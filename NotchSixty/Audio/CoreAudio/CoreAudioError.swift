@@ -446,6 +446,11 @@ final class CoreAudioTransportSession {
     /// Why the kernel renders although the graph is enabled; nil while the graph renders or is off.
     private(set) var unifiedGraphFallbackReason: UnifiedGraphFallbackReason?
     private var headphoneDSPConfigured = false
+    /// E6 S9d: the profile the HEADPHONE stage renders (nil without a stereo headphone profile) and the one the
+    /// kernel was configured with. They differ after a live edit; the kernel cannot be reconfigured while IO runs.
+    private var headphoneProfile: HeadphoneDeviceProfileConfiguration?
+    private var kernelHeadphoneProfile: HeadphoneDeviceProfileConfiguration?
+    private var lastGraphSnapshot: N60DSPGraphSnapshot?
     private var graphPublicationCoordinator: DSPGraphPublicationCoordinator?
     private var analysisWorker: ProductionAnalysisWorker?
     private var audioUnitRack: AudioUnitLiveRackSwitchboard?
@@ -1107,7 +1112,9 @@ final class CoreAudioTransportSession {
         return info
     }
 
-    func configureHeadphoneDSP(_ snapshot: N60HeadphoneDSPSnapshot?) throws {
+    func configureHeadphoneDSP(
+        _ snapshot: N60HeadphoneDSPSnapshot?, profile: HeadphoneDeviceProfileConfiguration? = nil
+    ) throws {
         guard let bridge, !isOutputStarted, !isCaptureStarted else {
             throw CoreAudioTransportError.headphoneDSPConfigurationFailed
         }
@@ -1119,6 +1126,8 @@ final class CoreAudioTransportSession {
             N60RealtimeAudioBridgeClearHeadphoneDSP(bridge)
         }
         headphoneDSPConfigured = snapshot != nil
+        headphoneProfile = snapshot != nil ? profile : nil
+        kernelHeadphoneProfile = headphoneProfile
         // IO is stopped here, so the callback cannot be mid-hand-over; the next publish
         // re-evaluates eligibility, and until then the kernel (which has the headphone DSP) renders.
         if headphoneDSPConfigured { detachUnifiedGraph() }
@@ -1130,26 +1139,56 @@ final class CoreAudioTransportSession {
         return N60RealtimeAudioBridgeUnifiedGraphActive(bridge)
     }
 
+    /// True while the graph renders a stereo session whose headphone profile it applies (E6 S9d).
+    var headphoneGraphActive: Bool { headphoneProfile != nil && unifiedGraphActive }
+
+    /// True when the kernel's headphone stage holds an older profile than the graph (after a live edit), so a
+    /// fall-back to the kernel would render the wrong correction.
+    private var kernelHeadphoneStale: Bool { headphoneProfile != kernelHeadphoneProfile }
+
+    /// E6 S9d. Control thread. A live headphone profile edit on a graph-rendered stereo session: the HEADPHONE and
+    /// ear delay stages are rebuilt from `profile` and applied as posted parameters (or a faded rebuild). Any
+    /// refusal leaves the running graph and the stored profile as they were.
+    func applyLiveHeadphoneProfile(_ profile: HeadphoneDeviceProfileConfiguration) throws {
+        guard headphoneGraphActive, let snapshot = lastGraphSnapshot else {
+            throw LiveNChannelTransportError.configurationChangeRequiresRestart
+        }
+        // Stored state changes only once the graph accepted the profile.
+        if !refreshUnifiedGraph(for: snapshot, headphone: profile) {
+            throw LiveNChannelTransportError.unifiedGraphRejected(unifiedGraphFallbackReason ?? .specRejected)
+        }
+    }
+
     /// The live graph host, for metering and latency readbacks (nil while the kernel renders).
     var unifiedGraphReadback: UnifiedGraphHost? { unifiedGraphActive ? unifiedGraphHost : nil }
 
     /// Control thread. Builds or updates the core graph for `snapshot` and attaches it, or
     /// detaches it so the kernel renders. Any failure falls back to the kernel.
-    private func refreshUnifiedGraph(for snapshot: N60DSPGraphSnapshot) {
-        guard let bridge else { return }
+    @discardableResult
+    private func refreshUnifiedGraph(
+        for snapshot: N60DSPGraphSnapshot, headphone candidate: HeadphoneDeviceProfileConfiguration? = nil
+    ) -> Bool {
+        guard let bridge else { return false }
+        lastGraphSnapshot = snapshot
         unifiedGraphFallbackReason = nil
+        // A refusal normally hands rendering to the kernel. After a live headphone edit the kernel holds the older
+        // correction, so the running graph stays instead and the caller sees the refusal (E6 S9d).
+        let profile = candidate ?? headphoneProfile
+        let kernelWouldBeWrong = kernelHeadphoneStale || (headphoneDSPConfigured && profile != kernelHeadphoneProfile)
+        func refuse(_ reason: UnifiedGraphFallbackReason) -> Bool {
+            unifiedGraphFallbackReason = reason
+            if !(kernelWouldBeWrong && N60RealtimeAudioBridgeUnifiedGraphActive(bridge)) { detachUnifiedGraph() }
+            return false
+        }
         guard unifiedGraphEnabled else {
+            if kernelWouldBeWrong { return false }
             detachUnifiedGraph()
-            return
+            return true
         }
         // E6 S8e: same-device, aggregate and AU rack routes render through the graph too (the rack as its
-        // EXTERNAL stage, the speaker-bus split in the bridge). The graph has no headphone DSP stage yet; the
-        // kernel keeps rendering that setup.
-        guard !headphoneDSPConfigured else {
-            unifiedGraphFallbackReason = .headphoneDSP
-            detachUnifiedGraph()
-            return
-        }
+        // EXTERNAL stage, the speaker-bus split in the bridge). A stereo headphone profile is the HEADPHONE stage
+        // and ear delays (E6 S9d); one the stage cannot reproduce, or a kernel-only headphone setup, keeps the kernel.
+        if headphoneDSPConfigured, headphoneProfile == nil { return refuse(.headphoneDSP) }
         var mutable = snapshot
         let configuration: UnifiedGraphConfiguration
         switch UnifiedGraphTranslator.stereoEligibility(
@@ -1158,14 +1197,17 @@ final class CoreAudioTransportSession {
         ) {
         case .success(let accepted): configuration = accepted
         case .failure(let reason):
-            unifiedGraphFallbackReason = reason
-            detachUnifiedGraph()
-            return
+            return refuse(reason)
         }
-        guard var spec = try? configuration.makeSpec() else {
-            unifiedGraphFallbackReason = .specRejected
-            detachUnifiedGraph()
-            return
+        guard var spec = try? configuration.makeSpec() else { return refuse(.specRejected) }
+        var earDelayFrames: [UInt32] = [0, 0]
+        if headphoneDSPConfigured, let profile {
+            switch UnifiedGraphTranslator.stereoApplyHeadphone(spec: spec, profile: profile) {
+            case .failure(let reason): return refuse(reason)
+            case .success(let applied):
+                spec = applied.spec
+                earDelayFrames = applied.earDelayFrames
+            }
         }
         if let audioUnitRack {
             spec = spec.insertingExternalRackStage(latencyFrames: UInt32(clamping: max(audioUnitRack.latencyFrames, 0)))
@@ -1176,14 +1218,12 @@ final class CoreAudioTransportSession {
             } else {
                 unifiedGraphHost = try UnifiedGraphHost(spec: spec)
             }
-            guard let host = unifiedGraphHost, let raw = host.rawGraph else { return }
+            guard let host = unifiedGraphHost, let raw = host.rawGraph else { return true }
             // E6 S8e: the graph's EXTERNAL stage calls this transport's AU rack (once per graph; the graph
             // is attached only after this succeeds).
             if audioUnitRack != nil, rackBoundGraph != raw {
                 guard N60RealtimeAudioBridgeBindRackToGraph(bridge, raw) else {
-                    unifiedGraphFallbackReason = .attachFailed
-                    detachUnifiedGraph()
-                    return
+                    return refuse(.attachFailed)
                 }
                 rackBoundGraph = raw
             }
@@ -1193,20 +1233,22 @@ final class CoreAudioTransportSession {
             // of the kernel's reported latency, so they are removed from the graph's readback (the
             // eligible stereo setup has one tap pair, so the larger of the two is the lane offset).
             // Published before the attach so the callback never fades with a stale value.
-            let taps = configuration.lanes.map(\.interChannelTapFrames).max() ?? 0
+            // The ear delays are likewise applied by the kernel's headphone stage and left out of its latency.
+            let taps = configuration.lanes.enumerated().map { index, lane in
+                lane.interChannelTapFrames &+ (index < earDelayFrames.count ? earDelayFrames[index] : 0)
+            }.max() ?? 0
             unifiedGraphLaneTapFrames = taps
             N60RealtimeAudioBridgeSetUnifiedGraphLatency(bridge, host.latencyFrames &- min(host.latencyFrames, taps))
             if !N60RealtimeAudioBridgeUnifiedGraphActive(bridge) {
                 guard N60RealtimeAudioBridgeSetUnifiedGraph(bridge, raw, spec.maxBlockFrames, spec.sampleRate) else {
-                    unifiedGraphFallbackReason = .attachFailed
-                    detachUnifiedGraph()
-                    return
+                    return refuse(.attachFailed)
                 }
             }
             unifiedGraphHost?.collect()
+            if let candidate { headphoneProfile = candidate }
+            return true
         } catch {
-            unifiedGraphFallbackReason = unifiedGraphHost == nil ? .graphBuildFailed : .specRejected
-            detachUnifiedGraph()
+            return refuse(unifiedGraphHost == nil ? .graphBuildFailed : .specRejected)
         }
     }
 
@@ -1220,7 +1262,9 @@ final class CoreAudioTransportSession {
 
     func publishDSPGraph(_ snapshot: N60DSPGraphSnapshot) throws {
         guard let bridge else { throw CoreAudioTransportError.dspGraphPublicationFailed }
-        refreshUnifiedGraph(for: snapshot)
+        if !refreshUnifiedGraph(for: snapshot), kernelHeadphoneStale {
+            throw CoreAudioTransportError.dspGraphPublicationFailed
+        }
         if !isOutputStarted || !isCaptureStarted {
             guard N60RealtimeAudioBridgePublishDSPGraph(bridge, snapshot) else {
                 throw CoreAudioTransportError.dspGraphPublicationFailed
@@ -1236,7 +1280,9 @@ final class CoreAudioTransportSession {
 
     func transitionDSPGraph(_ snapshot: N60DSPGraphSnapshot) throws {
         guard bridge != nil else { throw CoreAudioTransportError.dspGraphPublicationFailed }
-        refreshUnifiedGraph(for: snapshot)
+        if !refreshUnifiedGraph(for: snapshot), kernelHeadphoneStale {
+            throw CoreAudioTransportError.dspGraphPublicationFailed
+        }
 
         if !isOutputStarted || !isCaptureStarted {
             try publishDSPGraph(snapshot)

@@ -388,6 +388,11 @@ struct HeadphoneDeviceProfileConfiguration: Codable, Equatable, Sendable {
         return source
     }
 
+    /// Crossfeed runs only for a stereo profile with a preset and a non-zero amount (virtual speakers carry the image).
+    var crossfeedActive: Bool {
+        spatialMode == .stereo && crossfeed.preset != .off && crossfeed.amount > 0
+    }
+
     func makeRealtimeSnapshot(sampleRate: Double) throws -> N60HeadphoneDSPSnapshot {
         try validateStructure(sampleRate: sampleRate)
         var snapshot = N60HeadphoneDSPSnapshotMakeUnity(sampleRate)
@@ -402,7 +407,7 @@ struct HeadphoneDeviceProfileConfiguration: Codable, Equatable, Sendable {
                 crossfeed.virtualSpeakerAngleDegrees,
                 crossfeed.headRadiusMeters,
                 crossfeed.headShadowFrequencyHz,
-                spatialMode == .stereo && crossfeed.preset != .off && crossfeed.amount > 0
+                crossfeedActive
               ),
               N60HeadphoneDSPSnapshotIsValid(&snapshot) else {
             throw HeadphoneDeviceProfileError.realtimeSnapshotCompilationFailed

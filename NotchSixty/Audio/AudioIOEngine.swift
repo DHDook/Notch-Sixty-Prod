@@ -2356,13 +2356,18 @@ final class AudioIOEngine: ObservableObject {
                 unifiedGraphEnabled: unifiedGraphEnabled,
                 lifecycleRunning: lifecycle.state == .running,
                 binauralSession: binauralHeadphoneTransportSession.map { $0.unifiedGraphActive ? .graph : .legacy } ?? .none,
-                nChannelSessionActive: nChannelTransportSession != nil)
+                nChannelSessionActive: nChannelTransportSession != nil,
+                stereoHeadphoneGraphActive: transportSession?.headphoneGraphActive == true)
             switch HeadphoneLiveEditPlanner.plan(from: headphoneDeviceProfileConfiguration, to: configuration, context: context) {
             case .unchanged: break
             case .refuse: throw HeadphoneDeviceProfileError.configurationChangeRequiresRestart
             case .liveEdit(let assetChanged):
                 guard let configuration else { throw HeadphoneDeviceProfileError.configurationChangeRequiresRestart }
-                try applyLiveHeadphoneEdit(configuration, assetChanged: assetChanged)
+                if transportSession?.headphoneGraphActive == true {
+                    try applyLiveStereoHeadphoneEdit(configuration)
+                } else {
+                    try applyLiveHeadphoneEdit(configuration, assetChanged: assetChanged)
+                }
                 return
             case .reconfigure:
                 try validateHeadphoneSessionKindChange(configuration)
@@ -2392,6 +2397,11 @@ final class AudioIOEngine: ObservableObject {
         }
         let selected = try configuration.validateForActivation(
             availableDevices: outputDevices, selectedOutputUID: output.uid, sampleRate: output.nominalSampleRate)
+        if configuration.spatialMode == .stereo {
+            guard multiOutputRoutingConfiguration?.enabled != true else {
+                throw HeadphoneDeviceProfileError.legacyPhysicalRoutingConflict
+            }
+        }
         if configuration.spatialMode == .virtualSpeakers {
             let source = try configuration.resolveProgramSource(availableDevices: outputDevices, selectedOutput: selected)
             guard source.supports(sampleRate: output.nominalSampleRate) else {
@@ -2400,6 +2410,18 @@ final class AudioIOEngine: ObservableObject {
             }
             try validateBinauralHeadphoneActivation()
         }
+    }
+
+    /// E6 S9d: a headphone profile edit inside one graph-rendered stereo session. The session rebuilds the HEADPHONE
+    /// and ear delay stages and republishes; stored state changes only after the graph accepted it.
+    private func applyLiveStereoHeadphoneEdit(_ configuration: HeadphoneDeviceProfileConfiguration) throws {
+        guard let session = transportSession else {
+            throw HeadphoneDeviceProfileError.configurationChangeRequiresRestart
+        }
+        try configuration.validateStructure(sampleRate: session.outputFormat.sampleRate)
+        try session.applyLiveHeadphoneProfile(configuration)
+        headphoneDeviceProfileConfiguration = configuration
+        lastErrorDescription = nil
     }
 
     /// E6 S9c: a headphone profile edit inside one graph-rendered binaural session. The channel correction (headroom,
@@ -4772,7 +4794,8 @@ final class AudioIOEngine: ObservableObject {
             audioUnitRack: stagedAudioUnitRack
         )
         session.unifiedGraphEnabled = unifiedGraphEnabled
-        try session.configureHeadphoneDSP(headphoneSnapshot)
+        try session.configureHeadphoneDSP(
+            headphoneSnapshot, profile: headphoneSnapshot == nil ? nil : headphoneDeviceProfileConfiguration)
         activeEQFIRProgram = nil
         nextEQFIRProgramSlot = 0
         activeRoomCorrectionProgram = nil
