@@ -503,6 +503,53 @@ static void testLatencyModes(double fs) {
     }
 }
 
+// E10 S8: the two-band realisation of a design matches the single-band synthesis of the same design (magnitude and phase)
+// at every rate, within the stage's limits.
+static void testTwoBand(double fs) {
+    std::vector<double> db(N60_CORRECT_GRID_POINTS), phase(N60_CORRECT_GRID_POINTS), freq(N60_CORRECT_GRID_POINTS);
+    n60_correct_grid_frequencies(freq.data(), N60_CORRECT_GRID_POINTS);
+    for (uint32_t i = 0; i < N60_CORRECT_GRID_POINTS; ++i) {
+        const double lf = std::log2(freq[i] / 1000.0);
+        db[i] = 5.0 * std::exp(-0.5 * std::pow((std::log2(freq[i] / 60.0)) / 0.25, 2)) -
+                4.0 * std::exp(-0.5 * std::pow((std::log2(freq[i] / 450.0)) / 0.3, 2)) +
+                2.5 * std::exp(-0.5 * std::pow(lf / 0.8, 2)) - 3.0 * std::exp(-0.5 * std::pow((std::log2(freq[i] / 5000.0)) / 0.5, 2));
+        phase[i] = 2.0 * std::atan(freq[i] / 80.0) - 0.8 * std::atan(freq[i] / 900.0);
+    }
+    n60_correct_design_grid grid{};
+    grid.correction_db = db.data();
+    grid.correction_phase_rad = phase.data();
+    const uint32_t span = n60_correct_latency_mode_tap_count(N60_CORRECT_LATENCY_MUSIC_100MS, fs);
+    n60_correct_synth_params sp{};
+    n60_correct_synth_defaults(N60_CORRECT_MODE_MIXED_PHASE, fs, span, 0.1, &sp);
+    std::vector<float> single(span), fullTaps(32768), lowTaps(32768);
+    n60_correct_synth_report sr{};
+    CHECK(n60_correct_synthesize(&sp, &grid, single.data(), single.size(), &sr) == 0, "single-band at %g", fs);
+    n60_correct_two_band_report tr{};
+    const int32_t status = n60_correct_synthesize_two_band(&sp, &grid, fullTaps.data(), fullTaps.size(), lowTaps.data(), lowTaps.size(), &tr);
+    CHECK(status == 0, "two-band at %g: %d", fs, status);
+    if (status != 0) return;
+    const double lowRate = fs / tr.decimation;
+    CHECK(lowRate == 11025.0 || lowRate == 12000.0, "low rate %g at %g", lowRate, fs);
+    CHECK(tr.declared_latency_frames == sr.declared_latency_frames, "declared latency %u vs %u", tr.declared_latency_frames, sr.declared_latency_frames);
+    CHECK(tr.full_tap_count <= 32768 && tr.low_tap_count <= 32768 && tr.low_tap_count * tr.decimation >= span - 2 * tr.decimation, "tap counts %u %u", tr.full_tap_count, tr.low_tap_count);
+    std::vector<double> f;
+    for (double x = 20.0; x < 0.4 * fs && x < 20000.0; x *= std::exp2(1.0 / 6.0)) f.push_back(x);
+    std::vector<double> m1(f.size()), p1(f.size()), m2(f.size()), p2(f.size());
+    CHECK(n60_correct_two_band_response(fs, 1, 0, sr.declared_latency_frames, single.data(), span, nullptr, 0, f.data(), f.size(), m1.data(), p1.data()) == 0, "single response");
+    CHECK(n60_correct_two_band_response(fs, tr.decimation, tr.extra_delay_frames, tr.declared_latency_frames, fullTaps.data(), tr.full_tap_count,
+                                        lowTaps.data(), tr.low_tap_count, f.data(), f.size(), m2.data(), p2.data()) == 0, "two-band response");
+    double worstMag = 0.0, worstPhase = 0.0;
+    for (size_t i = 0; i < f.size(); ++i) {
+        worstMag = std::max(worstMag, std::fabs(m1[i] - m2[i]));
+        double dp = std::fabs(p1[i] - p2[i]);
+        dp = std::min(dp, 2.0 * kPi - dp);
+        worstPhase = std::max(worstPhase, dp);
+    }
+    if (verbose) std::printf("  %g: D=%u E=%u N=%u M=%u mag %.4f dB phase %.4f rad\n", fs, tr.decimation, tr.extra_delay_frames, tr.full_tap_count, tr.low_tap_count, worstMag, worstPhase);
+    CHECK(worstMag < 0.1, "two-band magnitude within 0.1 dB of single-band at %g: %g", fs, worstMag);
+    CHECK(worstPhase < 0.1, "two-band phase within 0.1 rad at %g: %g", fs, worstPhase);
+}
+
 }  // namespace
 
 int main(int argc, char **argv) {
@@ -519,6 +566,7 @@ int main(int argc, char **argv) {
         testSixSeats(fs);
         testWeightMovesTowardSeat(fs);
         testLatencyModes(fs);
+        testTwoBand(fs);
         const double s = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
         if (verbose) std::printf("rate %g done in %.2f s\n", fs, s);
     }

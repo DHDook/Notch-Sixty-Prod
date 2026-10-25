@@ -8,57 +8,6 @@ final class OptionalAudioResearchTests: XCTestCase {
         192_000, 352_800, 384_000
     ]
 
-    func testMixedPhaseIdentityIsFiniteAndNeverDeploysThrough384kHz() throws {
-        var taps = [Float](repeating: 0, count: 512)
-        taps[0] = 1
-        for rate in rates {
-            let result = try MixedPhaseResearchDesigner().design(
-                left: taps, right: taps,
-                sampleRate: rate, linearPhaseShare: 0.25,
-                latencyBudgetMilliseconds: 5
-            )
-            XCTAssertEqual(result.leftTaps.count, 512)
-            XCTAssertEqual(result.rightTaps.count, 512)
-            XCTAssertEqual(result.maximumMagnitudeDeviationDB, 0,
-                           accuracy: 0.0001)
-            XCTAssertEqual(result.preRingingEnergyFraction, 0,
-                           accuracy: 0.0001)
-            XCTAssertTrue(result.leftTaps.allSatisfy(\.isFinite))
-            XCTAssertFalse(result.canDeploy)
-            XCTAssertFalse(result.isMeasuredVerification)
-        }
-    }
-
-    func testMixedPhaseFiniteTapsAndBlockingHeadroomAndBadInputs() throws {
-        var taps = [Float](repeating: 0, count: 256)
-        taps[0] = 3.0
-        taps[1] = 0.25
-        let result = try MixedPhaseResearchDesigner().design(
-            left: taps, right: taps,
-            sampleRate: 48_000, linearPhaseShare: 0.3,
-            latencyBudgetMilliseconds: 10
-        )
-        XCTAssertGreaterThan(result.maximumPositiveGainDB, 6)
-        XCTAssertTrue(result.blockingReasons.contains {
-            $0.contains("attenuation")
-        })
-        XCTAssertFalse(result.canDeploy)
-        taps[3] = .nan
-        XCTAssertThrowsError(try MixedPhaseResearchDesigner().design(
-            left: taps, right: taps, sampleRate: 48_000
-        ))
-        XCTAssertThrowsError(try MixedPhaseResearchDesigner().design(
-            left: Array(repeating: 0, count: 256),
-            right: Array(repeating: 0, count: 255),
-            sampleRate: 48_000
-        ))
-        XCTAssertThrowsError(try MixedPhaseResearchDesigner().design(
-            left: Array(repeating: 0, count: 256),
-            right: Array(repeating: 0, count: 256),
-            sampleRate: 400_000
-        ))
-    }
-
     func testHRTFExactDirectionAndInterpolationAreBounded() throws {
         let asset = BinauralProfileAsset.validationStereo(sampleRate: 384_000)
         let designer = HRTFDirectionalResearchDesigner()

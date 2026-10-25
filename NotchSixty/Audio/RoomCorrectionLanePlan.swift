@@ -35,10 +35,33 @@ struct RoomCorrectionMultiLaneDesign: Equatable, Codable, Sendable {
     }
 }
 
-/// One ROOM_FIR stage: the lanes that share one tap set.
+/// The low band of a two-band stage (E10 S8): the taps at fs / decimation and the pure delay of the full-rate path.
+struct RoomCorrectionTwoBandPart: Equatable, Sendable {
+    var decimation: UInt32
+    var extraDelayFrames: UInt32
+    var lowTaps: [Float]
+}
+
+/// One ROOM_FIR stage: the lanes that share one tap set. `twoBand` is set when the design does not fit the
+/// single-band stage; `taps` are then the full-rate taps of an `N60_STAGE_ROOM_FIR_TWO_BAND`.
 struct RoomCorrectionLaneStage: Equatable, Sendable {
     var laneMask: UInt64
     var taps: [Float]
+    var twoBand: RoomCorrectionTwoBandPart?
+
+    init(laneMask: UInt64, taps: [Float], twoBand: RoomCorrectionTwoBandPart? = nil) {
+        self.laneMask = laneMask
+        self.taps = taps
+        self.twoBand = twoBand
+    }
+
+    /// The stage kind and parameter list for the graph.
+    var graphKind: n60_stage_kind { twoBand == nil ? N60_STAGE_ROOM_FIR : N60_STAGE_ROOM_FIR_TWO_BAND }
+    var graphParams: [Float] {
+        guard let part = twoBand else { return taps }
+        return [Float(part.decimation), Float(taps.count), Float(part.lowTaps.count), Float(part.extraDelayFrames)]
+            + taps + part.lowTaps
+    }
 }
 
 /// The taps of a design at one sample rate, grouped into one stage per distinct tap set.
@@ -59,7 +82,6 @@ enum RoomCorrectionLanePlanError: Error, Equatable, LocalizedError {
     case noLanes
     case laneOutOfRange(Int)
     case duplicateLane(Int)
-    case tapsExceedSingleBand(required: Int, maximum: Int)
     case synthesis(Int32)
 
     var errorDescription: String? {
@@ -72,8 +94,6 @@ enum RoomCorrectionLanePlanError: Error, Equatable, LocalizedError {
             return "Lane \(lane) is outside the layout."
         case .duplicateLane(let lane):
             return "Lane \(lane) appears twice in the design."
-        case let .tapsExceedSingleBand(required, maximum):
-            return "This mode needs \(required) taps at this rate; the single-band room stage holds \(maximum). Choose a shorter latency budget or the video mode."
         case .synthesis(let status):
             return "Filter synthesis failed (status \(status))."
         }
@@ -121,10 +141,9 @@ final class RoomCorrectionRateCache: @unchecked Sendable {
         lock.unlock()
         if let cached { return cached }
 
+        // A design longer than the single-band stage holds is carried by the two-band stage (E10 S8).
         let required = Int(n60_correct_latency_mode_tap_count(design.latencyMode.rawValue, sampleRate))
-        guard required <= Self.maximumSingleBandTaps else {
-            throw RoomCorrectionLanePlanError.tapsExceedSingleBand(required: required, maximum: Self.maximumSingleBandTaps)
-        }
+        let twoBand = required > Self.maximumSingleBandTaps
 
         // Lanes with the same grid share one synthesis and one stage.
         var groups: [(grid: RoomCorrectionGridDesign, lanes: [Int])] = []
@@ -138,16 +157,24 @@ final class RoomCorrectionRateCache: @unchecked Sendable {
         var stages: [RoomCorrectionLaneStage] = []
         var latency: UInt32?
         for group in groups {
-            let result: (taps: [Float], declaredLatencyFrames: UInt32)
+            let mask = group.lanes.reduce(UInt64(0)) { $0 | (UInt64(1) << UInt64($1)) }
             do {
-                result = try RoomCorrectionCore.synthesize(group.grid, sampleRate: sampleRate, mode: design.latencyMode)
+                if twoBand {
+                    let result = try RoomCorrectionCore.synthesizeTwoBand(group.grid, sampleRate: sampleRate, mode: design.latencyMode)
+                    latency = latency ?? result.declaredLatencyFrames
+                    stages.append(RoomCorrectionLaneStage(
+                        laneMask: mask, taps: result.fullTaps,
+                        twoBand: RoomCorrectionTwoBandPart(
+                            decimation: result.decimation, extraDelayFrames: result.extraDelayFrames, lowTaps: result.lowTaps)))
+                } else {
+                    let result = try RoomCorrectionCore.synthesize(group.grid, sampleRate: sampleRate, mode: design.latencyMode)
+                    // The latency is a function of the mode and rate, so it is equal across groups.
+                    latency = latency ?? result.declaredLatencyFrames
+                    stages.append(RoomCorrectionLaneStage(laneMask: mask, taps: result.taps))
+                }
             } catch RoomCorrectionCore.CoreError.status(let status) {
                 throw RoomCorrectionLanePlanError.synthesis(status)
             }
-            // The latency is a function of the mode and rate, so it is equal across groups.
-            latency = latency ?? result.declaredLatencyFrames
-            let mask = group.lanes.reduce(UInt64(0)) { $0 | (UInt64(1) << UInt64($1)) }
-            stages.append(RoomCorrectionLaneStage(laneMask: mask, taps: result.taps))
         }
         let plan = RoomCorrectionLanePlan(
             designID: design.id, sampleRate: sampleRate, stages: stages,

@@ -5,6 +5,8 @@ import Foundation
 struct SignalGeneratorSettings: Equatable, Sendable {
     enum Kind: Int, CaseIterable, Sendable {
         case white = 0, pink, bandLimitedPink, sine, periodicPink
+        /// E10 S8: one synchronised exponential sweep from `lowHz` to `highHz` over `periodFrames` frames (ABI v16).
+        case sweep
     }
 
     /// Safety defaults (design note 8): -20 dBFS RMS, ceiling -6, 10 minute auto-stop.
@@ -58,6 +60,10 @@ struct SignalGeneratorSettings: Equatable, Sendable {
         case .periodicPink:
             guard periodFrames >= 256, periodFrames <= 1_048_576,
                   periodFrames & (periodFrames - 1) == 0 else { return nil }
+        case .sweep:
+            let seconds = Double(periodFrames) / sampleRate
+            guard lowHz >= 1, highHz <= nyquistLimit, highHz >= 2 * lowHz, periodFrames <= 16_777_216,
+                  seconds >= 0.5, seconds <= 60 else { return nil }
         case .white, .pink:
             break
         }

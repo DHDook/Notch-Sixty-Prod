@@ -37,7 +37,7 @@
 extern "C" {
 #endif
 
-#define N60_CORRECT_ABI_VERSION 1
+#define N60_CORRECT_ABI_VERSION 2
 
 #define N60_CORRECT_OK 0
 #define N60_CORRECT_ERR_ARGUMENT (-1)
@@ -220,6 +220,42 @@ typedef struct n60_correct_synth_report {
 /* Synthesises a design into taps at any sample rate. Correction above the grid is unity. */
 int32_t n60_correct_synthesize(const n60_correct_synth_params *params, const n60_correct_design_grid *grid,
                                float *taps, uint64_t capacity, n60_correct_synth_report *report);
+
+/*
+ * Two-band synthesis (ABI v2, E10 S8): the same design as n60_correct_synthesize, realised for N60_STAGE_ROOM_FIR_TWO_BAND
+ * so a long filter fits the 32768-tap stage limit at every rate. params->tap_count is the whole span in full-rate frames
+ * (latency plus tail, up to N60_CORRECT_MAX_TAPS) and params->latency_seconds the budget L. D is the stage's decimation
+ * (1, 2, 4, 8, 16, 32: fs / D is 11.025 or 12 kHz), chosen with n60_correct_two_band_decimation.
+ * The low band (0 to 0.18 fs / D, raised-cosine hand-over from 0.10 fs / D) is carried by the low taps at fs / D, divided by
+ * the resampler's own in-band response; the full-rate taps carry the rest, after a pure delay of extra_delay_frames
+ * (= L - ramp). declared_latency_frames is L, exactly; the stage reports it as capacityFrames.
+ * Writes full_tap_count taps (<= 32768) and low_tap_count taps (<= 32768). D == 1 is refused (use n60_correct_synthesize).
+ */
+typedef struct n60_correct_two_band_report {
+    uint32_t decimation;
+    uint32_t extra_delay_frames;       /* E */
+    uint32_t full_tap_count;           /* N */
+    uint32_t low_tap_count;            /* M */
+    uint32_t declared_latency_frames;  /* L */
+    double peak_gain_db;               /* of the combined response, for headroom */
+} n60_correct_two_band_report;
+
+/* The decimation that makes fs / D 11.025 or 12 kHz (1 below 16 kHz). */
+uint32_t n60_correct_two_band_decimation(double sample_rate);
+
+int32_t n60_correct_synthesize_two_band(const n60_correct_synth_params *params, const n60_correct_design_grid *grid,
+                                        float *full_taps, uint64_t full_capacity, float *low_taps, uint64_t low_capacity,
+                                        n60_correct_two_band_report *report);
+
+/*
+ * The magnitude (dB) and the delay-removed phase of the stage's combined response for given taps, evaluated analytically
+ * (full path, low path through the resampler's in-band response). frequencies_hz in, magnitude_db and phase_rad out;
+ * the phase has the declared latency L removed. Used to verify a published design against its prediction.
+ */
+int32_t n60_correct_two_band_response(double sample_rate, uint32_t decimation, uint32_t extra_delay_frames,
+                                      uint32_t declared_latency_frames, const float *full_taps, uint32_t full_tap_count,
+                                      const float *low_taps, uint32_t low_tap_count, const double *frequencies_hz,
+                                      uint32_t count, double *magnitude_db, double *phase_rad);
 
 typedef struct n60_correct_prering_band {
     double centre_hz;

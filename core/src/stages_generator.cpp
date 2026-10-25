@@ -32,6 +32,7 @@
 #include <vector>
 
 #include "measure/offline_fft.hpp"
+#include "n60/measure.h"
 
 namespace n60 {
 namespace {
@@ -43,6 +44,9 @@ constexpr double kCeilingMaxDb = -6.0;
 constexpr float kMaxAutoStopSeconds = 600.0f;
 constexpr double kRampSeconds = 0.1;
 constexpr uint32_t kChunk = 256;
+constexpr double kSweepFadeSeconds = 0.05;
+constexpr double kSweepMinSeconds = 0.5;
+constexpr double kSweepMaxSeconds = 60.0;
 
 enum Param : uint32_t {
     kType = 0,       // N60_GENERATOR_*
@@ -86,7 +90,26 @@ struct GenLane {
     uint32_t pad;
 };
 
+// The synchronised sweep of the generator (ABI v16): the E11 ESS at 0 dBFS peak, so it is bit-identical to a direct call.
+bool sweepParams(const float *p, double rate, n60_measure_ess_params &e) {
+    e = n60_measure_ess_params{};
+    e.sample_rate = rate;
+    e.start_hz = p[kLow];
+    e.end_hz = p[kHigh];
+    e.duration_seconds = double(p[kPeriod]) / rate;
+    e.level_dbfs = 0.0;
+    e.fade_seconds = kSweepFadeSeconds;
+    e.synchronised = 1;
+    return p[kPeriod] <= 16777216.0f && e.duration_seconds >= kSweepMinSeconds && e.duration_seconds <= kSweepMaxSeconds;
+}
+
 uint32_t tableLengthFor(uint32_t type, const float *p, double rate) {
+    if (type == N60_GENERATOR_SWEEP) {
+        n60_measure_ess_params e;
+        n60_measure_ess_info info{};
+        if (!sweepParams(p, rate, e) || n60_measure_ess_describe(&e, &info) != N60_MEASURE_OK) return 0;
+        return static_cast<uint32_t>(info.frame_count);
+    }
     if (type == N60_GENERATOR_PERIODIC_PINK) return static_cast<uint32_t>(p[kPeriod]);
     if (type == N60_GENERATOR_PINK || type == N60_GENERATOR_BAND_PINK) {
         uint32_t n = 1u << 10;
@@ -115,16 +138,18 @@ void pcgSeed(GenLane &g, uint64_t seed, uint64_t stream) {
 double targetAmp(const float *p) {
     const double db = std::min<double>(p[kLevel], std::min<double>(p[kCeiling], kCeilingMaxDb));
     const double rms = std::pow(10.0, db / 20.0);
-    return static_cast<uint32_t>(p[kType]) == N60_GENERATOR_SINE ? rms * std::sqrt(2.0) : rms;
+    const uint32_t type = static_cast<uint32_t>(p[kType]);
+    return (type == N60_GENERATOR_SINE || type == N60_GENERATOR_SWEEP) ? rms * std::sqrt(2.0) : rms;
 }
 
 void startStreams(SnapHeader *h, const StageRec &r, GenShared &S) {
     const float *p = paramsOf(h, r);
+    const bool sweep = static_cast<uint32_t>(p[kType]) == N60_GENERATOR_SWEEP;
     for (uint32_t l = 0; l < r.laneCount; ++l) {
         GenLane &g = *reinterpret_cast<GenLane *>(laneState(h, r, l));
         pcgSeed(g, static_cast<uint64_t>(p[kSeed]), l);
         g.phase = 0.0;
-        g.pos = S.tableLen != 0 ? static_cast<uint32_t>((uint64_t(l) * 0x9E3779B1u) & (S.tableLen - 1)) : 0u;
+        g.pos = S.tableLen != 0 && sweep ?  0u : S.tableLen != 0 ? static_cast<uint32_t>((uint64_t(l) * 0x9E3779B1u) & (S.tableLen - 1)) : 0u;
     }
     S.elapsed = 0;
     S.expired = 0;
@@ -145,7 +170,7 @@ n60_status validateGeneratorStage(const n60_stage_desc &s, double rate, uint32_t
     }
     if (s.params == nullptr || s.paramCount != kParams) return N60_STATUS_BAD_ARGUMENT;
     const float *p = s.params;
-    if (!isInt(p[kType]) || p[kType] < 0.0f || p[kType] > static_cast<float>(N60_GENERATOR_PERIODIC_PINK)) {
+    if (!isInt(p[kType]) || p[kType] < 0.0f || p[kType] > static_cast<float>(N60_GENERATOR_SWEEP)) {
         return N60_STATUS_BAD_ARGUMENT;
     }
     const uint32_t type = static_cast<uint32_t>(p[kType]);
@@ -158,6 +183,14 @@ n60_status validateGeneratorStage(const n60_stage_desc &s, double rate, uint32_t
     if (type == N60_GENERATOR_PERIODIC_PINK &&
         !(isInt(p[kPeriod]) && p[kPeriod] >= 256.0f && p[kPeriod] <= 1048576.0f && isPow2(static_cast<uint32_t>(p[kPeriod])))) {
         return N60_STATUS_BAD_ARGUMENT;
+    }
+    if (type == N60_GENERATOR_SWEEP) {
+        n60_measure_ess_params e;
+        n60_measure_ess_info info{};
+        if (!isInt(p[kPeriod]) || !inR(p[kLow], 1.0, 0.45 * rate) || !inR(p[kHigh], 1.0, 0.45 * rate) ||
+            !(p[kHigh] > p[kLow]) || !sweepParams(p, rate, e) || n60_measure_ess_describe(&e, &info) != N60_MEASURE_OK) {
+            return N60_STATUS_BAD_ARGUMENT;
+        }
     }
     if (!isInt(p[kSeed]) || !inR(p[kSeed], 0.0, 16777216.0)) return N60_STATUS_BAD_ARGUMENT;
     if (p[kMuteOthers] != 0.0f && p[kMuteOthers] != 1.0f) return N60_STATUS_BAD_ARGUMENT;
@@ -183,7 +216,12 @@ void generatorInit(SnapHeader *h, const StageRec &r) {
     S.wasActive = 0;
     S.tableLen = tableLengthFor(type, p, h->sampleRate);
 
-    if (S.tableLen != 0) {
+    if (type == N60_GENERATOR_SWEEP) {
+        n60_measure_ess_params e;
+        n60_measure_ess_info info{};
+        float *table = reinterpret_cast<float *>(sh + up(sizeof(GenShared)));
+        if (sweepParams(p, h->sampleRate, e)) n60_measure_ess_generate(&e, table, S.tableLen, &info);
+    } else if (S.tableLen != 0) {
         const uint32_t n = S.tableLen;
         const double rate = h->sampleRate;
         const bool banded = type == N60_GENERATOR_BAND_PINK;
@@ -288,6 +326,9 @@ void runGenerator(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t fram
                         s = static_cast<float>(std::sin(g.phase));
                         g.phase += w;
                         if (g.phase >= 2.0 * kPi) g.phase -= 2.0 * kPi;
+                        break;
+                    case N60_GENERATOR_SWEEP:
+                        s = g.pos < S.tableLen ? table[g.pos++] : 0.0f;
                         break;
                     default:
                         s = table[g.pos];

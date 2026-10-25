@@ -56,8 +56,33 @@ final class SignalGeneratorSettingsTests: XCTestCase {
         let kinds = spec.stages.map(\.kind)
         let gen = try XCTUnwrap(kinds.firstIndex(of: N60_STAGE_GENERATOR.rawValue))
         let gain = try XCTUnwrap(spec.stages.firstIndex { $0.stageId == N60_LSTAGE_INPUT_GAIN })
-        XCTAssertEqual(gen, gain + 1)
+        // The core ranks the generator after every GAIN stage, including the lane pre-gains; the spec must build.
+        let lastGain = try XCTUnwrap(spec.stages.lastIndex { $0.kind == N60_STAGE_GAIN.rawValue })
+        XCTAssertGreaterThan(gen, gain)
+        XCTAssertEqual(gen, lastGain + 1)
+        let host = try UnifiedGraphHost(spec: spec)
+        host.release()
         config.generatorParams = [1, 2]
         XCTAssertThrowsError(try config.makeSpec())
+    }
+
+    func testSweepKindMapsToTheCoreAndFollowsDurationAndRateLimits() throws {
+        var s = SignalGeneratorSettings()
+        s.kind = .sweep
+        s.lowHz = 10
+        s.highHz = 18_000
+        for rate in [44_100.0, 48_000, 88_200, 96_000, 176_400, 192_000, 352_800, 384_000] {
+            s.periodFrames = Int(2 * rate)
+            let params = try XCTUnwrap(s.stageParams(active: true, sampleRate: rate), "\(rate)")
+            XCTAssertEqual(params[0], Float(N60_GENERATOR_SWEEP))
+            XCTAssertEqual(params[6], Float(s.periodFrames))
+            s.periodFrames = Int(0.4 * rate)
+            XCTAssertNil(s.stageParams(active: true, sampleRate: rate), "too short at \(rate)")
+            s.periodFrames = Int(61 * rate)
+            XCTAssertNil(s.stageParams(active: true, sampleRate: rate), "too long at \(rate)")
+        }
+        s.periodFrames = 96_000
+        s.highHz = 30_000
+        XCTAssertNil(s.stageParams(active: true, sampleRate: 48_000))
     }
 }

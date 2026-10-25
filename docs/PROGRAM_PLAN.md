@@ -252,7 +252,7 @@ minimum-phase in blind ABX at three or more seats, and measurement results match
 - [x] Multi-seat robustness: correct only phase that is coherent across seats, with per-seat weighting
 - [x] Joint mains-and-subwoofer bass optimisation across all channels (Dirac Bass Control class), not subwoofers alone
 - [x] Target editor with curtain, limited-range, per-channel offsets and saved target library
-- [ ] Flip `canDeploy` only through the verification path, with prediction and post-apply measurement
+- [x] Flip `canDeploy` only through the verification path, with prediction and post-apply measurement
 - [ ] Bench: blind ABX against minimum-phase on the reference room
 
 ### E12 Guided setup and information architecture

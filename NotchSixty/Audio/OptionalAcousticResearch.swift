@@ -1,6 +1,6 @@
 import Foundation
 
-// MARK: - Optional research: bounded offline mixed-phase FIR proposals
+// MARK: - Optional research errors
 
 enum OptionalAcousticResearchError: Error, Equatable, LocalizedError {
     case invalidEvidence
@@ -17,131 +17,6 @@ enum OptionalAcousticResearchError: Error, Equatable, LocalizedError {
         case .excessiveFileSize: return "Research document exceeds the bounded import size."
         case .unsupportedFormat: return "Unsupported research document schema or filter format."
         }
-    }
-}
-
-struct MixedPhaseResearchResult: Sendable {
-    var sampleRate: Double
-    var amount: Double
-    var declaredLatencyFrames: Int
-    var maximumMagnitudeDeviationDB: Double
-    var maximumPositiveGainDB: Double
-    var recommendedHeadroomDB: Double
-    var preRingingEnergyFraction: Double
-    var leftTaps: [Float]
-    var rightTaps: [Float]
-    var blockingReasons: [String]
-    var canDeploy: Bool { false }
-    var isMeasuredVerification: Bool { false }
-    var previewOnly: Bool { true }
-}
-
-/// Creates a bounded, causal, symmetrical component blended with an existing
-/// *measured-source-derived* minimum-phase FIR, then audits its ACTUAL taps.
-/// This deliberately does not replace the approved room-correction engine,
-/// attach an Apply button, or claim measured improvement.
-struct MixedPhaseResearchDesigner: Sendable {
-    func design(
-        left minimumLeft: [Float],
-        right minimumRight: [Float],
-        sampleRate: Double,
-        linearPhaseShare: Double = 0.15,
-        latencyBudgetMilliseconds: Double = 12
-    ) throws -> MixedPhaseResearchResult {
-        guard sampleRate.isFinite,
-              (44_100...384_000).contains(sampleRate) else {
-            throw OptionalAcousticResearchError.unsupportedRate
-        }
-        let count = minimumLeft.count
-        guard (128...Int(N60_CONVOLUTION_MAX_TAPS)).contains(count),
-              minimumRight.count == count,
-              minimumLeft.allSatisfy(\.isFinite),
-              minimumRight.allSatisfy(\.isFinite),
-              linearPhaseShare.isFinite, (0...0.4).contains(linearPhaseShare),
-              latencyBudgetMilliseconds.isFinite,
-              (0...30).contains(latencyBudgetMilliseconds) else {
-            throw OptionalAcousticResearchError.invalidEvidence
-        }
-        let delay = min(count / 4, Int((latencyBudgetMilliseconds * sampleRate / 1000).rounded(.down)))
-        guard delay >= 1 else { throw OptionalAcousticResearchError.invalidEvidence }
-        let left = blend(minimumLeft, amount: linearPhaseShare, delay: delay)
-        let right = blend(minimumRight, amount: linearPhaseShare, delay: delay)
-        let auditL = audit(reference: minimumLeft, proposed: left, delay: delay)
-        let auditR = audit(reference: minimumRight, proposed: right, delay: delay)
-        let deviation = max(auditL.deviation, auditR.deviation)
-        let gain = max(auditL.peakGain, auditR.peakGain)
-        let preRing = max(auditL.preRing, auditR.preRing)
-        let headroom = max(0, ceil((gain + 0.25) * 2) / 2)
-        var reasons = [String]()
-        if deviation > 1.0 {
-            reasons.append("Actual mixed-phase FIR differs by over 1 dB from the source minimum-phase transfer; review response and ringing.")
-        }
-        if preRing > 0.15 {
-            reasons.append("Pre-ringing energy exceeds 15% of the measured filter impulse energy.")
-        }
-        if headroom > 6 {
-            reasons.append("Modeled positive filter gain needs more than 6 dB of attenuation.")
-        }
-        if Double(delay) / sampleRate * 1000 > 30 {
-            reasons.append("The candidate exceeds the A/V latency review budget.")
-        }
-        return MixedPhaseResearchResult(
-            sampleRate: sampleRate,
-            amount: linearPhaseShare,
-            declaredLatencyFrames: delay,
-            maximumMagnitudeDeviationDB: deviation,
-            maximumPositiveGainDB: gain,
-            recommendedHeadroomDB: headroom,
-            preRingingEnergyFraction: preRing,
-            leftTaps: left, rightTaps: right,
-            blockingReasons: reasons
-        )
-    }
-
-    private func blend(_ taps: [Float], amount: Double, delay: Int) -> [Float] {
-        var output = [Float](repeating: 0, count: taps.count)
-        // Delayed min-phase impulse with a constrained even-symmetric tail
-        // around the delay: a direct time-domain, phase-bounded proposal.
-        for i in 0..<min(taps.count - delay, taps.count) {
-            output[delay + i] += Float(1 - amount) * taps[i]
-        }
-        output[delay] += Float(amount) * taps[0]
-        for i in 1...min(delay, taps.count - delay - 1) {
-            let part = Float(amount * 0.5) * taps[i]
-            output[delay - i] += part
-            output[delay + i] += part
-        }
-        return output
-    }
-
-    private func audit(
-        reference: [Float], proposed: [Float], delay: Int
-    ) -> (deviation: Double, peakGain: Double, preRing: Double) {
-        var worst = 0.0
-        var peak = 0.0
-        // The same direct Fourier sum is applied to BOTH actual float tap
-        // vectors. No design frequency curve is trusted as final evidence.
-        for bin in 0...96 {
-            let omega = Double.pi * Double(bin) / 96
-            func level(_ taps: [Float]) -> Double {
-                var real = 0.0, imaginary = 0.0
-                for (i, tap) in taps.enumerated() {
-                    let phase = omega * Double(i)
-                    real += Double(tap) * cos(phase)
-                    imaginary -= Double(tap) * sin(phase)
-                }
-                return 20 * log10(max(hypot(real, imaginary), 1e-10))
-            }
-            let expected = level(reference)
-            let actual = level(proposed)
-            worst = max(worst, abs(actual - expected))
-            peak = max(peak, actual)
-        }
-        let total = proposed.reduce(0.0) { $0 + Double($1) * Double($1) }
-        let early = proposed.prefix(delay).reduce(0.0) {
-            $0 + Double($1) * Double($1)
-        }
-        return (worst, peak, total > 0 ? early / total : 0)
     }
 }
 
