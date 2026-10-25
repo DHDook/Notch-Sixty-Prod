@@ -11,6 +11,7 @@
 #include <new>
 #include <vector>
 
+#include "n60/correct.h"
 #include "n60/graph.h"
 
 static std::atomic<bool> armed{false};
@@ -399,8 +400,54 @@ static void testValidation() {
     CHECK(status(pack(4, {1.0f}, {1.0f}), N60_GRAPH_MAX_DELAY_FRAMES + 1) == N60_STATUS_BAD_ARGUMENT, "declared delay too large");
 }
 
+// ---- 8. a synthesised design through the stage equals the single-band design (E10 S8) -------------------------------
+static void testDesignThroughStage(double rate) {
+    std::vector<double> db(N60_CORRECT_GRID_POINTS), phase(N60_CORRECT_GRID_POINTS), freq(N60_CORRECT_GRID_POINTS);
+    n60_correct_grid_frequencies(freq.data(), N60_CORRECT_GRID_POINTS);
+    for (uint32_t i = 0; i < N60_CORRECT_GRID_POINTS; ++i) {
+        db[i] = 5.0 * std::exp(-0.5 * std::pow(std::log2(freq[i] / 60.0) / 0.25, 2)) -
+                4.0 * std::exp(-0.5 * std::pow(std::log2(freq[i] / 450.0) / 0.3, 2)) -
+                3.0 * std::exp(-0.5 * std::pow(std::log2(freq[i] / 5000.0) / 0.5, 2));
+        phase[i] = 2.0 * std::atan(freq[i] / 80.0) - 0.8 * std::atan(freq[i] / 900.0);
+    }
+    n60_correct_design_grid grid{};
+    grid.correction_db = db.data();
+    grid.correction_phase_rad = phase.data();
+    const uint32_t span = n60_correct_latency_mode_tap_count(N60_CORRECT_LATENCY_MUSIC_100MS, rate);
+    n60_correct_synth_params sp{};
+    n60_correct_synth_defaults(N60_CORRECT_MODE_MIXED_PHASE, rate, span, 0.1, &sp);
+    std::vector<float> single(span), full(32768), low(32768);
+    n60_correct_synth_report sr{};
+    n60_correct_two_band_report tr{};
+    CHECK(n60_correct_synthesize(&sp, &grid, single.data(), single.size(), &sr) == 0, "single %.0f", rate);
+    CHECK(n60_correct_synthesize_two_band(&sp, &grid, full.data(), full.size(), low.data(), low.size(), &tr) == 0, "two band %.0f", rate);
+    full.resize(tr.full_tap_count);
+    low.resize(tr.low_tap_count);
+    std::vector<float> p = {static_cast<float>(tr.decimation), static_cast<float>(full.size()), static_cast<float>(low.size()),
+                            static_cast<float>(tr.extra_delay_frames)};
+    p.insert(p.end(), full.begin(), full.end());
+    p.insert(p.end(), low.begin(), low.end());
+    const uint32_t L = lowLatency(tr.decimation);
+    uint32_t reported = 0;
+    const size_t len = L + sr.declared_latency_frames + std::max<size_t>(full.size(), low.size() * tr.decimation) + 2048;
+    const std::vector<float> h = render(rate, p, tr.declared_latency_frames, impulse(len), &reported);
+    CHECK(reported == L + tr.declared_latency_frames, "latency %u, expected %u", reported, L + tr.declared_latency_frames);
+    double worstMag = 0.0, worstPhase = 0.0;
+    for (double f = 20.0; f < 0.4 * rate && f < 20000.0; f *= std::exp2(1.0 / 6.0)) {
+        double m1, p1;
+        CHECK(n60_correct_two_band_response(rate, 1, 0, sr.declared_latency_frames, single.data(), span, nullptr, 0, &f, 1, &m1, &p1) == 0, "ref");
+        const std::complex<double> got = dft(h, f / rate) * std::polar(1.0, 2 * kPi * f / rate * static_cast<double>(reported));
+        worstMag = std::max(worstMag, std::fabs(20 * std::log10(std::abs(got)) - m1));
+        double dp = std::fabs(std::arg(got) - p1);
+        dp = std::min(dp, 2 * kPi - dp);
+        worstPhase = std::max(worstPhase, dp);
+    }
+    CHECK(worstMag < 0.05, "rate %.0f: stage magnitude within %.4f dB of the single-band design", rate, worstMag);
+    CHECK(worstPhase < 0.05, "rate %.0f: stage phase within %.4f rad", rate, worstPhase);
+}
+
 int main() {
-    CHECK(n60_graph_abi_version() == 15u, "ABI v15");
+    CHECK(n60_graph_abi_version() == 16u, "ABI v16");
     for (double rate : kRates) {
         for (uint32_t D : kDs) {
             testEquivalence(rate, D);
@@ -408,6 +455,7 @@ int main() {
         }
     }
     testEquivalence(12000, 1);
+    for (double rate : kRates) testDesignThroughStage(rate);
     testLatency();
     testBlockIndependence();
     testRebuild();

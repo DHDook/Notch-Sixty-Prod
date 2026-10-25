@@ -214,10 +214,6 @@ struct UnifiedGraphConfiguration: Equatable, Sendable {
         add(N60_STAGE_SANITISE, N60_LSTAGE_SANITISE, lane: all)
         add(N60_STAGE_METER_IN, N60_LSTAGE_METER_IN, lane: all)
         add(N60_STAGE_GAIN, N60_LSTAGE_INPUT_GAIN, lane: all, params: [inputGain])
-        if let generatorParams {
-            guard generatorParams.count == 11 else { throw UnifiedGraphError.invalidConfiguration("generator") }
-            add(N60_STAGE_GENERATOR, Self.generatorStageId, mask: programMask, params: generatorParams)
-        }
         for (index, lane) in lanes.enumerated() {
             guard lane.preGain > 0, lane.preGain <= 10_000, lane.outputGain > 0,
                   lane.outputGain <= 10_000 else {
@@ -225,6 +221,11 @@ struct UnifiedGraphConfiguration: Equatable, Sendable {
             }
             add(N60_STAGE_GAIN, Self.preGainStageBase + UInt32(index), lane: UInt32(index),
                 params: [lane.preGain])
+        }
+        // The core ranks the generator after every GAIN stage (rank 3.5), so it follows the lane pre-gains.
+        if let generatorParams {
+            guard generatorParams.count == 11 else { throw UnifiedGraphError.invalidConfiguration("generator") }
+            add(N60_STAGE_GENERATOR, Self.generatorStageId, mask: programMask, params: generatorParams)
         }
         if !canonical, stereo.dynamicEQ != nil, stereo.midSideEQ {
             // The kernel runs the dynamic EQ after the mid/side decode; the core runs it before.

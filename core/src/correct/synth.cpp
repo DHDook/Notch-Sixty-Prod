@@ -8,6 +8,7 @@
 #include <cmath>
 
 #include "common.hpp"
+#include "../halfband.hpp"
 #include "../measure/offline_fft.hpp"
 
 namespace {
@@ -25,6 +26,45 @@ bool validSynth(const n60_correct_synth_params *p) {
     if (!std::isfinite(p->latency_seconds) || p->latency_seconds < 0.0 || p->latency_seconds > 1.0) return false;
     if (!std::isfinite(p->tail_taper_fraction) || p->tail_taper_fraction < 0.0 || p->tail_taper_fraction > 0.5) return false;
     return true;
+}
+
+constexpr uint32_t kStageMaxTaps = 32768;
+constexpr double kHandOverStart = 0.10;  // of fs / D
+constexpr double kHandOverEnd = 0.18;
+
+double handOver(double hz, double lowRate) {
+    const double a = kHandOverStart * lowRate, b = kHandOverEnd * lowRate;
+    if (hz <= a) return 1.0;
+    if (hz >= b) return 0.0;
+    return 0.5 * (1.0 + std::cos(kPi * (hz - a) / (b - a)));
+}
+
+// In-band response of the stage's decimate-then-interpolate cascade (real, positive: the alignment delay is the stage's
+// latency): each half-band stage filters twice at its own input rate.
+double resamplerResponse(double hz, double rate, uint32_t levels) {
+    static const std::vector<float> odd = [] {
+        std::vector<float> v(2 * n60::kHalfbandK);
+        n60::halfbandOddTaps(v.data());
+        return v;
+    }();
+    double r = 1.0;
+    double stageRate = rate;
+    for (uint32_t k = 0; k < levels; ++k) {
+        const double w = 2.0 * kPi * hz / stageRate;
+        double a = 0.5;
+        for (uint32_t i = 0; i < odd.size(); ++i) {
+            a += static_cast<double>(odd[i]) * std::cos(w * (static_cast<double>(2 * i + 1) - 2.0 * n60::kHalfbandK));
+        }
+        r *= a * a;
+        stageRate *= 0.5;
+    }
+    return r;
+}
+
+uint32_t levelsOf(uint32_t d) {
+    uint32_t l = 0;
+    while ((1u << l) < d) ++l;
+    return l;
 }
 
 }  // namespace
@@ -117,6 +157,165 @@ int32_t n60_correct_synthesize(const n60_correct_synth_params *params, const n60
         double peak = 0.0;
         for (const Cplx &c : response) peak = std::max(peak, std::hypot(c.re, c.im));
         report->peak_gain_db = peak > 1.0 ? 20.0 * std::log10(peak) : 0.0;
+    }
+    return N60_CORRECT_OK;
+}
+
+uint32_t n60_correct_two_band_decimation(double sample_rate) {
+    if (!std::isfinite(sample_rate) || sample_rate < 16000.0) return 1;
+    uint32_t d = 1;
+    while (d < 32 && sample_rate / static_cast<double>(d) > 13000.0) d *= 2;
+    return d;
+}
+
+int32_t n60_correct_synthesize_two_band(const n60_correct_synth_params *params, const n60_correct_design_grid *grid,
+                                        float *fullTaps, uint64_t fullCapacity, float *lowTaps, uint64_t lowCapacity,
+                                        n60_correct_two_band_report *report) {
+    if (!validSynth(params) || grid == nullptr || grid->correction_db == nullptr || grid->correction_phase_rad == nullptr ||
+        fullTaps == nullptr || lowTaps == nullptr) {
+        return N60_CORRECT_ERR_ARGUMENT;
+    }
+    const double fs = params->sample_rate;
+    const uint32_t D = n60_correct_two_band_decimation(fs);
+    if (D < 2) return N60_CORRECT_ERR_ARGUMENT;
+    const uint64_t span = params->tap_count;
+    const uint64_t latency = static_cast<uint64_t>(std::llround(params->latency_seconds * fs));
+    if (latency + 64 >= span) return N60_CORRECT_ERR_ARGUMENT;
+    const bool mixed = params->mode == N60_CORRECT_MODE_MIXED_PHASE;
+    const uint64_t ramp = mixed ? std::min<uint64_t>(latency, static_cast<uint64_t>(std::llround(0.25 * static_cast<double>(latency)))) : 0;
+    const uint64_t extra = latency - ramp;
+    if (extra > (1ull << 22)) return N60_CORRECT_ERR_SIZE;
+    const uint64_t fullCount = std::min<uint64_t>(kStageMaxTaps, span - extra);
+    const uint64_t lowCount = std::min<uint64_t>(kStageMaxTaps, (span + D - 1) / D);
+    if (fullCapacity < fullCount || lowCapacity < lowCount) return N60_CORRECT_ERR_CAPACITY;
+    const uint32_t levels = levelsOf(D);
+    const double lowRate = fs / static_cast<double>(D);
+
+    const uint64_t size = nextPow2(std::max<uint64_t>(16384, span * 8));
+    if (size > kMaxTransform) return N60_CORRECT_ERR_SIZE;
+    const uint64_t half = size / 2;
+    std::vector<double> logMagnitude(half + 1), extraPhase(half + 1, 0.0);
+    for (uint64_t k = 0; k <= half; ++k) {
+        const double f = static_cast<double>(k) * fs / static_cast<double>(size);
+        logMagnitude[k] = dbToNeper(interpolateGrid(grid->correction_db, f, 0.0));
+        if (mixed) extraPhase[k] = interpolateGrid(grid->correction_phase_rad, f, 0.0);
+    }
+    std::vector<double> phase;
+    if (!minimumPhase(logMagnitude, size, phase)) return N60_CORRECT_ERR_ALLOC;
+    std::vector<Cplx> fullSpectrum(half + 1), lowSpectrum(half + 1);
+    for (uint64_t k = 0; k <= half; ++k) {
+        const double f = static_cast<double>(k) * fs / static_cast<double>(size);
+        const double amplitude = std::exp(logMagnitude[k]);
+        const double p = (k == 0 || k == half) ? 0.0 : phase[k] + extraPhase[k];
+        const Cplx t{amplitude * std::cos(p), amplitude * std::sin(p)};
+        const double w = handOver(f, lowRate);
+        fullSpectrum[k] = Cplx{t.re * (1.0 - w), t.im * (1.0 - w)};
+        if (w > 0.0) {
+            const double r = 1.0 / resamplerResponse(f, fs, levels);
+            lowSpectrum[k] = Cplx{t.re * w * r, t.im * w * r};
+        } else {
+            lowSpectrum[k] = Cplx{0.0, 0.0};
+        }
+    }
+    std::vector<double> fullImpulse, lowImpulse;
+    if (!n60::fft::offline::realInverse(fullSpectrum, size, fullImpulse) ||
+        !n60::fft::offline::realInverse(lowSpectrum, size, lowImpulse)) {
+        return N60_CORRECT_ERR_ALLOC;
+    }
+    fullSpectrum.clear();
+    lowSpectrum.clear();
+
+    auto preTaper = [&](uint64_t absolute) {  // absolute full-rate time from the filter start
+        return absolute < latency ? 0.5 * (1.0 - std::cos(kPi * static_cast<double>(absolute) / static_cast<double>(latency))) : 1.0;
+    };
+    auto tailTaper = [&](std::vector<double> &v) {
+        const int64_t count = static_cast<int64_t>(v.size());
+        if (params->tail_taper_fraction <= 0.0 || count < 2) return;
+        const int64_t taper = std::min<int64_t>(count - 1, std::max<int64_t>(1, static_cast<int64_t>(static_cast<double>(count) * params->tail_taper_fraction)));
+        const int64_t start = count - taper;
+        for (int64_t i = start; i < count; ++i) {
+            const double position = static_cast<double>(i - start + 1) / static_cast<double>(taper);
+            v[static_cast<size_t>(i)] *= 0.5 + 0.5 * std::cos(kPi * position);
+        }
+    };
+    std::vector<double> full(fullCount), low(lowCount);
+    for (uint64_t n = 0; n < fullCount; ++n) {
+        const uint64_t absolute = n + extra;
+        double v = fullImpulse[(absolute + size - latency) % size] * preTaper(absolute);
+        if (n < ramp) v *= 0.5 * (1.0 - std::cos(kPi * static_cast<double>(n) / static_cast<double>(ramp)));
+        full[n] = v;
+    }
+    for (uint64_t m = 0; m < lowCount; ++m) {
+        const uint64_t absolute = m * D;
+        low[m] = static_cast<double>(D) * lowImpulse[(absolute + size - latency) % size] * preTaper(absolute);
+    }
+    tailTaper(full);
+    tailTaper(low);
+    for (uint64_t n = 0; n < fullCount; ++n) {
+        if (!std::isfinite(full[n])) return N60_CORRECT_ERR_NONFINITE;
+        fullTaps[n] = static_cast<float>(full[n]);
+    }
+    for (uint64_t m = 0; m < lowCount; ++m) {
+        if (!std::isfinite(low[m])) return N60_CORRECT_ERR_NONFINITE;
+        lowTaps[m] = static_cast<float>(low[m]);
+    }
+    if (report != nullptr) {
+        *report = n60_correct_two_band_report{};
+        report->decimation = D;
+        report->extra_delay_frames = static_cast<uint32_t>(extra);
+        report->full_tap_count = static_cast<uint32_t>(fullCount);
+        report->low_tap_count = static_cast<uint32_t>(lowCount);
+        report->declared_latency_frames = static_cast<uint32_t>(latency);
+        std::vector<double> freqs(2048), mag(2048), ph(2048);
+        for (size_t i = 0; i < freqs.size(); ++i) freqs[i] = 20.0 * std::pow(0.45 * fs / 20.0, static_cast<double>(i) / 2047.0);
+        const int32_t status = n60_correct_two_band_response(fs, D, static_cast<uint32_t>(extra), static_cast<uint32_t>(latency), fullTaps,
+                                                              static_cast<uint32_t>(fullCount), lowTaps, static_cast<uint32_t>(lowCount),
+                                                              freqs.data(), 2048, mag.data(), ph.data());
+        if (status != N60_CORRECT_OK) return status;
+        double peak = 0.0;
+        for (double m : mag) peak = std::max(peak, m);
+        report->peak_gain_db = peak > 0.0 ? peak : 0.0;
+    }
+    return N60_CORRECT_OK;
+}
+
+int32_t n60_correct_two_band_response(double fs, uint32_t D, uint32_t extra, uint32_t latency, const float *fullTaps,
+                                      uint32_t fullCount, const float *lowTaps, uint32_t lowCount, const double *frequencies,
+                                      uint32_t count, double *magnitudeDb, double *phaseRad) {
+    if (!std::isfinite(fs) || fs < 8000.0 || D < 1 || D > 32 || (D & (D - 1)) != 0 || fullTaps == nullptr || fullCount == 0 ||
+        (D > 1 && (lowTaps == nullptr || lowCount == 0)) || frequencies == nullptr || magnitudeDb == nullptr || phaseRad == nullptr) {
+        return N60_CORRECT_ERR_ARGUMENT;
+    }
+    const uint32_t levels = levelsOf(D);
+    const double lowRate = fs / static_cast<double>(D);
+    for (uint32_t i = 0; i < count; ++i) {
+        const double f = frequencies[i];
+        if (!(f > 0.0) || f > 0.5 * fs) return N60_CORRECT_ERR_ARGUMENT;
+        const double w = 2.0 * kPi * f / fs;
+        // Direct sums with a rotating phasor would drift; recompute the angle per tap in blocks.
+        double re = 0.0, im = 0.0;
+        for (uint32_t n = 0; n < fullCount; ++n) {
+            const double a = w * static_cast<double>(static_cast<uint64_t>(n) + extra);
+            re += static_cast<double>(fullTaps[n]) * std::cos(a);
+            im -= static_cast<double>(fullTaps[n]) * std::sin(a);
+        }
+        if (D > 1 && f < kHandOverEnd * lowRate * 1.05) {
+            double lr = 0.0, li = 0.0;
+            for (uint32_t m = 0; m < lowCount; ++m) {
+                const double a = w * static_cast<double>(static_cast<uint64_t>(m) * D);
+                lr += static_cast<double>(lowTaps[m]) * std::cos(a);
+                li -= static_cast<double>(lowTaps[m]) * std::sin(a);
+            }
+            const double r = resamplerResponse(f, fs, levels);
+            re += lr * r;
+            im += li * r;
+        }
+        // Remove the declared latency.
+        const double a = w * static_cast<double>(latency);
+        const double c = std::cos(a), s = std::sin(a);
+        const double rr = re * c - im * s, ri = re * s + im * c;
+        magnitudeDb[i] = 20.0 * std::log10(std::max(std::hypot(rr, ri), 1e-12));
+        phaseRad[i] = std::atan2(ri, rr);
     }
     return N60_CORRECT_OK;
 }

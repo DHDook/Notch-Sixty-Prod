@@ -1,6 +1,7 @@
 // E11 S7: behavioural harness for the libn60core generator stage (ABI v14), through the C ABI at the eight
 // standard rates. Reference values are closed forms written here: octave and third-octave band powers of a pink
 // spectrum, the sine definition, Butterworth edge levels, RMS from the dB parameters.
+#include <algorithm>
 #include <atomic>
 #include <cmath>
 #include <cstdio>
@@ -11,6 +12,7 @@
 
 #include "measure/offline_fft.hpp"
 #include "n60/graph.h"
+#include "n60/measure.h"
 
 static std::atomic<bool> armed{false};
 static std::atomic<long> allocs{0};
@@ -325,6 +327,59 @@ static void testPeriodic(double rate) {
     n60_graph_retire(g);
 }
 
+// E10 S8: the sweep kind equals the E11 synchronised ESS bit for bit (times the RMS-referenced gain), plays once, then
+// stays silent, and restarts on a rising edge.
+static void testSweep(double rate) {
+    Gen G;
+    G.p[TYPE] = 5;
+    G.p[LOW] = 20;
+    G.p[HIGH] = 18000;
+    G.p[PERIOD] = float(uint32_t(rate)); // 1 s
+    G.p[LEVEL] = -20;
+    G.p[MUTE] = 0;
+    n60_stage_desc st[1] = {stg(N60_STAGE_GENERATOR, 1, N60_LANE_ALL, G.p, NP)};
+    n60_graph *g = build(rate, 2, st, 1);
+    n60_measure_ess_params e{};
+    e.sample_rate = rate; e.start_hz = 20; e.end_hz = 18000; e.duration_seconds = 1.0; e.level_dbfs = 0;
+    e.fade_seconds = 0.05; e.synchronised = 1;
+    n60_measure_ess_info info{};
+    CHECK(n60_measure_ess_describe(&e, &info) == N60_MEASURE_OK, "describe");
+    std::vector<float> ref(info.frame_count);
+    CHECK(n60_measure_ess_generate(&e, ref.data(), ref.size(), &info) == N60_MEASURE_OK, "generate");
+    const uint32_t total = uint32_t(info.frame_count) + uint32_t(rate * 0.3);
+    auto o = render(g, 2, total);
+    const float gain = float(std::pow(10.0, -20.0 / 20.0) * std::sqrt(2.0));
+    // Past the 100 ms mix ramp the output is exactly the scaled ESS.
+    uint32_t diff = 0, lanesDiffer = 0;
+    for (uint32_t i = rampOf(rate); i < info.frame_count; ++i) {
+        const float want = std::clamp(ref[i] * gain, -1.0f, 1.0f);
+        diff += (o[0][i] != want) ? 1u : 0u;
+        lanesDiffer += (o[0][i] != o[1][i]);
+    }
+    CHECK(diff == 0, "%.0f sweep differs from the E11 ESS in %u samples", rate, diff);
+    CHECK(lanesDiffer == 0, "%.0f sweep lanes identical", rate);
+    double tail = 0;
+    for (uint32_t i = uint32_t(info.frame_count) + 16; i < total; ++i) tail = std::fmax(tail, std::fabs(o[0][i]));
+    CHECK(tail == 0.0, "%.0f silent after the sweep (peak %g)", rate, tail);
+    n60_graph_retire(g);
+
+    // Invalid sweeps are refused: end above 0.45 fs, end below start, too short, too long.
+    auto bad = [&](int idx, float v) {
+        Gen H = G;
+        H.p[idx] = v;
+        n60_stage_desc s2[1] = {stg(N60_STAGE_GENERATOR, 1, N60_LANE_ALL, H.p, NP)};
+        n60_graph_desc d = descOf(rate, 2, s2, 1);
+        n60_graph *x = nullptr;
+        const n60_status r = n60_graph_build(&d, &x);
+        if (x) n60_graph_retire(x);
+        return r != N60_STATUS_OK;
+    };
+    CHECK(bad(HIGH, float(0.46 * rate)), "%.0f sweep end above 0.45 fs", rate);
+    CHECK(bad(HIGH, 10.0f), "%.0f sweep end below start", rate);
+    CHECK(bad(PERIOD, float(uint32_t(rate * 0.1))), "%.0f sweep shorter than 0.5 s", rate);
+    CHECK(bad(PERIOD, 20000000.0f), "%.0f sweep above 16777216 frames", rate);
+}
+
 static void testAutoStop(double rate) {
     Gen G;
     G.p[TYPE] = 0;
@@ -384,9 +439,14 @@ static void testNoAllocation(double rate) {
     n60_graph_post_params(g, &rec, 1);
     render(g, 2, 8 * kBlock, nullptr, true);
     CHECK(allocs.load() == 0, "%.0f render allocated %ld times", rate, allocs.load());
-    for (uint32_t type : {0u, 3u, 2u}) {
+    for (uint32_t type : {0u, 3u, 2u, 5u}) {
         Gen H;
         H.p[TYPE] = float(type);
+        if (type == 5u) {  // the sweep: 10 Hz to 0.4 fs over about one second
+            H.p[LOW] = 10.0f;
+            H.p[HIGH] = float(0.4 * rate);
+            H.p[PERIOD] = float(std::lround(rate));
+        }
         n60_stage_desc s2[1] = {stg(N60_STAGE_GENERATOR, 1, N60_LANE_ALL, H.p, NP)};
         n60_graph *h = build(rate, 2, s2, 1);
         allocs = 0;
@@ -438,7 +498,7 @@ static void testRejects() {
 }
 
 int main() {
-    CHECK(n60_graph_abi_version() == N60_GRAPH_ABI_VERSION && N60_GRAPH_ABI_VERSION == 15u, "ABI v15");
+    CHECK(n60_graph_abi_version() == N60_GRAPH_ABI_VERSION && N60_GRAPH_ABI_VERSION == 16u, "ABI v16");
     testRejects();
     for (double rate : kRates) {
         testPinkSlope(rate);
@@ -448,6 +508,7 @@ int main() {
         testRampsAndLanes(rate);
         testDeterminismAndRestart(rate);
         testPeriodic(rate);
+        testSweep(rate);
         testAutoStop(rate);
         testProtectionDownstream(rate);
         testNoAllocation(rate);

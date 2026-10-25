@@ -49,16 +49,6 @@ final class RoomCorrectionBassApplyTests: XCTestCase {
             settings: BassOptimiserSettings(timingTier: .acoustic))
     }
 
-    private func response(_ taps: [Float], _ frequency: Double, _ rate: Double) -> Double {
-        var re = 0.0, im = 0.0
-        let w = 2 * Double.pi * frequency / rate
-        for (n, tap) in taps.enumerated() {
-            re += Double(tap) * cos(w * Double(n))
-            im -= Double(tap) * sin(w * Double(n))
-        }
-        return 20 * log10(max(hypot(re, im), 1e-12))
-    }
-
     private func emptyProgram() -> UnifiedGraphProgramDSP {
         var base = UnifiedGraphConfiguration(sampleRate: 48_000, lanes: [UnifiedGraphLane(), UnifiedGraphLane()])
         base.stereoStages = UnifiedGraphStereoStages()
@@ -94,11 +84,10 @@ final class RoomCorrectionBassApplyTests: XCTestCase {
 
     func testPublishedFiltersMatchThePredictionOnEverySynthesisedRate() throws {
         let optimisation = try optimise()
-        // 100 ms resolves the bass filter; it fits the single-band stage up to 88.2 kHz. Above that the 20 ms budget
-        // is used (the two-band stage of E10 S3 carries long bass filters at high rates) and only the structure is checked (the magnitude is bounded by the shorter filter's resolution).
+        // 100 ms resolves the bass filter at every rate: the single-band stage holds it up to 192 kHz and the two-band
+        // stage (E10 S8) above that.
         for rate in Self.rates {
-            let mode: RoomCorrectionLatencyMode = rate <= 88_200 ? .music100ms : .music20ms
-            try checkPrediction(optimisation, rate: rate, mode: mode, exact: rate <= 88_200)
+            try checkPrediction(optimisation, rate: rate, mode: .music100ms, exact: true)
         }
     }
 
@@ -114,15 +103,8 @@ final class RoomCorrectionBassApplyTests: XCTestCase {
             var bass = UnifiedGraphBassManagement(
                 subwoofers: [UnifiedGraphSubwoofer(), UnifiedGraphSubwoofer()])
             var program = emptyProgram()
-            let lanePlan: RoomCorrectionLanePlan
-            do {
-                lanePlan = try RoomCorrectionBassApply.install(
-                    plan, into: &bass, program: &program, sampleRate: rate, cache: cache)
-            } catch RoomCorrectionLanePlanError.tapsExceedSingleBand(let required, let maximum) {
-                // Refused with a reason; the two-band stage (E10 S3) carries these budgets at high rates.
-                XCTAssertGreaterThan(required, maximum, "\(rate) Hz")
-                return
-            }
+            let lanePlan = try RoomCorrectionBassApply.install(
+                plan, into: &bass, program: &program, sampleRate: rate, cache: cache)
             XCTAssertEqual(program.roomLanes, lanePlan)
             XCTAssertEqual(program.laneDelayFrames, plan.mainDelayFrames(sampleRate: rate))
             XCTAssertEqual(lanePlan.sampleRate, rate)
@@ -134,8 +116,11 @@ final class RoomCorrectionBassApplyTests: XCTestCase {
                 if exact {
                     // Synthesis tracks the prediction on average; the residual is the fine structure that the
                     // tap budget cannot hold (recorded in the E10 log).
-                    let errors = probes.map {
-                        response(stage.taps, frequencies[$0], rate) - plan.design.lanes[index].grid.correctionDB[$0]
+                    let measured = try RoomCorrectionCore.filterResponse(
+                        sampleRate: rate, taps: stage.taps, twoBand: stage.twoBand,
+                        declaredLatencyFrames: lanePlan.declaredLatencyFrames, frequencies: probes.map { frequencies[$0] })
+                    let errors = probes.enumerated().map {
+                        measured.magnitudeDB[$0.offset] - plan.design.lanes[index].grid.correctionDB[$0.element]
                     }
                     let rms = (errors.map { $0 * $0 }.reduce(0, +) / Double(errors.count)).squareRoot()
                     XCTAssertLessThan(rms, 2.0, "lane \(lane) at \(rate)")

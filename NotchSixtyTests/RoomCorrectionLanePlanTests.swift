@@ -67,15 +67,34 @@ final class RoomCorrectionLanePlanTests: XCTestCase {
         }
     }
 
-    func testLongBudgetBeyondASingleBandIsRefusedWithAReason() throws {
-        let multi = design(mode: .music100ms, laneGrids: [0: try grid { _ in 0 }], laneCount: 2)
-        XCTAssertThrowsError(try RoomCorrectionRateCache().plan(for: multi, sampleRate: 384_000)) {
-            guard case .tapsExceedSingleBand(let required, let maximum)? = $0 as? RoomCorrectionLanePlanError else {
-                return XCTFail("unexpected \($0)")
+    /// E10 S8: a budget longer than the single-band stage holds is carried by the two-band stage and still lands on the
+    /// design at every rate.
+    func testLongBudgetBeyondASingleBandUsesTheTwoBandStage() throws {
+        let g = try grid(smooth)
+        let multi = design(mode: .music100ms, laneGrids: [0: g], laneCount: 2)
+        let cache = RoomCorrectionRateCache()
+        for rate in [44_100.0, 48_000, 88_200, 96_000, 176_400, 192_000, 352_800, 384_000] {
+            let plan = try cache.plan(for: multi, sampleRate: rate)
+            let stage = try XCTUnwrap(plan.stages.first)
+            XCTAssertEqual(Int(plan.declaredLatencyFrames), Int((0.1 * rate).rounded()), "latency at \(rate)")
+            XCTAssertLessThanOrEqual(stage.taps.count, RoomCorrectionRateCache.maximumSingleBandTaps)
+            XCTAssertEqual(
+                stage.twoBand != nil, Int(n60_correct_latency_mode_tap_count(RoomCorrectionLatencyMode.music100ms.rawValue, rate)) > 32_768)
+            let probes = [120.0, 400, 3_000, 8_000]
+            let result = try RoomCorrectionCore.filterResponse(
+                sampleRate: rate, taps: stage.taps, twoBand: stage.twoBand,
+                declaredLatencyFrames: plan.declaredLatencyFrames, frequencies: probes)
+            for (index, f) in probes.enumerated() {
+                XCTAssertEqual(result.magnitudeDB[index], smooth(f), accuracy: 0.1, "\(f) Hz at \(rate)")
             }
-            XCTAssertGreaterThan(required, maximum)
-            XCTAssertNotNil(($0 as? LocalizedError)?.errorDescription)
+            if let part = stage.twoBand {
+                XCTAssertTrue([11_025.0, 12_000.0].contains(rate / Double(part.decimation)), "low rate at \(rate)")
+                XCTAssertEqual(stage.graphKind, N60_STAGE_ROOM_FIR_TWO_BAND)
+                XCTAssertEqual(stage.graphParams.count, 4 + stage.taps.count + part.lowTaps.count)
+            }
         }
+        let high = try cache.plan(for: multi, sampleRate: 384_000)
+        XCTAssertNotNil(high.stages.first?.twoBand)
     }
 
     func testLegacyKernelRefusesWithAReason() throws {
