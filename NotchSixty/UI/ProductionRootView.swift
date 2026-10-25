@@ -285,6 +285,7 @@ struct ProductionRootView: View {
     @Environment(\.openWindow) private var openWindow
     #endif
     @State private var commandError: String?
+    @State private var showingGuidedSetup = false
     @EnvironmentObject private var featureFlags: FeatureFlags
 
     /// E4: the adaptive Quiet Zone shadow runs only with its flag on.
@@ -385,6 +386,31 @@ struct ProductionRootView: View {
         } message: {
             Text(commandError ?? "")
         }
+        .sheet(isPresented: $showingGuidedSetup) {
+            ProductionSystemSetupFlowView(
+                engine: engine,
+                profiles: product.profiles,
+                microphone: product.calibration,
+                advisor: product.roomTreatmentAdvisor
+            )
+        }
+    }
+
+    /// E12 S3: the "Set up my system" card; empty with the flag off.
+    private var setupEntryCard: AnyView {
+        let status = SystemCalibrationStatus.resolve(
+            summary: product.profiles.selectedSystemProfile?.state.roomCorrectionCalibration,
+            verifiedDesignID: nil)
+        let availability = SystemSetupEntryPolicy.availability(
+            flagEnabled: systemAreaEnabled,
+            outputName: engine.selectedOutputDevice?.name,
+            outputUID: engine.selectedOutputDevice?.uid,
+            state: product.profiles.selectedSystemProfile?.state,
+            calibration: status)
+        return AnyView(SystemSetupEntryCard(
+            availability: availability,
+            start: { showingGuidedSetup = true },
+            openHeadphones: { navigation.navigate(to: .headphones, systemArea: systemAreaEnabled) }))
     }
 
     @ViewBuilder
@@ -401,7 +427,8 @@ struct ProductionRootView: View {
             navigation: navigation,
             overview: AnyView(
                 ProductionSystemOverviewView(
-                    engine: engine, profiles: product.profiles, navigation: navigation)),
+                    engine: engine, profiles: product.profiles, navigation: navigation,
+                    entryCard: setupEntryCard)),
             speakers: AnyView(sectionDetail(for: .speakers)),
             room: AnyView(sectionDetail(for: .roomAdvisor)),
             measure: AnyView(sectionDetail(for: .measurementLab)),
@@ -416,7 +443,7 @@ struct ProductionRootView: View {
         case .system:
             systemArea
         case .dashboard:
-            ProductionDashboardView(engine: engine)
+            ProductionDashboardView(engine: engine, entryCard: setupEntryCard)
         case .equalizer:
             ProductionEqualizerView(engine: engine, reference: product.reference)
         case .dynamics:
@@ -796,6 +823,7 @@ private struct ProductSafeLaunchSheet: View {
 
 private struct ProductionDashboardView: View {
     @ObservedObject var engine: AudioIOEngine
+    var entryCard = AnyView(EmptyView())
     @AppStorage(PreferenceKeys.Application.volumeStepResolution)
     private var storedVolumeStepResolution = ApplicationVolumeStepResolution.standard.rawValue
     @State private var actionError: String?
@@ -819,6 +847,8 @@ private struct ProductionDashboardView: View {
                     Text("Choose an output below to begin.")
                         .foregroundStyle(.secondary)
                 }
+
+                entryCard
 
                 StereoSignatureVUMeterPanel(engine: engine)
 

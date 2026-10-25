@@ -191,6 +191,7 @@ struct ProductionSystemOverviewView: View {
     @ObservedObject var engine: AudioIOEngine
     @ObservedObject var profiles: ProductProfileController
     @ObservedObject var navigation: ProductionNavigation
+    var entryCard = AnyView(EmptyView())
 
     private var status: SystemCalibrationStatus {
         SystemCalibrationStatus.resolve(
@@ -220,6 +221,8 @@ struct ProductionSystemOverviewView: View {
                     }
                     .padding(4)
                 }
+
+                entryCard
 
                 ForEach(ProductionSystemTab.allCases.filter { $0 != .overview }) { tab in
                     Button {
