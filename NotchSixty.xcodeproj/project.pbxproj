@@ -7,6 +7,8 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		E11F0000000000000000000A /* MeasurementMultiMic.swift in Sources */ = {isa = PBXBuildFile; fileRef = E11F0000000000000000000B /* MeasurementMultiMic.swift */; };
+		E11F0000000000000000000C /* MeasurementMultiMicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E11F0000000000000000000D /* MeasurementMultiMicTests.swift */; };
 		E11E0000000000000000000D /* MeasurementLiveAnalysisTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E11E0000000000000000000C /* MeasurementLiveAnalysisTests.swift */; };
 		E11E00000000000000000009 /* N60MeasurementMonitorProc.c in Sources */ = {isa = PBXBuildFile; fileRef = E11E00000000000000000008 /* N60MeasurementMonitorProc.c */; };
 		E11E00000000000000000007 /* MeasurementRTASPLCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = E11E00000000000000000006 /* MeasurementRTASPLCard.swift */; };
@@ -407,6 +409,8 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		E11F0000000000000000000B /* MeasurementMultiMic.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeasurementMultiMic.swift; sourceTree = "<group>"; };
+		E11F0000000000000000000D /* MeasurementMultiMicTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeasurementMultiMicTests.swift; sourceTree = "<group>"; };
 		E11E0000000000000000000C /* MeasurementLiveAnalysisTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeasurementLiveAnalysisTests.swift; sourceTree = "<group>"; };
 		E11E0000000000000000000A /* N60MeasurementMonitorProc.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = N60MeasurementMonitorProc.h; sourceTree = "<group>"; };
 		E11E00000000000000000008 /* N60MeasurementMonitorProc.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = N60MeasurementMonitorProc.c; sourceTree = "<group>"; };
@@ -943,6 +947,7 @@
 				A100000000000000000E2206 /* FeatureFlagsTests.swift */,
 				E11D00000000000000000012 /* MeasurementCoreTests.swift */,
 				E11E0000000000000000000C /* MeasurementLiveAnalysisTests.swift */,
+				E11F0000000000000000000D /* MeasurementMultiMicTests.swift */,
 				E11D00000000000000000033 /* MeasurementAnalysisViewsTests.swift */,
 				E11D00000000000000000053 /* MeasurementLibraryTests.swift */,
 				E11D00000000000000000085 /* SignalGeneratorSettingsTests.swift */,
@@ -1142,6 +1147,7 @@
 				A2000000000000000000002E /* RoomCorrectionMeasurementAnalyzer.swift */,
 				E11D00000000000000000011 /* MeasurementCore.swift */,
 				E11E00000000000000000002 /* MeasurementLiveAnalysis.swift */,
+				E11F0000000000000000000B /* MeasurementMultiMic.swift */,
 				E11E00000000000000000004 /* MeasurementInputMonitor.swift */,
 				E11D00000000000000000031 /* MeasurementGatedPlot.swift */,
 				E11D00000000000000000051 /* MeasurementLibrary.swift */,
@@ -1459,6 +1465,7 @@
 				A2000000000000000000001E /* RoomCorrectionMeasurementAnalyzer.swift in Sources */,
 				E11D00000000000000000001 /* MeasurementCore.swift in Sources */,
 				E11E00000000000000000003 /* MeasurementLiveAnalysis.swift in Sources */,
+				E11F0000000000000000000A /* MeasurementMultiMic.swift in Sources */,
 				E11E00000000000000000005 /* MeasurementInputMonitor.swift in Sources */,
 				E11E00000000000000000007 /* MeasurementRTASPLCard.swift in Sources */,
 				E11E00000000000000000009 /* N60MeasurementMonitorProc.c in Sources */,
@@ -1600,6 +1607,7 @@
 				A100000000000000000E2205 /* FeatureFlagsTests.swift in Sources */,
 				E11D00000000000000000002 /* MeasurementCoreTests.swift in Sources */,
 				E11E0000000000000000000D /* MeasurementLiveAnalysisTests.swift in Sources */,
+				E11F0000000000000000000C /* MeasurementMultiMicTests.swift in Sources */,
 				E11D00000000000000000023 /* MeasurementAnalysisViewsTests.swift in Sources */,
 				E11D00000000000000000043 /* MeasurementLibraryTests.swift in Sources */,
 				E11D00000000000000000084 /* SignalGeneratorSettingsTests.swift in Sources */,
