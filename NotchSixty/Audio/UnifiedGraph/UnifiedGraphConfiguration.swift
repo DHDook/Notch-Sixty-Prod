@@ -129,6 +129,9 @@ struct UnifiedGraphConfiguration: Equatable, Sendable {
     var maxBlockFrames: UInt32 = 65_536
     var lanes: [UnifiedGraphLane]
     var inputGain: Float = 1
+    /// E11 S7: measurement source stage params (11 floats from `SignalGeneratorSettings.stageParams`), placed after the
+    /// input gain so protection still guards it. nil for normal playback.
+    var generatorParams: [Float]?
     var bassManagement: UnifiedGraphBassManagement?
     var protection: UnifiedGraphProtection?
     /// Two-lane configurations only.
@@ -211,6 +214,10 @@ struct UnifiedGraphConfiguration: Equatable, Sendable {
         add(N60_STAGE_SANITISE, N60_LSTAGE_SANITISE, lane: all)
         add(N60_STAGE_METER_IN, N60_LSTAGE_METER_IN, lane: all)
         add(N60_STAGE_GAIN, N60_LSTAGE_INPUT_GAIN, lane: all, params: [inputGain])
+        if let generatorParams {
+            guard generatorParams.count == 11 else { throw UnifiedGraphError.invalidConfiguration("generator") }
+            add(N60_STAGE_GENERATOR, Self.generatorStageId, mask: programMask, params: generatorParams)
+        }
         for (index, lane) in lanes.enumerated() {
             guard lane.preGain > 0, lane.preGain <= 10_000, lane.outputGain > 0,
                   lane.outputGain <= 10_000 else {
@@ -355,6 +362,7 @@ struct UnifiedGraphConfiguration: Equatable, Sendable {
     static let denoiserStageId: UInt32 = 607
     static let dynamicEQStageId: UInt32 = 608
     static let crossoverStageId: UInt32 = 616
+    static let generatorStageId: UInt32 = 618
     /// FIR stages take two consecutive ids (left, right) when the channels differ.
     static let programFIRStageId: UInt32 = 610
     static let roomFIRStageId: UInt32 = 612
