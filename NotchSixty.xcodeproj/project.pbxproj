@@ -28,6 +28,8 @@
 		E6C000000000000000000031 /* snapshot.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E6C000000000000000000011 /* snapshot.cpp */; };
 		E6C000000000000000000032 /* fft.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E6C000000000000000000012 /* fft.cpp */; };
 		E11C00000000000000000035 /* timing.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E11C00000000000000000015 /* timing.cpp */; };
+		E11C00000000000000000036 /* distortion.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E11C00000000000000000016 /* distortion.cpp */; };
+		E11C00000000000000000037 /* decay.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E11C00000000000000000017 /* decay.cpp */; };
 		E11C00000000000000000031 /* offline_fft.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E11C00000000000000000011 /* offline_fft.cpp */; };
 		E11C00000000000000000032 /* ess.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E11C00000000000000000012 /* ess.cpp */; };
 		E11C00000000000000000033 /* deconvolve.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E11C00000000000000000013 /* deconvolve.cpp */; };
@@ -410,6 +412,8 @@
 		E11C00000000000000000013 /* deconvolve.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = measure/deconvolve.cpp; sourceTree = "<group>"; };
 		E11C00000000000000000014 /* reference_room.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = measure/reference_room.cpp; sourceTree = "<group>"; };
 		E11C00000000000000000015 /* timing.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = measure/timing.cpp; sourceTree = "<group>"; };
+		E11C00000000000000000016 /* distortion.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = measure/distortion.cpp; sourceTree = "<group>"; };
+		E11C00000000000000000017 /* decay.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = measure/decay.cpp; sourceTree = "<group>"; };
 		E11C00000000000000000020 /* offline_fft.hpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.h; path = measure/offline_fft.hpp; sourceTree = "<group>"; };
 		E11D00000000000000000011 /* MeasurementCore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeasurementCore.swift; sourceTree = "<group>"; };
 		E11D00000000000000000012 /* MeasurementCoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeasurementCoreTests.swift; sourceTree = "<group>"; };
@@ -814,6 +818,8 @@
 				E11C00000000000000000013 /* deconvolve.cpp */,
 				E11C00000000000000000014 /* reference_room.cpp */,
 				E11C00000000000000000015 /* timing.cpp */,
+				E11C00000000000000000016 /* distortion.cpp */,
+				E11C00000000000000000017 /* decay.cpp */,
 				E11C00000000000000000020 /* offline_fft.hpp */,
 				E6C000000000000000000020 /* fft.hpp */,
 				E6C000000000000000000021 /* snapshot.hpp */,
@@ -1282,6 +1288,8 @@
 				E11C00000000000000000033 /* deconvolve.cpp in Sources */,
 				E11C00000000000000000034 /* reference_room.cpp in Sources */,
 				E11C00000000000000000035 /* timing.cpp in Sources */,
+				E11C00000000000000000036 /* distortion.cpp in Sources */,
+				E11C00000000000000000037 /* decay.cpp in Sources */,
 				A10000000000000000000011 /* ContentView.swift in Sources */,
 				A10000000000000000000010 /* NotchSixtyApp.swift in Sources */,
 				A40000000000000000000010 /* ProductionRootView.swift in Sources */,

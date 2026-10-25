@@ -228,3 +228,106 @@ extension MeasurementCore {
         )
     }
 }
+
+// MARK: - E11 S3: harmonic distortion and decay times
+
+/// Why a distortion or decay analysis could not produce a result.
+enum MeasurementAnalysisError: Error, Equatable {
+    case invalidArguments
+    case allocationFailed
+}
+
+extension MeasurementCore {
+    struct DistortionResult: Equatable, Sendable {
+        var frequencyHz: [Double]
+        var fundamentalDB: [Double]
+        /// Index 0 is H2 ... index 3 is H5; `noDataDB` where k f lies above the sweep band.
+        var harmonicDB: [[Double]]
+        var thdDB: [Double]
+        var minSweepSeconds: Double
+        var cleanSeparation: Bool
+
+        static let noDataDB = -999.0
+    }
+
+    struct DecayBand: Equatable, Sendable {
+        var centreHz: Double
+        var edtSeconds: Double
+        var t20Seconds: Double
+        var t30Seconds: Double
+        var rt60Seconds: Double
+        var decayRangeDB: Double
+        var noiseFloorDB: Double
+        var flags: UInt32
+    }
+
+    private static func analysisError(_ status: Int32) -> MeasurementAnalysisError {
+        status == N60_MEASURE_ERR_ALLOC ? .allocationFailed : .invalidArguments
+    }
+
+    /// Harmonic distortion curves from the circular deconvolved response of a synchronised sweep.
+    static func analyzeDistortion(
+        response: [Float], sampleRate: Double, sweep: SweepInfo,
+        startFrequencyHz: Double, endFrequencyHz: Double
+    ) throws -> DistortionResult {
+        var info = n60_measure_ess_info(
+            frame_count: UInt64(sweep.frameCount), sweep_rate_seconds: sweep.sweepRateSeconds,
+            duration_seconds: sweep.durationSeconds)
+        var params = n60_measure_distortion_params()
+        n60_measure_distortion_defaults(sampleRate, &info, startFrequencyHz, endFrequencyHz, &params)
+        let capacity = max(1, Int((log2(endFrequencyHz / startFrequencyHz) * Double(params.points_per_octave)).rounded(.up)) + 2)
+        var frequency = [Double](repeating: 0, count: capacity)
+        var fundamental = [Double](repeating: 0, count: capacity)
+        var h2 = [Double](repeating: 0, count: capacity)
+        var h3 = h2, h4 = h2, h5 = h2
+        var thd = [Double](repeating: 0, count: capacity)
+        var out = n60_measure_distortion_info()
+        let status = h2.withUnsafeMutableBufferPointer { p2 in
+            h3.withUnsafeMutableBufferPointer { p3 in
+                h4.withUnsafeMutableBufferPointer { p4 in
+                    h5.withUnsafeMutableBufferPointer { p5 in
+                        var table: [UnsafeMutablePointer<Double>?] = [
+                            p2.baseAddress, p3.baseAddress, p4.baseAddress, p5.baseAddress]
+                        return table.withUnsafeMutableBufferPointer { tablePointer in
+                            response.withUnsafeBufferPointer { r in
+                                n60_measure_distortion_analyze(
+                                    &params, r.baseAddress, UInt64(r.count), &frequency, &fundamental,
+                                    tablePointer.baseAddress, &thd, UInt32(capacity), &out)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        guard status == N60_MEASURE_OK else { throw analysisError(status) }
+        let count = Int(out.point_count)
+        return DistortionResult(
+            frequencyHz: Array(frequency.prefix(count)),
+            fundamentalDB: Array(fundamental.prefix(count)),
+            harmonicDB: [h2, h3, h4, h5].map { Array($0.prefix(count)) },
+            thdDB: Array(thd.prefix(count)),
+            minSweepSeconds: out.min_sweep_seconds,
+            cleanSeparation: out.clean_separation != 0)
+    }
+
+    /// EDT, T20, T30 and RT60 per octave or third-octave band (63 Hz to 8 kHz).
+    static func analyzeDecay(
+        impulseResponse: [Float], sampleRate: Double, bandsPerOctave: Int = 3,
+        minCentreHz: Double = 63, maxCentreHz: Double = 8_000
+    ) throws -> [DecayBand] {
+        var bands = [n60_measure_decay_band](repeating: n60_measure_decay_band(), count: 40)
+        var count: UInt32 = 0
+        let status = impulseResponse.withUnsafeBufferPointer {
+            n60_measure_decay_analyze(
+                $0.baseAddress, UInt64($0.count), sampleRate, UInt32(bandsPerOctave), minCentreHz, maxCentreHz,
+                &bands, UInt32(bands.count), &count)
+        }
+        guard status == N60_MEASURE_OK else { throw analysisError(status) }
+        return bands.prefix(Int(count)).map {
+            DecayBand(
+                centreHz: $0.centre_hz, edtSeconds: $0.edt_seconds, t20Seconds: $0.t20_seconds,
+                t30Seconds: $0.t30_seconds, rt60Seconds: $0.rt60_seconds, decayRangeDB: $0.decay_range_db,
+                noiseFloorDB: $0.noise_floor_db, flags: $0.flags)
+        }
+    }
+}

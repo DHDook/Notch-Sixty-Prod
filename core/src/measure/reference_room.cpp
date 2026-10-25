@@ -200,15 +200,30 @@ int32_t n60_measure_room_capture(const n60_measure_room_params *params,
         }
         std::vector<double> quadrature;
         if (!n60::fft::offline::realInverse(spectrum, hn, quadrature)) return N60_MEASURE_ERR_ALLOC;
+        // Instantaneous frequency from the analytic phase (central difference), used to fade a
+        // harmonic out as it approaches Nyquist so nothing aliases back into the band (a real
+        // converter has no alias products here; the fade spans 0.45..0.5 fs and is smooth).
+        std::vector<double> phase(excitation_count);
+        for (uint64_t i = 0; i < excitation_count; ++i) phase[i] = std::atan2(quadrature[i], static_cast<double>(excitation[i]));
         for (uint64_t i = 0; i < excitation_count; ++i) {
             const double x = excitation[i];
             const double r = std::hypot(x, quadrature[i]);
             if (r <= 1e-12) continue;
             const double c = std::min(1.0, std::max(-1.0, x / r));
+            double step = 0.0;
+            if (i > 0 && i + 1 < excitation_count) {
+                double d = phase[i + 1] - phase[i - 1];
+                while (d > kPi) d -= 2.0 * kPi;
+                while (d < -kPi) d += 2.0 * kPi;
+                step = std::fabs(d) / 2.0;  // radians per sample
+            }
+            const double fInst = step / (2.0 * kPi);  // cycles per sample
             double tPrev = 1.0, tCur = c, sum = 0.0;
             for (int k = 2; k <= 5; ++k) {
                 const double tNext = 2.0 * c * tCur - tPrev;
-                sum += g[k - 2] * tNext;
+                const double fk = k * fInst;
+                const double fade = fk <= 0.45 ? 1.0 : (fk >= 0.5 ? 0.0 : 0.5 * (1.0 + std::cos(kPi * (fk - 0.45) / 0.05)));
+                sum += g[k - 2] * fade * tNext;
                 tPrev = tCur;
                 tCur = tNext;
             }

@@ -193,6 +193,84 @@ int32_t n60_measure_average_repeats(const n60_measure_average_params *params,
                                     float *out, uint64_t capacity,
                                     n60_measure_average_result *result_out);
 
+/* ---- Harmonic distortion from a synchronised-ESS response (E11 S3, design note 9) ---- */
+
+#define N60_MEASURE_MAX_HARMONIC 5
+#define N60_MEASURE_NO_DATA_DB (-999.0) /* a curve point whose harmonic lies above the sweep band */
+
+typedef struct n60_measure_distortion_params {
+    double sample_rate;
+    double sweep_start_hz;
+    double sweep_end_hz;
+    double sweep_rate_seconds;       /* L from n60_measure_ess_info */
+    uint64_t linear_index;           /* frame of the linear impulse; UINT64_MAX: largest |sample| in the first half */
+    double smoothing_octaves;        /* power smoothing of every curve; 1/3 */
+    uint32_t points_per_octave;      /* output grid density, log spaced; 12 */
+    double response_seconds;         /* room response one wants inside each harmonic window; 0.05 */
+    double edge_guard_octaves;       /* a harmonic point is reported only when its smoothing band ends this far
+                                        below sweep_end_hz (the sweep's fade-out and the regularised division
+                                        corrupt the last part of the band); 0.1 */
+} n60_measure_distortion_params;
+
+typedef struct n60_measure_distortion_info {
+    uint32_t point_count;
+    uint64_t linear_index;           /* as used */
+    double min_window_seconds;       /* shortest harmonic window (H5), half the gap to H4 */
+    double min_sweep_seconds;        /* shortest sweep whose H5 window holds response_seconds */
+    uint32_t clean_separation;       /* 1 when the sweep is at least min_sweep_seconds */
+} n60_measure_distortion_info;
+
+void n60_measure_distortion_defaults(double sample_rate, const n60_measure_ess_info *sweep,
+                                     double start_hz, double end_hz, n60_measure_distortion_params *params);
+
+/* Shortest sweep over start..end for which the 5th harmonic window holds response_seconds. */
+double n60_measure_distortion_min_sweep_seconds(double start_hz, double end_hz, double response_seconds);
+
+/*
+ * `response` is the full circular deconvolved response of a synchronised sweep (n60_measure_deconvolve
+ * output). The k-th harmonic impulse sits L ln k before the linear one; each is windowed to half the
+ * gap to the next impulse in time and its spectrum read at k f, so harmonic k is plotted against the
+ * fundamental f in dB re the linear response at f. Arrays hold `capacity` points; frequency_hz and
+ * the dB curves are filled for point_count points. harmonic_db[k-2] is N60_MEASURE_NO_DATA_DB where
+ * k f exceeds the sweep band. thd_db sums the harmonics that are in band (power).
+ */
+int32_t n60_measure_distortion_analyze(const n60_measure_distortion_params *params,
+                                       const float *response, uint64_t response_count,
+                                       double *frequency_hz, double *fundamental_db,
+                                       double *harmonic_db[N60_MEASURE_MAX_HARMONIC - 1], double *thd_db,
+                                       uint32_t capacity, n60_measure_distortion_info *info_out);
+
+/* ---- Decay times from an impulse response (E11 S3, design note 9) ---- */
+
+#define N60_MEASURE_DECAY_OCTAVE 1
+#define N60_MEASURE_DECAY_THIRD_OCTAVE 3
+
+#define N60_MEASURE_DECAY_FLAG_EDT_RANGE 1u   /* decay range under 10 dB: EDT not reported */
+#define N60_MEASURE_DECAY_FLAG_T20_RANGE 2u   /* under 25 dB: T20 not reported */
+#define N60_MEASURE_DECAY_FLAG_T30_RANGE 4u   /* under 35 dB: T30 not reported */
+#define N60_MEASURE_DECAY_FLAG_NO_DECAY 8u    /* no measurable decay (silent or not decaying) */
+
+typedef struct n60_measure_decay_band {
+    double centre_hz;                /* exact base-10 centre (1000 * 10^(0.1 n) for thirds) */
+    double edt_seconds;              /* 0 when unavailable; see flags */
+    double t20_seconds;
+    double t30_seconds;
+    double rt60_seconds;             /* T30 when available, else T20, else EDT, else 0 */
+    double decay_range_db;           /* Schroeder drop reached before the noise floor */
+    double noise_floor_db;           /* re the band peak */
+    uint32_t flags;
+} n60_measure_decay_band;
+
+/*
+ * Causal IEC 61260-1 base-10 band filters (double, order 3 Butterworth band-pass), Lundeby
+ * truncation with noise compensation, Schroeder backward integration. Bands are those with
+ * nominal centres in [min_centre_hz, max_centre_hz] (63..8000 by default) whose upper edge is
+ * under 0.45 fs. bands_per_octave is 1 or 3.
+ */
+int32_t n60_measure_decay_analyze(const float *ir, uint64_t count, double sample_rate,
+                                  uint32_t bands_per_octave, double min_centre_hz, double max_centre_hz,
+                                  n60_measure_decay_band *bands, uint32_t capacity, uint32_t *band_count);
+
 #ifdef __cplusplus
 }
 #endif
