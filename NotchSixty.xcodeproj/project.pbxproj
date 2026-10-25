@@ -7,6 +7,9 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		E6D0000000000000000109A3 /* LiveHeadphoneProfileTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6D0000000000000000009A3 /* LiveHeadphoneProfileTests.swift */; };
+		E6D0000000000000000109A2 /* HeadphoneLiveEditPlanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6D0000000000000000009A2 /* HeadphoneLiveEditPlanner.swift */; };
+		E6D0000000000000000109A1 /* BinauralResampledAssetCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6D0000000000000000009A1 /* BinauralResampledAssetCache.swift */; };
 		E6D000000000000000000101 /* UnifiedGraphSpec.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6D000000000000000000001 /* UnifiedGraphSpec.swift */; };
 		E6D0000000000000000001B0 /* UnifiedGraphProgramDSP.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6D0000000000000000000B0 /* UnifiedGraphProgramDSP.swift */; };
 		E6D000000000000000000102 /* UnifiedGraphHost.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6D000000000000000000002 /* UnifiedGraphHost.swift */; };
@@ -372,6 +375,9 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		E6D0000000000000000009A3 /* LiveHeadphoneProfileTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveHeadphoneProfileTests.swift; sourceTree = "<group>"; };
+		E6D0000000000000000009A2 /* HeadphoneLiveEditPlanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HeadphoneLiveEditPlanner.swift; sourceTree = "<group>"; };
+		E6D0000000000000000009A1 /* BinauralResampledAssetCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BinauralResampledAssetCache.swift; sourceTree = "<group>"; };
 		E6D000000000000000000001 /* UnifiedGraphSpec.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnifiedGraphSpec.swift; sourceTree = "<group>"; };
 		E6D0000000000000000000B0 /* UnifiedGraphProgramDSP.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnifiedGraphProgramDSP.swift; sourceTree = "<group>"; };
 		E6D000000000000000000002 /* UnifiedGraphHost.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnifiedGraphHost.swift; sourceTree = "<group>"; };
@@ -846,6 +852,7 @@
 				E6D0000000000000000000B7 /* UnifiedGraphConfigurationMatrixTests.swift */,
 				E6D0000000000000000000A0 /* UnifiedGraphBinauralTests.swift */,
 				E6D0000000000000000000E5 /* UnifiedGraphLiveEditTests.swift */,
+				E6D0000000000000000009A3 /* LiveHeadphoneProfileTests.swift */,
 				E6D0000000000000000000B1 /* UnifiedGraphProgramDSPTests.swift */,
 				E6D000000000000000000007 /* LiveNChannelUnifiedGraphTests.swift */,
 				A10000000000000000000027 /* ConvolutionTests.swift */,
@@ -1106,7 +1113,7 @@
 		};
 		A20000000000000000000051 /* CoreAudio */ = {isa = PBXGroup; children = (A20000000000000000000021 /* CoreAudioError.swift */, E4E000000000000000000011 /* OutputBufferSizeController.swift */, F63000000000000000000011 /* CoreAudioNChannelTransportSession.swift */, F65000000000000000000013 /* CoreAudioSemanticTransportSupport.swift */, F65000000000000000000014 /* CoreAudioBinauralHeadphoneTransportSession.swift */, F64000000000000000000013 /* MultichannelCalibrationTransport.swift */, A20000000000000000000028 /* MasterVolumeDeviceController.swift */, A2000000000000000000002C /* RoomCorrectionCalibrationTransport.swift */,); path = CoreAudio; sourceTree = "<group>"; };
 		A20000000000000000000052 /* Devices */ = {isa = PBXGroup; children = (A20000000000000000000022 /* AudioOutputDevice.swift */, A20000000000000000000023 /* OutputDeviceCatalog.swift */,); path = Devices; sourceTree = "<group>"; };
-		A20000000000000000000053 /* Routing */ = {isa = PBXGroup; children = (A20000000000000000000024 /* AudioRouteConfiguration.swift */, F62000000000000000000011 /* OutputDeviceProfileConfiguration.swift */, F65000000000000000000011 /* HeadphoneDeviceProfileConfiguration.swift */, B40000000000000000000011 /* BlindABXValidation.swift */, B50000000000000000000012 /* HeadphoneModelResearchLibrary.swift */, F65000000000000000000012 /* BinauralProfileAsset.swift */, F64000000000000000000011 /* OutputDeviceCalibration.swift */,); path = Routing; sourceTree = "<group>"; };
+		A20000000000000000000053 /* Routing */ = {isa = PBXGroup; children = (A20000000000000000000024 /* AudioRouteConfiguration.swift */, F62000000000000000000011 /* OutputDeviceProfileConfiguration.swift */, F65000000000000000000011 /* HeadphoneDeviceProfileConfiguration.swift */, B40000000000000000000011 /* BlindABXValidation.swift */, B50000000000000000000012 /* HeadphoneModelResearchLibrary.swift */, F65000000000000000000012 /* BinauralProfileAsset.swift */, F64000000000000000000011 /* OutputDeviceCalibration.swift */, E6D0000000000000000009A1 /* BinauralResampledAssetCache.swift */, E6D0000000000000000009A2 /* HeadphoneLiveEditPlanner.swift */,); path = Routing; sourceTree = "<group>"; };
 		B113B0000000000000000050 /* Backup */ = {
 			isa = PBXGroup;
 			children = (
@@ -1274,6 +1281,8 @@
 				B50000000000000000000002 /* HeadphoneModelResearchLibrary.swift in Sources */,
 				B40000000000000000000001 /* BlindABXValidation.swift in Sources */,
 				F65000000000000000000002 /* BinauralProfileAsset.swift in Sources */,
+				E6D0000000000000000109A2 /* HeadphoneLiveEditPlanner.swift in Sources */,
+				E6D0000000000000000109A1 /* BinauralResampledAssetCache.swift in Sources */,
 				F65000000000000000000003 /* CoreAudioSemanticTransportSupport.swift in Sources */,
 				F65000000000000000000004 /* CoreAudioBinauralHeadphoneTransportSession.swift in Sources */,
 				F66000000000000000000001 /* HeadTrackingController.swift in Sources */,
@@ -1459,6 +1468,7 @@
 				E6D0000000000000000000B8 /* UnifiedGraphConfigurationMatrixTests.swift in Sources */,
 				E6D0000000000000000001A0 /* UnifiedGraphBinauralTests.swift in Sources */,
 				E6D0000000000000000001E5 /* UnifiedGraphLiveEditTests.swift in Sources */,
+				E6D0000000000000000109A3 /* LiveHeadphoneProfileTests.swift in Sources */,
 				E6D0000000000000000001B1 /* UnifiedGraphProgramDSPTests.swift in Sources */,
 				E6D000000000000000000107 /* LiveNChannelUnifiedGraphTests.swift in Sources */,
 				A10000000000000000000013 /* NotchSixtyTests.swift in Sources */,

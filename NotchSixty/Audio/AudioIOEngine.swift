@@ -1028,6 +1028,13 @@ final class AudioIOEngine: ObservableObject {
     private let masterVolumeController: any MasterVolumeDeviceControlling
     private let globalVolumeKeyMonitor: any GlobalVolumeKeyMonitoring
     private let binauralProfileAssetStore: BinauralProfileAssetStore
+    /// E6 S9c: converted HRTF assets per (asset, rate), shared by session start and live asset swaps.
+    private let binauralAssetCache = BinauralResampledAssetCache()
+    /// Newest live HRTF asset swap request; an older prepare that finishes later is dropped.
+    private var headphoneAssetGeneration: UInt64 = 0
+    /// The HRTF asset the running binaural graph renders (a requested swap is pending while it differs from the
+    /// configuration's).
+    private var renderedBinauralProfile: BinauralProfileReference?
     private let masterVolumeStore: (any MasterVolumePersisting)?
     /// Output whose stored software volume has already been restored. A sync
     /// for the same output (external change, device-list refresh) never
@@ -2326,8 +2333,26 @@ final class AudioIOEngine: ObservableObject {
                 try configuration.validateStructure(sampleRate: output.nominalSampleRate)
             }
         }
-        guard lifecycle.state == .idle || configuration == headphoneDeviceProfileConfiguration else {
-            throw HeadphoneDeviceProfileError.configurationChangeRequiresRestart
+        if lifecycle.state != .idle {
+            let context = HeadphoneLiveEditPlanner.Context(
+                unifiedGraphEnabled: unifiedGraphEnabled,
+                lifecycleRunning: lifecycle.state == .running,
+                binauralSession: binauralHeadphoneTransportSession.map { $0.unifiedGraphActive ? .graph : .legacy } ?? .none,
+                nChannelSessionActive: nChannelTransportSession != nil)
+            switch HeadphoneLiveEditPlanner.plan(from: headphoneDeviceProfileConfiguration, to: configuration, context: context) {
+            case .unchanged: break
+            case .refuse: throw HeadphoneDeviceProfileError.configurationChangeRequiresRestart
+            case .liveEdit(let assetChanged):
+                guard let configuration else { throw HeadphoneDeviceProfileError.configurationChangeRequiresRestart }
+                try applyLiveHeadphoneEdit(configuration, assetChanged: assetChanged)
+                return
+            case .reconfigure:
+                try validateHeadphoneSessionKindChange(configuration)
+                headphoneDeviceProfileConfiguration = configuration
+                lastErrorDescription = nil
+                scheduleSampleRateReconfiguration(countsAsSampleRateChange: false)
+                return
+            }
         }
         headphoneDeviceProfileConfiguration = configuration
         if configuration?.enabled == true,
@@ -2338,6 +2363,104 @@ final class AudioIOEngine: ObservableObject {
             headTrackingRuntimeStatus = .disabled
         }
         lastErrorDescription = nil
+    }
+
+    /// E6 S9c: everything a session-kind change would need at the rebuild, checked before the change is committed so
+    /// a refusal leaves the running session and the stored configuration alone.
+    private func validateHeadphoneSessionKindChange(_ configuration: HeadphoneDeviceProfileConfiguration?) throws {
+        guard let configuration, configuration.enabled else { return }
+        guard let output = selectedOutputDevice else {
+            throw HeadphoneDeviceProfileError.outputDeviceRequired
+        }
+        let selected = try configuration.validateForActivation(
+            availableDevices: outputDevices, selectedOutputUID: output.uid, sampleRate: output.nominalSampleRate)
+        if configuration.spatialMode == .virtualSpeakers {
+            let source = try configuration.resolveProgramSource(availableDevices: outputDevices, selectedOutput: selected)
+            guard source.supports(sampleRate: output.nominalSampleRate) else {
+                throw BinauralHeadphoneTransportError.sampleRateMismatch(
+                    source: source.nominalSampleRate, output: output.nominalSampleRate)
+            }
+            try validateBinauralHeadphoneActivation()
+        }
+    }
+
+    /// E6 S9c: a headphone profile edit inside one graph-rendered binaural session. The channel correction (headroom,
+    /// gain, polarity, EQ, delay) is laid onto the retained base spec and republished as a posted parameter or a
+    /// faded rebuild; stored state changes only after the graph accepted it. A new HRTF asset is prepared off the main
+    /// actor and published when ready, the old one rendering meanwhile.
+    private func applyLiveHeadphoneEdit(
+        _ configuration: HeadphoneDeviceProfileConfiguration, assetChanged: Bool
+    ) throws {
+        guard let session = binauralHeadphoneTransportSession, let base = session.unifiedGraphBaseSpec else {
+            throw HeadphoneDeviceProfileError.configurationChangeRequiresRestart
+        }
+        try configuration.validateStructure(sampleRate: session.outputFormat.sampleRate)
+        switch UnifiedGraphTranslator.binauralApplyHeadphone(base: base, profile: configuration) {
+        case .failure(let reason): throw LiveNChannelTransportError.unifiedGraphRejected(reason)
+        case .success(let newBase): try republishLiveGraph(currentLiveGraphInputs, headphoneBase: newBase)
+        }
+        headphoneDeviceProfileConfiguration = configuration
+        lastErrorDescription = nil
+        if assetChanged { beginHeadphoneAssetSwap(session: session, profile: configuration) }
+    }
+
+    private func beginHeadphoneAssetSwap(
+        session: CoreAudioBinauralHeadphoneTransportSession, profile: HeadphoneDeviceProfileConfiguration
+    ) {
+        headphoneAssetGeneration &+= 1
+        let generation = headphoneAssetGeneration
+        guard let reference = profile.binauralProfile else { return }
+        let rate = session.outputFormat.sampleRate
+        let store = binauralProfileAssetStore
+        let cache = binauralAssetCache
+        Task.detached(priority: .userInitiated) { [weak self] in
+            let result: Result<UnifiedGraphSpec, Error>
+            do {
+                let asset = try cache.asset(for: reference, sampleRate: rate, store: store)
+                switch UnifiedGraphTranslator.binauralBaseSpec(
+                    asset: asset, layout: profile.programLayout, profile: profile, outputChannels: 2,
+                    sampleRate: rate, headTracking: profile.headTracking?.enabled == true
+                ) {
+                case .success(let base): result = .success(base)
+                case .failure(let reason): result = .failure(LiveNChannelTransportError.unifiedGraphRejected(reason))
+                }
+            } catch {
+                result = .failure(error)
+            }
+            await self?.finishHeadphoneAssetSwap(
+                generation: generation, reference: reference, session: session, result: result)
+        }
+    }
+
+    private func finishHeadphoneAssetSwap(
+        generation: UInt64,
+        reference: BinauralProfileReference,
+        session: CoreAudioBinauralHeadphoneTransportSession,
+        result: Result<UnifiedGraphSpec, Error>
+    ) {
+        guard generation == headphoneAssetGeneration,
+              binauralHeadphoneTransportSession === session,
+              lifecycle.state == .running,
+              let profile = headphoneDeviceProfileConfiguration,
+              profile.binauralProfile == reference else { return }
+        do {
+            // Edits made while the asset prepared are already in the configuration: lay them onto the new set.
+            let prepared = try result.get()
+            let newBase: UnifiedGraphSpec
+            switch UnifiedGraphTranslator.binauralApplyHeadphone(base: prepared, profile: profile) {
+            case .success(let base): newBase = base
+            case .failure(let reason): throw LiveNChannelTransportError.unifiedGraphRejected(reason)
+            }
+            try republishLiveGraph(currentLiveGraphInputs, headphoneBase: newBase)
+            renderedBinauralProfile = reference
+            lastErrorDescription = nil
+        } catch {
+            lastErrorDescription = error.localizedDescription
+            if var restored = headphoneDeviceProfileConfiguration, let rendered = renderedBinauralProfile {
+                restored.binauralProfile = rendered
+                headphoneDeviceProfileConfiguration = restored
+            }
+        }
     }
 
     func recenterHeadTracking() {
@@ -3922,7 +4045,7 @@ final class AudioIOEngine: ObservableObject {
 
     /// Builds the graph for `inputs` and moves the running graph to it. Throws (a named reason) and leaves the
     /// running graph untouched when the graph cannot take the edit; call it as the last step before committing state.
-    private func republishLiveGraph(_ inputs: LiveGraphInputs) throws {
+    private func republishLiveGraph(_ inputs: LiveGraphInputs, headphoneBase: UnifiedGraphSpec? = nil) throws {
         if let session = nChannelTransportSession {
             let rate = session.outputFormat.sampleRate
             guard let shape = UnifiedGraphLayoutShape(roles: session.routePlan.programLayout.roles) else {
@@ -3938,7 +4061,7 @@ final class AudioIOEngine: ObservableObject {
             case .failure(let reason): throw LiveNChannelTransportError.unifiedGraphRejected(reason)
             }
         } else if let session = binauralHeadphoneTransportSession {
-            guard let base = session.unifiedGraphBaseSpec,
+            guard let base = headphoneBase ?? session.unifiedGraphBaseSpec,
                   let shape = UnifiedGraphLayoutShape(roles: session.programLayout.roles) else {
                 throw LiveNChannelTransportError.configurationChangeRequiresRestart
             }
@@ -3948,7 +4071,9 @@ final class AudioIOEngine: ObservableObject {
             switch UnifiedGraphTranslator.binauralApplyProgram(
                 base: base, programDSP: program, programGain: Float(DSPGainConfiguration.linearGain(forDB: combinedDB))
             ) {
-            case .success(let spec): try session.republishGraph(spec)
+            case .success(let spec):
+                try session.republishGraph(spec)
+                if let headphoneBase { session.commitUnifiedGraphBaseSpec(headphoneBase) }
             case .failure(let reason): throw LiveNChannelTransportError.unifiedGraphRejected(reason)
             }
         } else {
@@ -4444,15 +4569,11 @@ final class AudioIOEngine: ObservableObject {
         guard let reference = profile.binauralProfile else {
             throw HeadphoneDeviceProfileError.binauralProfileRequired
         }
-        let storedAsset = try binauralProfileAssetStore.load(id: reference.assetID)
-        guard storedAsset.id == reference.assetID,
-              abs(storedAsset.sampleRate - reference.sampleRate) < 0.5,
-              storedAsset.tapCount == reference.tapCount else {
-            throw HeadphoneDeviceProfileError.invalidBinauralProfileReference
-        }
         // HRIRs measured at another rate are converted off the realtime path
         // rather than refusing to start after a nominal-rate change.
-        let asset = try storedAsset.resampled(to: output.nominalSampleRate)
+        let asset = try binauralAssetCache.asset(
+            for: reference, sampleRate: output.nominalSampleRate, store: binauralProfileAssetStore)
+        renderedBinauralProfile = reference
         let prepared = try asset.prepare(for: profile.programLayout)
         let headphoneSnapshot = try profile.makeRealtimeSnapshot(
             sampleRate: output.nominalSampleRate

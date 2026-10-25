@@ -419,9 +419,22 @@ final class CoreAudioBinauralHeadphoneTransportSession {
               abs(spec.sampleRate - outputFormat.sampleRate) < 0.5 else {
             throw LiveNChannelTransportError.unifiedGraphRejected(.laneCountMismatch)
         }
+        var spec = spec
+        // The head pose is live state of the BINAURAL stage; a new response set must not snap the image back to 0.
+        if let current = host.spec.stages.first(where: { $0.stageId == N60_LSTAGE_BINAURAL }),
+           let index = spec.stages.firstIndex(where: { $0.stageId == N60_LSTAGE_BINAURAL }),
+           current.params.count >= 3, spec.stages[index].params.count >= 3 {
+            for offset in 0..<3 { spec.stages[index].params[offset] = current.params[offset] }
+        }
         do { return try host.apply(spec) } catch {
             throw LiveNChannelTransportError.graphRepublishRefused(String(describing: error))
         }
+    }
+
+    /// E6 S9c: records the graph-before-program-DSP that the last accepted republish was built from, so the next live
+    /// edit re-lays the program DSP onto the current headphone profile and response set.
+    func commitUnifiedGraphBaseSpec(_ base: UnifiedGraphSpec) {
+        unifiedGraphBaseSpec = base
     }
 
     /// Builds the graph for a session and attaches it to `bridge`, or says why it cannot.

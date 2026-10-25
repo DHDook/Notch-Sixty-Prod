@@ -389,8 +389,8 @@ enum UnifiedGraphTranslator {
     /// Selection rule and spec for a binaural headphone session (E6 S8b2d): the output must be
     /// a 2-channel headphone endpoint, the program layout must have more than 2 channels and
     /// the profile must carry an asset. `asset` is already resampled to `sampleRate`. The
-    /// HEADPHONE stage carries the profile's headroom, channel gain, polarity and EQ; channel
-    /// delay and a headroom above 24 dB stay on the legacy path (`headphoneDSP`). Protection
+    /// HEADPHONE stage carries the profile's headroom, channel gain, polarity and EQ and a DELAY stage per ear
+    /// carries the channel delay (S9c); a headroom above 24 dB stays on the legacy path (`headphoneDSP`). Protection
     /// matches the legacy limiter. Program gain is the INPUT_GAIN stage (the bridge applies it only on the legacy pipeline).
     static func binauralSpec(
         asset: BinauralProfileAsset?,
@@ -458,12 +458,7 @@ enum UnifiedGraphTranslator {
             return .failure(.binauralBudget)
         }
         // Headphone correction the stage cannot reproduce stays on the legacy path.
-        guard profile.headroomAttenuationDB.isFinite, (0.0...24.0).contains(profile.headroomAttenuationDB),
-              profile.left.delayMilliseconds == 0, profile.right.delayMilliseconds == 0,
-              profile.left.eqBands.filter(\.enabled).count <= 16,
-              profile.right.eqBands.filter(\.enabled).count <= 16,
-              (-24.0...24.0).contains(profile.left.gainDB), (-24.0...24.0).contains(profile.right.gainDB)
-        else { return .failure(.headphoneDSP) }
+        guard headphoneStagesEligible(profile: profile, sampleRate: sampleRate) else { return .failure(.headphoneDSP) }
 
         let channels = layout.roles.count
         let orientations = headTracking ? binauralTrackedOrientations : 1
@@ -536,7 +531,41 @@ enum UnifiedGraphTranslator {
         spec.maxBlockFrames = maxBlockFrames
 
         // Headphone stage: pair (left, right) on lanes 0 and 1, crossfeed off (the virtual
-        // speakers already carry the spatial image).
+        // speakers already carry the spatial image). Then one DELAY stage per ear.
+        let stage = headphoneStage(profile: profile)
+        let delays = headphoneDelayStages(profile: profile, sampleRate: sampleRate)
+        guard let protectionIndex = spec.stages.firstIndex(where: { $0.stageId == N60_LSTAGE_PROTECTION }) else {
+            return .failure(.specRejected)
+        }
+        // Same limiter as the legacy bridge: -1 dB ceiling, 0.5/90 ms, 2 ms look-ahead, 4x true-peak.
+        spec.stages[protectionIndex].params = [1, -1, 0.5, 90, 2, 1, 4]
+        spec.stages.insert(contentsOf: [stage] + delays, at: protectionIndex)
+        return .success(spec)
+    }
+
+    /// First DELAY stage id of the ear lanes of a binaural graph (lane 0, lane 1).
+    static let headphoneDelayStageBase: UInt32 = 2_400
+
+    /// True when the HEADPHONE stage and the ear DELAY stages reproduce `profile`: headroom up to 24 dB (the stage's
+    /// range; a deeper headroom stays on the legacy path), at most 16 enabled bands a side, channel gain within the
+    /// stage's range and a delay within the delay capacity.
+    static func headphoneStagesEligible(profile: HeadphoneDeviceProfileConfiguration, sampleRate: Double) -> Bool {
+        guard profile.headroomAttenuationDB.isFinite, (0.0...24.0).contains(profile.headroomAttenuationDB),
+              profile.left.eqBands.filter(\.enabled).count <= 16,
+              profile.right.eqBands.filter(\.enabled).count <= 16,
+              (-24.0...24.0).contains(profile.left.gainDB), (-24.0...24.0).contains(profile.right.gainDB),
+              sampleRate.isFinite, sampleRate > 0 else { return false }
+        for side in [profile.left, profile.right] {
+            guard side.delayMilliseconds.isFinite, side.delayMilliseconds >= 0,
+                  sampleRate * side.delayMilliseconds * 0.001 <= Double(N60_HEADPHONE_MAX_DELAY_FRAMES) else {
+                return false
+            }
+        }
+        return true
+    }
+
+    /// The HEADPHONE pair stage (lanes 0 and 1) for `profile`; call only when `headphoneStagesEligible`.
+    static func headphoneStage(profile: HeadphoneDeviceProfileConfiguration) -> UnifiedGraphStageSpec {
         func bands(_ side: HeadphoneChannelCorrection) -> [Float] {
             side.eqBands.filter(\.enabled).flatMap { band -> [Float] in
                 [Float(band.type.realtimeCType.rawValue), Float(band.frequencyHz), Float(band.gainDB), Float(band.q)]
@@ -551,15 +580,44 @@ enum UnifiedGraphTranslator {
             Float(leftBands.count / 4), Float(rightBands.count / 4),
         ]
         headphone += leftBands + rightBands
-        let stage = UnifiedGraphStageSpec(
+        return UnifiedGraphStageSpec(
             kind: UInt32(N60_STAGE_HEADPHONE.rawValue), stageId: N60_LSTAGE_HEADPHONE,
             laneA: 0, laneB: 1, laneMask: 0, params: headphone)
-        guard let protectionIndex = spec.stages.firstIndex(where: { $0.stageId == N60_LSTAGE_PROTECTION }) else {
+    }
+
+    /// The per-ear channel delay as two DELAY stages with a fixed capacity, so a delay edit is a posted parameter
+    /// and never a rebuild. Frames round to nearest like the legacy `N60HeadphoneDSPSetChannelDelayMs`.
+    static func headphoneDelayStages(
+        profile: HeadphoneDeviceProfileConfiguration, sampleRate: Double
+    ) -> [UnifiedGraphStageSpec] {
+        [profile.left, profile.right].enumerated().map { lane, side in
+            let frames = min(UInt32(N60_HEADPHONE_MAX_DELAY_FRAMES), UInt32((sampleRate * side.delayMilliseconds * 0.001).rounded()))
+            return UnifiedGraphStageSpec(
+                kind: UInt32(N60_STAGE_DELAY.rawValue), stageId: headphoneDelayStageBase + UInt32(lane),
+                laneA: UInt32(lane), laneB: 0, laneMask: 0, capacityFrames: UInt32(N60_HEADPHONE_MAX_DELAY_FRAMES),
+                params: [Float(frames)])
+        }
+    }
+
+    /// E6 S9c: `base` (a binaural base spec) with the HEADPHONE stage and ear delays of `profile`, without
+    /// rebuilding the response set. Fails with `headphoneDSP` when the stages cannot reproduce the profile.
+    static func binauralApplyHeadphone(
+        base: UnifiedGraphSpec, profile: HeadphoneDeviceProfileConfiguration
+    ) -> Result<UnifiedGraphSpec, UnifiedGraphFallbackReason> {
+        guard headphoneStagesEligible(profile: profile, sampleRate: base.sampleRate) else {
+            return .failure(.headphoneDSP)
+        }
+        var spec = base
+        guard let hp = spec.stages.firstIndex(where: { $0.stageId == N60_LSTAGE_HEADPHONE }) else {
             return .failure(.specRejected)
         }
-        // Same limiter as the legacy bridge: -1 dB ceiling, 0.5/90 ms, 2 ms look-ahead, 4x true-peak.
-        spec.stages[protectionIndex].params = [1, -1, 0.5, 90, 2, 1, 4]
-        spec.stages.insert(stage, at: protectionIndex)
+        spec.stages[hp] = headphoneStage(profile: profile)
+        for delay in headphoneDelayStages(profile: profile, sampleRate: base.sampleRate) {
+            guard let index = spec.stages.firstIndex(where: { $0.stageId == delay.stageId }) else {
+                return .failure(.specRejected)
+            }
+            spec.stages[index].params = delay.params
+        }
         return .success(spec)
     }
 
