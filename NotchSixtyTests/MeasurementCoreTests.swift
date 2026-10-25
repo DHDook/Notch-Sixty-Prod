@@ -165,4 +165,29 @@ final class MeasurementCoreTests: XCTestCase {
             XCTAssertEqual(found.frames, 300, accuracy: 0.05, "aligned to repeat 0 at \(ppm) ppm")
         }
     }
+
+    func testDecayAnalysisRecoversReferenceRoomRT60() throws {
+        var room = n60_measure_room_params()
+        n60_measure_room_defaults(48_000, &room)
+        room.ir_seconds = 1.2
+        var length: UInt64 = 0
+        XCTAssertEqual(n60_measure_room_ir_length(&room, &length), N60_MEASURE_OK)
+        var ir = [Float](repeating: 0, count: Int(length))
+        XCTAssertEqual(n60_measure_room_ir(&room, &ir, length, &length), N60_MEASURE_OK)
+        let bands = try MeasurementCore.analyzeDecay(
+            impulseResponse: ir, sampleRate: 48_000, bandsPerOctave: 1, minCentreHz: 250, maxCentreHz: 4_000)
+        XCTAssertEqual(bands.count, 5)
+        let mid = try XCTUnwrap(bands.first { abs($0.centreHz - 1_000) < 1 })
+        let expected = withUnsafeBytes(of: room.rt60_seconds) { Array($0.bindMemory(to: Double.self))[3] }
+        XCTAssertEqual(mid.rt60Seconds, expected, accuracy: expected * 0.1)
+        XCTAssertEqual(mid.flags, 0)
+    }
+
+    func testDecayAnalysisRejectsBadArguments() {
+        XCTAssertThrowsError(try MeasurementCore.analyzeDecay(impulseResponse: [], sampleRate: 48_000))
+        XCTAssertThrowsError(try MeasurementCore.analyzeDistortion(
+            response: [], sampleRate: 48_000,
+            sweep: .init(frameCount: 0, sweepRateSeconds: 1, durationSeconds: 1),
+            startFrequencyHz: 20, endFrequencyHz: 20_000))
+    }
 }
