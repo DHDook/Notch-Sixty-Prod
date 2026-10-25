@@ -4,7 +4,7 @@ import Foundation
 ///
 /// Offline only: every call allocates and runs on a design task, never from an audio callback.
 /// S1 exposes the minimum-phase designer and the correction grid; later slices add the
-/// multi-seat design and synthesis calls behind the `e10.mixed-phase-correction` flag.
+/// multi-seat design and synthesis calls.
 enum RoomCorrectionCore {
     enum CoreError: Error, Equatable {
         case status(Int32)

@@ -8,7 +8,6 @@ struct ProductionRoomCorrectionWorkspace: View {
     @ObservedObject var projects: RoomCorrectionProjectController
     @ObservedObject var profiles: ProductProfileController
 
-    @EnvironmentObject private var featureFlags: FeatureFlags
     @State private var channelShaping = ChannelTargetShaping()
     @State private var actionError: String?
     @State private var positionName = ""
@@ -58,14 +57,12 @@ struct ProductionRoomCorrectionWorkspace: View {
 
                 if projects.aggregate != nil {
                     targetDesignCard
-                    if featureFlags.isEnabled(.mixedPhaseCorrection) {
-                        RoomCorrectionTargetEditorCard(
-                            channelNames: ["Left", "Right"],
-                            shaping: $channelShaping,
-                            target: Binding(
-                                get: { projects.target },
-                                set: { if let t = $0 { try? projects.setTarget(t, modifiedAt: Date()) } }))
-                    }
+                    RoomCorrectionTargetEditorCard(
+                        channelNames: ["Left", "Right"],
+                        shaping: $channelShaping,
+                        target: Binding(
+                            get: { projects.target },
+                            set: { if let t = $0 { try? projects.setTarget(t, modifiedAt: Date()) } }))
                 }
 
                 if let error = actionError ?? calibration.lastErrorDescription ?? projects.lastErrorDescription {

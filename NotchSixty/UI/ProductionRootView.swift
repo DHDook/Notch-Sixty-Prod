@@ -400,10 +400,7 @@ struct ProductionRootView: View {
         case .blindListening:
             ProductionBlindListeningWorkspace(engine: engine)
         case .acousticResearch:
-            ProductionOptionalAudioResearchWorkspace(
-                projects: product.roomCorrectionProjects,
-                engine: engine
-            )
+            ProductionOptionalAudioResearchWorkspace(engine: engine)
         case .hardwareAcceptance:
             ProductionHardwareAcceptanceWorkspace(
                 engine: engine,
