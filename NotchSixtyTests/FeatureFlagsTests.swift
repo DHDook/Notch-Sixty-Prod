@@ -88,6 +88,21 @@ final class FeatureFlagsTests: XCTestCase {
         }
     }
 
+    /// E6 S11: the graph is the default renderer; only the frozen-fallback flag selects the kernel.
+    func testGraphIsDefaultAndLegacyKernelFlagSelectsFallback() {
+        XCTAssertTrue(FeatureFlag.all.contains(.legacyKernel))
+        XCTAssertEqual(FeatureFlag.legacyKernel.id, "e6.legacy-kernel")
+        let plain = FeatureFlags(known: FeatureFlag.all, defaults: defaults, policy: .launchArgumentOnly, arguments: [])
+        XCTAssertFalse(plain.isEnabled(.legacyKernel), "graph renders by default")
+        let fallback = FeatureFlags(
+            known: FeatureFlag.all, defaults: defaults, policy: .launchArgumentOnly,
+            arguments: ["Notch Sixty", "-NotchSixtyFeatures", "e6.legacy-kernel"])
+        XCTAssertTrue(fallback.isEnabled(.legacyKernel))
+        XCTAssertEqual(
+            UnifiedGraphConfiguration(sampleRate: 48_000, lanes: [UnifiedGraphLane(), UnifiedGraphLane()]).orderPolicy,
+            .canonical)
+    }
+
     // These strings are persisted on users' Macs; renaming one silently resets
     // that setting.
     func testPersistedPreferenceKeysNeverChange() {

@@ -135,8 +135,9 @@ struct UnifiedGraphConfiguration: Equatable, Sendable {
     var stereoStages = UnifiedGraphStereoStages()
     /// The kernel denoiser's view while it is off (ignored when the denoiser stage is present).
     var denoiserPark: UnifiedGraphDenoiserPark?
-    /// E6 S9a: `.canonical` orders stages as the core does and lifts four kernel-order guards.
-    var orderPolicy: UnifiedGraphOrderPolicy = .kernelParity
+    /// E6 S9a/S11: `.canonical` (the default since S11, stereo included) orders stages as the core does and lifts four
+    /// kernel-order guards. `.kernelParity` is kept only so tests can still exercise those guards.
+    var orderPolicy: UnifiedGraphOrderPolicy = .canonical
     /// E6 S9a: program DSP mapped onto the lane sets of this layout (N-channel graphs). Needs empty `stereoStages`.
     var programDSP: UnifiedGraphProgramDSP?
 
@@ -164,7 +165,7 @@ struct UnifiedGraphConfiguration: Equatable, Sendable {
         }
         // Owner decision of 24 Oct 2026: ambient compensation runs after the compressor and expander and before
         // protection on every path, so the ambient boost never feeds the dynamics' detectors. The kernel runs it
-        // before them; that difference stays until S11 (the kernel is then the frozen fallback).
+        // before them; that difference is the recorded S11 parity exception (the kernel is now the frozen fallback).
         let canonical = orderPolicy == .canonical
         if let programDSP {
             guard stereo.isEmpty, programDSP.shape.laneCount == programLanes else {

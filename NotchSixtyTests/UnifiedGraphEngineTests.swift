@@ -94,8 +94,8 @@ final class UnifiedGraphEngineTests: XCTestCase {
         XCTAssertNotNil(UnifiedGraphTranslator.stereoConfiguration(snapshot: &snapshot, sampleRate: 48_000))
     }
 
-    func testFlagOffLeavesTheKernelPathAlone() throws {
-        XCTAssertFalse(FeatureFlag.unifiedGraph.defaultEnabled)
+    func testBridgeWithoutAGraphLeavesTheKernelPathAlone() throws {
+        XCTAssertFalse(FeatureFlag.legacyKernel.defaultEnabled)
         let bridge = try XCTUnwrap(N60RealtimeAudioBridgeCreate(4_096))
         defer { N60RealtimeAudioBridgeDestroy(bridge) }
         XCTAssertFalse(N60RealtimeAudioBridgeUnifiedGraphActive(bridge))
@@ -1179,6 +1179,7 @@ extension UnifiedGraphStageParityTests {
 
     private func firCase(
         rate: Double, kind: UnifiedGraphProgramKind, stereoTaps: Bool, tapCount: Int, declared: UInt32,
+        order: UnifiedGraphOrderPolicy = .canonical,
         extra: (inout N60DSPGraphSnapshot) -> Void = { _ in }, _ label: String
     ) throws {
         let kernel = try XCTUnwrap(N60RenderKernelCreate())
@@ -1195,10 +1196,11 @@ extension UnifiedGraphStageParityTests {
         runKernel(kernel, input, from: 0, to: input[0].count, into: &ref)
 
         var graphSnapshot = s
-        let configuration = try XCTUnwrap(
+        var configuration = try XCTUnwrap(
             UnifiedGraphTranslator.stereoConfiguration(
                 snapshot: &graphSnapshot, sampleRate: rate, programs: lookup(kind, [prepared])),
             "\(label) should be eligible at \(rate)")
+        configuration.orderPolicy = order
         let host = try UnifiedGraphHost(spec: try configuration.makeSpec())
         XCTAssertEqual(host.latencyFrames, prepared.info.engineLatencyFrames + prepared.info.declaredLatencyFrames,
                        "\(label) latency at \(rate)")
@@ -1232,9 +1234,11 @@ extension UnifiedGraphStageParityTests {
         }
     }
 
+    /// E6 S11 parity exception: stereo is `.canonical` by default, which puts the compressor before the room
+    /// convolver; the frozen kernel puts it after. The kernel order stays reachable (`.kernelParity`) and is pinned here.
     func testRoomFIRWithCompressorKeepsKernelOrderAtEveryRate() throws {
         for rate in Self.rates {
-            try firCase(rate: rate, kind: .roomCorrection, stereoTaps: true, tapCount: 800, declared: 0, extra: { s in
+            try firCase(rate: rate, kind: .roomCorrection, stereoTaps: true, tapCount: 800, declared: 0, order: .kernelParity, extra: { s in
                 XCTAssertTrue(N60DynamicsSnapshotSetCompressorAdvanced(
                     &s.dynamics, rate, true, -24, 3, 6, 8, 120, 2, N60CompressorTopologyFeedForward, false, 80))
             }, "room FIR and compressor")

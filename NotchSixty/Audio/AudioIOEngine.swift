@@ -1019,7 +1019,7 @@ private struct PreparedSpeakerIRProgram {
 
 @MainActor
 final class AudioIOEngine: ObservableObject {
-    /// E6 S8: set by the app shell from the `e6.unified-graph` flag. The engine never reads
+    /// E6 S8: set by the app shell (on unless `e6.legacy-kernel` is on). The engine never reads
     /// the flag itself; with this false the kernel path runs exactly as before.
     var unifiedGraphEnabled = false
 

@@ -18,7 +18,7 @@ struct FeatureFlag: Hashable, Identifiable, Sendable {
 extension FeatureFlag {
     /// Every flag the app knows. Add one when an epic starts merging dark;
     /// delete it, and the checks that read it, once the epic ships.
-    static let all: [FeatureFlag] = [.adaptiveANC, .unifiedGraph, .measurementSuite]
+    static let all: [FeatureFlag] = [.adaptiveANC, .legacyKernel, .measurementSuite]
 
     /// E4: adaptive Quiet Zone controls and the shadow-mode adaptive path.
     static let adaptiveANC = FeatureFlag(
@@ -27,11 +27,12 @@ extension FeatureFlag {
         epic: "E4"
     )
 
-    /// E6: the unified live N-channel graph (libn60core). Nothing reads it until the
-    /// epic wires the graph into the live path; Swift decides, the engine never reads flags.
-    static let unifiedGraph = FeatureFlag(
-        id: "e6.unified-graph",
-        title: "Unified N-channel graph",
+    /// E6 S11: the unified graph is the default renderer. Turning this on selects the frozen
+    /// `N60RenderKernel` fallback instead (no new features). Swift decides; the engine never reads
+    /// flags. E23 deletes the kernel and this flag.
+    static let legacyKernel = FeatureFlag(
+        id: "e6.legacy-kernel",
+        title: "Legacy render kernel (frozen fallback)",
         epic: "E6"
     )
 
