@@ -8,7 +8,7 @@
   builds one slice in a fresh context), realtime-reviewer (Sonnet), and code-scout,
   build-test-runner, plan-tracker, pr-writer (Haiku). `/next` itself runs on Sonnet.
 
-**Current focus:** E12 (guided setup and IA), slice 3 of 7: output, topology, microphone and level steps (e12/flow-start)
+**Current focus:** E12 (guided setup and IA), slice 4 of 7: seats, measurement and alignment steps (e12/flow-measure-align)
 <!-- plan-tracker keeps the line above current -->
 
 @AGENTS.md
