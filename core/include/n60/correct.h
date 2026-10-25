@@ -16,7 +16,7 @@
  *   4. Rate-specific synthesis of that design into taps with a declared latency, and the
  *      pre-ringing audit of the predicted result (design note 4).
  *
- * Extension plan (E10 S7, joint bass optimiser): the problem description already holds every
+ * Extension (E10 S6, joint bass optimiser, section 5): the problem description already holds every
  * channel and every seat (n60_correct_problem), so the joint optimiser is added as further
  * functions that take the same problem struct and return per-channel delay, gain, polarity
  * and a low-frequency grid design in the same n60_correct_design_grid form. Adding functions
@@ -46,6 +46,7 @@ extern "C" {
 #define N60_CORRECT_ERR_ALLOC (-4)
 #define N60_CORRECT_ERR_NONFINITE (-5)
 #define N60_CORRECT_ERR_PRERINGING (-6) /* the design is blocked: see the report for the band */
+#define N60_CORRECT_ERR_TIMING (-7)     /* the problem has no inter-channel timing (E11 tier 3): blocked */
 
 /* Longest FIR the designer returns; equal to the legacy convolver limit. */
 #define N60_CORRECT_MAX_TAPS 262144u
@@ -260,6 +261,111 @@ int32_t n60_correct_design_channel_taps(const n60_correct_problem *problem, uint
                                         const n60_correct_design_params *design,
                                         const n60_correct_synth_params *synth, float *taps, uint64_t capacity,
                                         n60_correct_channel_report *report);
+
+/* ---- 5. Joint bass optimiser (E10 S6, design note 7) ----
+ *
+ * Offline, deterministic (fixed summation order, fixed starts, no threads or randomness, so bit-identical across
+ * runs on one build). The problem is the same n60_correct_problem: every channel (mains and subwoofers) measured at
+ * every seat in one time reference, so the inter-channel delay is in the data. The model of the system at seat k is
+ *
+ *     Y_k(f) = sum_n A_n(f) X_n(f) H_kn(f),   A_n(f) = C_n(f) 10^(g_n/20) (+1 or -1) e^(-j 2 pi f d_n)
+ *
+ * where C_n is the analytic BASS_MGMT crossover response (Linkwitz-Riley 4: high-pass for a main, low-pass for a sub,
+ * for one mono bass signal of unit level; the bass-sum normalisation of the sub lane is applied by the caller that
+ * publishes the gains), d_n the channel delay, g_n its gain, and X_n the channel's low-frequency correction on the
+ * correction grid (unity outside the correction band). Two steps:
+ *   (i)  delay, gain and polarity of every channel with a free degree of freedom: a grid search by coordinate descent
+ *        from fixed starts, then Levenberg-Marquardt polish of the continuous delays and gains, on the log-magnitude
+ *        spread of the seat responses across the fit band;
+ *   (ii) per bin, the weighted regularised least squares  min sum_k w_k |sum_n B_kn X_n - T_k|^2 + lambda sum_n
+ *        |X_n - 1|^2  (regularised towards unity, so a channel that cannot help keeps its response), with |X_n| capped
+ *        at the boost limit (active set, fixed order). T_k is the target level (the shared target curve at the fitted
+ *        mean level) with each seat's own phase, refined by reweighting the seats by 1/|Y_k|^2 so the error follows the
+ *        log magnitude; a regularisation ladder is tried and a candidate is kept only if it beats unity. The solved
+ *        filters are smoothed over +-3 bins (a sixteenth of an octave) so they fit a latency budget, then given a
+ *        third-octave raised-cosine transition to unity at the edges of the correction band.
+ * The result corrects magnitude and cancellation between channels, not an invented phase.
+ * The output is static: filters (as correction-grid designs for n60_correct_synthesize), delays, gains and
+ * polarities. It is not active decay cancellation.
+ */
+#define N60_CORRECT_MAX_BASS_CHANNELS 16u
+#define N60_CORRECT_BASS_ROLE_MAIN 0u
+#define N60_CORRECT_BASS_ROLE_SUB 1u
+/* Timing tiers recorded by E11 (same values as N60_MEASURE_TIMING_*). Tier 3 blocks the design. */
+#define N60_CORRECT_TIMING_LOOPBACK 1u
+#define N60_CORRECT_TIMING_ACOUSTIC 2u
+#define N60_CORRECT_TIMING_NONE 3u
+
+typedef struct n60_correct_bass_channel {
+    uint32_t role;           /* N60_CORRECT_BASS_ROLE_* */
+    uint32_t free_delay;     /* 1: the optimiser may set the delay */
+    uint32_t free_gain;      /* 1: it may set the gain */
+    uint32_t free_polarity;  /* 1: it may invert the polarity */
+    double min_gain_db;      /* gain range when free */
+    double max_gain_db;
+} n60_correct_bass_channel;
+
+/* A sub: all three free, gain -12 .. +6 dB. A main: delay free; gain and polarity fixed at 0 dB and normal. */
+void n60_correct_bass_channel_defaults(uint32_t role, n60_correct_bass_channel *channel);
+
+typedef struct n60_correct_bass_params {
+    uint32_t struct_size;
+    uint32_t timing_tier;          /* N60_CORRECT_TIMING_*; NONE returns N60_CORRECT_ERR_TIMING */
+    const n60_correct_bass_channel *channels; /* channel_count entries; required */
+    double crossover_hz;           /* the BASS_MGMT crossover; 80 */
+    double fit_low_hz;             /* 20 */
+    double fit_high_hz;            /* the step (i) fit band and the report band end; 0: 1.5 * crossover_hz */
+    double fir_high_hz;            /* the correction (filter) band end; 0: 2 * crossover_hz (crossover + 1 octave) */
+    double max_delay_seconds;      /* 0.02 */
+    double max_boost_db;           /* 6: cap on |X_n| */
+    double regularisation;         /* lambda relative to the mean channel power; 0.01 */
+    double ir_seconds;             /* use only this much of every IR (half-Hann fade over the last quarter); 0: all */
+    const double *target_frequencies_hz; /* shared target (dB, log-frequency interpolation); NULL: flat */
+    const double *target_gain_db;
+    uint32_t target_points;
+} n60_correct_bass_params;
+
+void n60_correct_bass_defaults(const n60_correct_bass_channel *channels, n60_correct_bass_params *params);
+
+typedef struct n60_correct_bass_channel_result {
+    double delay_seconds;     /* the delay actually deployed: delay_frames / sample_rate; the earliest channel is 0 */
+    uint32_t delay_frames;
+    double gain_db;
+    uint32_t polarity_invert; /* 0 normal, 1 inverted */
+    double peak_boost_db;     /* largest boost of the low-frequency filter X_n (<= max_boost_db) */
+    double peak_gain_db;      /* largest of the channel's gain plus the filter's boost, per grid point */
+    double headroom_db;       /* max(0, peak_gain_db): attenuation needed so this channel cannot clip */
+} n60_correct_bass_channel_result;
+
+typedef struct n60_correct_bass_report {
+    uint32_t channel_count;
+    uint32_t seat_count;
+    /* Seat-to-seat standard deviation of the level in dB, averaged over the grid points of the fit band: the
+     * uncorrected system (no delay, gain 0 dB, normal polarity, X = 1), after step (i), and after step (ii). */
+    double seat_std_before_db;
+    double seat_std_aligned_db;
+    double seat_std_after_db;
+    /* RMS deviation of the seat levels from the target (mean level removed), same three stages. */
+    double target_rms_before_db;
+    double target_rms_after_db;
+    double reference_level_db;     /* the fitted mean level the target is placed at */
+    double headroom_db;            /* the largest channel headroom */
+    uint32_t boost_limited_bins;   /* grid points where the boost cap was active on any channel */
+    n60_correct_bass_channel_result channels[N60_CORRECT_MAX_BASS_CHANNELS];
+} n60_correct_bass_report;
+
+/*
+ * Optimises the bass of every channel jointly. `grids` holds channel_count designs whose correction_db and
+ * correction_phase_rad arrays (GRID_POINTS values) are written (the phase is the extra phase of
+ * n60_correct_synthesize: the filter's phase less the minimum phase of its magnitude, unwrapped); the other
+ * arrays may be NULL and are set to 0 (boost_limit_db: the cap). `before_db` / `after_db` are
+ * optional (seat_count * GRID_POINTS values, seat-major, absolute level in dB) predicted seat responses of the
+ * uncorrected and the optimised system. Errors: ERR_TIMING (tier NONE), ERR_ARGUMENT, ERR_NONFINITE, ERR_ALLOC.
+ * main_seat is not used: seats are weighted only by their weights.
+ */
+int32_t n60_correct_bass_optimise(const n60_correct_problem *problem, const n60_correct_bass_params *params,
+                                  n60_correct_design_grid *grids, n60_correct_bass_report *report,
+                                  double *before_db, double *after_db);
 
 #ifdef __cplusplus
 }
