@@ -64,6 +64,7 @@
 		E10A00000000000000000021 /* minphase.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E10A00000000000000000011 /* minphase.cpp */; };
 		E10A00000000000000000022 /* design.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E10A00000000000000000012 /* design.cpp */; };
 		E10A00000000000000000023 /* synth.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E10A00000000000000000013 /* synth.cpp */; };
+		E10A00000000000000000024 /* bass.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E10A00000000000000000014 /* bass.cpp */; };
 		E10A00000000000000000031 /* RoomCorrectionCore.swift in Sources */ = {isa = PBXBuildFile; fileRef = E10A00000000000000000041 /* RoomCorrectionCore.swift */; };
 		E10A00000000000000000032 /* RoomCorrectionCoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E10A00000000000000000042 /* RoomCorrectionCoreTests.swift */; };
 		E11D00000000000000000001 /* MeasurementCore.swift in Sources */ = {isa = PBXBuildFile; fileRef = E11D00000000000000000011 /* MeasurementCore.swift */; };
@@ -482,6 +483,7 @@
 		E10A00000000000000000011 /* minphase.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = correct/minphase.cpp; sourceTree = "<group>"; };
 		E10A00000000000000000012 /* design.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = correct/design.cpp; sourceTree = "<group>"; };
 		E10A00000000000000000013 /* synth.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = correct/synth.cpp; sourceTree = "<group>"; };
+		E10A00000000000000000014 /* bass.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = correct/bass.cpp; sourceTree = "<group>"; };
 		E10A00000000000000000041 /* RoomCorrectionCore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomCorrectionCore.swift; sourceTree = "<group>"; };
 		E10A00000000000000000042 /* RoomCorrectionCoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomCorrectionCoreTests.swift; sourceTree = "<group>"; };
 		E11D00000000000000000011 /* MeasurementCore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeasurementCore.swift; sourceTree = "<group>"; };
@@ -901,6 +903,7 @@
 				E10A00000000000000000011 /* minphase.cpp */,
 				E10A00000000000000000012 /* design.cpp */,
 				E10A00000000000000000013 /* synth.cpp */,
+				E10A00000000000000000014 /* bass.cpp */,
 				E11C0000000000000000001C /* spl.cpp */,
 				E11C0000000000000000001B /* monitor_ring.cpp */,
 				E11C00000000000000000020 /* offline_fft.hpp */,
@@ -1402,6 +1405,7 @@
 				E10A00000000000000000021 /* minphase.cpp in Sources */,
 				E10A00000000000000000022 /* design.cpp in Sources */,
 				E10A00000000000000000023 /* synth.cpp in Sources */,
+				E10A00000000000000000024 /* bass.cpp in Sources */,
 				E11C0000000000000000003B /* spl.cpp in Sources */,
 				E11C0000000000000000003A /* monitor_ring.cpp in Sources */,
 				A10000000000000000000011 /* ContentView.swift in Sources */,
