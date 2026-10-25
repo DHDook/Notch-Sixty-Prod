@@ -6,8 +6,23 @@ struct MultichannelCalibrationCapture: Equatable, Sendable {
     /// Optional simultaneous second input captured on the exact same IOProc
     /// timeline. PR106 uses this for an electrical/shared-time reference.
     var referenceSamples: [Float]? = nil
+    /// E11 S9b: captures of every seat after the first (`additionalSeats` order), same length and
+    /// timeline as `samples`. Empty for the ordinary one-microphone pass.
+    var seatSamples: [[Float]] = []
 }
 
+/// E11 S9b: one more microphone channel captured in the same pass.
+struct MultichannelSeatInput: Equatable, Sendable {
+    var device: AudioInputDevice
+    var channelIndex: Int
+}
+
+/// E11 S9b: second output program (the acoustic timing chirp) played on its own output channel.
+struct MultichannelReferenceProgram: Equatable, Sendable {
+    var samples: [Float]
+    var startFrame: Int
+    var outputChannelIndex: UInt32
+}
 enum MultichannelCalibrationTransportError: Error, Equatable, LocalizedError {
     case outputDeviceUnavailable(String)
     case invalidInputChannel(index: Int, availableChannels: Int)
@@ -16,6 +31,7 @@ enum MultichannelCalibrationTransportError: Error, Equatable, LocalizedError {
     case unsupportedPCMFormat(role: String, format: AudioStreamFormatDescription)
     case frameCountOverflow
     case invalidOutputProgram
+    case invalidSeatPlan
     case bridgeAllocationFailed
     case ioProcUnavailable
     case closed
@@ -39,6 +55,8 @@ enum MultichannelCalibrationTransportError: Error, Equatable, LocalizedError {
             return "The calibration sweep exceeds the bounded targeted measurement transport."
         case .invalidOutputProgram:
             return "The targeted measurement output program is empty, non-finite, or otherwise invalid."
+        case .invalidSeatPlan:
+            return "The seat list repeats a microphone channel or exceeds 16 seats."
         case .bridgeAllocationFailed:
             return "Unable to allocate the precomputed targeted measurement bridge."
         case .ioProcUnavailable:
@@ -67,7 +85,13 @@ final class MultichannelCalibrationTransport {
     let referenceInputChannelIndex: Int?
     let program: RoomCorrectionSweepProgram
     let physicalOutputChannelIndex: UInt32
-
+    /// E11 S9b: seats after the first; empty for the ordinary one-microphone pass.
+    let additionalSeats: [MultichannelSeatInput]
+    let referenceProgram: MultichannelReferenceProgram?
+    /// E11 S9b: true when every seat is a channel of one device (one clock).
+    var isSharedClock: Bool {
+        additionalSeats.allSatisfy { $0.device.deviceID == input.deviceID }
+    }
     /// Optional control-plane pre-rendered output. Ordinary calibration uses
     /// program.sweepSamples unchanged; protected-driver Lab acquisition may
     /// supply a longer crossover/limiter-rendered waveform while analysis
@@ -90,8 +114,21 @@ final class MultichannelCalibrationTransport {
         referenceInputChannelIndex: Int? = nil,
         program: RoomCorrectionSweepProgram,
         physicalOutputChannelIndex: UInt32,
-        outputSweepSamples: [Float]? = nil
+        outputSweepSamples: [Float]? = nil,
+        additionalSeats: [MultichannelSeatInput] = [],
+        referenceProgram: MultichannelReferenceProgram? = nil
     ) throws {
+        var seen: Set<String> = ["\(input.deviceID):\(inputChannelIndex)"]
+        for seat in additionalSeats {
+            guard seen.insert("\(seat.device.deviceID):\(seat.channelIndex)").inserted else {
+                throw MultichannelCalibrationTransportError.invalidSeatPlan
+            }
+        }
+        guard additionalSeats.count <= 15 else {
+            throw MultichannelCalibrationTransportError.invalidSeatPlan
+        }
+        self.additionalSeats = additionalSeats
+        self.referenceProgram = referenceProgram
         self.routePlan = routePlan
         self.input = input
         self.selectedInputChannelIndex = inputChannelIndex
@@ -200,10 +237,28 @@ final class MultichannelCalibrationTransport {
             }
             referenceSamples = reference
         }
+        var seatSamples: [[Float]] = []
+        for index in 0..<additionalSeats.count {
+            var seat = [Float](repeating: 0, count: frameCount)
+            let seatCopied = seat.withUnsafeMutableBufferPointer { buffer in
+                N60TargetedRoomMeasurementBridgeCopyExtraCapture(
+                    bridge,
+                    UInt32(index),
+                    buffer.baseAddress!,
+                    UInt32(buffer.count)
+                )
+            }
+            guard seatCopied == UInt32(frameCount) else {
+                close()
+                throw MultichannelCalibrationTransportError.incompleteCapture
+            }
+            seatSamples.append(seat)
+        }
         close()
         return MultichannelCalibrationCapture(
             samples: samples,
-            referenceSamples: referenceSamples
+            referenceSamples: referenceSamples,
+            seatSamples: seatSamples
         )
     }
 
@@ -278,9 +333,37 @@ final class MultichannelCalibrationTransport {
             }
         }
 
-        let useDirectDevice = orderedOutputs.count == 1 && input.deviceID == orderedOutputs[0].deviceID
+        var movedDevices: Set<AudioDeviceID> = [input.deviceID]
+        for seat in additionalSeats where movedDevices.insert(seat.device.deviceID).inserted {
+            let channels = try Self.readChannelCount(
+                deviceID: seat.device.deviceID,
+                scope: kAudioObjectPropertyScopeInput,
+                operation: "read seat microphone channel count"
+            )
+            guard seat.channelIndex >= 0, seat.channelIndex < channels else {
+                throw MultichannelCalibrationTransportError.invalidInputChannel(
+                    index: seat.channelIndex,
+                    availableChannels: channels
+                )
+            }
+            if !orderedOutputs.contains(where: { $0.deviceID == seat.device.deviceID }) {
+                try ensureSampleRate(seat.device.deviceID, expected: sampleRate, role: "seat microphone \(seat.device.name)")
+            }
+        }
+        for seat in additionalSeats where seat.device.deviceID == input.deviceID {
+            guard seat.channelIndex >= 0, seat.channelIndex < physicalInputChannelCount else {
+                throw MultichannelCalibrationTransportError.invalidInputChannel(
+                    index: seat.channelIndex,
+                    availableChannels: physicalInputChannelCount
+                )
+            }
+        }
+        let useDirectDevice = orderedOutputs.count == 1
+            && input.deviceID == orderedOutputs[0].deviceID
+            && additionalSeats.allSatisfy { $0.device.deviceID == input.deviceID }
         let aggregateInputChannel: Int
         let aggregateReferenceInputChannel: Int?
+        var aggregateSeatChannels: [Int] = additionalSeats.map(\.channelIndex)
         if useDirectDevice {
             calibrationDeviceID = orderedOutputs[0].deviceID
             aggregateInputChannel = selectedInputChannelIndex
@@ -294,6 +377,7 @@ final class MultichannelCalibrationTransport {
             calibrationDeviceID = aggregate.deviceID
             aggregateInputChannel = aggregate.inputChannelIndex
             aggregateReferenceInputChannel = aggregate.referenceInputChannelIndex
+            aggregateSeatChannels = aggregate.seatChannelIndices
         }
 
         let inputChannelCount = try Self.readChannelCount(
@@ -313,6 +397,14 @@ final class MultichannelCalibrationTransport {
                   aggregateReferenceInputChannel != aggregateInputChannel else {
                 throw MultichannelCalibrationTransportError.invalidInputChannel(
                     index: aggregateReferenceInputChannel,
+                    availableChannels: inputChannelCount
+                )
+            }
+        }
+        for channel in aggregateSeatChannels {
+            guard channel >= 0, channel < inputChannelCount else {
+                throw MultichannelCalibrationTransportError.invalidInputChannel(
+                    index: channel,
                     availableChannels: inputChannelCount
                 )
             }
@@ -352,7 +444,28 @@ final class MultichannelCalibrationTransport {
         let leadInFrames = try Self.checkedUInt32(program.leadInFrames)
         let tailFrames = try Self.checkedUInt32(program.tailFrames)
         let inputChannel = try Self.checkedUInt32(aggregateInputChannel)
+        // The K-seat bridge has no shared-time reference input; refuse rather than drop it silently.
+        guard additionalSeats.isEmpty || aggregateReferenceInputChannel == nil else {
+            throw MultichannelCalibrationTransportError.invalidSeatPlan
+        }
+        var seatChannels: [UInt32] = [inputChannel]
+        for channel in aggregateSeatChannels {
+            seatChannels.append(try Self.checkedUInt32(channel))
+        }
         bridge = outputSweepSamples.withUnsafeBufferPointer { buffer in
+            if seatChannels.count > 1 {
+                return seatChannels.withUnsafeBufferPointer { channels in
+                    N60TargetedRoomMeasurementBridgeCreateMultiInput(
+                        buffer.baseAddress!,
+                        sweepFrames,
+                        leadInFrames,
+                        tailFrames,
+                        channels.baseAddress!,
+                        UInt32(channels.count),
+                        physicalOutputChannelIndex
+                    )
+                }
+            }
             if let aggregateReferenceInputChannel,
                let referenceChannel = try? Self.checkedUInt32(
                    aggregateReferenceInputChannel
@@ -378,6 +491,20 @@ final class MultichannelCalibrationTransport {
         }
         guard let bridge else {
             throw MultichannelCalibrationTransportError.bridgeAllocationFailed
+        }
+        if let referenceProgram {
+            let attached = referenceProgram.samples.withUnsafeBufferPointer { buffer -> Bool in
+                guard let base = buffer.baseAddress,
+                      let start = try? Self.checkedUInt32(referenceProgram.startFrame),
+                      let count = try? Self.checkedUInt32(buffer.count),
+                      referenceProgram.samples.allSatisfy(\.isFinite) else { return false }
+                return N60TargetedRoomMeasurementBridgeAttachReferenceProgram(
+                    bridge, base, count, start, referenceProgram.outputChannelIndex)
+            }
+            guard attached,
+                  referenceProgram.outputChannelIndex < UInt32(outputChannelCount) else {
+                throw MultichannelCalibrationTransportError.invalidOutputProgram
+            }
         }
         let expectedCaptureFrames = program.leadInFrames
             + outputSweepSamples.count
@@ -432,14 +559,17 @@ final class MultichannelCalibrationTransport {
     ) throws -> (
         deviceID: AudioDeviceID,
         inputChannelIndex: Int,
-        referenceInputChannelIndex: Int?
+        referenceInputChannelIndex: Int?,
+        seatChannelIndices: [Int]
     ) {
         var subdevices: [[String: Any]] = []
         var aggregateInputOffset = 0
         var resolvedInputChannel: Int?
         var resolvedReferenceInputChannel: Int?
 
+        var deviceOffsets: [AudioDeviceID: Int] = [:]
         for output in orderedOutputs {
+            deviceOffsets[output.deviceID] = aggregateInputOffset
             if output.deviceID == input.deviceID {
                 resolvedInputChannel =
                     aggregateInputOffset + selectedInputChannelIndex
@@ -461,6 +591,7 @@ final class MultichannelCalibrationTransport {
         }
 
         if !orderedOutputs.contains(where: { $0.deviceID == input.deviceID }) {
+            deviceOffsets[input.deviceID] = aggregateInputOffset
             resolvedInputChannel =
                 aggregateInputOffset + selectedInputChannelIndex
             if let referenceInputChannelIndex {
@@ -471,6 +602,27 @@ final class MultichannelCalibrationTransport {
                 kAudioSubDeviceUIDKey: input.uid,
                 kAudioSubDeviceDriftCompensationKey: true,
             ])
+            aggregateInputOffset += (try Self.readChannelCount(
+                deviceID: input.deviceID,
+                scope: kAudioObjectPropertyScopeInput,
+                operation: "read measurement microphone input channel count"
+            ))
+        }
+        // E11 S9b: every further seat device joins the private aggregate once, drift compensated.
+        for seat in additionalSeats where deviceOffsets[seat.device.deviceID] == nil {
+            deviceOffsets[seat.device.deviceID] = aggregateInputOffset
+            subdevices.append([
+                kAudioSubDeviceUIDKey: seat.device.uid,
+                kAudioSubDeviceDriftCompensationKey: true,
+            ])
+            aggregateInputOffset += (try Self.readChannelCount(
+                deviceID: seat.device.deviceID,
+                scope: kAudioObjectPropertyScopeInput,
+                operation: "read seat microphone input channel count"
+            ))
+        }
+        let resolvedSeatChannels = additionalSeats.map {
+            (deviceOffsets[$0.device.deviceID] ?? 0) + $0.channelIndex
         }
         guard let resolvedInputChannel else {
             throw MultichannelCalibrationTransportError.invalidInputChannel(
@@ -522,7 +674,8 @@ final class MultichannelCalibrationTransport {
         return (
             deviceID,
             resolvedInputChannel,
-            resolvedReferenceInputChannel
+            resolvedReferenceInputChannel,
+            resolvedSeatChannels
         )
     }
 

@@ -8,6 +8,9 @@
 
 /* Begin PBXBuildFile section */
 		E11F0000000000000000000A /* MeasurementMultiMic.swift in Sources */ = {isa = PBXBuildFile; fileRef = E11F0000000000000000000B /* MeasurementMultiMic.swift */; };
+		E11F00000000000000000014 /* MeasurementSeatPlanTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E11F00000000000000000015 /* MeasurementSeatPlanTests.swift */; };
+		E11F00000000000000000012 /* MeasurementSeatPickerCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = E11F00000000000000000013 /* MeasurementSeatPickerCard.swift */; };
+		E11F00000000000000000010 /* MeasurementSeatPlan.swift in Sources */ = {isa = PBXBuildFile; fileRef = E11F00000000000000000011 /* MeasurementSeatPlan.swift */; };
 		E11F0000000000000000000C /* MeasurementMultiMicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E11F0000000000000000000D /* MeasurementMultiMicTests.swift */; };
 		E11E0000000000000000000D /* MeasurementLiveAnalysisTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E11E0000000000000000000C /* MeasurementLiveAnalysisTests.swift */; };
 		E11E00000000000000000009 /* N60MeasurementMonitorProc.c in Sources */ = {isa = PBXBuildFile; fileRef = E11E00000000000000000008 /* N60MeasurementMonitorProc.c */; };
@@ -410,6 +413,9 @@
 
 /* Begin PBXFileReference section */
 		E11F0000000000000000000B /* MeasurementMultiMic.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeasurementMultiMic.swift; sourceTree = "<group>"; };
+		E11F00000000000000000015 /* MeasurementSeatPlanTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeasurementSeatPlanTests.swift; sourceTree = "<group>"; };
+		E11F00000000000000000013 /* MeasurementSeatPickerCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeasurementSeatPickerCard.swift; sourceTree = "<group>"; };
+		E11F00000000000000000011 /* MeasurementSeatPlan.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeasurementSeatPlan.swift; sourceTree = "<group>"; };
 		E11F0000000000000000000D /* MeasurementMultiMicTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeasurementMultiMicTests.swift; sourceTree = "<group>"; };
 		E11E0000000000000000000C /* MeasurementLiveAnalysisTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeasurementLiveAnalysisTests.swift; sourceTree = "<group>"; };
 		E11E0000000000000000000A /* N60MeasurementMonitorProc.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = N60MeasurementMonitorProc.h; sourceTree = "<group>"; };
@@ -948,6 +954,7 @@
 				E11D00000000000000000012 /* MeasurementCoreTests.swift */,
 				E11E0000000000000000000C /* MeasurementLiveAnalysisTests.swift */,
 				E11F0000000000000000000D /* MeasurementMultiMicTests.swift */,
+				E11F00000000000000000015 /* MeasurementSeatPlanTests.swift */,
 				E11D00000000000000000033 /* MeasurementAnalysisViewsTests.swift */,
 				E11D00000000000000000053 /* MeasurementLibraryTests.swift */,
 				E11D00000000000000000085 /* SignalGeneratorSettingsTests.swift */,
@@ -1148,6 +1155,7 @@
 				E11D00000000000000000011 /* MeasurementCore.swift */,
 				E11E00000000000000000002 /* MeasurementLiveAnalysis.swift */,
 				E11F0000000000000000000B /* MeasurementMultiMic.swift */,
+				E11F00000000000000000011 /* MeasurementSeatPlan.swift */,
 				E11E00000000000000000004 /* MeasurementInputMonitor.swift */,
 				E11D00000000000000000031 /* MeasurementGatedPlot.swift */,
 				E11D00000000000000000051 /* MeasurementLibrary.swift */,
@@ -1277,7 +1285,7 @@
 			path = Realtime;
 			sourceTree = "<group>";
 		};
-		A40000000000000000000050 /* UI */ = {isa = PBXGroup; children = (A40000000000000000000020 /* ProductionRootView.swift */, A40000000000000000000021 /* ProductionEqualizerView.swift */, A40000000000000000000022 /* ProductionDynamicsView.swift */, A40000000000000000000023 /* ProductionDynamicsTelemetryView.swift */, A40000000000000000000024 /* ProductionMetersView.swift */, A40000000000000000000025 /* ProductionAnalysisViews.swift */, A40000000000000000000026 /* ProductionProfileToolbar.swift */, F65000000000000000000015 /* ProductionHeadphoneWorkspace.swift */, B40000000000000000000012 /* ProductionBlindListeningWorkspace.swift */, B50000000000000000000013 /* ProductionOptionalAudioResearchWorkspace.swift */, F64000000000000000000015 /* ProductionMultichannelCalibrationWorkspace.swift */, F10600000000000000000035 /* ProductionSpeakerMeasurementLabWorkspace.swift */, E11D00000000000000000032 /* MeasurementAnalysisViews.swift */, E11D00000000000000000052 /* MeasurementLibraryView.swift */, E11E00000000000000000006 /* MeasurementRTASPLCard.swift */, E11D00000000000000000081 /* MeasurementGeneratorCard.swift */, A40000000000000000000027 /* ProductionRoomCorrectionWorkspace.swift */, F78000000000000000000011 /* ProductionActiveAcousticsWorkspace.swift */, F92000000000000000000013 /* ProductionRoomTreatmentAdvisorWorkspace.swift */, F96000000000000000000013 /* ProductionFeedForwardReadinessCard.swift */, E4D000000000000000000012 /* ProductionAdaptiveQuietZoneCard.swift */, E4F200000000000000000014 /* ProductionFeedForwardDesignSurveyCard.swift */, E4F300000000000000000013 /* ProductionFeedForwardShadowCard.swift */, F93000000000000000000012 /* ProductionRoomGeometrySection.swift */, F94000000000000000000013 /* ProductionRoomTreatmentDesignSection.swift */, F78000000000000000000012 /* ProductionPluginWorkspace.swift */, F112A0000000000000000013 /* ProductionHardwareAcceptanceWorkspace.swift */, F11300000000000000000011 /* ProductionUserGuideView.swift */,); path = UI; sourceTree = "<group>"; };
+		A40000000000000000000050 /* UI */ = {isa = PBXGroup; children = (A40000000000000000000020 /* ProductionRootView.swift */, A40000000000000000000021 /* ProductionEqualizerView.swift */, A40000000000000000000022 /* ProductionDynamicsView.swift */, A40000000000000000000023 /* ProductionDynamicsTelemetryView.swift */, A40000000000000000000024 /* ProductionMetersView.swift */, A40000000000000000000025 /* ProductionAnalysisViews.swift */, A40000000000000000000026 /* ProductionProfileToolbar.swift */, F65000000000000000000015 /* ProductionHeadphoneWorkspace.swift */, B40000000000000000000012 /* ProductionBlindListeningWorkspace.swift */, B50000000000000000000013 /* ProductionOptionalAudioResearchWorkspace.swift */, F64000000000000000000015 /* ProductionMultichannelCalibrationWorkspace.swift */, F10600000000000000000035 /* ProductionSpeakerMeasurementLabWorkspace.swift */, E11D00000000000000000032 /* MeasurementAnalysisViews.swift */, E11D00000000000000000052 /* MeasurementLibraryView.swift */, E11E00000000000000000006 /* MeasurementRTASPLCard.swift */, E11D00000000000000000081 /* MeasurementGeneratorCard.swift */, E11F00000000000000000013 /* MeasurementSeatPickerCard.swift */, A40000000000000000000027 /* ProductionRoomCorrectionWorkspace.swift */, F78000000000000000000011 /* ProductionActiveAcousticsWorkspace.swift */, F92000000000000000000013 /* ProductionRoomTreatmentAdvisorWorkspace.swift */, F96000000000000000000013 /* ProductionFeedForwardReadinessCard.swift */, E4D000000000000000000012 /* ProductionAdaptiveQuietZoneCard.swift */, E4F200000000000000000014 /* ProductionFeedForwardDesignSurveyCard.swift */, E4F300000000000000000013 /* ProductionFeedForwardShadowCard.swift */, F93000000000000000000012 /* ProductionRoomGeometrySection.swift */, F94000000000000000000013 /* ProductionRoomTreatmentDesignSection.swift */, F78000000000000000000012 /* ProductionPluginWorkspace.swift */, F112A0000000000000000013 /* ProductionHardwareAcceptanceWorkspace.swift */, F11300000000000000000011 /* ProductionUserGuideView.swift */,); path = UI; sourceTree = "<group>"; };
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -1466,6 +1474,8 @@
 				E11D00000000000000000001 /* MeasurementCore.swift in Sources */,
 				E11E00000000000000000003 /* MeasurementLiveAnalysis.swift in Sources */,
 				E11F0000000000000000000A /* MeasurementMultiMic.swift in Sources */,
+				E11F00000000000000000010 /* MeasurementSeatPlan.swift in Sources */,
+				E11F00000000000000000012 /* MeasurementSeatPickerCard.swift in Sources */,
 				E11E00000000000000000005 /* MeasurementInputMonitor.swift in Sources */,
 				E11E00000000000000000007 /* MeasurementRTASPLCard.swift in Sources */,
 				E11E00000000000000000009 /* N60MeasurementMonitorProc.c in Sources */,
@@ -1608,6 +1618,7 @@
 				E11D00000000000000000002 /* MeasurementCoreTests.swift in Sources */,
 				E11E0000000000000000000D /* MeasurementLiveAnalysisTests.swift in Sources */,
 				E11F0000000000000000000C /* MeasurementMultiMicTests.swift in Sources */,
+				E11F00000000000000000014 /* MeasurementSeatPlanTests.swift in Sources */,
 				E11D00000000000000000023 /* MeasurementAnalysisViewsTests.swift in Sources */,
 				E11D00000000000000000043 /* MeasurementLibraryTests.swift in Sources */,
 				E11D00000000000000000084 /* SignalGeneratorSettingsTests.swift in Sources */,
