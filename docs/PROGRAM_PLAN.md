@@ -239,7 +239,7 @@ minimum-phase in blind ABX at three or more seats, and measurement results match
 - [x] Waterfall / CSD and spectrogram from the existing impulse response
 - [x] Harmonic distortion (H2–H5) from the log sweep's negative-time impulses
 - [x] RT60 and EDT per octave and third-octave band
-- [ ] Simultaneous multi-microphone capture to speed up multi-seat measurement
+- [x] Simultaneous multi-microphone capture to speed up multi-seat measurement
   - [x] S9a processing: one record per seat from K simultaneous captures (shared-clock and separate-USB modes); K-input transport and seat picker in S9b
 - [x] Measurement management: overlays, groups, notes, A/B against a reference
 - [x] Quasi-anechoic (gated) speaker response view in the Measurement Lab's Advanced tab, using the existing analyser (`SpeakerMeasurementLabQuasiAnechoic.swift`; from E5)

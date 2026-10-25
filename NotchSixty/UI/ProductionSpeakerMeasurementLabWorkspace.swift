@@ -49,6 +49,7 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
     @State private var referenceMinimumSNRDB = 35.0
     @State private var recentSessions: [SpeakerMeasurementLabSession] = []
     @State private var actionError: String?
+    @State private var seatPlan = MeasurementSeatPlan()
     @State private var exportDocument: SpeakerMeasurementLabExportDocument?
     @State private var exportContentType: UTType = .json
     @State private var exportFilename = "notch-sixty-speaker-lab"
@@ -99,6 +100,7 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
                     if featureFlags.isEnabled(.measurementSuite) {
                         MeasurementRTASPLCard(microphone: microphone)
                         MeasurementGeneratorCard()
+                        MeasurementSeatPickerCard(microphone: microphone, plan: $seatPlan)
                         MeasurementAnalysisCard(capture: lab.session?.captures.last)
                         MeasurementLibraryView(
                             latestCapture: lab.session?.captures.last, projects: roomCorrectionProjects)

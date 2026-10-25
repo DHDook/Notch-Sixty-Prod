@@ -87,6 +87,62 @@ int main(void) {
     CHECK(cap[10] == input[10 * kIn + 1] && ref[kFrames - 1] == input[(kFrames - 1) * kIn + 3], "inputs on one timeline");
     N60TargetedRoomMeasurementBridgeDestroy(b);
 
+    /* E11 S9b: K simultaneous inputs on one timeline, allocation-free, with the chirp output too. */
+    {
+        const uint32_t chans[4] = {1u, 2u, 5u, 6u};
+        enum { kInK = 8 };
+        CHECK(N60TargetedRoomMeasurementBridgeCreateMultiInput(sweep, kSweep, kLead, kTail, chans, 0u, 0u) == NULL, "zero inputs rejected");
+        const uint32_t dup[3] = {1u, 2u, 1u};
+        CHECK(N60TargetedRoomMeasurementBridgeCreateMultiInput(sweep, kSweep, kLead, kTail, dup, 3u, 0u) == NULL, "duplicate channel rejected");
+        uint32_t many[17];
+        for (uint32_t i = 0; i < 17u; ++i) many[i] = i;
+        CHECK(N60TargetedRoomMeasurementBridgeCreateMultiInput(sweep, kSweep, kLead, kTail, many, 17u, 20u) == NULL, "17 inputs rejected");
+        b = N60TargetedRoomMeasurementBridgeCreateMultiInput(sweep, kSweep, kLead, kTail, chans, 4u, 0u);
+        CHECK(b != NULL, "create multi");
+        CHECK(N60TargetedRoomMeasurementBridgeAttachReferenceProgram(b, chirp, kChirp, kChirpStart, 2u), "attach with multi");
+        static float in8[kFrames * kInK];
+        for (int i = 0; i < kFrames; ++i)
+            for (int c = 0; c < kInK; ++c) in8[i * kInK + c] = (float)(c + 1) + 0.0001f * (float)i;
+        memset(output, 0x55, sizeof output);
+        armed = 1;
+        allocations = 0;
+        done = 0;
+        blockIndex = 0;
+        while (done < kFrames) {
+            uint32_t n = blocks[blockIndex++ % 5];
+            if (n > kFrames - done) n = kFrames - done;
+            const float *extras[3] = {in8 + done * kInK + 2, in8 + done * kInK + 5, in8 + done * kInK + 6};
+            const uint32_t strides[3] = {kInK, kInK, kInK};
+            uint32_t consumed = N60TargetedRoomMeasurementProcessSeatsStrided(
+                b, in8 + done * kInK + 1, kInK, NULL, 0u, extras, strides,
+                output + done * kOut, kOut, output + done * kOut + 2, kOut, n);
+            CHECK(consumed == n, "multi consumed %u of %u", consumed, n);
+            snap = N60TargetedRoomMeasurementBridgeGetSnapshot(b);
+            CHECK(snap.complete == (done + n == kFrames), "complete only when every seat is full");
+            done += n;
+        }
+        armed = 0;
+        CHECK(allocations == 0, "multi process allocated or freed %ld time(s)", allocations);
+        snap = N60TargetedRoomMeasurementBridgeGetSnapshot(b);
+        CHECK(snap.extraInputCount == 3u && snap.extraCapturedFramesMin == kFrames, "extra counts");
+        static float seat[kFrames];
+        const int srcCol[4] = {1, 2, 5, 6};
+        CHECK(N60TargetedRoomMeasurementBridgeCopyCapture(b, seat, kFrames) == kFrames, "seat 0");
+        CHECK(seat[17] == in8[17 * kInK + 1], "seat 0 matches");
+        for (uint32_t k = 0; k < 3u; ++k) {
+            CHECK(N60TargetedRoomMeasurementBridgeCopyExtraCapture(b, k, seat, kFrames) == kFrames, "extra %u", k);
+            int wrong = 0;
+            for (int i = 0; i < kFrames; ++i) if (seat[i] != in8[i * kInK + srcCol[k + 1]]) wrong++;
+            CHECK(wrong == 0, "extra seat %u: %d wrong frame(s)", k, wrong);
+        }
+        CHECK(N60TargetedRoomMeasurementBridgeCopyExtraCapture(b, 3u, seat, kFrames) == 0u, "no fourth extra");
+        /* A short extra seat keeps the pass incomplete; reset clears it for a repeat. */
+        N60TargetedRoomMeasurementBridgeReset(b);
+        snap = N60TargetedRoomMeasurementBridgeGetSnapshot(b);
+        CHECK(!snap.complete && snap.extraCapturedFramesMin == 0u, "reset clears extras");
+        N60TargetedRoomMeasurementBridgeDestroy(b);
+    }
+
     /* Without a program the bridge behaves exactly as before. */
     b = N60TargetedRoomMeasurementBridgeCreate(sweep, kSweep, kLead, kTail, 1u, 0u);
     done = 0;

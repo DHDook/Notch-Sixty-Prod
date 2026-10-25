@@ -16,6 +16,9 @@
 extern "C" {
 #endif
 
+/* E11 S9b: at most this many inputs beyond the primary microphone (so 16 seats in all). */
+#define N60_TARGETED_MAX_EXTRA_INPUTS 15u
+
 typedef struct {
     uint32_t frameCursor;
     uint32_t totalFrameCount;
@@ -25,6 +28,9 @@ typedef struct {
     uint64_t callbacks;
     uint64_t unsupportedBufferLayouts;
     bool complete;
+    /* E11 S9b: inputs beyond the primary, and the fewest frames captured by any of them. */
+    uint32_t extraInputCount;
+    uint32_t extraCapturedFramesMin;
 } N60TargetedRoomMeasurementBridgeSnapshot;
 
 typedef struct N60TargetedRoomMeasurementBridge {
@@ -46,6 +52,12 @@ typedef struct N60TargetedRoomMeasurementBridge {
     uint32_t referenceProgramStartFrame;
     uint32_t referenceOutputChannelIndex;
     bool hasReferenceProgram;
+    /* E11 S9b: K-input capture. Extra seats are captured on the same timeline as the primary
+     * microphone; buffers are allocated on the control plane. */
+    uint32_t extraInputCount;
+    uint32_t extraInputChannelIndex[N60_TARGETED_MAX_EXTRA_INPUTS];
+    float * _Nullable extraCapture[N60_TARGETED_MAX_EXTRA_INPUTS];
+    _Atomic uint32_t extraCapturedFrames[N60_TARGETED_MAX_EXTRA_INPUTS];
     _Atomic uint32_t frameCursor;
     _Atomic uint32_t capturedFrames;
     _Atomic uint32_t referenceCapturedFrames;
@@ -67,6 +79,12 @@ static inline void N60TargetedRoomMeasurementBridgeReset(
     }
     if (bridge->referenceCapture != NULL) {
         memset(bridge->referenceCapture, 0, sizeof(float) * bridge->captureFrameCount);
+    }
+    for (uint32_t k = 0; k < bridge->extraInputCount; ++k) {
+        if (bridge->extraCapture[k] != NULL) {
+            memset(bridge->extraCapture[k], 0, sizeof(float) * bridge->captureFrameCount);
+        }
+        atomic_store_explicit(&bridge->extraCapturedFrames[k], 0u, memory_order_relaxed);
     }
     atomic_store_explicit(&bridge->frameCursor, 0u, memory_order_relaxed);
     atomic_store_explicit(&bridge->capturedFrames, 0u, memory_order_relaxed);
@@ -147,10 +165,54 @@ N60TargetedRoomMeasurementBridgeCreateDualInput(
     return bridge;
 }
 
+/*
+ * E11 S9b, control plane: K simultaneous inputs. `inputChannelIndices[0]` is the primary seat
+ * (captured as before); the rest are extra seats. Channels must be distinct. Returns NULL for
+ * a bad argument, more than 16 inputs, a duplicate channel or an allocation failure.
+ */
+static inline N60TargetedRoomMeasurementBridge * _Nullable
+N60TargetedRoomMeasurementBridgeCreateMultiInput(
+    const float * _Nonnull sweepSamples,
+    uint32_t sweepFrameCount,
+    uint32_t leadInFrames,
+    uint32_t tailFrames,
+    const uint32_t * _Nonnull inputChannelIndices,
+    uint32_t inputCount,
+    uint32_t outputChannelIndex
+) {
+    if (inputChannelIndices == NULL || inputCount == 0u
+        || inputCount > N60_TARGETED_MAX_EXTRA_INPUTS + 1u) return NULL;
+    for (uint32_t i = 0; i < inputCount; ++i) {
+        for (uint32_t j = i + 1u; j < inputCount; ++j) {
+            if (inputChannelIndices[i] == inputChannelIndices[j]) return NULL;
+        }
+    }
+    N60TargetedRoomMeasurementBridge *bridge = N60TargetedRoomMeasurementBridgeCreate(
+        sweepSamples, sweepFrameCount, leadInFrames, tailFrames, inputChannelIndices[0],
+        outputChannelIndex);
+    if (bridge == NULL) return NULL;
+    for (uint32_t k = 0; k + 1u < inputCount; ++k) {
+        bridge->extraCapture[k] = (float *)calloc((size_t)bridge->captureFrameCount, sizeof(float));
+        if (bridge->extraCapture[k] == NULL) {
+            bridge->extraInputCount = k;
+            N60TargetedRoomMeasurementBridgeDestroy(bridge);
+            return NULL;
+        }
+        bridge->extraInputChannelIndex[k] = inputChannelIndices[k + 1u];
+        bridge->extraInputCount = k + 1u;
+    }
+    N60TargetedRoomMeasurementBridgeReset(bridge);
+    return bridge;
+}
+
 static inline void N60TargetedRoomMeasurementBridgeDestroy(
     N60TargetedRoomMeasurementBridge * _Nullable bridge
 ) {
     if (bridge == NULL) return;
+    for (uint32_t k = 0; k < N60_TARGETED_MAX_EXTRA_INPUTS; ++k) {
+        free(bridge->extraCapture[k]);
+        bridge->extraCapture[k] = NULL;
+    }
     free(bridge->referenceProgram);
     free(bridge->referenceCapture);
     free(bridge->capture);
@@ -197,7 +259,14 @@ static inline N60TargetedRoomMeasurementBridgeSnapshot N60TargetedRoomMeasuremen
     const N60TargetedRoomMeasurementBridge * _Nullable bridge
 ) {
     if (bridge == NULL) return (N60TargetedRoomMeasurementBridgeSnapshot){0};
+    uint32_t extraMin = bridge->extraInputCount == 0u ? 0u : UINT32_MAX;
+    for (uint32_t k = 0; k < bridge->extraInputCount; ++k) {
+        const uint32_t n = atomic_load_explicit(&bridge->extraCapturedFrames[k], memory_order_acquire);
+        if (n < extraMin) extraMin = n;
+    }
     return (N60TargetedRoomMeasurementBridgeSnapshot){
+        .extraInputCount = bridge->extraInputCount,
+        .extraCapturedFramesMin = extraMin,
         .frameCursor = atomic_load_explicit(&bridge->frameCursor, memory_order_acquire),
         .totalFrameCount = bridge->captureFrameCount,
         .capturedFrames = atomic_load_explicit(&bridge->capturedFrames, memory_order_acquire),
@@ -222,12 +291,14 @@ static inline N60TargetedRoomMeasurementBridgeSnapshot N60TargetedRoomMeasuremen
  * required exactly when the bridge has a reference program. Reset: N60TargetedRoomMeasurementBridgeReset
  * on the control thread while the IOProc is stopped.
  */
-static inline uint32_t N60TargetedRoomMeasurementProcessProgramStrided(
+static inline uint32_t N60TargetedRoomMeasurementProcessSeatsStrided(
     N60TargetedRoomMeasurementBridge * _Nonnull bridge,
     const float * _Nonnull microphone,
     uint32_t microphoneStride,
     const float * _Nullable reference,
     uint32_t referenceStride,
+    const float * _Nullable const * _Nullable extraInputs,
+    const uint32_t * _Nullable extraStrides,
     float * _Nonnull output,
     uint32_t outputStride,
     float * _Nullable referenceOutput,
@@ -235,6 +306,7 @@ static inline uint32_t N60TargetedRoomMeasurementProcessProgramStrided(
     uint32_t frameCount
 ) {
     if (bridge == NULL || microphone == NULL || output == NULL) return 0u;
+    if (bridge->extraInputCount > 0u && (extraInputs == NULL || extraStrides == NULL)) return 0u;
     if (bridge->hasReferenceProgram
         && (referenceOutput == NULL || bridge->referenceProgram == NULL)) return 0u;
     if (bridge->hasReferenceInput
@@ -250,6 +322,10 @@ static inline uint32_t N60TargetedRoomMeasurementProcessProgramStrided(
     uint32_t referenceCaptured = atomic_load_explicit(
         &bridge->referenceCapturedFrames, memory_order_relaxed
     );
+    uint32_t extraCaptured[N60_TARGETED_MAX_EXTRA_INPUTS];
+    for (uint32_t k = 0; k < bridge->extraInputCount; ++k) {
+        extraCaptured[k] = atomic_load_explicit(&bridge->extraCapturedFrames[k], memory_order_relaxed);
+    }
     const uint32_t sweepStart = bridge->leadInFrames;
     const uint32_t sweepEnd = sweepStart + bridge->sweepFrameCount;
 
@@ -280,6 +356,12 @@ static inline uint32_t N60TargetedRoomMeasurementProcessProgramStrided(
             bridge->referenceCapture[referenceCaptured] = *referenceInput;
             referenceCaptured += 1u;
         }
+        for (uint32_t k = 0; k < bridge->extraInputCount; ++k) {
+            if (timelineFrame == extraCaptured[k]) {
+                bridge->extraCapture[k][extraCaptured[k]] = extraInputs[k][(size_t)offset * extraStrides[k]];
+                extraCaptured[k] += 1u;
+            }
+        }
         input += microphoneStride;
         if (referenceInput != NULL) referenceInput += referenceStride;
         destination += outputStride;
@@ -294,6 +376,11 @@ static inline uint32_t N60TargetedRoomMeasurementProcessProgramStrided(
     }
 
     cursor += consumed;
+    bool extrasComplete = true;
+    for (uint32_t k = 0; k < bridge->extraInputCount; ++k) {
+        atomic_store_explicit(&bridge->extraCapturedFrames[k], extraCaptured[k], memory_order_release);
+        if (extraCaptured[k] != bridge->captureFrameCount) extrasComplete = false;
+    }
     atomic_store_explicit(&bridge->capturedFrames, captured, memory_order_release);
     atomic_store_explicit(
         &bridge->referenceCapturedFrames,
@@ -303,7 +390,8 @@ static inline uint32_t N60TargetedRoomMeasurementProcessProgramStrided(
     atomic_store_explicit(&bridge->frameCursor, cursor, memory_order_release);
     const bool primaryComplete =
         cursor == bridge->captureFrameCount
-        && captured == bridge->captureFrameCount;
+        && captured == bridge->captureFrameCount
+        && extrasComplete;
     const bool referenceComplete =
         !bridge->hasReferenceInput
         || referenceCaptured == bridge->captureFrameCount;
@@ -313,6 +401,23 @@ static inline uint32_t N60TargetedRoomMeasurementProcessProgramStrided(
         memory_order_release
     );
     return consumed;
+}
+
+static inline uint32_t N60TargetedRoomMeasurementProcessProgramStrided(
+    N60TargetedRoomMeasurementBridge * _Nonnull bridge,
+    const float * _Nonnull microphone,
+    uint32_t microphoneStride,
+    const float * _Nullable reference,
+    uint32_t referenceStride,
+    float * _Nonnull output,
+    uint32_t outputStride,
+    float * _Nullable referenceOutput,
+    uint32_t referenceOutputStride,
+    uint32_t frameCount
+) {
+    return N60TargetedRoomMeasurementProcessSeatsStrided(
+        bridge, microphone, microphoneStride, reference, referenceStride, NULL, NULL,
+        output, outputStride, referenceOutput, referenceOutputStride, frameCount);
 }
 
 static inline uint32_t N60TargetedRoomMeasurementProcessDualStrided(
@@ -375,6 +480,21 @@ static inline uint32_t N60TargetedRoomMeasurementBridgeCopyCapture(
     const uint32_t available = atomic_load_explicit(&bridge->capturedFrames, memory_order_acquire);
     const uint32_t count = available < capacityFrames ? available : capacityFrames;
     memcpy(destination, bridge->capture, sizeof(float) * count);
+    return count;
+}
+
+/* Control plane, after the pass: copies extra seat `index` (0 is the second seat overall). */
+static inline uint32_t N60TargetedRoomMeasurementBridgeCopyExtraCapture(
+    const N60TargetedRoomMeasurementBridge * _Nullable bridge,
+    uint32_t index,
+    float * _Nonnull destination,
+    uint32_t capacityFrames
+) {
+    if (bridge == NULL || index >= bridge->extraInputCount || bridge->extraCapture[index] == NULL
+        || destination == NULL || capacityFrames == 0u) return 0u;
+    const uint32_t available = atomic_load_explicit(&bridge->extraCapturedFrames[index], memory_order_acquire);
+    const uint32_t count = available < capacityFrames ? available : capacityFrames;
+    memcpy(destination, bridge->extraCapture[index], sizeof(float) * count);
     return count;
 }
 
@@ -497,7 +617,22 @@ static inline OSStatus N60TargetedRoomMeasurementIOProc(
     N60TargetedMeasurementInputView reference = {0};
     N60TargetedMeasurementOutputView output = {0};
     N60TargetedMeasurementOutputView referenceOutput = {0};
-    if (!N60TargetedRoomMeasurementMakeInputView(
+    const float * _Nullable extraSamples[N60_TARGETED_MAX_EXTRA_INPUTS];
+    uint32_t extraStrides[N60_TARGETED_MAX_EXTRA_INPUTS];
+    uint32_t extraFrames = UINT32_MAX;
+    bool extrasOK = true;
+    for (uint32_t k = 0; k < bridge->extraInputCount; ++k) {
+        N60TargetedMeasurementInputView view = {0};
+        if (!N60TargetedRoomMeasurementMakeInputView(
+                inInputData, bridge->extraInputChannelIndex[k], &view)) {
+            extrasOK = false;
+            break;
+        }
+        extraSamples[k] = view.samples;
+        extraStrides[k] = view.stride;
+        if (view.frameCount < extraFrames) extraFrames = view.frameCount;
+    }
+    if (!extrasOK || !N60TargetedRoomMeasurementMakeInputView(
             inInputData,
             bridge->inputChannelIndex,
             &input)
@@ -524,16 +659,19 @@ static inline OSStatus N60TargetedRoomMeasurementIOProc(
     if (bridge->hasReferenceInput && reference.frameCount < frameCount) {
         frameCount = reference.frameCount;
     }
+    if (bridge->extraInputCount > 0u && extraFrames < frameCount) frameCount = extraFrames;
     if (frameCount == 0u) return noErr;
     if (bridge->hasReferenceProgram && referenceOutput.frameCount < frameCount) {
         frameCount = referenceOutput.frameCount;
     }
-    (void)N60TargetedRoomMeasurementProcessProgramStrided(
+    (void)N60TargetedRoomMeasurementProcessSeatsStrided(
         bridge,
         input.samples,
         input.stride,
         bridge->hasReferenceInput ? reference.samples : NULL,
         bridge->hasReferenceInput ? reference.stride : 0u,
+        bridge->extraInputCount > 0u ? extraSamples : NULL,
+        bridge->extraInputCount > 0u ? extraStrides : NULL,
         output.samples,
         output.stride,
         bridge->hasReferenceProgram ? referenceOutput.samples : NULL,
