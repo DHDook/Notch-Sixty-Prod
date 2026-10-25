@@ -4,13 +4,7 @@ import SwiftUI
 /// Optional research is read-only. The normal Room Correction and Headphones
 /// workspaces retain sole control of committed DSP and device profiles.
 struct ProductionOptionalAudioResearchWorkspace: View {
-    @ObservedObject var projects: RoomCorrectionProjectController
     @ObservedObject var engine: AudioIOEngine
-
-    @State private var mixedShare = 0.15
-    @State private var latencyBudgetMS = 12.0
-    @State private var mixed: MixedPhaseResearchResult?
-    @State private var working = false
 
     @State private var availableHRTFs: [BinauralProfileAsset] = []
     @State private var selectedHRTFID: UUID?
@@ -30,11 +24,10 @@ struct ProductionOptionalAudioResearchWorkspace: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 Text(
-                    "Optional experimental comparison tools. They never apply a DSP filter, change audio routing or declare measured improvement. Use Room Correction or Headphones for the separate, validated deployment workflows."
+                    "Optional experimental HRTF comparison tools. They never apply a DSP filter, change audio routing or declare measured improvement. Use Room Correction or Headphones for the separate, validated deployment workflows."
                 )
                 .foregroundStyle(.secondary)
 
-                mixedPhaseCard
                 hrtfCard
 
                 if let errorMessage {
@@ -48,86 +41,6 @@ struct ProductionOptionalAudioResearchWorkspace: View {
             .frame(maxWidth: 980, alignment: .topLeading)
         }
         .task { loadHRTFs() }
-        .task(id: projects.selectedDesign?.id) {
-            mixed = nil
-        }
-    }
-
-    private var mixedPhaseCard: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("Experimental Mixed-Phase FIR")
-                .font(.headline)
-            Text(
-                "Start from the selected, real Room Correction minimum-phase FIR design. Blend a bounded symmetric component and audit its actual taps. This is a research preview: extra latency and pre-ringing can make it worse, even when predicted magnitude looks similar."
-            )
-            .font(.caption)
-            .foregroundStyle(.secondary)
-
-            if let design = projects.selectedDesign {
-                Text(
-                    "\(design.name) · \(Int(design.sampleRate)) Hz · \(design.filter.leftTaps.count) FIR taps"
-                )
-                .font(.subheadline)
-            } else {
-                Text("Select and generate a Room Correction FIR design first.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            HStack {
-                Text("Symmetric phase share")
-                Slider(value: $mixedShare, in: 0...0.4, step: 0.05)
-                Text("\(mixedShare * 100, specifier: "%.0f")%")
-                    .monospacedDigit()
-                    .frame(width: 52)
-            }
-            HStack {
-                Text("Maximum added delay")
-                Slider(value: $latencyBudgetMS, in: 1...30, step: 1)
-                Text("\(latencyBudgetMS, specifier: "%.0f") ms")
-                    .monospacedDigit()
-                    .frame(width: 63)
-            }
-            Button(working ? "Auditing candidate…" : "Compare offline FIR candidate") {
-                evaluateMixedPhase()
-            }
-            .buttonStyle(.borderedProminent)
-            .disabled(projects.selectedDesign == nil || working)
-
-            if let result = mixed {
-                LabeledContent("Declared latency") {
-                    Text(
-                        "\(result.declaredLatencyFrames) frames · "
-                        + String(format: "%.2f ms", Double(result.declaredLatencyFrames)
-                            / result.sampleRate * 1000)
-                    )
-                }
-                LabeledContent("Largest measured-tap magnitude difference") {
-                    Text(String(format: "%.2f dB", result.maximumMagnitudeDeviationDB))
-                }
-                LabeledContent("Worst pre-ringing energy fraction") {
-                    Text(String(format: "%.2f%%", result.preRingingEnergyFraction * 100))
-                }
-                LabeledContent("Conservative attenuation recommendation") {
-                    Text(String(format: "%.2f dB", result.recommendedHeadroomDB))
-                }
-                if result.blockingReasons.isEmpty {
-                    Text(
-                        "Candidate passes bounded numerical review only; no hardware/seat verification and no Apply path."
-                    )
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                } else {
-                    ForEach(result.blockingReasons, id: \.self) { reason in
-                        Label(reason, systemImage: "exclamationmark.triangle")
-                            .font(.caption)
-                            .foregroundStyle(.orange)
-                    }
-                }
-            }
-        }
-        .padding(20)
-        .background(.regularMaterial, in: .rect(cornerRadius: 18))
     }
 
     private var hrtfCard: some View {
@@ -234,34 +147,6 @@ struct ProductionOptionalAudioResearchWorkspace: View {
         }
         .padding(20)
         .background(.regularMaterial, in: .rect(cornerRadius: 18))
-    }
-
-    private func evaluateMixedPhase() {
-        guard let design = projects.selectedDesign else { return }
-        mixed = nil
-        errorMessage = nil
-        working = true
-        let left = design.filter.leftTaps
-        let right = design.filter.rightTaps ?? design.filter.leftTaps
-        let rate = design.sampleRate
-        let share = mixedShare
-        let latency = latencyBudgetMS
-        Task.detached(priority: .userInitiated) {
-            let result = Result {
-                try MixedPhaseResearchDesigner().design(
-                    left: left, right: right, sampleRate: rate,
-                    linearPhaseShare: share,
-                    latencyBudgetMilliseconds: latency
-                )
-            }
-            await MainActor.run {
-                working = false
-                switch result {
-                case .success(let value): mixed = value
-                case .failure(let error): errorMessage = error.localizedDescription
-                }
-            }
-        }
     }
 
     private func loadHRTFs() {

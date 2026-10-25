@@ -1,7 +1,7 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// E10 S5: target editor card (design note 8), shown only with `e10.mixed-phase-correction`.
+/// E10 S5: target editor card (design note 8).
 /// Curtains, the limited-range preset, per-channel level and tilt, and the saved target library.
 struct RoomCorrectionTargetEditorCard: View {
     let channelNames: [String]
