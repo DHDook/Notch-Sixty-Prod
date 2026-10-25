@@ -846,7 +846,7 @@ struct RfLevel {
 };
 struct RfHead {
     FirLane full, low;
-    uint32_t ringPos, pad[3];
+    uint32_t ringPos, ringFill, pad[2];  // ringFill: slots written since the last reset (the rest read as zero)
     RfLevel lv[kRfMaxLevels];
 };
 struct RfShared {
@@ -959,7 +959,7 @@ void runRoomFirTwoBand(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t
             st.full.epoch = st.low.epoch = h->historyEpoch;
             std::memset(in1, 0, sizeof(float) * (kFft + kPart));
             std::memset(in2, 0, sizeof(float) * (kFft + kPart));
-            std::memset(ring, 0, sizeof(float) * S.delay);
+            // The delay ring is not cleared here (it can be megabytes): slots read as zero until written (ringFill).
         }
         const RfCtx c{full, low, S.hodd, S.levels, in2, out2, fdl2, &st.low, st.lv};
         float *buf = lanes[laneOf(r, l)];
@@ -967,7 +967,12 @@ void runRoomFirTwoBand(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t
             const float x = buf[i];
             float yFull = firStep(full, st.full, in1, out1, fdl1, x);
             if (S.delay != 0) {
-                const float d = ring[st.ringPos];
+                float d = 0.0f;
+                if (st.ringFill < S.delay) {
+                    ++st.ringFill;
+                } else {
+                    d = ring[st.ringPos];
+                }
                 ring[st.ringPos] = yFull;
                 yFull = d;
                 st.ringPos = st.ringPos + 1 == S.delay ? 0 : st.ringPos + 1;

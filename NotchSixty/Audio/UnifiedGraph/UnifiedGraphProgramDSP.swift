@@ -286,6 +286,7 @@ struct UnifiedGraphProgramDSP: Equatable, Sendable {
         }
         var postLatency: UInt32 = 0
         var lanePlanCovered: UInt64 = 0
+        var planLatency: UInt32 = 0
         if let plan = roomLanes {
             guard !hasPostConvolver, plan.laneCount == count, !plan.stages.isEmpty,
                   plan.stages.count <= count, plan.declaredLatencyFrames <= N60_GRAPH_MAX_DELAY_FRAMES,
@@ -293,15 +294,20 @@ struct UnifiedGraphProgramDSP: Equatable, Sendable {
                 throw UnifiedGraphFallbackReason.specRejected
             }
             for (index, stage) in plan.stages.enumerated() {
-                guard !stage.taps.isEmpty, stage.taps.count <= 32_768, stage.laneMask != 0,
+                guard !stage.taps.isEmpty, stage.taps.count <= 32_768, (stage.twoBand?.lowTaps.count ?? 1) <= 32_768,
+                      !(stage.twoBand?.lowTaps.isEmpty ?? false), stage.laneMask != 0,
                       stage.laneMask & lanePlanCovered == 0 else {
                     throw UnifiedGraphFallbackReason.convolutionProgramUnavailable
                 }
                 lanePlanCovered |= stage.laneMask
-                add(N60_STAGE_ROOM_FIR, RoomCorrectionRateCache.stageIDBase + UInt32(index), mask: stage.laneMask,
-                    capacity: plan.declaredLatencyFrames, params: stage.taps)
+                add(stage.graphKind, RoomCorrectionRateCache.stageIDBase + UInt32(index), mask: stage.laneMask,
+                    capacity: plan.declaredLatencyFrames, params: stage.graphParams)
+                // The two-band stage aligns both paths to 72 (D - 1) + 256 D frames.
+                let stageLatency = stage.twoBand.map { 72 * ($0.decimation - 1) + Self.firPartitionFrames * $0.decimation }
+                    ?? Self.firPartitionFrames
+                planLatency = max(planLatency, stageLatency)
             }
-            postLatency = Self.firPartitionFrames + plan.declaredLatencyFrames
+            postLatency = planLatency + plan.declaredLatencyFrames
         }
         if hasPostConvolver, let fl = shape.frontLeft, let fr = shape.frontRight {
             let frontMask = Self.mask([fl, fr])
@@ -429,8 +435,8 @@ struct UnifiedGraphProgramDSP: Equatable, Sendable {
         N60_STAGE_DENOISER.rawValue: 4, N60_STAGE_MS_ENCODE.rawValue: 5, N60_STAGE_PEQ.rawValue: 6,
         N60_STAGE_DYN_EQ.rawValue: 7, N60_STAGE_MS_DECODE.rawValue: 8, N60_STAGE_FIR.rawValue: 9,
         N60_STAGE_COMPRESSOR.rawValue: 10, N60_STAGE_EXPANDER.rawValue: 11, N60_STAGE_METER_OUT.rawValue: 12,
-        N60_STAGE_EXTERNAL.rawValue: 12.5, N60_STAGE_BASS_MGMT.rawValue: 13,
-        N60_STAGE_STEREO_CROSSOVER.rawValue: 13, N60_STAGE_ROOM_FIR.rawValue: 14,
+        N60_STAGE_GENERATOR.rawValue: 3.5, N60_STAGE_EXTERNAL.rawValue: 12.5, N60_STAGE_BASS_MGMT.rawValue: 13,
+        N60_STAGE_STEREO_CROSSOVER.rawValue: 13, N60_STAGE_ROOM_FIR.rawValue: 14, N60_STAGE_ROOM_FIR_TWO_BAND.rawValue: 14,
         N60_STAGE_SPEAKER_IR.rawValue: 15, N60_STAGE_AMBIENT.rawValue: 16, N60_STAGE_CORE_DYNAMICS.rawValue: 17,
         N60_STAGE_BINAURAL.rawValue: 17.5, N60_STAGE_SYMMETRY.rawValue: 18, N60_STAGE_CROSSFEED.rawValue: 19,
         N60_STAGE_CROSSTALK.rawValue: 20, N60_STAGE_OUTPUT_GAIN.rawValue: 21, N60_STAGE_HEADPHONE.rawValue: 22,

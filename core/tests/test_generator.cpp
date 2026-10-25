@@ -439,9 +439,14 @@ static void testNoAllocation(double rate) {
     n60_graph_post_params(g, &rec, 1);
     render(g, 2, 8 * kBlock, nullptr, true);
     CHECK(allocs.load() == 0, "%.0f render allocated %ld times", rate, allocs.load());
-    for (uint32_t type : {0u, 3u, 2u}) {
+    for (uint32_t type : {0u, 3u, 2u, 5u}) {
         Gen H;
         H.p[TYPE] = float(type);
+        if (type == 5u) {  // the sweep: 10 Hz to 0.4 fs over about one second
+            H.p[LOW] = 10.0f;
+            H.p[HIGH] = float(0.4 * rate);
+            H.p[PERIOD] = float(std::lround(rate));
+        }
         n60_stage_desc s2[1] = {stg(N60_STAGE_GENERATOR, 1, N60_LANE_ALL, H.p, NP)};
         n60_graph *h = build(rate, 2, s2, 1);
         allocs = 0;
