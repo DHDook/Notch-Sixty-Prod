@@ -138,4 +138,31 @@ final class MeasurementCoreTests: XCTestCase {
             [[0, 1], [0, 1, 2]], arrivals: [0, 0], sampleRate: 48_000, repeatPeriodFrames: 2
         )) { XCTAssertEqual($0 as? MeasurementTimingError, .invalidArguments) }
     }
+
+    func testAverageRepeatsReportsDriftAcrossRepeats() throws {
+        let rate = 48_000.0
+        let chirp = try MeasurementCore.makeReferenceChirp(sampleRate: rate)
+        let length = chirp.count + 4_000
+        for ppm in [50.0, -50.0] {
+            var repeats: [[Float]] = []
+            var arrivals: [Double] = []
+            for r in 0..<4 {
+                // Whole-sample positions cannot carry a few ppm exactly, so scale the period instead:
+                // arrival r sits r * period * ppm * 1e-6 frames from repeat 0 (rounded to a sample).
+                let shift = Int((Double(r) * Double(length) * ppm * 1e-6).rounded())
+                var pass = [Float](repeating: 0, count: length)
+                for (i, v) in chirp.enumerated() { pass[300 + shift + i] = v }
+                repeats.append(pass)
+                arrivals.append(Double(300 + shift))
+            }
+            let result = try MeasurementCore.averageRepeats(
+                repeats, arrivals: arrivals, sampleRate: rate, repeatPeriodFrames: length
+            )
+            XCTAssertTrue(result.driftWarning, "\(ppm) ppm should warn")
+            XCTAssertEqual(result.driftPPM, ppm, accuracy: 10, "reported drift for \(ppm) ppm")
+            XCTAssertEqual(result.acceptedCount, 4)
+            let found = try MeasurementCore.findArrival(template: chirp, in: result.samples, sampleRate: rate)
+            XCTAssertEqual(found.frames, 300, accuracy: 0.05, "aligned to repeat 0 at \(ppm) ppm")
+        }
+    }
 }

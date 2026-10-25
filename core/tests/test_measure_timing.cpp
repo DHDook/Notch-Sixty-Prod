@@ -200,10 +200,9 @@ static void testAveraging(double fs) {
           result.rejected_mask);
 }
 
-static void testDriftAndFailure(double fs) {
+static void testDrift(double fs, double ppm) {
     const Pass pass = makePass(fs);
     const uint64_t frames = captureLength(pass, 0.2) + 16;
-    const double ppm = 35.0;
     const uint32_t repeats = 4;
     std::vector<std::vector<float>> captures(repeats);
     std::vector<double> arrivals(repeats);
@@ -228,7 +227,18 @@ static void testDriftAndFailure(double fs) {
     CHECK(n60_measure_average_repeats(&ap, pointers.data(), arrivals.data(), averaged.data(), frames, &result) == 0, "average");
     CHECK(std::fabs(result.drift_ppm - ppm) <= 2.0, "fs=%g drift reported %.2f ppm, expected %.0f", fs, result.drift_ppm, ppm);
     CHECK(result.drift_warning == 1, "drift above 20 ppm warns");
+    CHECK(result.accepted_count == repeats, "fs=%g drift %+.0f ppm: %u repeats accepted", fs, ppm, result.accepted_count);
+    // After drift correction the averaged reference sits where repeat 0 had it.
+    n60_measure_arrival aligned{};
+    CHECK(n60_measure_find_arrival(pass.chirpOnly.data(), pass.chirpOnly.size(), averaged.data(), frames, fs, 20.0,
+                                   &aligned) == 0, "reference in the averaged capture");
+    CHECK(std::fabs(aligned.arrival_frames - arrivals[0]) <= 0.05,
+          "fs=%g drift %+.0f ppm averaged arrival %.3f, repeat 0 at %.3f", fs, ppm, aligned.arrival_frames, arrivals[0]);
+}
 
+static void testFailure(double fs) {
+    const Pass pass = makePass(fs);
+    const uint64_t frames = captureLength(pass, 0.2) + 16;
     // A capture without the reference fails loudly rather than falling back.
     std::vector<float> silent(frames, 0.0f);
     n60_measure_arrival arrival{};
@@ -274,7 +284,8 @@ int main() {
         testTiming(fs, 50.0);
         testTiming(fs, -50.0);
         testAveraging(fs);
-        testDriftAndFailure(fs);
+        for (const double ppm : {50.0, -50.0, 35.0}) testDrift(fs, ppm);
+        testFailure(fs);
     }
     if (failures) { std::fprintf(stderr, "%d failure(s)\n", failures); return 1; }
     std::puts("measure timing OK");
