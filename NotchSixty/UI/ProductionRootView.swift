@@ -7,6 +7,7 @@ enum ProductionSection: String, CaseIterable, Identifiable, Hashable {
     case equalizer
     case dynamics
     case meters
+    case system
     case speakers
     case headphones
     case speakerCalibration
@@ -25,7 +26,7 @@ enum ProductionSection: String, CaseIterable, Identifiable, Hashable {
         .meters,
     ]
 
-    static let system: [ProductionSection] = [
+    static let systemGroup: [ProductionSection] = [
         .speakers,
         .headphones,
         .speakerCalibration,
@@ -53,11 +54,14 @@ enum ProductionSection: String, CaseIterable, Identifiable, Hashable {
     /// The sidebar's groups, in order. The dashboard is a standalone row
     /// above them. A selected developer tool stays visible in a Developer
     /// group until the user moves to another section.
-    static func sidebarGroups(selection: ProductionSection? = nil) -> [ProductionSidebarGroup] {
+    static func sidebarGroups(
+        selection: ProductionSection? = nil,
+        systemArea: Bool = false
+    ) -> [ProductionSidebarGroup] {
         var groups = [
             ProductionSidebarGroup(title: "Playback", sections: playback),
-            ProductionSidebarGroup(title: "System", sections: system),
-            ProductionSidebarGroup(title: "Tools", sections: tools),
+            ProductionSidebarGroup(title: "System", sections: systemArea ? systemAreaSections : systemGroup),
+            ProductionSidebarGroup(title: "Tools", sections: systemArea ? systemAreaTools : tools),
             ProductionSidebarGroup(title: "Extensions", sections: extensions),
         ]
         if let selection, developerTools.contains(selection) {
@@ -74,6 +78,7 @@ enum ProductionSection: String, CaseIterable, Identifiable, Hashable {
         case .equalizer: return "Equalizer"
         case .dynamics: return "Dynamics"
         case .meters: return "Meters"
+        case .system: return "System"
         case .speakers: return "Speakers"
         case .headphones: return "Headphones"
         case .speakerCalibration: return "Speaker Calibration"
@@ -94,11 +99,12 @@ enum ProductionSection: String, CaseIterable, Identifiable, Hashable {
         case .equalizer: return "slider.horizontal.3"
         case .dynamics: return "waveform.path.ecg"
         case .meters: return "chart.xyaxis.line"
+        case .system: return "slider.horizontal.below.square.and.square.filled"
         case .speakers: return "hifispeaker.2.fill"
         case .headphones: return "headphones"
         case .speakerCalibration: return "speaker.wave.3.fill"
         case .measurementLab: return "waveform.badge.magnifyingglass"
-        case .roomCorrection: return "waveform.badge.magnifyingglass"
+        case .roomCorrection: return "dial.medium"
         case .activeAcoustics: return "waveform.and.mic"
         case .roomAdvisor: return "wand.and.stars.inverse"
         case .blindListening: return "ear.badge.waveform"
@@ -254,6 +260,22 @@ struct ProductionSidebarGroup: Hashable, Identifiable {
 @MainActor
 final class ProductionNavigation: ObservableObject {
     @Published var selection: ProductionSection? = .dashboard
+    /// E12: the System area's tab and the Calibrate tab's section.
+    @Published var systemTab: ProductionSystemTab = .overview
+    @Published var calibrateSection: ProductionCalibrateSection = .alignment
+
+    /// Selects a section. With the System area on, the old workspace
+    /// sections resolve to a System tab.
+    func navigate(to section: ProductionSection, systemArea: Bool) {
+        guard systemArea else {
+            selection = section
+            return
+        }
+        let destination = section.systemAreaDestination
+        if let tab = destination.systemTab { systemTab = tab }
+        if let calibrate = destination.calibrateSection { calibrateSection = calibrate }
+        selection = destination.section
+    }
 }
 
 struct ProductionRootView: View {
@@ -271,6 +293,22 @@ struct ProductionRootView: View {
     private var engine: AudioIOEngine { product.audioEngine }
 
     private var selection: ProductionSection? { navigation.selection }
+
+    /// E12: the System area replaces the System group's separate rows.
+    private var systemAreaEnabled: Bool { featureFlags.isEnabled(.guidedSetup) }
+
+    private var sidebarSelection: Binding<ProductionSection?> {
+        Binding(
+            get: { navigation.selection },
+            set: { newValue in
+                if let newValue {
+                    navigation.navigate(to: newValue, systemArea: systemAreaEnabled)
+                } else {
+                    navigation.selection = nil
+                }
+            }
+        )
+    }
 
     private var minimumWindowWidth: CGFloat {
         if selection == .equalizer, engine.stereoEQConfiguration.channelMode != .linked {
@@ -290,14 +328,14 @@ struct ProductionRootView: View {
 
     var body: some View {
         NavigationSplitView {
-            List(selection: $navigation.selection) {
+            List(selection: sidebarSelection) {
                 Label(
                     ProductionSection.dashboard.title,
                     systemImage: ProductionSection.dashboard.systemImage
                 )
                 .tag(ProductionSection.dashboard)
 
-                ForEach(ProductionSection.sidebarGroups(selection: selection)) { group in
+                ForEach(ProductionSection.sidebarGroups(selection: selection, systemArea: systemAreaEnabled)) { group in
                     Section(group.title) {
                         ForEach(group.sections) { section in
                             Label(section.title, systemImage: section.systemImage)
@@ -315,6 +353,12 @@ struct ProductionRootView: View {
                 .toolbar { toolbar }
         }
         .frame(minWidth: minimumWindowWidth, minHeight: 680)
+        .onChange(of: navigation.selection) { _, new in
+            // Programmatic selections of an old section land on its System tab.
+            if systemAreaEnabled, let new, new.systemAreaDestination.section == .system, new != .system {
+                navigation.navigate(to: new, systemArea: true)
+            }
+        }
         .task { product.prepareForUse() }
         .task(id: adaptiveANCEnabled) {
             product.adaptiveQuietZone.setActive(adaptiveANCEnabled)
@@ -345,7 +389,32 @@ struct ProductionRootView: View {
 
     @ViewBuilder
     private func detail(for section: ProductionSection) -> some View {
+        if systemAreaEnabled, section.systemAreaDestination.section == .system {
+            systemArea
+        } else {
+            sectionDetail(for: section)
+        }
+    }
+
+    private var systemArea: some View {
+        ProductionSystemAreaView(
+            navigation: navigation,
+            overview: AnyView(
+                ProductionSystemOverviewView(
+                    engine: engine, profiles: product.profiles, navigation: navigation)),
+            speakers: AnyView(sectionDetail(for: .speakers)),
+            room: AnyView(sectionDetail(for: .roomAdvisor)),
+            measure: AnyView(sectionDetail(for: .measurementLab)),
+            alignment: AnyView(sectionDetail(for: .speakerCalibration)),
+            correction: AnyView(sectionDetail(for: .roomCorrection))
+        )
+    }
+
+    @ViewBuilder
+    private func sectionDetail(for section: ProductionSection) -> some View {
         switch section {
+        case .system:
+            systemArea
         case .dashboard:
             ProductionDashboardView(engine: engine)
         case .equalizer:
@@ -415,7 +484,7 @@ struct ProductionRootView: View {
     @ToolbarContentBuilder
     private var toolbar: some ToolbarContent {
         ToolbarItemGroup(placement: .primaryAction) {
-            if selection != .roomAdvisor {
+            if !(selection == .roomAdvisor || (selection == .system && navigation.systemTab == .room)) {
                 ProductionProfileToolbar(product: product)
 
                 #if DEBUG
@@ -430,7 +499,7 @@ struct ProductionRootView: View {
             }
         }
 
-        if selection != .roomAdvisor {
+        if !(selection == .roomAdvisor || (selection == .system && navigation.systemTab == .room)) {
             // A readout, not a control: no glass, so it reads as status text.
             ToolbarItem(placement: .primaryAction) {
                 ProductionProcessingStatusReadout(
@@ -444,7 +513,7 @@ struct ProductionRootView: View {
         }
 
         ToolbarItemGroup(placement: .primaryAction) {
-            if selection != .roomAdvisor {
+            if !(selection == .roomAdvisor || (selection == .system && navigation.systemTab == .room)) {
                 // Bypass keeps the tap running and passes audio unprocessed;
                 // the Processing switch beside it tears the tap down.
                 Button {
