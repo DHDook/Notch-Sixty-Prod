@@ -109,3 +109,8 @@ add_executable(n60core_correct_test tests/test_correct.cpp)
 target_include_directories(n60core_correct_test PRIVATE src)
 target_link_libraries(n60core_correct_test PRIVATE n60core)
 add_test(NAME n60core_correct COMMAND n60core_correct_test)
+
+# E10 S3: two-band ROOM_FIR stage (ABI v15).
+add_executable(n60core_room_fir_test tests/test_room_fir.cpp)
+target_link_libraries(n60core_room_fir_test PRIVATE n60core)
+add_test(NAME n60core_room_fir COMMAND n60core_room_fir_test)
