@@ -162,6 +162,8 @@
 		A30000000000000000000016 /* N60DynamicEQ.c in Sources */ = {isa = PBXBuildFile; fileRef = A3000000000000000000002B /* N60DynamicEQ.c */; };
 		E12A00000000000000000001 /* ProductionSystemArea.swift in Sources */ = {isa = PBXBuildFile; fileRef = E12A00000000000000000011 /* ProductionSystemArea.swift */; };
 		E12A00000000000000000002 /* ProductionSystemAreaTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E12A00000000000000000012 /* ProductionSystemAreaTests.swift */; };
+		E12B00000000000000000001 /* SystemSetupFlow.swift in Sources */ = {isa = PBXBuildFile; fileRef = E12B00000000000000000011 /* SystemSetupFlow.swift */; };
+		E12B00000000000000000002 /* SystemSetupFlowTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E12B00000000000000000012 /* SystemSetupFlowTests.swift */; };
 		A40000000000000000000010 /* ProductionRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A40000000000000000000020 /* ProductionRootView.swift */; };
 		A40000000000000000000011 /* ProductionEqualizerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A40000000000000000000021 /* ProductionEqualizerView.swift */; };
 		A40000000000000000000012 /* ProductionDynamicsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A40000000000000000000022 /* ProductionDynamicsView.swift */; };
@@ -608,6 +610,8 @@
 		A3000000000000000000002C /* N60DynamicEQ.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = N60DynamicEQ.h; sourceTree = "<group>"; };
 		E12A00000000000000000011 /* ProductionSystemArea.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductionSystemArea.swift; sourceTree = "<group>"; };
 		E12A00000000000000000012 /* ProductionSystemAreaTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductionSystemAreaTests.swift; sourceTree = "<group>"; };
+		E12B00000000000000000011 /* SystemSetupFlow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemSetupFlow.swift; sourceTree = "<group>"; };
+		E12B00000000000000000012 /* SystemSetupFlowTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemSetupFlowTests.swift; sourceTree = "<group>"; };
 		A40000000000000000000020 /* ProductionRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductionRootView.swift; sourceTree = "<group>"; };
 		A40000000000000000000021 /* ProductionEqualizerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductionEqualizerView.swift; sourceTree = "<group>"; };
 		A40000000000000000000022 /* ProductionDynamicsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductionDynamicsView.swift; sourceTree = "<group>"; };
@@ -1078,6 +1082,7 @@
 				F76000000000000000000012 /* MIMORoomTreatmentActivationPermitTests.swift */,
 				F78000000000000000000013 /* ProductionInformationArchitectureTests.swift */,
 				E12A00000000000000000012 /* ProductionSystemAreaTests.swift */,
+				E12B00000000000000000012 /* SystemSetupFlowTests.swift */,
 				F79000000000000000000013 /* AudioUnitHostFoundationTests.swift */,
 				F80000000000000000000012 /* AudioUnitOfflinePreparationTests.swift */,
 				F81000000000000000000013 /* AudioUnitLiveRackRuntimeTests.swift */,
@@ -1296,7 +1301,7 @@
 			path = Backup;
 			sourceTree = "<group>";
 		};
-		A20000000000000000000054 /* State */ = {isa = PBXGroup; children = (A20000000000000000000025 /* AudioLifecycleState.swift */, A100000000000000000E2204 /* FeatureFlags.swift */, A100000000000000000E2202 /* PreferenceKeys.swift */, A2000000000000000000002B /* ProductProfiles.swift */, B113B0000000000000000061 /* ProductRecovery.swift */, B113B0000000000000000071 /* HeadroomAssistant.swift */, F64000000000000000000014 /* MultichannelCalibrationController.swift */, A2000000000000000000002D /* RoomCorrectionCalibrationController.swift */, A2000000000000000000002F /* RoomCorrectionProjectController.swift */, F89300000000000000000011 /* AmbientCompensationController.swift */, F90200000000000000000011 /* ActiveQuietZoneController.swift */, E4D000000000000000000011 /* AdaptiveQuietZoneShadow.swift */, E4F200000000000000000013 /* QuietZoneFeedForwardSurveyController.swift */, E4F300000000000000000012 /* QuietZoneFeedForwardShadow.swift */, F92000000000000000000012 /* RoomTreatmentAdvisorController.swift */, E10B00000000000000000004 /* RoomCorrectionDeployController.swift */,); path = State; sourceTree = "<group>"; };
+		A20000000000000000000054 /* State */ = {isa = PBXGroup; children = (A20000000000000000000025 /* AudioLifecycleState.swift */, A100000000000000000E2204 /* FeatureFlags.swift */, A100000000000000000E2202 /* PreferenceKeys.swift */, A2000000000000000000002B /* ProductProfiles.swift */, E12B00000000000000000011 /* SystemSetupFlow.swift */, B113B0000000000000000061 /* ProductRecovery.swift */, B113B0000000000000000071 /* HeadroomAssistant.swift */, F64000000000000000000014 /* MultichannelCalibrationController.swift */, A2000000000000000000002D /* RoomCorrectionCalibrationController.swift */, A2000000000000000000002F /* RoomCorrectionProjectController.swift */, F89300000000000000000011 /* AmbientCompensationController.swift */, F90200000000000000000011 /* ActiveQuietZoneController.swift */, E4D000000000000000000011 /* AdaptiveQuietZoneShadow.swift */, E4F200000000000000000013 /* QuietZoneFeedForwardSurveyController.swift */, E4F300000000000000000012 /* QuietZoneFeedForwardShadow.swift */, F92000000000000000000012 /* RoomTreatmentAdvisorController.swift */, E10B00000000000000000004 /* RoomCorrectionDeployController.swift */,); path = State; sourceTree = "<group>"; };
 		A20000000000000000000055 /* Diagnostics */ = {isa = PBXGroup; children = (A20000000000000000000026 /* AudioDiagnosticsSnapshot.swift */, A2000000000000000000002A /* ProductionAnalysisWorker.swift */,); path = Diagnostics; sourceTree = "<group>"; };
 		A30000000000000000000050 /* Realtime */ = {
 			isa = PBXGroup;
@@ -1535,6 +1540,7 @@
 				A20000000000000000000016 /* AudioDiagnosticsSnapshot.swift in Sources */,
 				A2000000000000000000001A /* ProductionAnalysisWorker.swift in Sources */,
 				A2000000000000000000001B /* ProductProfiles.swift in Sources */,
+				E12B00000000000000000001 /* SystemSetupFlow.swift in Sources */,
 				B113B0000000000000000062 /* ProductRecovery.swift in Sources */,
 				B113B0000000000000000072 /* HeadroomAssistant.swift in Sources */,
 				B113B0000000000000000001 /* NotchSixtyBackup.swift in Sources */,
@@ -1770,6 +1776,7 @@
 				F76000000000000000000002 /* MIMORoomTreatmentActivationPermitTests.swift in Sources */,
 				F78000000000000000000003 /* ProductionInformationArchitectureTests.swift in Sources */,
 				E12A00000000000000000002 /* ProductionSystemAreaTests.swift in Sources */,
+				E12B00000000000000000002 /* SystemSetupFlowTests.swift in Sources */,
 				F79000000000000000000003 /* AudioUnitHostFoundationTests.swift in Sources */,
 				F80000000000000000000002 /* AudioUnitOfflinePreparationTests.swift in Sources */,
 				F81000000000000000000003 /* AudioUnitLiveRackRuntimeTests.swift in Sources */,
