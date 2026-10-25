@@ -27,6 +27,7 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
     @ObservedObject var engine: AudioIOEngine
     @ObservedObject var microphone: RoomCorrectionCalibrationController
     @ObservedObject var profiles: ProductProfileController
+    var roomCorrectionProjects: RoomCorrectionProjectController?
     @EnvironmentObject private var featureFlags: FeatureFlags
     @StateObject private var lab: SpeakerMeasurementLabController
     @StateObject private var alignment:
@@ -60,8 +61,10 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
     init(
         engine: AudioIOEngine,
         microphone: RoomCorrectionCalibrationController,
-        profiles: ProductProfileController
+        profiles: ProductProfileController,
+        roomCorrectionProjects: RoomCorrectionProjectController? = nil
     ) {
+        self.roomCorrectionProjects = roomCorrectionProjects
         _engine = ObservedObject(wrappedValue: engine)
         _microphone = ObservedObject(wrappedValue: microphone)
         _profiles = ObservedObject(wrappedValue: profiles)
@@ -95,6 +98,8 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
                 if tab == .advanced {
                     if featureFlags.isEnabled(.measurementSuite) {
                         MeasurementAnalysisCard(capture: lab.session?.captures.last)
+                        MeasurementLibraryView(
+                            latestCapture: lab.session?.captures.last, projects: roomCorrectionProjects)
                     }
                     protectedDriverCommissioningCard
                 } else {
