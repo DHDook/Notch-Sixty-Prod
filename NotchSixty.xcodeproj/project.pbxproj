@@ -27,6 +27,12 @@
 		E6C000000000000000000030 /* graph.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E6C000000000000000000010 /* graph.cpp */; };
 		E6C000000000000000000031 /* snapshot.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E6C000000000000000000011 /* snapshot.cpp */; };
 		E6C000000000000000000032 /* fft.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E6C000000000000000000012 /* fft.cpp */; };
+		E11C00000000000000000031 /* offline_fft.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E11C00000000000000000011 /* offline_fft.cpp */; };
+		E11C00000000000000000032 /* ess.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E11C00000000000000000012 /* ess.cpp */; };
+		E11C00000000000000000033 /* deconvolve.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E11C00000000000000000013 /* deconvolve.cpp */; };
+		E11C00000000000000000034 /* reference_room.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E11C00000000000000000014 /* reference_room.cpp */; };
+		E11D00000000000000000001 /* MeasurementCore.swift in Sources */ = {isa = PBXBuildFile; fileRef = E11D00000000000000000011 /* MeasurementCore.swift */; };
+		E11D00000000000000000002 /* MeasurementCoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E11D00000000000000000012 /* MeasurementCoreTests.swift */; };
 		E6C000000000000000000033 /* stages_dsp.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E6C000000000000000000013 /* stages_dsp.cpp */; };
 		E6C000000000000000000034 /* stages_system.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E6C000000000000000000014 /* stages_system.cpp */; };
 		E6C000000000000000000035 /* stages_matrix.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E6C000000000000000000015 /* stages_matrix.cpp */; };
@@ -398,6 +404,13 @@
 		E6C000000000000000000010 /* graph.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = graph.cpp; sourceTree = "<group>"; };
 		E6C000000000000000000011 /* snapshot.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = snapshot.cpp; sourceTree = "<group>"; };
 		E6C000000000000000000012 /* fft.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = fft.cpp; sourceTree = "<group>"; };
+		E11C00000000000000000011 /* offline_fft.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = measure/offline_fft.cpp; sourceTree = "<group>"; };
+		E11C00000000000000000012 /* ess.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = measure/ess.cpp; sourceTree = "<group>"; };
+		E11C00000000000000000013 /* deconvolve.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = measure/deconvolve.cpp; sourceTree = "<group>"; };
+		E11C00000000000000000014 /* reference_room.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = measure/reference_room.cpp; sourceTree = "<group>"; };
+		E11C00000000000000000020 /* offline_fft.hpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.h; path = measure/offline_fft.hpp; sourceTree = "<group>"; };
+		E11D00000000000000000011 /* MeasurementCore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeasurementCore.swift; sourceTree = "<group>"; };
+		E11D00000000000000000012 /* MeasurementCoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeasurementCoreTests.swift; sourceTree = "<group>"; };
 		E6C000000000000000000013 /* stages_dsp.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = stages_dsp.cpp; sourceTree = "<group>"; };
 		E6C000000000000000000014 /* stages_system.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = stages_system.cpp; sourceTree = "<group>"; };
 		E6C000000000000000000015 /* stages_matrix.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = stages_matrix.cpp; sourceTree = "<group>"; };
@@ -794,6 +807,11 @@
 				E6C000000000000000000014 /* stages_system.cpp */,
 				E6C000000000000000000015 /* stages_matrix.cpp */,
 				E6C000000000000000000016 /* layout.cpp */,
+				E11C00000000000000000011 /* offline_fft.cpp */,
+				E11C00000000000000000012 /* ess.cpp */,
+				E11C00000000000000000013 /* deconvolve.cpp */,
+				E11C00000000000000000014 /* reference_room.cpp */,
+				E11C00000000000000000020 /* offline_fft.hpp */,
 				E6C000000000000000000020 /* fft.hpp */,
 				E6C000000000000000000021 /* snapshot.hpp */,
 				E6C000000000000000000022 /* stages_dsp.hpp */,
@@ -863,6 +881,7 @@
 				E6D000000000000000000007 /* LiveNChannelUnifiedGraphTests.swift */,
 				A10000000000000000000027 /* ConvolutionTests.swift */,
 				A100000000000000000E2206 /* FeatureFlagsTests.swift */,
+				E11D00000000000000000012 /* MeasurementCoreTests.swift */,
 				A100000000000000000E1302 /* PresetInterchangeTests.swift */,
 				A100000000000000000E1304 /* MultichannelCalibrationDesignerTests.swift */,
 				A100000000000000000E1306 /* FeedForwardShadowIsolationTests.swift */,
@@ -1056,6 +1075,7 @@
 				F10600000000000000000033 /* SpeakerMeasurementLabUIModel.swift */,
 				F10600000000000000000036 /* SpeakerMeasurementLabController.swift */,
 				A2000000000000000000002E /* RoomCorrectionMeasurementAnalyzer.swift */,
+				E11D00000000000000000011 /* MeasurementCore.swift */,
 				A20000000000000000000030 /* RoomCorrectionTargetDesigner.swift */,
 				E20000000000000000000012 /* RoomCorrectionFIRDesigner.swift */,
 				B50000000000000000000011 /* OptionalAcousticResearch.swift */,
@@ -1254,6 +1274,10 @@
 				E6C000000000000000000034 /* stages_system.cpp in Sources */,
 				E6C000000000000000000035 /* stages_matrix.cpp in Sources */,
 				E6C000000000000000000036 /* layout.cpp in Sources */,
+				E11C00000000000000000031 /* offline_fft.cpp in Sources */,
+				E11C00000000000000000032 /* ess.cpp in Sources */,
+				E11C00000000000000000033 /* deconvolve.cpp in Sources */,
+				E11C00000000000000000034 /* reference_room.cpp in Sources */,
 				A10000000000000000000011 /* ContentView.swift in Sources */,
 				A10000000000000000000010 /* NotchSixtyApp.swift in Sources */,
 				A40000000000000000000010 /* ProductionRootView.swift in Sources */,
@@ -1353,6 +1377,7 @@
 				A2000000000000000000001C /* RoomCorrectionCalibrationTransport.swift in Sources */,
 				A2000000000000000000001D /* RoomCorrectionCalibrationController.swift in Sources */,
 				A2000000000000000000001E /* RoomCorrectionMeasurementAnalyzer.swift in Sources */,
+				E11D00000000000000000001 /* MeasurementCore.swift in Sources */,
 				A2000000000000000000001F /* RoomCorrectionProjectController.swift in Sources */,
 				E20000000000000000000001 /* RoomCorrectionTargetDesigner.swift in Sources */,
 				E20000000000000000000002 /* RoomCorrectionFIRDesigner.swift in Sources */,
@@ -1482,6 +1507,7 @@
 				A10000000000000000000013 /* NotchSixtyTests.swift in Sources */,
 				A10000000000000000000014 /* ConvolutionTests.swift in Sources */,
 				A100000000000000000E2205 /* FeatureFlagsTests.swift in Sources */,
+				E11D00000000000000000002 /* MeasurementCoreTests.swift in Sources */,
 				A100000000000000000E1301 /* PresetInterchangeTests.swift in Sources */,
 				A100000000000000000E1303 /* MultichannelCalibrationDesignerTests.swift in Sources */,
 				A100000000000000000E1305 /* FeedForwardShadowIsolationTests.swift in Sources */,

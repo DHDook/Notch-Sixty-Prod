@@ -8,7 +8,7 @@
   builds one slice in a fresh context), realtime-reviewer (Sonnet), and code-scout,
   build-test-runner, plan-tracker, pr-writer (Haiku). `/next` itself runs on Sonnet.
 
-**Current focus:** E11 (measurement suite) next; E6 complete after S11 `e6/graph-default` merges (in review, needs owner). After E6, follow the Execution order in `docs/PROGRAM_PLAN.md` (E11 next).
+**Current focus:** E11 (measurement suite), slice 2 of 10: `e11/repeat-and-timing` (needs owner)
 <!-- plan-tracker keeps the line above current -->
 
 @AGENTS.md

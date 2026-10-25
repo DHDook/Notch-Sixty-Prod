@@ -53,10 +53,12 @@ build_core_objs() {
     CORE_BUILT=1
     CORE_OK=1
     local src
-    for src in graph snapshot fft stages_dsp stages_system stages_matrix layout; do
-        if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -fno-exceptions -fno-rtti -Icore/include \
-            -c "core/src/$src.cpp" -o "$OUT/n60core_$src.o"; then
-            CORE_OBJS+=("$OUT/n60core_$src.o")
+    for src in graph snapshot fft stages_dsp stages_system stages_matrix layout \
+        measure/offline_fft measure/ess measure/deconvolve measure/reference_room; do
+        local obj="$OUT/n60core_${src//\//_}.o"
+        if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -fno-exceptions -fno-rtti -Icore/include -Icore/src \
+            -c "core/src/$src.cpp" -o "$obj"; then
+            CORE_OBJS+=("$obj")
         else
             CORE_OK=0
         fi
@@ -191,6 +193,23 @@ if selected e4_ff_survey; then
             "$OUT/n60_ff_survey.o" "$OUT/n60_fxlms_survey.o" -lc++ -lm
     else
         failed+=(e4_ff_survey)
+    fi
+fi
+
+# E11 S1: measurement core (offline FFT, synchronised ESS, deconvolution, reference room).
+if selected e11_measure_core; then
+    build_core_objs
+    if [ "$CORE_OK" = 1 ]; then
+        for t in measure_fft measure; do
+            if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -Icore/include -Icore/src "core/tests/test_$t.cpp" \
+                "${CORE_OBJS[@]}" -o "$OUT/e11_core_$t" && "$OUT/e11_core_$t"; then
+                passed+=("e11_core_$t")
+            else
+                failed+=("e11_core_$t")
+            fi
+        done
+    else
+        failed+=(e11_measure_core)
     fi
 fi
 
