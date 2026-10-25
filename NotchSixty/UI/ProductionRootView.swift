@@ -391,6 +391,7 @@ struct ProductionRootView: View {
                 engine: engine,
                 profiles: product.profiles,
                 microphone: product.calibration,
+                calibration: product.multichannelCalibration,
                 advisor: product.roomTreatmentAdvisor
             )
         }

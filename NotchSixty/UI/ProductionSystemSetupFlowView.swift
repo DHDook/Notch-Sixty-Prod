@@ -11,22 +11,31 @@ final class SystemSetupFlowModel: ObservableObject {
     @Published var topologyPreset = SystemSetupTopologyPreset(topology: .stereo)
     @Published private(set) var level = SystemSetupLevelPlan()
     @Published var message: String?
+    @Published private(set) var alignment: SystemSetupAlignment?
+    @Published private(set) var noiseIsPlaying = false
+    @Published private(set) var isMeasuring = false
 
     let engine: AudioIOEngine
     let profiles: ProductProfileController
     let microphone: RoomCorrectionCalibrationController
+    let calibration: MultichannelCalibrationController
+    private let noise: SystemSetupNoisePlaying
 
-    init(engine: AudioIOEngine, profiles: ProductProfileController, microphone: RoomCorrectionCalibrationController) {
+    init(engine: AudioIOEngine, profiles: ProductProfileController, microphone: RoomCorrectionCalibrationController,
+         calibration: MultichannelCalibrationController,
+         noise: SystemSetupNoisePlaying? = nil) {
         self.engine = engine
         self.profiles = profiles
         self.microphone = microphone
+        self.calibration = calibration
+        self.noise = noise ?? UnconnectedSystemSetupNoisePlayer()
     }
 
     var choices: SystemSetupChoices { flow.choices }
     var step: SystemSetupStep { flow.step }
     var isRunning: Bool { flow.phase == .running }
     /// Steps built so far; later ones show a placeholder.
-    static let builtSteps: Set<SystemSetupStep> = [.output, .topology, .microphone, .room]
+    static let builtSteps: Set<SystemSetupStep> = [.output, .topology, .microphone, .room, .measure, .alignment]
 
     func begin() {
         let snapshot = profiles.captureSystemState()
@@ -69,8 +78,146 @@ final class SystemSetupFlowModel: ObservableObject {
         flow.choices.microphoneCalibrationFile = microphone.microphoneCalibration?.sourceName
     }
 
-    func raiseLevel() { level.raise() }
-    func lowerLevel() { level.lower() }
+    func raiseLevel() { level.raise(); republishNoise() }
+    func lowerLevel() { level.lower(); republishNoise() }
+
+    /// Plays the Level step's noise through the E11 generator, or says why it cannot.
+    func toggleNoise() {
+        if noiseIsPlaying { stopNoise(); return }
+        do {
+            try noise.start(level.validatedGeneratorSettings(sampleRate: engine.selectedOutputDevice?.nominalSampleRate ?? 48_000))
+            noiseIsPlaying = noise.isPlaying
+            message = nil
+        } catch {
+            noiseIsPlaying = false
+            message = error.localizedDescription
+        }
+    }
+
+    func stopNoise() {
+        noise.stop()
+        noiseIsPlaying = false
+    }
+
+    private func republishNoise() {
+        guard noiseIsPlaying else { return }
+        do { try noise.start(level.validatedGeneratorSettings(sampleRate: engine.selectedOutputDevice?.nominalSampleRate ?? 48_000)) } catch { stopNoise(); message = error.localizedDescription }
+    }
+
+    // MARK: Measure (design note 3)
+
+    var measureProgress: SystemSetupMeasureProgress {
+        SystemSetupMeasureProgress(
+            seats: calibration.seats, sources: calibration.sources, measurements: calibration.measurements)
+    }
+
+    func prepareMeasure() {
+        stopNoise()
+        calibration.prepareForUse()
+        syncMeasurementChoices()
+    }
+
+    func addSeat() {
+        do { try calibration.addSeat(); syncMeasurementChoices() } catch { message = error.localizedDescription }
+    }
+
+    func removeSeat(_ id: UUID) {
+        do { try calibration.removeSeat(id); invalidateDesign(); syncMeasurementChoices() }
+        catch { message = error.localizedDescription }
+    }
+
+    /// Measures every missing seat and source in turn. Playback is stopped first (measurement needs
+    /// the output to itself) and the reason is shown.
+    func measureAll() async {
+        guard !isMeasuring else { return }
+        isMeasuring = true
+        defer { isMeasuring = false; syncMeasurementChoices() }
+        if engine.lifecycleState != .idle {
+            engine.stop()
+            message = "Playback was stopped so the speakers can be measured. Start it again when setup finishes."
+        } else {
+            message = nil
+        }
+        while measureProgress.next != nil {
+            do {
+                try calibration.beginNextMeasurement()
+                while calibration.state == .measuring {
+                    try? await Task.sleep(for: .milliseconds(100))
+                    if try await calibration.finishMeasurementIfComplete() { break }
+                    if Task.isCancelled { calibration.cancelMeasurement(); return }
+                }
+                syncMeasurementChoices()
+            } catch {
+                message = error.localizedDescription
+                return
+            }
+        }
+    }
+
+    /// Re-measure one seat: its records are dropped and the next pass measures them again.
+    func remeasure(seatID: UUID) {
+        do {
+            for source in calibration.sources { try calibration.remeasure(seatID: seatID, source: source) }
+            invalidateDesign()
+            syncMeasurementChoices()
+        } catch { message = error.localizedDescription }
+    }
+
+    func cancelMeasurement() {
+        calibration.cancelMeasurement()
+        syncMeasurementChoices()
+    }
+
+    private func syncMeasurementChoices() {
+        var choices = flow.choices
+        measureProgress.apply(to: &choices)
+        flow.choices = choices
+    }
+
+    /// New or removed measurements make the alignment stale: revert the trial and ask again.
+    private func invalidateDesign() {
+        if flow.choices.alignmentApplied { revertAlignment() }
+        alignment = nil
+    }
+
+    // MARK: Alignment
+
+    func computeAlignment() async {
+        do {
+            let design = try await calibration.designCalibration()
+            alignment = SystemSetupAlignment.make(
+                design: design, seats: calibration.seats, measurements: calibration.measurements)
+            message = nil
+        } catch {
+            alignment = nil
+            message = error.localizedDescription
+        }
+    }
+
+    /// Trial apply: only trim, delay and polarity change; Cancel or Revert restores the snapshot.
+    func applyAlignment() {
+        guard let alignment, let profile = profiles.selectedSystemOutputDeviceProfile else {
+            message = "Work out the alignment first."
+            return
+        }
+        do {
+            try profiles.replaceSelectedSystemOutputDeviceProfile(try alignment.applying(to: profile))
+            flow.choices.alignmentApplied = true
+            message = nil
+        } catch {
+            message = error.localizedDescription
+        }
+    }
+
+    func revertAlignment() {
+        guard let snapshot = flow.snapshot else { return }
+        do {
+            try profiles.replaceSelectedSystemOutputDeviceProfile(snapshot.outputDeviceProfile)
+            flow.choices.alignmentApplied = false
+        } catch {
+            message = "Restoring the previous alignment failed: \(error.localizedDescription)"
+        }
+    }
 
     func acceptSweepLevel(measuredSPLdBC: Double) {
         flow.choices.sweepLevelDBFS = level.sweepLevel(measuredSPLdBC: measuredSPLdBC)
@@ -95,8 +242,11 @@ final class SystemSetupFlowModel: ObservableObject {
     }
 
     func cancel() {
+        stopNoise()
+        calibration.cancelMeasurement()
         guard let snapshot = try? flow.cancel() else { return }
         do {
+            try profiles.replaceSelectedSystemOutputDeviceProfile(snapshot.outputDeviceProfile)
             try profiles.replaceSelectedSystemBassManagement(snapshot.bassManagement)
         } catch {
             message = "Restoring the previous settings failed: \(error.localizedDescription)"
@@ -115,9 +265,10 @@ struct ProductionSystemSetupFlowView: View {
     @Environment(\.dismiss) private var dismiss
 
     init(engine: AudioIOEngine, profiles: ProductProfileController,
-         microphone: RoomCorrectionCalibrationController, advisor: RoomTreatmentAdvisorController) {
+         microphone: RoomCorrectionCalibrationController, calibration: MultichannelCalibrationController,
+         advisor: RoomTreatmentAdvisorController) {
         _model = StateObject(wrappedValue: SystemSetupFlowModel(
-            engine: engine, profiles: profiles, microphone: microphone))
+            engine: engine, profiles: profiles, microphone: microphone, calibration: calibration))
         self.advisor = advisor
     }
 
@@ -176,6 +327,8 @@ struct ProductionSystemSetupFlowView: View {
         case .output: SystemSetupOutputStep(model: model)
         case .topology: SystemSetupTopologyStep(model: model)
         case .microphone: SystemSetupMicrophoneStep(model: model)
+        case .measure: SystemSetupMeasureStep(model: model)
+        case .alignment: SystemSetupAlignmentStep(model: model)
         case .room:
             Text("Optional. Describe the room so seat and speaker suggestions can pre-fill the next steps, or skip.")
                 .foregroundStyle(.secondary)
@@ -313,6 +466,7 @@ private struct SystemSetupMicrophoneStep: View {
                 }
             }
             HStack {
+                Button(model.noiseIsPlaying ? "Stop noise" : "Play noise") { model.toggleNoise() }
                 Button(monitor.isRunning ? "Stop meter" : "Start meter") { toggleMeter() }
                     .disabled(microphone.selectedInputDevice == nil)
                 Button("Use this level for the sweep") {
@@ -324,7 +478,7 @@ private struct SystemSetupMicrophoneStep: View {
                 }
             }
         }
-        .onDisappear { monitor.stop() }
+        .onDisappear { monitor.stop(); model.stopNoise() }
     }
 
     private func toggleMeter() {
@@ -332,6 +486,102 @@ private struct SystemSetupMicrophoneStep: View {
         guard let device = microphone.selectedInputDevice else { return }
         monitor.weighting = .c
         monitor.start(microphone: device, channel: microphone.selectedInputChannelIndex)
+    }
+}
+
+private struct SystemSetupMeasureStep: View {
+    @ObservedObject var model: SystemSetupFlowModel
+    @ObservedObject private var calibration: MultichannelCalibrationController
+
+    init(model: SystemSetupFlowModel) {
+        self.model = model
+        _calibration = ObservedObject(wrappedValue: model.calibration)
+    }
+
+    var body: some View {
+        let progress = model.measureProgress
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Measure your listening seats").font(.headline)
+            Text("Each speaker plays a sweep and the microphone records it at each seat. Measure the main seat first; add seats for a wider sweet spot. Playback is stopped while measuring.")
+                .font(.callout).foregroundStyle(.secondary)
+            if calibration.sources.isEmpty {
+                Label("Describe your speakers and outputs in Speakers first; measuring needs an enabled output device profile.",
+                      systemImage: "exclamationmark.triangle")
+                    .font(.callout)
+            }
+            ForEach(calibration.seats) { seat in
+                HStack {
+                    Image(systemName: progress.isComplete(seat) ? "checkmark.circle.fill" : "circle")
+                    Text(seat.name)
+                    Spacer()
+                    if progress.isComplete(seat) {
+                        Button("Re-measure") { model.remeasure(seatID: seat.id) }.disabled(model.isMeasuring)
+                    }
+                    if calibration.seats.count > 1 {
+                        Button("Remove") { model.removeSeat(seat.id) }.disabled(model.isMeasuring)
+                    }
+                }
+            }
+            HStack {
+                Button("Add seat") { model.addSeat() }
+                    .disabled(model.isMeasuring || calibration.seats.count >= Int(N60_CALIBRATION_MAX_SEATS))
+                Spacer()
+                if model.isMeasuring {
+                    Button("Stop") { model.cancelMeasurement() }
+                } else {
+                    Button(progress.isComplete ? "Measure again" : "Measure") {
+                        Task { await model.measureAll() }
+                    }
+                    .disabled(progress.next == nil && !progress.isComplete)
+                }
+            }
+            ProgressView(value: model.isMeasuring ? calibration.activeMeasurementProgress : progress.fraction)
+            if let next = progress.next, model.isMeasuring {
+                Text("Measuring \(next.seat.name), \(next.source.displayName)").font(.caption)
+            }
+        }
+        .onAppear { model.prepareMeasure() }
+    }
+}
+
+private struct SystemSetupAlignmentStep: View {
+    @ObservedObject var model: SystemSetupFlowModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Align levels, polarity and distances").font(.headline)
+            Text("Notch Sixty matches the loudness and arrival time of your speakers at the seats you measured. Apply it to hear the result; you can revert at any time and Cancel restores everything.")
+                .font(.callout).foregroundStyle(.secondary)
+            if let alignment = model.alignment {
+                Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 6) {
+                    GridRow {
+                        Text("Speaker").bold(); Text("Level").bold(); Text("Delay").bold()
+                        Text("Polarity").bold(); Text("Distance").bold()
+                    }
+                    ForEach(alignment.rows) { row in
+                        GridRow {
+                            Text(row.title)
+                            Text("\(row.levelDB, specifier: "%.1f") dB").monospacedDigit()
+                            Text("\(row.delayMilliseconds, specifier: "%.2f") ms").monospacedDigit()
+                            Text(row.polarityInverted ? "Inverted" : "Normal")
+                            Text(row.distanceText).monospacedDigit()
+                        }
+                    }
+                }
+                if !alignment.invertedSources.isEmpty {
+                    Label("A speaker looks wired out of polarity. Alignment flips it for you; check the wiring too.",
+                          systemImage: "exclamationmark.triangle").font(.callout)
+                }
+                HStack {
+                    Button("Apply") { model.applyAlignment() }.disabled(model.choices.alignmentApplied)
+                    Button("Revert") { model.revertAlignment() }.disabled(!model.choices.alignmentApplied)
+                    if model.choices.alignmentApplied { Label("Applied", systemImage: "checkmark.circle.fill") }
+                }
+            } else {
+                Button("Work out the alignment") { Task { await model.computeAlignment() } }
+            }
+        }
+        .onAppear { if model.alignment == nil { Task { await model.computeAlignment() } } }
     }
 }
 

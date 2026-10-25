@@ -81,8 +81,9 @@ struct SystemSetupLevelPlan: Equatable, Sendable {
     mutating func reset() { levelDB = Self.startLevelDB }
 
     /// Generator settings for the current level: band-limited pink noise at the ceiling-clamped level.
-    func generatorSettings() -> SignalGeneratorSettings {
+    func generatorSettings(sampleRate: Double = 48_000) -> SignalGeneratorSettings {
         var settings = SignalGeneratorSettings()
+        settings.highHz = min(settings.highHz, 0.45 * sampleRate)
         settings.kind = .bandLimitedPink
         settings.levelDB = levelDB
         settings.ceilingDB = Self.ceilingDB
