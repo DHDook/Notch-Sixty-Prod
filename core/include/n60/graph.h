@@ -34,7 +34,7 @@ extern "C" {
 #endif
 
 /* Bumped on any incompatible change to a struct or function below. */
-#define N60_GRAPH_ABI_VERSION 15u
+#define N60_GRAPH_ABI_VERSION 16u
 
 typedef struct n60_graph n60_graph; /* opaque */
 
@@ -120,6 +120,13 @@ typedef enum n60_stage_kind {
 #define N60_GENERATOR_BAND_PINK 2u
 #define N60_GENERATOR_SINE 3u
 #define N60_GENERATOR_PERIODIC_PINK 4u
+/* ABI v16 (E10 S8): N60_GENERATOR_SWEEP plays one synchronised exponential sine sweep (Novak, Lotton and Simon 2015,
+ * identical sample for sample to n60_measure_ess_generate with synchronised = 1, level 0 dBFS peak and a 50 ms half-Hann
+ * fade) from [4] start Hz to [5] end Hz over [6] frames (0.5 s to 60 s and at most 16777216 frames; the synchronised sweep rounds the duration, so
+ * the played length is n60_measure_ess_describe's frame_count), then silence until the auto-stop or [9] going 0. The
+ * level is RMS-referenced as for the sine (peak = RMS x sqrt 2), so the sweep peak is 3 dB above the stated level.
+ * Every selected lane plays the same sweep. A rising edge of [9] from silence restarts it from its first sample. */
+#define N60_GENERATOR_SWEEP 5u
 
 /* External processor (ABI v13). The graph calls back into the host for work the core cannot do itself and must
  * not know about (the macOS app's Audio Unit rack). The stage sits between the playback half and the system half
@@ -200,7 +207,9 @@ typedef int (*n60_external_process_fn)(void *context, const float *const *in, fl
  *  full-rate FIR in parallel with a long FIR run at fs/D, so a long room filter costs a fraction of its full-rate length
  *  at 352.8 and 384 kHz. params: [0] D (1, 2, 4, 8, 16 or 32; the designer picks D so that fs/D is 11.025 or 12 kHz),
  *  [1] N full-rate taps (1..32768), [2] M low-band taps (1..32768), then the N full-rate taps, then the M low-band
- *  taps (the low taps are sampled at fs/D). paramCount 3+N+M, identical taps on every selected lane (laneMask or
+ *  taps (the low taps are sampled at fs/D). ABI v16: paramCount 4+N+M adds a header word [3] E (0..N60_GRAPH_MAX_DELAY_FRAMES), a
+ *  pure delay in full-rate frames given to the full-rate path only (the taps then start at [4]), so a design delay need not be
+ *  stored as leading zeros; the declared group delay still counts it. paramCount 3+N+M, identical taps on every selected lane (laneMask or
  *  laneA/N60_LANE_ALL, as FIR). capacityFrames is the filter's declared group delay in full-rate frames (reported,
  *  never applied), as for FIR. Taps are not live: publish a new snapshot.
  *  Signal path: out = fullFIR(x) delayed by E + interp(lowFIR(decim(x))). decim and interp are a cascade of log2(D)

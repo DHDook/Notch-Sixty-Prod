@@ -30,6 +30,7 @@
 #include <cstring>
 
 #include "fft.hpp"
+#include "halfband.hpp"
 
 namespace n60 {
 namespace {
@@ -832,7 +833,7 @@ void runFir(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) {
 // ---- two-band room FIR (ABI v15, E10 S3) -------------------------------------------
 // Full-rate FIR (delayed) + half-band decimate / low-rate FIR / half-band interpolate, summed. See graph.h.
 
-constexpr uint32_t kHbK = 18;                 // half-band length 4K+1 = 73 taps, delay 2K per filter
+constexpr uint32_t kHbK = kHalfbandK;                 // half-band length 4K+1 = 73 taps, delay 2K per filter
 constexpr uint32_t kHbOdd = 2 * kHbK;         // non-zero off-centre taps on one side of the centre (odd offsets)
 constexpr uint32_t kHbRing = 128;             // power of two >= 4K+1
 constexpr uint32_t kRfMaxLevels = 5;          // D = 32
@@ -849,7 +850,7 @@ struct RfHead {
     RfLevel lv[kRfMaxLevels];
 };
 struct RfShared {
-    uint32_t D, levels, taps1, taps2, parts1, parts2, delay, lowLatency, hashLo, hashHi, pad[2];
+    uint32_t D, levels, taps1, taps2, parts1, parts2, delay, lowLatency, hashLo, hashHi, extra, pad;
     float hodd[kHbOdd];  // h[2i+1] of the half-band, i = 0..2K-1 (centre tap is 0.5)
 };
 struct RfLayout {
@@ -864,6 +865,12 @@ bool rfValidD(float d) { return d == 1.0f || d == 2.0f || d == 4.0f || d == 8.0f
 // Latency of the low path in full-rate frames; the full-rate path is delayed by the difference to 256.
 uint32_t rfLowLatency(uint32_t D) { return kRfDelayPerLevel * (D - 1) + kPart * D; }
 uint32_t rfDelay(uint32_t D) { return rfLowLatency(D) - kPart; }
+// ABI v16: an optional fourth header word E (full-rate pure delay in frames) sits before the taps when paramCount is
+// 4 + N + M; the full-rate path takes E extra delay frames, so a long design delay need not be stored as leading zeros.
+bool rfHasExtra(const float *p, uint32_t paramCount) {
+    return static_cast<uint64_t>(paramCount) == 4ull + static_cast<uint32_t>(p[1]) + static_cast<uint32_t>(p[2]);
+}
+uint32_t rfExtraOf(const float *p, uint32_t paramCount) { return rfHasExtra(p, paramCount) ? static_cast<uint32_t>(p[3]) : 0u; }
 
 RfLayout rfLayout(uint32_t p1, uint32_t p2) {
     RfLayout L;
@@ -970,33 +977,7 @@ void runRoomFirTwoBand(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t
     }
 }
 
-// Kaiser-windowed half-band (cutoff a quarter of the rate), odd taps normalised so the DC gain is exactly one.
-double besselI0(double x) {
-    double sum = 1.0, term = 1.0;
-    for (int k = 1; k < 60; ++k) {
-        term *= (x / (2.0 * k)) * (x / (2.0 * k));
-        sum += term;
-        if (term < 1e-18 * sum) break;
-    }
-    return sum;
-}
-void rfDesignHalfband(float *hodd) {
-    constexpr double kBeta = 11.0;  // about 110 dB
-    constexpr double kPi = 3.14159265358979323846;
-    const int N = static_cast<int>(4 * kHbK);
-    double h[kHbOdd], sum = 0.0;
-    for (uint32_t i = 0; i < kHbOdd; ++i) {
-        const int n = static_cast<int>(2 * i + 1);
-        const double m = n - static_cast<int>(2 * kHbK);
-        const double sinc = std::sin(0.5 * kPi * m) / (kPi * m);  // 2 fc sinc(2 fc m), fc = 1/4
-        const double t = 2.0 * n / N - 1.0;
-        h[i] = sinc * besselI0(kBeta * std::sqrt(std::max(0.0, 1.0 - t * t))) / besselI0(kBeta);
-        sum += h[i];
-    }
-    // h[centre] = 0.5 and the odd taps sum to 0.5, so the DC gain is exactly one.
-    const double norm = 0.5 / sum;
-    for (uint32_t i = 0; i < kHbOdd; ++i) hodd[i] = static_cast<float>(h[i] * norm);
-}
+void rfDesignHalfband(float *hodd) { halfbandOddTaps(hodd); }
 
 }  // namespace
 
@@ -1055,7 +1036,11 @@ n60_status validateDspStage(const n60_stage_desc &s, double rate, uint32_t outCh
             n2 > maxTaps) {
             return N60_STATUS_BAD_ARGUMENT;
         }
-        if (static_cast<uint64_t>(s.paramCount) != 3ull + static_cast<uint32_t>(n1) + static_cast<uint32_t>(n2)) {
+        const uint64_t base = static_cast<uint64_t>(static_cast<uint32_t>(n1)) + static_cast<uint32_t>(n2);
+        if (static_cast<uint64_t>(s.paramCount) == 4ull + base) {
+            const float e = s.params[3];
+            if (e != std::floor(e) || e < 0.0f || e > static_cast<float>(N60_GRAPH_MAX_DELAY_FRAMES)) return N60_STATUS_BAD_ARGUMENT;
+        } else if (static_cast<uint64_t>(s.paramCount) != 3ull + base) {
             return N60_STATUS_BAD_ARGUMENT;
         }
         return N60_STATUS_OK;
@@ -1116,7 +1101,7 @@ void dspSizes(const n60_stage_desc &s, size_t &perLane, size_t &shared) {
         case N60_STAGE_ROOM_FIR_TWO_BAND: {
             const uint32_t D = static_cast<uint32_t>(s.params[0]);
             const uint32_t p1 = firParts(static_cast<uint32_t>(s.params[1])), p2 = firParts(static_cast<uint32_t>(s.params[2]));
-            perLane = rfLaneLayout(p1, p2, rfDelay(D)).total;
+            perLane = rfLaneLayout(p1, p2, rfDelay(D) + rfExtraOf(s.params, s.paramCount)).total;
             shared = rfLayout(p1, p2).total;
             break;
         }
@@ -1185,7 +1170,8 @@ void dspInit(SnapHeader *h, const StageRec &r) {
             s->taps2 = static_cast<uint32_t>(p[2]);
             s->parts1 = firParts(s->taps1);
             s->parts2 = firParts(s->taps2);
-            s->delay = rfDelay(s->D);
+            s->extra = rfExtraOf(p, r.paramCount);
+            s->delay = rfDelay(s->D) + s->extra;
             s->lowLatency = rfLowLatency(s->D);
             const uint64_t hash = firTapHash(p, r.paramCount);
             s->hashLo = static_cast<uint32_t>(hash);
@@ -1194,7 +1180,8 @@ void dspInit(SnapHeader *h, const StageRec &r) {
             const RfLayout L = rfLayout(s->parts1, s->parts2);
             fft::planInit(sh + L.plan, kFft);
             Complex *work = reinterpret_cast<Complex *>(sh + L.work);
-            const float *taps[2] = {p + 3, p + 3 + s->taps1};
+            const uint32_t hdr = rfHasExtra(p, r.paramCount) ? 4u : 3u;
+            const float *taps[2] = {p + hdr, p + hdr + s->taps1};
             const uint32_t counts[2] = {s->taps1, s->taps2};
             Complex *spectra[2] = {reinterpret_cast<Complex *>(sh + L.spec1), reinterpret_cast<Complex *>(sh + L.spec2)};
             const uint32_t parts[2] = {s->parts1, s->parts2};
@@ -1260,7 +1247,7 @@ bool dspFirSameFilter(const SnapHeader *a, const StageRec &ra, const SnapHeader 
 }
 
 // Warm-up frames the two-band stage needs from silence: its longest path, in full-rate frames.
-static uint32_t rfWarmFrames(const RfShared &s) { return std::max(s.taps1 + kPart, s.lowLatency + s.taps2 * s.D); }
+static uint32_t rfWarmFrames(const RfShared &s) { return std::max(s.taps1 + kPart + s.extra, s.lowLatency + s.taps2 * s.D); }
 
 static void rfCopyFdl(Complex *dst, const Complex *src, const FirLane &st, uint32_t P) {
     uint32_t slot = st.head;
