@@ -8,7 +8,7 @@
   builds one slice in a fresh context), realtime-reviewer (Sonnet), and code-scout,
   build-test-runner, plan-tracker, pr-writer (Haiku). `/next` itself runs on Sonnet.
 
-**Current focus:** E10 (mixed-phase room correction and bass control), slice 2 of 9: multi-seat coherence and latency modes
+**Current focus:** E10 (mixed-phase room correction and bass control), slice 3 of 9: two-band ROOM_FIR stage
 <!-- plan-tracker keeps the line above current -->
 
 @AGENTS.md

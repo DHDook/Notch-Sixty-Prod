@@ -101,6 +101,15 @@ int32_t n60_correct_synthesize(const n60_correct_synth_params *params, const n60
     if (report != nullptr) {
         *report = n60_correct_synth_report{};
         report->declared_latency_frames = static_cast<uint32_t>(latency);
+        if (latency > 0) {
+            report->effective_latency_frames = report->declared_latency_frames;
+        } else {
+            uint64_t peakAt = 0;
+            for (uint64_t n = 1; n < tapCount; ++n) {
+                if (std::fabs(taps[n]) > std::fabs(taps[peakAt])) peakAt = n;
+            }
+            report->effective_latency_frames = static_cast<uint32_t>(peakAt);
+        }
         std::vector<double> padded(size, 0.0);
         for (uint64_t n = 0; n < tapCount; ++n) padded[n] = static_cast<double>(taps[n]);
         std::vector<Cplx> response;

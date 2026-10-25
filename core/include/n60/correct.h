@@ -157,6 +157,45 @@ int32_t n60_correct_seat_excess_phase(const n60_correct_problem *problem, uint32
 int32_t n60_correct_design_channel(const n60_correct_problem *problem, uint32_t channel,
                                    const n60_correct_design_params *params, n60_correct_design_grid *grid);
 
+/*
+ * Default seat weights (design note 3): 1 for every seat, 2 for the main seat. Writes seat_count
+ * values; main_seat >= seat_count gives all ones.
+ */
+int32_t n60_correct_default_seat_weights(uint32_t seat_count, uint32_t main_seat, double *weights, uint32_t capacity);
+
+/*
+ * Each seat's contribution to the multi-seat phase coherence of one channel, for the UI: the
+ * weight-free mean of cos(angle between the seat's excess-phase phasor and the weighted mean
+ * phasor), taken over the grid points below the phase limit where the coherence ramp g(R) is
+ * above 0 and weighted by g(R). 1 means the seat agrees with the correction, 0 or below means it
+ * disagrees. Writes seat_count values; a seat with zero weight, or a channel with no coherent
+ * points, gives 0.
+ */
+int32_t n60_correct_seat_coherence_contribution(const n60_correct_problem *problem, uint32_t channel,
+                                                const n60_correct_design_params *params, double *contribution,
+                                                uint32_t capacity);
+
+/* ---- Latency modes (design note 4) ---- */
+
+#define N60_CORRECT_LATENCY_VIDEO 0u      /* minimum phase, low latency */
+#define N60_CORRECT_LATENCY_MUSIC_20MS 1u /* mixed phase, budget 20 ms */
+#define N60_CORRECT_LATENCY_MUSIC_50MS 2u /* mixed phase, budget 50 ms (default music mode) */
+#define N60_CORRECT_LATENCY_MUSIC_100MS 3u
+/* Upper bound on the latency video mode adds at any rate. */
+#define N60_CORRECT_VIDEO_MAX_LATENCY_SECONDS 0.005
+
+/*
+ * Resolves a latency mode to the design mode (N60_CORRECT_MODE_*) and the budget L in seconds
+ * (0 in video mode). Either output may be NULL. Unknown modes return ERR_ARGUMENT.
+ */
+int32_t n60_correct_latency_mode(uint32_t latency_mode, uint32_t *design_mode, double *budget_seconds);
+
+/*
+ * Tap count that holds the budget at a rate: the budget plus the response tail (120 ms in music
+ * modes, 40 ms in video mode), rounded up to a multiple of 64 and capped at N60_CORRECT_MAX_TAPS.
+ */
+uint32_t n60_correct_latency_mode_tap_count(uint32_t latency_mode, double sample_rate);
+
 /* ---- 4. Synthesis, declared latency and the pre-ringing audit ---- */
 
 typedef struct n60_correct_synth_params {
@@ -174,6 +213,7 @@ void n60_correct_synth_defaults(uint32_t mode, double sample_rate, uint32_t tap_
 typedef struct n60_correct_synth_report {
     uint32_t declared_latency_frames;  /* exactly round(latency_seconds * sample_rate) */
     double peak_gain_db;               /* largest positive gain of the taps, for headroom */
+    uint32_t effective_latency_frames; /* mixed phase: the declared latency; minimum phase: the tap peak position */
 } n60_correct_synth_report;
 
 /* Synthesises a design into taps at any sample rate. Correction above the grid is unity. */

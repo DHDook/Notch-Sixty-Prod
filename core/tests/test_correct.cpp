@@ -325,6 +325,184 @@ static void testMinimumPhaseMode(double fs) {
     CHECK(report.prering.band_count == 0, "audit skipped in minimum-phase mode");
 }
 
+// ---- E10 S2: coherence gating, weighting and latency modes ----
+
+static double rmsGroupDelay(const std::vector<double> &f, const std::vector<double> &phase, const std::vector<char> *mask,
+                            double lowHz, double highHz) {
+    const std::vector<double> gd = groupDelay(f, phase);
+    double sum = 0;
+    int n = 0;
+    for (size_t i = 0; i < f.size(); ++i) {
+        if (f[i] < lowHz || f[i] > highHz) continue;
+        if (mask != nullptr && !(*mask)[i]) continue;
+        sum += gd[i] * gd[i];
+        ++n;
+    }
+    return n > 0 ? std::sqrt(sum / n) : 0.0;
+}
+
+// Seats 1..5 get their own extra allpass section near 150 to 250 Hz, so the seats disagree about
+// the excess phase there while still agreeing below it.
+static void divergeSeats(Room &room) {
+    for (uint32_t s = 1; s < room.problem.seat_count; ++s) {
+        const double f0 = 140.0 + 22.0 * s, q = 3.0 + 0.4 * s;
+        const double w0 = 2 * kPi * f0 / room.fs, alpha = std::sin(w0) / (2 * q), c = std::cos(w0);
+        const double a0 = 1 + alpha, b0 = (1 - alpha) / a0, b1 = -2 * c / a0, b2 = 1.0, a1 = -2 * c / a0, a2 = (1 - alpha) / a0;
+        std::vector<float> &ir = room.irs[s];
+        double x1 = 0, x2 = 0, y1 = 0, y2 = 0;
+        for (float &v : ir) {
+            const double x = v, y = b0 * x + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2;
+            x2 = x1; x1 = x; y2 = y1; y1 = y;
+            v = static_cast<float>(y);
+        }
+    }
+}
+
+static void testSixSeats(double fs) {
+    Room room;
+    buildRoom(room, fs, 6);
+    divergeSeats(room);
+    const std::vector<double> f = gridFrequencies();
+    n60_correct_design_params mixed{}, minimum{};
+    n60_correct_design_defaults(N60_CORRECT_MODE_MIXED_PHASE, &mixed);
+    n60_correct_design_defaults(N60_CORRECT_MODE_MIN_PHASE, &minimum);
+    GridBuffers gm, gn;
+    CHECK(n60_correct_design_channel(&room.problem, 0, &mixed, &gm.grid) == 0, "six-seat mixed design");
+    CHECK(n60_correct_design_channel(&room.problem, 0, &minimum, &gn.grid) == 0, "six-seat minimum design");
+
+    // The magnitude path is the same in both modes (incoherent bins match minimum phase within 0.1 dB).
+    double worstMag = 0;
+    for (size_t i = 0; i < f.size(); ++i) worstMag = std::max(worstMag, std::fabs(gm.db[i] - gn.db[i]));
+    CHECK(worstMag < 0.1, "mixed magnitude matches minimum phase at %g: %g dB", fs, worstMag);
+
+    // Coherent bins are corrected; incoherent bins get g = 0, so the phase correction has no group delay there.
+    const std::vector<double> gdPhase = groupDelay(f, gm.phase);
+    std::vector<char> coherent(f.size(), 0), incoherent(f.size(), 0);
+    int coherentCount = 0, incoherentCount = 0;
+    for (size_t i = 1; i + 1 < f.size(); ++i) {
+        if (f[i] > 300.0 || f[i] < 30.0) continue;
+        if (gm.coherence[i] >= 0.8 && gm.coherence[i - 1] >= 0.8 && gm.coherence[i + 1] >= 0.8) { coherent[i] = 1; ++coherentCount; }
+        if (gm.coherence[i] < 0.6 && gm.coherence[i - 1] < 0.6 && gm.coherence[i + 1] < 0.6) {
+            incoherent[i] = 1;
+            ++incoherentCount;
+            CHECK(std::fabs(gdPhase[i]) < 1e-9, "no group delay correction where incoherent at %g Hz: %g", f[i], gdPhase[i]);
+        }
+    }
+    CHECK(incoherentCount > 5, "six-seat room has incoherent bins at %g: %d", fs, incoherentCount);
+    CHECK(coherentCount > 20, "six-seat room has coherent bins at %g: %d", fs, coherentCount);
+    if (verbose) std::printf("  %g: coherent bins %d incoherent bins %d\n", fs, coherentCount, incoherentCount);
+    // Coherent bins: the mean excess group delay of the seats falls.
+    double before = 0, after = 0;
+    for (uint32_t s = 0; s < 6; ++s) {
+        std::vector<double> excess(N60_CORRECT_GRID_POINTS), residual(N60_CORRECT_GRID_POINTS);
+        CHECK(n60_correct_seat_excess_phase(&room.problem, 0, s, &mixed, excess.data(), N60_CORRECT_GRID_POINTS) == 0, "excess");
+        for (size_t i = 0; i < excess.size(); ++i) residual[i] = excess[i] + gm.phase[i];
+        before += rmsGroupDelay(f, excess, &coherent, 30.0, 300.0);
+        after += rmsGroupDelay(f, residual, &coherent, 30.0, 300.0);
+    }
+    CHECK(after < before, "coherent-bin excess group delay falls at %g: %g -> %g ms", fs, before / 6 * 1e3, after / 6 * 1e3);
+
+    // Seats' overall excess group delay falls on average, and no seat's magnitude is worse than
+    // minimum phase by more than 0.5 dB at 1/6 octave (predicted from the synthesised taps).
+    const uint32_t tapCount = static_cast<uint32_t>(fs * 0.25);
+    n60_correct_synth_params sm{}, sn{};
+    n60_correct_synth_defaults(N60_CORRECT_MODE_MIXED_PHASE, fs, tapCount, 0.05, &sm);
+    n60_correct_synth_defaults(N60_CORRECT_MODE_MIN_PHASE, fs, tapCount, 0.0, &sn);
+    std::vector<float> tm(tapCount), tn(tapCount);
+    CHECK(n60_correct_synthesize(&sm, &gm.grid, tm.data(), tm.size(), nullptr) == 0, "mixed taps");
+    CHECK(n60_correct_synthesize(&sn, &gn.grid, tn.data(), tn.size(), nullptr) == 0, "minimum taps");
+    double meanAll = 0, meanAllAfter = 0, worstSeat = 0;
+    for (uint32_t s = 0; s < 6; ++s) {
+        std::vector<double> excess(N60_CORRECT_GRID_POINTS), residual(N60_CORRECT_GRID_POINTS);
+        n60_correct_seat_excess_phase(&room.problem, 0, s, &mixed, excess.data(), N60_CORRECT_GRID_POINTS);
+        for (size_t i = 0; i < excess.size(); ++i) residual[i] = excess[i] + gm.phase[i];
+        meanAll += rmsGroupDelay(f, excess, nullptr, 30.0, 300.0);
+        meanAllAfter += rmsGroupDelay(f, residual, nullptr, 30.0, 300.0);
+        const std::vector<float> &ir = room.irs[s];
+        for (double hz : {40.0, 63.0, 100.0, 160.0, 250.0, 400.0, 630.0, 1000.0, 2000.0, 4000.0, 8000.0}) {
+            double pm = 0, pn = 0;
+            for (int k = -3; k <= 3; ++k) {  // 1/6 octave power smoothing, seven points
+                const double h = hz * std::exp2(k / 36.0);
+                const double w = 2 * kPi * h / fs;
+                double re = 0, im = 0;
+                for (size_t n = 0; n < ir.size(); ++n) { re += ir[n] * std::cos(w * n); im -= ir[n] * std::sin(w * n); }
+                const double seatMag2 = re * re + im * im;
+                const double fm = std::pow(10.0, tapsDb(tm, h, fs) / 10.0), fn = std::pow(10.0, tapsDb(tn, h, fs) / 10.0);
+                pm += seatMag2 * fm;
+                pn += seatMag2 * fn;
+            }
+            worstSeat = std::max(worstSeat, 10.0 * std::log10(pm / pn));
+        }
+    }
+    if (verbose) std::printf("  %g: mean excess gd %.3f -> %.3f ms, worst seat vs minimum %.3f dB\n", fs, meanAll / 6e-3, meanAllAfter / 6e-3, worstSeat);
+    CHECK(meanAllAfter < meanAll, "mean excess group delay falls at %g: %g -> %g ms", fs, meanAll / 6 * 1e3, meanAllAfter / 6 * 1e3);
+    CHECK(worstSeat < 0.5, "no seat worse than minimum phase by 0.5 dB at %g: %g", fs, worstSeat);
+
+    // Per-seat contribution: in [-1, 1], and the default weights favour the main seat.
+    std::vector<double> contribution(6), weights(6);
+    CHECK(n60_correct_seat_coherence_contribution(&room.problem, 0, &mixed, contribution.data(), 6) == 0, "contribution");
+    for (double c : contribution) CHECK(c >= -1.0 - 1e-9 && c <= 1.0 + 1e-9, "contribution range %g", c);
+    CHECK(n60_correct_default_seat_weights(6, 2, weights.data(), 6) == 0 && weights[2] == 2.0 && weights[0] == 1.0, "default weights");
+    CHECK(n60_correct_default_seat_weights(6, 2, weights.data(), 5) == N60_CORRECT_ERR_CAPACITY, "weights capacity");
+}
+
+// Raising one seat's weight moves the result toward that seat, monotonically.
+static void testWeightMovesTowardSeat(double fs) {
+    Room room;
+    buildRoom(room, fs, 6);
+    divergeSeats(room);
+    const std::vector<double> f = gridFrequencies();
+    n60_correct_design_params dp{};
+    n60_correct_design_defaults(N60_CORRECT_MODE_MIXED_PHASE, &dp);
+    std::vector<double> excess(N60_CORRECT_GRID_POINTS);
+    CHECK(n60_correct_seat_excess_phase(&room.problem, 0, 5, &dp, excess.data(), N60_CORRECT_GRID_POINTS) == 0, "excess");
+    double previous = 1e30;
+    for (double weight : {0.5, 1.0, 2.0, 4.0, 8.0}) {
+        room.seats[5].weight = weight;
+        GridBuffers g;
+        CHECK(n60_correct_design_channel(&room.problem, 0, &dp, &g.grid) == 0, "weighted design");
+        std::vector<double> residual(excess.size());
+        for (size_t i = 0; i < excess.size(); ++i) residual[i] = excess[i] + g.phase[i];
+        const double rms = rmsGroupDelay(f, residual, nullptr, 30.0, 300.0);
+        if (verbose) std::printf("  %g: seat 5 weight %.1f residual excess gd %.4f ms\n", fs, weight, rms * 1e3);
+        CHECK(rms <= previous + 1e-6, "raising a seat's weight moves toward it at %g: weight %g gives %g after %g", fs, weight, rms, previous);
+        previous = rms;
+    }
+}
+
+static void testLatencyModes(double fs) {
+    Room room;
+    buildRoom(room, fs, 3);
+    CHECK(n60_correct_latency_mode(99, nullptr, nullptr) == N60_CORRECT_ERR_ARGUMENT, "unknown latency mode");
+    const uint32_t modes[] = {N60_CORRECT_LATENCY_VIDEO, N60_CORRECT_LATENCY_MUSIC_20MS, N60_CORRECT_LATENCY_MUSIC_50MS, N60_CORRECT_LATENCY_MUSIC_100MS};
+    const double budgets[] = {0.0, 0.020, 0.050, 0.100};
+    for (int m = 0; m < 4; ++m) {
+        uint32_t designMode = 99;
+        double budget = -1;
+        CHECK(n60_correct_latency_mode(modes[m], &designMode, &budget) == 0, "mode lookup");
+        CHECK(budget == budgets[m] && designMode == (m == 0 ? N60_CORRECT_MODE_MIN_PHASE : N60_CORRECT_MODE_MIXED_PHASE), "mode %d resolved", m);
+        const uint32_t taps = n60_correct_latency_mode_tap_count(modes[m], fs);
+        CHECK(taps > budget * fs && taps <= N60_CORRECT_MAX_TAPS && taps % 64 == 0, "tap count %u at %g", taps, fs);
+        n60_correct_design_params dp{};
+        n60_correct_design_defaults(designMode, &dp);
+        n60_correct_synth_params sp{};
+        n60_correct_synth_defaults(designMode, fs, taps, budget, &sp);
+        std::vector<float> out(taps);
+        n60_correct_channel_report report{};
+        const int32_t status = n60_correct_design_channel_taps(&room.problem, 0, &dp, &sp, out.data(), out.size(), &report);
+        if (m > 0) {
+            CHECK(status == 0, "music mode %d designs at %g: %d (failed %u)", m, fs, status, report.prering.failed_count);
+            CHECK(report.synth.declared_latency_frames == static_cast<uint32_t>(std::llround(budget * fs)), "declared latency equals the budget");
+            CHECK(report.synth.effective_latency_frames == report.synth.declared_latency_frames, "effective latency in music mode");
+        } else {
+            CHECK(status == 0, "video mode designs at %g: %d", fs, status);
+            const double added = report.synth.effective_latency_frames / fs;
+            if (verbose) std::printf("  %g: video mode latency %.3f ms\n", fs, added * 1e3);
+            CHECK(added <= N60_CORRECT_VIDEO_MAX_LATENCY_SECONDS, "video mode adds <= 5 ms at %g: %g ms", fs, added * 1e3);
+        }
+    }
+}
+
 }  // namespace
 
 int main(int argc, char **argv) {
@@ -338,6 +516,9 @@ int main(int argc, char **argv) {
         testMixedPhase(fs, 3);
         testReferenceRoom(fs);
         testSynthesisAndAudit(fs);
+        testSixSeats(fs);
+        testWeightMovesTowardSeat(fs);
+        testLatencyModes(fs);
         const double s = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
         if (verbose) std::printf("rate %g done in %.2f s\n", fs, s);
     }
