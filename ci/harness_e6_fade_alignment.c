@@ -68,17 +68,21 @@ static float minWindowPeak(void) {
     return minPeak;
 }
 
-static n60_graph *buildDelayGraph(uint32_t delay) {
-    float p = (float)delay;
-    n60_stage_desc st;
-    memset(&st, 0, sizeof st);
-    st.structSize = sizeof st;
-    st.kind = N60_STAGE_DELAY;
-    st.stageId = 1;
-    st.laneA = N60_LANE_ALL;
-    st.params = &p;
-    st.paramCount = 1;
-    st.capacityFrames = delay + 16u;
+/* delayR != delay builds asymmetric ear delays: lane 0 (left, the captured lane) gets `delay`, lane 1
+ * gets `delayR`. The graph latency readback is the larger of the two. */
+static n60_graph *buildDelayGraph(uint32_t delay, uint32_t delayR) {
+    float p = (float)delay, pr = (float)delayR;
+    n60_stage_desc st[2];
+    memset(st, 0, sizeof st);
+    for (int k = 0; k < 2; ++k) {
+        st[k].structSize = sizeof st[k];
+        st[k].kind = N60_STAGE_DELAY;
+        st[k].stageId = 1u + (uint32_t)k;
+        st[k].laneA = k == 0 ? 0u : 1u;
+        st[k].params = k == 0 ? &p : &pr;
+        st[k].paramCount = 1;
+        st[k].capacityFrames = (k == 0 ? delay : delayR) + 16u;
+    }
     n60_graph_desc d;
     memset(&d, 0, sizeof d);
     d.structSize = sizeof d;
@@ -86,15 +90,16 @@ static n60_graph *buildDelayGraph(uint32_t delay) {
     d.sampleRate = rateNow;
     d.maxBlockFrames = BUF;
     d.inputChannels = d.outputChannels = 2;
-    d.stages = &st;
-    d.stageCount = 1;
+    d.stages = st;
+    d.stageCount = 2;
     n60_graph *g = NULL;
     if (n60_graph_build(&d, &g) != N60_STATUS_OK) return NULL;
     return g;
 }
 
 /* mode 0: aligned attach+detach (graph latency published). mode 1: not published (control,
- * must collapse). mode 3: latency far beyond the fade (clamped), still step-free. mode 2: graph leads (kernel snapshot declares D, graph has no delay). */
+ * must collapse). mode 4: asymmetric ear delays (left D, right D/2): latency and alignment follow the
+ * larger delay and the left lane stays aligned. mode 3: latency far beyond the fade (clamped), still step-free. mode 2: graph leads (kernel snapshot declares D, graph has no delay). */
 static void run(int mode) {
     pos = 0;
     N60RealtimeAudioBridge *b = N60RealtimeAudioBridgeCreate(CAP);
@@ -106,7 +111,9 @@ static void run(int mode) {
     if (mode == 2) snap.latencyFrames = D;
     CHECK(N60RealtimeAudioBridgePublishDSPGraph(b, snap), "publish");
     N60RealtimeAudioBridgeConfigureOutputGate(b, 0u, 0u);
-    n60_graph *g = buildDelayGraph(mode == 2 ? 0u : D);
+    const uint32_t delayR = mode == 4 ? D / 2u : (mode == 2 ? 0u : D);
+    n60_graph *g = buildDelayGraph(mode == 2 ? 0u : D, delayR);
+    CHECK(g && n60_graph_latency_frames(g) == (mode == 2 ? 0u : D), "mode %d graph latency is the larger ear delay", mode);
     CHECK(g != NULL, "graph build");
     if (!g) { N60RealtimeAudioBridgeDestroy(b); return; }
     const uint32_t settle = (uint32_t)(rateNow * 0.2 / BUF) + 8u;
@@ -114,7 +121,7 @@ static void run(int mode) {
     const float slope = 0.4f * (float)(2.0 * M_PI * 1000.0 / rateNow);
 
     CHECK(N60RealtimeAudioBridgeSetUnifiedGraph(b, g, BUF, rateNow), "attach");
-    if (mode == 0 || mode == 3) N60RealtimeAudioBridgeSetUnifiedGraphLatency(b, D);
+    if (mode == 0 || mode == 3 || mode == 4) N60RealtimeAudioBridgeSetUnifiedGraphLatency(b, D);
     if (mode == 2) N60RealtimeAudioBridgeSetUnifiedGraphLatency(b, 0u);
     capturedCount = 0;
     maxStep = 0.0f;
@@ -123,7 +130,7 @@ static void run(int mode) {
     const float attachMin = minWindowPeak();
     const float attachStep = maxStep;
     /* Mode 3: a 40 ms graph latency is capped at a quarter of the 20 ms fade. */
-    const int32_t expectAlign = mode == 3 ? (int32_t)(fadeFrames / 4u) : mode == 0 ? (int32_t)D : mode == 2 ? -(int32_t)D : 0;
+    const int32_t expectAlign = mode == 3 ? (int32_t)(fadeFrames / 4u) : (mode == 0 || mode == 4) ? (int32_t)D : mode == 2 ? -(int32_t)D : 0;
     CHECK(N60RealtimeAudioBridgeUnifiedGraphAlignmentFrames(b) == expectAlign,
           "mode %d alignment %d expected %d at %.0f", mode,
           N60RealtimeAudioBridgeUnifiedGraphAlignmentFrames(b), expectAlign, rateNow);
@@ -139,7 +146,7 @@ static void run(int mode) {
     if (mode == 1) {
         /* Unaligned antiphase fade: the mid-fade window must collapse (sensitivity check). */
         CHECK(attachMin < 0.3f * 0.4f, "unaligned attach min peak %.3f did not collapse at %.0f", attachMin, rateNow);
-    } else if (mode == 0) {
+    } else if (mode == 0 || mode == 4) {
         /* Aligned: the kernel is delayed by D*mix, the graph by D, so the residual lag is
          * D*(1-mix) of a half period. The linear crossfade of two sines with that lag has
          * magnitude |(1-m) + m*exp(j*pi*(1-m))|, minimum ~0.57 near m = 0.3 (measured 0.58
@@ -167,7 +174,7 @@ int main(void) {
     outList.mBuffers[0].mData = outBuf;
     for (size_t r = 0; r < sizeof kRates / sizeof kRates[0]; ++r) {
         rateNow = kRates[r];
-        for (int mode = 0; mode < 4; ++mode) run(mode);
+        for (int mode = 0; mode < 5; ++mode) run(mode);
     }
     if (failures) { fprintf(stderr, "E6 fade alignment: %d failures\n", failures); return EXIT_FAILURE; }
     puts("E6 fade alignment: PASS");
