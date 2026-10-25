@@ -34,7 +34,7 @@ extern "C" {
 #endif
 
 /* Bumped on any incompatible change to a struct or function below. */
-#define N60_GRAPH_ABI_VERSION 14u
+#define N60_GRAPH_ABI_VERSION 15u
 
 typedef struct n60_graph n60_graph; /* opaque */
 
@@ -99,7 +99,9 @@ typedef enum n60_stage_kind {
     /* ABI v13 (E6 S8e). */
     N60_STAGE_EXTERNAL = 35,        /* position 12.5: after METER_OUT, before BASS_MGMT. Host-supplied processor. See "External processor" below. */
     /* ABI v14 (E11 S7). */
-    N60_STAGE_GENERATOR = 36        /* position 3.5: after GAIN, before DENOISER. Test-signal source. See "Generator" below. */
+    N60_STAGE_GENERATOR = 36,       /* position 3.5: after GAIN, before DENOISER. Test-signal source. See "Generator" below. */
+    /* ABI v15 (E10 S3). */
+    N60_STAGE_ROOM_FIR_TWO_BAND = 37/* position 14, with ROOM_FIR. Full-rate FIR plus a decimated low band. See "Two-band room FIR" below. */
 } n60_stage_kind;
 
 /* Generator (ABI v14). A source that replaces program audio on its lanes, ahead of every correction stage and
@@ -194,6 +196,25 @@ typedef int (*n60_external_process_fn)(void *context, const float *const *in, fl
  *  stage unchanged (same stage id, taps and lanes) copies its running state into the new snapshot, so the convolver
  *  does not restart; a new or changed FIR warms silently for its full tap length (+256 frames) before the crossfade.
  *  Only partitions written since the stage last started (or since n60_graph_invalidate_history) are accumulated. */
+/* Two-band room FIR (ABI v15, E10 S3). N60_STAGE_ROOM_FIR_TWO_BAND is ROOM_FIR with an optional low band: a short
+ *  full-rate FIR in parallel with a long FIR run at fs/D, so a long room filter costs a fraction of its full-rate length
+ *  at 352.8 and 384 kHz. params: [0] D (1, 2, 4, 8, 16 or 32; the designer picks D so that fs/D is 11.025 or 12 kHz),
+ *  [1] N full-rate taps (1..32768), [2] M low-band taps (1..32768), then the N full-rate taps, then the M low-band
+ *  taps (the low taps are sampled at fs/D). paramCount 3+N+M, identical taps on every selected lane (laneMask or
+ *  laneA/N60_LANE_ALL, as FIR). capacityFrames is the filter's declared group delay in full-rate frames (reported,
+ *  never applied), as for FIR. Taps are not live: publish a new snapshot.
+ *  Signal path: out = fullFIR(x) delayed by E + interp(lowFIR(decim(x))). decim and interp are a cascade of log2(D)
+ *  linear-phase half-band stages (73 taps, Kaiser, about 110 dB stop band, pass band to 0.4 of the low rate's Nyquist),
+ *  unity gain at DC. The sum is exact within the stated error for a low band confined to 0.4 of fs/D / 2: the designer
+ *  makes the low taps (target - full-rate band - resampler response) and the stage adds nothing else.
+ *  Latency: both paths are aligned to one latency of 4*18*(D-1) + 256*D frames (256 for D = 1) plus capacityFrames,
+ *  reported exactly (the full-rate path takes the difference as a pure delay of 328*(D-1) frames). A unit impulse in
+ *  the full-rate taps at index 0 comes out at exactly that frame.
+ *  Realtime documentation (AGENTS.md section 4): no allocation, no locks (all state is in the snapshot arena, zeroed
+ *  at build); sample rates: any rate the host supports (tested 11.025 to 384 kHz), any block length 1..maxBlockFrames with block-size independent results;
+ *  one independent state per lane; n60_graph_invalidate_history clears every ring, FIR history and the delay (bounded,
+ *  about 4 bytes x (E + 2048 + 5 x 1024) per lane); an unchanged stage (same id, params and lanes) carries its running
+ *  state across a rebuild, a new or changed one warms silently for max(N + 256, latency + M*D) frames. */
 /* System stages (ABI v4). Lane rules: BASS_MGMT, PAUSE_GATE and ANC_CAPTURE take laneMask; AMBIENT, MUTE and
  * PROTECTION take laneMask or laneA/N60_LANE_ALL; SYMMETRY, CROSSFEED, CROSSTALK and HEADPHONE are pair
  * stages on (laneA, laneB); ANC_GUARD and ANC_INJECT address one lane with laneA. ROOM_FIR, SPEAKER_IR,

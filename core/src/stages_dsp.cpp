@@ -25,6 +25,7 @@
 #include "stages_dsp.hpp"
 
 #include <algorithm>
+#include <bit>
 #include <cmath>
 #include <cstring>
 
@@ -766,15 +767,50 @@ uint64_t firTapHash(const float *p, uint32_t n) {
     return h;
 }
 
+// One partitioned-convolution context: shared plan and spectra, plus the scratch buffers (used by one lane at a time).
+struct FirCtx {
+    const void *plan;
+    const Complex *H;
+    Complex *work, *acc;
+    uint32_t P;
+};
+
+// One sample through a partitioned convolver: returns the output of the block before (256 frames of latency).
+inline float firStep(const FirCtx &c, FirLane &st, float *in, float *out, Complex *fdl, float x) {
+    const float y = out[st.fill];
+    in[kPart + st.fill] = x;
+    if (++st.fill < kPart) return y;
+    st.fill = 0;
+    Complex *work = c.work, *acc = c.acc;
+    for (uint32_t k = 0; k < kFft; ++k) work[k] = {in[k], 0.0f};
+    fft::forward(c.plan, work);
+    std::memcpy(fdl + size_t(st.head) * kFirBins, work, sizeof(Complex) * kFirBins);
+    if (st.valid < c.P) ++st.valid;
+    for (uint32_t k = 0; k < kFirBins; ++k) acc[k] = {0.0f, 0.0f};
+    uint32_t slot = st.head;
+    for (uint32_t q = 0; q < st.valid; ++q) {
+        const Complex *xs = fdl + size_t(slot) * kFirBins;
+        const Complex *hq = c.H + size_t(q) * kFirBins;
+        for (uint32_t k = 0; k < kFirBins; ++k) {
+            acc[k].re += hq[k].re * xs[k].re - hq[k].im * xs[k].im;
+            acc[k].im += hq[k].re * xs[k].im + hq[k].im * xs[k].re;
+        }
+        slot = slot == 0 ? c.P - 1 : slot - 1;
+    }
+    for (uint32_t k = 1; k < kPart; ++k) acc[kFft - k] = {acc[k].re, -acc[k].im};
+    fft::inverse(c.plan, acc);
+    for (uint32_t j = 0; j < kPart; ++j) out[j] = acc[kPart + j].re;
+    std::memcpy(in, in + kPart, sizeof(float) * kPart);
+    st.head = st.head + 1 == c.P ? 0 : st.head + 1;
+    return y;
+}
+
 void runFir(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) {
     uint8_t *shBase = sharedState(h, r);
     const FirShared &S = *reinterpret_cast<FirShared *>(shBase);
     const FirLayout L = firLayout(S.parts);
-    const void *plan = shBase + L.plan;
-    const Complex *H = reinterpret_cast<const Complex *>(shBase + L.spectra);
-    Complex *work = reinterpret_cast<Complex *>(shBase + L.work);
-    Complex *acc = reinterpret_cast<Complex *>(shBase + L.acc);
-    const uint32_t P = S.parts;
+    const FirCtx ctx{shBase + L.plan, reinterpret_cast<const Complex *>(shBase + L.spectra),
+                     reinterpret_cast<Complex *>(shBase + L.work), reinterpret_cast<Complex *>(shBase + L.acc), S.parts};
     for (uint32_t l = 0; l < r.laneCount; ++l) {
         uint8_t *lb = laneState(h, r, l);
         FirLane &st = *reinterpret_cast<FirLane *>(lb);
@@ -789,34 +825,177 @@ void runFir(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) {
             std::memset(in, 0, sizeof(float) * (kFft + kPart));
         }
         float *buf = lanes[laneOf(r, l)];
+        for (uint32_t i = 0; i < frames; ++i) buf[i] = firStep(ctx, st, in, out, fdl, buf[i]);
+    }
+}
+
+// ---- two-band room FIR (ABI v15, E10 S3) -------------------------------------------
+// Full-rate FIR (delayed) + half-band decimate / low-rate FIR / half-band interpolate, summed. See graph.h.
+
+constexpr uint32_t kHbK = 18;                 // half-band length 4K+1 = 73 taps, delay 2K per filter
+constexpr uint32_t kHbOdd = 2 * kHbK;         // non-zero off-centre taps on one side of the centre (odd offsets)
+constexpr uint32_t kHbRing = 128;             // power of two >= 4K+1
+constexpr uint32_t kRfMaxLevels = 5;          // D = 32
+constexpr uint32_t kRfDelayPerLevel = 4 * kHbK;
+
+struct RfLevel {
+    uint32_t phase, dpos, zpos, pad;
+    float dec[kHbRing];  // input history of the decimator
+    float z[kHbRing];    // inner-rate results feeding the interpolator
+};
+struct RfHead {
+    FirLane full, low;
+    uint32_t ringPos, pad[3];
+    RfLevel lv[kRfMaxLevels];
+};
+struct RfShared {
+    uint32_t D, levels, taps1, taps2, parts1, parts2, delay, lowLatency, hashLo, hashHi, pad[2];
+    float hodd[kHbOdd];  // h[2i+1] of the half-band, i = 0..2K-1 (centre tap is 0.5)
+};
+struct RfLayout {
+    size_t plan, spec1, spec2, work, acc, total;
+};
+struct RfLaneLayout {
+    size_t in1, in2, ring, fdl1, fdl2, total;
+};
+
+uint32_t rfLevels(uint32_t D) { return D <= 1 ? 0u : static_cast<uint32_t>(std::countr_zero(D)); }
+bool rfValidD(float d) { return d == 1.0f || d == 2.0f || d == 4.0f || d == 8.0f || d == 16.0f || d == 32.0f; }
+// Latency of the low path in full-rate frames; the full-rate path is delayed by the difference to 256.
+uint32_t rfLowLatency(uint32_t D) { return kRfDelayPerLevel * (D - 1) + kPart * D; }
+uint32_t rfDelay(uint32_t D) { return rfLowLatency(D) - kPart; }
+
+RfLayout rfLayout(uint32_t p1, uint32_t p2) {
+    RfLayout L;
+    size_t off = up(sizeof(RfShared));
+    L.plan = off;
+    off += up(fft::planBytes(kFft));
+    L.spec1 = off;
+    off += up(sizeof(Complex) * kFirBins * p1);
+    L.spec2 = off;
+    off += up(sizeof(Complex) * kFirBins * p2);
+    L.work = off;
+    off += up(sizeof(Complex) * kFft);
+    L.acc = off;
+    off += up(sizeof(Complex) * kFft);
+    L.total = off;
+    return L;
+}
+RfLaneLayout rfLaneLayout(uint32_t p1, uint32_t p2, uint32_t delay) {
+    RfLaneLayout L;
+    size_t off = up(sizeof(RfHead));
+    L.in1 = off;
+    off += up(sizeof(float) * (kFft + kPart));
+    L.in2 = off;
+    off += up(sizeof(float) * (kFft + kPart));
+    L.ring = off;
+    off += up(sizeof(float) * delay);
+    L.fdl1 = off;
+    off += up(sizeof(Complex) * kFirBins * p1);
+    L.fdl2 = off;
+    off += up(sizeof(Complex) * kFirBins * p2);
+    L.total = off;
+    return L;
+}
+
+// Everything the per-sample chain needs, resolved once per block.
+struct RfCtx {
+    FirCtx full, low;
+    const float *hodd;
+    uint32_t levels;
+    float *in2, *out2;
+    Complex *fdl2;
+    FirLane *lowState;
+    RfLevel *lv;
+};
+
+// Sample `x` at the rate of `level` (0 = full rate); returns the interpolated low-band output at that rate.
+float rfChain(const RfCtx &c, uint32_t level, float x) {
+    if (level == c.levels) return firStep(c.low, *c.lowState, c.in2, c.out2, c.fdl2, x);
+    RfLevel &L = c.lv[level];
+    L.dec[L.dpos++ & (kHbRing - 1)] = x;
+    const bool even = L.phase == 0;
+    L.phase ^= 1u;
+    if (even) {
+        float acc = 0.5f * L.dec[(L.dpos - 1 - 2 * kHbK) & (kHbRing - 1)];
+        for (uint32_t i = 0; i < kHbOdd; ++i) acc += c.hodd[i] * L.dec[(L.dpos - 2 - 2 * i) & (kHbRing - 1)];
+        const float z = rfChain(c, level + 1, acc);
+        L.z[L.zpos++ & (kHbRing - 1)] = z;
+        return L.z[(L.zpos - 1 - kHbK) & (kHbRing - 1)];
+    }
+    float a = 0.0f;
+    for (uint32_t i = 0; i < kHbOdd; ++i) a += c.hodd[i] * L.z[(L.zpos - 1 - i) & (kHbRing - 1)];
+    return 2.0f * a;
+}
+
+void runRoomFirTwoBand(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) {
+    uint8_t *shBase = sharedState(h, r);
+    const RfShared &S = *reinterpret_cast<RfShared *>(shBase);
+    const RfLayout L = rfLayout(S.parts1, S.parts2);
+    const RfLaneLayout LL = rfLaneLayout(S.parts1, S.parts2, S.delay);
+    Complex *work = reinterpret_cast<Complex *>(shBase + L.work);
+    Complex *acc = reinterpret_cast<Complex *>(shBase + L.acc);
+    const FirCtx full{shBase + L.plan, reinterpret_cast<const Complex *>(shBase + L.spec1), work, acc, S.parts1};
+    const FirCtx low{shBase + L.plan, reinterpret_cast<const Complex *>(shBase + L.spec2), work, acc, S.parts2};
+    for (uint32_t l = 0; l < r.laneCount; ++l) {
+        uint8_t *lb = laneState(h, r, l);
+        RfHead &st = *reinterpret_cast<RfHead *>(lb);
+        float *in1 = reinterpret_cast<float *>(lb + LL.in1);
+        float *out1 = in1 + kFft;
+        float *in2 = reinterpret_cast<float *>(lb + LL.in2);
+        float *out2 = in2 + kFft;
+        float *ring = reinterpret_cast<float *>(lb + LL.ring);
+        Complex *fdl1 = reinterpret_cast<Complex *>(lb + LL.fdl1);
+        Complex *fdl2 = reinterpret_cast<Complex *>(lb + LL.fdl2);
+        if (st.full.epoch != h->historyEpoch) {
+            std::memset(&st, 0, sizeof st);
+            st.full.epoch = st.low.epoch = h->historyEpoch;
+            std::memset(in1, 0, sizeof(float) * (kFft + kPart));
+            std::memset(in2, 0, sizeof(float) * (kFft + kPart));
+            std::memset(ring, 0, sizeof(float) * S.delay);
+        }
+        const RfCtx c{full, low, S.hodd, S.levels, in2, out2, fdl2, &st.low, st.lv};
+        float *buf = lanes[laneOf(r, l)];
         for (uint32_t i = 0; i < frames; ++i) {
-            const float y = out[st.fill];
-            in[kPart + st.fill] = buf[i];
-            buf[i] = y;
-            if (++st.fill < kPart) continue;
-            st.fill = 0;
-            for (uint32_t k = 0; k < kFft; ++k) work[k] = {in[k], 0.0f};
-            fft::forward(plan, work);
-            std::memcpy(fdl + size_t(st.head) * kFirBins, work, sizeof(Complex) * kFirBins);
-            if (st.valid < P) ++st.valid;
-            for (uint32_t k = 0; k < kFirBins; ++k) acc[k] = {0.0f, 0.0f};
-            uint32_t slot = st.head;
-            for (uint32_t q = 0; q < st.valid; ++q) {
-                const Complex *x = fdl + size_t(slot) * kFirBins;
-                const Complex *hq = H + size_t(q) * kFirBins;
-                for (uint32_t k = 0; k < kFirBins; ++k) {
-                    acc[k].re += hq[k].re * x[k].re - hq[k].im * x[k].im;
-                    acc[k].im += hq[k].re * x[k].im + hq[k].im * x[k].re;
-                }
-                slot = slot == 0 ? P - 1 : slot - 1;
+            const float x = buf[i];
+            float yFull = firStep(full, st.full, in1, out1, fdl1, x);
+            if (S.delay != 0) {
+                const float d = ring[st.ringPos];
+                ring[st.ringPos] = yFull;
+                yFull = d;
+                st.ringPos = st.ringPos + 1 == S.delay ? 0 : st.ringPos + 1;
             }
-            for (uint32_t k = 1; k < kPart; ++k) acc[kFft - k] = {acc[k].re, -acc[k].im};
-            fft::inverse(plan, acc);
-            for (uint32_t j = 0; j < kPart; ++j) out[j] = acc[kPart + j].re;
-            std::memcpy(in, in + kPart, sizeof(float) * kPart);
-            st.head = st.head + 1 == P ? 0 : st.head + 1;
+            buf[i] = yFull + rfChain(c, 0, x);
         }
     }
+}
+
+// Kaiser-windowed half-band (cutoff a quarter of the rate), odd taps normalised so the DC gain is exactly one.
+double besselI0(double x) {
+    double sum = 1.0, term = 1.0;
+    for (int k = 1; k < 60; ++k) {
+        term *= (x / (2.0 * k)) * (x / (2.0 * k));
+        sum += term;
+        if (term < 1e-18 * sum) break;
+    }
+    return sum;
+}
+void rfDesignHalfband(float *hodd) {
+    constexpr double kBeta = 11.0;  // about 110 dB
+    constexpr double kPi = 3.14159265358979323846;
+    const int N = static_cast<int>(4 * kHbK);
+    double h[kHbOdd], sum = 0.0;
+    for (uint32_t i = 0; i < kHbOdd; ++i) {
+        const int n = static_cast<int>(2 * i + 1);
+        const double m = n - static_cast<int>(2 * kHbK);
+        const double sinc = std::sin(0.5 * kPi * m) / (kPi * m);  // 2 fc sinc(2 fc m), fc = 1/4
+        const double t = 2.0 * n / N - 1.0;
+        h[i] = sinc * besselI0(kBeta * std::sqrt(std::max(0.0, 1.0 - t * t))) / besselI0(kBeta);
+        sum += h[i];
+    }
+    // h[centre] = 0.5 and the odd taps sum to 0.5, so the DC gain is exactly one.
+    const double norm = 0.5 / sum;
+    for (uint32_t i = 0; i < kHbOdd; ++i) hodd[i] = static_cast<float>(h[i] * norm);
 }
 
 }  // namespace
@@ -852,7 +1031,7 @@ bool readDspDynamics(SnapHeader *h, const StageRec &r, uint32_t lane, n60_dynami
 
 bool isDspKind(uint32_t kind) {
     return kind == N60_STAGE_COMPRESSOR || kind == N60_STAGE_EXPANDER || kind == N60_STAGE_DYN_EQ ||
-           kind == N60_STAGE_DENOISER || kind == N60_STAGE_FIR;
+           kind == N60_STAGE_DENOISER || kind == N60_STAGE_FIR || kind == N60_STAGE_ROOM_FIR_TWO_BAND;
 }
 
 n60_status validateDspStage(const n60_stage_desc &s, double rate, uint32_t outCh) {
@@ -864,6 +1043,19 @@ n60_status validateDspStage(const n60_stage_desc &s, double rate, uint32_t outCh
     }
     if (s.kind == N60_STAGE_FIR) {
         if (s.paramCount < 1 || s.paramCount > N60_FIR_MAX_TAPS || s.capacityFrames > N60_GRAPH_MAX_DELAY_FRAMES) {
+            return N60_STATUS_BAD_ARGUMENT;
+        }
+        return N60_STATUS_OK;
+    }
+    if (s.kind == N60_STAGE_ROOM_FIR_TWO_BAND) {
+        if (s.paramCount < 5 || s.capacityFrames > N60_GRAPH_MAX_DELAY_FRAMES) return N60_STATUS_BAD_ARGUMENT;
+        const float d = s.params[0], n1 = s.params[1], n2 = s.params[2];
+        const float maxTaps = static_cast<float>(N60_FIR_MAX_TAPS);
+        if (!rfValidD(d) || n1 != std::floor(n1) || n2 != std::floor(n2) || n1 < 1.0f || n2 < 1.0f || n1 > maxTaps ||
+            n2 > maxTaps) {
+            return N60_STATUS_BAD_ARGUMENT;
+        }
+        if (static_cast<uint64_t>(s.paramCount) != 3ull + static_cast<uint32_t>(n1) + static_cast<uint32_t>(n2)) {
             return N60_STATUS_BAD_ARGUMENT;
         }
         return N60_STATUS_OK;
@@ -919,6 +1111,13 @@ void dspSizes(const n60_stage_desc &s, size_t &perLane, size_t &shared) {
             const uint32_t parts = firParts(s.paramCount);
             perLane = firLaneBytes(parts);
             shared = firLayout(parts).total;
+            break;
+        }
+        case N60_STAGE_ROOM_FIR_TWO_BAND: {
+            const uint32_t D = static_cast<uint32_t>(s.params[0]);
+            const uint32_t p1 = firParts(static_cast<uint32_t>(s.params[1])), p2 = firParts(static_cast<uint32_t>(s.params[2]));
+            perLane = rfLaneLayout(p1, p2, rfDelay(D)).total;
+            shared = rfLayout(p1, p2).total;
             break;
         }
         default: break;
@@ -978,6 +1177,40 @@ void dspInit(SnapHeader *h, const StageRec &r) {
             std::memset(work, 0, sizeof(Complex) * kFft);
             break;
         }
+        case N60_STAGE_ROOM_FIR_TWO_BAND: {
+            RfShared *s = reinterpret_cast<RfShared *>(sh);
+            s->D = static_cast<uint32_t>(p[0]);
+            s->levels = rfLevels(s->D);
+            s->taps1 = static_cast<uint32_t>(p[1]);
+            s->taps2 = static_cast<uint32_t>(p[2]);
+            s->parts1 = firParts(s->taps1);
+            s->parts2 = firParts(s->taps2);
+            s->delay = rfDelay(s->D);
+            s->lowLatency = rfLowLatency(s->D);
+            const uint64_t hash = firTapHash(p, r.paramCount);
+            s->hashLo = static_cast<uint32_t>(hash);
+            s->hashHi = static_cast<uint32_t>(hash >> 32);
+            rfDesignHalfband(s->hodd);
+            const RfLayout L = rfLayout(s->parts1, s->parts2);
+            fft::planInit(sh + L.plan, kFft);
+            Complex *work = reinterpret_cast<Complex *>(sh + L.work);
+            const float *taps[2] = {p + 3, p + 3 + s->taps1};
+            const uint32_t counts[2] = {s->taps1, s->taps2};
+            Complex *spectra[2] = {reinterpret_cast<Complex *>(sh + L.spec1), reinterpret_cast<Complex *>(sh + L.spec2)};
+            const uint32_t parts[2] = {s->parts1, s->parts2};
+            for (int b = 0; b < 2; ++b) {
+                for (uint32_t q = 0; q < parts[b]; ++q) {
+                    for (uint32_t k = 0; k < kFft; ++k) {
+                        const size_t t = size_t(q) * kPart + k;
+                        work[k] = {k < kPart && t < counts[b] ? taps[b][t] : 0.0f, 0.0f};
+                    }
+                    fft::forward(sh + L.plan, work);
+                    std::memcpy(spectra[b] + size_t(q) * kFirBins, work, sizeof(Complex) * kFirBins);
+                }
+            }
+            std::memset(work, 0, sizeof(Complex) * kFft);
+            break;
+        }
         default: break;
     }
 }
@@ -989,12 +1222,15 @@ void runDsp(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) {
         case N60_STAGE_DYN_EQ: runDynEq(h, r, lanes, frames); break;
         case N60_STAGE_DENOISER: runDenoiser(h, r, lanes, frames); break;
         case N60_STAGE_FIR: runFir(h, r, lanes, frames); break;
+        case N60_STAGE_ROOM_FIR_TWO_BAND: runRoomFirTwoBand(h, r, lanes, frames); break;
         default: break;
     }
 }
 
 n60_status validateDspParam(const SnapHeader *h, const StageRec &r, uint32_t idx, float value) {
-    if (r.kind == N60_STAGE_FIR) return idx < r.paramCount ? N60_STATUS_UNSUPPORTED : N60_STATUS_BAD_ARGUMENT;
+    if (r.kind == N60_STAGE_FIR || r.kind == N60_STAGE_ROOM_FIR_TWO_BAND) {
+        return idx < r.paramCount ? N60_STATUS_UNSUPPORTED : N60_STATUS_BAD_ARGUMENT;
+    }
     if (idx >= r.paramCount) return N60_STATUS_BAD_ARGUMENT;
     if (!paramOk(r.kind, idx, value, h->sampleRate)) return N60_STATUS_BAD_ARGUMENT;
     return paramLive(r.kind, idx) ? N60_STATUS_OK : N60_STATUS_UNSUPPORTED;
@@ -1002,6 +1238,9 @@ n60_status validateDspParam(const SnapHeader *h, const StageRec &r, uint32_t idx
 
 uint32_t dspLatency(const SnapHeader *h, const StageRec &r) {
     if (r.kind == N60_STAGE_FIR) return kPart + r.capacity;
+    if (r.kind == N60_STAGE_ROOM_FIR_TWO_BAND) {
+        return reinterpret_cast<const RfShared *>(bytes(h) + r.sharedOff)->lowLatency + r.capacity;
+    }
     if (r.kind == N60_STAGE_DENOISER) return denoiseFft(paramsOf(h, r)[1]);
     return 0;
 }
@@ -1020,11 +1259,64 @@ bool dspFirSameFilter(const SnapHeader *a, const StageRec &ra, const SnapHeader 
     return true;
 }
 
+// Warm-up frames the two-band stage needs from silence: its longest path, in full-rate frames.
+static uint32_t rfWarmFrames(const RfShared &s) { return std::max(s.taps1 + kPart, s.lowLatency + s.taps2 * s.D); }
+
+static void rfCopyFdl(Complex *dst, const Complex *src, const FirLane &st, uint32_t P) {
+    uint32_t slot = st.head;
+    for (uint32_t q = 0; q < st.valid && q < P; ++q) {
+        std::memcpy(dst + size_t(slot) * kFirBins, src + size_t(slot) * kFirBins, sizeof(Complex) * kFirBins);
+        slot = slot == 0 ? P - 1 : slot - 1;
+    }
+}
+
+// Carries the running state of the same two-band filter from `from` into `to`; returns the warm-up still needed.
+static uint32_t rfCarry(SnapHeader *from, SnapHeader *to, StageRec &b) {
+    const RfShared &y = *reinterpret_cast<const RfShared *>(sharedState(to, b));
+    StageRec *src = stages(from);
+    for (uint32_t j = 0; j < from->stageCount; ++j) {
+        StageRec &a = src[j];
+        if (a.kind != b.kind || a.id != b.id || a.paramCount != b.paramCount || a.laneCount != b.laneCount) continue;
+        const RfShared &x = *reinterpret_cast<const RfShared *>(sharedState(from, a));
+        if (x.D != y.D || x.taps1 != y.taps1 || x.taps2 != y.taps2 || x.hashLo != y.hashLo || x.hashHi != y.hashHi) continue;
+        bool sameLanes = true;
+        for (uint32_t k = 0; k < a.laneCount; ++k) sameLanes = sameLanes && laneOf(a, k) == laneOf(b, k);
+        if (!sameLanes) continue;
+        const RfLaneLayout LL = rfLaneLayout(y.parts1, y.parts2, y.delay);
+        bool stale = false;
+        for (uint32_t k = 0; k < b.laneCount; ++k) {
+            uint8_t *sl = laneState(from, a, k);
+            uint8_t *dl = laneState(to, b, k);
+            const RfHead &sh = *reinterpret_cast<RfHead *>(sl);
+            if (sh.full.epoch != from->historyEpoch) {
+                stale = true;
+                continue;
+            }
+            // Bounded copy (once per rebuild, never per block): the head, rings and sample buffers, then only the
+            // spectra written so far.
+            // Layout order: in1, in2, delay ring and half-band rings all precede fdl1 (see rfLaneLayout).
+            std::memcpy(dl, sl, LL.fdl1);
+            rfCopyFdl(reinterpret_cast<Complex *>(dl + LL.fdl1), reinterpret_cast<const Complex *>(sl + LL.fdl1), sh.full,
+                      y.parts1);
+            rfCopyFdl(reinterpret_cast<Complex *>(dl + LL.fdl2), reinterpret_cast<const Complex *>(sl + LL.fdl2), sh.low,
+                      y.parts2);
+            RfHead &dh = *reinterpret_cast<RfHead *>(dl);
+            dh.full.epoch = dh.low.epoch = to->historyEpoch;
+        }
+        return stale ? rfWarmFrames(y) : 0;
+    }
+    return rfWarmFrames(y);
+}
+
 uint32_t dspFirCarry(SnapHeader *from, SnapHeader *to) {
     uint32_t warm = 0;
     StageRec *dst = stages(to);
     for (uint32_t i = 0; i < to->stageCount; ++i) {
         StageRec &b = dst[i];
+        if (b.kind == N60_STAGE_ROOM_FIR_TWO_BAND) {
+            warm = std::max(warm, rfCarry(from, to, b));
+            continue;
+        }
         if (b.kind != N60_STAGE_FIR) continue;
         bool carried = false, staleSource = false;
         StageRec *src = stages(from);
@@ -1068,6 +1360,9 @@ uint32_t dspFirHistoryFrames(const SnapHeader *h) {
     const StageRec *s = stages(h);
     for (uint32_t i = 0; i < h->stageCount; ++i) {
         if (s[i].kind == N60_STAGE_FIR) frames = std::max(frames, s[i].paramCount + kPart);
+        if (s[i].kind == N60_STAGE_ROOM_FIR_TWO_BAND) {
+            frames = std::max(frames, rfWarmFrames(*reinterpret_cast<const RfShared *>(bytes(h) + s[i].sharedOff)));
+        }
     }
     return frames;
 }
