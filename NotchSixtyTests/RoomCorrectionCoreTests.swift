@@ -114,4 +114,72 @@ final class RoomCorrectionCoreTests: XCTestCase {
         }
         return (re, im)
     }
+
+    // MARK: - Joint bass optimiser (E10 S6)
+
+    /// 2 mains and 2 subs at 4 seats: delayed direct sounds plus separable modal rings.
+    private func bassRoom(rate: Double) -> [[RoomCorrectionCore.SeatImpulseResponse]] {
+        let frames = Int(rate * 0.5)
+        let modes: [Double] = [31, 44, 58, 73, 96, 112]
+        let sourceDelay: [Double] = [0, 0.0004, 0.0031, 0.0046]
+        let tau = 0.12 / log(1000.0)
+        var state: UInt64 = 0x9E37_79B9_7F4A_7C15
+        func next() -> Double {
+            state = state &* 6_364_136_223_846_793_005 &+ 1_442_695_040_888_963_407
+            return Double(state >> 11) / 4_503_599_627_370_496.0 - 1.0
+        }
+        let seatGain = (0..<4).map { _ in modes.map { _ in next() } }
+        let sourceGain = (0..<4).map { _ in modes.map { _ in 0.35 + 0.65 * next() } }
+        return (0..<4).map { source in
+            (0..<4).map { seat in
+                var ir = [Float](repeating: 0, count: frames)
+                let arrival = (sourceDelay[source] + 0.0035 * Double(seat) / 10 + 0.004) * rate
+                ir[Int(arrival.rounded())] = 0.1
+                for (index, mode) in modes.enumerated() {
+                    let amplitude = 0.012 * (48_000 / rate) * seatGain[seat][index] * sourceGain[source][index]
+                    var i = Int(arrival) + 1
+                    while i < frames {
+                        let t = (Double(i) - arrival) / rate
+                        if t > 6 * tau { break }
+                        ir[i] += Float(amplitude * exp(-t / tau) * sin(2 * .pi * mode * t))
+                        i += 1
+                    }
+                }
+                return .init(samples: ir, arrivalFrames: arrival, weight: 1)
+            }
+        }
+    }
+
+    func testBassOptimiserThroughTheWrapper() throws {
+        let rate = 48_000.0
+        let irs = bassRoom(rate: rate)
+        let channels: [BassChannelSpec] = [.defaults(.main), .defaults(.main), .defaults(.sub), .defaults(.sub)]
+
+        var blocked = BassOptimiserSettings(timingTier: .none)
+        XCTAssertThrowsError(try RoomCorrectionCore.optimiseBass(irs: irs, channels: channels, sampleRate: rate, settings: blocked)) {
+            XCTAssertEqual($0 as? RoomCorrectionCore.CoreError, .status(N60_CORRECT_ERR_TIMING))
+        }
+        blocked.timingTier = .acoustic
+        let result = try RoomCorrectionCore.optimiseBass(irs: irs, channels: channels, sampleRate: rate, settings: blocked)
+        XCTAssertEqual(result.designs.count, 4)
+        XCTAssertEqual(result.report.channels.count, 4)
+        XCTAssertEqual(result.report.channels.map(\.delayFrames).min(), 0)
+        XCTAssertLessThan(result.report.seatStdAfterDB, result.report.seatStdBeforeDB)
+        XCTAssertEqual(result.beforeDB.count, 4 * 479)
+        for (index, design) in result.designs.enumerated() {
+            XCTAssertLessThanOrEqual(design.correctionDB.max() ?? 0, 6 + 1e-9)
+            XCTAssertLessThanOrEqual(result.report.channels[index].peakBoostDB, 6 + 1e-9)
+            XCTAssertTrue(design.correctionPhaseRadians.allSatisfy { $0.isFinite })
+            // The design synthesises at the device rate.
+            let taps = try RoomCorrectionCore.synthesize(design, sampleRate: rate, mode: .music100ms).taps
+            XCTAssertTrue(taps.allSatisfy { $0.isFinite })
+        }
+        // Mains keep gain and polarity.
+        XCTAssertEqual(result.report.channels[0].gainDB, 0)
+        XCTAssertFalse(result.report.channels[0].polarityInverted)
+        // Repeat runs are identical.
+        let again = try RoomCorrectionCore.optimiseBass(irs: irs, channels: channels, sampleRate: rate, settings: blocked)
+        XCTAssertEqual(again.report, result.report)
+        XCTAssertEqual(again.designs, result.designs)
+    }
 }

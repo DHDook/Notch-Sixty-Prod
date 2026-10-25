@@ -155,6 +155,208 @@ enum RoomCorrectionCore {
     }
 }
 
+// MARK: - Joint bass optimiser (E10 S6)
+
+/// One channel of the joint bass optimiser: a main (delay free) or a subwoofer (delay, gain and polarity free).
+struct BassChannelSpec: Equatable, Sendable {
+    enum Role: UInt32, Sendable { case main = 0, sub = 1 }
+    var role: Role
+    var freeDelay: Bool
+    var freeGain: Bool
+    var freePolarity: Bool
+    var minimumGainDB: Double
+    var maximumGainDB: Double
+
+    static func defaults(_ role: Role) -> BassChannelSpec {
+        var channel = n60_correct_bass_channel()
+        n60_correct_bass_channel_defaults(role.rawValue, &channel)
+        return BassChannelSpec(
+            role: role, freeDelay: channel.free_delay != 0, freeGain: channel.free_gain != 0,
+            freePolarity: channel.free_polarity != 0, minimumGainDB: channel.min_gain_db, maximumGainDB: channel.max_gain_db)
+    }
+}
+
+/// How the measurement was timed (E11); `.none` blocks the design.
+enum BassTimingTier: UInt32, Sendable {
+    case loopback = 1
+    case acoustic = 2
+    case none = 3
+}
+
+struct BassOptimiserSettings: Equatable, Sendable {
+    var timingTier: BassTimingTier
+    var crossoverHz: Double = 80
+    var fitLowHz: Double = 20
+    var fitHighHz: Double = 0
+    var filterHighHz: Double = 0
+    var maximumDelaySeconds: Double = 0.02
+    var maximumBoostDB: Double = 6
+    var regularisation: Double = 0.01
+    /// Shared target as (frequency Hz, gain dB) points; empty is flat.
+    var target: [(hz: Double, gainDB: Double)] = []
+
+    static func == (lhs: BassOptimiserSettings, rhs: BassOptimiserSettings) -> Bool {
+        lhs.timingTier == rhs.timingTier && lhs.crossoverHz == rhs.crossoverHz && lhs.fitLowHz == rhs.fitLowHz
+            && lhs.fitHighHz == rhs.fitHighHz && lhs.filterHighHz == rhs.filterHighHz
+            && lhs.maximumDelaySeconds == rhs.maximumDelaySeconds && lhs.maximumBoostDB == rhs.maximumBoostDB
+            && lhs.regularisation == rhs.regularisation && lhs.target.count == rhs.target.count
+            && zip(lhs.target, rhs.target).allSatisfy { $0.hz == $1.hz && $0.gainDB == $1.gainDB }
+    }
+}
+
+/// What the optimiser decided for one channel, and its boost and headroom.
+struct BassChannelResult: Equatable, Sendable {
+    var delaySeconds: Double
+    var delayFrames: Int
+    var gainDB: Double
+    var polarityInverted: Bool
+    var peakBoostDB: Double
+    var peakGainDB: Double
+    var headroomDB: Double
+}
+
+/// The bass report: seat-to-seat standard deviation of the level (dB, averaged over the fit band) before
+/// alignment, after delay/gain/polarity, and after the filters, plus boost and headroom per channel.
+struct BassReport: Equatable, Sendable {
+    var seatStdBeforeDB: Double
+    var seatStdAlignedDB: Double
+    var seatStdAfterDB: Double
+    var targetRMSBeforeDB: Double
+    var targetRMSAfterDB: Double
+    var referenceLevelDB: Double
+    var headroomDB: Double
+    var boostLimitedBins: Int
+    var channels: [BassChannelResult]
+}
+
+struct BassOptimisation: Sendable {
+    /// One grid design per channel (correction magnitude and extra phase, synthesisable per rate).
+    var designs: [RoomCorrectionGridDesign]
+    var report: BassReport
+    /// Predicted seat responses (seat-major, grid points) of the uncorrected and the optimised system.
+    var beforeDB: [Double]
+    var afterDB: [Double]
+}
+
+extension RoomCorrectionCore {
+    /// Jointly optimises delay, gain, polarity and low-frequency filters of the mains and subwoofers.
+    /// `irs` is channel-major: `irs[channel][seat]`, all in one time reference.
+    static func optimiseBass(
+        irs: [[SeatImpulseResponse]],
+        channels: [BassChannelSpec],
+        sampleRate: Double,
+        settings: BassOptimiserSettings
+    ) throws -> BassOptimisation {
+        let channelCount = irs.count
+        guard channelCount > 0, channels.count == channelCount, let seatCount = irs.first?.count, seatCount > 0,
+              irs.allSatisfy({ $0.count == seatCount }) else { throw CoreError.status(N60_CORRECT_ERR_ARGUMENT) }
+        let flat = irs.flatMap { $0 }
+        let buffers = flat.map { seat -> UnsafeMutablePointer<Float> in
+            let pointer = UnsafeMutablePointer<Float>.allocate(capacity: max(seat.samples.count, 1))
+            pointer.initialize(from: seat.samples, count: seat.samples.count)
+            return pointer
+        }
+        defer { buffers.forEach { $0.deallocate() } }
+        var seatIRs = zip(flat, buffers).map { seat, buffer in
+            n60_correct_seat_ir(
+                ir: UnsafePointer(buffer), frames: UInt64(seat.samples.count),
+                arrival_frames: seat.arrivalFrames, weight: seat.weight)
+        }
+        var channelParams = channels.map { spec -> n60_correct_bass_channel in
+            n60_correct_bass_channel(
+                role: spec.role.rawValue, free_delay: spec.freeDelay ? 1 : 0, free_gain: spec.freeGain ? 1 : 0,
+                free_polarity: spec.freePolarity ? 1 : 0, min_gain_db: spec.minimumGainDB, max_gain_db: spec.maximumGainDB)
+        }
+        let targetHz = settings.target.map(\.hz)
+        let targetDB = settings.target.map(\.gainDB)
+        let gridCount = Int(n60_correct_grid_size())
+        let dbBuffers = (0..<channelCount).map { _ -> UnsafeMutablePointer<Double> in
+            let pointer = UnsafeMutablePointer<Double>.allocate(capacity: gridCount)
+            pointer.initialize(repeating: 0, count: gridCount)
+            return pointer
+        }
+        let phaseBuffers = (0..<channelCount).map { _ -> UnsafeMutablePointer<Double> in
+            let pointer = UnsafeMutablePointer<Double>.allocate(capacity: gridCount)
+            pointer.initialize(repeating: 0, count: gridCount)
+            return pointer
+        }
+        defer {
+            dbBuffers.forEach { $0.deallocate() }
+            phaseBuffers.forEach { $0.deallocate() }
+        }
+        var grids = (0..<channelCount).map { index -> n60_correct_design_grid in
+            var grid = n60_correct_design_grid()
+            grid.correction_db = dbBuffers[index]
+            grid.correction_phase_rad = phaseBuffers[index]
+            return grid
+        }
+        var before = [Double](repeating: 0, count: seatCount * gridCount)
+        var after = before
+        var report = n60_correct_bass_report()
+
+        let status: Int32 = seatIRs.withUnsafeMutableBufferPointer { irPointer in
+            channelParams.withUnsafeMutableBufferPointer { channelPointer in
+                targetHz.withUnsafeBufferPointer { hz in
+                    targetDB.withUnsafeBufferPointer { gain in
+                        grids.withUnsafeMutableBufferPointer { gridPointer in
+                            before.withUnsafeMutableBufferPointer { beforePointer in
+                                after.withUnsafeMutableBufferPointer { afterPointer in
+                                    var params = n60_correct_bass_params()
+                                    n60_correct_bass_defaults(channelPointer.baseAddress, &params)
+                                    params.timing_tier = settings.timingTier.rawValue
+                                    params.crossover_hz = settings.crossoverHz
+                                    params.fit_low_hz = settings.fitLowHz
+                                    params.fit_high_hz = settings.fitHighHz
+                                    params.fir_high_hz = settings.filterHighHz
+                                    params.max_delay_seconds = settings.maximumDelaySeconds
+                                    params.max_boost_db = settings.maximumBoostDB
+                                    params.regularisation = settings.regularisation
+                                    params.target_frequencies_hz = hz.baseAddress
+                                    params.target_gain_db = gain.baseAddress
+                                    params.target_points = UInt32(hz.count)
+                                    var problem = n60_correct_problem(
+                                        struct_size: UInt32(MemoryLayout<n60_correct_problem>.size), sample_rate: sampleRate,
+                                        channel_count: UInt32(channelCount), seat_count: UInt32(seatCount), main_seat: 0,
+                                        irs: UnsafePointer(irPointer.baseAddress))
+                                    return n60_correct_bass_optimise(
+                                        &problem, &params, gridPointer.baseAddress, &report,
+                                        beforePointer.baseAddress, afterPointer.baseAddress)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        guard status == 0 else { throw CoreError.status(status) }
+
+        let results: [BassChannelResult] = withUnsafeBytes(of: &report.channels) { raw in
+            let base = raw.baseAddress!.assumingMemoryBound(to: n60_correct_bass_channel_result.self)
+            return (0..<channelCount).map { index in
+                let item = base[index]
+                return BassChannelResult(
+                    delaySeconds: item.delay_seconds, delayFrames: Int(item.delay_frames), gainDB: item.gain_db,
+                    polarityInverted: item.polarity_invert != 0, peakBoostDB: item.peak_boost_db,
+                    peakGainDB: item.peak_gain_db, headroomDB: item.headroom_db)
+            }
+        }
+        let designs = (0..<channelCount).map { index in
+            RoomCorrectionGridDesign(
+                correctionDB: Array(UnsafeBufferPointer(start: dbBuffers[index], count: gridCount)),
+                correctionPhaseRadians: Array(UnsafeBufferPointer(start: phaseBuffers[index], count: gridCount)),
+                coherence: [Double](repeating: 0, count: gridCount), seatContribution: [])
+        }
+        return BassOptimisation(
+            designs: designs,
+            report: BassReport(
+                seatStdBeforeDB: report.seat_std_before_db, seatStdAlignedDB: report.seat_std_aligned_db,
+                seatStdAfterDB: report.seat_std_after_db, targetRMSBeforeDB: report.target_rms_before_db,
+                targetRMSAfterDB: report.target_rms_after_db, referenceLevelDB: report.reference_level_db,
+                headroomDB: report.headroom_db, boostLimitedBins: Int(report.boost_limited_bins), channels: results),
+            beforeDB: before, afterDB: after)
+    }
+}
+
 /// The two correction modes and the latency budgets of design note 4.
 enum RoomCorrectionLatencyMode: UInt32, CaseIterable, Codable, Sendable {
     case video = 0
