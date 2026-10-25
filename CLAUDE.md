@@ -8,7 +8,7 @@
   builds one slice in a fresh context), realtime-reviewer (Sonnet), and code-scout,
   build-test-runner, plan-tracker, pr-writer (Haiku). `/next` itself runs on Sonnet.
 
-**Current focus:** E10 (mixed-phase room correction and bass control), slice 6 of 9 done: joint bass core (PR #229 awaits review); next S7 `e10/joint-bass-apply` (needs-owner, after #227 merge)
+**Current focus:** E10 (mixed-phase room correction and bass control), slice 7 of 9: joint bass apply
 <!-- plan-tracker keeps the line above current -->
 
 @AGENTS.md

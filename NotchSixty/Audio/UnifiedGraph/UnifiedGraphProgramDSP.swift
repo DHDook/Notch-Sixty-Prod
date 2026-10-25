@@ -92,6 +92,9 @@ struct UnifiedGraphProgramDSP: Equatable, Sendable {
     /// Binaural: the layout lanes are virtual speakers, so only pre-binaural stages, balance on the ears and the
     /// pause gate apply.
     var virtualSpeakers: Bool
+    /// E10 S4: per-lane room correction synthesised for this rate (one ROOM_FIR stage per distinct tap set,
+    /// sub lanes included). Mutually exclusive with `stages.roomFIR`.
+    var roomLanes: RoomCorrectionLanePlan?
 
     init(
         stereo: UnifiedGraphConfiguration,
@@ -118,7 +121,7 @@ struct UnifiedGraphProgramDSP: Equatable, Sendable {
             guard lane.delayMilliseconds == 0, lane.delayFrames == 0 else { return false }
             return lane.fractionalDelayFrames == nil
         }
-        guard rest.isEmpty, plain(left), plain(right), inputGain == 1 else { return false }
+        guard rest.isEmpty, roomLanes == nil, plain(left), plain(right), inputGain == 1 else { return false }
         return protection == nil
     }
 
@@ -279,6 +282,24 @@ struct UnifiedGraphProgramDSP: Equatable, Sendable {
             add(N60_STAGE_EXPANDER, UnifiedGraphConfiguration.expanderStageId, mask: programMask, params: params)
         }
         var postLatency: UInt32 = 0
+        var lanePlanCovered: UInt64 = 0
+        if let plan = roomLanes {
+            guard !hasPostConvolver, plan.laneCount == count, !plan.stages.isEmpty,
+                  plan.stages.count <= count, plan.declaredLatencyFrames <= N60_GRAPH_MAX_DELAY_FRAMES,
+                  plan.coveredMask < (UInt64(1) << UInt64(count)) else {
+                throw UnifiedGraphFallbackReason.specRejected
+            }
+            for (index, stage) in plan.stages.enumerated() {
+                guard !stage.taps.isEmpty, stage.taps.count <= 32_768, stage.laneMask != 0,
+                      stage.laneMask & lanePlanCovered == 0 else {
+                    throw UnifiedGraphFallbackReason.convolutionProgramUnavailable
+                }
+                lanePlanCovered |= stage.laneMask
+                add(N60_STAGE_ROOM_FIR, RoomCorrectionRateCache.stageIDBase + UInt32(index), mask: stage.laneMask,
+                    capacity: plan.declaredLatencyFrames, params: stage.taps)
+            }
+            postLatency = Self.firPartitionFrames + plan.declaredLatencyFrames
+        }
         if hasPostConvolver, let fl = shape.frontLeft, let fr = shape.frontRight {
             let frontMask = Self.mask([fl, fr])
             if let room = st.roomFIR {
@@ -327,7 +348,13 @@ struct UnifiedGraphProgramDSP: Equatable, Sendable {
             add(N60_STAGE_PAUSE_GATE, UnifiedGraphConfiguration.pauseGateStageId, mask: mask, params: params)
         }
         // Room and IR convolvers delay the front pair only; every other lane (subs included) catches up.
-        if postLatency > 0, let fl = shape.frontLeft, let fr = shape.frontRight {
+        if postLatency > 0, roomLanes != nil {
+            guard postLatency <= N60_GRAPH_MAX_DELAY_FRAMES else { throw UnifiedGraphFallbackReason.latencyAlignment }
+            for lane in 0..<Int(spec.outputChannels) where lanePlanCovered & (UInt64(1) << UInt64(lane)) == 0 {
+                add(N60_STAGE_DELAY, Self.alignmentDelayBase + UInt32(lane), lane: UInt32(lane),
+                    capacity: postLatency, params: [Float(postLatency)])
+            }
+        } else if postLatency > 0, let fl = shape.frontLeft, let fr = shape.frontRight {
             guard postLatency <= N60_GRAPH_MAX_DELAY_FRAMES else { throw UnifiedGraphFallbackReason.latencyAlignment }
             for lane in 0..<Int(spec.outputChannels) where lane != fl && lane != fr {
                 add(N60_STAGE_DELAY, Self.alignmentDelayBase + UInt32(lane), lane: UInt32(lane),
