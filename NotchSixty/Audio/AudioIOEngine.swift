@@ -4461,7 +4461,7 @@ final class AudioIOEngine: ObservableObject {
             + gainConfiguration.headroomAttenuationDB
             + gainConfiguration.outputGainDB
         let programGain = DSPGainConfiguration.linearGain(forDB: combinedGainDB)
-        guard programGain.isFinite, programGain >= 0, programGain <= 16 else {
+        guard programGain.isFinite, programGain > 0, programGain <= 16 else {
             throw BinauralHeadphoneTransportError.bridgeAllocationFailed
         }
         // E6 S8b2d: with the flag on, the core renders binaural, headphone DSP and protection when
