@@ -25,3 +25,11 @@ When the epic ships, delete the flag and every check that reads it in the same P
 - Flags that aren't in `FeatureFlag.all` are always off. A stale override left by a removed
   flag, or a mistyped launch argument, can't switch anything on.
 - All persisted keys live in `NotchSixty/State/PreferenceKeys.swift`. Never rename a stored key.
+
+## Current flags
+
+| id | epic | gates |
+| --- | --- | --- |
+| `e4.adaptive-anc` | E4 | Adaptive Quiet Zone controls |
+| `e6.legacy-kernel` | E6 | Selects the frozen legacy render kernel (E23 deletes it) |
+| `e10.mixed-phase-correction` | E10 | Mixed-phase multi-seat room correction (music and video modes, pre-ringing audit, joint bass optimiser); added in S1, removed in S9 |

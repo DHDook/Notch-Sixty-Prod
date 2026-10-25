@@ -18,7 +18,7 @@ struct FeatureFlag: Hashable, Identifiable, Sendable {
 extension FeatureFlag {
     /// Every flag the app knows. Add one when an epic starts merging dark;
     /// delete it, and the checks that read it, once the epic ships.
-    static let all: [FeatureFlag] = [.adaptiveANC, .legacyKernel]
+    static let all: [FeatureFlag] = [.adaptiveANC, .legacyKernel, .mixedPhaseCorrection]
 
     /// E4: adaptive Quiet Zone controls and the shadow-mode adaptive path.
     static let adaptiveANC = FeatureFlag(
@@ -34,6 +34,15 @@ extension FeatureFlag {
         id: "e6.legacy-kernel",
         title: "Legacy render kernel (frozen fallback)",
         epic: "E6"
+    )
+
+    /// E10: mixed-phase, multi-seat room correction (music mode with a declared latency budget,
+    /// video mode, the pre-ringing audit and the joint bass optimiser). Swift decides; the engine
+    /// never reads flags. Removed in E10 S9 when the epic ships.
+    static let mixedPhaseCorrection = FeatureFlag(
+        id: "e10.mixed-phase-correction",
+        title: "Mixed-phase room correction",
+        epic: "E10"
     )
 }
 

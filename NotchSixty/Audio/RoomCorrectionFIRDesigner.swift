@@ -178,6 +178,26 @@ struct RoomCorrectionFIRDesigner: Sendable {
         )
     }
 
+    /// Minimum-phase taps for a desired correction. Kept so the E10 core designer can be tested for
+    /// parity against this implementation.
+    func minimumPhaseTaps(
+        desiredCorrection: RoomCorrectionFrequencyResponse,
+        effectiveLowHz: Double,
+        effectiveHighHz: Double,
+        sampleRate: Double,
+        tapCount: Int
+    ) throws -> [Float] {
+        let transform = try RoomCorrectionFIRDFT(size: try Self.transformSize(forTapCount: tapCount))
+        return try synthesize(
+            desiredCorrection: desiredCorrection,
+            effectiveLowHz: effectiveLowHz,
+            effectiveHighHz: effectiveHighHz,
+            sampleRate: sampleRate,
+            tapCount: tapCount,
+            transform: transform
+        ).taps
+    }
+
     private func synthesize(
         desiredCorrection: RoomCorrectionFrequencyResponse,
         effectiveLowHz: Double,

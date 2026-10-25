@@ -286,3 +286,173 @@ int32_t n60_measure_room_capture(const n60_measure_room_params *params,
 }
 
 }  // extern "C"
+
+// ---- Multi-source, multi-seat room (E10 S1) ----
+namespace {
+
+bool validMulti(const n60_measure_multiroom_params *p) {
+    if (p == nullptr || !validRoom(&p->base)) return false;
+    if (p->source_count < 1 || p->source_count > N60_MEASURE_MULTIROOM_MAX) return false;
+    if (p->seat_count < 1 || p->seat_count > N60_MEASURE_MULTIROOM_MAX) return false;
+    if (p->reflection_count > N60_MEASURE_MULTIROOM_REFLECTIONS || p->allpass_count > N60_MEASURE_MULTIROOM_ALLPASS) return false;
+    if (!std::isfinite(p->modal_variation) || p->modal_variation < 0.0 || p->modal_variation > 0.95) return false;
+    for (uint32_t i = 0; i < N60_MEASURE_MULTIROOM_MAX; ++i) {
+        if (!std::isfinite(p->source_delay_seconds[i]) || p->source_delay_seconds[i] < 0.0) return false;
+        if (!std::isfinite(p->seat_delay_seconds[i]) || p->seat_delay_seconds[i] < 0.0) return false;
+    }
+    for (uint32_t i = 0; i < p->reflection_count; ++i) {
+        if (!std::isfinite(p->reflection_delay_seconds[i]) || p->reflection_delay_seconds[i] <= 0.0 ||
+            !std::isfinite(p->reflection_gain_db[i])) return false;
+    }
+    for (uint32_t i = 0; i < p->allpass_count; ++i) {
+        if (!std::isfinite(p->allpass_f0_hz[i]) || p->allpass_f0_hz[i] <= 0.0 || p->allpass_f0_hz[i] >= 0.2 * p->base.sample_rate) return false;
+        if (!std::isfinite(p->allpass_q[i]) || p->allpass_q[i] < 0.3 || p->allpass_q[i] > 20.0) return false;
+    }
+    return std::isfinite(p->ir_noise_dbfs);
+}
+
+double allpassPhase(const n60_measure_multiroom_params *p, double hz) {
+    double sum = 0.0;
+    for (uint32_t i = 0; i < p->allpass_count; ++i) {
+        const double w0 = 2.0 * kPi * p->allpass_f0_hz[i];
+        const double w = 2.0 * kPi * hz;
+        sum += -2.0 * std::atan2(w * w0 / p->allpass_q[i], w0 * w0 - w * w);
+    }
+    return sum;
+}
+
+double allpassGroupDelay(const n60_measure_multiroom_params *p, double hz) {
+    double sum = 0.0;
+    for (uint32_t i = 0; i < p->allpass_count; ++i) {
+        const double w0 = 2.0 * kPi * p->allpass_f0_hz[i];
+        const double w = 2.0 * kPi * hz;
+        const double a = w0 * w0 - w * w;
+        const double b = w * w0 / p->allpass_q[i];
+        sum += 2.0 * (w0 / p->allpass_q[i]) * (w0 * w0 + w * w) / (a * a + b * b);
+    }
+    return sum;
+}
+
+}  // namespace
+
+extern "C" {
+
+void n60_measure_multiroom_defaults(double sample_rate, n60_measure_multiroom_params *p) {
+    if (p == nullptr) return;
+    *p = n60_measure_multiroom_params{};
+    p->struct_size = sizeof(n60_measure_multiroom_params);
+    n60_measure_room_defaults(sample_rate, &p->base);
+    p->source_count = 1;
+    p->seat_count = 1;
+    for (uint32_t i = 0; i < N60_MEASURE_MULTIROOM_MAX; ++i) {
+        p->source_delay_seconds[i] = 0.0;
+        p->seat_delay_seconds[i] = 0.0;
+    }
+    // Mode levels are set so each resonance peaks at a fixed gain over the direct sound at any rate:
+    // a decaying sinusoid of amplitude A and decay rate alpha (per sample) has a spectral peak of
+    // A / (2 alpha). Peaks below unity keep the room minimum phase apart from the allpass sections.
+    static const double peakGain[3] = {0.6, 0.5, 0.4};
+    for (int m = 0; m < 3; ++m) {
+        const double alpha = kLn1000 / (p->base.mode_decay_seconds[m] * sample_rate);
+        p->base.mode_level_db[m] = 20.0 * std::log10(peakGain[m] * 2.0 * alpha / p->base.direct_gain);
+    }
+    // The diffuse tail is normalised per sample, so its in-band level grows with the rate; scale it
+    // so the level against the direct sound is the same at every rate (-60 dB per sample at 48 kHz).
+    p->base.diffuse_level_db = -60.0 - 10.0 * std::log10(sample_rate / 48000.0);
+    p->modal_variation = 0.3;
+    p->reflection_count = 2;
+    p->reflection_delay_seconds[0] = 0.0031;
+    p->reflection_gain_db[0] = -9.0;
+    p->reflection_delay_seconds[1] = 0.0075;
+    p->reflection_gain_db[1] = -12.0;
+    p->ir_noise_dbfs = -200.0;
+}
+
+int32_t n60_measure_multiroom_ir_length(const n60_measure_multiroom_params *params, uint64_t *frames_out) {
+    if (!validMulti(params) || frames_out == nullptr) return N60_MEASURE_ERR_ARGUMENT;
+    *frames_out = irFrames(&params->base);
+    return N60_MEASURE_OK;
+}
+
+double n60_measure_multiroom_arrival_frames(const n60_measure_multiroom_params *params, uint32_t source, uint32_t seat) {
+    if (!validMulti(params) || source >= params->source_count || seat >= params->seat_count) return -1.0;
+    return std::floor(0.5 + (params->base.direct_delay_seconds + params->source_delay_seconds[source] +
+                              params->seat_delay_seconds[seat]) * params->base.sample_rate);
+}
+
+double n60_measure_multiroom_allpass_phase(const n60_measure_multiroom_params *params, double hz) {
+    if (!validMulti(params)) return 0.0;
+    return allpassPhase(params, hz);
+}
+
+double n60_measure_multiroom_allpass_group_delay(const n60_measure_multiroom_params *params, double hz) {
+    if (!validMulti(params)) return 0.0;
+    return allpassGroupDelay(params, hz);
+}
+
+int32_t n60_measure_multiroom_ir(const n60_measure_multiroom_params *params, uint32_t source, uint32_t seat,
+                                 float *out, uint64_t capacity, uint64_t *count_out) {
+    if (!validMulti(params) || out == nullptr || count_out == nullptr || source >= params->source_count ||
+        seat >= params->seat_count) {
+        return N60_MEASURE_ERR_ARGUMENT;
+    }
+    const n60_measure_room_params &base = params->base;
+    const uint64_t len = irFrames(&base);
+    if (capacity < len) return N60_MEASURE_ERR_CAPACITY;
+    const double fs = base.sample_rate;
+
+    // Direct sound and diffuse tail for this path; the modes are added below with seat gains.
+    n60_measure_room_params path = base;
+    path.direct_delay_seconds = base.direct_delay_seconds + params->source_delay_seconds[source] + params->seat_delay_seconds[seat];
+    if (path.direct_delay_seconds >= path.ir_seconds) return N60_MEASURE_ERR_ARGUMENT;
+    path.seed = base.seed + 1u + source * N60_MEASURE_MULTIROOM_MAX + seat;
+    for (int m = 0; m < 4; ++m) path.mode_frequencies_hz[m] = 0.0;
+    std::vector<double> ir;
+    if (!buildIr(&path, ir)) return N60_MEASURE_ERR_ARGUMENT;
+    const uint64_t delay = static_cast<uint64_t>(std::llround(path.direct_delay_seconds * fs));
+
+    // Modes: shared frequencies and decays, per-seat gain (sign included), phase from the path delay.
+    Rng seatRng(base.seed * 7919u + 104729u * (seat + 1u));
+    for (int m = 0; m < 4; ++m) {
+        const double u = 2.0 * seatRng.uniform() - 1.0;  // drawn for every mode: stable stream
+        const double f = base.mode_frequencies_hz[m];
+        if (f <= 0 || base.mode_decay_seconds[m] <= 0 || f >= fs * 0.45) continue;
+        const double level = base.direct_gain * std::pow(10.0, base.mode_level_db[m] / 20.0) * (1.0 + params->modal_variation * u);
+        for (uint64_t i = delay + 1; i < len; ++i) {
+            const double t = static_cast<double>(i - delay) / fs;
+            ir[i] += level * std::exp(-kLn1000 * t / base.mode_decay_seconds[m]) * std::sin(2.0 * kPi * f * t);
+        }
+    }
+    // Early reflections: the same absolute times and gains at every seat.
+    const uint64_t baseDelay = static_cast<uint64_t>(std::llround(base.direct_delay_seconds * fs));
+    for (uint32_t r = 0; r < params->reflection_count; ++r) {
+        const uint64_t at = baseDelay + static_cast<uint64_t>(std::llround(params->reflection_delay_seconds[r] * fs));
+        if (at < len) ir[at] += base.direct_gain * std::pow(10.0, params->reflection_gain_db[r] / 20.0);
+    }
+    if (params->ir_noise_dbfs > -199.0) {
+        Rng noise(base.seed * 31u + 1000003u * (source * N60_MEASURE_MULTIROOM_MAX + seat + 1u));
+        const double rms = base.direct_gain * std::pow(10.0, params->ir_noise_dbfs / 20.0);
+        for (uint64_t i = 0; i < len; ++i) ir[i] += rms * noise.gaussian();
+    }
+    if (params->allpass_count > 0) {
+        uint64_t n = 2;
+        while (n < len) n <<= 1;
+        ir.resize(n, 0.0);
+        std::vector<Cplx> spectrum;
+        if (!n60::fft::offline::realForward(ir.data(), n, spectrum)) return N60_MEASURE_ERR_ALLOC;
+        for (size_t k = 1; k + 1 < spectrum.size(); ++k) {
+            const double ph = allpassPhase(params, static_cast<double>(k) * fs / static_cast<double>(n));
+            const double c = std::cos(ph), s = std::sin(ph);
+            const Cplx v = spectrum[k];
+            spectrum[k] = Cplx{v.re * c - v.im * s, v.re * s + v.im * c};
+        }
+        std::vector<double> shaped;
+        if (!n60::fft::offline::realInverse(spectrum, n, shaped)) return N60_MEASURE_ERR_ALLOC;
+        ir.assign(shaped.begin(), shaped.begin() + static_cast<std::ptrdiff_t>(len));
+    }
+    for (uint64_t i = 0; i < len; ++i) out[i] = static_cast<float>(ir[i]);
+    *count_out = len;
+    return N60_MEASURE_OK;
+}
+
+}  // extern "C"

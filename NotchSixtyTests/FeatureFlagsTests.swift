@@ -88,6 +88,15 @@ final class FeatureFlagsTests: XCTestCase {
         }
     }
 
+    /// E10 S1: the mixed-phase correction flag exists, belongs to E10 and is off by default.
+    func testMixedPhaseCorrectionFlagIsDarkByDefault() {
+        XCTAssertTrue(FeatureFlag.all.contains(.mixedPhaseCorrection))
+        XCTAssertEqual(FeatureFlag.mixedPhaseCorrection.id, "e10.mixed-phase-correction")
+        XCTAssertEqual(FeatureFlag.mixedPhaseCorrection.epic, "E10")
+        let plain = FeatureFlags(known: FeatureFlag.all, defaults: defaults, policy: .launchArgumentOnly, arguments: [])
+        XCTAssertFalse(plain.isEnabled(.mixedPhaseCorrection))
+    }
+
     /// E6 S11: the graph is the default renderer; only the frozen-fallback flag selects the kernel.
     func testGraphIsDefaultAndLegacyKernelFlagSelectsFallback() {
         XCTAssertTrue(FeatureFlag.all.contains(.legacyKernel))

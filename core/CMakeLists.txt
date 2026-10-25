@@ -3,7 +3,8 @@ cmake_minimum_required(VERSION 3.20)
 project(n60core LANGUAGES C CXX)
 
 add_library(n60core STATIC src/graph.cpp src/snapshot.cpp src/fft.cpp src/stages_dsp.cpp src/stages_system.cpp src/stages_matrix.cpp src/stages_generator.cpp src/layout.cpp
-    src/measure/offline_fft.cpp src/measure/ess.cpp src/measure/deconvolve.cpp src/measure/reference_room.cpp src/measure/timing.cpp src/measure/distortion.cpp src/measure/decay.cpp src/measure/waterfall.cpp src/measure/monitor_ring.cpp src/measure/spl.cpp src/measure/rta.cpp)
+    src/measure/offline_fft.cpp src/measure/ess.cpp src/measure/deconvolve.cpp src/measure/reference_room.cpp src/measure/timing.cpp src/measure/distortion.cpp src/measure/decay.cpp src/measure/waterfall.cpp src/measure/monitor_ring.cpp src/measure/spl.cpp src/measure/rta.cpp
+    src/correct/minphase.cpp src/correct/design.cpp src/correct/synth.cpp)
 target_compile_features(n60core PUBLIC cxx_std_20)
 target_include_directories(n60core PUBLIC include)
 target_include_directories(n60core PRIVATE src)
@@ -102,3 +103,9 @@ add_test(NAME n60core_generator COMMAND n60core_generator_test)
 add_executable(n60core_measure_monitor_test tests/test_measure_monitor.cpp)
 target_link_libraries(n60core_measure_monitor_test PRIVATE n60core Threads::Threads)
 add_test(NAME n60core_measure_monitor COMMAND n60core_measure_monitor_test)
+
+# E10 S1: room-correction design core (n60/correct.h): FDW, minimum phase, mixed-phase synthesis, pre-ringing audit.
+add_executable(n60core_correct_test tests/test_correct.cpp)
+target_include_directories(n60core_correct_test PRIVATE src)
+target_link_libraries(n60core_correct_test PRIVATE n60core)
+add_test(NAME n60core_correct COMMAND n60core_correct_test)
