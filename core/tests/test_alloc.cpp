@@ -701,6 +701,101 @@ int main() {
         n60_graph_set_external_processor(g, nullptr, nullptr, 0);
         n60_graph_retire(g);
     }
+    // E6 S9a2: a 7.1.4 (12 lane) graph with the program stages on every lane set the unified graph maps
+    // (denoiser, M/S around a PEQ, dynamic EQ, program FIR, linked compressor and expander, bass management
+    // to two lanes, room and speaker IR on the front pair, ambient, core dynamics, front pair stages, output
+    // gain, pause gate, delay, protection and the final meter), published, edited live and rendered.
+    for (double rate : rates) {
+        constexpr uint32_t CH = 12, N = 512;
+        const float gain = 0.8f, gain2 = 1.1f, delay = 24;
+        const float dn[9] = {1, 0, 0.8f, -50, 1, 100, 4000, 0, 0};
+        const float peq[8] = {0, static_cast<float>(1000 * rate / 48000), 4, 1, 1, static_cast<float>(250 * rate / 48000), -2, 0.7f};
+        float band[16] = {1, 0, 1000, 1, 0, -30, 4, -24, 10, 10, 0, -60, 1, 0, 1, 20};
+        band[2] = static_cast<float>(1000 * rate / 48000);
+        const float comp[10] = {-20, 4, 6, 1, 100, 0, 0, 1, 80, 1};
+        const float exp6[6] = {-50, 2, -30, 1, 100, 0};
+        const float bm[9] = {80, 0, 10, 11, 120, 0, 0, 0, 0};
+        const float amb[10] = {3, 100, 0, 1, 1000, 1, 1, 8000, 0, 1};
+        const float sym[1] = {0.2f}, cf[1] = {0.2f}, ct[2] = {900, 0.3f}, og[1] = {0.9f};
+        const float gate[5] = {-90, 6, 10, 5, 5};
+        const float prot[7] = {1, -1, 1, 50, 5, 1, 2};
+        float taps[700], room[300];
+        for (int i = 0; i < 700; i++) taps[i] = 0.001f * static_cast<float>(std::sin(0.1 * i));
+        for (int i = 0; i < 300; i++) room[i] = 0.002f * static_cast<float>(std::sin(0.2 * i));
+        constexpr uint32_t ALL = (1u << CH) - 1, MAINS = 0x3FF, FRONT = 0x3;
+        n60_stage_desc a[24] = {
+            stage(N60_STAGE_SANITISE, 1, N60_LANE_ALL, nullptr, 0),
+            stage(N60_STAGE_METER_IN, 2, N60_LANE_ALL, nullptr, 0),
+            stage(N60_STAGE_GAIN, 3, N60_LANE_ALL, &gain, 1),
+            stage(N60_STAGE_DENOISER, 4, 0, dn, 9),
+            stage(N60_STAGE_MS_ENCODE, 5, 0, nullptr, 0, 0, 1),
+            stage(N60_STAGE_PEQ, 6, N60_LANE_ALL, peq, 8),
+            stage(N60_STAGE_DYN_EQ, 7, 0, band, 16),
+            stage(N60_STAGE_MS_DECODE, 8, 0, nullptr, 0, 0, 1),
+            stage(N60_STAGE_FIR, 9, 0, taps, 700, 5),
+            stage(N60_STAGE_COMPRESSOR, 10, 0, comp, 10),
+            stage(N60_STAGE_EXPANDER, 11, 0, exp6, 6),
+            stage(N60_STAGE_METER_OUT, 12, N60_LANE_ALL, nullptr, 0),
+            stage(N60_STAGE_BASS_MGMT, 13, 0, bm, 9),
+            stage(N60_STAGE_ROOM_FIR, 14, 0, room, 300),
+            stage(N60_STAGE_SPEAKER_IR, 15, 0, room, 150),
+            stage(N60_STAGE_AMBIENT, 16, 0, amb, 10),
+            stage(N60_STAGE_SYMMETRY, 17, 0, sym, 1, 0, 1),
+            stage(N60_STAGE_CROSSFEED, 18, 0, cf, 1, 0, 1),
+            stage(N60_STAGE_CROSSTALK, 19, 0, ct, 2, 0, 1),
+            stage(N60_STAGE_OUTPUT_GAIN, 20, N60_LANE_ALL, og, 1),
+            stage(N60_STAGE_PAUSE_GATE, 21, 0, gate, 5),
+            stage(N60_STAGE_DELAY, 22, N60_LANE_ALL, &delay, 1, 256),
+            stage(N60_STAGE_PROTECTION, 23, N60_LANE_ALL, prot, 7),
+            stage(N60_STAGE_FINAL_METER, 24, N60_LANE_ALL, nullptr, 0),
+        };
+        for (int i : {3, 6, 8, 9, 10, 15, 20}) a[i].laneMask = ALL;
+        a[8].laneMask = MAINS; a[9].laneMask = MAINS; a[10].laneMask = MAINS;
+        a[12].laneMask = MAINS;
+        a[13].laneMask = FRONT; a[14].laneMask = FRONT;
+        n60_stage_desc b[3] = {a[0], stage(N60_STAGE_GAIN, 3, N60_LANE_ALL, &gain2, 1), a[22]};
+        n60_graph_desc da{}, db{};
+        da.structSize = db.structSize = sizeof da;
+        da.abiVersion = db.abiVersion = N60_GRAPH_ABI_VERSION;
+        da.sampleRate = db.sampleRate = rate;
+        da.maxBlockFrames = db.maxBlockFrames = N;
+        da.inputChannels = da.outputChannels = db.inputChannels = db.outputChannels = CH;
+        da.stages = a; da.stageCount = 24;
+        db.stages = b; db.stageCount = 3;
+        n60_graph *g = nullptr;
+        { n60_status bs = n60_graph_build(&da, &g); CHECK(bs == N60_STATUS_OK, "build 7.1.4 graph at %.0f (status %d)", rate, static_cast<int>(bs)); }
+        if (g == nullptr) continue;
+        { n60_rebuild_options instant{sizeof instant, 0.0f, 0.0f, 0}; n60_graph_set_rebuild_options(g, &instant); }
+        static float buf[CH][N], obuf[CH][N];
+        const float *in[CH];
+        float *out[CH];
+        for (uint32_t c = 0; c < CH; c++) { in[c] = buf[c]; out[c] = obuf[c]; }
+        uint32_t seed = 21;
+        for (int round = 0; round < 16; round++) {
+            n60_graph_desc &d = (round % 8 == 7) ? db : da;
+            CHECK(n60_graph_publish(g, &d) == N60_STATUS_OK, "publish 7.1.4");
+            n60_param_record rec[3] = {{3, 0, 0.7f + 0.01f * round, 0}, {10, 0, -30.0f + round, 0}, {20, 0, 0.8f, 0}};
+            n60_status ps = n60_graph_post_params(g, rec, (round % 8 == 7) ? 1 : 3);
+            CHECK(ps == N60_STATUS_OK, "post 7.1.4 (%d)", ps);
+            for (uint32_t c = 0; c < CH; c++) {
+                for (uint32_t i = 0; i < N; i++) {
+                    seed = seed * 1664525u + 1013904223u;
+                    buf[c][i] = 0.3f * (static_cast<float>((seed >> 8) & 0xFFFF) / 65536.0f - 0.5f);
+                }
+            }
+            allocs = 0;
+            frees = 0;
+            armed = true;
+            n60_status st = n60_graph_process(g, in, out, N);
+            for (int k = 0; k < 4; k++) st = static_cast<n60_status>(st | n60_graph_process(g, in, out, 1 + 100 * k));
+            armed = false;
+            CHECK(st == N60_STATUS_OK, "process 7.1.4");
+            CHECK(allocs == 0 && frees == 0, "rate %.0f 7.1.4 round %d: realtime call allocated %ld / freed %ld", rate, round,
+                  allocs.load(), frees.load());
+            n60_graph_collect(g);
+        }
+        n60_graph_retire(g);
+    }
     if (failures) {
         std::fprintf(stderr, "%d failure(s)\n", failures);
         return 1;

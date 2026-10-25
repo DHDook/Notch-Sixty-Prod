@@ -192,4 +192,239 @@ final class UnifiedGraphProgramDSPTests: XCTestCase {
             XCTAssertTrue(out.allSatisfy { $0.allSatisfy(\.isFinite) }, "finite at \(rate)")
         }
     }
+
+    // MARK: S9a2 hardening
+
+    /// A unit impulse on every lane at frame 0, rendered for `frames` frames; returns every output lane.
+    private func renderImpulse(_ spec: UnifiedGraphSpec, lanes: Int, only: Int? = nil, frames: Int) throws -> [[Float]] {
+        let host = try UnifiedGraphHost(spec: spec)
+        var out = [[Float]](repeating: [], count: Int(spec.outputChannels))
+        var position = 0
+        while position < frames {
+            var input = [[Float]](repeating: [Float](repeating: 0, count: block), count: lanes)
+            if position == 0 {
+                for lane in 0..<lanes where only == nil || only == lane { input[lane][0] = 1 }
+            }
+            let result = try host.processOffline(input: input, frames: block)
+            for lane in 0..<result.count { out[lane] += result[lane] }
+            position += block
+        }
+        return out
+    }
+
+    private func peakIndex(_ x: [Float]) -> Int {
+        var best = 0
+        for index in x.indices where abs(x[index]) > abs(x[best]) { best = index }
+        return best
+    }
+
+    private func delta(at index: Int, length: Int? = nil) -> [Float] {
+        var taps = [Float](repeating: 0, count: max(index + 1, length ?? 0))
+        taps[index] = 1
+        return taps
+    }
+
+    /// A denoiser as the translator builds it from a real snapshot, with the latency the snapshot reports.
+    private func denoiserStages(rate: Double, quality: N60DenoiserQuality) throws -> (UnifiedGraphStereoStages, UInt32) {
+        var snapshot = N60DSPGraphSnapshotMakeUnity(rate)
+        XCTAssertTrue(N60DynamicsSnapshotSetSpectralDenoiser(
+            &snapshot.dynamics, rate, true, N60DenoiserTuningStandard, quality,
+            0.7, -50, false, 0, 150, 0, N60DenoiserProfileCommandNone))
+        let reported = snapshot.dynamics.spectralDenoiser.latencyFrames
+        let configuration = try XCTUnwrap(UnifiedGraphTranslator.stereoConfiguration(snapshot: &snapshot, sampleRate: rate))
+        XCTAssertNotNil(configuration.stereoStages.denoiser)
+        return (configuration.stereoStages, reported)
+    }
+
+    func testRoomAndSpeakerIRLatencyAlignsEveryLaneAtEveryRate() throws {
+        for rate in Self.rates {
+            let layout = OutputProgramLayout.fiveOne
+            let s = try shape(layout)
+            let roomDelay = 100, irDelay = 40
+            var stages = UnifiedGraphStereoStages()
+            stages.roomFIR = UnifiedGraphFIRProgram(generation: 1, left: delta(at: roomDelay), right: nil,
+                                                    declaredLatencyFrames: UInt32(roomDelay))
+            stages.speakerIR = UnifiedGraphFIRProgram(generation: 1, left: delta(at: irDelay), right: nil,
+                                                      declaredLatencyFrames: UInt32(irDelay))
+            let dsp = UnifiedGraphProgramDSP(stereo: stereo(rate: rate, stages: stages), shape: s, eqMode: .linked)
+            let spec = try config(rate: rate, layout: layout, dsp: dsp).makeSpec()
+            let expected = 256 + roomDelay + 256 + irDelay
+            let out = try renderImpulse(spec, lanes: 6, frames: 2_048)
+            for lane in 0..<6 {
+                XCTAssertEqual(peakIndex(out[lane]), expected, "lane \(lane) at \(rate)")
+            }
+            let host = try UnifiedGraphHost(spec: spec)
+            XCTAssertEqual(Int(host.latencyFrames), expected, "reported latency at \(rate)")
+        }
+    }
+
+    func testRoomOnlyAndSpeakerIROnlyAlignEveryLane() throws {
+        for rate in Self.rates {
+            let layout = OutputProgramLayout.sevenOneFour
+            let s = try shape(layout)
+            for useRoom in [true, false] {
+                var stages = UnifiedGraphStereoStages()
+                let program = UnifiedGraphFIRProgram(generation: 1, left: delta(at: 64), right: nil, declaredLatencyFrames: 64)
+                if useRoom { stages.roomFIR = program } else { stages.speakerIR = program }
+                let dsp = UnifiedGraphProgramDSP(stereo: stereo(rate: rate, stages: stages), shape: s, eqMode: .linked)
+                let spec = try config(rate: rate, layout: layout, dsp: dsp).makeSpec()
+                let out = try renderImpulse(spec, lanes: layout.roles.count, frames: 1_024)
+                for lane in 0..<layout.roles.count {
+                    XCTAssertEqual(peakIndex(out[lane]), 256 + 64, "lane \(lane) room \(useRoom) at \(rate)")
+                }
+            }
+        }
+    }
+
+    func testDenoiserLatencyIsTheReportedLatencyAtEveryRate() throws {
+        for rate in Self.rates {
+            for quality in [N60DenoiserQualityQuality, N60DenoiserQualityHigh] {
+                let layout = OutputProgramLayout.fiveOne
+                let s = try shape(layout)
+                let (stages, reported) = try denoiserStages(rate: rate, quality: quality)
+                XCTAssertEqual(stages.denoiserLatencyFrames, reported)
+                let dsp = UnifiedGraphProgramDSP(stereo: stereo(rate: rate, stages: stages), shape: s, eqMode: .linked)
+                let spec = try config(rate: rate, layout: layout, dsp: dsp).makeSpec()
+                let host = try UnifiedGraphHost(spec: spec)
+                XCTAssertEqual(host.latencyFrames, reported, "graph latency at \(rate)")
+                // The LFE is not covered by the denoiser: its delta filter lands on the reported latency.
+                let lfe = try XCTUnwrap(s.lfeLane)
+                let out = try renderImpulse(spec, lanes: 6, only: lfe, frames: Int(reported) / block * block + 2 * block)
+                XCTAssertEqual(peakIndex(out[lfe]), Int(reported), "LFE alignment at \(rate)")
+            }
+        }
+    }
+
+    func testAlignmentFollowsAReportedLatencyThatIsNotTheFFTSize() throws {
+        let rate = 48_000.0
+        let s = try shape(.fiveOne)
+        var (stages, _) = try denoiserStages(rate: rate, quality: N60DenoiserQualityQuality)
+        stages.denoiserLatencyFrames = 1_500
+        let dsp = UnifiedGraphProgramDSP(stereo: stereo(rate: rate, stages: stages), shape: s, eqMode: .linked)
+        let spec = try config(rate: rate, layout: .fiveOne, dsp: dsp).makeSpec()
+        let lfe = try XCTUnwrap(s.lfeLane)
+        let out = try renderImpulse(spec, lanes: 6, only: lfe, frames: 2_048)
+        XCTAssertEqual(peakIndex(out[lfe]), 1_500)
+    }
+
+    func testBinauralDenoiserLatencyShiftsUncoveredLanesByTheReportedLatency() throws {
+        for rate in Self.rates {
+            let layout = OutputProgramLayout.fiveOne
+            let s = try shape(layout)
+            let (stages, reported) = try denoiserStages(rate: rate, quality: N60DenoiserQualityQuality)
+            let lfe = try XCTUnwrap(s.lfeLane)
+            func binaural(_ dsp: UnifiedGraphProgramDSP?) throws -> UnifiedGraphSpec {
+                var profile = HeadphoneDeviceProfileConfiguration()
+                profile.programLayout = layout
+                let result = UnifiedGraphTranslator.binauralSpec(
+                    asset: BinauralProfileAsset.validationStereo(sampleRate: rate), layout: layout, profile: profile,
+                    outputChannels: 2, sampleRate: rate, headTracking: false, programDSP: dsp)
+                guard case .success(let spec) = result else { throw XCTSkip("binaural spec rejected at \(rate)") }
+                return spec
+            }
+            let dsp = UnifiedGraphProgramDSP(stereo: stereo(rate: rate, stages: stages), shape: s, eqMode: .linked,
+                                             virtualSpeakers: true)
+            let plainSpec = try binaural(nil)
+            let dspSpec = try binaural(dsp)
+            let frames = Int(reported) / block * block + 3 * block
+            let plain = try renderImpulse(plainSpec, lanes: 6, only: lfe, frames: frames)
+            let aligned = try renderImpulse(dspSpec, lanes: 6, only: lfe, frames: frames)
+            XCTAssertEqual(peakIndex(aligned[0]) - peakIndex(plain[0]), Int(reported), "left ear at \(rate)")
+            XCTAssertEqual(peakIndex(aligned[1]) - peakIndex(plain[1]), Int(reported), "right ear at \(rate)")
+        }
+    }
+
+    func testBinauralUserProtectionNeverReplacesTheSafetyLimiter() throws {
+        for rate in Self.rates {
+            let layout = OutputProgramLayout.fiveOne
+            let s = try shape(layout)
+            let protection = UnifiedGraphProtection(
+                limiterEnabled: true, ceilingDB: -12, attackMilliseconds: 1, releaseMilliseconds: 50,
+                lookAheadMilliseconds: 2, truePeakGuard: true, oversampling: 2)
+            var st = stereo(rate: rate)
+            st.protection = protection
+            let dsp = UnifiedGraphProgramDSP(stereo: st, shape: s, eqMode: .linked, virtualSpeakers: true)
+            XCTAssertNotNil(dsp.protection)
+            var profile = HeadphoneDeviceProfileConfiguration()
+            profile.programLayout = layout
+            let build = { (dsp: UnifiedGraphProgramDSP?) -> UnifiedGraphSpec? in
+                guard case .success(let spec) = UnifiedGraphTranslator.binauralSpec(
+                    asset: BinauralProfileAsset.validationStereo(sampleRate: rate), layout: layout, profile: profile,
+                    outputChannels: 2, sampleRate: rate, headTracking: false, programDSP: dsp) else { return nil }
+                return spec
+            }
+            let plain = try XCTUnwrap(build(nil))
+            let spec = try XCTUnwrap(build(dsp))
+            let safetyBefore = try XCTUnwrap(plain.stages.first { $0.stageId == N60_LSTAGE_PROTECTION })
+            let protections = spec.stages.filter { $0.kind == N60_STAGE_PROTECTION.rawValue }
+            XCTAssertEqual(protections.count, 2, "user protection is an extra stage at \(rate)")
+            XCTAssertEqual(protections.last?.stageId, N60_LSTAGE_PROTECTION, "the safety limiter runs last")
+            XCTAssertEqual(protections.last?.params, safetyBefore.params, "safety parameters unchanged at \(rate)")
+            XCTAssertEqual(protections.last?.laneMask, safetyBefore.laneMask)
+            XCTAssertEqual(protections.first?.params, UnifiedGraphConfiguration.protectionParameters(protection))
+
+            // A loud tone is held to the stricter user ceiling, and the safety ceiling (-1 dB) holds with the user's
+            // protection off in the same graph shape.
+            let host = try UnifiedGraphHost(spec: spec)
+            var peak: Float = 0
+            var position = 0
+            let total = Int(rate * 0.4) / block * block
+            while position < total {
+                var input = [[Float]](repeating: [Float](repeating: 0, count: block), count: 6)
+                input[0] = (0..<block).map { 4 * Float(sin(2.0 * .pi * 1_000.0 * Double(position + $0) / rate)) }
+                let out = try host.processOffline(input: input, frames: block)
+                if position > total / 2 { peak = max(peak, out[0].map(abs).max() ?? 0, out[1].map(abs).max() ?? 0) }
+                position += block
+            }
+            XCTAssertLessThanOrEqual(peak, Float(pow(10.0, -1.0 / 20.0)) * 1.02, "safety ceiling at \(rate)")
+            XCTAssertGreaterThan(peak, 0.01)
+        }
+    }
+
+    func testStageBudgetRejectionKeepsTheRunningGraph() throws {
+        for rate in [44_100.0, 96_000.0, 384_000.0] {
+            let layout = OutputProgramLayout.sevenOneFour
+            let s = try shape(layout)
+            let good = try config(rate: rate, layout: layout, dsp: nil).makeSpec()
+            let reference = try UnifiedGraphHost(spec: good)
+            let running = try UnifiedGraphHost(spec: good)
+            let lanes = layout.roles.count
+
+            func blockInput(_ index: Int) -> [[Float]] {
+                (0..<lanes).map { lane in
+                    (0..<block).map { 0.2 * Float(sin(2.0 * .pi * Double(220 + 40 * lane) * Double(index * block + $0) / rate)) }
+                }
+            }
+            for index in 0..<4 {
+                XCTAssertEqual(try running.processOffline(input: blockInput(index), frames: block),
+                               try reference.processOffline(input: blockInput(index), frames: block))
+            }
+
+            // Program DSP that overflows the 256-stage budget is refused with the named reason.
+            var padded = good
+            for extra in 0..<(UnifiedGraphProgramDSP.maxStages - good.stages.count) {
+                padded.stages.append(UnifiedGraphStageSpec(
+                    kind: N60_STAGE_GAIN.rawValue, stageId: 4_000 + UInt32(extra), laneA: N60_LANE_ALL,
+                    laneB: 0, laneMask: 0, capacityFrames: 0, params: [1]))
+            }
+            XCTAssertEqual(padded.stages.count, UnifiedGraphProgramDSP.maxStages)
+            let dsp = UnifiedGraphProgramDSP(stereo: stereo(rate: rate, left: [peak(3)], right: [peak(3)]),
+                                             shape: s, eqMode: .linked)
+            var candidate = padded
+            XCTAssertThrowsError(try dsp.apply(to: &candidate)) {
+                XCTAssertEqual($0 as? UnifiedGraphFallbackReason, .stageBudget, "rate \(rate)")
+            }
+            // A description over the core's budget that does reach the host is refused too, and nothing changes.
+            var over = padded
+            over.stages.append(UnifiedGraphStageSpec(
+                kind: N60_STAGE_GAIN.rawValue, stageId: 9_000, laneA: N60_LANE_ALL,
+                laneB: 0, laneMask: 0, capacityFrames: 0, params: [1]))
+            XCTAssertThrowsError(try running.apply(over), "rate \(rate)")
+            for index in 4..<12 {
+                XCTAssertEqual(try running.processOffline(input: blockInput(index), frames: block),
+                               try reference.processOffline(input: blockInput(index), frames: block),
+                               "the old graph keeps rendering bit-identically at \(rate), block \(index)")
+            }
+        }
+    }
 }

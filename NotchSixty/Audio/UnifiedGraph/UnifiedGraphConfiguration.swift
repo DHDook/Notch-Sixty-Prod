@@ -51,6 +51,8 @@ struct UnifiedGraphStereoStages: Equatable, Sendable {
     var midSideEQ = false
     /// Spectral denoiser (runs before the EQ, as in the kernel).
     var denoiser: [Float]?
+    /// The denoiser's own reported latency (its snapshot's `latencyFrames`), which the lane alignment uses.
+    var denoiserLatencyFrames: UInt32 = 0
     /// Dynamic EQ (runs after the EQ sections).
     var dynamicEQ: [Float]?
     var compressor: [Float]?
