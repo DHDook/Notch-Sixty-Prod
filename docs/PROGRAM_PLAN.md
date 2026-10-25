@@ -64,8 +64,8 @@ reviewers compare with Dirac and REW), then engine depth, then breadth.
 1. E6 Unified live N-channel graph, through S11
 2. E11 Measurement suite
 3. E10 Mixed-phase room correction and bass control
-4. E8 Routing matrix and crossovers
-5. E12 Guided setup and information architecture
+4. E12 Guided setup and information architecture (ahead of E8, owner 25 Oct 2026; S6 waits for E10 S8)
+5. E8 Routing matrix and crossovers
 6. E13 Headphones complete (bring-your-own import first)
 7. E9 Multichannel protection and FIR parity
 8. E7 384 kHz everywhere
