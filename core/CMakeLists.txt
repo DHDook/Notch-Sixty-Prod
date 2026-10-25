@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.20)
 project(n60core LANGUAGES C CXX)
 
 add_library(n60core STATIC src/graph.cpp src/snapshot.cpp src/fft.cpp src/stages_dsp.cpp src/stages_system.cpp src/stages_matrix.cpp src/layout.cpp
-    src/measure/offline_fft.cpp src/measure/ess.cpp src/measure/deconvolve.cpp src/measure/reference_room.cpp)
+    src/measure/offline_fft.cpp src/measure/ess.cpp src/measure/deconvolve.cpp src/measure/reference_room.cpp src/measure/timing.cpp)
 target_compile_features(n60core PUBLIC cxx_std_20)
 target_include_directories(n60core PUBLIC include)
 target_include_directories(n60core PRIVATE src)
@@ -76,3 +76,8 @@ add_executable(n60core_measure_test tests/test_measure.cpp)
 target_include_directories(n60core_measure_test PRIVATE src)
 target_link_libraries(n60core_measure_test PRIVATE n60core)
 add_test(NAME n60core_measure COMMAND n60core_measure_test)
+
+# E11 S2: timing reference and repeat averaging.
+add_executable(n60core_measure_timing_test tests/test_measure_timing.cpp)
+target_link_libraries(n60core_measure_timing_test PRIVATE n60core)
+add_test(NAME n60core_measure_timing COMMAND n60core_measure_timing_test)

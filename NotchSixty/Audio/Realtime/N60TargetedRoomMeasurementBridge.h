@@ -39,6 +39,13 @@ typedef struct N60TargetedRoomMeasurementBridge {
     uint32_t referenceInputChannelIndex;
     bool hasReferenceInput;
     uint32_t outputChannelIndex;
+    /* E11 S2: optional second output program (the timing-reference chirp) played on its own
+     * output channel in the same pass. Preallocated and copied on the control plane. */
+    float * _Nullable referenceProgram;
+    uint32_t referenceProgramFrames;
+    uint32_t referenceProgramStartFrame;
+    uint32_t referenceOutputChannelIndex;
+    bool hasReferenceProgram;
     _Atomic uint32_t frameCursor;
     _Atomic uint32_t capturedFrames;
     _Atomic uint32_t referenceCapturedFrames;
@@ -144,13 +151,46 @@ static inline void N60TargetedRoomMeasurementBridgeDestroy(
     N60TargetedRoomMeasurementBridge * _Nullable bridge
 ) {
     if (bridge == NULL) return;
+    free(bridge->referenceProgram);
     free(bridge->referenceCapture);
     free(bridge->capture);
     free(bridge->sweepSamples);
+    bridge->referenceProgram = NULL;
     bridge->referenceCapture = NULL;
     bridge->capture = NULL;
     bridge->sweepSamples = NULL;
     free(bridge);
+}
+
+/*
+ * Control plane, before the IOProc starts: attaches a second output program that is played on
+ * `outputChannelIndex` starting at timeline frame `startFrame` (frames before and after it, and
+ * past the program, are silent). Returns false, leaving the bridge unchanged, for a bad
+ * argument, the same channel as the primary output, or an allocation failure.
+ * Attach once, before start: it is not safe against a running IOProc. The program must already be at
+ * the device rate; the channel must exist on the output device (a missing channel is counted in
+ * unsupportedBufferLayouts). Reset keeps the program so a pass can be repeated.
+ */
+static inline bool N60TargetedRoomMeasurementBridgeAttachReferenceProgram(
+    N60TargetedRoomMeasurementBridge * _Nullable bridge,
+    const float * _Nullable samples,
+    uint32_t frameCount,
+    uint32_t startFrame,
+    uint32_t outputChannelIndex
+) {
+    if (bridge == NULL || samples == NULL || frameCount == 0u) return false;
+    if (outputChannelIndex == bridge->outputChannelIndex) return false;
+    if ((uint64_t)startFrame + (uint64_t)frameCount > (uint64_t)bridge->captureFrameCount) return false;
+    float *copy = (float *)malloc(sizeof(float) * frameCount);
+    if (copy == NULL) return false;
+    memcpy(copy, samples, sizeof(float) * frameCount);
+    free(bridge->referenceProgram);
+    bridge->referenceProgram = copy;
+    bridge->referenceProgramFrames = frameCount;
+    bridge->referenceProgramStartFrame = startFrame;
+    bridge->referenceOutputChannelIndex = outputChannelIndex;
+    bridge->hasReferenceProgram = true;
+    return true;
 }
 
 static inline N60TargetedRoomMeasurementBridgeSnapshot N60TargetedRoomMeasurementBridgeGetSnapshot(
@@ -175,7 +215,14 @@ static inline N60TargetedRoomMeasurementBridgeSnapshot N60TargetedRoomMeasuremen
     };
 }
 
-static inline uint32_t N60TargetedRoomMeasurementProcessDualStrided(
+/*
+ * Realtime. Allocation: none. Synchronisation: the only shared state is the atomics below, one
+ * writer (this callback), read by the control thread after the pass. Latency: none added.
+ * Rate and channel assumptions: native device rate, strided float32; `referenceOutput` is
+ * required exactly when the bridge has a reference program. Reset: N60TargetedRoomMeasurementBridgeReset
+ * on the control thread while the IOProc is stopped.
+ */
+static inline uint32_t N60TargetedRoomMeasurementProcessProgramStrided(
     N60TargetedRoomMeasurementBridge * _Nonnull bridge,
     const float * _Nonnull microphone,
     uint32_t microphoneStride,
@@ -183,9 +230,13 @@ static inline uint32_t N60TargetedRoomMeasurementProcessDualStrided(
     uint32_t referenceStride,
     float * _Nonnull output,
     uint32_t outputStride,
+    float * _Nullable referenceOutput,
+    uint32_t referenceOutputStride,
     uint32_t frameCount
 ) {
     if (bridge == NULL || microphone == NULL || output == NULL) return 0u;
+    if (bridge->hasReferenceProgram
+        && (referenceOutput == NULL || bridge->referenceProgram == NULL)) return 0u;
     if (bridge->hasReferenceInput
         && (reference == NULL || bridge->referenceCapture == NULL)) return 0u;
 
@@ -205,6 +256,9 @@ static inline uint32_t N60TargetedRoomMeasurementProcessDualStrided(
     const float *input = microphone;
     const float *referenceInput = reference;
     float *destination = output;
+    float *referenceDestination = referenceOutput;
+    const uint32_t programStart = bridge->referenceProgramStartFrame;
+    const uint32_t programEnd = programStart + bridge->referenceProgramFrames;
     for (uint32_t offset = 0; offset < consumed; ++offset) {
         const uint32_t timelineFrame = cursor + offset;
         float sample = 0.0f;
@@ -212,6 +266,12 @@ static inline uint32_t N60TargetedRoomMeasurementProcessDualStrided(
             sample = bridge->sweepSamples[timelineFrame - sweepStart];
         }
         *destination = sample;
+        if (bridge->hasReferenceProgram) {
+            *referenceDestination =
+                (timelineFrame >= programStart && timelineFrame < programEnd)
+                ? bridge->referenceProgram[timelineFrame - programStart] : 0.0f;
+            referenceDestination += referenceOutputStride;
+        }
         if (timelineFrame == captured) {
             bridge->capture[captured] = *input;
             captured += 1u;
@@ -227,6 +287,10 @@ static inline uint32_t N60TargetedRoomMeasurementProcessDualStrided(
     for (uint32_t offset = consumed; offset < frameCount; ++offset) {
         *destination = 0.0f;
         destination += outputStride;
+        if (bridge->hasReferenceProgram) {
+            *referenceDestination = 0.0f;
+            referenceDestination += referenceOutputStride;
+        }
     }
 
     cursor += consumed;
@@ -249,6 +313,21 @@ static inline uint32_t N60TargetedRoomMeasurementProcessDualStrided(
         memory_order_release
     );
     return consumed;
+}
+
+static inline uint32_t N60TargetedRoomMeasurementProcessDualStrided(
+    N60TargetedRoomMeasurementBridge * _Nonnull bridge,
+    const float * _Nonnull microphone,
+    uint32_t microphoneStride,
+    const float * _Nullable reference,
+    uint32_t referenceStride,
+    float * _Nonnull output,
+    uint32_t outputStride,
+    uint32_t frameCount
+) {
+    return N60TargetedRoomMeasurementProcessProgramStrided(
+        bridge, microphone, microphoneStride, reference, referenceStride,
+        output, outputStride, NULL, 0u, frameCount);
 }
 
 static inline uint32_t N60TargetedRoomMeasurementProcessStrided(
@@ -417,6 +496,7 @@ static inline OSStatus N60TargetedRoomMeasurementIOProc(
     N60TargetedMeasurementInputView input = {0};
     N60TargetedMeasurementInputView reference = {0};
     N60TargetedMeasurementOutputView output = {0};
+    N60TargetedMeasurementOutputView referenceOutput = {0};
     if (!N60TargetedRoomMeasurementMakeInputView(
             inInputData,
             bridge->inputChannelIndex,
@@ -429,7 +509,12 @@ static inline OSStatus N60TargetedRoomMeasurementIOProc(
         || !N60TargetedRoomMeasurementMakeOutputView(
             outOutputData,
             bridge->outputChannelIndex,
-            &output)) {
+            &output)
+        || (bridge->hasReferenceProgram
+            && !N60TargetedRoomMeasurementMakeOutputView(
+                outOutputData,
+                bridge->referenceOutputChannelIndex,
+                &referenceOutput))) {
         atomic_fetch_add_explicit(&bridge->unsupportedBufferLayouts, 1u, memory_order_relaxed);
         return noErr;
     }
@@ -440,7 +525,10 @@ static inline OSStatus N60TargetedRoomMeasurementIOProc(
         frameCount = reference.frameCount;
     }
     if (frameCount == 0u) return noErr;
-    (void)N60TargetedRoomMeasurementProcessDualStrided(
+    if (bridge->hasReferenceProgram && referenceOutput.frameCount < frameCount) {
+        frameCount = referenceOutput.frameCount;
+    }
+    (void)N60TargetedRoomMeasurementProcessProgramStrided(
         bridge,
         input.samples,
         input.stride,
@@ -448,6 +536,8 @@ static inline OSStatus N60TargetedRoomMeasurementIOProc(
         bridge->hasReferenceInput ? reference.stride : 0u,
         output.samples,
         output.stride,
+        bridge->hasReferenceProgram ? referenceOutput.samples : NULL,
+        bridge->hasReferenceProgram ? referenceOutput.stride : 0u,
         frameCount
     );
     return noErr;

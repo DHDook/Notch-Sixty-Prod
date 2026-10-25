@@ -54,7 +54,7 @@ build_core_objs() {
     CORE_OK=1
     local src
     for src in graph snapshot fft stages_dsp stages_system stages_matrix layout \
-        measure/offline_fft measure/ess measure/deconvolve measure/reference_room; do
+        measure/offline_fft measure/ess measure/deconvolve measure/reference_room measure/timing; do
         local obj="$OUT/n60core_${src//\//_}.o"
         if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -fno-exceptions -fno-rtti -Icore/include -Icore/src \
             -c "core/src/$src.cpp" -o "$obj"; then
@@ -196,11 +196,11 @@ if selected e4_ff_survey; then
     fi
 fi
 
-# E11 S1: measurement core (offline FFT, synchronised ESS, deconvolution, reference room).
+# E11 S1/S2: measurement core (offline FFT, ESS, deconvolution, reference room, timing and averaging).
 if selected e11_measure_core; then
     build_core_objs
     if [ "$CORE_OK" = 1 ]; then
-        for t in measure_fft measure; do
+        for t in measure_fft measure measure_timing; do
             if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -Icore/include -Icore/src "core/tests/test_$t.cpp" \
                 "${CORE_OBJS[@]}" -o "$OUT/e11_core_$t" && "$OUT/e11_core_$t"; then
                 passed+=("e11_core_$t")
@@ -211,6 +211,11 @@ if selected e11_measure_core; then
     else
         failed+=(e11_measure_core)
     fi
+fi
+
+# E11 S2: targeted measurement bridge second-program playback and allocation-free process call.
+if selected e11_targeted_bridge; then
+    harness e11_targeted_bridge "${STRICT[@]}" -O2 -I"$RT" core/tests/test_targeted_bridge.c
 fi
 
 # E6 S2/S3: libn60core (portable C++ core behind its versioned C ABI): graph skeleton,
