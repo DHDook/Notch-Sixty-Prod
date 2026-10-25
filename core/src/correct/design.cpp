@@ -380,4 +380,76 @@ int32_t n60_correct_design_channel(const n60_correct_problem *problem, uint32_t 
     return N60_CORRECT_OK;
 }
 
+int32_t n60_correct_default_seat_weights(uint32_t seat_count, uint32_t main_seat, double *weights, uint32_t capacity) {
+    if (weights == nullptr || seat_count == 0) return N60_CORRECT_ERR_ARGUMENT;
+    if (capacity < seat_count) return N60_CORRECT_ERR_CAPACITY;
+    for (uint32_t s = 0; s < seat_count; ++s) weights[s] = s == main_seat ? 2.0 : 1.0;
+    return N60_CORRECT_OK;
+}
+
+int32_t n60_correct_seat_coherence_contribution(const n60_correct_problem *problem, uint32_t channel,
+                                                const n60_correct_design_params *params, double *contribution,
+                                                uint32_t capacity) {
+    if (!validProblem(problem, channel) || !validDesignParams(params) || contribution == nullptr) return N60_CORRECT_ERR_ARGUMENT;
+    if (capacity < problem->seat_count) return N60_CORRECT_ERR_CAPACITY;
+    const double fs = problem->sample_rate;
+    double weightSum = 0.0;
+    for (uint32_t s = 0; s < problem->seat_count; ++s) weightSum += std::max(0.0, seatOf(problem, channel, s).weight);
+    if (!(weightSum > 0.0)) return N60_CORRECT_ERR_ARGUMENT;
+    std::vector<std::vector<Complex>> phasors(problem->seat_count);
+    std::vector<Complex> mean(kGrid, Complex(0.0, 0.0));
+    for (uint32_t s = 0; s < problem->seat_count; ++s) {
+        const n60_correct_seat_ir &ir = seatOf(problem, channel, s);
+        if (!(ir.weight > 0.0)) continue;
+        std::vector<Complex> response;
+        fdwSeat(ir, fs, *params, response);
+        if (!excessPhasors(response, ir.arrival_frames, fs, phasors[s])) return N60_CORRECT_ERR_ALLOC;
+        for (uint32_t g = 0; g < kGrid; ++g) mean[g] += ir.weight * phasors[s][g];
+    }
+    std::vector<double> ramp(kGrid, 0.0);
+    for (uint32_t g = 0; g < kGrid; ++g) {
+        mean[g] /= weightSum;
+        if (gridFrequency(g) >= params->phase_limit_hz) continue;
+        ramp[g] = std::min(1.0, std::max(0.0, (std::abs(mean[g]) - params->coherence_low) / (params->coherence_high - params->coherence_low)));
+    }
+    for (uint32_t s = 0; s < problem->seat_count; ++s) {
+        double sum = 0.0, norm = 0.0;
+        if (!phasors[s].empty()) {
+            for (uint32_t g = 0; g < kGrid; ++g) {
+                if (!(ramp[g] > 0.0)) continue;
+                const double m = std::abs(mean[g]);
+                if (!(m > 0.0)) continue;
+                sum += ramp[g] * (phasors[s][g] * std::conj(mean[g])).real() / m;
+                norm += ramp[g];
+            }
+        }
+        contribution[s] = norm > 0.0 ? sum / norm : 0.0;
+    }
+    return N60_CORRECT_OK;
+}
+
+int32_t n60_correct_latency_mode(uint32_t latency_mode, uint32_t *design_mode, double *budget_seconds) {
+    uint32_t mode = N60_CORRECT_MODE_MIXED_PHASE;
+    double budget = 0.0;
+    switch (latency_mode) {
+        case N60_CORRECT_LATENCY_VIDEO: mode = N60_CORRECT_MODE_MIN_PHASE; break;
+        case N60_CORRECT_LATENCY_MUSIC_20MS: budget = 0.020; break;
+        case N60_CORRECT_LATENCY_MUSIC_50MS: budget = 0.050; break;
+        case N60_CORRECT_LATENCY_MUSIC_100MS: budget = 0.100; break;
+        default: return N60_CORRECT_ERR_ARGUMENT;
+    }
+    if (design_mode != nullptr) *design_mode = mode;
+    if (budget_seconds != nullptr) *budget_seconds = budget;
+    return N60_CORRECT_OK;
+}
+
+uint32_t n60_correct_latency_mode_tap_count(uint32_t latency_mode, double sample_rate) {
+    uint32_t mode = 0;
+    double budget = 0.0;
+    if (!(sample_rate > 0.0) || n60_correct_latency_mode(latency_mode, &mode, &budget) != N60_CORRECT_OK) return 0;
+    const double tail = mode == N60_CORRECT_MODE_MIXED_PHASE ? 0.120 : 0.040;
+    const double wanted = std::ceil((budget + tail) * sample_rate / 64.0) * 64.0;
+    return static_cast<uint32_t>(std::min(wanted, static_cast<double>(N60_CORRECT_MAX_TAPS)));
+}
+
 }  // extern "C"
