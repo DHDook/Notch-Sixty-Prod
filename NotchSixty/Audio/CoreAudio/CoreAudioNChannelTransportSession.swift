@@ -20,6 +20,9 @@ enum LiveNChannelTransportError: Error, Equatable, LocalizedError {
     case roomTreatmentConfigurationFailed
     case speakerOptimizerFIRConfigurationFailed
     case configurationChangeRequiresRestart
+    /// E6 S9a: stereo-class DSP is active and the unified graph cannot reproduce the setup, so it never starts on a
+    /// path that would drop that DSP.
+    case unifiedGraphRejected(UnifiedGraphFallbackReason)
 
     var errorDescription: String? {
         switch self {
@@ -55,6 +58,8 @@ enum LiveNChannelTransportError: Error, Equatable, LocalizedError {
             return "The persisted Speaker Optimizer FIR could not be bound to the live semantic program graph with its required latency/headroom contract."
         case .configurationChangeRequiresRestart:
             return "Stop N-channel processing before changing DSP or Output Device Profile configuration."
+        case .unifiedGraphRejected(let reason):
+            return "The active stereo DSP cannot run on this multichannel or Virtual Speakers setup: \(reason.displayText)."
         }
     }
 }
@@ -395,7 +400,8 @@ final class CoreAudioNChannelTransportSession {
         roomTreatment: LiveMIMORoomTreatmentPreparation? = nil,
         audioUnitRack: AudioUnitLiveRackSwitchboard? = nil,
         unifiedGraphConfiguration: UnifiedGraphConfiguration? = nil,
-        unifiedGraphIneligibility: UnifiedGraphFallbackReason? = nil
+        unifiedGraphIneligibility: UnifiedGraphFallbackReason? = nil,
+        unifiedGraphRequired: Bool = false
     ) throws {
         self.selectedOutput = selectedOutput
         self.routePlan = routePlan
@@ -647,9 +653,18 @@ final class CoreAudioNChannelTransportSession {
                     outputBufferFrames: outputBufferFrames
                 ) {
                 case .success(let host): unifiedGraphHost = host
-                case .failure(let reason): unifiedGraphFallbackReason = reason
+                case .failure(let reason):
+                    if unifiedGraphRequired {
+                        N60LiveNChannelBridgeDestroy(newBridge)
+                        throw LiveNChannelTransportError.unifiedGraphRejected(reason)
+                    }
+                    unifiedGraphFallbackReason = reason
                 }
             } else {
+                if unifiedGraphRequired {
+                    N60LiveNChannelBridgeDestroy(newBridge)
+                    throw LiveNChannelTransportError.unifiedGraphRejected(unifiedGraphIneligibility ?? .specRejected)
+                }
                 unifiedGraphFallbackReason = unifiedGraphIneligibility
             }
             bridge = newBridge
@@ -818,7 +833,14 @@ final class CoreAudioNChannelTransportSession {
         guard configuration.lanes.count == laneCount else { return .failure(.laneCountMismatch) }
         configuration.maxBlockFrames = graphMaxBlockFrames
         guard outputBufferFrames <= configuration.maxBlockFrames else { return .failure(.blockSizeTooLarge) }
-        guard let spec = try? configuration.makeSpec() else { return .failure(.specRejected) }
+        let spec: UnifiedGraphSpec
+        do {
+            spec = try configuration.makeSpec()
+        } catch let reason as UnifiedGraphFallbackReason {
+            return .failure(reason)
+        } catch {
+            return .failure(.specRejected)
+        }
         guard let host = try? UnifiedGraphHost(spec: spec), let raw = host.rawGraph else {
             return .failure(.graphBuildFailed)
         }

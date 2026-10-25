@@ -133,6 +133,10 @@ struct UnifiedGraphConfiguration: Equatable, Sendable {
     var stereoStages = UnifiedGraphStereoStages()
     /// The kernel denoiser's view while it is off (ignored when the denoiser stage is present).
     var denoiserPark: UnifiedGraphDenoiserPark?
+    /// E6 S9a: `.canonical` orders stages as the core does and lifts four kernel-order guards.
+    var orderPolicy: UnifiedGraphOrderPolicy = .kernelParity
+    /// E6 S9a: program DSP mapped onto the lane sets of this layout (N-channel graphs). Needs empty `stereoStages`.
+    var programDSP: UnifiedGraphProgramDSP?
 
     var subwooferCount: Int { bassManagement?.subwoofers.count ?? 0 }
     var channelCount: Int { lanes.count + subwooferCount }
@@ -160,15 +164,21 @@ struct UnifiedGraphConfiguration: Equatable, Sendable {
             // The kernel runs ambient before its dynamics; the core runs them the other way round.
             throw UnifiedGraphError.unsupportedConfiguration("ambient with compressor or expander")
         }
-        if stereo.programFIR != nil, stereo.dynamicEQ != nil || stereo.midSideEQ {
+        let canonical = orderPolicy == .canonical
+        if let programDSP {
+            guard stereo.isEmpty, programDSP.shape.laneCount == programLanes else {
+                throw UnifiedGraphError.invalidConfiguration("program DSP lanes")
+            }
+        }
+        if !canonical, stereo.programFIR != nil, stereo.dynamicEQ != nil || stereo.midSideEQ {
             // The kernel runs the convolution inside the mid/side pair and before the dynamic EQ.
             throw UnifiedGraphError.unsupportedConfiguration("program FIR with mid/side or dynamic EQ")
         }
         let hasPostConvolver = stereo.roomFIR != nil || stereo.speakerIR != nil
-        if hasPostConvolver, stereo.expander != nil {
+        if !canonical, hasPostConvolver, stereo.expander != nil {
             throw UnifiedGraphError.unsupportedConfiguration("expander with room or speaker IR")
         }
-        if hasPostConvolver, !(bassManagement?.subwoofers.isEmpty ?? true) {
+        if !canonical, hasPostConvolver, !(bassManagement?.subwoofers.isEmpty ?? true) {
             // Where the kernel feeds the sub relative to the room and speaker convolvers is not reproduced.
             throw UnifiedGraphError.unsupportedConfiguration("room or speaker IR with subwoofers")
         }
@@ -207,7 +217,7 @@ struct UnifiedGraphConfiguration: Equatable, Sendable {
             add(N60_STAGE_GAIN, Self.preGainStageBase + UInt32(index), lane: UInt32(index),
                 params: [lane.preGain])
         }
-        if stereo.dynamicEQ != nil, stereo.midSideEQ {
+        if !canonical, stereo.dynamicEQ != nil, stereo.midSideEQ {
             // The kernel runs the dynamic EQ after the mid/side decode; the core runs it before.
             throw UnifiedGraphError.unsupportedConfiguration("dynamic EQ with mid/side EQ")
         }
@@ -233,7 +243,7 @@ struct UnifiedGraphConfiguration: Equatable, Sendable {
         if let program = stereo.programFIR {
             try addFIR(N60_STAGE_FIR, program, baseId: Self.programFIRStageId)
         }
-        if let params = stereo.compressor, !hasPostConvolver {
+        if let params = stereo.compressor, !hasPostConvolver || canonical {
             add(N60_STAGE_COMPRESSOR, Self.compressorStageId, mask: programMask, params: params)
         }
         if let params = stereo.expander {
@@ -262,7 +272,7 @@ struct UnifiedGraphConfiguration: Equatable, Sendable {
         if let params = stereo.ambient {
             add(N60_STAGE_AMBIENT, Self.ambientStageId, mask: programMask, params: params)
         }
-        if let params = stereo.compressor, hasPostConvolver {
+        if let params = stereo.compressor, hasPostConvolver, !canonical {
             // The kernel runs its core dynamics after the room and speaker convolvers.
             add(N60_STAGE_CORE_DYNAMICS, Self.compressorStageId, mask: programMask, params: params)
         }
@@ -311,31 +321,20 @@ struct UnifiedGraphConfiguration: Equatable, Sendable {
         if let protection {
             var mask: UInt64 = 0
             for index in 0..<programLanes { mask |= UInt64(1) << UInt64(index) }
-            var params: [Float] = [
-                protection.limiterEnabled ? 1 : 0, Float(protection.ceilingDB), Float(protection.attackMilliseconds),
-                Float(protection.releaseMilliseconds), Float(protection.lookAheadMilliseconds),
-                protection.truePeakGuard ? 1 : 0, Float(protection.oversampling),
-            ]
-            if protection.clipper != nil || protection.rider != nil {
-                let c = protection.clipper ?? UnifiedGraphSoftClipper(
-                    enabled: false, driveDB: 0, thresholdDB: 0, knee: 0, curve: 0, autoCompensate: false, asymmetryDB: 0)
-                let r = protection.rider ?? UnifiedGraphGainRider(enabled: false, targetDB: 2, maxDB: 6, speed: 1)
-                params += [
-                    c.enabled ? 1 : 0, Float(c.driveDB), Float(c.thresholdDB), Float(c.knee), Float(c.curve),
-                    c.autoCompensate ? 1 : 0, Float(c.asymmetryDB),
-                    r.enabled ? 1 : 0, Float(r.targetDB), Float(r.maxDB), Float(r.speed),
-                ]
-            }
+            let params = Self.protectionParameters(protection)
             add(N60_STAGE_PROTECTION, N60_LSTAGE_PROTECTION, mask: mask, params: params)
         }
         add(N60_STAGE_FINAL_SANITISE, N60_LSTAGE_FINAL_SANITISE, lane: all)
         add(N60_STAGE_FINAL_METER, N60_LSTAGE_FINAL_METER, lane: all)
-        return UnifiedGraphSpec(
+        var spec = UnifiedGraphSpec(
             sampleRate: sampleRate, maxBlockFrames: maxBlockFrames,
             inputChannels: UInt32(channelCount), outputChannels: UInt32(channelCount),
             stages: stages,
             denoiserPark: stereo.denoiser == nil ? denoiserPark : nil
         )
+        try programDSP?.apply(to: &spec)
+        if spec.stages.count > UnifiedGraphProgramDSP.maxStages { throw UnifiedGraphFallbackReason.stageBudget }
+        return spec
     }
 
     static let preGainStageBase: UInt32 = 400
@@ -356,7 +355,27 @@ struct UnifiedGraphConfiguration: Equatable, Sendable {
     static let roomFIRStageId: UInt32 = 612
     static let speakerIRStageId: UInt32 = 614
 
-    private static func delayFrames(
+    /// PROTECTION stage parameters: 7 for limiter and true-peak guard, 18 when a soft clipper or gain rider exists.
+    static func protectionParameters(_ protection: UnifiedGraphProtection) -> [Float] {
+        var params: [Float] = [
+            protection.limiterEnabled ? 1 : 0, Float(protection.ceilingDB), Float(protection.attackMilliseconds),
+            Float(protection.releaseMilliseconds), Float(protection.lookAheadMilliseconds),
+            protection.truePeakGuard ? 1 : 0, Float(protection.oversampling),
+        ]
+        if protection.clipper != nil || protection.rider != nil {
+            let c = protection.clipper ?? UnifiedGraphSoftClipper(
+                enabled: false, driveDB: 0, thresholdDB: 0, knee: 0, curve: 0, autoCompensate: false, asymmetryDB: 0)
+            let r = protection.rider ?? UnifiedGraphGainRider(enabled: false, targetDB: 2, maxDB: 6, speed: 1)
+            params += [
+                c.enabled ? 1 : 0, Float(c.driveDB), Float(c.thresholdDB), Float(c.knee), Float(c.curve),
+                c.autoCompensate ? 1 : 0, Float(c.asymmetryDB),
+                r.enabled ? 1 : 0, Float(r.targetDB), Float(r.maxDB), Float(r.speed),
+            ]
+        }
+        return params
+    }
+
+    static func delayFrames(
         _ milliseconds: Double, extraFrames: UInt32 = 0, sampleRate: Double
     ) throws -> UInt32? {
         guard milliseconds.isFinite, milliseconds >= 0 else {
@@ -369,7 +388,7 @@ struct UnifiedGraphConfiguration: Equatable, Sendable {
         return frames >= 1 ? UInt32(frames) : nil
     }
 
-    private static func peqParameters(_ sections: [UnifiedGraphPEQSection]) throws -> [Float] {
+    static func peqParameters(_ sections: [UnifiedGraphPEQSection]) throws -> [Float] {
         guard sections.count <= Int(N60_PEQ_MAX_SECTIONS) else {
             throw UnifiedGraphError.unsupportedConfiguration("more than 16 EQ sections")
         }

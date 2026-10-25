@@ -8,7 +8,7 @@
   builds one slice in a fresh context), realtime-reviewer (Sonnet), and code-scout,
   build-test-runner, plan-tracker, pr-writer (Haiku). `/next` itself runs on Sonnet.
 
-**Current focus:** E6 (unified graph), S9 `e6/remove-restrictions`: remove the three-path restrictions; then S10 and S11. After E6, follow the Execution order in `docs/PROGRAM_PLAN.md` (E11 next).
+**Current focus:** E6 (unified graph), S9b `e6/live-session-edits`, then S9c, S9d, S10 and S11. After E6, follow the Execution order in `docs/PROGRAM_PLAN.md` (E11 next).
 <!-- plan-tracker keeps the line above current -->
 
 @AGENTS.md

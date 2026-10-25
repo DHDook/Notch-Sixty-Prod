@@ -3533,11 +3533,12 @@ final class AudioIOEngine: ObservableObject {
         )
     }
 
-    private func prepareEQFIRProgram(
+    /// The EQ FIR taps for the configured channel mode (left and optional second channel padded to one length), their
+    /// declared latency and the linear-phase design report. Pure: prepares nothing.
+    private func eqFIRTaps(
         _ configuration: StereoEQConfiguration,
-        for session: CoreAudioTransportSession
-    ) throws -> PreparedEQFIRProgram {
-        let sampleRate = session.outputFormat.sampleRate
+        sampleRate: Double
+    ) throws -> (left: [Float], right: [Float]?, declaredLatencyFrames: UInt32, designInfo: N60LinearPhaseEQDesignInfo?) {
         let primaryChannel: EQEditChannel
         switch configuration.channelMode {
         case .linked: primaryChannel = .linked
@@ -3570,13 +3571,22 @@ final class AudioIOEngine: ObservableObject {
             }
             secondaryTaps = secondary.taps
         }
+        return (primary.taps, secondaryTaps, primary.declaredLatencyFrames, primary.designInfo)
+    }
+
+    private func prepareEQFIRProgram(
+        _ configuration: StereoEQConfiguration,
+        for session: CoreAudioTransportSession
+    ) throws -> PreparedEQFIRProgram {
+        let primary = try eqFIRTaps(configuration, sampleRate: session.outputFormat.sampleRate)
+        let secondaryTaps = primary.right
 
         let slot = nextEQFIRProgramSlot % UInt32(N60_CONVOLUTION_PROGRAM_SLOTS)
         let programInfo: N60ConvolutionProgramInfo
         do {
             programInfo = try session.prepareConvolutionProgram(
                 slot: slot,
-                leftTaps: primary.taps,
+                leftTaps: primary.left,
                 rightTaps: secondaryTaps,
                 declaredLatencyFrames: primary.declaredLatencyFrames
             )
@@ -3700,6 +3710,99 @@ final class AudioIOEngine: ObservableObject {
         }
         nextSpeakerIRProgramSlot = (slot + 1) % UInt32(N60_CONVOLUTION_PROGRAM_SLOTS)
         return PreparedSpeakerIRProgram(slot: slot, programInfo: programInfo)
+    }
+
+    /// E6 S9a: the stereo-class DSP (EQ, dynamics, FIR, room, Speaker IR, image, protection) the active configuration
+    /// would apply, ready to map onto an N-channel or Virtual Speakers graph. Nil when the flag is off, when global
+    /// bypass or reference audition removes the program DSP (the lane calibration, bass management, binaural
+    /// rendering and protection stay), or when nothing is active. Throws when the configuration is unusable
+    /// (missing filter, rate mismatch) or when the graph cannot reproduce it, so activation never silently drops it.
+    func makeUnifiedProgramDSP(
+        sampleRate: Double,
+        shape: UnifiedGraphLayoutShape,
+        virtualSpeakers: Bool
+    ) throws -> UnifiedGraphProgramDSP? {
+        guard unifiedGraphEnabled else { return nil }
+        let playback = playbackControlConfiguration
+        if FIRUpdatePolicy.isRawBypassed(playback) || playback.auditionMode == .reference { return nil }
+        if playback.auditionMode == .delta {
+            throw LiveNChannelTransportError.unsupportedActiveDSP("delta audition")
+        }
+        var snapshot = try stereoEQConfiguration.makeGraphSnapshot(
+            sampleRate: sampleRate,
+            gainConfiguration: DSPGainConfiguration(),
+            bassManagementConfiguration: BassManagementConfiguration(),
+            dynamicsConfiguration: dynamicsConfiguration,
+            playbackConfiguration: playback,
+            masterGainLinear: 1
+        )
+        // The graph never reads the kernel's convolver slots; it takes the taps by generation. Generations here are
+        // local to this one translation (1 EQ FIR, 2 room correction, 3 Speaker IR).
+        var retained: [UInt64: UnifiedGraphFIRProgram] = [:]
+        func info(_ generation: UInt64, _ left: [Float], _ declared: UInt32) -> N60ConvolutionProgramInfo {
+            N60ConvolutionProgramInfo(
+                prepared: true,
+                generation: generation,
+                tapCount: UInt32(left.count),
+                partitionCount: N60ConvolutionPartitionCountForTapCount(UInt32(left.count)),
+                engineLatencyFrames: N60_CONVOLUTION_PARTITION_FRAMES,
+                declaredLatencyFrames: declared
+            )
+        }
+        if FIRUpdatePolicy.shouldPrepareEQFIR(stereoEQ: stereoEQConfiguration, playback: playback) {
+            let taps = try eqFIRTaps(stereoEQConfiguration, sampleRate: sampleRate)
+            retained[1] = UnifiedGraphFIRProgram(
+                generation: 1, left: taps.left, right: taps.right, declaredLatencyFrames: taps.declaredLatencyFrames)
+            guard N60DSPGraphSnapshotSetConvolutionProgram(
+                &snapshot, 0, info(1, taps.left, taps.declaredLatencyFrames), true) else {
+                throw EQConfigurationError.convolutionProgramUnavailable
+            }
+        }
+        if roomCorrectionConfiguration.enabled {
+            guard let filter = roomCorrectionConfiguration.filter else {
+                throw RoomCorrectionConfigurationError.filterRequired
+            }
+            try validateRoomCorrectionFilter(filter, outputSampleRate: sampleRate)
+            let adapted = rateAdaptedRoomCorrectionFilter(filter, sampleRate: sampleRate)
+            retained[2] = UnifiedGraphFIRProgram(
+                generation: 2, left: adapted.leftTaps, right: adapted.rightTaps,
+                declaredLatencyFrames: adapted.declaredLatencyFrames)
+            guard N60DSPGraphSnapshotSetRoomCorrectionProgram(
+                &snapshot, 1, info(2, adapted.leftTaps, adapted.declaredLatencyFrames), true) else {
+                throw RoomCorrectionConfigurationError.graphAttachmentFailed
+            }
+        }
+        if speakerIRConfiguration.enabled {
+            guard let filter = speakerIRConfiguration.filter else {
+                throw SpeakerIRConfigurationError.filterRequired
+            }
+            try validateSpeakerIRFilter(filter, outputSampleRate: sampleRate)
+            retained[3] = UnifiedGraphFIRProgram(
+                generation: 3, left: filter.leftTaps, right: filter.rightTaps,
+                declaredLatencyFrames: filter.declaredLatencyFrames)
+            guard N60DSPGraphSnapshotSetSpeakerIRProgram(
+                &snapshot, 2, info(3, filter.leftTaps, filter.declaredLatencyFrames), true) else {
+                throw SpeakerIRConfigurationError.graphAttachmentFailed
+            }
+        }
+        let programs = retained
+        let stereo: UnifiedGraphConfiguration
+        switch UnifiedGraphTranslator.stereoEligibility(
+            snapshot: &snapshot, sampleRate: sampleRate, programs: { _, generation in programs[generation] }
+        ) {
+        case .success(let configuration): stereo = configuration
+        case .failure(let reason): throw LiveNChannelTransportError.unifiedGraphRejected(reason)
+        }
+        // Bypassed EQ covers every lane (the other program stages follow the lane set of the EQ mode).
+        let mode: UnifiedGraphProgramDSP.EQMode
+        switch stereoEQConfiguration.bypassed ? .linked : stereoEQConfiguration.channelMode {
+        case .linked: mode = .linked
+        case .independent: mode = .independent
+        case .midSide: mode = .midSide
+        }
+        let program = UnifiedGraphProgramDSP(
+            stereo: stereo, shape: shape, eqMode: mode, virtualSpeakers: virtualSpeakers)
+        return program.isNeutral ? nil : program
     }
 
     private func attachEQFIRProgram(
@@ -4025,29 +4128,33 @@ final class AudioIOEngine: ObservableObject {
         if !speakerDriverProcessingConfiguration.isNeutral {
             throw LiveNChannelTransportError.unsupportedActiveDSP("legacy per-driver speaker processing")
         }
-        if !stereoEQConfiguration.bypassed {
-            if stereoEQConfiguration.channelMode != .linked
-                || stereoEQConfiguration.phaseMode != .minimumPhase
-                || stereoEQConfiguration.enabledBandCount != 0 {
-                throw LiveNChannelTransportError.unsupportedActiveDSP("stereo EQ")
+        // E6 S9a: with the unified graph the stereo-class DSP is mapped onto the program lanes (or the activation
+        // throws the graph's reason); without it every restriction below stays.
+        if !unifiedGraphEnabled {
+            if !stereoEQConfiguration.bypassed {
+                if stereoEQConfiguration.channelMode != .linked
+                    || stereoEQConfiguration.phaseMode != .minimumPhase
+                    || stereoEQConfiguration.enabledBandCount != 0 {
+                    throw LiveNChannelTransportError.unsupportedActiveDSP("stereo EQ")
+                }
             }
-        }
-        // Gate on what would actually process audio. Disabled processors keep
-        // their edited parameters and must not block activation.
-        if playbackControlConfiguration.globalBypassed {
-            throw LiveNChannelTransportError.globalBypassUnsupported
-        }
-        if playbackControlConfiguration.hasActiveImageProcessing {
-            throw LiveNChannelTransportError.unsupportedActiveDSP("stereo playback/image controls")
-        }
-        if dynamicsConfiguration.hasActiveProcessing {
-            throw LiveNChannelTransportError.unsupportedActiveDSP("stereo dynamics/protection")
-        }
-        if roomCorrectionConfiguration.enabled {
-            throw LiveNChannelTransportError.unsupportedActiveDSP("legacy stereo room correction")
-        }
-        if speakerIRConfiguration.enabled {
-            throw LiveNChannelTransportError.unsupportedActiveDSP("legacy stereo Speaker IR")
+            // Gate on what would actually process audio. Disabled processors keep
+            // their edited parameters and must not block activation.
+            if playbackControlConfiguration.globalBypassed {
+                throw LiveNChannelTransportError.globalBypassUnsupported
+            }
+            if playbackControlConfiguration.hasActiveImageProcessing {
+                throw LiveNChannelTransportError.unsupportedActiveDSP("stereo playback/image controls")
+            }
+            if dynamicsConfiguration.hasActiveProcessing {
+                throw LiveNChannelTransportError.unsupportedActiveDSP("stereo dynamics/protection")
+            }
+            if roomCorrectionConfiguration.enabled {
+                throw LiveNChannelTransportError.unsupportedActiveDSP("legacy stereo room correction")
+            }
+            if speakerIRConfiguration.enabled {
+                throw LiveNChannelTransportError.unsupportedActiveDSP("legacy stereo Speaker IR")
+            }
         }
         if bassManagementConfiguration.physicalOutputMode != nil {
             throw LiveNChannelTransportError.unsupportedActiveDSP("legacy physical crossover routing")
@@ -4085,12 +4192,20 @@ final class AudioIOEngine: ObservableObject {
         )
         var graphConfiguration: UnifiedGraphConfiguration?
         var graphIneligibility: UnifiedGraphFallbackReason?
+        var programDSP: UnifiedGraphProgramDSP?
         if unifiedGraphEnabled {
+            // E6 S9a: stereo-class DSP runs on the graph or activation throws; it is never dropped.
+            guard let shape = UnifiedGraphLayoutShape(roles: routePlan.programLayout.roles) else {
+                throw LiveNChannelTransportError.unifiedGraphRejected(.laneCountMismatch)
+            }
+            programDSP = try makeUnifiedProgramDSP(
+                sampleRate: output.nominalSampleRate, shape: shape, virtualSpeakers: false)
             switch UnifiedGraphTranslator.nChannelEligibility(
                 routePlan: routePlan,
                 sampleRate: output.nominalSampleRate,
                 gainConfiguration: gainConfiguration,
-                bassManagementConfiguration: bassManagementConfiguration
+                bassManagementConfiguration: bassManagementConfiguration,
+                programDSP: programDSP
             ) {
             case .success(let configuration): graphConfiguration = configuration
             case .failure(let reason): graphIneligibility = reason
@@ -4104,7 +4219,8 @@ final class AudioIOEngine: ObservableObject {
             roomTreatment: stagedRoomTreatment,
             audioUnitRack: stagedAudioUnitRack,
             unifiedGraphConfiguration: graphConfiguration,
-            unifiedGraphIneligibility: graphIneligibility
+            unifiedGraphIneligibility: graphIneligibility,
+            unifiedGraphRequired: programDSP != nil
         )
         activeEQFIRProgram = nil
         activeRoomCorrectionProgram = nil
@@ -4123,21 +4239,23 @@ final class AudioIOEngine: ObservableObject {
         if !speakerDriverProcessingConfiguration.isNeutral {
             throw LiveNChannelTransportError.unsupportedActiveDSP("per-driver speaker processing")
         }
-        if !stereoEQConfiguration.bypassed {
-            if stereoEQConfiguration.channelMode != .linked
-                || stereoEQConfiguration.phaseMode != .minimumPhase
-                || stereoEQConfiguration.enabledBandCount != 0 {
-                throw LiveNChannelTransportError.unsupportedActiveDSP("stereo EQ in Virtual Speakers mode")
+        if !unifiedGraphEnabled {
+            if !stereoEQConfiguration.bypassed {
+                if stereoEQConfiguration.channelMode != .linked
+                    || stereoEQConfiguration.phaseMode != .minimumPhase
+                    || stereoEQConfiguration.enabledBandCount != 0 {
+                    throw LiveNChannelTransportError.unsupportedActiveDSP("stereo EQ in Virtual Speakers mode")
+                }
             }
-        }
-        if playbackControlConfiguration.globalBypassed {
-            throw LiveNChannelTransportError.globalBypassUnsupported
-        }
-        if playbackControlConfiguration.hasActiveImageProcessing {
-            throw LiveNChannelTransportError.unsupportedActiveDSP("stereo playback/image controls in Virtual Speakers mode")
-        }
-        if dynamicsConfiguration.hasActiveProcessing {
-            throw LiveNChannelTransportError.unsupportedActiveDSP("stereo dynamics in Virtual Speakers mode")
+            if playbackControlConfiguration.globalBypassed {
+                throw LiveNChannelTransportError.globalBypassUnsupported
+            }
+            if playbackControlConfiguration.hasActiveImageProcessing {
+                throw LiveNChannelTransportError.unsupportedActiveDSP("stereo playback/image controls in Virtual Speakers mode")
+            }
+            if dynamicsConfiguration.hasActiveProcessing {
+                throw LiveNChannelTransportError.unsupportedActiveDSP("stereo dynamics in Virtual Speakers mode")
+            }
         }
         if bassManagementConfiguration.enabled
             || bassManagementConfiguration.physicalOutputMode != nil
@@ -4200,14 +4318,21 @@ final class AudioIOEngine: ObservableObject {
         // in diagnostics.
         var graphSpec: UnifiedGraphSpec?
         var graphIneligibility: UnifiedGraphFallbackReason?
+        var programDSP: UnifiedGraphProgramDSP?
         if unifiedGraphEnabled {
+            guard let shape = UnifiedGraphLayoutShape(roles: profile.programLayout.roles) else {
+                throw LiveNChannelTransportError.unifiedGraphRejected(.laneCountMismatch)
+            }
+            programDSP = try makeUnifiedProgramDSP(
+                sampleRate: output.nominalSampleRate, shape: shape, virtualSpeakers: true)
             switch UnifiedGraphTranslator.binauralSpec(
                 asset: asset,
                 layout: profile.programLayout,
                 profile: profile,
                 outputChannels: UInt32(output.outputChannelCount),
                 sampleRate: output.nominalSampleRate,
-                headTracking: profile.headTracking?.enabled == true
+                headTracking: profile.headTracking?.enabled == true,
+                programDSP: programDSP
             ) {
             case .success(let spec): graphSpec = spec
             case .failure(let reason): graphIneligibility = reason
@@ -4223,7 +4348,8 @@ final class AudioIOEngine: ObservableObject {
             outputGain: currentMasterSoftwareGain,
             audioUnitRack: stagedAudioUnitRack,
             unifiedGraphSpec: graphSpec,
-            unifiedGraphIneligibility: graphIneligibility
+            unifiedGraphIneligibility: graphIneligibility,
+            unifiedGraphRequired: programDSP != nil
         )
         activeEQFIRProgram = nil
         activeRoomCorrectionProgram = nil

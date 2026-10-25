@@ -280,7 +280,8 @@ enum UnifiedGraphTranslator {
         routePlan: LiveNChannelOutputRoutePlan,
         sampleRate: Double,
         gainConfiguration: DSPGainConfiguration,
-        bassManagementConfiguration: BassManagementConfiguration
+        bassManagementConfiguration: BassManagementConfiguration,
+        programDSP: UnifiedGraphProgramDSP? = nil
     ) -> Result<UnifiedGraphConfiguration, UnifiedGraphFallbackReason> {
         guard routePlan.speakerOptimizerFIR == nil else { return .failure(.optimizerFIR) }
         let roles = routePlan.programLayout.roles
@@ -355,6 +356,14 @@ enum UnifiedGraphTranslator {
                 subwoofers: subs
             )
         }
+        if let programDSP, !programDSP.isNeutral {
+            configuration.orderPolicy = .canonical
+            configuration.programDSP = programDSP
+            // Dry run, so the reason is known here and not as a bare "spec rejected" at session start.
+            do { _ = try configuration.makeSpec() } catch let reason as UnifiedGraphFallbackReason {
+                return .failure(reason)
+            } catch { return .failure(.specRejected) }
+        }
         return .success(configuration)
     }
 
@@ -387,7 +396,8 @@ enum UnifiedGraphTranslator {
         outputChannels: UInt32,
         sampleRate: Double,
         headTracking: Bool,
-        maxBlockFrames: UInt32 = 16_384
+        maxBlockFrames: UInt32 = 16_384,
+        programDSP: UnifiedGraphProgramDSP? = nil
     ) -> Result<UnifiedGraphSpec, UnifiedGraphFallbackReason> {
         guard outputChannels == 2 else { return .failure(.binauralOutputNotStereo) }
         guard layout.roles.count > 2 else { return .failure(.noProgramLanes) }
@@ -500,6 +510,12 @@ enum UnifiedGraphTranslator {
         // Same limiter as the legacy bridge: -1 dB ceiling, 0.5/90 ms, 2 ms look-ahead, 4x true-peak.
         spec.stages[protectionIndex].params = [1, -1, 0.5, 90, 2, 1, 4]
         spec.stages.insert(stage, at: protectionIndex)
+        if var programDSP, !programDSP.isNeutral {
+            programDSP.virtualSpeakers = true
+            do { try programDSP.apply(to: &spec) } catch let reason as UnifiedGraphFallbackReason {
+                return .failure(reason)
+            } catch { return .failure(.specRejected) }
+        }
         return .success(spec)
     }
 
@@ -621,6 +637,19 @@ enum UnifiedGraphFallbackReason: String, Error, Equatable, Sendable, CaseIterabl
     case binauralOutputNotStereo
     /// The response set exceeds the core's tap or memory budget at this rate.
     case binauralBudget
+    // Program DSP on an N-channel or binaural layout (S9a).
+    /// Mid/Side EQ together with calibration EQ on a paired lane (the calibration would run in the M/S domain).
+    case midSideWithPairCalibration
+    /// Mid/Side EQ together with a program FIR.
+    case midSideProgramFIR
+    /// The latency to align across lanes is larger than a delta FIR or a delay can carry.
+    case latencyAlignment
+    /// The graph would have more than 256 stages.
+    case stageBudget
+    /// A stereo image, room or speaker stage needs a front left and right pair the layout lacks.
+    case noFrontPair
+    /// Room correction, speaker IR or an image stage with Virtual Speakers (they act on speakers, not ears).
+    case virtualSpeakersSpeakerStage
 
     /// Short text for the diagnostics row.
     var displayText: String {
@@ -654,6 +683,12 @@ enum UnifiedGraphFallbackReason: String, Error, Equatable, Sendable, CaseIterabl
         case .binauralProfileMissing: "no HRTF profile asset"
         case .binauralOutputNotStereo: "output is not two-channel headphones"
         case .binauralBudget: "HRTF set over the graph budget"
+        case .midSideWithPairCalibration: "Mid/Side EQ with calibration EQ on a paired lane"
+        case .midSideProgramFIR: "Mid/Side EQ with a program FIR"
+        case .latencyAlignment: "latency alignment over the graph limit"
+        case .stageBudget: "more than 256 graph stages"
+        case .noFrontPair: "layout has no front left/right pair"
+        case .virtualSpeakersSpeakerStage: "room, speaker IR or image stage with Virtual Speakers"
         }
     }
 }
