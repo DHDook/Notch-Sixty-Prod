@@ -13,7 +13,7 @@ mkdir -p "$OUT"
 
 RT=NotchSixty/Audio/Realtime
 ALL_RT=$(find "$RT" -name '*.c' -print | sort)
-ALL_RT_NO_BRIDGE=$(find "$RT" -name '*.c' ! -name 'N60RealtimeAudioBridge.c' -print | sort)
+ALL_RT_NO_BRIDGE=$(find "$RT" -name '*.c' ! -name 'N60RealtimeAudioBridge.c' ! -name 'N60MeasurementMonitorProc.c' -print | sort)
 STRICT=(-std=c11 -Wall -Wextra -Werror)
 FILTERS=("$@")
 
