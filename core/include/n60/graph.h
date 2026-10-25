@@ -34,7 +34,7 @@ extern "C" {
 #endif
 
 /* Bumped on any incompatible change to a struct or function below. */
-#define N60_GRAPH_ABI_VERSION 13u
+#define N60_GRAPH_ABI_VERSION 14u
 
 typedef struct n60_graph n60_graph; /* opaque */
 
@@ -97,8 +97,27 @@ typedef enum n60_stage_kind {
     /* ABI v12 (E6 S8d group 4). */
     N60_STAGE_STEREO_CROSSOVER = 34,/* position 13, with BASS_MGMT. Pair stage: stereo crossover. See "Stereo crossover" below. */
     /* ABI v13 (E6 S8e). */
-    N60_STAGE_EXTERNAL = 35         /* position 12.5: after METER_OUT, before BASS_MGMT. Host-supplied processor. See "External processor" below. */
+    N60_STAGE_EXTERNAL = 35,        /* position 12.5: after METER_OUT, before BASS_MGMT. Host-supplied processor. See "External processor" below. */
+    /* ABI v14 (E11 S7). */
+    N60_STAGE_GENERATOR = 36        /* position 3.5: after GAIN, before DENOISER. Test-signal source. See "Generator" below. */
 } n60_stage_kind;
+
+/* Generator (ABI v14). A source that replaces program audio on its lanes, ahead of every correction stage and
+ * therefore ahead of PROTECTION, so it reaches the speakers through the same path as music. Lanes: laneMask,
+ * or laneA (one lane or N60_LANE_ALL). Each selected lane has its own uncorrelated stream. paramCount 11:
+ *  [0] type: N60_GENERATOR_*  [1] level dBFS RMS (live, -120..0)  [2] ceiling dBFS RMS (-60..-6; the level is
+ *  clamped to it)  [3] sine Hz (1..0.45 fs)  [4] low edge Hz, [5] high edge Hz (band-limited pink: 10..0.45 fs,
+ *  high >= 1.05 low; each edge is the -3 dB point of a 4th-order slope)  [6] period in frames (periodic pink:
+ *  power of two, 256..1048576)  [7] seed (integer 0..16777216)  [8] mute other lanes while playing (0/1)
+ *  [9] active (live, 0/1)  [10] auto-stop seconds (0.001..600).
+ * Starting, stopping and level changes ramp over 100 ms (program audio crossfades to the source). A rising edge of
+ * [9] from silence restarts the stream from its seed. After the auto-stop time the source fades out and stays
+ * silent until [9] goes 0 then 1. Output is clamped to +-1. Sine level is RMS (peak = RMS x sqrt 2). */
+#define N60_GENERATOR_WHITE 0u
+#define N60_GENERATOR_PINK 1u
+#define N60_GENERATOR_BAND_PINK 2u
+#define N60_GENERATOR_SINE 3u
+#define N60_GENERATOR_PERIODIC_PINK 4u
 
 /* External processor (ABI v13). The graph calls back into the host for work the core cannot do itself and must
  * not know about (the macOS app's Audio Unit rack). The stage sits between the playback half and the system half

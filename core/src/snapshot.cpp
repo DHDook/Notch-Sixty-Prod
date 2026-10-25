@@ -14,6 +14,7 @@
 #include "snapshot.hpp"
 
 #include "stages_dsp.hpp"
+#include "stages_generator.hpp"
 #include "stages_matrix.hpp"
 #include "stages_system.hpp"
 
@@ -220,6 +221,7 @@ uint32_t rankBase(uint32_t kind) {
 uint32_t rankOf(uint32_t kind) {
     if (kind == N60_STAGE_BINAURAL) return 175;
     if (kind == N60_STAGE_EXTERNAL) return 125;
+    if (kind == N60_STAGE_GENERATOR) return 35;
     return rankBase(kind) * 10;
 }
 
@@ -251,6 +253,7 @@ size_t stateStrideFor(const n60_stage_desc &s, double rate) {
             if (isDspKind(s.kind)) dspSizes(s, lane, shared);
             else if (isSystemKind(s.kind)) systemSizes(s, rate, lane, shared);
             else if (isMatrixKind(s.kind)) matrixSizes(s, lane, shared);
+            else if (isGeneratorKind(s.kind)) generatorSizes(s, rate, lane, shared);
             return lane;
         }
     }
@@ -261,6 +264,7 @@ size_t sharedBytesFor(const n60_stage_desc &s, double rate) {
     if (isDspKind(s.kind)) dspSizes(s, lane, shared);
     else if (isSystemKind(s.kind)) systemSizes(s, rate, lane, shared);
     else if (isMatrixKind(s.kind)) matrixSizes(s, lane, shared);
+    else if (isGeneratorKind(s.kind)) generatorSizes(s, rate, lane, shared);
     return shared;
 }
 
@@ -325,6 +329,13 @@ n60_status validateDesc(const n60_graph_desc &d) {
             if (v != N60_STATUS_OK) return v;
             total += (stateStrideFor(s, d.sampleRate) * laneCountFor(s, d.outputChannels)) + sharedBytesFor(s, d.sampleRate) +
                      size_t(s.paramCount) * sizeof(float);
+            if (total > kMaxArenaBytes) return N60_STATUS_OUT_OF_MEMORY;
+            continue;
+        }
+        if (isGeneratorKind(s.kind)) {
+            const n60_status v = validateGeneratorStage(s, d.sampleRate, d.outputChannels);
+            if (v != N60_STATUS_OK) return v;
+            total += (stateStrideFor(s, d.sampleRate) * laneCountFor(s, d.outputChannels)) + sharedBytesFor(s, d.sampleRate);
             if (total > kMaxArenaBytes) return N60_STATUS_OUT_OF_MEMORY;
             continue;
         }
@@ -486,6 +497,7 @@ n60_status buildSnapshot(const n60_graph_desc &d, uint32_t epoch, SnapHeader **o
         if (isDspKind(s.kind)) dspInit(h, r);
         if (isSystemKind(s.kind)) systemInit(h, r);
         if (isMatrixKind(s.kind)) matrixInit(h, r);
+        if (isGeneratorKind(s.kind)) generatorInit(h, r);
         if (s.kind == N60_STAGE_PEQ) {
             PeqSec *sec = reinterpret_cast<PeqSec *>(bytes(h) + r.coefOff);
             for (uint32_t k = 0; k < s.paramCount / 4; ++k) {
@@ -537,6 +549,7 @@ n60_status validateParam(const SnapHeader *snap, const StageRec &r, uint32_t par
         default:
             if (isSystemKind(r.kind)) return validateSystemParam(snap, r, paramIndex, value);
             if (isMatrixKind(r.kind)) return validateMatrixParam(snap, r, paramIndex, value);
+            if (isGeneratorKind(r.kind)) return validateGeneratorParam(snap, r, paramIndex, value);
             return isDspKind(r.kind) ? validateDspParam(snap, r, paramIndex, value) : N60_STATUS_UNSUPPORTED;
     }
 }
@@ -844,6 +857,8 @@ void runSnapshot(SnapHeader *h, float *const *lanes, uint32_t frames, std::atomi
                     runSystem(h, r, lanes, frames);
                 } else if (isMatrixKind(r.kind)) {
                     runMatrix(h, r, lanes, frames);
+                } else if (isGeneratorKind(r.kind)) {
+                    runGenerator(h, r, lanes, frames);
                 } else {
                     runDsp(h, r, lanes, frames);
                 }

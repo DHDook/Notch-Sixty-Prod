@@ -113,11 +113,11 @@ jobs:
         run: |
           set -euo pipefail
           clang++ --version
-          for f in graph snapshot fft stages_dsp stages_system stages_matrix layout; do
+          for f in graph snapshot fft stages_dsp stages_system stages_matrix stages_generator layout; do
             clang++ -std=c++20 -O2 -Wall -Wextra -Werror -fno-exceptions -fno-rtti -Icore/include \
               -c core/src/$f.cpp -o "$RUNNER_TEMP/n60core_$f.o"
           done
-          LIB=("$RUNNER_TEMP/n60core_graph.o" "$RUNNER_TEMP/n60core_snapshot.o" "$RUNNER_TEMP/n60core_fft.o" "$RUNNER_TEMP/n60core_stages_dsp.o" "$RUNNER_TEMP/n60core_stages_system.o" "$RUNNER_TEMP/n60core_stages_matrix.o" "$RUNNER_TEMP/n60core_layout.o")
+          LIB=("$RUNNER_TEMP/n60core_graph.o" "$RUNNER_TEMP/n60core_snapshot.o" "$RUNNER_TEMP/n60core_fft.o" "$RUNNER_TEMP/n60core_stages_dsp.o" "$RUNNER_TEMP/n60core_stages_system.o" "$RUNNER_TEMP/n60core_stages_matrix.o" "$RUNNER_TEMP/n60core_stages_generator.o" "$RUNNER_TEMP/n60core_layout.o")
           for t in test_graph test_stages test_dsp test_system test_rebuild test_denoiser_carry test_layout test_multisub test_readbacks; do
             clang -std=c11 -O2 -Wall -Wextra -Werror -Icore/include -c core/tests/$t.c -o "$RUNNER_TEMP/$t.o"
             clang++ "$RUNNER_TEMP/$t.o" "${LIB[@]}" -lm -pthread -o "$RUNNER_TEMP/$t"

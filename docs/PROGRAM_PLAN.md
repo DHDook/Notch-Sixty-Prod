@@ -235,7 +235,7 @@ minimum-phase in blind ABX at three or more seats, and measurement results match
 
 - [x] Repeat-sweep averaging and an acoustic timing reference for separate-clock USB microphones
 - [ ] RTA with selectable fractional-octave resolution, plus an SPL meter and logger with A/C/Z weighting
-- [ ] Signal generator: pink and white noise, band-limited noise, tones, for level matching and listening checks
+- [x] Signal generator: pink and white noise, band-limited noise, tones, for level matching and listening checks
 - [x] Waterfall / CSD and spectrogram from the existing impulse response
 - [x] Harmonic distortion (H2–H5) from the log sweep's negative-time impulses
 - [x] RT60 and EDT per octave and third-octave band

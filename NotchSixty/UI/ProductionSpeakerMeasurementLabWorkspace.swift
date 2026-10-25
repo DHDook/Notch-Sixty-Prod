@@ -97,6 +97,7 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
                 reportCard
                 if tab == .advanced {
                     if featureFlags.isEnabled(.measurementSuite) {
+                        MeasurementGeneratorCard()
                         MeasurementAnalysisCard(capture: lab.session?.captures.last)
                         MeasurementLibraryView(
                             latestCapture: lab.session?.captures.last, projects: roomCorrectionProjects)
