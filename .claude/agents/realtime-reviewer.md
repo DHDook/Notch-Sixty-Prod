@@ -3,6 +3,7 @@ name: realtime-reviewer
 description: Use proactively before committing any change to NotchSixty/Audio/Realtime, the engine core, or code called from an audio callback. Reviews the diff against the realtime, performance and portability rules.
 tools: Read, Glob, Grep, Bash
 model: sonnet
+effort: medium
 omitClaudeMd: true
 ---
 
