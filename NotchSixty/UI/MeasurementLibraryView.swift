@@ -1,4 +1,6 @@
 import SwiftUI
+import AppKit
+import UniformTypeIdentifiers
 
 /// E11 S5: Library tab. Saves captures, groups and annotates them, overlays up to eight curves,
 /// and shows the difference of each overlay against one reference (A/B).
@@ -75,6 +77,46 @@ final class MeasurementLibraryModel: ObservableObject {
         }
     }
 
+    /// E11 S6: imports REW text, FRD, ZMA or WAV impulse responses chosen by the user.
+    func importFiles() {
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = true
+        panel.allowedContentTypes = [.plainText, .wav, UTType(filenameExtension: "frd"), UTType(filenameExtension: "zma")].compactMap { $0 }
+        guard panel.runModal() == .OK else { return }
+        perform {
+            var notes: [String] = []
+            for url in panel.urls {
+                let data = try Data(contentsOf: url)
+                let name = url.deletingPathExtension().lastPathComponent
+                switch url.pathExtension.lowercased() {
+                case "wav": _ = try library.importImpulseWAV(data, name: name)
+                case "frd", "zma":
+                    let result = try library.importCurve(data, format: url.pathExtension.lowercased() == "zma" ? .zma : .frd, name: name)
+                    notes += result.issues.map { "\(name) \($0.description)" }
+                default:
+                    let result = try library.importCurve(data, format: .rew, name: name)
+                    notes += result.issues.map { "\(name) \($0.description)" }
+                }
+            }
+            message = notes.isEmpty ? "Imported \(panel.urls.count) file(s)." : notes.prefix(5).joined(separator: "\n")
+        }
+    }
+
+    func export(_ id: UUID, kind: String) {
+        let panel = NSSavePanel()
+        let base = records.first(where: { $0.id == id })?.name ?? "measurement"
+        let data: () throws -> Data
+        switch kind {
+        case "frd": panel.nameFieldStringValue = base + ".frd"; data = { try self.library.exportCurve(id: id, format: .frd) }
+        case "zma": panel.nameFieldStringValue = base + ".zma"; data = { try self.library.exportCurve(id: id, format: .zma) }
+        case "wav": panel.nameFieldStringValue = base + ".wav"; data = { try self.library.exportImpulseWAV(id: id) }
+        case "raw": panel.nameFieldStringValue = base + "-raw.wav"; data = { try self.library.exportRawWAV(id: id) }
+        default: panel.nameFieldStringValue = base + ".txt"; data = { try self.library.exportCurve(id: id, format: .rew) }
+        }
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        perform { try data().write(to: url, options: .atomic); message = "Exported \(url.lastPathComponent)." }
+    }
+
     private func perform(_ work: () throws -> Void) {
         do { try work() }
         catch { message = error.localizedDescription }
@@ -111,6 +153,7 @@ struct MeasurementLibraryView: View {
         GroupBox("Measurement library") {
             VStack(alignment: .leading, spacing: 12) {
                 saveRow
+                Button("Import REW, FRD, ZMA or WAV...") { model.importFiles() }
                 plot(title: "Overlays", curves: overlayCurves, minDB: -30, maxDB: 30, relative: true)
                 if model.overlays.referenceID != nil {
                     Picker("Smoothing", selection: $model.smoothing) {
@@ -197,6 +240,13 @@ struct MeasurementLibraryView: View {
                     if model.overlays.referenceID == record.id { try? model.overlays.add(record.id) }
                 }
                 .disabled(record.response == nil)
+                Menu("Export") {
+                    Button("REW text") { model.export(record.id, kind: "rew") }.disabled(record.response == nil)
+                    Button("FRD") { model.export(record.id, kind: "frd") }.disabled(record.response == nil)
+                    Button("ZMA") { model.export(record.id, kind: "zma") }.disabled(record.response == nil)
+                    Button("Impulse response WAV") { model.export(record.id, kind: "wav") }.disabled(!record.hasImpulseResponse)
+                    Button("Raw capture WAV") { model.export(record.id, kind: "raw") }.disabled(!record.hasRawCapture)
+                }
                 Button("Delete", role: .destructive) { model.delete(record.id) }
             }
             TextField("Notes", text: Binding(get: { record.notes }, set: { model.setNotes(record.id, $0) }))
