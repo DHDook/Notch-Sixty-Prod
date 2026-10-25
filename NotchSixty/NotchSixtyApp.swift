@@ -113,8 +113,7 @@ final class ProductController: ObservableObject {
             audioUnitHost: audioUnitHost
         )
         let calibration = RoomCorrectionCalibrationController(
-            engine: audioEngine,
-            useMeasurementCore: FeatureFlags().isEnabled(.measurementSuite)
+            engine: audioEngine
         )
         self.audioEngine = audioEngine
         self.audioUnitHost = audioUnitHost
@@ -201,8 +200,7 @@ final class ProductController: ObservableObject {
             audioUnitHost: audioUnitHost
         )
         let calibration = RoomCorrectionCalibrationController(
-            engine: audioEngine,
-            useMeasurementCore: FeatureFlags().isEnabled(.measurementSuite)
+            engine: audioEngine
         )
         self.audioEngine = audioEngine
         self.audioUnitHost = audioUnitHost

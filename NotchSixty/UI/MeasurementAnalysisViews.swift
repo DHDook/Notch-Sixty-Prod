@@ -154,7 +154,7 @@ struct MeasurementGatedPlotView: View {
     }
 }
 
-/// Analysis card for one capture of the Speaker Measurement Lab (Advanced tab), shown behind e11.measurement-suite.
+/// Analysis card for one capture of the Speaker Measurement Lab (Advanced tab).
 struct MeasurementAnalysisCard: View {
     let capture: SpeakerMeasurementLabCapture?
 

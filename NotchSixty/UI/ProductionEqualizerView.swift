@@ -4,6 +4,7 @@ import SwiftUI
 struct ProductionEqualizerView: View {
     @ObservedObject var engine: AudioIOEngine
     var reference: ProductionReferenceNavigator? = nil
+    @ObservedObject private var liveOverlay = MeasurementLiveOverlayStore.shared
     @State private var selectedBandID: UUID?
     @State private var dragPreview: EQBand?
     @State private var pendingDragBand: EQBand?
@@ -186,7 +187,8 @@ struct ProductionEqualizerView: View {
                     let sanitized = sanitize(band)
                     dragPreview = nil
                     perform { try engine.updateEQBand(sanitized) }
-                }
+                },
+                rtaOverlay: liveOverlay.showsRTA ? liveOverlay.rtaCurve : nil
             )
             .frame(minHeight: 330)
 
@@ -626,6 +628,8 @@ private struct ProductionEQResponseGraph: View {
     let onSelect: (UUID) -> Void
     let onPreview: (EQBand) -> Void
     let onCommit: (EQBand) -> Void
+    /// E11 S10: live RTA of the measurement microphone, drawn behind the EQ curve.
+    var rtaOverlay: RoomCorrectionFrequencyResponse?
 
     private let minimumFrequency = 20.0
     private let minimumDB = -24.0
@@ -651,6 +655,7 @@ private struct ProductionEQResponseGraph: View {
 
                 Canvas { context, _ in
                     drawGrid(context: &context, size: size)
+                    drawRTAOverlay(context: &context, size: size)
                     drawResponse(context: &context, size: size)
                 }
                 .opacity(bypassed ? 0.35 : 1)
@@ -727,6 +732,16 @@ private struct ProductionEQResponseGraph: View {
         }
     }
 
+    private func drawRTAOverlay(context: inout GraphicsContext, size: CGSize) {
+        guard let rtaOverlay else { return }
+        let points = MeasurementPlotLayout.points(rtaOverlay, size: size, minDB: minimumDB, maxDB: maximumDB)
+        guard let first = points.first else { return }
+        var path = Path()
+        path.move(to: first)
+        points.dropFirst().forEach { path.addLine(to: $0) }
+        context.stroke(path, with: .color(.orange.opacity(0.7)), lineWidth: 1.5)
+    }
+
     private func drawResponse(context: inout GraphicsContext, size: CGSize) {
         let program = ProductionEQResponseMath.compile(bands: displayBands, sampleRate: sampleRate)
         guard !program.isEmpty else { return }
@@ -775,7 +790,7 @@ private struct ProductionEQResponseGraph: View {
     }
 }
 
-private enum ProductionEQResponseMath {
+enum ProductionEQResponseMath {
     static func compile(bands: [EQBand], sampleRate: Double) -> [N60BiquadCoefficients] {
         var program: [N60BiquadCoefficients] = []
         for band in bands where band.enabled && band.type != .fir {

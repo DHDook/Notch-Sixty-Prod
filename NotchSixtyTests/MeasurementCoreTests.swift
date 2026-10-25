@@ -38,8 +38,7 @@ final class MeasurementCoreTests: XCTestCase {
 
     func testABIVersionAndFlagRegistration() {
         XCTAssertEqual(MeasurementCore.abiVersion, 2)
-        XCTAssertTrue(FeatureFlag.all.contains(.measurementSuite))
-        XCTAssertFalse(FeatureFlag.measurementSuite.defaultEnabled)
+        XCTAssertFalse(FeatureFlag.all.contains { $0.epic == "E11" }, "E11 flag is removed")
     }
 
     func testSynchronisedSweepHasIntegerCyclesAtStartFrequency() throws {
@@ -65,29 +64,21 @@ final class MeasurementCoreTests: XCTestCase {
         }
     }
 
-    func testCoreAndSwiftAnalysersAgreeWithinHundredthOfADecibel() throws {
+    func testAnalyserRecoversGainAndDelayThroughTheCore() throws {
         let plan = try makePlan()
         let raw = makeCapture(program: plan.program, gain: 0.5, delayFrames: 120)
         let capture = RoomCorrectionCalibrationCapture(left: raw, right: raw)
-        let reference = try RoomCorrectionMeasurementAnalyzer().analyze(capture: capture, plan: plan)
-        let core = try RoomCorrectionMeasurementAnalyzer(usesMeasurementCore: true)
-            .analyze(capture: capture, plan: plan)
-
-        let a = try XCTUnwrap(reference.left.transferFunction)
-        let b = try XCTUnwrap(core.left.transferFunction)
-        XCTAssertEqual(a.frequenciesHz, b.frequenciesHz)
+        let analysis = try RoomCorrectionMeasurementAnalyzer().analyze(capture: capture, plan: plan)
+        let response = try XCTUnwrap(analysis.left.transferFunction)
         var checked = 0
-        for index in a.frequenciesHz.indices where a.frequenciesHz[index] >= 20 && a.frequenciesHz[index] <= 20_000 {
-            XCTAssertEqual(a.magnitudeDB[index], b.magnitudeDB[index], accuracy: 0.01,
-                           "at \(a.frequenciesHz[index]) Hz")
+        for index in response.frequenciesHz.indices
+        where response.frequenciesHz[index] >= 100 && response.frequenciesHz[index] <= 10_000 {
+            XCTAssertEqual(response.magnitudeDB[index], 20 * log10(0.5), accuracy: 0.5,
+                           "at \(response.frequenciesHz[index]) Hz")
             checked += 1
         }
-        XCTAssertGreaterThan(checked, 100)
-        XCTAssertEqual(
-            reference.left.quality.directArrivalSeconds ?? -1,
-            core.left.quality.directArrivalSeconds ?? -2,
-            accuracy: 1.0 / 48_000.0
-        )
+        XCTAssertGreaterThan(checked, 50)
+        XCTAssertEqual(analysis.left.quality.directArrivalSeconds ?? -1, 120.0 / 48_000.0, accuracy: 2.0 / 48_000.0)
     }
 
     // MARK: - E11 S2 timing and averaging

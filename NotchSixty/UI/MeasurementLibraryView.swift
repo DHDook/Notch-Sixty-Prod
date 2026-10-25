@@ -141,6 +141,10 @@ struct MeasurementLibraryView: View {
     @StateObject private var model = MeasurementLibraryModel()
     let latestCapture: SpeakerMeasurementLabCapture?
     var projects: RoomCorrectionProjectController?
+    /// E11 S10: current EQ bands and output rate, for the "predicted with current EQ" overlay.
+    var equalizerBands: [EQBand] = []
+    var outputSampleRate: Double = 48_000
+    @State private var showsPredicted = false
 
     @State private var newName = ""
     @State private var newGroup = ""
@@ -154,7 +158,9 @@ struct MeasurementLibraryView: View {
             VStack(alignment: .leading, spacing: 12) {
                 saveRow
                 Button("Import REW, FRD, ZMA or WAV...") { model.importFiles() }
-                plot(title: "Overlays", curves: overlayCurves, minDB: -30, maxDB: 30, relative: true)
+                Toggle("Show predicted response with current EQ", isOn: $showsPredicted)
+                plot(title: showsPredicted ? "Overlays (predicted with current EQ)" : "Overlays",
+                     curves: showsPredicted ? predictedCurves : overlayCurves, minDB: -30, maxDB: 30, relative: true)
                 if model.overlays.referenceID != nil {
                     Picker("Smoothing", selection: $model.smoothing) {
                         ForEach(MeasurementSmoothing.allCases) { Text($0.rawValue).tag($0) }
@@ -189,6 +195,13 @@ struct MeasurementLibraryView: View {
     private var overlayCurves: [(id: UUID, curve: RoomCorrectionFrequencyResponse)] {
         model.overlays.overlayIDs.compactMap { id in
             model.records.first(where: { $0.id == id })?.response.map { (id, $0) }
+        }
+    }
+
+    private var predictedCurves: [(id: UUID, curve: RoomCorrectionFrequencyResponse)] {
+        let program = ProductionEQResponseMath.compile(bands: equalizerBands, sampleRate: outputSampleRate)
+        return overlayCurves.map {
+            ($0.id, MeasurementOverlays.predicted(measurement: $0.curve, program: program, sampleRate: outputSampleRate))
         }
     }
 
