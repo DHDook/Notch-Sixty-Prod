@@ -43,21 +43,17 @@ struct RoomCorrectionFIRDesignResult: Equatable, Sendable {
 /// Offline magnitude-focused room-correction FIR synthesis.
 ///
 /// The desired correction magnitude is converted to a causal minimum-phase
-/// response with a real-cepstrum construction. Large transform buffers are
+/// response by the C++ correction core (`RoomCorrectionCore`). Large transform buffers are
 /// owned only by this control-plane operation; the realtime graph receives the
 /// finished `RoomCorrectionFilter` through its existing program lifecycle.
 struct RoomCorrectionFIRDesigner: Sendable {
-    static let algorithmVersion = "n60-room-minphase-v1"
+    static let algorithmVersion = "n60-room-minphase-core-v1"
     static let minimumTransformSize = 16_384
-    /// Cepstral minimum-phase synthesis aliases when the DFT is short relative
-    /// to the impulse it reconstructs; use at least 8× the tap count.
+    /// Analysis-transform oversampling (response interpolation resolution).
     static let transformOversampling = 8
     /// Long filters are already long relative to the minimum-phase impulse, so
     /// oversampling is relaxed (never below 2x) to keep design interactive.
     static let maximumTransformSize = max(1 << 20, Int(N60_CONVOLUTION_MAX_TAPS) * 2)
-    /// Fraction of the filter given to a half-Hann fade so truncating the
-    /// minimum-phase impulse does not add spectral ripple.
-    static let tailTaperFraction = 0.10
 
     private let previewDesigner = RoomCorrectionCorrectionPreviewDesigner()
 
@@ -178,26 +174,7 @@ struct RoomCorrectionFIRDesigner: Sendable {
         )
     }
 
-    /// Minimum-phase taps for a desired correction. Kept so the E10 core designer can be tested for
-    /// parity against this implementation.
-    func minimumPhaseTaps(
-        desiredCorrection: RoomCorrectionFrequencyResponse,
-        effectiveLowHz: Double,
-        effectiveHighHz: Double,
-        sampleRate: Double,
-        tapCount: Int
-    ) throws -> [Float] {
-        let transform = try RoomCorrectionFIRDFT(size: try Self.transformSize(forTapCount: tapCount))
-        return try synthesize(
-            desiredCorrection: desiredCorrection,
-            effectiveLowHz: effectiveLowHz,
-            effectiveHighHz: effectiveHighHz,
-            sampleRate: sampleRate,
-            tapCount: tapCount,
-            transform: transform
-        ).taps
-    }
-
+    /// Minimum-phase taps from the C++ correction core, plus their spectrum on the analysis transform.
     private func synthesize(
         desiredCorrection: RoomCorrectionFrequencyResponse,
         effectiveLowHz: Double,
@@ -206,64 +183,18 @@ struct RoomCorrectionFIRDesigner: Sendable {
         tapCount: Int,
         transform: RoomCorrectionFIRDFT
     ) throws -> (taps: [Float], spectrum: RoomCorrectionFIRSpectrum) {
-        let size = transform.size
-        let half = size / 2
-        var logMagnitude = [Float](repeating: 0, count: size)
-        let naturalLogPerDB = log(10.0) / 20.0
-
-        for bin in 0...half {
-            let frequency = Double(bin) * sampleRate / Double(size)
-            let gainDB = desiredCorrectionDB(
-                at: frequency,
-                response: desiredCorrection,
-                low: effectiveLowHz,
-                high: effectiveHighHz
+        let taps: [Float]
+        do {
+            taps = try RoomCorrectionCore.minimumPhaseTaps(
+                sampleRate: sampleRate,
+                tapCount: tapCount,
+                frequenciesHz: desiredCorrection.frequenciesHz,
+                gainDB: desiredCorrection.magnitudeDB,
+                lowHz: effectiveLowHz,
+                highHz: effectiveHighHz
             )
-            let value = gainDB * naturalLogPerDB
-            guard value.isFinite else { throw RoomCorrectionFIRDesignError.nonFiniteResponse }
-            logMagnitude[bin] = Float(value)
-            if bin > 0, bin < half {
-                logMagnitude[size - bin] = Float(value)
-            }
-        }
-
-        let zeroImaginary = [Float](repeating: 0, count: size)
-        let cepstrum = transform.inverse(real: logMagnitude, imaginary: zeroImaginary)
-        var minimumPhaseCepstrum = [Float](repeating: 0, count: size)
-        minimumPhaseCepstrum[0] = cepstrum[0]
-        if half > 1 {
-            for index in 1..<half {
-                minimumPhaseCepstrum[index] = 2 * cepstrum[index]
-            }
-        }
-        minimumPhaseCepstrum[half] = cepstrum[half]
-
-        let complexLogSpectrum = transform.forward(minimumPhaseCepstrum)
-        var real = [Float](repeating: 0, count: size)
-        var imaginary = [Float](repeating: 0, count: size)
-        for index in 0..<size {
-            let amplitude = exp(Double(complexLogSpectrum.real[index]))
-            let phase = Double(complexLogSpectrum.imaginary[index])
-            let realValue = amplitude * cos(phase)
-            let imaginaryValue = amplitude * sin(phase)
-            guard realValue.isFinite, imaginaryValue.isFinite,
-                  abs(realValue) <= Double(Float.greatestFiniteMagnitude),
-                  abs(imaginaryValue) <= Double(Float.greatestFiniteMagnitude) else {
-                throw RoomCorrectionFIRDesignError.nonFiniteResponse
-            }
-            real[index] = Float(realValue)
-            imaginary[index] = Float(imaginaryValue)
-        }
-
-        let impulse = transform.inverse(real: real, imaginary: imaginary)
-        var taps = Array(impulse.prefix(tapCount))
-        let taperCount = min(taps.count - 1, max(1, Int(Double(tapCount) * Self.tailTaperFraction)))
-        if taperCount > 0 {
-            let taperStart = taps.count - taperCount
-            for index in taperStart..<taps.count {
-                let position = Double(index - taperStart + 1) / Double(taperCount)
-                taps[index] *= Float(0.5 + 0.5 * cos(Double.pi * position))
-            }
+        } catch {
+            throw RoomCorrectionFIRDesignError.nonFiniteFilter
         }
         guard taps.count == tapCount, taps.allSatisfy(\.isFinite) else {
             throw RoomCorrectionFIRDesignError.nonFiniteFilter
@@ -274,39 +205,6 @@ struct RoomCorrectionFIRDesigner: Sendable {
             throw RoomCorrectionFIRDesignError.nonFiniteResponse
         }
         return (taps, actualSpectrum)
-    }
-
-    private func desiredCorrectionDB(
-        at frequencyHz: Double,
-        response: RoomCorrectionFrequencyResponse,
-        low: Double,
-        high: Double
-    ) -> Double {
-        guard frequencyHz > low, frequencyHz < high,
-              frequencyHz > 0,
-              let first = response.frequenciesHz.first,
-              let last = response.frequenciesHz.last,
-              frequencyHz >= first,
-              frequencyHz <= last else {
-            return 0
-        }
-        if frequencyHz == first { return response.magnitudeDB[0] }
-        if frequencyHz == last { return response.magnitudeDB[response.magnitudeDB.count - 1] }
-
-        var upperIndex = 1
-        while upperIndex < response.frequenciesHz.count,
-              response.frequenciesHz[upperIndex] < frequencyHz {
-            upperIndex += 1
-        }
-        guard upperIndex < response.frequenciesHz.count else { return 0 }
-        let lowerIndex = upperIndex - 1
-        let lowerFrequency = response.frequenciesHz[lowerIndex]
-        let upperFrequency = response.frequenciesHz[upperIndex]
-        let denominator = log(upperFrequency) - log(lowerFrequency)
-        guard denominator > 0 else { return response.magnitudeDB[lowerIndex] }
-        let fraction = (log(frequencyHz) - log(lowerFrequency)) / denominator
-        return response.magnitudeDB[lowerIndex]
-            + fraction * (response.magnitudeDB[upperIndex] - response.magnitudeDB[lowerIndex])
     }
 
     private func response(
@@ -478,30 +376,6 @@ private final class RoomCorrectionFIRDFT {
             }
         }
         return RoomCorrectionFIRSpectrum(real: real, imaginary: imaginary)
-    }
-
-    func inverse(real: [Float], imaginary: [Float]) -> [Float] {
-        precondition(real.count == size && imaginary.count == size)
-        var outputReal = [Float](repeating: 0, count: size)
-        var outputImaginary = [Float](repeating: 0, count: size)
-        real.withUnsafeBufferPointer { inputReal in
-            imaginary.withUnsafeBufferPointer { inputImaginary in
-                outputReal.withUnsafeMutableBufferPointer { resultReal in
-                    outputImaginary.withUnsafeMutableBufferPointer { resultImaginary in
-                        vDSP_DFT_Execute(
-                            inverseSetup,
-                            inputReal.baseAddress!,
-                            inputImaginary.baseAddress!,
-                            resultReal.baseAddress!,
-                            resultImaginary.baseAddress!
-                        )
-                    }
-                }
-            }
-        }
-        let scale = 1.0 / Float(size)
-        for index in outputReal.indices { outputReal[index] *= scale }
-        return outputReal
     }
 }
 
