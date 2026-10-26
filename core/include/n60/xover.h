@@ -16,7 +16,14 @@
  * n60_xover_lr_inverts_hp) for the sum to be an allpass.
  *
  * Sample-rate assumption: any rate; corners up to 0.49 * fs. Channel count: not applicable.
- * Allocation: none. Not for audio callbacks (offline design only); latency does not apply.
+ * Allocation: none. Latency does not apply.
+ *
+ * Realtime use (ABI 2, E8 S2). n60_xover_design is offline: a Bessel prototype takes a root solve
+ * that is far too long for an audio callback. The design splits in two so the graph stages can edit
+ * a corner live: n60_xover_prototype_design (offline; family and order only) and n60_xover_realise
+ * (a few tan and divide operations per section; no allocation, no loops of unbounded length, safe on
+ * a realtime thread). n60_xover_design is exactly the two calls in sequence, so a stage that realises
+ * a stored prototype produces the same coefficients bit for bit as the offline prediction.
  */
 #ifndef N60_XOVER_H
 #define N60_XOVER_H
@@ -27,7 +34,7 @@
 extern "C" {
 #endif
 
-#define N60_XOVER_ABI_VERSION 1
+#define N60_XOVER_ABI_VERSION 2
 
 #define N60_XOVER_OK 0
 #define N60_XOVER_ERR_ARGUMENT (-1)
@@ -60,7 +67,27 @@ typedef struct n60_xover_cascade {
     n60_xover_biquad sections[N60_XOVER_MAX_SECTIONS];
 } n60_xover_cascade;
 
+/* Analogue low-pass prototype of a family and order (-3.01 dB at 1 rad/s): second-order sections
+ * s^2 + b s + c and first-order sections s + c. Linkwitz-Riley carries one Butterworth half-order
+ * list used twice (copies == 2). Independent of corner and sample rate. */
+typedef struct n60_xover_proto_section {
+    uint32_t second; /* 1: s^2 + b s + c, 0: s + c (b unused) */
+    double b, c;
+} n60_xover_proto_section;
+
+typedef struct n60_xover_prototype {
+    uint32_t count;  /* sections in one copy, at most N60_XOVER_MAX_SECTIONS */
+    uint32_t copies; /* 1, or 2 for Linkwitz-Riley */
+    n60_xover_proto_section sections[N60_XOVER_MAX_SECTIONS];
+} n60_xover_prototype;
+
 uint32_t n60_xover_abi_version(void);
+
+/* Offline. Returns N60_XOVER_OK, N60_XOVER_ERR_ORDER or N60_XOVER_ERR_ARGUMENT. */
+int n60_xover_prototype_design(uint32_t family, uint32_t order, n60_xover_prototype *out);
+
+/* Realtime-safe. Bilinear transform with the prewarp on corner_hz; high-pass is the s -> 1/s image. */
+int n60_xover_realise(const n60_xover_prototype *proto, int highpass, double corner_hz, double fs, n60_xover_cascade *out);
 
 /* Designs a low-pass (highpass == 0) or high-pass cascade at sample rate fs. */
 int n60_xover_design(const n60_xover_spec *spec, int highpass, double fs, n60_xover_cascade *out);

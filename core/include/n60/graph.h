@@ -34,7 +34,7 @@ extern "C" {
 #endif
 
 /* Bumped on any incompatible change to a struct or function below. */
-#define N60_GRAPH_ABI_VERSION 16u
+#define N60_GRAPH_ABI_VERSION 17u
 
 typedef struct n60_graph n60_graph; /* opaque */
 
@@ -101,7 +101,10 @@ typedef enum n60_stage_kind {
     /* ABI v14 (E11 S7). */
     N60_STAGE_GENERATOR = 36,       /* position 3.5: after GAIN, before DENOISER. Test-signal source. See "Generator" below. */
     /* ABI v15 (E10 S3). */
-    N60_STAGE_ROOM_FIR_TWO_BAND = 37/* position 14, with ROOM_FIR. Full-rate FIR plus a decimated low band. See "Two-band room FIR" below. */
+    N60_STAGE_ROOM_FIR_TWO_BAND = 37,/* position 14, with ROOM_FIR. Full-rate FIR plus a decimated low band. See "Two-band room FIR" below. */
+    /* ABI v17 (E8 S2). */
+    N60_STAGE_ROUTE = 38,           /* position 23.5: after PAUSE_GATE, before DELAY. Sparse routing matrix. See "Speaker routing" below. */
+    N60_STAGE_XOVER = 39            /* position 23.6: after ROUTE, before DELAY. Per-way crossover, trim and polarity. See "Speaker routing" below. */
 } n60_stage_kind;
 
 /* Generator (ABI v14). A source that replaces program audio on its lanes, ahead of every correction stage and
@@ -127,6 +130,64 @@ typedef enum n60_stage_kind {
  * level is RMS-referenced as for the sine (peak = RMS x sqrt 2), so the sweep peak is 3 dB above the stated level.
  * Every selected lane plays the same sweep. A rising edge of [9] from silence restarts it from its first sample. */
 #define N60_GENERATOR_SWEEP 5u
+
+/* Speaker routing (ABI v17, E8 S2). Two stages turn a program (or bass-managed) lane set into per-driver output
+ * lanes. A graph with routing has outputChannels = program lanes + sub lanes + way lanes (at most
+ * N60_GRAPH_MAX_CHANNELS). The prediction of every filter below is the offline library n60/xover.h: the stage
+ * realises the same prototype with the same function, so predicted and rendered coefficients are bit-identical.
+ *
+ * ROUTE (position 23.5). laneMask = the destination lanes (at least one). paramCount = 16 x D, D = popcount of the
+ * mask; destination k (ascending lane order) owns params [16k .. 16k+15] = 8 entries of (source lane, gain):
+ *  [16k + 2e] source lane: an integer 0..outputChannels-1, or -1 for an unused entry (topology)
+ *  [16k + 2e + 1] linear gain, -100..100 (live; an unused entry must hold 0 and cannot be edited live).
+ * Destination lane = sum over its used entries, in entry order, of gain x source lane, computed from the lane
+ * contents on entry to the stage (so swaps and splits are exact; a destination may also be a source). A source
+ * lane that is not a destination is cleared after the sum; lanes that are neither are untouched. A gain edit ramps
+ * linearly over the 5 ms ramp window. The entry set, the destination set and each source lane are topology
+ * (UNSUPPORTED live; publish a new snapshot, which fades). Latency 0.
+ *
+ * XOVER (position 23.6). Lanes: laneMask, or laneA (one lane or N60_LANE_ALL); every selected lane runs the same
+ * parameters with its own filter state. Chain per lane: high-pass, low-pass, Linkwitz transform, EQ sections,
+ * then trim and polarity. paramCount = 14 + 4 n:
+ *  [0] high-pass family: N60_GRAPH_FILTER_BUTTERWORTH, _BESSEL, _LINKWITZ_RILEY (0..2) or N60_GRAPH_FILTER_OFF (3)  (topology)
+ *  [1] high-pass order (Butterworth and Bessel 1..8; Linkwitz-Riley 2, 4, 6, 8; 0 when off) (topology)
+ *  [2] high-pass corner Hz (live, 1..0.49 fs; ignored when off)
+ *  [3] low-pass family, [4] low-pass order, [5] low-pass corner Hz (live), as above
+ *  [6] trim dB (live, -60..24)  [7] polarity (live; 0 normal, 1 inverted; a flip passes through zero)
+ *  [8] Linkwitz transform enable (0/1; topology)
+ *  [9] f0 Hz, [10] Q0, [11] fp Hz, [12] Qp (live when enabled: Hz in 1..0.49 fs, Q in 0.1..20; otherwise ignored)
+ *  [13] EQ section count n (0..N60_PEQ_MAX_SECTIONS, topology), then 4 per section (type, Hz, dB, Q) with the PEQ
+ *  meaning and ranges; Hz, dB and Q are live, the type is not.
+ * A live Hz, Q or dB edit starts a coefficient crossfade over the ramp window (the incoming cascade continues from
+ * the live one's state, as in PEQ); an edit that arrives during a crossfade is applied when it ends. Trim and
+ * polarity ramp linearly. A family, order, enable or count change is a rebuild (the snapshot fade). The corner
+ * edit runs n60_xover_realise (tan and divides, no loops of unbounded length) on the realtime thread; the Bessel
+ * root solve is done once, at build. Latency 0.
+ *
+ * Realtime documentation (docs/REALTIME_RULES.md) for runRoute and runXover:
+ *  - allocation: none. All state, scratch included, lives in the snapshot arena built on the control thread.
+ *  - synchronisation: none. The realtime thread owns the state once the snapshot is published; live parameters are
+ *    plain floats the mailbox wrote at block start.
+ *  - latency: 0 frames.
+ *  - sample rate: any rate in [N60_GRAPH_MIN_SAMPLE_RATE, N60_GRAPH_MAX_SAMPLE_RATE]; a corner must be at most
+ *    0.49 fs (rejected at build, BAD_ARGUMENT for a live edit); ramps are 5 ms. Filters run in double precision.
+ *  - channels: ROUTE reads and writes any lanes; XOVER runs on its lane set, one state per lane. Both are
+ *    block-size independent (a block is processed in chunks of at most 256 frames with state carried across).
+ *  - reset: a new snapshot starts with zero filter state and unity ramps at the stated parameters; there is no
+ *    in-place reset. State is not carried across a rebuild (the rebuild fade hides the discontinuity). */
+#define N60_GRAPH_FILTER_BUTTERWORTH 0u
+#define N60_GRAPH_FILTER_BESSEL 1u
+#define N60_GRAPH_FILTER_LINKWITZ_RILEY 2u
+#define N60_GRAPH_FILTER_OFF 3u
+#define N60_ROUTE_MAX_ENTRIES 8u
+#define N60_ROUTE_PARAMS_PER_DEST 16u
+#define N60_XOVER_FIXED_PARAMS 14u
+
+/* BASS_MGMT filter spec (ABI v17, E8 S2). When the extension word w is present (see BASS_MGMT below), an optional
+ * four-value trailer after the last sub block replaces the default Linkwitz-Riley 4 split: [t] mains high-pass
+ * family, [t+1] its order, [t+2] sub low-pass family, [t+3] its order (families N60_GRAPH_FILTER_BUTTERWORTH,
+ * _BESSEL, _LINKWITZ_RILEY; orders as for XOVER, no OFF). Both corners are the live crossover Hz [0]. Absent
+ * trailer: exactly the v16 LR4 arithmetic, bit-identical. Family and order are topology (UNSUPPORTED live). */
 
 /* External processor (ABI v13). The graph calls back into the host for work the core cannot do itself and must
  * not know about (the macOS app's Audio Unit rack). The stage sits between the playback half and the system half
@@ -247,6 +308,9 @@ typedef int (*n60_external_process_fn)(void *context, const float *const *in, fl
  *  the mask; the LFE lane is cleared unless it is a sub lane. A live edit ramps over the ramp window (gain,
  *  polarity: a flip passes through zero) or crossfades the section's coefficients (Hz, dB, Q). Per-sub delay is a
  *  DELAY stage on the sub lane (rank 24, after this stage).
+ *  ABI v17: after the last sub block an optional 4-value filter-spec trailer (see "BASS_MGMT filter spec" above)
+ *  sets the split family and order; it needs the extension word w (use 0 for a plain one-sub list), and
+ *  paramCount is then longer by 4.
  *  No added latency.
  * AMBIENT. params: [0] level dB (live, -60..24), then low-shelf, peaking and high-shelf bands (Hz, dB, Q). paramCount 10.
  * SYMMETRY. params: [0] position -1..1 (live). CROSSFEED. params: [0] amount 0..0.5 (live).

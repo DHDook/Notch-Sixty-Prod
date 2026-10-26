@@ -147,12 +147,38 @@ static void testRejections() {
     CHECK(n60_xover_abi_version() == N60_XOVER_ABI_VERSION, "abi version");
 }
 
+// The realtime split is exact: prototype once, realise per corner, bit-identical to the one-call design.
+static void testRealiseMatchesDesign() {
+    for (double fs : kRates) {
+        for (uint32_t order = 1; order <= 8; ++order) {
+            for (uint32_t family = 0; family < 3; ++family) {
+                if (family == 2 && (order & 1)) continue;
+                const n60_xover_spec s = spec(family, order, 0.01 * fs);
+                n60_xover_prototype proto;
+                CHECK(n60_xover_prototype_design(family, order, &proto) == N60_XOVER_OK, "prototype");
+                for (double fc : {40.0, 300.0, 0.2 * fs}) {
+                    for (int hp = 0; hp < 2; ++hp) {
+                        n60_xover_spec t = s;
+                        t.corner_hz = fc;
+                        n60_xover_cascade a, b;
+                        CHECK(n60_xover_design(&t, hp, fs, &a) == N60_XOVER_OK, "design");
+                        CHECK(n60_xover_realise(&proto, hp, fc, fs, &b) == N60_XOVER_OK, "realise");
+                        CHECK(a.count == b.count && std::memcmp(a.sections, b.sections, a.count * sizeof(n60_xover_biquad)) == 0,
+                              "realise differs from design (%s%u fc=%g fs=%g)", familyName(family), order, fc, fs);
+                    }
+                }
+            }
+        }
+    }
+}
+
 int main() {
     forEachSpec(testCorner);
     forEachSpec(testSlope);
     forEachSpec(testStabilityAndDeterminism);
     testLrSum();
     testLinkwitz();
+    testRealiseMatchesDesign();
     testRejections();
     if (failures) { std::fprintf(stderr, "%d failures\n", failures); return 1; }
     std::puts("xover: all checks passed");

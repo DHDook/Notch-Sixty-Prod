@@ -28,6 +28,8 @@
 #include <cstring>
 #include <new>
 
+#include "n60/xover.h"
+
 namespace n60 {
 namespace {
 
@@ -140,6 +142,7 @@ struct BassSubIdx {
 };
 struct BassLayout {
     uint32_t subs, end, ext;  // ext: index of the extension word, 0 when absent
+    uint32_t spec;            // ABI v17: index of the 4-value filter-spec trailer, 0 when absent
     bool weighted;
     BassSubIdx s[kBassMaxSubs];
 };
@@ -147,6 +150,7 @@ bool parseBass(const float *p, uint32_t have, BassLayout &L) {
     if (have < kBassFixed || !isInt(p[8]) || p[8] < 0.0f || p[8] > static_cast<float>(kBassMaxEq)) return false;
     L.subs = 1;
     L.ext = 0;
+    L.spec = 0;
     L.weighted = false;
     L.s[0] = {2, 6, 7, 8, 9};
     uint32_t pos = kBassFixed + 4u * static_cast<uint32_t>(p[8]);
@@ -164,6 +168,10 @@ bool parseBass(const float *p, uint32_t have, BassLayout &L) {
             L.s[L.subs++] = {pos, pos + 1, pos + 2, pos + 3, pos + 4};
             pos += 4u + 4u * static_cast<uint32_t>(n);
             if (have < pos) return false;
+        }
+        if (have == pos + 4) {  // ABI v17: filter-spec trailer (needs the extension word)
+            L.spec = pos;
+            pos += 4;
         }
     }
     L.end = pos;
@@ -297,9 +305,10 @@ struct GateShared {
     uint32_t open, below, holdFrames, pad;
     double thr, hystLin, atk, rel, cOut, cIn;
 };
+constexpr uint32_t kBassSplitSec = N60_XOVER_MAX_SECTIONS;
 struct BassLane {
-    Bq hp1, hp2, lp1, lp2;
-    Bq nhp1, nhp2, nlp1, nlp2;  // incoming crossover during a coefficient crossfade
+    Bq hp[kBassSplitSec], lp[kBassSplitSec];
+    Bq nhp[kBassSplitSec], nlp[kBassSplitSec];  // incoming crossover during a coefficient crossfade
 };
 // One subwoofer output of BASS_MGMT (ABI v7): own gain, polarity and EQ sections, all live.
 struct BassSub {
@@ -312,9 +321,11 @@ struct BassSub {
     uint32_t lane, nEq, gainIdx, polIdx, eqIdx;
 };
 struct BassShared {
-    double hp[5], lp[5], lfe[5];
+    double hp[kBassSplitSec][5], lp[kBassSplitSec][5], lfe[5];  // split sections (default: LR4 = two identical Butterworth biquads)
     Bq lfe1, lfe2;
-    double hpN[5], lpN[5], lfeN[5];  // incoming coefficients during a crossfade
+    double hpN[kBassSplitSec][5], lpN[kBassSplitSec][5], lfeN[5];  // incoming coefficients during a crossfade
+    n60_xover_prototype hpProto, lpProto;  // ABI v17 filter spec (general == 1)
+    uint32_t nHp, nLp, general, pad2;
     Bq lfe1n, lfe2n;
     uint32_t xfX, xfLfe;             // frames left in the crossover and LFE low-pass crossfades
     Ramp redirect, lfeG;
@@ -619,6 +630,16 @@ n60_status validateSystemStage(const n60_stage_desc &s, double rate, uint32_t ou
                 const uint32_t lfe = static_cast<uint32_t>(p[3]);
                 if (((s.laneMask >> lfe) & 1u) != 0) return N60_STATUS_BAD_ARGUMENT;
             }
+            if (L.spec != 0) {  // filter-spec trailer: HP family, order, LP family, order (no OFF)
+                for (uint32_t k = 0; k < 4; k += 2) {
+                    const float fam = p[L.spec + k], ord = p[L.spec + k + 1];
+                    n60_xover_prototype pr;
+                    if (!isInt(fam) || !isInt(ord) || fam < 0.0f || fam > 2.0f || ord < 1.0f ||
+                        n60_xover_prototype_design(static_cast<uint32_t>(fam), static_cast<uint32_t>(ord), &pr) != N60_XOVER_OK) {
+                        return N60_STATUS_BAD_ARGUMENT;
+                    }
+                }
+            }
             break;
         }
         case N60_STAGE_AMBIENT:
@@ -718,6 +739,25 @@ void designInto(uint32_t type, double rate, double f, double db, double q, doubl
     if (designBiquad(type, rate, f, db, q, c)) std::memcpy(out, c, sizeof c);
 }
 
+// The mains high-pass and sub low-pass at one corner. Default (no filter-spec trailer): the v16 Butterworth biquad
+// squared. General: the stored prototypes realised by the crossover library (realtime-safe).
+void designBassSplit(const BassShared &s, double rate, double fc, double hp[][5], double lp[][5]) {
+    if (s.general == 0) {
+        designInto(4, rate, fc, 0.0, kButterQ, hp[0]);
+        std::memcpy(hp[1], hp[0], sizeof hp[1]);
+        designInto(3, rate, fc, 0.0, kButterQ, lp[0]);
+        std::memcpy(lp[1], lp[0], sizeof lp[1]);
+        return;
+    }
+    n60_xover_cascade c;
+    if (n60_xover_realise(&s.hpProto, 1, fc, rate, &c) == N60_XOVER_OK) {
+        for (uint32_t k = 0; k < c.count; ++k) std::memcpy(hp[k], &c.sections[k], sizeof hp[k]);
+    }
+    if (n60_xover_realise(&s.lpProto, 0, fc, rate, &c) == N60_XOVER_OK) {
+        for (uint32_t k = 0; k < c.count; ++k) std::memcpy(lp[k], &c.sections[k], sizeof lp[k]);
+    }
+}
+
 void guardArm(GuardState &g) {
     g.blockPos = g.blocksSeen = g.decPos = g.bandCount = g.growthRun = g.errRun = 0;
     g.outSum = g.refSum = g.decSum = 0.0;
@@ -812,11 +852,18 @@ void systemInit(SnapHeader *h, const StageRec &r) {
         }
         case N60_STAGE_BASS_MGMT: {
             BassShared *s = reinterpret_cast<BassShared *>(sh);
-            designInto(4, rate, p[0], 0.0, kButterQ, s->hp);
-            designInto(3, rate, p[0], 0.0, kButterQ, s->lp);
-            designInto(3, rate, p[4], 0.0, kButterQ, s->lfe);
             BassLayout L;
             if (!parseBass(p, r.paramCount, L)) break;  // unreachable: validated at build
+            s->nHp = s->nLp = 2;
+            if (L.spec != 0) {
+                s->general = 1;
+                n60_xover_prototype_design(static_cast<uint32_t>(p[L.spec]), static_cast<uint32_t>(p[L.spec + 1]), &s->hpProto);
+                n60_xover_prototype_design(static_cast<uint32_t>(p[L.spec + 2]), static_cast<uint32_t>(p[L.spec + 3]), &s->lpProto);
+                s->nHp = s->hpProto.count * s->hpProto.copies;
+                s->nLp = s->lpProto.count * s->lpProto.copies;
+            }
+            designBassSplit(*s, rate, p[0], s->hp, s->lp);
+            designInto(3, rate, p[4], 0.0, kButterQ, s->lfe);
             s->nSubs = L.subs;
             s->norm = L.weighted ? 1.0 : 1.0 / static_cast<double>(L.subs);
             s->clearLfe = p[3] >= 0.0f ? 1u : 0u;
@@ -1192,11 +1239,10 @@ void runBass(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) {
     // crossfade runs is picked up when it ends (seenX still differs).
     if (p[0] != s.seenX && s.xfX == 0) {
         s.seenX = p[0];
-        designInto(4, rate, p[0], 0.0, kButterQ, s.hpN);
-        designInto(3, rate, p[0], 0.0, kButterQ, s.lpN);
+        designBassSplit(s, rate, p[0], s.hpN, s.lpN);
         for (uint32_t l = 0; l < r.laneCount; ++l) {
-            st[l]->nhp1 = st[l]->hp1; st[l]->nhp2 = st[l]->hp2;
-            st[l]->nlp1 = st[l]->lp1; st[l]->nlp2 = st[l]->lp2;
+            std::memcpy(st[l]->nhp, st[l]->hp, sizeof st[l]->nhp);
+            std::memcpy(st[l]->nlp, st[l]->lp, sizeof st[l]->nlp);
         }
         s.xfX = ramp;
     }
@@ -1252,11 +1298,13 @@ void runBass(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) {
         double acc = 0.0;
         for (uint32_t l = 0; l < r.laneCount; ++l) {
             const double x = ptr[l][i];
-            double hp = bqRun(s.hp, st[l]->hp2, bqRun(s.hp, st[l]->hp1, x));
-            double lp = bqRun(s.lp, st[l]->lp2, bqRun(s.lp, st[l]->lp1, x));
+            double hp = x, lp = x;
+            for (uint32_t k = 0; k < s.nHp; ++k) hp = bqRun(s.hp[k], st[l]->hp[k], hp);
+            for (uint32_t k = 0; k < s.nLp; ++k) lp = bqRun(s.lp[k], st[l]->lp[k], lp);
             if (xf) {
-                const double hn = bqRun(s.hpN, st[l]->nhp2, bqRun(s.hpN, st[l]->nhp1, x));
-                const double ln = bqRun(s.lpN, st[l]->nlp2, bqRun(s.lpN, st[l]->nlp1, x));
+                double hn = x, ln = x;
+                for (uint32_t k = 0; k < s.nHp; ++k) hn = bqRun(s.hpN[k], st[l]->nhp[k], hn);
+                for (uint32_t k = 0; k < s.nLp; ++k) ln = bqRun(s.lpN[k], st[l]->nlp[k], ln);
                 hp += t * (hn - hp);
                 lp += t * (ln - lp);
             }
@@ -1267,8 +1315,8 @@ void runBass(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) {
             std::memcpy(s.hp, s.hpN, sizeof s.hp);
             std::memcpy(s.lp, s.lpN, sizeof s.lp);
             for (uint32_t l = 0; l < r.laneCount; ++l) {
-                st[l]->hp1 = st[l]->nhp1; st[l]->hp2 = st[l]->nhp2;
-                st[l]->lp1 = st[l]->nlp1; st[l]->lp2 = st[l]->nlp2;
+                std::memcpy(st[l]->hp, st[l]->nhp, sizeof st[l]->hp);
+                std::memcpy(st[l]->lp, st[l]->nlp, sizeof st[l]->lp);
             }
         }
         double v = acc * rampNext(s.redirect);
@@ -1310,9 +1358,11 @@ void runBass(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) {
         if (clearLfe) lfe[i] = 0.0f;
     }
     for (uint32_t l = 0; l < r.laneCount; ++l) {
-        bqFlush(st[l]->hp1); bqFlush(st[l]->hp2); bqFlush(st[l]->lp1); bqFlush(st[l]->lp2);
+        for (uint32_t k = 0; k < s.nHp; ++k) bqFlush(st[l]->hp[k]);
+        for (uint32_t k = 0; k < s.nLp; ++k) bqFlush(st[l]->lp[k]);
         if (s.xfX != 0) {
-            bqFlush(st[l]->nhp1); bqFlush(st[l]->nhp2); bqFlush(st[l]->nlp1); bqFlush(st[l]->nlp2);
+            for (uint32_t k = 0; k < s.nHp; ++k) bqFlush(st[l]->nhp[k]);
+            for (uint32_t k = 0; k < s.nLp; ++k) bqFlush(st[l]->nlp[k]);
         }
     }
     bqFlush(s.lfe1); bqFlush(s.lfe2);

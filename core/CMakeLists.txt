@@ -2,7 +2,7 @@
 cmake_minimum_required(VERSION 3.20)
 project(n60core LANGUAGES C CXX)
 
-add_library(n60core STATIC src/graph.cpp src/snapshot.cpp src/fft.cpp src/stages_dsp.cpp src/stages_system.cpp src/stages_matrix.cpp src/stages_generator.cpp src/layout.cpp
+add_library(n60core STATIC src/graph.cpp src/snapshot.cpp src/fft.cpp src/stages_dsp.cpp src/stages_system.cpp src/stages_matrix.cpp src/stages_generator.cpp src/stages_route.cpp src/layout.cpp
     src/measure/offline_fft.cpp src/measure/ess.cpp src/measure/deconvolve.cpp src/measure/reference_room.cpp src/measure/timing.cpp src/measure/distortion.cpp src/measure/decay.cpp src/measure/waterfall.cpp src/measure/monitor_ring.cpp src/measure/spl.cpp src/measure/rta.cpp
     src/correct/minphase.cpp src/correct/design.cpp src/correct/synth.cpp src/correct/bass.cpp
     src/xover/xover.cpp)
@@ -126,3 +126,9 @@ add_test(NAME n60core_correct_bass COMMAND n60core_correct_bass_test)
 add_executable(n60core_xover_test tests/test_xover.cpp)
 target_link_libraries(n60core_xover_test PRIVATE n60core)
 add_test(NAME n60core_xover COMMAND n60core_xover_test)
+
+# E8 S2: ROUTE and XOVER graph stages (ABI v17).
+add_executable(n60core_route_test tests/test_route.cpp)
+target_include_directories(n60core_route_test PRIVATE src)
+target_link_libraries(n60core_route_test PRIVATE n60core)
+add_test(NAME n60core_route COMMAND n60core_route_test)
