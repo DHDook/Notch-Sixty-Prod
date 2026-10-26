@@ -67,6 +67,9 @@
 		E10A00000000000000000023 /* synth.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E10A00000000000000000013 /* synth.cpp */; };
 		E10A00000000000000000033 /* RoomCorrectionLanePlan.swift in Sources */ = {isa = PBXBuildFile; fileRef = E10A00000000000000000043 /* RoomCorrectionLanePlan.swift */; };
 		E10A00000000000000000024 /* bass.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E10A00000000000000000014 /* bass.cpp */; };
+		E8A000000000000000000021 /* xover.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E8A000000000000000000011 /* xover.cpp */; };
+		E8A000000000000000000031 /* CrossoverCore.swift in Sources */ = {isa = PBXBuildFile; fileRef = E8A000000000000000000041 /* CrossoverCore.swift */; };
+		E8A000000000000000000032 /* CrossoverCoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E8A000000000000000000042 /* CrossoverCoreTests.swift */; };
 		E10A00000000000000000071 /* RoomCorrectionBassApply.swift in Sources */ = {isa = PBXBuildFile; fileRef = E10A00000000000000000072 /* RoomCorrectionBassApply.swift */; };
 		E10B00000000000000000001 /* RoomCorrectionPostApply.swift in Sources */ = {isa = PBXBuildFile; fileRef = E10B00000000000000000002 /* RoomCorrectionPostApply.swift */; };
 		E10A00000000000000000031 /* RoomCorrectionCore.swift in Sources */ = {isa = PBXBuildFile; fileRef = E10A00000000000000000041 /* RoomCorrectionCore.swift */; };
@@ -509,6 +512,9 @@
 		E10A00000000000000000013 /* synth.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = correct/synth.cpp; sourceTree = "<group>"; };
 		E10A00000000000000000043 /* RoomCorrectionLanePlan.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomCorrectionLanePlan.swift; sourceTree = "<group>"; };
 		E10A00000000000000000014 /* bass.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = correct/bass.cpp; sourceTree = "<group>"; };
+		E8A000000000000000000011 /* xover.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = xover/xover.cpp; sourceTree = "<group>"; };
+		E8A000000000000000000041 /* CrossoverCore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrossoverCore.swift; sourceTree = "<group>"; };
+		E8A000000000000000000042 /* CrossoverCoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrossoverCoreTests.swift; sourceTree = "<group>"; };
 		E10A00000000000000000072 /* RoomCorrectionBassApply.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomCorrectionBassApply.swift; sourceTree = "<group>"; };
 		E10B00000000000000000002 /* RoomCorrectionPostApply.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomCorrectionPostApply.swift; sourceTree = "<group>"; };
 		E10A00000000000000000041 /* RoomCorrectionCore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomCorrectionCore.swift; sourceTree = "<group>"; };
@@ -950,6 +956,7 @@
 				E10A00000000000000000012 /* design.cpp */,
 				E10A00000000000000000013 /* synth.cpp */,
 				E10A00000000000000000014 /* bass.cpp */,
+				E8A000000000000000000011 /* xover.cpp */,
 				E11C0000000000000000001C /* spl.cpp */,
 				E11C0000000000000000001B /* monitor_ring.cpp */,
 				E11C00000000000000000020 /* offline_fft.hpp */,
@@ -1025,6 +1032,7 @@
 				A100000000000000000E2206 /* FeatureFlagsTests.swift */,
 				E11D00000000000000000012 /* MeasurementCoreTests.swift */,
 				E10A00000000000000000042 /* RoomCorrectionCoreTests.swift */,
+				E8A000000000000000000042 /* CrossoverCoreTests.swift */,
 				E10A00000000000000000074 /* RoomCorrectionBassApplyTests.swift */,
 				E10B00000000000000000006 /* RoomCorrectionDeployControllerTests.swift */,
 				E10A00000000000000000044 /* RoomCorrectionLanePlanTests.swift */,
@@ -1237,6 +1245,7 @@
 				E10A00000000000000000072 /* RoomCorrectionBassApply.swift */,
 				E10B00000000000000000002 /* RoomCorrectionPostApply.swift */,
 				E10A00000000000000000041 /* RoomCorrectionCore.swift */,
+				E8A000000000000000000041 /* CrossoverCore.swift */,
 				E10A00000000000000000043 /* RoomCorrectionLanePlan.swift */,
 				E10A00000000000000000061 /* RoomCorrectionTargetShaping.swift */,
 				E11E00000000000000000002 /* MeasurementLiveAnalysis.swift */,
@@ -1461,6 +1470,7 @@
 				E10A00000000000000000022 /* design.cpp in Sources */,
 				E10A00000000000000000023 /* synth.cpp in Sources */,
 				E10A00000000000000000024 /* bass.cpp in Sources */,
+				E8A000000000000000000021 /* xover.cpp in Sources */,
 				E11C0000000000000000003B /* spl.cpp in Sources */,
 				E11C0000000000000000003A /* monitor_ring.cpp in Sources */,
 				A10000000000000000000011 /* ContentView.swift in Sources */,
@@ -1574,6 +1584,7 @@
 				E10A00000000000000000071 /* RoomCorrectionBassApply.swift in Sources */,
 				E10B00000000000000000001 /* RoomCorrectionPostApply.swift in Sources */,
 				E10A00000000000000000031 /* RoomCorrectionCore.swift in Sources */,
+				E8A000000000000000000031 /* CrossoverCore.swift in Sources */,
 				E10A00000000000000000033 /* RoomCorrectionLanePlan.swift in Sources */,
 				E10A00000000000000000051 /* RoomCorrectionTargetShaping.swift in Sources */,
 				E11E00000000000000000003 /* MeasurementLiveAnalysis.swift in Sources */,
@@ -1724,6 +1735,7 @@
 				A100000000000000000E2205 /* FeatureFlagsTests.swift in Sources */,
 				E11D00000000000000000002 /* MeasurementCoreTests.swift in Sources */,
 				E10A00000000000000000032 /* RoomCorrectionCoreTests.swift in Sources */,
+				E8A000000000000000000032 /* CrossoverCoreTests.swift in Sources */,
 				E10A00000000000000000073 /* RoomCorrectionBassApplyTests.swift in Sources */,
 				E10B00000000000000000005 /* RoomCorrectionDeployControllerTests.swift in Sources */,
 				E10A00000000000000000034 /* RoomCorrectionLanePlanTests.swift in Sources */,
