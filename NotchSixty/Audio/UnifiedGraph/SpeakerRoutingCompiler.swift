@@ -93,10 +93,7 @@ enum SpeakerRoutingCompiler {
                     eq: way.eq.map { UnifiedGraphPEQSection(type: $0.type, frequencyHz: $0.frequencyHz, gainDB: $0.gainDB, q: $0.q) })
                 userDelayMilliseconds = way.delayMilliseconds
                 if let l = way.limiter {
-                    protection = UnifiedGraphProtection(
-                        ceilingDB: l.ceilingDB, attackMilliseconds: l.attackMilliseconds,
-                        releaseMilliseconds: l.releaseMilliseconds, lookAheadMilliseconds: l.lookAheadMilliseconds,
-                        truePeakGuard: l.truePeakGuard, oversampling: l.oversampling)
+                    protection = l.graphProtection
                 }
             }
             outputs.append(UnifiedGraphOutputLane(

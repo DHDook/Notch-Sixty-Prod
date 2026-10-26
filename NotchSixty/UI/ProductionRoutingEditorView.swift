@@ -8,6 +8,7 @@ struct ProductionRoutingEditorView: View {
     @ObservedObject var engine: AudioIOEngine
     @StateObject private var model: SpeakerRoutingEditorModel
     @State private var actionError: String?
+    @State private var interchangeNotes: [String] = []
 
     init(engine: AudioIOEngine) {
         self.engine = engine
@@ -32,6 +33,8 @@ struct ProductionRoutingEditorView: View {
                 speakerCard(speaker)
             }
             matrixCard
+            pipelineCard
+            camillaCard
             if !model.messages.isEmpty { messagesCard }
             if let actionError {
                 Label(actionError, systemImage: "exclamationmark.triangle.fill")
@@ -265,6 +268,99 @@ struct ProductionRoutingEditorView: View {
                     }
                 }))
                 .textFieldStyle(.roundedBorder).frame(width: 56)
+        }
+    }
+
+    private var pipelineCard: some View {
+        let rows = SpeakerRoutingPipeline.rows(model.configuration, context: model.context)
+        return DisclosureGroup("Pipeline") {
+            VStack(alignment: .leading, spacing: 10) {
+                if rows.isEmpty { Text("Nothing is routed yet.").foregroundStyle(.secondary) }
+                ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("\(row.title) (output \(row.output.channelIndex + 1))").font(.headline)
+                        ForEach(Array(row.steps.enumerated()), id: \.offset) { _, step in
+                            HStack(alignment: .firstTextBaseline) {
+                                Text(step.title).frame(width: 90, alignment: .leading)
+                                Text(step.detail).foregroundStyle(.secondary)
+                                Spacer()
+                                if step.latencyFrames > 0 {
+                                    Text(String(format: "%.2f ms", step.latencyFrames / model.context.sampleRate * 1000))
+                                        .monospacedDigit().foregroundStyle(.secondary)
+                                }
+                            }
+                            .font(.callout)
+                        }
+                        Text(String(format: "Total latency %.2f ms", row.totalLatencyMilliseconds(sampleRate: model.context.sampleRate)))
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.top, 6)
+        }
+    }
+
+    private var camillaCard: some View {
+        GroupBox("CamillaDSP") {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Button("Import YAML…") { importCamilla() }
+                    Button("Export YAML…") { exportCamilla() }
+                        .disabled(model.configuration.speakers.isEmpty && model.configuration.matrix.isEmpty)
+                }
+                ForEach(Array(interchangeNotes.enumerated()), id: \.offset) { _, note in
+                    Label(note, systemImage: "info.circle").font(.callout)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private func importCamilla() {
+        let panel = NSOpenPanel()
+        panel.title = "Import CamillaDSP YAML"
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.allowedFileTypes = ["yml", "yaml"]
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        let accessed = url.startAccessingSecurityScopedResource()
+        defer { if accessed { url.stopAccessingSecurityScopedResource() } }
+        do {
+            let text = try String(contentsOf: url, encoding: .utf8)
+            let uid = engine.selectedOutputDevice?.uid ?? ""
+            let imported = try CamillaDSPRouting.importRouting(text, context: model.context, deviceUID: uid)
+            interchangeNotes = imported.warnings
+            if let routing = imported.routing {
+                var next = routing
+                next.enabled = model.configuration.enabled
+                model.replace(next)
+            } else {
+                interchangeNotes.append("The file has no routing to import.")
+            }
+            if !imported.programEQ.isEmpty {
+                interchangeNotes.append("Program EQ in the file was not applied; import it from the Equalizer tab.")
+            }
+        } catch {
+            interchangeNotes = ["Import failed: \(error.localizedDescription)"]
+        }
+    }
+
+    private func exportCamilla() {
+        let exported = CamillaDSPRouting.exportRouting(
+            model.configuration, context: model.context, playbackDeviceName: engine.selectedOutputDevice?.name)
+        let panel = NSSavePanel()
+        panel.title = "Export CamillaDSP YAML"
+        panel.nameFieldStringValue = "NotchSixty-routing.yml"
+        panel.allowedFileTypes = ["yml", "yaml"]
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        let accessed = url.startAccessingSecurityScopedResource()
+        defer { if accessed { url.stopAccessingSecurityScopedResource() } }
+        do {
+            try Data(exported.yaml.utf8).write(to: url, options: .atomic)
+            interchangeNotes = exported.warnings
+        } catch {
+            interchangeNotes = ["Export failed: \(error.localizedDescription)"]
         }
     }
 
