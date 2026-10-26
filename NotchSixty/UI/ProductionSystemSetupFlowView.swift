@@ -19,6 +19,11 @@ final class SystemSetupFlowModel: ObservableObject {
     @Published var correctionTarget = SystemSetupCorrectionTarget.default
     @Published private(set) var seatPredictions: [SystemSetupSeatPrediction] = []
     @Published private(set) var correctionIsPrepared = false
+    @Published private(set) var verificationReport: SystemSetupVerificationReport?
+    @Published private(set) var verificationSummary: SystemSetupVerificationSummary?
+    @Published private(set) var isVerifying = false
+    @Published private(set) var roomInsights: [SystemSetupRoomInsight] = []
+    @Published private(set) var savedProfileName: String?
 
     let engine: AudioIOEngine
     let profiles: ProductProfileController
@@ -29,10 +34,18 @@ final class SystemSetupFlowModel: ObservableObject {
     /// the user keeps in the Room Correction workspace.
     let roomProjects: RoomCorrectionProjectController
     private var profileBeforeBass: OutputDeviceProfileConfiguration?
+    private let verifier: SystemSetupPostApplyMeasuring
+    private let sessions: SystemSetupSessionStore
+    private var verificationTask: Task<Void, Never>?
+    static let verificationTimeoutSeconds = 60.0
 
     init(engine: AudioIOEngine, profiles: ProductProfileController, microphone: RoomCorrectionCalibrationController,
          calibration: MultichannelCalibrationController,
-         noise: SystemSetupNoisePlaying? = nil) {
+         noise: SystemSetupNoisePlaying? = nil,
+         verifier: SystemSetupPostApplyMeasuring? = nil,
+         sessions: SystemSetupSessionStore = SystemSetupSessionStore(directory: SystemSetupSessionStore.defaultDirectory())) {
+        self.verifier = verifier ?? UnconnectedSystemSetupPostApplyMeasurer()
+        self.sessions = sessions
         self.engine = engine
         self.profiles = profiles
         self.microphone = microphone
@@ -49,9 +62,33 @@ final class SystemSetupFlowModel: ObservableObject {
     var step: SystemSetupStep { flow.step }
     var isRunning: Bool { flow.phase == .running }
     /// Steps built so far; later ones show a placeholder.
-    static let builtSteps: Set<SystemSetupStep> = [.output, .topology, .microphone, .room, .measure, .alignment, .bass, .correction]
+    static let builtSteps: Set<SystemSetupStep> = Set(SystemSetupStep.allCases)
+
+    private var sessionKey: String { profiles.selectedSystemProfileID?.uuidString ?? "default" }
+
+    private func persistSession() {
+        guard flow.phase == .running else { return }
+        try? sessions.save(SystemSetupSession(playbackSystemKey: sessionKey, updatedAt: Date(), flow: flow))
+    }
+
+    /// Resumes the saved session for this playback system at its last completed step. A different output
+    /// device or rate drops the measurement steps; measurements the controller no longer holds do the same.
+    private func resumeSession() -> Bool {
+        guard var saved = sessions.load(key: sessionKey)?.flow, saved.phase == .running else { return false }
+        let device = engine.selectedOutputDevice
+        saved.outputConfigurationChanged(outputUID: device?.uid, sampleRate: device?.nominalSampleRate)
+        calibration.prepareForUse()
+        saved.resumed(measurementsAvailable: !calibration.measurements.isEmpty)
+        flow = saved
+        topologyPreset = SystemSetupTopologyPreset.current(from: saved.snapshot ?? profiles.captureSystemState())
+        if let topology = saved.choices.topology { topologyPreset.topology = topology }
+        syncMeasurementChoices()
+        message = saved.invalidationReason ?? "Resumed where you left off."
+        return true
+    }
 
     func begin() {
+        if resumeSession() { return }
         let snapshot = profiles.captureSystemState()
         var initial = SystemSetupChoices()
         initial.outputUID = engine.selectedOutputDevice?.uid
@@ -372,6 +409,107 @@ final class SystemSetupFlowModel: ObservableObject {
         }
     }
 
+    // MARK: Verify (design note 7)
+
+    /// The main seat's predicted error after correction, from the Correction step.
+    var predictedMainSeatErrorDB: Double { seatPredictions.first?.rmsErrorAfterDB ?? 0 }
+
+    /// Room insights come from the advisor's analyser over the flow's own Room Correction project.
+    func prepareVerify() {
+        roomInsights = SystemSetupRoomInsights.make(
+            report: roomProjects.project.map { RoomTreatmentAdvisorAnalyzer().analyze(project: $0) })
+    }
+
+    /// Measures the main seat again through the live graph. Minimum phase keeps a failed or unavailable
+    /// check as "Not verified"; a mixed-phase mismatch, a timeout or a cancel reverts the correction and
+    /// returns to Correction.
+    func runVerification() {
+        guard verificationTask == nil, let rate = flow.choices.sampleRate else { return }
+        isVerifying = true
+        let predicted = predictedMainSeatErrorDB
+        let timeout = Self.verificationTimeoutSeconds
+        let verifier = self.verifier
+        verificationTask = Task { [weak self] in
+            var outcome: Result<SystemSetupVerificationReport, Error>
+            do {
+                let report = try await withThrowingTaskGroup(of: SystemSetupVerificationReport.self) { group in
+                    group.addTask { @MainActor in
+                        try await verifier.measureMainSeat(predictedErrorDB: predicted, sampleRate: rate)
+                    }
+                    group.addTask {
+                        try await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+                        throw SystemSetupVerificationError.timedOut(seconds: timeout)
+                    }
+                    defer { group.cancelAll() }
+                    guard let first = try await group.next() else { throw SystemSetupVerificationError.timedOut(seconds: timeout) }
+                    return first
+                }
+                outcome = .success(report)
+            } catch { outcome = .failure(error) }
+            self?.finishVerification(outcome)
+        }
+    }
+
+    func cancelVerification() { verificationTask?.cancel() }
+
+    private func finishVerification(_ outcome: Result<SystemSetupVerificationReport, Error>) {
+        verificationTask = nil
+        isVerifying = false
+        let kind = flow.choices.designKind
+        switch outcome {
+        case .success(let report):
+            verificationReport = report
+            if report.passed || kind == .minimumPhase {
+                flow.choices.verificationPassed = report.passed
+                verificationSummary = .make(report: report, designKind: kind)
+            } else {
+                failVerification(reason: "Verification did not match the design; the correction was reverted.")
+            }
+        case .failure(let error):
+            let unavailable = (error as? SystemSetupVerificationError) == .measurementUnavailable
+            if unavailable && kind == .minimumPhase {
+                verificationReport = nil
+                flow.choices.verificationPassed = false
+                verificationSummary = .make(report: nil, designKind: kind, failure: error.localizedDescription)
+            } else {
+                let reason = error is CancellationError
+                    ? "Verification was cancelled; the correction was reverted." : error.localizedDescription
+                failVerification(reason: reason)
+            }
+        }
+        persistSession()
+    }
+
+    private func failVerification(reason: String) {
+        revertCorrection()
+        verificationReport = nil
+        verificationSummary = SystemSetupVerificationSummary(verdict: .failed, headline: "Verification failed", detail: reason)
+        flow.verificationFailed(reason: reason)
+        message = reason
+    }
+
+    // MARK: Save (design notes 7 and 9)
+
+    var savesAsNotVerified: Bool { flow.savesAsNotVerified }
+
+    /// Saves the verified (or, for minimum phase, "Not verified") system as a profile and ends the flow.
+    func save() {
+        do {
+            try flow.finish()
+            let name = SystemSetupSaveNaming.profileName(flow.choices.profileName, notVerified: flow.savesAsNotVerified)
+            let id = profiles.saveCurrentSystemProfile(named: name)
+            savedProfileName = profiles.systemProfiles.first(where: { $0.id == id })?.name ?? name
+            sessions.delete(key: sessionKey)
+            message = nil
+        } catch let refusal as SystemSetupRefusal {
+            message = refusal.reason
+        } catch {
+            message = error.localizedDescription
+        }
+    }
+
+    func setProfileName(_ name: String) { flow.choices.profileName = name; persistSession() }
+
     func acceptSweepLevel(measuredSPLdBC: Double) {
         flow.choices.sweepLevelDBFS = level.sweepLevel(measuredSPLdBC: measuredSPLdBC)
     }
@@ -381,6 +519,11 @@ final class SystemSetupFlowModel: ObservableObject {
             if flow.step == .topology { try applyTopology() }
             try flow.next()
             message = nil
+            if flow.step == .verify { prepareVerify() }
+            if flow.step == .save, flow.choices.profileName.isEmpty {
+                flow.choices.profileName = SystemSetupSaveNaming.defaultName(outputName: engine.selectedOutputDevice?.name)
+            }
+            persistSession()
         } catch let refusal as SystemSetupRefusal {
             message = refusal.reason
         } catch {
@@ -388,15 +531,17 @@ final class SystemSetupFlowModel: ObservableObject {
         }
     }
 
-    func back() { try? flow.back() }
+    func back() { try? flow.back(); persistSession() }
 
     func skip() {
-        do { try flow.skip() } catch let refusal as SystemSetupRefusal { message = refusal.reason } catch {}
+        do { try flow.skip(); persistSession() } catch let refusal as SystemSetupRefusal { message = refusal.reason } catch {}
     }
 
     func cancel() {
         stopNoise()
         calibration.cancelMeasurement()
+        verificationTask?.cancel()
+        sessions.delete(key: sessionKey)
         guard let snapshot = try? flow.cancel() else { return }
         do {
             try profiles.replaceSelectedSystemOutputDeviceProfile(snapshot.outputDeviceProfile)
@@ -469,9 +614,15 @@ struct ProductionSystemSetupFlowView: View {
             if model.flow.canSkip(model.step) {
                 Button("Skip") { model.skip() }
             }
-            Button("Next") { model.next() }
-                .keyboardShortcut(.defaultAction)
-                .disabled(!SystemSetupFlowModel.builtSteps.contains(model.step))
+            if model.step == .save {
+                Button("Save") { model.save(); if model.savedProfileName != nil { dismiss() } }
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(model.isVerifying)
+            } else {
+                Button("Next") { model.next() }
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(!SystemSetupFlowModel.builtSteps.contains(model.step) || model.isVerifying)
+            }
         }
         .padding(16)
     }
@@ -486,6 +637,8 @@ struct ProductionSystemSetupFlowView: View {
         case .alignment: SystemSetupAlignmentStep(model: model)
         case .bass: SystemSetupBassStep(model: model)
         case .correction: SystemSetupCorrectionStep(model: model)
+        case .verify: SystemSetupVerifyStep(model: model)
+        case .save: SystemSetupSaveStep(model: model)
         case .room:
             Text("Optional. Describe the room so seat and speaker suggestions can pre-fill the next steps, or skip.")
                 .foregroundStyle(.secondary)
@@ -855,6 +1008,77 @@ private struct SystemSetupCorrectionStep: View {
                 Button("Apply") { model.applyCorrection() }.disabled(model.choices.correctionApplied)
                 Button("Revert") { model.revertCorrection() }.disabled(!model.choices.correctionApplied)
                 if model.choices.correctionApplied { Label("Applied", systemImage: "checkmark.circle.fill") }
+            }
+        }
+    }
+}
+
+private struct SystemSetupVerifyStep: View {
+    @ObservedObject var model: SystemSetupFlowModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Check the result").font(.headline)
+            Text("Notch Sixty measures your main seat once more with the correction on and compares it with what was predicted.")
+                .font(.callout).foregroundStyle(.secondary)
+            HStack {
+                Button("Verify") { model.runVerification() }.disabled(model.isVerifying)
+                if model.isVerifying {
+                    ProgressView().controlSize(.small)
+                    Button("Cancel check") { model.cancelVerification() }
+                }
+            }
+            if let summary = model.verificationSummary {
+                Label(summary.headline, systemImage: summary.verdict == .verified ? "checkmark.seal.fill" : "exclamationmark.triangle.fill")
+                    .font(.headline)
+                Text(summary.detail).font(.callout).foregroundStyle(.secondary)
+            }
+            if let report = model.verificationReport {
+                Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 6) {
+                    GridRow { Text("Predicted error").bold(); Text("Measured error").bold() }
+                    GridRow {
+                        Text("\(report.predictedErrorDB, specifier: "%.1f") dB").monospacedDigit()
+                        Text("\(report.measuredErrorDB, specifier: "%.1f") dB").monospacedDigit()
+                    }
+                }
+            }
+            roomInsightsCard
+        }
+    }
+
+    private var roomInsightsCard: some View {
+        GroupBox("Room insights") {
+            VStack(alignment: .leading, spacing: 8) {
+                if model.roomInsights.isEmpty {
+                    Text("Nothing here that EQ cannot handle.").font(.callout).foregroundStyle(.secondary)
+                }
+                ForEach(model.roomInsights) { insight in
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(insight.title).font(.callout.weight(insight.isImportant ? .semibold : .regular))
+                        Text(insight.detail).font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                Text("The Room tab in System shows the full advisor.").font(.caption).foregroundStyle(.secondary)
+            }
+            .padding(4)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+}
+
+private struct SystemSetupSaveStep: View {
+    @ObservedObject var model: SystemSetupFlowModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Save your system").font(.headline)
+            TextField("Profile name", text: Binding(
+                get: { model.choices.profileName }, set: { model.setProfileName($0) }))
+            if model.savesAsNotVerified {
+                Label("This profile will be labelled Not verified.", systemImage: "exclamationmark.triangle")
+                    .font(.callout).foregroundStyle(.orange)
+            } else if let summary = model.verificationSummary {
+                Label(summary.headline, systemImage: "checkmark.seal.fill").font(.callout)
             }
         }
     }
