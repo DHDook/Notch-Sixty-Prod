@@ -146,9 +146,11 @@ struct UnifiedGraphConfiguration: Equatable, Sendable {
     var orderPolicy: UnifiedGraphOrderPolicy = .canonical
     /// E6 S9a: program DSP mapped onto the lane sets of this layout (N-channel graphs). Needs empty `stereoStages`.
     var programDSP: UnifiedGraphProgramDSP?
+    /// E8 S3: speaker routing (ROUTE, XOVER and per-output delay and protection). nil leaves the graph exactly as before.
+    var routing: UnifiedGraphRouting?
 
     var subwooferCount: Int { bassManagement?.subwoofers.count ?? 0 }
-    var channelCount: Int { lanes.count + subwooferCount }
+    var channelCount: Int { lanes.count + subwooferCount + (routing?.outputLaneCount ?? 0) }
 
     static let maxSubwoofers = 8
 
@@ -316,6 +318,9 @@ struct UnifiedGraphConfiguration: Equatable, Sendable {
         if let params = stereo.pauseGate {
             add(N60_STAGE_PAUSE_GATE, Self.pauseGateStageId, mask: programMask, params: params)
         }
+        let routed = try routeStages(programLanes: programLanes)
+        stages += routed.route
+        stages += routed.rest
         for (index, lane) in lanes.enumerated() {
             if let total = lane.fractionalDelayFrames {
                 guard total.isFinite, total >= 0, total < 8190 else {
@@ -336,7 +341,7 @@ struct UnifiedGraphConfiguration: Equatable, Sendable {
                     capacity: frames, params: [Float(frames)])
             }
         }
-        if let protection {
+        if let protection, routing == nil {
             var mask: UInt64 = 0
             for index in 0..<programLanes { mask |= UInt64(1) << UInt64(index) }
             let params = Self.protectionParameters(protection)
