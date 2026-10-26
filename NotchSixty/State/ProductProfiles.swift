@@ -797,6 +797,8 @@ enum ProductProfileError: Error, LocalizedError {
 
 @MainActor
 final class ProductProfileController: ObservableObject {
+    /// E8 S5: set from `e8.routing-matrix` at launch. Only Swift reads the flag; the engine never does.
+    private let migratesSpeakerRouting: Bool
     private struct Archive: Codable {
         static let currentSchemaVersion = 3
         var schemaVersion: Int = currentSchemaVersion
@@ -1119,9 +1121,11 @@ final class ProductProfileController: ObservableObject {
     init(
         engine: AudioIOEngine,
         audioUnitHost: AudioUnitHostController? = nil,
-        storageURL: URL? = nil
+        storageURL: URL? = nil,
+        migratesSpeakerRouting: Bool = false
     ) {
         self.engine = engine
+        self.migratesSpeakerRouting = migratesSpeakerRouting
         self.audioUnitHost = audioUnitHost ?? AudioUnitHostController()
         self.storageURL = storageURL ?? Self.defaultStorageURL()
         audioUnitHostObservation = self.audioUnitHost.objectWillChange.sink {
@@ -1129,6 +1133,7 @@ final class ProductProfileController: ObservableObject {
             self?.objectWillChange.send()
         }
         loadArchive()
+        migrateLoadedSpeakerRouting()
         loadWorkingContentState()
         ensureContentPresetsSeeded()
         ensureDefaultSystemProfile()
@@ -2120,6 +2125,16 @@ final class ProductProfileController: ObservableObject {
         }
     }
 
+
+    /// E8 S5: with `e8.routing-matrix` on, fill each loaded profile's `speakerRouting` from its legacy physical crossover.
+    /// Pure and idempotent; the legacy fields stay as stored, so turning the flag off changes nothing.
+    private func migrateLoadedSpeakerRouting() {
+        guard migratesSpeakerRouting else { return }
+        for index in systemProfiles.indices {
+            systemProfiles[index].state =
+                systemProfiles[index].state.migratingSpeakerRouting(enabled: true)
+        }
+    }
 
     private func loadArchive() {
         guard FileManager.default.fileExists(atPath: storageURL.path) else { return }

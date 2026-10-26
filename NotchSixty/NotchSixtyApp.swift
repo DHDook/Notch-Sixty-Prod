@@ -112,7 +112,8 @@ final class ProductController: ObservableObject {
         let audioUnitHost = AudioUnitHostController()
         let profiles = ProductProfileController(
             engine: audioEngine,
-            audioUnitHost: audioUnitHost
+            audioUnitHost: audioUnitHost,
+            migratesSpeakerRouting: FeatureFlags().isEnabled(.routingMatrix)
         )
         let calibration = RoomCorrectionCalibrationController(
             engine: audioEngine
