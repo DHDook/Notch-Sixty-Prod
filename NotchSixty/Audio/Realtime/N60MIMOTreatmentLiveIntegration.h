@@ -51,7 +51,7 @@ static inline bool N60MIMOTreatmentLivePhysicalMapIsValid(
     const uint32_t * _Nonnull treatmentPhysicalChannels
 ) {
     if (physicalChannelCount == 0u
-        || physicalChannelCount > N60_LIVE_MAX_PHYSICAL_CHANNELS
+        || physicalChannelCount > N60_LIVE_LEGACY_MAX_PHYSICAL_CHANNELS
         || treatmentChannelCount == 0u
         || treatmentChannelCount > N60_MIMO_FIR_MAX_CHANNELS
         || treatmentPhysicalChannels == NULL) {

@@ -549,7 +549,7 @@ struct OutputDeviceProfileConfiguration: Codable, Equatable, Sendable {
             }
             offsets[uid] = UInt32(flattenedCount)
             flattenedCount += UInt64(device.outputChannelCount)
-            guard flattenedCount <= UInt64(N60_LIVE_MAX_PHYSICAL_CHANNELS) else {
+            guard flattenedCount <= UInt64(N60_LIVE_LEGACY_MAX_PHYSICAL_CHANNELS) else {
                 throw OutputDeviceProfileError.physicalChannelCountOverflow
             }
         }
@@ -632,6 +632,12 @@ struct LiveNChannelOutputRoutePlan: Equatable, Sendable {
     /// cannot silently ignore an enabled persisted FIR.
     let speakerOptimizerFIR:
         SpeakerOptimizerFIRDeploymentConfiguration?
+    /// E8 S4: non-empty for a routed session. Output lane `i` of the routed graph (after the program and sub lanes)
+    /// is the flattened physical channel `routedOutputPhysicalChannels[i]`. A routed plan carries no program or sub
+    /// channel map of its own: the graph's ROUTE stage owns every physical output.
+    let routedOutputPhysicalChannels: [UInt32]
+
+    var isRouted: Bool { !routedOutputPhysicalChannels.isEmpty }
 
     init(
         programLayout: OutputProgramLayout,
@@ -648,7 +654,8 @@ struct LiveNChannelOutputRoutePlan: Equatable, Sendable {
         speakerOptimizerPEQ:
             [OutputProgramRole: [SpeakerOptimizerDeployedPEQBand]] = [:],
         speakerOptimizerFIR:
-            SpeakerOptimizerFIRDeploymentConfiguration? = nil
+            SpeakerOptimizerFIRDeploymentConfiguration? = nil,
+        routedOutputPhysicalChannels: [UInt32] = []
     ) {
         self.programLayout = programLayout
         self.orderedDeviceUIDs = orderedDeviceUIDs
@@ -662,12 +669,28 @@ struct LiveNChannelOutputRoutePlan: Equatable, Sendable {
         self.subwooferCalibrations = subwooferCalibrations
         self.speakerOptimizerPEQ = speakerOptimizerPEQ
         self.speakerOptimizerFIR = speakerOptimizerFIR
+        self.routedOutputPhysicalChannels = routedOutputPhysicalChannels
     }
 
     var usesMultiplePhysicalDevices: Bool { orderedDeviceUIDs.count > 1 }
 
     func makeRealtimeOutputMap() throws -> N60LiveNChannelOutputMap {
         var result = N60LiveNChannelOutputMap()
+        if isRouted {
+            let routedCompiled = routedOutputPhysicalChannels.withUnsafeBufferPointer { buffer in
+                N60LiveNChannelOutputMapCompileRouted(
+                    programLayout.realtimeLayout,
+                    physicalChannelCount,
+                    UInt32(buffer.count),
+                    buffer.baseAddress!,
+                    &result
+                )
+            }
+            guard routedCompiled else {
+                throw OutputDeviceProfileError.realtimeOutputMapCompilationFailed
+            }
+            return result
+        }
         let compiled: Bool = programPhysicalChannels.withUnsafeBufferPointer { programBuffer in
             if bassManagementEnabled {
                 return subwooferPhysicalChannels.withUnsafeBufferPointer { subBuffer in

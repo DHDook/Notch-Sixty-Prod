@@ -1023,6 +1023,12 @@ final class AudioIOEngine: ObservableObject {
     /// the flag itself; with this false the kernel path runs exactly as before.
     var unifiedGraphEnabled = false
 
+    /// E8 S4: set by the app shell from `e8.routing-matrix`. The engine never reads the flag. With it false,
+    /// `replaceSpeakerRoutingConfiguration` refuses an enabled routing and every session builds exactly as before.
+    var routingMatrixEnabled = false
+    /// E8 S4: the speaker routing a session renders, or nil. See `replaceSpeakerRoutingConfiguration`.
+    private(set) var speakerRoutingConfiguration: SpeakerRoutingConfiguration?
+
     private let deviceCatalog: any OutputDeviceCataloging
     private let eventMonitor: AudioHardwareEventMonitor
     private let masterVolumeController: any MasterVolumeDeviceControlling
@@ -4154,7 +4160,9 @@ final class AudioIOEngine: ObservableObject {
 
     /// Builds the graph for `inputs` and moves the running graph to it. Throws (a named reason) and leaves the
     /// running graph untouched when the graph cannot take the edit; call it as the last step before committing state.
-    private func republishLiveGraph(_ inputs: LiveGraphInputs, headphoneBase: UnifiedGraphSpec? = nil) throws {
+    private func republishLiveGraph(
+        _ inputs: LiveGraphInputs, headphoneBase: UnifiedGraphSpec? = nil, routing: SpeakerRoutingConfiguration? = nil
+    ) throws {
         if let session = nChannelTransportSession {
             let rate = session.outputFormat.sampleRate
             guard let shape = UnifiedGraphLayoutShape(roles: session.routePlan.programLayout.roles) else {
@@ -4162,22 +4170,31 @@ final class AudioIOEngine: ObservableObject {
             }
             let program = try makeUnifiedProgramDSP(
                 sampleRate: rate, shape: shape, virtualSpeakers: false, inputs: inputs)
-            switch UnifiedGraphTranslator.nChannelEligibility(
-                routePlan: session.routePlan, sampleRate: rate, gainConfiguration: inputs.gain,
-                bassManagementConfiguration: renderBassManagementConfiguration(inputs.bass), programDSP: program
-            ) {
-            case .success(var configuration):
-                if let generator = inputs.generator {
-                    guard let mask = generator.selection.mask(laneCount: shape.laneCount, lfeLane: shape.lfeLane),
-                          let params = generator.settings.stageParams(active: true, sampleRate: rate) else {
-                        throw LiveNChannelTransportError.unifiedGraphRejected(.specRejected)
-                    }
-                    configuration.generatorParams = params
-                    configuration.generatorLaneMask = mask
+            var configuration: UnifiedGraphConfiguration
+            if session.routePlan.isRouted {
+                guard let activeRouting = routing ?? speakerRoutingConfiguration, activeRouting.enabled else {
+                    throw LiveNChannelTransportError.routingRefused("the session is routed but no routing is set.")
                 }
-                try session.republishGraph(configuration)
-            case .failure(let reason): throw LiveNChannelTransportError.unifiedGraphRejected(reason)
+                configuration = try makeRoutedGraphConfiguration(
+                    routing: activeRouting, routePlan: session.routePlan, sampleRate: rate, inputs: inputs)
+            } else {
+                switch UnifiedGraphTranslator.nChannelEligibility(
+                    routePlan: session.routePlan, sampleRate: rate, gainConfiguration: inputs.gain,
+                    bassManagementConfiguration: renderBassManagementConfiguration(inputs.bass), programDSP: program
+                ) {
+                case .success(let built): configuration = built
+                case .failure(let reason): throw LiveNChannelTransportError.unifiedGraphRejected(reason)
+                }
             }
+            if let generator = inputs.generator {
+                guard let mask = generator.selection.mask(laneCount: shape.laneCount, lfeLane: shape.lfeLane),
+                      let params = generator.settings.stageParams(active: true, sampleRate: rate) else {
+                    throw LiveNChannelTransportError.unifiedGraphRejected(.specRejected)
+                }
+                configuration.generatorParams = params
+                configuration.generatorLaneMask = mask
+            }
+            try session.republishGraph(configuration)
         } else if let session = binauralHeadphoneTransportSession {
             guard let base = headphoneBase ?? session.unifiedGraphBaseSpec,
                   let shape = UnifiedGraphLayoutShape(roles: session.programLayout.roles) else {
@@ -4508,11 +4525,150 @@ final class AudioIOEngine: ObservableObject {
             }
             return
         }
+        if routingMatrixEnabled, let routing = speakerRoutingConfiguration, routing.enabled {
+            try buildRoutedTransport(output: output, routing: routing)
+            return
+        }
         if outputDeviceProfileConfiguration?.enabled == true {
             try buildNChannelTransport(output: output)
             return
         }
         try buildStereoTransport(output: output)
+    }
+
+    /// E8 S4: the graph configuration of a routed session: the program lanes and sub lanes the N-channel path
+    /// builds, with the routing compiled onto them (ROUTE, XOVER, delay alignment, per-output protection).
+    func makeRoutedGraphConfiguration(
+        routing: SpeakerRoutingConfiguration,
+        routePlan: LiveNChannelOutputRoutePlan,
+        sampleRate: Double,
+        inputs: LiveGraphInputs
+    ) throws -> UnifiedGraphConfiguration {
+        guard let shape = UnifiedGraphLayoutShape(roles: routePlan.programLayout.roles) else {
+            throw LiveNChannelTransportError.unifiedGraphRejected(.laneCountMismatch)
+        }
+        let program = try makeUnifiedProgramDSP(sampleRate: sampleRate, shape: shape, virtualSpeakers: false, inputs: inputs)
+        // The routing's sub sources decide the sub lanes; bass management supplies their crossover and trims.
+        var bass = renderBassManagementConfiguration(inputs.bass)
+        bass.enabled = routePlan.subwooferCount > 0
+        switch UnifiedGraphTranslator.nChannelEligibility(
+            routePlan: routePlan, sampleRate: sampleRate, gainConfiguration: inputs.gain,
+            bassManagementConfiguration: bass, programDSP: program
+        ) {
+        case .success(var base):
+            // The user's protection moves from the program lanes to every output lane (the compiler gives each
+            // output its own PROTECTION stage, aligned in latency); a program-lane limiter would run on cleared lanes.
+            if base.protection == nil, let moved = base.programDSP?.protection { base.protection = moved }
+            base.programDSP?.protection = nil
+            // The bridge reads the output lanes as the last `routedOutputPhysicalChannels.count` graph lanes, so the
+            // compiled routing must have exactly that many (it does by construction; this keeps it so).
+            guard routing.outputEndpoints.count == routePlan.routedOutputPhysicalChannels.count else {
+                throw LiveNChannelTransportError.routingRefused("the routing outputs do not match the output plan.")
+            }
+            do { return try SpeakerRoutingCompiler.compile(routing, onto: base) } catch SpeakerRoutingCompileError.invalid(let errors) {
+                throw LiveNChannelTransportError.routingRefused("the routing is not valid (\(errors.map { "\($0)" }.joined(separator: ", "))).")
+            }
+        case .failure(let reason): throw LiveNChannelTransportError.unifiedGraphRejected(reason)
+        }
+    }
+
+    /// Checks that apply to any enabled routing, whether it is being set or started.
+    private func validateSpeakerRoutingActivation(_ routing: SpeakerRoutingConfiguration) throws {
+        guard routingMatrixEnabled else {
+            throw LiveNChannelTransportError.routingRefused("the routing matrix is switched off.")
+        }
+        guard unifiedGraphEnabled else {
+            throw LiveNChannelTransportError.routingRefused("it needs the unified graph, and the legacy render kernel is selected.")
+        }
+        if headphoneDeviceProfileConfiguration?.enabled == true {
+            throw HeadphoneDeviceProfileError.speakerProfileConflict
+        }
+        if multiOutputRoutingConfiguration?.enabled == true {
+            throw OutputDeviceProfileError.legacyPhysicalRoutingConflict
+        }
+        let subs = routing.subwooferSourceCount
+        if subs > UnifiedGraphConfiguration.maxSubwoofers {
+            throw LiveNChannelTransportError.routingRefused("it reads \(subs) subwoofer sources and the limit is \(UnifiedGraphConfiguration.maxSubwoofers).")
+        }
+        if subs > 0, !bassManagementConfiguration.enabled {
+            throw LiveNChannelTransportError.routingRefused("it reads subwoofer sources, so bass management must be on.")
+        }
+        if subs == 0, bassManagementConfiguration.enabled {
+            throw LiveNChannelTransportError.routingRefused("bass management is on but no speaker reads a subwoofer source.")
+        }
+    }
+
+    /// E8 S4: sets (or, with nil, clears) the speaker routing. Idle, it just stores it. Running, an edit that keeps
+    /// the same outputs and subwoofer sources (crossover corners, gains, trims, delays, EQ) is republished to the
+    /// graph, which posts gain changes over 5 ms and fades a family or order change; any other change is a
+    /// session-kind change and reconfigures with the shutdown fade. Throws, leaving the routing and the running
+    /// session as they were, when the routing cannot run.
+    func replaceSpeakerRoutingConfiguration(_ configuration: SpeakerRoutingConfiguration?) throws {
+        let active = configuration?.enabled == true
+        if let configuration, active { try validateSpeakerRoutingActivation(configuration) }
+        guard configuration != speakerRoutingConfiguration else { return }
+        let wasActive = speakerRoutingConfiguration?.enabled == true
+        guard lifecycle.state != .idle, active || wasActive else {
+            speakerRoutingConfiguration = configuration
+            lastErrorDescription = nil
+            return
+        }
+        if let configuration, active, let current = speakerRoutingConfiguration, wasActive,
+           let session = nChannelTransportSession, session.routePlan.isRouted, liveGraphEditsAvailable,
+           current.outputEndpoints == configuration.outputEndpoints,
+           current.subwooferSourceCount == configuration.subwooferSourceCount {
+            try republishLiveGraph(currentLiveGraphInputs, routing: configuration)
+            speakerRoutingConfiguration = configuration
+            lastErrorDescription = nil
+            return
+        }
+        speakerRoutingConfiguration = configuration
+        lastErrorDescription = nil
+        scheduleSampleRateReconfiguration(countsAsSampleRateChange: false, fadeOut: true, settleDelay: 0.03)
+    }
+
+    private func buildRoutedTransport(output: AudioOutputDevice, routing: SpeakerRoutingConfiguration) throws {
+        try validateSpeakerRoutingActivation(routing)
+        try validateLiveNChannelActivation()
+        if stagedRoomTreatment != nil {
+            throw LiveNChannelTransportError.routingRefused("room treatment cannot run with the routing matrix.")
+        }
+        // The program layout comes from an enabled Output Device Profile (5.1 and so on), else stereo. The routing
+        // owns every physical output, so the profile's speaker and subwoofer assignments are not used.
+        let layout = outputDeviceProfileConfiguration?.enabled == true
+            ? (outputDeviceProfileConfiguration?.programLayout ?? .stereo) : .stereo
+        let routePlan = try routing.makeLivePlan(
+            programLayout: layout,
+            availableDevices: outputDevices,
+            sampleRate: output.nominalSampleRate,
+            selectedOutputUID: output.uid,
+            bassManagementEnabled: routing.subwooferSourceCount > 0
+        )
+        let renderGraph = try LiveNChannelRenderGraphCompiler.makeGraph(
+            routePlan: routePlan,
+            sampleRate: output.nominalSampleRate,
+            gainConfiguration: gainConfiguration,
+            bassManagementConfiguration: bassManagementConfiguration
+        )
+        let configuration = try makeRoutedGraphConfiguration(
+            routing: routing, routePlan: routePlan, sampleRate: output.nominalSampleRate,
+            inputs: currentLiveGraphInputs)
+        let session = try CoreAudioNChannelTransportSession(
+            selectedOutput: output,
+            routePlan: routePlan,
+            renderGraph: renderGraph,
+            outputGain: currentMasterSoftwareGain,
+            roomTreatment: nil,
+            audioUnitRack: stagedAudioUnitRack,
+            unifiedGraphConfiguration: configuration,
+            unifiedGraphIneligibility: nil,
+            unifiedGraphRequired: true
+        )
+        activeEQFIRProgram = nil
+        activeRoomCorrectionProgram = nil
+        activeSpeakerIRProgram = nil
+        linearPhaseDesignInfo = nil
+        nChannelTransportSession = session
     }
 
     private func validateLiveNChannelActivation() throws {

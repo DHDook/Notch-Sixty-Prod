@@ -169,3 +169,74 @@ enum SpeakerRoutingTemplate: Sendable {
         count == 2 ? ["Low", "High"] : ["Low", "Mid", "High"]
     }
 }
+
+// E8 S4: the live plan for a routed session.
+extension SpeakerRoutingConfiguration {
+    /// Highest sub index used plus one (0 when no way or matrix entry reads a sub lane).
+    var subwooferSourceCount: Int {
+        let sources = speakers.map(\.source) + matrix.map(\.source)
+        return (sources.filter { $0.kind == .sub }.map(\.index).max() ?? -1) + 1
+    }
+
+    /// Flattens `outputEndpoints` onto the selected output and any other devices they name: the selected output is
+    /// the reference device and comes first, the rest follow in order of first use. Output lane `i` lands on the
+    /// physical channel of the `i`-th endpoint. Throws `LiveNChannelTransportError.routingRefused` with the reason.
+    func makeLivePlan(
+        programLayout: OutputProgramLayout,
+        availableDevices: [AudioOutputDevice],
+        sampleRate: Double,
+        selectedOutputUID: String,
+        bassManagementEnabled: Bool
+    ) throws -> LiveNChannelOutputRoutePlan {
+        let endpoints = outputEndpoints
+        guard !endpoints.isEmpty else { throw LiveNChannelTransportError.routingRefused("The routing has no outputs.") }
+        guard sampleRate.isFinite, sampleRate > 0 else { throw OutputDeviceProfileError.invalidSampleRate(sampleRate) }
+        var orderedUIDs = [selectedOutputUID]
+        for endpoint in endpoints where !orderedUIDs.contains(endpoint.deviceUID) { orderedUIDs.append(endpoint.deviceUID) }
+        guard endpoints.contains(where: { $0.deviceUID == selectedOutputUID }) else {
+            throw OutputDeviceProfileError.selectedOutputNotRouted(selectedOutputUID)
+        }
+        let byUID = Dictionary(availableDevices.map { ($0.uid, $0) }, uniquingKeysWith: { first, _ in first })
+        var offsets: [String: UInt32] = [:]
+        var total: UInt64 = 0
+        for uid in orderedUIDs {
+            guard let device = byUID[uid] else { throw OutputDeviceProfileError.outputDeviceUnavailable(uid) }
+            guard device.supports(sampleRate: sampleRate) else {
+                throw OutputDeviceProfileError.sampleRateUnsupported(deviceUID: uid, sampleRate: sampleRate)
+            }
+            offsets[uid] = UInt32(total)
+            total += UInt64(device.outputChannelCount)
+            guard total <= UInt64(N60_LIVE_MAX_PHYSICAL_CHANNELS) else {
+                throw OutputDeviceProfileError.physicalChannelCountOverflow
+            }
+        }
+        var physical: [UInt32] = []
+        for endpoint in endpoints {
+            guard let device = byUID[endpoint.deviceUID], let offset = offsets[endpoint.deviceUID] else {
+                throw OutputDeviceProfileError.outputDeviceUnavailable(endpoint.deviceUID)
+            }
+            guard endpoint.channelIndex < device.outputChannelCount else {
+                throw OutputDeviceProfileError.outputChannelUnavailable(
+                    deviceUID: endpoint.deviceUID, channelIndex: endpoint.channelIndex,
+                    channelCount: device.outputChannelCount)
+            }
+            physical.append(offset + endpoint.channelIndex)
+        }
+        let subs = subwooferSourceCount
+        let plan = LiveNChannelOutputRoutePlan(
+            programLayout: programLayout,
+            orderedDeviceUIDs: orderedUIDs,
+            referenceDeviceUID: selectedOutputUID,
+            physicalChannelCount: UInt32(total),
+            programPhysicalChannels: [UInt32](repeating: UInt32.max, count: Int(N60_MAX_PROGRAM_CHANNELS)),
+            subwooferPhysicalChannels: [UInt32](repeating: UInt32.max, count: Int(N60_MAX_SUBWOOFER_OUTPUTS)),
+            subwooferCount: UInt32(subs),
+            bassManagementEnabled: bassManagementEnabled,
+            speakerCalibrations: [:],
+            subwooferCalibrations: [PhysicalSubwooferCalibration?](repeating: nil, count: subs),
+            routedOutputPhysicalChannels: physical
+        )
+        _ = try plan.makeRealtimeOutputMap()
+        return plan
+    }
+}
