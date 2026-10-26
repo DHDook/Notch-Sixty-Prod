@@ -26,9 +26,14 @@ enum LiveNChannelTransportError: Error, Equatable, LocalizedError {
     /// E6 S9b: a live edit was refused by the running graph (for example the CPU budget for the fade); the
     /// running graph and the engine state are unchanged.
     case graphRepublishRefused(String)
+    /// E8 S4: the routing matrix cannot run on this session, with the reason (legacy kernel, flag off, a sub source
+    /// with bass management off, a routing the compiler rejects).
+    case routingRefused(String)
 
     var errorDescription: String? {
         switch self {
+        case .routingRefused(let reason):
+            return "The routing matrix cannot start: \(reason)"
         case .incompatibleProgramChannelCount(let tap, let profile):
             return "The captured program has \(tap) channels, but the enabled Output Device Profile expects \(profile)."
         case .inputChannelLayoutUnavailable(let channelCount):
@@ -163,6 +168,10 @@ enum LiveNChannelRenderGraphCompiler {
         gainConfiguration: DSPGainConfiguration,
         bassManagementConfiguration: BassManagementConfiguration
     ) throws -> N60LiveNChannelRenderGraph {
+        // E8 S4: a routed plan renders through the graph only; the legacy core gets silence. Its bass management
+        // is the graph's, so the legacy snapshot is never built for it.
+        var bassManagementConfiguration = bassManagementConfiguration
+        if routePlan.isRouted { bassManagementConfiguration.enabled = false }
         let layout = routePlan.programLayout.realtimeLayout
         var lanes = N60ProgramLaneGraphSnapshotMakeUnity(sampleRate, layout)
 
