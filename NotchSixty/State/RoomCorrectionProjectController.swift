@@ -284,6 +284,20 @@ final class RoomCorrectionProjectController: ObservableObject {
         try persistAndPublish(fresh)
     }
 
+    /// Adopts a project built elsewhere (the guided setup's seat records) as this controller's
+    /// project, after the same validation a stored project gets. The playback system must match.
+    func adoptProject(_ adopted: RoomCorrectionProject) throws {
+        guard let systemID = selectedPlaybackSystemID else {
+            throw RoomCorrectionProjectControllerError.noSelectedPlaybackSystem
+        }
+        guard adopted.playbackSystemID == systemID else {
+            throw RoomCorrectionProjectControllerError.projectPlaybackSystemMismatch(
+                expected: systemID, actual: adopted.playbackSystemID)
+        }
+        lastGeneratedTargetReport = nil
+        try persistAndPublish(adopted)
+    }
+
     func prepareForUse() {
         do {
             try reloadForSelectedPlaybackSystem()
