@@ -450,4 +450,31 @@ final class SystemSetupMeasureAlignTests: XCTestCase {
         config.generatorLaneMask = 0
         XCTAssertThrowsError(try config.makeSpec())
     }
+
+    func testCombinedIncludingLFEStartsAtTheSafeLevelWithAWarningAndKeepsTheCeiling() throws {
+        var plan = SystemSetupLevelPlan()
+        plan.selectTarget(.allProgram(includeLFE: false), isLFE: false)
+        XCTAssertEqual(plan.levelDB, -40)
+        XCTAssertFalse(plan.showsFullBandLFEWarning)
+        XCTAssertEqual(plan.target.mask(laneCount: 6, lfeLane: 3), 0b110111)
+        plan.selectTarget(.allProgram(includeLFE: true), isLFE: false)
+        XCTAssertEqual(plan.levelDB, SystemSetupLevelPlan.lfeStartLevelDB)
+        XCTAssertTrue(plan.showsFullBandLFEWarning)
+        XCTAssertEqual(plan.target.mask(laneCount: 6, lfeLane: 3), 0b111111)
+        for _ in 0..<40 {
+            plan.raise()
+            XCTAssertLessThanOrEqual(try plan.validatedGeneratorSettings().effectiveLevelDB, SignalGeneratorSettings.hardCeilingDB)
+        }
+        plan.reset()
+        XCTAssertEqual(plan.levelDB, SystemSetupLevelPlan.lfeStartLevelDB)
+        plan.selectTarget(.lane(0), isLFE: false)
+        XCTAssertFalse(plan.showsFullBandLFEWarning)
+        XCTAssertEqual(plan.levelDB, -40)
+        let host = FakeGeneratorHost()
+        let player = EngineSystemSetupNoisePlayer(host: host)
+        var loud = SystemSetupLevelPlan().generatorSettings()
+        loud.levelDB = -3
+        XCTAssertThrowsError(try player.start(loud, selection: .allProgram(includeLFE: true)))
+        XCTAssertTrue(host.calls.isEmpty)
+    }
 }

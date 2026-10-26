@@ -73,7 +73,16 @@ struct SystemSetupLevelPlan: Equatable, Sendable {
     /// The level the user settled on for each single lane (informational; the sweep level comes from the SPL reading).
     private(set) var recordedLevelsDB: [Int: Double] = [:]
 
-    private func startLevel(isLFE: Bool) -> Double { isLFE ? Self.lfeStartLevelDB : Self.startLevelDB }
+    /// True when the noise reaches the LFE together with other lanes. One parameter set serves every lane, so this
+    /// pass is full band at the LFE-safe level and the UI must warn that full-band noise goes to the sub.
+    var showsFullBandLFEWarning: Bool {
+        if case .allProgram(let includeLFE) = target { return includeLFE }
+        return false
+    }
+
+    private var startLevelForTarget: Double {
+        (targetIsLFE || showsFullBandLFEWarning) ? Self.lfeStartLevelDB : Self.startLevelDB
+    }
 
     /// Switches the noise to another lane (or all lanes) and drops back to that target's starting level, or the level
     /// already recorded for that lane. Never carries a raised level onto a new channel.
@@ -83,7 +92,7 @@ struct SystemSetupLevelPlan: Equatable, Sendable {
         if case .lane(let lane) = newTarget, let recorded = recordedLevelsDB[lane] {
             levelDB = min(recorded, Self.ceilingDB)
         } else {
-            levelDB = startLevel(isLFE: isLFE)
+            levelDB = startLevelForTarget
         }
     }
 
@@ -106,7 +115,7 @@ struct SystemSetupLevelPlan: Equatable, Sendable {
         levelDB = max(levelDB - Self.rampStepDB, Self.minimumSweepLevelDB)
     }
 
-    mutating func reset() { levelDB = startLevel(isLFE: targetIsLFE) }
+    mutating func reset() { levelDB = startLevelForTarget }
 
     /// Generator settings for the current level: band-limited pink noise at the ceiling-clamped level.
     func generatorSettings(sampleRate: Double = 48_000) -> SignalGeneratorSettings {

@@ -83,16 +83,21 @@ final class SystemSetupFlowModel: ObservableObject {
 
     /// Plays one channel at a time (or all channels) for the Level step. Switching channel stops the current noise,
     /// returns to that channel's starting level and starts it again if noise was playing.
-    func selectNoiseTarget(lane: Int?) {
+    func selectNoiseTarget(lane: Int?, includeLFE: Bool = false) {
         let wasPlaying = noiseIsPlaying
         if wasPlaying { stopNoise(); if noiseIsPlaying { return } }
         level.recordLevel()
         if let lane, let channel = noiseChannels.first(where: { $0.index == lane }) {
             level.selectTarget(.lane(lane), isLFE: channel.isLFE)
         } else {
-            level.selectTarget(.allProgram(includeLFE: false), isLFE: false)
+            level.selectTarget(.allProgram(includeLFE: includeLFE), isLFE: false)
         }
         if wasPlaying, !noiseIsPlaying { toggleNoise() }
+    }
+
+    /// "All channels" has two modes: without the LFE (default) and with it (full-band noise reaches the sub).
+    func selectCombinedMode(includeLFE: Bool) {
+        selectNoiseTarget(lane: nil, includeLFE: includeLFE)
     }
 
     func raiseLevel() { level.raise(); republishNoise() }
@@ -472,15 +477,25 @@ private struct SystemSetupMicrophoneStep: View {
             }
             Divider()
             Text("Set the level").font(.headline)
-            Text("Set each channel on its own, then use All channels as a combined check (the LFE is never in it). Pink noise starts very quietly at \(Int(SystemSetupLevelPlan.startLevelDB)) dBFS. Raise it a step at a time until the meter reads about \(Int(SystemSetupLevelPlan.targetSPLdBC)) dB(C) at your main seat. It never goes above \(Int(SystemSetupLevelPlan.ceilingDB)) dBFS.")
+            Text("Set each channel on its own, then use All channels as a combined check (the LFE is left out unless you choose the including-LFE mode). Pink noise starts very quietly at \(Int(SystemSetupLevelPlan.startLevelDB)) dBFS. Raise it a step at a time until the meter reads about \(Int(SystemSetupLevelPlan.targetSPLdBC)) dB(C) at your main seat. It never goes above \(Int(SystemSetupLevelPlan.ceilingDB)) dBFS.")
                 .font(.callout).foregroundStyle(.secondary)
             let channels = model.noiseChannels
             Picker("Channel", selection: Binding<Int>(
-                get: { if case .lane(let lane) = model.level.target { return lane } else { return -1 } },
-                set: { model.selectNoiseTarget(lane: $0 < 0 ? nil : $0) }
+                get: {
+                    switch model.level.target {
+                    case .lane(let lane): return lane
+                    case .allProgram(let includeLFE): return includeLFE ? -2 : -1
+                    }
+                },
+                set: { model.selectNoiseTarget(lane: $0 < 0 ? nil : $0, includeLFE: $0 == -2) }
             )) {
-                Text("All channels (combined check)").tag(-1)
+                Text("All channels except the LFE (combined check)").tag(-1)
+                if channels.contains(where: \.isLFE) { Text("All channels including the LFE").tag(-2) }
                 ForEach(channels, id: \.index) { Text($0.name + ($0.isLFE ? " (starts at \(Int(SystemSetupLevelPlan.lfeStartLevelDB)) dBFS, bass only)" : "")).tag($0.index) }
+            }
+            if model.level.showsFullBandLFEWarning {
+                Text("Warning: this mode sends full-band noise to the subwoofer as well. It starts at \(Int(SystemSetupLevelPlan.lfeStartLevelDB)) dBFS. Raise the level slowly and stop if the sub strains.")
+                    .font(.callout).foregroundStyle(.orange)
             }
             HStack {
                 Button("Lower") { model.lowerLevel() }
