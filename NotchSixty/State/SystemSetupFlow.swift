@@ -240,6 +240,21 @@ struct SystemSetupFlow: Codable, Equatable, Sendable {
         invalidationReason = "The output device or sample rate changed, so the measurements were discarded. Measure again."
     }
 
+    /// A resumed session whose measurements are no longer held (the session stores only their IDs) goes
+    /// back to the Measure step, and says why.
+    mutating func resumed(measurementsAvailable: Bool) {
+        guard phase == .running, step.index > SystemSetupStep.measure.index, !measurementsAvailable else { return }
+        choices.measurementIDs = []
+        choices.alignmentApplied = false
+        choices.bassApplied = false
+        choices.correctionApplied = false
+        choices.verificationPassed = nil
+        completed.subtract(SystemSetupStep.allCases.filter(\.dependsOnMeasurement))
+        skipped.subtract(SystemSetupStep.allCases.filter(\.dependsOnMeasurement))
+        step = .measure
+        invalidationReason = "The measurements were not kept, so the setup resumed at Measure seats."
+    }
+
     // MARK: Helpers
 
     private func requireRunning() throws {
@@ -305,11 +320,13 @@ actor SimulatedSystemSetupServices: SystemSetupServices {
     private(set) var saved: [PlaybackSystemProfile] = []
     var verificationPasses = true
     var failMeasureAtSeat: Int?
+    var verifyDelaySeconds = 0.0
 
     init(initial: PlaybackSystemState) { live = initial }
 
     func setVerificationPasses(_ value: Bool) { verificationPasses = value }
     func setFailMeasureAtSeat(_ value: Int?) { failMeasureAtSeat = value }
+    func setVerifyDelaySeconds(_ value: Double) { verifyDelaySeconds = value }
 
     func measureSeat(index: Int, sampleRate: Double) async throws -> SystemSetupMeasurementRecord {
         if failMeasureAtSeat == index { throw SimulatedFailure.measurement }
@@ -344,7 +361,8 @@ actor SimulatedSystemSetupServices: SystemSetupServices {
         state: PlaybackSystemState,
         records: [SystemSetupMeasurementRecord]
     ) async throws -> SystemSetupVerificationReport {
-        SystemSetupVerificationReport(
+        if verifyDelaySeconds > 0 { try await Task.sleep(nanoseconds: UInt64(verifyDelaySeconds * 1_000_000_000)) }
+        return SystemSetupVerificationReport(
             passed: verificationPasses,
             predictedErrorDB: 1.0,
             measuredErrorDB: verificationPasses ? 1.2 : 6.0,
@@ -376,6 +394,7 @@ final class SystemSetupDriver {
     private(set) var report: SystemSetupVerificationReport?
     private(set) var savedProfile: PlaybackSystemProfile?
     private var beforeCorrection: PlaybackSystemState?
+    private var verificationTask: Task<SystemSetupVerificationReport, Error>?
     private let services: SystemSetupServices
 
     init(services: SystemSetupServices, current: PlaybackSystemState) {
@@ -414,21 +433,55 @@ final class SystemSetupDriver {
         await applyStage(.correction) { $0.correctionApplied = true }
     }
 
-    func runVerification() async {
+    /// Verifies through the services. A timeout or a cancel (see `cancelVerification`) reverts the
+    /// correction and returns to the Correction step; so does a mixed-phase mismatch.
+    func runVerification(timeoutSeconds: Double = 60) async {
+        guard verificationTask == nil else { return }
+        let services = self.services, state = working, records = self.records
+        let task = Task { () -> SystemSetupVerificationReport in
+            try await withThrowingTaskGroup(of: SystemSetupVerificationReport.self) { group in
+                group.addTask { try await services.verify(state: state, records: records) }
+                group.addTask {
+                    try await Task.sleep(nanoseconds: UInt64(timeoutSeconds * 1_000_000_000))
+                    throw SystemSetupVerificationError.timedOut(seconds: timeoutSeconds)
+                }
+                defer { group.cancelAll() }
+                guard let first = try await group.next() else {
+                    throw SystemSetupVerificationError.timedOut(seconds: timeoutSeconds)
+                }
+                return first
+            }
+        }
+        verificationTask = task
+        defer { verificationTask = nil }
         do {
-            let result = try await services.verify(state: working, records: records)
+            let result = try await withTaskCancellationHandler { try await task.value } onCancel: { task.cancel() }
             report = result
             if result.passed || flow.choices.designKind == .minimumPhase {
                 flow.choices.verificationPassed = result.passed
             } else {
-                if let base = beforeCorrection {
-                    try await services.revert(to: base)
-                    working = base
-                }
-                flow.verificationFailed(reason: "Verification did not match the design; the correction was reverted.")
+                await revertCorrectionTrial(reason: "Verification did not match the design; the correction was reverted.")
             }
+        } catch is CancellationError {
+            await revertCorrectionTrial(reason: "Verification was cancelled; the correction was reverted.")
+        } catch let error as SystemSetupVerificationError {
+            await revertCorrectionTrial(reason: error.errorDescription ?? "Verification failed; the correction was reverted.")
         } catch {
             flow.fail("Verification failed: \(error)")
+        }
+    }
+
+    func cancelVerification() { verificationTask?.cancel() }
+
+    private func revertCorrectionTrial(reason: String) async {
+        do {
+            if let base = beforeCorrection {
+                try await services.revert(to: base)
+                working = base
+            }
+            flow.verificationFailed(reason: reason)
+        } catch {
+            flow.fail("Restoring the previous correction failed: \(error)")
         }
     }
 
