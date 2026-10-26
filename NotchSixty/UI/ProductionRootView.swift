@@ -26,20 +26,6 @@ enum ProductionSection: String, CaseIterable, Identifiable, Hashable {
         .meters,
     ]
 
-    static let systemGroup: [ProductionSection] = [
-        .speakers,
-        .headphones,
-        .speakerCalibration,
-        .measurementLab,
-        .roomCorrection,
-        .activeAcoustics,
-    ]
-
-    static let tools: [ProductionSection] = [
-        .roomAdvisor,
-        .blindListening,
-    ]
-
     static let extensions: [ProductionSection] = [
         .plugins,
     ]
@@ -55,13 +41,12 @@ enum ProductionSection: String, CaseIterable, Identifiable, Hashable {
     /// above them. A selected developer tool stays visible in a Developer
     /// group until the user moves to another section.
     static func sidebarGroups(
-        selection: ProductionSection? = nil,
-        systemArea: Bool = false
+        selection: ProductionSection? = nil
     ) -> [ProductionSidebarGroup] {
         var groups = [
             ProductionSidebarGroup(title: "Playback", sections: playback),
-            ProductionSidebarGroup(title: "System", sections: systemArea ? systemAreaSections : systemGroup),
-            ProductionSidebarGroup(title: "Tools", sections: systemArea ? systemAreaTools : tools),
+            ProductionSidebarGroup(title: "System", sections: systemAreaSections),
+            ProductionSidebarGroup(title: "Tools", sections: systemAreaTools),
             ProductionSidebarGroup(title: "Extensions", sections: extensions),
         ]
         if let selection, developerTools.contains(selection) {
@@ -264,13 +249,8 @@ final class ProductionNavigation: ObservableObject {
     @Published var systemTab: ProductionSystemTab = .overview
     @Published var calibrateSection: ProductionCalibrateSection = .alignment
 
-    /// Selects a section. With the System area on, the old workspace
-    /// sections resolve to a System tab.
-    func navigate(to section: ProductionSection, systemArea: Bool) {
-        guard systemArea else {
-            selection = section
-            return
-        }
+    /// Selects a section. The old workspace sections resolve to a System tab.
+    func navigate(to section: ProductionSection) {
         let destination = section.systemAreaDestination
         if let tab = destination.systemTab { systemTab = tab }
         if let calibrate = destination.calibrateSection { calibrateSection = calibrate }
@@ -295,15 +275,12 @@ struct ProductionRootView: View {
 
     private var selection: ProductionSection? { navigation.selection }
 
-    /// E12: the System area replaces the System group's separate rows.
-    private var systemAreaEnabled: Bool { featureFlags.isEnabled(.guidedSetup) }
-
     private var sidebarSelection: Binding<ProductionSection?> {
         Binding(
             get: { navigation.selection },
             set: { newValue in
                 if let newValue {
-                    navigation.navigate(to: newValue, systemArea: systemAreaEnabled)
+                    navigation.navigate(to: newValue)
                 } else {
                     navigation.selection = nil
                 }
@@ -336,7 +313,7 @@ struct ProductionRootView: View {
                 )
                 .tag(ProductionSection.dashboard)
 
-                ForEach(ProductionSection.sidebarGroups(selection: selection, systemArea: systemAreaEnabled)) { group in
+                ForEach(ProductionSection.sidebarGroups(selection: selection)) { group in
                     Section(group.title) {
                         ForEach(group.sections) { section in
                             Label(section.title, systemImage: section.systemImage)
@@ -356,8 +333,8 @@ struct ProductionRootView: View {
         .frame(minWidth: minimumWindowWidth, minHeight: 680)
         .onChange(of: navigation.selection) { _, new in
             // Programmatic selections of an old section land on its System tab.
-            if systemAreaEnabled, let new, new.systemAreaDestination.section == .system, new != .system {
-                navigation.navigate(to: new, systemArea: true)
+            if let new, new.systemAreaDestination.section == .system, new != .system {
+                navigation.navigate(to: new)
             }
         }
         .task { product.prepareForUse() }
@@ -397,13 +374,12 @@ struct ProductionRootView: View {
         }
     }
 
-    /// E12 S3: the "Set up my system" card; empty with the flag off.
+    /// E12 S3: the "Set up my system" card.
     private var setupEntryCard: AnyView {
         let status = SystemCalibrationStatus.resolve(
             summary: product.profiles.selectedSystemProfile?.state.roomCorrectionCalibration,
             verifiedDesignID: nil)
         let availability = SystemSetupEntryPolicy.availability(
-            flagEnabled: systemAreaEnabled,
             outputName: engine.selectedOutputDevice?.name,
             outputUID: engine.selectedOutputDevice?.uid,
             state: product.profiles.selectedSystemProfile?.state,
@@ -411,12 +387,12 @@ struct ProductionRootView: View {
         return AnyView(SystemSetupEntryCard(
             availability: availability,
             start: { showingGuidedSetup = true },
-            openHeadphones: { navigation.navigate(to: .headphones, systemArea: systemAreaEnabled) }))
+            openHeadphones: { navigation.navigate(to: .headphones) }))
     }
 
     @ViewBuilder
     private func detail(for section: ProductionSection) -> some View {
-        if systemAreaEnabled, section.systemAreaDestination.section == .system {
+        if section.systemAreaDestination.section == .system {
             systemArea
         } else {
             sectionDetail(for: section)

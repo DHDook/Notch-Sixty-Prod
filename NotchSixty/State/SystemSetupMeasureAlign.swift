@@ -3,7 +3,7 @@ import Foundation
 // E12 S4: pure logic behind the Measure and Alignment steps of the guided setup. No SwiftUI, no
 // engine, nothing here runs on an audio thread. The measurement itself stays in the existing
 // campaign transport (`MultichannelCalibrationController`); this file only reads its seat records.
-// Gated by `e12.guided-setup` at the call sites.
+//
 
 // MARK: - Measure step (design note 3)
 

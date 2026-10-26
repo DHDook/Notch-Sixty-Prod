@@ -2,7 +2,7 @@ import Foundation
 
 // E12 S2: guided-setup flow core. Pure Swift value types plus a small driver; no SwiftUI, no
 // engine, nothing here runs on an audio thread. The UI (S3 onward) and the real controllers
-// plug in through `SystemSetupServices`. Gated by the `e12.guided-setup` flag at the call sites.
+// plug in through `SystemSetupServices`.
 
 // MARK: - Steps and choices
 

@@ -78,17 +78,15 @@ final class SystemSetupStartStepsTests: XCTestCase {
 
     func testEntryAvailability() {
         let none = SystemCalibrationStatus.notCalibrated
-        func avail(flag: Bool, name: String? = "Studio Monitors", uid: String? = "u",
+        func avail(name: String? = "Studio Monitors", uid: String? = "u",
                    status: SystemCalibrationStatus = none) -> SystemSetupEntryPolicy.Availability {
             SystemSetupEntryPolicy.availability(
-                flagEnabled: flag, outputName: name, outputUID: uid, state: PlaybackSystemState(), calibration: status)
+                outputName: name, outputUID: uid, state: PlaybackSystemState(), calibration: status)
         }
-        XCTAssertEqual(avail(flag: false), .hidden)
-        XCTAssertEqual(avail(flag: false, name: "AirPods Pro"), .hidden)
-        XCTAssertEqual(avail(flag: true, uid: nil), .hidden)
-        XCTAssertEqual(avail(flag: true), .offer)
-        XCTAssertEqual(avail(flag: true, name: "Bob's AirPods Pro"), .headphonesPointer)
-        XCTAssertEqual(avail(flag: true, name: "USB Headphones"), .headphonesPointer)
+        XCTAssertEqual(avail(uid: nil), .hidden)
+        XCTAssertEqual(avail(), .offer)
+        XCTAssertEqual(avail(name: "Bob's AirPods Pro"), .headphonesPointer)
+        XCTAssertEqual(avail(name: "USB Headphones"), .headphonesPointer)
     }
 
     func testHeadphoneProfileMarksHeadphones() {

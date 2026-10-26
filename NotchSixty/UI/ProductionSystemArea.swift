@@ -1,9 +1,8 @@
 import Foundation
 import SwiftUI
 
-// E12 S1: the System area. With `e12.guided-setup` on, the sidebar's System
-// group becomes one System row whose tabs host the existing workspaces.
-// With the flag off nothing here is reachable and the sidebar is unchanged.
+// E12 S1: the System area. The sidebar's System group is one System row whose
+// tabs host the speaker, room, measurement and calibration workspaces.
 
 /// The tabs of the System area.
 enum ProductionSystemTab: String, CaseIterable, Identifiable, Hashable {

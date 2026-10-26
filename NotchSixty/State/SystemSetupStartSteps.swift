@@ -2,7 +2,7 @@ import Foundation
 
 // E12 S3: pure logic behind the first steps of the guided setup (Output, Topology, Microphone and
 // level). No SwiftUI, no engine, nothing here runs on an audio thread; the flow view feeds these
-// values to the existing profile and generator paths. Gated by `e12.guided-setup` at the call sites.
+// values to the existing profile and generator paths.
 
 // MARK: - Topology presets (design note 4)
 
@@ -159,13 +159,12 @@ enum SystemSetupEntryPolicy {
 
     /// Whether the "Set up my system" card shows for the selected output.
     static func availability(
-        flagEnabled: Bool,
         outputName: String?,
         outputUID: String?,
         state: PlaybackSystemState?,
         calibration: SystemCalibrationStatus
     ) -> Availability {
-        guard flagEnabled, outputUID != nil else { return .hidden }
+        guard outputUID != nil else { return .hidden }
         if isHeadphoneOutput(name: outputName, uid: outputUID, state: state) { return .headphonesPointer }
         if case .verified = calibration { return .hidden }
         return .offer
