@@ -226,6 +226,7 @@ uint32_t rankOf(uint32_t kind) {
     if (kind == N60_STAGE_GENERATOR) return 35;
     if (kind == N60_STAGE_ROUTE) return 235;
     if (kind == N60_STAGE_XOVER) return 236;
+    if (kind == N60_STAGE_DRIVER_FIR || kind == N60_STAGE_DRIVER_FIR_TWO_BAND) return 237;
     return rankBase(kind) * 10;
 }
 
@@ -234,7 +235,9 @@ uint32_t rankOf(uint32_t kind) {
 uint32_t canonKind(uint32_t kind) {
     switch (kind) {
         case N60_STAGE_ROOM_FIR:
-        case N60_STAGE_SPEAKER_IR: return N60_STAGE_FIR;
+        case N60_STAGE_SPEAKER_IR:
+        case N60_STAGE_DRIVER_FIR: return N60_STAGE_FIR;
+        case N60_STAGE_DRIVER_FIR_TWO_BAND: return N60_STAGE_ROOM_FIR_TWO_BAND;
         case N60_STAGE_CORE_DYNAMICS: return N60_STAGE_COMPRESSOR;
         case N60_STAGE_OUTPUT_GAIN: return N60_STAGE_GAIN;
         case N60_STAGE_FINAL_SANITISE: return N60_STAGE_SANITISE;

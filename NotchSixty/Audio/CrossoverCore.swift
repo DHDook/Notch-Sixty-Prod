@@ -131,4 +131,99 @@ enum CrossoverCore {
         guard status == N60_XOVER_OK else { throw CoreError.status(status) }
         return ripple
     }
+
+    /// E8 S7: sizes and latency of a linear-phase realisation, from `n60_xover_fir_plan`.
+    struct LinearPhasePlan: Equatable, Sendable {
+        var twoBand: Bool
+        var decimation: Int
+        var extraDelayFrames: Int
+        var fullTapCount: Int
+        var lowTapCount: Int
+        /// The stage's declared group delay (its `capacityFrames`).
+        var groupDelayFrames: Int
+        /// What the stage adds to the graph latency, the group delay included.
+        var latencyFrames: Int
+
+        fileprivate init(_ r: n60_xover_fir_report) {
+            twoBand = r.two_band != 0
+            decimation = Int(r.decimation)
+            extraDelayFrames = Int(r.extra_delay_frames)
+            fullTapCount = Int(r.full_tap_count)
+            lowTapCount = Int(r.low_tap_count)
+            groupDelayFrames = Int(r.group_delay_frames)
+            latencyFrames = Int(r.latency_frames)
+        }
+    }
+
+    /// A designed linear-phase way: the stage kind, its `capacityFrames` and its parameters.
+    struct LinearPhaseDesign: Equatable, Sendable {
+        var plan: LinearPhasePlan
+        var fullTaps: [Float]
+        var lowTaps: [Float]
+
+        /// `N60_STAGE_DRIVER_FIR` parameters (the taps), or for the two-band stage `[D, N, M, E]` then both tap sets.
+        var stageParameters: [Float] {
+            guard plan.twoBand else { return fullTaps }
+            return [Float(plan.decimation), Float(plan.fullTapCount), Float(plan.lowTapCount), Float(plan.extraDelayFrames)]
+                + fullTaps + lowTaps
+        }
+        var stageKind: UInt32 {
+            plan.twoBand ? N60_STAGE_DRIVER_FIR_TWO_BAND.rawValue : N60_STAGE_DRIVER_FIR.rawValue
+        }
+    }
+
+    private static func withFIRParams<T>(
+        highPass: FilterSpec?, lowPass: FilterSpec?, sampleRate: Double, groupDelayFrames: Int,
+        _ body: (inout n60_xover_fir_params) -> T
+    ) -> T {
+        var hp = highPass?.raw ?? n60_xover_spec()
+        var lp = lowPass?.raw ?? n60_xover_spec()
+        let hasHP = highPass != nil, hasLP = lowPass != nil
+        return withUnsafePointer(to: &hp) { hpPointer in
+            withUnsafePointer(to: &lp) { lpPointer in
+                var params = n60_xover_fir_params()
+                params.struct_size = UInt32(MemoryLayout<n60_xover_fir_params>.size)
+                params.sample_rate = sampleRate
+                params.group_delay_frames = UInt32(max(0, groupDelayFrames))
+                params.highpass = hasHP ? hpPointer : nil
+                params.lowpass = hasLP ? lpPointer : nil
+                return body(&params)
+            }
+        }
+    }
+
+    /// Sizes and latency of the linear-phase FIR for a way. `groupDelayFrames` 0 lets the core choose (five periods of the
+    /// lowest corner); a speaker's ways pass the largest of their automatic delays so their windows match.
+    static func linearPhasePlan(
+        highPass: FilterSpec?, lowPass: FilterSpec?, sampleRate: Double, groupDelayFrames: Int = 0
+    ) throws -> LinearPhasePlan {
+        var report = n60_xover_fir_report()
+        let status = withFIRParams(highPass: highPass, lowPass: lowPass, sampleRate: sampleRate,
+                                   groupDelayFrames: groupDelayFrames) { n60_xover_fir_plan(&$0, &report) }
+        guard status == N60_XOVER_OK else { throw CoreError.status(status) }
+        return LinearPhasePlan(report)
+    }
+
+    /// Synthesises the linear-phase FIR of a way (offline; the same code the Speaker Optimizer's linear-phase window
+    /// uses: zero-phase magnitude of the IIR cascade, delayed by the group delay, Blackman-windowed).
+    static func linearPhaseDesign(
+        highPass: FilterSpec?, lowPass: FilterSpec?, sampleRate: Double, groupDelayFrames: Int = 0
+    ) throws -> LinearPhaseDesign {
+        let plan = try linearPhasePlan(highPass: highPass, lowPass: lowPass, sampleRate: sampleRate,
+                                       groupDelayFrames: groupDelayFrames)
+        var full = [Float](repeating: 0, count: plan.fullTapCount)
+        var low = [Float](repeating: 0, count: max(1, plan.lowTapCount))
+        var report = n60_xover_fir_report()
+        let fullCount = UInt64(full.count), lowCount = UInt64(low.count)
+        let status = withFIRParams(highPass: highPass, lowPass: lowPass, sampleRate: sampleRate,
+                                   groupDelayFrames: groupDelayFrames) { params in
+            full.withUnsafeMutableBufferPointer { f in
+                low.withUnsafeMutableBufferPointer { l in
+                    n60_xover_fir_synthesize(&params, f.baseAddress, fullCount, l.baseAddress, lowCount, &report)
+                }
+            }
+        }
+        guard status == N60_XOVER_OK else { throw CoreError.status(status) }
+        return LinearPhaseDesign(plan: LinearPhasePlan(report), fullTaps: full, lowTaps: Array(low.prefix(plan.lowTapCount)))
+    }
 }

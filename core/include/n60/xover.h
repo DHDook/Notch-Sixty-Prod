@@ -34,12 +34,13 @@
 extern "C" {
 #endif
 
-#define N60_XOVER_ABI_VERSION 2
+#define N60_XOVER_ABI_VERSION 3
 
 #define N60_XOVER_OK 0
 #define N60_XOVER_ERR_ARGUMENT (-1)
 #define N60_XOVER_ERR_ORDER (-2)
 #define N60_XOVER_ERR_CORNER (-3)
+#define N60_XOVER_ERR_SYNTH (-4) /* the FIR synthesiser refused (size, capacity or non-finite) */
 
 #define N60_XOVER_FAMILY_BUTTERWORTH 0u
 #define N60_XOVER_FAMILY_BESSEL 1u
@@ -114,6 +115,41 @@ int n60_xover_sum_ripple_db(const n60_xover_spec *lp, const n60_xover_spec *hp, 
 
 /* Largest pole radius in the cascade (stable when below 1). */
 double n60_xover_max_pole_radius(const n60_xover_cascade *cascade);
+
+/*
+ * Linear-phase FIR realisation (ABI v3, E8 S7). The way's response is the magnitude of the IIR cascade(s) of its
+ * high-pass and low-pass specs (either may be NULL, not both), zero phase, delayed by exactly group_delay_frames and
+ * Blackman-windowed over twice that (see n60_correct_synthesize_linear_phase). Linkwitz-Riley pairs of any order sum to a
+ * pure delay of exactly the group delay; asymmetric or Butterworth / Bessel pairs sum as their IIR magnitudes do.
+ *
+ * group_delay_frames 0 chooses it: five periods of the lowest corner, 32 .. 2^18 frames. The taps suit N60_STAGE_DRIVER_FIR
+ * (report.two_band == 0, full taps only) or, when 2 * group delay + 1 exceeds 32768, N60_STAGE_DRIVER_FIR_TWO_BAND
+ * (parameters [D, N, M, E] then the taps). Buffers hold up to 32768 floats each when two-band and 2 * L + 1 otherwise;
+ * n60_xover_fir_plan returns the sizes so a caller can allocate first. Offline: allocates, never call from a callback.
+ */
+typedef struct n60_xover_fir_params {
+    uint32_t struct_size;                /* sizeof(n60_xover_fir_params) */
+    double sample_rate;
+    const n60_xover_spec *highpass;      /* NULL: none */
+    const n60_xover_spec *lowpass;       /* NULL: none */
+    uint32_t group_delay_frames;         /* 0: automatic */
+} n60_xover_fir_params;
+
+typedef struct n60_xover_fir_report {
+    uint32_t two_band;                   /* 1: use N60_STAGE_DRIVER_FIR_TWO_BAND */
+    uint32_t decimation;                 /* D; 1 when single band */
+    uint32_t extra_delay_frames;         /* E (two-band header word), 0 when single band */
+    uint32_t full_tap_count;             /* N */
+    uint32_t low_tap_count;              /* M, 0 when single band */
+    uint32_t group_delay_frames;         /* L: the stage's capacityFrames */
+    uint32_t latency_frames;             /* what the stage adds to the graph latency, L included */
+} n60_xover_fir_report;
+
+/* Sizes and latency for the params without synthesising. */
+int n60_xover_fir_plan(const n60_xover_fir_params *params, n60_xover_fir_report *report);
+
+int n60_xover_fir_synthesize(const n60_xover_fir_params *params, float *full_taps, uint64_t full_capacity, float *low_taps,
+                             uint64_t low_capacity, n60_xover_fir_report *report);
 
 #ifdef __cplusplus
 }

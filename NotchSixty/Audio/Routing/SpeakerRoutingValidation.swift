@@ -97,7 +97,6 @@ extension SpeakerRoutingConfiguration {
                     || !(0.0...20.0).contains(l.lookAheadMilliseconds) {
                     v.errors.append(.invalidLimiter(way: name))
                 }
-                if way.realisation == .fir { v.warnings.append(.firRealisedAsIIR(way: name)) }
             }
             v.warnings += Self.bandWarnings(speaker: label(speaker), ways: speaker.ways)
         }

@@ -261,6 +261,21 @@ if selected e8_xover_core; then
     fi
 fi
 
+# E8 S7: linear-phase FIR crossovers and the DRIVER_FIR stages (ABI v18), at the eight standard rates.
+if selected e8_xover_fir_core; then
+    build_core_objs
+    if [ "$CORE_OK" = 1 ]; then
+        if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -Icore/include -Icore/src core/tests/test_xover_fir.cpp \
+            "${CORE_OBJS[@]}" -o "$OUT/e8_core_xover_fir" && "$OUT/e8_core_xover_fir"; then
+            passed+=(e8_core_xover_fir)
+        else
+            failed+=(e8_core_xover_fir)
+        fi
+    else
+        failed+=(e8_xover_fir_core)
+    fi
+fi
+
 # E8 S2: ROUTE and XOVER graph stages (ABI v17), the BASS_MGMT filter-spec trailer, at the eight standard rates.
 if selected e8_route_core; then
     build_core_objs

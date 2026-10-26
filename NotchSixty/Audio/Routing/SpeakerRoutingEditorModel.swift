@@ -195,7 +195,7 @@ final class SpeakerRoutingEditorModel: ObservableObject {
         case .bandOverlap(let speaker, let lower, let upper):
             return "\(speaker): ways overlap between \(Int(upper)) and \(Int(lower)) Hz."
         case .firRealisedAsIIR(let way):
-            return "\(way): linear-phase is not available yet; it plays as its minimum-phase equivalent."
+            return "\(way): linear-phase is off in low-latency mode; it plays as its minimum-phase equivalent."
         case .unroutedSource(let source):
             return "\(sourceName(source)) feeds nothing."
         }
