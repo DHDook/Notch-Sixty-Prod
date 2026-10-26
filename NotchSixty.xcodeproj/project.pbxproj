@@ -444,6 +444,9 @@
 		E8B0000000000000000000A5 /* SpeakerRoutingMigration.swift in Sources */ = {isa = PBXBuildFile; fileRef = E8B000000000000000000005 /* SpeakerRoutingMigration.swift */; };
 		E8B0000000000000000000A6 /* SpeakerRoutingProtectedExcitation.swift in Sources */ = {isa = PBXBuildFile; fileRef = E8B000000000000000000006 /* SpeakerRoutingProtectedExcitation.swift */; };
 		E8B0000000000000000000A7 /* SpeakerRoutingMigrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E8B000000000000000000007 /* SpeakerRoutingMigrationTests.swift */; };
+		E8B0000000000000000000A8 /* SpeakerRoutingEditorModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = E8B000000000000000000008 /* SpeakerRoutingEditorModel.swift */; };
+		E8B0000000000000000000A9 /* ProductionRoutingEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E8B000000000000000000009 /* ProductionRoutingEditorView.swift */; };
+		E8B0000000000000000000AA /* SpeakerRoutingEditorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E8B00000000000000000000A /* SpeakerRoutingEditorTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -927,6 +930,9 @@
 		E8B000000000000000000005 /* SpeakerRoutingMigration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerRoutingMigration.swift; sourceTree = "<group>"; };
 		E8B000000000000000000006 /* SpeakerRoutingProtectedExcitation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerRoutingProtectedExcitation.swift; sourceTree = "<group>"; };
 		E8B000000000000000000007 /* SpeakerRoutingMigrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerRoutingMigrationTests.swift; sourceTree = "<group>"; };
+		E8B000000000000000000008 /* SpeakerRoutingEditorModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerRoutingEditorModel.swift; sourceTree = "<group>"; };
+		E8B000000000000000000009 /* ProductionRoutingEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductionRoutingEditorView.swift; sourceTree = "<group>"; };
+		E8B00000000000000000000A /* SpeakerRoutingEditorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerRoutingEditorTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -1055,6 +1061,7 @@
 				E8A000000000000000000042 /* CrossoverCoreTests.swift */,
 				E8B000000000000000000004 /* SpeakerRoutingTests.swift */,
 				E8B000000000000000000007 /* SpeakerRoutingMigrationTests.swift */,
+				E8B00000000000000000000A /* SpeakerRoutingEditorTests.swift */,
 				E10A00000000000000000074 /* RoomCorrectionBassApplyTests.swift */,
 				E10B00000000000000000006 /* RoomCorrectionDeployControllerTests.swift */,
 				E10A00000000000000000044 /* RoomCorrectionLanePlanTests.swift */,
@@ -1341,7 +1348,7 @@
 		};
 		A20000000000000000000051 /* CoreAudio */ = {isa = PBXGroup; children = (A20000000000000000000021 /* CoreAudioError.swift */, E4E000000000000000000011 /* OutputBufferSizeController.swift */, F63000000000000000000011 /* CoreAudioNChannelTransportSession.swift */, F65000000000000000000013 /* CoreAudioSemanticTransportSupport.swift */, F65000000000000000000014 /* CoreAudioBinauralHeadphoneTransportSession.swift */, F64000000000000000000013 /* MultichannelCalibrationTransport.swift */, A20000000000000000000028 /* MasterVolumeDeviceController.swift */, A2000000000000000000002C /* RoomCorrectionCalibrationTransport.swift */,); path = CoreAudio; sourceTree = "<group>"; };
 		A20000000000000000000052 /* Devices */ = {isa = PBXGroup; children = (A20000000000000000000022 /* AudioOutputDevice.swift */, A20000000000000000000023 /* OutputDeviceCatalog.swift */,); path = Devices; sourceTree = "<group>"; };
-		A20000000000000000000053 /* Routing */ = {isa = PBXGroup; children = (A20000000000000000000024 /* AudioRouteConfiguration.swift */, E8B000000000000000000001 /* SpeakerRoutingConfiguration.swift */, E8B000000000000000000002 /* SpeakerRoutingValidation.swift */, E8B000000000000000000005 /* SpeakerRoutingMigration.swift */, E8B000000000000000000006 /* SpeakerRoutingProtectedExcitation.swift */, F62000000000000000000011 /* OutputDeviceProfileConfiguration.swift */, F65000000000000000000011 /* HeadphoneDeviceProfileConfiguration.swift */, B40000000000000000000011 /* BlindABXValidation.swift */, B40000000000000000000092 /* RoomCorrectionABX.swift */, B50000000000000000000012 /* HeadphoneModelResearchLibrary.swift */, F65000000000000000000012 /* BinauralProfileAsset.swift */, F64000000000000000000011 /* OutputDeviceCalibration.swift */, E6D0000000000000000009A1 /* BinauralResampledAssetCache.swift */, E6D0000000000000000009A2 /* HeadphoneLiveEditPlanner.swift */,); path = Routing; sourceTree = "<group>"; };
+		A20000000000000000000053 /* Routing */ = {isa = PBXGroup; children = (A20000000000000000000024 /* AudioRouteConfiguration.swift */, E8B000000000000000000001 /* SpeakerRoutingConfiguration.swift */, E8B000000000000000000002 /* SpeakerRoutingValidation.swift */, E8B000000000000000000005 /* SpeakerRoutingMigration.swift */, E8B000000000000000000008 /* SpeakerRoutingEditorModel.swift */, E8B000000000000000000006 /* SpeakerRoutingProtectedExcitation.swift */, F62000000000000000000011 /* OutputDeviceProfileConfiguration.swift */, F65000000000000000000011 /* HeadphoneDeviceProfileConfiguration.swift */, B40000000000000000000011 /* BlindABXValidation.swift */, B40000000000000000000092 /* RoomCorrectionABX.swift */, B50000000000000000000012 /* HeadphoneModelResearchLibrary.swift */, F65000000000000000000012 /* BinauralProfileAsset.swift */, F64000000000000000000011 /* OutputDeviceCalibration.swift */, E6D0000000000000000009A1 /* BinauralResampledAssetCache.swift */, E6D0000000000000000009A2 /* HeadphoneLiveEditPlanner.swift */,); path = Routing; sourceTree = "<group>"; };
 		B113B0000000000000000050 /* Backup */ = {
 			isa = PBXGroup;
 			children = (
@@ -1403,7 +1410,7 @@
 			path = Realtime;
 			sourceTree = "<group>";
 		};
-		A40000000000000000000050 /* UI */ = {isa = PBXGroup; children = (A40000000000000000000020 /* ProductionRootView.swift */, E12A00000000000000000011 /* ProductionSystemArea.swift */, E12C00000000000000000013 /* ProductionSystemSetupFlowView.swift */, A40000000000000000000021 /* ProductionEqualizerView.swift */, A40000000000000000000022 /* ProductionDynamicsView.swift */, A40000000000000000000023 /* ProductionDynamicsTelemetryView.swift */, A40000000000000000000024 /* ProductionMetersView.swift */, A40000000000000000000025 /* ProductionAnalysisViews.swift */, A40000000000000000000026 /* ProductionProfileToolbar.swift */, F65000000000000000000015 /* ProductionHeadphoneWorkspace.swift */, B40000000000000000000012 /* ProductionBlindListeningWorkspace.swift */, B50000000000000000000013 /* ProductionOptionalAudioResearchWorkspace.swift */, F64000000000000000000015 /* ProductionMultichannelCalibrationWorkspace.swift */, F10600000000000000000035 /* ProductionSpeakerMeasurementLabWorkspace.swift */, E11D00000000000000000032 /* MeasurementAnalysisViews.swift */, E11D00000000000000000052 /* MeasurementLibraryView.swift */, E11E00000000000000000006 /* MeasurementRTASPLCard.swift */, E11D00000000000000000081 /* MeasurementGeneratorCard.swift */, E11F00000000000000000013 /* MeasurementSeatPickerCard.swift */, A40000000000000000000027 /* ProductionRoomCorrectionWorkspace.swift */, E10A00000000000000000062 /* RoomCorrectionTargetEditorCard.swift */, F78000000000000000000011 /* ProductionActiveAcousticsWorkspace.swift */, F92000000000000000000013 /* ProductionRoomTreatmentAdvisorWorkspace.swift */, F96000000000000000000013 /* ProductionFeedForwardReadinessCard.swift */, E4D000000000000000000012 /* ProductionAdaptiveQuietZoneCard.swift */, E4F200000000000000000014 /* ProductionFeedForwardDesignSurveyCard.swift */, E4F300000000000000000013 /* ProductionFeedForwardShadowCard.swift */, F93000000000000000000012 /* ProductionRoomGeometrySection.swift */, F94000000000000000000013 /* ProductionRoomTreatmentDesignSection.swift */, F78000000000000000000012 /* ProductionPluginWorkspace.swift */, F112A0000000000000000013 /* ProductionHardwareAcceptanceWorkspace.swift */, F11300000000000000000011 /* ProductionUserGuideView.swift */,); path = UI; sourceTree = "<group>"; };
+		A40000000000000000000050 /* UI */ = {isa = PBXGroup; children = (A40000000000000000000020 /* ProductionRootView.swift */, E12A00000000000000000011 /* ProductionSystemArea.swift */, E12C00000000000000000013 /* ProductionSystemSetupFlowView.swift */, A40000000000000000000021 /* ProductionEqualizerView.swift */, A40000000000000000000022 /* ProductionDynamicsView.swift */, A40000000000000000000023 /* ProductionDynamicsTelemetryView.swift */, A40000000000000000000024 /* ProductionMetersView.swift */, A40000000000000000000025 /* ProductionAnalysisViews.swift */, A40000000000000000000026 /* ProductionProfileToolbar.swift */, F65000000000000000000015 /* ProductionHeadphoneWorkspace.swift */, B40000000000000000000012 /* ProductionBlindListeningWorkspace.swift */, B50000000000000000000013 /* ProductionOptionalAudioResearchWorkspace.swift */, F64000000000000000000015 /* ProductionMultichannelCalibrationWorkspace.swift */, F10600000000000000000035 /* ProductionSpeakerMeasurementLabWorkspace.swift */, E11D00000000000000000032 /* MeasurementAnalysisViews.swift */, E11D00000000000000000052 /* MeasurementLibraryView.swift */, E11E00000000000000000006 /* MeasurementRTASPLCard.swift */, E11D00000000000000000081 /* MeasurementGeneratorCard.swift */, E11F00000000000000000013 /* MeasurementSeatPickerCard.swift */, A40000000000000000000027 /* ProductionRoomCorrectionWorkspace.swift */, E10A00000000000000000062 /* RoomCorrectionTargetEditorCard.swift */, F78000000000000000000011 /* ProductionActiveAcousticsWorkspace.swift */, F92000000000000000000013 /* ProductionRoomTreatmentAdvisorWorkspace.swift */, F96000000000000000000013 /* ProductionFeedForwardReadinessCard.swift */, E4D000000000000000000012 /* ProductionAdaptiveQuietZoneCard.swift */, E4F200000000000000000014 /* ProductionFeedForwardDesignSurveyCard.swift */, E4F300000000000000000013 /* ProductionFeedForwardShadowCard.swift */, F93000000000000000000012 /* ProductionRoomGeometrySection.swift */, F94000000000000000000013 /* ProductionRoomTreatmentDesignSection.swift */, F78000000000000000000012 /* ProductionPluginWorkspace.swift */, F112A0000000000000000013 /* ProductionHardwareAcceptanceWorkspace.swift */, F11300000000000000000011 /* ProductionUserGuideView.swift */, E8B000000000000000000009 /* ProductionRoutingEditorView.swift */,); path = UI; sourceTree = "<group>"; };
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -1473,6 +1480,8 @@
 				E8B0000000000000000000A3 /* SpeakerRoutingCompiler.swift in Sources */,
 				E8B0000000000000000000A6 /* SpeakerRoutingProtectedExcitation.swift in Sources */,
 				E8B0000000000000000000A5 /* SpeakerRoutingMigration.swift in Sources */,
+				E8B0000000000000000000A8 /* SpeakerRoutingEditorModel.swift in Sources */,
+				E8B0000000000000000000A9 /* ProductionRoutingEditorView.swift in Sources */,
 				E6D000000000000000000104 /* UnifiedGraphTranslator.swift in Sources */,
 				E6C000000000000000000030 /* graph.cpp in Sources */,
 				E6C000000000000000000031 /* snapshot.cpp in Sources */,
@@ -1766,6 +1775,7 @@
 				E8A000000000000000000032 /* CrossoverCoreTests.swift in Sources */,
 				E8B0000000000000000000A4 /* SpeakerRoutingTests.swift in Sources */,
 				E8B0000000000000000000A7 /* SpeakerRoutingMigrationTests.swift in Sources */,
+				E8B0000000000000000000AA /* SpeakerRoutingEditorTests.swift in Sources */,
 				E10A00000000000000000073 /* RoomCorrectionBassApplyTests.swift in Sources */,
 				E10B00000000000000000005 /* RoomCorrectionDeployControllerTests.swift in Sources */,
 				E10A00000000000000000034 /* RoomCorrectionLanePlanTests.swift in Sources */,
