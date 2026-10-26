@@ -83,6 +83,7 @@
 		E6C000000000000000000034 /* stages_system.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E6C000000000000000000014 /* stages_system.cpp */; };
 		E6C000000000000000000035 /* stages_matrix.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E6C000000000000000000015 /* stages_matrix.cpp */; };
 		E11C00000000000000000039 /* stages_generator.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E11C00000000000000000019 /* stages_generator.cpp */; };
+		E8A000000000000000000022 /* stages_route.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E8A000000000000000000012 /* stages_route.cpp */; };
 		E6C000000000000000000036 /* layout.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E6C000000000000000000016 /* layout.cpp */; };
 		F10200000000000000000001 /* ThirdPartyNotices.txt in Resources */ = {isa = PBXBuildFile; fileRef = F10200000000000000000011 /* ThirdPartyNotices.txt */; };
 		A10000000000000000000010 /* NotchSixtyApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000020 /* NotchSixtyApp.swift */; };
@@ -535,6 +536,8 @@
 		E6C000000000000000000024 /* stages_matrix.hpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.h; path = stages_matrix.hpp; sourceTree = "<group>"; };
 		E11C00000000000000000019 /* stages_generator.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = stages_generator.cpp; sourceTree = "<group>"; };
 		E11C0000000000000000001A /* stages_generator.hpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.h; path = stages_generator.hpp; sourceTree = "<group>"; };
+		E8A000000000000000000012 /* stages_route.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = stages_route.cpp; sourceTree = "<group>"; };
+		E8A000000000000000000013 /* stages_route.hpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.h; path = stages_route.hpp; sourceTree = "<group>"; };
 		F10200000000000000000011 /* ThirdPartyNotices.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = ThirdPartyNotices.txt; sourceTree = "<group>"; };
 		A10000000000000000000020 /* NotchSixtyApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotchSixtyApp.swift; sourceTree = "<group>"; };
 		A10000000000000000000021 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
@@ -942,6 +945,7 @@
 				E6C000000000000000000014 /* stages_system.cpp */,
 				E6C000000000000000000015 /* stages_matrix.cpp */,
 				E11C00000000000000000019 /* stages_generator.cpp */,
+				E8A000000000000000000012 /* stages_route.cpp */,
 				E6C000000000000000000016 /* layout.cpp */,
 				E11C00000000000000000011 /* offline_fft.cpp */,
 				E11C00000000000000000012 /* ess.cpp */,
@@ -966,6 +970,7 @@
 				E6C000000000000000000023 /* stages_system.hpp */,
 				E6C000000000000000000024 /* stages_matrix.hpp */,
 				E11C0000000000000000001A /* stages_generator.hpp */,
+				E8A000000000000000000013 /* stages_route.hpp */,
 			);
 			name = libn60core;
 			path = core/src;
@@ -1456,6 +1461,7 @@
 				E6C000000000000000000034 /* stages_system.cpp in Sources */,
 				E6C000000000000000000035 /* stages_matrix.cpp in Sources */,
 				E11C00000000000000000039 /* stages_generator.cpp in Sources */,
+				E8A000000000000000000022 /* stages_route.cpp in Sources */,
 				E6C000000000000000000036 /* layout.cpp in Sources */,
 				E11C00000000000000000031 /* offline_fft.cpp in Sources */,
 				E11C00000000000000000032 /* ess.cpp in Sources */,

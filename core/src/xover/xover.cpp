@@ -144,23 +144,39 @@ extern "C" {
 
 uint32_t n60_xover_abi_version(void) { return N60_XOVER_ABI_VERSION; }
 
-int n60_xover_design(const n60_xover_spec *spec, int highpass, double fs, n60_xover_cascade *out) {
+int n60_xover_prototype_design(uint32_t family, uint32_t order, n60_xover_prototype *out) {
     if (!out) return N60_XOVER_ERR_ARGUMENT;
     out->count = 0;
-    const int status = validateSpec(spec, fs);
+    out->copies = 0;
+    n60_xover_spec probe{};
+    probe.family = family;
+    probe.order = order;
+    probe.corner_hz = 1.0;
+    const int status = validateSpec(&probe, 1000.0);
     if (status != N60_XOVER_OK) return status;
-
     ProtoList list;
-    const bool lr = spec->family == N60_XOVER_FAMILY_LINKWITZ_RILEY;
-    const uint32_t base = lr ? spec->order / 2 : spec->order;
-    if (spec->family == N60_XOVER_FAMILY_BESSEL) bessel(base, list); else butterworth(base, list);
-    const uint32_t copies = lr ? 2 : 1;
+    const bool lr = family == N60_XOVER_FAMILY_LINKWITZ_RILEY;
+    const uint32_t base = lr ? order / 2 : order;
+    if (family == N60_XOVER_FAMILY_BESSEL) bessel(base, list); else butterworth(base, list);
+    out->count = list.count;
+    out->copies = lr ? 2u : 1u;
+    for (uint32_t i = 0; i < list.count; ++i) out->sections[i] = n60_xover_proto_section{list.s[i].second ? 1u : 0u, list.s[i].b, list.s[i].c};
+    return N60_XOVER_OK;
+}
 
-    const double k = std::tan(kPi * spec->corner_hz / fs);
+int n60_xover_realise(const n60_xover_prototype *proto, int highpass, double corner_hz, double fs, n60_xover_cascade *out) {
+    if (!out) return N60_XOVER_ERR_ARGUMENT;
+    out->count = 0;
+    if (!proto || !validFs(fs) || proto->count == 0 || proto->count > N60_XOVER_MAX_SECTIONS || proto->copies < 1 ||
+        proto->copies > 2 || proto->count * proto->copies > N60_XOVER_MAX_SECTIONS) {
+        return N60_XOVER_ERR_ARGUMENT;
+    }
+    if (!std::isfinite(corner_hz) || !(corner_hz > 0.0) || corner_hz > 0.49 * fs) return N60_XOVER_ERR_CORNER;
+    const double k = std::tan(kPi * corner_hz / fs);
     const double t = 1.0 / k;
-    for (uint32_t copy = 0; copy < copies; ++copy) {
-        for (uint32_t i = 0; i < list.count; ++i) {
-            const Proto &p = list.s[i];
+    for (uint32_t copy = 0; copy < proto->copies; ++copy) {
+        for (uint32_t i = 0; i < proto->count; ++i) {
+            const n60_xover_proto_section &p = proto->sections[i];
             n60_xover_biquad bq;
             if (p.second) {
                 bq = highpass ? bilinear(1.0, 0.0, 0.0, 1.0, p.b / p.c, 1.0 / p.c, t)
@@ -172,6 +188,17 @@ int n60_xover_design(const n60_xover_spec *spec, int highpass, double fs, n60_xo
         }
     }
     return N60_XOVER_OK;
+}
+
+int n60_xover_design(const n60_xover_spec *spec, int highpass, double fs, n60_xover_cascade *out) {
+    if (!out) return N60_XOVER_ERR_ARGUMENT;
+    out->count = 0;
+    const int status = validateSpec(spec, fs);
+    if (status != N60_XOVER_OK) return status;
+    n60_xover_prototype proto;
+    const int ps = n60_xover_prototype_design(spec->family, spec->order, &proto);
+    if (ps != N60_XOVER_OK) return ps;
+    return n60_xover_realise(&proto, highpass, spec->corner_hz, fs, out);
 }
 
 int n60_xover_linkwitz(double f0, double q0, double fp, double qp, double fs, n60_xover_cascade *out) {
