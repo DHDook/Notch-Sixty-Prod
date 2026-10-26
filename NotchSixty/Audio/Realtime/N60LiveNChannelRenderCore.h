@@ -17,9 +17,11 @@
 extern "C" {
 #endif
 
-/// Bounded hardware-output ceiling. 40 leaves room for the full 32-channel
-/// semantic program plus four explicit physical subwoofer outputs and margin.
-#define N60_LIVE_MAX_PHYSICAL_CHANNELS 40u
+/// Bounded hardware-output ceiling of the graph path (E8 S4: routed sessions, up to the graph's 64 lanes).
+#define N60_LIVE_MAX_PHYSICAL_CHANNELS 64u
+/// The legacy per-frame render core and the MIMO treatment keep their original ceiling: 40 leaves room for the full
+/// 32-channel semantic program plus four explicit physical subwoofer outputs and margin.
+#define N60_LIVE_LEGACY_MAX_PHYSICAL_CHANNELS 40u
 #define N60_LIVE_PHYSICAL_CHANNEL_UNMAPPED UINT32_MAX
 
 typedef struct {
@@ -30,6 +32,10 @@ typedef struct {
     uint32_t subwooferCount;
     uint32_t physicalChannelForProgram[N60_MAX_PROGRAM_CHANNELS];
     uint32_t physicalChannelForSubwoofer[N60_MAX_SUBWOOFER_OUTPUTS];
+    /// E8 S4: a routed session. The graph's output lanes (the lanes after the program and sub lanes) each go to one
+    /// physical channel; the program and sub entries above are all unmapped. Zero for every other session.
+    uint32_t routedLaneCount;
+    uint32_t physicalChannelForRoutedLane[N60_LIVE_MAX_PHYSICAL_CHANNELS];
 } N60LiveNChannelOutputMap;
 
 typedef struct {
@@ -85,7 +91,7 @@ static inline bool N60LiveNChannelOutputMapCompile(
         || physicalChannelForProgram == NULL
         || !N60ProgramChannelLayoutIsValid(&programLayout)
         || physicalChannelCount == 0u
-        || physicalChannelCount > N60_LIVE_MAX_PHYSICAL_CHANNELS
+        || physicalChannelCount > N60_LIVE_LEGACY_MAX_PHYSICAL_CHANNELS
         || subwooferCount > N60_MAX_SUBWOOFER_OUTPUTS) {
         return false;
     }
@@ -142,10 +148,59 @@ static inline bool N60LiveNChannelOutputMapCompile(
     return true;
 }
 
+/// E8 S4: the map of a routed session. `physicalChannelForRoutedLane[i]` is the physical channel of output lane i; each
+/// is unique and below `physicalChannelCount` (at most 64). Program and sub lanes are unmapped: their audio only reaches
+/// the outputs through the graph's ROUTE stage.
+static inline bool N60LiveNChannelOutputMapCompileRouted(
+    N60ProgramChannelLayout programLayout,
+    uint32_t physicalChannelCount,
+    uint32_t routedLaneCount,
+    const uint32_t * _Nonnull physicalChannelForRoutedLane,
+    N60LiveNChannelOutputMap * _Nonnull mapOut
+) {
+    if (mapOut == NULL
+        || physicalChannelForRoutedLane == NULL
+        || !N60ProgramChannelLayoutIsValid(&programLayout)
+        || physicalChannelCount == 0u
+        || physicalChannelCount > N60_LIVE_MAX_PHYSICAL_CHANNELS
+        || routedLaneCount == 0u
+        || routedLaneCount > physicalChannelCount) {
+        return false;
+    }
+    N60LiveNChannelOutputMap result = {0};
+    result.physicalChannelCount = physicalChannelCount;
+    result.programLayout = programLayout;
+    for (uint32_t channel = 0; channel < N60_MAX_PROGRAM_CHANNELS; ++channel) {
+        result.physicalChannelForProgram[channel] = N60_LIVE_PHYSICAL_CHANNEL_UNMAPPED;
+    }
+    for (uint32_t sub = 0; sub < N60_MAX_SUBWOOFER_OUTPUTS; ++sub) {
+        result.physicalChannelForSubwoofer[sub] = N60_LIVE_PHYSICAL_CHANNEL_UNMAPPED;
+    }
+    bool used[N60_LIVE_MAX_PHYSICAL_CHANNELS] = {false};
+    result.routedLaneCount = routedLaneCount;
+    for (uint32_t lane = 0; lane < routedLaneCount; ++lane) {
+        const uint32_t physical = physicalChannelForRoutedLane[lane];
+        if (physical >= physicalChannelCount || used[physical]) return false;
+        used[physical] = true;
+        result.physicalChannelForRoutedLane[lane] = physical;
+    }
+    result.valid = true;
+    *mapOut = result;
+    return true;
+}
+
 static inline bool N60LiveNChannelOutputMapIsValid(
     const N60LiveNChannelOutputMap * _Nullable map
 ) {
     if (map == NULL || !map->valid) return false;
+    if (map->routedLaneCount > 0u) {
+        N60LiveNChannelOutputMap routed = {0};
+        return !map->bassManagementEnabled
+            && map->subwooferCount == 0u
+            && N60LiveNChannelOutputMapCompileRouted(
+                map->programLayout, map->physicalChannelCount, map->routedLaneCount,
+                map->physicalChannelForRoutedLane, &routed);
+    }
     N60LiveNChannelOutputMap copy = {0};
     return N60LiveNChannelOutputMapCompile(
         map->programLayout,

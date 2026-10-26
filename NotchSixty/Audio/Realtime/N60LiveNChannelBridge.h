@@ -312,7 +312,9 @@ static inline bool N60LiveNChannelBridgeAttachGraph(
     const uint32_t programChannels = bridge->graph.programLayout.channelCount;
     if (graphChannels < programChannels
         || graphChannels > N60_GRAPH_MAX_CHANNELS
-        || maxFrames == 0u) {
+        || maxFrames == 0u
+        || (bridge->graph.outputMap.routedLaneCount > 0u
+            && graphChannels < programChannels + bridge->graph.outputMap.routedLaneCount)) {
         return false;
     }
     // Planar input and output blocks side by side.
@@ -1147,7 +1149,18 @@ static inline OSStatus N60LiveNChannelOutputIOProc(
                     + (size_t)bridge->graphChannels * bridge->graphMaxFrames;
                 const size_t stride = bridge->graphMaxFrames;
                 physical.physicalChannelCount = bridge->graph.outputMap.physicalChannelCount;
-                for (uint32_t program = 0; program < programChannels; ++program) {
+                const uint32_t routedLanes = bridge->graph.outputMap.routedLaneCount;
+                if (routedLanes > 0u) {
+                    // E8 S4: routed session. Output lane i (after the program and sub lanes) is one physical channel.
+                    const uint32_t firstOutputLane = bridge->graphChannels - routedLanes;
+                    for (uint32_t lane = 0; lane < routedLanes; ++lane) {
+                        const uint32_t target = bridge->graph.outputMap.physicalChannelForRoutedLane[lane];
+                        if (target >= physical.physicalChannelCount) { frameRendered = false; break; }
+                        const float value = planarOut[(firstOutputLane + lane) * stride + frameIndex];
+                        physical.values[target] = isfinite(value) ? value : 0.0f;
+                    }
+                }
+                for (uint32_t program = 0; routedLanes == 0u && program < programChannels; ++program) {
                     const uint32_t target = bridge->graph.outputMap.physicalChannelForProgram[program];
                     if (target == N60_LIVE_PHYSICAL_CHANNEL_UNMAPPED) continue;
                     if (target >= physical.physicalChannelCount) { frameRendered = false; break; }
@@ -1155,7 +1168,7 @@ static inline OSStatus N60LiveNChannelOutputIOProc(
                     physical.values[target] = isfinite(value) ? value : 0.0f;
                 }
                 for (uint32_t sub = 0;
-                     frameRendered && programChannels + sub < bridge->graphChannels
+                     frameRendered && routedLanes == 0u && programChannels + sub < bridge->graphChannels
                          && sub < bridge->graph.outputMap.subwooferCount;
                      ++sub) {
                     const uint32_t target = bridge->graph.outputMap.physicalChannelForSubwoofer[sub];
@@ -1168,6 +1181,9 @@ static inline OSStatus N60LiveNChannelOutputIOProc(
                     physical.values[target] = isfinite(value) ? value : 0.0f;
                 }
             }
+        } else if (bridge->graph.outputMap.routedLaneCount > 0u) {
+            // A routed map is only meaningful with a graph attached: silence, never an unmapped legacy render.
+            frameRendered = false;
         } else {
             frameRendered = N60LiveNChannelRenderProcessFrame(
                 bridge->renderRuntime,

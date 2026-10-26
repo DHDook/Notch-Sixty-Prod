@@ -251,3 +251,281 @@ final class SpeakerRoutingTests: XCTestCase {
         XCTAssertEqual(spec.outputChannels, 4)
     }
 }
+
+// MARK: - E8 S4: live wiring
+
+extension SpeakerRoutingTests {
+    private func fixtureDevice(_ uid: String, rate: Double, channels: UInt32) -> AudioOutputDevice {
+        AudioOutputDevice(
+            deviceID: 77, uid: uid, name: uid, nominalSampleRate: rate,
+            availableSampleRateRanges: [AudioSampleRateRange(minimum: 44_100, maximum: 384_000)],
+            outputChannelCount: channels)
+    }
+
+    private var bassOn: BassManagementConfiguration {
+        var bass = BassManagementConfiguration()
+        bass.enabled = true
+        return bass
+    }
+
+    private func engineReady(subs: Bool) throws -> AudioIOEngine {
+        let engine = AudioIOEngine()
+        engine.unifiedGraphEnabled = true
+        engine.routingMatrixEnabled = true
+        if subs { try engine.replaceBassManagementConfiguration(bassOn) }
+        return engine
+    }
+
+    /// A running, hardware-free routed session behind the engine's test seam.
+    private func routedSession(
+        engine: AudioIOEngine, routing: SpeakerRoutingConfiguration, layout: OutputProgramLayout,
+        labels: [AudioChannelLabel], rate: Double, channels: UInt32
+    ) throws -> (CoreAudioNChannelTransportSession, LiveNChannelOutputRoutePlan, UnifiedGraphHost) {
+        try engine.replaceSpeakerRoutingConfiguration(routing)
+        let device = fixtureDevice("fixture", rate: rate, channels: channels)
+        let plan = try routing.makeLivePlan(
+            programLayout: layout, availableDevices: [device], sampleRate: rate,
+            selectedOutputUID: "fixture", bassManagementEnabled: routing.subwooferSourceCount > 0)
+        let renderGraph = try LiveNChannelRenderGraphCompiler.makeGraph(
+            routePlan: plan, sampleRate: rate, gainConfiguration: DSPGainConfiguration(),
+            bassManagementConfiguration: engine.bassManagementConfiguration)
+        let descriptions = labels.map {
+            AudioChannelDescription(mChannelLabel: $0, mChannelFlags: [], mCoordinates: (0, 0, 0))
+        }
+        var inputMap = N60ProgramInputMap()
+        XCTAssertTrue(descriptions.withUnsafeBufferPointer {
+            N60ProgramInputMapCompile($0.baseAddress!, UInt32($0.count), renderGraph.programLayout, &inputMap)
+        })
+        let configuration = try engine.makeRoutedGraphConfiguration(
+            routing: routing, routePlan: plan, sampleRate: rate, inputs: engine.currentLiveGraphInputs)
+        let session = try CoreAudioNChannelTransportSession(
+            testingSelectedOutput: device, routePlan: plan, renderGraph: renderGraph, inputMap: inputMap,
+            sampleRate: rate, unifiedGraphConfiguration: configuration)
+        XCTAssertNil(session.unifiedGraphFallbackReason, "graph fallback")
+        try engine.installTestingNChannelSession(session)
+        let host = try XCTUnwrap(session.unifiedGraphReadback)
+        return (session, plan, host)
+    }
+
+    private func sine(_ hz: Double, rate: Double, frames: Int, amplitude: Double = 0.5) -> [Float] {
+        (0..<frames).map { Float(amplitude * sin(2 * Double.pi * hz * Double($0) / rate)) }
+    }
+
+    /// Renders in blocks so the host sees realistic callback sizes; state carries across blocks.
+    private func render(_ host: UnifiedGraphHost, input: [[Float]], block: Int = 512) throws -> [[Float]] {
+        let frames = input[0].count
+        // The host takes every graph lane as input; sub and output lanes start silent.
+        var input = input
+        while input.count < Int(host.spec.inputChannels) { input.append([Float](repeating: 0, count: frames)) }
+        var out = [[Float]](repeating: [], count: Int(host.spec.outputChannels))
+        var start = 0
+        while start < frames {
+            let n = min(block, frames - start)
+            let chunk = input.map { Array($0[start..<(start + n)]) }
+            let result = try host.processOffline(input: chunk, frames: n)
+            for lane in out.indices { out[lane] += result[lane][0..<n] }
+            start += n
+        }
+        return out
+    }
+
+    /// Amplitude of a steady sine at `hz` by Hann-windowed single-bin correlation over the tail of `signal`.
+    private func amplitude(_ signal: [Float], hz: Double, rate: Double, skip: Int) -> Double {
+        let tail = Array(signal[skip...])
+        let n = tail.count
+        var re = 0.0, im = 0.0, wsum = 0.0
+        for i in 0..<n {
+            let w = 0.5 - 0.5 * cos(2 * Double.pi * Double(i) / Double(n - 1))
+            let phase = 2 * Double.pi * hz * Double(i + skip) / rate
+            re += w * Double(tail[i]) * cos(phase)
+            im -= w * Double(tail[i]) * sin(phase)
+            wsum += w
+        }
+        return 2 * (re * re + im * im).squareRoot() / wsum
+    }
+
+    // MARK: Plan
+
+    func testLivePlanFlattensDevicesWithSelectedOutputFirst() throws {
+        let routing = SpeakerRoutingConfiguration(speakers: [
+            RoutedSpeaker(name: "L", source: .program(0), ways: [
+                RoutedWay(endpoint: ep(1, device: "dev")), RoutedWay(endpoint: ep(0, device: "other"))]),
+            RoutedSpeaker(name: "R", source: .program(1), ways: [
+                RoutedWay(endpoint: ep(3, device: "dev"))]),
+        ])
+        let devices = [fixtureDevice("dev", rate: 48_000, channels: 4), fixtureDevice("other", rate: 48_000, channels: 2)]
+        let plan = try routing.makeLivePlan(
+            programLayout: .stereo, availableDevices: devices, sampleRate: 48_000, selectedOutputUID: "other",
+            bassManagementEnabled: false)
+        XCTAssertTrue(plan.isRouted)
+        XCTAssertEqual(plan.orderedDeviceUIDs, ["other", "dev"])
+        XCTAssertEqual(plan.referenceDeviceUID, "other")
+        XCTAssertEqual(plan.physicalChannelCount, 6)
+        // "other" occupies physical 0-1, "dev" 2-5; endpoints in first-use order: dev 1, other 0, dev 3.
+        XCTAssertEqual(plan.routedOutputPhysicalChannels, [3, 0, 5])
+
+        XCTAssertThrowsError(try routing.makeLivePlan(
+            programLayout: .stereo, availableDevices: devices, sampleRate: 48_000, selectedOutputUID: "missing",
+            bassManagementEnabled: false))
+        let small = [fixtureDevice("dev", rate: 48_000, channels: 3), fixtureDevice("other", rate: 48_000, channels: 2)]
+        XCTAssertThrowsError(try routing.makeLivePlan(
+            programLayout: .stereo, availableDevices: small, sampleRate: 48_000, selectedOutputUID: "other",
+            bassManagementEnabled: false)) {
+            XCTAssertEqual($0 as? OutputDeviceProfileError, .outputChannelUnavailable(deviceUID: "dev", channelIndex: 3, channelCount: 3))
+        }
+        let wide = [fixtureDevice("dev", rate: 48_000, channels: 40), fixtureDevice("other", rate: 48_000, channels: 40)]
+        XCTAssertThrowsError(try routing.makeLivePlan(
+            programLayout: .stereo, availableDevices: wide, sampleRate: 48_000, selectedOutputUID: "other",
+            bassManagementEnabled: false)) {
+            XCTAssertEqual($0 as? OutputDeviceProfileError, .physicalChannelCountOverflow)
+        }
+    }
+
+    // MARK: Live render
+
+    func testThreeWayStereoMatchesCrossoverPredictionAtEveryRate() throws {
+        for rate in Self.rates {
+            let engine = try engineReady(subs: false)
+            let routing = SpeakerRoutingTemplate.threeWay.build(
+                mains: [.init(lane: 0, name: "L", endpoints: [ep(0, device: "fixture"), ep(1, device: "fixture"), ep(2, device: "fixture")]),
+                        .init(lane: 1, name: "R", endpoints: [ep(3, device: "fixture"), ep(4, device: "fixture"), ep(5, device: "fixture")])],
+                crossoverHz: [300, 3_000])!
+            let (_, plan, host) = try routedSession(
+                engine: engine, routing: routing, layout: .stereo,
+                labels: [kAudioChannelLabel_Left, kAudioChannelLabel_Right], rate: rate, channels: 6)
+            XCTAssertEqual(plan.routedOutputPhysicalChannels, [0, 1, 2, 3, 4, 5], "rate \(rate)")
+            XCTAssertEqual(host.spec.outputChannels, 2 + 6, "rate \(rate)")
+            let frames = Int(rate * 0.4)
+            let skip = Int(rate * 0.15)
+            let ways = routing.speakers[0].ways
+            for hz in [150.0, 300, 1_000, 3_000, 6_000] {
+                let silent = [Float](repeating: 0, count: frames)
+                let out = try render(host, input: [sine(hz, rate: rate, frames: frames), silent])
+                for (index, way) in ways.enumerated() {
+                    var expected = 0.0
+                    if let hp = way.highPass { expected += try CrossoverCore.design(hp, highPass: true, sampleRate: rate).magnitudeDB(atHz: hz) }
+                    if let lp = way.lowPass { expected += try CrossoverCore.design(lp, highPass: false, sampleRate: rate).magnitudeDB(atHz: hz) }
+                    guard expected > -50 else { continue }
+                    let measured = 20 * log10(amplitude(out[2 + index], hz: hz, rate: rate, skip: skip) / 0.5)
+                    XCTAssertEqual(measured, expected, accuracy: 0.05, "rate \(rate) hz \(hz) way \(index)")
+                }
+                // The right speaker has no input: its ways are silent.
+                for index in 0..<3 {
+                    XCTAssertLessThan(out[5 + index].map(abs).max() ?? 0, 1e-6, "rate \(rate) hz \(hz)")
+                }
+            }
+            engine.removeTestingNChannelSession()
+        }
+    }
+
+    func testFiveOnePlusEightSubsDrivesEveryPhysicalSub() throws {
+        let rate = 48_000.0
+        let engine = try engineReady(subs: true)
+        let mains: [SpeakerRoutingTemplate.Main] = [0, 1, 2, 4, 5].enumerated().map { n, lane in
+            .init(lane: lane, name: "M\(lane)", endpoints: [ep(UInt32(n), device: "fixture")])
+        }
+        let routing = SpeakerRoutingTemplate.mainsPlusSub.build(
+            mains: mains, subs: (0..<8).map { ep(UInt32(5 + $0), device: "fixture") })!
+        XCTAssertEqual(routing.subwooferSourceCount, 8)
+        let labels: [AudioChannelLabel] = [
+            kAudioChannelLabel_Left, kAudioChannelLabel_Right, kAudioChannelLabel_Center,
+            kAudioChannelLabel_LFEScreen, kAudioChannelLabel_LeftSurround, kAudioChannelLabel_RightSurround]
+        let (_, plan, host) = try routedSession(
+            engine: engine, routing: routing, layout: .fiveOne, labels: labels, rate: rate, channels: 13)
+        XCTAssertEqual(plan.routedOutputPhysicalChannels, (0..<13).map { UInt32($0) })
+        XCTAssertEqual(plan.subwooferCount, 8)
+        let frames = 24_000
+        var input = [[Float]](repeating: [Float](repeating: 0, count: frames), count: 6)
+        input[3] = sine(50, rate: rate, frames: frames)      // LFE
+        let out = try render(host, input: input)
+        let firstSub = 6 + 8                                  // program lanes, sub lanes, then the five mains
+        let levels = (0..<8).map { amplitude(out[firstSub + 5 + $0], hz: 50, rate: rate, skip: 12_000) }
+        XCTAssertGreaterThan(levels[0], 0.01)
+        for level in levels { XCTAssertEqual(level, levels[0], accuracy: levels[0] * 1e-3) }
+        engine.removeTestingNChannelSession()
+    }
+
+    func testLiveCrossoverEditIsClickFreeAtEveryRate() throws {
+        for rate in Self.rates {
+            let engine = try engineReady(subs: false)
+            func routing(_ corner: Double) -> SpeakerRoutingConfiguration {
+                SpeakerRoutingTemplate.twoWay.build(
+                    mains: [.init(lane: 0, name: "L", endpoints: [ep(0, device: "fixture"), ep(1, device: "fixture")]),
+                            .init(lane: 1, name: "R", endpoints: [ep(2, device: "fixture"), ep(3, device: "fixture")])],
+                    crossoverHz: [corner])!
+            }
+            let before = routing(2_000), after = routing(2_600)
+            let (_, _, host) = try routedSession(
+                engine: engine, routing: before, layout: .stereo,
+                labels: [kAudioChannelLabel_Left, kAudioChannelLabel_Right], rate: rate, channels: 4)
+            let hz = 1_000.0
+            let total = Int(rate * 0.5)
+            let tone = sine(hz, rate: rate, frames: total)
+            let silent = [Float](repeating: 0, count: total)
+            let half = total / 2
+            let settle = Int(rate * 0.1)
+            let first = try render(host, input: [Array(tone[0..<half]), Array(silent[0..<half])])
+            try engine.replaceSpeakerRoutingConfiguration(after)
+            XCTAssertEqual(engine.speakerRoutingConfiguration, after, "rate \(rate)")
+            let second = try render(host, input: [Array(tone[half...]), Array(silent[half...])])
+            func maxStep(_ s: ArraySlice<Float>) -> Float { zip(s, s.dropFirst()).map { abs($1 - $0) }.max() ?? 0 }
+            let lane = 2 + 0                                  // L low way
+            let baseline = maxStep(first[lane][settle...])
+            let across = maxStep(Array(first[lane].suffix(256)) + Array(second[lane].prefix(Int(rate * 0.1)))[...])
+            XCTAssertGreaterThan(baseline, 0, "rate \(rate)")
+            XCTAssertLessThanOrEqual(across, baseline * 2, "rate \(rate)")
+            engine.removeTestingNChannelSession()
+        }
+    }
+
+    // MARK: Refusals
+
+    func testRoutingRefusalsNameTheReasonAndKeepState() throws {
+        let routing = SpeakerRoutingTemplate.mainsPlusSub.build(
+            mains: [.init(lane: 0, name: "L", endpoints: [ep(0)]), .init(lane: 1, name: "R", endpoints: [ep(1)])])!
+        var disabled = routing
+        disabled.enabled = false
+
+        // Flag off: an active routing is refused; nil and a disabled routing are accepted and stereo is untouched.
+        let off = AudioIOEngine()
+        off.unifiedGraphEnabled = true
+        XCTAssertFalse(off.routingMatrixEnabled)
+        XCTAssertThrowsError(try off.replaceSpeakerRoutingConfiguration(routing)) {
+            guard case LiveNChannelTransportError.routingRefused(let reason) = $0 else { return XCTFail("\($0)") }
+            XCTAssertTrue(reason.contains("switched off"))
+        }
+        XCTAssertNil(off.speakerRoutingConfiguration)
+        XCTAssertNoThrow(try off.replaceSpeakerRoutingConfiguration(nil))
+        XCTAssertNoThrow(try off.replaceSpeakerRoutingConfiguration(disabled))
+        XCTAssertEqual(off.speakerRoutingConfiguration, disabled)
+
+        // Legacy kernel selected.
+        let legacy = AudioIOEngine()
+        legacy.routingMatrixEnabled = true
+        legacy.unifiedGraphEnabled = false
+        XCTAssertThrowsError(try legacy.replaceSpeakerRoutingConfiguration(routing)) {
+            guard case LiveNChannelTransportError.routingRefused(let reason) = $0 else { return XCTFail("\($0)") }
+            XCTAssertTrue(reason.contains("legacy render kernel"))
+        }
+        XCTAssertNil(legacy.speakerRoutingConfiguration)
+
+        // Sub sources need bass management, and bass management needs sub sources.
+        let engine = try engineReady(subs: false)
+        let withSub = SpeakerRoutingTemplate.mainsPlusSub.build(
+            mains: [.init(lane: 0, name: "L", endpoints: [ep(0)]), .init(lane: 1, name: "R", endpoints: [ep(1)])],
+            subs: [ep(2)])!
+        XCTAssertThrowsError(try engine.replaceSpeakerRoutingConfiguration(withSub)) {
+            guard case LiveNChannelTransportError.routingRefused(let reason) = $0 else { return XCTFail("\($0)") }
+            XCTAssertTrue(reason.contains("bass management must be on"))
+        }
+        XCTAssertNil(engine.speakerRoutingConfiguration)
+        try engine.replaceBassManagementConfiguration(bassOn)
+        XCTAssertThrowsError(try engine.replaceSpeakerRoutingConfiguration(routing)) {
+            guard case LiveNChannelTransportError.routingRefused(let reason) = $0 else { return XCTFail("\($0)") }
+            XCTAssertTrue(reason.contains("no speaker reads a subwoofer"))
+        }
+        XCTAssertNil(engine.speakerRoutingConfiguration)
+        XCTAssertNoThrow(try engine.replaceSpeakerRoutingConfiguration(withSub))
+        XCTAssertEqual(engine.speakerRoutingConfiguration, withSub)
+    }
+}
