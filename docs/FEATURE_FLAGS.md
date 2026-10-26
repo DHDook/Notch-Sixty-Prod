@@ -32,3 +32,4 @@ When the epic ships, delete the flag and every check that reads it in the same P
 | --- | --- | --- |
 | `e4.adaptive-anc` | E4 | Adaptive Quiet Zone controls |
 | `e6.legacy-kernel` | E6 | Selects the frozen legacy render kernel (E23 deletes it) |
+| `e8.routing-matrix` | E8 | Routing matrix, crossover library and per-output filter chains (S10 removes it) |

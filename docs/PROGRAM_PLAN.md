@@ -175,7 +175,7 @@ Gate G2 passed on 2026-10-25 (commit 07e82c6)
 ### E8 Routing matrix and crossovers
 
 - [ ] Replace Mains+Sub / Bi-Amp / Tri-Amp modes with a source-to-output matrix and a per-output filter chain
-- [ ] Filter library: Butterworth, Bessel, Linkwitz-Riley at 6–48 dB/oct, asymmetric slopes, Linkwitz transform
+- [x] Filter library: Butterworth, Bessel, Linkwitz-Riley at 6–48 dB/oct, asymmetric slopes, Linkwitz transform
 - [ ] Any number of ways per speaker, on any layout, not stereo only
 - [ ] Linear-phase FIR crossovers reusing the Speaker Optimizer's linear-phase synthesis
 - [ ] Driver linearisation from Measurement Lab near-field captures

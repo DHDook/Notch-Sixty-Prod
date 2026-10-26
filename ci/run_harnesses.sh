@@ -54,7 +54,7 @@ build_core_objs() {
     CORE_OK=1
     local src
     for src in graph snapshot fft stages_dsp stages_system stages_matrix stages_generator layout \
-        measure/offline_fft measure/ess measure/deconvolve measure/reference_room measure/timing measure/distortion measure/decay measure/waterfall measure/monitor_ring measure/spl measure/rta correct/minphase correct/design correct/synth correct/bass; do
+        measure/offline_fft measure/ess measure/deconvolve measure/reference_room measure/timing measure/distortion measure/decay measure/waterfall measure/monitor_ring measure/spl measure/rta correct/minphase correct/design correct/synth correct/bass xover/xover; do
         local obj="$OUT/n60core_${src//\//_}.o"
         if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -fno-exceptions -fno-rtti -Icore/include -Icore/src \
             -c "core/src/$src.cpp" -o "$obj"; then
@@ -240,6 +240,21 @@ if selected e10_bass_core; then
         fi
     else
         failed+=(e10_bass_core)
+    fi
+fi
+
+# E8 S1: crossover filter library at the eight standard rates.
+if selected e8_xover_core; then
+    build_core_objs
+    if [ "$CORE_OK" = 1 ]; then
+        if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -Icore/include -Icore/src core/tests/test_xover.cpp \
+            "${CORE_OBJS[@]}" -o "$OUT/e8_core_xover" && "$OUT/e8_core_xover"; then
+            passed+=(e8_core_xover)
+        else
+            failed+=(e8_core_xover)
+        fi
+    else
+        failed+=(e8_xover_core)
     fi
 fi
 
