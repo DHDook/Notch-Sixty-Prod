@@ -279,6 +279,69 @@ int32_t n60_correct_synthesize_two_band(const n60_correct_synth_params *params, 
     return N60_CORRECT_OK;
 }
 
+int32_t n60_correct_synthesize_linear_phase(double fs, uint32_t groupDelay, n60_correct_amplitude_fn amplitude, void *user,
+                                            float *fullTaps, uint64_t fullCapacity, float *lowTaps, uint64_t lowCapacity,
+                                            n60_correct_two_band_report *report) {
+    if (amplitude == nullptr || fullTaps == nullptr || !std::isfinite(fs) || fs < 8000.0 || fs > 768000.0 || groupDelay < 1 ||
+        groupDelay > (1u << 18)) {
+        return N60_CORRECT_ERR_ARGUMENT;
+    }
+    const uint64_t latency = groupDelay;
+    const uint64_t span = 2 * latency + 1;
+    const bool two = span > kStageMaxTaps;
+    const uint32_t D = two ? n60_correct_two_band_decimation(fs) : 1;
+    if (two && (D < 2 || lowTaps == nullptr)) return N60_CORRECT_ERR_ARGUMENT;
+    const uint64_t window = 2 * latency;
+    auto blackman = [&](uint64_t a) {  // a in [0, 2L]; 1 at the centre
+        if (a > window) return 0.0;
+        const double x = 2.0 * kPi * static_cast<double>(a) / static_cast<double>(window);
+        return 0.42 - 0.5 * std::cos(x) + 0.08 * std::cos(2.0 * x);
+    };
+    const uint64_t keep = two ? std::min<uint64_t>(latency, static_cast<uint64_t>(std::llround(0.01 * fs))) : latency;
+    const uint64_t extra = latency - keep;
+    const uint64_t fullCount = two ? std::min<uint64_t>(kStageMaxTaps, 2 * keep + 1) : span;
+    const uint64_t lowCount = two ? std::min<uint64_t>(kStageMaxTaps, (span + D - 1) / D) : 0;
+    if (fullCapacity < fullCount || lowCapacity < lowCount) return N60_CORRECT_ERR_CAPACITY;
+    const uint64_t size = nextPow2(std::max<uint64_t>(16384, span * 4));
+    if (size > kMaxTransform) return N60_CORRECT_ERR_SIZE;
+    const uint64_t half = size / 2;
+    const double lowRate = fs / static_cast<double>(D);
+    const uint32_t levels = levelsOf(D);
+    std::vector<Cplx> fullSpectrum(half + 1), lowSpectrum(half + 1);
+    for (uint64_t k = 0; k <= half; ++k) {
+        const double f = static_cast<double>(k) * fs / static_cast<double>(size);
+        const double a = amplitude(f, user);
+        if (!std::isfinite(a) || a < 0.0) return N60_CORRECT_ERR_NONFINITE;
+        const double w = two ? handOver(f, lowRate) : 0.0;
+        fullSpectrum[k] = Cplx{a * (1.0 - w), 0.0};
+        lowSpectrum[k] = Cplx{w > 0.0 ? a * w / resamplerResponse(f, fs, levels) : 0.0, 0.0};
+    }
+    std::vector<double> fullImpulse, lowImpulse;
+    if (!n60::fft::offline::realInverse(fullSpectrum, size, fullImpulse)) return N60_CORRECT_ERR_ALLOC;
+    if (two && !n60::fft::offline::realInverse(lowSpectrum, size, lowImpulse)) return N60_CORRECT_ERR_ALLOC;
+    for (uint64_t n = 0; n < fullCount; ++n) {
+        const uint64_t absolute = n + extra;
+        const double v = fullImpulse[(absolute + size - latency) % size] * blackman(absolute);
+        if (!std::isfinite(v)) return N60_CORRECT_ERR_NONFINITE;
+        fullTaps[n] = static_cast<float>(v);
+    }
+    for (uint64_t m = 0; m < lowCount; ++m) {
+        const uint64_t absolute = m * D;
+        const double v = static_cast<double>(D) * lowImpulse[(absolute + size - latency) % size] * blackman(absolute);
+        if (!std::isfinite(v)) return N60_CORRECT_ERR_NONFINITE;
+        lowTaps[m] = static_cast<float>(v);
+    }
+    if (report != nullptr) {
+        *report = n60_correct_two_band_report{};
+        report->decimation = D;
+        report->extra_delay_frames = static_cast<uint32_t>(extra);
+        report->full_tap_count = static_cast<uint32_t>(fullCount);
+        report->low_tap_count = static_cast<uint32_t>(lowCount);
+        report->declared_latency_frames = groupDelay;
+    }
+    return N60_CORRECT_OK;
+}
+
 int32_t n60_correct_two_band_response(double fs, uint32_t D, uint32_t extra, uint32_t latency, const float *fullTaps,
                                       uint32_t fullCount, const float *lowTaps, uint32_t lowCount, const double *frequencies,
                                       uint32_t count, double *magnitudeDb, double *phaseRad) {

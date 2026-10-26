@@ -132,3 +132,8 @@ add_executable(n60core_route_test tests/test_route.cpp)
 target_include_directories(n60core_route_test PRIVATE src)
 target_link_libraries(n60core_route_test PRIVATE n60core)
 add_test(NAME n60core_route COMMAND n60core_route_test)
+
+# E8 S7: linear-phase FIR crossovers (n60_xover_fir_*, N60_STAGE_DRIVER_FIR).
+add_executable(n60core_xover_fir_test tests/test_xover_fir.cpp)
+target_link_libraries(n60core_xover_fir_test PRIVATE n60core)
+add_test(NAME n60core_xover_fir COMMAND n60core_xover_fir_test)

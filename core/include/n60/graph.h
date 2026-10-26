@@ -34,7 +34,7 @@ extern "C" {
 #endif
 
 /* Bumped on any incompatible change to a struct or function below. */
-#define N60_GRAPH_ABI_VERSION 17u
+#define N60_GRAPH_ABI_VERSION 18u
 
 typedef struct n60_graph n60_graph; /* opaque */
 
@@ -104,7 +104,10 @@ typedef enum n60_stage_kind {
     N60_STAGE_ROOM_FIR_TWO_BAND = 37,/* position 14, with ROOM_FIR. Full-rate FIR plus a decimated low band. See "Two-band room FIR" below. */
     /* ABI v17 (E8 S2). */
     N60_STAGE_ROUTE = 38,           /* position 23.5: after PAUSE_GATE, before DELAY. Sparse routing matrix. See "Speaker routing" below. */
-    N60_STAGE_XOVER = 39            /* position 23.6: after ROUTE, before DELAY. Per-way crossover, trim and polarity. See "Speaker routing" below. */
+    N60_STAGE_XOVER = 39,           /* position 23.6: after ROUTE, before DELAY. Per-way crossover, trim and polarity. See "Speaker routing" below. */
+    /* ABI v18 (E8 S7). */
+    N60_STAGE_DRIVER_FIR = 40,      /* position 23.7: after XOVER, before DELAY. Per-way FIR (linear-phase crossover). Program FIR rules. */
+    N60_STAGE_DRIVER_FIR_TWO_BAND = 41 /* position 23.7. As N60_STAGE_ROOM_FIR_TWO_BAND, at the driver position. */
 } n60_stage_kind;
 
 /* Generator (ABI v14). A source that replaces program audio on its lanes, ahead of every correction stage and
@@ -163,6 +166,14 @@ typedef enum n60_stage_kind {
  * polarity ramp linearly. A family, order, enable or count change is a rebuild (the snapshot fade). The corner
  * edit runs n60_xover_realise (tan and divides, no loops of unbounded length) on the realtime thread; the Bessel
  * root solve is done once, at build. Latency 0.
+ *
+ *
+ * DRIVER_FIR and DRIVER_FIR_TWO_BAND (ABI v18, E8 S7; position 23.7: after XOVER, before DELAY). Exactly FIR and
+ * ROOM_FIR_TWO_BAND (parameters, lane rules, declared group delay in capacityFrames, latency, state carry-over and
+ * the realtime documentation of those stages), run at the driver position so a way's linear-phase crossover or
+ * driver linearisation follows the ROUTE sum and the way's XOVER (IIR EQ, trim, polarity) and precedes the way's delay
+ * and protection. One stage per way lane: the taps differ per way. n60_xover_fir_synthesize (n60/xover.h) designs the
+ * taps and reports the stage parameters. Latency: 256 + capacityFrames (single band) or the two-band figure.
  *
  * Realtime documentation (docs/REALTIME_RULES.md) for runRoute and runXover:
  *  - allocation: none. All state, scratch included, lives in the snapshot arena built on the control thread.

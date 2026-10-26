@@ -7,8 +7,10 @@
 // bilinear transform s = (1/K)(1 - z^-1)/(1 + z^-1), K = tan(pi fc / fs), puts 1 rad/s exactly at
 // the corner (prewarp). References: Bilinear transform, any DSP text; Bessel polynomials,
 // Krall and Frink (1949); Linkwitz-Riley, Linkwitz (1976); Linkwitz transform, Linkwitz (2001).
+#include "n60/correct.h"
 #include "n60/xover.h"
 
+#include <algorithm>
 #include <cmath>
 #include <complex>
 
@@ -280,6 +282,102 @@ double n60_xover_max_pole_radius(const n60_xover_cascade *c) {
         if (radius > worst) worst = radius;
     }
     return worst;
+}
+
+}  // extern "C"
+
+namespace {
+
+struct FirTarget {
+    n60_xover_cascade hp, lp;
+    bool hasHp = false, hasLp = false;
+    double fs = 0.0;
+};
+
+double firAmplitude(double hz, void *user) {
+    const FirTarget &t = *static_cast<const FirTarget *>(user);
+    double a = 1.0, re = 0.0, im = 0.0;
+    if (t.hasHp) { n60_xover_response(&t.hp, t.fs, hz, &re, &im); a *= std::hypot(re, im); }
+    if (t.hasLp) { n60_xover_response(&t.lp, t.fs, hz, &re, &im); a *= std::hypot(re, im); }
+    return a;
+}
+
+// Validates the params, builds the target and resolves the group delay.
+int firPrepare(const n60_xover_fir_params *p, FirTarget &t, uint32_t &delay) {
+    if (!p || p->struct_size != sizeof(n60_xover_fir_params) || !validFs(p->sample_rate) || p->sample_rate < 8000.0 ||
+        p->sample_rate > 768000.0 || (!p->highpass && !p->lowpass)) {
+        return N60_XOVER_ERR_ARGUMENT;
+    }
+    t.fs = p->sample_rate;
+    double lowest = 1e300;
+    if (p->highpass) {
+        const int s = n60_xover_design(p->highpass, 1, t.fs, &t.hp);
+        if (s != N60_XOVER_OK) return s;
+        t.hasHp = true;
+        lowest = std::fmin(lowest, p->highpass->corner_hz);
+    }
+    if (p->lowpass) {
+        const int s = n60_xover_design(p->lowpass, 0, t.fs, &t.lp);
+        if (s != N60_XOVER_OK) return s;
+        t.hasLp = true;
+        lowest = std::fmin(lowest, p->lowpass->corner_hz);
+    }
+    delay = p->group_delay_frames;
+    if (delay == 0) {
+        const double frames = std::round(5.0 * t.fs / lowest);
+        delay = static_cast<uint32_t>(std::fmin(262144.0, std::fmax(32.0, frames)));
+    }
+    if (delay > 262144u) return N60_XOVER_ERR_ARGUMENT;
+    return N60_XOVER_OK;
+}
+
+void firReport(uint32_t delay, double fs, n60_xover_fir_report *r) {
+    const uint64_t span = 2ull * delay + 1;
+    *r = n60_xover_fir_report{};
+    r->group_delay_frames = delay;
+    if (span <= 32768) {
+        r->decimation = 1;
+        r->full_tap_count = static_cast<uint32_t>(span);
+        r->latency_frames = 256 + delay;
+        return;
+    }
+    const uint32_t d = n60_correct_two_band_decimation(fs);
+    const uint64_t keep = std::min<uint64_t>(delay, static_cast<uint64_t>(std::llround(0.01 * fs)));
+    r->two_band = 1;
+    r->decimation = d;
+    r->extra_delay_frames = static_cast<uint32_t>(delay - keep);
+    r->full_tap_count = static_cast<uint32_t>(std::min<uint64_t>(32768, 2 * keep + 1));
+    r->low_tap_count = static_cast<uint32_t>(std::min<uint64_t>(32768, (span + d - 1) / d));
+    r->latency_frames = 4 * 18 * (d - 1) + 256 * d + delay;
+}
+
+}  // namespace
+
+extern "C" {
+
+int n60_xover_fir_plan(const n60_xover_fir_params *params, n60_xover_fir_report *report) {
+    if (!report) return N60_XOVER_ERR_ARGUMENT;
+    FirTarget t;
+    uint32_t delay = 0;
+    const int s = firPrepare(params, t, delay);
+    if (s != N60_XOVER_OK) return s;
+    firReport(delay, t.fs, report);
+    return N60_XOVER_OK;
+}
+
+int n60_xover_fir_synthesize(const n60_xover_fir_params *params, float *full, uint64_t fullCap, float *low, uint64_t lowCap,
+                             n60_xover_fir_report *report) {
+    FirTarget t;
+    uint32_t delay = 0;
+    int s = firPrepare(params, t, delay);
+    if (s != N60_XOVER_OK) return s;
+    n60_xover_fir_report plan;
+    firReport(delay, t.fs, &plan);
+    n60_correct_two_band_report r{};
+    const int32_t status = n60_correct_synthesize_linear_phase(t.fs, delay, firAmplitude, &t, full, fullCap, low, lowCap, &r);
+    if (status != N60_CORRECT_OK) return status == N60_CORRECT_ERR_ARGUMENT ? N60_XOVER_ERR_ARGUMENT : N60_XOVER_ERR_SYNTH;
+    if (report) *report = plan;
+    return N60_XOVER_OK;
 }
 
 }  // extern "C"

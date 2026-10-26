@@ -796,6 +796,48 @@ int main() {
         }
         n60_graph_retire(g);
     }
+    // E8 S7: DRIVER_FIR (single band) and DRIVER_FIR_TWO_BAND on two lanes render without allocating, across publishes.
+    for (double rate : rates) {
+        constexpr uint32_t N = 512;
+        static float taps[1500];
+        static float two[4 + 300 + 200];
+        for (int i = 0; i < 1500; i++) taps[i] = 0.0005f * static_cast<float>(std::sin(0.07 * i));
+        const uint32_t D = rate > 200000 ? 16 : (rate > 100000 ? 8 : 4);
+        two[0] = static_cast<float>(D); two[1] = 300; two[2] = 200; two[3] = 64;
+        for (int i = 4; i < 504; i++) two[i] = 0.001f * static_cast<float>(std::cos(0.05 * i));
+        n60_stage_desc a[2] = {stage(N60_STAGE_DRIVER_FIR, 1, 0, taps, 1500, 700), stage(N60_STAGE_DRIVER_FIR_TWO_BAND, 2, 1, two, 504, 900)};
+        n60_stage_desc b[1] = {a[0]};
+        n60_graph_desc da{}, db{};
+        da.structSize = db.structSize = sizeof da;
+        da.abiVersion = db.abiVersion = N60_GRAPH_ABI_VERSION;
+        da.sampleRate = db.sampleRate = rate;
+        da.maxBlockFrames = db.maxBlockFrames = N;
+        da.inputChannels = da.outputChannels = db.inputChannels = db.outputChannels = 2;
+        da.stages = a; da.stageCount = 2;
+        db.stages = b; db.stageCount = 1;
+        n60_graph *g = nullptr;
+        CHECK(n60_graph_build(&da, &g) == N60_STATUS_OK, "build driver FIR at %.0f", rate);
+        if (g == nullptr) continue;
+        n60_rebuild_options instant{sizeof instant, 0.0f, 0.0f, 0};
+        n60_graph_set_rebuild_options(g, &instant);
+        float l[N], r[N], ol[N], orr[N];
+        for (uint32_t i = 0; i < N; i++) { l[i] = 0.1f * std::sin(0.05f * i); r[i] = 0.1f * std::cos(0.07f * i); }
+        const float *in[2] = {l, r};
+        float *out[2] = {ol, orr};
+        for (int round = 0; round < 12; round++) {
+            CHECK(n60_graph_publish(g, (round & 1) ? &db : &da) == N60_STATUS_OK, "publish driver FIR");
+            allocs = 0;
+            frees = 0;
+            armed = true;
+            n60_status st = n60_graph_process(g, in, out, N);
+            for (int k = 0; k < 4; k++) st = static_cast<n60_status>(st | n60_graph_process(g, in, out, 1 + 100 * k));
+            armed = false;
+            CHECK(st == N60_STATUS_OK, "process driver FIR");
+            CHECK(allocs == 0 && frees == 0, "rate %.0f driver FIR round %d: allocated %ld / freed %ld", rate, round, allocs.load(), frees.load());
+            n60_graph_collect(g);
+        }
+        n60_graph_retire(g);
+    }
     if (failures) {
         std::fprintf(stderr, "%d failure(s)\n", failures);
         return 1;

@@ -20,6 +20,17 @@ struct UnifiedGraphOutputLane: Equatable, Sendable {
     /// Total delay in frames: the driver's own delay plus the latency alignment.
     var delayFrames: Double
     var protection: UnifiedGraphProtection?
+    /// E8 S7: the way's high-pass and low-pass realised as a linear-phase FIR (the crossover then carries trim, polarity
+    /// and EQ only). nil for IIR ways.
+    var driverFIR: UnifiedGraphDriverFIR?
+}
+
+/// A DRIVER_FIR or DRIVER_FIR_TWO_BAND stage's content, designed for the graph's sample rate.
+struct UnifiedGraphDriverFIR: Equatable, Sendable {
+    var kind: UInt32
+    var groupDelayFrames: UInt32
+    var latencyFrames: UInt32
+    var params: [Float]
 }
 
 /// An XOVER stage's content.
@@ -57,7 +68,8 @@ extension UnifiedGraphProtection {
 enum SpeakerRoutingCompiler {
     static func compile(
         _ routing: SpeakerRoutingConfiguration,
-        onto base: UnifiedGraphConfiguration
+        onto base: UnifiedGraphConfiguration,
+        preferLowLatency: Bool = false
     ) throws -> UnifiedGraphConfiguration {
         let context = SpeakerRoutingContext(
             programLanes: base.lanes.count, subwoofers: base.subwooferCount, sampleRate: base.sampleRate)
@@ -69,15 +81,31 @@ enum SpeakerRoutingCompiler {
             source.kind == .program ? source.index : base.lanes.count + source.index
         }
         let endpoints = routing.outputEndpoints
+        // E8 S7: a speaker's linear-phase ways share one group delay (the largest automatic choice) so their windows match
+        // and their sum stays a pure delay. Low-latency mode (video) realises every way as IIR instead.
+        var speakerDelay: [Int: Int] = [:]
+        if !preferLowLatency {
+            for (index, speaker) in routing.speakers.enumerated() {
+                var delay = 0
+                for way in speaker.ways where way.realisation == .fir && (way.highPass != nil || way.lowPass != nil) {
+                    let plan = try? CrossoverCore.linearPhasePlan(
+                        highPass: way.highPass, lowPass: way.lowPass, sampleRate: base.sampleRate)
+                    delay = max(delay, plan?.groupDelayFrames ?? 0)
+                }
+                speakerDelay[index] = delay
+            }
+        }
         var outputs: [UnifiedGraphOutputLane] = []
         var latencies: [UInt32] = []
         for (position, endpoint) in endpoints.enumerated() {
             var entries: [UnifiedGraphRouteEntry] = []
             var owner: RoutedWay?
-            for speaker in routing.speakers {
+            var ownerDelay = 0
+            for (speakerIndex, speaker) in routing.speakers.enumerated() {
                 for way in speaker.ways where way.endpoint == endpoint {
                     entries.append(UnifiedGraphRouteEntry(source: lane(speaker.source), gain: 1))
                     owner = way
+                    ownerDelay = speakerDelay[speakerIndex] ?? 0
                 }
             }
             for entry in routing.matrix where entry.output == endpoint {
@@ -86,9 +114,20 @@ enum SpeakerRoutingCompiler {
             var protection = base.protection
             var crossover: UnifiedGraphCrossover?
             var userDelayMilliseconds = 0.0
+            var driverFIR: UnifiedGraphDriverFIR?
             if let way = owner {
+                var highPass = way.highPass, lowPass = way.lowPass
+                if way.realisation == .fir, ownerDelay > 0, highPass != nil || lowPass != nil {
+                    let design = try CrossoverCore.linearPhaseDesign(
+                        highPass: highPass, lowPass: lowPass, sampleRate: base.sampleRate, groupDelayFrames: ownerDelay)
+                    driverFIR = UnifiedGraphDriverFIR(
+                        kind: design.stageKind, groupDelayFrames: UInt32(design.plan.groupDelayFrames),
+                        latencyFrames: UInt32(design.plan.latencyFrames), params: design.stageParameters)
+                    highPass = nil
+                    lowPass = nil
+                }
                 crossover = UnifiedGraphCrossover(
-                    highPass: way.highPass, lowPass: way.lowPass, trimDB: way.trimDB,
+                    highPass: highPass, lowPass: lowPass, trimDB: way.trimDB,
                     polarityInverted: way.polarityInverted,
                     eq: way.eq.map { UnifiedGraphPEQSection(type: $0.type, frequencyHz: $0.frequencyHz, gainDB: $0.gainDB, q: $0.q) })
                 userDelayMilliseconds = way.delayMilliseconds
@@ -98,8 +137,9 @@ enum SpeakerRoutingCompiler {
             }
             outputs.append(UnifiedGraphOutputLane(
                 lane: firstOutputLane + position, entries: entries, crossover: crossover,
-                delayFrames: userDelayMilliseconds * 0.001 * base.sampleRate, protection: protection))
-            latencies.append(protection?.latencyFrames(sampleRate: base.sampleRate) ?? 0)
+                delayFrames: userDelayMilliseconds * 0.001 * base.sampleRate, protection: protection,
+                driverFIR: driverFIR))
+            latencies.append((protection?.latencyFrames(sampleRate: base.sampleRate) ?? 0) + (driverFIR?.latencyFrames ?? 0))
         }
         // Alignment: every physical output ends up with the same total latency (the largest limiter latency).
         let target = latencies.max() ?? 0
@@ -116,6 +156,7 @@ extension UnifiedGraphConfiguration {
     static let routeStageId: UInt32 = 3_000
     static let xoverStageBase: UInt32 = 3_100
     static let outputProtectionStageBase: UInt32 = 3_200
+    static let driverFIRStageBase: UInt32 = 3_300
 
     /// ROUTE, XOVER, per-output DELAY or FRAC_DELAY and PROTECTION stages, appended in the core's order by `makeSpec`.
     func routeStages(programLanes: Int) throws -> (route: [UnifiedGraphStageSpec], rest: [UnifiedGraphStageSpec]) {
@@ -155,6 +196,13 @@ extension UnifiedGraphConfiguration {
                 rest.append(UnifiedGraphStageSpec(
                     kind: N60_STAGE_XOVER.rawValue, stageId: Self.xoverStageBase + id, laneA: id, params: p))
             }
+        }
+        for output in routing.outputs {
+            guard let fir = output.driverFIR else { continue }
+            let id = UInt32(output.lane)
+            rest.append(UnifiedGraphStageSpec(
+                kind: fir.kind, stageId: Self.driverFIRStageBase + id, laneA: id,
+                capacityFrames: fir.groupDelayFrames, params: fir.params))
         }
         for output in routing.outputs {
             let id = UInt32(output.lane)

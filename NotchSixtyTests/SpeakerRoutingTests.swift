@@ -109,6 +109,61 @@ final class SpeakerRoutingTests: XCTestCase {
         XCTAssertNil(outputs[1].crossover)
     }
 
+    // MARK: E8 S7 linear-phase ways
+
+    private func firTwoWay(rate: Double) -> SpeakerRoutingConfiguration {
+        var routing = SpeakerRoutingTemplate.twoWay.build(
+            mains: [.init(lane: 0, name: "L", endpoints: [ep(0), ep(1)])], crossoverHz: [2_000])!
+        for index in routing.speakers[0].ways.indices { routing.speakers[0].ways[index].realisation = .fir }
+        return routing
+    }
+
+    func testLinearPhaseWaysEmitFIRStagesAndAlignLatency() throws {
+        for rate in [48_000.0, 384_000.0] {
+            let routing = firTwoWay(rate: rate)
+            let config = try SpeakerRoutingCompiler.compile(routing, onto: base(rate: rate, lanes: 1))
+            let outputs = try XCTUnwrap(config.routing?.outputs)
+            let firs = outputs.compactMap(\.driverFIR)
+            XCTAssertEqual(firs.count, 2)
+            XCTAssertEqual(firs[0].groupDelayFrames, firs[1].groupDelayFrames, "ways of a speaker share one group delay")
+            for output in outputs {
+                let x = try XCTUnwrap(output.crossover)
+                XCTAssertNil(x.highPass)
+                XCTAssertNil(x.lowPass)
+            }
+            let spec = try config.makeSpec()
+            let fir = spec.stages.filter {
+                $0.kind == N60_STAGE_DRIVER_FIR.rawValue || $0.kind == N60_STAGE_DRIVER_FIR_TWO_BAND.rawValue
+            }
+            XCTAssertEqual(fir.map(\.laneA), [1, 2])
+            XCTAssertEqual(fir[0].capacityFrames, firs[0].groupDelayFrames)
+            let host = try UnifiedGraphHost(spec: spec)
+            host.release()
+        }
+    }
+
+    func testLowLatencyModeFallsBackToIIR() throws {
+        let routing = firTwoWay(rate: 48_000)
+        let config = try SpeakerRoutingCompiler.compile(routing, onto: base(lanes: 1), preferLowLatency: true)
+        let outputs = try XCTUnwrap(config.routing?.outputs)
+        XCTAssertTrue(outputs.allSatisfy { $0.driverFIR == nil })
+        XCTAssertNotNil(outputs[0].crossover?.lowPass)
+        XCTAssertNotNil(outputs[1].crossover?.highPass)
+    }
+
+    func testLinearPhaseDesignWrapperMatchesPlan() throws {
+        let lp = CrossoverCore.FilterSpec(family: .linkwitzRiley, order: 4, cornerHz: 1_000)
+        for rate in Self.rates {
+            let plan = try CrossoverCore.linearPhasePlan(highPass: nil, lowPass: lp, sampleRate: rate)
+            let design = try CrossoverCore.linearPhaseDesign(
+                highPass: nil, lowPass: lp, sampleRate: rate, groupDelayFrames: plan.groupDelayFrames)
+            XCTAssertEqual(design.plan, plan)
+            XCTAssertEqual(design.fullTaps.count, plan.fullTapCount)
+            XCTAssertEqual(design.stageParameters.count, plan.twoBand ? 4 + plan.fullTapCount + plan.lowTapCount : plan.fullTapCount)
+            XCTAssertTrue(design.fullTaps.allSatisfy(\.isFinite))
+        }
+    }
+
     func testCompileIsDeterministicAndRoutedGraphRendersAtEveryRate() throws {
         for rate in Self.rates {
             let routing = SpeakerRoutingTemplate.twoWay.build(
@@ -211,7 +266,7 @@ final class SpeakerRoutingTests: XCTestCase {
         XCTAssertTrue(r.validate(in: ctx).warnings.contains(.bandOverlap(speaker: "L", lowerHz: 2_000, upperHz: 1_000)))
         r = validRouting()
         r.speakers[0].ways[0].realisation = .fir
-        XCTAssertTrue(r.validate(in: ctx).warnings.contains(.firRealisedAsIIR(way: "L Low")))
+        XCTAssertFalse(r.validate(in: ctx).warnings.contains(.firRealisedAsIIR(way: "L Low")))
         XCTAssertTrue(r.validate(in: ctx).warnings.contains(.unroutedSource(.sub(0))))
         XCTAssertTrue(r.validate(in: ctx).isValid)
     }

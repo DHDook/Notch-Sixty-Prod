@@ -445,5 +445,6 @@ struct UnifiedGraphProgramDSP: Equatable, Sendable {
         N60_STAGE_MUTE.rawValue: 28, N60_STAGE_ANC_CAPTURE.rawValue: 29, N60_STAGE_FINAL_SANITISE.rawValue: 30,
         N60_STAGE_FINAL_METER.rawValue: 31,
         N60_STAGE_ROUTE.rawValue: 23.5, N60_STAGE_XOVER.rawValue: 23.6,
+        N60_STAGE_DRIVER_FIR.rawValue: 23.7, N60_STAGE_DRIVER_FIR_TWO_BAND.rawValue: 23.7,
     ]
 }

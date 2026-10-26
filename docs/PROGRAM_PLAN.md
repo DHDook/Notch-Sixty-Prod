@@ -177,7 +177,7 @@ Gate G2 passed on 2026-10-25 (commit 07e82c6)
 - [ ] Replace Mains+Sub / Bi-Amp / Tri-Amp modes with a source-to-output matrix and a per-output filter chain
 - [x] Filter library: Butterworth, Bessel, Linkwitz-Riley at 6–48 dB/oct, asymmetric slopes, Linkwitz transform
 - [ ] Any number of ways per speaker, on any layout, not stereo only
-- [ ] Linear-phase FIR crossovers reusing the Speaker Optimizer's linear-phase synthesis
+- [x] Linear-phase FIR crossovers reusing the Speaker Optimizer's linear-phase synthesis
 - [ ] Driver linearisation from Measurement Lab near-field captures
 - [ ] Raise the subwoofer limit from 4 to 8 (core bass management already supports 8 sub lanes since E6 S7b, ABI v7)
 - [x] Advanced pipeline view for power users, plus CamillaDSP YAML import alongside the existing export

@@ -37,7 +37,7 @@
 extern "C" {
 #endif
 
-#define N60_CORRECT_ABI_VERSION 2
+#define N60_CORRECT_ABI_VERSION 3
 
 #define N60_CORRECT_OK 0
 #define N60_CORRECT_ERR_ARGUMENT (-1)
@@ -246,6 +246,26 @@ uint32_t n60_correct_two_band_decimation(double sample_rate);
 int32_t n60_correct_synthesize_two_band(const n60_correct_synth_params *params, const n60_correct_design_grid *grid,
                                         float *full_taps, uint64_t full_capacity, float *low_taps, uint64_t low_capacity,
                                         n60_correct_two_band_report *report);
+
+/*
+ * Linear-phase (zero-phase, delayed) synthesis of an amplitude given as a function (ABI v3, E8 S7): the crossover designer's
+ * route to N60_STAGE_DRIVER_FIR. amplitude(hz, user) is the real, non-negative zero-phase gain; the result is that gain
+ * delayed by exactly group_delay_frames L, windowed with a Blackman window over 2 L + 1 frames (the Speaker Optimizer's
+ * linear-phase window). Unlike the grid designs it needs no 20 Hz to 20 kHz grid, so a high-pass or low-pass may fall
+ * anywhere. Two windowed designs of complementary amplitudes (a * a + b * b = 1 pairs such as Linkwitz-Riley) still sum to
+ * a delay of exactly L, because windowing is linear and the window is 1 at its centre.
+ *
+ * Single band (decimation 1) when 2 L + 1 <= 32768: full_tap_count = 2 L + 1, low_tap_count = 0, extra_delay_frames 0,
+ * for N60_STAGE_DRIVER_FIR. Otherwise two-band for N60_STAGE_DRIVER_FIR_TWO_BAND with the decimation of
+ * n60_correct_two_band_decimation: the full-rate taps cover the centre +-K (K = 10 ms, at most L) after a pure delay of
+ * E = L - K frames and carry the response above the hand-over (0.10 to 0.18 of fs / D); the low taps carry the rest. The
+ * report holds the stage parameters. Writes no more than the capacities. L is 1 .. 2^18 and the sample rate 8 to 768 kHz.
+ */
+typedef double (*n60_correct_amplitude_fn)(double hz, void *user);
+
+int32_t n60_correct_synthesize_linear_phase(double sample_rate, uint32_t group_delay_frames, n60_correct_amplitude_fn amplitude,
+                                            void *user, float *full_taps, uint64_t full_capacity, float *low_taps,
+                                            uint64_t low_capacity, n60_correct_two_band_report *report);
 
 /*
  * The magnitude (dB) and the delay-removed phase of the stage's combined response for given taps, evaluated analytically
