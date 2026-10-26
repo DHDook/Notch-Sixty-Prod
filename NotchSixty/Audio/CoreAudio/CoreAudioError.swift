@@ -1133,6 +1133,34 @@ final class CoreAudioTransportSession {
         if headphoneDSPConfigured { detachUnifiedGraph() }
     }
 
+    /// E12 S4a: the generator stage the next graph build includes (nil for normal playback). Session-scoped, so a
+    /// restart or an output change starts without it.
+    private var liveGenerator: (params: [Float], laneMask: UInt64?)?
+
+    /// E12 S4a. Control thread. Adds (or with nil, removes) the generator stage on the running stereo graph and
+    /// republishes it as posted parameters or a faded rebuild. Throws, leaving the stage state as it was, when the
+    /// session renders on the kernel or the graph refuses; the kernel never plays the generator.
+    func setLiveGenerator(_ settings: SignalGeneratorSettings?, laneMask: UInt64?) throws {
+        guard let settings else {
+            guard liveGenerator != nil else { return }
+            liveGenerator = nil
+            // A refusal here hands rendering to the kernel, which has no generator, so the noise stops either way.
+            if let snapshot = lastGraphSnapshot { refreshUnifiedGraph(for: snapshot) }
+            return
+        }
+        guard unifiedGraphEnabled, unifiedGraphActive, let snapshot = lastGraphSnapshot,
+              let params = settings.stageParams(active: true, sampleRate: outputFormat.sampleRate) else {
+            throw LiveNChannelTransportError.configurationChangeRequiresRestart
+        }
+        liveGenerator = (params, laneMask)
+        guard refreshUnifiedGraph(for: snapshot), unifiedGraphActive else {
+            // The refusal already cleared the stage; rebuild the graph without it so rendering returns to the graph.
+            liveGenerator = nil
+            if let snapshot = lastGraphSnapshot { refreshUnifiedGraph(for: snapshot) }
+            throw LiveNChannelTransportError.unifiedGraphRejected(unifiedGraphFallbackReason ?? .specRejected)
+        }
+    }
+
     /// Whether the plain-stereo callback is currently rendering through libn60core.
     var unifiedGraphActive: Bool {
         guard let bridge else { return false }
@@ -1177,6 +1205,8 @@ final class CoreAudioTransportSession {
         let kernelWouldBeWrong = kernelHeadphoneStale || (headphoneDSPConfigured && profile != kernelHeadphoneProfile)
         func refuse(_ reason: UnifiedGraphFallbackReason) -> Bool {
             unifiedGraphFallbackReason = reason
+            // The kernel never plays the generator, so a refusal ends the noise instead of leaving stale state.
+            liveGenerator = nil
             if !(kernelWouldBeWrong && N60RealtimeAudioBridgeUnifiedGraphActive(bridge)) { detachUnifiedGraph() }
             return false
         }
@@ -1190,7 +1220,7 @@ final class CoreAudioTransportSession {
         // and ear delays (E6 S9d); one the stage cannot reproduce, or a kernel-only headphone setup, keeps the kernel.
         if headphoneDSPConfigured, headphoneProfile == nil { return refuse(.headphoneDSP) }
         var mutable = snapshot
-        let configuration: UnifiedGraphConfiguration
+        var configuration: UnifiedGraphConfiguration
         switch UnifiedGraphTranslator.stereoEligibility(
             snapshot: &mutable, sampleRate: outputFormat.sampleRate,
             programs: { [self] kind, generation in retainedProgram(kind, generation: generation) }
@@ -1198,6 +1228,10 @@ final class CoreAudioTransportSession {
         case .success(let accepted): configuration = accepted
         case .failure(let reason):
             return refuse(reason)
+        }
+        if let liveGenerator {
+            configuration.generatorParams = liveGenerator.params
+            configuration.generatorLaneMask = liveGenerator.laneMask
         }
         guard var spec = try? configuration.makeSpec() else { return refuse(.specRejected) }
         var earDelayFrames: [UInt32] = [0, 0]

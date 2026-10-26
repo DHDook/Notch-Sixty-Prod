@@ -62,7 +62,35 @@ struct SystemSetupLevelPlan: Equatable, Sendable {
     static let targetSPLdBC = 75.0
     static let minimumSweepLevelDB = -60.0
 
+    /// The LFE channel starts lower and is band-limited to bass (E12 S4a).
+    static let lfeStartLevelDB = -50.0
+    static let lfeHighHz = 120.0
+
     private(set) var levelDB = SystemSetupLevelPlan.startLevelDB
+    /// Which program lanes the noise plays on. Default: every lane except the LFE.
+    private(set) var target: SignalGeneratorLaneSelection = .allProgram(includeLFE: false)
+    private(set) var targetIsLFE = false
+    /// The level the user settled on for each single lane (informational; the sweep level comes from the SPL reading).
+    private(set) var recordedLevelsDB: [Int: Double] = [:]
+
+    private func startLevel(isLFE: Bool) -> Double { isLFE ? Self.lfeStartLevelDB : Self.startLevelDB }
+
+    /// Switches the noise to another lane (or all lanes) and drops back to that target's starting level, or the level
+    /// already recorded for that lane. Never carries a raised level onto a new channel.
+    mutating func selectTarget(_ newTarget: SignalGeneratorLaneSelection, isLFE: Bool) {
+        target = newTarget
+        targetIsLFE = isLFE
+        if case .lane(let lane) = newTarget, let recorded = recordedLevelsDB[lane] {
+            levelDB = min(recorded, Self.ceilingDB)
+        } else {
+            levelDB = startLevel(isLFE: isLFE)
+        }
+    }
+
+    /// Remembers the current level for the selected lane.
+    mutating func recordLevel() {
+        if case .lane(let lane) = target { recordedLevelsDB[lane] = levelDB }
+    }
 
     /// The generator's own ceiling (never above -6 dBFS).
     static var ceilingDB: Double { SignalGeneratorSettings.hardCeilingDB }
@@ -78,13 +106,14 @@ struct SystemSetupLevelPlan: Equatable, Sendable {
         levelDB = max(levelDB - Self.rampStepDB, Self.minimumSweepLevelDB)
     }
 
-    mutating func reset() { levelDB = Self.startLevelDB }
+    mutating func reset() { levelDB = startLevel(isLFE: targetIsLFE) }
 
     /// Generator settings for the current level: band-limited pink noise at the ceiling-clamped level.
     func generatorSettings(sampleRate: Double = 48_000) -> SignalGeneratorSettings {
         var settings = SignalGeneratorSettings()
         settings.highHz = min(settings.highHz, 0.45 * sampleRate)
         settings.kind = .bandLimitedPink
+        if targetIsLFE { settings.highHz = min(settings.highHz, Self.lfeHighHz) }
         settings.levelDB = levelDB
         settings.ceilingDB = Self.ceilingDB
         return settings

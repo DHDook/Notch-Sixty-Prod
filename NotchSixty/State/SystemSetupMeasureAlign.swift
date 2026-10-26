@@ -215,7 +215,7 @@ enum SystemSetupNoiseError: Error, Equatable, LocalizedError {
     var errorDescription: String? {
         switch self {
         case .engineHookUnavailable:
-            return "This output cannot play the setup noise yet (it needs the multichannel graph path). Play steady pink noise from another app, or use the Generator tab in Measure."
+            return "This output cannot play the setup noise right now (it needs playback running on the graph renderer). Play steady pink noise from another app, or use the Generator tab in Measure."
         case .aboveCeiling:
             return "That level is above the generator ceiling."
         }
@@ -227,7 +227,7 @@ enum SystemSetupNoiseError: Error, Equatable, LocalizedError {
 @MainActor
 protocol SystemSetupNoisePlaying: AnyObject {
     var isPlaying: Bool { get }
-    func start(_ settings: SignalGeneratorSettings) throws
+    func start(_ settings: SignalGeneratorSettings, selection: SignalGeneratorLaneSelection) throws
     func stop()
 }
 
@@ -246,7 +246,7 @@ extension SystemSetupLevelPlan {
 /// What the engine-backed player needs from the engine: the same call `AudioIOEngine.setLiveGenerator` makes.
 @MainActor
 protocol SystemSetupGeneratorHost: AnyObject {
-    func setLiveGenerator(_ settings: SignalGeneratorSettings?) throws
+    func setLiveGenerator(_ settings: SignalGeneratorSettings?, selection: SignalGeneratorLaneSelection) throws
 }
 
 extension AudioIOEngine: SystemSetupGeneratorHost {}
@@ -260,14 +260,14 @@ final class EngineSystemSetupNoisePlayer: SystemSetupNoisePlaying {
 
     init(host: SystemSetupGeneratorHost) { self.host = host }
 
-    func start(_ settings: SignalGeneratorSettings) throws {
+    func start(_ settings: SignalGeneratorSettings, selection: SignalGeneratorLaneSelection) throws {
         guard settings.kind == .bandLimitedPink || settings.kind == .pink,
               settings.levelDB <= SystemSetupLevelPlan.ceilingDB,
               settings.ceilingDB <= SignalGeneratorSettings.hardCeilingDB else {
             throw SystemSetupNoiseError.aboveCeiling
         }
         do {
-            try host.setLiveGenerator(settings)
+            try host.setLiveGenerator(settings, selection: selection)
         } catch {
             isPlaying = false
             throw SystemSetupNoiseError.engineHookUnavailable
@@ -280,7 +280,7 @@ final class EngineSystemSetupNoisePlayer: SystemSetupNoisePlaying {
     func stop() {
         for _ in 0..<2 {
             do {
-                try host.setLiveGenerator(nil)
+                try host.setLiveGenerator(nil, selection: .allProgram(includeLFE: false))
                 isPlaying = false
                 return
             } catch {}
@@ -292,6 +292,6 @@ final class EngineSystemSetupNoisePlayer: SystemSetupNoisePlaying {
 @MainActor
 final class UnconnectedSystemSetupNoisePlayer: SystemSetupNoisePlaying {
     var isPlaying: Bool { false }
-    func start(_ settings: SignalGeneratorSettings) throws { throw SystemSetupNoiseError.engineHookUnavailable }
+    func start(_ settings: SignalGeneratorSettings, selection: SignalGeneratorLaneSelection) throws { throw SystemSetupNoiseError.engineHookUnavailable }
     func stop() {}
 }

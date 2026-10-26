@@ -78,6 +78,23 @@ final class SystemSetupFlowModel: ObservableObject {
         flow.choices.microphoneCalibrationFile = microphone.microphoneCalibration?.sourceName
     }
 
+    /// Channels the noise can play on right now, in lane order.
+    var noiseChannels: [(index: Int, name: String, isLFE: Bool)] { engine.generatorLaneChoices }
+
+    /// Plays one channel at a time (or all channels) for the Level step. Switching channel stops the current noise,
+    /// returns to that channel's starting level and starts it again if noise was playing.
+    func selectNoiseTarget(lane: Int?) {
+        let wasPlaying = noiseIsPlaying
+        if wasPlaying { stopNoise(); if noiseIsPlaying { return } }
+        level.recordLevel()
+        if let lane, let channel = noiseChannels.first(where: { $0.index == lane }) {
+            level.selectTarget(.lane(lane), isLFE: channel.isLFE)
+        } else {
+            level.selectTarget(.allProgram(includeLFE: false), isLFE: false)
+        }
+        if wasPlaying, !noiseIsPlaying { toggleNoise() }
+    }
+
     func raiseLevel() { level.raise(); republishNoise() }
     func lowerLevel() { level.lower(); republishNoise() }
 
@@ -85,7 +102,7 @@ final class SystemSetupFlowModel: ObservableObject {
     func toggleNoise() {
         if noiseIsPlaying { stopNoise(); return }
         do {
-            try noise.start(level.validatedGeneratorSettings(sampleRate: engine.selectedOutputDevice?.nominalSampleRate ?? 48_000))
+            try noise.start(level.validatedGeneratorSettings(sampleRate: engine.selectedOutputDevice?.nominalSampleRate ?? 48_000), selection: level.target)
             noiseIsPlaying = noise.isPlaying
             message = nil
         } catch {
@@ -102,7 +119,7 @@ final class SystemSetupFlowModel: ObservableObject {
 
     private func republishNoise() {
         guard noiseIsPlaying else { return }
-        do { try noise.start(level.validatedGeneratorSettings(sampleRate: engine.selectedOutputDevice?.nominalSampleRate ?? 48_000)) } catch { stopNoise(); message = error.localizedDescription }
+        do { try noise.start(level.validatedGeneratorSettings(sampleRate: engine.selectedOutputDevice?.nominalSampleRate ?? 48_000), selection: level.target) } catch { stopNoise(); message = error.localizedDescription }
     }
 
     // MARK: Measure (design note 3)
@@ -455,8 +472,16 @@ private struct SystemSetupMicrophoneStep: View {
             }
             Divider()
             Text("Set the level").font(.headline)
-            Text("Pink noise starts very quietly at \(Int(SystemSetupLevelPlan.startLevelDB)) dBFS. Raise it a step at a time until the meter reads about \(Int(SystemSetupLevelPlan.targetSPLdBC)) dB(C) at your main seat. It never goes above \(Int(SystemSetupLevelPlan.ceilingDB)) dBFS.")
+            Text("Set each channel on its own, then use All channels as a combined check (the LFE is never in it). Pink noise starts very quietly at \(Int(SystemSetupLevelPlan.startLevelDB)) dBFS. Raise it a step at a time until the meter reads about \(Int(SystemSetupLevelPlan.targetSPLdBC)) dB(C) at your main seat. It never goes above \(Int(SystemSetupLevelPlan.ceilingDB)) dBFS.")
                 .font(.callout).foregroundStyle(.secondary)
+            let channels = model.noiseChannels
+            Picker("Channel", selection: Binding<Int>(
+                get: { if case .lane(let lane) = model.level.target { return lane } else { return -1 } },
+                set: { model.selectNoiseTarget(lane: $0 < 0 ? nil : $0) }
+            )) {
+                Text("All channels (combined check)").tag(-1)
+                ForEach(channels, id: \.index) { Text($0.name + ($0.isLFE ? " (starts at \(Int(SystemSetupLevelPlan.lfeStartLevelDB)) dBFS, bass only)" : "")).tag($0.index) }
+            }
             HStack {
                 Button("Lower") { model.lowerLevel() }
                 Text("\(Int(model.level.levelDB)) dBFS").monospacedDigit()

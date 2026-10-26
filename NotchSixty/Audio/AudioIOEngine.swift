@@ -4049,31 +4049,69 @@ final class AudioIOEngine: ObservableObject {
         var room: RoomCorrectionConfiguration
         var speakerIR: SpeakerIRConfiguration
         var ambient: AmbientCompensationTarget
-        /// E12 S4a: the guided-setup Level step's noise. nil (the default) means no generator stage.
-        /// Any hand-built inputs must carry this forward or a later edit drops the noise.
-        var generator: SignalGeneratorSettings?
+        /// E12 S4a: the guided-setup Level step's noise. nil (the default) means no generator stage. Any hand-built
+        /// inputs must carry this forward or a later edit drops the noise.
+        var generator: LiveGenerator?
     }
 
-    /// E12 S4a: the generator settings currently published to the live graph, or nil when none is playing. Never
-    /// persisted: a session restart, stop or output change clears it.
-    private(set) var liveGeneratorSettings: SignalGeneratorSettings?
+    /// A generator the engine keeps playing across live graph edits.
+    struct LiveGenerator: Equatable {
+        var settings: SignalGeneratorSettings
+        var selection: SignalGeneratorLaneSelection
+    }
 
-    /// Plays (or, with nil, stops) the E11 generator on the running N-channel graph through the normal republish
-    /// path. Throws and leaves the graph untouched when the running session cannot take a graph edit (stereo kernel
-    /// path, binaural, flag off) or the settings cannot form a stage at the output rate.
-    func setLiveGenerator(_ settings: SignalGeneratorSettings?) throws {
-        guard let session = nChannelTransportSession, liveGraphEditsAvailable else {
-            if settings == nil { liveGeneratorSettings = nil; return }
+    /// E12 S4a: the generator currently published to the live graph, or nil when none is playing. Never persisted:
+    /// a session restart, stop or output change clears it.
+    private(set) var liveGenerator: LiveGenerator?
+
+    /// Plays (or, with nil, stops) the E11 generator on the running graph through the normal republish path:
+    /// N-channel graphs through `republishLiveGraph`, the stereo graph through its transport session. Throws and
+    /// leaves the playing state as it was when the running session cannot take the edit (kernel render, binaural,
+    /// flag off), the selection matches no lane, or the settings cannot form a stage at the output rate.
+    func setLiveGenerator(_ settings: SignalGeneratorSettings?, selection: SignalGeneratorLaneSelection = .allProgram(includeLFE: false)) throws {
+        if let session = nChannelTransportSession, liveGraphEditsAvailable {
+            var wanted: LiveGenerator?
+            if let settings {
+                guard let shape = UnifiedGraphLayoutShape(roles: session.routePlan.programLayout.roles),
+                      selection.mask(laneCount: shape.laneCount, lfeLane: shape.lfeLane) != nil,
+                      settings.stageParams(active: true, sampleRate: session.outputFormat.sampleRate) != nil else {
+                    throw LiveNChannelTransportError.unifiedGraphRejected(.specRejected)
+                }
+                wanted = LiveGenerator(settings: settings, selection: selection)
+            }
+            var inputs = currentLiveGraphInputs
+            inputs.generator = wanted
+            try republishLiveGraph(inputs)
+            liveGenerator = wanted
+        } else if let session = transportSession {
+            var mask: UInt64?
+            if settings != nil {
+                guard let resolved = selection.mask(laneCount: 2, lfeLane: nil) else {
+                    throw LiveNChannelTransportError.unifiedGraphRejected(.specRejected)
+                }
+                mask = resolved
+            }
+            try session.setLiveGenerator(settings, laneMask: mask)
+            liveGenerator = settings.map { LiveGenerator(settings: $0, selection: selection) }
+        } else if nChannelTransportSession != nil || binauralHeadphoneTransportSession != nil {
+            // A graph that cannot take the edit may still hold a generator, so never report it stopped.
+            throw LiveNChannelTransportError.configurationChangeRequiresRestart
+        } else if settings == nil {
+            liveGenerator = nil
+        } else {
             throw LiveNChannelTransportError.configurationChangeRequiresRestart
         }
-        if let settings,
-           settings.stageParams(active: true, sampleRate: session.outputFormat.sampleRate) == nil {
-            throw LiveNChannelTransportError.unifiedGraphRejected(.specRejected)
+    }
+
+    /// E12 S4a: the lanes the Level step can play noise on, for the running session (stereo L/R when the stereo
+    /// transport runs or nothing runs yet).
+    var generatorLaneChoices: [(index: Int, name: String, isLFE: Bool)] {
+        if let session = nChannelTransportSession {
+            return session.routePlan.programLayout.roles.enumerated().map {
+                ($0.offset, $0.element.displayName, $0.element == .lowFrequencyEffects)
+            }
         }
-        var inputs = currentLiveGraphInputs
-        inputs.generator = settings
-        try republishLiveGraph(inputs)
-        liveGeneratorSettings = settings
+        return [(0, OutputProgramRole.frontLeft.displayName, false), (1, OutputProgramRole.frontRight.displayName, false)]
     }
 
     var currentLiveGraphInputs: LiveGraphInputs {
@@ -4082,7 +4120,7 @@ final class AudioIOEngine: ObservableObject {
             playback: playbackControlConfiguration, gain: gainConfiguration,
             bass: bassManagementConfiguration, room: roomCorrectionConfiguration,
             speakerIR: speakerIRConfiguration, ambient: ambientCompensationRuntimeTarget,
-            generator: liveGeneratorSettings)
+            generator: liveGenerator)
     }
 
     /// True when the flag is on and the running N-channel or binaural session is rendered by the graph, so the
@@ -4129,7 +4167,14 @@ final class AudioIOEngine: ObservableObject {
                 bassManagementConfiguration: renderBassManagementConfiguration(inputs.bass), programDSP: program
             ) {
             case .success(var configuration):
-                configuration.generatorParams = inputs.generator?.stageParams(active: true, sampleRate: rate)
+                if let generator = inputs.generator {
+                    guard let mask = generator.selection.mask(laneCount: shape.laneCount, lfeLane: shape.lfeLane),
+                          let params = generator.settings.stageParams(active: true, sampleRate: rate) else {
+                        throw LiveNChannelTransportError.unifiedGraphRejected(.specRejected)
+                    }
+                    configuration.generatorParams = params
+                    configuration.generatorLaneMask = mask
+                }
                 try session.republishGraph(configuration)
             case .failure(let reason): throw LiveNChannelTransportError.unifiedGraphRejected(reason)
             }
@@ -4895,7 +4940,7 @@ final class AudioIOEngine: ObservableObject {
     }
 
     private func tearDownTransport(fadeOut: Bool) {
-        liveGeneratorSettings = nil
+        liveGenerator = nil
         if let controller = headTrackingController {
             controller.stop()
             headTrackingController = nil

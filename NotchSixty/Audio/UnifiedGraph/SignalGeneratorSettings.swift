@@ -73,3 +73,25 @@ struct SignalGeneratorSettings: Equatable, Sendable {
         ]
     }
 }
+
+/// E12 S4a: which program lanes a live generator plays on.
+enum SignalGeneratorLaneSelection: Equatable, Sendable {
+    /// One program lane (an index into the running layout).
+    case lane(Int)
+    /// Every program lane; the LFE lane only when `includeLFE` is true (never by default).
+    case allProgram(includeLFE: Bool)
+
+    /// The lane bit mask for a layout of `laneCount` lanes with the LFE at `lfeLane`, or nil when it selects nothing.
+    func mask(laneCount: Int, lfeLane: Int?) -> UInt64? {
+        guard laneCount > 0, laneCount <= 64 else { return nil }
+        switch self {
+        case .lane(let index):
+            guard index >= 0, index < laneCount else { return nil }
+            return UInt64(1) << UInt64(index)
+        case .allProgram(let includeLFE):
+            var mask = laneCount == 64 ? UInt64.max : (UInt64(1) << UInt64(laneCount)) - 1
+            if !includeLFE, let lfeLane, lfeLane >= 0, lfeLane < laneCount { mask &= ~(UInt64(1) << UInt64(lfeLane)) }
+            return mask == 0 ? nil : mask
+        }
+    }
+}

@@ -132,6 +132,9 @@ struct UnifiedGraphConfiguration: Equatable, Sendable {
     /// E11 S7: measurement source stage params (11 floats from `SignalGeneratorSettings.stageParams`), placed after the
     /// input gain so protection still guards it. nil for normal playback.
     var generatorParams: [Float]?
+    /// E12 S4a: program lanes the generator plays on (bit n = lane n); nil means every program lane. The core mutes the
+    /// other lanes while the generator is active, so one lane at a time can be level-set.
+    var generatorLaneMask: UInt64?
     var bassManagement: UnifiedGraphBassManagement?
     var protection: UnifiedGraphProtection?
     /// Two-lane configurations only.
@@ -225,7 +228,9 @@ struct UnifiedGraphConfiguration: Equatable, Sendable {
         // The core ranks the generator after every GAIN stage (rank 3.5), so it follows the lane pre-gains.
         if let generatorParams {
             guard generatorParams.count == 11 else { throw UnifiedGraphError.invalidConfiguration("generator") }
-            add(N60_STAGE_GENERATOR, Self.generatorStageId, mask: programMask, params: generatorParams)
+            let mask = generatorLaneMask ?? programMask
+            guard mask != 0, mask & ~programMask == 0 else { throw UnifiedGraphError.invalidConfiguration("generator lanes") }
+            add(N60_STAGE_GENERATOR, Self.generatorStageId, mask: mask, params: generatorParams)
         }
         if !canonical, stereo.dynamicEQ != nil, stereo.midSideEQ {
             // The kernel runs the dynamic EQ after the mid/side decode; the core runs it before.
