@@ -359,16 +359,18 @@ final class ProductionInformationArchitectureTests: XCTestCase {
     func testDashboardIsStandaloneAndEverySectionIsReachable() {
         let grouped =
             ProductionSection.playback
-            + ProductionSection.systemGroup
-            + ProductionSection.tools
+            + ProductionSection.systemAreaSections
+            + ProductionSection.systemAreaTools
             + ProductionSection.extensions
 
         XCTAssertFalse(grouped.contains(.dashboard))
         XCTAssertEqual(Set(grouped).count, grouped.count)
         XCTAssertEqual(
-            Set(grouped + ProductionSection.developerTools + [.dashboard, .system]),
+            Set(grouped.map { $0.systemAreaDestination.section }
+                + ProductionSection.developerTools + [.dashboard])
+                .union(ProductionSection.allCases.filter { $0.systemAreaDestination.section == .system }),
             Set(ProductionSection.allCases),
-            "every section is in the sidebar or the Developer menu (.system is the flag-gated System area row)"
+            "every section is in the sidebar or the Developer menu (.system is the System area row)"
         )
         XCTAssertTrue(Set(grouped).isDisjoint(with: ProductionSection.developerTools))
     }
@@ -380,22 +382,9 @@ final class ProductionInformationArchitectureTests: XCTestCase {
         )
     }
 
-    func testSystemGroupContainsHardwareCalibrationAndAcoustics() {
-        XCTAssertEqual(
-            ProductionSection.systemGroup,
-            [
-                .speakers,
-                .headphones,
-                .speakerCalibration,
-                .measurementLab,
-                .roomCorrection,
-                .activeAcoustics,
-            ]
-        )
-    }
-
-    func testToolsGroupContainsOccasionalAdvisoryWorkflows() {
-        XCTAssertEqual(ProductionSection.tools, [.roomAdvisor, .blindListening])
+    func testSystemAreaGroupsContainTheSystemRowAndAcoustics() {
+        XCTAssertEqual(ProductionSection.systemAreaSections, [.system, .headphones, .activeAcoustics])
+        XCTAssertEqual(ProductionSection.systemAreaTools, [.blindListening])
     }
 
     func testSidebarGroupsLeaveDeveloperToolsToTheDeveloperMenu() {
@@ -405,8 +394,8 @@ final class ProductionInformationArchitectureTests: XCTestCase {
             groups.map(\.sections),
             [
                 ProductionSection.playback,
-                ProductionSection.systemGroup,
-                ProductionSection.tools,
+                ProductionSection.systemAreaSections,
+                ProductionSection.systemAreaTools,
                 ProductionSection.extensions,
             ]
         )

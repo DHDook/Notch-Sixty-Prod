@@ -1,8 +1,7 @@
 import Foundation
 
 // E12 S6: pure logic behind the Verify and Save steps of the guided setup (design notes 7 to 9).
-// No SwiftUI, no engine, nothing here runs on an audio thread. Gated by `e12.guided-setup` at the
-// call sites. It adds no DSP: verification evidence comes from E10 S8's post-apply report and the
+// No SwiftUI, no engine, nothing here runs on an audio thread. It adds no DSP: verification evidence comes from E10 S8's post-apply report and the
 // Room insights come from the existing Room Advisor analyser.
 
 // MARK: - Verification

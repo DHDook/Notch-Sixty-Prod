@@ -186,7 +186,7 @@ enum ProductionUserGuideCatalog {
                     "optional-calibration",
                     "5. Add measurement and calibration only when useful",
                     [
-                        "Speaker Calibration, Measurement Lab and Room Correction are optional next steps after ordinary playback works correctly. Use the measurement microphone and its calibration data when accuracy matters, and keep the documented microphone placement, routing and provenance with the evidence.",
+                        "The quickest route is Set up my system on the Dashboard: it walks through the output, speakers, microphone, levels, seats, measurement, bass, correction and a verified, saved profile. Speaker Calibration, Measurement Lab and Room Correction, now tabs of the System area, are optional next steps after ordinary playback works correctly. Use the measurement microphone and its calibration data when accuracy matters, and keep the documented microphone placement, routing and provenance with the evidence.",
                         "Preview measurement-derived changes before Apply, verify after Apply, and retain rollback where the workflow provides it. Software plausibility, confidence and CI results do not replace an acoustic verification or the separate PR112 physical hardware-acceptance process."
                     ]
                 ),

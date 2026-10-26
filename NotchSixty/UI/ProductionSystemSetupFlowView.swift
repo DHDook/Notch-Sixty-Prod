@@ -1,7 +1,7 @@
 import SwiftUI
 
 // E12 S3: the guided-setup window and its first steps (Output, Topology, Microphone and level,
-// Room). Later steps arrive in S4 to S6. Reachable only with `e12.guided-setup` on.
+// Room). Later steps arrive in S4 to S6.
 
 /// Drives the reducer from the UI. Topology is written through the profile API when the user
 /// leaves that step; Cancel restores the bass-management snapshot exactly.

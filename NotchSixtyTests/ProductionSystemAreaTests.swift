@@ -3,16 +3,8 @@ import XCTest
 
 @MainActor
 final class ProductionSystemAreaTests: XCTestCase {
-    func testFlagOffSidebarIsUnchanged() {
-        let groups = ProductionSection.sidebarGroups(systemArea: false)
-        XCTAssertEqual(groups.map(\.title), ["Playback", "System", "Tools", "Extensions"])
-        XCTAssertEqual(groups[1].sections, ProductionSection.systemGroup)
-        XCTAssertEqual(groups[2].sections, ProductionSection.tools)
-        XCTAssertFalse(groups.flatMap(\.sections).contains(.system))
-    }
-
-    func testFlagOnSidebarHasOneSystemRowAndRoomAdvisorMoved() {
-        let groups = ProductionSection.sidebarGroups(systemArea: true)
+    func testSidebarHasOneSystemRowAndRoomAdvisorMoved() {
+        let groups = ProductionSection.sidebarGroups()
         XCTAssertEqual(groups.map(\.title), ["Playback", "System", "Tools", "Extensions"])
         XCTAssertEqual(groups[1].sections, [.system, .headphones, .activeAcoustics])
         XCTAssertEqual(groups[2].sections, [.blindListening])
@@ -38,8 +30,8 @@ final class ProductionSystemAreaTests: XCTestCase {
         }
     }
 
-    func testEverySectionIsReachableWithFlagOn() {
-        let sidebar = Set(ProductionSection.sidebarGroups(systemArea: true).flatMap(\.sections))
+    func testEverySectionIsReachable() {
+        let sidebar = Set(ProductionSection.sidebarGroups().flatMap(\.sections))
         for section in ProductionSection.allCases where section != .dashboard {
             if ProductionSection.developerTools.contains(section) { continue }
             let reachable = sidebar.contains(section.systemAreaDestination.section)
@@ -49,21 +41,14 @@ final class ProductionSystemAreaTests: XCTestCase {
 
     func testNavigateLandsOnTheRightTab() {
         let navigation = ProductionNavigation()
-        navigation.navigate(to: .roomCorrection, systemArea: true)
+        navigation.navigate(to: .roomCorrection)
         XCTAssertEqual(navigation.selection, .system)
         XCTAssertEqual(navigation.systemTab, .calibrate)
         XCTAssertEqual(navigation.calibrateSection, .correction)
-        navigation.navigate(to: .measurementLab, systemArea: true)
+        navigation.navigate(to: .measurementLab)
         XCTAssertEqual(navigation.systemTab, .measure)
-        navigation.navigate(to: .equalizer, systemArea: true)
+        navigation.navigate(to: .equalizer)
         XCTAssertEqual(navigation.selection, .equalizer)
-    }
-
-    func testNavigateWithFlagOffKeepsOldSection() {
-        let navigation = ProductionNavigation()
-        navigation.navigate(to: .roomCorrection, systemArea: false)
-        XCTAssertEqual(navigation.selection, .roomCorrection)
-        XCTAssertEqual(navigation.systemTab, .overview)
     }
 
     func testRoomCorrectionHasItsOwnIcon() {
@@ -71,12 +56,6 @@ final class ProductionSystemAreaTests: XCTestCase {
             ProductionSection.roomCorrection.systemImage,
             ProductionSection.measurementLab.systemImage
         )
-    }
-
-    func testFlagIsRegisteredAndOffByDefault() {
-        XCTAssertTrue(FeatureFlag.all.contains(.guidedSetup))
-        XCTAssertFalse(FeatureFlag.guidedSetup.defaultEnabled)
-        XCTAssertEqual(FeatureFlag.guidedSetup.id, "e12.guided-setup")
     }
 
     func testOverviewStatusForNoUnverifiedAndVerifiedCalibration() {

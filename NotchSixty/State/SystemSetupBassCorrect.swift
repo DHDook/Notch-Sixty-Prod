@@ -3,7 +3,7 @@ import Foundation
 // E12 S5: pure logic behind the Bass and Correction steps of the guided setup. No SwiftUI, no
 // engine, nothing here runs on an audio thread. It uses only existing E10 APIs: the joint bass
 // optimiser (`RoomCorrectionCore.optimiseBass`) and the Room Correction project controller's own
-// design path. Gated by `e12.guided-setup` at the call sites.
+// design path.
 
 // MARK: - Bass step
 
