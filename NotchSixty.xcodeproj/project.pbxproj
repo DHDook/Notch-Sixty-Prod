@@ -437,6 +437,10 @@
 		E12D00000000000000000002 /* SystemSetupMeasureAlignTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E12D00000000000000000012 /* SystemSetupMeasureAlignTests.swift */; };
 		E12E00000000000000000002 /* SystemSetupBassCorrectTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E12E00000000000000000012 /* SystemSetupBassCorrectTests.swift */; };
 		E12F00000000000000000002 /* SystemSetupVerifySaveTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E12F00000000000000000012 /* SystemSetupVerifySaveTests.swift */; };
+		E8B0000000000000000000A1 /* SpeakerRoutingConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = E8B000000000000000000001 /* SpeakerRoutingConfiguration.swift */; };
+		E8B0000000000000000000A2 /* SpeakerRoutingValidation.swift in Sources */ = {isa = PBXBuildFile; fileRef = E8B000000000000000000002 /* SpeakerRoutingValidation.swift */; };
+		E8B0000000000000000000A3 /* SpeakerRoutingCompiler.swift in Sources */ = {isa = PBXBuildFile; fileRef = E8B000000000000000000003 /* SpeakerRoutingCompiler.swift */; };
+		E8B0000000000000000000A4 /* SpeakerRoutingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E8B000000000000000000004 /* SpeakerRoutingTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -913,6 +917,10 @@
 		E12D00000000000000000012 /* SystemSetupMeasureAlignTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemSetupMeasureAlignTests.swift; sourceTree = "<group>"; };
 		E12E00000000000000000012 /* SystemSetupBassCorrectTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemSetupBassCorrectTests.swift; sourceTree = "<group>"; };
 		E12F00000000000000000012 /* SystemSetupVerifySaveTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemSetupVerifySaveTests.swift; sourceTree = "<group>"; };
+		E8B000000000000000000001 /* SpeakerRoutingConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerRoutingConfiguration.swift; sourceTree = "<group>"; };
+		E8B000000000000000000002 /* SpeakerRoutingValidation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerRoutingValidation.swift; sourceTree = "<group>"; };
+		E8B000000000000000000003 /* SpeakerRoutingCompiler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerRoutingCompiler.swift; sourceTree = "<group>"; };
+		E8B000000000000000000004 /* SpeakerRoutingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerRoutingTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -928,6 +936,7 @@
 				E6D0000000000000000000B0 /* UnifiedGraphProgramDSP.swift */,
 				E6D000000000000000000002 /* UnifiedGraphHost.swift */,
 				E6D000000000000000000003 /* UnifiedGraphConfiguration.swift */,
+				E8B000000000000000000003 /* SpeakerRoutingCompiler.swift */,
 				E11D00000000000000000083 /* SignalGeneratorSettings.swift */,
 				E6D000000000000000000004 /* UnifiedGraphTranslator.swift */,
 				E6D000000000000000000005 /* N60UnifiedGraphEligibility.h */,
@@ -1038,6 +1047,7 @@
 				E11D00000000000000000012 /* MeasurementCoreTests.swift */,
 				E10A00000000000000000042 /* RoomCorrectionCoreTests.swift */,
 				E8A000000000000000000042 /* CrossoverCoreTests.swift */,
+				E8B000000000000000000004 /* SpeakerRoutingTests.swift */,
 				E10A00000000000000000074 /* RoomCorrectionBassApplyTests.swift */,
 				E10B00000000000000000006 /* RoomCorrectionDeployControllerTests.swift */,
 				E10A00000000000000000044 /* RoomCorrectionLanePlanTests.swift */,
@@ -1324,7 +1334,7 @@
 		};
 		A20000000000000000000051 /* CoreAudio */ = {isa = PBXGroup; children = (A20000000000000000000021 /* CoreAudioError.swift */, E4E000000000000000000011 /* OutputBufferSizeController.swift */, F63000000000000000000011 /* CoreAudioNChannelTransportSession.swift */, F65000000000000000000013 /* CoreAudioSemanticTransportSupport.swift */, F65000000000000000000014 /* CoreAudioBinauralHeadphoneTransportSession.swift */, F64000000000000000000013 /* MultichannelCalibrationTransport.swift */, A20000000000000000000028 /* MasterVolumeDeviceController.swift */, A2000000000000000000002C /* RoomCorrectionCalibrationTransport.swift */,); path = CoreAudio; sourceTree = "<group>"; };
 		A20000000000000000000052 /* Devices */ = {isa = PBXGroup; children = (A20000000000000000000022 /* AudioOutputDevice.swift */, A20000000000000000000023 /* OutputDeviceCatalog.swift */,); path = Devices; sourceTree = "<group>"; };
-		A20000000000000000000053 /* Routing */ = {isa = PBXGroup; children = (A20000000000000000000024 /* AudioRouteConfiguration.swift */, F62000000000000000000011 /* OutputDeviceProfileConfiguration.swift */, F65000000000000000000011 /* HeadphoneDeviceProfileConfiguration.swift */, B40000000000000000000011 /* BlindABXValidation.swift */, B40000000000000000000092 /* RoomCorrectionABX.swift */, B50000000000000000000012 /* HeadphoneModelResearchLibrary.swift */, F65000000000000000000012 /* BinauralProfileAsset.swift */, F64000000000000000000011 /* OutputDeviceCalibration.swift */, E6D0000000000000000009A1 /* BinauralResampledAssetCache.swift */, E6D0000000000000000009A2 /* HeadphoneLiveEditPlanner.swift */,); path = Routing; sourceTree = "<group>"; };
+		A20000000000000000000053 /* Routing */ = {isa = PBXGroup; children = (A20000000000000000000024 /* AudioRouteConfiguration.swift */, E8B000000000000000000001 /* SpeakerRoutingConfiguration.swift */, E8B000000000000000000002 /* SpeakerRoutingValidation.swift */, F62000000000000000000011 /* OutputDeviceProfileConfiguration.swift */, F65000000000000000000011 /* HeadphoneDeviceProfileConfiguration.swift */, B40000000000000000000011 /* BlindABXValidation.swift */, B40000000000000000000092 /* RoomCorrectionABX.swift */, B50000000000000000000012 /* HeadphoneModelResearchLibrary.swift */, F65000000000000000000012 /* BinauralProfileAsset.swift */, F64000000000000000000011 /* OutputDeviceCalibration.swift */, E6D0000000000000000009A1 /* BinauralResampledAssetCache.swift */, E6D0000000000000000009A2 /* HeadphoneLiveEditPlanner.swift */,); path = Routing; sourceTree = "<group>"; };
 		B113B0000000000000000050 /* Backup */ = {
 			isa = PBXGroup;
 			children = (
@@ -1453,6 +1463,7 @@
 				E6D0000000000000000001B0 /* UnifiedGraphProgramDSP.swift in Sources */,
 				E6D000000000000000000102 /* UnifiedGraphHost.swift in Sources */,
 				E6D000000000000000000103 /* UnifiedGraphConfiguration.swift in Sources */,
+				E8B0000000000000000000A3 /* SpeakerRoutingCompiler.swift in Sources */,
 				E6D000000000000000000104 /* UnifiedGraphTranslator.swift in Sources */,
 				E6C000000000000000000030 /* graph.cpp in Sources */,
 				E6C000000000000000000031 /* snapshot.cpp in Sources */,
@@ -1509,6 +1520,8 @@
 				A20000000000000000000012 /* AudioOutputDevice.swift in Sources */,
 				A20000000000000000000013 /* OutputDeviceCatalog.swift in Sources */,
 				A20000000000000000000014 /* AudioRouteConfiguration.swift in Sources */,
+				E8B0000000000000000000A2 /* SpeakerRoutingValidation.swift in Sources */,
+				E8B0000000000000000000A1 /* SpeakerRoutingConfiguration.swift in Sources */,
 				F62000000000000000000001 /* OutputDeviceProfileConfiguration.swift in Sources */,
 				F65000000000000000000001 /* HeadphoneDeviceProfileConfiguration.swift in Sources */,
 				B50000000000000000000002 /* HeadphoneModelResearchLibrary.swift in Sources */,
@@ -1742,6 +1755,7 @@
 				E11D00000000000000000002 /* MeasurementCoreTests.swift in Sources */,
 				E10A00000000000000000032 /* RoomCorrectionCoreTests.swift in Sources */,
 				E8A000000000000000000032 /* CrossoverCoreTests.swift in Sources */,
+				E8B0000000000000000000A4 /* SpeakerRoutingTests.swift in Sources */,
 				E10A00000000000000000073 /* RoomCorrectionBassApplyTests.swift in Sources */,
 				E10B00000000000000000005 /* RoomCorrectionDeployControllerTests.swift in Sources */,
 				E10A00000000000000000034 /* RoomCorrectionLanePlanTests.swift in Sources */,

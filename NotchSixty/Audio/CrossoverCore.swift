@@ -10,7 +10,7 @@ enum CrossoverCore {
         case status(Int32)
     }
 
-    enum Family: UInt32, CaseIterable, Sendable {
+    enum Family: UInt32, CaseIterable, Codable, Sendable {
         case butterworth = 0
         case bessel = 1
         case linkwitzRiley = 2
@@ -22,7 +22,7 @@ enum CrossoverCore {
     }
 
     /// One filter: family, order and corner. High-pass and low-pass are specified independently.
-    struct FilterSpec: Equatable, Hashable, Sendable {
+    struct FilterSpec: Equatable, Hashable, Codable, Sendable {
         var family: Family
         var order: Int
         var cornerHz: Double

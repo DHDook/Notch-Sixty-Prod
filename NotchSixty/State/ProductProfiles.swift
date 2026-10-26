@@ -573,6 +573,9 @@ struct PlaybackSystemState: Codable, Equatable, Sendable {
     var speakerIR: SpeakerIRConfiguration
     var ambientCompensation: AmbientCompensationConfiguration?
     var activeQuietZone: ActiveQuietZoneConfiguration?
+    /// E8 S3: source-to-output routing with per-way crossovers. nil (the default, and always with `e8.routing-matrix` off)
+    /// leaves the stored profile byte-identical.
+    var speakerRouting: SpeakerRoutingConfiguration?
 
     init(
         schemaVersion: Int = PlaybackSystemState.currentSchemaVersion,
@@ -588,7 +591,8 @@ struct PlaybackSystemState: Codable, Equatable, Sendable {
         speakerDriverProcessing: SpeakerDriverProcessingConfiguration? = nil,
         speakerIR: SpeakerIRConfiguration = SpeakerIRConfiguration(),
         ambientCompensation: AmbientCompensationConfiguration? = nil,
-        activeQuietZone: ActiveQuietZoneConfiguration? = nil
+        activeQuietZone: ActiveQuietZoneConfiguration? = nil,
+        speakerRouting: SpeakerRoutingConfiguration? = nil
     ) {
         self.schemaVersion = schemaVersion
         self.associatedOutputUID = associatedOutputUID
@@ -604,6 +608,7 @@ struct PlaybackSystemState: Codable, Equatable, Sendable {
         self.speakerIR = speakerIR
         self.ambientCompensation = ambientCompensation
         self.activeQuietZone = activeQuietZone
+        self.speakerRouting = speakerRouting
     }
 
     func composingGain(over base: DSPGainConfiguration) -> DSPGainConfiguration {
