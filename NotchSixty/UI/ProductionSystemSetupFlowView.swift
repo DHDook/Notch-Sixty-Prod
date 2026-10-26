@@ -28,7 +28,7 @@ final class SystemSetupFlowModel: ObservableObject {
         self.profiles = profiles
         self.microphone = microphone
         self.calibration = calibration
-        self.noise = noise ?? UnconnectedSystemSetupNoisePlayer()
+        self.noise = noise ?? EngineSystemSetupNoisePlayer(host: engine)
     }
 
     var choices: SystemSetupChoices { flow.choices }
@@ -96,7 +96,8 @@ final class SystemSetupFlowModel: ObservableObject {
 
     func stopNoise() {
         noise.stop()
-        noiseIsPlaying = false
+        noiseIsPlaying = noise.isPlaying
+        if noiseIsPlaying { message = "The noise could not be stopped. Stop playback from the main window." }
     }
 
     private func republishNoise() {

@@ -4049,6 +4049,31 @@ final class AudioIOEngine: ObservableObject {
         var room: RoomCorrectionConfiguration
         var speakerIR: SpeakerIRConfiguration
         var ambient: AmbientCompensationTarget
+        /// E12 S4a: the guided-setup Level step's noise. nil (the default) means no generator stage.
+        /// Any hand-built inputs must carry this forward or a later edit drops the noise.
+        var generator: SignalGeneratorSettings?
+    }
+
+    /// E12 S4a: the generator settings currently published to the live graph, or nil when none is playing. Never
+    /// persisted: a session restart, stop or output change clears it.
+    private(set) var liveGeneratorSettings: SignalGeneratorSettings?
+
+    /// Plays (or, with nil, stops) the E11 generator on the running N-channel graph through the normal republish
+    /// path. Throws and leaves the graph untouched when the running session cannot take a graph edit (stereo kernel
+    /// path, binaural, flag off) or the settings cannot form a stage at the output rate.
+    func setLiveGenerator(_ settings: SignalGeneratorSettings?) throws {
+        guard let session = nChannelTransportSession, liveGraphEditsAvailable else {
+            if settings == nil { liveGeneratorSettings = nil; return }
+            throw LiveNChannelTransportError.configurationChangeRequiresRestart
+        }
+        if let settings,
+           settings.stageParams(active: true, sampleRate: session.outputFormat.sampleRate) == nil {
+            throw LiveNChannelTransportError.unifiedGraphRejected(.specRejected)
+        }
+        var inputs = currentLiveGraphInputs
+        inputs.generator = settings
+        try republishLiveGraph(inputs)
+        liveGeneratorSettings = settings
     }
 
     var currentLiveGraphInputs: LiveGraphInputs {
@@ -4056,7 +4081,8 @@ final class AudioIOEngine: ObservableObject {
             stereoEQ: stereoEQConfiguration, dynamics: dynamicsConfiguration,
             playback: playbackControlConfiguration, gain: gainConfiguration,
             bass: bassManagementConfiguration, room: roomCorrectionConfiguration,
-            speakerIR: speakerIRConfiguration, ambient: ambientCompensationRuntimeTarget)
+            speakerIR: speakerIRConfiguration, ambient: ambientCompensationRuntimeTarget,
+            generator: liveGeneratorSettings)
     }
 
     /// True when the flag is on and the running N-channel or binaural session is rendered by the graph, so the
@@ -4102,7 +4128,9 @@ final class AudioIOEngine: ObservableObject {
                 routePlan: session.routePlan, sampleRate: rate, gainConfiguration: inputs.gain,
                 bassManagementConfiguration: renderBassManagementConfiguration(inputs.bass), programDSP: program
             ) {
-            case .success(let configuration): try session.republishGraph(configuration)
+            case .success(var configuration):
+                configuration.generatorParams = inputs.generator?.stageParams(active: true, sampleRate: rate)
+                try session.republishGraph(configuration)
             case .failure(let reason): throw LiveNChannelTransportError.unifiedGraphRejected(reason)
             }
         } else if let session = binauralHeadphoneTransportSession {
@@ -4867,6 +4895,7 @@ final class AudioIOEngine: ObservableObject {
     }
 
     private func tearDownTransport(fadeOut: Bool) {
+        liveGeneratorSettings = nil
         if let controller = headTrackingController {
             controller.stop()
             headTrackingController = nil

@@ -294,4 +294,85 @@ final class SystemSetupMeasureAlignTests: XCTestCase {
         }
         XCTAssertFalse(player.isPlaying)
     }
+
+    // MARK: Engine noise player (E12 S4a)
+
+    @MainActor
+    final class FakeGeneratorHost: SystemSetupGeneratorHost {
+        var calls: [SignalGeneratorSettings?] = []
+        var failure: Error?
+        func setLiveGenerator(_ settings: SignalGeneratorSettings?) throws {
+            if let failure { throw failure }
+            calls.append(settings)
+        }
+    }
+
+    func testEnginePlayerStartsAtMinus40RefusesAboveCeilingAndStopsOnCancel() throws {
+        let host = FakeGeneratorHost()
+        let player = EngineSystemSetupNoisePlayer(host: host)
+        try player.start(SystemSetupLevelPlan().generatorSettings())
+        XCTAssertTrue(player.isPlaying)
+        XCTAssertEqual(host.calls.first??.levelDB, -40)
+        var loud = SystemSetupLevelPlan().generatorSettings()
+        loud.levelDB = -3
+        XCTAssertThrowsError(try player.start(loud)) { XCTAssertEqual($0 as? SystemSetupNoiseError, .aboveCeiling) }
+        var sine = SystemSetupLevelPlan().generatorSettings()
+        sine.kind = .sine
+        XCTAssertThrowsError(try player.start(sine))
+        XCTAssertEqual(host.calls.count, 1)
+        player.stop()
+        XCTAssertFalse(player.isPlaying)
+        XCTAssertEqual(host.calls.count, 2)
+        XCTAssertNil(host.calls[1])
+    }
+
+    func testEnginePlayerNeverClaimsSilenceWhenStopFails() throws {
+        let host = FakeGeneratorHost()
+        let player = EngineSystemSetupNoisePlayer(host: host)
+        try player.start(SystemSetupLevelPlan().generatorSettings())
+        host.failure = LiveNChannelTransportError.graphRepublishRefused("x")
+        player.stop()
+        XCTAssertTrue(player.isPlaying)
+        host.failure = nil
+        player.stop()
+        XCTAssertFalse(player.isPlaying)
+    }
+
+    func testEnginePlayerReportsAnOutputThatCannotTakeTheGenerator() throws {
+        let host = FakeGeneratorHost()
+        host.failure = LiveNChannelTransportError.configurationChangeRequiresRestart
+        let player = EngineSystemSetupNoisePlayer(host: host)
+        XCTAssertThrowsError(try player.start(SystemSetupLevelPlan().generatorSettings())) {
+            XCTAssertEqual($0 as? SystemSetupNoiseError, .engineHookUnavailable)
+        }
+        XCTAssertFalse(player.isPlaying)
+    }
+
+    /// The settings the player hands the engine render through the real graph: band-limited, near -40 dBFS RMS,
+    /// never above the ceiling, at every standard rate.
+    func testGraphRendersTheLevelNoiseWithinTheCeilingAtEveryRate() throws {
+        var plan = SystemSetupLevelPlan()
+        for _ in 0..<40 { plan.raise() }
+        for rate in Self.standardSampleRates {
+            for level in [SystemSetupLevelPlan(), plan] {
+                let settings = try level.validatedGeneratorSettings(sampleRate: rate)
+                var config = UnifiedGraphConfiguration(
+                    sampleRate: rate, lanes: [UnifiedGraphLane(outputGain: 1, eq: []), UnifiedGraphLane(outputGain: 1, eq: [])])
+                config.generatorParams = settings.stageParams(active: true, sampleRate: rate)
+                let host = try UnifiedGraphHost(spec: try config.makeSpec())
+                defer { host.release() }
+                let block = 4_096
+                let silence = [[Float]](repeating: [Float](repeating: 0, count: block), count: 2)
+                var out: [Float] = []
+                while out.count < Int(rate) { out += try host.processOffline(input: silence, frames: block)[0] }
+                let tail = Array(out.suffix(Int(rate / 2)))
+                let peak = tail.map { abs(Double($0)) }.max() ?? 0
+                let rms = (tail.reduce(0.0) { $0 + Double($1) * Double($1) } / Double(tail.count)).squareRoot()
+                XCTAssertGreaterThan(rms, 0, "\(rate) Hz plays")
+                XCTAssertLessThanOrEqual(20 * log10(rms), SignalGeneratorSettings.hardCeilingDB + 0.5, "\(rate) Hz rms")
+                // The core clamps samples to +-1.0; the ceiling is an RMS ceiling.
+                XCTAssertLessThanOrEqual(peak, 1.0, "\(rate) Hz peak")
+            }
+        }
+    }
 }
