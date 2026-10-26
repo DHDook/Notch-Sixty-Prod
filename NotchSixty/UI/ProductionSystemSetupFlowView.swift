@@ -14,12 +14,21 @@ final class SystemSetupFlowModel: ObservableObject {
     @Published private(set) var alignment: SystemSetupAlignment?
     @Published private(set) var noiseIsPlaying = false
     @Published private(set) var isMeasuring = false
+    @Published private(set) var bass: SystemSetupBassDesign?
+    @Published var correctionMode = SystemSetupCorrectionMode.default
+    @Published var correctionTarget = SystemSetupCorrectionTarget.default
+    @Published private(set) var seatPredictions: [SystemSetupSeatPrediction] = []
+    @Published private(set) var correctionIsPrepared = false
 
     let engine: AudioIOEngine
     let profiles: ProductProfileController
     let microphone: RoomCorrectionCalibrationController
     let calibration: MultichannelCalibrationController
     private let noise: SystemSetupNoisePlaying
+    /// The flow's own Room Correction project (its own folder), so it never overwrites the project
+    /// the user keeps in the Room Correction workspace.
+    let roomProjects: RoomCorrectionProjectController
+    private var profileBeforeBass: OutputDeviceProfileConfiguration?
 
     init(engine: AudioIOEngine, profiles: ProductProfileController, microphone: RoomCorrectionCalibrationController,
          calibration: MultichannelCalibrationController,
@@ -29,13 +38,18 @@ final class SystemSetupFlowModel: ObservableObject {
         self.microphone = microphone
         self.calibration = calibration
         self.noise = noise ?? UnconnectedSystemSetupNoisePlayer()
+        self.roomProjects = RoomCorrectionProjectController(
+            profiles: profiles,
+            store: RoomCorrectionProjectStore(
+                rootDirectory: SystemSetupSessionStore.defaultDirectory()
+                    .appendingPathComponent("RoomCorrection", isDirectory: true)))
     }
 
     var choices: SystemSetupChoices { flow.choices }
     var step: SystemSetupStep { flow.step }
     var isRunning: Bool { flow.phase == .running }
     /// Steps built so far; later ones show a placeholder.
-    static let builtSteps: Set<SystemSetupStep> = [.output, .topology, .microphone, .room, .measure, .alignment]
+    static let builtSteps: Set<SystemSetupStep> = [.output, .topology, .microphone, .room, .measure, .alignment, .bass, .correction]
 
     func begin() {
         let snapshot = profiles.captureSystemState()
@@ -176,8 +190,13 @@ final class SystemSetupFlowModel: ObservableObject {
 
     /// New or removed measurements make the alignment stale: revert the trial and ask again.
     private func invalidateDesign() {
+        if flow.choices.correctionApplied { revertCorrection() }
+        if flow.choices.bassApplied { revertBass() }
         if flow.choices.alignmentApplied { revertAlignment() }
         alignment = nil
+        bass = nil
+        correctionIsPrepared = false
+        seatPredictions = []
     }
 
     // MARK: Alignment
@@ -219,6 +238,117 @@ final class SystemSetupFlowModel: ObservableObject {
         }
     }
 
+    // MARK: Bass
+
+    var hasSubwoofer: Bool { flow.choices.topology?.hasSubwoofer == true }
+
+    /// Joint bass design (E10) for the measured seats. E10's mixed-phase flag has been removed, so
+    /// the joint optimiser is always allowed here; without a subwoofer the step is skipped.
+    func computeBass() {
+        guard let rate = flow.choices.sampleRate else { return }
+        do {
+            bass = try SystemSetupBassDesign.make(
+                sources: calibration.sources, seats: calibration.seats, measurements: calibration.measurements,
+                sampleRate: rate, crossoverHz: engine.bassManagementConfiguration.frequencyHz,
+                jointBassAllowed: true)
+            message = nil
+        } catch {
+            bass = nil
+            message = error.localizedDescription
+        }
+    }
+
+    func applyBass() {
+        guard let bass, let profile = profiles.selectedSystemOutputDeviceProfile else {
+            message = "Work out the bass design first."
+            return
+        }
+        do {
+            let before = profile
+            try profiles.replaceSelectedSystemOutputDeviceProfile(try bass.applying(to: profile))
+            profileBeforeBass = before
+            flow.choices.bassApplied = true
+            message = nil
+        } catch {
+            message = error.localizedDescription
+        }
+    }
+
+    func revertBass() {
+        do {
+            if let previous = profileBeforeBass {
+                try profiles.replaceSelectedSystemOutputDeviceProfile(previous)
+            }
+            profileBeforeBass = nil
+            flow.choices.bassApplied = false
+        } catch {
+            message = "Restoring the previous bass settings failed: \(error.localizedDescription)"
+        }
+    }
+
+    // MARK: Correction
+
+    /// Builds the flow's Room Correction project from the seat records (no second measurement),
+    /// then designs with the Room Correction workspace's own path.
+    func prepareCorrection() {
+        guard let rate = flow.choices.sampleRate, let systemID = profiles.selectedSystemProfileID else { return }
+        do {
+            let input = microphone.selectedInputDevice
+            let sweep = RoomCorrectionSweepSettings(
+                sampleRate: rate, startFrequencyHz: microphone.sweepStartFrequencyHz,
+                endFrequencyHz: microphone.sweepEndFrequencyHz, durationSeconds: microphone.sweepDurationSeconds,
+                levelDBFS: flow.choices.sweepLevelDBFS ?? microphone.sweepLevelDBFS,
+                leadInSeconds: microphone.sweepLeadInSeconds, tailSeconds: microphone.sweepTailSeconds,
+                fadeSeconds: microphone.sweepFadeSeconds)
+            let mic = RoomCorrectionMicrophone(
+                stableID: input?.uid, displayName: input?.name ?? "Measurement Microphone", manufacturer: nil,
+                inputChannelIndex: microphone.selectedInputChannelIndex, calibration: microphone.microphoneCalibration)
+            let project = try SystemSetupRoomProjectAdapter.project(
+                playbackSystemID: systemID, name: "\(profiles.selectedSystemProfileName) Guided Setup",
+                seats: calibration.seats, measurements: calibration.measurements, sampleRate: rate,
+                sweep: sweep, microphone: mic)
+            try roomProjects.adoptProject(project)
+            correctionIsPrepared = true
+            message = nil
+        } catch {
+            correctionIsPrepared = false
+            message = error.localizedDescription
+        }
+    }
+
+    /// Trial apply: designs against the chosen target and deploys through the controller's gated
+    /// path (verification recomputed before commit). Mixed phase is not produced here; the Verify
+    /// step's verifier gates it (S6), so the design kind stays minimum phase.
+    func applyCorrection() {
+        do {
+            if !correctionIsPrepared { prepareCorrection() }
+            guard correctionIsPrepared else { return }
+            try roomProjects.setTarget(correctionTarget.curve)
+            let design = try roomProjects.generateDesign(
+                parameters: SystemSetupCorrectionPlan.defaultParameters, name: "Guided Setup \(correctionTarget.title)")
+            let report = try roomProjects.verification(for: design)
+            try roomProjects.deploySelectedDesign()
+            seatPredictions = SystemSetupSeatPrediction.make(from: report)
+            flow.choices.designKind = correctionMode.designKind(mixedPhaseAllowed: false)
+            flow.choices.correctionApplied = true
+            message = nil
+        } catch {
+            message = error.localizedDescription
+        }
+    }
+
+    func revertCorrection() {
+        guard let snapshot = flow.snapshot else { return }
+        do {
+            try profiles.replaceSelectedSystemRoomCorrection(
+                snapshot.roomCorrection, calibrationSummary: snapshot.roomCorrectionCalibration)
+            flow.choices.correctionApplied = false
+            seatPredictions = []
+        } catch {
+            message = "Restoring the previous correction failed: \(error.localizedDescription)"
+        }
+    }
+
     func acceptSweepLevel(measuredSPLdBC: Double) {
         flow.choices.sweepLevelDBFS = level.sweepLevel(measuredSPLdBC: measuredSPLdBC)
     }
@@ -248,6 +378,8 @@ final class SystemSetupFlowModel: ObservableObject {
         do {
             try profiles.replaceSelectedSystemOutputDeviceProfile(snapshot.outputDeviceProfile)
             try profiles.replaceSelectedSystemBassManagement(snapshot.bassManagement)
+            try profiles.replaceSelectedSystemRoomCorrection(
+                snapshot.roomCorrection, calibrationSummary: snapshot.roomCorrectionCalibration)
         } catch {
             message = "Restoring the previous settings failed: \(error.localizedDescription)"
         }
@@ -329,6 +461,8 @@ struct ProductionSystemSetupFlowView: View {
         case .microphone: SystemSetupMicrophoneStep(model: model)
         case .measure: SystemSetupMeasureStep(model: model)
         case .alignment: SystemSetupAlignmentStep(model: model)
+        case .bass: SystemSetupBassStep(model: model)
+        case .correction: SystemSetupCorrectionStep(model: model)
         case .room:
             Text("Optional. Describe the room so seat and speaker suggestions can pre-fill the next steps, or skip.")
                 .foregroundStyle(.secondary)
@@ -582,6 +716,106 @@ private struct SystemSetupAlignmentStep: View {
             }
         }
         .onAppear { if model.alignment == nil { Task { await model.computeAlignment() } } }
+    }
+}
+
+private struct SystemSetupBassStep: View {
+    @ObservedObject var model: SystemSetupFlowModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Blend the subwoofer").font(.headline)
+            if !model.hasSubwoofer {
+                Text("You have no subwoofer, so there is nothing to blend. Continue to the next step.")
+                    .foregroundStyle(.secondary)
+            } else if let bass = model.bass {
+                content(bass)
+            } else {
+                Button("Work out the bass design") { model.computeBass() }
+            }
+        }
+        .onAppear { if model.hasSubwoofer && model.bass == nil { model.computeBass() } }
+    }
+
+    @ViewBuilder
+    private func content(_ bass: SystemSetupBassDesign) -> some View {
+        Text("Notch Sixty sets the subwoofer's level, delay and polarity so bass is as even as possible across every seat you measured. Apply it to hear the result; Revert or Cancel restores your earlier settings.")
+            .font(.callout).foregroundStyle(.secondary)
+        if bass.mode == .subAlignmentOnly {
+            Label("The subwoofer keeps the alignment you applied in the previous step.", systemImage: "checkmark.circle")
+        } else {
+            if let before = bass.seatSpreadBeforeDB, let after = bass.seatSpreadAfterDB {
+                Text("Seat-to-seat bass difference (20 to 120 Hz): \(before, specifier: "%.1f") dB now, \(after, specifier: "%.1f") dB predicted.")
+            }
+            Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 6) {
+                GridRow { Text("Seat").bold(); Text("Average level now").bold(); Text("Predicted").bold() }
+                ForEach(Array(bass.seatNames.enumerated()), id: \.offset) { index, name in
+                    GridRow {
+                        Text(name)
+                        Text("\(bass.seatMeanBeforeDB[safe: index] ?? 0, specifier: "%.1f") dB").monospacedDigit()
+                        Text("\(bass.seatMeanAfterDB[safe: index] ?? 0, specifier: "%.1f") dB").monospacedDigit()
+                    }
+                }
+            }
+            Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 6) {
+                GridRow { Text("Speaker").bold(); Text("Level").bold(); Text("Delay").bold(); Text("Polarity").bold() }
+                ForEach(bass.rows) { row in
+                    GridRow {
+                        Text(row.title)
+                        Text("\(row.gainDB, specifier: "%.1f") dB").monospacedDigit()
+                        Text("\(row.delayMilliseconds, specifier: "%.2f") ms").monospacedDigit()
+                        Text(row.polarityInverted ? "Inverted" : "Normal")
+                    }
+                }
+            }
+        }
+        HStack {
+            Button("Apply") { model.applyBass() }.disabled(model.choices.bassApplied)
+            Button("Revert") { model.revertBass() }.disabled(!model.choices.bassApplied)
+            if model.choices.bassApplied { Label("Applied", systemImage: "checkmark.circle.fill") }
+        }
+    }
+}
+
+private extension Array {
+    subscript(safe index: Int) -> Element? { indices.contains(index) ? self[index] : nil }
+}
+
+private struct SystemSetupCorrectionStep: View {
+    @ObservedObject var model: SystemSetupFlowModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Correct the room").font(.headline)
+            Text("Notch Sixty flattens the bumps and dips your seats share, using the measurements you already made. Nothing is measured again.")
+                .font(.callout).foregroundStyle(.secondary)
+            Picker("Listening", selection: $model.correctionMode) {
+                ForEach(SystemSetupCorrectionMode.allCases) { Text($0.title).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            Text(model.correctionMode.detail).font(.callout).foregroundStyle(.secondary)
+            Picker("Sound", selection: $model.correctionTarget) {
+                ForEach(SystemSetupCorrectionTarget.all) { Text($0.title).tag($0) }
+            }
+            Text(model.correctionTarget.detail).font(.callout).foregroundStyle(.secondary)
+            if !model.seatPredictions.isEmpty {
+                Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 6) {
+                    GridRow { Text("Seat").bold(); Text("Error now").bold(); Text("Predicted").bold() }
+                    ForEach(model.seatPredictions) { seat in
+                        GridRow {
+                            Text(seat.name)
+                            Text("\(seat.rmsErrorBeforeDB, specifier: "%.1f") dB").monospacedDigit()
+                            Text("\(seat.rmsErrorAfterDB, specifier: "%.1f") dB").monospacedDigit()
+                        }
+                    }
+                }
+            }
+            HStack {
+                Button("Apply") { model.applyCorrection() }.disabled(model.choices.correctionApplied)
+                Button("Revert") { model.revertCorrection() }.disabled(!model.choices.correctionApplied)
+                if model.choices.correctionApplied { Label("Applied", systemImage: "checkmark.circle.fill") }
+            }
+        }
     }
 }
 
