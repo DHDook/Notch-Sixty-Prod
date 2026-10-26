@@ -289,9 +289,192 @@ final class SystemSetupMeasureAlignTests: XCTestCase {
 
     func testUnconnectedPlayerSaysWhyAndNeverPlays() throws {
         let player = UnconnectedSystemSetupNoisePlayer()
-        XCTAssertThrowsError(try player.start(SystemSetupLevelPlan().generatorSettings())) {
+        XCTAssertThrowsError(try player.start(SystemSetupLevelPlan().generatorSettings(), selection: .lane(0))) {
             XCTAssertEqual($0 as? SystemSetupNoiseError, .engineHookUnavailable)
         }
         XCTAssertFalse(player.isPlaying)
+    }
+
+    // MARK: Engine noise player (E12 S4a)
+
+    @MainActor
+    final class FakeGeneratorHost: SystemSetupGeneratorHost {
+        var calls: [SignalGeneratorSettings?] = []
+        var selections: [SignalGeneratorLaneSelection] = []
+        var failure: Error?
+        func setLiveGenerator(_ settings: SignalGeneratorSettings?, selection: SignalGeneratorLaneSelection) throws {
+            if let failure { throw failure }
+            calls.append(settings)
+            selections.append(selection)
+        }
+    }
+
+    func testEnginePlayerStartsAtMinus40RefusesAboveCeilingAndStopsOnCancel() throws {
+        let host = FakeGeneratorHost()
+        let player = EngineSystemSetupNoisePlayer(host: host)
+        try player.start(SystemSetupLevelPlan().generatorSettings(), selection: .lane(0))
+        XCTAssertTrue(player.isPlaying)
+        XCTAssertEqual(host.calls.first??.levelDB, -40)
+        var loud = SystemSetupLevelPlan().generatorSettings()
+        loud.levelDB = -3
+        XCTAssertThrowsError(try player.start(loud, selection: .lane(0))) { XCTAssertEqual($0 as? SystemSetupNoiseError, .aboveCeiling) }
+        var sine = SystemSetupLevelPlan().generatorSettings()
+        sine.kind = .sine
+        XCTAssertThrowsError(try player.start(sine, selection: .lane(0)))
+        XCTAssertEqual(host.calls.count, 1)
+        player.stop()
+        XCTAssertFalse(player.isPlaying)
+        XCTAssertEqual(host.calls.count, 2)
+        XCTAssertNil(host.calls[1])
+    }
+
+    func testEnginePlayerNeverClaimsSilenceWhenStopFails() throws {
+        let host = FakeGeneratorHost()
+        let player = EngineSystemSetupNoisePlayer(host: host)
+        try player.start(SystemSetupLevelPlan().generatorSettings(), selection: .lane(0))
+        host.failure = LiveNChannelTransportError.graphRepublishRefused("x")
+        player.stop()
+        XCTAssertTrue(player.isPlaying)
+        host.failure = nil
+        player.stop()
+        XCTAssertFalse(player.isPlaying)
+    }
+
+    func testEnginePlayerReportsAnOutputThatCannotTakeTheGenerator() throws {
+        let host = FakeGeneratorHost()
+        host.failure = LiveNChannelTransportError.configurationChangeRequiresRestart
+        let player = EngineSystemSetupNoisePlayer(host: host)
+        XCTAssertThrowsError(try player.start(SystemSetupLevelPlan().generatorSettings(), selection: .lane(0))) {
+            XCTAssertEqual($0 as? SystemSetupNoiseError, .engineHookUnavailable)
+        }
+        XCTAssertFalse(player.isPlaying)
+    }
+
+    /// The settings the player hands the engine render through the real graph: band-limited, near -40 dBFS RMS,
+    /// never above the ceiling, at every standard rate.
+    func testGraphRendersTheLevelNoiseWithinTheCeilingAtEveryRate() throws {
+        var plan = SystemSetupLevelPlan()
+        for _ in 0..<40 { plan.raise() }
+        for rate in Self.standardSampleRates {
+            for level in [SystemSetupLevelPlan(), plan] {
+                let settings = try level.validatedGeneratorSettings(sampleRate: rate)
+                var config = UnifiedGraphConfiguration(
+                    sampleRate: rate, lanes: [UnifiedGraphLane(outputGain: 1, eq: []), UnifiedGraphLane(outputGain: 1, eq: [])])
+                config.generatorParams = settings.stageParams(active: true, sampleRate: rate)
+                let host = try UnifiedGraphHost(spec: try config.makeSpec())
+                defer { host.release() }
+                let block = 4_096
+                let silence = [[Float]](repeating: [Float](repeating: 0, count: block), count: 2)
+                var out: [Float] = []
+                while out.count < Int(rate) { out += try host.processOffline(input: silence, frames: block)[0] }
+                let tail = Array(out.suffix(Int(rate / 2)))
+                let peak = tail.map { abs(Double($0)) }.max() ?? 0
+                let rms = (tail.reduce(0.0) { $0 + Double($1) * Double($1) } / Double(tail.count)).squareRoot()
+                XCTAssertGreaterThan(rms, 0, "\(rate) Hz plays")
+                XCTAssertLessThanOrEqual(20 * log10(rms), SignalGeneratorSettings.hardCeilingDB + 0.5, "\(rate) Hz rms")
+                // The core clamps samples to +-1.0; the ceiling is an RMS ceiling.
+                XCTAssertLessThanOrEqual(peak, 1.0, "\(rate) Hz peak")
+            }
+        }
+    }
+
+    // MARK: Per-channel noise (E12 S4a owner decisions)
+
+    func testLaneSelectionNeverPutsNoiseOnTheLFEUnlessAsked() {
+        // 5.1 order: L R C LFE Ls Rs.
+        XCTAssertEqual(SignalGeneratorLaneSelection.allProgram(includeLFE: false).mask(laneCount: 6, lfeLane: 3), 0b110111)
+        XCTAssertEqual(SignalGeneratorLaneSelection.allProgram(includeLFE: true).mask(laneCount: 6, lfeLane: 3), 0b111111)
+        XCTAssertEqual(SignalGeneratorLaneSelection.lane(3).mask(laneCount: 6, lfeLane: 3), 0b001000)
+        XCTAssertEqual(SignalGeneratorLaneSelection.allProgram(includeLFE: false).mask(laneCount: 2, lfeLane: nil), 0b11)
+        XCTAssertNil(SignalGeneratorLaneSelection.lane(6).mask(laneCount: 6, lfeLane: 3))
+        XCTAssertNil(SignalGeneratorLaneSelection.lane(-1).mask(laneCount: 6, lfeLane: 3))
+        XCTAssertNil(SignalGeneratorLaneSelection.allProgram(includeLFE: false).mask(laneCount: 1, lfeLane: 0))
+    }
+
+    func testLFEStartsLowerBandLimitedAndChannelSwitchDropsBackToItsStart() throws {
+        var plan = SystemSetupLevelPlan()
+        plan.selectTarget(.lane(0), isLFE: false)
+        for _ in 0..<5 { plan.raise() }
+        XCTAssertEqual(plan.levelDB, -25)
+        plan.recordLevel()
+        plan.selectTarget(.lane(3), isLFE: true)
+        XCTAssertEqual(plan.levelDB, -50)
+        let lfe = try plan.validatedGeneratorSettings(sampleRate: 48_000)
+        XCTAssertLessThanOrEqual(lfe.highHz, SystemSetupLevelPlan.lfeHighHz)
+        plan.selectTarget(.lane(1), isLFE: false)
+        XCTAssertEqual(plan.levelDB, -40, "a raised level never carries onto a new channel")
+        plan.selectTarget(.lane(0), isLFE: false)
+        XCTAssertEqual(plan.levelDB, -25, "a recorded channel level comes back")
+        plan.selectTarget(.allProgram(includeLFE: false), isLFE: false)
+        XCTAssertEqual(plan.levelDB, -40)
+    }
+
+    func testEnginePlayerPassesTheSelectionThrough() throws {
+        let host = FakeGeneratorHost()
+        let player = EngineSystemSetupNoisePlayer(host: host)
+        try player.start(SystemSetupLevelPlan().generatorSettings(), selection: .lane(2))
+        try player.start(SystemSetupLevelPlan().generatorSettings(), selection: .allProgram(includeLFE: false))
+        XCTAssertEqual(host.selections, [.lane(2), .allProgram(includeLFE: false)])
+    }
+
+    /// One lane at a time: only the selected lane carries noise, the others stay silent; the mask never reaches the LFE
+    /// in the combined pass.
+    func testGraphPlaysOnlyTheSelectedLanesAtEveryRate() throws {
+        for rate in Self.standardSampleRates {
+            for (selection, expected) in [(SignalGeneratorLaneSelection.lane(1), [false, true, false]),
+                                          (.allProgram(includeLFE: false), [true, false, true])] {
+                let settings = try SystemSetupLevelPlan().validatedGeneratorSettings(sampleRate: rate)
+                var config = UnifiedGraphConfiguration(
+                    sampleRate: rate, lanes: [UnifiedGraphLane(), UnifiedGraphLane(), UnifiedGraphLane()])
+                config.generatorParams = settings.stageParams(active: true, sampleRate: rate)
+                config.generatorLaneMask = selection.mask(laneCount: 3, lfeLane: 1)
+                let host = try UnifiedGraphHost(spec: try config.makeSpec())
+                defer { host.release() }
+                let block = 4_096
+                let silence = [[Float]](repeating: [Float](repeating: 0, count: block), count: 3)
+                var out = [[Float]](repeating: [], count: 3)
+                while out[0].count < Int(rate) {
+                    let rendered = try host.processOffline(input: silence, frames: block)
+                    for lane in 0..<3 { out[lane] += rendered[lane] }
+                }
+                for lane in 0..<3 {
+                    let peak = out[lane].suffix(Int(rate / 2)).map { abs($0) }.max() ?? 0
+                    XCTAssertEqual(peak > 1e-6, expected[lane], "\(rate) Hz lane \(lane) \(selection)")
+                }
+            }
+        }
+        var config = UnifiedGraphConfiguration(sampleRate: 48_000, lanes: [UnifiedGraphLane(), UnifiedGraphLane()])
+        config.generatorParams = SignalGeneratorSettings().stageParams(active: true, sampleRate: 48_000)
+        config.generatorLaneMask = 0b100
+        XCTAssertThrowsError(try config.makeSpec())
+        config.generatorLaneMask = 0
+        XCTAssertThrowsError(try config.makeSpec())
+    }
+
+    func testCombinedIncludingLFEStartsAtTheSafeLevelWithAWarningAndKeepsTheCeiling() throws {
+        var plan = SystemSetupLevelPlan()
+        plan.selectTarget(.allProgram(includeLFE: false), isLFE: false)
+        XCTAssertEqual(plan.levelDB, -40)
+        XCTAssertFalse(plan.showsFullBandLFEWarning)
+        XCTAssertEqual(plan.target.mask(laneCount: 6, lfeLane: 3), 0b110111)
+        plan.selectTarget(.allProgram(includeLFE: true), isLFE: false)
+        XCTAssertEqual(plan.levelDB, SystemSetupLevelPlan.lfeStartLevelDB)
+        XCTAssertTrue(plan.showsFullBandLFEWarning)
+        XCTAssertEqual(plan.target.mask(laneCount: 6, lfeLane: 3), 0b111111)
+        for _ in 0..<40 {
+            plan.raise()
+            XCTAssertLessThanOrEqual(try plan.validatedGeneratorSettings().effectiveLevelDB, SignalGeneratorSettings.hardCeilingDB)
+        }
+        plan.reset()
+        XCTAssertEqual(plan.levelDB, SystemSetupLevelPlan.lfeStartLevelDB)
+        plan.selectTarget(.lane(0), isLFE: false)
+        XCTAssertFalse(plan.showsFullBandLFEWarning)
+        XCTAssertEqual(plan.levelDB, -40)
+        let host = FakeGeneratorHost()
+        let player = EngineSystemSetupNoisePlayer(host: host)
+        var loud = SystemSetupLevelPlan().generatorSettings()
+        loud.levelDB = -3
+        XCTAssertThrowsError(try player.start(loud, selection: .allProgram(includeLFE: true)))
+        XCTAssertTrue(host.calls.isEmpty)
     }
 }
