@@ -358,6 +358,49 @@ final class SpeakerRoutingMigrationTests: XCTestCase {
             SpeakerRoutingMigration.Result(routing: nil, refusal: .notApplicable))
     }
 
+    /// E8 A2a: stored tri-amp, bi-amp and mains + sub profiles load, migrate and save with the legacy fields untouched.
+    func testStoredLegacyProfilesRoundTripByteIdentical() throws {
+        for mode in SpeakerCrossoverMode.allCases {
+            let busList = buses(for: mode)
+            var state = PlaybackSystemState()
+            state.bassManagement = bass(mode, .linkwitzRiley24)
+            state.outputRouting = routes(busList)
+            state.speakerDriverProcessing = drivers(for: busList, rate: 48_000, limiter: -6)
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.sortedKeys]
+            let stored = try encoder.encode(state)
+            let loaded = try JSONDecoder().decode(PlaybackSystemState.self, from: stored)
+            XCTAssertEqual(loaded, state)
+            XCTAssertEqual(try encoder.encode(loaded), stored)
+            let migrated = loaded.migratingSpeakerRouting(enabled: true)
+            XCTAssertNotNil(migrated.speakerRouting, "\(mode)")
+            XCTAssertEqual(migrated.bassManagement, state.bassManagement)
+            XCTAssertEqual(migrated.outputRouting, state.outputRouting)
+            XCTAssertEqual(migrated.speakerDriverProcessing, state.speakerDriverProcessing)
+            XCTAssertNil(migrated.unmigratedLegacyRoutingReason)
+        }
+    }
+
+    /// E8 A2a: "Turn off legacy routing" shows only for an unmigratable profile and writes only `outputRouting.enabled`.
+    func testTurnOffLegacyRoutingWritesOnlyEnabled() throws {
+        let busList = buses(for: .biAmp)
+        var state = PlaybackSystemState()
+        state.bassManagement = bass(.biAmp, .linkwitzRiley24)
+        state.outputRouting = routes(busList)
+        XCTAssertNil(state.unmigratedLegacyRoutingReason, "migratable profile has nothing blocked")
+        XCTAssertEqual(state.turningOffLegacyRouting().outputRouting?.enabled, false)
+
+        state.speakerDriverProcessing = drivers(for: busList, rate: 48_000, limiter: -25)
+        XCTAssertNotNil(state.unmigratedLegacyRoutingReason)
+        let off = state.turningOffLegacyRouting()
+        XCTAssertEqual(off.outputRouting?.enabled, false)
+        XCTAssertNil(off.unmigratedLegacyRoutingReason)
+        var expected = state
+        expected.outputRouting?.enabled = false
+        XCTAssertEqual(off, expected)
+        XCTAssertEqual(PlaybackSystemState().turningOffLegacyRouting(), PlaybackSystemState())
+    }
+
     func testUnrepresentableLegacyConfigurationIsRefusedNotApproximated() throws {
         let busList = buses(for: .biAmp)
         var driverConfig = drivers(for: busList, rate: 48_000, limiter: -25)

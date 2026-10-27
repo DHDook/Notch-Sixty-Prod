@@ -1662,23 +1662,6 @@ private struct ProductionSpeakersView: View {
         engine.lifecycleState != .idle
     }
 
-    private var routedDeviceUIDs: [String] {
-        var result: [String] = []
-        for route in routing.enabledRoutes {
-            let uid = route.destination.deviceUID
-            if !result.contains(uid) { result.append(uid) }
-        }
-        return result
-    }
-
-    private var supportedRouteBuses: [SpeakerOutputBus] {
-        let fullRange: [SpeakerOutputBus] = [.leftFullRange, .rightFullRange]
-        guard let mode = engine.bassManagementConfiguration.physicalOutputMode else {
-            return fullRange
-        }
-        return fullRange + SpeakerOutputBus.allCases.filter { !fullRange.contains($0) && mode.supports(bus: $0) }
-    }
-
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
@@ -1691,8 +1674,7 @@ private struct ProductionSpeakersView: View {
                 if engine.bassManagementConfiguration.physicalOutputMode == .mainsSub {
                     subAlignmentCard
                 }
-                physicalRoutingCard
-                driverProcessingCard
+                legacyRoutingSummary
                 verificationCard
 
                 if let error = actionError ?? profiles.lastErrorDescription {
@@ -1744,7 +1726,7 @@ private struct ProductionSpeakersView: View {
             HStack {
                 VStack(alignment: .leading, spacing: 3) {
                     Text("Crossover Design").font(.headline)
-                    Text("Choose logical stereo bass management or a true physical Mains + Sub / Bi-Amp / Tri-Amp speaker topology.")
+                    Text("Logical stereo bass management. Physical speaker layouts, crossovers and driver processing are set up in the routing editor above.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -1757,34 +1739,7 @@ private struct ProductionSpeakersView: View {
                 .toggleStyle(.switch)
             }
 
-            LabeledContent("Physical Speaker Mode") {
-                Picker("Physical Speaker Mode", selection: Binding(
-                    get: { engine.bassManagementConfiguration.physicalOutputMode },
-                    set: { value in updateCrossover { configuration in
-                        configuration.physicalOutputMode = value
-                        if value == .triAmp {
-                            if configuration.frequencyHz >= 20_000 { configuration.frequencyHz = 2_000 }
-                            if configuration.upperFrequencyHz == nil
-                                || configuration.upperFrequencyHz! <= configuration.frequencyHz {
-                                configuration.upperFrequencyHz = min(20_000, max(configuration.frequencyHz + 1, 3_000))
-                            }
-                            if configuration.upperTopology == nil {
-                                configuration.upperTopology = configuration.topology
-                            }
-                        }
-                    } }
-                )) {
-                    Text("Stereo / logical only").tag(SpeakerCrossoverMode?.none)
-                    ForEach(SpeakerCrossoverMode.allCases) { mode in
-                        Text(mode.displayName).tag(Optional(mode))
-                    }
-                }
-                .labelsHidden()
-                .frame(width: 260)
-            }
-            .disabled(physicalRoutingLocked && routing.enabled)
-
-            LabeledContent(engine.bassManagementConfiguration.physicalOutputMode == .triAmp ? "Lower Crossover" : "Crossover Frequency") {
+            LabeledContent("Crossover Frequency") {
                 HStack {
                     Slider(value: Binding(
                         get: { engine.bassManagementConfiguration.frequencyHz },
@@ -1798,7 +1753,7 @@ private struct ProductionSpeakersView: View {
             }
             .disabled(physicalRoutingLocked && routing.enabled)
 
-            LabeledContent(engine.bassManagementConfiguration.physicalOutputMode == .triAmp ? "Lower Topology" : "Topology") {
+            LabeledContent("Topology") {
                 Picker("Topology", selection: Binding(
                     get: { engine.bassManagementConfiguration.topology },
                     set: { value in updateCrossover { $0.topology = value } }
@@ -1811,39 +1766,6 @@ private struct ProductionSpeakersView: View {
                 .frame(width: 280)
             }
             .disabled(physicalRoutingLocked && routing.enabled)
-
-            if engine.bassManagementConfiguration.physicalOutputMode == .triAmp {
-                LabeledContent("Upper Crossover") {
-                    HStack {
-                        Slider(value: Binding(
-                            get: {
-                                engine.bassManagementConfiguration.upperFrequencyHz
-                                    ?? max(engine.bassManagementConfiguration.frequencyHz + 1, 3_000)
-                            },
-                            set: { value in updateCrossover { $0.upperFrequencyHz = value } }
-                        ), in: upperFrequencyRange, step: 1)
-                        .frame(width: 330)
-                        Text("\((engine.bassManagementConfiguration.upperFrequencyHz ?? 3_000), specifier: "%.0f") Hz")
-                            .monospacedDigit()
-                            .frame(width: 72, alignment: .trailing)
-                    }
-                }
-                .disabled(physicalRoutingLocked && routing.enabled)
-
-                LabeledContent("Upper Topology") {
-                    Picker("Upper Topology", selection: Binding(
-                        get: { engine.bassManagementConfiguration.upperTopology ?? engine.bassManagementConfiguration.topology },
-                        set: { value in updateCrossover { $0.upperTopology = value } }
-                    )) {
-                        ForEach(CrossoverTopology.allCases) { topology in
-                            Text(topology.displayName).tag(topology)
-                        }
-                    }
-                    .labelsHidden()
-                    .frame(width: 280)
-                }
-                .disabled(physicalRoutingLocked && routing.enabled)
-            }
 
             if engine.bassManagementConfiguration.physicalOutputMode == .mainsSub
                 || engine.bassManagementConfiguration.physicalOutputMode == nil {
@@ -1935,474 +1857,6 @@ private struct ProductionSpeakersView: View {
         }
     }
 
-    private var physicalRoutingCard: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            HStack {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("Physical Output Matrix").font(.headline)
-                    Text("Map up to eight logical speaker buses to Core Audio device channels. Multiple devices are synchronized with a private Aggregate Device and HAL drift compensation.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-                Toggle("Physical Output Matrix", isOn: Binding(
-                    get: { routing.enabled },
-                    set: { value in updateRouting { $0.enabled = value } }
-                ))
-                .labelsHidden()
-                .toggleStyle(.switch)
-                .disabled(physicalRoutingLocked)
-            }
-
-            LabeledContent("Synchronization") {
-                Picker("Synchronization", selection: Binding(
-                    get: { routing.synchronizationMode },
-                    set: { value in updateRouting { $0.synchronizationMode = value } }
-                )) {
-                    Text(MultiOutputSynchronizationMode.automatic.displayName).tag(MultiOutputSynchronizationMode.automatic)
-                    Text(MultiOutputSynchronizationMode.aggregateDevice.displayName).tag(MultiOutputSynchronizationMode.aggregateDevice)
-                    Text("Software PLL (superseded)")
-                        .tag(MultiOutputSynchronizationMode.softwarePLL)
-                        .disabled(true)
-                }
-                .labelsHidden()
-                .frame(width: 240)
-            }
-            .disabled(physicalRoutingLocked)
-
-            if routedDeviceUIDs.count > 1 {
-                LabeledContent("Reference Device") {
-                    Picker("Reference Device", selection: Binding(
-                        get: { routing.referenceDeviceUID },
-                        set: { value in updateRouting { $0.referenceDeviceUID = value } }
-                    )) {
-                        Text("Automatic").tag(String?.none)
-                        ForEach(routedDeviceUIDs, id: \.self) { uid in
-                            Text(deviceName(uid)).tag(Optional(uid))
-                        }
-                    }
-                    .labelsHidden()
-                    .frame(width: 300)
-                }
-                .disabled(physicalRoutingLocked)
-            }
-
-            Divider()
-
-            if routing.routes.isEmpty {
-                ContentUnavailableView(
-                    "No Physical Routes",
-                    systemImage: "point.3.connected.trianglepath.dotted",
-                    description: Text("Add routes to assign speaker buses to physical device channels. Routing stays inactive until at least two routes are enabled.")
-                )
-                .frame(maxWidth: .infinity, minHeight: 150)
-            } else {
-                VStack(spacing: 10) {
-                    ForEach(routing.routes) { route in
-                        routeRow(route)
-                    }
-                }
-            }
-
-            HStack {
-                Button {
-                    addRoute()
-                } label: {
-                    Label("Add Route", systemImage: "plus")
-                }
-                .buttonStyle(.glass)
-                .disabled(physicalRoutingLocked || routing.routes.count >= MultiOutputRoutingConfiguration.maximumRouteCount || engine.outputDevices.isEmpty)
-
-                Spacer()
-                Text("\(routing.routes.count)/\(MultiOutputRoutingConfiguration.maximumRouteCount) routes")
-                    .font(.caption.monospacedDigit())
-                    .foregroundStyle(.secondary)
-            }
-
-            if routing.synchronizationMode == .softwarePLL {
-                Label("Software PLL is retained only for archive compatibility. Select Automatic or Aggregate Device before activation.", systemImage: "exclamationmark.triangle")
-                    .font(.caption)
-                    .foregroundStyle(.orange)
-            }
-        }
-        .padding(20)
-        .background(.regularMaterial, in: .rect(cornerRadius: 22))
-        .overlay {
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .stroke(.quaternary, lineWidth: 0.5)
-        }
-    }
-
-    private func routeRow(_ route: SpeakerOutputRoute) -> some View {
-        HStack(spacing: 10) {
-            Toggle("Route enabled", isOn: Binding(
-                get: { route.enabled },
-                set: { value in updateRoute(route.id) { $0.enabled = value } }
-            ))
-            .labelsHidden()
-            .toggleStyle(.switch)
-            .controlSize(.small)
-
-            Picker("Bus", selection: Binding(
-                get: { route.bus },
-                set: { value in updateRoute(route.id) { $0.bus = value; $0.name = value.displayName } }
-            )) {
-                ForEach(supportedRouteBuses) { bus in
-                    Text(bus.displayName).tag(bus)
-                }
-            }
-            .labelsHidden()
-            .frame(width: 180)
-
-            Picker("Device", selection: Binding(
-                get: { route.destination.deviceUID },
-                set: { uid in
-                    updateRoute(route.id) { updated in
-                        updated.destination.deviceUID = uid
-                        updated.destination.channelIndex = firstAvailableChannel(on: uid, excluding: route.id)
-                    }
-                }
-            )) {
-                ForEach(engine.outputDevices, id: \.uid) { device in
-                    Text(device.name).tag(device.uid)
-                }
-            }
-            .labelsHidden()
-            .frame(minWidth: 230)
-
-            Picker("Channel", selection: Binding(
-                get: { route.destination.channelIndex },
-                set: { value in updateRoute(route.id) { $0.destination.channelIndex = value } }
-            )) {
-                ForEach(0..<Int(max(1, channelCount(for: route.destination.deviceUID))), id: \.self) { channel in
-                    Text("Ch \(channel + 1)").tag(UInt32(channel))
-                }
-            }
-            .labelsHidden()
-            .frame(minWidth: 80)
-
-            Button(role: .destructive) {
-                removeRoute(route.id)
-            } label: {
-                Image(systemName: "trash")
-            }
-            .buttonStyle(.borderless)
-        }
-        .disabled(physicalRoutingLocked)
-        .padding(10)
-        .background(.quaternary.opacity(0.18), in: .rect(cornerRadius: 12))
-    }
-
-    private var driverProcessingCard: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            HStack(alignment: .firstTextBaseline) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("Per-Driver Processing").font(.headline)
-                    Text("Playback-System-owned EQ, trim, polarity, fractional delay, and protection. Mandatory crossover filtering always runs first.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-                if physicalRoutingLocked {
-                    Label("Stop processing to edit", systemImage: "stop.circle")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-
-            let buses = routedDriverBuses
-            if buses.isEmpty {
-                Text("Enable and map physical speaker routes to expose per-driver controls.")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-            } else {
-                ForEach(buses, id: \.self) { bus in
-                    driverBusEditor(bus)
-                }
-            }
-
-            Text("These controls are downstream of the mandatory Mains+Sub / Bi-Amp / Tri-Amp splitter. Global Bypass, audition modes, and driver-processing bypass cannot restore full-range signal to a protected split-driver bus.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
-        .padding(20)
-        .background(.regularMaterial, in: .rect(cornerRadius: 22))
-        .overlay {
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .stroke(.quaternary, lineWidth: 0.5)
-        }
-    }
-
-    private var routedDriverBuses: [SpeakerOutputBus] {
-        let routed = Set(routing.routes.filter(\.enabled).map(\.bus))
-        return SpeakerOutputBus.allCases.filter { routed.contains($0) }
-    }
-
-    @ViewBuilder
-    private func driverBusEditor(_ bus: SpeakerOutputBus) -> some View {
-        let configuration = engine.speakerDriverProcessingConfiguration.configuration(for: bus)
-        DisclosureGroup {
-            VStack(alignment: .leading, spacing: 14) {
-                HStack(spacing: 18) {
-                    Toggle("Processing", isOn: Binding(
-                        get: { driverConfiguration(for: bus).enabled },
-                        set: { value in updateDriverBus(bus) { $0.enabled = value } }
-                    ))
-                    .toggleStyle(.switch)
-
-                    Toggle("Invert Polarity", isOn: Binding(
-                        get: { driverConfiguration(for: bus).polarityInverted },
-                        set: { value in updateDriverBus(bus) { $0.polarityInverted = value } }
-                    ))
-                    .toggleStyle(.switch)
-
-                    Toggle("Limiter", isOn: Binding(
-                        get: { driverConfiguration(for: bus).limiterEnabled },
-                        set: { value in updateDriverBus(bus) { $0.limiterEnabled = value } }
-                    ))
-                    .toggleStyle(.switch)
-                }
-
-                LabeledContent("Trim") {
-                    HStack(spacing: 10) {
-                        Slider(
-                            value: Binding(
-                                get: { driverConfiguration(for: bus).trimDB },
-                                set: { value in updateDriverBus(bus) { $0.trimDB = value } }
-                            ),
-                            in: SpeakerDriverBusProcessingConfiguration.trimRange,
-                            step: 0.1
-                        )
-                        Text("\(configuration.trimDB, specifier: "%.1f") dB")
-                            .monospacedDigit()
-                            .frame(width: 66, alignment: .trailing)
-                    }
-                }
-
-                LabeledContent("Delay") {
-                    HStack(spacing: 10) {
-                        Slider(
-                            value: Binding(
-                                get: { driverConfiguration(for: bus).delayMilliseconds },
-                                set: { value in updateDriverBus(bus) { $0.delayMilliseconds = value } }
-                            ),
-                            in: SpeakerDriverBusProcessingConfiguration.delayRangeMilliseconds,
-                            step: 0.01
-                        )
-                        Text("\(configuration.delayMilliseconds, specifier: "%.2f") ms")
-                            .monospacedDigit()
-                            .frame(width: 72, alignment: .trailing)
-                    }
-                }
-
-                if configuration.limiterEnabled {
-                    LabeledContent("Limiter Threshold") {
-                        HStack(spacing: 10) {
-                            Slider(
-                                value: Binding(
-                                    get: { driverConfiguration(for: bus).limiterThresholdDBFS },
-                                    set: { value in updateDriverBus(bus) { $0.limiterThresholdDBFS = value } }
-                                ),
-                                in: SpeakerDriverBusProcessingConfiguration.limiterThresholdRange,
-                                step: 0.5
-                            )
-                            Text("\(configuration.limiterThresholdDBFS, specifier: "%.1f") dBFS")
-                                .monospacedDigit()
-                                .frame(width: 78, alignment: .trailing)
-                        }
-                    }
-                }
-
-                Divider()
-                HStack {
-                    Text("Driver EQ").font(.subheadline.weight(.semibold))
-                    Text("\(configuration.eqBands.count)/\(SpeakerDriverBusProcessingConfiguration.maximumEQBandCount)")
-                        .font(.caption.monospacedDigit())
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    Button {
-                        addDriverEQBand(to: bus)
-                    } label: {
-                        Label("Add Band", systemImage: "plus")
-                    }
-                    .buttonStyle(.glass)
-                    .disabled(configuration.eqBands.count >= SpeakerDriverBusProcessingConfiguration.maximumEQBandCount)
-                }
-
-                ForEach(Array(configuration.eqBands.enumerated()), id: \.element.id) { index, band in
-                    driverEQBandEditor(bus: bus, index: index, band: band)
-                }
-            }
-            .padding(.top, 10)
-            .disabled(physicalRoutingLocked)
-        } label: {
-            HStack {
-                Label(bus.displayName, systemImage: "hifispeaker.fill")
-                    .font(.subheadline.weight(.semibold))
-                Spacer()
-                let active = configuration.enabled && !configuration.isNeutral
-                Text(active ? "Configured" : "Neutral")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .padding(12)
-        .background(.quaternary.opacity(0.18), in: .rect(cornerRadius: 14))
-    }
-
-    @ViewBuilder
-    private func driverEQBandEditor(bus: SpeakerOutputBus, index: Int, band: EQBand) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Toggle("Band \(index + 1)", isOn: Binding(
-                    get: { driverBand(bus: bus, index: index)?.enabled ?? false },
-                    set: { value in updateDriverBand(bus: bus, index: index) { $0.enabled = value } }
-                ))
-                .toggleStyle(.switch)
-
-                Picker("Type", selection: Binding(
-                    get: { driverBand(bus: bus, index: index)?.type ?? .peaking },
-                    set: { value in updateDriverBand(bus: bus, index: index) { band in
-                        band.type = value
-                        band.slope = .db12
-                        band.constantQ = false
-                        band.firKernel = nil
-                    } }
-                )) {
-                    Text(EQFilterType.peaking.displayName).tag(EQFilterType.peaking)
-                    Text(EQFilterType.lowShelf.displayName).tag(EQFilterType.lowShelf)
-                    Text(EQFilterType.highShelf.displayName).tag(EQFilterType.highShelf)
-                    Text(EQFilterType.notch.displayName).tag(EQFilterType.notch)
-                    Text(EQFilterType.allPass.displayName).tag(EQFilterType.allPass)
-                }
-                .labelsHidden()
-                .frame(minWidth: 150)
-
-                Spacer()
-                Button(role: .destructive) {
-                    removeDriverEQBand(from: bus, index: index)
-                } label: {
-                    Image(systemName: "trash")
-                }
-                .buttonStyle(.plain)
-                .help("Remove driver EQ band")
-            }
-
-            LabeledContent("Frequency") {
-                HStack(spacing: 10) {
-                    Slider(
-                        value: Binding(
-                            get: { driverBand(bus: bus, index: index)?.frequencyHz ?? 1_000 },
-                            set: { value in updateDriverBand(bus: bus, index: index) { $0.frequencyHz = value } }
-                        ),
-                        in: 20 ... 20_000
-                    )
-                    Text("\(band.frequencyHz, specifier: "%.0f") Hz")
-                        .monospacedDigit()
-                        .frame(width: 76, alignment: .trailing)
-                }
-            }
-
-            if band.type != .notch && band.type != .allPass {
-                LabeledContent("Gain") {
-                    HStack(spacing: 10) {
-                        Slider(
-                            value: Binding(
-                                get: { driverBand(bus: bus, index: index)?.gainDB ?? 0 },
-                                set: { value in updateDriverBand(bus: bus, index: index) { $0.gainDB = value } }
-                            ),
-                            in: -12 ... 12,
-                            step: 0.1
-                        )
-                        Text("\(band.gainDB, specifier: "%.1f") dB")
-                            .monospacedDigit()
-                            .frame(width: 66, alignment: .trailing)
-                    }
-                }
-            }
-
-            LabeledContent("Q") {
-                HStack(spacing: 10) {
-                    Slider(
-                        value: Binding(
-                            get: { driverBand(bus: bus, index: index)?.q ?? 0.707 },
-                            set: { value in updateDriverBand(bus: bus, index: index) { $0.q = value } }
-                        ),
-                        in: 0.35 ... 10,
-                        step: 0.01
-                    )
-                    Text("\(band.q, specifier: "%.2f")")
-                        .monospacedDigit()
-                        .frame(width: 54, alignment: .trailing)
-                }
-            }
-        }
-        .padding(12)
-        .background(.quaternary.opacity(0.14), in: .rect(cornerRadius: 12))
-    }
-
-    private func driverConfiguration(for bus: SpeakerOutputBus) -> SpeakerDriverBusProcessingConfiguration {
-        engine.speakerDriverProcessingConfiguration.configuration(for: bus)
-    }
-
-    private func driverBand(bus: SpeakerOutputBus, index: Int) -> EQBand? {
-        let bands = driverConfiguration(for: bus).eqBands
-        guard bands.indices.contains(index) else { return nil }
-        return bands[index]
-    }
-
-    private func updateDriverBus(
-        _ bus: SpeakerOutputBus,
-        mutate: (inout SpeakerDriverBusProcessingConfiguration) -> Void
-    ) {
-        guard !physicalRoutingLocked else { return }
-        var all = engine.speakerDriverProcessingConfiguration
-        var busConfiguration = all.configuration(for: bus)
-        mutate(&busConfiguration)
-        all.replace(busConfiguration)
-        do {
-            try profiles.replaceSelectedSystemSpeakerDriverProcessing(all)
-            actionError = nil
-        } catch {
-            actionError = error.localizedDescription
-        }
-    }
-
-    private func addDriverEQBand(to bus: SpeakerOutputBus) {
-        updateDriverBus(bus) { configuration in
-            guard configuration.eqBands.count < SpeakerDriverBusProcessingConfiguration.maximumEQBandCount else { return }
-            let initialFrequency: Double
-            switch bus {
-            case .subMono: initialFrequency = 60
-            case .leftLow, .rightLow: initialFrequency = 120
-            case .leftMid, .rightMid: initialFrequency = 1_000
-            case .leftHigh, .rightHigh: initialFrequency = 5_000
-            case .leftFullRange, .rightFullRange: initialFrequency = 1_000
-            }
-            configuration.eqBands.append(
-                EQBand(type: .peaking, frequencyHz: initialFrequency, gainDB: 0, q: 0.707)
-            )
-        }
-    }
-
-    private func removeDriverEQBand(from bus: SpeakerOutputBus, index: Int) {
-        updateDriverBus(bus) { configuration in
-            guard configuration.eqBands.indices.contains(index) else { return }
-            configuration.eqBands.remove(at: index)
-        }
-    }
-
-    private func updateDriverBand(
-        bus: SpeakerOutputBus,
-        index: Int,
-        mutate: (inout EQBand) -> Void
-    ) {
-        updateDriverBus(bus) { configuration in
-            guard configuration.eqBands.indices.contains(index) else { return }
-            mutate(&configuration.eqBands[index])
-        }
-    }
-
     private var verificationCard: some View {
         DisclosureGroup("Verification Monitor") {
             VStack(alignment: .leading, spacing: 12) {
@@ -2431,79 +1885,33 @@ private struct ProductionSpeakersView: View {
     }
 
     private var lowerFrequencyRange: ClosedRange<Double> {
-        if engine.bassManagementConfiguration.physicalOutputMode == .triAmp {
-            return 20...19_999
-        }
-        return engine.bassManagementConfiguration.lowerFrequencyRange
+        engine.bassManagementConfiguration.lowerFrequencyRange
     }
 
-    private var upperFrequencyRange: ClosedRange<Double> {
-        let lower = min(19_999, max(20, engine.bassManagementConfiguration.frequencyHz + 1))
-        return lower...20_000
-    }
-
-    private func deviceName(_ uid: String) -> String {
-        engine.outputDevices.first(where: { $0.uid == uid })?.name ?? uid
-    }
-
-    private func channelCount(for uid: String) -> UInt32 {
-        engine.outputDevices.first(where: { $0.uid == uid })?.outputChannelCount ?? 1
-    }
-
-    private func firstAvailableChannel(on uid: String, excluding routeID: UUID?) -> UInt32 {
-        let used = Set(routing.routes.compactMap { route -> UInt32? in
-            guard route.id != routeID, route.destination.deviceUID == uid else { return nil }
-            return route.destination.channelIndex
-        })
-        let count = channelCount(for: uid)
-        for channel in 0..<count where !used.contains(channel) {
-            return channel
-        }
-        return 0
-    }
-
-    private func addRoute() {
-        actionError = nil
-        guard routing.routes.count < MultiOutputRoutingConfiguration.maximumRouteCount else { return }
-        let used = Set(routing.routes.map(\.destination))
-        var endpoint: PhysicalOutputEndpoint?
-        outer: for device in engine.outputDevices {
-            for channel in 0..<device.outputChannelCount {
-                let candidate = PhysicalOutputEndpoint(deviceUID: device.uid, channelIndex: channel)
-                if !used.contains(candidate) {
-                    endpoint = candidate
-                    break outer
-                }
+    @ViewBuilder
+    private var legacyRoutingSummary: some View {
+        if let reason = profiles.selectedSystemProfile?.state.unmigratedLegacyRoutingReason {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Legacy routing").font(.headline)
+                Text("This profile uses a legacy physical crossover that the routing editor cannot represent: \(reason) It stays as stored and blocks multichannel playback until it is turned off.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Button("Turn off legacy routing") { turnOffLegacyRouting() }
+                    .buttonStyle(.glass)
+                    .disabled(physicalRoutingLocked)
             }
-        }
-        guard let endpoint else {
-            actionError = "No unused physical output channel is currently available."
-            return
-        }
-        let usedBuses = Set(routing.routes.map(\.bus))
-        let bus = supportedRouteBuses.first(where: { !usedBuses.contains($0) }) ?? supportedRouteBuses.first ?? .leftFullRange
-        updateRouting { configuration in
-            configuration.routes.append(
-                SpeakerOutputRoute(name: bus.displayName, bus: bus, destination: endpoint)
-            )
-        }
-    }
-
-    private func removeRoute(_ id: UUID) {
-        updateRouting { configuration in
-            configuration.routes.removeAll { $0.id == id }
-            if let reference = configuration.referenceDeviceUID,
-               !configuration.enabledRoutes.contains(where: { $0.destination.deviceUID == reference }) {
-                configuration.referenceDeviceUID = nil
+            .padding(20)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(.regularMaterial, in: .rect(cornerRadius: 22))
+            .overlay {
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    .stroke(.quaternary, lineWidth: 0.5)
             }
         }
     }
 
-    private func updateRoute(_ id: UUID, _ mutation: (inout SpeakerOutputRoute) -> Void) {
-        updateRouting { configuration in
-            guard let index = configuration.routes.firstIndex(where: { $0.id == id }) else { return }
-            mutation(&configuration.routes[index])
-        }
+    private func turnOffLegacyRouting() {
+        updateRouting { $0.enabled = false }
     }
 
     private func updateRouting(_ mutation: (inout MultiOutputRoutingConfiguration) -> Void) {

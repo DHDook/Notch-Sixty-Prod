@@ -208,3 +208,28 @@ extension PlaybackSystemState {
         return copy
     }
 }
+
+// MARK: - Unmigrated legacy routing (E8 A2a)
+
+extension PlaybackSystemState {
+    /// Why this profile's legacy physical routing did not migrate to the routing model, or nil when there is nothing
+    /// blocked: legacy routing is off, a routing model is stored, or the migration succeeds. The routing editor shows
+    /// this read-only, with `turningOffLegacyRouting()` as the only action.
+    var unmigratedLegacyRoutingReason: String? {
+        guard speakerRouting == nil, outputRouting?.enabled == true else { return nil }
+        let result = SpeakerRoutingMigration.migrate(
+            routing: outputRouting, bassManagement: bassManagement, driverProcessing: speakerDriverProcessing)
+        guard result.routing == nil, case .unsupported(let reason)? = result.refusal else { return nil }
+        return reason
+    }
+
+    /// The state with only `outputRouting.enabled` cleared: the one legacy write kept, because it removes a blocked
+    /// state. Every other legacy field is left byte-identical.
+    func turningOffLegacyRouting() -> PlaybackSystemState {
+        guard var routing = outputRouting, routing.enabled else { return self }
+        routing.enabled = false
+        var copy = self
+        copy.outputRouting = routing
+        return copy
+    }
+}

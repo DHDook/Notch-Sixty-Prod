@@ -8,7 +8,8 @@ final class SystemSetupStartStepsTests: XCTestCase {
         state.bassManagement.physicalOutputMode = .mainsSub
         let out = SystemSetupTopologyPreset(topology: .stereo).applying(to: state)
         XCTAssertFalse(out.bassManagement.enabled)
-        XCTAssertNil(out.bassManagement.physicalOutputMode)
+        // E8 A2a: a stored legacy output mode is left as it is.
+        XCTAssertEqual(out.bassManagement.physicalOutputMode, .mainsSub)
     }
 
     func testSubwooferPresetsWriteCrossoverAndTouchNothingElse() {
@@ -17,7 +18,7 @@ final class SystemSetupStartStepsTests: XCTestCase {
             let preset = SystemSetupTopologyPreset(topology: topology, crossoverHz: 100, slope: .linkwitzRiley48)
             let out = preset.applying(to: state)
             XCTAssertTrue(out.bassManagement.enabled)
-            XCTAssertEqual(out.bassManagement.physicalOutputMode, .mainsSub)
+            XCTAssertNil(out.bassManagement.physicalOutputMode, "the preset never writes the legacy output mode")
             XCTAssertEqual(out.bassManagement.frequencyHz, 100)
             XCTAssertEqual(out.bassManagement.topology, .linkwitzRiley48)
             var restored = out
@@ -96,5 +97,26 @@ final class SystemSetupStartStepsTests: XCTestCase {
         XCTAssertTrue(SystemSetupEntryPolicy.isHeadphoneOutput(name: "DAC", uid: "x", state: state))
         state.headphoneDeviceProfile?.outputDeviceUID = "other"
         XCTAssertFalse(SystemSetupEntryPolicy.isHeadphoneOutput(name: "DAC", uid: "x", state: state))
+    }
+
+    /// E8 A2a: presets change only enabled, frequencyHz and topology; stored legacy fields survive byte-identical.
+    func testPresetsLeaveStoredLegacyFieldsAlone() {
+        var state = PlaybackSystemState()
+        state.bassManagement.physicalOutputMode = .triAmp
+        state.bassManagement.upperFrequencyHz = 3_000
+        state.bassManagement.upperTopology = .linkwitzRiley24
+        state.outputRouting = MultiOutputRoutingConfiguration(enabled: true, routes: [])
+        for topology in [SystemSetupTopology.stereo, .twoPointOne, .twoPointTwo] {
+            let out = SystemSetupTopologyPreset(topology: topology, crossoverHz: 90, slope: .linkwitzRiley48).applying(to: state)
+            XCTAssertEqual(out.bassManagement.physicalOutputMode, .triAmp)
+            XCTAssertEqual(out.bassManagement.upperFrequencyHz, 3_000)
+            XCTAssertEqual(out.bassManagement.upperTopology, .linkwitzRiley24)
+            XCTAssertEqual(out.outputRouting, state.outputRouting)
+            var restored = out
+            restored.bassManagement.enabled = state.bassManagement.enabled
+            restored.bassManagement.frequencyHz = state.bassManagement.frequencyHz
+            restored.bassManagement.topology = state.bassManagement.topology
+            XCTAssertEqual(restored, state)
+        }
     }
 }

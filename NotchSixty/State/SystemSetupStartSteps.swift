@@ -27,18 +27,16 @@ struct SystemSetupTopologyPreset: Equatable, Sendable {
     }
 
     /// Returns `state` with the preset's bass management applied. Nothing else is touched; in
-    /// particular no routing, correction, ANC or Active Acoustics setting changes.
+    /// particular no legacy output mode (E8 A2a), no routing, correction, ANC or Active Acoustics setting changes.
     func applying(to state: PlaybackSystemState) -> PlaybackSystemState {
         var next = state
         var bass = state.bassManagement
         if topology.hasSubwoofer {
             bass.enabled = true
-            bass.physicalOutputMode = .mainsSub
             bass.frequencyHz = min(max(crossoverHz, Self.crossoverRangeHz.lowerBound), Self.crossoverRangeHz.upperBound)
             bass.topology = slope
         } else {
             bass.enabled = false
-            bass.physicalOutputMode = nil
         }
         next.bassManagement = bass
         return next
