@@ -28,7 +28,7 @@ constexpr uint32_t kGrid = N60_CORRECT_GRID_POINTS;
 constexpr uint32_t kMaxSeats = 64;
 constexpr double kThirdOctave = 1.2599210498948732;  // 2^(1/3)
 
-bool finite(double v) { return std::isfinite(v); }
+bool isFiniteValue(double v) { return std::isfinite(v); }
 
 // ---- parameter checks ------------------------------------------------------------------------
 
@@ -39,12 +39,12 @@ struct Resolved {
 
 bool resolveParams(const n60_correct_problem *problem, const n60_correct_bass_params *p, Resolved &r) {
     if (problem == nullptr || p == nullptr || problem->irs == nullptr || p->channels == nullptr) return false;
-    if (!finite(problem->sample_rate) || problem->sample_rate < 8000.0 || problem->sample_rate > 768000.0) return false;
+    if (!isFiniteValue(problem->sample_rate) || problem->sample_rate < 8000.0 || problem->sample_rate > 768000.0) return false;
     if (problem->channel_count == 0 || problem->channel_count > N60_CORRECT_MAX_BASS_CHANNELS || problem->seat_count == 0 ||
         problem->seat_count > kMaxSeats) {
         return false;
     }
-    if (!finite(p->crossover_hz) || p->crossover_hz < 20.0 || p->crossover_hz > 500.0) return false;
+    if (!isFiniteValue(p->crossover_hz) || p->crossover_hz < 20.0 || p->crossover_hz > 500.0) return false;
     r.crossover = p->crossover_hz;
     r.fit_low = p->fit_low_hz;
     r.fit_high = p->fit_high_hz > 0.0 ? p->fit_high_hz : 1.5 * r.crossover;
@@ -53,19 +53,19 @@ bool resolveParams(const n60_correct_problem *problem, const n60_correct_bass_pa
     r.max_boost = p->max_boost_db;
     r.reg = p->regularisation;
     r.ir_seconds = p->ir_seconds;
-    if (!finite(r.fit_low) || !finite(r.fit_high) || !finite(r.fir_high) || r.fit_low < 10.0 || !(r.fit_high > r.fit_low * 2.0) ||
+    if (!isFiniteValue(r.fit_low) || !isFiniteValue(r.fit_high) || !isFiniteValue(r.fir_high) || r.fit_low < 10.0 || !(r.fit_high > r.fit_low * 2.0) ||
         !(r.fir_high >= r.fit_high / kThirdOctave)) {
         return false;
     }
     if (r.fir_high * kThirdOctave > 0.45 * problem->sample_rate) return false;
-    if (!finite(r.max_delay) || r.max_delay < 0.0 || r.max_delay > 0.1) return false;
-    if (!finite(r.max_boost) || r.max_boost < 0.0 || r.max_boost > 12.0) return false;
-    if (!finite(r.reg) || r.reg < 1e-6 || r.reg > 10.0) return false;
-    if (!finite(r.ir_seconds) || r.ir_seconds < 0.0) return false;
+    if (!isFiniteValue(r.max_delay) || r.max_delay < 0.0 || r.max_delay > 0.1) return false;
+    if (!isFiniteValue(r.max_boost) || r.max_boost < 0.0 || r.max_boost > 12.0) return false;
+    if (!isFiniteValue(r.reg) || r.reg < 1e-6 || r.reg > 10.0) return false;
+    if (!isFiniteValue(r.ir_seconds) || r.ir_seconds < 0.0) return false;
     for (uint32_t n = 0; n < problem->channel_count; ++n) {
         const n60_correct_bass_channel &c = p->channels[n];
         if (c.role > N60_CORRECT_BASS_ROLE_SUB) return false;
-        if (!finite(c.min_gain_db) || !finite(c.max_gain_db) || c.min_gain_db > c.max_gain_db || c.min_gain_db < -60.0 ||
+        if (!isFiniteValue(c.min_gain_db) || !isFiniteValue(c.max_gain_db) || c.min_gain_db > c.max_gain_db || c.min_gain_db < -60.0 ||
             c.max_gain_db > 24.0) {
             return false;
         }
@@ -73,7 +73,7 @@ bool resolveParams(const n60_correct_problem *problem, const n60_correct_bass_pa
     if (p->target_points > 0) {
         if (p->target_frequencies_hz == nullptr || p->target_gain_db == nullptr) return false;
         for (uint32_t i = 0; i < p->target_points; ++i) {
-            if (!finite(p->target_frequencies_hz[i]) || !finite(p->target_gain_db[i]) || !(p->target_frequencies_hz[i] > 0.0)) return false;
+            if (!isFiniteValue(p->target_frequencies_hz[i]) || !isFiniteValue(p->target_gain_db[i]) || !(p->target_frequencies_hz[i] > 0.0)) return false;
             if (i > 0 && !(p->target_frequencies_hz[i] > p->target_frequencies_hz[i - 1])) return false;
         }
     }
@@ -81,8 +81,8 @@ bool resolveParams(const n60_correct_problem *problem, const n60_correct_bass_pa
     for (uint32_t n = 0; n < problem->channel_count; ++n) {
         for (uint32_t k = 0; k < problem->seat_count; ++k) {
             const n60_correct_seat_ir &ir = problem->irs[static_cast<size_t>(n) * problem->seat_count + k];
-            if (ir.ir == nullptr || ir.frames < 64 || !finite(ir.arrival_frames) || ir.arrival_frames < 0.0 ||
-                ir.arrival_frames >= static_cast<double>(ir.frames) || !finite(ir.weight) || ir.weight < 0.0) {
+            if (ir.ir == nullptr || ir.frames < 64 || !isFiniteValue(ir.arrival_frames) || ir.arrival_frames < 0.0 ||
+                ir.arrival_frames >= static_cast<double>(ir.frames) || !isFiniteValue(ir.weight) || ir.weight < 0.0) {
                 return false;
             }
             if (n == 0) weightSum += ir.weight;
@@ -609,7 +609,7 @@ int32_t n60_correct_bass_optimise(const n60_correct_problem *problem, const n60_
             for (uint32_t g = 0; g < kGrid; ++g) m.b(g, k, n) = crossoverResponse(highPass, m.freq[g], rp.crossover) * spectrum[g];
         }
     }
-    for (const Complex &v : m.B) if (!finite(v.real()) || !finite(v.imag())) return N60_CORRECT_ERR_NONFINITE;
+    for (const Complex &v : m.B) if (!isFiniteValue(v.real()) || !isFiniteValue(v.imag())) return N60_CORRECT_ERR_NONFINITE;
 
     // Step (i): fixed starts, best final cost wins (earlier start on ties).
     Setting start0;
