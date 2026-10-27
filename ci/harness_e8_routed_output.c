@@ -116,6 +116,37 @@ int main(void) {
         phys[1] = 41u;
         CHECK(!N60LiveNChannelOutputMapCompile(layout, 42u, phys, false, 0u, NULL, &m), "legacy map accepted 42");
     }
+    /* E8 A3: the graph-subs map (5 to 8 subs) and the legacy ceiling of 4. */
+    {
+        const N60ProgramChannelLayout five1 = N60ProgramChannelLayoutMakeStandard(N60ProgramLayoutFiveOne);
+        uint32_t prog[N60_MAX_PROGRAM_CHANNELS], subs[8];
+        for (uint32_t i = 0; i < N60_MAX_PROGRAM_CHANNELS; ++i) prog[i] = N60_LIVE_PHYSICAL_CHANNEL_UNMAPPED;
+        uint32_t next = 0;
+        for (uint32_t i = 0; i < five1.channelCount; ++i) {
+            if (five1.channels[i] != N60ProgramChannelRoleLowFrequencyEffects) prog[i] = next++;
+        }
+        for (uint32_t i = 0; i < 8u; ++i) subs[i] = next + i;
+        N60LiveNChannelOutputMap m = {0};
+        CHECK(N60LiveNChannelOutputMapCompileGraphSubs(five1, 13u, prog, 8u, subs, &m), "8 graph subs refused");
+        CHECK(N60LiveNChannelOutputMapIsValid(&m), "8 graph subs map not valid");
+        CHECK(m.subwooferCount == 0u && !m.bassManagementEnabled && m.graphSubLaneCount == 8u, "graph subs map shape");
+        CHECK(!N60LiveNChannelOutputMapCompileGraphSubs(five1, 13u, prog, 4u, subs, &m), "4 subs accepted by lane compile");
+        CHECK(!N60LiveNChannelOutputMapCompileGraphSubs(five1, 13u, prog, 9u, subs, &m), "9 subs accepted");
+        CHECK(!N60LiveNChannelOutputMapCompileGraphSubs(five1, 12u, prog, 8u, subs, &m), "out of range sub accepted");
+        subs[7] = subs[0];
+        CHECK(!N60LiveNChannelOutputMapCompileGraphSubs(five1, 13u, prog, 8u, subs, &m), "duplicate sub accepted");
+        subs[7] = next + 7u;
+        prog[3] = 12u;
+        CHECK(!N60LiveNChannelOutputMapCompileGraphSubs(five1, 13u, prog, 8u, subs, &m), "mapped LFE accepted");
+        /* The legacy compile still refuses 5 subs. */
+        uint32_t lp[N60_MAX_PROGRAM_CHANNELS];
+        for (uint32_t i = 0; i < N60_MAX_PROGRAM_CHANNELS; ++i) lp[i] = N60_LIVE_PHYSICAL_CHANNEL_UNMAPPED;
+        next = 0;
+        for (uint32_t i = 0; i < five1.channelCount; ++i) {
+            if (five1.channels[i] != N60ProgramChannelRoleLowFrequencyEffects) lp[i] = next++;
+        }
+        CHECK(!N60LiveNChannelOutputMapCompile(five1, 13u, lp, true, 5u, subs, &m), "legacy map accepted 5 subs");
+    }
     for (size_t r = 0; r < sizeof kRates / sizeof kRates[0]; ++r) {
         const double rate = kRates[r];
         bool ok = false;

@@ -219,6 +219,71 @@ final class LiveNChannelUnifiedGraphTests: XCTestCase {
             bass: bass, label: "2 subs", legacyFloatEQChannels: [7])
     }
 
+    /// E8 A3: with 8 subs on the graph path every sub carries the core bass-management prediction. The prediction is
+    /// the 1-sub legacy render scaled by the 1/N route gain (identical calibration on every sub), and the speakers
+    /// are the 1-sub legacy speakers.
+    func testEightSubsOnTheGraphPathMatchTheCorePredictionAtEveryRate() throws {
+        var bass = BassManagementConfiguration(enabled: true)
+        bass.frequencyHz = 80
+        let scale = 1.0 / 8.0
+        for sampleRate in Self.standardSampleRates {
+            var referenceHost: UnifiedGraphHost?
+            var graphHost: UnifiedGraphHost?
+            let reference = try bridge(plan: plan(subs: 1, bass: true), sampleRate: sampleRate,
+                                       bassConfiguration: bass, useGraph: false, host: &referenceHost)
+            let eightPlan = plan(subs: 8, bass: true)
+            let map = try eightPlan.makeRealtimeOutputMap()
+            XCTAssertEqual(map.graphSubLaneCount, 8)
+            XCTAssertEqual(map.subwooferCount, 0)
+            let eight = try bridge(plan: eightPlan, sampleRate: sampleRate, bassConfiguration: bass,
+                                   useGraph: true, host: &graphHost)
+            defer {
+                N60LiveNChannelBridgeDestroy(reference)
+                N60LiveNChannelBridgeDestroy(eight)
+                withExtendedLifetime(graphHost) {}
+            }
+            let expected = run(reference, sampleRate: sampleRate, physical: 7)
+            let actual = run(eight, sampleRate: sampleRate, physical: 14)
+            for channel in 0..<14 where channel != 2 {
+                let source = channel < 6 ? channel : 6
+                let factor = channel < 6 ? 1.0 : scale
+                var error = 0.0, energy = 0.0
+                for index in 8..<expected[source].count {
+                    let e = Double(expected[source][index]) * factor, a = Double(actual[channel][index])
+                    error += (a - e) * (a - e)
+                    energy += e * e
+                }
+                XCTAssertGreaterThan(energy, 0, "\(sampleRate) Hz channel \(channel) is silent")
+                // 0.01 dB in amplitude is a squared-error ratio of about 1.3e-6.
+                XCTAssertLessThanOrEqual(error, energy * 1.0e-6, "\(sampleRate) Hz channel \(channel)")
+            }
+            XCTAssertEqual(N60LiveNChannelBridgeGetSnapshot(eight).renderFailures, 0, "\(sampleRate) Hz")
+        }
+    }
+
+    /// E8 A3: a 5 to 8 sub map cannot render on the legacy kernel: silence and counted failures, never a truncation.
+    func testFiveToEightSubMapRendersSilenceWithoutAGraph() throws {
+        var bass = BassManagementConfiguration(enabled: true)
+        bass.frequencyHz = 80
+        var host: UnifiedGraphHost?
+        let live = try bridge(plan: plan(subs: 5, bass: true), sampleRate: 48_000, bassConfiguration: bass,
+                              useGraph: false, host: &host)
+        defer { N60LiveNChannelBridgeDestroy(live) }
+        let output = run(live, sampleRate: 48_000, physical: 11)
+        for channel in 0..<11 { XCTAssertEqual(output[channel].map { abs($0) }.max() ?? 0, 0, "channel \(channel)") }
+        XCTAssertGreaterThan(N60LiveNChannelBridgeGetSnapshot(live).renderFailures, 0)
+    }
+
+    /// E8 A3: 1 to 4 subs keep the legacy map exactly (no lane map, same sub fields).
+    func testFourSubsKeepTheLegacyMap() throws {
+        let map = try plan(subs: 4, bass: true).makeRealtimeOutputMap()
+        XCTAssertEqual(map.graphSubLaneCount, 0)
+        XCTAssertEqual(map.subwooferCount, 4)
+        XCTAssertTrue(map.bassManagementEnabled)
+        XCTAssertEqual(map.physicalChannelForSubwoofer.0, 6)
+        XCTAssertEqual(map.physicalChannelForSubwoofer.3, 9)
+    }
+
     func testIneligibleSetupsStayOnTheLegacyRenderCore() {
         let gain = DSPGainConfiguration()
         let off = BassManagementConfiguration(enabled: false)

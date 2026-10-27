@@ -215,6 +215,16 @@ struct PhysicalSubwooferOutputAssignment: Codable, Equatable, Sendable {
     }
 }
 
+/// E8 A3: the two subwoofer limits. The unified graph drives up to 8 sub lanes; the legacy render kernel's
+/// bass-management snapshot is frozen at 4 and refuses more, by name, at session start.
+enum SubwooferLimit {
+    static let graph = UnifiedGraphConfiguration.maxSubwoofers
+    static let legacyKernel = Int(N60_MAX_SUBWOOFER_OUTPUTS)
+
+    /// Route-plan sub arrays hold the legacy 4 entries at least (unchanged for 0 to 4 subs) and grow to the count.
+    static func arrayCount(forSubwooferCount count: Int) -> Int { max(legacyKernel, count) }
+}
+
 enum OutputDeviceProfileError: Error, Equatable, LocalizedError {
     case profileDisabled
     case missingSpeaker(OutputProgramRole)
@@ -258,7 +268,7 @@ enum OutputDeviceProfileError: Error, Equatable, LocalizedError {
         case .physicalSubwoofersRequireBassManagement:
             return "Physical Sub outputs require bass management; otherwise semantic LFE remains an ordinary program output."
         case .tooManyPhysicalSubwoofers(let count):
-            return "At most \(Int(N60_MAX_SUBWOOFER_OUTPUTS)) physical subwoofers are supported; profile contains \(count)."
+            return "At most \(SubwooferLimit.graph) physical subwoofers are supported; profile contains \(count)."
         case .invalidPhysicalSubwooferIndex(let index):
             return "Physical subwoofer indices must be contiguous from Sub 1; found index \(index + 1)."
         case .duplicateDestination(let endpoint):
@@ -366,7 +376,7 @@ struct OutputDeviceProfileConfiguration: Codable, Equatable, Sendable {
     }
 
     func validateStructure(bassManagementEnabled: Bool) throws {
-        guard subwooferAssignments.count <= Int(N60_MAX_SUBWOOFER_OUTPUTS) else {
+        guard subwooferAssignments.count <= SubwooferLimit.graph else {
             throw OutputDeviceProfileError.tooManyPhysicalSubwoofers(subwooferAssignments.count)
         }
 
@@ -574,7 +584,7 @@ struct OutputDeviceProfileConfiguration: Codable, Equatable, Sendable {
 
         var subPhysical = [UInt32](
             repeating: UInt32.max,
-            count: Int(N60_MAX_SUBWOOFER_OUTPUTS)
+            count: SubwooferLimit.arrayCount(forSubwooferCount: subwooferAssignments.count)
         )
         for assignment in subwooferAssignments {
             subPhysical[Int(assignment.index)] = try flattened(assignment.destination)
@@ -587,7 +597,7 @@ struct OutputDeviceProfileConfiguration: Codable, Equatable, Sendable {
         )
         var subwooferCalibrations = [PhysicalSubwooferCalibration?](
             repeating: nil,
-            count: Int(N60_MAX_SUBWOOFER_OUTPUTS)
+            count: SubwooferLimit.arrayCount(forSubwooferCount: subwooferAssignments.count)
         )
         for assignment in subwooferAssignments {
             subwooferCalibrations[Int(assignment.index)] = assignment.calibration
@@ -687,6 +697,25 @@ struct LiveNChannelOutputRoutePlan: Equatable, Sendable {
                 )
             }
             guard routedCompiled else {
+                throw OutputDeviceProfileError.realtimeOutputMapCompilationFailed
+            }
+            return result
+        }
+        if bassManagementEnabled, Int(subwooferCount) > SubwooferLimit.legacyKernel {
+            // E8 A3: 5 to 8 subs exist only on the graph path, as sub lanes after the program lanes.
+            let lanesCompiled = programPhysicalChannels.withUnsafeBufferPointer { programBuffer in
+                subwooferPhysicalChannels.withUnsafeBufferPointer { subBuffer in
+                    N60LiveNChannelOutputMapCompileGraphSubs(
+                        programLayout.realtimeLayout,
+                        physicalChannelCount,
+                        programBuffer.baseAddress!,
+                        subwooferCount,
+                        subBuffer.baseAddress!,
+                        &result
+                    )
+                }
+            }
+            guard lanesCompiled else {
                 throw OutputDeviceProfileError.realtimeOutputMapCompilationFailed
             }
             return result

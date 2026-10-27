@@ -71,6 +71,60 @@ final class OutputDeviceProfileTests: XCTestCase {
         }
     }
 
+    private func fiveOneProfile(subs: Int) -> OutputDeviceProfileConfiguration {
+        let speakers = OutputProgramLayout.fiveOne.roles
+            .filter { $0 != .lowFrequencyEffects }
+            .enumerated()
+            .map { SemanticSpeakerOutputAssignment(role: $1, destination: endpoint(UInt32($0)), calibration: nil) }
+        let subAssignments = (0..<subs).map {
+            PhysicalSubwooferOutputAssignment(index: UInt32($0), destination: endpoint(UInt32(5 + $0)), calibration: nil)
+        }
+        return OutputDeviceProfileConfiguration(
+            enabled: true, programLayout: .fiveOne, speakerAssignments: speakers,
+            subwooferAssignments: subAssignments, synchronizationMode: .automatic, referenceDeviceUID: "avr")
+    }
+
+    /// E8 A3: 8 subs validate, round trip and compile a lane map; 9 fail by name; 5 to 8 sizes the route plan arrays.
+    func testEightSubProfileValidatesRoundTripsAndNineFailsByName() throws {
+        let eight = fiveOneProfile(subs: 8)
+        try eight.validateStructure(bassManagementEnabled: true)
+        let decoded = try JSONDecoder().decode(OutputDeviceProfileConfiguration.self, from: JSONEncoder().encode(eight))
+        XCTAssertEqual(decoded, eight)
+        let big = AudioOutputDevice(
+            deviceID: 2, uid: "avr", name: "AVR", nominalSampleRate: 96_000,
+            availableSampleRateRanges: [AudioSampleRateRange(minimum: 44_100, maximum: 192_000)],
+            outputChannelCount: 16)
+        let plan = try eight.makeLivePlan(
+            availableDevices: [big], sampleRate: 96_000, selectedOutputUID: "avr", bassManagementEnabled: true)
+        XCTAssertEqual(plan.subwooferCount, 8)
+        XCTAssertEqual(plan.subwooferPhysicalChannels.count, 8)
+        let map = try plan.makeRealtimeOutputMap()
+        XCTAssertEqual(map.graphSubLaneCount, 8)
+        let small = try fiveOneProfile(subs: 2).makeLivePlan(
+            availableDevices: [big], sampleRate: 96_000, selectedOutputUID: "avr", bassManagementEnabled: true)
+        XCTAssertEqual(small.subwooferPhysicalChannels.count, 4)
+        assertProfileError(.tooManyPhysicalSubwoofers(9)) {
+            try self.fiveOneProfile(subs: 9).validateStructure(bassManagementEnabled: true)
+        }
+    }
+
+    /// E8 A3 (interim until A4): calibration and coordinated alignment refuse 5 to 8 subs by name.
+    func testDesignersRefuseMoreThanFourSubs() {
+        let profile = fiveOneProfile(subs: 5)
+        XCTAssertThrowsError(try MultichannelCalibrationDesigner().design(
+            profile: profile, bassManagementEnabled: true, seats: [], measurements: [], sampleRate: 48_000)
+        ) { XCTAssertEqual($0 as? OutputDeviceCalibrationError, .tooManySubwoofersForDesigner(5)) }
+        XCTAssertThrowsError(try CoherentMultiSubwooferAlignmentPlanner().propose(
+            evidenceGroups: [], profile: profile, bassManagementEnabled: true, crossoverFrequencyHz: 80)
+        ) { XCTAssertEqual($0 as? CoherentMultiSubwooferAlignmentError, .tooManySubwoofers(5)) }
+    }
+
+    func testLegacyKernelRefusalNamesTheReason() {
+        let message = LiveNChannelTransportError.tooManySubwoofersForLegacyKernel(6).errorDescription ?? ""
+        XCTAssertTrue(message.contains("at most 4 subwoofers"))
+        XCTAssertTrue(message.contains("has 6"))
+    }
+
     func testBassManagedSevenOneFourPlanLeavesNativeLFEUnmappedAndRoutesSubs() throws {
         let profile = sevenOneFourProfile()
         try profile.validateStructure(bassManagementEnabled: true)

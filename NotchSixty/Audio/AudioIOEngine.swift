@@ -4728,6 +4728,13 @@ final class AudioIOEngine: ObservableObject {
                 throw LiveNChannelTransportError.roomTreatmentPermitMismatch
             }
         }
+        // E8 A3: the legacy kernel drives at most 4 subs; refuse by name rather than truncate. The graph path below
+        // takes 5 to 8 and must then be required (checked after eligibility).
+        if bassManagementConfiguration.enabled,
+           Int(routePlan.subwooferCount) > SubwooferLimit.legacyKernel,
+           !unifiedGraphEnabled {
+            throw LiveNChannelTransportError.tooManySubwoofersForLegacyKernel(Int(routePlan.subwooferCount))
+        }
         let graph = try LiveNChannelRenderGraphCompiler.makeGraph(
             routePlan: routePlan,
             sampleRate: output.nominalSampleRate,
@@ -4755,6 +4762,13 @@ final class AudioIOEngine: ObservableObject {
             case .failure(let reason): graphIneligibility = reason
             }
         }
+        // E8 A3: a graph that cannot take the setup would fall back to the legacy kernel; with 5 to 8 subs that is
+        // a refusal, not a truncation.
+        let needsGraphForSubs = bassManagementConfiguration.enabled
+            && Int(routePlan.subwooferCount) > SubwooferLimit.legacyKernel
+        if needsGraphForSubs, graphConfiguration == nil {
+            throw LiveNChannelTransportError.tooManySubwoofersForLegacyKernel(Int(routePlan.subwooferCount))
+        }
         let session = try CoreAudioNChannelTransportSession(
             selectedOutput: output,
             routePlan: routePlan,
@@ -4764,7 +4778,7 @@ final class AudioIOEngine: ObservableObject {
             audioUnitRack: stagedAudioUnitRack,
             unifiedGraphConfiguration: graphConfiguration,
             unifiedGraphIneligibility: graphIneligibility,
-            unifiedGraphRequired: programDSP != nil
+            unifiedGraphRequired: programDSP != nil || needsGraphForSubs
         )
         activeEQFIRProgram = nil
         activeRoomCorrectionProgram = nil

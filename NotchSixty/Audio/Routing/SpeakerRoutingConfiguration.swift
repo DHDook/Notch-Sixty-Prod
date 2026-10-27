@@ -282,7 +282,8 @@ extension SpeakerRoutingConfiguration {
             referenceDeviceUID: selectedOutputUID,
             physicalChannelCount: UInt32(total),
             programPhysicalChannels: [UInt32](repeating: UInt32.max, count: Int(N60_MAX_PROGRAM_CHANNELS)),
-            subwooferPhysicalChannels: [UInt32](repeating: UInt32.max, count: Int(N60_MAX_SUBWOOFER_OUTPUTS)),
+            subwooferPhysicalChannels: [UInt32](
+                repeating: UInt32.max, count: SubwooferLimit.arrayCount(forSubwooferCount: subs)),
             subwooferCount: UInt32(subs),
             bassManagementEnabled: bassManagementEnabled,
             speakerCalibrations: [:],
