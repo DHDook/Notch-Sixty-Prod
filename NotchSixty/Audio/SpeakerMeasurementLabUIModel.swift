@@ -6,6 +6,8 @@ struct SpeakerMeasurementLabProtocolDraft: Equatable, Sendable {
     var speakerRole: OutputProgramRole = .frontLeft
     var subwooferIndex: UInt32 = 0
     var protectedDriverBus: SpeakerOutputBus = .leftLow
+    /// E8 B2: the routed way a `driverNearField` draft measures (set by the linearisation UI, B3).
+    var routedWayID: UUID?
     var distanceMeters: Double = 1.0
     var horizontalAngleDegrees: Double = 0
     var verticalAngleDegrees: Double = 0
@@ -47,6 +49,13 @@ struct SpeakerMeasurementLabProtocolDraft: Equatable, Sendable {
             verticalAngleDegrees = 0
             usesExplicitExcitationLevel = true
             excitationLevelDBFS = min(excitationLevelDBFS, -24)
+        case .driverNearField:
+            name = "Driver Near-Field"
+            distanceMeters = 0.03
+            horizontalAngleDegrees = 0
+            verticalAngleDegrees = 0
+            usesExplicitExcitationLevel = true
+            excitationLevelDBFS = min(excitationLevelDBFS, -30)
         case .coherentMainsSubTiming:
             name = "Coherent Main / Sub"
             distanceMeters = 2.5
@@ -69,6 +78,7 @@ struct SpeakerMeasurementLabProtocolDraft: Equatable, Sendable {
         let explicitLevel: Double? =
             (usesExplicitExcitationLevel
                 || mode == .protectedDriverNearField
+                || mode == .driverNearField
                 || mode == .coherentMainsSubTiming)
             ? excitationLevelDBFS : nil
 
@@ -128,6 +138,25 @@ struct SpeakerMeasurementLabProtocolDraft: Equatable, Sendable {
                         repeatCount: repeatCount
                     ),
                     excitationLevelDBFS: explicitLevel
+                )
+            ]
+
+        case .driverNearField:
+            guard let routedWayID else {
+                throw SpeakerMeasurementLabError.invalidTarget
+            }
+            protocols = [
+                SpeakerMeasurementLabProtocol(
+                    id: idFactory(),
+                    name: name,
+                    request: SpeakerMeasurementLabRequest(
+                        mode: mode,
+                        target: .routedWay(routedWayID),
+                        geometry: geometry,
+                        repeatCount: repeatCount
+                    ),
+                    excitationLevelDBFS: explicitLevel,
+                    driverCaptureSource: .speaker(speakerRole)
                 )
             ]
 
