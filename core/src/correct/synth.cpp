@@ -282,6 +282,17 @@ int32_t n60_correct_synthesize_two_band(const n60_correct_synth_params *params, 
 int32_t n60_correct_synthesize_linear_phase(double fs, uint32_t groupDelay, n60_correct_amplitude_fn amplitude, void *user,
                                             float *fullTaps, uint64_t fullCapacity, float *lowTaps, uint64_t lowCapacity,
                                             n60_correct_two_band_report *report) {
+    return n60_correct_synthesize_linear_phase_banded(fs, groupDelay, amplitude, user, nullptr, fullTaps, fullCapacity, lowTaps,
+                                                      lowCapacity, report);
+}
+
+int32_t n60_correct_synthesize_linear_phase_banded(double fs, uint32_t groupDelay, n60_correct_amplitude_fn amplitude, void *user,
+                                                   const n60_correct_band_taper *taper, float *fullTaps, uint64_t fullCapacity,
+                                                   float *lowTaps, uint64_t lowCapacity, n60_correct_two_band_report *report) {
+    if (taper != nullptr && !(std::isfinite(taper->low_hz) && std::isfinite(taper->high_hz) && std::isfinite(taper->edge_octaves) &&
+                              taper->low_hz > 0.0 && taper->high_hz > taper->low_hz && taper->edge_octaves > 0.0)) {
+        return N60_CORRECT_ERR_ARGUMENT;
+    }
     if (amplitude == nullptr || fullTaps == nullptr || !std::isfinite(fs) || fs < 8000.0 || fs > 768000.0 || groupDelay < 1 ||
         groupDelay > (1u << 18)) {
         return N60_CORRECT_ERR_ARGUMENT;
@@ -310,8 +321,19 @@ int32_t n60_correct_synthesize_linear_phase(double fs, uint32_t groupDelay, n60_
     std::vector<Cplx> fullSpectrum(half + 1), lowSpectrum(half + 1);
     for (uint64_t k = 0; k <= half; ++k) {
         const double f = static_cast<double>(k) * fs / static_cast<double>(size);
-        const double a = amplitude(f, user);
+        double a = amplitude(f, user);
         if (!std::isfinite(a) || a < 0.0) return N60_CORRECT_ERR_NONFINITE;
+        if (taper != nullptr) {
+            // Band limit: the gain in dB is scaled by a raised edge (0 outside the band, 1 from edge_octaves inside it), i.e. a^t.
+            double t = 0.0;
+            if (f > taper->low_hz && f < taper->high_hz) {
+                const double lowEdge = std::min(1.0, std::max(0.0, std::log2(f / taper->low_hz) / taper->edge_octaves));
+                const double highEdge = std::min(1.0, std::max(0.0, std::log2(taper->high_hz / f) / taper->edge_octaves));
+                t = std::min(lowEdge, highEdge);
+            }
+            a = t <= 0.0 ? 1.0 : (t >= 1.0 ? a : std::pow(a, t));
+            if (!std::isfinite(a)) return N60_CORRECT_ERR_NONFINITE;
+        }
         const double w = two ? handOver(f, lowRate) : 0.0;
         fullSpectrum[k] = Cplx{a * (1.0 - w), 0.0};
         lowSpectrum[k] = Cplx{w > 0.0 ? a * w / resamplerResponse(f, fs, levels) : 0.0, 0.0};

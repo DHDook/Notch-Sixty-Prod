@@ -191,6 +191,38 @@ static void testGraphLatency() {
     }
 }
 
+// E8 S8b: the optional band taper. NULL is bit-identical to the plain call; a taper leaves 0 dB outside the band.
+static double boostAmp(double hz, void *) { return std::pow(10.0, (hz > 100.0 ? 6.0 : 0.0) / 20.0); }
+
+static void testBandedSynthesis() {
+    for (double fs : kRates) {
+        const uint32_t L = 1024;
+        std::vector<float> a(2 * L + 1), b(2 * L + 1), c(2 * L + 1);
+        n60_correct_two_band_report r{};
+        CHECK(n60_correct_synthesize_linear_phase(fs, L, boostAmp, nullptr, a.data(), a.size(), nullptr, 0, &r) == N60_CORRECT_OK, "plain");
+        CHECK(n60_correct_synthesize_linear_phase_banded(fs, L, boostAmp, nullptr, nullptr, b.data(), b.size(), nullptr, 0, &r) ==
+                  N60_CORRECT_OK, "banded null");
+        CHECK(std::memcmp(a.data(), b.data(), a.size() * sizeof(float)) == 0, "null taper changes output at %.0f", fs);
+        n60_correct_band_taper bad{500.0, 400.0, 1.0 / 3.0};
+        CHECK(n60_correct_synthesize_linear_phase_banded(fs, L, boostAmp, nullptr, &bad, c.data(), c.size(), nullptr, 0, &r) ==
+                  N60_CORRECT_ERR_ARGUMENT, "bad taper");
+        n60_correct_band_taper t{200.0, 8000.0, 1.0 / 3.0};
+        CHECK(n60_correct_synthesize_linear_phase_banded(fs, L, boostAmp, nullptr, &t, c.data(), c.size(), nullptr, 0, &r) ==
+                  N60_CORRECT_OK, "taper");
+        auto mag = [&](double hz) {
+            double re = 0, im = 0;
+            for (size_t n = 0; n < c.size(); ++n) {
+                const double ph = -2.0 * kPi * hz / fs * (static_cast<double>(n) - L);
+                re += c[n] * std::cos(ph);
+                im += c[n] * std::sin(ph);
+            }
+            return 20.0 * std::log10(std::hypot(re, im));
+        };
+        CHECK(std::fabs(mag(1000.0) - 6.0) < 0.5, "in band %.0f: %.3f", fs, mag(1000.0));
+        CHECK(mag(12000.0) < 1.0 && mag(12000.0) > -1.0 && fs > 30000.0, "out of band high %.0f: %.3f", fs, mag(12000.0));
+    }
+}
+
 int main() {
     CHECK(n60_xover_abi_version() == N60_XOVER_ABI_VERSION, "xover ABI");
     testPlanBoundary();
@@ -198,6 +230,7 @@ int main() {
     testThreeWaySum(8, 0.05, 1.0);
     testMagnitudeTracksIir();
     testGraphLatency();
+    testBandedSynthesis();
     if (failures) { std::fprintf(stderr, "%d failure(s)\n", failures); return 1; }
     std::puts("xover fir ok");
     return 0;
