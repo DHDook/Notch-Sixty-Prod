@@ -1652,7 +1652,6 @@ private struct StereoSignatureVUScaleFace: View, Equatable {
 private struct ProductionSpeakersView: View {
     @ObservedObject var engine: AudioIOEngine
     @ObservedObject var profiles: ProductProfileController
-    @EnvironmentObject private var featureFlags: FeatureFlags
     @State private var actionError: String?
 
     private var routing: MultiOutputRoutingConfiguration {
@@ -1686,9 +1685,7 @@ private struct ProductionSpeakersView: View {
                 Text("Speaker topology, bass management, crossover design, physical routing, and driver-level processing.")
                     .foregroundStyle(.secondary)
 
-                if featureFlags.isEnabled(.routingMatrix) {
-                    ProductionRoutingEditorView(engine: engine)
-                }
+                ProductionRoutingEditorView(engine: engine)
                 playbackSystemCard
                 crossoverCard
                 if engine.bassManagementConfiguration.physicalOutputMode == .mainsSub {

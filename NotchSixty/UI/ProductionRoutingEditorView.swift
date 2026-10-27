@@ -1,6 +1,6 @@
 import SwiftUI
 
-// E8 S6: the routing and crossover editor, shown on the Speakers tab only with `e8.routing-matrix` on. It edits a
+// E8 S6: the routing and crossover editor, shown on the Speakers tab. It edits a
 // `SpeakerRoutingConfiguration` through `SpeakerRoutingEditorModel` and hands each edit to the engine, which republishes
 // live where it can and reconfigures with the shutdown fade where it must.
 

@@ -9,9 +9,7 @@ final class CrossoverCoreTests: XCTestCase {
 
     func testAbiVersionAndFlag() {
         XCTAssertEqual(CrossoverCore.abiVersion, 4)
-        XCTAssertTrue(FeatureFlag.all.contains(.routingMatrix))
-        XCTAssertEqual(FeatureFlag.routingMatrix.id, "e8.routing-matrix")
-        XCTAssertFalse(FeatureFlag.routingMatrix.defaultEnabled)
+        XCTAssertFalse(FeatureFlag.all.contains { $0.id == "e8.routing-matrix" })
     }
 
     func testCornerLevelsAtEveryRate() throws {

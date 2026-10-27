@@ -1023,9 +1023,6 @@ final class AudioIOEngine: ObservableObject {
     /// the flag itself; with this false the kernel path runs exactly as before.
     var unifiedGraphEnabled = false
 
-    /// E8 S4: set by the app shell from `e8.routing-matrix`. The engine never reads the flag. With it false,
-    /// `replaceSpeakerRoutingConfiguration` refuses an enabled routing and every session builds exactly as before.
-    var routingMatrixEnabled = false
     /// E8 S4: the speaker routing a session renders, or nil. See `replaceSpeakerRoutingConfiguration`.
     private(set) var speakerRoutingConfiguration: SpeakerRoutingConfiguration?
 
@@ -4525,7 +4522,7 @@ final class AudioIOEngine: ObservableObject {
             }
             return
         }
-        if routingMatrixEnabled, let routing = speakerRoutingConfiguration, routing.enabled {
+        if let routing = speakerRoutingConfiguration, routing.enabled {
             try buildRoutedTransport(output: output, routing: routing)
             return
         }
@@ -4574,9 +4571,6 @@ final class AudioIOEngine: ObservableObject {
 
     /// Checks that apply to any enabled routing, whether it is being set or started.
     private func validateSpeakerRoutingActivation(_ routing: SpeakerRoutingConfiguration) throws {
-        guard routingMatrixEnabled else {
-            throw LiveNChannelTransportError.routingRefused("the routing matrix is switched off.")
-        }
         guard unifiedGraphEnabled else {
             throw LiveNChannelTransportError.routingRefused("it needs the unified graph, and the legacy render kernel is selected.")
         }

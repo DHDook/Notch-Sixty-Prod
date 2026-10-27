@@ -107,13 +107,10 @@ final class ProductController: ObservableObject {
         // E6 S11: the graph is the default; `e6.legacy-kernel` selects the frozen kernel fallback.
         // Swift decides; the engine only receives the result. Read once at launch.
         audioEngine.unifiedGraphEnabled = !FeatureFlags().isEnabled(.legacyKernel)
-        // E8 S4: routing matrix and crossovers, dark behind `e8.routing-matrix`.
-        audioEngine.routingMatrixEnabled = FeatureFlags().isEnabled(.routingMatrix)
         let audioUnitHost = AudioUnitHostController()
         let profiles = ProductProfileController(
             engine: audioEngine,
-            audioUnitHost: audioUnitHost,
-            migratesSpeakerRouting: FeatureFlags().isEnabled(.routingMatrix)
+            audioUnitHost: audioUnitHost
         )
         let calibration = RoomCorrectionCalibrationController(
             engine: audioEngine
