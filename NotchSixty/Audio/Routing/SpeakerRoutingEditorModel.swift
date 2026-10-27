@@ -46,6 +46,27 @@ final class SpeakerRoutingEditorModel: ObservableObject {
         return true
     }
 
+    /// The template the current configuration still has the shape of (nil when customised or empty).
+    var currentTemplate: SpeakerRoutingTemplate? { SpeakerRoutingTemplate.detect(configuration) }
+
+    /// E8 A1: builds a template onto one device, assigning outputs in channel order (mains first, low way to high, then
+    /// subs) with the template's default corners.
+    @discardableResult
+    func applyTemplate(_ template: SpeakerRoutingTemplate, deviceUID: String) -> Bool {
+        var channel: UInt32 = 0
+        func next() -> PhysicalOutputEndpoint {
+            defer { channel += 1 }
+            return PhysicalOutputEndpoint(deviceUID: deviceUID, channelIndex: channel)
+        }
+        let names = ["Left", "Right"]
+        let mains = (0..<min(2, context.programLanes)).map { lane in
+            SpeakerRoutingTemplate.Main(
+                lane: lane, name: names[lane], endpoints: (0..<template.waysPerMain).map { _ in next() })
+        }
+        let subs = (0..<context.subwoofers).map { _ in next() }
+        return applyTemplate(template, mains: mains, subs: subs, crossoverHz: template.defaultCrossoverHz)
+    }
+
     // MARK: Speakers and ways
 
     func addSpeaker(name: String, source: RoutingSource, endpoint: PhysicalOutputEndpoint) {

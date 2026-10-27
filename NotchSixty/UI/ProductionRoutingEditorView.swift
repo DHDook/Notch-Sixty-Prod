@@ -66,40 +66,35 @@ struct ProductionRoutingEditorView: View {
     }
 
     private var templateCard: some View {
-        GroupBox("Start from a template") {
+        GroupBox("System template") {
             HStack {
-                templateButton("Mains + Sub", .mainsPlusSub, corners: [])
-                templateButton("2-way", .twoWay, corners: [2_000])
-                templateButton("3-way", .threeWay, corners: [400, 3_000])
+                Picker("System template", selection: Binding(
+                    get: { model.currentTemplate },
+                    set: { choice in
+                        guard let choice else { return }
+                        guard let device = engine.selectedOutputDevice else {
+                            actionError = "Select an output device first."
+                            return
+                        }
+                        if !model.applyTemplate(choice, deviceUID: device.uid) {
+                            actionError = "That template does not fit this layout."
+                        }
+                    }
+                )) {
+                    if model.currentTemplate == nil {
+                        Text("Custom").tag(SpeakerRoutingTemplate?.none)
+                    }
+                    ForEach(SpeakerRoutingTemplate.allCases) { template in
+                        Text(template.displayName).tag(Optional(template))
+                    }
+                }
+                .labelsHidden()
+                .frame(width: 200)
                 Spacer()
-                Text("Outputs are assigned in channel order on the selected device.")
+                Text("Choosing a template rebuilds the speakers; outputs are assigned in channel order on the selected device.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             .padding(.vertical, 4)
-        }
-    }
-
-    private func templateButton(_ title: String, _ template: SpeakerRoutingTemplate, corners: [Double]) -> some View {
-        Button(title) {
-            guard let device = engine.selectedOutputDevice else {
-                actionError = "Select an output device first."
-                return
-            }
-            var channel: UInt32 = 0
-            func next() -> PhysicalOutputEndpoint {
-                defer { channel += 1 }
-                return PhysicalOutputEndpoint(deviceUID: device.uid, channelIndex: channel)
-            }
-            let names = ["Left", "Right"]
-            let mains = (0..<min(2, model.context.programLanes)).map { lane in
-                SpeakerRoutingTemplate.Main(
-                    lane: lane, name: names[lane],
-                    endpoints: (0..<template.waysPerMain).map { _ in next() })
-            }
-            let subs = (0..<model.context.subwoofers).map { _ in next() }
-            if !model.applyTemplate(template, mains: mains, subs: subs, crossoverHz: corners) {
-                actionError = "That template does not fit this layout."
-            }
         }
     }
 
