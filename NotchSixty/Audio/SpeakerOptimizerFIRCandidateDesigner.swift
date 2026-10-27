@@ -68,8 +68,8 @@ struct SpeakerOptimizerFIRCandidatePlan: Equatable, Sendable {
     var canDeploy: Bool { false }
 }
 
-/// Offline linear-phase synthesis using a Hermitian real magnitude spectrum,
-/// an inverse DFT, exact symmetric/causal windowed truncation, and a separate
+/// Offline linear-phase synthesis by the core synthesiser (exact group delay, Blackman window),
+/// and a separate
 /// forward DFT of ACTUAL Float taps for prediction and headroom auditing.
 /// This never installs FIR taps in the real-time audio graph.
 struct SpeakerOptimizerFIRCandidateDesigner: Sendable {
@@ -147,8 +147,7 @@ struct SpeakerOptimizerFIRCandidateDesigner: Sendable {
             }
             let impulse = try synthesize(
                 correctionDB: desired, frequencies: freqs,
-                sampleRate: rate, tapCount: constraints.tapCount,
-                transform: transform
+                sampleRate: rate, tapCount: constraints.tapCount
             )
             let spectrum = transform.forward(impulse)
             let response = try transferMagnitude(
@@ -224,48 +223,32 @@ struct SpeakerOptimizerFIRCandidateDesigner: Sendable {
         return size
     }
 
+    /// Linear-phase synthesis by the portable core (`n60_correct_synthesize_linear_phase_banded`, E8 S8b): the interpolated
+    /// correction is delayed by exactly (tapCount - 1) / 2 frames and Blackman-windowed over tapCount frames, with the
+    /// one-third-octave measurement-band edge taper applied in the core. 0 dB outside the measured band.
     private func synthesize(
         correctionDB: [Double], frequencies: [Double],
-        sampleRate: Double, tapCount: Int,
-        transform: SpeakerOptimizerFIRTransform
+        sampleRate: Double, tapCount: Int
     ) throws -> [Float] {
-        let size = transform.size
-        let half = size / 2
-        var real = [Float](repeating: 0, count: size)
-        let imaginary = [Float](repeating: 0, count: size)
-        let low = frequencies[0]
-        let high = frequencies[frequencies.count - 1]
-
-        for bin in 0...half {
-            let hz = Double(bin) * sampleRate / Double(size)
-            let gain: Double
-            if hz > low, hz < high {
-                let lowEdge = min(1, max(0, log2(hz / low) * 3))
-                let highEdge = min(1, max(0, log2(high / hz) * 3))
-                gain = interpolated(hz, frequencies: frequencies, values: correctionDB)
-                    * min(lowEdge, highEdge)
-            } else {
-                gain = 0
-            }
-            let magnitude = pow(10.0, gain / 20.0)
-            guard magnitude.isFinite, magnitude > 0,
-                  magnitude <= Double(Float.greatestFiniteMagnitude) else {
-                throw SpeakerOptimizerFIRCandidateError.nonFiniteSynthesis
-            }
-            real[bin] = Float(magnitude)
-            if bin > 0, bin < half { real[size - bin] = Float(magnitude) }
+        guard let low = frequencies.first, let high = frequencies.last, low > 0, high > low else {
+            throw SpeakerOptimizerFIRCandidateError.invalidFrequencyGrid
         }
-
-        let impulse = transform.inverse(real: real, imaginary: imaginary)
-        let middle = (tapCount - 1) / 2
-        var taps: [Float] = []
-        taps.reserveCapacity(tapCount)
-        for i in 0..<tapCount {
-            let circular = (i - middle + size) % size
-            let window = 0.5 - 0.5 * cos(2 * Double.pi * Double(i) / Double(tapCount - 1))
-            taps.append(Float(Double(impulse[circular]) * window))
+        var context = CorrectionCurve(frequencies: frequencies, valuesDB: correctionDB)
+        var taps = [Float](repeating: 0, count: tapCount)
+        var taper = n60_correct_band_taper(low_hz: low, high_hz: high, edge_octaves: 1.0 / 3.0)
+        var report = n60_correct_two_band_report()
+        let status = withUnsafeMutablePointer(to: &context) { pointer in
+            n60_correct_synthesize_linear_phase_banded(
+                sampleRate, UInt32((tapCount - 1) / 2),
+                { hz, user in
+                    let curve = user!.assumingMemoryBound(to: CorrectionCurve.self).pointee
+                    return pow(10.0, curve.interpolatedDB(hz) / 20.0)
+                },
+                pointer, &taper, &taps, UInt64(tapCount), nil, 0, &report
+            )
         }
-        guard taps.allSatisfy(\.isFinite) else {
+        guard status == N60_CORRECT_OK, report.low_tap_count == 0, report.full_tap_count == UInt32(tapCount),
+              taps.allSatisfy(\.isFinite) else {
             throw SpeakerOptimizerFIRCandidateError.nonFiniteSynthesis
         }
         return taps
@@ -383,20 +366,6 @@ struct SpeakerOptimizerFIRCandidateDesigner: Sendable {
         return weights.map { $0 / sum }
     }
 
-    private func interpolated(_ frequency: Double, frequencies: [Double], values: [Double]) -> Double {
-        if frequency <= frequencies[0] { return values[0] }
-        if frequency >= frequencies[frequencies.count - 1] { return values[values.count - 1] }
-        var start = 0
-        var end = frequencies.count - 1
-        while end - start > 1 {
-            let mid = (start + end) / 2
-            if frequencies[mid] <= frequency { start = mid } else { end = mid }
-        }
-        let fraction = log(frequency / frequencies[start])
-            / log(frequencies[end] / frequencies[start])
-        return values[start] + fraction * (values[end] - values[start])
-    }
-
     private func rmse(_ values: [Double], _ target: [Double], _ correction: [Double]) -> Double {
         sqrt(values.indices.reduce(0.0) { sum, i in
             let residual = values[i] + correction[i] - target[i]
@@ -415,6 +384,26 @@ struct SpeakerOptimizerFIRCandidateDesigner: Sendable {
     }
 }
 
+/// Log-frequency linear interpolation of the correction curve in dB, held flat beyond its ends.
+private struct CorrectionCurve {
+    let frequencies: [Double]
+    let valuesDB: [Double]
+
+    func interpolatedDB(_ frequency: Double) -> Double {
+        if frequency <= frequencies[0] { return valuesDB[0] }
+        if frequency >= frequencies[frequencies.count - 1] { return valuesDB[valuesDB.count - 1] }
+        var start = 0
+        var end = frequencies.count - 1
+        while end - start > 1 {
+            let mid = (start + end) / 2
+            if frequencies[mid] <= frequency { start = mid } else { end = mid }
+        }
+        let fraction = log(frequency / frequencies[start])
+            / log(frequencies[end] / frequencies[start])
+        return valuesDB[start] + fraction * (valuesDB[end] - valuesDB[start])
+    }
+}
+
 private struct SpeakerOptimizerFIRSpectrum {
     let real: [Float]
     let imaginary: [Float]
@@ -423,47 +412,19 @@ private struct SpeakerOptimizerFIRSpectrum {
 private final class SpeakerOptimizerFIRTransform {
     let size: Int
     private let forwardSetup: vDSP_DFT_Setup
-    private let inverseSetup: vDSP_DFT_Setup
     private let zeros: [Float]
 
     init(size: Int) throws {
         guard let forward = vDSP_DFT_zop_CreateSetup(nil, vDSP_Length(size), .FORWARD) else {
             throw SpeakerOptimizerFIRCandidateError.transformUnavailable
         }
-        guard let inverse = vDSP_DFT_zop_CreateSetup(nil, vDSP_Length(size), .INVERSE) else {
-            vDSP_DFT_DestroySetup(forward)
-            throw SpeakerOptimizerFIRCandidateError.transformUnavailable
-        }
         self.size = size
         self.forwardSetup = forward
-        self.inverseSetup = inverse
         self.zeros = Array(repeating: 0, count: size)
     }
 
     deinit {
         vDSP_DFT_DestroySetup(forwardSetup)
-        vDSP_DFT_DestroySetup(inverseSetup)
-    }
-
-    func inverse(real: [Float], imaginary: [Float]) -> [Float] {
-        precondition(real.count == size && imaginary.count == size)
-        var realOutput = [Float](repeating: 0, count: size)
-        var imagOutput = [Float](repeating: 0, count: size)
-        real.withUnsafeBufferPointer { inputReal in
-            imaginary.withUnsafeBufferPointer { inputImag in
-                realOutput.withUnsafeMutableBufferPointer { outReal in
-                    imagOutput.withUnsafeMutableBufferPointer { outImag in
-                        vDSP_DFT_Execute(
-                            inverseSetup, inputReal.baseAddress!, inputImag.baseAddress!,
-                            outReal.baseAddress!, outImag.baseAddress!
-                        )
-                    }
-                }
-            }
-        }
-        let factor = Float(1) / Float(size)
-        for i in realOutput.indices { realOutput[i] *= factor }
-        return realOutput
     }
 
     func forward(_ taps: [Float]) -> SpeakerOptimizerFIRSpectrum {

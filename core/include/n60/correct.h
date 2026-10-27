@@ -268,6 +268,23 @@ int32_t n60_correct_synthesize_linear_phase(double sample_rate, uint32_t group_d
                                             uint64_t low_capacity, n60_correct_two_band_report *report);
 
 /*
+ * Optional band limit for the linear-phase synthesis (ABI v3, E8 S8b): the Speaker Optimizer's measurement-band edge taper.
+ * The gain in dB is scaled by t(f) = min(clamp(log2(f / low_hz) / edge_octaves), clamp(log2(high_hz / f) / edge_octaves)),
+ * so the response is 0 dB outside (low_hz, high_hz) and the full requested gain edge_octaves inside each edge
+ * (the optimizer uses 1/3). Pass NULL for no band limit; n60_correct_synthesize_linear_phase does, so crossover output is unchanged.
+ */
+typedef struct n60_correct_band_taper {
+    double low_hz;
+    double high_hz;
+    double edge_octaves;
+} n60_correct_band_taper;
+
+int32_t n60_correct_synthesize_linear_phase_banded(double sample_rate, uint32_t group_delay_frames,
+                                                   n60_correct_amplitude_fn amplitude, void *user,
+                                                   const n60_correct_band_taper *taper, float *full_taps, uint64_t full_capacity,
+                                                   float *low_taps, uint64_t low_capacity, n60_correct_two_band_report *report);
+
+/*
  * The magnitude (dB) and the delay-removed phase of the stage's combined response for given taps, evaluated analytically
  * (full path, low path through the resampler's in-band response). frequencies_hz in, magnitude_db and phase_rad out;
  * the phase has the declared latency L removed. Used to verify a published design against its prediction.
