@@ -18,33 +18,33 @@ using Complex = std::complex<double>;
 
 constexpr uint32_t kGrid = N60_CORRECT_GRID_POINTS;
 
-bool finite(double v) { return std::isfinite(v); }
+bool isFiniteValue(double v) { return std::isfinite(v); }
 
 bool validDesignParams(const n60_correct_design_params *p) {
     if (p == nullptr) return false;
     if (p->mode != N60_CORRECT_MODE_MIN_PHASE && p->mode != N60_CORRECT_MODE_MIXED_PHASE) return false;
-    if (!finite(p->correction_low_hz) || !finite(p->correction_high_hz) || !(p->correction_low_hz >= 1.0) ||
+    if (!isFiniteValue(p->correction_low_hz) || !isFiniteValue(p->correction_high_hz) || !(p->correction_low_hz >= 1.0) ||
         !(p->correction_high_hz > p->correction_low_hz)) {
         return false;
     }
-    if (!finite(p->smoothing_octaves) || p->smoothing_octaves < 0.0 || p->smoothing_octaves > 2.0) return false;
-    if (!finite(p->max_boost_db) || p->max_boost_db < 0.0 || p->max_boost_db > 30.0) return false;
-    if (!finite(p->max_cut_db) || p->max_cut_db < 0.0 || p->max_cut_db > 40.0) return false;
-    if (!finite(p->fdw_cycles_low) || !finite(p->fdw_cycles_high) || p->fdw_cycles_low < 1.0 || p->fdw_cycles_high < 1.0 ||
+    if (!isFiniteValue(p->smoothing_octaves) || p->smoothing_octaves < 0.0 || p->smoothing_octaves > 2.0) return false;
+    if (!isFiniteValue(p->max_boost_db) || p->max_boost_db < 0.0 || p->max_boost_db > 30.0) return false;
+    if (!isFiniteValue(p->max_cut_db) || p->max_cut_db < 0.0 || p->max_cut_db > 40.0) return false;
+    if (!isFiniteValue(p->fdw_cycles_low) || !isFiniteValue(p->fdw_cycles_high) || p->fdw_cycles_low < 1.0 || p->fdw_cycles_high < 1.0 ||
         p->fdw_cycles_low > 60.0 || p->fdw_cycles_high > 60.0) {
         return false;
     }
-    if (!finite(p->fdw_knee_hz) || p->fdw_knee_hz < 20.0 || p->fdw_knee_hz > 19000.0) return false;
-    if (!finite(p->spread_threshold_db) || p->spread_threshold_db < 0.0) return false;
-    if (!finite(p->phase_limit_hz) || p->phase_limit_hz < 100.0 || p->phase_limit_hz > 2000.0) return false;
-    if (!finite(p->coherence_low) || !finite(p->coherence_high) || p->coherence_low < 0.0 ||
+    if (!isFiniteValue(p->fdw_knee_hz) || p->fdw_knee_hz < 20.0 || p->fdw_knee_hz > 19000.0) return false;
+    if (!isFiniteValue(p->spread_threshold_db) || p->spread_threshold_db < 0.0) return false;
+    if (!isFiniteValue(p->phase_limit_hz) || p->phase_limit_hz < 100.0 || p->phase_limit_hz > 2000.0) return false;
+    if (!isFiniteValue(p->coherence_low) || !isFiniteValue(p->coherence_high) || p->coherence_low < 0.0 ||
         !(p->coherence_high > p->coherence_low) || p->coherence_high > 1.0) {
         return false;
     }
     if (p->target_points > 0) {
         if (p->target_frequencies_hz == nullptr || p->target_gain_db == nullptr) return false;
         for (uint32_t i = 0; i < p->target_points; ++i) {
-            if (!finite(p->target_frequencies_hz[i]) || !finite(p->target_gain_db[i]) || !(p->target_frequencies_hz[i] > 0.0)) return false;
+            if (!isFiniteValue(p->target_frequencies_hz[i]) || !isFiniteValue(p->target_gain_db[i]) || !(p->target_frequencies_hz[i] > 0.0)) return false;
             if (i > 0 && !(p->target_frequencies_hz[i] > p->target_frequencies_hz[i - 1])) return false;
         }
     }
@@ -53,12 +53,12 @@ bool validDesignParams(const n60_correct_design_params *p) {
 
 bool validProblem(const n60_correct_problem *p, uint32_t channel) {
     if (p == nullptr || p->irs == nullptr) return false;
-    if (!finite(p->sample_rate) || p->sample_rate < 8000.0 || p->sample_rate > 768000.0) return false;
+    if (!isFiniteValue(p->sample_rate) || p->sample_rate < 8000.0 || p->sample_rate > 768000.0) return false;
     if (p->channel_count == 0 || p->seat_count == 0 || channel >= p->channel_count || p->main_seat >= p->seat_count) return false;
     for (uint32_t s = 0; s < p->seat_count; ++s) {
         const n60_correct_seat_ir &ir = p->irs[static_cast<size_t>(channel) * p->seat_count + s];
-        if (ir.ir == nullptr || ir.frames < 64 || !finite(ir.arrival_frames) || ir.arrival_frames < 0.0 ||
-            ir.arrival_frames >= static_cast<double>(ir.frames) || !finite(ir.weight) || ir.weight < 0.0) {
+        if (ir.ir == nullptr || ir.frames < 64 || !isFiniteValue(ir.arrival_frames) || ir.arrival_frames < 0.0 ||
+            ir.arrival_frames >= static_cast<double>(ir.frames) || !isFiniteValue(ir.weight) || ir.weight < 0.0) {
             return false;
         }
     }
@@ -330,7 +330,7 @@ int32_t n60_correct_design_channel(const n60_correct_problem *problem, uint32_t 
         c = std::min(std::max(c, -params->max_cut_db), boostLimit);
         const double edge = edgeWindow(f, params->correction_low_hz, std::min(params->correction_high_hz, 0.45 * fs));
         c *= edge;
-        if (!finite(c)) return N60_CORRECT_ERR_NONFINITE;
+        if (!isFiniteValue(c)) return N60_CORRECT_ERR_NONFINITE;
         grid->correction_db[g] = c;
         if (grid->measured_db != nullptr) grid->measured_db[g] = measured[g];
         if (grid->seat_spread_db != nullptr) grid->seat_spread_db[g] = spread[g];
@@ -369,7 +369,7 @@ int32_t n60_correct_design_channel(const n60_correct_problem *problem, uint32_t 
                                       edgeWindow(fMid, params->correction_low_hz, std::min(params->correction_high_hz, 0.45 * fs));
                 value += weight * (arg[g + 1] - arg[g]);
             }
-            if (!finite(value)) return N60_CORRECT_ERR_NONFINITE;
+            if (!isFiniteValue(value)) return N60_CORRECT_ERR_NONFINITE;
             phase[g] = value;
         }
     }
