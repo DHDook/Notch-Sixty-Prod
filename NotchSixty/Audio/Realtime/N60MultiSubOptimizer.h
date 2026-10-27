@@ -38,6 +38,10 @@ typedef struct {
     uint32_t searchStarts;
     uint32_t searchRounds;
     uint32_t searchEvaluationBudget;
+    /// E8 A6b: EQ stage search (n60/correct.h section 6). Adjacent bins differ by at most this slope (or one grid step).
+    float maximumEQSlopeDBPerOctave;
+    uint32_t eqSearchRounds;
+    uint32_t eqSearchEvaluationBudget;
 } N60MultiSubOptimizationSettings;
 
 typedef struct {
@@ -56,6 +60,9 @@ typedef struct {
     uint64_t searchEvaluations;
     uint32_t searchStartsRun;
     bool searchBudgetExhausted;
+    /// EQ stage diagnostics (A6b): bin evaluations, and whether the budget stopped the search.
+    uint64_t eqSearchEvaluations;
+    bool eqSearchBudgetExhausted;
 } N60MultiSubOptimizationResult;
 
 static inline N60MultiSubOptimizationSettings N60MultiSubOptimizationSettingsMakeDefault(void) {
@@ -78,6 +85,9 @@ static inline N60MultiSubOptimizationSettings N60MultiSubOptimizationSettingsMak
         .searchStarts = 12u,
         .searchRounds = 24u,
         .searchEvaluationBudget = 2000000u,
+        .maximumEQSlopeDBPerOctave = 12.0f,
+        .eqSearchRounds = 8u,
+        .eqSearchEvaluationBudget = 4000000u,
     };
 }
 
@@ -114,6 +124,14 @@ static inline bool N60MultiSubOptimizationSettingsIsValid(
         && settings.searchStarts >= 1u && settings.searchStarts <= 64u
         && settings.searchRounds >= 1u && settings.searchRounds <= 64u
         && settings.searchEvaluationBudget > 0u
+        && settings.maximumEQDB <= 3.0f
+        && settings.minimumEQDB >= -12.0f
+        && isfinite(settings.maximumEQSlopeDBPerOctave)
+        && settings.maximumEQSlopeDBPerOctave >= 0.0f
+        && settings.eqSearchRounds >= 1u && settings.eqSearchRounds <= 32u
+        && settings.eqSearchEvaluationBudget > 0u
+        && (settings.maximumEQDB - settings.minimumEQDB) / settings.eqStepDB
+            < (float)(N60_CORRECT_MULTISUB_MAX_EQ_LEVELS - 1u)
         && settings.maximumAdditionalDelayMs / settings.delayStepMs
             < (float)(N60_CORRECT_MULTISUB_MAX_DELAYS - 1u)
         && (settings.maximumGainDB - settings.minimumGainDB) / settings.gainStepDB
@@ -298,45 +316,6 @@ static inline float N60MultiSubEvaluateObjective(
         + regularization;
 }
 
-static inline float N60MultiSubEvaluateOneFrequencyObjective(
-    const N60MultichannelCalibrationMatrix * _Nonnull matrix,
-    const uint32_t * _Nonnull sourceIndices,
-    uint32_t subwooferCount,
-    const float * _Nonnull targetMagnitudeDB,
-    const N60MultiSubOptimizationSettings * _Nonnull settings,
-    const N60MultiSubOptimizationResult * _Nonnull result,
-    uint32_t frequencyIndex,
-    uint32_t editedSubwoofer
-) {
-    float targetError = 0.0f;
-    float variance = 0.0f;
-    if (!N60MultiSubEvaluateFrequency(
-            matrix,
-            sourceIndices,
-            subwooferCount,
-            targetMagnitudeDB,
-            settings,
-            result,
-            frequencyIndex,
-            &targetError,
-            &variance)) {
-        return INFINITY;
-    }
-    const float eq = result->perSubEQTargetDB[editedSubwoofer][frequencyIndex];
-    float regularization = settings->eqRegularization * eq * eq;
-    if (frequencyIndex > 0u) {
-        const float delta = eq - result->perSubEQTargetDB[editedSubwoofer][frequencyIndex - 1u];
-        regularization += settings->eqSmoothness * delta * delta;
-    }
-    if (frequencyIndex + 1u < matrix->frequencyCount) {
-        const float delta = eq - result->perSubEQTargetDB[editedSubwoofer][frequencyIndex + 1u];
-        regularization += settings->eqSmoothness * delta * delta;
-    }
-    return settings->targetErrorWeight * targetError
-        + settings->seatVarianceWeight * variance
-        + regularization;
-}
-
 /// Builds the unit-gain response table and runs the core search (n60_correct_multisub_search). Fills gain,
 /// delay and polarity of `result`; the EQ target stays zero. Control-plane only: it allocates.
 static inline bool N60MultiSubSearchDelayGainPolarity(
@@ -441,6 +420,107 @@ static inline bool N60MultiSubSearchDelayGainPolarity(
     return ok;
 }
 
+/// Offline only: never call from a render callback (it allocates).
+/// Builds the final-response table (gain, delay and polarity of `result` applied, EQ 0 dB) and runs the core EQ
+/// search (n60_correct_multisub_eq_search). Fills perSubEQTargetDB. Control-plane only: it allocates.
+static inline bool N60MultiSubSearchEQ(
+    const N60MultichannelCalibrationMatrix * _Nonnull matrix,
+    const uint32_t * _Nonnull sourceIndices,
+    uint32_t subwooferCount,
+    const float * _Nonnull targetMagnitudeDB,
+    const N60MultiSubOptimizationSettings * _Nonnull settings,
+    N60MultiSubOptimizationResult * _Nonnull result
+) {
+    const uint32_t seats = matrix->seatCount;
+    const uint32_t bins = matrix->frequencyCount;
+    if (bins > N60_CORRECT_MULTISUB_MAX_EQ_BINS) return false;
+    const size_t tableCount = (size_t)subwooferCount * seats * bins;
+    const uint32_t eqSteps = (uint32_t)floorf(
+        (settings->maximumEQDB - settings->minimumEQDB) / settings->eqStepDB + 0.5f);
+    double *storage = (double *)malloc(
+        (2u * tableCount + 3u * (size_t)bins + seats + (size_t)eqSteps + 1u) * sizeof(double));
+    n60_correct_multisub_eq_result *found = (n60_correct_multisub_eq_result *)malloc(sizeof *found);
+    if (storage == NULL || found == NULL) {
+        free(storage);
+        free(found);
+        return false;
+    }
+    double *re = storage;
+    double *im = re + tableCount;
+    double *frequency = im + tableCount;
+    double *target = frequency + bins;
+    double *weight = target + bins;
+    double *eq = weight + seats;
+
+    bool ok = true;
+    for (uint32_t sub = 0; sub < subwooferCount && ok; ++sub) {
+        for (uint32_t seat = 0; seat < seats && ok; ++seat) {
+            const N60CalibrationMeasuredResponse *response = &matrix->responses[sourceIndices[sub]][seat];
+            const bool used = matrix->seats[seat].included && matrix->seats[seat].weight > 0.0f;
+            if (used && !response->valid) ok = false;
+            for (uint32_t bin = 0; bin < bins; ++bin) {
+                const size_t index = ((size_t)sub * seats + seat) * bins + bin;
+                double real = 0.0, imaginary = 0.0;
+                if (used) {
+                    N60MultiSubComplexContribution(
+                        matrix, response, bin, result->gainDB[sub], result->additionalDelayMs[sub],
+                        result->polarityInverted[sub], 0.0f, &real, &imaginary);
+                }
+                re[index] = real;
+                im[index] = imaginary;
+            }
+        }
+    }
+    for (uint32_t bin = 0; bin < bins; ++bin) {
+        frequency[bin] = matrix->frequenciesHz[bin];
+        target[bin] = targetMagnitudeDB[bin];
+    }
+    for (uint32_t seat = 0; seat < seats; ++seat) {
+        const bool used = matrix->seats[seat].included && matrix->seats[seat].weight > 0.0f;
+        weight[seat] = used ? (double)matrix->seats[seat].weight : 0.0;
+    }
+    for (uint32_t step = 0; step <= eqSteps; ++step) {
+        eq[step] = (double)fminf(settings->maximumEQDB, settings->minimumEQDB + (float)step * settings->eqStepDB);
+    }
+    if (ok) {
+        n60_correct_multisub_eq_problem problem;
+        memset(&problem, 0, sizeof problem);
+        problem.struct_size = sizeof problem;
+        problem.sub_count = subwooferCount;
+        problem.seat_count = seats;
+        problem.bin_count = bins;
+        problem.response_re = re;
+        problem.response_im = im;
+        problem.frequency_hz = frequency;
+        problem.target_db = target;
+        problem.seat_weight = weight;
+        problem.eq_db = eq;
+        problem.eq_count = eqSteps + 1u;
+        problem.target_error_weight = settings->targetErrorWeight;
+        problem.seat_variance_weight = settings->seatVarianceWeight;
+        problem.eq_regularisation = settings->eqRegularization;
+        problem.eq_smoothness = settings->eqSmoothness;
+        problem.max_slope_db_per_octave = settings->maximumEQSlopeDBPerOctave;
+        problem.null_guard_db = 10.0;
+        problem.passes = settings->eqPasses;
+        problem.rounds = settings->eqSearchRounds;
+        problem.evaluation_budget = settings->eqSearchEvaluationBudget;
+        ok = n60_correct_multisub_eq_search(&problem, found) == N60_CORRECT_OK;
+    }
+    if (ok) {
+        for (uint32_t sub = 0; sub < subwooferCount; ++sub) {
+            for (uint32_t bin = 0; bin < bins; ++bin) {
+                result->perSubEQTargetDB[sub][bin] = (float)eq[found->eq_index[sub][bin]];
+            }
+        }
+        result->eqSearchEvaluations = found->evaluations;
+        result->eqSearchBudgetExhausted = found->budget_exhausted != 0u;
+    }
+    free(storage);
+    free(found);
+    return ok;
+}
+
 /// Offline/control-plane coordinate optimizer. It first alternates polarity/delay
 /// and broad gain per physical sub, then derives a smooth bounded frequency-domain
 /// correction target per sub. The EQ target is intentionally a design target, not
@@ -478,38 +558,9 @@ static inline bool N60MultiSubOptimize(
         return false;
     }
 
-    for (uint32_t pass = 0; pass < settings.eqPasses; ++pass) {
-        for (uint32_t frequency = 0; frequency < matrix->frequencyCount; ++frequency) {
-            for (uint32_t sub = 0; sub < subwooferCount; ++sub) {
-                float bestObjective = INFINITY;
-                float bestEQ = result.perSubEQTargetDB[sub][frequency];
-                const uint32_t eqSteps = (uint32_t)floorf(
-                    (settings.maximumEQDB - settings.minimumEQDB) / settings.eqStepDB + 0.5f
-                );
-                for (uint32_t step = 0; step <= eqSteps; ++step) {
-                    N60MultiSubOptimizationResult candidate = result;
-                    candidate.perSubEQTargetDB[sub][frequency] = fminf(
-                        settings.maximumEQDB,
-                        settings.minimumEQDB + (float)step * settings.eqStepDB
-                    );
-                    const float objective = N60MultiSubEvaluateOneFrequencyObjective(
-                        matrix,
-                        sourceIndices,
-                        subwooferCount,
-                        targetMagnitudeDB,
-                        &settings,
-                        &candidate,
-                        frequency,
-                        sub
-                    );
-                    if (objective < bestObjective) {
-                        bestObjective = objective;
-                        bestEQ = candidate.perSubEQTargetDB[sub][frequency];
-                    }
-                }
-                result.perSubEQTargetDB[sub][frequency] = bestEQ;
-            }
-        }
+    if (settings.eqPasses > 0u
+        && !N60MultiSubSearchEQ(matrix, sourceIndices, subwooferCount, targetMagnitudeDB, &settings, &result)) {
+        return false;
     }
 
     result.objective = N60MultiSubEvaluateObjective(

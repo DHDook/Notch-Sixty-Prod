@@ -500,6 +500,59 @@ typedef struct n60_correct_multisub_result {
 
 int32_t n60_correct_multisub_search(const n60_correct_multisub_problem *problem, n60_correct_multisub_result *result);
 
+/*
+ * Section 6 (E8 A6b): EQ stage of the multi-subwoofer optimiser, run after the delay, gain and polarity are fixed.
+ *
+ * Offline only; allocates at entry. The table holds the final complex response of every sub at every seat and bin
+ * (gain, delay and polarity applied, EQ 0 dB). Each sub gets an EQ level from `eq_db` (ascending grid) at every bin.
+ * The objective is the global objective of section 6 (target error and seat variance averaged over bins, plus
+ * eq_regularisation / (subs * bins) * sum v^2 and eq_smoothness / (subs * bins) * sum (v[b] - v[b-1])^2; the boost
+ * term is constant here). Start 0 runs `passes` per-bin, per-sub sweeps; with passes > 0, rounds of an exact
+ * per-sub Viterbi pass over the bins and a joint two-sub move at each bin follow, each accepting strict
+ * improvements only, so the result is never worse than start 0. Feasible levels: adjacent bins differ by at most
+ * max(max_slope_db_per_octave * |log2(f_b / f_(b-1))|, smallest grid step); no positive level at a bin where an
+ * active seat is more than null_guard_db below target with all EQ at 0 dB. The budget counts bin evaluations and
+ * is checked between rounds. No threads, no randomness: two runs give identical bits.
+ * Errors: ERR_ARGUMENT, ERR_NONFINITE, ERR_CAPACITY, ERR_ALLOC.
+ */
+#define N60_CORRECT_MULTISUB_MAX_EQ_BINS 128u
+#define N60_CORRECT_MULTISUB_MAX_EQ_LEVELS 64u
+
+typedef struct n60_correct_multisub_eq_problem {
+    uint32_t struct_size;
+    uint32_t sub_count;
+    uint32_t seat_count;
+    uint32_t bin_count; /* 1 .. N60_CORRECT_MULTISUB_MAX_EQ_BINS */
+    const double *response_re; /* sub_count * seat_count * bin_count, [sub][seat][bin] */
+    const double *response_im;
+    const double *frequency_hz;
+    const double *target_db;
+    const double *seat_weight;
+    const double *eq_db; uint32_t eq_count; /* ascending, 1 .. N60_CORRECT_MULTISUB_MAX_EQ_LEVELS */
+    double target_error_weight;
+    double seat_variance_weight;
+    double eq_regularisation;
+    double eq_smoothness;
+    double max_slope_db_per_octave;
+    double null_guard_db;
+    uint32_t passes; /* 0 .. 8: start-0 sweeps; 0 leaves the EQ at 0 dB and skips the rounds */
+    uint32_t rounds; /* 1 .. 32 */
+    uint64_t evaluation_budget;
+} n60_correct_multisub_eq_problem;
+
+typedef struct n60_correct_multisub_eq_result {
+    uint32_t struct_size;
+    uint32_t eq_index[N60_CORRECT_MULTISUB_MAX_SUBS][N60_CORRECT_MULTISUB_MAX_EQ_BINS];
+    double objective;
+    double target_error;
+    double seat_variance;
+    uint64_t evaluations;
+    uint32_t rounds_run;
+    uint32_t budget_exhausted;
+} n60_correct_multisub_eq_result;
+
+int32_t n60_correct_multisub_eq_search(const n60_correct_multisub_eq_problem *problem, n60_correct_multisub_eq_result *result);
+
 #ifdef __cplusplus
 }
 #endif

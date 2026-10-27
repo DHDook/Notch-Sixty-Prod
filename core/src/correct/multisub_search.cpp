@@ -16,6 +16,8 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <memory>
+#include <new>
 #include <vector>
 
 #include "n60/correct.h"
@@ -542,5 +544,477 @@ extern "C" int32_t n60_correct_multisub_search(const n60_correct_multisub_proble
     result->starts_run = static_cast<uint32_t>(results.size());
     result->budget_exhausted = search.exhausted ? 1u : 0u;
     result->delay_count_used = K;
+    return N60_CORRECT_OK;
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// EQ stage (E8 A6b, n60/correct.h section 6). With the delay, gain and polarity fixed, each sub s has an EQ level
+// e[s][b] on a grid at every bin b. The table C[s][n][b] is the final complex response of sub s (gain, delay and
+// polarity included, EQ 0 dB); the EQ multiplies it by 10^(v/20). The objective is the GLOBAL one of
+// N60MultiSubEvaluateObjective with the constant boost term dropped:
+//   (1/B) sum_b [ wT (Var_b + (m_b - t_b)^2) + wV Var_b ]
+//   + eqReg / (S B) sum_s,b v^2 + eqSmooth / (S B) sum_s,b>0 (v[b] - v[b-1])^2.
+// Feasible levels: |v[b] - v[b-1]| <= max(slope * |log2(f_b / f_(b-1))|, smallest grid step), and no positive level at a
+// bin where an active seat is more than `null_guard_db` below target with all EQ at 0 dB.
+// Moves, all accepting only strict improvements so the result is never worse than start 0 (the per-bin sweeps):
+//   chain: one sub over all bins, an exact Viterbi pass with the other subs fixed;
+//   pair:  two subs jointly at one bin, over a window of +-4 grid levels around the current ones.
+// Offline only; allocates at entry; fixed order; sums recomputed from scratch after each accepted move; no randomness.
+namespace {
+
+constexpr uint32_t kMaxEqBins = N60_CORRECT_MULTISUB_MAX_EQ_BINS;
+constexpr uint32_t kMaxEqLevels = N60_CORRECT_MULTISUB_MAX_EQ_LEVELS;
+constexpr int kPairRadius = 4;
+
+class EqSearch {
+public:
+    uint32_t S = 0, N = 0, B = 0, L = 0;
+    uint64_t evals = 0, budget = 0;
+    bool exhausted = false;
+    uint32_t e[kMaxSubs][kMaxEqBins] = {};
+
+    void build(const n60_correct_multisub_eq_problem &p);
+    void start0(uint32_t passes, bool legacy);
+    void startBest(uint32_t passes);
+    bool chainMove(uint32_t s);
+    bool pairMoves();
+    double total(double *error, double *variance);
+    uint32_t rounds(uint32_t maxRounds);
+
+private:
+    std::vector<double> cre_, cim_, lin_, val_, wn_, target_, rre_, rim_, orr_, oim_;
+    std::vector<double> dc_, cost_;
+    std::vector<int32_t> back_;
+    std::vector<uint32_t> top_;
+    std::vector<double> jump_;
+    double wT_ = 1, wV_ = 0, rg_ = 0, sm_ = 0;
+
+    size_t at(uint32_t s, uint32_t b) const { return (static_cast<size_t>(s) * B + b) * N; }
+    bool ok(uint32_t i, uint32_t j, uint32_t b) const { return std::fabs(val_[i] - val_[j]) <= jump_[b] + 1.0e-9; }
+    double unary(uint32_t l) const { return rg_ * val_[l] * val_[l]; }
+    double pairCost(uint32_t i, uint32_t j) const { return sm_ * (val_[i] - val_[j]) * (val_[i] - val_[j]); }
+    double data(uint32_t b, const double *re, const double *im, double *error, double *variance) const;
+    void binSum(uint32_t b, int ex0, int ex1, double *re, double *im) const;
+    void fullSums();
+    double neighbours(uint32_t s, uint32_t b, uint32_t l) const;
+    bool feasible(uint32_t s, uint32_t b, uint32_t l) const;
+};
+
+void EqSearch::build(const n60_correct_multisub_eq_problem &p) {
+    S = p.sub_count;
+    B = p.bin_count;
+    L = p.eq_count;
+    wT_ = p.target_error_weight;
+    wV_ = p.seat_variance_weight;
+    rg_ = p.eq_regularisation / (static_cast<double>(S) * B);
+    sm_ = p.eq_smoothness / (static_cast<double>(S) * B);
+    budget = p.evaluation_budget;
+
+    std::vector<uint32_t> seats;
+    double totalWeight = 0.0;
+    for (uint32_t n = 0; n < p.seat_count; ++n) {
+        if (p.seat_weight[n] > 0.0) {
+            seats.push_back(n);
+            totalWeight += p.seat_weight[n];
+        }
+    }
+    N = static_cast<uint32_t>(seats.size());
+    wn_.resize(N);
+    for (uint32_t i = 0; i < N; ++i) wn_[i] = p.seat_weight[seats[i]] / totalWeight;
+    cre_.assign(static_cast<size_t>(S) * B * N, 0.0);
+    cim_.assign(static_cast<size_t>(S) * B * N, 0.0);
+    for (uint32_t s = 0; s < S; ++s) {
+        for (uint32_t i = 0; i < N; ++i) {
+            const size_t src = (static_cast<size_t>(s) * p.seat_count + seats[i]) * B;
+            for (uint32_t b = 0; b < B; ++b) {
+                cre_[at(s, b) + i] = p.response_re[src + b];
+                cim_[at(s, b) + i] = p.response_im[src + b];
+            }
+        }
+    }
+    val_.assign(p.eq_db, p.eq_db + L);
+    lin_.resize(L);
+    double step = 1.0e30;
+    for (uint32_t l = 0; l < L; ++l) {
+        lin_[l] = std::pow(10.0, val_[l] / 20.0);
+        if (l > 0) step = std::min(step, val_[l] - val_[l - 1]);
+    }
+    target_.assign(p.target_db, p.target_db + B);
+    jump_.assign(B, 1.0e30);
+    for (uint32_t b = 1; b < B; ++b) {
+        const double oct = std::fabs(std::log2(p.frequency_hz[b] / p.frequency_hz[b - 1]));
+        jump_[b] = L > 1 ? std::max(p.max_slope_db_per_octave * oct, step) : 1.0e30;
+    }
+    rre_.assign(static_cast<size_t>(B) * N, 0.0);
+    rim_.assign(static_cast<size_t>(B) * N, 0.0);
+    orr_.assign(N, 0.0);
+    oim_.assign(N, 0.0);
+    dc_.assign(static_cast<size_t>(B) * L, 0.0);
+    cost_.assign(static_cast<size_t>(B) * L, 0.0);
+    back_.assign(static_cast<size_t>(B) * L, 0);
+
+    // Null guard: with all EQ at 0 dB, an active seat more than null_guard_db below target forbids positive levels.
+    uint32_t zero = 0;
+    for (uint32_t l = 1; l < L; ++l) {
+        if (std::fabs(val_[l]) < std::fabs(val_[zero])) zero = l;
+    }
+    top_.assign(B, L - 1);
+    uint32_t lastNonPositive = 0;
+    for (uint32_t l = 0; l < L; ++l) {
+        if (val_[l] <= 0.0) lastNonPositive = l;
+    }
+    for (uint32_t b = 0; b < B; ++b) {
+        bool nullBin = false;
+        for (uint32_t n = 0; n < N && !nullBin; ++n) {
+            double re = 0.0, im = 0.0;
+            for (uint32_t s = 0; s < S; ++s) {
+                re += cre_[at(s, b) + n];
+                im += cim_[at(s, b) + n];
+            }
+            if (target_[b] - powerToDb(re * re + im * im) > p.null_guard_db) nullBin = true;
+        }
+        if (nullBin) top_[b] = lastNonPositive;
+        for (uint32_t s = 0; s < S; ++s) e[s][b] = std::min(zero, top_[b]);
+    }
+    fullSums();
+}
+
+double EqSearch::data(uint32_t b, const double *re, const double *im, double *error, double *variance) const {
+    double mean = 0.0, sq = 0.0;
+    for (uint32_t n = 0; n < N; ++n) {
+        const double db = powerToDb(re[n] * re[n] + im[n] * im[n]);
+        mean += wn_[n] * db;
+        sq += wn_[n] * db * db;
+    }
+    double var = sq - mean * mean;
+    if (var < 0.0) var = 0.0;
+    const double err = mean - target_[b];
+    if (error != nullptr) *error = (var + err * err) / B;
+    if (variance != nullptr) *variance = var / B;
+    return (wT_ * (var + err * err) + wV_ * var) / B;
+}
+
+// Sum of all subs at bin b, skipping up to two.
+void EqSearch::binSum(uint32_t b, int ex0, int ex1, double *re, double *im) const {
+    for (uint32_t n = 0; n < N; ++n) {
+        re[n] = 0.0;
+        im[n] = 0.0;
+    }
+    for (uint32_t s = 0; s < S; ++s) {
+        if (static_cast<int>(s) == ex0 || static_cast<int>(s) == ex1) continue;
+        const double a = lin_[e[s][b]];
+        for (uint32_t n = 0; n < N; ++n) {
+            re[n] += a * cre_[at(s, b) + n];
+            im[n] += a * cim_[at(s, b) + n];
+        }
+    }
+}
+
+void EqSearch::fullSums() {
+    for (uint32_t b = 0; b < B; ++b) binSum(b, -1, -1, &rre_[static_cast<size_t>(b) * N], &rim_[static_cast<size_t>(b) * N]);
+}
+
+// Smoothness cost of sub s at bin b with level l against its neighbours' current levels.
+double EqSearch::neighbours(uint32_t s, uint32_t b, uint32_t l) const {
+    double c = 0.0;
+    if (b > 0) c += pairCost(e[s][b - 1], l);
+    if (b + 1 < B) c += pairCost(l, e[s][b + 1]);
+    return c;
+}
+
+bool EqSearch::feasible(uint32_t s, uint32_t b, uint32_t l) const {
+    if (l > top_[b]) return false;
+    if (b > 0 && !ok(e[s][b - 1], l, b)) return false;
+    if (b + 1 < B && !ok(l, e[s][b + 1], b + 1)) return false;
+    return true;
+}
+
+double EqSearch::total(double *error, double *variance) {
+    double sum = 0.0, err = 0.0, var = 0.0;
+    for (uint32_t b = 0; b < B; ++b) {
+        double be = 0.0, bv = 0.0;
+        sum += data(b, &rre_[static_cast<size_t>(b) * N], &rim_[static_cast<size_t>(b) * N], &be, &bv);
+        err += be;
+        var += bv;
+        for (uint32_t s = 0; s < S; ++s) {
+            sum += unary(e[s][b]);
+            if (b > 0) sum += pairCost(e[s][b - 1], e[s][b]);
+        }
+    }
+    if (error != nullptr) *error = err;
+    if (variance != nullptr) *variance = var;
+    return sum;
+}
+
+// Start sweeps: `passes` sweeps, per bin and per sub the best feasible level. The default sweep scores on the global
+// objective and keeps the current level unless another is strictly better. The legacy sweep reproduces the A4
+// per-bin rule (the local objective weights the EQ terms `subs` times more heavily than the global one, and the lowest
+// level wins a tie), so a start that is never worse than the A4 stage is always among the candidates.
+void EqSearch::start0(uint32_t passes, bool legacy) {
+    const double regScale = legacy ? static_cast<double>(S) : 1.0;
+    std::vector<double> re(N), im(N);
+    for (uint32_t pass = 0; pass < passes; ++pass) {
+        for (uint32_t b = 0; b < B; ++b) {
+            for (uint32_t s = 0; s < S; ++s) {
+                binSum(b, static_cast<int>(s), -1, orr_.data(), oim_.data());
+                const uint32_t cur = e[s][b];
+                auto cost = [&](uint32_t l) {
+                    for (uint32_t n = 0; n < N; ++n) {
+                        re[n] = orr_[n] + lin_[l] * cre_[at(s, b) + n];
+                        im[n] = oim_[n] + lin_[l] * cim_[at(s, b) + n];
+                    }
+                    ++evals;
+                    return data(b, re.data(), im.data(), nullptr, nullptr) + regScale * (unary(l) + neighbours(s, b, l));
+                };
+                if (legacy) {
+                    uint32_t pick = cur;
+                    double lowest = INFINITY;
+                    for (uint32_t l = 0; l < L; ++l) {
+                        if (!feasible(s, b, l)) continue;
+                        const double c = cost(l);
+                        if (c < lowest) {
+                            lowest = c;
+                            pick = l;
+                        }
+                    }
+                    if (pick != cur) {
+                        e[s][b] = pick;
+                        binSum(b, -1, -1, &rre_[static_cast<size_t>(b) * N], &rim_[static_cast<size_t>(b) * N]);
+                    }
+                    continue;
+                }
+                // Keep the current level unless another feasible one is strictly better.
+                const double curCost = cost(cur);
+                uint32_t best = cur;
+                double bestCost = curCost;
+                for (uint32_t l = 0; l < L; ++l) {
+                    if (l == cur || !feasible(s, b, l)) continue;
+                    const double c = cost(l);
+                    if (c < bestCost - 1.0e-12 * (1.0 + std::fabs(bestCost))) {
+                        bestCost = c;
+                        best = l;
+                    }
+                }
+                if (best != cur) {
+                    e[s][b] = best;
+                    binSum(b, -1, -1, &rre_[static_cast<size_t>(b) * N], &rim_[static_cast<size_t>(b) * N]);
+                }
+            }
+        }
+    }
+}
+
+// Start 0: the better of the global-objective sweep and the legacy sweep, both from the initial state.
+void EqSearch::startBest(uint32_t passes) {
+    uint32_t init[kMaxSubs][kMaxEqBins];
+    std::memcpy(init, e, sizeof init);
+    start0(passes, false);
+    const double a = total(nullptr, nullptr);
+    uint32_t keep[kMaxSubs][kMaxEqBins];
+    std::memcpy(keep, e, sizeof keep);
+    std::memcpy(e, init, sizeof init);
+    fullSums();
+    start0(passes, true);
+    if (!(total(nullptr, nullptr) < a)) {
+        std::memcpy(e, keep, sizeof keep);
+        fullSums();
+    }
+}
+
+// Exact Viterbi pass over the bins for sub s with the others fixed.
+bool EqSearch::chainMove(uint32_t s) {
+    std::vector<double> re(N), im(N);
+    for (uint32_t b = 0; b < B; ++b) {
+        binSum(b, static_cast<int>(s), -1, orr_.data(), oim_.data());
+        for (uint32_t l = 0; l < L; ++l) {
+            if (l > top_[b]) {
+                dc_[static_cast<size_t>(b) * L + l] = INFINITY;
+                continue;
+            }
+            for (uint32_t n = 0; n < N; ++n) {
+                re[n] = orr_[n] + lin_[l] * cre_[at(s, b) + n];
+                im[n] = oim_[n] + lin_[l] * cim_[at(s, b) + n];
+            }
+            ++evals;
+            dc_[static_cast<size_t>(b) * L + l] = data(b, re.data(), im.data(), nullptr, nullptr);
+        }
+    }
+    double current = 0.0;
+    for (uint32_t b = 0; b < B; ++b) {
+        current += dc_[static_cast<size_t>(b) * L + e[s][b]] + unary(e[s][b]);
+        if (b > 0) current += pairCost(e[s][b - 1], e[s][b]);
+    }
+    for (uint32_t l = 0; l < L; ++l) cost_[l] = dc_[l] + unary(l);
+    for (uint32_t b = 1; b < B; ++b) {
+        for (uint32_t l = 0; l < L; ++l) {
+            const size_t i = static_cast<size_t>(b) * L + l;
+            cost_[i] = INFINITY;
+            back_[i] = -1;
+            if (l > top_[b]) continue;
+            double best = INFINITY;
+            int32_t arg = -1;
+            for (uint32_t k = 0; k < L; ++k) {
+                const double prev = cost_[static_cast<size_t>(b - 1) * L + k];
+                if (!(prev < INFINITY) || !ok(k, l, b)) continue;
+                const double c = prev + pairCost(k, l);
+                if (c < best) {
+                    best = c;
+                    arg = static_cast<int32_t>(k);
+                }
+            }
+            if (arg >= 0) {
+                cost_[i] = best + dc_[i] + unary(l);
+                back_[i] = arg;
+            }
+        }
+    }
+    double best = INFINITY;
+    int32_t arg = -1;
+    for (uint32_t l = 0; l < L; ++l) {
+        const double c = cost_[static_cast<size_t>(B - 1) * L + l];
+        if (c < best) {
+            best = c;
+            arg = static_cast<int32_t>(l);
+        }
+    }
+    if (arg < 0 || !(best < current - 1.0e-12 * (1.0 + std::fabs(current)))) return false;
+    for (uint32_t b = B; b-- > 0;) {
+        e[s][b] = static_cast<uint32_t>(arg);
+        arg = back_[static_cast<size_t>(b) * L + static_cast<uint32_t>(arg)];
+    }
+    fullSums();
+    return true;
+}
+
+// Two subs jointly at one bin over a window of +-kPairRadius levels; every pair and bin in index order.
+bool EqSearch::pairMoves() {
+    bool any = false;
+    std::vector<double> re(N), im(N);
+    for (uint32_t b = 0; b < B; ++b) {
+        for (uint32_t s = 0; s < S; ++s) {
+            for (uint32_t t = s + 1; t < S; ++t) {
+                binSum(b, static_cast<int>(s), static_cast<int>(t), orr_.data(), oim_.data());
+                const uint32_t cs = e[s][b], ct = e[t][b];
+                auto cost = [&](uint32_t ls, uint32_t lt) {
+                    for (uint32_t n = 0; n < N; ++n) {
+                        re[n] = orr_[n] + lin_[ls] * cre_[at(s, b) + n] + lin_[lt] * cre_[at(t, b) + n];
+                        im[n] = oim_[n] + lin_[ls] * cim_[at(s, b) + n] + lin_[lt] * cim_[at(t, b) + n];
+                    }
+                    ++evals;
+                    return data(b, re.data(), im.data(), nullptr, nullptr) + unary(ls) + unary(lt) +
+                           neighbours(s, b, ls) + neighbours(t, b, lt);
+                };
+                const double current = cost(cs, ct);
+                double best = current;
+                uint32_t bs = cs, bt = ct;
+                const int lo = -kPairRadius, hi = kPairRadius;
+                for (int ds = lo; ds <= hi; ++ds) {
+                    const int ls = static_cast<int>(cs) + ds;
+                    if (ls < 0 || ls >= static_cast<int>(L) || !feasible(s, b, static_cast<uint32_t>(ls))) continue;
+                    for (int dt = lo; dt <= hi; ++dt) {
+                        const int lt = static_cast<int>(ct) + dt;
+                        if (lt < 0 || lt >= static_cast<int>(L) || !feasible(t, b, static_cast<uint32_t>(lt))) continue;
+                        if (ds == 0 && dt == 0) continue;
+                        const double c = cost(static_cast<uint32_t>(ls), static_cast<uint32_t>(lt));
+                        if (c < best - 1.0e-12 * (1.0 + std::fabs(best))) {
+                            best = c;
+                            bs = static_cast<uint32_t>(ls);
+                            bt = static_cast<uint32_t>(lt);
+                        }
+                    }
+                }
+                if (bs != cs || bt != ct) {
+                    e[s][b] = bs;
+                    e[t][b] = bt;
+                    binSum(b, -1, -1, &rre_[static_cast<size_t>(b) * N], &rim_[static_cast<size_t>(b) * N]);
+                    any = true;
+                }
+            }
+        }
+    }
+    return any;
+}
+
+uint32_t EqSearch::rounds(uint32_t maxRounds) {
+    uint32_t run = 0;
+    double obj = total(nullptr, nullptr);
+    for (uint32_t r = 0; r < maxRounds; ++r) {
+        if (evals >= budget) {
+            exhausted = true;
+            break;
+        }
+        ++run;
+        for (uint32_t s = 0; s < S; ++s) chainMove(s);
+        if (S > 1) {
+            if (evals >= budget) {
+                exhausted = true;
+            } else {
+                pairMoves();
+            }
+        }
+        const double now = total(nullptr, nullptr);
+        const bool small = obj - now <= 1.0e-6 * std::fabs(now);
+        obj = now;
+        if (small || exhausted) break;
+    }
+    return run;
+}
+
+}  // namespace
+
+extern "C" int32_t n60_correct_multisub_eq_search(const n60_correct_multisub_eq_problem *problem, n60_correct_multisub_eq_result *result) {
+    if (problem == nullptr || result == nullptr || problem->response_re == nullptr || problem->response_im == nullptr ||
+        problem->frequency_hz == nullptr || problem->target_db == nullptr || problem->seat_weight == nullptr ||
+        problem->eq_db == nullptr || problem->struct_size < sizeof(*problem) || problem->sub_count == 0 ||
+        problem->seat_count == 0 || problem->bin_count == 0 || problem->eq_count == 0 || problem->passes > 8 ||
+        problem->rounds == 0 || problem->rounds > 32) {
+        return N60_CORRECT_ERR_ARGUMENT;
+    }
+    if (problem->sub_count > kMaxSubs || problem->eq_count > kMaxEqLevels || problem->seat_count > 64u ||
+        problem->bin_count > kMaxEqBins) {
+        return N60_CORRECT_ERR_CAPACITY;
+    }
+    const size_t table = static_cast<size_t>(problem->sub_count) * problem->seat_count * problem->bin_count;
+    if (!finiteArray(problem->response_re, table) || !finiteArray(problem->response_im, table) ||
+        !finiteArray(problem->frequency_hz, problem->bin_count) || !finiteArray(problem->target_db, problem->bin_count) ||
+        !finiteArray(problem->seat_weight, problem->seat_count) || !finiteArray(problem->eq_db, problem->eq_count) ||
+        !std::isfinite(problem->target_error_weight) || !std::isfinite(problem->seat_variance_weight) ||
+        !std::isfinite(problem->eq_regularisation) || !std::isfinite(problem->eq_smoothness) ||
+        !std::isfinite(problem->max_slope_db_per_octave) || !std::isfinite(problem->null_guard_db)) {
+        return N60_CORRECT_ERR_NONFINITE;
+    }
+    if (problem->target_error_weight < 0.0 || problem->seat_variance_weight < 0.0 || problem->eq_regularisation < 0.0 ||
+        problem->eq_smoothness < 0.0 || problem->max_slope_db_per_octave < 0.0) {
+        return N60_CORRECT_ERR_ARGUMENT;
+    }
+    for (uint32_t l = 1; l < problem->eq_count; ++l) {
+        if (!(problem->eq_db[l] > problem->eq_db[l - 1])) return N60_CORRECT_ERR_ARGUMENT;
+    }
+    for (uint32_t b = 0; b < problem->bin_count; ++b) {
+        if (!(problem->frequency_hz[b] > 0.0)) return N60_CORRECT_ERR_ARGUMENT;
+    }
+    bool anySeat = false;
+    for (uint32_t n = 0; n < problem->seat_count; ++n) {
+        if (problem->seat_weight[n] < 0.0) return N60_CORRECT_ERR_ARGUMENT;
+        if (problem->seat_weight[n] > 0.0) anySeat = true;
+    }
+    if (!anySeat) return N60_CORRECT_ERR_ARGUMENT;
+
+    std::unique_ptr<EqSearch> search(new (std::nothrow) EqSearch());
+    if (!search) return N60_CORRECT_ERR_ALLOC;
+    search->build(*problem);
+    search->startBest(problem->passes);
+    uint32_t run = 0;
+    if (problem->passes > 0) run = search->rounds(problem->rounds);
+    std::memset(result, 0, sizeof(*result));
+    result->struct_size = sizeof(*result);
+    for (uint32_t s = 0; s < problem->sub_count; ++s) {
+        for (uint32_t b = 0; b < problem->bin_count; ++b) result->eq_index[s][b] = search->e[s][b];
+    }
+    result->objective = search->total(&result->target_error, &result->seat_variance);
+    if (!std::isfinite(result->objective)) return N60_CORRECT_ERR_NONFINITE;
+    result->evaluations = search->evals;
+    result->rounds_run = run;
+    result->budget_exhausted = search->exhausted ? 1u : 0u;
     return N60_CORRECT_OK;
 }
