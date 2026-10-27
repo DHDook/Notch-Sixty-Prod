@@ -374,7 +374,7 @@ struct HardwareAcceptanceEvidenceAdapter: Sendable {
     ) throws -> Bool {
         guard !protocols.isEmpty else { return false }
         for labProtocol in protocols {
-            guard let bus = labProtocol.protectedDriverBus else {
+            guard let wayID = labProtocol.protectedRoutedWayID else {
                 return false
             }
             let captures = session.captures.filter {
@@ -382,9 +382,8 @@ struct HardwareAcceptanceEvidenceAdapter: Sendable {
             }
             guard captures.count == labProtocol.request.repeatCount,
                   captures.allSatisfy({
-                      $0.protectedDriverProvenance?
-                        .validatesProtectedPath(for: bus)
-                        == true
+                      $0.routedWayProvenance?
+                        .validates(wayID: wayID) == true
                         && $0.quality.sweepComplete
                         && !$0.quality.clipped
                   }) else {

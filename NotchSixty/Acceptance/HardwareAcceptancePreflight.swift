@@ -277,23 +277,12 @@ struct HardwareAcceptancePreflightAnalyzer: Sendable {
         blockers: inout [HardwareAcceptancePreflightBlocker],
         warnings: inout [String]
     ) {
-        guard profile.state.outputRouting?.enabled == true,
-              profile.state.bassManagement.enabled else {
+        guard profile.state.speakerRouting?.enabled == true else {
             blockers.append(
                 .init(
                     code: .protectedRoutingRequired,
                     message:
-                        "Split-driver work requires enabled protected multi-output routing and active bass/crossover management."
-                )
-            )
-            return
-        }
-        guard profile.state.speakerDriverProcessing != nil else {
-            blockers.append(
-                .init(
-                    code: .protectedDriverProcessingRequired,
-                    message:
-                        "Split-driver work requires the protected per-driver processing state with limiter provenance."
+                        "Split-driver work requires an enabled routing matrix with the driver ways defined."
                 )
             )
             return
@@ -358,19 +347,20 @@ struct HardwareAcceptancePreflightAnalyzer: Sendable {
             return
         }
 
-        let protectedBuses = draft.affectedBuses
-        let processing = draft.rollbackPlaybackSystemState
-            .speakerDriverProcessing
-        guard !protectedBuses.isEmpty,
-              protectedBuses.allSatisfy({
-                  processing?.configuration(for: $0)
-                    .limiterEnabled == true
+        let routing = draft.rollbackPlaybackSystemState.speakerRouting
+        guard !draft.affectedWayIDs.isEmpty,
+              draft.affectedWayIDs.allSatisfy({ id in
+                  guard let loc = routing?.locateWay(id) else {
+                      return false
+                  }
+                  return routing?.speakers[loc.speaker].ways[loc.way]
+                      .limiter != nil
               }) else {
             blockers.append(
                 .init(
                     code: .protectedDriverProcessingRequired,
                     message:
-                        "Every affected exposed-driver bus must retain limiter protection."
+                        "Every affected exposed-driver way must retain limiter protection."
                 )
             )
             return

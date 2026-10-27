@@ -226,22 +226,7 @@ final class SpeakerMeasurementLabRoutedWayTests: XCTestCase {
         SpeakerMeasurementLabRequest(mode: mode, target: target, geometry: SpeakerMeasurementLabGeometry(distanceMeters: 0.03))
     }
 
-    func testPlanBlocksWithNamedReasonWhenFlagIsOff() throws {
-        let routing = try routing(.triAmp, rate: 48_000)
-        let id = midWay(routing).id
-        for (mode, target) in [
-            (SpeakerMeasurementLabMode.driverNearField, SpeakerMeasurementLabTarget.routedWay(id)),
-            (.protectedDriverNearField, .protectedRoutedWay(id)),
-        ] {
-            let plan = try SpeakerMeasurementLabCapabilityPlanner().plan(
-                request(mode, target), routePlan: routePlan(), multiOutputRouting: nil, speakerDriverProcessing: nil,
-                speakerRouting: routing, routedWayAcquisitionEnabled: false, routedWayEnvironment: environment(rate: 48_000))
-            XCTAssertEqual(plan.blockReasons, [.routedWayAcquisitionUnavailable(id)])
-            XCTAssertFalse(plan.canStartMeasurement)
-        }
-    }
-
-    func testPlanStartsReadyWaysAndBlocksOthersWhenFlagIsOn() throws {
+    func testPlanStartsReadyWaysAndBlocksOthers() throws {
         let rate = 48_000.0
         let routing = try routing(.triAmp, rate: rate)
         let id = midWay(routing).id
@@ -252,7 +237,7 @@ final class SpeakerMeasurementLabRoutedWayTests: XCTestCase {
         ] {
             let plan = try planner.plan(
                 request(mode, target), routePlan: routePlan(), multiOutputRouting: nil, speakerDriverProcessing: nil,
-                speakerRouting: routing, routedWayAcquisitionEnabled: true, routedWayEnvironment: environment(rate: rate))
+                speakerRouting: routing, routedWayEnvironment: environment(rate: rate))
             XCTAssertEqual(plan.blockReasons, [], "\(mode)")
             XCTAssertEqual(plan.protectedRoutedWayID, id)
             XCTAssertTrue(plan.canStartMeasurement)
@@ -261,15 +246,13 @@ final class SpeakerMeasurementLabRoutedWayTests: XCTestCase {
         unprotected.speakers[0].ways[1].limiter = nil
         let blocked = try planner.plan(
             request(.driverNearField, .routedWay(id)), routePlan: routePlan(), multiOutputRouting: nil,
-            speakerDriverProcessing: nil, speakerRouting: unprotected, routedWayAcquisitionEnabled: true,
-            routedWayEnvironment: environment(rate: rate))
+            speakerDriverProcessing: nil, speakerRouting: unprotected, routedWayEnvironment: environment(rate: rate))
         XCTAssertEqual(blocked.blockReasons, [.routedWayAcquisitionUnavailable(id)])
         XCTAssertFalse(blocked.canStartMeasurement)
 
         let noEnvironment = try planner.plan(
             request(.driverNearField, .routedWay(id)), routePlan: routePlan(), multiOutputRouting: nil,
-            speakerDriverProcessing: nil, speakerRouting: routing, routedWayAcquisitionEnabled: true,
-            routedWayEnvironment: nil)
+            speakerDriverProcessing: nil, speakerRouting: routing, routedWayEnvironment: nil)
         XCTAssertFalse(noEnvironment.canStartMeasurement)
         XCTAssertFalse(noEnvironment.blockReasons.isEmpty)
     }

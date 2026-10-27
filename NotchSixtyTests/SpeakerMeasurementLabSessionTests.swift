@@ -90,52 +90,6 @@ final class SpeakerMeasurementLabSessionTests: XCTestCase {
         )
     }
 
-    func testProtectedDriverCapturePersistsExactProtectionProvenance()
-        throws {
-        let labProtocol = makeProtocol(
-            mode: .protectedDriverNearField,
-            target: .protectedDriverBus(.leftHigh),
-            distance: 0.05,
-            excitationLevelDBFS: -30
-        )
-        let session = makeSession(protocols: [labProtocol])
-        let step = try XCTUnwrap(
-            SpeakerMeasurementLabSessionOrchestrator()
-                .nextPendingStep(for: session)
-        )
-        let provenance = makeProtectedProvenance()
-        let capture = try SpeakerMeasurementLabCaptureBuilder()
-            .build(
-                analyzed: makeChannel(),
-                session: session,
-                step: step,
-                excitationLevelDBFS: -30,
-                protectedDriverProvenance: provenance
-            )
-        XCTAssertEqual(capture.source, .speaker(.frontLeft))
-        XCTAssertEqual(
-            capture.protectedDriverProvenance?.targetBus,
-            .leftHigh
-        )
-        XCTAssertTrue(
-            capture.protectedDriverProvenance?
-                .limiterPreserved == true
-        )
-        XCTAssertNoThrow(
-            try SpeakerMeasurementLabSessionOrchestrator()
-                .appending(capture, to: session, for: step)
-        )
-
-        XCTAssertThrowsError(
-            try SpeakerMeasurementLabCaptureBuilder().build(
-                analyzed: makeChannel(),
-                session: session,
-                step: step,
-                excitationLevelDBFS: -30
-            )
-        )
-    }
-
     func testGuidedStepsFinishAllStationaryRepeatsBeforeNextProtocol() throws {
         let first = makeProtocol(
             name: "Left On Axis",
@@ -377,55 +331,6 @@ final class SpeakerMeasurementLabSessionTests: XCTestCase {
                 )
             ),
             excitationLevelDBFS: excitationLevelDBFS
-        )
-    }
-
-    private func makeProtectedProvenance()
-        -> SpeakerMeasurementLabProtectedDriverCaptureProvenance {
-        var bass = BassManagementConfiguration()
-        bass.enabled = true
-        bass.frequencyHz = 1_000
-        bass.physicalOutputMode = .biAmp
-        let driver = SpeakerDriverBusProcessingConfiguration(
-            bus: .leftHigh,
-            limiterEnabled: true,
-            limiterThresholdDBFS: -30
-        )
-        let routing = MultiOutputRoutingConfiguration(
-            enabled: true,
-            routes: [
-                SpeakerOutputRoute(
-                    name: "Left Low",
-                    bus: .leftLow,
-                    destination: PhysicalOutputEndpoint(
-                        deviceUID: "protected-device",
-                        channelIndex: 0
-                    )
-                ),
-                SpeakerOutputRoute(
-                    name: "Left High",
-                    bus: .leftHigh,
-                    destination: PhysicalOutputEndpoint(
-                        deviceUID: "protected-device",
-                        channelIndex: 1
-                    )
-                ),
-            ],
-            referenceDeviceUID: "protected-device"
-        )
-        return SpeakerMeasurementLabProtectedDriverCaptureProvenance(
-            targetBus: .leftHigh,
-            physicalDestination: PhysicalOutputEndpoint(
-                deviceUID: "protected-device",
-                channelIndex: 1
-            ),
-            routingConfiguration: routing,
-            bassManagementConfiguration: bass,
-            targetDriverConfiguration: driver,
-            inputPeakDBFS: -30,
-            renderedPeakDBFS: -30,
-            sourceFrameCount: 4_800,
-            renderedFrameCount: 16_800
         )
     }
 

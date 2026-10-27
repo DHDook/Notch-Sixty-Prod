@@ -110,14 +110,9 @@ struct SpeakerMeasurementLabRequest: Codable, Equatable, Sendable {
             }
         case (.subwooferNearField, .acousticSource(.subwoofer)):
             break
-        case (
-            .protectedDriverNearField,
-            .protectedDriverBus(let bus)
-        ):
-            guard SpeakerMeasurementLabProtectedDriverRoutePlanner
-                    .isProtectedSplitBus(bus) else {
-                throw SpeakerMeasurementLabError.invalidTarget
-            }
+        case (.protectedDriverNearField, .protectedDriverBus):
+            // Retired target: stored requests still decode, the planner blocks them.
+            break
         case (.protectedDriverNearField, .protectedRoutedWay),
              (.driverNearField, .routedWay):
             break
@@ -139,7 +134,8 @@ struct SpeakerMeasurementLabRequest: Codable, Equatable, Sendable {
 
 enum SpeakerMeasurementLabBlockReason: Equatable, Sendable {
     case transport(SpeakerOptimizerMeasurementTransportBlockReason)
-    case protectedDriverTransportRequired(SpeakerOutputBus)
+    /// A stored request that named a legacy output bus. The bus path is gone; the driver is measured as a way.
+    case legacyBusTargetRetired(SpeakerOutputBus)
     case authenticatedSharedClockRequired
     /// The routed way is not in the routing matrix, or its live acquisition path is not available yet.
     case routedWayAcquisitionUnavailable(UUID)
@@ -150,12 +146,12 @@ enum SpeakerMeasurementLabBlockReason: Equatable, Sendable {
         switch self {
         case .transport(let reason):
             return reason.message
-        case .protectedDriverTransportRequired(let bus):
-            return "\(bus.displayName) requires a crossover-preserving protected excitation path before the lab may sweep that driver."
+        case .legacyBusTargetRetired(let bus):
+            return "\(bus.displayName) was measured through the old output buses, which no longer exist. Pick the driver from the routing matrix instead; the stored capture is kept but not analysed."
         case .authenticatedSharedClockRequired:
             return "Coherent mains/sub timing requires authenticated shared playback/capture clock provenance; independent source sweeps are not sufficient."
         case .routedWayAcquisitionUnavailable:
-            return "Live per-driver acquisition needs a band-limited, limiter-protected way in the routing matrix, and the routed-way lab turned on; otherwise the lab only analyses captures already in a session."
+            return "Live per-driver acquisition needs a band-limited, limiter-protected way in the routing matrix; otherwise the lab only analyses captures already in a session."
         case .routedWayBlocked(_, let reason):
             return "This driver cannot be swept now: \(reason)"
         }
@@ -186,18 +182,12 @@ struct SpeakerMeasurementLabPlan: Equatable, Sendable {
     var blockReasons: [SpeakerMeasurementLabBlockReason]
     var warnings: [String]
     var phaseReferenceAuthenticated: Bool
-    /// Non-nil only for PR106's dedicated crossover/limiter-preserving path.
-    /// It never falls through to the legacy raw physical-lane planner.
-    var protectedDriverBus: SpeakerOutputBus? = nil
     /// Non-nil only when a routed way is ready for the protected, band-limited sweep (E8 A2b).
     var protectedRoutedWayID: UUID? = nil
 
     var canStartMeasurement: Bool {
         guard blockReasons.isEmpty else { return false }
         if protectedRoutedWayID != nil {
-            return delegatedTransportPlans.isEmpty
-        }
-        if protectedDriverBus != nil {
             return delegatedTransportPlans.isEmpty
         }
         return delegatedTransportPlans.count == 1
@@ -218,9 +208,7 @@ struct SpeakerMeasurementLabCapabilityPlanner: Sendable {
         routePlan: LiveNChannelOutputRoutePlan,
         multiOutputRouting: MultiOutputRoutingConfiguration?,
         speakerDriverProcessing: SpeakerDriverProcessingConfiguration?,
-        bassManagementConfiguration: BassManagementConfiguration? = nil,
         speakerRouting: SpeakerRoutingConfiguration? = nil,
-        routedWayAcquisitionEnabled: Bool = false,
         routedWayEnvironment: SpeakerMeasurementLabRoutedWayEnvironment? = nil,
         coherentLeg: SpeakerMeasurementLabCoherentLeg? = nil,
         sharedClockReferenceAvailable: Bool = false
@@ -293,49 +281,13 @@ struct SpeakerMeasurementLabCapabilityPlanner: Sendable {
             .protectedDriverNearField,
             .protectedDriverBus(let bus)
         ):
-            let routeReady =
-                multiOutputRouting?.enabled == true
-                && multiOutputRouting?.enabledRoutes.filter {
-                    $0.bus == bus
-                }.count == 1
-            let crossoverReady: Bool
-            if let bass = bassManagementConfiguration,
-               bass.enabled,
-               let mode = bass.physicalOutputMode,
-               (mode == .biAmp || mode == .triAmp) {
-                crossoverReady = mode.supports(bus: bus)
-            } else {
-                crossoverReady = false
-            }
-            let protectionReady: Bool
-            if let speakerDriverProcessing {
-                let target = speakerDriverProcessing.configuration(
-                    for: bus
-                )
-                protectionReady =
-                    target.enabled && target.limiterEnabled
-            } else {
-                protectionReady = false
-            }
-            let blockers: [SpeakerMeasurementLabBlockReason] =
-                routeReady && crossoverReady && protectionReady
-                ? []
-                : [.protectedDriverTransportRequired(bus)]
             return SpeakerMeasurementLabPlan(
                 request: request,
                 delegatedTransportPlans: [],
-                analysisProducts: [
-                    .magnitudeResponse,
-                    .phaseResponse,
-                    .directArrival,
-                ],
-                blockReasons: blockers,
-                warnings: [
-                    "Protected-driver response includes the active production crossover plus configured driver EQ/trim/polarity/delay/limiter path; it is not a bare-driver specification.",
-                    "Live acquisition still revalidates the exact physical route, crossover and target limiter immediately before playback."
-                ],
-                phaseReferenceAuthenticated: false,
-                protectedDriverBus: blockers.isEmpty ? bus : nil
+                analysisProducts: [],
+                blockReasons: [.legacyBusTargetRetired(bus)],
+                warnings: [],
+                phaseReferenceAuthenticated: false
             )
         case (
             .driverNearField,
@@ -343,7 +295,7 @@ struct SpeakerMeasurementLabCapabilityPlanner: Sendable {
         ):
             return routedWayPlan(
                 request: request, wayID: wayID, routing: speakerRouting,
-                enabled: routedWayAcquisitionEnabled, environment: routedWayEnvironment,
+                environment: routedWayEnvironment,
                 products: [
                     .magnitudeResponse,
                     .phaseResponse,
@@ -360,7 +312,7 @@ struct SpeakerMeasurementLabCapabilityPlanner: Sendable {
         ):
             return routedWayPlan(
                 request: request, wayID: wayID, routing: speakerRouting,
-                enabled: routedWayAcquisitionEnabled, environment: routedWayEnvironment,
+                environment: routedWayEnvironment,
                 products: [
                     .magnitudeResponse,
                     .phaseResponse,
@@ -447,14 +399,13 @@ extension SpeakerMeasurementLabCapabilityPlanner {
         request: SpeakerMeasurementLabRequest,
         wayID: UUID,
         routing: SpeakerRoutingConfiguration?,
-        enabled: Bool,
         environment: SpeakerMeasurementLabRoutedWayEnvironment?,
         products: [SpeakerMeasurementLabAnalysisProduct],
         warnings: [String]
     ) -> SpeakerMeasurementLabPlan {
         var blockers: [SpeakerMeasurementLabBlockReason] = []
         var readyWay: UUID?
-        if !enabled || !Self.protectedWayReady(routing: routing, wayID: wayID) {
+        if !Self.protectedWayReady(routing: routing, wayID: wayID) {
             blockers = [.routedWayAcquisitionUnavailable(wayID)]
         } else if let environment {
             do {

@@ -47,6 +47,8 @@ struct SpeakerMeasurementLabProtocol:
         return source
     }
 
+    /// Legacy (pre-routing-matrix) target, kept decode-only so stored sessions open. The Lab neither plans nor
+    /// analyses it; the capability planner blocks it with `legacyBusTargetRetired`.
     var protectedDriverBus: SpeakerOutputBus? {
         guard case .protectedDriverBus(let bus) = request.target else {
             return nil
@@ -243,9 +245,7 @@ struct SpeakerMeasurementLabCapture:
     var excitationLevelDBFS: Double? = nil
     var sampleRate: Double
     var source: MultichannelCalibrationSource
-    /// Nil for ordinary whole-speaker/sub captures. Protected Low/Mid/High
-    /// captures require receipt-like provenance binding the exact route and
-    /// production crossover/limiter state used for this repeat.
+    /// Decode-only receipt of a legacy bus capture (E8 A2c). Nothing writes, validates or analyses it.
     var protectedDriverProvenance:
         SpeakerMeasurementLabProtectedDriverCaptureProvenance? = nil
     /// E8 A2b: receipt of a live routed-way capture. Required for the protected routed-way protocol; optional for
@@ -375,14 +375,10 @@ struct SpeakerMeasurementLabSession:
                     .captureIdentityMismatch
             }
 
-            if let bus = labProtocol.protectedDriverBus {
-                guard let provenance =
-                        capture.protectedDriverProvenance,
-                      provenance.validatesProtectedPath(for: bus) else {
-                    throw SpeakerMeasurementLabSessionError
-                        .captureIdentityMismatch
-                }
-            } else if capture.protectedDriverProvenance != nil {
+            // A legacy bus protocol keeps its recorded provenance so the session still opens; nothing validates or
+            // acts on it any more (E8 A2c).
+            if labProtocol.protectedDriverBus == nil,
+               capture.protectedDriverProvenance != nil {
                 throw SpeakerMeasurementLabSessionError
                     .captureIdentityMismatch
             }
@@ -439,15 +435,6 @@ struct SpeakerMeasurementLabSession:
                let first = group.first?.routedWayProvenance {
                 guard group.allSatisfy({
                     $0.routedWayProvenance == first
-                }) else {
-                    throw SpeakerMeasurementLabSessionError
-                        .captureSequenceInvalid
-                }
-            }
-            if labProtocol.protectedDriverBus != nil,
-               let first = group.first?.protectedDriverProvenance {
-                guard group.allSatisfy({
-                    $0.protectedDriverProvenance == first
                 }) else {
                     throw SpeakerMeasurementLabSessionError
                         .captureSequenceInvalid
@@ -562,10 +549,7 @@ struct SpeakerMeasurementLabSessionStep: Equatable, Sendable {
         case .subwooferNearField:
             return "Place the microphone \(format(geometry.distanceMeters)) m from \(labProtocol.name) in the selected near-field location; keep geometry fixed for \(repeatText)."
         case .protectedDriverNearField:
-            let bus = labProtocol.protectedDriverBus?.displayName
-                ?? (labProtocol.protectedRoutedWayID != nil
-                    ? labProtocol.name : "protected driver")
-            return "Place the microphone \(format(geometry.distanceMeters)) m from \(bus). The sweep is pre-rendered through the active crossover and target limiter; keep geometry fixed for \(repeatText)."
+            return "Place the microphone \(format(geometry.distanceMeters)) m from \(labProtocol.name). The sweep is pre-rendered through the driver's crossover, EQ and limiter; keep geometry fixed for \(repeatText)."
         case .driverNearField:
             return "Place the microphone \(format(geometry.distanceMeters)) m from the cone of \(labProtocol.name), close to the dust cap. Only this driver plays, with a sweep limited to its passband; keep geometry fixed for \(repeatText)."
         case .coherentMainsSubTiming:
@@ -728,8 +712,6 @@ struct SpeakerMeasurementLabCaptureBuilder: Sendable {
         session: SpeakerMeasurementLabSession,
         step: SpeakerMeasurementLabSessionStep,
         excitationLevelDBFS: Double? = nil,
-        protectedDriverProvenance:
-            SpeakerMeasurementLabProtectedDriverCaptureProvenance? = nil,
         routedWayProvenance:
             SpeakerMeasurementLabRoutedWayCaptureProvenance? = nil,
         sharedClockReference:
@@ -753,8 +735,6 @@ struct SpeakerMeasurementLabCaptureBuilder: Sendable {
             excitationLevelDBFS: excitationLevelDBFS,
             sampleRate: session.sampleRate,
             source: source,
-            protectedDriverProvenance:
-                protectedDriverProvenance,
             routedWayProvenance: routedWayProvenance,
             sharedClockReference: sharedClockReference,
             impulseResponse: analyzed.impulseResponse,

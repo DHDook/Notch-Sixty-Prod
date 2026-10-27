@@ -17,250 +17,9 @@ struct SpeakerMeasurementLabProtectedExcitationOptions:
     }
 }
 
-struct SpeakerMeasurementLabProtectedExcitation:
-    Equatable, Sendable {
-    var targetBus: SpeakerOutputBus
-    var sampleRate: Double
-    var sourceFrameCount: Int
-    var renderedSamples: [Float]
-    var inputPeakDBFS: Double
-    var renderedPeakDBFS: Double
-    var bassManagementConfiguration: BassManagementConfiguration
-    var driverProcessingConfiguration:
-        SpeakerDriverProcessingConfiguration
-    var targetDriverConfiguration:
-        SpeakerDriverBusProcessingConfiguration
 
-    var preservesMandatoryCrossover: Bool { true }
-    var preservesConfiguredDriverProcessing: Bool { true }
-    var limiterProtected: Bool {
-        targetDriverConfiguration.enabled
-            && targetDriverConfiguration.limiterEnabled
-    }
-
-    /// Slice 8A proves the program can be rendered safely. It deliberately
-    /// does NOT authorize the existing raw physical-lane transport yet.
-    var canStartPhysicalMeasurement: Bool { false }
-    var measurementOnly: Bool { true }
-    var canDeploy: Bool { false }
-}
-
-enum SpeakerMeasurementLabProtectedExcitationError:
-    Error, Equatable, LocalizedError {
-    case invalidOptions
-    case invalidSampleRate
-    case invalidTargetBus
-    case physicalCrossoverRequired
-    case targetUnsupportedByCrossover
-    case targetDriverProcessingRequired
-    case targetLimiterRequired
-    case excitationTooHot(Double)
-    case invalidExcitation
-    case renderFailed
-    case silentProtectedOutput
-
-    var errorDescription: String? {
-        switch self {
-        case .invalidOptions:
-            return "Protected-driver excitation options are invalid."
-        case .invalidSampleRate:
-            return "Protected-driver excitation requires a finite supported sample rate."
-        case .invalidTargetBus:
-            return "Protected-driver excitation supports only split Low/Mid/High buses."
-        case .physicalCrossoverRequired:
-            return "Enable an explicit Bi-Amp or Tri-Amp physical crossover before protected-driver measurement."
-        case .targetUnsupportedByCrossover:
-            return "The selected driver bus is not produced by the active physical crossover mode."
-        case .targetDriverProcessingRequired:
-            return "The selected driver bus must have an enabled per-driver processing path."
-        case .targetLimiterRequired:
-            return "Protected-driver measurement requires the selected driver's limiter to be enabled."
-        case .excitationTooHot(let peak):
-            return "Protected-driver excitation peak \(String(format: "%.1f", peak)) dBFS exceeds the configured safety ceiling."
-        case .invalidExcitation:
-            return "Protected-driver excitation contains invalid, empty, or silent samples."
-        case .renderFailed:
-            return "The production crossover/driver protection chain could not render the protected excitation."
-        case .silentProtectedOutput:
-            return "The protected crossover/driver chain produced no usable excitation for this bus."
-        }
-    }
-}
-
-/// Control-plane compiler for future direct-driver measurement.
-///
-/// The raw physical measurement transport remains blocked in Slice 8A. This
-/// compiler first proves that the exact production speaker bus splitter AND
-/// target per-driver processor (including its limiter) can transform a bounded
-/// mono sweep into a safe target-bus program.
-struct SpeakerMeasurementLabProtectedExcitationCompiler: Sendable {
-    func compile(
-        monoSamples: [Float],
-        sampleRate: Double,
-        targetBus: SpeakerOutputBus,
-        bassManagement: BassManagementConfiguration,
-        driverProcessing: SpeakerDriverProcessingConfiguration,
-        options: SpeakerMeasurementLabProtectedExcitationOptions = .init()
-    ) throws -> SpeakerMeasurementLabProtectedExcitation {
-        guard options.validate() else {
-            throw SpeakerMeasurementLabProtectedExcitationError.invalidOptions
-        }
-        guard sampleRate.isFinite,
-              (16_000...384_000).contains(sampleRate) else {
-            throw SpeakerMeasurementLabProtectedExcitationError
-                .invalidSampleRate
-        }
-        guard isProtectedSplitBus(targetBus) else {
-            throw SpeakerMeasurementLabProtectedExcitationError
-                .invalidTargetBus
-        }
-        guard bassManagement.enabled,
-              let mode = bassManagement.physicalOutputMode,
-              mode == .biAmp || mode == .triAmp else {
-            throw SpeakerMeasurementLabProtectedExcitationError
-                .physicalCrossoverRequired
-        }
-        guard mode.supports(bus: targetBus) else {
-            throw SpeakerMeasurementLabProtectedExcitationError
-                .targetUnsupportedByCrossover
-        }
-
-        let targetDriver = driverProcessing.configuration(
-            for: targetBus
-        )
-        guard targetDriver.enabled else {
-            throw SpeakerMeasurementLabProtectedExcitationError
-                .targetDriverProcessingRequired
-        }
-        guard targetDriver.limiterEnabled else {
-            throw SpeakerMeasurementLabProtectedExcitationError
-                .targetLimiterRequired
-        }
-
-        guard !monoSamples.isEmpty,
-              monoSamples.allSatisfy(\.isFinite) else {
-            throw SpeakerMeasurementLabProtectedExcitationError
-                .invalidExcitation
-        }
-        let peak = monoSamples.reduce(Float(0)) {
-            max($0, abs($1))
-        }
-        guard peak.isFinite, peak > 1.0e-8 else {
-            throw SpeakerMeasurementLabProtectedExcitationError
-                .invalidExcitation
-        }
-        let peakDBFS = 20 * log10(Double(peak))
-        guard peakDBFS <= options.maximumInputPeakDBFS + 1.0e-6 else {
-            throw SpeakerMeasurementLabProtectedExcitationError
-                .excitationTooHot(peakDBFS)
-        }
-
-        let flushFrames = max(
-            1,
-            Int((options.flushSeconds * sampleRate).rounded(.up))
-        )
-        var padded = monoSamples
-        padded.append(
-            contentsOf: repeatElement(Float(0), count: flushFrames)
-        )
-
-        var splitter = try bassManagement
-            .makeSpeakerBusSplitterSnapshot(sampleRate: sampleRate)
-        var driver = try driverProcessing
-            .makeRealtimeSnapshot(sampleRate: sampleRate)
-        var rendered = [Float](
-            repeating: 0,
-            count: padded.count
-        )
-
-        let success = padded.withUnsafeBufferPointer { input in
-            rendered.withUnsafeMutableBufferPointer { output in
-                N60ProtectedSpeakerBusRenderProgram(
-                    input.baseAddress!,
-                    UInt32(input.count),
-                    targetBus.realtimeCType,
-                    splitter,
-                    driver,
-                    output.baseAddress!
-                )
-            }
-        }
-        guard success else {
-            throw SpeakerMeasurementLabProtectedExcitationError
-                .renderFailed
-        }
-        guard rendered.allSatisfy(\.isFinite) else {
-            throw SpeakerMeasurementLabProtectedExcitationError
-                .renderFailed
-        }
-        let renderedPeak = rendered.reduce(Float(0)) {
-            max($0, abs($1))
-        }
-        guard renderedPeak.isFinite, renderedPeak > 1.0e-9 else {
-            throw SpeakerMeasurementLabProtectedExcitationError
-                .silentProtectedOutput
-        }
-
-        return SpeakerMeasurementLabProtectedExcitation(
-            targetBus: targetBus,
-            sampleRate: sampleRate,
-            sourceFrameCount: monoSamples.count,
-            renderedSamples: rendered,
-            inputPeakDBFS: peakDBFS,
-            renderedPeakDBFS:
-                20 * log10(Double(renderedPeak)),
-            bassManagementConfiguration: bassManagement,
-            driverProcessingConfiguration: driverProcessing,
-            targetDriverConfiguration: targetDriver
-        )
-    }
-
-    private func isProtectedSplitBus(
-        _ bus: SpeakerOutputBus
-    ) -> Bool {
-        switch bus {
-        case .leftLow, .rightLow,
-             .leftMid, .rightMid,
-             .leftHigh, .rightHigh:
-            return true
-        case .leftFullRange, .rightFullRange, .subMono:
-            return false
-        }
-    }
-}
-
-
-// MARK: - Slice 8B protected physical-route binding
-
-struct SpeakerMeasurementLabProtectedDriverRouteBinding:
-    Equatable, Sendable {
-    var targetBus: SpeakerOutputBus
-    var physicalDestination: PhysicalOutputEndpoint
-    var physicalOutputChannelIndex: UInt32
-    /// Carrier used only to let the existing targeted Core Audio transport
-    /// recreate the exact device/aggregate topology. It does NOT determine
-    /// excitation filtering; the pre-rendered protected waveform does.
-    var carrierRoutePlan: LiveNChannelOutputRoutePlan
-    var routingConfiguration: MultiOutputRoutingConfiguration
-    var bassManagementConfiguration: BassManagementConfiguration
-    var targetDriverConfiguration:
-        SpeakerDriverBusProcessingConfiguration
-
-    func matchesCurrentState(
-        routing: MultiOutputRoutingConfiguration?,
-        bassManagement: BassManagementConfiguration,
-        driverProcessing: SpeakerDriverProcessingConfiguration?
-    ) -> Bool {
-        guard routing == routingConfiguration,
-              bassManagement == bassManagementConfiguration,
-              let driverProcessing else {
-            return false
-        }
-        return driverProcessing.configuration(for: targetBus)
-            == targetDriverConfiguration
-    }
-}
-
+/// Decode-only record of the bus-based protected capture, kept so sessions recorded before E8 A2a/A2c still open.
+/// Nothing acts on it: the Lab neither plans nor analyses a `.protectedDriverBus` capture any more.
 struct SpeakerMeasurementLabProtectedDriverCaptureProvenance:
     Codable, Equatable, Sendable {
     var targetBus: SpeakerOutputBus
@@ -281,284 +40,29 @@ struct SpeakerMeasurementLabProtectedDriverCaptureProvenance:
     }
 }
 
-enum SpeakerMeasurementLabProtectedDriverRouteError:
-    Error, Equatable, LocalizedError {
-    case invalidTargetBus
-    case routingRequired
-    case targetRouteMissing
-    case targetRouteAmbiguous
-    case physicalCrossoverRequired
-    case targetUnsupportedByCrossover
-    case targetLimiterRequired
-    case invalidPhysicalRoute
-    case insufficientCarrierRoutes
+// MARK: - Way pairing
 
-    var errorDescription: String? {
-        switch self {
-        case .invalidTargetBus:
-            return "Protected measurement supports only split Low/Mid/High driver buses."
-        case .routingRequired:
-            return "Protected-driver measurement requires enabled physical multi-output routing."
-        case .targetRouteMissing:
-            return "The protected driver bus does not have an enabled physical output route."
-        case .targetRouteAmbiguous:
-            return "The protected driver bus is routed more than once; measurement requires one exact physical destination."
-        case .physicalCrossoverRequired:
-            return "Protected-driver measurement requires an enabled Bi-Amp or Tri-Amp physical crossover."
-        case .targetUnsupportedByCrossover:
-            return "The active physical crossover does not produce the requested protected driver bus."
-        case .targetLimiterRequired:
-            return "The requested driver path must be enabled and limiter-protected immediately before measurement."
-        case .invalidPhysicalRoute:
-            return "The current physical output routing cannot be compiled safely for protected measurement."
-        case .insufficientCarrierRoutes:
-            return "Protected measurement requires at least two valid routed physical channels to construct the measurement carrier topology."
-        }
-    }
-}
+/// Which two ways meet at a crossover. The corner comes from the ways' own filter specs: the lower way's low-pass
+/// corner, matched to the upper way's effective high-pass corner (a migrated tri-amp high way carries its upper
+/// high-pass as an EQ section, which `effectiveHighPassHz` includes).
+enum ProtectedWayPairing {
+    /// Corners closer than this fraction count as the same crossover.
+    static let cornerTolerance = 0.01
 
-struct SpeakerMeasurementLabProtectedDriverRoutePlanner: Sendable {
-    func plan(
-        targetBus: SpeakerOutputBus,
-        routing: MultiOutputRoutingConfiguration?,
-        bassManagement: BassManagementConfiguration,
-        driverProcessing: SpeakerDriverProcessingConfiguration?,
-        availableOutputs: [AudioOutputDevice],
-        sampleRate: Double,
-        selectedOutputUID: String
-    ) throws -> SpeakerMeasurementLabProtectedDriverRouteBinding {
-        guard Self.isProtectedSplitBus(targetBus) else {
-            throw SpeakerMeasurementLabProtectedDriverRouteError
-                .invalidTargetBus
-        }
-        guard let routing, routing.enabled else {
-            throw SpeakerMeasurementLabProtectedDriverRouteError
-                .routingRequired
-        }
-        let matching = routing.enabledRoutes.filter {
-            $0.bus == targetBus
-        }
-        guard !matching.isEmpty else {
-            throw SpeakerMeasurementLabProtectedDriverRouteError
-                .targetRouteMissing
-        }
-        guard matching.count == 1, let targetRoute = matching.first else {
-            throw SpeakerMeasurementLabProtectedDriverRouteError
-                .targetRouteAmbiguous
-        }
-        guard bassManagement.enabled,
-              let crossoverMode = bassManagement.physicalOutputMode,
-              crossoverMode == .biAmp || crossoverMode == .triAmp else {
-            throw SpeakerMeasurementLabProtectedDriverRouteError
-                .physicalCrossoverRequired
-        }
-        guard crossoverMode.supports(bus: targetBus) else {
-            throw SpeakerMeasurementLabProtectedDriverRouteError
-                .targetUnsupportedByCrossover
-        }
-        guard let driverProcessing else {
-            throw SpeakerMeasurementLabProtectedDriverRouteError
-                .targetLimiterRequired
-        }
-        let targetDriver = driverProcessing.configuration(for: targetBus)
-        guard targetDriver.enabled, targetDriver.limiterEnabled else {
-            throw SpeakerMeasurementLabProtectedDriverRouteError
-                .targetLimiterRequired
-        }
-
-        do {
-            try routing.validate(
-                availableDevices: availableOutputs,
-                sampleRate: sampleRate
-            )
-
-            let orderedUIDs: [String]
-            let referenceUID: String
-            let physicalChannelCount: UInt32
-            let routeChannels: [UInt32]
-            let targetPhysical: UInt32
-
-            if routing.usesMultiplePhysicalDevices {
-                let aggregate = try routing.makeAggregateDevicePlan(
-                    availableDevices: availableOutputs,
-                    sampleRate: sampleRate
-                )
-                try aggregate.validateForC4LiveTransport(
-                    selectedOutputUID: selectedOutputUID,
-                    crossoverMode: crossoverMode
-                )
-                orderedUIDs = aggregate.orderedDeviceUIDs
-                referenceUID = aggregate.referenceDeviceUID
-                physicalChannelCount = aggregate.physicalChannelCount
-                routeChannels = aggregate.mappedRoutes.map(
-                    \.aggregateChannelIndex
-                )
-                guard let mapped = aggregate.mappedRoutes.first(
-                    where: { $0.route.id == targetRoute.id }
-                ) else {
-                    throw SpeakerMeasurementLabProtectedDriverRouteError
-                        .invalidPhysicalRoute
-                }
-                targetPhysical = mapped.aggregateChannelIndex
-            } else {
-                let same = try routing.makeSameDevicePlan(
-                    availableDevices: availableOutputs,
-                    sampleRate: sampleRate
-                )
-                try same.validateForC4LiveTransport(
-                    selectedOutputUID: selectedOutputUID,
-                    crossoverMode: crossoverMode
-                )
-                orderedUIDs = [same.deviceUID]
-                referenceUID = same.deviceUID
-                physicalChannelCount = same.physicalChannelCount
-                routeChannels = same.routes.map(
-                    \.destination.channelIndex
-                )
-                targetPhysical = targetRoute.destination.channelIndex
-            }
-
-            let uniqueCarrierChannels = routeChannels.reduce(
-                into: [UInt32]()
-            ) { result, channel in
-                if !result.contains(channel) {
-                    result.append(channel)
-                }
-            }
-            guard uniqueCarrierChannels.count >= 2 else {
-                throw SpeakerMeasurementLabProtectedDriverRouteError
-                    .insufficientCarrierRoutes
-            }
-
-            let carrier = LiveNChannelOutputRoutePlan(
-                programLayout: .stereo,
-                orderedDeviceUIDs: orderedUIDs,
-                referenceDeviceUID: referenceUID,
-                physicalChannelCount: physicalChannelCount,
-                programPhysicalChannels:
-                    Array(uniqueCarrierChannels.prefix(2)),
-                subwooferPhysicalChannels: [],
-                subwooferCount: 0,
-                bassManagementEnabled: false,
-                speakerCalibrations: [:],
-                subwooferCalibrations: [],
-                speakerOptimizerPEQ: [:]
-            )
-            _ = try carrier.makeRealtimeOutputMap()
-            guard targetPhysical < physicalChannelCount else {
-                throw SpeakerMeasurementLabProtectedDriverRouteError
-                    .invalidPhysicalRoute
-            }
-
-            return SpeakerMeasurementLabProtectedDriverRouteBinding(
-                targetBus: targetBus,
-                physicalDestination: targetRoute.destination,
-                physicalOutputChannelIndex: targetPhysical,
-                carrierRoutePlan: carrier,
-                routingConfiguration: routing,
-                bassManagementConfiguration: bassManagement,
-                targetDriverConfiguration: targetDriver
-            )
-        } catch let error as SpeakerMeasurementLabProtectedDriverRouteError {
-            throw error
-        } catch {
-            throw SpeakerMeasurementLabProtectedDriverRouteError
-                .invalidPhysicalRoute
-        }
+    static func crossoverHz(
+        _ a: SpeakerMeasurementLabRoutedWayCaptureProvenance,
+        _ b: SpeakerMeasurementLabRoutedWayCaptureProvenance
+    ) -> Double? {
+        guard let speaker = a.speakerID, speaker == b.speakerID,
+              a.way.id != b.way.id else { return nil }
+        return crossoverHz(a.way, b.way) ?? crossoverHz(b.way, a.way)
     }
 
-    static func isProtectedSplitBus(
-        _ bus: SpeakerOutputBus
-    ) -> Bool {
-        switch bus {
-        case .leftLow, .rightLow,
-             .leftMid, .rightMid,
-             .leftHigh, .rightHigh:
-            return true
-        case .leftFullRange, .rightFullRange, .subMono:
-            return false
-        }
-    }
-}
-
-extension SpeakerMeasurementLabProtectedExcitation {
-    func makeCaptureProvenance(
-        binding: SpeakerMeasurementLabProtectedDriverRouteBinding
-    ) throws -> SpeakerMeasurementLabProtectedDriverCaptureProvenance {
-        guard binding.targetBus == targetBus,
-              binding.bassManagementConfiguration
-                == bassManagementConfiguration,
-              binding.targetDriverConfiguration
-                == targetDriverConfiguration else {
-            throw SpeakerMeasurementLabProtectedDriverRouteError
-                .invalidPhysicalRoute
-        }
-        return SpeakerMeasurementLabProtectedDriverCaptureProvenance(
-            targetBus: targetBus,
-            physicalDestination: binding.physicalDestination,
-            routingConfiguration: binding.routingConfiguration,
-            bassManagementConfiguration: bassManagementConfiguration,
-            targetDriverConfiguration: targetDriverConfiguration,
-            inputPeakDBFS: inputPeakDBFS,
-            renderedPeakDBFS: renderedPeakDBFS,
-            sourceFrameCount: sourceFrameCount,
-            renderedFrameCount: renderedSamples.count
-        )
-    }
-
-    /// Keep the ORIGINAL upstream ESS as the deconvolution reference but extend
-    /// its capture tail by exactly the protected renderer's flush frames.
-    /// Therefore the measured transfer includes crossover + driver protection
-    /// rather than mathematically dividing those stages away.
-    func makeAnalysisProgram(
-        from sourceProgram: RoomCorrectionSweepProgram
-    ) throws -> RoomCorrectionSweepProgram {
-        guard sourceProgram.sweepSamples.count == sourceFrameCount,
-              abs(sourceProgram.sampleRate - sampleRate) < 0.5,
-              renderedSamples.count >= sourceFrameCount else {
-            throw SpeakerMeasurementLabProtectedExcitationError
-                .invalidExcitation
-        }
-        let extraFrames = renderedSamples.count - sourceFrameCount
-        guard sourceProgram.tailFrames <= Int.max - extraFrames else {
-            throw RoomCorrectionSweepGenerationError.frameCountOverflow
-        }
-        var result = sourceProgram
-        result.tailFrames += extraFrames
-        return result
-    }
-}
-
-
-extension SpeakerMeasurementLabProtectedDriverCaptureProvenance {
-    func validatesProtectedPath(
-        for targetBus: SpeakerOutputBus
-    ) -> Bool {
-        guard self.targetBus == targetBus,
-              SpeakerMeasurementLabProtectedDriverRoutePlanner
-                .isProtectedSplitBus(targetBus),
-              routingConfiguration.enabled,
-              routingConfiguration.enabledRoutes.filter({
-                  $0.bus == targetBus
-                    && $0.destination == physicalDestination
-              }).count == 1,
-              bassManagementConfiguration.enabled,
-              let mode =
-                bassManagementConfiguration.physicalOutputMode,
-              (mode == .biAmp || mode == .triAmp),
-              mode.supports(bus: targetBus),
-              targetDriverConfiguration.bus == targetBus,
-              targetDriverConfiguration.enabled,
-              targetDriverConfiguration.limiterEnabled,
-              inputPeakDBFS.isFinite,
-              inputPeakDBFS <= -24.0 + 1.0e-6,
-              renderedPeakDBFS.isFinite,
-              renderedPeakDBFS <= 0,
-              sourceFrameCount > 0,
-              renderedFrameCount >= sourceFrameCount else {
-            return false
-        }
-        return true
+    /// `lower` hands over to `upper`.
+    static func crossoverHz(_ lower: RoutedWay, _ upper: RoutedWay) -> Double? {
+        guard let corner = lower.lowPass?.cornerHz, corner.isFinite, corner > 0,
+              let upperCorner = upper.effectiveHighPassHz else { return nil }
+        return abs(corner - upperCorner) / corner <= cornerTolerance ? corner : nil
     }
 }
 
@@ -583,9 +87,9 @@ struct ProtectedDriverPEQRecommendation: Equatable, Sendable {
     var protocolID: UUID
     var playbackSystemID: UUID
     var routingSignature: String
-    var targetBus: SpeakerOutputBus
-    var protectedConfiguration: SpeakerDriverBusProcessingConfiguration
-    var bassManagement: BassManagementConfiguration
+    var wayID: UUID
+    /// The way exactly as it was rendered for the capture (its filters supply the guard corners).
+    var way: RoutedWay
     var sampleRate: Double
     var repeatedCaptureIDs: [UUID]
     var passbandLowHz: Double
@@ -603,8 +107,7 @@ struct ProtectedDriverPEQRecommendation: Equatable, Sendable {
 enum ProtectedDriverPEQRecommendationError:
     Error, Equatable, LocalizedError {
     case invalidSession
-    case unsupportedDriverBus
-    case protectedPathRequired
+    case unsupportedDriverWay
     case inadequateRepeatedEvidence
     case incompatibleResponseGrid
     case noUsableCrossoverPassband
@@ -613,10 +116,8 @@ enum ProtectedDriverPEQRecommendationError:
         switch self {
         case .invalidSession:
             return "Protected driver measurements must pass session integrity checks."
-        case .unsupportedDriverBus:
-            return "Per-driver optimization requires one exact Low/Mid/High bus."
-        case .protectedPathRequired:
-            return "The selected capture must retain the exact active crossover, limiter and physical bus provenance."
+        case .unsupportedDriverWay:
+            return "Per-driver optimization requires one routed driver (way) with its filters and limiter."
         case .inadequateRepeatedEvidence:
             return "At least three repeat-qualified, unclipped protected-driver captures are required."
         case .incompatibleResponseGrid:
@@ -651,12 +152,8 @@ struct ProtectedDriverPEQRecommendationAnalyzer: Sendable {
             where: { $0.id == protocolID }
         ),
         protocolItem.request.mode == .protectedDriverNearField,
-        let bus = protocolItem.protectedDriverBus else {
-            throw ProtectedDriverPEQRecommendationError.unsupportedDriverBus
-        }
-        guard SpeakerMeasurementLabProtectedDriverRoutePlanner
-            .isProtectedSplitBus(bus) else {
-            throw ProtectedDriverPEQRecommendationError.unsupportedDriverBus
+        let wayID = protocolItem.protectedRoutedWayID else {
+            throw ProtectedDriverPEQRecommendationError.unsupportedDriverWay
         }
 
         let captures = session.captures.filter {
@@ -665,10 +162,10 @@ struct ProtectedDriverPEQRecommendationAnalyzer: Sendable {
         guard captures.count >= Self.minimumRepeats,
               captures.count == protocolItem.request.repeatCount,
               captures.map(\.repeatIndex) == Array(0..<captures.count),
-              let provenance = captures.first?.protectedDriverProvenance,
-              provenance.validatesProtectedPath(for: bus),
+              let provenance = captures.first?.routedWayProvenance,
+              provenance.validates(wayID: wayID),
               captures.allSatisfy({
-                  $0.protectedDriverProvenance == provenance
+                  $0.routedWayProvenance == provenance
                       && $0.quality.sweepComplete
                       && !$0.quality.clipped
                       && $0.quality.estimatedSNRDB.map({
@@ -692,29 +189,15 @@ struct ProtectedDriverPEQRecommendationAnalyzer: Sendable {
             throw ProtectedDriverPEQRecommendationError
                 .incompatibleResponseGrid
         }
-        let bass = provenance.bassManagementConfiguration
-        guard bass.enabled,
-              let physicalMode = bass.physicalOutputMode,
-              (physicalMode == .biAmp || physicalMode == .triAmp),
-              physicalMode.supports(bus: bus) else {
-            throw ProtectedDriverPEQRecommendationError.protectedPathRequired
+        // The guard corners come from the way's own filter specs: nothing here reads a bus or a crossover mode.
+        guard let guarded = provenance.way.protectedPassband(
+            sampleRate: session.sampleRate
+        ) else {
+            throw ProtectedDriverPEQRecommendationError
+                .noUsableCrossoverPassband
         }
-        let fc = bass.frequencyHz
-        let upper = bass.upperFrequencyHz ?? 0
-        let nyquistCeiling = min(16_000.0, session.sampleRate * 0.42)
-        var low = 30.0
-        var high = nyquistCeiling
-        switch bus {
-        case .leftLow, .rightLow:
-            high = min(high, fc / 1.5)
-        case .leftMid, .rightMid:
-            low = max(low, fc * 1.5)
-            high = min(high, upper / 1.5)
-        case .leftHigh, .rightHigh:
-            low = max(low, (physicalMode == .triAmp ? upper : fc) * 1.5)
-        case .leftFullRange, .rightFullRange, .subMono:
-            throw ProtectedDriverPEQRecommendationError.unsupportedDriverBus
-        }
+        var low = guarded.lowerBound
+        var high = guarded.upperBound
         let measuredLow = captures.compactMap {
             $0.quality.usableLowHz
         }.max() ?? .infinity
@@ -723,8 +206,7 @@ struct ProtectedDriverPEQRecommendationAnalyzer: Sendable {
         }.min() ?? 0
         low = max(low, measuredLow)
         high = min(high, measuredHigh)
-        guard fc.isFinite, fc > 0, upper.isFinite,
-              low.isFinite, high.isFinite,
+        guard low.isFinite, high.isFinite,
               high > low * 1.7 else {
             throw ProtectedDriverPEQRecommendationError
                 .noUsableCrossoverPassband
@@ -805,16 +287,15 @@ struct ProtectedDriverPEQRecommendationAnalyzer: Sendable {
             protocolID: protocolID,
             playbackSystemID: session.playbackSystemID,
             routingSignature: session.routingSignature,
-            targetBus: bus,
-            protectedConfiguration: provenance.targetDriverConfiguration,
-            bassManagement: bass,
+            wayID: wayID,
+            way: provenance.way,
             sampleRate: session.sampleRate,
             repeatedCaptureIDs: captures.map(\.id),
             passbandLowHz: low,
             passbandHighHz: high,
             cuts: cuts,
             evidenceSummary:
-                "Protected \(bus.displayName) near-field repeated sweeps; " +
+                "Protected \(provenance.way.name) near-field repeated sweeps; " +
                 "0–3 cut-only, bounded peak hypotheses in the guarded passband. " +
                 "No active driver EQ, delay, polarity, limiter or crossover change."
         )
@@ -842,8 +323,8 @@ struct ProtectedDriverTimingRecommendation: Equatable, Sendable {
     var secondProtocolID: UUID
     var playbackSystemID: UUID
     var routingSignature: String
-    var firstBus: SpeakerOutputBus
-    var secondBus: SpeakerOutputBus
+    var firstWayID: UUID
+    var secondWayID: UUID
     var crossoverFrequencyHz: Double
     /// second minus first after subtracting each simultaneous electrical
     /// reference arrival. Positive means the second acoustic path is later.
@@ -852,7 +333,7 @@ struct ProtectedDriverTimingRecommendation: Equatable, Sendable {
     var referenceMagnitudeRepeatabilityRMSDB: Double
     var referencePhaseConsistency: Double
     var wrappedRelativePhaseAtCrossoverRadians: Double
-    var delayBus: SpeakerOutputBus?
+    var delayWayID: UUID?
     var additionalDelayMilliseconds: Double?
     var polarityHypothesis: ProtectedDriverTimingPolarityHypothesis
     var evidenceConfidence: Double
@@ -880,9 +361,9 @@ enum ProtectedDriverTimingRecommendationError:
         case .invalidSession:
             return "Protected driver timing requires a structurally valid Measurement Lab session."
         case .invalidPair:
-            return "Select two adjacent Low/Mid/High buses on the same physical speaker."
+            return "Select two adjacent drivers (ways) of the same speaker, one crossing over into the other."
         case .protectedPathMismatch:
-            return "Both drivers must share the same protected routing and active crossover topology."
+            return "Each driver's captures must carry one unchanged protected render of that way."
         case .sharedReferenceRequired:
             return "Every repeat requires a qualified simultaneous electrical reference on the same ADC timeline."
         case .referencePathUnstable:
@@ -923,13 +404,9 @@ struct ProtectedDriverTimingRecommendationAnalyzer: Sendable {
               ),
               firstProtocol.request.mode == .protectedDriverNearField,
               secondProtocol.request.mode == .protectedDriverNearField,
-              let firstBus = firstProtocol.protectedDriverBus,
-              let secondBus = secondProtocol.protectedDriverBus,
-              SpeakerMeasurementLabProtectedDriverRoutePlanner
-                .isProtectedSplitBus(firstBus),
-              SpeakerMeasurementLabProtectedDriverRoutePlanner
-                .isProtectedSplitBus(secondBus),
-              sameSpeakerSide(firstBus, secondBus) else {
+              let firstWayID = firstProtocol.protectedRoutedWayID,
+              let secondWayID = secondProtocol.protectedRoutedWayID,
+              firstWayID != secondWayID else {
             throw ProtectedDriverTimingRecommendationError.invalidPair
         }
         let first = session.captures.filter {
@@ -947,36 +424,22 @@ struct ProtectedDriverTimingRecommendationAnalyzer: Sendable {
             throw ProtectedDriverTimingRecommendationError
                 .inadequateRepeatedEvidence
         }
-        guard let firstProvenance = first.first?.protectedDriverProvenance,
-              let secondProvenance = second.first?.protectedDriverProvenance,
-              firstProvenance.validatesProtectedPath(for: firstBus),
-              secondProvenance.validatesProtectedPath(for: secondBus),
+        guard let firstProvenance = first.first?.routedWayProvenance,
+              let secondProvenance = second.first?.routedWayProvenance,
+              firstProvenance.validates(wayID: firstWayID),
+              secondProvenance.validates(wayID: secondWayID),
               first.allSatisfy({
-                  $0.protectedDriverProvenance == firstProvenance
+                  $0.routedWayProvenance == firstProvenance
               }),
               second.allSatisfy({
-                  $0.protectedDriverProvenance == secondProvenance
-              }),
-              sameProtectedRoutingTopology(
-                  firstProvenance.routingConfiguration,
-                  secondProvenance.routingConfiguration
-              ),
-              firstProvenance.bassManagementConfiguration
-                == secondProvenance.bassManagementConfiguration else {
+                  $0.routedWayProvenance == secondProvenance
+              }) else {
             throw ProtectedDriverTimingRecommendationError
                 .protectedPathMismatch
         }
-        let bass = firstProvenance.bassManagementConfiguration
-        guard bass.enabled,
-              let mode = bass.physicalOutputMode,
-              (mode == .biAmp || mode == .triAmp),
-              mode.supports(bus: firstBus),
-              mode.supports(bus: secondBus),
-              adjacent(firstBus, secondBus, mode: mode),
-              let crossover = crossoverFrequency(
-                firstBus, secondBus, bass
-              ),
-              crossover.isFinite, crossover > 0 else {
+        guard let crossover = ProtectedWayPairing.crossoverHz(
+            firstProvenance, secondProvenance
+        ), crossover.isFinite, crossover > 0 else {
             throw ProtectedDriverTimingRecommendationError.invalidPair
         }
 
@@ -1081,15 +544,15 @@ struct ProtectedDriverTimingRecommendationAnalyzer: Sendable {
         let relativePhase = circularMean(relativePhases)
 
         let delayMagnitude = abs(relativeArrival)
-        let delayBus: SpeakerOutputBus?
+        let delayWayID: UUID?
         let additionalDelay: Double?
         if delayMagnitude >= Self.minimumMeaningfulDelayMilliseconds,
            delayMagnitude <= Self.maximumAdditionalDelayMilliseconds {
             // Delay whichever acoustic path currently arrives first.
-            delayBus = relativeArrival > 0 ? firstBus : secondBus
+            delayWayID = relativeArrival > 0 ? firstWayID : secondWayID
             additionalDelay = delayMagnitude
         } else {
-            delayBus = nil
+            delayWayID = nil
             additionalDelay = nil
         }
 
@@ -1122,15 +585,15 @@ struct ProtectedDriverTimingRecommendationAnalyzer: Sendable {
             secondProtocolID: secondProtocolID,
             playbackSystemID: session.playbackSystemID,
             routingSignature: session.routingSignature,
-            firstBus: firstBus,
-            secondBus: secondBus,
+            firstWayID: firstWayID,
+            secondWayID: secondWayID,
             crossoverFrequencyHz: crossover,
             relativeArrivalMilliseconds: relativeArrival,
             referenceArrivalSpreadMilliseconds: referenceArrivalSpread,
             referenceMagnitudeRepeatabilityRMSDB: referenceMagnitudeRMS,
             referencePhaseConsistency: referencePhaseConsistency,
             wrappedRelativePhaseAtCrossoverRadians: relativePhase,
-            delayBus: delayBus,
+            delayWayID: delayWayID,
             additionalDelayMilliseconds: additionalDelay,
             polarityHypothesis: polarity,
             evidenceConfidence: min(
@@ -1143,104 +606,6 @@ struct ProtectedDriverTimingRecommendationAnalyzer: Sendable {
                 "No driver delay, polarity, crossover, limiter, PEQ or live route is changed by this analysis."
             ]
         )
-    }
-
-    private func sameProtectedRoutingTopology(
-        _ lhs: MultiOutputRoutingConfiguration,
-        _ rhs: MultiOutputRoutingConfiguration
-    ) -> Bool {
-        guard lhs.enabled == rhs.enabled,
-              lhs.synchronizationMode == rhs.synchronizationMode,
-              lhs.resolvedReferenceDeviceUID
-                == rhs.resolvedReferenceDeviceUID else {
-            return false
-        }
-        let left = lhs.enabledRoutes.map {
-            ($0.bus.rawValue, $0.destination.deviceUID,
-             $0.destination.channelIndex)
-        }.sorted {
-            if $0.0 != $1.0 { return $0.0 < $1.0 }
-            if $0.1 != $1.1 { return $0.1 < $1.1 }
-            return $0.2 < $1.2
-        }
-        let right = rhs.enabledRoutes.map {
-            ($0.bus.rawValue, $0.destination.deviceUID,
-             $0.destination.channelIndex)
-        }.sorted {
-            if $0.0 != $1.0 { return $0.0 < $1.0 }
-            if $0.1 != $1.1 { return $0.1 < $1.1 }
-            return $0.2 < $1.2
-        }
-        return left.elementsEqual(right) {
-            $0.0 == $1.0 && $0.1 == $1.1 && $0.2 == $1.2
-        }
-    }
-
-    private func sameSpeakerSide(
-        _ first: SpeakerOutputBus,
-        _ second: SpeakerOutputBus
-    ) -> Bool {
-        let left: Set<String> = [
-            SpeakerOutputBus.leftLow.rawValue,
-            SpeakerOutputBus.leftMid.rawValue,
-            SpeakerOutputBus.leftHigh.rawValue,
-        ]
-        let right: Set<String> = [
-            SpeakerOutputBus.rightLow.rawValue,
-            SpeakerOutputBus.rightMid.rawValue,
-            SpeakerOutputBus.rightHigh.rawValue,
-        ]
-        return (left.contains(first.rawValue) && left.contains(second.rawValue))
-            || (right.contains(first.rawValue)
-                && right.contains(second.rawValue))
-    }
-
-    private func adjacent(
-        _ first: SpeakerOutputBus,
-        _ second: SpeakerOutputBus,
-        mode: SpeakerCrossoverMode
-    ) -> Bool {
-        switch mode {
-        case .biAmp:
-            switch (first, second) {
-            case (.leftLow, .leftHigh), (.leftHigh, .leftLow),
-                 (.rightLow, .rightHigh), (.rightHigh, .rightLow):
-                return true
-            default:
-                return false
-            }
-        case .triAmp:
-            switch (first, second) {
-            case (.leftLow, .leftMid), (.leftMid, .leftLow),
-                 (.leftMid, .leftHigh), (.leftHigh, .leftMid),
-                 (.rightLow, .rightMid), (.rightMid, .rightLow),
-                 (.rightMid, .rightHigh), (.rightHigh, .rightMid):
-                return true
-            default:
-                return false
-            }
-        default:
-            return false
-        }
-    }
-
-    private func crossoverFrequency(
-        _ first: SpeakerOutputBus,
-        _ second: SpeakerOutputBus,
-        _ bass: BassManagementConfiguration
-    ) -> Double? {
-        switch (first, second) {
-        case (.leftLow, .leftHigh), (.leftHigh, .leftLow),
-             (.rightLow, .rightHigh), (.rightHigh, .rightLow),
-             (.leftLow, .leftMid), (.leftMid, .leftLow),
-             (.rightLow, .rightMid), (.rightMid, .rightLow):
-            return bass.frequencyHz
-        case (.leftMid, .leftHigh), (.leftHigh, .leftMid),
-             (.rightMid, .rightHigh), (.rightHigh, .rightMid):
-            return bass.upperFrequencyHz
-        default:
-            return nil
-        }
     }
 
     private func correctedArrival(
@@ -1360,8 +725,8 @@ struct ProtectedDriverCrossoverSumModel: Equatable, Sendable {
     var sessionID: UUID
     var firstProtocolID: UUID
     var secondProtocolID: UUID
-    var firstBus: SpeakerOutputBus
-    var secondBus: SpeakerOutputBus
+    var firstWayID: UUID
+    var secondWayID: UUID
     var crossoverFrequencyHz: Double
     var frequencyPointCount: Int
     var currentMeanCoherenceDeficitDB: Double
@@ -1476,15 +841,15 @@ struct ProtectedDriverCrossoverSumModelAnalyzer: Sendable {
         ]
 
         if let delay = timing.additionalDelayMilliseconds,
-           let delayBus = timing.delayBus {
+           let delayWayID = timing.delayWayID {
             let delayed = modeledPair(
                 firstMean,
                 secondMean,
                 indices: indices,
                 grid: grid,
                 delayMilliseconds: delay,
-                delayBus: delayBus,
-                firstBus: timing.firstBus,
+                delayWayID: delayWayID,
+                firstWayID: timing.firstWayID,
                 invertSecond: false
             )
             candidates.append((
@@ -1502,8 +867,8 @@ struct ProtectedDriverCrossoverSumModelAnalyzer: Sendable {
                 indices: indices,
                 grid: grid,
                 delayMilliseconds: nil,
-                delayBus: nil,
-                firstBus: timing.firstBus,
+                delayWayID: nil,
+                firstWayID: timing.firstWayID,
                 invertSecond: true
             )
             candidates.append((
@@ -1513,15 +878,15 @@ struct ProtectedDriverCrossoverSumModelAnalyzer: Sendable {
                 true
             ))
             if let delay = timing.additionalDelayMilliseconds,
-               let delayBus = timing.delayBus {
+               let delayWayID = timing.delayWayID {
                 let combined = modeledPair(
                     firstMean,
                     secondMean,
                     indices: indices,
                     grid: grid,
                     delayMilliseconds: delay,
-                    delayBus: delayBus,
-                    firstBus: timing.firstBus,
+                    delayWayID: delayWayID,
+                    firstWayID: timing.firstWayID,
                     invertSecond: true
                 )
                 candidates.append((
@@ -1548,8 +913,8 @@ struct ProtectedDriverCrossoverSumModelAnalyzer: Sendable {
             sessionID: session.id,
             firstProtocolID: firstProtocolID,
             secondProtocolID: secondProtocolID,
-            firstBus: timing.firstBus,
-            secondBus: timing.secondBus,
+            firstWayID: timing.firstWayID,
+            secondWayID: timing.secondWayID,
             crossoverFrequencyHz: timing.crossoverFrequencyHz,
             frequencyPointCount: indices.count,
             currentMeanCoherenceDeficitDB: current,
@@ -1627,18 +992,18 @@ struct ProtectedDriverCrossoverSumModelAnalyzer: Sendable {
         indices: [Int],
         grid: [Double],
         delayMilliseconds: Double?,
-        delayBus: SpeakerOutputBus?,
-        firstBus: SpeakerOutputBus,
+        delayWayID: UUID?,
+        firstWayID: UUID,
         invertSecond: Bool
     ) -> ([ComplexSample], [ComplexSample]) {
         var lhs = first
         var rhs = second
-        if let delayMilliseconds, let delayBus {
+        if let delayMilliseconds, let delayWayID {
             let seconds = delayMilliseconds / 1_000
             for offset in lhs.indices {
                 let frequency = grid[indices[offset]]
                 let phase = 2 * Double.pi * frequency * seconds
-                if delayBus == firstBus {
+                if delayWayID == firstWayID {
                     lhs[offset] = rotated(lhs[offset], phase)
                 } else {
                     rhs[offset] = rotated(rhs[offset], phase)
@@ -1685,10 +1050,13 @@ struct ProtectedDriverCrossoverSumModelAnalyzer: Sendable {
 
 // MARK: - PR111 Slice 5: hardware-blocked commissioning draft
 
+
+// MARK: - Commissioning draft (routed ways)
+
 struct ProtectedDriverCommissioningTimingReview:
     Codable, Equatable, Sendable {
-    var firstBus: SpeakerOutputBus
-    var secondBus: SpeakerOutputBus
+    var firstWayID: UUID
+    var secondWayID: UUID
     var crossoverFrequencyHz: Double
     var bestHypothesis: ProtectedDriverCrossoverSumHypothesis
     var modeledDeficitReductionDB: Double
@@ -1697,9 +1065,11 @@ struct ProtectedDriverCommissioningTimingReview:
     var combinedDriverCaptureVerified: Bool
 }
 
+/// A reviewable preview of cut-only driver EQ on the measured ways. The rollback state is the exact Playback System at
+/// the time; the legacy bus fields in it are never touched. There is still no Apply.
 struct ProtectedDriverCommissioningDraft:
     Identifiable, Codable, Equatable, Sendable {
-    static let currentSchemaVersion = 1
+    static let currentSchemaVersion = 2
 
     var schemaVersion: Int = currentSchemaVersion
     var id: UUID = UUID()
@@ -1709,8 +1079,9 @@ struct ProtectedDriverCommissioningDraft:
     var routingSignature: String
     var sampleRate: Double
     var rollbackPlaybackSystemState: PlaybackSystemState
-    var previewDriverProcessing: SpeakerDriverProcessingConfiguration
-    var affectedBuses: [SpeakerOutputBus]
+    /// The routing with the review cuts appended to the affected ways' EQ.
+    var previewRouting: SpeakerRoutingConfiguration
+    var affectedWayIDs: [UUID]
     var sourceProtocolIDs: [UUID]
     var sourceCaptureIDs: [UUID]
     var timingReviews: [ProtectedDriverCommissioningTimingReview]
@@ -1731,6 +1102,9 @@ struct ProtectedDriverCommissioningDraft:
     var stateDriftCheckRequired: Bool { true }
     var requiresPhysicalCombinedDriverCapture: Bool { true }
 
+    /// Peaking is code 0 in a routing EQ section.
+    static let peakingType = 0
+
     func validated() throws -> Self {
         guard schemaVersion == Self.currentSchemaVersion,
               sampleRate.isFinite, sampleRate > 0,
@@ -1739,7 +1113,7 @@ struct ProtectedDriverCommissioningDraft:
               ).isEmpty,
               Set(sourceProtocolIDs).count == sourceProtocolIDs.count,
               Set(sourceCaptureIDs).count == sourceCaptureIDs.count,
-              Set(affectedBuses).count == affectedBuses.count,
+              Set(affectedWayIDs).count == affectedWayIDs.count,
               timingReviews.allSatisfy({
                   !$0.combinedDriverCaptureVerified
                       && $0.crossoverFrequencyHz.isFinite
@@ -1749,62 +1123,53 @@ struct ProtectedDriverCommissioningDraft:
               !canApply, !canDeploy, !readyForApproval,
               rollbackSnapshotAvailable,
               stateDriftCheckRequired,
-              requiresPhysicalCombinedDriverCapture else {
+              requiresPhysicalCombinedDriverCapture,
+              let baseline = rollbackPlaybackSystemState.speakerRouting else {
             throw ProtectedDriverCommissioningError.invalidPreview
         }
-        guard let baseline =
-                rollbackPlaybackSystemState.speakerDriverProcessing else {
+        // Everything except the affected ways' EQ must equal the baseline.
+        guard previewRouting.speakers.count == baseline.speakers.count else {
             throw ProtectedDriverCommissioningError.invalidPreview
         }
-        do {
-            try baseline.validateStructure()
-            try previewDriverProcessing.validateStructure()
-        } catch {
-            throw ProtectedDriverCommissioningError.invalidPreview
-        }
-
-        var changed = Set<SpeakerOutputBus>()
-        for bus in SpeakerOutputBus.allCases {
-            let before = baseline.configuration(for: bus)
-            let after = previewDriverProcessing.configuration(for: bus)
-            guard after.enabled == before.enabled,
-                  after.trimDB == before.trimDB,
-                  after.polarityInverted == before.polarityInverted,
-                  after.delayMilliseconds == before.delayMilliseconds,
-                  after.limiterEnabled == before.limiterEnabled,
-                  after.limiterThresholdDBFS
-                    == before.limiterThresholdDBFS,
-                  after.eqBands.count >= before.eqBands.count,
-                  Array(after.eqBands.prefix(before.eqBands.count))
-                    == before.eqBands else {
+        var stripped = previewRouting
+        var changed = Set<UUID>()
+        for (si, speaker) in previewRouting.speakers.enumerated() {
+            let base = baseline.speakers[si]
+            guard speaker.ways.count == base.ways.count else {
                 throw ProtectedDriverCommissioningError.invalidPreview
             }
-            let added = Array(
-                after.eqBands.dropFirst(before.eqBands.count)
-            )
-            guard added.allSatisfy({
-                $0.enabled
-                    && $0.type == .peaking
-                    && $0.frequencyHz.isFinite
-                    && $0.frequencyHz > 0
-                    && $0.gainDB.isFinite
-                    && $0.gainDB < 0
-                    && $0.gainDB >=
-                        -ProtectedDriverPEQRecommendationAnalyzer
-                            .maximumCutDB
-                    && $0.q.isFinite
-                    && $0.q > 0
-                    && $0.q <=
-                        ProtectedDriverPEQRecommendationAnalyzer
-                            .maximumBandQ
-                    && $0.firKernel == nil
-                    && !$0.dynamic.enabled
-            }) else {
-                throw ProtectedDriverCommissioningError.invalidPreview
+            for (wi, way) in speaker.ways.enumerated() {
+                let before = base.ways[wi]
+                guard way.id == before.id,
+                      way.eq.count >= before.eq.count,
+                      way.eq.count <= Int(N60_PEQ_MAX_SECTIONS),
+                      Array(way.eq.prefix(before.eq.count)) == before.eq
+                else {
+                    throw ProtectedDriverCommissioningError.invalidPreview
+                }
+                let added = Array(way.eq.dropFirst(before.eq.count))
+                guard added.allSatisfy({
+                    $0.type == Self.peakingType
+                        && $0.frequencyHz.isFinite
+                        && $0.frequencyHz > 0
+                        && $0.gainDB.isFinite
+                        && $0.gainDB < 0
+                        && $0.gainDB >=
+                            -ProtectedDriverPEQRecommendationAnalyzer
+                                .maximumCutDB
+                        && $0.q.isFinite
+                        && $0.q > 0
+                        && $0.q <=
+                            ProtectedDriverPEQRecommendationAnalyzer
+                                .maximumBandQ
+                }) else {
+                    throw ProtectedDriverCommissioningError.invalidPreview
+                }
+                if !added.isEmpty { changed.insert(way.id) }
+                stripped.speakers[si].ways[wi].eq = before.eq
             }
-            if !added.isEmpty { changed.insert(bus) }
         }
-        guard changed == Set(affectedBuses) else {
+        guard stripped == baseline, changed == Set(affectedWayIDs) else {
             throw ProtectedDriverCommissioningError.invalidPreview
         }
         return self
@@ -1832,13 +1197,13 @@ enum ProtectedDriverCommissioningError:
         case .outputProfileRequired:
             return "An enabled Output Device Profile is required for per-driver commissioning review."
         case .protectedStateDrift:
-            return "Routing, crossover, limiter, or per-driver processing changed after the protected measurements."
+            return "The routing matrix, a driver's filters, or its limiter changed after the protected measurements."
         case .noQualifiedProtectedDriverEvidence:
             return "No protected driver protocol produced repeat-qualified commissioning evidence."
         case .insufficientEQCapacity:
-            return "The existing per-driver EQ has no safe free slots for the bounded review cuts."
+            return "The driver's EQ has no free sections for the bounded review cuts."
         case .invalidPreview:
-            return "The generated per-driver preview does not satisfy the existing realtime processing limits."
+            return "The generated per-driver preview does not satisfy the routing limits."
         case .currentStateDrift:
             return "The Playback System changed after commissioning review; regenerate the draft before any future Apply."
         case .unsupportedSchema:
@@ -1847,7 +1212,7 @@ enum ProtectedDriverCommissioningError:
     }
 }
 
-/// Re-runs PR111 analysis from the persisted Lab session instead of trusting
+/// Re-runs the analysis from the persisted Lab session instead of trusting
 /// caller-supplied cut/timing values. The output is a reviewable configuration
 /// snapshot only. It has no reference to the live engine or profile-controller
 /// mutation APIs and cannot deploy anything.
@@ -1871,60 +1236,53 @@ struct ProtectedDriverCommissioningPlanner: Sendable {
             throw ProtectedDriverCommissioningError
                 .outputProfileRequired
         }
-        guard let baselineProcessing =
-                profile.state.speakerDriverProcessing,
-              profile.state.bassManagement.enabled,
-              profile.state.outputRouting?.enabled == true else {
+        guard let baseline = profile.state.speakerRouting,
+              baseline.enabled else {
             throw ProtectedDriverCommissioningError
                 .protectedStateDrift
         }
 
         let protectedProtocols = session.protocols.filter {
             $0.request.mode == .protectedDriverNearField
-                && $0.protectedDriverBus != nil
+                && $0.protectedRoutedWayID != nil
         }
         guard !protectedProtocols.isEmpty else {
             throw ProtectedDriverCommissioningError
                 .noQualifiedProtectedDriverEvidence
         }
 
-        // Every measured protocol must still describe the exact current
-        // route, bass-management/crossover and driver-processing snapshot.
+        // Every measured way must still be the way that was measured.
+        let currentWays = Dictionary(
+            uniqueKeysWithValues: baseline.speakers.flatMap(\.ways).map {
+                ($0.id, $0)
+            }
+        )
         for labProtocol in protectedProtocols {
             let captures = session.captures.filter {
                 $0.protocolID == labProtocol.id
             }
-            guard !captures.isEmpty,
+            guard let wayID = labProtocol.protectedRoutedWayID,
+                  !captures.isEmpty,
                   captures.allSatisfy({
-                      guard let provenance =
-                            $0.protectedDriverProvenance,
-                            let currentRouting =
-                            profile.state.outputRouting else {
+                      guard let provenance = $0.routedWayProvenance else {
                           return false
                       }
-                      return sameRoutingTopology(
-                          provenance.routingConfiguration,
-                          currentRouting
-                      )
-                        && provenance.bassManagementConfiguration
-                            == profile.state.bassManagement
-                        && provenance.targetDriverConfiguration
-                            == baselineProcessing.configuration(
-                                for: labProtocol.protectedDriverBus!
-                            )
+                      return currentWays[wayID] == provenance.way
                   }) else {
                 throw ProtectedDriverCommissioningError
                     .protectedStateDrift
             }
         }
 
-        var preview = baselineProcessing
-        var affected = Set<SpeakerOutputBus>()
+        var preview = baseline
+        var affected = Set<UUID>()
         var qualifiedProtocolIDs: [UUID] = []
         var qualifiedCaptureIDs: [UUID] = []
 
         for labProtocol in protectedProtocols {
-            guard let bus = labProtocol.protectedDriverBus else { continue }
+            guard let wayID = labProtocol.protectedRoutedWayID else {
+                continue
+            }
             let recommendation: ProtectedDriverPEQRecommendation
             do {
                 recommendation =
@@ -1942,57 +1300,37 @@ struct ProtectedDriverCommissioningPlanner: Sendable {
             )
             guard !recommendation.cuts.isEmpty else { continue }
 
-            var busConfiguration = preview.configuration(for: bus)
-            guard busConfiguration.limiterEnabled,
-                  busConfiguration.eqBands.count
-                    + recommendation.cuts.count
-                    <= SpeakerDriverBusProcessingConfiguration
-                        .maximumEQBandCount else {
+            guard let location = preview.locateWay(wayID) else { continue }
+            var way = preview.speakers[location.speaker]
+                .ways[location.way]
+            guard way.limiter != nil,
+                  way.eq.count + recommendation.cuts.count
+                    <= Int(N60_PEQ_MAX_SECTIONS) else {
                 throw ProtectedDriverCommissioningError
                     .insufficientEQCapacity
             }
             for cut in recommendation.cuts {
-                busConfiguration.eqBands.append(
-                    EQBand(
-                        enabled: true,
-                        type: .peaking,
+                way.eq.append(
+                    RoutingEQSection(
+                        type: ProtectedDriverCommissioningDraft
+                            .peakingType,
                         frequencyHz: cut.frequencyHz,
                         gainDB: cut.gainDB,
-                        q: cut.q,
-                        slope: .db12
+                        q: cut.q
                     )
                 )
             }
-            // Never modify these protection/alignment fields in remote draft.
-            guard busConfiguration.trimDB
-                    == recommendation.protectedConfiguration.trimDB,
-                  busConfiguration.polarityInverted
-                    == recommendation.protectedConfiguration
-                        .polarityInverted,
-                  busConfiguration.delayMilliseconds
-                    == recommendation.protectedConfiguration
-                        .delayMilliseconds,
-                  busConfiguration.limiterEnabled
-                    == recommendation.protectedConfiguration
-                        .limiterEnabled,
-                  busConfiguration.limiterThresholdDBFS
-                    == recommendation.protectedConfiguration
-                        .limiterThresholdDBFS else {
-                throw ProtectedDriverCommissioningError
-                    .invalidPreview
-            }
-            preview.replace(busConfiguration)
-            affected.insert(bus)
+            preview.speakers[location.speaker].ways[location.way] = way
+            affected.insert(wayID)
         }
         guard !qualifiedProtocolIDs.isEmpty else {
             throw ProtectedDriverCommissioningError
                 .noQualifiedProtectedDriverEvidence
         }
-        do { try preview.validateStructure() }
-        catch { throw ProtectedDriverCommissioningError.invalidPreview }
 
         let timingReviews = makeTimingReviews(
             session: session,
+            routing: baseline,
             protectedProtocols: protectedProtocols
         )
 
@@ -2003,9 +1341,9 @@ struct ProtectedDriverCommissioningPlanner: Sendable {
             routingSignature: session.routingSignature,
             sampleRate: session.sampleRate,
             rollbackPlaybackSystemState: profile.state,
-            previewDriverProcessing: preview,
-            affectedBuses: affected.sorted {
-                $0.rawValue < $1.rawValue
+            previewRouting: preview,
+            affectedWayIDs: affected.sorted {
+                $0.uuidString < $1.uuidString
             },
             sourceProtocolIDs: qualifiedProtocolIDs.sorted {
                 $0.uuidString < $1.uuidString
@@ -2041,93 +1379,109 @@ struct ProtectedDriverCommissioningPlanner: Sendable {
         }
     }
 
-    private func sameRoutingTopology(
-        _ lhs: MultiOutputRoutingConfiguration,
-        _ rhs: MultiOutputRoutingConfiguration
-    ) -> Bool {
-        guard lhs.enabled == rhs.enabled,
-              lhs.synchronizationMode == rhs.synchronizationMode,
-              lhs.resolvedReferenceDeviceUID
-                == rhs.resolvedReferenceDeviceUID else {
-            return false
-        }
-        let left = lhs.enabledRoutes.map {
-            ($0.bus.rawValue, $0.destination.deviceUID,
-             $0.destination.channelIndex)
-        }.sorted {
-            if $0.0 != $1.0 { return $0.0 < $1.0 }
-            if $0.1 != $1.1 { return $0.1 < $1.1 }
-            return $0.2 < $1.2
-        }
-        let right = rhs.enabledRoutes.map {
-            ($0.bus.rawValue, $0.destination.deviceUID,
-             $0.destination.channelIndex)
-        }.sorted {
-            if $0.0 != $1.0 { return $0.0 < $1.0 }
-            if $0.1 != $1.1 { return $0.1 < $1.1 }
-            return $0.2 < $1.2
-        }
-        return left.elementsEqual(right) {
-            $0.0 == $1.0 && $0.1 == $1.1 && $0.2 == $1.2
-        }
-    }
-
     private func makeTimingReviews(
         session: SpeakerMeasurementLabSession,
+        routing: SpeakerRoutingConfiguration,
         protectedProtocols: [SpeakerMeasurementLabProtocol]
     ) -> [ProtectedDriverCommissioningTimingReview] {
         var reviews: [ProtectedDriverCommissioningTimingReview] = []
         let grouped = Dictionary(
             grouping: protectedProtocols
-        ) { $0.protectedDriverBus! }
-        let pairs: [(SpeakerOutputBus, SpeakerOutputBus)] = [
-            (.leftLow, .leftMid),
-            (.leftMid, .leftHigh),
-            (.leftLow, .leftHigh),
-            (.rightLow, .rightMid),
-            (.rightMid, .rightHigh),
-            (.rightLow, .rightHigh),
-        ]
-        for pair in pairs {
-            guard let firstGroup = grouped[pair.0],
-                  let secondGroup = grouped[pair.1],
-                  firstGroup.count == 1,
-                  secondGroup.count == 1,
-                  let first = firstGroup.first,
-                  let second = secondGroup.first,
-                  let model = try? ProtectedDriverCrossoverSumModelAnalyzer()
-                    .analyze(
-                        session: session,
-                        firstProtocolID: first.id,
-                        secondProtocolID: second.id
-                    ) else {
-                continue
-            }
-            reviews.append(
-                ProtectedDriverCommissioningTimingReview(
-                    firstBus: model.firstBus,
-                    secondBus: model.secondBus,
-                    crossoverFrequencyHz:
-                        model.crossoverFrequencyHz,
-                    bestHypothesis: model.bestHypothesis,
-                    modeledDeficitReductionDB:
-                        model.modeledDeficitReductionDB,
-                    modeledAdditionalDelayMilliseconds:
-                        model.modeledAdditionalDelayMilliseconds,
-                    modeledInvertsComparedDriver:
-                        model.modeledInvertsComparedDriver,
-                    combinedDriverCaptureVerified:
-                        model.combinedDriverCaptureVerified
+        ) { $0.protectedRoutedWayID! }
+        for speaker in routing.speakers {
+            for pair in speaker.adjacentWayPairs {
+                guard let firstGroup = grouped[pair.lower.id],
+                      let secondGroup = grouped[pair.upper.id],
+                      firstGroup.count == 1,
+                      secondGroup.count == 1,
+                      let first = firstGroup.first,
+                      let second = secondGroup.first,
+                      let model = try? ProtectedDriverCrossoverSumModelAnalyzer()
+                        .analyze(
+                            session: session,
+                            firstProtocolID: first.id,
+                            secondProtocolID: second.id
+                        ) else {
+                    continue
+                }
+                reviews.append(
+                    ProtectedDriverCommissioningTimingReview(
+                        firstWayID: model.firstWayID,
+                        secondWayID: model.secondWayID,
+                        crossoverFrequencyHz:
+                            model.crossoverFrequencyHz,
+                        bestHypothesis: model.bestHypothesis,
+                        modeledDeficitReductionDB:
+                            model.modeledDeficitReductionDB,
+                        modeledAdditionalDelayMilliseconds:
+                            model.modeledAdditionalDelayMilliseconds,
+                        modeledInvertsComparedDriver:
+                            model.modeledInvertsComparedDriver,
+                        combinedDriverCaptureVerified:
+                            model.combinedDriverCaptureVerified
+                    )
                 )
-            )
+            }
         }
         return reviews.sorted {
-            if $0.firstBus.rawValue != $1.firstBus.rawValue {
-                return $0.firstBus.rawValue < $1.firstBus.rawValue
+            if $0.firstWayID != $1.firstWayID {
+                return $0.firstWayID.uuidString < $1.firstWayID.uuidString
             }
-            return $0.secondBus.rawValue < $1.secondBus.rawValue
+            return $0.secondWayID.uuidString < $1.secondWayID.uuidString
         }
     }
+}
+
+extension SpeakerRoutingConfiguration {
+    func locateWay(_ id: UUID) -> (speaker: Int, way: Int)? {
+        for (si, speaker) in speakers.enumerated() {
+            if let wi = speaker.ways.firstIndex(where: { $0.id == id }) {
+                return (si, wi)
+            }
+        }
+        return nil
+    }
+}
+
+// MARK: - Drafts saved before the routing matrix
+
+/// Read-only record of a commissioning draft written against the legacy buses (schema 1). It is kept on disk and shown,
+/// never applied. It maps to ways through its own rollback state: a legacy route's id is the id of the way the
+/// migration created for it. A draft whose buses cannot all be mapped is "not applicable".
+struct ProtectedDriverLegacyCommissioningDraft: Codable, Equatable, Sendable {
+    var schemaVersion: Int
+    var id: UUID
+    var createdAt: Date
+    var playbackSystemID: UUID
+    var sessionID: UUID
+    var rollbackPlaybackSystemState: PlaybackSystemState
+    var affectedBuses: [SpeakerOutputBus]
+
+    /// The ways the draft's buses became, or nil when any bus has no single enabled route to map through.
+    var mappedWayIDs: [UUID]? {
+        guard let routes = rollbackPlaybackSystemState.outputRouting?
+            .enabledRoutes else { return nil }
+        var ids: [UUID] = []
+        for bus in affectedBuses {
+            let matches = routes.filter { $0.bus == bus }
+            guard matches.count == 1 else { return nil }
+            ids.append(matches[0].id)
+        }
+        return ids
+    }
+
+    var isApplicable: Bool { mappedWayIDs != nil }
+
+    var statusText: String {
+        isApplicable
+            ? "Saved before the routing matrix; its drivers map to the current ways. Read-only: regenerate it to review on ways."
+            : "Not applicable: this draft was saved against the legacy buses and they cannot be mapped to ways. Kept for the record."
+    }
+}
+
+enum ProtectedDriverCommissioningDraftEntry: Equatable, Sendable {
+    case current(ProtectedDriverCommissioningDraft)
+    case legacy(ProtectedDriverLegacyCommissioningDraft)
 }
 
 struct ProtectedDriverCommissioningDraftStore: Sendable {
@@ -2165,21 +1519,44 @@ struct ProtectedDriverCommissioningDraftStore: Sendable {
         )
     }
 
+    /// The current-schema draft for a session; nil when there is none or the saved one is a legacy draft.
     func load(_ sessionID: UUID)
         throws -> ProtectedDriverCommissioningDraft? {
+        guard case .current(let draft)? = try entry(sessionID) else {
+            return nil
+        }
+        return draft
+    }
+
+    /// Whatever is saved for the session, current or legacy.
+    func entry(_ sessionID: UUID) throws
+        -> ProtectedDriverCommissioningDraftEntry? {
         let path = url(for: sessionID)
         guard FileManager.default.fileExists(atPath: path.path) else {
             return nil
         }
+        let data = try Data(contentsOf: path)
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .millisecondsSince1970
+        let version = try decoder.decode(SchemaProbe.self, from: data)
+            .schemaVersion
+        if version == 1 {
+            let legacy = try decoder.decode(
+                ProtectedDriverLegacyCommissioningDraft.self, from: data
+            )
+            guard legacy.sessionID == sessionID else {
+                throw ProtectedDriverCommissioningError.unsupportedSchema
+            }
+            return .legacy(legacy)
+        }
         let draft = try decoder.decode(
-            ProtectedDriverCommissioningDraft.self,
-            from: Data(contentsOf: path)
+            ProtectedDriverCommissioningDraft.self, from: data
         )
         guard draft.sessionID == sessionID else {
             throw ProtectedDriverCommissioningError.unsupportedSchema
         }
-        return try draft.validated()
+        return .current(try draft.validated())
     }
+
+    private struct SchemaProbe: Decodable { var schemaVersion: Int }
 }

@@ -1,528 +1,44 @@
 import XCTest
 @testable import NotchSixty
 
-final class SpeakerMeasurementLabProtectedExcitationTests:
-    XCTestCase {
-    private let sampleRate = 48_000.0
+/// A bi-amp left speaker as routed ways: a low way (low-pass 1 kHz) and a high way (high-pass 1 kHz), both limited.
+enum ProtectedWayFixtures {
+    static let speakerID = UUID(uuidString:
+        "11100000-0000-0000-0000-000000000001")!
+    static let lowID = UUID(uuidString:
+        "11100000-0000-0000-0000-000000000010")!
+    static let highID = UUID(uuidString:
+        "11100000-0000-0000-0000-000000000011")!
 
-    func testBiAmpHighDriverProgramUsesCrossoverAndLimiter()
-        throws {
-        let compiler =
-            SpeakerMeasurementLabProtectedExcitationCompiler()
-        let lowTone = tone(
-            frequencyHz: 100,
-            amplitude: 0.04
-        )
-        let highTone = tone(
-            frequencyHz: 5_000,
-            amplitude: 0.04
-        )
-        let bass = biAmpCrossover()
-        let driver = protectedDriver(bus: .leftHigh)
-
-        let low = try compiler.compile(
-            monoSamples: lowTone,
-            sampleRate: sampleRate,
-            targetBus: .leftHigh,
-            bassManagement: bass,
-            driverProcessing: driver
-        )
-        let high = try compiler.compile(
-            monoSamples: highTone,
-            sampleRate: sampleRate,
-            targetBus: .leftHigh,
-            bassManagement: bass,
-            driverProcessing: driver
-        )
-
-        XCTAssertTrue(high.preservesMandatoryCrossover)
-        XCTAssertTrue(high.preservesConfiguredDriverProcessing)
-        XCTAssertTrue(high.limiterProtected)
-        XCTAssertFalse(high.canStartPhysicalMeasurement)
-        XCTAssertFalse(high.canDeploy)
-        XCTAssertGreaterThan(
-            rms(high.renderedSamples),
-            rms(low.renderedSamples) * 10
-        )
-        XCTAssertLessThanOrEqual(
-            high.renderedPeakDBFS,
-            -29.5
-        )
-        XCTAssertGreaterThan(
-            high.renderedSamples.count,
-            high.sourceFrameCount
+    static func lowWay() -> RoutedWay {
+        RoutedWay(
+            id: lowID, name: "Left Low",
+            endpoint: PhysicalOutputEndpoint(
+                deviceUID: "PR111 Device", channelIndex: 0),
+            lowPass: .init(family: .linkwitzRiley, order: 4, cornerHz: 1_000),
+            limiter: RoutingLimiter(ceilingDB: -30)
         )
     }
 
-    func testBiAmpLowDriverRejectsHighFrequencyEnergy()
-        throws {
-        let compiler =
-            SpeakerMeasurementLabProtectedExcitationCompiler()
-        let bass = biAmpCrossover()
-        let driver = protectedDriver(bus: .leftLow)
-        let low = try compiler.compile(
-            monoSamples: tone(
-                frequencyHz: 100,
-                amplitude: 0.04
-            ),
-            sampleRate: sampleRate,
-            targetBus: .leftLow,
-            bassManagement: bass,
-            driverProcessing: driver
-        )
-        let high = try compiler.compile(
-            monoSamples: tone(
-                frequencyHz: 5_000,
-                amplitude: 0.04
-            ),
-            sampleRate: sampleRate,
-            targetBus: .leftLow,
-            bassManagement: bass,
-            driverProcessing: driver
-        )
-        XCTAssertGreaterThan(
-            rms(low.renderedSamples),
-            rms(high.renderedSamples) * 10
+    static func highWay() -> RoutedWay {
+        RoutedWay(
+            id: highID, name: "Left High",
+            endpoint: PhysicalOutputEndpoint(
+                deviceUID: "PR111 Device", channelIndex: 1),
+            highPass: .init(family: .linkwitzRiley, order: 4, cornerHz: 1_000),
+            limiter: RoutingLimiter(ceilingDB: -30)
         )
     }
 
-    func testTriAmpMidBusIsSupportedThroughExactProtectedPath()
-        throws {
-        var bass = biAmpCrossover()
-        bass.physicalOutputMode = .triAmp
-        bass.frequencyHz = 400
-        bass.upperFrequencyHz = 3_000
-        let result = try
-            SpeakerMeasurementLabProtectedExcitationCompiler()
-                .compile(
-                    monoSamples: tone(
-                        frequencyHz: 1_000,
-                        amplitude: 0.04
-                    ),
-                    sampleRate: sampleRate,
-                    targetBus: .rightMid,
-                    bassManagement: bass,
-                    driverProcessing:
-                        protectedDriver(bus: .rightMid)
-                )
-        XCTAssertGreaterThan(rms(result.renderedSamples), 1.0e-5)
-        XCTAssertEqual(
-            result.targetDriverConfiguration.bus,
-            .rightMid
-        )
-    }
-
-    func testProtectedCompilerRequiresExactTargetLimiter()
-        throws {
-        var driver = SpeakerDriverProcessingConfiguration()
-        driver.replace(
-            SpeakerDriverBusProcessingConfiguration(
-                bus: .leftHigh,
-                limiterEnabled: false
-            )
-        )
-        XCTAssertThrowsError(
-            try SpeakerMeasurementLabProtectedExcitationCompiler()
-                .compile(
-                    monoSamples: tone(
-                        frequencyHz: 5_000,
-                        amplitude: 0.04
-                    ),
-                    sampleRate: sampleRate,
-                    targetBus: .leftHigh,
-                    bassManagement: biAmpCrossover(),
-                    driverProcessing: driver
-                )
-        ) {
-            XCTAssertEqual(
-                $0 as?
-                    SpeakerMeasurementLabProtectedExcitationError,
-                .targetLimiterRequired
-            )
-        }
-    }
-
-    func testProtectedCompilerRejectsFullRangeSubAndMainsSub()
-        throws {
-        let compiler =
-            SpeakerMeasurementLabProtectedExcitationCompiler()
-        let samples = tone(
-            frequencyHz: 1_000,
-            amplitude: 0.04
-        )
-        for bus: SpeakerOutputBus in [
-            .leftFullRange, .rightFullRange, .subMono
-        ] {
-            XCTAssertThrowsError(
-                try compiler.compile(
-                    monoSamples: samples,
-                    sampleRate: sampleRate,
-                    targetBus: bus,
-                    bassManagement: biAmpCrossover(),
-                    driverProcessing:
-                        protectedDriver(bus: .leftHigh)
-                )
-            )
-        }
-
-        var bass = biAmpCrossover()
-        bass.physicalOutputMode = .mainsSub
-        XCTAssertThrowsError(
-            try compiler.compile(
-                monoSamples: samples,
-                sampleRate: sampleRate,
-                targetBus: .leftHigh,
-                bassManagement: bass,
-                driverProcessing:
-                    protectedDriver(bus: .leftHigh)
-            )
-        ) {
-            XCTAssertEqual(
-                $0 as?
-                    SpeakerMeasurementLabProtectedExcitationError,
-                .physicalCrossoverRequired
-            )
-        }
-    }
-
-    func testProtectedCompilerRejectsHotOrNonFiniteExcitation()
-        throws {
-        let compiler =
-            SpeakerMeasurementLabProtectedExcitationCompiler()
-        let bass = biAmpCrossover()
-        let driver = protectedDriver(bus: .leftHigh)
-
-        XCTAssertThrowsError(
-            try compiler.compile(
-                monoSamples: tone(
-                    frequencyHz: 5_000,
-                    amplitude: 0.20
-                ),
-                sampleRate: sampleRate,
-                targetBus: .leftHigh,
-                bassManagement: bass,
-                driverProcessing: driver
-            )
-        )
-        XCTAssertThrowsError(
-            try compiler.compile(
-                monoSamples: [0, .nan, 0],
-                sampleRate: sampleRate,
-                targetBus: .leftHigh,
-                bassManagement: bass,
-                driverProcessing: driver
-            )
-        )
-    }
-
-    func testCapabilityPlannerStillBlocksLiveProtectedDriverTransport()
-        throws {
-        let request = SpeakerMeasurementLabRequest(
-            mode: .protectedDriverNearField,
-            target: .protectedDriverBus(.leftHigh),
-            geometry: SpeakerMeasurementLabGeometry(
-                distanceMeters: 0.05
-            )
-        )
-        let route = LiveNChannelOutputRoutePlan(
-            programLayout: .stereo,
-            orderedDeviceUIDs: ["device"],
-            referenceDeviceUID: "device",
-            physicalChannelCount: 2,
-            programPhysicalChannels: [0, 1],
-            subwooferPhysicalChannels: [],
-            subwooferCount: 0,
-            bassManagementEnabled: false,
-            speakerCalibrations: [:],
-            subwooferCalibrations: [],
-            speakerOptimizerPEQ: [:]
-        )
-        let plan = try SpeakerMeasurementLabCapabilityPlanner()
-            .plan(
-                request,
-                routePlan: route,
-                multiOutputRouting: nil,
-                speakerDriverProcessing:
-                    protectedDriver(bus: .leftHigh)
-            )
-        XCTAssertFalse(plan.canStartMeasurement)
-        XCTAssertEqual(
-            plan.blockReasons,
-            [.protectedDriverTransportRequired(.leftHigh)]
-        )
-    }
-
-
-    func testProtectedRouteBindingRequiresExactBusCrossoverAndLimiter()
-        throws {
-        let routing = sameDeviceRouting()
-        let outputs = [
-            AudioOutputDevice(
-                deviceID: 1,
-                uid: "protected-device",
-                name: "Protected Device",
-                nominalSampleRate: sampleRate,
-                availableSampleRateRanges: [
-                    AudioSampleRateRange(
-                        minimum: sampleRate,
-                        maximum: sampleRate
-                    )
-                ],
-                outputChannelCount: 2
-            )
-        ]
-        let binding = try
-            SpeakerMeasurementLabProtectedDriverRoutePlanner()
-                .plan(
-                    targetBus: .leftHigh,
-                    routing: routing,
-                    bassManagement: biAmpCrossover(),
-                    driverProcessing:
-                        protectedDriver(bus: .leftHigh),
-                    availableOutputs: outputs,
-                    sampleRate: sampleRate,
-                    selectedOutputUID: "protected-device"
-                )
-        XCTAssertEqual(binding.physicalOutputChannelIndex, 1)
-        XCTAssertEqual(
-            binding.physicalDestination,
-            PhysicalOutputEndpoint(
-                deviceUID: "protected-device",
-                channelIndex: 1
-            )
-        )
-        XCTAssertTrue(
-            binding.matchesCurrentState(
-                routing: routing,
-                bassManagement: biAmpCrossover(),
-                driverProcessing:
-                    protectedDriver(bus: .leftHigh)
-            )
-        )
-
-        var unprotected = SpeakerDriverProcessingConfiguration()
-        unprotected.replace(
-            SpeakerDriverBusProcessingConfiguration(
-                bus: .leftHigh,
-                limiterEnabled: false
-            )
-        )
-        XCTAssertThrowsError(
-            try SpeakerMeasurementLabProtectedDriverRoutePlanner()
-                .plan(
-                    targetBus: .leftHigh,
-                    routing: routing,
-                    bassManagement: biAmpCrossover(),
-                    driverProcessing: unprotected,
-                    availableOutputs: outputs,
-                    sampleRate: sampleRate,
-                    selectedOutputUID: "protected-device"
-                )
-        ) {
-            XCTAssertEqual(
-                $0 as?
-                    SpeakerMeasurementLabProtectedDriverRouteError,
-                .targetLimiterRequired
-            )
-        }
-    }
-
-    func testProtectedRouteBindingRejectsMissingOrAmbiguousTargetRoute()
-        throws {
-        let outputs = [
-            AudioOutputDevice(
-                deviceID: 1,
-                uid: "protected-device",
-                name: "Protected Device",
-                nominalSampleRate: sampleRate,
-                availableSampleRateRanges: [
-                    AudioSampleRateRange(
-                        minimum: sampleRate,
-                        maximum: sampleRate
-                    )
-                ],
-                outputChannelCount: 4
-            )
-        ]
-        var missing = sameDeviceRouting()
-        missing.routes[1].bus = .rightHigh
-        XCTAssertThrowsError(
-            try SpeakerMeasurementLabProtectedDriverRoutePlanner()
-                .plan(
-                    targetBus: .leftHigh,
-                    routing: missing,
-                    bassManagement: biAmpCrossover(),
-                    driverProcessing:
-                        protectedDriver(bus: .leftHigh),
-                    availableOutputs: outputs,
-                    sampleRate: sampleRate,
-                    selectedOutputUID: "protected-device"
-                )
-        )
-
-        var ambiguous = sameDeviceRouting()
-        ambiguous.routes.append(
-            SpeakerOutputRoute(
-                name: "Duplicate Left High",
-                bus: .leftHigh,
-                destination: PhysicalOutputEndpoint(
-                    deviceUID: "protected-device",
-                    channelIndex: 2
-                )
-            )
-        )
-        XCTAssertThrowsError(
-            try SpeakerMeasurementLabProtectedDriverRoutePlanner()
-                .plan(
-                    targetBus: .leftHigh,
-                    routing: ambiguous,
-                    bassManagement: biAmpCrossover(),
-                    driverProcessing:
-                        protectedDriver(bus: .leftHigh),
-                    availableOutputs: outputs,
-                    sampleRate: sampleRate,
-                    selectedOutputUID: "protected-device"
-                )
-        ) {
-            XCTAssertEqual(
-                $0 as?
-                    SpeakerMeasurementLabProtectedDriverRouteError,
-                .targetRouteAmbiguous
-            )
-        }
-    }
-
-    func testProtectedAnalysisProgramKeepsOriginalESSAndExtendsOnlyTail()
-        throws {
-        let settings = RoomCorrectionSweepSettings(
-            sampleRate: sampleRate,
-            startFrequencyHz: 100,
-            endFrequencyHz: 10_000,
-            durationSeconds: 0.20,
-            levelDBFS: -30,
-            leadInSeconds: 0.05,
-            tailSeconds: 0.10,
-            fadeSeconds: 0.01
-        )
-        let sourceProgram = try RoomCorrectionSweepGenerator()
-            .makeProgram(settings: settings)
-        let excitation = try
-            SpeakerMeasurementLabProtectedExcitationCompiler()
-                .compile(
-                    monoSamples: sourceProgram.sweepSamples,
-                    sampleRate: sampleRate,
-                    targetBus: .leftHigh,
-                    bassManagement: biAmpCrossover(),
-                    driverProcessing:
-                        protectedDriver(bus: .leftHigh)
-                )
-        let analysis = try excitation.makeAnalysisProgram(
-            from: sourceProgram
-        )
-
-        XCTAssertEqual(
-            analysis.sweepSamples,
-            sourceProgram.sweepSamples
-        )
-        XCTAssertEqual(
-            analysis.inverseFilter,
-            sourceProgram.inverseFilter
-        )
-        XCTAssertEqual(
-            analysis.tailFrames,
-            sourceProgram.tailFrames
-                + excitation.renderedSamples.count
-                - sourceProgram.sweepSamples.count
-        )
-        XCTAssertEqual(
-            analysis.captureFrameCount,
-            sourceProgram.leadInFrames
-                + excitation.renderedSamples.count
-                + sourceProgram.tailFrames
-        )
-    }
-
-    private func sameDeviceRouting()
-        -> MultiOutputRoutingConfiguration {
-        MultiOutputRoutingConfiguration(
-            enabled: true,
-            routes: [
-                SpeakerOutputRoute(
-                    name: "Left Low",
-                    bus: .leftLow,
-                    destination: PhysicalOutputEndpoint(
-                        deviceUID: "protected-device",
-                        channelIndex: 0
-                    )
-                ),
-                SpeakerOutputRoute(
-                    name: "Left High",
-                    bus: .leftHigh,
-                    destination: PhysicalOutputEndpoint(
-                        deviceUID: "protected-device",
-                        channelIndex: 1
-                    )
-                ),
-            ],
-            synchronizationMode: .automatic,
-            referenceDeviceUID: "protected-device"
-        )
-    }
-
-    private func biAmpCrossover() -> BassManagementConfiguration {
-        var configuration = BassManagementConfiguration()
-        configuration.enabled = true
-        configuration.frequencyHz = 1_000
-        configuration.topology = .linkwitzRiley24
-        configuration.physicalOutputMode = .biAmp
-        return configuration
-    }
-
-    private func protectedDriver(
-        bus: SpeakerOutputBus
-    ) -> SpeakerDriverProcessingConfiguration {
-        var configuration = SpeakerDriverProcessingConfiguration()
-        configuration.replace(
-            SpeakerDriverBusProcessingConfiguration(
-                bus: bus,
-                enabled: true,
-                trimDB: 0,
-                polarityInverted: false,
-                delayMilliseconds: 2,
-                limiterEnabled: true,
-                limiterThresholdDBFS: -30
-            )
-        )
-        return configuration
-    }
-
-    private func tone(
-        frequencyHz: Double,
-        amplitude: Float,
-        frameCount: Int = 4_800
-    ) -> [Float] {
-        (0..<frameCount).map { index in
-            amplitude * Float(
-                sin(
-                    2 * Double.pi * frequencyHz
-                        * Double(index) / sampleRate
-                )
-            )
-        }
-    }
-
-    private func rms(_ samples: [Float]) -> Double {
-        guard !samples.isEmpty else { return 0 }
-        return sqrt(
-            samples.reduce(0.0) {
-                $0 + Double($1 * $1)
-            } / Double(samples.count)
-        )
+    static func routing() -> SpeakerRoutingConfiguration {
+        SpeakerRoutingConfiguration(speakers: [
+            RoutedSpeaker(
+                id: speakerID, name: "Left", source: .program(0),
+                ways: [lowWay(), highWay()])
+        ])
     }
 }
 
-
-// PR111 Slice 1: original, measurement-only, cut-only driver optimizer.
 final class ProtectedDriverPEQRecommendationTests: XCTestCase {
     private let systemID = UUID(uuidString:
         "11100000-0000-0000-0000-000000000001")!
@@ -534,49 +50,15 @@ final class ProtectedDriverPEQRecommendationTests: XCTestCase {
     private let analyzer = ProtectedDriverPEQRecommendationAnalyzer()
 
     private func provenance(
-        bus: SpeakerOutputBus = .leftHigh,
-        limiter: Bool = true,
-        activeCrossover: Bool = true
-    ) -> SpeakerMeasurementLabProtectedDriverCaptureProvenance {
-        var bass = BassManagementConfiguration()
-        bass.enabled = activeCrossover
-        bass.frequencyHz = 1_000
-        bass.physicalOutputMode = .biAmp
-        let route = MultiOutputRoutingConfiguration(
-            enabled: true,
-            routes: [
-                SpeakerOutputRoute(
-                    id: UUID(uuidString:
-                        "11100000-0000-0000-0000-000000000010")!,
-                    name: "Left Low", bus: .leftLow,
-                    destination: PhysicalOutputEndpoint(
-                        deviceUID: "PR111 Device", channelIndex: 0
-                    )
-                ),
-                SpeakerOutputRoute(
-                    id: UUID(uuidString:
-                        "11100000-0000-0000-0000-000000000011")!,
-                    name: "Left High", bus: .leftHigh,
-                    destination: PhysicalOutputEndpoint(
-                        deviceUID: "PR111 Device", channelIndex: 1
-                    )
-                )
-            ],
-            referenceDeviceUID: "PR111 Device"
-        )
-        return SpeakerMeasurementLabProtectedDriverCaptureProvenance(
-            targetBus: bus,
-            physicalDestination: PhysicalOutputEndpoint(
-                deviceUID: "PR111 Device",
-                channelIndex: bus == .leftLow ? 0 : 1
-            ),
-            routingConfiguration: route,
-            bassManagementConfiguration: bass,
-            targetDriverConfiguration:
-                SpeakerDriverBusProcessingConfiguration(
-                    bus: bus, limiterEnabled: limiter,
-                    limiterThresholdDBFS: -30
-                ),
+        way: RoutedWay
+    ) -> SpeakerMeasurementLabRoutedWayCaptureProvenance {
+        let band = way.protectedPassband(sampleRate: 48_000)
+        return SpeakerMeasurementLabRoutedWayCaptureProvenance(
+            way: way,
+            speakerID: ProtectedWayFixtures.speakerID,
+            physicalDestination: way.endpoint,
+            passbandLowHz: band?.lowerBound ?? 100,
+            passbandHighHz: band?.upperBound ?? 1_000,
             inputPeakDBFS: -30,
             renderedPeakDBFS: -32,
             sourceFrameCount: 4_800,
@@ -590,27 +72,28 @@ final class ProtectedDriverPEQRecommendationTests: XCTestCase {
         repeats: Int = 3,
         limiter: Bool = true,
         crossover: Bool = true,
-        protectedBus: SpeakerOutputBus = .leftHigh
+        fullRange: Bool = false
     ) -> (SpeakerMeasurementLabSession, UUID) {
+        var way = ProtectedWayFixtures.highWay()
+        if !limiter { way.limiter = nil }
+        if !crossover || fullRange { way.highPass = nil }
+        if fullRange { way.lowPass = nil }
         let labProtocol = SpeakerMeasurementLabProtocol(
             name: "PR111 Protected High",
             request: SpeakerMeasurementLabRequest(
                 mode: .protectedDriverNearField,
-                target: .protectedDriverBus(protectedBus),
+                target: .protectedRoutedWay(way.id),
                 geometry: SpeakerMeasurementLabGeometry(
                     distanceMeters: 0.05
                 )
             ),
-            excitationLevelDBFS: -30
+            excitationLevelDBFS: -30,
+            driverCaptureSource: .speaker(.frontLeft)
         )
         let grid = (0..<100).map { i in
             400.0 * pow(35, Double(i) / 99)
         }
-        let receipt = provenance(
-            bus: protectedBus,
-            limiter: limiter,
-            activeCrossover: crossover
-        )
+        let receipt = provenance(way: way)
         var captures: [SpeakerMeasurementLabCapture] = []
         for repeatIndex in 0..<repeats {
             let magnitudes = grid.map { hz in
@@ -652,7 +135,7 @@ final class ProtectedDriverPEQRecommendationTests: XCTestCase {
                     excitationLevelDBFS: -30,
                     sampleRate: 48_000,
                     source: .speaker(.frontLeft),
-                    protectedDriverProvenance: receipt,
+                    routedWayProvenance: receipt,
                     impulseResponse: [0.0, 0.3, 1.0, 0.2],
                     transferFunction: response,
                     quality: quality
@@ -677,7 +160,7 @@ final class ProtectedDriverPEQRecommendationTests: XCTestCase {
         let advice = try analyzer.recommend(
             session: session, protocolID: protocolID
         )
-        XCTAssertEqual(advice.targetBus, .leftHigh)
+        XCTAssertEqual(advice.wayID, ProtectedWayFixtures.highID)
         XCTAssertEqual(advice.repeatedCaptureIDs.count, 3)
         XCTAssertFalse(advice.cuts.isEmpty)
         XCTAssertLessThanOrEqual(advice.cuts.count, 3)
@@ -731,7 +214,7 @@ final class ProtectedDriverPEQRecommendationTests: XCTestCase {
         XCTAssertThrowsError(try analyzer.recommend(
             session: session, protocolID: protocolID
         ))
-        (session, protocolID) = fixture(protectedBus: .leftFullRange)
+        (session, protocolID) = fixture(fullRange: true)
         XCTAssertThrowsError(try analyzer.recommend(
             session: session, protocolID: protocolID
         ))
@@ -767,7 +250,7 @@ final class ProtectedDriverPEQRecommendationTests: XCTestCase {
             $0.kind == .protectedDriverOptimization
         })
         XCTAssertTrue(summary.available)
-        XCTAssertTrue(summary.title.contains("Left High"))
+        XCTAssertTrue(summary.title.contains("Protected High"))
         XCTAssertEqual(summary.metrics.first {
             $0.name == "Driver"
         }?.value, "Left High")
@@ -855,29 +338,31 @@ final class ProtectedDriverPEQRecommendationTests: XCTestCase {
             name: "PR111 Left Low timing",
             request: SpeakerMeasurementLabRequest(
                 mode: .protectedDriverNearField,
-                target: .protectedDriverBus(.leftLow),
+                target: .protectedRoutedWay(ProtectedWayFixtures.lowID),
                 geometry: SpeakerMeasurementLabGeometry(
                     distanceMeters: 0.05
                 )
             ),
-            excitationLevelDBFS: -30
+            excitationLevelDBFS: -30,
+            driverCaptureSource: .speaker(.frontLeft)
         )
         let highProtocol = SpeakerMeasurementLabProtocol(
             name: "PR111 Left High timing",
             request: SpeakerMeasurementLabRequest(
                 mode: .protectedDriverNearField,
-                target: .protectedDriverBus(.leftHigh),
+                target: .protectedRoutedWay(ProtectedWayFixtures.highID),
                 geometry: SpeakerMeasurementLabGeometry(
                     distanceMeters: 0.05
                 )
             ),
-            excitationLevelDBFS: -30
+            excitationLevelDBFS: -30,
+            driverCaptureSource: .speaker(.frontLeft)
         )
         let grid = (0..<120).map { i in
             200.0 * pow(50.0, Double(i) / 119)
         }
-        let lowReceipt = provenance(bus: .leftLow)
-        let highReceipt = provenance(bus: .leftHigh)
+        let lowReceipt = provenance(way: ProtectedWayFixtures.lowWay())
+        let highReceipt = provenance(way: ProtectedWayFixtures.highWay())
         var captures: [SpeakerMeasurementLabCapture] = []
         for (labProtocol, receipt, arrival, phase) in [
             (
@@ -950,7 +435,7 @@ final class ProtectedDriverPEQRecommendationTests: XCTestCase {
                         excitationLevelDBFS: -30,
                         sampleRate: 48_000,
                         source: .speaker(.frontLeft),
-                        protectedDriverProvenance: receipt,
+                        routedWayProvenance: receipt,
                         sharedClockReference: shared,
                         impulseResponse: [0, 0.1, 1, 0.2, 0],
                         transferFunction:
@@ -1015,11 +500,11 @@ final class ProtectedDriverPEQRecommendationTests: XCTestCase {
                 firstProtocolID: lowID,
                 secondProtocolID: highID
             )
-        XCTAssertEqual(result.firstBus, .leftLow)
-        XCTAssertEqual(result.secondBus, .leftHigh)
+        XCTAssertEqual(result.firstWayID, ProtectedWayFixtures.lowID)
+        XCTAssertEqual(result.secondWayID, ProtectedWayFixtures.highID)
         XCTAssertEqual(result.crossoverFrequencyHz, 1_000, accuracy: 0.001)
         XCTAssertEqual(result.relativeArrivalMilliseconds, 0.8, accuracy: 0.03)
-        XCTAssertEqual(result.delayBus, .leftLow)
+        XCTAssertEqual(result.delayWayID, ProtectedWayFixtures.lowID)
         XCTAssertEqual(
             try XCTUnwrap(result.additionalDelayMilliseconds),
             0.8,
@@ -1090,7 +575,7 @@ final class ProtectedDriverPEQRecommendationTests: XCTestCase {
                 firstProtocolID: lowID,
                 secondProtocolID: highID
             )
-        XCTAssertNil(result.delayBus)
+        XCTAssertNil(result.delayWayID)
         XCTAssertNil(result.additionalDelayMilliseconds)
         XCTAssertFalse(result.canDeploy)
     }
@@ -1098,7 +583,7 @@ final class ProtectedDriverPEQRecommendationTests: XCTestCase {
     func testCrossSpeakerOrUnprotectedPairCannotProduceTimingAdvice() throws {
         var (session, lowID, highID) = timingFixture()
         session.protocols[1].request.target =
-            .protectedDriverBus(.rightHigh)
+            .protectedRoutedWay(UUID())
         XCTAssertThrowsError(
             try ProtectedDriverTimingRecommendationAnalyzer()
                 .recommend(
@@ -1108,8 +593,8 @@ final class ProtectedDriverPEQRecommendationTests: XCTestCase {
                 )
         )
         (session, lowID, highID) = timingFixture()
-        session.captures[3].protectedDriverProvenance?
-            .routingConfiguration.referenceDeviceUID = "other-device"
+        session.captures[3].routedWayProvenance?.physicalDestination
+            .deviceUID = "other-device"
         XCTAssertThrowsError(
             try ProtectedDriverTimingRecommendationAnalyzer()
                 .recommend(
@@ -1185,15 +670,14 @@ final class ProtectedDriverPEQRecommendationTests: XCTestCase {
         XCTAssertFalse(report.canDeploy)
     }
 
-    func testTriAmpCannotTreatLowAndHighAsAdjacentTimingPair() throws {
+    func testNonAdjacentWaysCannotBecomeATimingPair() throws {
+        // A high way whose high-pass sits at 4 kHz does not meet the low way's 1 kHz low-pass.
         var (session, lowID, highID) = timingFixture()
-        for index in session.captures.indices {
-            session.captures[index]
-                .protectedDriverProvenance?
-                .bassManagementConfiguration.physicalOutputMode = .triAmp
-            session.captures[index]
-                .protectedDriverProvenance?
-                .bassManagementConfiguration.upperFrequencyHz = 4_000
+        for index in session.captures.indices
+        where session.captures[index].routedWayProvenance?.way.id
+            == ProtectedWayFixtures.highID {
+            session.captures[index].routedWayProvenance?.way
+                .highPass?.cornerHz = 4_000
         }
         XCTAssertThrowsError(
             try ProtectedDriverTimingRecommendationAnalyzer()
@@ -1205,6 +689,22 @@ final class ProtectedDriverPEQRecommendationTests: XCTestCase {
         )
     }
 
+    func testPairsOnDifferentSpeakersCannotBecomeATimingPair() throws {
+        var (session, lowID, highID) = timingFixture()
+        for index in session.captures.indices
+        where session.captures[index].routedWayProvenance?.way.id
+            == ProtectedWayFixtures.highID {
+            session.captures[index].routedWayProvenance?.speakerID = UUID()
+        }
+        XCTAssertThrowsError(
+            try ProtectedDriverTimingRecommendationAnalyzer()
+                .recommend(
+                    session: session,
+                    firstProtocolID: lowID,
+                    secondProtocolID: highID
+                )
+        )
+    }
 
     func testCrossoverSumModelSelectsBoundedDelayWhenItReducesCancellation()
         throws {
@@ -1217,8 +717,8 @@ final class ProtectedDriverPEQRecommendationTests: XCTestCase {
                 firstProtocolID: lowID,
                 secondProtocolID: highID
             )
-        XCTAssertEqual(result.firstBus, .leftLow)
-        XCTAssertEqual(result.secondBus, .leftHigh)
+        XCTAssertEqual(result.firstWayID, ProtectedWayFixtures.lowID)
+        XCTAssertEqual(result.secondWayID, ProtectedWayFixtures.highID)
         XCTAssertEqual(result.bestHypothesis, .addBoundedDelay)
         XCTAssertEqual(
             try XCTUnwrap(result.modeledAdditionalDelayMilliseconds),
@@ -1376,25 +876,119 @@ final class ProtectedDriverPEQRecommendationTests: XCTestCase {
         XCTAssertFalse(report.canDeploy)
     }
 
+    // MARK: - Goldens at the standard rates
+
+    private func at(
+        _ rate: Double, _ s: SpeakerMeasurementLabSession
+    ) -> SpeakerMeasurementLabSession {
+        var s = s
+        s.sampleRate = rate
+        for i in s.captures.indices {
+            s.captures[i].sampleRate = rate
+            s.captures[i].sharedClockReference?.sampleRate = rate
+        }
+        return s
+    }
+
+    /// Values recorded from the bus analysers before they were ported (E8 A2c); the way analysers must reproduce them
+    /// at every standard rate: 0.01 dB, 0.1 degrees, one sample.
+    func testWayAnalysersMatchLegacyGoldensAtStandardRates() throws {
+        let rates: [Double] = [
+            44_100, 48_000, 88_200, 96_000, 176_400, 192_000, 352_800,
+            384_000,
+        ]
+        for rate in rates {
+            let oneSampleMs = 1_000 / rate
+            let (peqSession, peqID) = fixture(peakDB: 5)
+            let peq = try analyzer.recommend(
+                session: at(rate, peqSession), protocolID: peqID)
+            XCTAssertEqual(peq.passbandLowHz, 1_500, accuracy: 0.01, "\(rate)")
+            XCTAssertEqual(peq.passbandHighHz, 14_000, accuracy: 0.01)
+            XCTAssertEqual(peq.cuts.count, 1, "\(rate)")
+            let cut = try XCTUnwrap(peq.cuts.first)
+            XCTAssertEqual(cut.frequencyHz, 3_983.3218, accuracy: 0.5)
+            XCTAssertEqual(cut.gainDB, -2.3187, accuracy: 0.01, "\(rate)")
+            XCTAssertEqual(cut.q, 1.4, accuracy: 0.001)
+
+            // (arrival ms, residual phase, golden relative phase, delay, deficit, candidate, hypothesis, inverts)
+            let cases: [(Double, Double, Double, Double, Double, Double,
+                         ProtectedDriverTimingPolarityHypothesis,
+                         ProtectedDriverCrossoverSumHypothesis, Bool)] = [
+                (0.8, 0.0, 0.0, 0.8, 3.0607, 0.0,
+                 .retainCurrent, .addBoundedDelay, false),
+                (0.2, Double.pi, Double.pi, 0.2, 4.6453, 0.0,
+                 .invertComparedDriver, .addDelayAndInvertComparedDriver,
+                 true),
+            ]
+            for c in cases {
+                let (ts, lo, hi) = timingFixture(
+                    relativeArrivalMilliseconds: c.0,
+                    secondResidualPhaseRadians: c.1)
+                let session = at(rate, ts)
+                let t = try ProtectedDriverTimingRecommendationAnalyzer()
+                    .recommend(
+                        session: session, firstProtocolID: lo,
+                        secondProtocolID: hi)
+                XCTAssertEqual(t.crossoverFrequencyHz, 1_000, accuracy: 0.001)
+                XCTAssertEqual(
+                    t.relativeArrivalMilliseconds, c.0,
+                    accuracy: oneSampleMs, "\(rate)")
+                let phaseError = abs(
+                    abs(t.wrappedRelativePhaseAtCrossoverRadians) - c.2)
+                XCTAssertLessThan(phaseError * 180 / .pi, 0.1, "\(rate)")
+                XCTAssertEqual(t.delayWayID, ProtectedWayFixtures.lowID)
+                XCTAssertEqual(
+                    try XCTUnwrap(t.additionalDelayMilliseconds), c.3,
+                    accuracy: oneSampleMs)
+                XCTAssertEqual(t.polarityHypothesis, c.6)
+
+                let m = try ProtectedDriverCrossoverSumModelAnalyzer()
+                    .analyze(
+                        session: session, firstProtocolID: lo,
+                        secondProtocolID: hi)
+                XCTAssertEqual(
+                    m.modeledDeficitReductionDB, c.4, accuracy: 0.01,
+                    "\(rate)")
+                XCTAssertEqual(m.bestHypothesis, c.7)
+                XCTAssertEqual(m.modeledInvertsComparedDriver, c.8)
+                XCTAssertEqual(
+                    try XCTUnwrap(m.modeledAdditionalDelayMilliseconds),
+                    c.3, accuracy: oneSampleMs)
+            }
+        }
+    }
+
+    // MARK: - Commissioning on ways
+
+    private func legacyFields() -> (
+        BassManagementConfiguration, MultiOutputRoutingConfiguration
+    ) {
+        var bass = BassManagementConfiguration()
+        bass.enabled = true
+        bass.frequencyHz = 1_000
+        bass.physicalOutputMode = .biAmp
+        let routes = MultiOutputRoutingConfiguration(
+            enabled: true,
+            routes: [
+                SpeakerOutputRoute(
+                    id: ProtectedWayFixtures.lowID, name: "Left Low",
+                    bus: .leftLow,
+                    destination: PhysicalOutputEndpoint(
+                        deviceUID: "PR111 Device", channelIndex: 0)),
+                SpeakerOutputRoute(
+                    id: ProtectedWayFixtures.highID, name: "Left High",
+                    bus: .leftHigh,
+                    destination: PhysicalOutputEndpoint(
+                        deviceUID: "PR111 Device", channelIndex: 1)),
+            ],
+            referenceDeviceUID: "PR111 Device")
+        return (bass, routes)
+    }
 
     private func commissioningProfile(
-        normalizing session: inout SpeakerMeasurementLabSession
-    ) throws -> PlaybackSystemProfile {
-        let provenances = session.captures.compactMap(
-            \.protectedDriverProvenance
-        )
-        let first = try XCTUnwrap(provenances.first)
-        var unique: [SpeakerOutputBus:
-            SpeakerDriverBusProcessingConfiguration] = [:]
-        for provenance in provenances {
-            unique[provenance.targetBus] =
-                provenance.targetDriverConfiguration
-        }
-        let processing = SpeakerDriverProcessingConfiguration(
-            buses: unique.values.sorted {
-                $0.bus.rawValue < $1.bus.rawValue
-            }
-        )
+        normalizing session: inout SpeakerMeasurementLabSession,
+        withRouting: Bool = true
+    ) -> PlaybackSystemProfile {
         let output = OutputDeviceProfileConfiguration(
             enabled: true,
             programLayout: .stereo,
@@ -1402,513 +996,245 @@ final class ProtectedDriverPEQRecommendationTests: XCTestCase {
                 SemanticSpeakerOutputAssignment(
                     role: .frontLeft,
                     destination: PhysicalOutputEndpoint(
-                        deviceUID: "PR111 Device",
-                        channelIndex: 0
-                    )
-                ),
+                        deviceUID: "PR111 Device", channelIndex: 0)),
                 SemanticSpeakerOutputAssignment(
                     role: .frontRight,
                     destination: PhysicalOutputEndpoint(
-                        deviceUID: "PR111 Device",
-                        channelIndex: 1
-                    )
-                ),
+                        deviceUID: "PR111 Device", channelIndex: 1)),
             ],
-            referenceDeviceUID: "PR111 Device"
-        )
+            referenceDeviceUID: "PR111 Device")
         let signature = output.multichannelCalibrationRoutingSignature
         session.routingSignature = signature
         for index in session.captures.indices {
             session.captures[index].routingSignature = signature
         }
+        let (bass, routes) = legacyFields()
         return PlaybackSystemProfile(
             id: systemID,
             name: "PR111 Commissioning",
             state: PlaybackSystemState(
-                bassManagement: first.bassManagementConfiguration,
-                outputRouting: first.routingConfiguration,
+                bassManagement: bass,
+                outputRouting: routes,
                 outputDeviceProfile: output,
-                speakerDriverProcessing: processing
-            )
-        )
+                speakerRouting: withRouting
+                    ? ProtectedWayFixtures.routing() : nil))
     }
 
-    func testCommissioningDraftCompilesCutPreviewButCannotApply() throws {
-        var (session, _) = fixture(peakDB: 5)
-        let profile = try commissioningProfile(
-            normalizing: &session
-        )
-        let baseline = try XCTUnwrap(
-            profile.state.speakerDriverProcessing
-        )
-        let draft = try ProtectedDriverCommissioningPlanner()
-            .draft(
-                profile: profile,
-                session: session,
-                createdAt: Date(timeIntervalSince1970: 200)
-            )
-        XCTAssertEqual(draft.playbackSystemID, profile.id)
-        XCTAssertEqual(draft.sessionID, session.id)
-        XCTAssertEqual(
-            draft.rollbackPlaybackSystemState,
-            profile.state
-        )
-        XCTAssertFalse(draft.readyForApproval)
-        XCTAssertFalse(draft.canApply)
-        XCTAssertFalse(draft.canDeploy)
-        XCTAssertTrue(draft.rollbackSnapshotAvailable)
-        XCTAssertTrue(draft.stateDriftCheckRequired)
-        XCTAssertTrue(draft.requiresPhysicalCombinedDriverCapture)
-        XCTAssertFalse(
-            draft.physicalCombinedDriverVerificationComplete
-        )
-        XCTAssertTrue(draft.affectedBuses.contains(.leftHigh))
-
-        let before = baseline.configuration(for: .leftHigh)
-        let after = draft.previewDriverProcessing
-            .configuration(for: .leftHigh)
-        XCTAssertGreaterThan(after.eqBands.count, before.eqBands.count)
-        XCTAssertEqual(after.trimDB, before.trimDB)
-        XCTAssertEqual(
-            after.polarityInverted,
-            before.polarityInverted
-        )
-        XCTAssertEqual(
-            after.delayMilliseconds,
-            before.delayMilliseconds
-        )
-        XCTAssertEqual(
-            after.limiterEnabled,
-            before.limiterEnabled
-        )
-        XCTAssertEqual(
-            after.limiterThresholdDBFS,
-            before.limiterThresholdDBFS
-        )
-        XCTAssertTrue(after.eqBands.suffix(
-            after.eqBands.count - before.eqBands.count
-        ).allSatisfy {
-            $0.type == .peaking
-                && $0.gainDB < 0
-                && $0.gainDB >= -2.5
-                && $0.q <= 1.4
-        })
-    }
-
-    func testCommissioningDraftRetainsModelOnlyTimingReviews() throws {
-        var (session, _, _) = timingFixture(
-            relativeArrivalMilliseconds: 0.8
-        )
-        let profile = try commissioningProfile(
-            normalizing: &session
-        )
-        let draft = try ProtectedDriverCommissioningPlanner()
-            .draft(profile: profile, session: session)
-        XCTAssertFalse(draft.timingReviews.isEmpty)
-        XCTAssertTrue(draft.timingReviews.allSatisfy {
-            !$0.combinedDriverCaptureVerified
-        })
-        XCTAssertFalse(
-            draft.physicalCombinedDriverVerificationComplete
-        )
-        XCTAssertFalse(draft.canApply)
-        XCTAssertTrue(draft.evidenceSummary.contains(
-            "PR112 hardware acceptance"
-        ))
-    }
-
-    func testCommissioningExactStateDriftAndIdentityFailClosed()
+    func testCommissioningChangesOnlyTheTargetWayAndLegacyFieldsStayIdentical()
         throws {
         var (session, _) = fixture(peakDB: 5)
-        let profile = try commissioningProfile(
-            normalizing: &session
-        )
-        let planner = ProtectedDriverCommissioningPlanner()
-        let draft = try planner.draft(
-            profile: profile, session: session
-        )
-        XCTAssertNoThrow(
-            try planner.validateCurrentState(
-                profile, against: draft
-            )
-        )
-        var changed = profile
-        changed.state.outputGainDB = -1
-        XCTAssertThrowsError(
-            try planner.validateCurrentState(
-                changed, against: draft
-            )
-        ) {
-            XCTAssertEqual(
-                $0 as? ProtectedDriverCommissioningError,
-                .currentStateDrift
-            )
-        }
-        changed = profile
-        changed.id = UUID()
-        XCTAssertThrowsError(
-            try planner.validateCurrentState(
-                changed, against: draft
-            )
-        ) {
-            XCTAssertEqual(
-                $0 as? ProtectedDriverCommissioningError,
-                .playbackSystemMismatch
-            )
-        }
-    }
-
-    func testCommissioningRejectsProtectedRouteOrDriverStateDrift()
-        throws {
-        var (session, _) = fixture(peakDB: 5)
-        var profile = try commissioningProfile(
-            normalizing: &session
-        )
-        profile.state.bassManagement.frequencyHz = 1_200
-        XCTAssertThrowsError(
-            try ProtectedDriverCommissioningPlanner()
-                .draft(profile: profile, session: session)
-        ) {
-            XCTAssertEqual(
-                $0 as? ProtectedDriverCommissioningError,
-                .protectedStateDrift
-            )
-        }
-
-        profile = try commissioningProfile(
-            normalizing: &session
-        )
-        profile.state.speakerDriverProcessing?
-            .buses[0].limiterThresholdDBFS = -20
-        XCTAssertThrowsError(
-            try ProtectedDriverCommissioningPlanner()
-                .draft(profile: profile, session: session)
-        )
-    }
-
-    func testCommissioningFailsWhenMeasuredBusHasNoEQCapacity()
-        throws {
-        var (session, _) = fixture(peakDB: 5)
-        var profile = try commissioningProfile(
-            normalizing: &session
-        )
-        var high = try XCTUnwrap(
-            profile.state.speakerDriverProcessing?
-                .configuration(for: .leftHigh)
-        )
-        high.eqBands = (0..<8).map { index in
-            EQBand(
-                enabled: true,
-                type: .peaking,
-                frequencyHz: 2_000 + Double(index) * 100,
-                gainDB: -0.25,
-                q: 1,
-                slope: .db12
-            )
-        }
-        var processing = try XCTUnwrap(
-            profile.state.speakerDriverProcessing
-        )
-        processing.replace(high)
-        profile.state.speakerDriverProcessing = processing
-        for index in session.captures.indices
-        where session.captures[index]
-                .protectedDriverProvenance?.targetBus
-                    == .leftHigh {
-            session.captures[index]
-                .protectedDriverProvenance?
-                .targetDriverConfiguration = high
-        }
-        XCTAssertThrowsError(
-            try ProtectedDriverCommissioningPlanner()
-                .draft(profile: profile, session: session)
-        ) {
-            XCTAssertEqual(
-                $0 as? ProtectedDriverCommissioningError,
-                .insufficientEQCapacity
-            )
-        }
-    }
-
-    func testCommissioningDraftStoreRoundTripAndSchemaGate()
-        throws {
-        var (session, _) = fixture(peakDB: 5)
-        let profile = try commissioningProfile(
-            normalizing: &session
-        )
-        let draft = try ProtectedDriverCommissioningPlanner()
-            .draft(
-                profile: profile,
-                session: session,
-                createdAt: Date(timeIntervalSince1970: 1_700_000_000.123)
-            )
-        let root = FileManager.default.temporaryDirectory
-            .appendingPathComponent(
-                "PR111-Draft-\(UUID().uuidString)"
-            )
-        defer { try? FileManager.default.removeItem(at: root) }
-        let store = ProtectedDriverCommissioningDraftStore(
-            rootDirectory: root
-        )
-        try store.save(draft)
-        XCTAssertEqual(
-            try store.load(session.id),
-            draft
-        )
-        var unsupported = draft
-        unsupported.schemaVersion = 99
-        XCTAssertThrowsError(try store.save(unsupported))
-    }
-
-
-    private func commissioningFixture(
-        addHighDriverPeak: Bool = true
-    ) throws -> (
-        SpeakerMeasurementLabSession,
-        PlaybackSystemProfile
-    ) {
-        var (session, _, highID) = timingFixture(
-            relativeArrivalMilliseconds: 0.8
-        )
-        if addHighDriverPeak {
-            for index in session.captures.indices
-            where session.captures[index].protocolID == highID {
-                let grid = session.captures[index]
-                    .transferFunction.frequenciesHz
-                session.captures[index]
-                    .transferFunction.magnitudeDB = zip(
-                        grid,
-                        session.captures[index]
-                            .transferFunction.magnitudeDB
-                    ).map { frequency, existing in
-                        existing + 5.0 * exp(
-                            -0.5
-                                * pow(
-                                    log2(frequency / 4_000) / 0.23,
-                                    2
-                                )
-                        )
-                    }
-            }
-        }
-
-        let provenances = session.captures.compactMap {
-            $0.protectedDriverProvenance
-        }
-        let bass = try XCTUnwrap(
-            provenances.first?.bassManagementConfiguration
-        )
-        let routing = try XCTUnwrap(
-            provenances.first?.routingConfiguration
-        )
-        var byBus: [SpeakerOutputBus:
-            SpeakerDriverBusProcessingConfiguration] = [:]
-        for provenance in provenances {
-            byBus[provenance.targetBus] =
-                provenance.targetDriverConfiguration
-        }
-        let driverProcessing = SpeakerDriverProcessingConfiguration(
-            buses: byBus.values.sorted {
-                $0.bus.rawValue < $1.bus.rawValue
-            }
-        )
-        let outputProfile = OutputDeviceProfileConfiguration(
-            enabled: true,
-            programLayout: .stereo,
-            speakerAssignments: [
-                SemanticSpeakerOutputAssignment(
-                    role: .frontLeft,
-                    destination: PhysicalOutputEndpoint(
-                        deviceUID: "PR111 Device",
-                        channelIndex: 2
-                    )
-                ),
-                SemanticSpeakerOutputAssignment(
-                    role: .frontRight,
-                    destination: PhysicalOutputEndpoint(
-                        deviceUID: "PR111 Device",
-                        channelIndex: 3
-                    )
-                ),
-            ],
-            synchronizationMode: .automatic,
-            referenceDeviceUID: "PR111 Device"
-        )
-        let signature =
-            outputProfile.multichannelCalibrationRoutingSignature
-        XCTAssertFalse(signature.isEmpty)
-        session.routingSignature = signature
-        for index in session.captures.indices {
-            session.captures[index].routingSignature = signature
-        }
-        try session.validateStructure()
-
-        let state = PlaybackSystemState(
-            bassManagement: bass,
-            outputRouting: routing,
-            outputDeviceProfile: outputProfile,
-            speakerDriverProcessing: driverProcessing
-        )
-        let profile = PlaybackSystemProfile(
-            id: systemID,
-            name: "PR111 Active Prototype",
-            state: state
-        )
-        return (session, profile)
-    }
-
-    func testCommissioningDraftAddsOnlyBoundedCutPEQAndKeepsRollback()
-        throws {
-        let (session, profile) = try commissioningFixture()
-        let draft = try ProtectedDriverCommissioningPlanner()
-            .draft(
-                profile: profile,
-                session: session,
-                createdAt: Date(timeIntervalSince1970: 1_720_000_000)
-            )
-        XCTAssertEqual(draft.playbackSystemID, profile.id)
-        XCTAssertEqual(draft.sessionID, session.id)
+        let profile = commissioningProfile(normalizing: &session)
+        let draft = try ProtectedDriverCommissioningPlanner().draft(
+            profile: profile, session: session,
+            createdAt: Date(timeIntervalSince1970: 200))
+        XCTAssertEqual(draft.affectedWayIDs, [ProtectedWayFixtures.highID])
         XCTAssertEqual(draft.rollbackPlaybackSystemState, profile.state)
-        XCTAssertTrue(draft.rollbackSnapshotAvailable)
-        XCTAssertTrue(draft.approvalRequired)
-        XCTAssertFalse(draft.readyForApproval)
         XCTAssertFalse(draft.canApply)
         XCTAssertFalse(draft.canDeploy)
-        XCTAssertTrue(draft.stateDriftCheckRequired)
-        XCTAssertTrue(draft.requiresPhysicalCombinedDriverCapture)
+        XCTAssertFalse(draft.readyForApproval)
         XCTAssertFalse(draft.physicalCombinedDriverVerificationComplete)
-        XCTAssertFalse(draft.timingReviews.isEmpty)
+
+        let before = ProtectedWayFixtures.routing().speakers[0].ways
+        let after = draft.previewRouting.speakers[0].ways
+        XCTAssertEqual(after[0], before[0])
+        XCTAssertGreaterThan(after[1].eq.count, before[1].eq.count)
+        var stripped = after[1]
+        stripped.eq = before[1].eq
+        XCTAssertEqual(stripped, before[1])
+        XCTAssertTrue(after[1].eq.allSatisfy {
+            $0.type == 0 && $0.gainDB < 0 && $0.gainDB >= -2.5 && $0.q <= 1.4
+        })
+
+        // The legacy bus fields in the rollback state are byte-identical to the profile's.
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        XCTAssertEqual(
+            try encoder.encode(draft.rollbackPlaybackSystemState.outputRouting),
+            try encoder.encode(profile.state.outputRouting))
+        XCTAssertEqual(
+            try encoder.encode(draft.rollbackPlaybackSystemState.bassManagement),
+            try encoder.encode(profile.state.bassManagement))
+    }
+
+    func testCommissioningRetainsModelOnlyTimingReviewsForAdjacentWays()
+        throws {
+        var (session, _, _) = timingFixture(relativeArrivalMilliseconds: 0.8)
+        let profile = commissioningProfile(normalizing: &session)
+        let draft = try ProtectedDriverCommissioningPlanner().draft(
+            profile: profile, session: session)
+        let review = try XCTUnwrap(draft.timingReviews.first)
+        XCTAssertEqual(review.firstWayID, ProtectedWayFixtures.lowID)
+        XCTAssertEqual(review.secondWayID, ProtectedWayFixtures.highID)
+        XCTAssertEqual(review.crossoverFrequencyHz, 1_000, accuracy: 0.001)
         XCTAssertTrue(draft.timingReviews.allSatisfy {
             !$0.combinedDriverCaptureVerified
         })
-
-        let before = try XCTUnwrap(
-            profile.state.speakerDriverProcessing
-        ).configuration(for: .leftHigh)
-        let after = draft.previewDriverProcessing
-            .configuration(for: .leftHigh)
-        XCTAssertGreaterThan(after.eqBands.count, before.eqBands.count)
-        XCTAssertEqual(after.trimDB, before.trimDB)
-        XCTAssertEqual(after.delayMilliseconds, before.delayMilliseconds)
-        XCTAssertEqual(after.polarityInverted, before.polarityInverted)
-        XCTAssertEqual(after.limiterEnabled, before.limiterEnabled)
-        XCTAssertEqual(
-            after.limiterThresholdDBFS,
-            before.limiterThresholdDBFS
-        )
-        let added = after.eqBands.dropFirst(before.eqBands.count)
-        XCTAssertTrue(added.allSatisfy {
-            $0.type == .peaking
-                && $0.gainDB < 0
-                && $0.gainDB >= -2.5
-                && $0.q <= 1.4
-        })
-        XCTAssertTrue(draft.affectedBuses.contains(.leftHigh))
-        XCTAssertNoThrow(try draft.validated())
+        XCTAssertTrue(draft.evidenceSummary.contains("PR112 hardware acceptance"))
     }
 
-    func testCommissioningDraftDetectsCurrentPlaybackSystemDrift() throws {
-        let (session, profile) = try commissioningFixture()
+    func testCommissioningDriftAndIdentityFailClosed() throws {
+        var (session, _) = fixture(peakDB: 5)
+        let profile = commissioningProfile(normalizing: &session)
         let planner = ProtectedDriverCommissioningPlanner()
-        let draft = try planner.draft(
-            profile: profile, session: session
-        )
-        XCTAssertNoThrow(
-            try planner.validateCurrentState(profile, against: draft)
-        )
-        var changed = profile
-        changed.state.outputGainDB = -1
+        let draft = try planner.draft(profile: profile, session: session)
+        XCTAssertNoThrow(try planner.validateCurrentState(profile, against: draft))
+
+        var drifted = profile
+        drifted.state.speakerRouting?.speakers[0].ways[1].trimDB = -3
         XCTAssertThrowsError(
-            try planner.validateCurrentState(changed, against: draft)
-        ) {
-            XCTAssertEqual(
-                $0 as? ProtectedDriverCommissioningError,
-                .currentStateDrift
-            )
-        }
+            try planner.validateCurrentState(drifted, against: draft)
+        ) { XCTAssertEqual($0 as? ProtectedDriverCommissioningError, .currentStateDrift) }
+        // The measured way changed after the capture: no draft.
+        XCTAssertThrowsError(
+            try planner.draft(profile: drifted, session: session)
+        ) { XCTAssertEqual($0 as? ProtectedDriverCommissioningError, .protectedStateDrift) }
+
+        var other = profile
+        other.id = UUID()
+        XCTAssertThrowsError(try planner.draft(profile: other, session: session))
     }
 
-    func testCommissioningPlannerRejectsPostMeasurementProtectionDrift()
-        throws {
-        let (session, profile) = try commissioningFixture()
-        var changed = profile
-        changed.state.bassManagement.frequencyHz += 100
-        XCTAssertThrowsError(
-            try ProtectedDriverCommissioningPlanner()
-                .draft(profile: changed, session: session)
-        ) {
-            XCTAssertEqual(
-                $0 as? ProtectedDriverCommissioningError,
-                .protectedStateDrift
-            )
+    func testCommissioningFailsWhenTheWayHasNoEQCapacity() throws {
+        var (session, _) = fixture(peakDB: 5)
+        var profile = commissioningProfile(normalizing: &session)
+        // Fill the way, then re-measure it as filled so the drift check passes.
+        let full = (0..<Int(N60_PEQ_MAX_SECTIONS)).map {
+            RoutingEQSection(
+                type: 0, frequencyHz: 200 + Double($0) * 50,
+                gainDB: -0.5, q: 1)
         }
+        profile.state.speakerRouting?.speakers[0].ways[1].eq = full
+        for i in session.captures.indices {
+            session.captures[i].routedWayProvenance?.way.eq = full
+        }
+        XCTAssertThrowsError(
+            try ProtectedDriverCommissioningPlanner().draft(
+                profile: profile, session: session)
+        ) { XCTAssertEqual($0 as? ProtectedDriverCommissioningError, .insufficientEQCapacity) }
     }
 
-    func testCommissioningDraftPersistenceRoundTripAndTamperBlock()
-        throws {
-        let (session, profile) = try commissioningFixture()
-        let draft = try ProtectedDriverCommissioningPlanner()
-            .draft(
-                profile: profile,
-                session: session,
-                createdAt: Date(timeIntervalSince1970: 1_700_000_000.456)
-            )
+    func testCommissioningDraftStoreRoundTripAndTamperBlock() throws {
+        var (session, _) = fixture(peakDB: 5)
+        let profile = commissioningProfile(normalizing: &session)
+        let draft = try ProtectedDriverCommissioningPlanner().draft(
+            profile: profile, session: session,
+            createdAt: Date(timeIntervalSince1970: 200))
         let root = FileManager.default.temporaryDirectory
-            .appendingPathComponent(
-                "PR111-Drafts-\(UUID().uuidString)",
-                isDirectory: true
-            )
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
         defer { try? FileManager.default.removeItem(at: root) }
-        let store = ProtectedDriverCommissioningDraftStore(
-            rootDirectory: root
-        )
+        let store = ProtectedDriverCommissioningDraftStore(rootDirectory: root)
         try store.save(draft)
         XCTAssertEqual(try store.load(session.id), draft)
 
-        var unsafe = draft
-        var high = unsafe.previewDriverProcessing
-            .configuration(for: .leftHigh)
-        high.delayMilliseconds += 0.25
-        unsafe.previewDriverProcessing.replace(high)
-        XCTAssertThrowsError(try unsafe.validated()) {
-            XCTAssertEqual(
-                $0 as? ProtectedDriverCommissioningError,
-                .invalidPreview
-            )
-        }
-        XCTAssertThrowsError(try store.save(unsafe))
-        XCTAssertEqual(try store.load(session.id), draft)
+        var hidden = draft
+        hidden.affectedWayIDs = []
+        XCTAssertThrowsError(try store.save(hidden))
+        var applying = draft
+        applying.schemaVersion = 99
+        XCTAssertThrowsError(try applying.validated())
+        var extra = draft
+        extra.previewRouting.speakers[0].ways[0].trimDB = 3
+        XCTAssertThrowsError(try extra.validated())
     }
 
-    func testCommissioningDraftCannotHideAddedCutsFromAffectedBusList()
+    // MARK: - Drafts saved against the legacy buses
+
+    private func writeLegacyDraft(
+        _ draft: ProtectedDriverLegacyCommissioningDraft,
+        into store: ProtectedDriverCommissioningDraftStore
+    ) throws {
+        try FileManager.default.createDirectory(
+            at: store.rootDirectory, withIntermediateDirectories: true)
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .millisecondsSince1970
+        try encoder.encode(draft).write(to: store.url(for: draft.sessionID))
+    }
+
+    func testBusKeyedDraftsMapToTheirWaysAndUnmappableOnesAreKeptNotApplicable()
         throws {
-        let (session, profile) = try commissioningFixture()
-        var draft = try ProtectedDriverCommissioningPlanner()
-            .draft(profile: profile, session: session)
-        XCTAssertFalse(draft.affectedBuses.isEmpty)
-        draft.affectedBuses = []
-        XCTAssertThrowsError(try draft.validated()) {
-            XCTAssertEqual(
-                $0 as? ProtectedDriverCommissioningError,
-                .invalidPreview
-            )
-        }
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = ProtectedDriverCommissioningDraftStore(rootDirectory: root)
+        let (bass, routes) = legacyFields()
+        let state = PlaybackSystemState(
+            bassManagement: bass, outputRouting: routes)
+
+        let mappable = ProtectedDriverLegacyCommissioningDraft(
+            schemaVersion: 1, id: UUID(),
+            createdAt: Date(timeIntervalSince1970: 100),
+            playbackSystemID: systemID, sessionID: UUID(),
+            rollbackPlaybackSystemState: state,
+            affectedBuses: [.leftHigh, .leftLow])
+        try writeLegacyDraft(mappable, into: store)
+        guard case .legacy(let loaded)? = try store.entry(mappable.sessionID)
+        else { return XCTFail("expected a legacy draft") }
+        XCTAssertEqual(loaded.mappedWayIDs, [
+            ProtectedWayFixtures.highID, ProtectedWayFixtures.lowID,
+        ])
+        XCTAssertTrue(loaded.isApplicable)
+        XCTAssertNil(try store.load(mappable.sessionID))
+
+        // A bus with no enabled route cannot be mapped: the draft is kept, shown as not applicable.
+        let unmappable = ProtectedDriverLegacyCommissioningDraft(
+            schemaVersion: 1, id: UUID(),
+            createdAt: Date(timeIntervalSince1970: 100),
+            playbackSystemID: systemID, sessionID: UUID(),
+            rollbackPlaybackSystemState: state,
+            affectedBuses: [.rightHigh])
+        try writeLegacyDraft(unmappable, into: store)
+        guard case .legacy(let kept)? = try store.entry(unmappable.sessionID)
+        else { return XCTFail("the unmappable draft must be kept") }
+        XCTAssertNil(kept.mappedWayIDs)
+        XCTAssertFalse(kept.isApplicable)
+        XCTAssertTrue(kept.statusText.hasPrefix("Not applicable"))
+        XCTAssertTrue(FileManager.default.fileExists(
+            atPath: store.url(for: unmappable.sessionID).path))
+
+        // Drafts with no routing at all are also not applicable.
+        let bare = ProtectedDriverLegacyCommissioningDraft(
+            schemaVersion: 1, id: UUID(), createdAt: Date(),
+            playbackSystemID: systemID, sessionID: UUID(),
+            rollbackPlaybackSystemState: PlaybackSystemState(),
+            affectedBuses: [.leftHigh])
+        XCTAssertFalse(bare.isApplicable)
     }
 
-    func testCommissioningDraftWithSmoothDriversStaysNoOpAndBlocked()
-        throws {
-        let (session, profile) = try commissioningFixture(
-            addHighDriverPeak: false
-        )
-        let draft = try ProtectedDriverCommissioningPlanner()
-            .draft(profile: profile, session: session)
-        XCTAssertTrue(draft.affectedBuses.isEmpty)
-        XCTAssertEqual(
-            draft.previewDriverProcessing,
-            try XCTUnwrap(profile.state.speakerDriverProcessing)
-        )
-        XCTAssertFalse(draft.canApply)
-        XCTAssertFalse(draft.readyForApproval)
-    }
+    // MARK: - No protected-driver target from legacy fields alone
 
+    func testLegacyFieldsWithoutRoutingOfferNoProtectedDriverTarget() throws {
+        var (session, _) = fixture(peakDB: 5)
+        let profile = commissioningProfile(
+            normalizing: &session, withRouting: false)
+        // biAmp, two enabled bus routes and driver processing are all present; none of it is read.
+        XCTAssertEqual(profile.state.bassManagement.physicalOutputMode, .biAmp)
+        XCTAssertThrowsError(
+            try ProtectedDriverCommissioningPlanner().draft(
+                profile: profile, session: session)
+        ) { XCTAssertEqual($0 as? ProtectedDriverCommissioningError, .protectedStateDrift) }
+
+        let request = SpeakerMeasurementLabRequest(
+            mode: .protectedDriverNearField,
+            target: .protectedRoutedWay(ProtectedWayFixtures.highID),
+            geometry: .init(distanceMeters: 0.05))
+        let plan = try SpeakerMeasurementLabCapabilityPlanner().plan(
+            request,
+            routePlan: LiveNChannelOutputRoutePlan(
+                programLayout: .stereo,
+                orderedDeviceUIDs: ["PR111 Device"],
+                referenceDeviceUID: "PR111 Device",
+                physicalChannelCount: 2,
+                programPhysicalChannels: [0, 1],
+                subwooferPhysicalChannels: [],
+                subwooferCount: 0,
+                bassManagementEnabled: false,
+                speakerCalibrations: [:],
+                subwooferCalibrations: [],
+                speakerOptimizerPEQ: [:]),
+            multiOutputRouting: profile.state.outputRouting,
+            speakerDriverProcessing: nil,
+            speakerRouting: profile.state.speakerRouting)
+        XCTAssertFalse(plan.canStartMeasurement)
+        XCTAssertFalse(plan.blockReasons.isEmpty)
+    }
 }

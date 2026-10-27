@@ -62,6 +62,8 @@ struct SpeakerMeasurementLabRoutedWayBinding: Equatable, Sendable {
     var carrierRoutePlan: LiveNChannelOutputRoutePlan
     var outputEndpoints: [PhysicalOutputEndpoint]
     var passband: ClosedRange<Double>
+    /// The speaker that owns the way, so analysers can pair neighbouring ways of one speaker.
+    var speakerID: UUID? = nil
 
     /// True only when the routing still holds this exact way, with the same set of outputs.
     func matchesCurrentState(routing: SpeakerRoutingConfiguration?) -> Bool {
@@ -78,7 +80,8 @@ struct SpeakerMeasurementLabRoutedWayRoutePlanner: Sendable {
         environment: SpeakerMeasurementLabRoutedWayEnvironment
     ) throws -> SpeakerMeasurementLabRoutedWayBinding {
         guard let routing, routing.enabled else { throw SpeakerMeasurementLabRoutedWayError.routingRequired }
-        guard let way = routing.speakers.flatMap(\.ways).first(where: { $0.id == wayID }) else {
+        guard let owner = routing.speakers.first(where: { $0.ways.contains { $0.id == wayID } }),
+              let way = owner.ways.first(where: { $0.id == wayID }) else {
             throw SpeakerMeasurementLabRoutedWayError.wayNotFound
         }
         guard way.isProtectedMeasurementCandidate else { throw SpeakerMeasurementLabRoutedWayError.wayNotProtected }
@@ -129,7 +132,7 @@ struct SpeakerMeasurementLabRoutedWayRoutePlanner: Sendable {
         }
         return SpeakerMeasurementLabRoutedWayBinding(
             wayID: wayID, way: way, physicalDestination: way.endpoint, physicalOutputChannelIndex: target,
-            carrierRoutePlan: carrier, outputEndpoints: endpoints, passband: passband)
+            carrierRoutePlan: carrier, outputEndpoints: endpoints, passband: passband, speakerID: owner.id)
     }
 }
 
@@ -137,6 +140,8 @@ struct SpeakerMeasurementLabRoutedWayRoutePlanner: Sendable {
 struct SpeakerMeasurementLabRoutedWayCaptureProvenance: Codable, Equatable, Sendable {
     /// The way as rendered (its endpoint is the offline render's stand-in, see `physicalDestination`).
     var way: RoutedWay
+    /// The owning speaker. Absent in sessions recorded before A2c; those cannot be paired.
+    var speakerID: UUID? = nil
     var physicalDestination: PhysicalOutputEndpoint
     var passbandLowHz: Double
     var passbandHighHz: Double
@@ -164,7 +169,7 @@ extension SpeakerRoutingProtectedExcitation {
     ) throws -> SpeakerMeasurementLabRoutedWayCaptureProvenance {
         guard binding.wayID == wayID, let passband else { throw SpeakerMeasurementLabRoutedWayError.wayChanged }
         return SpeakerMeasurementLabRoutedWayCaptureProvenance(
-            way: way, physicalDestination: binding.physicalDestination,
+            way: way, speakerID: binding.speakerID, physicalDestination: binding.physicalDestination,
             passbandLowHz: passband.lowerBound, passbandHighHz: passband.upperBound,
             inputPeakDBFS: inputPeakDBFS, renderedPeakDBFS: renderedPeakDBFS,
             sourceFrameCount: sourceFrameCount, renderedFrameCount: renderedSamples.count)
