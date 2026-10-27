@@ -17,18 +17,55 @@ final class SpeakerRoutingEditorModel: ObservableObject {
     /// Called after every edit with the new configuration. The view wires this to the engine.
     var onCommit: ((SpeakerRoutingConfiguration) -> Void)?
 
+    /// E8 A5: what the live session supplies besides the rate and lane counts. The profile's sub count is the floor of
+    /// `context.subwoofers`; the lane names label new speakers; bass management gates the first/last subwoofer.
+    private(set) var profileSubwoofers: Int
+    private(set) var programLaneNames: [String] = []
+    private(set) var bassManagementEnabled: Bool?
+
     init(
         configuration: SpeakerRoutingConfiguration = SpeakerRoutingConfiguration(enabled: false),
         context: SpeakerRoutingContext
     ) {
         self.configuration = configuration
         self.context = context
+        self.profileSubwoofers = context.subwoofers
+    }
+
+    /// E8 A5: follows the live profile, layout and device rate without re-creating the model. Commits nothing.
+    func updateContext(
+        programLanes: Int, profileSubwoofers: Int, sampleRate: Double,
+        programLaneNames: [String] = [], bassManagementEnabled: Bool? = nil
+    ) {
+        self.profileSubwoofers = profileSubwoofers
+        self.programLaneNames = programLaneNames
+        self.bassManagementEnabled = bassManagementEnabled
+        var next = context
+        next.programLanes = programLanes
+        next.sampleRate = sampleRate
+        next.subwoofers = max(profileSubwoofers, configuration.subwooferSourceCount)
+        if next != context { context = next }
+    }
+
+    /// E8 A5: puts back the engine's configuration after a refused commit. Does not call `onCommit`; bypassed
+    /// linearisations of ways that no longer exist are dropped.
+    func revert(to configuration: SpeakerRoutingConfiguration) {
+        self.configuration = configuration
+        let ways = Set(configuration.speakers.flatMap { $0.ways.map(\.id) })
+        bypassedLinearisations = bypassedLinearisations.filter { ways.contains($0.key) }
+        refreshSubwoofers()
+    }
+
+    private func refreshSubwoofers() {
+        let count = max(profileSubwoofers, configuration.subwooferSourceCount)
+        if context.subwoofers != count { context.subwoofers = count }
     }
 
     // MARK: Whole-configuration edits
 
     func replace(_ configuration: SpeakerRoutingConfiguration) {
         self.configuration = configuration
+        refreshSubwoofers()
         onCommit?(configuration)
     }
 
@@ -78,8 +115,24 @@ final class SpeakerRoutingEditorModel: ObservableObject {
             name: name, source: source, ways: [RoutedWay(name: name, endpoint: endpoint)])) }
     }
 
-    func removeSpeaker(_ id: UUID) {
+    /// Removes a speaker. Refused for the last speaker while routing is enabled (the engine would refuse an enabled
+    /// routing with no speakers); a subwoofer speaker goes through `removeSubwoofer` so the sub sources stay contiguous.
+    @discardableResult
+    func removeSpeaker(_ id: UUID) -> Bool {
+        guard removeSpeakerBlockReason(id) == nil,
+              let speaker = configuration.speakers.first(where: { $0.id == id }) else { return false }
+        if speaker.source.kind == .sub { return removeSubwoofer(index: speaker.source.index) == .done }
         mutate { $0.speakers.removeAll { $0.id == id } }
+        return true
+    }
+
+    func removeSpeakerBlockReason(_ id: UUID) -> String? {
+        guard let speaker = configuration.speakers.first(where: { $0.id == id }) else { return "Unknown speaker." }
+        if configuration.enabled, configuration.speakers.count == 1 {
+            return "Turn off the routing matrix to remove the last speaker."
+        }
+        if speaker.source.kind == .sub { return subwooferRemoveBlockReason(index: speaker.source.index) }
+        return nil
     }
 
     func setSource(_ source: RoutingSource, speaker id: UUID) {
@@ -341,6 +394,10 @@ final class SpeakerRoutingEditorModel: ObservableObject {
                 (re, im) = (re * r.re - im * r.im, re * r.im + im * r.re)
             }
         } catch { return nil }
+        // E8 A5: a linear-phase way plays the cascade's magnitude with the shared delay removed, so its drawn phase is zero.
+        if way.realisation == .fir, way.highPass != nil || way.lowPass != nil {
+            (re, im) = ((re * re + im * im).squareRoot(), 0)
+        }
         let gain = pow(10, way.trimDB / 20) * (way.polarityInverted ? -1 : 1)
         return (re * gain, im * gain)
     }
@@ -374,6 +431,7 @@ final class SpeakerRoutingEditorModel: ObservableObject {
         change(&next)
         guard next != configuration else { return }
         configuration = next
+        refreshSubwoofers()
         onCommit?(next)
     }
 
@@ -382,5 +440,239 @@ final class SpeakerRoutingEditorModel: ObservableObject {
             guard let index = $0.speakers.firstIndex(where: { $0.id == id }) else { return }
             change(&$0.speakers[index])
         }
+    }
+}
+
+
+// MARK: - E8 A5: add speakers and subwoofers, reassign outputs, linear-phase choice
+
+/// The result of an edit that can be refused for a reason the user can act on.
+enum RoutingEditOutcome: Error, Equatable {
+    case done
+    case refused(String)
+}
+
+/// One selectable physical output: a device channel, named for the picker.
+struct RoutingOutputChoice: Identifiable, Equatable {
+    var endpoint: PhysicalOutputEndpoint
+    var title: String
+    var connected: Bool
+    var id: PhysicalOutputEndpoint { endpoint }
+
+    /// Every connected device's channels ("<Device> · Out n", up to `outputChannelCount`), then the current endpoint
+    /// marked "not connected" when its device is absent or the channel is beyond the device's count.
+    static func choices(devices: [AudioOutputDevice], current: PhysicalOutputEndpoint?) -> [RoutingOutputChoice] {
+        var result: [RoutingOutputChoice] = devices.flatMap { device in
+            (0..<device.outputChannelCount).map { channel in
+                RoutingOutputChoice(
+                    endpoint: PhysicalOutputEndpoint(deviceUID: device.uid, channelIndex: channel),
+                    title: "\(device.name) · Out \(channel + 1)", connected: true)
+            }
+        }
+        if let current, !result.contains(where: { $0.endpoint == current }) {
+            result.append(RoutingOutputChoice(
+                endpoint: current, title: "\(current.deviceUID) · Out \(current.channelIndex + 1) (not connected)",
+                connected: false))
+        }
+        return result
+    }
+}
+
+extension SpeakerRoutingEditorModel {
+    enum EndpointMove: Equatable {
+        case moved
+        case swapped(UUID)
+        case unchanged
+    }
+
+    enum RealisationChoice: Equatable { case iir, fir, mixed }
+
+    // MARK: Free outputs
+
+    /// The lowest channel of `deviceUID` below `channelCount` that no way and no raw matrix entry uses; nil when all are taken.
+    func nextFreeEndpoint(deviceUID: String, channelCount: UInt32) -> PhysicalOutputEndpoint? {
+        let used = Set(configuration.outputEndpoints.filter { $0.deviceUID == deviceUID }.map(\.channelIndex))
+        return (0..<channelCount).first { !used.contains($0) }
+            .map { PhysicalOutputEndpoint(deviceUID: deviceUID, channelIndex: $0) }
+    }
+
+    private func freeEndpoint(on device: AudioOutputDevice?) -> Result<PhysicalOutputEndpoint, RoutingEditOutcome> {
+        guard let device else { return .failure(.refused("Select an output device first.")) }
+        guard let endpoint = nextFreeEndpoint(deviceUID: device.uid, channelCount: device.outputChannelCount) else {
+            return .failure(.refused("All \(device.outputChannelCount) outputs of \(device.name) are in use."))
+        }
+        return .success(endpoint)
+    }
+
+    /// Adds a way on the speaker's device (else the selected output) at the lowest free channel.
+    @discardableResult
+    func addWayOnFreeOutput(speaker id: UUID, devices: [AudioOutputDevice], selected: AudioOutputDevice?) -> RoutingEditOutcome {
+        guard let speaker = configuration.speakers.first(where: { $0.id == id }) else { return .refused("Unknown speaker.") }
+        guard speaker.ways.count < RoutedSpeaker.maxWays else {
+            return .refused("A speaker can have at most \(RoutedSpeaker.maxWays) ways.")
+        }
+        let uid = speaker.ways.first?.endpoint.deviceUID
+        let device = devices.first { $0.uid == uid } ?? selected
+        switch freeEndpoint(on: device) {
+        case .failure(let refusal): return refusal
+        case .success(let endpoint): return addWay(speaker: id, endpoint: endpoint) ? .done : .refused("Could not add a way.")
+        }
+    }
+
+    // MARK: Speakers
+
+    /// The program lane a new speaker reads: the first no speaker reads, else lane 0.
+    var nextSpeakerSource: RoutingSource {
+        let read = Set(configuration.speakers.filter { $0.source.kind == .program }.map(\.source.index))
+        return .program((0..<max(0, context.programLanes)).first { !read.contains($0) } ?? 0)
+    }
+
+    func newSpeakerName(for source: RoutingSource) -> String {
+        var base: String?
+        if programLaneNames.indices.contains(source.index), !programLaneNames[source.index].isEmpty {
+            base = programLaneNames[source.index]
+        } else if context.programLanes == 2, source.index < 2 {
+            base = ["Left", "Right"][source.index]
+        }
+        if let base, !configuration.speakers.contains(where: { $0.name == base }) { return base }
+        return "Speaker \(configuration.speakers.count + 1)"
+    }
+
+    /// Adds one unfiltered way on the selected output's lowest free channel.
+    @discardableResult
+    func addSpeakerOnFreeOutput(selected: AudioOutputDevice?) -> RoutingEditOutcome {
+        guard context.programLanes > 0 else { return .refused("The program layout has no lanes.") }
+        switch freeEndpoint(on: selected) {
+        case .failure(let refusal): return refusal
+        case .success(let endpoint):
+            let source = nextSpeakerSource
+            addSpeaker(name: newSpeakerName(for: source), source: source, endpoint: endpoint)
+            return .done
+        }
+    }
+
+    // MARK: Subwoofers
+
+    var subwooferSpeakers: [RoutedSpeaker] { configuration.speakers.filter { $0.source.kind == .sub } }
+
+    /// Why a sub cannot be added now (the engine's reason while routing is enabled), else nil.
+    var subwooferAddBlockReason: String? {
+        let count = configuration.subwooferSourceCount
+        if count >= SubwooferLimit.graph {
+            return "Sub \(count + 1) cannot be added: the limit is \(SubwooferLimit.graph) subwoofers."
+        }
+        if configuration.enabled, count == 0, bassManagementEnabled == false {
+            return "It reads subwoofer sources, so bass management must be on."
+        }
+        return nil
+    }
+
+    func subwooferRemoveBlockReason(index: Int) -> String? {
+        if configuration.enabled, bassManagementEnabled == true,
+           configuration.speakers.filter({ $0.source.kind == .sub }).count <= 1,
+           configuration.subwooferSourceCount <= 1 {
+            return "Bass management is on but no speaker would read a subwoofer source."
+        }
+        return nil
+    }
+
+    /// Adds "Sub n", source `.sub(n - 1)`, one unfiltered way on the selected output's lowest free channel.
+    @discardableResult
+    func addSubwooferOnFreeOutput(selected: AudioOutputDevice?) -> RoutingEditOutcome {
+        if let reason = subwooferAddBlockReason { return .refused(reason) }
+        switch freeEndpoint(on: selected) {
+        case .failure(let refusal): return refusal
+        case .success(let endpoint):
+            let index = configuration.subwooferSourceCount
+            let name = "Sub \(index + 1)"
+            mutate { $0.speakers.append(RoutedSpeaker(
+                name: name, source: .sub(index), ways: [RoutedWay(name: name, endpoint: endpoint)])) }
+            return .done
+        }
+    }
+
+    /// Removes sub `index` (its speakers and raw feeds) and renumbers the higher subs down by one in speakers, matrix
+    /// entries and the default "Sub n" names, so the sources stay contiguous.
+    @discardableResult
+    func removeSubwoofer(index: Int) -> RoutingEditOutcome {
+        if let reason = subwooferRemoveBlockReason(index: index) { return .refused(reason) }
+        func shifted(_ source: RoutingSource) -> RoutingSource {
+            source.kind == .sub && source.index > index ? .sub(source.index - 1) : source
+        }
+        func renamed(_ name: String) -> String {
+            guard name.hasPrefix("Sub "), let n = Int(name.dropFirst(4)), n - 1 > index else { return name }
+            return "Sub \(n - 1)"
+        }
+        mutate {
+            $0.speakers.removeAll { $0.source == .sub(index) }
+            $0.matrix.removeAll { $0.source == .sub(index) }
+            for s in $0.speakers.indices {
+                $0.speakers[s].source = shifted($0.speakers[s].source)
+                if $0.speakers[s].source.kind == .sub {
+                    $0.speakers[s].name = renamed($0.speakers[s].name)
+                    for w in $0.speakers[s].ways.indices { $0.speakers[s].ways[w].name = renamed($0.speakers[s].ways[w].name) }
+                }
+            }
+            for m in $0.matrix.indices { $0.matrix[m].source = shifted($0.matrix[m].source) }
+        }
+        return .done
+    }
+
+    // MARK: Output reassignment
+
+    /// Moves a way to `endpoint`. A way already there swaps places with it, in one edit. Raw matrix entries stay on
+    /// their physical output, and each way keeps its filters, EQ and linearisation (the driver did not change).
+    @discardableResult
+    func setEndpoint(_ endpoint: PhysicalOutputEndpoint, way wayID: UUID, speaker id: UUID) -> EndpointMove {
+        guard let current = configuration.speakers.first(where: { $0.id == id })?
+            .ways.first(where: { $0.id == wayID })?.endpoint, current != endpoint else { return .unchanged }
+        let other = configuration.speakers.flatMap(\.ways).first { $0.endpoint == endpoint }?.id
+        mutate {
+            for s in $0.speakers.indices {
+                for w in $0.speakers[s].ways.indices {
+                    let wayID2 = $0.speakers[s].ways[w].id
+                    if wayID2 == wayID { $0.speakers[s].ways[w].endpoint = endpoint }
+                    else if wayID2 == other { $0.speakers[s].ways[w].endpoint = current }
+                }
+            }
+        }
+        return other.map(EndpointMove.swapped) ?? .moved
+    }
+
+    // MARK: Linear phase
+
+    /// A speaker's crossover realisation over its filtered ways; nil when none is filtered (a sub, a full-range speaker).
+    func realisationChoice(_ speaker: RoutedSpeaker) -> RealisationChoice? {
+        let filtered = speaker.ways.filter { $0.highPass != nil || $0.lowPass != nil }
+        guard let first = filtered.first else { return nil }
+        return filtered.allSatisfy { $0.realisation == first.realisation } ? (first.realisation == .fir ? .fir : .iir) : .mixed
+    }
+
+    /// Sets the realisation on all of a speaker's filtered ways, so their sum stays coherent.
+    func setRealisation(_ realisation: RoutingRealisation, speaker id: UUID) {
+        mutateSpeaker(id) { speaker in
+            for w in speaker.ways.indices where speaker.ways[w].highPass != nil || speaker.ways[w].lowPass != nil {
+                speaker.ways[w].realisation = realisation
+            }
+        }
+    }
+
+    /// The group delay a speaker's linear-phase ways share at the current rate (the compiler's value: the largest
+    /// automatic choice), and whether the plan is two-band. nil when no way is linear phase.
+    func linearPhaseLatency(_ speaker: RoutedSpeaker) -> (frames: Int, twoBand: Bool)? {
+        let fir = speaker.ways.filter { $0.realisation == .fir && ($0.highPass != nil || $0.lowPass != nil) }
+        guard !fir.isEmpty else { return nil }
+        let rate = context.sampleRate
+        var delay = 0
+        for way in fir {
+            guard let plan = try? CrossoverCore.linearPhasePlan(highPass: way.highPass, lowPass: way.lowPass, sampleRate: rate)
+            else { return nil }
+            delay = max(delay, plan.groupDelayFrames)
+        }
+        let twoBand = fir.contains {
+            (try? CrossoverCore.linearPhasePlan(
+                highPass: $0.highPass, lowPass: $0.lowPass, sampleRate: rate, groupDelayFrames: delay))?.twoBand == true
+        }
+        return (delay, twoBand)
     }
 }

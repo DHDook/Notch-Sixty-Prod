@@ -1669,6 +1669,7 @@ private struct ProductionSpeakersView: View {
                     .foregroundStyle(.secondary)
 
                 ProductionRoutingEditorView(engine: engine)
+                ProductionProfileSubwooferCard(engine: engine, profiles: profiles)
                 playbackSystemCard
                 crossoverCard
                 if engine.bassManagementConfiguration.physicalOutputMode == .mainsSub {
