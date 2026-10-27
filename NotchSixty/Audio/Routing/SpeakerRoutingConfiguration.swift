@@ -39,6 +39,15 @@ enum RoutingRealisation: String, Codable, Sendable {
     case fir
 }
 
+/// E8 B1: a way's measured near-field response (and an optional gated far-field capture above `mergeHz`), from which the
+/// compiler designs the driver linearisation (minimum phase, or linear phase when the way is FIR). Optional and additive:
+/// profiles saved without it decode unchanged, so the schema version stays.
+struct RoutedWayLinearisation: Codable, Equatable, Sendable {
+    var nearField: CrossoverCore.ResponseCapture
+    var farField: CrossoverCore.ResponseCapture?
+    var mergeHz: Double = 0
+}
+
 /// One driver: its physical output, its band-limiting filters and its per-driver processing.
 struct RoutedWay: Identifiable, Codable, Equatable, Sendable {
     var id: UUID = UUID()
@@ -54,6 +63,8 @@ struct RoutedWay: Identifiable, Codable, Equatable, Sendable {
     /// User delay for this driver, on top of the latency alignment the compiler adds.
     var delayMilliseconds: Double = 0
     var limiter: RoutingLimiter?
+    /// nil means the driver is not linearised.
+    var linearisation: RoutedWayLinearisation?
 }
 
 /// One speaker: a source and 1 to 8 ways.

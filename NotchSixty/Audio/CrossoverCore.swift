@@ -232,7 +232,7 @@ enum CrossoverCore {
 
 extension CrossoverCore {
     /// A frequency response capture: ascending frequencies in Hz and levels in dB.
-    struct ResponseCapture: Equatable, Sendable {
+    struct ResponseCapture: Codable, Equatable, Sendable {
         var frequenciesHz: [Double]
         var levelsDB: [Double]
     }
@@ -343,7 +343,9 @@ extension CrossoverCore {
         _ design: DriverLinearisation, fir: LinearPhaseDesign, highPass: FilterSpec?, lowPass: FilterSpec?, sampleRate: Double
     ) throws -> Double {
         let lo = highPass?.cornerHz ?? design.gridHz[0]
-        let hi = lowPass?.cornerHz ?? design.gridHz[design.gridHz.count - 1]
+        // An open top edge is checked up to 0.7 x the capture's top (and 0.4 x the rate): the correction fades out at the
+        // measurement's edge, which is not a realisation error.
+        let hi = lowPass?.cornerHz ?? min(0.7 * design.gridHz[design.gridHz.count - 1], 0.4 * sampleRate)
         let points = design.gridHz.indices.filter { design.gridHz[$0] >= lo && design.gridHz[$0] <= hi }
         let frequencies = points.map { design.gridHz[$0] }
         let realised = try firMagnitudeDB(fir, sampleRate: sampleRate, atHz: frequencies)

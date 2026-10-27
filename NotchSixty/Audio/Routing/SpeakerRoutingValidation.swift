@@ -19,6 +19,8 @@ enum SpeakerRoutingError: Equatable, Sendable {
     case invalidDelay(way: String)
     case invalidEQ(way: String)
     case invalidLimiter(way: String)
+    /// The way's linearisation capture is malformed (lengths differ, too few points, not ascending, not finite).
+    case invalidLinearisation(way: String)
     case matrixGainOutOfRange
     /// A destination would need more than the 8 entries a ROUTE destination holds.
     case tooManyEntries(PhysicalOutputEndpoint)
@@ -33,6 +35,17 @@ enum SpeakerRoutingWarning: Equatable, Sendable {
     /// Linear-phase ways compile as their IIR equivalent until E8 S7.
     case firRealisedAsIIR(way: String)
     case unroutedSource(RoutingSource)
+    /// The way's linearisation was left out of the compiled graph.
+    case linearisationSkipped(way: String, reason: LinearisationSkipReason)
+}
+
+enum LinearisationSkipReason: Equatable, Sendable {
+    /// Low-latency (video) mode compiles without driver FIRs.
+    case lowLatencyMode
+    /// The correction would add more latency than `SpeakerRoutingCompiler.maxLinearisationLatencyMilliseconds`.
+    case latencyCap(milliseconds: Double)
+    /// The core could not design it, or the realised FIR missed the design by more than the verifier tolerance.
+    case designFailed
 }
 
 struct SpeakerRoutingValidation: Equatable, Sendable {
@@ -78,6 +91,10 @@ extension SpeakerRoutingConfiguration {
                 if !seen.insert(way.endpoint).inserted, reported.insert(way.endpoint).inserted {
                     v.errors.append(.endpointReused(way.endpoint))
                 }
+                if let lin = way.linearisation, !Self.captureOK(lin.nearField)
+                    || !(lin.farField.map(Self.captureOK) ?? true) || !lin.mergeHz.isFinite || lin.mergeHz < 0 {
+                    v.errors.append(.invalidLinearisation(way: name))
+                }
                 for spec in [way.highPass, way.lowPass].compactMap({ $0 }) {
                     if !spec.family.orders.contains(spec.order) {
                         v.errors.append(.invalidFilter(way: name, reason: "order"))
@@ -118,6 +135,12 @@ extension SpeakerRoutingConfiguration {
             v.warnings.append(.unroutedSource(.sub(index)))
         }
         return v
+    }
+
+    private static func captureOK(_ c: CrossoverCore.ResponseCapture) -> Bool {
+        guard c.frequenciesHz.count == c.levelsDB.count, c.frequenciesHz.count >= 8,
+              c.frequenciesHz.allSatisfy({ $0.isFinite && $0 > 0 }), c.levelsDB.allSatisfy(\.isFinite) else { return false }
+        return zip(c.frequenciesHz, c.frequenciesHz.dropFirst()).allSatisfy { $0 < $1 }
     }
 
     /// Adjacent ways sorted by band: the lower way's low-pass corner against the upper way's high-pass corner.

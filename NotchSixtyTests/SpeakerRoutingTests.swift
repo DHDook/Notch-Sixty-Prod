@@ -575,4 +575,98 @@ extension SpeakerRoutingTests {
         XCTAssertNoThrow(try engine.replaceSpeakerRoutingConfiguration(withSub))
         XCTAssertEqual(engine.speakerRoutingConfiguration, withSub)
     }
+
+    // MARK: E8 B1 way linearisation
+
+    private func driverCapture() -> CrossoverCore.ResponseCapture {
+        var hz: [Double] = [], db: [Double] = []
+        var f = 20.0
+        while f <= 20_000 {
+            func peak(_ f0: Double, _ gain: Double, _ q: Double) -> Double {
+                let a = pow(10, gain / 40), x = f / f0
+                return 20 * log10(hypot(1 - x * x, x * a / q) / hypot(1 - x * x, x / (a * q)))
+            }
+            hz.append(f)
+            db.append(88 + peak(1_200, 4, 1.5) + peak(6_000, 8, 3))
+            f *= pow(2, 1.0 / 48)
+        }
+        return .init(frequenciesHz: hz, levelsDB: db)
+    }
+
+    private func linearisedTwoWay(fir: Bool) -> SpeakerRoutingConfiguration {
+        var routing = SpeakerRoutingTemplate.twoWay.build(
+            mains: [.init(lane: 0, name: "Left", endpoints: [ep(0), ep(1)])], crossoverHz: [3_000])!
+        routing.speakers[0].ways[1].linearisation = RoutedWayLinearisation(nearField: driverCapture())
+        if fir { for i in routing.speakers[0].ways.indices { routing.speakers[0].ways[i].realisation = .fir } }
+        return routing
+    }
+
+    func testLinearisedWayCompilesMinimumPhaseAtEveryRate() throws {
+        for rate in [44_100.0, 48_000, 88_200, 96_000, 176_400, 192_000, 352_800, 384_000] {
+            let config = try SpeakerRoutingCompiler.compile(linearisedTwoWay(fir: false), onto: base(rate: rate, lanes: 1))
+            XCTAssertEqual(config.routing?.warnings, [], "rate \(rate)")
+            let outputs = try XCTUnwrap(config.routing?.outputs)
+            XCTAssertNil(outputs[0].driverFIR)
+            let fir = try XCTUnwrap(outputs[1].driverFIR, "rate \(rate)")
+            // Minimum phase: the crossover stays IIR, and every output is padded to the same total latency.
+            XCTAssertNotNil(outputs[1].crossover?.highPass)
+            XCTAssertEqual(outputs[0].delayFrames, Double(fir.latencyFrames), accuracy: 0.5)
+            let spec = try config.makeSpec()
+            XCTAssertEqual(stages(spec, N60_STAGE_DRIVER_FIR).count + stages(spec, N60_STAGE_DRIVER_FIR_TWO_BAND).count, 1)
+        }
+    }
+
+    func testLinearisedFIRWayFoldsCrossoverIn() throws {
+        let config = try SpeakerRoutingCompiler.compile(linearisedTwoWay(fir: true), onto: base(lanes: 1))
+        let outputs = try XCTUnwrap(config.routing?.outputs)
+        XCTAssertEqual(config.routing?.warnings, [])
+        XCTAssertNotNil(outputs[1].driverFIR)
+        XCTAssertNil(outputs[1].crossover?.highPass)
+        XCTAssertNil(outputs[1].crossover?.lowPass)
+    }
+
+    func testLinearisationOffInLowLatencyModeWarns() throws {
+        let config = try SpeakerRoutingCompiler.compile(
+            linearisedTwoWay(fir: false), onto: base(lanes: 1), preferLowLatency: true)
+        XCTAssertNil(config.routing?.outputs[1].driverFIR)
+        XCTAssertEqual(config.routing?.warnings, [.linearisationSkipped(way: "Left High", reason: .lowLatencyMode)])
+    }
+
+    func testLinearisationLatencyCapSkipsWithWarning() throws {
+        // A 32-sample-per-octave-poor capture is fine; force the cap by compiling at a tiny rate budget instead.
+        XCTAssertLessThan(SpeakerRoutingCompiler.maxLinearisationLatencyMilliseconds, 100)
+        var routing = linearisedTwoWay(fir: false)
+        routing.speakers[0].ways[1].highPass = CrossoverCore.FilterSpec(family: .linkwitzRiley, order: 4, cornerHz: 20)
+        let config = try SpeakerRoutingCompiler.compile(routing, onto: base(rate: 384_000, lanes: 1))
+        // Either designed within the cap or skipped with a latency-cap warning; never both and never silent.
+        let driverFIR = config.routing?.outputs[1].driverFIR
+        let capped = config.routing?.warnings.contains {
+            if case .linearisationSkipped(_, .latencyCap) = $0 { return true } else { return false }
+        } ?? false
+        XCTAssertTrue((driverFIR != nil) != capped)
+    }
+
+    func testBadLinearisationCaptureIsRejected() {
+        var routing = linearisedTwoWay(fir: false)
+        routing.speakers[0].ways[1].linearisation?.nearField.levelsDB.removeLast()
+        XCTAssertTrue(routing.validate(in: context(lanes: 1)).errors.contains(.invalidLinearisation(way: "Left High")))
+    }
+
+    func testWayWithoutLinearisationDecodesFromOlderProfile() throws {
+        var routing = linearisedTwoWay(fir: false)
+        let data = try JSONEncoder().encode(routing)
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        var speakers = try XCTUnwrap(object["speakers"] as? [[String: Any]])
+        var ways = try XCTUnwrap(speakers[0]["ways"] as? [[String: Any]])
+        for i in ways.indices { ways[i].removeValue(forKey: "linearisation") }
+        speakers[0]["ways"] = ways
+        object["speakers"] = speakers
+        let old = try JSONDecoder().decode(
+            SpeakerRoutingConfiguration.self, from: JSONSerialization.data(withJSONObject: object))
+        routing.speakers[0].ways[1].linearisation = nil
+        XCTAssertEqual(old, routing)
+        XCTAssertEqual(old.schemaVersion, SpeakerRoutingConfiguration.currentSchemaVersion)
+        let roundTrip = try JSONDecoder().decode(SpeakerRoutingConfiguration.self, from: JSONEncoder().encode(linearisedTwoWay(fir: false)))
+        XCTAssertNotNil(roundTrip.speakers[0].ways[1].linearisation)
+    }
 }

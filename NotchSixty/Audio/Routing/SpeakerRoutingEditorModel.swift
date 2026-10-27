@@ -181,6 +181,7 @@ final class SpeakerRoutingEditorModel: ObservableObject {
         case .invalidDelay(let way): return "\(way): delay must be zero or more."
         case .invalidEQ(let way): return "\(way): an EQ section is out of range."
         case .invalidLimiter(let way): return "\(way): a limiter setting is out of range."
+        case .invalidLinearisation(let way): return "\(way): the driver measurement for linearisation is not usable."
         case .matrixGainOutOfRange: return "A matrix gain is out of range."
         case .tooManyEntries(let endpoint):
             return "Output channel \(endpoint.channelIndex + 1) has more than \(N60_ROUTE_MAX_ENTRIES) feeds."
@@ -198,6 +199,13 @@ final class SpeakerRoutingEditorModel: ObservableObject {
             return "\(way): linear-phase is off in low-latency mode; it plays as its minimum-phase equivalent."
         case .unroutedSource(let source):
             return "\(sourceName(source)) feeds nothing."
+        case .linearisationSkipped(let way, let reason):
+            switch reason {
+            case .lowLatencyMode: return "\(way): driver linearisation is off in low-latency mode."
+            case .latencyCap(let ms):
+                return "\(way): driver linearisation skipped; it would add \(Int(ms)) ms of latency to every output."
+            case .designFailed: return "\(way): driver linearisation could not be designed from this measurement."
+            }
         }
     }
 
