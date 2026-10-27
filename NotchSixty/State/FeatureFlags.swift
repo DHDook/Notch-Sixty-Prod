@@ -18,7 +18,7 @@ struct FeatureFlag: Hashable, Identifiable, Sendable {
 extension FeatureFlag {
     /// Every flag the app knows. Add one when an epic starts merging dark;
     /// delete it, and the checks that read it, once the epic ships.
-    static let all: [FeatureFlag] = [.adaptiveANC, .legacyKernel]
+    static let all: [FeatureFlag] = [.adaptiveANC, .legacyKernel, .labRoutedWays]
 
     /// E4: adaptive Quiet Zone controls and the shadow-mode adaptive path.
     static let adaptiveANC = FeatureFlag(
@@ -34,6 +34,14 @@ extension FeatureFlag {
         id: "e6.legacy-kernel",
         title: "Legacy render kernel (frozen fallback)",
         epic: "E6"
+    )
+
+    /// E8 A2b: the Measurement Lab can sweep one routed way (protected, band-limited) and capture it live. Off, the
+    /// Lab offers only the legacy bus target and routed-way acquisition stays blocked. E8 A2c removes the flag.
+    static let labRoutedWays = FeatureFlag(
+        id: "e8.lab-routed-ways",
+        title: "Measurement Lab on routed ways",
+        epic: "E8"
     )
 }
 

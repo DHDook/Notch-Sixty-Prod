@@ -445,6 +445,8 @@
 		E8B0000000000000000000A4 /* SpeakerRoutingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E8B000000000000000000004 /* SpeakerRoutingTests.swift */; };
 		E8B0000000000000000000A5 /* SpeakerRoutingMigration.swift in Sources */ = {isa = PBXBuildFile; fileRef = E8B000000000000000000005 /* SpeakerRoutingMigration.swift */; };
 		E8B0000000000000000000A6 /* SpeakerRoutingProtectedExcitation.swift in Sources */ = {isa = PBXBuildFile; fileRef = E8B000000000000000000006 /* SpeakerRoutingProtectedExcitation.swift */; };
+		E8C0000000000000000000A1 /* SpeakerRoutingLabAcquisition.swift in Sources */ = {isa = PBXBuildFile; fileRef = E8C000000000000000000001 /* SpeakerRoutingLabAcquisition.swift */; };
+		E8C0000000000000000000A2 /* SpeakerMeasurementLabRoutedWayTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E8C000000000000000000002 /* SpeakerMeasurementLabRoutedWayTests.swift */; };
 		E8B0000000000000000000A7 /* SpeakerRoutingMigrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E8B000000000000000000007 /* SpeakerRoutingMigrationTests.swift */; };
 		E8B0000000000000000000A8 /* SpeakerRoutingEditorModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = E8B000000000000000000008 /* SpeakerRoutingEditorModel.swift */; };
 		E8B0000000000000000000A9 /* ProductionRoutingEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E8B000000000000000000009 /* ProductionRoutingEditorView.swift */; };
@@ -937,6 +939,8 @@
 		E8B000000000000000000004 /* SpeakerRoutingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerRoutingTests.swift; sourceTree = "<group>"; };
 		E8B000000000000000000005 /* SpeakerRoutingMigration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerRoutingMigration.swift; sourceTree = "<group>"; };
 		E8B000000000000000000006 /* SpeakerRoutingProtectedExcitation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerRoutingProtectedExcitation.swift; sourceTree = "<group>"; };
+		E8C000000000000000000001 /* SpeakerRoutingLabAcquisition.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerRoutingLabAcquisition.swift; sourceTree = "<group>"; };
+		E8C000000000000000000002 /* SpeakerMeasurementLabRoutedWayTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerMeasurementLabRoutedWayTests.swift; sourceTree = "<group>"; };
 		E8B000000000000000000007 /* SpeakerRoutingMigrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerRoutingMigrationTests.swift; sourceTree = "<group>"; };
 		E8B000000000000000000008 /* SpeakerRoutingEditorModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerRoutingEditorModel.swift; sourceTree = "<group>"; };
 		E8B000000000000000000009 /* ProductionRoutingEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductionRoutingEditorView.swift; sourceTree = "<group>"; };
@@ -1198,6 +1202,7 @@
 				F10600000000000000000016 /* SpeakerMeasurementLabDirectivityTests.swift */,
 				F10600000000000000000018 /* SpeakerMeasurementLabNearFieldLFTests.swift */,
 				F10600000000000000000038 /* SpeakerMeasurementLabDriverCaptureTests.swift */,
+				E8C000000000000000000002 /* SpeakerMeasurementLabRoutedWayTests.swift */,
 				F1060000000000000000001A /* SpeakerMeasurementLabQuasiAnechoicTests.swift */,
 				F1060000000000000000001C /* SpeakerMeasurementLabLevelDependenceTests.swift */,
 				F1060000000000000000001E /* SpeakerMeasurementLabProtectedExcitationTests.swift */,
@@ -1363,7 +1368,7 @@
 		};
 		A20000000000000000000051 /* CoreAudio */ = {isa = PBXGroup; children = (A20000000000000000000021 /* CoreAudioError.swift */, E4E000000000000000000011 /* OutputBufferSizeController.swift */, F63000000000000000000011 /* CoreAudioNChannelTransportSession.swift */, F65000000000000000000013 /* CoreAudioSemanticTransportSupport.swift */, F65000000000000000000014 /* CoreAudioBinauralHeadphoneTransportSession.swift */, F64000000000000000000013 /* MultichannelCalibrationTransport.swift */, A20000000000000000000028 /* MasterVolumeDeviceController.swift */, A2000000000000000000002C /* RoomCorrectionCalibrationTransport.swift */,); path = CoreAudio; sourceTree = "<group>"; };
 		A20000000000000000000052 /* Devices */ = {isa = PBXGroup; children = (A20000000000000000000022 /* AudioOutputDevice.swift */, A20000000000000000000023 /* OutputDeviceCatalog.swift */,); path = Devices; sourceTree = "<group>"; };
-		A20000000000000000000053 /* Routing */ = {isa = PBXGroup; children = (A20000000000000000000024 /* AudioRouteConfiguration.swift */, E8B000000000000000000001 /* SpeakerRoutingConfiguration.swift */, E8B000000000000000000002 /* SpeakerRoutingValidation.swift */, E8B000000000000000000005 /* SpeakerRoutingMigration.swift */, E8B000000000000000000008 /* SpeakerRoutingEditorModel.swift */, E8B00000000000000000000B /* YAMLSubset.swift */, E8B00000000000000000000C /* CamillaDSPRouting.swift */, E8B00000000000000000000D /* SpeakerRoutingPipeline.swift */, E8B000000000000000000006 /* SpeakerRoutingProtectedExcitation.swift */, F62000000000000000000011 /* OutputDeviceProfileConfiguration.swift */, F65000000000000000000011 /* HeadphoneDeviceProfileConfiguration.swift */, B40000000000000000000011 /* BlindABXValidation.swift */, B40000000000000000000092 /* RoomCorrectionABX.swift */, B50000000000000000000012 /* HeadphoneModelResearchLibrary.swift */, F65000000000000000000012 /* BinauralProfileAsset.swift */, F64000000000000000000011 /* OutputDeviceCalibration.swift */, E6D0000000000000000009A1 /* BinauralResampledAssetCache.swift */, E6D0000000000000000009A2 /* HeadphoneLiveEditPlanner.swift */,); path = Routing; sourceTree = "<group>"; };
+		A20000000000000000000053 /* Routing */ = {isa = PBXGroup; children = (A20000000000000000000024 /* AudioRouteConfiguration.swift */, E8B000000000000000000001 /* SpeakerRoutingConfiguration.swift */, E8B000000000000000000002 /* SpeakerRoutingValidation.swift */, E8B000000000000000000005 /* SpeakerRoutingMigration.swift */, E8B000000000000000000008 /* SpeakerRoutingEditorModel.swift */, E8B00000000000000000000B /* YAMLSubset.swift */, E8B00000000000000000000C /* CamillaDSPRouting.swift */, E8B00000000000000000000D /* SpeakerRoutingPipeline.swift */, E8B000000000000000000006 /* SpeakerRoutingProtectedExcitation.swift */, E8C000000000000000000001 /* SpeakerRoutingLabAcquisition.swift */, F62000000000000000000011 /* OutputDeviceProfileConfiguration.swift */, F65000000000000000000011 /* HeadphoneDeviceProfileConfiguration.swift */, B40000000000000000000011 /* BlindABXValidation.swift */, B40000000000000000000092 /* RoomCorrectionABX.swift */, B50000000000000000000012 /* HeadphoneModelResearchLibrary.swift */, F65000000000000000000012 /* BinauralProfileAsset.swift */, F64000000000000000000011 /* OutputDeviceCalibration.swift */, E6D0000000000000000009A1 /* BinauralResampledAssetCache.swift */, E6D0000000000000000009A2 /* HeadphoneLiveEditPlanner.swift */,); path = Routing; sourceTree = "<group>"; };
 		B113B0000000000000000050 /* Backup */ = {
 			isa = PBXGroup;
 			children = (
@@ -1494,6 +1499,7 @@
 				E6D000000000000000000103 /* UnifiedGraphConfiguration.swift in Sources */,
 				E8B0000000000000000000A3 /* SpeakerRoutingCompiler.swift in Sources */,
 				E8B0000000000000000000A6 /* SpeakerRoutingProtectedExcitation.swift in Sources */,
+				E8C0000000000000000000A1 /* SpeakerRoutingLabAcquisition.swift in Sources */,
 				E8B0000000000000000000A5 /* SpeakerRoutingMigration.swift in Sources */,
 				E8B0000000000000000000A8 /* SpeakerRoutingEditorModel.swift in Sources */,
 				E8B0000000000000000000AB /* YAMLSubset.swift in Sources */,
@@ -1923,6 +1929,7 @@
 				F10600000000000000000006 /* SpeakerMeasurementLabDirectivityTests.swift in Sources */,
 				F10600000000000000000008 /* SpeakerMeasurementLabNearFieldLFTests.swift in Sources */,
 				F10600000000000000000028 /* SpeakerMeasurementLabDriverCaptureTests.swift in Sources */,
+				E8C0000000000000000000A2 /* SpeakerMeasurementLabRoutedWayTests.swift in Sources */,
 				F1060000000000000000000A /* SpeakerMeasurementLabQuasiAnechoicTests.swift in Sources */,
 				F1060000000000000000000C /* SpeakerMeasurementLabLevelDependenceTests.swift in Sources */,
 				F1060000000000000000000E /* SpeakerMeasurementLabProtectedExcitationTests.swift in Sources */,

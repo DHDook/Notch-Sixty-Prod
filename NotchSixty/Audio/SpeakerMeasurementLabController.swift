@@ -81,6 +81,8 @@ final class SpeakerMeasurementLabController: ObservableObject {
     private let sweepGenerator = RoomCorrectionSweepGenerator()
     private let protectedExcitationCompiler =
         SpeakerMeasurementLabProtectedExcitationCompiler()
+    private let routedWayAcquisitionPlanner =
+        SpeakerMeasurementLabRoutedWayAcquisitionPlanner()
     private let protectedRoutePlanner =
         SpeakerMeasurementLabProtectedDriverRoutePlanner()
 
@@ -90,7 +92,13 @@ final class SpeakerMeasurementLabController: ObservableObject {
     private var activeStep: SpeakerMeasurementLabSessionStep?
     private var activeProtectedProvenance:
         SpeakerMeasurementLabProtectedDriverCaptureProvenance?
+    private var activeRoutedWayProvenance:
+        SpeakerMeasurementLabRoutedWayCaptureProvenance?
     private var analysisGeneration: UInt64 = 0
+
+    /// E8 A2b: Swift decides from `e8.lab-routed-ways`; the engine never reads the flag. Off, routed-way
+    /// acquisition stays blocked exactly as before.
+    var routedWaysEnabled = false
 
     @Published private(set) var state:
         SpeakerOptimizerMeasurementControllerState = .idle
@@ -334,6 +342,12 @@ final class SpeakerMeasurementLabController: ObservableObject {
                 systemProfile.state.speakerDriverProcessing,
             bassManagementConfiguration:
                 systemProfile.state.bassManagement,
+            speakerRouting: systemProfile.state.speakerRouting,
+            routedWayAcquisitionEnabled: routedWaysEnabled,
+            routedWayEnvironment: SpeakerMeasurementLabRoutedWayEnvironment(
+                availableOutputs: engine.outputDevices,
+                sampleRate: output.nominalSampleRate,
+                selectedOutputUID: selectedOutputUID),
             coherentLeg: step.labProtocol.coherentLeg,
             sharedClockReferenceAvailable:
                 session.sharedClockReferenceConfiguration != nil
@@ -395,8 +409,42 @@ final class SpeakerMeasurementLabController: ObservableObject {
         let analysisProgram: RoomCorrectionSweepProgram
         var protectedProvenance:
             SpeakerMeasurementLabProtectedDriverCaptureProvenance? = nil
+        var routedProvenance:
+            SpeakerMeasurementLabRoutedWayCaptureProvenance? = nil
 
-        if let targetBus = capability.protectedDriverBus {
+        if let wayID = capability.protectedRoutedWayID {
+            // The sweep is regenerated inside the way's passband (guard corners at 1.5x), rendered offline through the
+            // way's own crossover, EQ, delay and limiter, and played on its physical channel only.
+            let acquisition = try routedWayAcquisitionPlanner.prepare(
+                wayID: wayID,
+                routing: systemProfile.state.speakerRouting,
+                environment: SpeakerMeasurementLabRoutedWayEnvironment(
+                    availableOutputs: engine.outputDevices,
+                    sampleRate: output.nominalSampleRate,
+                    selectedOutputUID: selectedOutputUID),
+                sweep: settings)
+            routedProvenance = acquisition.provenance
+            analysisProgram = acquisition.analysisProgram
+            transport = try protectedTransportFactory(
+                acquisition.binding.carrierRoutePlan,
+                engine.outputDevices,
+                input,
+                microphone.selectedInputChannelIndex,
+                acquisition.sweepProgram,
+                acquisition.binding.physicalOutputChannelIndex,
+                acquisition.excitation.renderedSamples
+            )
+
+            // Re-read the selected Playback System immediately before hardware start. Any change to the way, its
+            // outputs or the selected device after compilation cancels rather than plays a stale waveform.
+            guard profiles.selectedSystemProfileID == session.playbackSystemID,
+                  acquisition.binding.matchesCurrentState(
+                      routing: profiles.selectedSystemProfile?.state.speakerRouting),
+                  engine.routeConfiguration.selectedOutputUID
+                    == acquisition.binding.carrierRoutePlan.referenceDeviceUID else {
+                throw SpeakerMeasurementLabRoutedWayError.wayChanged
+            }
+        } else if let targetBus = capability.protectedDriverBus {
             guard let routing = systemProfile.state.outputRouting,
                   let driverProcessing =
                     systemProfile.state.speakerDriverProcessing else {
@@ -490,6 +538,7 @@ final class SpeakerMeasurementLabController: ObservableObject {
         activeTransport = transport
         activeProgram = analysisProgram
         activeProtectedProvenance = protectedProvenance
+        activeRoutedWayProvenance = routedProvenance
         activeStep = step
         do {
             try transport.start()
@@ -579,6 +628,7 @@ final class SpeakerMeasurementLabController: ObservableObject {
                 excitationLevelDBFS: program.settings.levelDBFS,
                 protectedDriverProvenance:
                     activeProtectedProvenance,
+                routedWayProvenance: activeRoutedWayProvenance,
                 sharedClockReference: referenceEvidence
             )
             session = try orchestrator.appending(
@@ -591,6 +641,7 @@ final class SpeakerMeasurementLabController: ObservableObject {
             activeStep = nil
             activeCapabilityPlan = nil
             activeProtectedProvenance = nil
+            activeRoutedWayProvenance = nil
             state = try orchestrator.progress(for: session).complete
                 ? .reviewing : .ready
             lastErrorDescription = nil
@@ -711,6 +762,7 @@ final class SpeakerMeasurementLabController: ObservableObject {
         activeStep = nil
         activeCapabilityPlan = nil
         activeProtectedProvenance = nil
+        activeRoutedWayProvenance = nil
     }
 
     private func recordFailure(_ error: Error) {

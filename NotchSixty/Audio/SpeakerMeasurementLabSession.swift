@@ -31,6 +31,15 @@ struct SpeakerMeasurementLabProtocol:
         return id
     }
 
+    /// E8 A2b: the way of a protected routed-way protocol.
+    var protectedRoutedWayID: UUID? {
+        guard case .protectedRoutedWay(let id) = request.target else { return nil }
+        return id
+    }
+
+    /// The way a protocol sweeps, whichever routed target it uses.
+    var sweptWayID: UUID? { protectedRoutedWayID ?? routedWayID }
+
     var acousticSource: MultichannelCalibrationSource? {
         guard case .acousticSource(let source) = request.target else {
             return nil
@@ -50,7 +59,7 @@ struct SpeakerMeasurementLabProtocol:
     /// Low/Mid/High bus identity.
     var captureSource: MultichannelCalibrationSource? {
         if let acousticSource { return acousticSource }
-        if routedWayID != nil { return driverCaptureSource }
+        if sweptWayID != nil { return driverCaptureSource }
         if request.mode == .coherentMainsSubTiming,
            case .sourcePair(let main, let subwoofer) = request.target,
            let coherentLeg {
@@ -103,7 +112,7 @@ struct SpeakerMeasurementLabProtocol:
                 throw SpeakerMeasurementLabSessionError.invalidProtocol
             }
         case .protectedDriverNearField:
-            guard protectedDriverBus != nil,
+            guard protectedDriverBus != nil || protectedRoutedWayID != nil,
                   captureSource != nil,
                   nearFieldComponent == nil,
                   let excitationLevelDBFS,
@@ -239,6 +248,10 @@ struct SpeakerMeasurementLabCapture:
     /// production crossover/limiter state used for this repeat.
     var protectedDriverProvenance:
         SpeakerMeasurementLabProtectedDriverCaptureProvenance? = nil
+    /// E8 A2b: receipt of a live routed-way capture. Required for the protected routed-way protocol; optional for
+    /// stored `driverNearField` captures, and validated when present.
+    var routedWayProvenance:
+        SpeakerMeasurementLabRoutedWayCaptureProvenance? = nil
     /// Optional simultaneous electrical/shared-time reference evidence.
     /// Nil preserves existing Lab archives and ordinary single-input captures.
     var sharedClockReference:
@@ -374,6 +387,21 @@ struct SpeakerMeasurementLabSession:
                     .captureIdentityMismatch
             }
 
+            if let wayID = labProtocol.sweptWayID {
+                if let provenance = capture.routedWayProvenance {
+                    guard provenance.validates(wayID: wayID) else {
+                        throw SpeakerMeasurementLabSessionError
+                            .captureIdentityMismatch
+                    }
+                } else if labProtocol.protectedRoutedWayID != nil {
+                    throw SpeakerMeasurementLabSessionError
+                        .captureIdentityMismatch
+                }
+            } else if capture.routedWayProvenance != nil {
+                throw SpeakerMeasurementLabSessionError
+                    .captureIdentityMismatch
+            }
+
             if let reference = capture.sharedClockReference {
                 guard let configuration =
                         sharedClockReferenceConfiguration,
@@ -406,6 +434,15 @@ struct SpeakerMeasurementLabSession:
                   group.map(\.repeatIndex) == Array(0..<group.count) else {
                 throw SpeakerMeasurementLabSessionError
                     .captureSequenceInvalid
+            }
+            if labProtocol.sweptWayID != nil,
+               let first = group.first?.routedWayProvenance {
+                guard group.allSatisfy({
+                    $0.routedWayProvenance == first
+                }) else {
+                    throw SpeakerMeasurementLabSessionError
+                        .captureSequenceInvalid
+                }
             }
             if labProtocol.protectedDriverBus != nil,
                let first = group.first?.protectedDriverProvenance {
@@ -526,7 +563,8 @@ struct SpeakerMeasurementLabSessionStep: Equatable, Sendable {
             return "Place the microphone \(format(geometry.distanceMeters)) m from \(labProtocol.name) in the selected near-field location; keep geometry fixed for \(repeatText)."
         case .protectedDriverNearField:
             let bus = labProtocol.protectedDriverBus?.displayName
-                ?? "protected driver"
+                ?? (labProtocol.protectedRoutedWayID != nil
+                    ? labProtocol.name : "protected driver")
             return "Place the microphone \(format(geometry.distanceMeters)) m from \(bus). The sweep is pre-rendered through the active crossover and target limiter; keep geometry fixed for \(repeatText)."
         case .driverNearField:
             return "Place the microphone \(format(geometry.distanceMeters)) m from the cone of \(labProtocol.name), close to the dust cap. Only this driver plays, with a sweep limited to its passband; keep geometry fixed for \(repeatText)."
@@ -692,6 +730,8 @@ struct SpeakerMeasurementLabCaptureBuilder: Sendable {
         excitationLevelDBFS: Double? = nil,
         protectedDriverProvenance:
             SpeakerMeasurementLabProtectedDriverCaptureProvenance? = nil,
+        routedWayProvenance:
+            SpeakerMeasurementLabRoutedWayCaptureProvenance? = nil,
         sharedClockReference:
             SpeakerMeasurementLabSharedClockReferenceEvidence? = nil
     ) throws -> SpeakerMeasurementLabCapture {
@@ -715,6 +755,7 @@ struct SpeakerMeasurementLabCaptureBuilder: Sendable {
             source: source,
             protectedDriverProvenance:
                 protectedDriverProvenance,
+            routedWayProvenance: routedWayProvenance,
             sharedClockReference: sharedClockReference,
             impulseResponse: analyzed.impulseResponse,
             transferFunction: response,

@@ -8,6 +8,8 @@ struct SpeakerMeasurementLabProtocolDraft: Equatable, Sendable {
     var protectedDriverBus: SpeakerOutputBus = .leftLow
     /// E8 B2: the routed way a `driverNearField` draft measures (set by the linearisation UI, B3).
     var routedWayID: UUID?
+    /// E8 A2b: a protected-driver draft targets a routed way (`e8.lab-routed-ways` on) instead of a legacy bus.
+    var usesRoutedWays = false
     var distanceMeters: Double = 1.0
     var horizontalAngleDegrees: Double = 0
     var verticalAngleDegrees: Double = 0
@@ -121,6 +123,25 @@ struct SpeakerMeasurementLabProtocolDraft: Equatable, Sendable {
                             label: trimmed.isEmpty ? nil : trimmed,
                             effectiveRadiatingAreaSquareMeters: nil
                         )
+                )
+            ]
+
+        case .protectedDriverNearField where usesRoutedWays:
+            guard let routedWayID else {
+                throw SpeakerMeasurementLabError.invalidTarget
+            }
+            protocols = [
+                SpeakerMeasurementLabProtocol(
+                    id: idFactory(),
+                    name: name,
+                    request: SpeakerMeasurementLabRequest(
+                        mode: mode,
+                        target: .protectedRoutedWay(routedWayID),
+                        geometry: geometry,
+                        repeatCount: repeatCount
+                    ),
+                    excitationLevelDBFS: explicitLevel,
+                    driverCaptureSource: .speaker(speakerRole)
                 )
             ]
 
