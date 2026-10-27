@@ -62,6 +62,8 @@ struct SpeakerMeasurementLabGeometry: Codable, Equatable, Sendable {
 enum SpeakerMeasurementLabTarget: Codable, Equatable, Sendable {
     case acousticSource(MultichannelCalibrationSource)
     case protectedDriverBus(SpeakerOutputBus)
+    /// E8 A2b: the protected, band-limited sweep of one routed way (replaces the bus target; the bus target stays until A2c).
+    case protectedRoutedWay(UUID)
     /// E8 B2: one `RoutedWay` of the speaker routing matrix, by its id.
     case routedWay(UUID)
     case sourcePair(
@@ -116,7 +118,8 @@ struct SpeakerMeasurementLabRequest: Codable, Equatable, Sendable {
                     .isProtectedSplitBus(bus) else {
                 throw SpeakerMeasurementLabError.invalidTarget
             }
-        case (.driverNearField, .routedWay):
+        case (.protectedDriverNearField, .protectedRoutedWay),
+             (.driverNearField, .routedWay):
             break
         case (
             .coherentMainsSubTiming,
@@ -140,6 +143,8 @@ enum SpeakerMeasurementLabBlockReason: Equatable, Sendable {
     case authenticatedSharedClockRequired
     /// The routed way is not in the routing matrix, or its live acquisition path is not available yet.
     case routedWayAcquisitionUnavailable(UUID)
+    /// The way is known but cannot be excited now (no endpoint on the selected output, narrow passband, no carrier).
+    case routedWayBlocked(UUID, String)
 
     var message: String {
         switch self {
@@ -150,7 +155,9 @@ enum SpeakerMeasurementLabBlockReason: Equatable, Sendable {
         case .authenticatedSharedClockRequired:
             return "Coherent mains/sub timing requires authenticated shared playback/capture clock provenance; independent source sweeps are not sufficient."
         case .routedWayAcquisitionUnavailable:
-            return "Live per-driver acquisition needs a band-limited, limiter-protected sweep to a single routed way; that path is not available yet, so the lab only analyses captures already in a session."
+            return "Live per-driver acquisition needs a band-limited, limiter-protected way in the routing matrix, and the routed-way lab turned on; otherwise the lab only analyses captures already in a session."
+        case .routedWayBlocked(_, let reason):
+            return "This driver cannot be swept now: \(reason)"
         }
     }
 }
@@ -182,9 +189,14 @@ struct SpeakerMeasurementLabPlan: Equatable, Sendable {
     /// Non-nil only for PR106's dedicated crossover/limiter-preserving path.
     /// It never falls through to the legacy raw physical-lane planner.
     var protectedDriverBus: SpeakerOutputBus? = nil
+    /// Non-nil only when a routed way is ready for the protected, band-limited sweep (E8 A2b).
+    var protectedRoutedWayID: UUID? = nil
 
     var canStartMeasurement: Bool {
         guard blockReasons.isEmpty else { return false }
+        if protectedRoutedWayID != nil {
+            return delegatedTransportPlans.isEmpty
+        }
         if protectedDriverBus != nil {
             return delegatedTransportPlans.isEmpty
         }
@@ -208,6 +220,8 @@ struct SpeakerMeasurementLabCapabilityPlanner: Sendable {
         speakerDriverProcessing: SpeakerDriverProcessingConfiguration?,
         bassManagementConfiguration: BassManagementConfiguration? = nil,
         speakerRouting: SpeakerRoutingConfiguration? = nil,
+        routedWayAcquisitionEnabled: Bool = false,
+        routedWayEnvironment: SpeakerMeasurementLabRoutedWayEnvironment? = nil,
         coherentLeg: SpeakerMeasurementLabCoherentLeg? = nil,
         sharedClockReferenceAvailable: Bool = false
     ) throws -> SpeakerMeasurementLabPlan {
@@ -327,25 +341,35 @@ struct SpeakerMeasurementLabCapabilityPlanner: Sendable {
             .driverNearField,
             .routedWay(let wayID)
         ):
-            // Never sweeps a driver here: an unknown way and the unwired live path both block, so no
-            // full-band excitation can reach a tweeter or midrange through this plan.
-            _ = speakerRouting
-            return SpeakerMeasurementLabPlan(
-                request: request,
-                delegatedTransportPlans: [],
-                analysisProducts: [
+            return routedWayPlan(
+                request: request, wayID: wayID, routing: speakerRouting,
+                enabled: routedWayAcquisitionEnabled, environment: routedWayEnvironment,
+                products: [
                     .magnitudeResponse,
                     .phaseResponse,
                     .directArrival,
                     .fullBandNearFieldMagnitude,
                 ],
-                blockReasons: [.routedWayAcquisitionUnavailable(wayID)],
                 warnings: [
                     "Near-field driver response is the driver at the microphone, close to the cone; it is not a listening-position response.",
                     "Each driver is captured alone, with the sweep limited to its passband and the way's limiter active; this protocol analyses stored captures and never mutates routing."
+                ])
+        case (
+            .protectedDriverNearField,
+            .protectedRoutedWay(let wayID)
+        ):
+            return routedWayPlan(
+                request: request, wayID: wayID, routing: speakerRouting,
+                enabled: routedWayAcquisitionEnabled, environment: routedWayEnvironment,
+                products: [
+                    .magnitudeResponse,
+                    .phaseResponse,
+                    .directArrival,
                 ],
-                phaseReferenceAuthenticated: false
-            )
+                warnings: [
+                    "Protected-driver response includes the way's crossover, EQ, trim, polarity, delay and limiter; it is not a bare-driver specification.",
+                    "Live acquisition re-reads the way and its output immediately before playback and stops if either changed."
+                ])
         case (
             .coherentMainsSubTiming,
             .sourcePair(let main, let subwoofer)
@@ -412,6 +436,46 @@ struct SpeakerMeasurementLabCapabilityPlanner: Sendable {
             blockReasons: blockers,
             warnings: warnings,
             phaseReferenceAuthenticated: false
+        )
+    }
+}
+
+extension SpeakerMeasurementLabCapabilityPlanner {
+    /// E8 A2b: one plan for both routed-way modes. It never sweeps unless the way exists, is band-limited and
+    /// limiter-protected, and resolves to a physical channel on the selected output.
+    fileprivate func routedWayPlan(
+        request: SpeakerMeasurementLabRequest,
+        wayID: UUID,
+        routing: SpeakerRoutingConfiguration?,
+        enabled: Bool,
+        environment: SpeakerMeasurementLabRoutedWayEnvironment?,
+        products: [SpeakerMeasurementLabAnalysisProduct],
+        warnings: [String]
+    ) -> SpeakerMeasurementLabPlan {
+        var blockers: [SpeakerMeasurementLabBlockReason] = []
+        var readyWay: UUID?
+        if !enabled || !Self.protectedWayReady(routing: routing, wayID: wayID) {
+            blockers = [.routedWayAcquisitionUnavailable(wayID)]
+        } else if let environment {
+            do {
+                _ = try SpeakerMeasurementLabRoutedWayRoutePlanner().plan(
+                    wayID: wayID, routing: routing, environment: environment)
+                readyWay = wayID
+            } catch {
+                blockers = [.routedWayBlocked(
+                    wayID, (error as? LocalizedError)?.errorDescription ?? "\(error)")]
+            }
+        } else {
+            blockers = [.routedWayBlocked(wayID, "no output device is selected.")]
+        }
+        return SpeakerMeasurementLabPlan(
+            request: request,
+            delegatedTransportPlans: [],
+            analysisProducts: products,
+            blockReasons: blockers,
+            warnings: warnings,
+            phaseReferenceAuthenticated: false,
+            protectedRoutedWayID: blockers.isEmpty ? readyWay : nil
         )
     }
 }

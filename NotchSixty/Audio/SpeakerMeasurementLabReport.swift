@@ -956,7 +956,7 @@ struct SpeakerMeasurementLabReportBuilder: Sendable {
             return source.displayName
         case .protectedDriverBus(let bus):
             return bus.displayName
-        case .routedWay:
+        case .routedWay, .protectedRoutedWay:
             return "Routed driver"
         case .sourcePair(let main, let subwoofer):
             return "\(main.displayName) + \(subwoofer.displayName)"

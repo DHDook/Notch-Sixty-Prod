@@ -24,6 +24,7 @@ private struct SpeakerMeasurementLabExportDocument: FileDocument {
 }
 
 struct ProductionSpeakerMeasurementLabWorkspace: View {
+    @EnvironmentObject private var featureFlags: FeatureFlags
     @ObservedObject var engine: AudioIOEngine
     @ObservedObject var microphone: RoomCorrectionCalibrationController
     @ObservedObject var profiles: ProductProfileController
@@ -132,6 +133,8 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
             .padding(28)
             .frame(maxWidth: 1_100, alignment: .topLeading)
         }
+        .onAppear { syncRoutedWays() }
+        .onChange(of: routedWaysOn) { _, _ in syncRoutedWays() }
         .task {
             microphone.prepareForUse()
             refreshRecentSessions()
@@ -568,6 +571,11 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
                 Text("Subwoofer")
                 subwooferPicker
             }
+        case .protectedDriverNearField where routedWaysOn:
+            GridRow {
+                Text("Driver")
+                routedWayPicker
+            }
         case .protectedDriverNearField:
             GridRow {
                 Text("Protected Bus")
@@ -597,17 +605,7 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
         case .driverNearField:
             GridRow {
                 Text("Driver")
-                let choices = engine.speakerRoutingConfiguration.map(SpeakerRoutingEditorModel.driverChoices) ?? []
-                if choices.isEmpty {
-                    Text("Add a speaker with ways in the routing editor first.").foregroundStyle(.secondary)
-                } else {
-                    Picker("Driver", selection: $draft.routedWayID) {
-                        Text("Choose a driver").tag(UUID?.none)
-                        ForEach(choices) { Text($0.title).tag(UUID?.some($0.wayID)) }
-                    }
-                    .labelsHidden().frame(minWidth: 220)
-                    speakerPicker
-                }
+                routedWayPicker
             }
         case .coherentMainsSubTiming:
             GridRow {
@@ -617,6 +615,31 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
                     subwooferPicker
                 }
             }
+        }
+    }
+
+    private var routedWaysOn: Bool { featureFlags.isEnabled(.labRoutedWays) }
+
+    /// Swift decides from the flag; the controller and the draft only carry the result.
+    private func syncRoutedWays() {
+        lab.routedWaysEnabled = routedWaysOn
+        draft.usesRoutedWays = routedWaysOn
+    }
+
+    /// The routed ways of the selected system (its stored routing, which is what the lab sweeps).
+    @ViewBuilder
+    private var routedWayPicker: some View {
+        let routing = profiles.selectedSystemProfile?.state.speakerRouting ?? engine.speakerRoutingConfiguration
+        let choices = routing.map(SpeakerRoutingEditorModel.driverChoices) ?? []
+        if choices.isEmpty {
+            Text("Add a speaker with ways in the routing editor first.").foregroundStyle(.secondary)
+        } else {
+            Picker("Driver", selection: $draft.routedWayID) {
+                Text("Choose a driver").tag(UUID?.none)
+                ForEach(choices) { Text($0.title).tag(UUID?.some($0.wayID)) }
+            }
+            .labelsHidden().frame(minWidth: 220)
+            speakerPicker
         }
     }
 
@@ -1754,6 +1777,8 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
             }
         case .subwooferNearField:
             return subwooferIndices.contains(draft.subwooferIndex)
+        case .protectedDriverNearField where routedWaysOn:
+            return draft.routedWayID != nil
         case .protectedDriverNearField:
             return protectedDriverBuses.contains {
                 $0.rawValue == draft.protectedDriverBus.rawValue
