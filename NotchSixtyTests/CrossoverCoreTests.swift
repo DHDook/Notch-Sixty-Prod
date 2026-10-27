@@ -8,7 +8,7 @@ final class CrossoverCoreTests: XCTestCase {
     private let rates: [Double] = [44_100, 48_000, 88_200, 96_000, 176_400, 192_000, 352_800, 384_000]
 
     func testAbiVersionAndFlag() {
-        XCTAssertEqual(CrossoverCore.abiVersion, 3)
+        XCTAssertEqual(CrossoverCore.abiVersion, 4)
         XCTAssertTrue(FeatureFlag.all.contains(.routingMatrix))
         XCTAssertEqual(FeatureFlag.routingMatrix.id, "e8.routing-matrix")
         XCTAssertFalse(FeatureFlag.routingMatrix.defaultEnabled)
@@ -63,5 +63,57 @@ final class CrossoverCoreTests: XCTestCase {
         XCTAssertThrowsError(try CrossoverCore.design(badCorner, highPass: false, sampleRate: 48_000)) {
             XCTAssertEqual($0 as? CrossoverCore.CoreError, .status(Int32(N60_XOVER_ERR_CORNER)))
         }
+    }
+
+    // E8 S8: the wrapper designs, merges into DRIVER_FIR content and verifies a synthetic driver at every rate.
+    private func syntheticDriver() -> CrossoverCore.ResponseCapture {
+        var hz: [Double] = [], db: [Double] = []
+        var f = 20.0
+        while f <= 20_000 {
+            func peak(_ f0: Double, _ gain: Double, _ q: Double) -> Double {
+                let a = pow(10, gain / 40), x = f / f0
+                let num = hypot(1 - x * x, x * a / q), den = hypot(1 - x * x, x / (a * q))
+                return 20 * log10(num / den)
+            }
+            let x = f / 90
+            let rolloff = 20 * log10(x * x / hypot(1 - x * x, x / 0.9))
+            hz.append(f)
+            db.append(88 + rolloff + peak(1_200, 4, 1.5) + peak(6_000, 8, 3))
+            f *= pow(2, 1.0 / 48)
+        }
+        return .init(frequenciesHz: hz, levelsDB: db)
+    }
+
+    func testDriverLinearisationAtEveryRate() throws {
+        let hp = CrossoverCore.FilterSpec(family: .linkwitzRiley, order: 4, cornerHz: 300)
+        let lp = CrossoverCore.FilterSpec(family: .linkwitzRiley, order: 4, cornerHz: 3_000)
+        let capture = syntheticDriver()
+        for rate in rates {
+            for linear in [false, true] {
+                let design = try CrossoverCore.linearise(
+                    nearField: capture, highPass: hp, lowPass: lp, sampleRate: rate, linearPhase: linear)
+                XCTAssertLessThan(design.rippleAfterDB, 0.5, "rate \(rate)")
+                XCTAssertGreaterThan(design.rippleBeforeDB, 2)
+                XCTAssertLessThanOrEqual(design.maxBoostDB, CrossoverCore.DriverLinearisation.maximumBoostDB + 1e-9)
+                for (hz, c) in zip(design.gridHz, design.correctionDB) where hz < 300 {
+                    XCTAssertLessThanOrEqual(c, 1e-12, "boost below the high-pass corner at \(hz)")
+                }
+                let fir = try CrossoverCore.linearisedDriverFIR(design, highPass: hp, lowPass: lp, sampleRate: rate)
+                XCTAssertLessThan(
+                    try CrossoverCore.verifyLinearisation(design, fir: fir, highPass: hp, lowPass: lp, sampleRate: rate), 0.5,
+                    "rate \(rate) linear \(linear)")
+                XCTAssertEqual(fir.stageKind == N60_STAGE_DRIVER_FIR_TWO_BAND.rawValue, fir.plan.twoBand)
+            }
+        }
+    }
+
+    func testDriverLinearisationRejectsBadInput() {
+        let hp = CrossoverCore.FilterSpec(family: .linkwitzRiley, order: 4, cornerHz: 300)
+        XCTAssertThrowsError(try CrossoverCore.linearise(
+            nearField: .init(frequenciesHz: [100, 50], levelsDB: [0, 0]), highPass: hp, lowPass: nil,
+            sampleRate: 48_000, linearPhase: false))
+        XCTAssertThrowsError(try CrossoverCore.linearise(
+            nearField: .init(frequenciesHz: [100], levelsDB: []), highPass: hp, lowPass: nil,
+            sampleRate: 48_000, linearPhase: false))
     }
 }

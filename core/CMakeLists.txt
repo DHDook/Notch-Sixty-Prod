@@ -133,6 +133,11 @@ target_include_directories(n60core_route_test PRIVATE src)
 target_link_libraries(n60core_route_test PRIVATE n60core)
 add_test(NAME n60core_route COMMAND n60core_route_test)
 
+# E8 S8: near-field driver linearisation (n60_xover_linearise_*).
+add_executable(n60core_xover_linearise_test tests/test_xover_linearise.cpp)
+target_link_libraries(n60core_xover_linearise_test PRIVATE n60core)
+add_test(NAME n60core_xover_linearise COMMAND n60core_xover_linearise_test)
+
 # E8 S7: linear-phase FIR crossovers (n60_xover_fir_*, N60_STAGE_DRIVER_FIR).
 add_executable(n60core_xover_fir_test tests/test_xover_fir.cpp)
 target_link_libraries(n60core_xover_fir_test PRIVATE n60core)
