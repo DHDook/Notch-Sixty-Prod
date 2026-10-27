@@ -4,7 +4,7 @@ project(n60core LANGUAGES C CXX)
 
 add_library(n60core STATIC src/graph.cpp src/snapshot.cpp src/fft.cpp src/stages_dsp.cpp src/stages_system.cpp src/stages_matrix.cpp src/stages_generator.cpp src/stages_route.cpp src/layout.cpp
     src/measure/offline_fft.cpp src/measure/ess.cpp src/measure/deconvolve.cpp src/measure/reference_room.cpp src/measure/timing.cpp src/measure/distortion.cpp src/measure/decay.cpp src/measure/waterfall.cpp src/measure/monitor_ring.cpp src/measure/spl.cpp src/measure/rta.cpp
-    src/correct/minphase.cpp src/correct/design.cpp src/correct/synth.cpp src/correct/bass.cpp
+    src/correct/minphase.cpp src/correct/design.cpp src/correct/synth.cpp src/correct/bass.cpp src/correct/multisub_search.cpp
     src/xover/xover.cpp)
 target_compile_features(n60core PUBLIC cxx_std_20)
 target_include_directories(n60core PUBLIC include)
@@ -142,3 +142,8 @@ add_test(NAME n60core_xover_linearise COMMAND n60core_xover_linearise_test)
 add_executable(n60core_xover_fir_test tests/test_xover_fir.cpp)
 target_link_libraries(n60core_xover_fir_test PRIVATE n60core)
 add_test(NAME n60core_xover_fir COMMAND n60core_xover_fir_test)
+
+# E8 A6a: multi-sub delay, gain and polarity search (n60/correct.h section 6).
+add_executable(n60core_correct_multisub_test tests/test_correct_multisub.cpp)
+target_link_libraries(n60core_correct_multisub_test PRIVATE n60core)
+add_test(NAME n60core_correct_multisub COMMAND n60core_correct_multisub_test)

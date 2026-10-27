@@ -67,6 +67,7 @@
 		E10A00000000000000000023 /* synth.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E10A00000000000000000013 /* synth.cpp */; };
 		E10A00000000000000000033 /* RoomCorrectionLanePlan.swift in Sources */ = {isa = PBXBuildFile; fileRef = E10A00000000000000000043 /* RoomCorrectionLanePlan.swift */; };
 		E10A00000000000000000024 /* bass.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E10A00000000000000000014 /* bass.cpp */; };
+		E8A600000000000000000002 /* multisub_search.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E8A600000000000000000001 /* multisub_search.cpp */; };
 		E8A000000000000000000021 /* xover.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E8A000000000000000000011 /* xover.cpp */; };
 		E8A000000000000000000031 /* CrossoverCore.swift in Sources */ = {isa = PBXBuildFile; fileRef = E8A000000000000000000041 /* CrossoverCore.swift */; };
 		E8A000000000000000000032 /* CrossoverCoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E8A000000000000000000042 /* CrossoverCoreTests.swift */; };
@@ -534,6 +535,7 @@
 		E10A00000000000000000013 /* synth.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = correct/synth.cpp; sourceTree = "<group>"; };
 		E10A00000000000000000043 /* RoomCorrectionLanePlan.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomCorrectionLanePlan.swift; sourceTree = "<group>"; };
 		E10A00000000000000000014 /* bass.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = correct/bass.cpp; sourceTree = "<group>"; };
+		E8A600000000000000000001 /* multisub_search.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = correct/multisub_search.cpp; sourceTree = "<group>"; };
 		E8A000000000000000000011 /* xover.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = xover/xover.cpp; sourceTree = "<group>"; };
 		E8A000000000000000000041 /* CrossoverCore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrossoverCore.swift; sourceTree = "<group>"; };
 		E8A000000000000000000042 /* CrossoverCoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrossoverCoreTests.swift; sourceTree = "<group>"; };
@@ -1003,6 +1005,7 @@
 				E10A00000000000000000012 /* design.cpp */,
 				E10A00000000000000000013 /* synth.cpp */,
 				E10A00000000000000000014 /* bass.cpp */,
+				E8A600000000000000000001 /* multisub_search.cpp */,
 				E8A000000000000000000011 /* xover.cpp */,
 				E11C0000000000000000001C /* spl.cpp */,
 				E11C0000000000000000001B /* monitor_ring.cpp */,
@@ -1538,6 +1541,7 @@
 				E10A00000000000000000022 /* design.cpp in Sources */,
 				E10A00000000000000000023 /* synth.cpp in Sources */,
 				E10A00000000000000000024 /* bass.cpp in Sources */,
+				E8A600000000000000000002 /* multisub_search.cpp in Sources */,
 				E8A000000000000000000021 /* xover.cpp in Sources */,
 				E11C0000000000000000003B /* spl.cpp in Sources */,
 				E11C0000000000000000003A /* monitor_ring.cpp in Sources */,

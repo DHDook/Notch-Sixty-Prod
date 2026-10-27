@@ -54,7 +54,7 @@ build_core_objs() {
     CORE_OK=1
     local src
     for src in graph snapshot fft stages_dsp stages_system stages_matrix stages_generator stages_route layout \
-        measure/offline_fft measure/ess measure/deconvolve measure/reference_room measure/timing measure/distortion measure/decay measure/waterfall measure/monitor_ring measure/spl measure/rta correct/minphase correct/design correct/synth correct/bass xover/xover; do
+        measure/offline_fft measure/ess measure/deconvolve measure/reference_room measure/timing measure/distortion measure/decay measure/waterfall measure/monitor_ring measure/spl measure/rta correct/minphase correct/design correct/synth correct/bass correct/multisub_search xover/xover; do
         local obj="$OUT/n60core_${src//\//_}.o"
         if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -fno-exceptions -fno-rtti -Icore/include -Icore/src \
             -c "core/src/$src.cpp" -o "$obj"; then
@@ -85,9 +85,18 @@ harness pr43_driver_runtime "${STRICT[@]}" -include stddef.h -I"$RT" ci/validate
 # headphone and binaural DSP, calibration, spatial, transport, head tracking.
 harness pr53_channel_router "${STRICT[@]}" -I"$RT" ci/validate_pr53_channel_router.c -lm
 for name in pr54_nchannel_lanes pr55_multichannel_bass_management pr55_subwoofer_tuning pr56_headphone_dsp \
-    pr57_binaural_renderer pr58_multichannel_calibration pr59_advanced_spatial pr60_nchannel_transport \
-    pr60_coreaudio_transport pr66_head_tracking e8_multi_sub_tools; do
+    pr57_binaural_renderer pr59_advanced_spatial pr60_nchannel_transport \
+    pr60_coreaudio_transport pr66_head_tracking; do
     harness "$name" "${STRICT[@]}" -O2 -I"$RT" "ci/validate_$name.c" -lm
+done
+# The multi-sub optimiser header calls n60_correct_multisub_search (E8 A6a), so these link libn60core.
+if selected pr58_multichannel_calibration || selected e8_multi_sub_tools; then
+    build_core_objs
+fi
+for name in pr58_multichannel_calibration e8_multi_sub_tools; do
+    # shellcheck disable=SC2086
+    harness "$name" "${STRICT[@]}" -O2 -I"$RT" -Icore/include -Ici "ci/validate_$name.c" \
+        ${CORE_OBJS[@]+"${CORE_OBJS[@]}"} -lc++ -lm
 done
 
 # Stereo realtime kernel and bridge contracts (PR35, PR38, PR41).
@@ -228,6 +237,21 @@ if selected e10_correct_core; then
         fi
     else
         failed+=(e10_correct_core)
+    fi
+fi
+
+# E8 A6a: multi-sub delay, gain and polarity search on its own table.
+if selected e8_multisub_core; then
+    build_core_objs
+    if [ "$CORE_OK" = 1 ]; then
+        if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -Icore/include -Icore/src core/tests/test_correct_multisub.cpp \
+            "${CORE_OBJS[@]}" -o "$OUT/e8_core_correct_multisub" && "$OUT/e8_core_correct_multisub"; then
+            passed+=(e8_core_correct_multisub)
+        else
+            failed+=(e8_core_correct_multisub)
+        fi
+    else
+        failed+=(e8_multisub_core)
     fi
 fi
 

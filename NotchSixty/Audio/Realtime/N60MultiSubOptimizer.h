@@ -6,9 +6,11 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <stddef.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "N60MultichannelCalibration.h"
+#include "n60/correct.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -32,6 +34,10 @@ typedef struct {
     uint32_t eqPasses;
     float eqRegularization;
     float eqSmoothness;
+    /// E8 A6a: multi-start search of the delay, gain and polarity grid (n60/correct.h section 6).
+    uint32_t searchStarts;
+    uint32_t searchRounds;
+    uint32_t searchEvaluationBudget;
 } N60MultiSubOptimizationSettings;
 
 typedef struct {
@@ -46,6 +52,10 @@ typedef struct {
     float objective;
     float weightedTargetErrorDBSquared;
     float seatVarianceDBSquared;
+    /// Search diagnostics (A6a): candidate evaluations, starts run, and whether the budget stopped the search.
+    uint64_t searchEvaluations;
+    uint32_t searchStartsRun;
+    bool searchBudgetExhausted;
 } N60MultiSubOptimizationResult;
 
 static inline N60MultiSubOptimizationSettings N60MultiSubOptimizationSettingsMakeDefault(void) {
@@ -65,6 +75,9 @@ static inline N60MultiSubOptimizationSettings N60MultiSubOptimizationSettingsMak
         .eqPasses = 2u,
         .eqRegularization = 0.03f,
         .eqSmoothness = 0.08f,
+        .searchStarts = 12u,
+        .searchRounds = 24u,
+        .searchEvaluationBudget = 2000000u,
     };
 }
 
@@ -97,7 +110,14 @@ static inline bool N60MultiSubOptimizationSettingsIsValid(
         && isfinite(settings.eqRegularization)
         && settings.eqRegularization >= 0.0f
         && isfinite(settings.eqSmoothness)
-        && settings.eqSmoothness >= 0.0f;
+        && settings.eqSmoothness >= 0.0f
+        && settings.searchStarts >= 1u && settings.searchStarts <= 64u
+        && settings.searchRounds >= 1u && settings.searchRounds <= 64u
+        && settings.searchEvaluationBudget > 0u
+        && settings.maximumAdditionalDelayMs / settings.delayStepMs
+            < (float)(N60_CORRECT_MULTISUB_MAX_DELAYS - 1u)
+        && (settings.maximumGainDB - settings.minimumGainDB) / settings.gainStepDB
+            < (float)(N60_CORRECT_MULTISUB_MAX_GAINS - 1u);
 }
 
 static inline bool N60MultiSubFindSourceIndices(
@@ -317,6 +337,110 @@ static inline float N60MultiSubEvaluateOneFrequencyObjective(
         + regularization;
 }
 
+/// Builds the unit-gain response table and runs the core search (n60_correct_multisub_search). Fills gain,
+/// delay and polarity of `result`; the EQ target stays zero. Control-plane only: it allocates.
+static inline bool N60MultiSubSearchDelayGainPolarity(
+    const N60MultichannelCalibrationMatrix * _Nonnull matrix,
+    const uint32_t * _Nonnull sourceIndices,
+    uint32_t subwooferCount,
+    const float * _Nonnull targetMagnitudeDB,
+    const N60MultiSubOptimizationSettings * _Nonnull settings,
+    N60MultiSubOptimizationResult * _Nonnull result
+) {
+    const uint32_t seats = matrix->seatCount;
+    const uint32_t bins = matrix->frequencyCount;
+    const size_t tableCount = (size_t)subwooferCount * seats * bins;
+    const uint32_t delaySteps = (uint32_t)floorf(
+        settings->maximumAdditionalDelayMs / settings->delayStepMs + 0.5f);
+    const uint32_t gainSteps = (uint32_t)floorf(
+        (settings->maximumGainDB - settings->minimumGainDB) / settings->gainStepDB + 0.5f);
+    double *storage = (double *)malloc(
+        (2u * tableCount + 2u * (size_t)bins + seats + (size_t)delaySteps + 1u + (size_t)gainSteps + 1u)
+        * sizeof(double));
+    if (storage == NULL) return false;
+    double *re = storage;
+    double *im = re + tableCount;
+    double *frequency = im + tableCount;
+    double *target = frequency + bins;
+    double *weight = target + bins;
+    double *delay = weight + seats;
+    double *gain = delay + delaySteps + 1u;
+
+    bool ok = true;
+    for (uint32_t sub = 0; sub < subwooferCount && ok; ++sub) {
+        for (uint32_t seat = 0; seat < seats && ok; ++seat) {
+            const N60CalibrationMeasuredResponse *response = &matrix->responses[sourceIndices[sub]][seat];
+            const bool used = matrix->seats[seat].included && matrix->seats[seat].weight > 0.0f;
+            if (used && !response->valid) ok = false;
+            for (uint32_t bin = 0; bin < bins; ++bin) {
+                const size_t index = ((size_t)sub * seats + seat) * bins + bin;
+                double real = 0.0, imaginary = 0.0;
+                if (used) {
+                    N60MultiSubComplexContribution(matrix, response, bin, 0.0f, 0.0f, false, 0.0f, &real, &imaginary);
+                }
+                re[index] = real;
+                im[index] = imaginary;
+            }
+        }
+    }
+    for (uint32_t bin = 0; bin < bins; ++bin) {
+        frequency[bin] = matrix->frequenciesHz[bin];
+        target[bin] = targetMagnitudeDB[bin];
+    }
+    for (uint32_t seat = 0; seat < seats; ++seat) {
+        const bool used = matrix->seats[seat].included && matrix->seats[seat].weight > 0.0f;
+        weight[seat] = used ? (double)matrix->seats[seat].weight : 0.0;
+    }
+    for (uint32_t step = 0; step <= delaySteps; ++step) {
+        delay[step] = 0.001 * (double)fminf(settings->maximumAdditionalDelayMs, (float)step * settings->delayStepMs);
+    }
+    for (uint32_t step = 0; step <= gainSteps; ++step) {
+        gain[step] = (double)fminf(settings->maximumGainDB, settings->minimumGainDB + (float)step * settings->gainStepDB);
+    }
+
+    n60_correct_multisub_result found;
+    memset(&found, 0, sizeof found);
+    if (ok) {
+        n60_correct_multisub_problem problem;
+        memset(&problem, 0, sizeof problem);
+        problem.struct_size = sizeof problem;
+        problem.sub_count = subwooferCount;
+        problem.seat_count = seats;
+        problem.bin_count = bins;
+        problem.response_re = re;
+        problem.response_im = im;
+        problem.frequency_hz = frequency;
+        problem.target_db = target;
+        problem.seat_weight = weight;
+        problem.delay_seconds = delay;
+        problem.delay_count = delaySteps + 1u;
+        problem.gain_db = gain;
+        problem.gain_count = gainSteps + 1u;
+        problem.target_error_weight = settings->targetErrorWeight;
+        problem.seat_variance_weight = settings->seatVarianceWeight;
+        problem.boost_regularisation = settings->boostRegularization;
+        problem.greedy_passes = settings->coordinatePasses;
+        problem.starts = settings->searchStarts;
+        problem.rounds = settings->searchRounds;
+        problem.evaluation_budget = settings->searchEvaluationBudget;
+        ok = n60_correct_multisub_search(&problem, &found) == N60_CORRECT_OK;
+    }
+    if (ok) {
+        for (uint32_t sub = 0; sub < subwooferCount; ++sub) {
+            result->gainDB[sub] = (float)gain[found.gain_index[sub]];
+            result->additionalDelayMs[sub] = fminf(
+                settings->maximumAdditionalDelayMs,
+                (float)found.delay_index[sub] * settings->delayStepMs);
+            result->polarityInverted[sub] = found.polarity[sub] != 0u;
+        }
+        result->searchEvaluations = found.evaluations;
+        result->searchStartsRun = found.starts_run;
+        result->searchBudgetExhausted = found.budget_exhausted != 0u;
+    }
+    free(storage);
+    return ok;
+}
+
 /// Offline/control-plane coordinate optimizer. It first alternates polarity/delay
 /// and broad gain per physical sub, then derives a smooth bounded frequency-domain
 /// correction target per sub. The EQ target is intentionally a design target, not
@@ -349,71 +473,9 @@ static inline bool N60MultiSubOptimize(
     result.subwooferCount = subwooferCount;
     result.frequencyCount = matrix->frequencyCount;
 
-    for (uint32_t pass = 0; pass < settings.coordinatePasses; ++pass) {
-        for (uint32_t sub = 0; sub < subwooferCount; ++sub) {
-            float bestObjective = INFINITY;
-            float bestDelay = result.additionalDelayMs[sub];
-            bool bestPolarity = result.polarityInverted[sub];
-
-            const uint32_t delaySteps = (uint32_t)floorf(
-                settings.maximumAdditionalDelayMs / settings.delayStepMs + 0.5f
-            );
-            for (uint32_t polarity = 0; polarity < 2u; ++polarity) {
-                for (uint32_t step = 0; step <= delaySteps; ++step) {
-                    N60MultiSubOptimizationResult candidate = result;
-                    candidate.polarityInverted[sub] = polarity != 0u;
-                    candidate.additionalDelayMs[sub] = fminf(
-                        settings.maximumAdditionalDelayMs,
-                        (float)step * settings.delayStepMs
-                    );
-                    const float objective = N60MultiSubEvaluateObjective(
-                        matrix,
-                        sourceIndices,
-                        subwooferCount,
-                        targetMagnitudeDB,
-                        &settings,
-                        &candidate,
-                        NULL,
-                        NULL
-                    );
-                    if (objective < bestObjective) {
-                        bestObjective = objective;
-                        bestDelay = candidate.additionalDelayMs[sub];
-                        bestPolarity = candidate.polarityInverted[sub];
-                    }
-                }
-            }
-            result.additionalDelayMs[sub] = bestDelay;
-            result.polarityInverted[sub] = bestPolarity;
-
-            bestObjective = INFINITY;
-            float bestGain = result.gainDB[sub];
-            const uint32_t gainSteps = (uint32_t)floorf(
-                (settings.maximumGainDB - settings.minimumGainDB) / settings.gainStepDB + 0.5f
-            );
-            for (uint32_t step = 0; step <= gainSteps; ++step) {
-                N60MultiSubOptimizationResult candidate = result;
-                candidate.gainDB[sub] = fminf(
-                    settings.maximumGainDB,
-                    settings.minimumGainDB + (float)step * settings.gainStepDB
-                );
-                const float objective = N60MultiSubEvaluateObjective(
-                    matrix,
-                    sourceIndices,
-                    subwooferCount,
-                    targetMagnitudeDB,
-                    &settings,
-                    &candidate,
-                    NULL,
-                    NULL
-                );
-                if (objective < bestObjective) {
-                    bestObjective = objective;
-                    bestGain = candidate.gainDB[sub];
-                }
-            }
-            result.gainDB[sub] = bestGain;
-        }
+    if (!N60MultiSubSearchDelayGainPolarity(
+            matrix, sourceIndices, subwooferCount, targetMagnitudeDB, &settings, &result)) {
+        return false;
     }
 
     for (uint32_t pass = 0; pass < settings.eqPasses; ++pass) {

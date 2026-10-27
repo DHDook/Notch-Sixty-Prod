@@ -84,6 +84,13 @@ jobs:
             -framework Accelerate -framework CoreAudio -o "$OUT/bridge-O3"
           echo "=== realtime bridge O3 ===" | tee -a "$OUT/benchmarks.txt"
           "$OUT/bridge-O3" | tee -a "$OUT/benchmarks.txt"
+          # E8 A6a: design time of the multi-sub search (8 subs x 8 seats x 128 bins, Release build of the core unit).
+          clang++ -std=c++20 -O3 -Wall -Wextra -fno-exceptions -fno-rtti -Icore/include -c core/src/correct/multisub_search.cpp \
+            -o "$OUT/multisub_search.o"
+          clang -std=c11 -O3 -Wall -Wextra -I"$RT" -Icore/include -Ici ci/validate_e8_multi_sub_tools.c "$OUT/multisub_search.o" \
+            -lc++ -lm -o "$OUT/multisub"
+          echo "=== multi-sub search ===" | tee -a "$OUT/benchmarks.txt"
+          "$OUT/multisub" | grep '^benchmark' | tee -a "$OUT/benchmarks.txt"
           clang -std=c11 -O2 -Wall -Wextra -I"$RT" "$RT/N60Convolution.c" ci/benchmark_nonuniform_convolution.c \
             -framework Accelerate -o "$OUT/convolution"
           echo "=== non-uniform convolution ===" | tee -a "$OUT/benchmarks.txt"

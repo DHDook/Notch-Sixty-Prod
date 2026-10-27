@@ -440,6 +440,66 @@ int32_t n60_correct_bass_optimise(const n60_correct_problem *problem, const n60_
                                   n60_correct_design_grid *grids, n60_correct_bass_report *report,
                                   double *before_db, double *after_db);
 
+/*
+ * Section 6 (E8 A6a): deterministic search for the multi-subwoofer optimiser (delay, gain and polarity).
+ *
+ * Offline only (control or worker thread); allocates at entry, never from an audio callback. The input is a
+ * precomputed table: the complex response of every sub at every seat and bin at unit gain, zero extra delay and
+ * normal polarity (measured magnitude, phase and arrival included). Sub s at seat n and bin b contributes
+ *   sign * 10^(gain_db / 20) * H[s][n][b] * exp(-j 2 pi f_b delay_s)
+ * and the seat level is 10 log10 |sum over subs|^2. The objective is
+ *   target_error_weight * E_w[(L - target)^2] + seat_variance_weight * Var_w[L], averaged over bins,
+ *   plus boost_regularisation * sum over subs of max(0, gain_db)^2.
+ * The search is a multi-start local search on the delay x gain x polarity grid. Start 0 first runs
+ * `greedy_passes` cyclic coordinate sweeps (per sub: delay x polarity, then gain), then every start improves by
+ * best-improvement moves (one sub, a relative delay between two subs, a swap of two subs' settings) with a strict
+ * improvement test, so the result is never worse than the coordinate sweeps. The starts are fixed patterns and a
+ * fixed-seed SplitMix64 stream (seed 0x4E36304D53). The smallest delay is shifted to 0, and the delay span is at
+ * most min(grid span, 0.5 / smallest bin spacing). No threads, no randomness beyond the fixed seed, fixed
+ * summation order: two runs give identical bits. Errors: ERR_ARGUMENT, ERR_NONFINITE, ERR_CAPACITY, ERR_ALLOC.
+ */
+#define N60_CORRECT_MULTISUB_MAX_SUBS 8u
+#define N60_CORRECT_MULTISUB_MAX_DELAYS 4096u
+#define N60_CORRECT_MULTISUB_MAX_GAINS 512u
+#define N60_CORRECT_MULTISUB_SEED 0x4E36304D53ull
+
+typedef struct n60_correct_multisub_problem {
+    uint32_t struct_size;
+    uint32_t sub_count;   /* 1 .. N60_CORRECT_MULTISUB_MAX_SUBS */
+    uint32_t seat_count;
+    uint32_t bin_count;
+    const double *response_re; /* sub_count * seat_count * bin_count, [sub][seat][bin] */
+    const double *response_im;
+    const double *frequency_hz; /* bin_count, > 0 */
+    const double *target_db;    /* bin_count */
+    const double *seat_weight;  /* seat_count; 0 excludes the seat; at least one positive */
+    const double *delay_seconds; uint32_t delay_count; /* ascending grid, delay_seconds[0] == 0 */
+    const double *gain_db; uint32_t gain_count;        /* gain grid, ascending */
+    double target_error_weight;
+    double seat_variance_weight;
+    double boost_regularisation;
+    uint32_t greedy_passes;     /* 1 .. 8 */
+    uint32_t starts;            /* 1 .. 64 */
+    uint32_t rounds;            /* 1 .. 64 */
+    uint64_t evaluation_budget; /* candidate evaluations; checked between rounds and starts */
+} n60_correct_multisub_problem;
+
+typedef struct n60_correct_multisub_result {
+    uint32_t struct_size;
+    uint32_t delay_index[N60_CORRECT_MULTISUB_MAX_SUBS];
+    uint32_t gain_index[N60_CORRECT_MULTISUB_MAX_SUBS];
+    uint32_t polarity[N60_CORRECT_MULTISUB_MAX_SUBS]; /* 1 inverted */
+    double objective;
+    double target_error;
+    double seat_variance;
+    uint64_t evaluations;
+    uint32_t starts_run;
+    uint32_t budget_exhausted;
+    uint32_t delay_count_used; /* delay grid points kept after the span bound */
+} n60_correct_multisub_result;
+
+int32_t n60_correct_multisub_search(const n60_correct_multisub_problem *problem, n60_correct_multisub_result *result);
+
 #ifdef __cplusplus
 }
 #endif
