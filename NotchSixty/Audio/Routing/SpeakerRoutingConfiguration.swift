@@ -123,13 +123,15 @@ struct SpeakerRoutingConfiguration: Codable, Equatable, Sendable {
 }
 
 /// The common cases. Each builds a configuration from physical endpoints; none reuses a legacy mode type.
-enum SpeakerRoutingTemplate: Sendable {
+enum SpeakerRoutingTemplate: CaseIterable, Identifiable, Sendable {
     /// Each main lane drives one full-range output; each sub lane drives one output.
     case mainsPlusSub
     /// Each main is a low way plus a high way split at one corner (Linkwitz-Riley order 4).
     case twoWay
     /// Each main is low, mid and high ways split at two corners.
     case threeWay
+
+    var id: Self { self }
 
     struct Main: Sendable {
         var lane: Int
@@ -174,6 +176,46 @@ enum SpeakerRoutingTemplate: Sendable {
                 ways: [RoutedWay(name: "Sub \(index + 1)", endpoint: endpoint)]))
         }
         return SpeakerRoutingConfiguration(speakers: speakers)
+    }
+
+    /// E8 A1: the corners the picker uses for a fresh template (none, one or two, ascending).
+    var defaultCrossoverHz: [Double] {
+        switch self {
+        case .mainsPlusSub: return []
+        case .twoWay: return [2_000]
+        case .threeWay: return [400, 3_000]
+        }
+    }
+
+    var displayName: String {
+        switch self {
+        case .mainsPlusSub: return "Mains + Sub"
+        case .twoWay: return "2-way"
+        case .threeWay: return "3-way"
+        }
+    }
+
+    /// The template a configuration still has the shape of, or nil for anything customised (a matrix, speakers with
+    /// differing way counts, filters off the template layout). Trim, EQ, delay and filter choices do not change the shape.
+    static func detect(_ configuration: SpeakerRoutingConfiguration) -> SpeakerRoutingTemplate? {
+        guard configuration.matrix.isEmpty else { return nil }
+        let mains = configuration.speakers.filter { $0.source.kind == .program }
+        let subs = configuration.speakers.filter { $0.source.kind == .sub }
+        guard let count = mains.first?.ways.count, (1...3).contains(count),
+              mains.allSatisfy({ $0.ways.count == count }),
+              subs.allSatisfy({ $0.ways.count == 1 && $0.ways[0].highPass == nil && $0.ways[0].lowPass == nil }),
+              mains.count + subs.count == configuration.speakers.count else { return nil }
+        for main in mains {
+            for (index, way) in main.ways.enumerated() {
+                if (way.highPass == nil) != (index == 0) { return nil }
+                if (way.lowPass == nil) != (index == count - 1) { return nil }
+            }
+        }
+        switch count {
+        case 1: return .mainsPlusSub
+        case 2: return .twoWay
+        default: return .threeWay
+        }
     }
 
     private static func wayNames(_ count: Int) -> [String] {

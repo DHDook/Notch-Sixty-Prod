@@ -36,6 +36,27 @@ final class SpeakerRoutingEditorTests: XCTestCase {
         XCTAssertEqual(committed.count, 1)
     }
 
+    func testTemplateDetectionAndDeviceApply() {
+        let m = model(subs: 1)
+        XCTAssertNil(m.currentTemplate)
+        for template in SpeakerRoutingTemplate.allCases {
+            XCTAssertTrue(m.applyTemplate(template, deviceUID: "dev"))
+            XCTAssertEqual(m.currentTemplate, template)
+            XCTAssertEqual(m.configuration.wayCount, 2 * template.waysPerMain + 1)
+            XCTAssertTrue(m.validation.isValid)
+            // Outputs run in channel order with no reuse.
+            let channels = m.configuration.outputEndpoints.map(\.channelIndex)
+            XCTAssertEqual(channels, Array(0..<UInt32(channels.count)))
+        }
+        // Edits that keep the shape keep the template; a raw matrix entry makes it custom.
+        m.setEnabled(true)
+        XCTAssertEqual(m.currentTemplate, .threeWay)
+        m.replace({ var c = m.configuration; c.matrix.append(RoutingMatrixEntry(source: .program(0), output: ep(20))); return c }())
+        XCTAssertNil(m.currentTemplate)
+        // Legacy-only state (no routing speakers) stays settable elsewhere and reads as custom here.
+        XCTAssertNil(SpeakerRoutingTemplate.detect(SpeakerRoutingConfiguration(enabled: false)))
+    }
+
     func testEditsMapToConfiguration() throws {
         let m = model()
         twoWay(m)
