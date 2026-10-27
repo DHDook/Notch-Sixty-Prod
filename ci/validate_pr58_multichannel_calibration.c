@@ -213,7 +213,7 @@ int main(void) {
     subSettings.maximumGainDB = 0.0f;
     subSettings.coordinatePasses = 1u;
     subSettings.eqPasses = 0u;
-    uint32_t subIndices[N60_MAX_SUBWOOFER_OUTPUTS] = {0};
+    uint32_t subIndices[N60_CALIBRATION_MAX_SUBWOOFERS] = {0};
     assert(N60MultiSubFindSourceIndices(&subs, 2u, subIndices));
     N60MultiSubOptimizationResult baseline = {0};
     baseline.subwooferCount = 2u;

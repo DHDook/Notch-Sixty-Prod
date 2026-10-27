@@ -179,7 +179,7 @@ Gate G2 passed on 2026-10-25 (commit 07e82c6)
 - [ ] Any number of ways per speaker, on any layout, not stereo only
 - [x] Linear-phase FIR crossovers reusing the Speaker Optimizer's linear-phase synthesis
 - [x] Driver linearisation from Measurement Lab near-field captures
-- [ ] Raise the subwoofer limit from 4 to 8 (core bass management already supports 8 sub lanes since E6 S7b, ABI v7)
+- [x] Raise the subwoofer limit from 4 to 8 (core bass management already supports 8 sub lanes since E6 S7b, ABI v7)
 - [x] Advanced pipeline view for power users, plus CamillaDSP YAML import alongside the existing export
 - [x] Migrate existing bi/tri-amp profiles automatically
 
