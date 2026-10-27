@@ -10,6 +10,10 @@ final class SpeakerRoutingEditorModel: ObservableObject {
     @Published private(set) var configuration: SpeakerRoutingConfiguration
     @Published var context: SpeakerRoutingContext
 
+    /// E8 B3: linearisations taken off a way for the A side of an A/B, keyed by way. Session-only: the configuration
+    /// holds nil while a way is bypassed, so nothing stale ever reaches a saved profile or the engine.
+    @Published private(set) var bypassedLinearisations: [UUID: RoutedWayLinearisation] = [:]
+
     /// Called after every edit with the new configuration. The view wires this to the engine.
     var onCommit: ((SpeakerRoutingConfiguration) -> Void)?
 
@@ -128,6 +132,95 @@ final class SpeakerRoutingEditorModel: ObservableObject {
 
     func removeEQ(at index: Int, way: UUID, speaker: UUID) {
         editWay(way, speaker: speaker) { if $0.eq.indices.contains(index) { $0.eq.remove(at: index) } }
+    }
+
+    // MARK: Driver linearisation (E8 B3)
+
+    enum LinearisationState: Equatable { case none, active, bypassed }
+
+    /// One selectable driver: a way and the speaker that owns it. Feeds the Measurement Lab way picker.
+    struct DriverChoice: Identifiable, Equatable {
+        var id: UUID { wayID }
+        var speakerID: UUID
+        var wayID: UUID
+        var source: RoutingSource
+        var title: String
+    }
+
+    var driverChoices: [DriverChoice] {
+        configuration.speakers.flatMap { speaker in
+            speaker.ways.map { way in
+                DriverChoice(
+                    speakerID: speaker.id, wayID: way.id, source: speaker.source,
+                    title: [speaker.name, way.name].filter { !$0.isEmpty }.joined(separator: " / "))
+            }
+        }
+    }
+
+    static func driverChoices(_ configuration: SpeakerRoutingConfiguration) -> [DriverChoice] {
+        let model = SpeakerRoutingEditorModel(configuration: configuration, context: SpeakerRoutingContext(
+            programLanes: 2, subwoofers: 0, sampleRate: 48_000))
+        return model.driverChoices
+    }
+
+    func linearisationState(_ wayID: UUID) -> LinearisationState {
+        if bypassedLinearisations[wayID] != nil { return .bypassed }
+        let linearised = configuration.speakers.contains { $0.ways.contains { $0.id == wayID && $0.linearisation != nil } }
+        return linearised ? .active : .none
+    }
+
+    /// Stores a near-field measurement on a way (the explicit user action; captures never deploy themselves). A fresh
+    /// apply replaces any bypassed one. False for an unknown way.
+    @discardableResult
+    func applyLinearisation(_ linearisation: RoutedWayLinearisation, way wayID: UUID) -> Bool {
+        guard let speaker = speakerID(ofWay: wayID) else { return false }
+        bypassedLinearisations[wayID] = nil
+        editWay(wayID, speaker: speaker) { $0.linearisation = linearisation }
+        return true
+    }
+
+    /// Takes the linearisation off a way for good (also forgetting a bypassed one).
+    func removeLinearisation(way wayID: UUID) {
+        guard let speaker = speakerID(ofWay: wayID) else { return }
+        bypassedLinearisations[wayID] = nil
+        editWay(wayID, speaker: speaker) { $0.linearisation = nil }
+    }
+
+    /// A/B: true plays the way without its linearisation (A), false restores it (B). The measurement is kept in the
+    /// model while bypassed. No-op for a way that has none.
+    func setLinearisationBypassed(_ bypassed: Bool, way wayID: UUID) {
+        guard let speaker = speakerID(ofWay: wayID) else { return }
+        if bypassed {
+            guard let current = configuration.speakers.first(where: { $0.id == speaker })?
+                .ways.first(where: { $0.id == wayID })?.linearisation else { return }
+            bypassedLinearisations[wayID] = current
+            editWay(wayID, speaker: speaker) { $0.linearisation = nil }
+        } else if let kept = bypassedLinearisations[wayID] {
+            bypassedLinearisations[wayID] = nil
+            editWay(wayID, speaker: speaker) { $0.linearisation = kept }
+        }
+    }
+
+    /// Applies the newest qualified Lab driver capture for a way, searching `sessions` newest first.
+    @discardableResult
+    func applyLabCapture(
+        wayID: UUID, sessions: [SpeakerMeasurementLabSession]
+    ) throws -> SpeakerMeasurementLabDriverCaptureResult {
+        var failure: Error = SpeakerMeasurementLabDriverCaptureError.protocolRequired
+        for session in sessions.sorted(by: { $0.modifiedAt > $1.modifiedAt }) {
+            do {
+                let result = try SpeakerMeasurementLabDriverCaptureAdapter().analyze(session: session, wayID: wayID)
+                _ = applyLinearisation(result.linearisation, way: wayID)
+                return result
+            } catch SpeakerMeasurementLabDriverCaptureError.protocolRequired {
+                continue
+            } catch { failure = error }
+        }
+        throw failure
+    }
+
+    private func speakerID(ofWay wayID: UUID) -> UUID? {
+        configuration.speakers.first { $0.ways.contains { $0.id == wayID } }?.id
     }
 
     // MARK: Matrix

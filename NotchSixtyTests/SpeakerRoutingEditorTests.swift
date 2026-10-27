@@ -57,6 +57,39 @@ final class SpeakerRoutingEditorTests: XCTestCase {
         XCTAssertNil(SpeakerRoutingTemplate.detect(SpeakerRoutingConfiguration(enabled: false)))
     }
 
+    func testLinearisationApplyRemoveAndABKeepConfigurationHonest() throws {
+        let m = model(subs: 0)
+        XCTAssertTrue(m.applyTemplate(.twoWay, deviceUID: "dev"))
+        var commits = 0
+        m.onCommit = { _ in commits += 1 }
+        let way = try XCTUnwrap(m.driverChoices.first)
+        XCTAssertEqual(m.driverChoices.count, 4)
+        XCTAssertEqual(m.linearisationState(way.wayID), .none)
+        let lin = RoutedWayLinearisation(
+            nearField: CrossoverCore.ResponseCapture(
+                frequenciesHz: (0..<24).map { 100 * pow(1.2, Double($0)) }, levelsDB: Array(repeating: 0, count: 24)),
+            farField: nil, mergeHz: 0)
+
+        XCTAssertFalse(m.applyLinearisation(lin, way: UUID()))
+        XCTAssertTrue(m.applyLinearisation(lin, way: way.wayID))
+        XCTAssertEqual(m.linearisationState(way.wayID), .active)
+        // A: bypass removes it from the configuration the engine sees; B restores the identical measurement.
+        m.setLinearisationBypassed(true, way: way.wayID)
+        XCTAssertEqual(m.linearisationState(way.wayID), .bypassed)
+        XCTAssertTrue(m.configuration.speakers.flatMap(\.ways).allSatisfy { $0.linearisation == nil })
+        m.setLinearisationBypassed(false, way: way.wayID)
+        XCTAssertEqual(m.configuration.speakers.flatMap(\.ways).first { $0.id == way.wayID }?.linearisation, lin)
+        // Remove forgets it, bypassed or not.
+        m.setLinearisationBypassed(true, way: way.wayID)
+        m.removeLinearisation(way: way.wayID)
+        XCTAssertEqual(m.linearisationState(way.wayID), .none)
+        m.setLinearisationBypassed(false, way: way.wayID)
+        XCTAssertEqual(m.linearisationState(way.wayID), .none)
+        XCTAssertEqual(commits, 4)  // removing an already-bypassed linearisation changes nothing in the configuration
+        // Without a Lab capture nothing is applied.
+        XCTAssertThrowsError(try m.applyLabCapture(wayID: way.wayID, sessions: []))
+    }
+
     func testEditsMapToConfiguration() throws {
         let m = model()
         twoWay(m)
