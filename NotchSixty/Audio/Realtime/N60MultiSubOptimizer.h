@@ -37,12 +37,12 @@ typedef struct {
 typedef struct {
     uint32_t subwooferCount;
     uint32_t frequencyCount;
-    float gainDB[N60_MAX_SUBWOOFER_OUTPUTS];
-    float additionalDelayMs[N60_MAX_SUBWOOFER_OUTPUTS];
-    bool polarityInverted[N60_MAX_SUBWOOFER_OUTPUTS];
+    float gainDB[N60_CALIBRATION_MAX_SUBWOOFERS];
+    float additionalDelayMs[N60_CALIBRATION_MAX_SUBWOOFERS];
+    bool polarityInverted[N60_CALIBRATION_MAX_SUBWOOFERS];
     /// Frequency-domain correction targets for the later bounded PEQ/FIR fitter.
     /// They are not raw realtime filters and must not be applied sample-by-sample.
-    float perSubEQTargetDB[N60_MAX_SUBWOOFER_OUTPUTS][N60_CALIBRATION_MAX_FREQUENCY_BINS];
+    float perSubEQTargetDB[N60_CALIBRATION_MAX_SUBWOOFERS][N60_CALIBRATION_MAX_FREQUENCY_BINS];
     float objective;
     float weightedTargetErrorDBSquared;
     float seatVarianceDBSquared;
@@ -108,7 +108,7 @@ static inline bool N60MultiSubFindSourceIndices(
     if (matrix == NULL
         || sourceIndices == NULL
         || subwooferCount == 0u
-        || subwooferCount > N60_MAX_SUBWOOFER_OUTPUTS) {
+        || subwooferCount > N60_CALIBRATION_MAX_SUBWOOFERS) {
         return false;
     }
     for (uint32_t sub = 0; sub < subwooferCount; ++sub) {
@@ -333,7 +333,7 @@ static inline bool N60MultiSubOptimize(
         || targetMagnitudeDB == NULL
         || resultOut == NULL
         || subwooferCount == 0u
-        || subwooferCount > N60_MAX_SUBWOOFER_OUTPUTS
+        || subwooferCount > N60_CALIBRATION_MAX_SUBWOOFERS
         || !N60MultiSubOptimizationSettingsIsValid(settings)
         || !N60MultichannelCalibrationMatrixIsValid(matrix, subwooferCount)) {
         return false;
@@ -342,7 +342,7 @@ static inline bool N60MultiSubOptimize(
         if (!isfinite(targetMagnitudeDB[frequency])) return false;
     }
 
-    uint32_t sourceIndices[N60_MAX_SUBWOOFER_OUTPUTS] = {0};
+    uint32_t sourceIndices[N60_CALIBRATION_MAX_SUBWOOFERS] = {0};
     if (!N60MultiSubFindSourceIndices(matrix, subwooferCount, sourceIndices)) return false;
 
     N60MultiSubOptimizationResult result = {0};

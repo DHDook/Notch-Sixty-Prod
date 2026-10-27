@@ -14,7 +14,9 @@ extern "C" {
 #endif
 
 #define N60_CALIBRATION_MAX_SEATS 8u
-#define N60_CALIBRATION_MAX_SOURCES (N60_MAX_PROGRAM_CHANNELS + N60_MAX_SUBWOOFER_OUTPUTS)
+/// E8 A4: the offline designers cover 8 subwoofers, decoupled from the frozen legacy-kernel `N60_MAX_SUBWOOFER_OUTPUTS` (4).
+#define N60_CALIBRATION_MAX_SUBWOOFERS 8u
+#define N60_CALIBRATION_MAX_SOURCES (N60_MAX_PROGRAM_CHANNELS + N60_CALIBRATION_MAX_SUBWOOFERS)
 #define N60_CALIBRATION_MAX_FREQUENCY_BINS 128u
 #define N60_CALIBRATION_MAX_TRIM_ATTENUATION_DB 24.0f
 
@@ -102,7 +104,7 @@ static inline N60MultichannelCalibrationMatrix N60MultichannelCalibrationMatrixM
     if (!isfinite(sampleRate)
         || sampleRate <= 0.0
         || !N60ProgramChannelLayoutIsValid(&programLayout)
-        || subwooferCount > N60_MAX_SUBWOOFER_OUTPUTS
+        || subwooferCount > N60_CALIBRATION_MAX_SUBWOOFERS
         || seatCount == 0u
         || seatCount > N60_CALIBRATION_MAX_SEATS
         || frequencyCount == 0u
@@ -217,7 +219,7 @@ static inline bool N60MultichannelCalibrationMatrixIsValid(
         || matrix->sourceCount > N60_CALIBRATION_MAX_SOURCES
         || matrix->frequencyCount == 0u
         || matrix->frequencyCount > N60_CALIBRATION_MAX_FREQUENCY_BINS
-        || expectedSubwooferCount > N60_MAX_SUBWOOFER_OUTPUTS) {
+        || expectedSubwooferCount > N60_CALIBRATION_MAX_SUBWOOFERS) {
         return false;
     }
 

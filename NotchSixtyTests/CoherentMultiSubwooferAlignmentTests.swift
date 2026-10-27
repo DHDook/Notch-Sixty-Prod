@@ -272,7 +272,34 @@ final class CoherentMultiSubwooferAlignmentTests: XCTestCase {
         }
     }
 
-    private func makeProfile()
+    /// E8 A4: coordinated alignment accepts 8 subs, with one result per sub.
+    func testCoordinatedSolveAcceptsEightSubwoofers() throws {
+        let profile = makeProfile(subs: 8)
+        let groups = (0..<8).map {
+            evidenceGroup(
+                profile: profile,
+                subwooferIndex: UInt32($0),
+                arrivalMilliseconds: Double($0) * 0.5 - 1.0
+            )
+        }
+        let candidate = try CoherentMultiSubwooferAlignmentPlanner().propose(
+            evidenceGroups: groups,
+            profile: profile,
+            bassManagementEnabled: true,
+            crossoverFrequencyHz: 80
+        )
+        XCTAssertEqual(candidate.subwoofers.map(\.subwooferIndex), (0..<8).map { UInt32($0) })
+        for sub in candidate.subwoofers {
+            XCTAssertEqual(
+                sub.subwooferDelayAdjustmentMilliseconds
+                    - candidate.speakerCommonDelayAdjustmentMilliseconds,
+                sub.signedRelativeDelayAdjustmentMilliseconds,
+                accuracy: 0.001
+            )
+        }
+    }
+
+    private func makeProfile(subs: Int = 2)
         -> OutputDeviceProfileConfiguration {
         OutputDeviceProfileConfiguration(
             enabled: true,
@@ -293,22 +320,15 @@ final class CoherentMultiSubwooferAlignmentTests: XCTestCase {
                     )
                 ),
             ],
-            subwooferAssignments: [
+            subwooferAssignments: (0..<subs).map {
                 PhysicalSubwooferOutputAssignment(
-                    index: 0,
+                    index: UInt32($0),
                     destination: PhysicalOutputEndpoint(
                         deviceUID: "pr108-multisub-output",
-                        channelIndex: 2
+                        channelIndex: UInt32(2 + $0)
                     )
-                ),
-                PhysicalSubwooferOutputAssignment(
-                    index: 1,
-                    destination: PhysicalOutputEndpoint(
-                        deviceUID: "pr108-multisub-output",
-                        channelIndex: 3
-                    )
-                ),
-            ]
+                )
+            }
         )
     }
 

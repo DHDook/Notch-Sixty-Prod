@@ -108,17 +108,6 @@ final class OutputDeviceProfileTests: XCTestCase {
         }
     }
 
-    /// E8 A3 (interim until A4): calibration and coordinated alignment refuse 5 to 8 subs by name.
-    func testDesignersRefuseMoreThanFourSubs() {
-        let profile = fiveOneProfile(subs: 5)
-        XCTAssertThrowsError(try MultichannelCalibrationDesigner().design(
-            profile: profile, bassManagementEnabled: true, seats: [], measurements: [], sampleRate: 48_000)
-        ) { XCTAssertEqual($0 as? OutputDeviceCalibrationError, .tooManySubwoofersForDesigner(5)) }
-        XCTAssertThrowsError(try CoherentMultiSubwooferAlignmentPlanner().propose(
-            evidenceGroups: [], profile: profile, bassManagementEnabled: true, crossoverFrequencyHz: 80)
-        ) { XCTAssertEqual($0 as? CoherentMultiSubwooferAlignmentError, .tooManySubwoofers(5)) }
-    }
-
     func testLegacyKernelRefusalNamesTheReason() {
         let message = LiveNChannelTransportError.tooManySubwoofersForLegacyKernel(6).errorDescription ?? ""
         XCTAssertTrue(message.contains("at most 4 subwoofers"))

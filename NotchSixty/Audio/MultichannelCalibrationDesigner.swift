@@ -83,9 +83,6 @@ struct MultichannelCalibrationDesigner: Sendable {
     ) throws -> MultichannelCalibrationDesign {
         guard profile.enabled else { throw OutputDeviceCalibrationError.profileRequired }
         try profile.validateStructure(bassManagementEnabled: bassManagementEnabled)
-        guard profile.subwooferAssignments.count <= SubwooferLimit.legacyKernel else {
-            throw OutputDeviceCalibrationError.tooManySubwoofersForDesigner(profile.subwooferAssignments.count)
-        }
         guard sampleRate.isFinite, sampleRate > 0 else {
             throw OutputDeviceCalibrationError.designFailed("invalid sample rate")
         }
@@ -515,17 +512,17 @@ struct MultichannelCalibrationDesigner: Sendable {
         var delays = [Float](repeating: 0, count: count)
         var polarities = [Bool](repeating: false, count: count)
         withUnsafePointer(to: &result.gainDB) { tuple in
-            tuple.withMemoryRebound(to: Float.self, capacity: Int(N60_MAX_SUBWOOFER_OUTPUTS)) {
+            tuple.withMemoryRebound(to: Float.self, capacity: Int(N60_CALIBRATION_MAX_SUBWOOFERS)) {
                 for index in 0..<count { gains[index] = $0[index] }
             }
         }
         withUnsafePointer(to: &result.additionalDelayMs) { tuple in
-            tuple.withMemoryRebound(to: Float.self, capacity: Int(N60_MAX_SUBWOOFER_OUTPUTS)) {
+            tuple.withMemoryRebound(to: Float.self, capacity: Int(N60_CALIBRATION_MAX_SUBWOOFERS)) {
                 for index in 0..<count { delays[index] = $0[index] }
             }
         }
         withUnsafePointer(to: &result.polarityInverted) { tuple in
-            tuple.withMemoryRebound(to: Bool.self, capacity: Int(N60_MAX_SUBWOOFER_OUTPUTS)) {
+            tuple.withMemoryRebound(to: Bool.self, capacity: Int(N60_CALIBRATION_MAX_SUBWOOFERS)) {
                 for index in 0..<count { polarities[index] = $0[index] }
             }
         }
@@ -565,7 +562,7 @@ struct MultichannelCalibrationDesigner: Sendable {
         guard subwooferCount > 0, var subResult else { return (0, 0) }
         var additionalDelays = [Float](repeating: 0, count: subwooferCount)
         withUnsafePointer(to: &subResult.additionalDelayMs) { tuple in
-            tuple.withMemoryRebound(to: Float.self, capacity: Int(N60_MAX_SUBWOOFER_OUTPUTS)) {
+            tuple.withMemoryRebound(to: Float.self, capacity: Int(N60_CALIBRATION_MAX_SUBWOOFERS)) {
                 for index in 0..<subwooferCount { additionalDelays[index] = $0[index] }
             }
         }
@@ -608,7 +605,7 @@ struct MultichannelCalibrationDesigner: Sendable {
         withUnsafePointer(to: &result.perSubEQTargetDB) { outerTuple in
             outerTuple.withMemoryRebound(
                 to: Float.self,
-                capacity: Int(N60_MAX_SUBWOOFER_OUTPUTS * N60_CALIBRATION_MAX_FREQUENCY_BINS)
+                capacity: Int(N60_CALIBRATION_MAX_SUBWOOFERS * N60_CALIBRATION_MAX_FREQUENCY_BINS)
             ) { flat in
                 let stride = Int(N60_CALIBRATION_MAX_FREQUENCY_BINS)
                 for frequency in values.indices {

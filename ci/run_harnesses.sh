@@ -86,7 +86,7 @@ harness pr43_driver_runtime "${STRICT[@]}" -include stddef.h -I"$RT" ci/validate
 harness pr53_channel_router "${STRICT[@]}" -I"$RT" ci/validate_pr53_channel_router.c -lm
 for name in pr54_nchannel_lanes pr55_multichannel_bass_management pr55_subwoofer_tuning pr56_headphone_dsp \
     pr57_binaural_renderer pr58_multichannel_calibration pr59_advanced_spatial pr60_nchannel_transport \
-    pr60_coreaudio_transport pr66_head_tracking; do
+    pr60_coreaudio_transport pr66_head_tracking e8_multi_sub_tools; do
     harness "$name" "${STRICT[@]}" -O2 -I"$RT" "ci/validate_$name.c" -lm
 done
 

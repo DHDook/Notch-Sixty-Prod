@@ -15,7 +15,7 @@ final class MultichannelCalibrationDesignerTests: XCTestCase {
         MultichannelCalibrationSeat(name: "Left of centre", weight: 0.5),
     ]
 
-    private func stereoWithSubProfile() -> OutputDeviceProfileConfiguration {
+    private func stereoWithSubProfile(subs: Int = 1) -> OutputDeviceProfileConfiguration {
         OutputDeviceProfileConfiguration(
             enabled: true,
             programLayout: .stereo,
@@ -29,12 +29,12 @@ final class MultichannelCalibrationDesignerTests: XCTestCase {
                     destination: PhysicalOutputEndpoint(deviceUID: "dac", channelIndex: 1)
                 ),
             ],
-            subwooferAssignments: [
+            subwooferAssignments: (0..<subs).map {
                 PhysicalSubwooferOutputAssignment(
-                    index: 0,
-                    destination: PhysicalOutputEndpoint(deviceUID: "dac", channelIndex: 2)
-                ),
-            ]
+                    index: UInt32($0),
+                    destination: PhysicalOutputEndpoint(deviceUID: "dac", channelIndex: UInt32(2 + $0))
+                )
+            }
         )
     }
 
@@ -73,14 +73,14 @@ final class MultichannelCalibrationDesignerTests: XCTestCase {
 
     private func measurements(
         sampleRate: Double,
-        speakerRollOffHz: Double = 18
+        speakerRollOffHz: Double = 18,
+        subs: Int = 1
     ) -> [MultichannelCalibrationMeasurement] {
         let frequencies = (0..<320).map { 10 * pow(2_200.0, Double($0) / 319) } // 10 Hz ... 22 kHz
         let sources: [(MultichannelCalibrationSource, Double)] = [
             (.speaker(.frontLeft), 0.0050),
             (.speaker(.frontRight), 0.0052),
-            (.subwoofer(0), 0.0071),
-        ]
+        ] + (0..<subs).map { (MultichannelCalibrationSource.subwoofer(UInt32($0)), 0.0071 + 0.0003 * Double($0)) }
         var result: [MultichannelCalibrationMeasurement] = []
         for (seatIndex, seat) in seats.enumerated() {
             for (source, arrival) in sources {
@@ -132,6 +132,31 @@ final class MultichannelCalibrationDesignerTests: XCTestCase {
             measurements: measurements(sampleRate: sampleRate, speakerRollOffHz: speakerRollOffHz),
             sampleRate: sampleRate
         )
+    }
+
+    /// E8 A4: the designer takes 8 subs and returns a valid, attenuation-only calibration for each, at every rate.
+    func testEightSubwoofersEachGetACalibrationAtEveryStandardRate() throws {
+        for rate in Self.standardSampleRates {
+            for count in [5, 8] {
+                let profile = stereoWithSubProfile(subs: count)
+                let design = try MultichannelCalibrationDesigner().design(
+                    profile: profile,
+                    bassManagementEnabled: true,
+                    seats: seats,
+                    measurements: measurements(sampleRate: rate, subs: count),
+                    sampleRate: rate
+                )
+                XCTAssertEqual(design.subwoofers.map(\.index), (0..<count).map { UInt32($0) }, "\(rate) Hz")
+                for sub in design.subwoofers {
+                    XCTAssertLessThanOrEqual(sub.calibration.gainDB, 0, "\(rate) Hz Sub \(sub.index + 1)")
+                    XCTAssertNoThrow(try sub.calibration.validate(sampleRate: rate), "\(rate) Hz")
+                }
+                XCTAssertEqual(design.summary.subwooferCount, count, "\(rate) Hz")
+                XCTAssertNoThrow(try design.summary.validate(), "\(rate) Hz")
+                let applied = try design.applying(to: profile)
+                XCTAssertNoThrow(try applied.validateStructure(bassManagementEnabled: true), "\(rate) Hz")
+            }
+        }
     }
 
     func testDesignDeploysAttenuationOnlyAtEveryStandardRate() throws {
