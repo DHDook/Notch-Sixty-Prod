@@ -573,8 +573,8 @@ struct PlaybackSystemState: Codable, Equatable, Sendable {
     var speakerIR: SpeakerIRConfiguration
     var ambientCompensation: AmbientCompensationConfiguration?
     var activeQuietZone: ActiveQuietZoneConfiguration?
-    /// E8 S3: source-to-output routing with per-way crossovers. nil (the default, and always with `e8.routing-matrix` off)
-    /// leaves the stored profile byte-identical.
+    /// E8 S3: source-to-output routing with per-way crossovers. nil (the default) leaves the stored profile
+    /// byte-identical; loaded profiles with a legacy physical crossover are migrated on launch (E8 S5).
     var speakerRouting: SpeakerRoutingConfiguration?
 
     init(
@@ -797,8 +797,6 @@ enum ProductProfileError: Error, LocalizedError {
 
 @MainActor
 final class ProductProfileController: ObservableObject {
-    /// E8 S5: set from `e8.routing-matrix` at launch. Only Swift reads the flag; the engine never does.
-    private let migratesSpeakerRouting: Bool
     private struct Archive: Codable {
         static let currentSchemaVersion = 3
         var schemaVersion: Int = currentSchemaVersion
@@ -1121,11 +1119,9 @@ final class ProductProfileController: ObservableObject {
     init(
         engine: AudioIOEngine,
         audioUnitHost: AudioUnitHostController? = nil,
-        storageURL: URL? = nil,
-        migratesSpeakerRouting: Bool = false
+        storageURL: URL? = nil
     ) {
         self.engine = engine
-        self.migratesSpeakerRouting = migratesSpeakerRouting
         self.audioUnitHost = audioUnitHost ?? AudioUnitHostController()
         self.storageURL = storageURL ?? Self.defaultStorageURL()
         audioUnitHostObservation = self.audioUnitHost.objectWillChange.sink {
@@ -2126,10 +2122,9 @@ final class ProductProfileController: ObservableObject {
     }
 
 
-    /// E8 S5: with `e8.routing-matrix` on, fill each loaded profile's `speakerRouting` from its legacy physical crossover.
-    /// Pure and idempotent; the legacy fields stay as stored, so turning the flag off changes nothing.
+    /// E8 S5: fill each loaded profile's `speakerRouting` from its legacy physical crossover.
+    /// Pure and idempotent; the legacy fields stay as stored, so the frozen legacy kernel keeps reading them.
     private func migrateLoadedSpeakerRouting() {
-        guard migratesSpeakerRouting else { return }
         for index in systemProfiles.indices {
             systemProfiles[index].state =
                 systemProfiles[index].state.migratingSpeakerRouting(enabled: true)

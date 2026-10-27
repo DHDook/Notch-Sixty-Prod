@@ -326,7 +326,6 @@ extension SpeakerRoutingTests {
     private func engineReady(subs: Bool) throws -> AudioIOEngine {
         let engine = AudioIOEngine()
         engine.unifiedGraphEnabled = true
-        engine.routingMatrixEnabled = true
         if subs { try engine.replaceBassManagementConfiguration(bassOn) }
         return engine
     }
@@ -541,22 +540,15 @@ extension SpeakerRoutingTests {
         var disabled = routing
         disabled.enabled = false
 
-        // Flag off: an active routing is refused; nil and a disabled routing are accepted and stereo is untouched.
+        // nil and a disabled routing are accepted and stereo is untouched.
         let off = AudioIOEngine()
         off.unifiedGraphEnabled = true
-        XCTAssertFalse(off.routingMatrixEnabled)
-        XCTAssertThrowsError(try off.replaceSpeakerRoutingConfiguration(routing)) {
-            guard case LiveNChannelTransportError.routingRefused(let reason) = $0 else { return XCTFail("\($0)") }
-            XCTAssertTrue(reason.contains("switched off"))
-        }
-        XCTAssertNil(off.speakerRoutingConfiguration)
         XCTAssertNoThrow(try off.replaceSpeakerRoutingConfiguration(nil))
         XCTAssertNoThrow(try off.replaceSpeakerRoutingConfiguration(disabled))
         XCTAssertEqual(off.speakerRoutingConfiguration, disabled)
 
         // Legacy kernel selected.
         let legacy = AudioIOEngine()
-        legacy.routingMatrixEnabled = true
         legacy.unifiedGraphEnabled = false
         XCTAssertThrowsError(try legacy.replaceSpeakerRoutingConfiguration(routing)) {
             guard case LiveNChannelTransportError.routingRefused(let reason) = $0 else { return XCTFail("\($0)") }
