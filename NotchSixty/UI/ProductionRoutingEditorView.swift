@@ -158,6 +158,7 @@ struct ProductionRoutingEditorView: View {
                 }
                 .disabled(way.eq.count >= Int(N60_PEQ_MAX_SECTIONS))
             }
+            linearisationRow(way: way)
             ForEach(Array(way.eq.enumerated()), id: \.offset) { index, section in
                 HStack(spacing: 12) {
                     Text("EQ \(index + 1)").font(.caption).frame(width: 40, alignment: .leading)
@@ -171,6 +172,38 @@ struct ProductionRoutingEditorView: View {
                         model.editWay(way.id, speaker: speaker.id) { $0.eq[index].q = v }
                     }
                     Button("Remove") { model.removeEQ(at: index, way: way.id, speaker: speaker.id) }
+                }
+            }
+        }
+    }
+
+    /// E8 B3: apply, remove and A/B for the way's driver linearisation.
+    private func linearisationRow(way: RoutedWay) -> some View {
+        let state = model.linearisationState(way.id)
+        return HStack(spacing: 12) {
+            Text("Driver linearisation").font(.caption)
+            Text(state == .active ? "On" : state == .bypassed ? "Bypassed (A)" : "Off")
+                .font(.caption).foregroundStyle(.secondary)
+            Spacer()
+            if state != .none {
+                Picker("A/B", selection: Binding(
+                    get: { state == .bypassed },
+                    set: { model.setLinearisationBypassed($0, way: way.id) })) {
+                    Text("A: off").tag(true)
+                    Text("B: on").tag(false)
+                }
+                .pickerStyle(.segmented).frame(width: 150)
+                Button("Remove") { model.removeLinearisation(way: way.id) }
+            }
+            Button(state == .none ? "Apply from Lab" : "Re-apply from Lab") {
+                let store = SpeakerMeasurementLabSessionStore()
+                do {
+                    let sessions = try store.listRecentSessions(limit: 25)
+                    let result = try model.applyLabCapture(wayID: way.id, sessions: sessions)
+                    interchangeNotes = result.warnings
+                    actionError = nil
+                } catch {
+                    actionError = error.localizedDescription
                 }
             }
         }

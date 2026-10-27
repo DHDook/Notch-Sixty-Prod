@@ -595,10 +595,19 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
                 .frame(width: 220)
             }
         case .driverNearField:
-            // The way picker arrives with the linearisation UI (E8 B3); until then the draft cannot be queued.
             GridRow {
                 Text("Driver")
-                Text("Choose a driver from the routing editor.").foregroundStyle(.secondary)
+                let choices = engine.speakerRoutingConfiguration.map(SpeakerRoutingEditorModel.driverChoices) ?? []
+                if choices.isEmpty {
+                    Text("Add a speaker with ways in the routing editor first.").foregroundStyle(.secondary)
+                } else {
+                    Picker("Driver", selection: $draft.routedWayID) {
+                        Text("Choose a driver").tag(UUID?.none)
+                        ForEach(choices) { Text($0.title).tag(UUID?.some($0.wayID)) }
+                    }
+                    .labelsHidden().frame(minWidth: 220)
+                    speakerPicker
+                }
             }
         case .coherentMainsSubTiming:
             GridRow {
