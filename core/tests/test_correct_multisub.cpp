@@ -1,4 +1,4 @@
-// E8 A6a: n60_correct_multisub_search on its own table (n60/correct.h section 6).
+// E8 A6a/A6b: n60_correct_multisub_search and n60_correct_multisub_eq_search on their own tables (n60/correct.h section 6).
 #include <cassert>
 #include <cmath>
 #include <cstdio>
@@ -94,6 +94,52 @@ int main() {
     bad.p.starts = 12;
     bad.re[0] = NAN;
     assert(n60_correct_multisub_search(&bad.p, &e) == N60_CORRECT_ERR_NONFINITE);
+
+    // EQ stage (A6b): one sub, one seat, a +6 dB peak at bin 2 against a 0 dB target; the cut must land there.
+    {
+        const uint32_t bins = 5;
+        std::vector<double> re(bins, 1.0), im(bins, 0.0), freq, target(bins, 0.0), eq;
+        re[2] = 2.0;  // +6 dB
+        for (uint32_t b = 0; b < bins; ++b) freq.push_back(40.0 + 10.0 * b);
+        for (int v = -8; v <= 0; ++v) eq.push_back(v);
+        double weight = 1.0;
+        n60_correct_multisub_eq_problem q{};
+        q.struct_size = sizeof q;
+        q.sub_count = 1;
+        q.seat_count = 1;
+        q.bin_count = bins;
+        q.response_re = re.data();
+        q.response_im = im.data();
+        q.frequency_hz = freq.data();
+        q.target_db = target.data();
+        q.seat_weight = &weight;
+        q.eq_db = eq.data();
+        q.eq_count = static_cast<uint32_t>(eq.size());
+        q.target_error_weight = 1.0;
+        q.seat_variance_weight = 1.5;
+        q.eq_regularisation = 0.03;
+        q.eq_smoothness = 0.08;
+        q.max_slope_db_per_octave = 12.0;
+        q.null_guard_db = 10.0;
+        q.passes = 2;
+        q.rounds = 8;
+        q.evaluation_budget = 100000;
+        n60_correct_multisub_eq_result x{}, y{};
+        assert(n60_correct_multisub_eq_search(&q, &x) == N60_CORRECT_OK);
+        assert(n60_correct_multisub_eq_search(&q, &y) == N60_CORRECT_OK);
+        assert(std::memcmp(&x, &y, sizeof x) == 0);
+        assert(eq[x.eq_index[0][2]] < -2.0 && eq[x.eq_index[0][0]] == 0.0);
+        assert(x.budget_exhausted == 0u && x.evaluations > 0u);
+        q.passes = 0;  // stage off: EQ stays at 0 dB
+        assert(n60_correct_multisub_eq_search(&q, &y) == N60_CORRECT_OK && eq[y.eq_index[0][2]] == 0.0);
+        q.passes = 2;
+        q.evaluation_budget = 1;
+        assert(n60_correct_multisub_eq_search(&q, &y) == N60_CORRECT_OK && y.budget_exhausted == 1u);
+        assert(y.objective >= x.objective - 1.0e-12);
+        q.eq_count = 0;
+        assert(n60_correct_multisub_eq_search(&q, &y) == N60_CORRECT_ERR_ARGUMENT);
+        assert(n60_correct_multisub_eq_search(nullptr, &y) == N60_CORRECT_ERR_ARGUMENT);
+    }
     std::puts("correct multisub ok");
     return 0;
 }
