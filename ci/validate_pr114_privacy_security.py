@@ -155,7 +155,7 @@ for token in (
 for token in (
     "Measurement Microphone access is separate and is not required for ordinary listening.",
     "Request it only when you choose to measure or calibrate.",
-    "Speaker Calibration, Measurement Lab and Room Correction are optional next steps",
+    "are optional next steps after ordinary playback works correctly",
 ):
     require(token in guide, f"Getting Started privacy guidance missing {token!r}")
 
