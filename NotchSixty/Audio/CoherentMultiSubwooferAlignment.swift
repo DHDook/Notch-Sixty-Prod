@@ -45,6 +45,8 @@ struct CoherentMultiSubwooferAlignmentCandidate:
 enum CoherentMultiSubwooferAlignmentError:
     Error, Equatable, LocalizedError {
     case multiSubProfileRequired
+    /// E8 A3 (interim until A4): coordinated alignment still covers at most 4 subs.
+    case tooManySubwoofers(Int)
     case evidenceSetIncomplete
     case duplicateSubwoofer(UInt32)
     case mainRoleSetMismatch
@@ -55,6 +57,8 @@ enum CoherentMultiSubwooferAlignmentError:
         switch self {
         case .multiSubProfileRequired:
             return "Coordinated PR108 alignment requires at least two assigned physical subwoofers."
+        case .tooManySubwoofers(let count):
+            return "Coordinated alignment covers at most \(SubwooferLimit.legacyKernel) subwoofers for now; this profile has \(count)."
         case .evidenceSetIncomplete:
             return "Coordinated PR108 alignment requires one coherent evidence group for every assigned physical subwoofer."
         case .duplicateSubwoofer(let index):
@@ -101,6 +105,10 @@ struct CoherentMultiSubwooferAlignmentPlanner: Sendable {
         guard profile.subwooferAssignments.count >= 2 else {
             throw CoherentMultiSubwooferAlignmentError
                 .multiSubProfileRequired
+        }
+        guard profile.subwooferAssignments.count <= SubwooferLimit.legacyKernel else {
+            throw CoherentMultiSubwooferAlignmentError
+                .tooManySubwoofers(profile.subwooferAssignments.count)
         }
         let assigned = Set(
             profile.subwooferAssignments.map(\.index)

@@ -129,9 +129,14 @@ enum OutputDeviceCalibrationError: Error, Equatable, LocalizedError {
     case profileRequired
     case sampleRateMismatch(expected: Double, actual: Double)
     case designFailed(String)
+    /// E8 A3 (interim until A4): the multi-sub designers still cover at most 4 subs.
+    case tooManySubwoofersForDesigner(Int)
 
     var errorDescription: String? {
         switch self {
+        case .tooManySubwoofersForDesigner(let count):
+            return "Calibration and multi-subwoofer optimisation cover at most \(SubwooferLimit.legacyKernel) subwoofers for now; this profile has \(count)."
+
         case .invalidEQBand:
             return "Calibration EQ contains an invalid frequency, cut, or Q value."
         case .invalidSpeakerCalibration:

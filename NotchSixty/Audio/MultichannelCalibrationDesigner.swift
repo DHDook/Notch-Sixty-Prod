@@ -83,6 +83,9 @@ struct MultichannelCalibrationDesigner: Sendable {
     ) throws -> MultichannelCalibrationDesign {
         guard profile.enabled else { throw OutputDeviceCalibrationError.profileRequired }
         try profile.validateStructure(bassManagementEnabled: bassManagementEnabled)
+        guard profile.subwooferAssignments.count <= SubwooferLimit.legacyKernel else {
+            throw OutputDeviceCalibrationError.tooManySubwoofersForDesigner(profile.subwooferAssignments.count)
+        }
         guard sampleRate.isFinite, sampleRate > 0 else {
             throw OutputDeviceCalibrationError.designFailed("invalid sample rate")
         }

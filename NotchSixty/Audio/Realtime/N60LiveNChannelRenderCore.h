@@ -23,6 +23,9 @@ extern "C" {
 /// 32-channel semantic program plus four explicit physical subwoofer outputs and margin.
 #define N60_LIVE_LEGACY_MAX_PHYSICAL_CHANNELS 40u
 #define N60_LIVE_PHYSICAL_CHANNEL_UNMAPPED UINT32_MAX
+/// E8 A3: sub lanes the graph path can drive (matches `UnifiedGraphConfiguration.maxSubwoofers`). The legacy kernel
+/// stays at `N60_MAX_SUBWOOFER_OUTPUTS` (4, frozen).
+#define N60_LIVE_MAX_GRAPH_SUBWOOFERS 8u
 
 typedef struct {
     bool valid;
@@ -36,6 +39,11 @@ typedef struct {
     /// physical channel; the program and sub entries above are all unmapped. Zero for every other session.
     uint32_t routedLaneCount;
     uint32_t physicalChannelForRoutedLane[N60_LIVE_MAX_PHYSICAL_CHANNELS];
+    /// E8 A3: a non-routed graph session with 5 to 8 subs. Graph sub lane i (after the program lanes) goes to
+    /// `physicalChannelForGraphSub[i]`. The legacy fields above hold no subs (`bassManagementEnabled` false,
+    /// `subwooferCount` 0): the legacy kernel cannot render this map and the bridge silences it without a graph.
+    uint32_t graphSubLaneCount;
+    uint32_t physicalChannelForGraphSub[N60_LIVE_MAX_GRAPH_SUBWOOFERS];
 } N60LiveNChannelOutputMap;
 
 typedef struct {
@@ -189,6 +197,62 @@ static inline bool N60LiveNChannelOutputMapCompileRouted(
     return true;
 }
 
+/// E8 A3: the map of a non-routed graph session whose bass management drives 5 to 8 physical subs. Program lanes map
+/// as the legacy compile does with bass management on (the semantic LFE lane is unmapped: the graph's bass management
+/// consumes it); sub lane i maps to `physicalChannelForSubLane[i]`. Every destination is unique.
+static inline bool N60LiveNChannelOutputMapCompileGraphSubs(
+    N60ProgramChannelLayout programLayout,
+    uint32_t physicalChannelCount,
+    const uint32_t * _Nonnull physicalChannelForProgram,
+    uint32_t subwooferCount,
+    const uint32_t * _Nonnull physicalChannelForSubLane,
+    N60LiveNChannelOutputMap * _Nonnull mapOut
+) {
+    if (mapOut == NULL
+        || physicalChannelForProgram == NULL
+        || physicalChannelForSubLane == NULL
+        || !N60ProgramChannelLayoutIsValid(&programLayout)
+        || physicalChannelCount == 0u
+        || physicalChannelCount > N60_LIVE_MAX_PHYSICAL_CHANNELS
+        || subwooferCount <= N60_MAX_SUBWOOFER_OUTPUTS
+        || subwooferCount > N60_LIVE_MAX_GRAPH_SUBWOOFERS) {
+        return false;
+    }
+    N60LiveNChannelOutputMap result = {0};
+    result.physicalChannelCount = physicalChannelCount;
+    result.programLayout = programLayout;
+    result.graphSubLaneCount = subwooferCount;
+    for (uint32_t channel = 0; channel < N60_MAX_PROGRAM_CHANNELS; ++channel) {
+        result.physicalChannelForProgram[channel] = N60_LIVE_PHYSICAL_CHANNEL_UNMAPPED;
+    }
+    for (uint32_t sub = 0; sub < N60_MAX_SUBWOOFER_OUTPUTS; ++sub) {
+        result.physicalChannelForSubwoofer[sub] = N60_LIVE_PHYSICAL_CHANNEL_UNMAPPED;
+    }
+    for (uint32_t sub = 0; sub < N60_LIVE_MAX_GRAPH_SUBWOOFERS; ++sub) {
+        result.physicalChannelForGraphSub[sub] = N60_LIVE_PHYSICAL_CHANNEL_UNMAPPED;
+    }
+    bool used[N60_LIVE_MAX_PHYSICAL_CHANNELS] = {false};
+    for (uint32_t program = 0; program < programLayout.channelCount; ++program) {
+        const uint32_t physical = physicalChannelForProgram[program];
+        if (programLayout.channels[program] == N60ProgramChannelRoleLowFrequencyEffects) {
+            if (physical != N60_LIVE_PHYSICAL_CHANNEL_UNMAPPED) return false;
+            continue;
+        }
+        if (physical >= physicalChannelCount || used[physical]) return false;
+        used[physical] = true;
+        result.physicalChannelForProgram[program] = physical;
+    }
+    for (uint32_t sub = 0; sub < subwooferCount; ++sub) {
+        const uint32_t physical = physicalChannelForSubLane[sub];
+        if (physical >= physicalChannelCount || used[physical]) return false;
+        used[physical] = true;
+        result.physicalChannelForGraphSub[sub] = physical;
+    }
+    result.valid = true;
+    *mapOut = result;
+    return true;
+}
+
 static inline bool N60LiveNChannelOutputMapIsValid(
     const N60LiveNChannelOutputMap * _Nullable map
 ) {
@@ -200,6 +264,14 @@ static inline bool N60LiveNChannelOutputMapIsValid(
             && N60LiveNChannelOutputMapCompileRouted(
                 map->programLayout, map->physicalChannelCount, map->routedLaneCount,
                 map->physicalChannelForRoutedLane, &routed);
+    }
+    if (map->graphSubLaneCount > 0u) {
+        N60LiveNChannelOutputMap lanes = {0};
+        return !map->bassManagementEnabled
+            && map->subwooferCount == 0u
+            && N60LiveNChannelOutputMapCompileGraphSubs(
+                map->programLayout, map->physicalChannelCount, map->physicalChannelForProgram,
+                map->graphSubLaneCount, map->physicalChannelForGraphSub, &lanes);
     }
     N60LiveNChannelOutputMap copy = {0};
     return N60LiveNChannelOutputMapCompile(
@@ -584,6 +656,8 @@ static inline bool N60LiveNChannelRenderProcessFrame(
         || graph == NULL
         || input == NULL
         || physicalOutput == NULL
+        // E8 A3: 5 to 8 subs exist only on the graph path; the legacy kernel renders silence, never a truncation.
+        || graph->outputMap.graphSubLaneCount > 0u
         || !N60LiveNChannelRenderRuntimeIsPrepared(runtime, graph)) {
         return false;
     }

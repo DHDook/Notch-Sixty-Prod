@@ -314,7 +314,8 @@ static inline bool N60LiveNChannelBridgeAttachGraph(
         || graphChannels > N60_GRAPH_MAX_CHANNELS
         || maxFrames == 0u
         || (bridge->graph.outputMap.routedLaneCount > 0u
-            && graphChannels < programChannels + bridge->graph.outputMap.routedLaneCount)) {
+            && graphChannels < programChannels + bridge->graph.outputMap.routedLaneCount)
+        || graphChannels < programChannels + bridge->graph.outputMap.graphSubLaneCount) {
         return false;
     }
     // Planar input and output blocks side by side.
@@ -1173,6 +1174,20 @@ static inline OSStatus N60LiveNChannelOutputIOProc(
                      ++sub) {
                     const uint32_t target = bridge->graph.outputMap.physicalChannelForSubwoofer[sub];
                     if (target == N60_LIVE_PHYSICAL_CHANNEL_UNMAPPED
+                        || target >= physical.physicalChannelCount) {
+                        frameRendered = false;
+                        break;
+                    }
+                    const float value = planarOut[(programChannels + sub) * stride + frameIndex];
+                    physical.values[target] = isfinite(value) ? value : 0.0f;
+                }
+                // E8 A3: 5 to 8 sub lanes follow the program lanes.
+                for (uint32_t sub = 0;
+                     frameRendered && routedLanes == 0u && sub < bridge->graph.outputMap.graphSubLaneCount;
+                     ++sub) {
+                    const uint32_t target = bridge->graph.outputMap.physicalChannelForGraphSub[sub];
+                    if (programChannels + sub >= bridge->graphChannels
+                        || target == N60_LIVE_PHYSICAL_CHANNEL_UNMAPPED
                         || target >= physical.physicalChannelCount) {
                         frameRendered = false;
                         break;

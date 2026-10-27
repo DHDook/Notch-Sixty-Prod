@@ -29,9 +29,14 @@ enum LiveNChannelTransportError: Error, Equatable, LocalizedError {
     /// E8 S4: the routing matrix cannot run on this session, with the reason (legacy kernel, flag off, a sub source
     /// with bass management off, a routing the compiler rejects).
     case routingRefused(String)
+    /// E8 A3: the profile has 5 to 8 subwoofers and the session would run on the legacy render kernel, which drives
+    /// at most 4. Nothing is truncated; the stored profile is kept.
+    case tooManySubwoofersForLegacyKernel(Int)
 
     var errorDescription: String? {
         switch self {
+        case .tooManySubwoofersForLegacyKernel(let count):
+            return "The legacy render kernel drives at most \(SubwooferLimit.legacyKernel) subwoofers; this profile has \(count). Turn on the unified graph to use more."
         case .routingRefused(let reason):
             return "The routing matrix cannot start: \(reason)"
         case .incompatibleProgramChannelCount(let tap, let profile):
@@ -172,6 +177,9 @@ enum LiveNChannelRenderGraphCompiler {
         // is the graph's, so the legacy snapshot is never built for it.
         var bassManagementConfiguration = bassManagementConfiguration
         if routePlan.isRouted { bassManagementConfiguration.enabled = false }
+        // E8 A3: 5 to 8 subs are graph-only. The legacy bass-management snapshot holds at most 4, so it is not built;
+        // the session requires the graph (the engine refuses the legacy kernel by name before this point).
+        if Int(routePlan.subwooferCount) > SubwooferLimit.legacyKernel { bassManagementConfiguration.enabled = false }
         let layout = routePlan.programLayout.realtimeLayout
         var lanes = N60ProgramLaneGraphSnapshotMakeUnity(sampleRate, layout)
 
