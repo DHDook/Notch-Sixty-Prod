@@ -12,17 +12,24 @@ struct ProductionRoutingEditorView: View {
 
     init(engine: AudioIOEngine) {
         self.engine = engine
-        let device = engine.selectedOutputDevice
-        let profile = engine.outputDeviceProfileConfiguration
-        let program = (profile?.enabled == true) ? profile?.programLayout.roles.count ?? 2 : 2
-        let subs = (profile?.enabled == true) ? profile?.subwooferAssignments.count ?? 0 : 0
         let configuration = engine.speakerRoutingConfiguration ?? SpeakerRoutingConfiguration(enabled: false)
-        _model = StateObject(wrappedValue: SpeakerRoutingEditorModel(
+        let model = SpeakerRoutingEditorModel(
             configuration: configuration,
-            context: SpeakerRoutingContext(
-                programLanes: program,
-                subwoofers: max(subs, configuration.subwooferSourceCount),
-                sampleRate: device?.nominalSampleRate ?? 48_000)))
+            context: SpeakerRoutingContext(programLanes: 2, subwoofers: 0, sampleRate: 48_000))
+        Self.syncContext(model, engine: engine)
+        _model = StateObject(wrappedValue: model)
+    }
+
+    /// E8 A5: the model follows the live profile, layout, bass management and device rate; it is never re-created.
+    private static func syncContext(_ model: SpeakerRoutingEditorModel, engine: AudioIOEngine) {
+        let profile = engine.outputDeviceProfileConfiguration
+        let active = profile?.enabled == true ? profile : nil
+        model.updateContext(
+            programLanes: active?.programLayout.roles.count ?? 2,
+            profileSubwoofers: active?.subwooferAssignments.count ?? 0,
+            sampleRate: engine.selectedOutputDevice?.nominalSampleRate ?? 48_000,
+            programLaneNames: active?.programLayout.roles.map(\.displayName) ?? [],
+            bassManagementEnabled: engine.bassManagementConfiguration.enabled)
     }
 
     var body: some View {
@@ -32,6 +39,8 @@ struct ProductionRoutingEditorView: View {
             ForEach(model.configuration.speakers) { speaker in
                 speakerCard(speaker)
             }
+            speakersFooter
+            subwooferCard
             matrixCard
             pipelineCard
             camillaCard
@@ -41,7 +50,13 @@ struct ProductionRoutingEditorView: View {
                     .font(.callout).foregroundStyle(.red).textSelection(.enabled)
             }
         }
-        .onAppear { model.onCommit = commit }
+        .onAppear {
+            model.onCommit = commit
+            Self.syncContext(model, engine: engine)
+        }
+        .onChange(of: engine.outputDeviceProfileConfiguration) { _, _ in Self.syncContext(model, engine: engine) }
+        .onChange(of: engine.selectedOutputDevice) { _, _ in Self.syncContext(model, engine: engine) }
+        .onChange(of: engine.bassManagementConfiguration.enabled) { _, _ in Self.syncContext(model, engine: engine) }
     }
 
     private func commit(_ configuration: SpeakerRoutingConfiguration) {
@@ -49,8 +64,14 @@ struct ProductionRoutingEditorView: View {
             try engine.replaceSpeakerRoutingConfiguration(configuration)
             actionError = nil
         } catch {
+            // The engine refused: show its reason and put the engine's configuration back in the editor.
+            model.revert(to: engine.speakerRoutingConfiguration ?? SpeakerRoutingConfiguration(enabled: false))
             actionError = error.localizedDescription
         }
+    }
+
+    private func report(_ outcome: RoutingEditOutcome) {
+        if case .refused(let reason) = outcome { actionError = reason }
     }
 
     // MARK: Cards
@@ -91,8 +112,11 @@ struct ProductionRoutingEditorView: View {
                 .labelsHidden()
                 .frame(width: 200)
                 Spacer()
-                Text("Choosing a template rebuilds the speakers; outputs are assigned in channel order on the selected device.")
-                    .font(.caption).foregroundStyle(.secondary)
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text("Choosing a template rebuilds the speakers; outputs are assigned in channel order on the selected device.")
+                    Text("Changing outputs or subwoofers restarts the output with a short fade.")
+                }
+                .font(.caption).foregroundStyle(.secondary)
             }
             .padding(.vertical, 4)
         }
@@ -103,19 +127,29 @@ struct ProductionRoutingEditorView: View {
             VStack(alignment: .leading, spacing: 10) {
                 HStack {
                     Text(speaker.name.isEmpty ? "Speaker" : speaker.name).font(.headline)
-                    Text(SpeakerRoutingEditorModel.sourceName(speaker.source)).foregroundStyle(.secondary)
-                    Spacer()
-                    Button("Add way") {
-                        let used = Set(model.configuration.outputEndpoints.map(\.channelIndex))
-                        let channel = (0..<UInt32(64)).first { !used.contains($0) } ?? 0
-                        let uid = speaker.ways.first?.endpoint.deviceUID ?? engine.selectedOutputDevice?.uid ?? ""
-                        if !model.addWay(speaker: speaker.id,
-                                         endpoint: PhysicalOutputEndpoint(deviceUID: uid, channelIndex: channel)) {
-                            actionError = "A speaker can have at most \(RoutedSpeaker.maxWays) ways."
+                    Picker("Source", selection: Binding(
+                        get: { speaker.source }, set: { model.setSource($0, speaker: speaker.id) })) {
+                        ForEach(model.matrixSources, id: \.self) {
+                            Text(SpeakerRoutingEditorModel.sourceName($0)).tag($0)
+                        }
+                        if !model.matrixSources.contains(speaker.source) {
+                            Text(SpeakerRoutingEditorModel.sourceName(speaker.source) + " (unavailable)").tag(speaker.source)
                         }
                     }
+                    .labelsHidden().frame(width: 150)
+                    Spacer()
+                    Button("Add way") {
+                        report(model.addWayOnFreeOutput(
+                            speaker: speaker.id, devices: engine.outputDevices, selected: engine.selectedOutputDevice))
+                    }
                     Button("Remove speaker", role: .destructive) { model.removeSpeaker(speaker.id) }
+                        .disabled(model.removeSpeakerBlockReason(speaker.id) != nil)
+                        .help(model.removeSpeakerBlockReason(speaker.id) ?? "")
                 }
+                if let reason = model.removeSpeakerBlockReason(speaker.id), speaker.source.kind == .program {
+                    Text(reason).font(.caption).foregroundStyle(.secondary)
+                }
+                phaseRow(speaker)
                 RoutingResponsePlot(model: model, speaker: speaker)
                     .frame(height: 140)
                 ForEach(speaker.ways) { way in
@@ -127,11 +161,88 @@ struct ProductionRoutingEditorView: View {
         }
     }
 
+    /// E8 A5: one linear-phase choice per speaker, with the latency it adds at the current rate.
+    @ViewBuilder
+    private func phaseRow(_ speaker: RoutedSpeaker) -> some View {
+        if let choice = model.realisationChoice(speaker) {
+            HStack(spacing: 12) {
+                Picker("Crossover phase", selection: Binding<RoutingRealisation?>(
+                    get: { choice == .mixed ? nil : (choice == .fir ? .fir : .iir) },
+                    set: { if let r = $0 { model.setRealisation(r, speaker: speaker.id) } })) {
+                    if choice == .mixed { Text("Mixed").tag(RoutingRealisation?.none) }
+                    Text("Minimum phase (IIR)").tag(Optional(RoutingRealisation.iir))
+                    Text("Linear phase (FIR)").tag(Optional(RoutingRealisation.fir))
+                }
+                .frame(width: 330)
+                if let latency = model.linearPhaseLatency(speaker) {
+                    Text(String(format: "Adds %.1f ms", Double(latency.frames) / model.context.sampleRate * 1000)
+                         + (latency.twoBand ? " (two-band)" : ""))
+                        .font(.caption).monospacedDigit().foregroundStyle(.secondary)
+                    Text("Plays as minimum phase in low-latency mode").font(.caption).foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
+    private var speakersFooter: some View {
+        HStack {
+            Button("Add speaker") {
+                report(model.addSpeakerOnFreeOutput(selected: engine.selectedOutputDevice))
+            }
+            Text("A new speaker reads the first program lane no speaker reads, on the next free output.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
+    /// E8 A5: the routing's own subwoofers. The profile's subwoofers are edited in the card below this editor.
+    private var subwooferCard: some View {
+        GroupBox("Subwoofers") {
+            VStack(alignment: .leading, spacing: 6) {
+                ForEach(model.subwooferSpeakers) { sub in
+                    HStack {
+                        Text(sub.name.isEmpty ? SpeakerRoutingEditorModel.sourceName(sub.source) : sub.name)
+                            .frame(width: 80, alignment: .leading)
+                        if let way = sub.ways.first {
+                            Picker("Output", selection: Binding(
+                                get: { way.endpoint },
+                                set: { model.setEndpoint($0, way: way.id, speaker: sub.id) })) {
+                                ForEach(RoutingOutputChoice.choices(devices: engine.outputDevices, current: way.endpoint)) {
+                                    Text($0.title).tag($0.endpoint)
+                                }
+                            }
+                            .labelsHidden().frame(width: 260)
+                        }
+                        Spacer()
+                        Button("Remove", role: .destructive) { report(model.removeSubwoofer(index: sub.source.index)) }
+                            .disabled(model.subwooferRemoveBlockReason(index: sub.source.index) != nil)
+                            .help(model.subwooferRemoveBlockReason(index: sub.source.index) ?? "")
+                    }
+                }
+                if model.subwooferSpeakers.isEmpty { Text("No subwoofers.").foregroundStyle(.secondary) }
+                HStack {
+                    Button("Add subwoofer") { report(model.addSubwooferOnFreeOutput(selected: engine.selectedOutputDevice)) }
+                        .disabled(model.subwooferAddBlockReason != nil)
+                    if let reason = model.subwooferAddBlockReason {
+                        Text(reason).font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
     private func wayRow(speaker: RoutedSpeaker, way: RoutedWay) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
                 Text(way.name.isEmpty ? "Way" : way.name).font(.subheadline.weight(.semibold))
-                Text("Output \(way.endpoint.channelIndex + 1)").font(.caption).foregroundStyle(.secondary)
+                Picker("Output", selection: Binding(
+                    get: { way.endpoint },
+                    set: { model.setEndpoint($0, way: way.id, speaker: speaker.id) })) {
+                    ForEach(RoutingOutputChoice.choices(devices: engine.outputDevices, current: way.endpoint)) {
+                        Text($0.title).tag($0.endpoint)
+                    }
+                }
+                .labelsHidden().frame(width: 260)
                 Spacer()
                 Button("Remove") { _ = model.removeWay(way.id, speaker: speaker.id) }
                     .disabled(speaker.ways.count < 2)
