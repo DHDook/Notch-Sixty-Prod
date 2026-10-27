@@ -44,6 +44,8 @@ struct UnifiedGraphCrossover: Equatable, Sendable {
 
 struct UnifiedGraphRouting: Equatable, Sendable {
     var outputs: [UnifiedGraphOutputLane]
+    /// Compile-time notes (for example a linearisation left out); the validation warnings come from `validate`.
+    var warnings: [SpeakerRoutingWarning] = []
     var outputLaneCount: Int { outputs.count }
 }
 
@@ -66,6 +68,12 @@ extension UnifiedGraphProtection {
 }
 
 enum SpeakerRoutingCompiler {
+    /// Minimum-phase (or linear-phase) driver linearisation adds latency to every output, because the alignment pads the
+    /// others up to the largest. Beyond this the correction is left out and a warning says so (owner decision 26 Oct 2026).
+    static let maxLinearisationLatencyMilliseconds = 50.0
+    /// The deploy gate: the realised FIR may differ from the design by at most this many dB over the passband.
+    static let linearisationVerifierToleranceDB = 0.5
+
     static func compile(
         _ routing: SpeakerRoutingConfiguration,
         onto base: UnifiedGraphConfiguration,
@@ -91,12 +99,22 @@ enum SpeakerRoutingCompiler {
                     let plan = try? CrossoverCore.linearPhasePlan(
                         highPass: way.highPass, lowPass: way.lowPass, sampleRate: base.sampleRate)
                     delay = max(delay, plan?.groupDelayFrames ?? 0)
+                    // A linearised linear-phase way needs the longer window its correction asks for (automatic choice).
+                    if let lin = way.linearisation,
+                       let design = try? CrossoverCore.linearise(
+                        nearField: lin.nearField, farField: lin.farField, mergeHz: lin.mergeHz, highPass: way.highPass,
+                        lowPass: way.lowPass, sampleRate: base.sampleRate, linearPhase: true),
+                       let fir = try? CrossoverCore.linearisedDriverFIR(
+                        design, highPass: way.highPass, lowPass: way.lowPass, sampleRate: base.sampleRate) {
+                        delay = max(delay, fir.plan.groupDelayFrames)
+                    }
                 }
                 speakerDelay[index] = delay
             }
         }
         var outputs: [UnifiedGraphOutputLane] = []
         var latencies: [UInt32] = []
+        var notes: [SpeakerRoutingWarning] = []
         for (position, endpoint) in endpoints.enumerated() {
             var entries: [UnifiedGraphRouteEntry] = []
             var owner: RoutedWay?
@@ -117,7 +135,18 @@ enum SpeakerRoutingCompiler {
             var driverFIR: UnifiedGraphDriverFIR?
             if let way = owner {
                 var highPass = way.highPass, lowPass = way.lowPass
-                if way.realisation == .fir, ownerDelay > 0, highPass != nil || lowPass != nil {
+                let wayName = way.name.isEmpty ? way.id.uuidString : way.name
+                let isFIR = way.realisation == .fir && ownerDelay > 0 && (highPass != nil || lowPass != nil)
+                if let lin = way.linearisation {
+                    if preferLowLatency {
+                        notes.append(.linearisationSkipped(way: wayName, reason: .lowLatencyMode))
+                    } else if let designed = Self.linearisedFIR(
+                        lin, way: way, linearPhase: isFIR, groupDelayFrames: isFIR ? ownerDelay : 0,
+                        sampleRate: base.sampleRate, name: wayName, notes: &notes) {
+                        driverFIR = designed
+                        if isFIR { highPass = nil; lowPass = nil }
+                    }
+                } else if isFIR {
                     let design = try CrossoverCore.linearPhaseDesign(
                         highPass: highPass, lowPass: lowPass, sampleRate: base.sampleRate, groupDelayFrames: ownerDelay)
                     driverFIR = UnifiedGraphDriverFIR(
@@ -147,8 +176,40 @@ enum SpeakerRoutingCompiler {
 
         var config = base
         config.protection = nil          // replaced by the per-output protection above
-        config.routing = UnifiedGraphRouting(outputs: outputs)
+        config.routing = UnifiedGraphRouting(outputs: outputs, warnings: notes)
         return config
+    }
+
+    /// Designs the way's driver FIR from its capture: minimum phase carries the correction alone (the crossover stays IIR);
+    /// linear phase folds the crossover in. Returns nil, with a note, when the correction is over the latency cap or fails.
+    private static func linearisedFIR(
+        _ lin: RoutedWayLinearisation, way: RoutedWay, linearPhase: Bool, groupDelayFrames: Int, sampleRate: Double,
+        name: String, notes: inout [SpeakerRoutingWarning]
+    ) -> UnifiedGraphDriverFIR? {
+        do {
+            let design = try CrossoverCore.linearise(
+                nearField: lin.nearField, farField: lin.farField, mergeHz: lin.mergeHz,
+                highPass: way.highPass, lowPass: way.lowPass, sampleRate: sampleRate, linearPhase: linearPhase)
+            let fir = try CrossoverCore.linearisedDriverFIR(
+                design, highPass: way.highPass, lowPass: way.lowPass, sampleRate: sampleRate, groupDelayFrames: groupDelayFrames)
+            let milliseconds = Double(fir.plan.latencyFrames) / sampleRate * 1_000
+            guard milliseconds <= maxLinearisationLatencyMilliseconds else {
+                notes.append(.linearisationSkipped(way: name, reason: .latencyCap(milliseconds: milliseconds)))
+                return nil
+            }
+            let error = try CrossoverCore.verifyLinearisation(
+                design, fir: fir, highPass: way.highPass, lowPass: way.lowPass, sampleRate: sampleRate)
+            guard error <= linearisationVerifierToleranceDB else {
+                notes.append(.linearisationSkipped(way: name, reason: .designFailed))
+                return nil
+            }
+            return UnifiedGraphDriverFIR(
+                kind: fir.stageKind, groupDelayFrames: UInt32(fir.plan.groupDelayFrames),
+                latencyFrames: UInt32(fir.plan.latencyFrames), params: fir.stageParameters)
+        } catch {
+            notes.append(.linearisationSkipped(way: name, reason: .designFailed))
+            return nil
+        }
     }
 }
 
