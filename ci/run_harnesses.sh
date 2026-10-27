@@ -276,6 +276,21 @@ if selected e8_xover_fir_core; then
     fi
 fi
 
+# E8 S8: near-field driver linearisation at the eight standard rates.
+if selected e8_xover_linearise_core; then
+    build_core_objs
+    if [ "$CORE_OK" = 1 ]; then
+        if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -Icore/include -Icore/src core/tests/test_xover_linearise.cpp \
+            "${CORE_OBJS[@]}" -o "$OUT/e8_core_xover_linearise" && "$OUT/e8_core_xover_linearise"; then
+            passed+=(e8_core_xover_linearise)
+        else
+            failed+=(e8_core_xover_linearise)
+        fi
+    else
+        failed+=(e8_xover_linearise_core)
+    fi
+fi
+
 # E8 S2: ROUTE and XOVER graph stages (ABI v17), the BASS_MGMT filter-spec trailer, at the eight standard rates.
 if selected e8_route_core; then
     build_core_objs

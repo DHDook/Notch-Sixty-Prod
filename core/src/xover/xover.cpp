@@ -381,3 +381,238 @@ int n60_xover_fir_synthesize(const n60_xover_fir_params *params, float *full, ui
 }
 
 }  // extern "C"
+
+// E8 S8: near-field driver linearisation (ABI v4). Method: smooth the measured dB at a fractional-octave width (the mean of
+// nine evenly spaced samples across the window), level-match and blend an optional far field above a merge frequency, take the
+// mean level between the way's corners as the target, and correct towards it with the fixed safety limits of owner decision 6.
+// Minimum phase uses the real-cepstrum synthesiser (n60_correct_minphase_synthesize); linear phase folds the correction into
+// the crossover's zero-phase amplitude and calls n60_correct_synthesize_linear_phase.
+#include <vector>
+
+namespace {
+
+uint64_t nextPow2Local(uint64_t n) {
+    uint64_t p = 1;
+    while (p < n) p <<= 1;
+    return p;
+}
+
+constexpr double kGridStartHz = 20.0;
+constexpr double kPerOctave = 24.0;
+constexpr double kMaxCutDb = -24.0;
+constexpr double kBoostCapDb = 6.0;
+
+// dB at hz, linear in log frequency, held at the ends.
+double atHz(const double *f, const double *v, uint32_t n, double hz) {
+    if (hz <= f[0]) return v[0];
+    if (hz >= f[n - 1]) return v[n - 1];
+    uint32_t lo = 0, hi = n - 1;
+    while (hi - lo > 1) {
+        const uint32_t mid = (lo + hi) / 2;
+        (f[mid] <= hz ? lo : hi) = mid;
+    }
+    const double t = std::log(hz / f[lo]) / std::log(f[hi] / f[lo]);
+    return v[lo] + t * (v[hi] - v[lo]);
+}
+
+bool ascending(const double *f, const double *v, uint32_t n) {
+    if (!f || !v || n < 2) return false;
+    for (uint32_t i = 0; i < n; ++i) {
+        if (!std::isfinite(f[i]) || !std::isfinite(v[i]) || !(f[i] > 0.0) || (i > 0 && !(f[i] > f[i - 1]))) return false;
+    }
+    return true;
+}
+
+double smoothedAt(const double *f, const double *v, uint32_t n, double hz, double width) {
+    double sum = 0.0;
+    for (int k = -4; k <= 4; ++k) sum += atHz(f, v, n, hz * std::exp2(width * static_cast<double>(k) / 8.0));
+    return sum / 9.0;
+}
+
+uint32_t gridCount(double fs) {
+    const double top = std::fmin(20000.0, 0.45 * fs);
+    return static_cast<uint32_t>(std::floor(std::log2(top / kGridStartHz) * kPerOctave)) + 1;
+}
+
+double gridHz(uint32_t i) { return kGridStartHz * std::exp2(static_cast<double>(i) / kPerOctave); }
+
+bool linValid(const n60_xover_lin_params *p) {
+    return p && p->struct_size == sizeof(n60_xover_lin_params) && std::isfinite(p->sample_rate) && p->sample_rate >= 8000.0 &&
+           p->sample_rate <= 768000.0 && (p->highpass || p->lowpass) && std::isfinite(p->merge_hz) && p->merge_hz >= 0.0 &&
+           std::isfinite(p->max_boost_db) && p->max_boost_db >= 0.0 && p->max_boost_db <= kBoostCapDb &&
+           std::isfinite(p->smoothing_octaves) && p->smoothing_octaves >= 0.0 && p->smoothing_octaves <= 1.0 &&
+           std::isfinite(p->band_octaves) && p->band_octaves >= 0.0 && p->band_octaves <= 2.0;
+}
+
+struct LinAmplitude {
+    FirTarget target;
+    const double *grid;
+    const double *correction;
+    uint32_t count;
+};
+
+double linAmplitude(double hz, void *user) {
+    const LinAmplitude &a = *static_cast<const LinAmplitude *>(user);
+    const double xo = firAmplitude(hz, const_cast<FirTarget *>(&a.target));
+    const double c = (hz < a.grid[0] || hz > a.grid[a.count - 1]) ? 0.0 : atHz(a.grid, a.correction, a.count, hz);
+    return xo * std::pow(10.0, c / 20.0);
+}
+
+}  // namespace
+
+extern "C" {
+
+int n60_xover_linearise_design(const n60_xover_lin_params *p, const double *nearHz, const double *nearDb, uint32_t nearN,
+                               const double *farHz, const double *farDb, uint32_t farN, double *gridOut, double *corrOut,
+                               double *predOut, uint32_t capacity, n60_xover_lin_report *report) {
+    if (!linValid(p) || !ascending(nearHz, nearDb, nearN) || !gridOut || !corrOut || !predOut || !report) return N60_XOVER_ERR_ARGUMENT;
+    const bool useFar = p->merge_hz > 0.0 && farN > 0;
+    if (useFar && !ascending(farHz, farDb, farN)) return N60_XOVER_ERR_ARGUMENT;
+    const uint32_t n = gridCount(p->sample_rate);
+    if (capacity < n || n > N60_XOVER_LIN_MAX_POINTS) return N60_XOVER_ERR_ARGUMENT;
+    const double width = p->smoothing_octaves > 0.0 ? p->smoothing_octaves : 1.0 / 6.0;
+    const double band = p->band_octaves > 0.0 ? p->band_octaves : 1.0;
+    const double cap = p->max_boost_db > 0.0 ? p->max_boost_db : kBoostCapDb;
+    const double top = gridHz(n - 1);
+    const double lo = p->highpass ? p->highpass->corner_hz : kGridStartHz;
+    const double hi = p->lowpass ? p->lowpass->corner_hz : top;
+    if (!(lo >= kGridStartHz) || !(hi > lo) || hi > 0.49 * p->sample_rate) return N60_XOVER_ERR_CORNER;
+
+    std::vector<double> measured(n);
+    double offset = 0.0;
+    if (useFar) {
+        double sum = 0.0;
+        for (int k = 0; k < 16; ++k) {
+            const double hz = p->merge_hz / std::exp2(0.585 * static_cast<double>(k) / 15.0);  // merge / 1.5 .. merge
+            sum += smoothedAt(nearHz, nearDb, nearN, hz, width) - smoothedAt(farHz, farDb, farN, hz, width);
+        }
+        offset = sum / 16.0;
+    }
+    for (uint32_t i = 0; i < n; ++i) {
+        const double hz = gridHz(i);
+        double m = smoothedAt(nearHz, nearDb, nearN, hz, width);
+        if (useFar) {
+            const double w = std::fmin(1.0, std::fmax(0.0, std::log2(hz / p->merge_hz) * 3.0 + 0.5));
+            const double s = w * w * (3.0 - 2.0 * w);
+            m = (1.0 - s) * m + s * (smoothedAt(farHz, farDb, farN, hz, width) + offset);
+        }
+        measured[i] = m;
+        gridOut[i] = hz;
+    }
+
+    double sum = 0.0, count = 0.0;
+    for (uint32_t i = 0; i < n; ++i) {
+        if (gridOut[i] >= lo && gridOut[i] <= hi) { sum += measured[i]; count += 1.0; }
+    }
+    if (count < 2.0) return N60_XOVER_ERR_CORNER;
+    const double reference = sum / count;
+
+    *report = n60_xover_lin_report{};
+    report->point_count = n;
+    report->passband_low_hz = lo;
+    report->passband_high_hz = hi;
+    report->reference_db = reference;
+    double beforeMin = 1e300, beforeMax = -1e300, afterMin = 1e300, afterMax = -1e300;
+    const double edgeLo = lo / std::exp2(band), edgeHi = hi * std::exp2(band);
+    for (uint32_t i = 0; i < n; ++i) {
+        const double hz = gridOut[i];
+        double c = 0.0;
+        if (hz >= edgeLo && hz <= edgeHi) {
+            c = reference - measured[i];
+            if (c > cap) { c = cap; report->boost_capped = 1; }
+            if (hz < lo && c > 0.0) { c = 0.0; report->boost_capped = 1; }
+            c = std::fmax(c, kMaxCutDb);
+            const double fade = std::fmin(std::fmin(1.0, std::log2(hz / edgeLo) * 3.0), std::fmin(1.0, std::log2(edgeHi / hz) * 3.0));
+            c *= fade;
+        }
+        corrOut[i] = c;
+        predOut[i] = measured[i] + c;
+        report->max_boost_db = std::fmax(report->max_boost_db, c);
+        report->max_cut_db = std::fmin(report->max_cut_db, c);
+        if (hz >= lo && hz <= hi) {
+            beforeMin = std::fmin(beforeMin, measured[i]);
+            beforeMax = std::fmax(beforeMax, measured[i]);
+            afterMin = std::fmin(afterMin, predOut[i]);
+            afterMax = std::fmax(afterMax, predOut[i]);
+        }
+    }
+    report->ripple_before_db = beforeMax - beforeMin;
+    report->ripple_after_db = afterMax - afterMin;
+    return N60_XOVER_OK;
+}
+
+int n60_xover_linearise_synthesize(const n60_xover_lin_params *p, const double *grid, const double *corr, uint32_t points,
+                                   uint32_t delayIn, float *full, uint64_t fullCap, float *low, uint64_t lowCap,
+                                   n60_xover_fir_report *report) {
+    if (!linValid(p) || !grid || !corr || points < 2 || !full || !report) return N60_XOVER_ERR_ARGUMENT;
+    for (uint32_t i = 0; i < points; ++i) {
+        if (!std::isfinite(grid[i]) || !std::isfinite(corr[i]) || !(grid[i] > 0.0) || (i > 0 && !(grid[i] > grid[i - 1]))) {
+            return N60_XOVER_ERR_ARGUMENT;
+        }
+    }
+    const double fs = p->sample_rate;
+    if (p->linear_phase) {
+        LinAmplitude a{};
+        a.grid = grid;
+        a.correction = corr;
+        a.count = points;
+        double lowest = 1e300;
+        if (p->highpass) {
+            const int s = n60_xover_design(p->highpass, 1, fs, &a.target.hp);
+            if (s != N60_XOVER_OK) return s;
+            a.target.hasHp = true;
+            lowest = std::fmin(lowest, p->highpass->corner_hz);
+        }
+        if (p->lowpass) {
+            const int s = n60_xover_design(p->lowpass, 0, fs, &a.target.lp);
+            if (s != N60_XOVER_OK) return s;
+            a.target.hasLp = true;
+            lowest = std::fmin(lowest, p->lowpass->corner_hz);
+        }
+        a.target.fs = fs;
+        uint32_t delay = delayIn;
+        if (delay == 0) {
+            const double band = p->band_octaves > 0.0 ? p->band_octaves : 1.0;
+            delay = static_cast<uint32_t>(std::fmin(262144.0, std::fmax(32.0, std::round(5.0 * fs / (lowest / std::exp2(band))))));
+        }
+        if (delay > 262144u) return N60_XOVER_ERR_ARGUMENT;
+        n60_xover_fir_report plan;
+        firReport(delay, fs, &plan);
+        n60_correct_two_band_report r{};
+        const int32_t status = n60_correct_synthesize_linear_phase(fs, delay, linAmplitude, &a, full, fullCap, low, lowCap, &r);
+        if (status != N60_CORRECT_OK) return status == N60_CORRECT_ERR_ARGUMENT ? N60_XOVER_ERR_ARGUMENT : N60_XOVER_ERR_SYNTH;
+        *report = plan;
+        return N60_XOVER_OK;
+    }
+    // Minimum phase: the correction alone. Tap count: about six periods of the lowest corrected frequency, 1024 .. 32768.
+    const double lowest = std::fmax(grid[0], p->highpass ? p->highpass->corner_hz / 2.0 : grid[0]);
+    const uint64_t wanted = nextPow2Local(static_cast<uint64_t>(std::ceil(6.0 * fs / lowest)));
+    const uint32_t taps = static_cast<uint32_t>(std::min<uint64_t>(32768, std::max<uint64_t>(1024, wanted)));
+    if (fullCap < taps) return N60_XOVER_ERR_SYNTH;
+    n60_correct_minphase_params mp{};
+    n60_correct_minphase_defaults(fs, taps, &mp);
+    mp.low_hz = 0.0;
+    mp.high_hz = 0.49 * fs;
+    if (n60_correct_minphase_synthesize(&mp, grid, corr, points, full, fullCap) != N60_CORRECT_OK) return N60_XOVER_ERR_SYNTH;
+    uint32_t peak = 0;
+    for (uint32_t i = 1; i < taps; ++i) {
+        if (std::fabs(full[i]) > std::fabs(full[peak])) peak = i;
+    }
+    *report = n60_xover_fir_report{};
+    report->decimation = 1;
+    report->full_tap_count = taps;
+    report->group_delay_frames = peak;
+    report->latency_frames = 256 + peak;
+    return N60_XOVER_OK;
+}
+
+int n60_xover_fir_magnitude_db(double fs, const n60_xover_fir_report *r, const float *full, const float *low,
+                               const double *freqs, uint32_t count, double *magDb) {
+    if (!r || !full || !freqs || !magDb || r->full_tap_count == 0 || !(fs >= 8000.0)) return N60_XOVER_ERR_ARGUMENT;
+    std::vector<double> phase(count);
+    const int32_t s = n60_correct_two_band_response(fs, r->decimation, r->extra_delay_frames, r->group_delay_frames, full,
+                                                    r->full_tap_count, low, r->low_tap_count, freqs, count, magDb, phase.data());
+    return s == N60_CORRECT_OK ? N60_XOVER_OK : N60_XOVER_ERR_ARGUMENT;
+}
+
+}  // extern "C"

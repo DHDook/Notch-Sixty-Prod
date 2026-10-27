@@ -34,7 +34,7 @@
 extern "C" {
 #endif
 
-#define N60_XOVER_ABI_VERSION 3
+#define N60_XOVER_ABI_VERSION 4
 
 #define N60_XOVER_OK 0
 #define N60_XOVER_ERR_ARGUMENT (-1)
@@ -150,6 +150,68 @@ int n60_xover_fir_plan(const n60_xover_fir_params *params, n60_xover_fir_report 
 
 int n60_xover_fir_synthesize(const n60_xover_fir_params *params, float *full_taps, uint64_t full_capacity, float *low_taps,
                              uint64_t low_capacity, n60_xover_fir_report *report);
+
+/*
+ * Near-field driver linearisation (ABI v4, E8 S8). Designs an inverse of a driver's measured magnitude within its way's
+ * passband, for N60_STAGE_DRIVER_FIR. Offline: allocates, never call from a callback.
+ *
+ * Input: the near-field capture as (frequency Hz, dB) points, ascending, and optionally a gated far-field capture used above
+ * merge_hz (level-matched to the near field over the octave-and-a-half below the merge, blended over a third of an octave).
+ * Both are smoothed at smoothing_octaves (0: 1/6 octave) before use. The target is the mean smoothed level between the
+ * way's corners (the high-pass corner, or the grid start when there is none; the low-pass corner, or the grid end). The
+ * correction is target - measured on a 1/24-octave grid from 20 Hz to min(20 kHz, 0.45 fs), applied across band_octaves
+ * (0: 1) beyond each corner with a third-octave fade at the outer edges, with these fixed limits (E8 owner decision 6):
+ *   - the boost never exceeds max_boost_db (0: 6; values above 6 are refused);
+ *   - the correction is never positive below the high-pass corner;
+ *   - cuts are limited to -24 dB.
+ * A resonant high-pass roll-off below the way's own corner is therefore left alone. The grid, the correction and the
+ * predicted driver response (smoothed measurement + correction) are written to the arrays (capacity at least
+ * N60_XOVER_LIN_MAX_POINTS). Deterministic.
+ */
+#define N60_XOVER_LIN_MAX_POINTS 512u
+
+typedef struct n60_xover_lin_params {
+    uint32_t struct_size;            /* sizeof(n60_xover_lin_params) */
+    double sample_rate;
+    const n60_xover_spec *highpass;  /* NULL: none (not both NULL) */
+    const n60_xover_spec *lowpass;   /* NULL: none */
+    uint32_t linear_phase;           /* 1: linear-phase (the way is FIR); 0: minimum phase */
+    double merge_hz;                 /* 0: near field only */
+    double max_boost_db;             /* 0: 6; at most 6 */
+    double smoothing_octaves;        /* 0: 1/6 */
+    double band_octaves;             /* 0: 1 */
+} n60_xover_lin_params;
+
+typedef struct n60_xover_lin_report {
+    uint32_t point_count;
+    double passband_low_hz, passband_high_hz; /* the way's corners (or grid ends) */
+    double reference_db;                      /* the target level of the smoothed measurement */
+    double ripple_before_db, ripple_after_db; /* peak-to-peak of the smoothed driver between the corners */
+    double max_boost_db, max_cut_db;          /* extremes of the correction (cut as a negative number) */
+    uint32_t boost_capped;                    /* 1 when the +6 dB (or requested) cap, or the high-pass rule, limited a point */
+} n60_xover_lin_report;
+
+int n60_xover_linearise_design(const n60_xover_lin_params *params, const double *near_hz, const double *near_db,
+                               uint32_t near_count, const double *far_hz, const double *far_db, uint32_t far_count,
+                               double *grid_hz, double *correction_db, double *predicted_db, uint32_t capacity,
+                               n60_xover_lin_report *report);
+
+/*
+ * The DRIVER_FIR content for a designed correction, merged with the way's crossover: linear-phase puts the way's
+ * high-pass and low-pass magnitudes and the correction into one zero-phase design (as n60_xover_fir_synthesize, so the
+ * IIR crossover is dropped from the way); minimum phase gives the correction alone (the crossover stays IIR), with
+ * group_delay_frames the tap peak position. group_delay_frames_in 0 chooses it (linear phase: five periods of half the
+ * lowest corner). Buffers and the report are as n60_xover_fir_synthesize (n60_xover_fir_plan sizes the linear-phase
+ * case; a minimum-phase design is at most 32768 taps in full_taps and never uses low_taps).
+ */
+int n60_xover_linearise_synthesize(const n60_xover_lin_params *params, const double *grid_hz, const double *correction_db,
+                                   uint32_t point_count, uint32_t group_delay_frames_in, float *full_taps,
+                                   uint64_t full_capacity, float *low_taps, uint64_t low_capacity,
+                                   n60_xover_fir_report *report);
+
+/* Magnitude in dB of designed DRIVER_FIR content (either kind) at the frequencies, the declared delay removed. */
+int n60_xover_fir_magnitude_db(double sample_rate, const n60_xover_fir_report *report, const float *full_taps,
+                               const float *low_taps, const double *frequencies_hz, uint32_t count, double *magnitude_db);
 
 #ifdef __cplusplus
 }

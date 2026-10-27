@@ -192,7 +192,7 @@ static void testGraphLatency() {
 }
 
 int main() {
-    CHECK(n60_xover_abi_version() == 3, "xover ABI");
+    CHECK(n60_xover_abi_version() == N60_XOVER_ABI_VERSION, "xover ABI");
     testPlanBoundary();
     testThreeWaySum(4, 0.05, 1.0);
     testThreeWaySum(8, 0.05, 1.0);

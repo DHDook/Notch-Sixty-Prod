@@ -227,3 +227,156 @@ enum CrossoverCore {
         return LinearPhaseDesign(plan: LinearPhasePlan(report), fullTaps: full, lowTaps: Array(low.prefix(plan.lowTapCount)))
     }
 }
+
+// MARK: - E8 S8 near-field driver linearisation
+
+extension CrossoverCore {
+    /// A frequency response capture: ascending frequencies in Hz and levels in dB.
+    struct ResponseCapture: Equatable, Sendable {
+        var frequenciesHz: [Double]
+        var levelsDB: [Double]
+    }
+
+    /// The designed correction of one driver, from `n60_xover_linearise_design`.
+    struct DriverLinearisation: Equatable, Sendable {
+        /// The fixed safety limits (E8 owner decision 6): at most +6 dB of boost, none below the way's high-pass corner.
+        static let maximumBoostDB = 6.0
+
+        var gridHz: [Double]
+        var correctionDB: [Double]
+        /// Smoothed measurement plus correction: the driver as it will sound, before the crossover.
+        var predictedDB: [Double]
+        var referenceDB: Double
+        var rippleBeforeDB: Double
+        var rippleAfterDB: Double
+        var maxBoostDB: Double
+        var maxCutDB: Double
+        var boostLimited: Bool
+        var linearPhase: Bool
+    }
+
+    /// Designs the correction. `farField` (gated, valid above `mergeHz`) is optional. Offline.
+    static func linearise(
+        nearField: ResponseCapture, farField: ResponseCapture? = nil, mergeHz: Double = 0,
+        highPass: FilterSpec?, lowPass: FilterSpec?, sampleRate: Double, linearPhase: Bool
+    ) throws -> DriverLinearisation {
+        guard nearField.frequenciesHz.count == nearField.levelsDB.count,
+              farField.map({ $0.frequenciesHz.count == $0.levelsDB.count }) ?? true else {
+            throw CoreError.status(N60_XOVER_ERR_ARGUMENT)
+        }
+        var grid = [Double](repeating: 0, count: Int(N60_XOVER_LIN_MAX_POINTS))
+        var correction = grid, predicted = grid
+        var report = n60_xover_lin_report()
+        let far = farField ?? ResponseCapture(frequenciesHz: [], levelsDB: [])
+        let status = withLinParams(highPass: highPass, lowPass: lowPass, sampleRate: sampleRate,
+                                   linearPhase: linearPhase, mergeHz: farField == nil ? 0 : mergeHz) { params in
+            nearField.frequenciesHz.withUnsafeBufferPointer { nf in
+                nearField.levelsDB.withUnsafeBufferPointer { nl in
+                    far.frequenciesHz.withUnsafeBufferPointer { ff in
+                        far.levelsDB.withUnsafeBufferPointer { fl in
+                            n60_xover_linearise_design(
+                                &params, nf.baseAddress, nl.baseAddress, UInt32(nf.count),
+                                ff.baseAddress, fl.baseAddress, UInt32(ff.count),
+                                &grid, &correction, &predicted, UInt32(grid.count), &report)
+                        }
+                    }
+                }
+            }
+        }
+        guard status == N60_XOVER_OK else { throw CoreError.status(status) }
+        let n = Int(report.point_count)
+        return DriverLinearisation(
+            gridHz: Array(grid.prefix(n)), correctionDB: Array(correction.prefix(n)),
+            predictedDB: Array(predicted.prefix(n)), referenceDB: report.reference_db,
+            rippleBeforeDB: report.ripple_before_db, rippleAfterDB: report.ripple_after_db,
+            maxBoostDB: report.max_boost_db, maxCutDB: report.max_cut_db,
+            boostLimited: report.boost_capped != 0, linearPhase: linearPhase)
+    }
+
+    /// The correction merged into DRIVER_FIR content. Linear phase folds in the way's crossover (so the way then drops
+    /// its IIR high-pass and low-pass); minimum phase carries the correction alone.
+    static func linearisedDriverFIR(
+        _ design: DriverLinearisation, highPass: FilterSpec?, lowPass: FilterSpec?, sampleRate: Double,
+        groupDelayFrames: Int = 0
+    ) throws -> LinearPhaseDesign {
+        var full = [Float](repeating: 0, count: 32_768)
+        var low = [Float](repeating: 0, count: 32_768)
+        var report = n60_xover_fir_report()
+        let status = withLinParams(highPass: highPass, lowPass: lowPass, sampleRate: sampleRate,
+                                   linearPhase: design.linearPhase, mergeHz: 0) { params in
+            full.withUnsafeMutableBufferPointer { f in
+                low.withUnsafeMutableBufferPointer { l in
+                    n60_xover_linearise_synthesize(
+                        &params, design.gridHz, design.correctionDB, UInt32(design.gridHz.count),
+                        UInt32(max(0, groupDelayFrames)), f.baseAddress, UInt64(f.count), l.baseAddress, UInt64(l.count),
+                        &report)
+                }
+            }
+        }
+        guard status == N60_XOVER_OK else { throw CoreError.status(status) }
+        let plan = LinearPhasePlan(report)
+        return LinearPhaseDesign(plan: plan, fullTaps: Array(full.prefix(plan.fullTapCount)),
+                                 lowTaps: Array(low.prefix(plan.lowTapCount)))
+    }
+
+    /// Magnitude (dB) of designed DRIVER_FIR content at the frequencies, the declared delay removed: the verifier input.
+    static func firMagnitudeDB(_ design: LinearPhaseDesign, sampleRate: Double, atHz frequencies: [Double]) throws -> [Double] {
+        var report = n60_xover_fir_report()
+        report.two_band = design.plan.twoBand ? 1 : 0
+        report.decimation = UInt32(design.plan.decimation)
+        report.extra_delay_frames = UInt32(design.plan.extraDelayFrames)
+        report.full_tap_count = UInt32(design.plan.fullTapCount)
+        report.low_tap_count = UInt32(design.plan.lowTapCount)
+        report.group_delay_frames = UInt32(design.plan.groupDelayFrames)
+        report.latency_frames = UInt32(design.plan.latencyFrames)
+        var out = [Double](repeating: 0, count: frequencies.count)
+        let low = design.lowTaps.isEmpty ? [0] : design.lowTaps
+        let status = n60_xover_fir_magnitude_db(sampleRate, &report, design.fullTaps, low, frequencies,
+                                                UInt32(frequencies.count), &out)
+        guard status == N60_XOVER_OK else { throw CoreError.status(status) }
+        return out
+    }
+
+    /// Largest difference (dB) between the realised FIR and the designed target (crossover magnitude, when linear phase,
+    /// plus the correction) over the passband: the deploy gate, like the other prediction verifiers.
+    static func verifyLinearisation(
+        _ design: DriverLinearisation, fir: LinearPhaseDesign, highPass: FilterSpec?, lowPass: FilterSpec?, sampleRate: Double
+    ) throws -> Double {
+        let lo = highPass?.cornerHz ?? design.gridHz[0]
+        let hi = lowPass?.cornerHz ?? design.gridHz[design.gridHz.count - 1]
+        let points = design.gridHz.indices.filter { design.gridHz[$0] >= lo && design.gridHz[$0] <= hi }
+        let frequencies = points.map { design.gridHz[$0] }
+        let realised = try firMagnitudeDB(fir, sampleRate: sampleRate, atHz: frequencies)
+        let hpCascade = try design.linearPhase ? highPass.map { try Self.design($0, highPass: true, sampleRate: sampleRate) } : nil
+        let lpCascade = try design.linearPhase ? lowPass.map { try Self.design($0, highPass: false, sampleRate: sampleRate) } : nil
+        var worst = 0.0
+        for (offset, index) in points.enumerated() {
+            var target = design.correctionDB[index]
+            if let hpCascade { target += try hpCascade.magnitudeDB(atHz: frequencies[offset]) }
+            if let lpCascade { target += try lpCascade.magnitudeDB(atHz: frequencies[offset]) }
+            worst = max(worst, abs(realised[offset] - target))
+        }
+        return worst
+    }
+
+    private static func withLinParams<T>(
+        highPass: FilterSpec?, lowPass: FilterSpec?, sampleRate: Double, linearPhase: Bool, mergeHz: Double,
+        _ body: (inout n60_xover_lin_params) -> T
+    ) -> T {
+        var hp = highPass?.raw ?? n60_xover_spec()
+        var lp = lowPass?.raw ?? n60_xover_spec()
+        let hasHP = highPass != nil, hasLP = lowPass != nil
+        return withUnsafePointer(to: &hp) { hpPointer in
+            withUnsafePointer(to: &lp) { lpPointer in
+                var params = n60_xover_lin_params()
+                params.struct_size = UInt32(MemoryLayout<n60_xover_lin_params>.size)
+                params.sample_rate = sampleRate
+                params.highpass = hasHP ? hpPointer : nil
+                params.lowpass = hasLP ? lpPointer : nil
+                params.linear_phase = linearPhase ? 1 : 0
+                params.merge_hz = mergeHz
+                return body(&params)
+            }
+        }
+    }
+}
