@@ -23,6 +23,13 @@ struct SpeakerMeasurementLabProtocol:
     /// ID, one Main leg and one Sub leg. Optional preserves older archives.
     var coherentPairID: UUID? = nil
     var coherentLeg: SpeakerMeasurementLabCoherentLeg? = nil
+    /// E8 B2: the parent speaker source of a `driverNearField` protocol (capture identity). Optional and additive.
+    var driverCaptureSource: MultichannelCalibrationSource? = nil
+
+    var routedWayID: UUID? {
+        guard case .routedWay(let id) = request.target else { return nil }
+        return id
+    }
 
     var acousticSource: MultichannelCalibrationSource? {
         guard case .acousticSource(let source) = request.target else {
@@ -43,6 +50,7 @@ struct SpeakerMeasurementLabProtocol:
     /// Low/Mid/High bus identity.
     var captureSource: MultichannelCalibrationSource? {
         if let acousticSource { return acousticSource }
+        if routedWayID != nil { return driverCaptureSource }
         if request.mode == .coherentMainsSubTiming,
            case .sourcePair(let main, let subwoofer) = request.target,
            let coherentLeg {
@@ -96,6 +104,18 @@ struct SpeakerMeasurementLabProtocol:
             }
         case .protectedDriverNearField:
             guard protectedDriverBus != nil,
+                  captureSource != nil,
+                  nearFieldComponent == nil,
+                  let excitationLevelDBFS,
+                  excitationLevelDBFS >= -48.0,
+                  excitationLevelDBFS <= -24.0,
+                  coherentPairID == nil,
+                  coherentLeg == nil else {
+                throw SpeakerMeasurementLabSessionError.invalidProtocol
+            }
+        case .driverNearField:
+            // Same driver-safety ceiling as the protected-driver protocol: low explicit level only.
+            guard routedWayID != nil,
                   captureSource != nil,
                   nearFieldComponent == nil,
                   let excitationLevelDBFS,
@@ -508,6 +528,8 @@ struct SpeakerMeasurementLabSessionStep: Equatable, Sendable {
             let bus = labProtocol.protectedDriverBus?.displayName
                 ?? "protected driver"
             return "Place the microphone \(format(geometry.distanceMeters)) m from \(bus). The sweep is pre-rendered through the active crossover and target limiter; keep geometry fixed for \(repeatText)."
+        case .driverNearField:
+            return "Place the microphone \(format(geometry.distanceMeters)) m from the cone of \(labProtocol.name), close to the dust cap. Only this driver plays, with a sweep limited to its passband; keep geometry fixed for \(repeatText)."
         case .coherentMainsSubTiming:
             let leg = labProtocol.coherentLeg == .main
                 ? "main speaker" : "subwoofer"

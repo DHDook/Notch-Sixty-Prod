@@ -474,7 +474,7 @@ final class ProductionInformationArchitectureTests: XCTestCase {
         let measure = SpeakerMeasurementLabTab.measure.modes
         let advanced = SpeakerMeasurementLabTab.advanced.modes
         XCTAssertEqual(measure, [.wholeSpeakerOnAxis, .subwooferNearField, .coherentMainsSubTiming])
-        XCTAssertEqual(advanced, [.wholeSpeakerOffAxis, .protectedDriverNearField])
+        XCTAssertEqual(advanced, [.wholeSpeakerOffAxis, .protectedDriverNearField, .driverNearField])
         XCTAssertEqual(Set(measure + advanced), Set(SpeakerMeasurementLabMode.allCases))
         XCTAssertEqual(measure.count + advanced.count, SpeakerMeasurementLabMode.allCases.count)
         XCTAssertEqual(

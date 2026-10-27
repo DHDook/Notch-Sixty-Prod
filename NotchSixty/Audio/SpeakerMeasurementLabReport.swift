@@ -941,6 +941,8 @@ struct SpeakerMeasurementLabReportBuilder: Sendable {
             return "Subwoofer · Near field"
         case .protectedDriverNearField:
             return "Protected driver · Near field"
+        case .driverNearField:
+            return "Driver · Near field"
         case .coherentMainsSubTiming:
             return "Coherent mains/sub timing"
         }
@@ -954,6 +956,8 @@ struct SpeakerMeasurementLabReportBuilder: Sendable {
             return source.displayName
         case .protectedDriverBus(let bus):
             return bus.displayName
+        case .routedWay:
+            return "Routed driver"
         case .sourcePair(let main, let subwoofer):
             return "\(main.displayName) + \(subwoofer.displayName)"
         }

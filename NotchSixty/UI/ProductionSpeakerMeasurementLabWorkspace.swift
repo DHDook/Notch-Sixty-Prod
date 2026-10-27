@@ -594,6 +594,12 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
                 .labelsHidden()
                 .frame(width: 220)
             }
+        case .driverNearField:
+            // The way picker arrives with the linearisation UI (E8 B3); until then the draft cannot be queued.
+            GridRow {
+                Text("Driver")
+                Text("Choose a driver from the routing editor.").foregroundStyle(.secondary)
+            }
         case .coherentMainsSubTiming:
             GridRow {
                 Text("Main / Sub")
@@ -642,6 +648,7 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
     private var excitationEditor: some View {
         let forced =
             draft.mode == .protectedDriverNearField
+            || draft.mode == .driverNearField
             || draft.mode == .coherentMainsSubTiming
         GridRow {
             Text("Excitation")
@@ -1742,6 +1749,8 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
             return protectedDriverBuses.contains {
                 $0.rawValue == draft.protectedDriverBus.rawValue
             }
+        case .driverNearField:
+            return draft.routedWayID != nil
         case .coherentMainsSubTiming:
             return speakerRoles.contains {
                 $0.rawValue == draft.speakerRole.rawValue
@@ -2005,6 +2014,8 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
         case .subwooferNearField: return "Subwoofer · Near-Field"
         case .protectedDriverNearField:
             return "Protected Driver · Near-Field"
+        case .driverNearField:
+            return "Driver · Near-Field"
         case .coherentMainsSubTiming:
             return "Coherent Main / Sub Timing"
         }
@@ -2018,6 +2029,7 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
         case .wholeSpeakerOffAxis: return "angle"
         case .subwooferNearField: return "waveform"
         case .protectedDriverNearField: return "lock.shield"
+        case .driverNearField: return "speaker.wave.2"
         case .coherentMainsSubTiming: return "link"
         }
     }
@@ -2085,7 +2097,7 @@ enum SpeakerMeasurementLabTab: String, CaseIterable, Identifiable {
         switch mode {
         case .wholeSpeakerOnAxis, .subwooferNearField, .coherentMainsSubTiming:
             return .measure
-        case .wholeSpeakerOffAxis, .protectedDriverNearField:
+        case .wholeSpeakerOffAxis, .protectedDriverNearField, .driverNearField:
             return .advanced
         }
     }

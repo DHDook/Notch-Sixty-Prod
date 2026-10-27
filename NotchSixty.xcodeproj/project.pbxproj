@@ -387,6 +387,8 @@
 		F10600000000000000000005 /* SpeakerMeasurementLabDirectivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10600000000000000000015 /* SpeakerMeasurementLabDirectivity.swift */; };
 		F10600000000000000000006 /* SpeakerMeasurementLabDirectivityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10600000000000000000016 /* SpeakerMeasurementLabDirectivityTests.swift */; };
 		F10600000000000000000007 /* SpeakerMeasurementLabNearFieldLF.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10600000000000000000017 /* SpeakerMeasurementLabNearFieldLF.swift */; };
+		F10600000000000000000027 /* SpeakerMeasurementLabDriverCapture.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10600000000000000000037 /* SpeakerMeasurementLabDriverCapture.swift */; };
+		F10600000000000000000028 /* SpeakerMeasurementLabDriverCaptureTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10600000000000000000038 /* SpeakerMeasurementLabDriverCaptureTests.swift */; };
 		F10600000000000000000008 /* SpeakerMeasurementLabNearFieldLFTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10600000000000000000018 /* SpeakerMeasurementLabNearFieldLFTests.swift */; };
 		F10600000000000000000009 /* SpeakerMeasurementLabQuasiAnechoic.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10600000000000000000019 /* SpeakerMeasurementLabQuasiAnechoic.swift */; };
 		F1060000000000000000000A /* SpeakerMeasurementLabQuasiAnechoicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1060000000000000000001A /* SpeakerMeasurementLabQuasiAnechoicTests.swift */; };
@@ -877,6 +879,8 @@
 		F10600000000000000000015 /* SpeakerMeasurementLabDirectivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerMeasurementLabDirectivity.swift; sourceTree = "<group>"; };
 		F10600000000000000000016 /* SpeakerMeasurementLabDirectivityTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerMeasurementLabDirectivityTests.swift; sourceTree = "<group>"; };
 		F10600000000000000000017 /* SpeakerMeasurementLabNearFieldLF.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerMeasurementLabNearFieldLF.swift; sourceTree = "<group>"; };
+		F10600000000000000000037 /* SpeakerMeasurementLabDriverCapture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerMeasurementLabDriverCapture.swift; sourceTree = "<group>"; };
+		F10600000000000000000038 /* SpeakerMeasurementLabDriverCaptureTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerMeasurementLabDriverCaptureTests.swift; sourceTree = "<group>"; };
 		F10600000000000000000018 /* SpeakerMeasurementLabNearFieldLFTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerMeasurementLabNearFieldLFTests.swift; sourceTree = "<group>"; };
 		F10600000000000000000019 /* SpeakerMeasurementLabQuasiAnechoic.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerMeasurementLabQuasiAnechoic.swift; sourceTree = "<group>"; };
 		F1060000000000000000001A /* SpeakerMeasurementLabQuasiAnechoicTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerMeasurementLabQuasiAnechoicTests.swift; sourceTree = "<group>"; };
@@ -1193,6 +1197,7 @@
 				F10600000000000000000014 /* SpeakerMeasurementLabSessionTests.swift */,
 				F10600000000000000000016 /* SpeakerMeasurementLabDirectivityTests.swift */,
 				F10600000000000000000018 /* SpeakerMeasurementLabNearFieldLFTests.swift */,
+				F10600000000000000000038 /* SpeakerMeasurementLabDriverCaptureTests.swift */,
 				F1060000000000000000001A /* SpeakerMeasurementLabQuasiAnechoicTests.swift */,
 				F1060000000000000000001C /* SpeakerMeasurementLabLevelDependenceTests.swift */,
 				F1060000000000000000001E /* SpeakerMeasurementLabProtectedExcitationTests.swift */,
@@ -1271,6 +1276,7 @@
 				F10600000000000000000013 /* SpeakerMeasurementLabSession.swift */,
 				F10600000000000000000015 /* SpeakerMeasurementLabDirectivity.swift */,
 				F10600000000000000000017 /* SpeakerMeasurementLabNearFieldLF.swift */,
+				F10600000000000000000037 /* SpeakerMeasurementLabDriverCapture.swift */,
 				F10600000000000000000019 /* SpeakerMeasurementLabQuasiAnechoic.swift */,
 				F1060000000000000000001B /* SpeakerMeasurementLabLevelDependence.swift */,
 				F1060000000000000000001D /* SpeakerMeasurementLabProtectedExcitation.swift */,
@@ -1601,6 +1607,7 @@
 				F10600000000000000000003 /* SpeakerMeasurementLabSession.swift in Sources */,
 				F10600000000000000000005 /* SpeakerMeasurementLabDirectivity.swift in Sources */,
 				F10600000000000000000007 /* SpeakerMeasurementLabNearFieldLF.swift in Sources */,
+				F10600000000000000000027 /* SpeakerMeasurementLabDriverCapture.swift in Sources */,
 				F10600000000000000000009 /* SpeakerMeasurementLabQuasiAnechoic.swift in Sources */,
 				F1060000000000000000000B /* SpeakerMeasurementLabLevelDependence.swift in Sources */,
 				F1060000000000000000000D /* SpeakerMeasurementLabProtectedExcitation.swift in Sources */,
@@ -1915,6 +1922,7 @@
 				F10600000000000000000004 /* SpeakerMeasurementLabSessionTests.swift in Sources */,
 				F10600000000000000000006 /* SpeakerMeasurementLabDirectivityTests.swift in Sources */,
 				F10600000000000000000008 /* SpeakerMeasurementLabNearFieldLFTests.swift in Sources */,
+				F10600000000000000000028 /* SpeakerMeasurementLabDriverCaptureTests.swift in Sources */,
 				F1060000000000000000000A /* SpeakerMeasurementLabQuasiAnechoicTests.swift in Sources */,
 				F1060000000000000000000C /* SpeakerMeasurementLabLevelDependenceTests.swift in Sources */,
 				F1060000000000000000000E /* SpeakerMeasurementLabProtectedExcitationTests.swift in Sources */,

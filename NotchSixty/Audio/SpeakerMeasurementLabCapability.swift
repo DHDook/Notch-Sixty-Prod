@@ -5,6 +5,8 @@ enum SpeakerMeasurementLabMode: String, CaseIterable, Codable, Sendable {
     case wholeSpeakerOffAxis
     case subwooferNearField
     case protectedDriverNearField
+    /// E8 B2: full-band near-field capture of one routed way (a driver of the routing matrix).
+    case driverNearField
     case coherentMainsSubTiming
 }
 
@@ -49,7 +51,7 @@ struct SpeakerMeasurementLabGeometry: Codable, Equatable, Sendable {
                 && max(horizontal, vertical) <= 90
         case .subwooferNearField:
             return (0.01...0.50).contains(distanceMeters)
-        case .protectedDriverNearField:
+        case .protectedDriverNearField, .driverNearField:
             return (0.01...0.50).contains(distanceMeters)
         case .coherentMainsSubTiming:
             return (0.5...10.0).contains(distanceMeters)
@@ -60,6 +62,8 @@ struct SpeakerMeasurementLabGeometry: Codable, Equatable, Sendable {
 enum SpeakerMeasurementLabTarget: Codable, Equatable, Sendable {
     case acousticSource(MultichannelCalibrationSource)
     case protectedDriverBus(SpeakerOutputBus)
+    /// E8 B2: one `RoutedWay` of the speaker routing matrix, by its id.
+    case routedWay(UUID)
     case sourcePair(
         main: MultichannelCalibrationSource,
         subwoofer: MultichannelCalibrationSource
@@ -74,6 +78,7 @@ enum SpeakerMeasurementLabAnalysisProduct:
     case earlyWindowMagnitude
     case directivityComparison
     case lowFrequencyNearFieldMagnitude
+    case fullBandNearFieldMagnitude
     case relativeArrival
     case relativePhase
 }
@@ -111,6 +116,8 @@ struct SpeakerMeasurementLabRequest: Codable, Equatable, Sendable {
                     .isProtectedSplitBus(bus) else {
                 throw SpeakerMeasurementLabError.invalidTarget
             }
+        case (.driverNearField, .routedWay):
+            break
         case (
             .coherentMainsSubTiming,
             .sourcePair(
@@ -131,6 +138,8 @@ enum SpeakerMeasurementLabBlockReason: Equatable, Sendable {
     case transport(SpeakerOptimizerMeasurementTransportBlockReason)
     case protectedDriverTransportRequired(SpeakerOutputBus)
     case authenticatedSharedClockRequired
+    /// The routed way is not in the routing matrix, or its live acquisition path is not available yet.
+    case routedWayAcquisitionUnavailable(UUID)
 
     var message: String {
         switch self {
@@ -140,6 +149,8 @@ enum SpeakerMeasurementLabBlockReason: Equatable, Sendable {
             return "\(bus.displayName) requires a crossover-preserving protected excitation path before the lab may sweep that driver."
         case .authenticatedSharedClockRequired:
             return "Coherent mains/sub timing requires authenticated shared playback/capture clock provenance; independent source sweeps are not sufficient."
+        case .routedWayAcquisitionUnavailable:
+            return "Live per-driver acquisition needs a band-limited, limiter-protected sweep to a single routed way; that path is not available yet, so the lab only analyses captures already in a session."
         }
     }
 }
@@ -196,6 +207,7 @@ struct SpeakerMeasurementLabCapabilityPlanner: Sendable {
         multiOutputRouting: MultiOutputRoutingConfiguration?,
         speakerDriverProcessing: SpeakerDriverProcessingConfiguration?,
         bassManagementConfiguration: BassManagementConfiguration? = nil,
+        speakerRouting: SpeakerRoutingConfiguration? = nil,
         coherentLeg: SpeakerMeasurementLabCoherentLeg? = nil,
         sharedClockReferenceAvailable: Bool = false
     ) throws -> SpeakerMeasurementLabPlan {
@@ -310,6 +322,29 @@ struct SpeakerMeasurementLabCapabilityPlanner: Sendable {
                 ],
                 phaseReferenceAuthenticated: false,
                 protectedDriverBus: blockers.isEmpty ? bus : nil
+            )
+        case (
+            .driverNearField,
+            .routedWay(let wayID)
+        ):
+            // Never sweeps a driver here: an unknown way and the unwired live path both block, so no
+            // full-band excitation can reach a tweeter or midrange through this plan.
+            _ = speakerRouting
+            return SpeakerMeasurementLabPlan(
+                request: request,
+                delegatedTransportPlans: [],
+                analysisProducts: [
+                    .magnitudeResponse,
+                    .phaseResponse,
+                    .directArrival,
+                    .fullBandNearFieldMagnitude,
+                ],
+                blockReasons: [.routedWayAcquisitionUnavailable(wayID)],
+                warnings: [
+                    "Near-field driver response is the driver at the microphone, close to the cone; it is not a listening-position response.",
+                    "Each driver is captured alone, with the sweep limited to its passband and the way's limiter active; this protocol analyses stored captures and never mutates routing."
+                ],
+                phaseReferenceAuthenticated: false
             )
         case (
             .coherentMainsSubTiming,
