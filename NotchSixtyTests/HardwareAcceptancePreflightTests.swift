@@ -105,16 +105,7 @@ final class HardwareAcceptancePreflightTests: XCTestCase {
                 ],
                 referenceDeviceUID: "acceptance-output"
             )
-            state.speakerDriverProcessing =
-                SpeakerDriverProcessingConfiguration(
-                    buses: [
-                        SpeakerDriverBusProcessingConfiguration(
-                            bus: .leftHigh,
-                            limiterEnabled: true,
-                            limiterThresholdDBFS: -20
-                        )
-                    ]
-                )
+            state.speakerRouting = ProtectedWayFixtures.routing()
         } else if coherentSub {
             state.outputRouting = MultiOutputRoutingConfiguration(
                 enabled: true,
@@ -172,20 +163,10 @@ final class HardwareAcceptancePreflightTests: XCTestCase {
         for profile: PlaybackSystemProfile,
         createdAt: Date = Date(timeIntervalSince1970: 1_800_100_100)
     ) -> ProtectedDriverCommissioningDraft {
-        let baseline = profile.state.speakerDriverProcessing!
-        var preview = baseline
-        var high = preview.configuration(for: .leftHigh)
-        high.eqBands.append(
-            EQBand(
-                enabled: true,
-                type: .peaking,
-                frequencyHz: 3_000,
-                gainDB: -1.0,
-                q: 1.0,
-                slope: .db12
-            )
-        )
-        preview.replace(high)
+        var preview = profile.state.speakerRouting!
+        preview.speakers[0].ways[1].eq.append(
+            RoutingEQSection(
+                type: 0, frequencyHz: 3_000, gainDB: -1.0, q: 1.0))
         return ProtectedDriverCommissioningDraft(
             id: UUID(),
             createdAt: createdAt,
@@ -194,8 +175,8 @@ final class HardwareAcceptancePreflightTests: XCTestCase {
             routingSignature: "preflight-routing",
             sampleRate: 96_000,
             rollbackPlaybackSystemState: profile.state,
-            previewDriverProcessing: preview,
-            affectedBuses: [.leftHigh],
+            previewRouting: preview,
+            affectedWayIDs: [ProtectedWayFixtures.highID],
             sourceProtocolIDs: [UUID()],
             sourceCaptureIDs: [UUID(), UUID(), UUID()],
             timingReviews: [],
@@ -314,12 +295,7 @@ final class HardwareAcceptancePreflightTests: XCTestCase {
     func testProtectedDriverPreflightDoesNotAcceptMissingLimiter()
         throws {
         var activeProfile = profile(splitDriver: true)
-        var processing = activeProfile.state
-            .speakerDriverProcessing!
-        var high = processing.configuration(for: .leftHigh)
-        high.limiterEnabled = false
-        processing.replace(high)
-        activeProfile.state.speakerDriverProcessing = processing
+        activeProfile.state.speakerRouting?.speakers[0].ways[1].limiter = nil
         let draft = commissioningDraft(for: activeProfile)
         let result = HardwareAcceptancePreflightAnalyzer()
             .evaluate(

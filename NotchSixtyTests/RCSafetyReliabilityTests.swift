@@ -298,53 +298,6 @@ final class RCSafetyReliabilityTests: XCTestCase {
         XCTAssertEqual(snapshot.transitionGain, 1, "fade-up \(sampleRate) Hz", file: file, line: line)
     }
 
-    // MARK: Tri-amp crossover
-
-    func testTriAmpBandsSumFlatBetweenCrossovers() throws {
-        var bass = BassManagementConfiguration()
-        bass.enabled = true
-        bass.frequencyHz = 800
-        bass.upperFrequencyHz = 2_500
-        bass.topology = .linkwitzRiley24
-        bass.physicalOutputMode = .triAmp
-        let sampleRate = 48_000.0
-
-        for frequency in [300.0, 1_000.0, 1_414.0, 2_000.0, 6_000.0] {
-            let frameCount = 19_200
-            let input = (0..<frameCount).map {
-                Float(0.01 * sin(2 * Double.pi * frequency * Double($0) / sampleRate))
-            }
-            var sum = [Float](repeating: 0, count: frameCount)
-            for bus in [SpeakerOutputBus.leftLow, .leftMid, .leftHigh] {
-                var driver = SpeakerDriverProcessingConfiguration()
-                driver.replace(SpeakerDriverBusProcessingConfiguration(
-                    bus: bus,
-                    enabled: true,
-                    trimDB: 0,
-                    polarityInverted: false,
-                    delayMilliseconds: 0,
-                    limiterEnabled: true,
-                    limiterThresholdDBFS: -1
-                ))
-                let rendered = try SpeakerMeasurementLabProtectedExcitationCompiler().compile(
-                    monoSamples: input,
-                    sampleRate: sampleRate,
-                    targetBus: bus,
-                    bassManagement: bass,
-                    driverProcessing: driver
-                ).renderedSamples
-                for index in 0..<frameCount { sum[index] += rendered[index] }
-            }
-            let steady = frameCount / 2..<frameCount
-            let ratioDB = 20 * log10(rms(sum[steady]) / rms(input[steady]))
-            XCTAssertEqual(ratioDB, 0, accuracy: 0.1, "tri-amp sum at \(frequency) Hz")
-        }
-    }
-
-    private func rms(_ samples: ArraySlice<Float>) -> Double {
-        sqrt(samples.reduce(0.0) { $0 + Double($1) * Double($1) } / Double(samples.count))
-    }
-
     // MARK: HRTF conversion
 
     func testHRIRResamplingPreservesFrequencyResponse() throws {

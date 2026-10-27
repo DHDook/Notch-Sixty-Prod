@@ -52,14 +52,15 @@ final class SpeakerMeasurementLabUIModelTests: XCTestCase {
     func testProtectedDriverDraftAlwaysUsesBoundedExplicitLevel() throws {
         var draft = SpeakerMeasurementLabProtocolDraft()
         draft.applyModeDefaults(.protectedDriverNearField)
-        draft.protectedDriverBus = .rightHigh
+        let wayID = UUID()
+        draft.routedWayID = wayID
         draft.excitationLevelDBFS = -30
         let protocolItem = try XCTUnwrap(
             draft.makeProtocols().first
         )
         XCTAssertEqual(
             protocolItem.request.target,
-            .protectedDriverBus(.rightHigh)
+            .protectedRoutedWay(wayID)
         )
         XCTAssertEqual(protocolItem.excitationLevelDBFS, -30)
         XCTAssertNoThrow(try protocolItem.validateForAcquisition())

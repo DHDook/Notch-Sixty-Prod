@@ -42,7 +42,8 @@ struct SpeakerMeasurementLabProtocolSummary:
     var nearFieldComponentKind: String?
     var coherentPairID: UUID?
     var coherentLeg: String?
-    var protectedDriverBus: String?
+    /// Name of the routed driver a protected protocol swept; nil for every other protocol.
+    var protectedDriverName: String?
     var complete: Bool
 }
 
@@ -143,8 +144,9 @@ struct SpeakerMeasurementLabReportBuilder: Sendable {
                     labProtocol.nearFieldComponent?.kind.rawValue,
                 coherentPairID: labProtocol.coherentPairID,
                 coherentLeg: labProtocol.coherentLeg?.rawValue,
-                protectedDriverBus:
-                    labProtocol.protectedDriverBus?.displayName,
+                protectedDriverName:
+                    labProtocol.protectedRoutedWayID == nil
+                        ? nil : labProtocol.name,
                 complete: count >= labProtocol.request.repeatCount
             )
         }
@@ -337,7 +339,7 @@ struct SpeakerMeasurementLabReportBuilder: Sendable {
         session: SpeakerMeasurementLabSession,
         labProtocol: SpeakerMeasurementLabProtocol
     ) -> SpeakerMeasurementLabAnalysisSummary {
-        let title = "\(labProtocol.protectedDriverBus?.displayName ?? labProtocol.name) · protected driver PEQ"
+        let title = "\(labProtocol.name) · protected driver PEQ"
         do {
             let candidate = try ProtectedDriverPEQRecommendationAnalyzer()
                 .recommend(
@@ -345,14 +347,14 @@ struct SpeakerMeasurementLabReportBuilder: Sendable {
                     protocolID: labProtocol.id
                 )
             var metrics: [SpeakerMeasurementLabReportMetric] = [
-                metric("Driver", candidate.targetBus.displayName),
+                metric("Driver", candidate.way.name),
                 metric(
                     "Protected usable passband",
                     "\(formatHz(candidate.passbandLowHz))–\(formatHz(candidate.passbandHighHz))"
                 ),
                 metric("Qualified repeats",
                        "\(candidate.repeatedCaptureIDs.count)"),
-                metric("Limiting", candidate.protectedConfiguration.limiterEnabled
+                metric("Limiting", candidate.way.limiter != nil
                        ? "Required / preserved" : "BLOCKED"),
                 metric("Suggested cuts", "\(candidate.cuts.count)"),
                 metric("Deployment", "Never · review only")
@@ -383,51 +385,54 @@ struct SpeakerMeasurementLabReportBuilder: Sendable {
         }
     }
 
+    /// Neighbouring protected ways of one speaker, lower band first. A way measured by other than exactly one protocol
+    /// yields `nil` for that pair so the caller reports it unavailable instead of guessing.
+    private func protectedWayPairs(
+        session: SpeakerMeasurementLabSession
+    ) -> [(first: [SpeakerMeasurementLabProtocol], second: [SpeakerMeasurementLabProtocol])] {
+        let protected = session.protocols.filter {
+            $0.request.mode == .protectedDriverNearField
+                && $0.protectedRoutedWayID != nil
+        }
+        let grouped = Dictionary(grouping: protected) { $0.protectedRoutedWayID! }
+        func provenance(_ wayID: UUID)
+            -> SpeakerMeasurementLabRoutedWayCaptureProvenance? {
+            guard let id = grouped[wayID]?.first?.id else { return nil }
+            return session.captures.first {
+                $0.protocolID == id && $0.routedWayProvenance != nil
+            }?.routedWayProvenance
+        }
+        let ids = grouped.keys.sorted { $0.uuidString < $1.uuidString }
+        var result: [(first: [SpeakerMeasurementLabProtocol], second: [SpeakerMeasurementLabProtocol])] = []
+        for (i, a) in ids.enumerated() {
+            for b in ids[(i + 1)...] {
+                guard let pa = provenance(a), let pb = provenance(b),
+                      ProtectedWayPairing.crossoverHz(pa, pb) != nil else {
+                    continue
+                }
+                if ProtectedWayPairing.crossoverHz(pa.way, pb.way) != nil {
+                    result.append((first: grouped[a]!, second: grouped[b]!))
+                } else {
+                    result.append((first: grouped[b]!, second: grouped[a]!))
+                }
+            }
+        }
+        return result.sorted {
+            $0.first[0].name != $1.first[0].name
+                ? $0.first[0].name < $1.first[0].name
+                : $0.second[0].name < $1.second[0].name
+        }
+    }
+
     private func protectedDriverCrossoverSumSummaries(
         session: SpeakerMeasurementLabSession
     ) -> [SpeakerMeasurementLabAnalysisSummary] {
-        let protected = session.protocols.filter {
-            $0.request.mode == .protectedDriverNearField
-                && $0.protectedDriverBus != nil
-        }
-        guard protected.count >= 2 else { return [] }
-        let mode = session.captures.compactMap {
-            $0.protectedDriverProvenance?
-                .bassManagementConfiguration.physicalOutputMode
-        }.first
-        guard let mode else { return [] }
-
-        let pairs: [(SpeakerOutputBus, SpeakerOutputBus)]
-        switch mode {
-        case .biAmp:
-            pairs = [
-                (.leftLow, .leftHigh),
-                (.rightLow, .rightHigh),
-            ]
-        case .triAmp:
-            pairs = [
-                (.leftLow, .leftMid),
-                (.leftMid, .leftHigh),
-                (.rightLow, .rightMid),
-                (.rightMid, .rightHigh),
-            ]
-        default:
-            return []
-        }
-
-        return pairs.compactMap { firstBus, secondBus in
-            let first = protected.filter {
-                $0.protectedDriverBus == firstBus
-            }
-            let second = protected.filter {
-                $0.protectedDriverBus == secondBus
-            }
-            guard !first.isEmpty || !second.isEmpty else { return nil }
-            guard first.count == 1, second.count == 1 else {
+        protectedWayPairs(session: session).map { pair in
+            guard pair.first.count == 1, pair.second.count == 1 else {
                 return unavailable(
                     .protectedDriverCrossoverSum,
                     title:
-                        "\(firstBus.displayName) + \(secondBus.displayName) crossover sum model",
+                        "\(pair.first[0].name) + \(pair.second[0].name) crossover sum model",
                     error:
                         ProtectedDriverCrossoverSumModelError
                             .timingEvidenceUnavailable
@@ -435,8 +440,8 @@ struct SpeakerMeasurementLabReportBuilder: Sendable {
             }
             return protectedDriverCrossoverSumSummary(
                 session: session,
-                first: first[0],
-                second: second[0]
+                first: pair.first[0],
+                second: pair.second[0]
             )
         }
     }
@@ -446,9 +451,7 @@ struct SpeakerMeasurementLabReportBuilder: Sendable {
         first: SpeakerMeasurementLabProtocol,
         second: SpeakerMeasurementLabProtocol
     ) -> SpeakerMeasurementLabAnalysisSummary {
-        let title =
-            "\(first.protectedDriverBus?.displayName ?? first.name) + " +
-            "\(second.protectedDriverBus?.displayName ?? second.name) · crossover sum model"
+        let title = "\(first.name) + \(second.name) · crossover sum model"
         do {
             let model = try ProtectedDriverCrossoverSumModelAnalyzer()
                 .analyze(
@@ -464,10 +467,10 @@ struct SpeakerMeasurementLabReportBuilder: Sendable {
                 hypothesis = "Compare bounded delay"
             case .invertComparedDriver:
                 hypothesis =
-                    "Compare inversion of \(model.secondBus.displayName)"
+                    "Compare inversion of \(second.name)"
             case .addDelayAndInvertComparedDriver:
                 hypothesis =
-                    "Compare bounded delay + \(model.secondBus.displayName) inversion"
+                    "Compare bounded delay + \(second.name) inversion"
             }
             return available(
                 .protectedDriverCrossoverSum,
@@ -514,60 +517,20 @@ struct SpeakerMeasurementLabReportBuilder: Sendable {
     private func protectedDriverTimingSummaries(
         session: SpeakerMeasurementLabSession
     ) -> [SpeakerMeasurementLabAnalysisSummary] {
-        let protected = session.protocols.filter {
-            $0.request.mode == .protectedDriverNearField
-                && $0.protectedDriverBus != nil
-        }
-        guard protected.count >= 2 else { return [] }
-
-        let mode = session.captures.compactMap {
-            $0.protectedDriverProvenance?
-                .bassManagementConfiguration.physicalOutputMode
-        }.first
-        guard let mode else { return [] }
-
-        let pairs: [(SpeakerOutputBus, SpeakerOutputBus)]
-        switch mode {
-        case .biAmp:
-            pairs = [
-                (.leftLow, .leftHigh),
-                (.rightLow, .rightHigh),
-            ]
-        case .triAmp:
-            pairs = [
-                (.leftLow, .leftMid),
-                (.leftMid, .leftHigh),
-                (.rightLow, .rightMid),
-                (.rightMid, .rightHigh),
-            ]
-        default:
-            return []
-        }
-
-        return pairs.compactMap { firstBus, secondBus in
-            let firstMatches = protected.filter {
-                $0.protectedDriverBus == firstBus
-            }
-            let secondMatches = protected.filter {
-                $0.protectedDriverBus == secondBus
-            }
-            guard !firstMatches.isEmpty || !secondMatches.isEmpty else {
-                return nil
-            }
-            guard firstMatches.count == 1,
-                  secondMatches.count == 1 else {
+        protectedWayPairs(session: session).map { pair in
+            guard pair.first.count == 1, pair.second.count == 1 else {
                 return unavailable(
                     .protectedDriverTiming,
                     title:
-                        "\(firstBus.displayName) + \(secondBus.displayName) protected timing",
+                        "\(pair.first[0].name) + \(pair.second[0].name) protected timing",
                     error:
                         ProtectedDriverTimingRecommendationError.invalidPair
                 )
             }
             return protectedDriverTimingSummary(
                 session: session,
-                first: firstMatches[0],
-                second: secondMatches[0]
+                first: pair.first[0],
+                second: pair.second[0]
             )
         }
     }
@@ -577,9 +540,7 @@ struct SpeakerMeasurementLabReportBuilder: Sendable {
         first: SpeakerMeasurementLabProtocol,
         second: SpeakerMeasurementLabProtocol
     ) -> SpeakerMeasurementLabAnalysisSummary {
-        let title =
-            "\(first.protectedDriverBus?.displayName ?? first.name) + " +
-            "\(second.protectedDriverBus?.displayName ?? second.name) · protected timing"
+        let title = "\(first.name) + \(second.name) · protected timing"
         do {
             let result = try ProtectedDriverTimingRecommendationAnalyzer()
                 .recommend(
@@ -588,10 +549,11 @@ struct SpeakerMeasurementLabReportBuilder: Sendable {
                     secondProtocolID: second.id
                 )
             let delay: String
-            if let bus = result.delayBus,
+            if let wayID = result.delayWayID,
                let milliseconds = result.additionalDelayMilliseconds {
+                let name = wayID == result.firstWayID ? first.name : second.name
                 delay =
-                    "Add \(format(milliseconds, 3)) ms to \(bus.displayName)"
+                    "Add \(format(milliseconds, 3)) ms to \(name)"
             } else {
                 delay = "No bounded delay suggestion"
             }
@@ -601,7 +563,7 @@ struct SpeakerMeasurementLabReportBuilder: Sendable {
                 polarity = "Retain current polarity"
             case .invertComparedDriver:
                 polarity =
-                    "Compare inversion of \(result.secondBus.displayName)"
+                    "Compare inversion of \(second.name)"
             case .inconclusive:
                 polarity = "Inconclusive"
             }
@@ -955,7 +917,7 @@ struct SpeakerMeasurementLabReportBuilder: Sendable {
         case .acousticSource(let source):
             return source.displayName
         case .protectedDriverBus(let bus):
-            return bus.displayName
+            return "\(bus.displayName) (retired bus target)"
         case .routedWay, .protectedRoutedWay:
             return "Routed driver"
         case .sourcePair(let main, let subwoofer):

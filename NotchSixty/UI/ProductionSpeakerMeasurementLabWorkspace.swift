@@ -24,7 +24,6 @@ private struct SpeakerMeasurementLabExportDocument: FileDocument {
 }
 
 struct ProductionSpeakerMeasurementLabWorkspace: View {
-    @EnvironmentObject private var featureFlags: FeatureFlags
     @ObservedObject var engine: AudioIOEngine
     @ObservedObject var microphone: RoomCorrectionCalibrationController
     @ObservedObject var profiles: ProductProfileController
@@ -58,6 +57,8 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
     @State private var driverCommissioningDraft:
         ProtectedDriverCommissioningDraft?
     @State private var driverCommissioningMessage: String?
+    @State private var legacyCommissioningDraft:
+        ProtectedDriverLegacyCommissioningDraft?
 
     init(
         engine: AudioIOEngine,
@@ -133,8 +134,6 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
             .padding(28)
             .frame(maxWidth: 1_100, alignment: .topLeading)
         }
-        .onAppear { syncRoutedWays() }
-        .onChange(of: routedWaysOn) { _, _ in syncRoutedWays() }
         .task {
             microphone.prepareForUse()
             refreshRecentSessions()
@@ -571,36 +570,10 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
                 Text("Subwoofer")
                 subwooferPicker
             }
-        case .protectedDriverNearField where routedWaysOn:
+        case .protectedDriverNearField:
             GridRow {
                 Text("Driver")
                 routedWayPicker
-            }
-        case .protectedDriverNearField:
-            GridRow {
-                Text("Protected Bus")
-                Picker(
-                    "Protected Bus",
-                    selection: Binding(
-                        get: { draft.protectedDriverBus.rawValue },
-                        set: { value in
-                            if let bus = SpeakerOutputBus(
-                                rawValue: value
-                            ) {
-                                draft.protectedDriverBus = bus
-                            }
-                        }
-                    )
-                ) {
-                    ForEach(
-                        protectedDriverBuses,
-                        id: \.rawValue
-                    ) { bus in
-                        Text(bus.displayName).tag(bus.rawValue)
-                    }
-                }
-                .labelsHidden()
-                .frame(width: 220)
             }
         case .driverNearField:
             GridRow {
@@ -616,14 +589,6 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
                 }
             }
         }
-    }
-
-    private var routedWaysOn: Bool { featureFlags.isEnabled(.labRoutedWays) }
-
-    /// Swift decides from the flag; the controller and the draft only carry the result.
-    private func syncRoutedWays() {
-        lab.routedWaysEnabled = routedWaysOn
-        draft.usesRoutedWays = routedWaysOn
     }
 
     /// The routed ways of the selected system (its stored routing, which is what the lab sweeps).
@@ -1121,11 +1086,18 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
                         spacing: 10
                     ) {
                         status(
-                            "Affected buses",
-                            draft.affectedBuses.isEmpty
+                            "Affected ways",
+                            draft.affectedWayIDs.isEmpty
                                 ? "No PEQ cuts"
-                                : draft.affectedBuses
-                                    .map(\.displayName)
+                                : draft.affectedWayIDs
+                                    .map { id in
+                                        draft.previewRouting.locateWay(id)
+                                            .map {
+                                                draft.previewRouting
+                                                    .speakers[$0.speaker]
+                                                    .ways[$0.way].name
+                                            } ?? "Way"
+                                    }
                                     .joined(separator: ", ")
                         )
                         status(
@@ -1154,7 +1126,7 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
                     ) { _, review in
                         VStack(alignment: .leading, spacing: 3) {
                             Text(
-                                "\(review.firstBus.displayName) + \(review.secondBus.displayName)"
+                                timingReviewTitle(review, in: draft.previewRouting)
                             )
                             .font(.caption.bold())
                             Text(
@@ -1211,16 +1183,25 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
     private func loadDriverCommissioningDraft() {
         guard let sessionID = lab.session?.id else {
             driverCommissioningDraft = nil
+            legacyCommissioningDraft = nil
             driverCommissioningMessage = nil
             return
         }
+        legacyCommissioningDraft = nil
         do {
-            let loaded = try driverCommissioningStore.load(sessionID)
-            driverCommissioningDraft = loaded
-            guard let loaded else {
+            let entry = try driverCommissioningStore.entry(sessionID)
+            if case .legacy(let old)? = entry {
+                driverCommissioningDraft = nil
+                legacyCommissioningDraft = old
+                driverCommissioningMessage = old.statusText
+                return
+            }
+            guard case .current(let loaded)? = entry else {
+                driverCommissioningDraft = nil
                 driverCommissioningMessage = nil
                 return
             }
+            driverCommissioningDraft = loaded
             guard let profile = profiles.selectedSystemProfile else {
                 driverCommissioningMessage =
                     "Saved draft retained, but its Playback System is not selected."
@@ -1762,13 +1743,6 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
             .sorted() ?? []
     }
 
-    private var protectedDriverBuses: [SpeakerOutputBus] {
-        SpeakerOutputBus.allCases.filter {
-            SpeakerMeasurementLabProtectedDriverRoutePlanner
-                .isProtectedSplitBus($0)
-        }
-    }
-
     private var canAddDraft: Bool {
         switch draft.mode {
         case .wholeSpeakerOnAxis, .wholeSpeakerOffAxis:
@@ -1777,13 +1751,7 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
             }
         case .subwooferNearField:
             return subwooferIndices.contains(draft.subwooferIndex)
-        case .protectedDriverNearField where routedWaysOn:
-            return draft.routedWayID != nil
-        case .protectedDriverNearField:
-            return protectedDriverBuses.contains {
-                $0.rawValue == draft.protectedDriverBus.rawValue
-            }
-        case .driverNearField:
+        case .protectedDriverNearField, .driverNearField:
             return draft.routedWayID != nil
         case .coherentMainsSubTiming:
             return speakerRoles.contains {
@@ -2026,6 +1994,17 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
             + String(capture.id.uuidString.prefix(8))
     }
 
+    private func timingReviewTitle(
+        _ review: ProtectedDriverCommissioningTimingReview,
+        in routing: SpeakerRoutingConfiguration
+    ) -> String {
+        func name(_ id: UUID) -> String {
+            guard let located = routing.locateWay(id) else { return "Way" }
+            return routing.speakers[located.speaker].ways[located.way].name
+        }
+        return name(review.firstWayID) + " + " + name(review.secondWayID)
+    }
+
     private func status(
         _ label: String,
         _ value: String
@@ -2098,7 +2077,7 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
             )
         }
         if let bus = item.protectedDriverBus {
-            parts.append(bus.displayName)
+            parts.append("\(bus.displayName) (retired bus target)")
         }
         if let leg = item.coherentLeg {
             parts.append(leg == .main ? "Main leg" : "Sub leg")

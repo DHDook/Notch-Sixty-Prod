@@ -79,26 +79,16 @@ final class SpeakerMeasurementLabController: ObservableObject {
     private let captureBuilder = SpeakerMeasurementLabCaptureBuilder()
     private let orchestrator = SpeakerMeasurementLabSessionOrchestrator()
     private let sweepGenerator = RoomCorrectionSweepGenerator()
-    private let protectedExcitationCompiler =
-        SpeakerMeasurementLabProtectedExcitationCompiler()
     private let routedWayAcquisitionPlanner =
         SpeakerMeasurementLabRoutedWayAcquisitionPlanner()
-    private let protectedRoutePlanner =
-        SpeakerMeasurementLabProtectedDriverRoutePlanner()
 
     private var activeTransport:
         (any MultichannelCalibrationTransporting)?
     private var activeProgram: RoomCorrectionSweepProgram?
     private var activeStep: SpeakerMeasurementLabSessionStep?
-    private var activeProtectedProvenance:
-        SpeakerMeasurementLabProtectedDriverCaptureProvenance?
     private var activeRoutedWayProvenance:
         SpeakerMeasurementLabRoutedWayCaptureProvenance?
     private var analysisGeneration: UInt64 = 0
-
-    /// E8 A2b: Swift decides from `e8.lab-routed-ways`; the engine never reads the flag. Off, routed-way
-    /// acquisition stays blocked exactly as before.
-    var routedWaysEnabled = false
 
     @Published private(set) var state:
         SpeakerOptimizerMeasurementControllerState = .idle
@@ -340,10 +330,7 @@ final class SpeakerMeasurementLabController: ObservableObject {
             multiOutputRouting: systemProfile.state.outputRouting,
             speakerDriverProcessing:
                 systemProfile.state.speakerDriverProcessing,
-            bassManagementConfiguration:
-                systemProfile.state.bassManagement,
             speakerRouting: systemProfile.state.speakerRouting,
-            routedWayAcquisitionEnabled: routedWaysEnabled,
             routedWayEnvironment: SpeakerMeasurementLabRoutedWayEnvironment(
                 availableOutputs: engine.outputDevices,
                 sampleRate: output.nominalSampleRate,
@@ -407,8 +394,6 @@ final class SpeakerMeasurementLabController: ObservableObject {
 
         let transport: any MultichannelCalibrationTransporting
         let analysisProgram: RoomCorrectionSweepProgram
-        var protectedProvenance:
-            SpeakerMeasurementLabProtectedDriverCaptureProvenance? = nil
         var routedProvenance:
             SpeakerMeasurementLabRoutedWayCaptureProvenance? = nil
 
@@ -444,54 +429,6 @@ final class SpeakerMeasurementLabController: ObservableObject {
                     == acquisition.binding.carrierRoutePlan.referenceDeviceUID else {
                 throw SpeakerMeasurementLabRoutedWayError.wayChanged
             }
-        } else if let targetBus = capability.protectedDriverBus {
-            guard let routing = systemProfile.state.outputRouting,
-                  let driverProcessing =
-                    systemProfile.state.speakerDriverProcessing else {
-                throw SpeakerMeasurementLabControllerError
-                    .transportBlocked(
-                        "Protected-driver crossover routing and limiter processing are required."
-                    )
-            }
-            let excitation = try protectedExcitationCompiler.compile(
-                monoSamples: program.sweepSamples,
-                sampleRate: program.sampleRate,
-                targetBus: targetBus,
-                bassManagement: systemProfile.state.bassManagement,
-                driverProcessing: driverProcessing
-            )
-            let binding = try protectedRoutePlanner.plan(
-                targetBus: targetBus,
-                routing: routing,
-                bassManagement: systemProfile.state.bassManagement,
-                driverProcessing: driverProcessing,
-                availableOutputs: engine.outputDevices,
-                sampleRate: output.nominalSampleRate,
-                selectedOutputUID: selectedOutputUID
-            )
-            protectedProvenance = try excitation
-                .makeCaptureProvenance(binding: binding)
-            analysisProgram = try excitation.makeAnalysisProgram(
-                from: program
-            )
-            transport = try protectedTransportFactory(
-                binding.carrierRoutePlan,
-                engine.outputDevices,
-                input,
-                microphone.selectedInputChannelIndex,
-                program,
-                binding.physicalOutputChannelIndex,
-                excitation.renderedSamples
-            )
-
-            // Re-read the selected Playback System immediately before hardware
-            // start. A route/crossover/limiter change after compilation must
-            // cancel rather than play a stale protected waveform.
-            try validateProtectedStateImmediatelyBeforeStart(
-                session: session,
-                binding: binding,
-                excitation: excitation
-            )
         } else {
             guard capability.delegatedTransportPlans.count == 1,
                   let physicalOutput =
@@ -537,7 +474,6 @@ final class SpeakerMeasurementLabController: ObservableObject {
         analysisGeneration &+= 1
         activeTransport = transport
         activeProgram = analysisProgram
-        activeProtectedProvenance = protectedProvenance
         activeRoutedWayProvenance = routedProvenance
         activeStep = step
         do {
@@ -626,8 +562,6 @@ final class SpeakerMeasurementLabController: ObservableObject {
                 session: session,
                 step: step,
                 excitationLevelDBFS: program.settings.levelDBFS,
-                protectedDriverProvenance:
-                    activeProtectedProvenance,
                 routedWayProvenance: activeRoutedWayProvenance,
                 sharedClockReference: referenceEvidence
             )
@@ -640,7 +574,6 @@ final class SpeakerMeasurementLabController: ObservableObject {
             try store.save(session)
             activeStep = nil
             activeCapabilityPlan = nil
-            activeProtectedProvenance = nil
             activeRoutedWayProvenance = nil
             state = try orchestrator.progress(for: session).complete
                 ? .reviewing : .ready
@@ -713,33 +646,6 @@ final class SpeakerMeasurementLabController: ObservableObject {
         }
     }
 
-    private func validateProtectedStateImmediatelyBeforeStart(
-        session: SpeakerMeasurementLabSession,
-        binding: SpeakerMeasurementLabProtectedDriverRouteBinding,
-        excitation: SpeakerMeasurementLabProtectedExcitation
-    ) throws {
-        guard profiles.selectedSystemProfileID
-                == session.playbackSystemID,
-              let current = profiles.selectedSystemProfile,
-              current.state.outputRouting
-                == binding.routingConfiguration,
-              current.state.bassManagement
-                == excitation.bassManagementConfiguration,
-              current.state.speakerDriverProcessing
-                == excitation.driverProcessingConfiguration,
-              engine.routeConfiguration.selectedOutputUID
-                == binding.carrierRoutePlan.referenceDeviceUID,
-              binding.matchesCurrentState(
-                  routing: current.state.outputRouting,
-                  bassManagement: current.state.bassManagement,
-                  driverProcessing:
-                      current.state.speakerDriverProcessing
-              ) else {
-            throw SpeakerMeasurementLabControllerError
-                .sessionEnvironmentChanged
-        }
-    }
-
     private func coherentEndpointDeviceUID(
         for source: MultichannelCalibrationSource,
         profile: OutputDeviceProfileConfiguration
@@ -761,7 +667,6 @@ final class SpeakerMeasurementLabController: ObservableObject {
         activeProgram = nil
         activeStep = nil
         activeCapabilityPlan = nil
-        activeProtectedProvenance = nil
         activeRoutedWayProvenance = nil
     }
 

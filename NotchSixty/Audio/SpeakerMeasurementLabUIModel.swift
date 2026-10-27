@@ -5,11 +5,8 @@ struct SpeakerMeasurementLabProtocolDraft: Equatable, Sendable {
     var mode: SpeakerMeasurementLabMode = .wholeSpeakerOnAxis
     var speakerRole: OutputProgramRole = .frontLeft
     var subwooferIndex: UInt32 = 0
-    var protectedDriverBus: SpeakerOutputBus = .leftLow
-    /// E8 B2: the routed way a `driverNearField` draft measures (set by the linearisation UI, B3).
+    /// E8 B2/A2c: the routed way a `driverNearField` or protected-driver draft measures.
     var routedWayID: UUID?
-    /// E8 A2b: a protected-driver draft targets a routed way (`e8.lab-routed-ways` on) instead of a legacy bus.
-    var usesRoutedWays = false
     var distanceMeters: Double = 1.0
     var horizontalAngleDegrees: Double = 0
     var verticalAngleDegrees: Double = 0
@@ -126,7 +123,7 @@ struct SpeakerMeasurementLabProtocolDraft: Equatable, Sendable {
                 )
             ]
 
-        case .protectedDriverNearField where usesRoutedWays:
+        case .protectedDriverNearField:
             guard let routedWayID else {
                 throw SpeakerMeasurementLabError.invalidTarget
             }
@@ -142,23 +139,6 @@ struct SpeakerMeasurementLabProtocolDraft: Equatable, Sendable {
                     ),
                     excitationLevelDBFS: explicitLevel,
                     driverCaptureSource: .speaker(speakerRole)
-                )
-            ]
-
-        case .protectedDriverNearField:
-            protocols = [
-                SpeakerMeasurementLabProtocol(
-                    id: idFactory(),
-                    name: name,
-                    request: SpeakerMeasurementLabRequest(
-                        mode: mode,
-                        target: .protectedDriverBus(
-                            protectedDriverBus
-                        ),
-                        geometry: geometry,
-                        repeatCount: repeatCount
-                    ),
-                    excitationLevelDBFS: explicitLevel
                 )
             ]
 

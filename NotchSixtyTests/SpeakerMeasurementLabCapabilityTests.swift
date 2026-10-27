@@ -83,30 +83,7 @@ final class SpeakerMeasurementLabCapabilityTests: XCTestCase {
         XCTAssertThrowsError(try tooFar.validate())
     }
 
-    func testProtectedDriverNearFieldCannotFallThroughToRawOutput() throws {
-        let request = SpeakerMeasurementLabRequest(
-            mode: .protectedDriverNearField,
-            target: .protectedDriverBus(.leftLow),
-            geometry: .init(distanceMeters: 0.05)
-        )
-        let plan = try SpeakerMeasurementLabCapabilityPlanner().plan(
-            request,
-            routePlan: makeRoutePlan(),
-            multiOutputRouting: nil,
-            speakerDriverProcessing: nil,
-            bassManagementConfiguration: nil
-        )
-        XCTAssertFalse(plan.canStartMeasurement)
-        XCTAssertTrue(plan.delegatedTransportPlans.isEmpty)
-        XCTAssertNil(plan.protectedDriverBus)
-        XCTAssertEqual(
-            plan.blockReasons,
-            [.protectedDriverTransportRequired(.leftLow)]
-        )
-    }
-
-    func testProtectedDriverNearFieldUnlocksOnlyDedicatedProtectedPath()
-        throws {
+    func testLegacyBusProtectedDriverTargetIsRetired() throws {
         let request = SpeakerMeasurementLabRequest(
             mode: .protectedDriverNearField,
             target: .protectedDriverBus(.leftHigh),
@@ -116,36 +93,13 @@ final class SpeakerMeasurementLabCapabilityTests: XCTestCase {
             request,
             routePlan: makeRoutePlan(),
             multiOutputRouting: makeProtectedRouting(),
-            speakerDriverProcessing:
-                makeProtectedDriver(bus: .leftHigh),
-            bassManagementConfiguration: makeBiAmpBass()
+            speakerDriverProcessing: makeProtectedDriver(bus: .leftHigh)
         )
-        XCTAssertTrue(plan.canStartMeasurement)
+        XCTAssertFalse(plan.canStartMeasurement)
         XCTAssertTrue(plan.delegatedTransportPlans.isEmpty)
-        XCTAssertEqual(plan.protectedDriverBus, .leftHigh)
-        XCTAssertTrue(
-            plan.analysisProducts.contains(.magnitudeResponse)
-        )
+        XCTAssertEqual(plan.blockReasons, [.legacyBusTargetRetired(.leftHigh)])
         XCTAssertFalse(plan.canDeploy)
         XCTAssertFalse(plan.canMutateDSP)
-
-        var noLimiter = SpeakerDriverProcessingConfiguration()
-        noLimiter.replace(
-            SpeakerDriverBusProcessingConfiguration(
-                bus: .leftHigh,
-                limiterEnabled: false
-            )
-        )
-        let blocked = try SpeakerMeasurementLabCapabilityPlanner()
-            .plan(
-                request,
-                routePlan: makeRoutePlan(),
-                multiOutputRouting: makeProtectedRouting(),
-                speakerDriverProcessing: noLimiter,
-                bassManagementConfiguration: makeBiAmpBass()
-            )
-        XCTAssertFalse(blocked.canStartMeasurement)
-        XCTAssertNil(blocked.protectedDriverBus)
     }
 
     func testCoherentTimingRequiresAuthenticatedSharedClock() throws {
@@ -283,14 +237,6 @@ final class SpeakerMeasurementLabCapabilityTests: XCTestCase {
             ],
             referenceDeviceUID: "pr106-output"
         )
-    }
-
-    private func makeBiAmpBass() -> BassManagementConfiguration {
-        var result = BassManagementConfiguration()
-        result.enabled = true
-        result.frequencyHz = 1_000
-        result.physicalOutputMode = .biAmp
-        return result
     }
 
     private func makeProtectedDriver(
