@@ -375,6 +375,12 @@ bool N60DSPGraphSnapshotSetActiveQuietZone(
     uint32_t transitionFrames,
     bool enabled
 );
+/// Sets the anti-noise output clamp (linear) after N60DSPGraphSnapshotSetActiveQuietZone,
+/// which resets it to the compile-time limit.
+bool N60DSPGraphSnapshotSetActiveQuietZonePeakCap(
+    N60DSPGraphSnapshot * _Nonnull snapshot,
+    float peakCapLinear
+);
 bool N60DSPGraphSnapshotSetCrossover(
     N60DSPGraphSnapshot * _Nonnull snapshot,
     double frequencyHz,

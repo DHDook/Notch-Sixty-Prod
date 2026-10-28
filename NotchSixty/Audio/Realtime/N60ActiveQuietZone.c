@@ -34,6 +34,20 @@ N60ActiveQuietZoneSnapshotMakeBypassed(void) {
     return snapshot;
 }
 
+bool N60ActiveQuietZoneSnapshotSetPeakCap(
+    N60ActiveQuietZoneSnapshot *snapshot,
+    float peakCapLinear
+) {
+    if (snapshot == NULL || !isfinite(peakCapLinear) || peakCapLinear <= 0.0f) {
+        return false;
+    }
+    const float hardLimit =
+        linear_from_db(N60_ACTIVE_QUIET_ZONE_MAX_AGGREGATE_PEAK_DBFS);
+    snapshot->peakCapLinear =
+        peakCapLinear < hardLimit ? peakCapLinear : hardLimit;
+    return true;
+}
+
 bool N60ActiveQuietZoneSnapshotSet(
     N60ActiveQuietZoneSnapshot *snapshot,
     const N60ActiveQuietZoneToneSnapshot *tones,
@@ -178,6 +192,10 @@ bool N60ActiveQuietZoneRuntimeSchedule(
         N60ActiveQuietZoneRuntimeReset(runtime, sampleRate);
     }
     runtime->sampleRate = sampleRate;
+    runtime->peakCapLinear =
+        snapshot->peakCapLinear > 0.0f
+            ? snapshot->peakCapLinear
+            : linear_from_db(N60_ACTIVE_QUIET_ZONE_MAX_AGGREGATE_PEAK_DBFS);
 
     for (uint32_t index = 0u;
          index < N60_ACTIVE_QUIET_ZONE_MAX_TONES;
@@ -333,14 +351,18 @@ void N60ActiveQuietZoneRuntimeProcessFrame(
         runtime->sanitizedSamples += 1u;
     }
 
-    const float aggregateLimit =
-        linear_from_db(
-            N60_ACTIVE_QUIET_ZONE_MAX_AGGREGATE_PEAK_DBFS
-        );
-    if (outputLeft > aggregateLimit) outputLeft = aggregateLimit;
-    if (outputLeft < -aggregateLimit) outputLeft = -aggregateLimit;
-    if (outputRight > aggregateLimit) outputRight = aggregateLimit;
-    if (outputRight < -aggregateLimit) outputRight = -aggregateLimit;
+    // Clamp every sample to the snapshot's cap (the always-on -40 dBFS in the app), never
+    // above the compile-time aggregate limit. An unscheduled runtime uses the limit.
+    // Schedule and SnapshotSetPeakCap already bound the cap by the aggregate limit; only an
+    // unscheduled runtime (cap 0) falls back to it here.
+    float limit = runtime->peakCapLinear;
+    if (!(limit > 0.0f)) {
+        limit = linear_from_db(N60_ACTIVE_QUIET_ZONE_MAX_AGGREGATE_PEAK_DBFS);
+    }
+    if (outputLeft > limit) { outputLeft = limit; runtime->clampedSamples += 1u; }
+    if (outputLeft < -limit) { outputLeft = -limit; runtime->clampedSamples += 1u; }
+    if (outputRight > limit) { outputRight = limit; runtime->clampedSamples += 1u; }
+    if (outputRight < -limit) { outputRight = -limit; runtime->clampedSamples += 1u; }
 
     runtime->lastLeft = outputLeft;
     runtime->lastRight = outputRight;

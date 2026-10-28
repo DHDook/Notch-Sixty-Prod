@@ -26,7 +26,7 @@ final class LiveTreatmentArmTests: XCTestCase {
 
     private func armed(rate: Double = 48_000) throws -> LiveTreatmentArm {
         let arm = LiveTreatmentArm(feature: .quietZone)
-        try arm.arm(environment: environment(rate: rate))
+        try arm.arm(environment: environment(rate: rate), now: t0)
         return arm
     }
 
@@ -275,5 +275,198 @@ final class LiveTreatmentArmTests: XCTestCase {
         ] {
             XCTAssertNoThrow(try ActiveQuietZoneRuntimeTarget(tones: [], transitionMilliseconds: ms).validated())
         }
+    }
+
+    // MARK: E4 S12 arm hardening
+
+    func testStalledAnalysisDisarmsAfterTwoSecondsAndAnyAnalysisRestartsTheTimer() throws {
+        let arm = try armed()
+        arm.observe(environment(), now: t0.addingTimeInterval(1.9))
+        XCTAssertTrue(arm.isArmed, "a short gap between analyses is tolerated")
+        arm.observe(environment(level: -40), now: t0.addingTimeInterval(1.95))
+        arm.observe(environment(), now: t0.addingTimeInterval(3.9))
+        XCTAssertTrue(arm.isArmed, "a fresh analysis restarted the watchdog")
+        arm.observe(environment(), now: t0.addingTimeInterval(4.0))
+        XCTAssertFalse(arm.isArmed)
+        XCTAssertEqual(arm.lastDisarmReason, .microphoneStalled)
+        XCTAssertTrue(arm.latchedByEvent)
+    }
+
+    func testInputDeviceChangeAndOutputGainChangeDisarm() throws {
+        var base = environment(level: -40)
+        base.inputDeviceUID = "mic-1"
+        base.outputGainDB = -6
+        func armedWith(_ env: LiveTreatmentEnvironment) throws -> LiveTreatmentArm {
+            let arm = LiveTreatmentArm(feature: .quietZone)
+            try arm.arm(environment: env, now: t0)
+            return arm
+        }
+        var other = base
+        other.inputDeviceUID = "mic-2"
+        var arm = try armedWith(base)
+        arm.observe(other, now: t0)
+        XCTAssertEqual(arm.lastDisarmReason, .inputDeviceChanged)
+
+        var gone = base
+        gone.inputDeviceUID = nil
+        arm = try armedWith(base)
+        arm.observe(gone, now: t0)
+        XCTAssertEqual(arm.lastDisarmReason, .inputDeviceChanged, "a vanished microphone is a change")
+
+        var within = base
+        within.outputGainDB = -6.9
+        arm = try armedWith(base)
+        arm.observe(within, now: t0)
+        XCTAssertTrue(arm.isArmed, "under 1 dB is tolerated")
+        var beyond = base
+        beyond.outputGainDB = -4.9
+        arm.observe(beyond, now: t0)
+        XCTAssertEqual(arm.lastDisarmReason, .outputGainChanged)
+        arm = try armedWith(base)
+        var nan = base
+        nan.outputGainDB = .nan
+        arm.observe(nan, now: t0)
+        XCTAssertEqual(arm.lastDisarmReason, .outputGainChanged)
+    }
+
+    func testSignalFaultsDisarmAsAnInvalidMicrophone() throws {
+        for fault in [MicrophoneSignalFault.frozen, .clipped, .directCurrentOffset, .nonFinite] {
+            let arm = try armed()
+            var env = environment(level: -40)
+            env.microphoneSignalFault = fault
+            arm.observe(env, now: t0)
+            XCTAssertEqual(arm.lastDisarmReason, .microphoneInvalid, "\(fault)")
+        }
+    }
+
+    func testDisconnectedPreampFloorCountsAsSilence() throws {
+        let arm = try armed()
+        let noise = environment(level: -97)  // a disconnected input: preamp noise, not digital silence
+        XCTAssertGreaterThan(noise.microphoneLevelDBFS!, -110)
+        arm.observe(noise, now: t0)
+        arm.observe(noise, now: t0.addingTimeInterval(1.5))
+        arm.observe(noise, now: t0.addingTimeInterval(4.0))
+        XCTAssertTrue(arm.isArmed)
+        arm.observe(noise, now: t0.addingTimeInterval(5.1))
+        XCTAssertEqual(arm.lastDisarmReason, .microphoneInvalid)
+    }
+
+    func testMicrophoneSignalCheckFindsFrozenClippedOffsetAndNonFiniteBlocks() {
+        let rate = 48_000.0
+        let clean = (0..<512).map { Float(0.05 * sin(2 * Double.pi * 60 * Double($0) / rate)) }
+        XCTAssertNil(MicrophoneSignalCheck.assess(clean))
+        XCTAssertNil(MicrophoneSignalCheck.assess([Float](repeating: 0, count: 512)), "digital silence is the silence timer's job")
+        XCTAssertNil(MicrophoneSignalCheck.assess([0.9, 0.9]), "too short to judge")
+        XCTAssertEqual(MicrophoneSignalCheck.assess([Float](repeating: 0.02, count: 512)), .frozen)
+        var clipped = clean
+        for i in stride(from: 0, to: 512, by: 20) { clipped[i] = 1 }
+        XCTAssertEqual(MicrophoneSignalCheck.assess(clipped), .clipped)
+        XCTAssertEqual(MicrophoneSignalCheck.assess(clean.map { $0 + 0.2 }), .directCurrentOffset)
+        var bad = clean
+        bad[10] = .nan
+        XCTAssertEqual(MicrophoneSignalCheck.assess(bad), .nonFinite)
+    }
+
+    func testRevokingTheArmAdvancesTheTokenAndRemovedObserversStaySilent() throws {
+        let engine = AudioIOEngine()
+        var first: [TransportTeardownCause] = []
+        var second: [TransportTeardownCause] = []
+        engine.addTransportTeardownObserver { first.append($0) }
+        let id = engine.addTransportTeardownObserver { second.append($0) }
+        let before = engine.liveTreatmentGeneration
+        engine.revokeLiveTreatmentArm()
+        XCTAssertEqual(engine.liveTreatmentGeneration, before &+ 1)
+        engine.removeTransportTeardownObserver(id)
+        engine.revokeLiveTreatmentArm()
+        XCTAssertTrue(first.isEmpty && second.isEmpty)
+    }
+
+    func testEngineRejectsActiveTargetsFromARevokedOrMissingArm() throws {
+        let engine = AudioIOEngine()
+        func target(_ generation: UInt64?) -> ActiveQuietZoneRuntimeTarget {
+            ActiveQuietZoneRuntimeTarget(
+                tones: [ActiveQuietZoneRuntimeTone(
+                    frequencyHz: 60, leftOutput: ActiveQuietZoneComplex(real: 0.001, imaginary: 0), rightOutput: .zero)],
+                transitionMilliseconds: 3_000, armGeneration: generation)
+        }
+        XCTAssertThrowsError(try engine.replaceActiveQuietZoneRuntimeTarget(target(nil))) {
+            XCTAssertEqual($0 as? ActiveQuietZoneError, .armRevoked)
+        }
+        let current = engine.liveTreatmentGeneration
+        engine.revokeLiveTreatmentArm()
+        XCTAssertThrowsError(try engine.replaceActiveQuietZoneRuntimeTarget(target(current))) {
+            XCTAssertEqual($0 as? ActiveQuietZoneError, .armRevoked, "a target from before the disarm")
+        }
+        // The current token passes the arm check (and then fails only for want of a transport).
+        XCTAssertThrowsError(try engine.replaceActiveQuietZoneRuntimeTarget(target(engine.liveTreatmentGeneration))) {
+            XCTAssertNotEqual($0 as? ActiveQuietZoneError, .armRevoked)
+        }
+        // A fade-out needs no token.
+        XCTAssertNoThrow(try engine.clearActiveQuietZoneRuntimeTarget())
+    }
+
+    func testRenderKernelClampsEverySampleToTheSnapshotCapAtEveryRate() {
+        let cap = Float(LiveTreatmentSafeguards.linearPeak(dbfs: LiveTreatmentSafeguards.defaultPeakCapDBFS))
+        for rate in Self.standardRates {
+            var snapshot = N60ActiveQuietZoneSnapshotMakeBypassed()
+            var tone = N60ActiveQuietZoneToneSnapshot()
+            tone.frequencyHz = 60
+            tone.leftReal = 0.05  // -26 dBFS: a wrong solve far above the -40 dBFS cap
+            tone.rightReal = 0.05
+            XCTAssertTrue(N60ActiveQuietZoneSnapshotSet(&snapshot, &tone, 1, 4, rate, true))
+            XCTAssertFalse(N60ActiveQuietZoneSnapshotSetPeakCap(&snapshot, .nan))
+            XCTAssertFalse(N60ActiveQuietZoneSnapshotSetPeakCap(&snapshot, 0))
+            XCTAssertTrue(N60ActiveQuietZoneSnapshotSetPeakCap(&snapshot, cap))
+            var runtime = N60ActiveQuietZoneRuntime()
+            N60ActiveQuietZoneRuntimeReset(&runtime, rate)
+            XCTAssertTrue(N60ActiveQuietZoneRuntimeSchedule(&runtime, &snapshot, rate))
+            var peak: Float = 0
+            for _ in 0..<Int(rate / 10) {
+                var l: Float = 0, r: Float = 0
+                N60ActiveQuietZoneRuntimeProcessFrame(&runtime, &l, &r)
+                peak = max(peak, abs(l), abs(r))
+            }
+            XCTAssertLessThanOrEqual(peak, cap * (1 + 1e-6), "rate \(rate)")
+            XCTAssertGreaterThan(peak, cap * 0.99, "the clamp, not silence, held the level at \(rate)")
+            XCTAssertGreaterThan(runtime.clampedSamples, 0)
+
+            // A cap above the compile-time aggregate limit is lowered to it.
+            XCTAssertTrue(N60ActiveQuietZoneSnapshotSetPeakCap(&snapshot, 1))
+            XCTAssertLessThanOrEqual(snapshot.peakCapLinear, Float(pow(10.0, N60_ACTIVE_QUIET_ZONE_MAX_AGGREGATE_PEAK_DBFS / 20)) * (1 + 1e-6))
+        }
+    }
+
+    // MARK: Controller wiring
+
+    private func makeController() -> (ActiveQuietZoneController, AudioIOEngine) {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: root) }
+        let engine = AudioIOEngine()
+        let profiles = ProductProfileController(engine: engine, storageURL: root.appendingPathComponent("profiles.json"))
+        let calibration = RoomCorrectionCalibrationController(engine: engine)
+        let projects = RoomCorrectionProjectController(
+            profiles: profiles,
+            store: RoomCorrectionProjectStore(rootDirectory: root.appendingPathComponent("rc", isDirectory: true)))
+        let ambient = AmbientCompensationController(
+            engine: engine, profiles: profiles, microphone: calibration, projects: projects)
+        return (ActiveQuietZoneController(engine: engine, profiles: profiles, ambient: ambient), engine)
+    }
+
+    func testControllerStaysDisarmedAndDisabledWhenTheEngineIsNotRunning() throws {
+        let (controller, _) = makeController()
+        XCTAssertFalse(controller.arm.isArmed)
+        XCTAssertThrowsError(try controller.setEnabled(true)) {
+            XCTAssertEqual($0 as? LiveTreatmentArmError, .engineNotRunning)
+        }
+        XCTAssertFalse(controller.arm.isArmed)
+        XCTAssertFalse(controller.configuration.enabled)
+    }
+
+    func testReplacingConfigurationCannotEnableOutputWithoutTheArm() throws {
+        let (controller, _) = makeController()
+        var requested = ActiveQuietZoneConfiguration()
+        requested.enabled = true
+        try controller.replaceConfiguration(requested)
+        XCTAssertFalse(controller.configuration.enabled, "only the ARM switch turns live output on")
     }
 }
