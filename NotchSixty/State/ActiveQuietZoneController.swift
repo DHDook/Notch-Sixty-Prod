@@ -66,6 +66,8 @@ final class ActiveQuietZoneController: ObservableObject {
     let ambient: AmbientCompensationController
     /// The Quiet Zone ARM switch. Disarmed on every launch; live output runs only while armed.
     let arm = LiveTreatmentArm(feature: .quietZone)
+    /// Engine arm token captured at arming and stamped on every active target.
+    private var armedGeneration: UInt64?
     private var lastMicrophoneRevision: UInt64 = 0
 
     private let planner = ActiveQuietZonePlanner()
@@ -178,7 +180,8 @@ final class ActiveQuietZoneController: ObservableObject {
         self.ambient = ambient
         arm.onDisarm = { [weak self] reason in self?.applyDisarm(reason) }
         armChange = arm.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }
-        engine.onTransportTornDown = { [weak self] cause in
+        // Observers hold self weakly, so a released controller leaves only a no-op closure.
+        _ = engine.addTransportTeardownObserver { [weak self] cause in
             self?.arm.transportTornDown(cause)
         }
     }
@@ -507,6 +510,7 @@ final class ActiveQuietZoneController: ObservableObject {
     func setEnabled(_ enabled: Bool) throws {
         if enabled {
             try arm.arm(environment: liveTreatmentEnvironment())
+            armedGeneration = engine.liveTreatmentGeneration
             do {
                 var updated = configuration
                 updated.enabled = true
@@ -537,13 +541,19 @@ final class ActiveQuietZoneController: ObservableObject {
             sampleRate: engine.liveTreatmentSampleRate,
             engineRunning: engine.lifecycleState == .running,
             inputAvailable: ambient.monitorStatus != .failed,
-            microphoneLevelDBFS: level
+            microphoneLevelDBFS: level,
+            inputDeviceUID: ambient.selectedInputDeviceUID,
+            outputGainDB: engine.liveTreatmentOutputGainDB,
+            microphoneSignalFault: ambient.microphoneSignalFault
         )
     }
 
     /// Called once per armed-to-disarmed transition: ramps the anti-noise out and returns the
     /// controller to the disabled state. The persisted configuration is already disabled.
     private func applyDisarm(_ reason: LiveTreatmentDisarmReason) {
+        // Revoke the engine arm token first: nothing built under this arm can play again.
+        armedGeneration = nil
+        engine.revokeLiveTreatmentArm()
         var updated = configuration
         updated.enabled = false
         configuration = updated
@@ -1052,7 +1062,8 @@ final class ActiveQuietZoneController: ObservableObject {
                 )
             },
             transitionMilliseconds:
-                startRampMilliseconds
+                startRampMilliseconds,
+            armGeneration: armedGeneration
         )
         return try target.validated(
             configuration: configuration
@@ -1091,7 +1102,8 @@ final class ActiveQuietZoneController: ObservableObject {
                 )
             },
             transitionMilliseconds:
-                startRampMilliseconds
+                startRampMilliseconds,
+            armGeneration: armedGeneration
         )
         return try target.validated(
             configuration: configuration
@@ -1340,7 +1352,8 @@ final class ActiveQuietZoneController: ObservableObject {
                 )
             },
             transitionMilliseconds:
-                startRampMilliseconds
+                startRampMilliseconds,
+            armGeneration: armedGeneration
         )
         return try target.validated(
             configuration: configuration

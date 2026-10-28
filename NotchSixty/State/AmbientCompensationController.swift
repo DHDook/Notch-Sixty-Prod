@@ -116,6 +116,12 @@ final class AmbientCompensationController: ObservableObject {
     /// Set when a poll returns without reading, so the next block is marked
     /// as following a gap.
     private var microphoneFramesSkipped = false
+    /// E4 S12: the latest raw-signal fault seen in the error microphone's frames, cleared by
+    /// the next clean block. Read by the live-treatment arm switch.
+    private(set) var microphoneSignalFault: MicrophoneSignalFault?
+
+    /// Stable UID of the selected measurement microphone, for the arm switch.
+    var selectedInputDeviceUID: String? { microphone.selectedInputDevice?.uid }
 
     @Published private(set) var configuration =
         AmbientCompensationConfiguration()
@@ -459,6 +465,7 @@ final class AmbientCompensationController: ObservableObject {
             )
             spatialMicrophoneFrameEnd &+= UInt64(newlyCaptured.count)
             if !newlyCaptured.isEmpty {
+                microphoneSignalFault = MicrophoneSignalCheck.assess(newlyCaptured)
                 microphoneFramesObserver?(
                     newlyCaptured,
                     monitor.sampleRate,

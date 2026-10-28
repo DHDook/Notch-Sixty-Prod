@@ -1256,6 +1256,11 @@ bool N60DSPGraphSnapshotSetActiveQuietZone(
     return true;
 }
 
+bool N60DSPGraphSnapshotSetActiveQuietZonePeakCap(N60DSPGraphSnapshot *snapshot, float peakCapLinear) {
+    if (snapshot == NULL) return false;
+    return N60ActiveQuietZoneSnapshotSetPeakCap(&snapshot->activeQuietZone, peakCapLinear);
+}
+
 bool N60DSPGraphSnapshotSetCrossover(N60DSPGraphSnapshot *snapshot, double frequencyHz, N60CrossoverTopology topology, N60CrossoverMonitorMode monitorMode, float subGainLinear, bool subPolarityInverted, bool enabled) {
     if (snapshot == NULL) return false;
     N60CrossoverSnapshot crossover = {0};

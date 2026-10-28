@@ -29,6 +29,9 @@ typedef struct {
     bool enabled;
     uint32_t toneCount;
     uint32_t transitionFrames;
+    // Output clamp (linear). 0 means the compile-time aggregate limit. Set with
+    // N60ActiveQuietZoneSnapshotSetPeakCap; defence in depth behind the Swift cap.
+    float peakCapLinear;
     N60ActiveQuietZoneToneSnapshot
         tones[N60_ACTIVE_QUIET_ZONE_MAX_TONES];
 } N60ActiveQuietZoneSnapshot;
@@ -65,10 +68,21 @@ typedef struct {
     float lastRight;
     uint64_t processedFrames;
     uint64_t sanitizedSamples;
+    // Linear clamp applied to every output sample; set by Schedule from the snapshot.
+    float peakCapLinear;
+    // Samples that reached the clamp (diagnostic; never reset by Schedule).
+    uint64_t clampedSamples;
 } N60ActiveQuietZoneRuntime;
 
 N60ActiveQuietZoneSnapshot
 N60ActiveQuietZoneSnapshotMakeBypassed(void);
+
+/// Sets the snapshot's output clamp. Rejects non-finite or non-positive values; values above the
+/// aggregate limit are lowered to it.
+bool N60ActiveQuietZoneSnapshotSetPeakCap(
+    N60ActiveQuietZoneSnapshot * _Nonnull snapshot,
+    float peakCapLinear
+);
 
 bool N60ActiveQuietZoneSnapshotSet(
     N60ActiveQuietZoneSnapshot * _Nonnull snapshot,

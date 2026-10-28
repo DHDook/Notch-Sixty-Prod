@@ -22,6 +22,12 @@ enum LiveTreatmentDisarmReason: String, Equatable, Sendable {
     case transportReconfigured
     /// The howl / instability detector tripped (`N60AncGuard`).
     case instabilityTrip
+    /// No new microphone analysis arrived within `LiveTreatmentSafeguards.analysisStallSeconds`.
+    case microphoneStalled
+    /// The selected measurement microphone changed.
+    case inputDeviceChanged
+    /// The output gain (volume, headroom) moved beyond `LiveTreatmentSafeguards.outputGainToleranceDB`.
+    case outputGainChanged
 
     /// Shown in the UI after an automatic disarm. Nil for the user's own action.
     var message: String? {
@@ -37,6 +43,9 @@ enum LiveTreatmentDisarmReason: String, Equatable, Sendable {
         case .quit: return "Disarmed: Notch Sixty is quitting."
         case .transportReconfigured: return "Disarmed: the audio path was rebuilt. Re-arm to continue."
         case .instabilityTrip: return "Muted: instability detected. Re-arm to continue."
+        case .microphoneStalled: return "Disarmed: the microphone analysis stopped updating. Re-arm to continue."
+        case .inputDeviceChanged: return "Disarmed: the measurement microphone changed. Re-arm to continue."
+        case .outputGainChanged: return "Disarmed: the output volume changed. Re-arm to continue."
         }
     }
 }
@@ -75,6 +84,12 @@ struct LiveTreatmentEnvironment: Equatable, Sendable {
     var inputAvailable: Bool
     /// Latest microphone level when a new measurement arrived since the last observation.
     var microphoneLevelDBFS: Double?
+    /// Stable UID of the measurement microphone; nil when unknown (not compared).
+    var inputDeviceUID: String? = nil
+    /// Output gain from volume and headroom attenuation, dB (0 = unity).
+    var outputGainDB: Double = 0
+    /// Raw-signal fault in the latest microphone frames (frozen, clipped, offset).
+    var microphoneSignalFault: MicrophoneSignalFault? = nil
 }
 
 enum LiveTreatmentArmError: Error, Equatable, LocalizedError {
@@ -114,6 +129,7 @@ final class LiveTreatmentArm: ObservableObject {
 
     private var baseline: LiveTreatmentEnvironment?
     private var silentSince: Date?
+    private var lastAnalysisAt: Date?
 
     init(feature: LiveTreatmentFeature) {
         self.feature = feature
@@ -129,7 +145,7 @@ final class LiveTreatmentArm: ObservableObject {
 
     /// The single arming action. Requires a running engine and a known output, which become
     /// the baseline the switch then guards.
-    func arm(environment: LiveTreatmentEnvironment) throws {
+    func arm(environment: LiveTreatmentEnvironment, now: Date = Date()) throws {
         guard environment.engineRunning, environment.sampleRate != nil else {
             throw LiveTreatmentArmError.engineNotRunning
         }
@@ -138,6 +154,7 @@ final class LiveTreatmentArm: ObservableObject {
         }
         baseline = environment
         silentSince = nil
+        lastAnalysisAt = now
         lastDisarmReason = nil
         isArmed = true
     }
@@ -148,6 +165,7 @@ final class LiveTreatmentArm: ObservableObject {
         isArmed = false
         baseline = nil
         silentSince = nil
+        lastAnalysisAt = nil
         lastDisarmReason = reason
         onDisarm?(reason)
     }
@@ -173,8 +191,21 @@ final class LiveTreatmentArm: ObservableObject {
             disarm(.sampleRateChanged)
         } else if !environment.inputAvailable {
             disarm(.inputLost)
+        } else if let uid = baseline.inputDeviceUID, environment.inputDeviceUID != uid {
+            disarm(.inputDeviceChanged)
+        } else if environment.outputGainDB.isNaN
+                    || abs(environment.outputGainDB - baseline.outputGainDB)
+                        > LiveTreatmentSafeguards.outputGainToleranceDB {
+            disarm(.outputGainChanged)
+        } else if environment.microphoneSignalFault != nil {
+            disarm(.microphoneInvalid)
         } else if let level = environment.microphoneLevelDBFS {
+            lastAnalysisAt = now
             observeMicrophone(level: level, now: now)
+        } else if let last = lastAnalysisAt,
+                  now.timeIntervalSince(last) >= LiveTreatmentSafeguards.analysisStallSeconds {
+            // No new analysis: a frozen or starved microphone path must not leave the arm on.
+            disarm(.microphoneStalled)
         }
     }
 
@@ -201,5 +232,48 @@ final class LiveTreatmentArm: ObservableObject {
     func transportTornDown(_ cause: TransportTeardownCause) {
         guard let reason = cause.disarmReason else { return }
         disarm(reason)
+    }
+}
+
+/// A fault in the raw error-microphone signal that makes live cancellation unsafe (E4 S12).
+enum MicrophoneSignalFault: String, Equatable, Sendable {
+    /// Non-finite samples.
+    case nonFinite
+    /// A block of identical non-zero samples: a stuck or frozen capture buffer.
+    case frozen
+    /// A large share of samples at full scale.
+    case clipped
+    /// A large constant offset: a broken or disconnected capture path.
+    case directCurrentOffset
+}
+
+/// Pure plausibility checks on one block of microphone frames. Control plane only.
+enum MicrophoneSignalCheck {
+    static let minimumFrames = 64
+    /// Samples at or above this magnitude count as clipped.
+    static let clipMagnitude: Float = 0.999
+    /// Fraction of clipped samples that faults the block.
+    static let clippedFraction = 0.01
+    /// Mean offset (linear full scale) that faults the block: about -20 dBFS.
+    static let offsetLimit = 0.1
+
+    static func assess(_ frames: [Float]) -> MicrophoneSignalFault? {
+        guard frames.count >= minimumFrames else { return nil }
+        var sum = 0.0
+        var clipped = 0
+        var low = Float.greatestFiniteMagnitude
+        var high = -Float.greatestFiniteMagnitude
+        for sample in frames {
+            guard sample.isFinite else { return .nonFinite }
+            sum += Double(sample)
+            if abs(sample) >= clipMagnitude { clipped += 1 }
+            low = min(low, sample)
+            high = max(high, sample)
+        }
+        // All-zero blocks are digital silence, handled by the silence floor, not "frozen".
+        if low == high, low != 0 { return .frozen }
+        if Double(clipped) / Double(frames.count) >= clippedFraction { return .clipped }
+        if abs(sum / Double(frames.count)) >= offsetLimit { return .directCurrentOffset }
+        return nil
     }
 }

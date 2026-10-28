@@ -282,6 +282,10 @@ struct ActiveQuietZoneRuntimeTone:
 struct ActiveQuietZoneRuntimeTarget: Equatable, Sendable {
     var tones: [ActiveQuietZoneRuntimeTone]
     var transitionMilliseconds: Double
+    /// E4 S12 arm token: the engine's `liveTreatmentGeneration` captured when the user armed.
+    /// The engine rejects an active target whose token is nil or predates the last transport
+    /// teardown or disarm. Inactive (fade-out) targets need no token.
+    var armGeneration: UInt64?
 
     static let bypassed = ActiveQuietZoneRuntimeTarget(
         tones: [],
@@ -418,6 +422,8 @@ enum ActiveQuietZoneError:
     case runtimeUnsupported
     case frequencyChangeRequiresDisarm
     case nonFiniteSolution
+    /// The target was built under an arm that has since been revoked (teardown or disarm).
+    case armRevoked
 
     var errorDescription: String? {
         switch self {
@@ -441,6 +447,8 @@ enum ActiveQuietZoneError:
             return "Active Quiet Zone must fade the current tone to silence before changing cancellation frequency."
         case .nonFiniteSolution:
             return "Active Quiet Zone produced a non-finite cancellation candidate."
+        case .armRevoked:
+            return "Active Quiet Zone output was refused: the arm switch was released or the audio path was rebuilt since this target was built."
         }
     }
 }

@@ -1320,14 +1320,48 @@ final class AudioIOEngine: ObservableObject {
         transportSession?.outputFormat.sampleRate
     }
 
-    /// Fired at the end of every transport teardown (control plane, main actor). The live-treatment
-    /// arm switch disarms from it. Never called from the audio callback.
-    var onTransportTornDown: ((TransportTeardownCause) -> Void)?
+    /// Output gain the user's volume and the headroom attenuation apply, in dB (0 = unity),
+    /// for the live-treatment arm switch. Muted reads as -120.
+    var liveTreatmentOutputGainDB: Double {
+        let level = masterVolumeConfiguration.muted
+            ? 0 : MasterVolumeConfiguration.softwareTaperGain(forLevel: masterVolumeConfiguration.level)
+        let volumeDB = level > 1.0e-6 ? 20 * log10(level) : -120
+        return gainConfiguration.headroomAttenuationDB + volumeDB
+    }
+
+    private var transportTeardownObservers: [(id: UUID, handler: (TransportTeardownCause) -> Void)] = []
+
+    /// Registers a handler fired at the end of every transport teardown (control plane, main
+    /// actor; never the audio callback). Multicast, so the Quiet Zone and MIMO arm switches
+    /// each keep their own. Returns an id for `removeTransportTeardownObserver`.
+    @discardableResult
+    func addTransportTeardownObserver(_ handler: @escaping (TransportTeardownCause) -> Void) -> UUID {
+        let id = UUID()
+        transportTeardownObservers.append((id, handler))
+        return id
+    }
+
+    func removeTransportTeardownObserver(_ id: UUID) {
+        transportTeardownObservers.removeAll { $0.id == id }
+    }
+
+    /// Arm token for live treatment targets. It advances on every transport teardown and every
+    /// disarm; `replaceActiveQuietZoneRuntimeTarget` rejects an active target stamped with any
+    /// other value. Control plane only.
+    private(set) var liveTreatmentGeneration: UInt64 = 0
+
+    /// Called by the arm owner on disarm: targets built under the old arm can no longer play.
+    func revokeLiveTreatmentArm() {
+        liveTreatmentGeneration &+= 1
+    }
 
     func replaceActiveQuietZoneRuntimeTarget(
         _ rawTarget: ActiveQuietZoneRuntimeTarget
     ) throws {
         let target = try rawTarget.validated()
+        if target.active, target.armGeneration != liveTreatmentGeneration {
+            throw ActiveQuietZoneError.armRevoked
+        }
         if target.active,
            !activeQuietZoneStereoSpeakerRuntimeAvailable {
             throw ActiveQuietZoneError.runtimeUnsupported
@@ -4397,7 +4431,12 @@ final class AudioIOEngine: ObservableObject {
                     )
                 }
         }
-        guard attached else {
+        guard attached,
+              N60DSPGraphSnapshotSetActiveQuietZonePeakCap(
+                &graph,
+                Float(LiveTreatmentSafeguards.linearPeak(
+                    dbfs: LiveTreatmentSafeguards.defaultPeakCapDBFS))
+              ) else {
             throw ActiveQuietZoneError
                 .invalidConfiguration
         }
@@ -5163,7 +5202,9 @@ final class AudioIOEngine: ObservableObject {
         activeEQFIRProgram = nil
         activeRoomCorrectionProgram = nil
         activeSpeakerIRProgram = nil
-        onTransportTornDown?(cause)
+        // The app's own profile switch happens while arming and keeps the arm (see `disarmReason`).
+        if cause != .plannedProfileChange { liveTreatmentGeneration &+= 1 }
+        for observer in transportTeardownObservers { observer.handler(cause) }
     }
 
     private func forceFailedState(_ error: Error) {

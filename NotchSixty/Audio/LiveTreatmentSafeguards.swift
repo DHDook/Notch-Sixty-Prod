@@ -29,8 +29,16 @@ enum LiveTreatmentSafeguards {
     static let tripRampMilliseconds = 20.0
 
     /// Silent-microphone detection: no input above this level for this long disarms.
-    static let silentMicrophoneFloorDBFS = -110.0
+    /// A disconnected input still shows preamp noise around -90 to -100 dBFS, so the floor sits
+    /// above that, not at digital silence.
+    static let silentMicrophoneFloorDBFS = -96.0
     static let silentMicrophoneSeconds = 5.0
+
+    /// No new microphone analysis for this long while armed disarms (frozen analysis).
+    static let analysisStallSeconds = 2.0
+
+    /// A change in output gain (volume, headroom) beyond this disarms.
+    static let outputGainToleranceDB = 1.0
 
     /// The cap in force, clamped into [-120, hardMaximum]. Non-finite input yields the default.
     static func clampedPeakCapDBFS(_ requested: Double) -> Double {
