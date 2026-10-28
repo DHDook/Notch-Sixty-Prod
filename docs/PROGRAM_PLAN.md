@@ -61,8 +61,8 @@ platforms; E6 (the unified graph) is the critical path, because eleven later epi
 an epic, slices go in their written order. Competitive features come first (what buyers and
 reviewers compare with Dirac and REW), then engine depth, then breadth.
 
-1. E4 class-leading roadmap, S12–S31 in written order (owner, 28 Oct 2026: ahead of E6; slices waiting on E6/E8 or the bench are skipped until ready)
-2. E6 Unified live N-channel graph, through S11
+1. E4 class-leading roadmap, S12–S31 in written order (owner, 28 Oct 2026; slices waiting on E8 or the bench are skipped until ready)
+2. E19 MIMO room treatment, software parts (plan first; owner, 28 Oct 2026: straight after the E4 roadmap)
 3. E11 Measurement suite
 4. E10 Mixed-phase room correction and bass control
 5. E12 Guided setup and information architecture (ahead of E8, owner 25 Oct 2026, so the full room correction UI can be tested sooner)
@@ -71,12 +71,11 @@ reviewers compare with Dirac and REW), then engine depth, then breadth.
 8. E9 Multichannel protection and FIR parity
 9. E7 384 kHz everywhere
 10. E20 Engine performance
-11. E19 MIMO room treatment, software parts (plan first)
-12. E4 S11 Re-qualify ANC on the unified graph
-13. E21 Portable C++ core, remaining items
-14. E14 Upmixer, E15 Device-aware profiles, E17 Export and dither, E16 Automation and remote
-15. E23 Legacy engine removal
-16. E22 Hardware validation and E18 Launch readiness (owner-led)
+11. E4 S11 Re-qualify ANC on the unified graph
+12. E21 Portable C++ core, remaining items
+13. E14 Upmixer, E15 Device-aware profiles, E17 Export and dither, E16 Automation and remote
+14. E23 Legacy engine removal
+15. E22 Hardware validation and E18 Launch readiness (owner-led)
 
 ## Phase 1 — Consolidate and qualify
 
@@ -148,15 +147,15 @@ Gate G2 passed on 2026-10-25 (commit 07e82c6)
 ### E6 Unified live N-channel graph
 
 - [x] Write a design note (`docs/epics/E6.md`, awaiting owner approval): lane stage list, snapshot layout, latency alignment, coefficient ramping, rebuild-with-fade rules, threading and multirate boundaries
-- [ ] Build the unified graph in C++ from the start, per the engine-language decision (E21)
-- [ ] Give every lane the full stereo stage set: PEQ, M/S where paired, dynamic EQ, dynamics, FIR, delay, protection
+- [x] Build the unified graph in C++ from the start, per the engine-language decision (E21) (`core/`, libn60core)
+- [x] Give every lane the full stereo stage set: PEQ, M/S where paired, dynamic EQ, dynamics, FIR, delay, protection (S9a, #203)
 - [x] Represent stereo as a 2-channel layout and the binaural renderer as a stage, not a separate transport
-- [ ] Make parameter edits live with ramped coefficients; rebuild with a short fade only on topology changes
+- [x] Make parameter edits live with ramped coefficients; rebuild with a short fade only on topology changes (S6, S9b #205)
 - [x] S8c `e6/dynamics-readbacks`: gain-reduction, true-peak and over-range readbacks through a core ABI addition (#187; diagnostics UI row and two tests follow up)
 - [x] S8e `e6/rack-and-routes`: AU rack as an external-processor node; same-device and aggregate routes render through the graph
-- [ ] S8d `e6/translate-remaining-stereo`: move the kernel-fallback stereo stages (dynamic EQ, FIR/IR/convolution, mixed phase, crossover and bass management, denoiser, fractional delay, soft clipper, gain rider) to the graph
-- [ ] Remove the `unsupportedActiveDSP` and `immutableSemanticTransportActive` restrictions in `AudioIOEngine.swift`, and the idle-only headphone profile rule
-- [ ] Build a parity suite that renders the old stereo kernel and the new graph side by side
+- [x] S8d `e6/translate-remaining-stereo` (#195, #203): move the kernel-fallback stereo stages (dynamic EQ, FIR/IR/convolution, mixed phase, crossover and bass management, denoiser, fractional delay, soft clipper, gain rider) to the graph
+- [x] Remove the `unsupportedActiveDSP` and `immutableSemanticTransportActive` restrictions in `AudioIOEngine.swift`, and the idle-only headphone profile rule (lifted on the graph path, the default since S11, by S9a–S9d; the copies kept for the `e6.legacy-kernel` fallback go with the kernel in E23)
+- [x] Build a parity suite that renders the old stereo kernel and the new graph side by side (S8b2a stage parity, S10 #209; the graph-vs-kernel full-config corpus is left open in `docs/epics/E6.md`)
 - [x] Make the graph the default once parity holds; keep `N60RenderKernel` as a frozen fallback behind a flag until E23
 - [x] S8b2a `e6/engine-integration-3` built on branch (needs-owner, behind `e6.unified-graph`): graph reproduces M/S EQ, compressor, expander, ambient compensation, symmetry, crossfeed, crosstalk cancellation, integer inter-channel delay and pause gate; everything else keeps the kernel fallback
 - [x] S8b2b: translate dynamic EQ, FIR/room/speaker IR, stereo crossover and bass management, denoiser, soft clipper and gain rider (or document keep-on-kernel); wire multichannel, layouts, 1 to 8 subs and binaural into the live N-channel session; metering and latency readbacks; compensate kernel/graph latency difference across the hand-over fade
