@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// E4 S9c (flag `e4.adaptive-anc`): the feed-forward canceller learning in
+/// E4 S9c: the feed-forward canceller learning in
 /// shadow, compared per third-octave band with the offline design. Nothing
 /// here plays anti-noise.
 struct ProductionFeedForwardShadowCard: View {

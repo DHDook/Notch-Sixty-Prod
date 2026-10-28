@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// E4 S6 (flag `e4.adaptive-anc`): what the adaptive tonal canceller would do.
+/// E4 S6: what the adaptive tonal canceller would do.
 /// It runs in shadow: computed and metered, never played.
 struct ProductionAdaptiveQuietZoneCard: View {
     @ObservedObject var shadow: AdaptiveQuietZoneShadow

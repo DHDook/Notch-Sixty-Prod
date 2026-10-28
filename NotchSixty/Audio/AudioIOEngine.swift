@@ -1298,18 +1298,31 @@ final class AudioIOEngine: ObservableObject {
             && multiOutputRoutingConfiguration?.enabled != true
     }
 
+    /// Largest anti-noise peak the engine will accept: the planner's headroom-based value, then the
+    /// always-on live-treatment cap (`LiveTreatmentSafeguards`), which no setting disables.
     var activeQuietZoneAvailableInjectionPeak: Double {
-        (try? ActiveQuietZonePlanner().availableInjectionPeak(
-            headroomAttenuationDB:
-                gainConfiguration.headroomAttenuationDB,
-            ambientLevelRecoveryDB:
-                max(
-                    ambientCompensationRuntimeTarget.levelDB,
-                    0
-                ),
-            configuration: ActiveQuietZoneConfiguration()
-        )) ?? 0
+        LiveTreatmentSafeguards.limitedInjectionPeak(
+            (try? ActiveQuietZonePlanner().availableInjectionPeak(
+                headroomAttenuationDB:
+                    gainConfiguration.headroomAttenuationDB,
+                ambientLevelRecoveryDB:
+                    max(
+                        ambientCompensationRuntimeTarget.levelDB,
+                        0
+                    ),
+                configuration: ActiveQuietZoneConfiguration()
+            )) ?? 0
+        )
     }
+
+    /// Output sample rate of the running stereo transport, for the live-treatment arm switch.
+    var liveTreatmentSampleRate: Double? {
+        transportSession?.outputFormat.sampleRate
+    }
+
+    /// Fired at the end of every transport teardown (control plane, main actor). The live-treatment
+    /// arm switch disarms from it. Never called from the audio callback.
+    var onTransportTornDown: ((TransportTeardownCause) -> Void)?
 
     func replaceActiveQuietZoneRuntimeTarget(
         _ rawTarget: ActiveQuietZoneRuntimeTarget
@@ -1327,18 +1340,20 @@ final class AudioIOEngine: ObservableObject {
                 .frequencyChangeRequiresDisarm
         }
 
-        let available = try ActiveQuietZonePlanner()
-            .availableInjectionPeak(
-                headroomAttenuationDB:
-                    gainConfiguration.headroomAttenuationDB,
-                ambientLevelRecoveryDB:
-                    max(
-                        ambientCompensationRuntimeTarget.levelDB,
-                        0
-                    ),
-                configuration:
-                    ActiveQuietZoneConfiguration()
-            )
+        let available = LiveTreatmentSafeguards.limitedInjectionPeak(
+            try ActiveQuietZonePlanner()
+                .availableInjectionPeak(
+                    headroomAttenuationDB:
+                        gainConfiguration.headroomAttenuationDB,
+                    ambientLevelRecoveryDB:
+                        max(
+                            ambientCompensationRuntimeTarget.levelDB,
+                            0
+                        ),
+                    configuration:
+                        ActiveQuietZoneConfiguration()
+                )
+        )
         if target.active,
            target.maximumSourceMagnitude
                 > available + 1.0e-7 {
@@ -2777,7 +2792,7 @@ final class AudioIOEngine: ObservableObject {
         recoveryWorkItem = nil
         eventMonitor.removeSelectedOutputSampleRateMonitor()
         if lifecycle.state != .stopping { try? setLifecycle(.stopping) }
-        tearDownTransport(fadeOut: true)
+        tearDownTransport(fadeOut: true, cause: .stop)
         try? setLifecycle(.idle)
         clearStagedAudioUnitRack()
         audioUnitRackRebuildPending = false
@@ -2791,7 +2806,7 @@ final class AudioIOEngine: ObservableObject {
         eventMonitor.removeSelectedOutputSampleRateMonitor()
         if lifecycle.state != .idle {
             if lifecycle.state != .stopping { try? setLifecycle(.stopping) }
-            tearDownTransport(fadeOut: true)
+            tearDownTransport(fadeOut: true, cause: .quit)
             try? setLifecycle(.idle)
         }
         if lifecycle.state == .idle {
@@ -4403,7 +4418,7 @@ final class AudioIOEngine: ObservableObject {
         ambientTarget: AmbientCompensationTarget
     ) -> ActiveQuietZoneRuntimeTarget {
         guard target.active else { return target }
-        let available =
+        let available = LiveTreatmentSafeguards.limitedInjectionPeak(
             (
                 try? ActiveQuietZonePlanner()
                     .availableInjectionPeak(
@@ -4417,6 +4432,7 @@ final class AudioIOEngine: ObservableObject {
                     )
             )
             ?? 0
+        )
         guard target.maximumSourceMagnitude
                 <= available + 1.0e-7 else {
             // Never rescale solved phasors behind the controller's back.
@@ -5103,7 +5119,7 @@ final class AudioIOEngine: ObservableObject {
         )
     }
 
-    private func tearDownTransport(fadeOut: Bool) {
+    private func tearDownTransport(fadeOut: Bool, cause: TransportTeardownCause = .other) {
         liveGenerator = nil
         if let controller = headTrackingController {
             controller.stop()
@@ -5147,6 +5163,7 @@ final class AudioIOEngine: ObservableObject {
         activeEQFIRProgram = nil
         activeRoomCorrectionProgram = nil
         activeSpeakerIRProgram = nil
+        onTransportTornDown?(cause)
     }
 
     private func forceFailedState(_ error: Error) {
@@ -5207,7 +5224,10 @@ final class AudioIOEngine: ObservableObject {
                 restoreLowLatencyBuffers()
             }
         }
-        scheduleSampleRateReconfiguration(countsAsSampleRateChange: false)
+        scheduleSampleRateReconfiguration(
+            countsAsSampleRateChange: false,
+            cause: .plannedProfileChange
+        )
     }
 
     /// Puts back the buffer sizes the profile replaced. Only while no
@@ -5244,7 +5264,8 @@ final class AudioIOEngine: ObservableObject {
     private func scheduleSampleRateReconfiguration(
         countsAsSampleRateChange: Bool = true,
         fadeOut: Bool = false,
-        settleDelay: TimeInterval = 0.15
+        settleDelay: TimeInterval = 0.15,
+        cause: TransportTeardownCause = .reconfiguration
     ) {
         guard lifecycle.state == .running else { return }
 
@@ -5252,7 +5273,7 @@ final class AudioIOEngine: ObservableObject {
         do {
             try setLifecycle(.reconfiguring)
             eventMonitor.removeSelectedOutputSampleRateMonitor()
-            tearDownTransport(fadeOut: fadeOut)
+            tearDownTransport(fadeOut: fadeOut, cause: cause)
         } catch {
             tearDownTransport(fadeOut: false)
             forceFailedState(error)
@@ -5297,7 +5318,7 @@ final class AudioIOEngine: ObservableObject {
         let generation = recoveryGeneration
         try? setLifecycle(.recoveringOutput)
         eventMonitor.removeSelectedOutputSampleRateMonitor()
-        tearDownTransport(fadeOut: false)
+        tearDownTransport(fadeOut: false, cause: .outputLost)
         scheduleRecoveryAttempt(
             generation: generation,
             delay: OutputRecoveryRetryPolicy.absentOutputPollInterval
@@ -5378,7 +5399,7 @@ final class AudioIOEngine: ObservableObject {
         eventMonitor.removeSelectedOutputSampleRateMonitor()
         masterVolumeController.stopMonitoring()
         try? setLifecycle(.stopping)
-        tearDownTransport(fadeOut: true)
+        tearDownTransport(fadeOut: true, cause: .sleep)
         try? setLifecycle(.idle)
     }
 

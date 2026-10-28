@@ -246,7 +246,6 @@ struct ProductionActiveAcousticsWorkspace: View {
     @ObservedObject var adaptiveQuietZone: AdaptiveQuietZoneShadow
     @ObservedObject var feedForwardSurvey: QuietZoneFeedForwardSurveyController
     @ObservedObject var feedForwardShadow: QuietZoneFeedForwardShadow
-    @EnvironmentObject private var featureFlags: FeatureFlags
     @ObservedObject var microphone: RoomCorrectionCalibrationController
     @ObservedObject var projects: RoomCorrectionProjectController
 
@@ -365,8 +364,16 @@ struct ProductionActiveAcousticsWorkspace: View {
                                     ? .green
                                     : .secondary
                         )
+                    if quietZone.arm.isArmed {
+                        Button("Disarm", role: .destructive) {
+                            quietZone.arm.disarm(.user)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(.red)
+                        .accessibilityLabel("Disarm Active Quiet Zone")
+                    }
                     Toggle(
-                        "Active Quiet Zone",
+                        "Arm Active Quiet Zone",
                         isOn: Binding(
                             get: { quietZone.configuration.enabled },
                             set: { enabled in
@@ -1126,8 +1133,18 @@ struct ProductionActiveAcousticsWorkspace: View {
                     .padding(.vertical, 6)
                     .glassEffect(.regular, in: .capsule)
 
+                if let message = quietZone.arm.statusMessage {
+                    Text(message).font(.caption).foregroundStyle(.orange)
+                }
+                if quietZone.arm.isArmed {
+                    Button("Disarm", role: .destructive) {
+                        quietZone.arm.disarm(.user)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.red)
+                }
                 Toggle(
-                    "Enable",
+                    "Arm",
                     isOn: Binding(
                         get: { quietZone.configuration.enabled },
                         set: { enabled in
@@ -1213,10 +1230,8 @@ struct ProductionActiveAcousticsWorkspace: View {
 
             spatialQuietZoneCard
             ProductionFeedForwardReadinessCard(quietZone: quietZone)
-            if featureFlags.isEnabled(.adaptiveANC) {
-                ProductionFeedForwardDesignSurveyCard(survey: feedForwardSurvey)
-                ProductionFeedForwardShadowCard(shadow: feedForwardShadow)
-            }
+            ProductionFeedForwardDesignSurveyCard(survey: feedForwardSurvey)
+            ProductionFeedForwardShadowCard(shadow: feedForwardShadow)
 
             LazyVGrid(
                 columns: [
@@ -1358,12 +1373,10 @@ struct ProductionActiveAcousticsWorkspace: View {
                 .textSelection(.enabled)
             }
 
-            if featureFlags.isEnabled(.adaptiveANC) {
-                ProductionAdaptiveQuietZoneCard(
-                    shadow: adaptiveQuietZone,
-                    latencyText: ancLatencyText
-                )
-            }
+            ProductionAdaptiveQuietZoneCard(
+                shadow: adaptiveQuietZone,
+                latencyText: ancLatencyText
+            )
 
             safetyNote(
                 "Active Quiet Zone is deliberately limited to stable low-frequency components. It does not cancel speech, claps or broadband room sound and makes no claim of whole-room silence. A low-level probe must measurably improve the physical error microphone before full cancellation is allowed."

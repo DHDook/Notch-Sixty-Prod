@@ -254,7 +254,7 @@ struct QuietZoneFeedForwardShadowStatus: Equatable, Sendable {
     static let inactive = QuietZoneFeedForwardShadowStatus(state: .inactive)
 }
 
-/// E4 S9c: the feed-forward canceller in shadow mode (flag `e4.adaptive-anc`).
+/// E4 S9c: the feed-forward canceller in shadow mode.
 /// It captures the reference and seat microphones on one device, seeds from
 /// the survey (S9b), adapts on the virtual error, and compares its predicted
 /// reduction per third-octave band with the offline design's. It never plays:

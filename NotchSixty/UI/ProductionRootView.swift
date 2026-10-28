@@ -266,10 +266,6 @@ struct ProductionRootView: View {
     #endif
     @State private var commandError: String?
     @State private var showingGuidedSetup = false
-    @EnvironmentObject private var featureFlags: FeatureFlags
-
-    /// E4: the adaptive Quiet Zone shadow runs only with its flag on.
-    private var adaptiveANCEnabled: Bool { featureFlags.isEnabled(.adaptiveANC) }
 
     private var engine: AudioIOEngine { product.audioEngine }
 
@@ -338,10 +334,10 @@ struct ProductionRootView: View {
             }
         }
         .task { product.prepareForUse() }
-        .task(id: adaptiveANCEnabled) {
-            product.adaptiveQuietZone.setActive(adaptiveANCEnabled)
-            product.feedForwardShadow.setActive(adaptiveANCEnabled)
-            product.activeQuietZone.lowLatencyOutputProfileAllowed = adaptiveANCEnabled
+        .task {
+            // E4: shadow-mode adaptive Quiet Zone paths are always on; they never play.
+            product.adaptiveQuietZone.setActive(true)
+            product.feedForwardShadow.setActive(true)
         }
         .sheet(
             isPresented: Binding(

@@ -68,7 +68,7 @@ enum QuietZoneFeedForwardSurveyRules {
     }
 }
 
-/// E4 S9b2: runs the feed-forward design measurement (flag `e4.adaptive-anc`)
+/// E4 S9b2: runs the feed-forward design measurement
 /// and publishes the bands and, once the timing budget allows, the design.
 @MainActor
 final class QuietZoneFeedForwardSurveyController: ObservableObject {
