@@ -18,14 +18,7 @@ struct FeatureFlag: Hashable, Identifiable, Sendable {
 extension FeatureFlag {
     /// Every flag the app knows. Add one when an epic starts merging dark;
     /// delete it, and the checks that read it, once the epic ships.
-    static let all: [FeatureFlag] = [.adaptiveANC, .legacyKernel]
-
-    /// E4: adaptive Quiet Zone controls and the shadow-mode adaptive path.
-    static let adaptiveANC = FeatureFlag(
-        id: "e4.adaptive-anc",
-        title: "Adaptive Quiet Zone",
-        epic: "E4"
-    )
+    static let all: [FeatureFlag] = [.legacyKernel]
 
     /// E6 S11: the unified graph is the default renderer. Turning this on selects the frozen
     /// `N60RenderKernel` fallback instead (no new features). Swift decides; the engine never reads

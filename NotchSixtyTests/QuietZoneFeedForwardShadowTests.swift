@@ -263,9 +263,7 @@ final class QuietZoneFeedForwardShadowTests: XCTestCase {
         XCTAssertEqual(shadow.status.seedSource, .offlineDesign)
         XCTAssertEqual(engine.activeQuietZoneRuntimeTarget, before)
 
-        let binding = LiveANCBinding(outputDeviceUID: "out", inputDeviceUID: "test-mic", sampleRate: 48_000)
-        let decision = LiveANCAuthorisation.evaluate([], for: binding)
-        XCTAssertFalse(AdaptiveQuietZoneOutputPolicy.mayPlay(decision))
+        XCTAssertFalse(AdaptiveQuietZoneOutputPolicy.mayPlay(LiveTreatmentArm(feature: .quietZone)))
     }
 
     // MARK: Fixtures

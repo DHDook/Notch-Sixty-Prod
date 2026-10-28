@@ -19,7 +19,7 @@ extern "C" {
 /*
  * E4 S5: adaptive speaker-ANC core (filtered-x LMS). C interface over a C++20
  * core (n60_fxlms.cpp). Not wired into the render kernel yet; S6 wires the
- * tonal core behind the e4.adaptive-anc flag, with the howl guard
+ * tonal core, with the howl guard
  * (N60AncGuard.h) after its output.
  *
  * Design (docs/epics/E4.md, design decisions 1-3):

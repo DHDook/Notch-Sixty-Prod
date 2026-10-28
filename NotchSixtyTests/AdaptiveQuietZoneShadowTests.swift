@@ -172,8 +172,6 @@ final class AdaptiveQuietZoneShadowTests: XCTestCase {
         XCTAssertEqual(shadow.status.state, .adapting)
         XCTAssertEqual(engine.activeQuietZoneRuntimeTarget, before)
 
-        let binding = LiveANCBinding(outputDeviceUID: "out", inputDeviceUID: "mic", sampleRate: 48_000)
-        let decision = LiveANCAuthorisation.evaluate([], for: binding)
-        XCTAssertFalse(AdaptiveQuietZoneOutputPolicy.mayPlay(decision))
+        XCTAssertFalse(AdaptiveQuietZoneOutputPolicy.mayPlay(LiveTreatmentArm(feature: .quietZone)))
     }
 }

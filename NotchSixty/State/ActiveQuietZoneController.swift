@@ -1,3 +1,4 @@
+import Combine
 import Foundation
 
 struct ActiveQuietZoneToneTelemetry:
@@ -63,6 +64,9 @@ final class ActiveQuietZoneController: ObservableObject {
     let engine: AudioIOEngine
     let profiles: ProductProfileController
     let ambient: AmbientCompensationController
+    /// The Quiet Zone ARM switch. Disarmed on every launch; live output runs only while armed.
+    let arm = LiveTreatmentArm(feature: .quietZone)
+    private var lastMicrophoneRevision: UInt64 = 0
 
     private let planner = ActiveQuietZonePlanner()
     private let spatialPlanner = ActiveQuietZoneSpatialPlanner()
@@ -162,6 +166,8 @@ final class ActiveQuietZoneController: ObservableObject {
         var decisions: [ActiveQuietZoneVerification.Decision]
     }
 
+    private var armChange: AnyCancellable?
+
     init(
         engine: AudioIOEngine,
         profiles: ProductProfileController,
@@ -170,6 +176,11 @@ final class ActiveQuietZoneController: ObservableObject {
         self.engine = engine
         self.profiles = profiles
         self.ambient = ambient
+        arm.onDisarm = { [weak self] reason in self?.applyDisarm(reason) }
+        armChange = arm.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }
+        engine.onTransportTornDown = { [weak self] cause in
+            self?.arm.transportTornDown(cause)
+        }
     }
 
     deinit {
@@ -491,38 +502,73 @@ final class ActiveQuietZoneController: ObservableObject {
         refreshSpatialCalibration()
     }
 
+    /// The ARM switch. `true` arms (one explicit user action) and starts the ramped-in canceller;
+    /// `false` disarms with a ramped stop. The armed state is never persisted.
     func setEnabled(_ enabled: Bool) throws {
-        var updated = configuration
-        updated.enabled = enabled
-        try persist(updated)
-        syncLowLatencyOutputProfile()
-
         if enabled {
-            faultLatched = false
-            try start()
+            try arm.arm(environment: liveTreatmentEnvironment())
+            do {
+                var updated = configuration
+                updated.enabled = true
+                try persist(updated)
+                syncLowLatencyOutputProfile()
+                faultLatched = false
+                try start()
+            } catch {
+                arm.disarm(.user)
+                throw error
+            }
         } else {
-            stop()
+            arm.disarm(.user)
+            if configuration.enabled { applyDisarm(.user) }
         }
     }
 
-    /// E4 S7 (flag `e4.adaptive-anc`, set by the app shell): while allowed,
-    /// enabling Quiet Zone switches the output to its lowest-latency buffer
-    /// and disabling restores it. Hold and fault keep it: Quiet Zone is still
-    /// enabled.
-    var lowLatencyOutputProfileAllowed = false {
-        didSet { syncLowLatencyOutputProfile() }
+    /// Environment the arm switch guards; observed with each controller poll.
+    private func liveTreatmentEnvironment() -> LiveTreatmentEnvironment {
+        var level: Double?
+        let revision = ambient.analysisRevision
+        if revision != lastMicrophoneRevision {
+            lastMicrophoneRevision = revision
+            level = ambient.latestAnalysis?.microphoneLevelDBFS
+        }
+        return LiveTreatmentEnvironment(
+            outputDeviceUID: engine.routeConfiguration.selectedOutputUID,
+            sampleRate: engine.liveTreatmentSampleRate,
+            engineRunning: engine.lifecycleState == .running,
+            inputAvailable: ambient.monitorStatus != .failed,
+            microphoneLevelDBFS: level
+        )
     }
 
+    /// Called once per armed-to-disarmed transition: ramps the anti-noise out and returns the
+    /// controller to the disabled state. The persisted configuration is already disabled.
+    private func applyDisarm(_ reason: LiveTreatmentDisarmReason) {
+        var updated = configuration
+        updated.enabled = false
+        configuration = updated
+        syncLowLatencyOutputProfile()
+        stop(fadeMilliseconds: LiveTreatmentSafeguards.rampMilliseconds(for: reason))
+        if let message = reason.message { lastErrorDescription = message }
+    }
+
+    /// E4 S7: while armed, Quiet Zone uses the lowest-latency output buffer; disarming
+    /// restores it. Always on (the former feature flag is gone).
     private func syncLowLatencyOutputProfile() {
-        engine.setLowLatencyOutputProfile(
-            lowLatencyOutputProfileAllowed && configuration.enabled
-        )
+        engine.setLowLatencyOutputProfile(configuration.enabled)
+    }
+
+    /// Arm ramp: never shorter than the always-on start ramp.
+    private var startRampMilliseconds: Double {
+        max(configuration.armRampMilliseconds, LiveTreatmentSafeguards.startRampMilliseconds)
     }
 
     func replaceConfiguration(
         _ rawConfiguration: ActiveQuietZoneConfiguration
     ) throws {
-        let validated = try rawConfiguration.validated()
+        var validated = try rawConfiguration.validated()
+        // Only the ARM switch can turn live output on.
+        validated.enabled = arm.isArmed
         if engine.activeQuietZoneRuntimeTarget.active {
             try engine.clearActiveQuietZoneRuntimeTarget(
                 fadeMilliseconds:
@@ -566,13 +612,14 @@ final class ActiveQuietZoneController: ObservableObject {
         lastErrorDescription = nil
     }
 
-    func stop() {
+    func stop(fadeMilliseconds: Double? = nil) {
         if spatialSurveyActive { cancelSpatialSurvey() }
         task?.cancel()
         task = nil
         try? engine.clearActiveQuietZoneRuntimeTarget(
             fadeMilliseconds:
-                configuration.faultFadeMilliseconds
+                fadeMilliseconds
+                ?? configuration.faultFadeMilliseconds
         )
         try? ambient.setQuietZoneObservationDemand(false)
         resetRuntimeState()
@@ -589,6 +636,8 @@ final class ActiveQuietZoneController: ObservableObject {
         do {
             try synchronizeSelectedPlaybackSystem()
             guard configuration.enabled else { return }
+            arm.observe(liveTreatmentEnvironment())
+            guard arm.isArmed, configuration.enabled else { return }
             guard !faultLatched else { return }
 
             guard engine.lifecycleState == .running,
@@ -598,13 +647,15 @@ final class ActiveQuietZoneController: ObservableObject {
             }
 
             availableInjectionPeak =
-                try planner.availableInjectionPeak(
-                    headroomAttenuationDB:
-                        engine.gainConfiguration
-                            .headroomAttenuationDB,
-                    ambientLevelRecoveryDB:
-                        ambient.appliedTarget.levelDB,
-                    configuration: configuration
+                LiveTreatmentSafeguards.limitedInjectionPeak(
+                    try planner.availableInjectionPeak(
+                        headroomAttenuationDB:
+                            engine.gainConfiguration
+                                .headroomAttenuationDB,
+                        ambientLevelRecoveryDB:
+                            ambient.appliedTarget.levelDB,
+                        configuration: configuration
+                    )
                 )
             guard availableInjectionPeak > 1.0e-7 else {
                 hold(.insufficientOutputHeadroom)
@@ -1001,7 +1052,7 @@ final class ActiveQuietZoneController: ObservableObject {
                 )
             },
             transitionMilliseconds:
-                configuration.armRampMilliseconds
+                startRampMilliseconds
         )
         return try target.validated(
             configuration: configuration
@@ -1040,7 +1091,7 @@ final class ActiveQuietZoneController: ObservableObject {
                 )
             },
             transitionMilliseconds:
-                configuration.armRampMilliseconds
+                startRampMilliseconds
         )
         return try target.validated(
             configuration: configuration
@@ -1289,7 +1340,7 @@ final class ActiveQuietZoneController: ObservableObject {
                 )
             },
             transitionMilliseconds:
-                configuration.armRampMilliseconds
+                startRampMilliseconds
         )
         return try target.validated(
             configuration: configuration
@@ -1320,7 +1371,7 @@ final class ActiveQuietZoneController: ObservableObject {
             3,
             Int(
                 ceil(
-                    configuration.armRampMilliseconds
+                    startRampMilliseconds
                         / 250.0
                 )
             ) + 2
@@ -1343,8 +1394,11 @@ final class ActiveQuietZoneController: ObservableObject {
                 .playbackSystemRequired
         }
         let validated = try rawConfiguration.validated()
+        // The armed state is never persisted as on.
+        var stored = validated
+        stored.enabled = false
         try profiles.replaceSelectedSystemActiveQuietZone(
-            validated
+            stored
         )
         configuration = validated
         activeSystemID = profiles.selectedSystemProfileID
@@ -1358,6 +1412,7 @@ final class ActiveQuietZoneController: ObservableObject {
         }
         guard activeSystemID != systemID else { return }
 
+        arm.disarm(.outputDeviceChanged)
         if engine.activeQuietZoneRuntimeTarget.active {
             try? engine.clearActiveQuietZoneRuntimeTarget(
                 fadeMilliseconds:
@@ -1371,6 +1426,8 @@ final class ActiveQuietZoneController: ObservableObject {
                 .activeQuietZone
             ?? ActiveQuietZoneConfiguration()
         _ = try configuration.validated()
+        // Armed state is never restored: a stored "enabled" from an older build is ignored.
+        configuration.enabled = false
         spatialCalibration = nil
         spatialPredictions = []
         feedForwardCalibration = nil

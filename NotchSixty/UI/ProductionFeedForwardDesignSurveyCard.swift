@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// E4 S9b2 (flag `e4.adaptive-anc`): measures the feed-forward design in the
+/// E4 S9b2: measures the feed-forward design in the
 /// app: reference to seat transfer from the noise itself, then speaker leakage
 /// into the reference microphone. Nothing here plays anti-noise.
 struct ProductionFeedForwardDesignSurveyCard: View {

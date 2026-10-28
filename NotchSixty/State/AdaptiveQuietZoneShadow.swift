@@ -80,10 +80,13 @@ struct AdaptiveQuietZoneShadowTone: Equatable, Sendable {
 }
 
 /// The only route from adaptive weights to audible output. S6 has no play
-/// path at all; when one exists (S10) it must ask this first.
+/// path at all; when one exists it must ask this first. Output is allowed only
+/// while the user has armed Quiet Zone (`LiveTreatmentArm`), and then only
+/// through the always-on `LiveTreatmentSafeguards` limits.
 enum AdaptiveQuietZoneOutputPolicy {
-    static func mayPlay(_ decision: LiveANCAuthorisation.Decision) -> Bool {
-        decision.authorised
+    @MainActor
+    static func mayPlay(_ arm: LiveTreatmentArm) -> Bool {
+        arm.isArmed
     }
 }
 
@@ -246,7 +249,7 @@ final class AdaptiveQuietZoneShadowEngine: @unchecked Sendable {
 /// E4 S6: the adaptive tonal canceller in shadow mode. It takes the error
 /// microphone from the ambient monitor, seeds itself from the live tonal
 /// design, adapts on the virtual error, and reports what it would do. It is
-/// active only while the app shell turns it on (flag `e4.adaptive-anc`).
+/// active only while the app shell turns it on.
 @MainActor
 final class AdaptiveQuietZoneShadow: ObservableObject {
     @Published private(set) var status = AdaptiveQuietZoneShadowStatus.inactive
