@@ -179,6 +179,9 @@ if selected e4_anc_guard; then
         failed+=(e4_anc_guard)
     fi
 fi
+# E4 S14: dead-man lease on the anti-noise in the render kernel.
+# shellcheck disable=SC2086
+harness e4_engine_lease "${STRICT[@]}" -O2 -include stddef.h -I"$RT" ci/harness_e4_engine_lease.c $ALL_RT_NO_BRIDGE -framework Accelerate -lc++
 # E4 S5: adaptive ANC core (FxLMS) on a simulated plant.
 if selected e4_fxlms; then
     if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -I"$RT" -c "$RT/n60_fxlms.cpp" -o "$OUT/n60_fxlms.o"; then

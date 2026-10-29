@@ -272,6 +272,18 @@ uint32_t N60RealtimeAudioBridgeReadAmbientReferenceFrames(
     uint32_t capacityFrames
 );
 
+/// E4 S14: dead-man lease on the anti-noise (see N60RenderKernel.h). Control plane only.
+void N60RealtimeAudioBridgeRenewActiveQuietZoneLease(
+    N60RealtimeAudioBridge * _Nonnull bridge,
+    uint64_t durationFrames
+);
+void N60RealtimeAudioBridgeReleaseActiveQuietZoneLease(
+    N60RealtimeAudioBridge * _Nonnull bridge
+);
+uint64_t N60RealtimeAudioBridgeActiveQuietZoneLeaseExpiryCount(
+    const N60RealtimeAudioBridge * _Nonnull bridge
+);
+
 void N60RealtimeAudioBridgeSetActiveQuietZoneReferenceDemand(
     N60RealtimeAudioBridge * _Nonnull bridge,
     bool enabled

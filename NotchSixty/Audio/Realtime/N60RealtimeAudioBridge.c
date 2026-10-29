@@ -1421,6 +1421,24 @@ uint32_t N60RealtimeAudioBridgeReadAmbientReferenceFrames(
     return framesToRead;
 }
 
+void N60RealtimeAudioBridgeRenewActiveQuietZoneLease(
+    N60RealtimeAudioBridge *bridge,
+    uint64_t durationFrames
+) {
+    if (bridge == NULL || bridge->renderKernel == NULL) return;
+    N60RenderKernelRenewActiveQuietZoneLease(bridge->renderKernel, durationFrames);
+}
+
+void N60RealtimeAudioBridgeReleaseActiveQuietZoneLease(N60RealtimeAudioBridge *bridge) {
+    if (bridge == NULL || bridge->renderKernel == NULL) return;
+    N60RenderKernelReleaseActiveQuietZoneLease(bridge->renderKernel);
+}
+
+uint64_t N60RealtimeAudioBridgeActiveQuietZoneLeaseExpiryCount(const N60RealtimeAudioBridge *bridge) {
+    if (bridge == NULL || bridge->renderKernel == NULL) return 0;
+    return N60RenderKernelActiveQuietZoneLeaseExpiryCount(bridge->renderKernel);
+}
+
 void N60RealtimeAudioBridgeSetActiveQuietZoneReferenceDemand(
     N60RealtimeAudioBridge *bridge,
     bool enabled

@@ -869,6 +869,18 @@ final class CoreAudioTransportSession {
         outputFormat.sampleRate
     }
 
+    /// E4 S14: renews the anti-noise dead-man lease for `seconds` of output.
+    func renewActiveQuietZoneLease(seconds: Double) {
+        guard let bridge, seconds > 0 else { return }
+        let frames = UInt64((outputFormat.sampleRate * seconds).rounded(.up))
+        N60RealtimeAudioBridgeRenewActiveQuietZoneLease(bridge, frames)
+    }
+
+    func releaseActiveQuietZoneLease() {
+        guard let bridge else { return }
+        N60RealtimeAudioBridgeReleaseActiveQuietZoneLease(bridge)
+    }
+
     func setActiveQuietZoneReferenceDemand(_ enabled: Bool) {
         guard let bridge else { return }
         N60RealtimeAudioBridgeSetActiveQuietZoneReferenceDemand(

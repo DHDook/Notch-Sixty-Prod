@@ -18,7 +18,7 @@ struct FeatureFlag: Hashable, Identifiable, Sendable {
 extension FeatureFlag {
     /// Every flag the app knows. Add one when an epic starts merging dark;
     /// delete it, and the checks that read it, once the epic ships.
-    static let all: [FeatureFlag] = [.legacyKernel]
+    static let all: [FeatureFlag] = [.legacyKernel, .ancEngineLease]
 
     /// E6 S11: the unified graph is the default renderer. Turning this on selects the frozen
     /// `N60RenderKernel` fallback instead (no new features). Swift decides; the engine never reads
@@ -27,6 +27,14 @@ extension FeatureFlag {
         id: "e6.legacy-kernel",
         title: "Legacy render kernel (frozen fallback)",
         epic: "E6"
+    )
+
+    /// E4 S14: the control plane renews a dead-man lease on the live anti-noise; the render path
+    /// fades it out if the lease lapses. Off: no lease is enforced. Removed when E4 ships.
+    static let ancEngineLease = FeatureFlag(
+        id: "e4.engine-lease",
+        title: "Anti-noise dead-man lease",
+        epic: "E4"
     )
 }
 

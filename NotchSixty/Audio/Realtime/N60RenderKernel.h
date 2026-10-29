@@ -491,6 +491,14 @@ void N60RenderKernelProcessStereoSystemFrameInContext(
     float * _Nonnull outputLeft,
     float * _Nonnull outputRight
 );
+/// E4 S14 dead-man lease for the anti-noise. Control plane renews about once a second for a few
+/// seconds' worth of frames; if the deadline passes (hung main thread, dead controller task) the
+/// render path fades the anti-noise out in 20 ms and fades it back in over 250 ms after a
+/// renewal. Clock is rendered frames (a stopped callback never expires it); expiry is checked once
+/// per callback, so it starts within one buffer. Reset clears the lease (renew again after). Release returns to "no lease enforced". Lock-free; the render thread reads one atomic.
+void N60RenderKernelRenewActiveQuietZoneLease(N60RenderKernel * _Nonnull kernel, uint64_t durationFrames);
+void N60RenderKernelReleaseActiveQuietZoneLease(N60RenderKernel * _Nonnull kernel);
+uint64_t N60RenderKernelActiveQuietZoneLeaseExpiryCount(const N60RenderKernel * _Nonnull kernel);
 void N60RenderKernelGetActiveQuietZoneReferenceFrame(
     const N60RenderKernel * _Nonnull kernel,
     float * _Nonnull left,
