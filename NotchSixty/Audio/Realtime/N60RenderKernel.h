@@ -499,6 +499,20 @@ void N60RenderKernelProcessStereoSystemFrameInContext(
 void N60RenderKernelRenewActiveQuietZoneLease(N60RenderKernel * _Nonnull kernel, uint64_t durationFrames);
 void N60RenderKernelReleaseActiveQuietZoneLease(N60RenderKernel * _Nonnull kernel);
 uint64_t N60RenderKernelActiveQuietZoneLeaseExpiryCount(const N60RenderKernel * _Nonnull kernel);
+/// E4 S15 live howl guard on the anti-noise (`N60AncGuard`, one per channel). Always on once
+/// attached (no feature flag: safety is engine-side). The guards watch the tonal canceller's
+/// output in 256-frame chunks (no microphone input exists in the kernel, so the growth,
+/// non-finite and ceiling checks run). A trip fades the anti-noise to silence over 20 ms, within
+/// 256 frames of detection, counts one trip, and latches silent until Rearm. Attach/Detach are
+/// control plane with IO stopped (they allocate and swap the guards); the rate is fixed per
+/// guard, so a rate change attaches again. Rearm, TripCount and LastTrip are lock-free from any
+/// thread; Rearm takes effect at the next callback and fades back in over 250 ms. Reset (IO stopped) un-mutes and
+/// re-arms; ColdStart leaves a latched trip alone. LastTrip is the `N60AncGuardTrip` value of the latest trip.
+bool N60RenderKernelAttachHowlGuard(N60RenderKernel * _Nonnull kernel, double sampleRate);
+void N60RenderKernelDetachHowlGuard(N60RenderKernel * _Nonnull kernel);
+void N60RenderKernelRearmHowlGuard(N60RenderKernel * _Nonnull kernel);
+uint64_t N60RenderKernelHowlGuardTripCount(const N60RenderKernel * _Nonnull kernel);
+uint32_t N60RenderKernelHowlGuardLastTrip(const N60RenderKernel * _Nonnull kernel);
 void N60RenderKernelGetActiveQuietZoneReferenceFrame(
     const N60RenderKernel * _Nonnull kernel,
     float * _Nonnull left,

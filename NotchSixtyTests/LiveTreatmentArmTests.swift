@@ -108,6 +108,23 @@ final class LiveTreatmentArmTests: XCTestCase {
         XCTAssertEqual(arm.lastDisarmReason, .microphoneInvalid)
     }
 
+    /// E4 S15: a change in the engine's howl-guard trip count disarms with the instability reason,
+    /// at every rate, and an unchanged count never does.
+    func testHowlGuardTripCountChangeDisarmsAsInstability() throws {
+        for rate in Self.standardRates {
+            let arm = try armed(rate: rate)
+            var env = environment(rate: rate, level: -30)
+            env.howlGuardTripCount = 0
+            arm.observe(env, now: t0)
+            XCTAssertTrue(arm.isArmed, "no trip at \(rate)")
+            env.howlGuardTripCount = 1
+            arm.observe(env, now: t0)
+            XCTAssertFalse(arm.isArmed, "trip at \(rate)")
+            XCTAssertEqual(arm.lastDisarmReason, .instabilityTrip)
+            XCTAssertTrue(arm.latchedByEvent)
+        }
+    }
+
     func testTripLatchesDisarmedUntilTheUserRearms() throws {
         let arm = try armed()
         arm.reportInstabilityTrip()

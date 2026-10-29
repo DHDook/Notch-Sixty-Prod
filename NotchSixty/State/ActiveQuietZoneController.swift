@@ -509,6 +509,8 @@ final class ActiveQuietZoneController: ObservableObject {
     /// `false` disarms with a ramped stop. The armed state is never persisted.
     func setEnabled(_ enabled: Bool) throws {
         if enabled {
+            // E4 S15: a trip latched in an earlier arm must not keep the new one silent.
+            engine.rearmHowlGuard()
             try arm.arm(environment: liveTreatmentEnvironment())
             armedGeneration = engine.liveTreatmentGeneration
             do {
@@ -544,7 +546,8 @@ final class ActiveQuietZoneController: ObservableObject {
             microphoneLevelDBFS: level,
             inputDeviceUID: ambient.selectedInputDeviceUID,
             outputGainDB: engine.liveTreatmentOutputGainDB,
-            microphoneSignalFault: ambient.microphoneSignalFault
+            microphoneSignalFault: ambient.microphoneSignalFault,
+            howlGuardTripCount: engine.liveTreatmentHowlTripCount
         )
     }
 
