@@ -28,6 +28,8 @@ enum LiveTreatmentDisarmReason: String, Equatable, Sendable {
     case inputDeviceChanged
     /// The output gain (volume, headroom) moved beyond `LiveTreatmentSafeguards.outputGainToleranceDB`.
     case outputGainChanged
+    /// The seat microphone heard a tone or band louder than its ANC-off baseline (E4 S16).
+    case seatRegression
 
     /// Shown in the UI after an automatic disarm. Nil for the user's own action.
     var message: String? {
@@ -46,6 +48,7 @@ enum LiveTreatmentDisarmReason: String, Equatable, Sendable {
         case .microphoneStalled: return "Disarmed: the microphone analysis stopped updating. Re-arm to continue."
         case .inputDeviceChanged: return "Disarmed: the measurement microphone changed. Re-arm to continue."
         case .outputGainChanged: return "Disarmed: the output volume changed. Re-arm to continue."
+        case .seatRegression: return "Disarmed: the seat got louder than before arming. Re-arm to continue."
         }
     }
 }
@@ -176,6 +179,12 @@ final class LiveTreatmentArm: ObservableObject {
     /// The howl detector reported a trip. Mutes and latches.
     func reportInstabilityTrip() {
         disarm(.instabilityTrip)
+    }
+
+    /// The do-no-harm verifier found the seat louder than its ANC-off baseline. Backs the
+    /// anti-noise out (the owner's ramp) and latches.
+    func reportSeatRegression() {
+        disarm(.seatRegression)
     }
 
     /// Compares the live environment with the one captured at arming. `now` is injectable so

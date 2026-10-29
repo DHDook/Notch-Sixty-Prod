@@ -100,6 +100,10 @@ final class ActiveQuietZoneController: ObservableObject {
     /// E4 S6: the offline design per controlled tone, for the adaptive shadow.
     @Published private(set) var adaptiveSeeds: [AdaptiveQuietZoneSeed] = []
     @Published private(set) var availableInjectionPeak: Double = 0
+    /// E4 S16: what the seat microphone verifies while armed, for example
+    /// "\u{2212}12 dB at 43 Hz, verified". Nil until a reduction is verified.
+    @Published private(set) var verifiedReadout: String?
+    private var doNoHarm = DoNoHarmVerifier()
     @Published private(set) var lastErrorDescription: String?
     @Published private(set) var spatialCalibration:
         ActiveQuietZoneSpatialCalibration?
@@ -685,6 +689,16 @@ final class ActiveQuietZoneController: ObservableObject {
             lastAnalysisRevision = revision
 
             let snapshot = detailed.snapshot
+            // E4 S16: the seat microphone is the judge. Runs before the trust checks so an
+            // unstable-looking window cannot hide a regression.
+            if case .observing = stage, !doNoHarm.hasBaseline {
+                doNoHarm.captureBaseline(snapshot)
+            } else if case .harm = doNoHarm.evaluate(snapshot, now: Date()) {
+                verifiedReadout = nil
+                arm.reportSeatRegression()
+                return
+            }
+            verifiedReadout = doNoHarm.readout
             guard trusted(snapshot) else {
                 hold(
                     snapshot.separationMode
@@ -1507,5 +1521,7 @@ final class ActiveQuietZoneController: ObservableObject {
         lastAnalysisRevision = 0
         weakActiveWindows = 0
         faultLatched = false
+        doNoHarm.reset()
+        verifiedReadout = nil
     }
 }
