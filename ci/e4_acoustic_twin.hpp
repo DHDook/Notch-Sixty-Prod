@@ -80,6 +80,7 @@ enum class Fault {
     MicClipped,   /* error mic gain +40 dB, then the +-1 clip */
     VolumeChange, /* speaker gain changes by param dB */
     MicMoved,     /* listener jumps by (param, 0) m */
+    PathInvert,   /* secondary path x -1 (a speaker wired out of phase) */
     DeviceLoss,   /* speaker output and both mics go to zero */
     Clear,        /* removes MicUnplug, MicFrozen, MicClipped, DeviceLoss */
 };
@@ -118,6 +119,7 @@ public:
             cfg_.listener.x += param;
             epoch_ = timeNow();
             break;
+        case Fault::PathInvert: volumeScale_ = -volumeScale_; break;
         case Fault::DeviceLoss: lost_ = true; break;
         case Fault::Clear:
             unplugged_ = frozen_ = clipped_ = lost_ = false;

@@ -375,6 +375,11 @@ bool N60DSPGraphSnapshotSetActiveQuietZone(
     uint32_t transitionFrames,
     bool enabled
 );
+/// Sets the arm generation after N60DSPGraphSnapshotSetActiveQuietZone (which resets it to 0).
+bool N60DSPGraphSnapshotSetActiveQuietZoneArmGeneration(
+    N60DSPGraphSnapshot * _Nonnull snapshot,
+    uint64_t armGeneration
+);
 /// Sets the anti-noise output clamp (linear) after N60DSPGraphSnapshotSetActiveQuietZone,
 /// which resets it to the compile-time limit.
 bool N60DSPGraphSnapshotSetActiveQuietZonePeakCap(
@@ -475,6 +480,17 @@ bool N60RenderKernelPublishSnapshot(
     N60DSPGraphSnapshot snapshot
 );
 N60RenderKernelRenderContext N60RenderKernelBeginRender(N60RenderKernel * _Nonnull kernel);
+/// E4 S18a: as BeginRender, with the output buffer's first-frame mHostTime (0 = unknown). Applies
+/// the adaptive gain mailbox and pushes a phase-anchor telemetry record (at most every 5 ms).
+N60RenderKernelRenderContext N60RenderKernelBeginRenderAtHostTime(
+    N60RenderKernel * _Nonnull kernel,
+    uint64_t outputHostTime
+);
+/// The gain mailbox / telemetry ring owned by the kernel (valid until Destroy).
+N60ActiveQuietZoneGainMailbox * _Nullable N60RenderKernelActiveQuietZoneMailbox(N60RenderKernel * _Nonnull kernel);
+N60ActiveQuietZoneTelemetry * _Nullable N60RenderKernelActiveQuietZoneTelemetry(N60RenderKernel * _Nonnull kernel);
+/// Any thread. Latches the same 20 ms anti-noise fade as a howl trip (cleared by Rearm).
+void N60RenderKernelRequestHowlTrip(N60RenderKernel * _Nonnull kernel);
 void N60RenderKernelProcessStereoPlaybackFrameInContext(
     N60RenderKernel * _Nonnull kernel,
     N60RenderKernelRenderContext * _Nonnull context,

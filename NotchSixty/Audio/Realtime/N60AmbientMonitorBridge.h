@@ -2,6 +2,7 @@
 #define N60AmbientMonitorBridge_h
 
 #include <CoreAudio/CoreAudio.h>
+#include <stdbool.h>
 #include <stdint.h>
 
 #ifdef __cplusplus
@@ -44,6 +45,31 @@ uint32_t N60AmbientMonitorBridgeProcessPlanar(
     N60AmbientMonitorBridge * _Nonnull bridge,
     const float * _Nonnull microphoneSamples,
     uint32_t frameCount
+);
+
+/// E4 S18a: where a read's first frame sits in host time. hostTime is the IOProc input time of
+/// the callback that delivered the frame's block; frameOffset is how many frames into that block
+/// the read began (add frameOffset / inputRate seconds). valid is false when no anchor covers it.
+typedef struct {
+    bool valid;
+    uint32_t frameOffset;
+    uint64_t hostTime;
+} N60AmbientMonitorAnchor;
+
+/// As ProcessPlanar, recording a host-time anchor for the block (0 = no anchor).
+uint32_t N60AmbientMonitorBridgeProcessPlanarAt(
+    N60AmbientMonitorBridge * _Nonnull bridge,
+    const float * _Nonnull microphoneSamples,
+    uint32_t frameCount,
+    uint64_t hostTime
+);
+
+/// As ReadFrames, also reporting the host-time anchor of the first frame read.
+uint32_t N60AmbientMonitorBridgeReadFramesWithAnchor(
+    N60AmbientMonitorBridge * _Nonnull bridge,
+    float * _Nonnull destination,
+    uint32_t capacityFrames,
+    N60AmbientMonitorAnchor * _Nullable anchorOut
 );
 
 /// Sole-consumer control-plane read. Returns frames copied and advances read index.
