@@ -1341,6 +1341,13 @@ final class AudioIOEngine: ObservableObject {
         transportSession?.outputFormat.sampleRate
     }
 
+    /// E4 S15: live howl-guard trips on the current transport session (0 without one). The Quiet
+    /// Zone arm compares it with the value captured at arming.
+    var liveTreatmentHowlTripCount: UInt64 { transportSession?.howlGuardTripCount ?? 0 }
+
+    /// E4 S15: clears a latched howl-guard trip; the arm calls it before arming.
+    func rearmHowlGuard() { transportSession?.rearmHowlGuard() }
+
     /// Output gain the user's volume and the headroom attenuation apply, in dB (0 = unity),
     /// for the live-treatment arm switch. Muted reads as -120.
     var liveTreatmentOutputGainDB: Double {

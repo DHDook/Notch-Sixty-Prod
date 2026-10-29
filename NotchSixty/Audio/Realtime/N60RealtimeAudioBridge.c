@@ -1439,6 +1439,21 @@ uint64_t N60RealtimeAudioBridgeActiveQuietZoneLeaseExpiryCount(const N60Realtime
     return N60RenderKernelActiveQuietZoneLeaseExpiryCount(bridge->renderKernel);
 }
 
+bool N60RealtimeAudioBridgeAttachHowlGuard(N60RealtimeAudioBridge *bridge, double sampleRate) {
+    if (bridge == NULL || bridge->renderKernel == NULL) return false;
+    return N60RenderKernelAttachHowlGuard(bridge->renderKernel, sampleRate);
+}
+
+void N60RealtimeAudioBridgeRearmHowlGuard(N60RealtimeAudioBridge *bridge) {
+    if (bridge == NULL || bridge->renderKernel == NULL) return;
+    N60RenderKernelRearmHowlGuard(bridge->renderKernel);
+}
+
+uint64_t N60RealtimeAudioBridgeHowlGuardTripCount(const N60RealtimeAudioBridge *bridge) {
+    if (bridge == NULL || bridge->renderKernel == NULL) return 0;
+    return N60RenderKernelHowlGuardTripCount(bridge->renderKernel);
+}
+
 void N60RealtimeAudioBridgeSetActiveQuietZoneReferenceDemand(
     N60RealtimeAudioBridge *bridge,
     bool enabled

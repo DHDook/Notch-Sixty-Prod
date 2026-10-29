@@ -90,6 +90,9 @@ struct LiveTreatmentEnvironment: Equatable, Sendable {
     var outputGainDB: Double = 0
     /// Raw-signal fault in the latest microphone frames (frozen, clipped, offset).
     var microphoneSignalFault: MicrophoneSignalFault? = nil
+    /// Live howl-guard trips on the current transport session (E4 S15). Any change from the
+    /// value at arming means the guard tripped (a rebuilt session restarts the count).
+    var howlGuardTripCount: UInt64 = 0
 }
 
 enum LiveTreatmentArmError: Error, Equatable, LocalizedError {
@@ -197,6 +200,8 @@ final class LiveTreatmentArm: ObservableObject {
                     || abs(environment.outputGainDB - baseline.outputGainDB)
                         > LiveTreatmentSafeguards.outputGainToleranceDB {
             disarm(.outputGainChanged)
+        } else if environment.howlGuardTripCount != baseline.howlGuardTripCount {
+            reportInstabilityTrip()
         } else if environment.microphoneSignalFault != nil {
             disarm(.microphoneInvalid)
         } else if let level = environment.microphoneLevelDBFS {

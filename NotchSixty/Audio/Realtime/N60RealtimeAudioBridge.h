@@ -284,6 +284,12 @@ uint64_t N60RealtimeAudioBridgeActiveQuietZoneLeaseExpiryCount(
     const N60RealtimeAudioBridge * _Nonnull bridge
 );
 
+/// E4 S15: live howl guard on the anti-noise (see N60RenderKernel.h). Attach is control plane with
+/// IO stopped and a no-op when already attached at this rate; Rearm and TripCount are lock-free.
+bool N60RealtimeAudioBridgeAttachHowlGuard(N60RealtimeAudioBridge * _Nonnull bridge, double sampleRate);
+void N60RealtimeAudioBridgeRearmHowlGuard(N60RealtimeAudioBridge * _Nonnull bridge);
+uint64_t N60RealtimeAudioBridgeHowlGuardTripCount(const N60RealtimeAudioBridge * _Nonnull bridge);
+
 void N60RealtimeAudioBridgeSetActiveQuietZoneReferenceDemand(
     N60RealtimeAudioBridge * _Nonnull bridge,
     bool enabled

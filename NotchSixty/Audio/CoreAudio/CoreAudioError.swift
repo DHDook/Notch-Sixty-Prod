@@ -876,6 +876,18 @@ final class CoreAudioTransportSession {
         N60RealtimeAudioBridgeRenewActiveQuietZoneLease(bridge, frames)
     }
 
+    /// E4 S15: number of live howl-guard trips on this session (0 when none).
+    var howlGuardTripCount: UInt64 {
+        guard let bridge else { return 0 }
+        return N60RealtimeAudioBridgeHowlGuardTripCount(bridge)
+    }
+
+    /// E4 S15: clears a latched trip so the anti-noise can fade back in. Called when arming.
+    func rearmHowlGuard() {
+        guard let bridge else { return }
+        N60RealtimeAudioBridgeRearmHowlGuard(bridge)
+    }
+
     func releaseActiveQuietZoneLease() {
         guard let bridge else { return }
         N60RealtimeAudioBridgeReleaseActiveQuietZoneLease(bridge)
@@ -1312,6 +1324,14 @@ final class CoreAudioTransportSession {
             throw CoreAudioTransportError.dspGraphPublicationFailed
         }
         if !isOutputStarted || !isCaptureStarted {
+            // E4 S15: IO is stopped, so the howl guard can be created here. Always on; the guard
+            // does nothing while no anti-noise plays.
+            // Only when neither side runs: Attach swaps the guards, and a started output IOProc
+            // may be rendering. The first publish of a session always happens fully stopped.
+            if !isOutputStarted && !isCaptureStarted,
+               !N60RealtimeAudioBridgeAttachHowlGuard(bridge, outputFormat.sampleRate) {
+                throw CoreAudioTransportError.dspGraphPublicationFailed
+            }
             guard N60RealtimeAudioBridgePublishDSPGraph(bridge, snapshot) else {
                 throw CoreAudioTransportError.dspGraphPublicationFailed
             }

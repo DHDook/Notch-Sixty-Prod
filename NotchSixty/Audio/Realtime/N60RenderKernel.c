@@ -1,4 +1,5 @@
 #include "N60RenderKernel.h"
+#include "N60AncGuard.h"
 
 #include <limits.h>
 #include <math.h>
@@ -68,6 +69,8 @@ typedef struct {
     uint32_t transitionFramesRemaining;
 } N60CrossoverRuntime;
 
+#define N60_HOWL_SCRATCH_FRAMES 256u
+
 struct N60RenderKernel {
     N60SnapshotSlot slots[N60_SNAPSHOT_SLOT_COUNT];
     _Atomic uint32_t activeSlot;
@@ -88,6 +91,18 @@ struct N60RenderKernel {
     _Atomic uint64_t activeQuietZoneLeaseExpiries;
     N60SmoothedGain activeQuietZoneLeaseGain;
     bool activeQuietZoneLeaseExpired;
+    // E4 S15 live howl guard on the anti-noise. One N60AncGuard per channel watches the runtime
+    // output in 256-frame chunks; a trip fades the anti-noise out (howlGuardGain) and latches
+    // until the control plane re-arms. Guards are created by AttachHowlGuard with IO stopped.
+    N60AncGuard *howlGuard[2];
+    double howlGuardRate;
+    float howlScratch[2][N60_HOWL_SCRATCH_FRAMES];
+    uint32_t howlScratchFill;
+    N60SmoothedGain howlGuardGain;
+    bool howlGuardMuted;
+    _Atomic bool howlRearmRequested;
+    _Atomic uint64_t howlTripCount;
+    _Atomic uint32_t howlTripKind;
     N60CrossoverRuntime crossoverRuntime;
     N60DynamicsRuntime dynamicsRuntime;
     N60SpectralDenoiserRuntime *denoiserRuntime;
@@ -410,6 +425,8 @@ static void reset_ambient_compensation_runtime(
         );
     }
 }
+
+static void reset_howl_guard_state(N60RenderKernel *kernel);
 
 static void reset_smoothed_gain(N60SmoothedGain *gain, float value) {
     gain->current = value;
@@ -1406,6 +1423,7 @@ N60RenderKernel *N60RenderKernelCreate(void) {
     kernel->activeQuietZoneReferenceRight = 0.0f;
     reset_smoothed_gain(&kernel->activeQuietZoneLeaseGain, 1.0f);
     kernel->activeQuietZoneLeaseExpired = false;
+    reset_howl_guard_state(kernel);
     reset_smoothed_gain(&kernel->balanceGainLeft, 1.0f);
     reset_smoothed_gain(&kernel->balanceGainRight, 1.0f);
     N60InterChannelDelayRuntimeReset(&kernel->interChannelDelayRuntime, initial.interChannelDelay);
@@ -1415,6 +1433,8 @@ N60RenderKernel *N60RenderKernelCreate(void) {
 
 void N60RenderKernelDestroy(N60RenderKernel *kernel) {
     if (kernel == NULL) return;
+    N60AncGuardDestroy(kernel->howlGuard[0]);
+    N60AncGuardDestroy(kernel->howlGuard[1]);
     N60SpectralDenoiserDestroy(kernel->denoiserRuntime);
     N60HeadphoneDSPRuntimeDestroy(kernel->headphoneDSPRuntime);
     N60ProtectionRuntimeDestroy(kernel->protectionRuntime);
@@ -1496,6 +1516,7 @@ uint32_t N60RenderKernelConvolutionHistoryFrames(N60RenderKernel *kernel) {
 void N60RenderKernelReset(N60RenderKernel *kernel) {
     if (kernel == NULL) return;
     N60RenderKernelColdStart(kernel);
+    reset_howl_guard_state(kernel); // IO stopped: a deliberate reset clears any latched trip
     N60PartitionedConvolverReset(kernel->convolver);
     N60PartitionedConvolverReset(kernel->roomCorrectionConvolver);
     N60PartitionedConvolverReset(kernel->speakerIRConvolver);
@@ -1649,6 +1670,48 @@ bool N60RenderKernelPublishSnapshot(N60RenderKernel *kernel, N60DSPGraphSnapshot
     return true;
 }
 
+// E4 S15: render-thread state back to healthy. Callers hold the kernel with IO stopped (Create,
+// ColdStart/Reset). A guard that exists is re-armed (cleared history) on its next Process call.
+static void reset_howl_guard_state(N60RenderKernel *kernel) {
+    reset_smoothed_gain(&kernel->howlGuardGain, 1.0f);
+    kernel->howlGuardMuted = false;
+    kernel->howlScratchFill = 0;
+    atomic_store_explicit(&kernel->howlRearmRequested, false, memory_order_relaxed);
+    if (kernel->howlGuard[0] != NULL) N60AncGuardRequestRearm(kernel->howlGuard[0]);
+    if (kernel->howlGuard[1] != NULL) N60AncGuardRequestRearm(kernel->howlGuard[1]);
+}
+
+// E4 S15: runs both guards over the chunk collected so far. The guards watch the anti-noise before
+// the lease and guard gains, so their own mute never reads as a quiet signal. A trip starts a
+// 20 ms fade to silence on the next samples (at most one chunk, 256 frames, after detection) and
+// latches until re-armed. Allocation-free; the guards are lock-free.
+static void flush_howl_scratch(N60RenderKernel *kernel, double sampleRate) {
+    const uint32_t frames = kernel->howlScratchFill;
+    if (frames == 0 || kernel->howlGuard[0] == NULL || kernel->howlGuard[1] == NULL) {
+        kernel->howlScratchFill = 0;
+        return;
+    }
+    kernel->howlScratchFill = 0;
+    N60AncGuardTrip trip = N60AncGuardProcess(
+        kernel->howlGuard[0], kernel->howlScratch[0], NULL, NULL, frames);
+    const N60AncGuardTrip right = N60AncGuardProcess(
+        kernel->howlGuard[1], kernel->howlScratch[1], NULL, NULL, frames);
+    if (trip == N60AncGuardTripNone) trip = right;
+    if (trip == N60AncGuardTripNone || kernel->howlGuardMuted) return;
+    kernel->howlGuardMuted = true;
+    atomic_store_explicit(&kernel->howlTripKind, (uint32_t)trip, memory_order_relaxed);
+    atomic_fetch_add_explicit(&kernel->howlTripCount, 1, memory_order_release);
+    const double rate = sampleRate > 0.0 ? sampleRate : 48000.0;
+    schedule_gain_transition(&kernel->howlGuardGain, 0.0f, (uint32_t)(rate * 0.020));
+}
+
+static inline void push_howl_sample(N60RenderKernel *kernel, float left, float right, double sampleRate) {
+    if (kernel->howlGuard[0] == NULL) return;
+    kernel->howlScratch[0][kernel->howlScratchFill] = left;
+    kernel->howlScratch[1][kernel->howlScratchFill] = right;
+    if (++kernel->howlScratchFill >= N60_HOWL_SCRATCH_FRAMES) flush_howl_scratch(kernel, sampleRate);
+}
+
 // E4 S14: once per callback. An expired lease starts a fade of the anti-noise to silence; a
 // renewed one fades it back in. No allocation, locks or logging.
 static void update_active_quiet_zone_lease(N60RenderKernel *kernel, double sampleRate) {
@@ -1665,6 +1728,52 @@ static void update_active_quiet_zone_lease(N60RenderKernel *kernel, double sampl
     const double rate = sampleRate > 0.0 ? sampleRate : 48000.0;
     const uint32_t fadeFrames = (uint32_t)(rate * (expired ? 0.020 : 0.250));
     schedule_gain_transition(&kernel->activeQuietZoneLeaseGain, expired ? 0.0f : 1.0f, fadeFrames);
+}
+
+bool N60RenderKernelAttachHowlGuard(N60RenderKernel *kernel, double sampleRate) {
+    if (kernel == NULL) return false;
+    if (kernel->howlGuard[0] != NULL && fabs(kernel->howlGuardRate - sampleRate) < 0.5) return true;
+    N60AncGuardConfig config = N60AncGuardConfigDefault(sampleRate);
+    if (!N60AncGuardConfigIsValid(&config)) return false;
+    N60AncGuard *left = N60AncGuardCreate(&config);
+    N60AncGuard *right = N60AncGuardCreate(&config);
+    if (left == NULL || right == NULL) {
+        N60AncGuardDestroy(left);
+        N60AncGuardDestroy(right);
+        return false;
+    }
+    N60AncGuardDestroy(kernel->howlGuard[0]);
+    N60AncGuardDestroy(kernel->howlGuard[1]);
+    kernel->howlGuard[0] = left;
+    kernel->howlGuard[1] = right;
+    kernel->howlGuardRate = sampleRate;
+    reset_howl_guard_state(kernel);
+    return true;
+}
+
+void N60RenderKernelDetachHowlGuard(N60RenderKernel *kernel) {
+    if (kernel == NULL) return;
+    N60AncGuardDestroy(kernel->howlGuard[0]);
+    N60AncGuardDestroy(kernel->howlGuard[1]);
+    kernel->howlGuard[0] = NULL;
+    kernel->howlGuard[1] = NULL;
+    kernel->howlGuardRate = 0.0;
+    reset_howl_guard_state(kernel);
+}
+
+void N60RenderKernelRearmHowlGuard(N60RenderKernel *kernel) {
+    if (kernel == NULL) return;
+    atomic_store_explicit(&kernel->howlRearmRequested, true, memory_order_release);
+}
+
+uint64_t N60RenderKernelHowlGuardTripCount(const N60RenderKernel *kernel) {
+    if (kernel == NULL) return 0;
+    return atomic_load_explicit(&((N60RenderKernel *)kernel)->howlTripCount, memory_order_acquire);
+}
+
+uint32_t N60RenderKernelHowlGuardLastTrip(const N60RenderKernel *kernel) {
+    if (kernel == NULL) return 0;
+    return atomic_load_explicit(&((N60RenderKernel *)kernel)->howlTripKind, memory_order_relaxed);
 }
 
 void N60RenderKernelRenewActiveQuietZoneLease(N60RenderKernel *kernel, uint64_t durationFrames) {
@@ -1691,6 +1800,17 @@ N60RenderKernelRenderContext N60RenderKernelBeginRender(N60RenderKernel *kernel)
         prepare_runtime_for_snapshot(kernel, context.snapshot);
         N60ProtectionRuntimeBeginBuffer(kernel->protectionRuntime);
         update_active_quiet_zone_lease(kernel, context.snapshot->sampleRate);
+        if (atomic_exchange_explicit(&kernel->howlRearmRequested, false, memory_order_acq_rel)
+            && kernel->howlGuard[0] != NULL) {
+            N60AncGuardRequestRearm(kernel->howlGuard[0]);
+            N60AncGuardRequestRearm(kernel->howlGuard[1]);
+            kernel->howlScratchFill = 0;
+            if (kernel->howlGuardMuted) {
+                kernel->howlGuardMuted = false;
+                const double rate = context.snapshot->sampleRate > 0.0 ? context.snapshot->sampleRate : 48000.0;
+                schedule_gain_transition(&kernel->howlGuardGain, 1.0f, (uint32_t)(rate * 0.250));
+            }
+        }
     }
     return context;
 }
@@ -2097,7 +2217,9 @@ void N60RenderKernelProcessStereoSystemFrameInContext(
             &quietZoneLeft,
             &quietZoneRight
         );
-        const float leaseGain = next_gain_value(&kernel->activeQuietZoneLeaseGain);
+        push_howl_sample(kernel, quietZoneLeft, quietZoneRight, context->snapshot->sampleRate);
+        const float leaseGain = next_gain_value(&kernel->activeQuietZoneLeaseGain)
+            * next_gain_value(&kernel->howlGuardGain);
         quietZoneLeft *= leaseGain;
         quietZoneRight *= leaseGain;
         left += quietZoneLeft;
@@ -2152,9 +2274,11 @@ void N60RenderKernelProcessStereoSystemFrameInContext(
         &activeQuietZoneRight
     );
     kernel->activeQuietZoneReferenceLeft =
-        activeQuietZoneLeft * kernel->activeQuietZoneLeaseGain.current * masterGain;
+        activeQuietZoneLeft * kernel->activeQuietZoneLeaseGain.current
+            * kernel->howlGuardGain.current * masterGain;
     kernel->activeQuietZoneReferenceRight =
-        activeQuietZoneRight * kernel->activeQuietZoneLeaseGain.current * masterGain;
+        activeQuietZoneRight * kernel->activeQuietZoneLeaseGain.current
+            * kernel->howlGuardGain.current * masterGain;
     left = sanitize_sample(kernel, left);
     right = sanitize_sample(kernel, right);
     if (meteringEnabled) {
@@ -2216,6 +2340,9 @@ void N60RenderKernelProcessStereoFrameInContext(
 
 void N60RenderKernelEndRender(N60RenderKernel *kernel, N60RenderKernelRenderContext *context, uint32_t renderedFrames) {
     if (kernel == NULL || context == NULL) return;
+    if (context->acquired && context->snapshot != NULL) {
+        flush_howl_scratch(kernel, context->snapshot->sampleRate);
+    }
     if (context->acquired && context->snapshot != NULL && context->snapshot->meteringEnabled) {
         publish_meter(&kernel->inputPeakLeftBits, &kernel->inputPeakRightBits, &kernel->inputRMSLeftBits, &kernel->inputRMSRightBits, &kernel->inputOverRangeSamples, context->inputPeakLeft, context->inputPeakRight, context->inputSquareSumLeft, context->inputSquareSumRight, context->inputOverRangeSamples, context->meteredFrames);
         publish_meter(&kernel->postEQPeakLeftBits, &kernel->postEQPeakRightBits, &kernel->postEQRMSLeftBits, &kernel->postEQRMSRightBits, &kernel->postEQOverRangeSamples, context->postEQPeakLeft, context->postEQPeakRight, context->postEQSquareSumLeft, context->postEQSquareSumRight, context->postEQOverRangeSamples, context->meteredFrames);

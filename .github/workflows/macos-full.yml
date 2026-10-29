@@ -64,11 +64,13 @@ jobs:
           RT=NotchSixty/Audio/Realtime
           OUT="$RUNNER_TEMP/benchmarks"
           mkdir -p "$OUT"
-          NO_BRIDGE=$(find "$RT" -name '*.c' ! -name 'N60RealtimeAudioBridge.c' ! -name 'N60MeasurementMonitorProc.c' -print)
-          ALL=$(find "$RT" -name '*.c' -print)
+          # E4 S15: the render kernel links the C++20 howl guard.
+          clang++ -std=c++20 -O3 -Wall -Wextra -I"$RT" -c "$RT/n60_anc_guard.cpp" -o "$OUT/n60_anc_guard.o"
+          NO_BRIDGE="$(find "$RT" -name '*.c' ! -name 'N60RealtimeAudioBridge.c' ! -name 'N60MeasurementMonitorProc.c' -print) $OUT/n60_anc_guard.o"
+          ALL="$(find "$RT" -name '*.c' -print) $OUT/n60_anc_guard.o"
           for opt in O0 O3; do
             clang -std=c11 -"$opt" -Wall -Wextra -include stddef.h -I"$RT" -Icore/include \
-              ci/benchmark_pr35_render_kernel.c $NO_BRIDGE -framework Accelerate -o "$OUT/render-$opt"
+              ci/benchmark_pr35_render_kernel.c $NO_BRIDGE -lc++ -framework Accelerate -o "$OUT/render-$opt"
             echo "=== render kernel $opt ===" | tee -a "$OUT/benchmarks.txt"
             "$OUT/render-$opt" | tee -a "$OUT/benchmarks.txt"
           done

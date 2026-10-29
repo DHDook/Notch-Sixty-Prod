@@ -12,8 +12,16 @@ OUT="${RUNNER_TEMP:-$(mktemp -d)}/harnesses"
 mkdir -p "$OUT"
 
 RT=NotchSixty/Audio/Realtime
-ALL_RT=$(find "$RT" -name '*.c' -print | sort)
-ALL_RT_NO_BRIDGE=$(find "$RT" -name '*.c' ! -name 'N60RealtimeAudioBridge.c' ! -name 'N60MeasurementMonitorProc.c' -print | sort)
+# E4 S15: the render kernel links the C++20 howl guard, so every harness that links the kernel
+# gets its object (and libc++, added in harness()).
+mkdir -p "$OUT"
+GUARD_OBJ="$OUT/n60_anc_guard_rt.o"
+if ! clang++ -std=c++20 -O2 -Wall -Wextra -Werror -I"NotchSixty/Audio/Realtime" -c "NotchSixty/Audio/Realtime/n60_anc_guard.cpp" -o "$GUARD_OBJ"; then
+    echo "failed to compile the howl guard" >&2
+    exit 1
+fi
+ALL_RT=$(find "$RT" -name '*.c' -print | sort; echo "$GUARD_OBJ")
+ALL_RT_NO_BRIDGE=$(find "$RT" -name '*.c' ! -name 'N60RealtimeAudioBridge.c' ! -name 'N60MeasurementMonitorProc.c' -print | sort; echo "$GUARD_OBJ")
 STRICT=(-std=c11 -Wall -Wextra -Werror)
 FILTERS=("$@")
 
@@ -35,7 +43,7 @@ harness() {
     shift
     selected "$name" || return 0
     echo "::group::$name"
-    if clang "$@" -o "$OUT/$name" && "$OUT/$name"; then
+    if clang "$@" -lc++ -o "$OUT/$name" && "$OUT/$name"; then
         passed+=("$name")
     else
         failed+=("$name")
@@ -182,6 +190,9 @@ fi
 # E4 S14: dead-man lease on the anti-noise in the render kernel.
 # shellcheck disable=SC2086
 harness e4_engine_lease "${STRICT[@]}" -O2 -include stddef.h -I"$RT" ci/harness_e4_engine_lease.c $ALL_RT_NO_BRIDGE -framework Accelerate -lc++
+# E4 S15: live howl guard in the render kernel.
+# shellcheck disable=SC2086
+harness e4_howl_guard_live "${STRICT[@]}" -O2 -include stddef.h -I"$RT" ci/harness_e4_howl_guard_live.c $ALL_RT_NO_BRIDGE -framework Accelerate
 # E4 S13: acoustic twin (closed-loop room simulator) with the tonal canceller and
 # howl guard in the loop. SOAK=1 adds the long drift and fault soak.
 if selected e4_acoustic_twin; then
