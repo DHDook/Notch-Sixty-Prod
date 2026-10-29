@@ -208,7 +208,9 @@
 		F90200000000000000000001 /* ActiveQuietZoneController.swift in Sources */ = {isa = PBXBuildFile; fileRef = F90200000000000000000011 /* ActiveQuietZoneController.swift */; };
 		E4G000000000000000000001 /* LiveTreatmentArm.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4G000000000000000000011 /* LiveTreatmentArm.swift */; };
 		E4H000000000000000000001 /* DoNoHarmVerifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4H000000000000000000011 /* DoNoHarmVerifier.swift */; };
+		E4H000000000000000000021 /* SafetyFlightRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4H000000000000000000031 /* SafetyFlightRecorder.swift */; };
 		E4H000000000000000000002 /* DoNoHarmVerifierTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4H000000000000000000012 /* DoNoHarmVerifierTests.swift */; };
+		E4H000000000000000000022 /* SafetyFlightRecorderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4H000000000000000000032 /* SafetyFlightRecorderTests.swift */; };
 		E4D000000000000000000001 /* AdaptiveQuietZoneShadow.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4D000000000000000000011 /* AdaptiveQuietZoneShadow.swift */; };
 		E4D000000000000000000002 /* ProductionAdaptiveQuietZoneCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4D000000000000000000012 /* ProductionAdaptiveQuietZoneCard.swift */; };
 		E4D000000000000000000003 /* AdaptiveQuietZoneShadowTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4D000000000000000000013 /* AdaptiveQuietZoneShadowTests.swift */; };
@@ -706,7 +708,9 @@
 		F89300000000000000000011 /* AmbientCompensationController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AmbientCompensationController.swift; sourceTree = "<group>"; };
 		F90200000000000000000011 /* ActiveQuietZoneController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActiveQuietZoneController.swift; sourceTree = "<group>"; };
 		E4H000000000000000000011 /* DoNoHarmVerifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DoNoHarmVerifier.swift; sourceTree = "<group>"; };
+		E4H000000000000000000031 /* SafetyFlightRecorder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SafetyFlightRecorder.swift; sourceTree = "<group>"; };
 		E4H000000000000000000012 /* DoNoHarmVerifierTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DoNoHarmVerifierTests.swift; sourceTree = "<group>"; };
+		E4H000000000000000000032 /* SafetyFlightRecorderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SafetyFlightRecorderTests.swift; sourceTree = "<group>"; };
 		E4G000000000000000000011 /* LiveTreatmentArm.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveTreatmentArm.swift; sourceTree = "<group>"; };
 		E4D000000000000000000011 /* AdaptiveQuietZoneShadow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdaptiveQuietZoneShadow.swift; sourceTree = "<group>"; };
 		E4D000000000000000000012 /* ProductionAdaptiveQuietZoneCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductionAdaptiveQuietZoneCard.swift; sourceTree = "<group>"; };
@@ -1156,6 +1160,7 @@
 				E4D000000000000000000013 /* AdaptiveQuietZoneShadowTests.swift */,
 				E4A000000000000000000012 /* LiveTreatmentArmTests.swift */,
 				E4H000000000000000000012 /* DoNoHarmVerifierTests.swift */,
+				E4H000000000000000000032 /* SafetyFlightRecorderTests.swift */,
 				E4A000000000000000000032 /* ActiveQuietZoneLeaseKeeperTests.swift */,
 				E4E000000000000000000014 /* QuietZoneLatencyPathTests.swift */,
 				F97100000000000000000012 /* QuietZonePhysicalLatencyMeasurementRunTests.swift */,
@@ -1400,7 +1405,7 @@
 			path = Backup;
 			sourceTree = "<group>";
 		};
-		A20000000000000000000054 /* State */ = {isa = PBXGroup; children = (A20000000000000000000025 /* AudioLifecycleState.swift */, A100000000000000000E2204 /* FeatureFlags.swift */, A100000000000000000E2202 /* PreferenceKeys.swift */, A2000000000000000000002B /* ProductProfiles.swift */, E12B00000000000000000011 /* SystemSetupFlow.swift */, E12C00000000000000000011 /* SystemSetupStartSteps.swift */, E12D00000000000000000011 /* SystemSetupMeasureAlign.swift */, E12E00000000000000000011 /* SystemSetupBassCorrect.swift */, E12F00000000000000000011 /* SystemSetupVerifySave.swift */, B113B0000000000000000061 /* ProductRecovery.swift */, B113B0000000000000000071 /* HeadroomAssistant.swift */, F64000000000000000000014 /* MultichannelCalibrationController.swift */, A2000000000000000000002D /* RoomCorrectionCalibrationController.swift */, A2000000000000000000002F /* RoomCorrectionProjectController.swift */, F89300000000000000000011 /* AmbientCompensationController.swift */, F90200000000000000000011 /* ActiveQuietZoneController.swift */, E4D000000000000000000011 /* AdaptiveQuietZoneShadow.swift */, E4G000000000000000000011 /* LiveTreatmentArm.swift */, E4H000000000000000000011 /* DoNoHarmVerifier.swift */, E4F200000000000000000013 /* QuietZoneFeedForwardSurveyController.swift */, E4F300000000000000000012 /* QuietZoneFeedForwardShadow.swift */, F92000000000000000000012 /* RoomTreatmentAdvisorController.swift */, E10B00000000000000000004 /* RoomCorrectionDeployController.swift */,); path = State; sourceTree = "<group>"; };
+		A20000000000000000000054 /* State */ = {isa = PBXGroup; children = (A20000000000000000000025 /* AudioLifecycleState.swift */, A100000000000000000E2204 /* FeatureFlags.swift */, A100000000000000000E2202 /* PreferenceKeys.swift */, A2000000000000000000002B /* ProductProfiles.swift */, E12B00000000000000000011 /* SystemSetupFlow.swift */, E12C00000000000000000011 /* SystemSetupStartSteps.swift */, E12D00000000000000000011 /* SystemSetupMeasureAlign.swift */, E12E00000000000000000011 /* SystemSetupBassCorrect.swift */, E12F00000000000000000011 /* SystemSetupVerifySave.swift */, B113B0000000000000000061 /* ProductRecovery.swift */, B113B0000000000000000071 /* HeadroomAssistant.swift */, F64000000000000000000014 /* MultichannelCalibrationController.swift */, A2000000000000000000002D /* RoomCorrectionCalibrationController.swift */, A2000000000000000000002F /* RoomCorrectionProjectController.swift */, F89300000000000000000011 /* AmbientCompensationController.swift */, F90200000000000000000011 /* ActiveQuietZoneController.swift */, E4D000000000000000000011 /* AdaptiveQuietZoneShadow.swift */, E4G000000000000000000011 /* LiveTreatmentArm.swift */, E4H000000000000000000011 /* DoNoHarmVerifier.swift */, E4H000000000000000000031 /* SafetyFlightRecorder.swift */, E4F200000000000000000013 /* QuietZoneFeedForwardSurveyController.swift */, E4F300000000000000000012 /* QuietZoneFeedForwardShadow.swift */, F92000000000000000000012 /* RoomTreatmentAdvisorController.swift */, E10B00000000000000000004 /* RoomCorrectionDeployController.swift */,); path = State; sourceTree = "<group>"; };
 		A20000000000000000000055 /* Diagnostics */ = {isa = PBXGroup; children = (A20000000000000000000026 /* AudioDiagnosticsSnapshot.swift */, A2000000000000000000002A /* ProductionAnalysisWorker.swift */,); path = Diagnostics; sourceTree = "<group>"; };
 		A30000000000000000000050 /* Realtime */ = {
 			isa = PBXGroup;
@@ -1706,6 +1711,7 @@
 				E4D000000000000000000001 /* AdaptiveQuietZoneShadow.swift in Sources */,
 				E4G000000000000000000001 /* LiveTreatmentArm.swift in Sources */,
 				E4H000000000000000000001 /* DoNoHarmVerifier.swift in Sources */,
+				E4H000000000000000000021 /* SafetyFlightRecorder.swift in Sources */,
 				A30000000000000000000011 /* N60RenderKernel.c in Sources */,
 				A30000000000000000000012 /* N60Convolution.c in Sources */,
 				A30000000000000000000013 /* N60Dynamics.c in Sources */,
@@ -1889,6 +1895,7 @@
 				E4D000000000000000000003 /* AdaptiveQuietZoneShadowTests.swift in Sources */,
 				E4A000000000000000000002 /* LiveTreatmentArmTests.swift in Sources */,
 				E4H000000000000000000002 /* DoNoHarmVerifierTests.swift in Sources */,
+				E4H000000000000000000022 /* SafetyFlightRecorderTests.swift in Sources */,
 				E4A000000000000000000022 /* ActiveQuietZoneLeaseKeeperTests.swift in Sources */,
 				E4E000000000000000000004 /* QuietZoneLatencyPathTests.swift in Sources */,
 				F97100000000000000000002 /* QuietZonePhysicalLatencyMeasurementRunTests.swift in Sources */,

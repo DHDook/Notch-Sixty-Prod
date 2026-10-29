@@ -573,7 +573,7 @@ final class ProductController: ObservableObject {
             "Room Correction: \(audioEngine.roomCorrectionConfiguration.enabled ? "On" : "Off")",
             "DSP Latency: \(latency)",
             "Quarantined Plug-ins: \(audioUnitHost.quarantinedComponentCount)",
-        ] + recovery.diagnosticsLines())
+        ] + recovery.diagnosticsLines() + activeQuietZone.flightRecorder.diagnosticsLines())
             .joined(separator: "\n")
     }
 

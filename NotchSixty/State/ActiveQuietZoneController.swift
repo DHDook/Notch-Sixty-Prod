@@ -104,6 +104,8 @@ final class ActiveQuietZoneController: ObservableObject {
     /// "\u{2212}12 dB at 43 Hz, verified". Nil until a reduction is verified.
     @Published private(set) var verifiedReadout: String?
     private var doNoHarm = DoNoHarmVerifier()
+    /// E4 S17: the last 60 s of safety events, in plain language. Text only, no audio.
+    private(set) var flightRecorder = SafetyFlightRecorder()
     @Published private(set) var lastErrorDescription: String?
     @Published private(set) var spatialCalibration:
         ActiveQuietZoneSpatialCalibration?
@@ -516,6 +518,7 @@ final class ActiveQuietZoneController: ObservableObject {
             // E4 S15: a trip latched in an earlier arm must not keep the new one silent.
             engine.rearmHowlGuard()
             try arm.arm(environment: liveTreatmentEnvironment())
+            flightRecorder.recordArm()
             armedGeneration = engine.liveTreatmentGeneration
             do {
                 var updated = configuration
@@ -558,6 +561,7 @@ final class ActiveQuietZoneController: ObservableObject {
     /// Called once per armed-to-disarmed transition: ramps the anti-noise out and returns the
     /// controller to the disabled state. The persisted configuration is already disabled.
     private func applyDisarm(_ reason: LiveTreatmentDisarmReason) {
+        flightRecorder.recordDisarm(reason)
         // Revoke the engine arm token first: nothing built under this arm can play again.
         armedGeneration = nil
         engine.revokeLiveTreatmentArm()
@@ -699,6 +703,7 @@ final class ActiveQuietZoneController: ObservableObject {
                 return
             }
             verifiedReadout = doNoHarm.readout
+            if let readout = verifiedReadout { flightRecorder.record(.verifier, "Verified: \(readout)") }
             guard trusted(snapshot) else {
                 hold(
                     snapshot.separationMode
