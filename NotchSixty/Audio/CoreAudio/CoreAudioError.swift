@@ -888,6 +888,33 @@ final class CoreAudioTransportSession {
         N60RealtimeAudioBridgeRearmHowlGuard(bridge)
     }
 
+    /// E4 S18b: publishes one adaptive gain record to the render thread's mailbox (single writer:
+    /// the adaptive worker). Returns the assigned sequence, 0 when rejected outright.
+    @discardableResult
+    func publishActiveQuietZoneGainRecord(_ record: N60ActiveQuietZoneGainRecord) -> UInt64 {
+        guard let bridge else { return 0 }
+        var copy = record
+        return N60RealtimeAudioBridgePublishActiveQuietZoneGainRecord(bridge, &copy)
+    }
+
+    /// E4 S18b: pops the oldest phase-anchor telemetry record (single consumer: the worker).
+    func popActiveQuietZoneTelemetry() -> N60ActiveQuietZoneTelemetryRecord? {
+        guard let bridge else { return nil }
+        var record = N60ActiveQuietZoneTelemetryRecord()
+        return N60RealtimeAudioBridgePopActiveQuietZoneTelemetry(bridge, &record) ? record : nil
+    }
+
+    var activeQuietZoneMailboxStats: N60ActiveQuietZoneMailboxStats {
+        guard let bridge else { return N60ActiveQuietZoneMailboxStats() }
+        return N60RealtimeAudioBridgeActiveQuietZoneMailboxStats(bridge)
+    }
+
+    /// E4 S18b: latches the 20 ms anti-noise fade as a howl trip (any thread).
+    func requestHowlTrip() {
+        guard let bridge else { return }
+        N60RealtimeAudioBridgeRequestHowlTrip(bridge)
+    }
+
     func releaseActiveQuietZoneLease() {
         guard let bridge else { return }
         N60RealtimeAudioBridgeReleaseActiveQuietZoneLease(bridge)

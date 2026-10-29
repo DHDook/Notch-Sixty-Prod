@@ -136,6 +136,51 @@ struct DoNoHarmVerifier: Sendable {
         return .ok
     }
 
+    /// The seat against the baseline in force, without the harm timer: used by the supervised
+    /// microphone-move re-solve (E4 S18b), which applies its own tighter limits.
+    struct Measurement: Equatable, Sendable {
+        /// Worst tone or band above its baseline, dB (negative when everything is quieter).
+        var worstIncreaseDB: Double
+        /// Smallest tone reduction against the baseline, dB (positive is quieter); nil when no tone
+        /// of the baseline is detected any more.
+        var minimumToneReductionDB: Double?
+    }
+
+    func measure(_ snapshot: AmbientAnalysisSnapshot) -> Measurement? {
+        guard hasBaseline else { return nil }
+        var worst = -Double.infinity
+        var minimumReduction: Double?
+        for entry in toneAccumulators {
+            guard let base = entry.acc.meanDBFS else { continue }
+            guard let live = snapshot.tonalComponents.first(where: { Self.sameTone($0.frequencyHz, entry.frequencyHz) }),
+                  live.levelDBFS.isFinite else {
+                // Not detected any more: cancelled below the detector, so at least a large reduction.
+                continue
+            }
+            let delta = live.levelDBFS - base
+            worst = max(worst, delta)
+            minimumReduction = min(minimumReduction ?? .infinity, -delta)
+        }
+        for entry in bandAccumulators {
+            guard let base = entry.acc.meanDBFS,
+                  let live = snapshot.spectrum.first(where: { Self.sameBand($0.centerFrequencyHz, entry.center) }),
+                  live.levelDBFS.isFinite else { continue }
+            worst = max(worst, live.levelDBFS - base)
+        }
+        return Measurement(worstIncreaseDB: worst, minimumToneReductionDB: minimumReduction)
+    }
+
+    /// Drops the baseline so the next windows (taken with the anti-noise out) capture a new one.
+    /// Until it is complete `evaluate` reports `.baselining`.
+    mutating func beginRebaseline() {
+        toneAccumulators.removeAll()
+        bandAccumulators.removeAll()
+        baselineWindows = 0
+        violatingSince = nil
+        okWindows = 0
+        reductions = []
+    }
+
     /// "-12 dB at 43 Hz, verified", or nil when no tone is verified yet.
     var readout: String? {
         guard let best = reductions.first else { return nil }

@@ -104,6 +104,8 @@ struct SafetyFlightRecorder: Sendable {
         case .inputDeviceChanged: return "The measurement microphone changed."
         case .outputGainChanged: return "The output volume changed enough to throw off the cancellation."
         case .seatRegression: return "The seat microphone heard a tone or band louder than before arming, so the anti-noise was backed out."
+        case .microphoneMoved: return "The measurement microphone moved and the supervised re-tune did not recover, so the anti-noise was stopped."
+        case .adaptiveFault: return "The adaptive tuning faulted, so the anti-noise was stopped."
         }
     }
 }

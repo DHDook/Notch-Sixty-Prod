@@ -1,4 +1,5 @@
 import Combine
+import CoreAudio
 import Foundation
 
 protocol AmbientMonitorTransporting: AnyObject {
@@ -6,7 +7,20 @@ protocol AmbientMonitorTransporting: AnyObject {
     func start() throws
     func stop()
     func readAvailableFrames(maximumFrames: Int) throws -> [Float]
+    /// E4 S18b: as `readAvailableFrames`, also giving the host-time anchor of the first frame.
+    func readAvailableFramesWithAnchor(
+        maximumFrames: Int
+    ) throws -> (samples: [Float], anchor: AmbientMonitorTransport.ReadAnchor?)
     func discardBufferedFrames()
+}
+
+extension AmbientMonitorTransporting {
+    /// Transports without host-time anchors (test doubles) read unanchored.
+    func readAvailableFramesWithAnchor(
+        maximumFrames: Int
+    ) throws -> (samples: [Float], anchor: AmbientMonitorTransport.ReadAnchor?) {
+        (try readAvailableFrames(maximumFrames: maximumFrames), nil)
+    }
 }
 
 extension AmbientMonitorTransport: AmbientMonitorTransporting {}
@@ -113,6 +127,10 @@ final class AmbientCompensationController: ObservableObject {
     /// skipped since the previous block). The adaptive Quiet Zone shadow uses
     /// it; it must not retain or modify anything here.
     var microphoneFramesObserver: (([Float], Double, UUID, Bool) -> Void)?
+    /// E4 S18b: as `microphoneFramesObserver`, with the host time (mach ticks) of the first frame
+    /// (nil when no anchor covers it). While set, reads use the anchored path; unset (the default,
+    /// flag off) reads exactly as before.
+    var anchoredMicrophoneFramesObserver: (([Float], Double, UUID, Bool, UInt64?) -> Void)?
     /// Set when a poll returns without reading, so the next block is marked
     /// as following a gap.
     private var microphoneFramesSkipped = false
@@ -460,9 +478,23 @@ final class AmbientCompensationController: ObservableObject {
                 return
             }
 
-            let newlyCaptured = try monitor.readAvailableFrames(
-                maximumFrames: Self.preferredAnalysisFrames
-            )
+            let newlyCaptured: [Float]
+            var firstFrameHostTime: UInt64?
+            if anchoredMicrophoneFramesObserver != nil {
+                let read = try monitor.readAvailableFramesWithAnchor(
+                    maximumFrames: Self.preferredAnalysisFrames
+                )
+                newlyCaptured = read.samples
+                if let anchor = read.anchor, monitor.sampleRate > 0 {
+                    let offsetSeconds = Double(anchor.frameOffset) / monitor.sampleRate
+                    firstFrameHostTime = anchor.hostTime
+                        &+ AudioConvertNanosToHostTime(UInt64((offsetSeconds * 1.0e9).rounded()))
+                }
+            } else {
+                newlyCaptured = try monitor.readAvailableFrames(
+                    maximumFrames: Self.preferredAnalysisFrames
+                )
+            }
             spatialMicrophoneFrameEnd &+= UInt64(newlyCaptured.count)
             if !newlyCaptured.isEmpty {
                 microphoneSignalFault = MicrophoneSignalCheck.assess(newlyCaptured)
@@ -471,6 +503,13 @@ final class AmbientCompensationController: ObservableObject {
                     monitor.sampleRate,
                     spatialMicrophoneEpoch,
                     microphoneFramesSkipped
+                )
+                anchoredMicrophoneFramesObserver?(
+                    newlyCaptured,
+                    monitor.sampleRate,
+                    spatialMicrophoneEpoch,
+                    microphoneFramesSkipped,
+                    firstFrameHostTime
                 )
                 microphoneFramesSkipped = false
             }

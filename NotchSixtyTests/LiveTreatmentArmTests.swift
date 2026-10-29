@@ -39,7 +39,7 @@ final class LiveTreatmentArmTests: XCTestCase {
             XCTAssertNil(arm.lastDisarmReason)
             XCTAssertFalse(arm.latchedByEvent)
         }
-        XCTAssertFalse(AdaptiveQuietZoneOutputPolicy.mayPlay(LiveTreatmentArm(feature: .quietZone)))
+        XCTAssertFalse(AdaptiveTonalOutputGate.evaluate(.sample(armed: LiveTreatmentArm(feature: .quietZone).isArmed)).isOpen)
     }
 
     func testArmingIsOneExplicitActionAndNeedsARunningEngine() throws {
@@ -50,7 +50,7 @@ final class LiveTreatmentArmTests: XCTestCase {
         XCTAssertFalse(arm.isArmed)
         try arm.arm(environment: environment())
         XCTAssertTrue(arm.isArmed)
-        XCTAssertTrue(AdaptiveQuietZoneOutputPolicy.mayPlay(arm))
+        XCTAssertTrue(AdaptiveTonalOutputGate.evaluate(.sample(armed: arm.isArmed)).isOpen)
     }
 
     func testUserDisarmFiresOnceAndDoesNotLatch() throws {

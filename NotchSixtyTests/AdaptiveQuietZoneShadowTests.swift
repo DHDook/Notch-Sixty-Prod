@@ -172,6 +172,6 @@ final class AdaptiveQuietZoneShadowTests: XCTestCase {
         XCTAssertEqual(shadow.status.state, .adapting)
         XCTAssertEqual(engine.activeQuietZoneRuntimeTarget, before)
 
-        XCTAssertFalse(AdaptiveQuietZoneOutputPolicy.mayPlay(LiveTreatmentArm(feature: .quietZone)))
+        XCTAssertFalse(AdaptiveTonalOutputGate.evaluate(.sample(armed: LiveTreatmentArm(feature: .quietZone).isArmed)).isOpen)
     }
 }

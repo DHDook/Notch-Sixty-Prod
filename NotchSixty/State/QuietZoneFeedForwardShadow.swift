@@ -258,7 +258,7 @@ struct QuietZoneFeedForwardShadowStatus: Equatable, Sendable {
 /// It captures the reference and seat microphones on one device, seeds from
 /// the survey (S9b), adapts on the virtual error, and compares its predicted
 /// reduction per third-octave band with the offline design's. It never plays:
-/// `AdaptiveQuietZoneOutputPolicy.mayPlay` stays the only route to output.
+/// `AdaptiveTonalOutputGate` stays the only route to output.
 ///
 /// Opening, starting, pumping and closing the capture all run off the main
 /// actor. Polls come every 100 ms, well inside the capture ring's 0.25 s.

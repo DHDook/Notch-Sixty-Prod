@@ -79,16 +79,8 @@ struct AdaptiveQuietZoneShadowTone: Equatable, Sendable {
     }
 }
 
-/// The only route from adaptive weights to audible output. S6 has no play
-/// path at all; when one exists it must ask this first. Output is allowed only
-/// while the user has armed Quiet Zone (`LiveTreatmentArm`), and then only
-/// through the always-on `LiveTreatmentSafeguards` limits.
-enum AdaptiveQuietZoneOutputPolicy {
-    @MainActor
-    static func mayPlay(_ arm: LiveTreatmentArm) -> Bool {
-        arm.isArmed
-    }
-}
+// E4 S18b: the route from adaptive weights to output is `AdaptiveTonalOutputGate` (the shadow
+// itself holds no engine handle and plays nothing).
 
 struct AdaptiveQuietZoneShadowToneStatus: Identifiable, Equatable, Sendable {
     var frequencyHz: Double

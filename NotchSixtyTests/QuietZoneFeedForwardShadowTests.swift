@@ -263,7 +263,7 @@ final class QuietZoneFeedForwardShadowTests: XCTestCase {
         XCTAssertEqual(shadow.status.seedSource, .offlineDesign)
         XCTAssertEqual(engine.activeQuietZoneRuntimeTarget, before)
 
-        XCTAssertFalse(AdaptiveQuietZoneOutputPolicy.mayPlay(LiveTreatmentArm(feature: .quietZone)))
+        XCTAssertFalse(AdaptiveTonalOutputGate.evaluate(.sample(armed: LiveTreatmentArm(feature: .quietZone).isArmed)).isOpen)
     }
 
     // MARK: Fixtures
