@@ -31,6 +31,8 @@ struct AdaptiveTonalLiveReport: Equatable, Sendable {
     var recordsPublished: UInt64 = 0
     var recordsRejected: UInt64 = 0
     var micMoved = false
+    /// E4 S19: the frequency loop gave up on a tone (out of range, unlocked or vanished).
+    var trackingLost = false
     var anyAdapting = false
     var pathFault = false
     var pathStepDegrees = 0.0
@@ -212,6 +214,7 @@ final class AdaptiveTonalLiveWorker: @unchecked Sendable {
             samples.withUnsafeBufferPointer { buffer in
                 _ = N60RemoteTonalProcessMic(core, buffer.baseAddress!, UInt32(buffer.count), hostTime)
             }
+            followTrackedFrequencies()
             runGuard(on: samples)
         }
 
@@ -248,8 +251,26 @@ final class AdaptiveTonalLiveWorker: @unchecked Sendable {
         if command.acknowledgeMove { N60RemoteTonalAcknowledgeMove(core) }
     }
 
+    /// E4 S19: moves each tone to the loop's slew-limited suggestion (a few tenths of a percent
+    /// at most per block). The weight is kept and the path is left as it is (nil seed): the
+    /// tracked path deviation over a drift of this size is small and the re-solve owns the rest.
+    private func followTrackedFrequencies() {
+        let status = N60RemoteTonalReadStatus(core)
+        let suggested = Self.doubles(status.suggestedHz, count: tones.count)
+        let current = Self.doubles(status.frequencyHz, count: tones.count)
+        let locked = withUnsafeBytes(of: status.locked) { Array($0.bindMemory(to: Bool.self).prefix(tones.count)) }
+        for k in tones.indices where locked[k] && suggested[k] > 0 && abs(suggested[k] - current[k]) > 1.0e-6 {
+            _ = N60RemoteTonalSetToneFrequency(core, UInt32(k), suggested[k], nil)
+        }
+    }
+
+    private static func doubles<T>(_ tuple: T, count: Int) -> [Double] {
+        withUnsafeBytes(of: tuple) { Array($0.bindMemory(to: Double.self).prefix(count)) }
+    }
+
     private func runGuard(on samples: [Float]) {
         let status = N60RemoteTonalReadStatus(core)
+        let hz = Self.doubles(status.frequencyHz, count: tones.count)
         let weights = Self.components(status.weight, count: tones.count)
         var start = 0
         while start < samples.count {
@@ -259,7 +280,7 @@ final class AdaptiveTonalLiveWorker: @unchecked Sendable {
                 var value = 0.0
                 for k in 0 ..< tones.count {
                     value += Double(weights[k].re) * cos(phases[k]) - Double(weights[k].im) * sin(phases[k])
-                    phases[k] += 2 * Double.pi * tones[k].frequencyHz / sampleRate
+                    phases[k] += 2 * Double.pi * hz[k] / sampleRate
                     if phases[k] > 2 * Double.pi { phases[k] -= 2 * Double.pi }
                 }
                 scratch[n] = Float(value)
@@ -301,6 +322,7 @@ final class AdaptiveTonalLiveWorker: @unchecked Sendable {
         report.recordsPublished = published
         report.recordsRejected = rejected
         report.micMoved = status.micMoved
+        report.trackingLost = status.trackingLost
         let weights = Self.components(status.weight, count: tones.count)
         let paths = Self.components(status.path, count: tones.count)
         let phaseDeg = Self.floats(status.pathPhaseDegrees, count: tones.count)
@@ -324,7 +346,7 @@ final class AdaptiveTonalLiveWorker: @unchecked Sendable {
                 step = max(step, delta)
             }
             report.tones.append(.init(
-                frequencyHz: tones[k].frequencyHz,
+                frequencyHz: Self.doubles(status.frequencyHz, count: tones.count)[k],
                 weightDBFS: 20 * log10(max(w, 1.0e-12)),
                 pathPhaseDegrees: Double(phaseDeg[k]),
                 pathLevelDB: Double(levelDB[k]),

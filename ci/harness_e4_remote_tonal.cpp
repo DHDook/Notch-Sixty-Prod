@@ -114,6 +114,11 @@ struct Sim {
     };
     std::deque<Pending> pending;
     bool adaptEnabled = true;
+    /* E4 S19: kernel oscillator with a glide, and the worker's frequency tracking. */
+    bool tracking = false;
+    std::vector<double> ph, fnow, ftarget, fstep;
+    uint64_t tailSqN = 0;
+    double tailSq = 0;
     double maxGain = 0;
     uint64_t latchedBlocks = 0;
     // Tail measurement of the error microphone.
@@ -141,6 +146,10 @@ struct Sim {
             rc.weightSeed[i] = {0.0f, 0.0f};
         }
         core = N60RemoteTonalCreate(&rc);
+        ph.assign(n, 0.0);
+        fnow = hz;
+        ftarget = hz;
+        fstep.assign(n, 0.0);
     }
     ~Sim() { N60RemoteTonalDestroy(core); }
 
@@ -153,10 +162,9 @@ struct Sim {
         r.renderedFrame = k;
         r.toneCount = n;
         for (uint32_t i = 0; i < n; ++i) {
-            const double ph = twin::kTau * std::fmod(static_cast<double>(k) * hz[i], fs) / fs;
-            r.frequencyHz[i] = static_cast<float>(hz[i]);
-            r.phasorCosine[i] = std::cos(ph);
-            r.phasorSine[i] = std::sin(ph);
+            r.frequencyHz[i] = static_cast<float>(fnow[i]);
+            r.phasorCosine[i] = std::cos(ph[i]);
+            r.phasorSine[i] = std::sin(ph[i]);
             r.gain[i][0] = static_cast<float>(G[i].real());
             r.gain[i][1] = static_cast<float>(G[i].imag());
         }
@@ -192,7 +200,19 @@ struct Sim {
         }
     }
 
+    void track_frequency() {
+        if (!tracking) return;
+        const N60RemoteTonalStatus st = N60RemoteTonalReadStatus(core);
+        for (uint32_t i = 0; i < n; ++i) {
+            if (std::fabs(st.suggestedHz[i] - ftarget[i]) < 1e-4) continue;
+            if (!N60RemoteTonalSetToneFrequency(core, i, st.suggestedHz[i], nullptr)) continue;
+            ftarget[i] = st.suggestedHz[i];
+            fstep[i] = (ftarget[i] - fnow[i]) / (0.1 * fs);
+        }
+    }
+
     void hand_over_record() {
+        track_frequency();
         N60ActiveQuietZoneGainRecord rec;
         if (adaptEnabled && N60RemoteTonalNextRecord(core, 1, 0.0f, &rec)) {
             Pending p;
@@ -220,12 +240,21 @@ struct Sim {
             }
             double y = 0;
             for (uint32_t i = 0; i < n; ++i) {
-                const double ph = twin::kTau * std::fmod(static_cast<double>(k) * hz[i], fs) / fs;
-                y += G[i].real() * std::cos(ph) - G[i].imag() * std::sin(ph);
+                y += G[i].real() * std::cos(ph[i]) - G[i].imag() * std::sin(ph[i]);
                 maxGain = std::max(maxGain, std::abs(G[i]));
+                ph[i] += twin::kTau * fnow[i] / fs;
+                if (ph[i] >= twin::kTau) ph[i] -= twin::kTau;
+                if (fnow[i] != ftarget[i]) {
+                    fnow[i] += fstep[i];
+                    if (std::fabs(ftarget[i] - fnow[i]) <= std::fabs(fstep[i])) fnow[i] = ftarget[i];
+                }
             }
             const float e = plant.step(static_cast<float>(y)).error;
             block.push_back(e);
+            if (k >= tailFrom) {
+                tailSq += static_cast<double>(e) * e;
+                ++tailSqN;
+            }
             if (k >= tailFrom) {
                 const double t = static_cast<double>(k) * drift / fs;
                 for (uint32_t i = 0; i < n; ++i) tailAcc[i] += static_cast<double>(e) * std::polar(1.0, -twin::kTau * hz[i] * t);
@@ -242,9 +271,12 @@ struct Sim {
         tailFrom = k + static_cast<uint64_t>(std::max(0.0, secs - 1.0) * fs);
         for (cd &a : tailAcc) a = 0;
         tailN = 0;
+        tailSq = 0;
+        tailSqN = 0;
         run(secs);
         tailFrom = ~0ull;
     }
+    double tail_rms() const { return std::sqrt(tailSq / static_cast<double>(std::max<uint64_t>(tailSqN, 1))); }
     double tail_amp(uint32_t i) const { return std::abs(2.0 * tailAcc[i] / static_cast<double>(std::max<uint64_t>(tailN, 1))); }
 };
 
@@ -496,6 +528,64 @@ static void test_soak(double fs, double hours) {
     printf("  soak %6.0f Hz: worst %.1f dB over %.1f h\n", fs, worst, hours);
 }
 
+/* E4 S19: a tone drifting at 0.05 Hz/s. The kernel follows it through the PLL and the reduction
+ * holds. Faster drift is beyond what the closed loop tracks (see the E4 Log). */
+static void test_glide(double fs) {
+    const std::vector<double> hz = {80.0};
+    Config c = scenario(fs, hz);
+    c.temperatureRateCPerS = 0.0;
+    const Truth truth = calibrate(c, hz);
+
+    Sim steady(c, hz, truth);
+    steady.tracking = true;
+    steady.run_measured(18.0);
+    Config off = c;
+    Sim silent(off, hz, truth);
+    silent.adaptEnabled = false;
+    silent.run_measured(18.0);
+    const double steadyDB = dbr(steady.tail_rms() / silent.tail_rms());
+
+    Config d = c;
+    d.sources[0].hzRate = 0.05;
+    d.sources[0].hzRateStart = 6.0;
+    const Truth truthD = calibrate(c, hz);  /* path and starting disturbance are those of the armed tone */
+    Sim moving(d, hz, truthD);
+    moving.tracking = true;
+    moving.run_measured(18.0);
+    Sim movingSilent(d, hz, truthD);
+    movingSilent.adaptEnabled = false;
+    movingSilent.run_measured(18.0);
+    const double movingDB = dbr(moving.tail_rms() / movingSilent.tail_rms());
+    const N60RemoteTonalStatus st = N60RemoteTonalReadStatus(moving.core);
+    const double sourceHz = 80.0 + 0.05 * 12.0;
+    CHECK(movingDB < -8.0, "%.0f Hz: drifting %.1f dB vs steady %.1f dB", fs, movingDB, steadyDB);
+    CHECK(!st.trackingLost && st.locked[0], "%.0f Hz: tracking lost %d locked %d", fs, st.trackingLost, st.locked[0]);
+    CHECK(std::fabs(moving.fnow[0] - sourceHz) < 0.3, "%.0f Hz: kernel at %.2f Hz, source at %.2f Hz", fs, moving.fnow[0], sourceHz);
+    /* micMoved may latch on a drifting tone (the fit is no longer a fixed path); that is the safe
+     * response and the worker disarms. Only silent model resets are excluded. */
+    CHECK(st.modelResets == 0, "%.0f Hz: resets %llu", fs, static_cast<unsigned long long>(st.modelResets));
+    printf("  glide     %6.0f Hz: %.1f dB drifting (steady %.1f dB), kernel %.2f Hz\n", fs, movingDB, steadyDB, moving.fnow[0]);
+}
+
+/* A tone that runs away at 1.5 Hz/s, far faster than the slew limit and past the range: the
+ * latched loss of tracking is the signal to disarm. */
+static void test_glide_lost(double fs) {
+    const std::vector<double> hz = {80.0};
+    Config c = scenario(fs, hz);
+    const Truth truth = calibrate(c, hz);
+    c.sources[0].hzRate = 1.5;
+    c.sources[0].hzRateStart = 6.0;
+    Sim sim(c, hz, truth);
+    sim.tracking = true;
+    sim.run(26.0);
+    const N60RemoteTonalStatus st = N60RemoteTonalReadStatus(sim.core);
+    CHECK(st.trackingLost, "%.0f Hz: a runaway tone did not latch tracking lost", fs);
+    CHECK(sim.fnow[0] <= 80.0 * 1.1 + 0.02, "%.0f Hz: kernel left the range (%.2f Hz)", fs, sim.fnow[0]);
+    CHECK(!N60RemoteTonalSetToneFrequency(sim.core, 0, 80.0 * 1.15, nullptr), "%.0f Hz: a 15 %% retune was accepted", fs);
+    CHECK(N60RemoteTonalSetToneFrequency(sim.core, 0, 80.0 * 1.05, nullptr), "%.0f Hz: a 5 %% retune was refused", fs);
+    printf("  glide lost %5.0f Hz: latched, kernel held at %.2f Hz\n", fs, sim.fnow[0]);
+}
+
 int main(int argc, char **argv) {
     const bool soak = argc > 1 && std::strcmp(argv[1], "--soak") == 0;
     if (soak) {
@@ -511,6 +601,8 @@ int main(int argc, char **argv) {
             test_path_invert(fs);
             test_drift_delay(fs);
             test_robustness(fs);
+            test_glide(fs);
+            test_glide_lost(fs);
         }
     }
     if (failures) {

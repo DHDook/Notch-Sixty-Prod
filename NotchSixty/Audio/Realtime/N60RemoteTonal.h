@@ -71,6 +71,24 @@ extern "C" {
  *    now (the newest telemetry record), so adaptation stays well below the kernel guard's
  *    growth trip (6 dB per 20 ms). 0 disables a limit.
  *
+ * Frequency tracking (E4 S19). A fan, compressor or pump drifts; the kernel's tone follows it
+ * phase-continuously (N60ActiveQuietZone.h glide). Each tone's instantaneous disturbance estimate
+ * Dm = M - Shat Gbar is a phasor relative to the kernel's, so it turns at (f_d - f_k) cycles per
+ * second. A second-order phase-locked loop per tone (critically damped, loop noise bandwidth
+ * trackBandwidthHz, default 0.5 Hz; Gardner, Phaselock Techniques, 3rd ed., 2005, ch. 2 and 4)
+ * locks to arg(Dm) once per block: phase error e = wrap(arg Dm - pred),
+ *     theta <- pred + kp e,    df <- df + ki e / (2 pi dt),    pred = theta + 2 pi df dt,
+ * kp = 2 zeta wn dt, ki = (wn dt)^2, wn = 8 zeta BL / (4 zeta^2 + 1), zeta = 0.707. df is the
+ * estimated disturbance-minus-kernel frequency. The suggested kernel frequency is the current one
+ * plus df, limited to frequencySlewPerSecond of the frequency per second and to the tracking
+ * range (+-trackRangeFraction of the armed frequency). The caller applies it with
+ * N60RemoteTonalSetToneFrequency, which keeps the weight (the cancelling phasor is in the
+ * kernel's frame, so a continuous retune leaves it valid) and carries the tracked path over.
+ * Unambiguous only while |df| < 1 / (2 block seconds) (2 Hz for 250 ms blocks), far above the
+ * slew limit. Tracking is declared lost (latched) when the requested offset stays outside the
+ * range for 3 blocks, the loop stays unlocked (|e| > 1.2 rad) for 12 blocks, or the disturbance
+ * estimate stays 12 dB under its recent peak for 6 s (the tone jumped out of range or stopped).
+ *
  * Realtime behaviour: worker side only, one thread for every call. Create allocates; nothing
  * else does. Latency: none (no audio is passed through). Sample rate: the microphone's, any
  * (8 kHz to 768 kHz); the output rate does not enter. Channels: one microphone, stereo output
@@ -107,6 +125,10 @@ typedef struct {
     double measurementNoise;
     float slewDB;                         /* default 1.5; 0 = off */
     float slewDegrees;                    /* default 10; 0 = off */
+    /// E4 S19 frequency tracking.
+    double trackBandwidthHz;              /* PLL loop noise bandwidth, default 0.5, 0.05 to 2 */
+    double frequencySlewPerSecond;        /* fraction of the frequency per second, default 0.005 */
+    double trackRangeFraction;            /* around the armed frequency, default 0.10, 0 = fixed */
 } N60RemoteTonalConfig;
 
 typedef struct {
@@ -131,6 +153,13 @@ typedef struct {
     uint32_t micMovedKind;
     double micMovedAtSeconds;
     bool reidentifying;
+    /// E4 S19: the frequency the core wants the kernel at, the estimated disturbance-minus-kernel
+    /// offset, whether the loop is locked, and the latched loss of tracking per tone.
+    double frequencyHz[N60_FXLMS_MAX_TONES];
+    double suggestedHz[N60_FXLMS_MAX_TONES];
+    double offsetHz[N60_FXLMS_MAX_TONES];
+    bool locked[N60_FXLMS_MAX_TONES];
+    bool trackingLost;
 } N60RemoteTonalStatus;
 
 typedef struct N60RemoteTonal N60RemoteTonal;
@@ -172,6 +201,16 @@ void N60RemoteTonalEndReidentify(N60RemoteTonal * N60_FXLMS_NONNULL core);
 /// Makes the current path estimate the reference for the mic-moved check.
 void N60RemoteTonalCaptureReference(N60RemoteTonal * N60_FXLMS_NONNULL core);
 void N60RemoteTonalAcknowledgeMove(N60RemoteTonal * N60_FXLMS_NONNULL core);
+/// E4 S19: moves tone k to hz (within the tracking range of the armed frequency, 20 to 150 Hz).
+/// The weight is kept. A non-NULL pathSeed is the secondary path of the split at the new
+/// frequency; the tracked path and the reference path are scaled by pathSeed / old seed, so the
+/// tracked deviation carries over. NULL keeps the path as it is. The next gain record carries hz.
+bool N60RemoteTonalSetToneFrequency(
+    N60RemoteTonal * N60_FXLMS_NONNULL core,
+    uint32_t tone,
+    double hz,
+    const N60AncComplex * N60_FXLMS_NULLABLE pathSeed
+);
 /// Re-seeds the weights (for example W Sold / Snew after a re-solve).
 bool N60RemoteTonalSetWeights(
     N60RemoteTonal * N60_FXLMS_NONNULL core,

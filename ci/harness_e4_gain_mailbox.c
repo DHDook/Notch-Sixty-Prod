@@ -109,7 +109,7 @@ static void testMailbox(double rate) {
     N60ActiveQuietZoneGainMailboxPublish(r.mailbox, &rec);
     applyAndSettle(&r, &last);
     rec = record(&r, 1u, 0.01f);
-    rec.frequencyHz[0] += 0.5;
+    rec.frequencyHz[0] += 9.0; /* 15 %: beyond the tracking range, ignored */
     N60ActiveQuietZoneGainMailboxPublish(r.mailbox, &rec);
     applyAndSettle(&r, &last);
     rec = record(&r, 1u, 0.01f);
@@ -217,10 +217,39 @@ static void testAnchors(void) {
     N60AmbientMonitorBridgeDestroy(b);
 }
 
+static void testGlide(double rate) {
+    Rig r;
+    CHECK(rigInit(&r, rate, 1u, 0.02f), "glide rig at %.0f", rate);
+    float last = 0.0f;
+    render(&r, (uint64_t)(0.2 * rate), &last);
+
+    /* A 1.5 % retarget glides: no step beyond the tone's own slope, lands on the target. */
+    N60ActiveQuietZoneGainRecord rec = record(&r, 1u, 0.02f);
+    rec.frequencyHz[0] = 60.0 * 1.015;
+    N60ActiveQuietZoneGainMailboxPublish(r.mailbox, &rec);
+    N60ActiveQuietZoneRuntimeApplyMailbox(&r.runtime, r.mailbox, &r.snapshot, rate);
+    const float slope = 0.02f * 2.0f * (float)M_PI * 61.0f / (float)rate;
+    const float step = render(&r, (uint64_t)(0.15 * rate), &last);
+    CHECK(step <= 1.2f * slope + 1e-6f, "%.0f: glide step %.3g exceeds slope %.3g", rate, step, slope);
+    CHECK(fabs(r.runtime.tones[0].frequencyHz - 60.9) < 1e-6, "%.0f: glide ended at %.6f Hz", rate,
+          r.runtime.tones[0].frequencyHz);
+
+    /* A further record more than 2 % from the tone now playing is ignored. */
+    N60ActiveQuietZoneMailboxStats before = N60ActiveQuietZoneGainMailboxStats(r.mailbox);
+    rec = record(&r, 1u, 0.02f);
+    rec.frequencyHz[0] = 60.9 * 1.05;
+    N60ActiveQuietZoneGainMailboxPublish(r.mailbox, &rec);
+    applyAndSettle(&r, &last);
+    CHECK(fabs(r.runtime.tones[0].frequencyHz - 60.9) < 1e-6, "%.0f: 5 %% retarget moved the tone", rate);
+    N60ActiveQuietZoneMailboxStats after = N60ActiveQuietZoneGainMailboxStats(r.mailbox);
+    CHECK(after.ignoredToneMismatch > before.ignoredToneMismatch, "%.0f: 5 %% retarget not counted", rate);
+}
+
 int main(void) {
     for (size_t i = 0; i < sizeof kRates / sizeof kRates[0]; ++i) {
         testMailbox(kRates[i]);
         testAggregate(kRates[i]);
+        testGlide(kRates[i]);
     }
     testTelemetry();
     testAnchors();
