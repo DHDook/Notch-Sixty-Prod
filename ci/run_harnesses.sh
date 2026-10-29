@@ -179,6 +179,9 @@ if selected e4_anc_guard; then
         failed+=(e4_anc_guard)
     fi
 fi
+# E4 S14: dead-man lease on the anti-noise in the render kernel.
+# shellcheck disable=SC2086
+harness e4_engine_lease "${STRICT[@]}" -O2 -include stddef.h -I"$RT" ci/harness_e4_engine_lease.c $ALL_RT_NO_BRIDGE -framework Accelerate -lc++
 # E4 S13: acoustic twin (closed-loop room simulator) with the tonal canceller and
 # howl guard in the loop. SOAK=1 adds the long drift and fault soak.
 if selected e4_acoustic_twin; then

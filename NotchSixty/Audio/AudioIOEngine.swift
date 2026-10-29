@@ -1023,6 +1023,27 @@ final class AudioIOEngine: ObservableObject {
     /// the flag itself; with this false the kernel path runs exactly as before.
     var unifiedGraphEnabled = false
 
+    /// E4 S14 (`e4.engine-lease`): when true, a live anti-noise target is guarded by the render
+    /// path's dead-man lease. Set once at launch by the app; off enforces no lease.
+    var activeQuietZoneLeaseEnabled = false
+    private var activeQuietZoneLeaseKeeper: ActiveQuietZoneLeaseKeeper?
+
+    /// Starts or stops lease renewal to match whether anti-noise is live on the current session.
+    private func syncActiveQuietZoneLease(active: Bool) {
+        guard activeQuietZoneLeaseEnabled, active, let session = transportSession else {
+            activeQuietZoneLeaseKeeper?.stop()
+            activeQuietZoneLeaseKeeper = nil
+            return
+        }
+        if activeQuietZoneLeaseKeeper == nil {
+            activeQuietZoneLeaseKeeper = ActiveQuietZoneLeaseKeeper(
+                renew: { [weak session] seconds in session?.renewActiveQuietZoneLease(seconds: seconds) },
+                release: { [weak session] in session?.releaseActiveQuietZoneLease() }
+            )
+        }
+        activeQuietZoneLeaseKeeper?.start()
+    }
+
     /// E8 S4: the speaker routing a session renders, or nil. See `replaceSpeakerRoutingConfiguration`.
     private(set) var speakerRoutingConfiguration: SpeakerRoutingConfiguration?
 
@@ -1429,7 +1450,15 @@ final class AudioIOEngine: ObservableObject {
         )
         try applyAudioUnitRackLatency(to: &graph)
         try attachActiveQuietZone(target, to: &graph)
-        try session.publishDSPGraph(graph)
+        // The lease exists before any anti-noise is published.
+        if target.active { syncActiveQuietZoneLease(active: true) }
+        do {
+            try session.publishDSPGraph(graph)
+        } catch {
+            if !activeQuietZoneRuntimeTarget.active { syncActiveQuietZoneLease(active: false) }
+            throw error
+        }
+        syncActiveQuietZoneLease(active: target.active)
         activeQuietZoneRuntimeTarget = target
         lastErrorDescription = nil
     }
@@ -5202,6 +5231,7 @@ final class AudioIOEngine: ObservableObject {
         activeEQFIRProgram = nil
         activeRoomCorrectionProgram = nil
         activeSpeakerIRProgram = nil
+        syncActiveQuietZoneLease(active: false)
         // The app's own profile switch happens while arming and keeps the arm (see `disarmReason`).
         if cause != .plannedProfileChange { liveTreatmentGeneration &+= 1 }
         for observer in transportTeardownObservers { observer.handler(cause) }

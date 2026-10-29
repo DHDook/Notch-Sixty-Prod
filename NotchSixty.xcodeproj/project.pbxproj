@@ -248,7 +248,9 @@
 		F97000000000000000000001 /* QuietZonePhysicalLatencyBudget.swift in Sources */ = {isa = PBXBuildFile; fileRef = F97000000000000000000011 /* QuietZonePhysicalLatencyBudget.swift */; };
 		F97000000000000000000002 /* QuietZonePhysicalLatencyBudgetTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F97000000000000000000012 /* QuietZonePhysicalLatencyBudgetTests.swift */; };
 		E4A000000000000000000001 /* LiveTreatmentSafeguards.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4A000000000000000000011 /* LiveTreatmentSafeguards.swift */; };
+		E4A000000000000000000021 /* ActiveQuietZoneLeaseKeeper.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4A000000000000000000031 /* ActiveQuietZoneLeaseKeeper.swift */; };
 		E4A000000000000000000002 /* LiveTreatmentArmTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4A000000000000000000012 /* LiveTreatmentArmTests.swift */; };
+		E4A000000000000000000022 /* ActiveQuietZoneLeaseKeeperTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4A000000000000000000032 /* ActiveQuietZoneLeaseKeeperTests.swift */; };
 		E4E000000000000000000001 /* OutputBufferSizeController.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4E000000000000000000011 /* OutputBufferSizeController.swift */; };
 		E4E000000000000000000002 /* QuietZoneMeasuredLatency.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4E000000000000000000012 /* QuietZoneMeasuredLatency.swift */; };
 		E4E000000000000000000003 /* ANCSupportedHardware.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4E000000000000000000013 /* ANCSupportedHardware.swift */; };
@@ -747,7 +749,9 @@
 		F97000000000000000000011 /* QuietZonePhysicalLatencyBudget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuietZonePhysicalLatencyBudget.swift; sourceTree = "<group>"; };
 		F97000000000000000000012 /* QuietZonePhysicalLatencyBudgetTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuietZonePhysicalLatencyBudgetTests.swift; sourceTree = "<group>"; };
 		E4A000000000000000000011 /* LiveTreatmentSafeguards.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveTreatmentSafeguards.swift; sourceTree = "<group>"; };
+		E4A000000000000000000031 /* ActiveQuietZoneLeaseKeeper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActiveQuietZoneLeaseKeeper.swift; sourceTree = "<group>"; };
 		E4A000000000000000000012 /* LiveTreatmentArmTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveTreatmentArmTests.swift; sourceTree = "<group>"; };
+		E4A000000000000000000032 /* ActiveQuietZoneLeaseKeeperTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActiveQuietZoneLeaseKeeperTests.swift; sourceTree = "<group>"; };
 		E4E000000000000000000011 /* OutputBufferSizeController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OutputBufferSizeController.swift; sourceTree = "<group>"; };
 		E4E000000000000000000012 /* QuietZoneMeasuredLatency.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuietZoneMeasuredLatency.swift; sourceTree = "<group>"; };
 		E4E000000000000000000013 /* ANCSupportedHardware.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ANCSupportedHardware.swift; sourceTree = "<group>"; };
@@ -1147,6 +1151,7 @@
 				E4F300000000000000000014 /* QuietZoneFeedForwardShadowTests.swift */,
 				E4D000000000000000000013 /* AdaptiveQuietZoneShadowTests.swift */,
 				E4A000000000000000000012 /* LiveTreatmentArmTests.swift */,
+				E4A000000000000000000032 /* ActiveQuietZoneLeaseKeeperTests.swift */,
 				E4E000000000000000000014 /* QuietZoneLatencyPathTests.swift */,
 				F97100000000000000000012 /* QuietZonePhysicalLatencyMeasurementRunTests.swift */,
 				F97200000000000000000012 /* QuietZoneHardwareCommissioningTests.swift */,
@@ -1340,6 +1345,7 @@
 				F96900000000000000000011 /* QuietZoneInstrumentedProbeCapture.swift */,
 				F97000000000000000000011 /* QuietZonePhysicalLatencyBudget.swift */,
 				E4A000000000000000000011 /* LiveTreatmentSafeguards.swift */,
+				E4A000000000000000000031 /* ActiveQuietZoneLeaseKeeper.swift */,
 				E4E000000000000000000012 /* QuietZoneMeasuredLatency.swift */,
 				E4E000000000000000000013 /* ANCSupportedHardware.swift */,
 				F97100000000000000000011 /* QuietZonePhysicalLatencyMeasurementRun.swift */,
@@ -1739,6 +1745,7 @@
 				F96900000000000000000001 /* QuietZoneInstrumentedProbeCapture.swift in Sources */,
 				F97000000000000000000001 /* QuietZonePhysicalLatencyBudget.swift in Sources */,
 				E4A000000000000000000001 /* LiveTreatmentSafeguards.swift in Sources */,
+				E4A000000000000000000021 /* ActiveQuietZoneLeaseKeeper.swift in Sources */,
 				E4E000000000000000000001 /* OutputBufferSizeController.swift in Sources */,
 				E4E000000000000000000002 /* QuietZoneMeasuredLatency.swift in Sources */,
 				E4E000000000000000000003 /* ANCSupportedHardware.swift in Sources */,
@@ -1875,6 +1882,7 @@
 				E4F300000000000000000004 /* QuietZoneFeedForwardShadowTests.swift in Sources */,
 				E4D000000000000000000003 /* AdaptiveQuietZoneShadowTests.swift in Sources */,
 				E4A000000000000000000002 /* LiveTreatmentArmTests.swift in Sources */,
+				E4A000000000000000000022 /* ActiveQuietZoneLeaseKeeperTests.swift in Sources */,
 				E4E000000000000000000004 /* QuietZoneLatencyPathTests.swift in Sources */,
 				F97100000000000000000002 /* QuietZonePhysicalLatencyMeasurementRunTests.swift in Sources */,
 				F97200000000000000000002 /* QuietZoneHardwareCommissioningTests.swift in Sources */,

@@ -82,6 +82,12 @@ struct N60RenderKernel {
     N60ActiveQuietZoneRuntime activeQuietZoneRuntime;
     float activeQuietZoneReferenceLeft;
     float activeQuietZoneReferenceRight;
+    // E4 S14 dead-man lease. Deadline in rendered frames (0 = no lease enforced). Written by the
+    // control plane, read once per callback; the fade gain is render-thread state.
+    _Atomic uint64_t activeQuietZoneLeaseDeadline;
+    _Atomic uint64_t activeQuietZoneLeaseExpiries;
+    N60SmoothedGain activeQuietZoneLeaseGain;
+    bool activeQuietZoneLeaseExpired;
     N60CrossoverRuntime crossoverRuntime;
     N60DynamicsRuntime dynamicsRuntime;
     N60SpectralDenoiserRuntime *denoiserRuntime;
@@ -1398,6 +1404,8 @@ N60RenderKernel *N60RenderKernelCreate(void) {
     );
     kernel->activeQuietZoneReferenceLeft = 0.0f;
     kernel->activeQuietZoneReferenceRight = 0.0f;
+    reset_smoothed_gain(&kernel->activeQuietZoneLeaseGain, 1.0f);
+    kernel->activeQuietZoneLeaseExpired = false;
     reset_smoothed_gain(&kernel->balanceGainLeft, 1.0f);
     reset_smoothed_gain(&kernel->balanceGainRight, 1.0f);
     N60InterChannelDelayRuntimeReset(&kernel->interChannelDelayRuntime, initial.interChannelDelay);
@@ -1448,6 +1456,8 @@ void N60RenderKernelColdStart(N60RenderKernel *kernel) {
     );
     kernel->activeQuietZoneReferenceLeft = 0.0f;
     kernel->activeQuietZoneReferenceRight = 0.0f;
+    reset_smoothed_gain(&kernel->activeQuietZoneLeaseGain, 1.0f);
+    kernel->activeQuietZoneLeaseExpired = false;
     reset_smoothed_gain(&kernel->balanceGainLeft, 1.0f);
     reset_smoothed_gain(&kernel->balanceGainRight, 1.0f);
     N60InterChannelDelayRuntimeReset(&kernel->interChannelDelayRuntime, N60InterChannelDelaySnapshotMakeBypassed());
@@ -1499,6 +1509,7 @@ void N60RenderKernelReset(N60RenderKernel *kernel) {
         }
     }
     atomic_store_explicit(&kernel->renderedFrames, 0, memory_order_relaxed);
+    atomic_store_explicit(&kernel->activeQuietZoneLeaseDeadline, 0, memory_order_relaxed);
     atomic_store_explicit(&kernel->sanitizedNonFiniteSamples, 0, memory_order_relaxed);
     atomic_store_explicit(&kernel->flushedDenormalSamples, 0, memory_order_relaxed);
     atomic_store_explicit(&kernel->snapshotReadMisses, 0, memory_order_relaxed);
@@ -1638,11 +1649,48 @@ bool N60RenderKernelPublishSnapshot(N60RenderKernel *kernel, N60DSPGraphSnapshot
     return true;
 }
 
+// E4 S14: once per callback. An expired lease starts a fade of the anti-noise to silence; a
+// renewed one fades it back in. No allocation, locks or logging.
+static void update_active_quiet_zone_lease(N60RenderKernel *kernel, double sampleRate) {
+    const uint64_t deadline = atomic_load_explicit(
+        &kernel->activeQuietZoneLeaseDeadline, memory_order_acquire);
+    const uint64_t now = atomic_load_explicit(&kernel->renderedFrames, memory_order_relaxed);
+    const bool expired = deadline != 0 && now >= deadline;
+    if (expired == kernel->activeQuietZoneLeaseExpired) return;
+    kernel->activeQuietZoneLeaseExpired = expired;
+    if (expired) {
+        atomic_fetch_add_explicit(&kernel->activeQuietZoneLeaseExpiries, 1, memory_order_relaxed);
+    }
+    // Scheduled on the change only: rescheduling every callback would stretch the fade.
+    const double rate = sampleRate > 0.0 ? sampleRate : 48000.0;
+    const uint32_t fadeFrames = (uint32_t)(rate * (expired ? 0.020 : 0.250));
+    schedule_gain_transition(&kernel->activeQuietZoneLeaseGain, expired ? 0.0f : 1.0f, fadeFrames);
+}
+
+void N60RenderKernelRenewActiveQuietZoneLease(N60RenderKernel *kernel, uint64_t durationFrames) {
+    if (kernel == NULL || durationFrames == 0) return;
+    const uint64_t now = atomic_load_explicit(&kernel->renderedFrames, memory_order_relaxed);
+    uint64_t deadline = now + durationFrames;
+    if (deadline < now) deadline = UINT64_MAX;
+    atomic_store_explicit(&kernel->activeQuietZoneLeaseDeadline, deadline, memory_order_release);
+}
+
+void N60RenderKernelReleaseActiveQuietZoneLease(N60RenderKernel *kernel) {
+    if (kernel == NULL) return;
+    atomic_store_explicit(&kernel->activeQuietZoneLeaseDeadline, 0, memory_order_release);
+}
+
+uint64_t N60RenderKernelActiveQuietZoneLeaseExpiryCount(const N60RenderKernel *kernel) {
+    if (kernel == NULL) return 0;
+    return atomic_load_explicit(&((N60RenderKernel *)kernel)->activeQuietZoneLeaseExpiries, memory_order_relaxed);
+}
+
 N60RenderKernelRenderContext N60RenderKernelBeginRender(N60RenderKernel *kernel) {
     N60RenderKernelRenderContext context = acquire_render_context(kernel);
     if (context.acquired && context.snapshot != NULL) {
         prepare_runtime_for_snapshot(kernel, context.snapshot);
         N60ProtectionRuntimeBeginBuffer(kernel->protectionRuntime);
+        update_active_quiet_zone_lease(kernel, context.snapshot->sampleRate);
     }
     return context;
 }
@@ -2049,6 +2097,9 @@ void N60RenderKernelProcessStereoSystemFrameInContext(
             &quietZoneLeft,
             &quietZoneRight
         );
+        const float leaseGain = next_gain_value(&kernel->activeQuietZoneLeaseGain);
+        quietZoneLeft *= leaseGain;
+        quietZoneRight *= leaseGain;
         left += quietZoneLeft;
         right += quietZoneRight;
 
@@ -2101,9 +2152,9 @@ void N60RenderKernelProcessStereoSystemFrameInContext(
         &activeQuietZoneRight
     );
     kernel->activeQuietZoneReferenceLeft =
-        activeQuietZoneLeft * masterGain;
+        activeQuietZoneLeft * kernel->activeQuietZoneLeaseGain.current * masterGain;
     kernel->activeQuietZoneReferenceRight =
-        activeQuietZoneRight * masterGain;
+        activeQuietZoneRight * kernel->activeQuietZoneLeaseGain.current * masterGain;
     left = sanitize_sample(kernel, left);
     right = sanitize_sample(kernel, right);
     if (meteringEnabled) {

@@ -107,6 +107,7 @@ final class ProductController: ObservableObject {
         // E6 S11: the graph is the default; `e6.legacy-kernel` selects the frozen kernel fallback.
         // Swift decides; the engine only receives the result. Read once at launch.
         audioEngine.unifiedGraphEnabled = !FeatureFlags().isEnabled(.legacyKernel)
+        audioEngine.activeQuietZoneLeaseEnabled = FeatureFlags().isEnabled(.ancEngineLease)
         let audioUnitHost = AudioUnitHostController()
         let profiles = ProductProfileController(
             engine: audioEngine,
