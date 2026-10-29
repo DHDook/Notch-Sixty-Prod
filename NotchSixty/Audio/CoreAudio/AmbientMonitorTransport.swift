@@ -178,6 +178,54 @@ final class AmbientMonitorTransport {
         return result
     }
 
+    /// Where the first frame of an anchored read sits in host time (E4 S18a).
+    struct ReadAnchor: Equatable, Sendable {
+        /// IOProc input time of the callback that delivered the frame's block.
+        var hostTime: UInt64
+        /// Frames into that block at which the read began.
+        var frameOffset: Int
+    }
+
+    /// As `readAvailableFrames`, also returning the host-time anchor of the first frame. The
+    /// anchor is nil when no recorded callback covers the frame (for example after a discard).
+    func readAvailableFramesWithAnchor(
+        maximumFrames: Int = Int(ringCapacityFrames)
+    ) throws -> (samples: [Float], anchor: ReadAnchor?) {
+        guard !isClosed, let bridge else {
+            throw AmbientMonitorTransportError.closed
+        }
+        let state = N60AmbientMonitorBridgeGetSnapshot(bridge)
+        guard state.unsupportedBufferLayouts == 0 else {
+            throw AmbientMonitorTransportError
+                .unsupportedRealtimeBufferLayout(
+                    state.unsupportedBufferLayouts
+                )
+        }
+        let capacity = min(
+            max(maximumFrames, 0),
+            Int(state.availableFrames)
+        )
+        guard capacity > 0 else { return ([], nil) }
+
+        var result = [Float](repeating: 0, count: capacity)
+        var raw = N60AmbientMonitorAnchor(valid: false, frameOffset: 0, hostTime: 0)
+        let count = result.withUnsafeMutableBufferPointer { buffer in
+            N60AmbientMonitorBridgeReadFramesWithAnchor(
+                bridge,
+                buffer.baseAddress!,
+                UInt32(buffer.count),
+                &raw
+            )
+        }
+        if Int(count) < result.count {
+            result.removeLast(result.count - Int(count))
+        }
+        let anchor = raw.valid && count > 0
+            ? ReadAnchor(hostTime: raw.hostTime, frameOffset: Int(raw.frameOffset))
+            : nil
+        return (result, anchor)
+    }
+
     func discardBufferedFrames() {
         guard let bridge else { return }
         N60AmbientMonitorBridgeDiscardFrames(bridge)

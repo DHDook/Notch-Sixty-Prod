@@ -2416,8 +2416,13 @@ OSStatus N60OutputIOProc(
         !N60AudioUnitLiveRackProcessorIsValid(&bridge->audioUnitRack)
             || atomic_load_explicit(&bridge->unifiedGraphHostsRack, memory_order_acquire)
     );
+    // E4 S18a: the output buffer's host time anchors the anti-noise phase for the adaptive worker.
+    const uint64_t outputHostTime =
+        inOutputTime != NULL && (inOutputTime->mFlags & kAudioTimeStampHostTimeValid) != 0
+            ? inOutputTime->mHostTime
+            : 0u;
     N60RenderKernelRenderContext renderContext =
-        N60RenderKernelBeginRender(bridge->renderKernel);
+        N60RenderKernelBeginRenderAtHostTime(bridge->renderKernel, outputHostTime);
     UInt32 renderedFrames = 0;
     uint32_t ringReadIndex =
         (uint32_t)(readIndex % bridge->capacityFrames);

@@ -193,6 +193,10 @@ harness e4_engine_lease "${STRICT[@]}" -O2 -include stddef.h -I"$RT" ci/harness_
 # E4 S15: live howl guard in the render kernel.
 # shellcheck disable=SC2086
 harness e4_howl_guard_live "${STRICT[@]}" -O2 -include stddef.h -I"$RT" ci/harness_e4_howl_guard_live.c $ALL_RT_NO_BRIDGE -framework Accelerate
+# E4 S18a: adaptive gain mailbox, phase-anchor telemetry ring and ambient host-time anchors.
+# shellcheck disable=SC2086
+harness e4_gain_mailbox "${STRICT[@]}" -O2 -include stddef.h -I"$RT" ci/harness_e4_gain_mailbox.c \
+    "$RT/N60ActiveQuietZone.c" "$RT/N60AmbientMonitorBridge.c" -framework CoreAudio -framework AudioToolbox
 # E4 S13: acoustic twin (closed-loop room simulator) with the tonal canceller and
 # howl guard in the loop. SOAK=1 adds the long drift and fault soak.
 if selected e4_acoustic_twin; then
@@ -209,6 +213,22 @@ if selected e4_acoustic_twin; then
         echo "::endgroup::"
     else
         failed+=(e4_acoustic_twin)
+    fi
+fi
+# E4 S18a: remote tonal worker core (microphone blocks on host time) on the acoustic twin.
+# SOAK=1 adds the one-hour drift soak.
+if selected e4_remote_tonal; then
+    if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -include stddef.h -I"$RT" -Ici ci/harness_e4_remote_tonal.cpp \
+            "$RT/n60_remote_tonal.cpp" -o "$OUT/e4_remote_tonal"; then
+        echo "::group::e4_remote_tonal"
+        if "$OUT/e4_remote_tonal" && { [ "${SOAK:-0}" != 1 ] || "$OUT/e4_remote_tonal" --soak; }; then
+            passed+=(e4_remote_tonal)
+        else
+            failed+=(e4_remote_tonal)
+        fi
+        echo "::endgroup::"
+    else
+        failed+=(e4_remote_tonal)
     fi
 fi
 # E4 S5: adaptive ANC core (FxLMS) on a simulated plant.
@@ -445,6 +465,15 @@ if selected e4_ff_shadow_reference; then
         passed+=(e4_ff_shadow_reference)
     else
         failed+=(e4_ff_shadow_reference)
+    fi
+    echo "::endgroup::"
+fi
+if selected e4_remote_tonal_reference; then
+    echo "::group::e4_remote_tonal_reference"
+    if python3 ci/acoustic_reference_lab/e4_remote_tonal_reference.py; then
+        passed+=(e4_remote_tonal_reference)
+    else
+        failed+=(e4_remote_tonal_reference)
     fi
     echo "::endgroup::"
 fi

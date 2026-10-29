@@ -10,7 +10,20 @@ typedef struct {
     uint32_t frameCount;
 } N60AmbientInputView;
 
+#define N60_AMBIENT_ANCHOR_CAPACITY 256u
+
+typedef struct {
+    uint64_t hostTime;
+    uint64_t firstFrame;  // absolute ring index of the callback's first accepted frame
+    uint32_t frames;
+} N60AmbientAnchorEntry;
+
 struct N60AmbientMonitorBridge {
+    // E4 S18a: host-time anchors, one per callback (SPSC; the producer is the IOProc).
+    N60AmbientAnchorEntry anchors[N60_AMBIENT_ANCHOR_CAPACITY];
+    _Atomic uint64_t anchorHead;
+    _Atomic uint64_t anchorTail;
+    _Atomic uint64_t anchorsDropped;
     float *frames;
     uint32_t capacityFrames;
     uint32_t mask;
@@ -64,11 +77,12 @@ static bool make_input_channel_view(
     return false;
 }
 
-static uint32_t process_strided(
+static uint32_t process_strided_at(
     N60AmbientMonitorBridge *bridge,
     const float *samples,
     uint32_t stride,
-    uint32_t frameCount
+    uint32_t frameCount,
+    uint64_t hostTime
 ) {
     if (bridge == NULL || samples == NULL || stride == 0
         || frameCount == 0) {
@@ -97,6 +111,17 @@ static uint32_t process_strided(
         source += stride;
     }
 
+    if (accepted > 0 && hostTime != 0u) {
+        const uint64_t head = atomic_load_explicit(&bridge->anchorHead, memory_order_relaxed);
+        const uint64_t tail = atomic_load_explicit(&bridge->anchorTail, memory_order_acquire);
+        if (head - tail < N60_AMBIENT_ANCHOR_CAPACITY) {
+            bridge->anchors[head % N60_AMBIENT_ANCHOR_CAPACITY] =
+                (N60AmbientAnchorEntry){hostTime, writeIndex, accepted};
+            atomic_store_explicit(&bridge->anchorHead, head + 1u, memory_order_release);
+        } else {
+            atomic_fetch_add_explicit(&bridge->anchorsDropped, 1u, memory_order_relaxed);
+        }
+    }
     if (accepted > 0) {
         atomic_store_explicit(
             &bridge->writeIndex,
@@ -117,6 +142,15 @@ static uint32_t process_strided(
         );
     }
     return accepted;
+}
+
+static uint32_t process_strided(
+    N60AmbientMonitorBridge *bridge,
+    const float *samples,
+    uint32_t stride,
+    uint32_t frameCount
+) {
+    return process_strided_at(bridge, samples, stride, frameCount, 0u);
 }
 
 N60AmbientMonitorBridge *N60AmbientMonitorBridgeCreate(
@@ -173,6 +207,9 @@ void N60AmbientMonitorBridgeReset(N60AmbientMonitorBridge *bridge) {
     atomic_store_explicit(
         &bridge->unsupportedBufferLayouts, 0, memory_order_relaxed
     );
+    atomic_store_explicit(&bridge->anchorHead, 0, memory_order_relaxed);
+    atomic_store_explicit(&bridge->anchorTail, 0, memory_order_relaxed);
+    atomic_store_explicit(&bridge->anchorsDropped, 0, memory_order_relaxed);
 }
 
 N60AmbientMonitorSnapshot N60AmbientMonitorBridgeGetSnapshot(
@@ -226,6 +263,42 @@ uint32_t N60AmbientMonitorBridgeProcessPlanar(
         1u,
         frameCount
     );
+}
+
+uint32_t N60AmbientMonitorBridgeProcessPlanarAt(
+    N60AmbientMonitorBridge *bridge,
+    const float *microphoneSamples,
+    uint32_t frameCount,
+    uint64_t hostTime
+) {
+    return process_strided_at(bridge, microphoneSamples, 1u, frameCount, hostTime);
+}
+
+uint32_t N60AmbientMonitorBridgeReadFramesWithAnchor(
+    N60AmbientMonitorBridge *bridge,
+    float *destination,
+    uint32_t capacityFrames,
+    N60AmbientMonitorAnchor *anchorOut
+) {
+    if (anchorOut != NULL) *anchorOut = (N60AmbientMonitorAnchor){0};
+    if (bridge == NULL) return 0;
+    const uint64_t readIndex = atomic_load_explicit(&bridge->readIndex, memory_order_relaxed);
+    if (anchorOut != NULL) {
+        uint64_t tail = atomic_load_explicit(&bridge->anchorTail, memory_order_relaxed);
+        const uint64_t head = atomic_load_explicit(&bridge->anchorHead, memory_order_acquire);
+        while (tail < head) {
+            const N60AmbientAnchorEntry *entry = &bridge->anchors[tail % N60_AMBIENT_ANCHOR_CAPACITY];
+            if (entry->firstFrame + entry->frames <= readIndex) { ++tail; continue; }
+            if (entry->firstFrame <= readIndex) {
+                anchorOut->valid = true;
+                anchorOut->hostTime = entry->hostTime;
+                anchorOut->frameOffset = (uint32_t)(readIndex - entry->firstFrame);
+            }
+            break;
+        }
+        atomic_store_explicit(&bridge->anchorTail, tail, memory_order_release);
+    }
+    return N60AmbientMonitorBridgeReadFrames(bridge, destination, capacityFrames);
 }
 
 uint32_t N60AmbientMonitorBridgeReadFrames(
@@ -292,7 +365,6 @@ OSStatus N60AmbientMonitorIOProc(
 ) {
     (void)inDevice;
     (void)inNow;
-    (void)inInputTime;
     (void)outOutputData;
     (void)inOutputTime;
 
@@ -319,11 +391,16 @@ OSStatus N60AmbientMonitorIOProc(
         );
         return noErr;
     }
-    (void)process_strided(
+    const uint64_t hostTime =
+        inInputTime != NULL && (inInputTime->mFlags & kAudioTimeStampHostTimeValid) != 0
+            ? inInputTime->mHostTime
+            : 0u;
+    (void)process_strided_at(
         bridge,
         input.samples,
         input.stride,
-        input.frameCount
+        input.frameCount,
+        hostTime
     );
     return noErr;
 }

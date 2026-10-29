@@ -32,6 +32,9 @@ typedef struct {
     // Output clamp (linear). 0 means the compile-time aggregate limit. Set with
     // N60ActiveQuietZoneSnapshotSetPeakCap; defence in depth behind the Swift cap.
     float peakCapLinear;
+    // E4 S18a: the control plane's arm generation (0 = none). A gain-mailbox record is played
+    // only while its generation equals this one; a disarm bumps it, so a late write cannot play.
+    uint64_t armGeneration;
     N60ActiveQuietZoneToneSnapshot
         tones[N60_ACTIVE_QUIET_ZONE_MAX_TONES];
 } N60ActiveQuietZoneSnapshot;
@@ -61,6 +64,18 @@ typedef struct {
 } N60ActiveQuietZoneToneRuntime;
 
 typedef struct {
+    uint64_t armGeneration;
+    // Assigned by Publish; ignored on input.
+    uint64_t sequence;
+    uint32_t toneCount;
+    // Attempt cap (linear peak per channel); 0 = no extra cap beyond the snapshot's.
+    float attemptCapLinear;
+    double frequencyHz[N60_ACTIVE_QUIET_ZONE_MAX_TONES];
+    // Per tone: left real, left imaginary, right real, right imaginary.
+    float gain[N60_ACTIVE_QUIET_ZONE_MAX_TONES][4];
+} N60ActiveQuietZoneGainRecord;
+
+typedef struct {
     double sampleRate;
     N60ActiveQuietZoneToneRuntime
         tones[N60_ACTIVE_QUIET_ZONE_MAX_TONES];
@@ -72,6 +87,13 @@ typedef struct {
     float peakCapLinear;
     // Samples that reached the clamp (diagnostic; never reset by Schedule).
     uint64_t clampedSamples;
+    // E4 S18a mailbox state (render thread only). The last valid record is kept so a graph
+    // re-publish within the same arm, which retargets to the offline gains, is followed by the
+    // adaptive gains again in the same callback (before any frame is rendered).
+    uint64_t mailboxSequence;
+    bool mailboxRecordValid;
+    bool mailboxReapply;
+    N60ActiveQuietZoneGainRecord mailboxRecord;
 } N60ActiveQuietZoneRuntime;
 
 N60ActiveQuietZoneSnapshot
@@ -114,6 +136,107 @@ void N60ActiveQuietZoneRuntimeProcessFrame(
     N60ActiveQuietZoneRuntime * _Nonnull runtime,
     float * _Nonnull left,
     float * _Nonnull right
+);
+
+/* ---- E4 S18a: adaptive gain mailbox and phase-anchor telemetry --------------------------------
+ *
+ * The adaptive tonal canceller refines the gains of the tones the offline target already plays,
+ * without rebuilding the graph. One writer thread (control plane or worker) publishes whole
+ * records into a lock-free triple buffer; the render thread reads the newest once per callback
+ * (N60ActiveQuietZoneRuntimeApplyMailbox) and retargets the tone gains through the existing
+ * linear crossfade over N60_ACTIVE_QUIET_ZONE_MAILBOX_CROSSFADE_SECONDS.
+ *
+ * A record is ignored (counted, nothing changes) when the snapshot is not enabled, its
+ * generation is 0 or differs from the snapshot's armGeneration, its tone count or any tone
+ * frequency (0.001 Hz) differs from the snapshot's, or any value is non-finite. Otherwise each
+ * tone's gains are limited to min(per-tone peak limit, snapshot cap, record attempt cap) and the
+ * sum over tones per channel to min(aggregate limit, snapshot cap, attempt cap) by scaling; any
+ * scaling counts as "clamped". The runtime's output clamp becomes the lower of the snapshot cap and
+ * the attempt cap while a record is in force, and returns to the snapshot cap on Schedule (it is only ever lowered between Schedules). A sample
+ * rate change clears the kept record until the worker republishes.
+ *
+ * Allocation: Create allocates once (control plane). Publish and Apply never allocate.
+ * Synchronisation: lock-free, one writer (Publish), one reader (render thread). Stats are
+ * relaxed atomics. Latency: at most one callback plus the crossfade. Rates: any, the crossfade is
+ * in frames. Channels: stereo, one complex gain per tone and channel. Reset: Schedule keeps the
+ * last valid record and re-applies it after a graph re-publish of the same arm; a different
+ * generation, tone set, or a disabled snapshot discards it.
+ */
+#define N60_ACTIVE_QUIET_ZONE_MAILBOX_CROSSFADE_SECONDS 0.1
+
+
+typedef struct {
+    uint64_t published;
+    uint64_t applied;
+    uint64_t clamped;
+    uint64_t ignoredStaleGeneration;
+    uint64_t ignoredToneMismatch;
+    uint64_t ignoredNonFinite;
+    uint64_t ignoredNotEnabled;
+} N60ActiveQuietZoneMailboxStats;
+
+typedef struct N60ActiveQuietZoneGainMailbox N60ActiveQuietZoneGainMailbox;
+
+N60ActiveQuietZoneGainMailbox * _Nullable N60ActiveQuietZoneGainMailboxCreate(void);
+void N60ActiveQuietZoneGainMailboxDestroy(N60ActiveQuietZoneGainMailbox * _Nullable mailbox);
+/// Single writer. Returns the assigned sequence (>= 1), or 0 for a NULL argument or tone count
+/// above the maximum.
+uint64_t N60ActiveQuietZoneGainMailboxPublish(
+    N60ActiveQuietZoneGainMailbox * _Nonnull mailbox,
+    const N60ActiveQuietZoneGainRecord * _Nonnull record
+);
+N60ActiveQuietZoneMailboxStats N60ActiveQuietZoneGainMailboxStats(
+    const N60ActiveQuietZoneGainMailbox * _Nonnull mailbox
+);
+
+/// Render thread, once per callback after Schedule. No-op when the mailbox was never written.
+void N60ActiveQuietZoneRuntimeApplyMailbox(
+    N60ActiveQuietZoneRuntime * _Nonnull runtime,
+    N60ActiveQuietZoneGainMailbox * _Nonnull mailbox,
+    const N60ActiveQuietZoneSnapshot * _Nonnull snapshot,
+    double sampleRate
+);
+
+/// What the render thread was playing at the start of a callback, anchored to host time. The
+/// phasor is the tone oscillator's value at the first frame; gain is the complex L/R gain playing
+/// (after the kernel's crossfade, before the lease and howl-guard gains).
+#define N60_ACTIVE_QUIET_ZONE_TELEMETRY_CAPACITY 1024u
+#define N60_ACTIVE_QUIET_ZONE_TELEMETRY_MIN_SPACING_SECONDS 0.005
+
+typedef struct {
+    // mHostTime of the output buffer's first frame (host ticks); 0 is never written.
+    uint64_t hostTime;
+    // Frames the kernel had rendered before this callback.
+    uint64_t renderedFrame;
+    uint32_t toneCount;
+    uint32_t reserved;
+    double frequencyHz[N60_ACTIVE_QUIET_ZONE_MAX_TONES];
+    double phasorCosine[N60_ACTIVE_QUIET_ZONE_MAX_TONES];
+    double phasorSine[N60_ACTIVE_QUIET_ZONE_MAX_TONES];
+    float gain[N60_ACTIVE_QUIET_ZONE_MAX_TONES][4];
+} N60ActiveQuietZoneTelemetryRecord;
+
+typedef struct N60ActiveQuietZoneTelemetry N60ActiveQuietZoneTelemetry;
+
+N60ActiveQuietZoneTelemetry * _Nullable N60ActiveQuietZoneTelemetryCreate(void);
+void N60ActiveQuietZoneTelemetryDestroy(N60ActiveQuietZoneTelemetry * _Nullable ring);
+/// Render thread (single producer). Drops the record when the ring is full (counted).
+bool N60ActiveQuietZoneTelemetryPush(
+    N60ActiveQuietZoneTelemetry * _Nonnull ring,
+    const N60ActiveQuietZoneTelemetryRecord * _Nonnull record
+);
+/// Worker (single consumer). Pops the oldest record.
+bool N60ActiveQuietZoneTelemetryPop(
+    N60ActiveQuietZoneTelemetry * _Nonnull ring,
+    N60ActiveQuietZoneTelemetryRecord * _Nonnull record
+);
+uint64_t N60ActiveQuietZoneTelemetryDropped(const N60ActiveQuietZoneTelemetry * _Nonnull ring);
+/// Snapshot of the runtime for the telemetry record. False when no tone is active.
+bool N60ActiveQuietZoneRuntimeCaptureTelemetry(
+    const N60ActiveQuietZoneRuntime * _Nonnull runtime,
+    uint64_t hostTime,
+    uint64_t renderedFrame,
+    N60ActiveQuietZoneTelemetryRecord * _Nonnull record
 );
 
 void N60ActiveQuietZoneRuntimeLastFrame(

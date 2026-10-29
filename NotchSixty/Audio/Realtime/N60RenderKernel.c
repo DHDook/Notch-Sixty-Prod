@@ -100,6 +100,14 @@ struct N60RenderKernel {
     uint32_t howlScratchFill;
     N60SmoothedGain howlGuardGain;
     bool howlGuardMuted;
+    // E4 S18a: a worker-requested trip (the seat path inverted); handled in BeginRender.
+    _Atomic bool howlTripRequested;
+    // E4 S18a adaptive tonal: gain mailbox (read each callback) and phase-anchor telemetry
+    // (pushed at most every 5 ms). Both are created with the kernel and live as long as it does.
+    N60ActiveQuietZoneGainMailbox *aqzMailbox;
+    N60ActiveQuietZoneTelemetry *aqzTelemetry;
+    uint64_t aqzTelemetryLastFrame;
+    bool aqzTelemetryHasLast;
     _Atomic bool howlRearmRequested;
     _Atomic uint64_t howlTripCount;
     _Atomic uint32_t howlTripKind;
@@ -1279,6 +1287,12 @@ bool N60DSPGraphSnapshotSetActiveQuietZone(
     return true;
 }
 
+bool N60DSPGraphSnapshotSetActiveQuietZoneArmGeneration(N60DSPGraphSnapshot *snapshot, uint64_t armGeneration) {
+    if (snapshot == NULL) return false;
+    snapshot->activeQuietZone.armGeneration = armGeneration;
+    return true;
+}
+
 bool N60DSPGraphSnapshotSetActiveQuietZonePeakCap(N60DSPGraphSnapshot *snapshot, float peakCapLinear) {
     if (snapshot == NULL) return false;
     return N60ActiveQuietZoneSnapshotSetPeakCap(&snapshot->activeQuietZone, peakCapLinear);
@@ -1424,6 +1438,12 @@ N60RenderKernel *N60RenderKernelCreate(void) {
     reset_smoothed_gain(&kernel->activeQuietZoneLeaseGain, 1.0f);
     kernel->activeQuietZoneLeaseExpired = false;
     reset_howl_guard_state(kernel);
+    kernel->aqzMailbox = N60ActiveQuietZoneGainMailboxCreate();
+    kernel->aqzTelemetry = N60ActiveQuietZoneTelemetryCreate();
+    if (kernel->aqzMailbox == NULL || kernel->aqzTelemetry == NULL) {
+        N60RenderKernelDestroy(kernel);
+        return NULL;
+    }
     reset_smoothed_gain(&kernel->balanceGainLeft, 1.0f);
     reset_smoothed_gain(&kernel->balanceGainRight, 1.0f);
     N60InterChannelDelayRuntimeReset(&kernel->interChannelDelayRuntime, initial.interChannelDelay);
@@ -1435,6 +1455,8 @@ void N60RenderKernelDestroy(N60RenderKernel *kernel) {
     if (kernel == NULL) return;
     N60AncGuardDestroy(kernel->howlGuard[0]);
     N60AncGuardDestroy(kernel->howlGuard[1]);
+    N60ActiveQuietZoneGainMailboxDestroy(kernel->aqzMailbox);
+    N60ActiveQuietZoneTelemetryDestroy(kernel->aqzTelemetry);
     N60SpectralDenoiserDestroy(kernel->denoiserRuntime);
     N60HeadphoneDSPRuntimeDestroy(kernel->headphoneDSPRuntime);
     N60ProtectionRuntimeDestroy(kernel->protectionRuntime);
@@ -1677,6 +1699,7 @@ static void reset_howl_guard_state(N60RenderKernel *kernel) {
     kernel->howlGuardMuted = false;
     kernel->howlScratchFill = 0;
     atomic_store_explicit(&kernel->howlRearmRequested, false, memory_order_relaxed);
+    atomic_store_explicit(&kernel->howlTripRequested, false, memory_order_relaxed);
     if (kernel->howlGuard[0] != NULL) N60AncGuardRequestRearm(kernel->howlGuard[0]);
     if (kernel->howlGuard[1] != NULL) N60AncGuardRequestRearm(kernel->howlGuard[1]);
 }
@@ -1794,10 +1817,54 @@ uint64_t N60RenderKernelActiveQuietZoneLeaseExpiryCount(const N60RenderKernel *k
     return atomic_load_explicit(&((N60RenderKernel *)kernel)->activeQuietZoneLeaseExpiries, memory_order_relaxed);
 }
 
+N60ActiveQuietZoneGainMailbox *N60RenderKernelActiveQuietZoneMailbox(N60RenderKernel *kernel) {
+    return kernel != NULL ? kernel->aqzMailbox : NULL;
+}
+
+N60ActiveQuietZoneTelemetry *N60RenderKernelActiveQuietZoneTelemetry(N60RenderKernel *kernel) {
+    return kernel != NULL ? kernel->aqzTelemetry : NULL;
+}
+
+void N60RenderKernelRequestHowlTrip(N60RenderKernel *kernel) {
+    if (kernel == NULL) return;
+    atomic_store_explicit(&kernel->howlTripRequested, true, memory_order_release);
+}
+
 N60RenderKernelRenderContext N60RenderKernelBeginRender(N60RenderKernel *kernel) {
+    return N60RenderKernelBeginRenderAtHostTime(kernel, 0u);
+}
+
+N60RenderKernelRenderContext N60RenderKernelBeginRenderAtHostTime(N60RenderKernel *kernel, uint64_t outputHostTime) {
     N60RenderKernelRenderContext context = acquire_render_context(kernel);
     if (context.acquired && context.snapshot != NULL) {
         prepare_runtime_for_snapshot(kernel, context.snapshot);
+        // E4 S18a: newest adaptive gains, then (rate-limited) the phase anchor for the worker.
+        N60ActiveQuietZoneRuntimeApplyMailbox(
+            &kernel->activeQuietZoneRuntime, kernel->aqzMailbox,
+            &context.snapshot->activeQuietZone, context.snapshot->sampleRate);
+        if (outputHostTime != 0u && context.snapshot->activeQuietZone.enabled) {
+            const uint64_t now = atomic_load_explicit(&kernel->renderedFrames, memory_order_relaxed);
+            const double rate = context.snapshot->sampleRate > 0.0 ? context.snapshot->sampleRate : 48000.0;
+            const uint64_t spacing = (uint64_t)(rate * N60_ACTIVE_QUIET_ZONE_TELEMETRY_MIN_SPACING_SECONDS);
+            if (!kernel->aqzTelemetryHasLast || now < kernel->aqzTelemetryLastFrame
+                || now - kernel->aqzTelemetryLastFrame >= spacing) {
+                N60ActiveQuietZoneTelemetryRecord record;
+                if (N60ActiveQuietZoneRuntimeCaptureTelemetry(
+                        &kernel->activeQuietZoneRuntime, outputHostTime, now, &record)) {
+                    N60ActiveQuietZoneTelemetryPush(kernel->aqzTelemetry, &record);
+                    kernel->aqzTelemetryLastFrame = now;
+                    kernel->aqzTelemetryHasLast = true;
+                }
+            }
+        }
+        if (atomic_exchange_explicit(&kernel->howlTripRequested, false, memory_order_acq_rel)
+            && !kernel->howlGuardMuted) {
+            kernel->howlGuardMuted = true;
+            atomic_store_explicit(&kernel->howlTripKind, (uint32_t)N60AncGuardTripErrorRise, memory_order_relaxed);
+            atomic_fetch_add_explicit(&kernel->howlTripCount, 1, memory_order_release);
+            const double tripRate = context.snapshot->sampleRate > 0.0 ? context.snapshot->sampleRate : 48000.0;
+            schedule_gain_transition(&kernel->howlGuardGain, 0.0f, (uint32_t)(tripRate * 0.020));
+        }
         N60ProtectionRuntimeBeginBuffer(kernel->protectionRuntime);
         update_active_quiet_zone_lease(kernel, context.snapshot->sampleRate);
         if (atomic_exchange_explicit(&kernel->howlRearmRequested, false, memory_order_acq_rel)
