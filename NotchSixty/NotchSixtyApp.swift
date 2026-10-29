@@ -108,6 +108,11 @@ final class ProductController: ObservableObject {
         // Swift decides; the engine only receives the result. Read once at launch.
         audioEngine.unifiedGraphEnabled = !FeatureFlags().isEnabled(.legacyKernel)
         audioEngine.activeQuietZoneLeaseEnabled = FeatureFlags().isEnabled(.ancEngineLease)
+        // E4 S18b: the adaptive tonal canceller needs the lease; with either flag off the engine
+        // stamps no arm token and the gain mailbox stays shut.
+        let adaptiveTonalLive = FeatureFlags().isEnabled(.adaptiveTonalLive)
+            && audioEngine.activeQuietZoneLeaseEnabled
+        audioEngine.adaptiveTonalMailboxEnabled = adaptiveTonalLive
         let audioUnitHost = AudioUnitHostController()
         let profiles = ProductProfileController(
             engine: audioEngine,
@@ -147,6 +152,12 @@ final class ProductController: ObservableObject {
             ambient: ambientCompensation
         )
         self.activeQuietZone = activeQuietZone
+        if adaptiveTonalLive {
+            activeQuietZone.attachAdaptiveLive(AdaptiveTonalLiveCoordinator(
+                ambient: ambientCompensation,
+                linkProvider: { [weak audioEngine] in audioEngine?.adaptiveTonalLink }
+            ))
+        }
         self.adaptiveQuietZone = AdaptiveQuietZoneShadow(
             quietZone: activeQuietZone,
             ambient: ambientCompensation

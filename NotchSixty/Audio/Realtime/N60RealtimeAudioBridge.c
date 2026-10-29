@@ -1454,6 +1454,39 @@ uint64_t N60RealtimeAudioBridgeHowlGuardTripCount(const N60RealtimeAudioBridge *
     return N60RenderKernelHowlGuardTripCount(bridge->renderKernel);
 }
 
+uint64_t N60RealtimeAudioBridgePublishActiveQuietZoneGainRecord(
+    N60RealtimeAudioBridge *bridge,
+    const N60ActiveQuietZoneGainRecord *record
+) {
+    if (bridge == NULL || bridge->renderKernel == NULL || record == NULL) return 0;
+    N60ActiveQuietZoneGainMailbox *mailbox = N60RenderKernelActiveQuietZoneMailbox(bridge->renderKernel);
+    if (mailbox == NULL) return 0;
+    return N60ActiveQuietZoneGainMailboxPublish(mailbox, record);
+}
+
+bool N60RealtimeAudioBridgePopActiveQuietZoneTelemetry(
+    N60RealtimeAudioBridge *bridge,
+    N60ActiveQuietZoneTelemetryRecord *record
+) {
+    if (bridge == NULL || bridge->renderKernel == NULL || record == NULL) return false;
+    N60ActiveQuietZoneTelemetry *ring = N60RenderKernelActiveQuietZoneTelemetry(bridge->renderKernel);
+    return ring != NULL && N60ActiveQuietZoneTelemetryPop(ring, record);
+}
+
+N60ActiveQuietZoneMailboxStats N60RealtimeAudioBridgeActiveQuietZoneMailboxStats(
+    const N60RealtimeAudioBridge *bridge
+) {
+    N60ActiveQuietZoneMailboxStats none = {0};
+    if (bridge == NULL || bridge->renderKernel == NULL) return none;
+    N60ActiveQuietZoneGainMailbox *mailbox = N60RenderKernelActiveQuietZoneMailbox(bridge->renderKernel);
+    return mailbox == NULL ? none : N60ActiveQuietZoneGainMailboxStats(mailbox);
+}
+
+void N60RealtimeAudioBridgeRequestHowlTrip(N60RealtimeAudioBridge *bridge) {
+    if (bridge == NULL || bridge->renderKernel == NULL) return;
+    N60RenderKernelRequestHowlTrip(bridge->renderKernel);
+}
+
 void N60RealtimeAudioBridgeSetActiveQuietZoneReferenceDemand(
     N60RealtimeAudioBridge *bridge,
     bool enabled

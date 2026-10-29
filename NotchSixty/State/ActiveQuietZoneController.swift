@@ -106,6 +106,16 @@ final class ActiveQuietZoneController: ObservableObject {
     private var doNoHarm = DoNoHarmVerifier()
     /// E4 S17: the last 60 s of safety events, in plain language. Text only, no audio.
     private(set) var flightRecorder = SafetyFlightRecorder()
+    /// E4 S18b (`e4.adaptive-tonal-live`): the adaptive tonal canceller's control plane. Nil with
+    /// the flag off, in which case nothing below runs and the controller behaves as before.
+    private(set) var adaptiveLive: AdaptiveTonalLiveCoordinator?
+
+    func attachAdaptiveLive(_ coordinator: AdaptiveTonalLiveCoordinator?) {
+        adaptiveLive = coordinator
+        coordinator?.onEvent = { [weak self] kind, message in
+            self?.flightRecorder.record(kind, message)
+        }
+    }
     @Published private(set) var lastErrorDescription: String?
     @Published private(set) var spatialCalibration:
         ActiveQuietZoneSpatialCalibration?
@@ -520,6 +530,7 @@ final class ActiveQuietZoneController: ObservableObject {
             try arm.arm(environment: liveTreatmentEnvironment())
             flightRecorder.recordArm()
             armedGeneration = engine.liveTreatmentGeneration
+            adaptiveLive?.reset()
             do {
                 var updated = configuration
                 updated.enabled = true
@@ -535,6 +546,37 @@ final class ActiveQuietZoneController: ObservableObject {
             arm.disarm(.user)
             if configuration.enabled { applyDisarm(.user) }
         }
+    }
+
+    /// E4 S18b: runs the adaptive coordinator for this window. False when it disarmed.
+    private func pollAdaptiveLive(_ snapshot: AmbientAnalysisSnapshot, verdict: DoNoHarmVerdict) -> Bool {
+        guard let adaptive = adaptiveLive else { return true }
+        var rampedIn = false
+        if case .active = stage { rampedIn = true }
+        let requests = adaptive.poll(AdaptiveTonalLivePollInput(
+            now: ProcessInfo.processInfo.systemUptime,
+            armed: arm.isArmed,
+            controllerGeneration: armedGeneration,
+            engineGeneration: engine.liveTreatmentGeneration,
+            targetRampedIn: rampedIn,
+            hasBaseline: doNoHarm.hasBaseline,
+            verdict: verdict,
+            measurement: doNoHarm.measure(snapshot),
+            seeds: adaptiveSeeds,
+            plannedPeakLinear: availableInjectionPeak,
+            leaseRequired: engine.activeQuietZoneLeaseEnabled,
+            leaseRenewed: engine.activeQuietZoneLeaseHealthy
+        ))
+        for request in requests {
+            switch request {
+            case .beginRebaseline:
+                doNoHarm.beginRebaseline()
+            case .disarm(let reason):
+                arm.disarm(reason)
+                return false
+            }
+        }
+        return true
     }
 
     /// Environment the arm switch guards; observed with each controller poll.
@@ -562,6 +604,7 @@ final class ActiveQuietZoneController: ObservableObject {
     /// controller to the disabled state. The persisted configuration is already disabled.
     private func applyDisarm(_ reason: LiveTreatmentDisarmReason) {
         flightRecorder.recordDisarm(reason)
+        adaptiveLive?.reset()
         // Revoke the engine arm token first: nothing built under this arm can play again.
         armedGeneration = nil
         engine.revokeLiveTreatmentArm()
@@ -695,15 +738,23 @@ final class ActiveQuietZoneController: ObservableObject {
             let snapshot = detailed.snapshot
             // E4 S16: the seat microphone is the judge. Runs before the trust checks so an
             // unstable-looking window cannot hide a regression.
-            if case .observing = stage, !doNoHarm.hasBaseline {
+            var verdict: DoNoHarmVerdict = .baselining
+            var isObserving = false
+            if case .observing = stage { isObserving = true }
+            let rebaselining = adaptiveLive?.isRebaselining == true
+            if (isObserving || rebaselining), !doNoHarm.hasBaseline {
                 doNoHarm.captureBaseline(snapshot)
-            } else if case .harm = doNoHarm.evaluate(snapshot, now: Date()) {
-                verifiedReadout = nil
-                arm.reportSeatRegression()
-                return
+            } else {
+                verdict = doNoHarm.evaluate(snapshot, now: Date())
+                if case .harm = verdict {
+                    verifiedReadout = nil
+                    arm.reportSeatRegression()
+                    return
+                }
             }
             verifiedReadout = doNoHarm.readout
             if let readout = verifiedReadout { flightRecorder.record(.verifier, "Verified: \(readout)") }
+            if !pollAdaptiveLive(snapshot, verdict: verdict) { return }
             guard trusted(snapshot) else {
                 hold(
                     snapshot.separationMode

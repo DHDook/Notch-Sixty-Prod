@@ -30,6 +30,10 @@ enum LiveTreatmentDisarmReason: String, Equatable, Sendable {
     case outputGainChanged
     /// The seat microphone heard a tone or band louder than its ANC-off baseline (E4 S16).
     case seatRegression
+    /// The microphone moved and the supervised re-solve did not recover (E4 S18b).
+    case microphoneMoved
+    /// The adaptive tonal core or its worker faulted (E4 S18b).
+    case adaptiveFault
 
     /// Shown in the UI after an automatic disarm. Nil for the user's own action.
     var message: String? {
@@ -49,6 +53,8 @@ enum LiveTreatmentDisarmReason: String, Equatable, Sendable {
         case .inputDeviceChanged: return "Disarmed: the measurement microphone changed. Re-arm to continue."
         case .outputGainChanged: return "Disarmed: the output volume changed. Re-arm to continue."
         case .seatRegression: return "Disarmed: the seat got louder than before arming. Re-arm to continue."
+        case .microphoneMoved: return "Disarmed: the microphone moved and could not be re-tuned. Re-arm to continue."
+        case .adaptiveFault: return "Disarmed: the adaptive tuning faulted. Re-arm to continue."
         }
     }
 }

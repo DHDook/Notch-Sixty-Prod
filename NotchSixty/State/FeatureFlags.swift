@@ -18,7 +18,7 @@ struct FeatureFlag: Hashable, Identifiable, Sendable {
 extension FeatureFlag {
     /// Every flag the app knows. Add one when an epic starts merging dark;
     /// delete it, and the checks that read it, once the epic ships.
-    static let all: [FeatureFlag] = [.legacyKernel, .ancEngineLease]
+    static let all: [FeatureFlag] = [.legacyKernel, .ancEngineLease, .adaptiveTonalLive]
 
     /// E6 S11: the unified graph is the default renderer. Turning this on selects the frozen
     /// `N60RenderKernel` fallback instead (no new features). Swift decides; the engine never reads
@@ -34,6 +34,15 @@ extension FeatureFlag {
     static let ancEngineLease = FeatureFlag(
         id: "e4.engine-lease",
         title: "Anti-noise dead-man lease",
+        epic: "E4"
+    )
+
+    /// E4 S18b: the adaptive tonal core drives the live anti-noise gains through the render
+    /// mailbox, with the supervised microphone-move re-solve. Needs `e4.engine-lease`. Off: the
+    /// render snapshot and the control plane behave exactly as before. Removed when E4 ships.
+    static let adaptiveTonalLive = FeatureFlag(
+        id: "e4.adaptive-tonal-live",
+        title: "Adaptive tonal anti-noise (live)",
         epic: "E4"
     )
 }

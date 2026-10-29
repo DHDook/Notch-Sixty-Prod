@@ -1028,6 +1028,12 @@ final class AudioIOEngine: ObservableObject {
     var activeQuietZoneLeaseEnabled = false
     private var activeQuietZoneLeaseKeeper: ActiveQuietZoneLeaseKeeper?
 
+    /// E4 S18b: true when the lease is required and its renewal is running (the adaptive gate
+    /// closes otherwise). With the lease flag off nothing is required, so this is true.
+    var activeQuietZoneLeaseHealthy: Bool {
+        !activeQuietZoneLeaseEnabled || activeQuietZoneLeaseKeeper?.isRunning == true
+    }
+
     /// Starts or stops lease renewal to match whether anti-noise is live on the current session.
     private func syncActiveQuietZoneLease(active: Bool) {
         guard activeQuietZoneLeaseEnabled, active, let session = transportSession else {
@@ -1347,6 +1353,35 @@ final class AudioIOEngine: ObservableObject {
 
     /// E4 S15: clears a latched howl-guard trip; the arm calls it before arming.
     func rearmHowlGuard() { transportSession?.rearmHowlGuard() }
+
+    /// E4 S18b: when true, an active Quiet Zone target also stamps the render snapshot with its arm
+    /// token, which lets the adaptive gain mailbox play. Set by the controller from the
+    /// `e4.adaptive-tonal-live` flag; false leaves the snapshot exactly as before (generation 0).
+    var adaptiveTonalMailboxEnabled = false
+
+    /// The token the kernel holds for the current arm: never 0 (0 means no arm in the mailbox).
+    var kernelArmGeneration: UInt64 { liveTreatmentGeneration &+ 1 }
+
+    @discardableResult
+    func publishActiveQuietZoneGainRecord(_ record: N60ActiveQuietZoneGainRecord) -> UInt64 {
+        transportSession?.publishActiveQuietZoneGainRecord(record) ?? 0
+    }
+
+    func popActiveQuietZoneTelemetry() -> N60ActiveQuietZoneTelemetryRecord? {
+        transportSession?.popActiveQuietZoneTelemetry()
+    }
+
+    var activeQuietZoneMailboxStats: N60ActiveQuietZoneMailboxStats {
+        transportSession?.activeQuietZoneMailboxStats ?? N60ActiveQuietZoneMailboxStats()
+    }
+
+    /// E4 S18b: the worker's link onto the current session, or nil when none is running.
+    var adaptiveTonalLink: (any AdaptiveTonalLiveLink)? {
+        transportSession.map { CoreAudioAdaptiveTonalLink(session: $0) }
+    }
+
+    /// Latches the same fade as a kernel howl-guard trip; the arm then disarms on the trip count.
+    func requestHowlTrip() { transportSession?.requestHowlTrip() }
 
     /// Output gain the user's volume and the headroom attenuation apply, in dB (0 = unity),
     /// for the live-treatment arm switch. Muted reads as -120.
@@ -4466,6 +4501,10 @@ final class AudioIOEngine: ObservableObject {
                         true
                     )
                 }
+        }
+        if attached, adaptiveTonalMailboxEnabled, !tones.isEmpty, let generation = resolved.armGeneration,
+           !N60DSPGraphSnapshotSetActiveQuietZoneArmGeneration(&graph, generation &+ 1) {
+            throw ActiveQuietZoneError.invalidConfiguration
         }
         guard attached,
               N60DSPGraphSnapshotSetActiveQuietZonePeakCap(

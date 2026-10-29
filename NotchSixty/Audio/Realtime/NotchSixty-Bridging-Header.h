@@ -15,6 +15,7 @@
 #import "N60FeedForwardDeadlineBridge.h"
 #import "N60AncGuard.h"
 #import "N60Fxlms.h"
+#import "N60RemoteTonal.h"
 #import "N60TargetedRoomMeasurementBridge.h"
 #import "N60Convolution.h"
 #import "N60LinearPhaseEQ.h"

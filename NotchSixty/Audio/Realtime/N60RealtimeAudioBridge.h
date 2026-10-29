@@ -290,6 +290,22 @@ bool N60RealtimeAudioBridgeAttachHowlGuard(N60RealtimeAudioBridge * _Nonnull bri
 void N60RealtimeAudioBridgeRearmHowlGuard(N60RealtimeAudioBridge * _Nonnull bridge);
 uint64_t N60RealtimeAudioBridgeHowlGuardTripCount(const N60RealtimeAudioBridge * _Nonnull bridge);
 
+/// E4 S18b: adaptive tonal gain mailbox, phase-anchor telemetry and the worker's howl-trip request
+/// (see N60ActiveQuietZone.h). Publish has one writer (the adaptive worker); Pop has one reader.
+/// Publish returns the sequence (0 when there is no kernel or the record is rejected outright).
+uint64_t N60RealtimeAudioBridgePublishActiveQuietZoneGainRecord(
+    N60RealtimeAudioBridge * _Nonnull bridge,
+    const N60ActiveQuietZoneGainRecord * _Nonnull record
+);
+bool N60RealtimeAudioBridgePopActiveQuietZoneTelemetry(
+    N60RealtimeAudioBridge * _Nonnull bridge,
+    N60ActiveQuietZoneTelemetryRecord * _Nonnull record
+);
+N60ActiveQuietZoneMailboxStats N60RealtimeAudioBridgeActiveQuietZoneMailboxStats(
+    const N60RealtimeAudioBridge * _Nonnull bridge
+);
+void N60RealtimeAudioBridgeRequestHowlTrip(N60RealtimeAudioBridge * _Nonnull bridge);
+
 void N60RealtimeAudioBridgeSetActiveQuietZoneReferenceDemand(
     N60RealtimeAudioBridge * _Nonnull bridge,
     bool enabled

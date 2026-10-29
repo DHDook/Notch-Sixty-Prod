@@ -356,6 +356,41 @@ static void test_mic_moved(double fs) {
 }
 
 /* The speaker is wired out of phase: positive feedback. Adaptation must not run away. */
+/* E4 S18b: the supervised re-solve sequence the controller drives after the microphone moved:
+   re-identify the path with the raised dither, adopt it as the reference, acknowledge the move,
+   then adapt. The tone must end cancelled again, the latch must be clear and the gain must stay
+   inside a bounded multiple of the converged gain throughout. */
+static void test_resolve(double fs) {
+    const std::vector<double> hz = {80.0, 110.0};
+    Config c = scenario(fs, hz);
+    const Truth t0 = calibrate(c, hz);
+    Sim sim(c, hz, t0);
+    sim.run(8.0);
+    const double convergedGain = std::max(sim.maxGain, 1e-6);
+    sim.plant.inject(Fault::MicMoved, 0.36);
+    Config moved = c;
+    moved.listener.x += 0.36;
+    const Truth t1 = calibrate(moved, hz);
+    sim.run(2.0);
+    N60RemoteTonalBeginReidentify(sim.core);
+    sim.run(3.0);
+    N60RemoteTonalEndReidentify(sim.core);
+    N60RemoteTonalCaptureReference(sim.core);
+    N60RemoteTonalAcknowledgeMove(sim.core);
+    sim.run_measured(8.0);
+    const N60RemoteTonalStatus st = N60RemoteTonalReadStatus(sim.core);
+    for (uint32_t i = 0; i < 2; ++i) {
+        const double after = sim.tail_amp(i);
+        CHECK(dbr(after / std::abs(t1.D[i])) < -12.0, "%.0f Hz: tone %u only %.1f dB down after the re-solve", fs, i,
+              dbr(after / std::abs(t1.D[i])));
+    }
+    CHECK(!st.micMoved, "%.0f Hz: mic-moved still latched after the acknowledged re-solve", fs);
+    CHECK(sim.maxGain < convergedGain * 8.0 + 1e-3, "%.0f Hz: gain %.4f exceeded a bounded multiple of %.4f", fs, sim.maxGain,
+          convergedGain);
+    printf("  re-solve  %6.0f Hz: tones %.1f / %.1f dB after, moved=%d\n", fs, dbr(sim.tail_amp(0) / std::abs(t1.D[0])),
+           dbr(sim.tail_amp(1) / std::abs(t1.D[1])), st.micMoved);
+}
+
 static void test_path_invert(double fs) {
     const std::vector<double> hz = {80.0};
     Config c = scenario(fs, hz);
@@ -472,6 +507,7 @@ int main(int argc, char **argv) {
             test_converge(fs);
             test_path_step(fs);
             test_mic_moved(fs);
+            test_resolve(fs);
             test_path_invert(fs);
             test_drift_delay(fs);
             test_robustness(fs);
