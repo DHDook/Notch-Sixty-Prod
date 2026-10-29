@@ -182,6 +182,24 @@ fi
 # E4 S14: dead-man lease on the anti-noise in the render kernel.
 # shellcheck disable=SC2086
 harness e4_engine_lease "${STRICT[@]}" -O2 -include stddef.h -I"$RT" ci/harness_e4_engine_lease.c $ALL_RT_NO_BRIDGE -framework Accelerate -lc++
+# E4 S13: acoustic twin (closed-loop room simulator) with the tonal canceller and
+# howl guard in the loop. SOAK=1 adds the long drift and fault soak.
+if selected e4_acoustic_twin; then
+    if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -I"$RT" -c "$RT/n60_anc_guard.cpp" -o "$OUT/n60_anc_guard_twin.o" \
+        && clang++ -std=c++20 -O2 -Wall -Wextra -Werror -I"$RT" -c "$RT/n60_fxlms.cpp" -o "$OUT/n60_fxlms_twin.o" \
+        && clang++ -std=c++20 -O2 -Wall -Wextra -Werror -I"$RT" -Ici ci/harness_e4_acoustic_twin.cpp \
+            "$OUT/n60_anc_guard_twin.o" "$OUT/n60_fxlms_twin.o" -o "$OUT/e4_acoustic_twin"; then
+        echo "::group::e4_acoustic_twin"
+        if "$OUT/e4_acoustic_twin" && { [ "${SOAK:-0}" != 1 ] || "$OUT/e4_acoustic_twin" --soak; }; then
+            passed+=(e4_acoustic_twin)
+        else
+            failed+=(e4_acoustic_twin)
+        fi
+        echo "::endgroup::"
+    else
+        failed+=(e4_acoustic_twin)
+    fi
+fi
 # E4 S5: adaptive ANC core (FxLMS) on a simulated plant.
 if selected e4_fxlms; then
     if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -I"$RT" -c "$RT/n60_fxlms.cpp" -o "$OUT/n60_fxlms.o"; then
