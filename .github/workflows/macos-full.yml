@@ -55,6 +55,7 @@ jobs:
       - name: Behavioural C harnesses
         env:
           N60_PARITY_FULL: "1" # E6 S10: full parity corpus at all eight rates, with graph timings
+          SOAK: "1" # E4 S13: long acoustic-twin drift and fault soak
         run: ci/run_harnesses.sh
 
       - name: Render and bridge benchmarks
