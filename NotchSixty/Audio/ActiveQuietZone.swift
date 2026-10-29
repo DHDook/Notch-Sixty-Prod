@@ -358,6 +358,18 @@ struct ActiveQuietZoneRuntimeTarget: Equatable, Sendable {
         )
     }
 
+    /// True when every tone is within `fraction` of the same tone in `other`. E4 S19 allows a
+    /// retarget of up to 2 % while armed (a phase-continuous glide in the kernel).
+    func frequencies(
+        withinFraction fraction: Double,
+        of other: ActiveQuietZoneRuntimeTarget
+    ) -> Bool {
+        guard tones.count == other.tones.count else { return false }
+        return zip(tones, other.tones).allSatisfy {
+            abs($0.frequencyHz - $1.frequencyHz) <= fraction * $1.frequencyHz + 0.001
+        }
+    }
+
     func sameFrequencies(
         as other: ActiveQuietZoneRuntimeTarget
     ) -> Bool {

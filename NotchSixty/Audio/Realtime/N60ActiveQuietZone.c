@@ -146,6 +146,35 @@ static bool runtime_is_silent(
         && tone->transitionFramesRemaining == 0u;
 }
 
+
+/* E4 S19: start a phase-continuous glide of an active tone to targetHz over `frames` frames.
+ * The oscillator phasor is untouched; its per-frame increment phasor is rotated a little each
+ * frame, so the frequency moves linearly and the phase never steps. No allocation; sincos runs
+ * once here, not per frame. */
+static void begin_glide(
+    N60ActiveQuietZoneToneRuntime *tone,
+    double targetHz,
+    double sampleRate,
+    uint32_t frames
+) {
+    if (frames < 1u) frames = 1u;
+    const double step = (targetHz - tone->frequencyHz) / (double)frames;
+    const double rotation = N60_AQZ_TWO_PI * step / sampleRate;
+    const double targetIncrement = N60_AQZ_TWO_PI * targetHz / sampleRate;
+    tone->glideFramesRemaining = frames;
+    tone->glideFrequencyStep = step;
+    tone->glideRotationCosine = cos(rotation);
+    tone->glideRotationSine = sin(rotation);
+    tone->glideTargetHz = targetHz;
+    tone->glideTargetIncrementCosine = cos(targetIncrement);
+    tone->glideTargetIncrementSine = sin(targetIncrement);
+}
+
+static uint32_t glide_frames(double sampleRate) {
+    const double frames = floor(sampleRate * N60_ACTIVE_QUIET_ZONE_MAILBOX_CROSSFADE_SECONDS + 0.5);
+    return frames < 1.0 ? 1u : (uint32_t)frames;
+}
+
 static void schedule_tone(
     N60ActiveQuietZoneToneRuntime *runtime,
     const N60ActiveQuietZoneToneSnapshot *target,
@@ -219,13 +248,23 @@ bool N60ActiveQuietZoneRuntimeSchedule(
                 return false;
             }
             if (tone->active
-                && fabs(
-                    tone->frequencyHz - target->frequencyHz
-                ) > 0.001
-                && !runtime_is_silent(tone)) {
-                // Do not jump an active oscillator to another phase/frequency.
-                // Fade/disarm must complete before a new target frequency.
-                return false;
+                && !runtime_is_silent(tone)
+                && fabs(tone->frequencyHz - target->frequencyHz) > 0.001) {
+                const double glideEnd = tone->glideFramesRemaining > 0u
+                    ? tone->glideTargetHz : tone->frequencyHz;
+                const double difference = fabs(glideEnd - target->frequencyHz);
+                if (runtime->mailboxRecordValid
+                    && fabs(tone->frequencyHz - target->frequencyHz)
+                        <= N60_ACTIVE_QUIET_ZONE_TRACK_RANGE_FRACTION * target->frequencyHz) {
+                    // The mailbox record sets the frequency while it is held (ApplyMailbox).
+                } else if (difference <= N60_ACTIVE_QUIET_ZONE_GLIDE_MAX_FRACTION * glideEnd
+                           && target->frequencyHz >= N60_ACTIVE_QUIET_ZONE_MIN_HZ
+                           && target->frequencyHz <= N60_ACTIVE_QUIET_ZONE_MAX_HZ) {
+                    begin_glide(tone, target->frequencyHz, sampleRate, glide_frames(sampleRate));
+                } else {
+                    // Too large a move for an active oscillator: fade or disarm first.
+                    return false;
+                }
             }
             if (!tone->active || runtime_is_silent(tone)) {
                 tone->frequencyHz = target->frequencyHz;
@@ -241,6 +280,7 @@ bool N60ActiveQuietZoneRuntimeSchedule(
                 tone->currentRightReal = 0.0f;
                 tone->currentRightImaginary = 0.0f;
                 tone->active = true;
+                tone->glideFramesRemaining = 0u;
             }
         }
 
@@ -301,6 +341,7 @@ static void advance_coefficient_transition(
             tone->incrementCosine = 1.0;
             tone->incrementSine = 0.0;
             tone->frequencyHz = 0.0;
+            tone->glideFramesRemaining = 0u;
         }
     }
 }
@@ -339,6 +380,19 @@ void N60ActiveQuietZoneRuntimeProcessFrame(
             + cosine * tone->incrementSine;
         tone->oscillatorCosine = nextCosine;
         tone->oscillatorSine = nextSine;
+        if (tone->glideFramesRemaining > 0u) {
+            const double c = tone->incrementCosine;
+            const double sn = tone->incrementSine;
+            tone->incrementCosine = c * tone->glideRotationCosine - sn * tone->glideRotationSine;
+            tone->incrementSine = sn * tone->glideRotationCosine + c * tone->glideRotationSine;
+            tone->frequencyHz += tone->glideFrequencyStep;
+            tone->glideFramesRemaining -= 1u;
+            if (tone->glideFramesRemaining == 0u) {
+                tone->frequencyHz = tone->glideTargetHz;
+                tone->incrementCosine = tone->glideTargetIncrementCosine;
+                tone->incrementSine = tone->glideTargetIncrementSine;
+            }
+        }
         tone->phaseRadians +=
             N60_AQZ_TWO_PI
             * tone->frequencyHz
@@ -527,8 +581,18 @@ void N60ActiveQuietZoneRuntimeApplyMailbox(
     bool matches = record->toneCount == snapshot->toneCount
         && record->toneCount <= N60_ACTIVE_QUIET_ZONE_MAX_TONES;
     for (uint32_t t = 0u; matches && t < record->toneCount; ++t) {
-        matches = isfinite(record->frequencyHz[t])
-            && fabs(record->frequencyHz[t] - snapshot->tones[t].frequencyHz) <= 0.001;
+        const double f = record->frequencyHz[t];
+        const double armed = snapshot->tones[t].frequencyHz;
+        matches = isfinite(f)
+            && f >= N60_ACTIVE_QUIET_ZONE_MIN_HZ && f <= N60_ACTIVE_QUIET_ZONE_MAX_HZ
+            && f < sampleRate * 0.5
+            && fabs(f - armed) <= N60_ACTIVE_QUIET_ZONE_TRACK_RANGE_FRACTION * armed + 0.001;
+        const N60ActiveQuietZoneToneRuntime *playing = &runtime->tones[t];
+        if (matches && playing->active) {
+            // One retarget moves the playing tone by at most the glide limit.
+            const double from = playing->glideFramesRemaining > 0u ? playing->glideTargetHz : playing->frequencyHz;
+            matches = fabs(f - from) <= N60_ACTIVE_QUIET_ZONE_GLIDE_MAX_FRACTION * from + 0.001;
+        }
     }
     if (!matches) {
         runtime->mailboxRecordValid = false;
@@ -593,6 +657,10 @@ void N60ActiveQuietZoneRuntimeApplyMailbox(
         target.rightReal = gain[t][2];
         target.rightImaginary = gain[t][3];
         schedule_tone(tone, &target, (uint32_t)frames, true);
+        const double from = tone->glideFramesRemaining > 0u ? tone->glideTargetHz : tone->frequencyHz;
+        if (fabs(record->frequencyHz[t] - from) > 0.001) {
+            begin_glide(tone, record->frequencyHz[t], sampleRate, (uint32_t)frames);
+        }
     }
     if (record->attemptCapLinear > 0.0f && record->attemptCapLinear < runtime->peakCapLinear) {
         runtime->peakCapLinear = record->attemptCapLinear;

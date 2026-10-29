@@ -574,7 +574,7 @@ final class ActiveQuietZoneTests: XCTestCase {
 
         var changed = N60ActiveQuietZoneSnapshotMakeBypassed()
         var tone61 = cTone(
-            frequency: 61,
+            frequency: 63,
             leftReal: 0.03,
             rightReal: 0.02
         )
@@ -594,6 +594,20 @@ final class ActiveQuietZoneTests: XCTestCase {
                 &changed,
                 sampleRate
             )
+        )
+
+        // E4 S19: a retarget of up to 2 % glides instead of requiring a fade-out.
+        var nudged = N60ActiveQuietZoneSnapshotMakeBypassed()
+        var tone606 = cTone(
+            frequency: 60.6,
+            leftReal: 0.03,
+            rightReal: 0.02
+        )
+        XCTAssertTrue(
+            N60ActiveQuietZoneSnapshotSet(&nudged, &tone606, 1, 4, sampleRate, true)
+        )
+        XCTAssertTrue(
+            N60ActiveQuietZoneRuntimeSchedule(&runtime, &nudged, sampleRate)
         )
 
         var bypass = N60ActiveQuietZoneSnapshotMakeBypassed()

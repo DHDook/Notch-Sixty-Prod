@@ -1432,7 +1432,7 @@ final class AudioIOEngine: ObservableObject {
         if activeQuietZoneRuntimeTarget.active,
            target.active,
            !activeQuietZoneRuntimeTarget
-                .sameFrequencies(as: target) {
+                .frequencies(withinFraction: 0.02, of: target) {
             throw ActiveQuietZoneError
                 .frequencyChangeRequiresDisarm
         }

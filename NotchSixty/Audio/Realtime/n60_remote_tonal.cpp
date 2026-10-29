@@ -27,6 +27,24 @@ struct Rec {
     uint64_t hostTime = 0;
     cd phasor[N60_FXLMS_MAX_TONES];
     cd weq[N60_FXLMS_MAX_TONES];  // W-equivalent of the gain playing
+    double freq[N60_FXLMS_MAX_TONES] = {};  // the kernel's frequency at this record
+};
+
+// E4 S19: one tone's frequency-tracking loop.
+struct Pll {
+    bool primed = false;
+    double theta = 0;     // predicted phase of Dm relative to the kernel phasor
+    double df = 0;        // disturbance minus demodulation frequency, Hz
+    double fest = 0;      // estimated disturbance frequency, Hz
+    double turn = 0;      // the loop's estimate of Dm's phase step over the last block, rad
+    double err = 0;
+    bool locked = false;
+    uint32_t unlocked = 0;
+    uint32_t steady = 0;  // consecutive blocks with a small phase error
+    uint32_t outOfRange = 0;
+    double peak = 0;      // slow peak of |Dm|
+    double vanishedSeconds = 0;
+    bool lost = false;
 };
 
 struct Rls {
@@ -58,6 +76,9 @@ struct N60RemoteTonal {
     cd weight[N60_FXLMS_MAX_TONES];
     cd shareL[N60_FXLMS_MAX_TONES], shareR[N60_FXLMS_MAX_TONES];
     cd refPath[N60_FXLMS_MAX_TONES];
+    cd curSeed[N60_FXLMS_MAX_TONES];
+    double freq[N60_FXLMS_MAX_TONES] = {};
+    Pll pll[N60_FXLMS_MAX_TONES];
     Rls fit[N60_FXLMS_MAX_TONES];
     bool fitStarted = false;
     cd measured[N60_FXLMS_MAX_TONES];
@@ -75,6 +96,7 @@ struct N60RemoteTonal {
     bool haveBase = false;
     uint64_t baseHost = 0;
     double lastBlockSeconds = 0;
+    double lastDt = 0.25;
     double firstBlockSeconds = -1;
     uint64_t blocks = 0, uncovered = 0, gaps = 0, resets = 0, nonFinite = 0, records = 0;
 
@@ -114,6 +136,9 @@ void reset_state(N60RemoteTonal &c) {
     for (uint32_t k = 0; k < c.tones; ++k) {
         c.weight[k] = to_cd(c.cfg.weightSeed[k]);
         c.refPath[k] = to_cd(c.cfg.pathSeed[k]);
+        c.curSeed[k] = to_cd(c.cfg.pathSeed[k]);
+        c.freq[k] = c.cfg.toneHz[k];
+        c.pll[k] = Pll{};
         c.measured[k] = 0;
         c.adapting[k] = false;
         c.dither[k] = 1.0;
@@ -195,6 +220,12 @@ void clamp_weights(N60RemoteTonal &c) {
     }
 }
 
+double wrap_pi(double x) {
+    while (x > M_PI) x -= kTwoPi;
+    while (x < -M_PI) x += kTwoPi;
+    return x;
+}
+
 // Kalman filter over x = (D, S), each a random walk, with the measurement M = D + S Gbar.
 // D drifts slowly (temperature, a moving source) and S changes abruptly or not at all, so D's
 // process noise is larger than S's. A forgetting factor would let D's drift leak into S when the
@@ -248,6 +279,85 @@ void update_fit(N60RemoteTonal &c, uint32_t k, cd m, cd g, double dt) {
     } else {
         f.surprise = 0;
     }
+}
+
+
+// E4 S19: second-order PLL on the instantaneous disturbance phasor (see N60RemoteTonal.h).
+void track_frequency(N60RemoteTonal &c, uint32_t k, cd dm, double dt, double demodHz) {
+    Pll &p = c.pll[k];
+    const double level = std::abs(dm);
+    if (!finite(dm) || level < 20.0 * c.cfg.measurementNoise) {
+        p.locked = false;
+        p.turn = 0.0;
+        // A primed tone whose disturbance falls under the gate has left the demodulation bin.
+        if (p.primed) {
+            p.vanishedSeconds += dt;
+            if (p.vanishedSeconds >= 6.0) p.lost = true;
+        }
+        return;
+    }
+    p.peak = std::max(level, p.peak * std::exp(-dt / 20.0));
+    if (level < 0.25 * p.peak) {
+        p.vanishedSeconds += dt;
+        if (p.vanishedSeconds >= 6.0) p.lost = true;
+    } else {
+        p.vanishedSeconds = 0.0;
+    }
+    const double ang = std::arg(dm);
+    if (!p.primed) {
+        p.primed = true;
+        p.theta = ang;
+        p.fest = demodHz;
+        p.df = 0.0;
+        p.err = 0.0;
+        p.locked = false;
+        return;
+    }
+    constexpr double zeta = 0.7071067811865476;
+    // trackBandwidthHz is the loop's natural frequency; a 0.5 Hz loop follows a 0.36 Hz/s chirp
+    // with a phase error near 0.25 rad.
+    const double wn = kTwoPi * c.cfg.trackBandwidthHz;
+    const double kp = std::min(2.0 * zeta * wn * dt, 0.7);
+    const double ki = std::min(wn * dt * wn * dt, 0.3);
+    p.df = p.fest - demodHz;
+    const double pred = p.theta + kTwoPi * p.df * dt;
+    const double e = wrap_pi(ang - pred);
+    p.err = e;
+    const double thetaBefore = p.theta;
+    p.steady = std::fabs(e) < 0.3 ? p.steady + 1 : 0;
+    if (std::fabs(e) > 0.6) {
+        // A jump this size is a path change or a lost tone, not a drift: hold the loop at the new
+        // phase with no rate until it settles.
+        p.theta = ang;
+        p.fest = demodHz;
+    } else {
+        p.theta = wrap_pi(pred + kp * e);
+        p.fest += ki * e / (kTwoPi * dt);
+    }
+    p.turn = std::fabs(e) > 0.6 ? 0.0 : wrap_pi(p.theta - thetaBefore);
+    p.df = p.fest - demodHz;
+    if (std::fabs(e) > 0.6) {
+        p.locked = false;
+        if (++p.unlocked >= 12) p.lost = true;
+    } else {
+        p.locked = true;
+        p.unlocked = 0;
+    }
+    const double armed = c.cfg.toneHz[k];
+    if (std::fabs(p.fest - armed) > c.cfg.trackRangeFraction * armed + 0.01) {
+        if (++p.outOfRange >= 3) p.lost = true;
+    } else {
+        p.outOfRange = 0;
+    }
+}
+
+double suggested_frequency(const N60RemoteTonal &c, uint32_t k, double dt) {
+    const double armed = c.cfg.toneHz[k];
+    const double slew = c.cfg.frequencySlewPerSecond * c.freq[k] * dt;
+    double f = c.freq[k] + std::clamp(c.pll[k].primed ? c.pll[k].fest - c.freq[k] : 0.0, -slew, slew);
+    const double range = c.cfg.trackRangeFraction * armed;
+    f = std::clamp(f, armed - range, armed + range);
+    return std::clamp(f, double(N60_ACTIVE_QUIET_ZONE_MIN_HZ), double(N60_ACTIVE_QUIET_ZONE_MAX_HZ));
 }
 
 void detect(N60RemoteTonal &c, double now) {
@@ -334,6 +444,9 @@ N60RemoteTonalConfig N60RemoteTonalConfigDefault(double micSampleRate, double ho
     c.measurementNoise = 1e-5;
     c.slewDB = 1.5f;
     c.slewDegrees = 10.0f;
+    c.trackBandwidthHz = 0.5;
+    c.frequencySlewPerSecond = 0.005;
+    c.trackRangeFraction = 0.10;
     return c;
 }
 
@@ -352,6 +465,9 @@ bool N60RemoteTonalConfigIsValid(const N60RemoteTonalConfig *config) {
     if (!(c.pathMemorySeconds >= 0.5 && c.pathMemorySeconds <= 60.0)) return false;
     if (!(c.measurementNoise > 0.0 && c.measurementNoise < 1.0)) return false;
     if (!(c.slewDB >= 0.0f && c.slewDegrees >= 0.0f)) return false;
+    if (!(c.trackBandwidthHz >= 0.05 && c.trackBandwidthHz <= 2.0)) return false;
+    if (!(c.frequencySlewPerSecond >= 0.0 && c.frequencySlewPerSecond <= 0.05)) return false;
+    if (!(c.trackRangeFraction >= 0.0 && c.trackRangeFraction <= 0.10)) return false;
     for (uint32_t k = 0; k < c.toneCount; ++k) {
         if (!(c.toneHz[k] >= 20.0f && c.toneHz[k] <= 150.0f)) return false;
         if (!(c.toneHz[k] < 0.5 * c.micSampleRate)) return false;
@@ -394,7 +510,8 @@ void N60RemoteTonalDestroy(N60RemoteTonal *core) { delete core; }
 void N60RemoteTonalPushTelemetry(N60RemoteTonal *c, const N60ActiveQuietZoneTelemetryRecord *record) {
     if (c == nullptr || record == nullptr || record->hostTime == 0 || record->toneCount < c->tones) return;
     for (uint32_t k = 0; k < c->tones; ++k) {
-        if (std::fabs(record->frequencyHz[k] - c->cfg.toneHz[k]) > 0.01) return;
+        const double armed = c->cfg.toneHz[k];
+        if (!(std::fabs(record->frequencyHz[k] - armed) <= c->cfg.trackRangeFraction * armed + 0.01)) return;
     }
     if (c->historyCount > 0) {
         const Rec &newest = c->history[(c->historyCount - 1) % c->history.size()];
@@ -412,6 +529,7 @@ void N60RemoteTonalPushTelemetry(N60RemoteTonal *c, const N60ActiveQuietZoneTele
         slot.phasor[k] = mag > 0.0 && std::isfinite(mag) ? p / mag : cd{1, 0};
         const cd w = weq_of(*c, *record, k);
         slot.weq[k] = finite(w) ? w : cd{0, 0};
+        slot.freq[k] = record->frequencyHz[k];
     }
     ++c->historyCount;
 }
@@ -453,6 +571,8 @@ bool N60RemoteTonalProcessMic(N60RemoteTonal *c, const float *samples, uint32_t 
 
     // Demodulate against the phasor the kernel played, segment by segment.
     cd acc[N60_FXLMS_MAX_TONES] = {};
+    double demod[N60_FXLMS_MAX_TONES];
+    for (uint32_t k = 0; k < c->tones; ++k) demod[k] = c->freq[k];
     uint32_t i = 0;
     while (i < frames) {
         const int64_t t = static_cast<int64_t>(hostTime) + static_cast<int64_t>(i / c->micRate * c->ticksPerSecond);
@@ -472,7 +592,8 @@ bool N60RemoteTonalProcessMic(N60RemoteTonal *c, const float *samples, uint32_t 
         }
         const double base = static_cast<double>(static_cast<int64_t>(hostTime) - static_cast<int64_t>(r.hostTime)) / c->ticksPerSecond;
         for (uint32_t k = 0; k < c->tones; ++k) {
-            const double omega = kTwoPi * c->cfg.toneHz[k];
+            demod[k] = r.freq[k];
+            const double omega = kTwoPi * r.freq[k];
             cd p = r.phasor[k] * std::polar(1.0, omega * (base + static_cast<double>(i) / c->micRate));
             const cd q = std::polar(1.0, omega / c->micRate);
             double re = 0, im = 0;
@@ -514,6 +635,7 @@ bool N60RemoteTonalProcessMic(N60RemoteTonal *c, const float *samples, uint32_t 
 
     const double now = c->seconds(hostTime) + blockSeconds;
     const double dt = blockSeconds;
+    c->lastDt = dt;
     if (c->firstBlockSeconds < 0) c->firstBlockSeconds = now;
     const double alpha = 1.0 - std::exp(-dt / c->cfg.convergenceSeconds);
     bool fault = false;
@@ -539,6 +661,9 @@ bool N60RemoteTonalProcessMic(N60RemoteTonal *c, const float *samples, uint32_t 
             f.p11 = std::pow(0.5 * sp, 2.0);
             f.p01 = 0;
         }
+        // The tracker sees the disturbance against the path as it stood before this block's update,
+        // so a turning disturbance cannot leak into the path estimate before the loop has it.
+        track_frequency(*c, k, m[k] - c->fit[k].s * gbar[k], dt, demod[k]);
         update_fit(*c, k, m[k], gbar[k], dt);
     }
     c->fitStarted = true;
@@ -603,7 +728,7 @@ bool N60RemoteTonalNextRecord(N60RemoteTonal *c, uint64_t armGeneration, float a
         }
         const cd gl = target * c->shareL[k];
         const cd gr = target * c->shareR[k];
-        record->frequencyHz[k] = c->cfg.toneHz[k];
+        record->frequencyHz[k] = c->freq[k];
         record->gain[k][0] = static_cast<float>(gl.real());
         record->gain[k][1] = static_cast<float>(gl.imag());
         record->gain[k][2] = static_cast<float>(gr.real());
@@ -652,9 +777,37 @@ bool N60RemoteTonalSetWeights(N60RemoteTonal *c, const N60AncComplex *weights, u
     return true;
 }
 
+bool N60RemoteTonalSetToneFrequency(N60RemoteTonal *c, uint32_t tone, double hz, const N60AncComplex *pathSeed) {
+    if (c == nullptr || tone >= c->tones || !std::isfinite(hz)) return false;
+    const double armed = c->cfg.toneHz[tone];
+    const double range = c->cfg.trackRangeFraction * armed + 0.01;
+    if (std::fabs(hz - armed) > range) return false;
+    if (hz < N60_ACTIVE_QUIET_ZONE_MIN_HZ || hz > N60_ACTIVE_QUIET_ZONE_MAX_HZ || hz >= 0.5 * c->micRate) return false;
+    cd ratio{1.0, 0.0};
+    if (pathSeed != nullptr) {
+        const cd next = to_cd(*pathSeed);
+        if (!finite(next) || !(std::abs(next) >= c->cfg.pathFloor)) return false;
+        ratio = next / c->curSeed[tone];
+        if (!finite(ratio)) return false;
+    }
+    c->freq[tone] = hz;
+    if (pathSeed != nullptr) {
+        c->curSeed[tone] = to_cd(*pathSeed);
+        c->fit[tone].s *= ratio;
+        c->refPath[tone] *= ratio;
+        c->detectorCount = 0;
+        c->violationStart = -1;
+    }
+    return true;
+}
+
 void N60RemoteTonalMarkDiscontinuity(N60RemoteTonal *c) {
     if (c == nullptr) return;
     ++c->gaps;
+    for (uint32_t k = 0; k < c->tones; ++k) {
+        c->pll[k].primed = false;
+        c->pll[k].locked = false;
+    }
     c->historyCount = 0;
     c->violationStart = -1;
     c->detectorCount = 0;
@@ -692,5 +845,12 @@ N60RemoteTonalStatus N60RemoteTonalReadStatus(const N60RemoteTonal *c) {
     s.micMovedKind = c->movedKind;
     s.micMovedAtSeconds = c->movedAt;
     s.reidentifying = c->reidentify;
+    for (uint32_t k = 0; k < c->tones; ++k) {
+        s.frequencyHz[k] = c->freq[k];
+        s.suggestedHz[k] = suggested_frequency(*c, k, c->lastDt);
+        s.offsetHz[k] = c->pll[k].primed ? c->pll[k].fest - c->freq[k] : 0.0;
+        s.locked[k] = c->pll[k].locked;
+        if (c->pll[k].lost) s.trackingLost = true;
+    }
     return s;
 }

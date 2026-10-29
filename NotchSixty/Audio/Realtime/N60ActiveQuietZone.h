@@ -13,6 +13,12 @@ extern "C" {
 #define N60_ACTIVE_QUIET_ZONE_MAX_HZ 150.0
 #define N60_ACTIVE_QUIET_ZONE_MAX_TONE_PEAK_DBFS (-24.0)
 #define N60_ACTIVE_QUIET_ZONE_MAX_AGGREGATE_PEAK_DBFS (-18.0)
+/// E4 S19: one retarget may move an active tone by at most this fraction of its current
+/// frequency; the oscillator glides there phase-continuously over the mailbox crossfade.
+#define N60_ACTIVE_QUIET_ZONE_GLIDE_MAX_FRACTION 0.02
+/// E4 S19: the tracking range around the armed (snapshot) frequency. A mailbox record may
+/// follow a drifting tone this far; a larger move needs a disarm.
+#define N60_ACTIVE_QUIET_ZONE_TRACK_RANGE_FRACTION 0.10
 
 typedef struct {
     double frequencyHz;
@@ -61,6 +67,16 @@ typedef struct {
     uint32_t transitionFramesTotal;
     uint32_t transitionFramesRemaining;
     bool active;
+    // E4 S19 glide: per frame the increment phasor is rotated by (glideRotationCosine,
+    // glideRotationSine) and frequencyHz moves by glideFrequencyStep, for glideFramesRemaining
+    // frames; the last frame lands on glideTargetHz and the exact target increment.
+    uint32_t glideFramesRemaining;
+    double glideRotationCosine;
+    double glideRotationSine;
+    double glideFrequencyStep;
+    double glideTargetHz;
+    double glideTargetIncrementCosine;
+    double glideTargetIncrementSine;
 } N60ActiveQuietZoneToneRuntime;
 
 typedef struct {
@@ -121,9 +137,12 @@ void N60ActiveQuietZoneRuntimeReset(
 );
 
 /// Control-plane preparation invoked when an immutable graph snapshot changes.
-/// Active frequency changes are fail-closed: callers must first publish a
-/// zero/bypassed snapshot, allowing the current tone to fade out, before
-/// introducing a different frequency in the same slot.
+/// Active frequency changes up to N60_ACTIVE_QUIET_ZONE_GLIDE_MAX_FRACTION of the tone's current
+/// frequency glide there phase-continuously (E4 S19). Larger changes are fail-closed: callers must
+/// first publish a zero/bypassed snapshot, allowing the current tone to fade out, before
+/// introducing a different frequency in the same slot. While a valid mailbox record of the same
+/// arm is held, the tone may sit anywhere within N60_ACTIVE_QUIET_ZONE_TRACK_RANGE_FRACTION of the
+/// snapshot's frequency: the record, not the snapshot, then sets the frequency.
 bool N60ActiveQuietZoneRuntimeSchedule(
     N60ActiveQuietZoneRuntime * _Nonnull runtime,
     const N60ActiveQuietZoneSnapshot * _Nonnull snapshot,
@@ -148,7 +167,8 @@ void N60ActiveQuietZoneRuntimeProcessFrame(
  *
  * A record is ignored (counted, nothing changes) when the snapshot is not enabled, its
  * generation is 0 or differs from the snapshot's armGeneration, its tone count or any tone
- * frequency (0.001 Hz) differs from the snapshot's, or any value is non-finite. Otherwise each
+ * frequency lies outside the tracking range of the snapshot's (E4 S19: +-10 %, 20 to 150 Hz, below
+ * Nyquist) or more than the glide limit (2 %) from the tone now playing, or any value is non-finite. Otherwise each
  * tone's gains are limited to min(per-tone peak limit, snapshot cap, record attempt cap) and the
  * sum over tones per channel to min(aggregate limit, snapshot cap, attempt cap) by scaling; any
  * scaling counts as "clamped". The runtime's output clamp becomes the lower of the snapshot cap and

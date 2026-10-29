@@ -53,6 +53,8 @@ struct Source {
     double phase = 0;
     Vec2 position{-2, 0};
     Vec2 velocity{0, 0};
+    double hzRate = 0;       /* Hz per second after hzRateStart (a drifting fan; not carried across changeRate) */
+    double hzRateStart = 0;
 };
 
 struct Config {
@@ -262,7 +264,9 @@ private:
         const double d = distance(from, to);
         const double temp = cfg_.temperatureC + cfg_.temperatureRateCPerS * t;
         const double tau = d / speedOfSound(temp);
-        return s.amplitude / std::max(d, 0.5) * std::cos(kTau * s.hz * (t - tau) + s.phase);
+        const double x = t - tau;
+        const double since = std::max(0.0, x - s.hzRateStart);
+        return s.amplitude / std::max(d, 0.5) * std::cos(kTau * (s.hz * x + 0.5 * s.hzRate * since * since) + s.phase);
     }
 
     uint64_t next() {

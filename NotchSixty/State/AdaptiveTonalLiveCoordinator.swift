@@ -347,10 +347,11 @@ final class AdaptiveTonalLiveCoordinator: ObservableObject {
             lastGaps = report.gaps
         }
         gapTimes.removeAll { now - $0 > 10 }
-        if report.modelResets > lastModelResets || report.pathFault
+        if report.modelResets > lastModelResets || report.pathFault || report.trackingLost
             || gapTimes.count > Self.maximumGapsPer10Seconds {
             faulted = true
-            let why = report.pathFault ? "a non-finite path or weight"
+            let why = report.trackingLost ? "a tone drifted out of the tracking range"
+                : report.pathFault ? "a non-finite path or weight"
                 : (report.modelResets > lastModelResets ? "the adaptive model had to reset" : "too many gaps in the microphone")
             onEvent?(.environment, "Adaptive fault: \(why).")
         }
