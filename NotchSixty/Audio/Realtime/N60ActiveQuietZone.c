@@ -420,6 +420,33 @@ static void advance_coefficient_transition(
     }
 }
 
+void N60ActiveQuietZoneRuntimeAccumulateProgramme(
+    N60ActiveQuietZoneRuntime *runtime,
+    float left,
+    float right
+) {
+    if (runtime == NULL) return;
+    const double l = isfinite(left) ? (double)left : 0.0;
+    const double r = isfinite(right) ? (double)right : 0.0;
+    for (uint32_t t = 0u; t < N60_ACTIVE_QUIET_ZONE_MAX_TONES; ++t) {
+        const N60ActiveQuietZoneToneRuntime *tone = &runtime->tones[t];
+        if (!tone->active) {
+            if (runtime->programmeFrames[t] != 0u) {
+                memset(runtime->programmeSum[t], 0, sizeof runtime->programmeSum[t]);
+                runtime->programmeFrames[t] = 0u;
+            }
+            continue;
+        }
+        const double c = tone->oscillatorCosine;
+        const double s = tone->oscillatorSine;
+        runtime->programmeSum[t][0] += l * c;
+        runtime->programmeSum[t][1] -= l * s;
+        runtime->programmeSum[t][2] += r * c;
+        runtime->programmeSum[t][3] -= r * s;
+        if (runtime->programmeFrames[t] < UINT32_MAX) runtime->programmeFrames[t] += 1u;
+    }
+}
+
 void N60ActiveQuietZoneRuntimeProcessFrame(
     N60ActiveQuietZoneRuntime *runtime,
     float *left,
@@ -821,7 +848,7 @@ uint64_t N60ActiveQuietZoneTelemetryDropped(const N60ActiveQuietZoneTelemetry *r
 }
 
 bool N60ActiveQuietZoneRuntimeCaptureTelemetry(
-    const N60ActiveQuietZoneRuntime *runtime,
+    N60ActiveQuietZoneRuntime *runtime,
     uint64_t hostTime,
     uint64_t renderedFrame,
     N60ActiveQuietZoneTelemetryRecord *record
@@ -843,6 +870,18 @@ bool N60ActiveQuietZoneRuntimeCaptureTelemetry(
         record->gain[t][2] = tone->currentRightReal;
         record->gain[t][3] = tone->currentRightImaginary;
     }
+    for (uint32_t t = 0u; t < N60_ACTIVE_QUIET_ZONE_MAX_TONES; ++t) {
+        const uint32_t frames = runtime->programmeFrames[t];
+        if (frames > 0u) {
+            const double inverse = 1.0 / (double)frames;
+            for (uint32_t i = 0u; i < 4u; ++i) {
+                record->programme[t][i] = (float)(runtime->programmeSum[t][i] * inverse);
+            }
+            record->programmeFrames[t] = frames;
+        }
+    }
+    memset(runtime->programmeSum, 0, sizeof runtime->programmeSum);
+    memset(runtime->programmeFrames, 0, sizeof runtime->programmeFrames);
     record->toneCount = count;
     return count > 0u;
 }

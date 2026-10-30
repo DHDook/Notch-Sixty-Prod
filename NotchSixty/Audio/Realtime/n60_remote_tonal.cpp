@@ -28,6 +28,9 @@ struct Rec {
     cd phasor[N60_FXLMS_MAX_TONES];
     cd weq[N60_FXLMS_MAX_TONES];  // W-equivalent of the gain playing
     double freq[N60_FXLMS_MAX_TONES] = {};  // the kernel's frequency at this record
+    bool progOk[N60_FXLMS_MAX_TONES];       // programme mean present (frames > 0, finite)
+    cd progL[N60_FXLMS_MAX_TONES];          // E4 S22: mean programme x conj(phasor) per channel
+    cd progR[N60_FXLMS_MAX_TONES];
 };
 
 // E4 S19: one tone's frequency-tracking loop.
@@ -76,6 +79,9 @@ struct N60RemoteTonal {
     cd weight[N60_FXLMS_MAX_TONES];
     cd shareL[N60_FXLMS_MAX_TONES], shareR[N60_FXLMS_MAX_TONES];
     cd refPath[N60_FXLMS_MAX_TONES];
+    cd rhoL[N60_FXLMS_MAX_TONES], rhoR[N60_FXLMS_MAX_TONES];  // S_c / S, E4 S22
+    cd programmeRemoved[N60_FXLMS_MAX_TONES];
+    float programmeFeed[N60_FXLMS_MAX_TONES] = {};
     cd curSeed[N60_FXLMS_MAX_TONES];
     double freq[N60_FXLMS_MAX_TONES] = {};
     Pll pll[N60_FXLMS_MAX_TONES];
@@ -447,6 +453,7 @@ N60RemoteTonalConfig N60RemoteTonalConfigDefault(double micSampleRate, double ho
     c.trackBandwidthHz = 0.5;
     c.frequencySlewPerSecond = 0.005;
     c.trackRangeFraction = 0.10;
+    c.removeProgramme = false;
     return c;
 }
 
@@ -499,6 +506,21 @@ N60RemoteTonal *N60RemoteTonalCreate(const N60RemoteTonalConfig *config) {
     for (uint32_t k = 0; k < c->tones; ++k) {
         c->shareL[k] = to_cd(config->leftShare[k]);
         c->shareR[k] = to_cd(config->rightShare[k]);
+        const cd seed = to_cd(config->pathSeed[k]);
+        cd pl = to_cd(config->leftPathSeed[k]);
+        cd pr = to_cd(config->rightPathSeed[k]);
+        if (!(std::abs(pl) > 0.0) && !(std::abs(pr) > 0.0)) {
+            const cd sum = c->shareL[k] + c->shareR[k];
+            const cd even = std::abs(sum) > 1e-9 ? seed / sum : cd{0, 0};
+            pl = even;
+            pr = even;
+        }
+        c->rhoL[k] = pl / seed;
+        c->rhoR[k] = pr / seed;
+        if (!finite(c->rhoL[k]) || !finite(c->rhoR[k])) {
+            c->rhoL[k] = 0;
+            c->rhoR[k] = 0;
+        }
     }
     c->rng = config->ditherSeed != 0 ? config->ditherSeed : 1;
     reset_state(*c);
@@ -530,6 +552,18 @@ void N60RemoteTonalPushTelemetry(N60RemoteTonal *c, const N60ActiveQuietZoneTele
         const cd w = weq_of(*c, *record, k);
         slot.weq[k] = finite(w) ? w : cd{0, 0};
         slot.freq[k] = record->frequencyHz[k];
+        slot.progL[k] = 0;
+        slot.progR[k] = 0;
+        slot.progOk[k] = false;
+        if (record->programmeFrames[k] > 0u) {
+            const cd l{record->programme[k][0], record->programme[k][1]};
+            const cd r{record->programme[k][2], record->programme[k][3]};
+            if (finite(l) && finite(r)) {
+                slot.progL[k] = l;
+                slot.progR[k] = r;
+                slot.progOk[k] = true;
+            }
+        }
     }
     ++c->historyCount;
 }
@@ -614,6 +648,9 @@ bool N60RemoteTonalProcessMic(N60RemoteTonal *c, const float *samples, uint32_t 
 
     // Window-mean gain playing (looked up one loop delay earlier).
     cd gbar[N60_FXLMS_MAX_TONES] = {};
+    cd pbarL[N60_FXLMS_MAX_TONES] = {};
+    cd pbarR[N60_FXLMS_MAX_TONES] = {};
+    double pbarW[N60_FXLMS_MAX_TONES] = {};  // window weight of records that carry a programme mean
     i = 0;
     while (i < frames) {
         const int64_t t = static_cast<int64_t>(hostTime) - delayTicks
@@ -629,7 +666,12 @@ bool N60RemoteTonalProcessMic(N60RemoteTonal *c, const float *samples, uint32_t 
             end = static_cast<uint32_t>(std::clamp(std::ceil(sample), static_cast<double>(i + 1), static_cast<double>(frames)));
         }
         const double ws = window_sum(i, end, frames);
-        for (uint32_t k = 0; k < c->tones; ++k) gbar[k] += ws * r.weq[k];
+        for (uint32_t k = 0; k < c->tones; ++k) {
+            gbar[k] += ws * r.weq[k];
+            if (r.progOk[k]) pbarW[k] += ws;
+            pbarL[k] += ws * r.progL[k];
+            pbarR[k] += ws * r.progR[k];
+        }
         i = end;
     }
 
@@ -643,6 +685,18 @@ bool N60RemoteTonalProcessMic(N60RemoteTonal *c, const float *samples, uint32_t 
     for (uint32_t k = 0; k < c->tones; ++k) {
         m[k] = 2.0 * acc[k] / wTotal;
         gbar[k] /= wTotal;
+        c->programmeRemoved[k] = 0;
+        c->programmeFeed[k] = 0.0f;
+        if (c->cfg.removeProgramme && pbarW[k] > 0.0) {
+            const cd pl = 2.0 * pbarL[k] / pbarW[k];
+            const cd pr = 2.0 * pbarR[k] / pbarW[k];
+            const cd removed = c->refPath[k] * (c->rhoL[k] * pl + c->rhoR[k] * pr);
+            if (finite(removed)) {
+                m[k] -= removed;
+                c->programmeRemoved[k] = removed;
+                c->programmeFeed[k] = static_cast<float>(std::sqrt(std::norm(pl) + std::norm(pr)));
+            }
+        }
         if (!finite(m[k]) || !finite(gbar[k])) fault = true;
     }
     if (fault) {
@@ -840,6 +894,8 @@ N60RemoteTonalStatus N60RemoteTonalReadStatus(const N60RemoteTonal *c) {
             s.pathLevelDB[k] = static_cast<float>(20.0 * std::log10(std::abs(path) / std::abs(ref)));
         }
         s.adapting[k] = c->adapting[k];
+        s.programmeAtMic[k] = from_cd(c->programmeRemoved[k]);
+        s.programmeFeedLevel[k] = c->programmeFeed[k];
     }
     s.micMoved = c->moved;
     s.micMovedKind = c->movedKind;

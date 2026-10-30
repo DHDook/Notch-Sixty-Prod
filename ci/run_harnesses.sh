@@ -236,6 +236,23 @@ if selected e4_remote_tonal; then
         failed+=(e4_remote_tonal)
     fi
 fi
+# E4 S22: programme removal (kernel demodulation of the music at each tone, and the remote tonal
+# core taking it out of the error signal) at the eight standard rates.
+if selected e4_programme_removal; then
+    if clang -std=c11 -O2 -Wall -Wextra -Werror -include stddef.h -I"$RT" -c "$RT/N60ActiveQuietZone.c" -o "$OUT/n60_aqz_programme.o" \
+        && clang++ -std=c++20 -O2 -Wall -Wextra -Werror -include stddef.h -I"$RT" ci/harness_e4_programme_removal.cpp \
+            "$RT/n60_remote_tonal.cpp" "$OUT/n60_aqz_programme.o" -o "$OUT/e4_programme_removal"; then
+        echo "::group::e4_programme_removal"
+        if "$OUT/e4_programme_removal"; then
+            passed+=(e4_programme_removal)
+        else
+            failed+=(e4_programme_removal)
+        fi
+        echo "::endgroup::"
+    else
+        failed+=(e4_programme_removal)
+    fi
+fi
 # E4 S5: adaptive ANC core (FxLMS) on a simulated plant.
 if selected e4_fxlms; then
     if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -I"$RT" -c "$RT/n60_fxlms.cpp" -o "$OUT/n60_fxlms.o"; then

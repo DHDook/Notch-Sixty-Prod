@@ -2290,6 +2290,8 @@ void N60RenderKernelProcessStereoSystemFrameInContext(
 
         float quietZoneLeft = 0.0f;
         float quietZoneRight = 0.0f;
+        // E4 S22: the programme at each tone, for the worker to take out of the error signal.
+        N60ActiveQuietZoneRuntimeAccumulateProgramme(&kernel->activeQuietZoneRuntime, left, right);
         N60ActiveQuietZoneRuntimeProcessFrame(
             &kernel->activeQuietZoneRuntime,
             &quietZoneLeft,

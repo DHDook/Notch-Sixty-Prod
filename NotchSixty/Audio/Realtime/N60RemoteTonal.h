@@ -89,6 +89,27 @@ extern "C" {
  * range for 3 blocks, the loop stays unlocked (|e| > 1.2 rad) for 12 blocks, or the disturbance
  * estimate stays 12 dB under its recent peak for 6 s (the tone jumped out of range or stopped).
  *
+ * Programme removal (E4 S22). Records without a programme mean (first record of a tone, after a
+ * reset, non-finite) are left out of the window average, not counted as silence. The kernel's
+ * mean is rectangular over the inter-record interval, so music a little off the tone leaks in as
+ * a small bias (not a whole number of cycles); the verifier's 6 dB rule keeps that harmless.
+ * Music plays through the same speakers and paths as the anti-noise,
+ * so at a tone frequency it reaches the microphone as P_mic = S_L P_L + S_R P_R, with P_c the
+ * programme's tone on channel c (the same complex amplitude convention as the gain: peak
+ * amplitude relative to the kernel phasor). The kernel demodulates the programme feeds with the
+ * tone oscillator (one multiply-add per channel per tone per frame) and reports the means in the
+ * telemetry; the core forms the window mean P_c the way it does Gbar and subtracts
+ * M <- M - Shat (rho_L P_L + rho_R P_R) before the path fit, the weight update, the frequency
+ * loop and the mic-moved check, rho_c = S_c / S from the per-channel seeds, so music adds path
+ * excitation instead of bias. The path used is the reference path (the seed, or the estimate when
+ * CaptureReference was last called), not the running fit: subtracting the fit would feed the fit's
+ * own change back into the disturbance it is separating from the path, and the loop diverges
+ * (found in the S22 harness). A path that has moved since the reference leaves a residual
+ * (S - Sref) P in the disturbance, which the mic-moved check and re-solve then own. A record's means cover
+ * the frames since the previous record and are looked up like the gain, one loop delay earlier;
+ * the offset (at most a callback) matters only for programme that changes within a few ms.
+ * Off by default.
+ *
  * Realtime behaviour: worker side only, one thread for every call. Create allocates; nothing
  * else does. Latency: none (no audio is passed through). Sample rate: the microphone's, any
  * (8 kHz to 768 kHz); the output rate does not enter. Channels: one microphone, stereo output
@@ -129,6 +150,13 @@ typedef struct {
     double trackBandwidthHz;              /* PLL loop noise bandwidth, default 0.5, 0.05 to 2 */
     double frequencySlewPerSecond;        /* fraction of the frequency per second, default 0.005 */
     double trackRangeFraction;            /* around the armed frequency, default 0.10, 0 = fixed */
+    /// E4 S22 programme removal. When true the core takes the programme (the music) out of the
+    /// measured tone before anything else uses it; see the header comment. The per-channel
+    /// speaker-to-microphone paths at each tone (zero = unknown: the combined path is split by
+    /// the shares, S_L = S_R = S / (s_L + s_R)).
+    bool removeProgramme;                 /* default false */
+    N60AncComplex leftPathSeed[N60_FXLMS_MAX_TONES];
+    N60AncComplex rightPathSeed[N60_FXLMS_MAX_TONES];
 } N60RemoteTonalConfig;
 
 typedef struct {
@@ -160,6 +188,11 @@ typedef struct {
     double offsetHz[N60_FXLMS_MAX_TONES];
     bool locked[N60_FXLMS_MAX_TONES];
     bool trackingLost;
+    /// E4 S22: the programme's tone at the microphone that was taken out of the last block (zero
+    /// when removal is off), relative to the kernel phasor, and the programme tone before the
+    /// speaker-to-microphone path, summed over the two channels in power (peak amplitude).
+    N60AncComplex programmeAtMic[N60_FXLMS_MAX_TONES];
+    float programmeFeedLevel[N60_FXLMS_MAX_TONES];
 } N60RemoteTonalStatus;
 
 typedef struct N60RemoteTonal N60RemoteTonal;
