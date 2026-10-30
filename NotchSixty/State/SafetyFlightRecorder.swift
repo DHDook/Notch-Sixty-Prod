@@ -7,6 +7,8 @@ enum SafetyEventKind: String, Equatable, Sendable {
     case verifier
     case guardTrip
     case environment
+    /// E4 S20: a step, reset or resume of the earned anti-noise cap.
+    case cap
 }
 
 /// One entry: when it happened, what kind, and a short plain-language line. No audio and no

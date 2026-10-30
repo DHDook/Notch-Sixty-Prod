@@ -15,6 +15,9 @@ struct AdaptiveTonalLivePollInput: Sendable {
     var seeds: [AdaptiveQuietZoneSeed]
     /// The planned peak per channel at full strength (linear); the cap in force before a move.
     var plannedPeakLinear: Double
+    /// E4 S20: when true, `plannedPeakLinear` is the earned cap in force and the coordinator writes
+    /// it as the mailbox attempt cap at all times (the kernel ceiling then follows the policy).
+    var earnedCapActive = false
     var leaseRequired: Bool
     var leaseRenewed: Bool
 }
@@ -102,6 +105,12 @@ final class AdaptiveTonalLiveCoordinator: ObservableObject {
     static let capStepBackSeconds = 5.0
 
     var isRebaselining: Bool { resolver.holdsOutputSilent }
+    /// E4 S20: a microphone-move recovery (re-solve, ramp-in or cap step-back) is under way.
+    var isCapRecovering: Bool { resolver.isRunning || rampInStartedAt != nil || capSteppingBackSince != nil }
+    /// E4 S20: facts the earned-cap policy reads after each poll.
+    var earnedCapFacts: (adapting: Bool, guardTripped: Bool, playedPeakLinear: Double) {
+        (state == .adapting, latestReport.guardTripped || faulted, latestReport.playedPeakLinear)
+    }
     var hasWorker: Bool { worker != nil }
 
     init(
@@ -217,6 +226,9 @@ final class AdaptiveTonalLiveCoordinator: ObservableObject {
         if armGeneration == 0 {
             armGeneration = input.engineGeneration &+ 1
             capInForce = Float(input.plannedPeakLinear)
+        } else if input.earnedCapActive, !isCapRecovering {
+            // The earned cap moves between moves; during a recovery it stays at the pre-move level.
+            capInForce = Float(input.plannedPeakLinear)
         }
         seeds = input.seeds
         let report = latestReport
@@ -286,6 +298,7 @@ final class AdaptiveTonalLiveCoordinator: ObservableObject {
                 cap = stepped
             }
         }
+        if cap == 0, input.earnedCapActive { cap = Float(input.plannedPeakLinear) }
         command.attemptCapLinear = cap
 
         // The gate.

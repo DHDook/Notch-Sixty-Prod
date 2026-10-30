@@ -8,10 +8,12 @@
 
 /* Begin PBXBuildFile section */
 		E4J800000000000000000001 /* AdaptiveTonalLiveCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4J800000000000000000011 /* AdaptiveTonalLiveCoordinatorTests.swift */; };
+		E4K200000000000000000001 /* EarnedCapPolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4K200000000000000000011 /* EarnedCapPolicyTests.swift */; };
 		E4J700000000000000000001 /* MicrophoneMoveResolverTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4J700000000000000000011 /* MicrophoneMoveResolverTests.swift */; };
 		E4J600000000000000000001 /* AdaptiveTonalOutputGateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4J600000000000000000011 /* AdaptiveTonalOutputGateTests.swift */; };
 		E4J500000000000000000001 /* AdaptiveTonalLiveLink.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4J500000000000000000011 /* AdaptiveTonalLiveLink.swift */; };
 		E4J400000000000000000001 /* AdaptiveTonalLiveCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4J400000000000000000011 /* AdaptiveTonalLiveCoordinator.swift */; };
+		E4K100000000000000000001 /* EarnedCapPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4K100000000000000000011 /* EarnedCapPolicy.swift */; };
 		E4J300000000000000000001 /* AdaptiveTonalLiveWorker.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4J300000000000000000011 /* AdaptiveTonalLiveWorker.swift */; };
 		E4J200000000000000000001 /* MicrophoneMoveResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4J200000000000000000011 /* MicrophoneMoveResolver.swift */; };
 		E4J100000000000000000001 /* AdaptiveTonalOutputGate.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4J100000000000000000011 /* AdaptiveTonalOutputGate.swift */; };
@@ -489,10 +491,12 @@
 
 /* Begin PBXFileReference section */
 		E4J800000000000000000011 /* AdaptiveTonalLiveCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdaptiveTonalLiveCoordinatorTests.swift; sourceTree = "<group>"; };
+		E4K200000000000000000011 /* EarnedCapPolicyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EarnedCapPolicyTests.swift; sourceTree = "<group>"; };
 		E4J700000000000000000011 /* MicrophoneMoveResolverTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MicrophoneMoveResolverTests.swift; sourceTree = "<group>"; };
 		E4J600000000000000000011 /* AdaptiveTonalOutputGateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdaptiveTonalOutputGateTests.swift; sourceTree = "<group>"; };
 		E4J500000000000000000011 /* AdaptiveTonalLiveLink.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdaptiveTonalLiveLink.swift; sourceTree = "<group>"; };
 		E4J400000000000000000011 /* AdaptiveTonalLiveCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdaptiveTonalLiveCoordinator.swift; sourceTree = "<group>"; };
+		E4K100000000000000000011 /* EarnedCapPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EarnedCapPolicy.swift; sourceTree = "<group>"; };
 		E4J300000000000000000011 /* AdaptiveTonalLiveWorker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdaptiveTonalLiveWorker.swift; sourceTree = "<group>"; };
 		E4J200000000000000000011 /* MicrophoneMoveResolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MicrophoneMoveResolver.swift; sourceTree = "<group>"; };
 		E4J100000000000000000011 /* AdaptiveTonalOutputGate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdaptiveTonalOutputGate.swift; sourceTree = "<group>"; };
@@ -1180,6 +1184,7 @@
 				E4A000000000000000000012 /* LiveTreatmentArmTests.swift */,
 				E4H000000000000000000012 /* DoNoHarmVerifierTests.swift */,
 				E4J800000000000000000011 /* AdaptiveTonalLiveCoordinatorTests.swift */,
+				E4K200000000000000000011 /* EarnedCapPolicyTests.swift */,
 				E4J700000000000000000011 /* MicrophoneMoveResolverTests.swift */,
 				E4J600000000000000000011 /* AdaptiveTonalOutputGateTests.swift */,
 				E4H000000000000000000032 /* SafetyFlightRecorderTests.swift */,
@@ -1428,7 +1433,7 @@
 			path = Backup;
 			sourceTree = "<group>";
 		};
-		A20000000000000000000054 /* State */ = {isa = PBXGroup; children = (A20000000000000000000025 /* AudioLifecycleState.swift */, A100000000000000000E2204 /* FeatureFlags.swift */, A100000000000000000E2202 /* PreferenceKeys.swift */, A2000000000000000000002B /* ProductProfiles.swift */, E12B00000000000000000011 /* SystemSetupFlow.swift */, E12C00000000000000000011 /* SystemSetupStartSteps.swift */, E12D00000000000000000011 /* SystemSetupMeasureAlign.swift */, E12E00000000000000000011 /* SystemSetupBassCorrect.swift */, E12F00000000000000000011 /* SystemSetupVerifySave.swift */, B113B0000000000000000061 /* ProductRecovery.swift */, B113B0000000000000000071 /* HeadroomAssistant.swift */, F64000000000000000000014 /* MultichannelCalibrationController.swift */, A2000000000000000000002D /* RoomCorrectionCalibrationController.swift */, A2000000000000000000002F /* RoomCorrectionProjectController.swift */, F89300000000000000000011 /* AmbientCompensationController.swift */, F90200000000000000000011 /* ActiveQuietZoneController.swift */, E4D000000000000000000011 /* AdaptiveQuietZoneShadow.swift */, E4G000000000000000000011 /* LiveTreatmentArm.swift */, E4H000000000000000000011 /* DoNoHarmVerifier.swift */, E4J100000000000000000011 /* AdaptiveTonalOutputGate.swift */, E4J200000000000000000011 /* MicrophoneMoveResolver.swift */, E4J300000000000000000011 /* AdaptiveTonalLiveWorker.swift */, E4J400000000000000000011 /* AdaptiveTonalLiveCoordinator.swift */, E4H000000000000000000031 /* SafetyFlightRecorder.swift */, E4F200000000000000000013 /* QuietZoneFeedForwardSurveyController.swift */, E4F300000000000000000012 /* QuietZoneFeedForwardShadow.swift */, F92000000000000000000012 /* RoomTreatmentAdvisorController.swift */, E10B00000000000000000004 /* RoomCorrectionDeployController.swift */,); path = State; sourceTree = "<group>"; };
+		A20000000000000000000054 /* State */ = {isa = PBXGroup; children = (A20000000000000000000025 /* AudioLifecycleState.swift */, A100000000000000000E2204 /* FeatureFlags.swift */, A100000000000000000E2202 /* PreferenceKeys.swift */, A2000000000000000000002B /* ProductProfiles.swift */, E12B00000000000000000011 /* SystemSetupFlow.swift */, E12C00000000000000000011 /* SystemSetupStartSteps.swift */, E12D00000000000000000011 /* SystemSetupMeasureAlign.swift */, E12E00000000000000000011 /* SystemSetupBassCorrect.swift */, E12F00000000000000000011 /* SystemSetupVerifySave.swift */, B113B0000000000000000061 /* ProductRecovery.swift */, B113B0000000000000000071 /* HeadroomAssistant.swift */, F64000000000000000000014 /* MultichannelCalibrationController.swift */, A2000000000000000000002D /* RoomCorrectionCalibrationController.swift */, A2000000000000000000002F /* RoomCorrectionProjectController.swift */, F89300000000000000000011 /* AmbientCompensationController.swift */, F90200000000000000000011 /* ActiveQuietZoneController.swift */, E4D000000000000000000011 /* AdaptiveQuietZoneShadow.swift */, E4G000000000000000000011 /* LiveTreatmentArm.swift */, E4H000000000000000000011 /* DoNoHarmVerifier.swift */, E4J100000000000000000011 /* AdaptiveTonalOutputGate.swift */, E4J200000000000000000011 /* MicrophoneMoveResolver.swift */, E4J300000000000000000011 /* AdaptiveTonalLiveWorker.swift */, E4J400000000000000000011 /* AdaptiveTonalLiveCoordinator.swift */, E4K100000000000000000011 /* EarnedCapPolicy.swift */, E4H000000000000000000031 /* SafetyFlightRecorder.swift */, E4F200000000000000000013 /* QuietZoneFeedForwardSurveyController.swift */, E4F300000000000000000012 /* QuietZoneFeedForwardShadow.swift */, F92000000000000000000012 /* RoomTreatmentAdvisorController.swift */, E10B00000000000000000004 /* RoomCorrectionDeployController.swift */,); path = State; sourceTree = "<group>"; };
 		A20000000000000000000055 /* Diagnostics */ = {isa = PBXGroup; children = (A20000000000000000000026 /* AudioDiagnosticsSnapshot.swift */, A2000000000000000000002A /* ProductionAnalysisWorker.swift */,); path = Diagnostics; sourceTree = "<group>"; };
 		A30000000000000000000050 /* Realtime */ = {
 			isa = PBXGroup;
@@ -1738,6 +1743,7 @@
 				E4H000000000000000000001 /* DoNoHarmVerifier.swift in Sources */,
 				E4J500000000000000000001 /* AdaptiveTonalLiveLink.swift in Sources */,
 				E4J400000000000000000001 /* AdaptiveTonalLiveCoordinator.swift in Sources */,
+				E4K100000000000000000001 /* EarnedCapPolicy.swift in Sources */,
 				E4J300000000000000000001 /* AdaptiveTonalLiveWorker.swift in Sources */,
 				E4J200000000000000000001 /* MicrophoneMoveResolver.swift in Sources */,
 				E4J100000000000000000001 /* AdaptiveTonalOutputGate.swift in Sources */,
@@ -1927,6 +1933,7 @@
 				E4A000000000000000000002 /* LiveTreatmentArmTests.swift in Sources */,
 				E4H000000000000000000002 /* DoNoHarmVerifierTests.swift in Sources */,
 				E4J800000000000000000001 /* AdaptiveTonalLiveCoordinatorTests.swift in Sources */,
+				E4K200000000000000000001 /* EarnedCapPolicyTests.swift in Sources */,
 				E4J700000000000000000001 /* MicrophoneMoveResolverTests.swift in Sources */,
 				E4J600000000000000000001 /* AdaptiveTonalOutputGateTests.swift in Sources */,
 				E4H000000000000000000022 /* SafetyFlightRecorderTests.swift in Sources */,

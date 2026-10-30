@@ -1359,6 +1359,12 @@ final class AudioIOEngine: ObservableObject {
     /// `e4.adaptive-tonal-live` flag; false leaves the snapshot exactly as before (generation 0).
     var adaptiveTonalMailboxEnabled = false
 
+    /// E4 S20 (`e4.earned-cap`): the earned anti-noise cap at arm, linear. 0 (the default, flag
+    /// off) keeps the fixed -40 dBFS snapshot cap exactly as before. Above 0 the snapshot cap is
+    /// the arm ceiling (-18 dBFS) and the kernel starts its own ceiling here and raises it at most
+    /// 3 dB per 5 s. Set by the Quiet Zone controller at arm; the engine never reads the flag.
+    var earnedCapInitialLinear: Float = 0
+
     /// The token the kernel holds for the current arm: never 0 (0 means no arm in the mailbox).
     var kernelArmGeneration: UInt64 { liveTreatmentGeneration &+ 1 }
 
@@ -4506,12 +4512,16 @@ final class AudioIOEngine: ObservableObject {
            !N60DSPGraphSnapshotSetActiveQuietZoneArmGeneration(&graph, generation &+ 1) {
             throw ActiveQuietZoneError.invalidConfiguration
         }
+        let earnedInitial = earnedCapInitialLinear
+        let snapshotCapDBFS = earnedInitial > 0
+            ? LiveTreatmentSafeguards.hardMaximumPeakCapDBFS
+            : LiveTreatmentSafeguards.defaultPeakCapDBFS
         guard attached,
               N60DSPGraphSnapshotSetActiveQuietZonePeakCap(
                 &graph,
-                Float(LiveTreatmentSafeguards.linearPeak(
-                    dbfs: LiveTreatmentSafeguards.defaultPeakCapDBFS))
-              ) else {
+                Float(LiveTreatmentSafeguards.linearPeak(dbfs: snapshotCapDBFS))
+              ),
+              N60DSPGraphSnapshotSetActiveQuietZoneInitialCap(&graph, tones.isEmpty ? 0 : earnedInitial) else {
             throw ActiveQuietZoneError
                 .invalidConfiguration
         }

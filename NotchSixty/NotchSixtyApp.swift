@@ -158,6 +158,9 @@ final class ProductController: ObservableObject {
                 linkProvider: { [weak audioEngine] in audioEngine?.adaptiveTonalLink }
             ))
         }
+        if adaptiveTonalLive, FeatureFlags().isEnabled(.earnedCap) {
+            activeQuietZone.attachEarnedCap(EarnedCapPolicy(store: EarnedCapStore()))
+        }
         self.adaptiveQuietZone = AdaptiveQuietZoneShadow(
             quietZone: activeQuietZone,
             ambient: ambientCompensation
