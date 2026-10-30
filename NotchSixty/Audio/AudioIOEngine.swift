@@ -2998,6 +2998,31 @@ final class AudioIOEngine: ObservableObject {
         ) ?? []
     }
 
+    /// E4 S22b1: records what is written to the speakers for the feed-forward echo model.
+    /// Set from `e4.feedforward-live`; while false nothing ever sets the demand.
+    var speakerDriveFeatureEnabled = false
+
+    func setSpeakerDriveDemand(_ requested: Bool) {
+        let allowed = SpeakerDriveDemandPolicy.demand(
+            requested: requested,
+            featureEnabled: speakerDriveFeatureEnabled,
+            transportAvailable: ambientPlaybackReferenceAvailable
+        )
+        transportSession?.setSpeakerDriveDemand(allowed)
+    }
+
+    func speakerDriveSnapshot() -> N60SpeakerDriveSnapshot? {
+        transportSession?.speakerDriveSnapshot()
+    }
+
+    func readSpeakerDriveAnchors() -> [N60SpeakerDriveAnchor] {
+        transportSession?.readSpeakerDriveAnchors() ?? []
+    }
+
+    func readSpeakerDriveFrames(maximumFrames: Int) -> [N60AmbientPlaybackReferenceFrame] {
+        transportSession?.readSpeakerDriveFrames(maximumFrames: maximumFrames) ?? []
+    }
+
     var activeQuietZoneReferenceAvailable: Bool {
         activeQuietZoneStereoSpeakerRuntimeAvailable
     }

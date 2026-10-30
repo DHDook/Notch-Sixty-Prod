@@ -73,7 +73,7 @@ build_core_objs() {
     done
 }
 # Bridge harnesses: build the core only when one of them is selected.
-if selected pr35_transition_ack || selected pr41_same_device_output_map || selected pr101_realtime_resource_soak || selected e6_graph_takeover || selected e6_fade_alignment || selected e6_nchannel_graph || selected e6_shutdown_fade || selected e8_routed_output; then
+if selected pr35_transition_ack || selected pr41_same_device_output_map || selected pr101_realtime_resource_soak || selected e6_graph_takeover || selected e6_fade_alignment || selected e6_nchannel_graph || selected e6_shutdown_fade || selected e8_routed_output || selected e4_speaker_drive; then
     build_core_objs
 fi
 
@@ -131,6 +131,9 @@ harness e6_fade_alignment "${STRICT[@]}" -O2 -include stddef.h -I"$RT" ci/harnes
     -Icore/include ${CORE_OBJS[@]+"${CORE_OBJS[@]}"} -lc++ -framework Accelerate -framework CoreAudio
 # shellcheck disable=SC2086
 harness e6_nchannel_graph "${STRICT[@]}" -O2 -include stddef.h -I"$RT" ci/harness_e6_nchannel_graph.c $ALL_RT \
+    -Icore/include ${CORE_OBJS[@]+"${CORE_OBJS[@]}"} -lc++ -framework Accelerate -framework CoreAudio
+# shellcheck disable=SC2086
+harness e4_speaker_drive "${STRICT[@]}" -O2 -include stddef.h -I"$RT" ci/harness_e4_speaker_drive.c $ALL_RT \
     -Icore/include ${CORE_OBJS[@]+"${CORE_OBJS[@]}"} -lc++ -framework Accelerate -framework CoreAudio
 # shellcheck disable=SC2086
 harness e8_routed_output "${STRICT[@]}" -O2 -include stddef.h -I"$RT" ci/harness_e8_routed_output.c $ALL_RT \
@@ -269,6 +272,16 @@ if selected e4_ff_shadow; then
             "$OUT/n60_ff_shadow.o" "$OUT/n60_fxlms_ff.o" -lc++ -lm
     else
         failed+=(e4_ff_shadow)
+    fi
+fi
+# E4 S22b1: feed-forward echo stage (leakage removal, offset search, gap, drift) on a simulated plant.
+if selected e4_ff_echo; then
+    if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -I"$RT" -c "$RT/n60_fxlms.cpp" -o "$OUT/n60_fxlms_echo.o" \
+        && clang++ -std=c++20 -O2 -Wall -Wextra -Werror -I"$RT" -c "$RT/n60_ff_shadow.cpp" -o "$OUT/n60_ff_shadow_echo.o"; then
+        harness e4_ff_echo "${STRICT[@]}" -O2 -I"$RT" ci/harness_e4_ff_echo.c \
+            "$OUT/n60_ff_shadow_echo.o" "$OUT/n60_fxlms_echo.o" -lc++ -lm
+    else
+        failed+=(e4_ff_echo)
     fi
 fi
 # E4 S9b1: feed-forward survey (Welch H1 transfer and coherence) on a simulated plant.

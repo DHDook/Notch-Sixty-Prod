@@ -105,6 +105,7 @@
 		A10000000000000000000013 /* NotchSixtyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000024 /* NotchSixtyTests.swift */; };
 		A10000000000000000000014 /* ConvolutionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000027 /* ConvolutionTests.swift */; };
 		A100000000000000000E2205 /* FeatureFlagsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000E2206 /* FeatureFlagsTests.swift */; };
+		E4M100000000000000000014 /* SpeakerDriveDemandPolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4M100000000000000000013 /* SpeakerDriveDemandPolicyTests.swift */; };
 		A100000000000000000E1301 /* PresetInterchangeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000E1302 /* PresetInterchangeTests.swift */; };
 		A100000000000000000E1303 /* MultichannelCalibrationDesignerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000E1304 /* MultichannelCalibrationDesignerTests.swift */; };
 		A100000000000000000E1305 /* FeedForwardShadowIsolationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000E1306 /* FeedForwardShadowIsolationTests.swift */; };
@@ -153,6 +154,7 @@
 		F64000000000000000000005 /* ProductionMultichannelCalibrationWorkspace.swift in Sources */ = {isa = PBXBuildFile; fileRef = F64000000000000000000015 /* ProductionMultichannelCalibrationWorkspace.swift */; };
 		A20000000000000000000015 /* AudioLifecycleState.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000025 /* AudioLifecycleState.swift */; };
 		A100000000000000000E2203 /* FeatureFlags.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000E2204 /* FeatureFlags.swift */; };
+		E4M100000000000000000012 /* SpeakerDriveDemandPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4M100000000000000000011 /* SpeakerDriveDemandPolicy.swift */; };
 		A100000000000000000E2201 /* PreferenceKeys.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000E2202 /* PreferenceKeys.swift */; };
 		A20000000000000000000016 /* AudioDiagnosticsSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000026 /* AudioDiagnosticsSnapshot.swift */; };
 		A20000000000000000000017 /* StereoPlaybackControl.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000027 /* StereoPlaybackControl.swift */; };
@@ -603,6 +605,7 @@
 		A10000000000000000000026 /* NotchSixtyTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = NotchSixtyTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		A10000000000000000000027 /* ConvolutionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConvolutionTests.swift; sourceTree = "<group>"; };
 		A100000000000000000E2206 /* FeatureFlagsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeatureFlagsTests.swift; sourceTree = "<group>"; };
+		E4M100000000000000000013 /* SpeakerDriveDemandPolicyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerDriveDemandPolicyTests.swift; sourceTree = "<group>"; };
 		A100000000000000000E1302 /* PresetInterchangeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PresetInterchangeTests.swift; sourceTree = "<group>"; };
 		A100000000000000000E1304 /* MultichannelCalibrationDesignerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MultichannelCalibrationDesignerTests.swift; sourceTree = "<group>"; };
 		A100000000000000000E1306 /* FeedForwardShadowIsolationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeedForwardShadowIsolationTests.swift; sourceTree = "<group>"; };
@@ -636,6 +639,7 @@
 		F64000000000000000000015 /* ProductionMultichannelCalibrationWorkspace.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductionMultichannelCalibrationWorkspace.swift; sourceTree = "<group>"; };
 		A20000000000000000000025 /* AudioLifecycleState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioLifecycleState.swift; sourceTree = "<group>"; };
 		A100000000000000000E2204 /* FeatureFlags.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeatureFlags.swift; sourceTree = "<group>"; };
+		E4M100000000000000000011 /* SpeakerDriveDemandPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerDriveDemandPolicy.swift; sourceTree = "<group>"; };
 		A100000000000000000E2202 /* PreferenceKeys.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreferenceKeys.swift; sourceTree = "<group>"; };
 		A20000000000000000000026 /* AudioDiagnosticsSnapshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioDiagnosticsSnapshot.swift; sourceTree = "<group>"; };
 		A20000000000000000000027 /* StereoPlaybackControl.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StereoPlaybackControl.swift; sourceTree = "<group>"; };
@@ -1122,6 +1126,7 @@
 				E6D000000000000000000007 /* LiveNChannelUnifiedGraphTests.swift */,
 				A10000000000000000000027 /* ConvolutionTests.swift */,
 				A100000000000000000E2206 /* FeatureFlagsTests.swift */,
+				E4M100000000000000000013 /* SpeakerDriveDemandPolicyTests.swift */,
 				E11D00000000000000000012 /* MeasurementCoreTests.swift */,
 				E10A00000000000000000042 /* RoomCorrectionCoreTests.swift */,
 				E8A000000000000000000042 /* CrossoverCoreTests.swift */,
@@ -1438,7 +1443,7 @@
 			path = Backup;
 			sourceTree = "<group>";
 		};
-		A20000000000000000000054 /* State */ = {isa = PBXGroup; children = (A20000000000000000000025 /* AudioLifecycleState.swift */, A100000000000000000E2204 /* FeatureFlags.swift */, A100000000000000000E2202 /* PreferenceKeys.swift */, A2000000000000000000002B /* ProductProfiles.swift */, E12B00000000000000000011 /* SystemSetupFlow.swift */, E12C00000000000000000011 /* SystemSetupStartSteps.swift */, E12D00000000000000000011 /* SystemSetupMeasureAlign.swift */, E12E00000000000000000011 /* SystemSetupBassCorrect.swift */, E12F00000000000000000011 /* SystemSetupVerifySave.swift */, B113B0000000000000000061 /* ProductRecovery.swift */, B113B0000000000000000071 /* HeadroomAssistant.swift */, F64000000000000000000014 /* MultichannelCalibrationController.swift */, A2000000000000000000002D /* RoomCorrectionCalibrationController.swift */, A2000000000000000000002F /* RoomCorrectionProjectController.swift */, F89300000000000000000011 /* AmbientCompensationController.swift */, F90200000000000000000011 /* ActiveQuietZoneController.swift */, E4D000000000000000000011 /* AdaptiveQuietZoneShadow.swift */, E4G000000000000000000011 /* LiveTreatmentArm.swift */, E4H000000000000000000011 /* DoNoHarmVerifier.swift */, E4J100000000000000000011 /* AdaptiveTonalOutputGate.swift */, E4J200000000000000000011 /* MicrophoneMoveResolver.swift */, E4J300000000000000000011 /* AdaptiveTonalLiveWorker.swift */, E4J400000000000000000011 /* AdaptiveTonalLiveCoordinator.swift */, E4K100000000000000000011 /* EarnedCapPolicy.swift */, E4L100000000000000000011 /* ExcursionCap.swift */, E4H000000000000000000031 /* SafetyFlightRecorder.swift */, E4F200000000000000000013 /* QuietZoneFeedForwardSurveyController.swift */, E4F300000000000000000012 /* QuietZoneFeedForwardShadow.swift */, F92000000000000000000012 /* RoomTreatmentAdvisorController.swift */, E10B00000000000000000004 /* RoomCorrectionDeployController.swift */,); path = State; sourceTree = "<group>"; };
+		A20000000000000000000054 /* State */ = {isa = PBXGroup; children = (A20000000000000000000025 /* AudioLifecycleState.swift */, A100000000000000000E2204 /* FeatureFlags.swift */, E4M100000000000000000011 /* SpeakerDriveDemandPolicy.swift */, A100000000000000000E2202 /* PreferenceKeys.swift */, A2000000000000000000002B /* ProductProfiles.swift */, E12B00000000000000000011 /* SystemSetupFlow.swift */, E12C00000000000000000011 /* SystemSetupStartSteps.swift */, E12D00000000000000000011 /* SystemSetupMeasureAlign.swift */, E12E00000000000000000011 /* SystemSetupBassCorrect.swift */, E12F00000000000000000011 /* SystemSetupVerifySave.swift */, B113B0000000000000000061 /* ProductRecovery.swift */, B113B0000000000000000071 /* HeadroomAssistant.swift */, F64000000000000000000014 /* MultichannelCalibrationController.swift */, A2000000000000000000002D /* RoomCorrectionCalibrationController.swift */, A2000000000000000000002F /* RoomCorrectionProjectController.swift */, F89300000000000000000011 /* AmbientCompensationController.swift */, F90200000000000000000011 /* ActiveQuietZoneController.swift */, E4D000000000000000000011 /* AdaptiveQuietZoneShadow.swift */, E4G000000000000000000011 /* LiveTreatmentArm.swift */, E4H000000000000000000011 /* DoNoHarmVerifier.swift */, E4J100000000000000000011 /* AdaptiveTonalOutputGate.swift */, E4J200000000000000000011 /* MicrophoneMoveResolver.swift */, E4J300000000000000000011 /* AdaptiveTonalLiveWorker.swift */, E4J400000000000000000011 /* AdaptiveTonalLiveCoordinator.swift */, E4K100000000000000000011 /* EarnedCapPolicy.swift */, E4L100000000000000000011 /* ExcursionCap.swift */, E4H000000000000000000031 /* SafetyFlightRecorder.swift */, E4F200000000000000000013 /* QuietZoneFeedForwardSurveyController.swift */, E4F300000000000000000012 /* QuietZoneFeedForwardShadow.swift */, F92000000000000000000012 /* RoomTreatmentAdvisorController.swift */, E10B00000000000000000004 /* RoomCorrectionDeployController.swift */,); path = State; sourceTree = "<group>"; };
 		A20000000000000000000055 /* Diagnostics */ = {isa = PBXGroup; children = (A20000000000000000000026 /* AudioDiagnosticsSnapshot.swift */, A2000000000000000000002A /* ProductionAnalysisWorker.swift */,); path = Diagnostics; sourceTree = "<group>"; };
 		A30000000000000000000050 /* Realtime */ = {
 			isa = PBXGroup;
@@ -1693,6 +1698,7 @@
 				F64000000000000000000005 /* ProductionMultichannelCalibrationWorkspace.swift in Sources */,
 				A20000000000000000000015 /* AudioLifecycleState.swift in Sources */,
 				A100000000000000000E2203 /* FeatureFlags.swift in Sources */,
+				E4M100000000000000000012 /* SpeakerDriveDemandPolicy.swift in Sources */,
 				A100000000000000000E2201 /* PreferenceKeys.swift in Sources */,
 				A20000000000000000000016 /* AudioDiagnosticsSnapshot.swift in Sources */,
 				A2000000000000000000001A /* ProductionAnalysisWorker.swift in Sources */,
@@ -1873,6 +1879,7 @@
 				A10000000000000000000013 /* NotchSixtyTests.swift in Sources */,
 				A10000000000000000000014 /* ConvolutionTests.swift in Sources */,
 				A100000000000000000E2205 /* FeatureFlagsTests.swift in Sources */,
+				E4M100000000000000000014 /* SpeakerDriveDemandPolicyTests.swift in Sources */,
 				E11D00000000000000000002 /* MeasurementCoreTests.swift in Sources */,
 				E10A00000000000000000032 /* RoomCorrectionCoreTests.swift in Sources */,
 				E8A000000000000000000032 /* CrossoverCoreTests.swift in Sources */,

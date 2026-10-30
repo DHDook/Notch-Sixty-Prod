@@ -18,7 +18,9 @@ struct FeatureFlag: Hashable, Identifiable, Sendable {
 extension FeatureFlag {
     /// Every flag the app knows. Add one when an epic starts merging dark;
     /// delete it, and the checks that read it, once the epic ships.
-    static let all: [FeatureFlag] = [.legacyKernel, .ancEngineLease, .adaptiveTonalLive, .earnedCap]
+    static let all: [FeatureFlag] = [
+        .legacyKernel, .ancEngineLease, .adaptiveTonalLive, .earnedCap, .feedForwardLive
+    ]
 
     /// E6 S11: the unified graph is the default renderer. Turning this on selects the frozen
     /// `N60RenderKernel` fallback instead (no new features). Swift decides; the engine never reads
@@ -53,6 +55,14 @@ extension FeatureFlag {
     static let earnedCap = FeatureFlag(
         id: "e4.earned-cap",
         title: "Earned anti-noise cap",
+        epic: "E4"
+    )
+
+    /// E4 S22: live feed-forward cancellation. S22b1 gates only the speaker-drive recording the
+    /// echo model needs; nothing sets the demand while this is off. Removed when E4 ships.
+    static let feedForwardLive = FeatureFlag(
+        id: "e4.feedforward-live",
+        title: "Live feed-forward cancellation",
         epic: "E4"
     )
 }

@@ -310,7 +310,16 @@ typedef struct {
     /// Sum |W_c| per channel, (0, 16]; default 0.0631 (-24 dB), the offline
     /// compiler's limit.
     float peakGainLimit;
+    /// E4 S22b1: native rate of the speaker-drive stream, 0 (default) or 8 kHz to
+    /// 768 kHz. 0 leaves the echo stage out entirely (the core is bit-identical to S9c).
+    double driveSampleRate;
 } N60FeedForwardShadowConfig;
+
+/// E4 S22b1 echo stage states (N60FeedForwardShadowStatus.echoState).
+#define N60_FF_ECHO_OFF 0u       /* no drive configured or no echo model set */
+#define N60_FF_ECHO_WAITING 1u   /* model set; waiting for drive, timing or programme */
+#define N60_FF_ECHO_SEARCHING 2u /* programme present; looking for the fixed offset */
+#define N60_FF_ECHO_LOCKED 3u    /* offset found; echo is being subtracted */
 
 typedef struct {
     double decimatedRate;
@@ -326,6 +335,17 @@ typedef struct {
     float predictedPower;
     float outputPower[2];
     float weightGain[2];                   /* sum |W_c| */
+    /* E4 S22b1 echo stage (all zero while it is off). */
+    uint32_t echoState;                    /* N60_FF_ECHO_* */
+    int32_t echoOffset;                    /* found offset, fd samples (+ = echo later than predicted) */
+    float searchPeak;                      /* last normalised correlation peak, [0, 1] */
+    uint64_t searchRestarts;               /* searches that ended below 0.7 or were restarted */
+    uint64_t driveFrames;                  /* native drive frames pushed */
+    uint64_t referenceFrames;              /* native reference frames processed */
+    uint64_t driveStarved;                 /* decimated samples with no drive to interpolate */
+    float drivePower;                      /* mean square at fd, left + right */
+    float referencePowerBefore;            /* band-limited reference before removal */
+    float referencePowerAfter;             /* ... after removal (equals before while not locked) */
 } N60FeedForwardShadowStatus;
 
 typedef struct N60FeedForwardShadow N60FeedForwardShadow;
@@ -365,6 +385,54 @@ void N60FeedForwardShadowProcess(
     uint32_t frames
 );
 void N60FeedForwardShadowMarkDiscontinuity(N60FeedForwardShadow * N60_FXLMS_NONNULL shadow);
+
+/* E4 S22b1 echo stage ---------------------------------------------------------
+ * Removes the speakers' own programme from the reference microphone, and its
+ * seat contribution from the error microphone, before adaptation.
+ *  - SetEcho: channel c's leakage path (speaker c to the reference microphone) at
+ *    fd: bulkDelay (0 to 512) then count (1 to 512) taps. Restarts the filters and
+ *    the offset search. Needs driveSampleRate > 0.
+ *  - PushDrive: the samples written to the output, at driveSampleRate, contiguous.
+ *    Decimated by the same filter as the microphones. Counts driveFrames.
+ *  - SetDriveTiming: the drive frame (fractional, counted from the first frame
+ *    pushed since RestartDrive or create) that coincides with reference frame
+ *    micFrame (counted from create, status.referenceFrames), and driveFrames per
+ *    reference frame (about driveSampleRate / sampleRate). Both streams' filter
+ *    delays are handled inside. Call it with every new clock fit.
+ *  - RestartDrive: after a gap in the drive stream. Clears the drive history, makes
+ *    nextDriveFrame the index of the next frame pushed, and restarts the search.
+ * The drive is read ahead by a fixed 10 ms so the search can find an offset of
+ * either sign. Subtraction x -= sum_c L_c * d_c and e -= sum_c S_c * d_c starts only
+ * when the correlation between the band-limited reference and the predicted
+ * leakage, over +/-10 ms, peaks at 0.7 or more, using that peak's lag. Until then
+ * (and while programme above -50 dBFS is present) adaptation is held. The search
+ * runs over 5 s of programme above -50 dBFS and restarts on a gap, a new echo model
+ * or a drive restart. Drive interpolation: 4-point Lagrange (band ends far below
+ * fd/2). Worker thread only; allocation: none after create.
+ */
+bool N60FeedForwardShadowSetEcho(
+    N60FeedForwardShadow * N60_FXLMS_NONNULL shadow,
+    uint32_t channel,
+    uint32_t bulkDelay,
+    const float * N60_FXLMS_NONNULL taps,
+    uint32_t count
+);
+void N60FeedForwardShadowPushDrive(
+    N60FeedForwardShadow * N60_FXLMS_NONNULL shadow,
+    const float * N60_FXLMS_NONNULL left,
+    const float * N60_FXLMS_NONNULL right,
+    uint32_t frames
+);
+bool N60FeedForwardShadowSetDriveTiming(
+    N60FeedForwardShadow * N60_FXLMS_NONNULL shadow,
+    uint64_t micFrame,
+    double driveFrame,
+    double driveFramesPerMicFrame
+);
+void N60FeedForwardShadowRestartDrive(
+    N60FeedForwardShadow * N60_FXLMS_NONNULL shadow,
+    uint64_t nextDriveFrame
+);
 void N60FeedForwardShadowReset(N60FeedForwardShadow * N60_FXLMS_NONNULL shadow);
 N60FeedForwardShadowStatus N60FeedForwardShadowReadStatus(
     const N60FeedForwardShadow * N60_FXLMS_NONNULL shadow

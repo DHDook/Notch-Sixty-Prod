@@ -39,6 +39,12 @@ public:
     void process(const float *reference, const float *error, std::uint32_t frames) noexcept;
     void markDiscontinuity() noexcept;
     void reset() noexcept;
+    // E4 S22b1 echo stage (see N60Fxlms.h).
+    bool setEcho(std::uint32_t channel, std::uint32_t bulkDelay, const float *taps,
+                 std::uint32_t count) noexcept;
+    void pushDrive(const float *left, const float *right, std::uint32_t frames) noexcept;
+    bool setDriveTiming(std::uint64_t micFrame, double driveFrame, double ratio) noexcept;
+    void restartDrive(std::uint64_t nextDriveFrame) noexcept;
     N60FeedForwardShadowStatus status() const noexcept;
     void copyWeights(std::uint32_t channel, float *out, std::uint32_t count) const noexcept;
 
@@ -50,6 +56,19 @@ private:
     void limitWeights() noexcept;
     void restartFilters() noexcept;
     void restoreSeed() noexcept;
+    // Echo stage.
+    void restartEcho() noexcept;
+    bool prepareDrive() noexcept;   // fills the read-ahead drive line for this fd sample
+    double driveAt(std::uint32_t channel, std::int64_t sample) const noexcept;
+    void search(double referenceBand) noexcept;
+    void finishSearch() noexcept;
+
+    static constexpr std::uint32_t kDriveHistory = 16384;   // decimated drive samples
+    static constexpr std::uint32_t kDriveLine = 2048;       // read-ahead drive at fd
+    static constexpr std::uint32_t kMaxLag = 96;            // +/-10 ms at fd <= 8 kHz is 80
+    static constexpr double kSearchSeconds = 5.0;
+    static constexpr double kLockThreshold = 0.7;
+    static constexpr double kActivePower = 1e-5;            // -50 dBFS mean square
 
     // Fixed configuration.
     double decimatedRate_;
@@ -80,6 +99,43 @@ private:
     std::uint64_t gaps_ = 0;
     std::uint64_t modelResets_ = 0;
     std::uint64_t gainLimited_ = 0;
+
+    // Echo stage (inert while driveRate_ == 0 or no echo model is set).
+    double driveRate_ = 0;
+    std::uint32_t lead_ = 0;          // read-ahead and search half-width, fd samples
+    std::vector<Decimator> driveDecimator_;
+    std::array<std::vector<double>, kChannels> driveHistory_;
+    std::uint64_t driveDecimated_ = 0;   // decimated drive samples produced since restart
+    std::uint64_t driveFrames_ = 0;      // native drive frames; index of the next frame
+    std::uint64_t driveBaseFrame_ = 0;   // drive frame index at the last restart
+    std::uint64_t referenceFrames_ = 0;
+    std::int64_t referenceCentre_ = 0;   // native centre of the sample being processed
+    bool timingValid_ = false;
+    std::uint64_t timingMicFrame_ = 0;
+    double timingDriveFrame_ = 0;
+    double timingRatio_ = 1;
+    std::array<std::vector<float>, kChannels> echo_;
+    std::array<std::uint32_t, kChannels> echoDelay_{};
+    bool echoSet_ = false;
+    std::array<std::vector<double>, kChannels> driveLine_;   // read-ahead drive at fd
+    std::vector<double> echoLine_;      // predicted leakage at read-ahead time
+    std::vector<double> predictedBandLine_;
+    std::array<Biquad, 4> predictedBand_{};
+    std::array<Biquad, 4> beforeBand_{};
+    std::uint32_t echoPosition_ = 0;
+    std::uint32_t drivePrepared_ = 0;    // samples of driveLine_ valid since restart
+    bool locked_ = false;
+    std::int32_t offset_ = 0;
+    double drivePower_ = 0;
+    double referenceBefore_ = 0;
+    double referenceAfter_ = 0;
+    std::vector<double> correlation_;
+    double searchXX_ = 0;
+    double searchPP_ = 0;
+    std::uint64_t searchSamples_ = 0;
+    float searchPeak_ = 0;
+    std::uint64_t searchRestarts_ = 0;
+    std::uint64_t driveStarved_ = 0;
 };
 
 }  // namespace n60::anc
