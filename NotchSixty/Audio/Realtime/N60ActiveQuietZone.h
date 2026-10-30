@@ -128,6 +128,10 @@ typedef struct {
     bool mailboxRecordValid;
     bool mailboxReapply;
     N60ActiveQuietZoneGainRecord mailboxRecord;
+    // E4 S22: programme demodulation sums per tone (render thread only), reset by each telemetry
+    // capture; see N60ActiveQuietZoneRuntimeAccumulateProgramme.
+    double programmeSum[N60_ACTIVE_QUIET_ZONE_MAX_TONES][4];
+    uint32_t programmeFrames[N60_ACTIVE_QUIET_ZONE_MAX_TONES];
 } N60ActiveQuietZoneRuntime;
 
 N60ActiveQuietZoneSnapshot
@@ -260,6 +264,12 @@ typedef struct {
     double phasorCosine[N60_ACTIVE_QUIET_ZONE_MAX_TONES];
     double phasorSine[N60_ACTIVE_QUIET_ZONE_MAX_TONES];
     float gain[N60_ACTIVE_QUIET_ZONE_MAX_TONES][4];
+    // E4 S22: the programme (the music on the speaker feeds) demodulated at each tone with the
+    // tone oscillator: mean over programmeFrames[t] frames since the previous record of
+    // x[n] conj(p[n]) per channel (left real, left imaginary, right real, right imaginary),
+    // p the oscillator phasor (unit). 0 frames = no estimate for that tone.
+    uint32_t programmeFrames[N60_ACTIVE_QUIET_ZONE_MAX_TONES];
+    float programme[N60_ACTIVE_QUIET_ZONE_MAX_TONES][4];
 } N60ActiveQuietZoneTelemetryRecord;
 
 typedef struct N60ActiveQuietZoneTelemetry N60ActiveQuietZoneTelemetry;
@@ -277,9 +287,21 @@ bool N60ActiveQuietZoneTelemetryPop(
     N60ActiveQuietZoneTelemetryRecord * _Nonnull record
 );
 uint64_t N60ActiveQuietZoneTelemetryDropped(const N60ActiveQuietZoneTelemetry * _Nonnull ring);
-/// Snapshot of the runtime for the telemetry record. False when no tone is active.
+/// E4 S22: render thread, once per frame immediately before ProcessFrame, with the programme
+/// (the stereo content before the anti-noise is added). For each active tone it adds
+/// x conj(p) per channel (p the oscillator phasor ProcessFrame is about to use) to running sums
+/// that the next CaptureTelemetry turns into means and clears. Realtime: no allocation, no locks,
+/// eight multiply-adds per active tone per frame; non-finite samples count as zero. Reset: the
+/// sums clear on capture and when a tone goes inactive.
+void N60ActiveQuietZoneRuntimeAccumulateProgramme(
+    N60ActiveQuietZoneRuntime * _Nonnull runtime,
+    float left,
+    float right
+);
+/// Snapshot of the runtime for the telemetry record. False when no tone is active. E4 S22: also
+/// takes and clears the programme means.
 bool N60ActiveQuietZoneRuntimeCaptureTelemetry(
-    const N60ActiveQuietZoneRuntime * _Nonnull runtime,
+    N60ActiveQuietZoneRuntime * _Nonnull runtime,
     uint64_t hostTime,
     uint64_t renderedFrame,
     N60ActiveQuietZoneTelemetryRecord * _Nonnull record

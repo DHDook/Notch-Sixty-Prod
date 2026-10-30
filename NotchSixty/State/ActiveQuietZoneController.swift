@@ -110,6 +110,16 @@ final class ActiveQuietZoneController: ObservableObject {
     /// the flag off, in which case nothing below runs and the controller behaves as before.
     private(set) var adaptiveLive: AdaptiveTonalLiveCoordinator?
 
+    /// E4 S22: the music's level at the microphone at each adaptive tone, so the do-no-harm check
+    /// leaves out tones the music dominates instead of reading them as the canceller's doing.
+    private var programmeLevels: [DoNoHarmVerifier.ProgrammeLevel] {
+        // Only while the worker is adapting: a stale report must not keep hiding real harm.
+        guard let live = adaptiveLive, live.earnedCapFacts.adapting else { return [] }
+        return live.latestReport.tones.map {
+            .init(frequencyHz: $0.frequencyHz, levelDBFS: $0.programmeDBFS)
+        }
+    }
+
     func attachAdaptiveLive(_ coordinator: AdaptiveTonalLiveCoordinator?) {
         adaptiveLive = coordinator
         coordinator?.onEvent = { [weak self] kind, message in
@@ -606,7 +616,7 @@ final class ActiveQuietZoneController: ObservableObject {
             targetRampedIn: rampedIn,
             hasBaseline: doNoHarm.hasBaseline,
             verdict: verdict,
-            measurement: doNoHarm.measure(snapshot),
+            measurement: doNoHarm.measure(snapshot, programme: programmeLevels),
             seeds: adaptiveSeeds,
             plannedPeakLinear: availableInjectionPeak,
             earnedCapActive: earnedCap != nil,
@@ -615,7 +625,7 @@ final class ActiveQuietZoneController: ObservableObject {
         ))
         if let earned = earnedCap {
             let facts = adaptive.earnedCapFacts
-            let measurement = doNoHarm.measure(snapshot)
+            let measurement = doNoHarm.measure(snapshot, programme: programmeLevels)
             let now = ProcessInfo.processInfo.systemUptime
             var holding = false
             if excursionLimitsProvider != nil {
@@ -819,7 +829,7 @@ final class ActiveQuietZoneController: ObservableObject {
             if (isObserving || rebaselining), !doNoHarm.hasBaseline {
                 doNoHarm.captureBaseline(snapshot)
             } else {
-                verdict = doNoHarm.evaluate(snapshot, now: Date())
+                verdict = doNoHarm.evaluate(snapshot, now: Date(), programme: programmeLevels)
                 if case .harm = verdict {
                     verifiedReadout = nil
                     arm.reportSeatRegression()

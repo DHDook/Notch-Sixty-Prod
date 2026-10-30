@@ -54,6 +54,9 @@ struct AdaptiveTonalLiveReport: Equatable, Sendable {
         var pathPhaseDegrees: Double
         var pathLevelDB: Double
         var adapting: Bool
+        /// E4 S22: the music's level at the error microphone at this tone (what was taken out of
+        /// the measured tone), dBFS peak; very low when none plays.
+        var programmeDBFS = -240.0
     }
 }
 
@@ -108,6 +111,9 @@ final class AdaptiveTonalLiveWorker: @unchecked Sendable {
         var config = N60RemoteTonalConfigDefault(sampleRate, hostTicksPerSecond)
         config.toneCount = UInt32(tones.count)
         config.ditherSeed = ditherSeed
+        // E4 S22: the music reaches the microphone through the same speakers, so the core takes
+        // it out of the measured tone. Needs the per-channel paths to split the programme.
+        config.removeProgramme = true
         withUnsafeMutableBytes(of: &config.toneHz) { raw in
             let hz = raw.bindMemory(to: Float.self)
             for (k, tone) in tones.enumerated() { hz[k] = Float(tone.frequencyHz) }
@@ -132,6 +138,14 @@ final class AdaptiveTonalLiveWorker: @unchecked Sendable {
             for (k, tone) in tones.enumerated() {
                 v[k] = N60AncComplex(re: Float(tone.offlineMagnitude), im: 0)
             }
+        }
+        withUnsafeMutableBytes(of: &config.leftPathSeed) { raw in
+            let v = raw.bindMemory(to: N60AncComplex.self)
+            for (k, tone) in tones.enumerated() { v[k] = complex(tone.leftPath) }
+        }
+        withUnsafeMutableBytes(of: &config.rightPathSeed) { raw in
+            let v = raw.bindMemory(to: N60AncComplex.self)
+            for (k, tone) in tones.enumerated() { v[k] = complex(tone.rightPath) }
         }
         var guardConfig = N60AncGuardConfigDefault(sampleRate)
         guard N60RemoteTonalConfigIsValid(&config), let core = N60RemoteTonalCreate(&config) else {
@@ -353,6 +367,7 @@ final class AdaptiveTonalLiveWorker: @unchecked Sendable {
         let paths = Self.components(status.path, count: tones.count)
         let phaseDeg = Self.floats(status.pathPhaseDegrees, count: tones.count)
         let levelDB = Self.floats(status.pathLevelDB, count: tones.count)
+        let removed = Self.components(status.programmeAtMic, count: tones.count)
         let adapting = withUnsafeBytes(of: status.adapting) { Array($0.bindMemory(to: Bool.self).prefix(tones.count)) }
         var sum = 0.0
         var peak = 0.0
@@ -376,7 +391,8 @@ final class AdaptiveTonalLiveWorker: @unchecked Sendable {
                 weightDBFS: 20 * log10(max(w, 1.0e-12)),
                 pathPhaseDegrees: Double(phaseDeg[k]),
                 pathLevelDB: Double(levelDB[k]),
-                adapting: adapting[k]
+                adapting: adapting[k],
+                programmeDBFS: 20 * log10(max(hypot(Double(removed[k].re), Double(removed[k].im)), 1.0e-12))
             ))
         }
         report.anyAdapting = adapting.contains(true)

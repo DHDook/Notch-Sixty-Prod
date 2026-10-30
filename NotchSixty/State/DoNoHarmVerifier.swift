@@ -55,8 +55,23 @@ struct DoNoHarmVerifier: Sendable {
     private var violatingSince: Date?
     private var okWindows = 0
 
+    /// E4 S22: a tone or band is left out of the check while the music at its frequency is more
+    /// than this far above what the band measured with the anti-noise out.
+    static let programmeExclusionDB = 6.0
+    /// Bands are wider than a tone: a programme tone counts for a band within this ratio.
+    static let programmeBandRatio = 1.1225  // 2^(1/6): a third-octave band
+
+    /// The music's level at the microphone at one of the canceller's tone frequencies (peak dBFS),
+    /// as the adaptive core measures it after the speaker-to-microphone path.
+    struct ProgrammeLevel: Equatable, Sendable {
+        var frequencyHz: Double
+        var levelDBFS: Double
+    }
+
     /// Latest verified tone reductions, strongest first.
     private(set) var reductions: [SeatVerifiedReduction] = []
+    /// Tones and bands (Hz) left out of the last evaluation because music dominated them.
+    private(set) var programmeExcludedHz: [Double] = []
 
     var hasBaseline: Bool { baselineWindows >= Self.baselineWindowCount }
 
@@ -87,8 +102,14 @@ struct DoNoHarmVerifier: Sendable {
     }
 
     /// Compares one analysis window taken while the anti-noise may be playing with the baseline.
-    mutating func evaluate(_ snapshot: AmbientAnalysisSnapshot, now: Date) -> DoNoHarmVerdict {
+    mutating func evaluate(
+        _ snapshot: AmbientAnalysisSnapshot,
+        now: Date,
+        programme: [ProgrammeLevel] = []
+    ) -> DoNoHarmVerdict {
         guard hasBaseline else { return .baselining }
+        var excluded: [Double] = []
+        defer { programmeExcludedHz = excluded.sorted() }
 
         var worst: (frequencyHz: Double, increaseDB: Double)?
         func consider(_ frequencyHz: Double, _ increase: Double) {
@@ -106,6 +127,10 @@ struct DoNoHarmVerifier: Sendable {
                 // either way it is not louder.
                 continue
             }
+            if Self.programmeDominates(entry.frequencyHz, base: base, programme: programme, ratio: 1 + Self.toneMatchFraction) {
+                excluded.append(entry.frequencyHz)
+                continue
+            }
             let delta = live.levelDBFS - base
             if live.levelDBFS.isFinite { consider(entry.frequencyHz, delta) }
             if -delta >= Self.readoutMinimumReductionDB {
@@ -116,6 +141,10 @@ struct DoNoHarmVerifier: Sendable {
             guard let base = entry.acc.meanDBFS,
                   let live = snapshot.spectrum.first(where: { Self.sameBand($0.centerFrequencyHz, entry.center) }),
                   live.levelDBFS.isFinite else { continue }
+            if Self.programmeDominates(entry.center, base: base, programme: programme, ratio: Self.programmeBandRatio) {
+                excluded.append(entry.center)
+                continue
+            }
             consider(entry.center, live.levelDBFS - base)
         }
 
@@ -146,7 +175,7 @@ struct DoNoHarmVerifier: Sendable {
         var minimumToneReductionDB: Double?
     }
 
-    func measure(_ snapshot: AmbientAnalysisSnapshot) -> Measurement? {
+    func measure(_ snapshot: AmbientAnalysisSnapshot, programme: [ProgrammeLevel] = []) -> Measurement? {
         guard hasBaseline else { return nil }
         var worst = -Double.infinity
         var minimumReduction: Double?
@@ -157,6 +186,7 @@ struct DoNoHarmVerifier: Sendable {
                 // Not detected any more: cancelled below the detector, so at least a large reduction.
                 continue
             }
+            if Self.programmeDominates(entry.frequencyHz, base: base, programme: programme, ratio: 1 + Self.toneMatchFraction) { continue }
             let delta = live.levelDBFS - base
             worst = max(worst, delta)
             minimumReduction = min(minimumReduction ?? .infinity, -delta)
@@ -165,6 +195,7 @@ struct DoNoHarmVerifier: Sendable {
             guard let base = entry.acc.meanDBFS,
                   let live = snapshot.spectrum.first(where: { Self.sameBand($0.centerFrequencyHz, entry.center) }),
                   live.levelDBFS.isFinite else { continue }
+            if Self.programmeDominates(entry.center, base: base, programme: programme, ratio: Self.programmeBandRatio) { continue }
             worst = max(worst, live.levelDBFS - base)
         }
         return Measurement(worstIncreaseDB: worst, minimumToneReductionDB: minimumReduction)
@@ -179,14 +210,34 @@ struct DoNoHarmVerifier: Sendable {
         violatingSince = nil
         okWindows = 0
         reductions = []
+        programmeExcludedHz = []
     }
 
-    /// "-12 dB at 43 Hz, verified", or nil when no tone is verified yet.
+    /// "-12 dB at 43 Hz, verified", or nil when no tone is verified yet. While music dominates a
+    /// tone the readout says so ("music at 43 Hz, not checked") instead of reporting it.
     var readout: String? {
-        guard let best = reductions.first else { return nil }
+        let note = programmeNote
+        guard let best = reductions.first else { return note }
         let db = Int(best.reductionDB.rounded())
         let hz = Int(best.frequencyHz.rounded())
-        return "\u{2212}\(db) dB at \(hz) Hz, verified"
+        let text = "\u{2212}\(db) dB at \(hz) Hz, verified"
+        return note.map { "\(text); \($0)" } ?? text
+    }
+
+    private var programmeNote: String? {
+        guard !programmeExcludedHz.isEmpty else { return nil }
+        var shown: [Int] = []
+        for hz in programmeExcludedHz.map({ Int($0.rounded()) }) where !shown.contains(hz) { shown.append(hz) }
+        return "music at " + shown.prefix(3).map { "\($0) Hz" }.joined(separator: ", ") + ", not checked"
+    }
+
+    /// True when the music at the entry's frequency is more than `programmeExclusionDB` above
+    /// the entry's baseline: what the microphone reads there is mostly music, not noise.
+    private static func programmeDominates(_ hz: Double, base: Double, programme: [ProgrammeLevel], ratio: Double) -> Bool {
+        programme.contains { p in
+            p.levelDBFS.isFinite && max(hz, p.frequencyHz) <= min(hz, p.frequencyHz) * ratio
+                && p.levelDBFS > base + programmeExclusionDB
+        }
     }
 
     private static func inRange(_ hz: Double) -> Bool {

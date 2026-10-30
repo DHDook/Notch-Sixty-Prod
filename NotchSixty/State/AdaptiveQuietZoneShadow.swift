@@ -49,6 +49,10 @@ struct AdaptiveQuietZoneShadowTone: Equatable, Sendable {
     var path: ActiveQuietZoneComplex
     /// sqrt(|L|^2 + |R|^2) of the offline outputs: the offline design's W.
     var offlineMagnitude: Double
+    /// E4 S22: the speaker-to-microphone path of each speaker alone, which programme removal
+    /// needs (the music reaches the microphone through each speaker separately). Zero = unknown.
+    var leftPath = ActiveQuietZoneComplex(real: 0, imaginary: 0)
+    var rightPath = ActiveQuietZoneComplex(real: 0, imaginary: 0)
 
     static func tones(from seeds: [AdaptiveQuietZoneSeed]) -> [AdaptiveQuietZoneShadowTone] {
         seeds
@@ -73,7 +77,9 @@ struct AdaptiveQuietZoneShadowTone: Equatable, Sendable {
                     leftShare: left,
                     rightShare: right,
                     path: left * seed.leftPath + right * seed.rightPath,
-                    offlineMagnitude: norm
+                    offlineMagnitude: norm,
+                    leftPath: seed.leftPath,
+                    rightPath: seed.rightPath
                 )
             }
     }

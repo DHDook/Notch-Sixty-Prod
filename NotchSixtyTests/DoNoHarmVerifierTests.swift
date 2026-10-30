@@ -92,6 +92,37 @@ final class DoNoHarmVerifierTests: XCTestCase {
         XCTAssertEqual(v.evaluate(snapshot(rate: 48_000, toneDB: -28), now: t0.addingTimeInterval(4.0)), .warning)
     }
 
+    func testMusicOverTheToneIsNotHarmAndTheReadoutSaysSoAtEveryRate() {
+        let music = [DoNoHarmVerifier.ProgrammeLevel(frequencyHz: 43, levelDBFS: -20)]
+        for rate in Self.standardRates {
+            var v = baselined(rate: rate)
+            // Music 10 dB over the noise lifts the tone and the band beside it by far more than 1 dB.
+            let loud = snapshot(rate: rate, toneDB: -22, bandOverride: (40, -45))
+            var verdict = DoNoHarmVerdict.baselining
+            for i in 0..<4 {
+                verdict = v.evaluate(loud, now: t0.addingTimeInterval(Double(i)), programme: music)
+            }
+            XCTAssertEqual(verdict, .ok, "\(rate)")
+            XCTAssertEqual(v.readout, "music at 40 Hz, 43 Hz, not checked", "\(rate)")
+            XCTAssertLessThanOrEqual(v.measure(loud, programme: music)?.worstIncreaseDB ?? 99, 1)
+            // Without the programme figure the same snapshot is harm.
+            var w = baselined(rate: rate)
+            _ = w.evaluate(loud, now: t0)
+            guard case .harm = w.evaluate(loud, now: t0.addingTimeInterval(2.5)) else {
+                return XCTFail("expected harm without programme at \(rate)")
+            }
+        }
+    }
+
+    func testMusicWellBelowTheNoiseDoesNotExcludeTheTone() {
+        var v = baselined(rate: 48_000)
+        let quiet = [DoNoHarmVerifier.ProgrammeLevel(frequencyHz: 43, levelDBFS: -50)]
+        _ = v.evaluate(snapshot(rate: 48_000, toneDB: -28.5), now: t0, programme: quiet)
+        guard case .harm = v.evaluate(snapshot(rate: 48_000, toneDB: -28.5), now: t0.addingTimeInterval(2.0), programme: quiet) else {
+            return XCTFail("quiet music must not hide harm")
+        }
+    }
+
     func testCancelledToneProducesAVerifiedReadoutAfterSettling() {
         var v = baselined(rate: 96_000)
         for i in 0..<(DoNoHarmVerifier.readoutVerifiedWindows - 1) {
