@@ -73,6 +73,8 @@ struct EarnedCapPollFacts: Sendable {
     var playedPeakLinear: Double
     /// A microphone-move recovery (re-solve, ramp-in, step-back) is in progress.
     var moveRecovering: Bool
+    /// E4 S21: the thermal hold is in force. The set-time timer pauses and keeps its elapsed time.
+    var thermalHold = false
 }
 
 /// E4 S20: the anti-noise cap earned by trust. One owner of the cap in force: starts at -40 dBFS,
@@ -96,6 +98,10 @@ final class EarnedCapPolicy {
     private var armedGainDB = 0.0
     private var qualifyingSince: TimeInterval?
     private var wasRecovering = false
+    private var pausedAt: TimeInterval?
+    /// E4 S21: how far the thermal hold lowers the cap in force (0 when not holding). It lowers
+    /// the cap only; the earned level, the store and the timer are untouched.
+    private(set) var thermalHoldDB = 0.0
     var onEvent: ((SafetyEventKind, String) -> Void)?
 
     init(store: EarnedCapStore) {
@@ -103,6 +109,18 @@ final class EarnedCapPolicy {
     }
 
     var capLinear: Double { LiveTreatmentSafeguards.linearPeak(dbfs: capDBFS) }
+
+    /// The cap the planner and mailbox use: the earned level less any thermal hold.
+    var effectiveCapDBFS: Double { capDBFS - thermalHoldDB }
+
+    func setThermalHold(_ dB: Double) {
+        let value = dB.isFinite ? max(0, dB) : 0
+        guard value != thermalHoldDB else { return }
+        thermalHoldDB = value
+        onEvent?(.cap, value > 0
+            ? "Thermal hold: anti-noise limit lowered \(Int(value.rounded())) dB while the speaker rests."
+            : "Thermal hold released.")
+    }
 
     var statusText: String {
         let level = Int(capDBFS.rounded())
@@ -116,6 +134,8 @@ final class EarnedCapPolicy {
         armedGainDB = outputGainDB
         qualifyingSince = nil
         wasRecovering = false
+        pausedAt = nil
+        thermalHoldDB = 0
         if let stored = store.record(for: binding),
            abs(stored.outputGainDB - outputGainDB) <= LiveTreatmentSafeguards.outputGainToleranceDB {
             capDBFS = Self.clamp(stored.earnedDBFS)
@@ -139,7 +159,7 @@ final class EarnedCapPolicy {
 
     /// Applies the reset rules when an arm ends.
     func noteDisarm(_ reason: LiveTreatmentDisarmReason) {
-        defer { binding = nil; qualifyingSince = nil; wasRecovering = false }
+        defer { binding = nil; qualifyingSince = nil; wasRecovering = false; pausedAt = nil; thermalHoldDB = 0 }
         guard let binding else { return }
         switch reason {
         case .seatRegression, .instabilityTrip:
@@ -163,6 +183,15 @@ final class EarnedCapPolicy {
     @discardableResult
     func poll(_ facts: EarnedCapPollFacts) -> Bool {
         guard binding != nil else { return false }
+        if facts.thermalHold {
+            // Pause, do not reset: the time spent held does not count towards the set time.
+            if pausedAt == nil { pausedAt = facts.now }
+            return false
+        }
+        if let paused = pausedAt {
+            pausedAt = nil
+            if let since = qualifyingSince { qualifyingSince = since + (facts.now - paused) }
+        }
         if facts.moveRecovering {
             wasRecovering = true
             qualifyingSince = nil

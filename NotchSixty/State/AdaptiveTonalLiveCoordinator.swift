@@ -72,6 +72,9 @@ final class AdaptiveTonalLiveCoordinator: ObservableObject {
     private(set) var resolver = MicrophoneMoveResolver()
     private(set) var latestReport = AdaptiveTonalLiveReport()
     private(set) var command = AdaptiveTonalLiveCommand()
+    /// E4 S21: the speaker's excursion curve for this arm (nil with the flag off). Set by the
+    /// controller at arm; the worker lowers each published tone to it.
+    var excursionCurve: ExcursionCapCurve?
 
     private let linkProvider: () -> (any AdaptiveTonalLiveLink)?
     private let clock: () -> TimeInterval
@@ -300,6 +303,7 @@ final class AdaptiveTonalLiveCoordinator: ObservableObject {
         }
         if cap == 0, input.earnedCapActive { cap = Float(input.plannedPeakLinear) }
         command.attemptCapLinear = cap
+        command.excursionCurve = excursionCurve
 
         // The gate.
         let decision = AdaptiveTonalOutputGate.evaluate(AdaptiveTonalGateInput(

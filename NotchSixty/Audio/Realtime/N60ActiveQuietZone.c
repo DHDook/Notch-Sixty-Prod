@@ -50,6 +50,24 @@ bool N60ActiveQuietZoneSnapshotSetPeakCap(
     return true;
 }
 
+bool N60ActiveQuietZoneSnapshotSetToneCaps(
+    N60ActiveQuietZoneSnapshot *snapshot,
+    const float *toneCapsLinear,
+    uint32_t count
+) {
+    if (snapshot == NULL || count > N60_ACTIVE_QUIET_ZONE_MAX_TONES
+        || (count > 0u && toneCapsLinear == NULL)) {
+        return false;
+    }
+    for (uint32_t index = 0u; index < count; ++index) {
+        if (!isfinite(toneCapsLinear[index]) || toneCapsLinear[index] < 0.0f) return false;
+    }
+    for (uint32_t index = 0u; index < N60_ACTIVE_QUIET_ZONE_MAX_TONES; ++index) {
+        snapshot->toneCapLinear[index] = index < count ? toneCapsLinear[index] : 0.0f;
+    }
+    return true;
+}
+
 bool N60ActiveQuietZoneSnapshotSet(
     N60ActiveQuietZoneSnapshot *snapshot,
     const N60ActiveQuietZoneToneSnapshot *tones,
@@ -331,6 +349,17 @@ bool N60ActiveQuietZoneRuntimeSchedule(
 
         if (!targetEnabled && !tone->active) {
             continue;
+        }
+        N60ActiveQuietZoneToneSnapshot capped;
+        if (targetEnabled && snapshot->toneCapLinear[index] > 0.0f) {
+            // E4 S21: the excursion cap lowers each channel's offline gain to the tone's limit.
+            capped = *target;
+            const float limit = snapshot->toneCapLinear[index];
+            const float left = complex_magnitude(capped.leftReal, capped.leftImaginary);
+            if (left > limit) { const float s = limit / left; capped.leftReal *= s; capped.leftImaginary *= s; }
+            const float right = complex_magnitude(capped.rightReal, capped.rightImaginary);
+            if (right > limit) { const float s = limit / right; capped.rightReal *= s; capped.rightImaginary *= s; }
+            target = &capped;
         }
         schedule_tone(
             tone,
@@ -692,11 +721,16 @@ void N60ActiveQuietZoneRuntimeApplyMailbox(
             float *re = &gain[t][channel * 2u];
             float *im = &gain[t][channel * 2u + 1u];
             float magnitude = complex_magnitude(*re, *im);
-            if (magnitude > toneLimit) {
-                const float scale = toneLimit / magnitude;
+            // E4 S21: the tone's excursion cap lowers the limit further (never raises it).
+            float limitHere = toneLimit;
+            if (snapshot->toneCapLinear[t] > 0.0f && snapshot->toneCapLinear[t] < limitHere) {
+                limitHere = snapshot->toneCapLinear[t];
+            }
+            if (magnitude > limitHere) {
+                const float scale = limitHere / magnitude;
                 *re *= scale;
                 *im *= scale;
-                magnitude = toneLimit;
+                magnitude = limitHere;
                 clamped = true;
             }
             sum[channel] += magnitude;

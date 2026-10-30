@@ -120,6 +120,15 @@ final class ActiveQuietZoneController: ObservableObject {
     /// adaptive canceller), in which case the cap is the fixed -40 dBFS as before.
     private(set) var earnedCap: EarnedCapPolicy?
 
+    /// E4 S21: where the speaker's limits come from (measured lower limit and role). Nil leaves the
+    /// excursion cap off.
+    private var excursionLimitsProvider: (@MainActor () -> ExcursionLimits)?
+    private var thermal = ExcursionThermalIntegrator()
+
+    func attachExcursionCap(_ provider: (@MainActor () -> ExcursionLimits)?) {
+        excursionLimitsProvider = provider
+    }
+
     func attachEarnedCap(_ policy: EarnedCapPolicy?) {
         earnedCap = policy
         policy?.onEvent = { [weak self] kind, message in
@@ -560,6 +569,12 @@ final class ActiveQuietZoneController: ObservableObject {
                     earned.beginArm(binding: binding, outputGainDB: environment.outputGainDB)
                 }
                 engine.earnedCapInitialLinear = Float(earned.capLinear)
+                // E4 S21: the curve is rebuilt at each arm, so a new Room Correction measurement
+                // is picked up by the next arm.
+                thermal.reset()
+                let curve = excursionLimitsProvider.map { ExcursionCapCurve(limits: $0()) }
+                engine.excursionCapCurve = curve
+                adaptiveLive?.excursionCurve = curve
             }
             do {
                 var updated = configuration
@@ -601,6 +616,12 @@ final class ActiveQuietZoneController: ObservableObject {
         if let earned = earnedCap {
             let facts = adaptive.earnedCapFacts
             let measurement = doNoHarm.measure(snapshot)
+            let now = ProcessInfo.processInfo.systemUptime
+            var holding = false
+            if excursionLimitsProvider != nil {
+                holding = thermal.update(now: now, playedPeakLinear: facts.playedPeakLinear, nominalCapDBFS: earned.capDBFS)
+                earned.setThermalHold(thermal.holdReductionDB)
+            }
             earned.poll(EarnedCapPollFacts(
                 now: ProcessInfo.processInfo.systemUptime,
                 adapting: facts.adapting,
@@ -608,7 +629,8 @@ final class ActiveQuietZoneController: ObservableObject {
                 measurement: measurement,
                 guardOrHold: facts.guardTripped,
                 playedPeakLinear: facts.playedPeakLinear,
-                moveRecovering: adaptive.isCapRecovering
+                moveRecovering: adaptive.isCapRecovering,
+                thermalHold: holding
             ))
         }
         for request in requests {
@@ -651,6 +673,9 @@ final class ActiveQuietZoneController: ObservableObject {
         adaptiveLive?.reset()
         earnedCap?.noteDisarm(reason)
         engine.earnedCapInitialLinear = 0
+        engine.excursionCapCurve = nil
+        adaptiveLive?.excursionCurve = nil
+        thermal.reset()
         // Revoke the engine arm token first: nothing built under this arm can play again.
         armedGeneration = nil
         engine.revokeLiveTreatmentArm()
@@ -768,7 +793,7 @@ final class ActiveQuietZoneController: ObservableObject {
                             ambient.appliedTarget.levelDB,
                         configuration: configuration
                     ),
-                    capDBFS: earnedCap?.capDBFS ?? LiveTreatmentSafeguards.defaultPeakCapDBFS
+                    capDBFS: earnedCap?.effectiveCapDBFS ?? LiveTreatmentSafeguards.defaultPeakCapDBFS
                 )
             guard availableInjectionPeak > 1.0e-7 else {
                 hold(.insufficientOutputHeadroom)

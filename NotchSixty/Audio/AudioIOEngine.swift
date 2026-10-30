@@ -1364,6 +1364,10 @@ final class AudioIOEngine: ObservableObject {
     /// the arm ceiling (-18 dBFS) and the kernel starts its own ceiling here and raises it at most
     /// 3 dB per 5 s. Set by the Quiet Zone controller at arm; the engine never reads the flag.
     var earnedCapInitialLinear: Float = 0
+    /// E4 S21 (`e4.earned-cap`): the speaker's excursion curve for this arm. Each tone gets a
+    /// kernel cap equal to the curve's lowest value across its tracking range; nil (flag off)
+    /// sets no caps and the snapshot is unchanged. Set by the Quiet Zone controller at arm.
+    var excursionCapCurve: ExcursionCapCurve?
 
     /// The token the kernel holds for the current arm: never 0 (0 means no arm in the mailbox).
     var kernelArmGeneration: UInt64 { liveTreatmentGeneration &+ 1 }
@@ -4512,6 +4516,9 @@ final class AudioIOEngine: ObservableObject {
            !N60DSPGraphSnapshotSetActiveQuietZoneArmGeneration(&graph, generation &+ 1) {
             throw ActiveQuietZoneError.invalidConfiguration
         }
+        let toneCaps: [Float] = excursionCapCurve.map { curve in
+            tones.map { curve.trackedCapLinear(atHz: Double($0.frequencyHz)) }
+        } ?? []
         let earnedInitial = earnedCapInitialLinear
         let snapshotCapDBFS = earnedInitial > 0
             ? LiveTreatmentSafeguards.hardMaximumPeakCapDBFS
@@ -4521,7 +4528,10 @@ final class AudioIOEngine: ObservableObject {
                 &graph,
                 Float(LiveTreatmentSafeguards.linearPeak(dbfs: snapshotCapDBFS))
               ),
-              N60DSPGraphSnapshotSetActiveQuietZoneInitialCap(&graph, tones.isEmpty ? 0 : earnedInitial) else {
+              N60DSPGraphSnapshotSetActiveQuietZoneInitialCap(&graph, tones.isEmpty ? 0 : earnedInitial),
+              toneCaps.withUnsafeBufferPointer({
+                  N60DSPGraphSnapshotSetActiveQuietZoneToneCaps(&graph, $0.baseAddress, UInt32($0.count))
+              }) else {
             throw ActiveQuietZoneError
                 .invalidConfiguration
         }
