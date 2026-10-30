@@ -113,6 +113,8 @@ final class ProductController: ObservableObject {
         let adaptiveTonalLive = FeatureFlags().isEnabled(.adaptiveTonalLive)
             && audioEngine.activeQuietZoneLeaseEnabled
         audioEngine.adaptiveTonalMailboxEnabled = adaptiveTonalLive
+        // E4 S22b1: only this flag lets the speaker-drive recording be requested at all.
+        audioEngine.speakerDriveFeatureEnabled = FeatureFlags().isEnabled(.feedForwardLive)
         let audioUnitHost = AudioUnitHostController()
         let profiles = ProductProfileController(
             engine: audioEngine,

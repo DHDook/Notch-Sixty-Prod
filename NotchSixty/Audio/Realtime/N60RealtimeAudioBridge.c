@@ -218,6 +218,18 @@ struct N60RealtimeAudioBridge {
     _Atomic uint64_t ambientReferenceCapturedFrames;
     _Atomic uint64_t ambientReferenceDroppedFrames;
 
+    // E4 S22b1: speaker-drive ring and host-time anchors (sole consumer: the feed-forward worker).
+    N60AmbientPlaybackReferenceFrame *speakerDriveFrames;
+    N60SpeakerDriveAnchor *speakerDriveAnchors;
+    _Atomic bool speakerDriveDemand;
+    _Atomic uint64_t speakerDriveWriteIndex;
+    _Atomic uint64_t speakerDriveReadIndex;
+    _Atomic uint64_t speakerDriveCapturedFrames;
+    _Atomic uint64_t speakerDriveDroppedFrames;
+    _Atomic uint64_t speakerDriveAnchorWriteIndex;
+    _Atomic uint64_t speakerDriveAnchorReadIndex;
+    _Atomic uint64_t speakerDriveDroppedAnchors;
+
     // Independent PR90 synthesized anti-noise reference. The control plane
     // uses this phase basis without competing with PR89's program-reference
     // consumer.
@@ -924,11 +936,31 @@ N60RealtimeAudioBridge *N60RealtimeAudioBridgeCreate(uint32_t capacityFrames) {
         return NULL;
     }
 
+    bridge->speakerDriveFrames = calloc(
+        N60_SPEAKER_DRIVE_CAPACITY_FRAMES,
+        sizeof(N60AmbientPlaybackReferenceFrame)
+    );
+    bridge->speakerDriveAnchors = calloc(
+        N60_SPEAKER_DRIVE_ANCHOR_CAPACITY,
+        sizeof(N60SpeakerDriveAnchor)
+    );
+    if (bridge->speakerDriveFrames == NULL || bridge->speakerDriveAnchors == NULL) {
+        free(bridge->speakerDriveFrames);
+        free(bridge->speakerDriveAnchors);
+        free(bridge->ambientReferenceFrames);
+        free(bridge->analysisFrames);
+        free(bridge->frames);
+        free(bridge);
+        return NULL;
+    }
+
     bridge->activeQuietZoneReferenceFrames = calloc(
         N60_ACTIVE_QUIET_ZONE_REFERENCE_CAPACITY_FRAMES,
         sizeof(N60ActiveQuietZoneReferenceFrame)
     );
     if (bridge->activeQuietZoneReferenceFrames == NULL) {
+        free(bridge->speakerDriveFrames);
+        free(bridge->speakerDriveAnchors);
         free(bridge->ambientReferenceFrames);
         free(bridge->analysisFrames);
         free(bridge->frames);
@@ -938,6 +970,8 @@ N60RealtimeAudioBridge *N60RealtimeAudioBridgeCreate(uint32_t capacityFrames) {
 
     bridge->renderKernel = N60RenderKernelCreate();
     if (bridge->renderKernel == NULL) {
+        free(bridge->speakerDriveFrames);
+        free(bridge->speakerDriveAnchors);
         free(bridge->activeQuietZoneReferenceFrames);
         free(bridge->ambientReferenceFrames);
         free(bridge->analysisFrames);
@@ -968,6 +1002,8 @@ void N60RealtimeAudioBridgeDestroy(N60RealtimeAudioBridge *bridge) {
     free(bridge->audioUnitRackScratch);
     free(bridge->audioUnitRackPlaybackFrames);
     free(bridge->activeQuietZoneReferenceFrames);
+    free(bridge->speakerDriveFrames);
+    free(bridge->speakerDriveAnchors);
     free(bridge->ambientReferenceFrames);
     free(bridge->analysisFrames);
     free(bridge->frames);
@@ -1005,6 +1041,14 @@ void N60RealtimeAudioBridgeReset(N60RealtimeAudioBridge *bridge) {
     atomic_store_explicit(&bridge->ambientReferenceReadIndex, 0, memory_order_release);
     atomic_store_explicit(&bridge->ambientReferenceCapturedFrames, 0, memory_order_relaxed);
     atomic_store_explicit(&bridge->ambientReferenceDroppedFrames, 0, memory_order_relaxed);
+    atomic_store_explicit(&bridge->speakerDriveDemand, false, memory_order_release);
+    atomic_store_explicit(&bridge->speakerDriveWriteIndex, 0, memory_order_release);
+    atomic_store_explicit(&bridge->speakerDriveReadIndex, 0, memory_order_release);
+    atomic_store_explicit(&bridge->speakerDriveCapturedFrames, 0, memory_order_relaxed);
+    atomic_store_explicit(&bridge->speakerDriveDroppedFrames, 0, memory_order_relaxed);
+    atomic_store_explicit(&bridge->speakerDriveAnchorWriteIndex, 0, memory_order_release);
+    atomic_store_explicit(&bridge->speakerDriveAnchorReadIndex, 0, memory_order_release);
+    atomic_store_explicit(&bridge->speakerDriveDroppedAnchors, 0, memory_order_relaxed);
     atomic_store_explicit(&bridge->activeQuietZoneReferenceDemand, false, memory_order_release);
     atomic_store_explicit(&bridge->activeQuietZoneReferenceWriteIndex, 0, memory_order_release);
     atomic_store_explicit(&bridge->activeQuietZoneReferenceReadIndex, 0, memory_order_release);
@@ -1419,6 +1463,83 @@ uint32_t N60RealtimeAudioBridgeReadAmbientReferenceFrames(
         memory_order_release
     );
     return framesToRead;
+}
+
+void N60RealtimeAudioBridgeSetSpeakerDriveDemand(
+    N60RealtimeAudioBridge *bridge,
+    bool enabled
+) {
+    if (bridge == NULL) return;
+    // The consumer is the only writer of the read indices: it drains the rings after turning
+    // demand on and treats any change in the dropped counters as a gap (RestartDrive).
+    atomic_store_explicit(&bridge->speakerDriveDemand, enabled, memory_order_release);
+}
+
+bool N60RealtimeAudioBridgeSpeakerDriveDemand(const N60RealtimeAudioBridge *bridge) {
+    return bridge != NULL
+        && atomic_load_explicit(&bridge->speakerDriveDemand, memory_order_acquire);
+}
+
+N60SpeakerDriveSnapshot N60RealtimeAudioBridgeGetSpeakerDriveSnapshot(
+    const N60RealtimeAudioBridge *bridge
+) {
+    N60SpeakerDriveSnapshot s = {0};
+    if (bridge == NULL) return s;
+    s.enabled = N60RealtimeAudioBridgeSpeakerDriveDemand(bridge);
+    uint64_t wr = atomic_load_explicit(&bridge->speakerDriveWriteIndex, memory_order_acquire);
+    uint64_t rd = atomic_load_explicit(&bridge->speakerDriveReadIndex, memory_order_acquire);
+    uint64_t avail = wr >= rd ? wr - rd : 0;
+    s.availableFrames = (uint32_t)(avail > N60_SPEAKER_DRIVE_CAPACITY_FRAMES
+        ? N60_SPEAKER_DRIVE_CAPACITY_FRAMES : avail);
+    uint64_t awr = atomic_load_explicit(&bridge->speakerDriveAnchorWriteIndex, memory_order_acquire);
+    uint64_t ard = atomic_load_explicit(&bridge->speakerDriveAnchorReadIndex, memory_order_acquire);
+    uint64_t aavail = awr >= ard ? awr - ard : 0;
+    s.availableAnchors = (uint32_t)(aavail > N60_SPEAKER_DRIVE_ANCHOR_CAPACITY
+        ? N60_SPEAKER_DRIVE_ANCHOR_CAPACITY : aavail);
+    s.capturedFrames = atomic_load_explicit(&bridge->speakerDriveCapturedFrames, memory_order_relaxed);
+    s.droppedFrames = atomic_load_explicit(&bridge->speakerDriveDroppedFrames, memory_order_relaxed);
+    s.droppedAnchors = atomic_load_explicit(&bridge->speakerDriveDroppedAnchors, memory_order_relaxed);
+    return s;
+}
+
+uint32_t N60RealtimeAudioBridgeReadSpeakerDriveFrames(
+    N60RealtimeAudioBridge *bridge,
+    N60AmbientPlaybackReferenceFrame *destination,
+    uint32_t capacityFrames
+) {
+    if (bridge == NULL || destination == NULL || capacityFrames == 0) return 0;
+    uint64_t rd = atomic_load_explicit(&bridge->speakerDriveReadIndex, memory_order_relaxed);
+    uint64_t wr = atomic_load_explicit(&bridge->speakerDriveWriteIndex, memory_order_acquire);
+    uint64_t avail = wr >= rd ? wr - rd : 0;
+    uint32_t n = capacityFrames < avail ? capacityFrames : (uint32_t)avail;
+    if (n == 0) return 0;
+    uint32_t ring = (uint32_t)rd & (N60_SPEAKER_DRIVE_CAPACITY_FRAMES - 1u);
+    uint32_t first = n;
+    if (first > N60_SPEAKER_DRIVE_CAPACITY_FRAMES - ring) first = N60_SPEAKER_DRIVE_CAPACITY_FRAMES - ring;
+    memcpy(destination, bridge->speakerDriveFrames + ring, first * sizeof(N60AmbientPlaybackReferenceFrame));
+    if (first < n) {
+        memcpy(destination + first, bridge->speakerDriveFrames,
+               (n - first) * sizeof(N60AmbientPlaybackReferenceFrame));
+    }
+    atomic_store_explicit(&bridge->speakerDriveReadIndex, rd + n, memory_order_release);
+    return n;
+}
+
+uint32_t N60RealtimeAudioBridgeReadSpeakerDriveAnchors(
+    N60RealtimeAudioBridge *bridge,
+    N60SpeakerDriveAnchor *destination,
+    uint32_t capacityAnchors
+) {
+    if (bridge == NULL || destination == NULL || capacityAnchors == 0) return 0;
+    uint64_t rd = atomic_load_explicit(&bridge->speakerDriveAnchorReadIndex, memory_order_relaxed);
+    uint64_t wr = atomic_load_explicit(&bridge->speakerDriveAnchorWriteIndex, memory_order_acquire);
+    uint64_t avail = wr >= rd ? wr - rd : 0;
+    uint32_t n = capacityAnchors < avail ? capacityAnchors : (uint32_t)avail;
+    for (uint32_t i = 0; i < n; ++i) {
+        destination[i] = bridge->speakerDriveAnchors[(rd + i) & (N60_SPEAKER_DRIVE_ANCHOR_CAPACITY - 1u)];
+    }
+    atomic_store_explicit(&bridge->speakerDriveAnchorReadIndex, rd + n, memory_order_release);
+    return n;
 }
 
 void N60RealtimeAudioBridgeRenewActiveQuietZoneLease(
@@ -2382,6 +2503,39 @@ OSStatus N60OutputIOProc(
             & (N60_AMBIENT_REFERENCE_CAPACITY_FRAMES - 1u);
     }
 
+    // E4 S22b1: record the whole callback or none of it, so the anchors stay exact.
+    bool speakerDriveDemand = atomic_load_explicit(
+        &bridge->speakerDriveDemand, memory_order_acquire
+    );
+    uint64_t speakerDriveWriteIndex = 0;
+    uint64_t speakerDriveAnchorWriteIndex = 0;
+    uint32_t speakerDriveFramesToWrite = 0;
+    uint32_t speakerDriveRingIndex = 0;
+    if (speakerDriveDemand) {
+        speakerDriveWriteIndex = atomic_load_explicit(
+            &bridge->speakerDriveWriteIndex, memory_order_relaxed
+        );
+        uint64_t driveRead = atomic_load_explicit(
+            &bridge->speakerDriveReadIndex, memory_order_acquire
+        );
+        speakerDriveAnchorWriteIndex = atomic_load_explicit(
+            &bridge->speakerDriveAnchorWriteIndex, memory_order_relaxed
+        );
+        uint64_t anchorRead = atomic_load_explicit(
+            &bridge->speakerDriveAnchorReadIndex, memory_order_acquire
+        );
+        uint64_t driveUsed = speakerDriveWriteIndex >= driveRead
+            ? speakerDriveWriteIndex - driveRead : N60_SPEAKER_DRIVE_CAPACITY_FRAMES;
+        uint64_t anchorUsed = speakerDriveAnchorWriteIndex >= anchorRead
+            ? speakerDriveAnchorWriteIndex - anchorRead : N60_SPEAKER_DRIVE_ANCHOR_CAPACITY;
+        if (driveUsed + framesToRead <= N60_SPEAKER_DRIVE_CAPACITY_FRAMES
+            && anchorUsed < N60_SPEAKER_DRIVE_ANCHOR_CAPACITY) {
+            speakerDriveFramesToWrite = framesToRead;
+        }
+        speakerDriveRingIndex = (uint32_t)speakerDriveWriteIndex
+            & (N60_SPEAKER_DRIVE_CAPACITY_FRAMES - 1u);
+    }
+
     bool activeQuietZoneReferenceDemand =
         atomic_load_explicit(
             &bridge->activeQuietZoneReferenceDemand,
@@ -2633,6 +2787,12 @@ OSStatus N60OutputIOProc(
                 ambientReferenceRingIndex =
                     (ambientReferenceRingIndex + 1u)
                     & (N60_AMBIENT_REFERENCE_CAPACITY_FRAMES - 1u);
+            }
+            if (frameIndex < speakerDriveFramesToWrite) {
+                bridge->speakerDriveFrames[speakerDriveRingIndex] =
+                    (N60AmbientPlaybackReferenceFrame){ finalLeft, finalRight };
+                speakerDriveRingIndex =
+                    (speakerDriveRingIndex + 1u) & (N60_SPEAKER_DRIVE_CAPACITY_FRAMES - 1u);
             }
             if (sameDeviceMultiOutput) {
                 N60SpeakerBusFrame busFrame;
@@ -2926,6 +3086,12 @@ OSStatus N60OutputIOProc(
                     (ambientReferenceRingIndex + 1u)
                     & (N60_AMBIENT_REFERENCE_CAPACITY_FRAMES - 1u);
             }
+            if (frameIndex < speakerDriveFramesToWrite) {
+                bridge->speakerDriveFrames[speakerDriveRingIndex] =
+                    (N60AmbientPlaybackReferenceFrame){ finalLeft, finalRight };
+                speakerDriveRingIndex =
+                    (speakerDriveRingIndex + 1u) & (N60_SPEAKER_DRIVE_CAPACITY_FRAMES - 1u);
+            }
             if (sameDeviceMultiOutput) {
                 N60SpeakerBusFrame busFrame;
                 process_speaker_bus_splitter(
@@ -3017,6 +3183,38 @@ OSStatus N60OutputIOProc(
                 &bridge->analysisDroppedFrames,
                 framesToRead - analysisFramesToWrite,
                 memory_order_relaxed
+            );
+        }
+    }
+
+    if (speakerDriveDemand) {
+        if (speakerDriveFramesToWrite > 0) {
+            // The anchor is published before the frames so a reader that sees frames can
+            // always find the anchor that covers them.
+            bridge->speakerDriveAnchors[
+                speakerDriveAnchorWriteIndex & (N60_SPEAKER_DRIVE_ANCHOR_CAPACITY - 1u)
+            ] = (N60SpeakerDriveAnchor){
+                outputHostTime, speakerDriveWriteIndex, speakerDriveFramesToWrite, 0u
+            };
+            atomic_store_explicit(
+                &bridge->speakerDriveAnchorWriteIndex,
+                speakerDriveAnchorWriteIndex + 1u,
+                memory_order_release
+            );
+            atomic_store_explicit(
+                &bridge->speakerDriveWriteIndex,
+                speakerDriveWriteIndex + speakerDriveFramesToWrite,
+                memory_order_release
+            );
+            atomic_fetch_add_explicit(
+                &bridge->speakerDriveCapturedFrames, speakerDriveFramesToWrite, memory_order_relaxed
+            );
+        } else if (framesToRead > 0) {
+            atomic_fetch_add_explicit(
+                &bridge->speakerDriveDroppedFrames, framesToRead, memory_order_relaxed
+            );
+            atomic_fetch_add_explicit(
+                &bridge->speakerDriveDroppedAnchors, 1u, memory_order_relaxed
             );
         }
     }

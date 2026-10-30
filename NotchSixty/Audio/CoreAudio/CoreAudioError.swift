@@ -865,6 +865,39 @@ final class CoreAudioTransportSession {
         return result
     }
 
+    /// E4 S22b1: speaker-drive recording for the feed-forward echo model.
+    func setSpeakerDriveDemand(_ enabled: Bool) {
+        guard let bridge else { return }
+        N60RealtimeAudioBridgeSetSpeakerDriveDemand(bridge, enabled)
+    }
+
+    func speakerDriveSnapshot() -> N60SpeakerDriveSnapshot? {
+        guard let bridge else { return nil }
+        return N60RealtimeAudioBridgeGetSpeakerDriveSnapshot(bridge)
+    }
+
+    func readSpeakerDriveAnchors(maximum: Int = Int(N60_SPEAKER_DRIVE_ANCHOR_CAPACITY)) -> [N60SpeakerDriveAnchor] {
+        guard let bridge, maximum > 0 else { return [] }
+        var result = [N60SpeakerDriveAnchor](repeating: N60SpeakerDriveAnchor(), count: maximum)
+        let count = result.withUnsafeMutableBufferPointer {
+            N60RealtimeAudioBridgeReadSpeakerDriveAnchors(bridge, $0.baseAddress!, UInt32($0.count))
+        }
+        result.removeLast(result.count - Int(count))
+        return result
+    }
+
+    func readSpeakerDriveFrames(maximumFrames: Int) -> [N60AmbientPlaybackReferenceFrame] {
+        guard let bridge, maximumFrames > 0 else { return [] }
+        var result = [N60AmbientPlaybackReferenceFrame](
+            repeating: N60AmbientPlaybackReferenceFrame(), count: maximumFrames
+        )
+        let count = result.withUnsafeMutableBufferPointer {
+            N60RealtimeAudioBridgeReadSpeakerDriveFrames(bridge, $0.baseAddress!, UInt32($0.count))
+        }
+        result.removeLast(result.count - Int(count))
+        return result
+    }
+
     var ambientReferenceSampleRate: Double {
         outputFormat.sampleRate
     }

@@ -32,6 +32,9 @@ typedef struct {
 #define N60_ANALYSIS_CAPTURE_CAPACITY_FRAMES 65536u
 #define N60_AMBIENT_REFERENCE_CAPACITY_FRAMES 131072u
 #define N60_ACTIVE_QUIET_ZONE_REFERENCE_CAPACITY_FRAMES 131072u
+/// E4 S22b1: speaker-drive ring (frames) and its host-time anchor ring (callbacks).
+#define N60_SPEAKER_DRIVE_CAPACITY_FRAMES 262144u
+#define N60_SPEAKER_DRIVE_ANCHOR_CAPACITY 4096u
 
 // PR41 Slice C2a: immutable same-device speaker-output routing. The control
 // plane compiles at most eight logical-bus routes; the realtime writer only
@@ -94,6 +97,26 @@ typedef struct {
     uint64_t capturedFrames;
     uint64_t droppedFrames;
 } N60AmbientPlaybackReferenceSnapshot;
+
+/// E4 S22b1: one render callback's place in the speaker-drive stream. `firstFrameIndex` counts
+/// frames written to the drive ring since the bridge was reset (the index only increases); `outputHostTime` is the
+/// output buffer's host time (0 when the callback had none).
+typedef struct {
+    uint64_t outputHostTime;
+    uint64_t firstFrameIndex;
+    uint32_t frames;
+    uint32_t reserved;
+} N60SpeakerDriveAnchor;
+
+typedef struct {
+    bool enabled;
+    uint32_t availableFrames;
+    uint32_t availableAnchors;
+    uint64_t capturedFrames;
+    /// Frames of callbacks that were not recorded because a ring was full. Any change is a gap.
+    uint64_t droppedFrames;
+    uint64_t droppedAnchors;
+} N60SpeakerDriveSnapshot;
 
 typedef struct {
     float left;
@@ -270,6 +293,33 @@ uint32_t N60RealtimeAudioBridgeReadAmbientReferenceFrames(
     N60RealtimeAudioBridge * _Nonnull bridge,
     N60AmbientPlaybackReferenceFrame * _Nonnull destination,
     uint32_t capacityFrames
+);
+
+// E4 S22b1: the samples written to the physical output (after master gain and fades, including
+// any tonal anti-noise), with one host-time anchor per callback, for the feed-forward echo model.
+// Single producer (render callback), single consumer (control plane). A callback is recorded
+// whole or not at all. The tap is the final stereo mix before any same-device speaker-bus split
+// or driver processing. Only the consumer moves the read indices: after enabling demand it drains
+// both rings, and any change in the dropped counters is a gap (RestartDrive). Off by default; Swift enables it only behind e4.feedforward-live.
+void N60RealtimeAudioBridgeSetSpeakerDriveDemand(
+    N60RealtimeAudioBridge * _Nonnull bridge,
+    bool enabled
+);
+bool N60RealtimeAudioBridgeSpeakerDriveDemand(
+    const N60RealtimeAudioBridge * _Nonnull bridge
+);
+N60SpeakerDriveSnapshot N60RealtimeAudioBridgeGetSpeakerDriveSnapshot(
+    const N60RealtimeAudioBridge * _Nonnull bridge
+);
+uint32_t N60RealtimeAudioBridgeReadSpeakerDriveFrames(
+    N60RealtimeAudioBridge * _Nonnull bridge,
+    N60AmbientPlaybackReferenceFrame * _Nonnull destination,
+    uint32_t capacityFrames
+);
+uint32_t N60RealtimeAudioBridgeReadSpeakerDriveAnchors(
+    N60RealtimeAudioBridge * _Nonnull bridge,
+    N60SpeakerDriveAnchor * _Nonnull destination,
+    uint32_t capacityAnchors
 );
 
 /// E4 S14: dead-man lease on the anti-noise (see N60RenderKernel.h). Control plane only.

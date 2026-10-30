@@ -91,7 +91,8 @@ FeedForwardShadow::FeedForwardShadow(const N60FeedForwardShadowConfig &config)
       errorDecimator_(config.sampleRate),
       cores_{BlockFxlms(coreConfig(config, decimatedRate_)),
              BlockFxlms(coreConfig(config, decimatedRate_))},
-      referenceLine_(kLine) {
+      referenceLine_(kLine),
+      driveRate_(config.driveSampleRate) {
     const double low = config.bandLowHz / decimatedRate_;
     const double high = config.bandHighHz / decimatedRate_;
     referenceBand_[0].highPass(low);
@@ -99,6 +100,21 @@ FeedForwardShadow::FeedForwardShadow(const N60FeedForwardShadowConfig &config)
     referenceBand_[2].lowPass(high);
     referenceBand_[3].lowPass(high);
     errorBand_ = referenceBand_;
+    if (driveRate_ > 0) {
+        predictedBand_ = referenceBand_;
+        beforeBand_ = referenceBand_;
+        lead_ = static_cast<std::uint32_t>(std::ceil(0.010 * decimatedRate_));
+        for (std::uint32_t c = 0; c < kChannels; ++c) {
+            driveDecimator_.emplace_back(driveRate_);
+            driveHistory_[c].assign(kDriveHistory, 0.0);
+            driveLine_[c].assign(kDriveLine, 0.0);
+            echo_[c].reserve(N60_FF_SHADOW_MAX_BULK_DELAY);
+        }
+        echoLine_.assign(kLine, 0.0);
+        predictedBandLine_.assign(kLine, 0.0);
+        correlation_.assign(2 * kMaxLag + 1, 0.0);
+        if (lead_ > kMaxLag) lead_ = kMaxLag; // fd < 8 kHz keeps this at 80; never index past the buffer
+    }
     for (std::uint32_t c = 0; c < kChannels; ++c) {
         // Reserve the largest path so setPath never allocates.
         path_[c].reserve(N60_FXLMS_MAX_PATH_TAPS);
@@ -150,12 +166,62 @@ void FeedForwardShadow::process(const float *reference, const float *error,
         double xd = 0, ed = 0;
         const bool emitted = referenceDecimator_.push(x, xd);
         errorDecimator_.push(e, ed);  // fed in step, so it emits with the reference
-        if (emitted && referenceDecimator_.warm()) adapt(xd, ed);
+        if (emitted && referenceDecimator_.warm()) {
+            referenceCentre_ = static_cast<std::int64_t>(referenceFrames_)
+                               - static_cast<std::int64_t>(referenceDecimator_.delayFrames());
+            adapt(xd, ed);
+        }
+        ++referenceFrames_;
     }
 }
 
 void FeedForwardShadow::adapt(double reference, double error) noexcept {
-    double x = reference, e = error;
+    const bool echo = driveRate_ > 0 && echoSet_;
+    double xRaw = reference, e = error;
+    bool hold = false;
+    if (echo) {
+        echoPosition_ = (echoPosition_ + 1) & (kDriveLine - 1);
+        const bool ok = prepareDrive();
+        double predicted = 0;
+        if (ok) {
+            for (std::uint32_t c = 0; c < kChannels; ++c) {
+                const auto &l = echo_[c];
+                for (std::uint32_t j = 0; j < l.size(); ++j) {
+                    predicted += l[j] * driveLine_[c][(echoPosition_ - echoDelay_[c] - j)
+                                                      & (kDriveLine - 1)];
+                }
+            }
+        }
+        echoLine_[echoPosition_ & kMask] = predicted;
+        const double a = driveLine_[0][echoPosition_], b = driveLine_[1][echoPosition_];
+        drivePower_ += meterAlpha_ * (std::max(a * a, b * b) - drivePower_);
+        if (drivePrepared_ < kDriveLine) ++drivePrepared_;
+        double xb = xRaw, pb = predicted;
+        for (auto &f : beforeBand_) xb = f.run(xb);
+        for (auto &f : predictedBand_) pb = f.run(pb);
+        predictedBandLine_[echoPosition_ & kMask] = pb;
+        referenceBefore_ += meterAlpha_ * (xb * xb - referenceBefore_);
+        const bool present = drivePower_ > kActivePower;
+        if (!locked_) {
+            if (ok && present && timingValid_) search(xb);
+            hold = present && timingValid_;
+        } else {
+            const std::uint32_t back = static_cast<std::uint32_t>(
+                static_cast<std::int32_t>(lead_) + offset_);
+            xRaw -= echoLine_[(echoPosition_ - back) & kMask];
+            double removed = 0;
+            for (std::uint32_t c = 0; c < kChannels; ++c) {
+                const auto &s = path_[c];
+                for (std::uint32_t j = 0; j < s.size(); ++j) {
+                    removed += s[j] * driveLine_[c][(echoPosition_ - back - delay_[c] - j)
+                                                    & (kDriveLine - 1)];
+                }
+            }
+            e -= removed;
+        }
+    }
+
+    double x = xRaw;
     for (auto &f : referenceBand_) x = f.run(x);
     for (auto &f : errorBand_) e = f.run(e);
     if (!finite(x) || !finite(e)) {  // unreachable with clamped input; never adapt on it
@@ -163,6 +229,7 @@ void FeedForwardShadow::adapt(double reference, double error) noexcept {
         ++gaps_;
         return;
     }
+    if (echo) referenceAfter_ += meterAlpha_ * (x * x - referenceAfter_);
 
     position_ = (position_ + 1) & kMask;
     referenceLine_[position_] = x;
@@ -185,14 +252,16 @@ void FeedForwardShadow::adapt(double reference, double error) noexcept {
     }
     virtualError = std::clamp(virtualError, -kErrorLimit, kErrorLimit);
 
-    const float ev = static_cast<float>(virtualError);
-    for (std::uint32_t c = 0; c < kChannels; ++c) {
-        const float xr = static_cast<float>(referenceLine_[(position_ - delay_[c]) & kMask]);
-        cores_[c].update(&xr, &ev, 1);
-    }
-    if (++blockFill_ == blockFrames_) {
-        blockFill_ = 0;
-        limitWeights();
+    if (!hold) {
+        const float ev = static_cast<float>(virtualError);
+        for (std::uint32_t c = 0; c < kChannels; ++c) {
+            const float xr = static_cast<float>(referenceLine_[(position_ - delay_[c]) & kMask]);
+            cores_[c].update(&xr, &ev, 1);
+        }
+        if (++blockFill_ == blockFrames_) {
+            blockFill_ = 0;
+            limitWeights();
+        }
     }
 
     measured_ += meterAlpha_ * (e * e - measured_);
@@ -233,6 +302,7 @@ void FeedForwardShadow::restartFilters() noexcept {
     position_ = 0;
     blockFill_ = 0;
     sinceRestart_ = 0;
+    if (driveRate_ > 0) restartEcho();
 }
 
 void FeedForwardShadow::restoreSeed() noexcept {
@@ -242,6 +312,151 @@ void FeedForwardShadow::restoreSeed() noexcept {
     // The meters described the previous weights.
     measured_ = predicted_ = 0;
     output_.fill(0);
+}
+
+// Echo stage -----------------------------------------------------------------
+
+bool FeedForwardShadow::setEcho(std::uint32_t channel, std::uint32_t bulkDelay, const float *taps,
+                                std::uint32_t count) noexcept {
+    if (driveRate_ <= 0 || channel >= kChannels || taps == nullptr || count == 0
+        || count > N60_FF_SHADOW_MAX_BULK_DELAY || bulkDelay > N60_FF_SHADOW_MAX_BULK_DELAY)
+        return false;
+    for (std::uint32_t k = 0; k < count; ++k) {
+        if (!finite(taps[k])) return false;
+    }
+    echo_[channel].assign(taps, taps + count);  // within the reserved capacity
+    echoDelay_[channel] = bulkDelay;
+    echoSet_ = true;
+    restartFilters();
+    return true;
+}
+
+void FeedForwardShadow::pushDrive(const float *left, const float *right,
+                                  std::uint32_t frames) noexcept {
+    if (driveRate_ <= 0) return;
+    for (std::uint32_t m = 0; m < frames; ++m) {
+        const float in[kChannels] = {
+            std::isfinite(left[m]) ? std::clamp(left[m], -kInputLimit, kInputLimit) : 0.0f,
+            std::isfinite(right[m]) ? std::clamp(right[m], -kInputLimit, kInputLimit) : 0.0f};
+        double out[kChannels] = {0, 0};
+        bool emitted = false;
+        for (std::uint32_t c = 0; c < kChannels; ++c) {
+            emitted = driveDecimator_[c].push(in[c], out[c]);
+        }
+        if (emitted) {
+            const auto slot = static_cast<std::uint32_t>(driveDecimated_ & (kDriveHistory - 1));
+            for (std::uint32_t c = 0; c < kChannels; ++c) driveHistory_[c][slot] = out[c];
+            ++driveDecimated_;
+        }
+        ++driveFrames_;
+    }
+}
+
+bool FeedForwardShadow::setDriveTiming(std::uint64_t micFrame, double driveFrame,
+                                       double ratio) noexcept {
+    if (driveRate_ <= 0 || !finite(driveFrame) || !finite(ratio) || ratio < 0.05 || ratio > 20.0)
+        return false;
+    timingMicFrame_ = micFrame;
+    timingDriveFrame_ = driveFrame;
+    timingRatio_ = ratio;
+    timingValid_ = true;
+    return true;
+}
+
+void FeedForwardShadow::restartDrive(std::uint64_t nextDriveFrame) noexcept {
+    if (driveRate_ <= 0) return;
+    for (auto &d : driveDecimator_) d.reset();
+    for (auto &h : driveHistory_) std::fill(h.begin(), h.end(), 0.0);
+    driveDecimated_ = 0;
+    driveFrames_ = nextDriveFrame;
+    driveBaseFrame_ = nextDriveFrame;
+    timingValid_ = false;
+    restartEcho();
+    if (echoSet_) ++searchRestarts_;
+}
+
+void FeedForwardShadow::restartEcho() noexcept {
+    locked_ = false;
+    offset_ = 0;
+    searchXX_ = searchPP_ = 0;
+    searchSamples_ = 0;
+    std::fill(correlation_.begin(), correlation_.end(), 0.0);
+    for (auto &l : driveLine_) std::fill(l.begin(), l.end(), 0.0);
+    std::fill(echoLine_.begin(), echoLine_.end(), 0.0);
+    std::fill(predictedBandLine_.begin(), predictedBandLine_.end(), 0.0);
+    for (auto &f : predictedBand_) f.reset();
+    for (auto &f : beforeBand_) f.reset();
+    echoPosition_ = 0;
+    drivePrepared_ = 0;
+    referenceBefore_ = referenceAfter_ = 0;
+}
+
+double FeedForwardShadow::driveAt(std::uint32_t channel, std::int64_t sample) const noexcept {
+    return driveHistory_[channel][static_cast<std::uint32_t>(sample) & (kDriveHistory - 1)];
+}
+
+// Interpolates the drive, read ahead by lead_ fd samples, at this reference sample (4-point
+// Lagrange, nodes -1..2). False when the drive does not cover the point.
+bool FeedForwardShadow::prepareDrive() noexcept {
+    for (std::uint32_t c = 0; c < kChannels; ++c) driveLine_[c][echoPosition_] = 0.0;
+    if (!timingValid_ || driveDecimated_ < 4) return false;
+    const double factor = driveDecimator_[0].factor();
+    const double centre = static_cast<double>(referenceCentre_)
+                          + static_cast<double>(lead_) * referenceDecimator_.factor();
+    const double frame = timingDriveFrame_
+                         + (centre - static_cast<double>(timingMicFrame_)) * timingRatio_;
+    const double index = (frame - static_cast<double>(driveBaseFrame_) - (factor - 1.0)
+                          + static_cast<double>(driveDecimator_[0].delayFrames())) / factor;
+    const double base = std::floor(index);
+    if (!finite(index) || base < 1.0) { ++driveStarved_; return false; }
+    const auto i0 = static_cast<std::int64_t>(base);
+    const auto produced = static_cast<std::int64_t>(driveDecimated_);
+    if (i0 + 2 >= produced || i0 - 1 < produced - static_cast<std::int64_t>(kDriveHistory)) {
+        ++driveStarved_;
+        return false;
+    }
+    const double t = index - base;
+    const double w[4] = {-t * (t - 1.0) * (t - 2.0) / 6.0, (t + 1.0) * (t - 1.0) * (t - 2.0) / 2.0,
+                         -(t + 1.0) * t * (t - 2.0) / 2.0, (t + 1.0) * t * (t - 1.0) / 6.0};
+    for (std::uint32_t c = 0; c < kChannels; ++c) {
+        double acc = 0;
+        for (int k = 0; k < 4; ++k) acc += w[k] * driveAt(c, i0 - 1 + k);
+        driveLine_[c][echoPosition_] = acc;
+    }
+    return true;
+}
+
+// Correlates the band-limited reference with the predicted leakage at lags -lead_..lead_.
+void FeedForwardShadow::search(double referenceBand) noexcept {
+    searchXX_ += referenceBand * referenceBand;
+    const double nominal = predictedBandLine_[(echoPosition_ - lead_) & kMask];
+    searchPP_ += nominal * nominal;
+    for (std::uint32_t l = 0; l <= 2 * lead_; ++l) {
+        const std::int32_t lag = static_cast<std::int32_t>(l) - static_cast<std::int32_t>(lead_);
+        const double p = predictedBandLine_[static_cast<std::uint32_t>(
+            static_cast<std::int32_t>(echoPosition_) - static_cast<std::int32_t>(lead_) - lag) & kMask];
+        correlation_[l] += referenceBand * p;
+    }
+    if (++searchSamples_ >= static_cast<std::uint64_t>(kSearchSeconds * decimatedRate_)) finishSearch();
+}
+
+void FeedForwardShadow::finishSearch() noexcept {
+    std::uint32_t best = 0;
+    for (std::uint32_t l = 1; l <= 2 * lead_; ++l) {
+        if (correlation_[l] > correlation_[best]) best = l;
+    }
+    const double energy = searchXX_ * searchPP_;
+    const double peak = energy > 0 ? correlation_[best] / std::sqrt(energy) : 0.0;
+    searchPeak_ = static_cast<float>(std::clamp(peak, 0.0, 1.0));
+    if (peak >= kLockThreshold) {
+        locked_ = true;
+        offset_ = static_cast<std::int32_t>(best) - static_cast<std::int32_t>(lead_);
+    } else {
+        ++searchRestarts_;
+    }
+    searchXX_ = searchPP_ = 0;
+    searchSamples_ = 0;
+    std::fill(correlation_.begin(), correlation_.end(), 0.0);
 }
 
 void FeedForwardShadow::markDiscontinuity() noexcept {
@@ -262,6 +477,21 @@ N60FeedForwardShadowStatus FeedForwardShadow::status() const noexcept {
     s.gaps = gaps_;
     s.modelResets = modelResets_;
     s.gainLimited = gainLimited_;
+    if (driveRate_ > 0) {
+        s.echoState = !echoSet_ ? N60_FF_ECHO_OFF
+                      : locked_ ? N60_FF_ECHO_LOCKED
+                      : (drivePower_ > kActivePower && timingValid_) ? N60_FF_ECHO_SEARCHING
+                                                                     : N60_FF_ECHO_WAITING;
+        s.echoOffset = offset_;
+        s.searchPeak = searchPeak_;
+        s.searchRestarts = searchRestarts_;
+        s.driveFrames = driveFrames_;
+        s.referenceFrames = referenceFrames_;
+        s.driveStarved = driveStarved_;
+        s.drivePower = static_cast<float>(drivePower_);
+        s.referencePowerBefore = static_cast<float>(referenceBefore_);
+        s.referencePowerAfter = static_cast<float>(referenceAfter_);
+    }
     s.measuredPower = static_cast<float>(measured_);
     s.predictedPower = static_cast<float>(predicted_);
     for (std::uint32_t c = 0; c < kChannels; ++c) {
@@ -299,6 +529,7 @@ N60FeedForwardShadowConfig N60FeedForwardShadowConfigDefault(double sampleRate) 
     config.bandLowHz = 20.0f;
     config.bandHighHz = 200.0f;
     config.peakGainLimit = static_cast<float>(kDefaultPeakGain);
+    config.driveSampleRate = 0;
     return config;
 }
 
@@ -314,6 +545,10 @@ bool N60FeedForwardShadowConfigIsValid(const N60FeedForwardShadowConfig *config)
     if (!in(config->leakagePerSecond, 0, 10)) return false;
     if (!in(config->bandLowHz, 10, 100)) return false;
     if (!in(config->bandHighHz, 2.0 * config->bandLowHz, 0.25 * fd)) return false;
+    if (config->driveSampleRate != 0
+        && !(in(config->driveSampleRate, 8000, 768000)
+             && decimatedRateFor(config->driveSampleRate) != 0))
+        return false;
     return finite(config->peakGainLimit) && config->peakGainLimit > 0
            && config->peakGainLimit <= 16;
 }
@@ -342,6 +577,25 @@ bool N60FeedForwardShadowSetSeed(N60FeedForwardShadow *shadow, const float *left
 void N60FeedForwardShadowProcess(N60FeedForwardShadow *shadow, const float *reference,
                                  const float *error, uint32_t frames) {
     shadow->core.process(reference, error, frames);
+}
+
+bool N60FeedForwardShadowSetEcho(N60FeedForwardShadow *shadow, uint32_t channel,
+                                 uint32_t bulkDelay, const float *taps, uint32_t count) {
+    return shadow->core.setEcho(channel, bulkDelay, taps, count);
+}
+
+void N60FeedForwardShadowPushDrive(N60FeedForwardShadow *shadow, const float *left,
+                                   const float *right, uint32_t frames) {
+    shadow->core.pushDrive(left, right, frames);
+}
+
+bool N60FeedForwardShadowSetDriveTiming(N60FeedForwardShadow *shadow, uint64_t micFrame,
+                                        double driveFrame, double driveFramesPerMicFrame) {
+    return shadow->core.setDriveTiming(micFrame, driveFrame, driveFramesPerMicFrame);
+}
+
+void N60FeedForwardShadowRestartDrive(N60FeedForwardShadow *shadow, uint64_t nextDriveFrame) {
+    shadow->core.restartDrive(nextDriveFrame);
 }
 
 void N60FeedForwardShadowMarkDiscontinuity(N60FeedForwardShadow *shadow) {
