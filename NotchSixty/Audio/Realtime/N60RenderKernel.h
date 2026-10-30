@@ -386,6 +386,12 @@ bool N60DSPGraphSnapshotSetActiveQuietZonePeakCap(
     N60DSPGraphSnapshot * _Nonnull snapshot,
     float peakCapLinear
 );
+/// E4 S20: the earned cap at arm (linear, 0 = none). The anti-noise clamp is then also held to a
+/// ceiling that starts here and rises at most 3 dB per 5 s toward the requested cap.
+bool N60DSPGraphSnapshotSetActiveQuietZoneInitialCap(
+    N60DSPGraphSnapshot * _Nonnull snapshot,
+    float initialCapLinear
+);
 bool N60DSPGraphSnapshotSetCrossover(
     N60DSPGraphSnapshot * _Nonnull snapshot,
     double frequencyHz,

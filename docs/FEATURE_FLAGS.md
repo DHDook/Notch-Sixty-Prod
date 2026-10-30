@@ -32,3 +32,4 @@ When the epic ships, delete the flag and every check that reads it in the same P
 | --- | --- | --- |
 | `e6.legacy-kernel` | E6 | Selects the frozen legacy render kernel (E23 deletes it) |
 | `e4.adaptive-tonal-live` | E4 | Live adaptive tonal canceller and the supervised microphone-move re-solve; still needs the per-feature arm switch (S18b) |
+| `e4.earned-cap` | E4 | Anti-noise cap earned in 3 dB steps from -40 to -18 dBFS per binding (S20); needs `e4.adaptive-tonal-live` |

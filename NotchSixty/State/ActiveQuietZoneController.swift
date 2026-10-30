@@ -116,6 +116,29 @@ final class ActiveQuietZoneController: ObservableObject {
             self?.flightRecorder.record(kind, message)
         }
     }
+    /// E4 S20 (`e4.earned-cap`): the earned anti-noise cap. Nil with the flag off (or without the
+    /// adaptive canceller), in which case the cap is the fixed -40 dBFS as before.
+    private(set) var earnedCap: EarnedCapPolicy?
+
+    func attachEarnedCap(_ policy: EarnedCapPolicy?) {
+        earnedCap = policy
+        policy?.onEvent = { [weak self] kind, message in
+            self?.flightRecorder.record(kind, message)
+        }
+    }
+
+    /// "Anti-noise limit -31 dBFS (earned)" while the earned cap is on; nil otherwise.
+    var earnedCapStatus: String? { arm.isArmed ? earnedCap?.statusText : nil }
+
+    private func earnedBinding(_ environment: LiveTreatmentEnvironment) -> EarnedCapBinding? {
+        guard let output = environment.outputDeviceUID, let rate = environment.sampleRate else { return nil }
+        return EarnedCapBinding(
+            outputDeviceUID: output,
+            inputDeviceUID: environment.inputDeviceUID ?? "",
+            sampleRate: rate
+        )
+    }
+
     @Published private(set) var lastErrorDescription: String?
     @Published private(set) var spatialCalibration:
         ActiveQuietZoneSpatialCalibration?
@@ -531,6 +554,13 @@ final class ActiveQuietZoneController: ObservableObject {
             flightRecorder.recordArm()
             armedGeneration = engine.liveTreatmentGeneration
             adaptiveLive?.reset()
+            if let earned = earnedCap {
+                let environment = liveTreatmentEnvironment()
+                if let binding = earnedBinding(environment) {
+                    earned.beginArm(binding: binding, outputGainDB: environment.outputGainDB)
+                }
+                engine.earnedCapInitialLinear = Float(earned.capLinear)
+            }
             do {
                 var updated = configuration
                 updated.enabled = true
@@ -564,9 +594,23 @@ final class ActiveQuietZoneController: ObservableObject {
             measurement: doNoHarm.measure(snapshot),
             seeds: adaptiveSeeds,
             plannedPeakLinear: availableInjectionPeak,
+            earnedCapActive: earnedCap != nil,
             leaseRequired: engine.activeQuietZoneLeaseEnabled,
             leaseRenewed: engine.activeQuietZoneLeaseHealthy
         ))
+        if let earned = earnedCap {
+            let facts = adaptive.earnedCapFacts
+            let measurement = doNoHarm.measure(snapshot)
+            earned.poll(EarnedCapPollFacts(
+                now: ProcessInfo.processInfo.systemUptime,
+                adapting: facts.adapting,
+                verdict: verdict,
+                measurement: measurement,
+                guardOrHold: facts.guardTripped,
+                playedPeakLinear: facts.playedPeakLinear,
+                moveRecovering: adaptive.isCapRecovering
+            ))
+        }
         for request in requests {
             switch request {
             case .beginRebaseline:
@@ -605,6 +649,8 @@ final class ActiveQuietZoneController: ObservableObject {
     private func applyDisarm(_ reason: LiveTreatmentDisarmReason) {
         flightRecorder.recordDisarm(reason)
         adaptiveLive?.reset()
+        earnedCap?.noteDisarm(reason)
+        engine.earnedCapInitialLinear = 0
         // Revoke the engine arm token first: nothing built under this arm can play again.
         armedGeneration = nil
         engine.revokeLiveTreatmentArm()
@@ -700,7 +746,9 @@ final class ActiveQuietZoneController: ObservableObject {
         do {
             try synchronizeSelectedPlaybackSystem()
             guard configuration.enabled else { return }
-            arm.observe(liveTreatmentEnvironment())
+            let environment = liveTreatmentEnvironment()
+            earnedCap?.observe(binding: earnedBinding(environment), outputGainDB: environment.outputGainDB)
+            arm.observe(environment)
             guard arm.isArmed, configuration.enabled else { return }
             guard !faultLatched else { return }
 
@@ -719,7 +767,8 @@ final class ActiveQuietZoneController: ObservableObject {
                         ambientLevelRecoveryDB:
                             ambient.appliedTarget.levelDB,
                         configuration: configuration
-                    )
+                    ),
+                    capDBFS: earnedCap?.capDBFS ?? LiveTreatmentSafeguards.defaultPeakCapDBFS
                 )
             guard availableInjectionPeak > 1.0e-7 else {
                 hold(.insufficientOutputHeadroom)

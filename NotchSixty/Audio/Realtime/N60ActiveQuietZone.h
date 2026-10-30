@@ -41,6 +41,11 @@ typedef struct {
     // E4 S18a: the control plane's arm generation (0 = none). A gain-mailbox record is played
     // only while its generation equals this one; a disarm bumps it, so a late write cannot play.
     uint64_t armGeneration;
+    // E4 S20: the earned cap at arm (linear). 0 = no ceiling (the clamp follows the snapshot cap
+    // and the record cap directly). Above 0, the clamp is also held to a ceiling that starts here
+    // for the arm generation and rises by at most 3 dB per 5 s of rendered frames toward the
+    // requested cap; lower requests apply at once and never lower the ceiling.
+    float initialCapLinear;
     N60ActiveQuietZoneToneSnapshot
         tones[N60_ACTIVE_QUIET_ZONE_MAX_TONES];
 } N60ActiveQuietZoneSnapshot;
@@ -101,6 +106,14 @@ typedef struct {
     uint64_t sanitizedSamples;
     // Linear clamp applied to every output sample; set by Schedule from the snapshot.
     float peakCapLinear;
+    // E4 S20: the clamp is min(snapshotCap, recordCap if any, ceiling if active); see Schedule.
+    float snapshotCapLinear;
+    float recordCapLinear;
+    float ceilingLinear;
+    bool ceilingActive;
+    uint64_t ceilingGeneration;
+    uint64_t ceilingStepFrames;
+    uint64_t ceilingFramesLeft;
     // Samples that reached the clamp (diagnostic; never reset by Schedule).
     uint64_t clampedSamples;
     // E4 S18a mailbox state (render thread only). The last valid record is kept so a graph

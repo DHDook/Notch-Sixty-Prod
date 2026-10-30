@@ -135,6 +135,35 @@ void N60ActiveQuietZoneRuntimeReset(
             : 48000.0;
 }
 
+/* E4 S20: the per-sample clamp is the lowest of the snapshot cap, the record's attempt cap and
+ * the earned-cap ceiling. Recomputed whenever one of them changes, so a raised request is
+ * followed as well as a lowered one. */
+#define N60_AQZ_CEILING_STEP_SECONDS 5.0
+/* Notes (E4 S20): the offline tone gains are planned by Swift under the earned cap, so the
+ * per-sample clamp is a safety net, not the normal limiter. A mailbox record scales its gains to
+ * the ceiling at apply time; headroom gained by a later ceiling step is used from the next record.
+ * A sample-rate change resets the runtime and restarts the ceiling at the initial cap (safe
+ * direction). The 5 s step timer keeps its partial count, so a step is never more than 3 dB per 5 s
+ * of rendered time in total. */
+
+static void refresh_clamp(N60ActiveQuietZoneRuntime *runtime) {
+    float limit = runtime->snapshotCapLinear;
+    if (runtime->recordCapLinear > 0.0f && runtime->recordCapLinear < limit) {
+        limit = runtime->recordCapLinear;
+    }
+    if (runtime->ceilingActive && runtime->ceilingLinear < limit) limit = runtime->ceilingLinear;
+    runtime->peakCapLinear = limit;
+}
+
+/* The cap the control plane is asking for right now, before the ceiling. */
+static float requested_cap(const N60ActiveQuietZoneRuntime *runtime) {
+    float request = runtime->snapshotCapLinear;
+    if (runtime->recordCapLinear > 0.0f && runtime->recordCapLinear < request) {
+        request = runtime->recordCapLinear;
+    }
+    return request;
+}
+
 static bool runtime_is_silent(
     const N60ActiveQuietZoneToneRuntime *tone
 ) {
@@ -223,10 +252,26 @@ bool N60ActiveQuietZoneRuntimeSchedule(
         N60ActiveQuietZoneRuntimeReset(runtime, sampleRate);
     }
     runtime->sampleRate = sampleRate;
-    runtime->peakCapLinear =
+    runtime->snapshotCapLinear =
         snapshot->peakCapLinear > 0.0f
             ? snapshot->peakCapLinear
             : linear_from_db(N60_ACTIVE_QUIET_ZONE_MAX_AGGREGATE_PEAK_DBFS);
+    runtime->recordCapLinear = 0.0f;  // a mailbox record of the same arm re-applies its own
+    if (snapshot->enabled && snapshot->initialCapLinear > 0.0f && isfinite(snapshot->initialCapLinear)) {
+        if (!runtime->ceilingActive || runtime->ceilingGeneration != snapshot->armGeneration) {
+            runtime->ceilingLinear = snapshot->initialCapLinear < runtime->snapshotCapLinear
+                ? snapshot->initialCapLinear : runtime->snapshotCapLinear;
+            runtime->ceilingGeneration = snapshot->armGeneration;
+            runtime->ceilingFramesLeft = 0u;
+        }
+        runtime->ceilingActive = true;
+        double stepFrames = floor(sampleRate * N60_AQZ_CEILING_STEP_SECONDS + 0.5);
+        runtime->ceilingStepFrames = stepFrames < 1.0 ? 1u : (uint64_t)stepFrames;
+    } else {
+        runtime->ceilingActive = false;
+        runtime->ceilingLinear = 0.0f;
+    }
+    refresh_clamp(runtime);
     // E4 S18a: this retargets to the offline gains. A valid mailbox record of the same arm is
     // applied again by ApplyMailbox in the same callback, before any frame is rendered.
     runtime->mailboxReapply = runtime->mailboxRecordValid && snapshot->enabled;
@@ -415,6 +460,15 @@ void N60ActiveQuietZoneRuntimeProcessFrame(
     // above the compile-time aggregate limit. An unscheduled runtime uses the limit.
     // Schedule and SnapshotSetPeakCap already bound the cap by the aggregate limit; only an
     // unscheduled runtime (cap 0) falls back to it here.
+    if (runtime->ceilingActive && runtime->ceilingLinear < requested_cap(runtime)) {
+        if (runtime->ceilingFramesLeft == 0u) runtime->ceilingFramesLeft = runtime->ceilingStepFrames;
+        if (--runtime->ceilingFramesLeft == 0u) {
+            const float request = requested_cap(runtime);
+            const float raised = runtime->ceilingLinear * 1.4125375f;  // +3 dB
+            runtime->ceilingLinear = raised < request ? raised : request;
+            refresh_clamp(runtime);
+        }
+    }
     float limit = runtime->peakCapLinear;
     if (!(limit > 0.0f)) {
         limit = linear_from_db(N60_ACTIVE_QUIET_ZONE_MAX_AGGREGATE_PEAK_DBFS);
@@ -605,6 +659,16 @@ void N60ActiveQuietZoneRuntimeApplyMailbox(
         return;
     }
 
+    // E4 S20: the attempt cap replaces the previous one (up or down), so the per-sample clamp
+    // follows a step-back instead of staying at the lowest value ever asked for.
+    runtime->recordCapLinear = record->attemptCapLinear > 0.0f ? record->attemptCapLinear : 0.0f;
+    if (runtime->snapshotCapLinear <= 0.0f) {
+        runtime->snapshotCapLinear = snapshot->peakCapLinear > 0.0f
+            ? snapshot->peakCapLinear
+            : linear_from_db(N60_ACTIVE_QUIET_ZONE_MAX_AGGREGATE_PEAK_DBFS);
+    }
+    refresh_clamp(runtime);
+
     // Limits: the lower of the always-on limits, the snapshot cap and the attempt cap.
     float aggregateLimit = linear_from_db(N60_ACTIVE_QUIET_ZONE_MAX_AGGREGATE_PEAK_DBFS);
     float toneLimit = linear_from_db(N60_ACTIVE_QUIET_ZONE_MAX_TONE_PEAK_DBFS);
@@ -613,6 +677,9 @@ void N60ActiveQuietZoneRuntimeApplyMailbox(
     }
     if (record->attemptCapLinear > 0.0f && record->attemptCapLinear < aggregateLimit) {
         aggregateLimit = record->attemptCapLinear;
+    }
+    if (runtime->ceilingActive && runtime->ceilingLinear < aggregateLimit) {
+        aggregateLimit = runtime->ceilingLinear;
     }
     if (toneLimit > aggregateLimit) toneLimit = aggregateLimit;
 
@@ -661,9 +728,6 @@ void N60ActiveQuietZoneRuntimeApplyMailbox(
         if (fabs(record->frequencyHz[t] - from) > 0.001) {
             begin_glide(tone, record->frequencyHz[t], sampleRate, (uint32_t)frames);
         }
-    }
-    if (record->attemptCapLinear > 0.0f && record->attemptCapLinear < runtime->peakCapLinear) {
-        runtime->peakCapLinear = record->attemptCapLinear;
     }
     if (isFresh) {
         atomic_fetch_add_explicit(&mailbox->applied, 1u, memory_order_relaxed);

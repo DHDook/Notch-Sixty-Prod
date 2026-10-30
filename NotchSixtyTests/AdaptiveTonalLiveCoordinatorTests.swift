@@ -69,3 +69,30 @@ final class AdaptiveTonalLiveCoordinatorTests: XCTestCase {
         XCTAssertFalse(c.resolver.isRunning)
     }
 }
+
+/// E4 S20: with the earned cap on, the coordinator writes the earned cap as the mailbox attempt cap.
+@MainActor
+final class AdaptiveTonalEarnedCapCommandTests: XCTestCase {
+    private func input(planned: Double, earned: Bool, now: TimeInterval = 10) -> AdaptiveTonalLivePollInput {
+        AdaptiveTonalLivePollInput(
+            now: now, armed: true, controllerGeneration: 4, engineGeneration: 4,
+            targetRampedIn: true, hasBaseline: true, verdict: .ok, measurement: nil,
+            seeds: [], plannedPeakLinear: planned, earnedCapActive: earned,
+            leaseRequired: false, leaseRenewed: false
+        )
+    }
+
+    func testEarnedCapIsTheAttemptCapAndFollowsTheRise() {
+        let c = AdaptiveTonalLiveCoordinator(ambient: nil, linkProvider: { nil }, clock: { 0 })
+        _ = c.poll(input(planned: 0.01, earned: true))
+        XCTAssertEqual(c.command.attemptCapLinear, 0.01, accuracy: 1e-9)
+        _ = c.poll(input(planned: 0.0141, earned: true, now: 70))
+        XCTAssertEqual(c.command.attemptCapLinear, 0.0141, accuracy: 1e-9)
+    }
+
+    func testFlagOffLeavesTheAttemptCapAtZero() {
+        let c = AdaptiveTonalLiveCoordinator(ambient: nil, linkProvider: { nil }, clock: { 0 })
+        _ = c.poll(input(planned: 0.01, earned: false))
+        XCTAssertEqual(c.command.attemptCapLinear, 0)
+    }
+}

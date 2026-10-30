@@ -197,6 +197,8 @@ harness e4_howl_guard_live "${STRICT[@]}" -O2 -include stddef.h -I"$RT" ci/harne
 # shellcheck disable=SC2086
 harness e4_gain_mailbox "${STRICT[@]}" -O2 -include stddef.h -I"$RT" ci/harness_e4_gain_mailbox.c \
     "$RT/N60ActiveQuietZone.c" "$RT/N60AmbientMonitorBridge.c" -framework CoreAudio -framework AudioToolbox
+# E4 S20: earned-cap ceiling and the attempt-cap fix in the Quiet Zone runtime.
+harness e4_earned_cap "${STRICT[@]}" -O2 -include stddef.h -I"$RT" ci/harness_e4_earned_cap.c "$RT/N60ActiveQuietZone.c"
 # E4 S13: acoustic twin (closed-loop room simulator) with the tonal canceller and
 # howl guard in the loop. SOAK=1 adds the long drift and fault soak.
 if selected e4_acoustic_twin; then
