@@ -12,6 +12,9 @@ struct AdaptiveTonalLiveCommand: Equatable, Sendable {
     var hold = false
     /// Extra peak cap on the mailbox record (linear per channel); 0 = none.
     var attemptCapLinear: Float = 0
+    /// E4 S21: the speaker's excursion curve. Each published tone gain is lowered to the curve's
+    /// cap at that tone (the kernel clamps the same value again). Nil = none.
+    var excursionCurve: ExcursionCapCurve?
     /// The token the kernel holds for this arm (never 0).
     var armGeneration: UInt64 = 0
     /// Faster path memory and larger dither while true.
@@ -304,12 +307,35 @@ final class AdaptiveTonalLiveWorker: @unchecked Sendable {
         }
     }
 
+    /// Lowers each tone's per-channel gain magnitude to the curve's cap at the tone. Only lowers.
+    static func applyExcursionCaps(_ curve: ExcursionCapCurve, to record: inout N60ActiveQuietZoneGainRecord) {
+        let count = Int(record.toneCount)
+        for t in 0 ..< min(count, Int(N60_ACTIVE_QUIET_ZONE_MAX_TONES)) {
+            let limit = curve.trackedCapLinear(atHz: withUnsafeBytes(of: record.frequencyHz) {
+                $0.bindMemory(to: Double.self)[t]
+            })
+            withUnsafeMutableBytes(of: &record.gain) { raw in
+                let gains = raw.bindMemory(to: Float.self)
+                for channel in 0 ..< 2 {
+                    let re = t * 4 + channel * 2
+                    let magnitude = hypotf(gains[re], gains[re + 1])
+                    if magnitude > limit {
+                        let scale = limit / magnitude
+                        gains[re] *= scale
+                        gains[re + 1] *= scale
+                    }
+                }
+            }
+        }
+    }
+
     private func publishIfWanted(_ command: AdaptiveTonalLiveCommand, status: N60RemoteTonalStatus) {
         guard command.writeEnabled || command.silence, command.armGeneration != 0, !guardTripReported else { return }
         let cap = command.silence ? Self.silentCapLinear : command.attemptCapLinear
         var record = N60ActiveQuietZoneGainRecord()
         guard N60RemoteTonalNextRecord(core, command.armGeneration, cap, &record) else { return }
         if command.silence { record.attemptCapLinear = Self.silentCapLinear }
+        if let curve = command.excursionCurve { Self.applyExcursionCaps(curve, to: &record) }
         if link.publish(record) == 0 { rejected += 1 } else { published += 1 }
     }
 

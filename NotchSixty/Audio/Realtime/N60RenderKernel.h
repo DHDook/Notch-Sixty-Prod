@@ -392,6 +392,14 @@ bool N60DSPGraphSnapshotSetActiveQuietZoneInitialCap(
     N60DSPGraphSnapshot * _Nonnull snapshot,
     float initialCapLinear
 );
+
+/// E4 S21: per-tone excursion caps (linear peak per channel, one per tone, 0 = none; count 0
+/// clears). They only lower the anti-noise.
+bool N60DSPGraphSnapshotSetActiveQuietZoneToneCaps(
+    N60DSPGraphSnapshot * _Nonnull snapshot,
+    const float * _Nullable toneCapsLinear,
+    uint32_t count
+);
 bool N60DSPGraphSnapshotSetCrossover(
     N60DSPGraphSnapshot * _Nonnull snapshot,
     double frequencyHz,

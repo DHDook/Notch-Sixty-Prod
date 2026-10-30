@@ -46,6 +46,11 @@ typedef struct {
     // for the arm generation and rises by at most 3 dB per 5 s of rendered frames toward the
     // requested cap; lower requests apply at once and never lower the ceiling.
     float initialCapLinear;
+    // E4 S21: per-tone peak cap (linear, per channel) from the speaker's excursion curve at the
+    // tone's frequency; 0 = no extra cap. It only lowers: applied to the offline gains at
+    // Schedule and to every mailbox record, after the aggregate limits. Defence in depth behind
+    // the Swift planner.
+    float toneCapLinear[N60_ACTIVE_QUIET_ZONE_MAX_TONES];
     N60ActiveQuietZoneToneSnapshot
         tones[N60_ACTIVE_QUIET_ZONE_MAX_TONES];
 } N60ActiveQuietZoneSnapshot;
@@ -127,6 +132,14 @@ typedef struct {
 
 N60ActiveQuietZoneSnapshot
 N60ActiveQuietZoneSnapshotMakeBypassed(void);
+
+/// E4 S21: sets the per-tone caps (linear, one per tone; 0 = none). Count 0 clears them.
+/// Returns false on a non-finite or negative value or a count above the maximum.
+bool N60ActiveQuietZoneSnapshotSetToneCaps(
+    N60ActiveQuietZoneSnapshot * _Nonnull snapshot,
+    const float * _Nullable toneCapsLinear,
+    uint32_t count
+);
 
 /// Sets the snapshot's output clamp. Rejects non-finite or non-positive values; values above the
 /// aggregate limit are lowered to it.
