@@ -29,7 +29,7 @@ struct QuietZoneFeedForwardLeakage: Codable, Equatable, Sendable {
 }
 
 struct QuietZoneFeedForwardDesignSurvey: Codable, Equatable, Sendable {
-    static let schemaVersion = 1
+    static let schemaVersion = 2
     var version: Int = schemaVersion
     var projectID: UUID
     /// The input device both microphones share.
@@ -40,12 +40,39 @@ struct QuietZoneFeedForwardDesignSurvey: Codable, Equatable, Sendable {
     var capturedAt: Date
     var segments: Int
     var bands: [QuietZoneFeedForwardSurveyBand]
+    /// v1: the native-rate response of one sweep. v2: the mean echo model at fd, with its delay
+    /// as leading zeros, so the designer's band assembly reads it unchanged.
     var leakage: QuietZoneFeedForwardLeakage?
+    /// E4 S22b2: the three-sweep echo model (v2). A v1 file has none; see `echoModelOrLegacy`.
+    var echoModel: FeedForwardEchoModel?
+
+    /// The model that drives echo removal. A v1 leakage becomes a one-repeat model without a
+    /// bound, which the stability check reports as "not checked".
+    var echoModelOrLegacy: FeedForwardEchoModel? {
+        if let echoModel { return echoModel }
+        guard let leakage else { return nil }
+        return try? FeedForwardEchoModelBuilder.build(
+            left: [leakage.leftImpulseResponse], right: [leakage.rightImpulseResponse],
+            nativeSampleRate: leakage.sampleRate, capturedAt: leakage.capturedAt
+        )
+    }
 
     /// The same device and channels: a new noise survey may keep the leakage.
     func sameInputs(as other: QuietZoneFeedForwardDesignSurvey) -> Bool {
         projectID == other.projectID && microphoneStableID == other.microphoneStableID
             && errorChannel == other.errorChannel && referenceChannel == other.referenceChannel
+    }
+}
+
+extension FeedForwardEchoModel {
+    /// The mean path at fd with its delay as leading zeros.
+    func asLeakage() -> QuietZoneFeedForwardLeakage {
+        QuietZoneFeedForwardLeakage(
+            sampleRate: sampleRate,
+            leftImpulseResponse: [Float](repeating: 0, count: left.bulkDelay) + left.taps,
+            rightImpulseResponse: [Float](repeating: 0, count: right.bulkDelay) + right.taps,
+            capturedAt: capturedAt
+        )
     }
 }
 

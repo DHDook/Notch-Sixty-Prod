@@ -209,10 +209,13 @@
 		E4F100000000000000000001 /* n60_ff_survey.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E4F100000000000000000012 /* n60_ff_survey.cpp */; };
 		E4F100000000000000000003 /* FeedForwardSurveyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4F100000000000000000014 /* FeedForwardSurveyTests.swift */; };
 		E4F200000000000000000001 /* QuietZoneFeedForwardDesignSurvey.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4F200000000000000000011 /* QuietZoneFeedForwardDesignSurvey.swift */; };
+		E4F700000000000000000001 /* FeedForwardEchoModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4F700000000000000000011 /* FeedForwardEchoModel.swift */; };
+		E4F700000000000000000002 /* FeedForwardDriveAligner.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4F700000000000000000012 /* FeedForwardDriveAligner.swift */; };
 		E4F200000000000000000002 /* QuietZoneFeedForwardNoiseSurvey.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4F200000000000000000012 /* QuietZoneFeedForwardNoiseSurvey.swift */; };
 		E4F200000000000000000003 /* QuietZoneFeedForwardSurveyController.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4F200000000000000000013 /* QuietZoneFeedForwardSurveyController.swift */; };
 		E4F200000000000000000004 /* ProductionFeedForwardDesignSurveyCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4F200000000000000000014 /* ProductionFeedForwardDesignSurveyCard.swift */; };
 		E4F200000000000000000005 /* QuietZoneFeedForwardSurveyFlowTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4F200000000000000000015 /* QuietZoneFeedForwardSurveyFlowTests.swift */; };
+		E4F700000000000000000003 /* FeedForwardEchoFlowTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4F700000000000000000013 /* FeedForwardEchoFlowTests.swift */; };
 		E4F300000000000000000001 /* QuietZoneFeedForwardShadowPlan.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4F300000000000000000011 /* QuietZoneFeedForwardShadowPlan.swift */; };
 		E4F300000000000000000002 /* QuietZoneFeedForwardShadow.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4F300000000000000000012 /* QuietZoneFeedForwardShadow.swift */; };
 		E4F300000000000000000003 /* ProductionFeedForwardShadowCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4F300000000000000000013 /* ProductionFeedForwardShadowCard.swift */; };
@@ -726,10 +729,13 @@
 		E4F100000000000000000012 /* n60_ff_survey.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = n60_ff_survey.cpp; sourceTree = "<group>"; };
 		E4F100000000000000000014 /* FeedForwardSurveyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeedForwardSurveyTests.swift; sourceTree = "<group>"; };
 		E4F200000000000000000011 /* QuietZoneFeedForwardDesignSurvey.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuietZoneFeedForwardDesignSurvey.swift; sourceTree = "<group>"; };
+		E4F700000000000000000011 /* FeedForwardEchoModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeedForwardEchoModel.swift; sourceTree = "<group>"; };
+		E4F700000000000000000012 /* FeedForwardDriveAligner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeedForwardDriveAligner.swift; sourceTree = "<group>"; };
 		E4F200000000000000000012 /* QuietZoneFeedForwardNoiseSurvey.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuietZoneFeedForwardNoiseSurvey.swift; sourceTree = "<group>"; };
 		E4F200000000000000000013 /* QuietZoneFeedForwardSurveyController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuietZoneFeedForwardSurveyController.swift; sourceTree = "<group>"; };
 		E4F200000000000000000014 /* ProductionFeedForwardDesignSurveyCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductionFeedForwardDesignSurveyCard.swift; sourceTree = "<group>"; };
 		E4F200000000000000000015 /* QuietZoneFeedForwardSurveyFlowTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuietZoneFeedForwardSurveyFlowTests.swift; sourceTree = "<group>"; };
+		E4F700000000000000000013 /* FeedForwardEchoFlowTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeedForwardEchoFlowTests.swift; sourceTree = "<group>"; };
 		E4F300000000000000000011 /* QuietZoneFeedForwardShadowPlan.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuietZoneFeedForwardShadowPlan.swift; sourceTree = "<group>"; };
 		E4F300000000000000000012 /* QuietZoneFeedForwardShadow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuietZoneFeedForwardShadow.swift; sourceTree = "<group>"; };
 		E4F300000000000000000013 /* ProductionFeedForwardShadowCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductionFeedForwardShadowCard.swift; sourceTree = "<group>"; };
@@ -1188,6 +1194,7 @@
 				E4F000000000000000000014 /* FeedForwardShadowTests.swift */,
 				E4F100000000000000000014 /* FeedForwardSurveyTests.swift */,
 				E4F200000000000000000015 /* QuietZoneFeedForwardSurveyFlowTests.swift */,
+				E4F700000000000000000013 /* FeedForwardEchoFlowTests.swift */,
 				E4F300000000000000000014 /* QuietZoneFeedForwardShadowTests.swift */,
 				E4D000000000000000000013 /* AdaptiveQuietZoneShadowTests.swift */,
 				E4A000000000000000000012 /* LiveTreatmentArmTests.swift */,
@@ -1383,6 +1390,8 @@
 				F96300000000000000000011 /* QuietZoneCausalFIRCompiler.swift */,
 				E4F000000000000000000013 /* QuietZoneFeedForwardShadowSeed.swift */,
 				E4F200000000000000000011 /* QuietZoneFeedForwardDesignSurvey.swift */,
+				E4F700000000000000000011 /* FeedForwardEchoModel.swift */,
+				E4F700000000000000000012 /* FeedForwardDriveAligner.swift */,
 				E4F200000000000000000012 /* QuietZoneFeedForwardNoiseSurvey.swift */,
 				E4F300000000000000000011 /* QuietZoneFeedForwardShadowPlan.swift */,
 				F96300000000000000000012 /* QuietZoneFeedForwardRehearsal.swift */,
@@ -1792,6 +1801,8 @@
 				F96300000000000000000001 /* QuietZoneCausalFIRCompiler.swift in Sources */,
 				E4F000000000000000000002 /* QuietZoneFeedForwardShadowSeed.swift in Sources */,
 				E4F200000000000000000001 /* QuietZoneFeedForwardDesignSurvey.swift in Sources */,
+				E4F700000000000000000001 /* FeedForwardEchoModel.swift in Sources */,
+				E4F700000000000000000002 /* FeedForwardDriveAligner.swift in Sources */,
 				E4F200000000000000000002 /* QuietZoneFeedForwardNoiseSurvey.swift in Sources */,
 				E4F200000000000000000003 /* QuietZoneFeedForwardSurveyController.swift in Sources */,
 				E4F200000000000000000004 /* ProductionFeedForwardDesignSurveyCard.swift in Sources */,
@@ -1941,6 +1952,7 @@
 				E4F000000000000000000003 /* FeedForwardShadowTests.swift in Sources */,
 				E4F100000000000000000003 /* FeedForwardSurveyTests.swift in Sources */,
 				E4F200000000000000000005 /* QuietZoneFeedForwardSurveyFlowTests.swift in Sources */,
+				E4F700000000000000000003 /* FeedForwardEchoFlowTests.swift in Sources */,
 				E4F300000000000000000004 /* QuietZoneFeedForwardShadowTests.swift in Sources */,
 				E4D000000000000000000003 /* AdaptiveQuietZoneShadowTests.swift in Sources */,
 				E4A000000000000000000002 /* LiveTreatmentArmTests.swift in Sources */,
