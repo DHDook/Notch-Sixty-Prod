@@ -30,8 +30,10 @@
 		E11E00000000000000000007 /* MeasurementRTASPLCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = E11E00000000000000000006 /* MeasurementRTASPLCard.swift */; };
 		E11E00000000000000000005 /* MeasurementInputMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = E11E00000000000000000004 /* MeasurementInputMonitor.swift */; };
 		E11E00000000000000000003 /* MeasurementLiveAnalysis.swift in Sources */ = {isa = PBXBuildFile; fileRef = E11E00000000000000000002 /* MeasurementLiveAnalysis.swift */; };
+		E13A00000000000000000001 /* FrequencyResponseImporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = E13A00000000000000000002 /* FrequencyResponseImporter.swift */; };
 		E11D00000000000000000061 /* MeasurementFormats.swift in Sources */ = {isa = PBXBuildFile; fileRef = E11D00000000000000000071 /* MeasurementFormats.swift */; };
 		E11D0000000000000000F001 /* MeasurementOverlays.swift in Sources */ = {isa = PBXBuildFile; fileRef = E11D0000000000000000F011 /* MeasurementOverlays.swift */; };
+		E13A00000000000000000003 /* FrequencyResponseImporterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E13A00000000000000000004 /* FrequencyResponseImporterTests.swift */; };
 		E11D00000000000000000062 /* MeasurementFormatsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E11D00000000000000000072 /* MeasurementFormatsTests.swift */; };
 		E11D0000000000000000F002 /* MeasurementOverlaysTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E11D0000000000000000F012 /* MeasurementOverlaysTests.swift */; };
 		E11D00000000000000000043 /* MeasurementLibraryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E11D00000000000000000053 /* MeasurementLibraryTests.swift */; };
@@ -525,8 +527,10 @@
 		E11E00000000000000000006 /* MeasurementRTASPLCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeasurementRTASPLCard.swift; sourceTree = "<group>"; };
 		E11E00000000000000000004 /* MeasurementInputMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreAudio/MeasurementInputMonitor.swift; sourceTree = "<group>"; };
 		E11E00000000000000000002 /* MeasurementLiveAnalysis.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeasurementLiveAnalysis.swift; sourceTree = "<group>"; };
+		E13A00000000000000000002 /* FrequencyResponseImporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FrequencyResponseImporter.swift; sourceTree = "<group>"; };
 		E11D00000000000000000071 /* MeasurementFormats.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeasurementFormats.swift; sourceTree = "<group>"; };
 		E11D0000000000000000F011 /* MeasurementOverlays.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeasurementOverlays.swift; sourceTree = "<group>"; };
+		E13A00000000000000000004 /* FrequencyResponseImporterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FrequencyResponseImporterTests.swift; sourceTree = "<group>"; };
 		E11D00000000000000000072 /* MeasurementFormatsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeasurementFormatsTests.swift; sourceTree = "<group>"; };
 		E11D0000000000000000F012 /* MeasurementOverlaysTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeasurementOverlaysTests.swift; sourceTree = "<group>"; };
 		E11D00000000000000000053 /* MeasurementLibraryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeasurementLibraryTests.swift; sourceTree = "<group>"; };
@@ -1160,6 +1164,7 @@
 				E11D00000000000000000053 /* MeasurementLibraryTests.swift */,
 				E11D00000000000000000085 /* SignalGeneratorSettingsTests.swift */,
 				E11D00000000000000000072 /* MeasurementFormatsTests.swift */,
+				E13A00000000000000000004 /* FrequencyResponseImporterTests.swift */,
 				E11D0000000000000000F012 /* MeasurementOverlaysTests.swift */,
 				A100000000000000000E1302 /* PresetInterchangeTests.swift */,
 				A100000000000000000E1304 /* MultichannelCalibrationDesignerTests.swift */,
@@ -1386,6 +1391,7 @@
 				E11D00000000000000000031 /* MeasurementGatedPlot.swift */,
 				E11D00000000000000000051 /* MeasurementLibrary.swift */,
 				E11D00000000000000000071 /* MeasurementFormats.swift */,
+				E13A00000000000000000002 /* FrequencyResponseImporter.swift */,
 				E11D0000000000000000F011 /* MeasurementOverlays.swift */,
 				A20000000000000000000030 /* RoomCorrectionTargetDesigner.swift */,
 				E20000000000000000000012 /* RoomCorrectionFIRDesigner.swift */,
@@ -1754,6 +1760,7 @@
 				E11D00000000000000000021 /* MeasurementGatedPlot.swift in Sources */,
 				E11D00000000000000000041 /* MeasurementLibrary.swift in Sources */,
 				E11D00000000000000000061 /* MeasurementFormats.swift in Sources */,
+				E13A00000000000000000001 /* FrequencyResponseImporter.swift in Sources */,
 				E11D0000000000000000F001 /* MeasurementOverlays.swift in Sources */,
 				E11D00000000000000000042 /* MeasurementLibraryView.swift in Sources */,
 				E11D00000000000000000080 /* MeasurementGeneratorCard.swift in Sources */,
@@ -1924,6 +1931,7 @@
 				E11D00000000000000000043 /* MeasurementLibraryTests.swift in Sources */,
 				E11D00000000000000000084 /* SignalGeneratorSettingsTests.swift in Sources */,
 				E11D00000000000000000062 /* MeasurementFormatsTests.swift in Sources */,
+				E13A00000000000000000003 /* FrequencyResponseImporterTests.swift in Sources */,
 				E11D0000000000000000F002 /* MeasurementOverlaysTests.swift in Sources */,
 				A100000000000000000E1301 /* PresetInterchangeTests.swift in Sources */,
 				A100000000000000000E1303 /* MultichannelCalibrationDesignerTests.swift in Sources */,

@@ -167,7 +167,7 @@ Gate G2 passed on 2026-10-25 (commit 07e82c6)
 ### E7 384 kHz everywhere
 
 - [ ] Express every buffer capacity in time, not frames, and size it at the 384 kHz worst case
-- [ ] Lift the known frame caps: program FIR 32,768 taps, binaural 8,192 taps, headphone delay 4,096 frames
+- [ ] Lift the known frame caps: program FIR 32,768 taps, headphone delay 4,096 frames (binaural 8,192 taps moved to E13, owner 31 Oct 2026)
 - [ ] Extend the PR117A double-precision fix beyond the crossover: user EQ, lane EQ, subwoofer EQ and headphone PEQ still use float32 coefficients and state, which loses low-frequency accuracy at high rates
 - [ ] Keep HRIR resampling on activation; add the same policy for any imported IR or SOFA asset
 - [ ] Run the XCTest acoustic reference lab at 44.1, 48, 88.2, 96, 176.4, 192, 352.8 and 384 kHz
@@ -272,7 +272,7 @@ complete, speaker ANC qualified, and a full hardware regression passing at every
 
 ### E13 Headphones complete
 
-- [ ] Bring-your-own import: AutoEq CSV, REW and squig.link frequency-response text, plus user target curves
+- [x] Bring-your-own import: AutoEq CSV, REW and squig.link frequency-response text, plus user target curves
 - [ ] One-click PEQ from an imported response and a chosen target, using the existing model fitter
 - [ ] Live PEQ and crossfeed tuning while playing (from E6)
 - [ ] Raise the HRIR cap for room-included BRIRs; live HRTF interpolation with head tracking
