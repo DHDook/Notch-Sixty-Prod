@@ -55,27 +55,28 @@ platforms; E6 (the unified graph) is the critical path, because eleven later epi
 | E22 | Hardware validation | 4 | all software epics | Bench | Every deferred bench check passes on `main` at every rate |
 | E18 | Launch readiness | 4 | all | Owner + Claude Code | Signed, reviewed, accessible, competitive ABX done, App Store live |
 
-## Execution order (owner, 20 Oct 2026)
+## Execution order (owner, 31 Oct 2026)
 
 `/next` works down this list: the first epic with open slices whose dependencies are met. Within
 an epic, slices go in their written order. Competitive features come first (what buyers and
 reviewers compare with Dirac and REW), then engine depth, then breadth.
 
-1. E4 class-leading roadmap, S12–S31 in written order (owner, 28 Oct 2026; slices waiting on E8 or the bench are skipped until ready)
-2. E19 MIMO room treatment, software parts (plan first; owner, 28 Oct 2026: straight after the E4 roadmap)
-3. E11 Measurement suite
-4. E10 Mixed-phase room correction and bass control
-5. E12 Guided setup and information architecture (ahead of E8, owner 25 Oct 2026, so the full room correction UI can be tested sooner)
-6. E8 Routing matrix and crossovers
-7. E13 Headphones complete (bring-your-own import first)
-8. E9 Multichannel protection and FIR parity
-9. E7 384 kHz everywhere
-10. E20 Engine performance
-11. E4 S11 Re-qualify ANC on the unified graph
-12. E21 Portable C++ core, remaining items
-13. E14 Upmixer, E15 Device-aware profiles, E17 Export and dither, E16 Automation and remote
-14. E23 Legacy engine removal
-15. E22 Hardware validation and E18 Launch readiness (owner-led)
+1. E4 class-leading roadmap, S24–S31 in written order (owner, 31 Oct 2026; S26 and S29 are skipped until the owner decides camera head position and the overnight power assertion; slices waiting on E8 or the bench are skipped until ready)
+2. E10 Mixed-phase room correction, S10 `min-phase-rewire`
+3. E12 Guided setup and information architecture, S7 `e12/ship` (#243, needs-owner)
+4. E11 Measurement suite, S10 `e11/overlays-and-ship` (needs-owner)
+5. Bring-your-own target and AutoEq import (pulled forward from E13, owner, 31 Oct 2026)
+6. E9 Multichannel protection and FIR parity, FIR limits: 262,144-tap program FIR and the 32,768-tap cap
+7. E19 MIMO room treatment, software parts
+8. E8 Routing matrix and crossovers
+9. E13 Headphones complete, remainder (after item 5)
+10. E7 384 kHz everywhere
+11. E20 Engine performance
+12. E4 S11 Re-qualify ANC on the unified graph
+13. E21 Portable C++ core, remaining items
+14. E14 Upmixer, E15 Device-aware profiles, E17 Export and dither, E16 Automation and remote
+15. E23 Legacy engine removal
+16. E22 Hardware validation and E18 Launch readiness (owner-led)
 
 ## Phase 1 — Consolidate and qualify
 
