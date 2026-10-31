@@ -32,7 +32,10 @@ enum QuietZoneFeedForwardSurveyRules {
             errorChannel: errorChannel, referenceChannel: referenceChannel,
             sampleRate: sampleRate, capturedAt: now, segments: segments, bands: bands
         )
-        if let previous, previous.sameInputs(as: survey) { survey.leakage = previous.leakage }
+        if let previous, previous.sameInputs(as: survey) {
+            survey.leakage = previous.leakage
+            survey.echoModel = previous.echoModel
+        }
         return survey
     }
 
@@ -80,6 +83,8 @@ final class QuietZoneFeedForwardSurveyController: ObservableObject {
     }
 
     static let pollNanoseconds: UInt64 = 100_000_000
+    /// E4 S22b2: sweeps per speaker. The run is audible and about three times as long as before.
+    static let leakageRepeats = FeedForwardEchoModel.minimumRepeats
 
     @Published private(set) var referenceChannel: Int?
     @Published private(set) var activity: Activity = .idle
@@ -164,7 +169,8 @@ final class QuietZoneFeedForwardSurveyController: ObservableObject {
         }
         return (QuietZoneFeedForwardShadowInputs(
             device: seat.device, referenceChannel: survey.referenceChannel, errorChannel: seat.channel,
-            bands: assembled.bands, design: design, budget: quietZone.feedForwardBudget, position: position
+            bands: assembled.bands, design: design, budget: quietZone.feedForwardBudget, position: position,
+            echoModel: survey.echoModelOrLegacy
         ), "")
     }
 
@@ -253,20 +259,32 @@ final class QuietZoneFeedForwardSurveyController: ObservableObject {
             try transport.start()
             leakageTransport = transport
             activity = .measuringLeakage(progress: 0)
-            message = "Playing a sweep on each speaker; the reference microphone records it."
+            message = "Playing \(Self.leakageRepeats) sweeps on each speaker; the reference microphone records them."
             task = Task { [weak self] in
                 guard let self else { return }
                 do {
-                    let capture = try await self.pollLeakage(transport)
-                    self.activity = .analyzing
-                    let analysis = try await self.analysisOperation(capture, plan, nil)
-                    var updated = survey
-                    updated.leakage = QuietZoneFeedForwardLeakage(
-                        sampleRate: analysis.sampleRate,
-                        leftImpulseResponse: analysis.left.impulseResponse,
-                        rightImpulseResponse: analysis.right.impulseResponse,
-                        capturedAt: Date()
+                    var lefts: [[Float]] = [], rights: [[Float]] = []
+                    var rate = output.nominalSampleRate
+                    var current = transport
+                    for index in 0..<Self.leakageRepeats {
+                        if index > 0 {
+                            current = try self.transportFactory(output, seat.device, survey.referenceChannel, plan)
+                            try current.start()
+                            self.leakageTransport = current
+                        }
+                        let capture = try await self.pollLeakage(current, repeatIndex: index)
+                        self.activity = .analyzing
+                        let analysis = try await self.analysisOperation(capture, plan, nil)
+                        lefts.append(analysis.left.impulseResponse)
+                        rights.append(analysis.right.impulseResponse)
+                        rate = analysis.sampleRate
+                    }
+                    let model = try FeedForwardEchoModelBuilder.build(
+                        left: lefts, right: rights, nativeSampleRate: rate, capturedAt: Date()
                     )
+                    var updated = survey
+                    updated.echoModel = model
+                    updated.leakage = model.asLeakage()
                     try self.store.save(updated, project: seat.project)
                     self.survey = updated
                     self.activity = .idle
@@ -325,14 +343,15 @@ final class QuietZoneFeedForwardSurveyController: ObservableObject {
     }
 
     private func pollLeakage(
-        _ transport: any RoomCorrectionCalibrationTransporting
+        _ transport: any RoomCorrectionCalibrationTransporting, repeatIndex: Int
     ) async throws -> RoomCorrectionCalibrationCapture {
         while true {
             try await Task.sleep(nanoseconds: Self.pollNanoseconds)
             guard let snapshot = transport.snapshot() else { throw QuietZoneFeedForwardSurveyError.captureFault }
             if snapshot.totalFrameCount > 0 {
                 activity = .measuringLeakage(
-                    progress: min(Double(snapshot.frameCursor) / Double(snapshot.totalFrameCount), 1)
+                    progress: (Double(repeatIndex) + min(Double(snapshot.frameCursor) / Double(snapshot.totalFrameCount), 1))
+                        / Double(Self.leakageRepeats)
                 )
             }
             if snapshot.complete { break }

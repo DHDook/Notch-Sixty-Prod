@@ -185,6 +185,8 @@ final class ProductController: ObservableObject {
         )
         self.feedForwardSurvey = feedForwardSurvey
         let feedForwardShadow = QuietZoneFeedForwardShadow()
+        // E4 S22b2: the drive is only ever requested while `e4.feedforward-live` is on.
+        feedForwardShadow.driveSource = audioEngine
         feedForwardShadow.observe(feedForwardSurvey)
         self.feedForwardShadow = feedForwardShadow
         self.hardwareAcceptance = HardwareAcceptanceController()
@@ -272,6 +274,8 @@ final class ProductController: ObservableObject {
         )
         self.feedForwardSurvey = feedForwardSurvey
         let feedForwardShadow = QuietZoneFeedForwardShadow()
+        // E4 S22b2: the drive is only ever requested while `e4.feedforward-live` is on.
+        feedForwardShadow.driveSource = audioEngine
         feedForwardShadow.observe(feedForwardSurvey)
         self.feedForwardShadow = feedForwardShadow
         self.hardwareAcceptance = HardwareAcceptanceController()

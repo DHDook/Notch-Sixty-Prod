@@ -13,6 +13,8 @@ struct QuietZoneFeedForwardShadowInputs: Equatable, Sendable {
     var design: QuietZoneVirtualSeatDesign?
     var budget: QuietZoneFeedForwardBudget
     var position: RoomCorrectionMeasurementPosition
+    /// E4 S22b2: the speakers' leakage into the reference microphone, for echo removal.
+    var echoModel: FeedForwardEchoModel?
 }
 
 typealias QuietZoneFeedForwardShadowCaptureFactory = (
@@ -116,7 +118,13 @@ final class QuietZoneFeedForwardShadowEngine: @unchecked Sendable {
         var status: N60FeedForwardShadowStatus
         var left: [Float]
         var right: [Float]
+        /// Why echo removal is not subtracting, or nil while it is aligned.
+        var alignmentNote: String?
+        var driftPPM: Double?
     }
+
+    typealias HostSeconds = @Sendable (UInt64) -> Double
+    static let machHostSeconds: HostSeconds = { Double(AudioConvertHostTimeToNanos($0)) * 1.0e-9 }
 
     /// At most one second of capture per pump.
     static let readFrames = 16_384
@@ -130,10 +138,28 @@ final class QuietZoneFeedForwardShadowEngine: @unchecked Sendable {
     private var nextSampleTime: Double?
     private var reference: [Float] = []
     private var error: [Float] = []
+    // E4 S22b2 echo removal. `aligner` is nil when there is no echo model or drive.
+    private let hostSeconds: HostSeconds
+    private var aligner: FeedForwardDriveAligner?
+    private var micFramesAppended: UInt64 = 0
+    private var nextDriveFrame: UInt64?
+    private var lastDropped: (UInt64, UInt64)?
+    private var alignmentNote: String? = "waiting for the speaker drive"
+    private var driftPPM: Double?
+    /// Fixed at init, so the main actor can read it without the worker queue.
+    let echoActive: Bool
 
-    init?(plan: QuietZoneFeedForwardShadowPlan, capture: QuietZoneFeedForwardPairCapturing) {
+    init?(
+        plan: QuietZoneFeedForwardShadowPlan, capture: QuietZoneFeedForwardPairCapturing,
+        echo: FeedForwardEchoModel? = nil, driveSampleRate: Double? = nil,
+        hostSeconds: @escaping HostSeconds = QuietZoneFeedForwardShadowEngine.machHostSeconds
+    ) {
         guard capture.sampleRate == plan.nativeSampleRate else { return nil }
+        self.hostSeconds = hostSeconds
         var config = N60FeedForwardShadowConfigDefault(plan.nativeSampleRate)
+        if let echo, let driveSampleRate, echo.nativeSampleRate == plan.nativeSampleRate {
+            config.driveSampleRate = driveSampleRate
+        }
         guard let core = N60FeedForwardShadowCreate(&config) else { return nil }
         let count = UInt32(min(plan.seedLeft.count, plan.seedRight.count))
         guard N60FeedForwardShadowSetPath(
@@ -147,9 +173,23 @@ final class QuietZoneFeedForwardShadowEngine: @unchecked Sendable {
             N60FeedForwardShadowDestroy(core)
             return nil
         }
+        if config.driveSampleRate > 0, let echo {
+            guard N60FeedForwardShadowSetEcho(
+                      core, 0, UInt32(echo.left.bulkDelay), echo.left.taps, UInt32(echo.left.taps.count)
+                  ),
+                  N60FeedForwardShadowSetEcho(
+                      core, 1, UInt32(echo.right.bulkDelay), echo.right.taps, UInt32(echo.right.taps.count)
+                  )
+            else {
+                N60FeedForwardShadowDestroy(core)
+                return nil
+            }
+            aligner = FeedForwardDriveAligner(micRate: plan.nativeSampleRate, driveRate: config.driveSampleRate)
+        }
         self.plan = plan
         self.capture = capture
         self.core = core
+        echoActive = aligner != nil
         sampleRate = plan.nativeSampleRate
         taps = Int(config.taps)
     }
@@ -160,8 +200,9 @@ final class QuietZoneFeedForwardShadowEngine: @unchecked Sendable {
 
     /// Drains the capture (up to one second). A jump in sample time (a lost
     /// callback) marks a gap. A capture fault throws.
-    func pump() throws -> Snapshot {
+    func pump(drive: FeedForwardDriveChunk? = nil) throws -> Snapshot {
         try queue.sync {
+            applyDrive(drive)
             var remaining = max(Int(sampleRate), Self.readFrames)
             while remaining > 0 {
                 let chunk = try capture.readPair(maximumFrames: min(Self.readFrames, remaining))
@@ -173,7 +214,53 @@ final class QuietZoneFeedForwardShadowEngine: @unchecked Sendable {
             var right = [Float](repeating: 0, count: taps)
             N60FeedForwardShadowCopyWeights(core, 0, &left, UInt32(taps))
             N60FeedForwardShadowCopyWeights(core, 1, &right, UInt32(taps))
-            return Snapshot(status: N60FeedForwardShadowReadStatus(core), left: left, right: right)
+            return Snapshot(
+                status: N60FeedForwardShadowReadStatus(core), left: left, right: right,
+                alignmentNote: aligner == nil ? nil : alignmentNote, driftPPM: driftPPM
+            )
+        }
+    }
+
+    /// Pushes the speaker drive ahead of the microphone frames that follow it. Any break in the
+    /// drive's index sequence or in the render path's drop counters restarts the drive and its fit.
+    private func applyDrive(_ chunk: FeedForwardDriveChunk?) {
+        guard aligner != nil else { return }
+        guard let chunk else {
+            alignmentNote = "no speaker drive from the engine"
+            return
+        }
+        let dropped = (chunk.droppedFrames, chunk.droppedAnchors)
+        if nextDriveFrame != chunk.firstFrame || lastDropped.map({ $0 != dropped }) ?? true {
+            N60FeedForwardShadowRestartDrive(core, chunk.firstFrame)
+            aligner?.resetDrive()
+            nextDriveFrame = chunk.firstFrame
+        }
+        lastDropped = dropped
+        for anchor in chunk.anchors where anchor.outputHostTime != 0 {
+            aligner?.addDrive(frame: anchor.firstFrameIndex, hostSeconds: hostSeconds(anchor.outputHostTime))
+        }
+        if !chunk.left.isEmpty {
+            N60FeedForwardShadowPushDrive(core, chunk.left, chunk.right, UInt32(chunk.left.count))
+            nextDriveFrame = chunk.firstFrame &+ UInt64(chunk.left.count)
+        }
+    }
+
+    /// Sets the drive position that matches the first microphone frame of the batch about to run.
+    private func applyTiming(micFrame: UInt64) {
+        guard let current = aligner else { return }
+        switch current.evaluate(micFrame: micFrame) {
+        case .aligning:
+            break
+        case .stopped(let reason):
+            alignmentNote = reason
+            driftPPM = nil
+            if let next = nextDriveFrame { N60FeedForwardShadowRestartDrive(core, next) }
+            aligner?.resetDrive()
+        case .aligned(let driveFrame, let ratio, let drift):
+            if N60FeedForwardShadowSetDriveTiming(core, micFrame, driveFrame, ratio) {
+                alignmentNote = nil
+                driftPPM = drift
+            }
         }
     }
 
@@ -201,8 +288,14 @@ final class QuietZoneFeedForwardShadowEngine: @unchecked Sendable {
                 if let expected, abs(time - expected) > 0.5 {
                     flush()
                     N60FeedForwardShadowMarkDiscontinuity(core)
+                    aligner?.resetAll()
+                    alignmentNote = "gap in the microphone stream"
+                }
+                if frame.frameOffset == 0, frame.firstFrameHostTime != 0 {
+                    aligner?.addMic(frame: micFramesAppended, hostSeconds: hostSeconds(frame.firstFrameHostTime))
                 }
             }
+            micFramesAppended &+= 1
             reference.append(frame.sample)
             error.append(samples[i])
         }
@@ -212,6 +305,7 @@ final class QuietZoneFeedForwardShadowEngine: @unchecked Sendable {
 
     private func flush() {
         guard !reference.isEmpty else { return }
+        applyTiming(micFrame: micFramesAppended &- UInt64(reference.count))
         N60FeedForwardShadowProcess(core, reference, error, UInt32(reference.count))
         reference.removeAll(keepingCapacity: true)
         error.removeAll(keepingCapacity: true)
@@ -250,8 +344,48 @@ struct QuietZoneFeedForwardShadowStatus: Equatable, Sendable {
     var gaps: UInt64 = 0
     var modelResets: UInt64 = 0
     var gainLimited: UInt64 = 0
+    /// E4 S22b2: echo removal (the speakers' own programme taken out of the reference).
+    var echo = QuietZoneFeedForwardEchoReadout.off
 
     static let inactive = QuietZoneFeedForwardShadowStatus(state: .inactive)
+}
+
+/// E4 S22b2: what the card shows about echo removal.
+struct QuietZoneFeedForwardEchoReadout: Equatable, Sendable {
+    enum Alignment: Equatable, Sendable {
+        case off(String)
+        case waiting(String)
+        case searching
+        case locked
+    }
+
+    var alignment: Alignment
+    /// Reference level before over after removal, dB; nil unless locked.
+    var removalDB: Double?
+    var offsetSamples: Int = 0
+    var driftPPM: Double?
+    var stability: FeedForwardLeakageStabilityCheck.Verdict = .notChecked("not checked: measure leakage again")
+    /// Removal stayed under 10 dB for 10 s of programme: the model no longer fits the room.
+    var measureAgain = false
+
+    static let off = QuietZoneFeedForwardEchoReadout(alignment: .off("Echo removal is off."))
+}
+
+/// Removal under 10 dB while locked on programme for 10 s means the leakage model is stale.
+struct FeedForwardRemovalWatch: Equatable, Sendable {
+    static let minimumRemovalDB = 10.0
+    static let seconds = 10.0
+    static let programmeFloor: Float = 1.0e-5  // -50 dBFS mean square
+
+    private var weak = 0.0
+    private(set) var stale = false
+
+    mutating func observe(locked: Bool, removalDB: Double?, drivePower: Float, dt: Double) {
+        guard locked, let removalDB, drivePower >= Self.programmeFloor else { return }
+        if removalDB >= Self.minimumRemovalDB { weak = 0; return }
+        weak += dt
+        if weak >= Self.seconds { stale = true }
+    }
 }
 
 /// E4 S9c: the feed-forward canceller in shadow mode.
@@ -269,6 +403,8 @@ final class QuietZoneFeedForwardShadow: ObservableObject {
     static let pollNanoseconds: UInt64 = 100_000_000
     /// Polls to wait after the capture could not be created or faulted.
     static let retryPolls = 10
+    /// At most 0.7 s of drive at 384 kHz per poll; the ring holds 262,144 frames.
+    static let driveReadFrames = 262_144
 
     private(set) var isActive = false
     /// Shadows created so far (each rate, device or survey change makes one).
@@ -278,6 +414,10 @@ final class QuietZoneFeedForwardShadow: ObservableObject {
     private var engine: QuietZoneFeedForwardShadowEngine?
     private var closing: QuietZoneFeedForwardShadowEngine?
     private var watch = QuietZoneFeedForwardShadowWatch()
+    private var removalWatch = FeedForwardRemovalWatch()
+    /// Set by the app when `e4.feedforward-live` is on; nil means no drive is ever requested.
+    var driveSource: (any FeedForwardDriveSource)?
+    private var demandSet = false
     private var retryCountdown = 0
     /// Bumped whenever the engine is dropped, so late results are ignored.
     private var generation = 0
@@ -374,6 +514,9 @@ final class QuietZoneFeedForwardShadow: ObservableObject {
         let current = generation
         let rate = deviceRate
         let device = inputs.device
+        // The rings have one consumer, this main-actor read; the worker only gets the copy.
+        let chunk = running.echoActive && echoBlockedReason(inputs) == nil
+            ? driveSource?.readDrive(maximumFrames: Self.driveReadFrames) : nil
         let snapshot: QuietZoneFeedForwardShadowEngine.Snapshot
         do {
             snapshot = try await Task.detached(priority: .userInitiated) {
@@ -381,7 +524,7 @@ final class QuietZoneFeedForwardShadow: ObservableObject {
                 if let now = rate(device), now != running.sampleRate {
                     throw QuietZoneFeedForwardSurveyError.captureFault
                 }
-                return try running.pump()
+                return try running.pump(drive: chunk)
             }.value
         } catch {
             guard generation == current else { return }
@@ -413,13 +556,17 @@ final class QuietZoneFeedForwardShadow: ObservableObject {
             return failCreation(error)
         }
         let box = UncheckedCapture(capture)
+        let echoModel = echoBlockedReason(inputs) == nil ? inputs.echoModel : nil
+        let driveRate = echoModel == nil ? nil : driveSource?.driveSampleRate
         let made: Result<QuietZoneFeedForwardShadowEngine, Error> = await Task.detached(priority: .userInitiated) {
             do {
                 let plan = try QuietZoneFeedForwardShadowPlanner().plan(
                     bands: inputs.bands, design: inputs.design, budget: inputs.budget,
                     position: inputs.position, nativeSampleRate: box.capture.sampleRate
                 )
-                guard let engine = QuietZoneFeedForwardShadowEngine(plan: plan, capture: box.capture) else {
+                guard let engine = QuietZoneFeedForwardShadowEngine(
+                    plan: plan, capture: box.capture, echo: echoModel, driveSampleRate: driveRate
+                ) else {
                     throw QuietZoneFeedForwardShadowSeedError.unsupportedRate
                 }
                 try engine.start()
@@ -437,6 +584,8 @@ final class QuietZoneFeedForwardShadow: ObservableObject {
             }
             engine = created
             watch = QuietZoneFeedForwardShadowWatch()
+            removalWatch = FeedForwardRemovalWatch()
+            setDemand(created.echoActive)
             enginesCreated += 1
             return true
         case .failure(let error):
@@ -451,7 +600,29 @@ final class QuietZoneFeedForwardShadow: ObservableObject {
         return false
     }
 
+    /// Why echo removal cannot run now (nil when it can). Question 15: off with a subwoofer.
+    func echoBlockedReason(_ inputs: QuietZoneFeedForwardShadowInputs) -> String? {
+        guard FeatureFlags().isEnabled(.feedForwardLive) || forceEchoForTesting else {
+            return "Echo removal is off (feature flag)."
+        }
+        guard inputs.echoModel != nil else { return "Measure speaker leakage to enable echo removal." }
+        guard let driveSource else { return "No speaker drive from the engine." }
+        guard driveSource.driveSampleRate != nil else { return "No speaker drive from the engine." }
+        if driveSource.subwooferActive { return "Echo removal is off with a subwoofer or bass management." }
+        return nil
+    }
+
+    /// Tests only: bypasses the feature flag.
+    var forceEchoForTesting = false
+
+    private func setDemand(_ requested: Bool) {
+        guard demandSet != requested else { return }
+        demandSet = requested
+        driveSource?.setDriveDemand(requested)
+    }
+
     private func dropEngine() {
+        setDemand(false)
         generation += 1
         engine?.close()
         if let engine { closing = engine }
@@ -474,8 +645,39 @@ final class QuietZoneFeedForwardShadow: ObservableObject {
             adaptedSeconds: Double(s.samplesSinceRestart) / max(s.decimatedRate, 1),
             gaps: s.gaps,
             modelResets: s.modelResets,
-            gainLimited: s.gainLimited
+            gainLimited: s.gainLimited,
+            echo: echoReadout(snapshot, status: s)
         )
+    }
+
+    private func echoReadout(
+        _ snapshot: QuietZoneFeedForwardShadowEngine.Snapshot, status s: N60FeedForwardShadowStatus
+    ) -> QuietZoneFeedForwardEchoReadout {
+        guard let inputs else { return .off }
+        if let reason = echoBlockedReason(inputs) { return QuietZoneFeedForwardEchoReadout(alignment: .off(reason)) }
+        let stability = FeedForwardLeakageStabilityCheck.evaluate(
+            model: inputs.echoModel, weightsLeft: snapshot.left, weightsRight: snapshot.right
+        )
+        var readout = QuietZoneFeedForwardEchoReadout(alignment: .waiting("starting"), stability: stability)
+        readout.driftPPM = snapshot.driftPPM
+        switch s.echoState {
+        case UInt32(N60_FF_ECHO_LOCKED):
+            readout.alignment = .locked
+            readout.offsetSamples = Int(s.echoOffset)
+            if s.referencePowerAfter > 0, s.referencePowerBefore > 0 {
+                readout.removalDB = 10 * log10(Double(s.referencePowerBefore) / Double(s.referencePowerAfter))
+            }
+        case UInt32(N60_FF_ECHO_SEARCHING):
+            readout.alignment = .searching
+        default:
+            readout.alignment = .waiting(snapshot.alignmentNote ?? "waiting for programme")
+        }
+        removalWatch.observe(
+            locked: s.echoState == UInt32(N60_FF_ECHO_LOCKED), removalDB: readout.removalDB,
+            drivePower: s.drivePower, dt: Double(Self.pollNanoseconds) * 1.0e-9
+        )
+        readout.measureAgain = removalWatch.stale
+        return readout
     }
 }
 

@@ -59,6 +59,8 @@ struct ProductionFeedForwardShadowCard: View {
         .font(.callout)
         .foregroundStyle(.secondary)
 
+        echo(status.echo)
+
         if !status.comparison.bands.isEmpty {
             Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 4) {
                 GridRow {
@@ -82,6 +84,42 @@ struct ProductionFeedForwardShadowCard: View {
                 }
             }
         }
+    }
+
+    @ViewBuilder
+    private func echo(_ echo: QuietZoneFeedForwardEchoReadout) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            switch echo.alignment {
+            case .off(let reason):
+                Text(reason)
+            case .waiting(let reason):
+                Text("Echo removal waiting: \(reason).")
+            case .searching:
+                Text("Echo removal: aligning to the programme.")
+            case .locked:
+                if let removal = echo.removalDB {
+                    Text(String(format: "Echo removal: %.1f dB of the speakers' programme taken out of the reference (offset %d samples).", removal, echo.offsetSamples))
+                } else {
+                    Text("Echo removal: aligned.")
+                }
+            }
+            if let drift = echo.driftPPM {
+                Text(String(format: "Output and input clocks differ by %.0f ppm.", drift))
+            }
+            switch echo.stability {
+            case .passed(let loop):
+                Text(String(format: "Leakage stability: passed (loop gain %.3f).", loop))
+            case .notChecked(let why):
+                Text("Leakage stability: \(why).")
+            case .refused(let why):
+                Text("Would be refused: \(why).").foregroundStyle(.orange)
+            }
+            if echo.measureAgain {
+                Text("Removal stayed under 10 dB; measure leakage again.").foregroundStyle(.orange)
+            }
+        }
+        .font(.callout)
+        .foregroundStyle(.secondary)
     }
 
     private func reduction(_ db: Double) -> some View {
