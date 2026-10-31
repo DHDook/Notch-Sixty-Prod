@@ -88,16 +88,16 @@ final class RoomCorrectionTargetEditorTests: XCTestCase {
         let library = TargetLibrary(directory: directory)
         var record = sample()
         try library.save(record)
-        record.schema = 2
+        record.schema = 3
         XCTAssertThrowsError(try TargetLibrary.validate(record)) {
-            XCTAssertEqual($0 as? TargetLibraryError, .unsupportedSchema(2))
+            XCTAssertEqual($0 as? TargetLibraryError, .unsupportedSchema(3))
         }
         let url = directory.appendingPathComponent("\(record.id.uuidString).json")
         var text = try String(contentsOf: url, encoding: .utf8)
-        text = text.replacingOccurrences(of: "\"schema\" : 1", with: "\"schema\" : 2")
+        text = text.replacingOccurrences(of: "\"schema\" : 2", with: "\"schema\" : 3")
         try text.write(to: url, atomically: true, encoding: .utf8)
         XCTAssertThrowsError(try library.load(id: record.id)) {
-            XCTAssertEqual($0 as? TargetLibraryError, .unsupportedSchema(2))
+            XCTAssertEqual($0 as? TargetLibraryError, .unsupportedSchema(3))
         }
         let report = library.loadAll()
         XCTAssertEqual(report.skipped.count, 1)

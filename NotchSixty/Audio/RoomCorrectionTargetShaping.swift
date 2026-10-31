@@ -101,14 +101,44 @@ struct ChannelTargetShaping: Codable, Equatable, Sendable {
 
 // MARK: - Library
 
-/// One saved target: the shared curve plus per-channel shaping (schema 1).
+/// Where a target is meant to be used (E13 S1). Pickers show their own category plus `general`.
+enum TargetCategory: String, Codable, Equatable, Sendable, CaseIterable {
+    case room, headphone, general
+}
+
+/// Where an imported target came from (E13 S1). Local data only; nothing is bundled.
+struct TargetProvenance: Codable, Equatable, Sendable {
+    var fileName: String
+    var format: String
+    /// ISO 8601 import date.
+    var importDate: String
+    var attribution: String?
+}
+
+/// One saved target: the shared curve plus per-channel shaping.
+/// Schema 2 (E13 S1) adds `category` and `provenance`; schema-1 files load as `room`.
 struct TargetRecord: Codable, Equatable, Sendable, Identifiable {
-    static let schemaVersion = 1
+    static let schemaVersion = 2
     var schema: Int = TargetRecord.schemaVersion
     var id: UUID
     var name: String
     var points: [RoomCorrectionTargetPoint]
     var shaping: ChannelTargetShaping = .init()
+    var category: TargetCategory = .room
+    var provenance: TargetProvenance?
+
+    private enum CodingKeys: String, CodingKey { case schema, id, name, points, shaping, category, provenance }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        schema = try c.decode(Int.self, forKey: .schema)
+        id = try c.decode(UUID.self, forKey: .id)
+        name = try c.decode(String.self, forKey: .name)
+        points = try c.decode([RoomCorrectionTargetPoint].self, forKey: .points)
+        shaping = try c.decodeIfPresent(ChannelTargetShaping.self, forKey: .shaping) ?? .init()
+        category = try c.decodeIfPresent(TargetCategory.self, forKey: .category) ?? .room
+        provenance = try c.decodeIfPresent(TargetProvenance.self, forKey: .provenance)
+    }
 
     init(id: UUID = UUID(), name: String, points: [RoomCorrectionTargetPoint], shaping: ChannelTargetShaping = .init()) {
         self.id = id; self.name = name; self.points = points; self.shaping = shaping
@@ -129,7 +159,7 @@ enum TargetLibraryError: Error, Equatable, LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .unsupportedSchema(let v): "Target file schema \(v) is not supported (expected \(TargetRecord.schemaVersion))."
+        case .unsupportedSchema(let v): "Target file schema \(v) is not supported (expected 1 or \(TargetRecord.schemaVersion))."
         case .invalid(let why): "Invalid target: \(why)"
         case .builtIn: "Built-in targets cannot be changed; duplicate it first."
         case .notFound: "Target not found."
@@ -178,7 +208,9 @@ final class TargetLibrary {
     }
 
     static func validate(_ record: TargetRecord) throws {
-        guard record.schema == TargetRecord.schemaVersion else { throw TargetLibraryError.unsupportedSchema(record.schema) }
+        guard (1 ... TargetRecord.schemaVersion).contains(record.schema) else {
+            throw TargetLibraryError.unsupportedSchema(record.schema)
+        }
         guard !record.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw TargetLibraryError.invalid("name is empty")
         }
@@ -240,9 +272,13 @@ final class TargetLibrary {
         // Reject a newer schema before decoding the rest, so a future file reports its version.
         struct Probe: Decodable { var schema: Int }
         let probe = try JSONDecoder().decode(Probe.self, from: data)
-        guard probe.schema == TargetRecord.schemaVersion else { throw TargetLibraryError.unsupportedSchema(probe.schema) }
-        let record = try JSONDecoder().decode(TargetRecord.self, from: data)
+        guard (1 ... TargetRecord.schemaVersion).contains(probe.schema) else {
+            throw TargetLibraryError.unsupportedSchema(probe.schema)
+        }
+        var record = try JSONDecoder().decode(TargetRecord.self, from: data)
         try validate(record)
+        // Schema 1 loads as a room target; the file is rewritten as schema 2 only when saved.
+        record.schema = TargetRecord.schemaVersion
         return record
     }
 
@@ -268,13 +304,26 @@ final class TargetLibrary {
     private func readIndexIDs() -> [UUID] {
         guard let data = try? Data(contentsOf: indexURL),
               let index = try? JSONDecoder().decode(Index.self, from: data),
-              index.schema == TargetRecord.schemaVersion else { return [] }
+              (1 ... TargetRecord.schemaVersion).contains(index.schema) else { return [] }
         return index.ids
     }
 
     private func writeIndex(_ ids: [UUID]) throws {
         try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
         try Self.encoder().encode(Index(schema: TargetRecord.schemaVersion, ids: ids)).write(to: indexURL, options: .atomic)
+    }
+
+    // MARK: Categories (E13 S1)
+
+    /// Records a picker for `category` lists: its own category plus `general`, or everything.
+    static func visible(_ records: [TargetRecord], for category: TargetCategory, showAll: Bool) -> [TargetRecord] {
+        showAll ? records : records.filter { $0.category == category || $0.category == .general }
+    }
+
+    /// One-line caution when a target from another category is picked, else nil.
+    static func crossCategoryCaution(_ record: TargetRecord, picker: TargetCategory) -> String? {
+        guard record.category != picker, record.category != .general else { return nil }
+        return "\(record.name) is a \(record.category.rawValue) target; check it suits this use."
     }
 
     // MARK: REW text
