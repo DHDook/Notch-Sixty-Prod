@@ -1,5 +1,6 @@
 #include "N60RenderKernel.h"
 #include "N60AncGuard.h"
+#include "N60FeedForwardLive.h"
 
 #include <limits.h>
 #include <math.h>
@@ -70,6 +71,11 @@ typedef struct {
 } N60CrossoverRuntime;
 
 #define N60_HOWL_SCRATCH_FRAMES 256u
+// E4 S25b: live feed-forward. Largest callback served in one piece (a longer one is silent past it),
+// and the reference ring capacity (power of two, frames). The ring is indexed by output frame: slot i
+// holds the reference sample that the filter sees at output frame i since attach/reset.
+#define N60_FF_LIVE_MAX_BLOCK 8192u
+#define N60_FF_LIVE_REF_RING 65536u
 
 struct N60RenderKernel {
     N60SnapshotSlot slots[N60_SNAPSHOT_SLOT_COUNT];
@@ -96,6 +102,7 @@ struct N60RenderKernel {
     // until the control plane re-arms. Guards are created by AttachHowlGuard with IO stopped.
     N60AncGuard *howlGuard[2];
     double howlGuardRate;
+    double ffLiveRate;
     float howlScratch[2][N60_HOWL_SCRATCH_FRAMES];
     uint32_t howlScratchFill;
     N60SmoothedGain howlGuardGain;
@@ -109,6 +116,21 @@ struct N60RenderKernel {
     uint64_t aqzTelemetryLastFrame;
     bool aqzTelemetryHasLast;
     _Atomic bool howlRearmRequested;
+    // E4 S25b live feed-forward (NULL unless attached; created with IO stopped). The reference ring is
+    // single producer (the reference pump thread) and single consumer (this render thread).
+    N60FeedForwardLive *ffLive;
+    float *ffScratch;            // reference, left, right: three lanes of N60_FF_LIVE_MAX_BLOCK
+    float *ffRefRing;
+    _Atomic uint64_t ffRefWrite;
+    _Atomic uint64_t ffRefRead;
+    _Atomic uint64_t ffUnderruns;
+    uint32_t ffBlockFrames;
+    uint32_t ffCursor;
+    uint32_t ffUnderrunRun;
+    float ffPendingLeft;         // this frame's anti-noise after lease and howl gain, before master gain
+    float ffPendingRight;
+    float ffDriveLeft;           // as sent to the speakers (after master gain), for the second drive signal
+    float ffDriveRight;
     _Atomic uint64_t howlTripCount;
     _Atomic uint32_t howlTripKind;
     N60CrossoverRuntime crossoverRuntime;
@@ -435,6 +457,7 @@ static void reset_ambient_compensation_runtime(
 }
 
 static void reset_howl_guard_state(N60RenderKernel *kernel);
+static void reset_feed_forward_live_state(N60RenderKernel *kernel);
 
 static void reset_smoothed_gain(N60SmoothedGain *gain, float value) {
     gain->current = value;
@@ -1464,6 +1487,9 @@ N60RenderKernel *N60RenderKernelCreate(void) {
 
 void N60RenderKernelDestroy(N60RenderKernel *kernel) {
     if (kernel == NULL) return;
+    N60FeedForwardLiveDestroy(kernel->ffLive);
+    free(kernel->ffScratch);
+    free(kernel->ffRefRing);
     N60AncGuardDestroy(kernel->howlGuard[0]);
     N60AncGuardDestroy(kernel->howlGuard[1]);
     N60ActiveQuietZoneGainMailboxDestroy(kernel->aqzMailbox);
@@ -1550,6 +1576,7 @@ void N60RenderKernelReset(N60RenderKernel *kernel) {
     if (kernel == NULL) return;
     N60RenderKernelColdStart(kernel);
     reset_howl_guard_state(kernel); // IO stopped: a deliberate reset clears any latched trip
+    reset_feed_forward_live_state(kernel);
     N60PartitionedConvolverReset(kernel->convolver);
     N60PartitionedConvolverReset(kernel->roomCorrectionConvolver);
     N60PartitionedConvolverReset(kernel->speakerIRConvolver);
@@ -1705,6 +1732,171 @@ bool N60RenderKernelPublishSnapshot(N60RenderKernel *kernel, N60DSPGraphSnapshot
 
 // E4 S15: render-thread state back to healthy. Callers hold the kernel with IO stopped (Create,
 // ColdStart/Reset). A guard that exists is re-armed (cleared history) on its next Process call.
+// E4 S25b: IO stopped. Clears the filter history, the reference ring and the per-block cursor.
+static void reset_feed_forward_live_state(N60RenderKernel *kernel) {
+    if (kernel->ffLive != NULL) N60FeedForwardLiveReset(kernel->ffLive);
+    atomic_store_explicit(&kernel->ffRefRead, 0, memory_order_release);
+    atomic_store_explicit(&kernel->ffRefWrite, 0, memory_order_release);
+    kernel->ffBlockFrames = 0;
+    kernel->ffCursor = 0;
+    kernel->ffUnderrunRun = 0;
+    kernel->ffPendingLeft = 0.0f;
+    kernel->ffPendingRight = 0.0f;
+    kernel->ffDriveLeft = 0.0f;
+    kernel->ffDriveRight = 0.0f;
+}
+
+bool N60RenderKernelAttachFeedForwardLive(N60RenderKernel *kernel, double sampleRate, double peakLimit) {
+    if (kernel == NULL) return false;
+    if (kernel->ffLive != NULL) {
+        // Same rate: keep it (weights and arm state survive). A new rate builds a new filter.
+        if (fabs(kernel->ffLiveRate - sampleRate) < 0.5) return true;
+    }
+    N60FeedForwardLiveConfig config = {0};
+    config.sampleRate = sampleRate;
+    config.maxBlockFrames = N60_FF_LIVE_MAX_BLOCK;
+    config.peakLimit = peakLimit;
+    if (!N60FeedForwardLiveConfigIsValid(&config)) return false;
+    N60FeedForwardLive *live = N60FeedForwardLiveCreate(&config);
+    if (live == NULL) return false;
+    float *scratch = kernel->ffScratch;
+    float *ring = kernel->ffRefRing;
+    if (scratch == NULL) scratch = (float *)calloc(3u * N60_FF_LIVE_MAX_BLOCK, sizeof(float));
+    if (ring == NULL) ring = (float *)calloc(N60_FF_LIVE_REF_RING, sizeof(float));
+    if (scratch == NULL || ring == NULL) {
+        if (scratch != kernel->ffScratch) free(scratch);
+        if (ring != kernel->ffRefRing) free(ring);
+        N60FeedForwardLiveDestroy(live);
+        return false;
+    }
+    N60FeedForwardLiveDestroy(kernel->ffLive);
+    kernel->ffLive = live;
+    kernel->ffLiveRate = sampleRate;
+    kernel->ffScratch = scratch;
+    kernel->ffRefRing = ring;
+    reset_feed_forward_live_state(kernel);
+    return true;
+}
+
+void N60RenderKernelDetachFeedForwardLive(N60RenderKernel *kernel) {
+    if (kernel == NULL) return;
+    N60FeedForwardLiveDestroy(kernel->ffLive);
+    kernel->ffLive = NULL;
+    kernel->ffLiveRate = 0.0;
+    reset_feed_forward_live_state(kernel);
+}
+
+bool N60RenderKernelFeedForwardLiveAttached(const N60RenderKernel *kernel) {
+    return kernel != NULL && kernel->ffLive != NULL;
+}
+
+bool N60RenderKernelFeedForwardLiveSetWeights(N60RenderKernel *kernel, const float *left,
+                                              const float *right, uint32_t count) {
+    if (kernel == NULL || kernel->ffLive == NULL || left == NULL || right == NULL) return false;
+    return N60FeedForwardLiveSetWeights(kernel->ffLive, left, right, count);
+}
+
+uint32_t N60RenderKernelFeedForwardLiveArm(N60RenderKernel *kernel, double leadSeconds, double requiredSeconds) {
+    if (kernel == NULL || kernel->ffLive == NULL) return N60FeedForwardLiveArmNoWeights;
+    return N60FeedForwardLiveArm(kernel->ffLive, leadSeconds, requiredSeconds);
+}
+
+void N60RenderKernelFeedForwardLiveDisarm(N60RenderKernel *kernel) {
+    if (kernel == NULL || kernel->ffLive == NULL) return;
+    N60FeedForwardLiveDisarm(kernel->ffLive);
+}
+
+void N60RenderKernelFeedForwardLiveMarkReferenceLost(N60RenderKernel *kernel) {
+    if (kernel == NULL || kernel->ffLive == NULL) return;
+    N60FeedForwardLiveMarkReferenceLost(kernel->ffLive);
+}
+
+N60RenderKernelFeedForwardLiveStatus N60RenderKernelFeedForwardLiveGetStatus(const N60RenderKernel *kernel) {
+    N60RenderKernelFeedForwardLiveStatus out = {0};
+    if (kernel == NULL || kernel->ffLive == NULL) return out;
+    out.attached = true;
+    out.filter = N60FeedForwardLiveGetStatus(kernel->ffLive);
+    const uint64_t wr = atomic_load_explicit(&((N60RenderKernel *)kernel)->ffRefWrite, memory_order_acquire);
+    const uint64_t rd = atomic_load_explicit(&((N60RenderKernel *)kernel)->ffRefRead, memory_order_acquire);
+    out.referenceAheadFrames = wr > rd ? (uint32_t)(wr - rd) : 0u;
+    out.outputIndex = rd;
+    out.referenceUnderruns = atomic_load_explicit(&((N60RenderKernel *)kernel)->ffUnderruns, memory_order_relaxed);
+    return out;
+}
+
+// Reference pump thread (single producer). Writes `count` samples as the reference for output frames
+// startIndex... (the index N60RenderKernelFeedForwardLiveOutputIndex counts). Frames before the render
+// thread's position are late and are dropped; a gap after the last write is zero-filled; nothing is
+// accepted further than the ring ahead of the render thread. Returns the next index it expects
+// (startIndex + accepted + dropped late), so the pump can see how far ahead it is.
+uint64_t N60RenderKernelFeedForwardLivePushReference(N60RenderKernel *kernel, uint64_t startIndex,
+                                                     const float *samples, uint32_t count) {
+    if (kernel == NULL || kernel->ffLive == NULL || kernel->ffRefRing == NULL || samples == NULL) return startIndex;
+    const uint64_t rd = atomic_load_explicit(&kernel->ffRefRead, memory_order_acquire);
+    uint64_t wr = atomic_load_explicit(&kernel->ffRefWrite, memory_order_relaxed);
+    uint64_t first = startIndex;
+    uint32_t skip = 0;
+    if (first < rd) {
+        const uint64_t late = rd - first;
+        skip = late < count ? (uint32_t)late : count;
+        first += skip;
+    }
+    uint32_t n = count - skip;
+    if (first >= rd + N60_FF_LIVE_REF_RING) n = 0;
+    else if (first + n > rd + N60_FF_LIVE_REF_RING) n = (uint32_t)(rd + N60_FF_LIVE_REF_RING - first);
+    if (n == 0) return startIndex + count;
+    if (wr < rd) wr = rd;
+    for (uint64_t g = wr; g < first; ++g) kernel->ffRefRing[g & (N60_FF_LIVE_REF_RING - 1u)] = 0.0f;
+    for (uint32_t i = 0; i < n; ++i) {
+        kernel->ffRefRing[(first + i) & (N60_FF_LIVE_REF_RING - 1u)] = samples[skip + i];
+    }
+    if (first + n > wr) atomic_store_explicit(&kernel->ffRefWrite, first + n, memory_order_release);
+    return startIndex + count;
+}
+
+uint64_t N60RenderKernelFeedForwardLiveOutputIndex(const N60RenderKernel *kernel) {
+    if (kernel == NULL || kernel->ffLive == NULL) return 0;
+    return atomic_load_explicit(&((N60RenderKernel *)kernel)->ffRefRead, memory_order_acquire);
+}
+
+// Render thread, once per callback after BeginRender. Takes the reference for the next `frames` output
+// frames, runs the filter over the whole block, and leaves the anti-noise in the scratch lanes for the
+// per-frame hook. A block the pump did not fully supply is zeros (an underrun); two in a row while
+// armed count as the reference being lost (the filter fades to silence in 10 ms and trips). The output
+// index advances by `frames` either way, so the ring stays aligned with the output clock.
+void N60RenderKernelPrepareFeedForward(N60RenderKernel *kernel, uint32_t frames) {
+    if (kernel == NULL) return;
+    kernel->ffBlockFrames = 0;
+    kernel->ffCursor = 0;
+    if (kernel->ffLive == NULL || frames == 0) return;
+    const uint32_t n = frames < N60_FF_LIVE_MAX_BLOCK ? frames : N60_FF_LIVE_MAX_BLOCK;
+    float *ref = kernel->ffScratch;
+    float *outL = kernel->ffScratch + N60_FF_LIVE_MAX_BLOCK;
+    float *outR = kernel->ffScratch + 2u * N60_FF_LIVE_MAX_BLOCK;
+    const uint64_t rd = atomic_load_explicit(&kernel->ffRefRead, memory_order_relaxed);
+    const uint64_t wr = atomic_load_explicit(&kernel->ffRefWrite, memory_order_acquire);
+    if (wr >= rd + n) {
+        for (uint32_t i = 0; i < n; ++i) ref[i] = kernel->ffRefRing[(rd + i) & (N60_FF_LIVE_REF_RING - 1u)];
+        kernel->ffUnderrunRun = 0;
+    } else {
+        memset(ref, 0, (size_t)n * sizeof(float));
+        atomic_fetch_add_explicit(&kernel->ffUnderruns, 1, memory_order_relaxed);
+        if (++kernel->ffUnderrunRun >= 2u
+            && N60FeedForwardLiveGetStatus(kernel->ffLive).state == N60FeedForwardLiveArmed) {
+            N60FeedForwardLiveMarkReferenceLost(kernel->ffLive);
+        }
+    }
+    atomic_store_explicit(&kernel->ffRefRead, rd + frames, memory_order_release);
+    N60FeedForwardLiveProcess(kernel->ffLive, ref, outL, outR, n);
+    kernel->ffBlockFrames = n;
+}
+
+void N60RenderKernelGetFeedForwardDriveFrame(const N60RenderKernel *kernel, float *left, float *right) {
+    if (kernel == NULL || left == NULL || right == NULL) return;
+    *left = kernel->ffDriveLeft;
+    *right = kernel->ffDriveRight;
+}
+
 static void reset_howl_guard_state(N60RenderKernel *kernel) {
     reset_smoothed_gain(&kernel->howlGuardGain, 1.0f);
     kernel->howlGuardMuted = false;
@@ -2078,6 +2270,8 @@ void N60RenderKernelProcessStereoSystemFrameInContext(
         return;
     }
 
+    kernel->ffPendingLeft = 0.0f;
+    kernel->ffPendingRight = 0.0f;
     const bool meteringEnabled =
         context->acquired
         && context->snapshot != NULL
@@ -2297,11 +2491,23 @@ void N60RenderKernelProcessStereoSystemFrameInContext(
             &quietZoneLeft,
             &quietZoneRight
         );
-        push_howl_sample(kernel, quietZoneLeft, quietZoneRight, context->snapshot->sampleRate);
+        // E4 S25b: the live feed-forward anti-noise for this frame joins the tonal canceller before the
+        // howl guard and the lease, so both govern it. It is also kept apart for the second drive signal.
+        float feedForwardLeft = 0.0f;
+        float feedForwardRight = 0.0f;
+        if (kernel->ffCursor < kernel->ffBlockFrames) {
+            feedForwardLeft = kernel->ffScratch[N60_FF_LIVE_MAX_BLOCK + kernel->ffCursor];
+            feedForwardRight = kernel->ffScratch[2u * N60_FF_LIVE_MAX_BLOCK + kernel->ffCursor];
+            kernel->ffCursor += 1u;
+        }
+        push_howl_sample(kernel, quietZoneLeft + feedForwardLeft, quietZoneRight + feedForwardRight,
+                         context->snapshot->sampleRate);
         const float leaseGain = next_gain_value(&kernel->activeQuietZoneLeaseGain)
             * next_gain_value(&kernel->howlGuardGain);
-        quietZoneLeft *= leaseGain;
-        quietZoneRight *= leaseGain;
+        quietZoneLeft = (quietZoneLeft + feedForwardLeft) * leaseGain;
+        quietZoneRight = (quietZoneRight + feedForwardRight) * leaseGain;
+        kernel->ffPendingLeft = feedForwardLeft * leaseGain;
+        kernel->ffPendingRight = feedForwardRight * leaseGain;
         left += quietZoneLeft;
         right += quietZoneRight;
 
@@ -2346,6 +2552,8 @@ void N60RenderKernelProcessStereoSystemFrameInContext(
     const float masterGain = next_gain_value(&kernel->masterGain);
     left *= masterGain;
     right *= masterGain;
+    kernel->ffDriveLeft = kernel->ffPendingLeft * masterGain;
+    kernel->ffDriveRight = kernel->ffPendingRight * masterGain;
     float activeQuietZoneLeft = 0.0f;
     float activeQuietZoneRight = 0.0f;
     N60ActiveQuietZoneRuntimeLastFrame(

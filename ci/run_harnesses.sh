@@ -20,6 +20,15 @@ if ! clang++ -std=c++20 -O2 -Wall -Wextra -Werror -I"NotchSixty/Audio/Realtime" 
     echo "failed to compile the howl guard" >&2
     exit 1
 fi
+# E4 S25b: the render kernel also links the live feed-forward filter (and the FxLMS primitives it uses).
+for src in n60_ff_live n60_fxlms; do
+    if ! clang++ -std=c++20 -O2 -Wall -Wextra -Werror -I"NotchSixty/Audio/Realtime" -c "NotchSixty/Audio/Realtime/$src.cpp" -o "$OUT/${src}_rt.o"; then
+        echo "failed to compile $src" >&2
+        exit 1
+    fi
+    GUARD_OBJ="$GUARD_OBJ
+$OUT/${src}_rt.o"
+done
 ALL_RT=$(find "$RT" -name '*.c' -print | sort; echo "$GUARD_OBJ")
 ALL_RT_NO_BRIDGE=$(find "$RT" -name '*.c' ! -name 'N60RealtimeAudioBridge.c' ! -name 'N60MeasurementMonitorProc.c' -print | sort; echo "$GUARD_OBJ")
 STRICT=(-std=c11 -Wall -Wextra -Werror)
@@ -294,6 +303,9 @@ if selected e4_ff_live; then
         failed+=(e4_ff_live)
     fi
 fi
+# E4 S25b: live feed-forward wiring in the render kernel (reference ring, gate, loss trip, lease, drive).
+# shellcheck disable=SC2086
+harness e4_ff_live_wiring "${STRICT[@]}" -O2 -include stddef.h -I"$RT" ci/harness_e4_ff_live_wiring.c $ALL_RT_NO_BRIDGE -framework Accelerate
 # E4 S9b1: feed-forward survey (Welch H1 transfer and coherence) on a simulated plant.
 if selected e4_ff_survey; then
     if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -I"$RT" -c "$RT/n60_fxlms.cpp" -o "$OUT/n60_fxlms_survey.o" \

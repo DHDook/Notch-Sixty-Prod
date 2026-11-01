@@ -3015,6 +3015,29 @@ final class AudioIOEngine: ObservableObject {
         transportSession?.speakerDriveSnapshot()
     }
 
+    /// E4 S25b: live feed-forward passthroughs. Arm needs the gate's inputs; the app supplies
+    /// `liveOutputAuthorized` only from the written authorisation path (nothing does yet).
+    func setFeedForwardLiveWeights(left: [Float], right: [Float]) -> Bool {
+        speakerDriveFeatureEnabled && (transportSession?.setFeedForwardLiveWeights(left: left, right: right) ?? false)
+    }
+
+    func armFeedForwardLive(gate: FeedForwardLiveArmGate.Inputs) -> UInt32? {
+        var checked = gate
+        checked.featureEnabled = speakerDriveFeatureEnabled
+        return transportSession?.armFeedForwardLive(gate: checked)
+    }
+
+    func disarmFeedForwardLive() { transportSession?.disarmFeedForwardLive() }
+
+    func feedForwardLiveStatus() -> N60RenderKernelFeedForwardLiveStatus? {
+        transportSession?.feedForwardLiveStatus()
+    }
+
+    func pushFeedForwardLiveReference(startIndex: UInt64, samples: [Float]) -> UInt64? {
+        guard speakerDriveFeatureEnabled else { return nil }
+        return transportSession?.pushFeedForwardLiveReference(startIndex: startIndex, samples: samples)
+    }
+
     func readSpeakerDriveAnchors() -> [N60SpeakerDriveAnchor] {
         transportSession?.readSpeakerDriveAnchors() ?? []
     }
@@ -5259,6 +5282,7 @@ final class AudioIOEngine: ObservableObject {
         }
 
         try applyAudioUnitRackLatency(to: &graph)
+        session.feedForwardLiveFeatureEnabled = speakerDriveFeatureEnabled
         try session.publishDSPGraph(graph)
         transportSession = session
     }
