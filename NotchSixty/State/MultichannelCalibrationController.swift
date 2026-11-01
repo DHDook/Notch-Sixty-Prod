@@ -227,6 +227,8 @@ final class MultichannelCalibrationController: ObservableObject {
     @Published private(set) var intelligentTargetReport:
         IntelligentTargetGenerationReport?
     @Published private(set) var lastErrorDescription: String?
+    /// Set when starting a measurement stopped normal playback (E24 S2).
+    @Published private(set) var playbackNotice: String?
 
     init(
         engine: AudioIOEngine,
@@ -302,16 +304,21 @@ final class MultichannelCalibrationController: ObservableObject {
         totalMeasurementCount > 0 && completedMeasurementCount == totalMeasurementCount
     }
 
-    var canMeasure: Bool {
-        state != .measuring
-            && state != .analyzing
-            && profile != nil
-            && microphone.permissionStatus == .authorized
-            && microphone.selectedInputDevice != nil
-            && engine.selectedOutputDevice != nil
-            && engine.lifecycleState == .idle
-            && nextTarget() != nil
+    /// Why the next measurement cannot start, or `.ready` (E24 S2). Playback is not a blocker.
+    var readiness: MeasurementReadiness {
+        MeasurementReadiness.evaluate(.init(
+            permission: microphone.permissionStatus,
+            hasInputDevice: microphone.selectedInputDevice != nil,
+            hasOutputDevice: engine.selectedOutputDevice != nil,
+            requiresProfile: true,
+            hasProfile: profile != nil,
+            requiresWork: true,
+            hasWork: nextTarget() != nil,
+            transportActive: activeTransport != nil,
+            busyDescription: state == .measuring ? "measuring" : (state == .analyzing ? "being analysed" : nil)))
     }
+
+    var canMeasure: Bool { readiness.isReady }
 
     func prepareForUse() {
         do {
@@ -447,9 +454,6 @@ final class MultichannelCalibrationController: ObservableObject {
             throw MultichannelCalibrationCampaignError.measurementAlreadyActive
         }
         try synchronizeCampaign()
-        guard engine.lifecycleState == .idle else {
-            throw MultichannelCalibrationCampaignError.playbackMustBeIdle(engine.lifecycleState)
-        }
         guard microphone.permissionStatus == .authorized else {
             throw MultichannelCalibrationCampaignError.microphonePermissionRequired
         }
@@ -466,6 +470,8 @@ final class MultichannelCalibrationController: ObservableObject {
         guard let target = nextTarget() else {
             throw MultichannelCalibrationCampaignError.campaignComplete
         }
+        // E24 S2: measuring needs the output to itself; stop playback and say so.
+        playbackNotice = MeasurementPlaybackPolicy.stopPlaybackIfRunning(engine)
 
         let bassEnabled = profiles.selectedSystemProfile?.state.bassManagement.enabled
             ?? engine.bassManagementConfiguration.enabled

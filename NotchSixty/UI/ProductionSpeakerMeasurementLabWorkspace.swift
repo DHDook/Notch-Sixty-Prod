@@ -759,6 +759,7 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
                             }
                         }
                     }
+                    MeasurementReadinessNote(readiness: lab.readiness, playbackNotice: lab.playbackNotice)
 
                     Divider()
 

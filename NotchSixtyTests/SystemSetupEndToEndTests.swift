@@ -115,9 +115,9 @@ final class SystemSetupEndToEndTests: XCTestCase {
         try rig.installTwoPointOneProfile()
         rig.calibration.prepareForUse()
         XCTAssertFalse(rig.calibration.canMeasure)
-        XCTExpectFailure("Disabled measure reason text: fixed by E24 S2", options: strict()) {
-            XCTAssertNotNil(rig.calibration.lastErrorDescription)
-        }
+        let reason = try XCTUnwrap(rig.calibration.readiness.reason)
+        XCTAssertTrue(reason.contains("Microphone access"), reason)
+        XCTAssertEqual(rig.calibration.readiness.fix, .openSystemSettings)
     }
 }
 

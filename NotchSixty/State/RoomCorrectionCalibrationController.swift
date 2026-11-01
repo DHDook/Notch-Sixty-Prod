@@ -27,7 +27,6 @@ enum RoomCorrectionCalibrationControllerError: Error, Equatable, LocalizedError 
     case microphonePermissionRequired(MicrophonePermissionStatus)
     case noMeasurementInputSelected
     case noPlaybackOutputSelected
-    case playbackMustBeIdle(AudioLifecycleState)
     case invalidInputChannel(Int)
     case measurementAlreadyActive
     case measurementNotActive
@@ -49,8 +48,6 @@ enum RoomCorrectionCalibrationControllerError: Error, Equatable, LocalizedError 
             return "Select a measurement microphone before starting room calibration."
         case .noPlaybackOutputSelected:
             return "Select the Playback System output device before starting room calibration."
-        case .playbackMustBeIdle(let state):
-            return "Stop normal DSP playback before measuring the room. The playback engine is currently \(state.rawValue)."
         case .invalidInputChannel(let index):
             return "Measurement microphone channel \(index + 1) is invalid."
         case .measurementAlreadyActive:
@@ -84,6 +81,8 @@ final class RoomCorrectionCalibrationController: ObservableObject {
     @Published private(set) var latestCapture: RoomCorrectionCalibrationCapture?
     @Published private(set) var latestAnalysis: RoomCorrectionMeasurementAnalysis?
     @Published private(set) var lastErrorDescription: String?
+    /// Set when starting a measurement stopped normal playback (E24 S2).
+    @Published private(set) var playbackNotice: String?
 
     @Published var sweepStartFrequencyHz = 20.0
     @Published var sweepEndFrequencyHz = 20_000.0
@@ -132,14 +131,18 @@ final class RoomCorrectionCalibrationController: ObservableObject {
 
     var selectedOutputDevice: AudioOutputDevice? { engine.selectedOutputDevice }
 
-    var canBeginMeasurement: Bool {
-        permissionStatus == .authorized
-            && selectedInputDevice != nil
-            && selectedOutputDevice != nil
-            && Self.canClaimHardware(audioLifecycle: engine.lifecycleState)
-            && activeTransport == nil
-            && (state == .ready || state == .reviewing)
+    /// Why a measurement cannot start now, or `.ready` (E24 S2). Playback is not a blocker:
+    /// `beginMeasurement` stops it and sets `playbackNotice`.
+    var readiness: MeasurementReadiness {
+        MeasurementReadiness.evaluate(.init(
+            permission: permissionStatus,
+            hasInputDevice: selectedInputDevice != nil,
+            hasOutputDevice: selectedOutputDevice != nil,
+            transportActive: activeTransport != nil,
+            stateAllowsStart: state == .ready || state == .reviewing))
     }
+
+    var canBeginMeasurement: Bool { readiness.isReady }
 
     static func canClaimHardware(audioLifecycle: AudioLifecycleState) -> Bool {
         audioLifecycle == .idle
@@ -267,9 +270,8 @@ final class RoomCorrectionCalibrationController: ObservableObject {
         lastErrorDescription = nil
     }
 
-    /// Claims the physical output only when ordinary DSP playback is fully idle.
-    /// The controller intentionally does not stop or later resume the normal DSP
-    /// transport on the user's behalf.
+    /// Claims the physical output. Normal DSP playback is stopped first and `playbackNotice`
+    /// says so; it is not resumed on the user's behalf (E24 S2).
     func beginMeasurement() throws {
         guard activeTransport == nil else {
             throw RoomCorrectionCalibrationControllerError.measurementAlreadyActive
@@ -278,10 +280,6 @@ final class RoomCorrectionCalibrationController: ObservableObject {
         guard permissionStatus == .authorized else {
             throw RoomCorrectionCalibrationControllerError
                 .microphonePermissionRequired(permissionStatus)
-        }
-        guard Self.canClaimHardware(audioLifecycle: engine.lifecycleState) else {
-            throw RoomCorrectionCalibrationControllerError
-                .playbackMustBeIdle(engine.lifecycleState)
         }
         guard let output = selectedOutputDevice else {
             throw RoomCorrectionCalibrationControllerError.noPlaybackOutputSelected
@@ -309,6 +307,7 @@ final class RoomCorrectionCalibrationController: ObservableObject {
             latestCapture = nil
             latestAnalysis = nil
 
+            playbackNotice = MeasurementPlaybackPolicy.stopPlaybackIfRunning(engine)
             try stateMachine.transition(to: .arming)
             publishState()
 
