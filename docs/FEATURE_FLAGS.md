@@ -36,3 +36,4 @@ When the epic ships, delete the flag and every check that reads it in the same P
 | `e4.feedforward-live` | E4 | Live feed-forward cancellation (S22); S22b1 gates only the speaker-drive recording for the echo model; off means nothing sets the demand |
 | `e4.conversation-unmasking` | E4 | Conversation Focus unmasking by SII per-band music cuts and syllable-rate speech detection (S30); ambient compensation only, no ANC output |
 | `e4.virtual-microphone` | E4 | Tonal virtual microphone at the ears: monitor-to-ear ratio survey and effective secondary path (S26a); offline maths, no output |
+| `e4.zones` | E4 | Choose the quiet zone: fixed seat, follow, or two zones with the 2 x 2 per-tone core and zone mode in the earned-cap binding (S27); offline maths, no output |

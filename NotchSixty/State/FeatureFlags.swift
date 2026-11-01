@@ -20,7 +20,7 @@ extension FeatureFlag {
     /// delete it, and the checks that read it, once the epic ships.
     static let all: [FeatureFlag] = [
         .legacyKernel, .ancEngineLease, .adaptiveTonalLive, .earnedCap, .feedForwardLive,
-        .noiseSurvey, .conversationUnmasking, .virtualMicrophone
+        .noiseSurvey, .conversationUnmasking, .virtualMicrophone, .zones
     ]
 
     /// E6 S11: the unified graph is the default renderer. Turning this on selects the frozen
@@ -90,6 +90,15 @@ extension FeatureFlag {
     static let virtualMicrophone = FeatureFlag(
         id: "e4.virtual-microphone",
         title: "Virtual microphone at the ears",
+        epic: "E4"
+    )
+
+    /// E4 S27: choose the zone (fixed seat, follow, or two zones) with the 2 x 2 per-tone core. Offline maths
+    /// and the zone mode in the earned-cap binding in this slice; nothing drives output while off.
+    /// Removed when E4 ships.
+    static let zones = FeatureFlag(
+        id: "e4.zones",
+        title: "Choose the quiet zone",
         epic: "E4"
     )
 }
