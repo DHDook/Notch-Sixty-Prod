@@ -459,6 +459,21 @@ final class AmbientCompensationTests: XCTestCase {
         XCTAssertFalse(target.active)
     }
 
+    func testSpeechModulationConfidenceSkipsStationarityHold() throws {
+        // E4 S30: the same non-stationary snapshot is held without the detector and passes the hold with it.
+        var configuration = configured()
+        configuration.playbackAdaptationMode = .conversationFocus
+        let snap = snapshot(
+            ambientDBFS: -27, confidence: 0.95, stationarity: 0.08, character: .nonstationary,
+            spectrum: [band(300, -33), band(600, -31), band(1_000, -30), band(2_000, -31), band(3_500, -32), band(10_000, -36)],
+            periodicity: 0.08
+        )
+        let planner = ConversationPreservationPlanner()
+        XCTAssertEqual(try planner.plan(snapshot: snap, configuration: configuration).holdReason, .nonstationaryTransient)
+        XCTAssertEqual(try planner.plan(snapshot: snap, configuration: configuration, speechModulationConfidence: 0.2).holdReason, .nonstationaryTransient)
+        XCTAssertNotEqual(try planner.plan(snapshot: snap, configuration: configuration, speechModulationConfidence: 0.9).holdReason, .nonstationaryTransient)
+    }
+
     func testConversationFocusSurvivesSpeechPlusHVACTone() throws {
         var configuration = configured()
         configuration.playbackAdaptationMode = .conversationFocus
