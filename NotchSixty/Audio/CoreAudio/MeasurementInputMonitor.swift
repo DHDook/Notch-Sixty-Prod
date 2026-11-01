@@ -57,6 +57,26 @@ final class MeasurementInputMonitor: ObservableObject {
         }
     }
 
+    /// E24 S1: drains a ring that the level session's IOProc fills (the microphone channel of the calibration
+    /// aggregate) through the same SPL meter and RTA. No IOProc of its own is created.
+    func attach(ring externalRing: MonitorSampleRing, sampleRate: Double) {
+        guard !isRunning else { return }
+        lastError = nil
+        do {
+            let pipeline = try MeasurementMonitorPipeline(
+                ring: externalRing, sampleRate: sampleRate, weighting: weighting, rta: rtaSettings,
+                calibrationOffsetDB: calibrationOffset)
+            ring = externalRing
+            self.pipeline = pipeline
+            log = MeasurementLevelLog(calibrated: isCalibrated, weighting: weighting)
+            startedAt = Date()
+            startTimer(pipeline: pipeline)
+            isRunning = true
+        } catch {
+            lastError = MeasurementInputMonitorError.allocationFailed.errorDescription
+        }
+    }
+
     func stop() {
         guard isRunning else { return }
         teardown()

@@ -152,6 +152,7 @@ struct OfflineSetupRig {
     let calibration: MultichannelCalibrationController
     let model: SystemSetupFlowModel
     let transports: ReferenceRoomTransportFactory
+    let levelTransports = OfflineLevelTransportFactory()
     let root: URL
 
     static let outputUID = "e24-reference-output"
@@ -200,7 +201,8 @@ struct OfflineSetupRig {
             })
         model = SystemSetupFlowModel(
             engine: engine, profiles: profiles, microphone: microphone, calibration: calibration,
-            services: ProductionSystemSetupServices.production(engine: engine),
+            services: ProductionSystemSetupServices.production(
+                engine: engine, profiles: profiles, microphone: microphone, levelTransport: levelTransports.factory),
             sessions: SystemSetupSessionStore(directory: root.appendingPathComponent("sessions")),
             roomProjectsDirectory: root.appendingPathComponent("RoomCorrection"))
     }
@@ -223,4 +225,88 @@ struct OfflineSetupRig {
     }
 
     func tearDown() { try? FileManager.default.removeItem(at: root) }
+}
+
+/// E24 S1: the offline boundary of the level session. A pump thread stands in for the Core Audio IOProc: it calls the
+/// production `N60LevelSessionProcess` with a synthetic microphone (a quiet sine) and collects what the lanes carry.
+final class OfflineLevelSessionPump: LevelSessionTransporting, @unchecked Sendable {
+    private let context: UnsafeMutableRawPointer
+    private let laneCount: Int
+    private let rate: Double
+    private let lock = NSLock()
+    private var running = false
+    private var thread: Thread?
+    private var peaks: [Float]
+    private(set) var started = false
+    private(set) var cancelled = false
+    var didStopCleanly: Bool { true }
+
+    init(context: OpaquePointer, laneCount: Int, rate: Double) {
+        self.context = UnsafeMutableRawPointer(context)
+        self.laneCount = laneCount
+        self.rate = rate
+        peaks = Array(repeating: 0, count: laneCount)
+    }
+
+    /// Largest absolute sample seen per lane so far.
+    var lanePeaks: [Float] { lock.lock(); defer { lock.unlock() }; return peaks }
+
+    func start() throws {
+        running = true
+        started = true
+        let block = 256
+        let blockSeconds = Double(block) / rate
+        let thread = Thread { [self] in
+            let ctx = OpaquePointer(context)
+            var mic = [Float](repeating: 0, count: block)
+            let storage = (0..<laneCount).map { _ in UnsafeMutablePointer<Float>.allocate(capacity: block) }
+            defer { storage.forEach { $0.deallocate() } }
+            var pointers: [UnsafeMutablePointer<Float>?] = storage
+            var strides = [UInt32](repeating: 1, count: laneCount)
+            var phase = 0.0
+            while true {
+                lock.lock(); let go = running; lock.unlock()
+                if !go { break }
+                for i in 0..<block { mic[i] = 0.01 * Float(sin(phase)); phase += 2 * .pi * 1_000 / rate }
+                _ = mic.withUnsafeBufferPointer { m in
+                    N60LevelSessionProcess(ctx, m.baseAddress, 1, &pointers, &strides, UInt32(block))
+                }
+                lock.lock()
+                for i in 0..<laneCount {
+                    for f in 0..<block { peaks[i] = max(peaks[i], abs(storage[i][f])) }
+                }
+                lock.unlock()
+                Thread.sleep(forTimeInterval: blockSeconds)
+            }
+        }
+        self.thread = thread
+        thread.start()
+    }
+
+    func stop() {
+        lock.lock(); running = false; lock.unlock()
+        while let t = thread, !t.isFinished, t.isExecuting { Thread.sleep(forTimeInterval: 0.002) }
+    }
+
+    func cancel() { cancelled = true; stop() }
+}
+
+/// Records what the session handed the transport factory.
+@MainActor
+final class OfflineLevelTransportFactory {
+    private(set) var pumps: [OfflineLevelSessionPump] = []
+    private(set) var requests: [LevelSessionRequest] = []
+    var failure: Error?
+
+    var factory: LevelSessionTransportFactory {
+        { [unowned self] request, context, channels in
+            try MainActor.assumeIsolated {
+                if let failure = self.failure { throw failure }
+                let pump = OfflineLevelSessionPump(context: context, laneCount: channels.count, rate: request.sampleRate)
+                self.pumps.append(pump)
+                self.requests.append(request)
+                return pump
+            }
+        }
+    }
 }

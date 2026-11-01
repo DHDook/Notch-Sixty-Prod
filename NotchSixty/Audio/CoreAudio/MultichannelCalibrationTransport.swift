@@ -99,6 +99,11 @@ final class MultichannelCalibrationTransport {
     private let outputSweepSamples: [Float]
     private let orderedOutputs: [AudioOutputDevice]
     private var bridge: UnsafeMutablePointer<N60TargetedRoomMeasurementBridge>?
+    /// E24 S1: when set, the transport runs the Level step's generator-only render path (`N60LevelSessionIOProc`)
+    /// on the same aggregate instead of the sweep bridge. The caller owns the context and outlives the transport.
+    private let levelContext: OpaquePointer?
+    private let levelOutputChannels: [UInt32]
+    var isLevelSession: Bool { levelContext != nil }
     private var ioProcID: AudioDeviceIOProcID?
     private var calibrationDeviceID = AudioDeviceID(kAudioObjectUnknown)
     private var aggregateDeviceID = AudioDeviceID(kAudioObjectUnknown)
@@ -116,8 +121,12 @@ final class MultichannelCalibrationTransport {
         physicalOutputChannelIndex: UInt32,
         outputSweepSamples: [Float]? = nil,
         additionalSeats: [MultichannelSeatInput] = [],
-        referenceProgram: MultichannelReferenceProgram? = nil
+        referenceProgram: MultichannelReferenceProgram? = nil,
+        levelContext: OpaquePointer? = nil,
+        levelOutputChannels: [UInt32] = []
     ) throws {
+        self.levelContext = levelContext
+        self.levelOutputChannels = levelOutputChannels
         var seen: Set<String> = ["\(input.deviceID):\(inputChannelIndex)"]
         for seat in additionalSeats {
             guard seen.insert("\(seat.device.deviceID):\(seat.channelIndex)").inserted else {
@@ -164,10 +173,10 @@ final class MultichannelCalibrationTransport {
     func start() throws {
         guard !isClosed else { throw MultichannelCalibrationTransportError.closed }
         guard !isStarted else { return }
-        guard let bridge, let ioProcID else {
+        guard let ioProcID, bridge != nil || levelContext != nil else {
             throw MultichannelCalibrationTransportError.ioProcUnavailable
         }
-        N60TargetedRoomMeasurementBridgeReset(bridge)
+        if let bridge { N60TargetedRoomMeasurementBridgeReset(bridge) }
         try Self.check(
             AudioDeviceStart(calibrationDeviceID, ioProcID),
             operation: "start targeted multichannel measurement IOProc"
@@ -177,9 +186,14 @@ final class MultichannelCalibrationTransport {
 
     func stop() {
         guard isStarted, let ioProcID else { return }
-        AudioDeviceStop(calibrationDeviceID, ioProcID)
-        isStarted = false
+        let status = AudioDeviceStop(calibrationDeviceID, ioProcID)
+        if status == noErr { isStarted = false } else { stopFailed = true; isStarted = false }
     }
+
+    /// True when Core Audio did not confirm the IOProc stopped; the level session then leaks its context rather
+    /// than free memory a running callback may still read.
+    private(set) var stopFailed = false
+    var didStopCleanly: Bool { !stopFailed }
 
     func snapshot() -> N60TargetedRoomMeasurementBridgeSnapshot? {
         guard let bridge else { return nil }
@@ -421,6 +435,12 @@ final class MultichannelCalibrationTransport {
             )
         }
 
+        for channel in levelOutputChannels where channel >= UInt32(outputChannelCount) {
+            throw MultichannelCalibrationTransportError.outputChannelUnavailable(
+                index: channel,
+                availableChannels: outputChannelCount
+            )
+        }
         let inputFormat = AudioStreamFormatDescription(
             try Self.readStreamFormat(
                 deviceID: calibrationDeviceID,
@@ -440,6 +460,22 @@ final class MultichannelCalibrationTransport {
         try Self.validateSampleRate(inputFormat, expected: sampleRate, role: "measurement input")
         try Self.validateSampleRate(outputFormat, expected: sampleRate, role: "measurement output")
 
+        if let levelContext {
+            N60LevelSessionContextSetInputChannel(levelContext, try Self.checkedUInt32(aggregateInputChannel))
+            try Self.check(
+                AudioDeviceCreateIOProcID(
+                    calibrationDeviceID,
+                    N60LevelSessionIOProc,
+                    UnsafeMutableRawPointer(levelContext),
+                    &ioProcID
+                ),
+                operation: "create level-session IOProc"
+            )
+            guard ioProcID != nil else {
+                throw MultichannelCalibrationTransportError.ioProcUnavailable
+            }
+            return
+        }
         let sweepFrames = try Self.checkedUInt32(outputSweepSamples.count)
         let leadInFrames = try Self.checkedUInt32(program.leadInFrames)
         let tailFrames = try Self.checkedUInt32(program.tailFrames)
