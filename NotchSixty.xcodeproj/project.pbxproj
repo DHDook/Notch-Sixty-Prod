@@ -207,6 +207,7 @@
 		E4B000000000000000000004 /* AncGuardTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4B000000000000000000014 /* AncGuardTests.swift */; };
 		E4C000000000000000000023 /* n60_remote_tonal.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E4C000000000000000000022 /* n60_remote_tonal.cpp */; };
 		E4C000000000000000000003 /* n60_fxlms.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E4C000000000000000000013 /* n60_fxlms.cpp */; };
+		E4F000000000000000000051 /* n60_ff_live.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E4F000000000000000000053 /* n60_ff_live.cpp */; };
 		E4F000000000000000000001 /* n60_ff_shadow.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E4F000000000000000000012 /* n60_ff_shadow.cpp */; };
 		E4F000000000000000000002 /* QuietZoneFeedForwardShadowSeed.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4F000000000000000000013 /* QuietZoneFeedForwardShadowSeed.swift */; };
 		E4F000000000000000000003 /* FeedForwardShadowTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4F000000000000000000014 /* FeedForwardShadowTests.swift */; };
@@ -737,6 +738,9 @@
 		E4C000000000000000000012 /* n60_fxlms.hpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.h; path = n60_fxlms.hpp; sourceTree = "<group>"; };
 		E4C000000000000000000013 /* n60_fxlms.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = n60_fxlms.cpp; sourceTree = "<group>"; };
 		E4C000000000000000000014 /* FxlmsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FxlmsTests.swift; sourceTree = "<group>"; };
+		E4F000000000000000000052 /* n60_ff_live.hpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.h; path = n60_ff_live.hpp; sourceTree = "<group>"; };
+		E4F000000000000000000053 /* n60_ff_live.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = n60_ff_live.cpp; sourceTree = "<group>"; };
+		E4F000000000000000000054 /* N60FeedForwardLive.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = N60FeedForwardLive.h; sourceTree = "<group>"; };
 		E4F000000000000000000011 /* n60_ff_shadow.hpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.h; path = n60_ff_shadow.hpp; sourceTree = "<group>"; };
 		E4F000000000000000000012 /* n60_ff_shadow.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = n60_ff_shadow.cpp; sourceTree = "<group>"; };
 		E4F000000000000000000013 /* QuietZoneFeedForwardShadowSeed.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuietZoneFeedForwardShadowSeed.swift; sourceTree = "<group>"; };
@@ -1521,6 +1525,9 @@
 				E4C000000000000000000013 /* n60_fxlms.cpp */,
 				E4C000000000000000000021 /* N60RemoteTonal.h */,
 				E4C000000000000000000022 /* n60_remote_tonal.cpp */,
+				E4F000000000000000000052 /* n60_ff_live.hpp */,
+				E4F000000000000000000053 /* n60_ff_live.cpp */,
+				E4F000000000000000000054 /* N60FeedForwardLive.h */,
 				E4F000000000000000000011 /* n60_ff_shadow.hpp */,
 				E4F000000000000000000012 /* n60_ff_shadow.cpp */,
 				E4F100000000000000000011 /* n60_ff_survey.hpp */,
@@ -1818,6 +1825,7 @@
 				E4B000000000000000000003 /* n60_anc_guard.cpp in Sources */,
 				E4C000000000000000000003 /* n60_fxlms.cpp in Sources */,
 				E4C000000000000000000023 /* n60_remote_tonal.cpp in Sources */,
+				E4F000000000000000000051 /* n60_ff_live.cpp in Sources */,
 				E4F000000000000000000001 /* n60_ff_shadow.cpp in Sources */,
 				E4F100000000000000000001 /* n60_ff_survey.cpp in Sources */,
 				F70000000000000000000001 /* N60AdaptiveSampleRate.c in Sources */,

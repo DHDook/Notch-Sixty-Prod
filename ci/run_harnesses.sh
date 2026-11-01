@@ -284,6 +284,16 @@ if selected e4_ff_echo; then
         failed+=(e4_ff_echo)
     fi
 fi
+# E4 S25a: live feed-forward filter (native head plus decimated tail) on a simulated plant.
+if selected e4_ff_live; then
+    if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -I"$RT" -c "$RT/n60_fxlms.cpp" -o "$OUT/n60_fxlms_live.o" \
+        && clang++ -std=c++20 -O2 -Wall -Wextra -Werror -I"$RT" -c "$RT/n60_ff_live.cpp" -o "$OUT/n60_ff_live.o"; then
+        harness e4_ff_live "${STRICT[@]}" -O2 -I"$RT" ci/harness_e4_ff_live.c \
+            "$OUT/n60_ff_live.o" "$OUT/n60_fxlms_live.o" -lc++ -lm
+    else
+        failed+=(e4_ff_live)
+    fi
+fi
 # E4 S9b1: feed-forward survey (Welch H1 transfer and coherence) on a simulated plant.
 if selected e4_ff_survey; then
     if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -I"$RT" -c "$RT/n60_fxlms.cpp" -o "$OUT/n60_fxlms_survey.o" \
