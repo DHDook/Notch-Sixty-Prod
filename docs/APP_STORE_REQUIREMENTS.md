@@ -19,6 +19,10 @@ Use Core Audio process/device-scoped tap APIs and private aggregate-device resou
 ## Permissions UX
 System-audio recording permission behavior must be handled as product UX. The app should clearly explain why permission is required, detect capture-without-signal states conservatively, and recover cleanly after OS-required relaunches.
 
+## Entitlements
+
+The sandbox entitlements are app-sandbox, audio-input, user-selected read-write files and camera. The camera entitlement (`com.apple.security.device.camera`) exists for E4 head position only (S26b, owner-approved 31 Oct 2026). It needs `NSCameraUsageDescription`, which is set in the project build settings. Frames are processed on this Mac and are never stored or sent. Any other entitlement change needs owner approval.
+
 ## Signing/release
 Production work must eventually validate:
 - Developer ID/local development as appropriate

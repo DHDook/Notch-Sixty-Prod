@@ -41,7 +41,9 @@ with INFO.open("rb") as handle:
     info = plistlib.load(handle)
 
 expected_entitlements = {
+    # Camera is for E4 head position only (S26b, owner-approved 31 Oct 2026); NSCameraUsageDescription is set in the project build settings.
     "com.apple.security.app-sandbox": True,
+    "com.apple.security.device.camera": True,
     "com.apple.security.device.audio-input": True,
     "com.apple.security.files.user-selected.read-write": True,
 }

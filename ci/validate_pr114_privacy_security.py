@@ -104,7 +104,9 @@ guide = GUIDE.read_text(encoding="utf-8")
 doc = DOC.read_text(encoding="utf-8")
 
 expected_entitlements = {
+    # Camera is for E4 head position only (S26b, owner-approved 31 Oct 2026); NSCameraUsageDescription is set in the project build settings.
     "com.apple.security.app-sandbox": True,
+    "com.apple.security.device.camera": True,
     "com.apple.security.device.audio-input": True,
     "com.apple.security.files.user-selected.read-write": True,
 }
@@ -118,7 +120,6 @@ for forbidden_entitlement in (
     "com.apple.security.personal-information.location",
     "com.apple.security.personal-information.addressbook",
     "com.apple.security.personal-information.calendars",
-    "com.apple.security.device.camera",
     "com.apple.security.device.bluetooth",
     "com.apple.security.automation.apple-events",
 ):
