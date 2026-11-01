@@ -500,8 +500,11 @@
 		E8B0000000000000000000AD /* SpeakerRoutingPipeline.swift in Sources */ = {isa = PBXBuildFile; fileRef = E8B00000000000000000000D /* SpeakerRoutingPipeline.swift */; };
 		E8B0000000000000000000AE /* CamillaDSPRoutingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E8B00000000000000000000E /* CamillaDSPRoutingTests.swift */; };
 		E4F7000000000000000000C4 /* QuietZoneVirtualMicrophone.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4F7000000000000000000C2 /* QuietZoneVirtualMicrophone.swift */; };
+		E4F7000000000000000000E7 /* QuietZoneCameraHeadSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4F7000000000000000000E6 /* QuietZoneCameraHeadSource.swift */; };
+		E4F7000000000000000000E4 /* QuietZoneHeadPosition.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4F7000000000000000000E2 /* QuietZoneHeadPosition.swift */; };
 		E4F7000000000000000000D4 /* QuietZoneZones.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4F7000000000000000000D2 /* QuietZoneZones.swift */; };
 		E4F7000000000000000000C5 /* QuietZoneVirtualMicrophoneTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4F7000000000000000000C3 /* QuietZoneVirtualMicrophoneTests.swift */; };
+		E4F7000000000000000000E5 /* QuietZoneHeadPositionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4F7000000000000000000E3 /* QuietZoneHeadPositionTests.swift */; };
 		E4F7000000000000000000D5 /* QuietZoneZonesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4F7000000000000000000D3 /* QuietZoneZonesTests.swift */; };
 /* End PBXBuildFile section */
 
@@ -1045,8 +1048,11 @@
 		E8B00000000000000000000D /* SpeakerRoutingPipeline.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerRoutingPipeline.swift; sourceTree = "<group>"; };
 		E8B00000000000000000000E /* CamillaDSPRoutingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CamillaDSPRoutingTests.swift; sourceTree = "<group>"; };
 		E4F7000000000000000000C2 /* QuietZoneVirtualMicrophone.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuietZoneVirtualMicrophone.swift; sourceTree = "<group>"; };
+		E4F7000000000000000000E6 /* QuietZoneCameraHeadSource.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuietZoneCameraHeadSource.swift; sourceTree = "<group>"; };
+		E4F7000000000000000000E2 /* QuietZoneHeadPosition.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuietZoneHeadPosition.swift; sourceTree = "<group>"; };
 		E4F7000000000000000000D2 /* QuietZoneZones.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuietZoneZones.swift; sourceTree = "<group>"; };
 		E4F7000000000000000000C3 /* QuietZoneVirtualMicrophoneTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuietZoneVirtualMicrophoneTests.swift; sourceTree = "<group>"; };
+		E4F7000000000000000000E3 /* QuietZoneHeadPositionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuietZoneHeadPositionTests.swift; sourceTree = "<group>"; };
 		E4F7000000000000000000D3 /* QuietZoneZonesTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuietZoneZonesTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -1242,6 +1248,7 @@
 				E4F7000000000000000000A3 /* QuietZoneNoiseSurveyTests.swift */,
 				E4F7000000000000000000B3 /* ConversationUnmaskingTests.swift */,
 				E4F7000000000000000000C3 /* QuietZoneVirtualMicrophoneTests.swift */,
+				E4F7000000000000000000E3 /* QuietZoneHeadPositionTests.swift */,
 				E4F7000000000000000000D3 /* QuietZoneZonesTests.swift */,
 				E4F300000000000000000014 /* QuietZoneFeedForwardShadowTests.swift */,
 				E4D000000000000000000013 /* AdaptiveQuietZoneShadowTests.swift */,
@@ -1447,6 +1454,7 @@
 				E4F7000000000000000000A2 /* QuietZoneNoiseSurvey.swift */,
 				E4F7000000000000000000B2 /* ConversationUnmasking.swift */,
 				E4F7000000000000000000C2 /* QuietZoneVirtualMicrophone.swift */,
+				E4F7000000000000000000E2 /* QuietZoneHeadPosition.swift */,
 				E4F7000000000000000000D2 /* QuietZoneZones.swift */,
 				E4F200000000000000000012 /* QuietZoneFeedForwardNoiseSurvey.swift */,
 				E4F300000000000000000011 /* QuietZoneFeedForwardShadowPlan.swift */,
@@ -1508,7 +1516,7 @@
 			path = Backup;
 			sourceTree = "<group>";
 		};
-		A20000000000000000000054 /* State */ = {isa = PBXGroup; children = (A20000000000000000000025 /* AudioLifecycleState.swift */, A100000000000000000E2204 /* FeatureFlags.swift */, E4M100000000000000000011 /* SpeakerDriveDemandPolicy.swift */, A100000000000000000E2202 /* PreferenceKeys.swift */, A2000000000000000000002B /* ProductProfiles.swift */, E12B00000000000000000011 /* SystemSetupFlow.swift */, E12C00000000000000000011 /* SystemSetupStartSteps.swift */, E12D00000000000000000011 /* SystemSetupMeasureAlign.swift */, E12E00000000000000000011 /* SystemSetupBassCorrect.swift */, E12F00000000000000000011 /* SystemSetupVerifySave.swift */, B113B0000000000000000061 /* ProductRecovery.swift */, B113B0000000000000000071 /* HeadroomAssistant.swift */, F64000000000000000000014 /* MultichannelCalibrationController.swift */, A2000000000000000000002D /* RoomCorrectionCalibrationController.swift */, A2000000000000000000002F /* RoomCorrectionProjectController.swift */, F89300000000000000000011 /* AmbientCompensationController.swift */, F90200000000000000000011 /* ActiveQuietZoneController.swift */, E4D000000000000000000011 /* AdaptiveQuietZoneShadow.swift */, E4G000000000000000000011 /* LiveTreatmentArm.swift */, E4H000000000000000000011 /* DoNoHarmVerifier.swift */, E4J100000000000000000011 /* AdaptiveTonalOutputGate.swift */, E4J200000000000000000011 /* MicrophoneMoveResolver.swift */, E4J300000000000000000011 /* AdaptiveTonalLiveWorker.swift */, E4J400000000000000000011 /* AdaptiveTonalLiveCoordinator.swift */, E4K100000000000000000011 /* EarnedCapPolicy.swift */, E4L100000000000000000011 /* ExcursionCap.swift */, E4H000000000000000000031 /* SafetyFlightRecorder.swift */, E4F200000000000000000013 /* QuietZoneFeedForwardSurveyController.swift */, E4F300000000000000000012 /* QuietZoneFeedForwardShadow.swift */, F92000000000000000000012 /* RoomTreatmentAdvisorController.swift */, E10B00000000000000000004 /* RoomCorrectionDeployController.swift */,); path = State; sourceTree = "<group>"; };
+		A20000000000000000000054 /* State */ = {isa = PBXGroup; children = (A20000000000000000000025 /* AudioLifecycleState.swift */, A100000000000000000E2204 /* FeatureFlags.swift */, E4M100000000000000000011 /* SpeakerDriveDemandPolicy.swift */, A100000000000000000E2202 /* PreferenceKeys.swift */, A2000000000000000000002B /* ProductProfiles.swift */, E12B00000000000000000011 /* SystemSetupFlow.swift */, E12C00000000000000000011 /* SystemSetupStartSteps.swift */, E12D00000000000000000011 /* SystemSetupMeasureAlign.swift */, E12E00000000000000000011 /* SystemSetupBassCorrect.swift */, E12F00000000000000000011 /* SystemSetupVerifySave.swift */, B113B0000000000000000061 /* ProductRecovery.swift */, B113B0000000000000000071 /* HeadroomAssistant.swift */, F64000000000000000000014 /* MultichannelCalibrationController.swift */, A2000000000000000000002D /* RoomCorrectionCalibrationController.swift */, A2000000000000000000002F /* RoomCorrectionProjectController.swift */, F89300000000000000000011 /* AmbientCompensationController.swift */, F90200000000000000000011 /* ActiveQuietZoneController.swift */, E4D000000000000000000011 /* AdaptiveQuietZoneShadow.swift */, E4G000000000000000000011 /* LiveTreatmentArm.swift */, E4H000000000000000000011 /* DoNoHarmVerifier.swift */, E4J100000000000000000011 /* AdaptiveTonalOutputGate.swift */, E4J200000000000000000011 /* MicrophoneMoveResolver.swift */, E4J300000000000000000011 /* AdaptiveTonalLiveWorker.swift */, E4J400000000000000000011 /* AdaptiveTonalLiveCoordinator.swift */, E4K100000000000000000011 /* EarnedCapPolicy.swift */, E4L100000000000000000011 /* ExcursionCap.swift */, E4H000000000000000000031 /* SafetyFlightRecorder.swift */, E4F200000000000000000013 /* QuietZoneFeedForwardSurveyController.swift */, E4F300000000000000000012 /* QuietZoneFeedForwardShadow.swift */, E4F7000000000000000000E6 /* QuietZoneCameraHeadSource.swift */, F92000000000000000000012 /* RoomTreatmentAdvisorController.swift */, E10B00000000000000000004 /* RoomCorrectionDeployController.swift */,); path = State; sourceTree = "<group>"; };
 		A20000000000000000000055 /* Diagnostics */ = {isa = PBXGroup; children = (A20000000000000000000026 /* AudioDiagnosticsSnapshot.swift */, A2000000000000000000002A /* ProductionAnalysisWorker.swift */,); path = Diagnostics; sourceTree = "<group>"; };
 		A30000000000000000000050 /* Realtime */ = {
 			isa = PBXGroup;
@@ -1871,6 +1879,8 @@
 				E4F7000000000000000000A4 /* QuietZoneNoiseSurvey.swift in Sources */,
 				E4F7000000000000000000B4 /* ConversationUnmasking.swift in Sources */,
 				E4F7000000000000000000C4 /* QuietZoneVirtualMicrophone.swift in Sources */,
+				E4F7000000000000000000E4 /* QuietZoneHeadPosition.swift in Sources */,
+				E4F7000000000000000000E7 /* QuietZoneCameraHeadSource.swift in Sources */,
 				E4F7000000000000000000D4 /* QuietZoneZones.swift in Sources */,
 				E4F200000000000000000002 /* QuietZoneFeedForwardNoiseSurvey.swift in Sources */,
 				E4F200000000000000000003 /* QuietZoneFeedForwardSurveyController.swift in Sources */,
@@ -2030,6 +2040,7 @@
 				E4F7000000000000000000A5 /* QuietZoneNoiseSurveyTests.swift in Sources */,
 				E4F7000000000000000000B5 /* ConversationUnmaskingTests.swift in Sources */,
 				E4F7000000000000000000C5 /* QuietZoneVirtualMicrophoneTests.swift in Sources */,
+				E4F7000000000000000000E5 /* QuietZoneHeadPositionTests.swift in Sources */,
 				E4F7000000000000000000D5 /* QuietZoneZonesTests.swift in Sources */,
 				E4F300000000000000000004 /* QuietZoneFeedForwardShadowTests.swift in Sources */,
 				E4D000000000000000000003 /* AdaptiveQuietZoneShadowTests.swift in Sources */,
@@ -2153,6 +2164,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = "Notch Sixty";
 				INFOPLIST_KEY_NSAudioCaptureUsageDescription = "Notch Sixty captures system audio so it can process and play it through your selected output device.";
+				INFOPLIST_KEY_NSCameraUsageDescription = "Notch Sixty uses the camera to find where your head is, on this Mac only, so the quiet zone can follow you. Images are never stored or sent.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Notch Sixty uses your selected measurement microphone to measure speaker and room response for room correction.";
 				INFOPLIST_KEY_NSMotionUsageDescription = "Notch Sixty uses supported headphone motion sensors to keep virtual speakers fixed in space as you move your head.";
 				MARKETING_VERSION = 1.0.0;
@@ -2187,6 +2199,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = "Notch Sixty";
 				INFOPLIST_KEY_NSAudioCaptureUsageDescription = "Notch Sixty captures system audio so it can process and play it through your selected output device.";
+				INFOPLIST_KEY_NSCameraUsageDescription = "Notch Sixty uses the camera to find where your head is, on this Mac only, so the quiet zone can follow you. Images are never stored or sent.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Notch Sixty uses your selected measurement microphone to measure speaker and room response for room correction.";
 				INFOPLIST_KEY_NSMotionUsageDescription = "Notch Sixty uses supported headphone motion sensors to keep virtual speakers fixed in space as you move your head.";
 				MARKETING_VERSION = 1.0.0;
