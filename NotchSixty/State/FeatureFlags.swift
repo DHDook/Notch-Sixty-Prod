@@ -20,7 +20,7 @@ extension FeatureFlag {
     /// delete it, and the checks that read it, once the epic ships.
     static let all: [FeatureFlag] = [
         .legacyKernel, .ancEngineLease, .adaptiveTonalLive, .earnedCap, .feedForwardLive,
-        .byoImport
+        .noiseSurvey, .byoImport
     ]
 
     /// E6 S11: the unified graph is the default renderer. Turning this on selects the frozen
@@ -64,6 +64,15 @@ extension FeatureFlag {
     static let feedForwardLive = FeatureFlag(
         id: "e4.feedforward-live",
         title: "Live feed-forward cancellation",
+        epic: "E4"
+    )
+
+    /// E4 S28: the noise survey card (what is cancellable, predicted against achieved reduction, annoyance
+    /// estimate). Reads the ambient spectrum only; never touches the arm or output path. Off: no card.
+    /// Removed when E4 ships.
+    static let noiseSurvey = FeatureFlag(
+        id: "e4.noise-survey",
+        title: "Noise survey before arming",
         epic: "E4"
     )
 
