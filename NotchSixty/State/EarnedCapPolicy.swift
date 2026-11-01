@@ -7,11 +7,23 @@ struct EarnedCapBinding: Codable, Hashable, Sendable {
     var inputDeviceUID: String
     /// Nominal rate, rounded to the nearest hertz.
     var sampleRate: Int
+    /// E4 S27: a change of zone mode is a different binding, so the output starts again at -40 dBFS.
+    /// Records stored before S27 decode as `.fixedSeat`.
+    var zoneMode: QuietZoneZoneMode
 
-    init(outputDeviceUID: String, inputDeviceUID: String, sampleRate: Double) {
+    init(outputDeviceUID: String, inputDeviceUID: String, sampleRate: Double, zoneMode: QuietZoneZoneMode = .fixedSeat) {
         self.outputDeviceUID = outputDeviceUID
         self.inputDeviceUID = inputDeviceUID
         self.sampleRate = Int(sampleRate.rounded())
+        self.zoneMode = zoneMode
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        outputDeviceUID = try c.decode(String.self, forKey: .outputDeviceUID)
+        inputDeviceUID = try c.decode(String.self, forKey: .inputDeviceUID)
+        sampleRate = try c.decode(Int.self, forKey: .sampleRate)
+        zoneMode = try c.decodeIfPresent(QuietZoneZoneMode.self, forKey: .zoneMode) ?? .fixedSeat
     }
 }
 
