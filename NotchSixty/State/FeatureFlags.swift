@@ -20,7 +20,7 @@ extension FeatureFlag {
     /// delete it, and the checks that read it, once the epic ships.
     static let all: [FeatureFlag] = [
         .legacyKernel, .ancEngineLease, .adaptiveTonalLive, .earnedCap, .feedForwardLive,
-        .noiseSurvey, .byoImport
+        .noiseSurvey, .byoImport, .conversationUnmasking
     ]
 
     /// E6 S11: the unified graph is the default renderer. Turning this on selects the frozen
@@ -83,6 +83,15 @@ extension FeatureFlag {
         id: "e13.byo-import",
         title: "Bring-your-own target import",
         epic: "E13"
+    )
+
+    /// E4 S30: Conversation Focus unmasking by speech intelligibility index (per-third-octave music cuts,
+    /// syllable-rate speech detection). Ambient compensation only; no ANC output. Off: the broad presence
+    /// cut as before. Removed when E4 ships.
+    static let conversationUnmasking = FeatureFlag(
+        id: "e4.conversation-unmasking",
+        title: "Conversation unmasking",
+        epic: "E4"
     )
 }
 
