@@ -98,14 +98,23 @@ struct ExcursionCapCurve: Equatable, Sendable {
 /// under the peak cap, the cap is held 6 dB lower without disarming, until the mean falls 1.5 dB
 /// further. Pure and deterministic: the caller supplies the time and the played peak. A single
 /// tone's RMS is its peak less 3 dB, which is the worst case for the sum of tones.
+///
+/// E4 S29: a second, 10-minute mean covers continuous low-frequency output over hours (overnight
+/// runs). Its RMS must stay 9 dB under the cap; above that the same 6 dB hold applies, and it
+/// releases 1.5 dB further down. The hold is in force when either mean asks for it.
 struct ExcursionThermalIntegrator: Equatable, Sendable {
     static let timeConstantSeconds = 60.0
     static let marginBelowCapDB = 6.0
     static let releaseHysteresisDB = 1.5
     static let holdReductionDB = 6.0
+    static let longTimeConstantSeconds = 600.0
+    static let longMarginBelowCapDB = 9.0
 
     private(set) var meanPower = 0.0
-    private(set) var holding = false
+    private(set) var longMeanPower = 0.0
+    private var shortHolding = false
+    private var longHolding = false
+    var holding: Bool { shortHolding || longHolding }
     private var lastTime: TimeInterval?
 
     var holdReductionDB: Double { holding ? Self.holdReductionDB : 0 }
@@ -123,13 +132,19 @@ struct ExcursionThermalIntegrator: Equatable, Sendable {
         let peak = playedPeakLinear.isFinite ? max(0, playedPeakLinear) : 0
         let alpha = 1 - exp(-dt / Self.timeConstantSeconds)
         meanPower += alpha * (peak * peak / 2 - meanPower)
+        let longAlpha = 1 - exp(-dt / Self.longTimeConstantSeconds)
+        longMeanPower += longAlpha * (peak * peak / 2 - longMeanPower)
+        Self.step(&shortHolding, meanPower: meanPower, limit: nominalCapDBFS - Self.marginBelowCapDB)
+        Self.step(&longHolding, meanPower: longMeanPower, limit: nominalCapDBFS - Self.longMarginBelowCapDB)
+        return holding
+    }
+
+    private static func step(_ holding: inout Bool, meanPower: Double, limit: Double) {
         let rmsDB = meanPower > 0 ? 10 * log10(meanPower) : -.infinity
-        let limit = nominalCapDBFS - Self.marginBelowCapDB
         if holding {
-            if rmsDB < limit - Self.releaseHysteresisDB { holding = false }
+            if rmsDB < limit - releaseHysteresisDB { holding = false }
         } else if rmsDB > limit {
             holding = true
         }
-        return holding
     }
 }

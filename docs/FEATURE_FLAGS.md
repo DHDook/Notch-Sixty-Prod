@@ -37,3 +37,4 @@ When the epic ships, delete the flag and every check that reads it in the same P
 | `e4.conversation-unmasking` | E4 | Conversation Focus unmasking by SII per-band music cuts and syllable-rate speech detection (S30); ambient compensation only, no ANC output |
 | `e4.virtual-microphone` | E4 | Tonal virtual microphone at the ears: monitor-to-ear ratio survey and effective secondary path (S26a); offline maths, no output |
 | `e4.zones` | E4 | Choose the quiet zone: fixed seat, follow, or two zones with the 2 x 2 per-tone core and zone mode in the earned-cap binding (S27); offline maths, no output |
+| `e4.overnight` | E4 | Overnight Quiet Zone runs: keep the Mac awake while armed (power assertion, S29) and the 10-minute thermal mean; type only, nothing arms it |

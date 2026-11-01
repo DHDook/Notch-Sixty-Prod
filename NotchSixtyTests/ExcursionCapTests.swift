@@ -75,6 +75,17 @@ final class ExcursionCapTests: XCTestCase {
         XCTAssertTrue(t.holding || (engaged ?? 0) > 0)
     }
 
+    func testLongRunMeanHoldsASteadyToneBetweenTheTwoMargins() {
+        // -22 dB peak: RMS -25 dB is under the 6 dB margin (-24) but over the 9 dB long margin (-27).
+        var t = ExcursionThermalIntegrator()
+        let peak = pow(10, -22.0 / 20)
+        for s in 0 ... 3600 { t.update(now: Double(s), playedPeakLinear: peak, nominalCapDBFS: -18) }
+        XCTAssertTrue(t.holding)
+        XCTAssertEqual(t.holdReductionDB, 6)
+        for s in 3601 ... 7200 { t.update(now: Double(s), playedPeakLinear: 0, nominalCapDBFS: -18) }
+        XCTAssertFalse(t.holding)
+    }
+
     func testToneWellBelowTheCapNeverHolds() {
         let (t, engaged) = hold(peakDB: -30, seconds: 900)
         XCTAssertNil(engaged)
