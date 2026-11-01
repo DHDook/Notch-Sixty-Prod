@@ -20,7 +20,7 @@ extension FeatureFlag {
     /// delete it, and the checks that read it, once the epic ships.
     static let all: [FeatureFlag] = [
         .legacyKernel, .ancEngineLease, .adaptiveTonalLive, .earnedCap, .feedForwardLive,
-        .noiseSurvey, .conversationUnmasking
+        .noiseSurvey, .conversationUnmasking, .virtualMicrophone
     ]
 
     /// E6 S11: the unified graph is the default renderer. Turning this on selects the frozen
@@ -82,6 +82,14 @@ extension FeatureFlag {
     static let conversationUnmasking = FeatureFlag(
         id: "e4.conversation-unmasking",
         title: "Conversation unmasking",
+        epic: "E4"
+    )
+
+    /// E4 S26a: tonal virtual microphone at the ears (monitor-to-ear ratio survey, effective secondary
+    /// path). Offline maths in this slice; nothing drives output while the flag is off. Removed when E4 ships.
+    static let virtualMicrophone = FeatureFlag(
+        id: "e4.virtual-microphone",
+        title: "Virtual microphone at the ears",
         epic: "E4"
     )
 }
