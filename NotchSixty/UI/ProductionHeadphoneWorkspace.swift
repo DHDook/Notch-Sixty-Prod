@@ -15,6 +15,16 @@ struct ProductionHeadphoneWorkspace: View {
     @State private var selectedModelID: UUID?
     @State private var modeledCorrection: HeadphoneModelFitResult?
     @State private var availableImportedHRTFs: [BinauralProfileAsset] = []
+    // E13 S2: bring-your-own responses and one-click fit.
+    @State private var importingResponses = false
+    @State private var importingAPOPreset = false
+    @State private var storedResponses: [HeadphoneResponseRecord] = []
+    @State private var selectedResponseID: UUID?
+    @State private var headphoneTargets: [RoomCorrectionTargetCurve] = [RoomCorrectionBuiltInTarget.flat.curve]
+    @State private var selectedTargetID: UUID? = RoomCorrectionBuiltInTarget.flat.curve.id
+    @State private var oneClick = HeadphoneOneClickSession()
+    @State private var oneClickFit: HeadphoneAutoFitResult?
+    @State private var fitting = false
     private static let sofaFileType: UTType =
         UTType(filenameExtension: "sofa")
             ?? UTType(importedAs: "org.aes69.sofa", conformingTo: .data)
@@ -38,6 +48,7 @@ struct ProductionHeadphoneWorkspace: View {
                 modeCard
                 correctionCard
                 perEarEQCard
+                oneClickFitCard
                 crossfeedCard
                 if draft.spatialMode == .virtualSpeakers {
                     spatialCard
@@ -68,6 +79,7 @@ struct ProductionHeadphoneWorkspace: View {
             syncFromSelectedSystem()
             loadSavedModelMeasurements()
             loadImportedHRTFs()
+            loadResponsesAndTargets()
         }
         .task(id: profiles.selectedSystemProfileID) { syncFromSelectedSystem() }
         .fileImporter(
@@ -83,6 +95,20 @@ struct ProductionHeadphoneWorkspace: View {
             allowsMultipleSelection: false
         ) { result in
             importEQProposal(result)
+        }
+        .fileImporter(
+            isPresented: $importingResponses,
+            allowedContentTypes: [.plainText, .text, .commaSeparatedText],
+            allowsMultipleSelection: true
+        ) { result in
+            importHeadphoneResponses(result)
+        }
+        .fileImporter(
+            isPresented: $importingAPOPreset,
+            allowedContentTypes: [.plainText, .text],
+            allowsMultipleSelection: false
+        ) { result in
+            importAPOPreset(result)
         }
         .fileImporter(
             isPresented: $importingModelResponse,
@@ -357,6 +383,132 @@ struct ProductionHeadphoneWorkspace: View {
                     .foregroundStyle(.secondary)
             }
         }
+    }
+
+    // MARK: One-click fit (E13 S2)
+
+    private var oneClickFitCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Fit and apply").font(.headline)
+            Text("Import your own headphone response (AutoEq CSV, REW or squig.link text; pick left and right files together, or one file for both ears), choose a target, and fit a parametric EQ in one step. Nothing is bundled or downloaded.")
+                .font(.caption).foregroundStyle(.secondary)
+            HStack {
+                Button("Import response...") { importingResponses = true }
+                Button("Import Equalizer APO preset...") { importingAPOPreset = true }
+                Button("Undo", action: undoOneClick).disabled(!oneClick.canUndo)
+            }
+            Picker("Response", selection: $selectedResponseID) {
+                Text("Choose a response...").tag(UUID?.none)
+                ForEach(storedResponses) { Text($0.name).tag(UUID?.some($0.id)) }
+            }
+            Picker("Target", selection: $selectedTargetID) {
+                ForEach(headphoneTargets) { Text($0.name).tag(UUID?.some($0.id)) }
+            }
+            Button(fitting ? "Fitting..." : "Fit and apply", action: fitAndApply)
+                .buttonStyle(.borderedProminent)
+                .disabled(fitting || selectedResponseID == nil || selectedSampleRate == nil)
+            if let fit = oneClickFit {
+                Text(String(format: "Error L %.2f to %.2f dB, R %.2f to %.2f dB; headroom %.1f dB",
+                            fit.leftRMSEBeforeDB, fit.leftRMSEAfterDB, fit.rightRMSEBeforeDB, fit.rightRMSEAfterDB,
+                            fit.recommendedHeadroomDB))
+                    .font(.caption.monospacedDigit())
+                ForEach(fit.warnings, id: \.self) { Label($0, systemImage: "info.circle").font(.caption).foregroundStyle(.secondary) }
+            }
+        }
+        .productionCard()
+    }
+
+    private func loadResponsesAndTargets() {
+        storedResponses = HeadphoneResponseStore().loadAll().records
+        let user = TargetLibrary().loadAll().records.filter {
+            !TargetLibrary.isBuiltIn($0.id) && ($0.category == .headphone || $0.category == .general)
+        }
+        headphoneTargets = [RoomCorrectionBuiltInTarget.flat.curve] + user.map(\.curve)
+        if !headphoneTargets.contains(where: { $0.id == selectedTargetID }) {
+            selectedTargetID = RoomCorrectionBuiltInTarget.flat.curve.id
+        }
+    }
+
+    private func importHeadphoneResponses(_ result: Result<[URL], Error>) {
+        actionError = nil
+        do {
+            let urls = try result.get()
+            guard !urls.isEmpty, urls.count <= 2 else { throw HeadphoneResponseError.pairingFailed }
+            var curves: [ImportedCurve] = []
+            for url in urls {
+                let scoped = url.startAccessingSecurityScopedResource()
+                defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+                curves.append(try FrequencyResponseImporter.parse(
+                    Data(contentsOf: url), sourceName: url.deletingPathExtension().lastPathComponent))
+            }
+            let record = try HeadphoneResponseRecord.make(from: curves)
+            try HeadphoneResponseStore().save(record)
+            loadResponsesAndTargets()
+            selectedResponseID = record.id
+            statusMessage = "Imported \(record.name). Choose a target and press Fit and apply."
+        } catch {
+            actionError = error.localizedDescription
+        }
+    }
+
+    private func fitAndApply() {
+        actionError = nil
+        guard let rate = selectedSampleRate,
+              let record = storedResponses.first(where: { $0.id == selectedResponseID }) else { return }
+        let target = headphoneTargets.first { $0.id == selectedTargetID }
+        fitting = true
+        Task {
+            do {
+                let fit = try await Task.detached(priority: .userInitiated) {
+                    try HeadphoneAutoFitter.fit(
+                        measurement: try record.measurement(target: target, sampleRate: rate), sampleRate: rate)
+                }.value
+                oneClickFit = fit
+                var session = oneClick
+                let before = draft
+                draft = try session.apply(fit, to: draft, targetID: target?.id, targetName: target?.name, sampleRate: rate)
+                applyDraft()
+                if actionError != nil { draft = before } else {
+                    oneClick = session
+                    statusMessage = "Applied a fitted EQ for \(record.name) and enabled the headphone profile. Undo restores the previous profile."
+                }
+            } catch {
+                actionError = error.localizedDescription
+            }
+            fitting = false
+        }
+    }
+
+    private func importAPOPreset(_ result: Result<[URL], Error>) {
+        actionError = nil
+        do {
+            guard let url = try result.get().first, let rate = selectedSampleRate else {
+                throw HeadphoneDeviceProfileError.outputDeviceRequired
+            }
+            let scoped = url.startAccessingSecurityScopedResource()
+            defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+            let preset = try EqualizerAPOPresetImporter.parse(Data(contentsOf: url))
+            let proposal = try EqualizerAPOPresetImporter.proposal(
+                from: preset, name: url.deletingPathExtension().lastPathComponent, sampleRate: rate)
+            var session = oneClick
+            let before = draft
+            draft = try session.apply(preset: proposal, to: draft, sampleRate: rate)
+            applyDraft()
+            if actionError != nil { draft = before } else {
+                oneClick = session
+                statusMessage = "Applied \(preset.bands.count) preset filters to both ears; headroom set from the filters (the preset's own preamp is not used)."
+            }
+        } catch {
+            actionError = error.localizedDescription
+        }
+    }
+
+    private func undoOneClick() {
+        actionError = nil
+        guard let previous = oneClick.undo() else { return }
+        draft = previous
+        applyDraft()
+        if actionError == nil { statusMessage = "Restored the profile from before the last fit." }
     }
 
     private func importLocalModelMeasurement(

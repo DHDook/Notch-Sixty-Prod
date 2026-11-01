@@ -145,9 +145,4 @@ final class FrequencyResponseImporterTests: XCTestCase {
         try library.save(record)
         XCTAssertEqual(try library.load(id: record.id).curve.points, record.curve.points)
     }
-
-    func testFlagDefaultsOffAndIsRegistered() {
-        XCTAssertTrue(FeatureFlag.all.contains(.byoImport))
-        XCTAssertFalse(FeatureFlag.byoImport.defaultEnabled)
-    }
 }

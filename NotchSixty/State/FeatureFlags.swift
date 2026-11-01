@@ -20,7 +20,7 @@ extension FeatureFlag {
     /// delete it, and the checks that read it, once the epic ships.
     static let all: [FeatureFlag] = [
         .legacyKernel, .ancEngineLease, .adaptiveTonalLive, .earnedCap, .feedForwardLive,
-        .byoImport
+        .noiseSurvey, .conversationUnmasking
     ]
 
     /// E6 S11: the unified graph is the default renderer. Turning this on selects the frozen
@@ -67,13 +67,22 @@ extension FeatureFlag {
         epic: "E4"
     )
 
-    /// E13 S1-S2: bring-your-own frequency-response and target import (AutoEq CSV, REW, squig.link,
-    /// FRD), target categories and the Correction tab's "Import target..." button. Off: the card is
-    /// as before. Removed at the end of E13 S2.
-    static let byoImport = FeatureFlag(
-        id: "e13.byo-import",
-        title: "Bring-your-own target import",
-        epic: "E13"
+    /// E4 S28: the noise survey card (what is cancellable, predicted against achieved reduction, annoyance
+    /// estimate). Reads the ambient spectrum only; never touches the arm or output path. Off: no card.
+    /// Removed when E4 ships.
+    static let noiseSurvey = FeatureFlag(
+        id: "e4.noise-survey",
+        title: "Noise survey before arming",
+        epic: "E4"
+    )
+
+    /// E4 S30: Conversation Focus unmasking by speech intelligibility index (per-third-octave music cuts,
+    /// syllable-rate speech detection). Ambient compensation only; no ANC output. Off: the broad presence
+    /// cut as before. Removed when E4 ships.
+    static let conversationUnmasking = FeatureFlag(
+        id: "e4.conversation-unmasking",
+        title: "Conversation unmasking",
+        epic: "E4"
     )
 }
 

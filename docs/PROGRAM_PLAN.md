@@ -273,7 +273,7 @@ complete, speaker ANC qualified, and a full hardware regression passing at every
 ### E13 Headphones complete
 
 - [x] Bring-your-own import: AutoEq CSV, REW and squig.link frequency-response text, plus user target curves
-- [ ] One-click PEQ from an imported response and a chosen target, using the existing model fitter
+- [x] One-click PEQ from an imported response and a chosen target, using the existing model fitter
 - [ ] Live PEQ and crossfeed tuning while playing (from E6)
 - [ ] Raise the HRIR cap for room-included BRIRs; live HRTF interpolation with head tracking
 - [ ] In-ear-microphone BRIR capture for personal virtual speakers

@@ -641,7 +641,8 @@ struct ConversationPreservationPlanner: Sendable {
     func plan(
         snapshot: AmbientAnalysisSnapshot,
         configuration rawConfiguration: AmbientCompensationConfiguration,
-        previousActivity: AmbientActivityClass? = nil
+        previousActivity: AmbientActivityClass? = nil,
+        speechModulationConfidence: Double? = nil
     ) throws -> AmbientCompensationTarget {
         let configuration = try rawConfiguration.validated()
         let social = try configuration
@@ -679,9 +680,13 @@ struct ConversationPreservationPlanner: Sendable {
                 snapshot: snapshot
             )
         }
-        guard snapshot.character != .nonstationary,
-              snapshot.stationarityScore
-                >= Self.minimumConversationStationarity else {
+        // E4 S30: speech is itself non-stationary, so when the syllable-rate detector (e4.conversation-unmasking)
+        // reports speech the stationarity hold is skipped. Nil keeps the old behaviour.
+        let speechDetected = (speechModulationConfidence ?? 0) >= 0.5
+        guard speechDetected
+                || (snapshot.character != .nonstationary
+                    && snapshot.stationarityScore
+                        >= Self.minimumConversationStationarity) else {
             return held(
                 .nonstationaryTransient,
                 snapshot: snapshot
