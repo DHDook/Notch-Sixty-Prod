@@ -83,6 +83,8 @@ final class RoomCorrectionCalibrationController: ObservableObject {
     @Published private(set) var lastErrorDescription: String?
     /// Set when starting a measurement stopped normal playback (E24 S2).
     @Published private(set) var playbackNotice: String?
+    /// How this controller sees and stops normal playback; replaced in tests.
+    var playbackControl: MeasurementPlaybackControl
 
     @Published var sweepStartFrequencyHz = 20.0
     @Published var sweepEndFrequencyHz = 20_000.0
@@ -108,6 +110,7 @@ final class RoomCorrectionCalibrationController: ObservableObject {
         analysisOperation: RoomCorrectionMeasurementAnalysisOperation? = nil
     ) {
         self.engine = engine
+        self.playbackControl = .engine(engine)
         self.inputCatalog = inputCatalog
         self.permissionClient = permissionClient
         self.transportFactory = transportFactory
@@ -307,7 +310,7 @@ final class RoomCorrectionCalibrationController: ObservableObject {
             latestCapture = nil
             latestAnalysis = nil
 
-            playbackNotice = MeasurementPlaybackPolicy.stopPlaybackIfRunning(engine)
+            playbackNotice = MeasurementPlaybackPolicy.stopPlaybackIfRunning(playbackControl)
             try stateMachine.transition(to: .arming)
             publishState()
 

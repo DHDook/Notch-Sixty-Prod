@@ -274,6 +274,7 @@ the shipped UI.
 - [ ] End-to-end wizard harness through production wiring at all eight rates; no `Unconnected*` production defaults
 - [ ] Measurement-owned level session: Level step and Measure tab generator play noise without normal playback
 - [x] One measurement-readiness result with reason text under every disabled measure button; every measure path stops playback with a notice
+- [ ] E24 S2b: optimizer, characterization, FIR-verify, evidence, guided-workflow and Quiet Zone survey controllers stop playback with a notice (owner sign-off); `deployLatestDesign` keeps refusing by design
 - [ ] Real post-apply verification; wizard offers mixed phase; joint-bass grid filters deployed
 - [ ] E11 leftovers wired: repeat averaging and timing in Room Correction and multichannel; Analysis tab (distortion, RT60/EDT)
 - [ ] E12 leftovers: shared microphone and seat cards; wizard multi-mic pass; target shaping persists

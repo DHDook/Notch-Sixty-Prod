@@ -102,8 +102,27 @@ enum MeasurementReadiness: Equatable {
     }
 }
 
+/// The seam a controller uses to see and stop normal playback; tests inject a fake because the
+/// real engine cannot start without hardware.
+struct MeasurementPlaybackControl {
+    var isRunning: () -> Bool
+    var stop: () -> Void
+
+    @MainActor
+    static func engine(_ engine: AudioIOEngine) -> MeasurementPlaybackControl {
+        MeasurementPlaybackControl(
+            isRunning: { engine.lifecycleState != .idle },
+            stop: { engine.stop() })
+    }
+}
+
 /// E24 S2: one playback policy for every measure path.
 enum MeasurementPlaybackPolicy {
+    @MainActor
+    static func stopPlaybackIfRunning(_ control: MeasurementPlaybackControl) -> String? {
+        stopPlaybackIfRunning(isRunning: control.isRunning(), stop: control.stop)
+    }
+
     static let stoppedNotice = "Playback was stopped so the speakers can be measured. Start it again when you finish."
 
     /// Stops normal playback if it is running and returns the notice to show, else nil.
