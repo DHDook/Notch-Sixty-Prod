@@ -30,6 +30,9 @@ final class SystemSetupFlowModel: ObservableObject {
     let microphone: RoomCorrectionCalibrationController
     let calibration: MultichannelCalibrationController
     private let noise: SystemSetupNoisePlaying
+    /// The Level step's meter; the level session feeds it while noise plays.
+    let levelMonitor: MeasurementInputMonitor
+    private let laneChoices: @MainActor () -> [(index: Int, name: String, isLFE: Bool)]
     /// The flow's own Room Correction project (its own folder), so it never overwrites the project
     /// the user keeps in the Room Correction workspace.
     let roomProjects: RoomCorrectionProjectController
@@ -45,7 +48,8 @@ final class SystemSetupFlowModel: ObservableObject {
          sessions: SystemSetupSessionStore = SystemSetupSessionStore(directory: SystemSetupSessionStore.defaultDirectory()),
          roomProjectsDirectory: URL = SystemSetupSessionStore.defaultDirectory()
              .appendingPathComponent("RoomCorrection", isDirectory: true)) {
-        let services = services ?? ProductionSystemSetupServices.production(engine: engine)
+        let services = services ?? ProductionSystemSetupServices.production(
+            engine: engine, profiles: profiles, microphone: microphone)
         self.verifier = services.verifier
         self.sessions = sessions
         self.engine = engine
@@ -53,9 +57,12 @@ final class SystemSetupFlowModel: ObservableObject {
         self.microphone = microphone
         self.calibration = calibration
         self.noise = services.noise
+        self.levelMonitor = services.monitor
+        self.laneChoices = services.laneChoices
         self.roomProjects = RoomCorrectionProjectController(
             profiles: profiles,
             store: RoomCorrectionProjectStore(rootDirectory: roomProjectsDirectory))
+        noise.setStopHandler { [weak self] reason in self?.noiseEndedOnItsOwn(reason) }
     }
 
     var choices: SystemSetupChoices { flow.choices }
@@ -130,7 +137,7 @@ final class SystemSetupFlowModel: ObservableObject {
     }
 
     /// Channels the noise can play on right now, in lane order.
-    var noiseChannels: [(index: Int, name: String, isLFE: Bool)] { engine.generatorLaneChoices }
+    var noiseChannels: [(index: Int, name: String, isLFE: Bool)] { laneChoices() }
 
     /// Plays one channel at a time (or all channels) for the Level step. Switching channel stops the current noise,
     /// returns to that channel's starting level and starts it again if noise was playing.
@@ -165,6 +172,12 @@ final class SystemSetupFlowModel: ObservableObject {
             noiseIsPlaying = false
             message = error.localizedDescription
         }
+    }
+
+    /// Auto-stop and output-change stops arrive here with the text to show.
+    private func noiseEndedOnItsOwn(_ reason: String) {
+        noiseIsPlaying = noise.isPlaying
+        message = reason
     }
 
     func stopNoise() {
@@ -569,7 +582,8 @@ struct ProductionSystemSetupFlowView: View {
          advisor: RoomTreatmentAdvisorController) {
         _model = StateObject(wrappedValue: SystemSetupFlowModel(
             engine: engine, profiles: profiles, microphone: microphone, calibration: calibration,
-            services: ProductionSystemSetupServices.production(engine: engine)))
+            services: ProductionSystemSetupServices.production(
+                engine: engine, profiles: profiles, microphone: microphone)))
         self.advisor = advisor
     }
 
@@ -734,12 +748,13 @@ private struct SystemSetupTopologyStep: View {
 private struct SystemSetupMicrophoneStep: View {
     @ObservedObject var model: SystemSetupFlowModel
     @ObservedObject private var microphone: RoomCorrectionCalibrationController
-    @StateObject private var monitor = MeasurementInputMonitor()
+    @ObservedObject private var monitor: MeasurementInputMonitor
     @State private var splText = ""
 
     init(model: SystemSetupFlowModel) {
         self.model = model
         _microphone = ObservedObject(wrappedValue: model.microphone)
+        _monitor = ObservedObject(wrappedValue: model.levelMonitor)
     }
 
     var body: some View {
@@ -797,7 +812,7 @@ private struct SystemSetupMicrophoneStep: View {
             HStack {
                 Button(model.noiseIsPlaying ? "Stop noise" : "Play noise") { model.toggleNoise() }
                 Button(monitor.isRunning ? "Stop meter" : "Start meter") { toggleMeter() }
-                    .disabled(microphone.selectedInputDevice == nil)
+                    .disabled(microphone.selectedInputDevice == nil || model.noiseIsPlaying)
                 Button("Use this level for the sweep") {
                     if let reading = monitor.reading { model.acceptSweepLevel(measuredSPLdBC: reading.slowDB) }
                 }

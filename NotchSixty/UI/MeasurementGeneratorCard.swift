@@ -5,7 +5,13 @@ import SwiftUI
 /// the ceiling, ramps over 100 ms and auto-stops, whatever this card sends.
 struct MeasurementGeneratorCard: View {
     @State private var settings = SignalGeneratorSettings()
+    @StateObject private var controller: MeasurementGeneratorController
     private static let octaveCentres: [Double] = [31.5, 63, 125, 250, 500, 1000, 2000, 4000, 8000, 16000]
+
+    init(engine: AudioIOEngine, profiles: ProductProfileController, microphone: RoomCorrectionCalibrationController) {
+        _controller = StateObject(wrappedValue: MeasurementGeneratorController(
+            engine: engine, profiles: profiles, microphone: microphone))
+    }
 
     var body: some View {
         GroupBox("Signal generator") {
@@ -35,10 +41,22 @@ struct MeasurementGeneratorCard: View {
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 Toggle("Mute other audio while playing", isOn: $settings.muteOtherAudio)
+                HStack {
+                    Button(controller.isPlaying ? "Stop" : "Play") { controller.toggle(settings) }
+                    if let left = controller.secondsRemaining {
+                        Text("Stops in \(left / 60):\(String(format: "%02d", left % 60))")
+                            .font(.caption).monospacedDigit().foregroundStyle(.secondary)
+                    }
+                }
+                if let message = controller.message {
+                    Text(message).font(.caption).foregroundStyle(.orange)
+                }
                 Text("Level is held at or below -6 dBFS RMS, fades over 100 ms, stops after 10 minutes and when the output changes.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             .padding(4)
         }
+        .onChange(of: settings) { _, new in controller.update(new) }
+        .onDisappear { controller.stop() }
     }
 }

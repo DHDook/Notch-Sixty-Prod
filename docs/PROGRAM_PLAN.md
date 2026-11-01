@@ -272,7 +272,7 @@ post-apply verification, mixed phase in the wizard and several E11 views are not
 the shipped UI.
 
 - [ ] End-to-end wizard harness through production wiring at all eight rates; no `Unconnected*` production defaults
-- [ ] Measurement-owned level session: Level step and Measure tab generator play noise without normal playback
+- [x] Measurement-owned level session: Level step and Measure tab generator play noise without normal playback
 - [ ] One measurement-readiness result with reason text under every disabled measure button; every measure path stops playback with a notice
 - [ ] Real post-apply verification; wizard offers mixed phase; joint-bass grid filters deployed
 - [ ] E11 leftovers wired: repeat averaging and timing in Room Correction and multichannel; Analysis tab (distortion, RT60/EDT)
