@@ -34,6 +34,7 @@
 		E11D00000000000000000061 /* MeasurementFormats.swift in Sources */ = {isa = PBXBuildFile; fileRef = E11D00000000000000000071 /* MeasurementFormats.swift */; };
 		E11D0000000000000000F001 /* MeasurementOverlays.swift in Sources */ = {isa = PBXBuildFile; fileRef = E11D0000000000000000F011 /* MeasurementOverlays.swift */; };
 		E13A00000000000000000003 /* FrequencyResponseImporterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E13A00000000000000000004 /* FrequencyResponseImporterTests.swift */; };
+		E13A00000000000000000007 /* HeadphoneResponseFittingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E13A00000000000000000008 /* HeadphoneResponseFittingTests.swift */; };
 		E11D00000000000000000062 /* MeasurementFormatsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E11D00000000000000000072 /* MeasurementFormatsTests.swift */; };
 		E11D0000000000000000F002 /* MeasurementOverlaysTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E11D0000000000000000F012 /* MeasurementOverlaysTests.swift */; };
 		E11D00000000000000000043 /* MeasurementLibraryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E11D00000000000000000053 /* MeasurementLibraryTests.swift */; };
@@ -143,6 +144,7 @@
 		B40000000000000000000093 /* RoomCorrectionABXTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B40000000000000000000094 /* RoomCorrectionABXTests.swift */; };
 		B50000000000000000000001 /* OptionalAcousticResearch.swift in Sources */ = {isa = PBXBuildFile; fileRef = B50000000000000000000011 /* OptionalAcousticResearch.swift */; };
 		B50000000000000000000002 /* HeadphoneModelResearchLibrary.swift in Sources */ = {isa = PBXBuildFile; fileRef = B50000000000000000000012 /* HeadphoneModelResearchLibrary.swift */; };
+		E13A00000000000000000005 /* HeadphoneResponseFitting.swift in Sources */ = {isa = PBXBuildFile; fileRef = E13A00000000000000000006 /* HeadphoneResponseFitting.swift */; };
 		B50000000000000000000003 /* ProductionOptionalAudioResearchWorkspace.swift in Sources */ = {isa = PBXBuildFile; fileRef = B50000000000000000000013 /* ProductionOptionalAudioResearchWorkspace.swift */; };
 		B50000000000000000000004 /* OptionalAudioResearchTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B50000000000000000000014 /* OptionalAudioResearchTests.swift */; };
 		F65000000000000000000002 /* BinauralProfileAsset.swift in Sources */ = {isa = PBXBuildFile; fileRef = F65000000000000000000012 /* BinauralProfileAsset.swift */; };
@@ -535,6 +537,7 @@
 		E11D00000000000000000071 /* MeasurementFormats.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeasurementFormats.swift; sourceTree = "<group>"; };
 		E11D0000000000000000F011 /* MeasurementOverlays.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeasurementOverlays.swift; sourceTree = "<group>"; };
 		E13A00000000000000000004 /* FrequencyResponseImporterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FrequencyResponseImporterTests.swift; sourceTree = "<group>"; };
+		E13A00000000000000000008 /* HeadphoneResponseFittingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HeadphoneResponseFittingTests.swift; sourceTree = "<group>"; };
 		E11D00000000000000000072 /* MeasurementFormatsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeasurementFormatsTests.swift; sourceTree = "<group>"; };
 		E11D0000000000000000F012 /* MeasurementOverlaysTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeasurementOverlaysTests.swift; sourceTree = "<group>"; };
 		E11D00000000000000000053 /* MeasurementLibraryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeasurementLibraryTests.swift; sourceTree = "<group>"; };
@@ -681,6 +684,7 @@
 		B40000000000000000000094 /* RoomCorrectionABXTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomCorrectionABXTests.swift; sourceTree = "<group>"; };
 		B50000000000000000000011 /* OptionalAcousticResearch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OptionalAcousticResearch.swift; sourceTree = "<group>"; };
 		B50000000000000000000012 /* HeadphoneModelResearchLibrary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HeadphoneModelResearchLibrary.swift; sourceTree = "<group>"; };
+		E13A00000000000000000006 /* HeadphoneResponseFitting.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HeadphoneResponseFitting.swift; sourceTree = "<group>"; };
 		B50000000000000000000013 /* ProductionOptionalAudioResearchWorkspace.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductionOptionalAudioResearchWorkspace.swift; sourceTree = "<group>"; };
 		B50000000000000000000014 /* OptionalAudioResearchTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OptionalAudioResearchTests.swift; sourceTree = "<group>"; };
 		F65000000000000000000012 /* BinauralProfileAsset.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BinauralProfileAsset.swift; sourceTree = "<group>"; };
@@ -1172,7 +1176,7 @@
 				E11D00000000000000000053 /* MeasurementLibraryTests.swift */,
 				E11D00000000000000000085 /* SignalGeneratorSettingsTests.swift */,
 				E11D00000000000000000072 /* MeasurementFormatsTests.swift */,
-				E13A00000000000000000004 /* FrequencyResponseImporterTests.swift */,
+				E13A00000000000000000004 /* FrequencyResponseImporterTests.swift */, E13A00000000000000000008 /* HeadphoneResponseFittingTests.swift */,
 				E11D0000000000000000F012 /* MeasurementOverlaysTests.swift */,
 				A100000000000000000E1302 /* PresetInterchangeTests.swift */,
 				A100000000000000000E1304 /* MultichannelCalibrationDesignerTests.swift */,
@@ -1473,7 +1477,7 @@
 		};
 		A20000000000000000000051 /* CoreAudio */ = {isa = PBXGroup; children = (A20000000000000000000021 /* CoreAudioError.swift */, E4E000000000000000000011 /* OutputBufferSizeController.swift */, F63000000000000000000011 /* CoreAudioNChannelTransportSession.swift */, F65000000000000000000013 /* CoreAudioSemanticTransportSupport.swift */, F65000000000000000000014 /* CoreAudioBinauralHeadphoneTransportSession.swift */, F64000000000000000000013 /* MultichannelCalibrationTransport.swift */, A20000000000000000000028 /* MasterVolumeDeviceController.swift */, A2000000000000000000002C /* RoomCorrectionCalibrationTransport.swift */,); path = CoreAudio; sourceTree = "<group>"; };
 		A20000000000000000000052 /* Devices */ = {isa = PBXGroup; children = (A20000000000000000000022 /* AudioOutputDevice.swift */, A20000000000000000000023 /* OutputDeviceCatalog.swift */,); path = Devices; sourceTree = "<group>"; };
-		A20000000000000000000053 /* Routing */ = {isa = PBXGroup; children = (A20000000000000000000024 /* AudioRouteConfiguration.swift */, E8B000000000000000000001 /* SpeakerRoutingConfiguration.swift */, E8B000000000000000000002 /* SpeakerRoutingValidation.swift */, E8B000000000000000000005 /* SpeakerRoutingMigration.swift */, E8B000000000000000000008 /* SpeakerRoutingEditorModel.swift */, E8D000000000000000000001 /* OutputDeviceProfileSubwooferEditing.swift */, E8B00000000000000000000B /* YAMLSubset.swift */, E8B00000000000000000000C /* CamillaDSPRouting.swift */, E8B00000000000000000000D /* SpeakerRoutingPipeline.swift */, E8B000000000000000000006 /* SpeakerRoutingProtectedExcitation.swift */, E8C000000000000000000001 /* SpeakerRoutingLabAcquisition.swift */, F62000000000000000000011 /* OutputDeviceProfileConfiguration.swift */, F65000000000000000000011 /* HeadphoneDeviceProfileConfiguration.swift */, B40000000000000000000011 /* BlindABXValidation.swift */, B40000000000000000000092 /* RoomCorrectionABX.swift */, B50000000000000000000012 /* HeadphoneModelResearchLibrary.swift */, F65000000000000000000012 /* BinauralProfileAsset.swift */, F64000000000000000000011 /* OutputDeviceCalibration.swift */, E6D0000000000000000009A1 /* BinauralResampledAssetCache.swift */, E6D0000000000000000009A2 /* HeadphoneLiveEditPlanner.swift */,); path = Routing; sourceTree = "<group>"; };
+		A20000000000000000000053 /* Routing */ = {isa = PBXGroup; children = (A20000000000000000000024 /* AudioRouteConfiguration.swift */, E8B000000000000000000001 /* SpeakerRoutingConfiguration.swift */, E8B000000000000000000002 /* SpeakerRoutingValidation.swift */, E8B000000000000000000005 /* SpeakerRoutingMigration.swift */, E8B000000000000000000008 /* SpeakerRoutingEditorModel.swift */, E8D000000000000000000001 /* OutputDeviceProfileSubwooferEditing.swift */, E8B00000000000000000000B /* YAMLSubset.swift */, E8B00000000000000000000C /* CamillaDSPRouting.swift */, E8B00000000000000000000D /* SpeakerRoutingPipeline.swift */, E8B000000000000000000006 /* SpeakerRoutingProtectedExcitation.swift */, E8C000000000000000000001 /* SpeakerRoutingLabAcquisition.swift */, F62000000000000000000011 /* OutputDeviceProfileConfiguration.swift */, F65000000000000000000011 /* HeadphoneDeviceProfileConfiguration.swift */, B40000000000000000000011 /* BlindABXValidation.swift */, B40000000000000000000092 /* RoomCorrectionABX.swift */, B50000000000000000000012 /* HeadphoneModelResearchLibrary.swift */, E13A00000000000000000006 /* HeadphoneResponseFitting.swift */, F65000000000000000000012 /* BinauralProfileAsset.swift */, F64000000000000000000011 /* OutputDeviceCalibration.swift */, E6D0000000000000000009A1 /* BinauralResampledAssetCache.swift */, E6D0000000000000000009A2 /* HeadphoneLiveEditPlanner.swift */,); path = Routing; sourceTree = "<group>"; };
 		B113B0000000000000000050 /* Backup */ = {
 			isa = PBXGroup;
 			children = (
@@ -1677,6 +1681,7 @@
 				F62000000000000000000001 /* OutputDeviceProfileConfiguration.swift in Sources */,
 				F65000000000000000000001 /* HeadphoneDeviceProfileConfiguration.swift in Sources */,
 				B50000000000000000000002 /* HeadphoneModelResearchLibrary.swift in Sources */,
+				E13A00000000000000000005 /* HeadphoneResponseFitting.swift in Sources */,
 				B40000000000000000000001 /* BlindABXValidation.swift in Sources */,
 				B40000000000000000000091 /* RoomCorrectionABX.swift in Sources */,
 				F65000000000000000000002 /* BinauralProfileAsset.swift in Sources */,
@@ -1946,6 +1951,7 @@
 				E11D00000000000000000084 /* SignalGeneratorSettingsTests.swift in Sources */,
 				E11D00000000000000000062 /* MeasurementFormatsTests.swift in Sources */,
 				E13A00000000000000000003 /* FrequencyResponseImporterTests.swift in Sources */,
+				E13A00000000000000000007 /* HeadphoneResponseFittingTests.swift in Sources */,
 				E11D0000000000000000F002 /* MeasurementOverlaysTests.swift in Sources */,
 				A100000000000000000E1301 /* PresetInterchangeTests.swift in Sources */,
 				A100000000000000000E1303 /* MultichannelCalibrationDesignerTests.swift in Sources */,

@@ -13,7 +13,6 @@ struct RoomCorrectionTargetEditorCard: View {
     @State private var importing = false
     @State private var importCategory: TargetCategory = .room
     @State private var showAll = false
-    @EnvironmentObject private var featureFlags: FeatureFlags
     private let library = TargetLibrary()
 
     var body: some View {
@@ -39,15 +38,10 @@ struct RoomCorrectionTargetEditorCard: View {
                 let access = url.startAccessingSecurityScopedResource()
                 defer { if access { url.stopAccessingSecurityScopedResource() } }
                 let name = url.deletingPathExtension().lastPathComponent
-                let record: TargetRecord
-                if featureFlags.isEnabled(.byoImport) {
-                    let curve = try FrequencyResponseImporter.parse(Data(contentsOf: url), sourceName: name)
-                    record = try FrequencyResponseImporter.targetRecord(
-                        from: curve, useOfferedTarget: curve.offeredTarget != nil, category: importCategory)
-                    message = curve.issues.isEmpty ? nil : "\(curve.issues.count) lines skipped; first: \(curve.issues[0])"
-                } else {
-                    record = try TargetLibrary.importREW(Data(contentsOf: url), name: name)
-                }
+                let curve = try FrequencyResponseImporter.parse(Data(contentsOf: url), sourceName: name)
+                let record = try FrequencyResponseImporter.targetRecord(
+                    from: curve, useOfferedTarget: curve.offeredTarget != nil, category: importCategory)
+                message = curve.issues.isEmpty ? nil : "\(curve.issues.count) lines skipped; first: \(curve.issues[0])"
                 try library.save(record)
                 report = library.loadAll()
                 target = record.curve
@@ -64,28 +58,21 @@ struct RoomCorrectionTargetEditorCard: View {
                 get: { target?.id }, set: { id in
                     if let record = report.records.first(where: { $0.id == id }) {
                         target = record.curve; shaping = record.shaping
-                        if featureFlags.isEnabled(.byoImport) {
-                            message = TargetLibrary.crossCategoryCaution(record, picker: .room)
-                        }
+                        message = TargetLibrary.crossCategoryCaution(record, picker: .room)
                     }
                 })) {
-                ForEach(featureFlags.isEnabled(.byoImport)
-                    ? pickerRecords : report.records) { Text($0.name).tag(Optional($0.id)) }
+                ForEach(pickerRecords) { Text($0.name).tag(Optional($0.id)) }
             }
-            if featureFlags.isEnabled(.byoImport) { Toggle("Show all", isOn: $showAll).toggleStyle(.checkbox) }
+            Toggle("Show all", isOn: $showAll).toggleStyle(.checkbox)
             Button("Duplicate") { act { if let t = target { _ = try library.duplicate(TargetRecord(curve: t, shaping: shaping)) } } }
                 .disabled(target == nil)
             Button("Save") {
                 act { if let t = target, !TargetLibrary.isBuiltIn(t.id) { try library.save(TargetRecord(curve: t, shaping: shaping)) } }
             }.disabled(target == nil || target.map { TargetLibrary.isBuiltIn($0.id) } ?? true)
-            if featureFlags.isEnabled(.byoImport) {
-                Menu("Import target...") {
-                    ForEach(TargetCategory.allCases, id: \.self) { category in
-                        Button("As \(category.rawValue) target") { importCategory = category; importing = true }
-                    }
+            Menu("Import target...") {
+                ForEach(TargetCategory.allCases, id: \.self) { category in
+                    Button("As \(category.rawValue) target") { importCategory = category; importing = true }
                 }
-            } else {
-                Button("Import REW...") { importing = true }
             }
             Button("Copy REW text") {
                 if let t = target {
