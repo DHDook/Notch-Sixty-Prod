@@ -486,4 +486,38 @@ final class LiveTreatmentArmTests: XCTestCase {
         try controller.replaceConfiguration(requested)
         XCTAssertFalse(controller.configuration.enabled, "only the ARM switch turns live output on")
     }
+
+    // E4 S29: overnight power follows the arm; it is never held while disarmed.
+    private final class CountingBackend: PowerAssertionBackend {
+        var created = 0
+        var live = 0
+        func create(reason: String) -> UInt32? { created += 1; live += 1; return UInt32(created) }
+        func release(_ id: UInt32) { live -= 1 }
+    }
+
+    func testOvernightPowerIsNotHeldWhileDisarmedWhateverTheToggle() {
+        let (controller, _) = makeController()
+        let backend = CountingBackend()
+        controller.attachOvernightPower(OvernightPowerAssertion(backend: backend))
+        controller.overnightMode = true
+        XCTAssertFalse(controller.isHoldingOvernightPower)
+        XCTAssertEqual(backend.created, 0)
+    }
+
+    func testFailedArmLeavesNoOvernightPowerHeld() {
+        let (controller, _) = makeController()
+        let backend = CountingBackend()
+        controller.attachOvernightPower(OvernightPowerAssertion(backend: backend))
+        controller.overnightMode = true
+        XCTAssertThrowsError(try controller.setEnabled(true))
+        XCTAssertFalse(controller.isHoldingOvernightPower)
+        XCTAssertEqual(backend.live, 0)
+    }
+
+    func testDetachingOvernightPowerReleasesAndNilIsInert() {
+        let (controller, _) = makeController()
+        controller.attachOvernightPower(nil)
+        controller.overnightMode = true
+        XCTAssertFalse(controller.isHoldingOvernightPower)
+    }
 }
