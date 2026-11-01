@@ -6,6 +6,7 @@
 
 #include "N60Biquad.h"
 #include "N60ActiveQuietZone.h"
+#include "N60FeedForwardLive.h"
 #include "N60Convolution.h"
 #include "N60Crossover.h"
 #include "N60Dynamics.h"
@@ -543,6 +544,68 @@ void N60RenderKernelDetachHowlGuard(N60RenderKernel * _Nonnull kernel);
 void N60RenderKernelRearmHowlGuard(N60RenderKernel * _Nonnull kernel);
 uint64_t N60RenderKernelHowlGuardTripCount(const N60RenderKernel * _Nonnull kernel);
 uint32_t N60RenderKernelHowlGuardLastTrip(const N60RenderKernel * _Nonnull kernel);
+/// E4 S25b live feed-forward (flag e4.feedforward-live; Swift decides, the kernel never reads the flag).
+/// Dark by default: nothing is attached, so the render path is unchanged and bit-identical. The filter
+/// is `N60FeedForwardLive` (S25a, zero added delay). Its anti-noise joins the tonal canceller before the
+/// howl guard and the dead-man lease, so a howl trip or a lapsed lease silences it as well.
+/// - Attach/Detach: control plane with IO stopped (they allocate). Attach at the same rate keeps weights.
+/// - SetWeights, Arm, Disarm: control plane, any time (lock-free into the filter). Arm is the S24 lead
+///   gate and is refused (not armed) on a short lead, no weights, or a trip. Nothing arms by itself.
+/// - PushReference: single producer (the reference pump). The ring is indexed by output frame: the pump
+///   writes the reference for output frames startIndex... already resampled to the output clock, and the
+///   render thread consumes frame i exactly when it renders output frame i, so the ring adds no latency
+///   of its own (what the pump writes ahead of the callback is the pump's lead, not an added delay).
+///   OutputIndex is the read position; late frames are dropped, gaps zero-filled.
+/// - Two callbacks in a row without a whole block of reference, while armed, count as the reference lost.
+/// - PrepareFeedForward: render thread, once per callback after BeginRender and before the frames
+///   (the bridge does this). A callback longer than 8192 frames is silent past that point.
+/// - GetFeedForwardDriveFrame: this frame's feed-forward anti-noise as sent to the speakers, so the
+///   control plane can leave it out of the error-side echo removal (the second drive signal).
+/// Allocation: Attach only. Synchronisation: the reference ring and counters are single-writer atomics.
+/// Attach, Detach and Reset rewrite the ring indices: IO and the reference pump must both be stopped.
+/// Attach at the same rate keeps the filter (peakLimit is ignored; call Reset to clear state).
+/// Stereo only; the reference is already resampled to the output clock. If processing is inactive
+/// the filter still runs but its output is dropped (drive frames read zero).
+typedef struct {
+    bool attached;
+    N60FeedForwardLiveStatus filter;
+    uint64_t outputIndex;           /* output frames passed since attach/reset (the reference ring's read index) */
+    uint32_t referenceAheadFrames;  /* how far the pump has written beyond outputIndex */
+    uint64_t referenceUnderruns;    /* callbacks whose reference block was not fully supplied */
+} N60RenderKernelFeedForwardLiveStatus;
+
+bool N60RenderKernelAttachFeedForwardLive(N60RenderKernel * _Nonnull kernel, double sampleRate, double peakLimit);
+void N60RenderKernelDetachFeedForwardLive(N60RenderKernel * _Nonnull kernel);
+bool N60RenderKernelFeedForwardLiveAttached(const N60RenderKernel * _Nonnull kernel);
+bool N60RenderKernelFeedForwardLiveSetWeights(
+    N60RenderKernel * _Nonnull kernel,
+    const float * _Nonnull left,
+    const float * _Nonnull right,
+    uint32_t count
+);
+uint32_t N60RenderKernelFeedForwardLiveArm(
+    N60RenderKernel * _Nonnull kernel,
+    double leadSeconds,
+    double requiredSeconds
+);
+void N60RenderKernelFeedForwardLiveDisarm(N60RenderKernel * _Nonnull kernel);
+void N60RenderKernelFeedForwardLiveMarkReferenceLost(N60RenderKernel * _Nonnull kernel);
+N60RenderKernelFeedForwardLiveStatus N60RenderKernelFeedForwardLiveGetStatus(
+    const N60RenderKernel * _Nonnull kernel
+);
+uint64_t N60RenderKernelFeedForwardLivePushReference(
+    N60RenderKernel * _Nonnull kernel,
+    uint64_t startIndex,
+    const float * _Nonnull samples,
+    uint32_t count
+);
+uint64_t N60RenderKernelFeedForwardLiveOutputIndex(const N60RenderKernel * _Nonnull kernel);
+void N60RenderKernelPrepareFeedForward(N60RenderKernel * _Nonnull kernel, uint32_t frames);
+void N60RenderKernelGetFeedForwardDriveFrame(
+    const N60RenderKernel * _Nonnull kernel,
+    float * _Nonnull left,
+    float * _Nonnull right
+);
 void N60RenderKernelGetActiveQuietZoneReferenceFrame(
     const N60RenderKernel * _Nonnull kernel,
     float * _Nonnull left,

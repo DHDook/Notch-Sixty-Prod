@@ -191,3 +191,48 @@ enum FeedForwardLeakageStabilityCheck {
         return .passed(loopGain: loop)
     }
 }
+
+/// The live feed-forward arm gate (E4 S25b). Pure policy: whether the filter may be armed. Arming is
+/// the only way anti-noise plays, so every condition must hold, and the written live-output
+/// authorisation is an explicit input that nothing in the app sets yet (the bench path owns it).
+/// Owner decision of 31 Oct 2026 (S25 option 2): the model-error bound in the stability check is
+/// accepted as the gate once echo removal has been verified at `minimumVerifiedRemovalDecibels`.
+enum FeedForwardLiveArmGate {
+    static let minimumVerifiedRemovalDecibels = 20.0
+
+    struct Inputs: Equatable, Sendable {
+        var featureEnabled: Bool
+        /// The separate live-output approval (QuietZoneFeedForwardAcceptanceGate.liveOutputAuthorization).
+        var liveOutputAuthorized: Bool
+        var stability: FeedForwardLeakageStabilityCheck.Verdict
+        /// Echo removal verified in the shadow, dB; nil when not yet verified.
+        var verifiedRemovalDecibels: Double?
+        var leadSeconds: Double
+        var requiredLeadSeconds: Double
+        var referenceLive: Bool
+    }
+
+    enum Decision: Equatable, Sendable {
+        case allowed
+        case refused(String)
+
+        var isAllowed: Bool { self == .allowed }
+    }
+
+    static func decide(_ input: Inputs) -> Decision {
+        guard input.featureEnabled else { return .refused("feed-forward live is off") }
+        guard input.liveOutputAuthorized else { return .refused("live output is not authorised") }
+        switch input.stability {
+        case .passed: break
+        case .notChecked(let reason), .refused(let reason): return .refused(reason)
+        }
+        guard let removal = input.verifiedRemovalDecibels, removal.isFinite,
+              removal >= minimumVerifiedRemovalDecibels
+        else { return .refused("echo removal is not verified at 20 dB") }
+        guard input.leadSeconds.isFinite, input.requiredLeadSeconds.isFinite,
+              input.leadSeconds >= input.requiredLeadSeconds
+        else { return .refused("reference lead is shorter than the budget") }
+        guard input.referenceLive else { return .refused("reference stream is not live") }
+        return .allowed
+    }
+}

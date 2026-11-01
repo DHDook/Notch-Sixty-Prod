@@ -915,6 +915,57 @@ final class CoreAudioTransportSession {
         return N60RealtimeAudioBridgeHowlGuardTripCount(bridge)
     }
 
+    /// E4 S25b: live feed-forward. Dark unless `feedForwardLiveFeatureEnabled`, which Swift sets from
+    /// `e4.feedforward-live`. Nothing here arms: arming goes through FeedForwardLiveArmGate.
+    var feedForwardLiveFeatureEnabled = false
+
+    /// Control plane, IO stopped. No-op (false) while the feature is off.
+    @discardableResult
+    func attachFeedForwardLive(peakLimit: Double = 0.5) -> Bool {
+        guard feedForwardLiveFeatureEnabled, let bridge, !isOutputStarted, !isCaptureStarted else { return false }
+        return N60RealtimeAudioBridgeAttachFeedForwardLive(bridge, outputFormat.sampleRate, peakLimit)
+    }
+
+    func detachFeedForwardLive() {
+        guard let bridge, !isOutputStarted, !isCaptureStarted else { return }
+        N60RealtimeAudioBridgeDetachFeedForwardLive(bridge)
+    }
+
+    func setFeedForwardLiveWeights(left: [Float], right: [Float]) -> Bool {
+        guard let bridge, !left.isEmpty, left.count == right.count else { return false }
+        return N60RealtimeAudioBridgeSetFeedForwardLiveWeights(bridge, left, right, UInt32(left.count))
+    }
+
+    /// Returns the N60FeedForwardLiveArm* code; nil when the gate refuses or the feature is off.
+    func armFeedForwardLive(gate: FeedForwardLiveArmGate.Inputs) -> UInt32? {
+        guard feedForwardLiveFeatureEnabled, let bridge, FeedForwardLiveArmGate.decide(gate).isAllowed
+        else { return nil }
+        return N60RealtimeAudioBridgeArmFeedForwardLive(bridge, gate.leadSeconds, gate.requiredLeadSeconds)
+    }
+
+    func disarmFeedForwardLive() {
+        guard let bridge else { return }
+        N60RealtimeAudioBridgeDisarmFeedForwardLive(bridge)
+    }
+
+    func markFeedForwardLiveReferenceLost() {
+        guard let bridge else { return }
+        N60RealtimeAudioBridgeMarkFeedForwardLiveReferenceLost(bridge)
+    }
+
+    func feedForwardLiveStatus() -> N60RenderKernelFeedForwardLiveStatus? {
+        guard let bridge else { return nil }
+        return N60RealtimeAudioBridgeGetFeedForwardLiveStatus(bridge)
+    }
+
+    /// Returns the next output index expected; the caller (the reference pump) places samples by it.
+    func pushFeedForwardLiveReference(startIndex: UInt64, samples: [Float]) -> UInt64? {
+        guard let bridge, !samples.isEmpty else { return nil }
+        return N60RealtimeAudioBridgePushFeedForwardLiveReference(
+            bridge, startIndex, samples, UInt32(samples.count)
+        )
+    }
+
     /// E4 S15: clears a latched trip so the anti-noise can fade back in. Called when arming.
     func rearmHowlGuard() {
         guard let bridge else { return }
@@ -1390,6 +1441,12 @@ final class CoreAudioTransportSession {
             // may be rendering. The first publish of a session always happens fully stopped.
             if !isOutputStarted && !isCaptureStarted,
                !N60RealtimeAudioBridgeAttachHowlGuard(bridge, outputFormat.sampleRate) {
+                throw CoreAudioTransportError.dspGraphPublicationFailed
+            }
+            // E4 S25b: the live feed-forward filter, only behind its flag. Attached idle: it plays
+            // nothing until the gated Arm.
+            if !isOutputStarted && !isCaptureStarted, feedForwardLiveFeatureEnabled,
+               !N60RealtimeAudioBridgeAttachFeedForwardLive(bridge, outputFormat.sampleRate, 0.5) {
                 throw CoreAudioTransportError.dspGraphPublicationFailed
             }
             guard N60RealtimeAudioBridgePublishDSPGraph(bridge, snapshot) else {

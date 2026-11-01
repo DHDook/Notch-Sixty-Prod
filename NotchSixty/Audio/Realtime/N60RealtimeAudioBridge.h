@@ -100,7 +100,8 @@ typedef struct {
 
 /// E4 S22b1: one render callback's place in the speaker-drive stream. `firstFrameIndex` counts
 /// frames written to the drive ring since the bridge was reset (the index only increases); `outputHostTime` is the
-/// output buffer's host time (0 when the callback had none).
+/// output buffer's host time (0 when the callback had none). `reserved` is, with the live feed-forward
+/// attached, the low 32 bits of its output index at the start of this callback (E4 S25b), else 0.
 typedef struct {
     uint64_t outputHostTime;
     uint64_t firstFrameIndex;
@@ -316,10 +317,46 @@ uint32_t N60RealtimeAudioBridgeReadSpeakerDriveFrames(
     N60AmbientPlaybackReferenceFrame * _Nonnull destination,
     uint32_t capacityFrames
 );
+/// E4 S25b: as ReadSpeakerDriveFrames, and the feed-forward anti-noise alone at the same indices
+/// (the second drive signal; error-side echo removal leaves it out). Advances the read index once.
+uint32_t N60RealtimeAudioBridgeReadSpeakerDriveFramesWithFeedForward(
+    N60RealtimeAudioBridge * _Nonnull bridge,
+    N60AmbientPlaybackReferenceFrame * _Nonnull destination,
+    N60AmbientPlaybackReferenceFrame * _Nonnull feedForwardDestination,
+    uint32_t capacityFrames
+);
 uint32_t N60RealtimeAudioBridgeReadSpeakerDriveAnchors(
     N60RealtimeAudioBridge * _Nonnull bridge,
     N60SpeakerDriveAnchor * _Nonnull destination,
     uint32_t capacityAnchors
+);
+
+/// E4 S25b: live feed-forward (flag e4.feedforward-live; see N60RenderKernel.h). Attach/Detach with IO
+/// stopped; the rest are lock-free. Nothing here arms the filter: Arm is the only path, and it is gated
+/// in Swift by the written authorisation (FeedForwardLiveArmGate).
+bool N60RealtimeAudioBridgeAttachFeedForwardLive(N60RealtimeAudioBridge * _Nonnull bridge, double sampleRate, double peakLimit);
+void N60RealtimeAudioBridgeDetachFeedForwardLive(N60RealtimeAudioBridge * _Nonnull bridge);
+bool N60RealtimeAudioBridgeSetFeedForwardLiveWeights(
+    N60RealtimeAudioBridge * _Nonnull bridge,
+    const float * _Nonnull left,
+    const float * _Nonnull right,
+    uint32_t count
+);
+uint32_t N60RealtimeAudioBridgeArmFeedForwardLive(
+    N60RealtimeAudioBridge * _Nonnull bridge,
+    double leadSeconds,
+    double requiredSeconds
+);
+void N60RealtimeAudioBridgeDisarmFeedForwardLive(N60RealtimeAudioBridge * _Nonnull bridge);
+void N60RealtimeAudioBridgeMarkFeedForwardLiveReferenceLost(N60RealtimeAudioBridge * _Nonnull bridge);
+N60RenderKernelFeedForwardLiveStatus N60RealtimeAudioBridgeGetFeedForwardLiveStatus(
+    const N60RealtimeAudioBridge * _Nonnull bridge
+);
+uint64_t N60RealtimeAudioBridgePushFeedForwardLiveReference(
+    N60RealtimeAudioBridge * _Nonnull bridge,
+    uint64_t startIndex,
+    const float * _Nonnull samples,
+    uint32_t count
 );
 
 /// E4 S14: dead-man lease on the anti-noise (see N60RenderKernel.h). Control plane only.

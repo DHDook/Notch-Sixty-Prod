@@ -936,8 +936,10 @@ N60RealtimeAudioBridge *N60RealtimeAudioBridgeCreate(uint32_t capacityFrames) {
         return NULL;
     }
 
+    // E4 S25b: the second half is the feed-forward anti-noise alone, at the same ring indices (the
+    // second drive signal for error-side echo removal).
     bridge->speakerDriveFrames = calloc(
-        N60_SPEAKER_DRIVE_CAPACITY_FRAMES,
+        2u * N60_SPEAKER_DRIVE_CAPACITY_FRAMES,
         sizeof(N60AmbientPlaybackReferenceFrame)
     );
     bridge->speakerDriveAnchors = calloc(
@@ -1520,6 +1522,33 @@ uint32_t N60RealtimeAudioBridgeReadSpeakerDriveFrames(
     if (first < n) {
         memcpy(destination + first, bridge->speakerDriveFrames,
                (n - first) * sizeof(N60AmbientPlaybackReferenceFrame));
+    }
+    atomic_store_explicit(&bridge->speakerDriveReadIndex, rd + n, memory_order_release);
+    return n;
+}
+
+uint32_t N60RealtimeAudioBridgeReadSpeakerDriveFramesWithFeedForward(
+    N60RealtimeAudioBridge *bridge,
+    N60AmbientPlaybackReferenceFrame *destination,
+    N60AmbientPlaybackReferenceFrame *feedForwardDestination,
+    uint32_t capacityFrames
+) {
+    if (bridge == NULL || destination == NULL || feedForwardDestination == NULL || capacityFrames == 0) return 0;
+    uint64_t rd = atomic_load_explicit(&bridge->speakerDriveReadIndex, memory_order_relaxed);
+    uint64_t wr = atomic_load_explicit(&bridge->speakerDriveWriteIndex, memory_order_acquire);
+    uint64_t avail = wr >= rd ? wr - rd : 0;
+    uint32_t n = capacityFrames < avail ? capacityFrames : (uint32_t)avail;
+    if (n == 0) return 0;
+    uint32_t ring = (uint32_t)rd & (N60_SPEAKER_DRIVE_CAPACITY_FRAMES - 1u);
+    uint32_t first = n;
+    if (first > N60_SPEAKER_DRIVE_CAPACITY_FRAMES - ring) first = N60_SPEAKER_DRIVE_CAPACITY_FRAMES - ring;
+    const N60AmbientPlaybackReferenceFrame *total = bridge->speakerDriveFrames;
+    const N60AmbientPlaybackReferenceFrame *feedForward = bridge->speakerDriveFrames + N60_SPEAKER_DRIVE_CAPACITY_FRAMES;
+    memcpy(destination, total + ring, first * sizeof(N60AmbientPlaybackReferenceFrame));
+    memcpy(feedForwardDestination, feedForward + ring, first * sizeof(N60AmbientPlaybackReferenceFrame));
+    if (first < n) {
+        memcpy(destination + first, total, (n - first) * sizeof(N60AmbientPlaybackReferenceFrame));
+        memcpy(feedForwardDestination + first, feedForward, (n - first) * sizeof(N60AmbientPlaybackReferenceFrame));
     }
     atomic_store_explicit(&bridge->speakerDriveReadIndex, rd + n, memory_order_release);
     return n;
@@ -2610,6 +2639,12 @@ OSStatus N60OutputIOProc(
             : 0u;
     N60RenderKernelRenderContext renderContext =
         N60RenderKernelBeginRenderAtHostTime(bridge->renderKernel, outputHostTime);
+    // E4 S25b: the live feed-forward anti-noise for the whole block (a no-op unless attached).
+    const uint32_t feedForwardOutputIndex =
+        (uint32_t)N60RenderKernelFeedForwardLiveOutputIndex(bridge->renderKernel);
+    // The reference timeline follows the output clock: a short (underrun) block still advances it by
+    // the full callback, so the pump stays aligned; only framesToRead of it are played.
+    N60RenderKernelPrepareFeedForward(bridge->renderKernel, frameCount);
     UInt32 renderedFrames = 0;
     uint32_t ringReadIndex =
         (uint32_t)(readIndex % bridge->capacityFrames);
@@ -2791,6 +2826,14 @@ OSStatus N60OutputIOProc(
             if (frameIndex < speakerDriveFramesToWrite) {
                 bridge->speakerDriveFrames[speakerDriveRingIndex] =
                     (N60AmbientPlaybackReferenceFrame){ finalLeft, finalRight };
+                {
+                    N60AmbientPlaybackReferenceFrame feedForwardDrive;
+                    N60RenderKernelGetFeedForwardDriveFrame(
+                        bridge->renderKernel, &feedForwardDrive.left, &feedForwardDrive.right);
+                    bridge->speakerDriveFrames[
+                        N60_SPEAKER_DRIVE_CAPACITY_FRAMES + speakerDriveRingIndex
+                    ] = feedForwardDrive;
+                }
                 speakerDriveRingIndex =
                     (speakerDriveRingIndex + 1u) & (N60_SPEAKER_DRIVE_CAPACITY_FRAMES - 1u);
             }
@@ -3089,6 +3132,14 @@ OSStatus N60OutputIOProc(
             if (frameIndex < speakerDriveFramesToWrite) {
                 bridge->speakerDriveFrames[speakerDriveRingIndex] =
                     (N60AmbientPlaybackReferenceFrame){ finalLeft, finalRight };
+                {
+                    N60AmbientPlaybackReferenceFrame feedForwardDrive;
+                    N60RenderKernelGetFeedForwardDriveFrame(
+                        bridge->renderKernel, &feedForwardDrive.left, &feedForwardDrive.right);
+                    bridge->speakerDriveFrames[
+                        N60_SPEAKER_DRIVE_CAPACITY_FRAMES + speakerDriveRingIndex
+                    ] = feedForwardDrive;
+                }
                 speakerDriveRingIndex =
                     (speakerDriveRingIndex + 1u) & (N60_SPEAKER_DRIVE_CAPACITY_FRAMES - 1u);
             }
@@ -3194,7 +3245,7 @@ OSStatus N60OutputIOProc(
             bridge->speakerDriveAnchors[
                 speakerDriveAnchorWriteIndex & (N60_SPEAKER_DRIVE_ANCHOR_CAPACITY - 1u)
             ] = (N60SpeakerDriveAnchor){
-                outputHostTime, speakerDriveWriteIndex, speakerDriveFramesToWrite, 0u
+                outputHostTime, speakerDriveWriteIndex, speakerDriveFramesToWrite, feedForwardOutputIndex
             };
             atomic_store_explicit(
                 &bridge->speakerDriveAnchorWriteIndex,
@@ -3308,4 +3359,37 @@ OSStatus N60OutputIOProc(
         );
     }
     return noErr;
+}
+
+// E4 S25b: live feed-forward passthroughs (see N60RenderKernel.h). Attach/Detach need IO stopped.
+bool N60RealtimeAudioBridgeAttachFeedForwardLive(N60RealtimeAudioBridge *bridge, double sampleRate, double peakLimit) {
+    return bridge != NULL && N60RenderKernelAttachFeedForwardLive(bridge->renderKernel, sampleRate, peakLimit);
+}
+void N60RealtimeAudioBridgeDetachFeedForwardLive(N60RealtimeAudioBridge *bridge) {
+    if (bridge != NULL) N60RenderKernelDetachFeedForwardLive(bridge->renderKernel);
+}
+bool N60RealtimeAudioBridgeSetFeedForwardLiveWeights(N60RealtimeAudioBridge *bridge, const float *left,
+                                                     const float *right, uint32_t count) {
+    return bridge != NULL && N60RenderKernelFeedForwardLiveSetWeights(bridge->renderKernel, left, right, count);
+}
+uint32_t N60RealtimeAudioBridgeArmFeedForwardLive(N60RealtimeAudioBridge *bridge, double leadSeconds,
+                                                  double requiredSeconds) {
+    if (bridge == NULL) return N60FeedForwardLiveArmNoWeights;
+    return N60RenderKernelFeedForwardLiveArm(bridge->renderKernel, leadSeconds, requiredSeconds);
+}
+void N60RealtimeAudioBridgeDisarmFeedForwardLive(N60RealtimeAudioBridge *bridge) {
+    if (bridge != NULL) N60RenderKernelFeedForwardLiveDisarm(bridge->renderKernel);
+}
+void N60RealtimeAudioBridgeMarkFeedForwardLiveReferenceLost(N60RealtimeAudioBridge *bridge) {
+    if (bridge != NULL) N60RenderKernelFeedForwardLiveMarkReferenceLost(bridge->renderKernel);
+}
+N60RenderKernelFeedForwardLiveStatus N60RealtimeAudioBridgeGetFeedForwardLiveStatus(
+    const N60RealtimeAudioBridge *bridge) {
+    N60RenderKernelFeedForwardLiveStatus empty = {0};
+    return bridge == NULL ? empty : N60RenderKernelFeedForwardLiveGetStatus(bridge->renderKernel);
+}
+uint64_t N60RealtimeAudioBridgePushFeedForwardLiveReference(N60RealtimeAudioBridge *bridge, uint64_t startIndex,
+                                                            const float *samples, uint32_t count) {
+    return bridge == NULL ? startIndex
+        : N60RenderKernelFeedForwardLivePushReference(bridge->renderKernel, startIndex, samples, count);
 }

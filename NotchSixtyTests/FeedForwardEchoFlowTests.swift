@@ -364,4 +364,34 @@ private final class EchoSimulatedPair: QuietZoneFeedForwardPairCapturing {
         next += count
         return (frames, error)
     }
+
+    // MARK: Live arm gate (E4 S25b)
+
+    private func gateInputs() -> FeedForwardLiveArmGate.Inputs {
+        .init(featureEnabled: true, liveOutputAuthorized: true, stability: .passed(loopGain: 0.05),
+              verifiedRemovalDecibels: 24, leadSeconds: 0.010, requiredLeadSeconds: 0.005, referenceLive: true)
+    }
+
+    func testArmGateAllowsOnlyWhenEveryConditionHolds() {
+        XCTAssertTrue(FeedForwardLiveArmGate.decide(gateInputs()).isAllowed)
+        var a = gateInputs(); a.featureEnabled = false
+        var b = gateInputs(); b.liveOutputAuthorized = false
+        var c = gateInputs(); c.stability = .refused("loop")
+        var d = gateInputs(); d.stability = .notChecked("not checked")
+        var e = gateInputs(); e.verifiedRemovalDecibels = 19.9
+        var f = gateInputs(); f.verifiedRemovalDecibels = nil
+        var g = gateInputs(); g.leadSeconds = 0.004
+        var h = gateInputs(); h.referenceLive = false
+        var i = gateInputs(); i.leadSeconds = .nan
+        for input in [a, b, c, d, e, f, g, h, i] {
+            XCTAssertFalse(FeedForwardLiveArmGate.decide(input).isAllowed, "\(input)")
+        }
+    }
+
+    func testArmGateExactBoundaries() {
+        var input = gateInputs()
+        input.verifiedRemovalDecibels = 20
+        input.leadSeconds = input.requiredLeadSeconds
+        XCTAssertTrue(FeedForwardLiveArmGate.decide(input).isAllowed)
+    }
 }
