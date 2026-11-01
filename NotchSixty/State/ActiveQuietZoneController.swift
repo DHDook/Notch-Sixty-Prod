@@ -139,6 +139,27 @@ final class ActiveQuietZoneController: ObservableObject {
         excursionLimitsProvider = provider
     }
 
+    /// E4 S29 (`e4.overnight`): keeps the Mac awake while armed with overnight on. Nil with the flag
+    /// off, in which case nothing is held. The caller reads the flag.
+    private var overnightPower: OvernightPowerAssertion?
+
+    /// The user's overnight choice. Never persisted; it only matters while armed.
+    @Published var overnightMode = false {
+        didSet { syncOvernightPower() }
+    }
+
+    var isHoldingOvernightPower: Bool { overnightPower?.isHeld ?? false }
+
+    func attachOvernightPower(_ assertion: OvernightPowerAssertion?) {
+        overnightPower?.release()
+        overnightPower = assertion
+        syncOvernightPower()
+    }
+
+    private func syncOvernightPower() {
+        overnightPower?.update(wanted: arm.isArmed && configuration.enabled && overnightMode)
+    }
+
     func attachEarnedCap(_ policy: EarnedCapPolicy?) {
         earnedCap = policy
         policy?.onEvent = { [weak self] kind, message in
@@ -593,8 +614,10 @@ final class ActiveQuietZoneController: ObservableObject {
                 syncLowLatencyOutputProfile()
                 faultLatched = false
                 try start()
+                syncOvernightPower()
             } catch {
                 arm.disarm(.user)
+                overnightPower?.release()
                 throw error
             }
         } else {
@@ -679,6 +702,7 @@ final class ActiveQuietZoneController: ObservableObject {
     /// Called once per armed-to-disarmed transition: ramps the anti-noise out and returns the
     /// controller to the disabled state. The persisted configuration is already disabled.
     private func applyDisarm(_ reason: LiveTreatmentDisarmReason) {
+        overnightPower?.release()
         flightRecorder.recordDisarm(reason)
         adaptiveLive?.reset()
         earnedCap?.noteDisarm(reason)
@@ -758,6 +782,7 @@ final class ActiveQuietZoneController: ObservableObject {
     }
 
     func stop(fadeMilliseconds: Double? = nil) {
+        overnightPower?.release()
         if spatialSurveyActive { cancelSpatialSurvey() }
         task?.cancel()
         task = nil

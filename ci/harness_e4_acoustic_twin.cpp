@@ -11,6 +11,7 @@
 #include <complex>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <vector>
 
@@ -418,15 +419,17 @@ static void test_guard_nonfinite_mic(double fs) {
 }
 
 /* Soak: drift, a moving listener and a fault sequence over a long run. */
-static void test_soak(double fs) {
+static void test_soak(double fs, int chunks = 30, const char *label = "soak") {
     const double hz = 80.0;
     Config c;
     c.fs = fs;
     c.micNoiseDBFS = -100;
     c.clockDriftPPM = 20.0;
     c.sources = {Source{hz, 0.02, 0.4, {-2, 0}, {0.002, 0}}};
-    c.listenerVelocity = {0.002, 0};
-    c.temperatureRateCPerS = 0.02;
+    /* Long runs keep the same total glide and temperature swing as the 5-minute soak. */
+    const double slow = chunks > 30 ? 30.0 / chunks : 1.0;
+    c.listenerVelocity = {0.002 * slow, 0};
+    c.temperatureRateCPerS = 0.02 * slow;
     c.modes = {Mode{60.0, 6.0, 4.0}};
     N60AdaptiveTonalConfig tc = N60AdaptiveTonalConfigDefault(fs);
     tc.toneCount = 1;
@@ -435,20 +438,38 @@ static void test_soak(double fs) {
     Loop l(c, tc, 256);
     const double base = 0.02 / 3.0;
     double worst = -1e9;
+    int poor = 0, poorTail = 0;
     l.run(10.0, hz);
-    for (int minute = 0; minute < 30; ++minute) {
+    for (int minute = 0; minute < chunks; ++minute) {
         const double a = l.run(10.0, hz);
-        worst = std::fmax(worst, 20 * std::log10(a / base));
-        if (minute == 10) l.plant.inject(Fault::VolumeChange, -4.0);
-        if (minute == 20) l.plant.inject(Fault::MicMoved, -0.3);
+        const double db = 20 * std::log10(a / base);
+        worst = std::fmax(worst, db);
+        if (db > -10.0) { ++poor; if (minute >= chunks - chunks / 10) ++poorTail; }
+        if (getenv("TWIN_TRACE") && minute % (chunks / 40 + 1) == 0) printf("   chunk %d: %.1f dB\n", minute, 20 * std::log10(a / base));
+        if (minute == chunks / 3) l.plant.inject(Fault::VolumeChange, -4.0);
+        if (minute == 2 * chunks / 3) l.plant.inject(Fault::MicMoved, -0.3);
     }
-    CHECK(worst < -10.0, "%.0f Hz: soak held only %.1f dB through drift and faults", fs, -worst);
-    printf("  soak %6.0f Hz: worst-case %.1f dB\n", fs, worst);
+    if (chunks > 30) {
+        /* Long run: the canceller may lose lock briefly after a fault or a slow mode crossing, but must
+         * stay bounded (never amplify past +10 dB), spend under 15% of the run above -10 dB, and be
+         * back in lock for the last tenth. */
+        CHECK(worst < 10.0, "%.0f Hz: %s amplified to %.1f dB", fs, label, worst);
+        CHECK(poor < chunks * 15 / 100, "%.0f Hz: %s out of lock for %d of %d chunks", fs, label, poor, chunks);
+        CHECK(poorTail == 0, "%.0f Hz: %s not locked in the final tenth", fs, label);
+        printf("  %s out-of-lock chunks: %d of %d\n", label, poor, chunks);
+    } else {
+        CHECK(worst < -10.0, "%.0f Hz: %s held only %.1f dB through drift and faults", fs, label, -worst);
+    }
+    printf("  %s %6.0f Hz: worst-case %.1f dB\n", label, fs, worst);
 }
 
 int main(int argc, char **argv) {
     const bool soak = argc > 1 && std::strcmp(argv[1], "--soak") == 0;
-    if (soak) {
+    /* E4 S29: --overnight simulates 8 hours (2880 chunks of 10 s) at 48 kHz; --overnight=N uses N chunks. */
+    if (argc > 1 && std::strncmp(argv[1], "--overnight", 11) == 0) {
+        const int chunks = argv[1][11] == '=' ? std::atoi(argv[1] + 12) : 2880;
+        test_soak(48000, chunks, "overnight");
+    } else if (soak) {
         test_soak(48000);
         test_soak(384000);
     } else {

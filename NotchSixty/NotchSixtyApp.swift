@@ -160,6 +160,9 @@ final class ProductController: ObservableObject {
                 linkProvider: { [weak audioEngine] in audioEngine?.adaptiveTonalLink }
             ))
         }
+        if FeatureFlags().isEnabled(.overnight) {
+            activeQuietZone.attachOvernightPower(OvernightPowerAssertion())
+        }
         if adaptiveTonalLive, FeatureFlags().isEnabled(.earnedCap) {
             activeQuietZone.attachEarnedCap(EarnedCapPolicy(store: EarnedCapStore()))
             // E4 S21: limits from the bass-management crossover and the speaker's role. A
