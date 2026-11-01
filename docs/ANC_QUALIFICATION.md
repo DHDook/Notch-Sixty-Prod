@@ -76,6 +76,40 @@ with the independent measurement microphone (not the error microphone).
 7. **Publishing.** For reviewers: room dimensions, rig, positions (diagram), noise source,
    per-band results, and this method. Raw captures stay available on request.
 
+### 4.1 Reviewer kit (E4 S31)
+
+Reviewers can reproduce the published numbers with the same noise sources.
+
+1. **Generate the noise files.** `python3 ci/generate_reviewer_noise.py OUTPUT_DIR` writes mono
+   16-bit WAVs at 48 and 96 kHz (60 s each) and `SHA256SUMS.txt`: `fan_tone` (47 Hz with
+   harmonics 2-6), `drifting_compressor` (60 Hz with harmonics 2-4, drifting +/-3 Hz over 40 s)
+   and `broadband_lf` (white noise low-passed near 120 Hz). The files are generated from fixed
+   constants, so the same script gives byte-identical files; check them against `SHA256SUMS.txt`.
+   They are published as GitHub release assets (the upload step is a separate change).
+2. **Play and position.** Play one file at a time from a source speaker at the listening
+   position's far wall, at a level that puts the microphone at the primary seat (A) at least 6 dB
+   above the room floor in the 20-150 Hz band. Positions are A, a neighbouring seat (B), then A
+   again, visited in that order within 30 minutes, microphone returned to the same point.
+3. **Capture at each visit.** Ten seconds of ANC-off, then ten seconds of ANC-on, per file, at 48
+   kHz and at the interface's highest rate. Note the room, rig and calibration file.
+4. **Export.** After each ANC-on capture choose "Export measurement report" (Settings,
+   diagnostics). It holds the S16 verified readout, the S28 predictions and the S17 safety log
+   as JSON. Attach the report to the results.
+5. **Compare.** Per-band reduction is the third-octave ANC-off minus ANC-on level (step 6 above);
+   it should match the S16 readout within the stated measurement uncertainty.
+
+Published reduction numbers (PLACEHOLDERS: not measured; filled in after the bench run in E22
+S11, and no figure here is a claim until then):
+
+| Noise file | Rate | Seat A reduction (dB) | Seat B change (dB) | S28 predicted (dB) |
+| --- | --- | --- | --- | --- |
+| fan_tone | 48 kHz | TBD (bench pending) | TBD | TBD |
+| fan_tone | 96 kHz | TBD (bench pending) | TBD | TBD |
+| drifting_compressor | 48 kHz | TBD (bench pending) | TBD | TBD |
+| drifting_compressor | 96 kHz | TBD (bench pending) | TBD | TBD |
+| broadband_lf | 48 kHz | TBD (bench pending) | TBD | TBD |
+| broadband_lf | 96 kHz | TBD (bench pending) | TBD | TBD |
+
 ## 5. Authorisation criteria
 
 `LiveANCAuthorisation` (E4 S3) is the only code that can decide live ANC is qualified. It governs broadband feed-forward and adaptive output. The fixed tonal canceller stays live

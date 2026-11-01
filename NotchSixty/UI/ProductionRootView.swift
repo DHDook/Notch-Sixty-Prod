@@ -762,6 +762,19 @@ private struct ProductSafeLaunchSheet: View {
                     )
                 }
                 .buttonStyle(.glass)
+
+                if FeatureFlags().isEnabled(.noiseSurvey) {
+                    Button {
+                        let report = product.measurementReport(version: version, build: build)
+                        if let data = try? report.jsonData(), let text = String(data: data, encoding: .utf8) {
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general.setString(text, forType: .string)
+                        }
+                    } label: {
+                        Label("Export Measurement Report", systemImage: "waveform.badge.magnifyingglass")
+                    }
+                    .buttonStyle(.glass)
+                }
             }
 
             Text(
