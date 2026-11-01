@@ -119,7 +119,8 @@ final class RoomCorrectionDeployController: ObservableObject {
                     sweepFrames: candidate.sweepFrames, sampleRate: candidate.sampleRate)
                 let measured = try RoomCorrectionPostApplyVerifier.bandedResponse(
                     impulse: response.impulse, originFrame: response.arrivalFrames,
-                    preFrames: Int(candidate.lanePlan.declaredLatencyFrames),
+                    // The deconvolved peak sits after the start of a minimum-phase filter's response; keep that early energy in the window.
+                    preFrames: Int(candidate.lanePlan.declaredLatencyFrames) + Int(0.005 * candidate.sampleRate),
                     sampleRate: candidate.sampleRate, criteria: criteria)
                 let report = RoomCorrectionPostApplyVerifier.evaluate(
                     designID: candidate.designID, sampleRate: candidate.sampleRate, predicted: candidate.predicted,

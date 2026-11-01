@@ -9,12 +9,16 @@ import Foundation
 enum SystemSetupVerificationError: Error, Equatable, LocalizedError {
     /// The live-graph measurement is not wired to this build of the flow.
     case measurementUnavailable
+    /// The check could not run (no playback, no microphone, capture failed); the reason is the text.
+    case couldNotMeasure(String)
     case timedOut(seconds: Double)
 
     var errorDescription: String? {
         switch self {
         case .measurementUnavailable:
             return "The result could not be measured again in this build, so the correction is saved as Not verified."
+        case .couldNotMeasure(let reason):
+            return reason + " The correction is saved as Not verified."
         case .timedOut(let seconds):
             return "The check did not finish in \(Int(seconds)) seconds, so the correction was reverted."
         }
@@ -28,11 +32,37 @@ protocol SystemSetupPostApplyMeasuring: AnyObject {
     func measureMainSeat(predictedErrorDB: Double, sampleRate: Double) async throws -> SystemSetupVerificationReport
 }
 
-/// Used until the live-graph host is wired: verification is reported as unavailable, never as passed.
+/// E24 S3a: wraps E10 S8's `RoomCorrectionDeployController` with the live-graph trial host. The candidate comes from the
+/// flow (`candidateProvider`), because only the flow knows the deployed design and the main seat's measurement.
 @MainActor
-final class UnconnectedSystemSetupPostApplyMeasurer: SystemSetupPostApplyMeasuring {
+final class SystemSetupPostApplyMeasurer: SystemSetupPostApplyMeasuring {
+    var candidateProvider: (@MainActor (Double) throws -> RoomCorrectionDeployCandidate)?
+    private let controller: RoomCorrectionDeployController
+    private let host: RoomCorrectionTrialHost
+    private let timeoutSeconds: Double
+
+    init(host: RoomCorrectionTrialHost, controller: RoomCorrectionDeployController? = nil,
+         timeoutSeconds: Double = 50) {
+        self.host = host
+        self.controller = controller ?? RoomCorrectionDeployController()
+        self.timeoutSeconds = timeoutSeconds
+    }
+
     func measureMainSeat(predictedErrorDB: Double, sampleRate: Double) async throws -> SystemSetupVerificationReport {
-        throw SystemSetupVerificationError.measurementUnavailable
+        guard let candidateProvider else { throw SystemSetupVerificationError.couldNotMeasure("No correction is ready to check.") }
+        let candidate: RoomCorrectionDeployCandidate
+        do { candidate = try candidateProvider(sampleRate) } catch {
+            throw SystemSetupVerificationError.couldNotMeasure(error.localizedDescription)
+        }
+        let report = await controller.verify(candidate, host: host, timeoutSeconds: timeoutSeconds)
+        switch report.outcome {
+        case .cancelled: throw CancellationError()
+        case .timedOut: throw SystemSetupVerificationError.timedOut(seconds: timeoutSeconds)
+        case .captureFailed, .analysisFailed:
+            throw SystemSetupVerificationError.couldNotMeasure(report.detail)
+        default: break
+        }
+        return SystemSetupVerificationReport(postApply: report, predictedErrorDB: predictedErrorDB)
     }
 }
 
