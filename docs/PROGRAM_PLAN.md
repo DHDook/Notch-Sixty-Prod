@@ -61,7 +61,7 @@ platforms; E6 (the unified graph) is the critical path, because eleven later epi
 an epic, slices go in their written order. Competitive features come first (what buyers and
 reviewers compare with Dirac and REW), then engine depth, then breadth.
 
-1. E4 class-leading roadmap, S24–S31 in written order (owner, 31 Oct 2026; S26 and S29 are skipped until the owner decides camera head position and the overnight power assertion; slices waiting on E8 or the bench are skipped until ready)
+1. E4 class-leading roadmap, S24–S31 in written order (owner, 31 Oct 2026; E4 S11 moved to E22 on 1 Nov 2026; S26 and S29 are skipped until the owner decides camera head position and the overnight power assertion; slices waiting on E8 or the bench are skipped until ready)
 2. E12 Guided setup and information architecture, S7 `e12/ship` (#243, needs-owner)
 3. E11 Measurement suite, S10 `e11/overlays-and-ship` (needs-owner)
 4. E9 Multichannel protection and FIR parity, FIR limits: 262,144-tap program FIR and the 32,768-tap cap
@@ -70,11 +70,10 @@ reviewers compare with Dirac and REW), then engine depth, then breadth.
 7. E13 Headphones complete, remainder (bring-your-own target and AutoEq import merged in #295 and #299)
 8. E7 384 kHz everywhere
 9. E20 Engine performance
-10. E4 S11 Re-qualify ANC on the unified graph
-11. E21 Portable C++ core, remaining items
-12. E14 Upmixer, E15 Device-aware profiles, E17 Export and dither, E16 Automation and remote
-13. E23 Legacy engine removal
-14. E22 Hardware validation and E18 Launch readiness (owner-led)
+10. E21 Portable C++ core, remaining items
+11. E14 Upmixer, E15 Device-aware profiles, E17 Export and dither, E16 Automation and remote
+12. E23 Legacy engine removal
+13. E22 Hardware validation and E18 Launch readiness (owner-led)
 
 ## Phase 1 — Consolidate and qualify
 
@@ -313,6 +312,7 @@ Owner decision, 18 Oct 2026: there is no bench access for now, so every bench ch
 
 - [ ] Collect every epic's "Bench checks" list and the E3 cases H01–H08 into one campaign
 - [ ] Run E4 S8 (PR97 timing calibration and PR99 verification) and record results against `docs/ANC_QUALIFICATION.md`
+- [ ] Run E4 S11 (owner, 1 Nov 2026: moved here from the E4 execution order): repeat S8 on the unified E6 graph, then fill the placeholder reduction table in `docs/ANC_QUALIFICATION.md` §4.1 from the S31 reviewer-kit noise files
 - [ ] Run the remaining bench checks at every rate from 44.1 to 384 kHz
 - [ ] Feed the results into the live-authorisation slices (E4 S10, E19), which still need real evidence
 

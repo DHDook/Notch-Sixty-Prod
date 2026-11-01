@@ -544,6 +544,20 @@ if selected e4_fxlms_reference; then
     fi
     echo "::endgroup::"
 fi
+if selected e4_reviewer_noise; then
+    echo "::group::e4_reviewer_noise"
+    # E4 S31: the reviewer noise generator is byte-identical across runs.
+    RN="$OUT/reviewer_noise"
+    rm -rf "$RN"
+    if python3 -I ci/generate_reviewer_noise.py "$RN/a" --seconds 1 \
+        && python3 -I ci/generate_reviewer_noise.py "$RN/b" --seconds 1 \
+        && [ "$(ls "$RN/a" | wc -l)" -eq 7 ] && diff -r "$RN/a" "$RN/b"; then
+        passed+=(e4_reviewer_noise)
+    else
+        failed+=(e4_reviewer_noise)
+    fi
+    echo "::endgroup::"
+fi
 
 echo
 echo "Harnesses passed: ${#passed[@]}"

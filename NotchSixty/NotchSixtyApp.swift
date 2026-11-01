@@ -608,8 +608,21 @@ final class ProductController: ObservableObject {
             "Room Correction: \(audioEngine.roomCorrectionConfiguration.enabled ? "On" : "Off")",
             "DSP Latency: \(latency)",
             "Quarantined Plug-ins: \(audioUnitHost.quarantinedComponentCount)",
-        ] + recovery.diagnosticsLines() + activeQuietZone.flightRecorder.diagnosticsLines())
+        ] + recovery.diagnosticsLines() + activeQuietZone.flightRecorder.diagnosticsLines()
+            + measurementReport(version: version, build: build).diagnosticsLines)
             .joined(separator: "\n")
+    }
+
+    /// E4 S31: the reviewer measurement report (S16 readout, S28 predictions, S17 log). The noise survey is
+    /// not yet held by a controller, so predictions are empty until it is wired to its card.
+    func measurementReport(version: String, build: String) -> ANCMeasurementReport {
+        ANCMeasurementReport(
+            version: version,
+            build: build,
+            verifiedReadout: activeQuietZone.verifiedReadout,
+            survey: nil,
+            recorder: activeQuietZone.flightRecorder
+        )
     }
 
     private func observeAudioEngine() {
