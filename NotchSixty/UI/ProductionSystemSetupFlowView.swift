@@ -41,21 +41,21 @@ final class SystemSetupFlowModel: ObservableObject {
 
     init(engine: AudioIOEngine, profiles: ProductProfileController, microphone: RoomCorrectionCalibrationController,
          calibration: MultichannelCalibrationController,
-         noise: SystemSetupNoisePlaying? = nil,
-         verifier: SystemSetupPostApplyMeasuring? = nil,
-         sessions: SystemSetupSessionStore = SystemSetupSessionStore(directory: SystemSetupSessionStore.defaultDirectory())) {
-        self.verifier = verifier ?? UnconnectedSystemSetupPostApplyMeasurer()
+         services: ProductionSystemSetupServices? = nil,
+         sessions: SystemSetupSessionStore = SystemSetupSessionStore(directory: SystemSetupSessionStore.defaultDirectory()),
+         roomProjectsDirectory: URL = SystemSetupSessionStore.defaultDirectory()
+             .appendingPathComponent("RoomCorrection", isDirectory: true)) {
+        let services = services ?? ProductionSystemSetupServices.production(engine: engine)
+        self.verifier = services.verifier
         self.sessions = sessions
         self.engine = engine
         self.profiles = profiles
         self.microphone = microphone
         self.calibration = calibration
-        self.noise = noise ?? EngineSystemSetupNoisePlayer(host: engine)
+        self.noise = services.noise
         self.roomProjects = RoomCorrectionProjectController(
             profiles: profiles,
-            store: RoomCorrectionProjectStore(
-                rootDirectory: SystemSetupSessionStore.defaultDirectory()
-                    .appendingPathComponent("RoomCorrection", isDirectory: true)))
+            store: RoomCorrectionProjectStore(rootDirectory: roomProjectsDirectory))
     }
 
     var choices: SystemSetupChoices { flow.choices }
@@ -568,7 +568,8 @@ struct ProductionSystemSetupFlowView: View {
          microphone: RoomCorrectionCalibrationController, calibration: MultichannelCalibrationController,
          advisor: RoomTreatmentAdvisorController) {
         _model = StateObject(wrappedValue: SystemSetupFlowModel(
-            engine: engine, profiles: profiles, microphone: microphone, calibration: calibration))
+            engine: engine, profiles: profiles, microphone: microphone, calibration: calibration,
+            services: ProductionSystemSetupServices.production(engine: engine)))
         self.advisor = advisor
     }
 

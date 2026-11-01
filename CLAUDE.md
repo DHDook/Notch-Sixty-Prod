@@ -8,7 +8,7 @@
   builds one slice in a fresh context), realtime-reviewer (Sonnet), and code-scout,
   build-test-runner, plan-tracker, pr-writer (Haiku). `/next` itself runs on Sonnet.
 
-**Current focus:** E4 (speaker ANC to class-leading), class-leading roadmap: next S25 follow-ups (S31 software built, PR open; S11 moved to E22; S29 wiring #307, S29 built dark #305, S26b built dark #304, S25c merged #303), execution order: E4 S24–S31, E9 FIR limits, E19 MIMO software, E8, E13 remainder, E7, E20, E21, E14–E17, E23, E22/E18
+**Current focus:** E24 (room correction completion), slice 1 of 9: level and noise session (S0 harness built, PR open)
 <!-- plan-tracker keeps the line above current -->
 
 @AGENTS.md

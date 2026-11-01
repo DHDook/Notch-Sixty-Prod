@@ -1,0 +1,165 @@
+import XCTest
+@testable import NotchSixty
+
+/// E24 S0: drives the production setup-window model through all ten steps against the synthetic
+/// 2.1 reference room (3 seats). Steps that are known to be broken are wrapped in a strict
+/// `XCTExpectFailure` naming the slice that fixes them, so a fix cannot land without flipping
+/// its marker.
+@MainActor
+final class SystemSetupEndToEndTests: XCTestCase {
+    /// Q5: all eight standard rates. `N60_E24_RATES=44100,48000,384000` narrows the list.
+    static var rates: [Double] {
+        if let list = ProcessInfo.processInfo.environment["N60_E24_RATES"] {
+            let parsed = list.split(separator: ",").compactMap { Double($0) }
+            if !parsed.isEmpty { return parsed }
+        }
+        return [44_100, 48_000, 88_200, 96_000, 176_400, 192_000, 352_800, 384_000]
+    }
+
+    private func strict() -> XCTExpectedFailure.Options {
+        let options = XCTExpectedFailure.Options()
+        options.isStrict = true
+        return options
+    }
+
+    private func waitForVerification(_ model: SystemSetupFlowModel) async {
+        for _ in 0..<600 where model.isVerifying { try? await Task.sleep(for: .milliseconds(50)) }
+    }
+
+    func testAllTenStepsAtEveryRate() async throws {
+        for rate in Self.rates {
+            let rig = try OfflineSetupRig(rate: rate)
+            defer { rig.tearDown() }
+            try rig.installTwoPointOneProfile()
+            let model = rig.model
+            let label = "\(rate) Hz"
+
+            model.begin()
+            XCTAssertEqual(model.step, .output, label)
+            XCTAssertEqual(model.choices.sampleRate, rate, label)
+            model.chooseOutput(uid: OfflineSetupRig.outputUID)
+            model.next()
+            XCTAssertEqual(model.step, .topology, "\(label): \(model.message ?? "")")
+
+            model.chooseTopology(.twoPointOne)
+            model.next()
+            XCTAssertEqual(model.step, .microphone, "\(label): \(model.message ?? "")")
+
+            // Level: playing noise needs a running session (E24 S1).
+            model.selectMicrophone(uid: OfflineSetupRig.inputUID)
+            model.toggleNoise()
+            XCTExpectFailure("Level noise with idle playback: fixed by E24 S1", options: strict()) {
+                XCTAssertTrue(model.noiseIsPlaying, label)
+            }
+            model.acceptSweepLevel(measuredSPLdBC: 75)
+            model.next()
+            XCTAssertEqual(model.step, .room, "\(label): \(model.message ?? "")")
+            model.next()
+            XCTAssertEqual(model.step, .measure, "\(label): \(model.message ?? "")")
+
+            // Measure: 3 seats x (L, R, sub) through the real analysis path.
+            model.prepareMeasure()
+            model.addSeat()
+            model.addSeat()
+            await model.measureAll()
+            XCTAssertEqual(model.measureProgress.next == nil, true, "\(label): \(model.message ?? "")")
+            XCTAssertEqual(model.choices.measurementIDs.count, 3, label)
+            XCTAssertEqual(rig.transports.made, 9, label)
+            model.next()
+            XCTAssertEqual(model.step, .alignment, "\(label): \(model.message ?? "")")
+
+            await model.computeAlignment()
+            XCTAssertNotNil(model.alignment, "\(label): \(model.message ?? "")")
+            model.applyAlignment()
+            XCTAssertTrue(model.choices.alignmentApplied, label)
+            model.next()
+            XCTAssertEqual(model.step, .bass, "\(label): \(model.message ?? "")")
+
+            model.computeBass()
+            XCTAssertNotNil(model.bass, "\(label): \(model.message ?? "")")
+            model.applyBass()
+            XCTAssertTrue(model.choices.bassApplied, label)
+            model.next()
+            XCTAssertEqual(model.step, .correction, "\(label): \(model.message ?? "")")
+
+            model.prepareCorrection()
+            XCTAssertTrue(model.correctionIsPrepared, "\(label): \(model.message ?? "")")
+            model.applyCorrection()
+            XCTAssertTrue(model.choices.correctionApplied, "\(label): \(model.message ?? "")")
+            model.next()
+            XCTAssertEqual(model.step, .verify, "\(label): \(model.message ?? "")")
+
+            // Verify can never pass today (E24 S3); it ends "Not verified".
+            model.runVerification()
+            await waitForVerification(model)
+            XCTAssertNotNil(model.choices.verificationPassed, label)
+            XCTExpectFailure("Verify pass: fixed by E24 S3", options: strict()) {
+                XCTAssertEqual(model.choices.verificationPassed, true, label)
+            }
+            XCTExpectFailure("Mixed phase never produced by the wizard: fixed by E24 S3", options: strict()) {
+                XCTAssertEqual(model.choices.designKind, .mixedPhase, label)
+            }
+            model.next()
+            XCTAssertEqual(model.step, .save, "\(label): \(model.message ?? "")")
+
+            model.setProfileName("E24 reference \(Int(rate))")
+            model.save()
+            XCTAssertNotNil(model.savedProfileName, "\(label): \(model.message ?? "")")
+        }
+    }
+
+    /// A disabled Measure Next must say why (E24 S2).
+    func testDisabledMeasureCarriesAReason() throws {
+        let rig = try OfflineSetupRig(rate: 48_000, permission: .denied)
+        defer { rig.tearDown() }
+        try rig.installTwoPointOneProfile()
+        rig.calibration.prepareForUse()
+        XCTAssertFalse(rig.calibration.canMeasure)
+        XCTExpectFailure("Disabled measure reason text: fixed by E24 S2", options: strict()) {
+            XCTAssertNotNil(rig.calibration.lastErrorDescription)
+        }
+    }
+}
+
+/// Each injectable service, called once through the production factory against the offline
+/// boundary, must not report that it is unavailable.
+@MainActor
+final class ProductionWiringTests: XCTestCase {
+    private func strict() -> XCTExpectedFailure.Options {
+        let options = XCTExpectedFailure.Options()
+        options.isStrict = true
+        return options
+    }
+
+    func testNoisePlayerDoesNotReportUnavailable() throws {
+        let rig = try OfflineSetupRig(rate: 48_000)
+        defer { rig.tearDown() }
+        let services = ProductionSystemSetupServices.production(engine: rig.engine)
+        var failure: Error?
+        do { try services.noise.start(SystemSetupLevelPlan().generatorSettings(), selection: .lane(0)) } catch { failure = error }
+        XCTExpectFailure("Noise player is unavailable with idle playback: fixed by E24 S1", options: strict()) {
+            XCTAssertNil(failure)
+        }
+    }
+
+    func testVerifierDoesNotReportUnavailable() async throws {
+        let rig = try OfflineSetupRig(rate: 48_000)
+        defer { rig.tearDown() }
+        let services = ProductionSystemSetupServices.production(engine: rig.engine)
+        var failure: Error?
+        do { _ = try await services.verifier.measureMainSeat(predictedErrorDB: 1, sampleRate: 48_000) } catch { failure = error }
+        XCTExpectFailure("Post-apply measurer is an Unconnected stand-in: fixed by E24 S3", options: strict()) {
+            XCTAssertNil(failure)
+        }
+    }
+
+    func testGeneratorPlayWithIdlePlaybackIsRefused() throws {
+        let rig = try OfflineSetupRig(rate: 48_000)
+        defer { rig.tearDown() }
+        var failure: Error?
+        do { try rig.engine.setLiveGenerator(SystemSetupLevelPlan().generatorSettings(), selection: .lane(0)) } catch { failure = error }
+        XCTExpectFailure("Generator Play with idle playback: fixed by E24 S1", options: strict()) {
+            XCTAssertNil(failure)
+        }
+    }
+}
