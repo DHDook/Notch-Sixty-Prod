@@ -497,6 +497,10 @@
 		E8B0000000000000000000AC /* CamillaDSPRouting.swift in Sources */ = {isa = PBXBuildFile; fileRef = E8B00000000000000000000C /* CamillaDSPRouting.swift */; };
 		E8B0000000000000000000AD /* SpeakerRoutingPipeline.swift in Sources */ = {isa = PBXBuildFile; fileRef = E8B00000000000000000000D /* SpeakerRoutingPipeline.swift */; };
 		E8B0000000000000000000AE /* CamillaDSPRoutingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E8B00000000000000000000E /* CamillaDSPRoutingTests.swift */; };
+		E4F7000000000000000000C4 /* QuietZoneVirtualMicrophone.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4F7000000000000000000C2 /* QuietZoneVirtualMicrophone.swift */; };
+		E4F7000000000000000000D4 /* QuietZoneZones.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4F7000000000000000000D2 /* QuietZoneZones.swift */; };
+		E4F7000000000000000000C5 /* QuietZoneVirtualMicrophoneTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4F7000000000000000000C3 /* QuietZoneVirtualMicrophoneTests.swift */; };
+		E4F7000000000000000000D5 /* QuietZoneZonesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4F7000000000000000000D3 /* QuietZoneZonesTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -1036,6 +1040,10 @@
 		E8B00000000000000000000C /* CamillaDSPRouting.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CamillaDSPRouting.swift; sourceTree = "<group>"; };
 		E8B00000000000000000000D /* SpeakerRoutingPipeline.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerRoutingPipeline.swift; sourceTree = "<group>"; };
 		E8B00000000000000000000E /* CamillaDSPRoutingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CamillaDSPRoutingTests.swift; sourceTree = "<group>"; };
+		E4F7000000000000000000C2 /* QuietZoneVirtualMicrophone.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuietZoneVirtualMicrophone.swift; sourceTree = "<group>"; };
+		E4F7000000000000000000D2 /* QuietZoneZones.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuietZoneZones.swift; sourceTree = "<group>"; };
+		E4F7000000000000000000C3 /* QuietZoneVirtualMicrophoneTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuietZoneVirtualMicrophoneTests.swift; sourceTree = "<group>"; };
+		E4F7000000000000000000D3 /* QuietZoneZonesTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuietZoneZonesTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -1228,6 +1236,8 @@
 				E4F700000000000000000053 /* QuietZoneUpstreamSurveyTests.swift */,
 				E4F7000000000000000000A3 /* QuietZoneNoiseSurveyTests.swift */,
 				E4F7000000000000000000B3 /* ConversationUnmaskingTests.swift */,
+				E4F7000000000000000000C3 /* QuietZoneVirtualMicrophoneTests.swift */,
+				E4F7000000000000000000D3 /* QuietZoneZonesTests.swift */,
 				E4F300000000000000000014 /* QuietZoneFeedForwardShadowTests.swift */,
 				E4D000000000000000000013 /* AdaptiveQuietZoneShadowTests.swift */,
 				E4A000000000000000000012 /* LiveTreatmentArmTests.swift */,
@@ -1430,6 +1440,8 @@
 				E4F700000000000000000052 /* QuietZoneUpstreamSurvey.swift */,
 				E4F7000000000000000000A2 /* QuietZoneNoiseSurvey.swift */,
 				E4F7000000000000000000B2 /* ConversationUnmasking.swift */,
+				E4F7000000000000000000C2 /* QuietZoneVirtualMicrophone.swift */,
+				E4F7000000000000000000D2 /* QuietZoneZones.swift */,
 				E4F200000000000000000012 /* QuietZoneFeedForwardNoiseSurvey.swift */,
 				E4F300000000000000000011 /* QuietZoneFeedForwardShadowPlan.swift */,
 				F96300000000000000000012 /* QuietZoneFeedForwardRehearsal.swift */,
@@ -1851,6 +1863,8 @@
 				E4F700000000000000000062 /* QuietZoneUpstreamSurvey.swift in Sources */,
 				E4F7000000000000000000A4 /* QuietZoneNoiseSurvey.swift in Sources */,
 				E4F7000000000000000000B4 /* ConversationUnmasking.swift in Sources */,
+				E4F7000000000000000000C4 /* QuietZoneVirtualMicrophone.swift in Sources */,
+				E4F7000000000000000000D4 /* QuietZoneZones.swift in Sources */,
 				E4F200000000000000000002 /* QuietZoneFeedForwardNoiseSurvey.swift in Sources */,
 				E4F200000000000000000003 /* QuietZoneFeedForwardSurveyController.swift in Sources */,
 				E4F200000000000000000004 /* ProductionFeedForwardDesignSurveyCard.swift in Sources */,
@@ -2007,6 +2021,8 @@
 				E4F700000000000000000063 /* QuietZoneUpstreamSurveyTests.swift in Sources */,
 				E4F7000000000000000000A5 /* QuietZoneNoiseSurveyTests.swift in Sources */,
 				E4F7000000000000000000B5 /* ConversationUnmaskingTests.swift in Sources */,
+				E4F7000000000000000000C5 /* QuietZoneVirtualMicrophoneTests.swift in Sources */,
+				E4F7000000000000000000D5 /* QuietZoneZonesTests.swift in Sources */,
 				E4F300000000000000000004 /* QuietZoneFeedForwardShadowTests.swift in Sources */,
 				E4D000000000000000000003 /* AdaptiveQuietZoneShadowTests.swift in Sources */,
 				E4A000000000000000000002 /* LiveTreatmentArmTests.swift in Sources */,
