@@ -703,9 +703,7 @@ final class MultichannelCalibrationController: ObservableObject {
             ?? engine.bassManagementConfiguration.enabled
         let measuredAt = measurements.compactMap { $0.channel.capturedAt }.max() ?? Date()
         do {
-            let result = try await Task.detached(
-                priority: .userInitiated
-            ) { [designer, predictionVerifier] in
+            let result = try await Self.runOnLargeStack { [designer, predictionVerifier] in
                 let design = try designer.design(
                     profile: profile,
                     bassManagementEnabled: bassEnabled,
@@ -723,7 +721,7 @@ final class MultichannelCalibrationController: ObservableObject {
                     target: resolvedTarget
                 )
                 return (design, prediction)
-            }.value
+            }
             latestDesign = result.0
             latestPrediction = result.1
             state = .reviewing
@@ -732,6 +730,22 @@ final class MultichannelCalibrationController: ObservableObject {
         } catch {
             fail(error)
             throw error
+        }
+    }
+
+    /// The calibration matrix is a large by-value C struct (hundreds of KB), which overflows the
+    /// default 512 KB stack of a concurrency-pool thread. Run the design on a dedicated thread with
+    /// a generous stack instead; this is off the realtime path.
+    nonisolated private static func runOnLargeStack<T: Sendable>(
+        _ work: @escaping @Sendable () throws -> T
+    ) async throws -> T {
+        try await withCheckedThrowingContinuation { continuation in
+            let thread = Thread {
+                continuation.resume(with: Result { try work() })
+            }
+            thread.stackSize = 32 * 1024 * 1024
+            thread.qualityOfService = .userInitiated
+            thread.start()
         }
     }
 
