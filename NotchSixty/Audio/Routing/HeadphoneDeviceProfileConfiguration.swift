@@ -287,6 +287,9 @@ struct HeadphoneDeviceProfileConfiguration: Codable, Equatable, Sendable {
     var name = "Headphones"
     var outputDeviceUID: String?
     var targetCurve: HeadphoneTargetCurve = .neutral
+    /// E13 S2: the library target a one-click fit used (recorded with `targetCurve = .custom`); not rendered.
+    var fittedTargetID: UUID?
+    var fittedTargetName: String?
     var headroomAttenuationDB = 6.0
     var left = HeadphoneChannelCorrection()
     var right = HeadphoneChannelCorrection()
