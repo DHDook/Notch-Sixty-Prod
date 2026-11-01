@@ -26,7 +26,7 @@ with them, these decisions win until E1/E21 update `AGENTS.md`.
 
 ## Epics at a glance
 
-Twenty-four epics in four phases close every gap in the analysis and set the engine up for other
+Twenty-five epics in four phases close every gap in the analysis and set the engine up for other
 platforms; E6 (the unified graph) is the critical path, because eleven later epics build on it.
 
 | ID | Epic | Phase | Depends on | Where the work happens | Done when |
@@ -47,6 +47,7 @@ platforms; E6 (the unified graph) is the critical path, because eleven later epi
 | E11 | Measurement suite | 3 | E1 (live overlays on the graph after E6) | Claude Code + bench | Results match REW on the same captures |
 | E12 | Guided setup and IA | 3 | E10, E11 | Claude Code (Mac) | New user reaches a verified calibration in one flow |
 | E24 | Room correction completion | 3 | E10, E11, E12 | Claude Code (Mac) | Every measure, correction and verify step is reachable from the shipped UI through production wiring; the wizard passes end to end at all eight rates |
+| E25 | Outputs and speaker arrangement, one-DAC support | 3 | E24, E12, E8 | Claude Code (Mac) | A 5.1 system on a two-channel DAC through a receiver sets up end to end from the UI; every feature states how it works, or why not, on each configuration |
 | E13 | Headphones complete | 4 | E6, E7 | Claude Code (Mac) | BYO files to PEQ in one click; live tuning |
 | E14 | Upmixer | 4 | E6 | Claude Code + bench | Stereo plays on 5.1–7.1.4 layouts |
 | E15 | Device-aware profiles | 4 | E6 | Claude Code (Mac) | Profile follows the output when the user opts in |
@@ -56,15 +57,15 @@ platforms; E6 (the unified graph) is the critical path, because eleven later epi
 | E22 | Hardware validation | 4 | all software epics | Bench | Every deferred bench check passes on `main` at every rate |
 | E18 | Launch readiness | 4 | all | Owner + Claude Code | Signed, reviewed, accessible, competitive ABX done, App Store live |
 
-## Execution order (owner, 31 Oct 2026; E24 added 1 Nov 2026)
+## Execution order (owner, 31 Oct 2026; E24 and E25 added 1 Nov 2026)
 
 `/next` works down this list: the first epic with open slices whose dependencies are met. Within
 an epic, slices go in their written order. Competitive features come first (what buyers and
 reviewers compare with Dirac and REW), then engine depth, then breadth.
 
-0. E24 Room correction completion, S0–S3 (owner, 1 Nov 2026, to be confirmed in the E24 plan PR; numbered 0 so later item numbers stay valid)
+0. E24 Room correction completion, all of S0–S8 in written order (owner, 1 Nov 2026; S4–S8 no longer wait for E4; numbered 0 so later item numbers stay valid)
+   - then E25 Outputs and speaker arrangement, S1–S8 in written order, before item 1 (owner, 1 Nov 2026)
 1. E4 class-leading roadmap, S24–S31 in written order (owner, 31 Oct 2026; E4 S11 moved to E22 on 1 Nov 2026; S26 and S29 are skipped until the owner decides camera head position and the overnight power assertion; slices waiting on E8 or the bench are skipped until ready)
-   - then E24 S4–S8, before item 2 (owner to confirm)
 2. E12 Guided setup and information architecture, S7 `e12/ship` (#243, needs-owner)
 3. E11 Measurement suite, S10 `e11/overlays-and-ship` (needs-owner)
 4. E9 Multichannel protection and FIR parity, FIR limits: 262,144-tap program FIR and the 32,768-tap cap
@@ -278,6 +279,21 @@ the shipped UI.
 - [ ] E12 leftovers: shared microphone and seat cards; wizard multi-mic pass; target shaping persists
 - [ ] Acceptance: harness green with no expected-fails; owner smoke checklist
 - [ ] Process safeguards (two kinds of done, deferral ledger, ship gate) and a ledger audit of E4, E6, E8, E9, E13
+
+### E25 Outputs and speaker arrangement, one-DAC support (owner, 1 Nov 2026)
+
+Plan: `docs/epics/E25.md`. Output channels and the speaker arrangement become separate concepts,
+so a 5.1 system on one two-channel DAC (for example into an AV receiver) gets every feature two
+channels allow, and the UI gives a reason for each one that it cannot.
+
+- [ ] Arrangement model, compiler (two channels stay on the stereo session), capability matrix and profile migration
+- [ ] Mono bass on the pair with selectable family, slope and frequency; per-feed trim, delay and polarity
+- [ ] Wizard Outputs and Speakers steps; the flow creates the arrangement from the UI; session schema 2
+- [ ] Alignment, bass and correction adapt to how bass is handled; receiver advice
+- [ ] Capability text on every surface that offers a choice
+- [ ] Quiet Zone and MIMO eligibility on two channels (never live outside authorisation)
+- [ ] Fold-down of 5.1/7.1 from a wider program source to the two feeds (owner: in v1)
+- [ ] Owner configuration end to end at eight rates; flag removed
 
 ## Phase 4 — Complete scope and launch
 
