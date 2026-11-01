@@ -63,6 +63,10 @@ final class SystemSetupFlowModel: ObservableObject {
             profiles: profiles,
             store: RoomCorrectionProjectStore(rootDirectory: roomProjectsDirectory))
         noise.setStopHandler { [weak self] reason in self?.noiseEndedOnItsOwn(reason) }
+        services.measurer.candidateProvider = { [weak self] rate in
+            guard let self else { throw SystemSetupVerificationError.couldNotMeasure("The setup window closed.") }
+            return try self.verificationCandidate(sampleRate: rate)
+        }
     }
 
     var choices: SystemSetupChoices { flow.choices }
@@ -425,6 +429,31 @@ final class SystemSetupFlowModel: ObservableObject {
     /// The main seat's predicted error after correction, from the Correction step.
     var predictedMainSeatErrorDB: Double { seatPredictions.first?.rmsErrorAfterDB ?? 0 }
 
+    /// What the live check compares: the published filter's prediction at the main seat (its measured room through the
+    /// deployed taps) against a sweep played through the running graph. Minimum phase only; mixed phase is E24 S3b.
+    func verificationCandidate(sampleRate rate: Double) throws -> RoomCorrectionDeployCandidate {
+        guard let design = roomProjects.selectedDesign, let mainSeat = roomProjects.positions.first else {
+            throw SystemSetupVerificationError.couldNotMeasure("No correction design is selected.")
+        }
+        let filter = try design.deploymentFilter()
+        let criteria = RoomCorrectionPostApplyCriteria()
+        let impulse = mainSeat.left.impulseResponse
+        var peak = 0
+        for index in impulse.indices where abs(impulse[index]) > abs(impulse[peak]) { peak = index }
+        let stage = RoomCorrectionLaneStage(laneMask: 1, taps: filter.leftTaps)
+        let predicted = try RoomCorrectionPostApplyVerifier.prediction(
+            roomImpulse: impulse, roomArrivalFrames: Double(peak), stage: stage,
+            declaredLatencyFrames: filter.declaredLatencyFrames, sampleRate: rate, criteria: criteria)
+        let plan = RoomCorrectionLanePlan(
+            designID: design.id, sampleRate: rate, stages: [stage],
+            declaredLatencyFrames: filter.declaredLatencyFrames, laneCount: 2)
+        return RoomCorrectionDeployCandidate(
+            designID: design.id.uuidString, kind: .minimumPhase, sampleRate: rate, lanePlan: plan,
+            latencyMode: correctionMode.latencyMode, measuredLane: 0,
+            predictionCheck: RoomCorrectionPredictionCheck(passed: true, rmsErrorDB: predictedMainSeatErrorDB, reasons: []),
+            predicted: predicted, sweepFrames: Int(2 * rate))
+    }
+
     /// Room insights come from the advisor's analyser over the flow's own Room Correction project.
     func prepareVerify() {
         roomInsights = SystemSetupRoomInsights.make(
@@ -477,7 +506,8 @@ final class SystemSetupFlowModel: ObservableObject {
                 failVerification(reason: "Verification did not match the design; the correction was reverted.")
             }
         case .failure(let error):
-            let unavailable = (error as? SystemSetupVerificationError) == .measurementUnavailable
+            var unavailable = error is SystemSetupVerificationError
+            if case .timedOut? = error as? SystemSetupVerificationError { unavailable = false }
             if unavailable && kind == .minimumPhase {
                 verificationReport = nil
                 flow.choices.verificationPassed = false

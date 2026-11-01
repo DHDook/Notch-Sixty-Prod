@@ -55,13 +55,14 @@ final class SystemSetupVerifySaveTests: XCTestCase {
         XCTAssertEqual(none.headline, "Not verified")
     }
 
-    func testUnconnectedMeasurerNeverReportsPassed() async {
-        let measurer = UnconnectedSystemSetupPostApplyMeasurer()
+    func testMeasurerWithoutACandidateIsUnavailableNotPassed() async {
+        let measurer = SystemSetupPostApplyMeasurer(host: EngineRoomCorrectionTrialHost(
+            playback: OfflineTrialSweepPlayer(room: ReferenceRoom(delayFrames: 100, resonanceHz: 90, gainDB: 0), rate: 48_000)))
         do {
             _ = try await measurer.measureMainSeat(predictedErrorDB: 1, sampleRate: 48_000)
             XCTFail("expected a refusal")
         } catch {
-            XCTAssertEqual(error as? SystemSetupVerificationError, .measurementUnavailable)
+            guard case .couldNotMeasure? = error as? SystemSetupVerificationError else { return XCTFail("\(error)") }
         }
     }
 

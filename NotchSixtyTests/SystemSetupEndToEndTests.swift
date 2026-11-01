@@ -90,14 +90,22 @@ final class SystemSetupEndToEndTests: XCTestCase {
             model.next()
             XCTAssertEqual(model.step, .verify, "\(label): \(model.message ?? "")")
 
-            // Verify can never pass today (E24 S3); it ends "Not verified".
+            // Verify plays the sweep through the live graph and the reference room (E24 S3a).
             model.runVerification()
             await waitForVerification(model)
             XCTAssertNotNil(model.choices.verificationPassed, label)
-            XCTExpectFailure("Verify pass: fixed by E24 S3", options: strict()) {
-                XCTAssertEqual(model.choices.verificationPassed, true, label)
+            let verifiedMessage = "\(label): \(model.message ?? "") \(String(describing: model.verificationSummary))"
+            if rate >= 176_400 {
+                // The stored measurement impulse response overstates the 60 to 120 Hz resonance by about 2 dB at the
+                // high rates (the trial room is exact), so the prediction misses by 1.6 to 2.0 dB. Open: see E24.md.
+                XCTExpectFailure("Stored measurement IR is inaccurate at 176.4 kHz and above: open, see E24.md", options: strict()) {
+                    XCTAssertEqual(model.choices.verificationPassed, true, verifiedMessage)
+                }
+            } else {
+                XCTAssertEqual(model.choices.verificationPassed, true, verifiedMessage)
             }
-            XCTExpectFailure("Mixed phase never produced by the wizard: fixed by E24 S3", options: strict()) {
+            XCTAssertEqual(rig.trialPlayer.sweepsPlayed, 1, label)
+            XCTExpectFailure("Mixed phase never produced by the wizard: fixed by E24 S3b", options: strict()) {
                 XCTAssertEqual(model.choices.designKind, .mixedPhase, label)
             }
             model.next()
@@ -150,9 +158,11 @@ final class ProductionWiringTests: XCTestCase {
             engine: rig.engine, profiles: rig.profiles, microphone: rig.microphone, levelTransport: rig.levelTransports.factory)
         var failure: Error?
         do { _ = try await services.verifier.measureMainSeat(predictedErrorDB: 1, sampleRate: 48_000) } catch { failure = error }
-        XCTExpectFailure("Post-apply measurer is an Unconnected stand-in: fixed by E24 S3", options: strict()) {
-            XCTAssertNil(failure)
+        // With no correction applied the verifier says why it cannot check; it is no longer an always-unavailable stand-in.
+        guard case .couldNotMeasure(let reason)? = failure as? SystemSetupVerificationError else {
+            return XCTFail("\(String(describing: failure))")
         }
+        XCTAssertFalse(reason.isEmpty)
     }
 
     /// The Generator card's Play with idle playback goes to the level session instead of the graph renderer.

@@ -153,6 +153,7 @@ struct OfflineSetupRig {
     let model: SystemSetupFlowModel
     let transports: ReferenceRoomTransportFactory
     let levelTransports = OfflineLevelTransportFactory()
+    let trialPlayer: OfflineTrialSweepPlayer
     let root: URL
 
     static let outputUID = "e24-reference-output"
@@ -182,13 +183,15 @@ struct OfflineSetupRig {
         _ = try? microphone.refreshInputDevices()
         microphone.selectInput(uid: Self.inputUID)
         // Short sweeps keep the suite fast; the analysis path is the production one.
-        microphone.sweepDurationSeconds = 0.4
+        microphone.sweepDurationSeconds = 1.5
         microphone.sweepLeadInSeconds = 0.05
         microphone.sweepTailSeconds = 0.25
         microphone.sweepFadeSeconds = 0.01
         microphone.sweepStartFrequencyHz = 30
         microphone.sweepEndFrequencyHz = min(20_000, 0.4 * rate)
         let layout = SyntheticReferenceRoom(rate: rate, seatCount: seats, sourcesPerSeat: 3)
+        let trialPlayer = OfflineTrialSweepPlayer(room: layout.room(measurement: 0, outputChannel: 0), rate: rate)
+        self.trialPlayer = trialPlayer
         let transports = ReferenceRoomTransportFactory(layout: layout)
         self.transports = transports
         calibration = MultichannelCalibrationController(
@@ -202,7 +205,8 @@ struct OfflineSetupRig {
         model = SystemSetupFlowModel(
             engine: engine, profiles: profiles, microphone: microphone, calibration: calibration,
             services: ProductionSystemSetupServices.production(
-                engine: engine, profiles: profiles, microphone: microphone, levelTransport: levelTransports.factory),
+                engine: engine, profiles: profiles, microphone: microphone, levelTransport: levelTransports.factory,
+                trialPlayback: trialPlayer),
             sessions: SystemSetupSessionStore(directory: root.appendingPathComponent("sessions")),
             roomProjectsDirectory: root.appendingPathComponent("RoomCorrection"))
     }
@@ -309,4 +313,30 @@ final class OfflineLevelTransportFactory {
             }
         }
     }
+}
+
+/// E24 S3a: the offline boundary of the live check. It renders the sweep through the real unified graph (the lane plan the
+/// candidate carries) and the main seat's reference room, in place of the generator on the live graph and the microphone.
+@MainActor
+final class OfflineTrialSweepPlayer: TrialSweepPlaying {
+    let room: ReferenceRoom
+    let rate: Double
+    var preparationFailure: RoomCorrectionTrialError?
+    private(set) var sweepsPlayed = 0
+    private(set) var stops = 0
+
+    init(room: ReferenceRoom, rate: Double) { self.room = room; self.rate = rate }
+
+    func prepare() throws { if let preparationFailure { throw preparationFailure } }
+
+    func playSweep(_ candidate: RoomCorrectionDeployCandidate) async throws -> [Float] {
+        try prepare()
+        sweepsPlayed += 1
+        // The offline graph is the 6-lane reference layout; the plan's stage and mask are the production ones.
+        var graphCandidate = candidate
+        graphCandidate.lanePlan.laneCount = 6
+        return room.render(try OfflineGraphTrialHost.renderGraph(graphCandidate, rate: rate), rate: rate)
+    }
+
+    func stop() { stops += 1 }
 }
