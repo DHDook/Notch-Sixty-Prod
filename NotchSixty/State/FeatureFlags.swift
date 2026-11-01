@@ -20,7 +20,7 @@ extension FeatureFlag {
     /// delete it, and the checks that read it, once the epic ships.
     static let all: [FeatureFlag] = [
         .legacyKernel, .ancEngineLease, .adaptiveTonalLive, .earnedCap, .feedForwardLive,
-        .noiseSurvey, .conversationUnmasking, .virtualMicrophone, .zones, .headPositionCamera
+        .noiseSurvey, .conversationUnmasking, .virtualMicrophone, .zones, .headPositionCamera, .overnight
     ]
 
     /// E6 S11: the unified graph is the default renderer. Turning this on selects the frozen
@@ -107,6 +107,15 @@ extension FeatureFlag {
     static let zones = FeatureFlag(
         id: "e4.zones",
         title: "Choose the quiet zone",
+        epic: "E4"
+    )
+
+    /// E4 S29: overnight mode keeps the Mac awake (display may sleep) while Quiet Zone is armed, with the
+    /// 10-minute thermal mean. Power assertion type only in this slice; nothing arms it while off.
+    /// Removed when E4 ships.
+    static let overnight = FeatureFlag(
+        id: "e4.overnight",
+        title: "Overnight Quiet Zone runs",
         epic: "E4"
     )
 }
