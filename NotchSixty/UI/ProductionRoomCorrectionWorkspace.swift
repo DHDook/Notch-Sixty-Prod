@@ -404,6 +404,7 @@ struct ProductionRoomCorrectionWorkspace: View {
                 }
                 .buttonStyle(.bordered)
                 .disabled(!calibration.canBeginMeasurement)
+                MeasurementReadinessNote(readiness: calibration.readiness, playbackNotice: calibration.playbackNotice)
 
             case .failed:
                 Button("Reset Calibration") {
@@ -422,6 +423,7 @@ struct ProductionRoomCorrectionWorkspace: View {
                 }
                 .buttonStyle(.glassProminent)
                 .disabled(!calibration.canBeginMeasurement)
+                MeasurementReadinessNote(readiness: calibration.readiness, playbackNotice: calibration.playbackNotice)
 
                 Text("This capture measures one listening position. After analysis, keep it as a named position below, then repeat for additional seats.")
                     .font(.caption)

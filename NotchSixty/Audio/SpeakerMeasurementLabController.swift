@@ -15,7 +15,6 @@ enum SpeakerMeasurementLabControllerError:
     Error, Equatable, LocalizedError {
     case playbackSystemRequired
     case outputDeviceProfileRequired
-    case playbackMustBeIdle(AudioLifecycleState)
     case microphonePermissionRequired
     case measurementInputRequired
     case outputRequired
@@ -32,8 +31,6 @@ enum SpeakerMeasurementLabControllerError:
             return "Select a Playback System before starting the Advanced Speaker Measurement Lab."
         case .outputDeviceProfileRequired:
             return "Enable and configure an Output Device Profile before starting the Advanced Speaker Measurement Lab."
-        case .playbackMustBeIdle(let state):
-            return "Stop normal DSP playback before a lab sweep. The playback engine is currently \(state.rawValue)."
         case .microphonePermissionRequired:
             return "Microphone access is required before an Advanced Speaker Measurement Lab sweep."
         case .measurementInputRequired:
@@ -96,6 +93,8 @@ final class SpeakerMeasurementLabController: ObservableObject {
     @Published private(set) var activeCapabilityPlan:
         SpeakerMeasurementLabPlan?
     @Published private(set) var lastErrorDescription: String?
+    /// Set when starting a measurement stopped normal playback (E24 S2).
+    @Published private(set) var playbackNotice: String?
 
     init(
         engine: AudioIOEngine,
@@ -182,18 +181,22 @@ final class SpeakerMeasurementLabController: ObservableObject {
         )
     }
 
-    var canBeginMeasurement: Bool {
-        guard state == .ready || state == .reviewing,
-              session != nil,
-              nextStep != nil else {
-            return false
-        }
-        return engine.lifecycleState == .idle
-            && microphone.permissionStatus == .authorized
-            && microphone.selectedInputDevice != nil
-            && engine.selectedOutputDevice != nil
-            && activeTransport == nil
+    /// Why a lab sweep cannot start now, or `.ready` (E24 S2). Playback is not a blocker.
+    var readiness: MeasurementReadiness {
+        MeasurementReadiness.evaluate(.init(
+            permission: microphone.permissionStatus,
+            hasInputDevice: microphone.selectedInputDevice != nil,
+            hasOutputDevice: engine.selectedOutputDevice != nil,
+            requiresProfile: true,
+            hasProfile: profiles.selectedSystemProfile?.state.outputDeviceProfile?.enabled == true,
+            requiresWork: true,
+            hasWork: session != nil && nextStep != nil,
+            transportActive: activeTransport != nil,
+            busyDescription: state == .measuring ? "measuring" : (state == .analyzing ? "being analysed" : nil),
+            stateAllowsStart: state == .ready || state == .reviewing))
     }
+
+    var canBeginMeasurement: Bool { readiness.isReady }
 
     func startNewSession(
         protocols: [SpeakerMeasurementLabProtocol],
@@ -285,10 +288,6 @@ final class SpeakerMeasurementLabController: ObservableObject {
             throw SpeakerMeasurementLabControllerError
                 .measurementAlreadyActive
         }
-        guard engine.lifecycleState == .idle else {
-            throw SpeakerMeasurementLabControllerError
-                .playbackMustBeIdle(engine.lifecycleState)
-        }
         guard microphone.permissionStatus == .authorized else {
             throw SpeakerMeasurementLabControllerError
                 .microphonePermissionRequired
@@ -375,6 +374,10 @@ final class SpeakerMeasurementLabController: ObservableObject {
             lastErrorDescription = error.localizedDescription
             throw error
         }
+
+        // E24 S2: every checked refusal is behind us; measuring needs the output to itself, so
+        // stop normal playback and say so. The state is the same one the old idle guard demanded.
+        playbackNotice = MeasurementPlaybackPolicy.stopPlaybackIfRunning(engine)
 
         let settings = RoomCorrectionSweepSettings(
             sampleRate: output.nominalSampleRate,

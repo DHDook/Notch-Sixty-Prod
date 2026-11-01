@@ -198,6 +198,8 @@ final class SystemSetupFlowModel: ObservableObject {
             seats: calibration.seats, sources: calibration.sources, measurements: calibration.measurements)
     }
 
+    var measurePlaybackNotice: String? { calibration.playbackNotice }
+
     func prepareMeasure() {
         stopNoise()
         calibration.prepareForUse()
@@ -219,12 +221,8 @@ final class SystemSetupFlowModel: ObservableObject {
         guard !isMeasuring else { return }
         isMeasuring = true
         defer { isMeasuring = false; syncMeasurementChoices() }
-        if engine.lifecycleState != .idle {
-            engine.stop()
-            message = "Playback was stopped so the speakers can be measured. Start it again when setup finishes."
-        } else {
-            message = nil
-        }
+        // The controller stops playback itself (E24 S2); its notice is shown under the button.
+        message = nil
         while measureProgress.next != nil {
             do {
                 try calibration.beginNextMeasurement()
@@ -876,9 +874,10 @@ private struct SystemSetupMeasureStep: View {
                     Button(progress.isComplete ? "Measure again" : "Measure") {
                         Task { await model.measureAll() }
                     }
-                    .disabled(progress.next == nil && !progress.isComplete)
+                    .disabled((progress.next == nil && !progress.isComplete) || !calibration.readiness.isReady)
                 }
             }
+            MeasurementReadinessNote(readiness: calibration.readiness, playbackNotice: model.measurePlaybackNotice)
             ProgressView(value: model.isMeasuring ? calibration.activeMeasurementProgress : progress.fraction)
             if let next = progress.next, model.isMeasuring {
                 Text("Measuring \(next.seat.name), \(next.source.displayName)").font(.caption)

@@ -438,6 +438,7 @@ struct ProductionMultichannelCalibrationWorkspace: View {
                     }
                     .disabled(calibration.measurements.isEmpty)
                 }
+                MeasurementReadinessNote(readiness: calibration.readiness, playbackNotice: calibration.playbackNotice)
 
                 if !calibration.sources.isEmpty && !calibration.seats.isEmpty {
                     Divider()

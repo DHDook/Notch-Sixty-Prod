@@ -258,6 +258,30 @@ final class RoomCorrectionCalibrationControllerTests: XCTestCase {
         XCTAssertEqual(controller.state, .idle)
     }
 
+    func testRunningPlaybackIsStoppedWithANoticeInsteadOfRefusing() throws {
+        let transport = TransportFixture(
+            capture: RoomCorrectionCalibrationCapture(left: [0.1], right: [0.2]))
+        let controller = RoomCorrectionCalibrationController(
+            engine: try engine(output: outputDevice()),
+            inputCatalog: InputCatalogFixture(devices: [inputDevice()]),
+            permissionClient: PermissionFixture(status: .authorized),
+            transportFactory: { _, _, _, _ in transport })
+        var running = true
+        var stops = 0
+        controller.playbackControl = MeasurementPlaybackControl(
+            isRunning: { running }, stop: { stops += 1; running = false })
+        controller.prepareForUse()
+        XCTAssertTrue(controller.readiness.isReady, "running playback is not a blocker")
+
+        try controller.beginMeasurement()
+
+        XCTAssertEqual(stops, 1)
+        XCTAssertFalse(running)
+        XCTAssertEqual(controller.playbackNotice, MeasurementPlaybackPolicy.stoppedNotice)
+        XCTAssertEqual(controller.state, .measuring)
+        XCTAssertEqual(transport.startCount, 1)
+    }
+
     func testMeasurementClaimsHardwareOnlyFromIdleAndHandsCaptureToAnalysis() throws {
         let output = outputDevice()
         let input = inputDevice()
