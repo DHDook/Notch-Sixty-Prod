@@ -3029,6 +3029,8 @@ final class AudioIOEngine: ObservableObject {
 
     func disarmFeedForwardLive() { transportSession?.disarmFeedForwardLive() }
 
+    func markFeedForwardLiveReferenceLost() { transportSession?.markFeedForwardLiveReferenceLost() }
+
     func feedForwardLiveStatus() -> N60RenderKernelFeedForwardLiveStatus? {
         transportSession?.feedForwardLiveStatus()
     }
