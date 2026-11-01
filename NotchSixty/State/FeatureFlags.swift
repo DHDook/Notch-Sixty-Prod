@@ -20,7 +20,7 @@ extension FeatureFlag {
     /// delete it, and the checks that read it, once the epic ships.
     static let all: [FeatureFlag] = [
         .legacyKernel, .ancEngineLease, .adaptiveTonalLive, .earnedCap, .feedForwardLive,
-        .noiseSurvey, .conversationUnmasking, .virtualMicrophone, .zones
+        .noiseSurvey, .conversationUnmasking, .virtualMicrophone, .zones, .headPositionCamera
     ]
 
     /// E6 S11: the unified graph is the default renderer. Turning this on selects the frozen
@@ -90,6 +90,14 @@ extension FeatureFlag {
     static let virtualMicrophone = FeatureFlag(
         id: "e4.virtual-microphone",
         title: "Virtual microphone at the ears",
+        epic: "E4"
+    )
+
+    /// E4 S26b: camera head position (Vision body pose, on-device) selects the surveyed virtual-microphone
+    /// ratios. Maths and camera source only in this slice; nothing drives output while off. Removed when E4 ships.
+    static let headPositionCamera = FeatureFlag(
+        id: "e4.head-position-camera",
+        title: "Camera head position for the quiet zone",
         epic: "E4"
     )
 
