@@ -7,9 +7,14 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		E24D00000000000000000032 /* MeasurementReadinessTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E24D00000000000000000031 /* MeasurementReadinessTests.swift */; };
-		E24D00000000000000000022 /* MeasurementReadinessNote.swift in Sources */ = {isa = PBXBuildFile; fileRef = E24D00000000000000000021 /* MeasurementReadinessNote.swift */; };
-		E24D00000000000000000012 /* MeasurementReadiness.swift in Sources */ = {isa = PBXBuildFile; fileRef = E24D00000000000000000011 /* MeasurementReadiness.swift */; };
+		E24E00000000000000000032 /* MeasurementReadinessTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E24E00000000000000000031 /* MeasurementReadinessTests.swift */; };
+		E24E00000000000000000022 /* MeasurementReadinessNote.swift in Sources */ = {isa = PBXBuildFile; fileRef = E24E00000000000000000021 /* MeasurementReadinessNote.swift */; };
+		E24E00000000000000000012 /* MeasurementReadiness.swift in Sources */ = {isa = PBXBuildFile; fileRef = E24E00000000000000000011 /* MeasurementReadiness.swift */; };
+		E24D00000000000000000002 /* MeasurementLevelSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = E24D00000000000000000001 /* MeasurementLevelSession.swift */; };
+		E24D00000000000000000012 /* SystemSetupLevelSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = E24D00000000000000000011 /* SystemSetupLevelSession.swift */; };
+		E24D00000000000000000022 /* MeasurementGeneratorController.swift in Sources */ = {isa = PBXBuildFile; fileRef = E24D00000000000000000021 /* MeasurementGeneratorController.swift */; };
+		E24D00000000000000000032 /* N60LevelSessionProc.c in Sources */ = {isa = PBXBuildFile; fileRef = E24D00000000000000000031 /* N60LevelSessionProc.c */; };
+		E24D00000000000000000042 /* MeasurementLevelSessionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E24D00000000000000000041 /* MeasurementLevelSessionTests.swift */; };
 		E24C00000000000000000012 /* SystemSetupEndToEndTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E24C00000000000000000011 /* SystemSetupEndToEndTests.swift */; };
 		E24B00000000000000000012 /* ReferenceRoomTransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = E24B00000000000000000011 /* ReferenceRoomTransport.swift */; };
 		E24A00000000000000000012 /* SystemSetupProduction.swift in Sources */ = {isa = PBXBuildFile; fileRef = E24A00000000000000000011 /* SystemSetupProduction.swift */; };
@@ -529,9 +534,15 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
-		E24D00000000000000000031 /* MeasurementReadinessTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeasurementReadinessTests.swift; sourceTree = "<group>"; };
-		E24D00000000000000000021 /* MeasurementReadinessNote.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeasurementReadinessNote.swift; sourceTree = "<group>"; };
-		E24D00000000000000000011 /* MeasurementReadiness.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeasurementReadiness.swift; sourceTree = "<group>"; };
+		E24E00000000000000000031 /* MeasurementReadinessTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeasurementReadinessTests.swift; sourceTree = "<group>"; };
+		E24E00000000000000000021 /* MeasurementReadinessNote.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeasurementReadinessNote.swift; sourceTree = "<group>"; };
+		E24E00000000000000000011 /* MeasurementReadiness.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeasurementReadiness.swift; sourceTree = "<group>"; };
+		E24D00000000000000000001 /* MeasurementLevelSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreAudio/MeasurementLevelSession.swift; sourceTree = "<group>"; };
+		E24D00000000000000000011 /* SystemSetupLevelSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemSetupLevelSession.swift; sourceTree = "<group>"; };
+		E24D00000000000000000021 /* MeasurementGeneratorController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeasurementGeneratorController.swift; sourceTree = "<group>"; };
+		E24D00000000000000000031 /* N60LevelSessionProc.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = N60LevelSessionProc.c; sourceTree = "<group>"; };
+		E24D00000000000000000033 /* N60LevelSessionProc.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = N60LevelSessionProc.h; sourceTree = "<group>"; };
+		E24D00000000000000000041 /* MeasurementLevelSessionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeasurementLevelSessionTests.swift; sourceTree = "<group>"; };
 		E24C00000000000000000011 /* SystemSetupEndToEndTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemSetupEndToEndTests.swift; sourceTree = "<group>"; };
 		E24B00000000000000000011 /* ReferenceRoomTransport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReferenceRoomTransport.swift; sourceTree = "<group>"; };
 		E24A00000000000000000011 /* SystemSetupProduction.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemSetupProduction.swift; sourceTree = "<group>"; };
@@ -1302,7 +1313,7 @@
 				F76000000000000000000012 /* MIMORoomTreatmentActivationPermitTests.swift */,
 				F78000000000000000000013 /* ProductionInformationArchitectureTests.swift */,
 				E12A00000000000000000012 /* ProductionSystemAreaTests.swift */,
-				E12B00000000000000000012 /* SystemSetupFlowTests.swift */, E12C00000000000000000012 /* SystemSetupStartStepsTests.swift */, E12D00000000000000000012 /* SystemSetupMeasureAlignTests.swift */, E12E00000000000000000012 /* SystemSetupBassCorrectTests.swift */, E12F00000000000000000012 /* SystemSetupVerifySaveTests.swift */, E24C00000000000000000011 /* SystemSetupEndToEndTests.swift */, E24B00000000000000000011 /* ReferenceRoomTransport.swift */, E24D00000000000000000031 /* MeasurementReadinessTests.swift */,
+				E12B00000000000000000012 /* SystemSetupFlowTests.swift */, E12C00000000000000000012 /* SystemSetupStartStepsTests.swift */, E12D00000000000000000012 /* SystemSetupMeasureAlignTests.swift */, E12E00000000000000000012 /* SystemSetupBassCorrectTests.swift */, E12F00000000000000000012 /* SystemSetupVerifySaveTests.swift */, E24C00000000000000000011 /* SystemSetupEndToEndTests.swift */, E24B00000000000000000011 /* ReferenceRoomTransport.swift */, E24E00000000000000000031 /* MeasurementReadinessTests.swift */, E24D00000000000000000041 /* MeasurementLevelSessionTests.swift */,
 				F79000000000000000000013 /* AudioUnitHostFoundationTests.swift */,
 				F80000000000000000000012 /* AudioUnitOfflinePreparationTests.swift */,
 				F81000000000000000000013 /* AudioUnitLiveRackRuntimeTests.swift */,
@@ -1450,6 +1461,7 @@
 				E11F0000000000000000000B /* MeasurementMultiMic.swift */,
 				E11F00000000000000000011 /* MeasurementSeatPlan.swift */,
 				E11E00000000000000000004 /* MeasurementInputMonitor.swift */,
+				E24D00000000000000000001 /* MeasurementLevelSession.swift */,
 				E11D00000000000000000031 /* MeasurementGatedPlot.swift */,
 				E11D00000000000000000051 /* MeasurementLibrary.swift */,
 				E11D00000000000000000071 /* MeasurementFormats.swift */,
@@ -1538,7 +1550,7 @@
 			path = Backup;
 			sourceTree = "<group>";
 		};
-		A20000000000000000000054 /* State */ = {isa = PBXGroup; children = (E24D00000000000000000011 /* MeasurementReadiness.swift */, A20000000000000000000025 /* AudioLifecycleState.swift */, A100000000000000000E2204 /* FeatureFlags.swift */, E4M100000000000000000011 /* SpeakerDriveDemandPolicy.swift */, A100000000000000000E2202 /* PreferenceKeys.swift */, A2000000000000000000002B /* ProductProfiles.swift */, E12B00000000000000000011 /* SystemSetupFlow.swift */, E12C00000000000000000011 /* SystemSetupStartSteps.swift */, E12D00000000000000000011 /* SystemSetupMeasureAlign.swift */, E12E00000000000000000011 /* SystemSetupBassCorrect.swift */, E12F00000000000000000011 /* SystemSetupVerifySave.swift */, E24A00000000000000000011 /* SystemSetupProduction.swift */, B113B0000000000000000061 /* ProductRecovery.swift */, B113B0000000000000000071 /* HeadroomAssistant.swift */, F64000000000000000000014 /* MultichannelCalibrationController.swift */, A2000000000000000000002D /* RoomCorrectionCalibrationController.swift */, A2000000000000000000002F /* RoomCorrectionProjectController.swift */, F89300000000000000000011 /* AmbientCompensationController.swift */, F90200000000000000000011 /* ActiveQuietZoneController.swift */, E4D000000000000000000011 /* AdaptiveQuietZoneShadow.swift */, E4G000000000000000000011 /* LiveTreatmentArm.swift */, E4H000000000000000000011 /* DoNoHarmVerifier.swift */, E4J100000000000000000011 /* AdaptiveTonalOutputGate.swift */, E4J200000000000000000011 /* MicrophoneMoveResolver.swift */, E4J300000000000000000011 /* AdaptiveTonalLiveWorker.swift */, E4J400000000000000000011 /* AdaptiveTonalLiveCoordinator.swift */, E4K100000000000000000011 /* EarnedCapPolicy.swift */, E4L100000000000000000011 /* ExcursionCap.swift */, E4N100000000000000000011 /* OvernightPowerAssertion.swift */, E4H000000000000000000031 /* SafetyFlightRecorder.swift */, E4S310000000000000000031 /* ANCMeasurementReport.swift */, E4F200000000000000000013 /* QuietZoneFeedForwardSurveyController.swift */, E4F300000000000000000012 /* QuietZoneFeedForwardShadow.swift */, E4F7000000000000000000E6 /* QuietZoneCameraHeadSource.swift */, F92000000000000000000012 /* RoomTreatmentAdvisorController.swift */, E10B00000000000000000004 /* RoomCorrectionDeployController.swift */,); path = State; sourceTree = "<group>"; };
+		A20000000000000000000054 /* State */ = {isa = PBXGroup; children = (E24E00000000000000000011 /* MeasurementReadiness.swift */, E24E00000000000000000021 /* MeasurementReadinessNote.swift */, A20000000000000000000025 /* AudioLifecycleState.swift */, A100000000000000000E2204 /* FeatureFlags.swift */, E4M100000000000000000011 /* SpeakerDriveDemandPolicy.swift */, A100000000000000000E2202 /* PreferenceKeys.swift */, A2000000000000000000002B /* ProductProfiles.swift */, E12B00000000000000000011 /* SystemSetupFlow.swift */, E12C00000000000000000011 /* SystemSetupStartSteps.swift */, E12D00000000000000000011 /* SystemSetupMeasureAlign.swift */, E12E00000000000000000011 /* SystemSetupBassCorrect.swift */, E12F00000000000000000011 /* SystemSetupVerifySave.swift */, E24A00000000000000000011 /* SystemSetupProduction.swift */, E24D00000000000000000011 /* SystemSetupLevelSession.swift */, E24D00000000000000000021 /* MeasurementGeneratorController.swift */, B113B0000000000000000061 /* ProductRecovery.swift */, B113B0000000000000000071 /* HeadroomAssistant.swift */, F64000000000000000000014 /* MultichannelCalibrationController.swift */, A2000000000000000000002D /* RoomCorrectionCalibrationController.swift */, A2000000000000000000002F /* RoomCorrectionProjectController.swift */, F89300000000000000000011 /* AmbientCompensationController.swift */, F90200000000000000000011 /* ActiveQuietZoneController.swift */, E4D000000000000000000011 /* AdaptiveQuietZoneShadow.swift */, E4G000000000000000000011 /* LiveTreatmentArm.swift */, E4H000000000000000000011 /* DoNoHarmVerifier.swift */, E4J100000000000000000011 /* AdaptiveTonalOutputGate.swift */, E4J200000000000000000011 /* MicrophoneMoveResolver.swift */, E4J300000000000000000011 /* AdaptiveTonalLiveWorker.swift */, E4J400000000000000000011 /* AdaptiveTonalLiveCoordinator.swift */, E4K100000000000000000011 /* EarnedCapPolicy.swift */, E4L100000000000000000011 /* ExcursionCap.swift */, E4N100000000000000000011 /* OvernightPowerAssertion.swift */, E4H000000000000000000031 /* SafetyFlightRecorder.swift */, E4S310000000000000000031 /* ANCMeasurementReport.swift */, E4F200000000000000000013 /* QuietZoneFeedForwardSurveyController.swift */, E4F300000000000000000012 /* QuietZoneFeedForwardShadow.swift */, E4F7000000000000000000E6 /* QuietZoneCameraHeadSource.swift */, F92000000000000000000012 /* RoomTreatmentAdvisorController.swift */, E10B00000000000000000004 /* RoomCorrectionDeployController.swift */,); path = State; sourceTree = "<group>"; };
 		A20000000000000000000055 /* Diagnostics */ = {isa = PBXGroup; children = (A20000000000000000000026 /* AudioDiagnosticsSnapshot.swift */, A2000000000000000000002A /* ProductionAnalysisWorker.swift */,); path = Diagnostics; sourceTree = "<group>"; };
 		A30000000000000000000050 /* Realtime */ = {
 			isa = PBXGroup;
@@ -1585,6 +1597,8 @@
 				F96100000000000000000014 /* N60FeedForwardReferenceBridge.h */,
 				E11E00000000000000000008 /* N60MeasurementMonitorProc.c */,
 				E11E0000000000000000000A /* N60MeasurementMonitorProc.h */,
+				E24D00000000000000000031 /* N60LevelSessionProc.c */,
+				E24D00000000000000000033 /* N60LevelSessionProc.h */,
 				F96200000000000000000013 /* N60FeedForwardPreviewFIR.c */,
 				F98100000000000000000011 /* N60FeedForwardDeadlineBridge.c */,
 				F96200000000000000000014 /* N60FeedForwardPreviewFIR.h */,
@@ -1827,6 +1841,10 @@
 				E11F00000000000000000012 /* MeasurementSeatPickerCard.swift in Sources */,
 				E10A00000000000000000052 /* RoomCorrectionTargetEditorCard.swift in Sources */,
 				E11E00000000000000000005 /* MeasurementInputMonitor.swift in Sources */,
+				E24D00000000000000000002 /* MeasurementLevelSession.swift in Sources */,
+				E24D00000000000000000012 /* SystemSetupLevelSession.swift in Sources */,
+				E24D00000000000000000022 /* MeasurementGeneratorController.swift in Sources */,
+				E24D00000000000000000032 /* N60LevelSessionProc.c in Sources */,
 				E11E00000000000000000007 /* MeasurementRTASPLCard.swift in Sources */,
 				E11E00000000000000000009 /* N60MeasurementMonitorProc.c in Sources */,
 				E11D00000000000000000022 /* MeasurementAnalysisViews.swift in Sources */,
@@ -1837,8 +1855,8 @@
 				E11D0000000000000000F001 /* MeasurementOverlays.swift in Sources */,
 				E11D00000000000000000042 /* MeasurementLibraryView.swift in Sources */,
 				E11D00000000000000000080 /* MeasurementGeneratorCard.swift in Sources */,
-				E24D00000000000000000022 /* MeasurementReadinessNote.swift in Sources */,
-				E24D00000000000000000012 /* MeasurementReadiness.swift in Sources */,
+				E24E00000000000000000022 /* MeasurementReadinessNote.swift in Sources */,
+				E24E00000000000000000012 /* MeasurementReadiness.swift in Sources */,
 				E11D00000000000000000082 /* SignalGeneratorSettings.swift in Sources */,
 				A2000000000000000000001F /* RoomCorrectionProjectController.swift in Sources */,
 				E10B00000000000000000003 /* RoomCorrectionDeployController.swift in Sources */,
@@ -2108,7 +2126,8 @@
 				E12F00000000000000000002 /* SystemSetupVerifySaveTests.swift in Sources */,
 				E24C00000000000000000012 /* SystemSetupEndToEndTests.swift in Sources */,
 				E24B00000000000000000012 /* ReferenceRoomTransport.swift in Sources */,
-				E24D00000000000000000032 /* MeasurementReadinessTests.swift in Sources */,
+				E24E00000000000000000032 /* MeasurementReadinessTests.swift in Sources */,
+				E24D00000000000000000042 /* MeasurementLevelSessionTests.swift in Sources */,
 				F79000000000000000000003 /* AudioUnitHostFoundationTests.swift in Sources */,
 				F80000000000000000000002 /* AudioUnitOfflinePreparationTests.swift in Sources */,
 				F81000000000000000000003 /* AudioUnitLiveRackRuntimeTests.swift in Sources */,

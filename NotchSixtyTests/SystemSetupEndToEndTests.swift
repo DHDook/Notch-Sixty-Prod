@@ -45,12 +45,13 @@ final class SystemSetupEndToEndTests: XCTestCase {
             model.next()
             XCTAssertEqual(model.step, .microphone, "\(label): \(model.message ?? "")")
 
-            // Level: playing noise needs a running session (E24 S1).
+            // Level: the noise runs in the measurement-owned level session (E24 S1).
             model.selectMicrophone(uid: OfflineSetupRig.inputUID)
             model.toggleNoise()
-            XCTExpectFailure("Level noise with idle playback: fixed by E24 S1", options: strict()) {
-                XCTAssertTrue(model.noiseIsPlaying, label)
-            }
+            XCTAssertTrue(model.noiseIsPlaying, "\(label): \(model.message ?? "")")
+            XCTAssertEqual(rig.levelTransports.pumps.count, 1, label)
+            model.stopNoise()
+            XCTAssertFalse(model.noiseIsPlaying, label)
             model.acceptSweepLevel(measuredSPLdBC: 75)
             model.next()
             XCTAssertEqual(model.step, .room, "\(label): \(model.message ?? "")")
@@ -134,18 +135,19 @@ final class ProductionWiringTests: XCTestCase {
     func testNoisePlayerDoesNotReportUnavailable() throws {
         let rig = try OfflineSetupRig(rate: 48_000)
         defer { rig.tearDown() }
-        let services = ProductionSystemSetupServices.production(engine: rig.engine)
+        let services = ProductionSystemSetupServices.production(
+            engine: rig.engine, profiles: rig.profiles, microphone: rig.microphone, levelTransport: rig.levelTransports.factory)
         var failure: Error?
         do { try services.noise.start(SystemSetupLevelPlan().generatorSettings(), selection: .lane(0)) } catch { failure = error }
-        XCTExpectFailure("Noise player is unavailable with idle playback: fixed by E24 S1", options: strict()) {
-            XCTAssertNil(failure)
-        }
+        XCTAssertNil(failure)
+        services.noise.stop()
     }
 
     func testVerifierDoesNotReportUnavailable() async throws {
         let rig = try OfflineSetupRig(rate: 48_000)
         defer { rig.tearDown() }
-        let services = ProductionSystemSetupServices.production(engine: rig.engine)
+        let services = ProductionSystemSetupServices.production(
+            engine: rig.engine, profiles: rig.profiles, microphone: rig.microphone, levelTransport: rig.levelTransports.factory)
         var failure: Error?
         do { _ = try await services.verifier.measureMainSeat(predictedErrorDB: 1, sampleRate: 48_000) } catch { failure = error }
         XCTExpectFailure("Post-apply measurer is an Unconnected stand-in: fixed by E24 S3", options: strict()) {
@@ -153,13 +155,16 @@ final class ProductionWiringTests: XCTestCase {
         }
     }
 
-    func testGeneratorPlayWithIdlePlaybackIsRefused() throws {
+    /// The Generator card's Play with idle playback goes to the level session instead of the graph renderer.
+    func testGeneratorPlayWithIdlePlaybackUsesTheLevelSession() throws {
         let rig = try OfflineSetupRig(rate: 48_000)
         defer { rig.tearDown() }
-        var failure: Error?
-        do { try rig.engine.setLiveGenerator(SystemSetupLevelPlan().generatorSettings(), selection: .lane(0)) } catch { failure = error }
-        XCTExpectFailure("Generator Play with idle playback: fixed by E24 S1", options: strict()) {
-            XCTAssertNil(failure)
-        }
+        let controller = MeasurementGeneratorController(
+            engine: rig.engine, profiles: rig.profiles, microphone: rig.microphone, transport: rig.levelTransports.factory)
+        controller.play(SystemSetupLevelPlan().generatorSettings(), selection: .lane(0))
+        XCTAssertTrue(controller.isPlaying, controller.message ?? "")
+        XCTAssertEqual(rig.levelTransports.pumps.count, 1)
+        controller.stop()
+        XCTAssertFalse(controller.isPlaying)
     }
 }

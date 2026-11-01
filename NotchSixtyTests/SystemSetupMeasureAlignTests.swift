@@ -287,14 +287,6 @@ final class SystemSetupMeasureAlignTests: XCTestCase {
         }
     }
 
-    func testUnconnectedPlayerSaysWhyAndNeverPlays() throws {
-        let player = UnconnectedSystemSetupNoisePlayer()
-        XCTAssertThrowsError(try player.start(SystemSetupLevelPlan().generatorSettings(), selection: .lane(0))) {
-            XCTAssertEqual($0 as? SystemSetupNoiseError, .engineHookUnavailable)
-        }
-        XCTAssertFalse(player.isPlaying)
-    }
-
     // MARK: Engine noise player (E12 S4a)
 
     @MainActor
@@ -345,7 +337,8 @@ final class SystemSetupMeasureAlignTests: XCTestCase {
         host.failure = LiveNChannelTransportError.configurationChangeRequiresRestart
         let player = EngineSystemSetupNoisePlayer(host: host)
         XCTAssertThrowsError(try player.start(SystemSetupLevelPlan().generatorSettings(), selection: .lane(0))) {
-            XCTAssertEqual($0 as? SystemSetupNoiseError, .engineHookUnavailable)
+            guard case .engineRefused(let reason)? = $0 as? SystemSetupNoiseError else { return XCTFail("\($0)") }
+            XCTAssertFalse(reason.isEmpty)
         }
         XCTAssertFalse(player.isPlaying)
     }

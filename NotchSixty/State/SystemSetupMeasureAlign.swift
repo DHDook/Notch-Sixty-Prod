@@ -208,14 +208,14 @@ struct SystemSetupAlignment: Equatable, Sendable {
 // MARK: - Level step noise (design note 5)
 
 enum SystemSetupNoiseError: Error, Equatable, LocalizedError {
-    /// The engine does not yet publish the generator stage to the live graph (follow-up slice).
-    case engineHookUnavailable
+    /// The engine or level session refused the noise; the text is the real reason.
+    case engineRefused(String)
     case aboveCeiling
 
     var errorDescription: String? {
         switch self {
-        case .engineHookUnavailable:
-            return "This output cannot play the setup noise right now (it needs playback running on the graph renderer). Play steady pink noise from another app, or use the Generator tab in Measure."
+        case .engineRefused(let reason):
+            return reason
         case .aboveCeiling:
             return "That level is above the generator ceiling."
         }
@@ -229,6 +229,12 @@ protocol SystemSetupNoisePlaying: AnyObject {
     var isPlaying: Bool { get }
     func start(_ settings: SignalGeneratorSettings, selection: SignalGeneratorLaneSelection) throws
     func stop()
+    /// Called when the noise ends without `stop()` (auto-stop, output change) with the text to show.
+    func setStopHandler(_ handler: @escaping (String) -> Void)
+}
+
+extension SystemSetupNoisePlaying {
+    func setStopHandler(_ handler: @escaping (String) -> Void) {}
 }
 
 extension SystemSetupLevelPlan {
@@ -270,7 +276,7 @@ final class EngineSystemSetupNoisePlayer: SystemSetupNoisePlaying {
             try host.setLiveGenerator(settings, selection: selection)
         } catch {
             isPlaying = false
-            throw SystemSetupNoiseError.engineHookUnavailable
+            throw SystemSetupNoiseError.engineRefused(error.localizedDescription)
         }
         isPlaying = true
     }
@@ -286,12 +292,4 @@ final class EngineSystemSetupNoisePlayer: SystemSetupNoisePlaying {
             } catch {}
         }
     }
-}
-
-/// Used until the engine publishes the generator stage: starting always reports why not.
-@MainActor
-final class UnconnectedSystemSetupNoisePlayer: SystemSetupNoisePlaying {
-    var isPlaying: Bool { false }
-    func start(_ settings: SignalGeneratorSettings, selection: SignalGeneratorLaneSelection) throws { throw SystemSetupNoiseError.engineHookUnavailable }
-    func stop() {}
 }

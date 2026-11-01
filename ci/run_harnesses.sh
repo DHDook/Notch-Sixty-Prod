@@ -30,7 +30,7 @@ for src in n60_ff_live n60_fxlms; do
 $OUT/${src}_rt.o"
 done
 ALL_RT=$(find "$RT" -name '*.c' -print | sort; echo "$GUARD_OBJ")
-ALL_RT_NO_BRIDGE=$(find "$RT" -name '*.c' ! -name 'N60RealtimeAudioBridge.c' ! -name 'N60MeasurementMonitorProc.c' -print | sort; echo "$GUARD_OBJ")
+ALL_RT_NO_BRIDGE=$(find "$RT" -name '*.c' ! -name 'N60RealtimeAudioBridge.c' ! -name 'N60MeasurementMonitorProc.c' ! -name 'N60LevelSessionProc.c' -print | sort; echo "$GUARD_OBJ")
 STRICT=(-std=c11 -Wall -Wextra -Werror)
 FILTERS=("$@")
 
@@ -443,6 +443,15 @@ fi
 # E11 S2: targeted measurement bridge second-program playback and allocation-free process call.
 if selected e11_targeted_bridge; then
     harness e11_targeted_bridge "${STRICT[@]}" -O2 -I"$RT" core/tests/test_targeted_bridge.c
+fi
+
+# E24 S1: the Level step's render path (generator-only core graph + monitor ring) at every standard rate.
+if selected e24_level_session; then
+    build_core_objs
+    if [ "$CORE_OK" = 1 ]; then
+        harness e24_level_session "${STRICT[@]}" -O2 -I"$RT" -Icore/include ci/harness_e24_level_session.c \
+            "$RT/N60LevelSessionProc.c" "${CORE_OBJS[@]}" -lc++ -lm -framework CoreAudio
+    fi
 fi
 
 # E6 S2/S3: libn60core (portable C++ core behind its versioned C ABI): graph skeleton,

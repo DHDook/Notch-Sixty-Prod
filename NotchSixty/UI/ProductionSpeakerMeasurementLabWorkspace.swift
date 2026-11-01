@@ -99,7 +99,7 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
                 reportCard
                 if tab == .advanced {
                     MeasurementRTASPLCard(microphone: microphone)
-                    MeasurementGeneratorCard()
+                    MeasurementGeneratorCard(engine: engine, profiles: profiles, microphone: microphone)
                     MeasurementSeatPickerCard(microphone: microphone, plan: $seatPlan)
                     MeasurementAnalysisCard(capture: lab.session?.captures.last)
                     MeasurementLibraryView(
