@@ -232,56 +232,10 @@ struct ProductionMultichannelCalibrationWorkspace: View {
     private var microphoneCard: some View {
         GroupBox("Measurement Microphone") {
             VStack(alignment: .leading, spacing: 12) {
-                LabeledContent("Permission") {
-                    HStack(spacing: 10) {
-                        Text(permissionLabel)
-                            .foregroundStyle(microphone.permissionStatus == .authorized ? .primary : .secondary)
-                        if microphone.permissionStatus != .authorized {
-                            Button("Request Access") {
-                                actionError = nil
-                                Task { await microphone.requestMicrophonePermission() }
-                            }
-                        }
-                    }
-                }
-
-                if microphone.permissionStatus == .authorized {
-                    LabeledContent("Input") {
-                        HStack(spacing: 10) {
-                            Picker("Measurement Input", selection: selectedInputBinding) {
-                                Text("Choose a microphone…").tag(Optional<String>.none)
-                                ForEach(microphone.inputDevices) { device in
-                                    Text("\(device.name) · \(device.nominalSampleRate / 1_000, specifier: "%.1f") kHz")
-                                        .tag(Optional(device.uid))
-                                }
-                            }
-                            .labelsHidden()
-                            .frame(minWidth: 330)
-                            .disabled(calibration.state == .measuring || calibration.state == .analyzing)
-
-                            Button("Refresh") {
-                                perform { _ = try microphone.refreshInputDevices() }
-                            }
-                            .disabled(calibration.state == .measuring || calibration.state == .analyzing)
-                        }
-                    }
-
-                    LabeledContent("Input Channel") {
-                        Stepper(
-                            "Channel \(microphone.selectedInputChannelIndex + 1)",
-                            value: inputChannelBinding,
-                            in: 1...64
-                        )
-                        .disabled(calibration.state == .measuring || calibration.state == .analyzing)
-                    }
-
-                    if let calibrationFile = microphone.microphoneCalibration {
-                        LabeledContent("Mic Calibration") {
-                            Text(calibrationFile.sourceName ?? "Loaded calibration curve")
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                }
+                MeasurementMicrophoneCard(
+                    microphone: microphone,
+                    locked: calibration.state == .measuring || calibration.state == .analyzing,
+                    onError: { actionError = $0 })
 
                 Text("Normal DSP playback must be stopped during acoustic measurement. The measurement transport owns the output hardware temporarily and zeros every non-target output lane before each sweep.")
                     .font(.caption)

@@ -228,87 +228,11 @@ struct ProductionRoomCorrectionWorkspace: View {
                 calibrationStateBadge
             }
 
-            LabeledContent("Microphone Permission") {
-                HStack(spacing: 10) {
-                    Text(permissionLabel)
-                        .foregroundStyle(calibration.permissionStatus == .authorized ? .primary : .secondary)
-                    if calibration.permissionStatus != .authorized {
-                        Button("Request Access") {
-                            actionError = nil
-                            Task { await calibration.requestMicrophonePermission() }
-                        }
-                        .disabled(calibration.state == .requestingPermission)
-                    }
-                }
-            }
-
-            if calibration.permissionStatus == .authorized {
-                LabeledContent("Measurement Input") {
-                    HStack(spacing: 10) {
-                        Picker("Measurement Input", selection: selectedInputBinding) {
-                            Text("Choose a microphone…").tag(Optional<String>.none)
-                            ForEach(calibration.inputDevices) { device in
-                                Text("\(device.name) · \(formattedRate(device.nominalSampleRate))")
-                                    .tag(Optional(device.uid))
-                            }
-                        }
-                        .labelsHidden()
-                        .frame(minWidth: 320)
-                        .disabled(calibration.state == .measuring || calibration.state == .arming)
-
-                        Button("Refresh") {
-                            actionError = nil
-                            do { _ = try calibration.refreshInputDevices() }
-                            catch { actionError = error.localizedDescription }
-                        }
-                        .disabled(calibration.state == .measuring || calibration.state == .arming)
-                    }
-                }
-
-                LabeledContent("Microphone Channel") {
-                    Stepper(
-                        "Input \(calibration.selectedInputChannelIndex + 1)",
-                        value: inputChannelBinding,
-                        in: 1...32
-                    )
-                    .disabled(
-                        calibration.selectedInputDevice == nil
-                            || calibration.state == .measuring
-                            || calibration.state == .arming
-                    )
-                }
-
-
-                LabeledContent("Microphone Calibration") {
-                    HStack(spacing: 10) {
-                        Text(calibration.microphoneCalibration?.sourceName ?? "No calibration curve")
-                            .foregroundStyle(calibration.microphoneCalibration == nil ? .secondary : .primary)
-                            .lineLimit(1)
-
-                        Button("Import…") {
-                            actionError = nil
-                            importingMicrophoneCalibration = true
-                        }
-                        .disabled(calibration.state == .measuring || calibration.state == .arming)
-
-                        Button("Clear") {
-                            actionError = nil
-                            calibration.clearMicrophoneCalibration()
-                        }
-                        .disabled(
-                            calibration.microphoneCalibration == nil
-                                || calibration.state == .measuring
-                                || calibration.state == .arming
-                        )
-                    }
-                }
-
-                if let microphoneCalibration = calibration.microphoneCalibration {
-                    Text("\(microphoneCalibration.points.count) calibration points. The curve is applied to offline measurement analysis only; it is never inserted into daily playback DSP.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
+            MeasurementMicrophoneCard(
+                microphone: calibration,
+                locked: calibration.state == .measuring || calibration.state == .arming,
+                onImportCalibration: { importingMicrophoneCalibration = true },
+                onError: { actionError = $0 })
 
             Divider()
 

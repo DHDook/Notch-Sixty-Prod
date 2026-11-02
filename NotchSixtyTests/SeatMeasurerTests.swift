@@ -206,6 +206,9 @@ final class SeatMeasurerTests: XCTestCase {
         XCTAssertNil(blocker(split, [device, other], [.speaker(.frontLeft), .speaker(.frontRight)]))
         XCTAssertTrue(blocker(split, [device, other], [.speaker(.frontRight)])?.reason.contains("front-left") == true)
         XCTAssertNil(blocker([seat("A", mic(0)), seat("B", mic(1))], [device], [.speaker(.frontRight)]))
+        var narrow = device; narrow.inputChannelCount = 2
+        XCTAssertNil(blocker([seat("A", mic(0)), seat("B", mic(1))], [narrow]))
+        XCTAssertTrue(blocker([seat("A", mic(0)), seat("B", mic(2))], [narrow])?.reason.contains("only 2") == true)
         let many = (0..<(MeasurementSeatPlan.maxSeats + 1)).map { seat("S\($0)", mic($0)) }
         XCTAssertTrue(blocker(many, [device])?.reason.contains("at most") == true)
     }

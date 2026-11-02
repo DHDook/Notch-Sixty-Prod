@@ -58,6 +58,11 @@ extension MeasurementReadiness {
             guard let device = devices.first(where: { $0.uid == microphone.deviceUID }) else {
                 return Blocker(reason: "The microphone chosen for \(seat.name) is not connected.", fix: .selectMicrophone)
             }
+            if let count = device.inputChannelCount, microphone.channelIndex >= count {
+                return Blocker(
+                    reason: "\(seat.name) uses input channel \(microphone.channelIndex + 1), but \(device.name) has only \(count). Choose a lower channel.",
+                    fix: .selectMicrophone)
+            }
             deviceIDs.insert(device.deviceID)
             let key = "\(microphone.deviceUID)#\(microphone.channelIndex)"
             if let other = used[key] {

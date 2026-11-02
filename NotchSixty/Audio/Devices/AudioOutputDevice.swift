@@ -55,6 +55,8 @@ struct AudioInputDevice: Identifiable, Equatable, Sendable {
     let name: String
     let nominalSampleRate: Double
     let availableSampleRateRanges: [AudioSampleRateRange]
+    /// Input channels the device exposes; nil when unknown (readiness then does not check the channel).
+    var inputChannelCount: Int? = nil
 
     var id: String { uid }
 

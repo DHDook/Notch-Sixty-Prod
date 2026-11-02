@@ -602,7 +602,8 @@ private enum CoreAudioDeviceCatalogSupport {
                 operation: .readDeviceName
             ),
             nominalSampleRate: try readNominalSampleRate(deviceID: deviceID),
-            availableSampleRateRanges: try readAvailableSampleRateRanges(deviceID: deviceID)
+            availableSampleRateRanges: try readAvailableSampleRateRanges(deviceID: deviceID),
+            inputChannelCount: (try? readInputChannelCount(deviceID: deviceID)).flatMap { $0 > 0 ? Int($0) : nil }
         )
     }
 
@@ -628,9 +629,18 @@ private enum CoreAudioDeviceCatalogSupport {
     }
 
     static func readOutputChannelCount(deviceID: AudioDeviceID) throws -> UInt32 {
+        try readChannelCount(deviceID: deviceID, scope: kAudioObjectPropertyScopeOutput)
+    }
+
+    /// Input channels across all input streams (E24: lets readiness refuse a channel the device does not have).
+    static func readInputChannelCount(deviceID: AudioDeviceID) throws -> UInt32 {
+        try readChannelCount(deviceID: deviceID, scope: kAudioObjectPropertyScopeInput)
+    }
+
+    private static func readChannelCount(deviceID: AudioDeviceID, scope: AudioObjectPropertyScope) throws -> UInt32 {
         var address = AudioObjectPropertyAddress(
             mSelector: kAudioDevicePropertyStreamConfiguration,
-            mScope: kAudioObjectPropertyScopeOutput,
+            mScope: scope,
             mElement: kAudioObjectPropertyElementMain
         )
         var dataSize: UInt32 = 0

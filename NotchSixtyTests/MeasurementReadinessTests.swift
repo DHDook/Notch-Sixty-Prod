@@ -18,6 +18,7 @@ final class MeasurementReadinessTests: XCTestCase {
         i = ready(); i.permission = .denied; cases.append(("denied", i, .openSystemSettings))
         i = ready(); i.permission = .restricted; cases.append(("restricted", i, nil))
         i = ready(); i.hasInputDevice = false; cases.append(("no input", i, .selectMicrophone))
+        i = ready(); i.inputChannelIndex = 2; i.inputChannelCount = 2; cases.append(("channel count", i, .selectMicrophone))
         i = ready(); i.hasOutputDevice = false; cases.append(("no output", i, .selectOutput))
         i = ready(); i.requiresProfile = true; i.hasProfile = false; cases.append(("no profile", i, .describeSpeakers))
         i = ready(); i.requiresWork = true; i.hasWork = false; cases.append(("no work", i, .startSession))

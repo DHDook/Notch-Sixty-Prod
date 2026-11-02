@@ -25,6 +25,9 @@ enum MeasurementReadiness: Equatable {
     struct Inputs: Equatable {
         var permission: MicrophonePermissionStatus
         var hasInputDevice: Bool
+        /// The chosen microphone channel (zero-based) and how many input channels its device has (nil = unknown).
+        var inputChannelIndex: Int = 0
+        var inputChannelCount: Int?
         var hasOutputDevice: Bool
         /// The surface needs an enabled output device profile (multichannel, Speaker Lab).
         var requiresProfile: Bool = false
@@ -96,6 +99,11 @@ enum MeasurementReadiness: Equatable {
         }
         if !inputs.hasInputDevice {
             return .blocked(Blocker(reason: "Choose a measurement microphone.", fix: .selectMicrophone))
+        }
+        if let count = inputs.inputChannelCount, inputs.inputChannelIndex >= count {
+            return .blocked(Blocker(
+                reason: "Input channel \(inputs.inputChannelIndex + 1) is chosen, but this microphone device has only \(count). Choose a lower channel.",
+                fix: .selectMicrophone))
         }
         if !inputs.hasOutputDevice {
             return .blocked(Blocker(reason: "Choose the Playback System output device.", fix: .selectOutput))
