@@ -33,6 +33,15 @@ final class ReferenceRoomTransport: MultichannelCalibrationTransporting {
     private let blockFrames: Int
     private(set) var started = false
     private(set) var cancelled = false
+    /// E24 S5b1: the rooms the seats after the first hear, in `additionalSeats` order (the K-microphone pass). Each seat
+    /// has its own seeded noise and an optional clock offset in frames (its capture starts that many frames late).
+    var seatRooms: [ReferenceRoom] = []
+    var seatClockOffsetFrames: [Int] = []
+    /// Burst corruption: (seat index in pass order, frame range, amplitude) added to that seat's capture.
+    var bursts: [(seat: Int, frames: Range<Int>, amplitude: Float)] = []
+    /// A seat whose microphone delivers digital silence.
+    var silentSeats: Set<Int> = []
+    private var seatCaptures: [[Float]] = []
 
     init(program: RoomCorrectionSweepProgram, inputChannel: Int, outputChannel: UInt32,
          room: ReferenceRoom, blockFrames: Int = 512) throws {
@@ -67,13 +76,25 @@ final class ReferenceRoomTransport: MultichannelCalibrationTransporting {
             for i in 0..<Int(consumed) { feed[done + i] = block[i] }
             done += n
         }
-        var heard = room.render(feed, rate: rate)
-        // A real microphone always has a noise floor; the analyzer estimates SNR from it.
-        // Deterministic LCG noise at about -75 dBFS.
-        var state: UInt32 = 0x1234_5678
-        for i in heard.indices {
-            state = state &* 1_664_525 &+ 1_013_904_223
-            heard[i] += (Float(state >> 8) / Float(1 << 24) - 0.5) * 0.0003
+        func hear(_ room: ReferenceRoom, seed: UInt32, offset: Int, seat: Int) -> [Float] {
+            var heard = room.render(feed, rate: rate)
+            if offset > 0 { heard = [Float](repeating: 0, count: offset) + heard.dropLast(offset) }
+            // A real microphone always has a noise floor; the analyzer estimates SNR from it.
+            // Deterministic LCG noise at about -75 dBFS.
+            var state = seed
+            for i in heard.indices {
+                state = state &* 1_664_525 &+ 1_013_904_223
+                heard[i] += (Float(state >> 8) / Float(1 << 24) - 0.5) * 0.0003
+            }
+            for burst in bursts where burst.seat == seat {
+                for i in burst.frames where i < heard.count { heard[i] += burst.amplitude * (i % 2 == 0 ? 1 : -1) }
+            }
+            return silentSeats.contains(seat) ? [Float](repeating: 0, count: heard.count) : heard
+        }
+        let heard = hear(room, seed: 0x1234_5678, offset: seatClockOffsetFrames.first ?? 0, seat: 0)
+        seatCaptures = seatRooms.enumerated().map { k, seatRoom in
+            hear(seatRoom, seed: 0x1234_5678 &+ UInt32(k + 1) &* 7_919,
+                 offset: k + 1 < seatClockOffsetFrames.count ? seatClockOffsetFrames[k + 1] : 0, seat: k + 1)
         }
         N60TargetedRoomMeasurementBridgeReset(bridge)
         done = 0
@@ -102,11 +123,14 @@ final class ReferenceRoomTransport: MultichannelCalibrationTransporting {
             N60TargetedRoomMeasurementBridgeCopyCapture(bridge, $0.baseAddress!, UInt32($0.count))
         }
         guard copied == snapshot.totalFrameCount else { throw MultichannelCalibrationTransportError.incompleteCapture }
-        return MultichannelCalibrationCapture(samples: samples)
+        return MultichannelCalibrationCapture(samples: samples, seatSamples: seatCaptures)
     }
 
     func cancel() { cancelled = true }
 }
+
+/// E24 S5b1: the K-microphone pass is the same transport with extra seat rooms.
+typealias ReferenceRoomMultiMicTransport = ReferenceRoomTransport
 
 /// Counts measurements so seat `k` gets the room for seat `k` (the campaign is seat-major).
 @MainActor
@@ -115,6 +139,32 @@ final class ReferenceRoomTransportFactory {
     private(set) var made = 0
 
     init(layout: SyntheticReferenceRoom) { self.layout = layout }
+
+    /// E24 S5b1: the K-microphone pass. Seat `k` listens on input channel `k` of the reference interface, so the room it
+    /// hears is the one a sequential pass of seat `k` hears (the campaign is seat-major, three sources per seat).
+    /// Called from the capture task (off the main actor), so this state is lock-guarded, not actor-isolated.
+    private let multiMicLock = NSLock()
+    nonisolated(unsafe) var clockOffsetFrames: [Int] = []
+    nonisolated(unsafe) var configure: (@Sendable (ReferenceRoomTransport) -> Void)?
+    nonisolated(unsafe) private var recordedPasses: [(primary: MultichannelSeatInput, additional: [MultichannelSeatInput])] = []
+    nonisolated var passes: [(primary: MultichannelSeatInput, additional: [MultichannelSeatInput])] {
+        multiMicLock.lock(); defer { multiMicLock.unlock() }; return recordedPasses
+    }
+    nonisolated var passCount: Int { passes.count }
+
+    nonisolated func makeMultiMic(program: RoomCorrectionSweepProgram, outputChannel: UInt32,
+                      primary: MultichannelSeatInput, additional: [MultichannelSeatInput]) throws -> any MultichannelCalibrationTransporting {
+        multiMicLock.lock(); recordedPasses.append((primary, additional)); multiMicLock.unlock()
+        func room(_ input: MultichannelSeatInput) -> ReferenceRoom {
+            layout.room(measurement: input.channelIndex * layout.sourcesPerSeat + Int(outputChannel), outputChannel: outputChannel)
+        }
+        let transport = try ReferenceRoomTransport(
+            program: program, inputChannel: primary.channelIndex, outputChannel: outputChannel, room: room(primary))
+        transport.seatRooms = additional.map(room)
+        transport.seatClockOffsetFrames = clockOffsetFrames
+        configure?(transport)
+        return transport
+    }
 
     func make(program: RoomCorrectionSweepProgram, inputChannel: Int, outputChannel: UInt32) throws -> any MultichannelCalibrationTransporting {
         defer { made += 1 }
@@ -206,8 +256,15 @@ struct OfflineSetupRig {
         model = SystemSetupFlowModel(
             engine: engine, profiles: profiles, microphone: microphone, calibration: calibration,
             services: ProductionSystemSetupServices.production(
-                engine: engine, profiles: profiles, microphone: microphone, levelTransport: levelTransports.factory,
-                trialPlayback: trialPlayer),
+                engine: engine, profiles: profiles, microphone: microphone, calibration: calibration,
+                seats: CalibrationSeatMeasurer(calibration: calibration, pollSeconds: 0.005, transport: { pass in
+                    { primary, additional in
+                        try transports.makeMultiMic(
+                            program: pass.program, outputChannel: pass.physicalOutputChannel,
+                            primary: primary, additional: additional)
+                    }
+                }),
+                levelTransport: levelTransports.factory, trialPlayback: trialPlayer),
             sessions: SystemSetupSessionStore(directory: root.appendingPathComponent("sessions")),
             roomProjectsDirectory: root.appendingPathComponent("RoomCorrection"))
     }
