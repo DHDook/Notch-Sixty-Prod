@@ -4281,6 +4281,7 @@ final class AudioIOEngine: ObservableObject {
         if let installedLanes {
             program.roomLanes = installedLanes.plan
             program.laneDelayFrames = installedLanes.delays
+            program.subLaneCount = subwooferCount ?? 0
         }
         roomCorrectionInactiveReason = inactive
         return program.isNeutral ? nil : program

@@ -100,11 +100,8 @@ final class RoomCorrectionBassApplyTests: XCTestCase {
         XCTAssertFalse(probes.isEmpty)
         let cache = RoomCorrectionRateCache()
         do {
-            var bass = UnifiedGraphBassManagement(
-                subwoofers: [UnifiedGraphSubwoofer(), UnifiedGraphSubwoofer()])
             var program = emptyProgram()
-            let lanePlan = try RoomCorrectionBassApply.install(
-                plan, into: &bass, program: &program, sampleRate: rate, cache: cache)
+            let lanePlan = try RoomCorrectionBassApply.install(plan, program: &program, sampleRate: rate, cache: cache)
             XCTAssertEqual(program.roomLanes, lanePlan)
             XCTAssertEqual(program.laneDelayFrames, plan.mainDelayFrames(sampleRate: rate))
             XCTAssertEqual(lanePlan.sampleRate, rate)
@@ -126,14 +123,9 @@ final class RoomCorrectionBassApplyTests: XCTestCase {
                     XCTAssertLessThan(rms, 2.0, "lane \(lane) at \(rate)")
                 }
             }
-            // BASS_MGMT and DELAY values.
-            XCTAssertEqual(bass.subwoofers.map(\.gainDB), plan.subGainDB)
-            XCTAssertEqual(bass.subwoofers.map(\.polarityInverted), plan.subPolarityInverted)
+            // Sub delays stay within the graph limit (they are published through the profile, not the graph).
             let frames = plan.subDelayFrames(sampleRate: rate)
             XCTAssertTrue(frames.allSatisfy { $0 >= 0 && $0 <= Int(N60_GRAPH_MAX_DELAY_FRAMES) })
-            for (sub, seconds) in zip(bass.subwoofers, plan.subDelaySeconds) {
-                XCTAssertEqual(sub.delayMilliseconds, seconds * 1_000, accuracy: 1e-9)
-            }
         }
     }
 
@@ -160,12 +152,11 @@ final class RoomCorrectionBassApplyTests: XCTestCase {
         var absurd = try XCTUnwrap(RoomCorrectionBassApply.plan(
             optimisation: optimisation, channels: specs, lanes: lanes, laneCount: 6, latencyMode: .music20ms, enabled: true))
         absurd.subDelaySeconds[0] = 100
-        var bass = UnifiedGraphBassManagement(subwoofers: [UnifiedGraphSubwoofer(), UnifiedGraphSubwoofer()])
         var program = emptyProgram()
         XCTAssertThrowsError(try RoomCorrectionBassApply.install(
-            absurd, into: &bass, program: &program, sampleRate: 384_000, cache: RoomCorrectionRateCache())) {
+            absurd, program: &program, sampleRate: 384_000, cache: RoomCorrectionRateCache())) {
             guard case .delayTooLong = $0 as? RoomCorrectionBassApplyError else { return XCTFail("\($0)") }
         }
-        XCTAssertEqual(bass.subwoofers, [UnifiedGraphSubwoofer(), UnifiedGraphSubwoofer()])
+        XCTAssertNil(program.roomLanes)
     }
 }

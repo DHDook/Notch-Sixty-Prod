@@ -326,9 +326,21 @@ final class OfflineTrialSweepPlayer: TrialSweepPlaying {
     private(set) var sweepsPlayed = 0
     private(set) var stops = 0
 
+    /// E24 S3c: with joint bass installed the sweep also reaches the main seat through each subwoofer (the generator sits
+    /// ahead of bass management). Each path is the sub lane's published stage, the sub's gain, delay and polarity, and the
+    /// sub's reference room. `mainDelaySeconds` is the lane alignment delay on the measured lane.
+    struct SubPath { var lane: Int; var room: ReferenceRoom; var gainDB: Double; var delaySeconds: Double; var inverted: Bool }
+    var subPaths: [SubPath] = []
+    var mainDelaySeconds = 0.0
+
     init(room: ReferenceRoom, rate: Double) { self.room = room; self.rate = rate }
 
     func prepare() throws { if let preparationFailure { throw preparationFailure } }
+
+    private func delayed(_ x: [Float], seconds: Double) -> [Float] {
+        let frames = Int((seconds * rate).rounded())
+        return frames > 0 ? [Float](repeating: 0, count: frames) + x.dropLast(frames) : x
+    }
 
     func playSweep(_ candidate: RoomCorrectionDeployCandidate) async throws -> [Float] {
         try prepare()
@@ -336,7 +348,23 @@ final class OfflineTrialSweepPlayer: TrialSweepPlaying {
         // The offline graph is the 6-lane reference layout; the plan's stage and mask are the production ones.
         var graphCandidate = candidate
         graphCandidate.lanePlan.laneCount = 6
-        return room.render(try OfflineGraphTrialHost.renderGraph(graphCandidate, rate: rate), rate: rate)
+        var mixed = room.render(delayed(try OfflineGraphTrialHost.renderGraph(graphCandidate, rate: rate), seconds: mainDelaySeconds), rate: rate)
+        for path in subPaths {
+            // Move the sub lane's stage onto the measured lane so the same graph renders it.
+            var sub = graphCandidate
+            sub.lanePlan.stages = sub.lanePlan.stages.compactMap { stage in
+                guard stage.laneMask & (UInt64(1) << UInt64(path.lane)) != 0 else { return nil }
+                var moved = stage
+                moved.laneMask = UInt64(1) << UInt64(sub.measuredLane)
+                return moved
+            }
+            guard !sub.lanePlan.stages.isEmpty else { continue }
+            let gain = Float(pow(10.0, path.gainDB / 20) * (path.inverted ? -1 : 1))
+            let heard = path.room.render(
+                delayed(try OfflineGraphTrialHost.renderGraph(sub, rate: rate), seconds: path.delaySeconds), rate: rate)
+            for index in mixed.indices where index < heard.count { mixed[index] += gain * heard[index] }
+        }
+        return mixed
     }
 
     func stop() { stops += 1 }

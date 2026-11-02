@@ -9,7 +9,7 @@ import Foundation
 //
 // Realtime: none. Everything here is an immutable value built and checked off the audio thread. Allocation:
 // allocates freely (control thread). Sample rate: seconds are rounded to frames at the device rate, so every rate to
-// 384 kHz is covered. Channels: up to N60_LAYOUT_MAX_CHANNELS program lanes. Reset: dropping the value restores the
+// 384 kHz is covered. Channels: up to N60_LAYOUT_MAX_CHANNELS lanes, program and sub. Reset: dropping the value restores the
 // previous configuration.
 
 /// One main lane's alignment delay.
@@ -37,16 +37,19 @@ struct RoomCorrectionLaneInstall: Equatable, Codable, Sendable {
         self.subwooferCount = subwooferCount
     }
 
-    /// Checks the value on its own (no session): the design addresses lanes inside the layout, and the delays are
-    /// finite, non-negative and on distinct lanes.
+    /// The lanes the design addresses: the program lanes, then the subwoofers' lanes (E24 S3c).
+    var sourceLaneCount: Int { programLaneCount + subwooferCount }
+
+    /// Checks the value on its own (no session): the design addresses lanes inside the layout (program lanes and sub
+    /// lanes), and the delays are finite, non-negative and on distinct main lanes.
     func validate() throws {
-        guard programLaneCount >= 1, programLaneCount <= Int(N60_LAYOUT_MAX_CHANNELS), subwooferCount >= 0,
-              design.laneCount == programLaneCount, !design.lanes.isEmpty else {
+        guard programLaneCount >= 1, subwooferCount >= 0, sourceLaneCount <= Int(N60_LAYOUT_MAX_CHANNELS),
+              design.laneCount == sourceLaneCount, !design.lanes.isEmpty else {
             throw RoomCorrectionLaneInstallError.invalidLayout
         }
         var seen = Set<Int>()
         for item in design.lanes {
-            guard item.lane >= 0, item.lane < programLaneCount else {
+            guard item.lane >= 0, item.lane < sourceLaneCount else {
                 throw RoomCorrectionLaneInstallError.laneOutOfRange(item.lane)
             }
             guard seen.insert(item.lane).inserted else { throw RoomCorrectionLaneInstallError.duplicateLane(item.lane) }
@@ -61,9 +64,10 @@ struct RoomCorrectionLaneInstall: Equatable, Codable, Sendable {
         }
     }
 
-    /// True when the running session has the layout this correction was measured for.
+    /// True when the running session has the layout this correction was measured for. A session that does not say how
+    /// many subwoofers it has (binaural, Virtual Speakers) has none.
     func matches(programLaneCount lanes: Int, subwooferCount subs: Int?) -> Bool {
-        programLaneCount == lanes && (subs.map { $0 == subwooferCount } ?? true)
+        programLaneCount == lanes && (subs ?? 0) == subwooferCount && design.laneCount == sourceLaneCount
     }
 
     /// Whole frames of each main lane's delay at `sampleRate` (only non-zero delays).

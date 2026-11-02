@@ -37,6 +37,11 @@ final class SystemSetupFlowModel: ObservableObject {
     /// the user keeps in the Room Correction workspace.
     let roomProjects: RoomCorrectionProjectController
     private var profileBeforeBass: OutputDeviceProfileConfiguration?
+    /// E24 S3c: what Bass Apply replaced (the room configuration and its summary), the room-only lane design that
+    /// Correction produced, and the bass design's grids; the installed `lanes` is always their composition.
+    private var roomBeforeBass: (configuration: RoomCorrectionConfiguration, summary: RoomCorrectionCalibrationSummary?)?
+    private var roomOnlyInstall: RoomCorrectionLaneInstall?
+    private var bassLanePlan: RoomCorrectionBassApplyPlan?
     private let verifier: SystemSetupPostApplyMeasuring
     private let sessions: SystemSetupSessionStore
     private var verificationTask: Task<Void, Never>?
@@ -333,15 +338,33 @@ final class SystemSetupFlowModel: ObservableObject {
         }
     }
 
-    func applyBass() {
+    /// Installs the bass step. The sub gain, delay and polarity go to the profile as before; with the unified graph and an
+    /// enabled profile the optimiser's low-frequency grids also install on the main and sub lanes through the lane plan
+    /// (composed with the room design when Correction already ran), so the step is audible.
+    func applyBass() async {
         guard let bass, let profile = profiles.selectedSystemOutputDeviceProfile else {
             message = "Work out the bass design first."
             return
         }
         do {
             let before = profile
+            let roomBefore = (engine.roomCorrectionConfiguration, selectedRoomCorrectionSummary)
+            let plan = try await makeBassLanePlan(bass, profile: profile)
+            let composed = try plan.map { try composeInstall(room: roomOnlyInstall, bass: $0) }
+            if let composed { try await engine.precomputeRoomCorrectionPlans(for: composed) }
             try profiles.replaceSelectedSystemOutputDeviceProfile(try bass.applying(to: profile))
+            if let composed {
+                do {
+                    try profiles.replaceSelectedSystemRoomCorrection(
+                        RoomCorrectionConfiguration(enabled: true, lanes: composed), calibrationSummary: nil)
+                } catch {
+                    try? profiles.replaceSelectedSystemOutputDeviceProfile(before)
+                    throw error
+                }
+            }
             profileBeforeBass = before
+            roomBeforeBass = roomBefore
+            bassLanePlan = plan
             flow.choices.bassApplied = true
             message = nil
         } catch {
@@ -354,11 +377,56 @@ final class SystemSetupFlowModel: ObservableObject {
             if let previous = profileBeforeBass {
                 try profiles.replaceSelectedSystemOutputDeviceProfile(previous)
             }
+            // The room design alone when Correction ran after the bass step; otherwise what was there before.
+            if bassLanePlan != nil {
+                if let room = roomOnlyInstall {
+                    try profiles.replaceSelectedSystemRoomCorrection(
+                        RoomCorrectionConfiguration(enabled: true, lanes: room), calibrationSummary: nil)
+                } else if let before = roomBeforeBass {
+                    try profiles.replaceSelectedSystemRoomCorrection(before.configuration, calibrationSummary: before.summary)
+                }
+            }
+            bassLanePlan = nil
+            roomBeforeBass = nil
             profileBeforeBass = nil
             flow.choices.bassApplied = false
         } catch {
             message = "Restoring the previous bass settings failed: \(error.localizedDescription)"
         }
+    }
+
+    private var selectedRoomCorrectionSummary: RoomCorrectionCalibrationSummary? {
+        profiles.systemProfiles.first { $0.id == profiles.selectedSystemProfileID }?.state.roomCorrectionCalibration
+    }
+
+    /// The lane layout of the enabled profile on the selected output, or nil on the filter path (legacy kernel, no profile).
+    private func laneLayout(profile: OutputDeviceProfileConfiguration) throws
+        -> (shape: UnifiedGraphLayoutShape, subs: Int)? {
+        guard engine.unifiedGraphEnabled, profile.enabled, let output = engine.selectedOutputDevice else { return nil }
+        let routePlan = try profile.makeLivePlan(
+            availableDevices: engine.outputDevices, sampleRate: output.nominalSampleRate,
+            selectedOutputUID: output.uid, bassManagementEnabled: engine.bassManagementConfiguration.enabled)
+        guard let shape = UnifiedGraphLayoutShape(roles: routePlan.programLayout.roles) else { return nil }
+        return (shape, Int(routePlan.subwooferCount))
+    }
+
+    private func makeBassLanePlan(
+        _ bass: SystemSetupBassDesign, profile: OutputDeviceProfileConfiguration
+    ) async throws -> RoomCorrectionBassApplyPlan? {
+        guard bass.mode == .jointOptimised, let layout = try laneLayout(profile: profile) else { return nil }
+        return try bass.lanePlan(
+            frontLeft: layout.shape.frontLeft, frontRight: layout.shape.frontRight,
+            programLaneCount: layout.shape.laneCount, subwooferCount: layout.subs,
+            latencyMode: roomOnlyInstall?.design.latencyMode ?? correctionMode.latencyMode)
+    }
+
+    /// The lanes to install: the room design and the bass grids composed (either may be absent).
+    private func composeInstall(room: RoomCorrectionLaneInstall?, bass: RoomCorrectionBassApplyPlan?) throws -> RoomCorrectionLaneInstall {
+        let layoutSource = room.map { ($0.programLaneCount, $0.subwooferCount) }
+            ?? bass.map { ($0.design.laneCount - $0.subLanes.count, $0.subLanes.count) }
+        guard let (program, subs) = layoutSource else { throw RoomCorrectionLaneComposerError.nothingToCompose }
+        return try RoomCorrectionLaneComposer.compose(
+            room: room, bass: bass, name: room?.name ?? "Guided Setup Bass", programLaneCount: program, subwooferCount: subs)
     }
 
     // MARK: Correction
@@ -400,7 +468,8 @@ final class SystemSetupFlowModel: ObservableObject {
             if !correctionIsPrepared { prepareCorrection() }
             guard correctionIsPrepared else { return }
             try roomProjects.setTarget(correctionTarget.curve)
-            if let install = try await makeLaneInstall() {
+            if let roomInstall = try await makeLaneInstall() {
+                let install = try composeInstall(room: roomInstall, bass: bassLanePlan)
                 try await engine.precomputeRoomCorrectionPlans(for: install)
                 let rates = engine.selectedOutputDevice?.correctionSampleRates ?? [flow.choices.sampleRate ?? 48_000]
                 var mixed = false
@@ -411,10 +480,13 @@ final class SystemSetupFlowModel: ObservableObject {
                             try engine.roomCorrectionRateCache.plan(for: install.design, sampleRate: rate), mode: install.design.latencyMode)
                     }
                 }
+                var finalRoom = roomInstall
                 if !mixed, install.design.latencyMode.isMixedPhase {
-                    finalInstall = try await makeLaneInstall(forceMode: .video) ?? install
+                    finalRoom = try await makeLaneInstall(forceMode: .video) ?? roomInstall
+                    finalInstall = try composeInstall(room: finalRoom, bass: bassLanePlan)
                     try await engine.precomputeRoomCorrectionPlans(for: finalInstall)
                 }
+                roomOnlyInstall = finalRoom
                 try profiles.replaceSelectedSystemRoomCorrection(
                     RoomCorrectionConfiguration(enabled: true, lanes: finalInstall), calibrationSummary: nil)
                 flow.choices.designKind = mixed ? .mixedPhase : .minimumPhase
@@ -465,7 +537,8 @@ final class SystemSetupFlowModel: ObservableObject {
             lanes.append(RoomCorrectionLaneDesign(lane: lane, grid: grid))
         }
         guard !lanes.isEmpty else { return nil }
-        let design = RoomCorrectionMultiLaneDesign(latencyMode: mode, laneCount: shape.laneCount, lanes: lanes)
+        let design = RoomCorrectionMultiLaneDesign(
+            latencyMode: mode, laneCount: shape.laneCount + Int(routePlan.subwooferCount), lanes: lanes)
         return RoomCorrectionLaneInstall(
             name: "Guided Setup \(correctionTarget.title)", design: design, programLaneCount: shape.laneCount,
             subwooferCount: Int(routePlan.subwooferCount))
@@ -476,6 +549,13 @@ final class SystemSetupFlowModel: ObservableObject {
         do {
             try profiles.replaceSelectedSystemRoomCorrection(
                 snapshot.roomCorrection, calibrationSummary: snapshot.roomCorrectionCalibration)
+            // Bass Apply stays in force: put its grids back on their own.
+            if let bassPlan = bassLanePlan {
+                try profiles.replaceSelectedSystemRoomCorrection(
+                    RoomCorrectionConfiguration(enabled: true, lanes: try composeInstall(room: nil, bass: bassPlan)),
+                    calibrationSummary: nil)
+            }
+            roomOnlyInstall = nil
             flow.choices.correctionApplied = false
             seatPredictions = []
         } catch {
@@ -518,14 +598,59 @@ final class SystemSetupFlowModel: ObservableObject {
                 designID: design.id, sampleRate: rate, stages: [stage],
                 declaredLatencyFrames: filter.declaredLatencyFrames, laneCount: 2)
         }
-        let predicted = try RoomCorrectionPostApplyVerifier.prediction(
-            roomImpulse: impulse, roomArrivalFrames: Double(peak), stage: stage,
-            declaredLatencyFrames: plan.declaredLatencyFrames, sampleRate: rate, criteria: criteria)
+        let predicted: RoomCorrectionBandedResponse
+        if let paths = try bassPredictionPaths(plan: plan, measuredLane: measuredLane, sampleRate: rate), paths.count > 1 {
+            predicted = try RoomCorrectionPostApplyVerifier.prediction(
+                paths: paths, declaredLatencyFrames: plan.declaredLatencyFrames, sampleRate: rate, criteria: criteria)
+        } else {
+            predicted = try RoomCorrectionPostApplyVerifier.prediction(
+                roomImpulse: impulse, roomArrivalFrames: Double(peak), stage: stage,
+                declaredLatencyFrames: plan.declaredLatencyFrames, sampleRate: rate, criteria: criteria)
+        }
         return RoomCorrectionDeployCandidate(
             designID: plan.designID.uuidString, kind: kind, sampleRate: rate, lanePlan: plan,
             latencyMode: correctionMode.latencyMode, measuredLane: measuredLane,
             predictionCheck: RoomCorrectionPredictionCheck(passed: true, rmsErrorDB: predictedMainSeatErrorDB, reasons: []),
             predicted: predicted, sweepFrames: Int(2 * rate))
+    }
+
+    /// With the joint bass installed, a sweep on the measured lane reaches the main seat through that lane's main and through
+    /// every subwoofer (the generator sits ahead of bass management): one path each, from the seat's own measurements.
+    /// Nil when no bass design is installed. The bass-management crossover is not modelled (an E22 bench item).
+    private func bassPredictionPaths(
+        plan: RoomCorrectionLanePlan, measuredLane: Int, sampleRate rate: Double
+    ) throws -> [RoomCorrectionPredictionPath]? {
+        guard let bassPlan = bassLanePlan, let bass, let seat = calibration.seats.first(where: { $0.included && $0.weight > 0 })
+        else { return nil }
+        func stage(_ lane: Int) -> RoomCorrectionLaneStage? {
+            plan.stages.first { $0.laneMask & (1 << UInt64(lane)) != 0 }
+        }
+        // The installed alignment delay on the lane: the room's plus the bass design's.
+        let laneDelays = try composeInstall(room: roomOnlyInstall, bass: bassPlan).laneDelays
+        var paths: [RoomCorrectionPredictionPath] = []
+        var mainIndex = 0
+        for (index, source) in bass.channelSources.enumerated() {
+            guard let measurement = calibration.measurements.last(where: { $0.seatID == seat.id && $0.source == source }),
+                  let arrival = measurement.channel.quality.directArrivalSeconds else { continue }
+            var path = RoomCorrectionPredictionPath(
+                roomImpulse: measurement.channel.impulseResponse, arrivalFrames: arrival * rate)
+            switch source {
+            case .speaker:
+                defer { mainIndex += 1 }
+                guard bassPlan.mainLanes[mainIndex] == measuredLane else { continue }
+                path.stage = stage(measuredLane)
+                path.delaySeconds = laneDelays.first { $0.lane == measuredLane }?.seconds ?? 0
+            case .subwoofer:
+                let row = bass.rows[index]
+                let range = PhysicalSubwooferCalibration.gainRangeDB
+                path.stage = stage(bassPlan.subLanes[index - bassPlan.mainLanes.count])
+                path.gainDB = min(range.upperBound, max(range.lowerBound, row.gainDB))
+                path.delaySeconds = min(PhysicalSubwooferCalibration.delayRangeMilliseconds.upperBound, max(0, row.delayMilliseconds)) / 1_000
+                path.polarityInverted = row.polarityInverted
+            }
+            paths.append(path)
+        }
+        return paths
     }
 
     /// Room insights come from the advisor's analyser over the flow's own Room Correction project.
@@ -1083,7 +1208,7 @@ private struct SystemSetupBassStep: View {
             }
         }
         HStack {
-            Button("Apply") { model.applyBass() }.disabled(model.choices.bassApplied)
+            Button("Apply") { Task { await model.applyBass() } }.disabled(model.choices.bassApplied)
             Button("Revert") { model.revertBass() }.disabled(!model.choices.bassApplied)
             if model.choices.bassApplied { Label("Applied", systemImage: "checkmark.circle.fill") }
         }

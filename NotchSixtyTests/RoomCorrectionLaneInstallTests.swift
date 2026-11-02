@@ -17,7 +17,7 @@ final class RoomCorrectionLaneInstallTests: XCTestCase {
     private func install(mode: RoomCorrectionLatencyMode = .video, subs: Int = 1) throws -> RoomCorrectionLaneInstall {
         let g = try grid()
         let design = RoomCorrectionMultiLaneDesign(
-            latencyMode: mode, laneCount: 2,
+            latencyMode: mode, laneCount: 2 + subs,
             lanes: [RoomCorrectionLaneDesign(lane: 0, grid: g), RoomCorrectionLaneDesign(lane: 1, grid: g)])
         return RoomCorrectionLaneInstall(
             name: "Test", design: design, laneDelays: [RoomCorrectionLaneDelay(lane: 1, seconds: 0.001)],

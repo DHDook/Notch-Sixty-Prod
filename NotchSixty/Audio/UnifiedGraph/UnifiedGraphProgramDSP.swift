@@ -97,6 +97,9 @@ struct UnifiedGraphProgramDSP: Equatable, Sendable {
     var roomLanes: RoomCorrectionLanePlan?
     /// E10 S7: extra per-lane delay in frames (joint bass alignment of the mains), one DELAY stage per lane.
     var laneDelayFrames: [Int: UInt32] = [:]
+    /// E24 S3c: the subwoofer source lanes after the program lanes (`count ..< count + subLaneCount`). A lane plan may
+    /// cover them (joint bass grids); on a routed graph the routed output lanes after them are outside the plan.
+    var subLaneCount = 0
 
     init(
         stereo: UnifiedGraphConfiguration,
@@ -288,9 +291,11 @@ struct UnifiedGraphProgramDSP: Equatable, Sendable {
         var lanePlanCovered: UInt64 = 0
         var planLatency: UInt32 = 0
         if let plan = roomLanes {
-            guard !hasPostConvolver, plan.laneCount == count, !plan.stages.isEmpty,
-                  plan.stages.count <= count, plan.declaredLatencyFrames <= N60_GRAPH_MAX_DELAY_FRAMES,
-                  plan.coveredMask < (UInt64(1) << UInt64(count)) else {
+            let sourceLanes = count + subLaneCount
+            guard !hasPostConvolver, sourceLanes <= Int(spec.outputChannels), plan.laneCount == sourceLanes,
+                  !plan.stages.isEmpty, plan.stages.count <= sourceLanes,
+                  plan.declaredLatencyFrames <= N60_GRAPH_MAX_DELAY_FRAMES,
+                  plan.coveredMask < (UInt64(1) << UInt64(sourceLanes)) else {
                 throw UnifiedGraphFallbackReason.specRejected
             }
             for (index, stage) in plan.stages.enumerated() {
@@ -363,10 +368,11 @@ struct UnifiedGraphProgramDSP: Equatable, Sendable {
             let mask = virtualSpeakers ? UInt64(0b11) : programMask
             add(N60_STAGE_PAUSE_GATE, UnifiedGraphConfiguration.pauseGateStageId, mask: mask, params: params)
         }
-        // Room and IR convolvers delay the front pair only; every other lane (subs included) catches up.
+        // Room and IR convolvers delay the front pair only; every other lane (subs included) catches up. A lane plan
+        // aligns the source lanes only: routed output lanes after them are aligned by the routing compiler.
         if postLatency > 0, roomLanes != nil {
             guard postLatency <= N60_GRAPH_MAX_DELAY_FRAMES else { throw UnifiedGraphFallbackReason.latencyAlignment }
-            for lane in 0..<Int(spec.outputChannels) where lanePlanCovered & (UInt64(1) << UInt64(lane)) == 0 {
+            for lane in 0..<(count + subLaneCount) where lanePlanCovered & (UInt64(1) << UInt64(lane)) == 0 {
                 add(N60_STAGE_DELAY, Self.alignmentDelayBase + UInt32(lane), lane: UInt32(lane),
                     capacity: postLatency, params: [Float(postLatency)])
             }
