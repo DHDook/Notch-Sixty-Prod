@@ -2450,6 +2450,8 @@ struct RoomCorrectionProject: Identifiable, Codable, Equatable, Sendable {
     var measurements: [RoomCorrectionMeasurementPosition] = []
     var aggregate: RoomCorrectionAggregateResponse?
     var target: RoomCorrectionTargetCurve?
+    /// E24 S5: per-channel target shaping, saved with the project (absent in older files).
+    var targetShaping: ChannelTargetShaping?
     var designs: [RoomCorrectionDesign] = []
     var selectedDesignID: UUID?
 

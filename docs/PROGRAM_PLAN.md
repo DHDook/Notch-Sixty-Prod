@@ -277,7 +277,7 @@ the shipped UI.
 - [ ] E24 S2b: optimizer, characterization, FIR-verify, evidence, guided-workflow and Quiet Zone survey controllers stop playback with a notice (owner sign-off); `deployLatestDesign` keeps refusing by design
 - [x] Real post-apply verification; wizard offers mixed phase; joint-bass grid filters deployed
 - [x] E11 leftovers wired: repeat averaging and timing in Room Correction and multichannel; Analysis tab (distortion, RT60/EDT)
-- [ ] E12 leftovers: shared microphone and seat cards; wizard multi-mic pass; target shaping persists
+- [ ] E12 leftovers: shared microphone and seat cards; wizard multi-mic pass; target shaping persists (target shaping persisted; shared cards and wizard multi-mic remain)
 - [ ] Acceptance: harness green with no expected-fails; owner smoke checklist
 - [ ] Process safeguards (two kinds of done, deferral ledger, ship gate) and a ledger audit of E4, E6, E8, E9, E13
 
