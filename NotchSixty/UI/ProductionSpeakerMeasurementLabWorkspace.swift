@@ -28,6 +28,7 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
     @ObservedObject var microphone: RoomCorrectionCalibrationController
     @ObservedObject var profiles: ProductProfileController
     var roomCorrectionProjects: RoomCorrectionProjectController?
+    var multichannelCalibration: MultichannelCalibrationController?
     @StateObject private var lab: SpeakerMeasurementLabController
     @StateObject private var alignment:
         CoherentSubwooferAlignmentGuidedController
@@ -64,9 +65,11 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
         engine: AudioIOEngine,
         microphone: RoomCorrectionCalibrationController,
         profiles: ProductProfileController,
-        roomCorrectionProjects: RoomCorrectionProjectController? = nil
+        roomCorrectionProjects: RoomCorrectionProjectController? = nil,
+        multichannelCalibration: MultichannelCalibrationController? = nil
     ) {
         self.roomCorrectionProjects = roomCorrectionProjects
+        self.multichannelCalibration = multichannelCalibration
         _engine = ObservedObject(wrappedValue: engine)
         _microphone = ObservedObject(wrappedValue: microphone)
         _profiles = ObservedObject(wrappedValue: profiles)
@@ -90,27 +93,27 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
             VStack(alignment: .leading, spacing: 20) {
                 header
                 tabPicker
-                if tab == .advanced {
-                    advancedNote
-                }
-                environmentCard
-                protocolComposerCard
-                sessionCard
-                reportCard
-                if tab == .advanced {
-                    MeasurementRTASPLCard(microphone: microphone)
-                    MeasurementGeneratorCard(engine: engine, profiles: profiles, microphone: microphone)
-                    MeasurementSeatPickerCard(microphone: microphone, plan: $seatPlan)
-                    MeasurementAnalysisCard(capture: lab.session?.captures.last)
-                    MeasurementLibraryView(
-                        latestCapture: lab.session?.captures.last, projects: roomCorrectionProjects,
-                        equalizerBands: engine.stereoEQConfiguration.editableBands,
-                        outputSampleRate: engine.selectedOutputDevice?.nominalSampleRate ?? 48_000)
-                    protectedDriverCommissioningCard
+                if tab == .analysis {
+                    analysisTabView
                 } else {
-                    coherentAlignmentCard
+                    if tab == .advanced {
+                        advancedNote
+                    }
+                    environmentCard
+                    if tab == .measure {
+                        levelAndNoiseSection
+                    }
+                    protocolComposerCard
+                    sessionCard
+                    reportCard
+                    if tab == .advanced {
+                        MeasurementSeatPickerCard(microphone: microphone, plan: $seatPlan)
+                        protectedDriverCommissioningCard
+                    } else {
+                        coherentAlignmentCard
+                    }
+                    historyCard
                 }
-                historyCard
 
                 if let error = actionError
                     ?? alignment.lastErrorDescription
@@ -267,6 +270,54 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
                 draft.applyModeDefaults(first)
             }
         }
+    }
+
+    /// E24 S4b: the level-setting tools every measurement uses (design note 9, Q6).
+    private var levelAndNoiseSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Level and noise").font(.title3.bold())
+            Text("Check the room noise and set the microphone and playback level before a sweep. The Generator plays through the live correction when one is active.")
+                .font(.callout).foregroundStyle(.secondary)
+            MeasurementRTASPLCard(microphone: microphone)
+            MeasurementGeneratorCard(engine: engine, profiles: profiles, microphone: microphone)
+        }
+    }
+
+    @ViewBuilder private var analysisTabView: some View {
+        if let projects = roomCorrectionProjects, let multi = multichannelCalibration {
+            ObservedBox(object: projects) { projects in
+                ObservedBox(object: multi) { multi in
+                    analysisTab(
+                        positions: projects.positions, sweep: projects.project?.sweep,
+                        measurements: multi.measurements, seats: multi.seats)
+                }
+            }
+        } else if let projects = roomCorrectionProjects {
+            ObservedBox(object: projects) { projects in
+                analysisTab(positions: projects.positions, sweep: projects.project?.sweep, measurements: [], seats: [])
+            }
+        } else {
+            analysisTab(positions: [], sweep: nil, measurements: [], seats: [])
+        }
+    }
+
+    private func analysisTab(
+        positions: [RoomCorrectionMeasurementPosition], sweep: RoomCorrectionSweepSettings?,
+        measurements: [MultichannelCalibrationMeasurement], seats: [MultichannelCalibrationSeat]
+    ) -> some View {
+        var sources: [MeasurementAnalysisSource] = []
+        if let capture = lab.session?.captures.last { sources.append(.speakerLab(capture)) }
+        if let position = positions.last {
+            if !position.left.impulseResponse.isEmpty { sources.append(.roomCorrection(position: position, left: true, sweep: sweep)) }
+            if !position.right.impulseResponse.isEmpty { sources.append(.roomCorrection(position: position, left: false, sweep: sweep)) }
+        }
+        if let measurement = measurements.last {
+            sources.append(.multichannel(measurement, seatName: seats.first { $0.id == measurement.seatID }?.name))
+        }
+        return MeasurementAnalysisTab(
+            liveSources: sources, latestCapture: lab.session?.captures.last, projects: roomCorrectionProjects,
+            equalizerBands: engine.stereoEQConfiguration.editableBands,
+            outputSampleRate: engine.selectedOutputDevice?.nominalSampleRate ?? 48_000)
     }
 
     private var advancedNote: some View {
@@ -2087,11 +2138,12 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
     }
 }
 
-/// The lab's two tabs. Measure holds the captures a typical system needs;
-/// Advanced holds directivity and per-driver work. Every mode is in exactly
-/// one tab.
+/// The lab's tabs. Measure holds the captures a typical system needs and the level and noise tools;
+/// Analysis reads a capture or library record and has no protocol modes; Advanced holds directivity
+/// and per-driver work. Every mode is in exactly one tab.
 enum SpeakerMeasurementLabTab: String, CaseIterable, Identifiable {
     case measure
+    case analysis
     case advanced
 
     var id: String { rawValue }
@@ -2099,6 +2151,7 @@ enum SpeakerMeasurementLabTab: String, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .measure: return "Measure"
+        case .analysis: return "Analysis"
         case .advanced: return "Advanced"
         }
     }
@@ -2115,4 +2168,11 @@ enum SpeakerMeasurementLabTab: String, CaseIterable, Identifiable {
             return .advanced
         }
     }
+}
+
+/// Observes an optional-in-the-parent object from a `@ViewBuilder` branch.
+private struct ObservedBox<Object: ObservableObject, Content: View>: View {
+    @ObservedObject var object: Object
+    @ViewBuilder let content: (Object) -> Content
+    var body: some View { content(object) }
 }

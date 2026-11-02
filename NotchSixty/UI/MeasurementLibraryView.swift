@@ -37,6 +37,19 @@ final class MeasurementLibraryModel: ObservableObject {
         perform { _ = try library.save(record, impulseResponse: capture.impulseResponse) }
     }
 
+    /// Saves an Analysis source with its raw capture and sweep settings, so distortion works on the record later.
+    func save(source: MeasurementAnalysisSource, name: String, group: String) {
+        var record = MeasurementRecord(
+            name: name, group: group, createdAt: Date(), sampleRate: source.sampleRate, channel: source.title)
+        record.sweep = source.sweep
+        record.quality.directArrivalSeconds = source.arrivalSeconds
+        perform {
+            _ = try library.save(
+                record, impulseResponse: source.impulseResponse,
+                rawCapture: source.rawCapture.isEmpty ? nil : source.rawCapture)
+        }
+    }
+
     func rename(_ id: UUID, to name: String) { perform { try library.updateMetadata(id: id) { $0.name = name } } }
     func setNotes(_ id: UUID, _ notes: String) { perform { try library.updateMetadata(id: id) { $0.notes = notes } } }
     func setGroup(_ id: UUID, _ group: String) { perform { try library.updateMetadata(id: id) { $0.group = group } } }
@@ -138,7 +151,7 @@ enum MeasurementPlotLayout {
 }
 
 struct MeasurementLibraryView: View {
-    @StateObject private var model = MeasurementLibraryModel()
+    @ObservedObject var model: MeasurementLibraryModel
     let latestCapture: SpeakerMeasurementLabCapture?
     var projects: RoomCorrectionProjectController?
     /// E11 S10: current EQ bands and output rate, for the "predicted with current EQ" overlay.

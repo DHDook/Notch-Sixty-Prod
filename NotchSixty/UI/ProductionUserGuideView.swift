@@ -482,9 +482,9 @@ enum ProductionUserGuideCatalog {
             id: "measurement-lab",
             category: .measurement,
             title: "Measurement Lab",
-            summary: "Advanced repeatable acoustic capture for transfer function, timing, phase, directivity and protected-driver evidence.",
+            summary: "Repeatable acoustic capture for transfer function, timing and phase, with level and noise tools, an Analysis tab, and advanced directivity and protected-driver evidence.",
             systemImage: "waveform.badge.magnifyingglass",
-            keywords: ["measurement lab", "sweep", "impulse response", "transfer function", "phase", "SNR", "directivity", "driver"],
+            keywords: ["measurement lab", "sweep", "impulse response", "transfer function", "phase", "SNR", "directivity", "driver", "analysis", "distortion", "THD", "RT60", "EDT", "decay", "RTA", "SPL", "generator", "library", "level and noise"],
             sections: [
                 section(
                     "capture",
@@ -492,6 +492,22 @@ enum ProductionUserGuideCatalog {
                     [
                         "Measurement Lab records repeated, identity-bound acoustic captures rather than trusting a single sweep. Qualification checks include source, microphone, routing, sample rate, clipping, repeat count and stability appropriate to the protocol.",
                         "Protected Low/Mid/High driver protocols add crossover, limiter and physical-route provenance. They are never a license to connect an unprotected driver directly to a full-range amplifier output."
+                    ]
+                ),
+                section(
+                    "level-and-noise",
+                    "Level and noise",
+                    [
+                        "The Measure tab opens with Level and noise: the RTA and SPL monitor, and the Generator. Use them before a sweep to read the room noise and to set the microphone and playback level; every measurement depends on that level. They sit on Measure rather than under Advanced for that reason.",
+                        "The Generator plays through the live correction when one is active, and says so. The seat picker and protected-driver commissioning stay under Advanced."
+                    ]
+                ),
+                section(
+                    "analysis",
+                    "Analysis tab",
+                    [
+                        "Analysis reads one source at a time: the latest Speaker Lab, Room Correction or multichannel capture, or a saved library record. It shows harmonic distortion (H2 to H5 and total, in dB below the fundamental), decay (EDT, T20, T30 and RT60 per octave or third-octave from 63 Hz to 8 kHz), and the gated response, waterfall and spectrogram. The measurement library now lives here.",
+                        "Distortion needs the raw recording and the sweep settings. Room Correction captures keep both; Speaker Lab and multichannel captures keep only the impulse response, and a library record has them only if it was saved from a Room Correction capture with Save to library. Where they are missing the tab says so instead of showing a curve. A sweep shorter than the stated minimum cannot separate the harmonics from the room response."
                     ]
                 ),
                 section(

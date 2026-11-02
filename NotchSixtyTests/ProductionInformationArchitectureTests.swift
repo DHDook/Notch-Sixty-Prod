@@ -475,6 +475,9 @@ final class ProductionInformationArchitectureTests: XCTestCase {
         let advanced = SpeakerMeasurementLabTab.advanced.modes
         XCTAssertEqual(measure, [.wholeSpeakerOnAxis, .subwooferNearField, .coherentMainsSubTiming])
         XCTAssertEqual(advanced, [.wholeSpeakerOffAxis, .protectedDriverNearField, .driverNearField])
+        XCTAssertEqual(SpeakerMeasurementLabTab.analysis.modes, [], "Analysis has no protocol modes")
+        XCTAssertEqual(
+            SpeakerMeasurementLabTab.allCases, [.measure, .analysis, .advanced], "Analysis sits between Measure and Advanced")
         XCTAssertEqual(Set(measure + advanced), Set(SpeakerMeasurementLabMode.allCases))
         XCTAssertEqual(measure.count + advanced.count, SpeakerMeasurementLabMode.allCases.count)
         XCTAssertEqual(

@@ -94,7 +94,7 @@ final class MeasurementAnalysisViewsTests: XCTestCase {
             AnyView(MeasurementWaterfallView(waterfall: wf)),
             AnyView(MeasurementSpectrogramView(spectrogram: sg)),
             AnyView(MeasurementGatedPlotView(plot: plot)),
-            AnyView(MeasurementAnalysisCard(capture: nil)),
+            AnyView(MeasurementAnalysisCard(source: nil)),
         ]
         for view in views {
             let renderer = ImageRenderer(content: view.frame(width: 400, height: 300))
