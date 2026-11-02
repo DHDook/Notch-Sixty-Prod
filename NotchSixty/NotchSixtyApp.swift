@@ -1623,10 +1623,12 @@ enum VolumeFeedbackPresentation {
     /// The widest strings `readout` can return in one mode, with 8 standing
     /// in for any digit (digits are tabular, so all share one width).
     /// The menu bar reserves the widest of these so the readout never
-    /// changes its width as the level moves.
+    /// changes its width as the level moves. In percent mode the slot is
+    /// exactly "100%" so that readout sits flush; the menu bar shows a
+    /// speaker-slash symbol, not text, when muted.
     static func readoutWidthTemplates(decibels: Bool, alwaysTenths: Bool) -> [String] {
-        guard decibels else { return ["100%", "Muted"] }
-        return [alwaysTenths ? "−88.8 dB" : "−88 dB", "−∞ dB", "Muted"]
+        guard decibels else { return ["100%"] }
+        return [alwaysTenths ? "−88.8 dB" : "−88 dB", "−∞ dB"]
     }
 
     static func decibelReadout(_ decibels: Double?, alwaysTenths: Bool = false) -> String {
@@ -1996,7 +1998,13 @@ private struct MenuBarVolumeLabel: View {
             if preferences.showVolumeInMenuBar {
                 ZStack(alignment: .leading) {
                     ForEach(widthTemplates, id: \.self) { Text($0).hidden() }
-                    Text(readout)
+                }
+                .overlay(alignment: .leading) {
+                    if engine.masterVolumeConfiguration.muted {
+                        Image(systemName: "speaker.slash.fill")
+                    } else {
+                        Text(readout)
+                    }
                 }
                 .font(.system(size: 12, weight: .medium))
                 .monospacedDigit()

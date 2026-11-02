@@ -106,7 +106,7 @@ final class ProductionInformationArchitectureTests: XCTestCase {
                 XCTAssertLessThanOrEqual(width(text), slot + 0.01, text)
                 db -= step
             }
-            for text in ["−∞ dB", "Muted"] {
+            for text in ["−∞ dB"] {
                 XCTAssertLessThanOrEqual(width(text), slot + 0.01, text)
             }
         }
