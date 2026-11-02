@@ -115,6 +115,10 @@ struct MultichannelSeatPass {
     var program: RoomCorrectionSweepProgram
     var physicalOutputChannel: UInt32
     var sampleRate: Double
+    /// E24 S5b2: separate-device timing. The chirp that plays ahead of the sweep, on its own channel.
+    var referenceProgram: MultichannelReferenceProgram? = nil
+    /// E24 S5b2: the output when it differs from `program.sweepSamples` (the reference speaker's own chirp, then the sweep).
+    var outputSweepSamples: [Float]? = nil
 }
 
 struct MultichannelCalibrationCampaignArchive: Codable, Equatable, Sendable {
@@ -347,7 +351,7 @@ final class MultichannelCalibrationController: ObservableObject {
             busyDescription: state == .measuring ? "measuring" : (state == .analyzing ? "being analysed" : nil),
             timelineBytes: bytes))
         guard perSeat, base.isReady,
-              let blocker = MeasurementReadiness.perSeatBlocker(seats: pending, devices: microphone.inputDevices)
+              let blocker = MeasurementReadiness.perSeatBlocker(seats: pending, devices: microphone.inputDevices, sources: sources)
         else { return base }
         return .blocked(blocker)
     }
@@ -934,7 +938,7 @@ final class MultichannelCalibrationController: ObservableObject {
         }
     }
 
-    private func physicalOutputChannel(
+    func physicalOutputChannel(
         for source: MultichannelCalibrationSource,
         routePlan: LiveNChannelOutputRoutePlan
     ) throws -> UInt32 {

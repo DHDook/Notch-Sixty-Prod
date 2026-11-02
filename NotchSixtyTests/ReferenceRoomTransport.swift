@@ -42,10 +42,20 @@ final class ReferenceRoomTransport: MultichannelCalibrationTransporting {
     /// A seat whose microphone delivers digital silence.
     var silentSeats: Set<Int> = []
     private var seatCaptures: [[Float]] = []
+    /// E24 S5b2: the timing chirp's own output channel and, per seat in pass order, the room that speaker has to the seat.
+    private let referenceProgram: MultichannelReferenceProgram?
+    var referenceRooms: [ReferenceRoom] = []
+    /// Per seat in pass order, how loudly the chirp reaches it (0 hides it).
+    var referenceGains: [Float] = []
+    /// Clock drift per seat in pass order, in ppm: a sample is dropped every 1e6/ppm frames, as an uncompensated
+    /// device would slip against the output clock.
+    var seatDriftPPM: [Double] = []
 
     init(program: RoomCorrectionSweepProgram, inputChannel: Int, outputChannel: UInt32,
-         room: ReferenceRoom, blockFrames: Int = 512) throws {
-        guard let bridge = program.sweepSamples.withUnsafeBufferPointer({
+         room: ReferenceRoom, blockFrames: Int = 512,
+         outputSweepSamples: [Float]? = nil, referenceProgram: MultichannelReferenceProgram? = nil) throws {
+        self.referenceProgram = referenceProgram
+        guard let bridge = (outputSweepSamples ?? program.sweepSamples).withUnsafeBufferPointer({
             N60TargetedRoomMeasurementBridgeCreate(
                 $0.baseAddress!, UInt32($0.count), UInt32(program.leadInFrames), UInt32(program.tailFrames),
                 UInt32(inputChannel), outputChannel)
@@ -54,6 +64,13 @@ final class ReferenceRoomTransport: MultichannelCalibrationTransporting {
         self.room = room
         self.rate = program.sampleRate
         self.blockFrames = blockFrames
+        if let referenceProgram {
+            let attached = referenceProgram.samples.withUnsafeBufferPointer {
+                N60TargetedRoomMeasurementBridgeAttachReferenceProgram(
+                    bridge, $0.baseAddress, UInt32($0.count), UInt32(referenceProgram.startFrame), referenceProgram.outputChannelIndex)
+            }
+            guard attached else { throw MultichannelCalibrationTransportError.invalidOutputProgram }
+        }
     }
 
     deinit { N60TargetedRoomMeasurementBridgeDestroy(bridge) }
@@ -63,22 +80,53 @@ final class ReferenceRoomTransport: MultichannelCalibrationTransporting {
         let total = Int(bridge.pointee.captureFrameCount)
         let silence = [Float](repeating: 0, count: blockFrames)
         var feed = [Float](repeating: 0, count: total)
+        var referenceFeed = [Float](repeating: 0, count: total)
         var block = [Float](repeating: 0, count: blockFrames)
+        var referenceBlock = [Float](repeating: 0, count: blockFrames)
         var done = 0
         while done < total {
             let n = min(blockFrames, total - done)
+            let hasReference = referenceProgram != nil
             let consumed = silence.withUnsafeBufferPointer { mic in
                 block.withUnsafeMutableBufferPointer { out in
-                    N60TargetedRoomMeasurementProcessProgramStrided(
-                        bridge, mic.baseAddress!, 1, nil, 0, out.baseAddress!, 1, nil, 0, UInt32(n))
+                    referenceBlock.withUnsafeMutableBufferPointer { ref in
+                        N60TargetedRoomMeasurementProcessProgramStrided(
+                            bridge, mic.baseAddress!, 1, nil, 0, out.baseAddress!, 1,
+                            hasReference ? ref.baseAddress : nil, hasReference ? 1 : 0, UInt32(n))
+                    }
                 }
             }
-            for i in 0..<Int(consumed) { feed[done + i] = block[i] }
+            for i in 0..<Int(consumed) { feed[done + i] = block[i]; referenceFeed[done + i] = referenceBlock[i] }
             done += n
         }
         func hear(_ room: ReferenceRoom, seed: UInt32, offset: Int, seat: Int) -> [Float] {
             var heard = room.render(feed, rate: rate)
+            if referenceProgram != nil, seat < referenceRooms.count {
+                let gain = seat < referenceGains.count ? referenceGains[seat] : 1
+                for (i, v) in referenceRooms[seat].render(referenceFeed, rate: rate).enumerated() { heard[i] += gain * v }
+            }
             if offset > 0 { heard = [Float](repeating: 0, count: offset) + heard.dropLast(offset) }
+            if seat < seatDriftPPM.count, seatDriftPPM[seat] > 0 {
+                // The input clock runs fast against the output clock: a smooth time warp, read with a windowed sinc
+                // (a drift-compensating aggregate resamples rather than slipping samples).
+                let ratio = 1 + seatDriftPPM[seat] * 1e-6
+                let half = 32
+                let source = heard
+                for i in heard.indices {
+                    let position = Double(i) * ratio
+                    let centre = Int(position.rounded(.down))
+                    var sum = 0.0
+                    let lo = max(0, centre - half + 1), hi = min(source.count - 1, centre + half)
+                    if lo > hi { heard[i] = 0; continue }
+                    for j in lo...hi {
+                        let x = position - Double(j)
+                        let sinc = x == 0 ? 1.0 : sin(Double.pi * x) / (Double.pi * x)
+                        let window = 0.5 + 0.5 * cos(Double.pi * x / Double(half))
+                        sum += Double(source[j]) * sinc * window
+                    }
+                    heard[i] = Float(sum)
+                }
+            }
             // A real microphone always has a noise floor; the analyzer estimates SNR from it.
             // Deterministic LCG noise at about -75 dBFS.
             var state = seed
@@ -100,10 +148,14 @@ final class ReferenceRoomTransport: MultichannelCalibrationTransporting {
         done = 0
         while done < total {
             let n = min(blockFrames, total - done)
+            let hasReference = referenceProgram != nil
             _ = heard.withUnsafeBufferPointer { mic in
                 block.withUnsafeMutableBufferPointer { out in
-                    N60TargetedRoomMeasurementProcessProgramStrided(
-                        bridge, mic.baseAddress! + done, 1, nil, 0, out.baseAddress!, 1, nil, 0, UInt32(n))
+                    referenceBlock.withUnsafeMutableBufferPointer { ref in
+                        N60TargetedRoomMeasurementProcessProgramStrided(
+                            bridge, mic.baseAddress! + done, 1, nil, 0, out.baseAddress!, 1,
+                            hasReference ? ref.baseAddress : nil, hasReference ? 1 : 0, UInt32(n))
+                    }
                 }
             }
             done += n
@@ -152,16 +204,40 @@ final class ReferenceRoomTransportFactory {
     }
     nonisolated var passCount: Int { passes.count }
 
+    /// Which seat of the room a microphone input hears; by default its channel index (one interface, channel per seat).
+    nonisolated(unsafe) var seatOfInput: @Sendable (MultichannelSeatInput) -> Int = { $0.channelIndex }
+    /// E24 S5b2: per input device UID, a clock offset in frames and a drift in ppm (seats on that device share them).
+    nonisolated(unsafe) var deviceClock: [String: (offsetFrames: Int, driftPPM: Double)] = [:]
+    nonisolated(unsafe) private var recordedPassSweeps: [(chirp: Bool, selfChirp: Bool)] = []
+    nonisolated var passSweeps: [(chirp: Bool, selfChirp: Bool)] {
+        multiMicLock.lock(); defer { multiMicLock.unlock() }; return recordedPassSweeps
+    }
+
     nonisolated func makeMultiMic(program: RoomCorrectionSweepProgram, outputChannel: UInt32,
-                      primary: MultichannelSeatInput, additional: [MultichannelSeatInput]) throws -> any MultichannelCalibrationTransporting {
-        multiMicLock.lock(); recordedPasses.append((primary, additional)); multiMicLock.unlock()
+                      primary: MultichannelSeatInput, additional: [MultichannelSeatInput],
+                      outputSweepSamples: [Float]? = nil, referenceProgram: MultichannelReferenceProgram? = nil) throws -> any MultichannelCalibrationTransporting {
+        multiMicLock.lock()
+        recordedPasses.append((primary, additional))
+        recordedPassSweeps.append((referenceProgram != nil || outputSweepSamples != nil, outputSweepSamples != nil))
+        multiMicLock.unlock()
         func room(_ input: MultichannelSeatInput) -> ReferenceRoom {
-            layout.room(measurement: input.channelIndex * layout.sourcesPerSeat + Int(outputChannel), outputChannel: outputChannel)
+            layout.room(measurement: seatOfInput(input) * layout.sourcesPerSeat + Int(outputChannel), outputChannel: outputChannel)
+        }
+        func referenceRoom(_ input: MultichannelSeatInput) -> ReferenceRoom {
+            layout.room(measurement: seatOfInput(input) * layout.sourcesPerSeat, outputChannel: 0)
         }
         let transport = try ReferenceRoomTransport(
-            program: program, inputChannel: primary.channelIndex, outputChannel: outputChannel, room: room(primary))
+            program: program, inputChannel: primary.channelIndex, outputChannel: outputChannel, room: room(primary),
+            outputSweepSamples: outputSweepSamples, referenceProgram: referenceProgram)
         transport.seatRooms = additional.map(room)
-        transport.seatClockOffsetFrames = clockOffsetFrames
+        transport.referenceRooms = ([primary] + additional).map(referenceRoom)
+        let inputs = [primary] + additional
+        if deviceClock.isEmpty {
+            transport.seatClockOffsetFrames = clockOffsetFrames
+        } else {
+            transport.seatClockOffsetFrames = inputs.map { deviceClock[$0.device.uid]?.offsetFrames ?? 0 }
+            transport.seatDriftPPM = inputs.map { deviceClock[$0.device.uid]?.driftPPM ?? 0 }
+        }
         configure?(transport)
         return transport
     }
@@ -209,7 +285,9 @@ struct OfflineSetupRig {
     static let outputUID = "e24-reference-output"
     static let inputUID = "e24-reference-mic"
 
-    init(rate: Double, permission: MicrophonePermissionStatus = .authorized, seats: Int = 3) throws {
+    static let secondInputUID = "e24-reference-mic-b"
+
+    init(rate: Double, permission: MicrophonePermissionStatus = .authorized, seats: Int = 3, secondMicrophone: Bool = false) throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("NotchSixty-E24S0-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
@@ -222,13 +300,16 @@ struct OfflineSetupRig {
         let input = AudioInputDevice(
             deviceID: 9_002, uid: Self.inputUID, name: "Reference Measurement Mic", nominalSampleRate: rate,
             availableSampleRateRanges: ranges)
+        let secondInput = AudioInputDevice(
+            deviceID: 9_003, uid: Self.secondInputUID, name: "Reference Measurement Mic B", nominalSampleRate: rate,
+            availableSampleRateRanges: ranges)
         engine = AudioIOEngine(deviceCatalog: OfflineOutputCatalog(devices: [output]))
         _ = try engine.refreshOutputDevices()
         try engine.selectOutput(uid: Self.outputUID)
         engine.unifiedGraphEnabled = true  // the production default (the legacy kernel is a flag)
         profiles = ProductProfileController(engine: engine, storageURL: root.appendingPathComponent("profiles.json"))
         microphone = RoomCorrectionCalibrationController(
-            engine: engine, inputCatalog: OfflineInputCatalog(devices: [input]),
+            engine: engine, inputCatalog: OfflineInputCatalog(devices: secondMicrophone ? [input, secondInput] : [input]),
             permissionClient: OfflinePermission(status: permission))
         microphone.prepareForUse()
         _ = try? microphone.refreshInputDevices()
@@ -261,7 +342,8 @@ struct OfflineSetupRig {
                     { primary, additional in
                         try transports.makeMultiMic(
                             program: pass.program, outputChannel: pass.physicalOutputChannel,
-                            primary: primary, additional: additional)
+                            primary: primary, additional: additional,
+                            outputSweepSamples: pass.outputSweepSamples, referenceProgram: pass.referenceProgram)
                     }
                 }),
                 levelTransport: levelTransports.factory, trialPlayback: trialPlayer),

@@ -246,6 +246,16 @@ final class SystemSetupFlowModel: ObservableObject {
         }
     }
 
+    /// The input device of one seat's microphone (E24 S5b2). Devices other than the first make the pass use timing chirps.
+    func setSeatDevice(_ seatID: UUID, uid: String) {
+        guard let seat = calibration.seats.first(where: { $0.id == seatID }) else { return }
+        let current = seat.microphone
+        do {
+            try calibration.setSeatMicrophone(seatID, MultichannelSeatMicrophone(
+                deviceUID: uid, channelIndex: current?.channelIndex ?? 0, calibration: current?.calibration))
+        } catch { message = error.localizedDescription }
+    }
+
     func setSeatChannel(_ seatID: UUID, channel: Int) {
         guard let seat = calibration.seats.first(where: { $0.id == seatID }),
               let device = microphone.selectedInputDevice else { return }
@@ -1162,6 +1172,13 @@ private struct SystemSetupMeasureStep: View {
                 Text("Repeats per sweep").font(.callout)
                 SweepRepeatPicker(repeatCount: $microphone.sweepRepeatCount, disabled: model.isMeasuring)
             }
+            if let clock = calibration.seatClockMode {
+                Text(clock.label).font(.caption).foregroundStyle(clock.isLessPrecise ? .orange : .secondary)
+                if clock.isLessPrecise {
+                    Text("Each device has its own clock, so timing between seats comes from a chirp the front-left speaker plays before every sweep. It is less precise than channels of one interface; keep the microphones' devices running for the whole measurement.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
             ForEach(calibration.seats) { seat in
                 HStack {
                     Image(systemName: progress.isComplete(seat) ? "checkmark.circle.fill" : "circle")
@@ -1170,6 +1187,13 @@ private struct SystemSetupMeasureStep: View {
                         RepeatSummaryNote(quality: latest.channel.quality)
                     }
                     if calibration.seatMicrophoneMode == .perSeat {
+                        Picker("Device", selection: Binding(
+                            get: { seat.microphone?.deviceUID ?? microphone.selectedInputDevice?.uid ?? "" },
+                            set: { model.setSeatDevice(seat.id, uid: $0) }
+                        )) {
+                            ForEach(microphone.inputDevices) { Text($0.name).tag($0.uid) }
+                        }
+                        .fixedSize().disabled(model.isMeasuring)
                         Stepper("Input channel \((seat.microphone?.channelIndex ?? 0) + 1)", value: Binding(
                             get: { seat.microphone?.channelIndex ?? 0 },
                             set: { model.setSeatChannel(seat.id, channel: $0) }), in: 0...63)

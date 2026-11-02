@@ -26,6 +26,8 @@ enum SeatMeasurerError: Error, Equatable, LocalizedError {
     /// A seat's microphone delivered nothing (a short capture or digital silence): the whole pass is discarded.
     case silentSeat(String)
     case incomplete(String)
+    /// E24 S5b2: a microphone on another device could not hear the timing chirp clearly; the pass is discarded.
+    case weakReference(String)
 
     var errorDescription: String? {
         switch self {
@@ -33,13 +35,17 @@ enum SeatMeasurerError: Error, Equatable, LocalizedError {
         case .notReady(let reason): reason
         case .silentSeat(let name): "No sound reached the microphone at \(name). Check its cable and level, then measure again; nothing from this pass was kept."
         case .incomplete(let name): "\(name) was not fully measured."
+        case .weakReference(let name): "The microphone at \(name) could not hear the timing signal from the front-left speaker clearly. Move it closer to the listening position or raise the speaker level, then measure again; nothing from this pass was kept."
         }
     }
 }
 
 extension MeasurementReadiness {
-    /// Why a per-seat pass over `seats` cannot start, or nil (design note 10). Separate devices wait for S5b2.
-    static func perSeatBlocker(seats: [MultichannelCalibrationSeat], devices: [AudioInputDevice]) -> Blocker? {
+    /// Why a per-seat pass over `seats` cannot start, or nil (design note 10). `sources` are the campaign's speakers and
+    /// subwoofers (nil skips the check); microphones on different devices need the front-left speaker as timing reference.
+    static func perSeatBlocker(
+        seats: [MultichannelCalibrationSeat], devices: [AudioInputDevice], sources: [MultichannelCalibrationSource]? = nil
+    ) -> Blocker? {
         if seats.count > MeasurementSeatPlan.maxSeats {
             return Blocker(reason: "One pass captures at most \(MeasurementSeatPlan.maxSeats) seats.", fix: nil)
         }
@@ -59,8 +65,10 @@ extension MeasurementReadiness {
             }
             used[key] = seat.name
         }
-        if deviceIDs.count > 1 {
-            return Blocker(reason: "Microphones on different devices arrive in the next update. Use channels of one interface for now.", fix: nil)
+        if deviceIDs.count > 1, let sources, !sources.contains(CalibrationSeatMeasurer.referenceSource) {
+            return Blocker(
+                reason: "Microphones on different devices need a front-left speaker to play the timing signal. Describe one in Speakers, or use channels of one interface.",
+                fix: nil)
         }
         return nil
     }
@@ -68,6 +76,9 @@ extension MeasurementReadiness {
 
 @MainActor
 final class CalibrationSeatMeasurer: SystemSetupSeatMeasuring {
+    /// The speaker whose chirp ties microphones on different devices to one clock.
+    nonisolated static let referenceSource = MultichannelCalibrationSource.speaker(.frontLeft)
+
     typealias TransportProvider = @MainActor (MultichannelSeatPass) -> MultiMicTransportFactory
     typealias SeatAnalysis = @Sendable (
         [Float], RoomCorrectionSweepProgram, RoomCorrectionMicrophoneCalibration?, [Double]?
@@ -86,7 +97,8 @@ final class CalibrationSeatMeasurer: SystemSetupSeatMeasuring {
         transport: @escaping TransportProvider = { pass in
             MultichannelCalibrationTransport.multiMicFactory(
                 routePlan: pass.routePlan, outputs: pass.outputs, program: pass.program,
-                physicalOutputChannelIndex: pass.physicalOutputChannel, referenceProgram: nil)
+                physicalOutputChannelIndex: pass.physicalOutputChannel, referenceProgram: pass.referenceProgram,
+                outputSweepSamples: pass.outputSweepSamples)
         },
         analysis: @escaping SeatAnalysis = { samples, program, microphone, arrivals in
             try await Task.detached(priority: .userInitiated) {
@@ -146,7 +158,8 @@ final class CalibrationSeatMeasurer: SystemSetupSeatMeasuring {
     // MARK: One microphone per seat: one K-microphone pass per source
 
     private func measurePerSeat(_ seats: [MultichannelCalibrationSeat]) async throws {
-        if let blocker = MeasurementReadiness.perSeatBlocker(seats: seats, devices: calibration.microphone.inputDevices) {
+        if let blocker = MeasurementReadiness.perSeatBlocker(
+            seats: seats, devices: calibration.microphone.inputDevices, sources: calibration.sources) {
             throw SeatMeasurerError.notReady(blocker.reason)
         }
         try calibration.beginExternalPass()
@@ -167,31 +180,67 @@ final class CalibrationSeatMeasurer: SystemSetupSeatMeasuring {
     }
 
     private func measureGroup(_ group: [MultichannelCalibrationSeat], source: MultichannelCalibrationSource) async throws {
-        let pass = try calibration.prepareSeatPass(for: source)
+        var pass = try calibration.prepareSeatPass(for: source)
         let devices = calibration.microphone.inputDevices
         let plan = try MeasurementSeatPlan(seats: group.map { seat in
             let microphone = seat.microphone!
             return MeasurementSeat(device: devices.first { $0.uid == microphone.deviceUID }!, channelIndex: microphone.channelIndex)
         })
+        // The program the analyser sees. Separate devices play a longer one with the timing chirp ahead of the sweep.
         let program = pass.program
-        let timeout = Double(program.captureFrameCount) / pass.sampleRate + 15
-        let captures: [[Float]]
+        var timing: SeparateDeviceTiming?
+        if plan.requiresTimingChirp {
+            let t = try SeparateDeviceTiming(program: program)
+            timing = t
+            if source == Self.referenceSource {
+                pass.outputSweepSamples = t.outputSweep(program)
+            } else {
+                let referencePass = try calibration.prepareSeatPass(for: Self.referenceSource)
+                pass.program = t.extendedProgram(program)
+                pass.referenceProgram = t.referenceProgram(outputChannel: referencePass.physicalOutputChannel)
+            }
+        }
+        let frames = timing.map { $0.extendedFrameCount(of: program) } ?? program.captureFrameCount
+        let timeout = Double(frames) / pass.sampleRate + 15
+        var captures: [[Float]]
         do {
             captures = try await MultiMicMeasurementRunner.capture(
                 plan: plan, timeoutSeconds: timeout, pollSeconds: pollSeconds, makeTransport: transport(pass))
+            if let timing { captures = try timing.align(captures).captures }
         } catch MultiMicError.missingMic(let seat) {
             throw SeatMeasurerError.silentSeat(group.indices.contains(seat) ? group[seat].name : "seat \(seat + 1)")
+        } catch MultiMicError.weakReference(let seat) {
+            throw SeatMeasurerError.weakReference(group.indices.contains(seat) ? group[seat].name : "seat \(seat + 1)")
         }
         try Task.checkCancellation()
-        // The primary seat's per-repeat arrivals serve every seat, so the seats stay on one timeline.
-        let shared = program.repeatCount > 1 ? try await arrivals(captures[0], program) : nil
+        // On one clock the primary seat's per-repeat arrivals serve every seat, so the seats stay on one timeline.
+        // Separate devices drift against each other (tens of ppm), so each seat tracks its own repeats.
+        let shared = program.repeatCount > 1 && timing == nil ? try await arrivals(captures[0], program) : nil
         var results: [(seatID: UUID, source: MultichannelCalibrationSource, channel: RoomCorrectionChannelMeasurement)] = []
         for (k, seat) in group.enumerated() {
             try Task.checkCancellation()
-            let channel = try await analysis(captures[k], program, seat.microphone?.calibration, shared)
+            var channel = try await analysis(captures[k], program, seat.microphone?.calibration, shared)
+            if timing != nil { channel.quality.warnings.append(MultiMicMode.separateDevices.timingWarning) }
             results.append((seat.id, source, channel))
         }
         try Task.checkCancellation()
         try calibration.storeSeatMeasurements(results, sampleRate: pass.sampleRate)
+    }
+}
+
+extension MultiMicMode {
+    /// Shown on the seat's result rows (E24 S5b2).
+    var timingWarning: String {
+        "Microphones on separate devices: timing between seats comes from the front-left speaker's chirp and is less precise."
+    }
+}
+
+extension MultichannelCalibrationController {
+    /// How the per-seat microphones are clocked, or nil when they are not per seat or no seat has a microphone yet.
+    var seatClockMode: MultiMicMode? {
+        guard seatMicrophoneMode == .perSeat else { return nil }
+        let uids = Set(includedSeats.compactMap { $0.microphone?.deviceUID })
+        guard !uids.isEmpty else { return nil }
+        return uids.count > 1 ? .separateDevices : .sharedClock
     }
 }

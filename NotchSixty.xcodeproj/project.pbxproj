@@ -39,8 +39,10 @@
 
 		E11F0000000000000000000A /* MeasurementMultiMic.swift in Sources */ = {isa = PBXBuildFile; fileRef = E11F0000000000000000000B /* MeasurementMultiMic.swift */; };
 		E11F00000000000000000014 /* MeasurementSeatPlanTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E11F00000000000000000015 /* MeasurementSeatPlanTests.swift */; };
+		E24F00000000000000000004 /* SeparateDeviceTimingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E24F00000000000000000003 /* SeparateDeviceTimingTests.swift */; };
 		E11F00000000000000000012 /* MeasurementSeatPickerCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = E11F00000000000000000013 /* MeasurementSeatPickerCard.swift */; };
 		E11F00000000000000000010 /* MeasurementSeatPlan.swift in Sources */ = {isa = PBXBuildFile; fileRef = E11F00000000000000000011 /* MeasurementSeatPlan.swift */; };
+		E24F00000000000000000002 /* MeasurementSeparateDeviceTiming.swift in Sources */ = {isa = PBXBuildFile; fileRef = E24F00000000000000000001 /* MeasurementSeparateDeviceTiming.swift */; };
 		E11F0000000000000000000C /* MeasurementMultiMicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E11F0000000000000000000D /* MeasurementMultiMicTests.swift */; };
 		E11E0000000000000000000D /* MeasurementLiveAnalysisTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E11E0000000000000000000C /* MeasurementLiveAnalysisTests.swift */; };
 		E11E00000000000000000009 /* N60MeasurementMonitorProc.c in Sources */ = {isa = PBXBuildFile; fileRef = E11E00000000000000000008 /* N60MeasurementMonitorProc.c */; };
@@ -578,8 +580,10 @@
 
 		E11F0000000000000000000B /* MeasurementMultiMic.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeasurementMultiMic.swift; sourceTree = "<group>"; };
 		E11F00000000000000000015 /* MeasurementSeatPlanTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeasurementSeatPlanTests.swift; sourceTree = "<group>"; };
+		E24F00000000000000000003 /* SeparateDeviceTimingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SeparateDeviceTimingTests.swift; sourceTree = "<group>"; };
 		E11F00000000000000000013 /* MeasurementSeatPickerCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeasurementSeatPickerCard.swift; sourceTree = "<group>"; };
 		E11F00000000000000000011 /* MeasurementSeatPlan.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeasurementSeatPlan.swift; sourceTree = "<group>"; };
+		E24F00000000000000000001 /* MeasurementSeparateDeviceTiming.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeasurementSeparateDeviceTiming.swift; sourceTree = "<group>"; };
 		E11F0000000000000000000D /* MeasurementMultiMicTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeasurementMultiMicTests.swift; sourceTree = "<group>"; };
 		E11E0000000000000000000C /* MeasurementLiveAnalysisTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeasurementLiveAnalysisTests.swift; sourceTree = "<group>"; };
 		E11E0000000000000000000A /* N60MeasurementMonitorProc.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = N60MeasurementMonitorProc.h; sourceTree = "<group>"; };
@@ -1249,6 +1253,7 @@
 				E11E0000000000000000000C /* MeasurementLiveAnalysisTests.swift */,
 				E11F0000000000000000000D /* MeasurementMultiMicTests.swift */,
 				E11F00000000000000000015 /* MeasurementSeatPlanTests.swift */,
+				E24F00000000000000000003 /* SeparateDeviceTimingTests.swift */,
 				E11D00000000000000000033 /* MeasurementAnalysisViewsTests.swift */,
 				E24A00000000000000000064 /* MeasurementAnalysisModelTests.swift */,
 				E11D00000000000000000053 /* MeasurementLibraryTests.swift */,
@@ -1488,6 +1493,7 @@
 				E11E00000000000000000002 /* MeasurementLiveAnalysis.swift */,
 				E11F0000000000000000000B /* MeasurementMultiMic.swift */,
 				E11F00000000000000000011 /* MeasurementSeatPlan.swift */,
+				E24F00000000000000000001 /* MeasurementSeparateDeviceTiming.swift */,
 				E11E00000000000000000004 /* MeasurementInputMonitor.swift */,
 				E24D00000000000000000001 /* MeasurementLevelSession.swift */,
 				E11D00000000000000000031 /* MeasurementGatedPlot.swift */,
@@ -1870,6 +1876,7 @@
 				E11E00000000000000000003 /* MeasurementLiveAnalysis.swift in Sources */,
 				E11F0000000000000000000A /* MeasurementMultiMic.swift in Sources */,
 				E11F00000000000000000010 /* MeasurementSeatPlan.swift in Sources */,
+				E24F00000000000000000002 /* MeasurementSeparateDeviceTiming.swift in Sources */,
 				E11F00000000000000000012 /* MeasurementSeatPickerCard.swift in Sources */,
 				E10A00000000000000000052 /* RoomCorrectionTargetEditorCard.swift in Sources */,
 				E11E00000000000000000005 /* MeasurementInputMonitor.swift in Sources */,
@@ -2068,6 +2075,7 @@
 				E11E0000000000000000000D /* MeasurementLiveAnalysisTests.swift in Sources */,
 				E11F0000000000000000000C /* MeasurementMultiMicTests.swift in Sources */,
 				E11F00000000000000000014 /* MeasurementSeatPlanTests.swift in Sources */,
+				E24F00000000000000000004 /* SeparateDeviceTimingTests.swift in Sources */,
 				E11D00000000000000000023 /* MeasurementAnalysisViewsTests.swift in Sources */,
 				E24A00000000000000000062 /* MeasurementAnalysisModelTests.swift in Sources */,
 				E11D00000000000000000043 /* MeasurementLibraryTests.swift in Sources */,
