@@ -93,6 +93,8 @@ final class RoomCorrectionCalibrationController: ObservableObject {
     @Published var sweepLeadInSeconds = 0.5
     @Published var sweepTailSeconds = 1.0
     @Published var sweepFadeSeconds = 0.02
+    /// Sweeps averaged with rejection (E24 S4, owner decision: 3).
+    @Published var sweepRepeatCount = 3
     @Published var interPassSettlingSeconds = 0.25
 
     init(
@@ -142,10 +144,25 @@ final class RoomCorrectionCalibrationController: ObservableObject {
             hasInputDevice: selectedInputDevice != nil,
             hasOutputDevice: selectedOutputDevice != nil,
             transportActive: activeTransport != nil,
-            stateAllowsStart: state == .ready || state == .reviewing))
+            stateAllowsStart: state == .ready || state == .reviewing,
+            timelineBytes: selectedOutputDevice.map { MeasurementReadiness.timelineBytes(for: sweepSettings(sampleRate: $0.nominalSampleRate)) }))
     }
 
     var canBeginMeasurement: Bool { readiness.isReady }
+
+    /// The sweep these controls describe at `sampleRate`; the one place the settings are assembled.
+    func sweepSettings(sampleRate: Double, levelDBFS: Double? = nil) -> RoomCorrectionSweepSettings {
+        RoomCorrectionSweepSettings(
+            sampleRate: sampleRate,
+            startFrequencyHz: sweepStartFrequencyHz,
+            endFrequencyHz: sweepEndFrequencyHz,
+            durationSeconds: sweepDurationSeconds,
+            levelDBFS: levelDBFS ?? sweepLevelDBFS,
+            leadInSeconds: sweepLeadInSeconds,
+            tailSeconds: sweepTailSeconds,
+            fadeSeconds: sweepFadeSeconds,
+            repeatCount: sweepRepeatCount)
+    }
 
     static func canClaimHardware(audioLifecycle: AudioLifecycleState) -> Bool {
         audioLifecycle == .idle
@@ -314,16 +331,7 @@ final class RoomCorrectionCalibrationController: ObservableObject {
             try stateMachine.transition(to: .arming)
             publishState()
 
-            let settings = RoomCorrectionSweepSettings(
-                sampleRate: output.nominalSampleRate,
-                startFrequencyHz: sweepStartFrequencyHz,
-                endFrequencyHz: sweepEndFrequencyHz,
-                durationSeconds: sweepDurationSeconds,
-                levelDBFS: sweepLevelDBFS,
-                leadInSeconds: sweepLeadInSeconds,
-                tailSeconds: sweepTailSeconds,
-                fadeSeconds: sweepFadeSeconds
-            )
+            let settings = sweepSettings(sampleRate: output.nominalSampleRate)
             let program = try sweepGenerator.makeProgram(settings: settings)
             let plan = try RoomCorrectionMeasurementPlan(
                 program: program,

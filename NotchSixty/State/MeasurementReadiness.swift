@@ -37,6 +37,21 @@ enum MeasurementReadiness: Equatable {
         var busyDescription: String?
         /// The surface is not in a state that can start (for example it is failed and needs reset).
         var stateAllowsStart: Bool = true
+        /// Bytes the sweep timeline would hold (playback plus capture buffers); nil when not known.
+        var timelineBytes: Int?
+    }
+
+    /// The most memory a measurement timeline may use (design note 9).
+    static let timelineBudgetBytes = 512_000_000
+
+    /// Playback plus capture buffers for one pass of `settings` (float32 each).
+    static func timelineBytes(for settings: RoomCorrectionSweepSettings) -> Int {
+        let rate = settings.sampleRate
+        let sweep = settings.durationSeconds * rate
+        let tail = settings.tailSeconds * rate
+        let frames = settings.leadInSeconds * rate + Double(max(1, settings.repeatCount)) * (sweep + tail)
+        let bytes = frames * 8
+        return bytes.isFinite && bytes < Double(Int.max) ? Int(bytes) : Int.max
     }
 
     case ready
@@ -97,6 +112,11 @@ enum MeasurementReadiness: Equatable {
         }
         if !inputs.stateAllowsStart {
             return .blocked(Blocker(reason: "The last measurement did not complete. Reset or review it before measuring again.", fix: nil))
+        }
+        if let bytes = inputs.timelineBytes, bytes > timelineBudgetBytes {
+            return .blocked(Blocker(
+                reason: "This sweep needs about \(bytes / 1_000_000) MB of buffer at this sample rate, over the \(timelineBudgetBytes / 1_000_000) MB limit. Use a shorter sweep or fewer repeats.",
+                fix: nil))
         }
         return .ready
     }

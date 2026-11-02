@@ -2301,6 +2301,31 @@ struct RoomCorrectionSweepSettings: Codable, Equatable, Sendable {
     var leadInSeconds: Double = 0.5
     var tailSeconds: Double = 1.0
     var fadeSeconds: Double = 0.02
+    /// E24 S4: sweeps played back to back and averaged with rejection. Absent in stored data decodes as 1.
+    var repeatCount: Int = 1
+
+    static let allowedRepeatCounts = [1, 2, 3, 4, 6, 8]
+}
+
+extension RoomCorrectionSweepSettings {
+    private enum CodingKeys: String, CodingKey {
+        case schemaVersion, sampleRate, startFrequencyHz, endFrequencyHz, durationSeconds, levelDBFS
+        case leadInSeconds, tailSeconds, fadeSeconds, repeatCount
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        schemaVersion = try c.decode(Int.self, forKey: .schemaVersion)
+        sampleRate = try c.decode(Double.self, forKey: .sampleRate)
+        startFrequencyHz = try c.decode(Double.self, forKey: .startFrequencyHz)
+        endFrequencyHz = try c.decode(Double.self, forKey: .endFrequencyHz)
+        durationSeconds = try c.decode(Double.self, forKey: .durationSeconds)
+        levelDBFS = try c.decode(Double.self, forKey: .levelDBFS)
+        leadInSeconds = try c.decode(Double.self, forKey: .leadInSeconds)
+        tailSeconds = try c.decode(Double.self, forKey: .tailSeconds)
+        fadeSeconds = try c.decode(Double.self, forKey: .fadeSeconds)
+        repeatCount = try c.decodeIfPresent(Int.self, forKey: .repeatCount) ?? 1
+    }
 }
 
 struct RoomCorrectionFrequencyResponse: Codable, Equatable, Sendable {
@@ -2320,6 +2345,28 @@ struct RoomCorrectionMeasurementQuality: Codable, Equatable, Sendable {
     var usableLowHz: Double?
     var usableHighHz: Double?
     var warnings: [String] = []
+    /// E24 S4: set when the capture was a train of repeats (absent for a single sweep).
+    var repeatCount: Int?
+    var rejectedRepeats: [Int]?
+    /// One short reason per rejected repeat, in the same order as `rejectedRepeats`.
+    var rejectedRepeatReasons: [String]?
+    var driftPPM: Double?
+
+    /// "3 of 4 repeats kept; repeat 2 rejected (low coherence)", or nil for a single sweep.
+    var repeatSummary: String? {
+        guard let total = repeatCount, total > 1 else { return nil }
+        let rejected = rejectedRepeats ?? []
+        var text = "\(total - rejected.count) of \(total) repeats kept"
+        if !rejected.isEmpty {
+            let reasons = rejectedRepeatReasons ?? []
+            let parts = rejected.enumerated().map { index, repeatIndex in
+                let reason = index < reasons.count ? " (\(reasons[index]))" : ""
+                return "repeat \(repeatIndex + 1) rejected\(reason)"
+            }
+            text += "; " + parts.joined(separator: ", ")
+        }
+        return text
+    }
 }
 
 struct RoomCorrectionChannelMeasurement: Codable, Equatable, Sendable {
@@ -2483,7 +2530,8 @@ struct RoomCorrectionProject: Identifiable, Codable, Equatable, Sendable {
               sweep.levelDBFS.isFinite, sweep.levelDBFS <= 0,
               sweep.leadInSeconds.isFinite, sweep.leadInSeconds >= 0,
               sweep.tailSeconds.isFinite, sweep.tailSeconds >= 0,
-              sweep.fadeSeconds.isFinite, sweep.fadeSeconds >= 0 else {
+              sweep.fadeSeconds.isFinite, sweep.fadeSeconds >= 0,
+              RoomCorrectionSweepSettings.allowedRepeatCounts.contains(sweep.repeatCount) else {
             throw RoomCorrectionProjectError.invalidProject("Sweep settings are invalid for their sample rate.")
         }
     }

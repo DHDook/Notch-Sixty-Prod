@@ -437,12 +437,7 @@ final class SystemSetupFlowModel: ObservableObject {
         guard let rate = flow.choices.sampleRate, let systemID = profiles.selectedSystemProfileID else { return }
         do {
             let input = microphone.selectedInputDevice
-            let sweep = RoomCorrectionSweepSettings(
-                sampleRate: rate, startFrequencyHz: microphone.sweepStartFrequencyHz,
-                endFrequencyHz: microphone.sweepEndFrequencyHz, durationSeconds: microphone.sweepDurationSeconds,
-                levelDBFS: flow.choices.sweepLevelDBFS ?? microphone.sweepLevelDBFS,
-                leadInSeconds: microphone.sweepLeadInSeconds, tailSeconds: microphone.sweepTailSeconds,
-                fadeSeconds: microphone.sweepFadeSeconds)
+            let sweep = microphone.sweepSettings(sampleRate: rate, levelDBFS: flow.choices.sweepLevelDBFS)
             let mic = RoomCorrectionMicrophone(
                 stableID: input?.uid, displayName: input?.name ?? "Measurement Microphone", manufacturer: nil,
                 inputChannelIndex: microphone.selectedInputChannelIndex, calibration: microphone.microphoneCalibration)
@@ -1063,10 +1058,12 @@ private struct SystemSetupMicrophoneStep: View {
 private struct SystemSetupMeasureStep: View {
     @ObservedObject var model: SystemSetupFlowModel
     @ObservedObject private var calibration: MultichannelCalibrationController
+    @ObservedObject private var microphone: RoomCorrectionCalibrationController
 
     init(model: SystemSetupFlowModel) {
         self.model = model
         _calibration = ObservedObject(wrappedValue: model.calibration)
+        _microphone = ObservedObject(wrappedValue: model.microphone)
     }
 
     var body: some View {
@@ -1080,10 +1077,17 @@ private struct SystemSetupMeasureStep: View {
                       systemImage: "exclamationmark.triangle")
                     .font(.callout)
             }
+            HStack {
+                Text("Repeats per sweep").font(.callout)
+                SweepRepeatPicker(repeatCount: $microphone.sweepRepeatCount, disabled: model.isMeasuring)
+            }
             ForEach(calibration.seats) { seat in
                 HStack {
                     Image(systemName: progress.isComplete(seat) ? "checkmark.circle.fill" : "circle")
                     Text(seat.name)
+                    if let latest = calibration.measurements.last(where: { $0.seatID == seat.id }) {
+                        RepeatSummaryNote(quality: latest.channel.quality)
+                    }
                     Spacer()
                     if progress.isComplete(seat) {
                         Button("Re-measure") { model.remeasure(seatID: seat.id) }.disabled(model.isMeasuring)

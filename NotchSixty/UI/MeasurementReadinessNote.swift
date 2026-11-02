@@ -24,3 +24,35 @@ struct MeasurementReadinessNote: View {
         }
     }
 }
+
+
+/// E24 S4: how many sweeps are played and averaged with rejection. Shared by the setup wizard and
+/// Room Correction; the multichannel campaign reads the same setting.
+struct SweepRepeatPicker: View {
+    @Binding var repeatCount: Int
+    var disabled = false
+
+    var body: some View {
+        Picker("Repeats", selection: $repeatCount) {
+            ForEach(RoomCorrectionSweepSettings.allowedRepeatCounts, id: \.self) { count in
+                Text(count == 1 ? "1 (no averaging)" : "\(count)").tag(count)
+            }
+        }
+        .fixedSize()
+        .disabled(disabled)
+        .help("Each sweep is played this many times and averaged. Repeats that disagree are rejected. More repeats take longer and lower the noise.")
+    }
+}
+
+/// One caption line under a measurement result: "3 of 4 repeats kept; repeat 2 rejected (low coherence)".
+struct RepeatSummaryNote: View {
+    let quality: RoomCorrectionMeasurementQuality
+
+    var body: some View {
+        if let summary = quality.repeatSummary {
+            Text(summary)
+                .font(.caption)
+                .foregroundStyle((quality.rejectedRepeats ?? []).isEmpty ? Color.secondary : Color.orange)
+        }
+    }
+}

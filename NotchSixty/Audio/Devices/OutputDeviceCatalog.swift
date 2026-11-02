@@ -221,6 +221,15 @@ struct RoomCorrectionSweepProgram: Equatable, Sendable {
     var inverseFilter: [Float]
     var leadInFrames: Int
     var tailFrames: Int
+    /// E24 S4: `sweepSamples` is a train of `repeatCount` sweeps, each followed by `tailFrames` of
+    /// silence, so `repeatPeriodFrames` is sweep plus tail. `excitation` is one sweep for analysis
+    /// (empty means `sweepSamples` is itself one sweep).
+    var repeatCount: Int = 1
+    var repeatPeriodFrames: Int = 0
+    var excitation: [Float] = []
+
+    /// One sweep, whatever the repeat count.
+    var singleSweep: [Float] { excitation.isEmpty ? sweepSamples : excitation }
 
     var captureFrameCount: Int {
         leadInFrames + sweepSamples.count + tailFrames
@@ -318,13 +327,30 @@ struct RoomCorrectionSweepGenerator: Sendable {
             }
         }
 
+        let repeats = settings.repeatCount
+        guard RoomCorrectionSweepSettings.allowedRepeatCounts.contains(repeats) else {
+            throw RoomCorrectionSweepGenerationError.invalidSettings
+        }
+        var played = sweep
+        let period = sweepFrameCount + tailFrames
+        if repeats > 1 {
+            guard period <= Int.max / repeats else { throw RoomCorrectionSweepGenerationError.frameCountOverflow }
+            played = [Float](repeating: 0, count: (repeats - 1) * period + sweepFrameCount)
+            for r in 0..<repeats {
+                played.replaceSubrange((r * period)..<(r * period + sweepFrameCount), with: sweep)
+            }
+        }
+
         return RoomCorrectionSweepProgram(
             settings: settings,
             sampleRate: sampleRate,
-            sweepSamples: sweep,
+            sweepSamples: played,
             inverseFilter: inverse,
             leadInFrames: leadInFrames,
-            tailFrames: tailFrames
+            tailFrames: tailFrames,
+            repeatCount: repeats,
+            repeatPeriodFrames: period,
+            excitation: repeats > 1 ? sweep : []
         )
     }
 
