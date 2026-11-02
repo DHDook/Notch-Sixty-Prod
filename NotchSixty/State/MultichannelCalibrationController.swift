@@ -101,6 +101,22 @@ enum MultichannelCalibrationCampaignError: Error, Equatable, LocalizedError {
     }
 }
 
+/// E24 S5b1: one microphone moved between seats (today's way), or one microphone per seat captured together.
+enum SeatMicrophoneMode: String, Codable, Equatable, Sendable {
+    case movedMicrophone
+    case perSeat
+}
+
+/// What a multi-microphone pass needs from the campaign: the route, the sweep and the source's output channel.
+struct MultichannelSeatPass {
+    var source: MultichannelCalibrationSource
+    var routePlan: LiveNChannelOutputRoutePlan
+    var outputs: [AudioOutputDevice]
+    var program: RoomCorrectionSweepProgram
+    var physicalOutputChannel: UInt32
+    var sampleRate: Double
+}
+
 struct MultichannelCalibrationCampaignArchive: Codable, Equatable, Sendable {
     static let currentSchemaVersion = 1
 
@@ -111,6 +127,8 @@ struct MultichannelCalibrationCampaignArchive: Codable, Equatable, Sendable {
     var seats: [MultichannelCalibrationSeat]
     var measurements: [MultichannelCalibrationMeasurement]
     var modifiedAt: Date = Date()
+    /// E24 S5b1: absent in older archives, which decode as one moved microphone.
+    var seatMicrophoneMode: SeatMicrophoneMode?
 }
 
 struct MultichannelCalibrationCampaignStore: Sendable {
@@ -229,6 +247,10 @@ final class MultichannelCalibrationController: ObservableObject {
     @Published private(set) var lastErrorDescription: String?
     /// Set when starting a measurement stopped normal playback (E24 S2).
     @Published private(set) var playbackNotice: String?
+    /// E24 S5b1: how the microphones are used; persisted in the campaign.
+    @Published private(set) var seatMicrophoneMode: SeatMicrophoneMode = .movedMicrophone
+    /// A multi-microphone pass run by `CalibrationSeatMeasurer` is in flight.
+    @Published private(set) var externalPassActive = false
 
     init(
         engine: AudioIOEngine,
@@ -306,9 +328,16 @@ final class MultichannelCalibrationController: ObservableObject {
 
     /// Why the next measurement cannot start, or `.ready` (E24 S2). Playback is not a blocker.
     var readiness: MeasurementReadiness {
-        MeasurementReadiness.evaluate(.init(
+        let perSeat = seatMicrophoneMode == .perSeat
+        let pending = seatsWithPendingWork()
+        var bytes = engine.selectedOutputDevice.map {
+            MeasurementReadiness.timelineBytes(for: microphone.sweepSettings(sampleRate: $0.nominalSampleRate))
+        }
+        // One playback timeline plus K capture buffers (design note 10).
+        if perSeat, let single = bytes { bytes = single / 2 * (1 + max(1, pending.count)) }
+        let base = MeasurementReadiness.evaluate(.init(
             permission: microphone.permissionStatus,
-            hasInputDevice: microphone.selectedInputDevice != nil,
+            hasInputDevice: perSeat || microphone.selectedInputDevice != nil,
             hasOutputDevice: engine.selectedOutputDevice != nil,
             requiresProfile: true,
             hasProfile: profile != nil,
@@ -316,9 +345,11 @@ final class MultichannelCalibrationController: ObservableObject {
             hasWork: nextTarget() != nil,
             transportActive: activeTransport != nil,
             busyDescription: state == .measuring ? "measuring" : (state == .analyzing ? "being analysed" : nil),
-            timelineBytes: engine.selectedOutputDevice.map {
-                MeasurementReadiness.timelineBytes(for: microphone.sweepSettings(sampleRate: $0.nominalSampleRate))
-            }))
+            timelineBytes: bytes))
+        guard perSeat, base.isReady,
+              let blocker = MeasurementReadiness.perSeatBlocker(seats: pending, devices: microphone.inputDevices)
+        else { return base }
+        return .blocked(blocker)
     }
 
     var canMeasure: Bool { readiness.isReady }
@@ -369,6 +400,7 @@ final class MultichannelCalibrationController: ObservableObject {
            archive.routingSignature == signature,
            abs(archive.sampleRate - sampleRate) < 0.5 {
             seats = normalizedSeats(archive.seats)
+            seatMicrophoneMode = archive.seatMicrophoneMode ?? .movedMicrophone
             measurements = archive.measurements.filter { measurement in
                 abs(measurement.sampleRate - sampleRate) < 0.5
                     && sources.contains(measurement.source)
@@ -377,6 +409,7 @@ final class MultichannelCalibrationController: ObservableObject {
         } else {
             seats = [MultichannelCalibrationSeat(name: "Main Seat")]
             measurements = []
+            seatMicrophoneMode = .movedMicrophone
             try persistCampaign()
         }
         state = campaignComplete ? .reviewing : .ready
@@ -442,6 +475,98 @@ final class MultichannelCalibrationController: ObservableObject {
         try persistCampaign()
     }
 
+    // MARK: Seat microphones and multi-microphone passes (E24 S5b1)
+
+    func setSeatMicrophoneMode(_ mode: SeatMicrophoneMode) throws {
+        guard activeTransport == nil, !externalPassActive else {
+            throw MultichannelCalibrationCampaignError.measurementAlreadyActive
+        }
+        guard mode != seatMicrophoneMode else { return }
+        seatMicrophoneMode = mode
+        try persistCampaign()
+    }
+
+    /// Sets (or clears) the microphone at a seat. Its measurements stay: they were taken with the previous one, so
+    /// the owner re-measures that seat to use the new calibration.
+    func setSeatMicrophone(_ id: UUID, _ seatMicrophone: MultichannelSeatMicrophone?) throws {
+        guard activeTransport == nil, !externalPassActive else {
+            throw MultichannelCalibrationCampaignError.measurementAlreadyActive
+        }
+        guard let index = seats.firstIndex(where: { $0.id == id }) else {
+            throw MultichannelCalibrationCampaignError.invalidSeat
+        }
+        if let calibration = seatMicrophone?.calibration { _ = try calibration.gainDB(at: 1.0) }
+        seats[index].microphone = seatMicrophone
+        try persistCampaign()
+    }
+
+    /// The route, sweep and output channel for one source. Stops normal playback (E24 S2) and says so in `playbackNotice`.
+    func prepareSeatPass(for source: MultichannelCalibrationSource) throws -> MultichannelSeatPass {
+        try synchronizeCampaign()
+        guard microphone.permissionStatus == .authorized else {
+            throw MultichannelCalibrationCampaignError.microphonePermissionRequired
+        }
+        guard let output = engine.selectedOutputDevice,
+              let selectedOutputUID = engine.routeConfiguration.selectedOutputUID else {
+            throw MultichannelCalibrationCampaignError.outputRequired
+        }
+        guard let profile else { throw MultichannelCalibrationCampaignError.outputDeviceProfileRequired }
+        playbackNotice = MeasurementPlaybackPolicy.stopPlaybackIfRunning(engine)
+        let bassEnabled = profiles.selectedSystemProfile?.state.bassManagement.enabled
+            ?? engine.bassManagementConfiguration.enabled
+        let routePlan = try profile.makeLivePlan(
+            availableDevices: engine.outputDevices,
+            sampleRate: output.nominalSampleRate,
+            selectedOutputUID: selectedOutputUID,
+            bassManagementEnabled: bassEnabled
+        )
+        let physicalOutput = try physicalOutputChannel(for: source, routePlan: routePlan)
+        let program = try sweepGenerator.makeProgram(settings: microphone.sweepSettings(sampleRate: output.nominalSampleRate))
+        return MultichannelSeatPass(
+            source: source, routePlan: routePlan, outputs: engine.outputDevices, program: program,
+            physicalOutputChannel: physicalOutput, sampleRate: output.nominalSampleRate)
+    }
+
+    /// Marks a pass run outside the controller (the K-microphone pass) as the measurement in progress.
+    func beginExternalPass() throws {
+        guard activeTransport == nil, !externalPassActive, state != .measuring, state != .analyzing else {
+            throw MultichannelCalibrationCampaignError.measurementAlreadyActive
+        }
+        externalPassActive = true
+        state = .measuring
+        lastErrorDescription = nil
+    }
+
+    /// Ends an external pass. Nothing is stored here: `storeSeatMeasurements` does that, so a failed or cancelled
+    /// pass leaves the measurements exactly as they were.
+    func endExternalPass() {
+        externalPassActive = false
+        state = profile == nil ? .idle : (campaignComplete ? .reviewing : .ready)
+    }
+
+    func failExternalPass(_ error: Error) {
+        externalPassActive = false
+        state = .failed
+        lastErrorDescription = error.localizedDescription
+    }
+
+    /// Stores a whole pass at once: the analysed measurement of every (seat, source) pair, or none.
+    func storeSeatMeasurements(
+        _ items: [(seatID: UUID, source: MultichannelCalibrationSource, channel: RoomCorrectionChannelMeasurement)],
+        sampleRate: Double
+    ) throws {
+        for item in items {
+            measurements.removeAll { $0.seatID == item.seatID && $0.source == item.source }
+            measurements.append(MultichannelCalibrationMeasurement(
+                seatID: item.seatID, source: item.source, sampleRate: sampleRate,
+                channel: compactMeasurement(item.channel, sampleRate: sampleRate)))
+        }
+        latestDesign = nil
+        latestPrediction = nil
+        intelligentTargetReport = nil
+        try persistCampaign()
+    }
+
     func resetMeasurements() throws {
         cancelMeasurement()
         measurements = []
@@ -452,8 +577,9 @@ final class MultichannelCalibrationController: ObservableObject {
         try persistCampaign()
     }
 
-    func beginNextMeasurement() throws {
-        guard activeTransport == nil else {
+    /// `seatID` limits the measurement to that seat (E24 S5b1: `measureSeats`); nil takes the next missing one.
+    func beginNextMeasurement(seatID: UUID? = nil) throws {
+        guard activeTransport == nil, !externalPassActive else {
             throw MultichannelCalibrationCampaignError.measurementAlreadyActive
         }
         try synchronizeCampaign()
@@ -470,7 +596,7 @@ final class MultichannelCalibrationController: ObservableObject {
         guard let profile else {
             throw MultichannelCalibrationCampaignError.outputDeviceProfileRequired
         }
-        guard let target = nextTarget() else {
+        guard let target = nextTarget(seatID: seatID) else {
             throw MultichannelCalibrationCampaignError.campaignComplete
         }
         // E24 S2: measuring needs the output to itself; stop playback and say so.
@@ -589,6 +715,7 @@ final class MultichannelCalibrationController: ObservableObject {
     }
 
     func cancelMeasurement() {
+        externalPassActive = false
         analysisGeneration &+= 1
         activeTransport?.cancel()
         activeTransport = nil
@@ -776,10 +903,23 @@ final class MultichannelCalibrationController: ObservableObject {
 
     func clearError() { lastErrorDescription = nil }
 
-    private func nextTarget() -> MultichannelCalibrationTarget? {
+    private func nextTarget(seatID: UUID? = nil) -> MultichannelCalibrationTarget? {
         requiredTargets().first { target in
-            !measurements.contains { $0.seatID == target.seat.id && $0.source == target.source }
+            (seatID == nil || target.seat.id == seatID)
+                && !measurements.contains { $0.seatID == target.seat.id && $0.source == target.source }
         }
+    }
+
+    /// Included seats that still miss at least one source, in seat order.
+    func seatsWithPendingWork() -> [MultichannelCalibrationSeat] {
+        includedSeats.filter { seat in sources.contains { source in
+            !measurements.contains { $0.seatID == seat.id && $0.source == source }
+        } }
+    }
+
+    /// Sources a seat still misses, in source order.
+    func missingSources(for seatID: UUID) -> [MultichannelCalibrationSource] {
+        sources.filter { source in !measurements.contains { $0.seatID == seatID && $0.source == source } }
     }
 
     private func requiredTargets() -> [MultichannelCalibrationTarget] {
@@ -846,7 +986,8 @@ final class MultichannelCalibrationController: ObservableObject {
             sampleRate: campaignSampleRate,
             seats: seats,
             measurements: measurements,
-            modifiedAt: Date()
+            modifiedAt: Date(),
+            seatMicrophoneMode: seatMicrophoneMode
         )
         try store.save(archive)
     }

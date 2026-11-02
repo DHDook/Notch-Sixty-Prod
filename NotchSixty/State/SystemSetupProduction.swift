@@ -8,6 +8,8 @@ import Foundation
 @MainActor
 struct ProductionSystemSetupServices {
     let noise: SystemSetupNoisePlaying
+    /// The measure step's seat measurer (E24 S5b1). The flow's `measureAll` and `remeasure` own no measure loop.
+    let seats: SystemSetupSeatMeasuring
     let verifier: SystemSetupPostApplyMeasuring
     /// The verifier, with the hook the flow uses to say what to check.
     let measurer: SystemSetupPostApplyMeasurer
@@ -20,7 +22,9 @@ struct ProductionSystemSetupServices {
     /// playback is idle (`levelTransport` is the Core Audio boundary tests replace).
     static func production(
         engine: AudioIOEngine, profiles: ProductProfileController, microphone: RoomCorrectionCalibrationController,
+        calibration: MultichannelCalibrationController,
         monitor: MeasurementInputMonitor? = nil,
+        seats: SystemSetupSeatMeasuring? = nil,
         levelTransport: @escaping LevelSessionTransportFactory = LevelSessionHardware.transportFactory,
         trialPlayback: TrialSweepPlaying? = nil
     ) -> ProductionSystemSetupServices {
@@ -31,6 +35,7 @@ struct ProductionSystemSetupServices {
         let measurer = SystemSetupPostApplyMeasurer(host: host)
         return ProductionSystemSetupServices(
             noise: LevelSessionNoisePlayer(engine: engine, environment: environment, monitor: monitor, transport: levelTransport),
+            seats: seats ?? CalibrationSeatMeasurer(calibration: calibration),
             verifier: measurer, measurer: measurer,
             monitor: monitor,
             laneChoices: { environment.laneChoices })

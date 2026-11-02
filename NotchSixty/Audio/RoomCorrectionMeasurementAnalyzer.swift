@@ -109,6 +109,7 @@ struct RoomCorrectionMeasurementAnalyzer: Sendable {
         rawCapture: [Float],
         program: RoomCorrectionSweepProgram,
         microphoneCalibration: RoomCorrectionMicrophoneCalibration? = nil,
+        repeatArrivals: [Double]? = nil,
         capturedAt: Date = Date()
     ) throws -> RoomCorrectionChannelMeasurement {
         guard program.sampleRate.isFinite, program.sampleRate > 0 else {
@@ -122,8 +123,21 @@ struct RoomCorrectionMeasurementAnalyzer: Sendable {
             expectedFrameCount: program.captureFrameCount,
             program: program,
             calibration: microphoneCalibration,
-            capturedAt: capturedAt
+            capturedAt: capturedAt,
+            repeatArrivals: repeatArrivals
         )
+    }
+
+    /// E24 S5b1: the per-repeat direct-arrival frames of one capture (nil for a single sweep). A multi-microphone pass
+    /// computes them on its primary seat and hands them to every seat's analysis, so the seats stay on one timeline.
+    func repeatArrivals(rawCapture: [Float], program: RoomCorrectionSweepProgram) throws -> [Double]? {
+        guard program.repeatCount > 1 else { return nil }
+        try validateProgram(program)
+        let start = program.leadInFrames
+        guard rawCapture.count == program.captureFrameCount, start < rawCapture.count else {
+            throw RoomCorrectionMeasurementAnalysisError.invalidSweep
+        }
+        return try segmentsAndArrivals(observed: Array(rawCapture[start...]), program: program, pass: .left).arrivals
     }
 
     private func analyzeChannel(
@@ -132,7 +146,8 @@ struct RoomCorrectionMeasurementAnalyzer: Sendable {
         expectedFrameCount: Int,
         program: RoomCorrectionSweepProgram,
         calibration: RoomCorrectionMicrophoneCalibration?,
-        capturedAt: Date
+        capturedAt: Date,
+        repeatArrivals: [Double]? = nil
     ) throws -> RoomCorrectionChannelMeasurement {
         guard rawCapture.count == expectedFrameCount else {
             throw RoomCorrectionMeasurementAnalysisError.captureLength(
@@ -162,7 +177,8 @@ struct RoomCorrectionMeasurementAnalyzer: Sendable {
         let single = program.singleSweep
         var repeatSummary: RepeatSummary?
         if program.repeatCount > 1 {
-            let averaged = try averageRepeats(observed: observed, program: program, pass: pass)
+            let averaged = try averageRepeats(
+                observed: observed, program: program, pass: pass, sharedArrivals: repeatArrivals)
             observed = averaged.samples
             repeatSummary = averaged.summary
         }
@@ -273,14 +289,15 @@ struct RoomCorrectionMeasurementAnalyzer: Sendable {
         var driftWarning: Bool
     }
 
-    /// Splits the observed train into its repeat periods, aligns them on each repeat's own direct
-    /// arrival and averages the accepted ones (design note 9). The result has the same length as one
-    /// period, so the rest of the analysis runs on it exactly as it does for a single sweep.
-    private func averageRepeats(
+    /// Splits the observed train into its repeat periods and finds each repeat's direct arrival, with a repeat whose
+    /// arrival strays more than a millisecond from the median moved onto the median (corrupted, not shifted: coherence
+    /// rejects it). All repeats share one device clock.
+    private func segmentsAndArrivals(
         observed: [Float],
         program: RoomCorrectionSweepProgram,
-        pass: RoomCorrectionMeasurementPass
-    ) throws -> (samples: [Float], summary: RepeatSummary) {
+        pass: RoomCorrectionMeasurementPass,
+        skipArrivals: Bool = false
+    ) throws -> (segments: [[Float]], arrivals: [Double]) {
         let count = program.repeatCount
         let period = program.repeatPeriodFrames
         let single = program.singleSweep
@@ -294,6 +311,7 @@ struct RoomCorrectionMeasurementAnalyzer: Sendable {
         for r in 0..<count {
             let segment = Array(observed[(r * period)..<((r + 1) * period)])
             segments.append(segment)
+            if skipArrivals { continue }
             let response = try MeasurementCore.deconvolve(
                 excitation: excitation, observed: segment,
                 regularizationRatio: Double(Self.regularizationPowerRatio))
@@ -302,9 +320,7 @@ struct RoomCorrectionMeasurementAnalyzer: Sendable {
                     impulse: response, sampleRate: program.sampleRate,
                     tailFrames: program.tailFrames, pass: pass)) ?? -1))
         }
-        // All repeats share one device clock, so a repeat whose arrival strays more than a
-        // millisecond from the median was corrupted, not shifted: align it with the others and let
-        // coherence reject it.
+        if skipArrivals { return (segments, []) }
         let valid = arrivals.filter { $0 >= 0 }.sorted()
         guard !valid.isEmpty else {
             throw RoomCorrectionMeasurementAnalysisError.directArrivalNotFound(pass: pass)
@@ -312,7 +328,28 @@ struct RoomCorrectionMeasurementAnalyzer: Sendable {
         let median = valid[valid.count / 2]
         let tolerance = program.sampleRate * 0.001
         arrivals = arrivals.map { $0 >= 0 && abs($0 - median) <= tolerance ? $0 : median }
+        return (segments, arrivals)
+    }
 
+    /// Splits the observed train into its repeat periods, aligns them on each repeat's own direct
+    /// arrival and averages the accepted ones (design note 9). The result has the same length as one
+    /// period, so the rest of the analysis runs on it exactly as it does for a single sweep.
+    private func averageRepeats(
+        observed: [Float],
+        program: RoomCorrectionSweepProgram,
+        pass: RoomCorrectionMeasurementPass,
+        sharedArrivals: [Double]? = nil
+    ) throws -> (samples: [Float], summary: RepeatSummary) {
+        let count = program.repeatCount
+        let period = program.repeatPeriodFrames
+        let computed = try segmentsAndArrivals(
+            observed: observed, program: program, pass: pass, skipArrivals: sharedArrivals != nil)
+        let segments = computed.segments
+        var arrivals = computed.arrivals
+        if let sharedArrivals {
+            guard sharedArrivals.count == count else { throw RoomCorrectionMeasurementAnalysisError.invalidSweep }
+            arrivals = sharedArrivals
+        }
         let result: MeasurementCore.AverageResult
         do {
             result = try MeasurementCore.averageRepeats(

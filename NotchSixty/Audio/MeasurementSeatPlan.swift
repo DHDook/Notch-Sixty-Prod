@@ -101,9 +101,41 @@ enum MultiMicMeasurementRunner {
         pollSeconds: Double = 0.02,
         makeTransport: MultiMicTransportFactory
     ) async throws -> [MultiMicSeatRecord] {
+        let capture = try await captureMaterialized(
+            plan: plan, timeoutSeconds: timeoutSeconds, pollSeconds: pollSeconds, makeTransport: makeTransport)
+        return try records(from: capture, plan: plan, pass: pass, sampleRate: sampleRate)
+    }
+
+    /// E24 S5b1: the pass up to the captures (start, poll, timeout, cancel), one raw capture per seat in plan order.
+    /// A seat the transport did not deliver, or delivered as digital silence, fails the whole pass with
+    /// `MultiMicError.missingMic(seat:)`, so no partial set is ever analysed or stored.
+    static func capture(
+        plan: MeasurementSeatPlan,
+        timeoutSeconds: Double,
+        pollSeconds: Double = 0.02,
+        makeTransport: MultiMicTransportFactory
+    ) async throws -> [[Float]] {
+        let capture = try await captureMaterialized(
+            plan: plan, timeoutSeconds: timeoutSeconds, pollSeconds: pollSeconds, makeTransport: makeTransport)
+        var captures: [[Float]?] = [capture.samples] + capture.seatSamples.map { Optional($0) }
+        while captures.count < plan.seats.count { captures.append(nil) }
+        let length = captures.compactMap { $0?.count }.max() ?? 0
+        return try captures.prefix(plan.seats.count).enumerated().map { index, samples in
+            guard let samples, samples.count == length, samples.contains(where: { $0 != 0 }) else {
+                throw MultiMicError.missingMic(seat: index)
+            }
+            return samples
+        }
+    }
+
+    private static func captureMaterialized(
+        plan: MeasurementSeatPlan,
+        timeoutSeconds: Double,
+        pollSeconds: Double,
+        makeTransport: MultiMicTransportFactory
+    ) async throws -> MultichannelCalibrationCapture {
         guard let primary = plan.primary else { throw MultiMicRunError.emptyPlan }
         let transport = try makeTransport(primary, plan.additional)
-        let capture: MultichannelCalibrationCapture
         do {
             try transport.start()
             let deadline = Date().addingTimeInterval(timeoutSeconds)
@@ -114,12 +146,11 @@ enum MultiMicMeasurementRunner {
                 if Date() > deadline { throw MultiMicRunError.timedOut }
                 try await Task.sleep(nanoseconds: UInt64(pollSeconds * 1e9))
             }
-            capture = try transport.finishAndMaterialize()
+            return try transport.finishAndMaterialize()
         } catch {
             transport.cancel()
             throw error
         }
-        return try records(from: capture, plan: plan, pass: pass, sampleRate: sampleRate)
     }
 
     /// A seat the transport did not deliver is a missing mic and fails the whole pass.

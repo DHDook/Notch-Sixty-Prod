@@ -148,7 +148,7 @@ final class ProductionWiringTests: XCTestCase {
         let rig = try OfflineSetupRig(rate: 48_000)
         defer { rig.tearDown() }
         let services = ProductionSystemSetupServices.production(
-            engine: rig.engine, profiles: rig.profiles, microphone: rig.microphone, levelTransport: rig.levelTransports.factory)
+            engine: rig.engine, profiles: rig.profiles, microphone: rig.microphone, calibration: rig.calibration, levelTransport: rig.levelTransports.factory)
         var failure: Error?
         do { try services.noise.start(SystemSetupLevelPlan().generatorSettings(), selection: .lane(0)) } catch { failure = error }
         XCTAssertNil(failure)
@@ -159,7 +159,7 @@ final class ProductionWiringTests: XCTestCase {
         let rig = try OfflineSetupRig(rate: 48_000)
         defer { rig.tearDown() }
         let services = ProductionSystemSetupServices.production(
-            engine: rig.engine, profiles: rig.profiles, microphone: rig.microphone, levelTransport: rig.levelTransports.factory)
+            engine: rig.engine, profiles: rig.profiles, microphone: rig.microphone, calibration: rig.calibration, levelTransport: rig.levelTransports.factory)
         var failure: Error?
         do { _ = try await services.verifier.measureMainSeat(predictedErrorDB: 1, sampleRate: 48_000) } catch { failure = error }
         // With no correction applied the verifier says why it cannot check; it is no longer an always-unavailable stand-in.

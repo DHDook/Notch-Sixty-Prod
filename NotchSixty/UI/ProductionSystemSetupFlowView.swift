@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 // E12 S3: the guided-setup window and its first steps (Output, Topology, Microphone and level,
 // Room). Later steps arrive in S4 to S6.
@@ -43,8 +44,11 @@ final class SystemSetupFlowModel: ObservableObject {
     private var roomOnlyInstall: RoomCorrectionLaneInstall?
     private var bassLanePlan: RoomCorrectionBassApplyPlan?
     private let verifier: SystemSetupPostApplyMeasuring
+    private let seats: SystemSetupSeatMeasuring
     private let sessions: SystemSetupSessionStore
     private var verificationTask: Task<Void, Never>?
+    /// The running measure task, so Stop can cancel the seat measurer's pass.
+    private var measureTask: Task<Void, Never>?
     static let verificationTimeoutSeconds = 60.0
 
     init(engine: AudioIOEngine, profiles: ProductProfileController, microphone: RoomCorrectionCalibrationController,
@@ -54,7 +58,8 @@ final class SystemSetupFlowModel: ObservableObject {
          roomProjectsDirectory: URL = SystemSetupSessionStore.defaultDirectory()
              .appendingPathComponent("RoomCorrection", isDirectory: true)) {
         let services = services ?? ProductionSystemSetupServices.production(
-            engine: engine, profiles: profiles, microphone: microphone)
+            engine: engine, profiles: profiles, microphone: microphone, calibration: calibration)
+        self.seats = services.seats
         self.verifier = services.verifier
         self.sessions = sessions
         self.engine = engine
@@ -219,45 +224,113 @@ final class SystemSetupFlowModel: ObservableObject {
         do { try calibration.addSeat(); syncMeasurementChoices() } catch { message = error.localizedDescription }
     }
 
+    // E24 S5b1: one microphone per seat. The default is the single moved microphone.
+    func setSeatMicrophoneMode(_ mode: SeatMicrophoneMode) {
+        do {
+            try calibration.setSeatMicrophoneMode(mode)
+            if mode == .perSeat { assignDefaultSeatChannels() }
+            syncMeasurementChoices()
+        } catch { message = error.localizedDescription }
+    }
+
+    /// Gives every seat without a microphone the next free channel of the selected input interface.
+    private func assignDefaultSeatChannels() {
+        guard let device = microphone.selectedInputDevice else { return }
+        var used = Set(calibration.seats.compactMap { $0.microphone.map { "\($0.deviceUID)#\($0.channelIndex)" } })
+        for seat in calibration.seats where seat.microphone == nil {
+            var channel = 0
+            while used.contains("\(device.uid)#\(channel)") { channel += 1 }
+            used.insert("\(device.uid)#\(channel)")
+            try? calibration.setSeatMicrophone(seat.id, MultichannelSeatMicrophone(
+                deviceUID: device.uid, channelIndex: channel, calibration: nil))
+        }
+    }
+
+    func setSeatChannel(_ seatID: UUID, channel: Int) {
+        guard let seat = calibration.seats.first(where: { $0.id == seatID }),
+              let device = microphone.selectedInputDevice else { return }
+        let current = seat.microphone
+        do {
+            try calibration.setSeatMicrophone(seatID, MultichannelSeatMicrophone(
+                deviceUID: current?.deviceUID ?? device.uid, channelIndex: max(0, channel), calibration: current?.calibration))
+        } catch { message = error.localizedDescription }
+    }
+
+    /// A separate calibration file per seat; the seat is measured again to use it.
+    func importSeatCalibration(_ seatID: UUID, text: String, sourceName: String?) {
+        guard let seat = calibration.seats.first(where: { $0.id == seatID }), let current = seat.microphone else { return }
+        do {
+            let parsed = try RoomCorrectionMicrophoneCalibrationParser().parse(text, sourceName: sourceName)
+            try calibration.setSeatMicrophone(seatID, MultichannelSeatMicrophone(
+                deviceUID: current.deviceUID, channelIndex: current.channelIndex, calibration: parsed))
+        } catch { message = error.localizedDescription }
+    }
+
+    func clearSeatCalibration(_ seatID: UUID) {
+        guard let seat = calibration.seats.first(where: { $0.id == seatID }), let current = seat.microphone else { return }
+        try? calibration.setSeatMicrophone(seatID, MultichannelSeatMicrophone(
+            deviceUID: current.deviceUID, channelIndex: current.channelIndex, calibration: nil))
+    }
+
     func removeSeat(_ id: UUID) {
         do { try calibration.removeSeat(id); invalidateDesign(); syncMeasurementChoices() }
         catch { message = error.localizedDescription }
     }
 
-    /// Measures every missing seat and source in turn. Playback is stopped first (measurement needs
-    /// the output to itself) and the reason is shown.
+    /// Measures every missing seat and source. The seat measurer owns the loop and, with one microphone per seat,
+    /// captures all pending seats in a single pass per source. Playback is stopped first (measurement needs the
+    /// output to itself) and the reason is shown.
     func measureAll() async {
         guard !isMeasuring else { return }
         isMeasuring = true
         defer { isMeasuring = false; syncMeasurementChoices() }
         // The controller stops playback itself (E24 S2); its notice is shown under the button.
         message = nil
-        while measureProgress.next != nil {
-            do {
-                try calibration.beginNextMeasurement()
-                while calibration.state == .measuring {
-                    try? await Task.sleep(for: .milliseconds(100))
-                    if try await calibration.finishMeasurementIfComplete() { break }
-                    if Task.isCancelled { calibration.cancelMeasurement(); return }
-                }
-                syncMeasurementChoices()
-            } catch {
-                message = error.localizedDescription
-                return
-            }
+        let pending = calibration.seatsWithPendingWork().compactMap { seat in
+            calibration.seats.firstIndex { $0.id == seat.id }
         }
+        guard !pending.isEmpty else { return }
+        await measureThroughServices(pending)
     }
 
-    /// Re-measure one seat: its records are dropped and the next pass measures them again.
-    func remeasure(seatID: UUID) {
+    /// The Measure button: runs `measureAll` as a task Stop can cancel.
+    func startMeasuring() {
+        guard !isMeasuring else { return }
+        measureTask = Task { await measureAll() }
+    }
+
+    func startRemeasure(seatID: UUID) {
+        guard !isMeasuring else { return }
+        measureTask = Task { await remeasure(seatID: seatID) }
+    }
+
+    /// Re-measure one seat: its records are dropped and the seat measurer measures them again (K = 1 with that seat's
+    /// own microphone in per-seat mode).
+    func remeasure(seatID: UUID) async {
+        guard !isMeasuring, let index = calibration.seats.firstIndex(where: { $0.id == seatID }) else { return }
+        isMeasuring = true
+        defer { isMeasuring = false; syncMeasurementChoices() }
+        message = nil
         do {
             for source in calibration.sources { try calibration.remeasure(seatID: seatID, source: source) }
             invalidateDesign()
-            syncMeasurementChoices()
-        } catch { message = error.localizedDescription }
+        } catch { message = error.localizedDescription; return }
+        await measureThroughServices([index])
+    }
+
+    private func measureThroughServices(_ indices: [Int]) async {
+        let rate = engine.selectedOutputDevice?.nominalSampleRate ?? flow.choices.sampleRate ?? 48_000
+        do {
+            _ = try await seats.measureSeats(indices, sampleRate: rate)
+        } catch is CancellationError {
+            return
+        } catch {
+            message = error.localizedDescription
+        }
     }
 
     func cancelMeasurement() {
+        measureTask?.cancel()
         calibration.cancelMeasurement()
         syncMeasurementChoices()
     }
@@ -805,7 +878,7 @@ struct ProductionSystemSetupFlowView: View {
         _model = StateObject(wrappedValue: SystemSetupFlowModel(
             engine: engine, profiles: profiles, microphone: microphone, calibration: calibration,
             services: ProductionSystemSetupServices.production(
-                engine: engine, profiles: profiles, microphone: microphone)))
+                engine: engine, profiles: profiles, microphone: microphone, calibration: calibration)))
         self.advisor = advisor
     }
 
@@ -1059,6 +1132,7 @@ private struct SystemSetupMeasureStep: View {
     @ObservedObject var model: SystemSetupFlowModel
     @ObservedObject private var calibration: MultichannelCalibrationController
     @ObservedObject private var microphone: RoomCorrectionCalibrationController
+    @State private var importingCalibrationSeat: UUID?
 
     init(model: SystemSetupFlowModel) {
         self.model = model
@@ -1077,6 +1151,13 @@ private struct SystemSetupMeasureStep: View {
                       systemImage: "exclamationmark.triangle")
                     .font(.callout)
             }
+            Picker("Microphones", selection: Binding(
+                get: { calibration.seatMicrophoneMode }, set: { model.setSeatMicrophoneMode($0) }
+            )) {
+                Text("One microphone, moved between seats").tag(SeatMicrophoneMode.movedMicrophone)
+                Text("One microphone per seat").tag(SeatMicrophoneMode.perSeat)
+            }
+            .disabled(model.isMeasuring)
             HStack {
                 Text("Repeats per sweep").font(.callout)
                 SweepRepeatPicker(repeatCount: $microphone.sweepRepeatCount, disabled: model.isMeasuring)
@@ -1088,9 +1169,21 @@ private struct SystemSetupMeasureStep: View {
                     if let latest = calibration.measurements.last(where: { $0.seatID == seat.id }) {
                         RepeatSummaryNote(quality: latest.channel.quality)
                     }
+                    if calibration.seatMicrophoneMode == .perSeat {
+                        Stepper("Input channel \((seat.microphone?.channelIndex ?? 0) + 1)", value: Binding(
+                            get: { seat.microphone?.channelIndex ?? 0 },
+                            set: { model.setSeatChannel(seat.id, channel: $0) }), in: 0...63)
+                            .fixedSize().disabled(model.isMeasuring)
+                        Button(seat.microphone?.calibration == nil ? "Calibration file" : "Replace file") {
+                            importingCalibrationSeat = seat.id
+                        }.disabled(model.isMeasuring)
+                        if seat.microphone?.calibration != nil {
+                            Button("Clear file") { model.clearSeatCalibration(seat.id) }.disabled(model.isMeasuring)
+                        }
+                    }
                     Spacer()
                     if progress.isComplete(seat) {
-                        Button("Re-measure") { model.remeasure(seatID: seat.id) }.disabled(model.isMeasuring)
+                        Button("Re-measure") { model.startRemeasure(seatID: seat.id) }.disabled(model.isMeasuring)
                     }
                     if calibration.seats.count > 1 {
                         Button("Remove") { model.removeSeat(seat.id) }.disabled(model.isMeasuring)
@@ -1105,7 +1198,7 @@ private struct SystemSetupMeasureStep: View {
                     Button("Stop") { model.cancelMeasurement() }
                 } else {
                     Button(progress.isComplete ? "Measure again" : "Measure") {
-                        Task { await model.measureAll() }
+                        model.startMeasuring()
                     }
                     .disabled((progress.next == nil && !progress.isComplete) || !calibration.readiness.isReady)
                 }
@@ -1117,6 +1210,21 @@ private struct SystemSetupMeasureStep: View {
             }
         }
         .onAppear { model.prepareMeasure() }
+        .fileImporter(
+            isPresented: Binding(get: { importingCalibrationSeat != nil }, set: { if !$0 { importingCalibrationSeat = nil } }),
+            allowedContentTypes: [.plainText, .commaSeparatedText, .data]
+        ) { result in
+            guard let seatID = importingCalibrationSeat else { return }
+            importingCalibrationSeat = nil
+            guard let url = try? result.get() else { return }
+            let accessed = url.startAccessingSecurityScopedResource()
+            defer { if accessed { url.stopAccessingSecurityScopedResource() } }
+            guard let data = try? Data(contentsOf: url), let text = String(data: data, encoding: .utf8) else {
+                model.message = "Microphone calibration files must be UTF-8 text with frequency and gain columns."
+                return
+            }
+            model.importSeatCalibration(seatID, text: text, sourceName: url.lastPathComponent)
+        }
     }
 }
 
