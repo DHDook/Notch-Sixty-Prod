@@ -17,6 +17,7 @@ enum RoomCorrectionMeasurementAnalysisError: Error, Equatable, LocalizedError {
     case unusableExcitation
     case directArrivalNotFound(pass: RoomCorrectionMeasurementPass)
     case invalidMicrophoneCalibration
+    case tooMuchNoise(rejected: Int, total: Int)
 
     var errorDescription: String? {
         switch self {
@@ -38,6 +39,8 @@ enum RoomCorrectionMeasurementAnalysisError: Error, Equatable, LocalizedError {
             return "Room measurement \(pass.rawValue) response does not contain a reliable direct arrival."
         case .invalidMicrophoneCalibration:
             return "The selected microphone calibration curve is invalid."
+        case .tooMuchNoise(let rejected, let total):
+            return "Too much noise: \(rejected) of \(total) repeats rejected; measure again."
         }
     }
 }
@@ -54,6 +57,8 @@ struct RoomCorrectionMeasurementAnalyzer: Sendable {
     static let regularizationPowerRatio: Float = 1.0e-10
     static let directArrivalThresholdRatio: Float = 0.10
     static let lowSNRWarningDB = 20.0
+    /// The core's default repeat-rejection coherence threshold (`n60_measure_average_defaults`).
+    static let minimumRepeatCoherence = 0.9
     /// Impulse-response analysis window around the direct arrival (REW-style
     /// room window). The left side keeps the onset while excluding log-sweep
     /// harmonic-distortion impulses, which deconvolve to negative time and wrap
@@ -150,13 +155,20 @@ struct RoomCorrectionMeasurementAnalyzer: Sendable {
 
         // Lead-in is excluded from the transfer estimate but retained in rawCapture
         // so it can provide an environmental/electrical noise-floor estimate.
-        let observed = Array(rawCapture[sweepStart...])
+        var observed = Array(rawCapture[sweepStart...])
         guard observed.count >= program.sweepSamples.count else {
             throw RoomCorrectionMeasurementAnalysisError.invalidSweep
         }
+        let single = program.singleSweep
+        var repeatSummary: RepeatSummary?
+        if program.repeatCount > 1 {
+            let averaged = try averageRepeats(observed: observed, program: program, pass: pass)
+            observed = averaged.samples
+            repeatSummary = averaged.summary
+        }
         var excitation = [Float](repeating: 0, count: observed.count)
-        for index in program.sweepSamples.indices {
-            excitation[index] = program.sweepSamples[index]
+        for index in single.indices {
+            excitation[index] = single[index]
         }
 
         let transformSize = try Self.transformSize(requiredFrames: observed.count)
@@ -198,11 +210,22 @@ struct RoomCorrectionMeasurementAnalyzer: Sendable {
             directArrivalFrame: arrivalFrame,
             calibration: calibration
         )
-        let quality = makeQuality(
+        var quality = makeQuality(
             rawCapture: rawCapture,
             program: program,
             arrivalFrame: arrivalFrame
         )
+        if let repeatSummary {
+            quality.repeatCount = program.repeatCount
+            quality.rejectedRepeats = repeatSummary.rejected
+            quality.rejectedRepeatReasons = repeatSummary.reasons
+            quality.driftPPM = repeatSummary.driftPPM
+            if repeatSummary.driftWarning {
+                quality.warnings.append(String(
+                    format: "Clock drift of %.0f ppm between repeats; the average may smear high frequencies.",
+                    repeatSummary.driftPPM))
+            }
+        }
 
         return RoomCorrectionChannelMeasurement(
             capturedAt: capturedAt,
@@ -241,6 +264,73 @@ struct RoomCorrectionMeasurementAnalyzer: Sendable {
             result[index] = impulse[index] * Float(weight)
         }
         return result
+    }
+
+    struct RepeatSummary: Equatable {
+        var rejected: [Int]
+        var reasons: [String]
+        var driftPPM: Double
+        var driftWarning: Bool
+    }
+
+    /// Splits the observed train into its repeat periods, aligns them on each repeat's own direct
+    /// arrival and averages the accepted ones (design note 9). The result has the same length as one
+    /// period, so the rest of the analysis runs on it exactly as it does for a single sweep.
+    private func averageRepeats(
+        observed: [Float],
+        program: RoomCorrectionSweepProgram,
+        pass: RoomCorrectionMeasurementPass
+    ) throws -> (samples: [Float], summary: RepeatSummary) {
+        let count = program.repeatCount
+        let period = program.repeatPeriodFrames
+        let single = program.singleSweep
+        guard period >= single.count, observed.count == period * count else {
+            throw RoomCorrectionMeasurementAnalysisError.invalidSweep
+        }
+        var excitation = [Float](repeating: 0, count: period)
+        for index in single.indices { excitation[index] = single[index] }
+        var segments: [[Float]] = []
+        var arrivals: [Double] = []
+        for r in 0..<count {
+            let segment = Array(observed[(r * period)..<((r + 1) * period)])
+            segments.append(segment)
+            let response = try MeasurementCore.deconvolve(
+                excitation: excitation, observed: segment,
+                regularizationRatio: Double(Self.regularizationPowerRatio))
+            arrivals.append(Double(
+                (try? directArrivalFrame(
+                    impulse: response, sampleRate: program.sampleRate,
+                    tailFrames: program.tailFrames, pass: pass)) ?? -1))
+        }
+        // All repeats share one device clock, so a repeat whose arrival strays more than a
+        // millisecond from the median was corrupted, not shifted: align it with the others and let
+        // coherence reject it.
+        let valid = arrivals.filter { $0 >= 0 }.sorted()
+        guard !valid.isEmpty else {
+            throw RoomCorrectionMeasurementAnalysisError.directArrivalNotFound(pass: pass)
+        }
+        let median = valid[valid.count / 2]
+        let tolerance = program.sampleRate * 0.001
+        arrivals = arrivals.map { $0 >= 0 && abs($0 - median) <= tolerance ? $0 : median }
+
+        let result: MeasurementCore.AverageResult
+        do {
+            result = try MeasurementCore.averageRepeats(
+                segments, arrivals: arrivals, sampleRate: program.sampleRate, repeatPeriodFrames: period)
+        } catch {
+            throw RoomCorrectionMeasurementAnalysisError.tooMuchNoise(rejected: count, total: count)
+        }
+        if count >= 3, result.acceptedCount < 2 {
+            throw RoomCorrectionMeasurementAnalysisError.tooMuchNoise(
+                rejected: result.rejectedRepeats.count, total: count)
+        }
+        let reasons = result.rejectedRepeats.map { index in
+            index < result.coherence.count && result.coherence[index] < Self.minimumRepeatCoherence
+                ? "low coherence" : "level differs from the other repeats"
+        }
+        return (result.samples, RepeatSummary(
+            rejected: result.rejectedRepeats, reasons: reasons,
+            driftPPM: result.driftPPM, driftWarning: result.driftWarning))
     }
 
     private func validateProgram(_ program: RoomCorrectionSweepProgram) throws {
@@ -428,7 +518,7 @@ struct RoomCorrectionMeasurementAnalyzer: Sendable {
             ? Self.rms(Array(rawCapture.prefix(leadCount)))
             : nil
         let sweepStart = min(program.leadInFrames, rawCapture.count)
-        let sweepEnd = min(sweepStart + program.sweepSamples.count, rawCapture.count)
+        let sweepEnd = min(sweepStart + program.singleSweep.count, rawCapture.count)
         let signalRMS = sweepStart < sweepEnd
             ? Self.rms(Array(rawCapture[sweepStart..<sweepEnd]))
             : nil

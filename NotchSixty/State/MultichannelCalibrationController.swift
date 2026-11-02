@@ -315,7 +315,10 @@ final class MultichannelCalibrationController: ObservableObject {
             requiresWork: true,
             hasWork: nextTarget() != nil,
             transportActive: activeTransport != nil,
-            busyDescription: state == .measuring ? "measuring" : (state == .analyzing ? "being analysed" : nil)))
+            busyDescription: state == .measuring ? "measuring" : (state == .analyzing ? "being analysed" : nil),
+            timelineBytes: engine.selectedOutputDevice.map {
+                MeasurementReadiness.timelineBytes(for: microphone.sweepSettings(sampleRate: $0.nominalSampleRate))
+            }))
     }
 
     var canMeasure: Bool { readiness.isReady }
@@ -483,16 +486,7 @@ final class MultichannelCalibrationController: ObservableObject {
         )
         let physicalOutput = try physicalOutputChannel(for: target.source, routePlan: routePlan)
 
-        let settings = RoomCorrectionSweepSettings(
-            sampleRate: output.nominalSampleRate,
-            startFrequencyHz: microphone.sweepStartFrequencyHz,
-            endFrequencyHz: microphone.sweepEndFrequencyHz,
-            durationSeconds: microphone.sweepDurationSeconds,
-            levelDBFS: microphone.sweepLevelDBFS,
-            leadInSeconds: microphone.sweepLeadInSeconds,
-            tailSeconds: microphone.sweepTailSeconds,
-            fadeSeconds: microphone.sweepFadeSeconds
-        )
+        let settings = microphone.sweepSettings(sampleRate: output.nominalSampleRate)
         let program = try sweepGenerator.makeProgram(settings: settings)
         let transport = try transportFactory(
             routePlan,

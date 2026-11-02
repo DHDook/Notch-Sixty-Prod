@@ -32,6 +32,18 @@ final class MeasurementReadinessTests: XCTestCase {
         }
     }
 
+    func testTimelineOverTheMemoryBudgetIsBlockedWithAReason() {
+        let big = RoomCorrectionSweepSettings(sampleRate: 384_000, durationSeconds: 20, repeatCount: 8)
+        var inputs = ready(); inputs.timelineBytes = MeasurementReadiness.timelineBytes(for: big)
+        let result = MeasurementReadiness.evaluate(inputs)
+        XCTAssertFalse(result.isReady)
+        XCTAssertTrue(result.reason?.contains("fewer repeats") ?? false)
+
+        let usual = RoomCorrectionSweepSettings(sampleRate: 384_000, durationSeconds: 5, repeatCount: 3)
+        inputs.timelineBytes = MeasurementReadiness.timelineBytes(for: usual)
+        XCTAssertTrue(MeasurementReadiness.evaluate(inputs).isReady)
+    }
+
     func testRunningPlaybackIsNeverABlocker() {
         // There is no playback input at all: the policy stops it instead.
         XCTAssertTrue(MeasurementReadiness.evaluate(ready()).isReady)

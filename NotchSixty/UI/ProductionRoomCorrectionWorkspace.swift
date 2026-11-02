@@ -324,6 +324,12 @@ struct ProductionRoomCorrectionWorkspace: View {
                 .disabled(calibration.state == .measuring || calibration.state == .arming)
             }
 
+            LabeledContent("Repeats") {
+                SweepRepeatPicker(
+                    repeatCount: $calibration.sweepRepeatCount,
+                    disabled: calibration.state == .measuring || calibration.state == .arming)
+            }
+
             LabeledContent("Sweep Level") {
                 HStack(spacing: 12) {
                     Slider(value: $calibration.sweepLevelDBFS, in: -36 ... -6, step: 1)
@@ -524,6 +530,8 @@ struct ProductionRoomCorrectionWorkspace: View {
                         .foregroundStyle(.secondary)
                 }
             }
+
+            RepeatSummaryNote(quality: measurement.quality)
 
             HStack(spacing: 24) {
                 statusValue("SNR", formattedDB(measurement.quality.estimatedSNRDB))
@@ -1470,6 +1478,7 @@ private struct RoomCorrectionPositionRow: View {
                 }
                 .font(.caption)
                 .foregroundStyle(.secondary)
+                RepeatSummaryNote(quality: position.left.quality)
             }
             .padding(12)
             .background(.quaternary.opacity(0.18), in: .rect(cornerRadius: 12))

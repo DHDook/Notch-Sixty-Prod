@@ -287,4 +287,111 @@ final class RoomCorrectionMeasurementAnalyzerTests: XCTestCase {
         }
     }
 
+
+    // MARK: E24 S4 repeats
+
+    private func repeatSettings(rate: Double, repeats: Int, duration: Double = 0.1) -> RoomCorrectionSweepSettings {
+        RoomCorrectionSweepSettings(
+            sampleRate: rate, startFrequencyHz: 100, endFrequencyHz: min(3_000, rate * 0.4),
+            durationSeconds: duration, levelDBFS: -12, leadInSeconds: 0.02, tailSeconds: 0.08,
+            fadeSeconds: 0.005, repeatCount: repeats)
+    }
+
+    func testRepeatTrainLayoutAtEveryStandardRate() throws {
+        for rate in [44_100.0, 48_000, 88_200, 96_000, 176_400, 192_000, 352_800, 384_000] {
+            let single = try RoomCorrectionSweepGenerator().makeProgram(settings: repeatSettings(rate: rate, repeats: 1, duration: 0.05))
+            let train = try RoomCorrectionSweepGenerator().makeProgram(settings: repeatSettings(rate: rate, repeats: 3, duration: 0.05))
+            let sweep = single.sweepSamples.count
+            let period = sweep + single.tailFrames
+            XCTAssertEqual(train.repeatPeriodFrames, period, "\(rate)")
+            XCTAssertEqual(train.sweepSamples.count, 2 * period + sweep, "\(rate)")
+            XCTAssertEqual(train.captureFrameCount, single.leadInFrames + 3 * period, "\(rate)")
+            XCTAssertEqual(train.excitation, single.sweepSamples, "\(rate)")
+            for r in 0..<3 {
+                XCTAssertEqual(Array(train.sweepSamples[(r * period)..<(r * period + sweep)]), single.sweepSamples, "\(rate) repeat \(r)")
+            }
+            XCTAssertTrue(train.sweepSamples[sweep..<period].allSatisfy { $0 == 0 }, "\(rate) silent tail")
+            // N = 1 is today's program.
+            XCTAssertEqual(single.repeatCount, 1)
+            XCTAssertTrue(single.excitation.isEmpty)
+            XCTAssertEqual(single.captureFrameCount, single.leadInFrames + sweep + single.tailFrames)
+        }
+    }
+
+    func testSettingsWithoutRepeatCountDecodeAsOne() throws {
+        let stored = RoomCorrectionSweepSettings(sampleRate: 48_000)
+        var json = try JSONSerialization.jsonObject(with: JSONEncoder().encode(stored)) as! [String: Any]
+        json.removeValue(forKey: "repeatCount")
+        let decoded = try JSONDecoder().decode(
+            RoomCorrectionSweepSettings.self, from: JSONSerialization.data(withJSONObject: json))
+        XCTAssertEqual(decoded.repeatCount, 1)
+        XCTAssertEqual(decoded, stored)
+    }
+
+    private func noisy(_ seed: UInt32, _ count: Int, amplitude: Float) -> [Float] {
+        var state = seed
+        return (0..<count).map { _ in
+            state = state &* 1_664_525 &+ 1_013_904_223
+            return amplitude * (Float(state >> 8) / Float(1 << 24) * 2 - 1)
+        }
+    }
+
+    private func trainCapture(_ program: RoomCorrectionSweepProgram, corrupt: [Int] = []) -> [Float] {
+        var capture = makeCapture(program: program, gain: 0.5, delayFrames: 12, noiseAmplitude: 0.000_01)
+        let period = program.repeatPeriodFrames
+        for r in corrupt {
+            let start = program.leadInFrames + r * period
+            let burst = noisy(UInt32(7 + r), period, amplitude: 0.4)
+            for k in 0..<period where start + k < capture.count { capture[start + k] = burst[k] }
+        }
+        return capture
+    }
+
+    func testRepeatsAverageToTheSingleSweepResultAndRejectABurstCorruptedRepeat() throws {
+        let analyzer = RoomCorrectionMeasurementAnalyzer()
+        let rate = 8_000.0
+        let single = try RoomCorrectionSweepGenerator().makeProgram(settings: repeatSettings(rate: rate, repeats: 1))
+        let clean = try analyzer.analyzeSingleChannel(
+            rawCapture: makeCapture(program: single, gain: 0.5, delayFrames: 12, noiseAmplitude: 0.000_01), program: single)
+
+        let train = try RoomCorrectionSweepGenerator().makeProgram(settings: repeatSettings(rate: rate, repeats: 4))
+        let averaged = try analyzer.analyzeSingleChannel(rawCapture: trainCapture(train, corrupt: [2]), program: train)
+        XCTAssertEqual(averaged.quality.repeatCount, 4)
+        XCTAssertEqual(averaged.quality.rejectedRepeats, [2])
+        XCTAssertEqual(averaged.quality.rejectedRepeatReasons?.count, 1)
+        XCTAssertEqual(averaged.quality.repeatSummary?.hasPrefix("3 of 4 repeats kept; repeat 3 rejected"), true)
+        XCTAssertEqual(averaged.quality.directArrivalSeconds ?? -1, clean.quality.directArrivalSeconds ?? -2, accuracy: 1e-9)
+        let a = averaged.transferFunction!, c = clean.transferFunction!
+        var checked = 0
+        for (index, f) in c.frequenciesHz.enumerated() where f >= 300 && f <= 2_500 {
+            XCTAssertEqual(a.magnitudeDB[index], c.magnitudeDB[index], accuracy: 0.2, "\(f) Hz")
+            checked += 1
+        }
+        XCTAssertGreaterThan(checked, 10)
+    }
+
+    func testAllCleanRepeatsAreKeptAndASingleRepeatReportsNoSummary() throws {
+        let analyzer = RoomCorrectionMeasurementAnalyzer()
+        let train = try RoomCorrectionSweepGenerator().makeProgram(settings: repeatSettings(rate: 8_000, repeats: 3))
+        let result = try analyzer.analyzeSingleChannel(rawCapture: trainCapture(train), program: train)
+        XCTAssertEqual(result.quality.rejectedRepeats, [])
+        XCTAssertEqual(result.quality.repeatSummary, "3 of 3 repeats kept")
+
+        let single = try RoomCorrectionSweepGenerator().makeProgram(settings: repeatSettings(rate: 8_000, repeats: 1))
+        let one = try analyzer.analyzeSingleChannel(rawCapture: makeCapture(program: single), program: single)
+        XCTAssertNil(one.quality.repeatCount)
+        XCTAssertNil(one.quality.repeatSummary)
+    }
+
+    func testTooManyRejectedRepeatsFailsWithAMeasureAgainMessage() throws {
+        let analyzer = RoomCorrectionMeasurementAnalyzer()
+        let train = try RoomCorrectionSweepGenerator().makeProgram(settings: repeatSettings(rate: 8_000, repeats: 3))
+        XCTAssertThrowsError(try analyzer.analyzeSingleChannel(rawCapture: trainCapture(train, corrupt: [0, 1, 2]), program: train)) {
+            guard case .tooMuchNoise(_, let total)? = $0 as? RoomCorrectionMeasurementAnalysisError else {
+                return XCTFail("unexpected error \($0)")
+            }
+            XCTAssertEqual(total, 3)
+            XCTAssertTrue($0.localizedDescription.contains("measure again"))
+        }
+    }
 }
