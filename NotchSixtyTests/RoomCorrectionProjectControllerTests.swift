@@ -381,6 +381,26 @@ final class RoomCorrectionProjectControllerTests: XCTestCase {
         XCTAssertEqual(persisted.designs, [design])
     }
 
+    func testTargetShapingPersistsThroughSaveAndReload() throws {
+        let fixture = try makeFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        _ = try fixture.controller.retainMeasurement(
+            analysis(capturedAt: 1), sweep: sweep(), microphone: microphone())
+        XCTAssertEqual(fixture.controller.targetShaping, ChannelTargetShaping())
+
+        var shaping = ChannelTargetShaping()
+        shaping[0] = TargetShaping(lowCurtainHz: 30, highCurtainHz: 300, levelOffsetDB: -1.5, tiltDBPerOctave: 0.5)
+        shaping[1] = .limitedRange()
+        try fixture.controller.setTargetShaping(shaping)
+
+        let reloaded = RoomCorrectionProjectController(profiles: fixture.profiles, store: fixture.controller.store)
+        try reloaded.reloadForSelectedPlaybackSystem()
+        XCTAssertEqual(reloaded.targetShaping, shaping)
+
+        try fixture.controller.setTargetShaping(ChannelTargetShaping())
+        XCTAssertNil(fixture.controller.project?.targetShaping)
+    }
+
     func testChangingTargetInvalidatesCandidateSelectionButKeepsDesignHistory() throws {
         let fixture = try makeFixture()
         defer { try? FileManager.default.removeItem(at: fixture.root) }

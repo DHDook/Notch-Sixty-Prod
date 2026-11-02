@@ -8,7 +8,6 @@ struct ProductionRoomCorrectionWorkspace: View {
     @ObservedObject var projects: RoomCorrectionProjectController
     @ObservedObject var profiles: ProductProfileController
 
-    @State private var channelShaping = ChannelTargetShaping()
     @State private var actionError: String?
     @State private var positionName = ""
     @State private var importingMicrophoneCalibration = false
@@ -59,7 +58,9 @@ struct ProductionRoomCorrectionWorkspace: View {
                     targetDesignCard
                     RoomCorrectionTargetEditorCard(
                         channelNames: ["Left", "Right"],
-                        shaping: $channelShaping,
+                        shaping: Binding(
+                            get: { projects.targetShaping },
+                            set: { try? projects.setTargetShaping($0) }),
                         target: Binding(
                             get: { projects.target },
                             set: { if let t = $0 { try? projects.setTarget(t, modifiedAt: Date()) } }))

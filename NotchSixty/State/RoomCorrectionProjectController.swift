@@ -445,6 +445,18 @@ final class RoomCorrectionProjectController: ObservableObject {
         try persistAndPublish(updated)
     }
 
+    var targetShaping: ChannelTargetShaping { project?.targetShaping ?? ChannelTargetShaping() }
+
+    /// E24 S5: shaping persists with the project. Like a target edit it clears the selected design.
+    func setTargetShaping(_ shaping: ChannelTargetShaping, modifiedAt: Date = Date()) throws {
+        var updated = try requiredProject()
+        guard (updated.targetShaping ?? ChannelTargetShaping()) != shaping else { return }
+        updated.targetShaping = shaping.channels.isEmpty ? nil : shaping
+        updated.selectedDesignID = nil
+        updated.modifiedAt = modifiedAt
+        try persistAndPublish(updated)
+    }
+
     func setTarget(_ target: RoomCorrectionTargetCurve, modifiedAt: Date = Date()) throws {
         var updated = try requiredProject()
         lastGeneratedTargetReport = nil
