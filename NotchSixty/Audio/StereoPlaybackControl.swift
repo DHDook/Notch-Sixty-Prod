@@ -709,7 +709,7 @@ enum FIRUpdatePolicy {
         roomCorrection: RoomCorrectionConfiguration,
         playback: PlaybackControlConfiguration
     ) -> Bool {
-        !isRawBypassed(playback) && roomCorrection.enabled
+        !isRawBypassed(playback) && roomCorrection.isActiveOnStereoKernel
     }
 
     static func shouldPrepareSpeakerIR(

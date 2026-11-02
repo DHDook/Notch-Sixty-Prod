@@ -175,6 +175,7 @@ struct OfflineSetupRig {
         engine = AudioIOEngine(deviceCatalog: OfflineOutputCatalog(devices: [output]))
         _ = try engine.refreshOutputDevices()
         try engine.selectOutput(uid: Self.outputUID)
+        engine.unifiedGraphEnabled = true  // the production default (the legacy kernel is a flag)
         profiles = ProductProfileController(engine: engine, storageURL: root.appendingPathComponent("profiles.json"))
         microphone = RoomCorrectionCalibrationController(
             engine: engine, inputCatalog: OfflineInputCatalog(devices: [input]),
