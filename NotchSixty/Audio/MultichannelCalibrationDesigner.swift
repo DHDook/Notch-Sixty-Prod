@@ -1,10 +1,19 @@
 import Foundation
 
+/// E24 S5b1: the microphone channel placed at one seat when each seat has its own microphone, with that
+/// microphone's own calibration file. Absent in archives written before per-seat microphones.
+struct MultichannelSeatMicrophone: Codable, Equatable, Sendable {
+    var deviceUID: String
+    var channelIndex: Int
+    var calibration: RoomCorrectionMicrophoneCalibration?
+}
+
 struct MultichannelCalibrationSeat: Identifiable, Codable, Equatable, Sendable {
     var id: UUID = UUID()
     var name: String
     var included = true
     var weight = 1.0
+    var microphone: MultichannelSeatMicrophone?
 }
 
 enum MultichannelCalibrationSource: Codable, Equatable, Hashable, Sendable {

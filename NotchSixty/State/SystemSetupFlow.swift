@@ -290,8 +290,7 @@ struct SystemSetupVerificationReport: Codable, Equatable, Sendable {
 
 /// The work behind each step. The real implementation wraps the calibration and room-correction
 /// controllers (S3 onward); tests use `SimulatedSystemSetupServices`.
-protocol SystemSetupServices: Sendable {
-    func measureSeat(index: Int, sampleRate: Double) async throws -> SystemSetupMeasurementRecord
+protocol SystemSetupServices: SystemSetupSeatMeasuring {
     /// Returns the trial state for the stage, built from `state` and the measurement records.
     func design(
         stage: SystemSetupDesignStage,
