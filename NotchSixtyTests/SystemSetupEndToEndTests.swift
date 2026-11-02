@@ -78,8 +78,21 @@ final class SystemSetupEndToEndTests: XCTestCase {
 
             model.computeBass()
             XCTAssertNotNil(model.bass, "\(label): \(model.message ?? "")")
-            model.applyBass()
+            await model.applyBass()
             XCTAssertTrue(model.choices.bassApplied, label)
+            // The trial room hears the subwoofer too (sub gain, delay and polarity from the design; grids from the plan).
+            if let bass = model.bass, bass.mode == .jointOptimised {
+                let layout = SyntheticReferenceRoom(rate: rate, seatCount: 3, sourcesPerSeat: 3)
+                let range = PhysicalSubwooferCalibration.gainRangeDB
+                rig.trialPlayer.subPaths = bass.rows.compactMap { row in
+                    guard case .subwoofer(let index) = row.source else { return nil }
+                    return OfflineTrialSweepPlayer.SubPath(
+                        lane: 2 + Int(index), room: layout.room(measurement: 2, outputChannel: 2),
+                        gainDB: min(range.upperBound, max(range.lowerBound, row.gainDB)),
+                        delaySeconds: min(PhysicalSubwooferCalibration.delayRangeMilliseconds.upperBound, max(0, row.delayMilliseconds)) / 1_000,
+                        inverted: row.polarityInverted)
+                }
+            }
             model.next()
             XCTAssertEqual(model.step, .correction, "\(label): \(model.message ?? "")")
 
@@ -87,6 +100,8 @@ final class SystemSetupEndToEndTests: XCTestCase {
             XCTAssertTrue(model.correctionIsPrepared, "\(label): \(model.message ?? "")")
             await model.applyCorrection()
             XCTAssertTrue(model.choices.correctionApplied, "\(label): \(model.message ?? "")")
+            // The lane's installed alignment delay (the room's plus the bass design's) is part of what the graph does.
+            rig.trialPlayer.mainDelaySeconds = rig.engine.roomCorrectionConfiguration.lanes?.laneDelays.first { $0.lane == 0 }?.seconds ?? 0
             model.next()
             XCTAssertEqual(model.step, .verify, "\(label): \(model.message ?? "")")
 
@@ -95,15 +110,6 @@ final class SystemSetupEndToEndTests: XCTestCase {
             await waitForVerification(model)
             let verifiedMessage = "\(label): \(model.message ?? "") \(String(describing: model.verificationSummary))"
             XCTAssertEqual(rig.trialPlayer.sweepsPlayed, 1, label)
-            if rate >= 176_400 {
-                // The stored measurement impulse response overstates the 60 to 120 Hz resonance by about 2 dB at the
-                // high rates (the trial room is exact), so the mixed-phase prediction misses by 1.6 to 2.0 dB and the
-                // flow reverts to Correction. Open: see E24.md (S3c).
-                XCTExpectFailure("Stored measurement IR is inaccurate at 176.4 kHz and above: open, see E24.md", options: strict()) {
-                    XCTAssertEqual(model.choices.verificationPassed, true, verifiedMessage)
-                }
-                continue
-            }
             XCTAssertEqual(model.choices.verificationPassed, true, verifiedMessage)
             XCTAssertEqual(model.choices.designKind, .mixedPhase, label)
             model.next()

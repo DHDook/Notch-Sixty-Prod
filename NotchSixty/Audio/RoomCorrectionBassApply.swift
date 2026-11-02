@@ -8,8 +8,8 @@ import Foundation
 //   - the per-channel filters become a `RoomCorrectionMultiLaneDesign` (one ROOM_FIR lane each, synthesised per rate by
 //     `RoomCorrectionRateCache`), with the headroom applied as a uniform attenuation of every channel so the set of
 //     filters cannot clip;
-//   - sub gain, polarity and delay go to `UnifiedGraphBassManagement.subwoofers` (BASS_MGMT gain and polarity, DELAY
-//     stage on the sub lane), checked against the BASS_MGMT ranges and the graph's delay limit at the device rate.
+//   - sub gain, polarity and delay stay in the profile's sub calibration (E24 S3c): `install` writes only the lane plan
+//     and the main-lane delays; the profile feeds bass management as before.
 // Measurements are taken with the sub gain, polarity and delay neutral, so the result replaces those three values.
 //
 // Realtime: none. Everything here runs off the audio thread and produces immutable values; the engine never reads the
@@ -136,17 +136,17 @@ enum RoomCorrectionBassApply {
             subDelaySeconds: delays, mainDelaySeconds: mainDelays, headroomDB: headroom)
     }
 
-    /// Writes the main-lane delays and the ROOM_FIR plan into `program`, and the sub gain, polarity and delay into the bass-management configuration and returns the ROOM_FIR plan
-    /// for `sampleRate`, to be set as `UnifiedGraphProgramDSP.roomLanes`. Throws when a delay exceeds the graph limit
-    /// at this rate (checked at 384 kHz as well as the current rate by the caller's rate sweep).
+    /// Writes the main-lane delays and the ROOM_FIR plan into `program` and returns the ROOM_FIR plan for `sampleRate`,
+    /// to be set as `UnifiedGraphProgramDSP.roomLanes`. Sub gain, polarity and delay are not written here (E24 S3c,
+    /// design note 8): they stay in the profile's sub calibration (`SystemSetupBassDesign.applying(to:)`), which the
+    /// bass-management configuration reads. Throws when a delay exceeds the graph limit at this rate (checked at
+    /// 384 kHz as well as the current rate by the caller's rate sweep).
     static func install(
         _ plan: RoomCorrectionBassApplyPlan,
-        into bass: inout UnifiedGraphBassManagement,
         program: inout UnifiedGraphProgramDSP,
         sampleRate: Double,
         cache: RoomCorrectionRateCache
     ) throws -> RoomCorrectionLanePlan {
-        guard bass.subwoofers.count == plan.subLanes.count else { throw RoomCorrectionBassApplyError.channelMismatch }
         for frames in plan.subDelayFrames(sampleRate: sampleRate) {
             guard frames >= 0, frames <= Int(N60_GRAPH_MAX_DELAY_FRAMES) else {
                 throw RoomCorrectionBassApplyError.delayTooLong(frames: frames)
@@ -157,13 +157,6 @@ enum RoomCorrectionBassApply {
             guard frames <= N60_GRAPH_MAX_DELAY_FRAMES else { throw RoomCorrectionBassApplyError.delayTooLong(frames: Int(frames)) }
         }
         let lanePlan = try cache.plan(for: plan.design, sampleRate: sampleRate)
-        var updated = bass
-        for index in updated.subwoofers.indices {
-            updated.subwoofers[index].gainDB = plan.subGainDB[index]
-            updated.subwoofers[index].polarityInverted = plan.subPolarityInverted[index]
-            updated.subwoofers[index].delayMilliseconds = plan.subDelaySeconds[index] * 1_000
-        }
-        bass = updated
         program.roomLanes = lanePlan
         program.laneDelayFrames = mainFrames
         return lanePlan

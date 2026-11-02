@@ -47,6 +47,9 @@ struct SystemSetupBassDesign: Sendable {
     var seatMeanBeforeDB: [Double]
     var seatMeanAfterDB: [Double]
     var optimisation: BassOptimisation?
+    /// The optimiser's channels in order (mains, then subwoofers) and their specs; empty unless `jointOptimised`.
+    var channelSources: [MultichannelCalibrationSource] = []
+    var channelSpecs: [BassChannelSpec] = []
 
     /// Seat-to-seat standard deviation of the level, 20 to 120 Hz, without and with the design.
     var seatSpreadBeforeDB: Double? { report?.seatStdBeforeDB }
@@ -104,7 +107,7 @@ struct SystemSetupBassDesign: Sendable {
             report: result.report,
             seatMeanBeforeDB: Self.seatMeans(result.beforeDB, seatCount: included.count),
             seatMeanAfterDB: Self.seatMeans(result.afterDB, seatCount: included.count),
-            optimisation: result)
+            optimisation: result, channelSources: ordered, channelSpecs: specs)
     }
 
     private static func seatMeans(_ values: [Double], seatCount: Int) -> [Double] {
@@ -113,6 +116,29 @@ struct SystemSetupBassDesign: Sendable {
         return (0..<seatCount).map { seat in
             values[(seat * grid)..<((seat + 1) * grid)].reduce(0, +) / Double(grid)
         }
+    }
+
+    /// E24 S3c: the optimiser's low-frequency grids as a lane-plan design on the session's lanes (mains on the front pair,
+    /// subwoofer `i` on lane `programLaneCount + i`). Nil unless the joint optimiser ran. Sub gain, delay and polarity are
+    /// not in it: `applying(to:)` puts them in the profile.
+    func lanePlan(
+        frontLeft: Int?, frontRight: Int?, programLaneCount: Int, subwooferCount: Int, latencyMode: RoomCorrectionLatencyMode
+    ) throws -> RoomCorrectionBassApplyPlan? {
+        guard mode == .jointOptimised, let optimisation else { return nil }
+        let lanes = try channelSources.map { source -> Int in
+            switch source {
+            case .speaker(let role):
+                let lane = role == .frontLeft ? frontLeft : (role == .frontRight ? frontRight : nil)
+                guard let lane else { throw RoomCorrectionBassApplyError.laneOutOfRange(-1) }
+                return lane
+            case .subwoofer(let index):
+                guard Int(index) < subwooferCount else { throw RoomCorrectionBassApplyError.laneOutOfRange(programLaneCount + Int(index)) }
+                return programLaneCount + Int(index)
+            }
+        }
+        return try RoomCorrectionBassApply.plan(
+            optimisation: optimisation, channels: channelSpecs, lanes: lanes, laneCount: programLaneCount + subwooferCount,
+            latencyMode: latencyMode, enabled: true)
     }
 
     /// The profile with only the subwoofers' gain, delay and polarity replaced by the design's;
