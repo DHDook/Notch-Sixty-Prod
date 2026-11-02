@@ -391,25 +391,84 @@ final class SystemSetupFlowModel: ObservableObject {
         }
     }
 
-    /// Trial apply: designs against the chosen target and deploys through the controller's gated
-    /// path (verification recomputed before commit). Mixed phase is not produced here; the Verify
-    /// step's verifier gates it (S6), so the design kind stays minimum phase.
-    func applyCorrection() {
+    /// Trial apply. With the unified graph and an enabled speaker profile the wizard designs one grid per front lane over
+    /// the seat impulse responses, precomputes the plan at every rate the output exposes, and deploys the lanes (mixed phase
+    /// in music mode when the plan's latency fits the budget at every rate; verification still gates saving). Otherwise
+    /// (legacy kernel, no profile) it falls back to the stereo minimum-phase filter through the project controller.
+    func applyCorrection() async {
         do {
             if !correctionIsPrepared { prepareCorrection() }
             guard correctionIsPrepared else { return }
             try roomProjects.setTarget(correctionTarget.curve)
-            let design = try roomProjects.generateDesign(
-                parameters: SystemSetupCorrectionPlan.defaultParameters, name: "Guided Setup \(correctionTarget.title)")
-            let report = try roomProjects.verification(for: design)
-            try roomProjects.deploySelectedDesign()
-            seatPredictions = SystemSetupSeatPrediction.make(from: report)
-            flow.choices.designKind = correctionMode.designKind(mixedPhaseAllowed: false)
+            if let install = try await makeLaneInstall() {
+                try await engine.precomputeRoomCorrectionPlans(for: install)
+                let rates = engine.selectedOutputDevice?.correctionSampleRates ?? [flow.choices.sampleRate ?? 48_000]
+                var mixed = false
+                var finalInstall = install
+                if correctionMode == .music {
+                    mixed = try rates.allSatisfy { rate in
+                        RoomCorrectionLaneInstall.latencyFits(
+                            try engine.roomCorrectionRateCache.plan(for: install.design, sampleRate: rate), mode: install.design.latencyMode)
+                    }
+                }
+                if !mixed, install.design.latencyMode.isMixedPhase {
+                    finalInstall = try await makeLaneInstall(forceMode: .video) ?? install
+                    try await engine.precomputeRoomCorrectionPlans(for: finalInstall)
+                }
+                try profiles.replaceSelectedSystemRoomCorrection(
+                    RoomCorrectionConfiguration(enabled: true, lanes: finalInstall), calibrationSummary: nil)
+                flow.choices.designKind = mixed ? .mixedPhase : .minimumPhase
+                seatPredictions = []
+            } else {
+                let design = try roomProjects.generateDesign(
+                    parameters: SystemSetupCorrectionPlan.defaultParameters, name: "Guided Setup \(correctionTarget.title)")
+                let report = try roomProjects.verification(for: design)
+                try roomProjects.deploySelectedDesign()
+                seatPredictions = SystemSetupSeatPrediction.make(from: report)
+                flow.choices.designKind = correctionMode.designKind(mixedPhaseAllowed: false)
+            }
             flow.choices.correctionApplied = true
             message = nil
         } catch {
             message = error.localizedDescription
         }
+    }
+
+    /// The lane-plan form of the correction, or nil when the filter path applies (legacy kernel, no enabled profile).
+    private func makeLaneInstall(forceMode: RoomCorrectionLatencyMode? = nil) async throws -> RoomCorrectionLaneInstall? {
+        guard engine.unifiedGraphEnabled, let rate = flow.choices.sampleRate,
+              let profile = profiles.selectedSystemOutputDeviceProfile, profile.enabled,
+              let output = engine.selectedOutputDevice else { return nil }
+        let routePlan = try profile.makeLivePlan(
+            availableDevices: engine.outputDevices, sampleRate: output.nominalSampleRate,
+            selectedOutputUID: output.uid, bassManagementEnabled: engine.bassManagementConfiguration.enabled)
+        guard let shape = UnifiedGraphLayoutShape(roles: routePlan.programLayout.roles) else { return nil }
+        let included = calibration.seats.filter { $0.included && $0.weight > 0 }
+        guard !included.isEmpty else { return nil }
+        let mode = forceMode ?? correctionMode.latencyMode
+        var lanes: [RoomCorrectionLaneDesign] = []
+        for (source, lane) in [(MultichannelCalibrationSource.speaker(.frontLeft), shape.frontLeft),
+                               (.speaker(.frontRight), shape.frontRight)] {
+            guard calibration.sources.contains(source), let lane else { continue }
+            let seats = try included.map { seat -> RoomCorrectionCore.SeatImpulseResponse in
+                guard let measurement = calibration.measurements.last(where: { $0.seatID == seat.id && $0.source == source }) else {
+                    throw SystemSetupBassError.missingMeasurement(seat: seat.name, source: source.displayName)
+                }
+                guard let arrival = measurement.channel.quality.directArrivalSeconds, arrival.isFinite, arrival >= 0 else {
+                    throw SystemSetupBassError.missingArrival(source: source.displayName)
+                }
+                return .init(samples: measurement.channel.impulseResponse, arrivalFrames: arrival * rate, weight: seat.weight)
+            }
+            let grid = try await Task.detached(priority: .userInitiated) {
+                try RoomCorrectionCore.designGrid(seats: seats, sampleRate: rate, mainSeat: 0, mode: mode)
+            }.value
+            lanes.append(RoomCorrectionLaneDesign(lane: lane, grid: grid))
+        }
+        guard !lanes.isEmpty else { return nil }
+        let design = RoomCorrectionMultiLaneDesign(latencyMode: mode, laneCount: shape.laneCount, lanes: lanes)
+        return RoomCorrectionLaneInstall(
+            name: "Guided Setup \(correctionTarget.title)", design: design, programLaneCount: shape.laneCount,
+            subwooferCount: Int(routePlan.subwooferCount))
     }
 
     func revertCorrection() {
@@ -429,27 +488,42 @@ final class SystemSetupFlowModel: ObservableObject {
     /// The main seat's predicted error after correction, from the Correction step.
     var predictedMainSeatErrorDB: Double { seatPredictions.first?.rmsErrorAfterDB ?? 0 }
 
-    /// What the live check compares: the published filter's prediction at the main seat (its measured room through the
-    /// deployed taps) against a sweep played through the running graph. Minimum phase only; mixed phase is E24 S3b.
+    /// What the live check compares: the installed plan's lane-0 stage and latency (what the graph actually runs) at the
+    /// main seat's measured room, against a sweep played through the running graph. Falls back to the published filter on
+    /// the stereo path.
     func verificationCandidate(sampleRate rate: Double) throws -> RoomCorrectionDeployCandidate {
-        guard let design = roomProjects.selectedDesign, let mainSeat = roomProjects.positions.first else {
-            throw SystemSetupVerificationError.couldNotMeasure("No correction design is selected.")
+        guard let mainSeat = roomProjects.positions.first else {
+            throw SystemSetupVerificationError.couldNotMeasure("No measured main seat is available.")
         }
-        let filter = try design.deploymentFilter()
         let criteria = RoomCorrectionPostApplyCriteria()
         let impulse = mainSeat.left.impulseResponse
         var peak = 0
         for index in impulse.indices where abs(impulse[index]) > abs(impulse[peak]) { peak = index }
-        let stage = RoomCorrectionLaneStage(laneMask: 1, taps: filter.leftTaps)
+        let plan: RoomCorrectionLanePlan
+        let stage: RoomCorrectionLaneStage
+        var measuredLane = 0
+        var kind: RoomCorrectionDeployCandidate.Kind = .minimumPhase
+        if let installed = engine.installedRoomCorrectionPlan(sampleRate: rate), let first = installed.stages.first {
+            plan = installed
+            measuredLane = first.laneMask.trailingZeroBitCount
+            stage = installed.stages.first { $0.laneMask & (1 << UInt64(measuredLane)) != 0 } ?? first
+            kind = flow.choices.designKind == .mixedPhase ? .mixedPhase : .minimumPhase
+        } else {
+            guard let design = roomProjects.selectedDesign else {
+                throw SystemSetupVerificationError.couldNotMeasure("No correction design is selected.")
+            }
+            let filter = try design.deploymentFilter()
+            stage = RoomCorrectionLaneStage(laneMask: 1, taps: filter.leftTaps)
+            plan = RoomCorrectionLanePlan(
+                designID: design.id, sampleRate: rate, stages: [stage],
+                declaredLatencyFrames: filter.declaredLatencyFrames, laneCount: 2)
+        }
         let predicted = try RoomCorrectionPostApplyVerifier.prediction(
             roomImpulse: impulse, roomArrivalFrames: Double(peak), stage: stage,
-            declaredLatencyFrames: filter.declaredLatencyFrames, sampleRate: rate, criteria: criteria)
-        let plan = RoomCorrectionLanePlan(
-            designID: design.id, sampleRate: rate, stages: [stage],
-            declaredLatencyFrames: filter.declaredLatencyFrames, laneCount: 2)
+            declaredLatencyFrames: plan.declaredLatencyFrames, sampleRate: rate, criteria: criteria)
         return RoomCorrectionDeployCandidate(
-            designID: design.id.uuidString, kind: .minimumPhase, sampleRate: rate, lanePlan: plan,
-            latencyMode: correctionMode.latencyMode, measuredLane: 0,
+            designID: plan.designID.uuidString, kind: kind, sampleRate: rate, lanePlan: plan,
+            latencyMode: correctionMode.latencyMode, measuredLane: measuredLane,
             predictionCheck: RoomCorrectionPredictionCheck(passed: true, rmsErrorDB: predictedMainSeatErrorDB, reasons: []),
             predicted: predicted, sweepFrames: Int(2 * rate))
     }
@@ -1050,7 +1124,7 @@ private struct SystemSetupCorrectionStep: View {
                 }
             }
             HStack {
-                Button("Apply") { model.applyCorrection() }.disabled(model.choices.correctionApplied)
+                Button("Apply") { Task { await model.applyCorrection() } }.disabled(model.choices.correctionApplied)
                 Button("Revert") { model.revertCorrection() }.disabled(!model.choices.correctionApplied)
                 if model.choices.correctionApplied { Label("Applied", systemImage: "checkmark.circle.fill") }
             }

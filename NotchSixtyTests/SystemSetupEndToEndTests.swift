@@ -85,7 +85,7 @@ final class SystemSetupEndToEndTests: XCTestCase {
 
             model.prepareCorrection()
             XCTAssertTrue(model.correctionIsPrepared, "\(label): \(model.message ?? "")")
-            model.applyCorrection()
+            await model.applyCorrection()
             XCTAssertTrue(model.choices.correctionApplied, "\(label): \(model.message ?? "")")
             model.next()
             XCTAssertEqual(model.step, .verify, "\(label): \(model.message ?? "")")
@@ -93,21 +93,19 @@ final class SystemSetupEndToEndTests: XCTestCase {
             // Verify plays the sweep through the live graph and the reference room (E24 S3a).
             model.runVerification()
             await waitForVerification(model)
-            XCTAssertNotNil(model.choices.verificationPassed, label)
             let verifiedMessage = "\(label): \(model.message ?? "") \(String(describing: model.verificationSummary))"
+            XCTAssertEqual(rig.trialPlayer.sweepsPlayed, 1, label)
             if rate >= 176_400 {
                 // The stored measurement impulse response overstates the 60 to 120 Hz resonance by about 2 dB at the
-                // high rates (the trial room is exact), so the prediction misses by 1.6 to 2.0 dB. Open: see E24.md.
+                // high rates (the trial room is exact), so the mixed-phase prediction misses by 1.6 to 2.0 dB and the
+                // flow reverts to Correction. Open: see E24.md (S3c).
                 XCTExpectFailure("Stored measurement IR is inaccurate at 176.4 kHz and above: open, see E24.md", options: strict()) {
                     XCTAssertEqual(model.choices.verificationPassed, true, verifiedMessage)
                 }
-            } else {
-                XCTAssertEqual(model.choices.verificationPassed, true, verifiedMessage)
+                continue
             }
-            XCTAssertEqual(rig.trialPlayer.sweepsPlayed, 1, label)
-            XCTExpectFailure("Mixed phase never produced by the wizard: fixed by E24 S3b", options: strict()) {
-                XCTAssertEqual(model.choices.designKind, .mixedPhase, label)
-            }
+            XCTAssertEqual(model.choices.verificationPassed, true, verifiedMessage)
+            XCTAssertEqual(model.choices.designKind, .mixedPhase, label)
             model.next()
             XCTAssertEqual(model.step, .save, "\(label): \(model.message ?? "")")
 

@@ -670,10 +670,14 @@ struct RoomCorrectionFilter: Equatable, Codable, Sendable {
 struct RoomCorrectionConfiguration: Equatable, Codable, Sendable {
     var enabled = false
     var filter: RoomCorrectionFilter?
+    /// E24 S3b: a rate-independent lane-plan correction for the speaker profile's lanes. Exactly one of `filter` and
+    /// `lanes` is set when enabled. Absent in older stored profiles, which decode with nil.
+    var lanes: RoomCorrectionLaneInstall?
 }
 
 enum RoomCorrectionConfigurationError: Error, LocalizedError, Equatable {
     case filterRequired
+    case filterAndLanes
     case invalidTapCount(Int)
     case mismatchedStereoTapCount(left: Int, right: Int)
     case nonFiniteTap
@@ -686,6 +690,8 @@ enum RoomCorrectionConfigurationError: Error, LocalizedError, Equatable {
         switch self {
         case .filterRequired:
             return "Room correction cannot be enabled until a correction filter is loaded."
+        case .filterAndLanes:
+            return "Room correction carries either a stereo filter or a lane plan, not both."
         case .invalidTapCount(let count):
             return "Room-correction FIR tap count \(count) is outside the supported 1...\(Int(N60_CONVOLUTION_MAX_TAPS)) range."
         case .mismatchedStereoTapCount(let left, let right):
@@ -1127,6 +1133,10 @@ final class AudioIOEngine: ObservableObject {
     @Published private(set) var speakerDriverProcessingConfiguration = SpeakerDriverProcessingConfiguration()
     @Published private(set) var dynamicsConfiguration = DynamicsConfiguration()
     @Published private(set) var roomCorrectionConfiguration = RoomCorrectionConfiguration()
+    /// E24 S3b: why an enabled lane-plan correction is not shaping playback right now, for Room Correction to show.
+    @Published private(set) var roomCorrectionInactiveReason: RoomCorrectionInactiveReason?
+    /// E24 S3b: the engine's per-rate cache of lane-plan synthesis (design note 8).
+    let roomCorrectionRateCache = RoomCorrectionRateCache()
     @Published private(set) var speakerIRConfiguration = SpeakerIRConfiguration()
     @Published private(set) var ambientCompensationRuntimeTarget =
         AmbientCompensationTarget.unity
@@ -3464,7 +3474,7 @@ final class AudioIOEngine: ObservableObject {
                     )
                 }
 
-                if roomCorrectionConfiguration.enabled {
+                if roomCorrectionConfiguration.isActiveOnStereoKernel {
                     guard let filter = roomCorrectionConfiguration.filter else {
                         throw RoomCorrectionConfigurationError.filterRequired
                     }
@@ -3733,9 +3743,13 @@ final class AudioIOEngine: ObservableObject {
     }
 
     private func applyRoomCorrectionConfiguration(_ configuration: RoomCorrectionConfiguration) throws {
-        if configuration.enabled && configuration.filter == nil {
+        if configuration.enabled && configuration.filter == nil && configuration.lanes == nil {
             throw RoomCorrectionConfigurationError.filterRequired
         }
+        if configuration.filter != nil && configuration.lanes != nil {
+            throw RoomCorrectionConfigurationError.filterAndLanes
+        }
+        try configuration.lanes?.validate()
         if immutableSemanticTransportActive, configuration != roomCorrectionConfiguration {
             try requireLiveGraphEdits()
             var inputs = currentLiveGraphInputs
@@ -3774,7 +3788,7 @@ final class AudioIOEngine: ObservableObject {
                 try applyAudioUnitRackLatency(to: &graph)
             try session.publishDSPGraph(graph)
                 activeRoomCorrectionProgram = nil
-            } else if configuration.enabled {
+            } else if configuration.isActiveOnStereoKernel {
                 guard let filter = configuration.filter else {
                     throw RoomCorrectionConfigurationError.filterRequired
                 }
@@ -3797,8 +3811,34 @@ final class AudioIOEngine: ObservableObject {
             activeRoomCorrectionProgram = nil
         }
 
+        // A lane plan cannot run on the stereo kernel (two-band stages, per-lane delays): the session plays uncorrected
+        // and says why (Q9, owner 1 Nov 2026). N-channel sessions set the reason while they build the graph.
+        if transportSession != nil {
+            roomCorrectionInactiveReason = configuration.enabled && configuration.lanes != nil ? .needsSpeakerProfile : nil
+        } else if !immutableSemanticTransportActive {
+            roomCorrectionInactiveReason = nil
+        }
         roomCorrectionConfiguration = configuration
         lastErrorDescription = nil
+    }
+
+    /// E24 S3b: synthesises the lane plan at every rate the selected output exposes, before a deploy commits (Q8), so a
+    /// rate change later hits the cache. Any failure throws and the deploy fails.
+    func precomputeRoomCorrectionPlans(for lanes: RoomCorrectionLaneInstall) async throws {
+        try lanes.validate()
+        let rates = selectedOutputDevice?.correctionSampleRates ?? [48_000]
+        for rate in rates {
+            _ = try await roomCorrectionRateCache.planAsync(
+                for: lanes.design, sampleRate: rate, unifiedGraphEnabled: unifiedGraphEnabled)
+        }
+    }
+
+    /// The plan the graph runs at `sampleRate` for the stored lanes (a cache hit after the precompute), for verification.
+    func installedRoomCorrectionPlan(sampleRate: Double) -> RoomCorrectionLanePlan? {
+        guard roomCorrectionConfiguration.enabled, roomCorrectionInactiveReason == nil,
+              let lanes = roomCorrectionConfiguration.lanes else { return nil }
+        return try? roomCorrectionRateCache.plan(
+            for: lanes.design, sampleRate: sampleRate, unifiedGraphEnabled: unifiedGraphEnabled)
     }
 
     private func applySpeakerIRConfiguration(_ configuration: SpeakerIRConfiguration) throws {
@@ -4127,9 +4167,14 @@ final class AudioIOEngine: ObservableObject {
         sampleRate: Double,
         shape: UnifiedGraphLayoutShape,
         virtualSpeakers: Bool,
+        subwooferCount: Int? = nil,
         inputs candidate: LiveGraphInputs? = nil
     ) throws -> UnifiedGraphProgramDSP? {
-        guard unifiedGraphEnabled else { return nil }
+        guard unifiedGraphEnabled else {
+            let room = candidate?.room ?? roomCorrectionConfiguration
+            roomCorrectionInactiveReason = room.enabled && room.lanes != nil ? .needsUnifiedGraph : nil
+            return nil
+        }
         let inputs = candidate ?? currentLiveGraphInputs
         let playback = inputs.playback
         if FIRUpdatePolicy.isRawBypassed(playback) || playback.auditionMode == .reference { return nil }
@@ -4172,7 +4217,24 @@ final class AudioIOEngine: ObservableObject {
                 throw EQConfigurationError.convolutionProgramUnavailable
             }
         }
-        if inputs.room.enabled {
+        var installedLanes: (plan: RoomCorrectionLanePlan, delays: [Int: UInt32])?
+        var inactive: RoomCorrectionInactiveReason?
+        if inputs.room.enabled, let lanes = inputs.room.lanes {
+            // Lane plans install on the main lanes (design note 8). A layout that no longer matches, or a rate the
+            // filters cannot be built for, leaves correction off with its reason; playback is never refused (Q9, Q11).
+            if !lanes.matches(programLaneCount: shape.laneCount, subwooferCount: subwooferCount) {
+                inactive = .layoutChanged
+            } else {
+                do {
+                    let delays = try lanes.delayFrames(sampleRate: sampleRate)
+                    // Cache hit after the deploy-time precompute; a miss (new device rate) synthesises here, on the control thread.
+                    let plan = try roomCorrectionRateCache.plan(for: lanes.design, sampleRate: sampleRate)
+                    installedLanes = (plan, delays)
+                } catch {
+                    inactive = .synthesisFailed(rate: sampleRate)
+                }
+            }
+        } else if inputs.room.enabled {
             guard let filter = inputs.room.filter else {
                 throw RoomCorrectionConfigurationError.filterRequired
             }
@@ -4214,8 +4276,13 @@ final class AudioIOEngine: ObservableObject {
         case .independent: mode = .independent
         case .midSide: mode = .midSide
         }
-        let program = UnifiedGraphProgramDSP(
+        var program = UnifiedGraphProgramDSP(
             stereo: stereo, shape: shape, eqMode: mode, virtualSpeakers: virtualSpeakers)
+        if let installedLanes {
+            program.roomLanes = installedLanes.plan
+            program.laneDelayFrames = installedLanes.delays
+        }
+        roomCorrectionInactiveReason = inactive
         return program.isNeutral ? nil : program
     }
 
@@ -4346,7 +4413,8 @@ final class AudioIOEngine: ObservableObject {
                 throw LiveNChannelTransportError.unifiedGraphRejected(.laneCountMismatch)
             }
             let program = try makeUnifiedProgramDSP(
-                sampleRate: rate, shape: shape, virtualSpeakers: false, inputs: inputs)
+                sampleRate: rate, shape: shape, virtualSpeakers: false,
+                subwooferCount: Int(session.routePlan.subwooferCount), inputs: inputs)
             var configuration: UnifiedGraphConfiguration
             if session.routePlan.isRouted {
                 guard let activeRouting = routing ?? speakerRoutingConfiguration, activeRouting.enabled else {
@@ -4440,7 +4508,7 @@ final class AudioIOEngine: ObservableObject {
         playbackConfiguration: PlaybackControlConfiguration
     ) throws {
         guard !processingIsBypassed(playbackConfiguration),
-              roomCorrectionConfiguration.enabled else { return }
+              roomCorrectionConfiguration.isActiveOnStereoKernel else { return }
         guard let activeRoomCorrectionProgram else {
             throw RoomCorrectionConfigurationError.convolutionProgramUnavailable
         }
@@ -4744,7 +4812,9 @@ final class AudioIOEngine: ObservableObject {
         guard let shape = UnifiedGraphLayoutShape(roles: routePlan.programLayout.roles) else {
             throw LiveNChannelTransportError.unifiedGraphRejected(.laneCountMismatch)
         }
-        let program = try makeUnifiedProgramDSP(sampleRate: sampleRate, shape: shape, virtualSpeakers: false, inputs: inputs)
+        let program = try makeUnifiedProgramDSP(
+            sampleRate: sampleRate, shape: shape, virtualSpeakers: false,
+            subwooferCount: Int(routePlan.subwooferCount), inputs: inputs)
         // The routing's sub sources decide the sub lanes; bass management supplies their crossover and trims.
         var bass = renderBassManagementConfiguration(inputs.bass)
         bass.enabled = routePlan.subwooferCount > 0
@@ -4950,7 +5020,8 @@ final class AudioIOEngine: ObservableObject {
                 throw LiveNChannelTransportError.unifiedGraphRejected(.laneCountMismatch)
             }
             programDSP = try makeUnifiedProgramDSP(
-                sampleRate: output.nominalSampleRate, shape: shape, virtualSpeakers: false)
+                sampleRate: output.nominalSampleRate, shape: shape, virtualSpeakers: false,
+                subwooferCount: Int(routePlan.subwooferCount))
             switch UnifiedGraphTranslator.nChannelEligibility(
                 routePlan: routePlan,
                 sampleRate: output.nominalSampleRate,
@@ -5253,7 +5324,9 @@ final class AudioIOEngine: ObservableObject {
             linearPhaseDesignInfo = nil
         }
 
-        if roomCorrectionConfiguration.enabled {
+        roomCorrectionInactiveReason = roomCorrectionConfiguration.enabled && roomCorrectionConfiguration.lanes != nil
+            ? .needsSpeakerProfile : nil
+        if roomCorrectionConfiguration.isActiveOnStereoKernel {
             guard let filter = roomCorrectionConfiguration.filter else {
                 throw RoomCorrectionConfigurationError.filterRequired
             }

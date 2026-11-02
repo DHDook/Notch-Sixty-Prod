@@ -147,8 +147,11 @@ struct ProductionRoomCorrectionWorkspace: View {
             HStack(alignment: .center) {
                 VStack(alignment: .leading, spacing: 3) {
                     Text("Daily Playback").font(.headline)
-                    Text(deployed.filter?.name ?? "No correction filter deployed")
+                    Text(deployed.lanes?.name ?? deployed.filter?.name ?? "No correction filter deployed")
                         .foregroundStyle(.secondary)
+                    if deployed.enabled, let reason = engine.roomCorrectionInactiveReason {
+                        Text(reason.message).font(.caption).foregroundStyle(.orange)
+                    }
                 }
                 Spacer()
                 Toggle(
@@ -159,7 +162,7 @@ struct ProductionRoomCorrectionWorkspace: View {
                     )
                 )
                 .toggleStyle(.switch)
-                .disabled(deployed.filter == nil)
+                .disabled(deployed.filter == nil && deployed.lanes == nil)
             }
 
             HStack(spacing: 22) {
