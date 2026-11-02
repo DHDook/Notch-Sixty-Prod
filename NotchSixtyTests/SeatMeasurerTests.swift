@@ -35,7 +35,8 @@ final class SeatMeasurerTests: XCTestCase {
         return CalibrationSeatMeasurer(calibration: rig.calibration, pollSeconds: 0.005, transport: { pass in
             { primary, additional in
                 try transports.makeMultiMic(
-                    program: pass.program, outputChannel: pass.physicalOutputChannel, primary: primary, additional: additional)
+                    program: pass.program, outputChannel: pass.physicalOutputChannel, primary: primary, additional: additional,
+                    outputSweepSamples: pass.outputSweepSamples, referenceProgram: pass.referenceProgram)
             }
         })
     }
@@ -190,7 +191,9 @@ final class SeatMeasurerTests: XCTestCase {
         func mic(_ channel: Int, uid: String = "e24-reference-mic") -> MultichannelSeatMicrophone {
             MultichannelSeatMicrophone(deviceUID: uid, channelIndex: channel, calibration: nil)
         }
-        let blocker = MeasurementReadiness.perSeatBlocker
+        func blocker(_ seats: [MultichannelCalibrationSeat], _ devices: [AudioInputDevice], _ sources: [MultichannelCalibrationSource]? = nil) -> MeasurementReadiness.Blocker? {
+            MeasurementReadiness.perSeatBlocker(seats: seats, devices: devices, sources: sources)
+        }
         XCTAssertNil(blocker([seat("A", mic(0)), seat("B", mic(1))], [device]))
         XCTAssertTrue(blocker([seat("A", mic(0)), seat("B", nil)], [device])?.reason.contains("B has no microphone") == true)
         XCTAssertTrue(blocker([seat("A", mic(0, uid: "gone"))], [device])?.reason.contains("not connected") == true)
@@ -198,7 +201,11 @@ final class SeatMeasurerTests: XCTestCase {
         let other = AudioInputDevice(
             deviceID: 9_003, uid: "other", name: "Other", nominalSampleRate: 48_000,
             availableSampleRateRanges: device.availableSampleRateRanges)
-        XCTAssertTrue(blocker([seat("A", mic(0)), seat("B", mic(0, uid: "other"))], [device, other])?.reason.contains("different devices") == true)
+        // Separate devices are allowed (E24 S5b2) as long as the front-left speaker can play the timing chirp.
+        let split = [seat("A", mic(0)), seat("B", mic(0, uid: "other"))]
+        XCTAssertNil(blocker(split, [device, other], [.speaker(.frontLeft), .speaker(.frontRight)]))
+        XCTAssertTrue(blocker(split, [device, other], [.speaker(.frontRight)])?.reason.contains("front-left") == true)
+        XCTAssertNil(blocker([seat("A", mic(0)), seat("B", mic(1))], [device], [.speaker(.frontRight)]))
         let many = (0..<(MeasurementSeatPlan.maxSeats + 1)).map { seat("S\($0)", mic($0)) }
         XCTAssertTrue(blocker(many, [device])?.reason.contains("at most") == true)
     }

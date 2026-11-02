@@ -173,7 +173,8 @@ extension MultichannelCalibrationTransport {
         outputs: [AudioOutputDevice],
         program: RoomCorrectionSweepProgram,
         physicalOutputChannelIndex: UInt32,
-        referenceProgram: MultichannelReferenceProgram?
+        referenceProgram: MultichannelReferenceProgram?,
+        outputSweepSamples: [Float]? = nil
     ) -> MultiMicTransportFactory {
         { primary, additional in
             try MultichannelCalibrationTransport(
@@ -183,6 +184,7 @@ extension MultichannelCalibrationTransport {
                 inputChannelIndex: primary.channelIndex,
                 program: program,
                 physicalOutputChannelIndex: physicalOutputChannelIndex,
+                outputSweepSamples: outputSweepSamples,
                 additionalSeats: additional,
                 referenceProgram: referenceProgram
             )
