@@ -154,9 +154,9 @@ struct MeasurementGatedPlotView: View {
     }
 }
 
-/// Analysis card for one capture of the Speaker Measurement Lab (Advanced tab).
+/// Gated response, waterfall and spectrogram for the Analysis tab's selected source.
 struct MeasurementAnalysisCard: View {
-    let capture: SpeakerMeasurementLabCapture?
+    let source: MeasurementAnalysisSource?
 
     @State private var gated: MeasurementGatedPlot?
     @State private var waterfall: MeasurementCore.Waterfall?
@@ -164,8 +164,8 @@ struct MeasurementAnalysisCard: View {
 
     var body: some View {
         GroupBox("Gated response, waterfall and spectrogram") {
-            if capture == nil {
-                Text("Capture a protocol to see its gated impulse response, waterfall and spectrogram.")
+            if source == nil {
+                Text("Pick a source to see its gated impulse response, waterfall and spectrogram.")
                     .font(.callout).foregroundStyle(.secondary)
             } else {
                 VStack(alignment: .leading, spacing: 14) {
@@ -175,10 +175,10 @@ struct MeasurementAnalysisCard: View {
                 }
             }
         }
-        .task(id: capture?.id) {
-            guard let capture else { gated = nil; waterfall = nil; spectrogram = nil; return }
-            let ir = capture.impulseResponse, rate = capture.sampleRate
-            let arrival = capture.quality.directArrivalSeconds
+        .task(id: source?.id) {
+            guard let source else { gated = nil; waterfall = nil; spectrogram = nil; return }
+            let ir = source.impulseResponse, rate = source.sampleRate
+            let arrival = source.arrivalSeconds
             let result = await Task.detached(priority: .userInitiated) {
                 (
                     arrival.flatMap { MeasurementGatedPlot(impulseResponse: ir, sampleRate: rate, directArrivalSeconds: $0) },

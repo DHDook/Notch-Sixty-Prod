@@ -442,7 +442,8 @@ struct ProductionRootView: View {
                 engine: engine,
                 microphone: product.calibration,
                 profiles: product.profiles,
-                roomCorrectionProjects: product.roomCorrectionProjects
+                roomCorrectionProjects: product.roomCorrectionProjects,
+                multichannelCalibration: product.multichannelCalibration
             )
         case .roomCorrection:
             ProductionRoomCorrectionWorkspace(
