@@ -21,7 +21,7 @@ if ! clang++ -std=c++20 -O2 -Wall -Wextra -Werror -I"NotchSixty/Audio/Realtime" 
     exit 1
 fi
 # E4 S25b: the render kernel also links the live feed-forward filter (and the FxLMS primitives it uses).
-for src in n60_ff_live n60_fxlms; do
+for src in n60_ff_live n60_ff_echo n60_fxlms; do
     if ! clang++ -std=c++20 -O2 -Wall -Wextra -Werror -I"NotchSixty/Audio/Realtime" -c "NotchSixty/Audio/Realtime/$src.cpp" -o "$OUT/${src}_rt.o"; then
         echo "failed to compile $src" >&2
         exit 1
@@ -297,9 +297,13 @@ fi
 # E4 S25a: live feed-forward filter (native head plus decimated tail) on a simulated plant.
 if selected e4_ff_live; then
     if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -I"$RT" -c "$RT/n60_fxlms.cpp" -o "$OUT/n60_fxlms_live.o" \
-        && clang++ -std=c++20 -O2 -Wall -Wextra -Werror -I"$RT" -c "$RT/n60_ff_live.cpp" -o "$OUT/n60_ff_live.o"; then
+        && clang++ -std=c++20 -O2 -Wall -Wextra -Werror -I"$RT" -c "$RT/n60_ff_live.cpp" -o "$OUT/n60_ff_live.o" \
+        && clang++ -std=c++20 -O2 -Wall -Wextra -Werror -I"$RT" -c "$RT/n60_ff_echo.cpp" -o "$OUT/n60_ff_echo.o"; then
         harness e4_ff_live "${STRICT[@]}" -O2 -I"$RT" ci/harness_e4_ff_live.c \
-            "$OUT/n60_ff_live.o" "$OUT/n60_fxlms_live.o" -lc++ -lm
+            "$OUT/n60_ff_live.o" "$OUT/n60_ff_echo.o" "$OUT/n60_fxlms_live.o" -lc++ -lm
+        # E4 S22b3: the echo stage on a simulated 128 ms leakage at the eight rates.
+        harness e4_ff_live_echo "${STRICT[@]}" -O2 -I"$RT" ci/harness_e4_ff_live_echo.c \
+            "$OUT/n60_ff_live.o" "$OUT/n60_ff_echo.o" "$OUT/n60_fxlms_live.o" -lc++ -lm
     else
         failed+=(e4_ff_live)
     fi

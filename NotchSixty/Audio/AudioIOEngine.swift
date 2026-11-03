@@ -3067,6 +3067,21 @@ final class AudioIOEngine: ObservableObject {
         return transportSession?.armFeedForwardLive(gate: checked)
     }
 
+    /// E4 S22b3: the echo stage's model, with the pump delay as timing. Refused (and cleared) with a
+    /// subwoofer or bass management (owner decision of 3 Nov 2026, question 18) and while the pump has
+    /// no delay yet. Nil clears.
+    func setFeedForwardLiveEcho(_ payload: FeedForwardLiveEchoPayload?) -> Bool {
+        guard speakerDriveFeatureEnabled, let transport = transportSession else { return false }
+        guard let payload, !bassManagementConfiguration.enabled else {
+            _ = transport.setFeedForwardLiveEcho(nil, timingFrames: 0)
+            return payload == nil
+        }
+        guard let rate = ambientPlaybackReferenceSampleRate, let delay = feedForwardLiveDriver.delaySeconds,
+              delay > 0, delay < 0.1
+        else { return false }
+        return transport.setFeedForwardLiveEcho(payload, timingFrames: UInt32((delay * rate).rounded()))
+    }
+
     func disarmFeedForwardLive() { transportSession?.disarmFeedForwardLive() }
 
     func markFeedForwardLiveReferenceLost() { transportSession?.markFeedForwardLiveReferenceLost() }

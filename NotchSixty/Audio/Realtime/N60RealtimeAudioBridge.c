@@ -2790,6 +2790,8 @@ OSStatus N60OutputIOProc(
             }
             const float finalLeft = processed.left * gain;
             const float finalRight = processed.right * gain;
+            // E4 S22b3: the speaker drive for the echo stage (programme plus anti-noise).
+            N60RenderKernelStoreFeedForwardDriveFrame(bridge->renderKernel, finalLeft, finalRight);
             if (frameIndex
                     < activeQuietZoneReferenceFramesToWrite) {
                 float quietZoneLeft = 0.0f;
@@ -3096,6 +3098,8 @@ OSStatus N60OutputIOProc(
             }
             const float finalLeft = processed.left * gain;
             const float finalRight = processed.right * gain;
+            // E4 S22b3: the speaker drive for the echo stage (programme plus anti-noise).
+            N60RenderKernelStoreFeedForwardDriveFrame(bridge->renderKernel, finalLeft, finalRight);
             if (frameIndex
                     < activeQuietZoneReferenceFramesToWrite) {
                 float quietZoneLeft = 0.0f;
@@ -3376,6 +3380,12 @@ uint32_t N60RealtimeAudioBridgeArmFeedForwardLive(N60RealtimeAudioBridge *bridge
                                                   double requiredSeconds) {
     if (bridge == NULL) return N60FeedForwardLiveArmNoWeights;
     return N60RenderKernelFeedForwardLiveArm(bridge->renderKernel, leadSeconds, requiredSeconds);
+}
+bool N60RealtimeAudioBridgeSetFeedForwardLiveEcho(N60RealtimeAudioBridge *bridge, const N60FeedForwardLiveEcho *echo) {
+    return bridge != NULL && N60RenderKernelFeedForwardLiveSetEcho(bridge->renderKernel, echo);
+}
+bool N60RealtimeAudioBridgeSetFeedForwardLiveEchoTiming(N60RealtimeAudioBridge *bridge, uint32_t baseLagFrames) {
+    return bridge != NULL && N60RenderKernelFeedForwardLiveSetEchoTiming(bridge->renderKernel, baseLagFrames);
 }
 void N60RealtimeAudioBridgeDisarmFeedForwardLive(N60RealtimeAudioBridge *bridge) {
     if (bridge != NULL) N60RenderKernelFeedForwardLiveDisarm(bridge->renderKernel);

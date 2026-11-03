@@ -139,7 +139,8 @@ final class ActiveQuietZoneController: ObservableObject {
             leaseHealthy: engine.activeQuietZoneLeaseHealthy,
             outputDeviceUID: engine.routeConfiguration.selectedOutputUID,
             sampleRate: engine.liveTreatmentSampleRate,
-            budget: feedForwardBudget)
+            budget: feedForwardBudget,
+            subwooferActive: engine.subwooferActive)
     }
 
     /// The user's one action: start the slow fade-in once every check passes. False unless armed.

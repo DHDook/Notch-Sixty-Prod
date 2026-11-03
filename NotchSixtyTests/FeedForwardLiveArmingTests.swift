@@ -39,11 +39,13 @@ final class FeedForwardLiveArmingTests: XCTestCase {
 
     private func facts(
         armed: Bool = true, baseline: Bool = true, verdict: DoNoHarmVerdict = .ok, lease: Bool = true,
-        uid: String? = "dac", rate: Double? = 48_000, budget: QuietZoneFeedForwardBudget? = nil
+        uid: String? = "dac", rate: Double? = 48_000, budget: QuietZoneFeedForwardBudget? = nil,
+        subwoofer: Bool = false
     ) -> FeedForwardLiveQuietZoneFacts {
         FeedForwardLiveQuietZoneFacts(
             armed: armed, hasBaseline: baseline, verdict: verdict, leaseRequired: true, leaseHealthy: lease,
-            outputDeviceUID: uid, sampleRate: rate, budget: budget ?? self.budget())
+            outputDeviceUID: uid, sampleRate: rate, budget: budget ?? self.budget(),
+            subwooferActive: subwoofer)
     }
 
     private func make() -> (FeedForwardLiveArmingController, Engine) {
@@ -169,5 +171,81 @@ final class FeedForwardLiveArmingTests: XCTestCase {
         engine.kernel = .init(state: .armed, gain: 0.3)
         c.poll(quietZone: facts())
         XCTAssertEqual(engine.disarmCalls, 1)
+    }
+
+    // MARK: - E4 S22b3 live echo stage
+
+    func testRefusedWithASubwooferAndTurnsOffIfOneAppears() {
+        let (c, engine) = make()
+        XCTAssertFalse(c.request(quietZone: facts(subwoofer: true)))
+        XCTAssertEqual(c.phase, .off)
+        XCTAssertTrue(c.statusMessage?.contains("subwoofer") == true)
+        XCTAssertTrue(c.request(quietZone: facts()))
+        c.poll(quietZone: facts(subwoofer: true))
+        XCTAssertEqual(c.phase, .off)
+        XCTAssertGreaterThan(engine.disarmCalls, 0)
+    }
+
+    func testWaitsForTheLiveStageToLockBeforeArming() {
+        let (c, engine) = make()
+        shadow.verifiedRemovalDecibels = nil
+        XCTAssertTrue(c.request(quietZone: facts()))
+        c.poll(quietZone: facts())
+        XCTAssertEqual(engine.armCalls, 0)
+        XCTAssertEqual(c.phase, .waiting("play music for a few seconds so echo removal can lock"))
+        shadow.verifiedRemovalDecibels = 12
+        c.poll(quietZone: facts())
+        XCTAssertEqual(engine.armCalls, 0, "under 20 dB is not enough")
+        shadow.verifiedRemovalDecibels = 25
+        c.poll(quietZone: facts())
+        XCTAssertEqual(engine.armCalls, 1)
+    }
+
+    func testStaleRemovalForTenSecondsOfProgrammeTurnsOff() {
+        let (c, engine) = make()
+        XCTAssertTrue(c.request(quietZone: facts()))
+        engine.kernel = .init(state: .armed, gain: 1)
+        shadow.verifiedRemovalDecibels = 6
+        shadow.removalProgrammeSeconds = 10
+        c.poll(quietZone: facts())
+        XCTAssertNotEqual(c.phase, .off, "the first reading only sets the baseline")
+        shadow.removalProgrammeSeconds = 15
+        c.poll(quietZone: facts())
+        XCTAssertNotEqual(c.phase, .off)
+        shadow.verifiedRemovalDecibels = 14  // recovered: the count restarts
+        shadow.removalProgrammeSeconds = 18
+        c.poll(quietZone: facts())
+        shadow.verifiedRemovalDecibels = 6
+        shadow.removalProgrammeSeconds = 27
+        c.poll(quietZone: facts())
+        XCTAssertNotEqual(c.phase, .off)
+        shadow.removalProgrammeSeconds = 29
+        c.poll(quietZone: facts())
+        XCTAssertEqual(c.phase, .off)
+        XCTAssertTrue(c.statusMessage?.contains("measure leakage again") == true)
+    }
+
+    func testEchoTripsHaveWords() {
+        XCTAssertEqual(FeedForwardLiveOffReason.tripText(UInt32(N60FeedForwardLiveTripEchoAlignmentLost)), "echo removal lost alignment")
+        XCTAssertEqual(FeedForwardLiveOffReason.tripText(UInt32(N60FeedForwardLiveTripEchoDiverged)), "echo removal diverged")
+    }
+
+    func testShadowFactsTrustOnlyALockedStageWithFiveSecondsOfProgramme() {
+        func facts(state: UInt32, seconds: Double, before: Double = 100, after: Double = 1) -> FeedForwardLiveShadowFacts {
+            var live = N60FeedForwardLiveEchoStatus()
+            live.state = state
+            live.programmeSeconds = seconds
+            live.bandBeforePower = before
+            live.bandAfterPower = after
+            return FeedForwardLiveShadowFacts(
+                stability: .passed(loopGain: 0.2), live: live, referenceRunning: true, pumpDelaySeconds: 0.02)
+        }
+        XCTAssertEqual(facts(state: UInt32(N60FeedForwardLiveEchoLocked), seconds: 6).verifiedRemovalDecibels ?? 0, 20, accuracy: 1e-9)
+        XCTAssertNil(facts(state: UInt32(N60FeedForwardLiveEchoLocked), seconds: 4).verifiedRemovalDecibels)
+        XCTAssertNil(facts(state: UInt32(N60FeedForwardLiveEchoOff), seconds: 60).verifiedRemovalDecibels)
+        XCTAssertNil(facts(state: UInt32(N60FeedForwardLiveEchoLocked), seconds: 6, after: 0).verifiedRemovalDecibels)
+        let none = FeedForwardLiveShadowFacts(
+            stability: .passed(loopGain: 0.2), live: nil, referenceRunning: true, pumpDelaySeconds: 0.02)
+        XCTAssertNil(none.verifiedRemovalDecibels)
     }
 }

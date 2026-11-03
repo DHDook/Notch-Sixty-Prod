@@ -249,6 +249,7 @@
 		E4B000000000000000000004 /* AncGuardTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4B000000000000000000014 /* AncGuardTests.swift */; };
 		E4C000000000000000000023 /* n60_remote_tonal.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E4C000000000000000000022 /* n60_remote_tonal.cpp */; };
 		E4C000000000000000000003 /* n60_fxlms.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E4C000000000000000000013 /* n60_fxlms.cpp */; };
+		E4F00000000000000000EC01 /* n60_ff_echo.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E4F00000000000000000EC03 /* n60_ff_echo.cpp */; };
 		E4F000000000000000000051 /* n60_ff_live.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E4F000000000000000000053 /* n60_ff_live.cpp */; };
 		E4F000000000000000000001 /* n60_ff_shadow.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E4F000000000000000000012 /* n60_ff_shadow.cpp */; };
 		E4F000000000000000000002 /* QuietZoneFeedForwardShadowSeed.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4F000000000000000000013 /* QuietZoneFeedForwardShadowSeed.swift */; };
@@ -279,6 +280,7 @@
 		E4F7000000000000000000B5 /* ConversationUnmaskingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4F7000000000000000000B3 /* ConversationUnmaskingTests.swift */; };
 		E4F300000000000000000001 /* QuietZoneFeedForwardShadowPlan.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4F300000000000000000011 /* QuietZoneFeedForwardShadowPlan.swift */; };
 		E4F300000000000000000002 /* QuietZoneFeedForwardShadow.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4F300000000000000000012 /* QuietZoneFeedForwardShadow.swift */; };
+		E4F700000000000000000F11 /* FeedForwardLiveEchoFeed.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4F700000000000000000F12 /* FeedForwardLiveEchoFeed.swift */; };
 		E4F700000000000000000F01 /* FeedForwardLiveWeightsFeed.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4F700000000000000000F02 /* FeedForwardLiveWeightsFeed.swift */; };
 		E4F300000000000000000003 /* ProductionFeedForwardShadowCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4F300000000000000000013 /* ProductionFeedForwardShadowCard.swift */; };
 		E4F300000000000000000004 /* QuietZoneFeedForwardShadowTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4F300000000000000000014 /* QuietZoneFeedForwardShadowTests.swift */; };
@@ -841,6 +843,8 @@
 		E4C000000000000000000012 /* n60_fxlms.hpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.h; path = n60_fxlms.hpp; sourceTree = "<group>"; };
 		E4C000000000000000000013 /* n60_fxlms.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = n60_fxlms.cpp; sourceTree = "<group>"; };
 		E4C000000000000000000014 /* FxlmsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FxlmsTests.swift; sourceTree = "<group>"; };
+		E4F00000000000000000EC02 /* n60_ff_echo.hpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.h; path = n60_ff_echo.hpp; sourceTree = "<group>"; };
+		E4F00000000000000000EC03 /* n60_ff_echo.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = n60_ff_echo.cpp; sourceTree = "<group>"; };
 		E4F000000000000000000052 /* n60_ff_live.hpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.h; path = n60_ff_live.hpp; sourceTree = "<group>"; };
 		E4F000000000000000000053 /* n60_ff_live.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = n60_ff_live.cpp; sourceTree = "<group>"; };
 		E4F000000000000000000054 /* N60FeedForwardLive.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = N60FeedForwardLive.h; sourceTree = "<group>"; };
@@ -875,6 +879,7 @@
 		E4F7000000000000000000B3 /* ConversationUnmaskingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationUnmaskingTests.swift; sourceTree = "<group>"; };
 		E4F300000000000000000011 /* QuietZoneFeedForwardShadowPlan.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuietZoneFeedForwardShadowPlan.swift; sourceTree = "<group>"; };
 		E4F300000000000000000012 /* QuietZoneFeedForwardShadow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuietZoneFeedForwardShadow.swift; sourceTree = "<group>"; };
+		E4F700000000000000000F12 /* FeedForwardLiveEchoFeed.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeedForwardLiveEchoFeed.swift; sourceTree = "<group>"; };
 		E4F700000000000000000F02 /* FeedForwardLiveWeightsFeed.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeedForwardLiveWeightsFeed.swift; sourceTree = "<group>"; };
 		E4F300000000000000000013 /* ProductionFeedForwardShadowCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductionFeedForwardShadowCard.swift; sourceTree = "<group>"; };
 		E4F300000000000000000014 /* QuietZoneFeedForwardShadowTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuietZoneFeedForwardShadowTests.swift; sourceTree = "<group>"; };
@@ -1651,7 +1656,7 @@
 			path = Backup;
 			sourceTree = "<group>";
 		};
-		A20000000000000000000054 /* State */ = {isa = PBXGroup; children = (E24F00000000000000009003 /* RoomCorrectionABXController.swift */, E24E00000000000000000011 /* MeasurementReadiness.swift */, A20000000000000000000025 /* AudioLifecycleState.swift */, A100000000000000000E2204 /* FeatureFlags.swift */, E4M100000000000000000011 /* SpeakerDriveDemandPolicy.swift */, A100000000000000000E2202 /* PreferenceKeys.swift */, A2000000000000000000002B /* ProductProfiles.swift */, E12B00000000000000000011 /* SystemSetupFlow.swift */, E12C00000000000000000011 /* SystemSetupStartSteps.swift */, E25C00000000000000000011 /* SystemSetupArrangementPlanner.swift */, E25D00000000000000000011 /* SystemSetupAdaptiveSteps.swift */, E12D00000000000000000011 /* SystemSetupMeasureAlign.swift */, E12E00000000000000000011 /* SystemSetupBassCorrect.swift */, E12F00000000000000000011 /* SystemSetupVerifySave.swift */, E24A00000000000000000011 /* SystemSetupProduction.swift */, E24D00000000000000000011 /* SystemSetupLevelSession.swift */, E24D000000000000000000B1 /* SystemSetupSeatMeasurer.swift */, E24F00000000000000000011 /* EngineRoomCorrectionTrialHost.swift */, E24D00000000000000000021 /* MeasurementGeneratorController.swift */, B113B0000000000000000061 /* ProductRecovery.swift */, B113B0000000000000000071 /* HeadroomAssistant.swift */, F64000000000000000000014 /* MultichannelCalibrationController.swift */, A2000000000000000000002D /* RoomCorrectionCalibrationController.swift */, A2000000000000000000002F /* RoomCorrectionProjectController.swift */, F89300000000000000000011 /* AmbientCompensationController.swift */, F90200000000000000000011 /* ActiveQuietZoneController.swift */, E4D000000000000000000011 /* AdaptiveQuietZoneShadow.swift */, E4G000000000000000000011 /* LiveTreatmentArm.swift */, E4H000000000000000000011 /* DoNoHarmVerifier.swift */, E4J100000000000000000011 /* AdaptiveTonalOutputGate.swift */, E4J200000000000000000011 /* MicrophoneMoveResolver.swift */, E4J300000000000000000011 /* AdaptiveTonalLiveWorker.swift */, E4J400000000000000000011 /* AdaptiveTonalLiveCoordinator.swift */, E4K100000000000000000011 /* EarnedCapPolicy.swift */, E4L100000000000000000011 /* ExcursionCap.swift */, E4N100000000000000000011 /* OvernightPowerAssertion.swift */, E4H000000000000000000031 /* SafetyFlightRecorder.swift */, E4S310000000000000000031 /* ANCMeasurementReport.swift */, E4F200000000000000000013 /* QuietZoneFeedForwardSurveyController.swift */, E4F300000000000000000012 /* QuietZoneFeedForwardShadow.swift */, E4F700000000000000000F02 /* FeedForwardLiveWeightsFeed.swift */, E4F7000000000000000000E6 /* QuietZoneCameraHeadSource.swift */, F92000000000000000000012 /* RoomTreatmentAdvisorController.swift */, E10B00000000000000000004 /* RoomCorrectionDeployController.swift */, E4F900000000000000000A02 /* FeedForwardLiveArming.swift */,); path = State; sourceTree = "<group>"; };
+		A20000000000000000000054 /* State */ = {isa = PBXGroup; children = (E24F00000000000000009003 /* RoomCorrectionABXController.swift */, E24E00000000000000000011 /* MeasurementReadiness.swift */, A20000000000000000000025 /* AudioLifecycleState.swift */, A100000000000000000E2204 /* FeatureFlags.swift */, E4M100000000000000000011 /* SpeakerDriveDemandPolicy.swift */, A100000000000000000E2202 /* PreferenceKeys.swift */, A2000000000000000000002B /* ProductProfiles.swift */, E12B00000000000000000011 /* SystemSetupFlow.swift */, E12C00000000000000000011 /* SystemSetupStartSteps.swift */, E25C00000000000000000011 /* SystemSetupArrangementPlanner.swift */, E25D00000000000000000011 /* SystemSetupAdaptiveSteps.swift */, E12D00000000000000000011 /* SystemSetupMeasureAlign.swift */, E12E00000000000000000011 /* SystemSetupBassCorrect.swift */, E12F00000000000000000011 /* SystemSetupVerifySave.swift */, E24A00000000000000000011 /* SystemSetupProduction.swift */, E24D00000000000000000011 /* SystemSetupLevelSession.swift */, E24D000000000000000000B1 /* SystemSetupSeatMeasurer.swift */, E24F00000000000000000011 /* EngineRoomCorrectionTrialHost.swift */, E24D00000000000000000021 /* MeasurementGeneratorController.swift */, B113B0000000000000000061 /* ProductRecovery.swift */, B113B0000000000000000071 /* HeadroomAssistant.swift */, F64000000000000000000014 /* MultichannelCalibrationController.swift */, A2000000000000000000002D /* RoomCorrectionCalibrationController.swift */, A2000000000000000000002F /* RoomCorrectionProjectController.swift */, F89300000000000000000011 /* AmbientCompensationController.swift */, F90200000000000000000011 /* ActiveQuietZoneController.swift */, E4D000000000000000000011 /* AdaptiveQuietZoneShadow.swift */, E4G000000000000000000011 /* LiveTreatmentArm.swift */, E4H000000000000000000011 /* DoNoHarmVerifier.swift */, E4J100000000000000000011 /* AdaptiveTonalOutputGate.swift */, E4J200000000000000000011 /* MicrophoneMoveResolver.swift */, E4J300000000000000000011 /* AdaptiveTonalLiveWorker.swift */, E4J400000000000000000011 /* AdaptiveTonalLiveCoordinator.swift */, E4K100000000000000000011 /* EarnedCapPolicy.swift */, E4L100000000000000000011 /* ExcursionCap.swift */, E4N100000000000000000011 /* OvernightPowerAssertion.swift */, E4H000000000000000000031 /* SafetyFlightRecorder.swift */, E4S310000000000000000031 /* ANCMeasurementReport.swift */, E4F200000000000000000013 /* QuietZoneFeedForwardSurveyController.swift */, E4F300000000000000000012 /* QuietZoneFeedForwardShadow.swift */, E4F700000000000000000F02 /* FeedForwardLiveWeightsFeed.swift */, E4F700000000000000000F12 /* FeedForwardLiveEchoFeed.swift */, E4F7000000000000000000E6 /* QuietZoneCameraHeadSource.swift */, F92000000000000000000012 /* RoomTreatmentAdvisorController.swift */, E10B00000000000000000004 /* RoomCorrectionDeployController.swift */, E4F900000000000000000A02 /* FeedForwardLiveArming.swift */,); path = State; sourceTree = "<group>"; };
 		A20000000000000000000055 /* Diagnostics */ = {isa = PBXGroup; children = (A20000000000000000000026 /* AudioDiagnosticsSnapshot.swift */, A2000000000000000000002A /* ProductionAnalysisWorker.swift */,); path = Diagnostics; sourceTree = "<group>"; };
 		A30000000000000000000050 /* Realtime */ = {
 			isa = PBXGroup;
@@ -1686,6 +1691,8 @@
 				E4C000000000000000000013 /* n60_fxlms.cpp */,
 				E4C000000000000000000021 /* N60RemoteTonal.h */,
 				E4C000000000000000000022 /* n60_remote_tonal.cpp */,
+				E4F00000000000000000EC02 /* n60_ff_echo.hpp */,
+				E4F00000000000000000EC03 /* n60_ff_echo.cpp */,
 				E4F000000000000000000052 /* n60_ff_live.hpp */,
 				E4F000000000000000000053 /* n60_ff_live.cpp */,
 				E4F000000000000000000054 /* N60FeedForwardLive.h */,
@@ -2015,6 +2022,7 @@
 				E4B000000000000000000003 /* n60_anc_guard.cpp in Sources */,
 				E4C000000000000000000003 /* n60_fxlms.cpp in Sources */,
 				E4C000000000000000000023 /* n60_remote_tonal.cpp in Sources */,
+				E4F00000000000000000EC01 /* n60_ff_echo.cpp in Sources */,
 				E4F000000000000000000051 /* n60_ff_live.cpp in Sources */,
 				E4F000000000000000000001 /* n60_ff_shadow.cpp in Sources */,
 				E4F100000000000000000001 /* n60_ff_survey.cpp in Sources */,
@@ -2054,6 +2062,7 @@
 				E4F300000000000000000001 /* QuietZoneFeedForwardShadowPlan.swift in Sources */,
 				E4F300000000000000000002 /* QuietZoneFeedForwardShadow.swift in Sources */,
 				E4F700000000000000000F01 /* FeedForwardLiveWeightsFeed.swift in Sources */,
+				E4F700000000000000000F11 /* FeedForwardLiveEchoFeed.swift in Sources */,
 				E4F900000000000000000A01 /* FeedForwardLiveArming.swift in Sources */,
 				E4F900000000000000000A03 /* ProductionFeedForwardLiveCard.swift in Sources */,
 				E4F300000000000000000003 /* ProductionFeedForwardShadowCard.swift in Sources */,

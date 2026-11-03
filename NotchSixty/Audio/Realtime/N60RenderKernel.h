@@ -572,6 +572,7 @@ typedef struct {
     uint64_t outputIndex;           /* output frames passed since attach/reset (the reference ring's read index) */
     uint32_t referenceAheadFrames;  /* how far the pump has written beyond outputIndex */
     uint64_t referenceUnderruns;    /* callbacks whose reference block was not fully supplied */
+    N60FeedForwardLiveEchoStatus echo; /* E4 S22b3 */
 } N60RenderKernelFeedForwardLiveStatus;
 
 bool N60RenderKernelAttachFeedForwardLive(N60RenderKernel * _Nonnull kernel, double sampleRate, double peakLimit);
@@ -594,6 +595,11 @@ uint32_t N60RenderKernelFeedForwardLiveArm(
     double requiredSeconds
 );
 void N60RenderKernelFeedForwardLiveDisarm(N60RenderKernel * _Nonnull kernel);
+/// E4 S22b3 echo stage (control thread; applied by the audio thread while the filter is idle).
+bool N60RenderKernelFeedForwardLiveSetEcho(N60RenderKernel * _Nonnull kernel, const N60FeedForwardLiveEcho * _Nullable echo);
+bool N60RenderKernelFeedForwardLiveSetEchoTiming(N60RenderKernel * _Nonnull kernel, uint32_t baseLagFrames);
+/// Render thread, once per output frame after the final limiter: the speaker drive for the echo stage.
+void N60RenderKernelStoreFeedForwardDriveFrame(N60RenderKernel * _Nonnull kernel, float left, float right);
 void N60RenderKernelFeedForwardLiveMarkReferenceLost(N60RenderKernel * _Nonnull kernel);
 N60RenderKernelFeedForwardLiveStatus N60RenderKernelFeedForwardLiveGetStatus(
     const N60RenderKernel * _Nonnull kernel

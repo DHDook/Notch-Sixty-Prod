@@ -83,3 +83,86 @@ final class FeedForwardLiveWeightsFeedTests: XCTestCase {
         XCTAssertNil(engine.feedForwardLiveStatus())
     }
 }
+
+/// E4 S22b3: the policy that publishes the leakage model to the live echo stage.
+@MainActor
+final class FeedForwardLiveEchoFeedTests: XCTestCase {
+    private final class Sink: FeedForwardLiveEchoSink {
+        var rate: Double? = 48_000
+        var accepts = true
+        var sets: [FeedForwardLiveEchoPayload?] = []
+        var liveEchoRate: Double? { rate }
+        func setFeedForwardLiveEcho(_ payload: FeedForwardLiveEchoPayload?) -> Bool {
+            guard accepts else { return false }
+            sets.append(payload)
+            return true
+        }
+    }
+
+    private func model(fd: Double = 4_000, repeats: Int = 3, taps: Int = 64, bulk: Int = 20) -> FeedForwardEchoModel {
+        let path = FeedForwardEchoPath(
+            bulkDelay: bulk, taps: (0..<taps).map { Float(0.5 * exp(-Double($0) / 12)) }, bound: [Float](repeating: 0, count: taps))
+        return FeedForwardEchoModel(
+            sampleRate: fd, nativeSampleRate: 48_000, repeats: repeats, left: path, right: path,
+            coherence: 0.95, repeatDeviation: 0.05, capturedAt: Date(timeIntervalSince1970: 0))
+    }
+
+    func testPublishesOnceAndClearsWhenBlocked() {
+        let sink = Sink()
+        var feed = FeedForwardLiveEchoFeed()
+        XCTAssertEqual(feed.offer(model: model(), blockedReason: nil, sink: sink), .published)
+        XCTAssertEqual(feed.offer(model: model(), blockedReason: nil, sink: sink), .skipped("unchanged"))
+        XCTAssertEqual(feed.offer(model: model(), blockedReason: "subwoofer", sink: sink), .cleared)
+        XCTAssertEqual(sink.sets.count, 2)
+        XCTAssertNil(sink.sets[1])
+        XCTAssertEqual(feed.offer(model: model(), blockedReason: "subwoofer", sink: sink), .skipped("subwoofer"))
+    }
+
+    func testAV1ModelWithoutRepeatsNeverPublishes() {
+        let sink = Sink()
+        var feed = FeedForwardLiveEchoFeed()
+        guard case .skipped = feed.offer(model: model(repeats: 1), blockedReason: nil, sink: sink) else {
+            return XCTFail("a model without repeats must not publish")
+        }
+        XCTAssertTrue(sink.sets.isEmpty)
+    }
+
+    func testNoRateOrARefusingSinkIsRetried() {
+        let sink = Sink()
+        var feed = FeedForwardLiveEchoFeed()
+        sink.rate = nil
+        guard case .skipped = feed.offer(model: model(), blockedReason: nil, sink: sink) else { return XCTFail() }
+        sink.rate = 48_000
+        sink.accepts = false
+        XCTAssertEqual(feed.offer(model: model(), blockedReason: nil, sink: sink), .skipped("echo stage not ready"))
+        sink.accepts = true
+        XCTAssertEqual(feed.offer(model: model(), blockedReason: nil, sink: sink), .published)
+        feed.reset()
+        XCTAssertEqual(feed.offer(model: model(), blockedReason: nil, sink: sink), .published)
+    }
+
+    func testEqualFdCopiesAndOtherRatesKeepTimeAndGain() throws {
+        // 48 kHz: D = 12, fd = 4000, so a 4 kHz model is copied unchanged.
+        let same = try XCTUnwrap(FeedForwardLiveEchoFeed.payload(model: model(), liveRate: 48_000))
+        XCTAssertEqual(same.left, model().left.taps)
+        XCTAssertEqual(same.bulk, [20, 20])
+        // 44.1 kHz: D = 11, fd = 4009.09. The bulk delay keeps its time and the DC gain is kept.
+        let other = try XCTUnwrap(FeedForwardLiveEchoFeed.payload(model: model(), liveRate: 44_100))
+        let fdLive = 44_100.0 / 11
+        XCTAssertEqual(Double(other.bulk[0]), 20 * fdLive / 4_000, accuracy: 1)
+        let gainIn = model().left.taps.reduce(0, +)
+        let gainOut = other.left.reduce(0, +)
+        XCTAssertEqual(Double(gainOut), Double(gainIn), accuracy: 0.05 * Double(gainIn))
+        for rate in [88_200.0, 96_000, 176_400, 192_000, 352_800, 384_000] {
+            XCTAssertNotNil(FeedForwardLiveEchoFeed.payload(model: model(), liveRate: rate), "\(rate)")
+        }
+    }
+
+    func testEngineRefusesWhileTheFlagIsOff() {
+        let engine = AudioIOEngine()
+        var feed = FeedForwardLiveEchoFeed()
+        XCTAssertEqual(
+            feed.offer(model: model(), blockedReason: nil, sink: engine), .skipped("no live filter attached"))
+        XCTAssertFalse(engine.setFeedForwardLiveEcho(FeedForwardLiveEchoPayload(bulk: [0, 0], left: [1], right: [1])))
+    }
+}

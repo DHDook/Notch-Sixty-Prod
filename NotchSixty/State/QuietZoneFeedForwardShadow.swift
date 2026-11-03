@@ -421,6 +421,10 @@ final class QuietZoneFeedForwardShadow: ObservableObject {
     /// Publishing never arms the filter (see `FeedForwardLiveWeightsFeed`).
     var weightsSink: (any FeedForwardLiveWeightsSink)?
     private(set) var weightsFeed = FeedForwardLiveWeightsFeed()
+    /// E4 S22b3: set by the app when `e4.feedforward-live` is on; the live echo stage's model goes here.
+    /// Publishing never arms the filter. Nil means the stage is never told about an echo.
+    var echoSink: (any FeedForwardLiveEchoSink)?
+    private(set) var echoFeed = FeedForwardLiveEchoFeed()
     /// Set by the app; the engine refuses unless `e4.feedforward-live` is on. Started once weights are published, stopped
     /// when the shadow ends. Starting it never arms the filter.
     var referenceDriver: (any FeedForwardLiveReferenceDriving)?
@@ -550,6 +554,9 @@ final class QuietZoneFeedForwardShadow: ObservableObject {
             )
             if outcome == .published { referenceDriver?.startLiveReference(device: device, channel: inputs.referenceChannel) }
         }
+        if let echoSink {
+            _ = echoFeed.offer(model: inputs.echoModel, blockedReason: echoBlockedReason(inputs), sink: echoSink)
+        }
     }
 
     /// Waits for closed captures to finish closing (tests).
@@ -638,6 +645,7 @@ final class QuietZoneFeedForwardShadow: ObservableObject {
         setDemand(false)
         referenceDriver?.stopLiveReference()
         weightsFeed.reset()
+        echoFeed.reset()
         generation += 1
         engine?.close()
         if let engine { closing = engine }

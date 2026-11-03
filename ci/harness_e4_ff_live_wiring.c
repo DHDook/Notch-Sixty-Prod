@@ -37,6 +37,7 @@ typedef struct {
     uint64_t pushed; /* next output index to push */
     bool feed;       /* the pump pushes reference */
     uint64_t ahead;  /* frames the pump stays ahead of the callback */
+    bool store;      /* play the bridge: hand the final output pair to the echo stage (E4 S22b3) */
 } Rig;
 
 static float refSample(double rate, uint64_t i) {
@@ -87,6 +88,7 @@ static void render(Rig *r, uint64_t frames) {
             float l = 0.0f, rr = 0.0f, dl = 0.0f, dr = 0.0f;
             N60RenderKernelProcessStereoFrameInContext(r->k, &ctx, 0.0f, 0.0f, &l, &rr);
             N60RenderKernelGetFeedForwardDriveFrame(r->k, &dl, &dr);
+            if (r->store) N60RenderKernelStoreFeedForwardDriveFrame(r->k, l, rr);
             r->out[r->frames + i] = l;
             r->drive[r->frames + i] = dl;
         }
@@ -231,6 +233,29 @@ int main(void) {
         render(&e, half);
         const float g2 = N60RenderKernelFeedForwardLiveGetStatus(e.k).filter.gain;
         CHECK(g2 > 0.28f && g2 < 0.39f, "gain %.3f after 1 s of a 3 s fade-in at %.0f", g2, rate);
+
+        /* 8. E4 S22b3: the bridge's final output pair reaches the echo stage as the drive; a bridge that
+              does not store it (unrendered frames) is silence, never an alignment fault. */
+        {
+            float taps[64];
+            for (int t = 0; t < 64; ++t) taps[t] = 0.001f;
+            N60FeedForwardLiveEcho echo = {{0, 0}, {64, 64}, {taps, taps}};
+            for (int stored = 0; stored < 2; ++stored) {
+                Rig f; rigInit(&f, rate);
+                f.store = stored != 0;
+                CHECK(N60RenderKernelAttachFeedForwardLiveWithRamp(f.k, rate, 1.0, 0.05), "attach f failed");
+                f.feed = true;
+                CHECK(N60RenderKernelFeedForwardLiveSetWeights(f.k, w, z, 1u), "weights f");
+                CHECK(N60RenderKernelFeedForwardLiveSetEcho(f.k, &echo), "echo f");
+                CHECK(N60RenderKernelFeedForwardLiveSetEchoTiming(f.k, (uint32_t)(rate * 0.025)), "timing f");
+                render(&f, half);
+                const N60RenderKernelFeedForwardLiveStatus fs = N60RenderKernelFeedForwardLiveGetStatus(f.k);
+                CHECK(fs.echo.state == N60FeedForwardLiveEchoSearching, "echo searching at %.0f (state %u)", rate, fs.echo.state);
+                CHECK(fs.echo.driveDiscontinuities == 0u, "bridge drive misaligned at %.0f (%u)", rate, fs.echo.driveDiscontinuities);
+                if (!stored) CHECK(fs.echo.drivePower == 0.0f, "unrendered frames are not silence at %.0f", rate);
+                rigFree(&f);
+            }
+        }
 
         rigFree(&a); rigFree(&b); rigFree(&c); rigFree(&d); rigFree(&e);
     }

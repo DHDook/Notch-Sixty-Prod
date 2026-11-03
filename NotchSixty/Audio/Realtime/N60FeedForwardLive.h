@@ -77,7 +77,19 @@ enum {
 
     N60FeedForwardLiveTripNone = 0,
     N60FeedForwardLiveTripReferenceLost = 1,
-    N60FeedForwardLiveTripNonFinite = 2
+    N60FeedForwardLiveTripNonFinite = 2,
+    /* E4 S22b3 (echo stage): the drive no longer lines up with the reference (a callback was missed,
+       cut or longer than the scratch lanes), or the subtraction is adding energy. Both latch. */
+    N60FeedForwardLiveTripEchoAlignmentLost = 3,
+    N60FeedForwardLiveTripEchoDiverged = 4,
+
+    N60FeedForwardLiveEchoMaxTaps = 512,
+    N60FeedForwardLiveEchoMaxBulk = 512,
+    N60FeedForwardLiveEchoOff = 0,
+    N60FeedForwardLiveEchoSearching = 1,
+    N60FeedForwardLiveEchoLocked = 2,
+    /* The peak sat at the edge the drive cannot reach yet: the reference delay is too short. */
+    N60FeedForwardLiveEchoRefused = 3
 };
 
 typedef struct {
@@ -93,6 +105,28 @@ typedef struct {
     float outputPeak;           /* largest absolute output since Reset */
     float gain;                 /* current ramp, 0 to 1 */
 } N60FeedForwardLiveStatus;
+
+/* E4 S22b3: the speaker-to-reference leakage model for the echo stage, at the live fd (the Swift
+   feed resamples a model from another fd first). Per speaker: a bulk delay and up to 512 taps, both
+   at fd. The taps are copied. */
+typedef struct {
+    uint32_t bulkDelay[2];
+    uint32_t tapCount[2];
+    const float * N60_FFL_NULLABLE taps[2];
+} N60FeedForwardLiveEcho;
+
+typedef struct {
+    uint32_t state;              /* Off, Searching, Locked, Refused */
+    uint32_t lagFrames;          /* locked lag beyond the model's bulk delay, native frames */
+    uint32_t baseLagFrames;      /* the timing the search was centred on */
+    uint32_t driveDiscontinuities;
+    float peak;                  /* best normalised correlation seen, 0 to 1 */
+    float drivePower;            /* mean square of the last drive block, both speakers */
+    double programmeSeconds;     /* qualifying programme: searched, or (locked) since the lock */
+    double bandBeforePower;      /* 31.5 to 125 Hz power of the raw reference since the lock */
+    double bandAfterPower;       /* the same after subtraction */
+    uint64_t searchRestarts;
+} N60FeedForwardLiveEchoStatus;
 
 bool N60FeedForwardLiveConfigIsValid(const N60FeedForwardLiveConfig * N60_FFL_NULLABLE config);
 
@@ -121,6 +155,27 @@ void N60FeedForwardLiveProcess(N60FeedForwardLive * N60_FFL_NONNULL live,
                                const float * N60_FFL_NONNULL reference,
                                float * N60_FFL_NONNULL left, float * N60_FFL_NONNULL right,
                                uint32_t frames);
+
+/* E4 S22b3, control thread. Publishes the echo model (NULL turns the stage off). Applied by the audio
+   thread only while the filter is idle (not armed, gain 0); each restarts the search. False for a
+   bad count, a bulk delay or tap count over 512 or a non-finite tap. */
+bool N60FeedForwardLiveSetEcho(N60FeedForwardLive * N60_FFL_NONNULL live,
+                               const N60FeedForwardLiveEcho * N60_FFL_NULLABLE echo);
+/* Control thread. The pump's delay in output frames (the search centre). False when over 100 ms of
+   the live rate. */
+bool N60FeedForwardLiveSetEchoTiming(N60FeedForwardLive * N60_FFL_NONNULL live, uint32_t baseLagFrames);
+/* Audio thread, before Process. The previous callback's final output pair (the speaker drive,
+   anti-noise included). A count other than the previous Process call's resets the drive line and
+   drops the lock; while armed that trips EchoAlignmentLost. */
+void N60FeedForwardLivePushDrive(N60FeedForwardLive * N60_FFL_NONNULL live,
+                                 const float * N60_FFL_NONNULL left,
+                                 const float * N60_FFL_NONNULL right, uint32_t frames);
+/* Audio thread, before Process. zeroFrames > 0: this block's reference is (partly) zero-filled, so it
+   is neither subtracted from nor metered. skippedFrames > 0: frames of the callback that Process will
+   not see (a callback longer than the scratch lanes), a discontinuity. */
+void N60FeedForwardLiveNoteReferenceGaps(N60FeedForwardLive * N60_FFL_NONNULL live, uint32_t zeroFrames,
+                                         uint32_t skippedFrames);
+N60FeedForwardLiveEchoStatus N60FeedForwardLiveGetEchoStatus(const N60FeedForwardLive * N60_FFL_NONNULL live);
 
 /* Audio thread, or control thread only while Process is not running (it clears audio state). */
 void N60FeedForwardLiveReset(N60FeedForwardLive * N60_FFL_NONNULL live);

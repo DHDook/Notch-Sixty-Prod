@@ -946,6 +946,25 @@ final class CoreAudioTransportSession {
         return N60RealtimeAudioBridgeArmFeedForwardLive(bridge, gate.leadSeconds, gate.requiredLeadSeconds)
     }
 
+    /// E4 S22b3: the leakage model and the pump's delay, in output frames. Nil clears the echo stage.
+    /// The kernel applies either only while the filter is idle.
+    func setFeedForwardLiveEcho(_ payload: FeedForwardLiveEchoPayload?, timingFrames: UInt32) -> Bool {
+        guard let bridge else { return false }
+        guard let payload else { return N60RealtimeAudioBridgeSetFeedForwardLiveEcho(bridge, nil) }
+        guard payload.isValid else { return false }
+        let bulk = payload.bulk
+        let ok = payload.left.withUnsafeBufferPointer { left in
+            payload.right.withUnsafeBufferPointer { right in
+                var echo = N60FeedForwardLiveEcho(
+                    bulkDelay: (bulk[0], bulk[1]),
+                    tapCount: (UInt32(left.count), UInt32(right.count)),
+                    taps: (left.baseAddress, right.baseAddress))
+                return N60RealtimeAudioBridgeSetFeedForwardLiveEcho(bridge, &echo)
+            }
+        }
+        return ok && N60RealtimeAudioBridgeSetFeedForwardLiveEchoTiming(bridge, timingFrames)
+    }
+
     func disarmFeedForwardLive() {
         guard let bridge else { return }
         N60RealtimeAudioBridgeDisarmFeedForwardLive(bridge)

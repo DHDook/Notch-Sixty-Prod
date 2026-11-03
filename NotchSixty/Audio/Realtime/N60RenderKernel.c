@@ -119,13 +119,17 @@ struct N60RenderKernel {
     // E4 S25b live feed-forward (NULL unless attached; created with IO stopped). The reference ring is
     // single producer (the reference pump thread) and single consumer (this render thread).
     N60FeedForwardLive *ffLive;
-    float *ffScratch;            // reference, left, right: three lanes of N60_FF_LIVE_MAX_BLOCK
+    float *ffScratch;            // reference, left, right, drive left, drive right: five lanes of N60_FF_LIVE_MAX_BLOCK
     float *ffRefRing;
     _Atomic uint64_t ffRefWrite;
     _Atomic uint64_t ffRefRead;
     _Atomic uint64_t ffUnderruns;
     uint32_t ffBlockFrames;
     uint32_t ffCursor;
+    uint32_t ffDriveCursor;      // E4 S22b3: final output pairs stored this callback (the next callback pushes them)
+    _Atomic uint64_t ffZeroFrom; // E4 S22b3: latest zero-filled span of the reference ring [from, to)
+    _Atomic uint64_t ffZeroTo;
+    _Atomic uint32_t ffZeroSeq;  // odd while the pump rewrites the span; the render thread retries or skips
     uint32_t ffUnderrunRun;
     float ffPendingLeft;         // this frame's anti-noise after lease and howl gain, before master gain
     float ffPendingRight;
@@ -1739,6 +1743,10 @@ static void reset_feed_forward_live_state(N60RenderKernel *kernel) {
     atomic_store_explicit(&kernel->ffRefWrite, 0, memory_order_release);
     kernel->ffBlockFrames = 0;
     kernel->ffCursor = 0;
+    kernel->ffDriveCursor = 0;
+    atomic_store_explicit(&kernel->ffZeroFrom, 0, memory_order_relaxed);
+    atomic_store_explicit(&kernel->ffZeroTo, 0, memory_order_relaxed);
+    atomic_store_explicit(&kernel->ffZeroSeq, 0, memory_order_relaxed);
     kernel->ffUnderrunRun = 0;
     kernel->ffPendingLeft = 0.0f;
     kernel->ffPendingRight = 0.0f;
@@ -1767,7 +1775,7 @@ bool N60RenderKernelAttachFeedForwardLiveWithRamp(N60RenderKernel *kernel, doubl
     if (live == NULL) return false;
     float *scratch = kernel->ffScratch;
     float *ring = kernel->ffRefRing;
-    if (scratch == NULL) scratch = (float *)calloc(3u * N60_FF_LIVE_MAX_BLOCK, sizeof(float));
+    if (scratch == NULL) scratch = (float *)calloc(5u * N60_FF_LIVE_MAX_BLOCK, sizeof(float));
     if (ring == NULL) ring = (float *)calloc(N60_FF_LIVE_REF_RING, sizeof(float));
     if (scratch == NULL || ring == NULL) {
         if (scratch != kernel->ffScratch) free(scratch);
@@ -1812,6 +1820,25 @@ void N60RenderKernelFeedForwardLiveDisarm(N60RenderKernel *kernel) {
     N60FeedForwardLiveDisarm(kernel->ffLive);
 }
 
+bool N60RenderKernelFeedForwardLiveSetEcho(N60RenderKernel *kernel, const N60FeedForwardLiveEcho *echo) {
+    if (kernel == NULL || kernel->ffLive == NULL) return false;
+    return N60FeedForwardLiveSetEcho(kernel->ffLive, echo);
+}
+
+bool N60RenderKernelFeedForwardLiveSetEchoTiming(N60RenderKernel *kernel, uint32_t baseLagFrames) {
+    if (kernel == NULL || kernel->ffLive == NULL) return false;
+    return N60FeedForwardLiveSetEchoTiming(kernel->ffLive, baseLagFrames);
+}
+
+// E4 S22b3: render thread, per frame. The bridge's final output pair (programme plus anti-noise, after
+// master gain and limiter): the echo stage's drive, pushed at the next callback.
+void N60RenderKernelStoreFeedForwardDriveFrame(N60RenderKernel *kernel, float left, float right) {
+    if (kernel->ffLive == NULL || kernel->ffDriveCursor >= N60_FF_LIVE_MAX_BLOCK) return;
+    kernel->ffScratch[3u * N60_FF_LIVE_MAX_BLOCK + kernel->ffDriveCursor] = left;
+    kernel->ffScratch[4u * N60_FF_LIVE_MAX_BLOCK + kernel->ffDriveCursor] = right;
+    kernel->ffDriveCursor += 1u;
+}
+
 void N60RenderKernelFeedForwardLiveMarkReferenceLost(N60RenderKernel *kernel) {
     if (kernel == NULL || kernel->ffLive == NULL) return;
     N60FeedForwardLiveMarkReferenceLost(kernel->ffLive);
@@ -1827,6 +1854,7 @@ N60RenderKernelFeedForwardLiveStatus N60RenderKernelFeedForwardLiveGetStatus(con
     out.referenceAheadFrames = wr > rd ? (uint32_t)(wr - rd) : 0u;
     out.outputIndex = rd;
     out.referenceUnderruns = atomic_load_explicit(&((N60RenderKernel *)kernel)->ffUnderruns, memory_order_relaxed);
+    out.echo = N60FeedForwardLiveGetEchoStatus(kernel->ffLive);
     return out;
 }
 
@@ -1853,6 +1881,18 @@ uint64_t N60RenderKernelFeedForwardLivePushReference(N60RenderKernel *kernel, ui
     if (n == 0) return startIndex + count;
     if (wr < rd) wr = rd;
     for (uint64_t g = wr; g < first; ++g) kernel->ffRefRing[g & (N60_FF_LIVE_REF_RING - 1u)] = 0.0f;
+    if (first > wr) {
+        // E4 S22b3: remember the zero-filled span so the echo stage skips subtraction over it.
+        // A gap the render thread has not consumed yet is merged (the span widens, which only skips more).
+        const uint64_t zf = atomic_load_explicit(&kernel->ffZeroFrom, memory_order_relaxed);
+        const uint64_t zt = atomic_load_explicit(&kernel->ffZeroTo, memory_order_relaxed);
+        const bool pending = zt > zf && zt > rd;
+        const uint32_t seq = atomic_load_explicit(&kernel->ffZeroSeq, memory_order_relaxed);
+        atomic_store_explicit(&kernel->ffZeroSeq, seq + 1u, memory_order_release);
+        atomic_store_explicit(&kernel->ffZeroFrom, pending && zf < wr ? zf : wr, memory_order_release);
+        atomic_store_explicit(&kernel->ffZeroTo, first, memory_order_release);
+        atomic_store_explicit(&kernel->ffZeroSeq, seq + 2u, memory_order_release);
+    }
     for (uint32_t i = 0; i < n; ++i) {
         kernel->ffRefRing[(first + i) & (N60_FF_LIVE_REF_RING - 1u)] = samples[skip + i];
     }
@@ -1872,6 +1912,7 @@ uint64_t N60RenderKernelFeedForwardLiveOutputIndex(const N60RenderKernel *kernel
 // index advances by `frames` either way, so the ring stays aligned with the output clock.
 void N60RenderKernelPrepareFeedForward(N60RenderKernel *kernel, uint32_t frames) {
     if (kernel == NULL) return;
+    const uint32_t previousBlock = kernel->ffBlockFrames;
     kernel->ffBlockFrames = 0;
     kernel->ffCursor = 0;
     if (kernel->ffLive == NULL || frames == 0) return;
@@ -1881,10 +1922,36 @@ void N60RenderKernelPrepareFeedForward(N60RenderKernel *kernel, uint32_t frames)
     float *outR = kernel->ffScratch + 2u * N60_FF_LIVE_MAX_BLOCK;
     const uint64_t rd = atomic_load_explicit(&kernel->ffRefRead, memory_order_relaxed);
     const uint64_t wr = atomic_load_explicit(&kernel->ffRefWrite, memory_order_acquire);
+    // E4 S22b3: the previous callback's final output pairs are the drive for the echo stage.
+    // Frames the output loop did not render (an early return or underrun) are silence, not a mismatch.
+    for (uint32_t i = kernel->ffDriveCursor; i < previousBlock; ++i) {
+        kernel->ffScratch[3u * N60_FF_LIVE_MAX_BLOCK + i] = 0.0f;
+        kernel->ffScratch[4u * N60_FF_LIVE_MAX_BLOCK + i] = 0.0f;
+    }
+    N60FeedForwardLivePushDrive(kernel->ffLive, kernel->ffScratch + 3u * N60_FF_LIVE_MAX_BLOCK,
+                                kernel->ffScratch + 4u * N60_FF_LIVE_MAX_BLOCK,
+                                kernel->ffDriveCursor > previousBlock ? kernel->ffDriveCursor : previousBlock);
+    kernel->ffDriveCursor = 0;
+    uint32_t zeroFrames = 0;
     if (wr >= rd + n) {
         for (uint32_t i = 0; i < n; ++i) ref[i] = kernel->ffRefRing[(rd + i) & (N60_FF_LIVE_REF_RING - 1u)];
         kernel->ffUnderrunRun = 0;
+        uint64_t zf = 0, zt = 0;
+        bool stable = false;
+        for (int attempt = 0; attempt < 3 && !stable; ++attempt) {
+            const uint32_t s0 = atomic_load_explicit(&kernel->ffZeroSeq, memory_order_acquire);
+            zf = atomic_load_explicit(&kernel->ffZeroFrom, memory_order_acquire);
+            zt = atomic_load_explicit(&kernel->ffZeroTo, memory_order_acquire);
+            stable = (s0 & 1u) == 0u && s0 == atomic_load_explicit(&kernel->ffZeroSeq, memory_order_acquire);
+        }
+        if (!stable) {
+            zeroFrames = n;   // the pump is mid-write: skip subtraction for this block, the safe side
+        } else if (zt > zf && zt > rd && zf < rd + n) {
+            const uint64_t a = zf > rd ? zf : rd, b = zt < rd + n ? zt : rd + n;
+            zeroFrames = (uint32_t)(b - a);
+        }
     } else {
+        zeroFrames = n;
         memset(ref, 0, (size_t)n * sizeof(float));
         atomic_fetch_add_explicit(&kernel->ffUnderruns, 1, memory_order_relaxed);
         if (++kernel->ffUnderrunRun >= 2u
@@ -1893,6 +1960,7 @@ void N60RenderKernelPrepareFeedForward(N60RenderKernel *kernel, uint32_t frames)
         }
     }
     atomic_store_explicit(&kernel->ffRefRead, rd + frames, memory_order_release);
+    N60FeedForwardLiveNoteReferenceGaps(kernel->ffLive, zeroFrames, frames - n);
     N60FeedForwardLiveProcess(kernel->ffLive, ref, outL, outR, n);
     kernel->ffBlockFrames = n;
 }
