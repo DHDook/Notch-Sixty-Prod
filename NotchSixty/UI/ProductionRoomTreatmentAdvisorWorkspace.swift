@@ -2,11 +2,15 @@ import SwiftUI
 
 struct ProductionRoomTreatmentAdvisorWorkspace: View {
     @ObservedObject var advisor: RoomTreatmentAdvisorController
+    @ObservedObject var profiles: ProductProfileController
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 header
+                SystemCapabilityNoteCard(
+                    title: "Your speaker arrangement", features: SystemCapabilityText.advisorFeatures,
+                    profiles: profiles, includeArrangement: true)
                 workflowCard
                 measurementSourceCard
 

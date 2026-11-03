@@ -378,6 +378,9 @@ final class MultichannelCalibrationController: ObservableObject {
             hasOutputDevice: engine.selectedOutputDevice != nil,
             requiresProfile: true,
             hasProfile: profile != nil,
+            profileReason: SystemCapabilityText.profileRequiredReason(
+                profile: profiles.selectedSystemProfile, flagEnabled: arrangementMeasurementEnabled(),
+                deviceChannelCount: Int(engine.selectedOutputDevice?.outputChannelCount ?? 0)),
             requiresWork: true,
             hasWork: nextTarget() != nil,
             transportActive: activeTransport != nil,
