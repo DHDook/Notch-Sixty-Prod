@@ -246,6 +246,8 @@ struct ProductionActiveAcousticsWorkspace: View {
     @ObservedObject var adaptiveQuietZone: AdaptiveQuietZoneShadow
     @ObservedObject var feedForwardSurvey: QuietZoneFeedForwardSurveyController
     @ObservedObject var feedForwardShadow: QuietZoneFeedForwardShadow
+    /// E4 S25: nil unless `e4.feedforward-live` is on.
+    var feedForwardArming: FeedForwardLiveArmingController?
     @ObservedObject var microphone: RoomCorrectionCalibrationController
     @ObservedObject var projects: RoomCorrectionProjectController
 
@@ -1232,6 +1234,9 @@ struct ProductionActiveAcousticsWorkspace: View {
             ProductionFeedForwardReadinessCard(quietZone: quietZone)
             ProductionFeedForwardDesignSurveyCard(survey: feedForwardSurvey)
             ProductionFeedForwardShadowCard(shadow: feedForwardShadow)
+            if let feedForwardArming {
+                ProductionFeedForwardLiveCard(quietZone: quietZone, arming: feedForwardArming)
+            }
 
             LazyVGrid(
                 columns: [

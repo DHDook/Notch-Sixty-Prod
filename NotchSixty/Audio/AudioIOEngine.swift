@@ -3056,7 +3056,7 @@ final class AudioIOEngine: ObservableObject {
     }
 
     /// E4 S25b: live feed-forward passthroughs. Arm needs the gate's inputs; the app supplies
-    /// `liveOutputAuthorized` only from the written authorisation path (nothing does yet).
+    /// `liveOutputAuthorized` only from `FeedForwardLiveArmingController` (the user's request).
     func setFeedForwardLiveWeights(left: [Float], right: [Float]) -> Bool {
         speakerDriveFeatureEnabled && (transportSession?.setFeedForwardLiveWeights(left: left, right: right) ?? false)
     }

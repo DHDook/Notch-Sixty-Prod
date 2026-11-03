@@ -65,7 +65,7 @@ reviewers compare with Dirac and REW), then engine depth, then breadth.
 
 0. E24 Room correction completion, all of S0–S8 in written order (owner, 1 Nov 2026; S4–S8 no longer wait for E4; numbered 0 so later item numbers stay valid)
    - then E25 Outputs and speaker arrangement, S1–S8 in written order, before item 1 (owner, 1 Nov 2026)
-   - then E4 S25 arming and S22b echo stage, before item 1 (owner, 2 Nov 2026; arming approved with the four conditions in `docs/epics/E4.md` Open owner decisions: user-initiated only, slow 3 s fade-in, existing gates first, never persisted)
+   - then E4 S22b echo stage in the live path (S25 arming built, PR open), before item 1 (owner, 2 Nov 2026; arming approved with the four conditions in `docs/epics/E4.md` Open owner decisions: user-initiated only, slow 3 s fade-in, existing gates first, never persisted)
 1. E4 class-leading roadmap, S24–S31 in written order (owner, 31 Oct 2026; E4 S11 moved to E22 on 1 Nov 2026; S26 and S29 are skipped until the owner decides camera head position and the overnight power assertion; slices waiting on E8 or the bench are skipped until ready)
 2. E12 Guided setup and information architecture, S7 `e12/ship` (#243, needs-owner)
 3. E11 Measurement suite, S10 `e11/overlays-and-ship` (needs-owner)

@@ -12,7 +12,8 @@ namespace {
 
 constexpr double kTwoPi = 6.283185307179586476925286766559;
 constexpr double kCutoffPerFd = 0.5;      // cycles per fd sample (stopband from 0.85 fd)
-constexpr double kRampUpSeconds = 0.05;
+// Owner approval of 2 Nov 2026: the fade-in matches the 3 s tonal ramp. Trips stay fast (10 ms).
+constexpr double kRampUpSeconds = 3.0;
 constexpr double kRampDownSeconds = 0.01;
 constexpr double kDefaultFadeSeconds = 0.01;
 constexpr std::uint32_t kDefaultHalf = 4;
@@ -56,7 +57,9 @@ FeedForwardLive::FeedForwardLive(const N60FeedForwardLiveConfig &config)
           1, static_cast<std::uint32_t>((config.swapFadeSeconds > 0 ? config.swapFadeSeconds
                                                                     : kDefaultFadeSeconds)
                                         * config.sampleRate))),
-      rampUp_(std::max<std::uint32_t>(1, static_cast<std::uint32_t>(kRampUpSeconds * config.sampleRate))),
+      rampUp_(std::max<std::uint32_t>(1, static_cast<std::uint32_t>((config.armRampSeconds > 0 ? config.armRampSeconds
+                                                                                   : kRampUpSeconds)
+                                                                  * config.sampleRate))),
       rampDown_(std::max<std::uint32_t>(1, static_cast<std::uint32_t>(kRampDownSeconds * config.sampleRate))),
       peakLimit_(static_cast<float>(config.peakLimit)),
       decimator_(kernel(factor_, half_)),
@@ -343,6 +346,7 @@ bool N60FeedForwardLiveConfigIsValid(const N60FeedForwardLiveConfig *config) {
     if (config->maxBlockFrames < 16 || config->maxBlockFrames > 16384) return false;
     if (config->kernelHalf != 0 && (config->kernelHalf < 3 || config->kernelHalf > 4)) return false;
     if (config->swapFadeSeconds != 0 && !finiteIn(config->swapFadeSeconds, 0.001, 0.5)) return false;
+    if (config->armRampSeconds != 0 && !finiteIn(config->armRampSeconds, 0.01, 30.0)) return false;
     return finiteIn(config->peakLimit, 1e-6, 1.0);
 }
 

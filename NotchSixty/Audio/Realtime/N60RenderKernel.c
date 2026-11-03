@@ -1747,6 +1747,11 @@ static void reset_feed_forward_live_state(N60RenderKernel *kernel) {
 }
 
 bool N60RenderKernelAttachFeedForwardLive(N60RenderKernel *kernel, double sampleRate, double peakLimit) {
+    return N60RenderKernelAttachFeedForwardLiveWithRamp(kernel, sampleRate, peakLimit, 0.0);
+}
+
+bool N60RenderKernelAttachFeedForwardLiveWithRamp(N60RenderKernel *kernel, double sampleRate, double peakLimit,
+                                                  double armRampSeconds) {
     if (kernel == NULL) return false;
     if (kernel->ffLive != NULL) {
         // Same rate: keep it (weights and arm state survive). A new rate builds a new filter.
@@ -1756,6 +1761,7 @@ bool N60RenderKernelAttachFeedForwardLive(N60RenderKernel *kernel, double sample
     config.sampleRate = sampleRate;
     config.maxBlockFrames = N60_FF_LIVE_MAX_BLOCK;
     config.peakLimit = peakLimit;
+    config.armRampSeconds = armRampSeconds;
     if (!N60FeedForwardLiveConfigIsValid(&config)) return false;
     N60FeedForwardLive *live = N60FeedForwardLiveCreate(&config);
     if (live == NULL) return false;

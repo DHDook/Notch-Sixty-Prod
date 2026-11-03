@@ -78,6 +78,8 @@ final class ProductController: ObservableObject {
     let adaptiveQuietZone: AdaptiveQuietZoneShadow
     let feedForwardSurvey: QuietZoneFeedForwardSurveyController
     let feedForwardShadow: QuietZoneFeedForwardShadow
+    /// E4 S25 arming: nil unless `e4.feedforward-live` is on.
+    let feedForwardArming: FeedForwardLiveArmingController?
     let hardwareAcceptance: HardwareAcceptanceController
     let backup: NotchSixtyBackupService
     let recovery: ProductRecoveryController
@@ -193,6 +195,19 @@ final class ProductController: ObservableObject {
         feedForwardShadow.referenceDriver = audioEngine
         feedForwardShadow.observe(feedForwardSurvey)
         self.feedForwardShadow = feedForwardShadow
+        // E4 S25: user-initiated arming of the feed-forward live output (flag-gated, never persisted).
+        if FeatureFlags().isEnabled(.feedForwardLive) {
+            let arming = FeedForwardLiveArmingController(
+                engine: audioEngine,
+                shadowFacts: { [weak feedForwardShadow, weak audioEngine] in
+                    guard let feedForwardShadow, let audioEngine else { return .none }
+                    return FeedForwardLiveShadowFacts.read(shadow: feedForwardShadow, engine: audioEngine)
+                })
+            activeQuietZone.attachFeedForwardArming(arming)
+            self.feedForwardArming = arming
+        } else {
+            self.feedForwardArming = nil
+        }
         self.hardwareAcceptance = HardwareAcceptanceController()
         self.backup = NotchSixtyBackupService(
             profiles: profiles,
@@ -285,6 +300,19 @@ final class ProductController: ObservableObject {
         feedForwardShadow.referenceDriver = audioEngine
         feedForwardShadow.observe(feedForwardSurvey)
         self.feedForwardShadow = feedForwardShadow
+        // E4 S25: user-initiated arming of the feed-forward live output (flag-gated, never persisted).
+        if FeatureFlags().isEnabled(.feedForwardLive) {
+            let arming = FeedForwardLiveArmingController(
+                engine: audioEngine,
+                shadowFacts: { [weak feedForwardShadow, weak audioEngine] in
+                    guard let feedForwardShadow, let audioEngine else { return .none }
+                    return FeedForwardLiveShadowFacts.read(shadow: feedForwardShadow, engine: audioEngine)
+                })
+            activeQuietZone.attachFeedForwardArming(arming)
+            self.feedForwardArming = arming
+        } else {
+            self.feedForwardArming = nil
+        }
         self.hardwareAcceptance = HardwareAcceptanceController()
         self.backup = NotchSixtyBackupService(
             profiles: profiles,

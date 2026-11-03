@@ -460,6 +460,7 @@ struct ProductionRootView: View {
                 adaptiveQuietZone: product.adaptiveQuietZone,
                 feedForwardSurvey: product.feedForwardSurvey,
                 feedForwardShadow: product.feedForwardShadow,
+                feedForwardArming: product.feedForwardArming,
                 microphone: product.calibration,
                 projects: product.roomCorrectionProjects
             )
