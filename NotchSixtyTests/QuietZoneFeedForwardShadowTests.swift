@@ -266,6 +266,34 @@ final class QuietZoneFeedForwardShadowTests: XCTestCase {
         XCTAssertFalse(AdaptiveTonalOutputGate.evaluate(.sample(armed: LiveTreatmentArm(feature: .quietZone).isArmed)).isOpen)
     }
 
+    func testShadowPublishesItsWeightsToTheLiveMailboxOnlyOnceTheWatchIsClear() async throws {
+        for rate in rates {
+            let capture = SimulatedFeedForwardPair(
+                sampleRate: rate, delayFrames: Int((disturbanceSeconds * rate).rounded()), gain: disturbanceGain
+            )
+            let sink = RecordingWeightsSink()
+            let shadow = QuietZoneFeedForwardShadow(captureFactory: { _ in capture }, deviceRate: { _ in nil }, pollsAutomatically: false)
+            shadow.weightsSink = sink
+            shadow.update(inputs: try inputs(rate: rate, design: false), reason: "")
+            shadow.setActive(true)
+            capture.produce(seconds: 1)
+            await shadow.tick()
+            XCTAssertEqual(shadow.status.guardState, .arming, "\(rate) Hz")
+            XCTAssertTrue(sink.sets.isEmpty, "\(rate) Hz: nothing while arming")
+            for _ in 0..<5 {
+                capture.produce(seconds: 1)
+                await shadow.tick()
+            }
+            XCTAssertEqual(shadow.status.guardState, .clear, "\(rate) Hz")
+            let last = try XCTUnwrap(sink.sets.last, "\(rate) Hz")
+            XCTAssertTrue((1...FeedForwardLiveWeightsFeed.maximumTaps).contains(last.0.count), "\(rate) Hz")
+            XCTAssertEqual(last.0.count, last.1.count)
+            XCTAssertTrue(last.0.allSatisfy(\.isFinite) && last.1.allSatisfy(\.isFinite))
+            XCTAssertTrue(last.0.contains { $0 != 0 }, "\(rate) Hz: the learned weights, not zeros")
+            shadow.flushForTesting()
+        }
+    }
+
     // MARK: Fixtures
 
     private func inputs(rate: Double, design: Bool) throws -> QuietZoneFeedForwardShadowInputs {
@@ -389,5 +417,13 @@ private final class SimulatedFeedForwardPair: QuietZoneFeedForwardPairCapturing 
         }
         time += Double(count)
         return (frames, error)
+    }
+}
+
+private final class RecordingWeightsSink: FeedForwardLiveWeightsSink {
+    var sets: [([Float], [Float])] = []
+    func setFeedForwardLiveWeights(left: [Float], right: [Float]) -> Bool {
+        sets.append((left, right))
+        return true
     }
 }

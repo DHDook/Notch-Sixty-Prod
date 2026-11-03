@@ -417,6 +417,10 @@ final class QuietZoneFeedForwardShadow: ObservableObject {
     private var removalWatch = FeedForwardRemovalWatch()
     /// Set by the app when `e4.feedforward-live` is on; nil means no drive is ever requested.
     var driveSource: (any FeedForwardDriveSource)?
+    /// Set by the app when `e4.feedforward-live` is on; nil means weights are never published.
+    /// Publishing never arms the filter (see `FeedForwardLiveWeightsFeed`).
+    var weightsSink: (any FeedForwardLiveWeightsSink)?
+    private(set) var weightsFeed = FeedForwardLiveWeightsFeed()
     private var demandSet = false
     private var retryCountdown = 0
     /// Bumped whenever the engine is dropped, so late results are ignored.
@@ -537,6 +541,11 @@ final class QuietZoneFeedForwardShadow: ObservableObject {
         }
         guard isActive, generation == current else { return }
         publish(snapshot, plan: running.plan)
+        if let weightsSink {
+            _ = weightsFeed.offer(
+                left: snapshot.left, right: snapshot.right, guardState: status.guardState, sink: weightsSink
+            )
+        }
     }
 
     /// Waits for closed captures to finish closing (tests).
@@ -623,6 +632,7 @@ final class QuietZoneFeedForwardShadow: ObservableObject {
 
     private func dropEngine() {
         setDemand(false)
+        weightsFeed.reset()
         generation += 1
         engine?.close()
         if let engine { closing = engine }
