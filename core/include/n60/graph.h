@@ -34,7 +34,7 @@ extern "C" {
 #endif
 
 /* Bumped on any incompatible change to a struct or function below. */
-#define N60_GRAPH_ABI_VERSION 18u
+#define N60_GRAPH_ABI_VERSION 19u
 
 typedef struct n60_graph n60_graph; /* opaque */
 
@@ -59,7 +59,8 @@ typedef enum n60_status {
 typedef enum n60_stage_kind {
     N60_STAGE_SANITISE = 1,   /* position 1. NaN and Inf become 0; counted. No params. */
     N60_STAGE_METER_IN = 2,   /* position 2. Peak and RMS per lane, audio untouched. No params. */
-    N60_STAGE_GAIN = 3,       /* position 3. Input gain x headroom. params[0] = linear gain, ramped over 5 ms. */
+    N60_STAGE_GAIN = 3,       /* position 3. Input gain x headroom. params[0] = linear gain, ramped over 5 ms. ABI v19 (E25 S2): -10000..10000;
+                                  * a negative value inverts polarity (a ramp through zero when it flips). */
     N60_STAGE_DENOISER = 11,  /* position 4. Spectral denoiser, linked across its lanes. See "Denoiser" below. */
     N60_STAGE_MS_ENCODE = 4,  /* position 5. Group stage on lanes (laneA, laneB): M = (A+B)/2, S = (A-B)/2. No params. */
     N60_STAGE_PEQ = 5,        /* position 6. Up to 16 sections, double precision. params = 4 per section: type, Hz, dB, Q. */
@@ -221,7 +222,10 @@ typedef int (*n60_external_process_fn)(void *context, const float *const *in, fl
 /* Stereo crossover (ABI v12). Pair stage (laneA, laneB). params: [0] frequency Hz (>0, below Nyquist),
  * [1] topology 0 LR24 or 1 LR48, [2] monitor mode 0 recombined, 1 mains only, 2 sub only, [3] sub gain (linear,
  * >= 0), [4] sub polarity inverted (0/1), [5] sub phase alignment on (0/1), [6] alignment Hz, [7] alignment Q.
- * paramCount 8, all fixed at build time. Mains are a high-pass per lane, the sub is (A + B) * 0.5 through the
+ * paramCount 8, all fixed at build time. ABI v19 (E25 S2): paramCount 12 adds a filter-spec trailer [8] mains high-pass
+ * family, [9] its order, [10] sub low-pass family, [11] its order (families N60_GRAPH_FILTER_BUTTERWORTH, _BESSEL,
+ * _LINKWITZ_RILEY; orders 1..8, Linkwitz-Riley 2, 4, 6, 8) and [1] (0 or 1) is then unused. Absent trailer: exactly the v18
+ * LR24 / LR48 arithmetic, bit-identical. The trailer is topology (UNSUPPORTED live). Mains are a high-pass per lane, the sub is (A + B) * 0.5 through the
  * low-pass (then the all-pass), gain and polarity. Double-precision sections with a float result between them.
  * Latency 0. Reset clears the section states. */
 

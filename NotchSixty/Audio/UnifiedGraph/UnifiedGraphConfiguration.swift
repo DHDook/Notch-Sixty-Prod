@@ -20,6 +20,10 @@ struct UnifiedGraphLane: Equatable, Sendable {
     /// Total fractional (Thiran) delay in frames from the kernel's inter-channel delay; replaces `delayFrames`
     /// with a FRAC_DELAY stage when set.
     var fractionalDelayFrames: Double?
+    /// E25 S2: speaker feed calibration. Polarity flips the sign of the output gain; the delay is added after the
+    /// ordinary lane delay and is real latency (not an inter-channel tap the kernel path also applies).
+    var polarityInverted = false
+    var calibrationDelayFrames: Double = 0
     var eq: [UnifiedGraphPEQSection] = []
 }
 
@@ -313,7 +317,7 @@ struct UnifiedGraphConfiguration: Equatable, Sendable {
         }
         for (index, lane) in lanes.enumerated() {
             add(N60_STAGE_OUTPUT_GAIN, N60_LSTAGE_OUTPUT_GAIN + UInt32(index), lane: UInt32(index),
-                params: [lane.outputGain])
+                params: [lane.polarityInverted ? -lane.outputGain : lane.outputGain])
         }
         if let params = stereo.pauseGate {
             add(N60_STAGE_PAUSE_GATE, Self.pauseGateStageId, mask: programMask, params: params)
@@ -322,7 +326,24 @@ struct UnifiedGraphConfiguration: Equatable, Sendable {
         stages += routed.route
         stages += routed.rest
         for (index, lane) in lanes.enumerated() {
-            if let total = lane.fractionalDelayFrames {
+            if lane.calibrationDelayFrames > 0 {
+                // E25 S2: the speaker feed delay (up to 50 ms, 19,200 frames at 384 kHz) exceeds the fractional stage's
+                // 8,190-frame range, so whole frames go to a DELAY stage and the last 16 plus the fraction to FRAC_DELAY.
+                let base = lane.fractionalDelayFrames
+                    ?? (lane.delayMilliseconds * 0.001 * sampleRate).rounded() + Double(lane.delayFrames)
+                let total = base + lane.calibrationDelayFrames
+                guard total.isFinite, total >= 0, total <= Double(N60_GRAPH_MAX_DELAY_FRAMES) else {
+                    throw UnifiedGraphError.invalidConfiguration("calibration delay")
+                }
+                let whole = total.rounded(.down)
+                let split = max(0, whole - 16)
+                if split >= 1 {
+                    add(N60_STAGE_DELAY, Self.calibrationDelayStageBase + UInt32(index), lane: UInt32(index),
+                        capacity: UInt32(split), params: [Float(split)])
+                }
+                add(N60_STAGE_FRAC_DELAY, Self.delayStageBase + UInt32(index), lane: UInt32(index),
+                    params: [Float(whole - split), Float(total - whole)])
+            } else if let total = lane.fractionalDelayFrames {
                 guard total.isFinite, total >= 0, total < 8190 else {
                     throw UnifiedGraphError.invalidConfiguration("fractional delay")
                 }
@@ -362,6 +383,7 @@ struct UnifiedGraphConfiguration: Equatable, Sendable {
 
     static let preGainStageBase: UInt32 = 400
     static let delayStageBase: UInt32 = 500
+    static let calibrationDelayStageBase: UInt32 = 520
     static let bassStageId: UInt32 = 90
     static let compressorStageId: UInt32 = 600
     static let expanderStageId: UInt32 = 601

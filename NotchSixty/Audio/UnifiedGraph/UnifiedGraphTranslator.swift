@@ -17,11 +17,12 @@ enum UnifiedGraphTranslator {
         sampleRate: Double,
         subwoofers: [UnifiedGraphSubwoofer] = [],
         crossoverHz: Double = 80,
-        programs: UnifiedGraphProgramLookup = { _, _ in nil }
+        programs: UnifiedGraphProgramLookup = { _, _ in nil },
+        alignment: StereoBassAlignment? = nil
     ) -> UnifiedGraphConfiguration? {
         try? stereoEligibility(
             snapshot: &snapshot, sampleRate: sampleRate, subwoofers: subwoofers, crossoverHz: crossoverHz,
-            programs: programs
+            programs: programs, alignment: alignment
         ).get()
     }
 
@@ -31,8 +32,10 @@ enum UnifiedGraphTranslator {
         sampleRate: Double,
         subwoofers: [UnifiedGraphSubwoofer] = [],
         crossoverHz: Double = 80,
-        programs: UnifiedGraphProgramLookup = { _, _ in nil }
+        programs: UnifiedGraphProgramLookup = { _, _ in nil },
+        alignment: StereoBassAlignment? = nil
     ) -> Result<UnifiedGraphConfiguration, UnifiedGraphFallbackReason> {
+        if let alignment, alignment.issue != nil { return .failure(.alignmentInvalid) }
         guard withUnsafePointer(to: &snapshot, {
             N60UnifiedGraphSnapshotUnsupportedReason($0) == N60UnifiedGraphSupported
         }) else { return .failure(.unsupportedKernelStage) }
@@ -90,6 +93,7 @@ enum UnifiedGraphTranslator {
             return .failure(.unsupportedKernelStage)
         }
         configuration.stereoStages = stages
+        if let alignment { apply(alignment, to: &configuration) }
         let p = snapshot.protection
         if p.limiterEnabled || p.truePeakGuardEnabled || p.softClipperEnabled || p.gainRiderEnabled {
             let ceilingDB = 20.0 * log10(Double(max(p.limiterCeilingLinear, 1e-6)))
@@ -128,6 +132,23 @@ enum UnifiedGraphTranslator {
             )
         }
         return .success(configuration)
+    }
+
+    /// E25 S2: compiles the mono-bass filter into the pair crossover (ABI v19 trailer, with the sum-polarity fix for
+    /// Linkwitz-Riley 12 and 36) and the speaker feed calibration into the stereo lanes. With no crossover in the
+    /// configuration the filter is ignored; an identity calibration leaves the lanes untouched.
+    static func apply(_ alignment: StereoBassAlignment, to configuration: inout UnifiedGraphConfiguration) {
+        if let filter = alignment.monoBassFilter, var params = configuration.stereoStages.crossover, params.count == 8 {
+            if filter.sumNeedsInversion { params[4] = params[4] == 0 ? 1 : 0 }
+            configuration.stereoStages.crossover = params + filter.trailer
+        }
+        let feeds = [alignment.left, alignment.right]
+        for index in 0..<min(2, configuration.lanes.count) {
+            let feed = feeds[index]
+            configuration.lanes[index].outputGain *= feed.linearGain
+            configuration.lanes[index].polarityInverted = feed.polarityInverted
+            configuration.lanes[index].calibrationDelayFrames = feed.delayFrames(sampleRate: configuration.sampleRate)
+        }
     }
 
     /// The retained taps are the ones the kernel was prepared with: same generation, tap count, shared-or-stereo shape
@@ -765,6 +786,8 @@ enum UnifiedGraphFallbackReason: String, Error, Equatable, Sendable, CaseIterabl
     case unsupportedRoute
     /// Stereo: headphone DSP is configured.
     case headphoneDSP
+    /// E25 S2: the stereo alignment (mono-bass filter or speaker feed calibration) is out of range.
+    case alignmentInvalid
     // Session-level (after the configuration was accepted).
     case sampleRateMismatch
     case laneCountMismatch
@@ -816,6 +839,7 @@ enum UnifiedGraphFallbackReason: String, Error, Equatable, Sendable, CaseIterabl
         case .protectionCeilingOutOfRange: "protection ceiling out of range"
         case .unsupportedRoute: "same-device, aggregate or rack route"
         case .headphoneDSP: "headphone DSP"
+        case .alignmentInvalid: "speaker trim, delay or mono-bass slope out of range"
         case .sampleRateMismatch: "sample rate mismatch"
         case .laneCountMismatch: "lane count mismatch"
         case .blockSizeTooLarge: "buffer larger than graph block"

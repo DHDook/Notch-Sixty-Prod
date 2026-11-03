@@ -451,6 +451,9 @@ final class CoreAudioTransportSession {
     private var headphoneProfile: HeadphoneDeviceProfileConfiguration?
     private var kernelHeadphoneProfile: HeadphoneDeviceProfileConfiguration?
     private var lastGraphSnapshot: N60DSPGraphSnapshot?
+    /// E25 S2: the mono-bass filter and speaker feed calibration compiled into the stereo graph. nil is the standard
+    /// session.
+    private(set) var stereoAlignment: StereoBassAlignment?
     private var graphPublicationCoordinator: DSPGraphPublicationCoordinator?
     private var analysisWorker: ProductionAnalysisWorker?
     private var audioUnitRack: AudioUnitLiveRackSwitchboard?
@@ -1322,6 +1325,26 @@ final class CoreAudioTransportSession {
         }
     }
 
+    /// E25 S2. Before the session starts: the alignment its first graph is built with.
+    func setInitialStereoAlignment(_ alignment: StereoBassAlignment?) { stereoAlignment = alignment }
+
+    /// E25 S2. Control thread. Sets the mono-bass filter and speaker feed calibration of this stereo session. The
+    /// legacy kernel cannot apply a non-standard alignment, so with the graph off it is refused with a reason; the
+    /// stored alignment changes only once the graph accepted it.
+    func applyStereoAlignment(_ alignment: StereoBassAlignment?) throws {
+        if let alignment {
+            if let issue = alignment.issue { throw issue }
+            if !unifiedGraphEnabled, let refusal = alignment.legacyKernelRefusal { throw refusal }
+        }
+        let previous = stereoAlignment
+        stereoAlignment = alignment
+        guard unifiedGraphEnabled, let snapshot = lastGraphSnapshot else { return }
+        if !refreshUnifiedGraph(for: snapshot) {
+            stereoAlignment = previous
+            throw LiveNChannelTransportError.unifiedGraphRejected(unifiedGraphFallbackReason ?? .specRejected)
+        }
+    }
+
     /// The live graph host, for metering and latency readbacks (nil while the kernel renders).
     var unifiedGraphReadback: UnifiedGraphHost? { unifiedGraphActive ? unifiedGraphHost : nil }
 
@@ -1358,7 +1381,8 @@ final class CoreAudioTransportSession {
         var configuration: UnifiedGraphConfiguration
         switch UnifiedGraphTranslator.stereoEligibility(
             snapshot: &mutable, sampleRate: outputFormat.sampleRate,
-            programs: { [self] kind, generation in retainedProgram(kind, generation: generation) }
+            programs: { [self] kind, generation in retainedProgram(kind, generation: generation) },
+            alignment: stereoAlignment
         ) {
         case .success(let accepted): configuration = accepted
         case .failure(let reason):

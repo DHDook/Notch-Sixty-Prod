@@ -195,7 +195,7 @@ uint32_t expectedParamCount(uint32_t kind, const float *p, uint32_t have) {
                        : 0u;
         case N60_STAGE_PAUSE_GATE: return 5;
         case N60_STAGE_PROTECTION: return have == 7 ? 7u : (have == kProtParamsV12 ? kProtParamsV12 : 0u);
-        case N60_STAGE_STEREO_CROSSOVER: return 8;
+        case N60_STAGE_STEREO_CROSSOVER: return have == 8 || have == 12 ? have : 0u;  // ABI v19: 8, or 12 with a filter-spec trailer
         case N60_STAGE_MUTE: return 1;
         case N60_STAGE_EXTERNAL: return 1;
         case N60_STAGE_FRAC_DELAY: return 2;
@@ -423,7 +423,7 @@ struct XoShared {
     double ap[5];
     Bq lpState[kXoSections];
     Bq apState;
-    uint32_t sections, mode;
+    uint32_t nHp, nLp, mode;
     uint32_t align, invert;
     float gain, pad;
 };
@@ -559,7 +559,8 @@ bool paramOk(uint32_t kind, uint32_t i, float v, const float *p, double rate, ui
                 case 5: return v == 0.0f || v == 1.0f;
                 case 2: return v == 0.0f || v == 1.0f || v == 2.0f;
                 case 3: return v >= 0.0f;
-                default: return v > 0.0f;  // 7: alignment Q
+                case 7: return v > 0.0f;  // alignment Q
+                default: return isInt(v) && v >= 0.0f && v <= 8.0f;  // 8..11: trailer family / order (checked as a pair below)
             }
         case N60_STAGE_MUTE: return v == 0.0f || v == 1.0f;
         case N60_STAGE_EXTERNAL: return v == 0.0f || v == 1.0f;
@@ -611,6 +612,20 @@ n60_status validateSystemStage(const n60_stage_desc &s, double rate, uint32_t ou
         if (!paramOk(s.kind, i, p[i], p, rate, outCh)) return N60_STATUS_BAD_ARGUMENT;
     }
     switch (s.kind) {
+        case N60_STAGE_STEREO_CROSSOVER:
+            if (s.paramCount == 12) {  // ABI v19 filter-spec trailer: HP family, order, LP family, order
+                for (uint32_t k = 8; k < 12; k += 2) {
+                    n60_xover_prototype pr;
+                    if (p[k] > 2.0f || n60_xover_prototype_design(static_cast<uint32_t>(p[k]), static_cast<uint32_t>(p[k + 1]), &pr) != N60_XOVER_OK) {
+                        return N60_STATUS_BAD_ARGUMENT;
+                    }
+                    n60_xover_cascade c;  // the corner must also realise at this rate
+                    if (n60_xover_realise(&pr, k == 8, static_cast<double>(p[0]), rate, &c) != N60_XOVER_OK) {
+                        return N60_STATUS_BAD_ARGUMENT;
+                    }
+                }
+            }
+            break;
         case N60_STAGE_BASS_MGMT: {
             BassLayout L;
             if (!parseBass(p, s.paramCount, L)) return N60_STATUS_BAD_ARGUMENT;
@@ -905,14 +920,30 @@ void systemInit(SnapHeader *h, const StageRec &r) {
             break;
         case N60_STAGE_STEREO_CROSSOVER: {
             XoShared *x = reinterpret_cast<XoShared *>(sh);
-            static const double q24[2] = {0.7071067811865476, 0.7071067811865476};
-            static const double q48[4] = {0.5411961001461970, 1.3065629648763766, 0.5411961001461970, 1.3065629648763766};
-            const bool lr48 = p[1] != 0.0f;
-            x->sections = lr48 ? 4u : 2u;
-            for (uint32_t k = 0; k < x->sections; ++k) {
-                const double q = lr48 ? q48[k] : q24[k];
-                xoDesign(1, rate, static_cast<double>(p[0]), q, x->hp[k]);
-                xoDesign(0, rate, static_cast<double>(p[0]), q, x->lp[k]);
+            if (r.paramCount == 12) {  // ABI v19 filter spec: the crossover library realises the prototypes
+                n60_xover_prototype hpP, lpP;
+                n60_xover_cascade c;
+                n60_xover_prototype_design(static_cast<uint32_t>(p[8]), static_cast<uint32_t>(p[9]), &hpP);
+                n60_xover_prototype_design(static_cast<uint32_t>(p[10]), static_cast<uint32_t>(p[11]), &lpP);
+                x->nHp = x->nLp = 0;
+                if (n60_xover_realise(&hpP, 1, static_cast<double>(p[0]), rate, &c) == N60_XOVER_OK) {
+                    x->nHp = c.count;
+                    for (uint32_t k = 0; k < c.count; ++k) std::memcpy(x->hp[k], &c.sections[k], sizeof x->hp[k]);
+                }
+                if (n60_xover_realise(&lpP, 0, static_cast<double>(p[0]), rate, &c) == N60_XOVER_OK) {
+                    x->nLp = c.count;
+                    for (uint32_t k = 0; k < c.count; ++k) std::memcpy(x->lp[k], &c.sections[k], sizeof x->lp[k]);
+                }
+            } else {  // no trailer: exactly the v18 LR24 / LR48 arithmetic
+                static const double q24[2] = {0.7071067811865476, 0.7071067811865476};
+                static const double q48[4] = {0.5411961001461970, 1.3065629648763766, 0.5411961001461970, 1.3065629648763766};
+                const bool lr48 = p[1] != 0.0f;
+                x->nHp = x->nLp = lr48 ? 4u : 2u;
+                for (uint32_t k = 0; k < x->nHp; ++k) {
+                    const double q = lr48 ? q48[k] : q24[k];
+                    xoDesign(1, rate, static_cast<double>(p[0]), q, x->hp[k]);
+                    xoDesign(0, rate, static_cast<double>(p[0]), q, x->lp[k]);
+                }
             }
             x->mode = static_cast<uint32_t>(p[2]);
             x->gain = p[3];
@@ -1390,7 +1421,6 @@ void runStereoCrossover(SnapHeader *h, StageRec &r, float *const *lanes, uint32_
     XoLane &st = *reinterpret_cast<XoLane *>(laneState(h, r, 0));
     float *a = lanes[r.laneA];
     float *b = lanes[r.laneB];
-    const uint32_t n = x.sections;
     constexpr uint32_t kChunk = 256;
     float ml[kChunk], mr[kChunk], sub[kChunk];
     for (uint32_t base = 0; base < frames; base += kChunk) {
@@ -1403,9 +1433,11 @@ void runStereoCrossover(SnapHeader *h, StageRec &r, float *const *lanes, uint32_
             mr[i] = rr;
             sub[i] = (l + rr) * 0.5f;
         }
-        for (uint32_t k = 0; k < n; ++k) {
+        for (uint32_t k = 0; k < x.nHp; ++k) {
             for (uint32_t i = 0; i < len; ++i) ml[i] = xoRun(x.hp[k], st.hp[0][k], ml[i]);
             for (uint32_t i = 0; i < len; ++i) mr[i] = xoRun(x.hp[k], st.hp[1][k], mr[i]);
+        }
+        for (uint32_t k = 0; k < x.nLp; ++k) {
             for (uint32_t i = 0; i < len; ++i) sub[i] = xoRun(x.lp[k], x.lpState[k], sub[i]);
         }
         if (x.align != 0u) {
@@ -1426,11 +1458,11 @@ void runStereoCrossover(SnapHeader *h, StageRec &r, float *const *lanes, uint32_
             }
         }
     }
-    for (uint32_t k = 0; k < n; ++k) {  // keep denormals out of silent input
+    for (uint32_t k = 0; k < x.nHp; ++k) {  // keep denormals out of silent input
         bqFlush(st.hp[0][k]);
         bqFlush(st.hp[1][k]);
-        bqFlush(x.lpState[k]);
     }
+    for (uint32_t k = 0; k < x.nLp; ++k) bqFlush(x.lpState[k]);
     bqFlush(x.apState);
 }
 

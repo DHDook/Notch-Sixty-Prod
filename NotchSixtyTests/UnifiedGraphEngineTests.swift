@@ -1403,3 +1403,226 @@ private final class LockedFlag: @unchecked Sendable {
     func set() { lock.lock(); flag = true; lock.unlock() }
     var isSet: Bool { lock.lock(); defer { lock.unlock() }; return flag }
 }
+
+/// E25 S2: mono bass on the pair (filter family and slope), speaker feed calibration and room-correction coexistence,
+/// rendered through the real graph at every standard rate.
+final class StereoBassAlignmentTests: XCTestCase {
+    private static let rates: [Double] = [44_100, 48_000, 88_200, 96_000, 176_400, 192_000, 352_800, 384_000]
+    private let block = 512
+
+    private func monoBassSnapshot(rate: Double, topology: N60CrossoverTopology = N60CrossoverTopologyLinkwitzRiley24) -> N60DSPGraphSnapshot {
+        var s = N60DSPGraphSnapshotMakeUnity(rate)
+        XCTAssertTrue(N60CrossoverSnapshotMake(rate, 90, topology, N60CrossoverMonitorModeRecombined, 1, false, true, &s.crossover))
+        return s
+    }
+
+    private func configuration(
+        _ snapshot: N60DSPGraphSnapshot, rate: Double, alignment: StereoBassAlignment?
+    ) throws -> UnifiedGraphConfiguration {
+        var s = snapshot
+        return try XCTUnwrap(UnifiedGraphTranslator.stereoConfiguration(
+            snapshot: &s, sampleRate: rate, alignment: alignment), "eligible at \(rate)")
+    }
+
+    private func render(_ configuration: UnifiedGraphConfiguration, _ input: [[Float]]) throws -> [[Float]] {
+        let host = try UnifiedGraphHost(spec: try configuration.makeSpec())
+        defer { host.release() }
+        var out: [[Float]] = [[], []]
+        var position = 0
+        while position + block <= input[0].count {
+            let chunk = input.map { Array($0[position..<position + block]) }
+            let rendered = try host.processOffline(input: chunk, frames: block)
+            out[0] += rendered[0]; out[1] += rendered[1]
+            position += block
+        }
+        return out
+    }
+
+    private func tone(_ hz: Double, rate: Double, frames: Int, amplitude: Float = 0.25, phase: Double = 0) -> [Float] {
+        (0..<frames).map { Float(Double(amplitude) * sin(2.0 * .pi * hz * Double($0) / rate + phase)) }
+    }
+
+    private func frames(_ rate: Double, seconds: Double = 0.4) -> Int { Int(rate * seconds) / block * block }
+
+    private func rms(_ x: ArraySlice<Float>) -> Double {
+        sqrt(x.reduce(0.0) { $0 + Double($1) * Double($1) } / Double(max(x.count, 1)))
+    }
+
+    private func stereoProgram(_ rate: Double) -> [[Float]] {
+        let n = frames(rate)
+        return [tone(1_000, rate: rate, frames: n), tone(310, rate: rate, frames: n, amplitude: 0.2, phase: 1)]
+    }
+
+    func testStandardFiltersMatchTheLegacyCrossover() throws {
+        for rate in Self.rates {
+            for (topology, slope) in [(N60CrossoverTopologyLinkwitzRiley24, 24), (N60CrossoverTopologyLinkwitzRiley48, 48)] {
+                let snapshot = monoBassSnapshot(rate: rate, topology: topology)
+                let input = stereoProgram(rate)
+                let base = try render(try configuration(snapshot, rate: rate, alignment: nil), input)
+                let alignment = StereoBassAlignment(monoBassFilter: MonoBassFilter(family: .linkwitzRiley, slopeDBPerOctave: slope))
+                let withTrailer = try render(try configuration(snapshot, rate: rate, alignment: alignment), input)
+                for lane in 0..<2 {
+                    for (a, b) in zip(base[lane], withTrailer[lane]) {
+                        XCTAssertEqual(a, b, accuracy: 1e-6, "LR\(slope) lane \(lane) at \(rate)")
+                    }
+                }
+            }
+        }
+    }
+
+    func testEveryLinkwitzRileySlopeSumsFlatAtTheCorner() throws {
+        for rate in Self.rates {
+            let n = frames(rate)
+            let x = tone(90, rate: rate, frames: n)
+            for slope in MonoBassFilter.slopes {
+                let alignment = StereoBassAlignment(monoBassFilter: MonoBassFilter(family: .linkwitzRiley, slopeDBPerOctave: slope))
+                let out = try render(try configuration(monoBassSnapshot(rate: rate), rate: rate, alignment: alignment), [x, x])
+                let tail = n * 3 / 4
+                let gainDB = 20 * log10(rms(out[0][tail...]) / rms(x[tail...]))
+                XCTAssertEqual(gainDB, 0, accuracy: 0.1, "LR\(slope) at \(rate)")
+            }
+        }
+    }
+
+    func testFamilyChangesTheCornerAndEveryFamilyPassesTheMidband() throws {
+        for rate in Self.rates {
+            let n = frames(rate)
+            let corner = tone(90, rate: rate, frames: n)
+            let mid = tone(2_000, rate: rate, frames: n)
+            var cornerGains: [Double] = []
+            for family in MonoBassFilter.Family.allCases {
+                let alignment = StereoBassAlignment(monoBassFilter: MonoBassFilter(family: family, slopeDBPerOctave: 24))
+                let config = try configuration(monoBassSnapshot(rate: rate), rate: rate, alignment: alignment)
+                let tail = n * 3 / 4
+                let c = try render(config, [corner, corner])
+                cornerGains.append(20 * log10(rms(c[0][tail...]) / rms(corner[tail...])))
+                let m = try render(config, [mid, mid])
+                XCTAssertEqual(20 * log10(rms(m[0][tail...]) / rms(mid[tail...])), 0, accuracy: 0.05, "\(family) mid at \(rate)")
+            }
+            XCTAssertGreaterThan(abs(cornerGains[0] - cornerGains[2]), 1.0, "Butterworth differs from Linkwitz-Riley at \(rate)")
+        }
+    }
+
+    func testPolarityIsExactAndTrimIsAccurate() throws {
+        for rate in Self.rates {
+            let snapshot = N60DSPGraphSnapshotMakeUnity(rate)
+            let input = stereoProgram(rate)
+            let base = try render(try configuration(snapshot, rate: rate, alignment: nil), input)
+            var feed = StereoBassAlignment()
+            feed.left.polarityInverted = true
+            let inverted = try render(try configuration(snapshot, rate: rate, alignment: feed), input)
+            XCTAssertEqual(inverted[0], base[0].map { -$0 }, "left inverted at \(rate)")
+            XCTAssertEqual(inverted[1], base[1], "right untouched at \(rate)")
+
+            feed = StereoBassAlignment()
+            feed.left.trimDB = -7.3
+            feed.right.trimDB = 12.5
+            let trimmed = try render(try configuration(snapshot, rate: rate, alignment: feed), input)
+            let tail = base[0].count / 2
+            XCTAssertEqual(20 * log10(rms(trimmed[0][tail...]) / rms(base[0][tail...])), -7.3, accuracy: 0.01, "left trim at \(rate)")
+            XCTAssertEqual(20 * log10(rms(trimmed[1][tail...]) / rms(base[1][tail...])), 12.5, accuracy: 0.01, "right trim at \(rate)")
+        }
+    }
+
+    func testWholeFrameDelaysAreExactUpToFiftyMilliseconds() throws {
+        for rate in Self.rates {
+            let snapshot = N60DSPGraphSnapshotMakeUnity(rate)
+            for ms in [10.0, 50.0] {
+                let shift = Int((ms * 0.001 * rate).rounded())
+                let n = (shift + 4_096) / block * block + block
+                let input = [tone(1_000, rate: rate, frames: n), tone(310, rate: rate, frames: n, phase: 1)]
+                var feed = StereoBassAlignment()
+                feed.left.delayMs = ms
+                let delayed = try render(try configuration(snapshot, rate: rate, alignment: feed), input)
+                for i in 0..<256 {
+                    XCTAssertEqual(delayed[0][i + shift], input[0][i], accuracy: 1e-6, "\(ms) ms at \(rate) frame \(i)")
+                }
+                XCTAssertTrue(delayed[0][0..<shift].allSatisfy { $0 == 0 }, "silence before the delay at \(rate)")
+                XCTAssertEqual(delayed[1], input[1], "right untouched at \(rate)")
+            }
+        }
+    }
+
+    func testFractionalDelayIsWithinOneHundredthOfAFrame() throws {
+        for rate in Self.rates {
+            let snapshot = N60DSPGraphSnapshotMakeUnity(rate)
+            let ms = 3.3
+            let d = ms * 0.001 * rate
+            let hz = 200.0
+            let n = (Int(d) + 12_288) / block * block
+            let amplitude: Float = 0.5
+            let x = tone(hz, rate: rate, frames: n, amplitude: amplitude)
+            var feed = StereoBassAlignment()
+            feed.right.delayMs = ms
+            let out = try render(try configuration(snapshot, rate: rate, alignment: feed), [x, x])
+            let tolerance = 2 * .pi * hz / rate * 0.01 * Double(amplitude) + 3e-5
+            for i in stride(from: n - 2_048, to: n, by: 7) {
+                let expected = Double(amplitude) * sin(2 * .pi * hz * (Double(i) - d) / rate)
+                XCTAssertEqual(Double(out[1][i]), expected, accuracy: tolerance, "frame \(i) at \(rate)")
+            }
+        }
+    }
+
+    func testRoomCorrectionFIRCoexistsWithMonoBass() throws {
+        for rate in Self.rates {
+            let snapshot = monoBassSnapshot(rate: rate)
+            let alignment = StereoBassAlignment(monoBassFilter: MonoBassFilter(family: .bessel, slopeDBPerOctave: 36))
+            var withoutFIR = try configuration(snapshot, rate: rate, alignment: alignment)
+            var withFIR = withoutFIR
+            withFIR.stereoStages.roomFIR = UnifiedGraphFIRProgram(
+                generation: 1, left: [1] + [Float](repeating: 0, count: 63), right: nil, declaredLatencyFrames: 0)
+            withoutFIR.stereoStages.roomFIR = nil
+            let input = stereoProgram(rate)
+            let base = try render(withoutFIR, input)
+            let out = try render(withFIR, input)
+            let latency = Int(N60_CONVOLUTION_PARTITION_FRAMES)
+            for lane in 0..<2 {
+                for i in stride(from: base[lane].count / 2, to: base[lane].count - latency, by: 5) {
+                    XCTAssertEqual(out[lane][i + latency], base[lane][i], accuracy: 2e-5, "lane \(lane) frame \(i) at \(rate)")
+                }
+            }
+        }
+    }
+
+    func testFilterWithoutCrossoverIsIgnoredAndOnlyLR12AndLR36FlipTheSubSum() throws {
+        // No crossover in the snapshot: the filter changes nothing, the calibration still applies.
+        var plain = try configuration(N60DSPGraphSnapshotMakeUnity(48_000), rate: 48_000, alignment: nil)
+        XCTAssertNil(plain.stereoStages.crossover)
+        var feed = StereoBassAlignment(monoBassFilter: MonoBassFilter(family: .bessel, slopeDBPerOctave: 36))
+        feed.left.trimDB = 6
+        let before = plain
+        UnifiedGraphTranslator.apply(feed, to: &plain)
+        XCTAssertNil(plain.stereoStages.crossover)
+        XCTAssertEqual(plain.lanes[0].outputGain, before.lanes[0].outputGain * feed.left.linearGain)
+
+        let base = try XCTUnwrap(try configuration(monoBassSnapshot(rate: 48_000), rate: 48_000, alignment: nil).stereoStages.crossover)
+        XCTAssertEqual(base.count, 8)
+        for family in MonoBassFilter.Family.allCases {
+            for slope in MonoBassFilter.slopes {
+                let filter = MonoBassFilter(family: family, slopeDBPerOctave: slope)
+                let a = StereoBassAlignment(monoBassFilter: filter)
+                let params = try XCTUnwrap(try configuration(monoBassSnapshot(rate: 48_000), rate: 48_000, alignment: a).stereoStages.crossover)
+                XCTAssertEqual(params.count, 12)
+                XCTAssertEqual(Array(params[8...]), filter.trailer)
+                let flipped = params[4] != base[4]
+                XCTAssertEqual(flipped, family == .linkwitzRiley && (slope == 12 || slope == 36), "\(family) \(slope)")
+            }
+        }
+    }
+
+    func testOutOfRangeAlignmentIsRefusedBeforeTheGraph() {
+        var s = N60DSPGraphSnapshotMakeUnity(48_000)
+        var feed = StereoBassAlignment()
+        feed.left.trimDB = 21
+        if case .failure(let reason) = UnifiedGraphTranslator.stereoEligibility(snapshot: &s, sampleRate: 48_000, alignment: feed) {
+            XCTAssertEqual(reason, .alignmentInvalid)
+        } else {
+            XCTFail("expected refusal")
+        }
+        feed = StereoBassAlignment(monoBassFilter: MonoBassFilter(family: .bessel, slopeDBPerOctave: 18))
+        XCTAssertEqual(feed.issue, .invalidSlope(18))
+        feed = StereoBassAlignment()
+        feed.right.delayMs = 50.5
+        XCTAssertEqual(feed.issue, .calibrationOutOfRange)
+    }
+}
