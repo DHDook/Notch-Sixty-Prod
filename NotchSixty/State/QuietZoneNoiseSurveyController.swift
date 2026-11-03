@@ -66,6 +66,31 @@ final class QuietZoneNoiseSurveyController: ObservableObject {
     private var accumulator = QuietZoneNoiseSurveyAccumulator()
     private var cancellable: AnyCancellable?
     private var splOffsetDB: Double?
+    private var coherenceCancellable: AnyCancellable?
+    /// Mean coherence of the design survey over the cancellation band, or nil when none was measured.
+    @Published private(set) var broadbandCoherence: Double?
+
+    static let coherenceBandHz: ClosedRange<Double> = 25...150
+
+    /// Mean of the band coherences inside 25-150 Hz; nil when there is no finite band there.
+    static func broadbandCoherence(of survey: QuietZoneFeedForwardDesignSurvey?) -> Double? {
+        guard let survey else { return nil }
+        let values = survey.bands
+            .filter { coherenceBandHz.contains($0.frequencyHz) && $0.coherence.isFinite }
+            .map { min(max($0.coherence, 0), 1) }
+        guard !values.isEmpty else { return nil }
+        return values.reduce(0, +) / Double(values.count)
+    }
+
+    func attach(to feedForward: QuietZoneFeedForwardSurveyController) {
+        coherenceCancellable = feedForward.$survey
+            .sink { [weak self] survey in self?.setCoherence(Self.broadbandCoherence(of: survey)) }
+    }
+
+    func setCoherence(_ value: Double?) {
+        broadbandCoherence = value
+        refreshReport()
+    }
 
     func attach(to ambient: AmbientCompensationController) {
         cancellable = ambient.$latestAnalysis
@@ -83,8 +108,13 @@ final class QuietZoneNoiseSurveyController: ObservableObject {
         accumulator.ingest(snapshot.spectrum)
         snapshotCount = accumulator.count
         isCalibratedToSPL = splOffsetDB != nil
+        refreshReport()
+    }
+
+    private func refreshReport() {
         report = accumulator.isReady
-            ? QuietZoneNoiseSurvey.survey(bands: accumulator.bands(offsetDB: splOffsetDB ?? 0), coherence: nil)
+            ? QuietZoneNoiseSurvey.survey(
+                bands: accumulator.bands(offsetDB: splOffsetDB ?? 0), coherence: broadbandCoherence)
             : nil
     }
 
