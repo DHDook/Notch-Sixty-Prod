@@ -188,6 +188,8 @@ final class ProductController: ObservableObject {
         let feedForwardShadow = QuietZoneFeedForwardShadow()
         // E4 S22b2: the drive is only ever requested while `e4.feedforward-live` is on.
         feedForwardShadow.driveSource = audioEngine
+        // E4 S25: the engine refuses the weights unless that flag is on, and publishing never arms.
+        feedForwardShadow.weightsSink = audioEngine
         feedForwardShadow.observe(feedForwardSurvey)
         self.feedForwardShadow = feedForwardShadow
         self.hardwareAcceptance = HardwareAcceptanceController()
@@ -277,6 +279,8 @@ final class ProductController: ObservableObject {
         let feedForwardShadow = QuietZoneFeedForwardShadow()
         // E4 S22b2: the drive is only ever requested while `e4.feedforward-live` is on.
         feedForwardShadow.driveSource = audioEngine
+        // E4 S25: the engine refuses the weights unless that flag is on, and publishing never arms.
+        feedForwardShadow.weightsSink = audioEngine
         feedForwardShadow.observe(feedForwardSurvey)
         self.feedForwardShadow = feedForwardShadow
         self.hardwareAcceptance = HardwareAcceptanceController()
