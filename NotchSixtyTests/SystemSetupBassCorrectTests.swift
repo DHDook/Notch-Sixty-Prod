@@ -174,6 +174,22 @@ final class SystemSetupBassCorrectTests: XCTestCase {
         XCTAssertTrue(SystemSetupCorrectionTarget.all.allSatisfy { !$0.detail.isEmpty })
     }
 
+    func testSavedTargetsJoinGuidedFlowChoices() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("targets-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let library = TargetLibrary(directory: dir)
+        let points = [RoomCorrectionTargetPoint(frequencyHz: 20, gainDB: 3), RoomCorrectionTargetPoint(frequencyHz: 20_000, gainDB: -2)]
+        let room = TargetRecord(name: "My room", points: points)
+        var headphone = TargetRecord(name: "My cans", points: points)
+        headphone.category = .headphone
+        try library.save(room)
+        try library.save(headphone)
+        let choices = SystemSetupCorrectionTarget.choices(library: library.loadAll().records)
+        XCTAssertEqual(choices.map(\.title), SystemSetupCorrectionTarget.all.map(\.title) + ["My room"])
+        XCTAssertEqual(choices.last?.curve.points, points)
+        XCTAssertEqual(choices.last?.curve.id, room.id)
+    }
+
     private func rippledMeasurements(
         rate: Double, seatList: [MultichannelCalibrationSeat]
     ) -> [MultichannelCalibrationMeasurement] {

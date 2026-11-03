@@ -279,7 +279,9 @@ the shipped UI.
 - [x] E11 leftovers wired: repeat averaging and timing in Room Correction and multichannel; Analysis tab (distortion, RT60/EDT)
 - [ ] E12 leftovers: shared microphone and seat cards; wizard multi-mic pass; target shaping persists (target shaping persisted; shared cards and wizard multi-mic remain)
 - [ ] Acceptance: harness green with no expected-fails; owner smoke checklist
-- [~] Process safeguards done (AGENTS.md section 12); ledger audit of E4, E6, E8, E9, E13 and RoomCorrectionABX wiring remain (S8)
+- [x] Process safeguards done (AGENTS.md section 12); ledger audit of E4, E6, E8, E9, E13 done (S8)
+- [ ] S9 `e24/abx-wiring`: UI caller for `RoomCorrectionABX` (E10 S9)
+- [ ] S10 `e24/ledger-fixes`: E4 S21 excursion lower limit, E6 S5 and E8 S6 wiring checks
 
 ### E25 Outputs and speaker arrangement, one-DAC support (owner, 1 Nov 2026)
 
