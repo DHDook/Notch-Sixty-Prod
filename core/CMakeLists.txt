@@ -147,3 +147,7 @@ add_test(NAME n60core_xover_fir COMMAND n60core_xover_fir_test)
 add_executable(n60core_correct_multisub_test tests/test_correct_multisub.cpp)
 target_link_libraries(n60core_correct_multisub_test PRIVATE n60core)
 add_test(NAME n60core_correct_multisub COMMAND n60core_correct_multisub_test)
+
+add_executable(n60core_stereo_bass_test tests/test_stereo_bass.cpp)
+target_link_libraries(n60core_stereo_bass_test PRIVATE n60core)
+add_test(NAME n60core_stereo_bass COMMAND n60core_stereo_bass_test)

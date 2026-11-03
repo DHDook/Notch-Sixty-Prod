@@ -19,6 +19,7 @@ enum ArrangementIssue: Error, Equatable, Sendable, LocalizedError {
     case missingSpeaker(OutputProgramRole)
     case speakerNotDirect(OutputProgramRole)
     case profileRejected(String)
+    case alignment(StereoBassAlignmentIssue)
 
     var errorDescription: String? {
         switch self {
@@ -46,6 +47,8 @@ enum ArrangementIssue: Error, Equatable, Sendable, LocalizedError {
             return "\(role.displayName) must have its own output when each speaker has one."
         case .profileRejected(let text):
             return text
+        case .alignment(let issue):
+            return issue.errorDescription
         }
     }
 }
@@ -68,6 +71,9 @@ struct CompiledArrangement: Equatable, Sendable {
     var monoBassOnPair: Bool
     var outputDeviceProfile: OutputDeviceProfileConfiguration?
     var speakerRouting: SpeakerRoutingConfiguration?
+    /// E25 S2: the stereo session's mono-bass filter and speaker feed calibration (two channels only). The mono-bass
+    /// filter is kept only when mono bass is on the pair.
+    var stereoAlignment: StereoBassAlignment?
 
     /// Writes the compiled configuration over the state's derived fields. Bass management keeps its frequency,
     /// slope and sub settings; only the switches the arrangement owns change. `outputRouting` (the legacy
@@ -123,12 +129,17 @@ enum SystemArrangementCompiler {
             for endpoint in a.speakers.compactMap(\.directEndpoint) where endpoint.channelIndex >= 2 {
                 throw ArrangementIssue.endpointOutOfRange(endpoint)
             }
+            var alignment = a.stereoAlignment
+            if a.bass != .dspMonoToMains { alignment?.monoBassFilter = nil }
+            if let issue = alignment?.issue { throw ArrangementIssue.alignment(issue) }
+            if alignment?.isStandard == true && alignment?.monoBassFilter == nil { alignment = nil }
             return CompiledArrangement(
                 session: .stereo,
                 bassManagementEnabled: a.bass == .dspMonoToMains,
                 monoBassOnPair: a.bass == .dspMonoToMains,
                 outputDeviceProfile: nil,
-                speakerRouting: nil)
+                speakerRouting: nil,
+                stereoAlignment: alignment)
         }
 
         // One output per speaker.

@@ -91,6 +91,9 @@ struct SystemArrangement: Codable, Equatable, Sendable {
     var subOutputs: [PhysicalOutputEndpoint] = []
     var speakers: [ArrangedSpeaker]
     var realisation: ArrangementRealisation = .profile
+    /// E25 S2: the mono-bass filter and per-speaker feed calibration of the two-channel session. nil keeps the
+    /// standard Linkwitz-Riley 24 crossover and an identity feed.
+    var stereoAlignment: StereoBassAlignment?
 
     init(
         outputs: SystemOutputs,
@@ -99,7 +102,8 @@ struct SystemArrangement: Codable, Equatable, Sendable {
         subwooferCount: Int = 0,
         subOutputs: [PhysicalOutputEndpoint] = [],
         speakers: [ArrangedSpeaker] = [],
-        realisation: ArrangementRealisation = .profile
+        realisation: ArrangementRealisation = .profile,
+        stereoAlignment: StereoBassAlignment? = nil
     ) {
         self.outputs = outputs
         self.layout = layout
@@ -108,6 +112,7 @@ struct SystemArrangement: Codable, Equatable, Sendable {
         self.subOutputs = subOutputs
         self.speakers = speakers
         self.realisation = realisation
+        self.stereoAlignment = stereoAlignment
     }
 
     init(from decoder: Decoder) throws {
@@ -125,6 +130,7 @@ struct SystemArrangement: Codable, Equatable, Sendable {
         subOutputs = try c.decodeIfPresent([PhysicalOutputEndpoint].self, forKey: .subOutputs) ?? []
         speakers = try c.decode([ArrangedSpeaker].self, forKey: .speakers)
         realisation = try c.decodeIfPresent(ArrangementRealisation.self, forKey: .realisation) ?? .profile
+        stereoAlignment = try c.decodeIfPresent(StereoBassAlignment.self, forKey: .stereoAlignment)
     }
 
     /// The five classes the capability matrix and the wizard speak in.
@@ -148,6 +154,105 @@ struct SystemArrangement: Codable, Equatable, Sendable {
         case .downstreamReceiver, .downstreamSubCrossover:
             return layout.roles.filter { $0 != .lowFrequencyEffects }.count > 2 ? .e : .d
         case .fullRange, .dspToSubOutputs: return .b
+        }
+    }
+}
+// rules that turn them into core parameters; the stereo translator and the arrangement compiler consume them.
+
+/// The crossover used when the DSP sends mono bass to the pair (`BassHandling.dspMonoToMains`). Any family at
+/// 12, 24, 36 or 48 dB per octave. The default (Linkwitz-Riley 24) is what the legacy kernel runs.
+struct MonoBassFilter: Codable, Equatable, Sendable {
+    enum Family: String, Codable, CaseIterable, Sendable {
+        case butterworth, bessel, linkwitzRiley
+
+        /// The core's `N60_GRAPH_FILTER_*` value.
+        var coreValue: Float {
+            switch self {
+            case .butterworth: return 0
+            case .bessel: return 1
+            case .linkwitzRiley: return 2
+            }
+        }
+    }
+
+    static let slopes = [12, 24, 36, 48]
+    static let standard = MonoBassFilter()
+
+    var family: Family = .linkwitzRiley
+    var slopeDBPerOctave: Int = 24
+
+    var order: Int { slopeDBPerOctave / 6 }
+    var isValid: Bool { Self.slopes.contains(slopeDBPerOctave) }
+
+    /// The legacy kernel runs Linkwitz-Riley 24 and 48 only.
+    var legacyKernelCanRun: Bool { family == .linkwitzRiley && (slopeDBPerOctave == 24 || slopeDBPerOctave == 48) }
+
+    /// Linkwitz-Riley orders 2 and 6 (12 and 36 dB per octave) sum flat only when the low-pass path is inverted.
+    /// Butterworth and Bessel are not flat at the corner by design, and need no correction.
+    var sumNeedsInversion: Bool { family == .linkwitzRiley && order % 4 == 2 }
+
+    /// The `STEREO_CROSSOVER` trailer `[hp family, hp order, lp family, lp order]` (ABI v19).
+    var trailer: [Float] { [family.coreValue, Float(order), family.coreValue, Float(order)] }
+}
+
+/// Trim, absolute delay and polarity for one speaker's feed, applied after all other processing.
+struct SpeakerFeedCalibration: Codable, Equatable, Sendable {
+    static let trimRangeDB = -20.0...20.0
+    static let delayRangeMs = 0.0...50.0
+
+    var trimDB: Double = 0
+    var delayMs: Double = 0
+    var polarityInverted = false
+
+    var isIdentity: Bool { trimDB == 0 && delayMs == 0 && !polarityInverted }
+    var isValid: Bool {
+        trimDB.isFinite && delayMs.isFinite && Self.trimRangeDB.contains(trimDB) && Self.delayRangeMs.contains(delayMs)
+    }
+    var linearGain: Float { Float(pow(10.0, trimDB / 20.0)) }
+    func delayFrames(sampleRate: Double) -> Double { delayMs * 0.001 * sampleRate }
+}
+
+/// Everything E25 S2 adds to the stereo session. `nil` fields leave the session exactly as before.
+struct StereoBassAlignment: Codable, Equatable, Sendable {
+    var monoBassFilter: MonoBassFilter?
+    var left = SpeakerFeedCalibration()
+    var right = SpeakerFeedCalibration()
+
+    var isStandard: Bool {
+        (monoBassFilter ?? .standard).legacyKernelCanRun && left.isIdentity && right.isIdentity
+    }
+
+    /// Why this cannot run, or nil. Checked before the alignment reaches the engine.
+    var issue: StereoBassAlignmentIssue? {
+        if let monoBassFilter, !monoBassFilter.isValid { return .invalidSlope(monoBassFilter.slopeDBPerOctave) }
+        if !left.isValid || !right.isValid { return .calibrationOutOfRange }
+        return nil
+    }
+
+    /// The legacy kernel (`e6.legacy-kernel`) cannot run this alignment; nil when it can.
+    var legacyKernelRefusal: StereoBassAlignmentIssue? {
+        if let monoBassFilter, !monoBassFilter.legacyKernelCanRun { return .legacyKernelFilter }
+        if !left.isIdentity || !right.isIdentity { return .legacyKernelCalibration }
+        return nil
+    }
+}
+
+enum StereoBassAlignmentIssue: Error, Equatable, Sendable, LocalizedError {
+    case invalidSlope(Int)
+    case calibrationOutOfRange
+    case legacyKernelFilter
+    case legacyKernelCalibration
+
+    var errorDescription: String? {
+        switch self {
+        case .invalidSlope(let slope):
+            return "A mono-bass slope of \(slope) dB per octave is not supported; use 12, 24, 36 or 48."
+        case .calibrationOutOfRange:
+            return "Speaker trim must be within 20 dB and delay within 0 to 50 ms."
+        case .legacyKernelFilter:
+            return "This mono-bass filter needs the unified graph; the legacy kernel (e6.legacy-kernel) runs Linkwitz-Riley 24 and 48 dB per octave only."
+        case .legacyKernelCalibration:
+            return "Speaker trim, delay and polarity need the unified graph; the legacy kernel (e6.legacy-kernel) does not apply them."
         }
     }
 }

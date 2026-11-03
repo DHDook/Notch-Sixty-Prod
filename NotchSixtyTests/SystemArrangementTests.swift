@@ -112,6 +112,62 @@ final class SystemArrangementTests: XCTestCase {
         }
     }
 
+    // MARK: E25 S2 stereo alignment
+
+    func testMonoBassCompilesTheChosenFilterAndCalibration() throws {
+        var a = twoChannel(.dspMonoToMains)
+        var alignment = StereoBassAlignment(monoBassFilter: MonoBassFilter(family: .bessel, slopeDBPerOctave: 36))
+        alignment.right = SpeakerFeedCalibration(trimDB: -3, delayMs: 2.5, polarityInverted: true)
+        a.stereoAlignment = alignment
+        let compiled = try SystemArrangementCompiler.compile(a).get()
+        XCTAssertEqual(compiled.session, .stereo)
+        XCTAssertEqual(compiled.stereoAlignment, alignment)
+        XCTAssertEqual(alignment.monoBassFilter?.trailer, [1, 6, 1, 6])
+        XCTAssertTrue(MonoBassFilter(family: .linkwitzRiley, slopeDBPerOctave: 12).sumNeedsInversion)
+        XCTAssertTrue(MonoBassFilter(family: .linkwitzRiley, slopeDBPerOctave: 36).sumNeedsInversion)
+        XCTAssertFalse(MonoBassFilter(family: .linkwitzRiley, slopeDBPerOctave: 24).sumNeedsInversion)
+        XCTAssertFalse(MonoBassFilter(family: .bessel, slopeDBPerOctave: 12).sumNeedsInversion)
+
+        // Without mono bass the filter is dropped; the feed calibration stays.
+        var plain = twoChannel(.fullRange)
+        plain.stereoAlignment = alignment
+        let kept = try SystemArrangementCompiler.compile(plain).get()
+        XCTAssertNil(kept.stereoAlignment?.monoBassFilter)
+        XCTAssertEqual(kept.stereoAlignment?.right, alignment.right)
+        // The standard arrangement compiles to no alignment at all.
+        XCTAssertNil(try SystemArrangementCompiler.compile(twoChannel(.dspMonoToMains)).get().stereoAlignment)
+    }
+
+    func testAlignmentOutOfRangeIsRefusedWithAReason() {
+        var a = twoChannel(.dspMonoToMains)
+        a.stereoAlignment = StereoBassAlignment(left: SpeakerFeedCalibration(trimDB: 25))
+        guard case .failure(let issue) = SystemArrangementCompiler.compile(a) else { return XCTFail("expected refusal") }
+        XCTAssertEqual(issue, .alignment(.calibrationOutOfRange))
+        XCTAssertNotNil(issue.errorDescription)
+    }
+
+    func testLegacyKernelRefusesWhatItCannotRunWithAReason() {
+        XCTAssertNil(StereoBassAlignment().legacyKernelRefusal)
+        XCTAssertNil(StereoBassAlignment(monoBassFilter: MonoBassFilter(family: .linkwitzRiley, slopeDBPerOctave: 48)).legacyKernelRefusal)
+        let bessel = StereoBassAlignment(monoBassFilter: MonoBassFilter(family: .bessel, slopeDBPerOctave: 24))
+        XCTAssertEqual(bessel.legacyKernelRefusal, .legacyKernelFilter)
+        XCTAssertEqual(StereoBassAlignment(monoBassFilter: MonoBassFilter(family: .linkwitzRiley, slopeDBPerOctave: 12)).legacyKernelRefusal,
+                       .legacyKernelFilter)
+        var trimmed = StereoBassAlignment()
+        trimmed.left.polarityInverted = true
+        XCTAssertEqual(trimmed.legacyKernelRefusal, .legacyKernelCalibration)
+        XCTAssertTrue(bessel.legacyKernelRefusal?.errorDescription?.contains("e6.legacy-kernel") ?? false)
+    }
+
+    func testAlignmentRoundTripsAndOldArrangementsDecodeWithout() throws {
+        var a = twoChannel(.dspMonoToMains)
+        a.stereoAlignment = StereoBassAlignment(monoBassFilter: MonoBassFilter(family: .butterworth, slopeDBPerOctave: 48))
+        XCTAssertEqual(try JSONDecoder().decode(SystemArrangement.self, from: JSONEncoder().encode(a)), a)
+        let plain = try JSONEncoder().encode(twoChannel(.fullRange))
+        XCTAssertFalse(String(decoding: plain, as: UTF8.self).contains("stereoAlignment"))
+        XCTAssertNil(try JSONDecoder().decode(SystemArrangement.self, from: plain).stereoAlignment)
+    }
+
     func testRecompilePreservesCalibration() throws {
         var existing = try XCTUnwrap(SystemArrangementCompiler.compile(fiveOneDirect(subs: 1)).get().outputDeviceProfile)
         existing.speakerAssignments[0].calibration = SemanticSpeakerCalibration(trimDB: -3)

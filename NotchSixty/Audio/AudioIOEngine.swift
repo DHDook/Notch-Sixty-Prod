@@ -1078,6 +1078,8 @@ final class AudioIOEngine: ObservableObject {
     private var masterVolumeSynchronizedOutputUID: String?
     private var lifecycle: AudioLifecycleStateMachine
     private var transportSession: CoreAudioTransportSession?
+    /// E25 S2: applied to each new stereo session.
+    private var stereoAlignment: StereoBassAlignment?
     private var nChannelTransportSession: CoreAudioNChannelTransportSession?
     private var binauralHeadphoneTransportSession: CoreAudioBinauralHeadphoneTransportSession?
     private var headTrackingController: SpatialHeadTrackingController?
@@ -2553,6 +2555,19 @@ final class AudioIOEngine: ObservableObject {
             }
             try validateBinauralHeadphoneActivation()
         }
+    }
+
+    /// E25 S2: sets the stereo session's mono-bass filter and speaker feed calibration (from the compiled
+    /// arrangement). Built dark: the arrangement wizard (S3) calls it.
+    func applyStereoAlignment(_ alignment: StereoBassAlignment?) throws {
+        if let session = transportSession {
+            try session.applyStereoAlignment(alignment)
+        } else if let alignment {
+            if let issue = alignment.issue { throw issue }
+            if !unifiedGraphEnabled, let refusal = alignment.legacyKernelRefusal { throw refusal }
+        }
+        stereoAlignment = alignment
+        lastErrorDescription = nil
     }
 
     /// E6 S9d: a headphone profile edit inside one graph-rendered stereo session. The session rebuilds the HEADPHONE
@@ -5369,6 +5384,7 @@ final class AudioIOEngine: ObservableObject {
             audioUnitRack: stagedAudioUnitRack
         )
         session.unifiedGraphEnabled = unifiedGraphEnabled
+        session.setInitialStereoAlignment(stereoAlignment)
         try session.configureHeadphoneDSP(
             headphoneSnapshot, profile: headphoneSnapshot == nil ? nil : headphoneDeviceProfileConfiguration)
         activeEQFIRProgram = nil

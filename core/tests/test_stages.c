@@ -458,8 +458,8 @@ static void testMailbox(double rate) {
     CHECK(n60_graph_post_params(g, &pe, 1) == N60_STATUS_BAD_ARGUMENT, "unknown stage");
     n60_param_record badv = {1, 0, NAN, 0};
     CHECK(n60_graph_post_params(g, &badv, 1) == N60_STATUS_BAD_ARGUMENT, "NaN value");
-    n60_param_record neg = {1, 0, -1.0f, 0};
-    CHECK(n60_graph_post_params(g, &neg, 1) == N60_STATUS_BAD_ARGUMENT, "negative gain");
+    n60_param_record neg = {1, 0, -10001.0f, 0};  /* ABI v19: a negative gain inverts polarity; below -10000 is refused */
+    CHECK(n60_graph_post_params(g, &neg, 1) == N60_STATUS_BAD_ARGUMENT, "gain below -10000");
     n60_param_record idx = {1, 1, 1.0f, 0};
     CHECK(n60_graph_post_params(g, &idx, 1) == N60_STATUS_BAD_ARGUMENT, "parameter index out of range");
     n60_param_record rsv = {1, 0, 1.0f, 1};

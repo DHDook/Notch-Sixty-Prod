@@ -367,7 +367,7 @@ n60_status validateDesc(const n60_graph_desc &d) {
         if (s.kind != N60_STAGE_DELAY && s.capacityFrames != 0) return N60_STATUS_BAD_ARGUMENT;
         switch (s.kind) {
             case N60_STAGE_GAIN:
-                if (s.paramCount != 1 || s.params[0] < 0.0f || s.params[0] > 10000.0f) return N60_STATUS_BAD_ARGUMENT;
+                if (s.paramCount != 1 || !(s.params[0] >= -10000.0f) || s.params[0] > 10000.0f) return N60_STATUS_BAD_ARGUMENT;  // ABI v19: a negative gain inverts polarity
                 break;
             case N60_STAGE_DELAY:
                 if (s.paramCount != 1 || s.capacityFrames > N60_GRAPH_MAX_DELAY_FRAMES || s.params[0] < 0.0f ||
@@ -547,7 +547,7 @@ n60_status validateParam(const SnapHeader *snap, const StageRec &r, uint32_t par
     if (!std::isfinite(value)) return N60_STATUS_BAD_ARGUMENT;
     switch (r.kind) {
         case N60_STAGE_GAIN:
-            return (paramIndex != 0 || value < 0.0f || value > 10000.0f) ? N60_STATUS_BAD_ARGUMENT : N60_STATUS_OK;
+            return (paramIndex != 0 || value < -10000.0f || value > 10000.0f) ? N60_STATUS_BAD_ARGUMENT : N60_STATUS_OK;  // ABI v19: negative inverts polarity
         case N60_STAGE_DELAY:
             return (paramIndex != 0 || value < 0.0f || value > static_cast<float>(r.capacity))
                        ? N60_STATUS_BAD_ARGUMENT
