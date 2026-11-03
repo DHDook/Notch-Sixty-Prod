@@ -20,7 +20,8 @@ extension FeatureFlag {
     /// delete it, and the checks that read it, once the epic ships.
     static let all: [FeatureFlag] = [
         .legacyKernel, .ancEngineLease, .adaptiveTonalLive, .earnedCap, .feedForwardLive,
-        .noiseSurvey, .conversationUnmasking, .virtualMicrophone, .zones, .headPositionCamera, .overnight
+        .noiseSurvey, .conversationUnmasking, .virtualMicrophone, .zones, .headPositionCamera, .overnight,
+        .outputsAndSpeakers
     ]
 
     /// E6 S11: the unified graph is the default renderer. Turning this on selects the frozen
@@ -117,6 +118,15 @@ extension FeatureFlag {
         id: "e4.overnight",
         title: "Overnight Quiet Zone runs",
         epic: "E4"
+    )
+
+    /// E25: outputs and speaker arrangement (output channels and speakers as separate concepts, one-DAC support).
+    /// S1 adds the model, compiler, capability matrix and migration; the wizard steps and capability text follow.
+    /// Off: the wizard keeps the Topology step and the stored arrangement is ignored. Removed when E25 ships.
+    static let outputsAndSpeakers = FeatureFlag(
+        id: "e25.outputs-and-speakers",
+        title: "Outputs and speaker arrangement",
+        epic: "E25"
     )
 }
 
