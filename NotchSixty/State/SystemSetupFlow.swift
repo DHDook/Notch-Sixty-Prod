@@ -221,6 +221,16 @@ struct SystemSetupFlow: Codable, Equatable, Sendable {
         invalidationReason = reason
     }
 
+    /// E24 S9: the listener kept the other design after the blind ABX. The kept design has not been measured, so the
+    /// flow goes back to Verify and Save stays blocked until that passes.
+    mutating func keptDifferentDesign(_ kind: SystemSetupDesignKind) {
+        choices.designKind = kind
+        choices.verificationPassed = nil
+        completed.subtract([.verify])
+        step = .verify
+        invalidationReason = "Verify the kept design before saving."
+    }
+
     /// Output device or rate changed: drop everything that came from measuring.
     mutating func outputConfigurationChanged(outputUID: String?, sampleRate: Double?) {
         let changed = outputUID != choices.outputUID || sampleRate != choices.sampleRate

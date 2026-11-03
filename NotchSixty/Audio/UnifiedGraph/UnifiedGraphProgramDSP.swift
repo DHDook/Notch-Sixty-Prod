@@ -358,7 +358,9 @@ struct UnifiedGraphProgramDSP: Equatable, Sendable {
             }
         }
         for (lane, frames) in laneDelayFrames.sorted(by: { $0.key < $1.key }) {
-            guard lane >= 0, lane < count, frames <= N60_GRAPH_MAX_DELAY_FRAMES else {
+            // A lane plan's sub lanes follow the program lanes (the ABX override delays them with the mains).
+            let limit = roomLanes == nil ? count : count + subLaneCount
+            guard lane >= 0, lane < limit, frames <= N60_GRAPH_MAX_DELAY_FRAMES else {
                 throw UnifiedGraphFallbackReason.latencyAlignment
             }
             add(N60_STAGE_DELAY, Self.laneDelayBase + UInt32(lane), lane: UInt32(lane),
