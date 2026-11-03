@@ -20,6 +20,9 @@ final class SystemSetupFlowModel: ObservableObject {
     @Published private(set) var noiseIsPlaying = false
     @Published private(set) var isMeasuring = false
     @Published private(set) var bass: SystemSetupBassDesign?
+    /// E25 S4: class C's mono-bass crossover designed from the feeds, and the bass settings it replaced.
+    @Published private(set) var monoBass: SystemSetupMonoBassDesign?
+    private var bassManagementBeforeMono: BassManagementConfiguration?
     @Published var correctionMode = SystemSetupCorrectionMode.default
     @Published var correctionTarget = SystemSetupCorrectionTarget.default
     /// Built-in sounds plus the target library's saved and imported room targets (E13 S1).
@@ -486,11 +489,46 @@ final class SystemSetupFlowModel: ObservableObject {
         if flow.choices.alignmentApplied { revertAlignment() }
         alignment = nil
         bass = nil
+        monoBass = nil
         correctionIsPrepared = false
         seatPredictions = []
     }
 
     // MARK: Alignment
+
+    /// E25 S4: two channels in use, so the feeds are what is aligned and calibration lands in the stereo session.
+    private var usesFeedSession: Bool { arrangementEnabled && SystemSetupAdaptiveSteps.isFeedSession(arrangement) }
+
+    /// Class-aware text for the Alignment step: the receiver reason in place of subwoofer controls, or the feed note.
+    var alignmentSubNote: String? { arrangementEnabled ? SystemSetupAdaptiveSteps.alignmentSubNote(arrangement) : nil }
+    var bassStepMode: SystemSetupBassStepMode? { arrangementEnabled ? SystemSetupAdaptiveSteps.bassMode(arrangement) : nil }
+    var receiverAdvice: String? { arrangementEnabled ? SystemSetupAdaptiveSteps.receiverAdvice(arrangement) : nil }
+    /// The measurement suite's name for a source: a downstream sub is "not separable" from its feed.
+    func sourceLabel(_ source: MultichannelCalibrationSource) -> String {
+        arrangementEnabled ? SystemSetupAdaptiveSteps.measuredSourceLabel(source, arrangement: arrangement) : source.displayName
+    }
+    var correctionNote: String? { arrangementEnabled ? SystemSetupAdaptiveSteps.correctionNote(arrangement) : nil }
+
+    /// The arrangement with `edit` applied to its stereo alignment, validated by the compiler, stored and sent to the
+    /// engine. Rolls the stored arrangement back when the compiler or the engine refuses.
+    private func editStereoAlignment(_ edit: (inout StereoBassAlignment) -> Void) throws {
+        guard var updated = flow.choices.arrangement else { return }
+        let previous = updated
+        var alignment = updated.stereoAlignment ?? StereoBassAlignment()
+        edit(&alignment)
+        updated.stereoAlignment = alignment
+        let compiled: CompiledArrangement
+        switch SystemArrangementCompiler.compile(updated, preserving: nil) {
+        case .success(let value): compiled = value
+        case .failure(let issue): throw SystemSetupApplyError(issue.errorDescription ?? "This arrangement cannot be used.")
+        }
+        try profiles.replaceSelectedSystemArrangement(updated)
+        do { try engine.applyStereoAlignment(compiled.stereoAlignment) } catch {
+            try? profiles.replaceSelectedSystemArrangement(previous)
+            throw error
+        }
+        flow.choices.arrangement = updated
+    }
 
     func computeAlignment() async {
         do {
@@ -506,6 +544,18 @@ final class SystemSetupFlowModel: ObservableObject {
 
     /// Trial apply: only trim, delay and polarity change; Cancel or Revert restores the snapshot.
     func applyAlignment() {
+        if usesFeedSession {
+            guard let alignment, let feeds = SystemSetupAdaptiveSteps.feedCalibration(from: alignment) else {
+                message = "Work out the alignment first."
+                return
+            }
+            do {
+                try editStereoAlignment { $0.left = feeds.left; $0.right = feeds.right }
+                flow.choices.alignmentApplied = true
+                message = nil
+            } catch { message = error.localizedDescription }
+            return
+        }
         guard let alignment, let profile = profiles.selectedSystemOutputDeviceProfile else {
             message = "Work out the alignment first."
             return
@@ -521,6 +571,14 @@ final class SystemSetupFlowModel: ObservableObject {
 
     func revertAlignment() {
         guard let snapshot = flow.snapshot else { return }
+        if usesFeedSession {
+            let before = snapshot.systemArrangement?.stereoAlignment
+            do {
+                try editStereoAlignment { $0.left = before?.left ?? SpeakerFeedCalibration(); $0.right = before?.right ?? SpeakerFeedCalibration() }
+                flow.choices.alignmentApplied = false
+            } catch { message = "Restoring the previous alignment failed: \(error.localizedDescription)" }
+            return
+        }
         do {
             try profiles.replaceSelectedSystemOutputDeviceProfile(snapshot.outputDeviceProfile)
             flow.choices.alignmentApplied = false
@@ -537,6 +595,17 @@ final class SystemSetupFlowModel: ObservableObject {
     /// the joint optimiser is always allowed here; without a subwoofer the step is skipped.
     func computeBass() {
         guard let rate = flow.choices.sampleRate else { return }
+        if bassStepMode == .monoBass {
+            do {
+                monoBass = try SystemSetupMonoBassDesign.make(
+                    seats: calibration.seats, measurements: calibration.measurements, sampleRate: rate)
+                message = nil
+            } catch {
+                monoBass = nil
+                message = error.localizedDescription
+            }
+            return
+        }
         do {
             bass = try SystemSetupBassDesign.make(
                 sources: calibration.sources, seats: calibration.seats, measurements: calibration.measurements,
@@ -552,7 +621,45 @@ final class SystemSetupFlowModel: ObservableObject {
     /// Installs the bass step. The sub gain, delay and polarity go to the profile as before; with the unified graph and an
     /// enabled profile the optimiser's low-frequency grids also install on the main and sub lanes through the lane plan
     /// (composed with the room design when Correction already ran), so the step is audible.
+    /// Class C trial: the designed crossover frequency goes to bass management and the slope to the stereo session.
+    func applyMonoBass() {
+        guard let design = monoBass else {
+            message = "Work out the bass design first."
+            return
+        }
+        let before = profiles.selectedSystemProfile?.state.bassManagement ?? engine.bassManagementConfiguration
+        var target = before
+        target.frequencyHz = min(max(design.crossoverHz, SystemSetupTopologyPreset.crossoverRangeHz.lowerBound),
+                                 SystemSetupTopologyPreset.crossoverRangeHz.upperBound)
+        do {
+            try profiles.replaceSelectedSystemBassManagement(target)
+            do { try editStereoAlignment { $0.monoBassFilter = design.filter } } catch {
+                try? profiles.replaceSelectedSystemBassManagement(before)
+                throw error
+            }
+            bassManagementBeforeMono = before
+            flow.choices.bassApplied = true
+            message = nil
+        } catch { message = error.localizedDescription }
+    }
+
+    func revertMonoBass() {
+        let snapshot = flow.snapshot
+        do {
+            if let before = bassManagementBeforeMono ?? snapshot?.bassManagement {
+                var restored = before
+                restored.enabled = profiles.selectedSystemProfile?.state.bassManagement.enabled ?? before.enabled
+                try profiles.replaceSelectedSystemBassManagement(restored)
+            }
+            let original = snapshot?.systemArrangement?.stereoAlignment?.monoBassFilter
+            try editStereoAlignment { $0.monoBassFilter = original }
+            bassManagementBeforeMono = nil
+            flow.choices.bassApplied = false
+        } catch { message = "Restoring the previous bass settings failed: \(error.localizedDescription)" }
+    }
+
     func applyBass() async {
+        if bassStepMode == .monoBass { applyMonoBass(); return }
         guard let bass, let profile = profiles.selectedSystemOutputDeviceProfile else {
             message = "Work out the bass design first."
             return
@@ -584,6 +691,7 @@ final class SystemSetupFlowModel: ObservableObject {
     }
 
     func revertBass() {
+        if bassStepMode == .monoBass { revertMonoBass(); return }
         do {
             if let previous = profileBeforeBass {
                 try profiles.replaceSelectedSystemOutputDeviceProfile(previous)
@@ -1093,7 +1201,7 @@ final class SystemSetupFlowModel: ObservableObject {
             try profiles.replaceSelectedSystemOutputDeviceProfile(snapshot.outputDeviceProfile)
             if arrangementEnabled {
                 try profiles.replaceSelectedSystemArrangement(snapshot.systemArrangement)
-                try engine.applyStereoAlignment(nil)
+                try engine.applyStereoAlignment(snapshot.systemArrangement.flatMap { try? SystemArrangementCompiler.compile($0, preserving: snapshot.outputDeviceProfile).get().stereoAlignment })
             }
             try profiles.replaceSelectedSystemRoomCorrection(
                 snapshot.roomCorrection, calibrationSummary: snapshot.roomCorrectionCalibration)
@@ -1455,6 +1563,12 @@ private struct SystemSetupMeasureStep: View {
             Text("Measure your listening seats").font(.headline)
             Text("Each speaker plays a sweep and the microphone records it at each seat. Measure the main seat first; add seats for a wider sweet spot. Playback is stopped while measuring.")
                 .font(.callout).foregroundStyle(.secondary)
+            if let note = model.correctionNote {
+                ForEach(calibration.sources, id: \.self) { source in
+                    Text(model.sourceLabel(source)).font(.caption)
+                }
+                Label(note, systemImage: "info.circle").font(.callout)
+            }
             if calibration.sources.isEmpty {
                 Label("Choose your outputs and speakers first so the setup knows which speakers to measure.",
                       systemImage: "exclamationmark.triangle")
@@ -1541,6 +1655,9 @@ private struct SystemSetupAlignmentStep: View {
             Text("Align levels, polarity and distances").font(.headline)
             Text("Notch Sixty matches the loudness and arrival time of your speakers at the seats you measured. Apply it to hear the result; you can revert at any time and Cancel restores everything.")
                 .font(.callout).foregroundStyle(.secondary)
+            if let note = model.alignmentSubNote {
+                Label(note, systemImage: "info.circle").font(.callout)
+            }
             if let alignment = model.alignment {
                 Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 6) {
                     GridRow {
@@ -1549,7 +1666,7 @@ private struct SystemSetupAlignmentStep: View {
                     }
                     ForEach(alignment.rows) { row in
                         GridRow {
-                            Text(row.title)
+                            Text(model.sourceLabel(row.source))
                             Text("\(row.levelDB, specifier: "%.1f") dB").monospacedDigit()
                             Text("\(row.delayMilliseconds, specifier: "%.2f") ms").monospacedDigit()
                             Text(row.polarityInverted ? "Inverted" : "Normal")
@@ -1579,8 +1696,16 @@ private struct SystemSetupBassStep: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Blend the subwoofer").font(.headline)
-            if !model.hasSubwoofer {
+            Text(model.bassStepMode == .monoBass ? "Share the bass between the speakers" : "Blend the subwoofer").font(.headline)
+            if case .skipped(let reason)? = model.bassStepMode {
+                Label(reason, systemImage: "info.circle")
+                if let advice = model.receiverAdvice {
+                    GroupBox("Before you continue") { Text(advice).font(.callout).frame(maxWidth: .infinity, alignment: .leading) }
+                }
+                Text("Continue to the next step.").foregroundStyle(.secondary)
+            } else if model.bassStepMode == .monoBass {
+                monoBassContent
+            } else if !model.hasSubwoofer {
                 Text("You have no subwoofer, so there is nothing to blend. Continue to the next step.")
                     .foregroundStyle(.secondary)
             } else if let bass = model.bass {
@@ -1589,7 +1714,31 @@ private struct SystemSetupBassStep: View {
                 Button("Work out the bass design") { model.computeBass() }
             }
         }
-        .onAppear { if model.hasSubwoofer && model.bass == nil { model.computeBass() } }
+        .onAppear {
+            if model.bassStepMode == .monoBass { if model.monoBass == nil { model.computeBass() } }
+            else if model.hasSubwoofer && model.bass == nil { model.computeBass() }
+        }
+    }
+
+    @ViewBuilder
+    private var monoBassContent: some View {
+        Text("Both speakers share the low frequencies. Notch Sixty picks where the sharing starts from how low your speakers play at the seats you measured. Apply it to hear the result; you can skip this to keep the standard 80 Hz setting.")
+            .font(.callout).foregroundStyle(.secondary)
+        if let design = model.monoBass {
+            Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 6) {
+                GridRow { Text("Left speaker plays down to").bold(); Text("\(design.leftExtensionHz, specifier: "%.0f") Hz").monospacedDigit() }
+                GridRow { Text("Right speaker plays down to").bold(); Text("\(design.rightExtensionHz, specifier: "%.0f") Hz").monospacedDigit() }
+                GridRow { Text("Shared bass below").bold(); Text("\(design.crossoverHz, specifier: "%.0f") Hz").monospacedDigit() }
+                GridRow { Text("Slope").bold(); Text("\(design.filter.slopeDBPerOctave) dB per octave").monospacedDigit() }
+            }
+            HStack {
+                Button("Apply") { Task { await model.applyBass() } }.disabled(model.choices.bassApplied)
+                Button("Revert") { model.revertBass() }.disabled(!model.choices.bassApplied)
+                if model.choices.bassApplied { Label("Applied", systemImage: "checkmark.circle.fill") }
+            }
+        } else {
+            Button("Work out the bass design") { model.computeBass() }
+        }
     }
 
     @ViewBuilder
@@ -1644,6 +1793,8 @@ private struct SystemSetupCorrectionStep: View {
             Text("Correct the room").font(.headline)
             Text("Notch Sixty flattens the bumps and dips your seats share, using the measurements you already made. Nothing is measured again.")
                 .font(.callout).foregroundStyle(.secondary)
+            if let note = model.correctionNote { Label(note, systemImage: "info.circle").font(.callout) }
+            if let advice = model.receiverAdvice { Text(advice).font(.callout).foregroundStyle(.secondary) }
             Picker("Listening", selection: $model.correctionMode) {
                 ForEach(SystemSetupCorrectionMode.allCases) { Text($0.title).tag($0) }
             }
