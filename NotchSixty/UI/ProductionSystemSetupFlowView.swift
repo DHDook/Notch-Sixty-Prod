@@ -18,6 +18,8 @@ final class SystemSetupFlowModel: ObservableObject {
     @Published private(set) var bass: SystemSetupBassDesign?
     @Published var correctionMode = SystemSetupCorrectionMode.default
     @Published var correctionTarget = SystemSetupCorrectionTarget.default
+    /// Built-in sounds plus the target library's saved and imported room targets (E13 S1).
+    @Published private(set) var correctionTargetChoices = SystemSetupCorrectionTarget.all
     @Published private(set) var seatPredictions: [SystemSetupSeatPrediction] = []
     @Published private(set) var correctionIsPrepared = false
     @Published private(set) var verificationReport: SystemSetupVerificationReport?
@@ -148,6 +150,12 @@ final class SystemSetupFlowModel: ObservableObject {
         microphone.selectInput(uid: uid)
         flow.choices.microphoneUID = microphone.selectedInputUID
         flow.choices.microphoneCalibrationFile = microphone.microphoneCalibration?.sourceName
+    }
+
+    /// Reloads the saved targets; keeps the current choice when it still exists, else the default.
+    func refreshCorrectionTargets(library: TargetLibrary = TargetLibrary()) {
+        correctionTargetChoices = SystemSetupCorrectionTarget.choices(library: library.loadAll().records)
+        if !correctionTargetChoices.contains(correctionTarget) { correctionTarget = .default }
     }
 
     /// Channels the noise can play on right now, in lane order.
@@ -1342,8 +1350,9 @@ private struct SystemSetupCorrectionStep: View {
             .pickerStyle(.segmented)
             Text(model.correctionMode.detail).font(.callout).foregroundStyle(.secondary)
             Picker("Sound", selection: $model.correctionTarget) {
-                ForEach(SystemSetupCorrectionTarget.all) { Text($0.title).tag($0) }
+                ForEach(model.correctionTargetChoices) { Text($0.title).tag($0) }
             }
+            .onAppear { model.refreshCorrectionTargets() }
             Text(model.correctionTarget.detail).font(.callout).foregroundStyle(.secondary)
             if !model.seatPredictions.isEmpty {
                 Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 6) {

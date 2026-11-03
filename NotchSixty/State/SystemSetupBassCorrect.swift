@@ -195,14 +195,33 @@ enum SystemSetupCorrectionMode: String, Codable, CaseIterable, Sendable, Identif
 
 /// The E10 target library in plain language.
 struct SystemSetupCorrectionTarget: Hashable, Sendable, Identifiable {
-    var builtIn: RoomCorrectionBuiltInTarget
-    var id: String { builtIn.rawValue }
+    /// A built-in target, or nil for a saved or imported one (E13 S1: the guided flow lists saved targets).
+    var builtIn: RoomCorrectionBuiltInTarget?
+    var savedRecord: TargetRecord?
+
+    init(builtIn: RoomCorrectionBuiltInTarget) { self.builtIn = builtIn }
+    init(saved record: TargetRecord) { builtIn = nil; savedRecord = record }
+
+    var id: String { builtIn?.rawValue ?? savedRecord?.id.uuidString ?? "" }
+
+    static func == (lhs: Self, rhs: Self) -> Bool { lhs.id == rhs.id }
+    func hash(into hasher: inout Hasher) { hasher.combine(id) }
 
     static let all = RoomCorrectionBuiltInTarget.allCases.map(SystemSetupCorrectionTarget.init)
     /// A gentle downward tilt is what most rooms and listeners prefer.
     static let `default` = SystemSetupCorrectionTarget(builtIn: .gentleDownwardTilt)
 
+    /// The three built-in sounds followed by the user's saved and imported room targets, as the target library
+    /// lists them. Headphone-category targets are left out: they do not suit a room.
+    static func choices(library records: [TargetRecord]) -> [SystemSetupCorrectionTarget] {
+        let saved = TargetLibrary.visible(records, for: .room, showAll: false)
+            .filter { !TargetLibrary.isBuiltIn($0.id) }
+            .map(SystemSetupCorrectionTarget.init(saved:))
+        return all + saved
+    }
+
     var title: String {
+        guard let builtIn else { return savedRecord?.name ?? "Saved target" }
         switch builtIn {
         case .gentleDownwardTilt: return "Natural"
         case .flat: return "Flat"
@@ -211,6 +230,7 @@ struct SystemSetupCorrectionTarget: Hashable, Sendable, Identifiable {
     }
 
     var detail: String {
+        guard let builtIn else { return "Your saved target curve." }
         switch builtIn {
         case .gentleDownwardTilt: return "Slightly softer highs, like a well-treated room. Recommended."
         case .flat: return "Equal level at every frequency. Can sound bright."
@@ -218,7 +238,7 @@ struct SystemSetupCorrectionTarget: Hashable, Sendable, Identifiable {
         }
     }
 
-    var curve: RoomCorrectionTargetCurve { builtIn.curve }
+    var curve: RoomCorrectionTargetCurve { builtIn?.curve ?? savedRecord?.curve ?? RoomCorrectionBuiltInTarget.flat.curve }
 }
 
 enum SystemSetupCorrectionPlan {
