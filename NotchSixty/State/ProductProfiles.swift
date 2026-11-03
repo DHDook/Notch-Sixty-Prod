@@ -576,6 +576,9 @@ struct PlaybackSystemState: Codable, Equatable, Sendable {
     /// E8 S3: source-to-output routing with per-way crossovers. nil (the default) leaves the stored profile
     /// byte-identical; loaded profiles with a legacy physical crossover are migrated on launch (E8 S5).
     var speakerRouting: SpeakerRoutingConfiguration?
+    /// E25 S1: outputs and speaker arrangement. nil (the default) leaves the stored profile byte-identical. With
+    /// `e25.outputs-and-speakers` off the field round-trips untouched and nothing reads it.
+    var systemArrangement: SystemArrangement?
 
     init(
         schemaVersion: Int = PlaybackSystemState.currentSchemaVersion,
@@ -592,7 +595,8 @@ struct PlaybackSystemState: Codable, Equatable, Sendable {
         speakerIR: SpeakerIRConfiguration = SpeakerIRConfiguration(),
         ambientCompensation: AmbientCompensationConfiguration? = nil,
         activeQuietZone: ActiveQuietZoneConfiguration? = nil,
-        speakerRouting: SpeakerRoutingConfiguration? = nil
+        speakerRouting: SpeakerRoutingConfiguration? = nil,
+        systemArrangement: SystemArrangement? = nil
     ) {
         self.schemaVersion = schemaVersion
         self.associatedOutputUID = associatedOutputUID
@@ -609,6 +613,7 @@ struct PlaybackSystemState: Codable, Equatable, Sendable {
         self.ambientCompensation = ambientCompensation
         self.activeQuietZone = activeQuietZone
         self.speakerRouting = speakerRouting
+        self.systemArrangement = systemArrangement
     }
 
     func composingGain(over base: DSPGainConfiguration) -> DSPGainConfiguration {
