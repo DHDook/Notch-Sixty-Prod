@@ -466,7 +466,8 @@ struct ProductionRootView: View {
             )
         case .roomAdvisor:
             ProductionRoomTreatmentAdvisorWorkspace(
-                advisor: product.roomTreatmentAdvisor
+                advisor: product.roomTreatmentAdvisor,
+                profiles: product.profiles
             )
         case .blindListening:
             ProductionBlindListeningWorkspace(engine: engine)
@@ -1679,9 +1680,19 @@ private struct ProductionSpeakersView: View {
                 Text("Speaker topology, bass management, crossover design, physical routing, and driver-level processing.")
                     .foregroundStyle(.secondary)
 
+                SystemCapabilityNoteCard(
+                    title: "What your speaker arrangement allows", features: SystemCapabilityText.speakersTabFeatures,
+                    profiles: profiles, deviceChannelCount: Int(engine.selectedOutputDevice?.outputChannelCount ?? 0))
+                SystemCapabilityNoteCard(
+                    title: "Routing", features: SystemCapabilityText.routingEditorFeatures,
+                    profiles: profiles, deviceChannelCount: Int(engine.selectedOutputDevice?.outputChannelCount ?? 0))
                 ProductionRoutingEditorView(engine: engine)
                 ProductionProfileSubwooferCard(engine: engine, profiles: profiles)
                 playbackSystemCard
+                SystemCapabilityNoteCard(
+                    title: "Saved with this profile", features: SystemCapabilityText.profileFeatures,
+                    profiles: profiles, deviceChannelCount: Int(engine.selectedOutputDevice?.outputChannelCount ?? 0),
+                    includeArrangement: true)
                 crossoverCard
                 if engine.bassManagementConfiguration.physicalOutputMode == .mainsSub {
                     subAlignmentCard

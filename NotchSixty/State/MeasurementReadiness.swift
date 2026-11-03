@@ -32,6 +32,9 @@ enum MeasurementReadiness: Equatable {
         /// The surface needs an enabled output device profile (multichannel, Speaker Lab).
         var requiresProfile: Bool = false
         var hasProfile: Bool = true
+        /// E25 S5: what to tell the user when the profile is missing, written for their arrangement
+        /// (`SystemCapabilityText.profileRequiredReason`). Nil uses the plain default.
+        var profileReason: String?
         /// The surface needs a session or campaign that has a next step (lab session, campaign).
         var requiresWork: Bool = false
         var hasWork: Bool = true
@@ -110,7 +113,8 @@ enum MeasurementReadiness: Equatable {
         }
         if inputs.requiresProfile && !inputs.hasProfile {
             return .blocked(Blocker(
-                reason: "Enable and configure an output device profile for this output first.",
+                reason: inputs.profileReason
+                    ?? "Describe your speakers in system setup first: this tool needs to know which output drives each speaker.",
                 fix: .describeSpeakers))
         }
         if inputs.requiresWork && !inputs.hasWork {

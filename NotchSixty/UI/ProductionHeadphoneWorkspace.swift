@@ -45,6 +45,8 @@ struct ProductionHeadphoneWorkspace: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 header
+                SystemCapabilityNoteCard(
+                    title: "With your speaker arrangement", features: SystemCapabilityText.headphoneFeatures, profiles: profiles)
                 modeCard
                 correctionCard
                 perEarEQCard
