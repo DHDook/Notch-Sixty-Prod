@@ -27,6 +27,10 @@ final class SystemSetupFlowModel: ObservableObject {
     @Published private(set) var isVerifying = false
     @Published private(set) var roomInsights: [SystemSetupRoomInsight] = []
     @Published private(set) var savedProfileName: String?
+    /// E24 S9: the open blind ABX (Save step), its preparation state and why it cannot open.
+    @Published private(set) var abx: RoomCorrectionABXController?
+    @Published private(set) var abxPreparing = false
+    @Published var abxMixedFitsEveryRate = true
 
     let engine: AudioIOEngine
     let profiles: ProductProfileController
@@ -49,6 +53,10 @@ final class SystemSetupFlowModel: ObservableObject {
     private let seats: SystemSetupSeatMeasuring
     private let sessions: SystemSetupSessionStore
     private var verificationTask: Task<Void, Never>?
+    private let abxPlayer: RoomCorrectionABXPlaying
+    private let abxDirectory: URL
+    /// The two room-only designs the open ABX compares (minimum and mixed phase); Keep applies one of them.
+    private var abxRooms: (minimum: RoomCorrectionLaneInstall, mixed: RoomCorrectionLaneInstall)?
     /// The running measure task, so Stop can cancel the seat measurer's pass.
     private var measureTask: Task<Void, Never>?
     static let verificationTimeoutSeconds = 60.0
@@ -58,7 +66,8 @@ final class SystemSetupFlowModel: ObservableObject {
          services: ProductionSystemSetupServices? = nil,
          sessions: SystemSetupSessionStore = SystemSetupSessionStore(directory: SystemSetupSessionStore.defaultDirectory()),
          roomProjectsDirectory: URL = SystemSetupSessionStore.defaultDirectory()
-             .appendingPathComponent("RoomCorrection", isDirectory: true)) {
+             .appendingPathComponent("RoomCorrection", isDirectory: true),
+         abxDirectory: URL? = nil) {
         let services = services ?? ProductionSystemSetupServices.production(
             engine: engine, profiles: profiles, microphone: microphone, calibration: calibration)
         self.seats = services.seats
@@ -70,6 +79,9 @@ final class SystemSetupFlowModel: ObservableObject {
         self.calibration = calibration
         self.noise = services.noise
         self.levelMonitor = services.monitor
+        self.abxPlayer = services.abx
+        self.abxDirectory = abxDirectory ?? RoomCorrectionABXLog.defaultDirectory()
+            ?? FileManager.default.temporaryDirectory.appendingPathComponent("NotchSixty-ABX", isDirectory: true)
         self.laneChoices = services.laneChoices
         self.roomProjects = RoomCorrectionProjectController(
             profiles: profiles,
@@ -573,6 +585,7 @@ final class SystemSetupFlowModel: ObservableObject {
                     try await engine.precomputeRoomCorrectionPlans(for: finalInstall)
                 }
                 roomOnlyInstall = finalRoom
+                abxRooms = nil
                 try profiles.replaceSelectedSystemRoomCorrection(
                     RoomCorrectionConfiguration(enabled: true, lanes: finalInstall), calibrationSummary: nil)
                 flow.choices.designKind = mixed ? .mixedPhase : .minimumPhase
@@ -642,6 +655,7 @@ final class SystemSetupFlowModel: ObservableObject {
                     calibrationSummary: nil)
             }
             roomOnlyInstall = nil
+            abxRooms = nil
             flow.choices.correctionApplied = false
             seatPredictions = []
         } catch {
@@ -814,6 +828,101 @@ final class SystemSetupFlowModel: ObservableObject {
         message = reason
     }
 
+    // MARK: Compare by ear (E24 S9, blind ABX)
+
+    /// Why the ABX cannot open right now, or nil.
+    var abxUnavailableReason: String? {
+        guard flow.choices.correctionApplied, roomOnlyInstall != nil else { return "Apply the correction first." }
+        if abxPreparing { return "Preparing the two designs." }
+        return abxPlayer.unavailableReason
+    }
+
+    /// Opens the blind ABX of minimum against mixed phase: the applied design is kept, the other is designed from the
+    /// same seats, both are composed with the bass design and cached at every output rate, then matched on level and
+    /// latency at the session rate. The profile is not changed; the engine plays the candidates as an override.
+    func openABX() async {
+        guard abx == nil, let applied = roomOnlyInstall else { return }
+        if let reason = abxUnavailableReason { message = reason; return }
+        abxPreparing = true
+        defer { abxPreparing = false }
+        do {
+            let appliedIsMixed = flow.choices.designKind == .mixedPhase
+            let minimum: RoomCorrectionLaneInstall
+            let mixed: RoomCorrectionLaneInstall
+            if let cached = abxRooms {
+                (minimum, mixed) = cached
+            } else if appliedIsMixed {
+                mixed = applied
+                guard let other = try await makeLaneInstall(forceMode: .video) else { throw RoomCorrectionABXError.noProgramLanes }
+                minimum = other
+            } else {
+                minimum = applied
+                guard let other = try await makeLaneInstall(
+                    forceMode: correctionMode == .music ? .defaultMusic : .music50ms) else { throw RoomCorrectionABXError.noProgramLanes }
+                mixed = other
+            }
+            let installA = try composeInstall(room: minimum, bass: bassLanePlan)
+            let installB = try composeInstall(room: mixed, bass: bassLanePlan)
+            try await engine.precomputeRoomCorrectionPlans(for: installA)
+            try await engine.precomputeRoomCorrectionPlans(for: installB)
+            let rates = engine.selectedOutputDevice?.correctionSampleRates ?? [flow.choices.sampleRate ?? 48_000]
+            let rate = engine.selectedOutputDevice?.nominalSampleRate ?? flow.choices.sampleRate ?? 48_000
+            abxMixedFitsEveryRate = try rates.allSatisfy {
+                RoomCorrectionLaneInstall.latencyFits(
+                    try engine.roomCorrectionRateCache.plan(for: installB.design, sampleRate: $0), mode: installB.design.latencyMode)
+            }
+            let planA = try engine.roomCorrectionRateCache.plan(for: installA.design, sampleRate: rate)
+            let planB = try engine.roomCorrectionRateCache.plan(for: installB.design, sampleRate: rate)
+            let common = Set(installA.design.lanes.map(\.lane)).intersection(installB.design.lanes.map(\.lane))
+                .filter { $0 < installA.programLaneCount }.sorted()
+            let match = try RoomCorrectionABXMatch.make(a: planA, b: planB, programLanes: common)
+            let listening = calibration.seats.filter { $0.included && $0.weight > 0 }
+            abxRooms = (minimum, mixed)
+            abx = try RoomCorrectionABXController(
+                player: abxPlayer, a: installA, b: installB, match: match, seatCount: listening.count,
+                seatNames: listening.map(\.name), logDirectory: abxDirectory)
+            message = nil
+        } catch {
+            message = error.localizedDescription
+        }
+    }
+
+    /// Closing without Keep returns to the applied design.
+    func closeABX() {
+        abx?.close()
+        abx = nil
+    }
+
+    /// Why "Keep B" (mixed phase) is not offered, or nil.
+    var keepMixedPhaseUnavailableReason: String? {
+        abxMixedFitsEveryRate ? nil : "Mixed phase does not fit the latency budget at every rate this output supports."
+    }
+
+    /// Keep A (minimum phase) or Keep B (mixed phase) after a finished run (Q15). The kept design is what Save stores.
+    /// Keeping the applied design changes nothing. Keeping the other one writes its install as Apply does, clears the
+    /// verification and returns to Verify, because that design has not been verified.
+    func keepABXCandidate(_ kind: SystemSetupDesignKind) {
+        guard let controller = abx, controller.phase == .finished, let rooms = abxRooms else { return }
+        if kind == .mixedPhase, let reason = keepMixedPhaseUnavailableReason { message = reason; return }
+        controller.close()
+        abx = nil
+        guard kind != flow.choices.designKind else { return }
+        do {
+            let install = try composeInstall(room: kind == .mixedPhase ? rooms.mixed : rooms.minimum, bass: bassLanePlan)
+            try profiles.replaceSelectedSystemRoomCorrection(
+                RoomCorrectionConfiguration(enabled: true, lanes: install), calibrationSummary: nil)
+            roomOnlyInstall = kind == .mixedPhase ? rooms.mixed : rooms.minimum
+            abxRooms = (rooms.minimum, rooms.mixed)
+            flow.keptDifferentDesign(kind)
+            verificationReport = nil
+            verificationSummary = nil
+            message = "Verify the kept design before saving."
+            persistSession()
+        } catch {
+            message = "Keeping that design failed: \(error.localizedDescription)"
+        }
+    }
+
     // MARK: Save (design notes 7 and 9)
 
     var savesAsNotVerified: Bool { flow.savesAsNotVerified }
@@ -864,6 +973,7 @@ final class SystemSetupFlowModel: ObservableObject {
     }
 
     func cancel() {
+        closeABX()
         stopNoise()
         calibration.cancelMeasurement()
         verificationTask?.cancel()
@@ -1442,6 +1552,7 @@ private struct SystemSetupSaveStep: View {
             } else if let summary = model.verificationSummary {
                 Label(summary.headline, systemImage: "checkmark.seal.fill").font(.callout)
             }
+            RoomCorrectionABXCard(model: model)
         }
     }
 }

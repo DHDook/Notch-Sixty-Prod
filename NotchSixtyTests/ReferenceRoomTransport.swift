@@ -281,6 +281,8 @@ struct OfflineSetupRig {
     let levelTransports = OfflineLevelTransportFactory()
     let trialPlayer: OfflineTrialSweepPlayer
     let root: URL
+    /// The ABX playback boundary (E24 S9): a recording fake, because no Core Audio session runs offline.
+    let abxPlayer = FakeABXPlayer()
 
     static let outputUID = "e24-reference-output"
     static let inputUID = "e24-reference-mic"
@@ -346,9 +348,10 @@ struct OfflineSetupRig {
                             outputSweepSamples: pass.outputSweepSamples, referenceProgram: pass.referenceProgram)
                     }
                 }),
-                levelTransport: levelTransports.factory, trialPlayback: trialPlayer),
+                levelTransport: levelTransports.factory, trialPlayback: trialPlayer, abx: abxPlayer),
             sessions: SystemSetupSessionStore(directory: root.appendingPathComponent("sessions")),
-            roomProjectsDirectory: root.appendingPathComponent("RoomCorrection"))
+            roomProjectsDirectory: root.appendingPathComponent("RoomCorrection"),
+            abxDirectory: root.appendingPathComponent("ABX"))
     }
 
     /// A stereo pair plus one subwoofer on the reference interface (2.1).

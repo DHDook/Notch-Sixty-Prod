@@ -4219,7 +4219,27 @@ final class AudioIOEngine: ObservableObject {
         }
         var installedLanes: (plan: RoomCorrectionLanePlan, delays: [Int: UInt32])?
         var inactive: RoomCorrectionInactiveReason?
-        if inputs.room.enabled, let lanes = inputs.room.lanes {
+        // E24 S9: a blind-ABX override replaces the profile's lanes while its sheet is open. It never changes the
+        // stored configuration, and a layout or delay it cannot honour throws instead of silently falling back.
+        let abx = roomCorrectionABXOverride
+        var abxGain: Float = 1
+        if let abx {
+            guard abx.install.matches(programLaneCount: shape.laneCount, subwooferCount: subwooferCount) else {
+                throw RoomCorrectionLaneInstallError.invalidLayout
+            }
+            var delays = try abx.install.delayFrames(sampleRate: sampleRate)
+            if abx.extraDelayFrames > 0 {
+                for lane in 0..<(shape.laneCount + (subwooferCount ?? 0)) {
+                    let total = delays[lane, default: 0] + abx.extraDelayFrames
+                    guard total <= N60_GRAPH_MAX_DELAY_FRAMES else {
+                        throw RoomCorrectionLaneInstallError.delayTooLong(lane: lane)
+                    }
+                    delays[lane] = total
+                }
+            }
+            installedLanes = (try roomCorrectionRateCache.plan(for: abx.install.design, sampleRate: sampleRate), delays)
+            abxGain = abx.gain
+        } else if inputs.room.enabled, let lanes = inputs.room.lanes {
             // Lane plans install on the main lanes (design note 8). A layout that no longer matches, or a rate the
             // filters cannot be built for, leaves correction off with its reason; playback is never refused (Q9, Q11).
             if !lanes.matches(programLaneCount: shape.laneCount, subwooferCount: subwooferCount) {
@@ -4279,6 +4299,7 @@ final class AudioIOEngine: ObservableObject {
         var program = UnifiedGraphProgramDSP(
             stereo: stereo, shape: shape, eqMode: mode, virtualSpeakers: virtualSpeakers)
         if let installedLanes {
+            program.inputGain *= abxGain
             program.roomLanes = installedLanes.plan
             program.laneDelayFrames = installedLanes.delays
             program.subLaneCount = subwooferCount ?? 0
@@ -4314,6 +4335,51 @@ final class AudioIOEngine: ObservableObject {
     /// E12 S4a: the generator currently published to the live graph, or nil when none is playing. Never persisted:
     /// a session restart, stop or output change clears it.
     private(set) var liveGenerator: LiveGenerator?
+
+    /// E24 S9: the design the blind ABX is playing in place of the profile's applied lanes, level-trimmed and
+    /// latency-matched. Never persisted; Stop, an output change and a session teardown clear it.
+    var roomCorrectionABXOverride: RoomCorrectionABXOverride?
+
+    /// Why the ABX cannot play right now, or nil when it can: it needs a running graph session that installs lanes.
+    var roomCorrectionABXUnavailableReason: String? {
+        if nChannelTransportSession == nil, transportSession != nil {
+            return RoomCorrectionInactiveReason.needsSpeakerProfile.message
+        }
+        guard nChannelTransportSession != nil, liveGraphEditsAvailable else {
+            return "Start playback with music to compare by ear."
+        }
+        guard roomCorrectionConfiguration.enabled, roomCorrectionConfiguration.lanes != nil else {
+            return "Apply a room correction to the speaker profile first."
+        }
+        return nil
+    }
+
+    /// True while the core is warming or fading to a republished graph (the switch the ABX presses cause).
+    var graphRebuildInProgress: Bool { (nChannelTransportSession?.unifiedGraphReadback?.rebuildState ?? 0) != 0 }
+
+    /// Sets (or, with nil, clears) the ABX override and moves the running graph to it through the normal faded
+    /// republish. Throws and leaves the override and the running graph as they were when the graph cannot take it.
+    func setRoomCorrectionABXOverride(_ override: RoomCorrectionABXOverride?) throws {
+        if override == nil, roomCorrectionABXOverride == nil { return }
+        if override == nil, nChannelTransportSession == nil {
+            roomCorrectionABXOverride = nil
+            return
+        }
+        if override == nil {
+            // Clearing never fails to clear: if the republish cannot run, the next republish or teardown rebuilds
+            // the graph without the override.
+            roomCorrectionABXOverride = nil
+            try republishLiveGraph(currentLiveGraphInputs)
+            return
+        }
+        if let reason = roomCorrectionABXUnavailableReason { throw RoomCorrectionABXError.unavailable(reason) }
+        let previous = roomCorrectionABXOverride
+        roomCorrectionABXOverride = override
+        do { try republishLiveGraph(currentLiveGraphInputs) } catch {
+            roomCorrectionABXOverride = previous
+            throw error
+        }
+    }
 
     /// Plays (or, with nil, stops) the E11 generator on the running graph through the normal republish path:
     /// N-channel graphs through `republishLiveGraph`, the stereo graph through its transport session. Throws and
@@ -5380,6 +5446,7 @@ final class AudioIOEngine: ObservableObject {
 
     private func tearDownTransport(fadeOut: Bool, cause: TransportTeardownCause = .other) {
         liveGenerator = nil
+        roomCorrectionABXOverride = nil
         if let controller = headTrackingController {
             controller.stop()
             headTrackingController = nil

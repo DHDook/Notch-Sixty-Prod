@@ -17,6 +17,8 @@ struct ProductionSystemSetupServices {
     let monitor: MeasurementInputMonitor
     /// Lanes the noise can play on right now.
     let laneChoices: @MainActor () -> [(index: Int, name: String, isLFE: Bool)]
+    /// The engine boundary the blind ABX plays through on the Save step (E24 S9).
+    let abx: RoomCorrectionABXPlaying
 
     /// Production wiring for `engine`. E24 S1: the noise runs in a measurement-owned level session when
     /// playback is idle (`levelTransport` is the Core Audio boundary tests replace).
@@ -26,7 +28,8 @@ struct ProductionSystemSetupServices {
         monitor: MeasurementInputMonitor? = nil,
         seats: SystemSetupSeatMeasuring? = nil,
         levelTransport: @escaping LevelSessionTransportFactory = LevelSessionHardware.transportFactory,
-        trialPlayback: TrialSweepPlaying? = nil
+        trialPlayback: TrialSweepPlaying? = nil,
+        abx: RoomCorrectionABXPlaying? = nil
     ) -> ProductionSystemSetupServices {
         let monitor = monitor ?? MeasurementInputMonitor()
         let environment = EngineLevelSessionEnvironment(engine: engine, profiles: profiles, microphone: microphone)
@@ -38,6 +41,7 @@ struct ProductionSystemSetupServices {
             seats: seats ?? CalibrationSeatMeasurer(calibration: calibration),
             verifier: measurer, measurer: measurer,
             monitor: monitor,
-            laneChoices: { environment.laneChoices })
+            laneChoices: { environment.laneChoices },
+            abx: abx ?? engine)
     }
 }

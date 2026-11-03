@@ -4,8 +4,10 @@ import Foundation
 //
 // Offline and control-plane only: this prepares matched FIRs and records trials. It never runs
 // on an audio thread. Trial logic reuses `BlindABXSession`; this file adds level and latency
-// matching of the two candidates and the on-disk trial log. Playback switches between the two
-// matched FIRs through the normal FIR crossfade; the engine is unchanged.
+// matching of the two candidates and the on-disk trial log. E24 S9 plays the candidates: each A/B/X press
+// republishes the live graph with the candidate's lane install, and the core's silent warm-up plus 20 ms
+// equal-power crossfade is the switch (the lane path has no FIR crossfade of its own). The match below gives
+// the override its gain and extra delay.
 
 /// One candidate design for a single channel, as a FIR plus its declared latency.
 struct RoomCorrectionABXCandidate: Equatable, Sendable {
@@ -32,6 +34,8 @@ struct RoomCorrectionABXMatch: Equatable, Sendable {
     /// Frames of leading delay added to each candidate. The one with less latency is delayed.
     var delayA: Int
     var delayB: Int
+    /// E24 S9: the largest per-lane level difference after the global trim (0 for a single-FIR match).
+    var maxLaneResidualDB: Double = 0
 
     /// Mean magnitude in dB over the 500 Hz to 2 kHz band, evaluated on a 1/12-octave grid
     /// by direct DFT in double precision.
@@ -88,8 +92,13 @@ struct RoomCorrectionABXMatch: Equatable, Sendable {
 }
 
 /// One finished ABX run with the context the bench needs, stored in the app container.
+/// Schema 2 (E24 S9) adds the per-lane residual, the listening seat and the stated preference; a schema 1 file
+/// still decodes, with those three nil.
 struct RoomCorrectionABXLog: Codable, Equatable, Sendable {
-    var schemaVersion = 1
+    static let minimumPhaseName = "Minimum phase"
+    static let mixedPhaseName = "Mixed phase"
+
+    var schemaVersion = 2
     var date: Date
     var designAName: String
     var designBName: String
@@ -101,6 +110,11 @@ struct RoomCorrectionABXLog: Codable, Equatable, Sendable {
     var correctCount: Int
     var oneSidedExactPValue: Double
     var trials: [BlindABXTrial]
+    var maxLaneResidualDB: Double?
+    /// The listening seat (1-based) this run was heard at.
+    var listeningSeat: Int?
+    /// The design the listener said they prefer, or nil for "no preference" (or a schema 1 file).
+    var preferredDesignName: String?
 
     init(
         session: BlindABXSession, match: RoomCorrectionABXMatch,
@@ -125,12 +139,49 @@ struct RoomCorrectionABXLog: Codable, Equatable, Sendable {
         trials = evidence.trials
     }
 
-    /// Gate G3 reads this: mixed-phase preferred at p < 0.05 with at least 3 seats.
-    var passesGateG3: Bool { seatCount >= 3 && oneSidedExactPValue < 0.05 }
+    /// The log of a run played through lane plans (E24 S9): the match carries the levels and the residual.
+    init(
+        session: BlindABXSession, match: RoomCorrectionABXMatch, designAName: String, designBName: String,
+        seatCount: Int, listeningSeat: Int, preferredDesignName: String?, date: Date = Date()
+    ) throws {
+        let evidence = try session.exportEvidence()
+        self.date = date
+        self.designAName = designAName
+        self.designBName = designBName
+        self.seatCount = seatCount
+        sampleRate = match.sampleRate
+        levelMatchResidualDB = abs((match.levelADB + 20 * log10(match.gainA)) - (match.levelBDB + 20 * log10(match.gainB)))
+        latencyFramesMatched = max(match.delayA, match.delayB)
+        trialCount = evidence.trialCount
+        correctCount = evidence.correctCount
+        oneSidedExactPValue = evidence.oneSidedExactPValue
+        trials = evidence.trials
+        maxLaneResidualDB = match.maxLaneResidualDB
+        self.listeningSeat = listeningSeat
+        self.preferredDesignName = preferredDesignName
+    }
+
+    /// Gate G3 (Q18, decided 2 Nov 2026): three or more distinct listening seats, each with a log at p < 0.05
+    /// that states mixed phase as the preference. Logs without a seat or a preference never count.
+    static func gateG3(_ logs: [RoomCorrectionABXLog]) -> Bool {
+        var seats = Set<Int>()
+        for log in logs where log.oneSidedExactPValue < 0.05 && log.preferredDesignName == mixedPhaseName {
+            if let seat = log.listeningSeat { seats.insert(seat) }
+        }
+        return seats.count >= 3
+    }
 
     static func defaultDirectory() -> URL? {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?
             .appendingPathComponent("NotchSixty/ABX", isDirectory: true)
+    }
+
+    /// Every readable log in `directory`, oldest first. Unreadable files are skipped.
+    static func readAll(in directory: URL) -> [RoomCorrectionABXLog] {
+        let files = (try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)) ?? []
+        return files.filter { $0.pathExtension == "json" && $0.lastPathComponent.hasPrefix("abx-") }
+            .compactMap { try? read(from: $0) }
+            .sorted { $0.date < $1.date }
     }
 
     @discardableResult
@@ -140,7 +191,8 @@ struct RoomCorrectionABXLog: Codable, Equatable, Sendable {
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         encoder.dateEncodingStrategy = .iso8601
         let stamp = Int(date.timeIntervalSince1970)
-        let url = directory.appendingPathComponent("abx-\(stamp)-\(seatCount)seat.json")
+        let tag = listeningSeat.map { "seat\($0)" } ?? "\(seatCount)seat"
+        let url = directory.appendingPathComponent("abx-\(stamp)-\(tag).json")
         try encoder.encode(self).write(to: url, options: .atomic)
         return url
     }

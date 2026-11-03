@@ -63,15 +63,13 @@ final class RoomCorrectionABXTests: XCTestCase {
         let log = try RoomCorrectionABXLog(session: session, match: match, a: a, b: b,
                                            seatCount: 3, date: Date(timeIntervalSince1970: 1_800_000_000))
         XCTAssertEqual(log.correctCount, 11)
-        XCTAssertTrue(log.passesGateG3)
+        XCTAssertFalse(RoomCorrectionABXLog.gateG3([log, log, log]), "a log without a seat or preference never counts")
         XCTAssertLessThan(log.levelMatchResidualDB, 0.01)
         XCTAssertEqual(log.latencyFramesMatched, 10)
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("abx-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: dir) }
         let url = try log.write(to: dir)
         XCTAssertEqual(try RoomCorrectionABXLog.read(from: url), log)
-        var twoSeat = log; twoSeat.seatCount = 2
-        XCTAssertFalse(twoSeat.passesGateG3)
     }
 
     func testIncompleteSessionCannotBeLogged() throws {
