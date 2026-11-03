@@ -1,0 +1,36 @@
+# Path -> XCTest group map for the PR check (see ci/select_tests.sh). One rule per line:
+#   <path glob> <TAB or spaces> <action>
+# The first matching rule wins for each changed file; a file that matches no rule runs the
+# WHOLE suite (fail safe). Actions:
+#   ALL        run the whole suite
+#   IGNORE     the file never needs tests (docs)
+#   SELF       the changed file is a test file: run its own test classes
+#   a,b,c      comma list of test-file stem globs (NotchSixtyTests/<stem>.swift); the token
+#              @stem means every test whose stem starts with the changed file's own stem.
+# Be generous: adding a glob to a group only costs CI time; a missing one can hide a break.
+# macos-full.yml ignores this file and always runs everything.
+
+docs/*                                  IGNORE
+*.md                                    IGNORE
+
+# Anything that can change engine, transport or build behaviour runs everything.
+NotchSixty/Audio/*                      ALL
+NotchSixty.xcodeproj/*                  ALL
+.github/*                               ALL
+ci/*                                    ALL
+core/*                                  ALL
+Package*                                ALL
+*Package.resolved                       ALL
+NotchSixty/Info.plist                   ALL
+NotchSixty/*.entitlements               ALL
+
+# State and UI.
+NotchSixty/State/*                      @stem,SystemSetup*,Production*,Measurement*,RoomCorrection*,FeatureFlags*,Preference*,Routing*,SpeakerRouting*,Safety*,Overnight*,Earned*,Excursion*,DoNoHarm*,LiveTreatment*,ANC*,Adaptive*,ActiveQuietZone*,Ambient*,Headroom*,QuietZone*Survey*,MicrophoneMove*,Seat*
+NotchSixty/UI/*                         @stem,Production*,Measurement*,SystemSetup*,RoomCorrection*,RoutingEditor*,SpeakerRoutingEditor*,Headphone*,Seat*
+NotchSixty/Backup/*                     @stem,Preset*,Backup*,SpeakerRouting*,FeatureFlags*
+NotchSixty/Diagnostics/*                @stem,Production*,Safety*,Diagnostics*
+NotchSixty/Acceptance/*                 @stem,HardwareAcceptance*
+NotchSixty/*.swift                      Production*,SystemSetup*,FeatureFlags*
+
+# Test files select themselves.
+NotchSixtyTests/*Tests.swift            SELF

@@ -16,12 +16,6 @@ final class SystemSetupEndToEndTests: XCTestCase {
         return [44_100, 48_000, 88_200, 96_000, 176_400, 192_000, 352_800, 384_000]
     }
 
-    private func strict() -> XCTExpectedFailure.Options {
-        let options = XCTExpectedFailure.Options()
-        options.isStrict = true
-        return options
-    }
-
     private func waitForVerification(_ model: SystemSetupFlowModel) async {
         for _ in 0..<600 where model.isVerifying { try? await Task.sleep(for: .milliseconds(50)) }
     }
@@ -138,12 +132,6 @@ final class SystemSetupEndToEndTests: XCTestCase {
 /// boundary, must not report that it is unavailable.
 @MainActor
 final class ProductionWiringTests: XCTestCase {
-    private func strict() -> XCTExpectedFailure.Options {
-        let options = XCTExpectedFailure.Options()
-        options.isStrict = true
-        return options
-    }
-
     func testNoisePlayerDoesNotReportUnavailable() throws {
         let rig = try OfflineSetupRig(rate: 48_000)
         defer { rig.tearDown() }
