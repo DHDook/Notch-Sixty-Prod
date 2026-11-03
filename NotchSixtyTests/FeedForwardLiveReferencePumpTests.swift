@@ -14,7 +14,7 @@ final class FeedForwardLiveReferencePumpTests: XCTestCase {
         tones.reduce(0) { $0 + $1.amp * sin(2 * .pi * $1.hz * t + $1.phase) } * 0.1
     }
 
-    private final class FakeReference: QuietZoneFeedForwardSingleCapturing {
+    final class FakeReference: QuietZoneFeedForwardSingleCapturing {
         let sampleRate: Double
         let drift: Double
         let wallStart: Double

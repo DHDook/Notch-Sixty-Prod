@@ -144,7 +144,7 @@ extension AudioIOEngine: FeedForwardDriveSource {
     func readDrive(maximumFrames: Int) -> FeedForwardDriveChunk? {
         guard let before = speakerDriveSnapshot(), before.enabled else { return nil }
         let first = before.capturedFrames &- UInt64(before.availableFrames)
-        let anchors = readSpeakerDriveAnchors()
+        let anchors = pullSpeakerDriveAnchors(for: .shadow)
         let frames = readSpeakerDriveFrames(maximumFrames: maximumFrames)
         return FeedForwardDriveChunk(
             anchors: anchors, left: frames.map(\.left), right: frames.map(\.right), firstFrame: first,
