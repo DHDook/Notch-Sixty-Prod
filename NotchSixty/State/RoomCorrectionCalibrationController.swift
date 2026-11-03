@@ -142,6 +142,8 @@ final class RoomCorrectionCalibrationController: ObservableObject {
         MeasurementReadiness.evaluate(.init(
             permission: permissionStatus,
             hasInputDevice: selectedInputDevice != nil,
+            inputChannelIndex: selectedInputChannelIndex,
+            inputChannelCount: selectedInputDevice?.inputChannelCount,
             hasOutputDevice: selectedOutputDevice != nil,
             transportActive: activeTransport != nil,
             stateAllowsStart: state == .ready || state == .reviewing,

@@ -342,6 +342,8 @@ final class MultichannelCalibrationController: ObservableObject {
         let base = MeasurementReadiness.evaluate(.init(
             permission: microphone.permissionStatus,
             hasInputDevice: perSeat || microphone.selectedInputDevice != nil,
+            inputChannelIndex: microphone.selectedInputChannelIndex,
+            inputChannelCount: perSeat ? nil : microphone.selectedInputDevice?.inputChannelCount,
             hasOutputDevice: engine.selectedOutputDevice != nil,
             requiresProfile: true,
             hasProfile: profile != nil,

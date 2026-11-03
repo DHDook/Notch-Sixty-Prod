@@ -1067,20 +1067,11 @@ private struct SystemSetupMicrophoneStep: View {
             Text("Measurement microphone").font(.headline)
             Text("Notch Sixty listens through this microphone to measure your speakers. Macs ask for microphone permission the first time; audio is analysed on this Mac and never leaves it.")
                 .font(.callout).foregroundStyle(.secondary)
-            if microphone.permissionStatus != .authorized {
-                Button("Allow microphone access") {
-                    Task { await microphone.requestMicrophonePermission(); try? microphone.refreshInputDevices() }
-                }
-            } else {
-                Picker("Microphone", selection: Binding(
-                    get: { microphone.selectedInputUID ?? "" },
-                    set: { model.selectMicrophone(uid: $0.isEmpty ? nil : $0) }
-                )) {
-                    Text("Choose a microphone").tag("")
-                    ForEach(microphone.inputDevices) { Text($0.name).tag($0.uid) }
-                }
-                Text(microphone.microphoneCalibration.map { "Calibration file: \($0.sourceName ?? "loaded")" }
-                     ?? "No calibration file. Import one in the Calibrate tab for the most accurate results.")
+            MeasurementMicrophoneCard(
+                microphone: microphone, locked: model.noiseIsPlaying,
+                onSelect: { model.selectMicrophone(uid: $0) })
+            if microphone.permissionStatus == .authorized, microphone.microphoneCalibration == nil {
+                Text("No calibration file. Import one in the Calibrate tab for the most accurate results.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Divider()
