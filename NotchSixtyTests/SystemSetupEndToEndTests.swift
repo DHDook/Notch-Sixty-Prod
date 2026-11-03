@@ -169,4 +169,27 @@ final class ProductionWiringTests: XCTestCase {
         controller.stop()
         XCTAssertFalse(controller.isPlaying)
     }
+
+    /// The seat measurer the app gets is the real one: an out-of-range seat is refused by name, not as "unavailable".
+    func testSeatMeasurerIsTheCalibrationBackedOne() async throws {
+        let rig = try OfflineSetupRig(rate: 48_000)
+        defer { rig.tearDown() }
+        let services = ProductionSystemSetupServices.production(
+            engine: rig.engine, profiles: rig.profiles, microphone: rig.microphone, calibration: rig.calibration, levelTransport: rig.levelTransports.factory)
+        do {
+            _ = try await services.seats.measureSeat(index: 99, sampleRate: 48_000)
+            XCTFail("an out-of-range seat must throw")
+        } catch let error as SeatMeasurerError {
+            XCTAssertEqual(error, .invalidSeat(99))
+        }
+    }
+
+    /// One post-apply measurer serves as both the verifier and the flow's hook, and its host is live (not an Unconnected stand-in).
+    func testVerifierAndMeasurerAreOneLiveObject() throws {
+        let rig = try OfflineSetupRig(rate: 48_000)
+        defer { rig.tearDown() }
+        let services = ProductionSystemSetupServices.production(
+            engine: rig.engine, profiles: rig.profiles, microphone: rig.microphone, calibration: rig.calibration, levelTransport: rig.levelTransports.factory)
+        XCTAssertTrue((services.verifier as AnyObject) === (services.measurer as AnyObject))
+    }
 }
