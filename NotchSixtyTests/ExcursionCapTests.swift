@@ -56,6 +56,42 @@ final class ExcursionCapTests: XCTestCase {
         XCTAssertNil(ExcursionLimits.lowerLimitHz(frequenciesHz: freqs, magnitudeDB: freqs.map { _ in 0 }))
     }
 
+    private func aggregate(rolloffHz: Double, right: Double? = nil) -> RoomCorrectionAggregateResponse {
+        let freqs = stride(from: 10.0, through: 1000.0, by: 1.0).map { $0 }
+        func response(_ corner: Double) -> RoomCorrectionFrequencyResponse {
+            RoomCorrectionFrequencyResponse(
+                frequenciesHz: freqs,
+                magnitudeDB: freqs.map { $0 >= corner ? 0.0 : -12 * log2(corner / $0) },
+                phaseRadians: nil
+            )
+        }
+        return RoomCorrectionAggregateResponse(
+            generatedAt: Date(timeIntervalSince1970: 0),
+            includedPositionIDs: [],
+            leftResponse: response(rolloffHz),
+            rightResponse: response(right ?? rolloffHz)
+        )
+    }
+
+    func testResolveUsesMeasuredPointWithoutASub() {
+        let measured = ExcursionLimits.resolve(
+            aggregate: aggregate(rolloffHz: 50, right: 70), subwooferEnabled: false, crossoverHz: 80)
+        XCTAssertEqual(measured.mainLowerLimitHz, 70 * pow(2, -10.0 / 12), accuracy: 1.0)
+        XCTAssertNil(measured.subCrossoverHz)
+        let none = ExcursionLimits.resolve(aggregate: nil, subwooferEnabled: false, crossoverHz: 80)
+        XCTAssertEqual(none.mainLowerLimitHz, ExcursionLimits.unmeasuredMainLowerLimitHz)
+    }
+
+    func testResolveKeepsTheCrossoverAsFloorWithASub() {
+        let low = ExcursionLimits.resolve(
+            aggregate: aggregate(rolloffHz: 30), subwooferEnabled: true, crossoverHz: 80)
+        XCTAssertEqual(low.mainLowerLimitHz, 80)
+        XCTAssertEqual(low.subCrossoverHz, 80)
+        let high = ExcursionLimits.resolve(
+            aggregate: aggregate(rolloffHz: 200), subwooferEnabled: true, crossoverHz: 80)
+        XCTAssertGreaterThan(high.mainLowerLimitHz, 80)
+    }
+
     // MARK: Thermal
 
     private func hold(peakDB: Double, seconds: Int, capDBFS: Double = -18) -> (ExcursionThermalIntegrator, Int?) {

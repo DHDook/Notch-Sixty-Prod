@@ -12,6 +12,33 @@ struct ExcursionLimits: Equatable, Sendable {
     /// Used when nothing measured is available: mains with no sub are assumed to stop at 60 Hz.
     static let unmeasuredMainLowerLimitHz = 60.0
 
+    /// The limits for the current system. The measured lower limit is the higher (more cautious) of
+    /// the left and right -10 dB points of the Room Correction aggregate. Without a subwoofer it
+    /// replaces the 60 Hz default; with one the mains are high-passed at the crossover, so the
+    /// crossover is the floor and a lower measured point cannot loosen it.
+    static func resolve(
+        aggregate: RoomCorrectionAggregateResponse?,
+        subwooferEnabled: Bool,
+        crossoverHz: Double
+    ) -> ExcursionLimits {
+        let measured = aggregate.flatMap { aggregate -> Double? in
+            let points = [aggregate.leftResponse, aggregate.rightResponse].compactMap {
+                lowerLimitHz(frequenciesHz: $0.frequenciesHz, magnitudeDB: $0.magnitudeDB)
+            }
+            return points.max()
+        }
+        if subwooferEnabled {
+            return ExcursionLimits(
+                mainLowerLimitHz: max(crossoverHz, measured ?? crossoverHz),
+                subCrossoverHz: crossoverHz
+            )
+        }
+        return ExcursionLimits(
+            mainLowerLimitHz: measured ?? unmeasuredMainLowerLimitHz,
+            subCrossoverHz: nil
+        )
+    }
+
     /// The -10 dB point of a measured response: the mean level of the 200-1000 Hz reference band,
     /// then the highest frequency below it where the response falls 10 dB under that mean
     /// (linear interpolation in dB over log frequency). Nil when the data is unusable or the

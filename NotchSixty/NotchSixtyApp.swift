@@ -165,16 +165,14 @@ final class ProductController: ObservableObject {
         }
         if adaptiveTonalLive, FeatureFlags().isEnabled(.earnedCap) {
             activeQuietZone.attachEarnedCap(EarnedCapPolicy(store: EarnedCapStore()))
-            // E4 S21: limits from the bass-management crossover and the speaker's role. A
-            // Room Correction -10 dB point (`ExcursionLimits.lowerLimitHz`) replaces the
-            // unmeasured default when the measurement store is wired in.
-            activeQuietZone.attachExcursionCap { [weak audioEngine] in
+            // E4 S21: limits from the Room Correction aggregate's -10 dB point
+            // (`ExcursionLimits.lowerLimitHz`), the bass-management crossover and the speaker's role.
+            activeQuietZone.attachExcursionCap { [weak audioEngine, weak roomProjects] in
                 let bass = audioEngine?.bassManagementConfiguration
-                let hasSub = bass?.enabled == true
-                let crossover = bass?.frequencyHz ?? 80
-                return ExcursionLimits(
-                    mainLowerLimitHz: hasSub ? crossover : ExcursionLimits.unmeasuredMainLowerLimitHz,
-                    subCrossoverHz: hasSub ? crossover : nil
+                return ExcursionLimits.resolve(
+                    aggregate: roomProjects?.aggregate,
+                    subwooferEnabled: bass?.enabled == true,
+                    crossoverHz: bass?.frequencyHz ?? 80
                 )
             }
         }
