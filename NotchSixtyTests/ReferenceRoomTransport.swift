@@ -324,7 +324,7 @@ struct OfflineSetupRig {
         microphone.sweepFadeSeconds = 0.01
         microphone.sweepStartFrequencyHz = 30
         microphone.sweepEndFrequencyHz = min(20_000, 0.4 * rate)
-        let layout = SyntheticReferenceRoom(rate: rate, seatCount: seats, sourcesPerSeat: 3)
+        let layout = SyntheticReferenceRoom(rate: rate, seatCount: seats, sourcesPerSeat: outputChannels > 2 ? 3 : 2)
         let trialPlayer = OfflineTrialSweepPlayer(room: layout.room(measurement: 0, outputChannel: 0), rate: rate)
         self.trialPlayer = trialPlayer
         let transports = ReferenceRoomTransportFactory(layout: layout)
