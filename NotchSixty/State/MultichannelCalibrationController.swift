@@ -335,7 +335,10 @@ final class MultichannelCalibrationController: ObservableObject {
         let subs = profile.subwooferAssignments
             .sorted { $0.index < $1.index }
             .map { MultichannelCalibrationSource.subwoofer($0.index) }
-        return speakers + subs
+        let all = speakers + subs
+        guard arrangementMeasurementEnabled() else { return all }
+        // E25 S6: two-channel arrangements offer only the two feeds as MIMO sources.
+        return TwoChannelMimoSources.restrict(all, arrangement: profiles.selectedSystemProfile?.state.systemArrangement)
     }
 
     var includedSeats: [MultichannelCalibrationSeat] {
