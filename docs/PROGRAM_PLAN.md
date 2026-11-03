@@ -271,14 +271,14 @@ Plan: `docs/epics/E24.md`. E10–E12 are ticked done, but the Level step, the Me
 post-apply verification, mixed phase in the wizard and several E11 views are not reachable from
 the shipped UI.
 
-- [ ] End-to-end wizard harness through production wiring at all eight rates; no `Unconnected*` production defaults
+- [x] End-to-end wizard harness through production wiring at all eight rates; no `Unconnected*` production defaults
 - [x] Measurement-owned level session: Level step and Measure tab generator play noise without normal playback
 - [x] One measurement-readiness result with reason text under every disabled measure button; every measure path stops playback with a notice
 - [x] E24 S2b closed by owner decision (3 Nov 2026): optimizer, characterization, FIR-verify, evidence, guided-workflow and Quiet Zone survey controllers keep refusing `playbackMustBeIdle`; `deployLatestDesign` keeps requiring idle
 - [x] Real post-apply verification; wizard offers mixed phase; joint-bass grid filters deployed
 - [x] E11 leftovers wired: repeat averaging and timing in Room Correction and multichannel; Analysis tab (distortion, RT60/EDT)
 - [ ] E12 leftovers: shared microphone and seat cards; wizard multi-mic pass; target shaping persists (target shaping persisted; shared cards and wizard multi-mic remain)
-- [ ] Acceptance: harness green with no expected-fails; owner smoke checklist
+- [~] Acceptance: harness green with no expected-fails (done, S6); owner smoke checklist pending, after E24 and E25 (open audit items in `docs/epics/E24.md`)
 - [x] Process safeguards done (AGENTS.md section 12); ledger audit of E4, E6, E8, E9, E13 done (S8)
 - [ ] S9 `e24/abx-wiring`: UI caller for `RoomCorrectionABX` (E10 S9)
 - [ ] S10 `e24/ledger-fixes`: E4 S21 excursion lower limit, E6 S5 and E8 S6 wiring checks
