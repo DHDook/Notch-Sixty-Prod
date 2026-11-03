@@ -25,17 +25,24 @@ struct FeedForwardLiveQuietZoneFacts: Equatable, Sendable {
     var outputDeviceUID: String?
     var sampleRate: Double?
     var budget: QuietZoneFeedForwardBudget
+    /// A subwoofer or bass management is active: not available yet (owner decision of 3 Nov 2026, question 18).
+    var subwooferActive = false
 }
 
 /// What the feed-forward shadow and reference driver know.
 struct FeedForwardLiveShadowFacts: Equatable, Sendable {
     var stability: FeedForwardLeakageStabilityCheck.Verdict
-    /// Echo removal verified in the shadow, dB; nil until locked.
+    /// Echo removal verified in the live stage (E4 S22b3): locked, with at least
+    /// `minimumVerifiedProgrammeSeconds` of programme since the lock. Nil until then.
     var verifiedRemovalDecibels: Double?
+    /// Programme seconds the live stage has metered since its lock (0 when not locked).
+    var removalProgrammeSeconds: Double = 0
     /// The reference pump is running (`FeedForwardLiveDriver.state == .running`).
     var referenceRunning: Bool
     /// `FeedForwardLiveDriver.delaySeconds`; spent from the lead budget.
     var pumpDelaySeconds: Double?
+
+    static let minimumVerifiedProgrammeSeconds = 5.0
 
     static let none = FeedForwardLiveShadowFacts(
         stability: .notChecked("no feed-forward shadow"), verifiedRemovalDecibels: nil,
@@ -76,6 +83,8 @@ enum FeedForwardLiveOffReason: Equatable, Sendable {
     case filterDisarmed
     case referenceLost
     case stabilityLost
+    /// The live echo removal stayed under 10 dB for 10 s of programme: the leakage model is stale.
+    case echoRemovalLost
     case waitedTooLong
     case engineRefused(String)
 
@@ -92,6 +101,7 @@ enum FeedForwardLiveOffReason: Equatable, Sendable {
         case .filterDisarmed: return "Feed-forward is off: the engine disarmed the filter. Turn it on again to continue."
         case .referenceLost: return "Feed-forward is off: the upstream reference stopped. Turn it on again to continue."
         case .stabilityLost: return "Feed-forward is off: the leakage stability check no longer passes. Turn it on again to continue."
+        case .echoRemovalLost: return "Feed-forward is off: echo removal fell below 10 dB, so measure leakage again. Turn it on again afterwards."
         case .waitedTooLong: return "Feed-forward did not start: its checks did not pass in time. Turn it on again to retry."
         case .engineRefused(let why): return "Feed-forward did not start: \(why)."
         }
@@ -101,6 +111,8 @@ enum FeedForwardLiveOffReason: Equatable, Sendable {
         switch code {
         case UInt32(N60FeedForwardLiveTripReferenceLost): return "reference lost"
         case UInt32(N60FeedForwardLiveTripNonFinite): return "non-finite signal"
+        case UInt32(N60FeedForwardLiveTripEchoAlignmentLost): return "echo removal lost alignment"
+        case UInt32(N60FeedForwardLiveTripEchoDiverged): return "echo removal diverged"
         default: return "trip \(code)"
         }
     }
@@ -133,14 +145,24 @@ struct FeedForwardLiveArmingPolicy: Equatable, Sendable {
     private var anchorUID: String?
     private var anchorRate: Double?
     private var requestedAt: Double?
+    private var weakProgramme = 0.0
+    private var lastProgramme: Double?
+
+    /// Removal under this for `staleProgrammeSeconds` of programme means the model is stale.
+    static let staleRemovalDecibels = 10.0
+    static let staleProgrammeSeconds = 10.0
 
     var isOff: Bool { phase == .off }
 
     /// The user's request. False (and why) unless Quiet Zone is armed and the filter is off.
     mutating func request(quietZone: FeedForwardLiveQuietZoneFacts, now: Double) -> Bool {
-        guard phase == .off, quietZone.armed, quietZone.sampleRate != nil, quietZone.outputDeviceUID != nil else {
+        guard phase == .off, quietZone.armed, quietZone.sampleRate != nil, quietZone.outputDeviceUID != nil,
+              !quietZone.subwooferActive
+        else {
             return false
         }
+        weakProgramme = 0
+        lastProgramme = nil
         anchorUID = quietZone.outputDeviceUID
         anchorRate = quietZone.sampleRate
         requestedAt = now
@@ -225,7 +247,11 @@ struct FeedForwardLiveArmingPolicy: Equatable, Sendable {
             leadSeconds: preview - delay,
             requiredLeadSeconds: path + QuietZoneFeedForwardBudgetAnalyzer.requiredReserveSeconds,
             referenceLive: shadow.referenceRunning)
-        if case .refused(let why) = FeedForwardLiveArmGate.decide(gate) { return wait(why) }
+        if case .refused(let why) = FeedForwardLiveArmGate.decide(gate) {
+            // E4 S22b3 question 17: the stage needs a few seconds of music to lock and verify.
+            return wait(why == FeedForwardLiveArmGate.removalNotVerifiedMessage
+                ? "play music for a few seconds so echo removal can lock" : why)
+        }
         return .arm(gate)
     }
 
@@ -239,6 +265,7 @@ struct FeedForwardLiveArmingPolicy: Equatable, Sendable {
         guard !quietZone.leaseRequired || quietZone.leaseHealthy else { return turnOff(.leaseLost) }
         guard shadow.referenceRunning else { return turnOff(.referenceLost) }
         guard case .passed = shadow.stability else { return turnOff(.stabilityLost) }
+        if watchRemoval(shadow) { return turnOff(.echoRemovalLost) }
         guard let kernel else { return turnOff(.engineRefused("the live filter is gone")) }
         switch kernel.state {
         case .tripped(let code): return turnOff(.filterTripped(FeedForwardLiveOffReason.tripText(code)))
@@ -249,8 +276,20 @@ struct FeedForwardLiveArmingPolicy: Equatable, Sendable {
         }
     }
 
+    /// True once the live removal sat under 10 dB for 10 s of programme (programme time, not wall time).
+    private mutating func watchRemoval(_ shadow: FeedForwardLiveShadowFacts) -> Bool {
+        let programme = shadow.removalProgrammeSeconds
+        defer { lastProgramme = programme }
+        guard let removal = shadow.verifiedRemovalDecibels else { return false }
+        if removal >= Self.staleRemovalDecibels { weakProgramme = 0; return false }
+        // The first reading only sets the baseline; later ones add the programme heard since.
+        weakProgramme += max(0, programme - (lastProgramme ?? programme))
+        return weakProgramme >= Self.staleProgrammeSeconds
+    }
+
     private func commonBreak(_ quietZone: FeedForwardLiveQuietZoneFacts) -> FeedForwardLiveOffReason? {
         guard quietZone.armed else { return .quietZoneDisarmed }
+        if quietZone.subwooferActive { return .engineRefused("not available with a subwoofer yet") }
         if quietZone.outputDeviceUID != anchorUID { return .environmentChanged }
         guard let rate = quietZone.sampleRate, let was = anchorRate, abs(rate - was) < 0.5 else {
             return .environmentChanged
@@ -303,7 +342,9 @@ final class FeedForwardLiveArmingController: ObservableObject {
     func request(quietZone: FeedForwardLiveQuietZoneFacts) -> Bool {
         let accepted = policy.request(quietZone: quietZone, now: clock())
         if !accepted {
-            statusMessage = quietZone.armed
+            statusMessage = quietZone.subwooferActive
+                ? "Feed-forward is not available with a subwoofer yet."
+                : quietZone.armed
                 ? "Feed-forward is already on."
                 : "Arm Quiet Zone first; feed-forward starts only from an armed Quiet Zone."
         }
@@ -360,15 +401,32 @@ extension AudioIOEngine: FeedForwardLiveArmingEngine {
 }
 
 extension FeedForwardLiveShadowFacts {
+    /// E4 S22b3: the gate trusts the live stage's own removal (locked, at least 5 s of programme since
+    /// the lock), not the shadow's. A stage that is off, searching or refused verifies nothing.
+    init(
+        stability: FeedForwardLeakageStabilityCheck.Verdict, live: N60FeedForwardLiveEchoStatus?,
+        referenceRunning: Bool, pumpDelaySeconds: Double?
+    ) {
+        var removal: Double?
+        var seconds = 0.0
+        if let live, live.state == UInt32(N60FeedForwardLiveEchoLocked) {
+            seconds = live.programmeSeconds
+            if seconds >= Self.minimumVerifiedProgrammeSeconds, live.bandBeforePower > 0, live.bandAfterPower > 0 {
+                removal = 10 * log10(live.bandBeforePower / live.bandAfterPower)
+            }
+        }
+        self.init(
+            stability: stability, verifiedRemovalDecibels: removal, removalProgrammeSeconds: seconds,
+            referenceRunning: referenceRunning, pumpDelaySeconds: pumpDelaySeconds)
+    }
+
     /// Reads the shadow's echo readout and the engine's reference driver.
     @MainActor
     static func read(shadow: QuietZoneFeedForwardShadow, engine: AudioIOEngine) -> FeedForwardLiveShadowFacts {
         let echo = shadow.status.echo
-        var removal: Double?
-        if case .locked = echo.alignment { removal = echo.removalDB }
         let driver = engine.feedForwardLiveDriver
         return FeedForwardLiveShadowFacts(
-            stability: echo.stability, verifiedRemovalDecibels: removal,
+            stability: echo.stability, live: engine.feedForwardLiveStatus()?.echo,
             referenceRunning: driver.state == .running, pumpDelaySeconds: driver.delaySeconds)
     }
 }

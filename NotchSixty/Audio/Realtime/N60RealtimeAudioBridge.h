@@ -347,6 +347,9 @@ uint32_t N60RealtimeAudioBridgeArmFeedForwardLive(
     double leadSeconds,
     double requiredSeconds
 );
+/// E4 S22b3 echo stage: leakage model and timing (control thread; applied while the filter is idle).
+bool N60RealtimeAudioBridgeSetFeedForwardLiveEcho(N60RealtimeAudioBridge * _Nonnull bridge, const N60FeedForwardLiveEcho * _Nullable echo);
+bool N60RealtimeAudioBridgeSetFeedForwardLiveEchoTiming(N60RealtimeAudioBridge * _Nonnull bridge, uint32_t baseLagFrames);
 void N60RealtimeAudioBridgeDisarmFeedForwardLive(N60RealtimeAudioBridge * _Nonnull bridge);
 void N60RealtimeAudioBridgeMarkFeedForwardLiveReferenceLost(N60RealtimeAudioBridge * _Nonnull bridge);
 N60RenderKernelFeedForwardLiveStatus N60RealtimeAudioBridgeGetFeedForwardLiveStatus(

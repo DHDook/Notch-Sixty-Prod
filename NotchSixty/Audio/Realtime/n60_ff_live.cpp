@@ -92,6 +92,9 @@ FeedForwardLive::FeedForwardLive(const N60FeedForwardLiveConfig &config)
     };
     prepare(active_);
     prepare(previous_);
+    cleaned_.assign(maxBlock_, 0.0f);
+    echo_ = std::make_unique<LiveEcho>(config.sampleRate, factor_, half_, maxBlock_, decimatorReversed_,
+                                       polyphase_);
 }
 
 void FeedForwardLive::makeSet(Set &set, const float *left, const float *right,
@@ -184,6 +187,8 @@ void FeedForwardLive::restartState() noexcept {
 
 void FeedForwardLive::reset() noexcept {
     restartState();
+    echo_->reset();
+    pendingFault_ = LiveEcho::Fault::None;
     state_.store(N60FeedForwardLiveIdle, std::memory_order_release);
     tripReason_.store(N60FeedForwardLiveTripNone, std::memory_order_release);
     referenceLost_.store(false, std::memory_order_release);
@@ -191,8 +196,29 @@ void FeedForwardLive::reset() noexcept {
     peak_.store(0, std::memory_order_relaxed);
 }
 
+void FeedForwardLive::pushDrive(const float *left, const float *right, std::uint32_t frames) noexcept {
+    const LiveEcho::Fault fault = echo_->pushDrive(left, right, frames);
+    if (fault != LiveEcho::Fault::None) pendingFault_ = fault;
+}
+
+void FeedForwardLive::handleEchoFault(LiveEcho::Fault fault, std::uint32_t &state) noexcept {
+    if (fault == LiveEcho::Fault::None) return;
+    if (state == N60FeedForwardLiveArmed || gain_ > 0.0f) {
+        // Armed or still fading: never keep playing on a reference that is not cleaned.
+        if (state != N60FeedForwardLiveTripped) {
+            state = N60FeedForwardLiveTripped;
+            tripReason_.store(fault == LiveEcho::Fault::Diverged ? N60FeedForwardLiveTripEchoDiverged
+                                                                 : N60FeedForwardLiveTripEchoAlignmentLost,
+                              std::memory_order_release);
+        }
+    } else if (state != N60FeedForwardLiveTripped) {
+        echo_->dropLock();
+    }
+}
+
 void FeedForwardLive::process(const float *reference, float *left, float *right,
                               std::uint32_t frames) noexcept {
+    echo_->beginCallback(frames);
     while (frames > 0) {
         const std::uint32_t chunk = std::min(frames, maxBlock_);
         processChunk(reference, left, right, chunk);
@@ -212,7 +238,13 @@ void FeedForwardLive::processChunk(const float *reference, float *left, float *r
         tripReason_.store(N60FeedForwardLiveTripReferenceLost, std::memory_order_release);
     }
     std::uint32_t state = state_.load(std::memory_order_relaxed);
-    const bool wanted = armRequested_.load(std::memory_order_acquire);
+    // E4 S22b3: a model or timing waits for an idle filter; an armed one never sees them change.
+    echo_->applyPending(state != N60FeedForwardLiveArmed && gain_ <= 0.0f);
+    handleEchoFault(pendingFault_, state);
+    pendingFault_ = LiveEcho::Fault::None;
+    // With an echo model the filter arms only on a locked stage (the loop is closed otherwise).
+    const bool wanted = armRequested_.load(std::memory_order_acquire)
+                        && (!echo_->enabled() || echo_->locked());
     if (state == N60FeedForwardLiveIdle && wanted && haveActive_) state = N60FeedForwardLiveArmed;
     if (state == N60FeedForwardLiveArmed && !wanted) state = N60FeedForwardLiveIdle;
     if (mailbox_.acquire()) {
@@ -230,9 +262,14 @@ void FeedForwardLive::processChunk(const float *reference, float *left, float *r
     // history_ is [kept samples][new samples]: slide the last kept samples of the previous chunk
     // down, then append this chunk.
     {
+        const float *source = reference;
+        if (echo_->enabled()) {
+            handleEchoFault(echo_->clean(reference, cleaned_.data(), frames), state);
+            source = cleaned_.data();
+        }
         float *base = history_.data();
         std::memmove(base, base + lastFrames_, historyKept_ * sizeof(float));
-        std::memcpy(base + historyKept_, reference, frames * sizeof(float));
+        std::memcpy(base + historyKept_, source, frames * sizeof(float));
         lastFrames_ = frames;
     }
     const float *history = history_.data();
@@ -376,6 +413,28 @@ void N60FeedForwardLiveMarkReferenceLost(N60FeedForwardLive *live) { live->core.
 void N60FeedForwardLiveProcess(N60FeedForwardLive *live, const float *reference, float *left,
                                float *right, uint32_t frames) {
     live->core.process(reference, left, right, frames);
+}
+
+bool N60FeedForwardLiveSetEcho(N60FeedForwardLive *live, const N60FeedForwardLiveEcho *echo) {
+    return live->core.setEcho(echo);
+}
+
+bool N60FeedForwardLiveSetEchoTiming(N60FeedForwardLive *live, uint32_t baseLagFrames) {
+    return live->core.setEchoTiming(baseLagFrames);
+}
+
+void N60FeedForwardLivePushDrive(N60FeedForwardLive *live, const float *left, const float *right,
+                                 uint32_t frames) {
+    live->core.pushDrive(left, right, frames);
+}
+
+void N60FeedForwardLiveNoteReferenceGaps(N60FeedForwardLive *live, uint32_t zeroFrames,
+                                         uint32_t skippedFrames) {
+    live->core.noteGaps(zeroFrames, skippedFrames);
+}
+
+N60FeedForwardLiveEchoStatus N60FeedForwardLiveGetEchoStatus(const N60FeedForwardLive *live) {
+    return live->core.echoStatus();
 }
 
 void N60FeedForwardLiveReset(N60FeedForwardLive *live) { live->core.reset(); }

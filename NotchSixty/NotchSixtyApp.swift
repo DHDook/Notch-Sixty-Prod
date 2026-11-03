@@ -192,6 +192,7 @@ final class ProductController: ObservableObject {
         feedForwardShadow.driveSource = audioEngine
         // E4 S25: the engine refuses the weights unless that flag is on, and publishing never arms.
         feedForwardShadow.weightsSink = audioEngine
+        feedForwardShadow.echoSink = audioEngine
         feedForwardShadow.referenceDriver = audioEngine
         feedForwardShadow.observe(feedForwardSurvey)
         self.feedForwardShadow = feedForwardShadow
@@ -297,6 +298,7 @@ final class ProductController: ObservableObject {
         feedForwardShadow.driveSource = audioEngine
         // E4 S25: the engine refuses the weights unless that flag is on, and publishing never arms.
         feedForwardShadow.weightsSink = audioEngine
+        feedForwardShadow.echoSink = audioEngine
         feedForwardShadow.referenceDriver = audioEngine
         feedForwardShadow.observe(feedForwardSurvey)
         self.feedForwardShadow = feedForwardShadow

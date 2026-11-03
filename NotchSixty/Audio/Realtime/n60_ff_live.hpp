@@ -4,11 +4,13 @@
 // tail). The C interface, the design and the realtime contract are in N60FeedForwardLive.h.
 
 #include "N60FeedForwardLive.h"
+#include "n60_ff_echo.hpp"
 #include "n60_fxlms.hpp"
 
 #include <array>
 #include <atomic>
 #include <cstdint>
+#include <memory>
 #include <vector>
 
 namespace n60::anc {
@@ -25,6 +27,14 @@ public:
     std::uint32_t arm(double leadSeconds, double requiredSeconds) noexcept;
     void disarm() noexcept { armRequested_.store(false, std::memory_order_release); }
     void markReferenceLost() noexcept { referenceLost_.store(true, std::memory_order_release); }
+    // E4 S22b3 echo stage. Control thread: SetEcho, SetEchoTiming. Audio thread: PushDrive, NoteGaps.
+    bool setEcho(const N60FeedForwardLiveEcho *echo) noexcept { return echo_->setModel(echo); }
+    bool setEchoTiming(std::uint32_t baseLagFrames) noexcept { return echo_->setTiming(baseLagFrames); }
+    void pushDrive(const float *left, const float *right, std::uint32_t frames) noexcept;
+    void noteGaps(std::uint32_t zeroFrames, std::uint32_t skippedFrames) noexcept {
+        echo_->noteGaps(zeroFrames, skippedFrames);
+    }
+    N60FeedForwardLiveEchoStatus echoStatus() const noexcept { return echo_->status(); }
     void process(const float *reference, float *left, float *right, std::uint32_t frames) noexcept;
     void reset() noexcept;
     N60FeedForwardLiveStatus status() const noexcept;
@@ -45,6 +55,8 @@ private:
                       std::uint32_t frames) noexcept;
     static float dot(const float *a, const float *b, std::uint32_t count) noexcept;
     void restartState() noexcept;
+    // Trips (armed or still fading) or lets an idle stage search again.
+    void handleEchoFault(LiveEcho::Fault fault, std::uint32_t &state) noexcept;
 
     // Fixed after construction.
     std::uint32_t factor_;
@@ -63,6 +75,10 @@ private:
     std::vector<double> chain_;          // decimator * interpolator
     std::vector<float> decimatorReversed_;
     std::vector<float> polyphase_;       // [D][kHistory]
+
+    std::unique_ptr<LiveEcho> echo_;
+    std::vector<float> cleaned_;         // the reference after the echo stage, maxBlock_
+    LiveEcho::Fault pendingFault_ = LiveEcho::Fault::None;
 
     // Control plane.
     TripleBuffer<Set> mailbox_;

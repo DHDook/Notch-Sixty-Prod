@@ -200,6 +200,7 @@ enum FeedForwardLeakageStabilityCheck {
 /// accepted as the gate once echo removal has been verified at `minimumVerifiedRemovalDecibels`.
 enum FeedForwardLiveArmGate {
     static let minimumVerifiedRemovalDecibels = 20.0
+    static let removalNotVerifiedMessage = "echo removal is not verified at 20 dB"
 
     struct Inputs: Equatable, Sendable {
         var featureEnabled: Bool
@@ -229,7 +230,7 @@ enum FeedForwardLiveArmGate {
         }
         guard let removal = input.verifiedRemovalDecibels, removal.isFinite,
               removal >= minimumVerifiedRemovalDecibels
-        else { return .refused("echo removal is not verified at 20 dB") }
+        else { return .refused(removalNotVerifiedMessage) }
         guard input.leadSeconds.isFinite, input.requiredLeadSeconds.isFinite,
               input.leadSeconds >= input.requiredLeadSeconds
         else { return .refused("reference lead is shorter than the budget") }
