@@ -289,7 +289,8 @@ struct OfflineSetupRig {
 
     static let secondInputUID = "e24-reference-mic-b"
 
-    init(rate: Double, permission: MicrophonePermissionStatus = .authorized, seats: Int = 3, secondMicrophone: Bool = false) throws {
+    init(rate: Double, permission: MicrophonePermissionStatus = .authorized, seats: Int = 3, secondMicrophone: Bool = false,
+         arrangementEnabled: Bool = false, outputChannels: Int = 6) throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("NotchSixty-E24S0-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
@@ -298,7 +299,7 @@ struct OfflineSetupRig {
         let ranges = [AudioSampleRateRange(minimum: 44_100, maximum: 384_000)]
         let output = AudioOutputDevice(
             deviceID: 9_001, uid: Self.outputUID, name: "Reference 2.1 Interface", nominalSampleRate: rate,
-            availableSampleRateRanges: ranges, outputChannelCount: 6)
+            availableSampleRateRanges: ranges, outputChannelCount: UInt32(outputChannels))
         let input = AudioInputDevice(
             deviceID: 9_002, uid: Self.inputUID, name: "Reference Measurement Mic", nominalSampleRate: rate,
             availableSampleRateRanges: ranges)
@@ -336,6 +337,7 @@ struct OfflineSetupRig {
                     try transports.make(program: program, inputChannel: inputChannel, outputChannel: outputChannel)
                 }
             })
+        calibration.arrangementMeasurementEnabled = { arrangementEnabled }
         model = SystemSetupFlowModel(
             engine: engine, profiles: profiles, microphone: microphone, calibration: calibration,
             services: ProductionSystemSetupServices.production(
@@ -351,7 +353,8 @@ struct OfflineSetupRig {
                 levelTransport: levelTransports.factory, trialPlayback: trialPlayer, abx: abxPlayer),
             sessions: SystemSetupSessionStore(directory: root.appendingPathComponent("sessions")),
             roomProjectsDirectory: root.appendingPathComponent("RoomCorrection"),
-            abxDirectory: root.appendingPathComponent("ABX"))
+            abxDirectory: root.appendingPathComponent("ABX"),
+            arrangementEnabled: arrangementEnabled)
     }
 
     /// A stereo pair plus one subwoofer on the reference interface (2.1).

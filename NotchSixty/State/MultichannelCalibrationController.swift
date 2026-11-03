@@ -291,9 +291,40 @@ final class MultichannelCalibrationController: ObservableObject {
         self.analysisOperation = analysisOperation
     }
 
-    var profile: OutputDeviceProfileConfiguration? {
+    /// E25 S3: whether the stored two-channel arrangement supplies the measurement feeds. Swift reads the flag here;
+    /// tests replace it.
+    var arrangementMeasurementEnabled: () -> Bool = { FeatureFlags().isEnabled(.outputsAndSpeakers) }
+
+    /// The enabled Output Device Profile that is stored on the selected system, if any.
+    var storedProfile: OutputDeviceProfileConfiguration? {
         guard let profile = profiles.selectedSystemOutputDeviceProfile, profile.enabled else { return nil }
         return profile
+    }
+
+    /// The profile measurement runs on. With `e25.outputs-and-speakers` on and a two-channel arrangement (one DAC, no
+    /// profile), the feeds in use are the measurement sources: a stereo measurement profile on outputs 0 and 1, built
+    /// here and never stored. Otherwise the stored profile.
+    var profile: OutputDeviceProfileConfiguration? {
+        if let stored = storedProfile { return stored }
+        guard arrangementMeasurementEnabled(),
+              let arrangement = profiles.selectedSystemProfile?.state.systemArrangement,
+              arrangement.outputs.channelsInUse == 2, !arrangement.outputs.deviceUID.isEmpty else { return nil }
+        let uid = arrangement.outputs.deviceUID
+        return OutputDeviceProfileConfiguration(
+            enabled: true, programLayout: .stereo,
+            speakerAssignments: [
+                SemanticSpeakerOutputAssignment(
+                    role: .frontLeft, destination: PhysicalOutputEndpoint(deviceUID: uid, channelIndex: 0)),
+                SemanticSpeakerOutputAssignment(
+                    role: .frontRight, destination: PhysicalOutputEndpoint(deviceUID: uid, channelIndex: 1)),
+            ])
+    }
+
+    /// Bass management as the live route plan sees it: a derived feed profile is never bass managed.
+    private var planBassEnabled: Bool {
+        if storedProfile == nil, profile != nil { return false }
+        return profiles.selectedSystemProfile?.state.bassManagement.enabled
+            ?? engine.bassManagementConfiguration.enabled
     }
 
     var sources: [MultichannelCalibrationSource] {
@@ -518,8 +549,7 @@ final class MultichannelCalibrationController: ObservableObject {
         }
         guard let profile else { throw MultichannelCalibrationCampaignError.outputDeviceProfileRequired }
         playbackNotice = MeasurementPlaybackPolicy.stopPlaybackIfRunning(engine)
-        let bassEnabled = profiles.selectedSystemProfile?.state.bassManagement.enabled
-            ?? engine.bassManagementConfiguration.enabled
+        let bassEnabled = planBassEnabled
         let routePlan = try profile.makeLivePlan(
             availableDevices: engine.outputDevices,
             sampleRate: output.nominalSampleRate,
@@ -608,8 +638,7 @@ final class MultichannelCalibrationController: ObservableObject {
         // E24 S2: measuring needs the output to itself; stop playback and say so.
         playbackNotice = MeasurementPlaybackPolicy.stopPlaybackIfRunning(engine)
 
-        let bassEnabled = profiles.selectedSystemProfile?.state.bassManagement.enabled
-            ?? engine.bassManagementConfiguration.enabled
+        let bassEnabled = planBassEnabled
         let routePlan = try profile.makeLivePlan(
             availableDevices: engine.outputDevices,
             sampleRate: output.nominalSampleRate,
@@ -832,8 +861,7 @@ final class MultichannelCalibrationController: ObservableObject {
         }
         let seats = seats
         let measurements = measurements
-        let bassEnabled = profiles.selectedSystemProfile?.state.bassManagement.enabled
-            ?? engine.bassManagementConfiguration.enabled
+        let bassEnabled = planBassEnabled
         let measuredAt = measurements.compactMap { $0.channel.capturedAt }.max() ?? Date()
         do {
             let result = try await Self.runOnLargeStack { [designer, predictionVerifier] in
@@ -897,7 +925,7 @@ final class MultichannelCalibrationController: ObservableObject {
                 prediction.blockingReasons
             )
         }
-        guard let profile else {
+        guard let profile = storedProfile else {
             throw MultichannelCalibrationCampaignError.outputDeviceProfileRequired
         }
         let updated = try design.applying(to: profile)
