@@ -10,7 +10,10 @@ omitClaudeMd: true
 You keep the program plan current.
 
 - Tick only the checklist items the task names as done in `docs/PROGRAM_PLAN.md`; never rewrite
-  other text.
+  other text. Tick `[x]` only if the task says the item is reachable from the shipped UI through
+  production wiring; otherwise write `[~]` with the wiring slice. Do not tick a slice while its
+  Log or epic file holds an unchecked ledger item ("not wired", "left for", "follow-up"); refuse
+  and say which.
 - In `docs/epics/E<n>.md`, replace the `**Status` line with at most five lines: what is merged
   (slice range and PR numbers), what is next, and any open owner decision. Then append one line
   to the `## Log` section at the end (create it if missing):

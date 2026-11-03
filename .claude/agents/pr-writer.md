@@ -12,7 +12,7 @@ Draft a pull request for the current branch.
 1. Read `git log --oneline origin/main..HEAD` and `git diff --stat origin/main...HEAD`; open
    individual diffs only where needed.
 2. Title: `E<n>: <what changed>` in under 70 characters.
-3. Body sections, each short: Purpose · Architecture impact · Realtime impact ·
+3. Body sections, each short: Reachable from UI: yes/no (one line naming the path from user action to engine, or the slice that wires it) · Purpose · Architecture impact · Realtime impact ·
    Provenance / source of truth (cite the public spec or derivation for any DSP maths) ·
    Tests added and run · Feature flag used · Manual / bench validation required ·
    App Sandbox / App Store impact.

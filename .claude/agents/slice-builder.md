@@ -27,7 +27,9 @@ so everything you need is in the task message, `CLAUDE.md`, the epic's section o
    agent to find files instead of reading large files. Never read `AudioIOEngine.swift`,
    `N60RenderKernel.c` or `ProductProfiles.swift` whole; read line ranges.
 4. Make the change, following `AGENTS.md` and `CLAUDE.md` (flags, realtime rules, tests at the
-   standard rates for DSP).
+   standard rates for DSP). Trace the feature from the user action to the engine (AGENTS.md
+   section 12): no `Unconnected*` production defaults; anything not wired is `[~]` with an owning
+   slice, and any "not wired" or "left for" note becomes an unchecked plan item.
 5. Verify with the build-test-runner agent, affected test classes and harnesses only. If the
    change touches the engine, `NotchSixty/Audio/Realtime`, Core Audio, or anything called from
    an audio callback, run the realtime-reviewer agent and fix what it flags. At most two fix
@@ -38,7 +40,7 @@ so everything you need is in the task message, `CLAUDE.md`, the epic's section o
    and open the PR with `gh pr create`. Add the label `needs-owner` if the PR touches anything
    in the owner-review list in `CLAUDE.md` (Merge policy).
 8. Return at most eight lines: PR number and link, `needs-owner` or `low-risk`, what changed in
-   one sentence, local test result, realtime-reviewer verdict if run, bench checks added, and
+   one sentence, "Reachable from UI: yes/no", local test result, realtime-reviewer verdict if run, bench checks added, and
    the next slice you would pick.
 
 Do not merge, do not wait for CI, and do not start a second slice.
