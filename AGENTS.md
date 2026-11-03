@@ -210,3 +210,11 @@ CI is three workflows:
 
 Do not add per-PR or per-branch workflows. Extend one of these three instead.
 
+
+## 12. Definition of done (E24 S7, owner-approved 3 Nov 2026)
+
+- `[x]` in a plan means reachable from the shipped UI through production wiring. Code that is built but not wired is `[~]` ("built dark") and names the slice that wires it.
+- A "not wired", "left for" or "follow-up" note in an epic Log becomes an unchecked plan item with an owning slice. A slice with an open ledger entry is not ticked.
+- A flag-removal or "ship" slice needs an end-to-end test through production wiring and no open ledger entries for its epic.
+- Production code has no `Unconnected*` (always-unavailable) defaults on injectable services; tests inject fakes explicitly.
+- Every PR body states "Reachable from UI: yes/no", with the path from the user action to the engine.
