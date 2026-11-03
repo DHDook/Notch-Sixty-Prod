@@ -1,7 +1,10 @@
 name: PR check
 
-# Every pull request to main: build, full XCTest and behavioural C harnesses.
-# Target: under 10 minutes.
+# Every pull request to main: build, XCTest and behavioural C harnesses.
+# Target: under 10 minutes. The slowest every-sample-rate XCTest cases (each over 30 s on the
+# runner, about 25 minutes together) are skipped here and run in full by macos-full.yml
+# (nightly on main, PRs labelled full-ci, manual). Add a case to the skip list below when it
+# takes more than about 30 s.
 on:
   pull_request:
     branches:
@@ -43,6 +46,16 @@ jobs:
             -derivedDataPath "$RUNNER_TEMP/DerivedData" \
             CODE_SIGNING_ALLOWED=NO \
             ENABLE_TESTABILITY=YES \
+            -skip-testing:NotchSixtyTests/SeparateDeviceTimingTests/testOnePassAcrossDevicesMatchesThreeSequentialPassesAtEveryRate \
+            -skip-testing:NotchSixtyTests/SeatMeasurerTests/testOnePassMatchesThreeSequentialPassesAtEveryRate \
+            -skip-testing:NotchSixtyTests/SystemSetupEndToEndTests/testAllTenStepsAtEveryRate \
+            -skip-testing:NotchSixtyTests/SeparateDeviceTimingTests/testRepeatsAcrossDevicesKeepWithinSeatTiming \
+            -skip-testing:NotchSixtyTests/SeatMeasurerTests/testWizardMeasuresThreeSeatsInOnePassPerSourceAtEveryRate \
+            -skip-testing:NotchSixtyTests/QuietZoneUpstreamSurveyTests/testLeadWithinATenthOfAMillisecondAndPredictionWithinADecibelAtEveryRate \
+            -skip-testing:NotchSixtyTests/RoomCorrectionDeployControllerTests/testCorrectDesignPassesAtEveryRate \
+            -skip-testing:NotchSixtyTests/SeatMeasurerTests/testBurstInOneRepeatAtOneSeatRejectsOnlyThere \
+            -skip-testing:NotchSixtyTests/QuietZoneUpstreamSurveyTests/testAShortLeadSaysMoveFurtherOut \
+            -skip-testing:NotchSixtyTests/FeedForwardLiveReferencePumpTests/testReferenceLandsOnTheOutputClockAtEightRatesWithDrift \
             test 2>&1 | tee "$RUNNER_TEMP/xctest.log"
 
       - name: Upload XCTest log
