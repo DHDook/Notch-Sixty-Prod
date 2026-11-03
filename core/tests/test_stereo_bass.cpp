@@ -354,6 +354,42 @@ static void testNoRenderAllocation() {
     }
 }
 
+// 7. A live polarity flip ramps monotonically through zero (no overshoot, no step), and the trailer is topology.
+static void testLiveFlipAndTrailerTopology() {
+    for (double rate : kRates) {
+        const float one = 1.0f;
+        n60_graph *g = nullptr;
+        CHECK(buildGraph(rate, {stage(N60_STAGE_GAIN, 1, 0, 0, &one, 1)}, &g) == N60_STATUS_OK, "flip graph builds");
+        if (!g) continue;
+        std::vector<float> l(kBlock * 40, 0.5f), r(l.size(), 0.5f), ol, orr;
+        const size_t half = kBlock * 4;
+        std::vector<float> l1(l.begin(), l.begin() + half), r1(l1.size(), 0.5f), o1, o2;
+        run(g, l1, r1, o1, o2);
+        const n60_param_record flip = {1, 0, -1.0f, 0};
+        CHECK(n60_graph_post_params(g, &flip, 1) == N60_STATUS_OK, "live negative gain accepted");
+        run(g, l, r, ol, orr);
+        float prev = ol[0];
+        bool monotone = true, inRange = true;
+        for (size_t i = 0; i < ol.size(); i++) {
+            if (ol[i] > prev + 1e-6f) monotone = false;
+            if (ol[i] > 0.5f + 1e-6f || ol[i] < -0.5f - 1e-6f) inRange = false;
+            prev = ol[i];
+        }
+        CHECK(monotone && inRange, "flip is monotone and bounded (rate %.0f)", rate);
+        CHECK(ol.back() == -0.5f, "flip settles exactly (rate %.0f)", rate);
+        n60_graph_retire(g);
+
+        const float p[12] = {100, 0, 0, 1, 0, 0, 80, 0.7f, 2, 4, 2, 4};
+        CHECK(buildGraph(rate, {stage(N60_STAGE_STEREO_CROSSOVER, 1, 0, 1, p, 12)}, &g) == N60_STATUS_OK, "trailer graph builds");
+        if (!g) continue;
+        for (uint32_t k = 8; k < 12; k++) {
+            const n60_param_record rec = {1, k, 1.0f, 0};
+            CHECK(n60_graph_post_params(g, &rec, 1) == N60_STATUS_UNSUPPORTED, "trailer index %u is topology (rate %.0f)", k, rate);
+        }
+        n60_graph_retire(g);
+    }
+}
+
 int main() {
     testNoTrailerBitIdentical();
     testLevelAtCorner();
@@ -361,6 +397,7 @@ int main() {
     testMonoBelowStereoAbove();
     testPolarity();
     testValidation();
+    testLiveFlipAndTrailerTopology();
     testRoomFirCoexistence();
     testNoRenderAllocation();
     if (failures != 0) {

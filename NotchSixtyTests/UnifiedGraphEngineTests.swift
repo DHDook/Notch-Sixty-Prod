@@ -1584,6 +1584,32 @@ final class StereoBassAlignmentTests: XCTestCase {
         }
     }
 
+    func testFilterWithoutCrossoverIsIgnoredAndOnlyLR12AndLR36FlipTheSubSum() throws {
+        // No crossover in the snapshot: the filter changes nothing, the calibration still applies.
+        var plain = try configuration(N60DSPGraphSnapshotMakeUnity(48_000), rate: 48_000, alignment: nil)
+        XCTAssertNil(plain.stereoStages.crossover)
+        var feed = StereoBassAlignment(monoBassFilter: MonoBassFilter(family: .bessel, slopeDBPerOctave: 36))
+        feed.left.trimDB = 6
+        let before = plain
+        UnifiedGraphTranslator.apply(feed, to: &plain)
+        XCTAssertNil(plain.stereoStages.crossover)
+        XCTAssertEqual(plain.lanes[0].outputGain, before.lanes[0].outputGain * feed.left.linearGain)
+
+        let base = try XCTUnwrap(try configuration(monoBassSnapshot(rate: 48_000), rate: 48_000, alignment: nil).stereoStages.crossover)
+        XCTAssertEqual(base.count, 8)
+        for family in MonoBassFilter.Family.allCases {
+            for slope in MonoBassFilter.slopes {
+                let filter = MonoBassFilter(family: family, slopeDBPerOctave: slope)
+                let a = StereoBassAlignment(monoBassFilter: filter)
+                let params = try XCTUnwrap(try configuration(monoBassSnapshot(rate: 48_000), rate: 48_000, alignment: a).stereoStages.crossover)
+                XCTAssertEqual(params.count, 12)
+                XCTAssertEqual(Array(params[8...]), filter.trailer)
+                let flipped = params[4] != base[4]
+                XCTAssertEqual(flipped, family == .linkwitzRiley && (slope == 12 || slope == 36), "\(family) \(slope)")
+            }
+        }
+    }
+
     func testOutOfRangeAlignmentIsRefusedBeforeTheGraph() {
         var s = N60DSPGraphSnapshotMakeUnity(48_000)
         var feed = StereoBassAlignment()
