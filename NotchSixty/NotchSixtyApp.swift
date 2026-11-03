@@ -162,6 +162,11 @@ final class ProductController: ObservableObject {
                 linkProvider: { [weak audioEngine] in audioEngine?.adaptiveTonalLink }
             ))
         }
+        if FeatureFlags().isEnabled(.noiseSurvey) {
+            let survey = QuietZoneNoiseSurveyController()
+            survey.attach(to: ambientCompensation)
+            activeQuietZone.attachNoiseSurvey(survey)
+        }
         if FeatureFlags().isEnabled(.overnight) {
             activeQuietZone.attachOvernightPower(OvernightPowerAssertion())
         }
@@ -647,14 +652,14 @@ final class ProductController: ObservableObject {
             .joined(separator: "\n")
     }
 
-    /// E4 S31: the reviewer measurement report (S16 readout, S28 predictions, S17 log). The noise survey is
-    /// not yet held by a controller, so predictions are empty until it is wired to its card.
+    /// E4 S31: the reviewer measurement report (S16 readout, S28 predictions, S17 log). Predictions come from
+    /// the noise survey when `e4.noise-survey` is on and enough ambient snapshots have been seen.
     func measurementReport(version: String, build: String) -> ANCMeasurementReport {
         ANCMeasurementReport(
             version: version,
             build: build,
             verifiedReadout: activeQuietZone.verifiedReadout,
-            survey: nil,
+            survey: activeQuietZone.noiseSurvey?.report,
             recorder: activeQuietZone.flightRecorder
         )
     }
