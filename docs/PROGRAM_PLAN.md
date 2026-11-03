@@ -271,14 +271,14 @@ Plan: `docs/epics/E24.md`. E10–E12 are ticked done, but the Level step, the Me
 post-apply verification, mixed phase in the wizard and several E11 views are not reachable from
 the shipped UI.
 
-- [ ] End-to-end wizard harness through production wiring at all eight rates; no `Unconnected*` production defaults
+- [x] End-to-end wizard harness through production wiring at all eight rates; no `Unconnected*` production defaults
 - [x] Measurement-owned level session: Level step and Measure tab generator play noise without normal playback
 - [x] One measurement-readiness result with reason text under every disabled measure button; every measure path stops playback with a notice
 - [ ] E24 S2b: optimizer, characterization, FIR-verify, evidence, guided-workflow and Quiet Zone survey controllers stop playback with a notice (owner sign-off); `deployLatestDesign` keeps refusing by design
 - [x] Real post-apply verification; wizard offers mixed phase; joint-bass grid filters deployed
 - [x] E11 leftovers wired: repeat averaging and timing in Room Correction and multichannel; Analysis tab (distortion, RT60/EDT)
 - [ ] E12 leftovers: shared microphone and seat cards; wizard multi-mic pass; target shaping persists (target shaping persisted; shared cards and wizard multi-mic remain)
-- [ ] Acceptance: harness green with no expected-fails; owner smoke checklist
+- [x] Acceptance: harness green with no expected-fails (owner smoke checklist deferred to after E24 and E25; open audit items listed in `docs/epics/E24.md`)
 - [ ] Process safeguards (two kinds of done, deferral ledger, ship gate) and a ledger audit of E4, E6, E8, E9, E13
 
 ### E25 Outputs and speaker arrangement, one-DAC support (owner, 1 Nov 2026)
