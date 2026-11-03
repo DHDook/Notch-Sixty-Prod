@@ -181,6 +181,14 @@ final class ActiveQuietZoneController: ObservableObject {
 
     var isHoldingOvernightPower: Bool { overnightPower?.isHeld ?? false }
 
+    /// E4 S28: the noise survey the Quiet Zone card shows. Measurement only; never read by the arm path.
+    private(set) var noiseSurvey: QuietZoneNoiseSurveyController?
+
+    func attachNoiseSurvey(_ survey: QuietZoneNoiseSurveyController?) {
+        noiseSurvey = survey
+        objectWillChange.send()
+    }
+
     func attachOvernightPower(_ assertion: OvernightPowerAssertion?) {
         overnightPower?.release()
         overnightPower = assertion

@@ -1230,6 +1230,9 @@ struct ProductionActiveAcousticsWorkspace: View {
             .padding(18)
             .glassEffect(.regular, in: .rect(cornerRadius: 18))
 
+            if let noiseSurvey = quietZone.noiseSurvey {
+                ProductionNoiseSurveyCard(survey: noiseSurvey)
+            }
             spatialQuietZoneCard
             ProductionFeedForwardReadinessCard(quietZone: quietZone)
             ProductionFeedForwardDesignSurveyCard(survey: feedForwardSurvey)

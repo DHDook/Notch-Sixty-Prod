@@ -76,3 +76,48 @@ final class QuietZoneNoiseSurveyTests: XCTestCase {
         XCTAssertEqual(QuietZoneNoiseSurvey.nearFieldGuidance.count, 3)
     }
 }
+
+/// E4 S28 wiring: ambient snapshots accumulate into the survey the card and report read.
+@MainActor
+final class QuietZoneNoiseSurveyControllerTests: XCTestCase {
+    private func snapshot(_ levels: [Double: Double], spl: Double? = nil) -> AmbientAnalysisSnapshot {
+        AmbientAnalysisSnapshot(
+            sampleRate: 48_000, analyzedFrames: 48_000, separationMode: .microphoneOnly, separationConfidence: 0,
+            predictionGain: nil, microphoneLevelDBFS: -40, predictedPlaybackLevelDBFS: nil,
+            ambientLevelDBFS: -40, ambientLevelDBSPL: spl, stationarityScore: 1, periodicityScore: 1,
+            periodicFrequencyHz: nil, lowFrequencyEnergyFraction: 1, cancellationCandidateScore: 1,
+            character: .tonal,
+            spectrum: levels.sorted { $0.key < $1.key }.map {
+                AmbientSpectrumBand(lowerFrequencyHz: $0.key * 0.89, centerFrequencyHz: $0.key,
+                                    upperFrequencyHz: $0.key * 1.12, levelDBFS: $0.value)
+            },
+            tonalComponents: [])
+    }
+
+    func testNoReportUntilEnoughReadings() {
+        let c = QuietZoneNoiseSurveyController()
+        for _ in 0..<(QuietZoneNoiseSurveyAccumulator.minimumCount - 1) { c.ingest(snapshot([50: -30])) }
+        XCTAssertNil(c.report)
+    }
+
+    func testSPLOffsetApplies() throws {
+        let c = QuietZoneNoiseSurveyController()
+        for _ in 0..<20 { c.ingest(snapshot([50: -20, 100: -60], spl: 74)) }  // offset 114 dB
+        XCTAssertTrue(c.isCalibratedToSPL)
+        let report = try XCTUnwrap(c.report)
+        let f50 = try XCTUnwrap(report.findings.first { $0.centerHz == 50 })
+        XCTAssertEqual(f50.levelDB, 94, accuracy: 0.01)
+        XCTAssertEqual(f50.noiseClass, .cancellableTonal)  // 40 dB above its neighbour, steady
+        XCTAssertEqual(f50.predictedReductionDB, QuietZoneNoiseSurvey.maximumTonalReductionDB, accuracy: 0.01)
+    }
+
+    func testFluctuatingLowBandNeedsReferenceAndReportCarriesPredictions() throws {
+        let c = QuietZoneNoiseSurveyController()
+        for i in 0..<20 { c.ingest(snapshot([63: i.isMultiple(of: 2) ? -10 : -30, 80: -60, 50: -60])) }
+        XCTAssertFalse(c.isCalibratedToSPL)
+        let report = try XCTUnwrap(c.report)
+        XCTAssertEqual(report.findings.first { $0.centerHz == 63 }?.noiseClass, .needsReference)
+        c.reset()
+        XCTAssertNil(c.report)
+    }
+}
