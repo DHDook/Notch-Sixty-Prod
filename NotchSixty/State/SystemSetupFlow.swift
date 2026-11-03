@@ -34,9 +34,18 @@ enum SystemSetupDesignStage: String, Codable, Sendable {
 }
 
 struct SystemSetupChoices: Codable, Equatable, Sendable {
+    /// True when the setup has a DSP-fed subwoofer to align and design bass for.
+    var hasDspSubwoofer: Bool {
+        if let arrangement { return arrangement.bass == .dspToSubOutputs && arrangement.subwooferCount > 0 }
+        return topology?.hasSubwoofer == true
+    }
+
     var outputUID: String?
     var sampleRate: Double?
     var topology: SystemSetupTopology?
+    /// E25 S3 (session schema 2): the outputs and speaker arrangement chosen on the Outputs and Speakers steps.
+    /// nil with the flag off, where `topology` decides.
+    var arrangement: SystemArrangement?
     var microphoneUID: String?
     var microphoneCalibrationFile: String?
     var sweepLevelDBFS: Double?
@@ -106,7 +115,7 @@ struct SystemSetupFlow: Codable, Equatable, Sendable {
             if c.outputUID == nil { return "Choose an output device." }
             if (c.sampleRate ?? 0) <= 0 { return "The output sample rate is unknown." }
         case .topology:
-            if c.topology == nil { return "Say what speakers you have." }
+            if c.arrangement == nil && c.topology == nil { return "Say what speakers you have." }
         case .microphone:
             if c.microphoneUID == nil { return "Choose a measurement microphone." }
             if c.sweepLevelDBFS == nil { return "Set the sweep level first." }
@@ -118,7 +127,7 @@ struct SystemSetupFlow: Codable, Equatable, Sendable {
         case .alignment:
             if !c.alignmentApplied { return "Apply the alignment first." }
         case .bass:
-            if c.topology?.hasSubwoofer == true && !c.bassApplied {
+            if c.hasDspSubwoofer && !c.bassApplied {
                 return "Apply the bass design first."
             }
         case .correction:
@@ -135,7 +144,7 @@ struct SystemSetupFlow: Codable, Equatable, Sendable {
     func canSkip(_ step: SystemSetupStep) -> Bool {
         switch step {
         case .room: return true
-        case .bass: return choices.topology?.hasSubwoofer == false
+        case .bass: return !choices.hasDspSubwoofer
         default: return false
         }
     }
@@ -263,6 +272,23 @@ struct SystemSetupFlow: Codable, Equatable, Sendable {
         skipped.subtract(SystemSetupStep.allCases.filter(\.dependsOnMeasurement))
         step = .measure
         invalidationReason = "The measurements were not kept, so the setup resumed at Measure seats."
+    }
+
+    /// E25 S3: a schema-1 session whose subwoofer cannot keep its output resumes at Speakers, and says why.
+    mutating func resumeAtSpeakers(note: String) {
+        guard phase == .running else { return }
+        if step.index > SystemSetupStep.topology.index {
+            let later = SystemSetupStep.allCases.filter { $0.index >= SystemSetupStep.topology.index }
+            completed.subtract(later)
+            skipped.subtract(later)
+            choices.measurementIDs = []
+            choices.alignmentApplied = false
+            choices.bassApplied = false
+            choices.correctionApplied = false
+            choices.verificationPassed = nil
+            step = .topology
+        }
+        invalidationReason = note
     }
 
     // MARK: Helpers
@@ -533,9 +559,10 @@ final class SystemSetupDriver {
 
 // MARK: - Session persistence
 
-/// Schema 1 session: step and choices and measurement IDs, never audio buffers.
+/// Schema 2 session: step and choices (E25 S3 adds the arrangement) and measurement IDs, never audio buffers.
+/// Schema 1 sessions still load; `choices.arrangement` is nil and the model derives it on resume.
 struct SystemSetupSession: Codable, Equatable, Sendable {
-    static let currentSchemaVersion = 1
+    static let currentSchemaVersion = 2
 
     var schemaVersion = SystemSetupSession.currentSchemaVersion
     var playbackSystemKey: String

@@ -1774,8 +1774,24 @@ final class ProductProfileController: ObservableObject {
             ambientCompensation:
                 selectedSystemProfile?.state.ambientCompensation,
             activeQuietZone:
-                selectedSystemProfile?.state.activeQuietZone
+                selectedSystemProfile?.state.activeQuietZone,
+            systemArrangement: selectedSystemProfile?.state.systemArrangement
         )
+    }
+
+    /// E25 S3: stores the outputs and speaker arrangement on the selected system. Stored state only; the wizard
+    /// applies the compiled configuration separately. nil clears it.
+    func replaceSelectedSystemArrangement(_ arrangement: SystemArrangement?) throws {
+        guard let selectedSystemProfileID,
+              let index = systemProfiles.firstIndex(where: { $0.id == selectedSystemProfileID }) else {
+            throw ProductProfileError.selectedSystemProfileRequired
+        }
+        let previous = systemProfiles[index].state.systemArrangement
+        systemProfiles[index].state.systemArrangement = arrangement
+        do { try persistThrowing() } catch {
+            systemProfiles[index].state.systemArrangement = previous
+            throw error
+        }
     }
 
     func applyContentStateWithoutAudioUnitRack(
