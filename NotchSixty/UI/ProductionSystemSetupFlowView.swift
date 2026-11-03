@@ -1170,44 +1170,26 @@ private struct SystemSetupMeasureStep: View {
                         .font(.caption).foregroundStyle(.secondary)
                 }
             }
-            ForEach(calibration.seats) { seat in
-                HStack {
-                    Image(systemName: progress.isComplete(seat) ? "checkmark.circle.fill" : "circle")
-                    Text(seat.name)
-                    if let latest = calibration.measurements.last(where: { $0.seatID == seat.id }) {
-                        RepeatSummaryNote(quality: latest.channel.quality)
-                    }
-                    if calibration.seatMicrophoneMode == .perSeat {
-                        Picker("Device", selection: Binding(
-                            get: { seat.microphone?.deviceUID ?? microphone.selectedInputDevice?.uid ?? "" },
-                            set: { model.setSeatDevice(seat.id, uid: $0) }
-                        )) {
-                            ForEach(microphone.inputDevices) { Text($0.name).tag($0.uid) }
+            MeasurementSeatsCard(
+                calibration: calibration, microphone: microphone, locked: model.isMeasuring,
+                onAdd: { model.addSeat() },
+                onRemove: { model.removeSeat($0) },
+                onSetDevice: { model.setSeatDevice($0, uid: $1) },
+                onSetChannel: { model.setSeatChannel($0, channel: $1) },
+                onImportCalibration: { importingCalibrationSeat = $0 },
+                onClearCalibration: { model.clearSeatCalibration($0) },
+                accessory: { seat in
+                    HStack {
+                        Image(systemName: progress.isComplete(seat) ? "checkmark.circle.fill" : "circle")
+                        if let latest = calibration.measurements.last(where: { $0.seatID == seat.id }) {
+                            RepeatSummaryNote(quality: latest.channel.quality)
                         }
-                        .fixedSize().disabled(model.isMeasuring)
-                        Stepper("Input channel \((seat.microphone?.channelIndex ?? 0) + 1)", value: Binding(
-                            get: { seat.microphone?.channelIndex ?? 0 },
-                            set: { model.setSeatChannel(seat.id, channel: $0) }), in: 0...63)
-                            .fixedSize().disabled(model.isMeasuring)
-                        Button(seat.microphone?.calibration == nil ? "Calibration file" : "Replace file") {
-                            importingCalibrationSeat = seat.id
-                        }.disabled(model.isMeasuring)
-                        if seat.microphone?.calibration != nil {
-                            Button("Clear file") { model.clearSeatCalibration(seat.id) }.disabled(model.isMeasuring)
+                        if progress.isComplete(seat) {
+                            Button("Re-measure") { model.startRemeasure(seatID: seat.id) }.disabled(model.isMeasuring)
                         }
                     }
-                    Spacer()
-                    if progress.isComplete(seat) {
-                        Button("Re-measure") { model.startRemeasure(seatID: seat.id) }.disabled(model.isMeasuring)
-                    }
-                    if calibration.seats.count > 1 {
-                        Button("Remove") { model.removeSeat(seat.id) }.disabled(model.isMeasuring)
-                    }
-                }
-            }
+                })
             HStack {
-                Button("Add seat") { model.addSeat() }
-                    .disabled(model.isMeasuring || calibration.seats.count >= Int(N60_CALIBRATION_MAX_SEATS))
                 Spacer()
                 if model.isMeasuring {
                     Button("Stop") { model.cancelMeasurement() }

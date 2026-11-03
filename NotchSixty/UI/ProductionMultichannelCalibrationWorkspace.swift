@@ -247,100 +247,17 @@ struct ProductionMultichannelCalibrationWorkspace: View {
 
     private var seatsCard: some View {
         GroupBox("Listening Seats") {
-            VStack(alignment: .leading, spacing: 12) {
-                ForEach(calibration.seats) { seat in
-                    HStack(spacing: 12) {
-                        Toggle(
-                            "",
-                            isOn: Binding(
-                                get: { seat.included },
-                                set: { value in
-                                    perform {
-                                        try calibration.updateSeat(
-                                            seat.id,
-                                            name: seat.name,
-                                            included: value,
-                                            weight: seat.weight
-                                        )
-                                    }
-                                }
-                            )
-                        )
-                        .toggleStyle(.switch)
-                        .labelsHidden()
-
-                        TextField(
-                            "Seat name",
-                            text: Binding(
-                                get: { seat.name },
-                                set: { value in
-                                    guard !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-                                    perform {
-                                        try calibration.updateSeat(
-                                            seat.id,
-                                            name: value,
-                                            included: seat.included,
-                                            weight: seat.weight
-                                        )
-                                    }
-                                }
-                            )
-                        )
-                        .textFieldStyle(.roundedBorder)
-                        .frame(width: 190)
-
-                        Stepper(
-                            value: Binding(
-                                get: { seat.weight },
-                                set: { value in
-                                    perform {
-                                        try calibration.updateSeat(
-                                            seat.id,
-                                            name: seat.name,
-                                            included: seat.included,
-                                            weight: value
-                                        )
-                                    }
-                                }
-                            ),
-                            in: 0...5,
-                            step: 0.25
-                        ) {
-                            Text("Weight \(seat.weight, specifier: "%.2g")")
-                                .monospacedDigit()
-                                .frame(width: 100, alignment: .leading)
-                        }
-
-                        Spacer()
-                        if calibration.seats.count > 1 {
-                            Button(role: .destructive) {
-                                perform { try calibration.removeSeat(seat.id) }
-                            } label: {
-                                Image(systemName: "minus.circle")
-                            }
-                            .buttonStyle(.plain)
-                            .help("Remove this seat and its measurements")
-                        }
-                    }
-                    .disabled(calibration.state == .measuring || calibration.state == .analyzing)
-                }
-
-                HStack {
-                    Button("Add Seat") {
-                        perform { try calibration.addSeat() }
-                    }
-                    .disabled(
-                        calibration.seats.count >= Int(N60_CALIBRATION_MAX_SEATS)
-                            || calibration.state == .measuring
-                            || calibration.state == .analyzing
-                    )
-                    Spacer()
-                    Text("Up to \(Int(N60_CALIBRATION_MAX_SEATS)) weighted seats")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-            .padding(6)
+            MeasurementSeatsCard(
+                calibration: calibration, microphone: microphone,
+                locked: calibration.state == .measuring || calibration.state == .analyzing,
+                editsDetails: true,
+                onAdd: { perform { try calibration.addSeat() } },
+                onRemove: { id in perform { try calibration.removeSeat(id) } },
+                onUpdate: { id, name, included, weight in
+                    perform { try calibration.updateSeat(id, name: name, included: included, weight: weight) }
+                },
+                accessory: { _ in EmptyView() })
+                .padding(6)
         }
     }
 
