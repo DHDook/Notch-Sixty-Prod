@@ -193,8 +193,9 @@ enum FeedForwardLeakageStabilityCheck {
 }
 
 /// The live feed-forward arm gate (E4 S25b). Pure policy: whether the filter may be armed. Arming is
-/// the only way anti-noise plays, so every condition must hold, and the written live-output
-/// authorisation is an explicit input that nothing in the app sets yet (the bench path owns it).
+/// the only way anti-noise plays, so every condition must hold. The live-output authorisation is the
+/// owner's approval of 2 Nov 2026, expressed only as the user's explicit request in
+/// `FeedForwardLiveArmingController` (armed Quiet Zone, never persisted).
 /// Owner decision of 31 Oct 2026 (S25 option 2): the model-error bound in the stability check is
 /// accepted as the gate once echo removal has been verified at `minimumVerifiedRemovalDecibels`.
 enum FeedForwardLiveArmGate {

@@ -114,7 +114,7 @@ int main(void) {
         Rig a; rigInit(&a, rate);
         render(&a, half);
         Rig b; rigInit(&b, rate);
-        CHECK(N60RenderKernelAttachFeedForwardLive(b.k, rate, 1.0), "attach failed at %.0f", rate);
+        CHECK(N60RenderKernelAttachFeedForwardLiveWithRamp(b.k, rate, 1.0, 0.05), "attach failed at %.0f", rate);
         b.feed = true;
         render(&b, half);
         CHECK(memcmp(a.out, b.out, half * sizeof(float)) == 0, "attached-idle output differs at %.0f", rate);
@@ -148,7 +148,7 @@ int main(void) {
         const double gain = num / den;
         /* The expected gain is whatever the standalone filter gives the same weights and reference. */
         N60FeedForwardLiveConfig cfg = {0};
-        cfg.sampleRate = rate; cfg.maxBlockFrames = 8192u; cfg.peakLimit = 1.0;
+        cfg.sampleRate = rate; cfg.maxBlockFrames = 8192u; cfg.peakLimit = 1.0; cfg.armRampSeconds = 0.05;
         N60FeedForwardLive *solo = N60FeedForwardLiveCreate(&cfg);
         CHECK(solo != NULL && N60FeedForwardLiveSetWeights(solo, w, z, 1u), "standalone setup at %.0f", rate);
         CHECK(N60FeedForwardLiveArm(solo, 0.010, 0.005) == N60FeedForwardLiveArmOK, "standalone arm");
@@ -191,7 +191,7 @@ int main(void) {
 
         /* 5. Late frames are dropped, a gap is zero-filled (control-plane check on a fresh rig). */
         Rig c; rigInit(&c, rate);
-        CHECK(N60RenderKernelAttachFeedForwardLive(c.k, rate, 1.0), "attach c failed");
+        CHECK(N60RenderKernelAttachFeedForwardLiveWithRamp(c.k, rate, 1.0, 0.05), "attach c failed");
         render(&c, 4u * BLOCK);
         float ones[BLOCK];
         for (uint32_t i = 0; i < BLOCK; ++i) ones[i] = 1.0f;
@@ -206,7 +206,7 @@ int main(void) {
 
         /* 6. Lease: a lapsed dead-man lease silences the feed-forward too. */
         Rig d; rigInit(&d, rate);
-        CHECK(N60RenderKernelAttachFeedForwardLive(d.k, rate, 1.0), "attach d failed");
+        CHECK(N60RenderKernelAttachFeedForwardLiveWithRamp(d.k, rate, 1.0, 0.05), "attach d failed");
         d.feed = true;
         CHECK(N60RenderKernelFeedForwardLiveSetWeights(d.k, w, z, 1u), "weights d");
         CHECK(N60RenderKernelFeedForwardLiveArm(d.k, 0.010, 0.005) == N60FeedForwardLiveArmOK, "arm d");
@@ -219,7 +219,20 @@ int main(void) {
         CHECK(peakRange(d.out, after - 1, d.frames) == 0.0 || peakRange(d.out, after, d.frames) < 1e-6,
               "lease lapse did not silence feed-forward at %.0f", rate);
 
-        rigFree(&a); rigFree(&b); rigFree(&c); rigFree(&d);
+        /* 7. The production attach fades in over 3 s (owner approval, 2 Nov 2026). */
+        Rig e; rigInit(&e, rate);
+        CHECK(N60RenderKernelAttachFeedForwardLive(e.k, rate, 1.0), "attach e failed");
+        e.feed = true;
+        CHECK(N60RenderKernelFeedForwardLiveSetWeights(e.k, w, z, 1u), "weights e");
+        CHECK(N60RenderKernelFeedForwardLiveArm(e.k, 0.010, 0.005) == N60FeedForwardLiveArmOK, "arm e");
+        render(&e, half);
+        const float g1 = N60RenderKernelFeedForwardLiveGetStatus(e.k).filter.gain;
+        CHECK(g1 > 0.12f && g1 < 0.22f, "gain %.3f after 0.5 s of a 3 s fade-in at %.0f", g1, rate);
+        render(&e, half);
+        const float g2 = N60RenderKernelFeedForwardLiveGetStatus(e.k).filter.gain;
+        CHECK(g2 > 0.28f && g2 < 0.39f, "gain %.3f after 1 s of a 3 s fade-in at %.0f", g2, rate);
+
+        rigFree(&a); rigFree(&b); rigFree(&c); rigFree(&d); rigFree(&e);
     }
     if (failures == 0) printf("e4_ff_live_wiring: all checks passed\n");
     return failures == 0 ? 0 : 1;

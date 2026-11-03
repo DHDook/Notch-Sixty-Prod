@@ -575,6 +575,11 @@ typedef struct {
 } N60RenderKernelFeedForwardLiveStatus;
 
 bool N60RenderKernelAttachFeedForwardLive(N60RenderKernel * _Nonnull kernel, double sampleRate, double peakLimit);
+/// As Attach, with an explicit fade-in after Arm (0 = the 3 s default; production uses the default, the
+/// harnesses use a short ramp to keep runs fast). Trips always fade out in 10 ms, from whatever gain was
+/// reached. The ramp is fixed at the first attach for a rate (a same-rate re-attach keeps the filter and
+/// ignores a different ramp). Reset while armed re-fades from silence over the full ramp.
+bool N60RenderKernelAttachFeedForwardLiveWithRamp(N60RenderKernel * _Nonnull kernel, double sampleRate, double peakLimit, double armRampSeconds);
 void N60RenderKernelDetachFeedForwardLive(N60RenderKernel * _Nonnull kernel);
 bool N60RenderKernelFeedForwardLiveAttached(const N60RenderKernel * _Nonnull kernel);
 bool N60RenderKernelFeedForwardLiveSetWeights(

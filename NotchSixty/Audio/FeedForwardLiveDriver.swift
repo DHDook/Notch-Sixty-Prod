@@ -4,7 +4,7 @@ import Foundation
 /// E4 S25 follow-up: who feeds the live feed-forward reference ring. The engine owns one driver; it runs
 /// the S25c pump on a 10 ms timer for as long as the shadow has published weights, and stops it (which
 /// fades the filter out) on any fault. Starting it never arms anything: arming is only
-/// `FeedForwardLiveArmGate`, and nothing sets the written authorisation yet.
+/// `FeedForwardLiveArmGate`, and only the user's request in `FeedForwardLiveArmingController` supplies the authorisation.
 
 /// Two control-plane readers share the speaker-drive anchor ring, which has one consumer. Whoever
 /// pulls first reads the ring; every anchor is handed to each consumer once.

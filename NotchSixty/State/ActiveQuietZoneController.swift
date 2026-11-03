@@ -120,6 +120,36 @@ final class ActiveQuietZoneController: ObservableObject {
         }
     }
 
+    /// E4 S25 arming (`e4.feedforward-live`): the user-initiated feed-forward live output. Nil with the
+    /// flag off. It follows this controller's arm switch and never outlives it.
+    private(set) var feedForwardArming: FeedForwardLiveArmingController?
+    private var lastDoNoHarmVerdict: DoNoHarmVerdict = .baselining
+
+    func attachFeedForwardArming(_ controller: FeedForwardLiveArmingController?) {
+        feedForwardArming = controller
+    }
+
+    /// What the arming policy needs from this controller.
+    func feedForwardLiveFacts() -> FeedForwardLiveQuietZoneFacts {
+        FeedForwardLiveQuietZoneFacts(
+            armed: arm.isArmed && configuration.enabled,
+            hasBaseline: doNoHarm.hasBaseline,
+            verdict: lastDoNoHarmVerdict,
+            leaseRequired: engine.activeQuietZoneLeaseEnabled,
+            leaseHealthy: engine.activeQuietZoneLeaseHealthy,
+            outputDeviceUID: engine.routeConfiguration.selectedOutputUID,
+            sampleRate: engine.liveTreatmentSampleRate,
+            budget: feedForwardBudget)
+    }
+
+    /// The user's one action: start the slow fade-in once every check passes. False unless armed.
+    @discardableResult
+    func requestFeedForwardLive() -> Bool {
+        feedForwardArming?.request(quietZone: feedForwardLiveFacts()) ?? false
+    }
+
+    func cancelFeedForwardLive() { feedForwardArming?.cancel() }
+
     func attachAdaptiveLive(_ coordinator: AdaptiveTonalLiveCoordinator?) {
         adaptiveLive = coordinator
         coordinator?.onEvent = { [weak self] kind, message in
@@ -783,6 +813,8 @@ final class ActiveQuietZoneController: ObservableObject {
 
     func stop(fadeMilliseconds: Double? = nil) {
         overnightPower?.release()
+        // E4 S25: feed-forward live output never outlives the Quiet Zone session.
+        feedForwardArming?.quietZoneStopped()
         if spatialSurveyActive { cancelSpatialSurvey() }
         task?.cancel()
         task = nil
@@ -810,6 +842,7 @@ final class ActiveQuietZoneController: ObservableObject {
             earnedCap?.observe(binding: earnedBinding(environment), outputGainDB: environment.outputGainDB)
             arm.observe(environment)
             guard arm.isArmed, configuration.enabled else { return }
+            feedForwardArming?.poll(quietZone: feedForwardLiveFacts())
             guard !faultLatched else { return }
 
             guard engine.lifecycleState == .running,
@@ -855,6 +888,7 @@ final class ActiveQuietZoneController: ObservableObject {
                 doNoHarm.captureBaseline(snapshot)
             } else {
                 verdict = doNoHarm.evaluate(snapshot, now: Date(), programme: programmeLevels)
+                lastDoNoHarmVerdict = verdict
                 if case .harm = verdict {
                     verifiedReadout = nil
                     arm.reportSeatRegression()
@@ -1687,6 +1721,7 @@ final class ActiveQuietZoneController: ObservableObject {
         weakActiveWindows = 0
         faultLatched = false
         doNoHarm.reset()
+        lastDoNoHarmVerdict = .baselining
         verifiedReadout = nil
     }
 }

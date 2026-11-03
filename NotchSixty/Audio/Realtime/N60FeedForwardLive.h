@@ -48,7 +48,7 @@ extern "C" {
  *    maxBlockFrames). One reference channel in, two anti-noise channels out.
  *  - Reset: Reset clears all histories and the output ramp, keeps weights and the arm request.
  *
- * Safety: output ramps in over 50 ms after Arm and out over 10 ms on Disarm or a trip. Trips:
+ * Safety: output ramps in over armRampSeconds (default 3 s) after Arm and out over 10 ms on Disarm or a trip. Trips:
  * reference lost (MarkReferenceLost), non-finite input or output. A trip stays until Reset and
  * Arm. Output is clamped to +-peakLimit (linear full scale); clamped samples are counted.
  */
@@ -61,6 +61,7 @@ typedef struct {
     uint32_t kernelHalf;        /* 0 = default 4; 3 to 4, fd samples (the interpolator keeps 9 phases) of one chain half-kernel */
     double swapFadeSeconds;     /* 0 = default 0.01 */
     double peakLimit;           /* linear full scale, (0, 1] */
+    double armRampSeconds;      /* 0 = default 3 s (owner approval, 2 Nov 2026); else 0.01 to 30. Fade-in after Arm. */
 } N60FeedForwardLiveConfig;
 
 enum {

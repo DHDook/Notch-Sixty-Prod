@@ -35,8 +35,9 @@ static int failures = 0;
 
 static uint32_t factor_for(double fs) { return (uint32_t)(fs / 4000.0); }
 
+/* Existing checks use a 50 ms fade-in to stay fast; slow_fade_in() covers the 3 s production default. */
 static N60FeedForwardLive *make(double fs, double peak) {
-    N60FeedForwardLiveConfig config = {fs, MAX_BLOCK, 0, 0, peak};
+    N60FeedForwardLiveConfig config = {fs, MAX_BLOCK, 0, 0, peak, 0.05};
     N60FeedForwardLive *live = N60FeedForwardLiveCreate(&config);
     if (!live) { fprintf(stderr, "FAIL create at %g\n", fs); failures++; exit(1); }
     return live;
@@ -236,6 +237,71 @@ static void zero_delay(double fs) {
     N60FeedForwardLiveDestroy(live);
 }
 
+/* Owner approval of 2 Nov 2026: with the default config the fade-in takes 3 s, climbs steadily, and a
+   trip in the middle of it still silences the output within 10 ms. */
+static void slow_fade_in(double fs) {
+    float w[512];
+    const uint32_t count = fractional_delay(w, 20.4, 6, -1.0);
+    N60FeedForwardLiveConfig config = {fs, MAX_BLOCK, 0, 0, 1.0, 0};
+    CHECK(N60FeedForwardLiveConfigIsValid(&config), "default ramp config valid");
+    N60FeedForwardLive *live = N60FeedForwardLiveCreate(&config);
+    CHECK(live != NULL, "create default ramp");
+    if (!live) return;
+    CHECK(N60FeedForwardLiveSetWeights(live, w, w, count), "weights");
+    CHECK(N60FeedForwardLiveArm(live, 0.02, 0.01) == N60FeedForwardLiveArmOK, "arm");
+    const uint32_t block = 480;
+    float x[480], yl[480], yr[480];
+    uint64_t n0 = 0;
+    float previous = 0.0f;
+    bool monotone = true, early = false, done = false;
+    const uint64_t total = (uint64_t)(3.3 * fs);
+    while (n0 < total) {
+        for (uint32_t i = 0; i < block; ++i) x[i] = (float)reference_at(n0 + i, fs);
+        N60FeedForwardLiveProcess(live, x, yl, yr, block);
+        n0 += block;
+        const float g = N60FeedForwardLiveGetStatus(live).gain;
+        if (g + 1e-6f < previous) monotone = false;
+        previous = g;
+        const double t = (double)n0 / fs;
+        if (t > 0.45 && t < 0.55) CHECK(fabsf(g - (float)(t / 3.0)) < 0.02f, "gain %g at %.2f s", g, t);
+        if (t < 2.9 && g >= 0.99f) early = true;
+        if (t > 3.05 && g >= 0.99f) done = true;
+    }
+    CHECK(monotone, "fade-in is not monotone at %g Hz", fs);
+    CHECK(!early, "fade-in finished before 3 s at %g Hz", fs);
+    CHECK(done, "fade-in not finished after 3 s at %g Hz", fs);
+    N60FeedForwardLiveDestroy(live);
+
+    /* A trip half way up: silent within 10 ms plus one block. */
+    live = N60FeedForwardLiveCreate(&config);
+    N60FeedForwardLiveSetWeights(live, w, w, count);
+    N60FeedForwardLiveArm(live, 0.02, 0.01);
+    n0 = 0;
+    while (n0 < (uint64_t)(1.5 * fs)) {
+        for (uint32_t i = 0; i < block; ++i) x[i] = (float)reference_at(n0 + i, fs);
+        N60FeedForwardLiveProcess(live, x, yl, yr, block);
+        n0 += block;
+    }
+    CHECK(N60FeedForwardLiveGetStatus(live).gain > 0.4f, "half way up");
+    N60FeedForwardLiveMarkReferenceLost(live);
+    const uint64_t tripEnd = n0 + (uint64_t)(0.010 * fs) + 2u * block;
+    while (n0 < tripEnd) {
+        for (uint32_t i = 0; i < block; ++i) x[i] = (float)reference_at(n0 + i, fs);
+        N60FeedForwardLiveProcess(live, x, yl, yr, block);
+        n0 += block;
+    }
+    float peak = 0.0f;
+    for (int b = 0; b < 4; ++b) {
+        for (uint32_t i = 0; i < block; ++i) x[i] = (float)reference_at(n0 + i, fs);
+        N60FeedForwardLiveProcess(live, x, yl, yr, block);
+        n0 += block;
+        for (uint32_t i = 0; i < block; ++i) peak = fmaxf(peak, fmaxf(fabsf(yl[i]), fabsf(yr[i])));
+    }
+    CHECK(peak == 0.0f, "output after a mid-ramp trip (peak %g) at %g Hz", peak, fs);
+    CHECK(N60FeedForwardLiveGetStatus(live).state == N60FeedForwardLiveTripped, "tripped");
+    N60FeedForwardLiveDestroy(live);
+}
+
 static void gate_and_trips(double fs) {
     float w[512];
     fractional_delay(w, 20.4, 6, -1.0);
@@ -346,15 +412,19 @@ static void block_independence(double fs) {
 }
 
 int main(void) {
-    N60FeedForwardLiveConfig bad = {0, MAX_BLOCK, 0, 0, 1.0};
+    N60FeedForwardLiveConfig bad = {0, MAX_BLOCK, 0, 0, 1.0, 0};
     CHECK(!N60FeedForwardLiveConfigIsValid(&bad), "rate 0 rejected");
-    bad = (N60FeedForwardLiveConfig){48000, 8, 0, 0, 1.0};
+    bad = (N60FeedForwardLiveConfig){48000, 8, 0, 0, 1.0, 0};
     CHECK(!N60FeedForwardLiveConfigIsValid(&bad), "block 8 rejected");
-    bad = (N60FeedForwardLiveConfig){48000, MAX_BLOCK, 2, 0, 1.0};
+    bad = (N60FeedForwardLiveConfig){48000, MAX_BLOCK, 2, 0, 1.0, 0};
     CHECK(!N60FeedForwardLiveConfigIsValid(&bad), "kernelHalf 2 rejected");
     bad.kernelHalf = 5;
     CHECK(!N60FeedForwardLiveConfigIsValid(&bad), "kernelHalf 5 rejected");
     CHECK(!N60FeedForwardLiveConfigIsValid(NULL), "null rejected");
+    bad = (N60FeedForwardLiveConfig){48000, MAX_BLOCK, 0, 0, 1.0, 0.001};
+    CHECK(!N60FeedForwardLiveConfigIsValid(&bad), "ramp 1 ms rejected");
+    bad.armRampSeconds = 31.0;
+    CHECK(!N60FeedForwardLiveConfigIsValid(&bad), "ramp 31 s rejected");
     for (size_t r = 0; r < RATE_COUNT; ++r) {
         const double fs = kRates[r];
         printf("rate %g\n", fs);
@@ -363,6 +433,7 @@ int main(void) {
         run_plant(fs, 1.7e-3 * (fs / factor_for(fs)), "head");
         run_plant(fs, 2.0e-3 * (fs / factor_for(fs)), "seam");
         run_plant(fs, 5.2e-3 * (fs / factor_for(fs)), "tail");
+        slow_fade_in(fs);
         gate_and_trips(fs);
         swap_and_clamp(fs);
         block_independence(fs);
