@@ -421,6 +421,9 @@ final class QuietZoneFeedForwardShadow: ObservableObject {
     /// Publishing never arms the filter (see `FeedForwardLiveWeightsFeed`).
     var weightsSink: (any FeedForwardLiveWeightsSink)?
     private(set) var weightsFeed = FeedForwardLiveWeightsFeed()
+    /// Set by the app; the engine refuses unless `e4.feedforward-live` is on. Started once weights are published, stopped
+    /// when the shadow ends. Starting it never arms the filter.
+    var referenceDriver: (any FeedForwardLiveReferenceDriving)?
     private var demandSet = false
     private var retryCountdown = 0
     /// Bumped whenever the engine is dropped, so late results are ignored.
@@ -542,9 +545,10 @@ final class QuietZoneFeedForwardShadow: ObservableObject {
         guard isActive, generation == current else { return }
         publish(snapshot, plan: running.plan)
         if let weightsSink {
-            _ = weightsFeed.offer(
+            let outcome = weightsFeed.offer(
                 left: snapshot.left, right: snapshot.right, guardState: status.guardState, sink: weightsSink
             )
+            if outcome == .published { referenceDriver?.startLiveReference(device: device, channel: inputs.referenceChannel) }
         }
     }
 
@@ -632,6 +636,7 @@ final class QuietZoneFeedForwardShadow: ObservableObject {
 
     private func dropEngine() {
         setDemand(false)
+        referenceDriver?.stopLiveReference()
         weightsFeed.reset()
         generation += 1
         engine?.close()

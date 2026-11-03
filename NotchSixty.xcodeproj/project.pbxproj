@@ -253,6 +253,8 @@
 		E4F700000000000000000002 /* FeedForwardDriveAligner.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4F700000000000000000012 /* FeedForwardDriveAligner.swift */; };
 		E4F700000000000000000032 /* CrossDevicePairCapture.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4F700000000000000000042 /* CrossDevicePairCapture.swift */; };
 		E4F800000000000000000001 /* FeedForwardLiveReferencePump.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4F800000000000000000003 /* FeedForwardLiveReferencePump.swift */; };
+		E4FA00000000000000000005 /* FeedForwardLiveDriver.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4FA00000000000000000015 /* FeedForwardLiveDriver.swift */; };
+		E4FA00000000000000000006 /* FeedForwardLiveDriverHost.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4FA00000000000000000016 /* FeedForwardLiveDriverHost.swift */; };
 		E4F700000000000000000062 /* QuietZoneUpstreamSurvey.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4F700000000000000000052 /* QuietZoneUpstreamSurvey.swift */; };
 		E4F7000000000000000000A4 /* QuietZoneNoiseSurvey.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4F7000000000000000000A2 /* QuietZoneNoiseSurvey.swift */; };
 		E4F7000000000000000000B4 /* ConversationUnmasking.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4F7000000000000000000B2 /* ConversationUnmasking.swift */; };
@@ -264,6 +266,7 @@
 		E4F700000000000000000F03 /* FeedForwardLiveWeightsFeedTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4F700000000000000000F04 /* FeedForwardLiveWeightsFeedTests.swift */; };
 		E4F700000000000000000033 /* CrossDevicePairCaptureTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4F700000000000000000043 /* CrossDevicePairCaptureTests.swift */; };
 		E4F800000000000000000002 /* FeedForwardLiveReferencePumpTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4F800000000000000000004 /* FeedForwardLiveReferencePumpTests.swift */; };
+		E4FA00000000000000000007 /* FeedForwardLiveDriverTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4FA00000000000000000017 /* FeedForwardLiveDriverTests.swift */; };
 		E4F700000000000000000063 /* QuietZoneUpstreamSurveyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4F700000000000000000053 /* QuietZoneUpstreamSurveyTests.swift */; };
 		E4F7000000000000000000A5 /* QuietZoneNoiseSurveyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4F7000000000000000000A3 /* QuietZoneNoiseSurveyTests.swift */; };
 		E4F7000000000000000000B5 /* ConversationUnmaskingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4F7000000000000000000B3 /* ConversationUnmaskingTests.swift */; };
@@ -839,6 +842,8 @@
 		E4F700000000000000000012 /* FeedForwardDriveAligner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeedForwardDriveAligner.swift; sourceTree = "<group>"; };
 		E4F700000000000000000042 /* CrossDevicePairCapture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrossDevicePairCapture.swift; sourceTree = "<group>"; };
 		E4F800000000000000000003 /* FeedForwardLiveReferencePump.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeedForwardLiveReferencePump.swift; sourceTree = "<group>"; };
+		E4FA00000000000000000015 /* FeedForwardLiveDriver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeedForwardLiveDriver.swift; sourceTree = "<group>"; };
+		E4FA00000000000000000016 /* FeedForwardLiveDriverHost.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeedForwardLiveDriverHost.swift; sourceTree = "<group>"; };
 		E4F700000000000000000052 /* QuietZoneUpstreamSurvey.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuietZoneUpstreamSurvey.swift; sourceTree = "<group>"; };
 		E4F7000000000000000000A2 /* QuietZoneNoiseSurvey.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuietZoneNoiseSurvey.swift; sourceTree = "<group>"; };
 		E4F7000000000000000000B2 /* ConversationUnmasking.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationUnmasking.swift; sourceTree = "<group>"; };
@@ -850,6 +855,7 @@
 		E4F700000000000000000F04 /* FeedForwardLiveWeightsFeedTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeedForwardLiveWeightsFeedTests.swift; sourceTree = "<group>"; };
 		E4F700000000000000000043 /* CrossDevicePairCaptureTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrossDevicePairCaptureTests.swift; sourceTree = "<group>"; };
 		E4F800000000000000000004 /* FeedForwardLiveReferencePumpTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeedForwardLiveReferencePumpTests.swift; sourceTree = "<group>"; };
+		E4FA00000000000000000017 /* FeedForwardLiveDriverTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeedForwardLiveDriverTests.swift; sourceTree = "<group>"; };
 		E4F700000000000000000053 /* QuietZoneUpstreamSurveyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuietZoneUpstreamSurveyTests.swift; sourceTree = "<group>"; };
 		E4F7000000000000000000A3 /* QuietZoneNoiseSurveyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuietZoneNoiseSurveyTests.swift; sourceTree = "<group>"; };
 		E4F7000000000000000000B3 /* ConversationUnmaskingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationUnmaskingTests.swift; sourceTree = "<group>"; };
@@ -1343,6 +1349,7 @@
 				E4F700000000000000000F04 /* FeedForwardLiveWeightsFeedTests.swift */,
 				E4F700000000000000000043 /* CrossDevicePairCaptureTests.swift */,
 				E4F800000000000000000004 /* FeedForwardLiveReferencePumpTests.swift */,
+				E4FA00000000000000000017 /* FeedForwardLiveDriverTests.swift */,
 				E4F700000000000000000053 /* QuietZoneUpstreamSurveyTests.swift */,
 				E4F7000000000000000000A3 /* QuietZoneNoiseSurveyTests.swift */,
 				E4F7000000000000000000B3 /* ConversationUnmaskingTests.swift */,
@@ -1560,6 +1567,8 @@
 				E4F700000000000000000012 /* FeedForwardDriveAligner.swift */,
 				E4F700000000000000000042 /* CrossDevicePairCapture.swift */,
 				E4F800000000000000000003 /* FeedForwardLiveReferencePump.swift */,
+				E4FA00000000000000000015 /* FeedForwardLiveDriver.swift */,
+				E4FA00000000000000000016 /* FeedForwardLiveDriverHost.swift */,
 				E4F700000000000000000052 /* QuietZoneUpstreamSurvey.swift */,
 				E4F7000000000000000000A2 /* QuietZoneNoiseSurvey.swift */,
 				E4F7000000000000000000B2 /* ConversationUnmasking.swift */,
@@ -2013,6 +2022,8 @@
 				E4F700000000000000000002 /* FeedForwardDriveAligner.swift in Sources */,
 				E4F700000000000000000032 /* CrossDevicePairCapture.swift in Sources */,
 				E4F800000000000000000001 /* FeedForwardLiveReferencePump.swift in Sources */,
+				E4FA00000000000000000005 /* FeedForwardLiveDriver.swift in Sources */,
+				E4FA00000000000000000006 /* FeedForwardLiveDriverHost.swift in Sources */,
 				E4F700000000000000000062 /* QuietZoneUpstreamSurvey.swift in Sources */,
 				E4F7000000000000000000A4 /* QuietZoneNoiseSurvey.swift in Sources */,
 				E4F7000000000000000000B4 /* ConversationUnmasking.swift in Sources */,
@@ -2180,6 +2191,7 @@
 				E4F700000000000000000F03 /* FeedForwardLiveWeightsFeedTests.swift in Sources */,
 				E4F700000000000000000033 /* CrossDevicePairCaptureTests.swift in Sources */,
 				E4F800000000000000000002 /* FeedForwardLiveReferencePumpTests.swift in Sources */,
+				E4FA00000000000000000007 /* FeedForwardLiveDriverTests.swift in Sources */,
 				E4F700000000000000000063 /* QuietZoneUpstreamSurveyTests.swift in Sources */,
 				E4F7000000000000000000A5 /* QuietZoneNoiseSurveyTests.swift in Sources */,
 				E4F7000000000000000000B5 /* ConversationUnmaskingTests.swift in Sources */,

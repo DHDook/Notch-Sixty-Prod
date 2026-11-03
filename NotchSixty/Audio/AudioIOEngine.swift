@@ -3011,10 +3011,25 @@ final class AudioIOEngine: ObservableObject {
     /// E4 S22b1: records what is written to the speakers for the feed-forward echo model.
     /// Set from `e4.feedforward-live`; while false nothing ever sets the demand.
     var speakerDriveFeatureEnabled = false
+    private var speakerDriveDemandMux = SpeakerDriveDemandMux()
+    private var speakerDriveAnchorFanout = SpeakerDriveAnchorFanout()
+    /// E4 S25 follow-up: runs the live reference pump; idle unless the shadow asks and the flag is on.
+    private(set) lazy var feedForwardLiveDriver = FeedForwardLiveDriver(host: self)
 
     func setSpeakerDriveDemand(_ requested: Bool) {
+        speakerDriveDemandMux.shadow = requested
+        applySpeakerDriveDemand()
+    }
+
+    /// E4 S25 follow-up: the live reference pump needs the output anchors.
+    func setPumpDriveDemand(_ requested: Bool) {
+        speakerDriveDemandMux.pump = requested
+        applySpeakerDriveDemand()
+    }
+
+    private func applySpeakerDriveDemand() {
         let allowed = SpeakerDriveDemandPolicy.demand(
-            requested: requested,
+            requested: speakerDriveDemandMux.requested,
             featureEnabled: speakerDriveFeatureEnabled,
             transportAvailable: ambientPlaybackReferenceAvailable
         )
@@ -3052,6 +3067,13 @@ final class AudioIOEngine: ObservableObject {
 
     func readSpeakerDriveAnchors() -> [N60SpeakerDriveAnchor] {
         transportSession?.readSpeakerDriveAnchors() ?? []
+    }
+
+    /// The anchor ring has one consumer; the shadow and the live reference pump each get every anchor
+    /// through this fan-out.
+    func pullSpeakerDriveAnchors(for consumer: SpeakerDriveAnchorFanout.Consumer) -> [N60SpeakerDriveAnchor] {
+        speakerDriveAnchorFanout.ingest(readSpeakerDriveAnchors())
+        return speakerDriveAnchorFanout.drain(consumer)
     }
 
     func readSpeakerDriveFrames(maximumFrames: Int) -> [N60AmbientPlaybackReferenceFrame] {
@@ -5427,6 +5449,8 @@ final class AudioIOEngine: ObservableObject {
         session.feedForwardLiveFeatureEnabled = speakerDriveFeatureEnabled
         try session.publishDSPGraph(graph)
         transportSession = session
+        speakerDriveAnchorFanout.reset()
+        applySpeakerDriveDemand()
     }
 
     /// Base graph for a newly built stereo transport (start, rate change,
@@ -5465,6 +5489,9 @@ final class AudioIOEngine: ObservableObject {
             lifetimeArchivedCounters.bufferedFrames = 0
             processingSessionArchivedCounters = processingSessionArchivedCounters + counters
             processingSessionArchivedCounters.bufferedFrames = 0
+            // E4 S25 follow-up: the reference ring dies with the session; the pump must not outlive it.
+            feedForwardLiveDriver.stop()
+            speakerDriveAnchorFanout.reset()
             session.stop(fadeOut: fadeOut)
             transportSession = nil
         }
