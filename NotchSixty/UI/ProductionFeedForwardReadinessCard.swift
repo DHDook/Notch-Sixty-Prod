@@ -690,6 +690,7 @@ struct ProductionFeedForwardReadinessCard: View {
             }
 
             commissioningSummary
+            arrangementNote
             oneMicrophoneSetupProgress
             consolidatedDiagnostics
             physicalCampaignPlan
@@ -1497,6 +1498,21 @@ struct ProductionFeedForwardReadinessCard: View {
             .secondary.opacity(0.05),
             in: RoundedRectangle(cornerRadius: 12)
         )
+    }
+
+    /// E25 S8b: the speaker arrangement's verdict for Quiet Zone (flag `e25.outputs-and-speakers`). Text only; being
+    /// eligible grants nothing.
+    @ViewBuilder
+    private var arrangementNote: some View {
+        if let reason = quietZone.arrangementRefusal {
+            Label(reason, systemImage: "speaker.slash")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        } else if quietZone.arrangement != nil {
+            Label("Your speaker arrangement can take part in Quiet Zone.", systemImage: "speaker.wave.2")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
     }
 
     private var commissioningSummary: some View {

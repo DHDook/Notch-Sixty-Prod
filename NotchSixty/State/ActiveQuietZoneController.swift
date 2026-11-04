@@ -140,7 +140,23 @@ final class ActiveQuietZoneController: ObservableObject {
             outputDeviceUID: engine.routeConfiguration.selectedOutputUID,
             sampleRate: engine.liveTreatmentSampleRate,
             budget: feedForwardBudget,
-            subwooferActive: engine.subwooferActive)
+            subwooferActive: engine.subwooferActive || (arrangement?.hasDownstreamSubwoofer ?? false),
+            arrangementRefusal: arrangementRefusal)
+    }
+
+    /// E25 S8b: whether the stored two-channel arrangement takes part in Quiet Zone readiness and arming. Swift reads
+    /// the flag here; tests replace it.
+    var arrangementEligibilityEnabled: () -> Bool = { FeatureFlags().isEnabled(.outputsAndSpeakers) }
+
+    /// The stored arrangement of the selected system, with the flag on.
+    var arrangement: SystemArrangement? {
+        arrangementEligibilityEnabled() ? profiles.selectedSystemProfile?.state.systemArrangement : nil
+    }
+
+    /// Why the arrangement does not qualify for Quiet Zone (nil when it does, or with the flag off). Shown on the
+    /// readiness card and added as a wait before the lead gate. Never grants anything.
+    var arrangementRefusal: String? {
+        TwoChannelAncArming.refusal(arrangement: arrangement, budget: feedForwardBudget)
     }
 
     /// The user's one action: start the slow fade-in once every check passes. False unless armed.

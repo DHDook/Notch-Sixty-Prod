@@ -2583,7 +2583,7 @@ final class AudioIOEngine: ObservableObject {
 
     /// E25 S8a: sets the wider program source and fold. The source is tapped and folded onto the two feeds inside the
     /// capture callback, so the change needs a new tap: a running stereo session is rebuilt through the planned-profile
-    /// path (one short dropout). Built dark: the Speakers tab (S8b) calls it behind `e25.outputs-and-speakers`.
+    /// path (one short dropout). Called by the Speakers tab (S8b) behind `e25.outputs-and-speakers`.
     func applyProgramFoldDown(_ plan: ProgramFoldDownPlan?) throws {
         if plan != nil {
             if let reason = ProgramFoldDownPlan.incompatibility(
