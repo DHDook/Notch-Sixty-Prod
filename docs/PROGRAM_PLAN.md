@@ -295,7 +295,7 @@ channels allow, and the UI gives a reason for each one that it cannot.
 
 - [~] Arrangement model, compiler (two channels stay on the stereo session), capability matrix and profile migration (built dark; wired by S3 and S5)
 - [~] Mono bass on the pair with selectable family, slope and frequency; per-feed trim, delay and polarity (built dark; wired by S3)
-- [~] Wizard Outputs and Speakers steps; the flow creates the arrangement from the UI; session schema 2 (wired by S3; readiness reason replaced in S5; open: S8 profile-load alignment and shortcut removal)
+- [~] Wizard Outputs and Speakers steps; the flow creates the arrangement from the UI; session schema 2 (wired by S3; readiness reason replaced in S5; profile-load alignment and shortcut removal done in S8c)
 - [x] Alignment, bass and correction adapt to how bass is handled; receiver advice
 - [x] Capability text on every surface that offers a choice
 - [x] Quiet Zone and MIMO on two channels: MIMO sources limited to the L and R feeds (done); Quiet Zone eligibility built dark (wired by S8)
