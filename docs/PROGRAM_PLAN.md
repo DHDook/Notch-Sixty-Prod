@@ -295,6 +295,7 @@ channels allow, and the UI gives a reason for each one that it cannot.
 - [~] Wizard Outputs and Speakers steps; the flow creates the arrangement from the UI; session schema 2 (wired by S3; readiness reason replaced in S5; open: S8 profile-load alignment and shortcut removal)
 - [x] Alignment, bass and correction adapt to how bass is handled; receiver advice
 - [x] Capability text on every surface that offers a choice
+- [~] Quiet Zone and MIMO on two channels: MIMO sources limited to the L and R feeds (done); Quiet Zone eligibility built dark (wired by S8)
 - [ ] Quiet Zone and MIMO eligibility on two channels (never live outside authorisation)
 - [ ] Fold-down of 5.1/7.1 from a wider program source to the two feeds (owner: in v1)
 - [ ] Owner configuration end to end at eight rates; flag removed

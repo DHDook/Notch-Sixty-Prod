@@ -7,6 +7,8 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		E25F00000000000000000002 /* TwoChannelAncEligibilityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E25F00000000000000000012 /* TwoChannelAncEligibilityTests.swift */; };
+		E25F00000000000000000001 /* TwoChannelAncEligibility.swift in Sources */ = {isa = PBXBuildFile; fileRef = E25F00000000000000000011 /* TwoChannelAncEligibility.swift */; };
 		E4F900000000000000000A05 /* FeedForwardLiveArmingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4F900000000000000000A06 /* FeedForwardLiveArmingTests.swift */; };
 		E4F900000000000000000A03 /* ProductionFeedForwardLiveCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4F900000000000000000A04 /* ProductionFeedForwardLiveCard.swift */; };
 		E4F900000000000000000A01 /* FeedForwardLiveArming.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4F900000000000000000A02 /* FeedForwardLiveArming.swift */; };
@@ -577,6 +579,8 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		E25F00000000000000000012 /* TwoChannelAncEligibilityTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TwoChannelAncEligibilityTests.swift; sourceTree = "<group>"; };
+		E25F00000000000000000011 /* TwoChannelAncEligibility.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TwoChannelAncEligibility.swift; sourceTree = "<group>"; };
 		E4F900000000000000000A06 /* FeedForwardLiveArmingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeedForwardLiveArmingTests.swift; sourceTree = "<group>"; };
 		E4F900000000000000000A04 /* ProductionFeedForwardLiveCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductionFeedForwardLiveCard.swift; sourceTree = "<group>"; };
 		E4F900000000000000000A02 /* FeedForwardLiveArming.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeedForwardLiveArming.swift; sourceTree = "<group>"; };
@@ -1187,6 +1191,7 @@
 				E25A00000000000000000002 /* SystemArrangementCompiler.swift */,
 				E25A00000000000000000003 /* SystemArrangementMigration.swift */,
 				E25A00000000000000000004 /* SystemCapabilityMatrix.swift */,
+				E25F00000000000000000011 /* TwoChannelAncEligibility.swift */,
 			);
 			path = Arrangement;
 			sourceTree = "<group>";
@@ -1418,7 +1423,8 @@
 				F76000000000000000000012 /* MIMORoomTreatmentActivationPermitTests.swift */,
 				F78000000000000000000013 /* ProductionInformationArchitectureTests.swift */,
 				E12A00000000000000000012 /* ProductionSystemAreaTests.swift */,
-				E12B00000000000000000012 /* SystemSetupFlowTests.swift */, E24D000000000000000000C1 /* SeatMeasurerTests.swift */, E12C00000000000000000012 /* SystemSetupStartStepsTests.swift */, E25C00000000000000000012 /* SystemSetupArrangementStepsTests.swift */, E25D00000000000000000012 /* SystemSetupAdaptiveStepsTests.swift */, E25E00000000000000000012 /* SystemCapabilityTextTests.swift */, E12D00000000000000000012 /* SystemSetupMeasureAlignTests.swift */, E12E00000000000000000012 /* SystemSetupBassCorrectTests.swift */, E12F00000000000000000012 /* SystemSetupVerifySaveTests.swift */, E24C00000000000000000011 /* SystemSetupEndToEndTests.swift */, E24B00000000000000000011 /* ReferenceRoomTransport.swift */, E24E00000000000000000031 /* MeasurementReadinessTests.swift */, E24D00000000000000000041 /* MeasurementLevelSessionTests.swift */,
+				E12B00000000000000000012 /* SystemSetupFlowTests.swift */, E24D000000000000000000C1 /* SeatMeasurerTests.swift */, E12C00000000000000000012 /* SystemSetupStartStepsTests.swift */, E25C00000000000000000012 /* SystemSetupArrangementStepsTests.swift */, E25D00000000000000000012 /* SystemSetupAdaptiveStepsTests.swift */, E25E00000000000000000012 /* SystemCapabilityTextTests.swift */, 
+				E25F00000000000000000012 /* TwoChannelAncEligibilityTests.swift */,E12D00000000000000000012 /* SystemSetupMeasureAlignTests.swift */, E12E00000000000000000012 /* SystemSetupBassCorrectTests.swift */, E12F00000000000000000012 /* SystemSetupVerifySaveTests.swift */, E24C00000000000000000011 /* SystemSetupEndToEndTests.swift */, E24B00000000000000000011 /* ReferenceRoomTransport.swift */, E24E00000000000000000031 /* MeasurementReadinessTests.swift */, E24D00000000000000000041 /* MeasurementLevelSessionTests.swift */,
 				F79000000000000000000013 /* AudioUnitHostFoundationTests.swift */,
 				F80000000000000000000012 /* AudioUnitOfflinePreparationTests.swift */,
 				F81000000000000000000013 /* AudioUnitLiveRackRuntimeTests.swift */,
@@ -1876,6 +1882,7 @@
 				E25A000000000000000000A2 /* SystemArrangementCompiler.swift in Sources */,
 				E25A000000000000000000A3 /* SystemArrangementMigration.swift in Sources */,
 				E25A000000000000000000A4 /* SystemCapabilityMatrix.swift in Sources */,
+				E25F00000000000000000001 /* TwoChannelAncEligibility.swift in Sources */,
 				B40000000000000000000091 /* RoomCorrectionABX.swift in Sources */,
 				F65000000000000000000002 /* BinauralProfileAsset.swift in Sources */,
 				E6D0000000000000000109A2 /* HeadphoneLiveEditPlanner.swift in Sources */,
@@ -2278,6 +2285,7 @@
 				E25C00000000000000000002 /* SystemSetupArrangementStepsTests.swift in Sources */,
 				E25D00000000000000000002 /* SystemSetupAdaptiveStepsTests.swift in Sources */,
 				E25E00000000000000000002 /* SystemCapabilityTextTests.swift in Sources */,
+				E25F00000000000000000002 /* TwoChannelAncEligibilityTests.swift in Sources */,
 				E12D00000000000000000002 /* SystemSetupMeasureAlignTests.swift in Sources */,
 				E12E00000000000000000002 /* SystemSetupBassCorrectTests.swift in Sources */,
 				E12F00000000000000000002 /* SystemSetupVerifySaveTests.swift in Sources */,
