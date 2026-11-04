@@ -2,6 +2,8 @@ name: Release (manual)
 
 # Manual only. kind=release builds the versioned Release DMG; kind=hardware-test
 # builds an ad-hoc signed DMG for bench validation. Neither publishes anything.
+# The reviewer-noise job (E4 S31) generates the ANC reviewer noise files and, only when
+# noise_release_tag names an existing GitHub release, uploads them to it as release assets.
 
 on:
   workflow_dispatch:
@@ -23,6 +25,10 @@ on:
         required: true
         default: true
         type: boolean
+      noise_release_tag:
+        description: Optional existing GitHub release tag to attach the ANC reviewer noise files to
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -242,3 +248,40 @@ jobs:
             ${{ runner.temp }}/production-sbom.json
           if-no-files-found: error
           retention-days: 90
+
+  reviewer-noise:
+    runs-on: xcode-27
+    permissions:
+      contents: write
+    steps:
+      - name: Check out selected revision
+        uses: actions/checkout@v7
+
+      - name: Generate reviewer noise twice and require identical output
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -I ci/generate_reviewer_noise.py "$RUNNER_TEMP/noise-a"
+          python3 -I ci/generate_reviewer_noise.py "$RUNNER_TEMP/noise-b"
+          diff -r "$RUNNER_TEMP/noise-a" "$RUNNER_TEMP/noise-b"
+          (cd "$RUNNER_TEMP/noise-a" && shasum -a 256 -c SHA256SUMS.txt)
+          ls -l "$RUNNER_TEMP/noise-a"
+
+      - name: Upload reviewer noise as a workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: anc-reviewer-noise
+          path: ${{ runner.temp }}/noise-a/*
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Attach reviewer noise to the named GitHub release
+        if: ${{ inputs.noise_release_tag != '' }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.noise_release_tag }}
+        run: |
+          set -euo pipefail
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null
+          gh release upload "$TAG" "$RUNNER_TEMP"/noise-a/* --clobber --repo "$GITHUB_REPOSITORY"

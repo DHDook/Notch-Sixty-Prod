@@ -85,7 +85,8 @@ Reviewers can reproduce the published numbers with the same noise sources.
    harmonics 2-6), `drifting_compressor` (60 Hz with harmonics 2-4, drifting +/-3 Hz over 40 s)
    and `broadband_lf` (white noise low-passed near 120 Hz). The files are generated from fixed
    constants, so the same script gives byte-identical files; check them against `SHA256SUMS.txt`.
-   They are published as GitHub release assets (the upload step is a separate change).
+   They are published as GitHub release assets: run the manual Release workflow with
+   `noise_release_tag` set to an existing release tag and its `reviewer-noise` job attaches them.
 2. **Play and position.** Play one file at a time from a source speaker at the listening
    position's far wall, at a level that puts the microphone at the primary seat (A) at least 6 dB
    above the room floor in the 20-150 Hz band. Positions are A, a neighbouring seat (B), then A
