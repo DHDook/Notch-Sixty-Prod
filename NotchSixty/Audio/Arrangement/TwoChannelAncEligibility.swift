@@ -59,3 +59,33 @@ enum TwoChannelMimoSources {
         return feeds.filter { sources.contains($0) }
     }
 }
+
+extension SystemArrangement {
+    /// E25 S8b: a subwoofer the DSP does not drive (a powered sub's crossover, or a receiver's subs) still carries the
+    /// bass the anti-noise would have to cancel. Class D always; class E when it has subs. Live Quiet Zone refuses it
+    /// until sub-aware ANC exists (owner decision of 3 Nov 2026, question 18; E26).
+    var hasDownstreamSubwoofer: Bool {
+        switch arrangementClass {
+        case .d: return true
+        case .e: return subwooferCount > 0
+        case .a, .b, .c: return false
+        }
+    }
+}
+
+enum TwoChannelAncArming {
+    static let subwooferRefusal = "not available with a subwoofer yet"
+
+    /// What the Quiet Zone readiness card and the arming policy show for the stored arrangement. nil: nothing to add
+    /// (no arrangement, or the flag is off). A downstream sub refuses first; otherwise an eligibility refusal.
+    static func refusal(arrangement: SystemArrangement?, budget: QuietZoneFeedForwardBudget) -> String? {
+        guard let arrangement else { return nil }
+        if arrangement.hasDownstreamSubwoofer { return "Quiet Zone is \(subwooferRefusal)." }
+        if case .refused(let reason) = TwoChannelAncEligibility.evaluate(
+            arrangement: arrangement, feedLatencyUpperBoundSeconds: budget.antiNoisePathSeconds,
+            conservativePreviewSeconds: budget.conservativePreviewSeconds) {
+            return reason
+        }
+        return nil
+    }
+}

@@ -27,6 +27,10 @@ struct FeedForwardLiveQuietZoneFacts: Equatable, Sendable {
     var budget: QuietZoneFeedForwardBudget
     /// A subwoofer or bass management is active: not available yet (owner decision of 3 Nov 2026, question 18).
     var subwooferActive = false
+    /// E25 S8b (`e25.outputs-and-speakers`): why the two-channel arrangement does not qualify yet (the measured feed,
+    /// including any receiver, against the survey preview). nil with the flag off or when it qualifies. Eligible
+    /// grants nothing; a reason only adds a wait.
+    var arrangementRefusal: String? = nil
 }
 
 /// What the feed-forward shadow and reference driver know.
@@ -232,6 +236,7 @@ struct FeedForwardLiveArmingPolicy: Equatable, Sendable {
         guard quietZone.hasBaseline else { return wait("capturing the seat baseline") }
         guard quietZone.verdict == .ok else { return wait("the seat check has not cleared yet") }
         guard !quietZone.leaseRequired || quietZone.leaseHealthy else { return wait("the engine lease is not running") }
+        if let reason = quietZone.arrangementRefusal { return wait(reason) }
         guard quietZone.budget.readiness == .physicallyPlausible,
               let preview = quietZone.budget.conservativePreviewSeconds,
               let path = quietZone.budget.antiNoisePathSeconds

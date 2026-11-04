@@ -1688,6 +1688,7 @@ private struct ProductionSpeakersView: View {
                     profiles: profiles, deviceChannelCount: Int(engine.selectedOutputDevice?.outputChannelCount ?? 0))
                 ProductionRoutingEditorView(engine: engine)
                 ProductionProfileSubwooferCard(engine: engine, profiles: profiles)
+                ProductionProgramSourceCard(engine: engine, profiles: profiles)
                 playbackSystemCard
                 SystemCapabilityNoteCard(
                     title: "Saved with this profile", features: SystemCapabilityText.profileFeatures,
