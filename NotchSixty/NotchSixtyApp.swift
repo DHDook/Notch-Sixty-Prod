@@ -192,6 +192,8 @@ final class ProductController: ObservableObject {
             calibration: calibration
         )
         self.feedForwardSurvey = feedForwardSurvey
+        // E4 S28: the design survey's coherence turns the noise survey's reference predictions on.
+        activeQuietZone.noiseSurvey?.attach(to: feedForwardSurvey)
         let feedForwardShadow = QuietZoneFeedForwardShadow()
         // E4 S22b2: the drive is only ever requested while `e4.feedforward-live` is on.
         feedForwardShadow.driveSource = audioEngine

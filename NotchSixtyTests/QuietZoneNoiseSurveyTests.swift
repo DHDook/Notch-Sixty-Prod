@@ -120,4 +120,35 @@ final class QuietZoneNoiseSurveyControllerTests: XCTestCase {
         c.reset()
         XCTAssertNil(c.report)
     }
+
+    private func designSurvey(_ coherences: [Double: Double]) -> QuietZoneFeedForwardDesignSurvey {
+        QuietZoneFeedForwardDesignSurvey(
+            projectID: UUID(), microphoneStableID: "mic", errorChannel: 0, referenceChannel: 1,
+            sampleRate: 48_000, capturedAt: Date(timeIntervalSince1970: 0), segments: 16,
+            bands: coherences.sorted { $0.key < $1.key }.map {
+                QuietZoneFeedForwardSurveyBand(
+                    frequencyHz: $0.key, referenceToSeat: ActiveQuietZoneComplex(real: 1, imaginary: 0),
+                    coherence: $0.value)
+            })
+    }
+
+    func testBroadbandCoherenceIsTheMeanInTheCancellationBand() throws {
+        XCTAssertNil(QuietZoneNoiseSurveyController.broadbandCoherence(of: nil))
+        XCTAssertNil(QuietZoneNoiseSurveyController.broadbandCoherence(of: designSurvey([500: 0.99])))
+        let mean = try XCTUnwrap(QuietZoneNoiseSurveyController.broadbandCoherence(
+            of: designSurvey([10: 0.1, 40: 0.8, 100: 0.9, 500: 0.2])))
+        XCTAssertEqual(mean, 0.85, accuracy: 1e-12)
+    }
+
+    func testSurveyCoherenceFeedsTheReferencePrediction() throws {
+        let c = QuietZoneNoiseSurveyController()
+        for i in 0..<20 { c.ingest(snapshot([63: i.isMultiple(of: 2) ? -10 : -30, 80: -60, 50: -60])) }
+        let before = try XCTUnwrap(c.report?.findings.first { $0.centerHz == 63 })
+        XCTAssertEqual(before.predictedReductionDB, 0)
+        c.setCoherence(0.9)
+        let after = try XCTUnwrap(c.report?.findings.first { $0.centerHz == 63 })
+        XCTAssertGreaterThan(after.predictedReductionDB, 0)
+        c.setCoherence(nil)
+        XCTAssertEqual(c.report?.findings.first { $0.centerHz == 63 }?.predictedReductionDB, 0)
+    }
 }
