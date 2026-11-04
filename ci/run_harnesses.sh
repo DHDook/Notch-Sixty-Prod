@@ -70,7 +70,7 @@ build_core_objs() {
     CORE_BUILT=1
     CORE_OK=1
     local src
-    for src in graph snapshot fft stages_dsp stages_system stages_matrix stages_generator stages_route layout \
+    for src in graph snapshot fft stages_dsp stages_system stages_matrix stages_generator stages_route fold layout \
         measure/offline_fft measure/ess measure/deconvolve measure/reference_room measure/timing measure/distortion measure/decay measure/waterfall measure/monitor_ring measure/spl measure/rta correct/minphase correct/design correct/synth correct/bass correct/multisub_search xover/xover; do
         local obj="$OUT/n60core_${src//\//_}.o"
         if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -fno-exceptions -fno-rtti -Icore/include -Icore/src \
@@ -82,7 +82,7 @@ build_core_objs() {
     done
 }
 # Bridge harnesses: build the core only when one of them is selected.
-if selected pr35_transition_ack || selected pr41_same_device_output_map || selected pr101_realtime_resource_soak || selected e6_graph_takeover || selected e6_fade_alignment || selected e6_nchannel_graph || selected e6_shutdown_fade || selected e8_routed_output || selected e4_speaker_drive; then
+if selected pr35_transition_ack || selected pr41_same_device_output_map || selected pr101_realtime_resource_soak || selected e6_graph_takeover || selected e6_fade_alignment || selected e6_nchannel_graph || selected e6_shutdown_fade || selected e8_routed_output || selected e4_speaker_drive || selected e25_fold; then
     build_core_objs
 fi
 
@@ -134,6 +134,9 @@ harness pr35_transition_ack "${STRICT[@]}" -O2 -include stddef.h -I"$RT" ci/vali
     -Icore/include ${CORE_OBJS[@]+"${CORE_OBJS[@]}"} -lc++ -framework Accelerate -framework CoreAudio
 # shellcheck disable=SC2086
 harness e6_graph_takeover "${STRICT[@]}" -O2 -include stddef.h -I"$RT" ci/validate_e6_graph_takeover.c $ALL_RT \
+    -Icore/include ${CORE_OBJS[@]+"${CORE_OBJS[@]}"} -lc++ -framework Accelerate -framework CoreAudio
+# shellcheck disable=SC2086
+harness e25_fold "${STRICT[@]}" -O2 -include stddef.h -I"$RT" ci/harness_e25_fold.c $ALL_RT \
     -Icore/include ${CORE_OBJS[@]+"${CORE_OBJS[@]}"} -lc++ -framework Accelerate -framework CoreAudio
 # shellcheck disable=SC2086
 harness e6_fade_alignment "${STRICT[@]}" -O2 -include stddef.h -I"$RT" ci/harness_e6_fade_alignment.c $ALL_RT \

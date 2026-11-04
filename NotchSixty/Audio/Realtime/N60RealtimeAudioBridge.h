@@ -226,6 +226,20 @@ bool N60RealtimeAudioBridgeConfigureAdaptiveSampleRate(
 bool N60RealtimeAudioBridgeAdaptiveSampleRateEnabled(
     const N60RealtimeAudioBridge * _Nonnull bridge
 );
+
+// E25 S8a: folds a wider program source (3..16 tap channels, device channel order) onto the stereo ring in the
+// capture callback with two rows of channelCount gains. Call before IO starts; the matrix is immutable until the
+// bridge is destroyed. Returns false (and changes nothing) when adaptive sample-rate conversion is configured, a fold
+// is already installed, the count is outside 3..16 or a gain is not finite. With no fold the capture is unchanged.
+bool N60RealtimeAudioBridgeConfigureProgramFold(
+    N60RealtimeAudioBridge * _Nonnull bridge,
+    const float * _Nonnull left,
+    const float * _Nonnull right,
+    uint32_t channelCount
+);
+bool N60RealtimeAudioBridgeProgramFoldConfigured(
+    const N60RealtimeAudioBridge * _Nonnull bridge
+);
 // Control-plane only. Configure before callbacks start. The processor context
 // remains owned by the Swift transport session for the entire IOProc lifetime.
 bool N60RealtimeAudioBridgeConfigureAudioUnitRack(

@@ -1,5 +1,6 @@
 #include "N60RealtimeAudioBridge.h"
 
+#include "n60/fold.h"
 #include "n60/graph.h"
 
 #include <math.h>
@@ -29,6 +30,13 @@ typedef struct {
     UInt32 rightStride;
     UInt32 frameCount;
 } N60InputBufferView;
+
+// E25 S8a: per-channel view of a wider program tap, for the capture-side fold.
+typedef struct {
+    const float *channel[N60_FOLD_MAX_CHANNELS];
+    uint32_t stride[N60_FOLD_MAX_CHANNELS];
+    UInt32 frameCount;
+} N60FoldInputView;
 
 typedef struct {
     float *left;
@@ -165,6 +173,10 @@ struct N60RealtimeAudioBridge {
     uint32_t capacityFrames;
     N60StereoFrame *frames;
     N60AdaptiveSRC *adaptiveSRC;
+    // E25 S8a: capture-side fold of a wider program source onto the two feeds. Written by
+    // N60RealtimeAudioBridgeConfigureProgramFold before IO starts and immutable until IO has stopped.
+    n60_fold_matrix foldMatrix;
+    bool foldConfigured;
     float *adaptiveCaptureScratch;
     float *adaptiveOutputScratch;
     N60RenderKernel *renderKernel;
@@ -275,6 +287,42 @@ static float clamp_gain(float gain) {
     if (gain < 0.0f) return 0.0f;
     if (gain > 1.0f) return 1.0f;
     return gain;
+}
+
+// E25 S8a: finds the program channels in a capture buffer list. The tap's streams come last in an aggregate
+// (sub-device streams, if any, come first), so the search starts from the end. A single interleaved buffer of
+// exactly `channels` channels, or `channels` mono buffers, are accepted; any other layout is unsupported.
+static bool make_fold_input_view(
+    const AudioBufferList *bufferList,
+    uint32_t channels,
+    N60FoldInputView *view
+) {
+    if (bufferList == NULL || view == NULL || channels < 3u || channels > N60_FOLD_MAX_CHANNELS) return false;
+    *view = (N60FoldInputView){0};
+    for (UInt32 index = bufferList->mNumberBuffers; index > 0u; --index) {
+        const AudioBuffer *buffer = &bufferList->mBuffers[index - 1u];
+        if (buffer->mData == NULL || buffer->mNumberChannels != channels) continue;
+        const float *samples = (const float *)buffer->mData;
+        for (uint32_t c = 0; c < channels; ++c) {
+            view->channel[c] = samples + c;
+            view->stride[c] = channels;
+        }
+        view->frameCount = buffer->mDataByteSize / (UInt32)(sizeof(float) * channels);
+        return true;
+    }
+    if (bufferList->mNumberBuffers < channels) return false;
+    UInt32 first = bufferList->mNumberBuffers - channels;
+    UInt32 frames = UINT32_MAX;
+    for (uint32_t c = 0; c < channels; ++c) {
+        const AudioBuffer *buffer = &bufferList->mBuffers[first + c];
+        if (buffer->mData == NULL || buffer->mNumberChannels != 1u) return false;
+        view->channel[c] = (const float *)buffer->mData;
+        view->stride[c] = 1u;
+        UInt32 bufferFrames = buffer->mDataByteSize / (UInt32)sizeof(float);
+        if (bufferFrames < frames) frames = bufferFrames;
+    }
+    view->frameCount = frames;
+    return true;
 }
 
 static void zero_output(AudioBufferList *bufferList) {
@@ -1096,7 +1144,7 @@ bool N60RealtimeAudioBridgeConfigureAdaptiveSampleRate(
     double outputSampleRate,
     uint32_t targetBufferedInputFrames
 ) {
-    if (bridge == NULL || bridge->adaptiveSRC != NULL
+    if (bridge == NULL || bridge->adaptiveSRC != NULL || bridge->foldConfigured
         || !isfinite(inputSampleRate) || inputSampleRate <= 0.0
         || !isfinite(outputSampleRate) || outputSampleRate <= 0.0) {
         return false;
@@ -2286,6 +2334,24 @@ static void advance_transition_through_silence(
     publish_transition_runtime(bridge, runtime);
 }
 
+bool N60RealtimeAudioBridgeConfigureProgramFold(
+    N60RealtimeAudioBridge *bridge,
+    const float *left,
+    const float *right,
+    uint32_t channelCount
+) {
+    if (bridge == NULL || bridge->adaptiveSRC != NULL || bridge->foldConfigured) return false;
+    n60_fold_matrix matrix;
+    if (!n60_fold_matrix_make(&matrix, channelCount, left, right)) return false;
+    bridge->foldMatrix = matrix;
+    bridge->foldConfigured = true;
+    return true;
+}
+
+bool N60RealtimeAudioBridgeProgramFoldConfigured(const N60RealtimeAudioBridge *bridge) {
+    return bridge != NULL && bridge->foldConfigured;
+}
+
 OSStatus N60CaptureIOProc(
     AudioDeviceID inDevice,
     const AudioTimeStamp *inNow,
@@ -2303,6 +2369,39 @@ OSStatus N60CaptureIOProc(
     N60RealtimeAudioBridge *bridge = (N60RealtimeAudioBridge *)inClientData;
     if (bridge == NULL || inInputData == NULL) return noErr;
     atomic_fetch_add_explicit(&bridge->captureCallbacks, 1, memory_order_relaxed);
+
+    if (bridge->foldConfigured) {
+        N60FoldInputView foldView;
+        if (!make_fold_input_view(inInputData, bridge->foldMatrix.channel_count, &foldView)) {
+            atomic_fetch_add_explicit(&bridge->unsupportedBufferLayouts, 1, memory_order_relaxed);
+            return noErr;
+        }
+        UInt32 foldFrames = foldView.frameCount;
+        uint64_t foldWrite = atomic_load_explicit(&bridge->writeIndex, memory_order_relaxed);
+        uint64_t foldRead = atomic_load_explicit(&bridge->readIndex, memory_order_acquire);
+        uint64_t foldUsed = foldWrite >= foldRead ? foldWrite - foldRead : 0;
+        uint64_t foldAvailable = foldUsed < bridge->capacityFrames ? bridge->capacityFrames - foldUsed : 0;
+        UInt32 foldToWrite = foldFrames < foldAvailable ? foldFrames : (UInt32)foldAvailable;
+        uint32_t ringIndex = (uint32_t)(foldWrite % bridge->capacityFrames);
+        UInt32 firstRun = bridge->capacityFrames - ringIndex;
+        if (firstRun > foldToWrite) firstRun = foldToWrite;
+        n60_fold_down_process(
+            &bridge->foldMatrix, foldView.channel, foldView.stride, firstRun, (float *)&bridge->frames[ringIndex]);
+        if (foldToWrite > firstRun) {
+            const float *shifted[N60_FOLD_MAX_CHANNELS];
+            for (uint32_t c = 0; c < bridge->foldMatrix.channel_count; ++c) {
+                shifted[c] = foldView.channel[c] + (size_t)firstRun * foldView.stride[c];
+            }
+            n60_fold_down_process(
+                &bridge->foldMatrix, shifted, foldView.stride, foldToWrite - firstRun, (float *)&bridge->frames[0]);
+        }
+        atomic_store_explicit(&bridge->writeIndex, foldWrite + foldToWrite, memory_order_release);
+        atomic_fetch_add_explicit(&bridge->capturedFrames, foldToWrite, memory_order_relaxed);
+        if (foldToWrite < foldFrames) {
+            atomic_fetch_add_explicit(&bridge->overrunFrames, foldFrames - foldToWrite, memory_order_relaxed);
+        }
+        return noErr;
+    }
 
     N60InputBufferView inputView = {0};
     if (!make_input_buffer_view(inInputData, &inputView)) {

@@ -213,6 +213,7 @@ enum CoreAudioTransportError: Error, LocalizedError, Equatable {
     case speakerDriverProcessingConfigurationFailed
     case headphoneDSPConfigurationFailed
     case audioUnitRackConfigurationFailed
+    case programFoldFailed(ProgramFoldDownError)
 
     var errorDescription: String? {
         switch self {
@@ -220,6 +221,8 @@ enum CoreAudioTransportError: Error, LocalizedError, Equatable {
             return "Unable to resolve Notch Sixty's Core Audio process object for tap self-exclusion."
         case .operationFailed(let operation, let status):
             return "Core Audio \(operation) failed with status \(status)."
+        case .programFoldFailed(let error):
+            return error.errorDescription
         case .unsupportedFormat(let role, let format):
             return "Unsupported \(role) format: \(format.sampleRate) Hz, \(format.channelCount) channels, \(format.bitsPerChannel)-bit."
         case .sampleRateMismatch(let tap, let output):
@@ -421,6 +424,10 @@ final class CoreAudioTransportSession {
     let calibrationTimingRouteLeaseID = UUID().uuidString
     let sameDeviceOutputPlan: SameDeviceOutputRoutePlan?
     let aggregateDeviceOutputPlan: AggregateDeviceOutputRoutePlan?
+    /// E25 S8a: the wider program-source device this session taps and folds onto the two feeds, and the fold. nil is
+    /// the standard session, which taps the selected output itself.
+    let programSource: AudioOutputDevice?
+    let programFoldPlan: ProgramFoldDownPlan?
     private(set) var tapFormat = AudioStreamFormatDescription(AudioStreamBasicDescription())
     private(set) var outputFormat = AudioStreamFormatDescription(AudioStreamBasicDescription())
     private(set) var startupGateTargetFrames: UInt32 = 0
@@ -475,9 +482,17 @@ final class CoreAudioTransportSession {
         speakerCrossoverMode: SpeakerCrossoverMode? = nil,
         speakerBusSplitterSnapshot: N60SpeakerBusSplitterSnapshot? = nil,
         speakerDriverProcessingSnapshot: N60SpeakerDriverProcessingSnapshot? = nil,
-        audioUnitRack: AudioUnitLiveRackSwitchboard? = nil
+        audioUnitRack: AudioUnitLiveRackSwitchboard? = nil,
+        programSource: AudioOutputDevice? = nil,
+        programFoldPlan: ProgramFoldDownPlan? = nil
     ) throws {
         precondition(sameDeviceOutputPlan == nil || aggregateDeviceOutputPlan == nil)
+        precondition((programSource == nil) == (programFoldPlan == nil))
+        if programSource != nil, sameDeviceOutputPlan != nil || aggregateDeviceOutputPlan != nil {
+            throw CoreAudioTransportError.programFoldFailed(.incompatibleOutput("a same-device or multi-device output plan"))
+        }
+        self.programSource = programSource
+        self.programFoldPlan = programFoldPlan
         self.selectedOutput = selectedOutput
         self.sameDeviceOutputPlan = sameDeviceOutputPlan
         self.aggregateDeviceOutputPlan = aggregateDeviceOutputPlan
@@ -493,12 +508,17 @@ final class CoreAudioTransportSession {
             let processObject = try Self.currentProcessObjectID()
             let description = CATapDescription(
                 excludingProcesses: [processObject],
-                deviceUID: selectedOutput.uid,
+                deviceUID: (programSource ?? selectedOutput).uid,
                 stream: 0
             )
             description.name = "Notch Sixty System Audio"
             description.isPrivate = true
             description.muteBehavior = .mutedWhenTapped
+            if programSource != nil {
+                // Keep every source channel: the fold happens in the capture callback.
+                description.isMixdown = false
+                description.isMono = false
+            }
 
             try Self.check(AudioHardwareCreateProcessTap(description, &tapID), operation: "create process tap")
 
@@ -519,8 +539,33 @@ final class CoreAudioTransportSession {
                 )
             )
 
-            guard tapFormat.isSupportedStereoTransportFormat else {
-                throw CoreAudioTransportError.unsupportedFormat(role: "tap", format: tapFormat)
+            var foldGains: (left: [Float], right: [Float])?
+            if let programFoldPlan {
+                guard tapFormat.isSupportedFloat32TransportFormat else {
+                    throw CoreAudioTransportError.unsupportedFormat(role: "program source tap", format: tapFormat)
+                }
+                let expected = programFoldPlan.layout.roles.count
+                guard Int(tapFormat.channelCount) == expected else {
+                    throw CoreAudioTransportError.programFoldFailed(
+                        .channelCountMismatch(expected: expected, actual: Int(tapFormat.channelCount)))
+                }
+                guard abs(tapFormat.sampleRate - outputFormat.sampleRate) < 0.5 else {
+                    throw CoreAudioTransportError.programFoldFailed(.sampleRateUnsupported(outputFormat.sampleRate))
+                }
+                let descriptions = try CoreAudioSemanticTransportSupport.resolveInputChannelDescriptions(
+                    deviceID: (programSource ?? selectedOutput).deviceID, channelCount: tapFormat.channelCount)
+                let streamRoles = descriptions.map {
+                    OutputProgramRole(realtime: N60ProgramChannelRoleFromAudioChannelLabel($0.mChannelLabel))
+                }
+                guard !streamRoles.contains(where: { $0 == nil }),
+                      let gains = programFoldPlan.matrix.deviceOrderGains(streamRoles: streamRoles.compactMap { $0 }) else {
+                    throw CoreAudioTransportError.programFoldFailed(.sourceChannelLayoutUnresolved)
+                }
+                foldGains = gains
+            } else {
+                guard tapFormat.isSupportedStereoTransportFormat else {
+                    throw CoreAudioTransportError.unsupportedFormat(role: "tap", format: tapFormat)
+                }
             }
             if sameDeviceOutputPlan == nil && aggregateDeviceOutputPlan == nil {
                 guard outputFormat.isSupportedStereoTransportFormat else {
@@ -531,7 +576,8 @@ final class CoreAudioTransportSession {
                     throw CoreAudioTransportError.unsupportedFormat(role: "multichannel output reference", format: outputFormat)
                 }
             }
-            let adaptiveSampleRateRequired = abs(tapFormat.sampleRate - outputFormat.sampleRate) >= 0.5
+            let adaptiveSampleRateRequired = programFoldPlan == nil
+                && abs(tapFormat.sampleRate - outputFormat.sampleRate) >= 0.5
             if adaptiveSampleRateRequired, aggregateDeviceOutputPlan != nil {
                 // The legacy multi-device speaker path already runs capture and
                 // output inside one HAL Aggregate Device clock domain. PR70
@@ -666,9 +712,23 @@ final class CoreAudioTransportSession {
                 startupGateActivationFrames = gatePolicy.activationBufferedFrames
             }
 
+            if let foldGains {
+                // Before IO starts: the capture callback reads the matrix without a lock.
+                var left = foldGains.left
+                var right = foldGains.right
+                let configured = left.withUnsafeMutableBufferPointer { l in
+                    right.withUnsafeMutableBufferPointer { r in
+                        N60RealtimeAudioBridgeConfigureProgramFold(newBridge, l.baseAddress!, r.baseAddress!, UInt32(l.count))
+                    }
+                }
+                guard configured else {
+                    throw CoreAudioTransportError.programFoldFailed(.sourceChannelLayoutUnresolved)
+                }
+            }
             let tapEntry: [String: Any] = [
                 kAudioSubTapUIDKey: description.uuid.uuidString,
-                kAudioSubTapDriftCompensationKey: false,
+                // A tap on another device runs on that device's clock; the aggregate follows the DAC.
+                kAudioSubTapDriftCompensationKey: programSource != nil,
             ]
             var aggregateDescription: [String: Any] = [
                 kAudioAggregateDeviceNameKey: aggregateDeviceOutputPlan == nil
@@ -691,13 +751,19 @@ final class CoreAudioTransportSession {
                 aggregateDescription[kAudioAggregateDeviceSubDeviceListKey] = subdevices
                 aggregateDescription[kAudioAggregateDeviceMainSubDeviceKey] = aggregateDeviceOutputPlan.referenceDeviceUID
             }
+            if programSource != nil {
+                aggregateDescription[kAudioAggregateDeviceSubDeviceListKey] = [
+                    [kAudioSubDeviceUIDKey: selectedOutput.uid, kAudioSubDeviceDriftCompensationKey: false] as [String: Any]
+                ]
+                aggregateDescription[kAudioAggregateDeviceMainSubDeviceKey] = selectedOutput.uid
+            }
             try Self.check(
                 AudioHardwareCreateAggregateDevice(aggregateDescription as CFDictionary, &aggregateDeviceID),
                 operation: aggregateDeviceOutputPlan == nil
                     ? "create private tap aggregate device"
                     : "create private multi-output aggregate device"
             )
-            if aggregateDeviceOutputPlan != nil {
+            if aggregateDeviceOutputPlan != nil || programSource != nil {
                 try Self.waitForDeviceAlive(aggregateDeviceID)
             }
 

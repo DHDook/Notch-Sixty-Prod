@@ -147,3 +147,117 @@ extension ProgramFoldDown {
         return .source(uid: uid)
     }
 }
+
+// MARK: - E25 S8a: the plan the engine applies, channel-order mapping and the protection merge
+
+/// Why a fold cannot run. Shown on the Speakers tab (S8b).
+enum ProgramFoldDownError: Error, Equatable, LocalizedError, Sendable {
+    case sourceUnavailable(uid: String)
+    case channelCountMismatch(expected: Int, actual: Int)
+    case sampleRateUnsupported(Double)
+    case sourceChannelLayoutUnresolved
+    case incompatibleOutput(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .sourceUnavailable(let uid):
+            return "Waiting for the program source device (\(uid)) to return."
+        case .channelCountMismatch(let expected, let actual):
+            return "The program source has \(actual) channels but the program layout needs \(expected)."
+        case .sampleRateUnsupported(let rate):
+            return "The program source does not offer the output's sample rate (\(Int(rate)) Hz); the fold never resamples."
+        case .sourceChannelLayoutUnresolved:
+            return "The program source does not label its channels, so the fold cannot place them."
+        case .incompatibleOutput(let reason):
+            return "A wider program source cannot be folded with \(reason)."
+        }
+    }
+}
+
+/// What the engine needs to tap a wider source and fold it onto the two feeds: the source UID, the layout and the
+/// compiled matrix. nil for a stereo layout or with no source configured (the player or macOS folds upstream).
+struct ProgramFoldDownPlan: Equatable, Sendable {
+    var foldDown: ProgramFoldDown
+    var layout: OutputProgramLayout
+    var matrix: FoldDownMatrix
+
+    init?(layout: OutputProgramLayout, foldDown: ProgramFoldDown) {
+        guard foldDown.isActive, let matrix = ProgramFoldDownCompiler.compile(layout: layout, foldDown: foldDown) else {
+            return nil
+        }
+        self.foldDown = foldDown
+        self.layout = layout
+        self.matrix = matrix
+    }
+
+    var sourceUID: String { foldDown.programSourceDeviceUID ?? "" }
+
+    /// A fold runs on the stereo session only. These are the setups that cannot host it.
+    static func incompatibility(sameDeviceOrAggregateOutput: Bool, headphoneProfileEnabled: Bool) -> ProgramFoldDownError? {
+        if sameDeviceOrAggregateOutput { return .incompatibleOutput("a same-device or multi-device output plan") }
+        if headphoneProfileEnabled { return .incompatibleOutput("a headphone profile") }
+        return nil
+    }
+
+    /// The decision `buildStereoTransport` acts on.
+    enum BuildDecision: Equatable, Sendable {
+        case standard
+        case tapSource(AudioOutputDevice)
+        case waitForSource(uid: String)
+        case refuse(ProgramFoldDownError)
+    }
+
+    static func buildDecision(
+        plan: ProgramFoldDownPlan?, availableDevices: [AudioOutputDevice], sampleRate: Double
+    ) -> BuildDecision {
+        guard let plan else { return .standard }
+        switch plan.foldDown.resolveSource(layout: plan.layout, availableDevices: availableDevices, sampleRate: sampleRate) {
+        case .upstreamFold: return .standard
+        case .source(let uid):
+            guard let device = availableDevices.first(where: { $0.uid == uid }) else { return .waitForSource(uid: uid) }
+            return .tapSource(device)
+        case .waitForDevice(let uid): return .waitForSource(uid: uid)
+        case .channelCountMismatch(let expected, let actual): return .refuse(.channelCountMismatch(expected: expected, actual: actual))
+        case .sampleRateUnsupported(let rate): return .refuse(.sampleRateUnsupported(rate))
+        }
+    }
+}
+
+extension OutputProgramRole {
+    init?(realtime role: N60ProgramChannelRole) {
+        guard let match = OutputProgramRole.allCases.first(where: { $0.realtimeCType == role }) else { return nil }
+        self = match
+    }
+}
+
+extension FoldDownMatrix {
+    /// The two rows reordered into the source device's channel order. `streamRoles[i]` is the role of device channel
+    /// `i`. nil unless the stream carries exactly the layout's roles, once each: the fold never guesses a channel.
+    func deviceOrderGains(streamRoles: [OutputProgramRole]) -> (left: [Float], right: [Float])? {
+        guard streamRoles.count == layout.roles.count, Set(streamRoles) == Set(layout.roles),
+              Set(streamRoles).count == streamRoles.count else { return nil }
+        let left = streamRoles.map { Float(gain(feed: 0, role: $0)) }
+        let right = streamRoles.map { Float(gain(feed: 1, role: $0)) }
+        return (left, right)
+    }
+}
+
+extension DynamicsConfiguration {
+    /// Merges the fold's output limiter into the user's protection settings, taking the stricter of each setting
+    /// (E25 S8a decision 3). A matrix that needs no limiter (`peakSafe`, or LFE dropped) leaves them unchanged.
+    func mergingFoldProtection(_ matrix: FoldDownMatrix?) -> DynamicsConfiguration {
+        guard let matrix, matrix.needsLimiter else { return self }
+        var merged = self
+        let userLimiterOn = limiter.enabled
+        merged.limiter.enabled = true
+        merged.limiter.ceilingDB = Swift.min(limiter.ceilingDB, ProgramFoldDown.limiterCeilingDB)
+        merged.limiter.truePeakGuardEnabled = true
+        merged.oversampling = OversamplingFactor.four
+        if !userLimiterOn {
+            merged.limiter.attackMs = 1
+            merged.limiter.releaseMs = 100
+            merged.limiter.lookAheadMs = 1
+        }
+        return merged
+    }
+}
