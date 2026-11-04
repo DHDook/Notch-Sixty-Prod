@@ -94,6 +94,8 @@ struct SystemArrangement: Codable, Equatable, Sendable {
     /// E25 S2: the mono-bass filter and per-speaker feed calibration of the two-channel session. nil keeps the
     /// standard Linkwitz-Riley 24 crossover and an identity feed.
     var stereoAlignment: StereoBassAlignment?
+    /// E25 S7: fold a wider program (5.1, 7.1) to the two feeds. nil keeps today's behaviour (the player folds).
+    var foldDown: ProgramFoldDown?
 
     init(
         outputs: SystemOutputs,
@@ -103,7 +105,8 @@ struct SystemArrangement: Codable, Equatable, Sendable {
         subOutputs: [PhysicalOutputEndpoint] = [],
         speakers: [ArrangedSpeaker] = [],
         realisation: ArrangementRealisation = .profile,
-        stereoAlignment: StereoBassAlignment? = nil
+        stereoAlignment: StereoBassAlignment? = nil,
+        foldDown: ProgramFoldDown? = nil
     ) {
         self.outputs = outputs
         self.layout = layout
@@ -113,6 +116,7 @@ struct SystemArrangement: Codable, Equatable, Sendable {
         self.speakers = speakers
         self.realisation = realisation
         self.stereoAlignment = stereoAlignment
+        self.foldDown = foldDown
     }
 
     init(from decoder: Decoder) throws {
@@ -131,6 +135,7 @@ struct SystemArrangement: Codable, Equatable, Sendable {
         speakers = try c.decode([ArrangedSpeaker].self, forKey: .speakers)
         realisation = try c.decodeIfPresent(ArrangementRealisation.self, forKey: .realisation) ?? .profile
         stereoAlignment = try c.decodeIfPresent(StereoBassAlignment.self, forKey: .stereoAlignment)
+        foldDown = try c.decodeIfPresent(ProgramFoldDown.self, forKey: .foldDown)
     }
 
     /// The five classes the capability matrix and the wizard speak in.
