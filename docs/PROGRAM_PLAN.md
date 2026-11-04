@@ -297,7 +297,7 @@ channels allow, and the UI gives a reason for each one that it cannot.
 - [x] Capability text on every surface that offers a choice
 - [~] Quiet Zone and MIMO on two channels: MIMO sources limited to the L and R feeds (done); Quiet Zone eligibility built dark (wired by S8)
 - [ ] Quiet Zone and MIMO eligibility on two channels (never live outside authorisation)
-- [ ] Fold-down of 5.1/7.1 from a wider program source to the two feeds (owner: in v1)
+- [~] Fold-down of 5.1/7.1 from a wider program source to the two feeds (owner: in v1) (built dark in S7; wired by S8)
 - [ ] Owner configuration end to end at eight rates; flag removed
 
 ## Phase 4 — Complete scope and launch

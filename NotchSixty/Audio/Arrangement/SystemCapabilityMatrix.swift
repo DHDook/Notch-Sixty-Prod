@@ -96,6 +96,9 @@ enum SystemCapabilityMatrix {
             return .available(note: "Works on every arrangement.")
         case .widerProgram:
             if c == .a { return .available(note: "Each speaker has its own output.") }
+            if arrangement.foldDown?.isActive == true {
+                return .available(note: "The wider program is folded to your two speaker feeds (ITU-R BS.775); Quiet Zone stays available.")
+            }
             return .limited(note: downstream
                 ? "The player or macOS folds 5.1 and 7.1 to two channels before the app; your receiver may upmix them again."
                 : "The player or macOS folds 5.1 and 7.1 to two channels before the app.")
