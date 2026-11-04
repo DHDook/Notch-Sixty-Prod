@@ -26,7 +26,7 @@ with them, these decisions win until E1/E21 update `AGENTS.md`.
 
 ## Epics at a glance
 
-Twenty-five epics in four phases close every gap in the analysis and set the engine up for other
+Twenty-six epics in four phases close every gap in the analysis and set the engine up for other
 platforms; E6 (the unified graph) is the critical path, because eleven later epics build on it.
 
 | ID | Epic | Phase | Depends on | Where the work happens | Done when |
@@ -48,6 +48,7 @@ platforms; E6 (the unified graph) is the critical path, because eleven later epi
 | E12 | Guided setup and IA | 3 | E10, E11 | Claude Code (Mac) | New user reaches a verified calibration in one flow |
 | E24 | Room correction completion | 3 | E10, E11, E12 | Claude Code (Mac) | Every measure, correction and verify step is reachable from the shipped UI through production wiring; the wizard passes end to end at all eight rates |
 | E25 | Outputs and speaker arrangement, one-DAC support | 3 | E24, E12, E8 | Claude Code (Mac) | A 5.1 system on a two-channel DAC through a receiver sets up end to end from the UI; every feature states how it works, or why not, on each configuration |
+| E26 | Sub-aware Quiet Zone | 3 | E4 S21, S22b, S25; E25 S8b (bench parts: E22) | Claude Code (Mac) + bench | Quiet Zone designs, limits and arms against the measured path through a sub or receiver; no blanket subwoofer refusal |
 | E13 | Headphones complete | 4 | E6, E7 | Claude Code (Mac) | BYO files to PEQ in one click; live tuning |
 | E14 | Upmixer | 4 | E6 | Claude Code + bench | Stereo plays on 5.1–7.1.4 layouts |
 | E15 | Device-aware profiles | 4 | E6 | Claude Code (Mac) | Profile follows the output when the user opts in |
@@ -57,7 +58,7 @@ platforms; E6 (the unified graph) is the critical path, because eleven later epi
 | E22 | Hardware validation | 4 | all software epics | Bench | Every deferred bench check passes on `main` at every rate |
 | E18 | Launch readiness | 4 | all | Owner + Claude Code | Signed, reviewed, accessible, competitive ABX done, App Store live |
 
-## Execution order (owner, 31 Oct 2026; E24 and E25 added 1 Nov 2026)
+## Execution order (owner, 31 Oct 2026; E24 and E25 added 1 Nov 2026; E26 added 4 Nov 2026)
 
 `/next` works down this list: the first epic with open slices whose dependencies are met. Within
 an epic, slices go in their written order. Competitive features come first (what buyers and
@@ -67,6 +68,7 @@ reviewers compare with Dirac and REW), then engine depth, then breadth.
    - then E25 Outputs and speaker arrangement, S1–S8 in written order, before item 1 (owner, 1 Nov 2026)
    - then E4 S22b echo stage in the live path (S22b3 echo stage built dark, PR open; S25 arming built), before item 1 (owner, 2 Nov 2026; arming approved with the four conditions in `docs/epics/E4.md` Open owner decisions: user-initiated only, slow 3 s fade-in, existing gates first, never persisted)
 1. E4 class-leading roadmap, S24–S31 in written order (owner, 31 Oct 2026; E4 S11 moved to E22 on 1 Nov 2026; S26 and S29 are skipped until the owner decides camera head position and the overnight power assertion; slices waiting on E8 or the bench are skipped until ready)
+   - then E26 Sub-aware Quiet Zone, S1–S7 in written order, before item 2 (owner, 4 Nov 2026; S1 waits for E25 S8b; no live ANC path is enabled outside the per-feature arm)
 2. E12 Guided setup and information architecture, S7 `e12/ship` (#243, needs-owner)
 3. E11 Measurement suite, S10 `e11/overlays-and-ship` (needs-owner)
 4. E9 Multichannel protection and FIR parity, FIR limits: 262,144-tap program FIR and the 32,768-tap cap
@@ -79,6 +81,7 @@ reviewers compare with Dirac and REW), then engine depth, then breadth.
 11. E14 Upmixer, E15 Device-aware profiles, E17 Export and dither, E16 Automation and remote
 12. E23 Legacy engine removal
 13. E22 Hardware validation and E18 Launch readiness (owner-led)
+14. Shared room model: design note only (owner, 3 Nov 2026: parked to the end of the roadmap; E26 S2 stores its sub measurements in a plain form a later model can absorb)
 
 ## Phase 1 — Consolidate and qualify
 
@@ -299,6 +302,21 @@ channels allow, and the UI gives a reason for each one that it cannot.
 - [ ] Quiet Zone and MIMO eligibility on two channels (never live outside authorisation)
 - [~] Fold-down of 5.1/7.1 from a wider program source to the two feeds (owner: in v1) (built dark in S7; S8a built dark; wired by S8b)
 - [ ] Owner configuration end to end at eight rates; flag removed
+
+### E26 Sub-aware Quiet Zone (owner, 4 Nov 2026)
+
+Plan: `docs/epics/E26.md`. Quiet Zone today refuses feed-forward live with a subwoofer or bass
+management (E4 question 18), so a system with a sub behind a receiver has no live Quiet Zone. E26
+measures the path the anti-noise really takes, sub included, and designs, limits and arms against
+it, behind `e26.sub-aware-anc`. Live output stays behind the per-feature arm.
+
+- [ ] Bass-path model, fingerprint and plain measurement record; receiver bass declaration (open preout or calibrated LFE out) with a setup note, refusing only when undeclared; mono bass on the pair no longer counts as a sub; acoustic twin with a sub
+- [ ] Secondary path and leakage measured through the whole feed; anti-noise latency per band; echo set with a sub (absorbs E4 S22c)
+- [ ] Conditioned L/R design where both channels share the sub (common-mode constraint), tonal and feed-forward
+- [ ] Sub safety: receiver crossover in the excursion caps, path-gain watch that disarms, combined leakage stability bound
+- [ ] Sub-aware readiness replaces the blanket refusal; setup UI; end-to-end twin harness at eight rates
+- [ ] Quiet Zone with a sub on its own output (profile session, sub lane as an actuator)
+- [ ] Flag removed after the E22 sub bench checks (owner decision)
 
 ## Phase 4 — Complete scope and launch
 
