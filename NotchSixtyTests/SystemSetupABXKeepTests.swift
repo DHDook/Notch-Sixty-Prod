@@ -4,11 +4,11 @@ import XCTest
 extension OfflineSetupRig {
     /// Drives the guided flow through the production model to the Save step (applied design is mixed phase).
     func driveToSave(label: String) async throws {
-        try installTwoPointOneProfile()
         model.begin()
         model.chooseOutput(uid: Self.outputUID)
+        model.chooseChannelCount(3)
         model.next()
-        model.chooseTopology(.twoPointOne)
+        model.chooseBass(.dspToSubOutputs)
         model.next()
         model.selectMicrophone(uid: Self.inputUID)
         model.acceptSweepLevel(measuredSPLdBC: 75)
@@ -77,7 +77,7 @@ final class SystemSetupABXKeepTests: XCTestCase {
     }
 
     func testABXIsOfferedOnlyWhenPlayable() async throws {
-        let rig = try OfflineSetupRig(rate: 48_000)
+        let rig = try OfflineSetupRig(rate: 48_000, arrangementEnabled: true)
         defer { rig.tearDown() }
         XCTAssertEqual(rig.model.abxUnavailableReason, "Apply the correction first.")
         try await rig.driveToSave(label: "gate")
@@ -90,7 +90,7 @@ final class SystemSetupABXKeepTests: XCTestCase {
 
     func testKeepingTheAppliedDesignChangesNothing() async throws {
         for rate in Self.rates {
-            let rig = try OfflineSetupRig(rate: rate)
+            let rig = try OfflineSetupRig(rate: rate, arrangementEnabled: true)
             defer { rig.tearDown() }
             let label = "\(rate) Hz"
             try await rig.driveToSave(label: label)
@@ -113,7 +113,7 @@ final class SystemSetupABXKeepTests: XCTestCase {
 
     func testKeepingTheOtherDesignWritesItAndReturnsToVerify() async throws {
         for rate in Self.rates {
-            let rig = try OfflineSetupRig(rate: rate)
+            let rig = try OfflineSetupRig(rate: rate, arrangementEnabled: true)
             defer { rig.tearDown() }
             let label = "\(rate) Hz"
             try await rig.driveToSave(label: label)
@@ -144,7 +144,7 @@ final class SystemSetupABXKeepTests: XCTestCase {
     }
 
     func testKeepIsRefusedBeforeTheRunIsFinishedAndWhenMixedPhaseDoesNotFit() async throws {
-        let rig = try OfflineSetupRig(rate: 48_000)
+        let rig = try OfflineSetupRig(rate: 48_000, arrangementEnabled: true)
         defer { rig.tearDown() }
         try await rig.driveToSave(label: "refuse")
         await rig.model.openABX()
@@ -166,7 +166,7 @@ final class SystemSetupABXKeepTests: XCTestCase {
     }
 
     func testCancelClosesTheRun() async throws {
-        let rig = try OfflineSetupRig(rate: 48_000)
+        let rig = try OfflineSetupRig(rate: 48_000, arrangementEnabled: true)
         defer { rig.tearDown() }
         try await rig.driveToSave(label: "cancel")
         await rig.model.openABX()

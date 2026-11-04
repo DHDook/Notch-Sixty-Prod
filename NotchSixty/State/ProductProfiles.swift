@@ -802,6 +802,9 @@ enum ProductProfileError: Error, LocalizedError {
 
 @MainActor
 final class ProductProfileController: ObservableObject {
+    /// E25 S8c: read through a closure so tests inject the flag; only Swift reads flags.
+    var arrangementFlagEnabled: () -> Bool = { FeatureFlags().isEnabled(.outputsAndSpeakers) }
+
     private struct Archive: Codable {
         static let currentSchemaVersion = 3
         var schemaVersion: Int = currentSchemaVersion
@@ -1878,6 +1881,7 @@ final class ProductProfileController: ObservableObject {
             try engine.replaceRoomCorrectionConfiguration(state.roomCorrection)
             try engine.replaceSpeakerIRConfiguration(state.speakerIR)
             try engine.replaceHeadphoneDeviceProfileConfiguration(state.headphoneDeviceProfile)
+            try applyStoredArrangement(state)
         } catch {
             if engine.lifecycleState == .idle,
                engine.routeConfiguration.selectedOutputUID != previousOutputUID {
@@ -1898,8 +1902,31 @@ final class ProductProfileController: ObservableObject {
             try? engine.replaceRoomCorrectionConfiguration(previous.roomCorrection)
             try? engine.replaceSpeakerIRConfiguration(previous.speakerIR)
             try? engine.replaceHeadphoneDeviceProfileConfiguration(previous.headphoneDeviceProfile)
+            try? applyStoredArrangement(previous)
             throw error
         }
+    }
+
+    /// E25 S8c: with `e25.outputs-and-speakers` on, the stored arrangement (migrated from older profiles) is compiled
+    /// and its stereo alignment and program fold-down are applied, so a profile load and the launch restore give the
+    /// same graph as the setup wizard. Flag off: nothing changes. Stereo programs have no fold, so the plan is nil.
+    private func applyStoredArrangement(_ state: PlaybackSystemState) throws {
+        guard arrangementFlagEnabled() else { return }
+        let detected = Int(engine.selectedOutputDevice?.outputChannelCount ?? 0)
+        guard let arrangement = SystemArrangementMigration.migrated(state, detectedChannelCount: detected)
+            .systemArrangement else {
+            try engine.applyStereoAlignment(nil)
+            try engine.applyProgramFoldDown(nil)
+            return
+        }
+        let compiled: CompiledArrangement
+        switch SystemArrangementCompiler.compile(arrangement, preserving: state.outputDeviceProfile) {
+        case .success(let value): compiled = value
+        case .failure(let issue): throw issue
+        }
+        try engine.applyStereoAlignment(compiled.stereoAlignment)
+        let plan = arrangement.foldDown.flatMap { ProgramFoldDownPlan(layout: arrangement.layout, foldDown: $0) }
+        try engine.applyProgramFoldDown(plan)
     }
 
     private func ensureContentPresetsSeeded() {

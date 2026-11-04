@@ -1085,6 +1085,9 @@ final class AudioIOEngine: ObservableObject {
     /// (no source tapped) adds no limiter.
     private var programFoldPlan: ProgramFoldDownPlan?
     private var foldMatrixInUse: FoldDownMatrix?
+    /// E25 S8c: read-only views of the applied arrangement state, so profile load and the wizard are comparable.
+    var appliedStereoAlignment: StereoBassAlignment? { stereoAlignment }
+    var appliedProgramFoldPlan: ProgramFoldDownPlan? { programFoldPlan }
     private var nChannelTransportSession: CoreAudioNChannelTransportSession?
     private var binauralHeadphoneTransportSession: CoreAudioBinauralHeadphoneTransportSession?
     private var headTrackingController: SpatialHeadTrackingController?

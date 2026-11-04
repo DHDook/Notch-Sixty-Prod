@@ -61,9 +61,9 @@ final class MeasurementReadinessTests: XCTestCase {
     }
 
     func testRoomCorrectionAndCampaignReportReasonsInsteadOfThrowingOnPlayback() throws {
-        let rig = try OfflineSetupRig(rate: 48_000, permission: .denied)
+        let rig = try OfflineSetupRig(rate: 48_000, permission: .denied, arrangementEnabled: true)
         defer { rig.tearDown() }
-        try rig.installTwoPointOneProfile()
+        rig.chooseTwoPointOneThroughWizard()
         rig.microphone.prepareForUse()
         rig.calibration.prepareForUse()
         XCTAssertEqual(rig.microphone.readiness.fix, .openSystemSettings)
@@ -73,9 +73,9 @@ final class MeasurementReadinessTests: XCTestCase {
     }
 
     func testCampaignIsReadyWithPermissionAndAnIdleEngineAndSetsNoNotice() throws {
-        let rig = try OfflineSetupRig(rate: 48_000)
+        let rig = try OfflineSetupRig(rate: 48_000, arrangementEnabled: true)
         defer { rig.tearDown() }
-        try rig.installTwoPointOneProfile()
+        rig.chooseTwoPointOneThroughWizard()
         rig.calibration.prepareForUse()
         XCTAssertEqual(rig.calibration.readiness, .ready)
         XCTAssertNil(rig.calibration.playbackNotice)

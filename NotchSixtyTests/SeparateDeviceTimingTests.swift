@@ -11,8 +11,8 @@ final class SeparateDeviceTimingTests: XCTestCase {
     private let driftPPM = 3.0
 
     private func makeRig(rate: Double, separate: Bool) throws -> OfflineSetupRig {
-        let rig = try OfflineSetupRig(rate: rate, secondMicrophone: true)
-        try rig.installTwoPointOneProfile()
+        let rig = try OfflineSetupRig(rate: rate, secondMicrophone: true, arrangementEnabled: true)
+        rig.chooseTwoPointOneThroughWizard()
         rig.calibration.prepareForUse()
         while rig.calibration.seats.count < 3 { try rig.calibration.addSeat() }
         guard separate else { return rig }

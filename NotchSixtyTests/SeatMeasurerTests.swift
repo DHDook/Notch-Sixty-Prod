@@ -16,8 +16,8 @@ final class SeatMeasurerTests: XCTestCase {
 
     /// A rig with three seats, each with its own channel of the reference interface when `perSeat`.
     private func makeRig(rate: Double, perSeat: Bool, calibrations: [Int: RoomCorrectionMicrophoneCalibration] = [:]) throws -> OfflineSetupRig {
-        let rig = try OfflineSetupRig(rate: rate)
-        try rig.installTwoPointOneProfile()
+        let rig = try OfflineSetupRig(rate: rate, arrangementEnabled: true)
+        rig.chooseTwoPointOneThroughWizard()
         rig.calibration.prepareForUse()
         while rig.calibration.seats.count < 3 { try rig.calibration.addSeat() }
         if perSeat {
