@@ -357,21 +357,16 @@ struct OfflineSetupRig {
             arrangementEnabled: arrangementEnabled)
     }
 
-    /// A stereo pair plus one subwoofer on the reference interface (2.1).
-    func installTwoPointOneProfile() throws {
-        var bass = profiles.selectedSystemProfile?.state.bassManagement ?? engine.bassManagementConfiguration
-        bass.enabled = true
-        try profiles.replaceSelectedSystemBassManagement(bass)
-        let uid = Self.outputUID
-        try profiles.replaceSelectedSystemOutputDeviceProfile(OutputDeviceProfileConfiguration(
-            enabled: true, programLayout: .stereo,
-            speakerAssignments: [
-                SemanticSpeakerOutputAssignment(role: .frontLeft, destination: PhysicalOutputEndpoint(deviceUID: uid, channelIndex: 0)),
-                SemanticSpeakerOutputAssignment(role: .frontRight, destination: PhysicalOutputEndpoint(deviceUID: uid, channelIndex: 1)),
-            ],
-            subwooferAssignments: [
-                PhysicalSubwooferOutputAssignment(index: 0, destination: PhysicalOutputEndpoint(deviceUID: uid, channelIndex: 2)),
-            ]))
+    /// A stereo pair plus one subwoofer on the reference interface (2.1), reached through the wizard's Output and
+    /// Speakers steps (E25 S8c: replaces the profile shortcut). The rig must be built with `arrangementEnabled: true`.
+    /// Leaves the model on the Topology (Bass) step; callers continue from there or cancel.
+    func chooseTwoPointOneThroughWizard() {
+        model.begin()
+        model.chooseOutput(uid: Self.outputUID)
+        model.chooseChannelCount(3)
+        model.next()
+        model.chooseBass(.dspToSubOutputs)
+        model.next()
     }
 
     func tearDown() { try? FileManager.default.removeItem(at: root) }

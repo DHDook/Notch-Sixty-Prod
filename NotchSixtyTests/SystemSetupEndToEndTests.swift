@@ -22,9 +22,8 @@ final class SystemSetupEndToEndTests: XCTestCase {
 
     func testAllTenStepsAtEveryRate() async throws {
         for rate in Self.rates {
-            let rig = try OfflineSetupRig(rate: rate)
+            let rig = try OfflineSetupRig(rate: rate, arrangementEnabled: true)
             defer { rig.tearDown() }
-            try rig.installTwoPointOneProfile()
             let model = rig.model
             let label = "\(rate) Hz"
 
@@ -32,10 +31,11 @@ final class SystemSetupEndToEndTests: XCTestCase {
             XCTAssertEqual(model.step, .output, label)
             XCTAssertEqual(model.choices.sampleRate, rate, label)
             model.chooseOutput(uid: OfflineSetupRig.outputUID)
+            model.chooseChannelCount(3)
             model.next()
             XCTAssertEqual(model.step, .topology, "\(label): \(model.message ?? "")")
 
-            model.chooseTopology(.twoPointOne)
+            model.chooseBass(.dspToSubOutputs)
             model.next()
             XCTAssertEqual(model.step, .microphone, "\(label): \(model.message ?? "")")
 
@@ -117,9 +117,9 @@ final class SystemSetupEndToEndTests: XCTestCase {
 
     /// A disabled Measure Next must say why (E24 S2).
     func testDisabledMeasureCarriesAReason() throws {
-        let rig = try OfflineSetupRig(rate: 48_000, permission: .denied)
+        let rig = try OfflineSetupRig(rate: 48_000, permission: .denied, arrangementEnabled: true)
         defer { rig.tearDown() }
-        try rig.installTwoPointOneProfile()
+        rig.chooseTwoPointOneThroughWizard()
         rig.calibration.prepareForUse()
         XCTAssertFalse(rig.calibration.canMeasure)
         let reason = try XCTUnwrap(rig.calibration.readiness.reason)

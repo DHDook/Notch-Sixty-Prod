@@ -27,6 +27,7 @@
 		E25A000000000000000000A4 /* SystemCapabilityMatrix.swift in Sources */ = {isa = PBXBuildFile; fileRef = E25A00000000000000000004 /* SystemCapabilityMatrix.swift */; };
 		E25A000000000000000000B1 /* SystemArrangementTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E25A0000000000000000001A /* SystemArrangementTests.swift */; };
 		E24F00000000000000009008 /* SystemSetupABXKeepTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E24F00000000000000009009 /* SystemSetupABXKeepTests.swift */; };
+		E25F0000000000000000A008 /* StoredArrangementApplyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E25F0000000000000000A009 /* StoredArrangementApplyTests.swift */; };
 		E24F00000000000000009006 /* RoomCorrectionABXWiringTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E24F00000000000000009007 /* RoomCorrectionABXWiringTests.swift */; };
 		E24F00000000000000009004 /* RoomCorrectionABXSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = E24F00000000000000009005 /* RoomCorrectionABXSheet.swift */; };
 		E24F00000000000000009002 /* RoomCorrectionABXController.swift in Sources */ = {isa = PBXBuildFile; fileRef = E24F00000000000000009003 /* RoomCorrectionABXController.swift */; };
@@ -605,6 +606,7 @@
 		E25A00000000000000000004 /* SystemCapabilityMatrix.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemCapabilityMatrix.swift; sourceTree = "<group>"; };
 		E25A0000000000000000001A /* SystemArrangementTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemArrangementTests.swift; sourceTree = "<group>"; };
 		E24F00000000000000009009 /* SystemSetupABXKeepTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemSetupABXKeepTests.swift; sourceTree = "<group>"; };
+		E25F0000000000000000A009 /* StoredArrangementApplyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StoredArrangementApplyTests.swift; sourceTree = "<group>"; };
 		E24F00000000000000009007 /* RoomCorrectionABXWiringTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomCorrectionABXWiringTests.swift; sourceTree = "<group>"; };
 		E24F00000000000000009005 /* RoomCorrectionABXSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomCorrectionABXSheet.swift; sourceTree = "<group>"; };
 		E24F00000000000000009003 /* RoomCorrectionABXController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomCorrectionABXController.swift; sourceTree = "<group>"; };
@@ -1448,6 +1450,7 @@
 				B40000000000000000000013 /* BlindABXValidationTests.swift */,
 				E24F00000000000000009007 /* RoomCorrectionABXWiringTests.swift */,
 				E24F00000000000000009009 /* SystemSetupABXKeepTests.swift */,
+				E25F0000000000000000A009 /* StoredArrangementApplyTests.swift */,
 				B40000000000000000000094 /* RoomCorrectionABXTests.swift */,
 				E25A0000000000000000001A /* SystemArrangementTests.swift */,
 				B50000000000000000000014 /* OptionalAudioResearchTests.swift */,
@@ -2323,6 +2326,7 @@
 				B40000000000000000000003 /* BlindABXValidationTests.swift in Sources */,
 				E24F00000000000000009006 /* RoomCorrectionABXWiringTests.swift in Sources */,
 				E24F00000000000000009008 /* SystemSetupABXKeepTests.swift in Sources */,
+				E25F0000000000000000A008 /* StoredArrangementApplyTests.swift in Sources */,
 				B40000000000000000000093 /* RoomCorrectionABXTests.swift in Sources */,
 				E25A000000000000000000B1 /* SystemArrangementTests.swift in Sources */,
 				B50000000000000000000004 /* OptionalAudioResearchTests.swift in Sources */,
