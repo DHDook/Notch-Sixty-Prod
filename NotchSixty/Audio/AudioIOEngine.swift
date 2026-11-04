@@ -1080,6 +1080,11 @@ final class AudioIOEngine: ObservableObject {
     private var transportSession: CoreAudioTransportSession?
     /// E25 S2: applied to each new stereo session.
     private var stereoAlignment: StereoBassAlignment?
+    /// E25 S8a: the wider-source fold the user configured (nil: none), and the matrix of the session that is running or
+    /// being built with it. The protection merge keys on the second, so a fold that resolves to the standard path
+    /// (no source tapped) adds no limiter.
+    private var programFoldPlan: ProgramFoldDownPlan?
+    private var foldMatrixInUse: FoldDownMatrix?
     private var nChannelTransportSession: CoreAudioNChannelTransportSession?
     private var binauralHeadphoneTransportSession: CoreAudioBinauralHeadphoneTransportSession?
     private var headTrackingController: SpatialHeadTrackingController?
@@ -1295,7 +1300,7 @@ final class AudioIOEngine: ObservableObject {
             gainConfiguration: gainConfiguration,
             bassManagementConfiguration:
                 renderBassManagementConfiguration(),
-            dynamicsConfiguration: dynamicsConfiguration,
+            dynamicsConfiguration: renderDynamicsConfiguration(),
             playbackConfiguration: playbackControlConfiguration,
             masterGainLinear: currentMasterSoftwareGain
         )
@@ -1494,7 +1499,7 @@ final class AudioIOEngine: ObservableObject {
             gainConfiguration: gainConfiguration,
             bassManagementConfiguration:
                 renderBassManagementConfiguration(),
-            dynamicsConfiguration: dynamicsConfiguration,
+            dynamicsConfiguration: renderDynamicsConfiguration(),
             playbackConfiguration:
                 playbackControlConfiguration,
             masterGainLinear: currentMasterSoftwareGain
@@ -2250,7 +2255,7 @@ final class AudioIOEngine: ObservableObject {
                 gainConfiguration: targetGain,
                 bassManagementConfiguration:
                     renderBassManagementConfiguration(),
-                dynamicsConfiguration: state.dynamics,
+                dynamicsConfiguration: state.dynamics.mergingFoldProtection(foldMatrixInUse),
                 playbackConfiguration: playbackControlConfiguration,
                 masterGainLinear: currentMasterSoftwareGain
             )
@@ -2299,7 +2304,7 @@ final class AudioIOEngine: ObservableObject {
                 gainConfiguration: targetGain,
                 bassManagementConfiguration:
                     renderBassManagementConfiguration(),
-                dynamicsConfiguration: state.dynamics,
+                dynamicsConfiguration: state.dynamics.mergingFoldProtection(foldMatrixInUse),
                 playbackConfiguration: playbackControlConfiguration,
                 masterGainLinear: currentMasterSoftwareGain
             )
@@ -2570,6 +2575,37 @@ final class AudioIOEngine: ObservableObject {
         lastErrorDescription = nil
     }
 
+    /// The stored dynamics with the fold's output limiter merged in while a wider source is folded (stricter of each
+    /// setting; see `DynamicsConfiguration.mergingFoldProtection`).
+    private func renderDynamicsConfiguration() -> DynamicsConfiguration {
+        dynamicsConfiguration.mergingFoldProtection(foldMatrixInUse)
+    }
+
+    /// E25 S8a: sets the wider program source and fold. The source is tapped and folded onto the two feeds inside the
+    /// capture callback, so the change needs a new tap: a running stereo session is rebuilt through the planned-profile
+    /// path (one short dropout). Built dark: the Speakers tab (S8b) calls it behind `e25.outputs-and-speakers`.
+    func applyProgramFoldDown(_ plan: ProgramFoldDownPlan?) throws {
+        if plan != nil {
+            if let reason = ProgramFoldDownPlan.incompatibility(
+                sameDeviceOrAggregateOutput: multiOutputRoutingConfiguration?.enabled == true,
+                headphoneProfileEnabled: headphoneDeviceProfileConfiguration?.enabled == true) {
+                throw CoreAudioTransportError.programFoldFailed(reason)
+            }
+        }
+        guard plan != programFoldPlan else { return }
+        programFoldPlan = plan
+        lastErrorDescription = nil
+        if transportSession != nil {
+            scheduleSampleRateReconfiguration(countsAsSampleRateChange: false, fadeOut: true, cause: .plannedProfileChange)
+        }
+    }
+
+    /// What `buildStereoTransport` does for this output given the configured fold and the devices present now.
+    private func programFoldBuildDecision(for output: AudioOutputDevice) -> ProgramFoldDownPlan.BuildDecision {
+        ProgramFoldDownPlan.buildDecision(
+            plan: programFoldPlan, availableDevices: outputDevices, sampleRate: output.nominalSampleRate)
+    }
+
     /// E6 S9d: a headphone profile edit inside one graph-rendered stereo session. The session rebuilds the HEADPHONE
     /// and ear delay stages and republishes; stored state changes only after the graph accepted it.
     private func applyLiveStereoHeadphoneEdit(_ configuration: HeadphoneDeviceProfileConfiguration) throws {
@@ -2737,7 +2773,7 @@ final class AudioIOEngine: ObservableObject {
                 sampleRate: session.outputFormat.sampleRate,
                 gainConfiguration: gainConfiguration,
                 bassManagementConfiguration: renderBassManagementConfiguration(configuration),
-                dynamicsConfiguration: dynamicsConfiguration,
+                dynamicsConfiguration: renderDynamicsConfiguration(),
                 playbackConfiguration: playbackControlConfiguration,
                 masterGainLinear: currentMasterSoftwareGain
             )
@@ -2831,7 +2867,7 @@ final class AudioIOEngine: ObservableObject {
             ?? binauralHeadphoneTransportSession?.outputFormat.sampleRate
             ?? 48_000
         _ = try configuration.makeSnapshot(sampleRate: validationRate)
-        let newProtection = try configuration.makeProtectionSnapshot(sampleRate: validationRate)
+        let newProtection = try configuration.mergingFoldProtection(foldMatrixInUse).makeProtectionSnapshot(sampleRate: validationRate)
         if immutableSemanticTransportActive, configuration != dynamicsConfiguration {
             try requireLiveGraphEdits()
             var inputs = currentLiveGraphInputs
@@ -2839,12 +2875,12 @@ final class AudioIOEngine: ObservableObject {
             try republishLiveGraph(inputs)
         }
         if let session = transportSession {
-            let oldProtection = try dynamicsConfiguration.makeProtectionSnapshot(sampleRate: session.outputFormat.sampleRate)
+            let oldProtection = try renderDynamicsConfiguration().makeProtectionSnapshot(sampleRate: session.outputFormat.sampleRate)
             var graph = try stereoEQConfiguration.makeGraphSnapshot(
                 sampleRate: session.outputFormat.sampleRate,
                 gainConfiguration: gainConfiguration,
                 bassManagementConfiguration: renderBassManagementConfiguration(),
-                dynamicsConfiguration: configuration,
+                dynamicsConfiguration: configuration.mergingFoldProtection(foldMatrixInUse),
                 playbackConfiguration: playbackControlConfiguration,
                 masterGainLinear: currentMasterSoftwareGain
             )
@@ -3430,7 +3466,7 @@ final class AudioIOEngine: ObservableObject {
                 sampleRate: session.outputFormat.sampleRate,
                 gainConfiguration: gainConfiguration,
                 bassManagementConfiguration: renderBassManagementConfiguration(),
-                dynamicsConfiguration: dynamicsConfiguration,
+                dynamicsConfiguration: renderDynamicsConfiguration(),
                 playbackConfiguration: playbackControlConfiguration,
                 masterGainLinear: currentMasterSoftwareGain
             )
@@ -3501,7 +3537,7 @@ final class AudioIOEngine: ObservableObject {
                 sampleRate: session.outputFormat.sampleRate,
                 gainConfiguration: gainConfiguration,
                 bassManagementConfiguration: renderBassManagementConfiguration(),
-                dynamicsConfiguration: dynamicsConfiguration,
+                dynamicsConfiguration: renderDynamicsConfiguration(),
                 playbackConfiguration: configuration,
                 masterGainLinear: currentMasterSoftwareGain
             )
@@ -3596,7 +3632,7 @@ final class AudioIOEngine: ObservableObject {
                 sampleRate: session.outputFormat.sampleRate,
                 gainConfiguration: gainConfiguration,
                 bassManagementConfiguration: renderBassManagementConfiguration(),
-                dynamicsConfiguration: dynamicsConfiguration,
+                dynamicsConfiguration: renderDynamicsConfiguration(),
                 playbackConfiguration: playbackControlConfiguration,
                 masterGainLinear: newSoftwareGain
             )
@@ -3668,7 +3704,7 @@ final class AudioIOEngine: ObservableObject {
                 sampleRate: session.outputFormat.sampleRate,
                 gainConfiguration: gainConfiguration,
                 bassManagementConfiguration: renderBassManagementConfiguration(),
-                dynamicsConfiguration: dynamicsConfiguration,
+                dynamicsConfiguration: renderDynamicsConfiguration(),
                 playbackConfiguration: playbackControlConfiguration,
                 masterGainLinear: newGain
             )
@@ -3757,7 +3793,7 @@ final class AudioIOEngine: ObservableObject {
                 sampleRate: session.outputFormat.sampleRate,
                 gainConfiguration: configuration,
                 bassManagementConfiguration: renderBassManagementConfiguration(),
-                dynamicsConfiguration: dynamicsConfiguration,
+                dynamicsConfiguration: renderDynamicsConfiguration(),
                 playbackConfiguration: playbackControlConfiguration,
                 masterGainLinear: currentMasterSoftwareGain
             )
@@ -3814,7 +3850,7 @@ final class AudioIOEngine: ObservableObject {
                 sampleRate: session.outputFormat.sampleRate,
                 gainConfiguration: gainConfiguration,
                 bassManagementConfiguration: renderBassManagementConfiguration(),
-                dynamicsConfiguration: dynamicsConfiguration,
+                dynamicsConfiguration: renderDynamicsConfiguration(),
                 playbackConfiguration: playbackControlConfiguration,
                 masterGainLinear: currentMasterSoftwareGain
             )
@@ -3909,7 +3945,7 @@ final class AudioIOEngine: ObservableObject {
                 sampleRate: session.outputFormat.sampleRate,
                 gainConfiguration: gainConfiguration,
                 bassManagementConfiguration: renderBassManagementConfiguration(),
-                dynamicsConfiguration: dynamicsConfiguration,
+                dynamicsConfiguration: renderDynamicsConfiguration(),
                 playbackConfiguration: playbackControlConfiguration,
                 masterGainLinear: currentMasterSoftwareGain
             )
@@ -5411,6 +5447,23 @@ final class AudioIOEngine: ObservableObject {
         }
         let speakerDriverProcessingSnapshot = try speakerDriverProcessingConfiguration
             .makeRealtimeSnapshot(sampleRate: output.nominalSampleRate)
+        var foldSource: AudioOutputDevice?
+        var foldPlan: ProgramFoldDownPlan?
+        foldMatrixInUse = nil
+        switch programFoldBuildDecision(for: output) {
+        case .standard: break
+        case .tapSource(let device):
+            if let reason = ProgramFoldDownPlan.incompatibility(
+                sameDeviceOrAggregateOutput: sameDeviceOutputPlan != nil || aggregateDeviceOutputPlan != nil,
+                headphoneProfileEnabled: headphoneSnapshot != nil) {
+                throw CoreAudioTransportError.programFoldFailed(reason)
+            }
+            foldSource = device
+            foldPlan = programFoldPlan
+            foldMatrixInUse = programFoldPlan?.matrix
+        case .waitForSource(let uid): throw CoreAudioTransportError.programFoldFailed(.sourceUnavailable(uid: uid))
+        case .refuse(let reason): throw CoreAudioTransportError.programFoldFailed(reason)
+        }
         let session = try CoreAudioTransportSession(
             selectedOutput: output,
             sameDeviceOutputPlan: sameDeviceOutputPlan,
@@ -5418,7 +5471,9 @@ final class AudioIOEngine: ObservableObject {
             speakerCrossoverMode: speakerCrossoverMode,
             speakerBusSplitterSnapshot: speakerBusSplitterSnapshot,
             speakerDriverProcessingSnapshot: speakerDriverProcessingSnapshot,
-            audioUnitRack: stagedAudioUnitRack
+            audioUnitRack: stagedAudioUnitRack,
+            programSource: foldSource,
+            programFoldPlan: foldPlan
         )
         session.unifiedGraphEnabled = unifiedGraphEnabled
         session.setInitialStereoAlignment(stereoAlignment)
@@ -5493,7 +5548,7 @@ final class AudioIOEngine: ObservableObject {
             sampleRate: sampleRate,
             gainConfiguration: gainConfiguration,
             bassManagementConfiguration: renderBassManagementConfiguration(),
-            dynamicsConfiguration: dynamicsConfiguration,
+            dynamicsConfiguration: renderDynamicsConfiguration(),
             playbackConfiguration: playbackControlConfiguration,
             masterGainLinear: currentMasterSoftwareGain
         )
@@ -5501,6 +5556,7 @@ final class AudioIOEngine: ObservableObject {
 
     private func tearDownTransport(fadeOut: Bool, cause: TransportTeardownCause = .other) {
         liveGenerator = nil
+        foldMatrixInUse = nil
         roomCorrectionABXOverride = nil
         if let controller = headTrackingController {
             controller.stop()
@@ -5568,7 +5624,8 @@ final class AudioIOEngine: ObservableObject {
         let spatialSourceUID = headphoneDeviceProfileConfiguration?.spatialMode == .virtualSpeakers
             ? (headphoneDeviceProfileConfiguration?.programSourceDeviceUID ?? selectedUID)
             : selectedUID
-        let spatialSourceIsPresent = outputDevices.contains { $0.uid == spatialSourceUID }
+        let foldSourceIsPresent = programFoldPlan.map { plan in outputDevices.contains { $0.uid == plan.sourceUID } } ?? true
+        let spatialSourceIsPresent = foldSourceIsPresent && outputDevices.contains { $0.uid == spatialSourceUID }
 
         if !selectedIsPresent {
             masterVolumeController.stopMonitoring()
@@ -5735,6 +5792,16 @@ final class AudioIOEngine: ObservableObject {
                 return
             }
 
+            if case .waitForSource(let uid) = programFoldBuildDecision(for: output) {
+                // The wider source is absent: wait for the same UID, never tap the DAC or another 6-channel device.
+                // Not a build failure, so it never counts toward the retry limit.
+                lastErrorDescription = ProgramFoldDownError.sourceUnavailable(uid: uid).errorDescription
+                scheduleRecoveryAttempt(
+                    generation: generation,
+                    delay: OutputRecoveryRetryPolicy.absentOutputPollInterval
+                )
+                return
+            }
             do {
                 detachAudioUnitRackIfIncompatible(with: output)
                 try buildTransport(output: output)
