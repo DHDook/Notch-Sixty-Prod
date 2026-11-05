@@ -34,7 +34,7 @@ final class ProgramSourceControllerTests: XCTestCase {
     }
 
     private func make(
-        _ arrangement: SystemArrangement?, flag: Bool = true, rate: Double = 48_000
+        _ arrangement: SystemArrangement?, rate: Double = 48_000
     ) throws -> (ProgramSourceController, FakeEngine, ProductProfileController) {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         addTeardownBlock { try? FileManager.default.removeItem(at: root) }
@@ -45,16 +45,14 @@ final class ProgramSourceControllerTests: XCTestCase {
         engine.selected = device("dac", channels: 2, rate: rate)
         engine.devices = [engine.selected!, device("rx", channels: 6, rate: rate), device("stereo", channels: 2, rate: rate)]
         let controller = ProgramSourceController(engine: engine, profiles: profiles)
-        controller.isFlagEnabled = { flag }
         return (controller, engine, profiles)
     }
 
-    func testVisibleForClassesBToEAndHiddenForAOrFlagOff() throws {
+    func testVisibleForClassesBToEAndHiddenForAOrNoArrangement() throws {
         for bass in [BassHandling.fullRange, .dspMonoToMains, .downstreamSubCrossover, .downstreamReceiver] {
             let (c, _, _) = try make(arrangement(bass))
             XCTAssertTrue(c.isVisible, "\(bass)")
         }
-        XCTAssertFalse(try make(arrangement(.fullRange), flag: false).0.isVisible)
         XCTAssertFalse(try make(nil).0.isVisible)
         let a = SystemSetupArrangementPlanner.arrangement(
             deviceUID: "dac", detectedChannelCount: 8, channelsInUse: 6, choices: .init(layout: .fiveOne, bass: .fullRange, subwooferCount: 0))

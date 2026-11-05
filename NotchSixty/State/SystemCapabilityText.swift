@@ -1,8 +1,7 @@
 import Foundation
 
 // E25 S5: matrix text wherever a choice is made. Pure. A surface names the features it offers; this returns the matrix
-// answer for the selected system's arrangement, or nothing when `e25.outputs-and-speakers` is off or the system has no
-// arrangement to describe (so every surface is unchanged with the flag off). All wording comes from
+// answer for the selected system's arrangement, or nothing when the system has no arrangement to describe. All wording comes from
 // `SystemCapabilityMatrix`; nothing here invents a second set of reasons.
 enum SystemCapabilityText {
     typealias Row = (feature: SystemFeature, availability: CapabilityAvailability)
@@ -23,9 +22,9 @@ enum SystemCapabilityText {
     }
 
     static func rows(
-        _ features: [SystemFeature], profile: PlaybackSystemProfile?, flagEnabled: Bool, deviceChannelCount: Int = 0
+        _ features: [SystemFeature], profile: PlaybackSystemProfile?, deviceChannelCount: Int = 0
     ) -> [Row] {
-        guard flagEnabled, let a = arrangement(for: profile, deviceChannelCount: deviceChannelCount) else { return [] }
+        guard let a = arrangement(for: profile, deviceChannelCount: deviceChannelCount) else { return [] }
         return features.map {
             ($0, SystemCapabilityMatrix.evaluate($0, arrangement: a, deviceChannelCount: deviceChannelCount))
         }
@@ -41,8 +40,8 @@ enum SystemCapabilityText {
 
     /// Replaces the old "needs an enabled output device profile" readiness reason. Names what the user can do for
     /// their arrangement; the fix stays `describeSpeakers`.
-    static func profileRequiredReason(profile: PlaybackSystemProfile?, flagEnabled: Bool, deviceChannelCount: Int = 0) -> String {
-        guard flagEnabled, let a = arrangement(for: profile, deviceChannelCount: deviceChannelCount) else {
+    static func profileRequiredReason(profile: PlaybackSystemProfile?, deviceChannelCount: Int = 0) -> String {
+        guard let a = arrangement(for: profile, deviceChannelCount: deviceChannelCount) else {
             return "Describe your speakers in system setup first: this tool needs to know which output drives each speaker."
         }
         switch a.arrangementClass {

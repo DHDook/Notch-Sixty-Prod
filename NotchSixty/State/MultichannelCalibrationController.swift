@@ -291,23 +291,18 @@ final class MultichannelCalibrationController: ObservableObject {
         self.analysisOperation = analysisOperation
     }
 
-    /// E25 S3: whether the stored two-channel arrangement supplies the measurement feeds. Swift reads the flag here;
-    /// tests replace it.
-    var arrangementMeasurementEnabled: () -> Bool = { FeatureFlags().isEnabled(.outputsAndSpeakers) }
-
     /// The enabled Output Device Profile that is stored on the selected system, if any.
     var storedProfile: OutputDeviceProfileConfiguration? {
         guard let profile = profiles.selectedSystemOutputDeviceProfile, profile.enabled else { return nil }
         return profile
     }
 
-    /// The profile measurement runs on. With `e25.outputs-and-speakers` on and a two-channel arrangement (one DAC, no
+    /// The profile measurement runs on. With a two-channel arrangement (one DAC, no
     /// profile), the feeds in use are the measurement sources: a stereo measurement profile on outputs 0 and 1, built
     /// here and never stored. Otherwise the stored profile.
     var profile: OutputDeviceProfileConfiguration? {
         if let stored = storedProfile { return stored }
-        guard arrangementMeasurementEnabled(),
-              let arrangement = profiles.selectedSystemProfile?.state.systemArrangement,
+        guard let arrangement = profiles.selectedSystemProfile?.state.systemArrangement,
               arrangement.outputs.channelsInUse == 2, !arrangement.outputs.deviceUID.isEmpty else { return nil }
         let uid = arrangement.outputs.deviceUID
         return OutputDeviceProfileConfiguration(
@@ -336,7 +331,6 @@ final class MultichannelCalibrationController: ObservableObject {
             .sorted { $0.index < $1.index }
             .map { MultichannelCalibrationSource.subwoofer($0.index) }
         let all = speakers + subs
-        guard arrangementMeasurementEnabled() else { return all }
         // E25 S6: two-channel arrangements offer only the two feeds as MIMO sources.
         return TwoChannelMimoSources.restrict(all, arrangement: profiles.selectedSystemProfile?.state.systemArrangement)
     }
@@ -382,7 +376,7 @@ final class MultichannelCalibrationController: ObservableObject {
             requiresProfile: true,
             hasProfile: profile != nil,
             profileReason: SystemCapabilityText.profileRequiredReason(
-                profile: profiles.selectedSystemProfile, flagEnabled: arrangementMeasurementEnabled(),
+                profile: profiles.selectedSystemProfile,
                 deviceChannelCount: Int(engine.selectedOutputDevice?.outputChannelCount ?? 0)),
             requiresWork: true,
             hasWork: nextTarget() != nil,

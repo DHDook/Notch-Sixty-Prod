@@ -11,7 +11,7 @@ final class SeparateDeviceTimingTests: XCTestCase {
     private let driftPPM = 3.0
 
     private func makeRig(rate: Double, separate: Bool) throws -> OfflineSetupRig {
-        let rig = try OfflineSetupRig(rate: rate, secondMicrophone: true, arrangementEnabled: true)
+        let rig = try OfflineSetupRig(rate: rate, secondMicrophone: true)
         rig.chooseTwoPointOneThroughWizard()
         rig.calibration.prepareForUse()
         while rig.calibration.seats.count < 3 { try rig.calibration.addSeat() }
@@ -205,11 +205,7 @@ final class SeparateDeviceTimingTests: XCTestCase {
         let rig = try makeRig(rate: 48_000, separate: true)
         defer { rig.tearDown() }
         let model = rig.model
-        model.begin()
-        model.chooseOutput(uid: OfflineSetupRig.outputUID)
-        model.next()
-        model.chooseTopology(.twoPointOne)
-        model.next()
+        rig.chooseTwoPointOneThroughWizard()
         model.selectMicrophone(uid: OfflineSetupRig.inputUID)
         model.acceptSweepLevel(measuredSPLdBC: 75)
         model.next()

@@ -3,7 +3,6 @@ import Foundation
 // E25 S1: the system arrangement model. Output channels (what the DAC exposes) and the speaker arrangement (what the
 // listener has) are separate concepts, so a 5.1 system on one two-channel DAC is expressible. Pure value types: no Core
 // Audio, no engine access, safe off the realtime thread, and rate-free (delays are never stored here).
-// Nothing reads the stored arrangement unless `e25.outputs-and-speakers` is on; S3 wires the wizard.
 
 /// The device the arrangement plays through, and how many of its output channels are used.
 struct SystemOutputs: Codable, Equatable, Sendable {

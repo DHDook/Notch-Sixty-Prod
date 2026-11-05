@@ -12,8 +12,6 @@ final class SystemSetupFlowModel: ObservableObject {
     @Published var topologyPreset = SystemSetupTopologyPreset(topology: .stereo)
     /// E25 S3: the Speakers step's choices (layout, subs, bass handling); the arrangement is rebuilt from them.
     @Published private(set) var speakerChoices = SystemSetupSpeakerChoices()
-    /// E25 S3: `e25.outputs-and-speakers`. Read once per window; Swift decides, the engine sees only the compiled result.
-    let arrangementEnabled: Bool
     @Published private(set) var level = SystemSetupLevelPlan()
     @Published var message: String?
     @Published private(set) var alignment: SystemSetupAlignment?
@@ -74,9 +72,7 @@ final class SystemSetupFlowModel: ObservableObject {
          sessions: SystemSetupSessionStore = SystemSetupSessionStore(directory: SystemSetupSessionStore.defaultDirectory()),
          roomProjectsDirectory: URL = SystemSetupSessionStore.defaultDirectory()
              .appendingPathComponent("RoomCorrection", isDirectory: true),
-         abxDirectory: URL? = nil,
-         arrangementEnabled: Bool? = nil) {
-        self.arrangementEnabled = arrangementEnabled ?? FeatureFlags().isEnabled(.outputsAndSpeakers)
+         abxDirectory: URL? = nil) {
         let services = services ?? ProductionSystemSetupServices.production(
             engine: engine, profiles: profiles, microphone: microphone, calibration: calibration)
         self.seats = services.seats
@@ -125,7 +121,7 @@ final class SystemSetupFlowModel: ObservableObject {
         saved.resumed(measurementsAvailable: !calibration.measurements.isEmpty)
         topologyPreset = SystemSetupTopologyPreset.current(from: saved.snapshot ?? profiles.captureSystemState())
         if let topology = saved.choices.topology { topologyPreset.topology = topology }
-        if arrangementEnabled { resumeArrangement(&saved) }
+        resumeArrangement(&saved)
         flow = saved
         syncMeasurementChoices()
         message = saved.invalidationReason ?? "Resumed where you left off."
@@ -142,15 +138,13 @@ final class SystemSetupFlowModel: ObservableObject {
         initial.microphoneCalibrationFile = microphone.microphoneCalibration?.sourceName
         topologyPreset = SystemSetupTopologyPreset.current(from: snapshot)
         initial.topology = topologyPreset.topology
-        if arrangementEnabled {
-            let detected = Int(engine.selectedOutputDevice?.outputChannelCount ?? 0)
-            let migrated = SystemArrangementMigration.derive(from: snapshot, detectedChannelCount: detected)
-                ?? SystemSetupArrangementPlanner.arrangement(
-                    deviceUID: initial.outputUID ?? "", detectedChannelCount: detected, channelsInUse: 2,
-                    choices: SystemSetupSpeakerChoices())
-            initial.arrangement = migrated
-            speakerChoices = SystemSetupArrangementPlanner.choices(from: migrated)
-        }
+        let detected = Int(engine.selectedOutputDevice?.outputChannelCount ?? 0)
+        let migrated = SystemArrangementMigration.derive(from: snapshot, detectedChannelCount: detected)
+            ?? SystemSetupArrangementPlanner.arrangement(
+                deviceUID: initial.outputUID ?? "", detectedChannelCount: detected, channelsInUse: 2,
+                choices: SystemSetupSpeakerChoices())
+        initial.arrangement = migrated
+        speakerChoices = SystemSetupArrangementPlanner.choices(from: migrated)
         do {
             try flow.start(snapshot: snapshot, choices: initial)
             message = nil
@@ -166,7 +160,7 @@ final class SystemSetupFlowModel: ObservableObject {
     var detectedChannelCount: Int { Int(engine.selectedOutputDevice?.outputChannelCount ?? 0) }
     var arrangement: SystemArrangement? { flow.choices.arrangement }
 
-    /// A schema-1 session (or one saved with the flag off) has no arrangement: derive it from the topology.
+    /// A schema-1 session has no arrangement: derive it from the topology.
     private func resumeArrangement(_ saved: inout SystemSetupFlow) {
         guard saved.choices.arrangement == nil else {
             if let a = saved.choices.arrangement { speakerChoices = SystemSetupArrangementPlanner.choices(from: a) }
@@ -183,14 +177,19 @@ final class SystemSetupFlowModel: ObservableObject {
 
     /// Rebuilds the arrangement after the device, channel count or a Speakers choice changed.
     private func rebuildArrangement(channelsInUse: Int? = nil) {
-        guard arrangementEnabled else { return }
         let previous = flow.choices.arrangement
         let uid = engine.selectedOutputDevice?.uid ?? flow.choices.outputUID ?? ""
         flow.choices.arrangement = SystemSetupArrangementPlanner.arrangement(
             deviceUID: uid, detectedChannelCount: detectedChannelCount,
             channelsInUse: channelsInUse ?? previous?.outputs.channelsInUse ?? 2,
             choices: speakerChoices, keeping: previous)
-        if let a = flow.choices.arrangement { speakerChoices = SystemSetupArrangementPlanner.choices(from: a) }
+        if let a = flow.choices.arrangement {
+            // The chosen layout is kept even when this arrangement stores stereo (a wider layout needs a downstream
+            // bass handling): picking the layout first and the receiver second must still give a 5.1 arrangement.
+            let layout = speakerChoices.layout
+            speakerChoices = SystemSetupArrangementPlanner.choices(from: a)
+            speakerChoices.layout = layout
+        }
         persistSession()
     }
 
@@ -253,20 +252,13 @@ final class SystemSetupFlowModel: ObservableObject {
             try engine.selectOutput(uid: uid)
             let device = engine.selectedOutputDevice
             flow.outputConfigurationChanged(outputUID: device?.uid, sampleRate: device?.nominalSampleRate)
-            if arrangementEnabled {
-                if speakerChoices.bass == .dspToSubOutputs, Int(device?.outputChannelCount ?? 0) < 3 { speakerChoices.bass = .fullRange }
-                rebuildArrangement(channelsInUse: min(flow.choices.arrangement?.outputs.channelsInUse ?? 2,
-                                                      max(Int(device?.outputChannelCount ?? 2), 2)))
-            }
+            if speakerChoices.bass == .dspToSubOutputs, Int(device?.outputChannelCount ?? 0) < 3 { speakerChoices.bass = .fullRange }
+            rebuildArrangement(channelsInUse: min(flow.choices.arrangement?.outputs.channelsInUse ?? 2,
+                                                  max(Int(device?.outputChannelCount ?? 2), 2)))
             message = nil
         } catch {
             message = error.localizedDescription
         }
-    }
-
-    func chooseTopology(_ topology: SystemSetupTopology) {
-        topologyPreset.topology = topology
-        flow.choices.topology = topology
     }
 
     func selectMicrophone(uid: String?) {
@@ -497,17 +489,17 @@ final class SystemSetupFlowModel: ObservableObject {
     // MARK: Alignment
 
     /// E25 S4: two channels in use, so the feeds are what is aligned and calibration lands in the stereo session.
-    private var usesFeedSession: Bool { arrangementEnabled && SystemSetupAdaptiveSteps.isFeedSession(arrangement) }
+    private var usesFeedSession: Bool { SystemSetupAdaptiveSteps.isFeedSession(arrangement) }
 
     /// Class-aware text for the Alignment step: the receiver reason in place of subwoofer controls, or the feed note.
-    var alignmentSubNote: String? { arrangementEnabled ? SystemSetupAdaptiveSteps.alignmentSubNote(arrangement) : nil }
-    var bassStepMode: SystemSetupBassStepMode? { arrangementEnabled ? SystemSetupAdaptiveSteps.bassMode(arrangement) : nil }
-    var receiverAdvice: String? { arrangementEnabled ? SystemSetupAdaptiveSteps.receiverAdvice(arrangement) : nil }
+    var alignmentSubNote: String? { SystemSetupAdaptiveSteps.alignmentSubNote(arrangement) }
+    var bassStepMode: SystemSetupBassStepMode? { SystemSetupAdaptiveSteps.bassMode(arrangement) }
+    var receiverAdvice: String? { SystemSetupAdaptiveSteps.receiverAdvice(arrangement) }
     /// The measurement suite's name for a source: a downstream sub is "not separable" from its feed.
     func sourceLabel(_ source: MultichannelCalibrationSource) -> String {
-        arrangementEnabled ? SystemSetupAdaptiveSteps.measuredSourceLabel(source, arrangement: arrangement) : source.displayName
+        SystemSetupAdaptiveSteps.measuredSourceLabel(source, arrangement: arrangement)
     }
-    var correctionNote: String? { arrangementEnabled ? SystemSetupAdaptiveSteps.correctionNote(arrangement) : nil }
+    var correctionNote: String? { SystemSetupAdaptiveSteps.correctionNote(arrangement) }
 
     /// The arrangement with `edit` applied to its stereo alignment, validated by the compiler, stored and sent to the
     /// engine. Rolls the stored arrangement back when the compiler or the engine refuses.
@@ -1167,7 +1159,7 @@ final class SystemSetupFlowModel: ObservableObject {
 
     func next() {
         do {
-            if flow.step == .topology { try arrangementEnabled ? applyArrangement() : applyTopology() }
+            if flow.step == .topology { try applyArrangement() }
             try flow.next()
             message = nil
             if flow.step == .verify { prepareVerify() }
@@ -1199,10 +1191,8 @@ final class SystemSetupFlowModel: ObservableObject {
             try profiles.replaceSelectedSystemOutputDeviceProfile(nil)
             try profiles.replaceSelectedSystemBassManagement(snapshot.bassManagement)
             try profiles.replaceSelectedSystemOutputDeviceProfile(snapshot.outputDeviceProfile)
-            if arrangementEnabled {
-                try profiles.replaceSelectedSystemArrangement(snapshot.systemArrangement)
-                try engine.applyStereoAlignment(snapshot.systemArrangement.flatMap { try? SystemArrangementCompiler.compile($0, preserving: snapshot.outputDeviceProfile).get().stereoAlignment })
-            }
+            try profiles.replaceSelectedSystemArrangement(snapshot.systemArrangement)
+            try engine.applyStereoAlignment(snapshot.systemArrangement.flatMap { try? SystemArrangementCompiler.compile($0, preserving: snapshot.outputDeviceProfile).get().stereoAlignment })
             try profiles.replaceSelectedSystemRoomCorrection(
                 snapshot.roomCorrection, calibrationSummary: snapshot.roomCorrectionCalibration)
         } catch {
@@ -1215,11 +1205,6 @@ final class SystemSetupFlowModel: ObservableObject {
         init(_ text: String) { errorDescription = text }
     }
 
-    private func applyTopology() throws {
-        guard let base = flow.snapshot else { return }
-        let target = topologyPreset.applying(to: base).bassManagement
-        try profiles.replaceSelectedSystemBassManagement(target)
-    }
 }
 
 struct ProductionSystemSetupFlowView: View {
@@ -1295,8 +1280,7 @@ struct ProductionSystemSetupFlowView: View {
     private var stepContent: some View {
         switch model.step {
         case .output: SystemSetupOutputStep(model: model)
-        case .topology:
-            if model.arrangementEnabled { SystemSetupSpeakersStep(model: model) } else { SystemSetupTopologyStep(model: model) }
+        case .topology: SystemSetupSpeakersStep(model: model)
         case .microphone: SystemSetupMicrophoneStep(model: model)
         case .measure: SystemSetupMeasureStep(model: model)
         case .alignment: SystemSetupAlignmentStep(model: model)
@@ -1360,7 +1344,7 @@ private struct SystemSetupOutputStep: View {
                           systemImage: "headphones")
                         .font(.callout)
                 }
-                if model.arrangementEnabled, let arrangement = model.arrangement {
+                if let arrangement = model.arrangement {
                     let detected = model.detectedChannelCount
                     Picker("Output channels in use", selection: Binding(
                         get: { arrangement.outputs.channelsInUse }, set: { model.chooseChannelCount($0) }
@@ -1378,36 +1362,6 @@ private struct SystemSetupOutputStep: View {
                             .font(.caption).foregroundStyle(.secondary)
                     }
                 }
-            }
-        }
-    }
-}
-
-private struct SystemSetupTopologyStep: View {
-    @ObservedObject var model: SystemSetupFlowModel
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("What speakers do you have?").font(.headline)
-            ForEach(SystemSetupTopology.allCases, id: \.self) { topology in
-                Button {
-                    model.chooseTopology(topology)
-                } label: {
-                    Label(SystemSetupTopologyPreset(topology: topology).title,
-                          systemImage: model.topologyPreset.topology == topology ? "largecircle.fill.circle" : "circle")
-                }
-                .buttonStyle(.plain)
-            }
-            if model.topologyPreset.topology.hasSubwoofer {
-                Stepper(
-                    "Crossover \(Int(model.topologyPreset.crossoverHz)) Hz",
-                    value: $model.topologyPreset.crossoverHz,
-                    in: SystemSetupTopologyPreset.crossoverRangeHz, step: 5)
-                Picker("Slope", selection: $model.topologyPreset.slope) {
-                    ForEach(CrossoverTopology.allCases) { Text($0.displayName).tag($0) }
-                }
-                Text("Two subwoofers share the same bass path for now; separate subwoofer routing arrives with the routing matrix.")
-                    .font(.caption).foregroundStyle(.secondary)
             }
         }
     }

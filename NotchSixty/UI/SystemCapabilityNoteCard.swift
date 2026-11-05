@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// E25 S5: what the selected system's arrangement allows for the features a surface offers, from
-/// `SystemCapabilityMatrix`. Empty (and so invisible) with `e25.outputs-and-speakers` off.
+/// `SystemCapabilityMatrix`. Empty (and so invisible) when the system has no arrangement.
 struct SystemCapabilityNoteCard: View {
     let title: String
     let features: [SystemFeature]
@@ -13,7 +13,7 @@ struct SystemCapabilityNoteCard: View {
     private var rows: [SystemCapabilityText.Row] {
         SystemCapabilityText.rows(
             features, profile: profiles.selectedSystemProfile,
-            flagEnabled: FeatureFlags().isEnabled(.outputsAndSpeakers), deviceChannelCount: deviceChannelCount)
+            deviceChannelCount: deviceChannelCount)
     }
 
     var body: some View {

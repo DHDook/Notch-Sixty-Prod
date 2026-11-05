@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// E25 S8b (flag `e25.outputs-and-speakers`): the Speakers-tab card that chooses the wider program source device and
+/// E25 S8b (flag): the Speakers-tab card that chooses the wider program source device and
 /// how the fold treats the LFE channel and headroom. Hidden with the flag off and for direct multi-output systems.
 struct ProductionProgramSourceCard: View {
     @StateObject private var controller: ProgramSourceController

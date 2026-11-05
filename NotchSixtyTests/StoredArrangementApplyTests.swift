@@ -28,16 +28,12 @@ final class StoredArrangementApplyTests: XCTestCase {
         return a
     }
 
-    private func rig(flag: Bool) throws -> OfflineSetupRig {
-        let rig = try OfflineSetupRig(rate: 48_000, arrangementEnabled: flag)
-        rig.profiles.arrangementFlagEnabled = { flag }
-        return rig
-    }
+    private func rig() throws -> OfflineSetupRig { try OfflineSetupRig(rate: 48_000) }
 
     func testProfileLoadAppliesStoredAlignmentLikeTheWizard() throws {
         let alignment = StereoBassAlignment(monoBassFilter: MonoBassFilter(family: .bessel, slopeDBPerOctave: 36))
         let arrangement = monoBass(alignment)
-        let rig = try rig(flag: true)
+        let rig = try rig()
         defer { rig.tearDown() }
         try rig.profiles.replaceSelectedSystemArrangement(arrangement)
         XCTAssertNil(rig.engine.appliedStereoAlignment)
@@ -49,13 +45,12 @@ final class StoredArrangementApplyTests: XCTestCase {
         try rig.engine.applyStereoAlignment(nil)
         let relaunched = ProductProfileController(
             engine: rig.engine, storageURL: rig.root.appendingPathComponent("profiles.json"))
-        relaunched.arrangementFlagEnabled = { true }
         relaunched.restoreSelectedLayers()
         XCTAssertEqual(rig.engine.appliedStereoAlignment, compiled.stereoAlignment)
     }
 
     func testProfileLoadAppliesStoredFoldDown() throws {
-        let rig = try rig(flag: true)
+        let rig = try rig()
         defer { rig.tearDown() }
         let arrangement = fiveOne(source: "receiver-hdmi")
         try rig.profiles.replaceSelectedSystemArrangement(arrangement)
@@ -69,23 +64,13 @@ final class StoredArrangementApplyTests: XCTestCase {
         XCTAssertNil(rig.engine.appliedProgramFoldPlan)
     }
 
-    func testFlagOffLeavesTheEngineAlone() throws {
-        let rig = try rig(flag: false)
-        defer { rig.tearDown() }
-        try rig.profiles.replaceSelectedSystemArrangement(fiveOne(source: "receiver-hdmi"))
-        try rig.profiles.applySelectedLayersNow()
-        XCTAssertNil(rig.engine.appliedProgramFoldPlan)
-        XCTAssertNil(rig.engine.appliedStereoAlignment)
-    }
-
     /// The alignment the UI model produced is what the stereo session renders: identical to the offline graph built
     /// from the compiled arrangement, and the mono-bass filter is audibly doing something at the low corner.
     func testRenderedMonoBassRunMatchesTheOfflineGraphAtLowAndHighRates() throws {
         let block = 512
         for rate in [44_100.0, 384_000.0] {
-            let rig = try OfflineSetupRig(rate: rate, arrangementEnabled: true)
+            let rig = try OfflineSetupRig(rate: rate)
             defer { rig.tearDown() }
-            rig.profiles.arrangementFlagEnabled = { true }
             rig.model.begin()
             rig.model.chooseOutput(uid: OfflineSetupRig.outputUID)
             rig.model.chooseChannelCount(2)

@@ -132,7 +132,7 @@ final class SystemSetupAdaptiveStepsTests: XCTestCase {
 
     func testClassCAlignmentAndMonoBassReachTheStereoSessionAtEveryRate() async throws {
         for rate in Self.rates {
-            let rig = try OfflineSetupRig(rate: rate, seats: 2, arrangementEnabled: true, outputChannels: 2)
+            let rig = try OfflineSetupRig(rate: rate, seats: 2, outputChannels: 2)
             defer { rig.tearDown() }
             let model = rig.model
             let label = "\(rate) Hz"
@@ -177,7 +177,7 @@ final class SystemSetupAdaptiveStepsTests: XCTestCase {
 
     func testReceiverClassSkipsBassWithTheReasonAndCorrectsTheFeeds() async throws {
         let rate = 48_000.0
-        let rig = try OfflineSetupRig(rate: rate, seats: 2, arrangementEnabled: true, outputChannels: 2)
+        let rig = try OfflineSetupRig(rate: rate, seats: 2, outputChannels: 2)
         defer { rig.tearDown() }
         let model = rig.model
         try await runToAlignment(rig, bass: .downstreamReceiver, layout: .fiveOne, label: "E")
@@ -199,11 +199,4 @@ final class SystemSetupAdaptiveStepsTests: XCTestCase {
         XCTAssertTrue(model.choices.correctionApplied, model.message ?? "")
     }
 
-    func testFlagOffLeavesTheStepsAsTheyWere() throws {
-        let rig = try OfflineSetupRig(rate: 48_000, arrangementEnabled: false, outputChannels: 2)
-        defer { rig.tearDown() }
-        XCTAssertNil(rig.model.bassStepMode)
-        XCTAssertNil(rig.model.alignmentSubNote)
-        XCTAssertNil(rig.model.correctionNote)
-    }
 }
