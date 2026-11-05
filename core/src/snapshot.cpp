@@ -247,7 +247,7 @@ uint32_t canonKind(uint32_t kind) {
 }
 
 // Per-stage state size in bytes for one lane.
-size_t stateStrideFor(const n60_stage_desc &s, double rate) {
+size_t stateStrideFor(const n60_stage_desc &s, double rate, uint32_t firScheme) {
     switch (s.kind) {
         case N60_STAGE_METER_IN:
         case N60_STAGE_METER_OUT: return sizeof(MeterLane);
@@ -257,7 +257,7 @@ size_t stateStrideFor(const n60_stage_desc &s, double rate) {
             return alignUp(sizeof(DelayLane) + (size_t(s.capacityFrames) + 1) * sizeof(float));
         default: {
             size_t lane = 0, shared = 0;
-            if (isDspKind(s.kind)) dspSizes(s, lane, shared);
+            if (isDspKind(s.kind)) dspSizes(s, firScheme, lane, shared);
             else if (isSystemKind(s.kind)) systemSizes(s, rate, lane, shared);
             else if (isMatrixKind(s.kind)) matrixSizes(s, lane, shared);
             else if (isGeneratorKind(s.kind)) generatorSizes(s, rate, lane, shared);
@@ -267,9 +267,9 @@ size_t stateStrideFor(const n60_stage_desc &s, double rate) {
     }
 }
 
-size_t sharedBytesFor(const n60_stage_desc &s, double rate) {
+size_t sharedBytesFor(const n60_stage_desc &s, double rate, uint32_t firScheme) {
     size_t lane = 0, shared = 0;
-    if (isDspKind(s.kind)) dspSizes(s, lane, shared);
+    if (isDspKind(s.kind)) dspSizes(s, firScheme, lane, shared);
     else if (isSystemKind(s.kind)) systemSizes(s, rate, lane, shared);
     else if (isMatrixKind(s.kind)) matrixSizes(s, lane, shared);
     else if (isGeneratorKind(s.kind)) generatorSizes(s, rate, lane, shared);
@@ -289,7 +289,7 @@ n60_status validateDesc(const n60_graph_desc &d) {
     }
     auto validChannels = [](uint32_t n) { return n >= 1 && n <= N60_GRAPH_MAX_CHANNELS; };
     if (d.maxBlockFrames < 1 || d.maxBlockFrames > N60_GRAPH_MAX_BLOCK_FRAMES || !validChannels(d.inputChannels) ||
-        !validChannels(d.outputChannels) || d.reserved != 0 || d.reserved2 != 0) {
+        !validChannels(d.outputChannels) || d.reserved != 0 || d.reserved2 != 0 || d.reserved3 != 0 || d.firScheme > 1) {
         return N60_STATUS_BAD_ARGUMENT;
     }
     if ((d.parkFftSize != 0 && d.parkFftSize != 1024 && d.parkFftSize != 2048 && d.parkFftSize != 4096) ||
@@ -322,21 +322,21 @@ n60_status validateDesc(const n60_graph_desc &d) {
         if (isSystemKind(s.kind)) {
             const n60_status v = validateSystemStage(s, d.sampleRate, d.outputChannels);
             if (v != N60_STATUS_OK) return v;
-            total += (stateStrideFor(s, d.sampleRate) * laneCountFor(s, d.outputChannels)) + sharedBytesFor(s, d.sampleRate);
+            total += (stateStrideFor(s, d.sampleRate, d.firScheme) * laneCountFor(s, d.outputChannels)) + sharedBytesFor(s, d.sampleRate, d.firScheme);
             if (total > kMaxArenaBytes) return N60_STATUS_OUT_OF_MEMORY;
             continue;
         }
         if (isDspKind(s.kind)) {
-            const n60_status v = validateDspStage(s, d.sampleRate, d.outputChannels);
+            const n60_status v = validateDspStage(s, d.sampleRate, d.outputChannels, d.firScheme);
             if (v != N60_STATUS_OK) return v;
-            total += (stateStrideFor(s, d.sampleRate) * laneCountFor(s, d.outputChannels)) + sharedBytesFor(s, d.sampleRate);
+            total += (stateStrideFor(s, d.sampleRate, d.firScheme) * laneCountFor(s, d.outputChannels)) + sharedBytesFor(s, d.sampleRate, d.firScheme);
             if (total > kMaxArenaBytes) return N60_STATUS_OUT_OF_MEMORY;
             continue;
         }
         if (isMatrixKind(s.kind)) {
             const n60_status v = validateMatrixStage(s, d.sampleRate, d.outputChannels);
             if (v != N60_STATUS_OK) return v;
-            total += (stateStrideFor(s, d.sampleRate) * laneCountFor(s, d.outputChannels)) + sharedBytesFor(s, d.sampleRate) +
+            total += (stateStrideFor(s, d.sampleRate, d.firScheme) * laneCountFor(s, d.outputChannels)) + sharedBytesFor(s, d.sampleRate, d.firScheme) +
                      size_t(s.paramCount) * sizeof(float);
             if (total > kMaxArenaBytes) return N60_STATUS_OUT_OF_MEMORY;
             continue;
@@ -344,14 +344,14 @@ n60_status validateDesc(const n60_graph_desc &d) {
         if (isGeneratorKind(s.kind)) {
             const n60_status v = validateGeneratorStage(s, d.sampleRate, d.outputChannels);
             if (v != N60_STATUS_OK) return v;
-            total += (stateStrideFor(s, d.sampleRate) * laneCountFor(s, d.outputChannels)) + sharedBytesFor(s, d.sampleRate);
+            total += (stateStrideFor(s, d.sampleRate, d.firScheme) * laneCountFor(s, d.outputChannels)) + sharedBytesFor(s, d.sampleRate, d.firScheme);
             if (total > kMaxArenaBytes) return N60_STATUS_OUT_OF_MEMORY;
             continue;
         }
         if (isRouteKind(s.kind)) {
             const n60_status v = validateRouteStage(s, d.sampleRate, d.outputChannels);
             if (v != N60_STATUS_OK) return v;
-            total += (stateStrideFor(s, d.sampleRate) * laneCountFor(s, d.outputChannels)) + sharedBytesFor(s, d.sampleRate) +
+            total += (stateStrideFor(s, d.sampleRate, d.firScheme) * laneCountFor(s, d.outputChannels)) + sharedBytesFor(s, d.sampleRate, d.firScheme) +
                      size_t(s.paramCount) * sizeof(float);
             if (total > kMaxArenaBytes) return N60_STATUS_OUT_OF_MEMORY;
             continue;
@@ -393,7 +393,7 @@ n60_status validateDesc(const n60_graph_desc &d) {
                 if (s.paramCount != 0) return N60_STATUS_BAD_ARGUMENT;
                 break;
         }
-        total += stateStrideFor(s, d.sampleRate) * laneCountFor(s, d.outputChannels);
+        total += stateStrideFor(s, d.sampleRate, d.firScheme) * laneCountFor(s, d.outputChannels);
         if (total > kMaxArenaBytes) return N60_STATUS_OUT_OF_MEMORY;
     }
     // Every M/S decode must undo exactly one earlier encode on the same lane pair.
@@ -434,11 +434,11 @@ n60_status buildSnapshot(const n60_graph_desc &d, uint32_t epoch, SnapHeader **o
         plan[i].params = off;
         off += alignUp(sizeof(float) * s.paramCount);
         plan[i].state = off;
-        off += alignUp(stateStrideFor(s, d.sampleRate) * laneCountFor(s, d.outputChannels));
+        off += alignUp(stateStrideFor(s, d.sampleRate, d.firScheme) * laneCountFor(s, d.outputChannels));
         plan[i].coef = off;
         if (s.kind == N60_STAGE_PEQ) off += alignUp(sizeof(PeqSec) * (s.paramCount / 4));
         plan[i].shared = off;
-        off += alignUp(sharedBytesFor(s, d.sampleRate));
+        off += alignUp(sharedBytesFor(s, d.sampleRate, d.firScheme));
         if (off > kMaxArenaBytes) return N60_STATUS_OUT_OF_MEMORY;
     }
 
@@ -461,6 +461,7 @@ n60_status buildSnapshot(const n60_graph_desc &d, uint32_t epoch, SnapHeader **o
     h->parkFftSize = d.parkFftSize;
     h->parkRevision = d.parkRevision;
     h->parkCommand = d.parkCommand;
+    h->firScheme = d.firScheme;
 
     // Pass 2: fill the stage table, parameters and initial state.
     for (uint32_t i = 0; i < d.stageCount; ++i) {
@@ -478,7 +479,7 @@ n60_status buildSnapshot(const n60_graph_desc &d, uint32_t epoch, SnapHeader **o
         r.paramCount = s.paramCount;
         r.paramsOff = static_cast<uint32_t>(plan[i].params);
         r.stateOff = static_cast<uint32_t>(plan[i].state);
-        r.stateStride = static_cast<uint32_t>(stateStrideFor(s, d.sampleRate));
+        r.stateStride = static_cast<uint32_t>(stateStrideFor(s, d.sampleRate, d.firScheme));
         r.capacity = s.capacityFrames;
         r.coefOff = static_cast<uint32_t>(plan[i].coef);
         r.sharedOff = static_cast<uint32_t>(plan[i].shared);

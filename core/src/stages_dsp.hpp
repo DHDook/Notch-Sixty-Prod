@@ -11,10 +11,10 @@ namespace n60 {
 bool isDspKind(uint32_t kind);
 
 // Control thread. Checks lanes, parameter count and ranges of one ABI v3 stage.
-n60_status validateDspStage(const n60_stage_desc &s, double sampleRate, uint32_t outputChannels);
+n60_status validateDspStage(const n60_stage_desc &s, double sampleRate, uint32_t outputChannels, uint32_t firScheme);
 
 // Control thread. Bytes of per-lane state and of stage-shared state.
-void dspSizes(const n60_stage_desc &s, size_t &perLane, size_t &shared);
+void dspSizes(const n60_stage_desc &s, uint32_t firScheme, size_t &perLane, size_t &shared);
 
 // Control thread, while the snapshot is being built (arena zeroed, StageRec filled).
 void dspInit(SnapHeader *h, const StageRec &r);

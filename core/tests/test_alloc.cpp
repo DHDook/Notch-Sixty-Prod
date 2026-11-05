@@ -838,6 +838,48 @@ int main() {
         }
         n60_graph_retire(g);
     }
+    // E9 S1: the non-uniform FIR (firScheme 1) at 262,144 taps on eight lanes: build and swap off the callback,
+    // then process allocation-free across tick boundaries and block sizes.
+    for (double rate : rates) {
+        constexpr uint32_t N = 512;
+        static float longTaps[262144];
+        for (int i = 0; i < 262144; i++) longTaps[i] = 0.0001f * static_cast<float>(std::sin(0.013 * i));
+        n60_stage_desc a[1] = {stage(N60_STAGE_FIR, 1, N60_LANE_ALL, longTaps, 262144)};
+        n60_graph_desc da{};
+        da.structSize = sizeof da;
+        da.abiVersion = N60_GRAPH_ABI_VERSION;
+        da.sampleRate = rate;
+        da.maxBlockFrames = N;
+        da.inputChannels = da.outputChannels = 8;
+        da.stages = a;
+        da.stageCount = 1;
+        da.firScheme = N60_FIR_SCHEME_NONUNIFORM;
+        n60_graph *g = nullptr;
+        CHECK(n60_graph_build(&da, &g) == N60_STATUS_OK, "build long FIR at %.0f", rate);
+        if (g == nullptr) continue;
+        static float buf[8][N], obuf[8][N];
+        const float *in[8];
+        float *out[8];
+        for (int c = 0; c < 8; c++) { in[c] = buf[c]; out[c] = obuf[c]; }
+        uint32_t seed = 11;
+        for (int round = 0; round < 6; round++) {
+            for (int c = 0; c < 8; c++)
+                for (uint32_t i = 0; i < N; i++) {
+                    seed = seed * 1664525u + 1013904223u;
+                    buf[c][i] = 0.2f * (static_cast<float>((seed >> 8) & 0xFFFF) / 65536.0f - 0.5f);
+                }
+            allocs = 0;
+            frees = 0;
+            armed = true;
+            n60_status st = n60_graph_process(g, in, out, N);
+            for (int k = 0; k < 4; k++) st = static_cast<n60_status>(st | n60_graph_process(g, in, out, 1 + 100 * k));
+            armed = false;
+            CHECK(st == N60_STATUS_OK, "process long FIR");
+            CHECK(allocs == 0 && frees == 0, "rate %.0f long FIR round %d: allocated %ld / freed %ld", rate, round, allocs.load(),
+                  frees.load());
+        }
+        n60_graph_retire(g);
+    }
     if (failures) {
         std::fprintf(stderr, "%d failure(s)\n", failures);
         return 1;

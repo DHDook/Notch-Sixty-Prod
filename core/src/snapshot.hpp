@@ -65,6 +65,8 @@ struct SnapHeader {
     uint32_t fadeFrames;  // rebuild crossfade length when this snapshot is adopted (0 = instant swap)
     uint32_t historyEpoch;  // ABI v10: bumped (realtime thread) to drop the FIR input history; lanes compare it
     uint32_t follower;      // ABI v13: realtime thread only; 1 while this snapshot is the incoming side of a rebuild
+    uint32_t firScheme;     // ABI v20: 0 uniform FIR engine, 1 non-uniform (N60_FIR_SCHEME_*)
+    uint32_t pad2;
     ExternalSlot *external; // ABI v13: the graph's EXTERNAL callback slot (set by the graph before publication)
 };
 

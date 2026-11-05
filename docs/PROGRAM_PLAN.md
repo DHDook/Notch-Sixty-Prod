@@ -193,7 +193,7 @@ Gate G2 passed on 2026-10-25 (commit 07e82c6)
 ### E9 Multichannel protection and FIR parity
 
 - [ ] Per-output limiter, true-peak guard and soft clip, matching the stereo chain
-- [ ] Move the program FIR onto the 262,144-tap non-uniform convolver
+- [~] Move the program FIR onto the 262,144-tap non-uniform convolver (E9 S1 built dark, firScheme 1 not set by Swift; S3 wires it)
 - [ ] Per-output headroom assistant
 
 ### E20 Engine performance

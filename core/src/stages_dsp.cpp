@@ -29,6 +29,7 @@
 #include <cmath>
 #include <cstring>
 
+#include "conv/nufir.hpp"
 #include "fft.hpp"
 #include "halfband.hpp"
 
@@ -806,7 +807,21 @@ inline float firStep(const FirCtx &c, FirLane &st, float *in, float *out, Comple
     return y;
 }
 
+// Non-uniform engine (ABI v20, firScheme 1).
+void runFirNonUniform(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) {
+    uint8_t *shBase = sharedState(h, r);
+    for (uint32_t l = 0; l < r.laneCount; ++l) {
+        uint8_t *lb = laneState(h, r, l);
+        if (conv::laneEpoch(lb) != h->historyEpoch) conv::resetLane(shBase, lb, h->historyEpoch);
+        conv::process(shBase, lb, lanes[laneOf(r, l)], frames, nullptr);
+    }
+}
+
 void runFir(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) {
+    if (h->firScheme == N60_FIR_SCHEME_NONUNIFORM) {
+        runFirNonUniform(h, r, lanes, frames);
+        return;
+    }
     uint8_t *shBase = sharedState(h, r);
     const FirShared &S = *reinterpret_cast<FirShared *>(shBase);
     const FirLayout L = firLayout(S.parts);
@@ -1020,7 +1035,7 @@ bool isDspKind(uint32_t kind) {
            kind == N60_STAGE_DENOISER || kind == N60_STAGE_FIR || kind == N60_STAGE_ROOM_FIR_TWO_BAND;
 }
 
-n60_status validateDspStage(const n60_stage_desc &s, double rate, uint32_t outCh) {
+n60_status validateDspStage(const n60_stage_desc &s, double rate, uint32_t outCh, uint32_t firScheme) {
     if (s.laneMask != 0) {
         if (s.laneA != 0 || s.laneB != 0) return N60_STATUS_BAD_ARGUMENT;
         if (outCh < 64 && (s.laneMask >> outCh) != 0) return N60_STATUS_BAD_ARGUMENT;
@@ -1028,7 +1043,8 @@ n60_status validateDspStage(const n60_stage_desc &s, double rate, uint32_t outCh
         if (s.laneB != 0 || (s.laneA != N60_LANE_ALL && s.laneA >= outCh)) return N60_STATUS_BAD_ARGUMENT;
     }
     if (s.kind == N60_STAGE_FIR) {
-        if (s.paramCount < 1 || s.paramCount > N60_FIR_MAX_TAPS || s.capacityFrames > N60_GRAPH_MAX_DELAY_FRAMES) {
+        const uint32_t maxTaps = firScheme == N60_FIR_SCHEME_NONUNIFORM ? N60_FIR_MAX_TAPS_LONG : N60_FIR_MAX_TAPS;
+        if (s.paramCount < 1 || s.paramCount > maxTaps || s.capacityFrames > N60_GRAPH_MAX_DELAY_FRAMES) {
             return N60_STATUS_BAD_ARGUMENT;
         }
         return N60_STATUS_OK;
@@ -1080,7 +1096,7 @@ n60_status validateDspStage(const n60_stage_desc &s, double rate, uint32_t outCh
     return N60_STATUS_OK;
 }
 
-void dspSizes(const n60_stage_desc &s, size_t &perLane, size_t &shared) {
+void dspSizes(const n60_stage_desc &s, uint32_t firScheme, size_t &perLane, size_t &shared) {
     perLane = shared = 0;
     switch (s.kind) {
         case N60_STAGE_COMPRESSOR: perLane = up(sizeof(CompLane)); shared = up(sizeof(CompShared)); break;
@@ -1098,6 +1114,11 @@ void dspSizes(const n60_stage_desc &s, size_t &perLane, size_t &shared) {
             break;
         }
         case N60_STAGE_FIR: {
+            if (firScheme == N60_FIR_SCHEME_NONUNIFORM) {
+                perLane = conv::laneBytes(s.params, s.paramCount);
+                shared = conv::sharedBytes(s.params, s.paramCount);
+                break;
+            }
             const uint32_t parts = firParts(s.paramCount);
             perLane = firLaneBytes(parts);
             shared = firLayout(parts).total;
@@ -1146,6 +1167,14 @@ void dspInit(SnapHeader *h, const StageRec &r) {
             break;
         }
         case N60_STAGE_FIR: {
+            if (h->firScheme == N60_FIR_SCHEME_NONUNIFORM) {
+                conv::init(sh, p, r.paramCount);
+                conv::Shared *cs = reinterpret_cast<conv::Shared *>(sh);
+                const uint64_t hash = firTapHash(p, r.paramCount);
+                cs->hashLo = static_cast<uint32_t>(hash);
+                cs->hashHi = static_cast<uint32_t>(hash >> 32);
+                break;
+            }
             FirShared *s = reinterpret_cast<FirShared *>(sh);
             s->parts = firParts(r.paramCount);
             s->taps = r.paramCount;
@@ -1242,9 +1271,20 @@ uint32_t dspLatency(const SnapHeader *h, const StageRec &r) {
 bool dspFirSameFilter(const SnapHeader *a, const StageRec &ra, const SnapHeader *b, const StageRec &rb) {
     if (ra.kind != N60_STAGE_FIR || rb.kind != N60_STAGE_FIR || ra.id != rb.id) return false;
     if (ra.paramCount != rb.paramCount || ra.laneCount != rb.laneCount) return false;
-    const FirShared &x = *reinterpret_cast<const FirShared *>(bytes(a) + ra.sharedOff);
-    const FirShared &y = *reinterpret_cast<const FirShared *>(bytes(b) + rb.sharedOff);
-    if (x.parts != y.parts || x.taps != y.taps || x.hashLo != y.hashLo || x.hashHi != y.hashHi) return false;
+    if (a->firScheme != b->firScheme) return false;
+    if (a->firScheme == N60_FIR_SCHEME_NONUNIFORM) {
+        // ABI v20: only filters up to the uniform cap carry (S1); a longer one always warms fully (S2 changes that).
+        const conv::Shared &cx = *reinterpret_cast<const conv::Shared *>(bytes(a) + ra.sharedOff);
+        const conv::Shared &cy = *reinterpret_cast<const conv::Shared *>(bytes(b) + rb.sharedOff);
+        if (cx.taps > N60_FIR_MAX_TAPS || cx.taps != cy.taps || cx.mode != cy.mode || cx.delay != cy.delay ||
+            cx.hashLo != cy.hashLo || cx.hashHi != cy.hashHi || ra.stateStride != rb.stateStride) {
+            return false;
+        }
+    } else {
+        const FirShared &x = *reinterpret_cast<const FirShared *>(bytes(a) + ra.sharedOff);
+        const FirShared &y = *reinterpret_cast<const FirShared *>(bytes(b) + rb.sharedOff);
+        if (x.parts != y.parts || x.taps != y.taps || x.hashLo != y.hashLo || x.hashHi != y.hashHi) return false;
+    }
     for (uint32_t k = 0; k < ra.laneCount; ++k) {
         if (laneOf(ra, k) != laneOf(rb, k)) return false;
     }
@@ -1315,6 +1355,22 @@ uint32_t dspFirCarry(SnapHeader *from, SnapHeader *to) {
         for (uint32_t j = 0; j < from->stageCount && !carried; ++j) {
             StageRec &a = src[j];
             if (!dspFirSameFilter(from, a, to, b)) continue;
+            if (to->firScheme == N60_FIR_SCHEME_NONUNIFORM) {
+                // Whole-lane copy (bounded: at most ~0.3 MB at 32,768 taps, once per rebuild). The lane header
+                // carries the tick phase, so the copy continues the schedule exactly.
+                for (uint32_t k = 0; k < b.laneCount; ++k) {
+                    uint8_t *sl = laneState(from, a, k);
+                    uint8_t *dl = laneState(to, b, k);
+                    if (conv::laneEpoch(sl) != from->historyEpoch) {
+                        staleSource = true;
+                        continue;
+                    }
+                    std::memcpy(dl, sl, b.stateStride);
+                    *reinterpret_cast<uint32_t *>(dl) = to->historyEpoch;
+                }
+                carried = true;
+                continue;
+            }
             const uint32_t P = reinterpret_cast<FirShared *>(sharedState(to, b))->parts;
             const size_t headBytes = sizeof(FirLane) + sizeof(float) * (kFft + kPart);
             for (uint32_t k = 0; k < b.laneCount; ++k) {
