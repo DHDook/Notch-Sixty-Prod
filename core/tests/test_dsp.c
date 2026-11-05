@@ -557,6 +557,31 @@ static void testValidation(void) {
     CHECK(tryBuild(48000, 1, st, 1) == N60_STATUS_BAD_ARGUMENT, "too many taps rejected");
     st[0] = stage(N60_STAGE_FIR, 1, N60_LANE_ALL, taps, 0);
     CHECK(tryBuild(48000, 1, st, 1) == N60_STATUS_BAD_ARGUMENT, "no taps rejected");
+    /* E9 S1: scheme 1 raises the cap to 262,144 taps; scheme 0 keeps 32,768. */
+    {
+        static float longTaps[N60_FIR_MAX_TAPS_LONG + 1];
+        static const double longRates[] = {44100, 48000, 88200, 96000, 176400, 192000, 352800, 384000};
+        for (int r = 0; r < 8; r++) {
+            n60_stage_desc ls = stage(N60_STAGE_FIR, 1, N60_LANE_ALL, longTaps, N60_FIR_MAX_TAPS_LONG);
+            n60_graph_desc d = makeDesc(longRates[r], 512, 2, &ls, 1);
+            n60_graph *g = NULL;
+            CHECK(n60_graph_build(&d, &g) == N60_STATUS_BAD_ARGUMENT, "scheme 0 rejects 262144 taps");
+            d.firScheme = N60_FIR_SCHEME_NONUNIFORM;
+            CHECK(n60_graph_build(&d, &g) == N60_STATUS_OK, "scheme 1 builds 262144 taps at %.0f", longRates[r]);
+            if (g) n60_graph_retire(g);
+            ls.paramCount = N60_FIR_MAX_TAPS_LONG + 1;
+            g = NULL;
+            CHECK(n60_graph_build(&d, &g) == N60_STATUS_BAD_ARGUMENT, "scheme 1 rejects 262145 taps");
+        }
+        n60_stage_desc ls = stage(N60_STAGE_FIR, 1, N60_LANE_ALL, longTaps, 100);
+        n60_graph_desc d = makeDesc(48000, 512, 2, &ls, 1);
+        d.firScheme = 2;
+        n60_graph *g = NULL;
+        CHECK(n60_graph_build(&d, &g) == N60_STATUS_BAD_ARGUMENT, "unknown firScheme rejected");
+        d.firScheme = 0;
+        d.reserved3 = 1;
+        CHECK(n60_graph_build(&d, &g) == N60_STATUS_BAD_ARGUMENT, "reserved3 must be zero");
+    }
     free(taps);
     float dn[9] = {1, 3, 0.5f, -60, 0, 0, 0, 0, 0};
     st[0] = stage(N60_STAGE_DENOISER, 1, N60_LANE_ALL, dn, 9);

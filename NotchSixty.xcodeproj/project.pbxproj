@@ -148,6 +148,7 @@
 		E11D00000000000000000001 /* MeasurementCore.swift in Sources */ = {isa = PBXBuildFile; fileRef = E11D00000000000000000011 /* MeasurementCore.swift */; };
 		E11D00000000000000000002 /* MeasurementCoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E11D00000000000000000012 /* MeasurementCoreTests.swift */; };
 		E6C000000000000000000033 /* stages_dsp.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E6C000000000000000000013 /* stages_dsp.cpp */; };
+		E9A100000000000000000002 /* nufir.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E9A100000000000000000001 /* nufir.cpp */; };
 		E6C000000000000000000034 /* stages_system.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E6C000000000000000000014 /* stages_system.cpp */; };
 		E6C000000000000000000035 /* stages_matrix.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E6C000000000000000000015 /* stages_matrix.cpp */; };
 		E11C00000000000000000039 /* stages_generator.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E11C00000000000000000019 /* stages_generator.cpp */; };
@@ -733,6 +734,7 @@
 		E11D00000000000000000011 /* MeasurementCore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeasurementCore.swift; sourceTree = "<group>"; };
 		E11D00000000000000000012 /* MeasurementCoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeasurementCoreTests.swift; sourceTree = "<group>"; };
 		E6C000000000000000000013 /* stages_dsp.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = stages_dsp.cpp; sourceTree = "<group>"; };
+		E9A100000000000000000001 /* nufir.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = conv/nufir.cpp; sourceTree = "<group>"; };
 		E6C000000000000000000014 /* stages_system.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = stages_system.cpp; sourceTree = "<group>"; };
 		E6C000000000000000000015 /* stages_matrix.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = stages_matrix.cpp; sourceTree = "<group>"; };
 		E6C000000000000000000016 /* layout.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = layout.cpp; sourceTree = "<group>"; };
@@ -1245,6 +1247,7 @@
 				E6C000000000000000000011 /* snapshot.cpp */,
 				E6C000000000000000000012 /* fft.cpp */,
 				E6C000000000000000000013 /* stages_dsp.cpp */,
+				E9A100000000000000000001 /* nufir.cpp */,
 				E6C000000000000000000014 /* stages_system.cpp */,
 				E6C000000000000000000015 /* stages_matrix.cpp */,
 				E11C00000000000000000019 /* stages_generator.cpp */,
@@ -1847,6 +1850,7 @@
 				E6C000000000000000000031 /* snapshot.cpp in Sources */,
 				E6C000000000000000000032 /* fft.cpp in Sources */,
 				E6C000000000000000000033 /* stages_dsp.cpp in Sources */,
+				E9A100000000000000000002 /* nufir.cpp in Sources */,
 				E6C000000000000000000034 /* stages_system.cpp in Sources */,
 				E6C000000000000000000035 /* stages_matrix.cpp in Sources */,
 				E11C00000000000000000039 /* stages_generator.cpp in Sources */,
