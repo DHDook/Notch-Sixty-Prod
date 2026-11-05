@@ -293,15 +293,15 @@ Plan: `docs/epics/E25.md`. Output channels and the speaker arrangement become se
 so a 5.1 system on one two-channel DAC (for example into an AV receiver) gets every feature two
 channels allow, and the UI gives a reason for each one that it cannot.
 
-- [~] Arrangement model, compiler (two channels stay on the stereo session), capability matrix and profile migration (built dark; wired by S3 and S5)
-- [~] Mono bass on the pair with selectable family, slope and frequency; per-feed trim, delay and polarity (built dark; wired by S3)
-- [~] Wizard Outputs and Speakers steps; the flow creates the arrangement from the UI; session schema 2 (wired by S3; readiness reason replaced in S5; profile-load alignment and shortcut removal done in S8c)
+- [x] Arrangement model, compiler (two channels stay on the stereo session), capability matrix and profile migration (built dark; wired by S3 and S5)
+- [x] Mono bass on the pair with selectable family, slope and frequency; per-feed trim, delay and polarity (built dark; wired by S3)
+- [x] Wizard Outputs and Speakers steps; the flow creates the arrangement from the UI; session schema 2 (wired by S3; readiness reason replaced in S5; profile-load alignment and shortcut removal done in S8c)
 - [x] Alignment, bass and correction adapt to how bass is handled; receiver advice
 - [x] Capability text on every surface that offers a choice
 - [x] Quiet Zone and MIMO on two channels: MIMO sources limited to the L and R feeds (done); Quiet Zone eligibility built dark (wired by S8)
 - [x] Quiet Zone and MIMO eligibility on two channels (never live outside authorisation)
 - [x] Fold-down of 5.1/7.1 from a wider program source to the two feeds (owner: in v1) (built dark in S7; S8a built dark; wired by S8b)
-- [ ] Owner configuration end to end at eight rates; flag removed
+- [x] Owner configuration end to end at eight rates; flag removed
 
 ### E26 Sub-aware Quiet Zone (owner, 4 Nov 2026)
 
