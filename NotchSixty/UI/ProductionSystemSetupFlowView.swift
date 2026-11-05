@@ -209,6 +209,11 @@ final class SystemSetupFlowModel: ObservableObject {
         if bass == .dspToSubOutputs || bass.isDownstream, speakerChoices.subwooferCount == 0 { speakerChoices.subwooferCount = 1 }
         rebuildArrangement()
     }
+    /// E26 S1: how the receiver or powered sub handles bass. Quiet Zone through it needs a declaration.
+    func chooseReceiverBass(_ receiverBass: ReceiverBass) {
+        speakerChoices.receiverBass = receiverBass
+        rebuildArrangement()
+    }
     func chooseSubwooferCount(_ count: Int) {
         speakerChoices.subwooferCount = min(max(count, 0), SystemArrangement.maxSubwoofers)
         rebuildArrangement()
@@ -1401,6 +1406,9 @@ private struct SystemSetupSpeakersStep: View {
             if choices.bass == .downstreamReceiver {
                 Text(SystemCapabilityMatrix.receiverAdvice).font(.caption).foregroundStyle(.secondary)
             }
+            if choices.bass.isDownstream {
+                SystemSetupReceiverBassPicker(receiverBass: choices.receiverBass) { model.chooseReceiverBass($0) }
+            }
             Divider()
             Text("What this arrangement can do").font(.headline)
             ForEach(Array(model.capabilityRows.enumerated()), id: \.offset) { _, row in
@@ -1416,6 +1424,51 @@ private struct SystemSetupSpeakersStep: View {
                     }
                 }
             }
+        }
+    }
+}
+
+/// E26 S1: declares how the receiver (or powered sub) handles bass. Quiet Zone is refused through it until this is set.
+/// The crossover entry appears only for calibrated LFE out.
+private struct SystemSetupReceiverBassPicker: View {
+    let receiverBass: ReceiverBass
+    let onChange: (ReceiverBass) -> Void
+
+    private enum Kind: Hashable { case undeclared, openPreout, calibratedLFE }
+    private var kind: Kind {
+        switch receiverBass {
+        case .undeclared: return .undeclared
+        case .openPreout: return .openPreout
+        case .calibratedLFE: return .calibratedLFE
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("How does it handle bass?").font(.subheadline.bold())
+            Picker("Receiver bass", selection: Binding(
+                get: { kind },
+                set: { newKind in
+                    switch newKind {
+                    case .undeclared: onChange(.undeclared)
+                    case .openPreout: onChange(.openPreout)
+                    case .calibratedLFE: onChange(.calibratedLFE(crossoverHz: ReceiverBass.defaultCrossoverHz))
+                    }
+                })) {
+                Text("Not set").tag(Kind.undeclared)
+                Text("Open sub pre-out (no receiver crossover)").tag(Kind.openPreout)
+                Text("Calibrated LFE out").tag(Kind.calibratedLFE)
+            }
+            if case .calibratedLFE(let hz) = receiverBass {
+                Stepper(
+                    "Receiver crossover \(Int(hz)) Hz",
+                    value: Binding(get: { hz }, set: { onChange(.calibratedLFE(crossoverHz: $0)) }),
+                    in: ReceiverBass.crossoverRangeHz, step: 5)
+            }
+            if !receiverBass.isDeclared {
+                Text(TwoChannelAncArming.undeclaredReceiverRefusal).font(.caption).foregroundStyle(.orange)
+            }
+            Text(ReceiverBass.setupNote).font(.caption).foregroundStyle(.secondary)
         }
     }
 }

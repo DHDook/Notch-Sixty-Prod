@@ -136,8 +136,14 @@ final class ProgramSourceControllerTests: XCTestCase {
         XCTAssertTrue(arrangement(.downstreamReceiver).hasDownstreamSubwoofer)
         XCTAssertFalse(arrangement(.fullRange).hasDownstreamSubwoofer)
         XCTAssertFalse(arrangement(.dspMonoToMains).hasDownstreamSubwoofer)
+        // E26 S1: undeclared receiver bass asks for the declaration first; a declared one keeps the old refusal.
         let text = TwoChannelAncArming.refusal(arrangement: arrangement(.downstreamSubCrossover, layout: .stereo), budget: budget())
-        XCTAssertEqual(text, "Quiet Zone is not available with a subwoofer yet.")
+        XCTAssertEqual(text, "Tell Notch Sixty how your receiver handles bass.")
+        var declared = arrangement(.downstreamSubCrossover, layout: .stereo)
+        declared.receiverBass = .openPreout
+        XCTAssertEqual(
+            TwoChannelAncArming.refusal(arrangement: declared, budget: budget()),
+            "Quiet Zone is not available with a subwoofer yet.")
     }
 
     func testReadinessTextFollowsTheMeasuredFeedAtEveryRate() {

@@ -10,6 +10,8 @@ struct SystemSetupSpeakerChoices: Equatable, Sendable {
     var bass: BassHandling = .fullRange
     /// Physical subs, including subs a receiver drives (0 to 8).
     var subwooferCount = 0
+    /// E26 S1: how a downstream receiver or powered sub handles bass. Kept only while bass is downstream.
+    var receiverBass: ReceiverBass = .undeclared
 }
 
 enum SystemSetupArrangementPlanner {
@@ -86,7 +88,8 @@ enum SystemSetupArrangementPlanner {
         var result = SystemArrangement(
             outputs: outputs, layout: layout, bass: bass, subwooferCount: subCount,
             subOutputs: subOutputs, speakers: speakers, realisation: previous?.realisation ?? .profile,
-            stereoAlignment: previous?.stereoAlignment)
+            stereoAlignment: previous?.stereoAlignment,
+            receiverBass: bass.isDownstream && choices.receiverBass.isValid ? choices.receiverBass : .undeclared)
         if inUse >= 3 { result.stereoAlignment = nil }
         return result
     }
@@ -94,7 +97,8 @@ enum SystemSetupArrangementPlanner {
     /// Speaker choices a stored arrangement describes, to pre-fill the step.
     static func choices(from arrangement: SystemArrangement) -> SystemSetupSpeakerChoices {
         SystemSetupSpeakerChoices(
-            layout: arrangement.layout, bass: arrangement.bass, subwooferCount: arrangement.subwooferCount)
+            layout: arrangement.layout, bass: arrangement.bass, subwooferCount: arrangement.subwooferCount,
+            receiverBass: arrangement.receiverBass)
     }
 
     /// Design note 8: a schema-1 session carries a topology; it becomes an arrangement. 2.1 and 2.2 become DSP

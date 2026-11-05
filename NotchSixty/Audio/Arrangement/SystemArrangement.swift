@@ -95,6 +95,9 @@ struct SystemArrangement: Codable, Equatable, Sendable {
     var stereoAlignment: StereoBassAlignment?
     /// E25 S7: fold a wider program (5.1, 7.1) to the two feeds. nil keeps today's behaviour (the player folds).
     var foldDown: ProgramFoldDown?
+    /// E26 S1: how a receiver or powered sub handles bass downstream of the two feeds. Meaningful for classes D and E
+    /// only; `.undeclared` refuses live Quiet Zone through a downstream sub. Additive: older files decode as undeclared.
+    var receiverBass: ReceiverBass = .undeclared
 
     init(
         outputs: SystemOutputs,
@@ -105,7 +108,8 @@ struct SystemArrangement: Codable, Equatable, Sendable {
         speakers: [ArrangedSpeaker] = [],
         realisation: ArrangementRealisation = .profile,
         stereoAlignment: StereoBassAlignment? = nil,
-        foldDown: ProgramFoldDown? = nil
+        foldDown: ProgramFoldDown? = nil,
+        receiverBass: ReceiverBass = .undeclared
     ) {
         self.outputs = outputs
         self.layout = layout
@@ -116,6 +120,7 @@ struct SystemArrangement: Codable, Equatable, Sendable {
         self.realisation = realisation
         self.stereoAlignment = stereoAlignment
         self.foldDown = foldDown
+        self.receiverBass = receiverBass
     }
 
     init(from decoder: Decoder) throws {
@@ -135,6 +140,7 @@ struct SystemArrangement: Codable, Equatable, Sendable {
         realisation = try c.decodeIfPresent(ArrangementRealisation.self, forKey: .realisation) ?? .profile
         stereoAlignment = try c.decodeIfPresent(StereoBassAlignment.self, forKey: .stereoAlignment)
         foldDown = try c.decodeIfPresent(ProgramFoldDown.self, forKey: .foldDown)
+        receiverBass = try c.decodeIfPresent(ReceiverBass.self, forKey: .receiverBass) ?? .undeclared
     }
 
     /// The five classes the capability matrix and the wizard speak in.

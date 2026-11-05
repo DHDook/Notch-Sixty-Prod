@@ -20,7 +20,8 @@ extension FeatureFlag {
     /// delete it, and the checks that read it, once the epic ships.
     static let all: [FeatureFlag] = [
         .legacyKernel, .ancEngineLease, .adaptiveTonalLive, .earnedCap, .feedForwardLive,
-        .noiseSurvey, .conversationUnmasking, .virtualMicrophone, .zones, .headPositionCamera, .overnight
+        .noiseSurvey, .conversationUnmasking, .virtualMicrophone, .zones, .headPositionCamera, .overnight,
+        .subAwareAnc
     ]
 
     /// E6 S11: the unified graph is the default renderer. Turning this on selects the frozen
@@ -117,6 +118,16 @@ extension FeatureFlag {
         id: "e4.overnight",
         title: "Overnight Quiet Zone runs",
         epic: "E4"
+    )
+
+    /// E26: sub-aware Quiet Zone. Bass-path records, per-band eligibility and `SubAwareAncReadiness` replace the blanket
+    /// "not available with a subwoofer yet" refusal. S1 only stops counting mono bass on the pair (class C) as a sub.
+    /// The undeclared-receiver refusal is not behind this flag. Live output still needs the E4 flags and the user's
+    /// Turn On. Removed when E26 ships.
+    static let subAwareAnc = FeatureFlag(
+        id: "e26.sub-aware-anc",
+        title: "Sub-aware Quiet Zone",
+        epic: "E26"
     )
 
 }

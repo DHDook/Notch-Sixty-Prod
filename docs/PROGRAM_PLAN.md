@@ -310,7 +310,7 @@ management (E4 question 18), so a system with a sub behind a receiver has no liv
 measures the path the anti-noise really takes, sub included, and designs, limits and arms against
 it, behind `e26.sub-aware-anc`. Live output stays behind the per-feature arm.
 
-- [ ] Bass-path model, fingerprint and plain measurement record; receiver bass declaration (open preout or calibrated LFE out) with a setup note, refusing only when undeclared; mono bass on the pair no longer counts as a sub; acoustic twin with a sub
+- [~] Bass-path model, fingerprint and plain measurement record; receiver bass declaration (open preout or calibrated LFE out) with a setup note, refusing only when undeclared; mono bass on the pair no longer counts as a sub; acoustic twin with a sub
 - [ ] Secondary path and leakage measured through the whole feed; anti-noise latency per band; echo set with a sub (absorbs E4 S22c)
 - [ ] Conditioned L/R design where both channels share the sub (common-mode constraint), tonal and feed-forward
 - [ ] Sub safety: receiver crossover in the excursion caps, path-gain watch that disarms, combined leakage stability bound

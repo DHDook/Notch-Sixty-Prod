@@ -390,6 +390,63 @@ static void testLiveFlipAndTrailerTopology() {
     }
 }
 
+
+// 10. E26 S1: anti-noise is injected after the crossover, so it bypasses STEREO_CROSSOVER. The drive frame of a mono-bass
+// pair already holds the recombined bass, and the injected tone arrives unfiltered in its own lane only. This is why
+// class C (mono bass on the pair) is not a subwoofer for Quiet Zone.
+static void runThree(n60_graph *g, const std::vector<float> &a, const std::vector<float> &b, const std::vector<float> &c,
+                     std::vector<float> &oa, std::vector<float> &ob) {
+    const size_t n = a.size();
+    oa.assign(n, 0.0f);
+    ob.assign(n, 0.0f);
+    std::vector<float> oc(n, 0.0f);
+    for (size_t at = 0; at < n; at += kBlock) {
+        const uint32_t len = static_cast<uint32_t>(std::min<size_t>(kBlock, n - at));
+        const float *in[3] = {a.data() + at, b.data() + at, c.data() + at};
+        float *out[3] = {oa.data() + at, ob.data() + at, oc.data() + at};
+        n60_graph_process(g, in, out, len);
+    }
+}
+
+static void testAntiNoiseBypassesCrossover() {
+    for (double rate : kRates) {
+        const size_t n = static_cast<size_t>(rate * 1.0);
+        const std::vector<float> program = tone(n, rate, 40.0, 0.5f);
+        const std::vector<float> silence(n, 0.0f);
+        const std::vector<float> anti = tone(n, rate, 40.0, 0.1f);
+        std::vector<float> withL, withR, baseL, baseR;
+        for (int injected = 0; injected < 2; injected++) {
+            const float xo[8] = {80.0f, 0, 0, 1.0f, 0, 0, 80, 0.7f};
+            const float inj[3] = {2, 1.0f, 0.0f};  // source lane 2, authorised, unity
+            std::vector<n60_stage_desc> st = {stage(N60_STAGE_STEREO_CROSSOVER, 1, 0, 1, xo, 8),
+                                              stage(N60_STAGE_ANC_INJECT, 2, 0, 0, inj, 3)};
+            n60_graph_desc d;
+            std::memset(&d, 0, sizeof d);
+            d.structSize = sizeof d;
+            d.abiVersion = N60_GRAPH_ABI_VERSION;
+            d.sampleRate = rate;
+            d.maxBlockFrames = kBlock;
+            d.inputChannels = d.outputChannels = 3;
+            d.stages = st.data();
+            d.stageCount = static_cast<uint32_t>(st.size());
+            n60_graph *g = nullptr;
+            CHECK(n60_graph_build(&d, &g) == N60_STATUS_OK, "rate %.0f: crossover + inject build", rate);
+            if (!g) return;
+            runThree(g, program, silence, injected ? anti : silence, injected ? withL : baseL, injected ? withR : baseR);
+            n60_graph_retire(g);
+        }
+        // The right input is silent, yet the drive holds the recombined bass: the crossover summed it in.
+        CHECK(amplitude(baseR, rate, 40.0, n / 2) > 0.18, "rate %.0f: recombined bass reaches the right lane (%.3f)", rate,
+              amplitude(baseR, rate, 40.0, n / 2));
+        // The anti-noise difference (injected minus baseline) is the 40 Hz tone at full level in its lane only.
+        std::vector<float> dl(n), dr(n);
+        for (size_t i = 0; i < n; i++) { dl[i] = withL[i] - baseL[i]; dr[i] = withR[i] - baseR[i]; }
+        const double got = amplitude(dl, rate, 40.0, n / 2);
+        CHECK(std::fabs(got - 0.1) < 0.002, "rate %.0f: anti-noise passes the crossover unfiltered (%.4f)", rate, got);
+        CHECK(amplitude(dr, rate, 40.0, n / 2) < 1e-6, "rate %.0f: anti-noise is not summed into the other lane", rate);
+    }
+}
+
 int main() {
     testNoTrailerBitIdentical();
     testLevelAtCorner();
@@ -400,6 +457,7 @@ int main() {
     testLiveFlipAndTrailerTopology();
     testRoomFirCoexistence();
     testNoRenderAllocation();
+    testAntiNoiseBypassesCrossover();
     if (failures != 0) {
         std::fprintf(stderr, "%d check(s) failed\n", failures);
         return 1;
