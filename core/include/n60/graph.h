@@ -34,7 +34,7 @@ extern "C" {
 #endif
 
 /* Bumped on any incompatible change to a struct or function below. */
-#define N60_GRAPH_ABI_VERSION 19u
+#define N60_GRAPH_ABI_VERSION 20u
 
 typedef struct n60_graph n60_graph; /* opaque */
 
@@ -390,6 +390,9 @@ typedef int (*n60_external_process_fn)(void *context, const float *const *in, fl
 #define N60_ANC_GUARD_BANDS 16u
 #define N60_FIR_PARTITION_FRAMES 256u
 #define N60_FIR_MAX_TAPS (128u * N60_FIR_PARTITION_FRAMES)
+#define N60_FIR_MAX_TAPS_LONG 262144u /* ABI v20: firScheme 1 */
+#define N60_FIR_SCHEME_UNIFORM 0u
+#define N60_FIR_SCHEME_NONUNIFORM 1u
 #define N60_DYN_EQ_MAX_BANDS 64u
 #define N60_DYN_EQ_BAND_PARAMS 15u
 
@@ -431,6 +434,15 @@ typedef struct n60_graph_desc {
     uint32_t parkRevision;
     uint32_t parkCommand;
     uint32_t reserved2;           /* must be 0 */
+    /* ABI v20 (E9 S1). FIR engine for FIR, ROOM_FIR, SPEAKER_IR and DRIVER_FIR stages. 0 = N60_FIR_SCHEME_UNIFORM, the
+     * uniformly partitioned convolver above (at most N60_FIR_MAX_TAPS = 32768 taps, unchanged output). 1 =
+     * N60_FIR_SCHEME_NONUNIFORM, a non-uniform partitioned convolver (256 x 4, 1024 x 4, 4096 x up to 63) taking up to
+     * N60_FIR_MAX_TAPS_LONG = 262144 taps at the same latency of 256 frames plus the declared latency. A tap set that is a
+     * single 1.0 runs as a delay (bit exact). The two-band stages keep their caps. Running state is carried across a
+     * rebuild only for filters of at most N60_FIR_MAX_TAPS taps; a longer one warms silently for its full length. Both
+     * schemes need the same scheme in the old and new snapshot to carry. */
+    uint32_t firScheme;
+    uint32_t reserved3;           /* must be 0 */
 } n60_graph_desc;
 
 /* Counters since build. Safe to read from the control thread at any time. */
