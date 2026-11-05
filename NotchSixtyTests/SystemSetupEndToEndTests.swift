@@ -179,13 +179,10 @@ final class SystemSetupEndToEndTests: XCTestCase {
             XCTAssertEqual(model.step, .verify, "\(label): \(model.message ?? "")")
             model.runVerification()
             await waitForVerification(model)
-            // Open item (E25 S8e): on the two-feed receiver arrangement the verify error reads 1.6 to 2.0 dB (prediction
-            // 0.5 dB) at 176.4 kHz and above. Until that is explained, the verdict must exist at every rate and must
-            // pass up to 96 kHz.
+            // E25 S8e: the prediction window keeps the pre-arrival ringing of the band-limited measured impulse, so the
+            // verdict is "verified" at every rate (it read 1.6 to 2.0 dB against 0.5 dB at 176.4 kHz and above before).
             XCTAssertNotNil(model.verificationSummary, label)
-            if rate <= 96_000 {
-                XCTAssertEqual(model.choices.verificationPassed, true, "\(label): \(model.message ?? "") \(String(describing: model.verificationSummary))")
-            }
+            XCTAssertEqual(model.choices.verificationPassed, true, "\(label): \(model.message ?? "") \(String(describing: model.verificationSummary))")
             model.next()
             XCTAssertEqual(model.step, .save, "\(label): \(model.message ?? "")")
             model.setProfileName("E25 receiver \(Int(rate))")
