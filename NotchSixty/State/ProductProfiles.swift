@@ -576,8 +576,7 @@ struct PlaybackSystemState: Codable, Equatable, Sendable {
     /// E8 S3: source-to-output routing with per-way crossovers. nil (the default) leaves the stored profile
     /// byte-identical; loaded profiles with a legacy physical crossover are migrated on launch (E8 S5).
     var speakerRouting: SpeakerRoutingConfiguration?
-    /// E25 S1: outputs and speaker arrangement. nil (the default) leaves the stored profile byte-identical. With
-    /// `e25.outputs-and-speakers` off the field round-trips untouched and nothing reads it.
+    /// E25 S1: outputs and speaker arrangement. nil (the default) leaves the stored profile byte-identical.
     var systemArrangement: SystemArrangement?
 
     init(
@@ -802,9 +801,6 @@ enum ProductProfileError: Error, LocalizedError {
 
 @MainActor
 final class ProductProfileController: ObservableObject {
-    /// E25 S8c: read through a closure so tests inject the flag; only Swift reads flags.
-    var arrangementFlagEnabled: () -> Bool = { FeatureFlags().isEnabled(.outputsAndSpeakers) }
-
     private struct Archive: Codable {
         static let currentSchemaVersion = 3
         var schemaVersion: Int = currentSchemaVersion
@@ -1907,11 +1903,10 @@ final class ProductProfileController: ObservableObject {
         }
     }
 
-    /// E25 S8c: with `e25.outputs-and-speakers` on, the stored arrangement (migrated from older profiles) is compiled
+    /// E25 S8c: the stored arrangement (migrated from older profiles) is compiled
     /// and its stereo alignment and program fold-down are applied, so a profile load and the launch restore give the
-    /// same graph as the setup wizard. Flag off: nothing changes. Stereo programs have no fold, so the plan is nil.
+    /// same graph as the setup wizard. Stereo programs have no fold, so the plan is nil.
     private func applyStoredArrangement(_ state: PlaybackSystemState) throws {
-        guard arrangementFlagEnabled() else { return }
         let detected = Int(engine.selectedOutputDevice?.outputChannelCount ?? 0)
         guard let arrangement = SystemArrangementMigration.migrated(state, detectedChannelCount: detected)
             .systemArrangement else {

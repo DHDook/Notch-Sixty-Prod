@@ -144,16 +144,10 @@ final class ActiveQuietZoneController: ObservableObject {
             arrangementRefusal: arrangementRefusal)
     }
 
-    /// E25 S8b: whether the stored two-channel arrangement takes part in Quiet Zone readiness and arming. Swift reads
-    /// the flag here; tests replace it.
-    var arrangementEligibilityEnabled: () -> Bool = { FeatureFlags().isEnabled(.outputsAndSpeakers) }
+    /// The stored arrangement of the selected system.
+    var arrangement: SystemArrangement? { profiles.selectedSystemProfile?.state.systemArrangement }
 
-    /// The stored arrangement of the selected system, with the flag on.
-    var arrangement: SystemArrangement? {
-        arrangementEligibilityEnabled() ? profiles.selectedSystemProfile?.state.systemArrangement : nil
-    }
-
-    /// Why the arrangement does not qualify for Quiet Zone (nil when it does, or with the flag off). Shown on the
+    /// Why the arrangement does not qualify for Quiet Zone (nil when it does). Shown on the
     /// readiness card and added as a wait before the lead gate. Never grants anything.
     var arrangementRefusal: String? {
         TwoChannelAncArming.refusal(arrangement: arrangement, budget: feedForwardBudget)

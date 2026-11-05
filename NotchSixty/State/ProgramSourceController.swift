@@ -1,7 +1,7 @@
 import Combine
 import Foundation
 
-// E25 S8b (flag `e25.outputs-and-speakers`): the Speakers-tab control for a wider program source. It writes
+// E25 S8b (flag): the Speakers-tab control for a wider program source. It writes
 // `SystemArrangement.foldDown` and calls `applyProgramFoldDown`. Control plane only (main actor); the capture-time
 // fold itself is the S8a transport.
 
@@ -24,8 +24,6 @@ final class ProgramSourceController: ObservableObject {
 
     private let engine: any ProgramFoldDownEngine
     private let profiles: ProductProfileController
-    /// Swift reads the flag here; tests replace it.
-    var isFlagEnabled: () -> Bool = { FeatureFlags().isEnabled(.outputsAndSpeakers) }
 
     init(engine: any ProgramFoldDownEngine, profiles: ProductProfileController) {
         self.engine = engine
@@ -36,7 +34,7 @@ final class ProgramSourceController: ObservableObject {
 
     /// Shown for the two-channel classes (B to E). Direct multi-output (class A) has its own routing and no fold.
     var isVisible: Bool {
-        guard isFlagEnabled(), let arrangement else { return false }
+        guard let arrangement else { return false }
         return arrangement.arrangementClass != .a
     }
 

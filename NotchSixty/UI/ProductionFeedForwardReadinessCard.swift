@@ -1500,7 +1500,7 @@ struct ProductionFeedForwardReadinessCard: View {
         )
     }
 
-    /// E25 S8b: the speaker arrangement's verdict for Quiet Zone (flag `e25.outputs-and-speakers`). Text only; being
+    /// E25 S8b: the speaker arrangement's verdict for Quiet Zone (flag). Text only; being
     /// eligible grants nothing.
     @ViewBuilder
     private var arrangementNote: some View {

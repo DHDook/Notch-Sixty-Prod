@@ -95,7 +95,7 @@ final class SystemSetupArrangementStepsTests: XCTestCase {
 
     func testSpeakersStepWritesTheProfileAndMeasureSourcesAreTheFeeds() throws {
         for rate in Self.rates {
-            let rig = try OfflineSetupRig(rate: rate, arrangementEnabled: true)
+            let rig = try OfflineSetupRig(rate: rate)
             defer { rig.tearDown() }
             let model = rig.model
             let label = "\(rate) Hz"
@@ -118,7 +118,7 @@ final class SystemSetupArrangementStepsTests: XCTestCase {
 
     func testTwoChannelMonoBassReachesMeasureWithoutAProfile() throws {
         for rate in Self.rates {
-            let rig = try OfflineSetupRig(rate: rate, arrangementEnabled: true, outputChannels: 2)
+            let rig = try OfflineSetupRig(rate: rate, outputChannels: 2)
             defer { rig.tearDown() }
             let model = rig.model
             let label = "\(rate) Hz"
@@ -136,16 +136,8 @@ final class SystemSetupArrangementStepsTests: XCTestCase {
         }
     }
 
-    func testFlagOffKeepsTheTopologyStepAndIgnoresTheArrangement() throws {
-        let rig = try OfflineSetupRig(rate: 48_000, arrangementEnabled: false, outputChannels: 2)
-        defer { rig.tearDown() }
-        rig.model.begin()
-        XCTAssertNil(rig.model.arrangement)
-        XCTAssertTrue(rig.calibration.sources.isEmpty)
-    }
-
     func testCancelRestoresTheStoredArrangement() throws {
-        let rig = try OfflineSetupRig(rate: 48_000, arrangementEnabled: true, outputChannels: 2)
+        let rig = try OfflineSetupRig(rate: 48_000, outputChannels: 2)
         defer { rig.tearDown() }
         let model = rig.model
         model.begin()

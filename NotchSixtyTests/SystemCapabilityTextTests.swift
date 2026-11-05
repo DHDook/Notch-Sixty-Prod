@@ -29,7 +29,7 @@ final class SystemCapabilityTextTests: XCTestCase {
         for (name, p) in classes {
             let a = SystemCapabilityText.arrangement(for: p)!
             for (surface, features) in surfaces {
-                let rows = SystemCapabilityText.rows(features, profile: p, flagEnabled: true, deviceChannelCount: 8)
+                let rows = SystemCapabilityText.rows(features, profile: p, deviceChannelCount: 8)
                 XCTAssertEqual(rows.map(\.feature), features, "\(surface) class \(name)")
                 for row in rows {
                     XCTAssertEqual(row.availability,
@@ -40,18 +40,15 @@ final class SystemCapabilityTextTests: XCTestCase {
         }
     }
 
-    func testFlagOffOrNoArrangementShowsNothing() {
-        for (_, p) in classes {
-            XCTAssertTrue(SystemCapabilityText.rows(SystemCapabilityText.speakersTabFeatures, profile: p, flagEnabled: false).isEmpty)
-        }
-        XCTAssertTrue(SystemCapabilityText.rows(SystemCapabilityText.speakersTabFeatures, profile: nil, flagEnabled: true).isEmpty)
+    func testNoArrangementShowsNothing() {
+        XCTAssertTrue(SystemCapabilityText.rows(SystemCapabilityText.speakersTabFeatures, profile: nil).isEmpty)
     }
 
     func testReceiverReasonsAndRoutingRefusalOnTwoChannels() {
-        let d = SystemCapabilityText.rows([.subAlignment, .speakerRoutingEditor], profile: profile(.downstreamSubCrossover), flagEnabled: true)
+        let d = SystemCapabilityText.rows([.subAlignment, .speakerRoutingEditor], profile: profile(.downstreamSubCrossover))
         XCTAssertEqual(d[0].availability.text, SystemCapabilityMatrix.receiverSetsBass)
         XCTAssertFalse(d[1].availability.isUsable)
-        let a = SystemCapabilityText.rows([.speakerRoutingEditor], profile: classes[0].1, flagEnabled: true)
+        let a = SystemCapabilityText.rows([.speakerRoutingEditor], profile: classes[0].1)
         XCTAssertTrue(a[0].availability.isUsable)
     }
 
@@ -65,18 +62,18 @@ final class SystemCapabilityTextTests: XCTestCase {
         let old = "Enable and configure an output device profile"
         var seen = Set<String>()
         for (name, p) in classes {
-            let r = SystemCapabilityText.profileRequiredReason(profile: p, flagEnabled: true, deviceChannelCount: 8)
+            let r = SystemCapabilityText.profileRequiredReason(profile: p, deviceChannelCount: 8)
             XCTAssertFalse(r.contains(old), name)
             seen.insert(r)
         }
         XCTAssertEqual(seen.count, 3, "describe-first, two-channel, receiver")
-        XCTAssertFalse(SystemCapabilityText.profileRequiredReason(profile: nil, flagEnabled: false).isEmpty)
+        XCTAssertFalse(SystemCapabilityText.profileRequiredReason(profile: nil).isEmpty)
     }
 
     func testReadinessUsesTheArrangementReason() {
         var i = MeasurementReadiness.Inputs(permission: .authorized, hasInputDevice: true, hasOutputDevice: true)
         i.requiresProfile = true; i.hasProfile = false
-        i.profileReason = SystemCapabilityText.profileRequiredReason(profile: profile(.downstreamReceiver, layout: .fiveOne), flagEnabled: true)
+        i.profileReason = SystemCapabilityText.profileRequiredReason(profile: profile(.downstreamReceiver, layout: .fiveOne))
         let r = MeasurementReadiness.evaluate(i)
         XCTAssertEqual(r.reason, i.profileReason)
         XCTAssertEqual(r.fix, .describeSpeakers)

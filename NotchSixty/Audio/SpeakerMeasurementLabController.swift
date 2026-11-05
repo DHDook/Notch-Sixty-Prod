@@ -190,7 +190,7 @@ final class SpeakerMeasurementLabController: ObservableObject {
             requiresProfile: true,
             hasProfile: profiles.selectedSystemProfile?.state.outputDeviceProfile?.enabled == true,
             profileReason: SystemCapabilityText.profileRequiredReason(
-                profile: profiles.selectedSystemProfile, flagEnabled: FeatureFlags().isEnabled(.outputsAndSpeakers),
+                profile: profiles.selectedSystemProfile,
                 deviceChannelCount: Int(engine.selectedOutputDevice?.outputChannelCount ?? 0)),
             requiresWork: true,
             hasWork: session != nil && nextStep != nil,

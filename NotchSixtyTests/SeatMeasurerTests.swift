@@ -16,7 +16,7 @@ final class SeatMeasurerTests: XCTestCase {
 
     /// A rig with three seats, each with its own channel of the reference interface when `perSeat`.
     private func makeRig(rate: Double, perSeat: Bool, calibrations: [Int: RoomCorrectionMicrophoneCalibration] = [:]) throws -> OfflineSetupRig {
-        let rig = try OfflineSetupRig(rate: rate, arrangementEnabled: true)
+        let rig = try OfflineSetupRig(rate: rate)
         rig.chooseTwoPointOneThroughWizard()
         rig.calibration.prepareForUse()
         while rig.calibration.seats.count < 3 { try rig.calibration.addSeat() }
@@ -249,11 +249,7 @@ final class SeatMeasurerTests: XCTestCase {
             let rig = try makeRig(rate: rate, perSeat: true)
             defer { rig.tearDown() }
             let model = rig.model
-            model.begin()
-            model.chooseOutput(uid: OfflineSetupRig.outputUID)
-            model.next()
-            model.chooseTopology(.twoPointOne)
-            model.next()
+            rig.chooseTwoPointOneThroughWizard()
             model.selectMicrophone(uid: OfflineSetupRig.inputUID)
             model.acceptSweepLevel(measuredSPLdBC: 75)
             model.next()

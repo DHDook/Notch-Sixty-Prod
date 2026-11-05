@@ -286,12 +286,6 @@ final class SystemArrangementTests: XCTestCase {
         XCTAssertThrowsError(try JSONDecoder().decode(SystemArrangement.self, from: data))
     }
 
-    func testFlagIsRegisteredAndOffByDefault() {
-        XCTAssertTrue(FeatureFlag.all.contains(.outputsAndSpeakers))
-        XCTAssertFalse(FeatureFlag.outputsAndSpeakers.defaultEnabled)
-        XCTAssertEqual(FeatureFlag.outputsAndSpeakers.id, "e25.outputs-and-speakers")
-    }
-
     // MARK: Capability matrix
 
     private func oneOfEachClass() -> [SystemArrangement.Class: SystemArrangement] {

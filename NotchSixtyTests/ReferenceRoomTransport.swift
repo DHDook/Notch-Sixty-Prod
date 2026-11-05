@@ -290,7 +290,7 @@ struct OfflineSetupRig {
     static let secondInputUID = "e24-reference-mic-b"
 
     init(rate: Double, permission: MicrophonePermissionStatus = .authorized, seats: Int = 3, secondMicrophone: Bool = false,
-         arrangementEnabled: Bool = false, outputChannels: Int = 6) throws {
+         outputChannels: Int = 6) throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("NotchSixty-E24S0-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
@@ -337,7 +337,6 @@ struct OfflineSetupRig {
                     try transports.make(program: program, inputChannel: inputChannel, outputChannel: outputChannel)
                 }
             })
-        calibration.arrangementMeasurementEnabled = { arrangementEnabled }
         model = SystemSetupFlowModel(
             engine: engine, profiles: profiles, microphone: microphone, calibration: calibration,
             services: ProductionSystemSetupServices.production(
@@ -353,12 +352,11 @@ struct OfflineSetupRig {
                 levelTransport: levelTransports.factory, trialPlayback: trialPlayer, abx: abxPlayer),
             sessions: SystemSetupSessionStore(directory: root.appendingPathComponent("sessions")),
             roomProjectsDirectory: root.appendingPathComponent("RoomCorrection"),
-            abxDirectory: root.appendingPathComponent("ABX"),
-            arrangementEnabled: arrangementEnabled)
+            abxDirectory: root.appendingPathComponent("ABX"))
     }
 
     /// A stereo pair plus one subwoofer on the reference interface (2.1), reached through the wizard's Output and
-    /// Speakers steps (E25 S8c: replaces the profile shortcut). The rig must be built with `arrangementEnabled: true`.
+    /// Speakers steps (E25 S8c: replaces the profile shortcut).
     /// Leaves the model on the Topology (Bass) step; callers continue from there or cancel.
     func chooseTwoPointOneThroughWizard() {
         model.begin()
