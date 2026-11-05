@@ -123,7 +123,7 @@ enum RoomCorrectionPostApplyVerifier {
         sampleRate: Double, criteria: RoomCorrectionPostApplyCriteria
     ) throws -> RoomCorrectionBandedResponse {
         let room = try bandedResponse(
-            impulse: roomImpulse, originFrame: roomArrivalFrames, preFrames: 0, sampleRate: sampleRate, criteria: criteria)
+            impulse: roomImpulse, originFrame: roomArrivalFrames, preFrames: Int(0.005 * sampleRate), sampleRate: sampleRate, criteria: criteria)
         let centres = room.centres
         let eps = 0.002
         let lower = centres.map { $0 * (1 - eps) }, upper = centres.map { $0 * (1 + eps) }

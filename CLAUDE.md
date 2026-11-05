@@ -8,7 +8,7 @@
   builds one slice in a fresh context), realtime-reviewer (Sonnet), and code-scout,
   build-test-runner, plan-tracker, pr-writer (Haiku). `/next` itself runs on Sonnet.
 
-**Current focus:** E25 (outputs and speaker arrangement), S8d PR open (flag removed); S8e high-rate receiver verify remains
+**Current focus:** E25 (outputs and speaker arrangement), S8e high-rate receiver verify, PR open; remaining: the unchecked audit-gap/ledger item in S8d
 <!-- plan-tracker keeps the line above current -->
 
 @AGENTS.md
