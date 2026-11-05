@@ -205,6 +205,9 @@ fi
 # E4 S14: dead-man lease on the anti-noise in the render kernel.
 # shellcheck disable=SC2086
 harness e4_engine_lease "${STRICT[@]}" -O2 -include stddef.h -I"$RT" ci/harness_e4_engine_lease.c $ALL_RT_NO_BRIDGE -framework Accelerate -lc++
+# E26 S1: tonal anti-noise bypasses the stereo crossover on the legacy kernel (class C is not a sub for Quiet Zone).
+# shellcheck disable=SC2086
+harness e26_anc_bypass "${STRICT[@]}" -O2 -include stddef.h -I"$RT" ci/harness_e26_anc_bypass.c $ALL_RT_NO_BRIDGE -framework Accelerate -lc++
 # E4 S15: live howl guard in the render kernel.
 # shellcheck disable=SC2086
 harness e4_howl_guard_live "${STRICT[@]}" -O2 -include stddef.h -I"$RT" ci/harness_e4_howl_guard_live.c $ALL_RT_NO_BRIDGE -framework Accelerate
@@ -235,6 +238,16 @@ if selected e4_acoustic_twin; then
     else
         failed+=(e4_acoustic_twin)
     fi
+fi
+# E26 S1: the twin's downstream-sub and app-splitter bass-path models.
+if selected e26_bass_path; then
+    echo "::group::e26_bass_path"
+    if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -Ici ci/harness_e26_bass_path.cpp -o "$OUT/e26_bass_path" && "$OUT/e26_bass_path"; then
+        passed+=(e26_bass_path)
+    else
+        failed+=(e26_bass_path)
+    fi
+    echo "::endgroup::"
 fi
 # E4 S18a: remote tonal worker core (microphone blocks on host time) on the acoustic twin.
 # SOAK=1 adds the one-hour drift soak.

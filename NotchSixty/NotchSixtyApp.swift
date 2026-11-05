@@ -155,6 +155,7 @@ final class ProductController: ObservableObject {
             profiles: profiles,
             ambient: ambientCompensation
         )
+        activeQuietZone.subAwareAncEnabled = FeatureFlags().isEnabled(.subAwareAnc)
         self.activeQuietZone = activeQuietZone
         if adaptiveTonalLive {
             activeQuietZone.attachAdaptiveLive(AdaptiveTonalLiveCoordinator(
@@ -290,6 +291,7 @@ final class ProductController: ObservableObject {
             profiles: profiles,
             ambient: ambientCompensation
         )
+        activeQuietZone.subAwareAncEnabled = FeatureFlags().isEnabled(.subAwareAnc)
         self.activeQuietZone = activeQuietZone
         self.adaptiveQuietZone = AdaptiveQuietZoneShadow(
             quietZone: activeQuietZone,

@@ -27,6 +27,8 @@ struct FeedForwardLiveQuietZoneFacts: Equatable, Sendable {
     var budget: QuietZoneFeedForwardBudget
     /// A subwoofer or bass management is active: not available yet (owner decision of 3 Nov 2026, question 18).
     var subwooferActive = false
+    /// E26 S1: a receiver or powered sub is downstream and its bass handling is not declared. Always on, not flag-gated.
+    var receiverBassUndeclared = false
     /// E25 S8b (`e25.outputs-and-speakers`): why the two-channel arrangement does not qualify yet (the measured feed,
     /// including any receiver, against the survey preview). nil with the flag off or when it qualifies. Eligible
     /// grants nothing; a reason only adds a wait.
@@ -161,7 +163,7 @@ struct FeedForwardLiveArmingPolicy: Equatable, Sendable {
     /// The user's request. False (and why) unless Quiet Zone is armed and the filter is off.
     mutating func request(quietZone: FeedForwardLiveQuietZoneFacts, now: Double) -> Bool {
         guard phase == .off, quietZone.armed, quietZone.sampleRate != nil, quietZone.outputDeviceUID != nil,
-              !quietZone.subwooferActive
+              !quietZone.subwooferActive, !quietZone.receiverBassUndeclared
         else {
             return false
         }
@@ -294,6 +296,7 @@ struct FeedForwardLiveArmingPolicy: Equatable, Sendable {
 
     private func commonBreak(_ quietZone: FeedForwardLiveQuietZoneFacts) -> FeedForwardLiveOffReason? {
         guard quietZone.armed else { return .quietZoneDisarmed }
+        if quietZone.receiverBassUndeclared { return .engineRefused(TwoChannelAncArming.undeclaredReceiverRefusal) }
         if quietZone.subwooferActive { return .engineRefused("not available with a subwoofer yet") }
         if quietZone.outputDeviceUID != anchorUID { return .environmentChanged }
         guard let rate = quietZone.sampleRate, let was = anchorRate, abs(rate - was) < 0.5 else {
@@ -347,7 +350,9 @@ final class FeedForwardLiveArmingController: ObservableObject {
     func request(quietZone: FeedForwardLiveQuietZoneFacts) -> Bool {
         let accepted = policy.request(quietZone: quietZone, now: clock())
         if !accepted {
-            statusMessage = quietZone.subwooferActive
+            statusMessage = quietZone.receiverBassUndeclared
+                ? TwoChannelAncArming.undeclaredReceiverRefusal
+                : quietZone.subwooferActive
                 ? "Feed-forward is not available with a subwoofer yet."
                 : quietZone.armed
                 ? "Feed-forward is already on."

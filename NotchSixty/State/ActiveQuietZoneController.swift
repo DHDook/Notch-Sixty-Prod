@@ -29,6 +29,8 @@ enum ActiveQuietZoneControllerError:
     case frequencySetChanged
     case runtimeTargetLost
     case verificationRegression
+    /// E26 S1: a receiver or powered sub is downstream and how it handles bass is not declared.
+    case receiverBassUndeclared
 
     var errorDescription: String? {
         switch self {
@@ -51,6 +53,8 @@ enum ActiveQuietZoneControllerError:
             return "The realtime Quiet Zone target was removed by a route or headroom safety gate."
         case .verificationRegression:
             return "The physical error microphone measured a cancellation regression, so Active Quiet Zone was fault-faded and latched."
+        case .receiverBassUndeclared:
+            return TwoChannelAncArming.undeclaredReceiverRefusal
         }
     }
 }
@@ -140,8 +144,26 @@ final class ActiveQuietZoneController: ObservableObject {
             outputDeviceUID: engine.routeConfiguration.selectedOutputUID,
             sampleRate: engine.liveTreatmentSampleRate,
             budget: feedForwardBudget,
-            subwooferActive: engine.subwooferActive || (arrangement?.hasDownstreamSubwoofer ?? false),
+            subwooferActive: subwooferActiveForAnc,
+            receiverBassUndeclared: receiverBassUndeclared,
             arrangementRefusal: arrangementRefusal)
+    }
+
+    /// E26 flag `e26.sub-aware-anc`, set at construction. Only Swift reads it.
+    var subAwareAncEnabled = false
+
+    /// A downstream receiver or sub whose bass handling is not declared (E26 S1, always on).
+    var receiverBassUndeclared: Bool {
+        guard let arrangement else { return false }
+        return arrangement.hasDownstreamSubwoofer && !arrangement.receiverBass.isDeclared
+    }
+
+    /// A sub is in the anti-noise path. Under the E26 flag mono bass on the pair (class C) is not one: the anti-noise
+    /// is added after the crossover and bypasses it.
+    var subwooferActiveForAnc: Bool {
+        if arrangement?.hasDownstreamSubwoofer ?? false { return true }
+        if subAwareAncEnabled, arrangement?.bass == .dspMonoToMains { return false }
+        return engine.subwooferActive
     }
 
     /// The stored arrangement of the selected system.
@@ -637,6 +659,7 @@ final class ActiveQuietZoneController: ObservableObject {
     /// `false` disarms with a ramped stop. The armed state is never persisted.
     func setEnabled(_ enabled: Bool) throws {
         if enabled {
+            if receiverBassUndeclared { throw ActiveQuietZoneControllerError.receiverBassUndeclared }
             // E4 S15: a trip latched in an earlier arm must not keep the new one silent.
             engine.rearmHowlGuard()
             try arm.arm(environment: liveTreatmentEnvironment())

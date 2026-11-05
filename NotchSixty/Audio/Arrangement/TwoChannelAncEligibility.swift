@@ -75,12 +75,18 @@ extension SystemArrangement {
 
 enum TwoChannelAncArming {
     static let subwooferRefusal = "not available with a subwoofer yet"
+    /// E26 S1: always on, not flag-gated. The caps cannot be trusted without knowing how the receiver handles bass.
+    static let undeclaredReceiverRefusal = "Tell Notch Sixty how your receiver handles bass."
 
     /// What the Quiet Zone readiness card and the arming policy show for the stored arrangement. nil: nothing to add
-    /// (no arrangement, or the flag is off). A downstream sub refuses first; otherwise an eligibility refusal.
+    /// (no arrangement). A downstream sub refuses first (asking for the receiver declaration while it is missing);
+    /// otherwise an eligibility refusal.
     static func refusal(arrangement: SystemArrangement?, budget: QuietZoneFeedForwardBudget) -> String? {
         guard let arrangement else { return nil }
-        if arrangement.hasDownstreamSubwoofer { return "Quiet Zone is \(subwooferRefusal)." }
+        if arrangement.hasDownstreamSubwoofer {
+            return arrangement.receiverBass.isDeclared
+                ? "Quiet Zone is \(subwooferRefusal)." : undeclaredReceiverRefusal
+        }
         if case .refused(let reason) = TwoChannelAncEligibility.evaluate(
             arrangement: arrangement, feedLatencyUpperBoundSeconds: budget.antiNoisePathSeconds,
             conservativePreviewSeconds: budget.conservativePreviewSeconds) {
