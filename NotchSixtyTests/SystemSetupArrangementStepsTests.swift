@@ -113,6 +113,9 @@ final class SystemSetupArrangementStepsTests: XCTestCase {
             XCTAssertTrue(rig.profiles.selectedSystemProfile?.state.bassManagement.enabled == true, label)
             XCTAssertNotNil(rig.profiles.selectedSystemProfile?.state.systemArrangement, label)
             XCTAssertEqual(rig.calibration.sources.count, 3, label)
+            // The sub output is fed by bass management, so the level lanes are the two program feeds only.
+            XCTAssertEqual(model.noiseChannels.map(\.index), [0, 1], "\(label): level lanes follow the arrangement written by the flow")
+            XCTAssertFalse(model.noiseChannels.contains { $0.isLFE }, label)
         }
     }
 
@@ -131,6 +134,8 @@ final class SystemSetupArrangementStepsTests: XCTestCase {
             XCTAssertNil(rig.profiles.selectedSystemOutputDeviceProfile, label)
             XCTAssertTrue(rig.profiles.selectedSystemProfile?.state.bassManagement.enabled == true, label)
             XCTAssertEqual(rig.calibration.sources, [.speaker(.frontLeft), .speaker(.frontRight)], label)
+            XCTAssertEqual(model.noiseChannels.map(\.index), [0, 1], "\(label): two feeds, two level lanes")
+            XCTAssertFalse(model.noiseChannels.contains { $0.isLFE }, label)
             XCTAssertNotNil(rig.calibration.profile, label)
             XCTAssertNil(rig.calibration.storedProfile, label)
         }
