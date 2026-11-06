@@ -185,6 +185,35 @@ final class FeedForwardEchoFlowTests: XCTestCase {
         XCTAssertTrue(shadow.echoBlockedReason(inputs)?.contains("subwoofer") == true)
     }
 
+    /// E26 S2: with a sub active, leakage measured through the whole feed lifts the S22b rule under the flag only,
+    /// and only while the bass setup still matches the one it was measured under.
+    @MainActor
+    func testSubAwareEchoRuleNeedsFlagFreshFingerprintAndSub() throws {
+        let rate = 48_000.0
+        let base = impulse(rate: rate, delaySeconds: 0.01, gain: 0.05)
+        let model = try FeedForwardEchoModelBuilder.build(
+            left: [base], right: [base], nativeSampleRate: rate, capturedAt: Date())
+        var inputs = try XCTUnwrap(Self.minimalInputs(echo: model))
+        let shadow = QuietZoneFeedForwardShadow(pollsAutomatically: false)
+        let source = RecordingDriveSource()
+        shadow.driveSource = source
+        shadow.forceEchoForTesting = true
+        source.subwoofer = true
+        let splitter = BassManagementConfiguration(enabled: true)
+        let state = AncBassPathState.resolve(arrangement: nil, bassManagement: splitter)
+        inputs.bassPath = state
+        inputs.echoBassFingerprint = state.fingerprint
+        XCTAssertTrue(shadow.echoBlockedReason(inputs)?.contains("subwoofer") == true, "flag off: unchanged")
+        shadow.forceSubAwareForTesting = true
+        XCTAssertNil(shadow.echoBlockedReason(inputs), "fresh combined leakage lifts the rule")
+        inputs.echoBassFingerprint = AncBassPathFingerprint(value: "other")
+        XCTAssertEqual(shadow.echoBlockedReason(inputs), AncBassPathState.staleMessage)
+        inputs.echoBassFingerprint = nil
+        XCTAssertEqual(shadow.echoBlockedReason(inputs), AncBassPathState.staleMessage, "unstamped with a sub is stale")
+        inputs.bassPath = nil
+        XCTAssertTrue(shadow.echoBlockedReason(inputs)?.contains("subwoofer") == true)
+    }
+
     // MARK: Engine end to end
 
     private struct Run {
