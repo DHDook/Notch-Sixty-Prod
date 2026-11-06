@@ -152,9 +152,14 @@ struct UnifiedGraphConfiguration: Equatable, Sendable {
     var programDSP: UnifiedGraphProgramDSP?
     /// E8 S3: speaker routing (ROUTE, XOVER and per-output delay and protection). nil leaves the graph exactly as before.
     var routing: UnifiedGraphRouting?
+    /// E26 S6a: ANC guard, inject and capture stages with the sub lane as an actuator. nil leaves the graph as before.
+    /// The anti-noise source and error lanes are appended after every other lane (see `ancLaneBase`).
+    var ancActuators: UnifiedGraphAncActuators?
 
     var subwooferCount: Int { bassManagement?.subwoofers.count ?? 0 }
-    var channelCount: Int { lanes.count + subwooferCount + (routing?.outputLaneCount ?? 0) }
+    /// First appended ANC lane: the lanes the graph had before the actuators were added.
+    var ancLaneBase: Int { lanes.count + subwooferCount + (routing?.outputLaneCount ?? 0) }
+    var channelCount: Int { ancLaneBase + (ancActuators?.appendedLaneCount ?? 0) }
 
     static let maxSubwoofers = 8
 
@@ -377,6 +382,7 @@ struct UnifiedGraphConfiguration: Equatable, Sendable {
             denoiserPark: stereo.denoiser == nil ? denoiserPark : nil
         )
         try programDSP?.apply(to: &spec)
+        try ancActuators?.apply(to: &spec, existingLanes: ancLaneBase)
         if spec.stages.count > UnifiedGraphProgramDSP.maxStages { throw UnifiedGraphFallbackReason.stageBudget }
         return spec
     }

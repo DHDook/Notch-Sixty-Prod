@@ -312,13 +312,16 @@ it, behind `e26.sub-aware-anc`. Live output stays behind the per-feature arm.
 
 - [~] Bass-path model, fingerprint and plain measurement record; receiver bass declaration (open preout or calibrated LFE out) with a setup note, refusing only when undeclared; mono bass on the pair no longer counts as a sub; acoustic twin with a sub
 - [~] Secondary path and leakage measured through the whole feed; anti-noise latency per band; echo set with a sub (absorbs E4 S22c). Built dark: per-band delay, per-band eligibility, open-preout check and sub-aware echo rule; S2b (#365) built dark the leakage sweep, its fingerprint stamp and the echo inputs under the flag. Remainder: S2c (secondary-path sweep, splitter rendering, position-model stamp, 20 dB echo twin test) and S5 (arming)
-  - [~] S2c `e26/through-feed-splitter-render` (#366): built dark the splitter-rendered through-feed sweep, position-model stamp and 20 dB echo twin test; not wired to hardware outputs (owner slice S6 transport and sub lane); bench: E22
+  - [~] S2c `e26/through-feed-splitter-render` (#366): built dark the splitter-rendered through-feed sweep, position-model stamp and 20 dB echo twin test; not wired to hardware outputs (S6a built the transport dark; S6b wires it); bench: E22
 - [ ] Conditioned L/R design where both channels share the sub (common-mode constraint), tonal and feed-forward
   - [~] S3b `e26/rank-one-bass-wiring` (PR pending): built behind `e26.sub-aware-anc`; bench: E22
   - [~] S4 `e26/sub-safety` (#368): receiver excursion caps, measured summing law, bass-path watch and combined-leakage bound behind `e26.sub-aware-anc`; bench: E22
 - [ ] Sub safety: receiver crossover in the excursion caps, path-gain watch that disarms, combined leakage stability bound
 - [~] Sub-aware readiness replaces the blanket refusal; setup UI; end-to-end twin harness at eight rates
   - [~] S5 `e26/sub-aware-arming` (PR pending): `SubAwareAncReadiness` feeds tonal `setEnabled` and feed-forward stepWaiting/stepPlaying (`subAwareRefusal`); setup card `ProductionSubAwareQuietZoneCard`; missing plant and multi-seat sub refused; twin harness at eight rates through UI-model calls, survey-to-arm twin wired by S6; bench: E22
+  - [~] S6a `e26/sub-multibus-transport` (PR pending)
+  - [ ] S6b `e26/sub-readiness-from-sweeps`
+  - [ ] S6c `e26/sub-multiseat-plant`
 - [ ] Quiet Zone with a sub on its own output (profile session, sub lane as an actuator)
   - [ ] S6: run `OpenPreoutCheck` on measured sweeps and set `openPreoutRefusal` (nil today, so open preout is not verified against the measurement)
   - [ ] S6: feed `PerBandAncEligibility` (`feedForwardBandCount`, nil today) from `CombinedPathBandAnalyzer` into readiness
