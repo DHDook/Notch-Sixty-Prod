@@ -15,11 +15,17 @@ enum TwoChannelAncEligibility: Equatable, Sendable {
         arrangement: SystemArrangement,
         feedLatencyUpperBoundSeconds: Double?,
         conservativePreviewSeconds: Double?,
-        requiredReserveSeconds: Double = QuietZoneFeedForwardBudgetAnalyzer.requiredReserveSeconds
+        requiredReserveSeconds: Double = QuietZoneFeedForwardBudgetAnalyzer.requiredReserveSeconds,
+        allowClassA: Bool = false
     ) -> TwoChannelAncEligibility {
         switch arrangement.arrangementClass {
         case .a:
-            return .refused(reason: "Quiet Zone runs on the two-channel session; a separate output per speaker ends it.")
+            // E26 S7c: with sub-aware ANC on, the v1 shape (two mains and one sub output) is let through.
+            if allowClassA {
+                if !arrangement.isTwoMainsOneSub { return .refused(reason: TwoChannelAncArming.classAShapeRefusal) }
+            } else {
+                return .refused(reason: "Quiet Zone runs on the two-channel session; a separate output per speaker ends it.")
+            }
         case .b, .c, .d, .e:
             break
         }
@@ -73,7 +79,17 @@ extension SystemArrangement {
     }
 }
 
+extension SystemArrangement {
+    /// E26 S7c: the one direct multi-output shape Quiet Zone supports in v1: a stereo pair of mains plus exactly one sub
+    /// output that the DSP drives through bass management.
+    var isTwoMainsOneSub: Bool {
+        arrangementClass == .a && layout == .stereo && bass == .dspToSubOutputs && outputs.channelsInUse >= 3
+            && subOutputs.count == 1
+    }
+}
+
 enum TwoChannelAncArming {
+    static let classAShapeRefusal = "Quiet Zone supports two speakers and one subwoofer output."
     static let subwooferRefusal = "not available with a subwoofer yet"
     /// E26 S1: always on, not flag-gated. The caps cannot be trusted without knowing how the receiver handles bass.
     static let undeclaredReceiverRefusal = "Tell Notch Sixty how your receiver handles bass."
@@ -91,7 +107,7 @@ enum TwoChannelAncArming {
         }
         if case .refused(let reason) = TwoChannelAncEligibility.evaluate(
             arrangement: arrangement, feedLatencyUpperBoundSeconds: budget.antiNoisePathSeconds,
-            conservativePreviewSeconds: budget.conservativePreviewSeconds) {
+            conservativePreviewSeconds: budget.conservativePreviewSeconds, allowClassA: subAware) {
             return reason
         }
         return nil

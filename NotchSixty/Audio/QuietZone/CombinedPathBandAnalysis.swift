@@ -112,7 +112,8 @@ struct PerBandAncEligibility: Equatable, Sendable {
 
     static func evaluate(
         arrangement: SystemArrangement, bands: [CombinedPathBand], conservativePreviewSeconds: Double?,
-        requiredReserveSeconds: Double = QuietZoneFeedForwardBudgetAnalyzer.requiredReserveSeconds
+        requiredReserveSeconds: Double = QuietZoneFeedForwardBudgetAnalyzer.requiredReserveSeconds,
+        allowClassA: Bool = false
     ) -> PerBandAncEligibility {
         PerBandAncEligibility(bands: bands.map { band in
             guard let delay = band.delaySeconds else {
@@ -123,7 +124,8 @@ struct PerBandAncEligibility: Equatable, Sendable {
             // The path's delay is the whole feed's latency for this band.
             let result = TwoChannelAncEligibility.evaluate(
                 arrangement: arrangement, feedLatencyUpperBoundSeconds: max(0, delay),
-                conservativePreviewSeconds: conservativePreviewSeconds, requiredReserveSeconds: requiredReserveSeconds)
+                conservativePreviewSeconds: conservativePreviewSeconds, requiredReserveSeconds: requiredReserveSeconds,
+                allowClassA: allowClassA)
             return Band(centerHz: band.centerHz, delaySeconds: delay, result: result)
         })
     }

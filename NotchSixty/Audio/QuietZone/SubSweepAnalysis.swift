@@ -52,6 +52,11 @@ struct SubSweepReport: Equatable, Sendable {
     var eligibility: PerBandAncEligibility
     /// Why the splitter render cannot be trusted, or nil.
     var renderUnverifiedMessage: String?
+    /// E26 S7c (class A): the measured combined seat path per feed, which is the plant the design uses, and the
+    /// stored records. Nil and empty elsewhere (the Room Correction position is the plant).
+    var seatLeft: RoomCorrectionChannelMeasurement? = nil
+    var seatRight: RoomCorrectionChannelMeasurement? = nil
+    var records: [CombinedAncPathRecord] = []
 
     var feedForwardBandCount: Int { eligibility.feedForwardBandsHz.count }
 }
@@ -125,7 +130,8 @@ enum SubSweepAnalyzer {
             return band
         }
         let eligibility = PerBandAncEligibility.evaluate(
-            arrangement: arrangement, bands: slower, conservativePreviewSeconds: conservativePreviewSeconds)
+            arrangement: arrangement, bands: slower, conservativePreviewSeconds: conservativePreviewSeconds,
+            allowClassA: path.path == .subOutput)
         return SubSweepReport(
             fingerprint: path.fingerprint, sampleRate: sampleRate, leftBands: left, rightBands: right,
             verification: verification, openPreoutRefusal: preout, eligibility: eligibility,

@@ -263,7 +263,7 @@ final class ActiveQuietZoneController: ObservableObject {
         objectWillChange.send()
     }
 
-    private var freshSubSweepReport: SubSweepReport? {
+    var freshSubSweepReport: SubSweepReport? {
         guard let report = subSweepReport, case .fresh = ancBassPathState.freshness(of: report.fingerprint) else { return nil }
         return report
     }

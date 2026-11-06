@@ -26,6 +26,9 @@ struct ProductionSubAwareQuietZoneCard: View {
                         .disabled(survey.activity != .idle)
                     Text(survey.message).font(.caption).foregroundStyle(.secondary)
                 }
+                if quietZone.ancBassPathState.path == .subOutput {
+                    Text("\(SubPathMeasurement.timeNote) Stop playback first.").font(.caption).foregroundStyle(.secondary)
+                }
                 Text(SubAwareQuietZoneText.advice).font(.caption).foregroundStyle(.secondary)
                 if let readout = quietZone.bassConditioningReadout {
                     Label(readout, systemImage: "waveform.path").font(.caption).foregroundStyle(.secondary)

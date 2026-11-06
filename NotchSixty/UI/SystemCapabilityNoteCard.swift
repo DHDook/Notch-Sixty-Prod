@@ -13,7 +13,7 @@ struct SystemCapabilityNoteCard: View {
     private var rows: [SystemCapabilityText.Row] {
         SystemCapabilityText.rows(
             features, profile: profiles.selectedSystemProfile,
-            deviceChannelCount: deviceChannelCount)
+            deviceChannelCount: deviceChannelCount, subAwareQuietZone: FeatureFlags().isEnabled(.subAwareAnc))
     }
 
     var body: some View {

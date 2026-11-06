@@ -123,7 +123,8 @@ struct AncBassPathState: Equatable, Sendable {
         } else {
             path = splitter(bassManagement)
         }
-        return AncBassPathState(path: path, fingerprint: fingerprint(path: path, arrangement: arrangement))
+        return AncBassPathState(
+            path: path, fingerprint: fingerprint(path: path, arrangement: arrangement, splitter: bassManagement))
     }
 
     private static func splitter(_ bass: BassManagementConfiguration?) -> AncBassPath {
@@ -134,12 +135,21 @@ struct AncBassPathState: Equatable, Sendable {
     /// SHA-256 over a canonical JSON of the path tag, the splitter fields (when the path is the app splitter) and the
     /// whole arrangement (its outputs, layout, bass, subs, feed calibration, mono-bass filter and receiver
     /// declaration), so every splitter field and every arrangement edit changes it.
-    static func fingerprint(path: AncBassPath, arrangement: SystemArrangement?) -> AncBassPathFingerprint {
+    ///
+    /// E26 S7c: the direct-output path (class A) also hashes the splitter configuration (the bass the DSP sends to the
+    /// sub output) and a version tag, so a record from before S7c, or measured under other bass settings, reads stale.
+    static func fingerprint(
+        path: AncBassPath, arrangement: SystemArrangement?, splitter: BassManagementConfiguration? = nil
+    ) -> AncBassPathFingerprint {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
         var data = Data(path.tag.utf8)
         if case .appSplitter(let bass) = path, let json = try? encoder.encode(bass) { data.append(json) }
         if let arrangement, let json = try? encoder.encode(arrangement) { data.append(json) }
+        if case .subOutput = path {
+            data.append(Data("|subOutput-v2".utf8))
+            if let splitter, let json = try? encoder.encode(splitter) { data.append(json) }
+        }
         let digest = SHA256.hash(data: data)
         return AncBassPathFingerprint(value: digest.map { String(format: "%02x", $0) }.joined())
     }
@@ -165,7 +175,7 @@ struct AncBassPathState: Equatable, Sendable {
 /// The plain, documented form of a measurement through the combined path. A later shared room model can absorb it
 /// unchanged (that model stays parked). Offline value; nothing here reaches the engine.
 struct CombinedAncPathRecord: Codable, Equatable, Sendable {
-    static let currentSchemaVersion = 1
+    static let currentSchemaVersion = 2
     /// The band the record covers, hertz.
     static let bandHz = 15.0...500.0
 
@@ -174,7 +184,13 @@ struct CombinedAncPathRecord: Codable, Equatable, Sendable {
         case feedLeft, feedRight
         /// The sub lane of a sub on its own output (class A).
         case subLane
+        /// E26 S7c: one hardware output on its own, measured at the reference microphone, with the splitter's bus
+        /// content for that output (`outputChannel` and `outputRole` say which).
+        case outputLeakage
     }
+
+    /// E26 S7c: the output roles a leakage record can name; any number of outputs may be stored.
+    enum OutputRole: String, Codable, Sendable { case leftMain, rightMain, sub }
 
     enum Destination: String, Codable, Sendable {
         case seatMicrophone, referenceMicrophone
@@ -190,20 +206,27 @@ struct CombinedAncPathRecord: Codable, Equatable, Sendable {
     var sampleRate: Double
     var fingerprint: AncBassPathFingerprint
     var impulseResponse: [Float]
+    /// E26 S7c (schema 2): which hardware output a `.outputLeakage` record belongs to; nil for the older sources.
+    var outputChannel: Int?
+    var outputRole: OutputRole?
 
     var isValid: Bool {
         schemaVersion >= 1 && schemaVersion <= Self.currentSchemaVersion
             && bandLowHz.isFinite && bandHighHz.isFinite && bandLowHz >= Self.bandHz.lowerBound
             && bandHighHz <= Self.bandHz.upperBound && bandLowHz < bandHighHz
             && windowSeconds.isFinite && windowSeconds > 0 && sampleRate.isFinite && sampleRate > 0
+            && (source != .outputLeakage || (schemaVersion >= 2 && (outputChannel ?? -1) >= 0 && outputRole != nil))
             && !impulseResponse.isEmpty && impulseResponse.allSatisfy(\.isFinite)
             && Double(impulseResponse.count) / sampleRate <= windowSeconds + 1.0 / sampleRate
     }
 
     init(
         source: Source, destination: Destination, windowSeconds: Double, sampleRate: Double,
-        fingerprint: AncBassPathFingerprint, impulseResponse: [Float]
+        fingerprint: AncBassPathFingerprint, impulseResponse: [Float],
+        outputChannel: Int? = nil, outputRole: OutputRole? = nil
     ) {
+        self.outputChannel = outputChannel
+        self.outputRole = outputRole
         self.source = source
         self.destination = destination
         self.windowSeconds = windowSeconds
@@ -224,6 +247,8 @@ struct CombinedAncPathRecord: Codable, Equatable, Sendable {
         sampleRate = try c.decode(Double.self, forKey: .sampleRate)
         fingerprint = try c.decode(AncBassPathFingerprint.self, forKey: .fingerprint)
         impulseResponse = try c.decode([Float].self, forKey: .impulseResponse)
+        outputChannel = try c.decodeIfPresent(Int.self, forKey: .outputChannel)
+        outputRole = try c.decodeIfPresent(OutputRole.self, forKey: .outputRole)
         guard isValid else {
             throw DecodingError.dataCorruptedError(
                 forKey: .schemaVersion, in: c, debugDescription: "invalid combined ANC path record")
