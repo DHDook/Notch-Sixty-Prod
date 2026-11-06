@@ -323,12 +323,13 @@ it, behind `e26.sub-aware-anc`. Live output stays behind the per-feature arm.
   - [~] S6a `e26/sub-multibus-transport` (#370)
   - [~] S6b `e26/sub-readiness-from-sweeps` (#372): open-preout check, per-band eligibility and sub-band render verification feed readiness behind `e26.sub-aware-anc`; multi-bus profile-session passes and the `measureSubPath` harness move to S7
   - [~] S6c `e26/sub-multiseat-plant` (#373): measured per-seat 2x2 plant in the spatial planner, conditioning and the stricter-of rule in the controller, behind `e26.sub-aware-anc`; driving the multi-seat branch through production wiring moves to S7 (G12)
+  - [~] S7b1 `e26/profile-anc-host-feed`: N60AncLaneFeed host feed, shared splitter header and harness, built dark; wiring (S7b2) and sub measurement (S7c) follow
 - [ ] Quiet Zone with a sub on its own output (profile session, sub lane as an actuator)
   - [~] S6: run `OpenPreoutCheck` on measured sweeps and set `openPreoutRefusal` (S6b, behind the flag)
   - [~] S6: feed `PerBandAncEligibility` (`feedForwardBandCount`) from `CombinedPathBandAnalyzer` into readiness (S6b, behind the flag)
   - [~] S6: multi-seat sub support with a measured per-seat 2x2 plant (S6c, behind the flag; built dark)
   - [ ] S6: full end-to-end twin harness from sweeps
-  - [~] S7 `e26/ship` (#374), part 1: `e26.sub-aware-anc` defaults on, G5 and G12 closed; G1 host feed and G9 open, so S7 is not ticked and the flag stays
+  - [~] S7 `e26/ship` (#374), part 1: `e26.sub-aware-anc` defaults on, G5 and G12 closed; G1 host feed open (G9 closed in S7c), so S7 is not ticked and the flag stays
   - [x] S7c `e26/profile-sub-measurement` (PR #377): class A sub measurement (two seat passes, nine leakage passes, per-output leakage, record schema 2) reachable from the sub button under `e26.sub-aware-anc`; class A arming waits for S7b; bench: E22
 - [ ] Flag removed after the E22 sub bench checks (owner decision)
 
