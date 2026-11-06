@@ -653,7 +653,7 @@ final class QuietZoneFeedForwardShadow: ObservableObject {
         if driveSource.subwooferActive {
             // E26 S2 (E4 S22c): under the flag, leakage measured through the whole feed with the same bass setup
             // describes the programme. Without the flag, or with a stale or unstamped record, it stays off.
-            guard FeatureFlags().isEnabled(.subAwareAnc) || forceSubAwareForTesting else {
+            guard forceSubAwareForTesting ?? FeatureFlags().isEnabled(.subAwareAnc) else {
                 return "Echo removal is off with a subwoofer or bass management."
             }
             guard let bassPath = inputs.bassPath else { return "Echo removal is off with a subwoofer or bass management." }
@@ -664,7 +664,7 @@ final class QuietZoneFeedForwardShadow: ObservableObject {
     }
 
     /// Tests only: bypasses the sub-aware feature flag.
-    var forceSubAwareForTesting = false
+    var forceSubAwareForTesting: Bool?
 
     /// Tests only: bypasses the feature flag.
     var forceEchoForTesting = false
