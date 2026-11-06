@@ -211,7 +211,8 @@ struct ActiveQuietZoneSpatialPlanner: Sendable {
         frequencyHz: Double,
         liveAnchorDisturbance: ActiveQuietZoneComplex,
         availableInjectionPeak: Double,
-        quietZoneConfiguration: ActiveQuietZoneConfiguration
+        quietZoneConfiguration: ActiveQuietZoneConfiguration,
+        bassConditioning: BassPlantConditioningMode = .free
     ) throws -> ActiveQuietZoneSpatialSolution {
         let source = try calibration.validated(against: project)
         let survey = try source.validatedSurvey(for: frequencyHz)
@@ -259,26 +260,56 @@ struct ActiveQuietZoneSpatialPlanner: Sendable {
         guard pathPower.isFinite, pathPower > 1.0e-12 else {
             throw ActiveQuietZoneSpatialError.unusableSpatialPlant
         }
-        let lambda = max(pathPower * source.settings.regularization, 1.0e-12)
-        var a = ActiveQuietZoneComplex(real: lambda, imaginary: 0)
-        var b = ActiveQuietZoneComplex.zero
-        var d = ActiveQuietZoneComplex(real: lambda, imaginary: 0)
-        var y0 = ActiveQuietZoneComplex.zero
-        var y1 = ActiveQuietZoneComplex.zero
-        for seat in seats {
-            let w = seat.weight / totalWeight
-            a = a + seat.left.conjugate * seat.left * w
-            b = b + seat.left.conjugate * seat.right * w
-            d = d + seat.right.conjugate * seat.right * w
-            y0 = y0 - seat.left.conjugate * seat.d * w
-            y1 = y1 - seat.right.conjugate * seat.d * w
+        var leftOutput: ActiveQuietZoneComplex
+        var rightOutput: ActiveQuietZoneComplex
+        if case .commonMode = bassConditioning {
+            // E26 S6c: one weight driven equally into L and R (the shared sub), the weighted least-squares optimum for
+            // the summed per-seat path. Mirrors the single-seat common-mode solve.
+            let summedPower = seats.reduce(0.0) {
+                $0 + $1.weight * pow(($1.left + $1.right).magnitude, 2)
+            } / totalWeight
+            guard summedPower.isFinite, summedPower > 1.0e-12 else {
+                throw ActiveQuietZoneSpatialError.unusableSpatialPlant
+            }
+            let lambda = max(summedPower * source.settings.regularization, 1.0e-12)
+            var denominator = ActiveQuietZoneComplex(real: lambda, imaginary: 0)
+            var numerator = ActiveQuietZoneComplex.zero
+            for seat in seats {
+                let w = seat.weight / totalWeight
+                let summed = seat.left + seat.right
+                denominator = denominator + summed.conjugate * summed * w
+                numerator = numerator - summed.conjugate * seat.d * w
+            }
+            guard denominator.magnitude.isFinite, denominator.magnitude > 1.0e-18 else {
+                throw ActiveQuietZoneSpatialError.unusableSpatialPlant
+            }
+            let weight = numerator / denominator
+            leftOutput = weight
+            rightOutput = weight
+        } else {
+            var lambdaScale = 1.0
+            if case .tikhonov(let scale) = bassConditioning { lambdaScale = max(scale, 1) }
+            let lambda = max(pathPower * source.settings.regularization * lambdaScale, 1.0e-12)
+            var a = ActiveQuietZoneComplex(real: lambda, imaginary: 0)
+            var b = ActiveQuietZoneComplex.zero
+            var d = ActiveQuietZoneComplex(real: lambda, imaginary: 0)
+            var y0 = ActiveQuietZoneComplex.zero
+            var y1 = ActiveQuietZoneComplex.zero
+            for seat in seats {
+                let w = seat.weight / totalWeight
+                a = a + seat.left.conjugate * seat.left * w
+                b = b + seat.left.conjugate * seat.right * w
+                d = d + seat.right.conjugate * seat.right * w
+                y0 = y0 - seat.left.conjugate * seat.d * w
+                y1 = y1 - seat.right.conjugate * seat.d * w
+            }
+            let det = a * d - b * b.conjugate
+            guard det.magnitude.isFinite, det.magnitude > 1.0e-18,
+                  a.magnitude.isFinite, d.magnitude.isFinite
+            else { throw ActiveQuietZoneSpatialError.unusableSpatialPlant }
+            leftOutput = (d * y0 - b * y1) / det
+            rightOutput = (a * y1 - b.conjugate * y0) / det
         }
-        let det = a * d - b * b.conjugate
-        guard det.magnitude.isFinite, det.magnitude > 1.0e-18,
-              a.magnitude.isFinite, d.magnitude.isFinite
-        else { throw ActiveQuietZoneSpatialError.unusableSpatialPlant }
-        var leftOutput = (d * y0 - b * y1) / det
-        var rightOutput = (a * y1 - b.conjugate * y0) / det
         guard leftOutput.real.isFinite, leftOutput.imaginary.isFinite,
               rightOutput.real.isFinite, rightOutput.imaginary.isFinite
         else { throw ActiveQuietZoneSpatialError.unusableSpatialPlant }
@@ -354,6 +385,31 @@ struct ActiveQuietZoneSpatialPlanner: Sendable {
             predictions: chosen.3,
             appliedScale: hardScale * chosen.0
         )
+    }
+
+    /// E26 S6c: the measured per-seat plant at one tone. Rows are the included seats (their measured L and R paths from
+    /// the Room Correction project), columns the two sources, so the stacked plant is N x 2. Its condition number
+    /// decides how the L/R design treats a shared sub, as for a single seat (`BassPlantConditioning`).
+    func bassConditioning(
+        calibration: ActiveQuietZoneSpatialCalibration,
+        project: RoomCorrectionProject,
+        frequencyHz: Double
+    ) throws -> BassPlantConditioning {
+        let source = try calibration.validated(against: project)
+        guard !source.positions.isEmpty else { throw ActiveQuietZoneSpatialError.insufficientPositions }
+        let seats: [(left: ActiveQuietZoneComplex, right: ActiveQuietZoneComplex)] = try source.positions.map { position in
+            guard let measurement = project.measurements.first(where: { $0.id == position.id }) else {
+                throw ActiveQuietZoneSpatialError.invalidSurvey
+            }
+            return (
+                try pr90.secondaryPath(
+                    impulseResponse: measurement.left.impulseResponse, frequencyHz: frequencyHz,
+                    sampleRate: measurement.sampleRate),
+                try pr90.secondaryPath(
+                    impulseResponse: measurement.right.impulseResponse, frequencyHz: frequencyHz,
+                    sampleRate: measurement.sampleRate))
+        }
+        return BassPlantConditioning.assess(frequencyHz: frequencyHz, seats: seats)
     }
 
     func spatialInjectionEnvelope(

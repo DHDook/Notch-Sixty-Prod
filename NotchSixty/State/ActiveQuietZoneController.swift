@@ -1600,11 +1600,6 @@ final class ActiveQuietZoneController: ObservableObject {
             let predictedDB: Double
             var bassMode = BassPlantConditioningMode.free
             if spatial {
-                // E26 S5: the multi-seat planner has no measured 2x2 plant, so it cannot be told a sub shares the bass.
-                if bassConditioningActive {
-                    throw ActiveQuietZoneControllerError.subAwareRefused(
-                        "Multi-seat Quiet Zone is not available with a subwoofer yet.")
-                }
                 guard let calibration = spatialCalibration,
                       let project = ambient.projects.project,
                       let survey = try? calibration.validatedSurvey(
@@ -1613,13 +1608,26 @@ final class ActiveQuietZoneController: ObservableObject {
                       Date().timeIntervalSince(survey.capturedAt) < 1800,
                       Date().timeIntervalSince(survey.capturedAt) >= 0
                 else { throw ActiveQuietZoneSpatialError.inadequatePhaseReference }
+                if bassConditioningActive {
+                    // E26 S6c: the sub-aware multi-seat design needs a bass measurement under today's setup, then
+                    // the measured per-seat plant decides the treatment. The single-seat plant can only tighten it.
+                    guard case .fresh = ancBassPathState.freshness(of: bassPlantFingerprint),
+                          !bassPlantMap.isEmpty
+                    else {
+                        throw ActiveQuietZoneControllerError.subAwareRefused(SubAwareAncReadiness.plantMissingMessage)
+                    }
+                    let seatPlant = try spatialPlanner.bassConditioning(
+                        calibration: calibration, project: project, frequencyHz: frequency)
+                    bassMode = BassPlantConditioning.stricter(seatPlant.mode, bassPlantMap.mode(atHz: frequency))
+                }
                 let candidate = try spatialPlanner.solve(
                     calibration: calibration,
                     project: project,
                     frequencyHz: frequency,
                     liveAnchorDisturbance: disturbance,
                     availableInjectionPeak: availableInjectionPeak,
-                    quietZoneConfiguration: configuration
+                    quietZoneConfiguration: configuration,
+                    bassConditioning: bassMode
                 )
                 outputLeft = candidate.leftOutput
                 outputRight = candidate.rightOutput

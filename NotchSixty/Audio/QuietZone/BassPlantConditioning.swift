@@ -70,6 +70,45 @@ struct BassPlantConditioning: Equatable, Sendable {
     }
 }
 
+extension BassPlantConditioning {
+    /// E26 S6c: the conditioning of an N x 2 plant (rows: seats, columns: L and R). The singular values come from the
+    /// Hermitian 2x2 Gram matrix [[a, b], [b*, d]]; the condition is 10 log10 of the eigenvalue ratio, which equals
+    /// 20 log10 of the singular-value ratio and agrees with `conditionDB` for two rows. Non-finite input or fewer
+    /// than two rows reads as fully rank one.
+    static func assess(
+        frequencyHz: Double, seats: [(left: ActiveQuietZoneComplex, right: ActiveQuietZoneComplex)]
+    ) -> BassPlantConditioning {
+        var a = 0.0
+        var d = 0.0
+        var b = ActiveQuietZoneComplex.zero
+        for seat in seats {
+            a += seat.left.magnitude * seat.left.magnitude
+            d += seat.right.magnitude * seat.right.magnitude
+            b = b + seat.left.conjugate * seat.right
+        }
+        let trace = a + d
+        let det = a * d - b.magnitude * b.magnitude
+        guard seats.count >= 2, trace.isFinite, trace > 0, det.isFinite, det > 1.0e-15 * trace * trace else {
+            return BassPlantConditioning(frequencyHz: frequencyHz, conditionDB: .infinity, mode: .commonMode)
+        }
+        let root = max(trace * trace - 4 * det, 0).squareRoot()
+        let largest = (trace + root) / 2
+        let smallest = det / largest
+        let db = 10 * log10(largest / smallest)
+        return BassPlantConditioning(frequencyHz: frequencyHz, conditionDB: db, mode: mode(forConditionDB: db))
+    }
+
+    /// The stricter of two treatments (never looser): common mode, then Tikhonov with the larger scale, then free.
+    static func stricter(_ x: BassPlantConditioningMode, _ y: BassPlantConditioningMode) -> BassPlantConditioningMode {
+        switch (x, y) {
+        case (.commonMode, _), (_, .commonMode): return .commonMode
+        case (.tikhonov(let p), .tikhonov(let q)): return .tikhonov(lambdaScale: max(p, q))
+        case (.tikhonov, .free): return x
+        case (.free, _): return y
+        }
+    }
+}
+
 /// The conditioning of a whole measurement, for the Quiet Zone card.
 struct BassPlantConditioningSummary: Equatable, Sendable {
     let bins: [BassPlantConditioning]

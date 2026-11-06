@@ -151,8 +151,10 @@ final class SubSweepReadinessTests: XCTestCase {
             QuietZoneFeedForwardSurveyController.subPathSummary(SubAwareArmingTests.report(fingerprint: fp, unverified: "u")), "u")
         XCTAssertEqual(
             QuietZoneFeedForwardSurveyController.subPathSummary(SubAwareArmingTests.report(fingerprint: fp, preout: "p")), "p")
-        XCTAssertTrue(QuietZoneFeedForwardSurveyController.subPathSummary(SubAwareArmingTests.report(fingerprint: fp))
+        XCTAssertTrue(QuietZoneFeedForwardSurveyController.subPathSummary(SubAwareArmingTests.report(fingerprint: fp, eligibleBands: 0))
             .contains("tonal Quiet Zone can still run"))
+        XCTAssertTrue(QuietZoneFeedForwardSurveyController.subPathSummary(SubAwareArmingTests.report(fingerprint: fp))
+            .contains("Feed-forward can run in 1 of 1"))
     }
 
     // MARK: G7: the tonal core's Tikhonov scaling and the graph ABI constant
