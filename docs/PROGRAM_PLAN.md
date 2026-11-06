@@ -69,8 +69,8 @@ reviewers compare with Dirac and REW), then engine depth, then breadth.
    - then E4 S22b echo stage in the live path (S22b3 echo stage built dark, PR open; S25 arming built), before item 1 (owner, 2 Nov 2026; arming approved with the four conditions in `docs/epics/E4.md` Open owner decisions: user-initiated only, slow 3 s fade-in, existing gates first, never persisted)
 1. E4 class-leading roadmap, S24–S31 in written order (owner, 31 Oct 2026; E4 S11 moved to E22 on 1 Nov 2026; S26 and S29 are skipped until the owner decides camera head position and the overnight power assertion; slices waiting on E8 or the bench are skipped until ready)
    - then E26 Sub-aware Quiet Zone, S1–S7 in written order, before item 2 (owner, 4 Nov 2026; owner 5 Nov 2026: all remaining slices S2–S7 complete before E9 FIR limits (item 4), so E9 S2 waits; S1 waits for E25 S8b; no live ANC path is enabled outside the per-feature arm)
-2. E12 Guided setup and information architecture, S7 `e12/ship` (#243, needs-owner)
-3. E11 Measurement suite, S10 `e11/overlays-and-ship` (needs-owner)
+2. E12 Guided setup and information architecture, S7 `e12/ship` (merged #243, 26 Oct 2026)
+3. E11 Measurement suite, S10 `e11/overlays-and-ship` (merged #222, 25 Oct 2026)
 4. E9 Multichannel protection and FIR parity, FIR limits: 262,144-tap program FIR and the 32,768-tap cap (S1 built dark in #361; S2 onward only after E26 S2–S7, owner 5 Nov 2026)
 5. E19 MIMO room treatment, software parts
 6. E8 Routing matrix and crossovers
@@ -314,6 +314,7 @@ it, behind `e26.sub-aware-anc`. Live output stays behind the per-feature arm.
 - [~] Secondary path and leakage measured through the whole feed; anti-noise latency per band; echo set with a sub (absorbs E4 S22c). Built dark: per-band delay, per-band eligibility, open-preout check and sub-aware echo rule; S2b (#365) built dark the leakage sweep, its fingerprint stamp and the echo inputs under the flag. Remainder: S2c (secondary-path sweep, splitter rendering, position-model stamp, 20 dB echo twin test) and S5 (arming)
   - [~] S2c `e26/through-feed-splitter-render` (#366): built dark the splitter-rendered through-feed sweep, position-model stamp and 20 dB echo twin test; not wired to hardware outputs (owner slice S6 transport and sub lane); bench: E22
 - [ ] Conditioned L/R design where both channels share the sub (common-mode constraint), tonal and feed-forward
+  - [~] S3b `e26/rank-one-bass-wiring` (PR pending): built behind `e26.sub-aware-anc`; bench: E22
 - [ ] Sub safety: receiver crossover in the excursion caps, path-gain watch that disarms, combined leakage stability bound
 - [ ] Sub-aware readiness replaces the blanket refusal; setup UI; end-to-end twin harness at eight rates
 - [ ] Quiet Zone with a sub on its own output (profile session, sub lane as an actuator)

@@ -147,6 +147,23 @@ final class AdaptiveTonalLiveWorker: @unchecked Sendable {
             let v = raw.bindMemory(to: N60AncComplex.self)
             for (k, tone) in tones.enumerated() { v[k] = complex(tone.rightPath) }
         }
+        // E26 S3b: the rank-one bass modes. Common mode needs equal shares, which the offline solve gives.
+        withUnsafeMutableBytes(of: &config.bassMode) { raw in
+            let v = raw.bindMemory(to: UInt8.self)
+            for (k, tone) in tones.enumerated() {
+                switch tone.bassMode {
+                case .free: v[k] = UInt8(N60_REMOTE_TONAL_BASS_FREE)
+                case .tikhonov: v[k] = UInt8(N60_REMOTE_TONAL_BASS_TIKHONOV)
+                case .commonMode: v[k] = UInt8(N60_REMOTE_TONAL_BASS_COMMON_MODE)
+                }
+            }
+        }
+        withUnsafeMutableBytes(of: &config.leakageScale) { raw in
+            let v = raw.bindMemory(to: Float.self)
+            for (k, tone) in tones.enumerated() {
+                if case .tikhonov(let scale) = tone.bassMode { v[k] = Float(min(max(scale, 1), 10)) }
+            }
+        }
         var guardConfig = N60AncGuardConfigDefault(sampleRate)
         guard N60RemoteTonalConfigIsValid(&config), let core = N60RemoteTonalCreate(&config) else {
             return nil

@@ -9,6 +9,8 @@ struct AdaptiveQuietZoneSeed: Equatable, Sendable {
     var rightPath: ActiveQuietZoneComplex
     var leftOutput: ActiveQuietZoneComplex
     var rightOutput: ActiveQuietZoneComplex
+    /// E26 S3b: how this tone's L/R split was solved (free unless a sub is in the path and the flag is on).
+    var bassMode: BassPlantConditioningMode = .free
 }
 
 /// One adaptive tone: a single complex weight W drives the left and right
@@ -37,6 +39,7 @@ struct AdaptiveQuietZoneShadowTone: Equatable, Sendable {
             && close(path, other.path)
             && close(leftShare, other.leftShare)
             && close(rightShare, other.rightShare)
+            && bassMode == other.bassMode
     }
 
     static func sameDesign(_ a: [AdaptiveQuietZoneShadowTone], _ b: [AdaptiveQuietZoneShadowTone]) -> Bool {
@@ -53,6 +56,8 @@ struct AdaptiveQuietZoneShadowTone: Equatable, Sendable {
     /// needs (the music reaches the microphone through each speaker separately). Zero = unknown.
     var leftPath = ActiveQuietZoneComplex(real: 0, imaginary: 0)
     var rightPath = ActiveQuietZoneComplex(real: 0, imaginary: 0)
+    /// E26 S3b: common mode keeps the shares equal (validated by the core); Tikhonov scales the leakage term.
+    var bassMode: BassPlantConditioningMode = .free
 
     static func tones(from seeds: [AdaptiveQuietZoneSeed]) -> [AdaptiveQuietZoneShadowTone] {
         seeds
@@ -79,7 +84,8 @@ struct AdaptiveQuietZoneShadowTone: Equatable, Sendable {
                     path: left * seed.leftPath + right * seed.rightPath,
                     offlineMagnitude: norm,
                     leftPath: seed.leftPath,
-                    rightPath: seed.rightPath
+                    rightPath: seed.rightPath,
+                    bassMode: seed.bassMode
                 )
             }
     }

@@ -54,6 +54,7 @@ private:
 
     void adapt(double reference, double error) noexcept;
     void limitWeights() noexcept;
+    void tieWeights() noexcept;
     void restartFilters() noexcept;
     void restoreSeed() noexcept;
     // Echo stage.
@@ -75,6 +76,7 @@ private:
     std::uint32_t taps_;
     std::uint32_t blockFrames_;
     double peakGainLimit_;
+    bool commonMode_ = false;   // E26 S3b: channels share one weight set
     double meterAlpha_;
 
     Decimator referenceDecimator_;

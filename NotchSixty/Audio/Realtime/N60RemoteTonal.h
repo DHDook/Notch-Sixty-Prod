@@ -157,7 +157,20 @@ typedef struct {
     bool removeProgramme;                 /* default false */
     N60AncComplex leftPathSeed[N60_FXLMS_MAX_TONES];
     N60AncComplex rightPathSeed[N60_FXLMS_MAX_TONES];
+    /// E26 S3b rank-one bass conditioning (design 4), per tone, decided by Swift from the measured 2x2 plant.
+    /// bassMode: N60_REMOTE_TONAL_BASS_FREE (default), _TIKHONOV or _COMMON_MODE. The core adapts one weight
+    /// along the fixed L/R shares, so it cannot split L from R: common mode is the shares themselves being
+    /// equal (the configuration is invalid for mode COMMON_MODE with unequal shares, so the engine cannot be
+    /// handed a split the plant cannot support). leakageScale (1 to 10, default 1) multiplies leakagePerSecond
+    /// for the tone: the leakage is this core's Tikhonov term, and the fixed point becomes
+    /// -D / (S + lambda scale tau Shat). The product leakagePerSecond * leakageScale must stay at or under 10.
+    uint8_t bassMode[N60_FXLMS_MAX_TONES];
+    float leakageScale[N60_FXLMS_MAX_TONES];
 } N60RemoteTonalConfig;
+
+#define N60_REMOTE_TONAL_BASS_FREE 0u
+#define N60_REMOTE_TONAL_BASS_TIKHONOV 1u
+#define N60_REMOTE_TONAL_BASS_COMMON_MODE 2u
 
 typedef struct {
     uint64_t blocks;                      /* blocks adapted */

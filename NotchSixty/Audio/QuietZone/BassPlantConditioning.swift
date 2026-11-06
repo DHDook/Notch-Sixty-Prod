@@ -94,3 +94,70 @@ struct BassPlantConditioningSummary: Equatable, Sendable {
         return "Below \(rounded) Hz both channels share your subwoofer."
     }
 }
+
+// E26 S3b: the measured plant behind the conditioning. The feed-forward survey already measures the 2x2 plant at every
+// band: both sources (L, R) to the seat (error point) and to the upstream reference microphone (the second point).
+
+extension BassPlantConditioning {
+    /// The conditioning of one survey band (rows: seat, reference microphone; columns: L, R).
+    static func assess(band: QuietZoneVirtualSeatBand) -> BassPlantConditioning {
+        assess(
+            frequencyHz: band.frequencyHz,
+            leftToFirst: band.leftSecondaryAtListener, rightToFirst: band.rightSecondaryAtListener,
+            leftToSecond: band.leftLeakageAtReference, rightToSecond: band.rightLeakageAtReference
+        )
+    }
+}
+
+extension BassPlantConditioningSummary {
+    /// One bin per survey band, lowest frequency first.
+    init(bands: [QuietZoneVirtualSeatBand]) {
+        self.init(bins: bands.sorted { $0.frequencyHz < $1.frequencyHz }.map { BassPlantConditioning.assess(band: $0) })
+    }
+
+    /// The treatment of a whole L/R filter pair that spans [lowHz, highHz] with one set of weights (the feed-forward
+    /// shadow). All bins common mode: common mode. Any bin rank one or ill-conditioned: Tikhonov at the largest scale
+    /// in the band (stricter, never looser, because the pair cannot be split by frequency). Otherwise free.
+    func pairMode(lowHz: Double, highHz: Double) -> BassPlantConditioningMode {
+        let inBand = bins.filter { $0.frequencyHz >= lowHz && $0.frequencyHz <= highHz }
+        guard !inBand.isEmpty else { return .free }
+        if inBand.allSatisfy({ $0.mode == .commonMode }) { return .commonMode }
+        var scale = 1.0
+        var any = false
+        for bin in inBand {
+            switch bin.mode {
+            case .free: break
+            case .tikhonov(let s): any = true; scale = max(scale, s)
+            case .commonMode: any = true; scale = BassPlantConditioning.maximumLambdaScale
+            }
+        }
+        return any ? .tikhonov(lambdaScale: scale) : .free
+    }
+}
+
+/// The measured plant looked up by tone frequency (the tonal controller works at tones, the survey at third-octave
+/// bands). A tone uses the nearest band within a third of an octave; further than that there is no measurement and the
+/// lookup is nil, which the caller reads as free (readiness, S5, owns refusing a missing plant).
+struct BassPlantMap: Equatable, Sendable {
+    static let toleranceOctaves = 1.0 / 3.0
+
+    private(set) var bands: [QuietZoneVirtualSeatBand]
+
+    init(bands: [QuietZoneVirtualSeatBand]) {
+        self.bands = bands.filter { $0.frequencyHz.isFinite && $0.frequencyHz > 0 }.sorted { $0.frequencyHz < $1.frequencyHz }
+    }
+
+    var isEmpty: Bool { bands.isEmpty }
+    var summary: BassPlantConditioningSummary { BassPlantConditioningSummary(bands: bands) }
+
+    func conditioning(atHz frequencyHz: Double) -> BassPlantConditioning? {
+        guard frequencyHz > 0, let nearest = bands.min(by: {
+            abs(log2($0.frequencyHz / frequencyHz)) < abs(log2($1.frequencyHz / frequencyHz))
+        }), abs(log2(nearest.frequencyHz / frequencyHz)) <= Self.toleranceOctaves else { return nil }
+        return BassPlantConditioning.assess(band: nearest)
+    }
+
+    func mode(atHz frequencyHz: Double) -> BassPlantConditioningMode {
+        conditioning(atHz: frequencyHz)?.mode ?? .free
+    }
+}

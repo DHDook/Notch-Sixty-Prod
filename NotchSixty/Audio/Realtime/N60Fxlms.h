@@ -313,7 +313,20 @@ typedef struct {
     /// E4 S22b1: native rate of the speaker-drive stream, 0 (default) or 8 kHz to
     /// 768 kHz. 0 leaves the echo stage out entirely (the core is bit-identical to S9c).
     double driveSampleRate;
+    /// E26 S3b rank-one bass conditioning of the L/R pair (design 4), decided by Swift from the measured 2x2 plant
+    /// over the shadow's band. N60_FF_BASS_FREE (default, bit-identical to before), N60_FF_BASS_TIKHONOV
+    /// (leakagePerSecond * leakageScale, the shadow's ridge term, scale 1 to 10) or N60_FF_BASS_COMMON_MODE (one
+    /// weight set driven equally into both channels: after every block the two channels' weights are replaced by
+    /// their mean, which is the summed-path gradient at half step, so L and R cannot fight and a shared sub is not
+    /// driven harder than one channel would; the seed is averaged too). The leakage product must stay at or
+    /// under 10.
+    uint32_t bassMode;
+    float leakageScale;
 } N60FeedForwardShadowConfig;
+
+#define N60_FF_BASS_FREE 0u
+#define N60_FF_BASS_TIKHONOV 1u
+#define N60_FF_BASS_COMMON_MODE 2u
 
 /// E4 S22b1 echo stage states (N60FeedForwardShadowStatus.echoState).
 #define N60_FF_ECHO_OFF 0u       /* no drive configured or no echo model set */

@@ -80,6 +80,11 @@ struct QuietZoneVirtualSeatDesigner: Sendable {
     static let minimumModeledReductionDB = 0.25
     static let minimumAuthority = 1.0e-5
 
+    /// E26 S3b (`e26.sub-aware-anc` with a sub in the path): condition each band by the measured 2x2 plant (seat and
+    /// reference microphone, L and R) as `ActiveQuietZonePlanner.solveStereo` does. Off, the design is bit-identical
+    /// to before.
+    var bassConditioning = false
+
     func design(
         measurements: [QuietZoneVirtualSeatBand],
         budget: QuietZoneFeedForwardBudget,
@@ -147,9 +152,26 @@ struct QuietZoneVirtualSeatDesigner: Sendable {
             }
             // Damped minimum-energy stereo least squares solution for
             // h + Sl*Ul + Sr*Ur = 0, normalized to a unit upstream input.
-            let lambda = max(authority * 0.035, 1.0e-9)
-            let l = -(left.conjugate * h) / (authority + lambda)
-            let r = -(right.conjugate * h) / (authority + lambda)
+            let l: ActiveQuietZoneComplex
+            let r: ActiveQuietZoneComplex
+            let mode = bassConditioning ? BassPlantConditioning.assess(band: band).mode : .free
+            if case .commonMode = mode {
+                // One weight driven equally into L and R: the single-actuator optimum for the summed path.
+                let summed = left + right
+                let summedPower = summed.magnitude * summed.magnitude
+                guard summedPower.isFinite, summedPower > Self.minimumAuthority else {
+                    throw QuietZoneVirtualSeatError.insufficientActuatorAuthority
+                }
+                let weight = -(summed.conjugate * h) / (summedPower + max(summedPower * 0.035, 1.0e-9))
+                l = weight
+                r = weight
+            } else {
+                var scale = 1.0
+                if case .tikhonov(let s) = mode { scale = max(s, 1) }
+                let lambda = max(authority * 0.035 * scale, 1.0e-9)
+                l = -(left.conjugate * h) / (authority + lambda)
+                r = -(right.conjugate * h) / (authority + lambda)
+            }
             guard l.real.isFinite, l.imaginary.isFinite,
                   r.real.isFinite, r.imaginary.isFinite else {
                 throw QuietZoneVirtualSeatError.invalidAcousticModel

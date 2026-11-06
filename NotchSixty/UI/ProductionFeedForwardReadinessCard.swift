@@ -1513,6 +1513,12 @@ struct ProductionFeedForwardReadinessCard: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
+        // E26 S3b: where the measured plant is rank one and the two speakers share the sub.
+        if let readout = quietZone.bassConditioningReadout {
+            Label(readout, systemImage: "waveform.path")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
     }
 
     private var commissioningSummary: some View {

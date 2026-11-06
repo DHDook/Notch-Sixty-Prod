@@ -20,6 +20,8 @@ struct QuietZoneFeedForwardShadowInputs: Equatable, Sendable {
     /// already holds the sub-to-reference path.
     var bassPath: AncBassPathState? = nil
     var echoBassFingerprint: AncBassPathFingerprint? = nil
+    /// E26 S3b: condition the offline weights and the shadow by the measured plant's rank-one bass modes.
+    var bassConditioning = false
 }
 
 typealias QuietZoneFeedForwardShadowCaptureFactory = (
@@ -153,6 +155,8 @@ final class QuietZoneFeedForwardShadowEngine: @unchecked Sendable {
     private var driftPPM: Double?
     /// Fixed at init, so the main actor can read it without the worker queue.
     let echoActive: Bool
+    /// E26 S3b: how the shadow treats the L/R pair (free unless the plan is conditioned).
+    let bassMode: BassPlantConditioningMode
 
     init?(
         plan: QuietZoneFeedForwardShadowPlan, capture: QuietZoneFeedForwardPairCapturing,
@@ -165,6 +169,17 @@ final class QuietZoneFeedForwardShadowEngine: @unchecked Sendable {
         if let echo, let driveSampleRate, echo.nativeSampleRate == plan.nativeSampleRate {
             config.driveSampleRate = driveSampleRate
         }
+        // E26 S3b: rank-one bass conditioning over the shadow's band.
+        let mode = plan.bassMode(lowHz: Double(config.bandLowHz), highHz: Double(config.bandHighHz))
+        switch mode {
+        case .free: break
+        case .tikhonov(let scale):
+            config.bassMode = N60_FF_BASS_TIKHONOV
+            config.leakageScale = Float(scale)
+        case .commonMode:
+            config.bassMode = N60_FF_BASS_COMMON_MODE
+        }
+        bassMode = mode
         guard let core = N60FeedForwardShadowCreate(&config) else { return nil }
         let count = UInt32(min(plan.seedLeft.count, plan.seedRight.count))
         guard N60FeedForwardShadowSetPath(
@@ -585,7 +600,9 @@ final class QuietZoneFeedForwardShadow: ObservableObject {
         let driveRate = echoModel == nil ? nil : driveSource?.driveSampleRate
         let made: Result<QuietZoneFeedForwardShadowEngine, Error> = await Task.detached(priority: .userInitiated) {
             do {
-                let plan = try QuietZoneFeedForwardShadowPlanner().plan(
+                var planner = QuietZoneFeedForwardShadowPlanner()
+                planner.bassConditioning = inputs.bassConditioning
+                let plan = try planner.plan(
                     bands: inputs.bands, design: inputs.design, budget: inputs.budget,
                     position: inputs.position, nativeSampleRate: box.capture.sampleRate
                 )

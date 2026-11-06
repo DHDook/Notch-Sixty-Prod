@@ -30,7 +30,10 @@ N60BlockFxlmsConfig coreConfig(const N60FeedForwardShadowConfig &config, double 
     c.taps = config.taps;
     c.blockFrames = config.blockFrames;
     c.step = config.step;
-    c.leakagePerSecond = config.leakagePerSecond;
+    // E26 S3b: the Tikhonov mode raises the ridge term of both channels' cores.
+    c.leakagePerSecond = config.leakagePerSecond
+                         * (config.bassMode == N60_FF_BASS_TIKHONOV
+                                ? static_cast<double>(config.leakageScale) : 1.0);
     return c;
 }
 
@@ -93,6 +96,7 @@ FeedForwardShadow::FeedForwardShadow(const N60FeedForwardShadowConfig &config)
              BlockFxlms(coreConfig(config, decimatedRate_))},
       referenceLine_(kLine),
       driveRate_(config.driveSampleRate) {
+    commonMode_ = config.bassMode == N60_FF_BASS_COMMON_MODE;
     const double low = config.bandLowHz / decimatedRate_;
     const double high = config.bandHighHz / decimatedRate_;
     referenceBand_[0].highPass(low);
@@ -149,6 +153,7 @@ bool FeedForwardShadow::setSeed(const float *left, const float *right,
     for (std::uint32_t k = 0; k < taps_; ++k) {
         seed_[0][k] = k < n ? left[k] : 0.0f;
         seed_[1][k] = k < n ? right[k] : 0.0f;
+        if (commonMode_) seed_[0][k] = seed_[1][k] = 0.5f * (seed_[0][k] + seed_[1][k]);
     }
     restoreSeed();
     restartFilters();
@@ -260,6 +265,7 @@ void FeedForwardShadow::adapt(double reference, double error) noexcept {
         }
         if (++blockFill_ == blockFrames_) {
             blockFill_ = 0;
+            if (commonMode_) tieWeights();
             limitWeights();
         }
     }
@@ -271,6 +277,14 @@ void FeedForwardShadow::adapt(double reference, double error) noexcept {
     }
     ++decimatedSamples_;
     ++sinceRestart_;
+}
+
+// E26 S3b common mode: both cores started the block from the same weights, so the mean is the shared weight set
+// moved by half the summed-path step. Exact in double, so equal weights stay bit-identical.
+void FeedForwardShadow::tieWeights() noexcept {
+    double *a = cores_[0].mutableWeights();
+    double *b = cores_[1].mutableWeights();
+    for (std::uint32_t k = 0; k < taps_; ++k) a[k] = b[k] = 0.5 * (a[k] + b[k]);
 }
 
 void FeedForwardShadow::limitWeights() noexcept {
@@ -530,6 +544,8 @@ N60FeedForwardShadowConfig N60FeedForwardShadowConfigDefault(double sampleRate) 
     config.bandHighHz = 200.0f;
     config.peakGainLimit = static_cast<float>(kDefaultPeakGain);
     config.driveSampleRate = 0;
+    config.bassMode = N60_FF_BASS_FREE;
+    config.leakageScale = 1.0f;
     return config;
 }
 
@@ -545,6 +561,9 @@ bool N60FeedForwardShadowConfigIsValid(const N60FeedForwardShadowConfig *config)
     if (!in(config->leakagePerSecond, 0, 10)) return false;
     if (!in(config->bandLowHz, 10, 100)) return false;
     if (!in(config->bandHighHz, 2.0 * config->bandLowHz, 0.25 * fd)) return false;
+    if (config->bassMode > N60_FF_BASS_COMMON_MODE) return false;
+    if (!in(config->leakageScale, 1, 10)) return false;
+    if (!(config->leakagePerSecond * static_cast<double>(config->leakageScale) <= 10.0)) return false;
     if (config->driveSampleRate != 0
         && !(in(config->driveSampleRate, 8000, 768000)
              && decimatedRateFor(config->driveSampleRate) != 0))
