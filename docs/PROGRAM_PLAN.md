@@ -315,6 +315,7 @@ it, behind `e26.sub-aware-anc`. Live output stays behind the per-feature arm.
   - [~] S2c `e26/through-feed-splitter-render` (#366): built dark the splitter-rendered through-feed sweep, position-model stamp and 20 dB echo twin test; not wired to hardware outputs (owner slice S6 transport and sub lane); bench: E22
 - [ ] Conditioned L/R design where both channels share the sub (common-mode constraint), tonal and feed-forward
   - [~] S3b `e26/rank-one-bass-wiring` (PR pending): built behind `e26.sub-aware-anc`; bench: E22
+  - [~] S4 `e26/sub-safety` (PR pending): receiver excursion caps, measured summing law, bass-path watch and combined-leakage bound behind `e26.sub-aware-anc`; bench: E22
 - [ ] Sub safety: receiver crossover in the excursion caps, path-gain watch that disarms, combined leakage stability bound
 - [ ] Sub-aware readiness replaces the blanket refusal; setup UI; end-to-end twin harness at eight rates
 - [ ] Quiet Zone with a sub on its own output (profile session, sub lane as an actuator)

@@ -221,7 +221,9 @@ struct QuietZoneVirtualSeatDesigner: Sendable {
             }
             // Without active reference-leakage compensation, input pollution
             // above 10% of the unit reference could undermine stability.
-            guard fraction <= Self.maximumLeakageFraction else {
+            guard fraction <= CombinedLeakageStabilityBound.fractionLimit(
+                for: candidate.band, bassConditioning: bassConditioning
+            ) else {
                 throw QuietZoneVirtualSeatError.excessiveReferenceLeakage
             }
             guard benefit >= Self.minimumModeledReductionDB else {

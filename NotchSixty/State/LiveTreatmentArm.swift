@@ -34,6 +34,8 @@ enum LiveTreatmentDisarmReason: String, Equatable, Sendable {
     case microphoneMoved
     /// The adaptive tonal core or its worker faulted (E4 S18b).
     case adaptiveFault
+    /// E26 S4: the bass path changed (fingerprint, or sub-band gain or phase moved past the watch window).
+    case bassPathChanged
 
     /// Shown in the UI after an automatic disarm. Nil for the user's own action.
     var message: String? {
@@ -55,6 +57,7 @@ enum LiveTreatmentDisarmReason: String, Equatable, Sendable {
         case .seatRegression: return "Disarmed: the seat got louder than before arming. Re-arm to continue."
         case .microphoneMoved: return "Disarmed: the microphone moved and could not be re-tuned. Re-arm to continue."
         case .adaptiveFault: return "Disarmed: the adaptive tuning faulted. Re-arm to continue."
+        case .bassPathChanged: return "Disarmed: your receiver's level or bass settings changed. Re-arm to continue."
         }
     }
 }
@@ -102,6 +105,8 @@ struct LiveTreatmentEnvironment: Equatable, Sendable {
     /// Live howl-guard trips on the current transport session (E4 S15). Any change from the
     /// value at arming means the guard tripped (a rebuilt session restarts the count).
     var howlGuardTripCount: UInt64 = 0
+    /// E26 S4: fingerprint of the bass path (under the flag with a sub in the path); nil is not compared.
+    var bassPathFingerprint: String? = nil
 }
 
 enum LiveTreatmentArmError: Error, Equatable, LocalizedError {
@@ -215,6 +220,8 @@ final class LiveTreatmentArm: ObservableObject {
                     || abs(environment.outputGainDB - baseline.outputGainDB)
                         > LiveTreatmentSafeguards.outputGainToleranceDB {
             disarm(.outputGainChanged)
+        } else if let print = baseline.bassPathFingerprint, environment.bassPathFingerprint != print {
+            disarm(.bassPathChanged)
         } else if environment.howlGuardTripCount != baseline.howlGuardTripCount {
             reportInstabilityTrip()
         } else if environment.microphoneSignalFault != nil {
