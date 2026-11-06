@@ -678,7 +678,8 @@ struct ActiveQuietZonePlanner: Sendable {
         rightSecondaryPath: ActiveQuietZoneComplex,
         availableInjectionPeak: Double,
         configuration rawConfiguration:
-            ActiveQuietZoneConfiguration
+            ActiveQuietZoneConfiguration,
+        bassConditioning: BassPlantConditioningMode = .free
     ) throws -> ActiveQuietZoneStereoSolution {
         let configuration = try rawConfiguration.validated()
         guard frequencyHz
@@ -708,18 +709,46 @@ struct ActiveQuietZonePlanner: Sendable {
             throw ActiveQuietZoneError.unusableSecondaryPath
         }
 
-        let lambda =
-            max(
-                pathPower * configuration.regularization,
+        var left: ActiveQuietZoneComplex
+        var right: ActiveQuietZoneComplex
+        switch bassConditioning {
+        case .free, .tikhonov:
+            var lambdaScale = 1.0
+            if case .tikhonov(let scale) = bassConditioning {
+                lambdaScale = max(scale, 1)
+            }
+            let lambda =
+                max(
+                    pathPower * configuration.regularization
+                        * lambdaScale,
+                    1.0e-12
+                )
+            let denominator = pathPower + lambda
+            left =
+                -(leftSecondaryPath.conjugate * disturbance)
+                / denominator
+            right =
+                -(rightSecondaryPath.conjugate * disturbance)
+                / denominator
+        case .commonMode:
+            // E26 S3: one weight driven equally into L and R. This is the single-actuator optimum for the summed
+            // path, so L and R cannot fight and the shared sub is driven no harder than one channel would.
+            let summed = leftSecondaryPath + rightSecondaryPath
+            let summedPower = pow(summed.magnitude, 2)
+            guard summedPower.isFinite,
+                  summedPower > 1.0e-12 else {
+                throw ActiveQuietZoneError.unusableSecondaryPath
+            }
+            let lambda = max(
+                summedPower * configuration.regularization,
                 1.0e-12
             )
-        let denominator = pathPower + lambda
-        var left =
-            -(leftSecondaryPath.conjugate * disturbance)
-            / denominator
-        var right =
-            -(rightSecondaryPath.conjugate * disturbance)
-            / denominator
+            let weight =
+                -(summed.conjugate * disturbance)
+                / (summedPower + lambda)
+            left = weight
+            right = weight
+        }
 
         let perToneMaximum = Self.linearPeak(
             dbfs: configuration
