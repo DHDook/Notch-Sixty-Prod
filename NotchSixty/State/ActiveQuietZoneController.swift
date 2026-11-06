@@ -166,6 +166,11 @@ final class ActiveQuietZoneController: ObservableObject {
         return engine.subwooferActive
     }
 
+    /// E26 S2b: the bass path the anti-noise plays through now, with its fingerprint.
+    var ancBassPathState: AncBassPathState {
+        AncBassPathState.resolve(arrangement: arrangement, bassManagement: engine.bassManagementConfiguration)
+    }
+
     /// The stored arrangement of the selected system.
     var arrangement: SystemArrangement? { profiles.selectedSystemProfile?.state.systemArrangement }
 

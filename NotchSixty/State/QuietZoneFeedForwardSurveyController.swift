@@ -35,6 +35,7 @@ enum QuietZoneFeedForwardSurveyRules {
         if let previous, previous.sameInputs(as: survey) {
             survey.leakage = previous.leakage
             survey.echoModel = previous.echoModel
+            survey.echoBassFingerprint = previous.echoBassFingerprint
         }
         return survey
     }
@@ -170,7 +171,9 @@ final class QuietZoneFeedForwardSurveyController: ObservableObject {
         return (QuietZoneFeedForwardShadowInputs(
             device: seat.device, referenceChannel: survey.referenceChannel, errorChannel: seat.channel,
             bands: assembled.bands, design: design, budget: quietZone.feedForwardBudget, position: position,
-            echoModel: survey.echoModelOrLegacy
+            echoModel: survey.echoModelOrLegacy,
+            bassPath: quietZone.subAwareAncEnabled ? quietZone.ancBassPathState : nil,
+            echoBassFingerprint: survey.echoBassFingerprint
         ), "")
     }
 
@@ -242,7 +245,9 @@ final class QuietZoneFeedForwardSurveyController: ObservableObject {
                   survey.errorChannel == seat.channel,
                   survey.referenceChannel == referenceChannel
             else { throw QuietZoneFeedForwardSurveyError.noiseSurveyMissing }
-            let program = try RoomCorrectionSweepGenerator().makeProgram(settings: RoomCorrectionSweepSettings(
+            // E26 S2b: with the flag on and a sub in the path, sweep from 15 Hz, longer, with a longer tail.
+            let bassPath = quietZone.subAwareAncEnabled ? quietZone.ancBassPathState : nil
+            let baseSettings = RoomCorrectionSweepSettings(
                 sampleRate: output.nominalSampleRate,
                 startFrequencyHz: calibration.sweepStartFrequencyHz,
                 endFrequencyHz: calibration.sweepEndFrequencyHz,
@@ -251,7 +256,12 @@ final class QuietZoneFeedForwardSurveyController: ObservableObject {
                 leadInSeconds: calibration.sweepLeadInSeconds,
                 tailSeconds: calibration.sweepTailSeconds,
                 fadeSeconds: calibration.sweepFadeSeconds
-            ))
+            )
+            let sweepSettings = bassPath.map {
+                ThroughFeedSweepPlanner.settings(
+                    base: baseSettings, path: $0.path, sampleRate: output.nominalSampleRate)
+            } ?? baseSettings
+            let program = try RoomCorrectionSweepGenerator().makeProgram(settings: sweepSettings)
             let plan = try RoomCorrectionMeasurementPlan(
                 program: program, settlingSeconds: calibration.interPassSettlingSeconds
             )
@@ -285,6 +295,7 @@ final class QuietZoneFeedForwardSurveyController: ObservableObject {
                     var updated = survey
                     updated.echoModel = model
                     updated.leakage = model.asLeakage()
+                    updated.echoBassFingerprint = bassPath?.fingerprint
                     try self.store.save(updated, project: seat.project)
                     self.survey = updated
                     self.activity = .idle
