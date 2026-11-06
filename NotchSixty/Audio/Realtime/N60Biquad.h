@@ -2,6 +2,7 @@
 #define N60Biquad_h
 
 #include <math.h>
+#include <stddef.h>
 #include <stdbool.h>
 #include <stdint.h>
 
