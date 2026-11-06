@@ -11,6 +11,7 @@
 //  8. The realtime call allocates nothing.
 #include <atomic>
 #include <cmath>
+#include <limits>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -244,6 +245,21 @@ int main() {
             N60AncLaneFeedDestroy(r.feed);
         }
 
+        // 5b. Non-finite programme samples are zeroed and counted.
+        {
+            Rig r;
+            CHECK(rigInit(r, rate, true, false, 0.05), "rig at %.0f", rate);
+            r.inLanes[0][3] = std::numeric_limits<float>::quiet_NaN();
+            r.inLanes[1][7] = std::numeric_limits<float>::infinity();
+            N60AncLaneFeedArm(r.feed);
+            N60AncLaneFeedRenewLease(r.feed, leaseLong);
+            block(r);
+            CHECK(N60AncLaneFeedGetStatus(r.feed).nonFiniteSamples == 2u, "non-finite count %llu at %.0f",
+                  static_cast<unsigned long long>(N60AncLaneFeedGetStatus(r.feed).nonFiniteSamples), rate);
+            for (uint32_t ch = 2; ch <= 4; ++ch) for (float x : r.lanes[ch]) CHECK(std::isfinite(x), "non-finite output at %.0f", rate);
+            N60AncLaneFeedDestroy(r.feed);
+        }
+
         // 6. Pass-through and refusal.
         {
             Rig r;
@@ -327,6 +343,26 @@ int main() {
             runFrames(r, static_cast<uint64_t>(rate * 0.1));
             for (int i = 0; i < 3; ++i) { pump(); block(r); }
             CHECK(sourcesExactlyZero(r), "ff played after the lease was released at %.0f", rate);
+            // A push far beyond the ring is trimmed, not wrapped over unread frames; the output index is unchanged.
+            {
+                const uint64_t before = N60AncLaneFeedReferenceOutputIndex(r.feed);
+                std::vector<float> big(2u * N60AncLaneFeedReferenceRingFrames, 0.25f);
+                const uint64_t next = N60AncLaneFeedPushReference(r.feed, before, big.data(),
+                                                                  static_cast<uint32_t>(big.size()));
+                CHECK(next == before + big.size(), "oversized push returned %llu at %.0f", static_cast<unsigned long long>(next), rate);
+                CHECK(N60AncLaneFeedReferenceOutputIndex(r.feed) == before, "push moved the output index at %.0f", rate);
+            }
+            // Reset restarts the reference timeline at 0; a push from 0 then plays again once armed.
+            N60AncLaneFeedReset(r.feed);
+            CHECK(N60AncLaneFeedReferenceOutputIndex(r.feed) == 0u, "reference index after reset %llu at %.0f",
+                  static_cast<unsigned long long>(N60AncLaneFeedReferenceOutputIndex(r.feed)), rate);
+            CHECK(N60AncLaneFeedFeedForwardArm(r.feed, 0.010, 0.005) == N60FeedForwardLiveArmOK, "ff re-arm after reset at %.0f", rate);
+            pushed = 0;
+            N60AncLaneFeedArm(r.feed);
+            N60AncLaneFeedRenewLease(r.feed, leaseLong);
+            double again = 0.0;
+            for (uint64_t done = 0; done < static_cast<uint64_t>(rate * 0.4); done += kBlock) { pump(); block(r); again = std::fmax(again, sourcePeak(r)); }
+            CHECK(again > 0.02, "ff silent after reset and re-push at %.0f (peak %g)", rate, again);
             N60AncLaneFeedDestroy(r.feed);
         }
     }

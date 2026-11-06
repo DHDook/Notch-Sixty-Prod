@@ -69,6 +69,7 @@ struct N60AncLaneFeed {
     std::atomic<float> gainShadow{0.0f};
     std::atomic<uint64_t> rendered{0};
     std::atomic<uint64_t> clamped{0};
+    std::atomic<uint64_t> nonFinite{0};
     std::atomic<uint64_t> faults{0};
 
     float *refLane() { return scratch.get(); }
@@ -207,8 +208,10 @@ void renderChunk(N60AncLaneFeed &f, const float *const *in, float *const *out, u
     float *srcS = out[c.sourceSub] + offset;
     const bool haveFF = f.ff != nullptr;
     uint64_t clamps = 0;
+    uint64_t nonFinite = 0;
 
     for (uint32_t i = 0; i < n; ++i) {
+        if (!std::isfinite(progL[i]) || !std::isfinite(progR[i])) ++nonFinite;
         const float pl = std::isfinite(progL[i]) ? progL[i] : 0.0f;
         const float pr = std::isfinite(progR[i]) ? progR[i] : 0.0f;
         N60ActiveQuietZoneRuntimeAccumulateProgramme(&f.tonal, pl, pr);
@@ -226,6 +229,7 @@ void renderChunk(N60AncLaneFeed &f, const float *const *in, float *const *out, u
         const float g = static_cast<float>(f.gain);
         al *= g;
         ar *= g;
+        if (!std::isfinite(al) || !std::isfinite(ar)) ++nonFinite;
         if (!std::isfinite(al)) al = 0.0f;
         if (!std::isfinite(ar)) ar = 0.0f;
         const float cl = std::clamp(al, -limit, limit);
@@ -249,6 +253,7 @@ void renderChunk(N60AncLaneFeed &f, const float *const *in, float *const *out, u
         srcS[i] = std::clamp(laneS, -limit, limit);
     }
     f.previousChunk = haveFF ? n : 0u;
+    if (nonFinite != 0u) f.nonFinite.fetch_add(nonFinite, std::memory_order_relaxed);
     if (clamps != 0u) f.clamped.fetch_add(clamps, std::memory_order_relaxed);
     f.gainShadow.store(static_cast<float>(f.gain), std::memory_order_relaxed);
     f.rendered.store(now + n, std::memory_order_release);
@@ -470,6 +475,7 @@ N60AncLaneFeedStatus N60AncLaneFeedGetStatus(const N60AncLaneFeed *feed) {
     s.referenceUnderruns = feed->underruns.load(std::memory_order_relaxed);
     s.clampedSamples = feed->clamped.load(std::memory_order_relaxed);
     s.faults = feed->faults.load(std::memory_order_relaxed);
+    s.nonFiniteSamples = feed->nonFinite.load(std::memory_order_relaxed);
     return s;
 }
 

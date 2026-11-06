@@ -320,9 +320,18 @@ struct UnifiedGraphConfiguration: Equatable, Sendable {
                 kind: N60_STAGE_CROSSTALK.rawValue, stageId: Self.crosstalkStageId, laneA: 0, laneB: 1,
                 params: params))
         }
+        // E26 S7b2: with a host-fed ANC the user's volume lives here (programme and sub lanes), ahead of ANC_INJECT.
+        let userGain = ancActuators?.hostFed == true ? (ancActuators?.userOutputGain ?? 1) : 1
         for (index, lane) in lanes.enumerated() {
+            let gain = lane.outputGain * userGain
             add(N60_STAGE_OUTPUT_GAIN, N60_LSTAGE_OUTPUT_GAIN + UInt32(index), lane: UInt32(index),
-                params: [lane.polarityInverted ? -lane.outputGain : lane.outputGain])
+                params: [lane.polarityInverted ? -gain : gain])
+        }
+        if ancActuators?.hostFed == true {
+            for sub in 0..<subwooferCount {
+                let index = lanes.count + sub
+                add(N60_STAGE_OUTPUT_GAIN, N60_LSTAGE_OUTPUT_GAIN + UInt32(index), lane: UInt32(index), params: [userGain])
+            }
         }
         if let params = stereo.pauseGate {
             add(N60_STAGE_PAUSE_GATE, Self.pauseGateStageId, mask: programMask, params: params)

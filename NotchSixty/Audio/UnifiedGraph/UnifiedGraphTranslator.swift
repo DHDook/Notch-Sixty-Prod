@@ -305,7 +305,9 @@ enum UnifiedGraphTranslator {
         sampleRate: Double,
         gainConfiguration: DSPGainConfiguration,
         bassManagementConfiguration: BassManagementConfiguration,
-        programDSP: UnifiedGraphProgramDSP? = nil
+        programDSP: UnifiedGraphProgramDSP? = nil,
+        ancHostFeed: Bool = false,
+        userOutputGain: Float = 1
     ) -> Result<UnifiedGraphConfiguration, UnifiedGraphFallbackReason> {
         guard routePlan.speakerOptimizerFIR == nil else { return .failure(.optimizerFIR) }
         let roles = routePlan.programLayout.roles
@@ -380,6 +382,12 @@ enum UnifiedGraphTranslator {
                 subwoofers: subs
             )
         }
+        if ancHostFeed, let actuators = hostFedAncActuators(
+            routePlan: routePlan, bassEnabled: bassEnabled, subCount: subCount, sampleRate: sampleRate,
+            userOutputGain: userOutputGain
+        ) {
+            configuration.ancActuators = actuators
+        }
         if let programDSP, !programDSP.isNeutral {
             configuration.orderPolicy = .canonical
             configuration.programDSP = programDSP
@@ -389,6 +397,22 @@ enum UnifiedGraphTranslator {
             } catch { return .failure(.specRejected) }
         }
         return .success(configuration)
+    }
+
+    /// E26 S7b2: class A (two mains plus one sub output): the left main, right main and sub lanes are the actuators of
+    /// a host-fed Quiet Zone. Any other layout gets none (the engine refuses Quiet Zone there). Not authorised.
+    static func hostFedAncActuators(
+        routePlan: LiveNChannelOutputRoutePlan, bassEnabled: Bool, subCount: Int, sampleRate: Double,
+        userOutputGain: Float
+    ) -> UnifiedGraphAncActuators? {
+        guard bassEnabled, subCount == 1, let shape = UnifiedGraphLayoutShape(roles: routePlan.programLayout.roles),
+              shape.laneCount == 2, let left = shape.frontLeft, let right = shape.frontRight, left != right else {
+            return nil
+        }
+        let frames = UInt32(min(Double(N60_GRAPH_MAX_DELAY_FRAMES), max(1, (sampleRate * 0.1).rounded())))
+        return UnifiedGraphAncActuators(
+            actuators: [.init(targetLane: left), .init(targetLane: right), .init(targetLane: shape.laneCount)],
+            captureFrames: frames, hostFed: true, userOutputGain: userOutputGain)
     }
 
     /// Binaural profile data for `layoutSpec`: `orientations * channels * 2 * taps` responses.

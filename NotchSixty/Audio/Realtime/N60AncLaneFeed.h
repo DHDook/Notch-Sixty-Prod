@@ -69,6 +69,9 @@ typedef struct N60AncLaneFeed N60AncLaneFeed;
 enum {
     N60AncLaneFeedMaxBlockFrames = 8192,
     N60AncLaneFeedMaxChannels = 16,
+    /* The reference ring holds the programme the speakers will play ahead of the output index. A pump must keep its
+       lead below this: 65536 frames is 0.17 s at 384 kHz and 1.5 s at 44.1 kHz. A push past the ring is trimmed
+       (the late frames are dropped, not overwritten), and the filter counts an underrun. */
     N60AncLaneFeedReferenceRingFrames = 65536
 };
 
@@ -95,7 +98,8 @@ typedef struct {
     uint64_t leaseExpiries;
     uint64_t referenceUnderruns;
     uint64_t clampedSamples;
-    uint64_t faults;                 /* Process calls refused (wrong channel count, null lane); non-finite samples are zeroed silently */
+    uint64_t faults;                 /* Process calls refused (wrong channel count, null lane) */
+    uint64_t nonFiniteSamples;       /* programme or anti-noise samples that were NaN or infinite and were zeroed */
 } N60AncLaneFeedStatus;
 
 bool N60AncLaneFeedConfigIsValid(const N60AncLaneFeedConfig * N60_ALF_NULLABLE config);

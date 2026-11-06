@@ -2432,6 +2432,9 @@ struct RoomCorrectionMeasurementPosition: Identifiable, Codable, Equatable, Send
     /// position made before the stamp existed, which reads as stale when a sub is in the path. Optional, so stored
     /// projects decode unchanged.
     var ancBassFingerprint: AncBassPathFingerprint? = nil
+    /// E26 S7b2 (G17): the output gain (volume plus headroom, dB) when the path was measured. Nil for older records,
+    /// which skip the device-volume check. Optional, so stored projects decode unchanged.
+    var outputGainDBAtMeasurement: Double? = nil
 }
 
 struct RoomCorrectionAggregateResponse: Codable, Equatable, Sendable {

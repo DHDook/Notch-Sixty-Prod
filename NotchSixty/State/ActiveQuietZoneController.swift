@@ -773,11 +773,28 @@ final class ActiveQuietZoneController: ObservableObject {
 
     /// The ARM switch. `true` arms (one explicit user action) and starts the ramped-in canceller;
     /// `false` disarms with a ramped stop. The armed state is never persisted.
+    /// E26 S7b2 (G17): the output gain (dB) the sub path was measured at; nil when unknown (legacy records).
+    var measuredOutputGainDB: Double?
+    var currentOutputGainDB: Double { engine.liveTreatmentOutputGainDB }
+
+    /// With the device volume in charge, the anti-noise follows the volume, so arming needs it within the
+    /// live-treatment tolerance of the measurement (1 dB). Software volume is out of the anti-noise path.
+    static func volumeRefusal(mode: MasterVolumeControlMode, measuredDB: Double?, currentDB: Double) -> String? {
+        guard mode == .device, let measuredDB,
+              abs(currentDB - measuredDB) > LiveTreatmentSafeguards.outputGainToleranceDB else { return nil }
+        return "The volume changed since the measurement. Set it back or measure again."
+    }
+
     func setEnabled(_ enabled: Bool) throws {
         if enabled {
             if receiverBassUndeclared { throw ActiveQuietZoneControllerError.receiverBassUndeclared }
             // E26 S5: readiness is a precondition only; the Turn On itself is this user action.
             if let why = subAwareReadiness(mode: .tonal).message { throw ActiveQuietZoneControllerError.subAwareRefused(why) }
+            if let why = Self.volumeRefusal(
+                mode: engine.masterVolumeCapabilities.controlMode, measuredDB: measuredOutputGainDB,
+                currentDB: engine.liveTreatmentOutputGainDB) {
+                throw ActiveQuietZoneControllerError.subAwareRefused(why)
+            }
             // E4 S15: a trip latched in an earlier arm must not keep the new one silent.
             engine.rearmHowlGuard()
             try arm.arm(environment: liveTreatmentEnvironment())

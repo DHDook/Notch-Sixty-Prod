@@ -1042,7 +1042,7 @@ final class AudioIOEngine: ObservableObject {
 
     /// Starts or stops lease renewal to match whether anti-noise is live on the current session.
     private func syncActiveQuietZoneLease(active: Bool) {
-        guard activeQuietZoneLeaseEnabled, active, let session = transportSession else {
+        guard activeQuietZoneLeaseEnabled, active, let session = quietZoneHost else {
             activeQuietZoneLeaseKeeper?.stop()
             activeQuietZoneLeaseKeeper = nil
             return
@@ -1367,12 +1367,20 @@ final class AudioIOEngine: ObservableObject {
         transportSession?.outputFormat.sampleRate
     }
 
+    /// E26 S7b2: the session that renders Quiet Zone anti-noise: the stereo session, or the profile session when its
+    /// graph carries the ANC lane feed (class A). nil otherwise, so every passthrough below answers "no session".
+    private var quietZoneHost: (any QuietZoneRuntimeHost)? {
+        if let transportSession { return transportSession }
+        if let profile = nChannelTransportSession, profile.hostsQuietZone { return profile }
+        return nil
+    }
+
     /// E4 S15: live howl-guard trips on the current transport session (0 without one). The Quiet
     /// Zone arm compares it with the value captured at arming.
-    var liveTreatmentHowlTripCount: UInt64 { transportSession?.howlGuardTripCount ?? 0 }
+    var liveTreatmentHowlTripCount: UInt64 { quietZoneHost?.howlGuardTripCount ?? 0 }
 
     /// E4 S15: clears a latched howl-guard trip; the arm calls it before arming.
-    func rearmHowlGuard() { transportSession?.rearmHowlGuard() }
+    func rearmHowlGuard() { quietZoneHost?.rearmHowlGuard() }
 
     /// E4 S18b: when true, an active Quiet Zone target also stamps the render snapshot with its arm
     /// token, which lets the adaptive gain mailbox play. Set by the controller from the
@@ -1394,24 +1402,24 @@ final class AudioIOEngine: ObservableObject {
 
     @discardableResult
     func publishActiveQuietZoneGainRecord(_ record: N60ActiveQuietZoneGainRecord) -> UInt64 {
-        transportSession?.publishActiveQuietZoneGainRecord(record) ?? 0
+        quietZoneHost?.publishActiveQuietZoneGainRecord(record) ?? 0
     }
 
     func popActiveQuietZoneTelemetry() -> N60ActiveQuietZoneTelemetryRecord? {
-        transportSession?.popActiveQuietZoneTelemetry()
+        quietZoneHost?.popActiveQuietZoneTelemetry()
     }
 
     var activeQuietZoneMailboxStats: N60ActiveQuietZoneMailboxStats {
-        transportSession?.activeQuietZoneMailboxStats ?? N60ActiveQuietZoneMailboxStats()
+        quietZoneHost?.activeQuietZoneMailboxStats ?? N60ActiveQuietZoneMailboxStats()
     }
 
     /// E4 S18b: the worker's link onto the current session, or nil when none is running.
     var adaptiveTonalLink: (any AdaptiveTonalLiveLink)? {
-        transportSession.map { CoreAudioAdaptiveTonalLink(session: $0) }
+        quietZoneHost.map { CoreAudioAdaptiveTonalLink(session: $0) }
     }
 
     /// Latches the same fade as a kernel howl-guard trip; the arm then disarms on the trip count.
-    func requestHowlTrip() { transportSession?.requestHowlTrip() }
+    func requestHowlTrip() { quietZoneHost?.requestHowlTrip() }
 
     /// Output gain the user's volume and the headroom attenuation apply, in dB (0 = unity),
     /// for the live-treatment arm switch. Muted reads as -120.
@@ -3097,20 +3105,20 @@ final class AudioIOEngine: ObservableObject {
     /// E4 S25b: live feed-forward passthroughs. Arm needs the gate's inputs; the app supplies
     /// `liveOutputAuthorized` only from `FeedForwardLiveArmingController` (the user's request).
     func setFeedForwardLiveWeights(left: [Float], right: [Float]) -> Bool {
-        speakerDriveFeatureEnabled && (transportSession?.setFeedForwardLiveWeights(left: left, right: right) ?? false)
+        speakerDriveFeatureEnabled && (quietZoneHost?.setFeedForwardLiveWeights(left: left, right: right) ?? false)
     }
 
     func armFeedForwardLive(gate: FeedForwardLiveArmGate.Inputs) -> UInt32? {
         var checked = gate
         checked.featureEnabled = speakerDriveFeatureEnabled
-        return transportSession?.armFeedForwardLive(gate: checked)
+        return quietZoneHost?.armFeedForwardLive(gate: checked)
     }
 
     /// E4 S22b3: the echo stage's model, with the pump delay as timing. Refused (and cleared) with a
     /// subwoofer or bass management (owner decision of 3 Nov 2026, question 18) and while the pump has
     /// no delay yet. Nil clears.
     func setFeedForwardLiveEcho(_ payload: FeedForwardLiveEchoPayload?) -> Bool {
-        guard speakerDriveFeatureEnabled, let transport = transportSession else { return false }
+        guard speakerDriveFeatureEnabled, let transport = quietZoneHost else { return false }
         guard let payload, !bassManagementConfiguration.enabled else {
             _ = transport.setFeedForwardLiveEcho(nil, timingFrames: 0)
             return payload == nil
@@ -3121,17 +3129,17 @@ final class AudioIOEngine: ObservableObject {
         return transport.setFeedForwardLiveEcho(payload, timingFrames: UInt32((delay * rate).rounded()))
     }
 
-    func disarmFeedForwardLive() { transportSession?.disarmFeedForwardLive() }
+    func disarmFeedForwardLive() { quietZoneHost?.disarmFeedForwardLive() }
 
-    func markFeedForwardLiveReferenceLost() { transportSession?.markFeedForwardLiveReferenceLost() }
+    func markFeedForwardLiveReferenceLost() { quietZoneHost?.markFeedForwardLiveReferenceLost() }
 
     func feedForwardLiveStatus() -> N60RenderKernelFeedForwardLiveStatus? {
-        transportSession?.feedForwardLiveStatus()
+        quietZoneHost?.feedForwardLiveStatus()
     }
 
     func pushFeedForwardLiveReference(startIndex: UInt64, samples: [Float]) -> UInt64? {
         guard speakerDriveFeatureEnabled else { return nil }
-        return transportSession?.pushFeedForwardLiveReference(startIndex: startIndex, samples: samples)
+        return quietZoneHost?.pushFeedForwardLiveReference(startIndex: startIndex, samples: samples)
     }
 
     func readSpeakerDriveAnchors() -> [N60SpeakerDriveAnchor] {
@@ -5172,6 +5180,8 @@ final class AudioIOEngine: ObservableObject {
         var graphConfiguration: UnifiedGraphConfiguration?
         var graphIneligibility: UnifiedGraphFallbackReason?
         var programDSP: UnifiedGraphProgramDSP?
+        let ancSplitter = unifiedGraphEnabled
+            ? hostedQuietZoneSplitter(routePlan: routePlan, sampleRate: output.nominalSampleRate) : nil
         if unifiedGraphEnabled {
             // E6 S9a: stereo-class DSP runs on the graph or activation throws; it is never dropped.
             guard let shape = UnifiedGraphLayoutShape(roles: routePlan.programLayout.roles) else {
@@ -5185,7 +5195,9 @@ final class AudioIOEngine: ObservableObject {
                 sampleRate: output.nominalSampleRate,
                 gainConfiguration: gainConfiguration,
                 bassManagementConfiguration: bassManagementConfiguration,
-                programDSP: programDSP
+                programDSP: programDSP,
+                ancHostFeed: ancSplitter != nil,
+                userOutputGain: currentMasterSoftwareGain
             ) {
             case .success(let configuration): graphConfiguration = configuration
             case .failure(let reason): graphIneligibility = reason
@@ -5207,13 +5219,27 @@ final class AudioIOEngine: ObservableObject {
             audioUnitRack: stagedAudioUnitRack,
             unifiedGraphConfiguration: graphConfiguration,
             unifiedGraphIneligibility: graphIneligibility,
-            unifiedGraphRequired: programDSP != nil || needsGraphForSubs
+            unifiedGraphRequired: programDSP != nil || needsGraphForSubs,
+            ancFeedSplitter: ancSplitter
         )
         activeEQFIRProgram = nil
         activeRoomCorrectionProgram = nil
         activeSpeakerIRProgram = nil
         linearPhaseDesignInfo = nil
         nChannelTransportSession = session
+    }
+
+    /// E26 S7b2: the bus splitter the Quiet Zone feed renders through, for a profile session that is class A (two mains
+    /// plus one sub output) with `e26.sub-aware-anc` on; nil otherwise, which leaves the graph exactly as before. The
+    /// splitter is the app's own mains-plus-sub design from the active bass management.
+    private func hostedQuietZoneSplitter(
+        routePlan: LiveNChannelOutputRoutePlan, sampleRate: Double
+    ) -> N60SpeakerBusSplitterSnapshot? {
+        guard FeatureFlags().isEnabled(.subAwareAnc), bassManagementConfiguration.enabled,
+              routePlan.subwooferCount == 1, routePlan.programLayout.roles.count == 2 else { return nil }
+        var bass = bassManagementConfiguration
+        bass.physicalOutputMode = .mainsSub
+        return try? bass.makeSpeakerBusSplitterSnapshot(sampleRate: sampleRate)
     }
 
     private func validateBinauralHeadphoneActivation() throws {

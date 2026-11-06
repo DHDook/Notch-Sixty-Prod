@@ -413,6 +413,14 @@ final class CoreAudioNChannelTransportSession {
     private var isCaptureStarted = false
     private var isOutputStarted = false
     private var stopped = false
+    /// E26 S7b2: the host-fed Quiet Zone's actuators and the last configuration published for this graph, under
+    /// `ancLock`. nil unless the graph carries the ANC lane feed. `republishGraph` re-applies the actuators, so
+    /// engine edits that rebuild the configuration keep the appended lanes, the authorisation and the user volume.
+    private let ancLock = NSLock()
+    private let ancPublishLock = NSLock()
+    private var hostedAnc: UnifiedGraphAncActuators?
+    private var hostedConfiguration: UnifiedGraphConfiguration?
+    private var ancManualTrips: UInt64 = 0
 
     init(
         selectedOutput: AudioOutputDevice,
@@ -423,7 +431,8 @@ final class CoreAudioNChannelTransportSession {
         audioUnitRack: AudioUnitLiveRackSwitchboard? = nil,
         unifiedGraphConfiguration: UnifiedGraphConfiguration? = nil,
         unifiedGraphIneligibility: UnifiedGraphFallbackReason? = nil,
-        unifiedGraphRequired: Bool = false
+        unifiedGraphRequired: Bool = false,
+        ancFeedSplitter: N60SpeakerBusSplitterSnapshot? = nil
     ) throws {
         self.selectedOutput = selectedOutput
         self.routePlan = routePlan
@@ -672,9 +681,13 @@ final class CoreAudioNChannelTransportSession {
                     bridge: newBridge,
                     sampleRate: outputFormat.sampleRate,
                     laneCount: Int(renderGraph.programLayout.channelCount),
-                    outputBufferFrames: outputBufferFrames
+                    outputBufferFrames: outputBufferFrames,
+                    ancFeedSplitter: ancFeedSplitter
                 ) {
-                case .success(let host): unifiedGraphHost = host
+                case .success(let host):
+                    unifiedGraphHost = host
+                    hostedAnc = configuration.ancActuators?.hostFed == true ? configuration.ancActuators : nil
+                    hostedConfiguration = hostedAnc == nil ? nil : configuration
                 case .failure(let reason):
                     if unifiedGraphRequired {
                         N60LiveNChannelBridgeDestroy(newBridge)
@@ -690,7 +703,9 @@ final class CoreAudioNChannelTransportSession {
                 unifiedGraphFallbackReason = unifiedGraphIneligibility
             }
             bridge = newBridge
-            N60LiveNChannelBridgeSetOutputGain(newBridge, outputGain)
+            // With a host-fed Quiet Zone the user's volume sits in the graph (OUTPUT_GAIN), so the anti-noise ignores it;
+            // the bridge gain stays at unity and only carries the start and stop fades.
+            N60LiveNChannelBridgeSetOutputGain(newBridge, hostedAnc == nil ? outputGain : 1)
 
             let tapEntry: [String: Any] = [
                 kAudioSubTapUIDKey: description.uuid.uuidString,
@@ -798,7 +813,8 @@ final class CoreAudioNChannelTransportSession {
         inputMap: N60ProgramInputMap,
         sampleRate: Double,
         outputBufferFrames: UInt32 = 512,
-        unifiedGraphConfiguration: UnifiedGraphConfiguration?
+        unifiedGraphConfiguration: UnifiedGraphConfiguration?,
+        ancFeedSplitter: N60SpeakerBusSplitterSnapshot? = nil
     ) throws {
         self.selectedOutput = selectedOutput
         self.routePlan = routePlan
@@ -820,13 +836,18 @@ final class CoreAudioNChannelTransportSession {
         if let configuration = unifiedGraphConfiguration {
             switch Self.makeUnifiedGraph(
                 configuration: configuration, bridge: newBridge, sampleRate: sampleRate,
-                laneCount: Int(renderGraph.programLayout.channelCount), outputBufferFrames: outputBufferFrames
+                laneCount: Int(renderGraph.programLayout.channelCount), outputBufferFrames: outputBufferFrames,
+                ancFeedSplitter: ancFeedSplitter
             ) {
-            case .success(let host): unifiedGraphHost = host
+            case .success(let host):
+                unifiedGraphHost = host
+                hostedAnc = configuration.ancActuators?.hostFed == true ? configuration.ancActuators : nil
+                hostedConfiguration = hostedAnc == nil ? nil : configuration
             case .failure(let reason): unifiedGraphFallbackReason = reason
             }
         }
         bridge = newBridge
+        if hostedAnc != nil { N60LiveNChannelBridgeSetOutputGain(newBridge, 1) }
     }
 
     deinit {
@@ -867,7 +888,15 @@ final class CoreAudioNChannelTransportSession {
     }
 
     func setOutputGain(_ gain: Float) {
-        N60LiveNChannelBridgeSetOutputGain(bridge, gain)
+        ancLock.lock()
+        let hosted = hostedAnc != nil
+        ancLock.unlock()
+        guard hosted else {
+            N60LiveNChannelBridgeSetOutputGain(bridge, gain)
+            return
+        }
+        // E26 S7b2: the volume moves into the graph's OUTPUT_GAIN stages; the anti-noise is added after them.
+        _ = try? updateHostedAnc { $0.userOutputGain = max(0, gain) }
     }
 
     func setDetailedMeteringDemand(_ enabled: Bool) {
@@ -892,6 +921,9 @@ final class CoreAudioNChannelTransportSession {
             throw LiveNChannelTransportError.configurationChangeRequiresRestart
         }
         var configuration = configuration
+        ancLock.lock()
+        if let anc = hostedAnc { configuration.ancActuators = anc }
+        ancLock.unlock()
         guard abs(configuration.sampleRate - outputFormat.sampleRate) < 0.5 else {
             throw LiveNChannelTransportError.unifiedGraphRejected(.sampleRateMismatch)
         }
@@ -903,7 +935,13 @@ final class CoreAudioNChannelTransportSession {
         guard spec.inputChannels == host.inputChannels, spec.outputChannels == host.outputChannels else {
             throw LiveNChannelTransportError.unifiedGraphRejected(.laneCountMismatch)
         }
-        do { return try host.apply(spec) } catch {
+        do {
+            let result = try host.apply(spec)
+            ancLock.lock()
+            if hostedAnc != nil { hostedConfiguration = configuration }
+            ancLock.unlock()
+            return result
+        } catch {
             throw LiveNChannelTransportError.graphRepublishRefused(String(describing: error))
         }
     }
@@ -914,7 +952,8 @@ final class CoreAudioNChannelTransportSession {
         bridge: UnsafeMutablePointer<N60LiveNChannelBridge>,
         sampleRate: Double,
         laneCount: Int,
-        outputBufferFrames: UInt32
+        outputBufferFrames: UInt32,
+        ancFeedSplitter: N60SpeakerBusSplitterSnapshot? = nil
     ) -> Result<UnifiedGraphHost, UnifiedGraphFallbackReason> {
         var configuration = configuration
         guard abs(configuration.sampleRate - sampleRate) < 0.5 else { return .failure(.sampleRateMismatch) }
@@ -931,6 +970,28 @@ final class CoreAudioNChannelTransportSession {
         }
         guard let host = try? UnifiedGraphHost(spec: spec), let raw = host.rawGraph else {
             return .failure(.graphBuildFailed)
+        }
+        if configuration.ancActuators?.hostFed == true {
+            // E26 S7b2: the anti-noise lanes are filled by the feed, registered as the graph's EXTERNAL processor
+            // (control thread, IO stopped). The host keeps the feed alive until the graph is retired.
+            guard let splitter = ancFeedSplitter,
+                  let feed = ProfileAncFeed(sampleRate: sampleRate, splitter: splitter) else {
+                host.release()
+                return .failure(.specRejected)
+            }
+            let process = unsafeBitCast(
+                N60AncLaneFeedProcess as @convention(c) (
+                    UnsafeMutableRawPointer?, UnsafePointer<UnsafePointer<Float>>, UnsafePointer<UnsafeMutablePointer<Float>>,
+                    UInt32, UInt32
+                ) -> Int32,
+                to: n60_external_process_fn.self)
+            guard n60_graph_set_external_processor(
+                OpaquePointer(raw), process, UnsafeMutableRawPointer(feed.pointer), ProfileAncFeed.channelCount
+            ) == N60_STATUS_OK else {
+                host.release()
+                return .failure(.graphBuildFailed)
+            }
+            host.retainedResource = feed
         }
         guard N60LiveNChannelBridgeAttachGraph(
             bridge, raw, UInt32(configuration.channelCount), configuration.maxBlockFrames
@@ -1330,4 +1391,167 @@ final class CoreAudioNChannelTransportSession {
             throw CoreAudioTransportError.operationFailed(operation: operation, status: status)
         }
     }
+}
+
+
+// MARK: - E26 S7b2: Quiet Zone host for the profile session (class A: two mains plus one sub output)
+
+/// Realtime contract (AGENTS.md section 4): everything here is control plane. The audio thread only runs the graph,
+/// which calls `N60AncLaneFeedProcess` (allocation: none; synchronisation: wait-free mailboxes and atomics; latency:
+/// none added; rates: any native rate; channels: five, programme L/R and the L/R/sub anti-noise sources; reset: the
+/// feed is created disarmed with the graph and recreated, disarmed, by every session rebuild). Nothing arms it but
+/// `setQuietZoneInjectAuthorised`, which the engine calls only for a live `LiveTreatmentArm`.
+extension CoreAudioNChannelTransportSession: QuietZoneRuntimeHost {
+    private var ancFeed: ProfileAncFeed? { unifiedGraphHost?.retainedResource as? ProfileAncFeed }
+
+    /// True while this session's graph carries the Quiet Zone feed.
+    var hostsQuietZone: Bool { ancFeed != nil }
+
+    /// Applies `mutate` to the hosted actuators and republishes the graph (posted when only live values changed).
+    @discardableResult
+    private func updateHostedAnc(_ mutate: (inout UnifiedGraphAncActuators) -> Void) throws -> UnifiedGraphApplyResult {
+        // Serialised end to end, so an older snapshot (say authorised) cannot reach the graph after a newer revoke.
+        ancPublishLock.lock(); defer { ancPublishLock.unlock() }
+        ancLock.lock()
+        guard var anc = hostedAnc, var configuration = hostedConfiguration else {
+            ancLock.unlock()
+            throw LiveNChannelTransportError.configurationChangeRequiresRestart
+        }
+        mutate(&anc)
+        hostedAnc = anc
+        configuration.ancActuators = anc
+        ancLock.unlock()
+        return try republishGraph(configuration)
+    }
+
+    /// True when the next graph publish would let ANC_INJECT add anti-noise.
+    var quietZoneInjectAuthorised: Bool {
+        ancLock.lock(); defer { ancLock.unlock() }
+        return hostedAnc?.authorised ?? false
+    }
+
+    /// Authorises or revokes ANC_INJECT (and ANC_CAPTURE) in the graph and arms or disarms the feed. This is the only
+    /// path to authorisation and the engine calls it only while a `LiveTreatmentArm` is armed for this session. The
+    /// authorisation is not a live parameter, so it is a faded graph publish. Revoking disarms the feed first (20 ms fade).
+    func setQuietZoneInjectAuthorised(_ authorised: Bool) throws {
+        guard let feed = ancFeed else { throw LiveNChannelTransportError.configurationChangeRequiresRestart }
+        if authorised {
+            try updateHostedAnc { $0.authorised = true }
+            N60AncLaneFeedArm(feed.pointer)
+        } else {
+            N60AncLaneFeedDisarm(feed.pointer)
+            N60AncLaneFeedReleaseLease(feed.pointer)
+            try updateHostedAnc { $0.authorised = false }
+        }
+    }
+
+    /// Feed counters for tests and diagnostics.
+    func quietZoneFeedStatus() -> N60AncLaneFeedStatus? {
+        guard let feed = ancFeed else { return nil }
+        return N60AncLaneFeedGetStatus(feed.pointer)
+    }
+
+    @discardableResult
+    func publishActiveQuietZoneGainRecord(_ record: N60ActiveQuietZoneGainRecord) -> UInt64 {
+        guard let feed = ancFeed else { return 0 }
+        var copy = record
+        return N60ActiveQuietZoneGainMailboxPublish(N60AncLaneFeedMailbox(feed.pointer), &copy)
+    }
+
+    func popActiveQuietZoneTelemetry() -> N60ActiveQuietZoneTelemetryRecord? {
+        guard let feed = ancFeed else { return nil }
+        var record = N60ActiveQuietZoneTelemetryRecord()
+        return N60ActiveQuietZoneTelemetryPop(N60AncLaneFeedTelemetry(feed.pointer), &record) ? record : nil
+    }
+
+    var activeQuietZoneMailboxStats: N60ActiveQuietZoneMailboxStats {
+        guard let feed = ancFeed else { return N60ActiveQuietZoneMailboxStats() }
+        return N60ActiveQuietZoneGainMailboxStats(N60AncLaneFeedMailbox(feed.pointer))
+    }
+
+    /// Latches the 20 ms fade (any thread). The graph's own guards also trip on their own; `howlGuardTripCount`
+    /// counts both, so `LiveTreatmentArm` disarms on either.
+    func requestHowlTrip() {
+        guard let feed = ancFeed else { return }
+        N60AncLaneFeedDisarm(feed.pointer)
+        ancLock.lock(); ancManualTrips &+= 1; ancLock.unlock()
+    }
+
+    /// Manual trips plus the graph guards' trips, the latter read by polling the newest snapshot (control thread, so
+    /// a graph-guard trip is seen at the poll rate, not at once; the guard itself mutes within its own ramp).
+    var howlGuardTripCount: UInt64 {
+        let stageIds = (0..<UnifiedGraphAncActuators.hostFedActuatorCount).map {
+            UnifiedGraphAncActuators.guardStageBase + UInt32($0)
+        }
+        let graphTrips = unifiedGraphHost?.guardTripCount(stageIds: stageIds) ?? 0
+        ancLock.lock(); defer { ancLock.unlock() }
+        return ancManualTrips &+ graphTrips
+    }
+
+    /// Re-arms the graph guards (a live revision bump) so the anti-noise can fade back in.
+    func rearmHowlGuard() {
+        _ = try? updateHostedAnc { $0.rearmRevision = ($0.rearmRevision % 1_000_000) + 1 }
+    }
+
+    func renewActiveQuietZoneLease(seconds: Double) {
+        guard let feed = ancFeed, seconds > 0 else { return }
+        N60AncLaneFeedRenewLease(feed.pointer, UInt64((outputFormat.sampleRate * seconds).rounded(.up)))
+    }
+
+    func releaseActiveQuietZoneLease() {
+        guard let feed = ancFeed else { return }
+        N60AncLaneFeedReleaseLease(feed.pointer)
+    }
+
+    func setFeedForwardLiveWeights(left: [Float], right: [Float]) -> Bool {
+        guard let feed = ancFeed, !left.isEmpty, left.count == right.count else { return false }
+        return N60AncLaneFeedSetFeedForwardWeights(feed.pointer, left, right, UInt32(left.count))
+    }
+
+    func armFeedForwardLive(gate: FeedForwardLiveArmGate.Inputs) -> UInt32? {
+        guard let feed = ancFeed, FeedForwardLiveArmGate.decide(gate).isAllowed else { return nil }
+        return N60AncLaneFeedFeedForwardArm(feed.pointer, gate.leadSeconds, gate.requiredLeadSeconds)
+    }
+
+    func setFeedForwardLiveEcho(_ payload: FeedForwardLiveEchoPayload?, timingFrames: UInt32) -> Bool {
+        guard let feed = ancFeed else { return false }
+        guard let payload else { return N60AncLaneFeedSetFeedForwardEcho(feed.pointer, nil) }
+        guard payload.isValid else { return false }
+        let bulk = payload.bulk
+        let ok = payload.left.withUnsafeBufferPointer { left in
+            payload.right.withUnsafeBufferPointer { right in
+                var echo = N60FeedForwardLiveEcho(
+                    bulkDelay: (bulk[0], bulk[1]),
+                    tapCount: (UInt32(left.count), UInt32(right.count)),
+                    taps: (left.baseAddress, right.baseAddress))
+                return N60AncLaneFeedSetFeedForwardEcho(feed.pointer, &echo)
+            }
+        }
+        return ok && N60AncLaneFeedSetFeedForwardEchoTiming(feed.pointer, timingFrames)
+    }
+
+    func disarmFeedForwardLive() {
+        guard let feed = ancFeed else { return }
+        N60AncLaneFeedFeedForwardDisarm(feed.pointer)
+    }
+
+    /// The feed has no separate reference-lost latch: losing the reference disarms the feed-forward filter.
+    func markFeedForwardLiveReferenceLost() { disarmFeedForwardLive() }
+
+    func feedForwardLiveStatus() -> N60RenderKernelFeedForwardLiveStatus? {
+        guard let feed = ancFeed else { return nil }
+        var status = N60RenderKernelFeedForwardLiveStatus()
+        status.attached = true
+        status.filter = N60AncLaneFeedFeedForwardStatus(feed.pointer)
+        status.outputIndex = N60AncLaneFeedReferenceOutputIndex(feed.pointer)
+        status.referenceUnderruns = N60AncLaneFeedGetStatus(feed.pointer).referenceUnderruns
+        return status
+    }
+
+    func pushFeedForwardLiveReference(startIndex: UInt64, samples: [Float]) -> UInt64? {
+        guard let feed = ancFeed, !samples.isEmpty else { return nil }
+        return N60AncLaneFeedPushReference(feed.pointer, startIndex, samples, UInt32(samples.count))
+    }
+
+    var ambientReferenceSampleRate: Double { outputFormat.sampleRate }
 }
