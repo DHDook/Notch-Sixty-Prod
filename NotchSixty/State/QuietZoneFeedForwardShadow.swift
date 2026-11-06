@@ -15,6 +15,11 @@ struct QuietZoneFeedForwardShadowInputs: Equatable, Sendable {
     var position: RoomCorrectionMeasurementPosition
     /// E4 S22b2: the speakers' leakage into the reference microphone, for echo removal.
     var echoModel: FeedForwardEchoModel?
+    /// E26 S2: the bass path now and the one the leakage sweep was measured under. Used only when a sub or bass
+    /// management is active and `e26.sub-aware-anc` is on; the sweep plays through the whole feed, so its leakage
+    /// already holds the sub-to-reference path.
+    var bassPath: AncBassPathState? = nil
+    var echoBassFingerprint: AncBassPathFingerprint? = nil
 }
 
 typealias QuietZoneFeedForwardShadowCaptureFactory = (
@@ -628,9 +633,21 @@ final class QuietZoneFeedForwardShadow: ObservableObject {
         guard inputs.echoModel != nil else { return "Measure speaker leakage to enable echo removal." }
         guard let driveSource else { return "No speaker drive from the engine." }
         guard driveSource.driveSampleRate != nil else { return "No speaker drive from the engine." }
-        if driveSource.subwooferActive { return "Echo removal is off with a subwoofer or bass management." }
+        if driveSource.subwooferActive {
+            // E26 S2 (E4 S22c): under the flag, leakage measured through the whole feed with the same bass setup
+            // describes the programme. Without the flag, or with a stale or unstamped record, it stays off.
+            guard FeatureFlags().isEnabled(.subAwareAnc) || forceSubAwareForTesting else {
+                return "Echo removal is off with a subwoofer or bass management."
+            }
+            guard let bassPath = inputs.bassPath else { return "Echo removal is off with a subwoofer or bass management." }
+            if case .stale(let message) = bassPath.freshness(of: inputs.echoBassFingerprint) { return message }
+            if !bassPath.path.hasSubwooferForAnc { return nil }
+        }
         return nil
     }
+
+    /// Tests only: bypasses the sub-aware feature flag.
+    var forceSubAwareForTesting = false
 
     /// Tests only: bypasses the feature flag.
     var forceEchoForTesting = false
