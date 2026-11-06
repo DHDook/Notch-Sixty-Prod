@@ -138,17 +138,37 @@ enum OpenPreoutCheck {
 
     /// nil: the measured path is explained by the app's settings. Otherwise the refusal text. Compared over bands both
     /// analyses could measure; fewer than three shared bands cannot confirm the declaration, so it is refused.
+    ///
+    /// `removingCommonOffset` (E26 S6b): a measurement at the seat also contains the speakers and the room, which add one
+    /// broadband delay and level the app's own model does not have. With it set, the median level and delay difference
+    /// over the shared bands is removed first, so only a difference in shape (an extra low-pass, a band-dependent delay)
+    /// counts. The tolerances are unchanged. Room modes can still move single bands; E22 checks the margin on the bench.
     static func refusal(
-        measured: [CombinedPathBand], expected: [CombinedPathBand], sampleRate: Double
+        measured: [CombinedPathBand], expected: [CombinedPathBand], sampleRate: Double,
+        removingCommonOffset: Bool = false
     ) -> String? {
         // One fd sample: the drive rate of the E4 analysis, at most 48 kHz.
         let oneSample = sampleRate > 0 ? 1.0 / min(sampleRate, 48_000) : .infinity
-        var shared = 0
+        var pairs: [(gain: Double, delay: Double)] = []
         for (m, e) in zip(measured, expected) {
             guard let md = m.delaySeconds, let ed = e.delaySeconds else { continue }
-            shared += 1
-            if abs(m.gainDB - e.gainDB) > gainToleranceDB || abs(md - ed) > oneSample { return refusal }
+            pairs.append((m.gainDB - e.gainDB, md - ed))
         }
-        return shared >= 3 ? nil : refusal
+        guard pairs.count >= 3 else { return refusal }
+        var gainOffset = 0.0, delayOffset = 0.0
+        if removingCommonOffset {
+            gainOffset = median(pairs.map(\.gain))
+            delayOffset = median(pairs.map(\.delay))
+        }
+        for pair in pairs where abs(pair.gain - gainOffset) > gainToleranceDB || abs(pair.delay - delayOffset) > oneSample {
+            return refusal
+        }
+        return nil
+    }
+
+    private static func median(_ values: [Double]) -> Double {
+        let sorted = values.sorted()
+        let n = sorted.count
+        return n % 2 == 1 ? sorted[n / 2] : (sorted[n / 2 - 1] + sorted[n / 2]) / 2
     }
 }

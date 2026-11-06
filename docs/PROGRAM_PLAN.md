@@ -321,11 +321,11 @@ it, behind `e26.sub-aware-anc`. Live output stays behind the per-feature arm.
 - [~] Sub-aware readiness replaces the blanket refusal; setup UI; end-to-end twin harness at eight rates
   - [~] S5 `e26/sub-aware-arming` (PR pending): `SubAwareAncReadiness` feeds tonal `setEnabled` and feed-forward stepWaiting/stepPlaying (`subAwareRefusal`); setup card `ProductionSubAwareQuietZoneCard`; missing plant and multi-seat sub refused; twin harness at eight rates through UI-model calls, survey-to-arm twin wired by S6; bench: E22
   - [~] S6a `e26/sub-multibus-transport` (#370)
-  - [ ] S6b `e26/sub-readiness-from-sweeps`
+  - [~] S6b `e26/sub-readiness-from-sweeps` (PR pending): open-preout check, per-band eligibility and sub-band render verification feed readiness behind `e26.sub-aware-anc`; multi-bus profile-session passes and the `measureSubPath` harness move to S7
   - [ ] S6c `e26/sub-multiseat-plant`
 - [ ] Quiet Zone with a sub on its own output (profile session, sub lane as an actuator)
-  - [ ] S6: run `OpenPreoutCheck` on measured sweeps and set `openPreoutRefusal` (nil today, so open preout is not verified against the measurement)
-  - [ ] S6: feed `PerBandAncEligibility` (`feedForwardBandCount`, nil today) from `CombinedPathBandAnalyzer` into readiness
+  - [~] S6: run `OpenPreoutCheck` on measured sweeps and set `openPreoutRefusal` (S6b, behind the flag)
+  - [~] S6: feed `PerBandAncEligibility` (`feedForwardBandCount`) from `CombinedPathBandAnalyzer` into readiness (S6b, behind the flag)
   - [ ] S6: multi-seat sub support with a measured per-seat 2x2 plant (refused today)
   - [ ] S6: full end-to-end twin harness from sweeps
 - [ ] Flag removed after the E22 sub bench checks (owner decision)

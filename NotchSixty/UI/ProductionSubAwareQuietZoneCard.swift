@@ -22,7 +22,7 @@ struct ProductionSubAwareQuietZoneCard: View {
                     }
                 }
                 HStack {
-                    Button("Measure with your subwoofer") { survey.measureLeakage() }
+                    Button("Measure with your subwoofer") { survey.measureSubPath(thenLeakage: true) }
                         .disabled(survey.activity != .idle)
                     Text(survey.message).font(.caption).foregroundStyle(.secondary)
                 }
