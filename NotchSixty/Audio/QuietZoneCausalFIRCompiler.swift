@@ -162,7 +162,8 @@ struct QuietZoneCausalFIRCompiler: Sendable {
             ).magnitude
             guard benefit.isFinite, echo.isFinite,
                   benefit >= QuietZoneVirtualSeatDesigner.minimumModeledReductionDB,
-                  echo <= QuietZoneVirtualSeatDesigner.maximumLeakageFraction
+                  echo <= CombinedLeakageStabilityBound.fractionLimit(
+                    for: model[i], bassConditioning: bassConditioning)
             else { throw QuietZoneCausalFIRError.inadequateModeledReduction }
             maxEcho = max(maxEcho, echo)
             worstReduction = min(worstReduction, benefit)

@@ -173,6 +173,45 @@ final class ActiveQuietZoneController: ObservableObject {
     /// feed-forward survey; empty until one is measured.
     var bassPlantMap = BassPlantMap(bands: [])
 
+    private var appBassCrossoverHz: Double? {
+        let bass = engine.bassManagementConfiguration
+        return bass.enabled ? bass.frequencyHz : nil
+    }
+
+    /// E26 S4: the crossover the sub-band watch and the summing law use, hertz.
+    private var subSafetyCrossoverHz: Double {
+        sub(limits: ExcursionLimits(mainLowerLimitHz: 0, subCrossoverHz: appBassCrossoverHz))
+            .subCrossoverHz ?? ReceiverBass.defaultCrossoverHz
+    }
+
+    /// E26 S4: the limits refined for a receiver or sub downstream (design 6). Unchanged with the flag off.
+    private func sub(limits: ExcursionLimits) -> ExcursionLimits {
+        guard subAwareAncEnabled else { return limits }
+        return limits.refined(for: ancBassPathState.path, appCrossoverHz: appBassCrossoverHz)
+    }
+
+    /// E26 S4: starts the sub-band watch and the summing factor for a new arm.
+    private func beginSubSafety() {
+        guard bassConditioningActive else {
+            bassPathWatch = nil
+            subSummingFactor = 1
+            return
+        }
+        let upper = subSafetyCrossoverHz
+        bassPathWatch = BassPathWatch(upperHz: upper)
+        subSummingFactor = SubSummingLaw.factor(plant: bassPlantMap, subInPath: true, upperHz: upper)
+    }
+
+    /// E26 S4: the sub-band path gain and phase against this arm's first value. True when it moved past the window.
+    private func bassPathMoved(_ tones: [AdaptiveTonalLiveReport.Tone]) -> Bool {
+        guard bassPathWatch != nil else { return false }
+        let samples = tones.map {
+            BassPathWatch.Sample(frequencyHz: $0.frequencyHz, levelDB: $0.pathLevelDB, phaseDegrees: $0.pathPhaseDegrees)
+        }
+        if case .changed = bassPathWatch!.observe(samples) { return true }
+        return false
+    }
+
     /// E26 S3b: the Quiet Zone card line, nil when the rules are off or no plant is measured.
     var bassConditioningReadout: String? {
         guard bassConditioningActive, !bassPlantMap.isEmpty else { return nil }
@@ -215,6 +254,9 @@ final class ActiveQuietZoneController: ObservableObject {
     /// excursion cap off.
     private var excursionLimitsProvider: (@MainActor () -> ExcursionLimits)?
     private var thermal = ExcursionThermalIntegrator()
+    /// E26 S4: the sub-band path watch and the measured summing factor for this arm (flag on, sub in the path).
+    private var bassPathWatch: BassPathWatch?
+    private var subSummingFactor = 1.0
 
     func attachExcursionCap(_ provider: (@MainActor () -> ExcursionLimits)?) {
         excursionLimitsProvider = provider
@@ -684,6 +726,7 @@ final class ActiveQuietZoneController: ObservableObject {
             flightRecorder.recordArm()
             armedGeneration = engine.liveTreatmentGeneration
             adaptiveLive?.reset()
+            beginSubSafety()
             if let earned = earnedCap {
                 let environment = liveTreatmentEnvironment()
                 if let binding = earnedBinding(environment) {
@@ -693,7 +736,7 @@ final class ActiveQuietZoneController: ObservableObject {
                 // E4 S21: the curve is rebuilt at each arm, so a new Room Correction measurement
                 // is picked up by the next arm.
                 thermal.reset()
-                let curve = excursionLimitsProvider.map { ExcursionCapCurve(limits: $0()) }
+                let curve = excursionLimitsProvider.map { ExcursionCapCurve(limits: sub(limits: $0())) }
                 engine.excursionCapCurve = curve
                 adaptiveLive?.excursionCurve = curve
             }
@@ -742,7 +785,7 @@ final class ActiveQuietZoneController: ObservableObject {
             let now = ProcessInfo.processInfo.systemUptime
             var holding = false
             if excursionLimitsProvider != nil {
-                holding = thermal.update(now: now, playedPeakLinear: facts.playedPeakLinear, nominalCapDBFS: earned.capDBFS)
+                holding = thermal.update(now: now, playedPeakLinear: facts.playedPeakLinear * subSummingFactor, nominalCapDBFS: earned.capDBFS)
                 earned.setThermalHold(thermal.holdReductionDB)
             }
             earned.poll(EarnedCapPollFacts(
@@ -755,6 +798,10 @@ final class ActiveQuietZoneController: ObservableObject {
                 moveRecovering: adaptive.isCapRecovering,
                 thermalHold: holding
             ))
+        }
+        if bassPathMoved(adaptive.latestReport.tones) {
+            arm.disarm(.bassPathChanged)
+            return false
         }
         for request in requests {
             switch request {
@@ -785,7 +832,8 @@ final class ActiveQuietZoneController: ObservableObject {
             inputDeviceUID: ambient.selectedInputDeviceUID,
             outputGainDB: engine.liveTreatmentOutputGainDB,
             microphoneSignalFault: ambient.microphoneSignalFault,
-            howlGuardTripCount: engine.liveTreatmentHowlTripCount
+            howlGuardTripCount: engine.liveTreatmentHowlTripCount,
+            bassPathFingerprint: bassConditioningActive ? ancBassPathState.fingerprint.value : nil
         )
     }
 
@@ -800,6 +848,8 @@ final class ActiveQuietZoneController: ObservableObject {
         engine.excursionCapCurve = nil
         adaptiveLive?.excursionCurve = nil
         thermal.reset()
+        bassPathWatch = nil
+        subSummingFactor = 1
         // Revoke the engine arm token first: nothing built under this arm can play again.
         armedGeneration = nil
         engine.revokeLiveTreatmentArm()
