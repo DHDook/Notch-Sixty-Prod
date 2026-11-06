@@ -23,6 +23,10 @@ struct MultichannelReferenceProgram: Equatable, Sendable {
     var startFrame: Int
     var outputChannelIndex: UInt32
 }
+/// E26 S6a: one more output program (a bus of the splitter-rendered through-feed, such as the sub) played on its own
+/// output channel in the same pass. Up to seven beside the primary sweep.
+typealias MultichannelLaneProgram = MultichannelReferenceProgram
+
 enum MultichannelCalibrationTransportError: Error, Equatable, LocalizedError {
     case outputDeviceUnavailable(String)
     case invalidInputChannel(index: Int, availableChannels: Int)
@@ -88,6 +92,8 @@ final class MultichannelCalibrationTransport {
     /// E11 S9b: seats after the first; empty for the ordinary one-microphone pass.
     let additionalSeats: [MultichannelSeatInput]
     let referenceProgram: MultichannelReferenceProgram?
+    /// E26 S6a: further output programs on their own channels (the sub lane of the splitter render).
+    let laneProgramsForOutputs: [MultichannelLaneProgram]
     /// E11 S9b: true when every seat is a channel of one device (one clock).
     var isSharedClock: Bool {
         additionalSeats.allSatisfy { $0.device.deviceID == input.deviceID }
@@ -122,6 +128,7 @@ final class MultichannelCalibrationTransport {
         outputSweepSamples: [Float]? = nil,
         additionalSeats: [MultichannelSeatInput] = [],
         referenceProgram: MultichannelReferenceProgram? = nil,
+        laneProgramsForOutputs: [MultichannelLaneProgram] = [],
         levelContext: OpaquePointer? = nil,
         levelOutputChannels: [UInt32] = []
     ) throws {
@@ -138,6 +145,10 @@ final class MultichannelCalibrationTransport {
         }
         self.additionalSeats = additionalSeats
         self.referenceProgram = referenceProgram
+        guard laneProgramsForOutputs.count <= Int(N60_TARGETED_MAX_LANE_PROGRAMS) else {
+            throw MultichannelCalibrationTransportError.invalidOutputProgram
+        }
+        self.laneProgramsForOutputs = laneProgramsForOutputs
         self.routePlan = routePlan
         self.input = input
         self.selectedInputChannelIndex = inputChannelIndex
@@ -541,6 +552,17 @@ final class MultichannelCalibrationTransport {
                   referenceProgram.outputChannelIndex < UInt32(outputChannelCount) else {
                 throw MultichannelCalibrationTransportError.invalidOutputProgram
             }
+        }
+        for lane in laneProgramsForOutputs {
+            let attached = lane.samples.withUnsafeBufferPointer { buffer -> Bool in
+                guard let base = buffer.baseAddress,
+                      let start = try? Self.checkedUInt32(lane.startFrame),
+                      let count = try? Self.checkedUInt32(buffer.count),
+                      lane.outputChannelIndex < UInt32(outputChannelCount) else { return false }
+                return N60TargetedRoomMeasurementBridgeAttachLaneProgram(
+                    bridge, base, count, start, lane.outputChannelIndex)
+            }
+            guard attached else { throw MultichannelCalibrationTransportError.invalidOutputProgram }
         }
         let expectedCaptureFrames = program.leadInFrames
             + outputSweepSamples.count

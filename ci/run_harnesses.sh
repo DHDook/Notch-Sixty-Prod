@@ -490,10 +490,27 @@ if selected e25_stereo_bass; then
     fi
 fi
 
+# E26 S6a: the ANC stages with the sub lane as an actuator (placement, lane rules, three-actuator cancellation).
+if selected e26_anc_actuators; then
+    build_core_objs
+    if [ "$CORE_OK" = 1 ]; then
+        if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -Icore/include -Icore/src core/tests/test_anc_actuators.cpp \
+            "${CORE_OBJS[@]}" -o "$OUT/e26_core_anc_actuators" && "$OUT/e26_core_anc_actuators"; then
+            passed+=(e26_core_anc_actuators)
+        else
+            failed+=(e26_core_anc_actuators)
+        fi
+    else
+        failed+=(e26_anc_actuators)
+    fi
+fi
+
 # E11 S2: targeted measurement bridge second-program playback and allocation-free process call.
 if selected e11_targeted_bridge; then
     harness e11_targeted_bridge "${STRICT[@]}" -O2 -I"$RT" core/tests/test_targeted_bridge.c
 fi
+# E26 S6a: further output programs (splitter-rendered mains and the sub lane) in the same pass.
+harness e26_bridge_lanes "${STRICT[@]}" -O2 -I"$RT" core/tests/test_targeted_bridge_lanes.c -lm
 
 # E24 S1: the Level step's render path (generator-only core graph + monitor ring) at every standard rate.
 if selected e24_level_session; then
