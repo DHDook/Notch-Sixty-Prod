@@ -39,8 +39,18 @@ so everything you need is in the task message, `CLAUDE.md`, the epic's section o
 7. Commit, push with `git push -u origin <branch>`, get the PR text from the pr-writer agent,
    and open the PR with `gh pr create`. Add the label `needs-owner` if the PR touches anything
    in the owner-review list in `CLAUDE.md` (Merge policy).
-8. Return at most eight lines: PR number and link, `needs-owner` or `low-risk`, what changed in
+8. **Gap pass (mandatory, before returning).** List every gap you found or left: "not wired",
+   "left for", follow-ups, verifier limits or excluded ranges, skipped reviewer notes, weakened or
+   replaced tests, unverified claims. Record each in the epic's `## Gaps` section (format in
+   `docs/epics/README.md`): clear answer -> a `scoped` entry plus an unchecked plan item in the
+   owning slice; a real question -> an `open-question` entry (question and recommendation written
+   in it) and list it under "Needs your decision" in the hand-back. Never fix a `scoped` gap
+   outside its owning slice unless the coordinator says to. Do not tick a slice that has an
+   `open-question` gap. The PR body carries the same `## Gaps` section ("none" if none).
+9. Return at most eight lines: PR number and link, `needs-owner` or `low-risk`, what changed in
    one sentence, "Reachable from UI: yes/no", local test result, realtime-reviewer verdict if run, bench checks added, and
-   the next slice you would pick.
+   the next slice you would pick. Then always add a `## Gaps` section (one line per gap with its
+   G-number and state; "none" if none), and a "Needs your decision" heading when any
+   `open-question` gap exists.
 
 Do not merge, do not wait for CI, and do not start a second slice.

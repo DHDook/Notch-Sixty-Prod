@@ -56,17 +56,18 @@ The owner already has a local test build of `main`; do not rebuild a baseline un
    The order of epics is the "Execution order" list in `docs/PROGRAM_PLAN.md`.
 4. **Verify narrowly** (affected tests only; CI runs the full suite), and use
    `realtime-reviewer` for any engine or realtime change.
-5. **Plan updates ride in the same PR** (plan-tracker). Epic files keep a Status of at most
+5. **Gaps:** every epic has a `## Gaps` ledger (`docs/epics/README.md`); slice-builder records gaps and its hand-back must include a `## Gaps` section. Never fix a `scoped` gap outside its owning slice; open-question gaps block ticking and shipping.
+6. **Plan updates ride in the same PR** (plan-tracker). Epic files keep a Status of at most
    five lines; history goes in their `## Log` section, which agents only grep when needed.
-6. **Merge policy:** low-risk PRs are merged by Claude with `gh pr merge --squash
+7. **Merge policy:** low-risk PRs are merged by Claude with `gh pr merge --squash
    --delete-branch` once CI is green. PRs that touch the realtime engine, Core Audio transport,
    `AudioIOEngine.swift`, ANC / MIMO / protection code, `AGENTS.md`, `.claude/`, workflows,
    dependencies, the minimum OS, or remove a user-visible feature get the `needs-owner` label
    and wait for the owner.
-7. **Keep going.** After a merge, or while a `needs-owner` PR waits, continue with the next
+8. **Keep going.** After a merge, or while a `needs-owner` PR waits, continue with the next
    slice that is independent of open PRs (branch from `main`, never stack). Stop after four PRs
    in a session, two open `needs-owner` PRs, a plan approval, bench work, or a phase gate.
-8. **Bench work:** when a step needs physical hardware, write the steps as a checklist in
+9. **Bench work:** when a step needs physical hardware, write the steps as a checklist in
    `docs/epics/E<n>.md` under "Bench checks", tell the owner, and stop that slice there.
 
 Ask the owner before: changing `AGENTS.md` policy, adding a third-party dependency, raising the
