@@ -33,6 +33,8 @@ struct FeedForwardLiveQuietZoneFacts: Equatable, Sendable {
     /// including any receiver, against the survey preview). nil with the flag off or when it qualifies. Eligible
     /// grants nothing; a reason only adds a wait.
     var arrangementRefusal: String? = nil
+    /// E26 S5 (`e26.sub-aware-anc`): `SubAwareAncReadiness` says why a sub in the path is not ready. nil: ready, or no sub.
+    var subAwareRefusal: String? = nil
 }
 
 /// What the feed-forward shadow and reference driver know.
@@ -239,6 +241,7 @@ struct FeedForwardLiveArmingPolicy: Equatable, Sendable {
         guard quietZone.verdict == .ok else { return wait("the seat check has not cleared yet") }
         guard !quietZone.leaseRequired || quietZone.leaseHealthy else { return wait("the engine lease is not running") }
         if let reason = quietZone.arrangementRefusal { return wait(reason) }
+        if let reason = quietZone.subAwareRefusal { return wait(reason) }
         guard quietZone.budget.readiness == .physicallyPlausible,
               let preview = quietZone.budget.conservativePreviewSeconds,
               let path = quietZone.budget.antiNoisePathSeconds
@@ -267,6 +270,8 @@ struct FeedForwardLiveArmingPolicy: Equatable, Sendable {
         kernel: FeedForwardLiveKernelFacts?
     ) -> Decision {
         if let broken = commonBreak(quietZone) { return turnOff(broken) }
+        // E26 S5: a stale or lost sub measurement ends a live filter at once.
+        if let reason = quietZone.subAwareRefusal { return turnOff(.engineRefused(reason)) }
         if case .harm = quietZone.verdict { return turnOff(.seatRegression) }
         guard quietZone.hasBaseline, quietZone.verdict != .baselining else { return turnOff(.baselineLost) }
         guard !quietZone.leaseRequired || quietZone.leaseHealthy else { return turnOff(.leaseLost) }

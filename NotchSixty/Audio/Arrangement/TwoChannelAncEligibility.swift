@@ -81,9 +81,11 @@ enum TwoChannelAncArming {
     /// What the Quiet Zone readiness card and the arming policy show for the stored arrangement. nil: nothing to add
     /// (no arrangement). A downstream sub refuses first (asking for the receiver declaration while it is missing);
     /// otherwise an eligibility refusal.
-    static func refusal(arrangement: SystemArrangement?, budget: QuietZoneFeedForwardBudget) -> String? {
+    static func refusal(
+        arrangement: SystemArrangement?, budget: QuietZoneFeedForwardBudget, subAware: Bool = false
+    ) -> String? {
         guard let arrangement else { return nil }
-        if arrangement.hasDownstreamSubwoofer {
+        if arrangement.hasDownstreamSubwoofer, !(subAware && arrangement.receiverBass.isDeclared) {
             return arrangement.receiverBass.isDeclared
                 ? "Quiet Zone is \(subwooferRefusal)." : undeclaredReceiverRefusal
         }
