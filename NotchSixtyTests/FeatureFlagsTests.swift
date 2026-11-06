@@ -32,6 +32,17 @@ final class FeatureFlagsTests: XCTestCase {
         }
     }
 
+    /// E26 S7 (owner decision): the sub-aware Quiet Zone flag is on in a release-style configuration (stored overrides
+    /// ignored, no launch argument), even with a stored "off" override, and the live ANC flags stay off.
+    func testSubAwareAncResolvesOnInAReleaseConfiguration() {
+        defaults.set(false, forKey: FeatureFlags.key(for: .subAwareAnc))
+        let release = FeatureFlags(known: FeatureFlag.all, defaults: defaults, policy: .launchArgumentOnly, arguments: [])
+        XCTAssertTrue(release.isEnabled(.subAwareAnc))
+        XCTAssertFalse(release.isEnabled(.feedForwardLive))
+        XCTAssertFalse(release.isEnabled(.adaptiveTonalLive))
+        XCTAssertFalse(release.isEnabled(.ancEngineLease))
+    }
+
     func testDebugOverridesPersistAndReset() {
         flags(.storedOverrides).setEnabled(true, for: draft)
         flags(.storedOverrides).setEnabled(false, for: onByDefault)

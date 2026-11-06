@@ -123,11 +123,14 @@ extension FeatureFlag {
     /// E26: sub-aware Quiet Zone. Bass-path records, per-band eligibility and `SubAwareAncReadiness` replace the blanket
     /// "not available with a subwoofer yet" refusal. S1 only stops counting mono bass on the pair (class C) as a sub.
     /// The undeclared-receiver refusal is not behind this flag. Live output still needs the E4 flags and the user's
-    /// Turn On. Removed when E26 ships.
+    /// Turn On. On by default (owner decision, E26 S7). Removed when E26 ships.
     static let subAwareAnc = FeatureFlag(
         id: "e26.sub-aware-anc",
         title: "Sub-aware Quiet Zone",
-        epic: "E26"
+        epic: "E26",
+        // Owner-approved flag enablement (E26 S7): on in release builds too. Live output still needs the E4 flags,
+        // the readiness checks, the per-feature arm and the user's Turn On; none of those is loosened.
+        defaultEnabled: true
     )
 
 }
