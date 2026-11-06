@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		E26A00000000000000000106 /* SubActuatorMultibusTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E26A00000000000000000105 /* SubActuatorMultibusTests.swift */; };
 		E26B00000000000000000104 /* SubSweepReadinessTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E26B00000000000000000103 /* SubSweepReadinessTests.swift */; };
+		E26B00000000000000000204 /* SubMultiSeatPlantTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E26B00000000000000000203 /* SubMultiSeatPlantTests.swift */; };
 		E26A00000000000000000104 /* UnifiedGraphAncActuators.swift in Sources */ = {isa = PBXBuildFile; fileRef = E26A00000000000000000103 /* UnifiedGraphAncActuators.swift */; };
 		E26A00000000000000000102 /* SubActuatorMultibus.swift in Sources */ = {isa = PBXBuildFile; fileRef = E26A00000000000000000101 /* SubActuatorMultibus.swift */; };
 		E26B00000000000000000102 /* SubSweepAnalysis.swift in Sources */ = {isa = PBXBuildFile; fileRef = E26B00000000000000000101 /* SubSweepAnalysis.swift */; };
@@ -610,6 +611,7 @@
 /* Begin PBXFileReference section */
 		E26A00000000000000000105 /* SubActuatorMultibusTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubActuatorMultibusTests.swift; sourceTree = "<group>"; };
 		E26B00000000000000000103 /* SubSweepReadinessTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubSweepReadinessTests.swift; sourceTree = "<group>"; };
+		E26B00000000000000000203 /* SubMultiSeatPlantTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubMultiSeatPlantTests.swift; sourceTree = "<group>"; };
 		E26A00000000000000000103 /* UnifiedGraphAncActuators.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnifiedGraphAncActuators.swift; sourceTree = "<group>"; };
 		E26A00000000000000000101 /* SubActuatorMultibus.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubActuatorMultibus.swift; sourceTree = "<group>"; };
 		E26B00000000000000000101 /* SubSweepAnalysis.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubSweepAnalysis.swift; sourceTree = "<group>"; };
@@ -1463,6 +1465,7 @@
 				E26A00000000000000000029 /* ThroughFeedSplitterRenderTests.swift */,
 				E26A00000000000000000105 /* SubActuatorMultibusTests.swift */,
 				E26B00000000000000000103 /* SubSweepReadinessTests.swift */,
+				E26B00000000000000000203 /* SubMultiSeatPlantTests.swift */,
 				E4F700000000000000000F04 /* FeedForwardLiveWeightsFeedTests.swift */,
 				E4F900000000000000000A06 /* FeedForwardLiveArmingTests.swift */,
 				E4F700000000000000000043 /* CrossDevicePairCaptureTests.swift */,
@@ -2349,6 +2352,7 @@
 				E26A0000000000000000002A /* ThroughFeedSplitterRenderTests.swift in Sources */,
 				E26A00000000000000000106 /* SubActuatorMultibusTests.swift in Sources */,
 				E26B00000000000000000104 /* SubSweepReadinessTests.swift in Sources */,
+				E26B00000000000000000204 /* SubMultiSeatPlantTests.swift in Sources */,
 				E4F700000000000000000F03 /* FeedForwardLiveWeightsFeedTests.swift in Sources */,
 				E4F900000000000000000A05 /* FeedForwardLiveArmingTests.swift in Sources */,
 				E4F700000000000000000033 /* CrossDevicePairCaptureTests.swift in Sources */,
