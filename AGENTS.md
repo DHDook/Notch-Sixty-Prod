@@ -218,3 +218,4 @@ Do not add per-PR or per-branch workflows. Extend one of these three instead.
 - A flag-removal or "ship" slice needs an end-to-end test through production wiring and no open ledger entries for its epic.
 - Production code has no `Unconnected*` (always-unavailable) defaults on injectable services; tests inject fakes explicitly.
 - Every PR body states "Reachable from UI: yes/no", with the path from the user action to the engine.
+- Every epic file has a `## Gaps` ledger (`docs/epics/README.md`). A slice with an `open-question` gap is not ticked. A `scoped` gap needs an unchecked plan item in its owning slice. A flag-removal or "ship" slice needs every gap in its epic `closed`.

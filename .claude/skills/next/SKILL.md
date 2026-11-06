@@ -29,6 +29,11 @@ yourself beyond what the steps below name. All building happens in subagents.
    independent work as in step 4 (`needs-owner`) while the plan waits.
 3. **Build it in a fresh context.** Start the slice-builder agent with: the epic ID, the slice
    name(s), one sentence of intent, and any owner decision from this session that affects it. Wait for its summary. Do not repeat its work.
+   - A hand-back with no `## Gaps` section is rejected: resume the same slice-builder (SendMessage)
+     to add it, record the gaps in the epic file and the PR body, and push.
+   - Never pick up a `scoped` gap on its own. It runs only when its owning slice comes up in
+     written order, or when the owner names it (for example "fix G3"). Gaps with an
+     `open-question` block ticking the owning slice and block flag-removal and ship slices.
    - "NEEDS PLAN": the slice's approach is not recorded; start epic-planner for that epic as in
      step 2.
    - "BLOCKED": report the failure in two lines and stop.
@@ -44,7 +49,8 @@ yourself beyond what the steps below name. All building happens in subagents.
 5. **Continue.** After a merge: `git switch main && git pull --ff-only origin main`, then back
    to step 1. Stop after four PRs in this session (merged or waiting), two open `needs-owner`
    PRs, a plan approval, bench work, a phase gate, or a block.
-6. **Report** at the end: one line per PR (number, title, merged or waiting) and anything the
-   owner must do.
+6. **Report** at the end: one line per PR (number, title, merged or waiting), every
+   `open-question` gap (epic, G-number, the question) so the owner can answer them, and anything
+   the owner must do.
 
 When the owner says a `needs-owner` PR is merged, sync and continue from step 1.
