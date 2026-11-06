@@ -45,6 +45,9 @@ struct QuietZoneFeedForwardDesignSurvey: Codable, Equatable, Sendable {
     var leakage: QuietZoneFeedForwardLeakage?
     /// E4 S22b2: the three-sweep echo model (v2). A v1 file has none; see `echoModelOrLegacy`.
     var echoModel: FeedForwardEchoModel?
+    /// E26 S2b: the bass path the leakage sweeps played through. Nil for a measurement made before the stamp existed
+    /// (it reads as stale when a sub is in the path). Optional, so schema 2 files decode unchanged.
+    var echoBassFingerprint: AncBassPathFingerprint?
 
     /// The model that drives echo removal. A v1 leakage becomes a one-repeat model without a
     /// bound, which the stability check reports as "not checked".
