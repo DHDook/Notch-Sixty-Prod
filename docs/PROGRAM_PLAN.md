@@ -326,7 +326,7 @@ it, behind `e26.sub-aware-anc`. Live output stays behind the per-feature arm.
 - [ ] Quiet Zone with a sub on its own output (profile session, sub lane as an actuator)
   - [~] S6: run `OpenPreoutCheck` on measured sweeps and set `openPreoutRefusal` (S6b, behind the flag)
   - [~] S6: feed `PerBandAncEligibility` (`feedForwardBandCount`) from `CombinedPathBandAnalyzer` into readiness (S6b, behind the flag)
-  - [ ] S6: multi-seat sub support with a measured per-seat 2x2 plant (refused today)
+  - [~] S6: multi-seat sub support with a measured per-seat 2x2 plant (S6c, behind the flag; built dark)
   - [ ] S6: full end-to-end twin harness from sweeps
 - [ ] Flag removed after the E22 sub bench checks (owner decision)
 
