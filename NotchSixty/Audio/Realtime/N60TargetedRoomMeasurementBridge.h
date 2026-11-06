@@ -19,6 +19,10 @@ extern "C" {
 /* E11 S9b: at most this many inputs beyond the primary microphone (so 16 seats in all). */
 #define N60_TARGETED_MAX_EXTRA_INPUTS 15u
 
+/* E26 S6a: at most this many further output programs (beyond the primary sweep and the timing reference), so a
+ * measurement can play the splitter-rendered mains and the sub lane out of real hardware outputs in one pass. */
+#define N60_TARGETED_MAX_LANE_PROGRAMS 7u
+
 typedef struct {
     uint32_t frameCursor;
     uint32_t totalFrameCount;
@@ -52,6 +56,13 @@ typedef struct N60TargetedRoomMeasurementBridge {
     uint32_t referenceProgramStartFrame;
     uint32_t referenceOutputChannelIndex;
     bool hasReferenceProgram;
+    /* E26 S6a: further output programs (the post-split buses), each on its own output channel, all on the same
+     * timeline as the primary sweep. Preallocated and copied on the control plane. */
+    uint32_t laneProgramCount;
+    float * _Nullable laneProgram[N60_TARGETED_MAX_LANE_PROGRAMS];
+    uint32_t laneProgramFrames[N60_TARGETED_MAX_LANE_PROGRAMS];
+    uint32_t laneProgramStartFrame[N60_TARGETED_MAX_LANE_PROGRAMS];
+    uint32_t laneOutputChannelIndex[N60_TARGETED_MAX_LANE_PROGRAMS];
     /* E11 S9b: K-input capture. Extra seats are captured on the same timeline as the primary
      * microphone; buffers are allocated on the control plane. */
     uint32_t extraInputCount;
@@ -213,6 +224,10 @@ static inline void N60TargetedRoomMeasurementBridgeDestroy(
         free(bridge->extraCapture[k]);
         bridge->extraCapture[k] = NULL;
     }
+    for (uint32_t k = 0; k < N60_TARGETED_MAX_LANE_PROGRAMS; ++k) {
+        free(bridge->laneProgram[k]);
+        bridge->laneProgram[k] = NULL;
+    }
     free(bridge->referenceProgram);
     free(bridge->referenceCapture);
     free(bridge->capture);
@@ -253,6 +268,74 @@ static inline bool N60TargetedRoomMeasurementBridgeAttachReferenceProgram(
     bridge->referenceOutputChannelIndex = outputChannelIndex;
     bridge->hasReferenceProgram = true;
     return true;
+}
+
+/*
+ * E26 S6a, control plane, before the IOProc starts: attaches a further output program played on
+ * `outputChannelIndex` from timeline frame `startFrame` (silent before and after). Up to
+ * N60_TARGETED_MAX_LANE_PROGRAMS programs; every channel must differ from the primary output, the reference
+ * program's channel and every earlier lane program. Returns false, leaving the bridge unchanged, for a bad
+ * argument, a non-finite sample, a clash, an overrun of the capture timeline or an allocation failure.
+ * Not safe against a running IOProc. The program must already be at the device rate. Reset keeps the programs.
+ */
+static inline bool N60TargetedRoomMeasurementBridgeAttachLaneProgram(
+    N60TargetedRoomMeasurementBridge * _Nullable bridge,
+    const float * _Nullable samples,
+    uint32_t frameCount,
+    uint32_t startFrame,
+    uint32_t outputChannelIndex
+) {
+    if (bridge == NULL || samples == NULL || frameCount == 0u) return false;
+    if (bridge->laneProgramCount >= N60_TARGETED_MAX_LANE_PROGRAMS) return false;
+    if (outputChannelIndex == bridge->outputChannelIndex) return false;
+    if (bridge->hasReferenceProgram && outputChannelIndex == bridge->referenceOutputChannelIndex) return false;
+    for (uint32_t k = 0; k < bridge->laneProgramCount; ++k) {
+        if (bridge->laneOutputChannelIndex[k] == outputChannelIndex) return false;
+    }
+    if ((uint64_t)startFrame + (uint64_t)frameCount > (uint64_t)bridge->captureFrameCount) return false;
+    for (uint32_t i = 0; i < frameCount; ++i) {
+        const float v = samples[i];
+        if (!(v == v) || v > 1.0e30f || v < -1.0e30f) return false;
+    }
+    float *copy = (float *)malloc(sizeof(float) * frameCount);
+    if (copy == NULL) return false;
+    memcpy(copy, samples, sizeof(float) * frameCount);
+    const uint32_t k = bridge->laneProgramCount;
+    bridge->laneProgram[k] = copy;
+    bridge->laneProgramFrames[k] = frameCount;
+    bridge->laneProgramStartFrame[k] = startFrame;
+    bridge->laneOutputChannelIndex[k] = outputChannelIndex;
+    bridge->laneProgramCount = k + 1u;
+    return true;
+}
+
+/*
+ * Realtime. Allocation: none. Synchronisation: reads only the bridge's frame cursor (written by the process call on
+ * this same thread) and immutable program data. Latency: none. Rate and channel assumptions: native device rate,
+ * strided float32; `outputs[k]` and `strides[k]` belong to lane program k. Call it BEFORE the process call of the
+ * same block, so both see the same cursor. Reset: the cursor reset in N60TargetedRoomMeasurementBridgeReset.
+ * Writes `frameCount` frames per lane; frames outside a program, or past the capture timeline, are written as 0.
+ */
+static inline void N60TargetedRoomMeasurementWriteLanePrograms(
+    const N60TargetedRoomMeasurementBridge * _Nonnull bridge,
+    float * _Nullable const * _Nonnull outputs,
+    const uint32_t * _Nonnull strides,
+    uint32_t frameCount
+) {
+    const uint32_t cursor = atomic_load_explicit(&bridge->frameCursor, memory_order_relaxed);
+    for (uint32_t k = 0; k < bridge->laneProgramCount; ++k) {
+        float *destination = outputs[k];
+        if (destination == NULL) continue;
+        const uint32_t start = bridge->laneProgramStartFrame[k];
+        const uint32_t end = start + bridge->laneProgramFrames[k];
+        const float *program = bridge->laneProgram[k];
+        for (uint32_t offset = 0; offset < frameCount; ++offset) {
+            const uint32_t timelineFrame = cursor + offset;
+            *destination = (timelineFrame >= start && timelineFrame < end && cursor < bridge->captureFrameCount)
+                ? program[timelineFrame - start] : 0.0f;
+            destination += strides[k];
+        }
+    }
 }
 
 static inline N60TargetedRoomMeasurementBridgeSnapshot N60TargetedRoomMeasurementBridgeGetSnapshot(
@@ -632,6 +715,19 @@ static inline OSStatus N60TargetedRoomMeasurementIOProc(
         extraStrides[k] = view.stride;
         if (view.frameCount < extraFrames) extraFrames = view.frameCount;
     }
+    float * _Nullable laneOutputs[N60_TARGETED_MAX_LANE_PROGRAMS];
+    uint32_t laneStrides[N60_TARGETED_MAX_LANE_PROGRAMS];
+    uint32_t laneFrames = UINT32_MAX;
+    for (uint32_t k = 0; k < bridge->laneProgramCount; ++k) {
+        N60TargetedMeasurementOutputView view = {0};
+        if (!N60TargetedRoomMeasurementMakeOutputView(outOutputData, bridge->laneOutputChannelIndex[k], &view)) {
+            extrasOK = false;
+            break;
+        }
+        laneOutputs[k] = view.samples;
+        laneStrides[k] = view.stride;
+        if (view.frameCount < laneFrames) laneFrames = view.frameCount;
+    }
     if (!extrasOK || !N60TargetedRoomMeasurementMakeInputView(
             inInputData,
             bridge->inputChannelIndex,
@@ -663,6 +759,10 @@ static inline OSStatus N60TargetedRoomMeasurementIOProc(
     if (frameCount == 0u) return noErr;
     if (bridge->hasReferenceProgram && referenceOutput.frameCount < frameCount) {
         frameCount = referenceOutput.frameCount;
+    }
+    if (bridge->laneProgramCount > 0u) {
+        if (laneFrames < frameCount) frameCount = laneFrames;
+        N60TargetedRoomMeasurementWriteLanePrograms(bridge, laneOutputs, laneStrides, frameCount);
     }
     (void)N60TargetedRoomMeasurementProcessSeatsStrided(
         bridge,
