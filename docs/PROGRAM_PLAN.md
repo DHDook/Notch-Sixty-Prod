@@ -321,14 +321,14 @@ it, behind `e26.sub-aware-anc`. Live output stays behind the per-feature arm.
 - [~] Sub-aware readiness replaces the blanket refusal; setup UI; end-to-end twin harness at eight rates
   - [~] S5 `e26/sub-aware-arming` (PR pending): `SubAwareAncReadiness` feeds tonal `setEnabled` and feed-forward stepWaiting/stepPlaying (`subAwareRefusal`); setup card `ProductionSubAwareQuietZoneCard`; missing plant and multi-seat sub refused; twin harness at eight rates through UI-model calls, survey-to-arm twin wired by S6; bench: E22
   - [~] S6a `e26/sub-multibus-transport` (#370)
-  - [~] S6b `e26/sub-readiness-from-sweeps` (PR pending): open-preout check, per-band eligibility and sub-band render verification feed readiness behind `e26.sub-aware-anc`; multi-bus profile-session passes and the `measureSubPath` harness move to S7
-  - [~] S6c `e26/sub-multiseat-plant` (PR pending): measured per-seat 2x2 plant in the spatial planner, conditioning and the stricter-of rule in the controller, behind `e26.sub-aware-anc`; driving the multi-seat branch through production wiring moves to S7 (G12)
+  - [~] S6b `e26/sub-readiness-from-sweeps` (#372): open-preout check, per-band eligibility and sub-band render verification feed readiness behind `e26.sub-aware-anc`; multi-bus profile-session passes and the `measureSubPath` harness move to S7
+  - [~] S6c `e26/sub-multiseat-plant` (#373): measured per-seat 2x2 plant in the spatial planner, conditioning and the stricter-of rule in the controller, behind `e26.sub-aware-anc`; driving the multi-seat branch through production wiring moves to S7 (G12)
 - [ ] Quiet Zone with a sub on its own output (profile session, sub lane as an actuator)
   - [~] S6: run `OpenPreoutCheck` on measured sweeps and set `openPreoutRefusal` (S6b, behind the flag)
   - [~] S6: feed `PerBandAncEligibility` (`feedForwardBandCount`) from `CombinedPathBandAnalyzer` into readiness (S6b, behind the flag)
   - [~] S6: multi-seat sub support with a measured per-seat 2x2 plant (S6c, behind the flag; built dark)
   - [ ] S6: full end-to-end twin harness from sweeps
-  - [~] S7 `e26/ship` (PR pending), part 1: `e26.sub-aware-anc` defaults on, G5 and G12 closed; G1 host feed and G9 open, so S7 is not ticked and the flag stays
+  - [~] S7 `e26/ship` (#374), part 1: `e26.sub-aware-anc` defaults on, G5 and G12 closed; G1 host feed and G9 open, so S7 is not ticked and the flag stays
 - [ ] Flag removed after the E22 sub bench checks (owner decision)
 
 ## Phase 4 — Complete scope and launch
