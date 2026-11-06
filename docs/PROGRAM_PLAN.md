@@ -315,10 +315,15 @@ it, behind `e26.sub-aware-anc`. Live output stays behind the per-feature arm.
   - [~] S2c `e26/through-feed-splitter-render` (#366): built dark the splitter-rendered through-feed sweep, position-model stamp and 20 dB echo twin test; not wired to hardware outputs (owner slice S6 transport and sub lane); bench: E22
 - [ ] Conditioned L/R design where both channels share the sub (common-mode constraint), tonal and feed-forward
   - [~] S3b `e26/rank-one-bass-wiring` (PR pending): built behind `e26.sub-aware-anc`; bench: E22
-  - [~] S4 `e26/sub-safety` (PR pending): receiver excursion caps, measured summing law, bass-path watch and combined-leakage bound behind `e26.sub-aware-anc`; bench: E22
+  - [~] S4 `e26/sub-safety` (#368): receiver excursion caps, measured summing law, bass-path watch and combined-leakage bound behind `e26.sub-aware-anc`; bench: E22
 - [ ] Sub safety: receiver crossover in the excursion caps, path-gain watch that disarms, combined leakage stability bound
-- [ ] Sub-aware readiness replaces the blanket refusal; setup UI; end-to-end twin harness at eight rates
+- [~] Sub-aware readiness replaces the blanket refusal; setup UI; end-to-end twin harness at eight rates
+  - [~] S5 `e26/sub-aware-arming` (PR pending): `SubAwareAncReadiness` feeds tonal `setEnabled` and feed-forward stepWaiting/stepPlaying (`subAwareRefusal`); setup card `ProductionSubAwareQuietZoneCard`; missing plant and multi-seat sub refused; twin harness at eight rates through UI-model calls, survey-to-arm twin wired by S6; bench: E22
 - [ ] Quiet Zone with a sub on its own output (profile session, sub lane as an actuator)
+  - [ ] S6: run `OpenPreoutCheck` on measured sweeps and set `openPreoutRefusal` (nil today, so open preout is not verified against the measurement)
+  - [ ] S6: feed `PerBandAncEligibility` (`feedForwardBandCount`, nil today) from `CombinedPathBandAnalyzer` into readiness
+  - [ ] S6: multi-seat sub support with a measured per-seat 2x2 plant (refused today)
+  - [ ] S6: full end-to-end twin harness from sweeps
 - [ ] Flag removed after the E22 sub bench checks (owner decision)
 
 ## Phase 4 — Complete scope and launch

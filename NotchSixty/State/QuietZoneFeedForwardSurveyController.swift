@@ -389,18 +389,18 @@ final class QuietZoneFeedForwardSurveyController: ObservableObject {
         case .design(let design, let result):
             self.design = design
             assembled = result
-            quietZone.bassPlantMap = BassPlantMap(bands: result.bands)
+            quietZone.setBassPlant(BassPlantMap(bands: result.bands), fingerprint: ambient.selectedModelPosition?.ancBassFingerprint)
             message = "Design ready: \(result.bands.count) bands, worst modelled reduction "
                 + String(format: "%.1f dB.", design.worstModeledReductionDB)
         case .bandsOnly(let result, let reason):
             design = nil
             assembled = result
-            quietZone.bassPlantMap = BassPlantMap(bands: result.bands)
+            quietZone.setBassPlant(BassPlantMap(bands: result.bands), fingerprint: ambient.selectedModelPosition?.ancBassFingerprint)
             message = "\(result.bands.count) bands measured. No design yet: \(reason)"
         case .unavailable(let reason):
             design = nil
             assembled = nil
-            quietZone.bassPlantMap = BassPlantMap(bands: [])
+            quietZone.setBassPlant(BassPlantMap(bands: []), fingerprint: nil)
             message = reason
         }
     }

@@ -1430,7 +1430,7 @@ private struct SystemSetupSpeakersStep: View {
 
 /// E26 S1: declares how the receiver (or powered sub) handles bass. Quiet Zone is refused through it until this is set.
 /// The crossover entry appears only for calibrated LFE out.
-private struct SystemSetupReceiverBassPicker: View {
+struct SystemSetupReceiverBassPicker: View {
     let receiverBass: ReceiverBass
     let onChange: (ReceiverBass) -> Void
 

@@ -31,6 +31,8 @@ enum ActiveQuietZoneControllerError:
     case verificationRegression
     /// E26 S1: a receiver or powered sub is downstream and how it handles bass is not declared.
     case receiverBassUndeclared
+    /// E26 S5: a subwoofer is in the anti-noise path and `SubAwareAncReadiness` (or the multi-seat rule) refuses.
+    case subAwareRefused(String)
 
     var errorDescription: String? {
         switch self {
@@ -55,6 +57,8 @@ enum ActiveQuietZoneControllerError:
             return "The physical error microphone measured a cancellation regression, so Active Quiet Zone was fault-faded and latched."
         case .receiverBassUndeclared:
             return TwoChannelAncArming.undeclaredReceiverRefusal
+        case .subAwareRefused(let message):
+            return message
         }
     }
 }
@@ -144,9 +148,11 @@ final class ActiveQuietZoneController: ObservableObject {
             outputDeviceUID: engine.routeConfiguration.selectedOutputUID,
             sampleRate: engine.liveTreatmentSampleRate,
             budget: feedForwardBudget,
-            subwooferActive: subwooferActiveForAnc,
+            // E26 S5: under the flag `SubAwareAncReadiness` replaces the blanket subwoofer refusal.
+            subwooferActive: subwooferActiveForAnc && !subAwareAncEnabled,
             receiverBassUndeclared: receiverBassUndeclared,
-            arrangementRefusal: arrangementRefusal)
+            arrangementRefusal: arrangementRefusal,
+            subAwareRefusal: subAwareReadiness(mode: .feedForward).message)
     }
 
     /// E26 flag `e26.sub-aware-anc`, set at construction. Only Swift reads it.
@@ -171,7 +177,14 @@ final class ActiveQuietZoneController: ObservableObject {
 
     /// E26 S3b: the measured 2x2 plant (seat and reference point), by frequency. Published by the
     /// feed-forward survey; empty until one is measured.
-    var bassPlantMap = BassPlantMap(bands: [])
+    private(set) var bassPlantMap = BassPlantMap(bands: [])
+
+    /// Publishes the measured plant with the bass fingerprint it was measured under (E26 S5).
+    func setBassPlant(_ plant: BassPlantMap, fingerprint: AncBassPathFingerprint?) {
+        bassPlantMap = plant
+        bassPlantFingerprint = plant.isEmpty ? nil : fingerprint
+        objectWillChange.send()
+    }
 
     private var appBassCrossoverHz: Double? {
         let bass = engine.bassManagementConfiguration
@@ -229,7 +242,33 @@ final class ActiveQuietZoneController: ObservableObject {
     /// Why the arrangement does not qualify for Quiet Zone (nil when it does). Shown on the
     /// readiness card and added as a wait before the lead gate. Never grants anything.
     var arrangementRefusal: String? {
-        TwoChannelAncArming.refusal(arrangement: arrangement, budget: feedForwardBudget)
+        TwoChannelAncArming.refusal(arrangement: arrangement, budget: feedForwardBudget, subAware: subAwareAncEnabled)
+    }
+
+    /// E26 S5: the fingerprint the measured plant was made under (the Room Correction position it came from). Set with
+    /// `bassPlantMap` by the feed-forward survey.
+    var bassPlantFingerprint: AncBassPathFingerprint?
+
+    /// E26 S5: result of `OpenPreoutCheck` against the measured sweeps; nil until a check has run. The sweeps need the
+    /// splitter-rendered through-feed played out of hardware outputs, which S6 adds.
+    var openPreoutRefusal: String?
+
+    /// E26 S5 (design 8): whether Quiet Zone may be armed with a sub in the path. Ready when no sub is in the path.
+    func subAwareReadiness(mode: SubAwareAncReadiness.Mode) -> SubAwareAncReadiness {
+        guard bassConditioningActive else { return SubAwareAncReadiness(reason: nil, message: nil) }
+        return SubAwareAncReadiness.evaluate(.init(
+            mode: mode, path: ancBassPathState, plant: bassPlantMap, plantFingerprint: bassPlantFingerprint,
+            openPreoutRefusal: openPreoutRefusal, safetyAvailable: excursionLimitsProvider != nil,
+            feedForwardBandCount: nil))
+    }
+
+    /// E26 S5: the receiver declaration from the Quiet Zone setup. Stored on the arrangement; the old measurement goes
+    /// stale by fingerprint.
+    func declareReceiverBass(_ receiverBass: ReceiverBass) throws {
+        guard var updated = arrangement else { return }
+        updated.receiverBass = receiverBass
+        try profiles.replaceSelectedSystemArrangement(updated)
+        objectWillChange.send()
     }
 
     /// The user's one action: start the slow fade-in once every check passes. False unless armed.
@@ -720,6 +759,8 @@ final class ActiveQuietZoneController: ObservableObject {
     func setEnabled(_ enabled: Bool) throws {
         if enabled {
             if receiverBassUndeclared { throw ActiveQuietZoneControllerError.receiverBassUndeclared }
+            // E26 S5: readiness is a precondition only; the Turn On itself is this user action.
+            if let why = subAwareReadiness(mode: .tonal).message { throw ActiveQuietZoneControllerError.subAwareRefused(why) }
             // E4 S15: a trip latched in an earlier arm must not keep the new one silent.
             engine.rearmHowlGuard()
             try arm.arm(environment: liveTreatmentEnvironment())
@@ -1542,6 +1583,11 @@ final class ActiveQuietZoneController: ObservableObject {
             let predictedDB: Double
             var bassMode = BassPlantConditioningMode.free
             if spatial {
+                // E26 S5: the multi-seat planner has no measured 2x2 plant, so it cannot be told a sub shares the bass.
+                if bassConditioningActive {
+                    throw ActiveQuietZoneControllerError.subAwareRefused(
+                        "Multi-seat Quiet Zone is not available with a subwoofer yet.")
+                }
                 guard let calibration = spatialCalibration,
                       let project = ambient.projects.project,
                       let survey = try? calibration.validatedSurvey(
@@ -1563,8 +1609,13 @@ final class ActiveQuietZoneController: ObservableObject {
                 predictedDB = candidate.weightedReductionDB
                 latestSpatialPredictions = candidate.predictions
             } else {
-                bassMode = bassConditioningActive
-                    ? bassPlantMap.mode(atHz: frequency) : .free
+                if bassConditioningActive {
+                    // E26 S5: a missing plant is a refusal, never the free solve.
+                    guard let measured = bassPlantMap.conditioning(atHz: frequency) else {
+                        throw ActiveQuietZoneControllerError.subAwareRefused(SubAwareAncReadiness.plantMissingMessage)
+                    }
+                    bassMode = measured.mode
+                }
                 let solution = try planner.solveStereo(
                     frequencyHz: frequency,
                     disturbance: disturbance,

@@ -1235,6 +1235,7 @@ struct ProductionActiveAcousticsWorkspace: View {
             }
             spatialQuietZoneCard
             ProductionFeedForwardReadinessCard(quietZone: quietZone)
+            ProductionSubAwareQuietZoneCard(quietZone: quietZone, survey: feedForwardSurvey)
             ProductionFeedForwardDesignSurveyCard(survey: feedForwardSurvey)
             ProductionFeedForwardShadowCard(shadow: feedForwardShadow)
             if let feedForwardArming {
