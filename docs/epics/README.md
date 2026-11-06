@@ -25,3 +25,10 @@ States:
 
 Rules: a slice with an `open-question` gap is not ticked; a flag-removal or ship slice needs every
 gap in its epic `closed`. Numbers are never reused. See AGENTS.md section 12.
+
+## Programme audit
+
+Owner decision 6 Nov 2026: once E26 is done, audit every completed epic against AGENTS.md section 12
+(`[x]` means reachable from the shipped UI, end-to-end tests through production wiring for ship
+slices, no stale ticks or unrecorded gaps). Then repeat the audit after each epic completes. Findings
+are recorded as gaps in the audited epic's `## Gaps`; the audit fixes nothing unprompted.
