@@ -292,9 +292,9 @@ final class AncBassPathTests: XCTestCase {
         XCTAssertTrue(d.subwooferActiveForAnc)
     }
 
-    func testFlagIsRegisteredAndOff() {
+    func testFlagIsRegisteredAndOnByOwnerDecision() {
         XCTAssertTrue(FeatureFlag.all.contains(.subAwareAnc))
         XCTAssertEqual(FeatureFlag.subAwareAnc.id, "e26.sub-aware-anc")
-        XCTAssertFalse(FeatureFlags().isEnabled(.subAwareAnc))
+        XCTAssertTrue(FeatureFlags(policy: .launchArgumentOnly, arguments: []).isEnabled(.subAwareAnc), "owner decision 6 Nov 2026")
     }
 }

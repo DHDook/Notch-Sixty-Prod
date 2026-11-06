@@ -203,6 +203,7 @@ final class FeedForwardEchoFlowTests: XCTestCase {
         let state = AncBassPathState.resolve(arrangement: nil, bassManagement: splitter)
         inputs.bassPath = state
         inputs.echoBassFingerprint = state.fingerprint
+        shadow.forceSubAwareForTesting = false
         XCTAssertTrue(shadow.echoBlockedReason(inputs)?.contains("subwoofer") == true, "flag off: unchanged")
         shadow.forceSubAwareForTesting = true
         XCTAssertNil(shadow.echoBlockedReason(inputs), "fresh combined leakage lifts the rule")

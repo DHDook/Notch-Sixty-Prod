@@ -1494,6 +1494,21 @@ final class ActiveQuietZoneController: ObservableObject {
         )
     }
 
+    /// E26 S6c/S7 (G12): the treatment for one tone of the sub-aware multi-seat design. `.free` when the flag or a sub is
+    /// off. Otherwise a fresh single-seat bass measurement is required, then the stricter of the seat plant and the
+    /// single-seat plant decides. Split out of `evaluate` so the controller branch is testable with fakes.
+    func spatialBassMode(
+        calibration: ActiveQuietZoneSpatialCalibration, project: RoomCorrectionProject, frequencyHz: Double
+    ) throws -> BassPlantConditioningMode {
+        guard bassConditioningActive else { return .free }
+        guard case .fresh = ancBassPathState.freshness(of: bassPlantFingerprint), !bassPlantMap.isEmpty else {
+            throw ActiveQuietZoneControllerError.subAwareRefused(SubAwareAncReadiness.plantMissingMessage)
+        }
+        let seatPlant = try spatialPlanner.bassConditioning(
+            calibration: calibration, project: project, frequencyHz: frequencyHz)
+        return BassPlantConditioning.stricter(seatPlant.mode, bassPlantMap.mode(atHz: frequencyHz))
+    }
+
     private func evaluate(
         scheduledTarget: ActiveQuietZoneRuntimeTarget,
         detailed: AmbientAnalysisDetailedResult
@@ -1608,18 +1623,7 @@ final class ActiveQuietZoneController: ObservableObject {
                       Date().timeIntervalSince(survey.capturedAt) < 1800,
                       Date().timeIntervalSince(survey.capturedAt) >= 0
                 else { throw ActiveQuietZoneSpatialError.inadequatePhaseReference }
-                if bassConditioningActive {
-                    // E26 S6c: the sub-aware multi-seat design needs a bass measurement under today's setup, then
-                    // the measured per-seat plant decides the treatment. The single-seat plant can only tighten it.
-                    guard case .fresh = ancBassPathState.freshness(of: bassPlantFingerprint),
-                          !bassPlantMap.isEmpty
-                    else {
-                        throw ActiveQuietZoneControllerError.subAwareRefused(SubAwareAncReadiness.plantMissingMessage)
-                    }
-                    let seatPlant = try spatialPlanner.bassConditioning(
-                        calibration: calibration, project: project, frequencyHz: frequency)
-                    bassMode = BassPlantConditioning.stricter(seatPlant.mode, bassPlantMap.mode(atHz: frequency))
-                }
+                bassMode = try spatialBassMode(calibration: calibration, project: project, frequencyHz: frequency)
                 let candidate = try spatialPlanner.solve(
                     calibration: calibration,
                     project: project,
