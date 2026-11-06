@@ -22,11 +22,14 @@ enum SystemCapabilityText {
     }
 
     static func rows(
-        _ features: [SystemFeature], profile: PlaybackSystemProfile?, deviceChannelCount: Int = 0
+        _ features: [SystemFeature], profile: PlaybackSystemProfile?, deviceChannelCount: Int = 0,
+        subAwareQuietZone: Bool = false
     ) -> [Row] {
         guard let a = arrangement(for: profile, deviceChannelCount: deviceChannelCount) else { return [] }
         return features.map {
-            ($0, SystemCapabilityMatrix.evaluate($0, arrangement: a, deviceChannelCount: deviceChannelCount))
+            ($0, SystemCapabilityMatrix.evaluate(
+                $0, arrangement: a, deviceChannelCount: deviceChannelCount,
+                subAwareQuietZone: subAwareQuietZone))
         }
     }
 

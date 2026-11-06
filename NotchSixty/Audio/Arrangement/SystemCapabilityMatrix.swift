@@ -85,7 +85,8 @@ enum SystemCapabilityMatrix {
     static func evaluate(
         _ feature: SystemFeature,
         arrangement: SystemArrangement,
-        deviceChannelCount: Int = 0
+        deviceChannelCount: Int = 0,
+        subAwareQuietZone: Bool = false
     ) -> CapabilityAvailability {
         let c = arrangement.arrangementClass
         let twoChannels = c != .a
@@ -171,7 +172,14 @@ enum SystemCapabilityMatrix {
                 : .available(note: "Advice uses your speaker arrangement.")
         case .quietZone:
             switch c {
-            case .a: return .unavailable(reason: "Quiet Zone runs on the two-channel session; a separate output per speaker ends it.", fix: "Use a two-channel arrangement.")
+            case .a:
+                // E26 S7c: with sub-aware ANC on, two speakers and one sub output are supported.
+                if subAwareQuietZone {
+                    return arrangement.isTwoMainsOneSub
+                        ? .limited(note: "Quiet Zone supports two speakers and one subwoofer output, measured with your subwoofer.")
+                        : .unavailable(reason: "Quiet Zone supports two speakers and one subwoofer output.", fix: "Use two speakers and one subwoofer output.")
+                }
+                return .unavailable(reason: "Quiet Zone runs on the two-channel session; a separate output per speaker ends it.", fix: "Use a two-channel arrangement.")
             case .b, .c: return .available(note: "Quiet Zone runs on the stereo session.")
             case .d, .e: return .limited(note: "The receiver's latency counts against the budget, and its processing must stay static.")
             }

@@ -18,6 +18,15 @@ struct FeedForwardEchoPath: Codable, Equatable, Sendable {
     var upperL1: Double { zip(taps, bound).reduce(0.0) { $0 + abs(Double($1.0)) + Double($1.1) } }
 }
 
+/// E26 S7c: one hardware output's leakage into the reference microphone (class A: left main, right main and the sub
+/// each swept alone). `feeds` names the program feeds the output carries (0 left, 1 right); the sub carries both.
+struct FeedForwardOutputEcho: Codable, Equatable, Sendable {
+    var role: String
+    var outputChannel: Int
+    var feeds: [Int]
+    var path: FeedForwardEchoPath
+}
+
 struct FeedForwardEchoModel: Codable, Equatable, Sendable {
     /// fd, Hz.
     var sampleRate: Double
@@ -30,6 +39,9 @@ struct FeedForwardEchoModel: Codable, Equatable, Sendable {
     /// Sum of repeat deviations over sum of mean magnitudes, the worse speaker.
     var repeatDeviation: Double?
     var capturedAt: Date
+    /// E26 S7c: the per-output paths behind `left` and `right` on a direct multi-output arrangement; nil elsewhere.
+    /// The stability check bounds the loop per output, so a strong coupling from one output cannot hide in a sum.
+    var outputs: [FeedForwardOutputEcho]? = nil
 
     static let maximumTaps = 512
     static let maximumBulkDelay = 512
@@ -97,7 +109,7 @@ enum FeedForwardEchoModelBuilder {
         return out[skip..<written].map { $0 * gain }
     }
 
-    private static func side(
+    static func side(
         _ repeats: [[Float]], nativeSampleRate: Double, factor: Int, fd: Double
     ) throws -> (path: FeedForwardEchoPath, coherence: Double, deviation: Double) {
         let decimated = repeats.map { decimate($0, nativeSampleRate: nativeSampleRate) }
@@ -184,7 +196,16 @@ enum FeedForwardLeakageStabilityCheck {
             return .refused(String(format: "leakage: repeats differ by %.0f%%", deviation * 100))
         }
         let l1 = { (w: [Float]) in w.reduce(0.0) { $0 + abs(Double($1)) } }
-        let loop = model.left.upperL1 * l1(weightsLeft) + model.right.upperL1 * l1(weightsRight)
+        var loop = model.left.upperL1 * l1(weightsLeft) + model.right.upperL1 * l1(weightsRight)
+        // E26 S7c: on a direct multi-output arrangement each output's own bound counts against every feed it carries.
+        if let outputs = model.outputs {
+            let perOutput = outputs.reduce(0.0) { total, output in
+                total + output.feeds.reduce(0.0) { sum, feed in
+                    sum + output.path.upperL1 * l1(feed == 0 ? weightsLeft : weightsRight)
+                }
+            }
+            loop = max(loop, perOutput)
+        }
         guard loop.isFinite, loop <= maximumLoopGain else {
             return .refused(String(format: "leakage: loop gain %.3f over %.2f", loop, maximumLoopGain))
         }

@@ -8,7 +8,7 @@
   builds one slice in a fresh context), realtime-reviewer (Sonnet), and code-scout,
   build-test-runner, plan-tracker, pr-writer (Haiku). `/next` itself runs on Sonnet.
 
-**Current focus:** E26 S7 partly done (flag on by default; G5, G12 closed); G1 host feed and G9 need an epic-planner plan, then flag removal; E9 S2 still waits for E26
+**Current focus:** E26 S7b (class A host feed, S7b1 and S7b2; PR #376 open, unmerged), then S7 flag removal; S7c built (PR pending); E9 S2 still waits for E26
 <!-- plan-tracker keeps the line above current -->
 
 @AGENTS.md

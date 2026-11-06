@@ -329,6 +329,7 @@ it, behind `e26.sub-aware-anc`. Live output stays behind the per-feature arm.
   - [~] S6: multi-seat sub support with a measured per-seat 2x2 plant (S6c, behind the flag; built dark)
   - [ ] S6: full end-to-end twin harness from sweeps
   - [~] S7 `e26/ship` (#374), part 1: `e26.sub-aware-anc` defaults on, G5 and G12 closed; G1 host feed and G9 open, so S7 is not ticked and the flag stays
+  - [x] S7c `e26/profile-sub-measurement` (PR pending): class A sub measurement (two seat passes, nine leakage passes, per-output leakage, record schema 2) reachable from the sub button under `e26.sub-aware-anc`; class A arming waits for S7b; bench: E22
 - [ ] Flag removed after the E22 sub bench checks (owner decision)
 
 ## Phase 4 — Complete scope and launch
