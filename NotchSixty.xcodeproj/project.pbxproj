@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		E26A00000000000000000022 /* CombinedPathBandAnalysis.swift in Sources */ = {isa = PBXBuildFile; fileRef = E26A00000000000000000021 /* CombinedPathBandAnalysis.swift */; };
 		E26A00000000000000000024 /* ThroughFeedSweepPlan.swift in Sources */ = {isa = PBXBuildFile; fileRef = E26A00000000000000000023 /* ThroughFeedSweepPlan.swift */; };
+		E26A00000000000000000028 /* ThroughFeedSplitterRender.swift in Sources */ = {isa = PBXBuildFile; fileRef = E26A00000000000000000027 /* ThroughFeedSplitterRender.swift */; };
 		E26A00000000000000000032 /* CombinedPathBandTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E26A00000000000000000031 /* CombinedPathBandTests.swift */; };
 		E26A00000000000000000002 /* AncBassPath.swift in Sources */ = {isa = PBXBuildFile; fileRef = E26A00000000000000000001 /* AncBassPath.swift */; };
 		E26A00000000000000000012 /* AncBassPathTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E26A00000000000000000011 /* AncBassPathTests.swift */; };
@@ -287,6 +288,7 @@
 		E4F200000000000000000005 /* QuietZoneFeedForwardSurveyFlowTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4F200000000000000000015 /* QuietZoneFeedForwardSurveyFlowTests.swift */; };
 		E4F700000000000000000003 /* FeedForwardEchoFlowTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4F700000000000000000013 /* FeedForwardEchoFlowTests.swift */; };
 		E26A00000000000000000026 /* ThroughFeedSweepPlanTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E26A00000000000000000025 /* ThroughFeedSweepPlanTests.swift */; };
+		E26A0000000000000000002A /* ThroughFeedSplitterRenderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E26A00000000000000000029 /* ThroughFeedSplitterRenderTests.swift */; };
 		E4F700000000000000000F03 /* FeedForwardLiveWeightsFeedTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4F700000000000000000F04 /* FeedForwardLiveWeightsFeedTests.swift */; };
 		E4F700000000000000000033 /* CrossDevicePairCaptureTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4F700000000000000000043 /* CrossDevicePairCaptureTests.swift */; };
 		E4F800000000000000000002 /* FeedForwardLiveReferencePumpTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4F800000000000000000004 /* FeedForwardLiveReferencePumpTests.swift */; };
@@ -597,6 +599,7 @@
 /* Begin PBXFileReference section */
 		E26A00000000000000000021 /* CombinedPathBandAnalysis.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CombinedPathBandAnalysis.swift; sourceTree = "<group>"; };
 		E26A00000000000000000023 /* ThroughFeedSweepPlan.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThroughFeedSweepPlan.swift; sourceTree = "<group>"; };
+		E26A00000000000000000027 /* ThroughFeedSplitterRender.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThroughFeedSplitterRender.swift; sourceTree = "<group>"; };
 		E26A00000000000000000031 /* CombinedPathBandTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CombinedPathBandTests.swift; sourceTree = "<group>"; };
 		E26A00000000000000000001 /* AncBassPath.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AncBassPath.swift; sourceTree = "<group>"; };
 		E26A00000000000000000011 /* AncBassPathTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AncBassPathTests.swift; sourceTree = "<group>"; };
@@ -909,6 +912,7 @@
 		E4F200000000000000000015 /* QuietZoneFeedForwardSurveyFlowTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuietZoneFeedForwardSurveyFlowTests.swift; sourceTree = "<group>"; };
 		E4F700000000000000000013 /* FeedForwardEchoFlowTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeedForwardEchoFlowTests.swift; sourceTree = "<group>"; };
 		E26A00000000000000000025 /* ThroughFeedSweepPlanTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThroughFeedSweepPlanTests.swift; sourceTree = "<group>"; };
+		E26A00000000000000000029 /* ThroughFeedSplitterRenderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThroughFeedSplitterRenderTests.swift; sourceTree = "<group>"; };
 		E4F700000000000000000F04 /* FeedForwardLiveWeightsFeedTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeedForwardLiveWeightsFeedTests.swift; sourceTree = "<group>"; };
 		E4F700000000000000000043 /* CrossDevicePairCaptureTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrossDevicePairCaptureTests.swift; sourceTree = "<group>"; };
 		E4F800000000000000000004 /* FeedForwardLiveReferencePumpTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeedForwardLiveReferencePumpTests.swift; sourceTree = "<group>"; };
@@ -1222,6 +1226,7 @@
 				E26A00000000000000000001 /* AncBassPath.swift */,
 				E26A00000000000000000021 /* CombinedPathBandAnalysis.swift */,
 				E26A00000000000000000023 /* ThroughFeedSweepPlan.swift */,
+				E26A00000000000000000027 /* ThroughFeedSplitterRender.swift */,
 			);
 			path = QuietZone;
 			sourceTree = "<group>";
@@ -1427,6 +1432,7 @@
 				E4F200000000000000000015 /* QuietZoneFeedForwardSurveyFlowTests.swift */,
 				E4F700000000000000000013 /* FeedForwardEchoFlowTests.swift */,
 				E26A00000000000000000025 /* ThroughFeedSweepPlanTests.swift */,
+				E26A00000000000000000029 /* ThroughFeedSplitterRenderTests.swift */,
 				E4F700000000000000000F04 /* FeedForwardLiveWeightsFeedTests.swift */,
 				E4F900000000000000000A06 /* FeedForwardLiveArmingTests.swift */,
 				E4F700000000000000000043 /* CrossDevicePairCaptureTests.swift */,
@@ -1938,6 +1944,7 @@
 				E26A00000000000000000002 /* AncBassPath.swift in Sources */,
 				E26A00000000000000000022 /* CombinedPathBandAnalysis.swift in Sources */,
 				E26A00000000000000000024 /* ThroughFeedSweepPlan.swift in Sources */,
+				E26A00000000000000000028 /* ThroughFeedSplitterRender.swift in Sources */,
 				E25F00000000000000000021 /* ProgramFoldDown.swift in Sources */,
 				E25F000000000000000000A1 /* ProgramSourceController.swift in Sources */,
 				E25F000000000000000000A2 /* ProductionProgramSourceCard.swift in Sources */,
@@ -2298,6 +2305,7 @@
 				E4F200000000000000000005 /* QuietZoneFeedForwardSurveyFlowTests.swift in Sources */,
 				E4F700000000000000000003 /* FeedForwardEchoFlowTests.swift in Sources */,
 				E26A00000000000000000026 /* ThroughFeedSweepPlanTests.swift in Sources */,
+				E26A0000000000000000002A /* ThroughFeedSplitterRenderTests.swift in Sources */,
 				E4F700000000000000000F03 /* FeedForwardLiveWeightsFeedTests.swift in Sources */,
 				E4F900000000000000000A05 /* FeedForwardLiveArmingTests.swift in Sources */,
 				E4F700000000000000000033 /* CrossDevicePairCaptureTests.swift in Sources */,

@@ -168,6 +168,11 @@ final class QuietZoneFeedForwardSurveyController: ObservableObject {
         guard let position = ambient.selectedModelPosition else {
             return (nil, QuietZoneFeedForwardSurveyError.positionModelMissing.localizedDescription)
         }
+        // E26 S2c: the secondary path (the Room Correction position) must describe today's bass setup.
+        if quietZone.subAwareAncEnabled,
+           case .stale(let message) = quietZone.ancBassPathState.freshness(of: position.ancBassFingerprint) {
+            return (nil, message)
+        }
         return (QuietZoneFeedForwardShadowInputs(
             device: seat.device, referenceChannel: survey.referenceChannel, errorChannel: seat.channel,
             bands: assembled.bands, design: design, budget: quietZone.feedForwardBudget, position: position,

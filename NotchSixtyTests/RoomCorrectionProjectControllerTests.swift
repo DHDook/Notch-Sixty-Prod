@@ -148,6 +148,30 @@ final class RoomCorrectionProjectControllerTests: XCTestCase {
         XCTAssertEqual(reloaded.positions[3].right.rawCapture, [4, 0.5])
     }
 
+    /// E26 S2c: a retained position carries the bass-path stamp the app supplies, an explicit one wins, and none
+    /// leaves it unstamped.
+    func testRetainedPositionCarriesTheAncBassStamp() throws {
+        let fixture = try makeFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let provided = AncBassPathFingerprint(value: "provided")
+        let explicit = AncBassPathFingerprint(value: "explicit")
+
+        let plain = try fixture.controller.retainMeasurement(
+            analysis(capturedAt: 1, leftMagnitude: [0, 10], rightMagnitude: [2, 12]), sweep: sweep(), microphone: microphone())
+        fixture.controller.ancBassStamp = { provided }
+        let stamped = try fixture.controller.retainMeasurement(
+            analysis(capturedAt: 2, leftMagnitude: [0, 10], rightMagnitude: [2, 12]), sweep: sweep(), microphone: microphone())
+        let overridden = try fixture.controller.retainMeasurement(
+            analysis(capturedAt: 3, leftMagnitude: [0, 10], rightMagnitude: [2, 12]), sweep: sweep(), microphone: microphone(),
+            ancBassFingerprint: explicit)
+        func stamp(_ id: UUID) -> AncBassPathFingerprint? {
+            fixture.controller.positions.first { $0.id == id }?.ancBassFingerprint
+        }
+        XCTAssertNil(stamp(plain))
+        XCTAssertEqual(stamp(stamped), provided)
+        XCTAssertEqual(stamp(overridden), explicit)
+    }
+
     func testWeightedAggregationUsesNormalizedDBWeightsAndDropsAggregatePhase() throws {
         let fixture = try makeFixture()
         defer { try? FileManager.default.removeItem(at: fixture.root) }

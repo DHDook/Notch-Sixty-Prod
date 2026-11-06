@@ -2428,6 +2428,10 @@ struct RoomCorrectionMeasurementPosition: Identifiable, Codable, Equatable, Send
     var sampleRate: Double
     var left: RoomCorrectionChannelMeasurement
     var right: RoomCorrectionChannelMeasurement
+    /// E26 S2c: the bass path the secondary path was measured under (under `e26.sub-aware-anc` only). Nil for a
+    /// position made before the stamp existed, which reads as stale when a sub is in the path. Optional, so stored
+    /// projects decode unchanged.
+    var ancBassFingerprint: AncBassPathFingerprint? = nil
 }
 
 struct RoomCorrectionAggregateResponse: Codable, Equatable, Sendable {

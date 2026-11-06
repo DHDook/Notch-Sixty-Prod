@@ -526,6 +526,22 @@ bool N60ProtectedSpeakerBusRenderProgram(
     float * _Nonnull output
 );
 
+/// E26 S2c: control-plane/offline renderer of a pre-split feed (left or right) through the
+/// production speaker bus splitter and, when `driverSnapshot` is valid and enabled, the
+/// production per-driver processor. Writes every bus (`N60SpeakerOutputBusCount` floats per
+/// frame, frame-major) so a measurement can model all of what the feed reaches, sub lane
+/// included. Fresh zeroed state each call; allocates, so it must not be called from a realtime
+/// callback. `output` must hold `frameCount * N60SpeakerOutputBusCount` floats. Returns false for a
+/// disabled or invalid splitter or a non-finite sample.
+bool N60SpeakerBusRenderFeed(
+    const float * _Nonnull monoInput,
+    uint32_t frameCount,
+    bool feedIsLeft,
+    N60SpeakerBusSplitterSnapshot splitterSnapshot,
+    N60SpeakerDriverProcessingSnapshot driverSnapshot,
+    float * _Nonnull output
+);
+
 bool N60SameDeviceOutputMapValueForChannel(
     const N60SameDeviceOutputMap * _Nonnull map,
     const N60SpeakerBusFrame * _Nonnull frame,
