@@ -269,6 +269,7 @@
 		F89100000000000000000001 /* N60AmbientMonitorBridge.c in Sources */ = {isa = PBXBuildFile; fileRef = F89100000000000000000011 /* N60AmbientMonitorBridge.c */; };
 		F90100000000000000000001 /* N60ActiveQuietZone.c in Sources */ = {isa = PBXBuildFile; fileRef = F90100000000000000000011 /* N60ActiveQuietZone.c */; };
 		E4B000000000000000000003 /* n60_anc_guard.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E4B000000000000000000013 /* n60_anc_guard.cpp */; };
+		E26C00000000000000000001 /* n60_anc_lane_feed.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E26C00000000000000000011 /* n60_anc_lane_feed.cpp */; };
 		E4B000000000000000000004 /* AncGuardTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4B000000000000000000014 /* AncGuardTests.swift */; };
 		E4C000000000000000000023 /* n60_remote_tonal.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E4C000000000000000000022 /* n60_remote_tonal.cpp */; };
 		E4C000000000000000000003 /* n60_fxlms.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E4C000000000000000000013 /* n60_fxlms.cpp */; };
@@ -897,6 +898,9 @@
 		E4B000000000000000000011 /* N60AncGuard.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = N60AncGuard.h; sourceTree = "<group>"; };
 		E4B000000000000000000012 /* n60_anc_guard.hpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.h; path = n60_anc_guard.hpp; sourceTree = "<group>"; };
 		E4B000000000000000000013 /* n60_anc_guard.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = n60_anc_guard.cpp; sourceTree = "<group>"; };
+		E26C00000000000000000011 /* n60_anc_lane_feed.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = n60_anc_lane_feed.cpp; sourceTree = "<group>"; };
+		E26C00000000000000000012 /* N60AncLaneFeed.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = N60AncLaneFeed.h; sourceTree = "<group>"; };
+		E26C00000000000000000013 /* N60SpeakerBusSplitter.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = N60SpeakerBusSplitter.h; sourceTree = "<group>"; };
 		E4B000000000000000000014 /* AncGuardTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AncGuardTests.swift; sourceTree = "<group>"; };
 		E4C000000000000000000021 /* N60RemoteTonal.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = N60RemoteTonal.h; sourceTree = "<group>"; };
 		E4C000000000000000000022 /* n60_remote_tonal.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = n60_remote_tonal.cpp; sourceTree = "<group>"; };
@@ -1796,6 +1800,9 @@
 				E4B000000000000000000011 /* N60AncGuard.h */,
 				E4B000000000000000000012 /* n60_anc_guard.hpp */,
 				E4B000000000000000000013 /* n60_anc_guard.cpp */,
+				E26C00000000000000000011 /* n60_anc_lane_feed.cpp */,
+				E26C00000000000000000012 /* N60AncLaneFeed.h */,
+				E26C00000000000000000013 /* N60SpeakerBusSplitter.h */,
 				E4C000000000000000000011 /* N60Fxlms.h */,
 				E4C000000000000000000012 /* n60_fxlms.hpp */,
 				E4C000000000000000000013 /* n60_fxlms.cpp */,
@@ -2147,6 +2154,7 @@
 				F89100000000000000000001 /* N60AmbientMonitorBridge.c in Sources */,
 				F90100000000000000000001 /* N60ActiveQuietZone.c in Sources */,
 				E4B000000000000000000003 /* n60_anc_guard.cpp in Sources */,
+				E26C00000000000000000001 /* n60_anc_lane_feed.cpp in Sources */,
 				E4C000000000000000000003 /* n60_fxlms.cpp in Sources */,
 				E4C000000000000000000023 /* n60_remote_tonal.cpp in Sources */,
 				E4F00000000000000000EC01 /* n60_ff_echo.cpp in Sources */,

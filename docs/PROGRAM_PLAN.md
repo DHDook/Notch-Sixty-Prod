@@ -323,6 +323,7 @@ it, behind `e26.sub-aware-anc`. Live output stays behind the per-feature arm.
   - [~] S6a `e26/sub-multibus-transport` (#370)
   - [~] S6b `e26/sub-readiness-from-sweeps` (#372): open-preout check, per-band eligibility and sub-band render verification feed readiness behind `e26.sub-aware-anc`; multi-bus profile-session passes and the `measureSubPath` harness move to S7
   - [~] S6c `e26/sub-multiseat-plant` (#373): measured per-seat 2x2 plant in the spatial planner, conditioning and the stricter-of rule in the controller, behind `e26.sub-aware-anc`; driving the multi-seat branch through production wiring moves to S7 (G12)
+  - [~] S7b1 `e26/profile-anc-host-feed`: N60AncLaneFeed host feed, shared splitter header and harness, built dark; wiring (S7b2) and sub measurement (S7c) follow
 - [ ] Quiet Zone with a sub on its own output (profile session, sub lane as an actuator)
   - [~] S6: run `OpenPreoutCheck` on measured sweeps and set `openPreoutRefusal` (S6b, behind the flag)
   - [~] S6: feed `PerBandAncEligibility` (`feedForwardBandCount`) from `CombinedPathBandAnalyzer` into readiness (S6b, behind the flag)

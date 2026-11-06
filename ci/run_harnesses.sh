@@ -505,6 +505,22 @@ if selected e26_anc_actuators; then
     fi
 fi
 
+# E26 S7b1 (G1): the host feed for the anti-noise lanes (lanes equal the offline splitter render, lease and fade, no allocation).
+if selected e26_anc_lane_feed; then
+    if clang -std=c11 -O2 -Wall -Wextra -Werror -include stddef.h -I"$RT" -c "$RT/N60ActiveQuietZone.c" -o "$OUT/e26_alf_aqz.o" \
+        && clang++ -std=c++20 -O2 -Wall -Wextra -Werror -I"$RT" -c "$RT/n60_fxlms.cpp" -o "$OUT/e26_alf_fxlms.o" \
+        && clang++ -std=c++20 -O2 -Wall -Wextra -Werror -I"$RT" -c "$RT/n60_ff_live.cpp" -o "$OUT/e26_alf_ff_live.o" \
+        && clang++ -std=c++20 -O2 -Wall -Wextra -Werror -I"$RT" -c "$RT/n60_ff_echo.cpp" -o "$OUT/e26_alf_ff_echo.o" \
+        && clang++ -std=c++20 -O2 -Wall -Wextra -Werror -I"$RT" -c "$RT/n60_anc_lane_feed.cpp" -o "$OUT/e26_alf_feed.o" \
+        && clang++ -std=c++20 -O2 -Wall -Wextra -Werror -I"$RT" core/tests/test_anc_lane_feed.cpp \
+            "$OUT/e26_alf_feed.o" "$OUT/e26_alf_aqz.o" "$OUT/e26_alf_ff_live.o" "$OUT/e26_alf_ff_echo.o" \
+            "$OUT/e26_alf_fxlms.o" -o "$OUT/e26_anc_lane_feed" && "$OUT/e26_anc_lane_feed"; then
+        passed+=(e26_anc_lane_feed)
+    else
+        failed+=(e26_anc_lane_feed)
+    fi
+fi
+
 # E11 S2: targeted measurement bridge second-program playback and allocation-free process call.
 if selected e11_targeted_bridge; then
     harness e11_targeted_bridge "${STRICT[@]}" -O2 -I"$RT" core/tests/test_targeted_bridge.c

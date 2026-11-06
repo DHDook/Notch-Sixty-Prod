@@ -1,4 +1,5 @@
 #include "N60RealtimeAudioBridge.h"
+#include "N60SpeakerBusSplitter.h"
 
 #include "n60/fold.h"
 #include "n60/graph.h"
@@ -61,25 +62,17 @@ typedef struct {
     uint64_t appliedCommandSequence;
 } N60StartupFadeRuntime;
 
-typedef struct {
-    N60SpeakerBusSplitterSnapshot snapshot;
-    N60CrossoverPreciseState lowerLowLeft[N60_MAX_CROSSOVER_SECTIONS];
-    N60CrossoverPreciseState lowerLowRight[N60_MAX_CROSSOVER_SECTIONS];
-    N60CrossoverPreciseState lowerLowMono[N60_MAX_CROSSOVER_SECTIONS];
-    N60CrossoverPreciseState lowerHighLeft[N60_MAX_CROSSOVER_SECTIONS];
-    N60CrossoverPreciseState lowerHighRight[N60_MAX_CROSSOVER_SECTIONS];
-    N60CrossoverPreciseState upperLowLeft[N60_MAX_CROSSOVER_SECTIONS];
-    N60CrossoverPreciseState upperLowRight[N60_MAX_CROSSOVER_SECTIONS];
-    N60CrossoverPreciseState upperHighLeft[N60_MAX_CROSSOVER_SECTIONS];
-    N60CrossoverPreciseState upperHighRight[N60_MAX_CROSSOVER_SECTIONS];
-    // Tri-amp phase compensation: the low band passes through the upper
-    // crossover's all-pass (LP2 + HP2) so the three bands sum flat.
-    N60CrossoverPreciseState lowAllPassLowLeft[N60_MAX_CROSSOVER_SECTIONS];
-    N60CrossoverPreciseState lowAllPassLowRight[N60_MAX_CROSSOVER_SECTIONS];
-    N60CrossoverPreciseState lowAllPassHighLeft[N60_MAX_CROSSOVER_SECTIONS];
-    N60CrossoverPreciseState lowAllPassHighRight[N60_MAX_CROSSOVER_SECTIONS];
-    N60CrossoverPreciseState subPhaseAlignment;
-} N60SpeakerBusSplitterRuntime;
+// E26 S7b: the splitter moved to N60SpeakerBusSplitter.h so the Quiet Zone lane feed shares it.
+_Static_assert((int)N60_SPLITTER_BUS_COUNT == (int)N60SpeakerOutputBusCount, "splitter bus count");
+_Static_assert((int)N60_SPLITTER_BUS_LEFT_FULL == (int)N60SpeakerOutputBusLeftFullRange, "splitter left full bus");
+_Static_assert((int)N60_SPLITTER_BUS_RIGHT_FULL == (int)N60SpeakerOutputBusRightFullRange, "splitter right full bus");
+_Static_assert((int)N60_SPLITTER_BUS_RIGHT_LOW == (int)N60SpeakerOutputBusRightLow, "splitter right low bus");
+_Static_assert((int)N60_SPLITTER_BUS_LEFT_MID == (int)N60SpeakerOutputBusLeftMid, "splitter left mid bus");
+_Static_assert((int)N60_SPLITTER_BUS_RIGHT_MID == (int)N60SpeakerOutputBusRightMid, "splitter right mid bus");
+_Static_assert((int)N60_SPLITTER_BUS_LEFT_HIGH == (int)N60SpeakerOutputBusLeftHigh, "splitter left high bus");
+_Static_assert((int)N60_SPLITTER_BUS_SUB_MONO == (int)N60SpeakerOutputBusSubMono, "splitter sub bus");
+_Static_assert((int)N60_SPLITTER_BUS_LEFT_LOW == (int)N60SpeakerOutputBusLeftLow, "splitter low bus");
+_Static_assert((int)N60_SPLITTER_BUS_RIGHT_HIGH == (int)N60SpeakerOutputBusRightHigh, "splitter high bus");
 
 
 // E6 S8b2c: capacity of each latency-alignment delay ring (power of two). The applied
@@ -540,137 +533,13 @@ static void publish_output_vu_meter(
     atomic_fetch_add_explicit(&bridge->outputVUOverRangeSamples, overRangeSamples, memory_order_relaxed);
 }
 
-static float process_splitter_sections(
-    const N60CrossoverPreciseCoefficients *coefficients,
-    N60CrossoverPreciseState *states,
-    uint32_t count,
-    float input
-) {
-    float output = input;
-    for (uint32_t index = 0; index < count; ++index) {
-        output = N60CrossoverPreciseProcessSample(coefficients[index], &states[index], output);
-    }
-    return output;
-}
-
 static void process_speaker_bus_splitter(
     N60SpeakerBusSplitterRuntime *runtime,
     float left,
     float right,
     N60SpeakerBusFrame *frame
 ) {
-    *frame = N60SpeakerBusFrameMakeSilence();
-    (void)N60SpeakerBusFrameSet(frame, N60SpeakerOutputBusLeftFullRange, left);
-    (void)N60SpeakerBusFrameSet(frame, N60SpeakerOutputBusRightFullRange, right);
-    if (!runtime->snapshot.enabled) return;
-
-    const N60SpeakerBusSplitterSnapshot *snapshot = &runtime->snapshot;
-    if (snapshot->mode == N60SpeakerCrossoverModeMainsSub) {
-        float mainsLeft = process_splitter_sections(
-            snapshot->lowerHighPass, runtime->lowerHighLeft,
-            snapshot->lowerSectionCount, left
-        );
-        float mainsRight = process_splitter_sections(
-            snapshot->lowerHighPass, runtime->lowerHighRight,
-            snapshot->lowerSectionCount, right
-        );
-        float subMono = 0.5f * (left + right);
-        subMono = process_splitter_sections(
-            snapshot->lowerLowPass, runtime->lowerLowMono,
-            snapshot->lowerSectionCount, subMono
-        );
-        if (snapshot->subPhaseAlignmentEnabled) {
-            subMono = N60CrossoverPreciseProcessSample(
-                snapshot->subPhaseAlignmentAllPass,
-                &runtime->subPhaseAlignment,
-                subMono
-            );
-        }
-        subMono *= snapshot->subGainLinear;
-        if (snapshot->subPolarityInverted) subMono = -subMono;
-        (void)N60SpeakerBusFrameSet(frame, N60SpeakerOutputBusLeftHigh, mainsLeft);
-        (void)N60SpeakerBusFrameSet(frame, N60SpeakerOutputBusRightHigh, mainsRight);
-        (void)N60SpeakerBusFrameSet(frame, N60SpeakerOutputBusSubMono, subMono);
-        return;
-    }
-
-    float lowLeft = process_splitter_sections(
-        snapshot->lowerLowPass, runtime->lowerLowLeft,
-        snapshot->lowerSectionCount, left
-    );
-    float lowRight = process_splitter_sections(
-        snapshot->lowerLowPass, runtime->lowerLowRight,
-        snapshot->lowerSectionCount, right
-    );
-
-    if (snapshot->mode == N60SpeakerCrossoverModeBiAmp) {
-        (void)N60SpeakerBusFrameSet(frame, N60SpeakerOutputBusLeftLow, lowLeft);
-        (void)N60SpeakerBusFrameSet(frame, N60SpeakerOutputBusRightLow, lowRight);
-        float highLeft = process_splitter_sections(
-            snapshot->lowerHighPass, runtime->lowerHighLeft,
-            snapshot->lowerSectionCount, left
-        );
-        float highRight = process_splitter_sections(
-            snapshot->lowerHighPass, runtime->lowerHighRight,
-            snapshot->lowerSectionCount, right
-        );
-        (void)N60SpeakerBusFrameSet(frame, N60SpeakerOutputBusLeftHigh, highLeft);
-        (void)N60SpeakerBusFrameSet(frame, N60SpeakerOutputBusRightHigh, highRight);
-        return;
-    }
-
-    // Tri-amp Linkwitz-Riley tree:
-    //   low  = LP1 · (LP2 + HP2)   (upper all-pass compensation)
-    //   mid  = HP1 · LP2
-    //   high = HP1 · HP2
-    // so low + mid + high = AP1 · AP2, an all-pass with flat magnitude.
-    lowLeft = process_splitter_sections(
-            snapshot->upperLowPass, runtime->lowAllPassLowLeft,
-            snapshot->upperSectionCount, lowLeft
-        )
-        + process_splitter_sections(
-            snapshot->upperHighPass, runtime->lowAllPassHighLeft,
-            snapshot->upperSectionCount, lowLeft
-        );
-    lowRight = process_splitter_sections(
-            snapshot->upperLowPass, runtime->lowAllPassLowRight,
-            snapshot->upperSectionCount, lowRight
-        )
-        + process_splitter_sections(
-            snapshot->upperHighPass, runtime->lowAllPassHighRight,
-            snapshot->upperSectionCount, lowRight
-        );
-    (void)N60SpeakerBusFrameSet(frame, N60SpeakerOutputBusLeftLow, lowLeft);
-    (void)N60SpeakerBusFrameSet(frame, N60SpeakerOutputBusRightLow, lowRight);
-
-    const float upperLeft = process_splitter_sections(
-        snapshot->lowerHighPass, runtime->lowerHighLeft,
-        snapshot->lowerSectionCount, left
-    );
-    const float upperRight = process_splitter_sections(
-        snapshot->lowerHighPass, runtime->lowerHighRight,
-        snapshot->lowerSectionCount, right
-    );
-    const float midLeft = process_splitter_sections(
-        snapshot->upperLowPass, runtime->upperLowLeft,
-        snapshot->upperSectionCount, upperLeft
-    );
-    const float midRight = process_splitter_sections(
-        snapshot->upperLowPass, runtime->upperLowRight,
-        snapshot->upperSectionCount, upperRight
-    );
-    const float highLeft = process_splitter_sections(
-        snapshot->upperHighPass, runtime->upperHighLeft,
-        snapshot->upperSectionCount, upperLeft
-    );
-    const float highRight = process_splitter_sections(
-        snapshot->upperHighPass, runtime->upperHighRight,
-        snapshot->upperSectionCount, upperRight
-    );
-    (void)N60SpeakerBusFrameSet(frame, N60SpeakerOutputBusLeftMid, midLeft);
-    (void)N60SpeakerBusFrameSet(frame, N60SpeakerOutputBusRightMid, midRight);
-    (void)N60SpeakerBusFrameSet(frame, N60SpeakerOutputBusLeftHigh, highLeft);
-    (void)N60SpeakerBusFrameSet(frame, N60SpeakerOutputBusRightHigh, highRight);
+    N60SpeakerBusSplitterProcess(runtime, left, right, frame->values);
 }
 
 static void free_unified_attachment(N60UnifiedGraphAttachment *attachment) {
