@@ -105,6 +105,7 @@ enum QuietZoneFeedForwardSurveyError: Error, Equatable, LocalizedError {
     case leakageMissing
     case positionModelMissing
     case corruptSidecar
+    case subPathNotNeeded
 
     var errorDescription: String? {
         switch self {
@@ -124,6 +125,8 @@ enum QuietZoneFeedForwardSurveyError: Error, Equatable, LocalizedError {
             return "Stop playback before measuring speaker leakage."
         case .noOutputSelected:
             return "Choose a playback output first."
+        case .subPathNotNeeded:
+            return "No subwoofer is in the anti-noise path, so there is nothing to measure."
         case .alreadyRunning:
             return "A feed-forward measurement is already running."
         case .captureFault:

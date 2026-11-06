@@ -40,6 +40,17 @@ final class SubAwareArmingTests: XCTestCase {
             openPreoutRefusal: preout, safetyAvailable: safety, feedForwardBandCount: nil)
     }
 
+    static func report(
+        fingerprint: AncBassPathFingerprint, preout: String = "", unverified: String? = nil, eligibleBands: Int = 1
+    ) -> SubSweepReport {
+        SubSweepReport(
+            fingerprint: fingerprint, sampleRate: 48_000, leftBands: [], rightBands: [],
+            verification: .init(worstGainErrorDB: 0, worstDelayErrorSeconds: 0, bandsCompared: 10, passes: true),
+            openPreoutRefusal: preout, eligibility: PerBandAncEligibility(bands: (0..<eligibleBands).map {
+                .init(centerHz: 50 + Double($0), delaySeconds: 0.004, result: .eligible(reserveSeconds: 0.01))
+            }), renderUnverifiedMessage: unverified)
+    }
+
     func testReadinessReasonsInOrderAtEveryRate() {
         let declared = arrangement(.downstreamReceiver, layout: .fiveOne, receiver: .openPreout)
         for rate in rates {
@@ -60,7 +71,13 @@ final class SubAwareArmingTests: XCTestCase {
             XCTAssertEqual(SubAwareAncReadiness.evaluate(i).message, AncBassPathState.staleMessage)
             i.plantFingerprint = i.path.fingerprint
             XCTAssertEqual(SubAwareAncReadiness.evaluate(i).reason, .openPreoutMismatch)
+            i.sweepsAnalysed = false
+            XCTAssertEqual(SubAwareAncReadiness.evaluate(i).reason, .sweepsNotAnalysed)
+            i.sweepsAnalysed = true
             i.openPreoutRefusal = ""
+            i.renderUnverified = SubSweepAnalyzer.renderUnverifiedText
+            XCTAssertEqual(SubAwareAncReadiness.evaluate(i).reason, .renderUnverified)
+            i.renderUnverified = nil
             XCTAssertEqual(SubAwareAncReadiness.evaluate(i).reason, .safetyUnavailable)
             i.safetyAvailable = true
             XCTAssertTrue(SubAwareAncReadiness.evaluate(i).isReady)
@@ -140,6 +157,8 @@ final class SubAwareArmingTests: XCTestCase {
             // Measured under today's setup: readiness passes; Turn On then fails only at the engine (not running),
             // so readiness never arms.
             c.setBassPlant(plant(rate: 48_000), fingerprint: c.ancBassPathState.fingerprint)
+            XCTAssertEqual(c.subAwareReadiness(mode: .tonal).reason, .sweepsNotAnalysed, "S6b: the sweeps must be analysed")
+            c.setSubSweepReport(Self.report(fingerprint: c.ancBassPathState.fingerprint))
             XCTAssertTrue(c.subAwareReadiness(mode: .tonal).isReady)
             XCTAssertNil(c.feedForwardLiveFacts().subAwareRefusal)
             XCTAssertFalse(c.arm.isArmed, "readiness alone never arms")

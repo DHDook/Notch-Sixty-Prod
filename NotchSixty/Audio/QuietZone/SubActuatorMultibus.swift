@@ -109,13 +109,23 @@ enum SplitterRenderVerifier {
     /// Bands that stick out of the sweep's own range, or where the dry sweep has less than this fraction of its peak band energy, are skipped (the sweep gives no estimate there).
     static let minimumDryEnergyFraction = 1.0e-4
 
+    /// The bands the verifier covers by default: the whole 20-450 Hz analysis range, so the sub bands are inside it
+    /// (E26 S6b, G2). The lowest third-octave band reaches down to 17.8 Hz.
+    static let defaultSweepRangeHz: ClosedRange<Double> = 15...450
+    /// Both signals are boxcar-averaged and decimated to a rate of at least this before the band DFTs (control-plane
+    /// cost only: the bands are below 500 Hz, and the same filter acts on both signals, so their ratio is unchanged).
+    static let minimumAnalysisRateHz = 4_000.0
+
     static func verify(
-        dry: [Float], rendered: [Float], impulseBands: [CombinedPathBand], sampleRate: Double,
-        sweepRangeHz: ClosedRange<Double> = 40...450
+        dry fullDry: [Float], rendered fullRendered: [Float], impulseBands: [CombinedPathBand], sampleRate fullRate: Double,
+        sweepRangeHz: ClosedRange<Double> = defaultSweepRangeHz
     ) -> Result {
-        guard dry.count == rendered.count, !dry.isEmpty, sampleRate > 0 else {
+        guard fullDry.count == fullRendered.count, !fullDry.isEmpty, fullRate > 0, fullRate.isFinite else {
             return Result(worstGainErrorDB: .infinity, worstDelayErrorSeconds: .infinity, bandsCompared: 0, passes: false)
         }
+        let factor = max(1, Int(fullRate / minimumAnalysisRateHz))
+        let dry = decimate(fullDry, by: factor), rendered = decimate(fullRendered, by: factor)
+        let sampleRate = fullRate / Double(factor)
         var energies: [Double] = []
         for band in impulseBands { energies.append(dryEnergy(dry, band: band, sampleRate: sampleRate)) }
         let peak = energies.max() ?? 0
@@ -133,6 +143,20 @@ enum SplitterRenderVerifier {
         return Result(
             worstGainErrorDB: worstGain, worstDelayErrorSeconds: worstDelay, bandsCompared: compared,
             passes: compared > 0 && worstGain <= gainToleranceDB && worstDelay <= delayToleranceSeconds)
+    }
+
+    /// Block average (a boxcar low-pass) then keep one value per block. Both signals take the same path, so the
+    /// filter's gain and half-block delay drop out of the ratio.
+    private static func decimate(_ x: [Float], by factor: Int) -> [Float] {
+        guard factor > 1 else { return x }
+        let count = x.count / factor
+        var out = [Float](repeating: 0, count: count)
+        for i in 0..<count {
+            var sum = 0.0
+            for k in 0..<factor { sum += Double(x[i * factor + k]) }
+            out[i] = Float(sum / Double(factor))
+        }
+        return out
     }
 
     private static func frequencies(_ band: CombinedPathBand) -> [Double] {

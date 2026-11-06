@@ -10,8 +10,8 @@ struct SubAwareAncReadiness: Equatable, Sendable {
 
     /// The first failing reason, in this order (`Reason.allCases`).
     enum Reason: Int, CaseIterable, Equatable, Sendable {
-        case receiverUndeclared, plantMissing, recordStale, openPreoutMismatch, notConditioned, safetyUnavailable
-        case noFeedForwardBand
+        case receiverUndeclared, plantMissing, recordStale, sweepsNotAnalysed, openPreoutMismatch, notConditioned
+        case renderUnverified, safetyUnavailable, noFeedForwardBand
     }
 
     struct Inputs: Equatable, Sendable {
@@ -27,12 +27,18 @@ struct SubAwareAncReadiness: Equatable, Sendable {
         /// Feed-forward only: bands that pass per-band eligibility. nil when not evaluated (the whole-feed lead gate still
         /// applies in `FeedForwardLiveArmGate`).
         var feedForwardBandCount: Int?
+        /// E26 S6b: a fresh `SubSweepReport` exists. Defaults to true so callers that do not model the sweep report
+        /// (the S5 tests) are unchanged; the controller passes the real answer.
+        var sweepsAnalysed: Bool = true
+        /// E26 S6b: the splitter render could not be verified (G2); the text to show, or nil.
+        var renderUnverified: String?
     }
 
     let reason: Reason?
     let message: String?
     var isReady: Bool { reason == nil }
 
+    static let sweepsNotAnalysedMessage = "Measure with your subwoofer, so Quiet Zone can check the bass path."
     static let plantMissingMessage = "Measure with your subwoofer first, so Quiet Zone knows how the bass reaches you."
     static let notConditionedMessage = "The bass measurement is not usable. Measure with your subwoofer again."
     static let safetyMessage = "Quiet Zone cannot set safe bass limits for this setup yet."
@@ -46,6 +52,7 @@ struct SubAwareAncReadiness: Equatable, Sendable {
         guard !i.plant.isEmpty else { return fail(.plantMissing, plantMissingMessage) }
         guard let stamp = i.plantFingerprint else { return fail(.plantMissing, plantMissingMessage) }
         if case .stale(let message) = i.path.freshness(of: stamp) { return fail(.recordStale, message) }
+        guard i.sweepsAnalysed else { return fail(.sweepsNotAnalysed, sweepsNotAnalysedMessage) }
         if let refusal = i.openPreoutRefusal, !refusal.isEmpty, i.path.path.receiverBass == .openPreout {
             return fail(.openPreoutMismatch, refusal)
         }
@@ -56,6 +63,7 @@ struct SubAwareAncReadiness: Equatable, Sendable {
                 && $0.leftLeakageAtReference.magnitude.isFinite && $0.rightLeakageAtReference.magnitude.isFinite
         }
         guard usable else { return fail(.notConditioned, notConditionedMessage) }
+        if let unverified = i.renderUnverified { return fail(.renderUnverified, unverified) }
         guard i.safetyAvailable else { return fail(.safetyUnavailable, safetyMessage) }
         if i.mode == .feedForward, let bands = i.feedForwardBandCount, bands == 0 {
             return fail(.noFeedForwardBand, noFeedForwardBandMessage)

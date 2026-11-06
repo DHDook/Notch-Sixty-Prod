@@ -78,10 +78,10 @@ final class SubActuatorMultibusTests: XCTestCase {
 
     func testBandDelayAndLevelHoldOnTheSplitterRenderAtEveryRate() throws {
         for rate in rates {
-            let dry = sweep(rate: rate)
+            let dry = SplitterVerificationSweep.samples(sampleRate: rate)
             let rendered = try ThroughFeedSplitterRenderer.render(dry, feed: .left, bass: bass(), sampleRate: rate)
             let impulse = try ThroughFeedSplitterRenderer.combinedImpulseResponse(
-                feed: .left, bass: bass(), sampleRate: rate, seconds: 0.5)
+                feed: .left, bass: bass(), sampleRate: rate, seconds: 1.0)
             let bands = CombinedPathBandAnalyzer.analyze(impulseResponse: impulse, sampleRate: rate)
             let result = SplitterRenderVerifier.verify(
                 dry: dry, rendered: rendered.combined, impulseBands: bands, sampleRate: rate)
@@ -92,9 +92,9 @@ final class SubActuatorMultibusTests: XCTestCase {
 
     func testVerifierRefusesAnAlteredRender() throws {
         let rate = 48_000.0
-        let dry = sweep(rate: rate)
+        let dry = SplitterVerificationSweep.samples(sampleRate: rate)
         let rendered = try ThroughFeedSplitterRenderer.render(dry, feed: .left, bass: bass(), sampleRate: rate)
-        let impulse = try ThroughFeedSplitterRenderer.combinedImpulseResponse(feed: .left, bass: bass(), sampleRate: rate, seconds: 0.5)
+        let impulse = try ThroughFeedSplitterRenderer.combinedImpulseResponse(feed: .left, bass: bass(), sampleRate: rate, seconds: 1.0)
         let bands = CombinedPathBandAnalyzer.analyze(impulseResponse: impulse, sampleRate: rate)
         let late = [Float](repeating: 0, count: 96) + rendered.combined.dropLast(96)  // 2 ms later
         XCTAssertFalse(SplitterRenderVerifier.verify(dry: dry, rendered: late, impulseBands: bands, sampleRate: rate).passes)

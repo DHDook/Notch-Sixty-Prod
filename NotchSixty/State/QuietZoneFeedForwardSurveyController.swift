@@ -270,7 +270,11 @@ final class QuietZoneFeedForwardSurveyController: ObservableObject {
                 ThroughFeedSweepPlanner.settings(
                     base: baseSettings, path: $0.path, sampleRate: output.nominalSampleRate)
             } ?? baseSettings
-            let program = try RoomCorrectionSweepGenerator().makeProgram(settings: sweepSettings)
+            var program = try RoomCorrectionSweepGenerator().makeProgram(settings: sweepSettings)
+            // E26 S6b: with a sub in the path the leakage is the combined leakage, so the sweep plays through the splitter.
+            if quietZone.bassConditioningActive {
+                program = try SubSweepAnalyzer.renderedProgram(program, bass: quietZone.engine.bassManagementConfiguration)
+            }
             let plan = try RoomCorrectionMeasurementPlan(
                 program: program, settlingSeconds: calibration.interPassSettlingSeconds
             )
@@ -319,6 +323,88 @@ final class QuietZoneFeedForwardSurveyController: ObservableObject {
         } catch {
             message = error.localizedDescription
         }
+    }
+
+    /// E26 S6b: the seat sweep through the combined path ("Measure with your subwoofer"). The sweep is rendered through
+    /// the app's splitter, played on each feed, and analysed per band: the open-preout check (G3), per-band feed-forward
+    /// eligibility (G4) and the splitter-render verification (G2) go to the controller as one `SubSweepReport`. With
+    /// `thenLeakage` the combined leakage sweep follows. Audible; needs playback idle.
+    func measureSubPath(thenLeakage: Bool = false) {
+        do {
+            guard quietZone.bassConditioningActive else { throw QuietZoneFeedForwardSurveyError.subPathNotNeeded }
+            guard activity == .idle else { throw QuietZoneFeedForwardSurveyError.alreadyRunning }
+            guard calibration.permissionStatus == .authorized else {
+                throw QuietZoneFeedForwardSurveyError.microphonePermissionRequired
+            }
+            guard RoomCorrectionCalibrationController.canClaimHardware(
+                audioLifecycle: quietZone.engine.lifecycleState
+            ) else { throw QuietZoneFeedForwardSurveyError.playbackMustBeIdle }
+            guard let output = calibration.selectedOutputDevice else {
+                throw QuietZoneFeedForwardSurveyError.noOutputSelected
+            }
+            guard let arrangement = quietZone.arrangement else { throw QuietZoneFeedForwardSurveyError.subPathNotNeeded }
+            let seat = try seat()
+            let pathState = quietZone.ancBassPathState
+            let bass = quietZone.engine.bassManagementConfiguration
+            let preview = quietZone.feedForwardBudget.conservativePreviewSeconds
+            let baseSettings = RoomCorrectionSweepSettings(
+                sampleRate: output.nominalSampleRate,
+                startFrequencyHz: calibration.sweepStartFrequencyHz,
+                endFrequencyHz: calibration.sweepEndFrequencyHz,
+                durationSeconds: calibration.sweepDurationSeconds,
+                levelDBFS: calibration.sweepLevelDBFS,
+                leadInSeconds: calibration.sweepLeadInSeconds,
+                tailSeconds: calibration.sweepTailSeconds,
+                fadeSeconds: calibration.sweepFadeSeconds
+            )
+            let settings = ThroughFeedSweepPlanner.settings(
+                base: baseSettings, path: pathState.path, sampleRate: output.nominalSampleRate)
+            let program = try SubSweepAnalyzer.renderedProgram(
+                try RoomCorrectionSweepGenerator().makeProgram(settings: settings), bass: bass)
+            let plan = try RoomCorrectionMeasurementPlan(
+                program: program, settlingSeconds: calibration.interPassSettlingSeconds)
+            let transport = try transportFactory(output, seat.device, seat.channel, plan)
+            try transport.start()
+            leakageTransport = transport
+            activity = .measuringLeakage(progress: 0)
+            message = "Playing the sweep through your bass path on each speaker; the seat microphone records it."
+            task = Task { [weak self] in
+                guard let self else { return }
+                do {
+                    let capture = try await self.pollLeakage(transport, repeatIndex: 0)
+                    self.activity = .analyzing
+                    let analysis = try await self.analysisOperation(capture, plan, nil)
+                    let rate = analysis.sampleRate
+                    let left = analysis.left.impulseResponse, right = analysis.right.impulseResponse
+                    let report = try await Task.detached(priority: .userInitiated) {
+                        try SubSweepAnalyzer.analyze(
+                            leftImpulse: left, rightImpulse: right, sampleRate: rate, bass: bass, path: pathState,
+                            arrangement: arrangement, conservativePreviewSeconds: preview)
+                    }.value
+                    self.quietZone.setSubSweepReport(report)
+                    self.activity = .idle
+                    self.message = Self.subPathSummary(report)
+                    if thenLeakage { self.measureLeakage() }
+                } catch {
+                    self.leakageTransport?.cancel()
+                    self.leakageTransport = nil
+                    self.activity = .idle
+                    if !(error is CancellationError) { self.message = error.localizedDescription }
+                }
+            }
+        } catch {
+            message = error.localizedDescription
+        }
+    }
+
+    /// One plain sentence for the card after a sub-path measurement.
+    static func subPathSummary(_ report: SubSweepReport) -> String {
+        if let unverified = report.renderUnverifiedMessage { return unverified }
+        if !report.openPreoutRefusal.isEmpty { return report.openPreoutRefusal }
+        let count = report.feedForwardBandCount
+        return count == 0
+            ? "Bass path measured. No band has enough lead for feed-forward; tonal Quiet Zone can still run."
+            : "Bass path measured. Feed-forward can run in \(count) of \(report.eligibility.bands.count) bands."
     }
 
     func cancel() {

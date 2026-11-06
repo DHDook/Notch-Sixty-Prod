@@ -249,17 +249,34 @@ final class ActiveQuietZoneController: ObservableObject {
     /// `bassPlantMap` by the feed-forward survey.
     var bassPlantFingerprint: AncBassPathFingerprint?
 
-    /// E26 S5: result of `OpenPreoutCheck` against the measured sweeps; nil until a check has run. The sweeps need the
-    /// splitter-rendered through-feed played out of hardware outputs, which S6 adds.
+    /// E26 S5: result of `OpenPreoutCheck` against the measured sweeps; nil until a check has run. Set from the sweep
+    /// report by `setSubSweepReport` (E26 S6b).
     var openPreoutRefusal: String?
+
+    /// E26 S6b: the measured-sweep report (open-preout check, per-band eligibility, render verification). Only a report
+    /// that still matches today's bass setup counts.
+    private(set) var subSweepReport: SubSweepReport?
+
+    func setSubSweepReport(_ report: SubSweepReport?) {
+        subSweepReport = report
+        openPreoutRefusal = report?.openPreoutRefusal
+        objectWillChange.send()
+    }
+
+    private var freshSubSweepReport: SubSweepReport? {
+        guard let report = subSweepReport, case .fresh = ancBassPathState.freshness(of: report.fingerprint) else { return nil }
+        return report
+    }
 
     /// E26 S5 (design 8): whether Quiet Zone may be armed with a sub in the path. Ready when no sub is in the path.
     func subAwareReadiness(mode: SubAwareAncReadiness.Mode) -> SubAwareAncReadiness {
         guard bassConditioningActive else { return SubAwareAncReadiness(reason: nil, message: nil) }
+        let report = freshSubSweepReport
         return SubAwareAncReadiness.evaluate(.init(
             mode: mode, path: ancBassPathState, plant: bassPlantMap, plantFingerprint: bassPlantFingerprint,
-            openPreoutRefusal: openPreoutRefusal, safetyAvailable: excursionLimitsProvider != nil,
-            feedForwardBandCount: nil))
+            openPreoutRefusal: report?.openPreoutRefusal, safetyAvailable: excursionLimitsProvider != nil,
+            feedForwardBandCount: report?.feedForwardBandCount, sweepsAnalysed: report != nil,
+            renderUnverified: report?.renderUnverifiedMessage))
     }
 
     /// E26 S5: the receiver declaration from the Quiet Zone setup. Stored on the arrangement; the old measurement goes
