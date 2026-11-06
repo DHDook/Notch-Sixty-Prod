@@ -2201,6 +2201,78 @@ bool N60ProtectedSpeakerBusRenderProgram(
     return true;
 }
 
+bool N60SpeakerBusRenderFeed(
+    const float *monoInput,
+    uint32_t frameCount,
+    bool feedIsLeft,
+    N60SpeakerBusSplitterSnapshot splitterSnapshot,
+    N60SpeakerDriverProcessingSnapshot driverSnapshot,
+    float *output
+) {
+    // E26 S2c: control-plane/offline. Allocation and the whole-programme loop happen here and
+    // never on an audio callback. The splitter state is a fresh zeroed runtime, so the render
+    // is deterministic and independent of any live stream.
+    if (monoInput == NULL || output == NULL || frameCount == 0u
+        || !splitterSnapshot.enabled
+        || splitterSnapshot.lowerSectionCount == 0u
+        || splitterSnapshot.lowerSectionCount > N60_MAX_CROSSOVER_SECTIONS) {
+        return false;
+    }
+    if (splitterSnapshot.mode == N60SpeakerCrossoverModeTriAmp
+        && (splitterSnapshot.upperSectionCount == 0u
+            || splitterSnapshot.upperSectionCount > N60_MAX_CROSSOVER_SECTIONS)) {
+        return false;
+    }
+
+    N60SpeakerBusSplitterRuntime splitterRuntime = {0};
+    splitterRuntime.snapshot = splitterSnapshot;
+
+    N60SpeakerDriverProcessingRuntime *driverRuntime = NULL;
+    if (driverSnapshot.valid && driverSnapshot.enabled) {
+        driverRuntime = (N60SpeakerDriverProcessingRuntime *)calloc(
+            1u, sizeof(N60SpeakerDriverProcessingRuntime)
+        );
+        if (driverRuntime == NULL) return false;
+        if (!N60SpeakerDriverProcessingRuntimeConfigure(
+                driverRuntime, driverSnapshot)) {
+            free(driverRuntime);
+            return false;
+        }
+    }
+
+    for (uint32_t frameIndex = 0u; frameIndex < frameCount; ++frameIndex) {
+        const float input = monoInput[frameIndex];
+        if (!isfinite(input)) {
+            free(driverRuntime);
+            return false;
+        }
+        N60SpeakerBusFrame frame;
+        process_speaker_bus_splitter(
+            &splitterRuntime,
+            feedIsLeft ? input : 0.0f,
+            feedIsLeft ? 0.0f : input,
+            &frame
+        );
+        if (driverRuntime != NULL) {
+            N60SpeakerDriverProcessingRuntimeProcessValues(
+                driverRuntime, frame.values
+            );
+        }
+        float *row = output + (size_t)frameIndex * N60SpeakerOutputBusCount;
+        for (uint32_t bus = 0u; bus < (uint32_t)N60SpeakerOutputBusCount; ++bus) {
+            const float value = frame.values[bus];
+            if (!isfinite(value)) {
+                free(driverRuntime);
+                return false;
+            }
+            row[bus] = value;
+        }
+    }
+
+    free(driverRuntime);
+    return true;
+}
+
 bool N60SameDeviceOutputMapValueForChannel(
     const N60SameDeviceOutputMap *map,
     const N60SpeakerBusFrame *frame,

@@ -312,6 +312,7 @@ it, behind `e26.sub-aware-anc`. Live output stays behind the per-feature arm.
 
 - [~] Bass-path model, fingerprint and plain measurement record; receiver bass declaration (open preout or calibrated LFE out) with a setup note, refusing only when undeclared; mono bass on the pair no longer counts as a sub; acoustic twin with a sub
 - [~] Secondary path and leakage measured through the whole feed; anti-noise latency per band; echo set with a sub (absorbs E4 S22c). Built dark: per-band delay, per-band eligibility, open-preout check and sub-aware echo rule; S2b (#365) built dark the leakage sweep, its fingerprint stamp and the echo inputs under the flag. Remainder: S2c (secondary-path sweep, splitter rendering, position-model stamp, 20 dB echo twin test) and S5 (arming)
+  - [~] S2c `e26/through-feed-splitter-render` (#TBD): built dark the splitter-rendered through-feed sweep, position-model stamp and 20 dB echo twin test; not wired to hardware outputs (owner slice S6 transport and sub lane); bench: E22
 - [ ] Conditioned L/R design where both channels share the sub (common-mode constraint), tonal and feed-forward
 - [ ] Sub safety: receiver crossover in the excursion caps, path-gain watch that disarms, combined leakage stability bound
 - [ ] Sub-aware readiness replaces the blanket refusal; setup UI; end-to-end twin harness at eight rates

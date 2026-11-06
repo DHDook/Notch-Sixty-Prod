@@ -358,13 +358,18 @@ final class RoomCorrectionProjectController: ObservableObject {
         }
     }
 
+    /// E26 S2c: supplies the bass-path fingerprint to stamp on a retained position (secondary path). Set at app
+    /// construction under `e26.sub-aware-anc`; nil leaves positions unstamped. Only Swift reads the flag.
+    var ancBassStamp: (() -> AncBassPathFingerprint?)?
+
     @discardableResult
     func retainMeasurement(
         _ analysis: RoomCorrectionMeasurementAnalysis,
         sweep: RoomCorrectionSweepSettings,
         microphone: RoomCorrectionMicrophone,
         name proposedName: String? = nil,
-        retainedAt: Date = Date()
+        retainedAt: Date = Date(),
+        ancBassFingerprint: AncBassPathFingerprint? = nil
     ) throws -> UUID {
         guard let systemID = selectedPlaybackSystemID else {
             throw RoomCorrectionProjectControllerError.noSelectedPlaybackSystem
@@ -394,7 +399,8 @@ final class RoomCorrectionProjectController: ObservableObject {
             weight: 1,
             sampleRate: analysis.sampleRate,
             left: analysis.left,
-            right: analysis.right
+            right: analysis.right,
+            ancBassFingerprint: ancBassFingerprint ?? ancBassStamp?()
         )
         updated.measurements.append(position)
         updated.modifiedAt = retainedAt

@@ -156,6 +156,9 @@ final class ProductController: ObservableObject {
             ambient: ambientCompensation
         )
         activeQuietZone.subAwareAncEnabled = FeatureFlags().isEnabled(.subAwareAnc)
+        if activeQuietZone.subAwareAncEnabled {
+            roomProjects.ancBassStamp = { [weak activeQuietZone] in activeQuietZone?.ancBassPathState.fingerprint }
+        }
         self.activeQuietZone = activeQuietZone
         if adaptiveTonalLive {
             activeQuietZone.attachAdaptiveLive(AdaptiveTonalLiveCoordinator(
@@ -292,6 +295,9 @@ final class ProductController: ObservableObject {
             ambient: ambientCompensation
         )
         activeQuietZone.subAwareAncEnabled = FeatureFlags().isEnabled(.subAwareAnc)
+        if activeQuietZone.subAwareAncEnabled {
+            roomProjects.ancBassStamp = { [weak activeQuietZone] in activeQuietZone?.ancBassPathState.fingerprint }
+        }
         self.activeQuietZone = activeQuietZone
         self.adaptiveQuietZone = AdaptiveQuietZoneShadow(
             quietZone: activeQuietZone,
