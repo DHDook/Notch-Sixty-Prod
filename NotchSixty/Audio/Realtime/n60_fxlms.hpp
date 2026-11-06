@@ -197,6 +197,8 @@ public:
     void setWeights(const float *in, std::uint32_t count) noexcept;
     std::uint32_t taps() const noexcept { return taps_; }
     const double *weights() const noexcept { return weights_.data(); }
+    // E26 S3b: the feed-forward shadow's common-mode tie writes the shared weights back (worker thread only).
+    double *mutableWeights() noexcept { return weights_.data(); }
     void scaleWeights(double factor) noexcept;
     // Zeroes the histories, the pending gradient and the power estimate.
     void clearHistory() noexcept;

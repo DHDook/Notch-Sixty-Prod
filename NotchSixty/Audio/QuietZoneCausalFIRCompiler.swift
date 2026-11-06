@@ -38,6 +38,16 @@ enum QuietZoneCausalFIRError: Error, LocalizedError, Equatable {
 }
 
 struct QuietZoneCausalFIRCompiler: Sendable {
+    /// E26 S3b (`e26.sub-aware-anc` with a sub in the path): in bands where the measured 2x2 plant (seat and reference
+    /// microphone, L and R) is rank one (design 4: over 20 dB), the L and R responses are tied to be equal, so the
+    /// compiled pair is one common-mode filter there and cannot fight through a shared sub. Off, the compile is
+    /// bit-identical to before.
+    var bassConditioning = false
+    /// Weight of the L = R tie rows against the unit-weight fit rows, and the largest relative L/R difference the
+    /// compiled pair may keep in a tied band.
+    static let commonModeTieWeight = 10.0
+    static let commonModeTolerance = 0.05
+
     static let maximumTaps = 64
     static let peakGainLimit = 0.06309573444801933
     static let maximumRelativeFitError = 0.18
@@ -81,14 +91,26 @@ struct QuietZoneCausalFIRCompiler: Sendable {
                 throw QuietZoneCausalFIRError.invalidModel
             }
         }
-        let left = try fit(
-            target.map(\.leftFilter), at: model.map(\.frequencyHz),
-            sampleRate: sampleRate, taps: tapCount
-        )
-        let right = try fit(
-            target.map(\.rightFilter), at: model.map(\.frequencyHz),
-            sampleRate: sampleRate, taps: tapCount
-        )
+        let tied = bassConditioning
+            ? model.map { BassPlantConditioning.assess(band: $0).mode == .commonMode }
+            : model.map { _ in false }
+        let left: [Double]
+        let right: [Double]
+        if tied.contains(true) {
+            (left, right) = try fitTied(
+                left: target.map(\.leftFilter), right: target.map(\.rightFilter),
+                tied: tied, at: model.map(\.frequencyHz), sampleRate: sampleRate, taps: tapCount
+            )
+        } else {
+            left = try fit(
+                target.map(\.leftFilter), at: model.map(\.frequencyHz),
+                sampleRate: sampleRate, taps: tapCount
+            )
+            right = try fit(
+                target.map(\.rightFilter), at: model.map(\.frequencyHz),
+                sampleRate: sampleRate, taps: tapCount
+            )
+        }
 
         let boundL = left.reduce(0.0) { $0 + abs($1) }
         let boundR = right.reduce(0.0) { $0 + abs($1) }
@@ -120,6 +142,13 @@ struct QuietZoneCausalFIRCompiler: Sendable {
                 throw QuietZoneCausalFIRError.nonCausalTarget
             }
             maxError = max(maxError, error)
+            if tied[i] {
+                let difference = (computedL - computedR).magnitude
+                guard difference <= Self.commonModeTolerance
+                        * max(computedL.magnitude + computedR.magnitude, 1.0e-9) else {
+                    throw QuietZoneCausalFIRError.nonCausalTarget
+                }
+            }
             let disturbance = target[i].disturbanceTransfer
             let predicted = disturbance
                 + model[i].leftSecondaryAtListener * computedL
@@ -194,6 +223,15 @@ struct QuietZoneCausalFIRCompiler: Sendable {
                     + basis[2 * k + 1][i] * desired[k].imaginary
             }
         }
+        let solution = try Self.solve(&matrix, &rhs, size: taps)
+        guard solution.allSatisfy(\.isFinite) else {
+            throw QuietZoneCausalFIRError.rankDeficient
+        }
+        return solution
+    }
+
+    /// Pivoted Gaussian elimination of `matrix x = rhs`; offline only, no callback allocations.
+    private static func solve(_ matrix: inout [[Double]], _ rhs: inout [Double], size taps: Int) throws -> [Double] {
         // Pivoted elimination; offline only, no callback allocations.
         for k in 0..<taps {
             var pivot = k
@@ -232,10 +270,58 @@ struct QuietZoneCausalFIRCompiler: Sendable {
             }
             solution[i] = x
         }
-        guard solution.allSatisfy(\.isFinite) else {
-            throw QuietZoneCausalFIRError.rankDeficient
-        }
         return solution
+    }
+
+    /// E26 S3b: joint fit of the L and R taps with the rows `w (H_L(f) - H_R(f)) = 0` added at every tied frequency.
+    func fitTied(
+        left desiredL: [ActiveQuietZoneComplex],
+        right desiredR: [ActiveQuietZoneComplex],
+        tied: [Bool],
+        at frequencies: [Double],
+        sampleRate: Double,
+        taps: Int
+    ) throws -> (left: [Double], right: [Double]) {
+        let count = frequencies.count
+        var basis = Array(repeating: Array(repeating: 0.0, count: taps), count: 2 * count)
+        for (j, f) in frequencies.enumerated() {
+            let omega = 2 * Double.pi * f / sampleRate
+            for n in 0..<taps {
+                basis[2 * j][n] = cos(omega * Double(n))
+                basis[2 * j + 1][n] = -sin(omega * Double(n))
+            }
+        }
+        let size = 2 * taps
+        let tieWeightSquared = Self.commonModeTieWeight * Self.commonModeTieWeight
+        var matrix = Array(repeating: Array(repeating: 0.0, count: size), count: size)
+        var rhs = Array(repeating: 0.0, count: size)
+        for i in 0..<taps {
+            for j in 0..<taps {
+                var plain = 0.0
+                var tie = 0.0
+                for k in 0..<(2 * count) {
+                    let product = basis[k][i] * basis[k][j]
+                    plain += product
+                    if tied[k / 2] { tie += product }
+                }
+                tie *= tieWeightSquared
+                matrix[i][j] = plain + tie
+                matrix[taps + i][taps + j] = plain + tie
+                matrix[i][taps + j] = -tie
+                matrix[taps + i][j] = -tie
+            }
+            let late = Double(i) / Double(max(taps - 1, 1))
+            let ridge = 0.02 + 0.25 * late * late
+            matrix[i][i] += ridge
+            matrix[taps + i][taps + i] += ridge
+            for k in 0..<count {
+                rhs[i] += basis[2 * k][i] * desiredL[k].real + basis[2 * k + 1][i] * desiredL[k].imaginary
+                rhs[taps + i] += basis[2 * k][i] * desiredR[k].real + basis[2 * k + 1][i] * desiredR[k].imaginary
+            }
+        }
+        let solution = try Self.solve(&matrix, &rhs, size: size)
+        guard solution.allSatisfy(\.isFinite) else { throw QuietZoneCausalFIRError.rankDeficient }
+        return (Array(solution[0..<taps]), Array(solution[taps..<size]))
     }
 
     func response(

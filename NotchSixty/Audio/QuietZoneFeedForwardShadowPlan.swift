@@ -28,6 +28,14 @@ struct QuietZoneFeedForwardShadowPlan: Equatable, Sendable {
     var rightPath: QuietZoneFeedForwardShadowSeed.Path
     /// The assembled survey bands (coherent bands only).
     var bands: [QuietZoneVirtualSeatBand]
+    /// E26 S3b: the weights were compiled, and the shadow adapts, under the measured plant's rank-one conditioning.
+    var bassConditioning = false
+
+    /// The L/R treatment of the shadow's whole band: free unless `bassConditioning` (see `pairMode`).
+    func bassMode(lowHz: Double, highHz: Double) -> BassPlantConditioningMode {
+        guard bassConditioning else { return .free }
+        return BassPlantConditioningSummary(bands: bands).pairMode(lowHz: lowHz, highHz: highHz)
+    }
 
     var hasOfflineDesign: Bool { seedSource == .offlineDesign }
     var liveDeploymentAuthorized: Bool { false }
@@ -46,6 +54,8 @@ struct QuietZoneFeedForwardShadowPlanner: Sendable {
     static let onsetMarginSeconds = 0.001
 
     var builder = QuietZoneFeedForwardShadowSeedBuilder()
+    /// E26 S3b (flag on and a sub in the path): condition the offline weights and the shadow by the measured plant.
+    var bassConditioning = false
 
     func plan(
         bands: [QuietZoneVirtualSeatBand],
@@ -59,6 +69,8 @@ struct QuietZoneFeedForwardShadowPlanner: Sendable {
         let fd = nativeSampleRate / Double(factor)
         guard bands.count >= Self.minimumBands else { throw QuietZoneFeedForwardSurveyError.noCoherentBands }
         let bulkSeconds = Self.pathBulkDelaySeconds(position: position, decimatedRate: fd)
+        var builder = self.builder
+        builder.compiler.bassConditioning = bassConditioning
         var zeroReason = "No offline design yet: the shadow starts from zero weights."
         if let design {
             do {
@@ -70,7 +82,8 @@ struct QuietZoneFeedForwardShadowPlanner: Sendable {
                 return QuietZoneFeedForwardShadowPlan(
                     nativeSampleRate: nativeSampleRate, decimatedRate: fd, seedSource: .offlineDesign,
                     seedLeft: seed.weights.leftTaps, seedRight: seed.weights.rightTaps,
-                    leftPath: seed.leftPath, rightPath: seed.rightPath, bands: bands
+                    leftPath: seed.leftPath, rightPath: seed.rightPath, bands: bands,
+                    bassConditioning: bassConditioning
                 )
             } catch {
                 zeroReason = "The offline design did not compile at the shadow's rate (\(error.localizedDescription)); the shadow starts from zero weights."
@@ -92,7 +105,8 @@ struct QuietZoneFeedForwardShadowPlanner: Sendable {
                 model.map(\.rightSecondaryAtListener), at: frequencies,
                 decimatedRate: fd, bulkDelay: bulk, taps: Self.pathTaps
             ),
-            bands: bands
+            bands: bands,
+            bassConditioning: bassConditioning
         )
     }
 

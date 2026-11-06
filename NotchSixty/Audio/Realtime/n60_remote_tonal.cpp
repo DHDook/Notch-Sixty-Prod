@@ -454,6 +454,10 @@ N60RemoteTonalConfig N60RemoteTonalConfigDefault(double micSampleRate, double ho
     c.frequencySlewPerSecond = 0.005;
     c.trackRangeFraction = 0.10;
     c.removeProgramme = false;
+    for (uint32_t k = 0; k < N60_FXLMS_MAX_TONES; ++k) {
+        c.bassMode[k] = N60_REMOTE_TONAL_BASS_FREE;
+        c.leakageScale[k] = 1.0f;
+    }
     return c;
 }
 
@@ -484,6 +488,15 @@ bool N60RemoteTonalConfigIsValid(const N60RemoteTonalConfig *config) {
             return false;
         }
         if (std::norm(to_cd(c.leftShare[k])) + std::norm(to_cd(c.rightShare[k])) <= 0.0) return false;
+        // E26 S3b: rank-one bass conditioning.
+        if (c.bassMode[k] > N60_REMOTE_TONAL_BASS_COMMON_MODE) return false;
+        if (!(c.leakageScale[k] >= 1.0f && c.leakageScale[k] <= 10.0f)) return false;
+        if (!(c.leakagePerSecond * static_cast<double>(c.leakageScale[k]) <= 10.0)) return false;
+        if (c.bassMode[k] == N60_REMOTE_TONAL_BASS_COMMON_MODE) {
+            const cd l = to_cd(c.leftShare[k]);
+            const cd r = to_cd(c.rightShare[k]);
+            if (!(std::abs(l - r) <= 1e-4 * (std::abs(l) + std::abs(r)))) return false;
+        }
     }
     return true;
 }
@@ -732,7 +745,8 @@ bool N60RemoteTonalProcessMic(N60RemoteTonal *c, const float *samples, uint32_t 
         }
         if (c->hold || std::abs(s) < c->cfg.pathFloor) continue;
         const cd ev = m[k] - s * (gbar[k] - c->weight[k]);
-        c->weight[k] = (1.0 - c->cfg.leakagePerSecond * dt) * c->weight[k] - alpha * ev / s;
+        const double leakage = c->cfg.leakagePerSecond * static_cast<double>(c->cfg.leakageScale[k]);
+        c->weight[k] = (1.0 - leakage * dt) * c->weight[k] - alpha * ev / s;
         c->adapting[k] = true;
     }
     if (reset) {

@@ -306,12 +306,47 @@ static void test_config(void) {
     N60FeedForwardShadowDestroy(s);
 }
 
+/* E26 S3b: common mode ties the two weight sets after every block, so even with unequal paths and unequal seeds
+ * the left and right weights end equal; free mode keeps them apart, and the tied shadow still cancels. */
+static double common_mode_gap(double fs, uint32_t mode) {
+    N60FeedForwardShadowConfig c = config_for(fs);
+    c.bassMode = mode;
+    Sim s = sim_make(fs, &c, 0.5, 0.1, 0.0);
+    sim_paths(&s, false);
+    float seedL[TAPS] = {0}, seedR[TAPS] = {0};
+    seedL[PRIMARY_DELAY - LEFT_DELAY] = -0.4f;
+    seedR[PRIMARY_DELAY - RIGHT_DELAY] = -0.1f;
+    CHECK(N60FeedForwardShadowSetSeed(s.shadow, seedL, seedR, TAPS), "seed rejected");
+    sim_run(&s, fs, 3.0);
+    float wl[TAPS], wr[TAPS];
+    N60FeedForwardShadowCopyWeights(s.shadow, 0, wl, TAPS);
+    N60FeedForwardShadowCopyWeights(s.shadow, 1, wr, TAPS);
+    double gap = 0;
+    for (uint32_t k = 0; k < TAPS; ++k) gap = fmax(gap, fabs((double)wl[k] - (double)wr[k]));
+    sim_free(&s);
+    return gap;
+}
+
+static void test_common_mode(double fs) {
+    const double tied = common_mode_gap(fs, N60_FF_BASS_COMMON_MODE);
+    const double free_gap = common_mode_gap(fs, N60_FF_BASS_FREE);
+    CHECK(tied < 1e-5, "%.0f Hz: common mode left a gap of %.2e", fs, tied);
+    CHECK(free_gap > 1e-2, "%.0f Hz: free mode tied the weights (gap %.2e)", fs, free_gap);
+    N60FeedForwardShadowConfig c = config_for(fs);
+    c.bassMode = N60_FF_BASS_TIKHONOV;
+    c.leakageScale = 4.0f;
+    CHECK(N60FeedForwardShadowConfigIsValid(&c), "tikhonov config rejected");
+    c.leakageScale = 11.0f;
+    CHECK(!N60FeedForwardShadowConfigIsValid(&c), "leakage scale above 10 accepted");
+}
+
 int main(void) {
     test_config();
     for (size_t r = 0; r < RATE_COUNT; ++r) {
         const double fs = kRates[r];
         test_wiener_gap_reset(fs);
         test_fixed_point(fs);
+        test_common_mode(fs);
         test_gain_limit(fs);
         test_non_finite(fs);
     }

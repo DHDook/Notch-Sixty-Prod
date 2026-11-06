@@ -327,6 +327,7 @@
 		E26B00000000000000000001 /* BassPlantConditioning.swift in Sources */ = {isa = PBXBuildFile; fileRef = E26B00000000000000000011 /* BassPlantConditioning.swift */; };
 		F90000000000000000000002 /* ActiveQuietZoneTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F90000000000000000000012 /* ActiveQuietZoneTests.swift */; };
 		E26B00000000000000000002 /* BassPlantConditioningTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E26B00000000000000000012 /* BassPlantConditioningTests.swift */; };
+		E26B00000000000000000003 /* RankOneBassWiringTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E26B00000000000000000013 /* RankOneBassWiringTests.swift */; };
 		F96000000000000000000001 /* QuietZoneFeedForward.swift in Sources */ = {isa = PBXBuildFile; fileRef = F96000000000000000000011 /* QuietZoneFeedForward.swift */; };
 		F96000000000000000000002 /* QuietZoneFeedForwardTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F96000000000000000000012 /* QuietZoneFeedForwardTests.swift */; };
 		F96000000000000000000003 /* ProductionFeedForwardReadinessCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = F96000000000000000000013 /* ProductionFeedForwardReadinessCard.swift */; };
@@ -952,6 +953,7 @@
 		E26B00000000000000000011 /* BassPlantConditioning.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuietZone/BassPlantConditioning.swift; sourceTree = "<group>"; };
 		F90000000000000000000012 /* ActiveQuietZoneTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActiveQuietZoneTests.swift; sourceTree = "<group>"; };
 		E26B00000000000000000012 /* BassPlantConditioningTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BassPlantConditioningTests.swift; sourceTree = "<group>"; };
+		E26B00000000000000000013 /* RankOneBassWiringTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RankOneBassWiringTests.swift; sourceTree = "<group>"; };
 		F96000000000000000000011 /* QuietZoneFeedForward.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuietZoneFeedForward.swift; sourceTree = "<group>"; };
 		F96000000000000000000012 /* QuietZoneFeedForwardTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuietZoneFeedForwardTests.swift; sourceTree = "<group>"; };
 		F96000000000000000000013 /* ProductionFeedForwardReadinessCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductionFeedForwardReadinessCard.swift; sourceTree = "<group>"; };
@@ -1411,6 +1413,7 @@
 				F89000000000000000000012 /* AmbientCompensationTests.swift */,
 				F90000000000000000000012 /* ActiveQuietZoneTests.swift */,
 				E26B00000000000000000012 /* BassPlantConditioningTests.swift */,
+				E26B00000000000000000013 /* RankOneBassWiringTests.swift */,
 				F96000000000000000000012 /* QuietZoneFeedForwardTests.swift */,
 				F96000000000000000000015 /* QuietZoneFeedForwardProbeTests.swift */,
 				F96100000000000000000012 /* QuietZoneFeedForwardSurveyTests.swift */,
@@ -2284,6 +2287,7 @@
 				F89000000000000000000002 /* AmbientCompensationTests.swift in Sources */,
 				F90000000000000000000002 /* ActiveQuietZoneTests.swift in Sources */,
 				E26B00000000000000000002 /* BassPlantConditioningTests.swift in Sources */,
+				E26B00000000000000000003 /* RankOneBassWiringTests.swift in Sources */,
 				F96000000000000000000002 /* QuietZoneFeedForwardTests.swift in Sources */,
 				F96000000000000000000005 /* QuietZoneFeedForwardProbeTests.swift in Sources */,
 				F96100000000000000000002 /* QuietZoneFeedForwardSurveyTests.swift in Sources */,

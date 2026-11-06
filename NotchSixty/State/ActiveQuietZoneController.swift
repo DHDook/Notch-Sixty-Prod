@@ -166,6 +166,19 @@ final class ActiveQuietZoneController: ObservableObject {
         return engine.subwooferActive
     }
 
+    /// E26 S3b: the rank-one bass rules apply (flag on and a sub in the anti-noise path).
+    var bassConditioningActive: Bool { subAwareAncEnabled && subwooferActiveForAnc }
+
+    /// E26 S3b: the measured 2x2 plant (seat and reference point), by frequency. Published by the
+    /// feed-forward survey; empty until one is measured.
+    var bassPlantMap = BassPlantMap(bands: [])
+
+    /// E26 S3b: the Quiet Zone card line, nil when the rules are off or no plant is measured.
+    var bassConditioningReadout: String? {
+        guard bassConditioningActive, !bassPlantMap.isEmpty else { return nil }
+        return bassPlantMap.summary.cardReadout
+    }
+
     /// E26 S2b: the bass path the anti-noise plays through now, with its fingerprint.
     var ancBassPathState: AncBassPathState {
         AncBassPathState.resolve(arrangement: arrangement, bassManagement: engine.bassManagementConfiguration)
@@ -1477,6 +1490,7 @@ final class ActiveQuietZoneController: ObservableObject {
             let outputLeft: ActiveQuietZoneComplex
             let outputRight: ActiveQuietZoneComplex
             let predictedDB: Double
+            var bassMode = BassPlantConditioningMode.free
             if spatial {
                 guard let calibration = spatialCalibration,
                       let project = ambient.projects.project,
@@ -1499,6 +1513,8 @@ final class ActiveQuietZoneController: ObservableObject {
                 predictedDB = candidate.weightedReductionDB
                 latestSpatialPredictions = candidate.predictions
             } else {
+                bassMode = bassConditioningActive
+                    ? bassPlantMap.mode(atHz: frequency) : .free
                 let solution = try planner.solveStereo(
                     frequencyHz: frequency,
                     disturbance: disturbance,
@@ -1506,7 +1522,8 @@ final class ActiveQuietZoneController: ObservableObject {
                     rightSecondaryPath: rightPath,
                     availableInjectionPeak:
                         availableInjectionPeak,
-                    configuration: configuration
+                    configuration: configuration,
+                    bassConditioning: bassMode
                 )
                 outputLeft = solution.leftOutput
                 outputRight = solution.rightOutput
@@ -1538,7 +1555,8 @@ final class ActiveQuietZoneController: ObservableObject {
                     leftPath: leftPath,
                     rightPath: rightPath,
                     leftOutput: outputLeft,
-                    rightOutput: outputRight
+                    rightOutput: outputRight,
+                    bassMode: bassMode
                 )
             )
 

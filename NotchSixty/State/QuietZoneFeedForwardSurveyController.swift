@@ -51,7 +51,8 @@ enum QuietZoneFeedForwardSurveyRules {
     static func design(
         survey: QuietZoneFeedForwardDesignSurvey?,
         position: RoomCorrectionMeasurementPosition?,
-        budget: QuietZoneFeedForwardBudget
+        budget: QuietZoneFeedForwardBudget,
+        bassConditioning: Bool = false
     ) -> DesignOutcome {
         guard let survey else { return .unavailable(reason: "Measure the reference to seat transfer.") }
         guard let position else {
@@ -64,7 +65,9 @@ enum QuietZoneFeedForwardSurveyRules {
             return .unavailable(reason: error.localizedDescription)
         }
         do {
-            let design = try QuietZoneVirtualSeatDesigner().design(measurements: assembled.bands, budget: budget)
+            var designer = QuietZoneVirtualSeatDesigner()
+            designer.bassConditioning = bassConditioning
+            let design = try designer.design(measurements: assembled.bands, budget: budget)
             return .design(design, assembled)
         } catch {
             return .bandsOnly(assembled, reason: error.localizedDescription)
@@ -178,7 +181,8 @@ final class QuietZoneFeedForwardSurveyController: ObservableObject {
             bands: assembled.bands, design: design, budget: quietZone.feedForwardBudget, position: position,
             echoModel: survey.echoModelOrLegacy,
             bassPath: quietZone.subAwareAncEnabled ? quietZone.ancBassPathState : nil,
-            echoBassFingerprint: survey.echoBassFingerprint
+            echoBassFingerprint: survey.echoBassFingerprint,
+            bassConditioning: quietZone.bassConditioningActive
         ), "")
     }
 
@@ -379,20 +383,24 @@ final class QuietZoneFeedForwardSurveyController: ObservableObject {
 
     private func recomputeDesign() {
         switch QuietZoneFeedForwardSurveyRules.design(
-            survey: survey, position: ambient.selectedModelPosition, budget: quietZone.feedForwardBudget
+            survey: survey, position: ambient.selectedModelPosition, budget: quietZone.feedForwardBudget,
+            bassConditioning: quietZone.bassConditioningActive
         ) {
         case .design(let design, let result):
             self.design = design
             assembled = result
+            quietZone.bassPlantMap = BassPlantMap(bands: result.bands)
             message = "Design ready: \(result.bands.count) bands, worst modelled reduction "
                 + String(format: "%.1f dB.", design.worstModeledReductionDB)
         case .bandsOnly(let result, let reason):
             design = nil
             assembled = result
+            quietZone.bassPlantMap = BassPlantMap(bands: result.bands)
             message = "\(result.bands.count) bands measured. No design yet: \(reason)"
         case .unavailable(let reason):
             design = nil
             assembled = nil
+            quietZone.bassPlantMap = BassPlantMap(bands: [])
             message = reason
         }
     }
