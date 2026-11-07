@@ -381,6 +381,56 @@ int main() {
         N60AncLaneFeedDestroy(r.feed);
     }
 
+    // 9. Reference taps (E26 S7b2c, G26): off by default; the ambient and drive taps carry programme (at the programme
+    //    scale) plus anti-noise, the quiet-zone tap the anti-noise alone; the drive tap is anchored per chunk and all or
+    //    nothing; Reset clears the frames and keeps the demand.
+    for (double rate : kRates) {
+        Rig r;
+        CHECK(rigInit(r, rate, true, false, 0.05), "tap rig at %.0f", rate);
+        for (uint32_t i = 0; i < kBlock; ++i) { r.inLanes[0][i] = 0.3f; r.inLanes[1][i] = -0.2f; }
+        block(r);
+        CHECK(N60AncLaneFeedTapGetSnapshot(r.feed, N60AncLaneFeedTapAmbient).capturedFrames == 0, "tap recorded without demand at %.0f", rate);
+        N60AncLaneFeedSetTapDemand(r.feed, N60AncLaneFeedTapAmbient, true);
+        N60AncLaneFeedSetTapDemand(r.feed, N60AncLaneFeedTapQuietZone, true);
+        N60AncLaneFeedSetTapDemand(r.feed, N60AncLaneFeedTapSpeakerDrive, true);
+        N60AncLaneFeedSetProgrammeScale(r.feed, 0.5f);
+        N60AncLaneFeedSetHostTime(r.feed, 1000);
+        block(r);
+        N60AncLaneFeedSetHostTime(r.feed, 2000);
+        block(r);
+        std::vector<N60AncLaneFeedFramePair> amb(4 * kBlock), qz(4 * kBlock), drv(4 * kBlock);
+        const uint32_t na = N60AncLaneFeedTapRead(r.feed, N60AncLaneFeedTapAmbient, amb.data(), 4 * kBlock);
+        const uint32_t nq = N60AncLaneFeedTapRead(r.feed, N60AncLaneFeedTapQuietZone, qz.data(), 4 * kBlock);
+        const uint32_t nd = N60AncLaneFeedTapRead(r.feed, N60AncLaneFeedTapSpeakerDrive, drv.data(), 4 * kBlock);
+        CHECK(na == 2 * kBlock && nq == 2 * kBlock && nd == 2 * kBlock, "tap counts %u %u %u at %.0f", na, nq, nd, rate);
+        double maxErr = 0.0;
+        for (uint32_t i = 0; i < nd && i < na && i < nq; ++i) {
+            maxErr = std::fmax(maxErr, std::fabs(amb[i].left - drv[i].left));
+            maxErr = std::fmax(maxErr, std::fabs(amb[i].left - (0.15f + qz[i].left)));
+            maxErr = std::fmax(maxErr, std::fabs(amb[i].right - (-0.10f + qz[i].right)));
+        }
+        CHECK(maxErr < 1e-6, "tap content error %g at %.0f", maxErr, rate);
+        N60AncLaneFeedAnchor anchors[4] = {};
+        const uint32_t nanchor = N60AncLaneFeedAnchorsRead(r.feed, anchors, 4);
+        CHECK(nanchor == 2 && anchors[0].outputHostTime == 1000 && anchors[1].outputHostTime == 2000
+              && anchors[0].firstFrameIndex == 0 && anchors[1].firstFrameIndex == kBlock
+              && anchors[0].frames == kBlock && anchors[1].frames == kBlock,
+              "anchors %u at %.0f", nanchor, rate);
+        // A full drive ring drops whole chunks (and counts the anchor), never part of one.
+        const uint32_t chunks = N60AncLaneFeedDriveRingFrames / kBlock + 4;
+        for (uint32_t i = 0; i < chunks; ++i) block(r);
+        const N60AncLaneFeedTapSnapshot full = N60AncLaneFeedTapGetSnapshot(r.feed, N60AncLaneFeedTapSpeakerDrive);
+        CHECK(full.droppedFrames > 0 && full.droppedFrames % kBlock == 0 && full.availableFrames % kBlock == 0,
+              "drive ring partial chunk (dropped %llu avail %u) at %.0f", static_cast<unsigned long long>(full.droppedFrames), full.availableFrames, rate);
+        N60AncLaneFeedTapDiscard(r.feed, N60AncLaneFeedTapSpeakerDrive);
+        CHECK(N60AncLaneFeedTapGetSnapshot(r.feed, N60AncLaneFeedTapSpeakerDrive).availableFrames == 0, "discard at %.0f", rate);
+        block(r);
+        N60AncLaneFeedReset(r.feed);
+        const N60AncLaneFeedTapSnapshot afterReset = N60AncLaneFeedTapGetSnapshot(r.feed, N60AncLaneFeedTapAmbient);
+        CHECK(afterReset.availableFrames == 0 && afterReset.enabled, "reset kept frames or lost demand at %.0f", rate);
+        N60AncLaneFeedDestroy(r.feed);
+    }
+
     if (failures == 0) std::printf("e26_anc_lane_feed: all checks passed\n");
     return failures == 0 ? 0 : 1;
 }

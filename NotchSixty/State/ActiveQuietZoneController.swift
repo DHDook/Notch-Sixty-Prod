@@ -986,7 +986,7 @@ final class ActiveQuietZoneController: ObservableObject {
             }
         }
         if engine.lifecycleState == .running,
-           engine.activeQuietZoneStereoSpeakerRuntimeAvailable {
+           engine.activeQuietZoneRuntimeAvailable {
             status = .observe
             holdReason = nil
         } else {
@@ -1031,7 +1031,7 @@ final class ActiveQuietZoneController: ObservableObject {
             guard !faultLatched else { return }
 
             guard engine.lifecycleState == .running,
-                  engine.activeQuietZoneStereoSpeakerRuntimeAvailable else {
+                  engine.activeQuietZoneRuntimeAvailable else {
                 hold(.unsupportedRoute)
                 return
             }
