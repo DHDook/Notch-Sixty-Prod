@@ -148,6 +148,20 @@ final class RoomCorrectionProjectControllerTests: XCTestCase {
         XCTAssertEqual(reloaded.positions[3].right.rawCapture, [4, 0.5])
     }
 
+    /// E26 (G17): a retained position carries the output gain the app supplies; none leaves it unstamped.
+    func testRetainedPositionCarriesTheOutputGainStamp() throws {
+        let fixture = try makeFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let plain = try fixture.controller.retainMeasurement(
+            analysis(capturedAt: 1, leftMagnitude: [0, 10], rightMagnitude: [2, 12]), sweep: sweep(), microphone: microphone())
+        fixture.controller.outputGainStamp = { -18 }
+        let stamped = try fixture.controller.retainMeasurement(
+            analysis(capturedAt: 2, leftMagnitude: [0, 10], rightMagnitude: [2, 12]), sweep: sweep(), microphone: microphone())
+        func gain(_ id: UUID) -> Double? { fixture.controller.positions.first { $0.id == id }?.outputGainDBAtMeasurement }
+        XCTAssertNil(gain(plain))
+        XCTAssertEqual(gain(stamped), -18)
+    }
+
     /// E26 S2c: a retained position carries the bass-path stamp the app supplies, an explicit one wins, and none
     /// leaves it unstamped.
     func testRetainedPositionCarriesTheAncBassStamp() throws {

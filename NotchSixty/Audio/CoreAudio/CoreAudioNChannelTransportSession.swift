@@ -426,8 +426,13 @@ final class CoreAudioNChannelTransportSession {
     /// A revoke disarmed the feed but its graph publish failed, so the record still says authorised (under `ancLock`).
     /// The next authorisation must then arm the feed itself instead of returning early (G27).
     private var ancFeedNeedsArm = false
-    /// Test seam (G27): the next `republishGraph` throws this once. Never set by the app.
+    /// Serialises whole `setQuietZoneInjectAuthorised` calls (G31), so interleaved authorise and revoke calls cannot
+    /// leave the feed and the graph record disagreeing. Lock order: `ancAuthoriseLock`, `ancPublishLock`, `ancLock`.
+    private let ancAuthoriseLock = NSLock()
+#if DEBUG
+    /// Test seam (G27): the next `republishGraph` throws this once. Compiled out of release builds (G32).
     var testingRepublishFailure: LiveNChannelTransportError?
+#endif
 
     init(
         selectedOutput: AudioOutputDevice,
@@ -906,6 +911,7 @@ final class CoreAudioNChannelTransportSession {
         N60LiveNChannelBridgeSetHostTimeSink(bridge, N60AncLaneFeedHostTimeSink, UnsafeMutableRawPointer(feed.pointer))
     }
 
+#if DEBUG
     /// Test seam (E26 S7b2c part 2): runs one capture block and one output block through the bridge's real IO procs, as
     /// the hardware callbacks would, and returns the interleaved output (`outputChannels` per frame). The programme is a
     /// constant on every captured channel. Never used by the app.
@@ -952,6 +958,7 @@ final class CoreAudioNChannelTransportSession {
             registerHostTimeSink(bridge, host: unifiedGraphHost)
         }
     }
+#endif
 
     func setOutputGain(_ gain: Float) {
         ancLock.lock()
@@ -985,10 +992,12 @@ final class CoreAudioNChannelTransportSession {
     /// rendering.
     @discardableResult
     func republishGraph(_ configuration: UnifiedGraphConfiguration) throws -> UnifiedGraphApplyResult {
+#if DEBUG
         if let failure = testingRepublishFailure {
             testingRepublishFailure = nil
             throw failure
         }
+#endif
         guard let host = unifiedGraphReadback else {
             throw LiveNChannelTransportError.configurationChangeRequiresRestart
         }
@@ -1513,6 +1522,7 @@ extension CoreAudioNChannelTransportSession: QuietZoneRuntimeHost {
     /// path to authorisation and the engine calls it only while a `LiveTreatmentArm` is armed for this session. The
     /// authorisation is not a live parameter, so it is a faded graph publish. Revoking disarms the feed first (20 ms fade).
     func setQuietZoneInjectAuthorised(_ authorised: Bool) throws {
+        ancAuthoriseLock.lock(); defer { ancAuthoriseLock.unlock() }
         guard let feed = ancFeed else { throw LiveNChannelTransportError.configurationChangeRequiresRestart }
         if authorised {
             // Already authorised and armed: a tonal update changes only the snapshot, never republishes the graph.

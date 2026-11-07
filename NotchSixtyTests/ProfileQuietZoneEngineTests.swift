@@ -15,7 +15,8 @@ enum ProfileQuietZoneFixture {
     static func device(rate: Double) -> AudioOutputDevice {
         AudioOutputDevice(
             deviceID: 77, uid: "fixture", name: "Fixture", nominalSampleRate: rate,
-            availableSampleRateRanges: [AudioSampleRateRange(minimum: 44_100, maximum: 384_000)])
+            availableSampleRateRanges: [AudioSampleRateRange(minimum: 44_100, maximum: 384_000)],
+            outputChannelCount: 3)
     }
 
     private struct Catalog: OutputDeviceCataloging {
@@ -26,7 +27,7 @@ enum ProfileQuietZoneFixture {
     /// `ceiling` lowers the graph guards' output ceiling so a test can trip them with a small tone.
     /// `lowLatency` pre-applies the Quiet Zone output profile, so the controller's Turn On does not schedule the planned
     /// reconfiguration that would rebuild (and, without hardware, drop) the seam session.
-    static func make(rate: Double, hosted: Bool, ceiling: Float? = nil, lowLatency: Bool = false) throws -> (AudioIOEngine, CoreAudioNChannelTransportSession) {
+    static func make(rate: Double, hosted: Bool, ceiling: Float? = nil, lowLatency: Bool = false, install: Bool = true) throws -> (AudioIOEngine, CoreAudioNChannelTransportSession) {
         let plan = LiveNChannelOutputRoutePlan(
             programLayout: .stereo, orderedDeviceUIDs: ["fixture"], referenceDeviceUID: "fixture",
             physicalChannelCount: 3, programPhysicalChannels: [0, 1], subwooferPhysicalChannels: [2],
@@ -57,7 +58,7 @@ enum ProfileQuietZoneFixture {
         gain.headroomAttenuationDB = -12  // the planner reserves anti-noise headroom from this
         try engine.replaceGainConfiguration(gain)
         if lowLatency { engine.setLowLatencyOutputProfile(true) }
-        try engine.installTestingNChannelSession(session)
+        if install { try engine.installTestingNChannelSession(session) }
         return (engine, session)
     }
 }
@@ -309,6 +310,8 @@ final class ProfileQuietZoneEngineTests: XCTestCase {
             }
         }
         group.wait()
+        // G31: whole calls are serialised, so whichever call ran last left the feed and the record in agreement.
+        XCTAssertEqual(try XCTUnwrap(session.quietZoneFeedStatus()).armed, session.quietZoneInjectAuthorised)
         try session.setQuietZoneInjectAuthorised(false)
         XCTAssertFalse(session.quietZoneInjectAuthorised)
         XCTAssertFalse(try XCTUnwrap(session.quietZoneFeedStatus()).armed)
@@ -384,7 +387,19 @@ final class ClassAEndToEndTests: XCTestCase {
 
     /// A class A controller on an engine that runs the hosted profile session, measured and ready.
     private func makeRig(rate: Double) throws -> (ActiveQuietZoneController, AudioIOEngine, CoreAudioNChannelTransportSession) {
-        let (engine, session) = try ProfileQuietZoneFixture.make(rate: rate, hosted: true, lowLatency: true)
+        let parts = try makeRigParts(rate: rate, cannedReport: true)
+        return (parts.quietZone, parts.engine, parts.session)
+    }
+
+    private struct RigParts {
+        var quietZone: ActiveQuietZoneController
+        var engine: AudioIOEngine
+        var session: CoreAudioNChannelTransportSession
+        var calibration: RoomCorrectionCalibrationController
+    }
+
+    private func makeRigParts(rate: Double, cannedReport: Bool, install: Bool = true) throws -> RigParts {
+        let (engine, session) = try ProfileQuietZoneFixture.make(rate: rate, hosted: true, lowLatency: true, install: install)
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         addTeardownBlock {
             engine.removeTestingNChannelSession()
@@ -396,6 +411,19 @@ final class ClassAEndToEndTests: XCTestCase {
             choices: .init(layout: .stereo, bass: .dspToSubOutputs, subwooferCount: 1, receiverBass: .undeclared))
         XCTAssertTrue(arrangement.isTwoMainsOneSub)
         try profiles.replaceSelectedSystemArrangement(arrangement)
+        if !cannedReport {
+            // The measurement reads the route from the enabled output device profile (left, right and sub endpoints).
+            try profiles.replaceSelectedSystemOutputDeviceProfile(OutputDeviceProfileConfiguration(
+                enabled: true,
+                speakerAssignments: [
+                    SemanticSpeakerOutputAssignment(role: .frontLeft, destination: PhysicalOutputEndpoint(deviceUID: "fixture", channelIndex: 0)),
+                    SemanticSpeakerOutputAssignment(role: .frontRight, destination: PhysicalOutputEndpoint(deviceUID: "fixture", channelIndex: 1)),
+                ],
+                subwooferAssignments: [
+                    PhysicalSubwooferOutputAssignment(index: 0, destination: PhysicalOutputEndpoint(deviceUID: "fixture", channelIndex: 2)),
+                ],
+                referenceDeviceUID: "fixture"))
+        }
         let input = AudioInputDevice(
             deviceID: 22, uid: "mic", name: "Mic", nominalSampleRate: rate,
             availableSampleRateRanges: [AudioSampleRateRange(minimum: rate, maximum: rate)])
@@ -407,6 +435,9 @@ final class ClassAEndToEndTests: XCTestCase {
             profiles: profiles,
             store: RoomCorrectionProjectStore(rootDirectory: root.appendingPathComponent("rc", isDirectory: true)))
         try projects.startNewProject()
+        var project = try XCTUnwrap(projects.project)
+        project.microphone = RoomCorrectionMicrophone(stableID: "mic", displayName: "Mic")
+        try projects.adoptProject(project)
         let ambient = AmbientCompensationController(
             engine: engine, profiles: profiles, microphone: calibration, projects: projects,
             transportFactory: { _, _ in SilentMonitor(rate: rate) })
@@ -414,8 +445,94 @@ final class ClassAEndToEndTests: XCTestCase {
         quietZone.subAwareAncEnabled = true
         quietZone.attachExcursionCap { ExcursionLimits(mainLowerLimitHz: 45, subCrossoverHz: 80) }
         quietZone.setBassPlant(plant(rate: rate), fingerprint: quietZone.ancBassPathState.fingerprint)
-        quietZone.setSubSweepReport(SubAwareArmingTests.report(fingerprint: quietZone.ancBassPathState.fingerprint))
-        return (quietZone, engine, session)
+        if cannedReport {
+            quietZone.setSubSweepReport(SubAwareArmingTests.report(fingerprint: quietZone.ancBassPathState.fingerprint))
+        }
+        return RigParts(quietZone: quietZone, engine: engine, session: session, calibration: calibration)
+    }
+
+    private final class FakeMultibusTransport: MultichannelCalibrationTransporting {
+        var started = 0, cancelled = 0
+        func start() throws { started += 1 }
+        func snapshot() -> N60TargetedRoomMeasurementBridgeSnapshot? {
+            var s = N60TargetedRoomMeasurementBridgeSnapshot()
+            s.frameCursor = 100
+            s.totalFrameCount = 100
+            s.complete = true
+            return s
+        }
+        func finishAndMaterialize() throws -> MultichannelCalibrationCapture { .init(samples: [0]) }
+        func cancel() { cancelled += 1 }
+    }
+
+    private final class PassLog: @unchecked Sendable {
+        private let lock = NSLock()
+        private(set) var transports: [FakeMultibusTransport] = []
+        private(set) var primaryChannels: [UInt32] = []
+        private(set) var laneCounts: [Int] = []
+        func record(_ transport: FakeMultibusTransport, channel: UInt32, lanes: Int) {
+            lock.lock(); transports.append(transport); primaryChannels.append(channel); laneCounts.append(lanes); lock.unlock()
+        }
+    }
+
+    /// E26 S7 (G30, hardware-free part): the real class A `measureSubPath` through fake multichannel transports (two
+    /// seat passes, one per feed, with the sub on its own lane), then the report is stamped with today's bass
+    /// fingerprint, then Turn On arms and the armed target authorises the feed in the published graph.
+    func testMeasureSubPathThroughMultibusFakesThenTurnOnAuthorisesTheFeed() async throws {
+        for rate in [48_000.0, 384_000.0] {
+            let parts = try makeRigParts(rate: rate, cannedReport: false, install: false)
+            let quietZone = parts.quietZone
+            XCTAssertNil(quietZone.subSweepReport)
+            XCTAssertFalse(quietZone.subAwareReadiness(mode: .tonal).isReady, "\(rate): no sub measurement yet")
+
+            let log = PassLog()
+            var ir = [Float](repeating: 0, count: Int(rate * 0.5))
+            ir[Int(rate * 0.004)] = 0.3
+            let quality = RoomCorrectionMeasurementQuality(clipped: false, estimatedSNRDB: 45, sweepComplete: true)
+            let channel = RoomCorrectionChannelMeasurement(
+                capturedAt: Date(), rawCapture: [0], impulseResponse: ir, transferFunction: nil, quality: quality)
+            let suite = UserDefaults(suiteName: "ClassAMultibus-\(UUID().uuidString)")!
+            let survey = QuietZoneFeedForwardSurveyController(
+                quietZone: quietZone, calibration: parts.calibration, defaults: suite,
+                multibusTransportFactory: { _, _, _, _, _, primary, _, lanes in
+                    let transport = FakeMultibusTransport()
+                    log.record(transport, channel: primary, lanes: lanes.count)
+                    return transport
+                },
+                multibusAnalysisOperation: { _, _, _ in channel },
+                settlingSecondsOverride: 0)
+
+            survey.measureSubPath()
+            XCTAssertEqual(survey.activity, .measuringLeakage(progress: 0), "\(rate): \(survey.message)")
+            for _ in 0..<1200 where survey.activity != .idle { try await Task.sleep(nanoseconds: 100_000_000) }
+            XCTAssertEqual(survey.activity, .idle, "\(rate): \(survey.message)")
+
+            XCTAssertEqual(log.transports.count, 2, "\(rate): one seat pass per feed")
+            XCTAssertTrue(log.transports.allSatisfy { $0.started == 1 }, "\(rate)")
+            XCTAssertEqual(log.laneCounts.filter { $0 > 0 }.count, 2, "\(rate): the other outputs play beside the primary")
+            let report = try XCTUnwrap(quietZone.subSweepReport, "\(rate): \(survey.message)")
+            XCTAssertEqual(report.fingerprint, quietZone.ancBassPathState.fingerprint, "\(rate)")
+            XCTAssertNotNil(report.seatLeft, "\(rate)")
+            XCTAssertNotNil(report.seatRight, "\(rate)")
+
+            // Playback starts now (measuring needs it idle); the session is the one the app would run.
+            try parts.engine.installTestingNChannelSession(parts.session)
+            // Turn On is reachable from the measurement's own state; if the twin report is not ready the refusal is
+            // the readiness reason, never a crash, and nothing arms.
+            let readiness = quietZone.subAwareReadiness(mode: .tonal)
+            if readiness.isReady {
+                try quietZone.setEnabled(true)
+                XCTAssertTrue(quietZone.arm.isArmed, "\(rate)")
+                try parts.engine.replaceActiveQuietZoneRuntimeTarget(ActiveQuietZoneRuntimeTarget(
+                    tones: [ActiveQuietZoneRuntimeTone(frequencyHz: 60, leftOutput: z(0.001), rightOutput: .zero)],
+                    transitionMilliseconds: 3_000, armGeneration: parts.engine.liveTreatmentGeneration))
+                XCTAssertTrue(parts.session.quietZoneInjectAuthorised, "\(rate)")
+                try quietZone.setEnabled(false)
+                XCTAssertFalse(parts.session.quietZoneInjectAuthorised, "\(rate)")
+            } else {
+                XCTFail("\(rate): measured class A twin not ready: \(String(describing: readiness.message))")
+            }
+        }
     }
 
     func testTurnOnReachesTheEngineAndTurnOffRevokesItAtEveryRate() async throws {

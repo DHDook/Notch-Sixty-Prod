@@ -31,7 +31,9 @@ enum SubPathMeasurement {
     /// anything but the v1 shape (two mains plus one sub output).
     static func outputMap(routePlan: LiveNChannelOutputRoutePlan) throws -> SubActuatorOutputMap {
         let roles = routePlan.programLayout.roles
-        guard routePlan.subwooferCount == 1, routePlan.subwooferPhysicalChannels.count == 1,
+        // A live plan pads its arrays (program to the maximum channels, subs to at least four entries), so the sub count,
+        // not the array length, says how many subs are routed.
+        guard routePlan.subwooferCount == 1, routePlan.subwooferPhysicalChannels.count >= 1,
               let left = roles.firstIndex(of: .frontLeft), let right = roles.firstIndex(of: .frontRight),
               left < routePlan.programPhysicalChannels.count, right < routePlan.programPhysicalChannels.count
         else { throw PlanError.unsupportedShape }
