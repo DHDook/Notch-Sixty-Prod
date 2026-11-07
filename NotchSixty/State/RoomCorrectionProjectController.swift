@@ -361,6 +361,9 @@ final class RoomCorrectionProjectController: ObservableObject {
     /// E26 S2c: supplies the bass-path fingerprint to stamp on a retained position (secondary path). Set at app
     /// construction under `e26.sub-aware-anc`; nil leaves positions unstamped. Only Swift reads the flag.
     var ancBassStamp: (() -> AncBassPathFingerprint?)?
+    /// E26 (G17): supplies the output gain (volume plus headroom, dB) at the moment a position is retained, so Quiet
+    /// Zone can refuse a design measured at a different volume. Nil leaves the position unstamped (older behaviour).
+    var outputGainStamp: (() -> Double?)?
 
     @discardableResult
     func retainMeasurement(
@@ -400,7 +403,8 @@ final class RoomCorrectionProjectController: ObservableObject {
             sampleRate: analysis.sampleRate,
             left: analysis.left,
             right: analysis.right,
-            ancBassFingerprint: ancBassFingerprint ?? ancBassStamp?()
+            ancBassFingerprint: ancBassFingerprint ?? ancBassStamp?(),
+            outputGainDBAtMeasurement: outputGainStamp?()
         )
         updated.measurements.append(position)
         updated.modifiedAt = retainedAt
