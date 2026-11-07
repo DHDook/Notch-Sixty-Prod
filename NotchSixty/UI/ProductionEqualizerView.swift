@@ -25,12 +25,6 @@ struct ProductionEqualizerView: View {
     private var sampleRate: Double { engine.selectedOutputDevice?.nominalSampleRate ?? 48_000 }
     private var maximumFrequency: Double { max(20, sampleRate * 0.49) }
 
-    private var selectedBand: EQBand? {
-        if let dragPreview, dragPreview.id == selectedBandID { return dragPreview }
-        guard let selectedBandID else { return nil }
-        return bands.first(where: { $0.id == selectedBandID })
-    }
-
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             header
@@ -38,13 +32,10 @@ struct ProductionEqualizerView: View {
             modeBar
 
             HSplitView {
-                VStack(alignment: .leading, spacing: 12) {
-                    responseGraph
-                    bandStrip
-                }
-                .frame(minWidth: 560)
+                responseGraph
+                    .frame(minWidth: 560)
 
-                inspector
+                bandsPanel
                     .frame(minWidth: 330, idealWidth: 360, maxWidth: 430)
             }
         }
@@ -64,7 +55,7 @@ struct ProductionEqualizerView: View {
     private var header: some View {
         HStack(alignment: .firstTextBaseline) {
             VStack(alignment: .leading, spacing: 5) {
-                Text("Static and Dynamic EQ share one band model. Drag a band on the response graph or use the precision inspector.")
+                Text("Static and Dynamic EQ share one band model. Drag a band on the response graph or edit it in the Bands panel.")
                     .foregroundStyle(.secondary)
             }
             Spacer()
@@ -142,16 +133,6 @@ struct ProductionEqualizerView: View {
                 .toggleStyle(.switch)
                 .fixedSize(horizontal: true, vertical: false)
                 .layoutPriority(1)
-
-                Button {
-                    addBand()
-                } label: {
-                    Label("Add Band", systemImage: "plus")
-                }
-                .buttonStyle(.glassProminent)
-                .keyboardShortcut("n", modifiers: [.command, .shift])
-                .help("Add EQ band (⇧⌘N)")
-                .disabled(bands.count >= EQConfiguration.maximumBandCount)
             }
             .padding(12)
             .glassEffect(.regular, in: .rect(cornerRadius: 18))
@@ -190,7 +171,7 @@ struct ProductionEqualizerView: View {
                 },
                 rtaOverlay: liveOverlay.showsRTA ? liveOverlay.rtaCurve : nil
             )
-            .frame(minHeight: 330)
+            .frame(minHeight: 330, maxHeight: .infinity)
 
             if bands.contains(where: { $0.enabled && $0.type == .fir }) {
                 Label(
@@ -202,114 +183,174 @@ struct ProductionEqualizerView: View {
             }
         }
         .padding(16)
+        .frame(maxHeight: .infinity, alignment: .top)
         .background(.quaternary.opacity(0.24), in: .rect(cornerRadius: 20))
     }
 
-    private var bandStrip: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text("BANDS").font(.caption.bold()).tracking(1.5).foregroundStyle(.secondary)
-                Spacer()
-                Button { selectAdjacentBand(offset: -1) } label: {
-                    Image(systemName: "chevron.left")
-                }
-                .buttonStyle(.borderless)
-                .keyboardShortcut("[", modifiers: [.command])
-                .help("Previous band (⌘[)")
-                .disabled(bands.count < 2)
-                Button { selectAdjacentBand(offset: 1) } label: {
-                    Image(systemName: "chevron.right")
-                }
-                .buttonStyle(.borderless)
-                .keyboardShortcut("]", modifiers: [.command])
-                .help("Next band (⌘])")
-                .disabled(bands.count < 2)
-                Text("\(bands.count) / \(EQConfiguration.maximumBandCount)")
-                    .font(.caption.monospacedDigit()).foregroundStyle(.tertiary)
-            }
+    // MARK: Bands panel
+
+    private var bandsPanel: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            bandsPanelHeader
+                .padding(.horizontal, 6)
 
             if bands.isEmpty {
-                ContentUnavailableView(
-                    "No EQ Bands",
-                    systemImage: "slider.horizontal.3",
-                    description: Text("Add a band to begin shaping the response.")
-                )
-                .frame(maxWidth: .infinity, minHeight: 110)
+                ContentUnavailableView {
+                    Label("No EQ Bands", systemImage: "slider.horizontal.3")
+                } description: {
+                    Text("Add a band to begin shaping the response.")
+                } actions: {
+                    Button { addBand() } label: { Label("Add Band", systemImage: "plus") }
+                        .buttonStyle(.glassProminent)
+                        .accessibilityIdentifier("eq.bands.empty.add")
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                ScrollView(.horizontal) {
-                    HStack(spacing: 8) {
-                        ForEach(Array(bands.enumerated()), id: \.element.id) { index, band in
-                            Button {
-                                selectedBandID = band.id
-                            } label: {
-                                VStack(alignment: .leading, spacing: 4) {
-                                    HStack(spacing: 6) {
-                                        Text("\(index + 1)").font(.caption2.bold())
-                                        Text(band.type.displayName).font(.caption.bold())
-                                        if band.dynamic.enabled {
-                                            Text("DYN").font(.system(size: 8, weight: .bold)).padding(.horizontal, 4).padding(.vertical, 2)
-                                                .background(.secondary.opacity(0.18), in: .capsule)
-                                        }
-                                    }
-                                    Text("\(formatFrequency(band.frequencyHz)) · \(band.gainDB, specifier: "%+.1f") dB")
-                                        .font(.caption2.monospacedDigit())
-                                        .foregroundStyle(.secondary)
-                                }
-                                .frame(width: 126, alignment: .leading)
-                                .padding(9)
-                                .background(
-                                    selectedBandID == band.id ? Color.accentColor.opacity(0.14) : Color.clear,
-                                    in: .rect(cornerRadius: 10)
-                                )
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        LazyVStack(spacing: 4) {
+                            ForEach(Array(bands.enumerated()), id: \.element.id) { index, band in
+                                bandRow(index: index, band: band)
+                                    .id(band.id)
                             }
-                            .buttonStyle(.plain)
-                            .opacity(band.enabled ? 1 : 0.48)
                         }
+                        .padding(.horizontal, 2)
+                        .padding(.bottom, 6)
+                    }
+                    .onChange(of: selectedBandID) { _, id in
+                        guard let id else { return }
+                        withAnimation(.easeInOut(duration: 0.15)) { proxy.scrollTo(id, anchor: .top) }
+                    }
+                    .onAppear {
+                        if let selectedBandID { proxy.scrollTo(selectedBandID, anchor: .top) }
                     }
                 }
-                .scrollIndicators(.hidden)
             }
         }
-        .padding(14)
-        .background(.quaternary.opacity(0.18), in: .rect(cornerRadius: 16))
+        .padding(12)
+        .frame(maxHeight: .infinity, alignment: .top)
+        .background(.quaternary.opacity(0.20), in: .rect(cornerRadius: 20))
+    }
+
+    private var bandsPanelHeader: some View {
+        HStack(spacing: 6) {
+            Text("Bands").font(.headline)
+            Text(EQBandPanelModel.countText(count: bands.count, maximum: EQConfiguration.maximumBandCount))
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.secondary)
+            Spacer(minLength: 4)
+            Button { selectAdjacentBand(offset: -1) } label: {
+                Image(systemName: "chevron.up")
+            }
+            .buttonStyle(.borderless)
+            .keyboardShortcut("[", modifiers: [.command])
+            .help("Previous band (⌘[)")
+            .accessibilityLabel("Previous band")
+            .accessibilityIdentifier("eq.bands.previous")
+            .disabled(bands.count < 2)
+            Button { selectAdjacentBand(offset: 1) } label: {
+                Image(systemName: "chevron.down")
+            }
+            .buttonStyle(.borderless)
+            .keyboardShortcut("]", modifiers: [.command])
+            .help("Next band (⌘])")
+            .accessibilityLabel("Next band")
+            .accessibilityIdentifier("eq.bands.next")
+            .disabled(bands.count < 2)
+            Button {
+                addBand()
+            } label: {
+                Label("Add Band", systemImage: "plus")
+            }
+            .buttonStyle(.glassProminent)
+            .controlSize(.small)
+            .keyboardShortcut("n", modifiers: [.command, .shift])
+            .help("Add EQ band (⇧⌘N)")
+            .accessibilityIdentifier("eq.bands.add")
+            .disabled(bands.count >= EQConfiguration.maximumBandCount)
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("eq.bands.header")
     }
 
     @ViewBuilder
-    private var inspector: some View {
-        if let band = selectedBand, let binding = selectedBandBinding(for: band.id) {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
-                    inspectorHeader(band: band, binding: binding)
+    private func bandRow(index: Int, band storedBand: EQBand) -> some View {
+        let isSelected = selectedBandID == storedBand.id
+        let band = (dragPreview?.id == storedBand.id ? dragPreview : nil) ?? storedBand
+        VStack(alignment: .leading, spacing: 0) {
+            Button {
+                selectedBandID = band.id
+            } label: {
+                HStack(spacing: 8) {
+                    Text("\(index + 1)")
+                        .font(.caption.bold().monospacedDigit())
+                        .foregroundStyle(isSelected ? Color.white : Color.primary)
+                        .frame(width: 22, height: 22)
+                        .background(
+                            isSelected ? Color.accentColor : Color.secondary.opacity(0.22),
+                            in: .circle
+                        )
+                    Text(band.type.displayName)
+                        .font(.caption.bold())
+                        .lineLimit(1)
+                    if band.dynamic.enabled {
+                        Text("DYN")
+                            .font(.system(size: 8, weight: .bold))
+                            .padding(.horizontal, 4).padding(.vertical, 2)
+                            .background(Color.orange.opacity(0.28), in: .capsule)
+                    }
+                    Spacer(minLength: 4)
+                    Text(EQBandPanelModel.frequencyText(band.frequencyHz))
+                        .font(.caption.monospacedDigit())
+                    Text(EQBandPanelModel.gainText(band.gainDB))
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                        .frame(minWidth: 52, alignment: .trailing)
+                    Circle()
+                        .fill(band.enabled ? Color.green : Color.secondary.opacity(0.35))
+                        .frame(width: 7, height: 7)
+                }
+                .frame(minHeight: 34)
+                .padding(.horizontal, 8)
+                .contentShape(Rectangle())
+                .opacity(band.enabled ? 1 : 0.55)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(EQBandPanelModel.accessibilityLabel(number: index + 1, band: band))
+            .accessibilityAddTraits(isSelected ? .isSelected : [])
+            .accessibilityIdentifier("eq.bands.row.\(index + 1)")
+
+            if isSelected, let binding = selectedBandBinding(for: band.id) {
+                VStack(alignment: .leading, spacing: 16) {
+                    Divider()
+                    editorHeader(band: band, binding: binding)
                     staticControls(band: band, binding: binding)
+                    Divider()
                     if band.type.supportsDynamicEQ {
-                        Divider()
                         dynamicControls(band: band, binding: binding)
                     } else {
-                        Divider()
                         Label("Dynamic EQ is unavailable for this filter type.", systemImage: "bolt.slash")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
                 }
-                .padding(18)
+                .padding(.horizontal, 10)
+                .padding(.bottom, 12)
+                .accessibilityIdentifier("eq.bands.editor")
             }
-            .background(.quaternary.opacity(0.20), in: .rect(cornerRadius: 20))
-        } else {
-            ContentUnavailableView(
-                "Select a Band",
-                systemImage: "cursorarrow.click",
-                description: Text("Choose a band below the graph or add a new one.")
-            )
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(.quaternary.opacity(0.16), in: .rect(cornerRadius: 20))
         }
+        .background(
+            isSelected ? Color.accentColor.opacity(0.14) : Color.clear,
+            in: .rect(cornerRadius: 12)
+        )
     }
 
-    private func inspectorHeader(band: EQBand, binding: Binding<EQBand>) -> some View {
+
+    private func editorHeader(band: EQBand, binding: Binding<EQBand>) -> some View {
         // The switch sits beside the section title it controls, as in
         // System Settings, so its position alone reads as on or off.
         HStack {
-            Text("Band").font(.headline)
+            Text("Band settings").font(.subheadline.bold())
             Spacer()
             Toggle("Band", isOn: binding.enabled)
                 .labelsHidden()
@@ -527,22 +568,20 @@ struct ProductionEqualizerView: View {
 
     private func removeBand(_ id: UUID) {
         let previousBands = bands
-        let previousIndex = previousBands.firstIndex(where: { $0.id == id }) ?? 0
         do {
             try engine.removeEQBand(id: id)
-            if selectedBandID == id {
-                let remaining = engine.stereoEQConfiguration.editableBands
-                selectedBandID = remaining.isEmpty ? nil : remaining[min(previousIndex, remaining.count - 1)].id
-            }
+            selectedBandID = EQBandPanelModel.selectionAfterRemoving(
+                removed: id,
+                selected: selectedBandID,
+                bandsBefore: previousBands
+            )
         } catch { }
     }
 
     private func selectAdjacentBand(offset: Int) {
-        guard !bands.isEmpty else { return }
-        let current = selectedBandID.flatMap { id in bands.firstIndex(where: { $0.id == id }) } ?? 0
-        let next = (current + offset + bands.count) % bands.count
-        selectedBandID = bands[next].id
+        selectedBandID = EQBandPanelModel.adjacentSelection(from: selectedBandID, offset: offset, bands: bands)
     }
+
 
     private func suggestedFrequency() -> Double {
         guard let last = bands.last else { return 1_000 }
@@ -550,8 +589,7 @@ struct ProductionEqualizerView: View {
     }
 
     private func ensureSelection() {
-        if let selectedBandID, bands.contains(where: { $0.id == selectedBandID }) { return }
-        selectedBandID = bands.first?.id
+        selectedBandID = EQBandPanelModel.ensuredSelection(current: selectedBandID, bands: bands)
     }
 
     private func resetSelectionForBank() {
@@ -613,10 +651,6 @@ struct ProductionEqualizerView: View {
         }
         return band
     }
-
-    private func formatFrequency(_ value: Double) -> String {
-        value >= 1_000 ? String(format: "%.2g kHz", value / 1_000) : String(format: "%.0f Hz", value)
-    }
 }
 
 private struct ProductionEQResponseGraph: View {
@@ -660,38 +694,54 @@ private struct ProductionEQResponseGraph: View {
                 }
                 .opacity(bypassed ? 0.35 : 1)
 
-                ForEach(displayBands.filter { $0.type != .fir }) { band in
+                ForEach(Array(displayBands.enumerated()).filter { $0.element.type != .fir }, id: \.element.id) { index, band in
                     let point = point(for: band, size: size)
-                    Circle()
-                        .fill(selectedBandID == band.id ? Color.accentColor : Color.secondary)
-                        .overlay(Circle().stroke(.white.opacity(0.85), lineWidth: selectedBandID == band.id ? 2 : 1))
-                        .frame(width: selectedBandID == band.id ? 18 : 14, height: selectedBandID == band.id ? 18 : 14)
-                        .position(point)
-                        .opacity(band.enabled ? 1 : 0.42)
-                        .contentShape(Circle().inset(by: -10))
-                        .gesture(
-                            DragGesture(minimumDistance: 0)
-                                .onChanged { value in
-                                    onSelect(band.id)
-                                    var updated = band
-                                    updated.frequencyHz = frequency(atX: value.location.x, width: size.width)
-                                    if band.type.productionHasGainControl {
-                                        updated.gainDB = gain(atY: value.location.y, height: size.height)
-                                    }
-                                    onPreview(updated)
+                    let isSelected = selectedBandID == band.id
+                    let diameter: CGFloat = isSelected ? 22 : 20
+                    ZStack {
+                        Circle()
+                            .fill(isSelected ? Color.accentColor : Color(nsColor: .controlBackgroundColor))
+                        Circle()
+                            .stroke(isSelected ? Color.white.opacity(0.9) : Color.secondary.opacity(0.8), lineWidth: isSelected ? 2 : 1)
+                        if band.dynamic.enabled {
+                            Circle()
+                                .stroke(Color.orange, lineWidth: 1.5)
+                                .padding(-3.5)
+                        }
+                        Text("\(index + 1)")
+                            .font(.system(size: index >= 99 ? 8 : 10, weight: .bold).monospacedDigit())
+                            .foregroundStyle(isSelected ? Color.white : Color.primary)
+                    }
+                    .frame(width: diameter, height: diameter)
+                    .position(point)
+                    .opacity(band.enabled ? 1 : 0.42)
+                    .contentShape(Circle().inset(by: -10))
+                    .gesture(
+                        DragGesture(minimumDistance: 0)
+                            .onChanged { value in
+                                onSelect(band.id)
+                                var updated = band
+                                updated.frequencyHz = frequency(atX: value.location.x, width: size.width)
+                                if band.type.productionHasGainControl {
+                                    updated.gainDB = gain(atY: value.location.y, height: size.height)
                                 }
-                                .onEnded { value in
-                                    var updated = band
-                                    updated.frequencyHz = frequency(atX: value.location.x, width: size.width)
-                                    if band.type.productionHasGainControl {
-                                        updated.gainDB = gain(atY: value.location.y, height: size.height)
-                                    }
-                                    onCommit(updated)
+                                onPreview(updated)
+                            }
+                            .onEnded { value in
+                                var updated = band
+                                updated.frequencyHz = frequency(atX: value.location.x, width: size.width)
+                                if band.type.productionHasGainControl {
+                                    updated.gainDB = gain(atY: value.location.y, height: size.height)
                                 }
-                        )
-                        .onTapGesture { onSelect(band.id) }
+                                onCommit(updated)
+                            }
+                    )
+                    .onTapGesture { onSelect(band.id) }
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(EQBandPanelModel.accessibilityLabel(number: index + 1, band: band))
+                    .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
+                    .accessibilityIdentifier("eq.graph.handle.\(index + 1)")
                 }
-
                 if bypassed {
                     Text("EQ BYPASSED")
                         .font(.caption.bold()).tracking(1.7)
@@ -723,10 +773,12 @@ private struct ProductionEQResponseGraph: View {
             path.move(to: CGPoint(x: 0, y: y))
             path.addLine(to: CGPoint(x: size.width, y: y))
             context.stroke(path, with: .color(.secondary.opacity(db == 0 ? 0.34 : 0.14)), lineWidth: db == 0 ? 1.3 : 1)
-            if db != 0 {
+            // The bottom -24 label would sit on the 20 Hz frequency label, so it is omitted;
+            // the top label is drawn below its gridline instead of above the plot.
+            if db != 0 && y < size.height - 24 {
                 context.draw(
                     Text("\(Int(db))").font(.system(size: 9, weight: .medium)).foregroundStyle(.secondary),
-                    at: CGPoint(x: 16, y: y - 7)
+                    at: CGPoint(x: 16, y: db == maximumDB ? y + 8 : y - 7)
                 )
             }
         }
