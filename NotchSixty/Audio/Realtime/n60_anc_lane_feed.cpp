@@ -540,6 +540,21 @@ uint64_t N60AncLaneFeedReferenceOutputIndex(const N60AncLaneFeed *feed) {
     return feed->ff == nullptr ? 0u : feed->refRead.load(std::memory_order_acquire);
 }
 
+bool N60AncLaneFeedReferenceZeroSpan(const N60AncLaneFeed *feed, uint64_t *from, uint64_t *to) {
+    if (feed->ff == nullptr) return false;
+    for (int attempt = 0; attempt < 8; ++attempt) {
+        const uint32_t s0 = feed->zeroSeq.load(std::memory_order_acquire);
+        const uint64_t zf = feed->zeroFrom.load(std::memory_order_acquire);
+        const uint64_t zt = feed->zeroTo.load(std::memory_order_acquire);
+        if ((s0 & 1u) != 0u || s0 != feed->zeroSeq.load(std::memory_order_acquire)) continue;
+        if (!(zt > zf && zt > feed->refRead.load(std::memory_order_acquire))) return false;
+        *from = zf;
+        *to = zt;
+        return true;
+    }
+    return false;
+}
+
 N60FeedForwardLiveStatus N60AncLaneFeedFeedForwardStatus(const N60AncLaneFeed *feed) {
     if (feed->ff == nullptr) return N60FeedForwardLiveStatus{};
     return N60FeedForwardLiveGetStatus(feed->ff);
