@@ -18,8 +18,19 @@ struct BinauralMeasurement: Codable, Equatable, Sendable {
     var distanceMeters: Double
     var leftIR: [Float]
     var rightIR: [Float]
+    /// Schema 2 (E13 S6): the speaker this BRIR was captured for. `nil` for HRTF sets, which are
+    /// selected by direction instead. Decodes as `nil` from schema-1 files.
+    var channelRole: OutputProgramRole? = nil
+    /// Schema 2: head yaw of the listener while this was captured, degrees, same sign convention
+    /// as `N60HeadPose.yawDegrees`. Only meaningful with `channelRole`.
+    var headYawDegrees: Double? = nil
 
     func validate(tapCount: Int) throws {
+        if let headYawDegrees {
+            guard channelRole != nil, headYawDegrees.isFinite, (-180.0...180.0).contains(headYawDegrees) else {
+                throw BinauralProfileAssetError.invalidMeasurement
+            }
+        }
         guard azimuthDegrees.isFinite, (-180.0...180.0).contains(azimuthDegrees),
               elevationDegrees.isFinite, (-90.0...90.0).contains(elevationDegrees),
               distanceMeters.isFinite, distanceMeters > 0,
@@ -36,7 +47,9 @@ struct BinauralMeasurement: Codable, Equatable, Sendable {
 /// AES69/SOFA/HDF5 parsing. A future reviewed SOFA adapter can populate this same
 /// document without changing the realtime renderer or product profile schema.
 struct BinauralProfileAsset: Codable, Equatable, Sendable, Identifiable {
-    static let currentSchemaVersion = 1
+    /// 2 adds `channelRole` and `headYawDegrees` to measurements (E13 S6). Schema-1 files still load.
+    static let currentSchemaVersion = 2
+    static let supportedSchemaVersions = 1...2
 
     var schemaVersion = Self.currentSchemaVersion
     var id = UUID()
@@ -50,7 +63,7 @@ struct BinauralProfileAsset: Codable, Equatable, Sendable, Identifiable {
     var importProvenance: SOFAImportProvenance? = nil
 
     func validate() throws {
-        guard schemaVersion == Self.currentSchemaVersion else {
+        guard Self.supportedSchemaVersions.contains(schemaVersion) else {
             throw BinauralProfileAssetError.unsupportedSchema(schemaVersion)
         }
         guard !displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
@@ -64,7 +77,23 @@ struct BinauralProfileAsset: Codable, Equatable, Sendable, Identifiable {
         for measurement in measurements {
             try measurement.validate(tapCount: tapCount)
         }
+        if isRoleTagged {
+            // Role-tagged (captured) sets need schema 2, one BRIR per role and yaw, and every
+            // measurement tagged, so that selection by role cannot silently skip entries.
+            guard schemaVersion >= 2,
+                  measurements.allSatisfy({ $0.channelRole != nil }) else {
+                throw BinauralProfileAssetError.invalidMetadata
+            }
+            var seen = Set<String>()
+            for measurement in measurements {
+                let key = "\(measurement.channelRole!.rawValue)@\(measurement.headYawDegrees ?? 0)"
+                guard seen.insert(key).inserted else { throw BinauralProfileAssetError.invalidMetadata }
+            }
+        }
     }
+
+    /// True for personally captured BRIR sets that carry a speaker role per measurement.
+    var isRoleTagged: Bool { measurements.contains { $0.channelRole != nil } }
 
     var reference: BinauralProfileReference {
         BinauralProfileReference(
@@ -196,6 +225,20 @@ struct BinauralProfileAsset: Codable, Equatable, Sendable, Identifiable {
         right.reserveCapacity(layout.roles.count * tapCount)
 
         for channel in 0..<layout.roles.count {
+            if isRoleTagged {
+                // Captured BRIRs are tied to their speaker: pick by role, then the capture yaw
+                // nearest the current head yaw (sets are not wrapped; the range is bounded).
+                guard let measurement = measurement(
+                    role: layout.roles[channel], yawDegrees: headPose.yawDegrees
+                ) else {
+                    throw BinauralProfileAssetError.measurementUnavailable(
+                        layout.roles[channel].displayName
+                    )
+                }
+                left.append(contentsOf: measurement.leftIR)
+                right.append(contentsOf: measurement.rightIR)
+                continue
+            }
             let target: N60BinauralSourcePosition = withUnsafePointer(
                 to: &descriptor.sources
             ) { tuplePointer in
@@ -223,6 +266,13 @@ struct BinauralProfileAsset: Codable, Equatable, Sendable, Identifiable {
             leftIRs: left,
             rightIRs: right
         )
+    }
+
+    /// The captured BRIR for `role` whose capture yaw is closest to `yawDegrees`.
+    func measurement(role: OutputProgramRole, yawDegrees: Double) -> BinauralMeasurement? {
+        measurements
+            .filter { $0.channelRole == role }
+            .min { abs(($0.headYawDegrees ?? 0) - yawDegrees) < abs(($1.headYawDegrees ?? 0) - yawDegrees) }
     }
 
     private func nearestMeasurement(
