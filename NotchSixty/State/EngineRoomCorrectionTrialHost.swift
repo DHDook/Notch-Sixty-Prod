@@ -50,6 +50,69 @@ final class EngineRoomCorrectionTrialHost: RoomCorrectionTrialHost, @unchecked S
     func revertTrial() async { await MainActor.run { playback.stop() } }
 }
 
+/// The playback seam of the trial (E24 S11, Q4): tests inject a fake because the real engine cannot start without hardware.
+@MainActor
+protocol TrialPlaybackControlling: AnyObject {
+    /// True when the running graph renderer can take the generator.
+    var liveGraphAvailable: Bool { get }
+    /// True when no playback runs at all (so the trial may start it).
+    var isIdle: Bool { get }
+    func start() throws
+    func stop()
+}
+
+@MainActor
+final class EngineTrialPlaybackControl: TrialPlaybackControlling {
+    private let engine: AudioIOEngine
+    init(engine: AudioIOEngine) { self.engine = engine }
+    var liveGraphAvailable: Bool { engine.liveGraphEditsAvailable }
+    var isIdle: Bool { engine.lifecycleState == .idle }
+    func start() throws { try engine.start() }
+    func stop() { engine.stop() }
+}
+
+/// Verification needs the graph renderer (Q4): with playback idle it starts playback on the selected output (the sweep
+/// mutes other audio) and stops it again afterwards, so the prior state (idle) is restored. Playback that was already
+/// running is left running. Control thread only.
+@MainActor
+final class TrialPlaybackOwner {
+    static let startTimeoutSeconds = 5.0
+    private let control: TrialPlaybackControlling
+    private let pollNanoseconds: UInt64
+    private(set) var startedByTrial = false
+
+    init(control: TrialPlaybackControlling, pollNanoseconds: UInt64 = 50_000_000) {
+        self.control = control
+        self.pollNanoseconds = pollNanoseconds
+    }
+
+    /// Makes sure the live graph is running. Throws `playbackNotRunning` when it cannot be (a renderer that cannot take the
+    /// generator, or playback that did not reach the graph in time); anything this call started is stopped again.
+    func acquire() async throws {
+        if control.liveGraphAvailable { return }
+        guard control.isIdle else { throw RoomCorrectionTrialError.playbackNotRunning }
+        do { try control.start() } catch {
+            throw RoomCorrectionTrialError.captureFailed("playback could not start (\(error.localizedDescription)).")
+        }
+        startedByTrial = true
+        let deadline = Date().addingTimeInterval(Self.startTimeoutSeconds)
+        while !control.liveGraphAvailable {
+            if Date() >= deadline || Task.isCancelled {
+                release()
+                throw RoomCorrectionTrialError.playbackNotRunning
+            }
+            try? await Task.sleep(nanoseconds: pollNanoseconds)
+        }
+    }
+
+    /// Stops playback only if `acquire` started it. Safe to call repeatedly.
+    func release() {
+        guard startedByTrial else { return }
+        startedByTrial = false
+        control.stop()
+    }
+}
+
 /// The production sweep player: the generator joins the live graph (other audio muted for the sweep) and a microphone-only
 /// IOProc fills a monitor ring that is drained after the sweep.
 @MainActor
@@ -61,14 +124,17 @@ final class EngineTrialSweepPlayer: TrialSweepPlaying {
     private let engine: AudioIOEngine
     private let microphone: RoomCorrectionCalibrationController
     private var capture: MicrophoneRingCapture?
+    private let owner: TrialPlaybackOwner
 
-    init(engine: AudioIOEngine, microphone: RoomCorrectionCalibrationController) {
+    init(engine: AudioIOEngine, microphone: RoomCorrectionCalibrationController, playback: TrialPlaybackControlling? = nil) {
         self.engine = engine
         self.microphone = microphone
+        owner = TrialPlaybackOwner(control: playback ?? EngineTrialPlaybackControl(engine: engine))
     }
 
     func prepare() throws {
-        guard engine.liveGraphEditsAvailable else { throw RoomCorrectionTrialError.playbackNotRunning }
+        // Idle playback is allowed: `playSweep` starts it (Q4). Playback on a renderer that cannot take the generator is not.
+        guard engine.liveGraphEditsAvailable || engine.lifecycleState == .idle else { throw RoomCorrectionTrialError.playbackNotRunning }
         guard microphone.selectedInputDevice != nil else { throw RoomCorrectionTrialError.microphoneRequired }
         guard microphone.permissionStatus == .authorized else { throw RoomCorrectionTrialError.microphonePermissionRequired }
     }
@@ -76,6 +142,8 @@ final class EngineTrialSweepPlayer: TrialSweepPlaying {
     func playSweep(_ candidate: RoomCorrectionDeployCandidate) async throws -> [Float] {
         try prepare()
         guard let input = microphone.selectedInputDevice else { throw RoomCorrectionTrialError.microphoneRequired }
+        defer { stop() }
+        try await owner.acquire()
         var settings = SignalGeneratorSettings()
         settings.kind = .sweep
         settings.lowHz = candidate.sweepStartHz
@@ -85,7 +153,6 @@ final class EngineTrialSweepPlayer: TrialSweepPlaying {
         let capture = try MicrophoneRingCapture(
             device: input, channel: microphone.selectedInputChannelIndex, sampleRate: candidate.sampleRate)
         self.capture = capture
-        defer { stop() }
         try capture.start()
         try await Task.sleep(nanoseconds: UInt64(Self.leadSeconds * 1e9))
         do { try engine.setLiveGenerator(settings, selection: .lane(candidate.measuredLane)) } catch {
@@ -105,6 +172,7 @@ final class EngineTrialSweepPlayer: TrialSweepPlaying {
         if engine.liveGenerator != nil {
             _ = try? engine.setLiveGenerator(nil, selection: .allProgram(includeLFE: false))
         }
+        owner.release()
     }
 }
 

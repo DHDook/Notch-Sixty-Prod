@@ -189,6 +189,8 @@ enum RoomCorrectionProjectControllerError: Error, Equatable, LocalizedError {
     case noUsableMeasurementRange
     case designVerificationRequired
     case designVerificationRejected([String])
+    /// E24 S11: the installed correction carries joint-bass grids on the subwoofer lanes, which this stereo filter would drop.
+    case jointBassInstalled
 
     var errorDescription: String? {
         switch self {
@@ -222,6 +224,8 @@ enum RoomCorrectionProjectControllerError: Error, Equatable, LocalizedError {
             return "The included measurements do not share a usable frequency range for correction design."
         case .designVerificationRequired:
             return "Verify the selected room-correction design before deployment."
+        case .jointBassInstalled:
+            return "Guided Setup installed joint bass grids on the subwoofers. Deploying this stereo filter would remove them. Use Revert in the Guided Setup bass step first, or run Guided Setup again."
         case .designVerificationRejected(let reasons):
             return "Room-correction verification blocked deployment: " + reasons.joined(separator: " ")
         }
@@ -614,6 +618,10 @@ final class RoomCorrectionProjectController: ObservableObject {
         guard let design = selectedDesign else {
             throw RoomCorrectionProjectControllerError
                 .designVerificationRequired
+        }
+        if let lanes = profiles.selectedSystemProfile?.state.roomCorrection.lanes,
+           lanes.design.lanes.contains(where: { $0.lane >= lanes.programLaneCount }) {
+            throw RoomCorrectionProjectControllerError.jointBassInstalled
         }
         let report = try verification(for: design)
         selectedDesignVerification = report

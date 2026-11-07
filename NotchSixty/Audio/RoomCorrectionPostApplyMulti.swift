@@ -107,3 +107,55 @@ extension RoomCorrectionPostApplyVerifier {
         return RoomCorrectionBandedResponse(centres: centres, magnitudeDB: magnitude, groupDelaySeconds: delay)
     }
 }
+
+/// One source of the joint-bass design as the main seat measured it (E24 S11): the speakers first, then the subwoofers, in
+/// the bass design's channel order. A source without a usable measurement carries nil `impulse`.
+struct RoomCorrectionJointBassSource: Sendable {
+    var isSubwoofer: Bool
+    var impulse: [Float]?
+    var directArrivalSeconds: Double?
+    /// The subwoofer's calibrated gain, delay and polarity (ignored for a speaker).
+    var gainDB = 0.0
+    var delayMilliseconds = 0.0
+    var polarityInverted = false
+}
+
+extension RoomCorrectionPostApplyVerifier {
+    /// The prediction paths for a sweep on `measuredLane` with the joint bass installed: that lane's main and every
+    /// subwoofer, one path each, from the main seat's own measurements (the generator sits ahead of bass management).
+    /// `mainLanes` and `subLanes` are the bass plan's lanes in source order; `laneDelays` are the installed alignment delays.
+    /// A source with no measurement is skipped. The bass-management crossover is not modelled (an E22 bench item).
+    static func jointBassPaths(
+        sources: [RoomCorrectionJointBassSource], mainLanes: [Int], subLanes: [Int],
+        plan: RoomCorrectionLanePlan, measuredLane: Int, laneDelays: [RoomCorrectionLaneDelay], sampleRate: Double
+    ) -> [RoomCorrectionPredictionPath] {
+        func stage(_ lane: Int) -> RoomCorrectionLaneStage? {
+            plan.stages.first { $0.laneMask & (1 << UInt64(lane)) != 0 }
+        }
+        var paths: [RoomCorrectionPredictionPath] = []
+        var mainIndex = 0, subIndex = 0
+        for source in sources {
+            let isSub = source.isSubwoofer
+            let mainLane = isSub ? nil : (mainIndex < mainLanes.count ? mainLanes[mainIndex] : nil)
+            let subLane = isSub ? (subIndex < subLanes.count ? subLanes[subIndex] : nil) : nil
+            if isSub { subIndex += 1 } else { mainIndex += 1 }
+            guard let impulse = source.impulse, let arrival = source.directArrivalSeconds else { continue }
+            var path = RoomCorrectionPredictionPath(roomImpulse: impulse, arrivalFrames: arrival * sampleRate)
+            if isSub {
+                guard let lane = subLane else { continue }
+                let range = PhysicalSubwooferCalibration.gainRangeDB
+                path.stage = stage(lane)
+                path.gainDB = min(range.upperBound, max(range.lowerBound, source.gainDB))
+                path.delaySeconds = min(PhysicalSubwooferCalibration.delayRangeMilliseconds.upperBound,
+                                        max(0, source.delayMilliseconds)) / 1_000
+                path.polarityInverted = source.polarityInverted
+            } else {
+                guard mainLane == measuredLane else { continue }
+                path.stage = stage(measuredLane)
+                path.delaySeconds = laneDelays.first { $0.lane == measuredLane }?.seconds ?? 0
+            }
+            paths.append(path)
+        }
+        return paths
+    }
+}

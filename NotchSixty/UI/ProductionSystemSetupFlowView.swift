@@ -935,35 +935,25 @@ final class SystemSetupFlowModel: ObservableObject {
     ) throws -> [RoomCorrectionPredictionPath]? {
         guard let bassPlan = bassLanePlan, let bass, let seat = calibration.seats.first(where: { $0.included && $0.weight > 0 })
         else { return nil }
-        func stage(_ lane: Int) -> RoomCorrectionLaneStage? {
-            plan.stages.first { $0.laneMask & (1 << UInt64(lane)) != 0 }
-        }
         // The installed alignment delay on the lane: the room's plus the bass design's.
         let laneDelays = try composeInstall(room: roomOnlyInstall, bass: bassPlan).laneDelays
-        var paths: [RoomCorrectionPredictionPath] = []
-        var mainIndex = 0
-        for (index, source) in bass.channelSources.enumerated() {
-            guard let measurement = calibration.measurements.last(where: { $0.seatID == seat.id && $0.source == source }),
-                  let arrival = measurement.channel.quality.directArrivalSeconds else { continue }
-            var path = RoomCorrectionPredictionPath(
-                roomImpulse: measurement.channel.impulseResponse, arrivalFrames: arrival * rate)
-            switch source {
-            case .speaker:
-                defer { mainIndex += 1 }
-                guard bassPlan.mainLanes[mainIndex] == measuredLane else { continue }
-                path.stage = stage(measuredLane)
-                path.delaySeconds = laneDelays.first { $0.lane == measuredLane }?.seconds ?? 0
-            case .subwoofer:
+        let sources = bass.channelSources.enumerated().map { index, source -> RoomCorrectionJointBassSource in
+            let measurement = calibration.measurements.last { $0.seatID == seat.id && $0.source == source }
+            var item = RoomCorrectionJointBassSource(
+                isSubwoofer: { if case .subwoofer = source { return true } else { return false } }(),
+                impulse: measurement?.channel.impulseResponse,
+                directArrivalSeconds: measurement?.channel.quality.directArrivalSeconds)
+            if item.isSubwoofer {
                 let row = bass.rows[index]
-                let range = PhysicalSubwooferCalibration.gainRangeDB
-                path.stage = stage(bassPlan.subLanes[index - bassPlan.mainLanes.count])
-                path.gainDB = min(range.upperBound, max(range.lowerBound, row.gainDB))
-                path.delaySeconds = min(PhysicalSubwooferCalibration.delayRangeMilliseconds.upperBound, max(0, row.delayMilliseconds)) / 1_000
-                path.polarityInverted = row.polarityInverted
+                item.gainDB = row.gainDB
+                item.delayMilliseconds = row.delayMilliseconds
+                item.polarityInverted = row.polarityInverted
             }
-            paths.append(path)
+            return item
         }
-        return paths
+        return RoomCorrectionPostApplyVerifier.jointBassPaths(
+            sources: sources, mainLanes: bassPlan.mainLanes, subLanes: bassPlan.subLanes, plan: plan,
+            measuredLane: measuredLane, laneDelays: laneDelays, sampleRate: rate)
     }
 
     /// Room insights come from the advisor's analyser over the flow's own Room Correction project.
