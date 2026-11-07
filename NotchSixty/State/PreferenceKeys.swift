@@ -24,6 +24,13 @@ enum PreferenceKeys {
     /// seat microphone's interface (zero-based).
     static let quietZoneFeedForwardReferenceChannel = "quietZone.feedForwardReferenceChannel"
 
+    /// E27 S2: the Equalizer graph's visible ranges and band-curve choice.
+    enum Equalizer {
+        static let graphYRange = "equalizer.graphYRange"
+        static let graphXZoom = "equalizer.graphXZoom"
+        static let bandCurves = "equalizer.bandCurves"
+    }
+
     /// Feature-flag overrides are stored as `feature.<flag id>`.
     static let featureFlagPrefix = "feature."
 }
