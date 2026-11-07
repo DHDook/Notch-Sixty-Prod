@@ -174,7 +174,7 @@ enum CrossoverCore {
 
     private static func withFIRParams<T>(
         highPass: FilterSpec?, lowPass: FilterSpec?, sampleRate: Double, groupDelayFrames: Int,
-        _ body: (inout n60_xover_fir_params) -> T
+        maxSingleBandTaps: UInt32, _ body: (inout n60_xover_fir_params) -> T
     ) -> T {
         var hp = highPass?.raw ?? n60_xover_spec()
         var lp = lowPass?.raw ?? n60_xover_spec()
@@ -185,6 +185,7 @@ enum CrossoverCore {
                 params.struct_size = UInt32(MemoryLayout<n60_xover_fir_params>.size)
                 params.sample_rate = sampleRate
                 params.group_delay_frames = UInt32(max(0, groupDelayFrames))
+                params.max_single_band_taps = maxSingleBandTaps
                 params.highpass = hasHP ? hpPointer : nil
                 params.lowpass = hasLP ? lpPointer : nil
                 return body(&params)
@@ -195,11 +196,14 @@ enum CrossoverCore {
     /// Sizes and latency of the linear-phase FIR for a way. `groupDelayFrames` 0 lets the core choose (five periods of the
     /// lowest corner); a speaker's ways pass the largest of their automatic delays so their windows match.
     static func linearPhasePlan(
-        highPass: FilterSpec?, lowPass: FilterSpec?, sampleRate: Double, groupDelayFrames: Int = 0
+        highPass: FilterSpec?, lowPass: FilterSpec?, sampleRate: Double, groupDelayFrames: Int = 0,
+        maxSingleBandTaps: UInt32 = UnifiedGraphFIRScheme.currentDesignerCap()
     ) throws -> LinearPhasePlan {
         var report = n60_xover_fir_report()
         let status = withFIRParams(highPass: highPass, lowPass: lowPass, sampleRate: sampleRate,
-                                   groupDelayFrames: groupDelayFrames) { n60_xover_fir_plan(&$0, &report) }
+                                   groupDelayFrames: groupDelayFrames, maxSingleBandTaps: maxSingleBandTaps) {
+            n60_xover_fir_plan(&$0, &report)
+        }
         guard status == N60_XOVER_OK else { throw CoreError.status(status) }
         return LinearPhasePlan(report)
     }
@@ -207,16 +211,17 @@ enum CrossoverCore {
     /// Synthesises the linear-phase FIR of a way (offline; the same code the Speaker Optimizer's linear-phase window
     /// uses: zero-phase magnitude of the IIR cascade, delayed by the group delay, Blackman-windowed).
     static func linearPhaseDesign(
-        highPass: FilterSpec?, lowPass: FilterSpec?, sampleRate: Double, groupDelayFrames: Int = 0
+        highPass: FilterSpec?, lowPass: FilterSpec?, sampleRate: Double, groupDelayFrames: Int = 0,
+        maxSingleBandTaps: UInt32 = UnifiedGraphFIRScheme.currentDesignerCap()
     ) throws -> LinearPhaseDesign {
         let plan = try linearPhasePlan(highPass: highPass, lowPass: lowPass, sampleRate: sampleRate,
-                                       groupDelayFrames: groupDelayFrames)
+                                       groupDelayFrames: groupDelayFrames, maxSingleBandTaps: maxSingleBandTaps)
         var full = [Float](repeating: 0, count: plan.fullTapCount)
         var low = [Float](repeating: 0, count: max(1, plan.lowTapCount))
         var report = n60_xover_fir_report()
         let fullCount = UInt64(full.count), lowCount = UInt64(low.count)
         let status = withFIRParams(highPass: highPass, lowPass: lowPass, sampleRate: sampleRate,
-                                   groupDelayFrames: groupDelayFrames) { params in
+                                   groupDelayFrames: groupDelayFrames, maxSingleBandTaps: maxSingleBandTaps) { params in
             full.withUnsafeMutableBufferPointer { f in
                 low.withUnsafeMutableBufferPointer { l in
                     n60_xover_fir_synthesize(&params, f.baseAddress, fullCount, l.baseAddress, lowCount, &report)
@@ -258,7 +263,8 @@ extension CrossoverCore {
     /// Designs the correction. `farField` (gated, valid above `mergeHz`) is optional. Offline.
     static func linearise(
         nearField: ResponseCapture, farField: ResponseCapture? = nil, mergeHz: Double = 0,
-        highPass: FilterSpec?, lowPass: FilterSpec?, sampleRate: Double, linearPhase: Bool
+        highPass: FilterSpec?, lowPass: FilterSpec?, sampleRate: Double, linearPhase: Bool,
+        maxSingleBandTaps: UInt32 = UnifiedGraphFIRScheme.currentDesignerCap()
     ) throws -> DriverLinearisation {
         guard nearField.frequenciesHz.count == nearField.levelsDB.count,
               farField.map({ $0.frequenciesHz.count == $0.levelsDB.count }) ?? true else {
@@ -269,7 +275,8 @@ extension CrossoverCore {
         var report = n60_xover_lin_report()
         let far = farField ?? ResponseCapture(frequenciesHz: [], levelsDB: [])
         let status = withLinParams(highPass: highPass, lowPass: lowPass, sampleRate: sampleRate,
-                                   linearPhase: linearPhase, mergeHz: farField == nil ? 0 : mergeHz) { params in
+                                   linearPhase: linearPhase, mergeHz: farField == nil ? 0 : mergeHz,
+                                   maxSingleBandTaps: maxSingleBandTaps) { params in
             nearField.frequenciesHz.withUnsafeBufferPointer { nf in
                 nearField.levelsDB.withUnsafeBufferPointer { nl in
                     far.frequenciesHz.withUnsafeBufferPointer { ff in
@@ -297,13 +304,15 @@ extension CrossoverCore {
     /// its IIR high-pass and low-pass); minimum phase carries the correction alone.
     static func linearisedDriverFIR(
         _ design: DriverLinearisation, highPass: FilterSpec?, lowPass: FilterSpec?, sampleRate: Double,
-        groupDelayFrames: Int = 0
+        groupDelayFrames: Int = 0, maxSingleBandTaps: UInt32 = UnifiedGraphFIRScheme.currentDesignerCap()
     ) throws -> LinearPhaseDesign {
-        var full = [Float](repeating: 0, count: 32_768)
+        // Single-band output (and the long minimum-phase correction) can need up to the cap; two-band parts stay 32,768.
+        var full = [Float](repeating: 0, count: Int(max(maxSingleBandTaps, N60_CORRECT_STAGE_TAPS)))
         var low = [Float](repeating: 0, count: 32_768)
         var report = n60_xover_fir_report()
         let status = withLinParams(highPass: highPass, lowPass: lowPass, sampleRate: sampleRate,
-                                   linearPhase: design.linearPhase, mergeHz: 0) { params in
+                                   linearPhase: design.linearPhase, mergeHz: 0,
+                                   maxSingleBandTaps: maxSingleBandTaps) { params in
             full.withUnsafeMutableBufferPointer { f in
                 low.withUnsafeMutableBufferPointer { l in
                     n60_xover_linearise_synthesize(
@@ -363,7 +372,7 @@ extension CrossoverCore {
 
     private static func withLinParams<T>(
         highPass: FilterSpec?, lowPass: FilterSpec?, sampleRate: Double, linearPhase: Bool, mergeHz: Double,
-        _ body: (inout n60_xover_lin_params) -> T
+        maxSingleBandTaps: UInt32, _ body: (inout n60_xover_lin_params) -> T
     ) -> T {
         var hp = highPass?.raw ?? n60_xover_spec()
         var lp = lowPass?.raw ?? n60_xover_spec()
@@ -377,6 +386,7 @@ extension CrossoverCore {
                 params.lowpass = hasLP ? lpPointer : nil
                 params.linear_phase = linearPhase ? 1 : 0
                 params.merge_hz = mergeHz
+                params.max_single_band_taps = maxSingleBandTaps
                 return body(&params)
             }
         }

@@ -18,7 +18,7 @@ enum SpeakerOptimizerFIRLatencyPlanningError:
         case .invalidSampleRate:
             return "Speaker Optimizer FIR latency planning requires a finite positive sample rate."
         case .invalidTapCount(let count):
-            return "Speaker Optimizer FIR deployment requires an odd tap count inside the realtime convolution limit; received \(count)."
+            return "Speaker Optimizer FIR deployment requires an odd tap count inside the realtime convolution limit (a filter longer than the longest supported, \(UnifiedGraphFIRScheme.currentMaxTaps()) taps, is refused); received \(count)."
         case .invalidDeclaredGroupDelay(let expected, let actual):
             return "Linear-phase FIR group delay must equal (tapCount - 1) / 2; expected \(expected) frames, received \(actual)."
         case .correctedRoleRequired:
@@ -111,13 +111,14 @@ struct SpeakerOptimizerFIRLatencyPlanner: Sendable {
         sampleRate: Double,
         tapCount: Int,
         declaredGroupDelayFrames: UInt32,
-        correctedRoles: [OutputProgramRole]
+        correctedRoles: [OutputProgramRole],
+        firScheme: UInt32 = UnifiedGraphFIRScheme.current()
     ) throws -> SpeakerOptimizerFIRLatencyPlan {
         guard sampleRate.isFinite, sampleRate > 0 else {
             throw SpeakerOptimizerFIRLatencyPlanningError.invalidSampleRate
         }
         guard tapCount >= 3,
-              tapCount <= Int(N60_PROGRAM_FIR_MAX_TAPS),
+              tapCount <= UnifiedGraphFIRScheme.maxTaps(firScheme),
               tapCount % 2 == 1 else {
             throw SpeakerOptimizerFIRLatencyPlanningError
                 .invalidTapCount(tapCount)
@@ -363,7 +364,8 @@ struct SpeakerOptimizerFIRDeploymentConfiguration:
     }
 
     func validate(
-        profile: OutputDeviceProfileConfiguration
+        profile: OutputDeviceProfileConfiguration,
+        firScheme: UInt32 = UnifiedGraphFIRScheme.current()
     ) throws {
         guard schemaVersion == Self.currentSchemaVersion,
               enabled,
@@ -374,7 +376,7 @@ struct SpeakerOptimizerFIRDeploymentConfiguration:
               profile.speakerOptimizerPEQ == nil,
               !aggregateCandidateFingerprint.isEmpty,
               tapCount >= 257,
-              tapCount <= Int(N60_PROGRAM_FIR_MAX_TAPS),
+              tapCount <= UnifiedGraphFIRScheme.maxTaps(firScheme),
               tapCount % 2 == 1,
               declaredGroupDelayFrames == (tapCount - 1) / 2,
               requiredHeadroomDB.isFinite,

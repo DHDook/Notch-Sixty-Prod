@@ -92,6 +92,29 @@ final class SpeakerOptimizerFIRDeploymentTests: XCTestCase {
         XCTAssertEqual(plan.maximumEndToEndProgramLatencyFrames, 1_328)
     }
 
+    /// E9 S4: a 65,535-tap deployment plans on the graph with the long scheme and is refused (named) without it.
+    func testLongFIRSchemeAllowsA65535TapDeploymentAndTheUniformSchemeRefusesIt() throws {
+        let profile = makeStereoProfile()
+        for rate in [44_100.0, 48_000, 88_200, 96_000, 176_400, 192_000, 352_800, 384_000] {
+            let plan = try SpeakerOptimizerFIRLatencyPlanner().plan(
+                profile: profile, bassManagementEnabled: false, sampleRate: rate, tapCount: 65_535,
+                declaredGroupDelayFrames: 32_767, correctedRoles: [.frontLeft, .frontRight],
+                firScheme: UnifiedGraphFIRScheme.nonUniform)
+            XCTAssertEqual(plan.declaredGroupDelayFrames, 32_767, "\(rate)")
+            XCTAssertThrowsError(try SpeakerOptimizerFIRLatencyPlanner().plan(
+                profile: profile, bassManagementEnabled: false, sampleRate: rate, tapCount: 65_535,
+                declaredGroupDelayFrames: 32_767, correctedRoles: [.frontLeft],
+                firScheme: UnifiedGraphFIRScheme.uniform)) { error in
+                XCTAssertEqual(error as? SpeakerOptimizerFIRLatencyPlanningError, .invalidTapCount(65_535), "\(rate)")
+                XCTAssertTrue(error.localizedDescription.contains("longest supported"))
+            }
+        }
+        XCTAssertThrowsError(try SpeakerOptimizerFIRLatencyPlanner().plan(
+            profile: profile, bassManagementEnabled: false, sampleRate: 384_000, tapCount: 262_145,
+            declaredGroupDelayFrames: 131_072, correctedRoles: [.frontLeft],
+            firScheme: UnifiedGraphFIRScheme.nonUniform))
+    }
+
     func testRejectsWrongGroupDelayEvenIfTapCountOtherwiseValid() throws {
         XCTAssertThrowsError(
             try SpeakerOptimizerFIRLatencyPlanner().plan(

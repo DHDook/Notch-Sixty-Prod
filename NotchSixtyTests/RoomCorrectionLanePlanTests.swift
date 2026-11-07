@@ -53,6 +53,47 @@ final class RoomCorrectionLanePlanTests: XCTestCase {
         }
     }
 
+    /// E9 S4: with the long scheme every mode is a single-band stage of its full tap count at every standard rate;
+    /// with the uniform scheme a design above 32,768 taps stays two-band (flag off unchanged).
+    func testLongSchemeChoosesSingleBandStagesAndUniformKeepsTwoBand() throws {
+        let g = try grid(smooth)
+        for rate in Self.rates {
+            for mode in RoomCorrectionLatencyMode.allCases {
+                let multi = design(mode: mode, laneGrids: [0: g], laneCount: 2)
+                let required = Int(n60_correct_latency_mode_tap_count(mode.rawValue, rate))
+                let long = try RoomCorrectionRateCache().plan(
+                    for: multi, sampleRate: rate, firScheme: UnifiedGraphFIRScheme.nonUniform)
+                let longStage = try XCTUnwrap(long.stages.first)
+                XCTAssertNil(longStage.twoBand, "\(mode) at \(rate)")
+                XCTAssertEqual(longStage.taps.count, required, "\(mode) at \(rate)")
+                let uniform = try RoomCorrectionRateCache().plan(
+                    for: multi, sampleRate: rate, firScheme: UnifiedGraphFIRScheme.uniform)
+                XCTAssertEqual(try XCTUnwrap(uniform.stages.first).twoBand != nil,
+                               required > RoomCorrectionRateCache.maximumSingleBandTaps, "\(mode) at \(rate)")
+            }
+        }
+    }
+
+    func testStagePlanRefusesALongerFilterByNameAndTheCacheKeysOnTheScheme() throws {
+        for scheme in [UnifiedGraphFIRScheme.uniform, UnifiedGraphFIRScheme.nonUniform] {
+            XCTAssertThrowsError(try RoomCorrectionRateCache.stagePlan(span: 262_145 + 1, scheme: scheme)) { error in
+                guard case RoomCorrectionLanePlanError.synthesis(let status) = error else { return XCTFail("\(error)") }
+                XCTAssertEqual(status, N60_CORRECT_ERR_TOO_LONG)
+                XCTAssertTrue(error.localizedDescription.contains(String(cString: n60_correct_status_name(status))))
+            }
+        }
+        XCTAssertEqual(try RoomCorrectionRateCache.stagePlan(span: 131_073, scheme: UnifiedGraphFIRScheme.nonUniform).two_band, 0)
+        XCTAssertEqual(try RoomCorrectionRateCache.stagePlan(span: 131_073, scheme: UnifiedGraphFIRScheme.uniform).two_band, 1)
+        XCTAssertNil(RoomCorrectionRateCache.stageNote(taps: 131_072, scheme: UnifiedGraphFIRScheme.uniform))
+        XCTAssertNil(RoomCorrectionRateCache.stageNote(taps: 16_384, scheme: UnifiedGraphFIRScheme.nonUniform))
+        XCTAssertEqual(RoomCorrectionRateCache.stageNote(taps: 131_072, scheme: UnifiedGraphFIRScheme.nonUniform), "single band")
+        let multi = design(mode: .video, laneGrids: [0: try grid(smooth)], laneCount: 2)
+        let cache = RoomCorrectionRateCache()
+        _ = try cache.plan(for: multi, sampleRate: 48_000, firScheme: UnifiedGraphFIRScheme.uniform)
+        _ = try cache.plan(for: multi, sampleRate: 48_000, firScheme: UnifiedGraphFIRScheme.nonUniform)
+        XCTAssertEqual(cache.synthesisCount, 2)
+    }
+
     func testMixedPhaseDesignAgreesAtRatesThatFitASingleBand() throws {
         let g = try grid(smooth)
         let multi = design(mode: .music20ms, laneGrids: [0: g], laneCount: 2)

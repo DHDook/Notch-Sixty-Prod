@@ -114,4 +114,24 @@ final class CrossoverCoreTests: XCTestCase {
             nearField: .init(frequenciesHz: [100], levelsDB: []), highPass: hp, lowPass: nil,
             sampleRate: 48_000, linearPhase: false))
     }
+
+    /// E9 S4: with the long cap a linear-phase way of 40,001 taps is single band at every standard rate; the short cap
+    /// keeps it two-band; a way longer than 262,144 taps is refused by name.
+    func testLongCapKeepsLongLinearPhaseWaysSingleBand() throws {
+        let lp = CrossoverCore.FilterSpec(family: .linkwitzRiley, order: 4, cornerHz: 80)
+        for rate in [44_100.0, 48_000, 88_200, 96_000, 176_400, 192_000, 352_800, 384_000] {
+            let short = try CrossoverCore.linearPhasePlan(
+                highPass: nil, lowPass: lp, sampleRate: rate, groupDelayFrames: 20_000, maxSingleBandTaps: 32_768)
+            XCTAssertTrue(short.twoBand, "\(rate)")
+            let long = try CrossoverCore.linearPhaseDesign(
+                highPass: nil, lowPass: lp, sampleRate: rate, groupDelayFrames: 20_000, maxSingleBandTaps: 262_144)
+            XCTAssertFalse(long.plan.twoBand, "\(rate)")
+            XCTAssertEqual(long.fullTaps.count, 40_001, "\(rate)")
+            XCTAssertEqual(long.stageKind, N60_STAGE_DRIVER_FIR.rawValue)
+            XCTAssertThrowsError(try CrossoverCore.linearPhasePlan(
+                highPass: nil, lowPass: lp, sampleRate: rate, groupDelayFrames: 131_072, maxSingleBandTaps: 262_144)) {
+                XCTAssertEqual($0 as? CrossoverCore.CoreError, .status(N60_XOVER_ERR_TOO_LONG), "\(rate)")
+            }
+        }
+    }
 }

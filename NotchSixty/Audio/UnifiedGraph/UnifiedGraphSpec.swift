@@ -32,6 +32,16 @@ enum UnifiedGraphFIRScheme {
 
     static func maxTaps(_ scheme: UInt32) -> Int { scheme == nonUniform ? longMaxTaps : uniformMaxTaps }
 
+    /// E9 S4: the `max_single_band_taps` the offline designers pass for a scheme. 32,768 is today's rule (above it a design
+    /// is two-band); 262,144 makes every design up to that length single band and refuses longer ones by name.
+    static func designerSingleBandCap(_ scheme: UInt32) -> UInt32 {
+        scheme == nonUniform ? N60_CORRECT_STAGE_TAPS_LONG : N60_CORRECT_STAGE_TAPS
+    }
+
+    /// The designer cap and tap limit for the scheme new configurations use (`current()`).
+    static func currentDesignerCap() -> UInt32 { designerSingleBandCap(current()) }
+    static func currentMaxTaps() -> Int { maxTaps(current()) }
+
     private static let lock = NSLock()
     nonisolated(unsafe) private static var defaultScheme: UInt32 = uniform
 
