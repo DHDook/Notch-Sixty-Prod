@@ -34,13 +34,14 @@
 extern "C" {
 #endif
 
-#define N60_XOVER_ABI_VERSION 4
+#define N60_XOVER_ABI_VERSION 5
 
 #define N60_XOVER_OK 0
 #define N60_XOVER_ERR_ARGUMENT (-1)
 #define N60_XOVER_ERR_ORDER (-2)
 #define N60_XOVER_ERR_CORNER (-3)
 #define N60_XOVER_ERR_SYNTH (-4) /* the FIR synthesiser refused (size, capacity or non-finite) */
+#define N60_XOVER_ERR_TOO_LONG (-5) /* ABI v5 (E9 S4): the FIR needs more taps than max_single_band_taps allows (long scheme) */
 
 #define N60_XOVER_FAMILY_BUTTERWORTH 0u
 #define N60_XOVER_FAMILY_BESSEL 1u
@@ -133,6 +134,12 @@ typedef struct n60_xover_fir_params {
     const n60_xover_spec *highpass;      /* NULL: none */
     const n60_xover_spec *lowpass;       /* NULL: none */
     uint32_t group_delay_frames;         /* 0: automatic */
+    /*
+     * ABI v5 (E9 S4). 0 or 32768: today's rule (above 32768 taps the realisation is two-band). Up to 262144 (the long
+     * scheme, firScheme 1): single band whenever 2 L + 1 fits, never two-band, and an explicit group delay whose 2 L + 1
+     * exceeds it returns N60_XOVER_ERR_TOO_LONG. An automatic group delay is shortened to fit rather than refused.
+     */
+    uint32_t max_single_band_taps;
 } n60_xover_fir_params;
 
 typedef struct n60_xover_fir_report {
@@ -180,6 +187,7 @@ typedef struct n60_xover_lin_params {
     double max_boost_db;             /* 0: 6; at most 6 */
     double smoothing_octaves;        /* 0: 1/6 */
     double band_octaves;             /* 0: 1 */
+    uint32_t max_single_band_taps;   /* ABI v5: as n60_xover_fir_params; also lifts the minimum-phase cap (32768) to this */
 } n60_xover_lin_params;
 
 typedef struct n60_xover_lin_report {

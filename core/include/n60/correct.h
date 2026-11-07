@@ -37,7 +37,7 @@
 extern "C" {
 #endif
 
-#define N60_CORRECT_ABI_VERSION 3
+#define N60_CORRECT_ABI_VERSION 4
 
 #define N60_CORRECT_OK 0
 #define N60_CORRECT_ERR_ARGUMENT (-1)
@@ -47,6 +47,11 @@ extern "C" {
 #define N60_CORRECT_ERR_NONFINITE (-5)
 #define N60_CORRECT_ERR_PRERINGING (-6) /* the design is blocked: see the report for the band */
 #define N60_CORRECT_ERR_TIMING (-7)     /* the problem has no inter-channel timing (E11 tier 3): blocked */
+#define N60_CORRECT_ERR_TOO_LONG (-8)   /* ABI v4 (E9 S4): the design needs more taps than the stage scheme allows */
+
+/* Single-band stage limits: the uniform scheme (firScheme 0) and the non-uniform scheme (firScheme 1, e9.long-fir). */
+#define N60_CORRECT_STAGE_TAPS 32768u
+#define N60_CORRECT_STAGE_TAPS_LONG 262144u
 
 /* Longest FIR the designer returns; equal to the legacy convolver limit. */
 #define N60_CORRECT_MAX_TAPS 262144u
@@ -283,6 +288,34 @@ int32_t n60_correct_synthesize_linear_phase_banded(double sample_rate, uint32_t 
                                                    n60_correct_amplitude_fn amplitude, void *user,
                                                    const n60_correct_band_taper *taper, float *full_taps, uint64_t full_capacity,
                                                    float *low_taps, uint64_t low_capacity, n60_correct_two_band_report *report);
+
+/*
+ * Single-band cap (ABI v4, E9 S4). As n60_correct_synthesize_linear_phase_banded, with max_single_band_taps either
+ * N60_CORRECT_STAGE_TAPS (today: a span above it is two-band) or up to N60_CORRECT_STAGE_TAPS_LONG (a span 2 L + 1 up to
+ * the cap is single band; a longer one returns N60_CORRECT_ERR_TOO_LONG, never two-band). The banded function above is this
+ * with N60_CORRECT_STAGE_TAPS, unchanged.
+ */
+int32_t n60_correct_synthesize_linear_phase_capped(double sample_rate, uint32_t group_delay_frames,
+                                                   n60_correct_amplitude_fn amplitude, void *user,
+                                                   const n60_correct_band_taper *taper, uint32_t max_single_band_taps,
+                                                   float *full_taps, uint64_t full_capacity, float *low_taps,
+                                                   uint64_t low_capacity, n60_correct_two_band_report *report);
+
+/*
+ * Which stage carries a design of span_frames full-rate taps (ABI v4, E9 S4): single band when it fits max_single_band_taps
+ * (N60_CORRECT_STAGE_TAPS .. N60_CORRECT_STAGE_TAPS_LONG), two-band above N60_CORRECT_STAGE_TAPS with the short cap (up to
+ * N60_CORRECT_MAX_TAPS), and N60_CORRECT_ERR_TOO_LONG otherwise (always, above the cap, with the long cap). Callers use this
+ * for the room and Speaker Optimizer stage choice instead of a hard-coded 32768.
+ */
+typedef struct n60_correct_stage_plan {
+    uint32_t two_band;   /* 1: N60_STAGE_ROOM_FIR_TWO_BAND */
+    uint32_t tap_count;  /* the span */
+} n60_correct_stage_plan;
+
+int32_t n60_correct_plan_stage(uint64_t span_frames, uint32_t max_single_band_taps, n60_correct_stage_plan *plan);
+
+/* A short, stable reason for a status code, for the UI. Never NULL. */
+const char *n60_correct_status_name(int32_t status);
 
 /*
  * The magnitude (dB) and the delay-removed phase of the stage's combined response for given taps, evaluated analytically
