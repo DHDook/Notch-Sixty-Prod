@@ -73,7 +73,7 @@ reviewers compare with Dirac and REW), then engine depth, then breadth.
    - then E26 Sub-aware Quiet Zone, S1–S7 in written order, before item 2 (owner, 4 Nov 2026; owner 5 Nov 2026: all remaining slices S2–S7 complete before E9 FIR limits (item 4), so E9 S2 waits; S1 waits for E25 S8b; no live ANC path is enabled outside the per-feature arm)
    - then the programme audit of all completed epics, before item 2 and again after every epic completes (owner, 6 Nov 2026; see `docs/epics/README.md`)
    - then E27 Equalizer page polish, S1, S2, S3a, S3b, S2b, S4 in written order, once #395 (merged 7 Nov 2026) and the plan are merged (owner, 7 Nov 2026; placement before item 4 confirmed, owner decision 7 in `docs/epics/E27.md`)
-   - then E28 Dynamics and Meters polish, S1–S8 in written order, once the plan and E27 S1 (#397) are merged (owner, 7 Nov 2026; placement relative to the remaining E27 slices and E9 is owner question 1 in `docs/epics/E28.md`)
+   - then E28 Dynamics and Meters polish, S1–S8 in written order, after E27 S4 and before E9 FIR limits (item 4); S4 also waits for #397 (owner, 7 Nov 2026; owner decision 1 in `docs/epics/E28.md`)
 2. E12 Guided setup and information architecture, S7 `e12/ship` (merged #243, 26 Oct 2026)
 3. E11 Measurement suite, S10 `e11/overlays-and-ship` (merged #222, 25 Oct 2026)
 4. E9 Multichannel protection and FIR parity, FIR limits: 262,144-tap program FIR and the 32,768-tap cap (S1 built dark in #361; S2 onward only after E26 S2–S7, owner 5 Nov 2026)
