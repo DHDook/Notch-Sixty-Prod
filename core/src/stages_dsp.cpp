@@ -1385,7 +1385,7 @@ static uint32_t rfCarry(SnapHeader *from, SnapHeader *to, StageRec &b) {
 }
 
 uint32_t dspFirCarry(SnapHeader *from, SnapHeader *to, bool lazy, bool *pending, uint64_t *syncBudget) {
-    uint32_t warm = 0;
+    uint32_t warm = 0, upCopied = 0;
     if (pending != nullptr) *pending = false;
     StageRec *dst = stages(to);
     for (uint32_t i = 0; i < to->stageCount; ++i) {
@@ -1411,6 +1411,12 @@ uint32_t dspFirCarry(SnapHeader *from, SnapHeader *to, bool lazy, bool *pending,
             // warms too.
             const bool lockstep = j == i && dspUpstreamSame(from, to, i);
             if (to->firScheme == N60_FIR_SCHEME_NONUNIFORM && (lazy ? !lockstep : seed)) continue;
+            // E9 S2c (G7): the incoming upstream stages start with the outgoing ones' running state, so both
+            // instances see the same input from this tick and the carried history is exact (no cold-start transient).
+            if (lockstep && to->firScheme == N60_FIR_SCHEME_NONUNIFORM) {
+                carryUpstreamState(from, to, i, syncBudget, upCopied);
+                upCopied = std::max(upCopied, i);
+            }
             if (to->firScheme == N60_FIR_SCHEME_NONUNIFORM) {
                 const conv::Shared &cs = *reinterpret_cast<const conv::Shared *>(bytes(to) + b.sharedOff);
                 // No fade: the outgoing instance is gone at once, so a copy that fits this callback's budget is
@@ -1423,7 +1429,11 @@ uint32_t dspFirCarry(SnapHeader *from, SnapHeader *to, bool lazy, bool *pending,
                     } else if (lockstep) {
                         useLazy = true;
                     } else {
-                        continue;  // too large to copy now and not in lockstep: starts empty
+                        // Too large to copy now and not in lockstep (E9 S2c, G8): the history of a different upstream
+                        // is not worth a non-lockstep copy, so the stage warms in full next to the live one and the
+                        // swap, still without a fade, waits for it (never refused for CPU) instead of starting empty.
+                        if (pending != nullptr) *pending = true;
+                        continue;
                     }
                 }
                 if (useLazy) {

@@ -347,7 +347,7 @@ complete, speaker ANC qualified, and a full hardware regression passing at every
 - [x] One-click PEQ from an imported response and a chosen target, using the existing model fitter
 - [ ] Live PEQ and crossfeed tuning while playing (from E6)
 - [ ] Raise the HRIR cap for room-included BRIRs; live HRTF interpolation with head tracking
-- [ ] In-ear-microphone BRIR capture for personal virtual speakers
+- [~] In-ear-microphone BRIR capture for personal virtual speakers (S6 core built dark; S7 wires the guided flow)
 
 ### E14 Upmixer
 

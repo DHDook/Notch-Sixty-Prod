@@ -369,26 +369,68 @@ void testNoFadeDeferred(double rate) {
           (unsigned long long)n60_graph_debug_peak_rt_bytes(test.g));
 }
 
-// Over the budget and not in lockstep: no whole copy is made (the stage starts empty), the swap is still at once.
+// Over the budget and not in lockstep (E9 S2c, G8): no whole copy is made and the stage does not start empty. It warms
+// in full next to the live instance, the fade-less swap waits for it (never refused for CPU), and after the swap the
+// output is what a fresh render of the new topology gives.
 void testNoFadeTooLargeMoved(double rate) {
     const uint32_t taps = 32768;
     std::vector<float> h = decaying(taps, 63, 0.02f);
     const float unity = 1.0f;
     n60_stage_desc a[1] = {stage(N60_STAGE_FIR, 1, h.data(), taps)};
     n60_stage_desc b[2] = {stage(N60_STAGE_GAIN, 2, &unity, 1), a[0]};
-    Rig test(rate, 2, a, 1);
+    Rig test(rate, 2, a, 1), fresh(rate, 2, b, 2);
     n60_rebuild_options o;
     std::memset(&o, 0, sizeof o);
     o.structSize = sizeof o;
     o.fadeMs = 0.0f;
+    o.cpuBudgetPercent = 1e-7f;
     CHECK(n60_graph_set_rebuild_options(test.g, &o) == N60_STATUS_OK, "options");
     runFrames(test, taps + 4096);
     test.publish(b, 2, rate);
     test.step();
-    CHECK(test.status().state == 0, "rate %.0f too-large moved filter swaps at once", rate);
+    CHECK(test.status().state != 0, "rate %.0f too-large moved filter waits for its warm", rate);
+    const uint32_t warming = finishRebuild(test);
+    CHECK(test.status().completed == 1 && test.status().refused == 0, "rate %.0f moved swap completed, not refused", rate);
+    CHECK(warming >= taps / kBlock, "rate %.0f moved filter warmed in full (%u callbacks)", rate, warming);
     CHECK(n60_graph_debug_peak_rt_bytes(test.g) <= kBudget, "rate %.0f too-large peak", rate);
-    runFrames(test, 8 * 16384);
-    for (size_t i = 0; i < test.out.size(); ++i) CHECK(std::isfinite(test.out[i]), "rate %.0f finite output", rate);
+    // The fresh graph has seen the same input from the start, so it equals the swapped one once the swap is done.
+    while (fresh.pos < test.pos) fresh.step();
+    double worst = 0;
+    for (int blk = 0; blk < 4 * 16384 / static_cast<int>(kBlock); ++blk) {
+        test.step();
+        fresh.step();
+        for (size_t i = 0; i < test.out.size(); ++i) worst = std::max<double>(worst, std::fabs(test.out[i] - fresh.out[i]));
+    }
+    CHECK(worst < 1e-5, "rate %.0f moved filter equals a fresh render after the swap (%g)", rate, worst);
+}
+
+// E9 S2c, G7: a PEQ and a gain ahead of a lazily carried long FIR keep their running state across the rebuild, so
+// the incoming instance's input history has no cold-start transient: after the fade the output is bit-identical to
+// an uninterrupted render (the cold biquads would differ for thousands of frames).
+void testUpstreamState(double rate, uint32_t blk) {
+    const uint32_t taps = 262144;
+    std::vector<float> h = decaying(taps, 97, 0.02f);
+    const float gain = 0.8f;
+    const float peq[8] = {0.0f, 60.0f, 9.0f, 2.0f, 2.0f, 6000.0f, -6.0f, 0.7f};
+    // One dynamic EQ band (the compressor and expander sit after the program FIR, so only DYN_EQ is upstream of it).
+    const float dq[16] = {1.0f, 0.0f, 1000.0f, 1.0f, 0.0f, -40.0f, 3.0f, -12.0f, 10.0f, 100.0f, 0.0f, -40.0f, 3.0f, 6.0f, 0.0f, 20.0f};
+    n60_stage_desc a[4] = {stage(N60_STAGE_GAIN, 3, &gain, 1), stage(N60_STAGE_PEQ, 2, peq, 8),
+                           stage(N60_STAGE_DYN_EQ, 5, dq, 16), stage(N60_STAGE_FIR, 1, h.data(), taps)};
+    n60_stage_desc b[5] = {a[0], a[1], a[2], a[3], stage(N60_STAGE_METER_OUT, 4, nullptr, 0)};
+    Rig test(rate, 2, a, 4), ref(rate, 2, a, 4);
+    runFrames(test, taps + 4096, blk);
+    runFrames(ref, taps + 4096, blk);
+    test.publish(b, 5, rate);
+    ref.step(blk);
+    test.step(blk);
+    CHECK(test.status().state == 1, "rate %.0f block %u upstream state: rebuild running", rate, blk);
+    finishRebuild(test, 2000000, blk);
+    while (ref.pos < test.pos) ref.step(blk);
+    CHECK(test.status().completed == 1 && test.status().lastResult == 1, "rate %.0f block %u upstream state completed", rate, blk);
+    CHECK(n60_graph_debug_carry_abandoned(test.g) == 0, "rate %.0f block %u carry kept", rate, blk);
+    CHECK(n60_graph_debug_peak_rt_bytes(test.g) <= n60_graph_debug_rt_budget(blk), "rate %.0f block %u peak", rate, blk);
+    CHECK(compareRun(test, ref, 3ull * 16384, true, nullptr, blk) == 0.0, "rate %.0f block %u cold upstream state differs after carry",
+          rate, blk);
 }
 
 // ---- 6. Blocks below 64 frames: the budget scales with the block, the carry stays exact. -------------------------
@@ -536,6 +578,7 @@ int main() {
         testNoFadeSync(rate);
         testNoFadeDeferred(rate);
         testNoFadeTooLargeMoved(rate);
+        testUpstreamState(rate, kBlock);
         testSmallBlocks(rate, 2, 32);
         testSmallBlocks(rate, 2, 48);
         testStaleSource(rate);
@@ -544,6 +587,8 @@ int main() {
         std::printf("rate %.0f done\n", rate);
     }
     testSmallBlocks(384000, 8, 32);
+    testUpstreamState(384000, 32);
+    testUpstreamState(384000, 48);
     testCpuRefusal(48000);
     if (failures != 0) {
         std::printf("test_conv_rebuild: %d failures\n", failures);

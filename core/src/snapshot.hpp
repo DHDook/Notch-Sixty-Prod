@@ -72,6 +72,9 @@ struct SnapHeader {
     uint64_t *rtBudget;     // E9 S2: bytes of bulk clearing / copying left in this callback (the graph's; null = unlimited)
 };
 
+// PEQ parameters per section (type, Hz, dB, Q); the coefficient region holds one PeqSec per section.
+constexpr uint32_t kPeqParamsPerSection = 4;
+
 inline uint8_t *bytes(SnapHeader *h) { return reinterpret_cast<uint8_t *>(h); }
 inline const uint8_t *bytes(const SnapHeader *h) { return reinterpret_cast<const uint8_t *>(h); }
 inline StageRec *stages(SnapHeader *h) { return reinterpret_cast<StageRec *>(bytes(h) + h->stageTableOff); }
@@ -118,6 +121,16 @@ n60_status validateParam(const SnapHeader *snap, const StageRec &stage, uint32_t
 // *latencyMayChange when the applied parameter can change the reported latency.
 bool applyParam(SnapHeader *snap, uint32_t stageId, uint32_t paramIndex, float value, bool *latencyMayChange);
 uint32_t snapshotLatency(const SnapHeader *snap);
+
+// Realtime thread (E9 S2c, closes G7). The stages before index `i` of `to` are the same stages as in `from` (the
+// caller has checked kind, id, lanes and parameters). Copies the running state of the ones that keep any and are
+// small (GAIN and OUTPUT_GAIN, PEQ with its coefficient block, COMPRESSOR, CORE_DYNAMICS, EXPANDER, DYN_EQ), so the
+// incoming instance's upstream matches the outgoing one from the adoption tick on and a lazily carried FIR input
+// history has no cold-start transient. Stateless kinds (sanitise, meters, M/S) need nothing. The bytes copied are
+// deducted from `*budget` (saturating; null = unbudgeted); a stage that exceeds what is left is skipped (cold start),
+// as are other stateful kinds (ledger G9). Stages before `first` are skipped (already copied for an earlier FIR).
+// Returns the number of stages whose state was copied.
+uint32_t carryUpstreamState(SnapHeader *from, SnapHeader *to, uint32_t i, uint64_t *budget, uint32_t first = 0);
 
 // Control thread (immutable fields only).
 const StageRec *findStage(const SnapHeader *snap, uint32_t stageId);

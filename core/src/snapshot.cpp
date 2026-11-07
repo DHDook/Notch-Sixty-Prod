@@ -436,7 +436,7 @@ n60_status buildSnapshot(const n60_graph_desc &d, uint32_t epoch, SnapHeader **o
         plan[i].state = off;
         off += alignUp(stateStrideFor(s, d.sampleRate, d.firScheme) * laneCountFor(s, d.outputChannels));
         plan[i].coef = off;
-        if (s.kind == N60_STAGE_PEQ) off += alignUp(sizeof(PeqSec) * (s.paramCount / 4));
+        if (s.kind == N60_STAGE_PEQ) off += alignUp(sizeof(PeqSec) * (s.paramCount / kPeqParamsPerSection));
         plan[i].shared = off;
         off += alignUp(sharedBytesFor(s, d.sampleRate, d.firScheme));
         if (off > kMaxArenaBytes) return N60_STATUS_OUT_OF_MEMORY;
@@ -847,6 +847,46 @@ void runDelay(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) 
 }
 
 }  // namespace
+
+uint32_t carryUpstreamState(SnapHeader *from, SnapHeader *to, uint32_t i, uint64_t *budget, uint32_t first) {
+    if (i > from->stageCount || i > to->stageCount) return 0;
+    const StageRec *a = stages(from);
+    StageRec *b = stages(to);
+    uint32_t copied = 0;
+    uint64_t spent = 0;
+    for (uint32_t j = first; j < i; ++j) {
+        const StageRec &x = a[j];
+        StageRec &y = b[j];
+        if (x.kind != y.kind || x.id != y.id || x.laneCount != y.laneCount || x.stateStride != y.stateStride ||
+            x.paramCount != y.paramCount) {
+            continue;
+        }
+        switch (y.kind) {
+            case N60_STAGE_GAIN:
+            case N60_STAGE_PEQ:
+            case N60_STAGE_COMPRESSOR:
+            case N60_STAGE_EXPANDER:
+            case N60_STAGE_DYN_EQ: break;
+            default: continue;  // stateless, or not carried (G9)
+        }
+        const size_t lanes = static_cast<size_t>(y.stateStride) * y.laneCount;
+        const size_t coef = y.kind == N60_STAGE_PEQ ? sizeof(PeqSec) * (y.paramCount / kPeqParamsPerSection) : 0;
+        // Bounded by the callback's bulk budget: a stage that does not fit keeps the cold start (G9).
+        if (budget != nullptr && spent + lanes + coef > *budget) continue;
+        // The gain-reduction atomics of dynamics lanes are copied too (the pending maximum carries over, wanted); the
+        // source is the realtime thread's own and a concurrent control-thread reset can at worst drop one reading.
+        std::memcpy(bytes(to) + y.stateOff, bytes(from) + x.stateOff, lanes);
+        spent += lanes;
+        if (coef != 0) {
+            std::memcpy(bytes(to) + y.coefOff, bytes(from) + x.coefOff, coef);
+            spent += coef;
+        }
+        y.applied = x.applied;
+        ++copied;
+    }
+    if (budget != nullptr) *budget -= std::min(*budget, spent);
+    return copied;
+}
 
 void runSnapshot(SnapHeader *h, float *const *lanes, uint32_t frames, std::atomic<uint64_t> &sanitisedSamples,
                  bool follower) {
