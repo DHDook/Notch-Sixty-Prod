@@ -143,6 +143,11 @@ add_executable(n60core_xover_fir_test tests/test_xover_fir.cpp)
 target_link_libraries(n60core_xover_fir_test PRIVATE n60core)
 add_test(NAME n60core_xover_fir COMMAND n60core_xover_fir_test)
 
+# E9 S4: designer single-band caps (n60/correct.h ABI v4, n60/xover.h ABI v5).
+add_executable(n60core_designer_caps_test tests/test_designer_caps.cpp)
+target_link_libraries(n60core_designer_caps_test PRIVATE n60core)
+add_test(NAME n60core_designer_caps COMMAND n60core_designer_caps_test)
+
 # E8 A6a: multi-sub delay, gain and polarity search (n60/correct.h section 6).
 add_executable(n60core_correct_multisub_test tests/test_correct_multisub.cpp)
 target_link_libraries(n60core_correct_multisub_test PRIVATE n60core)

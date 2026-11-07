@@ -8,7 +8,7 @@ final class CrossoverCoreTests: XCTestCase {
     private let rates: [Double] = [44_100, 48_000, 88_200, 96_000, 176_400, 192_000, 352_800, 384_000]
 
     func testAbiVersionAndFlag() {
-        XCTAssertEqual(CrossoverCore.abiVersion, 4)
+        XCTAssertEqual(CrossoverCore.abiVersion, 5)
         XCTAssertFalse(FeatureFlag.all.contains { $0.id == "e8.routing-matrix" })
     }
 

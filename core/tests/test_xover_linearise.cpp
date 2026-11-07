@@ -199,7 +199,7 @@ static void testArguments() {
 }
 
 int main() {
-    CHECK(n60_xover_abi_version() == 4, "abi");
+    CHECK(n60_xover_abi_version() == N60_XOVER_ABI_VERSION, "abi");
     testFlatPassbandAndLimits();
     testBoostCap();
     testNoBoostBelowHighPass();

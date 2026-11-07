@@ -85,6 +85,7 @@ void n60_correct_synth_defaults(uint32_t mode, double sample_rate, uint32_t tap_
 
 int32_t n60_correct_synthesize(const n60_correct_synth_params *params, const n60_correct_design_grid *grid,
                                float *taps, uint64_t capacity, n60_correct_synth_report *report) {
+    if (params != nullptr && params->tap_count > N60_CORRECT_MAX_TAPS) return N60_CORRECT_ERR_TOO_LONG;
     if (!validSynth(params) || grid == nullptr || grid->correction_db == nullptr || grid->correction_phase_rad == nullptr ||
         taps == nullptr) {
         return N60_CORRECT_ERR_ARGUMENT;
@@ -171,6 +172,7 @@ uint32_t n60_correct_two_band_decimation(double sample_rate) {
 int32_t n60_correct_synthesize_two_band(const n60_correct_synth_params *params, const n60_correct_design_grid *grid,
                                         float *fullTaps, uint64_t fullCapacity, float *lowTaps, uint64_t lowCapacity,
                                         n60_correct_two_band_report *report) {
+    if (params != nullptr && params->tap_count > N60_CORRECT_MAX_TAPS) return N60_CORRECT_ERR_TOO_LONG;
     if (!validSynth(params) || grid == nullptr || grid->correction_db == nullptr || grid->correction_phase_rad == nullptr ||
         fullTaps == nullptr || lowTaps == nullptr) {
         return N60_CORRECT_ERR_ARGUMENT;
@@ -289,6 +291,48 @@ int32_t n60_correct_synthesize_linear_phase(double fs, uint32_t groupDelay, n60_
 int32_t n60_correct_synthesize_linear_phase_banded(double fs, uint32_t groupDelay, n60_correct_amplitude_fn amplitude, void *user,
                                                    const n60_correct_band_taper *taper, float *fullTaps, uint64_t fullCapacity,
                                                    float *lowTaps, uint64_t lowCapacity, n60_correct_two_band_report *report) {
+    return n60_correct_synthesize_linear_phase_capped(fs, groupDelay, amplitude, user, taper, N60_CORRECT_STAGE_TAPS, fullTaps,
+                                                      fullCapacity, lowTaps, lowCapacity, report);
+}
+
+int32_t n60_correct_plan_stage(uint64_t span_frames, uint32_t max_single_band_taps, n60_correct_stage_plan *plan) {
+    if (plan == nullptr || span_frames == 0 || max_single_band_taps < N60_CORRECT_STAGE_TAPS ||
+        max_single_band_taps > N60_CORRECT_STAGE_TAPS_LONG) {
+        return N60_CORRECT_ERR_ARGUMENT;
+    }
+    *plan = n60_correct_stage_plan{};
+    if (span_frames <= max_single_band_taps) {
+        plan->tap_count = static_cast<uint32_t>(span_frames);
+        return N60_CORRECT_OK;
+    }
+    // Short scheme (today): a long design is carried by the two-band stage, up to the designer's limit. Long scheme (E9, owner
+    // Q2): never two-band, so a design longer than the cap is refused with a named reason.
+    if (max_single_band_taps > N60_CORRECT_STAGE_TAPS || span_frames > N60_CORRECT_MAX_TAPS) return N60_CORRECT_ERR_TOO_LONG;
+    plan->two_band = 1;
+    plan->tap_count = static_cast<uint32_t>(span_frames);
+    return N60_CORRECT_OK;
+}
+
+const char *n60_correct_status_name(int32_t status) {
+    switch (status) {
+        case N60_CORRECT_OK: return "ok";
+        case N60_CORRECT_ERR_ARGUMENT: return "invalid argument";
+        case N60_CORRECT_ERR_SIZE: return "transform too large";
+        case N60_CORRECT_ERR_CAPACITY: return "output buffer too small";
+        case N60_CORRECT_ERR_ALLOC: return "out of memory";
+        case N60_CORRECT_ERR_NONFINITE: return "non-finite value";
+        case N60_CORRECT_ERR_PRERINGING: return "pre-ringing audit failed";
+        case N60_CORRECT_ERR_TIMING: return "no inter-channel timing";
+        case N60_CORRECT_ERR_TOO_LONG: return "filter longer than the longest supported (262144 taps)";
+        default: return "unknown status";
+    }
+}
+
+int32_t n60_correct_synthesize_linear_phase_capped(double fs, uint32_t groupDelay, n60_correct_amplitude_fn amplitude, void *user,
+                                                   const n60_correct_band_taper *taper, uint32_t maxSingleBandTaps,
+                                                   float *fullTaps, uint64_t fullCapacity, float *lowTaps, uint64_t lowCapacity,
+                                                   n60_correct_two_band_report *report) {
+    if (maxSingleBandTaps < N60_CORRECT_STAGE_TAPS || maxSingleBandTaps > N60_CORRECT_STAGE_TAPS_LONG) return N60_CORRECT_ERR_ARGUMENT;
     if (taper != nullptr && !(std::isfinite(taper->low_hz) && std::isfinite(taper->high_hz) && std::isfinite(taper->edge_octaves) &&
                               taper->low_hz > 0.0 && taper->high_hz > taper->low_hz && taper->edge_octaves > 0.0)) {
         return N60_CORRECT_ERR_ARGUMENT;
@@ -299,7 +343,9 @@ int32_t n60_correct_synthesize_linear_phase_banded(double fs, uint32_t groupDela
     }
     const uint64_t latency = groupDelay;
     const uint64_t span = 2 * latency + 1;
-    const bool two = span > kStageMaxTaps;
+    // With the long cap a design that does not fit is refused, never made two-band (E9 owner Q2).
+    if (span > maxSingleBandTaps && maxSingleBandTaps > kStageMaxTaps) return N60_CORRECT_ERR_TOO_LONG;
+    const bool two = span > maxSingleBandTaps;
     const uint32_t D = two ? n60_correct_two_band_decimation(fs) : 1;
     if (two && (D < 2 || lowTaps == nullptr)) return N60_CORRECT_ERR_ARGUMENT;
     const uint64_t window = 2 * latency;

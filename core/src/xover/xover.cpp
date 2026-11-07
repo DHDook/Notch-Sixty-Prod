@@ -302,12 +302,35 @@ double firAmplitude(double hz, void *user) {
     return a;
 }
 
+// The single-band cap for a params value: 0 means today's 32768; anything else must be 32768 .. 262144.
+bool resolveCap(uint32_t in, uint32_t &cap) {
+    cap = in == 0 ? N60_CORRECT_STAGE_TAPS : in;
+    return cap >= N60_CORRECT_STAGE_TAPS && cap <= N60_CORRECT_STAGE_TAPS_LONG;
+}
+
+// With the long cap an explicit delay that does not fit is refused; an automatic one is shortened to fit.
+int fitDelay(uint32_t cap, bool automatic, uint32_t &delay) {
+    if (cap == N60_CORRECT_STAGE_TAPS) return N60_XOVER_OK;
+    const uint32_t most = (cap - 1) / 2;
+    if (delay <= most) return N60_XOVER_OK;
+    if (!automatic) return N60_XOVER_ERR_TOO_LONG;
+    delay = most;
+    return N60_XOVER_OK;
+}
+
+int mapSynth(int32_t status) {
+    if (status == N60_CORRECT_ERR_ARGUMENT) return N60_XOVER_ERR_ARGUMENT;
+    if (status == N60_CORRECT_ERR_TOO_LONG) return N60_XOVER_ERR_TOO_LONG;
+    return N60_XOVER_ERR_SYNTH;
+}
+
 // Validates the params, builds the target and resolves the group delay.
-int firPrepare(const n60_xover_fir_params *p, FirTarget &t, uint32_t &delay) {
+int firPrepare(const n60_xover_fir_params *p, FirTarget &t, uint32_t &delay, uint32_t &cap) {
     if (!p || p->struct_size != sizeof(n60_xover_fir_params) || !validFs(p->sample_rate) || p->sample_rate < 8000.0 ||
         p->sample_rate > 768000.0 || (!p->highpass && !p->lowpass)) {
         return N60_XOVER_ERR_ARGUMENT;
     }
+    if (!resolveCap(p->max_single_band_taps, cap)) return N60_XOVER_ERR_ARGUMENT;
     t.fs = p->sample_rate;
     double lowest = 1e300;
     if (p->highpass) {
@@ -323,19 +346,20 @@ int firPrepare(const n60_xover_fir_params *p, FirTarget &t, uint32_t &delay) {
         lowest = std::fmin(lowest, p->lowpass->corner_hz);
     }
     delay = p->group_delay_frames;
-    if (delay == 0) {
+    const bool automatic = delay == 0;
+    if (automatic) {
         const double frames = std::round(5.0 * t.fs / lowest);
         delay = static_cast<uint32_t>(std::fmin(262144.0, std::fmax(32.0, frames)));
     }
     if (delay > 262144u) return N60_XOVER_ERR_ARGUMENT;
-    return N60_XOVER_OK;
+    return fitDelay(cap, automatic, delay);
 }
 
-void firReport(uint32_t delay, double fs, n60_xover_fir_report *r) {
+void firReport(uint32_t delay, double fs, n60_xover_fir_report *r, uint32_t cap = N60_CORRECT_STAGE_TAPS) {
     const uint64_t span = 2ull * delay + 1;
     *r = n60_xover_fir_report{};
     r->group_delay_frames = delay;
-    if (span <= 32768) {
+    if (span <= cap) {
         r->decimation = 1;
         r->full_tap_count = static_cast<uint32_t>(span);
         r->latency_frames = 256 + delay;
@@ -358,24 +382,25 @@ extern "C" {
 int n60_xover_fir_plan(const n60_xover_fir_params *params, n60_xover_fir_report *report) {
     if (!report) return N60_XOVER_ERR_ARGUMENT;
     FirTarget t;
-    uint32_t delay = 0;
-    const int s = firPrepare(params, t, delay);
+    uint32_t delay = 0, cap = 0;
+    const int s = firPrepare(params, t, delay, cap);
     if (s != N60_XOVER_OK) return s;
-    firReport(delay, t.fs, report);
+    firReport(delay, t.fs, report, cap);
     return N60_XOVER_OK;
 }
 
 int n60_xover_fir_synthesize(const n60_xover_fir_params *params, float *full, uint64_t fullCap, float *low, uint64_t lowCap,
                              n60_xover_fir_report *report) {
     FirTarget t;
-    uint32_t delay = 0;
-    int s = firPrepare(params, t, delay);
+    uint32_t delay = 0, cap = 0;
+    int s = firPrepare(params, t, delay, cap);
     if (s != N60_XOVER_OK) return s;
     n60_xover_fir_report plan;
-    firReport(delay, t.fs, &plan);
+    firReport(delay, t.fs, &plan, cap);
     n60_correct_two_band_report r{};
-    const int32_t status = n60_correct_synthesize_linear_phase(t.fs, delay, firAmplitude, &t, full, fullCap, low, lowCap, &r);
-    if (status != N60_CORRECT_OK) return status == N60_CORRECT_ERR_ARGUMENT ? N60_XOVER_ERR_ARGUMENT : N60_XOVER_ERR_SYNTH;
+    const int32_t status =
+        n60_correct_synthesize_linear_phase_capped(t.fs, delay, firAmplitude, &t, nullptr, cap, full, fullCap, low, lowCap, &r);
+    if (status != N60_CORRECT_OK) return mapSynth(status);
     if (report) *report = plan;
     return N60_XOVER_OK;
 }
@@ -437,7 +462,8 @@ uint32_t gridCount(double fs) {
 double gridHz(uint32_t i) { return kGridStartHz * std::exp2(static_cast<double>(i) / kPerOctave); }
 
 bool linValid(const n60_xover_lin_params *p) {
-    return p && p->struct_size == sizeof(n60_xover_lin_params) && std::isfinite(p->sample_rate) && p->sample_rate >= 8000.0 &&
+    uint32_t cap = 0;
+    return p && p->struct_size == sizeof(n60_xover_lin_params) && resolveCap(p->max_single_band_taps, cap) && std::isfinite(p->sample_rate) && p->sample_rate >= 8000.0 &&
            p->sample_rate <= 768000.0 && (p->highpass || p->lowpass) && std::isfinite(p->merge_hz) && p->merge_hz >= 0.0 &&
            std::isfinite(p->max_boost_db) && p->max_boost_db >= 0.0 && p->max_boost_db <= kBoostCapDb &&
            std::isfinite(p->smoothing_octaves) && p->smoothing_octaves >= 0.0 && p->smoothing_octaves <= 1.0 &&
@@ -576,18 +602,25 @@ int n60_xover_linearise_synthesize(const n60_xover_lin_params *p, const double *
             delay = static_cast<uint32_t>(std::fmin(262144.0, std::fmax(32.0, std::round(5.0 * fs / (lowest / std::exp2(band))))));
         }
         if (delay > 262144u) return N60_XOVER_ERR_ARGUMENT;
+        uint32_t cap = 0;
+        resolveCap(p->max_single_band_taps, cap);
+        const int fit = fitDelay(cap, delayIn == 0, delay);
+        if (fit != N60_XOVER_OK) return fit;
         n60_xover_fir_report plan;
-        firReport(delay, fs, &plan);
+        firReport(delay, fs, &plan, cap);
         n60_correct_two_band_report r{};
-        const int32_t status = n60_correct_synthesize_linear_phase(fs, delay, linAmplitude, &a, full, fullCap, low, lowCap, &r);
-        if (status != N60_CORRECT_OK) return status == N60_CORRECT_ERR_ARGUMENT ? N60_XOVER_ERR_ARGUMENT : N60_XOVER_ERR_SYNTH;
+        const int32_t status =
+            n60_correct_synthesize_linear_phase_capped(fs, delay, linAmplitude, &a, nullptr, cap, full, fullCap, low, lowCap, &r);
+        if (status != N60_CORRECT_OK) return mapSynth(status);
         *report = plan;
         return N60_XOVER_OK;
     }
     // Minimum phase: the correction alone. Tap count: about six periods of the lowest corrected frequency, 1024 .. 32768.
     const double lowest = std::fmax(grid[0], p->highpass ? p->highpass->corner_hz / 2.0 : grid[0]);
     const uint64_t wanted = nextPow2Local(static_cast<uint64_t>(std::ceil(6.0 * fs / lowest)));
-    const uint32_t taps = static_cast<uint32_t>(std::min<uint64_t>(32768, std::max<uint64_t>(1024, wanted)));
+    uint32_t minCap = 0;
+    resolveCap(p->max_single_band_taps, minCap);
+    const uint32_t taps = static_cast<uint32_t>(std::min<uint64_t>(minCap, std::max<uint64_t>(1024, wanted)));
     if (fullCap < taps) return N60_XOVER_ERR_SYNTH;
     n60_correct_minphase_params mp{};
     n60_correct_minphase_defaults(fs, taps, &mp);
