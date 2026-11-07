@@ -26,7 +26,7 @@ with them, these decisions win until E1/E21 update `AGENTS.md`.
 
 ## Epics at a glance
 
-Twenty-seven epics in four phases close every gap in the analysis and set the engine up for other
+Twenty-eight epics in four phases close every gap in the analysis and set the engine up for other
 platforms; E6 (the unified graph) is the critical path, because eleven later epics build on it.
 
 | ID | Epic | Phase | Depends on | Where the work happens | Done when |
@@ -50,6 +50,7 @@ platforms; E6 (the unified graph) is the critical path, because eleven later epi
 | E25 | Outputs and speaker arrangement, one-DAC support | 3 | E24, E12, E8 | Claude Code (Mac) | A 5.1 system on a two-channel DAC through a receiver sets up end to end from the UI; every feature states how it works, or why not, on each configuration |
 | E26 | Sub-aware Quiet Zone | 3 | E4 S21, S22b, S25; E25 S8b (bench parts: E22) | Claude Code (Mac) + bench | Quiet Zone designs, limits and arms against the measured path through a sub or receiver; no blanket subwoofer refusal |
 | E27 | Equalizer page world-class polish | 3 | E11 S11 (#395) (bench parts: E22) | Claude Code (Mac) | Undo, precise entry, phase and impulse views at every rate to 384 kHz, headroom read-out, EQ A/B, band listen and click-free bypass, all reachable from the Equalizer page |
+| E28 | Dynamics and Meters polish | 3 | E27 S1 (#397) (bench parts: E22) | Claude Code (Mac) | Display-rate meters with hold, clip latch and VoiceOver values on every output configuration, BS.1770-4 loudness, spectrum options, transfer curves and gain-reduction history, Equalizer-grade parameter feel, compressor mix and link and expander hold, all reachable from the Dynamics and Meters pages |
 | E13 | Headphones complete | 4 | E6, E7 | Claude Code (Mac) | BYO files to PEQ in one click; live tuning |
 | E14 | Upmixer | 4 | E6 | Claude Code + bench | Stereo plays on 5.1–7.1.4 layouts |
 | E15 | Device-aware profiles | 4 | E6 | Claude Code (Mac) | Profile follows the output when the user opts in |
@@ -59,7 +60,7 @@ platforms; E6 (the unified graph) is the critical path, because eleven later epi
 | E22 | Hardware validation | 4 | all software epics | Bench | Every deferred bench check passes on `main` at every rate |
 | E18 | Launch readiness | 4 | all | Owner + Claude Code | Signed, reviewed, accessible, competitive ABX done, App Store live |
 
-## Execution order (owner, 31 Oct 2026; E24 and E25 added 1 Nov 2026; E26 added 4 Nov 2026; E27 added 7 Nov 2026)
+## Execution order (owner, 31 Oct 2026; E24 and E25 added 1 Nov 2026; E26 added 4 Nov 2026; E27 added 7 Nov 2026; E28 added 7 Nov 2026)
 
 `/next` works down this list: the first epic with open slices whose dependencies are met. Within
 an epic, slices go in their written order. Competitive features come first (what buyers and
@@ -72,6 +73,7 @@ reviewers compare with Dirac and REW), then engine depth, then breadth.
    - then E26 Sub-aware Quiet Zone, S1–S7 in written order, before item 2 (owner, 4 Nov 2026; owner 5 Nov 2026: all remaining slices S2–S7 complete before E9 FIR limits (item 4), so E9 S2 waits; S1 waits for E25 S8b; no live ANC path is enabled outside the per-feature arm)
    - then the programme audit of all completed epics, before item 2 and again after every epic completes (owner, 6 Nov 2026; see `docs/epics/README.md`)
    - then E27 Equalizer page polish, S1, S2, S3a, S3b, S2b, S4 in written order, once #395 (merged 7 Nov 2026) and the plan are merged (owner, 7 Nov 2026; placement before item 4 confirmed, owner decision 7 in `docs/epics/E27.md`)
+   - then E28 Dynamics and Meters polish, S1–S8 in written order, after E27 S4 and before E9 FIR limits (item 4); S4 also waits for #397 (owner, 7 Nov 2026; owner decision 1 in `docs/epics/E28.md`)
 2. E12 Guided setup and information architecture, S7 `e12/ship` (merged #243, 26 Oct 2026)
 3. E11 Measurement suite, S10 `e11/overlays-and-ship` (merged #222, 25 Oct 2026)
 4. E9 Multichannel protection and FIR parity, FIR limits: 262,144-tap program FIR and the 32,768-tap cap (S1 built dark in #361; S2 onward only after E26 S2–S7, owner 5 Nov 2026)
@@ -214,8 +216,8 @@ chain once per frame, with no SIMD, on one thread.
 - [ ] Set flush-to-zero at callback entry instead of scanning every sample for denormals; keep the NaN guard at the output
 - [ ] RealtimeSanitizer plus `nonblocking` / `nonallocating` attributes on every realtime entry point, run in CI
 - [ ] CI benchmarks: per-stage ns/sample and worst-case callback time at 48, 192 and 384 kHz, with fail thresholds
-- [ ] UI: move `ObservableObject` controllers (23 `@Published` in `AudioIOEngine`, 33 in `RoomTreatmentAdvisorController`) to `@Observable`, and draw meters with Canvas at display rate
-- [ ] User-facing dynamics meters from the E6 S8c readbacks: gain reduction on the compressor, expander and limiter controls, true-peak beside the output meter, and a latching over-range indicator (owner, 20 Oct 2026)
+- [ ] UI: move `ObservableObject` controllers (23 `@Published` in `AudioIOEngine`, 33 in `RoomTreatmentAdvisorController`) to `@Observable` (drawing meters with Canvas at display rate moved to E28 S1 and S5, owner, 7 Nov 2026)
+- Moved to E28 (owner, 7 Nov 2026): user-facing dynamics meters from the E6 S8c readbacks (gain reduction on the compressor, expander and limiter controls in E28 S5; true-peak beside the output meter and a latching over-range indicator in E28 S1)
 
 ### E21 Portable C++ core (starts with E6, runs to Phase 4)
 
@@ -348,6 +350,20 @@ on the Equalizer page; S1 and S2 flagless, the engine-facing S3 items behind `e2
 - [ ] S3b EQ-level A/B with loudness match, band listen, click-free bypass proved at eight rates
 - [ ] S2b pre/post-EQ program analyser overlay from an engine spectrum tap (owner, 7 Nov 2026)
 - [ ] S4 flag removed (owner decision)
+
+### E28 Dynamics and Meters polish (owner, 7 Nov 2026)
+
+Plan: `docs/epics/E28.md`. Absorbs E20's dynamics-meter and Canvas items; E28 owns the Meters page.
+S1–S6 flagless; compressor mix, stereo link and expander hold behind `e28.dynamics-extras`.
+
+- [ ] S1 meter levels: display-rate bars, true-peak bars, peak hold, latching clip with reset, ballistics, VoiceOver values, pause when hidden
+- [ ] S2 loudness: momentary, short-term, integrated with reset, loudness range and true-peak max per ITU-R BS.1770-4 and EBU R128
+- [ ] S3 spectrum options: smoothing, averaging, tilt, freeze and reference trace, hover read-out, input and output overlay
+- [ ] S4 dynamics feel: log sliders, unit-aware fields, stepping, reset, fine drag, undo, sidechain range fix, auto makeup, accessibility (after #397)
+- [ ] S5 dynamics visualisation: transfer curves, gain-reduction bars and history, navigator bars
+- [ ] S6 per-output and sub meters on every output configuration (needs-owner)
+- [ ] S7 compressor mix and stereo link, expander hold (needs-owner, engine)
+- [ ] S8 flag removed (owner decision)
 
 ## Phase 4 — Complete scope and launch
 
