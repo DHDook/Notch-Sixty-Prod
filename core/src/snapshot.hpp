@@ -119,6 +119,15 @@ n60_status validateParam(const SnapHeader *snap, const StageRec &stage, uint32_t
 bool applyParam(SnapHeader *snap, uint32_t stageId, uint32_t paramIndex, float value, bool *latencyMayChange);
 uint32_t snapshotLatency(const SnapHeader *snap);
 
+// Realtime thread (E9 S2c, closes G7). The stages before index `i` of `to` are the same stages as in `from` (the
+// caller has checked kind, id, lanes and parameters). Copies the running state of the ones that keep any and are small
+// (GAIN and OUTPUT_GAIN, PEQ with its coefficient block, COMPRESSOR, CORE_DYNAMICS, EXPANDER, DYN_EQ), so the incoming
+// instance's upstream is bit-identical to the outgoing one from the adoption tick on and a lazily carried FIR input
+// history has no cold-start transient. Stateless kinds (sanitise, meters, M/S) need nothing. The bytes copied (a few
+// hundred per lane) are deducted from `*budget` (saturating; null = unbudgeted). A stage whose bytes exceed what is left of `*budget` is skipped (cold start), as are other stateful kinds
+// (ledger G9). Stages before `first` are skipped (already copied for an earlier FIR). Returns the number of stages whose state was copied.
+uint32_t carryUpstreamState(SnapHeader *from, SnapHeader *to, uint32_t i, uint64_t *budget, uint32_t first = 0);
+
 // Control thread (immutable fields only).
 const StageRec *findStage(const SnapHeader *snap, uint32_t stageId);
 bool readMeter(SnapHeader *snap, uint32_t stageId, uint32_t lane, float *peak, float *rms);
