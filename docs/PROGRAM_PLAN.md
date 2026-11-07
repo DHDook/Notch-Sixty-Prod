@@ -26,7 +26,7 @@ with them, these decisions win until E1/E21 update `AGENTS.md`.
 
 ## Epics at a glance
 
-Twenty-six epics in four phases close every gap in the analysis and set the engine up for other
+Twenty-seven epics in four phases close every gap in the analysis and set the engine up for other
 platforms; E6 (the unified graph) is the critical path, because eleven later epics build on it.
 
 | ID | Epic | Phase | Depends on | Where the work happens | Done when |
@@ -49,6 +49,7 @@ platforms; E6 (the unified graph) is the critical path, because eleven later epi
 | E24 | Room correction completion | 3 | E10, E11, E12 | Claude Code (Mac) | Every measure, correction and verify step is reachable from the shipped UI through production wiring; the wizard passes end to end at all eight rates |
 | E25 | Outputs and speaker arrangement, one-DAC support | 3 | E24, E12, E8 | Claude Code (Mac) | A 5.1 system on a two-channel DAC through a receiver sets up end to end from the UI; every feature states how it works, or why not, on each configuration |
 | E26 | Sub-aware Quiet Zone | 3 | E4 S21, S22b, S25; E25 S8b (bench parts: E22) | Claude Code (Mac) + bench | Quiet Zone designs, limits and arms against the measured path through a sub or receiver; no blanket subwoofer refusal |
+| E27 | Equalizer page world-class polish | 3 | E11 S11 (#395) (bench parts: E22) | Claude Code (Mac) | Undo, precise entry, phase and impulse views at every rate to 384 kHz, headroom read-out, EQ A/B, band listen and click-free bypass, all reachable from the Equalizer page |
 | E13 | Headphones complete | 4 | E6, E7 | Claude Code (Mac) | BYO files to PEQ in one click; live tuning |
 | E14 | Upmixer | 4 | E6 | Claude Code + bench | Stereo plays on 5.1–7.1.4 layouts |
 | E15 | Device-aware profiles | 4 | E6 | Claude Code (Mac) | Profile follows the output when the user opts in |
@@ -58,7 +59,7 @@ platforms; E6 (the unified graph) is the critical path, because eleven later epi
 | E22 | Hardware validation | 4 | all software epics | Bench | Every deferred bench check passes on `main` at every rate |
 | E18 | Launch readiness | 4 | all | Owner + Claude Code | Signed, reviewed, accessible, competitive ABX done, App Store live |
 
-## Execution order (owner, 31 Oct 2026; E24 and E25 added 1 Nov 2026; E26 added 4 Nov 2026)
+## Execution order (owner, 31 Oct 2026; E24 and E25 added 1 Nov 2026; E26 added 4 Nov 2026; E27 added 7 Nov 2026)
 
 `/next` works down this list: the first epic with open slices whose dependencies are met. Within
 an epic, slices go in their written order. Competitive features come first (what buyers and
@@ -70,6 +71,7 @@ reviewers compare with Dirac and REW), then engine depth, then breadth.
 1. E4 class-leading roadmap, S24–S31 in written order (owner, 31 Oct 2026; E4 S11 moved to E22 on 1 Nov 2026; S26 and S29 are skipped until the owner decides camera head position and the overnight power assertion; slices waiting on E8 or the bench are skipped until ready)
    - then E26 Sub-aware Quiet Zone, S1–S7 in written order, before item 2 (owner, 4 Nov 2026; owner 5 Nov 2026: all remaining slices S2–S7 complete before E9 FIR limits (item 4), so E9 S2 waits; S1 waits for E25 S8b; no live ANC path is enabled outside the per-feature arm)
    - then the programme audit of all completed epics, before item 2 and again after every epic completes (owner, 6 Nov 2026; see `docs/epics/README.md`)
+   - then E27 Equalizer page polish, S1, S2, S3a, S3b, S2b, S4 in written order, once #395 (merged 7 Nov 2026) and the plan are merged (owner, 7 Nov 2026; placement before item 4 confirmed, owner decision 7 in `docs/epics/E27.md`)
 2. E12 Guided setup and information architecture, S7 `e12/ship` (merged #243, 26 Oct 2026)
 3. E11 Measurement suite, S10 `e11/overlays-and-ship` (merged #222, 25 Oct 2026)
 4. E9 Multichannel protection and FIR parity, FIR limits: 262,144-tap program FIR and the 32,768-tap cap (S1 built dark in #361; S2 onward only after E26 S2–S7, owner 5 Nov 2026)
@@ -334,6 +336,18 @@ it, behind `e26.sub-aware-anc`. Live output stays behind the per-feature arm.
   - [~] S7 `e26/ship` (#374), part 1: `e26.sub-aware-anc` defaults on, G5 and G12 closed; G1 host feed open (G9 closed in S7c), so S7 is not ticked and the flag stays
   - [x] S7c `e26/profile-sub-measurement` (PR #377): class A sub measurement (two seat passes, nine leakage passes, per-output leakage, record schema 2) reachable from the sub button under `e26.sub-aware-anc`; class A arming waits for S7b; bench: E22
 - [ ] Flag removed after the E22 sub bench checks (owner decision)
+
+### E27 Equalizer page world-class polish (owner, 7 Nov 2026)
+
+Plan: `docs/epics/E27.md`. Baseline PR #395 (E11 S11 band panel). Feel, filter views and safety
+on the Equalizer page; S1 and S2 flagless, the engine-facing S3 items behind `e27.eq-safety`.
+
+- [ ] S1 feel and precision: hover read-out, Q by scroll or pinch, double-click add and reset, axis-locked and fine drag, keyboard nudging, unit-aware number fields, undo and redo
+- [ ] S2 filter views: band curves, other-lane ghost, y-range and auto, x-range to 0.49 fs at every rate, phase, group delay, impulse and step from the engine's filter math
+- [ ] S3a headroom badge with post-EQ clip light, auto preamp, preamp and output gain on the page
+- [ ] S3b EQ-level A/B with loudness match, band listen, click-free bypass proved at eight rates
+- [ ] S2b pre/post-EQ program analyser overlay from an engine spectrum tap (owner, 7 Nov 2026)
+- [ ] S4 flag removed (owner decision)
 
 ## Phase 4 — Complete scope and launch
 
