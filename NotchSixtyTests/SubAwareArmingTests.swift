@@ -210,6 +210,43 @@ final class SubAwareArmingTests: XCTestCase {
     }
 
     /// E26 S7b2 (G17): in device-volume mode the arm needs the volume within 1 dB of the measurement.
+    /// E26 S7b2 (G37): the graph's `BASS_MGMT` runs Linkwitz-Riley 4 only (the translator names the other topology
+    /// `nonLR4Crossover`, see `LiveNChannelUnifiedGraphTests`). Class A feed-forward refuses it with the plain text;
+    /// tonal, and every other path, are unaffected.
+    func testUnsupportedBassFilterRefusesClassAFeedForwardOnlyAtEveryRate() {
+        let text = "This bass filter is not supported for Quiet Zone with a separate subwoofer output."
+        for rate in rates {
+            for topology in CrossoverTopology.allCases {
+                var splitter = BassManagementConfiguration(enabled: true)
+                splitter.topology = topology
+                let supported = topology == .linkwitzRiley24
+                XCTAssertEqual(SubAwareAncReadiness.bassFilterSupportedByGraph(splitter), supported, "\(topology)")
+                var off = splitter
+                off.enabled = false
+                XCTAssertTrue(SubAwareAncReadiness.bassFilterSupportedByGraph(off), "a splitter that is off has no filter")
+                let classA = SystemSetupArrangementPlanner.arrangement(
+                    deviceUID: "dac", detectedChannelCount: 3, channelsInUse: 3,
+                    choices: .init(layout: .stereo, bass: .dspToSubOutputs, subwooferCount: 1, receiverBass: .undeclared))
+                XCTAssertEqual(AncBassPathState.resolve(arrangement: classA, bassManagement: nil).path, .subOutput)
+                var ff = inputs(classA, mode: .feedForward, rate: rate)
+                ff.bassFilterSupported = supported
+                ff.feedForwardBandCount = 3
+                var tonal = ff
+                tonal.mode = .tonal
+                var other = inputs(arrangement(.downstreamReceiver, layout: .fiveOne, receiver: .openPreout),
+                                   mode: .feedForward, rate: rate)
+                other.bassFilterSupported = supported
+                XCTAssertEqual(SubAwareAncReadiness.evaluate(ff).isReady, supported, "\(topology) \(rate)")
+                if !supported {
+                    XCTAssertEqual(SubAwareAncReadiness.evaluate(ff).reason, .unsupportedBassFilter)
+                    XCTAssertEqual(SubAwareAncReadiness.evaluate(ff).message, text)
+                }
+                XCTAssertTrue(SubAwareAncReadiness.evaluate(tonal).isReady, "tonal is unaffected \(rate)")
+                XCTAssertTrue(SubAwareAncReadiness.evaluate(other).isReady, "class D/E is unaffected \(rate)")
+            }
+        }
+    }
+
     func testDeviceVolumeRuleRefusesBeyondOneDecibel() {
         let rule = ActiveQuietZoneController.volumeRefusal
         XCTAssertNil(rule(.device, -20, -20.5), "inside the 1 dB tolerance")

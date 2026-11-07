@@ -276,7 +276,8 @@ final class ActiveQuietZoneController: ObservableObject {
             mode: mode, path: ancBassPathState, plant: bassPlantMap, plantFingerprint: bassPlantFingerprint,
             openPreoutRefusal: report?.openPreoutRefusal, safetyAvailable: excursionLimitsProvider != nil,
             feedForwardBandCount: report?.feedForwardBandCount, sweepsAnalysed: report != nil,
-            renderUnverified: report?.renderUnverifiedMessage))
+            renderUnverified: report?.renderUnverifiedMessage,
+            bassFilterSupported: SubAwareAncReadiness.bassFilterSupportedByGraph(engine.bassManagementConfiguration)))
     }
 
     /// E26 S5: the receiver declaration from the Quiet Zone setup. Stored on the arrangement; the old measurement goes

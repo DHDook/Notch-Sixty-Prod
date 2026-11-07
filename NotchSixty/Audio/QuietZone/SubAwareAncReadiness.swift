@@ -12,6 +12,8 @@ struct SubAwareAncReadiness: Equatable, Sendable {
     enum Reason: Int, CaseIterable, Equatable, Sendable {
         case receiverUndeclared, plantMissing, recordStale, sweepsNotAnalysed, openPreoutMismatch, notConditioned
         case renderUnverified, safetyUnavailable, noFeedForwardBand
+        /// E26 S7b2 (G37): class A feed-forward only. The host-fed graph's `BASS_MGMT` splits Linkwitz-Riley 4 only.
+        case unsupportedBassFilter
     }
 
     struct Inputs: Equatable, Sendable {
@@ -32,6 +34,9 @@ struct SubAwareAncReadiness: Equatable, Sendable {
         var sweepsAnalysed: Bool = true
         /// E26 S6b: the splitter render could not be verified (G2); the text to show, or nil.
         var renderUnverified: String?
+        /// E26 S7b2 (G37): the app's split is one the graph's `BASS_MGMT` reproduces (`bassFilterSupportedByGraph`).
+        /// Only feed-forward on class A (a sub on its own output) reads it. Defaults to true.
+        var bassFilterSupported: Bool = true
     }
 
     let reason: Reason?
@@ -42,6 +47,15 @@ struct SubAwareAncReadiness: Equatable, Sendable {
     static let plantMissingMessage = "Measure with your subwoofer first, so Quiet Zone knows how the bass reaches you."
     static let notConditionedMessage = "The bass measurement is not usable. Measure with your subwoofer again."
     static let safetyMessage = "Quiet Zone cannot set safe bass limits for this setup yet."
+    static let unsupportedBassFilterMessage = "This bass filter is not supported for Quiet Zone with a separate subwoofer output."
+
+    /// The graph's `BASS_MGMT` runs a Linkwitz-Riley 4 split; the app's other topology (48 dB per octave) is refused by
+    /// the translator (`nonLR4Crossover`), so feed-forward, which needs the graph split to equal the measured one,
+    /// refuses it on class A. A splitter that is off has nothing to disagree.
+    static func bassFilterSupportedByGraph(_ bass: BassManagementConfiguration) -> Bool {
+        !bass.enabled || bass.topology == .linkwitzRiley24
+    }
+
     static let noFeedForwardBandMessage = "No frequency band has enough lead for feed-forward. Tonal Quiet Zone can still run."
 
     static func evaluate(_ i: Inputs) -> SubAwareAncReadiness {
@@ -65,6 +79,9 @@ struct SubAwareAncReadiness: Equatable, Sendable {
         guard usable else { return fail(.notConditioned, notConditionedMessage) }
         if let unverified = i.renderUnverified { return fail(.renderUnverified, unverified) }
         guard i.safetyAvailable else { return fail(.safetyUnavailable, safetyMessage) }
+        if i.mode == .feedForward, i.path.path == .subOutput, !i.bassFilterSupported {
+            return fail(.unsupportedBassFilter, unsupportedBassFilterMessage)
+        }
         if i.mode == .feedForward, let bands = i.feedForwardBandCount, bands == 0 {
             return fail(.noFeedForwardBand, noFeedForwardBandMessage)
         }
