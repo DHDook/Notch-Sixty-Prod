@@ -48,7 +48,10 @@ bool dspDenoiserCarry(SnapHeader *from, SnapHeader *to);
 //
 // Without lazy (no rebuild fade) a stage is copied whole, synchronously, only while its lanes fit `*syncBudget` bytes
 // (E9 S2b; the copy is deducted from it; null = unlimited). A larger one that still sees the same input is carried
-// lazily and sets *pending, so the graph defers the swap; one that does not warms in full.
+// lazily and sets *pending, so the graph defers the swap; one that does not see the same input and does not fit also sets
+// *pending (E9 S2c, G8): it warms in full and the swap waits for the warm instead of starting empty.
+// A lockstep stage first has the running state of the GAIN, PEQ, COMPRESSOR, EXPANDER and DYN_EQ stages ahead of it
+// copied (carryUpstreamState, snapshot.hpp), so its input history has no cold-start transient (G7).
 uint32_t dspFirCarry(SnapHeader *from, SnapHeader *to, bool lazy, bool *pending, uint64_t *syncBudget);
 // Realtime thread. True when `stageId` is at or before a stage of `to` that is being carried lazily (E9 S2b): a
 // parameter change there alters the input of the carried filter.
