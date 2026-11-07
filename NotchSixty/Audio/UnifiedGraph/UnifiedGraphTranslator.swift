@@ -381,6 +381,10 @@ enum UnifiedGraphTranslator {
                 lfeGainDB: LiveNChannelRenderGraphCompiler.lfeInBandGainDB,
                 subwoofers: subs
             )
+            // E26 G38: two mains and no LFE (stereo plus sub, class A) play the sub at the stereo path's level.
+            if roles.count == 2, lfeLane == nil {
+                configuration.bassManagement?.redirectDB = UnifiedGraphBassManagement.twoMainMeanRedirectDB
+            }
         }
         if ancHostFeed, let actuators = hostFedAncActuators(
             routePlan: routePlan, bassEnabled: bassEnabled, subCount: subCount, sampleRate: sampleRate,

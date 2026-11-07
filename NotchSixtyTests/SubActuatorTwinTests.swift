@@ -265,9 +265,8 @@ final class SubActuatorTwinTests: XCTestCase {
     private func graphCombinedImpulse(rate: Double, hz: Double, seconds: Double) throws -> [Float] {
         var config = hostedConfig(rate: rate, userGain: 1, hostFed: false)
         config.bassManagement?.crossoverHz = hz
-        // The graph's sub is the SUM of the main low-passes; the stereo bus splitter's is their MEAN (0.5 * (L + R)).
-        // Level convention differs by 20 * log10(2) dB (G38); matching it here compares shape, gain slope and delay.
-        config.bassManagement?.subwoofers[0].gainDB = -20 * log10(2.0)
+        // G38: a two-main layout carries the translator's mean redirect, so the sub is 0.5 * (L + R) like the splitter.
+        config.bassManagement?.redirectDB = UnifiedGraphBassManagement.twoMainMeanRedirectDB
         let frames = Int(seconds * rate) / block * block
         var impulse = [Float](repeating: 0, count: frames)
         impulse[0] = 1
@@ -298,6 +297,64 @@ final class SubActuatorTwinTests: XCTestCase {
                     compared += 1
                 }
                 XCTAssertGreaterThan(compared, 8, "bands compared (\(rate), \(hz))")
+            }
+        }
+    }
+
+    // MARK: G38 sub programme level
+
+    private func stereoPlan(layout: OutputProgramLayout = .stereo) -> LiveNChannelOutputRoutePlan {
+        let channels = layout.roles.count
+        return LiveNChannelOutputRoutePlan(
+            programLayout: layout,
+            orderedDeviceUIDs: ["interface"],
+            referenceDeviceUID: "interface",
+            physicalChannelCount: UInt32(channels + 1),
+            programPhysicalChannels: (0..<channels).map { UInt32($0) },
+            subwooferPhysicalChannels: [UInt32(channels)],
+            subwooferCount: 1,
+            bassManagementEnabled: true,
+            speakerCalibrations: [:],
+            subwooferCalibrations: [nil]
+        )
+    }
+
+    func testStereoPlusSubSessionCarriesTheMeanRedirectAndFiveOneDoesNot() throws {
+        for (layout, expected) in [(OutputProgramLayout.stereo, UnifiedGraphBassManagement.twoMainMeanRedirectDB), (.fiveOne, 0.0)] {
+            let config = try UnifiedGraphTranslator.nChannelEligibility(
+                routePlan: stereoPlan(layout: layout), sampleRate: 48_000, gainConfiguration: DSPGainConfiguration(),
+                bassManagementConfiguration: bass()).get()
+            XCTAssertEqual(config.bassManagement?.redirectDB ?? 99, expected, accuracy: 1e-9, "\(layout)")
+        }
+    }
+
+    /// The sub lane of the production stereo-plus-sub graph plays the programme at the stereo bus splitter's level
+    /// (SubMono = 0.5 * (L + R) of the low-passes), at every rate.
+    func testSubLaneProgrammeLevelEqualsTheStereoSplitterAtEveryRate() throws {
+        for rate in rates {
+            let config = try UnifiedGraphTranslator.nChannelEligibility(
+                routePlan: stereoPlan(), sampleRate: rate, gainConfiguration: DSPGainConfiguration(),
+                bassManagementConfiguration: bass()).get()
+            let frames = Int(rate * 0.5) / block * block
+            for hz in [30.0, 40.0] {
+                let tone = (0..<frames).map { Float(0.5 * sin(2 * Double.pi * hz * Double($0) / rate)) }
+                let out = try runGraph(rate: rate, config: config, drive: .none, frames: frames, programme: tone)
+                let splitter = try bass().makeSpeakerBusSplitterSnapshot(sampleRate: rate)
+                func subBus(left: Bool) -> [Float] {
+                    var buses = [Float](repeating: 0, count: frames * ThroughFeedSplitterRenderer.busCount)
+                    tone.withUnsafeBufferPointer { i in
+                        buses.withUnsafeMutableBufferPointer { o in
+                            XCTAssertTrue(N60SpeakerBusRenderFeed(
+                                i.baseAddress!, UInt32(frames), left, splitter, N60SpeakerDriverProcessingSnapshot(), o.baseAddress!))
+                        }
+                    }
+                    let bc = ThroughFeedSplitterRenderer.busCount
+                    return (0..<frames).map { buses[$0 * bc + 8] }
+                }
+                let reference = zip(subBus(left: true), subBus(left: false)).map { $0 + $1 }
+                let h = frames / 2
+                let db = 20 * log10(rms(out[2][h...]) / rms(reference[h...]))
+                XCTAssertEqual(db, 0, accuracy: 0.3, "sub lane vs SubMono, \(hz) Hz at \(rate)")
             }
         }
     }

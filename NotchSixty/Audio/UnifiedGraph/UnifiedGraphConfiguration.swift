@@ -88,6 +88,9 @@ struct UnifiedGraphSubwoofer: Equatable, Sendable {
 struct UnifiedGraphBassManagement: Equatable, Sendable {
     var crossoverHz: Double = 80
     var redirectDB: Double = 0
+    /// E26 G38: the stereo bus splitter's sub is the mean of the two main low-passes (0.5 * (L + R)); `BASS_MGMT` sums
+    /// them. A two-main layout without an LFE lane sets this redirect so its sub plays the programme at the stereo level.
+    static let twoMainMeanRedirectDB = -20 * log10(2.0)
     /// Program lane of the LFE channel, or nil when the layout has none.
     var lfeLane: Int?
     var lfeLowPassHz: Double = 120
