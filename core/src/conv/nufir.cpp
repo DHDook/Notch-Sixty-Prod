@@ -20,6 +20,8 @@ constexpr uint32_t kRing = 16384;                           // input ring when s
 
 constexpr size_t up(size_t v) { return (v + 15) & ~size_t(15); }
 constexpr uint32_t fftN(uint32_t s) { return 2 * kL[s]; }
+// kSettleFrames is three 16-tick cycles of the largest partition.
+static_assert(kSettleFrames == 3 * (kL[2] / kBlock) * kBlock, "settle time follows the partition schedule");
 constexpr uint32_t binsOf(uint32_t s) { return kL[s] + 1; }
 
 uint32_t log2u(uint32_t n) {
@@ -77,10 +79,12 @@ SLayout sLayout(const uint32_t parts[kSegs]) {
 struct LaneHdr {
     uint32_t epoch, fill, tick, wp;
     uint32_t cnt[kSegs], head[kSegs];
-    uint32_t outCur, pad;
+    uint32_t outCur, rPos;
+    uint32_t rEpoch, pad;  // reset in progress: target epoch and bytes of the clear range done
 };
+// filled: ring slots written since the reset (below the delay the stale ring reads as zero).
 struct DelayHdr {
-    uint32_t epoch, pos;
+    uint32_t epoch, pos, filled, pad;
 };
 
 struct LLayout {
@@ -330,21 +334,93 @@ void init(void *shared, const float *taps, uint32_t n) {
 
 uint32_t laneEpoch(const void *lane) { return *static_cast<const uint32_t *>(lane); }
 
-void resetLane(const void *shared, void *lane, uint32_t epoch) {
+bool resetStep(const void *shared, void *lane, uint32_t epoch, uint64_t *budget) {
     const Shared &S = *static_cast<const Shared *>(shared);
     uint8_t *lb = static_cast<uint8_t *>(lane);
     if (S.mode == 1) {
         DelayHdr &h = *reinterpret_cast<DelayHdr *>(lb);
         h.epoch = epoch;
         h.pos = 0;
-        std::memset(lb + sizeof(DelayHdr), 0, sizeof(float) * (size_t(S.delay) + kBlock));
-        return;
+        h.filled = 0;
+        return true;
     }
     const LLayout LL = lLayout(S.parts);
-    std::memset(lb, 0, LL.clearEnd);
     LaneHdr &h = *reinterpret_cast<LaneHdr *>(lb);
+    const size_t begin = up(sizeof(LaneHdr)), total = LL.clearEnd - begin;
+    if (h.rEpoch != epoch) {
+        h.rEpoch = epoch;
+        h.rPos = 0;
+    }
+    if (h.rPos < total) {
+        size_t n = total - h.rPos;
+        if (budget != nullptr) n = std::min<uint64_t>(n, *budget);
+        std::memset(lb + begin + h.rPos, 0, n);
+        h.rPos += static_cast<uint32_t>(n);
+        if (budget != nullptr) *budget -= n;
+        if (h.rPos < total) return false;
+    }
+    h.fill = h.tick = h.wp = h.outCur = 0;
+    for (uint32_t s = 0; s < kSegs; ++s) {
+        h.cnt[s] = 0;
+        h.head[s] = S.parts[s] > 0 ? S.parts[s] - 1 : 0;
+    }
     h.epoch = epoch;
-    for (uint32_t s = 0; s < kSegs; ++s) h.head[s] = S.parts[s] > 0 ? S.parts[s] - 1 : 0;
+    return true;
+}
+
+void resetLane(const void *shared, void *lane, uint32_t epoch) { resetStep(shared, lane, epoch, nullptr); }
+
+// ---- lazy carry ----------------------------------------------------------------------
+
+void carryHeader(const void *shared, const void *src, void *dst, uint32_t epoch) {
+    const Shared &S = *static_cast<const Shared *>(shared);
+    if (S.mode == 1) {
+        std::memcpy(dst, src, sizeof(DelayHdr));
+        static_cast<DelayHdr *>(dst)->epoch = epoch;
+        return;
+    }
+    std::memcpy(dst, src, sizeof(LaneHdr));
+    LaneHdr &h = *static_cast<LaneHdr *>(dst);
+    h.epoch = epoch;
+    h.rEpoch = epoch;  // nothing in progress
+    h.rPos = 0;
+}
+
+size_t carryBytes(const void *shared) {
+    const Shared &S = *static_cast<const Shared *>(shared);
+    if (S.mode == 1) return sizeof(float) * (size_t(S.delay) + kBlock);
+    const LLayout LL = lLayout(S.parts);
+    return sizeof(float) * LL.ringLen + (LL.total - LL.fdl[0]);
+}
+
+size_t carryCopy(const void *shared, const void *src, void *dst, size_t offset, size_t maxBytes) {
+    const Shared &S = *static_cast<const Shared *>(shared);
+    const uint8_t *sb = static_cast<const uint8_t *>(src);
+    uint8_t *db = static_cast<uint8_t *>(dst);
+    const size_t all = carryBytes(shared);
+    if (offset >= all) return 0;
+    const size_t n = std::min(maxBytes, all - offset);
+    if (S.mode == 1) {
+        std::memcpy(db + sizeof(DelayHdr) + offset, sb + sizeof(DelayHdr) + offset, n);
+        return n;
+    }
+    // Two ranges in one linear space: the input ring, then the spectrum delay lines (contiguous to the end).
+    const LLayout LL = lLayout(S.parts);
+    const size_t ringBytes = sizeof(float) * LL.ringLen;
+    size_t done = 0;
+    while (done < n) {
+        const size_t at = offset + done;
+        const size_t base = at < ringBytes ? LL.ring + at : LL.fdl[0] + (at - ringBytes);
+        const size_t room = at < ringBytes ? ringBytes - at : all - at;
+        const size_t k = std::min(room, n - done);
+        std::memcpy(db + base, sb + base, k);
+        done += k;
+    }
+    return n;
+}
+
+uint32_t carrySettleFrames(const void *shared) {
+    return static_cast<const Shared *>(shared)->mode == 1 ? 0u : kSettleFrames;
 }
 
 void process(void *shared, void *lane, float *buf, uint32_t frames, Counter *counter) {
@@ -356,7 +432,14 @@ void process(void *shared, void *lane, float *buf, uint32_t frames, Counter *cou
         float *ring = reinterpret_cast<float *>(lb + sizeof(DelayHdr));
         const uint32_t D = S.delay + kBlock;
         uint32_t pos = h.pos;
-        for (uint32_t i = 0; i < frames; ++i) {
+        uint32_t i = 0;
+        // Right after a reset the ring holds stale samples: read zero until the delay has been written once.
+        for (; i < frames && h.filled < D; ++i, ++h.filled) {
+            ring[pos] = buf[i];
+            buf[i] = 0.0f;
+            pos = pos + 1 == D ? 0 : pos + 1;
+        }
+        for (; i < frames; ++i) {
             const float y = ring[pos];
             ring[pos] = buf[i];
             buf[i] = y;

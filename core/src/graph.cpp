@@ -43,6 +43,7 @@ namespace {
 constexpr uint32_t kRetireSlots = 16;
 constexpr uint32_t kMailboxSlots = 1024;  // power of two
 constexpr uint32_t kDrainCap = 256;       // mailbox records applied per block
+constexpr uint64_t kRtBudgetBytes = 256 * 1024;  // bulk clear / copy per callback (E9 S2, design note 5)
 
 struct MailboxRecord {
     uint32_t stageId;
@@ -114,6 +115,13 @@ struct n60_graph {
     // ABI v9. Realtime thread only: the denoiser profile kept while the live snapshot has no DENOISER stage
     // (fftSize 0 = none). Part of the handle, so nothing is allocated when it is used.
     n60_denoiser_state parked{};
+
+    // E9 S2. Bulk clearing and copying left in the current callback (bytes); the snapshots point at it. Realtime
+    // thread only. `budgetPeak` is the most any callback has used, for the tests (graph_debug.hpp).
+    uint64_t rtBudget = 0;
+    std::atomic<uint64_t> budgetPeak{0};
+    bool carryActive = false;  // a lazy FIR carry from current to incoming still has bytes to copy
+    n60::FirCarryCursor carry;
 
     // ABI v13: the EXTERNAL stage's host callback and its rebuild-fade scratch.
     n60::ExternalSlot external;
@@ -203,7 +211,8 @@ void adopt(n60_graph *g) {
     carryDenoiserIn(g, g->current, next);
     // ABI v10: a FIR stage that is unchanged keeps its running state; one that is new or changed needs its whole
     // tap length of silent history before it is heard.
-    const uint32_t firWarm = n60::dspFirCarry(g->current, next);
+    bool carryPending = false;
+    const uint32_t firWarm = n60::dspFirCarry(g->current, next, next->fadeFrames != 0, &carryPending);
     n60::systemRiderCarry(g->current, next);  // ABI v12
     if (next->fadeFrames == 0) {
         settleDenoiser(g, g->current, next);
@@ -218,6 +227,8 @@ void adopt(n60_graph *g) {
     const uint32_t latency = n60::snapshotLatency(next);
     const uint32_t cap = static_cast<uint32_t>(std::min(g->sampleRate, 4.0e6));
     g->warmLeft = std::max({next->rampFrames, std::min(latency, cap), firWarm});
+    g->carry = n60::FirCarryCursor{0, 0, 0, g->current->historyEpoch, next->historyEpoch};
+    g->carryActive = carryPending;
     g->fadePos = 0;
     g->warmSeconds = 0.0;
     g->warmCost = 0.0;
@@ -246,6 +257,7 @@ void finishRebuild(n60_graph *g, uint32_t result) {
         (result == 2 ? g->rbRefused : g->rbCancelled).fetch_add(1, std::memory_order_relaxed);
     }
     g->incoming = nullptr;
+    g->carryActive = false;
     g->phase = 0;
     g->ancStages = 0;  // rbAnc keeps the count from the last rebuild
     g->rbLast.store(result, std::memory_order_relaxed);
@@ -319,13 +331,22 @@ void rebuildBlock(n60_graph *g, float *const *out, uint32_t frames) {
         }
     }
 
+    // Lazy FIR carry (E9 S2). Both instances have just rendered the same block, so they are at the same tick: copy
+    // what is left of the budget of the outgoing lanes' bulk state, any order. The warm-up waits for it.
+    if (g->carryActive) {
+        bool done = false;
+        const uint64_t left = g->rtBudget;
+        g->rtBudget -= n60::dspFirCarryStep(g->current, g->incoming, g->carry, left, &done);
+        if (done) g->carryActive = false;
+    }
+
     if (g->phase == 1) {
         if (timed) {
             g->warmCost += std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
             g->warmSeconds += static_cast<double>(frames) / g->sampleRate;
         }
-        g->warmLeft -= std::min(g->warmLeft, frames);
-        if (g->warmLeft == 0) {
+        if (!g->carryActive) g->warmLeft -= std::min(g->warmLeft, frames);
+        if (g->warmLeft == 0 && !g->carryActive) {
             if (budget > 0.0f) {
                 const double load = g->warmSeconds > 0.0 ? 100.0 * g->warmCost / g->warmSeconds : 0.0;
                 storeFloat(g->rbCpuBits, static_cast<float>(load));
@@ -423,6 +444,7 @@ n60_status n60_graph_build(const n60_graph_desc *desc, n60_graph **outGraph) {
         return N60_STATUS_OUT_OF_MEMORY;
     }
     snap->external = &g->external;
+    snap->rtBudget = &g->rtBudget;
     g->sampleRate = desc->sampleRate;
     g->maxBlockFrames = desc->maxBlockFrames;
     g->inputChannels = desc->inputChannels;
@@ -464,6 +486,7 @@ n60_status n60_graph_publish(n60_graph *g, const n60_graph_desc *desc) {
     if (st != N60_STATUS_OK) return st;
     ++g->nextEpoch;
     snap->external = &g->external;
+    snap->rtBudget = &g->rtBudget;
     snap->fadeFrames = g->fadeFrames;
     g->latest = snap;
     g->publishedEpoch.store(snap->epoch, std::memory_order_release);
@@ -499,6 +522,7 @@ n60_status n60_graph_process(n60_graph *g, const float *const *in, float *const 
     for (uint32_t c = 0; c < outCount; ++c) {
         if (out[c] == nullptr || (c < inCount && in[c] == nullptr)) return N60_STATUS_BAD_ARGUMENT;
     }
+    g->rtBudget = kRtBudgetBytes;
     adopt(g);
     drainMailbox(g);
     const size_t bytes = static_cast<size_t>(frames) * sizeof(float);
@@ -518,6 +542,8 @@ n60_status n60_graph_process(n60_graph *g, const float *const *in, float *const 
     } else {
         rebuildBlock(g, out, frames);
     }
+    g->budgetPeak.store(std::max(g->budgetPeak.load(std::memory_order_relaxed), kRtBudgetBytes - g->rtBudget),
+                        std::memory_order_relaxed);
     return N60_STATUS_OK;
 }
 
@@ -589,6 +615,8 @@ void n60_graph_get_stats(const n60_graph *g, n60_graph_stats *s) {
     s->sanitisedSamples = g->sanitised.load(std::memory_order_relaxed);
     s->snapshotsRetired = g->snapshotsRetired.load(std::memory_order_relaxed);
 }
+
+uint64_t n60_graph_debug_peak_rt_bytes(const n60_graph *g) { return g == nullptr ? 0 : g->budgetPeak.load(std::memory_order_relaxed); }
 
 void n60_graph_retire(n60_graph *g) {
     if (g == nullptr) return;
