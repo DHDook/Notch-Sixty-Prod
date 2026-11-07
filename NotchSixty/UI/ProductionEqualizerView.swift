@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import SwiftUI
 
@@ -10,6 +11,9 @@ struct ProductionEqualizerView: View {
     @State private var pendingDragBand: EQBand?
     @State private var pendingPublishTask: Task<Void, Never>?
     @State private var actionError: String?
+    /// E27 S1: undo and redo for edits made on this page, on the window's undo manager.
+    @Environment(\.undoManager) private var undoManager
+    @State private var history = EQEditHistory()
 
     private func perform(_ action: () throws -> Void) {
         do {
@@ -18,6 +22,22 @@ struct ProductionEqualizerView: View {
         } catch {
             actionError = error.localizedDescription
         }
+    }
+
+    /// Runs an EQ edit and records it as one undo step (`coalesceKey` joins repeated steps on
+    /// the same field). Bypass, the edit-lane picker, A/B and audition do not go through here.
+    private func recorded(coalesceKey: String? = nil, _ action: () throws -> Void) {
+        let before = engine.stereoEQConfiguration
+        perform(action)
+        history.record(before: before, after: engine.stereoEQConfiguration, coalesceKey: coalesceKey)
+    }
+
+    private func configureHistory() {
+        history.configure(
+            undoManager: undoManager,
+            live: { engine.stereoEQConfiguration },
+            apply: { try engine.replaceStereoEQConfiguration($0) }
+        )
     }
 
     private var configuration: StereoEQConfiguration { engine.stereoEQConfiguration }
@@ -43,7 +63,12 @@ struct ProductionEqualizerView: View {
             .layoutPriority(1)
         }
         .padding(24)
-        .onAppear { ensureSelection() }
+        .onAppear {
+            ensureSelection()
+            configureHistory()
+        }
+        .onChange(of: undoManager.map(ObjectIdentifier.init)) { _, _ in configureHistory() }
+        .onChange(of: engine.stereoEQConfiguration) { _, _ in history.observeLiveChange() }
         .onChange(of: configuration.channelMode) { _, _ in resetSelectionForBank() }
         .onChange(of: configuration.editChannel) { _, _ in resetSelectionForBank() }
         .onChange(of: bands.map(\.id)) { _, _ in ensureSelection() }
@@ -52,6 +77,8 @@ struct ProductionEqualizerView: View {
             pendingPublishTask = nil
             pendingDragBand = nil
             dragPreview = nil
+            // Leaving the page ends its history, so no undo step outlives the view.
+            history.clear()
         }
     }
 
@@ -81,7 +108,7 @@ struct ProductionEqualizerView: View {
                     HStack(spacing: 8) {
                         Picker("Channels", selection: Binding(
                             get: { configuration.channelMode },
-                            set: { mode in perform { try engine.setEQChannelMode(mode) } }
+                            set: { mode in recorded { try engine.setEQChannelMode(mode) } }
                         )) {
                             ForEach(EQChannelMode.allCases) { mode in Text(mode.displayName).tag(mode) }
                         }
@@ -118,7 +145,7 @@ struct ProductionEqualizerView: View {
 
                     Picker("Phase", selection: Binding(
                         get: { configuration.phaseMode },
-                        set: { mode in perform { try engine.setEQPhaseMode(mode) } }
+                        set: { mode in recorded { try engine.setEQPhaseMode(mode) } }
                     )) {
                         ForEach(EQPhaseMode.allCases) { mode in Text(mode.displayName).tag(mode) }
                     }
@@ -160,6 +187,7 @@ struct ProductionEqualizerView: View {
                 bypassed: configuration.bypassed,
                 onSelect: { selectedBandID = $0 },
                 onPreview: { band in
+                    if !history.isGestureOpen { history.beginGesture(before: engine.stereoEQConfiguration) }
                     selectedBandID = band.id
                     dragPreview = band
                     scheduleCoalescedPublish(band)
@@ -171,7 +199,13 @@ struct ProductionEqualizerView: View {
                     let sanitized = sanitize(band)
                     dragPreview = nil
                     perform { try engine.updateEQBand(sanitized) }
+                    history.endGesture(after: engine.stereoEQConfiguration)
                 },
+                onNudge: { axis, direction, step in nudgeSelectedBand(axis, direction, step) },
+                onDeleteSelected: { if let id = selectedBandID { removeBand(id) } },
+                onScaleQ: { id, scale in scaleQ(of: id, scale) },
+                onAddBand: { frequency, gain in addBand(atFrequency: frequency, gain: gain) },
+                onResetBand: { id in resetBand(id) },
                 rtaOverlay: liveOverlay.showsRTA ? liveOverlay.rtaCurve : nil
             )
             .frame(minHeight: 260, maxHeight: .infinity)
@@ -407,29 +441,51 @@ struct ProductionEqualizerView: View {
 
             LabeledContent("Frequency") {
                 HStack(spacing: 6) {
-                    TextField("Hz", value: binding.frequencyHz, format: .number.precision(.fractionLength(0...1)))
-                        .textFieldStyle(.roundedBorder)
-                        .frame(width: 110)
-                        .disabled(band.type == .fir)
+                    EQNumberField(
+                        title: "Frequency",
+                        field: .frequency,
+                        value: band.frequencyHz,
+                        band: band,
+                        maximumFrequency: maximumFrequency,
+                        width: 110,
+                        identifier: "eq.bands.editor.frequency"
+                    ) { newValue, isStep in
+                        commitField(band, key: isStep ? "field.frequency" : nil) { $0.frequencyHz = newValue }
+                    }
+                    .disabled(band.type == .fir)
                     Text("Hz").foregroundStyle(.secondary)
                 }
             }
 
             LabeledContent("Gain") {
                 HStack(spacing: 6) {
-                    TextField("dB", value: binding.gainDB, format: .number.precision(.fractionLength(1)))
-                        .textFieldStyle(.roundedBorder)
-                        .frame(width: 90)
-                        .disabled(!band.type.productionHasGainControl)
+                    EQNumberField(
+                        title: "Gain",
+                        field: .gain,
+                        value: band.gainDB,
+                        band: band,
+                        maximumFrequency: maximumFrequency,
+                        identifier: "eq.bands.editor.gain"
+                    ) { newValue, isStep in
+                        commitField(band, key: isStep ? "field.gain" : nil) { $0.gainDB = newValue }
+                    }
+                    .disabled(!band.type.productionHasGainControl)
                     Text("dB").foregroundStyle(.secondary)
                 }
             }
 
             LabeledContent {
-                TextField("Q", value: binding.q, format: .number.precision(.fractionLength(2...3)))
-                    .textFieldStyle(.roundedBorder)
-                    .frame(width: 90)
-                    .disabled(band.type == .tilt || band.type == .fir)
+                EQNumberField(
+                    title: "Q",
+                    field: .q,
+                    value: band.q,
+                    band: band,
+                    maximumFrequency: maximumFrequency,
+                    identifier: "eq.bands.editor.q"
+                ) { newValue, isStep in
+                    commitField(band, key: isStep ? "field.q" : nil) { $0.q = newValue }
+                }
+                .disabled(!band.type.productionHasQControl)
             } label: {
                 HStack(spacing: 5) {
                     Text("Q")
@@ -463,14 +519,31 @@ struct ProductionEqualizerView: View {
             if band.type == .linkwitzTransform {
                 LabeledContent("Target Frequency") {
                     HStack(spacing: 6) {
-                        TextField("Hz", value: binding.linkwitzTargetHz, format: .number.precision(.fractionLength(0...1)))
-                            .textFieldStyle(.roundedBorder).frame(width: 110)
+                        EQNumberField(
+                            title: "Target Frequency",
+                            field: .linkwitzTargetFrequency,
+                            value: band.linkwitzTargetHz,
+                            band: band,
+                            maximumFrequency: maximumFrequency,
+                            width: 110,
+                            identifier: "eq.bands.editor.linkwitzTargetFrequency"
+                        ) { newValue, isStep in
+                            commitField(band, key: isStep ? "field.linkwitzTargetHz" : nil) { $0.linkwitzTargetHz = newValue }
+                        }
                         Text("Hz").foregroundStyle(.secondary)
                     }
                 }
                 LabeledContent("Target Q") {
-                    TextField("Q", value: binding.linkwitzTargetQ, format: .number.precision(.fractionLength(2...3)))
-                        .textFieldStyle(.roundedBorder).frame(width: 90)
+                    EQNumberField(
+                        title: "Target Q",
+                        field: .linkwitzTargetQ,
+                        value: band.linkwitzTargetQ,
+                        band: band,
+                        maximumFrequency: maximumFrequency,
+                        identifier: "eq.bands.editor.linkwitzTargetQ"
+                    ) { newValue, isStep in
+                        commitField(band, key: isStep ? "field.linkwitzTargetQ" : nil) { $0.linkwitzTargetQ = newValue }
+                    }
                 }
             }
 
@@ -573,21 +646,35 @@ struct ProductionEqualizerView: View {
                 pendingPublishTask = nil
                 pendingDragBand = nil
                 dragPreview = nil
-                perform { try engine.updateEQBand(sanitize(updated)) }
+                recorded { try engine.updateEQBand(sanitize(updated)) }
             }
         )
     }
 
+    /// Applies one field edit to a band (typed value or arrow step) as one undo step.
+    private func commitField(_ band: EQBand, key: String?, _ change: (inout EQBand) -> Void) {
+        var updated = band
+        change(&updated)
+        pendingPublishTask?.cancel()
+        pendingPublishTask = nil
+        pendingDragBand = nil
+        dragPreview = nil
+        recorded(coalesceKey: key.map { "\($0).\(band.id)" }) { try engine.updateEQBand(sanitize(updated)) }
+    }
+
     private func addBand() {
         let band = EQBand(frequencyHz: suggestedFrequency(), q: 1.0)
+        let before = engine.stereoEQConfiguration
         do {
             try engine.addEQBand(band)
             selectedBandID = band.id
+            history.record(before: before, after: engine.stereoEQConfiguration)
         } catch { }
     }
 
     private func removeBand(_ id: UUID) {
         let previousBands = bands
+        let before = engine.stereoEQConfiguration
         do {
             try engine.removeEQBand(id: id)
             selectedBandID = EQBandPanelModel.selectionAfterRemoving(
@@ -595,7 +682,73 @@ struct ProductionEqualizerView: View {
                 selected: selectedBandID,
                 bandsBefore: previousBands
             )
+            history.record(before: before, after: engine.stereoEQConfiguration)
         } catch { }
+    }
+
+    // MARK: Graph gestures (E27 S1)
+
+    private func band(withID id: UUID) -> EQBand? {
+        bands.first(where: { $0.id == id })
+    }
+
+    /// Arrow keys on the focused graph: left/right frequency, up/down gain.
+    private func nudgeSelectedBand(_ axis: EQGraphKeyAxis, _ direction: EQNudge.Direction, _ step: EQNudge.Step) {
+        guard let id = selectedBandID, var edited = band(withID: id) else { return }
+        switch axis {
+        case .frequency:
+            guard edited.type != .fir else { return }
+            edited.frequencyHz = EQNudge.nudged(
+                edited.frequencyHz, field: .frequency, direction: direction, step: step,
+                band: edited, maximumFrequency: maximumFrequency
+            )
+        case .gain:
+            guard edited.type.productionHasGainControl else { return }
+            edited.gainDB = EQNudge.nudged(
+                edited.gainDB, field: .gain, direction: direction, step: step,
+                band: edited, maximumFrequency: maximumFrequency
+            )
+        }
+        commitField(edited, key: "nudge.\(axis)") { _ in }
+    }
+
+    /// Scroll or pinch over a handle. Does nothing for filters without a Q.
+    private func scaleQ(of id: UUID, _ scale: EQGraphQScale) {
+        guard var edited = band(withID: id), edited.type.productionHasQControl else { return }
+        let limits = EQValueParser.range(for: .q, band: edited, maximumFrequency: maximumFrequency)
+        switch scale {
+        case .notches(let notches): edited.q = EQNudge.q(edited.q, scrollNotches: notches, range: limits)
+        case .magnification(let value): edited.q = EQNudge.q(edited.q, magnification: value, range: limits)
+        }
+        guard edited.q != band(withID: id)?.q else { return }
+        selectedBandID = id
+        commitField(edited, key: "scroll.q") { _ in }
+    }
+
+    /// Double-click on empty graph: a peaking band at that frequency and gain, Q 1.0.
+    private func addBand(atFrequency frequency: Double, gain: Double) {
+        guard bands.count < EQConfiguration.maximumBandCount else {
+            actionError = "The EQ is at its limit of \(EQConfiguration.maximumBandCount) bands. Remove a band to add another."
+            return
+        }
+        let band = sanitize(EQBand(
+            type: .peaking,
+            frequencyHz: min(max(frequency, EQNudge.minimumFrequency), maximumFrequency),
+            gainDB: gain,
+            q: EQNudge.addedBandQ
+        ))
+        recorded { try engine.addEQBand(band) }
+        if bands.contains(where: { $0.id == band.id }) { selectedBandID = band.id }
+    }
+
+    /// Double-click on a handle: gain back to 0 dB and Q to the default.
+    private func resetBand(_ id: UUID) {
+        guard var edited = band(withID: id) else { return }
+        selectedBandID = id
+        if edited.type.productionHasGainControl { edited.gainDB = 0 }
+        if edited.type.productionHasQControl { edited.q = EQNudge.defaultQ }
+        guard edited != band(withID: id) else { return }
+        commitField(edited, key: nil) { _ in }
     }
 
     private func selectAdjacentBand(offset: Int) {
@@ -673,6 +826,18 @@ struct ProductionEqualizerView: View {
     }
 }
 
+/// Which value an arrow key moves on the graph.
+private enum EQGraphKeyAxis {
+    case frequency
+    case gain
+}
+
+/// A Q change from scroll notches or a pinch.
+private enum EQGraphQScale {
+    case notches(Int)
+    case magnification(Double)
+}
+
 private struct ProductionEQResponseGraph: View {
     let bands: [EQBand]
     let selectedBandID: UUID?
@@ -682,16 +847,29 @@ private struct ProductionEQResponseGraph: View {
     let onSelect: (UUID) -> Void
     let onPreview: (EQBand) -> Void
     let onCommit: (EQBand) -> Void
+    /// E27 S1: arrow keys on the focused graph move the selected band.
+    let onNudge: (EQGraphKeyAxis, EQNudge.Direction, EQNudge.Step) -> Void
+    let onDeleteSelected: () -> Void
+    /// Scroll or pinch over a handle scales that band's Q.
+    let onScaleQ: (UUID, EQGraphQScale) -> Void
+    /// Double-click on empty graph adds a band at (frequency, gain).
+    let onAddBand: (Double, Double) -> Void
+    /// Double-click on a handle resets its gain and Q.
+    let onResetBand: (UUID) -> Void
     /// E11 S10: live RTA of the measurement microphone, drawn behind the EQ curve.
     var rtaOverlay: RoomCorrectionFrequencyResponse?
 
-    private let minimumFrequency = 20.0
-    private let minimumDB = -24.0
-    private let maximumDB = 24.0
+    @State private var hover = EQGraphHoverModel()
+    @State private var dragSession: EQGraphGeometry.DragSession?
+    @State private var scrollAccumulator = EQNudge.ScrollAccumulator()
+    @FocusState private var graphFocused: Bool
 
-    private var graphMaximumFrequency: Double {
-        min(96_000, max(minimumFrequency * 1.01, sampleRate * 0.49))
-    }
+    private let minimumDB = EQGraphGeometry.minimumDB
+    private let maximumDB = EQGraphGeometry.maximumDB
+    private let minimumFrequency = EQGraphGeometry.minimumFrequency
+
+    private var geometry: EQGraphGeometry { EQGraphGeometry(sampleRate: sampleRate) }
+    private var graphMaximumFrequency: Double { geometry.maximumFrequency }
 
     private var displayBands: [EQBand] {
         bands.map { band in
@@ -703,6 +881,8 @@ private struct ProductionEQResponseGraph: View {
     var body: some View {
         GeometryReader { proxy in
             let size = proxy.size
+            let program = ProductionEQResponseMath.compile(bands: displayBands, sampleRate: sampleRate)
+            let handleBands = Array(displayBands.enumerated()).filter { $0.element.type != .fir }
             ZStack {
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
                     .fill(.black.opacity(0.17))
@@ -710,11 +890,24 @@ private struct ProductionEQResponseGraph: View {
                 Canvas { context, _ in
                     drawGrid(context: &context, size: size)
                     drawRTAOverlay(context: &context, size: size)
-                    drawResponse(context: &context, size: size)
+                    drawResponse(context: &context, size: size, program: program)
                 }
                 .opacity(bypassed ? 0.35 : 1)
+                .allowsHitTesting(false)
 
-                ForEach(Array(displayBands.enumerated()).filter { $0.element.type != .fir }, id: \.element.id) { index, band in
+                // Empty-graph double-click adds a band; a click also focuses the graph for keys.
+                Color.clear
+                    .contentShape(Rectangle())
+                    .gesture(
+                        SpatialTapGesture(count: 2).onEnded { value in
+                            let target = geometry.position(at: value.location, size: size)
+                            onAddBand(target.frequencyHz, target.gainDB)
+                        }
+                    )
+                    .simultaneousGesture(TapGesture().onEnded { graphFocused = true })
+                    .accessibilityHidden(true)
+
+                ForEach(handleBands, id: \.element.id) { index, band in
                     let point = point(for: band, size: size)
                     let isSelected = selectedBandID == band.id
                     let diameter: CGFloat = isSelected ? 22 : 20
@@ -737,29 +930,25 @@ private struct ProductionEQResponseGraph: View {
                     .opacity(band.enabled ? 1 : 0.42)
                     .contentShape(Circle().inset(by: -10))
                     .gesture(
-                        DragGesture(minimumDistance: 0)
+                        DragGesture(minimumDistance: 0, coordinateSpace: .named("eq.graph"))
                             .onChanged { value in
+                                graphFocused = true
                                 onSelect(band.id)
-                                var updated = band
-                                updated.frequencyHz = frequency(atX: value.location.x, width: size.width)
-                                if band.type.productionHasGainControl {
-                                    updated.gainDB = gain(atY: value.location.y, height: size.height)
+                                if dragSession == nil {
+                                    dragSession = EQGraphGeometry.DragSession(origin: point, start: value.startLocation)
                                 }
-                                onPreview(updated)
+                                onPreview(movedBand(band, value: value, size: size))
                             }
                             .onEnded { value in
-                                var updated = band
-                                updated.frequencyHz = frequency(atX: value.location.x, width: size.width)
-                                if band.type.productionHasGainControl {
-                                    updated.gainDB = gain(atY: value.location.y, height: size.height)
-                                }
-                                onCommit(updated)
+                                onCommit(movedBand(band, value: value, size: size))
+                                dragSession = nil
                             }
                     )
-                    .onTapGesture { onSelect(band.id) }
+                    .simultaneousGesture(TapGesture(count: 2).onEnded { onResetBand(band.id) })
                     .accessibilityElement(children: .ignore)
                     .accessibilityLabel(EQBandPanelModel.accessibilityLabel(number: index + 1, band: band))
                     .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
+                    .accessibilityAction { onSelect(band.id) }
                     .accessibilityIdentifier("eq.graph.handle.\(index + 1)")
                 }
                 if bypassed {
@@ -767,11 +956,101 @@ private struct ProductionEQResponseGraph: View {
                         .font(.caption.bold()).tracking(1.7)
                         .padding(.horizontal, 12).padding(.vertical, 7)
                         .background(.ultraThinMaterial, in: .capsule)
+                        .allowsHitTesting(false)
+                }
+
+                EQGraphHoverOverlay(
+                    model: hover,
+                    geometry: geometry,
+                    size: size,
+                    handles: handleBands.map { index, band in
+                        EQGraphHoverHandle(
+                            handle: EQGraphGeometry.Handle(id: band.id, center: point(for: band, size: size)),
+                            number: index + 1,
+                            band: band,
+                            hasGain: band.type.productionHasGainControl,
+                            hasQ: band.type.productionHasQControl
+                        )
+                    },
+                    responseDB: { ProductionEQResponseMath.responseDB(program: program, sampleRate: sampleRate, frequencyHz: $0) }
+                )
+            }
+            .coordinateSpace(name: "eq.graph")
+            .background(
+                EQGraphEventCatcher(
+                    onScroll: { point, delta, precise in
+                        guard let id = handleID(at: point, size: size) else {
+                            scrollAccumulator.reset()
+                            return false
+                        }
+                        let notches = scrollAccumulator.add(delta: delta, precise: precise)
+                        if notches != 0 { onScaleQ(id, .notches(notches)) }
+                        return true
+                    },
+                    onMagnify: { point, magnification in
+                        guard let id = handleID(at: point, size: size) else { return false }
+                        onScaleQ(id, .magnification(magnification))
+                        return true
+                    }
+                )
+            )
+            .onContinuousHover { phase in
+                switch phase {
+                case .active(let location): hover.location = location
+                case .ended: hover.location = nil
                 }
             }
+            .focusable()
+            .focused($graphFocused)
+            .onKeyPress(phases: [.down, .repeat]) { press in handleKey(press) }
         }
         .accessibilityLabel("Equalizer frequency response")
     }
+
+    // MARK: Interaction
+
+    private func movedBand(_ band: EQBand, value: DragGesture.Value, size: CGSize) -> EQBand {
+        let flags = NSEvent.modifierFlags
+        var session = dragSession ?? EQGraphGeometry.DragSession(origin: point(for: band, size: size), start: value.startLocation)
+        let moved = session.update(
+            location: value.location,
+            shift: flags.contains(.shift),
+            option: flags.contains(.option),
+            bounds: size
+        )
+        dragSession = session
+        var updated = band
+        updated.frequencyHz = geometry.frequency(x: moved.x, width: size.width)
+        if band.type.productionHasGainControl {
+            updated.gainDB = geometry.gain(y: moved.y, height: size.height)
+        }
+        return updated
+    }
+
+    private func handleID(at point: CGPoint, size: CGSize) -> UUID? {
+        let handles = displayBands
+            .filter { $0.type != .fir }
+            .map { EQGraphGeometry.Handle(id: $0.id, center: self.point(for: $0, size: size)) }
+        return EQGraphGeometry.hitHandle(at: point, handles: handles)
+    }
+
+    private func handleKey(_ press: KeyPress) -> KeyPress.Result {
+        guard selectedBandID != nil else { return .ignored }
+        // Command combinations (for example Command-[ and Command-]) belong to the menu.
+        if press.modifiers.contains(.command) || press.modifiers.contains(.control) { return .ignored }
+        let step = EQNudge.Step(shift: press.modifiers.contains(.shift), option: press.modifiers.contains(.option))
+        switch press.key {
+        case .leftArrow: onNudge(.frequency, .down, step)
+        case .rightArrow: onNudge(.frequency, .up, step)
+        case .upArrow: onNudge(.gain, .up, step)
+        case .downArrow: onNudge(.gain, .down, step)
+        case .delete, .deleteForward: onDeleteSelected()
+        default: return .ignored
+        }
+        return .handled
+    }
+
+    // MARK: Drawing
 
     private func drawGrid(context: inout GraphicsContext, size: CGSize) {
         let frequencies: [Double] = [20, 50, 100, 200, 500, 1_000, 2_000, 5_000, 10_000, 20_000, 40_000, 80_000]
@@ -814,8 +1093,7 @@ private struct ProductionEQResponseGraph: View {
         context.stroke(path, with: .color(.orange.opacity(0.7)), lineWidth: 1.5)
     }
 
-    private func drawResponse(context: inout GraphicsContext, size: CGSize) {
-        let program = ProductionEQResponseMath.compile(bands: displayBands, sampleRate: sampleRate)
+    private func drawResponse(context: inout GraphicsContext, size: CGSize, program: [N60BiquadCoefficients]) {
         guard !program.isEmpty else { return }
         let count = max(180, Int(size.width / 3))
         var path = Path()
@@ -830,31 +1108,19 @@ private struct ProductionEQResponseGraph: View {
     }
 
     private func point(for band: EQBand, size: CGSize) -> CGPoint {
-        CGPoint(
-            x: xPosition(min(max(band.frequencyHz, minimumFrequency), graphMaximumFrequency), width: size.width),
-            y: yPosition(band.type.productionHasGainControl ? band.gainDB : 0, height: size.height)
+        geometry.point(
+            frequency: band.frequencyHz,
+            gainDB: band.type.productionHasGainControl ? band.gainDB : 0,
+            size: size
         )
     }
 
     private func xPosition(_ frequency: Double, width: CGFloat) -> CGFloat {
-        let clamped = min(max(frequency, minimumFrequency), graphMaximumFrequency)
-        let t = (log(clamped) - log(minimumFrequency)) / (log(graphMaximumFrequency) - log(minimumFrequency))
-        return CGFloat(t) * width
-    }
-
-    private func frequency(atX x: CGFloat, width: CGFloat) -> Double {
-        let t = min(max(Double(x / max(width, 1)), 0), 1)
-        return exp(log(minimumFrequency) + t * (log(graphMaximumFrequency) - log(minimumFrequency)))
+        geometry.x(frequency: frequency, width: width)
     }
 
     private func yPosition(_ db: Double, height: CGFloat) -> CGFloat {
-        let clamped = min(max(db, minimumDB), maximumDB)
-        return CGFloat((maximumDB - clamped) / (maximumDB - minimumDB)) * height
-    }
-
-    private func gain(atY y: CGFloat, height: CGFloat) -> Double {
-        let t = min(max(Double(y / max(height, 1)), 0), 1)
-        return maximumDB - t * (maximumDB - minimumDB)
+        geometry.y(db: db, height: height)
     }
 
     private func axisFrequency(_ value: Double) -> String {
@@ -917,6 +1183,14 @@ private extension EQFilterType {
         switch self {
         case .peaking, .lowShelf, .highShelf, .tilt: return true
         case .lowPass, .highPass, .bandPass, .linkwitzTransform, .fir, .notch, .allPass: return false
+        }
+    }
+
+    /// Types whose Q the band editor lets the user change (scroll, pinch and the Q field).
+    var productionHasQControl: Bool {
+        switch self {
+        case .tilt, .fir: return false
+        default: return true
         }
     }
 }

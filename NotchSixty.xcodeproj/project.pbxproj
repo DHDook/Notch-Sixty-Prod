@@ -302,6 +302,16 @@
 		E4F200000000000000000004 /* ProductionFeedForwardDesignSurveyCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4F200000000000000000014 /* ProductionFeedForwardDesignSurveyCard.swift */; };
 		E11B00000000000000000041 /* EQBandPanelModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = E11B00000000000000000051 /* EQBandPanelModel.swift */; };
 		E11B00000000000000000042 /* EQBandPanelModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E11B00000000000000000052 /* EQBandPanelModelTests.swift */; };
+		E27A00000000000000000100 /* EQValueParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = E27A00000000000000000200 /* EQValueParser.swift */; };
+		E27A00000000000000000101 /* EQNudge.swift in Sources */ = {isa = PBXBuildFile; fileRef = E27A00000000000000000201 /* EQNudge.swift */; };
+		E27A00000000000000000102 /* EQGraphGeometry.swift in Sources */ = {isa = PBXBuildFile; fileRef = E27A00000000000000000202 /* EQGraphGeometry.swift */; };
+		E27A00000000000000000103 /* EQEditHistory.swift in Sources */ = {isa = PBXBuildFile; fileRef = E27A00000000000000000203 /* EQEditHistory.swift */; };
+		E27A00000000000000000104 /* EQNumberField.swift in Sources */ = {isa = PBXBuildFile; fileRef = E27A00000000000000000204 /* EQNumberField.swift */; };
+		E27A00000000000000000105 /* EQGraphInteraction.swift in Sources */ = {isa = PBXBuildFile; fileRef = E27A00000000000000000205 /* EQGraphInteraction.swift */; };
+		E27A00000000000000000106 /* EQValueParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E27A00000000000000000206 /* EQValueParserTests.swift */; };
+		E27A00000000000000000107 /* EQNudgeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E27A00000000000000000207 /* EQNudgeTests.swift */; };
+		E27A00000000000000000108 /* EQEditHistoryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E27A00000000000000000208 /* EQEditHistoryTests.swift */; };
+		E27A00000000000000000109 /* EQGraphGeometryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E27A00000000000000000209 /* EQGraphGeometryTests.swift */; };
 		E26C00000000000000000041 /* ProductionSubAwareQuietZoneCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = E26C00000000000000000051 /* ProductionSubAwareQuietZoneCard.swift */; };
 		E4F200000000000000000005 /* QuietZoneFeedForwardSurveyFlowTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4F200000000000000000015 /* QuietZoneFeedForwardSurveyFlowTests.swift */; };
 		E4F700000000000000000003 /* FeedForwardEchoFlowTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4F700000000000000000013 /* FeedForwardEchoFlowTests.swift */; };
@@ -951,6 +961,16 @@
 		E4F200000000000000000014 /* ProductionFeedForwardDesignSurveyCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductionFeedForwardDesignSurveyCard.swift; sourceTree = "<group>"; };
 		E11B00000000000000000051 /* EQBandPanelModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EQBandPanelModel.swift; sourceTree = "<group>"; };
 		E11B00000000000000000052 /* EQBandPanelModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EQBandPanelModelTests.swift; sourceTree = "<group>"; };
+		E27A00000000000000000200 /* EQValueParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EQValueParser.swift; sourceTree = "<group>"; };
+		E27A00000000000000000201 /* EQNudge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EQNudge.swift; sourceTree = "<group>"; };
+		E27A00000000000000000202 /* EQGraphGeometry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EQGraphGeometry.swift; sourceTree = "<group>"; };
+		E27A00000000000000000203 /* EQEditHistory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EQEditHistory.swift; sourceTree = "<group>"; };
+		E27A00000000000000000204 /* EQNumberField.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EQNumberField.swift; sourceTree = "<group>"; };
+		E27A00000000000000000205 /* EQGraphInteraction.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EQGraphInteraction.swift; sourceTree = "<group>"; };
+		E27A00000000000000000206 /* EQValueParserTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EQValueParserTests.swift; sourceTree = "<group>"; };
+		E27A00000000000000000207 /* EQNudgeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EQNudgeTests.swift; sourceTree = "<group>"; };
+		E27A00000000000000000208 /* EQEditHistoryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EQEditHistoryTests.swift; sourceTree = "<group>"; };
+		E27A00000000000000000209 /* EQGraphGeometryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EQGraphGeometryTests.swift; sourceTree = "<group>"; };
 		E26C00000000000000000051 /* ProductionSubAwareQuietZoneCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductionSubAwareQuietZoneCard.swift; sourceTree = "<group>"; };
 		E4F200000000000000000015 /* QuietZoneFeedForwardSurveyFlowTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuietZoneFeedForwardSurveyFlowTests.swift; sourceTree = "<group>"; };
 		E4F700000000000000000013 /* FeedForwardEchoFlowTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeedForwardEchoFlowTests.swift; sourceTree = "<group>"; };
@@ -1468,6 +1488,10 @@
 				E26B00000000000000000013 /* RankOneBassWiringTests.swift */,
 				E26B00000000000000000032 /* SubSafetyTests.swift */,
 				E11B00000000000000000052 /* EQBandPanelModelTests.swift */,
+				E27A00000000000000000206 /* EQValueParserTests.swift */,
+				E27A00000000000000000207 /* EQNudgeTests.swift */,
+				E27A00000000000000000208 /* EQEditHistoryTests.swift */,
+				E27A00000000000000000209 /* EQGraphGeometryTests.swift */,
 				E26C00000000000000000032 /* SubAwareArmingTests.swift */,
 				F96000000000000000000012 /* QuietZoneFeedForwardTests.swift */,
 				F96000000000000000000015 /* QuietZoneFeedForwardProbeTests.swift */,
@@ -1860,7 +1884,7 @@
 			path = Realtime;
 			sourceTree = "<group>";
 		};
-		A40000000000000000000050 /* UI */ = {isa = PBXGroup; children = (E11B00000000000000000051 /* EQBandPanelModel.swift */, E26C00000000000000000051 /* ProductionSubAwareQuietZoneCard.swift */, E25F000000000000000000B2 /* ProductionProgramSourceCard.swift */, E4FA00000000000000000012 /* ProductionNoiseSurveyCard.swift */, A40000000000000000000020 /* ProductionRootView.swift */, E12A00000000000000000011 /* ProductionSystemArea.swift */, E24F00000000000000009005 /* RoomCorrectionABXSheet.swift */, E12C00000000000000000013 /* ProductionSystemSetupFlowView.swift */, A40000000000000000000021 /* ProductionEqualizerView.swift */, A40000000000000000000022 /* ProductionDynamicsView.swift */, A40000000000000000000023 /* ProductionDynamicsTelemetryView.swift */, A40000000000000000000024 /* ProductionMetersView.swift */, A40000000000000000000025 /* ProductionAnalysisViews.swift */, A40000000000000000000026 /* ProductionProfileToolbar.swift */, F65000000000000000000015 /* ProductionHeadphoneWorkspace.swift */, B40000000000000000000012 /* ProductionBlindListeningWorkspace.swift */, B50000000000000000000013 /* ProductionOptionalAudioResearchWorkspace.swift */, F64000000000000000000015 /* ProductionMultichannelCalibrationWorkspace.swift */, F10600000000000000000035 /* ProductionSpeakerMeasurementLabWorkspace.swift */, E11D00000000000000000032 /* MeasurementAnalysisViews.swift */, E24A00000000000000000066 /* MeasurementAnalysisTab.swift */, E11D00000000000000000052 /* MeasurementLibraryView.swift */, E11E00000000000000000006 /* MeasurementRTASPLCard.swift */, E11D00000000000000000081 /* MeasurementGeneratorCard.swift */, E24E00000000000000000021 /* MeasurementReadinessNote.swift */, E24C00000000000000000902 /* MeasurementMicrophoneCard.swift */, E24C00000000000000000904 /* MeasurementSeatsCard.swift */, A40000000000000000000027 /* ProductionRoomCorrectionWorkspace.swift */, E10A00000000000000000062 /* RoomCorrectionTargetEditorCard.swift */, F78000000000000000000011 /* ProductionActiveAcousticsWorkspace.swift */, F92000000000000000000013 /* ProductionRoomTreatmentAdvisorWorkspace.swift */, F96000000000000000000013 /* ProductionFeedForwardReadinessCard.swift */, E4D000000000000000000012 /* ProductionAdaptiveQuietZoneCard.swift */, E4F200000000000000000014 /* ProductionFeedForwardDesignSurveyCard.swift */, E4F300000000000000000013 /* ProductionFeedForwardShadowCard.swift */, E4F900000000000000000A04 /* ProductionFeedForwardLiveCard.swift */, F93000000000000000000012 /* ProductionRoomGeometrySection.swift */, F94000000000000000000013 /* ProductionRoomTreatmentDesignSection.swift */, F78000000000000000000012 /* ProductionPluginWorkspace.swift */, F112A0000000000000000013 /* ProductionHardwareAcceptanceWorkspace.swift */, F11300000000000000000011 /* ProductionUserGuideView.swift */, E8B000000000000000000009 /* ProductionRoutingEditorView.swift */, E25E00000000000000000013 /* SystemCapabilityNoteCard.swift */, E8D000000000000000000002 /* ProductionProfileSubwooferCard.swift */,); path = UI; sourceTree = "<group>"; };
+		A40000000000000000000050 /* UI */ = {isa = PBXGroup; children = (E11B00000000000000000051 /* EQBandPanelModel.swift */, E27A00000000000000000200 /* EQValueParser.swift */, E27A00000000000000000201 /* EQNudge.swift */, E27A00000000000000000202 /* EQGraphGeometry.swift */, E27A00000000000000000203 /* EQEditHistory.swift */, E27A00000000000000000204 /* EQNumberField.swift */, E27A00000000000000000205 /* EQGraphInteraction.swift */, E26C00000000000000000051 /* ProductionSubAwareQuietZoneCard.swift */, E25F000000000000000000B2 /* ProductionProgramSourceCard.swift */, E4FA00000000000000000012 /* ProductionNoiseSurveyCard.swift */, A40000000000000000000020 /* ProductionRootView.swift */, E12A00000000000000000011 /* ProductionSystemArea.swift */, E24F00000000000000009005 /* RoomCorrectionABXSheet.swift */, E12C00000000000000000013 /* ProductionSystemSetupFlowView.swift */, A40000000000000000000021 /* ProductionEqualizerView.swift */, A40000000000000000000022 /* ProductionDynamicsView.swift */, A40000000000000000000023 /* ProductionDynamicsTelemetryView.swift */, A40000000000000000000024 /* ProductionMetersView.swift */, A40000000000000000000025 /* ProductionAnalysisViews.swift */, A40000000000000000000026 /* ProductionProfileToolbar.swift */, F65000000000000000000015 /* ProductionHeadphoneWorkspace.swift */, B40000000000000000000012 /* ProductionBlindListeningWorkspace.swift */, B50000000000000000000013 /* ProductionOptionalAudioResearchWorkspace.swift */, F64000000000000000000015 /* ProductionMultichannelCalibrationWorkspace.swift */, F10600000000000000000035 /* ProductionSpeakerMeasurementLabWorkspace.swift */, E11D00000000000000000032 /* MeasurementAnalysisViews.swift */, E24A00000000000000000066 /* MeasurementAnalysisTab.swift */, E11D00000000000000000052 /* MeasurementLibraryView.swift */, E11E00000000000000000006 /* MeasurementRTASPLCard.swift */, E11D00000000000000000081 /* MeasurementGeneratorCard.swift */, E24E00000000000000000021 /* MeasurementReadinessNote.swift */, E24C00000000000000000902 /* MeasurementMicrophoneCard.swift */, E24C00000000000000000904 /* MeasurementSeatsCard.swift */, A40000000000000000000027 /* ProductionRoomCorrectionWorkspace.swift */, E10A00000000000000000062 /* RoomCorrectionTargetEditorCard.swift */, F78000000000000000000011 /* ProductionActiveAcousticsWorkspace.swift */, F92000000000000000000013 /* ProductionRoomTreatmentAdvisorWorkspace.swift */, F96000000000000000000013 /* ProductionFeedForwardReadinessCard.swift */, E4D000000000000000000012 /* ProductionAdaptiveQuietZoneCard.swift */, E4F200000000000000000014 /* ProductionFeedForwardDesignSurveyCard.swift */, E4F300000000000000000013 /* ProductionFeedForwardShadowCard.swift */, E4F900000000000000000A04 /* ProductionFeedForwardLiveCard.swift */, F93000000000000000000012 /* ProductionRoomGeometrySection.swift */, F94000000000000000000013 /* ProductionRoomTreatmentDesignSection.swift */, F78000000000000000000012 /* ProductionPluginWorkspace.swift */, F112A0000000000000000013 /* ProductionHardwareAcceptanceWorkspace.swift */, F11300000000000000000011 /* ProductionUserGuideView.swift */, E8B000000000000000000009 /* ProductionRoutingEditorView.swift */, E25E00000000000000000013 /* SystemCapabilityNoteCard.swift */, E8D000000000000000000002 /* ProductionProfileSubwooferCard.swift */,); path = UI; sourceTree = "<group>"; };
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -2225,6 +2249,12 @@
 				E4F200000000000000000003 /* QuietZoneFeedForwardSurveyController.swift in Sources */,
 				E4F200000000000000000004 /* ProductionFeedForwardDesignSurveyCard.swift in Sources */,
 				E11B00000000000000000041 /* EQBandPanelModel.swift in Sources */,
+				E27A00000000000000000100 /* EQValueParser.swift in Sources */,
+				E27A00000000000000000101 /* EQNudge.swift in Sources */,
+				E27A00000000000000000102 /* EQGraphGeometry.swift in Sources */,
+				E27A00000000000000000103 /* EQEditHistory.swift in Sources */,
+				E27A00000000000000000104 /* EQNumberField.swift in Sources */,
+				E27A00000000000000000105 /* EQGraphInteraction.swift in Sources */,
 				E26C00000000000000000041 /* ProductionSubAwareQuietZoneCard.swift in Sources */,
 				E4F300000000000000000001 /* QuietZoneFeedForwardShadowPlan.swift in Sources */,
 				E4F300000000000000000002 /* QuietZoneFeedForwardShadow.swift in Sources */,
@@ -2369,6 +2399,10 @@
 				E26B00000000000000000003 /* RankOneBassWiringTests.swift in Sources */,
 				E26B00000000000000000022 /* SubSafetyTests.swift in Sources */,
 				E11B00000000000000000042 /* EQBandPanelModelTests.swift in Sources */,
+				E27A00000000000000000106 /* EQValueParserTests.swift in Sources */,
+				E27A00000000000000000107 /* EQNudgeTests.swift in Sources */,
+				E27A00000000000000000108 /* EQEditHistoryTests.swift in Sources */,
+				E27A00000000000000000109 /* EQGraphGeometryTests.swift in Sources */,
 				E26C00000000000000000022 /* SubAwareArmingTests.swift in Sources */,
 				F96000000000000000000002 /* QuietZoneFeedForwardTests.swift in Sources */,
 				F96000000000000000000005 /* QuietZoneFeedForwardProbeTests.swift in Sources */,
