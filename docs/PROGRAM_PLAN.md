@@ -73,7 +73,7 @@ reviewers compare with Dirac and REW), then engine depth, then breadth.
    - then E26 Sub-aware Quiet Zone, S1–S7 in written order, before item 2 (owner, 4 Nov 2026; owner 5 Nov 2026: all remaining slices S2–S7 complete before E9 FIR limits (item 4), so E9 S2 waits; S1 waits for E25 S8b; no live ANC path is enabled outside the per-feature arm)
    - then the programme audit of all completed epics, before item 2 and again after every epic completes (owner, 6 Nov 2026; see `docs/epics/README.md`)
    - then E27 Equalizer page polish, S1, S2, S3a, S3b, S2b, S4 in written order, once #395 (merged 7 Nov 2026) and the plan are merged (owner, 7 Nov 2026; placement before item 4 confirmed, owner decision 7 in `docs/epics/E27.md`)
-   - then E6 S12a–S12h legacy-kernel migration, in written order, after E27 S4 (owner, 7 Nov 2026; E6 decisions 13–14): every stage still on `N60RenderKernel`, the old N-channel path or the legacy binaural pipeline moves to the unified graph. E28 S1 starts only after all of them have merged
+   - then E6 S12a–S12h legacy-kernel migration, in written order, after E27 S4 (owner, 7 Nov 2026; E6 decisions 13–19): every stage still on `N60RenderKernel`, the old N-channel path or the legacy binaural pipeline moves to the unified graph. E28 S1 starts only after all of them have merged
    - then E28 Dynamics and Meters polish, S1–S6, S7a–S7d, S8 in written order, after E6 S12a–S12h and before E9 FIR limits (item 4) (owner, 7 Nov 2026; owner decisions 1, 6–8 and 12 in `docs/epics/E28.md`)
 2. E12 Guided setup and information architecture, S7 `e12/ship` (merged #243, 26 Oct 2026)
 3. E11 Measurement suite, S10 `e11/overlays-and-ship` (merged #222, 25 Oct 2026)
@@ -179,10 +179,10 @@ Gate G2 passed on 2026-10-25 (commit 07e82c6)
   - [ ] S12b stereo mode, widener, de-harsh and de-esser in the core
   - [ ] S12c loudness match, loudness contour, per-band loudness and dialogue leveler in the core
   - [ ] S12d multiband compressor in the core, with per-band auto release (closes E28 G11)
-  - [ ] S12e stereo global bypass and audition on the graph; wide PEQ (over 16 sections, types 8–10, kernel gain range) (owner questions 16–17)
+  - [ ] S12e stereo global bypass and audition on the graph; wide PEQ (over 16 sections, types 8–10, kernel gain range); D5 semantics as parity exception P1, delta audition ported (E6 decisions 16–17)
   - [ ] S12f stereo crossover and room/IR with subs, oversampling-only protection, the three ordering guards, named refusals and a UI-range attach test
-  - [ ] S12g old N-channel and legacy binaural path reasons onto the graph (owner question 18)
-  - [ ] S12h stereo Active Quiet Zone on the graph, authorisation unchanged (needs-owner, ANC; owner question 15)
+  - [ ] S12g old N-channel and legacy binaural path reasons onto the graph; `binauralBudget` raised within measured cost, refused beyond (E6 decision 18)
+  - [ ] S12h stereo Active Quiet Zone on the graph, authorisation unchanged (needs-owner, ANC; E6 decision 15)
 
 ### E7 384 kHz everywhere
 
