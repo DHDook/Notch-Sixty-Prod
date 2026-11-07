@@ -375,6 +375,7 @@ Owner decision, 20 Oct 2026: the kernel stays behind `e6.legacy-kernel` until la
 then this epic deletes it before E22 hardware validation, so v1 ships and is validated on the
 unified graph only.
 
+- [ ] First slice (owner decision 7 Nov 2026, E6 G1): graph-vs-kernel full-config corpus (every stage on, all layouts, eight rates) plus the E6 S5 stereo-chain parity and latency test (latency report equals measured impulse delay). `N60RenderKernel` must not be deleted until it is green
 - [ ] Confirm nothing falls back to the kernel (E6 S8d, S8e; E4 S11 for AQZ/ANC)
 - [ ] Delete `N60RenderKernel`, the old N-channel path and the `e6.legacy-kernel` flag
 - [ ] Update `docs/DSP_KERNEL.md`, `docs/ARCHITECTURE.md` and the `AGENTS.md` mention, in coordination with E21
