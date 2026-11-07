@@ -1566,6 +1566,48 @@ final class RoomCorrectionProjectControllerTests: XCTestCase {
     }
 
 
+    /// E24 S11: the Room Correction tab's Deploy writes a stereo filter; with joint-bass grids installed on the sub lanes it
+    /// refuses instead of silently dropping them. Room-only lanes (no sub grid) are not affected by the guard.
+    func testTabDeployRefusesWhileJointBassGridsAreInstalled() throws {
+        let fixture = try makeFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        _ = try fixture.controller.retainMeasurement(
+            analysis(capturedAt: 1, leftMagnitude: [0, 5], rightMagnitude: [0, 5], frequencies: [100, 1_000], snr: 20),
+            sweep: sweep(), microphone: microphone())
+        try fixture.controller.setTarget(RoomCorrectionBuiltInTarget.flat.curve)
+        _ = try fixture.controller.generateDesign(
+            parameters: RoomCorrectionDesignParameters(
+                correctionLowHz: 100, correctionHighHz: 1_000, smoothingOctaves: 0, maximumBoostDB: 4,
+                maximumCutDB: 6, requestedTapCount: 1_024),
+            name: "Tab design")
+
+        let frequencies = try RoomCorrectionCore.gridFrequencies()
+        let grid = RoomCorrectionGridDesign(
+            correctionDB: frequencies.map { $0 < 500 ? -1 : 0 },
+            correctionPhaseRadians: [Double](repeating: 0, count: frequencies.count),
+            coherence: [Double](repeating: 0, count: frequencies.count), seatContribution: [])
+        func install(lanes: [Int]) -> RoomCorrectionConfiguration {
+            RoomCorrectionConfiguration(enabled: true, lanes: RoomCorrectionLaneInstall(
+                name: "Wizard",
+                design: RoomCorrectionMultiLaneDesign(
+                    latencyMode: .video, laneCount: 3, lanes: lanes.map { RoomCorrectionLaneDesign(lane: $0, grid: grid) }),
+                programLaneCount: 2, subwooferCount: 1))
+        }
+        // Room only on the main lanes: the guard does not fire (verification may still reject this synthetic design).
+        try fixture.profiles.replaceSelectedSystemRoomCorrection(install(lanes: [0, 1]), calibrationSummary: nil)
+        do { try fixture.controller.deploySelectedDesign() } catch {
+            XCTAssertNotEqual(error as? RoomCorrectionProjectControllerError, .jointBassInstalled)
+        }
+        // Bass grid on the sub lane (index programLanes + 0): refused, and the installed lanes are untouched.
+        let withBass = install(lanes: [0, 1, 2])
+        try fixture.profiles.replaceSelectedSystemRoomCorrection(withBass, calibrationSummary: nil)
+        XCTAssertThrowsError(try fixture.controller.deploySelectedDesign()) {
+            XCTAssertEqual($0 as? RoomCorrectionProjectControllerError, .jointBassInstalled)
+        }
+        XCTAssertEqual(fixture.profiles.selectedSystemProfile?.state.roomCorrection, withBass)
+        XCTAssertNotNil(RoomCorrectionProjectControllerError.jointBassInstalled.errorDescription)
+    }
+
     func testIntelligentTargetGenerationPersistsAndManualTargetInvalidatesReport() throws {
         let fixture = try makeFixture()
         defer { try? FileManager.default.removeItem(at: fixture.root) }
