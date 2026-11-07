@@ -95,7 +95,7 @@ enum RoomCorrectionLanePlanError: Error, Equatable, LocalizedError {
         case .duplicateLane(let lane):
             return "Lane \(lane) appears twice in the design."
         case .synthesis(let status):
-            return "Filter synthesis failed (status \(status))."
+            return "Filter synthesis failed: \(String(cString: n60_correct_status_name(status))) (status \(status))."
         }
     }
 }
@@ -111,6 +111,7 @@ final class RoomCorrectionRateCache: @unchecked Sendable {
         var id: UUID
         var mode: RoomCorrectionLatencyMode
         var rate: Int
+        var scheme: UInt32
     }
 
     private let lock = NSLock()
@@ -124,7 +125,8 @@ final class RoomCorrectionRateCache: @unchecked Sendable {
     /// The plan for `rate`, from the cache when this design has been synthesised at that rate before.
     /// Throws `.legacyKernel` (with a user-facing reason) when `unifiedGraphEnabled` is false.
     func plan(
-        for design: RoomCorrectionMultiLaneDesign, sampleRate: Double, unifiedGraphEnabled: Bool = true
+        for design: RoomCorrectionMultiLaneDesign, sampleRate: Double, unifiedGraphEnabled: Bool = true,
+        firScheme: UInt32 = UnifiedGraphFIRScheme.current()
     ) throws -> RoomCorrectionLanePlan {
         guard unifiedGraphEnabled else { throw RoomCorrectionLanePlanError.legacyKernel }
         guard !design.lanes.isEmpty else { throw RoomCorrectionLanePlanError.noLanes }
@@ -135,15 +137,17 @@ final class RoomCorrectionRateCache: @unchecked Sendable {
             }
             guard seen.insert(item.lane).inserted else { throw RoomCorrectionLanePlanError.duplicateLane(item.lane) }
         }
-        let key = Key(id: design.id, mode: design.latencyMode, rate: Self.rateKey(sampleRate))
+        let key = Key(id: design.id, mode: design.latencyMode, rate: Self.rateKey(sampleRate), scheme: firScheme)
         lock.lock()
         let cached = plans[key]
         lock.unlock()
         if let cached { return cached }
 
-        // A design longer than the single-band stage holds is carried by the two-band stage (E10 S8).
+        // A design longer than the single-band stage holds is carried by the two-band stage (E10 S8); with the long scheme
+        // (E9 S4, `e9.long-fir`) it is single band up to 262,144 taps and longer ones are refused by name.
         let required = Int(n60_correct_latency_mode_tap_count(design.latencyMode.rawValue, sampleRate))
-        let twoBand = required > Self.maximumSingleBandTaps
+        let stagePlan = try Self.stagePlan(span: required, scheme: firScheme)
+        let twoBand = stagePlan.two_band != 0
 
         // Lanes with the same grid share one synthesis and one stage.
         var groups: [(grid: RoomCorrectionGridDesign, lanes: [Int])] = []
@@ -186,12 +190,35 @@ final class RoomCorrectionRateCache: @unchecked Sendable {
         return plan
     }
 
+    /// Which stage carries a design of `span` taps (`n60_correct_plan_stage`); throws `.synthesis(N60_CORRECT_ERR_TOO_LONG)`
+    /// when no stage of the scheme can.
+    static func stagePlan(span: Int, scheme: UInt32) throws -> n60_correct_stage_plan {
+        var plan = n60_correct_stage_plan()
+        let status = n60_correct_plan_stage(UInt64(max(0, span)), UnifiedGraphFIRScheme.designerSingleBandCap(scheme), &plan)
+        guard status == N60_CORRECT_OK else { throw RoomCorrectionLanePlanError.synthesis(status) }
+        return plan
+    }
+
+    /// The Room Correction tap picker's note for a `taps`-long design under `scheme` (E9 S4): nil with the uniform scheme
+    /// (the picker is unchanged), otherwise the stage `n60_correct_plan_stage` chooses or the named refusal.
+    static func stageNote(taps: Int, scheme: UInt32) -> String? {
+        guard scheme == UnifiedGraphFIRScheme.nonUniform, taps > maximumSingleBandTaps else { return nil }
+        do {
+            return try stagePlan(span: taps, scheme: scheme).two_band != 0 ? "two-band" : "single band"
+        } catch RoomCorrectionLanePlanError.synthesis(let status) {
+            return String(cString: n60_correct_status_name(status))
+        } catch {
+            return nil
+        }
+    }
+
     /// Synthesises on a background task, for the rate-change path (never on the main actor or an audio thread).
     func planAsync(
-        for design: RoomCorrectionMultiLaneDesign, sampleRate: Double, unifiedGraphEnabled: Bool = true
+        for design: RoomCorrectionMultiLaneDesign, sampleRate: Double, unifiedGraphEnabled: Bool = true,
+        firScheme: UInt32 = UnifiedGraphFIRScheme.current()
     ) async throws -> RoomCorrectionLanePlan {
         try await Task.detached(priority: .userInitiated) { [self] in
-            try plan(for: design, sampleRate: sampleRate, unifiedGraphEnabled: unifiedGraphEnabled)
+            try plan(for: design, sampleRate: sampleRate, unifiedGraphEnabled: unifiedGraphEnabled, firScheme: firScheme)
         }.value
     }
 

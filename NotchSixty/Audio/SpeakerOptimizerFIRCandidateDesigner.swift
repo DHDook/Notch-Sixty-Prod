@@ -9,6 +9,19 @@ enum SpeakerOptimizerFIRCandidateError: Error, Equatable {
     case transformUnavailable
     case nonFiniteSynthesis
     case invalidEvidenceMask
+    /// E9 S4: the requested filter is longer than the longest the active FIR scheme supports (named, not a generic refusal).
+    case filterTooLong(requested: Int, maximum: Int)
+}
+
+extension SpeakerOptimizerFIRCandidateError: LocalizedError {
+    var errorDescription: String? {
+        switch self {
+        case .filterTooLong(let requested, let maximum):
+            return "Filter longer than the longest supported (\(maximum) taps): \(requested) taps requested."
+        default:
+            return nil
+        }
+    }
 }
 
 /// Explicitly finite linear-phase latency: odd-length symmetric FIRs have
@@ -22,8 +35,8 @@ struct SpeakerOptimizerFIRConstraints: Equatable, Sendable {
     var minimumModeledImprovementDB = 0.05
     var maximumTruncationOvershootDB = 0.35
 
-    func valid() -> Bool {
-        tapCount >= 257 && tapCount <= Int(N60_PROGRAM_FIR_MAX_TAPS)
+    func valid(firScheme: UInt32 = UnifiedGraphFIRScheme.current()) -> Bool {
+        tapCount >= 257 && tapCount <= UnifiedGraphFIRScheme.maxTaps(firScheme)
             && tapCount % 2 == 1
             && maximumGroupDelayMilliseconds.isFinite
             && (0...100).contains(maximumGroupDelayMilliseconds)
@@ -78,9 +91,14 @@ struct SpeakerOptimizerFIRCandidateDesigner: Sendable {
         seatWeights: [UUID: Double]? = nil,
         options: SpeakerOptimizerDesignOptions = .init(),
         constraints: SpeakerOptimizerFIRConstraints = .init(),
-        evidenceMask: SpeakerOptimizerCorrectionEvidenceMask? = nil
+        evidenceMask: SpeakerOptimizerCorrectionEvidenceMask? = nil,
+        firScheme: UInt32 = UnifiedGraphFIRScheme.current()
     ) throws -> SpeakerOptimizerFIRCandidatePlan {
-        guard constraints.valid() else { throw SpeakerOptimizerFIRCandidateError.invalidConstraints }
+        let maximumTaps = UnifiedGraphFIRScheme.maxTaps(firScheme)
+        if constraints.tapCount > maximumTaps {
+            throw SpeakerOptimizerFIRCandidateError.filterTooLong(requested: constraints.tapCount, maximum: maximumTaps)
+        }
+        guard constraints.valid(firScheme: firScheme) else { throw SpeakerOptimizerFIRCandidateError.invalidConstraints }
         let rate = baseline.sampleRate
         guard rate.isFinite, (16_000...384_000).contains(rate) else {
             throw SpeakerOptimizerFIRCandidateError.invalidSampleRate
@@ -101,7 +119,7 @@ struct SpeakerOptimizerFIRCandidateDesigner: Sendable {
             baseline: baseline, seatWeights: seatWeights, options: options
         )
         let seatWeights = try normalizedWeights(baseline.positions, seatWeights)
-        let transformSize = try Self.transformSize(tapCount: constraints.tapCount)
+        let transformSize = try Self.transformSize(tapCount: constraints.tapCount, maximumTaps: maximumTaps)
         let transform = try SpeakerOptimizerFIRTransform(size: transformSize)
 
         var candidates: [SpeakerOptimizerFIRSourceCandidate] = []
@@ -147,7 +165,8 @@ struct SpeakerOptimizerFIRCandidateDesigner: Sendable {
             }
             let impulse = try synthesize(
                 correctionDB: desired, frequencies: freqs,
-                sampleRate: rate, tapCount: constraints.tapCount
+                sampleRate: rate, tapCount: constraints.tapCount,
+                singleBandCap: UnifiedGraphFIRScheme.designerSingleBandCap(firScheme)
             )
             let spectrum = transform.forward(impulse)
             let response = try transferMagnitude(
@@ -211,11 +230,11 @@ struct SpeakerOptimizerFIRCandidateDesigner: Sendable {
         )
     }
 
-    private static func transformSize(tapCount: Int) throws -> Int {
+    private static func transformSize(tapCount: Int, maximumTaps: Int) throws -> Int {
         // Prefer a transform larger than the truncated impulse so edge
         // tapering is sampled finely without circular aliasing.
         let required = max(4096, tapCount * 4)
-        guard required <= Int(N60_PROGRAM_FIR_MAX_TAPS) * 8 else {
+        guard required <= maximumTaps * 8 else {
             throw SpeakerOptimizerFIRCandidateError.invalidConstraints
         }
         var size = 1
@@ -223,12 +242,12 @@ struct SpeakerOptimizerFIRCandidateDesigner: Sendable {
         return size
     }
 
-    /// Linear-phase synthesis by the portable core (`n60_correct_synthesize_linear_phase_banded`, E8 S8b): the interpolated
+    /// Linear-phase synthesis by the portable core (`n60_correct_synthesize_linear_phase_capped`, E8 S8b, E9 S4): the interpolated
     /// correction is delayed by exactly (tapCount - 1) / 2 frames and Blackman-windowed over tapCount frames, with the
     /// one-third-octave measurement-band edge taper applied in the core. 0 dB outside the measured band.
     private func synthesize(
         correctionDB: [Double], frequencies: [Double],
-        sampleRate: Double, tapCount: Int
+        sampleRate: Double, tapCount: Int, singleBandCap: UInt32
     ) throws -> [Float] {
         guard let low = frequencies.first, let high = frequencies.last, low > 0, high > low else {
             throw SpeakerOptimizerFIRCandidateError.invalidFrequencyGrid
@@ -238,14 +257,17 @@ struct SpeakerOptimizerFIRCandidateDesigner: Sendable {
         var taper = n60_correct_band_taper(low_hz: low, high_hz: high, edge_octaves: 1.0 / 3.0)
         var report = n60_correct_two_band_report()
         let status = withUnsafeMutablePointer(to: &context) { pointer in
-            n60_correct_synthesize_linear_phase_banded(
+            n60_correct_synthesize_linear_phase_capped(
                 sampleRate, UInt32((tapCount - 1) / 2),
                 { hz, user in
                     let curve = user!.assumingMemoryBound(to: CorrectionCurve.self).pointee
                     return pow(10.0, curve.interpolatedDB(hz) / 20.0)
                 },
-                pointer, &taper, &taps, UInt64(tapCount), nil, 0, &report
+                pointer, &taper, singleBandCap, &taps, UInt64(tapCount), nil, 0, &report
             )
+        }
+        if status == N60_CORRECT_ERR_TOO_LONG {
+            throw SpeakerOptimizerFIRCandidateError.filterTooLong(requested: tapCount, maximum: Int(singleBandCap))
         }
         guard status == N60_CORRECT_OK, report.low_tap_count == 0, report.full_tap_count == UInt32(tapCount),
               taps.allSatisfy(\.isFinite) else {

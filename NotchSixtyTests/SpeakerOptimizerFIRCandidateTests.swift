@@ -118,6 +118,46 @@ final class SpeakerOptimizerFIRCandidateTests: XCTestCase {
         }
     }
 
+    /// E9 S4: with the long scheme the core designs a 65,535-tap single-band candidate (the delay limit lets it run at
+    /// the two highest rates); with the uniform scheme the request is refused with a named reason.
+    func testLongSchemeDesignsA65535TapCandidateAndTheUniformSchemeNamesTheRefusal() throws {
+        for rate in [352_800.0, 384_000] {
+            var constraints = SpeakerOptimizerFIRConstraints()
+            constraints.tapCount = 65_535
+            constraints.maximumGroupDelayMilliseconds = 100
+            let baseline = stableBaseline(sampleRate: rate)
+            let result = try SpeakerOptimizerFIRCandidateDesigner().design(
+                baseline: baseline, constraints: constraints, firScheme: UnifiedGraphFIRScheme.nonUniform)
+            XCTAssertEqual(result.declaredGroupDelayFrames, 32_767, "\(rate)")
+            let candidate = try XCTUnwrap(result.sources.first)
+            XCTAssertEqual(candidate.taps.count, 65_535, "\(rate): " + candidate.blockingReasons.joined(separator: "; "))
+            XCTAssertTrue(candidate.taps.allSatisfy(\.isFinite))
+            for i in 0..<32_767 where i % 997 == 0 {
+                XCTAssertEqual(candidate.taps[i], candidate.taps[65_534 - i], accuracy: 1e-6, "\(rate) tap \(i)")
+            }
+            XCTAssertThrowsError(try SpeakerOptimizerFIRCandidateDesigner().design(
+                baseline: baseline, constraints: constraints, firScheme: UnifiedGraphFIRScheme.uniform)) { error in
+                XCTAssertEqual(error as? SpeakerOptimizerFIRCandidateError,
+                               .filterTooLong(requested: 65_535, maximum: 32_768), "\(rate)")
+                XCTAssertTrue(error.localizedDescription.contains("longest supported (32768 taps)"))
+            }
+        }
+    }
+
+    /// E9 S4: the long scheme leaves designs inside 32,768 taps as they were, at every standard rate.
+    func testLongSchemeKeepsShortDesignsSingleBandAtStandardRates() throws {
+        for rate in [44_100.0, 48_000, 88_200, 96_000, 176_400, 192_000, 352_800, 384_000] {
+            var constraints = SpeakerOptimizerFIRConstraints()
+            constraints.tapCount = 2 * Int((1024 * rate / 48_000).rounded()) + 1
+            let baseline = stableBaseline(sampleRate: rate)
+            let uniform = try SpeakerOptimizerFIRCandidateDesigner().design(
+                baseline: baseline, constraints: constraints, firScheme: UnifiedGraphFIRScheme.uniform)
+            let long = try SpeakerOptimizerFIRCandidateDesigner().design(
+                baseline: baseline, constraints: constraints, firScheme: UnifiedGraphFIRScheme.nonUniform)
+            XCTAssertEqual(try XCTUnwrap(long.sources.first).taps, try XCTUnwrap(uniform.sources.first).taps, "\(rate)")
+        }
+    }
+
     private func stableBaseline(sampleRate: Double = 48_000) -> SpeakerOptimizerMeasurementSet {
         let source: MultichannelCalibrationSource = .speaker(.frontLeft)
         let frequencies = (0..<96).map { index in

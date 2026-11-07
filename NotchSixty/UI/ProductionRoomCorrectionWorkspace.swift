@@ -1327,11 +1327,13 @@ struct ProductionRoomCorrectionWorkspace: View {
     /// Tap count plus the span it covers at the measured rate; resolution at
     /// low frequencies follows the span, not the tap count.
     private func firLengthLabel(_ taps: Int) -> String {
+        let note = RoomCorrectionRateCache.stageNote(taps: taps, scheme: UnifiedGraphFIRScheme.current())
+            .map { " · \($0)" } ?? ""
         guard let rate = projects.project?.sweep?.sampleRate, rate > 0 else {
-            return "\(taps.formatted()) taps"
+            return "\(taps.formatted()) taps\(note)"
         }
         let milliseconds = Double(taps) / rate * 1_000
-        return "\(taps.formatted()) taps · \(Int(milliseconds.rounded())) ms"
+        return "\(taps.formatted()) taps · \(Int(milliseconds.rounded())) ms\(note)"
     }
 
     private func formattedRate(_ rate: Double) -> String {
