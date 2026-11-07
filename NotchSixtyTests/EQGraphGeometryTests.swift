@@ -11,7 +11,8 @@ final class EQGraphGeometryTests: XCTestCase {
         XCTAssertEqual(EQGraphGeometry(sampleRate: 44_100).maximumFrequency, 44_100 * 0.49, accuracy: 1e-9)
         XCTAssertEqual(EQGraphGeometry(sampleRate: 96_000).maximumFrequency, 96_000 * 0.49, accuracy: 1e-9)
         XCTAssertEqual(EQGraphGeometry(sampleRate: 192_000).maximumFrequency, 94_080, accuracy: 1e-9)
-        XCTAssertEqual(EQGraphGeometry(sampleRate: 384_000).maximumFrequency, 96_000)
+        // E27 S2: the axis reaches 0.49 fs at every rate (it was capped at 96 kHz in S1).
+        XCTAssertEqual(EQGraphGeometry(sampleRate: 384_000).maximumFrequency, 188_160, accuracy: 1e-9)
         XCTAssertEqual(EQGraphGeometry(sampleRate: 0).maximumFrequency, 48_000 * 0.49, accuracy: 1e-9)
     }
 

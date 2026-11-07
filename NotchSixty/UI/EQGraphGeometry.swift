@@ -3,8 +3,9 @@ import Foundation
 
 /// E27 S1: the Equalizer response graph's coordinate maps, hit tests and drag rules as plain
 /// value types, kept out of the view so they can be tested at every sample rate without a
-/// window. The axes are the ones the graph already draws: frequency is logarithmic from
-/// 20 Hz to min(96 kHz, 0.49 fs), gain is linear from -24 to +24 dB, y grows downward.
+/// window. Frequency is logarithmic from 20 Hz to 0.49 fs (or the 20 kHz Audible zoom, E27 S2),
+/// gain is linear over the visible range (+/-24 dB unless a y preset narrows or widens it),
+/// y grows downward.
 struct EQGraphGeometry: Equatable, Sendable {
     static let minimumFrequency = 20.0
     static let minimumDB = -24.0
@@ -16,11 +17,16 @@ struct EQGraphGeometry: Equatable, Sendable {
     /// Hit radius of a handle in points (an 11 pt handle radius plus the 10 pt inset).
     static let handleHitRadius = 21.0
 
+    /// The right-hand edge of the visible frequency axis.
     let maximumFrequency: Double
+    /// The visible gain range; the fields and the band limits stay at `minimumDB`...`maximumDB`.
+    let displayMinimumDB: Double
+    let displayMaximumDB: Double
 
-    init(sampleRate: Double) {
-        let ceiling = sampleRate.isFinite && sampleRate > 0 ? sampleRate * 0.49 : 48_000 * 0.49
-        maximumFrequency = min(96_000, max(Self.minimumFrequency * 1.01, ceiling))
+    init(sampleRate: Double, zoom: EQGraphXZoom = .full, visibleDB: ClosedRange<Double> = EQGraphGeometry.minimumDB...EQGraphGeometry.maximumDB) {
+        maximumFrequency = zoom.maximumFrequency(sampleRate: sampleRate)
+        displayMinimumDB = visibleDB.lowerBound
+        displayMaximumDB = max(visibleDB.upperBound, visibleDB.lowerBound + 0.001)
     }
 
     // MARK: Maps
@@ -37,13 +43,13 @@ struct EQGraphGeometry: Equatable, Sendable {
     }
 
     func y(db: Double, height: CGFloat) -> CGFloat {
-        let clamped = min(max(db, Self.minimumDB), Self.maximumDB)
-        return CGFloat((Self.maximumDB - clamped) / (Self.maximumDB - Self.minimumDB)) * height
+        let clamped = min(max(db, displayMinimumDB), displayMaximumDB)
+        return CGFloat((displayMaximumDB - clamped) / (displayMaximumDB - displayMinimumDB)) * height
     }
 
     func gain(y: CGFloat, height: CGFloat) -> Double {
         let t = min(max(Double(y / max(height, 1)), 0), 1)
-        return Self.maximumDB - t * (Self.maximumDB - Self.minimumDB)
+        return displayMaximumDB - t * (displayMaximumDB - displayMinimumDB)
     }
 
     func point(frequency: Double, gainDB: Double, size: CGSize) -> CGPoint {

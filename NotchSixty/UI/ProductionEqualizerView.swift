@@ -14,6 +14,13 @@ struct ProductionEqualizerView: View {
     /// E27 S1: undo and redo for edits made on this page, on the window's undo manager.
     @Environment(\.undoManager) private var undoManager
     @State private var history = EQEditHistory()
+    /// E27 S2: the graph's view, ranges and band curves. Ranges and curves persist.
+    @AppStorage(PreferenceKeys.Equalizer.graphYRange) private var yRangeRaw = EQGraphYRange.plusMinus24.rawValue
+    @AppStorage(PreferenceKeys.Equalizer.graphXZoom) private var xZoomRaw = EQGraphXZoom.full.rawValue
+    @AppStorage(PreferenceKeys.Equalizer.bandCurves) private var bandCurvesRaw = EQBandCurvesMode.selected.rawValue
+    @State private var graphView: EQGraphView = .magnitude
+    @State private var series: EQAnalysisSeries?
+    @State private var autoMemory = EQAutoRangeMemory()
 
     private func perform(_ action: () throws -> Void) {
         do {
@@ -44,6 +51,44 @@ struct ProductionEqualizerView: View {
     private var bands: [EQBand] { configuration.editableBands }
     private var sampleRate: Double { engine.selectedOutputDevice?.nominalSampleRate ?? 48_000 }
     private var maximumFrequency: Double { max(20, sampleRate * 0.49) }
+    private var yRange: EQGraphYRange { EQGraphYRange(rawValue: yRangeRaw) ?? .plusMinus24 }
+    private var xZoom: EQGraphXZoom { EQGraphXZoom(rawValue: xZoomRaw) ?? .full }
+    private var bandCurvesMode: EQBandCurvesMode { EQBandCurvesMode(rawValue: bandCurvesRaw) ?? .selected }
+    /// The bands as drawn: the band under a drag shows its preview.
+    private var shownBands: [EQBand] {
+        bands.map { band in dragPreview.flatMap { $0.id == band.id ? $0 : nil } ?? band }
+    }
+
+    private struct AnalysisKey: Equatable {
+        let bands: [EQBand]
+        let phaseMode: EQPhaseMode
+        let sampleRate: Double
+        let view: EQGraphView
+        let zoom: EQGraphXZoom
+    }
+
+    private var analysisKey: AnalysisKey {
+        AnalysisKey(bands: shownBands, phaseMode: configuration.phaseMode, sampleRate: sampleRate, view: graphView, zoom: xZoom)
+    }
+
+    /// Phase, group delay, impulse and step are computed off the main thread on value types and
+    /// restarted by the next edit after a 50 ms pause (design 6). Magnitude draws directly.
+    private func refreshSeries(_ key: AnalysisKey) async {
+        guard key.view != .magnitude else {
+            series = nil
+            return
+        }
+        try? await Task.sleep(for: .milliseconds(50))
+        guard !Task.isCancelled else { return }
+        let upper = key.zoom.maximumFrequency(sampleRate: key.sampleRate)
+        let result = await Task.detached(priority: .userInitiated) {
+            let analysis = EQFilterAnalysis(bands: key.bands, phaseMode: key.phaseMode, sampleRate: key.sampleRate)
+            let grid = EQFilterAnalysis.frequencyGrid(lower: EQGraphGeometry.minimumFrequency, upper: upper, count: 360)
+            return analysis.series(for: key.view, frequencies: grid)
+        }.value
+        guard !Task.isCancelled else { return }
+        series = result
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -63,6 +108,7 @@ struct ProductionEqualizerView: View {
             .layoutPriority(1)
         }
         .padding(24)
+        .task(id: analysisKey) { await refreshSeries(analysisKey) }
         .onAppear {
             ensureSelection()
             configureHistory()
@@ -179,7 +225,17 @@ struct ProductionEqualizerView: View {
                     .foregroundStyle(.secondary)
             }
 
+            graphControls
+
+            let shown = shownBands
+            let program = ProductionEQResponseMath.compile(bands: shown, sampleRate: sampleRate)
+            let geometry = graphGeometry(program: program)
             ProductionEQResponseGraph(
+                geometry: geometry,
+                graphView: graphView,
+                series: series,
+                curvesMode: bandCurvesMode,
+                otherLane: EQBandCurves.otherLane(in: configuration),
                 bands: bands,
                 selectedBandID: selectedBandID,
                 previewBand: dragPreview,
@@ -210,6 +266,17 @@ struct ProductionEqualizerView: View {
             )
             .frame(minHeight: 260, maxHeight: .infinity)
 
+            if let note = graphView == .magnitude ? nil : series?.note {
+                Label(note, systemImage: "info.circle")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            if graphView != .magnitude {
+                Text("Bands are edited on the Magnitude view or in the Bands list.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             if bands.contains(where: { $0.enabled && $0.type == .fir }) {
                 Label(
                     "Per-band FIR processing remains active, but imported FIR magnitude is intentionally omitted from this first live curve rather than approximated inaccurately.",
@@ -222,6 +289,58 @@ struct ProductionEqualizerView: View {
         .padding(16)
         .frame(maxHeight: .infinity, alignment: .top)
         .background(.quaternary.opacity(0.24), in: .rect(cornerRadius: 20))
+    }
+
+    private var graphControls: some View {
+        HStack(spacing: 12) {
+            Picker("View", selection: $graphView) {
+                ForEach(EQGraphView.allCases) { view in Text(view.displayName).tag(view) }
+            }
+            .labelsHidden()
+            .pickerStyle(.segmented)
+            .fixedSize()
+            .accessibilityLabel("Graph view")
+
+            Spacer(minLength: 8)
+
+            Picker("Band curves", selection: $bandCurvesRaw) {
+                ForEach(EQBandCurvesMode.allCases) { mode in Text(mode.displayName).tag(mode.rawValue) }
+            }
+            .pickerStyle(.menu)
+            .fixedSize()
+            .disabled(graphView != .magnitude)
+            .help("Band curves: draw the selected band, every band or none under the total curve")
+
+            Picker("Range", selection: $yRangeRaw) {
+                ForEach(EQGraphYRange.allCases) { range in Text(range.displayName).tag(range.rawValue) }
+            }
+            .pickerStyle(.menu)
+            .fixedSize()
+            .disabled(graphView != .magnitude)
+            .help("Visible gain range; Auto fits the largest response plus 3 dB")
+
+            Picker("Frequencies", selection: $xZoomRaw) {
+                ForEach(EQGraphXZoom.allCases) { zoom in Text(zoom.displayName).tag(zoom.rawValue) }
+            }
+            .labelsHidden()
+            .pickerStyle(.segmented)
+            .fixedSize()
+            .disabled(!graphView.isFrequencyDomain)
+            .accessibilityLabel("Frequency range")
+        }
+    }
+
+    /// The graph's coordinate maps for the chosen zoom and gain range. Auto widens during a
+    /// drag but only narrows once the drag ends.
+    private func graphGeometry(program: [N60BiquadCoefficients]) -> EQGraphGeometry {
+        var half = yRange.fixedHalfRange ?? 24
+        if graphView == .magnitude, yRange == .auto {
+            let upper = xZoom.maximumFrequency(sampleRate: sampleRate)
+            let grid = EQFilterAnalysis.frequencyGrid(lower: EQGraphGeometry.minimumFrequency, upper: upper, count: 180)
+            let peak = grid.reduce(0.0) { max($0, abs(ProductionEQResponseMath.responseDB(program: program, sampleRate: sampleRate, frequencyHz: $1))) }
+            half = autoMemory.resolve(.auto, peakMagnitudeDB: peak, growOnly: dragPreview != nil)
+        }
+        return EQGraphGeometry(sampleRate: sampleRate, zoom: xZoom, visibleDB: -half...half)
     }
 
     // MARK: Bands panel
@@ -839,6 +958,12 @@ private enum EQGraphQScale {
 }
 
 private struct ProductionEQResponseGraph: View {
+    /// E27 S2: the coordinate maps (zoom and gain range), view, curve and ghost choices.
+    let geometry: EQGraphGeometry
+    let graphView: EQGraphView
+    let series: EQAnalysisSeries?
+    let curvesMode: EQBandCurvesMode
+    let otherLane: (label: String, bands: [EQBand])?
     let bands: [EQBand]
     let selectedBandID: UUID?
     let previewBand: EQBand?
@@ -864,11 +989,10 @@ private struct ProductionEQResponseGraph: View {
     @State private var scrollAccumulator = EQNudge.ScrollAccumulator()
     @FocusState private var graphFocused: Bool
 
-    private let minimumDB = EQGraphGeometry.minimumDB
-    private let maximumDB = EQGraphGeometry.maximumDB
     private let minimumFrequency = EQGraphGeometry.minimumFrequency
+    private var minimumDB: Double { geometry.displayMinimumDB }
+    private var maximumDB: Double { geometry.displayMaximumDB }
 
-    private var geometry: EQGraphGeometry { EQGraphGeometry(sampleRate: sampleRate) }
     private var graphMaximumFrequency: Double { geometry.maximumFrequency }
 
     private var displayBands: [EQBand] {
@@ -882,15 +1006,27 @@ private struct ProductionEQResponseGraph: View {
         GeometryReader { proxy in
             let size = proxy.size
             let program = ProductionEQResponseMath.compile(bands: displayBands, sampleRate: sampleRate)
-            let handleBands = Array(displayBands.enumerated()).filter { $0.element.type != .fir }
+            // Handles sit on the magnitude axes, so the other views are read-only.
+            let handleBands = graphView == .magnitude
+                ? Array(displayBands.enumerated()).filter { $0.element.type != .fir }
+                : []
             ZStack {
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
                     .fill(.black.opacity(0.17))
 
                 Canvas { context, _ in
-                    drawGrid(context: &context, size: size)
-                    drawRTAOverlay(context: &context, size: size)
-                    drawResponse(context: &context, size: size, program: program)
+                    if graphView == .magnitude {
+                        drawGrid(context: &context, size: size)
+                        drawRTAOverlay(context: &context, size: size)
+                        drawGhostLane(context: &context, size: size)
+                        drawBandCurves(context: &context, size: size)
+                        drawResponse(context: &context, size: size, program: program)
+                    } else if let series, series.view == graphView {
+                        EQGraphSeriesDrawing.draw(
+                            context: &context, size: size, series: series,
+                            geometry: geometry, sampleRate: sampleRate
+                        )
+                    }
                 }
                 .opacity(bypassed ? 0.35 : 1)
                 .allowsHitTesting(false)
@@ -900,6 +1036,7 @@ private struct ProductionEQResponseGraph: View {
                     .contentShape(Rectangle())
                     .gesture(
                         SpatialTapGesture(count: 2).onEnded { value in
+                            guard graphView == .magnitude else { return }
                             let target = geometry.position(at: value.location, size: size)
                             onAddBand(target.frequencyHz, target.gainDB)
                         }
@@ -959,6 +1096,7 @@ private struct ProductionEQResponseGraph: View {
                         .allowsHitTesting(false)
                 }
 
+                if graphView == .magnitude {
                 EQGraphHoverOverlay(
                     model: hover,
                     geometry: geometry,
@@ -974,6 +1112,7 @@ private struct ProductionEQResponseGraph: View {
                     },
                     responseDB: { ProductionEQResponseMath.responseDB(program: program, sampleRate: sampleRate, frequencyHz: $0) }
                 )
+                }
             }
             .coordinateSpace(name: "eq.graph")
             .background(
@@ -1028,6 +1167,7 @@ private struct ProductionEQResponseGraph: View {
     }
 
     private func handleID(at point: CGPoint, size: CGSize) -> UUID? {
+        guard graphView == .magnitude else { return nil }
         let handles = displayBands
             .filter { $0.type != .fir }
             .map { EQGraphGeometry.Handle(id: $0.id, center: self.point(for: $0, size: size)) }
@@ -1053,7 +1193,7 @@ private struct ProductionEQResponseGraph: View {
     // MARK: Drawing
 
     private func drawGrid(context: inout GraphicsContext, size: CGSize) {
-        let frequencies: [Double] = [20, 50, 100, 200, 500, 1_000, 2_000, 5_000, 10_000, 20_000, 40_000, 80_000]
+        let frequencies: [Double] = [20, 50, 100, 200, 500, 1_000, 2_000, 5_000, 10_000, 20_000, 40_000, 80_000, 160_000]
         for frequency in frequencies where frequency <= graphMaximumFrequency {
             let x = xPosition(frequency, width: size.width)
             var path = Path()
@@ -1066,45 +1206,115 @@ private struct ProductionEQResponseGraph: View {
             )
         }
 
-        for db in stride(from: -24.0, through: 24.0, by: 6.0) {
+        let half = maximumDB
+        let step = EQGraphYRange.gridStep(halfRange: half)
+        var db = -half
+        while db <= half + 1.0e-9 {
             let y = yPosition(db, height: size.height)
             var path = Path()
             path.move(to: CGPoint(x: 0, y: y))
             path.addLine(to: CGPoint(x: size.width, y: y))
-            context.stroke(path, with: .color(.secondary.opacity(db == 0 ? 0.34 : 0.14)), lineWidth: db == 0 ? 1.3 : 1)
-            // The bottom -24 label would sit on the 20 Hz frequency label, so it is omitted;
+            let isZero = abs(db) < 1.0e-9
+            context.stroke(path, with: .color(.secondary.opacity(isZero ? 0.34 : 0.14)), lineWidth: isZero ? 1.3 : 1)
+            // The bottom label would sit on the 20 Hz frequency label, so it is omitted;
             // the top label is drawn below its gridline instead of above the plot.
-            if db != 0 && y < size.height - 24 {
+            if !isZero && y < size.height - 24 {
                 context.draw(
-                    Text("\(Int(db))").font(.system(size: 9, weight: .medium)).foregroundStyle(.secondary),
-                    at: CGPoint(x: 16, y: db == maximumDB ? y + 8 : y - 7)
+                    Text(String(format: "%g", db)).font(.system(size: 9, weight: .medium)).foregroundStyle(.secondary),
+                    at: CGPoint(x: 16, y: abs(db - half) < 1.0e-9 ? y + 8 : y - 7)
                 )
             }
+            db += step
         }
     }
 
     private func drawRTAOverlay(context: inout GraphicsContext, size: CGSize) {
         guard let rtaOverlay else { return }
-        let points = MeasurementPlotLayout.points(rtaOverlay, size: size, minDB: minimumDB, maxDB: maximumDB)
-        guard let first = points.first else { return }
         var path = Path()
-        path.move(to: first)
-        points.dropFirst().forEach { path.addLine(to: $0) }
+        var started = false
+        for (frequency, db) in zip(rtaOverlay.frequenciesHz, rtaOverlay.magnitudeDB) where frequency >= minimumFrequency && frequency <= graphMaximumFrequency && db.isFinite {
+            let point = CGPoint(x: xPosition(frequency, width: size.width), y: yPosition(db, height: size.height))
+            if started { path.addLine(to: point) } else { path.move(to: point); started = true }
+        }
+        guard started else { return }
         context.stroke(path, with: .color(.orange.opacity(0.7)), lineWidth: 1.5)
+    }
+
+    /// The curve through `evaluate` over the visible frequency span, as a path.
+    private func curvePath(size: CGSize, evaluate: (Double) -> Double) -> (path: Path, points: [CGPoint]) {
+        let count = max(180, Int(size.width / 3))
+        var path = Path()
+        var points: [CGPoint] = []
+        points.reserveCapacity(count)
+        for index in 0..<count {
+            let t = Double(index) / Double(max(1, count - 1))
+            let frequency = exp(log(minimumFrequency) + t * (log(graphMaximumFrequency) - log(minimumFrequency)))
+            let point = CGPoint(x: CGFloat(t) * size.width, y: yPosition(evaluate(frequency), height: size.height))
+            points.append(point)
+            if index == 0 { path.move(to: point) } else { path.addLine(to: point) }
+        }
+        return (path, points)
     }
 
     private func drawResponse(context: inout GraphicsContext, size: CGSize, program: [N60BiquadCoefficients]) {
         guard !program.isEmpty else { return }
-        let count = max(180, Int(size.width / 3))
-        var path = Path()
-        for index in 0..<count {
-            let t = Double(index) / Double(max(1, count - 1))
-            let frequency = exp(log(minimumFrequency) + t * (log(graphMaximumFrequency) - log(minimumFrequency)))
-            let db = ProductionEQResponseMath.responseDB(program: program, sampleRate: sampleRate, frequencyHz: frequency)
-            let point = CGPoint(x: CGFloat(t) * size.width, y: yPosition(db, height: size.height))
-            if index == 0 { path.move(to: point) } else { path.addLine(to: point) }
+        let curve = curvePath(size: size) {
+            ProductionEQResponseMath.responseDB(program: program, sampleRate: sampleRate, frequencyHz: $0)
         }
-        context.stroke(path, with: .color(.accentColor), lineWidth: 2.4)
+        context.stroke(curve.path, with: .color(.accentColor), lineWidth: 2.4)
+    }
+
+    /// Band fill (design 8): each drawn band's own curve, filled down to 0 dB for the selection
+    /// and stroked thin for the rest; dynamic bands shade the gain range they can reach.
+    private func drawBandCurves(context: inout GraphicsContext, size: CGSize) {
+        let zeroY = yPosition(0, height: size.height)
+        for band in displayBands where band.enabled && band.dynamic.enabled {
+            guard let envelope = EQBandCurves.dynamicEnvelope(of: band) else { continue }
+            let lowerProgram = ProductionEQResponseMath.compile(bands: [envelope.lower], sampleRate: sampleRate)
+            let upperProgram = ProductionEQResponseMath.compile(bands: [envelope.upper], sampleRate: sampleRate)
+            let lower = curvePath(size: size) { ProductionEQResponseMath.responseDB(program: lowerProgram, sampleRate: sampleRate, frequencyHz: $0) }
+            let upper = curvePath(size: size) { ProductionEQResponseMath.responseDB(program: upperProgram, sampleRate: sampleRate, frequencyHz: $0) }
+            var shade = Path()
+            if let first = upper.points.first { shade.move(to: first) }
+            upper.points.dropFirst().forEach { shade.addLine(to: $0) }
+            lower.points.reversed().forEach { shade.addLine(to: $0) }
+            shade.closeSubpath()
+            context.fill(shade, with: .color(.orange.opacity(band.id == selectedBandID ? 0.28 : 0.16)))
+        }
+
+        for band in EQBandCurves.drawn(mode: curvesMode, bands: displayBands, selectedID: selectedBandID) {
+            let bandProgram = ProductionEQResponseMath.compile(bands: [band], sampleRate: sampleRate)
+            let curve = curvePath(size: size) { ProductionEQResponseMath.responseDB(program: bandProgram, sampleRate: sampleRate, frequencyHz: $0) }
+            let isSelected = band.id == selectedBandID
+            if isSelected, let first = curve.points.first, let last = curve.points.last {
+                var fill = Path()
+                fill.move(to: CGPoint(x: first.x, y: zeroY))
+                curve.points.forEach { fill.addLine(to: $0) }
+                fill.addLine(to: CGPoint(x: last.x, y: zeroY))
+                fill.closeSubpath()
+                context.fill(fill, with: .color(.accentColor.opacity(0.22)))
+            }
+            context.stroke(
+                curve.path,
+                with: .color(.accentColor.opacity(isSelected ? 0.85 : 0.4)),
+                lineWidth: isSelected ? 1.4 : 1
+            )
+        }
+    }
+
+    /// The lane that is not being edited (Left/Right or Mid/Side), dashed and faint.
+    private func drawGhostLane(context: inout GraphicsContext, size: CGSize) {
+        guard let otherLane, !otherLane.bands.isEmpty else { return }
+        let program = ProductionEQResponseMath.compile(bands: otherLane.bands, sampleRate: sampleRate)
+        guard !program.isEmpty else { return }
+        let curve = curvePath(size: size) {
+            ProductionEQResponseMath.responseDB(program: program, sampleRate: sampleRate, frequencyHz: $0)
+        }
+        context.stroke(curve.path, with: .color(.secondary.opacity(0.65)), style: StrokeStyle(lineWidth: 1.5, dash: [5, 4]))
+        context.draw(
+            Text("\(otherLane.label) (not editing)").font(.system(size: 9, weight: .medium)).foregroundStyle(.secondary),
+            at: CGPoint(x: size.width - 60, y: 12)
+        )
     }
 
     private func point(for band: EQBand, size: CGSize) -> CGPoint {

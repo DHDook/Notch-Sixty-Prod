@@ -345,7 +345,7 @@ Plan: `docs/epics/E27.md`. Baseline PR #395 (E11 S11 band panel). Feel, filter v
 on the Equalizer page; S1 and S2 flagless, the engine-facing S3 items behind `e27.eq-safety`.
 
 - [x] S1 feel and precision: hover read-out, Q by scroll or pinch, double-click add and reset, axis-locked and fine drag, keyboard nudging, unit-aware number fields, undo and redo
-- [ ] S2 filter views: band curves, other-lane ghost, y-range and auto, x-range to 0.49 fs at every rate, phase, group delay, impulse and step from the engine's filter math
+- [x] S2 filter views: band curves, other-lane ghost, y-range and auto, x-range to 0.49 fs at every rate, phase, group delay, impulse and step from the engine's filter math (lab case moved to gap G6, owned by S4)
 - [ ] S3a headroom badge with post-EQ clip light, auto preamp, preamp and output gain on the page
 - [ ] S3b EQ-level A/B with loudness match, band listen, click-free bypass proved at eight rates
 - [ ] S2b pre/post-EQ program analyser overlay from an engine spectrum tap (owner, 7 Nov 2026)
