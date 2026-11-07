@@ -418,7 +418,7 @@ struct ProductionRootView: View {
         case .dashboard:
             ProductionDashboardView(engine: engine, entryCard: setupEntryCard)
         case .equalizer:
-            ProductionEqualizerView(engine: engine, reference: product.reference)
+            ProductionEqualizerView(engine: engine, autoPreamp: product.profiles.autoPreamp, reference: product.reference)
         case .dynamics:
             ProductionDynamicsView(engine: engine, reference: product.reference)
         case .meters:
@@ -2037,7 +2037,7 @@ struct MasterVolumeFaderScale: View {
 
 /// One gain trim: −/+ step 0.5 dB, and the value box takes a typed dB
 /// value on Return. Values clamp to the trim's range.
-private struct ProductionGainStepper: View {
+struct ProductionGainStepper: View {
     let title: String
     let value: Double
     let range: ClosedRange<Double>
