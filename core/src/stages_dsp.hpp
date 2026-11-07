@@ -38,7 +38,23 @@ bool dspDenoiserCarry(SnapHeader *from, SnapHeader *to);
 // ABI v10 (E6 S8d). Realtime thread. Copies the running state of every FIR stage of `to` that is the same filter
 // (stage id, taps, lanes) in `from`, so an unrelated topology change does not restart a convolver. Returns the
 // frames of silent warm-up the stages that could not be carried need to fill their history (0 = none).
-uint32_t dspFirCarry(SnapHeader *from, SnapHeader *to);
+//
+// lazy (E9 S2, firScheme 1 with a rebuild fade): the running state of such a stage is not copied here. The fixed part
+// is, and the bulk (input ring and spectrum delay lines) is copied by dspFirCarryStep over the next callbacks while
+// both snapshots run the same input. `*pending` is set when dspFirCarryStep has work. The returned warm-up then
+// covers the settle time after the copy, not the copy itself (the graph holds the warm-up while the copy runs).
+// A filter whose taps changed but whose tap schedule, lanes and every upstream stage are unchanged is seeded the
+// same way. Without lazy a firScheme 1 filter longer than N60_FIR_MAX_TAPS is not carried (it warms in full).
+uint32_t dspFirCarry(SnapHeader *from, SnapHeader *to, bool lazy, bool *pending);
+// Position of the lazy copy over the (stage, lane, byte) space of the incoming snapshot.
+struct FirCarryCursor {
+    uint32_t stage = 0, lane = 0;
+    uint64_t offset = 0;
+    uint32_t fromEpoch = 0, toEpoch = 0;  // history epochs at adoption; a change ends the carry
+};
+// Realtime thread. Copies at most `maxBytes` of the lazy carry and returns the bytes copied; sets *done when
+// nothing is left. `from` is the outgoing snapshot, `to` the incoming one.
+uint64_t dspFirCarryStep(SnapHeader *from, SnapHeader *to, FirCarryCursor &cursor, uint64_t maxBytes, bool *done);
 // Control or realtime thread (pure). Frames of input history the FIR stages of `h` hold (longest taps + one partition).
 uint32_t dspFirHistoryFrames(const SnapHeader *h);
 // Profile of the first DENOISER stage of `h` to / from a plain value; false when `h` has no such stage.

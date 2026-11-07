@@ -161,3 +161,8 @@ add_executable(n60core_conv_test tests/test_conv.cpp)
 target_link_libraries(n60core_conv_test PRIVATE n60core)
 target_include_directories(n60core_conv_test PRIVATE src)
 add_test(NAME n60core_conv COMMAND n60core_conv_test)
+
+add_executable(n60core_conv_rebuild_test tests/test_conv_rebuild.cpp)
+target_link_libraries(n60core_conv_rebuild_test PRIVATE n60core)
+target_include_directories(n60core_conv_rebuild_test PRIVATE src)
+add_test(NAME n60core_conv_rebuild COMMAND n60core_conv_rebuild_test)

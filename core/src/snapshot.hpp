@@ -34,6 +34,7 @@ struct StageRec {
     uint32_t coefOff;    // PEQ: PeqSec[sections] (live and incoming biquad coefficients, crossfade counter)
     uint32_t sharedOff;  // ABI v3 stages: state shared by all of the stage's lanes
     float applied;       // last target the state acted on (GAIN, DELAY)
+    uint32_t carrySrc;   // ABI v20 (E9 S2): 1 + index of the stage in the outgoing snapshot a lazy FIR carry copies from (0 = none)
 };
 
 // ABI v13. The host callback of the EXTERNAL stage, owned by the graph handle (snapshots hold a pointer to it).
@@ -68,6 +69,7 @@ struct SnapHeader {
     uint32_t firScheme;     // ABI v20: 0 uniform FIR engine, 1 non-uniform (N60_FIR_SCHEME_*)
     uint32_t pad2;
     ExternalSlot *external; // ABI v13: the graph's EXTERNAL callback slot (set by the graph before publication)
+    uint64_t *rtBudget;     // E9 S2: bytes of bulk clearing / copying left in this callback (the graph's; null = unlimited)
 };
 
 inline uint8_t *bytes(SnapHeader *h) { return reinterpret_cast<uint8_t *>(h); }
