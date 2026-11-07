@@ -33,11 +33,12 @@ enum UnifiedGraphTranslator {
         subwoofers: [UnifiedGraphSubwoofer] = [],
         crossoverHz: Double = 80,
         programs: UnifiedGraphProgramLookup = { _, _ in nil },
-        alignment: StereoBassAlignment? = nil
+        alignment: StereoBassAlignment? = nil,
+        firScheme: UInt32 = UnifiedGraphFIRScheme.current()
     ) -> Result<UnifiedGraphConfiguration, UnifiedGraphFallbackReason> {
         if let alignment, alignment.issue != nil { return .failure(.alignmentInvalid) }
         guard withUnsafePointer(to: &snapshot, {
-            N60UnifiedGraphSnapshotUnsupportedReason($0) == N60UnifiedGraphSupported
+            N60UnifiedGraphSnapshotUnsupportedReason($0, UInt32(UnifiedGraphFIRScheme.maxTaps(firScheme))) == N60UnifiedGraphSupported
         }) else { return .failure(.unsupportedKernelStage) }
 
         var left: [UnifiedGraphPEQSection] = []
@@ -77,7 +78,7 @@ enum UnifiedGraphTranslator {
         ]
         for (kind, state) in states where state.enabled {
             guard let program = programs(kind, state.programGeneration),
-                  recoveredProgramMatches(program, state) else {
+                  recoveredProgramMatches(program, state, firScheme: firScheme) else {
                 return .failure(.convolutionProgramUnavailable)
             }
             switch kind {
@@ -93,6 +94,7 @@ enum UnifiedGraphTranslator {
             return .failure(.unsupportedKernelStage)
         }
         configuration.stereoStages = stages
+        configuration.firScheme = firScheme
         if let alignment { apply(alignment, to: &configuration) }
         let p = snapshot.protection
         if p.limiterEnabled || p.truePeakGuardEnabled || p.softClipperEnabled || p.gainRiderEnabled {
@@ -153,9 +155,12 @@ enum UnifiedGraphTranslator {
 
     /// The retained taps are the ones the kernel was prepared with: same generation, tap count, shared-or-stereo shape
     /// and declared latency as the snapshot's record, all finite, within what the core holds.
-    static func recoveredProgramMatches(_ program: UnifiedGraphFIRProgram, _ state: N60ConvolutionGraphState) -> Bool {
+    static func recoveredProgramMatches(
+        _ program: UnifiedGraphFIRProgram, _ state: N60ConvolutionGraphState,
+        firScheme: UInt32 = UnifiedGraphFIRScheme.current()
+    ) -> Bool {
         guard program.generation == state.programGeneration,
-              program.left.count == Int(state.tapCount), program.left.count <= 32_768,
+              program.left.count == Int(state.tapCount), program.left.count <= UnifiedGraphFIRScheme.maxTaps(firScheme),
               program.right == nil || program.right?.count == program.left.count,
               program.declaredLatencyFrames == state.declaredLatencyFrames,
               program.declaredLatencyFrames <= N60_GRAPH_MAX_DELAY_FRAMES else { return false }

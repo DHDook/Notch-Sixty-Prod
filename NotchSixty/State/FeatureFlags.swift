@@ -21,7 +21,7 @@ extension FeatureFlag {
     static let all: [FeatureFlag] = [
         .legacyKernel, .ancEngineLease, .adaptiveTonalLive, .earnedCap, .feedForwardLive,
         .noiseSurvey, .conversationUnmasking, .virtualMicrophone, .zones, .headPositionCamera, .overnight,
-        .subAwareAnc
+        .subAwareAnc, .longFIR
     ]
 
     /// E6 S11: the unified graph is the default renderer. Turning this on selects the frozen
@@ -131,6 +131,16 @@ extension FeatureFlag {
         // Owner-approved flag enablement (E26 S7): on in release builds too. Live output still needs the E4 flags,
         // the readiness checks, the per-feature arm and the user's Turn On; none of those is loosened.
         defaultEnabled: true
+    )
+
+    /// E9 S3: graph FIRs (program, room, speaker IR, driver) of up to 262,144 taps at the engine's 256-frame latency
+    /// (`firScheme` 1, the non-uniform engine). Off: the uniform scheme, 32,768 taps, and a longer stereo filter keeps
+    /// the kernel's convolver. Swift decides; the core only sees `firScheme`. Removed with the uniform scheme when E9's
+    /// FIR part ships.
+    static let longFIR = FeatureFlag(
+        id: "e9.long-fir",
+        title: "Long FIR (up to 262,144 taps) on the graph",
+        epic: "E9"
     )
 
 }

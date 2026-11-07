@@ -155,6 +155,7 @@ final class ProductController: ObservableObject {
             profiles: profiles,
             ambient: ambientCompensation
         )
+        UnifiedGraphFIRScheme.refresh()
         activeQuietZone.subAwareAncEnabled = FeatureFlags().isEnabled(.subAwareAnc)
         if activeQuietZone.subAwareAncEnabled {
             roomProjects.ancBassStamp = { [weak activeQuietZone] in activeQuietZone?.ancBassPathState.fingerprint }
@@ -295,6 +296,7 @@ final class ProductController: ObservableObject {
             profiles: profiles,
             ambient: ambientCompensation
         )
+        UnifiedGraphFIRScheme.refresh()
         activeQuietZone.subAwareAncEnabled = FeatureFlags().isEnabled(.subAwareAnc)
         if activeQuietZone.subAwareAncEnabled {
             roomProjects.ancBassStamp = { [weak activeQuietZone] in activeQuietZone?.ancBassPathState.fingerprint }

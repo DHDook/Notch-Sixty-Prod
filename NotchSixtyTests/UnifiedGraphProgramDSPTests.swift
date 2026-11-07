@@ -428,3 +428,166 @@ final class UnifiedGraphProgramDSPTests: XCTestCase {
         }
     }
 }
+
+// MARK: E9 S3 long FIR (262,144 taps, firScheme 1, flag e9.long-fir)
+
+extension UnifiedGraphProgramDSPTests {
+    @MainActor private func longFlags(on: Bool) throws -> FeatureFlags {
+        let suite = "E9LongFIR-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        addTeardownBlock { defaults.removePersistentDomain(forName: suite) }
+        return FeatureFlags(
+            known: FeatureFlag.all, defaults: defaults, policy: .launchArgumentOnly,
+            arguments: on ? ["-NotchSixtyFeatures", "e9.long-fir"] : [])
+    }
+
+    @MainActor func testLongFIRFlagSelectsTheSchemeAndIsOffByDefault() throws {
+        XCTAssertTrue(FeatureFlag.all.contains(.longFIR))
+        XCTAssertFalse(FeatureFlag.longFIR.defaultEnabled)
+        XCTAssertEqual(UnifiedGraphFIRScheme.scheme(for: try longFlags(on: false)), UnifiedGraphFIRScheme.uniform)
+        XCTAssertEqual(UnifiedGraphFIRScheme.scheme(for: try longFlags(on: true)), UnifiedGraphFIRScheme.nonUniform)
+        XCTAssertEqual(UnifiedGraphFIRScheme.maxTaps(0), 32_768)
+        XCTAssertEqual(UnifiedGraphFIRScheme.maxTaps(1), 262_144)
+        var configuration = UnifiedGraphConfiguration(sampleRate: 48_000, lanes: [UnifiedGraphLane(), UnifiedGraphLane()])
+        configuration.firScheme = UnifiedGraphFIRScheme.nonUniform
+        let spec = try configuration.makeSpec()
+        XCTAssertEqual(spec.firScheme, 1)
+        spec.withDescription { XCTAssertEqual($0.pointee.firScheme, 1) }
+        configuration.firScheme = UnifiedGraphFIRScheme.uniform
+        let uniformSpec = try configuration.makeSpec()
+        XCTAssertEqual(uniformSpec.firScheme, 0)
+        uniformSpec.withDescription { XCTAssertEqual($0.pointee.firScheme, 0) }
+        XCTAssertFalse(spec.hasSameTopology(as: uniformSpec))
+    }
+
+    func testEligibilityAccepts262144AndNamesTheReasonAt262145() throws {
+        func state(_ taps: UInt32) -> N60ConvolutionGraphState {
+            N60ConvolutionGraphState(
+                enabled: true, programSlot: 0, programGeneration: 1, tapCount: taps,
+                partitionCount: 1, engineLatencyFrames: 256, declaredLatencyFrames: 0)
+        }
+        var long = state(262_144)
+        XCTAssertTrue(N60UnifiedGraphConvolutionState(&long, UInt32(UnifiedGraphFIRScheme.longMaxTaps)))
+        var over = state(262_145)
+        XCTAssertFalse(N60UnifiedGraphConvolutionState(&over, UInt32(UnifiedGraphFIRScheme.longMaxTaps)))
+        var beyondUniform = state(32_769)
+        XCTAssertFalse(N60UnifiedGraphConvolutionState(&beyondUniform, UInt32(UnifiedGraphFIRScheme.uniformMaxTaps)))
+        var edge = state(32_768)
+        XCTAssertTrue(N60UnifiedGraphConvolutionState(&edge, UInt32(UnifiedGraphFIRScheme.uniformMaxTaps)))
+
+        // The spec guards name the same reason for the same cap.
+        for (scheme, taps, ok) in [(UInt32(1), 262_144, true), (1, 262_145, false), (0, 32_768, true), (0, 32_769, false)] {
+            var stages = UnifiedGraphStereoStages()
+            stages.programFIR = UnifiedGraphFIRProgram(
+                generation: 1, left: [Float](repeating: 0, count: taps - 1) + [1], right: nil, declaredLatencyFrames: 0)
+            var configuration = UnifiedGraphConfiguration(sampleRate: 48_000, lanes: [UnifiedGraphLane(), UnifiedGraphLane()])
+            configuration.stereoStages = stages
+            configuration.firScheme = scheme
+            if ok {
+                XCTAssertNoThrow(try configuration.makeSpec(), "scheme \(scheme) taps \(taps)")
+            } else {
+                XCTAssertThrowsError(try configuration.makeSpec(), "scheme \(scheme) taps \(taps)") {
+                    XCTAssertTrue(String(describing: $0).contains("FIR taps"), "\($0)")
+                }
+            }
+        }
+    }
+
+    /// A decaying random filter and noise input, the graph with firScheme 1 against the kernel's `N60Convolution`.
+    func testStereo262144TapProgramFIRGraphMatchesKernelAtEveryRate() throws {
+        let tapCount = 262_144
+        var seed: UInt64 = 0x9E37_79B9_7F4A_7C15
+        func noise() -> Float {
+            seed = seed &* 6_364_136_223_846_793_005 &+ 1_442_695_040_888_963_407
+            return Float(Int64(bitPattern: seed >> 11) % 2_000_000) / 1_000_000 - 1
+        }
+        var taps = [Float](repeating: 0, count: tapCount)
+        for index in 0..<tapCount { taps[index] = noise() * Float(exp(-Double(index) / 30_000.0)) * 0.02 }
+        let inputFrames = 8_192
+        let input = (0..<inputFrames).map { _ in noise() * 0.5 }
+        let total = tapCount + inputFrames + 1_024
+        for rate in Self.rates {
+            let kernel = try XCTUnwrap(N60RenderKernelCreate())
+            defer { N60RenderKernelDestroy(kernel) }
+            var info = N60ConvolutionProgramInfo()
+            XCTAssertTrue(taps.withUnsafeBufferPointer {
+                N60RenderKernelPrepareConvolutionProgram(kernel, 0, $0.baseAddress!, nil, UInt32(tapCount), 0, &info)
+            })
+            var snapshot = N60DSPGraphSnapshotMakeUnity(rate)
+            XCTAssertTrue(N60DSPGraphSnapshotSetConvolutionProgram(&snapshot, 0, info, true))
+            XCTAssertTrue(N60RenderKernelPublishSnapshot(kernel, snapshot))
+            let program = UnifiedGraphFIRProgram(
+                generation: info.generation, left: taps, right: nil, declaredLatencyFrames: 0)
+            // Flag off: the 262,144-tap filter stays on the kernel.
+            XCTAssertThrowsError(try UnifiedGraphTranslator.stereoEligibility(
+                snapshot: &snapshot, sampleRate: rate, programs: { _, _ in program }, firScheme: 0).get())
+            let configuration = try UnifiedGraphTranslator.stereoEligibility(
+                snapshot: &snapshot, sampleRate: rate, programs: { _, _ in program }, firScheme: 1).get()
+            let host = try UnifiedGraphHost(spec: try configuration.makeSpec())
+            XCTAssertEqual(Int(host.latencyFrames), 256, "engine latency at \(rate)")
+
+            var kernelOut = [Float](repeating: 0, count: total)
+            var left: Float = 0, right: Float = 0
+            for frame in 0..<total {
+                let x: Float = frame < inputFrames ? input[frame] : 0
+                N60RenderKernelProcessStereoFrame(kernel, x, x, &left, &right)
+                kernelOut[frame] = left
+            }
+            var graphOut = [Float](repeating: 0, count: total)
+            var position = 0
+            while position < total {
+                let n = min(block, total - position)
+                var lane = [Float](repeating: 0, count: block)
+                for i in 0..<n where position + i < inputFrames { lane[i] = input[position + i] }
+                let result = try host.processOffline(input: [lane, lane], frames: n)
+                for i in 0..<n { graphOut[position + i] = result[0][i] }
+                position += n
+            }
+            var worst: Float = 0
+            var reference: Float = 0
+            for i in 0..<total {
+                worst = max(worst, abs(graphOut[i] - kernelOut[i]))
+                reference = max(reference, abs(kernelOut[i]))
+            }
+            XCTAssertGreaterThan(reference, 0.01, "the filter produced output at \(rate)")
+            XCTAssertLessThan(worst, 3.16e-6, "graph vs kernel peak difference at \(rate): \(worst) (reference peak \(reference))")
+        }
+    }
+
+    /// 5.1 and 7.1.4, a 262,144-tap program FIR with declared latency. The uncovered LFE lane gets the delta FIR
+    /// (a unit impulse, run as a delay), so every lane lines up at 256 + declared + the main tap.
+    func testLongProgramFIROnSurroundLayoutsAlignsEveryLaneAtEveryRate() throws {
+        let declared = 20_000
+        for rate in Self.rates {
+            for layout in [OutputProgramLayout.fiveOne, .sevenOneFour] {
+                let s = try shape(layout)
+                var taps = [Float](repeating: 0, count: 262_144)
+                taps[declared] = 0.8
+                taps[262_143] = 0.2
+                var stages = UnifiedGraphStereoStages()
+                stages.programFIR = UnifiedGraphFIRProgram(
+                    generation: 1, left: taps, right: nil, declaredLatencyFrames: UInt32(declared))
+                var base = stereo(rate: rate, stages: stages)
+                base.firScheme = UnifiedGraphFIRScheme.nonUniform
+                let dsp = UnifiedGraphProgramDSP(stereo: base, shape: s, eqMode: .linked)
+                var configuration = try config(rate: rate, layout: layout, dsp: dsp)
+                configuration.firScheme = UnifiedGraphFIRScheme.nonUniform
+                let spec = try configuration.makeSpec()
+                XCTAssertEqual(spec.firScheme, 1)
+                let lanes = layout.roles.count
+                let out = try renderImpulse(spec, lanes: lanes, frames: 256 + declared + 1_024)
+                let host = try UnifiedGraphHost(spec: spec)
+                XCTAssertEqual(Int(host.latencyFrames), 256 + declared, "reported latency at \(rate)")
+                var covered = 0, delayed = 0
+                for lane in 0..<lanes {
+                    let index = peakIndex(out[lane])
+                    XCTAssertEqual(index, 256 + declared, "\(layout) lane \(lane) at \(rate)")
+                    if abs(abs(out[lane][index]) - 0.8) < 1e-3 { covered += 1 }
+                    if abs(abs(out[lane][index]) - 1) < 1e-3 { delayed += 1 }
+                }
+                XCTAssertEqual(covered + delayed, lanes, "\(layout) at \(rate)")
+                XCTAssertGreaterThan(delayed, 0, "the LFE lane runs the delta delay")
+            }
+        }
+    }
+}

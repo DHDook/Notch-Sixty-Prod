@@ -436,7 +436,7 @@ n60_status buildSnapshot(const n60_graph_desc &d, uint32_t epoch, SnapHeader **o
         plan[i].state = off;
         off += alignUp(stateStrideFor(s, d.sampleRate, d.firScheme) * laneCountFor(s, d.outputChannels));
         plan[i].coef = off;
-        if (s.kind == N60_STAGE_PEQ) off += alignUp(sizeof(PeqSec) * (s.paramCount / 4));
+        if (s.kind == N60_STAGE_PEQ) off += alignUp(sizeof(PeqSec) * (s.paramCount / kPeqParamsPerSection));
         plan[i].shared = off;
         off += alignUp(sharedBytesFor(s, d.sampleRate, d.firScheme));
         if (off > kMaxArenaBytes) return N60_STATUS_OUT_OF_MEMORY;
@@ -870,7 +870,7 @@ uint32_t carryUpstreamState(SnapHeader *from, SnapHeader *to, uint32_t i, uint64
             default: continue;  // stateless, or not carried (G9)
         }
         const size_t lanes = static_cast<size_t>(y.stateStride) * y.laneCount;
-        const size_t coef = y.kind == N60_STAGE_PEQ ? sizeof(PeqSec) * (y.paramCount / 4) : 0;
+        const size_t coef = y.kind == N60_STAGE_PEQ ? sizeof(PeqSec) * (y.paramCount / kPeqParamsPerSection) : 0;
         // Bounded by the callback's bulk budget: a stage that does not fit keeps the cold start (G9).
         if (budget != nullptr && spent + lanes + coef > *budget) continue;
         // The gain-reduction atomics of dynamics lanes are copied too (the pending maximum carries over, wanted); the
