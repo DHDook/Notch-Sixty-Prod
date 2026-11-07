@@ -6,6 +6,9 @@ struct ProductionEqualizerView: View {
     @ObservedObject var engine: AudioIOEngine
     @ObservedObject var autoPreamp: EQAutoPreampController
     var reference: ProductionReferenceNavigator? = nil
+    /// E27 S3b: EQ A/B and Listen; nil or unavailable hides the controls.
+    var comparison: EQComparisonController? = nil
+    var audition: EQAuditionController? = nil
     @ObservedObject private var liveOverlay = MeasurementLiveOverlayStore.shared
     @State private var selectedBandID: UUID?
     @State private var dragPreview: EQBand?
@@ -97,6 +100,13 @@ struct ProductionEqualizerView: View {
             ProductionActionErrorBanner(message: $actionError)
             modeBar
 
+            if let comparison, let audition, comparison.isAvailable {
+                ProductionEQCompareBar(
+                    comparison: comparison, audition: audition, history: history,
+                    selectedBand: bands.first { $0.id == selectedBandID }, perform: { perform($0) }
+                )
+            }
+
             ProductionEQGainBar(engine: engine, autoPreamp: autoPreamp, perform: { perform($0) })
 
             responseGraph
@@ -128,6 +138,7 @@ struct ProductionEqualizerView: View {
             dragPreview = nil
             // Leaving the page ends its history, so no undo step outlives the view.
             history.clear()
+            audition?.stop()
         }
     }
 
@@ -246,12 +257,18 @@ struct ProductionEqualizerView: View {
                 bypassed: configuration.bypassed,
                 onSelect: { selectedBandID = $0 },
                 onPreview: { band in
+                    // Option-press on a handle auditions that band until release.
+                    if let audition, audition.isAvailable, audition.active == nil,
+                       NSEvent.modifierFlags.contains(.option) {
+                        audition.start(band: band)
+                    }
                     if !history.isGestureOpen { history.beginGesture(before: engine.stereoEQConfiguration) }
                     selectedBandID = band.id
                     dragPreview = band
                     scheduleCoalescedPublish(band)
                 },
                 onCommit: { band in
+                    audition?.stop()
                     pendingPublishTask?.cancel()
                     pendingPublishTask = nil
                     pendingDragBand = nil

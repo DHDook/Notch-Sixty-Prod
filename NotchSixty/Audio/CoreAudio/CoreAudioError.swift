@@ -442,6 +442,9 @@ final class CoreAudioTransportSession {
     /// E6 S8: when true, each published stereo snapshot the core can reproduce is also
     /// rendered through a libn60core graph; anything else keeps the kernel path.
     var unifiedGraphEnabled = false
+    /// E27 S3b: set by the engine while it republishes an EQ change (bypass, A/B, audition), so the
+    /// rebuild crossfade uses the linear law. Every other republish keeps the equal-power law.
+    var linearFadeForEQRepublish = false
     private var unifiedGraphHost: UnifiedGraphHost?
     /// Integer inter-channel taps of the attached stereo graph, excluded from its reported latency.
     private var unifiedGraphLaneTapFrames: UInt32 = 0
@@ -1492,7 +1495,7 @@ final class CoreAudioTransportSession {
         }
         do {
             if let host = unifiedGraphHost {
-                try host.apply(spec)
+                try host.apply(spec, linearFade: linearFadeForEQRepublish)
             } else {
                 unifiedGraphHost = try UnifiedGraphHost(spec: spec)
             }

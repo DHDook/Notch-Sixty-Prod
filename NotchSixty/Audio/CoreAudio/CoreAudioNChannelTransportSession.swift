@@ -400,6 +400,9 @@ final class CoreAudioNChannelTransportSession {
     /// E6 S8b2b: the libn60core graph rendering this session, when `e6.unified-graph` is on and
     /// the setup is one the core reproduces. Created before IO starts and released only after
     /// the bridge is destroyed (see `stop`), so the callback never sees it freed.
+    /// E27 S3b: set by the engine while it republishes an EQ change (bypass, A/B, audition), so the
+    /// rebuild crossfade uses the linear law. Every other republish keeps the equal-power law.
+    var linearFadeForEQRepublish = false
     private var unifiedGraphHost: UnifiedGraphHost?
     /// Why the legacy render core kept this session although the graph was requested; nil when
     /// the graph renders it or was not requested.
@@ -1017,7 +1020,7 @@ final class CoreAudioNChannelTransportSession {
             throw LiveNChannelTransportError.unifiedGraphRejected(.laneCountMismatch)
         }
         do {
-            let result = try host.apply(spec)
+            let result = try host.apply(spec, linearFade: linearFadeForEQRepublish)
             ancLock.lock()
             if hostedAnc != nil { hostedConfiguration = configuration }
             ancLock.unlock()

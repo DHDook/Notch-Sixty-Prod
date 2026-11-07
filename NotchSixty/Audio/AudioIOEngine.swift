@@ -1131,6 +1131,13 @@ final class AudioIOEngine: ObservableObject {
     @Published private(set) var routeConfiguration: AudioRouteConfiguration
     @Published private(set) var eqConfiguration = EQConfiguration()
     @Published private(set) var stereoEQConfiguration = StereoEQConfiguration()
+    /// E27 S3b: the band-pass "Listen" audition, if one is held. Never stored in
+    /// `stereoEQConfiguration`, the profile or undo; it only changes what is rendered.
+    @Published private(set) var eqAudition: EQAuditionOverride?
+    /// The EQ as rendered: the stored EQ, or the audition band-pass while one is held.
+    var renderStereoEQConfiguration: StereoEQConfiguration {
+        eqAudition.map { stereoEQConfiguration.auditioned($0) } ?? stereoEQConfiguration
+    }
     @Published private(set) var playbackControlConfiguration = PlaybackControlConfiguration()
     @Published private(set) var masterVolumeConfiguration = MasterVolumeConfiguration()
     @Published private(set) var masterVolumeCapabilities = MasterVolumeDeviceCapabilities.softwareOnly
@@ -1299,7 +1306,7 @@ final class AudioIOEngine: ObservableObject {
                 ambientTarget: target
             )
 
-        var graph = try stereoEQConfiguration.makeGraphSnapshot(
+        var graph = try renderStereoEQConfiguration.makeGraphSnapshot(
             sampleRate: session.outputFormat.sampleRate,
             gainConfiguration: gainConfiguration,
             bassManagementConfiguration:
@@ -1310,7 +1317,7 @@ final class AudioIOEngine: ObservableObject {
         )
         try attachActiveEQFIRProgramIfNeeded(
             to: &graph,
-            stereoConfiguration: stereoEQConfiguration,
+            stereoConfiguration: renderStereoEQConfiguration,
             playbackConfiguration: playbackControlConfiguration
         )
         try attachActiveRoomCorrectionProgramIfNeeded(
@@ -1531,7 +1538,7 @@ final class AudioIOEngine: ObservableObject {
             return
         }
 
-        var graph = try stereoEQConfiguration.makeGraphSnapshot(
+        var graph = try renderStereoEQConfiguration.makeGraphSnapshot(
             sampleRate: session.outputFormat.sampleRate,
             gainConfiguration: gainConfiguration,
             bassManagementConfiguration:
@@ -1543,7 +1550,7 @@ final class AudioIOEngine: ObservableObject {
         )
         try attachActiveEQFIRProgramIfNeeded(
             to: &graph,
-            stereoConfiguration: stereoEQConfiguration,
+            stereoConfiguration: renderStereoEQConfiguration,
             playbackConfiguration: playbackControlConfiguration
         )
         try attachActiveRoomCorrectionProgramIfNeeded(
@@ -2116,6 +2123,21 @@ final class AudioIOEngine: ObservableObject {
         try applyStereoEQConfiguration(configuration)
     }
 
+    /// E27 S3b: starts, moves or ends the Listen audition. The stored EQ is untouched; the
+    /// rendered EQ becomes one unity-peak band-pass (minimum phase) and returns on `nil`.
+    /// Control thread only; it publishes through the normal EQ snapshot path.
+    func setEQAudition(_ override: EQAuditionOverride?) throws {
+        guard override != eqAudition else { return }
+        let previous = eqAudition
+        eqAudition = override
+        do {
+            try applyStereoEQConfiguration(stereoEQConfiguration, forceRepublish: true)
+        } catch {
+            eqAudition = previous
+            throw error
+        }
+    }
+
     func replaceEQConfiguration(_ configuration: EQConfiguration) throws {
         var updated = stereoEQConfiguration
         updated.phaseMode = configuration.phaseMode
@@ -2428,7 +2450,7 @@ final class AudioIOEngine: ObservableObject {
                 try republishLiveGraph(inputs)
             }
         } else if let session = transportSession {
-            var graph = try stereoEQConfiguration
+            var graph = try renderStereoEQConfiguration
                 .makeGraphSnapshot(
                     sampleRate:
                         session.outputFormat.sampleRate,
@@ -2445,7 +2467,7 @@ final class AudioIOEngine: ObservableObject {
             try attachActiveEQFIRProgramIfNeeded(
                 to: &graph,
                 stereoConfiguration:
-                    stereoEQConfiguration,
+                    renderStereoEQConfiguration,
                 playbackConfiguration:
                     playbackControlConfiguration
             )
@@ -2831,7 +2853,7 @@ final class AudioIOEngine: ObservableObject {
             try republishLiveGraph(inputs)
         }
         if let session = transportSession {
-            var graph = try stereoEQConfiguration.makeGraphSnapshot(
+            var graph = try renderStereoEQConfiguration.makeGraphSnapshot(
                 sampleRate: session.outputFormat.sampleRate,
                 gainConfiguration: gainConfiguration,
                 bassManagementConfiguration: renderBassManagementConfiguration(configuration),
@@ -2841,7 +2863,7 @@ final class AudioIOEngine: ObservableObject {
             )
             try attachActiveEQFIRProgramIfNeeded(
                 to: &graph,
-                stereoConfiguration: stereoEQConfiguration,
+                stereoConfiguration: renderStereoEQConfiguration,
                 playbackConfiguration: playbackControlConfiguration
             )
             try attachActiveRoomCorrectionProgramIfNeeded(
@@ -2938,7 +2960,7 @@ final class AudioIOEngine: ObservableObject {
         }
         if let session = transportSession {
             let oldProtection = try renderDynamicsConfiguration().makeProtectionSnapshot(sampleRate: session.outputFormat.sampleRate)
-            var graph = try stereoEQConfiguration.makeGraphSnapshot(
+            var graph = try renderStereoEQConfiguration.makeGraphSnapshot(
                 sampleRate: session.outputFormat.sampleRate,
                 gainConfiguration: gainConfiguration,
                 bassManagementConfiguration: renderBassManagementConfiguration(),
@@ -2948,7 +2970,7 @@ final class AudioIOEngine: ObservableObject {
             )
             try attachActiveEQFIRProgramIfNeeded(
                 to: &graph,
-                stereoConfiguration: stereoEQConfiguration,
+                stereoConfiguration: renderStereoEQConfiguration,
                 playbackConfiguration: playbackControlConfiguration
             )
             try attachActiveRoomCorrectionProgramIfNeeded(
@@ -3522,17 +3544,27 @@ final class AudioIOEngine: ObservableObject {
         }
     }
 
-    private func applyStereoEQConfiguration(_ configuration: StereoEQConfiguration) throws {
+    private func applyStereoEQConfiguration(
+        _ configuration: StereoEQConfiguration, forceRepublish: Bool = false
+    ) throws {
         try validateStereoEQStorage(configuration)
-        if immutableSemanticTransportActive, configuration != stereoEQConfiguration {
+        transportSession?.linearFadeForEQRepublish = true
+        nChannelTransportSession?.linearFadeForEQRepublish = true
+        defer {
+            transportSession?.linearFadeForEQRepublish = false
+            nChannelTransportSession?.linearFadeForEQRepublish = false
+        }
+        // E27 S3b: an active audition replaces what is rendered, never what is stored.
+        let rendered = eqAudition.map { configuration.auditioned($0) } ?? configuration
+        if immutableSemanticTransportActive, forceRepublish || rendered != renderStereoEQConfiguration {
             try requireLiveGraphEdits()
             var inputs = currentLiveGraphInputs
-            inputs.stereoEQ = configuration
+            inputs.stereoEQ = rendered
             try republishLiveGraph(inputs)
         }
 
         if let session = transportSession {
-            var graph = try configuration.makeGraphSnapshot(
+            var graph = try rendered.makeGraphSnapshot(
                 sampleRate: session.outputFormat.sampleRate,
                 gainConfiguration: gainConfiguration,
                 bassManagementConfiguration: renderBassManagementConfiguration(),
@@ -3550,8 +3582,8 @@ final class AudioIOEngine: ObservableObject {
                 linearPhaseDesignInfo = nil
             } else {
                 var preparedEQFIRProgram: PreparedEQFIRProgram?
-                if configuration.requiresEQFIRProgram && !configuration.bypassed {
-                    let prepared = try prepareEQFIRProgram(configuration, for: session)
+                if rendered.requiresEQFIRProgram && !rendered.bypassed {
+                    let prepared = try prepareEQFIRProgram(rendered, for: session)
                     preparedEQFIRProgram = prepared
                     linearPhaseDesignInfo = prepared.designInfo
                     try attachEQFIRProgram(prepared, to: &graph)
@@ -3565,7 +3597,7 @@ final class AudioIOEngine: ObservableObject {
                 )
 
                 let leavingEQFIR = activeEQFIRProgram != nil
-                    && (!configuration.requiresEQFIRProgram || configuration.bypassed)
+                    && (!rendered.requiresEQFIRProgram || rendered.bypassed)
                 let enteringOrReplacingEQFIR = preparedEQFIRProgram != nil
                 if leavingEQFIR || enteringOrReplacingEQFIR {
                     try applyAudioUnitRackLatency(to: &graph)
@@ -3603,7 +3635,7 @@ final class AudioIOEngine: ObservableObject {
         }
 
         if let session = transportSession {
-            var graph = try stereoEQConfiguration.makeGraphSnapshot(
+            var graph = try renderStereoEQConfiguration.makeGraphSnapshot(
                 sampleRate: session.outputFormat.sampleRate,
                 gainConfiguration: gainConfiguration,
                 bassManagementConfiguration: renderBassManagementConfiguration(),
@@ -3617,17 +3649,17 @@ final class AudioIOEngine: ObservableObject {
 
             if !willBeBypassed {
                 if FIRUpdatePolicy.shouldPrepareEQFIR(
-                    stereoEQ: stereoEQConfiguration,
+                    stereoEQ: renderStereoEQConfiguration,
                     playback: configuration
                 ) {
                     if activeEQFIRProgram == nil {
-                        let prepared = try prepareEQFIRProgram(stereoEQConfiguration, for: session)
+                        let prepared = try prepareEQFIRProgram(renderStereoEQConfiguration, for: session)
                         activeEQFIRProgram = prepared
                         linearPhaseDesignInfo = prepared.designInfo
                     }
                     try attachActiveEQFIRProgramIfNeeded(
                         to: &graph,
-                        stereoConfiguration: stereoEQConfiguration,
+                        stereoConfiguration: renderStereoEQConfiguration,
                         playbackConfiguration: configuration
                     )
                 }
@@ -3698,7 +3730,7 @@ final class AudioIOEngine: ObservableObject {
         let oldSoftwareGain = currentMasterSoftwareGain
         let newSoftwareGain = configuration.softwareGain(for: masterVolumeCapabilities)
         if let session = transportSession, abs(oldSoftwareGain - newSoftwareGain) > 0.000_001 {
-            var graph = try stereoEQConfiguration.makeGraphSnapshot(
+            var graph = try renderStereoEQConfiguration.makeGraphSnapshot(
                 sampleRate: session.outputFormat.sampleRate,
                 gainConfiguration: gainConfiguration,
                 bassManagementConfiguration: renderBassManagementConfiguration(),
@@ -3706,7 +3738,7 @@ final class AudioIOEngine: ObservableObject {
                 playbackConfiguration: playbackControlConfiguration,
                 masterGainLinear: newSoftwareGain
             )
-            try attachActiveEQFIRProgramIfNeeded(to: &graph, stereoConfiguration: stereoEQConfiguration, playbackConfiguration: playbackControlConfiguration)
+            try attachActiveEQFIRProgramIfNeeded(to: &graph, stereoConfiguration: renderStereoEQConfiguration, playbackConfiguration: playbackControlConfiguration)
             try attachActiveRoomCorrectionProgramIfNeeded(to: &graph, playbackConfiguration: playbackControlConfiguration)
             try attachActiveSpeakerIRProgramIfNeeded(to: &graph, playbackConfiguration: playbackControlConfiguration)
             try applyAudioUnitRackLatency(to: &graph)
@@ -3770,7 +3802,7 @@ final class AudioIOEngine: ObservableObject {
         let oldGain = masterVolumeConfiguration.softwareGain(for: previousCapabilities)
         let newGain = updated.softwareGain(for: snapshot.capabilities)
         if let session = transportSession, abs(oldGain - newGain) > 0.000_001 {
-            var graph = try stereoEQConfiguration.makeGraphSnapshot(
+            var graph = try renderStereoEQConfiguration.makeGraphSnapshot(
                 sampleRate: session.outputFormat.sampleRate,
                 gainConfiguration: gainConfiguration,
                 bassManagementConfiguration: renderBassManagementConfiguration(),
@@ -3778,7 +3810,7 @@ final class AudioIOEngine: ObservableObject {
                 playbackConfiguration: playbackControlConfiguration,
                 masterGainLinear: newGain
             )
-            try attachActiveEQFIRProgramIfNeeded(to: &graph, stereoConfiguration: stereoEQConfiguration, playbackConfiguration: playbackControlConfiguration)
+            try attachActiveEQFIRProgramIfNeeded(to: &graph, stereoConfiguration: renderStereoEQConfiguration, playbackConfiguration: playbackControlConfiguration)
             try attachActiveRoomCorrectionProgramIfNeeded(to: &graph, playbackConfiguration: playbackControlConfiguration)
             try attachActiveSpeakerIRProgramIfNeeded(to: &graph, playbackConfiguration: playbackControlConfiguration)
             try applyAudioUnitRackLatency(to: &graph)
@@ -3859,7 +3891,7 @@ final class AudioIOEngine: ObservableObject {
         }
 
         if let session = transportSession {
-            var graph = try stereoEQConfiguration.makeGraphSnapshot(
+            var graph = try renderStereoEQConfiguration.makeGraphSnapshot(
                 sampleRate: session.outputFormat.sampleRate,
                 gainConfiguration: configuration,
                 bassManagementConfiguration: renderBassManagementConfiguration(),
@@ -3869,7 +3901,7 @@ final class AudioIOEngine: ObservableObject {
             )
             try attachActiveEQFIRProgramIfNeeded(
                 to: &graph,
-                stereoConfiguration: stereoEQConfiguration,
+                stereoConfiguration: renderStereoEQConfiguration,
                 playbackConfiguration: playbackControlConfiguration
             )
             try attachActiveRoomCorrectionProgramIfNeeded(
@@ -3916,7 +3948,7 @@ final class AudioIOEngine: ObservableObject {
         }
 
         if let session = transportSession {
-            var graph = try stereoEQConfiguration.makeGraphSnapshot(
+            var graph = try renderStereoEQConfiguration.makeGraphSnapshot(
                 sampleRate: session.outputFormat.sampleRate,
                 gainConfiguration: gainConfiguration,
                 bassManagementConfiguration: renderBassManagementConfiguration(),
@@ -3926,7 +3958,7 @@ final class AudioIOEngine: ObservableObject {
             )
             try attachActiveEQFIRProgramIfNeeded(
                 to: &graph,
-                stereoConfiguration: stereoEQConfiguration,
+                stereoConfiguration: renderStereoEQConfiguration,
                 playbackConfiguration: playbackControlConfiguration
             )
             try attachActiveSpeakerIRProgramIfNeeded(
@@ -4011,7 +4043,7 @@ final class AudioIOEngine: ObservableObject {
         }
 
         if let session = transportSession {
-            var graph = try stereoEQConfiguration.makeGraphSnapshot(
+            var graph = try renderStereoEQConfiguration.makeGraphSnapshot(
                 sampleRate: session.outputFormat.sampleRate,
                 gainConfiguration: gainConfiguration,
                 bassManagementConfiguration: renderBassManagementConfiguration(),
@@ -4021,7 +4053,7 @@ final class AudioIOEngine: ObservableObject {
             )
             try attachActiveEQFIRProgramIfNeeded(
                 to: &graph,
-                stereoConfiguration: stereoEQConfiguration,
+                stereoConfiguration: renderStereoEQConfiguration,
                 playbackConfiguration: playbackControlConfiguration
             )
             try attachActiveRoomCorrectionProgramIfNeeded(
@@ -4591,7 +4623,7 @@ final class AudioIOEngine: ObservableObject {
 
     var currentLiveGraphInputs: LiveGraphInputs {
         LiveGraphInputs(
-            stereoEQ: stereoEQConfiguration, dynamics: dynamicsConfiguration,
+            stereoEQ: renderStereoEQConfiguration, dynamics: dynamicsConfiguration,
             playback: playbackControlConfiguration, gain: gainConfiguration,
             bass: bassManagementConfiguration, room: roomCorrectionConfiguration,
             speakerIR: speakerIRConfiguration, ambient: ambientCompensationRuntimeTarget,
@@ -5585,10 +5617,10 @@ final class AudioIOEngine: ObservableObject {
         var graph = try stereoTransportStartGraph(sampleRate: session.outputFormat.sampleRate)
 
         if FIRUpdatePolicy.shouldPrepareEQFIR(
-            stereoEQ: stereoEQConfiguration,
+            stereoEQ: renderStereoEQConfiguration,
             playback: playbackControlConfiguration
         ) {
-            let preparedProgram = try prepareEQFIRProgram(stereoEQConfiguration, for: session)
+            let preparedProgram = try prepareEQFIRProgram(renderStereoEQConfiguration, for: session)
             activeEQFIRProgram = preparedProgram
             linearPhaseDesignInfo = preparedProgram.designInfo
             try attachEQFIRProgram(preparedProgram, to: &graph)
@@ -5641,7 +5673,7 @@ final class AudioIOEngine: ObservableObject {
     /// mute; the realtime kernel otherwise starts at unity until the next
     /// volume change republishes the graph.
     func stereoTransportStartGraph(sampleRate: Double) throws -> N60DSPGraphSnapshot {
-        try stereoEQConfiguration.makeGraphSnapshot(
+        try renderStereoEQConfiguration.makeGraphSnapshot(
             sampleRate: sampleRate,
             gainConfiguration: gainConfiguration,
             bassManagementConfiguration: renderBassManagementConfiguration(),
@@ -5655,6 +5687,8 @@ final class AudioIOEngine: ObservableObject {
         liveGenerator = nil
         foldMatrixInUse = nil
         roomCorrectionABXOverride = nil
+        // E27 S3b: an audition never outlives the transport. The stored EQ is untouched.
+        if eqAudition != nil { eqAudition = nil }
         if let controller = headTrackingController {
             controller.stop()
             headTrackingController = nil

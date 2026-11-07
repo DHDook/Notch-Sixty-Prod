@@ -87,6 +87,7 @@ struct n60_graph {
 
     // Rebuild options. Control writes; fadeFrames is stamped into each snapshot at publish.
     uint32_t fadeFrames = 0;
+    uint32_t fadeLinear = 0;  // E27 S3b: rebuild option bit 0, stamped into each snapshot at publish
     std::atomic<uint32_t> cpuBudgetBits{0};  // float percent; 0 = no budget (realtime reads)
 
     // Rebuild state, realtime thread only.
@@ -407,6 +408,23 @@ void rebuildBlock(n60_graph *g, float *const *out, uint32_t frames) {
     const double cd = std::cos(step), sd = std::sin(step);
     const uint32_t pos = g->fadePos;
     const uint32_t active = pos >= fade ? 0u : std::min(frames, fade - pos);
+    if (g->incoming->fadeLinear != 0) {
+        // E27 S3b linear law for correlated old/new signals (an EQ bypass, A/B or audition switch):
+        // old * (1 - t) + new * t keeps a shared component at constant gain, with no equal-power bump.
+        const double inv = 1.0 / static_cast<double>(fade);
+        for (uint32_t c = 0; c < outCount; ++c) {
+            float *dst = out[c];
+            const float *nw = g->scratchLane[c];
+            for (uint32_t i = 0; i < active; ++i) {
+                const double t = static_cast<double>(pos + i) * inv;
+                dst[i] = static_cast<float>(dst[i] * (1.0 - t) + nw[i] * t);
+            }
+            if (active < frames) std::memcpy(dst + active, nw + active, sizeof(float) * (frames - active));
+        }
+        g->fadePos = pos + frames;
+        if (g->fadePos >= fade) finishRebuild(g, 1);
+        return;
+    }
     for (uint32_t c = 0; c < outCount; ++c) {
         float *dst = out[c];
         const float *nw = g->scratchLane[c];
@@ -527,6 +545,7 @@ n60_status n60_graph_publish(n60_graph *g, const n60_graph_desc *desc) {
     snap->external = &g->external;
     snap->rtBudget = &g->rtBudget;
     snap->fadeFrames = g->fadeFrames;
+    snap->fadeLinear = g->fadeLinear;
     g->latest = snap;
     g->publishedEpoch.store(snap->epoch, std::memory_order_release);
     n60::SnapHeader *superseded = g->pending.exchange(snap, std::memory_order_acq_rel);
@@ -703,13 +722,14 @@ void n60_graph_external_stats(const n60_graph *g, uint64_t *calls, uint64_t *fau
 n60_status n60_graph_set_rebuild_options(n60_graph *g, const n60_rebuild_options *o) {
     if (g == nullptr || o == nullptr) return N60_STATUS_BAD_ARGUMENT;
     if (o->structSize != sizeof(n60_rebuild_options)) return N60_STATUS_ABI_MISMATCH;
-    if (o->reserved != 0 || !std::isfinite(o->fadeMs) || !std::isfinite(o->cpuBudgetPercent) || o->fadeMs < 0.0f ||
+    if ((o->reserved & ~1u) != 0 || !std::isfinite(o->fadeMs) || !std::isfinite(o->cpuBudgetPercent) || o->fadeMs < 0.0f ||
         o->fadeMs > 500.0f || o->cpuBudgetPercent < 0.0f || o->cpuBudgetPercent > 1000.0f) {
         return N60_STATUS_BAD_ARGUMENT;
     }
     g->fadeFrames = o->fadeMs == 0.0f
                         ? 0u
                         : std::max<uint32_t>(1u, static_cast<uint32_t>(std::lround(o->fadeMs * 1e-3 * g->sampleRate)));
+    g->fadeLinear = o->reserved & 1u;
     storeFloat(g->cpuBudgetBits, o->cpuBudgetPercent);
     return N60_STATUS_OK;
 }

@@ -101,7 +101,7 @@ enum EQHeadroomPredictor {
 
     // MARK: Complex response
 
-    private struct Complex {
+    struct Complex {
         var re: Double
         var im: Double
         static func + (l: Complex, r: Complex) -> Complex { Complex(re: l.re + r.re, im: l.im + r.im) }
@@ -114,13 +114,14 @@ enum EQHeadroomPredictor {
             return Complex(re: (re * d.re + im * d.im) / n, im: (im * d.re - re * d.im) / n)
         }
         var magnitude: Double { hypot(re, im) }
+        var power: Double { re * re + im * im }
     }
 
-    private static func sections(for bands: [EQBand], sampleRate: Double) -> [N60BiquadCoefficients] {
+    static func sections(for bands: [EQBand], sampleRate: Double) -> [N60BiquadCoefficients] {
         ProductionEQResponseMath.compile(bands: bands.map(upwardLimit(of:)), sampleRate: sampleRate)
     }
 
-    private static func response(_ sections: [N60BiquadCoefficients], sampleRate: Double, frequency: Double) -> Complex {
+    static func response(_ sections: [N60BiquadCoefficients], sampleRate: Double, frequency: Double) -> Complex {
         let omega = 2 * Double.pi * frequency / sampleRate
         let z1 = Complex(re: cos(omega), im: -sin(omega))
         let z2 = z1 * z1

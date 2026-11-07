@@ -356,6 +356,50 @@ static void testFadeLaw(double rate) {
     n60_graph_retire(g);
 }
 
+/* E27 S3b: reserved bit 0 selects the linear law, old * (1 - t) + new * t: constant gain for a shared signal. */
+static void testLinearFadeLaw(double rate) {
+    float ga = 1.0f, gb = 0.25f;
+    n60_stage_desc a[1] = {stg(N60_STAGE_GAIN, 1, N60_LANE_ALL, &ga, 1)};
+    n60_stage_desc b[1] = {stg(N60_STAGE_GAIN, 1, N60_LANE_ALL, &gb, 1)};
+    n60_graph *g = build(rate, 1, a, 1);
+    if (!g) return;
+    n60_rebuild_options bad = {sizeof(n60_rebuild_options), 20.0f, 0.0f, 2u};
+    CHECK(n60_graph_set_rebuild_options(g, &bad) == N60_STATUS_BAD_ARGUMENT, "unknown reserved bit refused");
+    n60_rebuild_options o = {sizeof(n60_rebuild_options), 20.0f, 0.0f, 1u};
+    CHECK(n60_graph_set_rebuild_options(g, &o) == N60_STATUS_OK, "linear law set");
+    Src s;
+    srcInit(&s, rate, 1);
+    s.freq[0] = 300;
+    s.amp[0] = 0.5;
+    for (int i = 0; i < 5; i++) step(g, &s, BLOCK);
+    n60_graph_desc db = desc(rate, 1, b, 1);
+    CHECK(n60_graph_publish(g, &db) == N60_STATUS_OK, "publish");
+    const uint32_t F = (uint32_t)lround(0.020 * rate);
+    long fadeStart = -1;
+    double maxErr = 0;
+    int guard = 0;
+    while (guard++ < 100000) {
+        n60_rebuild_status rs = status(g);
+        if (rs.state == 0 && s.pos > 5 * BLOCK && rs.completed == 1) break;
+        const uint64_t start = s.pos;
+        const int inFade = rs.state == 2;
+        if (inFade && fadeStart < 0) fadeStart = (long)start;
+        step(g, &s, BLOCK);
+        for (uint32_t i = 0; i < BLOCK; i++) {
+            const double x = s.in[0][i];
+            double expect = x;
+            if (fadeStart >= 0 && inFade) {
+                double t = fmin((double)((long)(start + i) - fadeStart), (double)F) / (double)F;
+                expect = x * ((1.0 - t) + 0.25 * t);
+            }
+            maxErr = fmax(maxErr, fabs(s.out[0][i] - expect));
+        }
+    }
+    CHECK(maxErr < 3e-5, "rate %.0f linear law error %g", rate, maxErr);
+    CHECK(fadeStart > 0, "rate %.0f fade ran", rate);
+    n60_graph_retire(g);
+}
+
 static void testEnergyConstancy(double rate) {
     /* The new graph delays white noise by 1000 frames, so old and new outputs are uncorrelated and an
      * equal-power fade keeps the power constant. The delay line must be warm before the fade starts. */
@@ -868,6 +912,7 @@ int main(void) {
         testBassCrossover(rate);
         testCrosstalkAndCrossfeed(rate);
         testFadeLaw(rate);
+        testLinearFadeLaw(rate);
         testEnergyConstancy(rate);
         testFailedBuildKeepsOld(rate);
         testNanCancel(rate);

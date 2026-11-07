@@ -19,6 +19,9 @@ final class EQAutoPreampController: ObservableObject {
     /// The last prediction, for the badge.
     @Published private(set) var prediction = EQHeadroomPrediction.none
 
+    /// E27 S3b: extra attenuation, in dB (zero or positive), from the A/B loudness match.
+    @Published private(set) var matchAttenuationDB = 0.0
+
     let isAvailable: Bool
     private let engine: AudioIOEngine
     private var observation: AnyCancellable?
@@ -43,7 +46,17 @@ final class EQAutoPreampController: ObservableObject {
 
     /// The preamp the rule asks for now.
     var targetPreampDB: Double {
-        EQAutoPreamp.preampDB(trimDB: trimDB, boostDB: prediction.boostDB)
+        let range = DSPGainConfiguration.inputPreampRange
+        let base = EQAutoPreamp.preampDB(trimDB: trimDB, boostDB: prediction.boostDB)
+        return min(max(base - matchAttenuationDB, range.lowerBound), range.upperBound)
+    }
+
+    /// Sets the loudness-match attenuation; while the rule is active the preamp follows at once.
+    func setMatchAttenuation(_ value: Double) {
+        let clamped = max(0, value.isFinite ? value : 0)
+        guard clamped != matchAttenuationDB else { return }
+        matchAttenuationDB = clamped
+        if isActive { reconcile() }
     }
 
     /// Turns the rule on or off. On: the current preamp becomes the trim. Off: the preamp returns

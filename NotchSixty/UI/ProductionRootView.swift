@@ -418,7 +418,10 @@ struct ProductionRootView: View {
         case .dashboard:
             ProductionDashboardView(engine: engine, entryCard: setupEntryCard)
         case .equalizer:
-            ProductionEqualizerView(engine: engine, autoPreamp: product.profiles.autoPreamp, reference: product.reference)
+            ProductionEqualizerView(
+                engine: engine, autoPreamp: product.profiles.autoPreamp, reference: product.reference,
+                comparison: product.profiles.eqComparison, audition: product.profiles.eqAudition
+            )
         case .dynamics:
             ProductionDynamicsView(engine: engine, reference: product.reference)
         case .meters:

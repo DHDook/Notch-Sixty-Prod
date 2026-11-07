@@ -510,7 +510,8 @@ void n60_graph_denoiser_import(n60_graph *graph, const n60_denoiser_state *in);
  * The new snapshot has fresh state (filters, delays, meters, gain at its target). Since
  * ABI v5 it is not swapped in cold: the realtime thread renders it next to the live one
  * (silent warm-up long enough to fill its latency), then crossfades live -> new with an
- * equal-power law over the fade length (default 20 ms; see n60_rebuild_options). Both
+ * equal-power law (or the linear law when n60_rebuild_options.reserved bit 0 is set, which
+ * keeps correlated signals at constant gain) over the fade length (default 20 ms; see n60_rebuild_options). Both
  * graphs run during the rebuild, and the next publish waits until it finishes. Live ANC
  * injection is muted in both instances for the whole rebuild and stays muted until the
  * host posts a new re-arm revision. Parameter records posted before a publish
@@ -526,7 +527,9 @@ typedef struct n60_rebuild_options {
     uint32_t structSize; /* sizeof(n60_rebuild_options) */
     float fadeMs;
     float cpuBudgetPercent;
-    uint32_t reserved;   /* must be 0 */
+    uint32_t reserved;   /* flags. Bit 0 (E27 S3b): linear fade law for the later publishes, for old and new graphs
+                            that carry the same signal (EQ bypass, A/B, audition); 0 = equal-power (default).
+                            Other bits must be 0. */
 } n60_rebuild_options;
 
 n60_status n60_graph_set_rebuild_options(n60_graph *graph, const n60_rebuild_options *options);

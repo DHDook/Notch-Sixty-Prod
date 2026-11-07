@@ -64,6 +64,7 @@ struct SnapHeader {
     uint32_t parkRevision;
     uint32_t parkCommand;
     uint32_t fadeFrames;  // rebuild crossfade length when this snapshot is adopted (0 = instant swap)
+    uint32_t fadeLinear;  // E27 S3b: 1 = linear fade law (correlated old/new), 0 = equal-power
     uint32_t historyEpoch;  // ABI v10: bumped (realtime thread) to drop the FIR input history; lanes compare it
     uint32_t follower;      // ABI v13: realtime thread only; 1 while this snapshot is the incoming side of a rebuild
     uint32_t firScheme;     // ABI v20: 0 uniform FIR engine, 1 non-uniform (N60_FIR_SCHEME_*)
