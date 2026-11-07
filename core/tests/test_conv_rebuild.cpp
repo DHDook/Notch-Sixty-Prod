@@ -29,7 +29,7 @@ int failures = 0;
 constexpr double kRates[] = {44100, 48000, 88200, 96000, 176400, 192000, 352800, 384000};
 constexpr uint32_t kBlock = 200;  // deliberately not a multiple of the 256-frame partition
 constexpr uint32_t kMaxBlock = 512;
-constexpr uint64_t kBudget = 256 * 1024;  // graph.cpp kRtBudgetBytes
+const uint64_t kBudget = n60_graph_debug_rt_budget(kBlock);  // 1 KiB per frame, 4 KiB to 256 KiB (S2b)
 
 uint64_t mix(uint64_t x) {
     x += 0x9E3779B97F4A7C15ull;
@@ -118,21 +118,18 @@ struct Rig {
     }
 };
 
-void runFrames(Rig &r, uint64_t frames) {
-    for (uint64_t done = 0; done < frames; done += kBlock) r.step();
-}
-
-bool sameBits(const std::vector<float> &a, const std::vector<float> &b) {
-    return a.size() == b.size() && std::memcmp(a.data(), b.data(), a.size() * sizeof(float)) == 0;
+void runFrames(Rig &r, uint64_t frames, uint32_t blk = kBlock) {
+    for (uint64_t done = 0; done < frames; done += blk) r.step(blk);
 }
 
 // Renders `test` and `ref` in step for `frames`; returns the largest |test - ref|, ignoring blocks whose
 // rebuild state was not idle at the end of the block when `idleOnly`.
-double compareRun(Rig &test, Rig &ref, uint64_t frames, bool idleOnly, uint32_t *callbacks = nullptr) {
+double compareRun(Rig &test, Rig &ref, uint64_t frames, bool idleOnly, uint32_t *callbacks = nullptr,
+                  uint32_t blk = kBlock) {
     double worst = 0;
-    for (uint64_t done = 0; done < frames; done += kBlock) {
-        test.step();
-        ref.step();
+    for (uint64_t done = 0; done < frames; done += blk) {
+        test.step(blk);
+        ref.step(blk);
         if (callbacks != nullptr) ++*callbacks;
         if (idleOnly && test.status().state != 0) continue;
         for (size_t i = 0; i < test.out.size(); ++i) worst = std::max<double>(worst, std::fabs(test.out[i] - ref.out[i]));
@@ -141,10 +138,10 @@ double compareRun(Rig &test, Rig &ref, uint64_t frames, bool idleOnly, uint32_t 
 }
 
 // Drives the rebuild to the end, returning the callbacks spent warming (state 1) and the peak budget used.
-uint32_t finishRebuild(Rig &r, uint32_t limit = 200000) {
+uint32_t finishRebuild(Rig &r, uint32_t limit = 200000, uint32_t blk = kBlock) {
     uint32_t warming = 0, n = 0;
     while (r.status().state != 0 && n++ < limit) {
-        r.step();
+        r.step(blk);
         if (r.status().state == 1) ++warming;
     }
     return warming;
@@ -319,14 +316,15 @@ void testClick(double rate) {
     n60_graph_retire(g);
 }
 
-// ---- 5. No fade: the whole copy is synchronous up to the uniform cap. ------------------------------------------
+// ---- 5. No fade: a copy within the callback budget is whole and counted; a larger one defers the swap. ----------
 
-void testNoFadeCarry(double rate) {
-    const uint32_t taps = 32768;
+// 2,048 taps on 2 lanes fit the budget: the swap is at once, the copy is counted in the peak.
+void testNoFadeSync(double rate) {
+    const uint32_t taps = 2048;
     std::vector<float> h = decaying(taps, 61, 0.02f);
     const float unity = 1.0f;
     n60_stage_desc a[1] = {stage(N60_STAGE_FIR, 1, h.data(), taps)};
-    n60_stage_desc b[2] = {stage(N60_STAGE_GAIN, 2, &unity, 1), a[0]};
+    n60_stage_desc b[2] = {stage(N60_STAGE_GAIN, 2, &unity, 1), a[0]};  // moved: not in lockstep, copied whole
     Rig test(rate, 2, a, 1), ref(rate, 2, a, 1);
     n60_rebuild_options o;
     std::memset(&o, 0, sizeof o);
@@ -335,8 +333,151 @@ void testNoFadeCarry(double rate) {
     CHECK(n60_graph_set_rebuild_options(test.g, &o) == N60_STATUS_OK, "options");
     runFrames(test, taps + 4096);
     runFrames(ref, taps + 4096);
+    const uint64_t before = n60_graph_debug_peak_rt_bytes(test.g);
     test.publish(b, 2, rate);
+    test.step();
+    ref.step();
+    CHECK(test.status().state == 0 && test.status().completed == 0, "rate %.0f small fade-less swap is at once", rate);
+    const uint64_t copied = n60_graph_debug_peak_rt_bytes(test.g);
+    CHECK(copied > before && copied <= kBudget, "rate %.0f fade-less copy counted in the peak (%llu)", rate, (unsigned long long)copied);
     CHECK(compareRun(test, ref, 4 * 16384, false) == 0.0, "rate %.0f instant swap keeps the filter running", rate);
+}
+
+// 32,768 taps on 2 lanes are over the budget: same position, so the lane runs in lockstep and the swap waits for
+// the copy; the output never differs from an uninterrupted render, and no callback exceeds the budget.
+void testNoFadeDeferred(double rate) {
+    const uint32_t taps = 32768;
+    std::vector<float> h = decaying(taps, 62, 0.02f);
+    n60_stage_desc a[1] = {stage(N60_STAGE_FIR, 1, h.data(), taps)};
+    n60_stage_desc b[2] = {a[0], stage(N60_STAGE_METER_OUT, 2, nullptr, 0)};
+    Rig test(rate, 2, a, 1), ref(rate, 2, a, 1);
+    n60_rebuild_options o;
+    std::memset(&o, 0, sizeof o);
+    o.structSize = sizeof o;
+    o.fadeMs = 0.0f;
+    o.cpuBudgetPercent = 1e-7f;  // a fade-less snapshot is never refused for CPU
+    CHECK(n60_graph_set_rebuild_options(test.g, &o) == N60_STATUS_OK, "options");
+    runFrames(test, taps + 4096);
+    runFrames(ref, taps + 4096);
+    test.publish(b, 2, rate);
+    test.step();
+    ref.step();
+    CHECK(test.status().state != 0, "rate %.0f large fade-less swap waits for the lazy copy", rate);
+    CHECK(compareRun(test, ref, 4 * 16384, false) == 0.0, "rate %.0f deferred swap keeps the filter running", rate);
+    CHECK(test.status().state == 0 && test.status().completed == 1 && test.status().refused == 0, "rate %.0f deferred swap done", rate);
+    CHECK(n60_graph_debug_peak_rt_bytes(test.g) <= kBudget, "rate %.0f deferred peak %llu", rate,
+          (unsigned long long)n60_graph_debug_peak_rt_bytes(test.g));
+}
+
+// Over the budget and not in lockstep: no whole copy is made (the stage starts empty), the swap is still at once.
+void testNoFadeTooLargeMoved(double rate) {
+    const uint32_t taps = 32768;
+    std::vector<float> h = decaying(taps, 63, 0.02f);
+    const float unity = 1.0f;
+    n60_stage_desc a[1] = {stage(N60_STAGE_FIR, 1, h.data(), taps)};
+    n60_stage_desc b[2] = {stage(N60_STAGE_GAIN, 2, &unity, 1), a[0]};
+    Rig test(rate, 2, a, 1);
+    n60_rebuild_options o;
+    std::memset(&o, 0, sizeof o);
+    o.structSize = sizeof o;
+    o.fadeMs = 0.0f;
+    CHECK(n60_graph_set_rebuild_options(test.g, &o) == N60_STATUS_OK, "options");
+    runFrames(test, taps + 4096);
+    test.publish(b, 2, rate);
+    test.step();
+    CHECK(test.status().state == 0, "rate %.0f too-large moved filter swaps at once", rate);
+    CHECK(n60_graph_debug_peak_rt_bytes(test.g) <= kBudget, "rate %.0f too-large peak", rate);
+    runFrames(test, 8 * 16384);
+    for (size_t i = 0; i < test.out.size(); ++i) CHECK(std::isfinite(test.out[i]), "rate %.0f finite output", rate);
+}
+
+// ---- 6. Blocks below 64 frames: the budget scales with the block, the carry stays exact. -------------------------
+
+void testSmallBlocks(double rate, uint32_t lanes, uint32_t blk) {
+    const uint32_t taps = 262144;
+    std::vector<float> h = decaying(taps, 91, 0.02f);
+    n60_stage_desc a[1] = {stage(N60_STAGE_FIR, 1, h.data(), taps)};
+    n60_stage_desc b[2] = {a[0], stage(N60_STAGE_METER_OUT, 2, nullptr, 0)};
+    Rig test(rate, lanes, a, 1), ref(rate, lanes, a, 1);
+    runFrames(test, taps + 4096, blk);
+    runFrames(ref, taps + 4096, blk);
+    test.publish(b, 2, rate);
+    test.step(blk);
+    finishRebuild(test, 400000, blk);
+    while (ref.pos < test.pos) ref.step(blk);
+    const uint64_t budget = n60_graph_debug_rt_budget(blk);
+    CHECK(budget == std::max<uint64_t>(4096, uint64_t(blk) * 1024), "rate %.0f block %u budget %llu", rate, blk, (unsigned long long)budget);
+    CHECK(test.status().completed == 1 && test.status().lastResult == 1, "rate %.0f block %u rebuild completed", rate, blk);
+    CHECK(n60_graph_debug_peak_rt_bytes(test.g) <= budget, "rate %.0f block %u peak %llu > %llu", rate, blk,
+          (unsigned long long)n60_graph_debug_peak_rt_bytes(test.g), (unsigned long long)budget);
+    CHECK(compareRun(test, ref, 3ull * 16384, true, nullptr, blk) == 0.0, "rate %.0f block %u output differs after carry", rate, blk);
+}
+
+// ---- 7. A source lane whose history was invalidated and has not run since: the lazy path warms in full. ----------
+
+void testStaleSource(double rate) {
+    const uint32_t taps = 262144;
+    std::vector<float> h = decaying(taps, 92, 0.02f);
+    n60_stage_desc a[1] = {stage(N60_STAGE_FIR, 1, h.data(), taps)};
+    n60_stage_desc b[2] = {a[0], stage(N60_STAGE_METER_OUT, 2, nullptr, 0)};
+    Rig test(rate, 2, a, 1);
+    runFrames(test, taps + 4096);
+    n60_graph_invalidate_history(test.g);  // before the next callback: every source lane is stale
+    test.publish(b, 2, rate);
+    test.step();
+    const uint32_t warming = finishRebuild(test);
+    CHECK(test.status().completed == 1, "rate %.0f stale-source rebuild completed", rate);
+    CHECK(warming >= taps / kBlock, "rate %.0f stale source warms in full (%u callbacks)", rate, warming);
+    CHECK(n60_graph_debug_peak_rt_bytes(test.g) <= kBudget, "rate %.0f stale-source peak", rate);
+    runFrames(test, 4 * 16384);
+    for (size_t i = 0; i < test.out.size(); ++i) CHECK(std::isfinite(test.out[i]), "rate %.0f finite output", rate);
+}
+
+// ---- 8. A parameter post upstream of the carried filter during the copy window gives the carry up. ---------------
+
+void testUpstreamPost(double rate, bool upstream) {
+    const uint32_t taps = 262144;
+    std::vector<float> h = decaying(taps, 93, 0.02f);
+    const float g1 = 1.0f;
+    // Upstream case: the gain is before the filter. Downstream case: an output gain after it. Either way the new
+    // snapshot adds a meter after the filter, so the filter itself is unchanged and carried lazily.
+    n60_stage_desc a[2], bm[3];
+    if (upstream) {
+        a[0] = stage(N60_STAGE_GAIN, 2, &g1, 1);
+        a[1] = stage(N60_STAGE_FIR, 1, h.data(), taps);
+        bm[0] = a[0];
+        bm[1] = a[1];
+        bm[2] = stage(N60_STAGE_METER_OUT, 3, nullptr, 0);
+    } else {
+        a[0] = stage(N60_STAGE_FIR, 1, h.data(), taps);
+        a[1] = stage(N60_STAGE_OUTPUT_GAIN, 2, &g1, 1);
+        bm[0] = a[0];
+        bm[1] = stage(N60_STAGE_METER_OUT, 3, nullptr, 0);
+        bm[2] = a[1];
+    }
+    Rig test(rate, 2, a, 2), ref(rate, 2, a, 2);
+    runFrames(test, taps + 4096);
+    runFrames(ref, taps + 4096);
+    test.publish(bm, 3, rate);
+    test.step();
+    for (int i = 0; i < 3; ++i) test.step();  // inside the copy window
+    CHECK(test.status().state == 1, "rate %.0f copy window open", rate);
+    n60_param_record rec = {2, 0, 0.5f, 0};
+    CHECK(n60_graph_post_params(test.g, &rec, 1) == N60_STATUS_OK, "post");
+    test.step();
+    const uint32_t warming = finishRebuild(test);
+    CHECK(test.status().completed == 1, "rate %.0f rebuild after post completed", rate);
+    if (upstream) {
+        CHECK(n60_graph_debug_carry_abandoned(test.g) == 1, "rate %.0f upstream post abandons the carry", rate);
+        CHECK(warming >= taps / kBlock, "rate %.0f abandoned carry warms in full (%u callbacks)", rate, warming);
+    } else {
+        CHECK(n60_graph_debug_carry_abandoned(test.g) == 0, "rate %.0f downstream post keeps the carry", rate);
+        CHECK(warming < taps / kBlock / 4, "rate %.0f carried warm %u", rate, warming);
+    }
+    CHECK(n60_graph_debug_peak_rt_bytes(test.g) <= kBudget, "rate %.0f post peak", rate);
+    // The post was aimed at the incoming epoch, so after the swap the output is a finite continuation.
+    runFrames(test, 4 * 16384);
+    for (size_t i = 0; i < test.out.size(); ++i) CHECK(std::isfinite(test.out[i]), "rate %.0f finite output", rate);
 }
 
 // Same taps behind a changed upstream stage: not in lockstep, so it warms in full (never a spliced history).
@@ -392,9 +533,17 @@ int main() {
         testReset(rate, false);
         testReset(rate, true);
         testClick(rate);
-        testNoFadeCarry(rate);
+        testNoFadeSync(rate);
+        testNoFadeDeferred(rate);
+        testNoFadeTooLargeMoved(rate);
+        testSmallBlocks(rate, 2, 32);
+        testSmallBlocks(rate, 2, 48);
+        testStaleSource(rate);
+        testUpstreamPost(rate, true);
+        testUpstreamPost(rate, false);
         std::printf("rate %.0f done\n", rate);
     }
+    testSmallBlocks(384000, 8, 32);
     testCpuRefusal(48000);
     if (failures != 0) {
         std::printf("test_conv_rebuild: %d failures\n", failures);

@@ -44,8 +44,15 @@ bool dspDenoiserCarry(SnapHeader *from, SnapHeader *to);
 // both snapshots run the same input. `*pending` is set when dspFirCarryStep has work. The returned warm-up then
 // covers the settle time after the copy, not the copy itself (the graph holds the warm-up while the copy runs).
 // A filter whose taps changed but whose tap schedule, lanes and every upstream stage are unchanged is seeded the
-// same way. Without lazy a firScheme 1 filter longer than N60_FIR_MAX_TAPS is not carried (it warms in full).
-uint32_t dspFirCarry(SnapHeader *from, SnapHeader *to, bool lazy, bool *pending);
+// same way.
+//
+// Without lazy (no rebuild fade) a stage is copied whole, synchronously, only while its lanes fit `*syncBudget` bytes
+// (E9 S2b; the copy is deducted from it; null = unlimited). A larger one that still sees the same input is carried
+// lazily and sets *pending, so the graph defers the swap; one that does not warms in full.
+uint32_t dspFirCarry(SnapHeader *from, SnapHeader *to, bool lazy, bool *pending, uint64_t *syncBudget);
+// Realtime thread. True when `stageId` is at or before a stage of `to` that is being carried lazily (E9 S2b): a
+// parameter change there alters the input of the carried filter.
+bool dspFirCarryUpstream(const SnapHeader *to, uint32_t stageId);
 // Position of the lazy copy over the (stage, lane, byte) space of the incoming snapshot.
 struct FirCarryCursor {
     uint32_t stage = 0, lane = 0;

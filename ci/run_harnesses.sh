@@ -475,6 +475,21 @@ if selected e9_conv; then
     fi
 fi
 
+# E9 S2 / S2b: long FIR across rebuilds (lazy carry, budgeted reset, small blocks, fade-less adoption, upstream posts).
+if selected e9_conv_rebuild; then
+    build_core_objs
+    if [ "$CORE_OK" = 1 ]; then
+        if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -Icore/include -Icore/src core/tests/test_conv_rebuild.cpp \
+            "${CORE_OBJS[@]}" -o "$OUT/e9_core_conv_rebuild" && "$OUT/e9_core_conv_rebuild"; then
+            passed+=(e9_core_conv_rebuild)
+        else
+            failed+=(e9_core_conv_rebuild)
+        fi
+    else
+        failed+=(e9_conv_rebuild)
+    fi
+fi
+
 # E25 S2: STEREO_CROSSOVER filter-spec trailer, lane polarity (negative GAIN) and crossover + ROOM_FIR (ABI v19).
 if selected e25_stereo_bass; then
     build_core_objs

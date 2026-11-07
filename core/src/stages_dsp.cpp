@@ -1384,7 +1384,7 @@ static uint32_t rfCarry(SnapHeader *from, SnapHeader *to, StageRec &b) {
     return rfWarmFrames(y);
 }
 
-uint32_t dspFirCarry(SnapHeader *from, SnapHeader *to, bool lazy, bool *pending) {
+uint32_t dspFirCarry(SnapHeader *from, SnapHeader *to, bool lazy, bool *pending, uint64_t *syncBudget) {
     uint32_t warm = 0;
     if (pending != nullptr) *pending = false;
     StageRec *dst = stages(to);
@@ -1406,15 +1406,27 @@ uint32_t dspFirCarry(SnapHeader *from, SnapHeader *to, bool lazy, bool *pending)
             // stage sees the same input as before (same position, every stage upstream unchanged).
             if (seed && !(j == i && dspUpstreamSame(from, to, i))) continue;
             // A lazy carry runs both instances in lockstep, which needs the same input in both: same position and
-            // unchanged upstream. Otherwise the stage warms in full. A seed with no fade would be audible at once
-            // with the old taps' partial sums, so it warms too.
-            if (to->firScheme == N60_FIR_SCHEME_NONUNIFORM &&
-                (lazy ? !(j == i && dspUpstreamSame(from, to, i)) : seed)) {
-                continue;
-            }
+            // unchanged upstream. Otherwise the stage warms in full (a whole-lane copy without a fade is the one
+            // exception, below). A seed with no fade would be audible at once with the old taps' partial sums, so it
+            // warms too.
+            const bool lockstep = j == i && dspUpstreamSame(from, to, i);
+            if (to->firScheme == N60_FIR_SCHEME_NONUNIFORM && (lazy ? !lockstep : seed)) continue;
             if (to->firScheme == N60_FIR_SCHEME_NONUNIFORM) {
                 const conv::Shared &cs = *reinterpret_cast<const conv::Shared *>(bytes(to) + b.sharedOff);
-                if (lazy) {
+                // No fade: the outgoing instance is gone at once, so a copy that fits this callback's budget is
+                // made whole now (the lane is identical at once); a larger one goes the lazy way.
+                bool useLazy = lazy;
+                if (!lazy) {
+                    const uint64_t need = static_cast<uint64_t>(b.stateStride) * b.laneCount;
+                    if (syncBudget == nullptr || need <= *syncBudget) {
+                        if (syncBudget != nullptr) *syncBudget -= need;
+                    } else if (lockstep) {
+                        useLazy = true;
+                    } else {
+                        continue;  // too large to copy now and not in lockstep: starts empty
+                    }
+                }
+                if (useLazy) {
                     uint32_t settle = 0;
                     for (uint32_t k = 0; k < b.laneCount; ++k) {
                         uint8_t *sl = laneState(from, a, k);
@@ -1432,9 +1444,6 @@ uint32_t dspFirCarry(SnapHeader *from, SnapHeader *to, bool lazy, bool *pending)
                     carried = true;
                     continue;
                 }
-                // No fade: the outgoing instance is gone at once, so the copy must be whole. Bounded only up to
-                // the uniform cap; a longer filter starts empty and warms in full.
-                if (cs.taps > N60_FIR_MAX_TAPS) continue;
                 for (uint32_t k = 0; k < b.laneCount; ++k) {
                     uint8_t *sl = laneState(from, a, k);
                     uint8_t *dl = laneState(to, b, k);
@@ -1649,6 +1658,16 @@ bool dspDenoiserImport(SnapHeader *h, const n60_denoiser_state *in) {
     std::memcpy(V.aMin, in->adaptiveMin, bytes);
     std::memcpy(V.capSum, in->captureSum, bytes);
     return true;
+}
+
+bool dspFirCarryUpstream(const SnapHeader *to, uint32_t stageId) {
+    const StageRec *st = stages(to);
+    int64_t at = -1, last = -1;
+    for (uint32_t i = 0; i < to->stageCount; ++i) {
+        if (st[i].id == stageId) at = i;
+        if (st[i].carrySrc != 0) last = i;
+    }
+    return at >= 0 && at <= last;
 }
 
 }  // namespace n60
