@@ -1049,6 +1049,7 @@ final class AudioIOEngine: ObservableObject {
         }
         if activeQuietZoneLeaseKeeper == nil {
             activeQuietZoneLeaseKeeper = ActiveQuietZoneLeaseKeeper(
+                poll: { [weak session] in session?.pollQuietZoneGuards() },
                 renew: { [weak session] seconds in session?.renewActiveQuietZoneLease(seconds: seconds) },
                 release: { [weak session] in session?.releaseActiveQuietZoneLease() }
             )
@@ -1345,6 +1346,13 @@ final class AudioIOEngine: ObservableObject {
             && multiOutputRoutingConfiguration?.enabled != true
     }
 
+    /// E26 S7b2b: the profile session hosts the Quiet Zone feed (class A: two mains plus one sub output, not routed).
+    var activeQuietZoneProfileRuntimeAvailable: Bool {
+        guard transportSession == nil, binauralHeadphoneTransportSession == nil,
+              let profile = nChannelTransportSession else { return false }
+        return profile.hostsQuietZone
+    }
+
     /// Largest anti-noise peak the engine will accept: the planner's headroom-based value, then the
     /// always-on live-treatment cap (`LiveTreatmentSafeguards`), which no setting disables.
     var activeQuietZoneAvailableInjectionPeak: Double {
@@ -1454,6 +1462,14 @@ final class AudioIOEngine: ObservableObject {
     /// Called by the arm owner on disarm: targets built under the old arm can no longer play.
     func revokeLiveTreatmentArm() {
         liveTreatmentGeneration &+= 1
+        // E26 S7b2b: the profile session's ANC_INJECT authorisation ends with the arm (the feed fades out in 20 ms).
+        if let profile = nChannelTransportSession, profile.hostsQuietZone, profile.quietZoneInjectAuthorised {
+            try? profile.setQuietZoneInjectAuthorised(false)
+        }
+        if activeQuietZoneProfileRuntimeAvailable, activeQuietZoneRuntimeTarget.active {
+            activeQuietZoneRuntimeTarget = ActiveQuietZoneRuntimeTarget(tones: [], transitionMilliseconds: 100)
+            syncActiveQuietZoneLease(active: false)
+        }
     }
 
     func replaceActiveQuietZoneRuntimeTarget(
@@ -1464,7 +1480,8 @@ final class AudioIOEngine: ObservableObject {
             throw ActiveQuietZoneError.armRevoked
         }
         if target.active,
-           !activeQuietZoneStereoSpeakerRuntimeAvailable {
+           !activeQuietZoneStereoSpeakerRuntimeAvailable,
+           !activeQuietZoneProfileRuntimeAvailable {
             throw ActiveQuietZoneError.runtimeUnsupported
         }
         if activeQuietZoneRuntimeTarget.active,
@@ -1496,6 +1513,11 @@ final class AudioIOEngine: ObservableObject {
                 .insufficientOutputHeadroom
         }
 
+        if transportSession == nil, let profile = nChannelTransportSession, profile.hostsQuietZone,
+           binauralHeadphoneTransportSession == nil {
+            try replaceProfileActiveQuietZoneTarget(target, on: profile)
+            return
+        }
         guard let session = transportSession else {
             guard !target.active else {
                 throw ActiveQuietZoneError.runtimeUnsupported
@@ -1536,6 +1558,30 @@ final class AudioIOEngine: ObservableObject {
             try session.publishDSPGraph(graph)
         } catch {
             if !activeQuietZoneRuntimeTarget.active { syncActiveQuietZoneLease(active: false) }
+            throw error
+        }
+        syncActiveQuietZoneLease(active: target.active)
+        activeQuietZoneRuntimeTarget = target
+        lastErrorDescription = nil
+    }
+
+    /// E26 S7b2b: the profile session's branch. The tonal snapshot goes to the feed; ANC_INJECT is authorised only for
+    /// an active target stamped with the current arm token (checked by the caller), and revoked for an inactive one.
+    /// The lease exists before the feed is armed, so the output stays zero until the first renewal.
+    private func replaceProfileActiveQuietZoneTarget(
+        _ target: ActiveQuietZoneRuntimeTarget, on profile: CoreAudioNChannelTransportSession
+    ) throws {
+        var scratch = N60DSPGraphSnapshotMakeUnity(profile.outputFormat.sampleRate)
+        try attachActiveQuietZone(target, to: &scratch)
+        if target.active { syncActiveQuietZoneLease(active: true) }
+        do {
+            try profile.setQuietZoneTonalSnapshot(scratch.activeQuietZone)
+            try profile.setQuietZoneInjectAuthorised(target.active)
+        } catch {
+            if !activeQuietZoneRuntimeTarget.active {
+                try? profile.setQuietZoneInjectAuthorised(false)
+                syncActiveQuietZoneLease(active: false)
+            }
             throw error
         }
         syncActiveQuietZoneLease(active: target.active)
@@ -5235,7 +5281,8 @@ final class AudioIOEngine: ObservableObject {
     private func hostedQuietZoneSplitter(
         routePlan: LiveNChannelOutputRoutePlan, sampleRate: Double
     ) -> N60SpeakerBusSplitterSnapshot? {
-        guard FeatureFlags().isEnabled(.subAwareAnc), bassManagementConfiguration.enabled,
+        // A routed session (the ROUTE stage owns every physical output) never hosts Quiet Zone in v1 (gap G18).
+        guard FeatureFlags().isEnabled(.subAwareAnc), bassManagementConfiguration.enabled, !routePlan.isRouted,
               routePlan.subwooferCount == 1, routePlan.programLayout.roles.count == 2 else { return nil }
         var bass = bassManagementConfiguration
         bass.physicalOutputMode = .mainsSub

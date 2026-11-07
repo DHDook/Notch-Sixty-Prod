@@ -454,7 +454,7 @@ enum ActiveQuietZoneError:
         case .insufficientOutputHeadroom:
             return "The active Content Preset does not reserve enough output headroom for bounded anti-noise injection."
         case .runtimeUnsupported:
-            return "Active Quiet Zone currently requires the direct stereo speaker transport."
+            return "Quiet Zone supports two speakers and one subwoofer output, or the direct stereo speaker transport."
         case .frequencyChangeRequiresDisarm:
             return "Active Quiet Zone must fade the current tone to silence before changing cancellation frequency."
         case .nonFiniteSolution:

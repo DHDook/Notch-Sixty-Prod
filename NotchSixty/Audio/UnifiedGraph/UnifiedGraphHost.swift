@@ -53,12 +53,18 @@ final class UnifiedGraphHost: @unchecked Sendable {
         if let graph { n60_graph_retire(graph) }
         graph = nil
         // A registered EXTERNAL processor's context (E26 S7b2) is freed only after the graph is retired.
-        retainedResource = nil
+        retained = nil
     }
 
     /// An object the graph's EXTERNAL callback points at (the ANC lane feed). Kept alive until `release`, which
     /// retires the graph first. Set once, before IO starts.
-    var retainedResource: AnyObject?
+    /// Read and written under the host lock (G25), so a control call racing `release()` sees the resource or nil, and
+    /// holds a strong reference to it while it works.
+    var retainedResource: AnyObject? {
+        get { lock.lock(); defer { lock.unlock() }; return retained }
+        set { lock.lock(); defer { lock.unlock() }; retained = newValue }
+    }
+    private var retained: AnyObject?
 
     /// E26 S7b2: sum of the trip counts of the guard stages, read from the newest published snapshot. Control thread.
     func guardTripCount(stageIds: [UInt32]) -> UInt64 {

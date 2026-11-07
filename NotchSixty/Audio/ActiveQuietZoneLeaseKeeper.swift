@@ -16,14 +16,22 @@ final class ActiveQuietZoneLeaseKeeper {
     private let leaseSeconds: Double
     private let renew: (Double) -> Void
     private let release: () -> Void
+    /// E26 S7b2b (G20): called every `pollIntervalSeconds` while running (graph guard trips are read by polling, so the
+    /// feed learns of one within a poll, not a renewal). Must not block.
+    private let poll: (() -> Void)?
+    private let pollIntervalSeconds: Double
     private var task: Task<Void, Never>?
 
     init(
         renewIntervalSeconds: Double = ActiveQuietZoneLeaseKeeper.renewIntervalSeconds,
         leaseSeconds: Double = ActiveQuietZoneLeaseKeeper.leaseSeconds,
+        pollIntervalSeconds: Double = 0.05,
+        poll: (() -> Void)? = nil,
         renew: @escaping (Double) -> Void,
         release: @escaping () -> Void
     ) {
+        self.poll = poll
+        self.pollIntervalSeconds = max(0.001, pollIntervalSeconds)
         self.renewIntervalSeconds = max(0.001, renewIntervalSeconds)
         self.leaseSeconds = max(self.renewIntervalSeconds, leaseSeconds)
         self.renew = renew
@@ -38,11 +46,18 @@ final class ActiveQuietZoneLeaseKeeper {
         guard task == nil else { return }
         renew(leaseSeconds)
         let interval = renewIntervalSeconds
+        let step = poll == nil ? interval : min(interval, pollIntervalSeconds)
         task = Task { [weak self] in
+            var sinceRenew = 0.0
             while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: UInt64(interval * 1_000_000_000))
+                try? await Task.sleep(nanoseconds: UInt64(step * 1_000_000_000))
                 guard !Task.isCancelled, let self else { return }
-                self.renew(self.leaseSeconds)
+                self.poll?()
+                sinceRenew += step
+                if sinceRenew >= interval - 1e-9 {
+                    sinceRenew = 0
+                    self.renew(self.leaseSeconds)
+                }
             }
         }
     }
