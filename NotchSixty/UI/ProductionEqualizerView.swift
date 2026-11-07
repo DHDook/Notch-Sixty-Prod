@@ -31,13 +31,16 @@ struct ProductionEqualizerView: View {
             ProductionActionErrorBanner(message: $actionError)
             modeBar
 
-            HSplitView {
-                responseGraph
-                    .frame(minWidth: 560)
+            responseGraph
 
+            HStack(alignment: .top, spacing: 12) {
                 bandsPanel
-                    .frame(minWidth: 330, idealWidth: 360, maxWidth: 430)
+                    .frame(minWidth: 300, maxWidth: .infinity)
+                bandEditorPane
+                    .frame(minWidth: 300, idealWidth: 330, maxWidth: 360)
             }
+            .frame(minHeight: 240, idealHeight: 300, maxHeight: 300)
+            .layoutPriority(1)
         }
         .padding(24)
         .onAppear { ensureSelection() }
@@ -171,7 +174,7 @@ struct ProductionEqualizerView: View {
                 },
                 rtaOverlay: liveOverlay.showsRTA ? liveOverlay.rtaCurve : nil
             )
-            .frame(minHeight: 330, maxHeight: .infinity)
+            .frame(minHeight: 260, maxHeight: .infinity)
 
             if bands.contains(where: { $0.enabled && $0.type == .fir }) {
                 Label(
@@ -319,25 +322,6 @@ struct ProductionEqualizerView: View {
             .accessibilityLabel(EQBandPanelModel.accessibilityLabel(number: index + 1, band: band))
             .accessibilityAddTraits(isSelected ? .isSelected : [])
             .accessibilityIdentifier("eq.bands.row.\(index + 1)")
-
-            if isSelected, let binding = selectedBandBinding(for: band.id) {
-                VStack(alignment: .leading, spacing: 16) {
-                    Divider()
-                    editorHeader(band: band, binding: binding)
-                    staticControls(band: band, binding: binding)
-                    Divider()
-                    if band.type.supportsDynamicEQ {
-                        dynamicControls(band: band, binding: binding)
-                    } else {
-                        Label("Dynamic EQ is unavailable for this filter type.", systemImage: "bolt.slash")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                .padding(.horizontal, 10)
-                .padding(.bottom, 12)
-                .accessibilityIdentifier("eq.bands.editor")
-            }
         }
         .background(
             isSelected ? Color.accentColor.opacity(0.14) : Color.clear,
@@ -345,13 +329,49 @@ struct ProductionEqualizerView: View {
         )
     }
 
+    private var bandEditorPane: some View {
+        Group {
+            if let id = selectedBandID,
+               let index = bands.firstIndex(where: { $0.id == id }),
+               let binding = selectedBandBinding(for: id) {
+                let band = binding.wrappedValue
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 16) {
+                        editorHeader(number: index + 1, band: band, binding: binding)
+                        staticControls(band: band, binding: binding)
+                        Divider()
+                        if band.type.supportsDynamicEQ {
+                            dynamicControls(band: band, binding: binding)
+                        } else {
+                            Label("Dynamic EQ is unavailable for this filter type.", systemImage: "bolt.slash")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .padding(14)
+                }
+            } else {
+                Text(bands.isEmpty ? "Add a band to edit it here." : "Select a band to edit it here.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .padding(16)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+        .frame(maxHeight: .infinity)
+        .background(.quaternary.opacity(0.20), in: .rect(cornerRadius: 20))
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("eq.bands.editor")
+    }
 
-    private func editorHeader(band: EQBand, binding: Binding<EQBand>) -> some View {
+    private func editorHeader(number: Int, band: EQBand, binding: Binding<EQBand>) -> some View {
         // The switch sits beside the section title it controls, as in
         // System Settings, so its position alone reads as on or off.
         HStack {
-            Text("Band settings").font(.subheadline.bold())
-            Spacer()
+            Text("Band \(number)").font(.headline)
+            Text(band.type.displayName).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            Spacer(minLength: 4)
             Toggle("Band", isOn: binding.enabled)
                 .labelsHidden()
                 .toggleStyle(.switch)
