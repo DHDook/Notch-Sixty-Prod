@@ -182,9 +182,9 @@ Gate G2 passed on 2026-10-25 (commit 07e82c6)
 
 ### E8 Routing matrix and crossovers
 
-- [ ] Replace Mains+Sub / Bi-Amp / Tri-Amp modes with a source-to-output matrix and a per-output filter chain
+- [x] Replace Mains+Sub / Bi-Amp / Tri-Amp modes with a source-to-output matrix and a per-output filter chain
 - [x] Filter library: Butterworth, Bessel, Linkwitz-Riley at 6–48 dB/oct, asymmetric slopes, Linkwitz transform
-- [ ] Any number of ways per speaker, on any layout, not stereo only
+- [x] Any number of ways per speaker, on any layout, not stereo only
 - [x] Linear-phase FIR crossovers reusing the Speaker Optimizer's linear-phase synthesis
 - [x] Driver linearisation from Measurement Lab near-field captures
 - [x] Raise the subwoofer limit from 4 to 8 (core bass management already supports 8 sub lanes since E6 S7b, ABI v7)
@@ -255,7 +255,7 @@ minimum-phase in blind ABX at three or more seats, and measurement results match
 
 ### E10 Mixed-phase room correction and bass control
 
-- [ ] Excess-phase correction with frequency-dependent windowing, built on the PR129 research designer
+- [x] Excess-phase correction with frequency-dependent windowing, built on the PR129 research designer
 - [x] Pre-ringing limits and a latency budget; keep minimum-phase as a low-latency / video mode
 - [x] Multi-seat robustness: correct only phase that is coherent across seats, with per-seat weighting
 - [x] Joint mains-and-subwoofer bass optimisation across all channels (Dirac Bass Control class), not subwoofers alone
@@ -265,9 +265,9 @@ minimum-phase in blind ABX at three or more seats, and measurement results match
 
 ### E12 Guided setup and information architecture
 
-- [ ] One "Set up my system" flow: topology, levels and polarity, distances, multi-seat sweep, bass, correction, verification, saved profile
-- [ ] Merge Speakers, Speaker Calibration, Measurement Lab and Room Correction into a clear System area
-- [ ] Surface the room geometry and treatment advisor inside the flow
+- [x] One "Set up my system" flow: topology, levels and polarity, distances, multi-seat sweep, bass, correction, verification, saved profile
+- [x] Merge Speakers, Speaker Calibration, Measurement Lab and Room Correction into a clear System area
+- [x] Surface the room geometry and treatment advisor inside the flow
 - [ ] Usability test with someone who has never seen the app
 
 ### E24 Room correction completion (owner, 1 Nov 2026)
@@ -282,7 +282,7 @@ the shipped UI.
 - [x] E24 S2b closed by owner decision (3 Nov 2026): optimizer, characterization, FIR-verify, evidence, guided-workflow and Quiet Zone survey controllers keep refusing `playbackMustBeIdle`; `deployLatestDesign` keeps requiring idle
 - [x] Real post-apply verification; wizard offers mixed phase; joint-bass grid filters deployed
 - [x] E11 leftovers wired: repeat averaging and timing in Room Correction and multichannel; Analysis tab (distortion, RT60/EDT)
-- [ ] E12 leftovers: shared microphone and seat cards; wizard multi-mic pass; target shaping persists (target shaping persisted; shared cards and wizard multi-mic remain)
+- [x] E12 leftovers: shared microphone and seat cards; wizard multi-mic pass; target shaping persists (E24 S5, #323 to #328)
 - [~] Acceptance: harness green with no expected-fails (done, S6); owner smoke checklist pending, after E24 and E25 (open audit items in `docs/epics/E24.md`)
 - [x] Process safeguards done (AGENTS.md section 12); ledger audit of E4, E6, E8, E9, E13 done (S8)
 - [x] S9 `e24/abx-wiring` (#335): UI caller for `RoomCorrectionABX` (E10 S9)
