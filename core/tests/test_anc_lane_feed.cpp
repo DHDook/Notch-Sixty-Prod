@@ -352,6 +352,22 @@ int main() {
                 CHECK(next == before + big.size(), "oversized push returned %llu at %.0f", static_cast<unsigned long long>(next), rate);
                 CHECK(N60AncLaneFeedReferenceOutputIndex(r.feed) == before, "push moved the output index at %.0f", rate);
             }
+            // G15: an unconsumed zero-filled gap is widened by the next gap, never narrowed (the echo stage then skips
+            // at least as much). Reset first so the timeline is at 0 and nothing is consumed.
+            N60AncLaneFeedReset(r.feed);
+            {
+                float chunk[16] = {};
+                uint64_t from = 0, to = 0;
+                CHECK(!N60AncLaneFeedReferenceZeroSpan(r.feed, &from, &to), "span before any gap at %.0f", rate);
+                N60AncLaneFeedPushReference(r.feed, 0, chunk, 16);
+                CHECK(!N60AncLaneFeedReferenceZeroSpan(r.feed, &from, &to), "contiguous push made a span at %.0f", rate);
+                N60AncLaneFeedPushReference(r.feed, 16 + 100, chunk, 16);   // gap [16, 116)
+                CHECK(N60AncLaneFeedReferenceZeroSpan(r.feed, &from, &to) && from == 16 && to == 116,
+                      "first gap [%llu, %llu) at %.0f", static_cast<unsigned long long>(from), static_cast<unsigned long long>(to), rate);
+                N60AncLaneFeedPushReference(r.feed, 132 + 300, chunk, 16);  // second gap [132, 432), first unconsumed
+                CHECK(N60AncLaneFeedReferenceZeroSpan(r.feed, &from, &to) && from == 16 && to == 432,
+                      "merged gap [%llu, %llu) at %.0f", static_cast<unsigned long long>(from), static_cast<unsigned long long>(to), rate);
+            }
             // Reset restarts the reference timeline at 0; a push from 0 then plays again once armed.
             N60AncLaneFeedReset(r.feed);
             CHECK(N60AncLaneFeedReferenceOutputIndex(r.feed) == 0u, "reference index after reset %llu at %.0f",

@@ -184,6 +184,10 @@ bool N60AncLaneFeedSetFeedForwardEchoTiming(N60AncLaneFeed * N60_ALF_NONNULL fee
 uint64_t N60AncLaneFeedPushReference(N60AncLaneFeed * N60_ALF_NONNULL feed, uint64_t startIndex,
                                      const float * N60_ALF_NONNULL samples, uint32_t count);
 uint64_t N60AncLaneFeedReferenceOutputIndex(const N60AncLaneFeed * N60_ALF_NONNULL feed);
+/* The zero-filled reference span the echo stage skips over, [from, to) in reference frames. Control thread
+   (diagnostics and tests). Returns false when there is no pending span (none pushed, or already consumed). */
+bool N60AncLaneFeedReferenceZeroSpan(const N60AncLaneFeed * N60_ALF_NONNULL feed, uint64_t * N60_ALF_NONNULL from,
+                                     uint64_t * N60_ALF_NONNULL to);
 N60FeedForwardLiveStatus N60AncLaneFeedFeedForwardStatus(const N60AncLaneFeed * N60_ALF_NONNULL feed);
 
 /* Control thread. Turns a tap on or off (off keeps what was recorded until Discard). */

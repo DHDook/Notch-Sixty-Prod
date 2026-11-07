@@ -1370,9 +1370,13 @@ final class AudioIOEngine: ObservableObject {
         )
     }
 
-    /// Output sample rate of the running stereo transport, for the live-treatment arm switch.
+    /// Output sample rate of the running transport, for the live-treatment arm switch: the stereo session, or the
+    /// profile session when it hosts the Quiet Zone feed (class A). Without the profile fallback Turn On refused
+    /// with `engineNotRunning` on a profile session (E26 S7b2c part 2, G16).
     var liveTreatmentSampleRate: Double? {
-        transportSession?.outputFormat.sampleRate
+        if let transportSession { return transportSession.outputFormat.sampleRate }
+        if let profile = nChannelTransportSession, profile.hostsQuietZone { return profile.outputFormat.sampleRate }
+        return nil
     }
 
     /// E26 S7b2: the session that renders Quiet Zone anti-noise: the stereo session, or the profile session when its

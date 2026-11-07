@@ -423,6 +423,11 @@ final class CoreAudioNChannelTransportSession {
     private var hostedAnc: UnifiedGraphAncActuators?
     private var hostedConfiguration: UnifiedGraphConfiguration?
     private var ancManualTrips: UInt64 = 0
+    /// A revoke disarmed the feed but its graph publish failed, so the record still says authorised (under `ancLock`).
+    /// The next authorisation must then arm the feed itself instead of returning early (G27).
+    private var ancFeedNeedsArm = false
+    /// Test seam (G27): the next `republishGraph` throws this once. Never set by the app.
+    var testingRepublishFailure: LiveNChannelTransportError?
 
     init(
         selectedOutput: AudioOutputDevice,
@@ -901,6 +906,53 @@ final class CoreAudioNChannelTransportSession {
         N60LiveNChannelBridgeSetHostTimeSink(bridge, N60AncLaneFeedHostTimeSink, UnsafeMutableRawPointer(feed.pointer))
     }
 
+    /// Test seam (E26 S7b2c part 2): runs one capture block and one output block through the bridge's real IO procs, as
+    /// the hardware callbacks would, and returns the interleaved output (`outputChannels` per frame). The programme is a
+    /// constant on every captured channel. Never used by the app.
+    func testingRunBlock(frames: Int, programme: Float, outputChannels: Int, hostTime: UInt64 = 0) -> [Float] {
+        guard let bridge, frames > 0 else { return [] }
+        let captureChannels = Int(outputFormat.channelCount)
+        var input = [Float](repeating: programme, count: frames * captureChannels)
+        var output = [Float](repeating: -9, count: frames * outputChannels)
+        var inputTime = AudioTimeStamp()
+        var outputTime = AudioTimeStamp()
+        outputTime.mHostTime = hostTime
+        outputTime.mFlags = hostTime == 0 ? [] : .hostTimeValid
+        input.withUnsafeMutableBufferPointer { buffer in
+            var list = AudioBufferList(
+                mNumberBuffers: 1,
+                mBuffers: AudioBuffer(
+                    mNumberChannels: UInt32(captureChannels),
+                    mDataByteSize: UInt32(buffer.count * MemoryLayout<Float>.size),
+                    mData: UnsafeMutableRawPointer(buffer.baseAddress)))
+            var unused = AudioBufferList()
+            _ = N60LiveNChannelCaptureIOProc(
+                0, &inputTime, &list, &inputTime, &unused, &inputTime, UnsafeMutableRawPointer(bridge))
+        }
+        output.withUnsafeMutableBufferPointer { buffer in
+            var list = AudioBufferList(
+                mNumberBuffers: 1,
+                mBuffers: AudioBuffer(
+                    mNumberChannels: UInt32(outputChannels),
+                    mDataByteSize: UInt32(buffer.count * MemoryLayout<Float>.size),
+                    mData: UnsafeMutableRawPointer(buffer.baseAddress)))
+            var unused = AudioBufferList()
+            _ = N60LiveNChannelOutputIOProc(
+                0, &outputTime, &unused, &outputTime, &list, &outputTime, UnsafeMutableRawPointer(bridge))
+        }
+        return output
+    }
+
+    /// Test seam (G29): replaces the bridge's host-time sink while no block runs; nil restores the feed's own sink.
+    func testingSwapHostTimeSink(_ function: N60LiveNChannelHostTimeSinkFunction?, context: UnsafeMutableRawPointer?) {
+        guard let bridge else { return }
+        if let function {
+            N60LiveNChannelBridgeSetHostTimeSink(bridge, function, context)
+        } else {
+            registerHostTimeSink(bridge, host: unifiedGraphHost)
+        }
+    }
+
     func setOutputGain(_ gain: Float) {
         ancLock.lock()
         let hosted = hostedAnc != nil
@@ -933,6 +985,10 @@ final class CoreAudioNChannelTransportSession {
     /// rendering.
     @discardableResult
     func republishGraph(_ configuration: UnifiedGraphConfiguration) throws -> UnifiedGraphApplyResult {
+        if let failure = testingRepublishFailure {
+            testingRepublishFailure = nil
+            throw failure
+        }
         guard let host = unifiedGraphReadback else {
             throw LiveNChannelTransportError.configurationChangeRequiresRestart
         }
@@ -1460,13 +1516,24 @@ extension CoreAudioNChannelTransportSession: QuietZoneRuntimeHost {
         guard let feed = ancFeed else { throw LiveNChannelTransportError.configurationChangeRequiresRestart }
         if authorised {
             // Already authorised and armed: a tonal update changes only the snapshot, never republishes the graph.
-            if quietZoneInjectAuthorised { return }
-            try updateHostedAnc { $0.authorised = true }
+            ancLock.lock()
+            let needsArm = ancFeedNeedsArm
+            ancLock.unlock()
+            if quietZoneInjectAuthorised, !needsArm { return }
+            if !quietZoneInjectAuthorised { try updateHostedAnc { $0.authorised = true } }
             N60AncLaneFeedArm(feed.pointer)
+            ancLock.lock(); ancFeedNeedsArm = false; ancLock.unlock()
         } else {
             N60AncLaneFeedDisarm(feed.pointer)
             N60AncLaneFeedReleaseLease(feed.pointer)
-            try updateHostedAnc { $0.authorised = false }
+            do {
+                try updateHostedAnc { $0.authorised = false }
+            } catch {
+                // The graph (and so the record) is still authorised; the feed is silent. Remember to arm it next time.
+                ancLock.lock(); ancFeedNeedsArm = true; ancLock.unlock()
+                throw error
+            }
+            ancLock.lock(); ancFeedNeedsArm = false; ancLock.unlock()
         }
     }
 
