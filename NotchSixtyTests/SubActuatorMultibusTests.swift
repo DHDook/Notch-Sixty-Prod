@@ -150,4 +150,126 @@ final class SubActuatorMultibusTests: XCTestCase {
         rejects(.init(actuators: [.init(targetLane: 0, gainDB: 3)], captureFrames: 100), "gain above 0 dB")
         rejects(.init(actuators: [.init(targetLane: 0)], captureFrames: 0), "no capture ring")
     }
+
+    // MARK: E26 S7b2
+
+    private func hostedConfig(rate: Double, userGain: Float = 1) -> UnifiedGraphConfiguration {
+        var config = UnifiedGraphConfiguration(sampleRate: rate, lanes: [UnifiedGraphLane(), UnifiedGraphLane()])
+        config.bassManagement = UnifiedGraphBassManagement(subwoofers: [UnifiedGraphSubwoofer()])
+        config.ancActuators = UnifiedGraphAncActuators(
+            actuators: [.init(targetLane: 0), .init(targetLane: 1), .init(targetLane: 2)], captureFrames: 4096,
+            hostFed: true, userOutputGain: userGain)
+        return config
+    }
+
+    func testHostFedClassAPlacesFeedAndMovesVolumeAheadOfInjectAtEveryRate() throws {
+        for rate in rates {
+            let spec = try hostedConfig(rate: rate, userGain: 0.25).makeSpec()
+            let externals = spec.stages.filter { $0.kind == N60_STAGE_EXTERNAL.rawValue }
+            XCTAssertEqual(externals.count, 1, "rate \(rate)")
+            XCTAssertEqual(externals[0].laneMask, 0b111011, "programme lanes 0,1 and sources 3,4,5 (\(rate))")
+            let kinds = spec.stages.map(\.kind)
+            let external = try XCTUnwrap(kinds.firstIndex(of: N60_STAGE_EXTERNAL.rawValue))
+            let bass = try XCTUnwrap(kinds.firstIndex(of: N60_STAGE_BASS_MGMT.rawValue))
+            let inject = try XCTUnwrap(kinds.firstIndex(of: N60_STAGE_ANC_INJECT.rawValue))
+            XCTAssertLessThan(external, bass, "the feed runs before bass management")
+            let gains = spec.stages.enumerated().filter { $0.element.kind == N60_STAGE_OUTPUT_GAIN.rawValue }
+            XCTAssertEqual(gains.map { $0.element.laneA }.sorted(), [0, 1, 2], "mains and the sub lane carry the volume")
+            XCTAssertTrue(gains.allSatisfy { $0.element.params[0] == 0.25 })
+            XCTAssertTrue(gains.allSatisfy { $0.offset < inject }, "volume sits ahead of ANC_INJECT")
+            let guards = spec.stages.filter { $0.kind == N60_STAGE_ANC_GUARD.rawValue }
+            XCTAssertTrue(guards.allSatisfy { $0.params[0] == -1 }, "no error input on the guards")
+        }
+    }
+
+    func testHostFedOffLeavesSpecUnchangedAndRefusesASecondExternalStage() throws {
+        var plain = UnifiedGraphConfiguration(sampleRate: 48_000, lanes: [UnifiedGraphLane(), UnifiedGraphLane()])
+        plain.bassManagement = UnifiedGraphBassManagement(subwoofers: [UnifiedGraphSubwoofer()])
+        var withoutFeed = plain
+        withoutFeed.ancActuators = UnifiedGraphAncActuators(
+            actuators: [.init(targetLane: 0), .init(targetLane: 1), .init(targetLane: 2)], captureFrames: 4096)
+        let spec = try withoutFeed.makeSpec()
+        XCTAssertFalse(spec.stages.contains { $0.kind == N60_STAGE_EXTERNAL.rawValue })
+        XCTAssertEqual(spec.stages.filter { $0.kind == N60_STAGE_OUTPUT_GAIN.rawValue }.count, 2, "no sub-lane gain")
+        var wrong = hostedConfig(rate: 48_000)
+        wrong.ancActuators?.actuators.removeLast()
+        XCTAssertThrowsError(try wrong.makeSpec(), "host feed needs exactly three actuators")
+        var bad = hostedConfig(rate: 48_000)
+        bad.ancActuators?.userOutputGain = -1
+        XCTAssertThrowsError(try bad.makeSpec())
+    }
+
+    /// G14: the feed's anti-noise lanes equal the tonal runtime rendered through `N60SpeakerBusRenderFeed`.
+    func testFeedLanesMatchTheSpeakerBusRenderFeedAtEveryRate() throws {
+        for rate in rates {
+            let splitter = try bass().makeSpeakerBusSplitterSnapshot(sampleRate: rate)
+            let fade = 0.05
+            let feed = try XCTUnwrap(ProfileAncFeed(sampleRate: rate, splitter: splitter, peakLimit: 1, fadeInSeconds: fade))
+            var tonal = N60ActiveQuietZoneSnapshotMakeBypassed()
+            var tone = N60ActiveQuietZoneToneSnapshot()
+            tone.frequencyHz = 60; tone.leftReal = 0.05; tone.rightReal = 0.05
+            XCTAssertTrue(N60ActiveQuietZoneSnapshotSet(&tonal, &tone, 1, 64, rate, true))
+            tonal.armGeneration = 1
+            XCTAssertTrue(N60AncLaneFeedSetTonalSnapshot(feed.pointer, &tonal))
+            N60AncLaneFeedArm(feed.pointer)
+            N60AncLaneFeedRenewLease(feed.pointer, UInt64(rate * 600))
+
+            let block = 480, blocks = max(2, Int(rate * 0.25) / block)
+            let frames = block * blocks
+            var lanes = [[Float]](repeating: [], count: 5)
+            let inBufs = (0..<5).map { _ in UnsafeMutablePointer<Float>.allocate(capacity: block) }
+            let outBufs = (0..<5).map { _ in UnsafeMutablePointer<Float>.allocate(capacity: block) }
+            defer { inBufs.forEach { $0.deallocate() }; outBufs.forEach { $0.deallocate() } }
+            var inPtrs: [UnsafePointer<Float>] = inBufs.map { UnsafePointer($0) }
+            var outPtrs: [UnsafeMutablePointer<Float>] = outBufs
+            for _ in 0..<blocks {
+                for c in 0..<5 { inBufs[c].update(repeating: 0, count: block); outBufs[c].update(repeating: 0, count: block) }
+                _ = N60AncLaneFeedProcess(UnsafeMutableRawPointer(feed.pointer), &inPtrs, &outPtrs, 5, UInt32(block))
+                for c in 0..<5 { lanes[c] += UnsafeBufferPointer(start: outBufs[c], count: block) }
+            }
+
+            var runtime = N60ActiveQuietZoneRuntime()
+            N60ActiveQuietZoneRuntimeReset(&runtime, rate)
+            XCTAssertTrue(N60ActiveQuietZoneRuntimeSchedule(&runtime, &tonal, rate))
+            var l = [Float](repeating: 0, count: frames), r = l
+            let step = 1.0 / (fade * rate)
+            var gain = 0.0
+            for n in 0..<frames {
+                N60ActiveQuietZoneRuntimeAccumulateProgramme(&runtime, 0, 0)
+                var tl: Float = 0, tr: Float = 0
+                N60ActiveQuietZoneRuntimeProcessFrame(&runtime, &tl, &tr)
+                gain = min(1, gain + step)
+                l[n] = max(-1, min(1, tl * Float(gain)))
+                r[n] = max(-1, min(1, tr * Float(gain)))
+            }
+            func render(_ x: [Float], left: Bool) -> [Float] {
+                var out = [Float](repeating: 0, count: frames * ThroughFeedSplitterRenderer.busCount)
+                x.withUnsafeBufferPointer { i in
+                    out.withUnsafeMutableBufferPointer { o in
+                        XCTAssertTrue(N60SpeakerBusRenderFeed(
+                            i.baseAddress!, UInt32(frames), left, splitter, N60SpeakerDriverProcessingSnapshot(), o.baseAddress!))
+                    }
+                }
+                return out
+            }
+            let a = render(l, left: true), b = render(r, left: false)
+            let bc = ThroughFeedSplitterRenderer.busCount
+            func sum(_ n: Int, _ buses: [N60SpeakerOutputBus]) -> Float {
+                buses.reduce(0) { $0 + a[n * bc + Int($1.rawValue)] + b[n * bc + Int($1.rawValue)] }
+            }
+            var maxErr: Float = 0, peak: Float = 0
+            for n in 0..<frames {
+                let left = a[n * bc + Int(N60SpeakerOutputBusLeftLow.rawValue)] + a[n * bc + Int(N60SpeakerOutputBusLeftMid.rawValue)]
+                    + a[n * bc + Int(N60SpeakerOutputBusLeftHigh.rawValue)]
+                    + b[n * bc + Int(N60SpeakerOutputBusLeftLow.rawValue)] + b[n * bc + Int(N60SpeakerOutputBusLeftMid.rawValue)]
+                    + b[n * bc + Int(N60SpeakerOutputBusLeftHigh.rawValue)]
+                maxErr = max(maxErr, abs(left - lanes[2][n]))
+                maxErr = max(maxErr, abs(sum(n, [N60SpeakerOutputBusRightLow, N60SpeakerOutputBusRightMid, N60SpeakerOutputBusRightHigh]) - lanes[3][n]))
+                maxErr = max(maxErr, abs(sum(n, [N60SpeakerOutputBusSubMono]) - lanes[4][n]))
+                peak = max(peak, abs(lanes[2][n]), abs(lanes[4][n]))
+            }
+            XCTAssertGreaterThan(peak, 0.001, "anti-noise present (\(rate))")
+            XCTAssertLessThan(maxErr, 1e-6, "feed vs N60SpeakerBusRenderFeed at \(rate)")
+        }
+    }
 }

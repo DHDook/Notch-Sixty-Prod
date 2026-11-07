@@ -208,4 +208,35 @@ final class SubAwareArmingTests: XCTestCase {
         XCTAssertTrue(SubAwareQuietZoneText.advice.contains("room EQ"))
         XCTAssertEqual(SubAwareQuietZoneText.question, "How does bass reach the room?")
     }
+
+    /// E26 S7b2 (G17): in device-volume mode the arm needs the volume within 1 dB of the measurement.
+    func testDeviceVolumeRuleRefusesBeyondOneDecibel() {
+        let rule = ActiveQuietZoneController.volumeRefusal
+        XCTAssertNil(rule(.device, -20, -20.5), "inside the 1 dB tolerance")
+        XCTAssertNil(rule(.device, -20, -19.2))
+        XCTAssertNotNil(rule(.device, -20, -22), "2 dB away refuses")
+        XCTAssertNotNil(rule(.device, -20, -18.5))
+        XCTAssertNil(rule(.device, nil, -40), "a record without a stamp skips the check")
+        XCTAssertNil(rule(.softwareDSP, -20, -40), "software volume is not in the anti-noise path")
+    }
+
+    func testMeasurementPositionDecodesWithoutTheVolumeStamp() throws {
+        let quality = RoomCorrectionMeasurementQuality(
+            clipped: false, playbackPeakDBFS: -18, capturePeakDBFS: -12, estimatedNoiseFloorDBFS: -70,
+            estimatedSNRDB: 45, sweepComplete: true, directArrivalSeconds: 0.01, usableLowHz: 20,
+            usableHighHz: 20_000, warnings: [])
+        let channel = RoomCorrectionChannelMeasurement(
+            capturedAt: Date(timeIntervalSince1970: 1), rawCapture: [0.1], impulseResponse: [1],
+            transferFunction: RoomCorrectionFrequencyResponse(
+                frequenciesHz: [100, 1_000], magnitudeDB: [0, -1], phaseRadians: [0, 0.1]),
+            quality: quality)
+        var position = RoomCorrectionMeasurementPosition(name: "p", sampleRate: 48_000, left: channel, right: channel)
+        position.outputGainDBAtMeasurement = -12
+        let data = try JSONEncoder().encode(position)
+        XCTAssertEqual(try JSONDecoder().decode(RoomCorrectionMeasurementPosition.self, from: data).outputGainDBAtMeasurement, -12)
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        object.removeValue(forKey: "outputGainDBAtMeasurement")
+        let old = try JSONSerialization.data(withJSONObject: object)
+        XCTAssertNil(try JSONDecoder().decode(RoomCorrectionMeasurementPosition.self, from: old).outputGainDBAtMeasurement)
+    }
 }

@@ -199,6 +199,7 @@ final class QuietZoneFeedForwardSurveyController: ObservableObject {
         position.right = right
         position.sampleRate = report.sampleRate
         position.ancBassFingerprint = report.fingerprint
+        position.outputGainDBAtMeasurement = quietZone.currentOutputGainDB
         return position
     }
 
@@ -535,12 +536,14 @@ final class QuietZoneFeedForwardSurveyController: ObservableObject {
         case .design(let design, let result):
             self.design = design
             assembled = result
+            quietZone.measuredOutputGainDB = planningPosition()?.outputGainDBAtMeasurement
             quietZone.setBassPlant(BassPlantMap(bands: result.bands), fingerprint: planningPosition()?.ancBassFingerprint)
             message = "Design ready: \(result.bands.count) bands, worst modelled reduction "
                 + String(format: "%.1f dB.", design.worstModeledReductionDB)
         case .bandsOnly(let result, let reason):
             design = nil
             assembled = result
+            quietZone.measuredOutputGainDB = planningPosition()?.outputGainDBAtMeasurement
             quietZone.setBassPlant(BassPlantMap(bands: result.bands), fingerprint: planningPosition()?.ancBassFingerprint)
             message = "\(result.bands.count) bands measured. No design yet: \(reason)"
         case .unavailable(let reason):

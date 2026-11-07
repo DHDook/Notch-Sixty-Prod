@@ -52,6 +52,25 @@ final class UnifiedGraphHost: @unchecked Sendable {
         lock.lock(); defer { lock.unlock() }
         if let graph { n60_graph_retire(graph) }
         graph = nil
+        // A registered EXTERNAL processor's context (E26 S7b2) is freed only after the graph is retired.
+        retainedResource = nil
+    }
+
+    /// An object the graph's EXTERNAL callback points at (the ANC lane feed). Kept alive until `release`, which
+    /// retires the graph first. Set once, before IO starts.
+    var retainedResource: AnyObject?
+
+    /// E26 S7b2: sum of the trip counts of the guard stages, read from the newest published snapshot. Control thread.
+    func guardTripCount(stageIds: [UInt32]) -> UInt64 {
+        lock.lock(); defer { lock.unlock() }
+        guard let graph else { return 0 }
+        var total: UInt64 = 0
+        for id in stageIds {
+            var status = n60_guard_status()
+            status.structSize = UInt32(MemoryLayout<n60_guard_status>.size)
+            if n60_graph_read_guard(graph, id, &status) == N60_STATUS_OK { total &+= status.tripCount }
+        }
+        return total
     }
 
     /// The graph pointer for `N60RealtimeAudioBridgeSetUnifiedGraph`. Valid while the host lives.
