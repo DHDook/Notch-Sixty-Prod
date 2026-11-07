@@ -418,6 +418,8 @@ final class CoreAudioNChannelTransportSession {
     /// engine edits that rebuild the configuration keep the appended lanes, the authorisation and the user volume.
     private let ancLock = NSLock()
     private let ancPublishLock = NSLock()
+    /// Graph-guard trips already acted on by `pollQuietZoneGuards` (under `ancLock`).
+    private var ancSeenGuardTrips: UInt64 = 0
     private var hostedAnc: UnifiedGraphAncActuators?
     private var hostedConfiguration: UnifiedGraphConfiguration?
     private var ancManualTrips: UInt64 = 0
@@ -1417,11 +1419,18 @@ extension CoreAudioNChannelTransportSession: QuietZoneRuntimeHost {
             ancLock.unlock()
             throw LiveNChannelTransportError.configurationChangeRequiresRestart
         }
+        let previous = anc
         mutate(&anc)
         hostedAnc = anc
         configuration.ancActuators = anc
         ancLock.unlock()
-        return try republishGraph(configuration)
+        do {
+            return try republishGraph(configuration)
+        } catch {
+            // The graph still holds the old actuators, so the record must too (authorisation never gets ahead of it).
+            ancLock.lock(); hostedAnc = previous; ancLock.unlock()
+            throw error
+        }
     }
 
     /// True when the next graph publish would let ANC_INJECT add anti-noise.
@@ -1436,12 +1445,23 @@ extension CoreAudioNChannelTransportSession: QuietZoneRuntimeHost {
     func setQuietZoneInjectAuthorised(_ authorised: Bool) throws {
         guard let feed = ancFeed else { throw LiveNChannelTransportError.configurationChangeRequiresRestart }
         if authorised {
+            // Already authorised and armed: a tonal update changes only the snapshot, never republishes the graph.
+            if quietZoneInjectAuthorised { return }
             try updateHostedAnc { $0.authorised = true }
             N60AncLaneFeedArm(feed.pointer)
         } else {
             N60AncLaneFeedDisarm(feed.pointer)
             N60AncLaneFeedReleaseLease(feed.pointer)
             try updateHostedAnc { $0.authorised = false }
+        }
+    }
+
+    /// Hands the tonal canceller's snapshot to the feed (single writer: the engine's control path).
+    func setQuietZoneTonalSnapshot(_ snapshot: N60ActiveQuietZoneSnapshot) throws {
+        guard let feed = ancFeed else { throw LiveNChannelTransportError.configurationChangeRequiresRestart }
+        var copy = snapshot
+        guard N60AncLaneFeedSetTonalSnapshot(feed.pointer, &copy) else {
+            throw ActiveQuietZoneError.invalidConfiguration
         }
     }
 
@@ -1486,6 +1506,21 @@ extension CoreAudioNChannelTransportSession: QuietZoneRuntimeHost {
         let graphTrips = unifiedGraphHost?.guardTripCount(stageIds: stageIds) ?? 0
         ancLock.lock(); defer { ancLock.unlock() }
         return ancManualTrips &+ graphTrips
+    }
+
+    /// G20: a graph-guard trip newly seen since the last poll disarms the feed at once (20 ms fade), so the feed does not
+    /// keep playing until the arm notices the count. Call from the lease keeper's poll (main actor).
+    func pollQuietZoneGuards() {
+        guard let feed = ancFeed else { return }
+        let stageIds = (0..<UnifiedGraphAncActuators.hostFedActuatorCount).map {
+            UnifiedGraphAncActuators.guardStageBase + UInt32($0)
+        }
+        let trips = unifiedGraphHost?.guardTripCount(stageIds: stageIds) ?? 0
+        ancLock.lock()
+        let fresh = trips > ancSeenGuardTrips
+        ancSeenGuardTrips = trips
+        ancLock.unlock()
+        if fresh { N60AncLaneFeedDisarm(feed.pointer) }
     }
 
     /// Re-arms the graph guards (a live revision bump) so the anti-noise can fade back in.

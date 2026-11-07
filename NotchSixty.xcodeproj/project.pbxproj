@@ -12,6 +12,7 @@
 		E26B00000000000000000104 /* SubSweepReadinessTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E26B00000000000000000103 /* SubSweepReadinessTests.swift */; };
 		E26B00000000000000000204 /* SubMultiSeatPlantTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E26B00000000000000000203 /* SubMultiSeatPlantTests.swift */; };
 		E26B00000000000000000206 /* SubShipWiringTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E26B00000000000000000205 /* SubShipWiringTests.swift */; };
+		E26B00000000000000000208 /* ProfileQuietZoneEngineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E26B00000000000000000207 /* ProfileQuietZoneEngineTests.swift */; };
 		E26A00000000000000000104 /* UnifiedGraphAncActuators.swift in Sources */ = {isa = PBXBuildFile; fileRef = E26A00000000000000000103 /* UnifiedGraphAncActuators.swift */; };
 		E26A00000000000000000102 /* SubActuatorMultibus.swift in Sources */ = {isa = PBXBuildFile; fileRef = E26A00000000000000000101 /* SubActuatorMultibus.swift */; };
 		E26A00000000000000000702 /* SubPathMeasurement.swift in Sources */ = {isa = PBXBuildFile; fileRef = E26A00000000000000000701 /* SubPathMeasurement.swift */; };
@@ -618,6 +619,7 @@
 		E26B00000000000000000103 /* SubSweepReadinessTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubSweepReadinessTests.swift; sourceTree = "<group>"; };
 		E26B00000000000000000203 /* SubMultiSeatPlantTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubMultiSeatPlantTests.swift; sourceTree = "<group>"; };
 		E26B00000000000000000205 /* SubShipWiringTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubShipWiringTests.swift; sourceTree = "<group>"; };
+		E26B00000000000000000207 /* ProfileQuietZoneEngineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfileQuietZoneEngineTests.swift; sourceTree = "<group>"; };
 		E26A00000000000000000103 /* UnifiedGraphAncActuators.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnifiedGraphAncActuators.swift; sourceTree = "<group>"; };
 		E26A00000000000000000101 /* SubActuatorMultibus.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubActuatorMultibus.swift; sourceTree = "<group>"; };
 		E26A00000000000000000701 /* SubPathMeasurement.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubPathMeasurement.swift; sourceTree = "<group>"; };
@@ -1479,6 +1481,7 @@
 				E26B00000000000000000103 /* SubSweepReadinessTests.swift */,
 				E26B00000000000000000203 /* SubMultiSeatPlantTests.swift */,
 				E26B00000000000000000205 /* SubShipWiringTests.swift */,
+				E26B00000000000000000207 /* ProfileQuietZoneEngineTests.swift */,
 				E4F700000000000000000F04 /* FeedForwardLiveWeightsFeedTests.swift */,
 				E4F900000000000000000A06 /* FeedForwardLiveArmingTests.swift */,
 				E4F700000000000000000043 /* CrossDevicePairCaptureTests.swift */,
@@ -2373,6 +2376,7 @@
 				E26B00000000000000000104 /* SubSweepReadinessTests.swift in Sources */,
 				E26B00000000000000000204 /* SubMultiSeatPlantTests.swift in Sources */,
 				E26B00000000000000000206 /* SubShipWiringTests.swift in Sources */,
+				E26B00000000000000000208 /* ProfileQuietZoneEngineTests.swift in Sources */,
 				E4F700000000000000000F03 /* FeedForwardLiveWeightsFeedTests.swift in Sources */,
 				E4F900000000000000000A05 /* FeedForwardLiveArmingTests.swift in Sources */,
 				E4F700000000000000000033 /* CrossDevicePairCaptureTests.swift in Sources */,

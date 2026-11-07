@@ -32,6 +32,13 @@ protocol QuietZoneRuntimeHost: AnyObject {
     func feedForwardLiveStatus() -> N60RenderKernelFeedForwardLiveStatus?
     func pushFeedForwardLiveReference(startIndex: UInt64, samples: [Float]) -> UInt64?
     var ambientReferenceSampleRate: Double { get }
+    /// E26 S7b2b (G20): control-thread poll that turns a graph guard trip into a feed fade. No-op for the kernel session,
+    /// whose guards run inside the kernel.
+    func pollQuietZoneGuards()
+}
+
+extension QuietZoneRuntimeHost {
+    func pollQuietZoneGuards() {}
 }
 
 /// Owns one `N60AncLaneFeed` for the life of a graph host (see `UnifiedGraphHost.retainedResource`).
