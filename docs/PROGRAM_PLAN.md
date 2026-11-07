@@ -194,8 +194,8 @@ Gate G2 passed on 2026-10-25 (commit 07e82c6)
 ### E9 Multichannel protection and FIR parity
 
 - [ ] Per-output limiter, true-peak guard and soft clip, matching the stereo chain
-- [~] Move the program FIR onto the 262,144-tap non-uniform convolver (E9 S1 built dark, firScheme 1 not set by Swift; S3 wires it)
-- [~] Long FIR rebuild: lockstep lazy carry with 256 KiB per-callback budget, changed-tap seeding, chunked or O(1) scheme 1 reset (E9 S2 built dark, PR pending; not wired to Swift, S3 wires it; S2b follow-ups and E22 bench items open)
+- [~] Move the program FIR onto the 262,144-tap non-uniform convolver (E9 S1 built dark; S3 sets firScheme 1 and lifts the Swift guards behind e9.long-fir, PR pending; flag stays dark until S2c and E22 bench)
+- [~] Long FIR rebuild: lockstep lazy carry with 256 KiB per-callback budget, changed-tap seeding, chunked or O(1) scheme 1 reset (E9 S2 built dark, PR pending; S3 wires Swift behind e9.long-fir; S2b follow-ups and E22 bench items open)
 - [ ] Per-output headroom assistant
 
 ### E20 Engine performance
