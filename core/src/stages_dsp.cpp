@@ -812,7 +812,11 @@ void runFirNonUniform(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t 
     uint8_t *shBase = sharedState(h, r);
     for (uint32_t l = 0; l < r.laneCount; ++l) {
         uint8_t *lb = laneState(h, r, l);
-        if (conv::laneEpoch(lb) != h->historyEpoch) conv::resetLane(shBase, lb, h->historyEpoch);
+        if (conv::laneEpoch(lb) != h->historyEpoch &&
+            !conv::resetStep(shBase, lb, h->historyEpoch, h->rtBudget)) {
+            std::memset(lanes[laneOf(r, l)], 0, sizeof(float) * frames);  // still clearing: silent, input dropped
+            continue;
+        }
         conv::process(shBase, lb, lanes[laneOf(r, l)], frames, nullptr);
     }
 }
@@ -1268,25 +1272,65 @@ uint32_t dspLatency(const SnapHeader *h, const StageRec &r) {
 
 // ---- ABI v10 FIR state carry ---------------------------------------------------------
 
-bool dspFirSameFilter(const SnapHeader *a, const StageRec &ra, const SnapHeader *b, const StageRec &rb) {
+// Same stage (id, kind, lanes, scheme) in both snapshots. The tap content may differ for scheme 1: *seed* is set
+// then (the schedule and so the state layout still match).
+bool dspFirSameFilter(const SnapHeader *a, const StageRec &ra, const SnapHeader *b, const StageRec &rb, bool *seed) {
+    if (seed != nullptr) *seed = false;
     if (ra.kind != N60_STAGE_FIR || rb.kind != N60_STAGE_FIR || ra.id != rb.id) return false;
-    if (ra.paramCount != rb.paramCount || ra.laneCount != rb.laneCount) return false;
+    if (ra.laneCount != rb.laneCount) return false;
     if (a->firScheme != b->firScheme) return false;
     if (a->firScheme == N60_FIR_SCHEME_NONUNIFORM) {
-        // ABI v20: only filters up to the uniform cap carry (S1); a longer one always warms fully (S2 changes that).
         const conv::Shared &cx = *reinterpret_cast<const conv::Shared *>(bytes(a) + ra.sharedOff);
         const conv::Shared &cy = *reinterpret_cast<const conv::Shared *>(bytes(b) + rb.sharedOff);
-        if (cx.taps > N60_FIR_MAX_TAPS || cx.taps != cy.taps || cx.mode != cy.mode || cx.delay != cy.delay ||
-            cx.hashLo != cy.hashLo || cx.hashHi != cy.hashHi || ra.stateStride != rb.stateStride) {
-            return false;
-        }
+        // The same layout: the state of one is the state of the other.
+        if (cx.mode != cy.mode || cx.delay != cy.delay || ra.stateStride != rb.stateStride) return false;
+        if (cx.mode == 0 && (cx.parts[0] != cy.parts[0] || cx.parts[1] != cy.parts[1] || cx.parts[2] != cy.parts[2])) return false;
+        const bool same = cx.taps == cy.taps && cx.hashLo == cy.hashLo && cx.hashHi == cy.hashHi;
+        if (!same && seed == nullptr) return false;
+        if (seed != nullptr) *seed = !same;
     } else {
+        if (ra.paramCount != rb.paramCount) return false;
         const FirShared &x = *reinterpret_cast<const FirShared *>(bytes(a) + ra.sharedOff);
         const FirShared &y = *reinterpret_cast<const FirShared *>(bytes(b) + rb.sharedOff);
         if (x.parts != y.parts || x.taps != y.taps || x.hashLo != y.hashLo || x.hashHi != y.hashHi) return false;
     }
     for (uint32_t k = 0; k < ra.laneCount; ++k) {
         if (laneOf(ra, k) != laneOf(rb, k)) return false;
+    }
+    return true;
+}
+
+// Every stage before index `i` of `to` is the stage at the same index of `from` with the same parameters, so a
+// FIR at `i` sees the same input in both. Conservative: a long parameter array or a stage that is not plainly
+// comparable counts as changed.
+bool dspUpstreamSame(const SnapHeader *from, const SnapHeader *to, uint32_t i) {
+    if (from->stageCount < i || from->inputChannels != to->inputChannels) return false;
+    const StageRec *a = stages(from), *b = stages(to);
+    for (uint32_t j = 0; j < i; ++j) {
+        const StageRec &x = a[j], &y = b[j];
+        if (x.kind != y.kind || x.id != y.id || x.laneMask != y.laneMask || x.laneA != y.laneA || x.laneB != y.laneB ||
+            x.laneFirst != y.laneFirst || x.laneCount != y.laneCount || x.paramCount != y.paramCount) {
+            return false;
+        }
+        if (x.kind == N60_STAGE_ROOM_FIR_TWO_BAND) return false;
+        if (x.kind == N60_STAGE_FIR) {
+            if (from->firScheme != to->firScheme) return false;
+            if (from->firScheme == N60_FIR_SCHEME_NONUNIFORM) {
+                const conv::Shared &cx = *reinterpret_cast<const conv::Shared *>(bytes(from) + x.sharedOff);
+                const conv::Shared &cy = *reinterpret_cast<const conv::Shared *>(bytes(to) + y.sharedOff);
+                if (cx.taps != cy.taps || cx.hashLo != cy.hashLo || cx.hashHi != cy.hashHi) return false;
+            } else {
+                const FirShared &fx = *reinterpret_cast<const FirShared *>(bytes(from) + x.sharedOff);
+                const FirShared &fy = *reinterpret_cast<const FirShared *>(bytes(to) + y.sharedOff);
+                if (fx.taps != fy.taps || fx.hashLo != fy.hashLo || fx.hashHi != fy.hashHi) return false;
+            }
+            continue;
+        }
+        if (x.paramCount > 4096) return false;
+        if (x.paramCount != 0 &&
+            std::memcmp(paramsOf(from, x), paramsOf(to, y), sizeof(float) * x.paramCount) != 0) {
+            return false;
+        }
     }
     return true;
 }
@@ -1340,11 +1384,13 @@ static uint32_t rfCarry(SnapHeader *from, SnapHeader *to, StageRec &b) {
     return rfWarmFrames(y);
 }
 
-uint32_t dspFirCarry(SnapHeader *from, SnapHeader *to) {
+uint32_t dspFirCarry(SnapHeader *from, SnapHeader *to, bool lazy, bool *pending) {
     uint32_t warm = 0;
+    if (pending != nullptr) *pending = false;
     StageRec *dst = stages(to);
     for (uint32_t i = 0; i < to->stageCount; ++i) {
         StageRec &b = dst[i];
+        b.carrySrc = 0;
         if (b.kind == N60_STAGE_ROOM_FIR_TWO_BAND) {
             warm = std::max(warm, rfCarry(from, to, b));
             continue;
@@ -1354,10 +1400,41 @@ uint32_t dspFirCarry(SnapHeader *from, SnapHeader *to) {
         StageRec *src = stages(from);
         for (uint32_t j = 0; j < from->stageCount && !carried; ++j) {
             StageRec &a = src[j];
-            if (!dspFirSameFilter(from, a, to, b)) continue;
+            bool seed = false;
+            if (!dspFirSameFilter(from, a, to, b, &seed)) continue;
+            // New taps on the same schedule: the input history is the same, so it is copied, but only while the
+            // stage sees the same input as before (same position, every stage upstream unchanged).
+            if (seed && !(j == i && dspUpstreamSame(from, to, i))) continue;
+            // A lazy carry runs both instances in lockstep, which needs the same input in both: same position and
+            // unchanged upstream. Otherwise the stage warms in full. A seed with no fade would be audible at once
+            // with the old taps' partial sums, so it warms too.
+            if (to->firScheme == N60_FIR_SCHEME_NONUNIFORM &&
+                (lazy ? !(j == i && dspUpstreamSame(from, to, i)) : seed)) {
+                continue;
+            }
             if (to->firScheme == N60_FIR_SCHEME_NONUNIFORM) {
-                // Whole-lane copy (bounded: at most ~0.3 MB at 32,768 taps, once per rebuild). The lane header
-                // carries the tick phase, so the copy continues the schedule exactly.
+                const conv::Shared &cs = *reinterpret_cast<const conv::Shared *>(bytes(to) + b.sharedOff);
+                if (lazy) {
+                    uint32_t settle = 0;
+                    for (uint32_t k = 0; k < b.laneCount; ++k) {
+                        uint8_t *sl = laneState(from, a, k);
+                        uint8_t *dl = laneState(to, b, k);
+                        if (conv::laneEpoch(sl) != from->historyEpoch) {
+                            staleSource = true;
+                            continue;
+                        }
+                        conv::carryHeader(&cs, sl, dl, to->historyEpoch);
+                        settle = conv::carrySettleFrames(&cs);
+                        if (pending != nullptr) *pending = true;
+                    }
+                    b.carrySrc = j + 1;
+                    warm = std::max(warm, settle);
+                    carried = true;
+                    continue;
+                }
+                // No fade: the outgoing instance is gone at once, so the copy must be whole. Bounded only up to
+                // the uniform cap; a longer filter starts empty and warms in full.
+                if (cs.taps > N60_FIR_MAX_TAPS) continue;
                 for (uint32_t k = 0; k < b.laneCount; ++k) {
                     uint8_t *sl = laneState(from, a, k);
                     uint8_t *dl = laneState(to, b, k);
@@ -1365,8 +1442,9 @@ uint32_t dspFirCarry(SnapHeader *from, SnapHeader *to) {
                         staleSource = true;
                         continue;
                     }
+                    // Whole lane (rings, spectra, accumulators, output blocks): the incoming lane is identical at once.
                     std::memcpy(dl, sl, b.stateStride);
-                    *reinterpret_cast<uint32_t *>(dl) = to->historyEpoch;
+                    conv::carryHeader(&cs, sl, dl, to->historyEpoch);
                 }
                 carried = true;
                 continue;
@@ -1400,6 +1478,43 @@ uint32_t dspFirCarry(SnapHeader *from, SnapHeader *to) {
         if (!carried || staleSource) warm = std::max(warm, b.paramCount + kPart);
     }
     return warm;
+}
+
+uint64_t dspFirCarryStep(SnapHeader *from, SnapHeader *to, FirCarryCursor &c, uint64_t maxBytes, bool *done) {
+    uint64_t spent = 0;
+    StageRec *dst = stages(to);
+    StageRec *src = stages(from);
+    // A history invalidation mid-carry ends it: the lanes reset themselves and the copy must not resume later.
+    if (from->historyEpoch != c.fromEpoch || to->historyEpoch != c.toEpoch) c.stage = to->stageCount;
+    while (c.stage < to->stageCount) {
+        StageRec &b = dst[c.stage];
+        if (b.carrySrc == 0 || b.carrySrc > from->stageCount || c.lane >= b.laneCount) {
+            ++c.stage;
+            c.lane = 0;
+            c.offset = 0;
+            continue;
+        }
+        StageRec &a = src[b.carrySrc - 1];
+        const void *cs = bytes(to) + b.sharedOff;
+        uint8_t *sl = laneState(from, a, c.lane);
+        uint8_t *dl = laneState(to, b, c.lane);
+        // A lane whose history was invalidated meanwhile resets itself; leave it.
+        const bool live = conv::laneEpoch(sl) == from->historyEpoch && conv::laneEpoch(dl) == to->historyEpoch;
+        const uint64_t total = conv::carryBytes(cs);
+        if (live && c.offset < total && spent < maxBytes) {
+            const size_t n = conv::carryCopy(cs, sl, dl, static_cast<size_t>(c.offset), static_cast<size_t>(maxBytes - spent));
+            c.offset += n;
+            spent += n;
+        }
+        if (!live || c.offset >= total) {
+            ++c.lane;
+            c.offset = 0;
+            continue;
+        }
+        break;  // budget used up inside this lane
+    }
+    if (done != nullptr) *done = c.stage >= to->stageCount;
+    return spent;
 }
 
 uint32_t dspFirHistoryFrames(const SnapHeader *h) {
