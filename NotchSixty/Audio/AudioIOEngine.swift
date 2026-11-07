@@ -1616,6 +1616,7 @@ final class AudioIOEngine: ObservableObject {
             try setLifecycle(state)
         }
         nChannelTransportSession = session
+        adoptQuietZoneReferenceHost()
     }
 
     /// Test seam: stops and drops the seam session and returns the engine to idle.
@@ -3077,33 +3078,36 @@ final class AudioIOEngine: ObservableObject {
         transportSession?.analysisCaptureSnapshot()
     }
 
+    /// E26 S7b2c (G26): true for the stereo session and for a profile session whose graph carries the Quiet Zone feed
+    /// (class A); the references come from the live `quietZoneHost` either way.
     var ambientPlaybackReferenceAvailable: Bool {
-        transportSession != nil
+        (transportSession != nil
             && nChannelTransportSession == nil
-            && binauralHeadphoneTransportSession == nil
+            && binauralHeadphoneTransportSession == nil)
+            || activeQuietZoneProfileRuntimeAvailable
     }
 
     var ambientPlaybackReferenceSampleRate: Double? {
         guard ambientPlaybackReferenceAvailable else { return nil }
-        return transportSession?.ambientReferenceSampleRate
+        return quietZoneHost?.ambientReferenceSampleRate
     }
 
     func setAmbientPlaybackReferenceDemand(_ enabled: Bool) {
         guard ambientPlaybackReferenceAvailable else {
-            transportSession?.setAmbientReferenceDemand(false)
+            quietZoneHost?.setAmbientReferenceDemand(false)
             return
         }
-        transportSession?.setAmbientReferenceDemand(enabled)
+        quietZoneHost?.setAmbientReferenceDemand(enabled)
     }
 
     func ambientPlaybackReferenceSnapshot()
         -> N60AmbientPlaybackReferenceSnapshot? {
         guard ambientPlaybackReferenceAvailable else { return nil }
-        return transportSession?.ambientReferenceSnapshot()
+        return quietZoneHost?.ambientReferenceSnapshot()
     }
 
     func discardAmbientPlaybackReferenceFrames() {
-        transportSession?.discardAmbientReferenceFrames()
+        quietZoneHost?.discardAmbientReferenceFrames()
     }
 
     func readAmbientPlaybackReferenceFrames(
@@ -3111,7 +3115,7 @@ final class AudioIOEngine: ObservableObject {
             Int(N60_AMBIENT_REFERENCE_CAPACITY_FRAMES)
     ) -> [N60AmbientPlaybackReferenceFrame] {
         guard ambientPlaybackReferenceAvailable else { return [] }
-        return transportSession?.readAmbientReferenceFrames(
+        return quietZoneHost?.readAmbientReferenceFrames(
             maximumFrames: maximumFrames
         ) ?? []
     }
@@ -3141,11 +3145,11 @@ final class AudioIOEngine: ObservableObject {
             featureEnabled: speakerDriveFeatureEnabled,
             transportAvailable: ambientPlaybackReferenceAvailable
         )
-        transportSession?.setSpeakerDriveDemand(allowed)
+        quietZoneHost?.setSpeakerDriveDemand(allowed)
     }
 
     func speakerDriveSnapshot() -> N60SpeakerDriveSnapshot? {
-        transportSession?.speakerDriveSnapshot()
+        quietZoneHost?.speakerDriveSnapshot()
     }
 
     /// E4 S25b: live feed-forward passthroughs. Arm needs the gate's inputs; the app supplies
@@ -3189,7 +3193,7 @@ final class AudioIOEngine: ObservableObject {
     }
 
     func readSpeakerDriveAnchors() -> [N60SpeakerDriveAnchor] {
-        transportSession?.readSpeakerDriveAnchors() ?? []
+        quietZoneHost?.readSpeakerDriveAnchors(maximum: Int(N60_SPEAKER_DRIVE_ANCHOR_CAPACITY)) ?? []
     }
 
     /// The anchor ring has one consumer; the shadow and the live reference pump each get every anchor
@@ -3200,28 +3204,33 @@ final class AudioIOEngine: ObservableObject {
     }
 
     func readSpeakerDriveFrames(maximumFrames: Int) -> [N60AmbientPlaybackReferenceFrame] {
-        transportSession?.readSpeakerDriveFrames(maximumFrames: maximumFrames) ?? []
+        quietZoneHost?.readSpeakerDriveFrames(maximumFrames: maximumFrames) ?? []
     }
 
     var activeQuietZoneReferenceAvailable: Bool {
-        activeQuietZoneStereoSpeakerRuntimeAvailable
+        activeQuietZoneStereoSpeakerRuntimeAvailable || activeQuietZoneProfileRuntimeAvailable
+    }
+
+    /// E26 S7b2c (G26): the tonal controller may run on the stereo route or on a profile session hosting the feed.
+    var activeQuietZoneRuntimeAvailable: Bool {
+        activeQuietZoneStereoSpeakerRuntimeAvailable || activeQuietZoneProfileRuntimeAvailable
     }
 
     var activeQuietZoneReferenceSampleRate: Double? {
         guard activeQuietZoneReferenceAvailable else {
             return nil
         }
-        return transportSession?
+        return quietZoneHost?
             .activeQuietZoneReferenceSampleRate
     }
 
     func setActiveQuietZoneReferenceDemand(_ enabled: Bool) {
         guard activeQuietZoneReferenceAvailable else {
-            transportSession?
+            quietZoneHost?
                 .setActiveQuietZoneReferenceDemand(false)
             return
         }
-        transportSession?
+        quietZoneHost?
             .setActiveQuietZoneReferenceDemand(enabled)
     }
 
@@ -3230,12 +3239,12 @@ final class AudioIOEngine: ObservableObject {
         guard activeQuietZoneReferenceAvailable else {
             return nil
         }
-        return transportSession?
+        return quietZoneHost?
             .activeQuietZoneReferenceSnapshot()
     }
 
     func discardActiveQuietZoneReferenceFrames() {
-        transportSession?
+        quietZoneHost?
             .discardActiveQuietZoneReferenceFrames()
     }
 
@@ -3248,7 +3257,7 @@ final class AudioIOEngine: ObservableObject {
         guard activeQuietZoneReferenceAvailable else {
             return []
         }
-        return transportSession?
+        return quietZoneHost?
             .readActiveQuietZoneReferenceFrames(
                 maximumFrames: maximumFrames
             )
@@ -5273,6 +5282,14 @@ final class AudioIOEngine: ObservableObject {
         activeSpeakerIRProgram = nil
         linearPhaseDesignInfo = nil
         nChannelTransportSession = session
+        adoptQuietZoneReferenceHost()
+    }
+
+    /// E26 S7b2c: a new profile session starts with fresh reference rings, so the anchor fan-out restarts and the
+    /// speaker-drive demand is re-applied to the new feed (a no-op unless the profile session hosts Quiet Zone).
+    private func adoptQuietZoneReferenceHost() {
+        speakerDriveAnchorFanout.reset()
+        applySpeakerDriveDemand()
     }
 
     /// E26 S7b2: the bus splitter the Quiet Zone feed renders through, for a profile session that is class A (two mains
@@ -5664,6 +5681,11 @@ final class AudioIOEngine: ObservableObject {
             lifetimeArchivedCounters.bufferedFrames = 0
             processingSessionArchivedCounters = processingSessionArchivedCounters + counters
             processingSessionArchivedCounters.bufferedFrames = 0
+            // The reference ring dies with the session; the live pump must not outlive it.
+            if session.hostsQuietZone {
+                feedForwardLiveDriver.stop()
+                speakerDriveAnchorFanout.reset()
+            }
             session.stop(fadeOut: fadeOut)
             nChannelTransportSession = nil
         }

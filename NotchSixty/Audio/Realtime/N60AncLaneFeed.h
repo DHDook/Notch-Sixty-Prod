@@ -90,6 +90,42 @@ typedef struct {
     bool feedForward;                /* create the live feed-forward filter and its reference ring */
 } N60AncLaneFeedConfig;
 
+/* E26 S7b2c (G26): reference taps for the tonal controller and the live reference pump, the profile session's
+   counterparts of the stereo bridge's rings (same meaning, same frame layout). All three are recorded in Process
+   only while the control thread asks for them (SetTapDemand). Single reader: the control thread. */
+typedef struct {
+    float left;
+    float right;
+} N60AncLaneFeedFramePair;
+
+typedef struct {
+    uint64_t outputHostTime;   /* the output buffer's host time (0 = none) */
+    uint64_t firstFrameIndex;  /* index of the first frame this callback wrote to the drive ring */
+    uint32_t frames;
+    uint32_t reserved;         /* low 32 bits of the reference output index at the start of the chunk */
+} N60AncLaneFeedAnchor;
+
+typedef enum {
+    N60AncLaneFeedTapAmbient = 0,      /* what the speakers get before the split: programme (at the volume) plus anti-noise */
+    N60AncLaneFeedTapQuietZone = 1,    /* the anti-noise pair alone, before the split */
+    N60AncLaneFeedTapSpeakerDrive = 2  /* as Ambient, anchored per chunk (the pump's output-clock fit and the echo model) */
+} N60AncLaneFeedTap;
+
+enum {
+    N60AncLaneFeedTapRingFrames = 131072,
+    N60AncLaneFeedDriveRingFrames = 262144,
+    N60AncLaneFeedAnchorRingEntries = 4096
+};
+
+typedef struct {
+    bool enabled;
+    uint32_t availableFrames;
+    uint32_t availableAnchors;       /* SpeakerDrive only */
+    uint64_t capturedFrames;
+    uint64_t droppedFrames;          /* frames of chunks not recorded because the ring was full */
+    uint64_t droppedAnchors;
+} N60AncLaneFeedTapSnapshot;
+
 typedef struct {
     bool armed;
     bool leaseActive;                /* a lease was renewed and has not expired */
@@ -150,7 +186,25 @@ uint64_t N60AncLaneFeedPushReference(N60AncLaneFeed * N60_ALF_NONNULL feed, uint
 uint64_t N60AncLaneFeedReferenceOutputIndex(const N60AncLaneFeed * N60_ALF_NONNULL feed);
 N60FeedForwardLiveStatus N60AncLaneFeedFeedForwardStatus(const N60AncLaneFeed * N60_ALF_NONNULL feed);
 
-/* Audio thread, or control thread only while Process is not running. */
+/* Control thread. Turns a tap on or off (off keeps what was recorded until Discard). */
+void N60AncLaneFeedSetTapDemand(N60AncLaneFeed * N60_ALF_NONNULL feed, N60AncLaneFeedTap tap, bool enabled);
+N60AncLaneFeedTapSnapshot N60AncLaneFeedTapGetSnapshot(const N60AncLaneFeed * N60_ALF_NONNULL feed, N60AncLaneFeedTap tap);
+/* Reads up to `maximum` frames, oldest first. Returns the count. */
+uint32_t N60AncLaneFeedTapRead(N60AncLaneFeed * N60_ALF_NONNULL feed, N60AncLaneFeedTap tap,
+                               N60AncLaneFeedFramePair * N60_ALF_NONNULL destination, uint32_t maximum);
+void N60AncLaneFeedTapDiscard(N60AncLaneFeed * N60_ALF_NONNULL feed, N60AncLaneFeedTap tap);
+uint32_t N60AncLaneFeedAnchorsRead(N60AncLaneFeed * N60_ALF_NONNULL feed, N60AncLaneFeedAnchor * N60_ALF_NONNULL destination,
+                                   uint32_t maximum);
+/* Control thread. The software volume the graph applies to the programme lanes after this stage (OUTPUT_GAIN), so
+   the taps and the echo drive see what the speakers get. A block-constant approximation of the graph's own ramp;
+   1 by default. */
+void N60AncLaneFeedSetProgrammeScale(N60AncLaneFeed * N60_ALF_NONNULL feed, float scale);
+/* Matches the bridge's host-time sink signature: context is the feed. Audio thread. */
+void N60AncLaneFeedHostTimeSink(void * N60_ALF_NULLABLE context, uint64_t hostTime);
+
+/* Audio thread, or control thread only while Process is not running. The tap rings are also cleared, so the control
+   thread must not be inside TapRead/TapDiscard (the host stops the reference readers first). Readers should drain
+   at 10 Hz or faster: the tap rings hold 0.34 s and the drive ring 0.68 s at 384 kHz. */
 void N60AncLaneFeedReset(N60AncLaneFeed * N60_ALF_NONNULL feed);
 N60AncLaneFeedStatus N60AncLaneFeedGetStatus(const N60AncLaneFeed * N60_ALF_NONNULL feed);
 

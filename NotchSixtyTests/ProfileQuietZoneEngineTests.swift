@@ -110,4 +110,45 @@ final class ProfileQuietZoneEngineTests: XCTestCase {
         XCTAssertLessThanOrEqual(renewals, 3)
         XCTAssertEqual(ActiveQuietZoneLeaseKeeper.renewIntervalSeconds, 1)
     }
+
+    /// G26: the engine's reference passthroughs and the tonal controller's gate follow the profile session when it
+    /// hosts the feed, and stay unavailable when it does not.
+    func testReferencePassthroughsAndGateFollowTheProfileSession() throws {
+        for rate in [48_000.0, 384_000.0] {
+            let (engine, session) = try makeEngine(rate: rate, hosted: true)
+            defer { engine.removeTestingNChannelSession() }
+            XCTAssertTrue(engine.activeQuietZoneRuntimeAvailable)
+            XCTAssertTrue(engine.ambientPlaybackReferenceAvailable)
+            XCTAssertTrue(engine.activeQuietZoneReferenceAvailable)
+            XCTAssertEqual(engine.ambientPlaybackReferenceSampleRate, rate)
+            XCTAssertEqual(engine.activeQuietZoneReferenceSampleRate, rate)
+
+            engine.setAmbientPlaybackReferenceDemand(true)
+            engine.setActiveQuietZoneReferenceDemand(true)
+            XCTAssertEqual(session.ambientReferenceSnapshot()?.enabled, true)
+            XCTAssertEqual(engine.activeQuietZoneReferenceSnapshot()?.enabled, true)
+            XCTAssertTrue(engine.readAmbientPlaybackReferenceFrames(maximumFrames: 64).isEmpty)
+            engine.setAmbientPlaybackReferenceDemand(false)
+            engine.setActiveQuietZoneReferenceDemand(false)
+            XCTAssertEqual(session.ambientReferenceSnapshot()?.enabled, false)
+        }
+        let (plain, _) = try makeEngine(rate: 48_000, hosted: false)
+        defer { plain.removeTestingNChannelSession() }
+        XCTAssertFalse(plain.activeQuietZoneRuntimeAvailable)
+        XCTAssertFalse(plain.ambientPlaybackReferenceAvailable)
+        XCTAssertNil(plain.ambientPlaybackReferenceSampleRate)
+        XCTAssertNil(plain.activeQuietZoneReferenceSnapshot())
+    }
+
+    /// G22: a rebuilt session carries a new feed that is disarmed and unauthorised; nothing re-arms it implicitly.
+    func testARebuiltSessionStartsDisarmed() throws {
+        let (engine, session) = try makeEngine(rate: 48_000, hosted: true)
+        try engine.replaceActiveQuietZoneRuntimeTarget(target(engine.liveTreatmentGeneration))
+        XCTAssertTrue(session.quietZoneInjectAuthorised)
+        engine.removeTestingNChannelSession()
+        let (rebuiltEngine, rebuilt) = try makeEngine(rate: 96_000, hosted: true)
+        defer { rebuiltEngine.removeTestingNChannelSession() }
+        XCTAssertFalse(rebuilt.quietZoneInjectAuthorised)
+        XCTAssertFalse(rebuiltEngine.activeQuietZoneRuntimeTarget.active)
+    }
 }

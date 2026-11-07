@@ -8,7 +8,7 @@
   builds one slice in a fresh context), realtime-reviewer (Sonnet), and code-scout,
   build-test-runner, plan-tracker, pr-writer (Haiku). `/next` itself runs on Sonnet.
 
-**Current focus:** E26 (sub-aware Quiet Zone), S7b2 part 1 in PR, S7b2b next then flag removal after E22 bench; E9 S2 still waits for E26
+**Current focus:** E26 (sub-aware Quiet Zone), S7b2c part 1 built, S7b2c part 2 next (G16 end-to-end and tests), then S6c, S7; E9 S2 still waits for E26
 <!-- plan-tracker keeps the line above current -->
 
 @AGENTS.md

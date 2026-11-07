@@ -114,7 +114,14 @@ typedef struct N60LiveNChannelBridge {
     _Atomic uint64_t outputWriteFailures;
     _Atomic uint64_t gatedOutputCallbacks;
     _Atomic uint64_t gatedOutputFrames;
+    /* E26 S7b2c: optional per-callback host-time sink (the output buffer's host time), called on the audio thread before
+       the graph runs. Set from the control thread with N60LiveNChannelBridgeSetHostTimeSink; the context is stored
+       before the function so the audio thread never sees a function without its context. */
+    _Atomic(void * _Nullable) hostTimeSinkContext;
+    _Atomic(void * _Nullable) hostTimeSinkFunction;
 } N60LiveNChannelBridge;
+
+typedef void (*N60LiveNChannelHostTimeSinkFunction)(void * _Nullable context, uint64_t hostTime);
 
 static inline uint32_t N60LiveNChannelFloatToBits(float value) {
     uint32_t bits = 0u;
@@ -544,6 +551,20 @@ static inline void N60LiveNChannelBridgeRequestRoomTreatmentFaultClear(
 ) {
     if (bridge == NULL || bridge->roomTreatment == NULL) return;
     N60MIMOTreatmentLiveRequestFaultClear(bridge->roomTreatment);
+}
+
+static inline void N60LiveNChannelBridgeSetHostTimeSink(
+    N60LiveNChannelBridge * _Nullable bridge,
+    N60LiveNChannelHostTimeSinkFunction _Nullable function,
+    void * _Nullable context
+) {
+    if (bridge == NULL) return;
+    /* Lifecycle contract: call only while the output IOProc is stopped (session init, before IO starts) and keep the
+       context alive until the bridge is destroyed. The pair is not swapped atomically, so it must not change while the
+       audio thread can run. */
+    atomic_store_explicit(&bridge->hostTimeSinkFunction, NULL, memory_order_release);
+    atomic_store_explicit(&bridge->hostTimeSinkContext, context, memory_order_release);
+    atomic_store_explicit(&bridge->hostTimeSinkFunction, (void *)function, memory_order_release);
 }
 
 static inline void N60LiveNChannelBridgeSetOutputGain(
@@ -1108,6 +1129,15 @@ static inline OSStatus N60LiveNChannelOutputIOProc(
         for (uint32_t channel = 0; channel < graphChannels; ++channel) {
             inPointers[channel] = planarIn + channel * stride;
             outPointers[channel] = planarOut + channel * stride;
+        }
+        {
+            N60LiveNChannelHostTimeSinkFunction sink = (N60LiveNChannelHostTimeSinkFunction)atomic_load_explicit(
+                &bridge->hostTimeSinkFunction, memory_order_acquire);
+            if (sink != NULL) {
+                const bool hostTimeValid = inOutputTime != NULL && (inOutputTime->mFlags & kAudioTimeStampHostTimeValid) != 0;
+                sink(atomic_load_explicit(&bridge->hostTimeSinkContext, memory_order_acquire),
+                     hostTimeValid ? inOutputTime->mHostTime : 0u);
+            }
         }
         graphRendered = n60_graph_process(graph, inPointers, outPointers, frameCount) == N60_STATUS_OK;
         if (!graphRendered) {

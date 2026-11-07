@@ -30,7 +30,38 @@ struct SnapshotBuffer {
     uint32_t readSlot{2u};
 };
 
+// Single-producer (audio) single-consumer (control) ring of frame pairs for one reference tap.
+struct PairRing {
+    std::unique_ptr<N60AncLaneFeedFramePair[]> data;
+    uint32_t capacity{0};
+    std::atomic<bool> demand{false};
+    std::atomic<uint64_t> writeIndex{0}, readIndex{0}, captured{0}, dropped{0};
+
+    bool allocate(uint32_t frames) {
+        capacity = frames;
+        data.reset(new (std::nothrow) N60AncLaneFeedFramePair[frames]());
+        return static_cast<bool>(data);
+    }
+    uint32_t freeFrames() const {
+        const uint64_t wr = writeIndex.load(std::memory_order_relaxed);
+        const uint64_t rd = readIndex.load(std::memory_order_acquire);
+        const uint64_t used = wr >= rd ? wr - rd : capacity;
+        return used < capacity ? static_cast<uint32_t>(capacity - used) : 0u;
+    }
+    void clear() {
+        writeIndex.store(0, std::memory_order_release);
+        readIndex.store(0, std::memory_order_release);
+        captured.store(0, std::memory_order_relaxed);
+        dropped.store(0, std::memory_order_relaxed);
+    }
+};
+
 }  // namespace
+
+static_assert((N60AncLaneFeedTapRingFrames & (N60AncLaneFeedTapRingFrames - 1)) == 0, "tap ring must be a power of two");
+static_assert((N60AncLaneFeedDriveRingFrames & (N60AncLaneFeedDriveRingFrames - 1)) == 0, "drive ring must be a power of two");
+static_assert(static_cast<int>(N60AncLaneFeedTapRingFrames) >= static_cast<int>(N60AncLaneFeedMaxBlockFrames), "a tap ring must hold a maximum chunk");
+static_assert(static_cast<int>(N60AncLaneFeedDriveRingFrames) >= static_cast<int>(N60AncLaneFeedMaxBlockFrames), "the drive ring must hold a maximum chunk");
 
 struct N60AncLaneFeed {
     N60AncLaneFeedConfig config{};
@@ -71,6 +102,13 @@ struct N60AncLaneFeed {
     std::atomic<uint64_t> clamped{0};
     std::atomic<uint64_t> nonFinite{0};
     std::atomic<uint64_t> faults{0};
+
+    // Reference taps (E26 S7b2c). Ambient and quiet-zone record as many frames as fit; the drive ring records a whole
+    // chunk or none of it, with an anchor, so the anchors stay exact.
+    PairRing tapAmbient, tapQuietZone, tapDrive;
+    std::unique_ptr<N60AncLaneFeedAnchor[]> anchors;
+    std::atomic<uint64_t> anchorWrite{0}, anchorRead{0}, droppedAnchors{0};
+    std::atomic<float> programmeScale{1.0f};
 
     float *refLane() { return scratch.get(); }
     float *ffLeft() { return scratch.get() + chunkFrames; }
@@ -193,6 +231,7 @@ void renderChunk(N60AncLaneFeed &f, const float *const *in, float *const *out, u
     const uint64_t now = f.rendered.load(std::memory_order_relaxed);
     applyTonalSnapshot(f);
     captureTelemetry(f, now);
+    const uint64_t outputIndexAtStart = f.ff != nullptr ? f.refRead.load(std::memory_order_relaxed) : 0u;
     (void)chunkTargetGain(f, now);  // counts lease expiries; the gain target is evaluated per frame below
     prepareFeedForward(f, n);
 
@@ -209,6 +248,22 @@ void renderChunk(N60AncLaneFeed &f, const float *const *in, float *const *out, u
     const bool haveFF = f.ff != nullptr;
     uint64_t clamps = 0;
     uint64_t nonFinite = 0;
+    const float scale = f.programmeScale.load(std::memory_order_relaxed);
+
+    // Tap budgets for this chunk, taken before the loop (the consumer only ever frees space).
+    const bool wantAmbient = f.tapAmbient.demand.load(std::memory_order_acquire);
+    const bool wantQuietZone = f.tapQuietZone.demand.load(std::memory_order_acquire);
+    const bool wantDrive = f.tapDrive.demand.load(std::memory_order_acquire);
+    const uint32_t ambientRoom = wantAmbient ? std::min(n, f.tapAmbient.freeFrames()) : 0u;
+    const uint32_t quietZoneRoom = wantQuietZone ? std::min(n, f.tapQuietZone.freeFrames()) : 0u;
+    const uint64_t anchorWriteAt = f.anchorWrite.load(std::memory_order_relaxed);
+    const uint64_t anchorUsed = anchorWriteAt - std::min(anchorWriteAt, f.anchorRead.load(std::memory_order_acquire));
+    const bool driveFits = wantDrive && f.tapDrive.freeFrames() >= n && anchorUsed < N60AncLaneFeedAnchorRingEntries;
+    const uint32_t driveRoom = driveFits ? n : 0u;
+    uint64_t ambientAt = f.tapAmbient.writeIndex.load(std::memory_order_relaxed);
+    uint64_t quietZoneAt = f.tapQuietZone.writeIndex.load(std::memory_order_relaxed);
+    uint64_t driveAt = f.tapDrive.writeIndex.load(std::memory_order_relaxed);
+    const uint64_t driveStart = driveAt;
 
     for (uint32_t i = 0; i < n; ++i) {
         if (!std::isfinite(progL[i]) || !std::isfinite(progR[i])) ++nonFinite;
@@ -235,9 +290,14 @@ void renderChunk(N60AncLaneFeed &f, const float *const *in, float *const *out, u
         const float cl = std::clamp(al, -limit, limit);
         const float cr = std::clamp(ar, -limit, limit);
         if (cl != al || cr != ar) ++clamps;
-        // The drive for the echo stage is what the speakers get: programme plus anti-noise, before the split.
-        f.driveLeft()[i] = pl + cl;
-        f.driveRight()[i] = pr + cr;
+        // The drive for the echo stage is what the speakers get: programme (at the volume the graph applies after
+        // this stage) plus anti-noise, before the split.
+        const float dl = pl * scale + cl, dr = pr * scale + cr;
+        f.driveLeft()[i] = dl;
+        f.driveRight()[i] = dr;
+        if (i < ambientRoom) f.tapAmbient.data[(ambientAt + i) & (f.tapAmbient.capacity - 1u)] = {dl, dr};
+        if (i < quietZoneRoom) f.tapQuietZone.data[(quietZoneAt + i) & (f.tapQuietZone.capacity - 1u)] = {cl, cr};
+        if (i < driveRoom) f.tapDrive.data[(driveAt + i) & (f.tapDrive.capacity - 1u)] = {dl, dr};
 
         float buses[N60_SPLITTER_BUS_COUNT];
         N60SpeakerBusSplitterProcess(&f.splitter, cl, cr, buses);
@@ -253,12 +313,46 @@ void renderChunk(N60AncLaneFeed &f, const float *const *in, float *const *out, u
         srcS[i] = std::clamp(laneS, -limit, limit);
     }
     f.previousChunk = haveFF ? n : 0u;
+    if (wantAmbient) {
+        f.tapAmbient.writeIndex.store(ambientAt + ambientRoom, std::memory_order_release);
+        f.tapAmbient.captured.fetch_add(ambientRoom, std::memory_order_relaxed);
+        if (ambientRoom < n) f.tapAmbient.dropped.fetch_add(n - ambientRoom, std::memory_order_relaxed);
+    }
+    if (wantQuietZone) {
+        f.tapQuietZone.writeIndex.store(quietZoneAt + quietZoneRoom, std::memory_order_release);
+        f.tapQuietZone.captured.fetch_add(quietZoneRoom, std::memory_order_relaxed);
+        if (quietZoneRoom < n) f.tapQuietZone.dropped.fetch_add(n - quietZoneRoom, std::memory_order_relaxed);
+    }
+    if (wantDrive) {
+        if (driveFits) {
+            // The anchor is published before the frames, so a reader that sees frames can find the anchor covering them.
+            f.anchors[anchorWriteAt & (N60AncLaneFeedAnchorRingEntries - 1u)] = {
+                f.hostTime.load(std::memory_order_relaxed), driveStart, n, static_cast<uint32_t>(outputIndexAtStart)};
+            f.anchorWrite.store(anchorWriteAt + 1u, std::memory_order_release);
+            f.tapDrive.writeIndex.store(driveAt + n, std::memory_order_release);
+            f.tapDrive.captured.fetch_add(n, std::memory_order_relaxed);
+        } else {
+            f.tapDrive.dropped.fetch_add(n, std::memory_order_relaxed);
+            f.droppedAnchors.fetch_add(1, std::memory_order_relaxed);
+        }
+    }
     if (nonFinite != 0u) f.nonFinite.fetch_add(nonFinite, std::memory_order_relaxed);
     if (clamps != 0u) f.clamped.fetch_add(clamps, std::memory_order_relaxed);
     f.gainShadow.store(static_cast<float>(f.gain), std::memory_order_relaxed);
     f.rendered.store(now + n, std::memory_order_release);
 }
 
+}  // namespace
+
+namespace {
+PairRing &tapRing(N60AncLaneFeed &f, N60AncLaneFeedTap tap) {
+    switch (tap) {
+        case N60AncLaneFeedTapQuietZone: return f.tapQuietZone;
+        case N60AncLaneFeedTapSpeakerDrive: return f.tapDrive;
+        case N60AncLaneFeedTapAmbient: break;
+    }
+    return f.tapAmbient;
+}
 }  // namespace
 
 extern "C" {
@@ -307,6 +401,14 @@ N60AncLaneFeed *N60AncLaneFeedCreate(const N60AncLaneFeedConfig *config) {
             N60ActiveQuietZoneTelemetryDestroy(f->telemetry);
             return nullptr;
         }
+    }
+    f->anchors.reset(new (std::nothrow) N60AncLaneFeedAnchor[N60AncLaneFeedAnchorRingEntries]());
+    if (!f->tapAmbient.allocate(N60AncLaneFeedTapRingFrames) || !f->tapQuietZone.allocate(N60AncLaneFeedTapRingFrames)
+        || !f->tapDrive.allocate(N60AncLaneFeedDriveRingFrames) || !f->anchors) {
+        N60FeedForwardLiveDestroy(f->ff);
+        N60ActiveQuietZoneGainMailboxDestroy(f->mailbox);
+        N60ActiveQuietZoneTelemetryDestroy(f->telemetry);
+        return nullptr;
     }
     f->snapshots.slots[0] = f->snapshots.slots[1] = f->snapshots.slots[2] = N60ActiveQuietZoneSnapshotMakeBypassed();
     f->splitter.snapshot = f->config.splitter;
@@ -443,8 +545,75 @@ N60FeedForwardLiveStatus N60AncLaneFeedFeedForwardStatus(const N60AncLaneFeed *f
     return N60FeedForwardLiveGetStatus(feed->ff);
 }
 
+void N60AncLaneFeedSetTapDemand(N60AncLaneFeed *feed, N60AncLaneFeedTap tap, bool enabled) {
+    tapRing(*feed, tap).demand.store(enabled, std::memory_order_release);
+}
+
+N60AncLaneFeedTapSnapshot N60AncLaneFeedTapGetSnapshot(const N60AncLaneFeed *feed, N60AncLaneFeedTap tap) {
+    PairRing &r = tapRing(*const_cast<N60AncLaneFeed *>(feed), tap);
+    N60AncLaneFeedTapSnapshot s{};
+    s.enabled = r.demand.load(std::memory_order_acquire);
+    const uint64_t wr = r.writeIndex.load(std::memory_order_acquire), rd = r.readIndex.load(std::memory_order_acquire);
+    s.availableFrames = wr >= rd ? static_cast<uint32_t>(wr - rd) : 0u;
+    s.capturedFrames = r.captured.load(std::memory_order_relaxed);
+    s.droppedFrames = r.dropped.load(std::memory_order_relaxed);
+    if (tap == N60AncLaneFeedTapSpeakerDrive) {
+        const uint64_t aw = feed->anchorWrite.load(std::memory_order_acquire), ar = feed->anchorRead.load(std::memory_order_acquire);
+        s.availableAnchors = aw >= ar ? static_cast<uint32_t>(aw - ar) : 0u;
+        s.droppedAnchors = feed->droppedAnchors.load(std::memory_order_relaxed);
+    }
+    return s;
+}
+
+uint32_t N60AncLaneFeedTapRead(N60AncLaneFeed *feed, N60AncLaneFeedTap tap, N60AncLaneFeedFramePair *destination,
+                               uint32_t maximum) {
+    PairRing &r = tapRing(*feed, tap);
+    const uint64_t rd = r.readIndex.load(std::memory_order_relaxed);
+    const uint64_t wr = r.writeIndex.load(std::memory_order_acquire);
+    if (wr <= rd || maximum == 0u) return 0u;
+    const uint32_t n = static_cast<uint32_t>(std::min<uint64_t>(wr - rd, maximum));
+    for (uint32_t i = 0; i < n; ++i) destination[i] = r.data[(rd + i) & (r.capacity - 1u)];
+    r.readIndex.store(rd + n, std::memory_order_release);
+    return n;
+}
+
+void N60AncLaneFeedTapDiscard(N60AncLaneFeed *feed, N60AncLaneFeedTap tap) {
+    PairRing &r = tapRing(*feed, tap);
+    // Anchors first: the audio thread publishes an anchor before its frames, so this order can leave an orphan anchor
+    // (its frames discarded), which is harmless, but never frames without their anchor.
+    if (tap == N60AncLaneFeedTapSpeakerDrive) {
+        feed->anchorRead.store(feed->anchorWrite.load(std::memory_order_acquire), std::memory_order_release);
+    }
+    r.readIndex.store(r.writeIndex.load(std::memory_order_acquire), std::memory_order_release);
+}
+
+uint32_t N60AncLaneFeedAnchorsRead(N60AncLaneFeed *feed, N60AncLaneFeedAnchor *destination, uint32_t maximum) {
+    const uint64_t rd = feed->anchorRead.load(std::memory_order_relaxed);
+    const uint64_t wr = feed->anchorWrite.load(std::memory_order_acquire);
+    if (wr <= rd || maximum == 0u) return 0u;
+    const uint32_t n = static_cast<uint32_t>(std::min<uint64_t>(wr - rd, maximum));
+    for (uint32_t i = 0; i < n; ++i) destination[i] = feed->anchors[(rd + i) & (N60AncLaneFeedAnchorRingEntries - 1u)];
+    feed->anchorRead.store(rd + n, std::memory_order_release);
+    return n;
+}
+
+void N60AncLaneFeedSetProgrammeScale(N60AncLaneFeed *feed, float scale) {
+    feed->programmeScale.store(std::isfinite(scale) ? std::clamp(scale, 0.0f, 16.0f) : 1.0f, std::memory_order_relaxed);
+}
+
+void N60AncLaneFeedHostTimeSink(void *context, uint64_t hostTime) {
+    if (context != nullptr) static_cast<N60AncLaneFeed *>(context)->hostTime.store(hostTime, std::memory_order_relaxed);
+}
+
 void N60AncLaneFeedReset(N60AncLaneFeed *feed) {
     N60AncLaneFeed &f = *feed;
+    // Tap demand is a control-plane choice and survives; recorded frames do not.
+    f.tapAmbient.clear();
+    f.tapQuietZone.clear();
+    f.tapDrive.clear();
+    f.anchorWrite.store(0, std::memory_order_release);
+    f.anchorRead.store(0, std::memory_order_release);
+    f.droppedAnchors.store(0, std::memory_order_relaxed);
     f.armed.store(false, std::memory_order_release);
     f.leaseWasActive = false;
     f.gain = 0.0;

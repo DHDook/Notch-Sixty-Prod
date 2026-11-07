@@ -35,10 +35,39 @@ protocol QuietZoneRuntimeHost: AnyObject {
     /// E26 S7b2b (G20): control-thread poll that turns a graph guard trip into a feed fade. No-op for the kernel session,
     /// whose guards run inside the kernel.
     func pollQuietZoneGuards()
+
+    /// E26 S7b2c (G26): the reference taps and speaker-drive stream the tonal controller and the live reference pump read.
+    /// Same meaning and frame layout on both sessions. The defaults answer "nothing recorded".
+    func setAmbientReferenceDemand(_ enabled: Bool)
+    func ambientReferenceSnapshot() -> N60AmbientPlaybackReferenceSnapshot?
+    func discardAmbientReferenceFrames()
+    func readAmbientReferenceFrames(maximumFrames: Int) -> [N60AmbientPlaybackReferenceFrame]
+    func setActiveQuietZoneReferenceDemand(_ enabled: Bool)
+    func activeQuietZoneReferenceSnapshot() -> N60ActiveQuietZoneReferenceSnapshot?
+    func discardActiveQuietZoneReferenceFrames()
+    func readActiveQuietZoneReferenceFrames(maximumFrames: Int) -> [N60ActiveQuietZoneReferenceFrame]
+    var activeQuietZoneReferenceSampleRate: Double { get }
+    func setSpeakerDriveDemand(_ enabled: Bool)
+    func speakerDriveSnapshot() -> N60SpeakerDriveSnapshot?
+    func readSpeakerDriveAnchors(maximum: Int) -> [N60SpeakerDriveAnchor]
+    func readSpeakerDriveFrames(maximumFrames: Int) -> [N60AmbientPlaybackReferenceFrame]
 }
 
 extension QuietZoneRuntimeHost {
     func pollQuietZoneGuards() {}
+    func setAmbientReferenceDemand(_ enabled: Bool) {}
+    func ambientReferenceSnapshot() -> N60AmbientPlaybackReferenceSnapshot? { nil }
+    func discardAmbientReferenceFrames() {}
+    func readAmbientReferenceFrames(maximumFrames: Int) -> [N60AmbientPlaybackReferenceFrame] { [] }
+    func setActiveQuietZoneReferenceDemand(_ enabled: Bool) {}
+    func activeQuietZoneReferenceSnapshot() -> N60ActiveQuietZoneReferenceSnapshot? { nil }
+    func discardActiveQuietZoneReferenceFrames() {}
+    func readActiveQuietZoneReferenceFrames(maximumFrames: Int) -> [N60ActiveQuietZoneReferenceFrame] { [] }
+    var activeQuietZoneReferenceSampleRate: Double { ambientReferenceSampleRate }
+    func setSpeakerDriveDemand(_ enabled: Bool) {}
+    func speakerDriveSnapshot() -> N60SpeakerDriveSnapshot? { nil }
+    func readSpeakerDriveAnchors(maximum: Int) -> [N60SpeakerDriveAnchor] { [] }
+    func readSpeakerDriveFrames(maximumFrames: Int) -> [N60AmbientPlaybackReferenceFrame] { [] }
 }
 
 /// Owns one `N60AncLaneFeed` for the life of a graph host (see `UnifiedGraphHost.retainedResource`).
