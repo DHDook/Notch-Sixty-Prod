@@ -15,6 +15,9 @@ struct ContentPresetState: Codable, Equatable, Sendable {
     var headroomAttenuationDB: Double
     var dynamics: DynamicsConfiguration
     var audioUnitRack: AudioUnitRackConfiguration
+    /// E27 S3a: auto preamp toggle and the user's trim. Absent in older profiles: off and 0 dB.
+    var autoPreampEnabled: Bool
+    var preampTrimDB: Double
 
     init(
         schemaVersion: Int = ContentPresetState.currentSchemaVersion,
@@ -22,9 +25,13 @@ struct ContentPresetState: Codable, Equatable, Sendable {
         inputPreampDB: Double = 0,
         headroomAttenuationDB: Double = 0,
         dynamics: DynamicsConfiguration = DynamicsConfiguration(),
-        audioUnitRack: AudioUnitRackConfiguration = AudioUnitRackConfiguration()
+        audioUnitRack: AudioUnitRackConfiguration = AudioUnitRackConfiguration(),
+        autoPreampEnabled: Bool = false,
+        preampTrimDB: Double = 0
     ) {
         self.schemaVersion = schemaVersion
+        self.autoPreampEnabled = autoPreampEnabled
+        self.preampTrimDB = preampTrimDB
         self.stereoEQ = stereoEQ
         self.inputPreampDB = inputPreampDB
         self.headroomAttenuationDB = headroomAttenuationDB
@@ -39,11 +46,15 @@ struct ContentPresetState: Codable, Equatable, Sendable {
         case headroomAttenuationDB
         case dynamics
         case audioUnitRack
+        case autoPreampEnabled
+        case preampTrimDB
     }
 
     init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         schemaVersion = try values.decode(Int.self, forKey: .schemaVersion)
+        autoPreampEnabled = try values.decodeIfPresent(Bool.self, forKey: .autoPreampEnabled) ?? false
+        preampTrimDB = try values.decodeIfPresent(Double.self, forKey: .preampTrimDB) ?? 0
         stereoEQ = try values.decode(
             StereoEQConfiguration.self,
             forKey: .stereoEQ
@@ -77,6 +88,8 @@ struct ContentPresetState: Codable, Equatable, Sendable {
         )
         try values.encode(dynamics, forKey: .dynamics)
         try values.encode(audioUnitRack, forKey: .audioUnitRack)
+        try values.encode(autoPreampEnabled, forKey: .autoPreampEnabled)
+        try values.encode(preampTrimDB, forKey: .preampTrimDB)
     }
 
     func composingGain(over base: DSPGainConfiguration) -> DSPGainConfiguration {
@@ -1104,6 +1117,8 @@ final class ProductProfileController: ObservableObject {
 
     let engine: AudioIOEngine
     let audioUnitHost: AudioUnitHostController
+    /// E27 S3a: auto preamp for the Equalizer page; inert unless `e27.eq-safety` is on.
+    let autoPreamp: EQAutoPreampController
     private let storageURL: URL
     private var didRestoreSelection = false
     private var didLoadArchive = false
@@ -1123,9 +1138,14 @@ final class ProductProfileController: ObservableObject {
     init(
         engine: AudioIOEngine,
         audioUnitHost: AudioUnitHostController? = nil,
-        storageURL: URL? = nil
+        storageURL: URL? = nil,
+        autoPreampAvailable: Bool? = nil
     ) {
         self.engine = engine
+        self.autoPreamp = EQAutoPreampController(
+            engine: engine,
+            isAvailable: autoPreampAvailable ?? FeatureFlags().isEnabled(.eqSafety)
+        )
         self.audioUnitHost = audioUnitHost ?? AudioUnitHostController()
         self.storageURL = storageURL ?? Self.defaultStorageURL()
         audioUnitHostObservation = self.audioUnitHost.objectWillChange.sink {
@@ -1750,7 +1770,9 @@ final class ProductProfileController: ObservableObject {
             inputPreampDB: gain.inputPreampDB,
             headroomAttenuationDB: gain.headroomAttenuationDB,
             dynamics: dynamics,
-            audioUnitRack: audioUnitHost.rackConfiguration
+            audioUnitRack: audioUnitHost.rackConfiguration,
+            autoPreampEnabled: autoPreamp.isOn,
+            preampTrimDB: autoPreamp.trimDB
         )
     }
 
@@ -1798,12 +1820,14 @@ final class ProductProfileController: ObservableObject {
     ) throws {
         let previous = captureContentState()
         do {
+            autoPreamp.restore(isOn: state.autoPreampEnabled, trimDB: state.preampTrimDB)
             let gain = state.composingGain(over: engine.gainConfiguration)
             try engine.replaceStereoEQConfiguration(state.stereoEQ)
             try engine.replaceDynamicsConfiguration(state.dynamics)
             try engine.replaceGainConfiguration(gain)
         } catch {
             let rollbackGain = previous.composingGain(over: engine.gainConfiguration)
+            autoPreamp.restore(isOn: previous.autoPreampEnabled, trimDB: previous.preampTrimDB)
             try? engine.replaceStereoEQConfiguration(previous.stereoEQ)
             try? engine.replaceDynamicsConfiguration(previous.dynamics)
             try? engine.replaceGainConfiguration(rollbackGain)

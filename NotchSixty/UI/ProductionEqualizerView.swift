@@ -4,6 +4,7 @@ import SwiftUI
 
 struct ProductionEqualizerView: View {
     @ObservedObject var engine: AudioIOEngine
+    @ObservedObject var autoPreamp: EQAutoPreampController
     var reference: ProductionReferenceNavigator? = nil
     @ObservedObject private var liveOverlay = MeasurementLiveOverlayStore.shared
     @State private var selectedBandID: UUID?
@@ -95,6 +96,8 @@ struct ProductionEqualizerView: View {
             header
             ProductionActionErrorBanner(message: $actionError)
             modeBar
+
+            ProductionEQGainBar(engine: engine, autoPreamp: autoPreamp, perform: { perform($0) })
 
             responseGraph
 
