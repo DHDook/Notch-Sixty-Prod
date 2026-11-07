@@ -153,6 +153,8 @@ struct UnifiedGraphConfiguration: Equatable, Sendable {
     var orderPolicy: UnifiedGraphOrderPolicy = .canonical
     /// E6 S9a: program DSP mapped onto the lane sets of this layout (N-channel graphs). Needs empty `stereoStages`.
     var programDSP: UnifiedGraphProgramDSP?
+    /// E9 S3: the core's FIR engine for this graph (`UnifiedGraphFIRScheme`); it sets every FIR tap limit below.
+    var firScheme: UInt32 = UnifiedGraphFIRScheme.current()
     /// E8 S3: speaker routing (ROUTE, XOVER and per-output delay and protection). nil leaves the graph exactly as before.
     var routing: UnifiedGraphRouting?
     /// E26 S6a: ANC guard, inject and capture stages with the sub lane as an actuator. nil leaves the graph as before.
@@ -216,7 +218,7 @@ struct UnifiedGraphConfiguration: Equatable, Sendable {
         /// One FIR stage when both channels share taps, else one per lane (the core applies identical taps to every
         /// lane a stage selects).
         func addFIR(_ kind: n60_stage_kind, _ program: UnifiedGraphFIRProgram, baseId: UInt32) throws {
-            guard !program.left.isEmpty, program.left.count <= 32_768,
+            guard !program.left.isEmpty, program.left.count <= UnifiedGraphFIRScheme.maxTaps(firScheme),
                   program.right == nil || program.right?.count == program.left.count,
                   program.declaredLatencyFrames <= N60_GRAPH_MAX_DELAY_FRAMES else {
                 throw UnifiedGraphError.unsupportedConfiguration("FIR taps")
@@ -391,7 +393,8 @@ struct UnifiedGraphConfiguration: Equatable, Sendable {
             sampleRate: sampleRate, maxBlockFrames: maxBlockFrames,
             inputChannels: UInt32(channelCount), outputChannels: UInt32(channelCount),
             stages: stages,
-            denoiserPark: stereo.denoiser == nil ? denoiserPark : nil
+            denoiserPark: stereo.denoiser == nil ? denoiserPark : nil,
+            firScheme: firScheme
         )
         try programDSP?.apply(to: &spec)
         try ancActuators?.apply(to: &spec, existingLanes: ancLaneBase)

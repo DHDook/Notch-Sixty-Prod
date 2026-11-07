@@ -447,7 +447,7 @@ final class CoreAudioTransportSession {
     private var unifiedGraphLaneTapFrames: UInt32 = 0
     /// E6 S8d: the taps of recently prepared kernel convolver programs, by generation, so a snapshot that references
     /// one can be rebuilt on the graph. The kernel snapshot carries only the generation. Only programs the core can
-    /// hold (up to 32768 taps) are kept, newest few per convolver (the kernel has three slots).
+    /// hold (up to 32768 taps, 262144 with e9.long-fir) are kept, newest few per convolver (the kernel has three slots).
     private var retainedPrograms: [UnifiedGraphProgramKind: [UInt64: UnifiedGraphFIRProgram]] = [:]
     private let retainedProgramsLock = NSLock()
     /// Why the kernel renders although the graph is enabled; nil while the graph renders or is off.
@@ -1170,7 +1170,7 @@ final class CoreAudioTransportSession {
         left: [Float], right: [Float]?, declaredLatencyFrames: UInt32
     ) {
         retainedProgramsLock.lock(); defer { retainedProgramsLock.unlock() }
-        guard info.tapCount <= 32_768 else { return }
+        guard Int(info.tapCount) <= UnifiedGraphFIRScheme.maxTaps(UnifiedGraphFIRScheme.current()) else { return }
         var forKind = retainedPrograms[kind] ?? [:]
         forKind[info.generation] = UnifiedGraphFIRProgram(
             generation: info.generation, left: left, right: right, declaredLatencyFrames: declaredLatencyFrames

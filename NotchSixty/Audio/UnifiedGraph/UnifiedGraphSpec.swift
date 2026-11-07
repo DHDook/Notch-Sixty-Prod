@@ -22,6 +22,35 @@ struct UnifiedGraphDenoiserPark: Equatable, Sendable {
     var command: UInt32
 }
 
+/// E9 S3: which FIR engine the core uses (`n60_graph_desc.firScheme`) and the tap limit each scheme allows. Swift picks
+/// the scheme from `e9.long-fir`; the core never reads a flag.
+enum UnifiedGraphFIRScheme {
+    static let uniform: UInt32 = 0
+    static let nonUniform: UInt32 = 1
+    static let uniformMaxTaps = 32_768
+    static let longMaxTaps = Int(N60_FIR_MAX_TAPS_LONG)
+
+    static func maxTaps(_ scheme: UInt32) -> Int { scheme == nonUniform ? longMaxTaps : uniformMaxTaps }
+
+    private static let lock = NSLock()
+    nonisolated(unsafe) private static var defaultScheme: UInt32 = uniform
+
+    /// The scheme new graph configurations use by default. Set once at launch from `e9.long-fir` (`refresh`), because
+    /// feature flags are main-actor and graph configurations are built on any thread.
+    static func current() -> UInt32 {
+        lock.lock(); defer { lock.unlock() }
+        return defaultScheme
+    }
+
+    @MainActor static func scheme(for flags: FeatureFlags) -> UInt32 { flags.isEnabled(.longFIR) ? nonUniform : uniform }
+
+    /// Reads the flag and makes it the default for configurations built from now on.
+    @MainActor static func refresh(_ flags: FeatureFlags? = nil) {
+        let value = scheme(for: flags ?? FeatureFlags())
+        lock.lock(); defaultScheme = value; lock.unlock()
+    }
+}
+
 struct UnifiedGraphSpec: Equatable {
     var sampleRate: Double
     var maxBlockFrames: UInt32
@@ -29,6 +58,8 @@ struct UnifiedGraphSpec: Equatable {
     var outputChannels: UInt32
     var stages: [UnifiedGraphStageSpec]
     var denoiserPark: UnifiedGraphDenoiserPark?
+    /// E9 S3 (ABI v20): `UnifiedGraphFIRScheme` value. A change is a rebuild, so it is part of the topology.
+    var firScheme: UInt32 = UnifiedGraphFIRScheme.uniform
 
     /// Two specs share a topology when a rebuild is not needed to move between them,
     /// as far as the control plane can tell without asking the core: same rate, size,
@@ -40,7 +71,7 @@ struct UnifiedGraphSpec: Equatable {
               inputChannels == other.inputChannels, outputChannels == other.outputChannels,
               stages.count == other.stages.count else { return false }
         // A change in the denoiser's off view is applied when a snapshot is adopted, so it needs one.
-        guard denoiserPark == other.denoiserPark else { return false }
+        guard denoiserPark == other.denoiserPark, firScheme == other.firScheme else { return false }
         for (a, b) in zip(stages, other.stages) {
             if a.kind != b.kind || a.stageId != b.stageId || a.laneA != b.laneA
                 || a.laneB != b.laneB || a.laneMask != b.laneMask
@@ -91,6 +122,7 @@ struct UnifiedGraphSpec: Equatable {
             }
         }
         stages = out
+        firScheme = d.firScheme
         if d.parkFftSize != 0 {
             denoiserPark = UnifiedGraphDenoiserPark(
                 fftSize: d.parkFftSize, revision: d.parkRevision, command: d.parkCommand
@@ -104,7 +136,8 @@ struct UnifiedGraphSpec: Equatable {
         inputChannels: UInt32,
         outputChannels: UInt32,
         stages: [UnifiedGraphStageSpec],
-        denoiserPark: UnifiedGraphDenoiserPark? = nil
+        denoiserPark: UnifiedGraphDenoiserPark? = nil,
+        firScheme: UInt32 = UnifiedGraphFIRScheme.uniform
     ) {
         self.sampleRate = sampleRate
         self.maxBlockFrames = maxBlockFrames
@@ -112,6 +145,7 @@ struct UnifiedGraphSpec: Equatable {
         self.outputChannels = outputChannels
         self.stages = stages
         self.denoiserPark = denoiserPark
+        self.firScheme = firScheme
     }
 
     /// Runs `body` with a C description that is valid only for the call (the core copies
@@ -149,6 +183,7 @@ struct UnifiedGraphSpec: Equatable {
             graphDesc.outputChannels = outputChannels
             graphDesc.stages = stageBuffer.baseAddress
             graphDesc.stageCount = UInt32(stages.count)
+            graphDesc.firScheme = firScheme
             if let park = denoiserPark {
                 graphDesc.parkFftSize = park.fftSize
                 graphDesc.parkRevision = park.revision

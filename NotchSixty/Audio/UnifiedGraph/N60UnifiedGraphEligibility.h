@@ -352,16 +352,17 @@ static inline bool N60UnifiedGraphDynamicEQParams(
     return true;
 }
 
-// A convolution state the core can hold: 1..32768 taps (N60_FIR_MAX_TAPS), the kernel's 256-frame engine latency, and
-// a declared latency within N60_GRAPH_MAX_DELAY_FRAMES. A disabled state is always acceptable.
-static inline bool N60UnifiedGraphConvolutionState(const N60ConvolutionGraphState * _Nonnull c) {
+// A convolution state the core can hold: 1..maxTaps taps (32768 for firScheme 0, N60_FIR_MAX_TAPS; 262144 for
+// firScheme 1, N60_FIR_MAX_TAPS_LONG), the kernel's 256-frame engine latency, and a declared latency within
+// N60_GRAPH_MAX_DELAY_FRAMES. A disabled state is always acceptable.
+static inline bool N60UnifiedGraphConvolutionState(const N60ConvolutionGraphState * _Nonnull c, uint32_t maxTaps) {
     if (!c->enabled) return true;
-    return c->programGeneration != 0 && c->tapCount >= 1u && c->tapCount <= 32768u
+    return c->programGeneration != 0 && c->tapCount >= 1u && c->tapCount <= maxTaps
         && c->engineLatencyFrames == 256u && c->declaredLatencyFrames <= (1u << 22);
 }
 
 static inline N60UnifiedGraphUnsupportedReason N60UnifiedGraphSnapshotUnsupportedReason(
-    const N60DSPGraphSnapshot * _Nonnull s
+    const N60DSPGraphSnapshot * _Nonnull s, uint32_t maxFIRTaps
 ) {
     if (s->bypassed || s->auditionMode != N60AuditionModeProcessed) {
         return N60UnifiedGraphUnsupportedBypassOrAudition;
@@ -480,8 +481,9 @@ static inline N60UnifiedGraphUnsupportedReason N60UnifiedGraphSnapshotUnsupporte
     // core can hold and where the kernel runs the stage; the translator then recovers the taps by generation from
     // the control plane's retained program and verifies them against this record (see UnifiedGraphFIRProgram).
     if (s->convolution.enabled || s->roomCorrection.enabled || s->speakerIR.enabled) {
-        if (!N60UnifiedGraphConvolutionState(&s->convolution) || !N60UnifiedGraphConvolutionState(&s->roomCorrection)
-                || !N60UnifiedGraphConvolutionState(&s->speakerIR)) {
+        if (!N60UnifiedGraphConvolutionState(&s->convolution, maxFIRTaps)
+                || !N60UnifiedGraphConvolutionState(&s->roomCorrection, maxFIRTaps)
+                || !N60UnifiedGraphConvolutionState(&s->speakerIR, maxFIRTaps)) {
             return N60UnifiedGraphUnsupportedConvolution;
         }
         // The kernel runs the program convolution inside the mid/side pair and before the dynamic EQ; the core

@@ -157,6 +157,9 @@ struct UnifiedGraphProgramDSP: Equatable, Sendable {
             throw UnifiedGraphFallbackReason.laneCountMismatch
         }
         let st = stages
+        // E9 S3: the FIR tap limit follows the spec's scheme; two-band stages keep the uniform limit (no designer emits
+        // them with `e9.long-fir` on).
+        let maxFIRTaps = UnifiedGraphFIRScheme.maxTaps(spec.firScheme)
         guard inputGain.isFinite, inputGain > 0, inputGain <= 10_000 else {
             throw UnifiedGraphFallbackReason.gainOutOfRange
         }
@@ -216,7 +219,7 @@ struct UnifiedGraphProgramDSP: Equatable, Sendable {
         }
         func addFIR(_ kind: n60_stage_kind, _ program: UnifiedGraphFIRProgram, base: UInt32,
                     sharedMask: UInt64, leftLanes: [Int], rightLanes: [Int]) throws {
-            guard !program.left.isEmpty, program.left.count <= 32_768,
+            guard !program.left.isEmpty, program.left.count <= maxFIRTaps,
                   program.right == nil || program.right?.count == program.left.count,
                   program.declaredLatencyFrames <= N60_GRAPH_MAX_DELAY_FRAMES else {
                 throw UnifiedGraphFallbackReason.convolutionProgramUnavailable
@@ -276,7 +279,7 @@ struct UnifiedGraphProgramDSP: Equatable, Sendable {
         let uncovered = (0..<count).filter { !covered.contains($0) }
         if coveredLatency > 0, !uncovered.isEmpty {
             let delta = Int(coveredLatency) - Int(Self.firPartitionFrames)
-            guard delta >= 0, delta + 1 <= 32_768 else { throw UnifiedGraphFallbackReason.latencyAlignment }
+            guard delta >= 0, delta + 1 <= maxFIRTaps else { throw UnifiedGraphFallbackReason.latencyAlignment }
             var taps = [Float](repeating: 0, count: delta)
             taps.append(1)
             add(N60_STAGE_FIR, Self.deltaFIRStageId, mask: Self.mask(uncovered), capacity: UInt32(delta), params: taps)
@@ -299,7 +302,8 @@ struct UnifiedGraphProgramDSP: Equatable, Sendable {
                 throw UnifiedGraphFallbackReason.specRejected
             }
             for (index, stage) in plan.stages.enumerated() {
-                guard !stage.taps.isEmpty, stage.taps.count <= 32_768, (stage.twoBand?.lowTaps.count ?? 1) <= 32_768,
+                guard !stage.taps.isEmpty, stage.taps.count <= (stage.twoBand == nil ? maxFIRTaps : UnifiedGraphFIRScheme.uniformMaxTaps),
+                      (stage.twoBand?.lowTaps.count ?? 1) <= UnifiedGraphFIRScheme.uniformMaxTaps,
                       !(stage.twoBand?.lowTaps.isEmpty ?? false), stage.laneMask != 0,
                       stage.laneMask & lanePlanCovered == 0 else {
                     throw UnifiedGraphFallbackReason.convolutionProgramUnavailable
