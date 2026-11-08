@@ -123,14 +123,20 @@ n60_status validateParam(const SnapHeader *snap, const StageRec &stage, uint32_t
 bool applyParam(SnapHeader *snap, uint32_t stageId, uint32_t paramIndex, float value, bool *latencyMayChange);
 uint32_t snapshotLatency(const SnapHeader *snap);
 
-// Realtime thread (E9 S2c, closes G7). The stages before index `i` of `to` are the same stages as in `from` (the
-// caller has checked kind, id, lanes and parameters). Copies the running state of the ones that keep any and are
-// small (GAIN and OUTPUT_GAIN, PEQ with its coefficient block, COMPRESSOR, CORE_DYNAMICS, EXPANDER, DYN_EQ), so the
-// incoming instance's upstream matches the outgoing one from the adoption tick on and a lazily carried FIR input
-// history has no cold-start transient. Stateless kinds (sanitise, meters, M/S) need nothing. The bytes copied are
-// deducted from `*budget` (saturating; null = unbudgeted); a stage that exceeds what is left is skipped (cold start),
-// as are other stateful kinds (ledger G9). Stages before `first` are skipped (already copied for an earlier FIR).
-// Returns the number of stages whose state was copied.
+// Realtime thread (E9 S2c, closes G7; S2d, closes G9). The stages before index `i` of `to` are the same stages as in
+// `from` (the caller has checked kind, id, lanes and parameters).
+//
+// upstreamStateCarriable: true when every stateful stage in [first, i) can be given the outgoing instance's running
+// state, so a lazily carried FIR behind them sees the same input in both instances. Carried kinds: GAIN and
+// OUTPUT_GAIN, PEQ (with its coefficient block), COMPRESSOR, CORE_DYNAMICS, EXPANDER, DYN_EQ, BASS_MGMT,
+// STEREO_CROSSOVER, AMBIENT and CLEANUP (lanes plus shared block, copied whole; DELAY ranks after every FIR kind, so it is never upstream). Stateless kinds (sanitise,
+// meters, M/S, analyser taps) need nothing. False for any other stateful kind (the denoiser included), for a stage
+// whose bytes exceed `budget` together (`unbudgeted`: no limit), and for an upstream FIR unless firExact[j] says it was
+// copied whole; the caller then does not run the FIR in lockstep and it warms in full. Pure: copies nothing.
+bool upstreamStateCarriable(const SnapHeader *from, const SnapHeader *to, uint32_t i, uint64_t budget, bool unbudgeted,
+                            uint32_t first, const uint8_t *firExact);
+// Copies that state (call only after upstreamStateCarriable). The bytes are deducted from `*budget` (saturating; null =
+// unbudgeted). Stages before `first` are skipped (already copied for an earlier FIR). Returns the stages copied.
 uint32_t carryUpstreamState(SnapHeader *from, SnapHeader *to, uint32_t i, uint64_t *budget, uint32_t first = 0);
 
 // Control thread (immutable fields only).

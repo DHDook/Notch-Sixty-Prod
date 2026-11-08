@@ -894,6 +894,88 @@ void runDelay(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) 
 
 }  // namespace
 
+namespace {
+
+enum class UpstreamKind { Stateless, Carry, Fir, Refuse };
+
+// How a stage ahead of a lazily carried FIR is treated (E9 S2d, G9). Carry: plain-data state in the lanes, the
+// coefficient block (PEQ) and the shared block, copied whole. Stateless: no audible state (the meters and taps are
+// read-only observers). Fir: an upstream convolver, exact only if it was itself copied whole. Refuse: any other
+// stateful kind (the denoiser's spectral state is too large to copy within a callback budget, the rest are not yet
+// proven copyable); the FIR behind it is not carried in lockstep and warms in full.
+UpstreamKind upstreamKindOf(uint32_t kind) {
+    switch (kind) {
+        case N60_STAGE_SANITISE:
+        case N60_STAGE_METER_IN:
+        case N60_STAGE_METER_OUT:
+        case N60_STAGE_MS_ENCODE:
+        case N60_STAGE_MS_DECODE:
+        case N60_STAGE_ANALYSER_TAP_EQ:
+        case N60_STAGE_ANALYSER_TAP_DYN: return UpstreamKind::Stateless;
+        case N60_STAGE_GAIN:
+        case N60_STAGE_PEQ:
+        case N60_STAGE_COMPRESSOR:
+        case N60_STAGE_EXPANDER:
+        case N60_STAGE_DYN_EQ:
+        case N60_STAGE_BASS_MGMT:
+        case N60_STAGE_STEREO_CROSSOVER:
+        case N60_STAGE_AMBIENT:
+        case N60_STAGE_CLEANUP: return UpstreamKind::Carry;
+        case N60_STAGE_FIR: return UpstreamKind::Fir;
+        default: return UpstreamKind::Refuse;
+    }
+}
+
+// Bytes a carried stage copies: lanes, PEQ coefficients, and the shared block (its extent is the gap to the next
+// stage's parameters, which is the aligned shared size the arena was planned with). 0 when the stages differ.
+bool upstreamBytes(const SnapHeader *from, const SnapHeader *to, uint32_t j, size_t &lanes, size_t &coef, size_t &shared) {
+    const StageRec &x = stages(const_cast<SnapHeader *>(from))[j];
+    const StageRec &y = stages(const_cast<SnapHeader *>(to))[j];
+    // The shared block holds coefficients designed for one rate, so a rate change refuses the carry.
+    if (from->sampleRate != to->sampleRate || x.kind != y.kind || x.id != y.id || x.laneCount != y.laneCount || x.stateStride != y.stateStride ||
+        x.paramCount != y.paramCount) {
+        return false;
+    }
+    lanes = static_cast<size_t>(y.stateStride) * y.laneCount;
+    coef = y.kind == N60_STAGE_PEQ ? sizeof(PeqSec) * (y.paramCount / kPeqParamsPerSection) : 0;
+    shared = 0;
+    // Fail closed: the shared extent is bounded by the next stage, which always exists for an upstream stage.
+    if (j + 1 >= to->stageCount || j + 1 >= from->stageCount) return false;
+    {
+        const StageRec &ny = stages(const_cast<SnapHeader *>(to))[j + 1];
+        const StageRec &nx = stages(const_cast<SnapHeader *>(from))[j + 1];
+        if (ny.paramsOff < y.sharedOff || nx.paramsOff < x.sharedOff) return false;
+        shared = ny.paramsOff - y.sharedOff;
+        if (shared != nx.paramsOff - x.sharedOff) return false;
+    }
+    return true;
+}
+
+}  // namespace
+
+bool upstreamStateCarriable(const SnapHeader *from, const SnapHeader *to, uint32_t i, uint64_t budget, bool unbudgeted,
+                            uint32_t first, const uint8_t *firExact) {
+    if (i > from->stageCount || i > to->stageCount) return false;
+    uint64_t total = 0;
+    for (uint32_t j = first; j < i; ++j) {
+        const StageRec &y = stages(const_cast<SnapHeader *>(to))[j];
+        switch (upstreamKindOf(y.kind)) {
+            case UpstreamKind::Stateless: break;
+            case UpstreamKind::Refuse: return false;
+            case UpstreamKind::Fir:
+                if (firExact == nullptr || firExact[j] == 0) return false;
+                break;
+            case UpstreamKind::Carry: {
+                size_t lanes = 0, coef = 0, shared = 0;
+                if (!upstreamBytes(from, to, j, lanes, coef, shared)) return false;
+                total += lanes + coef + shared;
+                break;
+            }
+        }
+    }
+    return unbudgeted || total <= budget;
+}
+
 uint32_t carryUpstreamState(SnapHeader *from, SnapHeader *to, uint32_t i, uint64_t *budget, uint32_t first) {
     if (i > from->stageCount || i > to->stageCount) return 0;
     const StageRec *a = stages(from);
@@ -901,31 +983,23 @@ uint32_t carryUpstreamState(SnapHeader *from, SnapHeader *to, uint32_t i, uint64
     uint32_t copied = 0;
     uint64_t spent = 0;
     for (uint32_t j = first; j < i; ++j) {
+        if (upstreamKindOf(b[j].kind) != UpstreamKind::Carry) continue;
+        size_t lanes = 0, coef = 0, shared = 0;
+        if (!upstreamBytes(from, to, j, lanes, coef, shared)) continue;
         const StageRec &x = a[j];
         StageRec &y = b[j];
-        if (x.kind != y.kind || x.id != y.id || x.laneCount != y.laneCount || x.stateStride != y.stateStride ||
-            x.paramCount != y.paramCount) {
-            continue;
-        }
-        switch (y.kind) {
-            case N60_STAGE_GAIN:
-            case N60_STAGE_PEQ:
-            case N60_STAGE_COMPRESSOR:
-            case N60_STAGE_EXPANDER:
-            case N60_STAGE_DYN_EQ: break;
-            default: continue;  // stateless, or not carried (G9)
-        }
-        const size_t lanes = static_cast<size_t>(y.stateStride) * y.laneCount;
-        const size_t coef = y.kind == N60_STAGE_PEQ ? sizeof(PeqSec) * (y.paramCount / kPeqParamsPerSection) : 0;
-        // Bounded by the callback's bulk budget: a stage that does not fit keeps the cold start (G9).
-        if (budget != nullptr && spent + lanes + coef > *budget) continue;
-        // The gain-reduction atomics of dynamics lanes are copied too (the pending maximum carries over, wanted); the
+        // Callers run upstreamStateCarriable with the same budget first; the parameters are identical (lockstep).
+        // The gain-reduction atomics of dynamics lanes and the cleanup detector telemetry atomics are copied too (the pending maximum carries over, wanted); the
         // source is the realtime thread's own and a concurrent control-thread reset can at worst drop one reading.
         std::memcpy(bytes(to) + y.stateOff, bytes(from) + x.stateOff, lanes);
         spent += lanes;
         if (coef != 0) {
             std::memcpy(bytes(to) + y.coefOff, bytes(from) + x.coefOff, coef);
             spent += coef;
+        }
+        if (shared != 0) {
+            std::memcpy(bytes(to) + y.sharedOff, bytes(from) + x.sharedOff, shared);
+            spent += shared;
         }
         y.applied = x.applied;
         ++copied;
