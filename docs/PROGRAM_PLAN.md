@@ -358,8 +358,8 @@ on the Equalizer page; S1 and S2 flagless, the engine-facing S3 items behind `e2
 - [x] S2 filter views: band curves, other-lane ghost, y-range and auto, x-range to 0.49 fs at every rate, phase, group delay, impulse and step from the engine's filter math (lab case moved to gap G6, owned by S4)
 - [~] S3a headroom badge with post-EQ clip light, auto preamp, preamp and output gain on the page (PR pending): badge and page gains reachable; auto preamp built behind `e27.eq-safety` until S4 removes the flag; bench: E22
 - [~] S3b EQ-level A/B with loudness match, band listen, click-free bypass proved at eight rates (PR pending)
-  - [~] EQ A/B built dark behind `e27.eq-safety`; prepared linear-phase FIR programs wait for S3c (G10)
-- [ ] S3c `e27/eq-ab-fir-prewarm` prepared FIR programs for linear-phase A/B and engine-level tests (G10, G11; owner slice for both)
+  - [~] EQ A/B built dark behind `e27.eq-safety`; prepared linear-phase FIR designs are cached in S3c (G10 closed); flag removal in S4
+- [x] S3c `e27/eq-ab-fir-prewarm` prepared FIR programs for linear-phase A/B and engine-level tests (G10, G11; owner slice for both)
 - [ ] S2b pre/post-EQ program analyser overlay from an engine spectrum tap (owner, 7 Nov 2026)
 - [ ] S4 flag removed (owner decision)
 
