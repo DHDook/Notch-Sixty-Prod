@@ -785,10 +785,11 @@ final class UnifiedGraphStageParityTests: XCTestCase {
         // The core has no stereo crossover beside the sub-lane bass management.
         XCTAssertNil(UnifiedGraphTranslator.stereoConfiguration(
             snapshot: &s, sampleRate: 48_000, subwoofers: [UnifiedGraphSubwoofer()]))
-        // Oversampling with neither limiter nor clipper: the kernel adds latency the core does not.
+        // E6 S12f: oversampling with neither limiter nor clipper is an oversampling round trip in the core, with the
+        // kernel's latency (parity in the e6_core_xover_clipper_parity harness).
         s = N60DSPGraphSnapshotMakeUnity(48_000)
         XCTAssertTrue(N60ProtectionSnapshotSetOversamplingFactor(&s.protection, N60OversamplingFactor4x))
-        XCTAssertNil(UnifiedGraphTranslator.stereoConfiguration(snapshot: &s, sampleRate: 48_000))
+        XCTAssertNotNil(UnifiedGraphTranslator.stereoConfiguration(snapshot: &s, sampleRate: 48_000))
     }
 
     func testAmbientCompensationMatchesTheKernelAtEveryRate() throws {
@@ -856,8 +857,8 @@ final class UnifiedGraphStageParityTests: XCTestCase {
                         "a dynamic EQ with no enabled band is the identity")
         s = dynamicEQSnapshot(rate: 48_000)
         s.eqMidSideMode = true
-        XCTAssertNil(UnifiedGraphTranslator.stereoConfiguration(snapshot: &s, sampleRate: 48_000),
-                     "the kernel runs the dynamic EQ after the mid/side decode, the core before")
+        XCTAssertNotNil(UnifiedGraphTranslator.stereoConfiguration(snapshot: &s, sampleRate: 48_000),
+                        "E6 S12f, parity exception P3: the dynamic EQ runs before the mid/side encode in the core")
     }
 
     // MARK: dynamic EQ and spectral denoiser (E6 S8d, first stage group)
