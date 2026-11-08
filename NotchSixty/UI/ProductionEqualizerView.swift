@@ -103,7 +103,7 @@ struct ProductionEqualizerView: View {
             ProductionActionErrorBanner(message: $actionError)
             modeBar
 
-            if let comparison, let audition, comparison.isAvailable {
+            if let comparison, let audition {
                 ProductionEQCompareBar(
                     comparison: comparison, audition: audition, history: history,
                     selectedBand: bands.first { $0.id == selectedBandID }, perform: { perform($0) }
@@ -139,9 +139,8 @@ struct ProductionEqualizerView: View {
             pendingPublishTask = nil
             pendingDragBand = nil
             dragPreview = nil
-            // Leaving the page ends its history, so no undo step outlives the view.
-            history.clear()
-            audition?.stop()
+            // Leaving the page ends its history and any held Listen (E27 S4, G14).
+            EQPageLifecycle.leave(history: history, audition: audition)
         }
     }
 
@@ -261,7 +260,7 @@ struct ProductionEqualizerView: View {
                 onSelect: { selectedBandID = $0 },
                 onPreview: { band in
                     // Option-press on a handle auditions that band until release.
-                    if let audition, audition.isAvailable, audition.active == nil,
+                    if let audition, audition.active == nil,
                        NSEvent.modifierFlags.contains(.option) {
                         audition.start(band: band)
                     }
@@ -726,11 +725,11 @@ struct ProductionEqualizerView: View {
                     .disabled(band.type == .notch)
                 }
 
-                metricField("Threshold", value: binding.dynamic.thresholdDB, suffix: "dB")
-                metricField("Ratio", value: binding.dynamic.ratio, suffix: ":1")
-                metricField("Max Cut", value: binding.dynamic.rangeDB, suffix: "dB")
-                metricField("Attack", value: binding.dynamic.attackMs, suffix: "ms")
-                metricField("Release", value: binding.dynamic.releaseMs, suffix: "ms")
+                metricField("Threshold", .threshold, value: binding.dynamic.thresholdDB, suffix: "dB")
+                metricField("Ratio", .ratio, value: binding.dynamic.ratio, suffix: ":1")
+                metricField("Max Cut", .maxCut, value: binding.dynamic.rangeDB, suffix: "dB")
+                metricField("Attack", .attack, value: binding.dynamic.attackMs, suffix: "ms")
+                metricField("Release", .release, value: binding.dynamic.releaseMs, suffix: "ms")
 
                 LabeledContent("Detector") {
                     Picker("Detector", selection: binding.dynamic.detectorMode) {
@@ -740,14 +739,14 @@ struct ProductionEqualizerView: View {
                 }
 
                 if band.dynamic.detectorMode == .rms {
-                    metricField("RMS Window", value: binding.dynamic.rmsWindowMs, suffix: "ms")
+                    metricField("RMS Window", .rmsWindow, value: binding.dynamic.rmsWindowMs, suffix: "ms")
                 }
 
                 if band.dynamic.direction != .cutOnly {
                     Text("Boost").font(.subheadline.bold()).padding(.top, 3)
-                    metricField("Boost Threshold", value: binding.dynamic.boostThresholdDB, suffix: "dB")
-                    metricField("Boost Ratio", value: binding.dynamic.boostRatio, suffix: ":1")
-                    metricField("Max Boost", value: binding.dynamic.maxBoostDB, suffix: "dB")
+                    metricField("Boost Threshold", .boostThreshold, value: binding.dynamic.boostThresholdDB, suffix: "dB")
+                    metricField("Boost Ratio", .boostRatio, value: binding.dynamic.boostRatio, suffix: ":1")
+                    metricField("Max Boost", .maxBoost, value: binding.dynamic.maxBoostDB, suffix: "dB")
                 }
             } else {
                 Text("Enable Dynamic to add level-dependent correction to this ordinary EQ band. Static gain remains owned by the band itself.")
@@ -757,12 +756,10 @@ struct ProductionEqualizerView: View {
         }
     }
 
-    private func metricField(_ label: String, value: Binding<Double>, suffix: String) -> some View {
+    private func metricField(_ label: String, _ metric: EQDynamicMetric, value: Binding<Double>, suffix: String) -> some View {
         LabeledContent(label) {
             HStack(spacing: 6) {
-                TextField(label, value: value, format: .number.precision(.fractionLength(1...2)))
-                    .textFieldStyle(.roundedBorder)
-                    .frame(width: 92)
+                EQDynamicMetricField(title: label, metric: metric, value: value)
                 Text(suffix).foregroundStyle(.secondary).frame(width: 28, alignment: .leading)
             }
         }

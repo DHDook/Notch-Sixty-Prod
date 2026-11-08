@@ -114,3 +114,55 @@ final class EQValueParserTests: XCTestCase {
         XCTAssertEqual(EQValueParser.displayText(1_000, field: .frequency, locale: us), "1000")
     }
 }
+
+/// E27 S4 (G4): dynamic-EQ metric fields take units, clamp and step.
+final class EQDynamicMetricTests: XCTestCase {
+    private let us = Locale(identifier: "en_US")
+    private let de = Locale(identifier: "de_DE")
+
+    func testUnitsAndLocale() {
+        XCTAssertEqual(EQDynamicMetric.parse("-24 dB", metric: .threshold, locale: us), -24)
+        XCTAssertEqual(EQDynamicMetric.parse("-24,5db", metric: .threshold, locale: de), -24.5)
+        XCTAssertEqual(EQDynamicMetric.parse("2:1", metric: .ratio, locale: us), 2)
+        XCTAssertEqual(EQDynamicMetric.parse("3,5", metric: .boostRatio, locale: de), 3.5)
+        XCTAssertEqual(EQDynamicMetric.parse("10 ms", metric: .attack, locale: us), 10)
+        XCTAssertEqual(EQDynamicMetric.parse("0.25 s", metric: .release, locale: us), 250)
+        XCTAssertNil(EQDynamicMetric.parse("10 hz", metric: .attack, locale: us))
+        XCTAssertNil(EQDynamicMetric.parse("2 ms", metric: .ratio, locale: us))
+        XCTAssertNil(EQDynamicMetric.parse("abc", metric: .threshold, locale: us))
+    }
+
+    func testClampsToEngineRanges() {
+        for metric in EQDynamicMetric.allCases {
+            XCTAssertEqual(EQDynamicMetric.value(from: "99999", metric: metric, locale: us), metric.range.upperBound, "\(metric)")
+            let low = EQDynamicMetric.value(from: "-99999", metric: metric, locale: us)
+            XCTAssertEqual(low, metric.range.lowerBound, "\(metric)")
+        }
+    }
+
+    func testArrowStepsStayInRangeAndFollowTheTables() {
+        XCTAssertEqual(EQDynamicMetric.nudged(-24, metric: .threshold, direction: .up, step: .normal), -23.5)
+        XCTAssertEqual(EQDynamicMetric.nudged(-24, metric: .threshold, direction: .up, step: .coarse), -21)
+        XCTAssertEqual(EQDynamicMetric.nudged(-24, metric: .threshold, direction: .down, step: .fine), -24.1, accuracy: 1e-9)
+        XCTAssertEqual(EQDynamicMetric.nudged(0, metric: .threshold, direction: .up, step: .coarse), 0, "clamped at 0 dB")
+        XCTAssertEqual(EQDynamicMetric.nudged(10, metric: .attack, direction: .up, step: .normal), 11, accuracy: 1e-9)
+        XCTAssertEqual(EQDynamicMetric.nudged(10, metric: .ratio, direction: .up, step: .normal), 10, "clamped at 10:1")
+        for metric in EQDynamicMetric.allCases {
+            var value = metric.range.lowerBound
+            for _ in 0..<500 { value = EQDynamicMetric.nudged(value, metric: metric, direction: .up, step: .coarse) }
+            XCTAssertEqual(value, metric.range.upperBound, "\(metric) reaches the top")
+            for _ in 0..<500 { value = EQDynamicMetric.nudged(value, metric: metric, direction: .down, step: .coarse) }
+            XCTAssertEqual(value, metric.range.lowerBound, "\(metric) reaches the bottom")
+        }
+    }
+
+    func testDisplayRoundTripsInTheLocale() {
+        for locale in [us, de] {
+            for metric in EQDynamicMetric.allCases {
+                let text = EQDynamicMetric.displayText(metric.range.lowerBound + 1.5, metric: metric, locale: locale)
+                XCTAssertEqual(EQDynamicMetric.parse(text, metric: metric, locale: locale) ?? .nan,
+                               metric.range.lowerBound + 1.5, accuracy: 0.051, "\(metric) \(text)")
+            }
+        }
+    }
+}

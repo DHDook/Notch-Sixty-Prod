@@ -93,8 +93,42 @@ final class UnifiedGraphHost: @unchecked Sendable {
     /// `since`: samples written before this index (the ring held them frozen while demand was off) are not used; a
     /// rebuild restarts the count, so a `since` above the current count is ignored.
     func readAnalyserTap(stageId: UInt32, frames: Int, since: UInt64 = 0) -> (left: [Float], right: [Float])? {
-        guard frames > 0, frames <= Int(UnifiedGraphAnalyserTaps.capacityFrames) / 2 else { return nil }
         lock.lock(); defer { lock.unlock() }
+        return readAnalyserTapLocked(stageId: stageId, frames: frames, since: since)
+    }
+
+    /// E27 S4 (G17). Control plane. Remembers where the ring stands now, for `readAnalyserTapSinceBaseline`. The
+    /// baselines live with the host and are dropped by a rebuild (a rebuild empties the rings), so a stale value can
+    /// never hide the samples of the new ring.
+    func markAnalyserTapBaseline(stageId: UInt32) {
+        lock.lock(); defer { lock.unlock() }
+        guard let graph else { return }
+        var written: UInt64 = 0
+        guard n60_graph_read_capture(graph, stageId, 0, 0, nil, 0, &written) == N60_STATUS_OK else { return }
+        analyserTapBaselines[stageId] = written
+    }
+
+    /// The baseline marked for `stageId` (0 when none, or when a rebuild dropped it).
+    func analyserTapBaseline(stageId: UInt32) -> UInt64 {
+        lock.lock(); defer { lock.unlock() }
+        return analyserTapBaselines[stageId] ?? 0
+    }
+
+    func clearAnalyserTapBaselines() {
+        lock.lock(); defer { lock.unlock() }
+        analyserTapBaselines.removeAll()
+    }
+
+    /// `readAnalyserTap` using the stored baseline of the stage.
+    func readAnalyserTapSinceBaseline(stageId: UInt32, frames: Int) -> (left: [Float], right: [Float])? {
+        lock.lock(); defer { lock.unlock() }
+        return readAnalyserTapLocked(stageId: stageId, frames: frames, since: analyserTapBaselines[stageId] ?? 0)
+    }
+
+    private var analyserTapBaselines: [UInt32: UInt64] = [:]
+
+    private func readAnalyserTapLocked(stageId: UInt32, frames: Int, since: UInt64) -> (left: [Float], right: [Float])? {
+        guard frames > 0, frames <= Int(UnifiedGraphAnalyserTaps.capacityFrames) / 2 else { return nil }
         guard let graph else { return nil }
         var written: UInt64 = 0
         guard n60_graph_read_capture(graph, stageId, 0, 0, nil, 0, &written) == N60_STATUS_OK,
@@ -215,6 +249,8 @@ final class UnifiedGraphHost: @unchecked Sendable {
         let status = newSpec.withDescription { n60_graph_publish(graph, $0) }
         guard status == N60_STATUS_OK else { throw UnifiedGraphError.coreStatus(status.rawValue) }
         spec = newSpec
+        // E27 S4 (G17): a new snapshot starts with empty tap rings, so the marked baselines no longer apply.
+        analyserTapBaselines.removeAll()
         return .published
     }
 

@@ -450,7 +450,6 @@ final class CoreAudioTransportSession {
     /// (bit 0 the EQ tap, bit 1 the after-dynamics tap). The demand is a live parameter; installing is a rebuild.
     private var analyserTapsInstalled = false
     private var analyserTapDemand: UInt8 = 0
-    private var analyserTapBaseline: [UInt32: UInt64] = [:]
     /// Integer inter-channel taps of the attached stereo graph, excluded from its reported latency.
     private var unifiedGraphLaneTapFrames: UInt32 = 0
     /// E6 S8d: the taps of recently prepared kernel convolver programs, by generation, so a snapshot that references
@@ -1426,7 +1425,7 @@ final class CoreAudioTransportSession {
     func setAnalyserTapsInstalled(_ installed: Bool) {
         guard installed != analyserTapsInstalled else { return }
         analyserTapsInstalled = installed
-        if !installed { analyserTapDemand = 0; analyserTapBaseline = [:] }
+        if !installed { analyserTapDemand = 0; unifiedGraphHost?.clearAnalyserTapBaselines() }
         republishForAnalyserTaps()
     }
 
@@ -1440,7 +1439,7 @@ final class CoreAudioTransportSession {
         // Samples recorded before a tap is switched on again are old: remember where the ring stood.
         for (bit, stage) in [(UInt8(1), UnifiedGraphConfiguration.analyserTapEQStageId),
                              (UInt8(2), UnifiedGraphConfiguration.analyserTapDynStageId)] where newlyOn & bit != 0 {
-            analyserTapBaseline[stage] = unifiedGraphHost?.analyserTapWritten(stageId: stage) ?? 0
+            unifiedGraphHost?.markAnalyserTapBaseline(stageId: stage)
         }
         republishForAnalyserTaps()
     }
@@ -1459,7 +1458,7 @@ final class CoreAudioTransportSession {
         guard analyserTapsInstalled, unifiedGraphActive else { return nil }
         let stage = afterDynamics
             ? UnifiedGraphConfiguration.analyserTapDynStageId : UnifiedGraphConfiguration.analyserTapEQStageId
-        return unifiedGraphHost?.readAnalyserTap(stageId: stage, frames: frames, since: analyserTapBaseline[stage] ?? 0)
+        return unifiedGraphHost?.readAnalyserTapSinceBaseline(stageId: stage, frames: frames)
     }
 
     /// True when a tap can be read: installed and the core graph (not the kernel) is rendering.

@@ -21,7 +21,7 @@ extension FeatureFlag {
     static let all: [FeatureFlag] = [
         .legacyKernel, .ancEngineLease, .adaptiveTonalLive, .earnedCap, .feedForwardLive,
         .noiseSurvey, .conversationUnmasking, .virtualMicrophone, .zones, .headPositionCamera, .overnight,
-        .subAwareAnc, .longFIR, .eqSafety
+        .subAwareAnc, .longFIR
     ]
 
     /// E6 S11: the unified graph is the default renderer. Turning this on selects the frozen
@@ -142,17 +142,6 @@ extension FeatureFlag {
         title: "Long FIR (up to 262,144 taps) on the graph",
         epic: "E9"
     )
-
-    /// E27 S3a: auto preamp on the Equalizer page (the input preamp follows the EQ's predicted boost).
-    /// S3b adds EQ A/B and audition, S2b the program analyser. Swift decides; the engine reads no flag.
-    /// Off: the page has the headroom badge and gain controls but never writes a gain by itself.
-    /// Removed when E27 ships.
-    static let eqSafety = FeatureFlag(
-        id: "e27.eq-safety",
-        title: "EQ safety and compare (auto preamp)",
-        epic: "E27"
-    )
-
 }
 
 /// Resolves feature flags.

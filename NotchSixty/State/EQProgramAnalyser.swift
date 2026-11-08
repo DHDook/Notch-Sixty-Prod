@@ -96,9 +96,8 @@ extension AudioIOEngine: EQProgramAnalysisSource {
     var isAnalysisRunning: Bool { lifecycleState == .running }
 }
 
-/// Owns the analyser switch and the polling loop. Inert unless `isAvailable` (the
-/// `e27.eq-safety` flag, decided by Swift at launch): with the flag off it never sets a capture
-/// demand, so the realtime bridge never copies a frame for the Equalizer page.
+/// Owns the analyser switch and the polling loop. It sets a capture demand only while the
+/// overlay is switched on and the page is showing, so the realtime bridge copies no frame otherwise.
 ///
 /// The loop runs only while the Equalizer page shows the overlay (`.task(id:)` in the view), at
 /// 20 Hz, and releases the demand when it ends. The Meters page sets its own demand while visible;
@@ -111,42 +110,40 @@ final class EQProgramAnalyserController: ObservableObject {
     @Published private(set) var mode: EQAnalyserMode
     @Published private(set) var spectrum = EQProgramSpectrum.none
 
-    let isAvailable: Bool
     private let source: EQProgramAnalysisSource
     private let defaults: UserDefaults
     private let tapAnalyzer = ProductionSpectrumAnalyzer()
 
-    init(source: EQProgramAnalysisSource, isAvailable: Bool, defaults: UserDefaults = .standard) {
+    init(source: EQProgramAnalysisSource, defaults: UserDefaults = .standard) {
         self.source = source
-        self.isAvailable = isAvailable
         self.defaults = defaults
-        self.isOn = isAvailable && defaults.bool(forKey: PreferenceKeys.Equalizer.programAnalyser)
+        self.isOn = defaults.bool(forKey: PreferenceKeys.Equalizer.programAnalyser)
         self.mode = defaults.string(forKey: PreferenceKeys.Equalizer.programAnalyserMode)
             .flatMap(EQAnalyserMode.init(rawValue:)) ?? .default
-        // Design note 16: with the flag on, stereo graphs carry the (idle) taps from the start, so switching the
-        // analyser or its mode never rebuilds the graph. With the flag off nothing is installed.
-        if isAvailable { source.setAnalyserTapsInstalled(true) }
+        // Design note 16: stereo graphs carry the (idle) taps from the start, so switching the
+        // analyser or its mode never rebuilds the graph.
+        source.setAnalyserTapsInstalled(true)
     }
 
-    /// True when the overlay should be capturing: available, switched on, transport running.
-    var isCapturing: Bool { isAvailable && isOn && source.isAnalysisRunning }
+    /// True when the overlay should be capturing: switched on, transport running.
+    var isCapturing: Bool { isOn && source.isAnalysisRunning }
 
     func setOn(_ on: Bool) {
-        guard isAvailable, on != isOn else { return }
+        guard on != isOn else { return }
         isOn = on
         defaults.set(on, forKey: PreferenceKeys.Equalizer.programAnalyser)
         if !on { spectrum = .none }
     }
 
     func setMode(_ newMode: EQAnalyserMode) {
-        guard isAvailable, newMode != mode else { return }
+        guard newMode != mode else { return }
         mode = newMode
         defaults.set(newMode.rawValue, forKey: PreferenceKeys.Equalizer.programAnalyserMode)
     }
 
     /// Polls until cancelled or switched off. Sets the spectrum demand once, releases it on exit.
     func run() async {
-        guard isAvailable, isOn else {
+        guard isOn else {
             spectrum = .none
             return
         }

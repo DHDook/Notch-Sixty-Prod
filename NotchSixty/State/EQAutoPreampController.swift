@@ -4,9 +4,7 @@ import Foundation
 /// E27 S3a: keeps the engine's input preamp at `trim - predicted EQ boost` while auto preamp is
 /// on, whoever edits the EQ (the page, undo, a profile switch, Room Correction).
 ///
-/// The toggle and trim are plain stored values that travel with the content profile. They only
-/// act when `isAvailable` (the `e27.eq-safety` flag, decided by Swift at launch): with the flag
-/// off the controller never writes a gain, so a profile saved with auto preamp on loads inert.
+/// The toggle and trim are plain stored values that travel with the content profile.
 ///
 /// Threading: main actor only; it publishes through the normal gain setter, so the engine
 /// reads no flag and gains no new realtime state. A reconcile runs one main-queue hop after an
@@ -22,14 +20,12 @@ final class EQAutoPreampController: ObservableObject {
     /// E27 S3b: extra attenuation, in dB (zero or positive), from the A/B loudness match.
     @Published private(set) var matchAttenuationDB = 0.0
 
-    let isAvailable: Bool
     private let engine: AudioIOEngine
     private var observation: AnyCancellable?
     private var cacheKey: (configuration: StereoEQConfiguration, sampleRate: Double)?
 
-    init(engine: AudioIOEngine, isAvailable: Bool) {
+    init(engine: AudioIOEngine) {
         self.engine = engine
-        self.isAvailable = isAvailable
         refreshPrediction()
         observation = engine.objectWillChange
             .receive(on: DispatchQueue.main)
@@ -38,8 +34,8 @@ final class EQAutoPreampController: ObservableObject {
             }
     }
 
-    /// True when the controller is allowed to drive the preamp.
-    var isActive: Bool { isAvailable && isOn }
+    /// True when the controller is driving the preamp.
+    var isActive: Bool { isOn }
 
     /// The output sample rate the prediction uses.
     var sampleRate: Double { engine.selectedOutputDevice?.nominalSampleRate ?? 48_000 }
@@ -69,7 +65,7 @@ final class EQAutoPreampController: ObservableObject {
             try reconcileThrowing()
         } else {
             isOn = false
-            if isAvailable { try engine.setInputPreampDB(clampedTrim) }
+            try engine.setInputPreampDB(clampedTrim)
         }
     }
 

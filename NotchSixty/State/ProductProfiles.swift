@@ -1126,13 +1126,13 @@ final class ProductProfileController: ObservableObject {
 
     let engine: AudioIOEngine
     let audioUnitHost: AudioUnitHostController
-    /// E27 S3a: auto preamp for the Equalizer page; inert unless `e27.eq-safety` is on.
+    /// E27 S3a: auto preamp for the Equalizer page.
     let autoPreamp: EQAutoPreampController
-    /// E27 S3b: EQ A/B slots and the Listen audition; inert unless `e27.eq-safety` is on.
+    /// E27 S3b: EQ A/B slots and the Listen audition.
     /// The profile saves the live EQ, which is the active slot; slot B is session-only.
     let eqAudition: EQAuditionController
     let eqComparison: EQComparisonController
-    /// E27 S2b: program spectrum overlay on the Equalizer graph; inert unless `e27.eq-safety` is on.
+    /// E27 S2b: program spectrum overlay on the Equalizer graph.
     let eqProgramAnalyser: EQProgramAnalyserController
     private let storageURL: URL
     private var didRestoreSelection = false
@@ -1153,20 +1153,15 @@ final class ProductProfileController: ObservableObject {
     init(
         engine: AudioIOEngine,
         audioUnitHost: AudioUnitHostController? = nil,
-        storageURL: URL? = nil,
-        autoPreampAvailable: Bool? = nil
+        storageURL: URL? = nil
     ) {
         self.engine = engine
-        self.autoPreamp = EQAutoPreampController(
-            engine: engine,
-            isAvailable: autoPreampAvailable ?? FeatureFlags().isEnabled(.eqSafety)
-        )
-        let eqSafety = autoPreampAvailable ?? FeatureFlags().isEnabled(.eqSafety)
-        self.eqAudition = EQAuditionController(engine: engine, isAvailable: eqSafety)
+        self.autoPreamp = EQAutoPreampController(engine: engine)
+        self.eqAudition = EQAuditionController(engine: engine)
         self.eqComparison = EQComparisonController(
-            engine: engine, autoPreamp: self.autoPreamp, audition: self.eqAudition, isAvailable: eqSafety
+            engine: engine, autoPreamp: self.autoPreamp, audition: self.eqAudition
         )
-        self.eqProgramAnalyser = EQProgramAnalyserController(source: engine, isAvailable: eqSafety)
+        self.eqProgramAnalyser = EQProgramAnalyserController(source: engine)
         self.audioUnitHost = audioUnitHost ?? AudioUnitHostController()
         self.storageURL = storageURL ?? Self.defaultStorageURL()
         audioUnitHostObservation = self.audioUnitHost.objectWillChange.sink {

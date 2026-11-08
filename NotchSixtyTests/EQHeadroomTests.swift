@@ -290,13 +290,13 @@ final class EQHeadroomTests: XCTestCase {
 
     // MARK: Controller
 
-    private func controller(available: Bool) -> (AudioIOEngine, EQAutoPreampController) {
+    private func controller() -> (AudioIOEngine, EQAutoPreampController) {
         let engine = AudioIOEngine()
-        return (engine, EQAutoPreampController(engine: engine, isAvailable: available))
+        return (engine, EQAutoPreampController(engine: engine))
     }
 
     func testAutoPreampFollowsEditsKeepsTheTrimAndIsIdempotent() throws {
-        let (engine, auto) = controller(available: true)
+        let (engine, auto) = controller()
         try engine.setInputPreampDB(-1)
         try auto.setOn(true)
         XCTAssertEqual(auto.trimDB, -1, accuracy: 1e-12, "turning it on adopts the current preamp as the trim")
@@ -336,19 +336,6 @@ final class EQHeadroomTests: XCTestCase {
         XCTAssertEqual(engine.gainConfiguration.inputPreampDB, -3, accuracy: 1e-9, "off never writes a gain")
     }
 
-    func testAutoPreampIsInertWithTheFlagOff() throws {
-        let (engine, auto) = controller(available: false)
-        try engine.setInputPreampDB(-2)
-        try auto.setOn(true)
-        try engine.addEQBand(peaking(1_000, gain: 12, q: 1))
-        auto.reconcile()
-        auto.restore(isOn: true, trimDB: -5)
-        auto.reconcile()
-        XCTAssertFalse(auto.isActive)
-        XCTAssertEqual(engine.gainConfiguration.inputPreampDB, -2, accuracy: 1e-12)
-        XCTAssertEqual(auto.prediction.boostDB, 12, accuracy: 0.05, "the badge still has its prediction")
-    }
-
     // MARK: Profile
 
     func testOldProfilesDecodeAsOffAndZero() throws {
@@ -371,8 +358,7 @@ final class EQHeadroomTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: root) }
         let profiles = ProductProfileController(
             engine: AudioIOEngine(),
-            storageURL: root.appendingPathComponent("profiles.json"),
-            autoPreampAvailable: true
+            storageURL: root.appendingPathComponent("profiles.json")
         )
         XCTAssertFalse(profiles.captureContentState().autoPreampEnabled)
 
@@ -387,11 +373,5 @@ final class EQHeadroomTests: XCTestCase {
         try profiles.applyContentStateWithoutAudioUnitRack(ContentPresetState())
         XCTAssertFalse(profiles.autoPreamp.isOn)
         XCTAssertEqual(profiles.autoPreamp.trimDB, 0)
-    }
-
-    func testFlagIsRegisteredAndOffByDefault() {
-        XCTAssertTrue(FeatureFlag.all.contains(.eqSafety))
-        XCTAssertFalse(FeatureFlag.eqSafety.defaultEnabled)
-        XCTAssertEqual(FeatureFlag.eqSafety.id, "e27.eq-safety")
     }
 }

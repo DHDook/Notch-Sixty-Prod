@@ -75,3 +75,49 @@ struct EQNumberField: View {
         if next != value { onCommit(next, true) }
     }
 }
+
+/// E27 S4 (G4): the dynamic-EQ metric field, same behaviour as `EQNumberField`: units, clamping,
+/// rejection restores the old value, Up/Down step (Shift coarse, Option fine). Rules in `EQDynamicMetric`.
+struct EQDynamicMetricField: View {
+    let title: String
+    let metric: EQDynamicMetric
+    @Binding var value: Double
+
+    @State private var text = ""
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        TextField(title, text: $text)
+            .textFieldStyle(.roundedBorder)
+            .multilineTextAlignment(.trailing)
+            .frame(width: 92)
+            .focused($focused)
+            .accessibilityLabel(title)
+            .accessibilityIdentifier("eq.dynamic.\(title)")
+            .onAppear { text = EQDynamicMetric.displayText(value, metric: metric) }
+            .onChange(of: value) { _, newValue in
+                if !focused { text = EQDynamicMetric.displayText(newValue, metric: metric) }
+            }
+            .onChange(of: focused) { _, isFocused in if !isFocused { commit() } }
+            .onSubmit { commit() }
+            .onKeyPress(keys: [.upArrow, .downArrow], phases: [.down, .repeat]) { press in
+                let current = EQDynamicMetric.value(from: text, metric: metric) ?? value
+                let next = EQDynamicMetric.nudged(
+                    current, metric: metric, direction: press.key == .upArrow ? .up : .down,
+                    step: EQNudge.Step(shift: press.modifiers.contains(.shift), option: press.modifiers.contains(.option)))
+                text = EQDynamicMetric.displayText(next, metric: metric)
+                if next != value { value = next }
+                return .handled
+            }
+    }
+
+    private func commit() {
+        if text == EQDynamicMetric.displayText(value, metric: metric) { return }
+        guard let parsed = EQDynamicMetric.value(from: text, metric: metric) else {
+            text = EQDynamicMetric.displayText(value, metric: metric)
+            return
+        }
+        text = EQDynamicMetric.displayText(parsed, metric: metric)
+        if parsed != value { value = parsed }
+    }
+}

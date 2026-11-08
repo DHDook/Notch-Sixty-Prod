@@ -176,3 +176,92 @@ enum EQValueParser {
         return value
     }
 }
+
+// MARK: - Dynamic EQ metric fields (G4)
+
+/// E27 S4: the Band editor's dynamic-EQ metric fields (threshold, ratio, max cut, attack, release,
+/// RMS window, boost threshold, boost ratio, max boost) take units, clamp to the engine's ranges and
+/// step with the arrows, like the frequency, gain and Q fields. Plain Swift; the view only binds it.
+enum EQDynamicMetric: CaseIterable, Equatable, Sendable {
+    case threshold, ratio, maxCut, attack, release, rmsWindow, boostThreshold, boostRatio, maxBoost
+
+    enum Unit { case decibels, ratio, milliseconds }
+
+    var unit: Unit {
+        switch self {
+        case .threshold, .maxCut, .boostThreshold, .maxBoost: return .decibels
+        case .ratio, .boostRatio: return .ratio
+        case .attack, .release, .rmsWindow: return .milliseconds
+        }
+    }
+
+    var range: ClosedRange<Double> {
+        typealias C = DynamicEQBandConfiguration
+        switch self {
+        case .threshold: return C.thresholdRange
+        case .ratio: return C.ratioRange
+        case .maxCut: return C.rangeRange
+        case .attack: return C.attackRange
+        case .release: return C.releaseRange
+        case .rmsWindow: return C.rmsWindowRange
+        case .boostThreshold: return C.boostThresholdRange
+        case .boostRatio: return C.boostRatioRange
+        case .maxBoost: return C.maxBoostRange
+        }
+    }
+
+    /// Accepts "-24", "-24 dB", "2", "2:1", "10 ms", "0.1 s". Unparseable text is nil (keep the old value).
+    static func parse(_ text: String, metric: EQDynamicMetric, locale: Locale = .current) -> Double? {
+        guard let (number, unit) = EQValueParser.splitForMetric(text, locale: locale) else { return nil }
+        switch metric.unit {
+        case .decibels:
+            return unit == "" || unit == "db" ? number : nil
+        case .ratio:
+            return unit == "" || unit == ":1" || unit == "x" ? number : nil
+        case .milliseconds:
+            switch unit {
+            case "", "ms": return number
+            case "s": return number * 1_000
+            default: return nil
+            }
+        }
+    }
+
+    /// Parses and clamps; nil means reject.
+    static func value(from text: String, metric: EQDynamicMetric, locale: Locale = .current) -> Double? {
+        guard let parsed = parse(text, metric: metric, locale: locale), parsed.isFinite else { return nil }
+        return min(max(parsed, metric.range.lowerBound), metric.range.upperBound)
+    }
+
+    static func displayText(_ value: Double, metric: EQDynamicMetric, locale: Locale = .current) -> String {
+        let formatter = NumberFormatter()
+        formatter.locale = locale
+        formatter.numberStyle = .decimal
+        formatter.usesGroupingSeparator = false
+        formatter.minimumFractionDigits = metric.unit == .milliseconds ? 0 : 1
+        formatter.maximumFractionDigits = metric.unit == .milliseconds ? 1 : 2
+        return formatter.string(from: NSNumber(value: value)) ?? String(value)
+    }
+
+    /// Arrow step: decibels 0.5 / 3 / 0.1 dB; ratio and times scale by the Q ratios 1.1 / 1.5 / 1.02.
+    static func nudged(_ value: Double, metric: EQDynamicMetric, direction: EQNudge.Direction, step: EQNudge.Step) -> Double {
+        let limits = metric.range
+        let moved: Double
+        switch metric.unit {
+        case .decibels:
+            let raw = value + Double(direction.rawValue) * EQNudge.gainStep(step)
+            moved = (raw * 1_000_000).rounded() / 1_000_000
+        case .ratio, .milliseconds:
+            let ratio = EQNudge.qRatio(step)
+            moved = direction == .up ? value * ratio : value / ratio
+        }
+        return min(max(moved, limits.lowerBound), limits.upperBound)
+    }
+}
+
+extension EQValueParser {
+    fileprivate static func splitForMetric(_ text: String, locale: Locale) -> (Double, String)? {
+        // "2:1" is a ratio: the number is the part before the colon, the unit ":1".
+        split(text, locale: locale)
+    }
+}
