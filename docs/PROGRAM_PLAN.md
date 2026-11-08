@@ -361,7 +361,7 @@ on the Equalizer page; S1 and S2 flagless, the engine-facing S3 items behind `e2
   - [~] EQ A/B built dark behind `e27.eq-safety`; prepared linear-phase FIR designs are cached in S3c (G10 closed); flag removal in S4
 - [x] S3c `e27/eq-ab-fir-prewarm` prepared FIR programs for linear-phase A/B and engine-level tests (G10, G11; owner slice for both)
 - [~] S2b program analyser overlay (Input and "Output (full chain)" spectrum on the existing render capture, no engine tap; built dark behind e27.eq-safety, PR #405; the EQ-only view is S2c)
-- [ ] S2c `e27/analyser-eq-taps`: EQ-only and EQ + Dynamics spectrum taps with a toggle (needs-owner, realtime; owner, 7 Nov 2026)
+- [~] S2c `e27/analyser-eq-taps`: EQ-only and EQ + Dynamics spectrum taps with a toggle (needs-owner, realtime; owner, 7 Nov 2026; built dark behind e27.eq-safety, PR pending; G16 and G17 and flag removal to S4)
 - [ ] S4 flag removed (owner decision)
 
 ### E28 Dynamics and Meters polish (owner, 7 Nov 2026)

@@ -128,6 +128,15 @@ struct UnifiedGraphGainRider: Equatable, Sendable {
     var speed: Int
 }
 
+/// E27 S2c: the Equalizer analyser's two taps (design note 16). Present when the stereo graph carries them; the
+/// demand flags are live parameters, so toggling a tap never rebuilds the graph.
+struct UnifiedGraphAnalyserTaps: Equatable, Sendable {
+    /// Ring length per lane; covers the largest analysis transform (32,768 frames at 384 kHz) with headroom.
+    static let capacityFrames: UInt32 = 65_536
+    var eqDemand = false
+    var dynDemand = false
+}
+
 /// What the engine wants rendered: program lanes (and optional sub lanes) in the shipping
 /// engine's terms. `UnifiedGraphConfiguration.makeSpec()` is the single place that decides the
 /// stage list, so the stereo hook, the multichannel path and the tests all agree.
@@ -160,6 +169,8 @@ struct UnifiedGraphConfiguration: Equatable, Sendable {
     /// E26 S6a: ANC guard, inject and capture stages with the sub lane as an actuator. nil leaves the graph as before.
     /// The anti-noise source and error lanes are appended after every other lane (see `ancLaneBase`).
     var ancActuators: UnifiedGraphAncActuators?
+    /// E27 S2c: analyser taps at the EQ output and after dynamics (two program lanes only). nil leaves the graph as before.
+    var analyserTaps: UnifiedGraphAnalyserTaps?
 
     var subwooferCount: Int { bassManagement?.subwoofers.count ?? 0 }
     /// First appended ANC lane: the lanes the graph had before the actuators were added.
@@ -277,11 +288,22 @@ struct UnifiedGraphConfiguration: Equatable, Sendable {
         // With ambient on, the compressor takes its ordinary slot even after a room or speaker convolver, because the
         // core ranks CORE_DYNAMICS after AMBIENT (see the decision above).
         let compressorBeforeAmbient = !hasPostConvolver || canonical || stereo.ambient != nil
+        if let taps = analyserTaps {
+            guard programLanes == 2 else { throw UnifiedGraphError.unsupportedConfiguration("analyser taps need two lanes") }
+            add(N60_STAGE_ANALYSER_TAP_EQ, Self.analyserTapEQStageId, mask: programMask,
+                capacity: UnifiedGraphAnalyserTaps.capacityFrames, params: [taps.eqDemand ? 1 : 0])
+        }
         if let params = stereo.compressor, compressorBeforeAmbient {
             add(N60_STAGE_COMPRESSOR, Self.compressorStageId, mask: programMask, params: params)
         }
         if let params = stereo.expander {
             add(N60_STAGE_EXPANDER, Self.expanderStageId, mask: programMask, params: params)
+        }
+        // Kernel-parity order only: the compressor then runs after the room and speaker convolvers (CORE_DYNAMICS),
+        // past this point, so a tap here would not hold it. No tap is added; readers see it unavailable.
+        if let taps = analyserTaps, compressorBeforeAmbient || stereo.compressor == nil {
+            add(N60_STAGE_ANALYSER_TAP_DYN, Self.analyserTapDynStageId, mask: programMask,
+                capacity: UnifiedGraphAnalyserTaps.capacityFrames, params: [taps.dynDemand ? 1 : 0])
         }
         add(N60_STAGE_METER_OUT, N60_LSTAGE_METER_OUT, lane: all)
 
@@ -417,6 +439,8 @@ struct UnifiedGraphConfiguration: Equatable, Sendable {
     static let dynamicEQStageId: UInt32 = 608
     static let crossoverStageId: UInt32 = 616
     static let generatorStageId: UInt32 = 618
+    static let analyserTapEQStageId: UInt32 = 620
+    static let analyserTapDynStageId: UInt32 = 621
     /// FIR stages take two consecutive ids (left, right) when the channels differ.
     static let programFIRStageId: UInt32 = 610
     static let roomFIRStageId: UInt32 = 612

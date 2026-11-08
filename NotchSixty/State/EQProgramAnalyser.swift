@@ -7,10 +7,49 @@ import Foundation
 /// the stereo program before the render kernel ("Input") and the kernel output ("Output"), so
 /// the overlay needs no new engine tap, allocation or lock. "Output" includes every stage after
 /// the EQ (see ledger G15), so the Output minus Input difference is the whole chain, not the EQ alone.
+/// E27 S2c: which signal the analyser's second curve shows (design note 16, owner decision of 7 Nov 2026).
+enum EQAnalyserMode: String, CaseIterable, Identifiable, Sendable {
+    /// The program at the EQ stage output (the default): the EQ's own effect, whatever follows it.
+    case eqOnly
+    /// The program after the compressor and expander. Room correction, gains and crossovers stay out.
+    case eqAndDynamics
+    /// The S2b curve: the kernel output of the whole chain.
+    case fullChain
+
+    var id: String { rawValue }
+    static let `default` = EQAnalyserMode.eqOnly
+
+    var displayName: String {
+        switch self {
+        case .eqOnly: "EQ only"
+        case .eqAndDynamics: "EQ + Dynamics"
+        case .fullChain: "Output (full chain)"
+        }
+    }
+
+    /// Tap demand bits: 1 the EQ tap, 2 the after-dynamics tap.
+    var tapDemand: UInt8 {
+        switch self {
+        case .eqOnly: 1
+        case .eqAndDynamics: 2
+        case .fullChain: 0
+        }
+    }
+}
+
+/// E27 S2c: the newest samples of an analyser tap.
+struct EQAnalyserTapWindow: Sendable {
+    var left: [Float]
+    var right: [Float]
+    var sampleRate: Double
+}
+
 struct EQProgramSpectrum: Equatable, Sendable {
     var frequenciesHz: [Double] = []
     var inputDB: [Double] = []
     var outputDB: [Double] = []
+    /// What the output curve is (legend text).
+    var outputLabel = EQAnalyserMode.fullChain.displayName
 
     static let none = EQProgramSpectrum()
 
@@ -46,6 +85,11 @@ protocol EQProgramAnalysisSource: AnyObject {
     var isAnalysisRunning: Bool { get }
     func setAnalysisDemand(_ demandMask: UInt32)
     func productionAnalysisSnapshot() -> ProductionAnalysisSnapshot
+    /// E27 S2c. Installs the analyser taps in stereo graphs (the controller does it once, when available).
+    func setAnalyserTapsInstalled(_ installed: Bool)
+    func setAnalyserTapDemand(_ mask: UInt8)
+    var analyserTapsAvailable: Bool { get }
+    func analyserTapWindow(afterDynamics: Bool, frames: Int) -> EQAnalyserTapWindow?
 }
 
 extension AudioIOEngine: EQProgramAnalysisSource {
@@ -64,17 +108,24 @@ final class EQProgramAnalyserController: ObservableObject {
     static let pollIntervalNanoseconds: UInt64 = 50_000_000
 
     @Published private(set) var isOn: Bool
+    @Published private(set) var mode: EQAnalyserMode
     @Published private(set) var spectrum = EQProgramSpectrum.none
 
     let isAvailable: Bool
     private let source: EQProgramAnalysisSource
     private let defaults: UserDefaults
+    private let tapAnalyzer = ProductionSpectrumAnalyzer()
 
     init(source: EQProgramAnalysisSource, isAvailable: Bool, defaults: UserDefaults = .standard) {
         self.source = source
         self.isAvailable = isAvailable
         self.defaults = defaults
         self.isOn = isAvailable && defaults.bool(forKey: PreferenceKeys.Equalizer.programAnalyser)
+        self.mode = defaults.string(forKey: PreferenceKeys.Equalizer.programAnalyserMode)
+            .flatMap(EQAnalyserMode.init(rawValue:)) ?? .default
+        // Design note 16: with the flag on, stereo graphs carry the (idle) taps from the start, so switching the
+        // analyser or its mode never rebuilds the graph. With the flag off nothing is installed.
+        if isAvailable { source.setAnalyserTapsInstalled(true) }
     }
 
     /// True when the overlay should be capturing: available, switched on, transport running.
@@ -87,6 +138,12 @@ final class EQProgramAnalyserController: ObservableObject {
         if !on { spectrum = .none }
     }
 
+    func setMode(_ newMode: EQAnalyserMode) {
+        guard isAvailable, newMode != mode else { return }
+        mode = newMode
+        defaults.set(newMode.rawValue, forKey: PreferenceKeys.Equalizer.programAnalyserMode)
+    }
+
     /// Polls until cancelled or switched off. Sets the spectrum demand once, releases it on exit.
     func run() async {
         guard isAvailable, isOn else {
@@ -94,8 +151,15 @@ final class EQProgramAnalyserController: ObservableObject {
             return
         }
         var holdsDemand = false
+        var tapMask: UInt8 = 0
+        func setTapMask(_ mask: UInt8) {
+            guard mask != tapMask else { return }
+            source.setAnalyserTapDemand(mask)
+            tapMask = mask
+        }
         defer {
             if holdsDemand { source.setAnalysisDemand(UInt32(N60_ANALYSIS_DEMAND_NONE)) }
+            setTapMask(0)
             spectrum = .none
         }
         while !Task.isCancelled, isOn {
@@ -104,21 +168,50 @@ final class EQProgramAnalyserController: ObservableObject {
                     source.setAnalysisDemand(UInt32(N60_ANALYSIS_DEMAND_SPECTRUM))
                     holdsDemand = true
                 }
+                setTapMask(mode.tapDemand)
                 poll()
             } else {
                 if holdsDemand {
                     source.setAnalysisDemand(UInt32(N60_ANALYSIS_DEMAND_NONE))
                     holdsDemand = false
                 }
+                setTapMask(0)
                 spectrum = .none
             }
             try? await Task.sleep(nanoseconds: Self.pollIntervalNanoseconds)
         }
     }
 
-    /// One read of the worker's latest snapshot (also called by tests).
+    /// One read (also called by tests). The input curve always comes from the render capture. The output curve is the
+    /// chosen tap; with "Output (full chain)" chosen, or when the core graph is not rendering (so no tap exists), it is
+    /// the render capture's kernel output and the legend says so.
     func poll() {
-        let next = EQProgramSpectrum(snapshot: source.productionAnalysisSnapshot())
+        let snapshot = source.productionAnalysisSnapshot()
+        var next = EQProgramSpectrum(snapshot: snapshot)
+        if mode != .fullChain, source.analyserTapsAvailable, snapshot.sampleRate > 0,
+           let tap = tapSpectrum(snapshot: snapshot, input: next) {
+            next = tap
+        }
         if next != spectrum { spectrum = next }
+    }
+
+    private func tapSpectrum(snapshot: ProductionAnalysisSnapshot, input: EQProgramSpectrum) -> EQProgramSpectrum? {
+        let size = ProductionAnalysisMath.fftSize(sampleRate: snapshot.sampleRate)
+        guard let window = source.analyserTapWindow(afterDynamics: mode == .eqAndDynamics, frames: size),
+              window.left.count >= size, window.right.count >= size,
+              window.sampleRate == snapshot.sampleRate else { return nil }
+        let bands = tapAnalyzer.analyze(
+            inputLeft: window.left, inputRight: window.right, outputLeft: window.left, outputRight: window.right,
+            count: size, sampleRate: window.sampleRate)
+        guard !bands.isEmpty else { return nil }
+        var spectrum = EQProgramSpectrum()
+        for band in bands where band.frequencyHz.isFinite {
+            spectrum.frequenciesHz.append(band.frequencyHz)
+            spectrum.outputDB.append(Double(band.outputDB))
+        }
+        spectrum.inputDB = input.inputDB.count == spectrum.outputDB.count
+            ? input.inputDB : [Double](repeating: EQProgramSpectrum.floorDB, count: spectrum.outputDB.count)
+        spectrum.outputLabel = mode.displayName
+        return spectrum
     }
 }

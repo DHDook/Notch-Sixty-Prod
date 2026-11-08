@@ -34,7 +34,7 @@ extern "C" {
 #endif
 
 /* Bumped on any incompatible change to a struct or function below. */
-#define N60_GRAPH_ABI_VERSION 20u
+#define N60_GRAPH_ABI_VERSION 21u
 
 typedef struct n60_graph n60_graph; /* opaque */
 
@@ -108,8 +108,22 @@ typedef enum n60_stage_kind {
     N60_STAGE_XOVER = 39,           /* position 23.6: after ROUTE, before DELAY. Per-way crossover, trim and polarity. See "Speaker routing" below. */
     /* ABI v18 (E8 S7). */
     N60_STAGE_DRIVER_FIR = 40,      /* position 23.7: after XOVER, before DELAY. Per-way FIR (linear-phase crossover). Program FIR rules. */
-    N60_STAGE_DRIVER_FIR_TWO_BAND = 41 /* position 23.7. As N60_STAGE_ROOM_FIR_TWO_BAND, at the driver position. */
+    N60_STAGE_DRIVER_FIR_TWO_BAND = 41, /* position 23.7. As N60_STAGE_ROOM_FIR_TWO_BAND, at the driver position. */
+    /* ABI v21 (E27 S2c). Analyser taps: see "Analyser taps" below. */
+    N60_STAGE_ANALYSER_TAP_EQ = 42,  /* position 9.5: after FIR, before the compressor. Audio untouched. */
+    N60_STAGE_ANALYSER_TAP_DYN = 43  /* position 11.5: after the expander, before METER_OUT. Audio untouched. */
 } n60_stage_kind;
+
+/* Analyser taps (ABI v21, E27 S2c). Two read-only capture points for the Equalizer page's spectrum overlay: the program
+ * after the EQ (PEQ, dynamic EQ, FIR) and after the user dynamics (compressor, expander). Neither includes room
+ * correction, speaker IR, ambient, gains or crossovers. Same shape as ANC_CAPTURE: laneMask selects the lanes,
+ * capacityFrames (1..N60_GRAPH_MAX_DELAY_FRAMES) is the per-lane ring, paramCount 1. params[0] is the demand: 0 records
+ * nothing (the stage is then a branch and a return), 1 copies each block into the ring. Unlike ANC_CAPTURE, params[0]
+ * is a live parameter, so the control thread switches the demand with n60_graph_post_params and no rebuild. The audio is
+ * never modified and the stage adds no latency. The ring is read with n60_graph_read_capture: it writes only while the
+ * demand is 1, so a reader that turns the demand on records `written` first and uses only samples from that index on. A
+ * new snapshot starts with an empty ring (written 0). Allocation: the rings are part of the snapshot, built off the audio
+ * thread. Synchronisation: the ANC_CAPTURE seqlock (single writer on the audio thread, no lock). */
 
 /* Generator (ABI v14). A source that replaces program audio on its lanes, ahead of every correction stage and
  * therefore ahead of PROTECTION, so it reaches the speakers through the same path as music. Lanes: laneMask,

@@ -520,6 +520,21 @@ if selected e26_anc_actuators; then
     fi
 fi
 
+# E27 S2c: the analyser taps (ABI v21): placement, demand switch, +12 dB EQ visible at both taps and the gain after them not, no allocation.
+if selected e27_analyser_tap; then
+    build_core_objs
+    if [ "$CORE_OK" = 1 ]; then
+        if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -Icore/include -Icore/src core/tests/test_analyser_tap.cpp \
+            "${CORE_OBJS[@]}" -o "$OUT/e27_core_analyser_tap" && "$OUT/e27_core_analyser_tap"; then
+            passed+=(e27_core_analyser_tap)
+        else
+            failed+=(e27_core_analyser_tap)
+        fi
+    else
+        failed+=(e27_analyser_tap)
+    fi
+fi
+
 # E26 S7b1 (G1): the host feed for the anti-noise lanes (lanes equal the offline splitter render, lease and fade, no allocation).
 if selected e26_anc_lane_feed; then
     if clang -std=c11 -O2 -Wall -Wextra -Werror -include stddef.h -I"$RT" -c "$RT/N60ActiveQuietZone.c" -o "$OUT/e26_alf_aqz.o" \

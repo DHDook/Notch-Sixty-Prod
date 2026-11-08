@@ -446,6 +446,11 @@ final class CoreAudioTransportSession {
     /// rebuild crossfade uses the linear law. Every other republish keeps the equal-power law.
     var linearFadeForEQRepublish = false
     private var unifiedGraphHost: UnifiedGraphHost?
+    /// E27 S2c (design note 16): whether the stereo graph carries the Equalizer analyser taps, and which are wanted
+    /// (bit 0 the EQ tap, bit 1 the after-dynamics tap). The demand is a live parameter; installing is a rebuild.
+    private var analyserTapsInstalled = false
+    private var analyserTapDemand: UInt8 = 0
+    private var analyserTapBaseline: [UInt32: UInt64] = [:]
     /// Integer inter-channel taps of the attached stereo graph, excluded from its reported latency.
     private var unifiedGraphLaneTapFrames: UInt32 = 0
     /// E6 S8d: the taps of recently prepared kernel convolver programs, by generation, so a snapshot that references
@@ -1413,6 +1418,54 @@ final class CoreAudioTransportSession {
         }
     }
 
+    /// E27 S2c. Before the session starts: whether its first graph carries the analyser taps.
+    func setInitialAnalyserTaps(installed: Bool) { analyserTapsInstalled = installed }
+
+    /// E27 S2c. Control thread. Installs or removes the analyser taps. The taps never change the audio, so the
+    /// rebuild crossfades with the linear law (an equal-power fade of two identical signals swells 3 dB).
+    func setAnalyserTapsInstalled(_ installed: Bool) {
+        guard installed != analyserTapsInstalled else { return }
+        analyserTapsInstalled = installed
+        if !installed { analyserTapDemand = 0; analyserTapBaseline = [:] }
+        republishForAnalyserTaps()
+    }
+
+    /// E27 S2c. Control thread. `mask` bit 0 records the EQ tap, bit 1 the after-dynamics tap. Posts a live parameter;
+    /// nothing is rebuilt once the taps are installed. Ignored while they are not.
+    func setAnalyserTapDemand(_ mask: UInt8) {
+        let mask = mask & 0b11
+        guard analyserTapsInstalled, mask != analyserTapDemand else { return }
+        let newlyOn = mask & ~analyserTapDemand
+        analyserTapDemand = mask
+        // Samples recorded before a tap is switched on again are old: remember where the ring stood.
+        for (bit, stage) in [(UInt8(1), UnifiedGraphConfiguration.analyserTapEQStageId),
+                             (UInt8(2), UnifiedGraphConfiguration.analyserTapDynStageId)] where newlyOn & bit != 0 {
+            analyserTapBaseline[stage] = unifiedGraphHost?.analyserTapWritten(stageId: stage) ?? 0
+        }
+        republishForAnalyserTaps()
+    }
+
+    private func republishForAnalyserTaps() {
+        guard unifiedGraphEnabled, let snapshot = lastGraphSnapshot else { return }
+        let previous = linearFadeForEQRepublish
+        linearFadeForEQRepublish = true
+        defer { linearFadeForEQRepublish = previous }
+        refreshUnifiedGraph(for: snapshot)
+    }
+
+    /// E27 S2c. The newest `frames` samples of an analyser tap (`afterDynamics` picks the second tap). nil when the
+    /// taps are not installed, the graph is not the renderer, or not enough audio was recorded since demand began.
+    func readAnalyserTap(afterDynamics: Bool, frames: Int) -> (left: [Float], right: [Float])? {
+        guard analyserTapsInstalled, unifiedGraphActive else { return nil }
+        let stage = afterDynamics
+            ? UnifiedGraphConfiguration.analyserTapDynStageId : UnifiedGraphConfiguration.analyserTapEQStageId
+        return unifiedGraphHost?.readAnalyserTap(stageId: stage, frames: frames, since: analyserTapBaseline[stage] ?? 0)
+    }
+
+    /// True when a tap can be read: installed and the core graph (not the kernel) is rendering.
+    var analyserTapsAvailable: Bool { analyserTapsInstalled && unifiedGraphActive }
+    var outputSampleRate: Double { outputFormat.sampleRate }
+
     /// E25 S2. Before the session starts: the alignment its first graph is built with.
     func setInitialStereoAlignment(_ alignment: StereoBassAlignment?) { stereoAlignment = alignment }
 
@@ -1479,6 +1532,10 @@ final class CoreAudioTransportSession {
         if let liveGenerator {
             configuration.generatorParams = liveGenerator.params
             configuration.generatorLaneMask = liveGenerator.laneMask
+        }
+        if analyserTapsInstalled {
+            configuration.analyserTaps = UnifiedGraphAnalyserTaps(
+                eqDemand: analyserTapDemand & 1 != 0, dynDemand: analyserTapDemand & 2 != 0)
         }
         guard var spec = try? configuration.makeSpec() else { return refuse(.specRejected) }
         var earDelayFrames: [UInt32] = [0, 0]
