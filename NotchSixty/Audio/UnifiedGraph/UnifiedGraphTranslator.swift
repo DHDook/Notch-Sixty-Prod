@@ -184,6 +184,16 @@ enum UnifiedGraphTranslator {
             if N60UnifiedGraphCleanupParams(pointer, &cleanup, &cleanupNeeded) {
                 if cleanupNeeded { stages.cleanup = cleanup }
             } else { ok = false }
+            var image = [Float](repeating: 0, count: 8)
+            var imageNeeded = false
+            if N60UnifiedGraphImageParams(pointer, &image, &imageNeeded) {
+                if imageNeeded { stages.image = image }
+            } else { ok = false }
+            var deess = [Float](repeating: 0, count: 12)
+            var deessNeeded = false
+            if N60UnifiedGraphDeEssParams(pointer, &deess, &deessNeeded) {
+                if deessNeeded { stages.deess = deess }
+            } else { ok = false }
             if dynamics.spectralDenoiser.enabled {
                 var values = [Float](repeating: 0, count: 9)
                 if N60UnifiedGraphDenoiserParams(pointer, &values) {

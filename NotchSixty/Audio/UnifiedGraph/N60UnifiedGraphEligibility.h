@@ -328,6 +328,82 @@ static inline bool N60UnifiedGraphCleanupParams(
     return true;
 }
 
+// E6 S12b: the stereo mode and widener as the core IMAGE stage's 8 parameters (graph.h "Image and de-ess"). The stage is
+// needed when the mode is not stereo or the widener is on. A widener that is on is recovered from the snapshot and
+// verified by rebuilding it with the kernel's own setter (same filter coefficients, bit for bit); the frequencies are
+// doubles in the kernel, floats in the core, so a frequency that is not exactly a float keeps the kernel. Returns false
+// when the part cannot be reproduced; *needed is whether the stage is wanted at all.
+static inline bool N60UnifiedGraphImageParams(
+    const N60DSPGraphSnapshot * _Nonnull s, float out[_Nonnull 8], bool * _Nonnull needed
+) {
+    const N60DynamicsSnapshot *d = &s->dynamics;
+    const double rate = s->sampleRate;
+    out[0] = 0.0f; out[1] = 0.0f; out[2] = 1.0f; out[3] = 200.0f; out[4] = 4000.0f;
+    out[5] = 0.0f; out[6] = 1.0f; out[7] = 1.0f;
+    const int mode = (int)d->stereoMode.mode;
+    *needed = mode != (int)N60StereoModeStereo || d->stereoWidener.enabled;
+    if (!*needed) return true;
+    if (mode < 0 || mode > 2 || !(rate >= 8000.0 && rate <= 768000.0)) return false;
+    out[0] = (float)mode;
+    if (d->stereoWidener.enabled) {
+        const N60StereoWidenerSnapshot *w = &d->stereoWidener;
+        if ((double)(float)w->lowMidFrequencyHz != w->lowMidFrequencyHz
+            || (double)(float)w->midHighFrequencyHz != w->midHighFrequencyHz) return false;
+        N60DynamicsSnapshot r = N60DynamicsSnapshotMakeBypassed(rate);
+        if (!N60DynamicsSnapshotSetStereoWidener(&r, rate, true, w->monoLowBand, w->lowMidFrequencyHz,
+                                                 w->midHighFrequencyHz, w->lowWidth, w->midWidth, w->highWidth)
+            || r.stereoWidener.sectionCount != w->sectionCount
+            || memcmp(r.stereoWidener.lowPass, w->lowPass, sizeof(N60BiquadCoefficients) * w->sectionCount) != 0
+            || memcmp(r.stereoWidener.highPass, w->highPass, sizeof(N60BiquadCoefficients) * w->sectionCount) != 0) return false;
+        out[1] = 1.0f; out[2] = w->monoLowBand ? 1.0f : 0.0f;
+        out[3] = (float)w->lowMidFrequencyHz; out[4] = (float)w->midHighFrequencyHz;
+        out[5] = w->lowWidth; out[6] = w->midWidth; out[7] = w->highWidth;
+    }
+    return true;
+}
+
+// E6 S12b: de-harsh and the de-esser as the core DEESS stage's 12 parameters. Same recover-then-verify rule. The kernel
+// stores the attack and release as pole coefficients, so the milliseconds are recovered by inverting exp(-1/(rate*ms))
+// and the rebuilt coefficients must equal the stored ones exactly.
+static inline bool N60UnifiedGraphDeEssParams(
+    const N60DSPGraphSnapshot * _Nonnull s, float out[_Nonnull 12], bool * _Nonnull needed
+) {
+    const N60DynamicsSnapshot *d = &s->dynamics;
+    const double rate = s->sampleRate;
+    const float defaults[12] = {0.0f, 6000.0f, 0.0f, 0.0f, 6000.0f, -30.0f, 4.0f, -12.0f, 2.0f, 2.0f, 80.0f, 0.0f};
+    for (int i = 0; i < 12; ++i) out[i] = defaults[i];
+    *needed = d->deHarsh.enabled || d->deEsser.enabled;
+    if (!*needed) return true;
+    if (!(rate >= 8000.0 && rate <= 768000.0)) return false;
+    if (d->deHarsh.enabled) {
+        const N60DeHarshSnapshot *h = &d->deHarsh;
+        if ((double)(float)h->frequencyHz != h->frequencyHz) return false;
+        N60DynamicsSnapshot r = N60DynamicsSnapshotMakeBypassed(rate);
+        if (!N60DynamicsSnapshotSetDeHarsh(&r, rate, true, h->amountDB, h->frequencyHz)
+            || memcmp(&r.deHarsh.highShelf, &h->highShelf, sizeof(N60BiquadCoefficients)) != 0) return false;
+        out[0] = 1.0f; out[1] = (float)h->frequencyHz; out[2] = h->amountDB;
+    }
+    if (d->deEsser.enabled) {
+        const N60DeEsserSnapshot *e = &d->deEsser;
+        if ((double)(float)e->frequencyHz != e->frequencyHz) return false;
+        const double a = e->attackCoefficient, rl = e->releaseCoefficient;
+        if (!(a > 0.0 && a < 1.0 && rl > 0.0 && rl < 1.0)) return false;
+        const float attackMs = (float)(-1000.0 / (rate * log(a)));
+        const float releaseMs = (float)(-1000.0 / (rate * log(rl)));
+        N60DynamicsSnapshot r = N60DynamicsSnapshotMakeBypassed(rate);
+        if (!N60DynamicsSnapshotSetDeEsserAdvanced(&r, rate, true, e->frequencyHz, e->thresholdDB, e->ratio,
+                                                   e->rangeDB, e->detectionQ, attackMs, releaseMs, e->dynamicEQMode)
+            || r.deEsser.attackCoefficient != e->attackCoefficient
+            || r.deEsser.releaseCoefficient != e->releaseCoefficient
+            || memcmp(&r.deEsser.sidechainHighPass, &e->sidechainHighPass, sizeof(N60BiquadCoefficients)) != 0
+            || memcmp(&r.deEsser.sidechainLowPass, &e->sidechainLowPass, sizeof(N60BiquadCoefficients)) != 0) return false;
+        out[3] = 1.0f; out[4] = (float)e->frequencyHz; out[5] = e->thresholdDB; out[6] = e->ratio;
+        out[7] = e->rangeDB; out[8] = e->detectionQ; out[9] = attackMs; out[10] = releaseMs;
+        out[11] = e->dynamicEQMode ? 1.0f : 0.0f;
+    }
+    return true;
+}
+
 // What the kernel's denoiser sees while it is switched off (ABI v9 park view): FFT size of the quality
 // setting, profile revision and command. The kernel keeps its profile while off, applies a Reset command
 // and drops the profile on a quality change, all of which the core reproduces from these three numbers. A
@@ -489,10 +565,8 @@ static inline N60UnifiedGraphUnsupportedReason N60UnifiedGraphSnapshotUnsupporte
         }
     }
     const N60DynamicsSnapshot *d = &s->dynamics;
-    if (d->stereoMode.mode != N60StereoModeStereo || d->stereoWidener.enabled
-            || d->loudnessMatch.enabled
+    if (d->loudnessMatch.enabled
             || d->loudnessContour.enabled || d->dialogueLeveler.enabled
-            || d->deHarsh.enabled || d->deEsser.enabled
             || d->multibandCompressor.enabled) {
         return N60UnifiedGraphUnsupportedDynamics;
     }
@@ -501,6 +575,11 @@ static inline N60UnifiedGraphUnsupportedReason N60UnifiedGraphSnapshotUnsupporte
         float cleanup[26];
         bool cleanupNeeded = false;
         if (!N60UnifiedGraphCleanupParams(s, cleanup, &cleanupNeeded)) return N60UnifiedGraphUnsupportedDynamics;
+        float image[8];
+        float deess[12];
+        bool imageNeeded = false, deessNeeded = false;
+        if (!N60UnifiedGraphImageParams(s, image, &imageNeeded)) return N60UnifiedGraphUnsupportedDynamics;
+        if (!N60UnifiedGraphDeEssParams(s, deess, &deessNeeded)) return N60UnifiedGraphUnsupportedDynamics;
     }
     if (d->spectralDenoiser.enabled && !N60UnifiedGraphDenoiserParams(s, scratch)) {
         return N60UnifiedGraphUnsupportedDynamics;

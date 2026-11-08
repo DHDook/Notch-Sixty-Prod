@@ -68,6 +68,9 @@ struct UnifiedGraphStereoStages: Equatable, Sendable {
     var pauseGate: [Float]?
     /// E6 S12a: DC offset, infrasonic, mains notch and hum detector (the CLEANUP stage's 26 parameters); nil when all are off.
     var cleanup: [Float]?
+    /// E6 S12b: stereo mode and widener (IMAGE, 8 parameters) and de-harsh and de-esser (DEESS, 12); nil when all off.
+    var image: [Float]?
+    var deess: [Float]?
     /// Program convolution (kernel: after the EQ, before the compressor).
     var programFIR: UnifiedGraphFIRProgram?
     /// Room correction and speaker IR (kernel: after bass management's slot, before ambient and the core dynamics).
@@ -301,6 +304,23 @@ struct UnifiedGraphConfiguration: Equatable, Sendable {
             add(N60_STAGE_ANALYSER_TAP_EQ, Self.analyserTapEQStageId, mask: programMask,
                 capacity: UnifiedGraphAnalyserTaps.capacityFrames, params: [taps.eqDemand ? 1 : 0])
         }
+        // E6 S12b: the kernel runs stereo mode, widener, de-harsh and de-esser after the room and speaker convolvers; the
+        // core ranks them before the compressor, so the frozen kernel-parity order cannot place them.
+        if !canonical, hasPostConvolver, stereo.image != nil || stereo.deess != nil {
+            throw UnifiedGraphError.unsupportedConfiguration("image or de-ess with a post convolver in kernel-parity order")
+        }
+        if let params = stereo.image {
+            guard params.count == 8 else { throw UnifiedGraphError.invalidConfiguration("image") }
+            guard programLanes == 2 else { throw UnifiedGraphError.unsupportedConfiguration("image needs two lanes") }
+            stages.append(UnifiedGraphStageSpec(
+                kind: N60_STAGE_IMAGE.rawValue, stageId: Self.imageStageId, laneA: 0, laneB: 1, params: params))
+        }
+        if let params = stereo.deess {
+            guard params.count == 12 else { throw UnifiedGraphError.invalidConfiguration("de-ess") }
+            guard programLanes == 2 else { throw UnifiedGraphError.unsupportedConfiguration("de-ess needs two lanes") }
+            stages.append(UnifiedGraphStageSpec(
+                kind: N60_STAGE_DEESS.rawValue, stageId: Self.deessStageId, laneA: 0, laneB: 1, params: params))
+        }
         if let params = stereo.compressor, compressorBeforeAmbient {
             add(N60_STAGE_COMPRESSOR, Self.compressorStageId, mask: programMask, params: params)
         }
@@ -448,6 +468,8 @@ struct UnifiedGraphConfiguration: Equatable, Sendable {
     static let crossoverStageId: UInt32 = 616
     static let generatorStageId: UInt32 = 618
     static let cleanupStageId: UInt32 = 622
+    static let imageStageId: UInt32 = 623
+    static let deessStageId: UInt32 = 624
     static let analyserTapEQStageId: UInt32 = 620
     static let analyserTapDynStageId: UInt32 = 621
     /// FIR stages take two consecutive ids (left, right) when the channels differ.

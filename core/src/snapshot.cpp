@@ -15,6 +15,7 @@
 
 #include "stages_dsp.hpp"
 #include "stages_cleanup.hpp"
+#include "stages_image.hpp"
 #include "stages_generator.hpp"
 #include "stages_route.hpp"
 #include "stages_matrix.hpp"
@@ -226,6 +227,8 @@ uint32_t rankOf(uint32_t kind) {
     if (kind == N60_STAGE_EXTERNAL) return 125;
     if (kind == N60_STAGE_GENERATOR) return 35;
     if (kind == N60_STAGE_CLEANUP) return 37;           // ABI v22: after the generator, before the denoiser (rank 40)
+    if (kind == N60_STAGE_IMAGE) return 96;             // ABI v23: after the EQ tap, before the de-esser and the compressor
+    if (kind == N60_STAGE_DEESS) return 98;             // ABI v23: after IMAGE (and the S12c loudness slot at 97), before the compressor (100)
     if (kind == N60_STAGE_ANALYSER_TAP_EQ) return 95;   // ABI v21: after FIR, before the compressor
     if (kind == N60_STAGE_ANALYSER_TAP_DYN) return 115; // ABI v21: after the expander, before METER_OUT
     if (kind == N60_STAGE_ROUTE) return 235;
@@ -266,6 +269,7 @@ size_t stateStrideFor(const n60_stage_desc &s, double rate, uint32_t firScheme) 
             else if (isMatrixKind(s.kind)) matrixSizes(s, lane, shared);
             else if (isGeneratorKind(s.kind)) generatorSizes(s, rate, lane, shared);
             else if (isCleanupKind(s.kind)) cleanupSizes(s, rate, lane, shared);
+            else if (isImageKind(s.kind)) imageSizes(s, rate, lane, shared);
             else if (isRouteKind(s.kind)) routeSizes(s, lane, shared);
             return lane;
         }
@@ -279,6 +283,7 @@ size_t sharedBytesFor(const n60_stage_desc &s, double rate, uint32_t firScheme) 
     else if (isMatrixKind(s.kind)) matrixSizes(s, lane, shared);
     else if (isGeneratorKind(s.kind)) generatorSizes(s, rate, lane, shared);
     else if (isCleanupKind(s.kind)) cleanupSizes(s, rate, lane, shared);
+    else if (isImageKind(s.kind)) imageSizes(s, rate, lane, shared);
     else if (isRouteKind(s.kind)) routeSizes(s, lane, shared);
     return shared;
 }
@@ -356,6 +361,14 @@ n60_status validateDesc(const n60_graph_desc &d) {
         }
         if (isCleanupKind(s.kind)) {
             const n60_status v = validateCleanupStage(s, d.sampleRate, d.outputChannels);
+            if (v != N60_STATUS_OK) return v;
+            total += (stateStrideFor(s, d.sampleRate, d.firScheme) * laneCountFor(s, d.outputChannels)) + sharedBytesFor(s, d.sampleRate, d.firScheme) +
+                     size_t(s.paramCount) * sizeof(float);
+            if (total > kMaxArenaBytes) return N60_STATUS_OUT_OF_MEMORY;
+            continue;
+        }
+        if (isImageKind(s.kind)) {
+            const n60_status v = validateImageStage(s, d.sampleRate, d.outputChannels);
             if (v != N60_STATUS_OK) return v;
             total += (stateStrideFor(s, d.sampleRate, d.firScheme) * laneCountFor(s, d.outputChannels)) + sharedBytesFor(s, d.sampleRate, d.firScheme) +
                      size_t(s.paramCount) * sizeof(float);
@@ -531,6 +544,7 @@ n60_status buildSnapshot(const n60_graph_desc &d, uint32_t epoch, SnapHeader **o
         if (isMatrixKind(s.kind)) matrixInit(h, r);
         if (isGeneratorKind(s.kind)) generatorInit(h, r);
         if (isCleanupKind(s.kind)) cleanupInit(h, r);
+        if (isImageKind(s.kind)) imageInit(h, r);
         if (isRouteKind(s.kind)) routeInit(h, r);
         if (s.kind == N60_STAGE_PEQ) {
             PeqSec *sec = reinterpret_cast<PeqSec *>(bytes(h) + r.coefOff);
@@ -585,6 +599,7 @@ n60_status validateParam(const SnapHeader *snap, const StageRec &r, uint32_t par
             if (isMatrixKind(r.kind)) return validateMatrixParam(snap, r, paramIndex, value);
             if (isGeneratorKind(r.kind)) return validateGeneratorParam(snap, r, paramIndex, value);
             if (isCleanupKind(r.kind)) return validateCleanupParam(snap, r, paramIndex, value);
+            if (isImageKind(r.kind)) return validateImageParam(snap, r, paramIndex, value);
             if (isRouteKind(r.kind)) return validateRouteParam(snap, r, paramIndex, value);
             return isDspKind(r.kind) ? validateDspParam(snap, r, paramIndex, value) : N60_STATUS_UNSUPPORTED;
     }
@@ -649,6 +664,7 @@ bool readDynamics(SnapHeader *snap, uint32_t stageId, uint32_t lane, n60_dynamic
     const StageRec *r = findStage(snap, stageId);
     if (r == nullptr) return false;
     if (r->kind == N60_STAGE_PROTECTION) return readProtectionDynamics(snap, *r, lane, out);
+    if (r->kind == N60_STAGE_DEESS) return readDeEss(snap, *r, lane, out);
     return readDspDynamics(snap, *r, lane, out);
 }
 
@@ -937,6 +953,8 @@ void runSnapshot(SnapHeader *h, float *const *lanes, uint32_t frames, std::atomi
                     runGenerator(h, r, lanes, frames);
                 } else if (isCleanupKind(r.kind)) {
                     runCleanup(h, r, lanes, frames);
+                } else if (isImageKind(r.kind)) {
+                    runImage(h, r, lanes, frames);
                 } else if (isRouteKind(r.kind)) {
                     runRoute(h, r, lanes, frames);
                 } else {

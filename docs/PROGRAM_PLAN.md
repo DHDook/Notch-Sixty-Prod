@@ -176,7 +176,7 @@ Gate G2 passed on 2026-10-25 (commit 07e82c6)
 - [x] S9c `e6/live-headphone-profile` (needs-owner): headphone profile edits live on graph-rendered binaural sessions, asset swap off the main actor, ear delay stages; bench in E22
 - [ ] S12 legacy-kernel migration (owner, 7 Nov 2026; after E27 S4, before E28 S1; all needs-owner, engine; no new flag, `e6.legacy-kernel` stays the escape hatch until E23; eight-rate kernel parity within E6 decision 1):
   - [x] S12a DC offset, infrasonic, mains notch and hum detector in the core (migration audit table row 1 done, `docs/epics/E6.md`; PR pending)
-  - [ ] S12b stereo mode, widener, de-harsh and de-esser in the core
+  - [~] S12b stereo mode, widener, de-harsh and de-esser in the core (`e6/port-image-and-deess`, #409, ABI v23; built in the core, wiring: S12g for N-channel (G12) and S12f for state carry and refusals (G11, G13, G14); bench: E22)
   - [ ] S12c loudness match, loudness contour, per-band loudness and dialogue leveler in the core
   - [ ] S12d multiband compressor in the core, with per-band auto release (closes E28 G11)
   - [ ] S12e stereo global bypass and audition on the graph; wide PEQ (over 16 sections, types 8–10, kernel gain range); D5 semantics as parity exception P1, delta audition ported (E6 decisions 16–17)

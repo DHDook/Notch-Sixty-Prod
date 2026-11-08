@@ -336,6 +336,10 @@ final class UnifiedGraphHost: @unchecked Sendable {
         if let comp = dynamicsReading(graph, stageId: UnifiedGraphConfiguration.compressorStageId) {
             diagnostics.compressorGainReductionDB = comp.grMaxDb
         }
+        // E6 S12b: the de-esser's gain reduction (positive dB, as the kernel reports it).
+        if let ess = dynamicsReading(graph, stageId: UnifiedGraphConfiguration.deessStageId) {
+            diagnostics.deEsserGainReductionDB = ess.grMaxDb
+        }
         if let prot = dynamicsReading(graph, stageId: N60_LSTAGE_PROTECTION) {
             diagnostics.limiterGainReductionDB = prot.grMaxDb
             diagnostics.inputTruePeakLinear = prot.inTruePeak
