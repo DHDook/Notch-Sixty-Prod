@@ -389,9 +389,6 @@ enum UnifiedGraphTranslator {
         let bassEnabled = bassManagementConfiguration.enabled
         let subCount = Int(routePlan.subwooferCount)
         if bassEnabled {
-            guard bassManagementConfiguration.topology == .linkwitzRiley24 else {
-                return .failure(.nonLR4Crossover)
-            }
             guard subCount <= UnifiedGraphConfiguration.maxSubwoofers else { return .failure(.tooManySubs) }
             guard subCount >= 1 else { return .failure(.noSubForBassManagement) }
             guard routePlan.subwooferCalibrations.count >= subCount else {
@@ -415,7 +412,6 @@ enum UnifiedGraphTranslator {
         var lfeLane: Int?
         for (index, role) in roles.enumerated() {
             let calibration = routePlan.speakerCalibrations[role]
-            if calibration?.polarityInverted == true { return .failure(.invertedPolarity) }
             let delay = calibration?.delayMilliseconds ?? 0
             if bassEnabled, delay > 0 { return .failure(.laneDelayUnderBassMgmt) }
             let lfeGainDB = role == .lowFrequencyEffects && !bassEnabled
@@ -430,7 +426,9 @@ enum UnifiedGraphTranslator {
                 }
             }
             if peq.count > Int(N60_PEQ_MAX_SECTIONS) { return .failure(.laneEQTooLarge) }
-            lanes.append(UnifiedGraphLane(preGain: gain, delayMilliseconds: delay, eq: peq))
+            lanes.append(UnifiedGraphLane(
+                preGain: gain, delayMilliseconds: delay, polarityInverted: calibration?.polarityInverted == true,
+                eq: peq))
             if role == .lowFrequencyEffects { lfeLane = index }
         }
         var configuration = UnifiedGraphConfiguration(sampleRate: sampleRate, lanes: lanes)
@@ -454,6 +452,7 @@ enum UnifiedGraphTranslator {
                 lfeLane: lfeLane,
                 lfeLowPassHz: LiveNChannelRenderGraphCompiler.lfeLowPassHz,
                 lfeGainDB: LiveNChannelRenderGraphCompiler.lfeInBandGainDB,
+                steepSplit: bassManagementConfiguration.topology == .linkwitzRiley48,
                 subwoofers: subs
             )
             // E26 G38: two mains and no LFE (stereo plus sub, class A) play the sub at the stereo path's level.
@@ -858,12 +857,8 @@ enum UnifiedGraphFallbackReason: String, Error, Equatable, Sendable, CaseIterabl
     // N-channel and stereo eligibility (translator).
     /// A speaker optimizer FIR is in the route; the core has no equivalent FIR lane stage.
     case optimizerFIR
-    /// A lane or sub with inverted polarity that the legacy core applies in a different place.
-    case invertedPolarity
     /// A lane delay under bass management (legacy: before the crossover; core: after).
     case laneDelayUnderBassMgmt
-    /// Bass management with a crossover other than Linkwitz-Riley 24 dB.
-    case nonLR4Crossover
     /// More than eight subwoofers.
     case tooManySubs
     /// Bass management enabled with no subwoofer lane.
@@ -955,9 +950,7 @@ enum UnifiedGraphFallbackReason: String, Error, Equatable, Sendable, CaseIterabl
     var displayText: String {
         switch self {
         case .optimizerFIR: "speaker optimizer FIR"
-        case .invertedPolarity: "inverted polarity"
         case .laneDelayUnderBassMgmt: "lane delay under bass management"
-        case .nonLR4Crossover: "crossover is not LR4"
         case .tooManySubs: "more than 8 subs"
         case .noSubForBassManagement: "bass management without a sub"
         case .subCalibrationMissing: "sub calibration missing"

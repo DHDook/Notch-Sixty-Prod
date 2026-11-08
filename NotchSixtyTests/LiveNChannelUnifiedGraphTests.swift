@@ -296,18 +296,18 @@ final class LiveNChannelUnifiedGraphTests: XCTestCase {
         XCTAssertNotNil(configuration(plan(subs: 0, bass: false), off))
         XCTAssertNotNil(configuration(plan(subs: 2, bass: true), bass))
 
-        // Polarity-inverted lane: the core's lane gain is positive only.
-        XCTAssertNil(configuration(
+        // E6 S12g: an inverted-polarity lane is a graph lane (negative output gain).
+        XCTAssertEqual(configuration(
             plan(subs: 0, bass: false, speakers: [.frontLeft: SemanticSpeakerCalibration(polarityInverted: true)]),
-            off))
+            off)?.lanes[0].polarityInverted, true)
         // Lane delay under bass management: the legacy order is delay before the crossover.
         XCTAssertNil(configuration(
             plan(subs: 1, bass: true, speakers: [.frontLeft: SemanticSpeakerCalibration(delayMilliseconds: 3)]),
             bass))
-        // Bass management without a sub, and a 48 dB crossover, are legacy-only.
+        // Bass management without a sub is legacy-only; a 48 dB crossover is a graph feature.
         XCTAssertNil(configuration(plan(subs: 0, bass: true), bass))
         bass.topology = .linkwitzRiley48
-        XCTAssertNil(configuration(plan(subs: 1, bass: true), bass))
+        XCTAssertEqual(configuration(plan(subs: 1, bass: true), bass)?.bassManagement?.steepSplit, true)
     }
 
     @MainActor
@@ -354,9 +354,10 @@ final class LiveNChannelUnifiedGraphTests: XCTestCase {
         XCTAssertNil(reason(plan(subs: 0, bass: false), off))
         XCTAssertNil(reason(plan(subs: 2, bass: true), bass))
 
-        XCTAssertEqual(reason(
+        // E6 S12g: inverted polarity and the 48 dB crossover are graph features now.
+        XCTAssertNil(reason(
             plan(subs: 0, bass: false, speakers: [.frontLeft: SemanticSpeakerCalibration(polarityInverted: true)]),
-            off), .invertedPolarity)
+            off))
         XCTAssertEqual(reason(
             plan(subs: 1, bass: true, speakers: [.frontLeft: SemanticSpeakerCalibration(delayMilliseconds: 3)]),
             bass), .laneDelayUnderBassMgmt)
@@ -382,7 +383,13 @@ final class LiveNChannelUnifiedGraphTests: XCTestCase {
                     repeating: OutputCalibrationEQBand(frequencyHz: 60, gainDB: -1, q: 1), count: 9))]),
             bass), .subEQTooLarge)
         bass.topology = .linkwitzRiley48
-        XCTAssertEqual(reason(plan(subs: 1, bass: true), bass), .nonLR4Crossover)
+        XCTAssertNil(reason(plan(subs: 1, bass: true), bass))
+        let steep = try? UnifiedGraphTranslator.nChannelEligibility(
+            routePlan: plan(subs: 1, bass: true), sampleRate: 48_000, gainConfiguration: DSPGainConfiguration(),
+            bassManagementConfiguration: bass).get().makeSpec()
+        let bassStage = steep?.stages.first { $0.kind == N60_STAGE_BASS_MGMT.rawValue }
+        // Extension word 0, then LR (family 2) order 8 for both corners.
+        XCTAssertEqual(Array((bassStage?.params ?? []).suffix(5)), [0, 2, 8, 2, 8])
         // Every reason has display text for the diagnostics row.
         for reason in UnifiedGraphFallbackReason.allCases { XCTAssertFalse(reason.displayText.isEmpty) }
     }

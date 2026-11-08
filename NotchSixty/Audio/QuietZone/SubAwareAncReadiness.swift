@@ -49,9 +49,9 @@ struct SubAwareAncReadiness: Equatable, Sendable {
     static let safetyMessage = "Quiet Zone cannot set safe bass limits for this setup yet."
     static let unsupportedBassFilterMessage = "This bass filter is not supported for Quiet Zone with a separate subwoofer output."
 
-    /// The graph's `BASS_MGMT` runs a Linkwitz-Riley 4 split; the app's other topology (48 dB per octave) is refused by
-    /// the translator (`nonLR4Crossover`), so feed-forward, which needs the graph split to equal the measured one,
-    /// refuses it on class A. A splitter that is off has nothing to disagree.
+    /// The Quiet Zone feed-forward model is measured through the Linkwitz-Riley 4 split. The graph now also runs the
+    /// 48 dB per octave topology (E6 S12g), but feed-forward needs the graph split to equal the measured one, so it
+    /// still refuses it on class A. A splitter that is off has nothing to disagree.
     static func bassFilterSupportedByGraph(_ bass: BassManagementConfiguration) -> Bool {
         !bass.enabled || bass.topology == .linkwitzRiley24
     }

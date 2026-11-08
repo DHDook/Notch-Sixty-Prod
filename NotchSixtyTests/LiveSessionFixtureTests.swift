@@ -71,18 +71,6 @@ final class LiveSessionFixtureTests: XCTestCase {
             let specBefore = host.spec
             let bassBefore = engine.bassManagementConfiguration
 
-            // A 48 dB/oct crossover is something the graph cannot reproduce: the edit is refused by name.
-            var refused = bassBefore
-            refused.topology = .linkwitzRiley48
-            XCTAssertThrowsError(try engine.replaceBassManagementConfiguration(refused), "rate \(rate)") {
-                guard case LiveNChannelTransportError.unifiedGraphRejected(let reason) = $0 else {
-                    return XCTFail("wrong error \($0)")
-                }
-                XCTAssertEqual(reason, .nonLR4Crossover, "rate \(rate)")
-            }
-            XCTAssertEqual(engine.bassManagementConfiguration, bassBefore, "rate \(rate)")
-            XCTAssertEqual(host.spec, specBefore, "rate \(rate)")
-
             // A value outside the crossover range is refused before anything runs.
             var outOfRange = bassBefore
             outOfRange.frequencyHz = 5
