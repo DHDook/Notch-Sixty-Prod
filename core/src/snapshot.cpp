@@ -14,6 +14,7 @@
 #include "snapshot.hpp"
 
 #include "stages_dsp.hpp"
+#include "stages_cleanup.hpp"
 #include "stages_generator.hpp"
 #include "stages_route.hpp"
 #include "stages_matrix.hpp"
@@ -224,6 +225,7 @@ uint32_t rankOf(uint32_t kind) {
     if (kind == N60_STAGE_BINAURAL) return 175;
     if (kind == N60_STAGE_EXTERNAL) return 125;
     if (kind == N60_STAGE_GENERATOR) return 35;
+    if (kind == N60_STAGE_CLEANUP) return 37;           // ABI v22: after the generator, before the denoiser (rank 40)
     if (kind == N60_STAGE_ANALYSER_TAP_EQ) return 95;   // ABI v21: after FIR, before the compressor
     if (kind == N60_STAGE_ANALYSER_TAP_DYN) return 115; // ABI v21: after the expander, before METER_OUT
     if (kind == N60_STAGE_ROUTE) return 235;
@@ -263,6 +265,7 @@ size_t stateStrideFor(const n60_stage_desc &s, double rate, uint32_t firScheme) 
             else if (isSystemKind(s.kind)) systemSizes(s, rate, lane, shared);
             else if (isMatrixKind(s.kind)) matrixSizes(s, lane, shared);
             else if (isGeneratorKind(s.kind)) generatorSizes(s, rate, lane, shared);
+            else if (isCleanupKind(s.kind)) cleanupSizes(s, rate, lane, shared);
             else if (isRouteKind(s.kind)) routeSizes(s, lane, shared);
             return lane;
         }
@@ -275,6 +278,7 @@ size_t sharedBytesFor(const n60_stage_desc &s, double rate, uint32_t firScheme) 
     else if (isSystemKind(s.kind)) systemSizes(s, rate, lane, shared);
     else if (isMatrixKind(s.kind)) matrixSizes(s, lane, shared);
     else if (isGeneratorKind(s.kind)) generatorSizes(s, rate, lane, shared);
+    else if (isCleanupKind(s.kind)) cleanupSizes(s, rate, lane, shared);
     else if (isRouteKind(s.kind)) routeSizes(s, lane, shared);
     return shared;
 }
@@ -347,6 +351,14 @@ n60_status validateDesc(const n60_graph_desc &d) {
             const n60_status v = validateGeneratorStage(s, d.sampleRate, d.outputChannels);
             if (v != N60_STATUS_OK) return v;
             total += (stateStrideFor(s, d.sampleRate, d.firScheme) * laneCountFor(s, d.outputChannels)) + sharedBytesFor(s, d.sampleRate, d.firScheme);
+            if (total > kMaxArenaBytes) return N60_STATUS_OUT_OF_MEMORY;
+            continue;
+        }
+        if (isCleanupKind(s.kind)) {
+            const n60_status v = validateCleanupStage(s, d.sampleRate, d.outputChannels);
+            if (v != N60_STATUS_OK) return v;
+            total += (stateStrideFor(s, d.sampleRate, d.firScheme) * laneCountFor(s, d.outputChannels)) + sharedBytesFor(s, d.sampleRate, d.firScheme) +
+                     size_t(s.paramCount) * sizeof(float);
             if (total > kMaxArenaBytes) return N60_STATUS_OUT_OF_MEMORY;
             continue;
         }
@@ -518,6 +530,7 @@ n60_status buildSnapshot(const n60_graph_desc &d, uint32_t epoch, SnapHeader **o
         if (isSystemKind(s.kind)) systemInit(h, r);
         if (isMatrixKind(s.kind)) matrixInit(h, r);
         if (isGeneratorKind(s.kind)) generatorInit(h, r);
+        if (isCleanupKind(s.kind)) cleanupInit(h, r);
         if (isRouteKind(s.kind)) routeInit(h, r);
         if (s.kind == N60_STAGE_PEQ) {
             PeqSec *sec = reinterpret_cast<PeqSec *>(bytes(h) + r.coefOff);
@@ -571,6 +584,7 @@ n60_status validateParam(const SnapHeader *snap, const StageRec &r, uint32_t par
             if (isSystemKind(r.kind)) return validateSystemParam(snap, r, paramIndex, value);
             if (isMatrixKind(r.kind)) return validateMatrixParam(snap, r, paramIndex, value);
             if (isGeneratorKind(r.kind)) return validateGeneratorParam(snap, r, paramIndex, value);
+            if (isCleanupKind(r.kind)) return validateCleanupParam(snap, r, paramIndex, value);
             if (isRouteKind(r.kind)) return validateRouteParam(snap, r, paramIndex, value);
             return isDspKind(r.kind) ? validateDspParam(snap, r, paramIndex, value) : N60_STATUS_UNSUPPORTED;
     }
@@ -921,6 +935,8 @@ void runSnapshot(SnapHeader *h, float *const *lanes, uint32_t frames, std::atomi
                     runMatrix(h, r, lanes, frames);
                 } else if (isGeneratorKind(r.kind)) {
                     runGenerator(h, r, lanes, frames);
+                } else if (isCleanupKind(r.kind)) {
+                    runCleanup(h, r, lanes, frames);
                 } else if (isRouteKind(r.kind)) {
                     runRoute(h, r, lanes, frames);
                 } else {

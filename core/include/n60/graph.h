@@ -34,7 +34,7 @@ extern "C" {
 #endif
 
 /* Bumped on any incompatible change to a struct or function below. */
-#define N60_GRAPH_ABI_VERSION 21u
+#define N60_GRAPH_ABI_VERSION 22u
 
 typedef struct n60_graph n60_graph; /* opaque */
 
@@ -111,7 +111,9 @@ typedef enum n60_stage_kind {
     N60_STAGE_DRIVER_FIR_TWO_BAND = 41, /* position 23.7. As N60_STAGE_ROOM_FIR_TWO_BAND, at the driver position. */
     /* ABI v21 (E27 S2c). Analyser taps: see "Analyser taps" below. */
     N60_STAGE_ANALYSER_TAP_EQ = 42,  /* position 9.5: after FIR, before the compressor. Audio untouched. */
-    N60_STAGE_ANALYSER_TAP_DYN = 43  /* position 11.5: after the expander, before METER_OUT. Audio untouched. */
+    N60_STAGE_ANALYSER_TAP_DYN = 43, /* position 11.5: after the expander, before METER_OUT. Audio untouched. */
+    /* ABI v22 (E6 S12a). Cleanup: see "Cleanup" below. */
+    N60_STAGE_CLEANUP = 44           /* position 3.7: after GAIN and the generator, before DENOISER. Pair stage. */
 } n60_stage_kind;
 
 /* Analyser taps (ABI v21, E27 S2c). Two read-only capture points for the Equalizer page's spectrum overlay: the program
@@ -124,6 +126,21 @@ typedef enum n60_stage_kind {
  * demand is 1, so a reader that turns the demand on records `written` first and uses only samples from that index on. A
  * new snapshot starts with an empty ring (written 0). Allocation: the rings are part of the snapshot, built off the audio
  * thread. Synchronisation: the ANC_CAPTURE seqlock (single writer on the audio thread, no lock). */
+
+/* Cleanup (ABI v22, E6 S12a). The stereo kernel's pre-EQ block as one pair stage: DC offset filter, infrasonic high-pass
+ * cascade, mains hum detector tap and mains notch bank, in that order, with the kernel's arithmetic. Lanes: a pair
+ * (laneA, laneB, laneMask 0). paramCount 26, every parameter live (posted with n60_graph_post_params, applied at block
+ * start; a changed filter redesigns its coefficients on the realtime thread: at most 8 biquads, 16 notches, 25 oscillator
+ * steps, no allocation):
+ *  [0] DC offset filter on (0/1; 0.5 Hz corner)  [1] infrasonic high-pass on (0/1)  [2] infrasonic cutoff Hz (10..30,
+ *  below 0.45 fs)  [3] slope: 0 = 24, 1 = 48, 2 = 96 dB/octave (2, 4, 8 Butterworth biquads)  [4] mains notch on (0/1)
+ *  [5] mains fundamental Hz (40..70)  [6] harmonic count (integer 1..16)  [7] notch Q (5..60)  [8] hum detector on (0/1)
+ *  [9] detector search centre Hz (47..63; searches +-3 Hz in 0.25 Hz bins)  [10..25] notch depth dB per harmonic (-40..0;
+ *  entries past the count are ignored but must be in range; a harmonic at or above 0.45 fs, or a depth of 0, is skipped).
+ * Each part's on/off change is a 5 ms one-pole mix; a part that is off and settled is parked (zero state, no cost). A
+ * notch retune (fundamental, Q, count or a depth) crossfades the old and the new bank over max(32, decimation x 10)
+ * frames. The detector is read with n60_graph_read_mains. The stage has no latency. Running state is not carried across
+ * a rebuild. Stereo only. */
 
 /* Generator (ABI v14). A source that replaces program audio on its lanes, ahead of every correction stage and
  * therefore ahead of PROTECTION, so it reaches the speakers through the same path as music. Lanes: laneMask,
@@ -628,6 +645,18 @@ typedef struct n60_dynamics_readback {
  * reduction is max(0, -gain dB) with the stage's make-up gain included, as in the stereo kernel.
  * BAD_ARGUMENT for another kind of stage or a lane the stage does not cover; ABI_MISMATCH on structSize. */
 n60_status n60_graph_read_dynamics(n60_graph *graph, uint32_t stageId, uint32_t lane, n60_dynamics_readback *out);
+
+/* ABI v22 (E6 S12a): the mains hum detector of a CLEANUP stage. Control thread, newest published snapshot, relaxed reads.
+ * frequencyHz is the last completed window's refined peak (0 until the first window completes, or while the detector is
+ * off), confidence is prominence x tone-energy fraction in 0..1 (0 below -78 dBFS). BAD_ARGUMENT for another kind of
+ * stage; ABI_MISMATCH on structSize. */
+typedef struct n60_mains_readback {
+    uint32_t structSize;      /* sizeof(n60_mains_readback) as seen by the caller */
+    float frequencyHz;
+    float confidence;
+    uint32_t reserved;
+} n60_mains_readback;
+n60_status n60_graph_read_mains(n60_graph *graph, uint32_t stageId, n60_mains_readback *out);
 
 /* Reads the over-range counter of a METER_IN, METER_OUT or FINAL_METER stage lane: samples with
  * |x| > 1.0 since the previous read (reset by the read). */

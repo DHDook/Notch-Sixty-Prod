@@ -179,6 +179,11 @@ enum UnifiedGraphTranslator {
         var ok = true
         withUnsafePointer(to: &snapshot) { pointer in
             let dynamics = pointer.pointee.dynamics
+            var cleanup = [Float](repeating: 0, count: 26)
+            var cleanupNeeded = false
+            if N60UnifiedGraphCleanupParams(pointer, &cleanup, &cleanupNeeded) {
+                if cleanupNeeded { stages.cleanup = cleanup }
+            } else { ok = false }
             if dynamics.spectralDenoiser.enabled {
                 var values = [Float](repeating: 0, count: 9)
                 if N60UnifiedGraphDenoiserParams(pointer, &values) {

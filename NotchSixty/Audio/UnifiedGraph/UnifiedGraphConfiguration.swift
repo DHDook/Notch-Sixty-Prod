@@ -66,6 +66,8 @@ struct UnifiedGraphStereoStages: Equatable, Sendable {
     var crossfeedAmount: Float?
     var crosstalk: [Float]?
     var pauseGate: [Float]?
+    /// E6 S12a: DC offset, infrasonic, mains notch and hum detector (the CLEANUP stage's 26 parameters); nil when all are off.
+    var cleanup: [Float]?
     /// Program convolution (kernel: after the EQ, before the compressor).
     var programFIR: UnifiedGraphFIRProgram?
     /// Room correction and speaker IR (kernel: after bass management's slot, before ambient and the core dynamics).
@@ -263,6 +265,12 @@ struct UnifiedGraphConfiguration: Equatable, Sendable {
             // The kernel runs the dynamic EQ after the mid/side decode; the core runs it before.
             throw UnifiedGraphError.unsupportedConfiguration("dynamic EQ with mid/side EQ")
         }
+        if let params = stereo.cleanup {
+            guard params.count == 26 else { throw UnifiedGraphError.invalidConfiguration("cleanup") }
+            guard programLanes == 2 else { throw UnifiedGraphError.unsupportedConfiguration("cleanup needs two lanes") }
+            stages.append(UnifiedGraphStageSpec(
+                kind: N60_STAGE_CLEANUP.rawValue, stageId: Self.cleanupStageId, laneA: 0, laneB: 1, params: params))
+        }
         if let params = stereo.denoiser {
             add(N60_STAGE_DENOISER, Self.denoiserStageId, mask: programMask, params: params)
         }
@@ -439,6 +447,7 @@ struct UnifiedGraphConfiguration: Equatable, Sendable {
     static let dynamicEQStageId: UInt32 = 608
     static let crossoverStageId: UInt32 = 616
     static let generatorStageId: UInt32 = 618
+    static let cleanupStageId: UInt32 = 622
     static let analyserTapEQStageId: UInt32 = 620
     static let analyserTapDynStageId: UInt32 = 621
     /// FIR stages take two consecutive ids (left, right) when the channels differ.

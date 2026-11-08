@@ -70,7 +70,7 @@ build_core_objs() {
     CORE_BUILT=1
     CORE_OK=1
     local src
-    for src in graph snapshot fft stages_dsp conv/nufir stages_system stages_matrix stages_generator stages_route fold layout \
+    for src in graph snapshot fft stages_dsp conv/nufir stages_system stages_matrix stages_generator stages_cleanup stages_route fold layout \
         measure/offline_fft measure/ess measure/deconvolve measure/reference_room measure/timing measure/distortion measure/decay measure/waterfall measure/monitor_ring measure/spl measure/rta correct/minphase correct/design correct/synth correct/bass correct/multisub_search xover/xover; do
         local obj="$OUT/n60core_${src//\//_}.o"
         if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -fno-exceptions -fno-rtti -Icore/include -Icore/src \
@@ -535,6 +535,21 @@ if selected e27_analyser_tap; then
     fi
 fi
 
+# E6 S12a: the cleanup stage (DC, infrasonic, mains notch, hum detector): behaviour at the eight standard rates.
+if selected e6_cleanup; then
+    build_core_objs
+    if [ "$CORE_OK" = 1 ]; then
+        if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -Icore/include -Icore/src core/tests/test_cleanup.cpp \
+            "${CORE_OBJS[@]}" -o "$OUT/e6_core_cleanup" && "$OUT/e6_core_cleanup"; then
+            passed+=(e6_core_cleanup)
+        else
+            failed+=(e6_core_cleanup)
+        fi
+    else
+        failed+=(e6_cleanup)
+    fi
+fi
+
 # E26 S7b1 (G1): the host feed for the anti-noise lanes (lanes equal the offline splitter render, lease and fade, no allocation).
 if selected e26_anc_lane_feed; then
     if clang -std=c11 -O2 -Wall -Wextra -Werror -include stddef.h -I"$RT" -c "$RT/N60ActiveQuietZone.c" -o "$OUT/e26_alf_aqz.o" \
@@ -584,6 +599,8 @@ if selected e6_core_graph; then
             "$RT/N60Protection.c" "${CORE_OBJS[@]}" -lc++ -lm
         harness e6_core_xover_clipper_parity "${STRICT[@]}" -O2 -Icore/include core/tests/test_xover_clipper_parity.c \
             "$RT/N60Protection.c" "${CORE_OBJS[@]}" -lc++ -lm
+        harness e6_core_cleanup_parity "${STRICT[@]}" -O2 -include stddef.h -Icore/include -I"$RT" core/tests/test_cleanup_parity.c \
+            "$RT/N60Dynamics.c" "$RT/N60DynamicEQ.c" "$RT/N60SpectralDenoiser.c" "$RT/N60Protection.c" "${CORE_OBJS[@]}" -lc++ -lm
         harness e6_core_fracdelay_parity "${STRICT[@]}" -O2 -Icore/include core/tests/test_fracdelay_parity.c \
             "${CORE_OBJS[@]}" -lc++ -lm
         harness e6_core_external "${STRICT[@]}" -O2 -Icore/include core/tests/test_external.c \

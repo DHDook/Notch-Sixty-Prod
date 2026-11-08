@@ -326,6 +326,13 @@ final class UnifiedGraphHost: @unchecked Sendable {
         diagnostics.postEQMeter = reading(N60_LSTAGE_METER_OUT)
         if includeOutput { diagnostics.outputMeter = reading(N60_LSTAGE_FINAL_METER) }
         diagnostics.latencyFrames = latencyFrames
+        // E6 S12a: the hum detector's readback (the kernel reports it in its own diagnostics).
+        var mains = n60_mains_readback()
+        mains.structSize = UInt32(MemoryLayout<n60_mains_readback>.size)
+        if n60_graph_read_mains(graph, UnifiedGraphConfiguration.cleanupStageId, &mains) == N60_STATUS_OK {
+            diagnostics.mainsDetectedFrequencyHz = mains.frequencyHz
+            diagnostics.mainsDetectionConfidence = mains.confidence
+        }
         if let comp = dynamicsReading(graph, stageId: UnifiedGraphConfiguration.compressorStageId) {
             diagnostics.compressorGainReductionDB = comp.grMaxDb
         }
