@@ -420,7 +420,8 @@ struct ProductionRootView: View {
         case .equalizer:
             ProductionEqualizerView(
                 engine: engine, autoPreamp: product.profiles.autoPreamp, reference: product.reference,
-                comparison: product.profiles.eqComparison, audition: product.profiles.eqAudition
+                comparison: product.profiles.eqComparison, audition: product.profiles.eqAudition,
+                programAnalyser: product.profiles.eqProgramAnalyser
             )
         case .dynamics:
             ProductionDynamicsView(engine: engine, reference: product.reference)

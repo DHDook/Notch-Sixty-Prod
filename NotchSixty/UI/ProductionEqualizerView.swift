@@ -9,6 +9,9 @@ struct ProductionEqualizerView: View {
     /// E27 S3b: EQ A/B and Listen; nil or unavailable hides the controls.
     var comparison: EQComparisonController? = nil
     var audition: EQAuditionController? = nil
+    /// E27 S2b: program spectrum overlay; nil or unavailable hides the switch.
+    var programAnalyser: EQProgramAnalyserController? = nil
+    @State private var programSpectrum = EQProgramSpectrum.none
     @ObservedObject private var liveOverlay = MeasurementLiveOverlayStore.shared
     @State private var selectedBandID: UUID?
     @State private var dragPreview: EQBand?
@@ -282,7 +285,8 @@ struct ProductionEqualizerView: View {
                 onScaleQ: { id, scale in scaleQ(of: id, scale) },
                 onAddBand: { frequency, gain in addBand(atFrequency: frequency, gain: gain) },
                 onResetBand: { id in resetBand(id) },
-                rtaOverlay: liveOverlay.showsRTA ? liveOverlay.rtaCurve : nil
+                rtaOverlay: liveOverlay.showsRTA ? liveOverlay.rtaCurve : nil,
+                programSpectrum: programSpectrum
             )
             .frame(minHeight: 260, maxHeight: .infinity)
 
@@ -322,6 +326,10 @@ struct ProductionEqualizerView: View {
             .accessibilityLabel("Graph view")
 
             Spacer(minLength: 8)
+
+            if let programAnalyser {
+                EQProgramAnalyserSwitch(analyser: programAnalyser, spectrum: $programSpectrum)
+            }
 
             Picker("Band curves", selection: $bandCurvesRaw) {
                 ForEach(EQBandCurvesMode.allCases) { mode in Text(mode.displayName).tag(mode.rawValue) }
@@ -1003,6 +1011,8 @@ private struct ProductionEQResponseGraph: View {
     let onResetBand: (UUID) -> Void
     /// E11 S10: live RTA of the measurement microphone, drawn behind the EQ curve.
     var rtaOverlay: RoomCorrectionFrequencyResponse?
+    /// E27 S2b: program input and output spectrum, drawn first (behind everything).
+    var programSpectrum: EQProgramSpectrum = .none
 
     @State private var hover = EQGraphHoverModel()
     @State private var dragSession: EQGraphGeometry.DragSession?
@@ -1037,6 +1047,11 @@ private struct ProductionEQResponseGraph: View {
                 Canvas { context, _ in
                     if graphView == .magnitude {
                         drawGrid(context: &context, size: size)
+                        EQProgramSpectrumDrawing.draw(
+                            context: &context, size: size, spectrum: programSpectrum,
+                            xPosition: { xPosition($0, width: size.width) },
+                            minimumFrequency: minimumFrequency, maximumFrequency: graphMaximumFrequency
+                        )
                         drawRTAOverlay(context: &context, size: size)
                         drawGhostLane(context: &context, size: size)
                         drawBandCurves(context: &context, size: size)

@@ -29,6 +29,7 @@ enum PreferenceKeys {
         static let graphYRange = "equalizer.graphYRange"
         static let graphXZoom = "equalizer.graphXZoom"
         static let bandCurves = "equalizer.bandCurves"
+        static let programAnalyser = "equalizer.programAnalyser"
     }
 
     /// Feature-flag overrides are stored as `feature.<flag id>`.

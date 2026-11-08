@@ -72,7 +72,7 @@ reviewers compare with Dirac and REW), then engine depth, then breadth.
 1. E4 class-leading roadmap, S24–S31 in written order (owner, 31 Oct 2026; E4 S11 moved to E22 on 1 Nov 2026; S26 and S29 are skipped until the owner decides camera head position and the overnight power assertion; slices waiting on E8 or the bench are skipped until ready)
    - then E26 Sub-aware Quiet Zone, S1–S7 in written order, before item 2 (owner, 4 Nov 2026; owner 5 Nov 2026: all remaining slices S2–S7 complete before E9 FIR limits (item 4), so E9 S2 waits; S1 waits for E25 S8b; no live ANC path is enabled outside the per-feature arm)
    - then the programme audit of all completed epics, before item 2 and again after every epic completes (owner, 6 Nov 2026; see `docs/epics/README.md`)
-   - then E27 Equalizer page polish, S1, S2, S3a, S3b, S2b, S4 in written order, once #395 (merged 7 Nov 2026) and the plan are merged (owner, 7 Nov 2026; placement before item 4 confirmed, owner decision 7 in `docs/epics/E27.md`)
+   - then E27 Equalizer page polish, S1, S2, S3a, S3b, S2b, S2c, S4 in written order, once #395 (merged 7 Nov 2026) and the plan are merged (owner, 7 Nov 2026; placement before item 4 confirmed, owner decision 7 in `docs/epics/E27.md`)
    - then E6 S12a–S12h legacy-kernel migration, in written order, after E27 S4 (owner, 7 Nov 2026; E6 decisions 13–19): every stage still on `N60RenderKernel`, the old N-channel path or the legacy binaural pipeline moves to the unified graph. E28 S1 starts only after all of them have merged
    - then E28 Dynamics and Meters polish, S1–S6, S7a–S7d, S8 in written order, after E6 S12a–S12h and before E9 FIR limits (item 4) (owner, 7 Nov 2026; owner decisions 1, 6–8 and 12 in `docs/epics/E28.md`)
 2. E12 Guided setup and information architecture, S7 `e12/ship` (merged #243, 26 Oct 2026)
@@ -360,7 +360,8 @@ on the Equalizer page; S1 and S2 flagless, the engine-facing S3 items behind `e2
 - [~] S3b EQ-level A/B with loudness match, band listen, click-free bypass proved at eight rates (PR pending)
   - [~] EQ A/B built dark behind `e27.eq-safety`; prepared linear-phase FIR designs are cached in S3c (G10 closed); flag removal in S4
 - [x] S3c `e27/eq-ab-fir-prewarm` prepared FIR programs for linear-phase A/B and engine-level tests (G10, G11; owner slice for both)
-- [ ] S2b pre/post-EQ program analyser overlay from an engine spectrum tap (owner, 7 Nov 2026)
+- [~] S2b program analyser overlay (Input and "Output (full chain)" spectrum on the existing render capture, no engine tap; built dark behind e27.eq-safety, PR #405; the EQ-only view is S2c)
+- [ ] S2c `e27/analyser-eq-taps`: EQ-only and EQ + Dynamics spectrum taps with a toggle (needs-owner, realtime; owner, 7 Nov 2026)
 - [ ] S4 flag removed (owner decision)
 
 ### E28 Dynamics and Meters polish (owner, 7 Nov 2026)
