@@ -224,6 +224,8 @@ uint32_t rankOf(uint32_t kind) {
     if (kind == N60_STAGE_BINAURAL) return 175;
     if (kind == N60_STAGE_EXTERNAL) return 125;
     if (kind == N60_STAGE_GENERATOR) return 35;
+    if (kind == N60_STAGE_ANALYSER_TAP_EQ) return 95;   // ABI v21: after FIR, before the compressor
+    if (kind == N60_STAGE_ANALYSER_TAP_DYN) return 115; // ABI v21: after the expander, before METER_OUT
     if (kind == N60_STAGE_ROUTE) return 235;
     if (kind == N60_STAGE_XOVER) return 236;
     if (kind == N60_STAGE_DRIVER_FIR || kind == N60_STAGE_DRIVER_FIR_TWO_BAND) return 237;

@@ -13,9 +13,19 @@ struct EQProgramAnalyserSwitch: View {
                 .toggleStyle(.switch)
                 .controlSize(.small)
                 .fixedSize()
-                .help("Live program spectrum: grey is the input, blue the output (full chain)")
+                .help("Live program spectrum: grey is the input, blue the second curve chosen here")
                 .task(id: analyser.isOn) { await analyser.run() }
                 .onReceive(analyser.$spectrum) { spectrum = $0 }
+            if analyser.isOn {
+                Picker("Analyser source", selection: Binding(get: { analyser.mode }, set: { analyser.setMode($0) })) {
+                    ForEach(EQAnalyserMode.allCases) { mode in Text(mode.displayName).tag(mode) }
+                }
+                .pickerStyle(.menu)
+                .controlSize(.small)
+                .fixedSize()
+                .accessibilityIdentifier("eq.analyser.source")
+                .help("EQ only: after the EQ. EQ + Dynamics: after the compressor and expander. Output: the whole chain")
+            }
         }
     }
 }
@@ -53,7 +63,7 @@ enum EQProgramSpectrumDrawing {
         if let line = path(spectrum.outputDB, closed: false) {
             context.stroke(line, with: .color(.cyan.opacity(0.75)), lineWidth: 1.25)
         }
-        let legend: [(String, Color)] = [("Input", .gray), ("Output (full chain)", .cyan)]
+        let legend: [(String, Color)] = [("Input", .gray), (spectrum.outputLabel, .cyan)]
         for (index, entry) in legend.enumerated() {
             context.draw(
                 Text(entry.0).font(.caption2).foregroundStyle(entry.1),

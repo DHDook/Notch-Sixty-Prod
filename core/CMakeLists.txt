@@ -157,6 +157,11 @@ add_executable(n60core_anc_actuators_test tests/test_anc_actuators.cpp)
 target_link_libraries(n60core_anc_actuators_test PRIVATE n60core)
 add_test(NAME n60core_anc_actuators COMMAND n60core_anc_actuators_test)
 
+# E27 S2c: analyser taps (ABI v21).
+add_executable(n60core_analyser_tap_test tests/test_analyser_tap.cpp)
+target_link_libraries(n60core_analyser_tap_test PRIVATE n60core)
+add_test(NAME n60core_analyser_tap COMMAND n60core_analyser_tap_test)
+
 add_executable(n60core_stereo_bass_test tests/test_stereo_bass.cpp)
 target_link_libraries(n60core_stereo_bass_test PRIVATE n60core)
 add_test(NAME n60core_stereo_bass COMMAND n60core_stereo_bass_test)

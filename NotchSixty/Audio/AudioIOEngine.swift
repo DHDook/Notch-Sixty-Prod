@@ -3104,6 +3104,30 @@ final class AudioIOEngine: ObservableObject {
         transportSession?.setAnalysisDemand(demandMask)
     }
 
+    /// E27 S2c (design note 16). Whether stereo graphs carry the Equalizer analyser taps. Swift decides this from
+    /// `e27.eq-safety` (the controller sets it); the engine and the core read no flag.
+    private(set) var analyserTapsInstalled = false
+
+    func setAnalyserTapsInstalled(_ installed: Bool) {
+        guard installed != analyserTapsInstalled else { return }
+        analyserTapsInstalled = installed
+        transportSession?.setAnalyserTapsInstalled(installed)
+    }
+
+    /// Bit 0 records the EQ tap, bit 1 the after-dynamics tap; 0 releases both.
+    func setAnalyserTapDemand(_ mask: UInt8) {
+        transportSession?.setAnalyserTapDemand(mask)
+    }
+
+    /// True when a tap can be read now: installed, and the core graph (not the kernel) is rendering.
+    var analyserTapsAvailable: Bool { transportSession?.analyserTapsAvailable ?? false }
+
+    func analyserTapWindow(afterDynamics: Bool, frames: Int) -> EQAnalyserTapWindow? {
+        guard let session = transportSession,
+              let window = session.readAnalyserTap(afterDynamics: afterDynamics, frames: frames) else { return nil }
+        return EQAnalyserTapWindow(left: window.left, right: window.right, sampleRate: session.outputSampleRate)
+    }
+
     func analysisCaptureSnapshot() -> N60AnalysisCaptureSnapshot? {
         transportSession?.analysisCaptureSnapshot()
     }
@@ -5640,6 +5664,7 @@ final class AudioIOEngine: ObservableObject {
         )
         session.unifiedGraphEnabled = unifiedGraphEnabled
         session.setInitialStereoAlignment(stereoAlignment)
+        session.setInitialAnalyserTaps(installed: analyserTapsInstalled)
         try session.configureHeadphoneDSP(
             headphoneSnapshot, profile: headphoneSnapshot == nil ? nil : headphoneDeviceProfileConfiguration)
         activeEQFIRProgram = nil

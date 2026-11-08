@@ -85,6 +85,45 @@ final class UnifiedGraphHost: @unchecked Sendable {
         return graph.map { UnsafeMutableRawPointer($0) }
     }
 
+    /// E27 S2c. Control plane, under the host lock. The newest `frames` samples of lanes 0 and 1 of an analyser tap
+    /// stage, taken at one start index (so the channels stay aligned). nil when the stage is not in the live graph,
+    /// holds fewer than `frames` samples since the last rebuild (a new snapshot starts empty), or the range was
+    /// overwritten while reading (the seqlock refuses it).
+    ///
+    /// `since`: samples written before this index (the ring held them frozen while demand was off) are not used; a
+    /// rebuild restarts the count, so a `since` above the current count is ignored.
+    func readAnalyserTap(stageId: UInt32, frames: Int, since: UInt64 = 0) -> (left: [Float], right: [Float])? {
+        guard frames > 0, frames <= Int(UnifiedGraphAnalyserTaps.capacityFrames) / 2 else { return nil }
+        lock.lock(); defer { lock.unlock() }
+        guard let graph else { return nil }
+        var written: UInt64 = 0
+        guard n60_graph_read_capture(graph, stageId, 0, 0, nil, 0, &written) == N60_STATUS_OK,
+              written >= UInt64(frames) else { return nil }
+        let floor = since <= written ? since : 0
+        guard written - floor >= UInt64(frames) else { return nil }
+        let start = written - UInt64(frames)
+        var lanes: [[Float]] = []
+        for lane in UInt32(0)..<2 {
+            var buffer = [Float](repeating: 0, count: frames)
+            var after: UInt64 = 0
+            let status = buffer.withUnsafeMutableBufferPointer {
+                n60_graph_read_capture(graph, stageId, lane, start, $0.baseAddress, UInt32(frames), &after)
+            }
+            guard status == N60_STATUS_OK else { return nil }
+            lanes.append(buffer)
+        }
+        return (lanes[0], lanes[1])
+    }
+
+    /// E27 S2c. Samples the tap has written so far (0 when the stage is absent).
+    func analyserTapWritten(stageId: UInt32) -> UInt64 {
+        lock.lock(); defer { lock.unlock() }
+        guard let graph else { return 0 }
+        var written: UInt64 = 0
+        guard n60_graph_read_capture(graph, stageId, 0, 0, nil, 0, &written) == N60_STATUS_OK else { return 0 }
+        return written
+    }
+
     var inputChannels: UInt32 { lock.lock(); defer { lock.unlock() }; return spec.inputChannels }
     var outputChannels: UInt32 { lock.lock(); defer { lock.unlock() }; return spec.outputChannels }
 

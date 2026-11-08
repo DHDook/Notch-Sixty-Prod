@@ -10,7 +10,8 @@ enum EQRenderHarness {
     static let block = 64
 
     static func spec(
-        _ eq: StereoEQConfiguration, rate: Double, preampDB: Double = 0, audition: EQAuditionOverride? = nil
+        _ eq: StereoEQConfiguration, rate: Double, preampDB: Double = 0, audition: EQAuditionOverride? = nil,
+        taps: UnifiedGraphAnalyserTaps? = nil
     ) throws -> UnifiedGraphSpec {
         let rendered = audition.map { eq.auditioned($0) } ?? eq
         var snapshot = try rendered.makeGraphSnapshot(
@@ -19,7 +20,8 @@ enum EQRenderHarness {
             bassManagementConfiguration: BassManagementConfiguration(),
             playbackConfiguration: PlaybackControlConfiguration()
         )
-        let configuration = try XCTUnwrap(UnifiedGraphTranslator.stereoConfiguration(snapshot: &snapshot, sampleRate: rate))
+        var configuration = try XCTUnwrap(UnifiedGraphTranslator.stereoConfiguration(snapshot: &snapshot, sampleRate: rate))
+        configuration.analyserTaps = taps
         return try configuration.makeSpec()
     }
 

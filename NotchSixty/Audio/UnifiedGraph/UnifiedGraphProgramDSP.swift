@@ -446,6 +446,7 @@ struct UnifiedGraphProgramDSP: Equatable, Sendable {
         N60_STAGE_SANITISE.rawValue: 1, N60_STAGE_METER_IN.rawValue: 2, N60_STAGE_GAIN.rawValue: 3,
         N60_STAGE_DENOISER.rawValue: 4, N60_STAGE_MS_ENCODE.rawValue: 5, N60_STAGE_PEQ.rawValue: 6,
         N60_STAGE_DYN_EQ.rawValue: 7, N60_STAGE_MS_DECODE.rawValue: 8, N60_STAGE_FIR.rawValue: 9,
+        N60_STAGE_ANALYSER_TAP_EQ.rawValue: 9.5, N60_STAGE_ANALYSER_TAP_DYN.rawValue: 11.5,
         N60_STAGE_COMPRESSOR.rawValue: 10, N60_STAGE_EXPANDER.rawValue: 11, N60_STAGE_METER_OUT.rawValue: 12,
         N60_STAGE_GENERATOR.rawValue: 3.5, N60_STAGE_EXTERNAL.rawValue: 12.5, N60_STAGE_BASS_MGMT.rawValue: 13,
         N60_STAGE_STEREO_CROSSOVER.rawValue: 13, N60_STAGE_ROOM_FIR.rawValue: 14, N60_STAGE_ROOM_FIR_TWO_BAND.rawValue: 14,

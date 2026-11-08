@@ -104,10 +104,16 @@ bool lanesOk(const n60_stage_desc &s, uint32_t outCh, Lanes rule) {
     return false;
 }
 
+inline bool isAnalyserTap(uint32_t kind) {
+    return kind == N60_STAGE_ANALYSER_TAP_EQ || kind == N60_STAGE_ANALYSER_TAP_DYN;
+}
+
 Lanes ruleOf(uint32_t kind) {
     switch (kind) {
         case N60_STAGE_BASS_MGMT:
         case N60_STAGE_PAUSE_GATE:
+        case N60_STAGE_ANALYSER_TAP_EQ:
+        case N60_STAGE_ANALYSER_TAP_DYN:
         case N60_STAGE_ANC_CAPTURE: return Lanes::MaskOnly;
         case N60_STAGE_SYMMETRY:
         case N60_STAGE_CROSSFEED:
@@ -201,7 +207,9 @@ uint32_t expectedParamCount(uint32_t kind, const float *p, uint32_t have) {
         case N60_STAGE_FRAC_DELAY: return 2;
         case N60_STAGE_ANC_GUARD: return kGuardParams;
         case N60_STAGE_ANC_INJECT: return have == 4 ? 4u : 3u;
-        case N60_STAGE_ANC_CAPTURE: return 1;
+        case N60_STAGE_ANC_CAPTURE:
+        case N60_STAGE_ANALYSER_TAP_EQ:
+        case N60_STAGE_ANALYSER_TAP_DYN: return 1;
         default: return 0;
     }
 }
@@ -478,6 +486,8 @@ bool isSystemKind(uint32_t kind) {
         case N60_STAGE_FRAC_DELAY:
         case N60_STAGE_STEREO_CROSSOVER:
         case N60_STAGE_EXTERNAL:
+        case N60_STAGE_ANALYSER_TAP_EQ:
+        case N60_STAGE_ANALYSER_TAP_DYN:
         case N60_STAGE_ANC_CAPTURE: return true;
         default: return false;
     }
@@ -588,6 +598,8 @@ bool paramOk(uint32_t kind, uint32_t i, float v, const float *p, double rate, ui
                 case 3: return isInt(v) && v >= 0.0f && v <= 16777216.0f;
                 default: return inR(v, -96.0, 0.0);
             }
+        case N60_STAGE_ANALYSER_TAP_EQ:
+        case N60_STAGE_ANALYSER_TAP_DYN:
         case N60_STAGE_ANC_CAPTURE: return v == 0.0f || v == 1.0f;
         default: return false;
     }
@@ -597,7 +609,7 @@ bool paramOk(uint32_t kind, uint32_t i, float v, const float *p, double rate, ui
 
 n60_status validateSystemStage(const n60_stage_desc &s, double rate, uint32_t outCh) {
     if (!lanesOk(s, outCh, ruleOf(s.kind))) return N60_STATUS_BAD_ARGUMENT;
-    if (s.kind == N60_STAGE_ANC_CAPTURE) {
+    if (s.kind == N60_STAGE_ANC_CAPTURE || isAnalyserTap(s.kind)) {
         if (s.capacityFrames < 1 || s.capacityFrames > N60_GRAPH_MAX_DELAY_FRAMES) return N60_STATUS_BAD_ARGUMENT;
     } else if (s.kind == N60_STAGE_EXTERNAL) {
         if (s.capacityFrames > N60_GRAPH_MAX_DELAY_FRAMES) return N60_STATUS_BAD_ARGUMENT;
@@ -707,6 +719,8 @@ void systemSizes(const n60_stage_desc &s, double rate, size_t &perLane, size_t &
         case N60_STAGE_STEREO_CROSSOVER: perLane = up(sizeof(XoLane)); shared = up(sizeof(XoShared)); break;
         case N60_STAGE_ANC_INJECT: shared = up(sizeof(InjectShared)); break;
         case N60_STAGE_ANC_GUARD: shared = up(sizeof(GuardState)); break;
+        case N60_STAGE_ANALYSER_TAP_EQ:
+        case N60_STAGE_ANALYSER_TAP_DYN:
         case N60_STAGE_ANC_CAPTURE:
             perLane = up(size_t(s.capacityFrames) * sizeof(std::atomic<uint32_t>));
             shared = up(sizeof(CapShared));
@@ -970,6 +984,8 @@ void systemInit(SnapHeader *h, const StageRec &r) {
             if (s->authorised != 0) rampSet(s->g, static_cast<float>(db2lin(p[2])), ramp);  // fade in, no click
             break;
         }
+        case N60_STAGE_ANALYSER_TAP_EQ:
+        case N60_STAGE_ANALYSER_TAP_DYN:
         case N60_STAGE_ANC_CAPTURE: new (sh) CapShared{};
             for (uint32_t l = 0; l < r.laneCount; ++l) {
                 std::atomic<uint32_t> *ring = reinterpret_cast<std::atomic<uint32_t> *>(laneState(h, r, l));
@@ -1068,7 +1084,9 @@ n60_status validateSystemParam(const SnapHeader *h, const StageRec &r, uint32_t 
         case N60_STAGE_EXTERNAL: live = idx == 0; break;
         case N60_STAGE_ANC_GUARD: live = idx == 11; break;
         case N60_STAGE_ANC_INJECT: live = idx == 2 || idx == 3; break;
-        default: live = false; break;  // pause gate, capture, authorisation: new snapshot only
+        case N60_STAGE_ANALYSER_TAP_EQ:
+        case N60_STAGE_ANALYSER_TAP_DYN: live = idx == 0; break;  // the demand switch
+        default: live = false; break;  // pause gate, ANC capture, authorisation: new snapshot only
     }
     const float *p = paramsOf(h, r);
     if (!paramOk(r.kind, idx, value, p, h->sampleRate, h->outputChannels)) return N60_STATUS_BAD_ARGUMENT;
@@ -1577,7 +1595,7 @@ void runInject(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames)
 }
 
 void runCapture(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) {
-    if (paramsOf(h, r)[0] == 0.0f) return;  // not authorised: nothing is recorded
+    if (paramsOf(h, r)[0] == 0.0f) return;  // not authorised (ANC) or no analyser demand (taps): nothing is recorded
     CapShared &cs = *reinterpret_cast<CapShared *>(sharedState(h, r));
     const uint64_t w = cs.written.load(std::memory_order_relaxed);
     const uint32_t cap = r.capacity;
@@ -1987,6 +2005,8 @@ void runSystem(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames)
         case N60_STAGE_FRAC_DELAY: runFracDelay(h, r, lanes, frames); break;
         case N60_STAGE_STEREO_CROSSOVER: runStereoCrossover(h, r, lanes, frames); break;
         case N60_STAGE_ANC_INJECT: runInject(h, r, lanes, frames); break;
+        case N60_STAGE_ANALYSER_TAP_EQ:
+        case N60_STAGE_ANALYSER_TAP_DYN:
         case N60_STAGE_ANC_CAPTURE: runCapture(h, r, lanes, frames); break;
         case N60_STAGE_PROTECTION: runProtection(h, r, lanes, frames); break;
         case N60_STAGE_ANC_GUARD: runGuard(h, r, lanes, frames); break;
@@ -2068,7 +2088,7 @@ bool readGuardStatus(const SnapHeader *h, uint32_t stageId, n60_guard_status *ou
 n60_status readCapture(const SnapHeader *h, uint32_t stageId, uint32_t lane, uint64_t startSample, float *dst,
                        uint32_t frames, uint64_t *written) {
     const StageRec *r = findStage(h, stageId);
-    if (r == nullptr || r->kind != N60_STAGE_ANC_CAPTURE || lane >= h->outputChannels) return N60_STATUS_BAD_ARGUMENT;
+    if (r == nullptr || (r->kind != N60_STAGE_ANC_CAPTURE && !isAnalyserTap(r->kind)) || lane >= h->outputChannels) return N60_STATUS_BAD_ARGUMENT;
     uint32_t k = 0;
     for (; k < r->laneCount; ++k) {
         if (laneOf(*r, k) == lane) break;

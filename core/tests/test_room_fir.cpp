@@ -447,7 +447,7 @@ static void testDesignThroughStage(double rate) {
 }
 
 int main() {
-    CHECK(n60_graph_abi_version() == 20u, "ABI v20");
+    CHECK(n60_graph_abi_version() == 21u, "ABI v21");
     for (double rate : kRates) {
         for (uint32_t D : kDs) {
             testEquivalence(rate, D);
