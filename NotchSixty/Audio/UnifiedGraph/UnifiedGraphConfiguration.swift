@@ -118,6 +118,8 @@ struct UnifiedGraphBassManagement: Equatable, Sendable {
     var lfeLane: Int?
     var lfeLowPassHz: Double = 120
     var lfeGainDB: Double = 10
+    /// E6 S12g: the Linkwitz-Riley 8 (48 dB per octave) split in place of the default Linkwitz-Riley 4.
+    var steepSplit = false
     var subwoofers: [UnifiedGraphSubwoofer]
 }
 
@@ -617,6 +619,12 @@ struct UnifiedGraphConfiguration: Equatable, Sendable {
                       subs[index].polarityInverted ? 1 : 0, Float(subs[index].eq.count)]
                 p += try peqParameters(subs[index].eq)
             }
+        } else if bass.steepSplit {
+            p.append(0) // the filter-spec trailer needs the extension word (plain one-sub list)
+        }
+        if bass.steepSplit {
+            let family = Float(N60_GRAPH_FILTER_LINKWITZ_RILEY)
+            p += [family, 8, family, 8]
         }
         return p
     }
