@@ -9,6 +9,8 @@
 /* Begin PBXBuildFile section */
 		E27C295049611000000B0000 /* EQComparisonTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E27C295049610000000A0000 /* EQComparisonTests.swift */; };
 		E27C913354471000000B0000 /* ProductionEQCompareBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = E27C913354470000000A0000 /* ProductionEQCompareBar.swift */; };
+		E27D100000001000000B0000 /* EQFIRProgramCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = E27D100000000000000A0000 /* EQFIRProgramCache.swift */; };
+		E27D100000011000000B0000 /* EQFIRPrewarmTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E27D100000010000000A0000 /* EQFIRPrewarmTests.swift */; };
 		E27C996876871000000B0000 /* EQComparison.swift in Sources */ = {isa = PBXBuildFile; fileRef = E27C996876870000000A0000 /* EQComparison.swift */; };
 		E27D00000000000000000603 /* EQProgramAnalyserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E27D00000000000000000503 /* EQProgramAnalyserTests.swift */; };
 		E27C501416951000000B0000 /* EQRenderHarness.swift in Sources */ = {isa = PBXBuildFile; fileRef = E27C501416950000000A0000 /* EQRenderHarness.swift */; };
@@ -650,6 +652,8 @@
 /* Begin PBXFileReference section */
 		E27C295049610000000A0000 /* EQComparisonTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EQComparisonTests.swift; sourceTree = "<group>"; };
 		E27C913354470000000A0000 /* ProductionEQCompareBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductionEQCompareBar.swift; sourceTree = "<group>"; };
+		E27D100000000000000A0000 /* EQFIRProgramCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EQFIRProgramCache.swift; sourceTree = "<group>"; };
+		E27D100000010000000A0000 /* EQFIRPrewarmTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EQFIRPrewarmTests.swift; sourceTree = "<group>"; };
 		E27C996876870000000A0000 /* EQComparison.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EQComparison.swift; sourceTree = "<group>"; };
 		E27D00000000000000000503 /* EQProgramAnalyserTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EQProgramAnalyserTests.swift; sourceTree = "<group>"; };
 		E27C501416950000000A0000 /* EQRenderHarness.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EQRenderHarness.swift; sourceTree = "<group>"; };
@@ -1530,6 +1534,7 @@
 				E27A00000000000000000209 /* EQGraphGeometryTests.swift */,
 				E27B00000000000000000404 /* EQHeadroomTests.swift */,
 				E27C295049610000000A0000 /* EQComparisonTests.swift */,
+				E27D100000010000000A0000 /* EQFIRPrewarmTests.swift */,
 				E27C501416950000000A0000 /* EQRenderHarness.swift */,
 				E27D00000000000000000503 /* EQProgramAnalyserTests.swift */,
 				E27C839511430000000A0000 /* EQBypassFadeTests.swift */,
@@ -1700,6 +1705,7 @@
 				E26A00000000000000000050 /* QuietZone */,
 				A30000000000000000000050 /* Realtime */,
 				A20000000000000000000020 /* AudioIOEngine.swift */,
+				E27D100000000000000A0000 /* EQFIRProgramCache.swift */,
 				E4J500000000000000000011 /* AdaptiveTonalLiveLink.swift */,
 				F89200000000000000000011 /* AmbientMonitorTransport.swift */,
 				F96100000000000000000015 /* FeedForwardReferenceTransport.swift */,
@@ -2064,6 +2070,7 @@
 				F112A0000000000000000003 /* ProductionHardwareAcceptanceWorkspace.swift in Sources */,
 				F11300000000000000000001 /* ProductionUserGuideView.swift in Sources */,
 				A20000000000000000000010 /* AudioIOEngine.swift in Sources */,
+				E27D100000001000000B0000 /* EQFIRProgramCache.swift in Sources */,
 				A20000000000000000000011 /* CoreAudioError.swift in Sources */,
 				F63000000000000000000001 /* CoreAudioNChannelTransportSession.swift in Sources */,
 				A20000000000000000000012 /* AudioOutputDevice.swift in Sources */,
@@ -2459,6 +2466,7 @@
 				E27A00000000000000000109 /* EQGraphGeometryTests.swift in Sources */,
 				E27B00000000000000000304 /* EQHeadroomTests.swift in Sources */,
 				E27C295049611000000B0000 /* EQComparisonTests.swift in Sources */,
+				E27D100000011000000B0000 /* EQFIRPrewarmTests.swift in Sources */,
 				E27C501416951000000B0000 /* EQRenderHarness.swift in Sources */,
 				E27D00000000000000000603 /* EQProgramAnalyserTests.swift in Sources */,
 				E27C839511431000000B0000 /* EQBypassFadeTests.swift in Sources */,
