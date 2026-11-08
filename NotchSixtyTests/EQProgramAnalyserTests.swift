@@ -82,26 +82,11 @@ final class EQProgramAnalyserTests: XCTestCase {
         }
     }
 
-    func testFlagOffIsInertAndNeverSetsDemand() async {
-        let source = FakeSource()
-        source.snapshot = snapshot()
-        let store = defaults()
-        store.set(true, forKey: PreferenceKeys.Equalizer.programAnalyser)
-        let controller = EQProgramAnalyserController(source: source, isAvailable: false, defaults: store)
-        XCTAssertFalse(controller.isOn, "a stored 'on' is ignored with the flag off")
-        controller.setOn(true)
-        XCTAssertFalse(controller.isOn)
-        await controller.run()
-        controller.poll()
-        XCTAssertTrue(source.demands.isEmpty)
-        XCTAssertFalse(controller.isCapturing)
-    }
-
     func testSwitchPersistsAndLoopHoldsThenReleasesDemand() async throws {
         let source = FakeSource()
         source.snapshot = snapshot()
         let store = defaults()
-        let controller = EQProgramAnalyserController(source: source, isAvailable: true, defaults: store)
+        let controller = EQProgramAnalyserController(source: source, defaults: store)
         XCTAssertFalse(controller.isOn)
         await controller.run()
         XCTAssertTrue(source.demands.isEmpty, "off: no capture demand")
@@ -129,35 +114,14 @@ final class EQProgramAnalyserTests: XCTestCase {
         XCTAssertFalse(store.bool(forKey: PreferenceKeys.Equalizer.programAnalyser))
     }
 
-    func testProfileControllerBuildsAnalyserInertWithFlagOff() {
-        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
-        defer { try? FileManager.default.removeItem(at: root) }
-        let off = ProductProfileController(
-            engine: AudioIOEngine(), storageURL: root.appendingPathComponent("profiles.json"), autoPreampAvailable: false)
-        XCTAssertFalse(off.eqProgramAnalyser.isAvailable)
-        let on = ProductProfileController(
-            engine: AudioIOEngine(), storageURL: root.appendingPathComponent("profiles2.json"), autoPreampAvailable: true)
-        XCTAssertTrue(on.eqProgramAnalyser.isAvailable)
-    }
-
     // MARK: E27 S2c: analyser taps (design note 16)
-
-    func testFlagOffNeverInstallsTapsOrSetsTapDemand() async {
-        let source = FakeSource()
-        let controller = EQProgramAnalyserController(source: source, isAvailable: false, defaults: defaults())
-        controller.setMode(.eqAndDynamics)
-        XCTAssertEqual(controller.mode, .eqOnly, "the mode is not changeable with the flag off")
-        await controller.run()
-        XCTAssertTrue(source.tapsInstalled.isEmpty)
-        XCTAssertTrue(source.tapDemands.isEmpty)
-    }
 
     func testModeDefaultsToEQOnlyPersistsAndDrivesTapDemand() async throws {
         let source = FakeSource()
         source.snapshot = snapshot()
         let store = defaults()
-        let controller = EQProgramAnalyserController(source: source, isAvailable: true, defaults: store)
-        XCTAssertEqual(source.tapsInstalled, [true], "available: the idle taps are installed once")
+        let controller = EQProgramAnalyserController(source: source, defaults: store)
+        XCTAssertEqual(source.tapsInstalled, [true], "the idle taps are installed once")
         XCTAssertEqual(controller.mode, .eqOnly)
         controller.setOn(true)
         let task = Task { await controller.run() }
@@ -175,14 +139,14 @@ final class EQProgramAnalyserTests: XCTestCase {
         task.cancel()
         await task.value
         XCTAssertEqual(source.tapDemands, [1, 2, 0, 1, 0], "leaving the page releases the tap demand")
-        let reopened = EQProgramAnalyserController(source: source, isAvailable: true, defaults: store)
+        let reopened = EQProgramAnalyserController(source: source, defaults: store)
         XCTAssertEqual(reopened.mode, .eqOnly)
     }
 
     func testOutputCurveFallsBackToFullChainWithoutATap() {
         let source = FakeSource()
         source.snapshot = snapshot()
-        let controller = EQProgramAnalyserController(source: source, isAvailable: true, defaults: defaults())
+        let controller = EQProgramAnalyserController(source: source, defaults: defaults())
         controller.poll()
         XCTAssertEqual(controller.spectrum.outputLabel, "Output (full chain)", "no tap (kernel path): the S2b curve")
         XCTAssertEqual(controller.spectrum.outputDB, [-30, -8])

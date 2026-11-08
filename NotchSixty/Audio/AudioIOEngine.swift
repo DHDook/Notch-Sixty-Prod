@@ -3104,8 +3104,8 @@ final class AudioIOEngine: ObservableObject {
         transportSession?.setAnalysisDemand(demandMask)
     }
 
-    /// E27 S2c (design note 16). Whether stereo graphs carry the Equalizer analyser taps. Swift decides this from
-    /// `e27.eq-safety` (the controller sets it); the engine and the core read no flag.
+    /// E27 S2c (design note 16). Whether stereo graphs carry the Equalizer analyser taps. The analyser controller sets it;
+    /// the engine and the core read no flag.
     private(set) var analyserTapsInstalled = false
 
     func setAnalyserTapsInstalled(_ installed: Bool) {

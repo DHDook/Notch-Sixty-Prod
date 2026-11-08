@@ -4,7 +4,7 @@ import Foundation
 // E27 S3b: EQ A/B comparison. Two EQ slots, a toggle that publishes the other slot through the
 // normal `replaceStereoEQConfiguration` path, copy and Keep, a per-slot undo history, and an
 // optional loudness match. Swift only; nothing here runs on the audio thread, and the engine
-// reads no flag (the controller is built inert unless `e27.eq-safety` is on).
+// reads no flag.
 
 enum EQComparisonSlot: String, CaseIterable, Identifiable, Sendable {
     case a, b
@@ -137,8 +137,7 @@ enum EQLoudnessMatch {
     }
 }
 
-/// Keeps the A/B state for the Equalizer page. Created by the profile controller; inert (every
-/// call is a no-op) unless `isAvailable`, which is the `e27.eq-safety` flag decided at launch.
+/// Keeps the A/B state for the Equalizer page. Created by the profile controller.
 @MainActor
 final class EQComparisonController: ObservableObject {
     @Published private(set) var slots: EQComparisonSlots
@@ -148,7 +147,6 @@ final class EQComparisonController: ObservableObject {
     /// The trim, in dB (zero or negative), currently taken off the louder slot.
     @Published private(set) var matchTrimDB = 0.0
 
-    let isAvailable: Bool
     /// Wired by the content A/B controller: true while a content A/B session is open.
     var contentABActive: () -> Bool = { false }
     private let engine: AudioIOEngine
@@ -161,12 +159,11 @@ final class EQComparisonController: ObservableObject {
 
     init(
         engine: AudioIOEngine, autoPreamp: EQAutoPreampController,
-        audition: EQAuditionController? = nil, isAvailable: Bool
+        audition: EQAuditionController? = nil
     ) {
         self.engine = engine
         self.autoPreamp = autoPreamp
         self.audition = audition
-        self.isAvailable = isAvailable
         slots = EQComparisonSlots(live: engine.stereoEQConfiguration)
         observation = engine.objectWillChange
             .receive(on: DispatchQueue.main)
@@ -186,7 +183,7 @@ final class EQComparisonController: ObservableObject {
     /// Follows edits to the live EQ (the page, undo, Room Correction): they belong to the active
     /// slot. A profile switch calls `reset()` instead.
     func liveChanged() {
-        guard isAvailable, isComparing else { return }
+        guard isComparing else { return }
         let live = engine.stereoEQConfiguration
         guard !Self.sameIgnoringBypass(live, slots.configuration(slots.active)) else { return }
         slots.updateActive(from: live)
@@ -204,7 +201,6 @@ final class EQComparisonController: ObservableObject {
     func toggle(history: EQEditHistory?) throws { try select(slots.active.other, history: history) }
 
     func select(_ slot: EQComparisonSlot, history: EQEditHistory?) throws {
-        guard isAvailable else { return }
         if !isComparing, contentABActive() { throw Refusal.contentABActive }
         audition?.stop()
         if isComparing, slot == slots.active { return }
@@ -227,7 +223,7 @@ final class EQComparisonController: ObservableObject {
     }
 
     func copy(from source: EQComparisonSlot) throws {
-        guard isAvailable, isComparing else { return }
+        guard isComparing else { return }
         if let publish = slots.copy(from: source, live: engine.stereoEQConfiguration) {
             try engine.replaceStereoEQConfiguration(publish)
         }
@@ -237,7 +233,7 @@ final class EQComparisonController: ObservableObject {
 
     /// Keeps `slot`: it becomes the EQ, the other slot is dropped and the comparison ends.
     func keep(_ slot: EQComparisonSlot, history: EQEditHistory?) throws {
-        guard isAvailable, isComparing else { return }
+        guard isComparing else { return }
         if slot != slots.active { try select(slot, history: history) }
         let live = engine.stereoEQConfiguration
         slots = EQComparisonSlots(live: live)
@@ -248,7 +244,7 @@ final class EQComparisonController: ObservableObject {
     }
 
     func setLoudnessMatch(_ enabled: Bool) {
-        guard isAvailable, loudnessMatchEnabled != enabled else { return }
+        guard loudnessMatchEnabled != enabled else { return }
         loudnessMatchEnabled = enabled
         reconcileMatch()
     }

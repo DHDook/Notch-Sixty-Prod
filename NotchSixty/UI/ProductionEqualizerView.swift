@@ -103,7 +103,7 @@ struct ProductionEqualizerView: View {
             ProductionActionErrorBanner(message: $actionError)
             modeBar
 
-            if let comparison, let audition, comparison.isAvailable {
+            if let comparison, let audition {
                 ProductionEQCompareBar(
                     comparison: comparison, audition: audition, history: history,
                     selectedBand: bands.first { $0.id == selectedBandID }, perform: { perform($0) }
@@ -139,9 +139,8 @@ struct ProductionEqualizerView: View {
             pendingPublishTask = nil
             pendingDragBand = nil
             dragPreview = nil
-            // Leaving the page ends its history, so no undo step outlives the view.
-            history.clear()
-            audition?.stop()
+            // Leaving the page ends its history and any held Listen (E27 S4, G14).
+            EQPageLifecycle.leave(history: history, audition: audition)
         }
     }
 
@@ -261,7 +260,7 @@ struct ProductionEqualizerView: View {
                 onSelect: { selectedBandID = $0 },
                 onPreview: { band in
                     // Option-press on a handle auditions that band until release.
-                    if let audition, audition.isAvailable, audition.active == nil,
+                    if let audition, audition.active == nil,
                        NSEvent.modifierFlags.contains(.option) {
                         audition.start(band: band)
                     }

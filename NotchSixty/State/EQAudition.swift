@@ -68,16 +68,14 @@ final class EQAuditionController: ObservableObject {
     @Published private(set) var active: EQAuditionOverride?
     @Published private(set) var lastErrorDescription: String?
 
-    let isAvailable: Bool
     var maxDuration: TimeInterval = EQAuditionOverride.maxDuration
     private let engine: AudioIOEngine
     private var timer: Task<Void, Never>?
     private var engineObservation: AnyCancellable?
     private var windowObservation: NSObjectProtocol?
 
-    init(engine: AudioIOEngine, isAvailable: Bool) {
+    init(engine: AudioIOEngine) {
         self.engine = engine
-        self.isAvailable = isAvailable
         engineObservation = engine.$eqAudition
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
@@ -105,7 +103,6 @@ final class EQAuditionController: ObservableObject {
     }
 
     func start(_ override: EQAuditionOverride) {
-        guard isAvailable else { return }
         do {
             try engine.setEQAudition(override)
             active = override
@@ -130,5 +127,16 @@ final class EQAuditionController: ObservableObject {
         guard active != nil || engine.eqAudition != nil else { return }
         active = nil
         do { try engine.setEQAudition(nil) } catch { lastErrorDescription = error.localizedDescription }
+    }
+}
+
+/// E27 S4 (G14): what leaving the Equalizer page does, in one place so a test can drive it without a view.
+/// Leaving ends the page's undo history, so no step outlives the view, and ends a held Listen audition so
+/// the band-pass never keeps playing on another page.
+@MainActor
+enum EQPageLifecycle {
+    static func leave(history: EQEditHistory, audition: EQAuditionController?) {
+        history.clear()
+        audition?.stop()
     }
 }

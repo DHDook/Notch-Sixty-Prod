@@ -1,7 +1,6 @@
 import SwiftUI
 
-/// E27 S3b: the Equalizer page's A/B slots and the Listen audition control. Shown only when
-/// `e27.eq-safety` is on (the controllers are built inert otherwise).
+/// E27 S3b: the Equalizer page's A/B slots and the Listen audition control.
 struct ProductionEQCompareBar: View {
     @ObservedObject var comparison: EQComparisonController
     @ObservedObject var audition: EQAuditionController

@@ -31,7 +31,7 @@ final class EQFIRPrewarmTests: XCTestCase {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         addTeardownBlock { try? FileManager.default.removeItem(at: root) }
         return ProductProfileController(
-            engine: engine, storageURL: root.appendingPathComponent("profiles.json"), autoPreampAvailable: true)
+            engine: engine, storageURL: root.appendingPathComponent("profiles.json"))
     }
 
     // MARK: The cache

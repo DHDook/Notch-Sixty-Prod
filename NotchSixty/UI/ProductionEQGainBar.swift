@@ -2,7 +2,7 @@ import SwiftUI
 
 /// E27 S3a: the Equalizer page's gain row. The headroom badge (EQ sine-gain prediction against
 /// the preamp, red when the post-EQ meter clipped in the last two seconds), the input preamp
-/// (or its trim while auto preamp is on), the auto preamp switch (behind `e27.eq-safety`) and
+/// (or its trim while auto preamp is on), the auto preamp switch and
 /// the output gain. Every control uses the engine's existing gain setters.
 struct ProductionEQGainBar: View {
     @ObservedObject var engine: AudioIOEngine
@@ -51,15 +51,13 @@ struct ProductionEQGainBar: View {
                 .help("Gain before all processing. Lower it to leave headroom for EQ boosts.")
             }
 
-            if autoPreamp.isAvailable {
-                Toggle("Auto preamp", isOn: Binding(
-                    get: { autoPreamp.isOn },
-                    set: { on in perform { try autoPreamp.setOn(on) } }
-                ))
-                .toggleStyle(.switch)
-                .fixedSize()
-                .help("Lowers the preamp by the largest boost the EQ can apply, rounded up to 0.1 dB, so boosts do not clip.")
-            }
+            Toggle("Auto preamp", isOn: Binding(
+                get: { autoPreamp.isOn },
+                set: { on in perform { try autoPreamp.setOn(on) } }
+            ))
+            .toggleStyle(.switch)
+            .fixedSize()
+            .help("Lowers the preamp by the largest boost the EQ can apply, rounded up to 0.1 dB, so boosts do not clip.")
 
             ProductionGainStepper(
                 title: "Output",

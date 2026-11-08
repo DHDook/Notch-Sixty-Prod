@@ -352,7 +352,7 @@ it, behind `e26.sub-aware-anc`. Live output stays behind the per-feature arm.
 ### E27 Equalizer page world-class polish (owner, 7 Nov 2026)
 
 Plan: `docs/epics/E27.md`. Baseline PR #395 (E11 S11 band panel). Feel, filter views and safety
-on the Equalizer page; S1 and S2 flagless, the engine-facing S3 items behind `e27.eq-safety`.
+on the Equalizer page; S1 and S2 flagless, the engine-facing S3 items were behind `e27.eq-safety` (removed in S4).
 
 - [x] S1 feel and precision: hover read-out, Q by scroll or pinch, double-click add and reset, axis-locked and fine drag, keyboard nudging, unit-aware number fields, undo and redo
 - [x] S2 filter views: band curves, other-lane ghost, y-range and auto, x-range to 0.49 fs at every rate, phase, group delay, impulse and step from the engine's filter math (lab case moved to gap G6, owned by S4)
@@ -362,7 +362,7 @@ on the Equalizer page; S1 and S2 flagless, the engine-facing S3 items behind `e2
 - [x] S3c `e27/eq-ab-fir-prewarm` prepared FIR programs for linear-phase A/B and engine-level tests (G10, G11; owner slice for both)
 - [~] S2b program analyser overlay (Input and "Output (full chain)" spectrum on the existing render capture, no engine tap; built dark behind e27.eq-safety, PR #405; the EQ-only view is S2c)
 - [~] S2c `e27/analyser-eq-taps`: EQ-only and EQ + Dynamics spectrum taps with a toggle (needs-owner, realtime; owner, 7 Nov 2026; built dark behind e27.eq-safety, PR pending; G16 and G17 and flag removal to S4)
-- [ ] S4 flag removed (owner decision)
+- [~] S4 `e27/ship` flag `e27.eq-safety` removed, offline lab cases and end-to-end tests added (PR pending, needs-owner, ready-but-held); open gaps G3, G4, G5, G9, G12, G14, G16 need the owner's running-window checks or a DAC (E22), so not ticked
 
 ### E28 Dynamics and Meters polish (owner, 7 Nov 2026)
 

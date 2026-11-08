@@ -1,14 +1,13 @@
 import SwiftUI
 
 /// E27 S2b: the "Analyser" switch above the response graph. It drives the polling loop while the
-/// page is on screen and hands the latest spectrum to the page through `spectrum`. Hidden when
-/// `e27.eq-safety` is off (the controller is then inert).
+/// page is on screen and hands the latest spectrum to the page through `spectrum`.
 struct EQProgramAnalyserSwitch: View {
     @ObservedObject var analyser: EQProgramAnalyserController
     @Binding var spectrum: EQProgramSpectrum
 
     var body: some View {
-        if analyser.isAvailable {
+        Group {
             Toggle("Analyser", isOn: Binding(get: { analyser.isOn }, set: { analyser.setOn($0) }))
                 .toggleStyle(.switch)
                 .controlSize(.small)
