@@ -139,8 +139,12 @@ enum UnifiedGraphTranslator {
         }
         let p = snapshot.protection
         if p.limiterEnabled || p.truePeakGuardEnabled || p.softClipperEnabled || p.gainRiderEnabled {
-            let ceilingDB = 20.0 * log10(Double(max(p.limiterCeilingLinear, 1e-6)))
-            guard ceilingDB >= -20, ceilingDB <= 0 else { return .failure(.protectionCeilingOutOfRange) }
+            // The snapshot carries linear gains, so a setting exactly on a range end (-20 dB, 12 dB drive, -6 dB
+            // threshold) comes back a hair outside it after the dB round trip. Ends are snapped (E6 S12f2, G34);
+            // only a genuinely out-of-range ceiling is refused.
+            let rawCeilingDB = 20.0 * log10(Double(max(p.limiterCeilingLinear, 1e-6)))
+            guard rawCeilingDB >= -20.001, rawCeilingDB <= 0.001 else { return .failure(.protectionCeilingOutOfRange) }
+            let ceilingDB = min(0, max(-20, rawCeilingDB))
             var protection = UnifiedGraphProtection(
                 limiterEnabled: p.limiterEnabled,
                 ceilingDB: ceilingDB,
@@ -153,12 +157,12 @@ enum UnifiedGraphTranslator {
             if p.softClipperEnabled || p.gainRiderEnabled {
                 protection.clipper = UnifiedGraphSoftClipper(
                     enabled: p.softClipperEnabled,
-                    driveDB: 20.0 * log10(Double(max(p.clipperDriveLinear, 1e-6))),
-                    thresholdDB: 20.0 * log10(Double(max(p.clipperThresholdLinear, 1e-6))),
+                    driveDB: min(12, max(0, 20.0 * log10(Double(max(p.clipperDriveLinear, 1e-6))))),
+                    thresholdDB: min(0, max(-6, 20.0 * log10(Double(max(p.clipperThresholdLinear, 1e-6))))),
                     knee: Double(p.clipperKneeSmooth),
                     curve: Int(p.clipperCurve.rawValue),
                     autoCompensate: p.clipperCompensationLinear != 1,
-                    asymmetryDB: Double(p.clipperAsymmetryTrimDB)
+                    asymmetryDB: min(3, max(-3, Double(p.clipperAsymmetryTrimDB)))
                 )
                 protection.rider = UnifiedGraphGainRider(
                     enabled: p.gainRiderEnabled,

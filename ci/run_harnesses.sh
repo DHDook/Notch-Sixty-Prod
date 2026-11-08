@@ -535,6 +535,21 @@ if selected e27_analyser_tap; then
     fi
 fi
 
+# E6 S12f2: state carry across a swap, non-finite reset, corner precision against a double reference.
+if selected e6_state_carry; then
+    build_core_objs
+    if [ "$CORE_OK" = 1 ]; then
+        if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -Icore/include -Icore/src core/tests/test_state_carry.cpp \
+            "${CORE_OBJS[@]}" -o "$OUT/e6_core_state_carry" && "$OUT/e6_core_state_carry"; then
+            passed+=(e6_core_state_carry)
+        else
+            failed+=(e6_core_state_carry)
+        fi
+    else
+        failed+=(e6_state_carry)
+    fi
+fi
+
 # E6 S12a: the cleanup stage (DC, infrasonic, mains notch, hum detector): behaviour at the eight standard rates.
 if selected e6_cleanup; then
     build_core_objs

@@ -228,6 +228,38 @@ static void testProtection(double rate) {
         CHECK(r.grMaxDb == 0.0f && r.grNowDb == 0.0f && r.guardActive == 0, "%.0f bypassed protection reads zero", rate);
         n60_graph_retire(g);
     }
+    {
+        /* E6 S12f2 (G35): oversampling only (limiter and clipper off). The half-band round trip is the whole latency
+         * (32 frames at 2x, 48 at 4x), hard-asserted rather than compared with the kernel; the limiter guard is not
+         * active, and a limiter at the same factor adds its look-ahead and reports the guard. */
+        const uint32_t factors[2] = {2, 4};
+        const uint32_t expectLat[2] = {32, 48};
+        for (int k = 0; k < 2; k++) {
+            const float only[7] = {0, -6, 1, 50, 10, 0, (float)factors[k]};
+            n60_stage_desc st = stage(N60_STAGE_PROTECTION, 20, N60_LANE_ALL, 0, only, 7);
+            n60_graph *g = build(rate, 2, &st, 1);
+            double sig[2] = {0.5, 0.5};
+            run(g, 2, 0, (uint64_t)(rate * 0.05), isp, rate, sig);
+            n60_dynamics_readback r = readDyn(g, 20, 0, NULL);
+            CHECK(n60_graph_latency_frames(g) == expectLat[k], "%.0f oversampling-only %ux latency %u expected %u", rate,
+                  factors[k], n60_graph_latency_frames(g), expectLat[k]);
+            CHECK(r.guardActive == 0 && r.grMaxDb == 0.0f && r.grNowDb == 0.0f, "%.0f oversampling-only %ux guard %u", rate,
+                  factors[k], r.guardActive);
+            n60_graph_retire(g);
+
+            const float lim[7] = {1, -6, 1, 50, 10, 0, (float)factors[k]};
+            n60_stage_desc st2 = stage(N60_STAGE_PROTECTION, 20, N60_LANE_ALL, 0, lim, 7);
+            n60_graph *g2 = build(rate, 2, &st2, 1);
+            run(g2, 2, 0, (uint64_t)(rate * 0.05), isp, rate, sig);
+            r = readDyn(g2, 20, 0, NULL);
+            const uint32_t la = (uint32_t)ceil(10.0 * 0.001 * rate * factors[k]);
+            const uint32_t want = expectLat[k] + (la + factors[k] - 1) / factors[k];
+            CHECK(n60_graph_latency_frames(g2) == want, "%.0f limiter %ux latency %u expected %u", rate, factors[k],
+                  n60_graph_latency_frames(g2), want);
+            CHECK(r.guardActive == 1, "%.0f limiter %ux guard active", rate, factors[k]);
+            n60_graph_retire(g2);
+        }
+    }
 }
 
 /* Publishes `st` as the graph's new topology (same rate and channels as `build`). */

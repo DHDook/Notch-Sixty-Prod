@@ -73,12 +73,6 @@ bool inR(double v, double lo, double hi) { return std::isfinite(v) && v >= lo &&
 bool isInt(float v) { return std::isfinite(v) && v == std::floor(v); }
 bool isFlag(float v) { return v == 0.0f || v == 1.0f; }
 
-struct Bq {
-    float b0, b1, b2, a1, a2;
-};
-struct BqState {
-    float z1, z2;
-};
 struct Nc {
     double b0, b1, b2, a1, a2;
 };
@@ -97,21 +91,22 @@ struct NotchBank {
 struct CleanShared {
     // fixed per snapshot
     float bypassCoef;
-    float dcPole;
+    double dcPole;
     uint32_t decimation;
     uint32_t windowSamples;
     uint32_t retuneFrames;
     double detRate;
     // dc
-    float dcMix, dcPrevInL, dcPrevInR, dcPrevOutL, dcPrevOutR;
+    float dcMix;
+    double dcPrevInL, dcPrevInR, dcPrevOutL, dcPrevOutR;  // double state: the pole sits near 1 at high rates (G9)
     // infrasonic
     float infraMix;
     float infraSeenHz;
     float infraSeenSlope;
     uint32_t infraSections;
-    Bq infra[kMaxInfra];
-    BqState infraL[kMaxInfra];
-    BqState infraR[kMaxInfra];
+    Nc infra[kMaxInfra];  // double coefficients and state: a 10 Hz corner at 384 kHz puts the poles within 1e-4 of 1 (G9)
+    NState infraL[kMaxInfra];
+    NState infraR[kMaxInfra];
     // mains notch
     float mainsMix;
     uint32_t transTotal, transRemaining;
@@ -136,11 +131,10 @@ struct CleanShared {
 float smoothToward(float current, float target, float coef) { return target + coef * (current - target); }
 bool nearZero(float v) { return std::fabs(v) <= kParkEps; }
 
-Bq identityBq() { return Bq{1.0f, 0.0f, 0.0f, 0.0f, 0.0f}; }
 Nc identityNc() { return Nc{1.0, 0.0, 0.0, 0.0, 0.0}; }
 
-// RBJ high-pass, normalised in double, stored as float (the kernel's N60BiquadDesign with N60BiquadFilterTypeHighPass).
-bool designHighPass(double rate, double f, double q, Bq &out) {
+// RBJ high-pass, normalised in double, stored as double (the kernel's N60BiquadDesign with N60BiquadFilterTypeHighPass).
+bool designHighPass(double rate, double f, double q, Nc &out) {
     if (!std::isfinite(f) || f <= 0.0 || f >= rate * 0.5 || !std::isfinite(q) || q <= 0.0) return false;
     const double omega = 2.0 * kPi * f / rate;
     const double cosOmega = std::cos(omega);
@@ -152,8 +146,7 @@ bool designHighPass(double rate, double f, double q, Bq &out) {
     const double a1 = -2.0 * cosOmega;
     const double a2 = 1.0 - alpha;
     if (!std::isfinite(a0) || std::fabs(a0) < 1.0e-20) return false;
-    const Bq c{static_cast<float>(b0 / a0), static_cast<float>(b1 / a0), static_cast<float>(b2 / a0),
-               static_cast<float>(a1 / a0), static_cast<float>(a2 / a0)};
+    const Nc c{b0 / a0, b1 / a0, b2 / a0, a1 / a0, a2 / a0};
     if (!std::isfinite(c.b0) || !std::isfinite(c.b1) || !std::isfinite(c.b2) || !std::isfinite(c.a1) || !std::isfinite(c.a2)) {
         return false;
     }
@@ -164,11 +157,11 @@ bool designHighPass(double rate, double f, double q, Bq &out) {
 void designInfra(CleanShared &S, double rate, float hz, float slope) {
     const uint32_t sections = slope < 0.5f ? 2u : (slope < 1.5f ? 4u : 8u);
     const uint32_t order = sections * 2;
-    for (uint32_t i = 0; i < kMaxInfra; ++i) S.infra[i] = identityBq();
+    for (uint32_t i = 0; i < kMaxInfra; ++i) S.infra[i] = identityNc();
     for (uint32_t i = 0; i < sections; ++i) {
         const double angle = ((2.0 * double(i) + 1.0) * kPi) / (2.0 * double(order));
         const double q = 1.0 / (2.0 * std::cos(angle));
-        if (!designHighPass(rate, double(hz), q, S.infra[i])) S.infra[i] = identityBq();
+        if (!designHighPass(rate, double(hz), q, S.infra[i])) S.infra[i] = identityNc();
     }
     S.infraSections = sections;
     S.infraSeenHz = hz;
@@ -216,17 +209,6 @@ void designBank(NotchBank &b, double rate, const float *p) {
         if (harmonicHz >= rate * 0.45 || std::fabs(depth) < 1.0e-6f) continue;
         if (!designNotch(rate, harmonicHz, depth, double(b.q), b.coef[i])) b.coef[i] = identityNc();
     }
-}
-
-float runBiquads(const Bq *c, BqState *st, uint32_t n, float x) {
-    float out = x;
-    for (uint32_t i = 0; i < n; ++i) {
-        const float y = c[i].b0 * out + st[i].z1;
-        st[i].z1 = c[i].b1 * out - c[i].a1 * y + st[i].z2;
-        st[i].z2 = c[i].b2 * out - c[i].a2 * y;
-        out = y;
-    }
-    return out;
 }
 
 float runNotches(const Nc *c, NState *st, uint32_t n, float x) {
@@ -389,7 +371,7 @@ void parkPre(CleanShared &S) {
 
 void activatePre(CleanShared &S) {
     if (!S.preParked) return;
-    S.dcPrevInL = S.dcPrevInR = S.dcPrevOutL = S.dcPrevOutR = 0.0f;
+    S.dcPrevInL = S.dcPrevInR = S.dcPrevOutL = S.dcPrevOutR = 0.0;
     std::memset(S.infraL, 0, sizeof S.infraL);
     std::memset(S.infraR, 0, sizeof S.infraR);
     std::memset(S.curL, 0, sizeof S.curL);
@@ -434,7 +416,7 @@ void cleanupInit(SnapHeader *h, const StageRec &r) {
     CleanShared &S = *new (sharedState(h, r)) CleanShared{};
     const double rate = h->sampleRate;
     S.bypassCoef = static_cast<float>(std::exp(-1.0 / (rate * (5.0 / 1000.0))));
-    S.dcPole = static_cast<float>(std::exp(-2.0 * kPi * kDcCutoffHz / rate));
+    S.dcPole = std::exp(-2.0 * kPi * kDcCutoffHz / rate);
     long dec = std::llround(rate / kDetTargetRate);
     if (dec < 1) dec = 1;
     S.decimation = static_cast<uint32_t>(dec);
@@ -450,6 +432,59 @@ void cleanupInit(SnapHeader *h, const StageRec &r) {
     S.dcParked = S.infraParked = S.mainsParked = S.detParked = S.preParked = 1;
     S.detFreqBits.store(0, std::memory_order_relaxed);
     S.detConfBits.store(0, std::memory_order_relaxed);
+}
+
+void cleanupCarry(SnapHeader *from, SnapHeader *to) {
+    if (from == nullptr || to == nullptr) return;
+    const StageRec *src = stages(from);
+    StageRec *dst = stages(to);
+    for (uint32_t i = 0; i < to->stageCount; ++i) {
+        if (dst[i].kind != N60_STAGE_CLEANUP) continue;
+        for (uint32_t j = 0; j < from->stageCount; ++j) {
+            if (src[j].kind != N60_STAGE_CLEANUP || src[j].id != dst[i].id) continue;
+            if (from->sampleRate != to->sampleRate) break;
+            const CleanShared &a = *reinterpret_cast<const CleanShared *>(sharedState(from, src[j]));
+            CleanShared &b = *reinterpret_cast<CleanShared *>(sharedState(to, dst[i]));
+            b.dcMix = a.dcMix;
+            b.dcPrevInL = a.dcPrevInL; b.dcPrevInR = a.dcPrevInR;
+            b.dcPrevOutL = a.dcPrevOutL; b.dcPrevOutR = a.dcPrevOutR;
+            b.dcParked = a.dcParked;
+            b.infraMix = a.infraMix;
+            b.infraParked = a.infraParked;
+            // Section states carry for the sections both designs have; extra sections start silent.
+            const uint32_t sections = std::min(a.infraSections, b.infraSections);
+            for (uint32_t k = 0; k < sections; ++k) {
+                b.infraL[k] = a.infraL[k];
+                b.infraR[k] = a.infraR[k];
+            }
+            b.mainsMix = a.mainsMix;
+            b.transTotal = a.transTotal;
+            b.transRemaining = a.transRemaining;
+            b.notchInit = a.notchInit;
+            b.cur = a.cur;
+            b.pend = a.pend;
+            std::memcpy(b.curL, a.curL, sizeof b.curL);
+            std::memcpy(b.curR, a.curR, sizeof b.curR);
+            std::memcpy(b.pendL, a.pendL, sizeof b.pendL);
+            std::memcpy(b.pendR, a.pendR, sizeof b.pendR);
+            b.mainsParked = a.mainsParked;
+            b.preParked = a.preParked;
+            // The detector window is only meaningful for the same search grid.
+            if (a.detSeenCenter == b.detSeenCenter) {
+                b.detCounter = a.detCounter;
+                b.detCount = a.detCount;
+                std::memcpy(b.detCos, a.detCos, sizeof b.detCos);
+                std::memcpy(b.detSin, a.detSin, sizeof b.detSin);
+                std::memcpy(b.detRe, a.detRe, sizeof b.detRe);
+                std::memcpy(b.detIm, a.detIm, sizeof b.detIm);
+                b.detEnergy = a.detEnergy;
+                b.detParked = a.detParked;
+                b.detFreqBits.store(a.detFreqBits.load(std::memory_order_relaxed), std::memory_order_relaxed);
+                b.detConfBits.store(a.detConfBits.load(std::memory_order_relaxed), std::memory_order_relaxed);
+            }
+            break;
+        }
+    }
 }
 
 void runCleanup(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) {
@@ -472,6 +507,20 @@ void runCleanup(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames
         float left = L[i];
         float right = R[i];
 
+        // G14: a non-finite sample would poison every recursive state (and the next snapshot's carry), so it clears
+        // them and outputs silence for that sample.
+        if (!std::isfinite(left) || !std::isfinite(right)) {
+            S.dcPrevInL = S.dcPrevInR = S.dcPrevOutL = S.dcPrevOutR = 0.0;
+            for (uint32_t k = 0; k < kMaxInfra; ++k) { S.infraL[k] = NState{}; S.infraR[k] = NState{}; }
+            for (uint32_t k = 0; k < kMaxHarm; ++k) {
+                S.curL[k] = NState{}; S.curR[k] = NState{}; S.pendL[k] = NState{}; S.pendR[k] = NState{};
+            }
+            resetDetectorWindow(S);
+            L[i] = 0.0f;
+            R[i] = 0.0f;
+            continue;
+        }
+
         if (!dcOn && !infraOn && !mainsOn) {
             if (!S.preParked && preNeutral(S)) parkPre(S);
             if (S.preParked) {
@@ -483,27 +532,27 @@ void runCleanup(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames
         }
 
         if (dcOn && S.dcParked) {
-            S.dcPrevInL = S.dcPrevInR = S.dcPrevOutL = S.dcPrevOutR = 0.0f;
+            S.dcPrevInL = S.dcPrevInR = S.dcPrevOutL = S.dcPrevOutR = 0.0;
             S.dcMix = 0.0f;
             S.dcParked = 0;
         }
         if (!S.dcParked) {
             const float dryL = left;
             const float dryR = right;
-            const float dcL = dryL - S.dcPrevInL + S.dcPole * S.dcPrevOutL;
-            const float dcR = dryR - S.dcPrevInR + S.dcPole * S.dcPrevOutR;
-            S.dcPrevInL = dryL;
-            S.dcPrevInR = dryR;
+            const double dcL = double(dryL) - S.dcPrevInL + S.dcPole * S.dcPrevOutL;
+            const double dcR = double(dryR) - S.dcPrevInR + S.dcPole * S.dcPrevOutR;
+            S.dcPrevInL = double(dryL);
+            S.dcPrevInR = double(dryR);
             S.dcPrevOutL = dcL;
             S.dcPrevOutR = dcR;
             S.dcMix = smoothToward(S.dcMix, dcOn ? 1.0f : 0.0f, bypass);
             if (!dcOn && nearZero(S.dcMix)) {
                 S.dcMix = 0.0f;
-                S.dcPrevInL = S.dcPrevInR = S.dcPrevOutL = S.dcPrevOutR = 0.0f;
+                S.dcPrevInL = S.dcPrevInR = S.dcPrevOutL = S.dcPrevOutR = 0.0;
                 S.dcParked = 1;
             } else {
-                left = dryL + (dcL - dryL) * S.dcMix;
-                right = dryR + (dcR - dryR) * S.dcMix;
+                left = dryL + static_cast<float>((dcL - double(dryL)) * double(S.dcMix));
+                right = dryR + static_cast<float>((dcR - double(dryR)) * double(S.dcMix));
             }
         }
 
@@ -516,8 +565,8 @@ void runCleanup(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames
         if (!S.infraParked) {
             const float dryL = left;
             const float dryR = right;
-            const float hpL = runBiquads(S.infra, S.infraL, S.infraSections, dryL);
-            const float hpR = runBiquads(S.infra, S.infraR, S.infraSections, dryR);
+            const float hpL = runNotches(S.infra, S.infraL, S.infraSections, dryL);
+            const float hpR = runNotches(S.infra, S.infraR, S.infraSections, dryR);
             S.infraMix = smoothToward(S.infraMix, infraOn ? 1.0f : 0.0f, bypass);
             if (!infraOn && nearZero(S.infraMix)) {
                 S.infraMix = 0.0f;
@@ -578,11 +627,10 @@ void runCleanup(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames
     }
     // Denormal guard, once per block: decayed filter state below 1e-30 (-600 dBFS) is flushed to zero so a long tail
     // after loud input never runs the float units in denormal mode. Bounded work, no allocation.
-    auto flushF = [](float &v) { if (std::fabs(v) < 1.0e-30f) v = 0.0f; };
     auto flushD = [](double &v) { if (std::fabs(v) < 1.0e-30) v = 0.0; };
-    flushF(S.dcPrevInL); flushF(S.dcPrevInR); flushF(S.dcPrevOutL); flushF(S.dcPrevOutR);
+    flushD(S.dcPrevInL); flushD(S.dcPrevInR); flushD(S.dcPrevOutL); flushD(S.dcPrevOutR);
     for (uint32_t k = 0; k < kMaxInfra; ++k) {
-        flushF(S.infraL[k].z1); flushF(S.infraL[k].z2); flushF(S.infraR[k].z1); flushF(S.infraR[k].z2);
+        flushD(S.infraL[k].z1); flushD(S.infraL[k].z2); flushD(S.infraR[k].z1); flushD(S.infraR[k].z2);
     }
     for (uint32_t k = 0; k < kMaxHarm; ++k) {
         flushD(S.curL[k].z1); flushD(S.curL[k].z2); flushD(S.curR[k].z1); flushD(S.curR[k].z2);

@@ -211,6 +211,12 @@ void runWidener(ImgShared &S, const float *p, double rate, float *L, float *R, u
     for (uint32_t i = 0; i < frames; ++i) {
         const float dryL = L[i];
         const float dryR = R[i];
+        if (!std::isfinite(dryL) || !std::isfinite(dryR)) {  // G14: never let a non-finite sample into the recursions
+            std::memset(S.lowSt, 0, sizeof S.lowSt);
+            std::memset(S.highSt, 0, sizeof S.highSt);
+            L[i] = R[i] = 0.0f;
+            continue;
+        }
         const float mid = 0.5f * (dryL + dryR);
         const float side = 0.5f * (dryL - dryR);
         float lowSide = side;
@@ -253,6 +259,7 @@ struct DeShared {
     BqState hpL, hpR, lpL, lpR;
     float essGainDb;
     uint32_t essParked;
+    float lastDetector, lastDetectorDb, lastGainDb, lastGainLin;  // pure caches of linearToDb / dbToLinear
     // telemetry (control thread reads)
     std::atomic<uint32_t> grMaxBits;
     std::atomic<uint32_t> grNowBits;
@@ -292,6 +299,11 @@ void runHarsh(DeShared &S, const float *p, double rate, float *L, float *R, uint
     for (uint32_t i = 0; i < frames; ++i) {
         const float dryL = L[i];
         const float dryR = R[i];
+        if (!std::isfinite(dryL) || !std::isfinite(dryR)) {
+            S.shelfL = S.shelfR = BqState{0.0f, 0.0f};
+            L[i] = R[i] = 0.0f;
+            continue;
+        }
         const float wetL = runBq(S.shelf, S.shelfL, dryL);
         const float wetR = runBq(S.shelf, S.shelfR, dryR);
         S.harshMix = smoothToward(S.harshMix, target, S.bypassCoef);
@@ -347,12 +359,21 @@ void runEss(DeShared &S, const float *p, double rate, float *L, float *R, uint32
     for (uint32_t i = 0; i < frames; ++i) {
         const float dryL = L[i];
         const float dryR = R[i];
+        if (!std::isfinite(dryL) || !std::isfinite(dryR)) {
+            clearEssState(S);
+            L[i] = R[i] = 0.0f;
+            continue;
+        }
         float bandL = runBq(S.hp, S.hpL, dryL);
         bandL = runBq(S.lp, S.lpL, bandL);
         float bandR = runBq(S.hp, S.hpR, dryR);
         bandR = runBq(S.lp, S.lpR, bandR);
         const float detector = std::fmax(std::fabs(bandL), std::fabs(bandR));
-        float targetDb = essTarget(linearToDb(detector), enabled, thr, ratio);
+        if (detector != S.lastDetector) {  // G13: the log is recomputed only when the detector moved (same value as before)
+            S.lastDetector = detector;
+            S.lastDetectorDb = linearToDb(detector);
+        }
+        float targetDb = essTarget(S.lastDetectorDb, enabled, thr, ratio);
         targetDb = std::fmax(targetDb, range);
         const float coef = !enabled ? S.bypassCoef : (targetDb < S.essGainDb ? S.attackPole : S.releasePole);
         S.essGainDb = smoothToward(S.essGainDb, targetDb, coef);
@@ -362,7 +383,11 @@ void runEss(DeShared &S, const float *p, double rate, float *L, float *R, uint32
             S.essParked = 1;
             break;
         }
-        const float gain = dbToLinear(S.essGainDb);
+        if (S.essGainDb != S.lastGainDb) {  // the pow is recomputed only when the smoothed gain moved
+            S.lastGainDb = S.essGainDb;
+            S.lastGainLin = dbToLinear(S.essGainDb);
+        }
+        const float gain = S.lastGainLin;
         if (dynEq) {
             L[i] = dryL + (gain - 1.0f) * bandL;
             R[i] = dryR + (gain - 1.0f) * bandR;
@@ -452,6 +477,10 @@ void imageInit(SnapHeader *h, const StageRec &r) {
         S.seenRelease = p[kEssRelease];
         S.harshParked = 1;
         S.essParked = 1;
+        S.lastDetector = 0.0f;
+        S.lastDetectorDb = linearToDb(0.0f);
+        S.lastGainDb = 0.0f;
+        S.lastGainLin = dbToLinear(0.0f);
     }
 }
 
@@ -477,6 +506,39 @@ void runImage(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) 
         flush(S.shelfL.z1); flush(S.shelfL.z2); flush(S.shelfR.z1); flush(S.shelfR.z2);
         flush(S.hpL.z1); flush(S.hpL.z2); flush(S.hpR.z1); flush(S.hpR.z2);
         flush(S.lpL.z1); flush(S.lpL.z2); flush(S.lpR.z1); flush(S.lpR.z2);
+    }
+}
+
+void imageCarry(SnapHeader *from, SnapHeader *to) {
+    if (from == nullptr || to == nullptr || from->sampleRate != to->sampleRate) return;
+    const StageRec *src = stages(from);
+    StageRec *dst = stages(to);
+    for (uint32_t i = 0; i < to->stageCount; ++i) {
+        if (!isImageKind(dst[i].kind)) continue;
+        for (uint32_t j = 0; j < from->stageCount; ++j) {
+            if (src[j].kind != dst[i].kind || src[j].id != dst[i].id) continue;
+            if (dst[i].kind == N60_STAGE_IMAGE) {
+                const ImgShared &a = *reinterpret_cast<const ImgShared *>(sharedState(from, src[j]));
+                ImgShared &b = *reinterpret_cast<ImgShared *>(sharedState(to, dst[i]));
+                b.mLL = a.mLL; b.mLR = a.mLR; b.mRL = a.mRL; b.mRR = a.mRR;
+                b.modeParked = a.modeParked;
+                b.lowW = a.lowW; b.midW = a.midW; b.highW = a.highW;
+                b.wideParked = a.wideParked;
+                std::memcpy(b.lowSt, a.lowSt, sizeof b.lowSt);
+                std::memcpy(b.highSt, a.highSt, sizeof b.highSt);
+            } else {
+                const DeShared &a = *reinterpret_cast<const DeShared *>(sharedState(from, src[j]));
+                DeShared &b = *reinterpret_cast<DeShared *>(sharedState(to, dst[i]));
+                b.shelfL = a.shelfL; b.shelfR = a.shelfR;
+                b.harshMix = a.harshMix;
+                b.harshParked = a.harshParked;
+                b.hpL = a.hpL; b.hpR = a.hpR; b.lpL = a.lpL; b.lpR = a.lpR;
+                b.essGainDb = a.essGainDb;
+                b.essParked = a.essParked;
+                b.grNowBits.store(a.grNowBits.load(std::memory_order_relaxed), std::memory_order_relaxed);
+            }
+            break;
+        }
     }
 }
 

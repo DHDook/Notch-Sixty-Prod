@@ -133,6 +133,7 @@
 		E6D000000000000000000107 /* LiveNChannelUnifiedGraphTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6D000000000000000000007 /* LiveNChannelUnifiedGraphTests.swift */; };
 		E6D100000000000000000002 /* UnifiedGraphCleanupTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6D100000000000000000001 /* UnifiedGraphCleanupTests.swift */; };
 		E6D100000000000000000012 /* UnifiedGraphImageTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6D100000000000000000011 /* UnifiedGraphImageTests.swift */; };
+		E6D100000000000000000043 /* UnifiedGraphUIRangeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6D100000000000000000044 /* UnifiedGraphUIRangeTests.swift */; };
 		E6D100000000000000000022 /* UnifiedGraphLoudnessTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6D100000000000000000021 /* UnifiedGraphLoudnessTests.swift */; };
 		E6D100000000000000000032 /* UnifiedGraphMultibandTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6D100000000000000000031 /* UnifiedGraphMultibandTests.swift */; };
 		E6D100000000000000000042 /* UnifiedGraphBypassAuditionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6D100000000000000000041 /* UnifiedGraphBypassAuditionTests.swift */; };
@@ -792,6 +793,7 @@
 		E6D0000000000000000000B1 /* UnifiedGraphProgramDSPTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnifiedGraphProgramDSPTests.swift; sourceTree = "<group>"; };
 		E6D100000000000000000001 /* UnifiedGraphCleanupTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnifiedGraphCleanupTests.swift; sourceTree = "<group>"; };
 		E6D100000000000000000011 /* UnifiedGraphImageTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnifiedGraphImageTests.swift; sourceTree = "<group>"; };
+		E6D100000000000000000044 /* UnifiedGraphUIRangeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnifiedGraphUIRangeTests.swift; sourceTree = "<group>"; };
 		E6D100000000000000000021 /* UnifiedGraphLoudnessTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnifiedGraphLoudnessTests.swift; sourceTree = "<group>"; };
 		E6D100000000000000000031 /* UnifiedGraphMultibandTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnifiedGraphMultibandTests.swift; sourceTree = "<group>"; };
 		E6D100000000000000000041 /* UnifiedGraphBypassAuditionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnifiedGraphBypassAuditionTests.swift; sourceTree = "<group>"; };
@@ -1498,6 +1500,7 @@
 				E6D000000000000000000009 /* UnifiedGraphRoutesTests.swift */,
 				E6D100000000000000000001 /* UnifiedGraphCleanupTests.swift */,
 				E6D100000000000000000011 /* UnifiedGraphImageTests.swift */,
+				E6D100000000000000000044 /* UnifiedGraphUIRangeTests.swift */,
 				E6D100000000000000000021 /* UnifiedGraphLoudnessTests.swift */,
 				E6D100000000000000000031 /* UnifiedGraphMultibandTests.swift */,
 				E6D100000000000000000041 /* UnifiedGraphBypassAuditionTests.swift */,
@@ -2438,6 +2441,7 @@
 				E6D000000000000000000108 /* UnifiedGraphRoutesTests.swift in Sources */,
 				E6D100000000000000000002 /* UnifiedGraphCleanupTests.swift in Sources */,
 				E6D100000000000000000012 /* UnifiedGraphImageTests.swift in Sources */,
+				E6D100000000000000000043 /* UnifiedGraphUIRangeTests.swift in Sources */,
 				E6D100000000000000000022 /* UnifiedGraphLoudnessTests.swift in Sources */,
 				E6D100000000000000000032 /* UnifiedGraphMultibandTests.swift in Sources */,
 				E6D100000000000000000042 /* UnifiedGraphBypassAuditionTests.swift in Sources */,
