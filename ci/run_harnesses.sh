@@ -70,7 +70,7 @@ build_core_objs() {
     CORE_BUILT=1
     CORE_OK=1
     local src
-    for src in graph snapshot fft stages_dsp conv/nufir stages_system stages_matrix stages_generator stages_cleanup stages_image stages_loudness stages_route fold layout \
+    for src in graph snapshot fft stages_dsp conv/nufir stages_system stages_matrix stages_generator stages_cleanup stages_image stages_loudness stages_multiband stages_route fold layout \
         measure/offline_fft measure/ess measure/deconvolve measure/reference_room measure/timing measure/distortion measure/decay measure/waterfall measure/monitor_ring measure/spl measure/rta correct/minphase correct/design correct/synth correct/bass correct/multisub_search xover/xover; do
         local obj="$OUT/n60core_${src//\//_}.o"
         if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -fno-exceptions -fno-rtti -Icore/include -Icore/src \
@@ -565,6 +565,21 @@ if selected e6_image; then
     fi
 fi
 
+# E6 S12d: the multiband compressor stage: behaviour at the eight standard rates.
+if selected e6_multiband; then
+    build_core_objs
+    if [ "$CORE_OK" = 1 ]; then
+        if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -Icore/include -Icore/src core/tests/test_multiband.cpp \
+            "${CORE_OBJS[@]}" -o "$OUT/e6_core_multiband" && "$OUT/e6_core_multiband"; then
+            passed+=(e6_core_multiband)
+        else
+            failed+=(e6_core_multiband)
+        fi
+    else
+        failed+=(e6_multiband)
+    fi
+fi
+
 # E6 S12c: the loudness stage (match, contour, dialogue leveler): behaviour at the eight standard rates.
 if selected e6_loudness; then
     build_core_objs
@@ -634,6 +649,8 @@ if selected e6_core_graph; then
         harness e6_core_image_parity "${STRICT[@]}" -O2 -include stddef.h -Icore/include -I"$RT" core/tests/test_image_parity.c \
             "$RT/N60Dynamics.c" "$RT/N60DynamicEQ.c" "$RT/N60SpectralDenoiser.c" "$RT/N60Protection.c" "${CORE_OBJS[@]}" -lc++ -lm
         harness e6_core_loudness_parity "${STRICT[@]}" -O2 -include stddef.h -Icore/include -I"$RT" core/tests/test_loudness_parity.c \
+            "$RT/N60Dynamics.c" "$RT/N60DynamicEQ.c" "$RT/N60SpectralDenoiser.c" "$RT/N60Protection.c" "${CORE_OBJS[@]}" -lc++ -lm
+        harness e6_core_multiband_parity "${STRICT[@]}" -O2 -include stddef.h -Icore/include -I"$RT" core/tests/test_multiband_parity.c \
             "$RT/N60Dynamics.c" "$RT/N60DynamicEQ.c" "$RT/N60SpectralDenoiser.c" "$RT/N60Protection.c" "${CORE_OBJS[@]}" -lc++ -lm
         harness e6_core_fracdelay_parity "${STRICT[@]}" -O2 -Icore/include core/tests/test_fracdelay_parity.c \
             "${CORE_OBJS[@]}" -lc++ -lm

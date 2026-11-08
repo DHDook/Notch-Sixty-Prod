@@ -37,6 +37,7 @@
 #include "snapshot.hpp"
 #include "stages_cleanup.hpp"
 #include "stages_loudness.hpp"
+#include "stages_multiband.hpp"
 #include "stages_dsp.hpp"
 #include "stages_system.hpp"
 
@@ -651,6 +652,13 @@ n60_status n60_graph_read_mains(n60_graph *g, uint32_t stageId, n60_mains_readba
     if (out->structSize != sizeof(n60_mains_readback)) return N60_STATUS_ABI_MISMATCH;
     syncLatest(g);
     return n60::readMains(g->latest, stageId, out) ? N60_STATUS_OK : N60_STATUS_BAD_ARGUMENT;
+}
+
+n60_status n60_graph_read_multiband(n60_graph *g, uint32_t stageId, n60_multiband_readback *out) {
+    if (g == nullptr || out == nullptr) return N60_STATUS_BAD_ARGUMENT;
+    if (out->structSize != sizeof(n60_multiband_readback)) return N60_STATUS_ABI_MISMATCH;
+    syncLatest(g);
+    return n60::readMultiband(g->latest, stageId, out) ? N60_STATUS_OK : N60_STATUS_BAD_ARGUMENT;
 }
 
 n60_status n60_graph_read_loudness(n60_graph *g, uint32_t stageId, n60_loudness_readback *out) {

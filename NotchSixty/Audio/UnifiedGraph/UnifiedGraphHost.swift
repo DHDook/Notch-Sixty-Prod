@@ -353,6 +353,14 @@ final class UnifiedGraphHost: @unchecked Sendable {
             diagnostics.dialogueVoiceConfidence = loud.dialogueVoiceConfidence
             diagnostics.dialogueBoostDB = loud.dialogueBoostDb
         }
+        // E6 S12d: per-band multiband gain reduction (the kernel reports the value at the end of the block).
+        var band = n60_multiband_readback()
+        band.structSize = UInt32(MemoryLayout<n60_multiband_readback>.size)
+        if n60_graph_read_multiband(graph, UnifiedGraphConfiguration.multibandStageId, &band) == N60_STATUS_OK {
+            diagnostics.multibandLowGainReductionDB = band.grNowDb.0
+            diagnostics.multibandMidGainReductionDB = band.grNowDb.1
+            diagnostics.multibandHighGainReductionDB = band.grNowDb.2
+        }
         if let prot = dynamicsReading(graph, stageId: N60_LSTAGE_PROTECTION) {
             diagnostics.limiterGainReductionDB = prot.grMaxDb
             diagnostics.inputTruePeakLinear = prot.inTruePeak

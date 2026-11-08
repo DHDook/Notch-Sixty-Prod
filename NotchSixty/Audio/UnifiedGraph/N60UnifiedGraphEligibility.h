@@ -522,6 +522,76 @@ static inline bool N60UnifiedGraphLoudnessParams(
     return true;
 }
 
+// E6 S12d: the three-band multiband compressor as the core MULTIBAND stage's 29 parameters (graph.h "Multiband"). Same
+// recover-then-verify rule: the attack and release times come from inverting exp(-1/(rate*t)) and each sidechain high-pass
+// frequency from its stored biquad (a2 = (1 - alpha)/(1 + alpha), sin(w) = alpha*2Q), first snapped to a coarse grid and
+// then raw; the compressor is rebuilt with the kernel's own setter and every stored coefficient must match exactly or the
+// kernel keeps the chain. The kernel has no program-dependent release, so the three auto-release flags are 0 (E28 S7c).
+static inline bool N60UnifiedGraphMultibandParams(
+    const N60DSPGraphSnapshot * _Nonnull s, float out[_Nonnull 29], bool * _Nonnull needed
+) {
+    const N60MultibandCompressorSnapshot *m = &s->dynamics.multibandCompressor;
+    const double rate = s->sampleRate;
+    for (int i = 0; i < 29; ++i) out[i] = 0.0f;
+    out[1] = 120.0f; out[2] = 2500.0f;
+    for (int b = 0; b < 3; ++b) {
+        out[5 + b] = 0.0f; out[8 + b] = 1.0f; out[11 + b] = 10.0f; out[14 + b] = 100.0f;
+    }
+    *needed = m->enabled;
+    if (!*needed) return true;
+    if (!(rate >= 8000.0 && rate <= 768000.0)) return false;
+    float attackRaw[3], releaseRaw[3], hpfRaw[3];
+    for (int b = 0; b < 3; ++b) {
+        const double a = m->attackCoefficient[b], rl = m->releaseCoefficient[b];
+        if (!(a > 0.0 && a < 1.0 && rl > 0.0 && rl < 1.0)) return false;
+        attackRaw[b] = (float)(-1000.0 / (rate * log(a)));
+        releaseRaw[b] = (float)(-1000.0 / (rate * log(rl)));
+        const N60BiquadCoefficients id = N60BiquadCoefficientsMakeIdentity();
+        if (memcmp(&m->sidechainHighPass[b], &id, sizeof id) == 0) {
+            hpfRaw[b] = 0.0f;
+        } else {
+            const double a2 = m->sidechainHighPass[b].a2;
+            const double alpha = (1.0 - a2) / (1.0 + a2);
+            const double sinw = alpha * 2.0 * 0.7071067811865476;
+            if (!(sinw > 0.0 && sinw < 1.0)) return false;
+            hpfRaw[b] = (float)(asin(sinw) * rate / (2.0 * M_PI));
+        }
+    }
+    bool ok = false;
+    for (int pass = 0; pass < 2 && !ok; ++pass) {
+        float atk[3], rel[3], hpf[3];
+        for (int b = 0; b < 3; ++b) {
+            atk[b] = pass == 0 ? (float)N60UnifiedGraphSnapValue(attackRaw[b], 1.0e-2) : attackRaw[b];
+            rel[b] = pass == 0 ? (float)N60UnifiedGraphSnapValue(releaseRaw[b], 1.0e-2) : releaseRaw[b];
+            hpf[b] = hpfRaw[b] == 0.0f ? 0.0f : (pass == 0 ? (float)N60UnifiedGraphSnapValue(hpfRaw[b], 1.0e-1) : hpfRaw[b]);
+        }
+        N60DynamicsSnapshot r = N60DynamicsSnapshotMakeBypassed(rate);
+        if (!N60DynamicsSnapshotSetMultibandCompressorAdvanced(&r, rate, true, m->lowMidFrequencyHz, m->midHighFrequencyHz,
+                m->lowTopology, m->highTopology, m->thresholdDB[0], m->thresholdDB[1], m->thresholdDB[2],
+                m->ratio[0], m->ratio[1], m->ratio[2], atk[0], atk[1], atk[2], rel[0], rel[1], rel[2],
+                m->kneeWidthDB[0], m->kneeWidthDB[1], m->kneeWidthDB[2], hpf[0], hpf[1], hpf[2],
+                m->makeupGainDB[0], m->makeupGainDB[1], m->makeupGainDB[2])) continue;
+        const N60MultibandCompressorSnapshot *b = &r.multibandCompressor;
+        if (b->lowSectionCount != m->lowSectionCount || b->highSectionCount != m->highSectionCount
+            || memcmp(b->attackCoefficient, m->attackCoefficient, sizeof b->attackCoefficient) != 0
+            || memcmp(b->releaseCoefficient, m->releaseCoefficient, sizeof b->releaseCoefficient) != 0
+            || memcmp(b->sidechainHighPass, m->sidechainHighPass, sizeof b->sidechainHighPass) != 0
+            || memcmp(b->lowPass, m->lowPass, sizeof b->lowPass) != 0
+            || memcmp(b->highPass, m->highPass, sizeof b->highPass) != 0) continue;
+        if ((double)(float)m->lowMidFrequencyHz != m->lowMidFrequencyHz
+            || (double)(float)m->midHighFrequencyHz != m->midHighFrequencyHz) continue;
+        out[0] = 1.0f; out[1] = (float)m->lowMidFrequencyHz; out[2] = (float)m->midHighFrequencyHz;
+        out[3] = m->lowTopology == N60CrossoverTopologyLinkwitzRiley48 ? 1.0f : 0.0f;
+        out[4] = m->highTopology == N60CrossoverTopologyLinkwitzRiley48 ? 1.0f : 0.0f;
+        for (int i = 0; i < 3; ++i) {
+            out[5 + i] = m->thresholdDB[i]; out[8 + i] = m->ratio[i]; out[11 + i] = atk[i]; out[14 + i] = rel[i];
+            out[17 + i] = m->kneeWidthDB[i]; out[20 + i] = hpf[i]; out[23 + i] = m->makeupGainDB[i];
+        }
+        ok = true;
+    }
+    return ok;
+}
+
 // What the kernel's denoiser sees while it is switched off (ABI v9 park view): FFT size of the quality
 // setting, profile revision and command. The kernel keeps its profile while off, applies a Reset command
 // and drops the profile on a quality change, all of which the core reproduces from these three numbers. A
@@ -683,9 +753,6 @@ static inline N60UnifiedGraphUnsupportedReason N60UnifiedGraphSnapshotUnsupporte
         }
     }
     const N60DynamicsSnapshot *d = &s->dynamics;
-    if (d->multibandCompressor.enabled) {
-        return N60UnifiedGraphUnsupportedDynamics;
-    }
     float scratch[10];
     {
         float cleanup[26];
@@ -694,7 +761,9 @@ static inline N60UnifiedGraphUnsupportedReason N60UnifiedGraphSnapshotUnsupporte
         float image[8];
         float deess[12];
         float loudness[32];
-        bool imageNeeded = false, deessNeeded = false, loudnessNeeded = false;
+        float multiband[29];
+        bool imageNeeded = false, deessNeeded = false, loudnessNeeded = false, multibandNeeded = false;
+        if (!N60UnifiedGraphMultibandParams(s, multiband, &multibandNeeded)) return N60UnifiedGraphUnsupportedDynamics;
         if (!N60UnifiedGraphLoudnessParams(s, loudness, &loudnessNeeded)) return N60UnifiedGraphUnsupportedDynamics;
         if (!N60UnifiedGraphImageParams(s, image, &imageNeeded)) return N60UnifiedGraphUnsupportedDynamics;
         if (!N60UnifiedGraphDeEssParams(s, deess, &deessNeeded)) return N60UnifiedGraphUnsupportedDynamics;

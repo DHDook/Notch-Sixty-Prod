@@ -17,6 +17,7 @@
 #include "stages_cleanup.hpp"
 #include "stages_image.hpp"
 #include "stages_loudness.hpp"
+#include "stages_multiband.hpp"
 #include "stages_generator.hpp"
 #include "stages_route.hpp"
 #include "stages_matrix.hpp"
@@ -230,6 +231,7 @@ uint32_t rankOf(uint32_t kind) {
     if (kind == N60_STAGE_CLEANUP) return 37;           // ABI v22: after the generator, before the denoiser (rank 40)
     if (kind == N60_STAGE_IMAGE) return 96;             // ABI v23: after the EQ tap, before the de-esser and the compressor
     if (kind == N60_STAGE_LOUDNESS) return 97;          // ABI v24: after IMAGE, before the de-esser
+    if (kind == N60_STAGE_MULTIBAND) return 99;         // ABI v25: after the de-esser, before the compressor (100)
     if (kind == N60_STAGE_DEESS) return 98;             // ABI v23: after IMAGE (and the S12c loudness slot at 97), before the compressor (100)
     if (kind == N60_STAGE_ANALYSER_TAP_EQ) return 95;   // ABI v21: after FIR, before the compressor
     if (kind == N60_STAGE_ANALYSER_TAP_DYN) return 115; // ABI v21: after the expander, before METER_OUT
@@ -273,6 +275,7 @@ size_t stateStrideFor(const n60_stage_desc &s, double rate, uint32_t firScheme) 
             else if (isCleanupKind(s.kind)) cleanupSizes(s, rate, lane, shared);
             else if (isImageKind(s.kind)) imageSizes(s, rate, lane, shared);
             else if (isLoudnessKind(s.kind)) loudnessSizes(s, rate, lane, shared);
+            else if (isMultibandKind(s.kind)) multibandSizes(s, rate, lane, shared);
             else if (isRouteKind(s.kind)) routeSizes(s, lane, shared);
             return lane;
         }
@@ -288,6 +291,7 @@ size_t sharedBytesFor(const n60_stage_desc &s, double rate, uint32_t firScheme) 
     else if (isCleanupKind(s.kind)) cleanupSizes(s, rate, lane, shared);
     else if (isImageKind(s.kind)) imageSizes(s, rate, lane, shared);
     else if (isLoudnessKind(s.kind)) loudnessSizes(s, rate, lane, shared);
+    else if (isMultibandKind(s.kind)) multibandSizes(s, rate, lane, shared);
     else if (isRouteKind(s.kind)) routeSizes(s, lane, shared);
     return shared;
 }
@@ -381,6 +385,14 @@ n60_status validateDesc(const n60_graph_desc &d) {
         }
         if (isLoudnessKind(s.kind)) {
             const n60_status v = validateLoudnessStage(s, d.sampleRate, d.outputChannels);
+            if (v != N60_STATUS_OK) return v;
+            total += (stateStrideFor(s, d.sampleRate, d.firScheme) * laneCountFor(s, d.outputChannels)) + sharedBytesFor(s, d.sampleRate, d.firScheme) +
+                     size_t(s.paramCount) * sizeof(float);
+            if (total > kMaxArenaBytes) return N60_STATUS_OUT_OF_MEMORY;
+            continue;
+        }
+        if (isMultibandKind(s.kind)) {
+            const n60_status v = validateMultibandStage(s, d.sampleRate, d.outputChannels);
             if (v != N60_STATUS_OK) return v;
             total += (stateStrideFor(s, d.sampleRate, d.firScheme) * laneCountFor(s, d.outputChannels)) + sharedBytesFor(s, d.sampleRate, d.firScheme) +
                      size_t(s.paramCount) * sizeof(float);
@@ -558,6 +570,7 @@ n60_status buildSnapshot(const n60_graph_desc &d, uint32_t epoch, SnapHeader **o
         if (isCleanupKind(s.kind)) cleanupInit(h, r);
         if (isImageKind(s.kind)) imageInit(h, r);
         if (isLoudnessKind(s.kind)) loudnessInit(h, r);
+        if (isMultibandKind(s.kind)) multibandInit(h, r);
         if (isRouteKind(s.kind)) routeInit(h, r);
         if (s.kind == N60_STAGE_PEQ) {
             PeqSec *sec = reinterpret_cast<PeqSec *>(bytes(h) + r.coefOff);
@@ -614,6 +627,7 @@ n60_status validateParam(const SnapHeader *snap, const StageRec &r, uint32_t par
             if (isCleanupKind(r.kind)) return validateCleanupParam(snap, r, paramIndex, value);
             if (isImageKind(r.kind)) return validateImageParam(snap, r, paramIndex, value);
             if (isLoudnessKind(r.kind)) return validateLoudnessParam(snap, r, paramIndex, value);
+            if (isMultibandKind(r.kind)) return validateMultibandParam(snap, r, paramIndex, value);
             if (isRouteKind(r.kind)) return validateRouteParam(snap, r, paramIndex, value);
             return isDspKind(r.kind) ? validateDspParam(snap, r, paramIndex, value) : N60_STATUS_UNSUPPORTED;
     }
@@ -1045,6 +1059,8 @@ void runSnapshot(SnapHeader *h, float *const *lanes, uint32_t frames, std::atomi
                     runImage(h, r, lanes, frames);
                 } else if (isLoudnessKind(r.kind)) {
                     runLoudness(h, r, lanes, frames);
+                } else if (isMultibandKind(r.kind)) {
+                    runMultiband(h, r, lanes, frames);
                 } else if (isRouteKind(r.kind)) {
                     runRoute(h, r, lanes, frames);
                 } else {

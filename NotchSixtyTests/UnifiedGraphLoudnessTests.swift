@@ -95,13 +95,4 @@ final class UnifiedGraphLoudnessTests: XCTestCase {
             XCTAssertGreaterThan(rms(on[0]), 1.2 * rms(off[0]), "contour lifts the bass at \(rate)")
         }
     }
-
-    func testAMultibandCompressorStillKeepsTheKernel() throws {
-        let engine = try engine(rate: 48_000)
-        var configuration = DynamicsConfiguration()
-        configuration.multibandCompressor.enabled = true
-        try engine.replaceDynamicsConfiguration(configuration)
-        var snapshot = try engine.stereoTransportStartGraph(sampleRate: 48_000)
-        XCTAssertNil(UnifiedGraphTranslator.stereoConfiguration(snapshot: &snapshot, sampleRate: 48_000))
-    }
 }

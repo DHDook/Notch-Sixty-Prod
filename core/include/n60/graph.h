@@ -34,7 +34,7 @@ extern "C" {
 #endif
 
 /* Bumped on any incompatible change to a struct or function below. */
-#define N60_GRAPH_ABI_VERSION 24u
+#define N60_GRAPH_ABI_VERSION 25u
 
 typedef struct n60_graph n60_graph; /* opaque */
 
@@ -118,7 +118,9 @@ typedef enum n60_stage_kind {
     N60_STAGE_IMAGE = 45,            /* position 9.6: after ANALYSER_TAP_EQ, before DEESS and the compressor. Pair stage: stereo mode, then widener. */
     N60_STAGE_DEESS = 46,            /* position 9.8: after IMAGE and LOUDNESS, before the compressor. Pair stage: de-harsh, then de-esser. */
     /* ABI v24 (E6 S12c). Loudness: see "Loudness" below. */
-    N60_STAGE_LOUDNESS = 47          /* position 9.7: after IMAGE, before DEESS. Pair stage: loudness match, contour, dialogue leveler. */
+    N60_STAGE_LOUDNESS = 47,         /* position 9.7: after IMAGE, before DEESS. Pair stage: loudness match, contour, dialogue leveler. */
+    /* ABI v25 (E6 S12d). Multiband compressor: see "Multiband" below. */
+    N60_STAGE_MULTIBAND = 48         /* position 9.9: after DEESS, before the compressor. Pair stage: three-band compressor. */
 } n60_stage_kind;
 
 /* Image and de-ess (ABI v23, E6 S12b). The stereo kernel's stereo mode, widener, de-harsh and de-esser, same arithmetic.
@@ -158,6 +160,15 @@ typedef enum n60_stage_kind {
  * notch retune (fundamental, Q, count or a depth) crossfades the old and the new bank over max(32, decimation x 10)
  * frames. The detector is read with n60_graph_read_mains. The stage has no latency. Running state is not carried across
  * a rebuild. Stereo only. */
+
+/* Multiband (ABI v25, E6 S12d). The stereo kernel's three-band compressor, same arithmetic. Pair stage (laneA, laneB
+ * distinct, laneMask 0, capacityFrames 0); off is parked and costs nothing. 29 parameters, in order:
+ *   0 on (0/1), 1 low/mid Hz (40..250), 2 mid/high Hz (1000..8000), 3 low slope (0 LR4, 1 LR8), 4 high slope (0/1),
+ *   then six groups of three (low, mid, high): 5 threshold dB (-60..0), 8 ratio (1..20), 11 attack ms (1..200),
+ *   14 release ms (10..1000), 17 knee dB (0..20), 20 sidechain HPF Hz (0..300, 0 off), 23 make-up dB (-12..12),
+ *   26 auto release (0/1; program-dependent release, 0 = kernel parity).
+ * Every parameter is live except the two slopes (topology; changing them needs a rebuild: UNSUPPORTED).
+ * Latency 0. Running state is not carried across a rebuild. Telemetry: n60_graph_read_multiband. */
 
 /* Loudness (ABI v24, E6 S12c). The stereo kernel's loudness match, loudness contour (simple and per-band) and dialogue
  * leveler, same arithmetic and order. One pair stage (laneA, laneB distinct, laneMask 0, capacityFrames 0); an off part is
@@ -709,6 +720,17 @@ typedef struct n60_loudness_readback {
     uint32_t reserved;
 } n60_loudness_readback;
 n60_status n60_graph_read_loudness(n60_graph *graph, uint32_t stageId, n60_loudness_readback *out);
+
+/* ABI v25 (E6 S12d): per-band gain reduction of a MULTIBAND stage (dB, positive = reduction). grMaxDb is the peak since
+ * the previous read (reset by the read); grNowDb is the value at the end of the last block. Control thread, newest
+ * published snapshot. BAD_ARGUMENT for another kind of stage; ABI_MISMATCH on structSize. */
+typedef struct n60_multiband_readback {
+    uint32_t structSize;            /* sizeof(n60_multiband_readback) as seen by the caller */
+    float grMaxDb[3];               /* low, mid, high */
+    float grNowDb[3];
+    uint32_t reserved;
+} n60_multiband_readback;
+n60_status n60_graph_read_multiband(n60_graph *graph, uint32_t stageId, n60_multiband_readback *out);
 
 /* Reads the over-range counter of a METER_IN, METER_OUT or FINAL_METER stage lane: samples with
  * |x| > 1.0 since the previous read (reset by the read). */
