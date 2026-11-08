@@ -121,6 +121,35 @@ final class EQShipTests: XCTestCase {
         }
     }
 
+    /// G9 software part: the live graph's final meter feeds `EQClipMonitor` and the badge exactly as the gain
+    /// row's poll does. An unprotected +12 dB boost lights the clip badge; auto preamp does not.
+    func testLiveMeterLightsTheClipBadgeOnlyWithoutAutoPreampAtEveryRate() throws {
+        for rate in rates {
+            for protected in [false, true] {
+                let engine = try engine(rate: rate)
+                let product = profiles(engine)
+                try engine.addEQBand(peaking(1_000, 12))
+                if protected { try product.autoPreamp.setOn(true) }
+                let host = try host(engine, rate: rate)
+                let out = try render(host, rate: rate, input: tone(1_000, amplitude: pow(10, -1.0 / 20), rate: rate))
+                var monitor = EQClipMonitor()
+                monitor.ingest(
+                    peakLinear: out.reduce(Float(0)) { max($0, abs($1)) },
+                    overRangeSamples: UInt64(host.overRangeSamples(stageId: N60_LSTAGE_FINAL_METER, lane: 0)),
+                    overRangeIsDelta: true, at: 10)
+                XCTAssertEqual(monitor.isTripped(at: 10.5), !protected, "tripped=\(!protected) at \(rate)")
+                let badge = EQHeadroomBadge.evaluate(
+                    boostDB: product.autoPreamp.prediction.boostDB, preampDB: engine.gainConfiguration.inputPreampDB,
+                    headroomAttenuationDB: engine.gainConfiguration.headroomAttenuationDB, clipTripped: monitor.isTripped(at: 10.5))
+                if protected {
+                    if case .clipped = badge { XCTFail("badge clipped with auto preamp at \(rate)") }
+                } else {
+                    XCTAssertEqual(badge, .clipped, "badge at \(rate)")
+                }
+            }
+        }
+    }
+
     // MARK: Live EQ impulse response (G6)
 
     /// An impulse through the engine's live EQ, its DFT against `EQFilterAnalysis` (the drawn curve) at the eight rates.

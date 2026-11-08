@@ -362,7 +362,7 @@ on the Equalizer page; S1 and S2 flagless, the engine-facing S3 items were behin
 - [x] S3c `e27/eq-ab-fir-prewarm` prepared FIR programs for linear-phase A/B and engine-level tests (G10, G11; owner slice for both)
 - [~] S2b program analyser overlay (Input and "Output (full chain)" spectrum on the existing render capture, no engine tap; built dark behind e27.eq-safety, PR #405; the EQ-only view is S2c)
 - [~] S2c `e27/analyser-eq-taps`: EQ-only and EQ + Dynamics spectrum taps with a toggle (needs-owner, realtime; owner, 7 Nov 2026; built dark behind e27.eq-safety, PR pending; G16 and G17 and flag removal to S4)
-- [~] S4 `e27/ship` flag `e27.eq-safety` removed, offline lab cases and end-to-end tests added (PR pending, needs-owner, ready-but-held); open gaps G3, G4, G5, G9, G12, G14, G16 need the owner's running-window checks or a DAC (E22), so not ticked
+- [x] S4 `e27/ship` flag `e27.eq-safety` removed, offline lab cases, end-to-end tests and dynamic metric fields (PR #407, needs-owner); live-window and DAC remainders are E22 items (owner decision 7 Nov 2026)
 
 ### E28 Dynamics and Meters polish (owner, 7 Nov 2026)
 
@@ -435,6 +435,7 @@ Owner decision, 18 Oct 2026: there is no bench access for now, so every bench ch
 - [ ] Run E4 S8 (PR97 timing calibration and PR99 verification) and record results against `docs/ANC_QUALIFICATION.md`
 - [ ] Run E4 S11 (owner, 1 Nov 2026: moved here from the E4 execution order): repeat S8 on the unified E6 graph, then fill the placeholder reduction table in `docs/ANC_QUALIFICATION.md` §4.1 from the S31 reviewer-kit noise files
 - [ ] Run the remaining bench checks at every rate from 44.1 to 384 kHz
+- [ ] E27 owner release-build verification (owner decision 7 Nov 2026): Equalizer page running-window checks G3, G5, G9, G12, G16 and the DAC checks G14 (Listen ends on transport stop, glitch-free linear-phase A/B), per the checklist in `docs/epics/E27.md` Bench checks
 - [ ] Feed the results into the live-authorisation slices (E4 S10, E19), which still need real evidence
 
 ### E18 Launch readiness
