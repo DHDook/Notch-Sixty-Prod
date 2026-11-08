@@ -1386,6 +1386,10 @@ static uint32_t rfCarry(SnapHeader *from, SnapHeader *to, StageRec &b) {
 
 uint32_t dspFirCarry(SnapHeader *from, SnapHeader *to, bool lazy, bool *pending, uint64_t *syncBudget) {
     uint32_t warm = 0, upCopied = 0;
+    // Stages of `to` that are FIR lanes copied whole in this call: the only upstream FIRs a later lockstep stage may
+    // sit behind (a lazily carried or warming one is not yet exact), E9 S2d.
+    uint8_t firExact[N60_GRAPH_MAX_STAGES] = {};
+    bool upstreamFailed = false;  // a stateful stage ahead of an earlier FIR could not be carried: later ones cannot either
     if (pending != nullptr) *pending = false;
     StageRec *dst = stages(to);
     for (uint32_t i = 0; i < to->stageCount; ++i) {
@@ -1409,10 +1413,22 @@ uint32_t dspFirCarry(SnapHeader *from, SnapHeader *to, bool lazy, bool *pending,
             // unchanged upstream. Otherwise the stage warms in full (a whole-lane copy without a fade is the one
             // exception, below). A seed with no fade would be audible at once with the old taps' partial sums, so it
             // warms too.
-            const bool lockstep = j == i && dspUpstreamSame(from, to, i);
+            bool lockstep = j == i && dspUpstreamSame(from, to, i);
+            bool upstreamRefused = false;
+            // E9 S2c (G7), S2d (G9): the incoming upstream stages start with the outgoing ones' running state, so both
+            // instances see the same input from this tick and the carried history is exact (no cold-start
+            // transient). Where a stateful stage ahead cannot be carried (not a known plain-data kind, over this
+            // callback's budget, or an upstream FIR that is not exact) the stage is not run in lockstep: it warms in
+            // full instead, never a history with a transient in it.
+            if (lockstep && to->firScheme == N60_FIR_SCHEME_NONUNIFORM) {
+                if (upstreamFailed ||
+                    !upstreamStateCarriable(from, to, i, syncBudget != nullptr ? *syncBudget : 0, syncBudget == nullptr,
+                                            upCopied, firExact)) {
+                    upstreamFailed = upstreamRefused = true;
+                    lockstep = false;
+                }
+            }
             if (to->firScheme == N60_FIR_SCHEME_NONUNIFORM && (lazy ? !lockstep : seed)) continue;
-            // E9 S2c (G7): the incoming upstream stages start with the outgoing ones' running state, so both
-            // instances see the same input from this tick and the carried history is exact (no cold-start transient).
             if (lockstep && to->firScheme == N60_FIR_SCHEME_NONUNIFORM) {
                 carryUpstreamState(from, to, i, syncBudget, upCopied);
                 upCopied = std::max(upCopied, i);
@@ -1422,6 +1438,12 @@ uint32_t dspFirCarry(SnapHeader *from, SnapHeader *to, bool lazy, bool *pending,
                 // No fade: the outgoing instance is gone at once, so a copy that fits this callback's budget is
                 // made whole now (the lane is identical at once); a larger one goes the lazy way.
                 bool useLazy = lazy;
+                if (!lazy && upstreamRefused) {
+                    // An upstream stage cannot be carried (S2d): a whole copy would sit behind a cold stage. Warm in
+                    // full next to the live instance; the fade-less swap waits for it.
+                    if (pending != nullptr) *pending = true;
+                    continue;
+                }
                 if (!lazy) {
                     const uint64_t need = static_cast<uint64_t>(b.stateStride) * b.laneCount;
                     if (syncBudget == nullptr || need <= *syncBudget) {
@@ -1465,6 +1487,7 @@ uint32_t dspFirCarry(SnapHeader *from, SnapHeader *to, bool lazy, bool *pending,
                     std::memcpy(dl, sl, b.stateStride);
                     conv::carryHeader(&cs, sl, dl, to->historyEpoch);
                 }
+                firExact[i] = (staleSource || !lockstep) ? 0 : 1;
                 carried = true;
                 continue;
             }

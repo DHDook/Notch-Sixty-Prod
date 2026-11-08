@@ -86,7 +86,8 @@ struct Rig {
 
     Rig(double rate, uint32_t channels, const n60_stage_desc *st, uint32_t n, uint64_t sd = 1) : ch(channels), seed(sd) {
         n60_graph_desc d = desc(rate, channels, st, n);
-        CHECK(n60_graph_build(&d, &g) == N60_STATUS_OK && g != nullptr, "build");
+        const n60_status rc = n60_graph_build(&d, &g);
+        CHECK(rc == N60_STATUS_OK && g != nullptr, "build status %d", (int)rc);
         in.resize(size_t(ch) * kMaxBlock);
         out.resize(size_t(ch) * kMaxBlock);
         for (uint32_t c = 0; c < ch; ++c) {
@@ -392,6 +393,10 @@ void testNoFadeTooLargeMoved(double rate) {
     const uint32_t warming = finishRebuild(test);
     CHECK(test.status().completed == 1 && test.status().refused == 0, "rate %.0f moved swap completed, not refused", rate);
     CHECK(warming >= taps / kBlock, "rate %.0f moved filter warmed in full (%u callbacks)", rate, warming);
+    // E9 S2d (G9): the wait is bounded by the filter's own tap length plus one partition and the settle (at most
+    // 0.68 s of audio at 262,144 taps and 384 kHz; the live chain is unchanged and audible meanwhile). The E22 bench
+    // item records the worst callback during it.
+    CHECK(warming <= (taps + 256 + 48 * 256) / kBlock + 8, "rate %.0f deferred swap wait %u callbacks is bounded", rate, warming);
     CHECK(n60_graph_debug_peak_rt_bytes(test.g) <= kBudget, "rate %.0f too-large peak", rate);
     // The fresh graph has seen the same input from the start, so it equals the swapped one once the swap is done.
     while (fresh.pos < test.pos) fresh.step();
@@ -560,6 +565,139 @@ void testInterrupted(double rate, bool invalidate) {
     for (size_t i = 0; i < test.out.size(); ++i) CHECK(std::isfinite(test.out[i]), "rate %.0f finite output", rate);
 }
 
+
+// ---- 9. E9 S2d (G9): every stateful stage kind ahead of a lazily carried FIR is carried or refused. ---------------
+
+n60_stage_desc stageLanes(uint32_t kind, uint32_t id, uint32_t laneA, uint32_t laneB, uint64_t mask, const float *p, uint32_t n) {
+    n60_stage_desc s = stage(kind, id, p, n);
+    s.laneA = laneA;
+    s.laneB = laneB;
+    s.laneMask = mask;
+    return s;
+}
+
+// The chain every case below shares: gain, cleanup, PEQ, dynamic EQ, compressor, expander, meter, bass management,
+// stereo crossover, ambient compensation, core dynamics, then the driver FIR (all lanes of a four-lane graph).
+struct Chain {
+    std::vector<float> taps;
+    float cleanup[26], gain = 0.8f, peq[8], dq[16], comp[10], exp[6], bass[9], xo[8], amb[10], core[10];
+    n60_stage_desc st[13];
+    uint32_t n = 0;
+
+    Chain(uint32_t tapCount, uint64_t seed) : taps(decaying(tapCount, seed, 0.02f)) {
+        std::memset(cleanup, 0, sizeof cleanup);
+        cleanup[0] = 1;
+        cleanup[1] = 1;
+        cleanup[2] = 20;
+        cleanup[3] = 1;
+        cleanup[5] = 50;
+        cleanup[6] = 3;
+        cleanup[7] = 20;
+        cleanup[9] = 50;
+        for (int i = 10; i < 26; ++i) cleanup[i] = -30;
+        const float peqv[8] = {0.0f, 60.0f, 9.0f, 2.0f, 2.0f, 6000.0f, -6.0f, 0.7f};
+        std::memcpy(peq, peqv, sizeof peq);
+        const float dqv[16] = {1.0f, 0.0f, 1000.0f, 1.0f, 0.0f, -40.0f, 3.0f, -12.0f, 10.0f, 100.0f, 0.0f, -40.0f, 3.0f, 6.0f, 0.0f, 20.0f};
+        std::memcpy(dq, dqv, sizeof dq);
+        const float cv[10] = {-30.0f, 4.0f, 6.0f, 5.0f, 80.0f, 2.0f, 0.0f, 1.0f, 100.0f, 1.0f};
+        std::memcpy(comp, cv, sizeof comp);
+        std::memcpy(core, cv, sizeof core);
+        const float ev[6] = {-50.0f, 2.0f, -20.0f, 5.0f, 80.0f, 1.0f};
+        std::memcpy(exp, ev, sizeof exp);
+        const float bv[9] = {80, 0, 2, 3, 120, 0, 0, 0, 0};
+        std::memcpy(bass, bv, sizeof bass);
+        const float xv[8] = {90.0f, 0, 0, 1.0f, 0, 0, 100.0f, 0.7f};
+        std::memcpy(xo, xv, sizeof xo);
+        const float av[10] = {6.0f, 100, 0, 1, 1000, 0, 1, 8000, 0, 1};
+        std::memcpy(amb, av, sizeof amb);
+        st[n++] = stage(N60_STAGE_GAIN, 3, &gain, 1);
+        st[n++] = stageLanes(N60_STAGE_CLEANUP, 12, 0, 1, 0, cleanup, 26);
+        st[n++] = stage(N60_STAGE_PEQ, 2, peq, 8);
+        st[n++] = stage(N60_STAGE_DYN_EQ, 5, dq, 16);
+        st[n++] = stage(N60_STAGE_COMPRESSOR, 6, comp, 10);
+        st[n++] = stage(N60_STAGE_EXPANDER, 7, exp, 6);
+        st[n++] = stage(N60_STAGE_METER_OUT, 8, nullptr, 0);
+        st[n++] = stageLanes(N60_STAGE_BASS_MGMT, 9, 0, 0, 0x3, bass, 9);
+        st[n++] = stageLanes(N60_STAGE_STEREO_CROSSOVER, 10, 0, 1, 0, xo, 8);
+        st[n++] = stage(N60_STAGE_AMBIENT, 11, amb, 10);
+        st[n++] = stage(N60_STAGE_CORE_DYNAMICS, 13, core, 10);
+        st[n++] = stage(N60_STAGE_DRIVER_FIR, 1, taps.data(), tapCount);
+    }
+};
+
+// `apply` runs on both rigs just before the publish (a live parameter post, so a stage is mid-transition when the
+// state is copied); `bm` is the same chain with a meter added. After the fade the output is bit-identical to a graph
+// that was never rebuilt.
+void testChainState(double rate, uint32_t blk, int post) {
+    const uint32_t taps = 262144;
+    Chain c(taps, 211);
+    n60_stage_desc a[12], b[13];
+    std::memcpy(a, c.st, sizeof a);
+    std::memcpy(b, c.st, sizeof a);
+    b[12] = stage(N60_STAGE_FINAL_METER, 14, nullptr, 0);
+    Rig test(rate, 4, a, 12), ref(rate, 4, a, 12);
+    runFrames(test, taps + 4096, blk);
+    runFrames(ref, taps + 4096, blk);
+    if (post != 0) {
+        // 1: a PEQ section gain moves (crossfade between two biquads). 2: a dynamic EQ band's static gain moves (a
+        // smoothed value mid-glide). Both are live; the rebuilt chain carries the new target.
+        n60_param_record rec = post == 1 ? n60_param_record{2, 2, 3.0f, 0} : n60_param_record{5, 4, -9.0f, 0};
+        CHECK(n60_graph_post_params(test.g, &rec, 1) == N60_STATUS_OK, "post");
+        CHECK(n60_graph_post_params(ref.g, &rec, 1) == N60_STATUS_OK, "post ref");
+        if (post == 1) c.peq[2] = 3.0f;
+        else c.dq[4] = -9.0f;
+        test.step(blk);
+        ref.step(blk);
+    }
+    test.publish(b, 13, rate);
+    test.step(blk);
+    ref.step(blk);
+    CHECK(test.status().state == 1, "rate %.0f block %u post %d chain: rebuild running", rate, blk, post);
+    const uint32_t warming = finishRebuild(test, 4000000, blk);
+    while (ref.pos < test.pos) ref.step(blk);
+    CHECK(test.status().completed == 1 && test.status().lastResult == 1, "rate %.0f block %u post %d chain completed", rate, blk, post);
+    CHECK(n60_graph_debug_carry_abandoned(test.g) == 0, "rate %.0f block %u post %d chain carry kept", rate, blk, post);
+    CHECK(warming < taps / blk / 2, "rate %.0f block %u post %d chain carried, not warmed in full (%u)", rate, blk, post, warming);
+    CHECK(n60_graph_debug_peak_rt_bytes(test.g) <= n60_graph_debug_rt_budget(blk), "rate %.0f block %u post %d chain peak", rate, blk, post);
+    CHECK(compareRun(test, ref, 3ull * 16384, true, nullptr, blk) == 0.0, "rate %.0f block %u post %d chain output differs after carry",
+          rate, blk, post);
+}
+
+// A stateful stage ahead of the FIR that cannot be carried (the denoiser, an upstream FIR carried lazily, or a state
+// over the callback budget) refuses lockstep: the stage warms in full and the output is finite.
+void testRefused(double rate, int what) {
+    const uint32_t taps = 32768;
+    std::vector<float> h = decaying(taps, 217, 0.02f), h2 = decaying(taps, 219, 0.02f);
+    const float dn[9] = {1, 0, 0.5f, -60, 0, 0, 0, 0, 0};
+    const float bass[9] = {80, 0, 2, 3, 120, 0, 0, 0, 0};
+    uint32_t blk = kBlock;
+    n60_stage_desc a[3], b[4];
+    uint32_t na = 0;
+    if (what == 0) {  // denoiser ahead of the program FIR
+        a[na++] = stage(N60_STAGE_DENOISER, 4, dn, 9);
+        a[na++] = stage(N60_STAGE_FIR, 1, h.data(), taps);
+    } else if (what == 1) {  // program FIR ahead of a room FIR: the first is carried lazily, so it is not exact
+        a[na++] = stage(N60_STAGE_FIR, 1, h.data(), taps);
+        a[na++] = stage(N60_STAGE_ROOM_FIR, 2, h2.data(), taps);
+    } else {  // bass management larger than a 4-frame block's 4 KiB budget
+        blk = 4;
+        a[na++] = stageLanes(N60_STAGE_BASS_MGMT, 9, 0, 0, 0x3, bass, 9);
+        a[na++] = stage(N60_STAGE_ROOM_FIR, 2, h2.data(), taps);
+    }
+    for (uint32_t i = 0; i < na; ++i) b[i] = a[i];
+    b[na] = stage(N60_STAGE_FINAL_METER, 14, nullptr, 0);
+    const uint32_t ch = what == 2 ? 4 : 2;
+    Rig test(rate, ch, a, na);
+    runFrames(test, taps + 4096, blk);
+    test.publish(b, na + 1, rate);
+    test.step(blk);
+    const uint32_t warming = finishRebuild(test, 4000000, blk);
+    CHECK(test.status().completed == 1 && test.status().lastResult == 1, "rate %.0f refused %d completed", rate, what);
+    CHECK(warming >= taps / blk, "rate %.0f refused %d warms in full (%u callbacks)", rate, what, warming);
+    runFrames(test, 4 * 16384, blk);
+    for (size_t i = 0; i < test.out.size(); ++i) CHECK(std::isfinite(test.out[i]), "rate %.0f refused %d finite output", rate, what);
+}
+
 }  // namespace
 
 int main() {
@@ -584,6 +722,13 @@ int main() {
         testStaleSource(rate);
         testUpstreamPost(rate, true);
         testUpstreamPost(rate, false);
+        testChainState(rate, kBlock, 0);
+        testChainState(rate, kBlock, 1);
+        testChainState(rate, 32, 1);
+        testChainState(rate, 32, 2);
+        testRefused(rate, 0);
+        testRefused(rate, 1);
+        testRefused(rate, 2);
         std::printf("rate %.0f done\n", rate);
     }
     testSmallBlocks(384000, 8, 32);
