@@ -1273,10 +1273,34 @@ extension UnifiedGraphStageParityTests {
         // Wrong kind.
         XCTAssertNil(UnifiedGraphTranslator.stereoConfiguration(
             snapshot: &s, sampleRate: rate, programs: lookup(.speakerIR, [p])))
-        // Room FIR before the expander.
+        // E6 S12f (G3, P2): room FIR with the expander attaches; the core orders the stages canonically.
         XCTAssertTrue(N60DynamicsSnapshotSetExpander(&s.dynamics, rate, true, -26, 2, -30, 2, 80))
-        XCTAssertNil(UnifiedGraphTranslator.stereoConfiguration(
+        XCTAssertNotNil(UnifiedGraphTranslator.stereoConfiguration(
             snapshot: &s, sampleRate: rate, programs: lookup(.roomCorrection, [p])))
+    }
+
+    /// E6 S12f: refusals are named, and a room FIR with subwoofer lanes attaches.
+    func testS12fNamedRefusalsAndRoomFIRWithSubwoofers() throws {
+        let rate = 48_000.0
+        let kernel = try XCTUnwrap(N60RenderKernelCreate())
+        defer { N60RenderKernelDestroy(kernel) }
+        let p = try prepare(kernel, kind: .roomCorrection, slot: 0, left: taps(count: 500, seed: 0.2), right: nil, declared: 0)
+        var s = N60DSPGraphSnapshotMakeUnity(rate)
+        select(&s, kind: .roomCorrection, slot: 0, p)
+        var delta = N60DSPGraphSnapshotMakeUnity(rate)
+        delta.auditionMode = N60AuditionModeDelta
+        if case .failure(let reason) = UnifiedGraphTranslator.stereoEligibility(snapshot: &delta, sampleRate: rate) {
+            XCTAssertEqual(reason, .snapshotBypassOrAudition)
+        } else {
+            XCTFail("delta audition must stay on the kernel")
+        }
+        if case .failure(let reason) = UnifiedGraphTranslator.stereoEligibility(
+            snapshot: &s, sampleRate: rate, programs: lookup(.roomCorrection, [p])) {
+            XCTFail("room FIR alone must attach, got \(reason)")
+        }
+        for reason in UnifiedGraphFallbackReason.allCases {
+            XCTAssertFalse(reason.displayText.isEmpty)
+        }
     }
 
     /// An IR change on the kernel ducks 8 ms and cuts to a cold runtime; the graph rebuilds with a fully warm filter

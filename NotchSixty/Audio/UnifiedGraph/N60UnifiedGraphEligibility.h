@@ -788,8 +788,8 @@ static inline N60UnifiedGraphUnsupportedReason N60UnifiedGraphSnapshotUnsupporte
         return N60UnifiedGraphUnsupportedDynamics;
     }
     if (d->dynamicEQ.enabled && !s->eqBypassed) {
-        // The kernel runs the dynamic EQ after the mid/side decode; the core runs it before.
-        if (s->eqMidSideMode) return N60UnifiedGraphUnsupportedDynamics;
+        // E6 S12f (G3, parity exception P3): the kernel runs the dynamic EQ after the mid/side decode; the core runs it
+        // before the encode, so it sees the signal ahead of the static EQ.
         float dynParams[N60_UNIFIED_DYN_EQ_MAX_PARAMS];
         uint32_t dynCount = 0u;
         if (!N60UnifiedGraphDynamicEQParams(s, dynParams, &dynCount)) return N60UnifiedGraphUnsupportedDynamics;
@@ -805,8 +805,8 @@ static inline N60UnifiedGraphUnsupportedReason N60UnifiedGraphSnapshotUnsupporte
     }
     }
     // Ambient after the compressor and expander is the owner's order (24 Oct 2026): the core's, not the kernel's.
-    // E6 S8d group 4: the soft clipper and gain rider. The core holds the ranges below; the oversampling factor must be
-    // one the core applies (it bypasses, with no oversampling latency, when neither the limiter nor the clipper is on).
+    // E6 S8d group 4: the soft clipper and gain rider. The core holds the ranges below (the UI ranges of
+    // `SoftClipperConfiguration`, `GainRiderConfiguration` and `LimiterConfiguration`).
     {
         const N60ProtectionSnapshot *p = &s->protection;
         if (p->softClipperEnabled) {
@@ -825,9 +825,7 @@ static inline N60UnifiedGraphUnsupportedReason N60UnifiedGraphSnapshotUnsupporte
                      && (int)p->gainRiderSpeed >= 0 && (int)p->gainRiderSpeed <= 2)) {
             return N60UnifiedGraphUnsupportedProtection;
         }
-        if (!p->limiterEnabled && !p->softClipperEnabled && (int)p->effectiveFactor > 1) {
-            return N60UnifiedGraphUnsupportedProtection;
-        }
+        // E6 S12f (ABI v27): oversampling alone (limiter and clipper off) is the core's half-band round trip too.
     }
     // E6 S8d: program FIR, room FIR and speaker IR. The snapshot carries no taps, so this only checks what the
     // core can hold and where the kernel runs the stage; the translator then recovers the taps by generation from
@@ -838,16 +836,11 @@ static inline N60UnifiedGraphUnsupportedReason N60UnifiedGraphSnapshotUnsupporte
                 || !N60UnifiedGraphConvolutionState(&s->speakerIR, maxFIRTaps)) {
             return N60UnifiedGraphUnsupportedConvolution;
         }
-        // The kernel runs the program convolution inside the mid/side pair and before the dynamic EQ; the core
-        // runs the FIR after both.
-        if (s->convolution.enabled && (s->eqMidSideMode || (d->dynamicEQ.enabled && !s->eqBypassed))) {
-            return N60UnifiedGraphUnsupportedConvolution;
-        }
-        // The kernel runs the expander after the room and speaker convolvers; the core has no expander position
-        // there (the compressor moves to CORE_DYNAMICS).
-        if ((s->roomCorrection.enabled || s->speakerIR.enabled) && d->expander.enabled) {
-            return N60UnifiedGraphUnsupportedConvolution;
-        }
+        // E6 S12f (G3): the ordering guards are lifted; the graph's canonical order is the default. The program FIR with
+        // a mid/side EQ is exact only for taps shared by both channels, which the translator checks (it holds the taps);
+        // the others are parity exceptions P2 to P4 (docs/epics/E6.md): the expander runs ahead of the room and speaker
+        // convolvers (P2), the dynamic EQ runs before the mid/side encode (P3), and the program FIR commutes with the pair
+        // for shared taps only (P4).
     }
     if (s->activeQuietZone.enabled) return N60UnifiedGraphUnsupportedAmbientOrANC;
     if (!d5 && s->ambientCompensation.enabled && !N60UnifiedGraphAmbientParams(s, scratch)) {

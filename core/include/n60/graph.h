@@ -34,7 +34,7 @@ extern "C" {
 #endif
 
 /* Bumped on any incompatible change to a struct or function below. */
-#define N60_GRAPH_ABI_VERSION 26u
+#define N60_GRAPH_ABI_VERSION 27u
 
 typedef struct n60_graph n60_graph; /* opaque */
 
@@ -417,8 +417,9 @@ typedef int (*n60_external_process_fn)(void *context, const float *const *in, fl
  *  (quadratic, cubic, sine, asymmetric tube), [12] auto compensation (0/1), [13] asymmetry trim dB (-3..3),
  *  [14] gain rider on (0/1), [15] target reduction dB (0.5..6), [16] max reduction dB (3..12), [17] speed 0/1/2
  *  (3, 10, 30 s). With the limiter and guard both on the factor is 4. Latency is the half-band delay (32 at 2x,
- *  48 at 4x) plus ceil(look-ahead high samples / factor) frames. With the limiter off the stage is a bypass
- *  unless the clipper is on, when it runs at factor [6]. The clipper acts per oversampled sample before the
+ *  48 at 4x) plus ceil(look-ahead high samples / factor) frames. With the limiter and clipper off the stage is a bypass
+ *  at factor 1; at factor [6] above 1 it is an oversampling round trip (ABI v27, as the kernel's oversampling-only
+ *  protection); the clipper runs at factor [6]. The clipper acts per oversampled sample before the
  *  limiter; the rider (active only with the limiter on) scales each frame by the sustained limiter reduction
  *  before oversampling. Its state is carried across a rebuild.
  * MUTE. params: [0] muted (0/1, live); 10 ms ramp.
@@ -473,6 +474,7 @@ typedef int (*n60_external_process_fn)(void *context, const float *const *in, fl
 
 /* PEQ section types (params[4*s]): 0 peaking, 1 low shelf, 2 high shelf, 3 low pass,
  * 4 high pass, 5 notch, 6 all pass, 7 band pass. Gain is -24..+24 dB.
+ * ABI v27 (E6 S12f): PROTECTION with the limiter and clipper off runs the oversampling round trip (see PROTECTION).
  * ABI v26 (E6 S12e): 8 constant-Q peaking (Q is the classic electrical Q, so the cookbook Q is Q / A). Types 9 and 10 are
  * the two halves of one prepared biquad (the stereo kernel's Linkwitz transform): a type 9 section is the numerator
  * (b0, b1, b2 in the Hz, dB and Q slots) and the section after it, type 10, is the denominator (a1, a2, unused). The
