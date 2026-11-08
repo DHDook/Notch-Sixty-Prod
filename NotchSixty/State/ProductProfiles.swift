@@ -281,6 +281,7 @@ struct ContentABLoudnessMatchPlan: Equatable, Sendable {
 }
 
 enum ContentABComparisonError: Error, LocalizedError, Equatable {
+    case eqComparisonActive
     case emptySlot(ContentABSlot)
     case playbackSystemChanged
     case playbackSystemStateChanged
@@ -288,6 +289,8 @@ enum ContentABComparisonError: Error, LocalizedError, Equatable {
 
     var errorDescription: String? {
         switch self {
+        case .eqComparisonActive:
+            return "Keep an EQ slot (A or B) on the Equalizer page before starting a content A/B comparison."
         case .emptySlot(let slot):
             return "Capture \(slot.displayName) before auditioning it."
         case .playbackSystemChanged:
@@ -318,6 +321,11 @@ final class ContentABComparisonController: ObservableObject {
 
     init(profiles: ProductProfileController) {
         self.profiles = profiles
+        // E27 S3b: EQ A/B and content A/B are mutually exclusive.
+        profiles.eqComparison.contentABActive = { [weak self] in
+            guard let self else { return false }
+            return self.activeSlot != nil || self.sessionBaseline != nil
+        }
     }
 
     var loudnessMatchPlan: ContentABLoudnessMatchPlan? {
@@ -501,6 +509,7 @@ final class ContentABComparisonController: ObservableObject {
     }
 
     private func validate(_ slot: ContentABSlot) throws {
+        if profiles.eqComparison.isComparing { throw ContentABComparisonError.eqComparisonActive }
         guard snapshot(for: slot) != nil else {
             throw ContentABComparisonError.emptySlot(slot)
         }
@@ -1119,6 +1128,10 @@ final class ProductProfileController: ObservableObject {
     let audioUnitHost: AudioUnitHostController
     /// E27 S3a: auto preamp for the Equalizer page; inert unless `e27.eq-safety` is on.
     let autoPreamp: EQAutoPreampController
+    /// E27 S3b: EQ A/B slots and the Listen audition; inert unless `e27.eq-safety` is on.
+    /// The profile saves the live EQ, which is the active slot; slot B is session-only.
+    let eqAudition: EQAuditionController
+    let eqComparison: EQComparisonController
     private let storageURL: URL
     private var didRestoreSelection = false
     private var didLoadArchive = false
@@ -1145,6 +1158,11 @@ final class ProductProfileController: ObservableObject {
         self.autoPreamp = EQAutoPreampController(
             engine: engine,
             isAvailable: autoPreampAvailable ?? FeatureFlags().isEnabled(.eqSafety)
+        )
+        let eqSafety = autoPreampAvailable ?? FeatureFlags().isEnabled(.eqSafety)
+        self.eqAudition = EQAuditionController(engine: engine, isAvailable: eqSafety)
+        self.eqComparison = EQComparisonController(
+            engine: engine, autoPreamp: self.autoPreamp, audition: self.eqAudition, isAvailable: eqSafety
         )
         self.audioUnitHost = audioUnitHost ?? AudioUnitHostController()
         self.storageURL = storageURL ?? Self.defaultStorageURL()
@@ -1767,7 +1785,11 @@ final class ProductProfileController: ObservableObject {
         dynamics.spectralDenoiser.profileCommand = .none
         return ContentPresetState(
             stereoEQ: eq,
-            inputPreampDB: gain.inputPreampDB,
+            // The A/B loudness-match trim is a session aid, not part of the profile.
+            inputPreampDB: min(
+                max(gain.inputPreampDB - eqComparison.matchTrimDB, DSPGainConfiguration.inputPreampRange.lowerBound),
+                DSPGainConfiguration.inputPreampRange.upperBound
+            ),
             headroomAttenuationDB: gain.headroomAttenuationDB,
             dynamics: dynamics,
             audioUnitRack: audioUnitHost.rackConfiguration,
@@ -1818,6 +1840,8 @@ final class ProductProfileController: ObservableObject {
     func applyContentStateWithoutAudioUnitRack(
         _ state: ContentPresetState
     ) throws {
+        eqAudition.stop()
+        eqComparison.reset()
         let previous = captureContentState()
         do {
             autoPreamp.restore(isOn: state.autoPreampEnabled, trimDB: state.preampTrimDB)

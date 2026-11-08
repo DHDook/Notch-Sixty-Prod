@@ -90,10 +90,30 @@ final class UnifiedGraphHost: @unchecked Sendable {
 
     /// Moves the graph to `newSpec`: parameter posts when only live values differ, a
     /// faded rebuild otherwise. Safe to call while a bridge is rendering the graph.
+    ///
+    /// `linearFade`: a rebuild crossfades with the linear law (old * (1 - t) + new * t) instead of
+    /// equal-power. Use it when old and new graphs carry the same signal, as an EQ bypass, A/B or
+    /// audition switch does (E27 S3b): an equal-power fade of two copies of one signal at different
+    /// gains swells past both by up to 3 percent in the middle.
     @discardableResult
-    func apply(_ newSpec: UnifiedGraphSpec) throws -> UnifiedGraphApplyResult {
+    func apply(_ newSpec: UnifiedGraphSpec, linearFade: Bool = false) throws -> UnifiedGraphApplyResult {
         lock.lock(); defer { lock.unlock() }
-        return try applyLocked(newSpec)
+        return try applyLocked(newSpec, linearFade: linearFade)
+    }
+
+    private var fadeLawLinear = false
+
+    /// Control thread, under the lock. Sets the fade law stamped into the next published snapshot.
+    /// Nothing else sets rebuild options; `fadeMs` repeats the core default (20 ms) so keep them equal.
+    private func setFadeLaw(linear: Bool) {
+        guard let graph, linear != fadeLawLinear else { return }
+        var options = n60_rebuild_options(
+            structSize: UInt32(MemoryLayout<n60_rebuild_options>.size),
+            fadeMs: 20,
+            cpuBudgetPercent: 0,
+            reserved: linear ? 1 : 0
+        )
+        if n60_graph_set_rebuild_options(graph, &options) == N60_STATUS_OK { fadeLawLinear = linear }
     }
 
     /// Posts a head pose to the BINAURAL stage (yaw, pitch and roll are its live parameters 0 to 2;
@@ -131,7 +151,7 @@ final class UnifiedGraphHost: @unchecked Sendable {
         return .posted(count: records.count)
     }
 
-    private func applyLocked(_ newSpec: UnifiedGraphSpec) throws -> UnifiedGraphApplyResult {
+    private func applyLocked(_ newSpec: UnifiedGraphSpec, linearFade: Bool = false) throws -> UnifiedGraphApplyResult {
         guard let graph else { throw UnifiedGraphError.invalidConfiguration("graph released") }
         if newSpec == spec { return .unchanged }
         if newSpec.hasSameTopology(as: spec) {
@@ -152,6 +172,7 @@ final class UnifiedGraphHost: @unchecked Sendable {
             }
             // A parameter that needs a new topology (or a full mailbox): publish instead.
         }
+        setFadeLaw(linear: linearFade)
         let status = newSpec.withDescription { n60_graph_publish(graph, $0) }
         guard status == N60_STATUS_OK else { throw UnifiedGraphError.coreStatus(status.rawValue) }
         spec = newSpec

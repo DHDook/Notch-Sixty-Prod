@@ -23,7 +23,7 @@ final class EQEditHistory {
     static let depth = 100
     static let coalescingWindow: TimeInterval = 0.75
 
-    private final class Entry {
+    fileprivate final class Entry {
         let before: StereoEQConfiguration
         var after: StereoEQConfiguration
         let name: String
@@ -34,6 +34,17 @@ final class EQEditHistory {
             self.name = name
         }
     }
+
+    /// E27 S3b: the undo steps of one A/B slot, set aside while the other slot is active.
+    /// Redo steps are not kept across a slot switch (an `UndoManager` cannot register a redo
+    /// outside an undo), so a switch ends redo for the slot it leaves.
+    struct SlotSteps {
+        fileprivate var undo: [Entry] = []
+        var count: Int { undo.count }
+    }
+
+    private var undoEntries: [Entry] = []
+    private var redoEntries: [Entry] = []
 
     private weak var undoManager: UndoManager?
     private var live: (() -> StereoEQConfiguration)?
@@ -110,6 +121,9 @@ final class EQEditHistory {
 
         let entry = Entry(before: before, after: after, name: Self.actionName(before: before, after: after))
         registerUndo(entry)
+        undoEntries.append(entry)
+        if undoEntries.count > Self.depth { undoEntries.removeFirst(undoEntries.count - Self.depth) }
+        redoEntries.removeAll()
         lastEntry = entry
         lastKey = coalesceKey
         lastTime = time
@@ -139,11 +153,40 @@ final class EQEditHistory {
 
     /// Drops every step. Called when the page goes away so no registration outlives it.
     func clear() {
+        undoEntries.removeAll()
+        redoEntries.removeAll()
         gestureBefore = nil
         lastEntry = nil
         lastKey = nil
         undoManager?.removeAllActions(withTarget: self)
     }
+
+    // MARK: Slots (E27 S3b)
+
+    /// Removes this history's steps from the undo manager and returns them, so the other A/B
+    /// slot can have its own. The live EQ is not touched.
+    func detachSteps() -> SlotSteps {
+        let saved = SlotSteps(undo: undoEntries)
+        undoEntries.removeAll()
+        redoEntries.removeAll()
+        gestureBefore = nil
+        lastEntry = nil
+        lastKey = nil
+        undoManager?.removeAllActions(withTarget: self)
+        return saved
+    }
+
+    /// Registers `steps` (oldest first) on the undo manager and re-bases on the live EQ.
+    func attachSteps(_ steps: SlotSteps) {
+        undoManager?.removeAllActions(withTarget: self)
+        undoEntries = steps.undo
+        redoEntries.removeAll()
+        for entry in steps.undo { registerUndo(entry) }
+        if let live { expected = live() }
+    }
+
+    /// The number of undo steps held (for tests).
+    var undoStepCount: Int { undoEntries.count }
 
     // MARK: Names
 
@@ -202,6 +245,14 @@ final class EQEditHistory {
             return
         }
         expected = live()
-        if toBefore { registerRedo(entry) } else { registerUndo(entry) }
+        if toBefore {
+            undoEntries.removeAll { $0 === entry }
+            redoEntries.append(entry)
+            registerRedo(entry)
+        } else {
+            redoEntries.removeAll { $0 === entry }
+            undoEntries.append(entry)
+            registerUndo(entry)
+        }
     }
 }
