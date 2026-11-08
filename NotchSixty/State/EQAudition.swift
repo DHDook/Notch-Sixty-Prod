@@ -80,9 +80,11 @@ final class EQAuditionController: ObservableObject {
         self.isAvailable = isAvailable
         engineObservation = engine.$eqAudition
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] value in
+            .sink { [weak self] _ in
                 MainActor.assumeIsolated {
-                    guard let self, value == nil, self.active != nil else { return }
+                    // Read the engine's current value: the delivered one may be stale (the
+                    // subscription's initial nil arrives after an immediate start).
+                    guard let self, self.engine.eqAudition == nil, self.active != nil else { return }
                     self.active = nil
                     self.timer?.cancel()
                     self.timer = nil

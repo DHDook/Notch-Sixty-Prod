@@ -1102,6 +1102,10 @@ final class AudioIOEngine: ObservableObject {
     private var prepared = false
     private var activeEQFIRProgram: PreparedEQFIRProgram?
     private var nextEQFIRProgramSlot: UInt32 = 0
+    /// E27 S3c: designed taps of the recent EQ configurations, so an A/B toggle redesigns nothing.
+    private var eqFIRCache = EQFIRProgramCache()
+    /// Linear-phase designs run so far (a cache hit runs none). Tests read it.
+    var eqFIRDesignCount: Int { eqFIRCache.designCount }
     private var activeRoomCorrectionProgram: PreparedRoomCorrectionProgram?
     private var nextRoomCorrectionProgramSlot: UInt32 = 0
     private var activeSpeakerIRProgram: PreparedSpeakerIRProgram?
@@ -4175,6 +4179,19 @@ final class AudioIOEngine: ObservableObject {
         _ configuration: StereoEQConfiguration,
         sampleRate: Double
     ) throws -> (left: [Float], right: [Float]?, declaredLatencyFrames: UInt32, designInfo: N60LinearPhaseEQDesignInfo?) {
+        let design = try eqFIRCache.design(for: EQFIRProgramKey(configuration, sampleRate: sampleRate)) {
+            let taps = try designEQFIRTaps(configuration, sampleRate: sampleRate)
+            return EQFIRDesign(
+                left: taps.left, right: taps.right,
+                declaredLatencyFrames: taps.declaredLatencyFrames, designInfo: taps.designInfo)
+        }
+        return (design.left, design.right, design.declaredLatencyFrames, design.designInfo)
+    }
+
+    private func designEQFIRTaps(
+        _ configuration: StereoEQConfiguration,
+        sampleRate: Double
+    ) throws -> (left: [Float], right: [Float]?, declaredLatencyFrames: UInt32, designInfo: N60LinearPhaseEQDesignInfo?) {
         let primaryChannel: EQEditChannel
         switch configuration.channelMode {
         case .linked: primaryChannel = .linked
@@ -4214,6 +4231,8 @@ final class AudioIOEngine: ObservableObject {
         _ configuration: StereoEQConfiguration,
         for session: CoreAudioTransportSession
     ) throws -> PreparedEQFIRProgram {
+        // The taps come from the design cache (E27 S3c); the program itself is always freshly
+        // prepared so its convolver runtime starts clean.
         let primary = try eqFIRTaps(configuration, sampleRate: session.outputFormat.sampleRate)
         let secondaryTaps = primary.right
 
@@ -4235,6 +4254,21 @@ final class AudioIOEngine: ObservableObject {
             programInfo: programInfo,
             designInfo: primary.designInfo
         )
+    }
+
+    /// E27 S3c: designs `partner` (the other A/B slot) now and keeps its design cached while the
+    /// live EQ is edited, so a toggle to it designs nothing. `nil` ends the protection. Control
+    /// thread; publishes nothing. Skipped when the partner needs no FIR.
+    func prewarmEQFIRPartner(_ partner: StereoEQConfiguration?) {
+        guard let partner, partner.requiresEQFIRProgram else {
+            eqFIRCache.protect(nil)
+            return
+        }
+        let rate = transportSession?.outputFormat.sampleRate
+            ?? nChannelTransportSession?.outputFormat.sampleRate
+            ?? selectedOutputDevice?.nominalSampleRate ?? 48_000
+        eqFIRCache.protect(EQFIRProgramKey(partner, sampleRate: rate))
+        _ = try? eqFIRTaps(partner, sampleRate: rate)
     }
 
     private func rateAdaptedRoomCorrectionFilter(
@@ -5610,6 +5644,7 @@ final class AudioIOEngine: ObservableObject {
             headphoneSnapshot, profile: headphoneSnapshot == nil ? nil : headphoneDeviceProfileConfiguration)
         activeEQFIRProgram = nil
         nextEQFIRProgramSlot = 0
+        eqFIRCache.removeAll()
         activeRoomCorrectionProgram = nil
         nextRoomCorrectionProgramSlot = 0
         activeSpeakerIRProgram = nil

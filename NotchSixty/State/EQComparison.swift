@@ -222,6 +222,7 @@ final class EQComparisonController: ObservableObject {
             throw error
         }
         history?.attachSteps(savedSteps[slot] ?? EQEditHistory.SlotSteps())
+        syncPartnerDesign()
         reconcileMatch()
     }
 
@@ -230,6 +231,7 @@ final class EQComparisonController: ObservableObject {
         if let publish = slots.copy(from: source, live: engine.stereoEQConfiguration) {
             try engine.replaceStereoEQConfiguration(publish)
         }
+        syncPartnerDesign()
         reconcileMatch()
     }
 
@@ -241,6 +243,7 @@ final class EQComparisonController: ObservableObject {
         slots = EQComparisonSlots(live: live)
         savedSteps.removeAll()
         isComparing = false
+        syncPartnerDesign()
         reconcileMatch()
     }
 
@@ -256,7 +259,14 @@ final class EQComparisonController: ObservableObject {
         slots = EQComparisonSlots(live: engine.stereoEQConfiguration)
         savedSteps.removeAll()
         isComparing = false
+        syncPartnerDesign()
         reconcileMatch()
+    }
+
+    /// E27 S3c: keeps the other slot's linear-phase FIR designed (and protected from eviction by
+    /// edits to the active slot) so a toggle redesigns nothing. No-op for slots with no FIR.
+    private func syncPartnerDesign() {
+        engine.prewarmEQFIRPartner(isComparing ? slots.configuration(slots.active.other) : nil)
     }
 
     /// The trim the louder slot needs: negative when the active slot is the louder one.
