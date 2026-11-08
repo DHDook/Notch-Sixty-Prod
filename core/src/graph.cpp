@@ -36,6 +36,7 @@
 #include "n60/graph.h"
 #include "snapshot.hpp"
 #include "stages_cleanup.hpp"
+#include "stages_image.hpp"
 #include "stages_loudness.hpp"
 #include "stages_multiband.hpp"
 #include "stages_dsp.hpp"
@@ -229,6 +230,8 @@ void adopt(n60_graph *g) {
     bool carryPending = false;
     const uint32_t firWarm = n60::dspFirCarry(g->current, next, next->fadeFrames != 0, &carryPending, &g->rtBudget);
     n60::systemRiderCarry(g->current, next);  // ABI v12
+    n60::cleanupCarry(g->current, next);      // E6 S12f2: cleanup, image and de-ess state
+    n60::imageCarry(g->current, next);
     // A fade-less snapshot replaces the live one at once, unless a FIR lane is too large to copy within this
     // callback's budget (E9 S2b): then it runs next to the live one in lockstep, is swapped in without a fade
     // when the copy and settle are done, and is never refused for CPU.

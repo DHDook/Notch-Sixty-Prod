@@ -172,6 +172,11 @@ add_executable(n60core_image_test tests/test_image.cpp)
 target_link_libraries(n60core_image_test PRIVATE n60core)
 add_test(NAME n60core_image COMMAND n60core_image_test)
 
+# E6 S12f2: state carry across a swap, non-finite reset, corner precision.
+add_executable(n60core_state_carry_test tests/test_state_carry.cpp)
+target_link_libraries(n60core_state_carry_test PRIVATE n60core)
+add_test(NAME n60core_state_carry COMMAND n60core_state_carry_test)
+
 # E6 S12c: loudness (match, contour, dialogue leveler) stage (ABI v24).
 add_executable(n60core_loudness_test tests/test_loudness.cpp)
 target_link_libraries(n60core_loudness_test PRIVATE n60core)

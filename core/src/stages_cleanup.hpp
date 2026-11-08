@@ -19,6 +19,11 @@ void cleanupSizes(const n60_stage_desc &s, double sampleRate, size_t &perLane, s
 // Control thread, while the snapshot is being built (arena zeroed, StageRec filled).
 void cleanupInit(SnapHeader *h, const StageRec &r);
 
+// Realtime thread, at adopt (E6 S12f2, G7): a cleanup stage of `to` starts from the running state of the stage with the
+// same id in `from`: DC, infrasonic and notch filter state, the mix fades (including one in flight), the retune
+// crossfade and the hum detector window. Coefficients stay the new snapshot's own. Bounded copies, no allocation.
+void cleanupCarry(SnapHeader *from, SnapHeader *to);
+
 // Realtime thread. Runs the stage in place over `frames` frames of the pair.
 void runCleanup(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames);
 

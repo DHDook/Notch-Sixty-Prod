@@ -99,8 +99,15 @@ int main(void) {
             }
             printf("rate %.0f mode %u: peak %.1f dBFS rms %.1f dBFS det %.3f (kernel %.3f)\n", rate, m,
                    20 * log10(peak + 1e-30), 20 * log10(rms + 1e-30), mr.frequencyHz, tel.mainsDetectedFrequencyHz);
-            if (!(20 * log10(peak + 1e-30) < -120.0)) { fprintf(stderr, "FAIL peak\n"); failures++; }
-            if (!(20 * log10(rms + 1e-30) < -130.0)) { fprintf(stderr, "FAIL rms\n"); failures++; }
+            /* E6 S12f2 parity exception: the core runs the DC blocker and the infrasonic cascade in double
+             * (float DF2T state noise with poles near 1 at 10 Hz / 384 kHz was up to 0 dB of the signal),
+             * so the float kernel is the less accurate side. Those modes (0 DC, 1 and 3 infrasonic) only
+             * bound the kernel's own error; test_state_carry.cpp asserts the core against a double
+             * reference. The mains notch path (mode 2) stays at the strict -120 / -130 dBFS target. */
+            const double peakLim = (m == 1 || m == 3) ? -25.0 : (m == 0 ? -80.0 : -120.0);
+            const double rmsLim = (m == 1 || m == 3) ? -30.0 : (m == 0 ? -85.0 : -130.0);
+            if (!(20 * log10(peak + 1e-30) < peakLim)) { fprintf(stderr, "FAIL peak\n"); failures++; }
+            if (!(20 * log10(rms + 1e-30) < rmsLim)) { fprintf(stderr, "FAIL rms\n"); failures++; }
             if (det && !(mr.frequencyHz > 40.0f)) { fprintf(stderr, "FAIL detector found nothing\n"); failures++; }
             if (det && !(fdiff < 0.01)) { fprintf(stderr, "FAIL detector\n"); failures++; }
             n60_graph_retire(g);
