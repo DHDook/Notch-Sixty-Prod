@@ -179,8 +179,8 @@ Gate G2 passed on 2026-10-25 (commit 07e82c6)
   - [~] S12b stereo mode, widener, de-harsh and de-esser in the core (`e6/port-image-and-deess`, #409, ABI v23; built in the core, wiring: S12g for N-channel (G12) and S12f for state carry and refusals (G11, G13, G14); bench: E22)
   - [x] S12c loudness match, loudness contour, per-band loudness and dialogue leveler in the core
   - [~] S12d multiband compressor in the core, with per-band auto release (closes E28 G11; `e6/port-multiband`, #412, ABI v25; per-band auto release is core-only, wiring: E28 S7c; bench: E22)
-  - [~] S12e stereo global bypass and reference audition on the graph (D5, parity exception P1) and wide PEQ (over 16 sections, types 8–10) built (`e6/port-bypass-audition-eq`, PR pending, ABI v26); delta audition and the bypass lab case remain (G27, G28); bench: E22 (G29)
-  - [ ] S12f stereo crossover and room/IR with subs, oversampling-only protection, the three ordering guards, named refusals and a UI-range attach test
+  - [~] S12e stereo global bypass and reference audition on the graph (D5, parity exception P1) and wide PEQ (over 16 sections, types 8–10) built (`e6/port-bypass-audition-eq`, #413, ABI v26); delta audition and the bypass lab case remain (G27, G28); bench: E22 (G29)
+  - [~] S12f stereo crossover and room/IR with subs, oversampling-only protection, the three ordering guards and named refusals built (`e6/port-stereo-subs-and-guards`, PR #414, ABI v27); stereo crossover with subs refused as `crossoverWithSubwoofer` (G32 open question; no wiring slice); state carry and the UI-range tests moved to S12f2 (G33–G35)
   - [ ] S12g old N-channel and legacy binaural path reasons onto the graph; `binauralBudget` raised within measured cost, refused beyond (E6 decision 18)
   - [ ] S12h stereo Active Quiet Zone on the graph, authorisation unchanged (needs-owner, ANC; E6 decision 15)
 

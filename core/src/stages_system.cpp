@@ -8,7 +8,8 @@
 //    are relaxed/acquire/release atomics the control thread reads; everything else is owned
 //    by the realtime thread once the snapshot is published.
 //  - latency: every stage adds 0 frames except PROTECTION, whose latency is the half-band
-//    oversampling delay (32 frames at 2x, 48 at 4x) plus ceil(look-ahead high samples / factor).
+//    oversampling delay (32 frames at 2x, 48 at 4x) plus ceil(look-ahead high samples / factor). It applies whenever the
+//    factor is above 1, also with the limiter and the clipper off (E6 S12f); only factor 1 with both off is a bypass.
 //  - sample rate: any rate in [8 kHz, 768 kHz]. Times are converted to frames from the
 //    snapshot rate. Filters and one-pole detectors are double precision.
 //  - channels: 1..64 lanes. Pair stages need two distinct lanes. Protection and the pause
@@ -242,8 +243,9 @@ ProtCfg protCfg(const float *p, double rate, uint32_t n) {
     c.limiter = p[0] != 0.0f;
     const bool tp = p[5] != 0.0f;
     c.clipper = n >= kProtParamsV12 && p[7] != 0.0f;
-    // Limiter off is a bypass unless the clipper is on; then the user's oversampling factor applies, as in the kernel.
-    c.factor = (!c.limiter && !c.clipper) ? 1u : ((c.limiter && tp) ? 4u : static_cast<uint32_t>(p[6]));
+    // The user's oversampling factor applies whenever it is above 1, as in the kernel: with the limiter and the clipper
+    // both off the stage is a pure half-band round trip (E6 S12f, ABI v27), and a factor of 1 with both off is a bypass.
+    c.factor = (c.limiter && tp) ? 4u : static_cast<uint32_t>(p[6]);
     const double highRate = rate * static_cast<double>(c.factor);
     c.ceilLin = std::pow(10.0f, p[1] / 20.0f);
     c.laHigh = c.limiter ? static_cast<uint32_t>(std::ceil(static_cast<double>(p[4]) * 0.001 * highRate)) : 0u;

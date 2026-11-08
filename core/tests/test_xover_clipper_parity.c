@@ -162,6 +162,11 @@ int main(void) {
                           9.0f, -3.0f, 0.8f, curve == 3 ? 1.5f : 0.0f, 3.0f, 6.0f, 1.0f, N, 2e-3};
             failures += protCase(rate, &c);
         }
+        /* E6 S12f (ABI v27): oversampling alone, limiter and clipper off, is the kernel's half-band round trip. */
+        for (int os = 2; os <= 4; os += 2) {
+            ProtCase only = {0, 0, os, 0, 0, 0, 0, 0, 0.0f, 0.0f, 1.0f, 0.0f, 3.0f, 6.0f, 1.0f, N, 2e-3};
+            failures += protCase(rate, &only);
+        }
         ProtCase both = {1, 1, 4, 1, 2, 1, 0, 0, 6.0f, -2.0f, 1.0f, 0.5f, 3.0f, 6.0f, 1.0f, N, 2e-3};
         failures += protCase(rate, &both);
         /* Rider: a hot signal held for about 2.5 s so the 1 s sustained measure settles and the fast (3 s) rider moves. */

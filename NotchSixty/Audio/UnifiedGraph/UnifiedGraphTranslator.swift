@@ -37,9 +37,12 @@ enum UnifiedGraphTranslator {
         firScheme: UInt32 = UnifiedGraphFIRScheme.current()
     ) -> Result<UnifiedGraphConfiguration, UnifiedGraphFallbackReason> {
         if let alignment, alignment.issue != nil { return .failure(.alignmentInvalid) }
-        guard withUnsafePointer(to: &snapshot, {
-            N60UnifiedGraphSnapshotUnsupportedReason($0, UInt32(UnifiedGraphFIRScheme.maxTaps(firScheme))) == N60UnifiedGraphSupported
-        }) else { return .failure(.unsupportedKernelStage) }
+        let eligibility = withUnsafePointer(to: &snapshot) {
+            N60UnifiedGraphSnapshotUnsupportedReason($0, UInt32(UnifiedGraphFIRScheme.maxTaps(firScheme)))
+        }
+        if eligibility != N60UnifiedGraphSupported {
+            return .failure(UnifiedGraphFallbackReason.eligibility(eligibility))
+        }
 
         // E6 S12e, decision 16 (D5): global bypass and the reference audition remove the program DSP and keep the lane
         // calibration, the bass management and the protection. Parity exception P1: the kernel's bypass keeps only the
@@ -108,11 +111,18 @@ enum UnifiedGraphTranslator {
             case .speakerIR: stages.speakerIR = program
             }
         }
-        if (stages.roomFIR != nil || stages.speakerIR != nil), !subwoofers.isEmpty {
-            return .failure(.convolverWithSubwoofer)
+        // E6 S12f (G3): the kernel runs the program convolution inside the mid/side pair. Taps shared by both channels
+        // commute with the pair, so the core's order (the FIR ahead of the pair) is exact; distinct left and right taps
+        // do not, and the graph names the refusal.
+        if snapshot.eqMidSideMode, !snapshot.eqBypassed, let program = stages.programFIR,
+           let right = program.right, right != program.left {
+            return .failure(.midSideProgramFIR)
         }
+        // E6 S12f: a room or speaker IR convolver with subwoofer lanes renders on the graph in the core's order (the
+        // convolvers delay the front pair, the other lanes catch up). Two bass managers on one path do not: the stereo
+        // crossover and the subwoofer split would each take the low band (G32).
         if stages.crossover != nil, !subwoofers.isEmpty {
-            return .failure(.unsupportedKernelStage)
+            return .failure(.crossoverWithSubwoofer)
         }
         configuration.stereoStages = stages
         configuration.firScheme = firScheme
@@ -868,8 +878,22 @@ enum UnifiedGraphFallbackReason: String, Error, Equatable, Sendable, CaseIterabl
     case stageParametersUnreadable
     /// Stereo: a convolver's taps were not retained, or do not match the snapshot's program record.
     case convolutionProgramUnavailable
-    /// Stereo: room correction or speaker IR with a subwoofer lane.
+    /// Retired in E6 S12f (room correction or speaker IR with a subwoofer lane renders on the graph); kept so diagnostics stay stable.
     case convolverWithSubwoofer
+    /// E6 S12f: the stereo crossover and subwoofer lanes together would split the bass twice (G32).
+    case crossoverWithSubwoofer
+    /// E6 S12f: the snapshot's unsupported stage group, by name (replaces the generic kernel-stage refusal).
+    case snapshotBypassOrAudition
+    case snapshotMidSideOrMixedPhase
+    case snapshotEQSection
+    case snapshotSpatial
+    case snapshotCrossover
+    case snapshotDynamics
+    case snapshotProtection
+    case snapshotConvolution
+    case snapshotAmbientOrANC
+    case snapshotDelay
+    case snapshotGain
     case protectionCeilingOutOfRange
     /// Retired in E6 S8e (those routes render through the graph); kept so diagnostics stay stable.
     case unsupportedRoute
@@ -905,6 +929,24 @@ enum UnifiedGraphFallbackReason: String, Error, Equatable, Sendable, CaseIterabl
     /// Room correction, speaker IR or an image stage with Virtual Speakers (they act on speakers, not ears).
     case virtualSpeakersSpeakerStage
 
+    /// Maps the snapshot eligibility result to its named refusal.
+    static func eligibility(_ reason: N60UnifiedGraphUnsupportedReason) -> UnifiedGraphFallbackReason {
+        switch reason {
+        case N60UnifiedGraphUnsupportedBypassOrAudition: .snapshotBypassOrAudition
+        case N60UnifiedGraphUnsupportedMidSideOrMixedPhase: .snapshotMidSideOrMixedPhase
+        case N60UnifiedGraphUnsupportedEQSection: .snapshotEQSection
+        case N60UnifiedGraphUnsupportedSpatial: .snapshotSpatial
+        case N60UnifiedGraphUnsupportedCrossover: .snapshotCrossover
+        case N60UnifiedGraphUnsupportedDynamics: .snapshotDynamics
+        case N60UnifiedGraphUnsupportedProtection: .snapshotProtection
+        case N60UnifiedGraphUnsupportedConvolution: .snapshotConvolution
+        case N60UnifiedGraphUnsupportedAmbientOrANC: .snapshotAmbientOrANC
+        case N60UnifiedGraphUnsupportedDelay: .snapshotDelay
+        case N60UnifiedGraphUnsupportedGain: .snapshotGain
+        default: .unsupportedKernelStage
+        }
+    }
+
     /// Short text for the diagnostics row.
     var displayText: String {
         switch self {
@@ -925,6 +967,18 @@ enum UnifiedGraphFallbackReason: String, Error, Equatable, Sendable, CaseIterabl
         case .stageParametersUnreadable: "stage parameters unreadable"
         case .convolutionProgramUnavailable: "convolver taps not retained or not matching"
         case .convolverWithSubwoofer: "room or speaker IR with a subwoofer"
+        case .crossoverWithSubwoofer: "stereo crossover with a subwoofer"
+        case .snapshotBypassOrAudition: "delta audition"
+        case .snapshotMidSideOrMixedPhase: "Mid/Side or mixed-phase EQ out of range"
+        case .snapshotEQSection: "EQ section out of range"
+        case .snapshotSpatial: "spatial stage out of range"
+        case .snapshotCrossover: "crossover out of range"
+        case .snapshotDynamics: "dynamics stage out of range"
+        case .snapshotProtection: "protection out of range"
+        case .snapshotConvolution: "convolution out of range"
+        case .snapshotAmbientOrANC: "ambient or ANC stage"
+        case .snapshotDelay: "delay out of range"
+        case .snapshotGain: "gain out of range"
         case .protectionCeilingOutOfRange: "protection ceiling out of range"
         case .unsupportedRoute: "same-device, aggregate or rack route"
         case .headphoneDSP: "headphone DSP"

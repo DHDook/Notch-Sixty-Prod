@@ -250,7 +250,8 @@ static void republish(n60_graph *g, double rate, uint32_t ch, const n60_stage_de
  * and reading again after the switch back shows the limiter working. */
 static void testLimiterBypassedDuringPlayback(double rate) {
     const float on[7] = {1, -6, 1, 50, 10, 1, 4};
-    const float off[7] = {0, -6, 1, 50, 10, 1, 4};
+    /* Factor 1: with the limiter off, a factor above 1 is an oversampling round trip (ABI v27), not a bypass. */
+    const float off[7] = {0, -6, 1, 50, 10, 1, 1};
     const double ceilLin = pow(10.0, -6.0 / 20.0);
     n60_stage_desc stOn = stage(N60_STAGE_PROTECTION, 20, N60_LANE_ALL, 0, on, 7);
     n60_stage_desc stOff = stage(N60_STAGE_PROTECTION, 20, N60_LANE_ALL, 0, off, 7);
@@ -363,7 +364,7 @@ static void testArguments(void) {
     CHECK(n60_graph_read_over_range(g, 10, 0, &c) == N60_STATUS_BAD_ARGUMENT, "over-range of a compressor");
     CHECK(n60_graph_read_over_range(g, 2, 5, &c) == N60_STATUS_BAD_ARGUMENT, "over-range lane out of range");
     CHECK(n60_graph_read_over_range(g, 2, 0, NULL) == N60_STATUS_BAD_ARGUMENT, "over-range null count");
-    CHECK(n60_graph_abi_version() == 26u && N60_GRAPH_ABI_VERSION == 26u, "ABI v26");
+    CHECK(n60_graph_abi_version() == 27u && N60_GRAPH_ABI_VERSION == 27u, "ABI v27");
     n60_graph_retire(g);
 }
 

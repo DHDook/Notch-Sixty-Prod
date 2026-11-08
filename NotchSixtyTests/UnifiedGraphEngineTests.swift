@@ -785,10 +785,11 @@ final class UnifiedGraphStageParityTests: XCTestCase {
         // The core has no stereo crossover beside the sub-lane bass management.
         XCTAssertNil(UnifiedGraphTranslator.stereoConfiguration(
             snapshot: &s, sampleRate: 48_000, subwoofers: [UnifiedGraphSubwoofer()]))
-        // Oversampling with neither limiter nor clipper: the kernel adds latency the core does not.
+        // E6 S12f: oversampling with neither limiter nor clipper is an oversampling round trip in the core, with the
+        // kernel's latency (parity in the e6_core_xover_clipper_parity harness).
         s = N60DSPGraphSnapshotMakeUnity(48_000)
         XCTAssertTrue(N60ProtectionSnapshotSetOversamplingFactor(&s.protection, N60OversamplingFactor4x))
-        XCTAssertNil(UnifiedGraphTranslator.stereoConfiguration(snapshot: &s, sampleRate: 48_000))
+        XCTAssertNotNil(UnifiedGraphTranslator.stereoConfiguration(snapshot: &s, sampleRate: 48_000))
     }
 
     func testAmbientCompensationMatchesTheKernelAtEveryRate() throws {
@@ -856,8 +857,8 @@ final class UnifiedGraphStageParityTests: XCTestCase {
                         "a dynamic EQ with no enabled band is the identity")
         s = dynamicEQSnapshot(rate: 48_000)
         s.eqMidSideMode = true
-        XCTAssertNil(UnifiedGraphTranslator.stereoConfiguration(snapshot: &s, sampleRate: 48_000),
-                     "the kernel runs the dynamic EQ after the mid/side decode, the core before")
+        XCTAssertNotNil(UnifiedGraphTranslator.stereoConfiguration(snapshot: &s, sampleRate: 48_000),
+                        "E6 S12f, parity exception P3: the dynamic EQ runs before the mid/side encode in the core")
     }
 
     // MARK: dynamic EQ and spectral denoiser (E6 S8d, first stage group)
@@ -1273,10 +1274,34 @@ extension UnifiedGraphStageParityTests {
         // Wrong kind.
         XCTAssertNil(UnifiedGraphTranslator.stereoConfiguration(
             snapshot: &s, sampleRate: rate, programs: lookup(.speakerIR, [p])))
-        // Room FIR before the expander.
+        // E6 S12f (G3, P2): room FIR with the expander attaches; the core orders the stages canonically.
         XCTAssertTrue(N60DynamicsSnapshotSetExpander(&s.dynamics, rate, true, -26, 2, -30, 2, 80))
-        XCTAssertNil(UnifiedGraphTranslator.stereoConfiguration(
+        XCTAssertNotNil(UnifiedGraphTranslator.stereoConfiguration(
             snapshot: &s, sampleRate: rate, programs: lookup(.roomCorrection, [p])))
+    }
+
+    /// E6 S12f: refusals are named, and a room FIR with subwoofer lanes attaches.
+    func testS12fNamedRefusalsAndRoomFIRWithSubwoofers() throws {
+        let rate = 48_000.0
+        let kernel = try XCTUnwrap(N60RenderKernelCreate())
+        defer { N60RenderKernelDestroy(kernel) }
+        let p = try prepare(kernel, kind: .roomCorrection, slot: 0, left: taps(count: 500, seed: 0.2), right: nil, declared: 0)
+        var s = N60DSPGraphSnapshotMakeUnity(rate)
+        select(&s, kind: .roomCorrection, slot: 0, p)
+        var delta = N60DSPGraphSnapshotMakeUnity(rate)
+        delta.auditionMode = N60AuditionModeDelta
+        if case .failure(let reason) = UnifiedGraphTranslator.stereoEligibility(snapshot: &delta, sampleRate: rate) {
+            XCTAssertEqual(reason, .snapshotBypassOrAudition)
+        } else {
+            XCTFail("delta audition must stay on the kernel")
+        }
+        if case .failure(let reason) = UnifiedGraphTranslator.stereoEligibility(
+            snapshot: &s, sampleRate: rate, programs: lookup(.roomCorrection, [p])) {
+            XCTFail("room FIR alone must attach, got \(reason)")
+        }
+        for reason in UnifiedGraphFallbackReason.allCases {
+            XCTAssertFalse(reason.displayText.isEmpty)
+        }
     }
 
     /// An IR change on the kernel ducks 8 ms and cuts to a cold runtime; the graph rebuilds with a fully warm filter
