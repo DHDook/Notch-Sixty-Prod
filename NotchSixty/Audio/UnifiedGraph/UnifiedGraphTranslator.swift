@@ -41,34 +41,55 @@ enum UnifiedGraphTranslator {
             N60UnifiedGraphSnapshotUnsupportedReason($0, UInt32(UnifiedGraphFIRScheme.maxTaps(firScheme))) == N60UnifiedGraphSupported
         }) else { return .failure(.unsupportedKernelStage) }
 
+        // E6 S12e, decision 16 (D5): global bypass and the reference audition remove the program DSP and keep the lane
+        // calibration, the bass management and the protection. Parity exception P1: the kernel's bypass keeps only the
+        // master gain and the calibration it applies after the program stages; the graph also keeps the stereo crossover.
+        let d5 = snapshot.bypassed || snapshot.auditionMode == N60AuditionModeReference
         var left: [UnifiedGraphPEQSection] = []
         var right: [UnifiedGraphPEQSection] = []
         withUnsafePointer(to: &snapshot) { pointer in
             var band = N60UnifiedGraphBand()
             var index: UInt32 = 0
-            while !pointer.pointee.eqBypassed, N60UnifiedGraphReadBand(pointer, index, &band) {
+            while !d5, !pointer.pointee.eqBypassed, N60UnifiedGraphReadBand(pointer, index, &band) {
                 index += 1
                 guard band.enabled else { continue }
                 let section = UnifiedGraphPEQSection(
                     type: Int(band.type), frequencyHz: band.frequencyHz,
-                    gainDB: band.gainDB, q: band.q
+                    gainDB: band.gainDB, q: band.q,
+                    coefficients: band.type == 9 ? [band.b0, band.b1, band.b2, band.a1, band.a2] : nil
                 )
                 if band.channelMask & UInt8(N60_EQ_CHANNEL_LEFT) != 0 { left.append(section) }
                 if band.channelMask & UInt8(N60_EQ_CHANNEL_RIGHT) != 0 { right.append(section) }
             }
         }
 
-        let output = snapshot.outputGainLinear * snapshot.masterGainLinear
+        let output = d5 ? snapshot.masterGainLinear : snapshot.outputGainLinear * snapshot.masterGainLinear
+        let balanceLeft = d5 ? 1 : snapshot.balanceGainLeftLinear
+        let balanceRight = d5 ? 1 : snapshot.balanceGainRightLinear
         var configuration = UnifiedGraphConfiguration(
             sampleRate: sampleRate,
             lanes: [
-                UnifiedGraphLane(outputGain: output * snapshot.balanceGainLeftLinear, eq: left),
-                UnifiedGraphLane(outputGain: output * snapshot.balanceGainRightLinear, eq: right),
+                UnifiedGraphLane(outputGain: output * balanceLeft, eq: left),
+                UnifiedGraphLane(outputGain: output * balanceRight, eq: right),
             ]
         )
-        configuration.inputGain = snapshot.inputGainLinear * snapshot.headroomGainLinear
-        guard var stages = stereoStages(snapshot: &snapshot, configuration: &configuration) else {
-            return .failure(.stageParametersUnreadable)
+        configuration.inputGain = d5 ? 1 : snapshot.inputGainLinear * snapshot.headroomGainLinear
+        var stages: UnifiedGraphStereoStages
+        if d5 {
+            stages = UnifiedGraphStereoStages()
+            if snapshot.crossover.enabled {
+                let x = snapshot.crossover
+                stages.crossover = [
+                    Float(x.frequencyHz), Float(x.topology.rawValue), Float(x.monitorMode.rawValue), x.subGainLinear,
+                    x.subPolarityInverted ? 1 : 0, x.subPhaseAlignmentEnabled ? 1 : 0,
+                    Float(x.subPhaseAlignmentFrequencyHz), Float(x.subPhaseAlignmentQ),
+                ]
+            }
+        } else {
+            guard let built = stereoStages(snapshot: &snapshot, configuration: &configuration) else {
+                return .failure(.stageParametersUnreadable)
+            }
+            stages = built
         }
         // E6 S8d: recover each enabled convolver's taps by generation and verify them against the snapshot's record.
         let states = [
@@ -76,7 +97,7 @@ enum UnifiedGraphTranslator {
             (.roomCorrection, snapshot.roomCorrection),
             (.speakerIR, snapshot.speakerIR),
         ]
-        for (kind, state) in states where state.enabled {
+        for (kind, state) in states where state.enabled && !d5 {
             guard let program = programs(kind, state.programGeneration),
                   recoveredProgramMatches(program, state, firScheme: firScheme) else {
                 return .failure(.convolutionProgramUnavailable)
@@ -96,6 +117,16 @@ enum UnifiedGraphTranslator {
         configuration.stereoStages = stages
         configuration.firScheme = firScheme
         if let alignment { apply(alignment, to: &configuration) }
+        if d5 {
+            // The processed path's latency is what the control plane reports for this snapshot; the graph pads the lanes
+            // with whatever the removed program DSP contributed, so a toggle keeps the latency (decision 16).
+            let pad = Int(snapshot.latencyFrames) - Int(snapshot.protection.latencyFrames)
+            // A pad beyond the delay capacity cannot keep the latency, so the kernel keeps the snapshot instead.
+            if pad > Int(N60_GRAPH_MAX_DELAY_FRAMES) / 2 { return .failure(.alignmentInvalid) }
+            if pad > 0 {
+                for index in configuration.lanes.indices { configuration.lanes[index].calibrationDelayFrames += Double(pad) }
+            }
+        }
         let p = snapshot.protection
         if p.limiterEnabled || p.truePeakGuardEnabled || p.softClipperEnabled || p.gainRiderEnabled {
             let ceilingDB = 20.0 * log10(Double(max(p.limiterCeilingLinear, 1e-6)))

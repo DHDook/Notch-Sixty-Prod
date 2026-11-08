@@ -1,11 +1,25 @@
 import Foundation
 
-/// One PEQ section for the core stage (types 0 to 7 of `N60BiquadFilterType`).
+/// One PEQ section for the core stage: types 0 to 8 of `N60BiquadFilterType`, or type 9 (the Linkwitz transform) as the
+/// kernel's prepared coefficients (E6 S12e, ABI v26: two core slots, a numerator and a denominator).
 struct UnifiedGraphPEQSection: Equatable, Sendable {
     var type: Int
     var frequencyHz: Double
     var gainDB: Double
     var q: Double
+    /// b0, b1, b2, a1, a2 of the prepared biquad; required for type 9, ignored otherwise.
+    var coefficients: [Float]?
+
+    init(type: Int, frequencyHz: Double, gainDB: Double, q: Double, coefficients: [Float]? = nil) {
+        self.type = type
+        self.frequencyHz = frequencyHz
+        self.gainDB = gainDB
+        self.q = q
+        self.coefficients = coefficients
+    }
+
+    /// Core PEQ slots this section takes.
+    var slotCount: Int { type == 9 ? 2 : 1 }
 }
 
 /// One program lane of a speaker graph.
@@ -287,8 +301,13 @@ struct UnifiedGraphConfiguration: Equatable, Sendable {
                 kind: N60_STAGE_MS_ENCODE.rawValue, stageId: N60_LSTAGE_MS_ENCODE, laneA: 0, laneB: 1))
         }
         for (index, lane) in lanes.enumerated() where !lane.eq.isEmpty {
-            add(N60_STAGE_PEQ, N60_LSTAGE_PEQ_LANE + UInt32(index), lane: UInt32(index),
-                params: try Self.peqParameters(lane.eq))
+            // E6 S12e: more than 16 slots chain PEQ stages in order (the chain is the cascade); the first keeps the
+            // ordinary id so a configuration within one stage is unchanged.
+            let chunks = try Self.peqChunks(lane.eq)
+            for (chunk, params) in chunks.enumerated() {
+                let id = chunk == 0 ? N60_LSTAGE_PEQ_LANE + UInt32(index) : Self.wideEQStageId + UInt32(index) * 64 + UInt32(chunk)
+                add(N60_STAGE_PEQ, id, lane: UInt32(index), params: params)
+            }
         }
         if let params = stereo.dynamicEQ {
             add(N60_STAGE_DYN_EQ, Self.dynamicEQStageId, mask: programMask, params: params)
@@ -472,6 +491,9 @@ struct UnifiedGraphConfiguration: Equatable, Sendable {
     static let delayStageBase: UInt32 = 500
     static let calibrationDelayStageBase: UInt32 = 520
     static let bassStageId: UInt32 = 90
+    /// E6 S12e: PEQ stages after the first on a lane carrying more than 16 slots (+ lane * 64 + chunk).
+    static let wideEQStageId: UInt32 = 2000
+    static let maxPEQSlotsPerLane = 512
     static let compressorStageId: UInt32 = 600
     static let expanderStageId: UInt32 = 601
     static let ambientStageId: UInt32 = 602
@@ -528,19 +550,44 @@ struct UnifiedGraphConfiguration: Equatable, Sendable {
         return frames >= 1 ? UInt32(frames) : nil
     }
 
+    /// A lane's sections as PEQ stage parameter lists of at most 16 slots each. A type 9 section's two slots stay together.
+    static func peqChunks(_ sections: [UnifiedGraphPEQSection]) throws -> [[Float]] {
+        guard sections.reduce(0, { $0 + $1.slotCount }) <= maxPEQSlotsPerLane else {
+            throw UnifiedGraphError.unsupportedConfiguration("more than \(maxPEQSlotsPerLane) EQ slots on a lane")
+        }
+        var chunks: [[Float]] = []
+        var current: [Float] = []
+        for section in sections {
+            let slots = try peqSlots(section)
+            if current.count + slots.count > Int(N60_PEQ_MAX_SECTIONS) * 4 {
+                chunks.append(current)
+                current = []
+            }
+            current += slots
+        }
+        if !current.isEmpty { chunks.append(current) }
+        return chunks
+    }
+
+    private static func peqSlots(_ section: UnifiedGraphPEQSection) throws -> [Float] {
+        if section.type == 9 {
+            guard let c = section.coefficients, c.count == 5, c.allSatisfy(\.isFinite) else {
+                throw UnifiedGraphError.unsupportedConfiguration("Linkwitz transform coefficients")
+            }
+            return [9, c[0], c[1], c[2], 10, c[3], c[4], 0]
+        }
+        guard (0...8).contains(section.type), (-24.0...24.0).contains(section.gainDB) else {
+            throw UnifiedGraphError.unsupportedConfiguration("EQ section type or gain")
+        }
+        return [Float(section.type), Float(section.frequencyHz), Float(section.gainDB), Float(section.q)]
+    }
+
+    /// One stage's parameters (at most 16 slots, types 0 to 7), as the sub EQ, routing and program-curve stages use them.
     static func peqParameters(_ sections: [UnifiedGraphPEQSection]) throws -> [Float] {
-        guard sections.count <= Int(N60_PEQ_MAX_SECTIONS) else {
+        guard sections.count <= Int(N60_PEQ_MAX_SECTIONS), sections.allSatisfy({ (0...7).contains($0.type) }) else {
             throw UnifiedGraphError.unsupportedConfiguration("more than 16 EQ sections")
         }
-        var result: [Float] = []
-        result.reserveCapacity(sections.count * 4)
-        for section in sections {
-            guard (0...7).contains(section.type), (-24.0...24.0).contains(section.gainDB) else {
-                throw UnifiedGraphError.unsupportedConfiguration("EQ section type or gain")
-            }
-            result += [Float(section.type), Float(section.frequencyHz), Float(section.gainDB), Float(section.q)]
-        }
-        return result
+        return try sections.flatMap(peqSlots)
     }
 
     private static func bassParameters(

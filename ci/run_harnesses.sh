@@ -580,6 +580,21 @@ if selected e6_multiband; then
     fi
 fi
 
+# E6 S12e: the PEQ kernel types and wide chains: behaviour at the eight standard rates.
+if selected e6_peq_wide; then
+    build_core_objs
+    if [ "$CORE_OK" = 1 ]; then
+        if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -Icore/include -Icore/src core/tests/test_peq_wide.cpp \
+            "${CORE_OBJS[@]}" -o "$OUT/e6_core_peq_wide" && "$OUT/e6_core_peq_wide"; then
+            passed+=(e6_core_peq_wide)
+        else
+            failed+=(e6_core_peq_wide)
+        fi
+    else
+        failed+=(e6_peq_wide)
+    fi
+fi
+
 # E6 S12c: the loudness stage (match, contour, dialogue leveler): behaviour at the eight standard rates.
 if selected e6_loudness; then
     build_core_objs

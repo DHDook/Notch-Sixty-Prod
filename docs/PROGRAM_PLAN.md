@@ -178,8 +178,8 @@ Gate G2 passed on 2026-10-25 (commit 07e82c6)
   - [x] S12a DC offset, infrasonic, mains notch and hum detector in the core (migration audit table row 1 done, `docs/epics/E6.md`; PR pending)
   - [~] S12b stereo mode, widener, de-harsh and de-esser in the core (`e6/port-image-and-deess`, #409, ABI v23; built in the core, wiring: S12g for N-channel (G12) and S12f for state carry and refusals (G11, G13, G14); bench: E22)
   - [x] S12c loudness match, loudness contour, per-band loudness and dialogue leveler in the core
-  - [~] S12d multiband compressor in the core, with per-band auto release (closes E28 G11; `e6/port-multiband`, PR pending, ABI v25; per-band auto release is core-only, wiring: E28 S7c; bench: E22)
-  - [ ] S12e stereo global bypass and audition on the graph; wide PEQ (over 16 sections, types 8–10, kernel gain range); D5 semantics as parity exception P1, delta audition ported (E6 decisions 16–17)
+  - [~] S12d multiband compressor in the core, with per-band auto release (closes E28 G11; `e6/port-multiband`, #412, ABI v25; per-band auto release is core-only, wiring: E28 S7c; bench: E22)
+  - [~] S12e stereo global bypass and reference audition on the graph (D5, parity exception P1) and wide PEQ (over 16 sections, types 8–10) built (`e6/port-bypass-audition-eq`, PR pending, ABI v26); delta audition and the bypass lab case remain (G27, G28); bench: E22 (G29)
   - [ ] S12f stereo crossover and room/IR with subs, oversampling-only protection, the three ordering guards, named refusals and a UI-range attach test
   - [ ] S12g old N-channel and legacy binaural path reasons onto the graph; `binauralBudget` raised within measured cost, refused beyond (E6 decision 18)
   - [ ] S12h stereo Active Quiet Zone on the graph, authorisation unchanged (needs-owner, ANC; E6 decision 15)
@@ -436,6 +436,7 @@ Owner decision, 18 Oct 2026: there is no bench access for now, so every bench ch
 - [ ] Run E4 S11 (owner, 1 Nov 2026: moved here from the E4 execution order): repeat S8 on the unified E6 graph, then fill the placeholder reduction table in `docs/ANC_QUALIFICATION.md` §4.1 from the S31 reviewer-kit noise files
 - [ ] Run the remaining bench checks at every rate from 44.1 to 384 kHz
 - [ ] E6 G19: listening for level riding on speech and music at the eight rates (LOUDNESS stage, E6 S12c)
+- [ ] E6 G29: bypass and reference audition A/B while playing, and wide-EQ listening at the eight rates (E6 S12e)
 - [ ] E6 G26: listening and bench check of multiband at the eight rates, including the kernel-to-graph hand-over with multiband on (MULTIBAND stage, E6 S12d); the reference-lab case is E6 S12h
 - [ ] E27 owner release-build verification (owner decision 7 Nov 2026): Equalizer page running-window checks G3, G5, G9, G12, G16 and the DAC checks G14 (Listen ends on transport stop, glitch-free linear-phase A/B), per the checklist in `docs/epics/E27.md` Bench checks
 - [ ] Feed the results into the live-authorisation slices (E4 S10, E19), which still need real evidence
