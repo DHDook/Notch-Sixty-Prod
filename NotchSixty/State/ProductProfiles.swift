@@ -1132,6 +1132,8 @@ final class ProductProfileController: ObservableObject {
     /// The profile saves the live EQ, which is the active slot; slot B is session-only.
     let eqAudition: EQAuditionController
     let eqComparison: EQComparisonController
+    /// E27 S2b: program spectrum overlay on the Equalizer graph; inert unless `e27.eq-safety` is on.
+    let eqProgramAnalyser: EQProgramAnalyserController
     private let storageURL: URL
     private var didRestoreSelection = false
     private var didLoadArchive = false
@@ -1164,6 +1166,7 @@ final class ProductProfileController: ObservableObject {
         self.eqComparison = EQComparisonController(
             engine: engine, autoPreamp: self.autoPreamp, audition: self.eqAudition, isAvailable: eqSafety
         )
+        self.eqProgramAnalyser = EQProgramAnalyserController(source: engine, isAvailable: eqSafety)
         self.audioUnitHost = audioUnitHost ?? AudioUnitHostController()
         self.storageURL = storageURL ?? Self.defaultStorageURL()
         audioUnitHostObservation = self.audioUnitHost.objectWillChange.sink {
