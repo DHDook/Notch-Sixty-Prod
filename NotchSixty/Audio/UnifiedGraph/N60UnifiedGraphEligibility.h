@@ -698,24 +698,52 @@ static inline bool N60UnifiedGraphConvolutionState(const N60ConvolutionGraphStat
 static inline N60UnifiedGraphUnsupportedReason N60UnifiedGraphSnapshotUnsupportedReason(
     const N60DSPGraphSnapshot * _Nonnull s, uint32_t maxFIRTaps
 ) {
-    if (s->bypassed || s->auditionMode != N60AuditionModeProcessed) {
-        return N60UnifiedGraphUnsupportedBypassOrAudition;
+    // E6 S12e: delta audition (processed minus the aligned reference) still belongs to the kernel. Global bypass and the
+    // reference audition run on the graph as the D5 path (decision 16): program DSP removed; the lane calibration, the
+    // bass management and the protection kept. Only those stages are checked then.
+    if (s->auditionMode == N60AuditionModeDelta) return N60UnifiedGraphUnsupportedBypassOrAudition;
+    const bool d5 = s->bypassed || s->auditionMode == N60AuditionModeReference;
+    // E6 S8d group 4: the stereo crossover. The core rebuilds its coefficients from the user-level values, so the
+    // topology, monitor mode, frequency and alignment must be ones it accepts.
+    if (s->crossover.enabled) {
+        const N60CrossoverSnapshot *x = &s->crossover;
+        const double nyquist = s->sampleRate * 0.5;
+        if (!(x->frequencyHz > 0.0 && x->frequencyHz < nyquist
+              && ((int)x->topology == 0 || (int)x->topology == 1)
+              && (int)x->monitorMode >= 0 && (int)x->monitorMode <= 2
+              && isfinite(x->subGainLinear) && x->subGainLinear >= 0.0f
+              && x->subPhaseAlignmentFrequencyHz > 0.0 && x->subPhaseAlignmentFrequencyHz < nyquist
+              && x->subPhaseAlignmentQ > 0.0 && isfinite(x->subPhaseAlignmentQ))) {
+            return N60UnifiedGraphUnsupportedCrossover;
+        }
     }
+    const N60DynamicsSnapshot *d = &s->dynamics;
+    float scratch[10];
+    if (!d5) {
     if (s->eqBandCount > N60_MAX_EQ_RENDER_SLOTS) return N60UnifiedGraphUnsupportedEQSection;
     uint32_t perLane[2] = {0u, 0u};
     for (uint32_t i = 0; i < s->eqBandCount; ++i) {
         const N60BiquadBandSnapshot *b = &s->eqBands[i];
         if (!b->enabled) continue;
         const int type = (int)b->type;
-        // The core PEQ implements types 0..7 only, +-24 dB, with 16 sections per lane.
-        if (type < 0 || type > 7 || !(b->gainDB >= -24.0 && b->gainDB <= 24.0)) {
+        // The core PEQ implements types 0..8 (constant-Q) and the prepared Linkwitz transform (9) as two slots,
+        // +-24 dB (the kernel's own range), chained over several stages beyond 16 slots (E6 S12e, ABI v26).
+        if (type < 0 || type > 9 || (type != 9 && !(b->gainDB >= -24.0 && b->gainDB <= 24.0))) {
+            return N60UnifiedGraphUnsupportedEQSection;
+        }
+        if (type == 8 && !(b->q > 0.0f)) return N60UnifiedGraphUnsupportedEQSection;
+        // The Linkwitz denominator must be strictly stable as a float, as the core demands, or the kernel keeps it.
+        if (type == 9 && !(isfinite(b->coefficients.b0) && isfinite(b->coefficients.b1) && isfinite(b->coefficients.b2)
+                           && isfinite(b->coefficients.a1) && isfinite(b->coefficients.a2)
+                           && fabsf(b->coefficients.a2) < 1.0f && fabsf(b->coefficients.a1) < 1.0f + b->coefficients.a2)) {
             return N60UnifiedGraphUnsupportedEQSection;
         }
         const uint8_t mask = s->eqBandChannelMasks[i];
-        if (mask & N60_EQ_CHANNEL_LEFT) perLane[0] += 1u;
-        if (mask & N60_EQ_CHANNEL_RIGHT) perLane[1] += 1u;
+        const uint32_t slots = type == 9 ? 2u : 1u;
+        if (mask & N60_EQ_CHANNEL_LEFT) perLane[0] += slots;
+        if (mask & N60_EQ_CHANNEL_RIGHT) perLane[1] += slots;
     }
-    if (perLane[0] > 16u || perLane[1] > 16u) return N60UnifiedGraphUnsupportedEQSection;
+    if (perLane[0] > 512u || perLane[1] > 512u) return N60UnifiedGraphUnsupportedEQSection;
     if (s->symmetryBalance.enabled
             && !(s->symmetryBalance.position >= -1.0 && s->symmetryBalance.position <= 1.0)) {
         return N60UnifiedGraphUnsupportedSpatial;
@@ -731,20 +759,6 @@ static inline N60UnifiedGraphUnsupportedReason N60UnifiedGraphSnapshotUnsupporte
                  && s->crosstalkCancellation.headShadowFrequencyHz < s->sampleRate * 0.5)) {
         return N60UnifiedGraphUnsupportedSpatial;
     }
-    // E6 S8d group 4: the stereo crossover. The core rebuilds its coefficients from the user-level values, so the
-    // topology, monitor mode, frequency and alignment must be ones it accepts.
-    if (s->crossover.enabled) {
-        const N60CrossoverSnapshot *x = &s->crossover;
-        const double nyquist = s->sampleRate * 0.5;
-        if (!(x->frequencyHz > 0.0 && x->frequencyHz < nyquist
-              && ((int)x->topology == 0 || (int)x->topology == 1)
-              && (int)x->monitorMode >= 0 && (int)x->monitorMode <= 2
-              && isfinite(x->subGainLinear) && x->subGainLinear >= 0.0f
-              && x->subPhaseAlignmentFrequencyHz > 0.0 && x->subPhaseAlignmentFrequencyHz < nyquist
-              && x->subPhaseAlignmentQ > 0.0 && isfinite(x->subPhaseAlignmentQ))) {
-            return N60UnifiedGraphUnsupportedCrossover;
-        }
-    }
     if (s->interChannelDelay.enabled) {
         uint32_t delayFrames[2];
         double fractional[2];
@@ -752,8 +766,6 @@ static inline N60UnifiedGraphUnsupportedReason N60UnifiedGraphSnapshotUnsupporte
             return N60UnifiedGraphUnsupportedDelay;
         }
     }
-    const N60DynamicsSnapshot *d = &s->dynamics;
-    float scratch[10];
     {
         float cleanup[26];
         bool cleanupNeeded = false;
@@ -791,6 +803,7 @@ static inline N60UnifiedGraphUnsupportedReason N60UnifiedGraphSnapshotUnsupporte
     if (d->pauseGate.enabled && !N60UnifiedGraphPauseGateParams(s, scratch)) {
         return N60UnifiedGraphUnsupportedDynamics;
     }
+    }
     // Ambient after the compressor and expander is the owner's order (24 Oct 2026): the core's, not the kernel's.
     // E6 S8d group 4: the soft clipper and gain rider. The core holds the ranges below; the oversampling factor must be
     // one the core applies (it bypasses, with no oversampling latency, when neither the limiter nor the clipper is on).
@@ -819,7 +832,7 @@ static inline N60UnifiedGraphUnsupportedReason N60UnifiedGraphSnapshotUnsupporte
     // E6 S8d: program FIR, room FIR and speaker IR. The snapshot carries no taps, so this only checks what the
     // core can hold and where the kernel runs the stage; the translator then recovers the taps by generation from
     // the control plane's retained program and verifies them against this record (see UnifiedGraphFIRProgram).
-    if (s->convolution.enabled || s->roomCorrection.enabled || s->speakerIR.enabled) {
+    if (!d5 && (s->convolution.enabled || s->roomCorrection.enabled || s->speakerIR.enabled)) {
         if (!N60UnifiedGraphConvolutionState(&s->convolution, maxFIRTaps)
                 || !N60UnifiedGraphConvolutionState(&s->roomCorrection, maxFIRTaps)
                 || !N60UnifiedGraphConvolutionState(&s->speakerIR, maxFIRTaps)) {
@@ -837,7 +850,7 @@ static inline N60UnifiedGraphUnsupportedReason N60UnifiedGraphSnapshotUnsupporte
         }
     }
     if (s->activeQuietZone.enabled) return N60UnifiedGraphUnsupportedAmbientOrANC;
-    if (s->ambientCompensation.enabled && !N60UnifiedGraphAmbientParams(s, scratch)) {
+    if (!d5 && s->ambientCompensation.enabled && !N60UnifiedGraphAmbientParams(s, scratch)) {
         return N60UnifiedGraphUnsupportedAmbientOrANC;
     }
     const float gains[7] = {
@@ -858,6 +871,7 @@ typedef struct {
     double gainDB;
     double q;
     uint8_t channelMask;
+    float b0, b1, b2, a1, a2;  // the prepared coefficients (the Linkwitz transform is passed to the core as these)
 } N60UnifiedGraphBand;
 
 // Reads EQ band `index` of the snapshot into a flat struct so Swift need not index the
@@ -873,6 +887,8 @@ static inline bool N60UnifiedGraphReadBand(
     out->gainDB = b->gainDB;
     out->q = b->q;
     out->channelMask = s->eqBandChannelMasks[index];
+    out->b0 = b->coefficients.b0; out->b1 = b->coefficients.b1; out->b2 = b->coefficients.b2;
+    out->a1 = b->coefficients.a1; out->a2 = b->coefficients.a2;
     return true;
 }
 

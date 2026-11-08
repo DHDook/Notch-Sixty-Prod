@@ -34,7 +34,7 @@ extern "C" {
 #endif
 
 /* Bumped on any incompatible change to a struct or function below. */
-#define N60_GRAPH_ABI_VERSION 25u
+#define N60_GRAPH_ABI_VERSION 26u
 
 typedef struct n60_graph n60_graph; /* opaque */
 
@@ -472,7 +472,13 @@ typedef int (*n60_external_process_fn)(void *context, const float *const *in, fl
 #define N60_DYN_EQ_BAND_PARAMS 15u
 
 /* PEQ section types (params[4*s]): 0 peaking, 1 low shelf, 2 high shelf, 3 low pass,
- * 4 high pass, 5 notch, 6 all pass, 7 band pass. Gain is -24..+24 dB. */
+ * 4 high pass, 5 notch, 6 all pass, 7 band pass. Gain is -24..+24 dB.
+ * ABI v26 (E6 S12e): 8 constant-Q peaking (Q is the classic electrical Q, so the cookbook Q is Q / A). Types 9 and 10 are
+ * the two halves of one prepared biquad (the stereo kernel's Linkwitz transform): a type 9 section is the numerator
+ * (b0, b1, b2 in the Hz, dB and Q slots) and the section after it, type 10, is the denominator (a1, a2, unused). The
+ * cascade is the biquad. The denominator must be strictly stable (|a2| < 1, |a1| < 1 + a2) or the snapshot is refused.
+ * Types 8 to 10 add no latency, reset like the other types and, for 9 and 10, ignore the sample rate: the prepared
+ * coefficients belong to the rate they were designed at, so the caller re-prepares them on a rate change. A caller needing more than N60_PEQ_MAX_SECTIONS sections chains several PEQ stages. */
 #define N60_PEQ_MAX_SECTIONS 16u
 #define N60_GRAPH_MAX_STAGES 256u
 #define N60_GRAPH_MAX_DELAY_FRAMES (1u << 22)

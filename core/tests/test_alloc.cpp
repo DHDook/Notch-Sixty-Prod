@@ -1006,6 +1006,51 @@ int main() {
         }
         n60_graph_retire(g);
     }
+
+    // E6 S12e: a wide PEQ chain (three stages) with a constant-Q section and a Linkwitz pair, edited live between blocks:
+    // the realtime call allocates and frees nothing.
+    for (double rate : rates) {
+        constexpr uint32_t N = 512;
+        float p0[64], p1[64], p2[16];
+        for (int k = 0; k < 16; k++) {
+            const float row[4] = {static_cast<float>(k % 2 == 0 ? 0 : 8), 200.0f + 100.0f * k, 1.5f, 1.0f};
+            std::memcpy(p0 + 4 * k, row, sizeof row);
+            std::memcpy(p1 + 4 * k, row, sizeof row);
+        }
+        const float lt[8] = {9, 1.0f, -1.9f, 0.9f, 10, -1.8f, 0.81f, 0};
+        std::memcpy(p2, lt, sizeof lt);
+        const float tail[8] = {8, 3000, 3, 1.2f, 0, 5000, -2, 1.0f};
+        std::memcpy(p2 + 8, tail, sizeof tail);
+        n60_stage_desc st[3] = {stage(N60_STAGE_PEQ, 1, 0, p0, 64), stage(N60_STAGE_PEQ, 2, 0, p1, 64), stage(N60_STAGE_PEQ, 3, 0, p2, 16)};
+        n60_graph_desc d{};
+        d.structSize = sizeof d;
+        d.abiVersion = N60_GRAPH_ABI_VERSION;
+        d.sampleRate = rate;
+        d.maxBlockFrames = N;
+        d.inputChannels = d.outputChannels = 1;
+        d.stages = st;
+        d.stageCount = 3;
+        n60_graph *g = nullptr;
+        CHECK(n60_graph_build(&d, &g) == N60_STATUS_OK, "build wide peq");
+        float l[N], ol[N];
+        for (uint32_t i = 0; i < N; i++) l[i] = 0.3f * std::sin(0.9f * i);
+        const float *in[1] = {l};
+        float *out[1] = {ol};
+        for (int round = 0; round < 20; round++) {
+            n60_param_record rec[3] = {{1, 2, static_cast<float>(round % 5), 0}, {2, 6, 0.5f + 0.1f * round, 0},
+                                       {3, 10, -0.5f - 0.05f * round, 0}};
+            CHECK(n60_graph_post_params(g, rec, 3) == N60_STATUS_OK, "post wide peq");
+            allocs = 0;
+            frees = 0;
+            armed = true;
+            n60_status s2 = n60_graph_process(g, in, out, N);
+            for (int k = 0; k < 3; k++) s2 = static_cast<n60_status>(s2 | n60_graph_process(g, in, out, 1 + 97 * k));
+            armed = false;
+            CHECK(s2 == N60_STATUS_OK, "process wide peq");
+            CHECK(allocs == 0 && frees == 0, "wide peq rate %.0f round %d: allocated %ld / freed %ld", rate, round, allocs.load(), frees.load());
+        }
+        n60_graph_retire(g);
+    }
     if (failures) {
         std::fprintf(stderr, "%d failure(s)\n", failures);
         return 1;

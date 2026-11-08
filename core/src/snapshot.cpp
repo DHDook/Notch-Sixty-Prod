@@ -168,6 +168,28 @@ bool designBiquad(uint32_t type, double rate, double f, double gainDb, double q,
 
 namespace {
 
+// One PEQ section (ABI v26): types 0..7 as designBiquad, 8 constant-Q peaking (cookbook Q = Q / A, so Q is the classic
+// electrical Q), 9 the numerator half and 10 the denominator half of one prepared biquad (see graph.h).
+bool designPeqSection(const float *p, double rate, double out[5]) {
+    const uint32_t type = static_cast<uint32_t>(p[0]);
+    if (type <= 7) return designBiquad(type, rate, p[1], p[2], p[3], out);
+    if (type == 8) {
+        if (!std::isfinite(p[2]) || p[2] < -24.0f || p[2] > 24.0f || !(p[3] > 0.0f)) return false;
+        return designBiquad(0, rate, p[1], p[2], static_cast<double>(p[3]) / std::pow(10.0, static_cast<double>(p[2]) / 40.0), out);
+    }
+    if (!std::isfinite(p[1]) || !std::isfinite(p[2]) || !std::isfinite(p[3])) return false;
+    if (type == 9) {
+        out[0] = p[1]; out[1] = p[2]; out[2] = p[3]; out[3] = 0.0; out[4] = 0.0;
+    } else {
+        // The denominator must be strictly stable (inside the stability triangle), or a hostile snapshot could build a
+        // runaway recursion.
+        const double a1 = p[1], a2 = p[2];
+        if (!(std::fabs(a2) < 1.0 && std::fabs(a1) < 1.0 + a2)) return false;
+        out[0] = 1.0; out[1] = 0.0; out[2] = 0.0; out[3] = a1; out[4] = a2;
+    }
+    return true;
+}
+
 bool paramsFinite(const n60_stage_desc &s) {
     for (uint32_t i = 0; i < s.paramCount; ++i) {
         if (!std::isfinite(s.params[i])) return false;
@@ -433,10 +455,15 @@ n60_status validateDesc(const n60_graph_desc &d) {
                 for (uint32_t k = 0; k < s.paramCount / 4; ++k) {
                     const float *p = s.params + 4 * k;
                     double c[5];
-                    if (!(p[0] >= 0.0f && p[0] <= 7.0f) || p[0] != std::floor(p[0]) ||
-                        !designBiquad(static_cast<uint32_t>(p[0]), d.sampleRate, p[1], p[2], p[3], c)) {
+                    if (!(p[0] >= 0.0f && p[0] <= 10.0f) || p[0] != std::floor(p[0]) ||
+                        !designPeqSection(p, d.sampleRate, c)) {
                         return N60_STATUS_BAD_ARGUMENT;
                     }
+                    // A type 9 numerator is followed by its type 10 denominator, and a type 10 follows a type 9.
+                    const bool numerator = p[0] == 9.0f;
+                    const bool followed = k + 1 < s.paramCount / 4 && p[4] == 10.0f;
+                    const bool preceded = k > 0 && p[-4] == 9.0f;
+                    if (numerator != followed || (p[0] == 10.0f) != preceded) return N60_STATUS_BAD_ARGUMENT;
                 }
                 break;
             }
@@ -576,7 +603,7 @@ n60_status buildSnapshot(const n60_graph_desc &d, uint32_t epoch, SnapHeader **o
             PeqSec *sec = reinterpret_cast<PeqSec *>(bytes(h) + r.coefOff);
             for (uint32_t k = 0; k < s.paramCount / 4; ++k) {
                 const float *p = s.params + 4 * k;
-                designBiquad(static_cast<uint32_t>(p[0]), d.sampleRate, p[1], p[2], p[3], sec[k].cur);
+                designPeqSection(p, d.sampleRate, sec[k].cur);
                 for (int j = 0; j < 4; ++j) sec[k].seen[j] = p[j];
             }
         }
@@ -791,7 +818,7 @@ void runPeq(SnapHeader *h, const StageRec &r, float *const *lanes, uint32_t fram
         const float *p = params + 4 * s;
         PeqSec &q = sec[s];
         if (q.xfLeft != 0 || (p[0] == q.seen[0] && p[1] == q.seen[1] && p[2] == q.seen[2] && p[3] == q.seen[3])) continue;
-        if (!designBiquad(static_cast<uint32_t>(p[0]), h->sampleRate, p[1], p[2], p[3], q.nxt)) {
+        if (!designPeqSection(p, h->sampleRate, q.nxt)) {
             for (int j = 0; j < 4; ++j) q.seen[j] = p[j];  // unreachable for validated values; keep the old design
             continue;
         }
