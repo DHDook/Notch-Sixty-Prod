@@ -71,6 +71,8 @@ struct UnifiedGraphStereoStages: Equatable, Sendable {
     /// E6 S12b: stereo mode and widener (IMAGE, 8 parameters) and de-harsh and de-esser (DEESS, 12); nil when all off.
     var image: [Float]?
     var deess: [Float]?
+    /// E6 S12c: loudness match, contour and dialogue leveler (LOUDNESS, 32 parameters); nil when all off.
+    var loudness: [Float]?
     /// Program convolution (kernel: after the EQ, before the compressor).
     var programFIR: UnifiedGraphFIRProgram?
     /// Room correction and speaker IR (kernel: after bass management's slot, before ambient and the core dynamics).
@@ -306,14 +308,20 @@ struct UnifiedGraphConfiguration: Equatable, Sendable {
         }
         // E6 S12b: the kernel runs stereo mode, widener, de-harsh and de-esser after the room and speaker convolvers; the
         // core ranks them before the compressor, so the frozen kernel-parity order cannot place them.
-        if !canonical, hasPostConvolver, stereo.image != nil || stereo.deess != nil {
-            throw UnifiedGraphError.unsupportedConfiguration("image or de-ess with a post convolver in kernel-parity order")
+        if !canonical, hasPostConvolver, stereo.image != nil || stereo.deess != nil || stereo.loudness != nil {
+            throw UnifiedGraphError.unsupportedConfiguration("image, loudness or de-ess with a post convolver in kernel-parity order")
         }
         if let params = stereo.image {
             guard params.count == 8 else { throw UnifiedGraphError.invalidConfiguration("image") }
             guard programLanes == 2 else { throw UnifiedGraphError.unsupportedConfiguration("image needs two lanes") }
             stages.append(UnifiedGraphStageSpec(
                 kind: N60_STAGE_IMAGE.rawValue, stageId: Self.imageStageId, laneA: 0, laneB: 1, params: params))
+        }
+        if let params = stereo.loudness {
+            guard params.count == 32 else { throw UnifiedGraphError.invalidConfiguration("loudness") }
+            guard programLanes == 2 else { throw UnifiedGraphError.unsupportedConfiguration("loudness needs two lanes") }
+            stages.append(UnifiedGraphStageSpec(
+                kind: N60_STAGE_LOUDNESS.rawValue, stageId: Self.loudnessStageId, laneA: 0, laneB: 1, params: params))
         }
         if let params = stereo.deess {
             guard params.count == 12 else { throw UnifiedGraphError.invalidConfiguration("de-ess") }
@@ -470,6 +478,7 @@ struct UnifiedGraphConfiguration: Equatable, Sendable {
     static let cleanupStageId: UInt32 = 622
     static let imageStageId: UInt32 = 623
     static let deessStageId: UInt32 = 624
+    static let loudnessStageId: UInt32 = 625
     static let analyserTapEQStageId: UInt32 = 620
     static let analyserTapDynStageId: UInt32 = 621
     /// FIR stages take two consecutive ids (left, right) when the channels differ.
