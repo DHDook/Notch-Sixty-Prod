@@ -189,6 +189,11 @@ enum UnifiedGraphTranslator {
             if N60UnifiedGraphImageParams(pointer, &image, &imageNeeded) {
                 if imageNeeded { stages.image = image }
             } else { ok = false }
+            var loudness = [Float](repeating: 0, count: 32)
+            var loudnessNeeded = false
+            if N60UnifiedGraphLoudnessParams(pointer, &loudness, &loudnessNeeded) {
+                if loudnessNeeded { stages.loudness = loudness }
+            } else { ok = false }
             var deess = [Float](repeating: 0, count: 12)
             var deessNeeded = false
             if N60UnifiedGraphDeEssParams(pointer, &deess, &deessNeeded) {
