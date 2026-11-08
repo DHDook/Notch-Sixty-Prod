@@ -258,6 +258,76 @@ static inline bool N60UnifiedGraphDenoiserParams(
     return true;
 }
 
+// E6 S12a: the pre-EQ clean-up filters (DC offset, infrasonic cascade, mains notch, hum detector) as the core CLEANUP
+// stage's 26 parameters (graph.h "Cleanup"). Each enabled part is recovered from the kernel snapshot and verified by
+// rebuilding it with the kernel's own setter. The core takes the fundamental as a float, so a double that is not within
+// half a float step of its float (a continuously tracked 49.87 Hz is) keeps the kernel; the coefficients of the rebuilt
+// notch must then match to 1e-5 relative. Returns false when any enabled part cannot be reproduced; *anyEnabled is
+// whether the stage is needed at all (a snapshot with all four parts off leaves it out).
+static inline bool N60UnifiedGraphCleanupParams(
+    const N60DSPGraphSnapshot * _Nonnull s, float out[_Nonnull 26], bool * _Nonnull anyEnabled
+) {
+    const N60DynamicsSnapshot *d = &s->dynamics;
+    const double rate = s->sampleRate;
+    for (int i = 0; i < 26; ++i) out[i] = 0.0f;
+    out[2] = 20.0f; out[3] = 1.0f; out[5] = 50.0f; out[6] = 1.0f; out[7] = 20.0f; out[9] = 50.0f;
+    for (int i = 10; i < 26; ++i) out[i] = 0.0f;
+    *anyEnabled = d->dcOffsetFilter.enabled || d->infrasonicFilter.enabled
+                  || d->mainsNotch.enabled || d->mainsHumDetector.enabled;
+    if (!*anyEnabled) return true;
+    if (!(rate >= 8000.0 && rate <= 768000.0)) return false;
+    if (d->dcOffsetFilter.enabled) {
+        N60DynamicsSnapshot r = N60DynamicsSnapshotMakeBypassed(rate);
+        if (!N60DynamicsSnapshotSetDCOffsetFilter(&r, rate, true)
+            || r.dcOffsetFilter.poleCoefficient != d->dcOffsetFilter.poleCoefficient) return false;
+        out[0] = 1.0f;
+    }
+    if (d->infrasonicFilter.enabled) {
+        const N60InfrasonicFilterSnapshot *f = &d->infrasonicFilter;
+        if (!(f->cutoffHz >= 10.0 && f->cutoffHz <= 30.0 && f->cutoffHz < 0.45 * rate)
+            || (int)f->slope < 0 || (int)f->slope > 2) return false;
+        if ((double)(float)f->cutoffHz != f->cutoffHz) return false;
+        N60DynamicsSnapshot r = N60DynamicsSnapshotMakeBypassed(rate);
+        if (!N60DynamicsSnapshotSetInfrasonicFilter(&r, rate, true, f->cutoffHz, f->slope)
+            || r.infrasonicFilter.sectionCount != f->sectionCount
+            || memcmp(r.infrasonicFilter.highPass, f->highPass, sizeof(N60BiquadCoefficients) * f->sectionCount) != 0) return false;
+        out[1] = 1.0f; out[2] = (float)f->cutoffHz; out[3] = (float)(int)f->slope;
+    }
+    if (d->mainsNotch.enabled) {
+        const N60MainsNotchSnapshot *m = &d->mainsNotch;
+        const float fund = (float)m->fundamentalHz;
+        if (fabs((double)fund - m->fundamentalHz) > 4.0e-6 || m->harmonicCount < 1u
+            || m->harmonicCount > N60_MAX_MAINS_HARMONICS) return false;
+        N60DynamicsSnapshot r = N60DynamicsSnapshotMakeBypassed(rate);
+        if (!N60DynamicsSnapshotSetMainsNotch(&r, rate, true, (double)fund, m->harmonicCount, m->q,
+                                              m->depthsDB, m->harmonicCount)) return false;
+        for (uint32_t i = 0; i < m->harmonicCount; ++i) {
+            const double a[5] = {r.mainsNotch.filters[i].b0, r.mainsNotch.filters[i].b1, r.mainsNotch.filters[i].b2,
+                                 r.mainsNotch.filters[i].a1, r.mainsNotch.filters[i].a2};
+            const double b[5] = {m->filters[i].b0, m->filters[i].b1, m->filters[i].b2, m->filters[i].a1, m->filters[i].a2};
+            for (int k = 0; k < 5; ++k) {
+                if (fabs(a[k] - b[k]) > 1.0e-5 * fmax(1.0, fabs(b[k]))) return false;
+            }
+        }
+        out[4] = 1.0f; out[5] = fund; out[6] = (float)m->harmonicCount; out[7] = m->q;
+        for (uint32_t i = 0; i < m->harmonicCount; ++i) out[10 + i] = m->depthsDB[i];
+    }
+    if (d->mainsHumDetector.enabled) {
+        const double c = d->mainsHumDetector.searchCenterHz;
+        if (!(c >= 47.0 && c <= 63.0) || (double)(float)c != c) return false;
+        N60DynamicsSnapshot r = N60DynamicsSnapshotMakeBypassed(rate);
+        if (!N60DynamicsSnapshotSetMainsHumDetector(&r, rate, true, c)
+            || r.mainsHumDetector.decimationFactor != d->mainsHumDetector.decimationFactor
+            || r.mainsHumDetector.windowSamples != d->mainsHumDetector.windowSamples
+            || memcmp(r.mainsHumDetector.oscillatorStepCos, d->mainsHumDetector.oscillatorStepCos,
+                      sizeof r.mainsHumDetector.oscillatorStepCos) != 0
+            || memcmp(r.mainsHumDetector.oscillatorStepSin, d->mainsHumDetector.oscillatorStepSin,
+                      sizeof r.mainsHumDetector.oscillatorStepSin) != 0) return false;
+        out[8] = 1.0f; out[9] = (float)c;
+    }
+    return true;
+}
+
 // What the kernel's denoiser sees while it is switched off (ABI v9 park view): FFT size of the quality
 // setting, profile revision and command. The kernel keeps its profile while off, applies a Reset command
 // and drops the profile on a quality change, all of which the core reproduces from these three numbers. A
@@ -420,8 +490,6 @@ static inline N60UnifiedGraphUnsupportedReason N60UnifiedGraphSnapshotUnsupporte
     }
     const N60DynamicsSnapshot *d = &s->dynamics;
     if (d->stereoMode.mode != N60StereoModeStereo || d->stereoWidener.enabled
-            || d->dcOffsetFilter.enabled || d->infrasonicFilter.enabled
-            || d->mainsNotch.enabled || d->mainsHumDetector.enabled
             || d->loudnessMatch.enabled
             || d->loudnessContour.enabled || d->dialogueLeveler.enabled
             || d->deHarsh.enabled || d->deEsser.enabled
@@ -429,6 +497,11 @@ static inline N60UnifiedGraphUnsupportedReason N60UnifiedGraphSnapshotUnsupporte
         return N60UnifiedGraphUnsupportedDynamics;
     }
     float scratch[10];
+    {
+        float cleanup[26];
+        bool cleanupNeeded = false;
+        if (!N60UnifiedGraphCleanupParams(s, cleanup, &cleanupNeeded)) return N60UnifiedGraphUnsupportedDynamics;
+    }
     if (d->spectralDenoiser.enabled && !N60UnifiedGraphDenoiserParams(s, scratch)) {
         return N60UnifiedGraphUnsupportedDynamics;
     }

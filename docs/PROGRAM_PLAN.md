@@ -175,7 +175,7 @@ Gate G2 passed on 2026-10-25 (commit 07e82c6)
 - [x] S9b `e6/live-session-edits` (needs-owner): setters live while an N-channel or binaural graph renders, with a fresh-build equality test at eight rates; bench in E22
 - [x] S9c `e6/live-headphone-profile` (needs-owner): headphone profile edits live on graph-rendered binaural sessions, asset swap off the main actor, ear delay stages; bench in E22
 - [ ] S12 legacy-kernel migration (owner, 7 Nov 2026; after E27 S4, before E28 S1; all needs-owner, engine; no new flag, `e6.legacy-kernel` stays the escape hatch until E23; eight-rate kernel parity within E6 decision 1):
-  - [ ] S12a DC offset, infrasonic, mains notch and hum detector in the core
+  - [x] S12a DC offset, infrasonic, mains notch and hum detector in the core (migration audit table row 1 done, `docs/epics/E6.md`; PR pending)
   - [ ] S12b stereo mode, widener, de-harsh and de-esser in the core
   - [ ] S12c loudness match, loudness contour, per-band loudness and dialogue leveler in the core
   - [ ] S12d multiband compressor in the core, with per-band auto release (closes E28 G11)
