@@ -187,6 +187,11 @@ add_executable(n60core_peq_wide_test tests/test_peq_wide.cpp)
 target_link_libraries(n60core_peq_wide_test PRIVATE n60core)
 add_test(NAME n60core_peq_wide COMMAND n60core_peq_wide_test)
 
+# E6 S12g2: lane delay ahead of bass management (ABI v28).
+add_executable(n60core_lane_delay_test tests/test_lane_delay.cpp)
+target_link_libraries(n60core_lane_delay_test PRIVATE n60core)
+add_test(NAME n60core_lane_delay COMMAND n60core_lane_delay_test)
+
 # E6 S12d: multiband compressor stage (ABI v25).
 add_executable(n60core_multiband_test tests/test_multiband.cpp)
 target_link_libraries(n60core_multiband_test PRIVATE n60core)

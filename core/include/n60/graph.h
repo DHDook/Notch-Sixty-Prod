@@ -34,7 +34,7 @@ extern "C" {
 #endif
 
 /* Bumped on any incompatible change to a struct or function below. */
-#define N60_GRAPH_ABI_VERSION 27u
+#define N60_GRAPH_ABI_VERSION 28u
 
 typedef struct n60_graph n60_graph; /* opaque */
 
@@ -120,7 +120,10 @@ typedef enum n60_stage_kind {
     /* ABI v24 (E6 S12c). Loudness: see "Loudness" below. */
     N60_STAGE_LOUDNESS = 47,         /* position 9.7: after IMAGE, before DEESS. Pair stage: loudness match, contour, dialogue leveler. */
     /* ABI v25 (E6 S12d). Multiband compressor: see "Multiband" below. */
-    N60_STAGE_MULTIBAND = 48         /* position 9.9: after DEESS, before the compressor. Pair stage: three-band compressor. */
+    N60_STAGE_MULTIBAND = 48,        /* position 9.9: after DEESS, before the compressor. Pair stage: three-band compressor. */
+    /* ABI v28 (E6 S12g2). Lane delay ahead of bass management: the N-channel path delays a program lane before the
+     * crossover, so the bass sum carries the delay. Same parameters, state, crossfade and latency as N60_STAGE_DELAY. */
+    N60_STAGE_LANE_DELAY = 49        /* position 12.6: after EXTERNAL, before BASS_MGMT. Integer delay (DELAY rules). */
 } n60_stage_kind;
 
 /* Image and de-ess (ABI v23, E6 S12b). The stereo kernel's stereo mode, widener, de-harsh and de-esser, same arithmetic.

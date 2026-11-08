@@ -610,6 +610,21 @@ if selected e6_peq_wide; then
     fi
 fi
 
+# E6 S12g2: the lane delay ahead of bass management: exact shift, order and live change at the eight standard rates.
+if selected e6_lane_delay; then
+    build_core_objs
+    if [ "$CORE_OK" = 1 ]; then
+        if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -Icore/include -Icore/src core/tests/test_lane_delay.cpp \
+            "${CORE_OBJS[@]}" -o "$OUT/e6_core_lane_delay" && "$OUT/e6_core_lane_delay"; then
+            passed+=(e6_core_lane_delay)
+        else
+            failed+=(e6_core_lane_delay)
+        fi
+    else
+        failed+=(e6_lane_delay)
+    fi
+fi
+
 # E6 S12c: the loudness stage (match, contour, dialogue leveler): behaviour at the eight standard rates.
 if selected e6_loudness; then
     build_core_objs

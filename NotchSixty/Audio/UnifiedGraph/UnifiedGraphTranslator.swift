@@ -359,9 +359,8 @@ enum UnifiedGraphTranslator {
     /// The live N-channel session's lanes, bass management and 1 to 8 subs as a graph
     /// configuration (E6 S8b2b), or nil when the legacy render core must keep the session. It
     /// mirrors `LiveNChannelRenderGraphCompiler.makeGraph` field for field. Ineligible, because
-    /// the core cannot reproduce them exactly: an optimizer FIR, a polarity-inverted or silent
-    /// lane, a lane delay under bass management (the legacy order puts it before the
-    /// crossover, the core after), and any crossover other than Linkwitz-Riley 24.
+    /// the core cannot reproduce them exactly: an optimizer FIR (S12g, G39) and a lane EQ or sub
+    /// EQ beyond the stages' limits (G39). A lane delay under bass management is a LANE_DELAY stage (ABI v28).
     static func nChannelConfiguration(
         routePlan: LiveNChannelOutputRoutePlan,
         sampleRate: Double,
@@ -413,7 +412,6 @@ enum UnifiedGraphTranslator {
         for (index, role) in roles.enumerated() {
             let calibration = routePlan.speakerCalibrations[role]
             let delay = calibration?.delayMilliseconds ?? 0
-            if bassEnabled, delay > 0 { return .failure(.laneDelayUnderBassMgmt) }
             let lfeGainDB = role == .lowFrequencyEffects && !bassEnabled
                 ? LiveNChannelRenderGraphCompiler.lfeInBandGainDB : 0
             let gain = combined * DSPGainConfiguration.linearGain(
@@ -426,9 +424,11 @@ enum UnifiedGraphTranslator {
                 }
             }
             if peq.count > Int(N60_PEQ_MAX_SECTIONS) { return .failure(.laneEQTooLarge) }
+            // E6 S12g2: under bass management the legacy order is delay before the crossover (LANE_DELAY stage).
             lanes.append(UnifiedGraphLane(
-                preGain: gain, delayMilliseconds: delay, polarityInverted: calibration?.polarityInverted == true,
-                eq: peq))
+                preGain: gain, delayMilliseconds: bassEnabled ? 0 : delay,
+                polarityInverted: calibration?.polarityInverted == true,
+                preBassDelayMilliseconds: bassEnabled ? delay : 0, eq: peq))
             if role == .lowFrequencyEffects { lfeLane = index }
         }
         var configuration = UnifiedGraphConfiguration(sampleRate: sampleRate, lanes: lanes)
@@ -857,8 +857,6 @@ enum UnifiedGraphFallbackReason: String, Error, Equatable, Sendable, CaseIterabl
     // N-channel and stereo eligibility (translator).
     /// A speaker optimizer FIR is in the route; the core has no equivalent FIR lane stage.
     case optimizerFIR
-    /// A lane delay under bass management (legacy: before the crossover; core: after).
-    case laneDelayUnderBassMgmt
     /// More than eight subwoofers.
     case tooManySubs
     /// Bass management enabled with no subwoofer lane.
@@ -950,7 +948,6 @@ enum UnifiedGraphFallbackReason: String, Error, Equatable, Sendable, CaseIterabl
     var displayText: String {
         switch self {
         case .optimizerFIR: "speaker optimizer FIR"
-        case .laneDelayUnderBassMgmt: "lane delay under bass management"
         case .tooManySubs: "more than 8 subs"
         case .noSubForBassManagement: "bass management without a sub"
         case .subCalibrationMissing: "sub calibration missing"
