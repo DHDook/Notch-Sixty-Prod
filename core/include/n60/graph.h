@@ -34,7 +34,7 @@ extern "C" {
 #endif
 
 /* Bumped on any incompatible change to a struct or function below. */
-#define N60_GRAPH_ABI_VERSION 22u
+#define N60_GRAPH_ABI_VERSION 24u
 
 typedef struct n60_graph n60_graph; /* opaque */
 
@@ -113,8 +113,25 @@ typedef enum n60_stage_kind {
     N60_STAGE_ANALYSER_TAP_EQ = 42,  /* position 9.5: after FIR, before the compressor. Audio untouched. */
     N60_STAGE_ANALYSER_TAP_DYN = 43, /* position 11.5: after the expander, before METER_OUT. Audio untouched. */
     /* ABI v22 (E6 S12a). Cleanup: see "Cleanup" below. */
-    N60_STAGE_CLEANUP = 44           /* position 3.7: after GAIN and the generator, before DENOISER. Pair stage. */
+    N60_STAGE_CLEANUP = 44,          /* position 3.7: after GAIN and the generator, before DENOISER. Pair stage. */
+    /* ABI v23 (E6 S12b). Image and de-ess: see "Image and de-ess" below. */
+    N60_STAGE_IMAGE = 45,            /* position 9.6: after ANALYSER_TAP_EQ, before DEESS and the compressor. Pair stage: stereo mode, then widener. */
+    N60_STAGE_DEESS = 46,            /* position 9.8: after IMAGE and LOUDNESS, before the compressor. Pair stage: de-harsh, then de-esser. */
+    /* ABI v24 (E6 S12c). Loudness: see "Loudness" below. */
+    N60_STAGE_LOUDNESS = 47          /* position 9.7: after IMAGE, before DEESS. Pair stage: loudness match, contour, dialogue leveler. */
 } n60_stage_kind;
+
+/* Image and de-ess (ABI v23, E6 S12b). The stereo kernel's stereo mode, widener, de-harsh and de-esser, same arithmetic.
+ * Both are pair stages (laneA, laneB distinct, laneMask 0, capacityFrames 0); an off part is parked and costs nothing.
+ * IMAGE paramCount 8: [0] mode (0 stereo, 1 wide mono, 2 true mono), [1] widener on (0/1), [2] mono low band (0/1),
+ * [3] low/mid Hz (80..500), [4] mid/high Hz (1500..8000), [5] low width (0..1), [6] mid width (1..2), [7] high width (1..2).
+ * Frequencies must also be below 0.45 x the sample rate. Mode and width changes glide over 5 ms.
+ * DEESS paramCount 12: [0] de-harsh on (0/1), [1] Hz (1500..10000), [2] amount dB (-6..0), [3] de-esser on (0/1),
+ * [4] Hz (2000..10000), [5] threshold dB (-60..0), [6] ratio (1..20), [7] range dB (-24..0), [8] detection Q (0.5..8),
+ * [9] attack ms (0.1..100), [10] release ms (10..1000), [11] dynamic-EQ mode (0/1; 0 = wideband).
+ * The de-esser gain reduction is read with n60_graph_read_dynamics on DEESS (either lane of the pair; grMaxDb reset by the read).
+ * Parameter edits through n60_graph_post_params are live; the filters are redesigned at the next block start.
+ * Built from a fresh snapshot a stage starts parked and neutral, so state is not carried across a rebuild. */
 
 /* Analyser taps (ABI v21, E27 S2c). Two read-only capture points for the Equalizer page's spectrum overlay: the program
  * after the EQ (PEQ, dynamic EQ, FIR) and after the user dynamics (compressor, expander). Neither includes room
@@ -141,6 +158,22 @@ typedef enum n60_stage_kind {
  * notch retune (fundamental, Q, count or a depth) crossfades the old and the new bank over max(32, decimation x 10)
  * frames. The detector is read with n60_graph_read_mains. The stage has no latency. Running state is not carried across
  * a rebuild. Stereo only. */
+
+/* Loudness (ABI v24, E6 S12c). The stereo kernel's loudness match, loudness contour (simple and per-band) and dialogue
+ * leveler, same arithmetic and order. One pair stage (laneA, laneB distinct, laneMask 0, capacityFrames 0); an off part is
+ * parked. paramCount 32, all live:
+ *  match: [0] on (0/1)  [1] dialogue gate (0/1)  [2] target LUFS (-24..-10)  [3] max correction dB (3..20)
+ *   [4] attack s (0.3..5)  [5] release s (1..10)
+ *  contour: [6] on (0/1)  [7] strength (0..1)  [8] per-band (0/1)  [9] level source (0 system volume, 1 integrated LUFS)
+ *   [10] reference phons (60..95)  [11] max boost dB (6..20)  [12] max cut dB (0..6)  [13] master gain, linear 0..1
+ *   (the system volume; the simple contour fades in as it falls from -6 to -30 dB)
+ *  leveler: [14] on (0/1)  [15] voice gate (0/1)  [16] band low Hz (100..8000)  [17] band high Hz (above low, below 0.45 fs)
+ *   [18] target gap dB (3..20)  [19] boost ratio (1..6)  [20] max boost dB (0..15)  [21] detector ms (50..500)
+ *   [22] attack ms (10..1000)  [23] release ms (50..3000)  [24] programme gate dBFS (-70..-30)  [25] modulation low Hz
+ *   (0.5..10)  [26] modulation high Hz (3..14, above low, below 0.45 fs)  [27] envelope ms (5..30)  [28] measurement ms
+ *   (300..1500)  [29] confidence floor (0..1)  [30] confidence ceiling (above floor, <= 1)  [31] minimum confidence (0..1).
+ * Telemetry is read with n60_graph_read_loudness. The stage has no latency. Running state is not carried across a
+ * rebuild. Stereo only. */
 
 /* Generator (ABI v14). A source that replaces program audio on its lanes, ahead of every correction stage and
  * therefore ahead of PROTECTION, so it reaches the speakers through the same path as music. Lanes: laneMask,
@@ -657,6 +690,25 @@ typedef struct n60_mains_readback {
     uint32_t reserved;
 } n60_mains_readback;
 n60_status n60_graph_read_mains(n60_graph *graph, uint32_t stageId, n60_mains_readback *out);
+
+/* ABI v24 (E6 S12c): the telemetry of a LOUDNESS stage as of the last block. Control thread, newest published snapshot,
+ * relaxed reads. BAD_ARGUMENT for another kind of stage; ABI_MISMATCH on structSize. */
+typedef struct n60_loudness_readback {
+    uint32_t structSize;            /* sizeof(n60_loudness_readback) as seen by the caller */
+    float shortTermLufs;            /* K-weighted 3 s loudness */
+    float matchGainDb;
+    float contourScale;             /* contour mix 0..1 */
+    float lowCompensationDb;
+    float highCompensationDb;
+    float estimatedPhons;
+    float dialogueProgramDbfs;
+    float dialogueBandDbfs;
+    float dialogueGapDb;
+    float dialogueVoiceConfidence;
+    float dialogueBoostDb;
+    uint32_t reserved;
+} n60_loudness_readback;
+n60_status n60_graph_read_loudness(n60_graph *graph, uint32_t stageId, n60_loudness_readback *out);
 
 /* Reads the over-range counter of a METER_IN, METER_OUT or FINAL_METER stage lane: samples with
  * |x| > 1.0 since the previous read (reset by the read). */

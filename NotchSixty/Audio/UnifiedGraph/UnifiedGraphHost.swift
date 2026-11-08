@@ -336,6 +336,23 @@ final class UnifiedGraphHost: @unchecked Sendable {
         if let comp = dynamicsReading(graph, stageId: UnifiedGraphConfiguration.compressorStageId) {
             diagnostics.compressorGainReductionDB = comp.grMaxDb
         }
+        // E6 S12b: the de-esser's gain reduction (positive dB, as the kernel reports it).
+        if let ess = dynamicsReading(graph, stageId: UnifiedGraphConfiguration.deessStageId) {
+            diagnostics.deEsserGainReductionDB = ess.grMaxDb
+        }
+        // E6 S12c: the loudness and dialogue telemetry (the kernel reports it in its own diagnostics).
+        var loud = n60_loudness_readback()
+        loud.structSize = UInt32(MemoryLayout<n60_loudness_readback>.size)
+        if n60_graph_read_loudness(graph, UnifiedGraphConfiguration.loudnessStageId, &loud) == N60_STATUS_OK {
+            diagnostics.loudnessShortTermLUFS = loud.shortTermLufs
+            diagnostics.loudnessMatchGainDB = loud.matchGainDb
+            diagnostics.loudnessContourScale = loud.contourScale
+            diagnostics.dialogueProgramLevelDBFS = loud.dialogueProgramDbfs
+            diagnostics.dialogueBandLevelDBFS = loud.dialogueBandDbfs
+            diagnostics.dialogueGapDB = loud.dialogueGapDb
+            diagnostics.dialogueVoiceConfidence = loud.dialogueVoiceConfidence
+            diagnostics.dialogueBoostDB = loud.dialogueBoostDb
+        }
         if let prot = dynamicsReading(graph, stageId: N60_LSTAGE_PROTECTION) {
             diagnostics.limiterGainReductionDB = prot.grMaxDb
             diagnostics.inputTruePeakLinear = prot.inTruePeak

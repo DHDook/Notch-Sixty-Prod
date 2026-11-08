@@ -115,6 +115,90 @@ int main() {
         n60_graph_retire(g);
     }
 
+    // E6 S12b: IMAGE and DEESS with every part on, live edits that redesign the filters (corner and band changes, mode
+    // changes, enable and disable edges) between blocks: the realtime call allocates and frees nothing.
+    for (double rate : rates) {
+        constexpr uint32_t N = 512;
+        const float img[8] = {1, 1, 0, 200, 4000, 0.5f, 1.5f, 1.5f};
+        const float dee[12] = {1, 3500, -3, 1, 6500, -30, 6, -12, 2, 1, 50, 0};
+        n60_stage_desc st[2] = {stage(N60_STAGE_IMAGE, 1, 0, img, 8, 0, 1), stage(N60_STAGE_DEESS, 2, 0, dee, 12, 0, 1)};
+        n60_graph_desc d{};
+        d.structSize = sizeof d;
+        d.abiVersion = N60_GRAPH_ABI_VERSION;
+        d.sampleRate = rate;
+        d.maxBlockFrames = N;
+        d.inputChannels = d.outputChannels = 2;
+        d.stages = st;
+        d.stageCount = 2;
+        n60_graph *g = nullptr;
+        CHECK(n60_graph_build(&d, &g) == N60_STATUS_OK, "build image");
+        float l[N], r[N], ol[N], orr[N];
+        for (uint32_t i = 0; i < N; i++) { l[i] = 0.3f * std::sin(0.9f * i); r[i] = 0.3f * std::cos(1.1f * i); }
+        const float *in[2] = {l, r};
+        float *out[2] = {ol, orr};
+        for (int round = 0; round < 30; round++) {
+            n60_param_record rec[6] = {{1, 0, static_cast<float>(round % 3), 0},
+                                       {1, 3, 100.0f + 10.0f * round, 0},
+                                       {1, 1, static_cast<float>((round / 2) & 1), 0},
+                                       {2, 1, 2000.0f + 100.0f * round, 0},
+                                       {2, 4, 3000.0f + 100.0f * round, 0},
+                                       {2, 3, static_cast<float>((round / 3) & 1), 0}};
+            CHECK(n60_graph_post_params(g, rec, 6) == N60_STATUS_OK, "post image");
+            allocs = 0;
+            frees = 0;
+            armed = true;
+            n60_status s2 = n60_graph_process(g, in, out, N);
+            for (int k = 0; k < 3; k++) s2 = static_cast<n60_status>(s2 | n60_graph_process(g, in, out, 1 + 97 * k));
+            armed = false;
+            CHECK(s2 == N60_STATUS_OK, "process image");
+            CHECK(allocs == 0 && frees == 0, "image rate %.0f round %d: allocated %ld / freed %ld", rate, round, allocs.load(), frees.load());
+        }
+        n60_graph_retire(g);
+    }
+
+    // E6 S12c: LOUDNESS with every part on, live edits that redesign the filters (strength, band edges, windows, enable
+    // edges, per-band mode, master gain) between blocks: the realtime call allocates and frees nothing.
+    for (double rate : rates) {
+        constexpr uint32_t N = 512;
+        const float ld[32] = {1, 1, -20, 10, 0.5f, 2, 1, 0.6f, 1, 1, 80, 12, 3, 0.5f,
+                              1, 1, 1000, 5000, 3, 6, 9, 200, 80, 600, -60, 3, 7, 12, 800, 0.1f, 0.5f, 0.3f};
+        n60_stage_desc st[1] = {stage(N60_STAGE_LOUDNESS, 1, 0, ld, 32, 0, 1)};
+        n60_graph_desc d{};
+        d.structSize = sizeof d;
+        d.abiVersion = N60_GRAPH_ABI_VERSION;
+        d.sampleRate = rate;
+        d.maxBlockFrames = N;
+        d.inputChannels = d.outputChannels = 2;
+        d.stages = st;
+        d.stageCount = 1;
+        n60_graph *g = nullptr;
+        CHECK(n60_graph_build(&d, &g) == N60_STATUS_OK, "build loudness");
+        float l[N], r[N], ol[N], orr[N];
+        for (uint32_t i = 0; i < N; i++) { l[i] = 0.3f * std::sin(0.05f * i); r[i] = 0.3f * std::cos(0.07f * i); }
+        const float *in[2] = {l, r};
+        float *out[2] = {ol, orr};
+        for (int round = 0; round < 30; round++) {
+            n60_param_record rec[8] = {{1, 7, 0.1f + 0.02f * round, 0},
+                                       {1, 16, 400.0f + 20.0f * round, 0},
+                                       {1, 28, 400.0f + 20.0f * round, 0},
+                                       {1, 6, static_cast<float>((round / 2) & 1), 0},
+                                       {1, 8, static_cast<float>((round / 3) & 1), 0},
+                                       {1, 13, 0.02f + 0.03f * round, 0},
+                                       {1, 4, 0.5f + 0.1f * round, 0},
+                                       {1, 14, static_cast<float>((round / 4) & 1), 0}};
+            CHECK(n60_graph_post_params(g, rec, 8) == N60_STATUS_OK, "post loudness");
+            allocs = 0;
+            frees = 0;
+            armed = true;
+            n60_status s2 = n60_graph_process(g, in, out, N);
+            for (int k = 0; k < 3; k++) s2 = static_cast<n60_status>(s2 | n60_graph_process(g, in, out, 1 + 97 * k));
+            armed = false;
+            CHECK(s2 == N60_STATUS_OK, "process loudness");
+            CHECK(allocs == 0 && frees == 0, "loudness rate %.0f round %d: allocated %ld / freed %ld", rate, round, allocs.load(), frees.load());
+        }
+        n60_graph_retire(g);
+    }
+
     // S4 stages: denoiser, dynamic EQ, FIR, compressor and expander on four lanes, with
     // lane masks, published, edited live and rendered with blocks that straddle FFT frames.
     for (double rate : rates) {

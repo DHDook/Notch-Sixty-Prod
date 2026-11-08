@@ -328,6 +328,200 @@ static inline bool N60UnifiedGraphCleanupParams(
     return true;
 }
 
+// E6 S12b: the stereo mode and widener as the core IMAGE stage's 8 parameters (graph.h "Image and de-ess"). The stage is
+// needed when the mode is not stereo or the widener is on. A widener that is on is recovered from the snapshot and
+// verified by rebuilding it with the kernel's own setter (same filter coefficients, bit for bit); the frequencies are
+// doubles in the kernel, floats in the core, so a frequency that is not exactly a float keeps the kernel. Returns false
+// when the part cannot be reproduced; *needed is whether the stage is wanted at all.
+static inline bool N60UnifiedGraphImageParams(
+    const N60DSPGraphSnapshot * _Nonnull s, float out[_Nonnull 8], bool * _Nonnull needed
+) {
+    const N60DynamicsSnapshot *d = &s->dynamics;
+    const double rate = s->sampleRate;
+    out[0] = 0.0f; out[1] = 0.0f; out[2] = 1.0f; out[3] = 200.0f; out[4] = 4000.0f;
+    out[5] = 0.0f; out[6] = 1.0f; out[7] = 1.0f;
+    const int mode = (int)d->stereoMode.mode;
+    *needed = mode != (int)N60StereoModeStereo || d->stereoWidener.enabled;
+    if (!*needed) return true;
+    if (mode < 0 || mode > 2 || !(rate >= 8000.0 && rate <= 768000.0)) return false;
+    out[0] = (float)mode;
+    if (d->stereoWidener.enabled) {
+        const N60StereoWidenerSnapshot *w = &d->stereoWidener;
+        if ((double)(float)w->lowMidFrequencyHz != w->lowMidFrequencyHz
+            || (double)(float)w->midHighFrequencyHz != w->midHighFrequencyHz) return false;
+        N60DynamicsSnapshot r = N60DynamicsSnapshotMakeBypassed(rate);
+        if (!N60DynamicsSnapshotSetStereoWidener(&r, rate, true, w->monoLowBand, w->lowMidFrequencyHz,
+                                                 w->midHighFrequencyHz, w->lowWidth, w->midWidth, w->highWidth)
+            || r.stereoWidener.sectionCount != w->sectionCount
+            || memcmp(r.stereoWidener.lowPass, w->lowPass, sizeof(N60BiquadCoefficients) * w->sectionCount) != 0
+            || memcmp(r.stereoWidener.highPass, w->highPass, sizeof(N60BiquadCoefficients) * w->sectionCount) != 0) return false;
+        out[1] = 1.0f; out[2] = w->monoLowBand ? 1.0f : 0.0f;
+        out[3] = (float)w->lowMidFrequencyHz; out[4] = (float)w->midHighFrequencyHz;
+        out[5] = w->lowWidth; out[6] = w->midWidth; out[7] = w->highWidth;
+    }
+    return true;
+}
+
+// E6 S12b: de-harsh and the de-esser as the core DEESS stage's 12 parameters. Same recover-then-verify rule. The kernel
+// stores the attack and release as pole coefficients, so the milliseconds are recovered by inverting exp(-1/(rate*ms))
+// and the rebuilt coefficients must equal the stored ones exactly.
+static inline bool N60UnifiedGraphDeEssParams(
+    const N60DSPGraphSnapshot * _Nonnull s, float out[_Nonnull 12], bool * _Nonnull needed
+) {
+    const N60DynamicsSnapshot *d = &s->dynamics;
+    const double rate = s->sampleRate;
+    const float defaults[12] = {0.0f, 6000.0f, 0.0f, 0.0f, 6000.0f, -30.0f, 4.0f, -12.0f, 2.0f, 2.0f, 80.0f, 0.0f};
+    for (int i = 0; i < 12; ++i) out[i] = defaults[i];
+    *needed = d->deHarsh.enabled || d->deEsser.enabled;
+    if (!*needed) return true;
+    if (!(rate >= 8000.0 && rate <= 768000.0)) return false;
+    if (d->deHarsh.enabled) {
+        const N60DeHarshSnapshot *h = &d->deHarsh;
+        if ((double)(float)h->frequencyHz != h->frequencyHz) return false;
+        N60DynamicsSnapshot r = N60DynamicsSnapshotMakeBypassed(rate);
+        if (!N60DynamicsSnapshotSetDeHarsh(&r, rate, true, h->amountDB, h->frequencyHz)
+            || memcmp(&r.deHarsh.highShelf, &h->highShelf, sizeof(N60BiquadCoefficients)) != 0) return false;
+        out[0] = 1.0f; out[1] = (float)h->frequencyHz; out[2] = h->amountDB;
+    }
+    if (d->deEsser.enabled) {
+        const N60DeEsserSnapshot *e = &d->deEsser;
+        if ((double)(float)e->frequencyHz != e->frequencyHz) return false;
+        const double a = e->attackCoefficient, rl = e->releaseCoefficient;
+        if (!(a > 0.0 && a < 1.0 && rl > 0.0 && rl < 1.0)) return false;
+        const float attackMs = (float)(-1000.0 / (rate * log(a)));
+        const float releaseMs = (float)(-1000.0 / (rate * log(rl)));
+        N60DynamicsSnapshot r = N60DynamicsSnapshotMakeBypassed(rate);
+        if (!N60DynamicsSnapshotSetDeEsserAdvanced(&r, rate, true, e->frequencyHz, e->thresholdDB, e->ratio,
+                                                   e->rangeDB, e->detectionQ, attackMs, releaseMs, e->dynamicEQMode)
+            || r.deEsser.attackCoefficient != e->attackCoefficient
+            || r.deEsser.releaseCoefficient != e->releaseCoefficient
+            || memcmp(&r.deEsser.sidechainHighPass, &e->sidechainHighPass, sizeof(N60BiquadCoefficients)) != 0
+            || memcmp(&r.deEsser.sidechainLowPass, &e->sidechainLowPass, sizeof(N60BiquadCoefficients)) != 0) return false;
+        out[3] = 1.0f; out[4] = (float)e->frequencyHz; out[5] = e->thresholdDB; out[6] = e->ratio;
+        out[7] = e->rangeDB; out[8] = e->detectionQ; out[9] = attackMs; out[10] = releaseMs;
+        out[11] = e->dynamicEQMode ? 1.0f : 0.0f;
+    }
+    return true;
+}
+
+// E6 S12c: the loudness match, contour and dialogue leveler as the core LOUDNESS stage's 32 parameters (graph.h
+// "Loudness"). Same recover-then-verify rule: the times are recovered by inverting exp(-1/(rate*t)) (and the leveler's
+// modulation poles by inverting exp(-2 pi f / rate)), first snapped to a millisecond-class grid and then raw, and the
+// part is rebuilt with the kernel's own setter; the rebuilt coefficients must equal the stored ones exactly or the
+// kernel keeps the chain. The master gain (system volume) is read from the snapshot. Returns false when a part cannot
+// be reproduced; *needed is whether the stage is wanted at all.
+static inline double N60UnifiedGraphSnapValue(double v, double grid) {
+    return round(v / grid) * grid;
+}
+
+static inline bool N60UnifiedGraphLoudnessParams(
+    const N60DSPGraphSnapshot * _Nonnull s, float out[_Nonnull 32], bool * _Nonnull needed
+) {
+    const N60DynamicsSnapshot *d = &s->dynamics;
+    const double rate = s->sampleRate;
+    const float defaults[32] = {
+        0.0f, 0.0f, -18.0f, 10.0f, 1.0f, 3.0f,
+        0.0f, 1.0f, 0.0f, 0.0f, 80.0f, 12.0f, 3.0f, 1.0f,
+        0.0f, 0.0f, 300.0f, 3400.0f, 8.0f, 2.0f, 9.0f, 150.0f, 80.0f, 600.0f, -50.0f, 2.0f, 6.0f, 10.0f, 600.0f,
+        0.2f, 0.8f, 0.3f};
+    for (int i = 0; i < 32; ++i) out[i] = defaults[i];
+    *needed = d->loudnessMatch.enabled || d->loudnessContour.enabled || d->dialogueLeveler.enabled;
+    if (!*needed) return true;
+    if (!(rate >= 8000.0 && rate <= 768000.0)) return false;
+    if (d->loudnessMatch.enabled) {
+        const N60LoudnessMatchSnapshot *m = &d->loudnessMatch;
+        const double a = m->attackCoefficient, rl = m->releaseCoefficient;
+        if (!(a > 0.0 && a < 1.0 && rl > 0.0 && rl < 1.0)) return false;
+        const double rawAttack = -1.0 / (rate * log(a)), rawRelease = -1.0 / (rate * log(rl));
+        bool ok = false;
+        for (int pass = 0; pass < 2 && !ok; ++pass) {
+            const float attackS = (float)(pass == 0 ? N60UnifiedGraphSnapValue(rawAttack, 1.0e-3) : rawAttack);
+            const float releaseS = (float)(pass == 0 ? N60UnifiedGraphSnapValue(rawRelease, 1.0e-3) : rawRelease);
+            N60DynamicsSnapshot r = N60DynamicsSnapshotMakeBypassed(rate);
+            if (!N60DynamicsSnapshotSetLoudnessMatch(&r, rate, true, m->dialogueGateEnabled, m->targetLUFS,
+                                                     m->maxCorrectionDB, attackS, releaseS)) continue;
+            if (r.loudnessMatch.attackCoefficient != m->attackCoefficient
+                || r.loudnessMatch.releaseCoefficient != m->releaseCoefficient
+                || r.loudnessMatch.measurementCoefficient != m->measurementCoefficient
+                || memcmp(&r.loudnessMatch.kWeightHighPass, &m->kWeightHighPass, sizeof(N60BiquadCoefficients)) != 0
+                || memcmp(&r.loudnessMatch.kWeightShelf, &m->kWeightShelf, sizeof(N60BiquadCoefficients)) != 0) continue;
+            out[0] = 1.0f; out[1] = m->dialogueGateEnabled ? 1.0f : 0.0f; out[2] = m->targetLUFS;
+            out[3] = m->maxCorrectionDB; out[4] = attackS; out[5] = releaseS;
+            ok = true;
+        }
+        if (!ok) return false;
+    }
+    if (d->loudnessContour.enabled) {
+        const N60LoudnessContourSnapshot *c = &d->loudnessContour;
+        if (!(s->masterGainLinear >= 0.0f && s->masterGainLinear <= 1.0f)) return false;
+        N60DynamicsSnapshot r = N60DynamicsSnapshotMakeBypassed(rate);
+        bool built;
+        if (c->perBandMode) {
+            built = N60DynamicsSnapshotSetPerBandLoudness(&r, rate, true, c->strength, c->referencePhons,
+                                                          c->maxBoostDB, c->maxCutDB, c->levelSource);
+        } else {
+            built = N60DynamicsSnapshotSetLoudnessContour(&r, rate, true, c->strength);
+        }
+        const N60LoudnessContourSnapshot *b = &r.loudnessContour;
+        if (!built || b->perBandMode != c->perBandMode
+            || b->fullContourMasterGainLinear != c->fullContourMasterGainLinear
+            || b->flatContourMasterGainLinear != c->flatContourMasterGainLinear
+            || b->responseCoefficient != c->responseCoefficient
+            || memcmp(&b->lowShelf, &c->lowShelf, sizeof(N60BiquadCoefficients)) != 0
+            || memcmp(&b->highShelf, &c->highShelf, sizeof(N60BiquadCoefficients)) != 0
+            || memcmp(&b->lowBandLowPass, &c->lowBandLowPass, sizeof(N60BiquadCoefficients)) != 0
+            || memcmp(&b->highBandHighPass, &c->highBandHighPass, sizeof(N60BiquadCoefficients)) != 0) return false;
+        out[6] = 1.0f; out[7] = c->strength; out[8] = c->perBandMode ? 1.0f : 0.0f;
+        if (c->perBandMode) {
+            out[9] = (float)c->levelSource; out[10] = c->referencePhons; out[11] = c->maxBoostDB;
+            out[12] = c->maxCutDB;
+        }
+    }
+    out[13] = s->masterGainLinear;
+    if (d->dialogueLeveler.enabled) {
+        const N60DialogueLevelerSnapshot *l = &d->dialogueLeveler;
+        const double cd = l->detectorCoefficient, ca = l->attackCoefficient, cr = l->releaseCoefficient;
+        const double ce = l->voiceEnvelopeCoefficient, cm = l->voiceMeasurementCoefficient;
+        const double ph = l->modulationHighPassPole, pl = l->modulationLowPassPole;
+        if (!(cd > 0.0 && cd < 1.0 && ca > 0.0 && ca < 1.0 && cr > 0.0 && cr < 1.0 && ce > 0.0 && ce < 1.0
+              && cm > 0.0 && cm < 1.0 && ph > 0.0 && ph < 1.0 && pl > 0.0 && pl < 1.0)) return false;
+        const double raw[7] = {
+            -1000.0 / (rate * log(cd)), -1000.0 / (rate * log(ca)), -1000.0 / (rate * log(cr)),
+            -1000.0 / (rate * log(ce)), -1000.0 / (rate * log(cm)),
+            -rate * log(ph) / (2.0 * M_PI), -rate * log(pl) / (2.0 * M_PI)};
+        bool ok = false;
+        for (int pass = 0; pass < 2 && !ok; ++pass) {
+            float v[7];
+            for (int i = 0; i < 7; ++i) v[i] = (float)(pass == 0 ? N60UnifiedGraphSnapValue(raw[i], 1.0e-3) : raw[i]);
+            const float modLow = v[5], modHigh = v[6];
+            const float center = 0.5f * (modLow + modHigh), bandwidth = modHigh - modLow;
+            N60DynamicsSnapshot r = N60DynamicsSnapshotMakeBypassed(rate);
+            if (!N60DynamicsSnapshotSetDialogueLeveler(&r, rate, true, l->bandLowHz, l->bandHighHz, l->targetGapDB,
+                    l->boostRatio, l->maxBoostDB, v[0], v[1], v[2], l->programGateThresholdDB, l->voiceGateEnabled,
+                    center, bandwidth, v[3], v[4], l->confidenceFloorIndex, l->confidenceCeilingIndex,
+                    l->minConfidence)) continue;
+            const N60DialogueLevelerSnapshot *b = &r.dialogueLeveler;
+            if (b->detectorCoefficient != l->detectorCoefficient || b->attackCoefficient != l->attackCoefficient
+                || b->releaseCoefficient != l->releaseCoefficient
+                || b->voiceEnvelopeCoefficient != l->voiceEnvelopeCoefficient
+                || b->voiceMeasurementCoefficient != l->voiceMeasurementCoefficient
+                || b->modulationHighPassPole != l->modulationHighPassPole
+                || b->modulationLowPassPole != l->modulationLowPassPole
+                || memcmp(&b->bandHighPass, &l->bandHighPass, sizeof(N60BiquadCoefficients)) != 0
+                || memcmp(&b->bandLowPass, &l->bandLowPass, sizeof(N60BiquadCoefficients)) != 0) continue;
+            if ((double)(float)l->bandLowHz != l->bandLowHz || (double)(float)l->bandHighHz != l->bandHighHz) continue;
+            out[14] = 1.0f; out[15] = l->voiceGateEnabled ? 1.0f : 0.0f;
+            out[16] = (float)l->bandLowHz; out[17] = (float)l->bandHighHz; out[18] = l->targetGapDB;
+            out[19] = l->boostRatio; out[20] = l->maxBoostDB; out[21] = v[0]; out[22] = v[1]; out[23] = v[2];
+            out[24] = l->programGateThresholdDB; out[25] = modLow; out[26] = modHigh; out[27] = v[3]; out[28] = v[4];
+            out[29] = l->confidenceFloorIndex; out[30] = l->confidenceCeilingIndex; out[31] = l->minConfidence;
+            ok = true;
+        }
+        if (!ok) return false;
+    }
+    return true;
+}
+
 // What the kernel's denoiser sees while it is switched off (ABI v9 park view): FFT size of the quality
 // setting, profile revision and command. The kernel keeps its profile while off, applies a Reset command
 // and drops the profile on a quality change, all of which the core reproduces from these three numbers. A
@@ -489,11 +683,7 @@ static inline N60UnifiedGraphUnsupportedReason N60UnifiedGraphSnapshotUnsupporte
         }
     }
     const N60DynamicsSnapshot *d = &s->dynamics;
-    if (d->stereoMode.mode != N60StereoModeStereo || d->stereoWidener.enabled
-            || d->loudnessMatch.enabled
-            || d->loudnessContour.enabled || d->dialogueLeveler.enabled
-            || d->deHarsh.enabled || d->deEsser.enabled
-            || d->multibandCompressor.enabled) {
+    if (d->multibandCompressor.enabled) {
         return N60UnifiedGraphUnsupportedDynamics;
     }
     float scratch[10];
@@ -501,6 +691,13 @@ static inline N60UnifiedGraphUnsupportedReason N60UnifiedGraphSnapshotUnsupporte
         float cleanup[26];
         bool cleanupNeeded = false;
         if (!N60UnifiedGraphCleanupParams(s, cleanup, &cleanupNeeded)) return N60UnifiedGraphUnsupportedDynamics;
+        float image[8];
+        float deess[12];
+        float loudness[32];
+        bool imageNeeded = false, deessNeeded = false, loudnessNeeded = false;
+        if (!N60UnifiedGraphLoudnessParams(s, loudness, &loudnessNeeded)) return N60UnifiedGraphUnsupportedDynamics;
+        if (!N60UnifiedGraphImageParams(s, image, &imageNeeded)) return N60UnifiedGraphUnsupportedDynamics;
+        if (!N60UnifiedGraphDeEssParams(s, deess, &deessNeeded)) return N60UnifiedGraphUnsupportedDynamics;
     }
     if (d->spectralDenoiser.enabled && !N60UnifiedGraphDenoiserParams(s, scratch)) {
         return N60UnifiedGraphUnsupportedDynamics;
