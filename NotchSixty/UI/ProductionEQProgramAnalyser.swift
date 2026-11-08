@@ -13,7 +13,7 @@ struct EQProgramAnalyserSwitch: View {
                 .toggleStyle(.switch)
                 .controlSize(.small)
                 .fixedSize()
-                .help("Live program spectrum: grey is the input, blue the output of the whole processing chain")
+                .help("Live program spectrum: grey is the input, blue the output (full chain)")
                 .task(id: analyser.isOn) { await analyser.run() }
                 .onReceive(analyser.$spectrum) { spectrum = $0 }
         }
@@ -52,6 +52,12 @@ enum EQProgramSpectrumDrawing {
         }
         if let line = path(spectrum.outputDB, closed: false) {
             context.stroke(line, with: .color(.cyan.opacity(0.75)), lineWidth: 1.25)
+        }
+        let legend: [(String, Color)] = [("Input", .gray), ("Output (full chain)", .cyan)]
+        for (index, entry) in legend.enumerated() {
+            context.draw(
+                Text(entry.0).font(.caption2).foregroundStyle(entry.1),
+                at: CGPoint(x: size.width - 8, y: 10 + CGFloat(index) * 13), anchor: .trailing)
         }
     }
 }
