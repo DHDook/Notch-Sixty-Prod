@@ -199,6 +199,48 @@ int main() {
         n60_graph_retire(g);
     }
 
+    // E6 S12d: MULTIBAND with live edits that redesign the crossover, sidechain filters and poles between blocks, plus
+    // enable edges (park and wake): the realtime call allocates and frees nothing.
+    for (double rate : rates) {
+        constexpr uint32_t N = 512;
+        float mb[29] = {1, 120, 2500, 1, 0, -30, -26, -28, 4, 3, 6, 10, 5, 2, 120, 80, 60, 6, 4, 0, 60, 0, 120, 0, 1, 0, 1, 0, 1};
+        n60_stage_desc st[1] = {stage(N60_STAGE_MULTIBAND, 1, 0, mb, 29, 0, 1)};
+        n60_graph_desc d{};
+        d.structSize = sizeof d;
+        d.abiVersion = N60_GRAPH_ABI_VERSION;
+        d.sampleRate = rate;
+        d.maxBlockFrames = N;
+        d.inputChannels = d.outputChannels = 2;
+        d.stages = st;
+        d.stageCount = 1;
+        n60_graph *g = nullptr;
+        CHECK(n60_graph_build(&d, &g) == N60_STATUS_OK, "build multiband");
+        float l[N], r[N], ol[N], orr[N];
+        for (uint32_t i = 0; i < N; i++) { l[i] = 0.5f * std::sin(0.05f * i); r[i] = 0.5f * std::cos(0.07f * i); }
+        const float *in[2] = {l, r};
+        float *out[2] = {ol, orr};
+        for (int round = 0; round < 30; round++) {
+            n60_param_record rec[8] = {{1, 1, 60.0f + 5.0f * round, 0},
+                                       {1, 2, 1500.0f + 100.0f * round, 0},
+                                       {1, 20, static_cast<float>(10 * (round % 7)), 0},
+                                       {1, 11, 1.0f + round, 0},
+                                       {1, 15, 20.0f + 10.0f * round, 0},
+                                       {1, 26, static_cast<float>(round & 1), 0},
+                                       {1, 0, static_cast<float>((round / 3) % 2), 0},
+                                       {1, 5, -40.0f + round, 0}};
+            CHECK(n60_graph_post_params(g, rec, 8) == N60_STATUS_OK, "post multiband");
+            allocs = 0;
+            frees = 0;
+            armed = true;
+            n60_status s2 = n60_graph_process(g, in, out, N);
+            for (int k = 0; k < 3; k++) s2 = static_cast<n60_status>(s2 | n60_graph_process(g, in, out, 1 + 97 * k));
+            armed = false;
+            CHECK(s2 == N60_STATUS_OK, "process multiband");
+            CHECK(allocs == 0 && frees == 0, "multiband rate %.0f round %d: allocated %ld / freed %ld", rate, round, allocs.load(), frees.load());
+        }
+        n60_graph_retire(g);
+    }
+
     // S4 stages: denoiser, dynamic EQ, FIR, compressor and expander on four lanes, with
     // lane masks, published, edited live and rendered with blocks that straddle FFT frames.
     for (double rate : rates) {

@@ -134,6 +134,7 @@
 		E6D100000000000000000002 /* UnifiedGraphCleanupTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6D100000000000000000001 /* UnifiedGraphCleanupTests.swift */; };
 		E6D100000000000000000012 /* UnifiedGraphImageTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6D100000000000000000011 /* UnifiedGraphImageTests.swift */; };
 		E6D100000000000000000022 /* UnifiedGraphLoudnessTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6D100000000000000000021 /* UnifiedGraphLoudnessTests.swift */; };
+		E6D100000000000000000032 /* UnifiedGraphMultibandTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6D100000000000000000031 /* UnifiedGraphMultibandTests.swift */; };
 		E6D000000000000000000108 /* UnifiedGraphRoutesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6D000000000000000000009 /* UnifiedGraphRoutesTests.swift */; };
 		E6D000000000000000000106 /* UnifiedGraphEngineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6D000000000000000000006 /* UnifiedGraphEngineTests.swift */; };
 		E6D0000000000000000000B8 /* UnifiedGraphConfigurationMatrixTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6D0000000000000000000B7 /* UnifiedGraphConfigurationMatrixTests.swift */; };
@@ -186,6 +187,7 @@
 		E6C100000000000000000002 /* stages_cleanup.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E6C100000000000000000001 /* stages_cleanup.cpp */; };
 		E6C100000000000000000012 /* stages_image.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E6C100000000000000000011 /* stages_image.cpp */; };
 		E6C100000000000000000022 /* stages_loudness.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E6C100000000000000000021 /* stages_loudness.cpp */; };
+		E6C100000000000000000032 /* stages_multiband.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E6C100000000000000000031 /* stages_multiband.cpp */; };
 		E8A000000000000000000022 /* stages_route.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E8A000000000000000000012 /* stages_route.cpp */; };
 		E25F0000000000000000F002 /* fold.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E25F0000000000000000F001 /* fold.cpp */; };
 		E6C000000000000000000036 /* layout.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E6C000000000000000000016 /* layout.cpp */; };
@@ -790,6 +792,7 @@
 		E6D100000000000000000001 /* UnifiedGraphCleanupTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnifiedGraphCleanupTests.swift; sourceTree = "<group>"; };
 		E6D100000000000000000011 /* UnifiedGraphImageTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnifiedGraphImageTests.swift; sourceTree = "<group>"; };
 		E6D100000000000000000021 /* UnifiedGraphLoudnessTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnifiedGraphLoudnessTests.swift; sourceTree = "<group>"; };
+		E6D100000000000000000031 /* UnifiedGraphMultibandTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnifiedGraphMultibandTests.swift; sourceTree = "<group>"; };
 		E6D000000000000000000009 /* UnifiedGraphRoutesTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnifiedGraphRoutesTests.swift; sourceTree = "<group>"; };
 		E6D000000000000000000006 /* UnifiedGraphEngineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnifiedGraphEngineTests.swift; sourceTree = "<group>"; };
 		E6D0000000000000000000B7 /* UnifiedGraphConfigurationMatrixTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnifiedGraphConfigurationMatrixTests.swift; sourceTree = "<group>"; };
@@ -847,9 +850,11 @@
 		E6C100000000000000000001 /* stages_cleanup.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = stages_cleanup.cpp; sourceTree = "<group>"; };
 		E6C100000000000000000011 /* stages_image.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = stages_image.cpp; sourceTree = "<group>"; };
 		E6C100000000000000000021 /* stages_loudness.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = stages_loudness.cpp; sourceTree = "<group>"; };
+		E6C100000000000000000031 /* stages_multiband.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = stages_multiband.cpp; sourceTree = "<group>"; };
 		E6C100000000000000000003 /* stages_cleanup.hpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.h; path = stages_cleanup.hpp; sourceTree = "<group>"; };
 		E6C100000000000000000013 /* stages_image.hpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.h; path = stages_image.hpp; sourceTree = "<group>"; };
 		E6C100000000000000000023 /* stages_loudness.hpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.h; path = stages_loudness.hpp; sourceTree = "<group>"; };
+		E6C100000000000000000033 /* stages_multiband.hpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.h; path = stages_multiband.hpp; sourceTree = "<group>"; };
 		E8A000000000000000000012 /* stages_route.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = stages_route.cpp; sourceTree = "<group>"; };
 		E25F0000000000000000F001 /* fold.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = fold.cpp; sourceTree = "<group>"; };
 		E8A000000000000000000013 /* stages_route.hpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.h; path = stages_route.hpp; sourceTree = "<group>"; };
@@ -1402,6 +1407,7 @@
 				E6C100000000000000000001 /* stages_cleanup.cpp */,
 				E6C100000000000000000011 /* stages_image.cpp */,
 				E6C100000000000000000021 /* stages_loudness.cpp */,
+				E6C100000000000000000031 /* stages_multiband.cpp */,
 				E8A000000000000000000012 /* stages_route.cpp */,
 				E25F0000000000000000F001 /* fold.cpp */,
 				E6C000000000000000000016 /* layout.cpp */,
@@ -1432,6 +1438,7 @@
 				E6C100000000000000000003 /* stages_cleanup.hpp */,
 				E6C100000000000000000013 /* stages_image.hpp */,
 				E6C100000000000000000023 /* stages_loudness.hpp */,
+				E6C100000000000000000033 /* stages_multiband.hpp */,
 				E8A000000000000000000013 /* stages_route.hpp */,
 			);
 			name = libn60core;
@@ -1490,6 +1497,7 @@
 				E6D100000000000000000001 /* UnifiedGraphCleanupTests.swift */,
 				E6D100000000000000000011 /* UnifiedGraphImageTests.swift */,
 				E6D100000000000000000021 /* UnifiedGraphLoudnessTests.swift */,
+				E6D100000000000000000031 /* UnifiedGraphMultibandTests.swift */,
 				E6D0000000000000000000B7 /* UnifiedGraphConfigurationMatrixTests.swift */,
 				E6D0000000000000000000A0 /* UnifiedGraphBinauralTests.swift */,
 				E6D0000000000000000000E5 /* UnifiedGraphLiveEditTests.swift */,
@@ -2054,6 +2062,7 @@
 				E6C100000000000000000002 /* stages_cleanup.cpp in Sources */,
 				E6C100000000000000000012 /* stages_image.cpp in Sources */,
 				E6C100000000000000000022 /* stages_loudness.cpp in Sources */,
+				E6C100000000000000000032 /* stages_multiband.cpp in Sources */,
 				E8A000000000000000000022 /* stages_route.cpp in Sources */,
 				E25F0000000000000000F002 /* fold.cpp in Sources */,
 				E6C000000000000000000036 /* layout.cpp in Sources */,
@@ -2427,6 +2436,7 @@
 				E6D100000000000000000002 /* UnifiedGraphCleanupTests.swift in Sources */,
 				E6D100000000000000000012 /* UnifiedGraphImageTests.swift in Sources */,
 				E6D100000000000000000022 /* UnifiedGraphLoudnessTests.swift in Sources */,
+				E6D100000000000000000032 /* UnifiedGraphMultibandTests.swift in Sources */,
 				E6D0000000000000000000B8 /* UnifiedGraphConfigurationMatrixTests.swift in Sources */,
 				E6D0000000000000000001A0 /* UnifiedGraphBinauralTests.swift in Sources */,
 				E6D0000000000000000001E5 /* UnifiedGraphLiveEditTests.swift in Sources */,

@@ -194,6 +194,11 @@ enum UnifiedGraphTranslator {
             if N60UnifiedGraphLoudnessParams(pointer, &loudness, &loudnessNeeded) {
                 if loudnessNeeded { stages.loudness = loudness }
             } else { ok = false }
+            var multiband = [Float](repeating: 0, count: 29)
+            var multibandNeeded = false
+            if N60UnifiedGraphMultibandParams(pointer, &multiband, &multibandNeeded) {
+                if multibandNeeded { stages.multiband = multiband }
+            } else { ok = false }
             var deess = [Float](repeating: 0, count: 12)
             var deessNeeded = false
             if N60UnifiedGraphDeEssParams(pointer, &deess, &deessNeeded) {

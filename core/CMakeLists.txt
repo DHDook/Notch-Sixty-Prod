@@ -2,7 +2,7 @@
 cmake_minimum_required(VERSION 3.20)
 project(n60core LANGUAGES C CXX)
 
-add_library(n60core STATIC src/graph.cpp src/snapshot.cpp src/fft.cpp src/stages_dsp.cpp src/conv/nufir.cpp src/stages_system.cpp src/stages_matrix.cpp src/stages_generator.cpp src/stages_cleanup.cpp src/stages_image.cpp src/stages_loudness.cpp src/stages_route.cpp src/layout.cpp
+add_library(n60core STATIC src/graph.cpp src/snapshot.cpp src/fft.cpp src/stages_dsp.cpp src/conv/nufir.cpp src/stages_system.cpp src/stages_matrix.cpp src/stages_generator.cpp src/stages_cleanup.cpp src/stages_image.cpp src/stages_loudness.cpp src/stages_multiband.cpp src/stages_route.cpp src/layout.cpp
     src/measure/offline_fft.cpp src/measure/ess.cpp src/measure/deconvolve.cpp src/measure/reference_room.cpp src/measure/timing.cpp src/measure/distortion.cpp src/measure/decay.cpp src/measure/waterfall.cpp src/measure/monitor_ring.cpp src/measure/spl.cpp src/measure/rta.cpp
     src/correct/minphase.cpp src/correct/design.cpp src/correct/synth.cpp src/correct/bass.cpp src/correct/multisub_search.cpp
     src/xover/xover.cpp)
@@ -176,6 +176,11 @@ add_test(NAME n60core_image COMMAND n60core_image_test)
 add_executable(n60core_loudness_test tests/test_loudness.cpp)
 target_link_libraries(n60core_loudness_test PRIVATE n60core)
 add_test(NAME n60core_loudness COMMAND n60core_loudness_test)
+
+# E6 S12d: multiband compressor stage (ABI v25).
+add_executable(n60core_multiband_test tests/test_multiband.cpp)
+target_link_libraries(n60core_multiband_test PRIVATE n60core)
+add_test(NAME n60core_multiband COMMAND n60core_multiband_test)
 
 add_executable(n60core_stereo_bass_test tests/test_stereo_bass.cpp)
 target_link_libraries(n60core_stereo_bass_test PRIVATE n60core)

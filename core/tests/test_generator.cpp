@@ -498,7 +498,7 @@ static void testRejects() {
 }
 
 int main() {
-    CHECK(n60_graph_abi_version() == N60_GRAPH_ABI_VERSION && N60_GRAPH_ABI_VERSION == 24u, "ABI v24");
+    CHECK(n60_graph_abi_version() == N60_GRAPH_ABI_VERSION && N60_GRAPH_ABI_VERSION == 25u, "ABI v25");
     testRejects();
     for (double rate : kRates) {
         testPinkSlope(rate);
