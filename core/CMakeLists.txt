@@ -2,7 +2,7 @@
 cmake_minimum_required(VERSION 3.20)
 project(n60core LANGUAGES C CXX)
 
-add_library(n60core STATIC src/graph.cpp src/snapshot.cpp src/fft.cpp src/stages_dsp.cpp src/conv/nufir.cpp src/stages_system.cpp src/stages_matrix.cpp src/stages_generator.cpp src/stages_cleanup.cpp src/stages_route.cpp src/layout.cpp
+add_library(n60core STATIC src/graph.cpp src/snapshot.cpp src/fft.cpp src/stages_dsp.cpp src/conv/nufir.cpp src/stages_system.cpp src/stages_matrix.cpp src/stages_generator.cpp src/stages_cleanup.cpp src/stages_image.cpp src/stages_route.cpp src/layout.cpp
     src/measure/offline_fft.cpp src/measure/ess.cpp src/measure/deconvolve.cpp src/measure/reference_room.cpp src/measure/timing.cpp src/measure/distortion.cpp src/measure/decay.cpp src/measure/waterfall.cpp src/measure/monitor_ring.cpp src/measure/spl.cpp src/measure/rta.cpp
     src/correct/minphase.cpp src/correct/design.cpp src/correct/synth.cpp src/correct/bass.cpp src/correct/multisub_search.cpp
     src/xover/xover.cpp)
@@ -166,6 +166,11 @@ add_test(NAME n60core_analyser_tap COMMAND n60core_analyser_tap_test)
 add_executable(n60core_cleanup_test tests/test_cleanup.cpp)
 target_link_libraries(n60core_cleanup_test PRIVATE n60core)
 add_test(NAME n60core_cleanup COMMAND n60core_cleanup_test)
+
+# E6 S12b: image (stereo mode, widener) and de-ess (de-harsh, de-esser) stages (ABI v23).
+add_executable(n60core_image_test tests/test_image.cpp)
+target_link_libraries(n60core_image_test PRIVATE n60core)
+add_test(NAME n60core_image COMMAND n60core_image_test)
 
 add_executable(n60core_stereo_bass_test tests/test_stereo_bass.cpp)
 target_link_libraries(n60core_stereo_bass_test PRIVATE n60core)

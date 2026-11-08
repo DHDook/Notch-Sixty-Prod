@@ -34,7 +34,7 @@ extern "C" {
 #endif
 
 /* Bumped on any incompatible change to a struct or function below. */
-#define N60_GRAPH_ABI_VERSION 22u
+#define N60_GRAPH_ABI_VERSION 23u
 
 typedef struct n60_graph n60_graph; /* opaque */
 
@@ -113,8 +113,23 @@ typedef enum n60_stage_kind {
     N60_STAGE_ANALYSER_TAP_EQ = 42,  /* position 9.5: after FIR, before the compressor. Audio untouched. */
     N60_STAGE_ANALYSER_TAP_DYN = 43, /* position 11.5: after the expander, before METER_OUT. Audio untouched. */
     /* ABI v22 (E6 S12a). Cleanup: see "Cleanup" below. */
-    N60_STAGE_CLEANUP = 44           /* position 3.7: after GAIN and the generator, before DENOISER. Pair stage. */
+    N60_STAGE_CLEANUP = 44,          /* position 3.7: after GAIN and the generator, before DENOISER. Pair stage. */
+    /* ABI v23 (E6 S12b). Image and de-ess: see "Image and de-ess" below. */
+    N60_STAGE_IMAGE = 45,            /* position 9.6: after ANALYSER_TAP_EQ, before DEESS and the compressor. Pair stage: stereo mode, then widener. */
+    N60_STAGE_DEESS = 46             /* position 9.8: after IMAGE (and the S12c loudness slot), before the compressor. Pair stage: de-harsh, then de-esser. */
 } n60_stage_kind;
+
+/* Image and de-ess (ABI v23, E6 S12b). The stereo kernel's stereo mode, widener, de-harsh and de-esser, same arithmetic.
+ * Both are pair stages (laneA, laneB distinct, laneMask 0, capacityFrames 0); an off part is parked and costs nothing.
+ * IMAGE paramCount 8: [0] mode (0 stereo, 1 wide mono, 2 true mono), [1] widener on (0/1), [2] mono low band (0/1),
+ * [3] low/mid Hz (80..500), [4] mid/high Hz (1500..8000), [5] low width (0..1), [6] mid width (1..2), [7] high width (1..2).
+ * Frequencies must also be below 0.45 x the sample rate. Mode and width changes glide over 5 ms.
+ * DEESS paramCount 12: [0] de-harsh on (0/1), [1] Hz (1500..10000), [2] amount dB (-6..0), [3] de-esser on (0/1),
+ * [4] Hz (2000..10000), [5] threshold dB (-60..0), [6] ratio (1..20), [7] range dB (-24..0), [8] detection Q (0.5..8),
+ * [9] attack ms (0.1..100), [10] release ms (10..1000), [11] dynamic-EQ mode (0/1; 0 = wideband).
+ * The de-esser gain reduction is read with n60_graph_read_dynamics on DEESS (either lane of the pair; grMaxDb reset by the read).
+ * Parameter edits through n60_graph_post_params are live; the filters are redesigned at the next block start.
+ * Built from a fresh snapshot a stage starts parked and neutral, so state is not carried across a rebuild. */
 
 /* Analyser taps (ABI v21, E27 S2c). Two read-only capture points for the Equalizer page's spectrum overlay: the program
  * after the EQ (PEQ, dynamic EQ, FIR) and after the user dynamics (compressor, expander). Neither includes room
