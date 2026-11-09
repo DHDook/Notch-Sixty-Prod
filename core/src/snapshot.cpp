@@ -487,7 +487,7 @@ n60_status validateDesc(const n60_graph_desc &d) {
         }
         if (captures != subtracts || captures > 1) return N60_STATUS_BAD_ARGUMENT;
         if (captures == 1 && (d.stages[capIdx].laneA != d.stages[subIdx].laneA || d.stages[capIdx].laneB != d.stages[subIdx].laneB ||
-                              capIdx > subIdx)) {
+                              d.stages[capIdx].laneMask != d.stages[subIdx].laneMask || capIdx > subIdx)) {
             return N60_STATUS_BAD_ARGUMENT;
         }
     }

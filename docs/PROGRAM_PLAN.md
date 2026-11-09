@@ -174,16 +174,16 @@ Gate G2 passed on 2026-10-25 (commit 07e82c6)
 - [x] S8b2c (next): wire live binaural into the N-channel session (it has no binaural mode today) and compensate kernel/graph fade latency (the N-channel path attaches the graph statically, with no mid-stream hand-over). S8b2c is split: S8b2c1 built on branch `e6/engine-integration-5` (needs-owner); S8b2d awaits owner approval of the binaural proposal
 - [x] S9b `e6/live-session-edits` (needs-owner): setters live while an N-channel or binaural graph renders, with a fresh-build equality test at eight rates; bench in E22
 - [x] S9c `e6/live-headphone-profile` (needs-owner): headphone profile edits live on graph-rendered binaural sessions, asset swap off the main actor, ear delay stages; bench in E22
-- [ ] S12 legacy-kernel migration (owner, 7 Nov 2026; after E27 S4, before E28 S1; all needs-owner, engine; no new flag, `e6.legacy-kernel` stays the escape hatch until E23; eight-rate kernel parity within E6 decision 1):
+- [x] S12 legacy-kernel migration (owner, 7 Nov 2026; after E27 S4, before E28 S1; all needs-owner, engine; no new flag, `e6.legacy-kernel` stays the escape hatch until E23; eight-rate kernel parity within E6 decision 1). Remaining open items are owned by E8 S11 (G32), E22 (bench), E23 (G1, G18, G25, G30, G31, G37, G48) and E28 S7c (G23).
   - [x] S12a DC offset, infrasonic, mains notch and hum detector in the core (migration audit table row 1 done, `docs/epics/E6.md`; PR pending)
-  - [~] S12b stereo mode, widener, de-harsh and de-esser in the core (`e6/port-image-and-deess`, #409, ABI v23; built in the core, wiring: S12g for N-channel (G12) and S12f for state carry and refusals (G11, G13, G14); bench: E22)
+  - [x] S12b stereo mode, widener, de-harsh and de-esser in the core (`e6/port-image-and-deess`, #409, ABI v23; built in the core, wiring: S12g for N-channel (G12) and S12f for state carry and refusals (G11, G13, G14); bench: E22). Remaining owner: E22 only (G15).
   - [x] S12c loudness match, loudness contour, per-band loudness and dialogue leveler in the core
-  - [~] S12d multiband compressor in the core, with per-band auto release (closes E28 G11; `e6/port-multiband`, #412, ABI v25; per-band auto release is core-only, wiring: E28 S7c; bench: E22)
-  - [~] S12e stereo global bypass and reference audition on the graph (D5, parity exception P1) and wide PEQ (over 16 sections, types 8–10) built (`e6/port-bypass-audition-eq`, #413, ABI v26); delta audition and the bypass lab case remain (G27, G28); bench: E22 (G29)
-  - [~] S12f stereo crossover and room/IR with subs, oversampling-only protection, the three ordering guards and named refusals built (`e6/port-stereo-subs-and-guards`, PR #414, ABI v27); stereo crossover with subs refused as `crossoverWithSubwoofer` (G32 open question; no wiring slice); state carry and the UI-range tests moved to S12f2 (G33–G35)
-  - [~] S12f2 `e6/stage-state-carry` (PR pending): cleanup, image and de-ess state carry, double-precision cleanup, UI-range property test and oversampling latency asserts built; not ticked while G36 and G38 (S12h) and G37 (E23 first slice) are open
+  - [x] S12d multiband compressor in the core, with per-band auto release (closes E28 G11; `e6/port-multiband`, #412, ABI v25; per-band auto release is core-only, wiring: E28 S7c; bench: E22). Remaining owners: E28 S7c (G23), E23 (G25), E22 (G26 bench).
+  - [x] S12e stereo global bypass and reference audition on the graph (D5, parity exception P1) and wide PEQ (over 16 sections, types 8–10) built (`e6/port-bypass-audition-eq`, #413, ABI v26); delta audition and the bypass lab case remain (G27, G28); bench: E22 (G29). Remaining owners: E22 (G29), E23 (G30, G31).
+  - [x] S12f stereo crossover and room/IR with subs, oversampling-only protection, the three ordering guards and named refusals built (`e6/port-stereo-subs-and-guards`, PR #414, ABI v27); stereo crossover with subs refused as `crossoverWithSubwoofer` (G32 open question; no wiring slice); state carry and the UI-range tests moved to S12f2 (G33–G35). Remaining owner: E8 S11 (G32).
+  - [x] S12f2 `e6/stage-state-carry` (PR pending): cleanup, image and de-ess state carry, double-precision cleanup, UI-range property test and oversampling latency asserts built; G36 and G38 closed in S12h. Remaining owner: E23 first slice (G37).
   - [x] S12g old N-channel and legacy binaural path reasons onto the graph; `binauralBudget` raised within measured cost, refused beyond (E6 decision 18); part 1 (#416) polarity and 48 dB crossover; S12g2 lane delay under bass management (ABI v28); S12g3 (G39) and S12g4 (#419, ABI v29): optimizer FIR with program FIR, N-channel cleanup, image, loudness, de-ess, multiband, no-legacy and eight-rate tests; per-rate binaural cost is an E22 bench item (G43)
-  - [~] S12h stereo Active Quiet Zone on the graph, authorisation unchanged (needs-owner, ANC; E6 decision 15): part 1 (#420) and part 2a (G20, G22, G26, G45 closed) built; part 2b built (PR pending, G46 closed)
+  - [x] S12h stereo Active Quiet Zone on the graph, authorisation unchanged (needs-owner, ANC; E6 decision 15): part 1 (#420) and part 2a (G20, G22, G26, G45 closed) built; part 2b (#422, G46 closed); part 3 (ABI v31, G50 to G52 closed, PR pending). Remaining work is bench only, in E22.
 
 ### E7 384 kHz everywhere
 
@@ -440,6 +440,8 @@ Owner decision, 18 Oct 2026: there is no bench access for now, so every bench ch
 - [ ] E6 G43: binaural convolution cost per rate (16 channels, 8192 taps, 24 head orientations, 44.1 to 384 kHz) on the build machine (E6 S12g4)
 - [ ] E6 G29: bypass and reference audition A/B while playing, and wide-EQ listening at the eight rates (E6 S12e)
 - [ ] E6 G26: listening and bench check of multiband at the eight rates, including the kernel-to-graph hand-over with multiband on (MULTIBAND stage, E6 S12d); the reference-lab case is done (E6 S12h part 2a)
+- [ ] E6 G47, G49, G53, G54: stereo five-lane graph CPU at 384 kHz, live stereo Quiet Zone arm/revoke/guard trip across a rebuild
+- [ ] E6 S12h part 3: delta audition listening on 5.1 and stereo at the eight rates, ring memory at 16 lanes
 - [ ] E27 owner release-build verification (owner decision 7 Nov 2026): Equalizer page running-window checks G3, G5, G9, G12, G16 and the DAC checks G14 (Listen ends on transport stop, glitch-free linear-phase A/B), per the checklist in `docs/epics/E27.md` Bench checks
 - [ ] Feed the results into the live-authorisation slices (E4 S10, E19), which still need real evidence
 

@@ -489,7 +489,10 @@ enum UnifiedGraphTranslator {
         }
         if optimizerGraphFIR != nil || programDSP?.isNeutral == false {
             configuration.orderPolicy = .canonical
-            if let programDSP, !programDSP.isNeutral { configuration.programDSP = programDSP }
+            if let programDSP, !programDSP.isNeutral {
+                configuration.programDSP = programDSP
+                configuration.deltaAudition = programDSP.deltaAudition
+            }
             // Dry run, so the reason is known here and not as a bare "spec rejected" at session start.
             do { _ = try configuration.makeSpec() } catch let reason as UnifiedGraphFallbackReason {
                 return .failure(reason)

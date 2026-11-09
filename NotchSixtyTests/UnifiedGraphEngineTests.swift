@@ -761,6 +761,30 @@ final class UnifiedGraphStageParityTests: XCTestCase {
         }
     }
 
+    /// E6 S12h part 3 (G51): the delta audition with the stereo crossover and program EQ on matches the kernel's delta
+    /// (processed minus the input delayed by the snapshot's latency) at every rate. The crossover's mains-only and
+    /// sub-only monitor modes and a polarity-inverted, phase-aligned sub are included.
+    func testDeltaAuditionWithTheStereoCrossoverMatchesTheKernelAtEveryRate() throws {
+        for rate in Self.rates {
+            for (topology, mode, align, invert) in [
+                (N60CrossoverTopologyLinkwitzRiley24, N60CrossoverMonitorModeRecombined, false, false),
+                (N60CrossoverTopologyLinkwitzRiley48, N60CrossoverMonitorModeMainsOnly, false, true),
+                (N60CrossoverTopologyLinkwitzRiley24, N60CrossoverMonitorModeSubOnly, true, false),
+            ] {
+                var s = N60DSPGraphSnapshotMakeUnity(rate)
+                XCTAssertTrue(N60DSPGraphSnapshotSetEQBandForChannels(
+                    &s, 0, UInt8(N60_EQ_CHANNEL_LEFT), N60BiquadFilterTypePeaking, 1_000, 6, 1.0, true))
+                XCTAssertTrue(N60DSPGraphSnapshotSetEQBandForChannels(
+                    &s, 1, UInt8(N60_EQ_CHANNEL_RIGHT), N60BiquadFilterTypeHighShelf, 4_000, -4, 0.707, true))
+                XCTAssertTrue(N60CrossoverSnapshotMake(rate, 90, topology, mode, 0.7, invert, true, &s.crossover))
+                XCTAssertTrue(N60CrossoverSnapshotSetSubPhaseAlignment(rate, 70, 0.8, align, &s.crossover))
+                s.auditionMode = N60AuditionModeDelta
+                try assertParity(s, rate: rate, tolerance: 0.002,
+                                 "delta with crossover \(topology.rawValue) \(mode.rawValue)")
+            }
+        }
+    }
+
     /// E6 S8d group 4: the soft clipper (every curve), alone and in front of the limiter, and the gain rider.
     func testSoftClipperAndGainRiderMatchTheKernelAtEveryRate() throws {
         for rate in Self.rates {

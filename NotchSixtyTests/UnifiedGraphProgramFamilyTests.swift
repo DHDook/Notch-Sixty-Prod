@@ -189,4 +189,114 @@ final class UnifiedGraphProgramFamilyTests: XCTestCase {
             XCTAssertEqual(peaks[0], 2 * (256 + 2), "program plus optimizer latency at \(rate)")
         }
     }
+
+    // MARK: E6 S12h part 3 (G50, G51): the delta audition on N-channel sessions
+
+    private func fiveOnePlan(subs: Int) -> LiveNChannelOutputRoutePlan {
+        LiveNChannelOutputRoutePlan(
+            programLayout: .fiveOne,
+            orderedDeviceUIDs: ["interface"],
+            referenceDeviceUID: "interface",
+            physicalChannelCount: UInt32(6 + subs),
+            programPhysicalChannels: [5, 4, 3, N60_LIVE_PHYSICAL_CHANNEL_UNMAPPED, 1, 0],
+            subwooferPhysicalChannels: (0..<subs).map { UInt32(6 + $0) },
+            subwooferCount: UInt32(subs),
+            bassManagementEnabled: subs > 0,
+            speakerCalibrations: [:],
+            subwooferCalibrations: [PhysicalSubwooferCalibration?](repeating: nil, count: subs)
+        )
+    }
+
+    private func block(_ lanes: Int, _ frames: Int, offset: Int) -> [[Float]] {
+        (0..<lanes).map { lane in
+            (0..<frames).map { i in
+                let n = Double(offset + i)
+                return Float(0.1 * sin(0.05 * n * Double(lane + 1)) + 0.03 * sin(0.9 * n + Double(lane)))
+            }
+        }
+    }
+
+    private func renderAll(_ host: UnifiedGraphHost, input: [[Float]]) throws -> [[Float]] {
+        var out = [[Float]](repeating: [], count: input.count)
+        var position = 0
+        while position < input[0].count {
+            let count = min(512, input[0].count - position)
+            let chunk = input.map { Array($0[position..<position + count]) }
+            let result = try host.processOffline(input: chunk, frames: count)
+            for lane in 0..<input.count { out[lane] += result[lane] }
+            position += count
+        }
+        return out
+    }
+
+    /// Program EQ plus a lane delay on a 5.1 session with bass management and two subs. The delta is processed minus the
+    /// lane-aligned input on the six program lanes; the sub lanes are outside the delta and render as without it.
+    func testFiveOneDeltaAuditionWithSubwoofersIsProcessedMinusAlignedInputAtEveryRate() throws {
+        for rate in EQRenderHarness.rates {
+            let engine = try engine(rate: rate)
+            try engine.addEQBand(EQBand(type: .peaking, frequencyHz: 1_000, gainDB: 6, q: 1))
+            let stereo = try stereoStages(engine, rate: rate)
+            let plan = fiveOnePlan(subs: 2)
+            let shape = try XCTUnwrap(UnifiedGraphLayoutShape(roles: plan.programLayout.roles))
+            var bass = BassManagementConfiguration(enabled: true)
+            bass.frequencyHz = 80
+            func host(delta: Bool) throws -> UnifiedGraphHost {
+                var dsp = UnifiedGraphProgramDSP(stereo: stereo, shape: shape, eqMode: .linked)
+                dsp.laneDelayFrames = [2: 37]
+                dsp.subLaneCount = 2
+                dsp.deltaAudition = delta
+                XCTAssertFalse(dsp.isNeutral)
+                var configuration = try UnifiedGraphTranslator.nChannelEligibility(
+                    routePlan: plan, sampleRate: rate, gainConfiguration: DSPGainConfiguration(),
+                    bassManagementConfiguration: bass, programDSP: dsp).get()
+                XCTAssertEqual(configuration.deltaAudition, delta)
+                return try UnifiedGraphHost(spec: try configuration.makeSpec())
+            }
+            let plain = try host(delta: false)
+            let audition = try host(delta: true)
+            XCTAssertEqual(audition.latencyFrames, plain.latencyFrames, "the pair adds no latency at \(rate)")
+            let lanes = Int(plain.spec.inputChannels)
+            var input = block(6, 6_144, offset: 0)
+            input += [[Float]](repeating: [Float](repeating: 0, count: 6_144), count: lanes - 6)
+            let expected = try renderAll(plain, input: input)
+            let actual = try renderAll(audition, input: input)
+            let delays = [0, 0, 37, 0, 0, 0]
+            var worst: Float = 0
+            for lane in 0..<6 {
+                for n in 0..<input[lane].count {
+                    let aligned: Float = n >= delays[lane] ? input[lane][n - delays[lane]] : 0
+                    worst = max(worst, abs(actual[lane][n] - (expected[lane][n] - aligned)))
+                }
+            }
+            XCTAssertLessThan(worst, 1e-5, "program lane delta at \(rate)")
+            for lane in 6..<lanes {
+                let same = zip(actual[lane], expected[lane]).map { abs($0 - $1) }.max() ?? 1
+                XCTAssertEqual(same, 0, accuracy: 1e-6, "sub lane \(lane) is outside the delta at \(rate)")
+                XCTAssertGreaterThan(expected[lane].map { abs($0) }.max() ?? 0, 1e-4, "sub lane \(lane) carries bass at \(rate)")
+            }
+        }
+    }
+
+    /// The engine builds the mask delta for a speaker session and refuses it for Virtual Speakers, by name.
+    func testEngineBuildsTheDeltaForSpeakersAndRefusesItForVirtualSpeakers() throws {
+        let rate = 48_000.0
+        let engine = try engine(rate: rate)
+        engine.unifiedGraphEnabled = true
+        let shape = try XCTUnwrap(UnifiedGraphLayoutShape(roles: OutputProgramLayout.fiveOne.roles))
+        var inputs = engine.currentLiveGraphInputs
+        inputs.playback.auditionMode = .delta
+        let dsp = try XCTUnwrap(engine.makeUnifiedProgramDSP(
+            sampleRate: rate, shape: shape, virtualSpeakers: false, inputs: inputs))
+        XCTAssertTrue(dsp.deltaAudition)
+        XCTAssertFalse(dsp.isNeutral, "a delta alone is program DSP")
+        XCTAssertThrowsError(try engine.makeUnifiedProgramDSP(
+            sampleRate: rate, shape: shape, virtualSpeakers: true, inputs: inputs)) { error in
+            guard case LiveNChannelTransportError.unsupportedActiveDSP(let what) = error else {
+                return XCTFail("expected a named refusal, got \(error)")
+            }
+            XCTAssertTrue(what.contains("Virtual Speakers"))
+        }
+        inputs.playback.auditionMode = .processed
+        XCTAssertEqual(try engine.makeUnifiedProgramDSP(sampleRate: rate, shape: shape, virtualSpeakers: false, inputs: inputs)?.deltaAudition, false)
+    }
 }

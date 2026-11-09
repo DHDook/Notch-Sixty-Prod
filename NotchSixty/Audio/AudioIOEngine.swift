@@ -4433,8 +4433,11 @@ final class AudioIOEngine: ObservableObject {
         let inputs = candidate ?? currentLiveGraphInputs
         let playback = inputs.playback
         if FIRUpdatePolicy.isRawBypassed(playback) || playback.auditionMode == .reference { return nil }
-        if playback.auditionMode == .delta {
-            throw LiveNChannelTransportError.unsupportedActiveDSP("delta audition")
+        // E6 S12h part 3 (G50): the delta runs on the program lanes of a speaker graph (mask form, ABI v31). Virtual
+        // Speakers renders the ears from the lanes, so a lane delta would not be what the listener hears.
+        let deltaAudition = playback.auditionMode == .delta
+        if deltaAudition, virtualSpeakers {
+            throw LiveNChannelTransportError.unsupportedActiveDSP("delta audition in Virtual Speakers mode")
         }
         var snapshot = try inputs.stereoEQ.makeGraphSnapshot(
             sampleRate: sampleRate,
@@ -4553,6 +4556,7 @@ final class AudioIOEngine: ObservableObject {
         }
         var program = UnifiedGraphProgramDSP(
             stereo: stereo, shape: shape, eqMode: mode, virtualSpeakers: virtualSpeakers)
+        program.deltaAudition = deltaAudition
         if let installedLanes {
             program.inputGain *= abxGain
             program.roomLanes = installedLanes.plan
@@ -5133,6 +5137,11 @@ final class AudioIOEngine: ObservableObject {
     ) throws -> UnifiedGraphConfiguration {
         guard let shape = UnifiedGraphLayoutShape(roles: routePlan.programLayout.roles) else {
             throw LiveNChannelTransportError.unifiedGraphRejected(.laneCountMismatch)
+        }
+        // E6 S12h part 3 (G51 decision): a delta cannot be compared across a routing (each output has its own
+        // crossover, delay and protection), so a routed session refuses it and the picker offers it only unrouted.
+        if inputs.playback.auditionMode == .delta {
+            throw LiveNChannelTransportError.routingRefused("the delta audition is not available with speaker routing; switch to Processed or Reference.")
         }
         let program = try makeUnifiedProgramDSP(
             sampleRate: sampleRate, shape: shape, virtualSpeakers: false,

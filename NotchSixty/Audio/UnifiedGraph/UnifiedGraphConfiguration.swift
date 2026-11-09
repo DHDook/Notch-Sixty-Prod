@@ -290,11 +290,12 @@ struct UnifiedGraphConfiguration: Equatable, Sendable {
         }
         add(N60_STAGE_SANITISE, N60_LSTAGE_SANITISE, lane: all)
         if deltaAudition {
-            guard programLanes == 2 else { throw UnifiedGraphError.invalidConfiguration("delta audition lanes") }
+            // ABI v31 (E6 S12h part 3, G50): the capture covers every program lane as a mask; sub and routed lanes are not
+            // part of the program, so they are outside the delta.
             // The ring must hold a block plus the longest lane latency (the core refuses a build that does not fit).
             let ring = min(maxBlockFrames + Self.deltaRingMargin, N60_GRAPH_MAX_DELAY_FRAMES)
             stages.append(UnifiedGraphStageSpec(
-                kind: N60_STAGE_DELTA_CAPTURE.rawValue, stageId: Self.deltaCaptureStageId, laneA: 0, laneB: 1,
+                kind: N60_STAGE_DELTA_CAPTURE.rawValue, stageId: Self.deltaCaptureStageId, laneA: 0, laneMask: programMask,
                 capacityFrames: ring, params: [1]))
         }
         add(N60_STAGE_METER_IN, N60_LSTAGE_METER_IN, lane: all)
@@ -542,7 +543,7 @@ struct UnifiedGraphConfiguration: Equatable, Sendable {
         }
         if deltaAudition {
             stages.append(UnifiedGraphStageSpec(
-                kind: N60_STAGE_DELTA_SUBTRACT.rawValue, stageId: Self.deltaSubtractStageId, laneA: 0, laneB: 1,
+                kind: N60_STAGE_DELTA_SUBTRACT.rawValue, stageId: Self.deltaSubtractStageId, laneA: 0, laneMask: programMask,
                 params: [1]))
         }
         add(N60_STAGE_FINAL_SANITISE, N60_LSTAGE_FINAL_SANITISE, lane: all)
