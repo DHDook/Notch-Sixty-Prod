@@ -423,7 +423,10 @@ enum UnifiedGraphTranslator {
                     UnifiedGraphPEQSection(type: 0, frequencyHz: $0.frequencyHz, gainDB: $0.gainDB, q: $0.q)
                 }
             }
-            if peq.count > Int(N60_PEQ_MAX_SECTIONS) { return .failure(.laneEQTooLarge) }
+            // E6 S12g3: lanes chain PEQ stages, so only the chain limit (512 slots) refuses; the legacy 16-section cap is lifted.
+            if peq.reduce(0, { $0 + $1.slotCount }) > UnifiedGraphConfiguration.maxPEQSlotsPerLane {
+                return .failure(.laneEQTooLarge)
+            }
             // E6 S12g2: under bass management the legacy order is delay before the crossover (LANE_DELAY stage).
             lanes.append(UnifiedGraphLane(
                 preGain: gain, delayMilliseconds: bassEnabled ? 0 : delay,

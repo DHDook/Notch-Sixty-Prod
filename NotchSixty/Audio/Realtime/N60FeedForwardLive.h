@@ -128,6 +128,16 @@ typedef struct {
     uint64_t searchRestarts;
 } N60FeedForwardLiveEchoStatus;
 
+/* Feed-forward live status as read from the render path (graph or kernel): filter status plus reference-ring counters. */
+typedef struct {
+    bool attached;
+    N60FeedForwardLiveStatus filter;
+    uint64_t outputIndex;           /* output frames passed since attach/reset (the reference ring's read index) */
+    uint32_t referenceAheadFrames;  /* how far the pump has written beyond outputIndex */
+    uint64_t referenceUnderruns;    /* callbacks whose reference block was not fully supplied */
+    N60FeedForwardLiveEchoStatus echo; /* E4 S22b3 */
+} N60RenderKernelFeedForwardLiveStatus;
+
 bool N60FeedForwardLiveConfigIsValid(const N60FeedForwardLiveConfig * N60_FFL_NULLABLE config);
 
 N60FeedForwardLive * N60_FFL_NULLABLE N60FeedForwardLiveCreate(

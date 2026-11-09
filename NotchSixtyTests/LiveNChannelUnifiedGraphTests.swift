@@ -384,10 +384,17 @@ final class LiveNChannelUnifiedGraphTests: XCTestCase {
             off), .gainOutOfRange)
         let manyBands = [OutputCalibrationEQBand](
             repeating: OutputCalibrationEQBand(frequencyHz: 500, gainDB: -1, q: 1),
-            count: Int(N60_PEQ_MAX_SECTIONS) + 1)
+            count: UnifiedGraphConfiguration.maxPEQSlotsPerLane + 1)
         XCTAssertEqual(reason(
             plan(subs: 0, bass: false, speakers: [.frontLeft: SemanticSpeakerCalibration(eqBands: manyBands)]),
             off), .laneEQTooLarge)
+        // S12g3: more than the legacy 16 sections now attach (chained PEQ stages).
+        let over16 = [OutputCalibrationEQBand](
+            repeating: OutputCalibrationEQBand(frequencyHz: 500, gainDB: -1, q: 1),
+            count: Int(N60_PEQ_MAX_SECTIONS) + 8)
+        XCTAssertNil(reason(
+            plan(subs: 0, bass: false, speakers: [.frontLeft: SemanticSpeakerCalibration(eqBands: over16)]),
+            off))
         XCTAssertEqual(reason(
             plan(subs: 1, bass: true, subCalibrations: [PhysicalSubwooferCalibration(gainDB: 40)]),
             bass), .subGainOutOfRange)
