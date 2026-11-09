@@ -26,7 +26,8 @@
 //  - latency: 0 frames.
 //  - sample rate: 8 kHz to 768 kHz. At a block start a changed parameter redesigns its coefficients (at most 8
 //    biquads, 16 notches, 25 oscillator steps: bounded libm, no allocation).
-//  - channels: a stereo pair (laneA, laneB), as the kernel. N-channel use is a later slice.
+//  - channels: a stereo pair (laneA, laneB), as the kernel, or one lane (laneA == laneB, ABI v29: the centre lane of an
+//    N-channel layout). A single lane runs both channel states on the same input, so its output equals the pair's left.
 //  - reset: a new snapshot starts parked and neutral; enabling a part from parked clears its state and starts its
 //    5 ms bypass mix at 0, as the kernel does. State is not carried across a rebuild (ledger).
 #include "stages_cleanup.hpp"
@@ -390,7 +391,7 @@ n60_status validateCleanupStage(const n60_stage_desc &s, double rate, uint32_t o
     if (!(rate >= 8000.0 && rate <= 768000.0) || s.kind != N60_STAGE_CLEANUP || s.capacityFrames != 0) {
         return N60_STATUS_BAD_ARGUMENT;
     }
-    if (s.laneMask != 0 || s.laneA >= outCh || s.laneB >= outCh || s.laneA == s.laneB) return N60_STATUS_BAD_ARGUMENT;
+    if (s.laneMask != 0 || s.laneA >= outCh || s.laneB >= outCh) return N60_STATUS_BAD_ARGUMENT;
     if (s.params == nullptr || s.paramCount != kParams) return N60_STATUS_BAD_ARGUMENT;
     const float *p = s.params;
     if (!isFlag(p[kDc]) || !isFlag(p[kInfraOn]) || !isFlag(p[kMainsOn]) || !isFlag(p[kDetOn])) return N60_STATUS_BAD_ARGUMENT;

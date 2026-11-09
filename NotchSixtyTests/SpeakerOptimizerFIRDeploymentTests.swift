@@ -295,8 +295,9 @@ final class SpeakerOptimizerFIRDeploymentTests: XCTestCase {
         }
     }
 
-    /// E6 S8b2b: a route with an optimizer FIR stays on the legacy core and says why.
-    func testUnifiedGraphFallbackReportsOptimizerFIR() throws {
+    /// E6 S12g4: an optimizer FIR runs on the graph: the corrected lane gets its taps, every other program lane a
+    /// delay-only delta FIR of the same latency, and the headroom lands in the lane gain.
+    func testUnifiedGraphRunsOptimizerFIRWithCoherenceCompensation() throws {
         let profile = makeStereoProfile()
         let deployment = makeDeployment(
             profile: profile, sources: [makeSource(role: .frontLeft, centerTap: 1.0)], requiredHeadroomDB: 1.0)
@@ -308,8 +309,34 @@ final class SpeakerOptimizerFIRDeploymentTests: XCTestCase {
         let result = UnifiedGraphTranslator.nChannelEligibility(
             routePlan: routePlan, sampleRate: 48_000, gainConfiguration: DSPGainConfiguration(),
             bassManagementConfiguration: BassManagementConfiguration(enabled: false))
-        guard case .failure(let reason) = result else { return XCTFail("optimizer FIR must be ineligible") }
-        XCTAssertEqual(reason, .optimizerFIR)
+        let configuration = try result.get()
+        let spec = try configuration.makeSpec()
+        let firs = spec.stages.filter { $0.kind == N60_STAGE_FIR.rawValue }
+        XCTAssertEqual(firs.count, 2)
+        let corrected = try XCTUnwrap(firs.first { $0.stageId == UnifiedGraphOptimizerFIR.stageBase })
+        XCTAssertEqual(corrected.laneA, 0)
+        XCTAssertEqual(corrected.params.count, deployment.tapCount)
+        XCTAssertEqual(corrected.capacityFrames, UInt32(deployment.declaredGroupDelayFrames))
+        let delta = try XCTUnwrap(firs.first { $0.stageId == UnifiedGraphOptimizerFIR.deltaStageId })
+        XCTAssertEqual(delta.laneMask, 0b10)
+        XCTAssertEqual(delta.params.count, deployment.declaredGroupDelayFrames + 1)
+        XCTAssertEqual(delta.params.last, 1)
+        XCTAssertEqual(delta.capacityFrames, corrected.capacityFrames)
+        XCTAssertEqual(configuration.lanes[0].preGain, Float(DSPGainConfiguration.linearGain(forDB: -1.0)), accuracy: 1e-6)
+
+        // Coherence: an impulse on both lanes leaves both at the same frame (partition + declared group delay).
+        for rate in [44_100.0, 48_000, 88_200, 96_000, 176_400, 192_000, 352_800, 384_000] {
+            let atRate = try UnifiedGraphTranslator.nChannelEligibility(
+                routePlan: routePlan, sampleRate: rate, gainConfiguration: DSPGainConfiguration(),
+                bassManagementConfiguration: BassManagementConfiguration(enabled: false)).get()
+            let host = try UnifiedGraphHost(spec: try atRate.makeSpec())
+            var impulse = [Float](repeating: 0, count: 1_024)
+            impulse[0] = 1
+            let out = try host.processOffline(input: [impulse, impulse], frames: 1_024)
+            func peakIndex(_ x: [Float]) -> Int { x.indices.max { abs(x[$0]) < abs(x[$1]) } ?? -1 }
+            XCTAssertEqual(peakIndex(out[0]), peakIndex(out[1]), "lanes stay coherent at \(rate)")
+            XCTAssertEqual(peakIndex(out[0]), 256 + deployment.declaredGroupDelayFrames, "latency at \(rate)")
+        }
     }
 
     func testLegacyOutputDeviceProfileDecodesWithFIRAbsent() throws {

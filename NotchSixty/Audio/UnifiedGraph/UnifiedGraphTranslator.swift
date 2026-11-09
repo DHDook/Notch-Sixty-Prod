@@ -383,8 +383,22 @@ enum UnifiedGraphTranslator {
         ancHostFeed: Bool = false,
         userOutputGain: Float = 1
     ) -> Result<UnifiedGraphConfiguration, UnifiedGraphFallbackReason> {
-        guard routePlan.speakerOptimizerFIR == nil else { return .failure(.optimizerFIR) }
         let roles = routePlan.programLayout.roles
+        // E6 S12g4: the optimizer FIR becomes one FIR stage per corrected lane plus a delay-only delta for the rest.
+        var optimizerGraphFIR: UnifiedGraphOptimizerFIR?
+        if let fir = routePlan.speakerOptimizerFIR {
+            var perLane: [Int: [Float]] = [:]
+            for source in fir.sources {
+                guard source.role != .lowFrequencyEffects, let lane = roles.firstIndex(of: source.role),
+                      source.taps.count == fir.tapCount else { return .failure(.optimizerFIR) }
+                perLane[lane] = source.taps
+            }
+            guard !perLane.isEmpty, fir.tapCount % 2 == 1, fir.declaredGroupDelayFrames == (fir.tapCount - 1) / 2,
+                  fir.tapCount <= UnifiedGraphFIRScheme.maxTaps(UnifiedGraphFIRScheme.current()),
+                  programDSP?.hasProgramLatency != true else { return .failure(.optimizerFIR) }
+            optimizerGraphFIR = UnifiedGraphOptimizerFIR(
+                declaredLatencyFrames: UInt32(fir.declaredGroupDelayFrames), taps: perLane)
+        }
         let bassEnabled = bassManagementConfiguration.enabled
         let subCount = Int(routePlan.subwooferCount)
         if bassEnabled {
@@ -435,6 +449,7 @@ enum UnifiedGraphTranslator {
             if role == .lowFrequencyEffects { lfeLane = index }
         }
         var configuration = UnifiedGraphConfiguration(sampleRate: sampleRate, lanes: lanes)
+        configuration.optimizerFIR = optimizerGraphFIR
         if bassEnabled {
             var subs: [UnifiedGraphSubwoofer] = []
             for index in 0..<subCount {
@@ -469,9 +484,9 @@ enum UnifiedGraphTranslator {
         ) {
             configuration.ancActuators = actuators
         }
-        if let programDSP, !programDSP.isNeutral {
+        if optimizerGraphFIR != nil || programDSP?.isNeutral == false {
             configuration.orderPolicy = .canonical
-            configuration.programDSP = programDSP
+            if let programDSP, !programDSP.isNeutral { configuration.programDSP = programDSP }
             // Dry run, so the reason is known here and not as a bare "spec rejected" at session start.
             do { _ = try configuration.makeSpec() } catch let reason as UnifiedGraphFallbackReason {
                 return .failure(reason)

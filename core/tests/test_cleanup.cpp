@@ -19,14 +19,15 @@ struct Params {
     Params() { std::memset(p, 0, sizeof p); p[2] = 20; p[3] = 1; p[5] = 50; p[6] = 3; p[7] = 20; p[9] = 50; for (int i = 10; i < 26; ++i) p[i] = -30; }
 };
 
-n60_graph *build(double rate, const Params &pp, n60_status *st = nullptr, uint32_t paramCount = 26) {
+n60_graph *build(double rate, const Params &pp, n60_status *st = nullptr, uint32_t paramCount = 26, uint32_t laneA = 0,
+                 uint32_t laneB = 1, uint32_t channels = 2) {
     n60_stage_desc s;
     std::memset(&s, 0, sizeof s);
     s.structSize = sizeof s;
     s.kind = N60_STAGE_CLEANUP;
     s.stageId = 7;
-    s.laneA = 0;
-    s.laneB = 1;
+    s.laneA = laneA;
+    s.laneB = laneB;
     s.params = pp.p;
     s.paramCount = paramCount;
     n60_graph_desc d;
@@ -35,7 +36,7 @@ n60_graph *build(double rate, const Params &pp, n60_status *st = nullptr, uint32
     d.abiVersion = N60_GRAPH_ABI_VERSION;
     d.sampleRate = rate;
     d.maxBlockFrames = 512;
-    d.inputChannels = d.outputChannels = 2;
+    d.inputChannels = d.outputChannels = channels;
     d.stages = &s;
     d.stageCount = 1;
     n60_graph *g = nullptr;
@@ -132,6 +133,38 @@ int main() {
             n60_graph_read_mains(g, 7, &mr);
             check(std::fabs(mr.frequencyHz - 50.0f) < 0.1f && mr.confidence > 0.1f, "detector finds 50 Hz", rate);
             n60_graph_retire(g);
+        }
+        // ABI v29: one lane (laneA == laneB), the centre lane of an N-channel layout. DC leaves that lane only, and the
+        // result equals the left output of the same stage on a pair.
+        {
+            Params pp; pp.p[0] = 1; pp.p[1] = 1; pp.p[2] = 20;
+            n60_status st = N60_STATUS_OK;
+            n60_graph *one = build(rate, pp, &st, 26, 2, 2, 3);
+            check(one != nullptr, "build single lane", rate);
+            n60_graph *pair = build(rate, pp);
+            check(pair != nullptr, "build pair", rate);
+            if (one && pair) {
+                const size_t m = (size_t)(rate * 0.5);
+                std::vector<float> sig = sine(rate, 1000.0, 0.3, 0.2, m);
+                std::vector<float> a(m, 0.1f), b(m, 0.0f), c = sig;
+                std::vector<float> oa(m), ob(m), oc(m);
+                std::vector<float> pl = sig, pr = sig;
+                for (size_t off = 0; off < m; off += 512) {
+                    const uint32_t cnt = (uint32_t)std::fmin(512.0, (double)(m - off));
+                    const float *ip[3] = {a.data() + off, b.data() + off, c.data() + off};
+                    float *op[3] = {oa.data() + off, ob.data() + off, oc.data() + off};
+                    n60_graph_process(one, ip, op, cnt);
+                }
+                run(pair, pl, pr);
+                bool same = true, untouched = true;
+                for (size_t i = 0; i < m; ++i) {
+                    if (oc[i] != pl[i]) same = false;
+                    if (oa[i] != 0.1f || ob[i] != 0.0f) untouched = false;
+                }
+                check(same, "single lane equals the pair's left", rate);
+                check(untouched, "other lanes untouched", rate);
+                check(rmsTail(oc, m / 2) > 0.1 && std::fabs([&] { double mean = 0; for (size_t i = m / 2; i < m; ++i) mean += oc[i]; return mean / (double)(m - m / 2); }()) < 0.01, "single lane removes DC", rate);
+            }
         }
         // Validation.
         {

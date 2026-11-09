@@ -166,6 +166,19 @@ struct UnifiedGraphAnalyserTaps: Equatable, Sendable {
     var dynDemand = false
 }
 
+/// E6 S12g4: the speaker optimizer's per-role linear-phase FIR on an N-channel graph. Corrected lanes run their own
+/// taps; every other program lane (the LFE included) gets a delay-only delta FIR, so all lanes reach bass management with
+/// the same latency (`firPartitionFrames + declaredLatencyFrames`), the legacy render core's coherence rule.
+struct UnifiedGraphOptimizerFIR: Equatable, Sendable {
+    static let stageBase: UInt32 = 5_000
+    static let deltaStageId: UInt32 = 5_100
+    static let partitionFrames: UInt32 = 256
+    /// Linear-phase group delay of every tap set, (taps - 1) / 2.
+    var declaredLatencyFrames: UInt32
+    /// Program lane index to its taps (all the same length).
+    var taps: [Int: [Float]]
+}
+
 /// What the engine wants rendered: program lanes (and optional sub lanes) in the shipping
 /// engine's terms. `UnifiedGraphConfiguration.makeSpec()` is the single place that decides the
 /// stage list, so the stereo hook, the multichannel path and the tests all agree.
@@ -200,6 +213,8 @@ struct UnifiedGraphConfiguration: Equatable, Sendable {
     var ancActuators: UnifiedGraphAncActuators?
     /// E27 S2c: analyser taps at the EQ output and after dynamics (two program lanes only). nil leaves the graph as before.
     var analyserTaps: UnifiedGraphAnalyserTaps?
+    /// E6 S12g4: speaker optimizer FIR (N-channel graphs). nil leaves the graph as before.
+    var optimizerFIR: UnifiedGraphOptimizerFIR?
 
     var subwooferCount: Int { bassManagement?.subwoofers.count ?? 0 }
     /// First appended ANC lane: the lanes the graph had before the actuators were added.
@@ -324,6 +339,30 @@ struct UnifiedGraphConfiguration: Equatable, Sendable {
         }
         if let program = stereo.programFIR {
             try addFIR(N60_STAGE_FIR, program, baseId: Self.programFIRStageId)
+        }
+        if let optimizer = optimizerFIR {
+            let lengths = Set(optimizer.taps.values.map(\.count))
+            guard stereo.programFIR == nil, programDSP?.hasProgramLatency != true, !optimizer.taps.isEmpty,
+                  lengths.count == 1, let length = lengths.first, length >= 1,
+                  length <= UnifiedGraphFIRScheme.maxTaps(firScheme),
+                  optimizer.declaredLatencyFrames == UInt32((length - 1) / 2),
+                  optimizer.declaredLatencyFrames <= N60_GRAPH_MAX_DELAY_FRAMES,
+                  optimizer.taps.keys.allSatisfy({ $0 >= 0 && $0 < programLanes }) else {
+                throw UnifiedGraphError.unsupportedConfiguration("optimizer FIR")
+            }
+            var corrected: UInt64 = 0
+            for (lane, taps) in optimizer.taps.sorted(by: { $0.key < $1.key }) {
+                corrected |= UInt64(1) << UInt64(lane)
+                add(N60_STAGE_FIR, UnifiedGraphOptimizerFIR.stageBase + UInt32(lane), lane: UInt32(lane),
+                    capacity: optimizer.declaredLatencyFrames, params: taps)
+            }
+            let rest = programMask & ~corrected
+            if rest != 0 {
+                var delta = [Float](repeating: 0, count: Int(optimizer.declaredLatencyFrames))
+                delta.append(1)
+                add(N60_STAGE_FIR, UnifiedGraphOptimizerFIR.deltaStageId, mask: rest,
+                    capacity: optimizer.declaredLatencyFrames, params: delta)
+            }
         }
         // With ambient on, the compressor takes its ordinary slot even after a room or speaker convolver, because the
         // core ranks CORE_DYNAMICS after AMBIENT (see the decision above).
