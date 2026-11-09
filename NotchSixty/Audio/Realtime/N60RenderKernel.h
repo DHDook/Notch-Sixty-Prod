@@ -566,14 +566,7 @@ uint32_t N60RenderKernelHowlGuardLastTrip(const N60RenderKernel * _Nonnull kerne
 /// Attach at the same rate keeps the filter (peakLimit is ignored; call Reset to clear state).
 /// Stereo only; the reference is already resampled to the output clock. If processing is inactive
 /// the filter still runs but its output is dropped (drive frames read zero).
-typedef struct {
-    bool attached;
-    N60FeedForwardLiveStatus filter;
-    uint64_t outputIndex;           /* output frames passed since attach/reset (the reference ring's read index) */
-    uint32_t referenceAheadFrames;  /* how far the pump has written beyond outputIndex */
-    uint64_t referenceUnderruns;    /* callbacks whose reference block was not fully supplied */
-    N60FeedForwardLiveEchoStatus echo; /* E4 S22b3 */
-} N60RenderKernelFeedForwardLiveStatus;
+/* E6 S12g3: N60RenderKernelFeedForwardLiveStatus lives in N60FeedForwardLive.h so the status type outlives the kernel. */
 
 bool N60RenderKernelAttachFeedForwardLive(N60RenderKernel * _Nonnull kernel, double sampleRate, double peakLimit);
 /// As Attach, with an explicit fade-in after Arm (0 = the 3 s default; production uses the default, the
