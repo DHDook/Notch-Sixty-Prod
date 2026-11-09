@@ -208,7 +208,7 @@ Gate G2 passed on 2026-10-25 (commit 07e82c6)
 
 ### E9 Multichannel protection and FIR parity
 
-- [ ] Per-output limiter, true-peak guard and soft clip, matching the stereo chain
+- [~] Per-output limiter, true-peak guard and soft clip, matching the stereo chain (E9 S5 built dark behind `e9.output-protection`, PR pending; wiring: E9 S5b for the Outputs UI and S5c for routed outputs)
 - [~] Move the program FIR onto the 262,144-tap non-uniform convolver (E9 S1 built dark; S3 sets firScheme 1 and lifts the Swift guards behind e9.long-fir, PR pending; flag stays dark until S2c and E22 bench)
 - [~] Long FIR rebuild: lockstep lazy carry with 256 KiB per-callback budget, changed-tap seeding, chunked or O(1) scheme 1 reset (E9 S2 built dark, PR pending; S3 wires Swift behind e9.long-fir; S2b follow-ups and E22 bench items open)
 - [ ] Per-output headroom assistant
@@ -443,6 +443,7 @@ Owner decision, 18 Oct 2026: there is no bench access for now, so every bench ch
 - [ ] E6 G47, G49, G53, G54: stereo five-lane graph CPU at 384 kHz, live stereo Quiet Zone arm/revoke/guard trip across a rebuild
 - [ ] E6 S12h part 3: delta audition listening on 5.1 and stereo at the eight rates, ring memory at 16 lanes
 - [ ] E27 owner release-build verification (owner decision 7 Nov 2026): Equalizer page running-window checks G3, G5, G9, G12, G16 and the DAC checks G14 (Listen ends on transport stop, glitch-free linear-phase A/B), per the checklist in `docs/epics/E27.md` Bench checks
+- [ ] E9 S5 (G18): sub output under a +6 dB bass-heavy track, limiter audible check and loopback peak (E9 S5 bench item)
 - [ ] Feed the results into the live-authorisation slices (E4 S10, E19), which still need real evidence
 
 ### E18 Launch readiness

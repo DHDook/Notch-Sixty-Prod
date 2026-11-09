@@ -21,7 +21,7 @@ extension FeatureFlag {
     static let all: [FeatureFlag] = [
         .legacyKernel, .ancEngineLease, .adaptiveTonalLive, .earnedCap, .feedForwardLive,
         .noiseSurvey, .conversationUnmasking, .virtualMicrophone, .zones, .headPositionCamera, .overnight,
-        .subAwareAnc, .longFIR
+        .subAwareAnc, .longFIR, .outputProtection
     ]
 
     /// E6 S11: the unified graph is the default renderer. Turning this on selects the frozen
@@ -140,6 +140,15 @@ extension FeatureFlag {
     static let longFIR = FeatureFlag(
         id: "e9.long-fir",
         title: "Long FIR (up to 262,144 taps) on the graph",
+        epic: "E9"
+    )
+
+    /// E9 S5: protection on every output. Sub lanes get their own limiter, true-peak guard and soft clip with the program
+    /// settings, an Advanced switch makes every program lane independent, and an always-on hard limit (-1 dBFS, zero
+    /// latency) closes every output. Swift decides; the core only sees the stages. Off: the graph is unchanged.
+    static let outputProtection = FeatureFlag(
+        id: "e9.output-protection",
+        title: "Protection on every output",
         epic: "E9"
     )
 }

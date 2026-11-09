@@ -102,6 +102,10 @@ struct UnifiedGraphProgramDSP: Equatable, Sendable {
     var subLaneCount = 0
     /// E6 S12h part 3 (G50): the delta audition (processed minus input, aligned per lane) over the program lanes.
     var deltaAudition = false
+    /// E9 S5: protection on every output. Sub lanes `count ..< count + protectedSubLanes` get their own stage with the
+    /// program settings; independent mode gives every program lane one. nil leaves the graph as before.
+    var outputProtection: UnifiedGraphOutputProtection?
+    var protectedSubLanes = 0
 
     init(
         stereo: UnifiedGraphConfiguration,
@@ -435,6 +439,23 @@ struct UnifiedGraphProgramDSP: Equatable, Sendable {
                 // second stage on the ears that runs ahead of it.
                 guard virtualSpeakers else { throw UnifiedGraphFallbackReason.specRejected }
                 add(N60_STAGE_PROTECTION, Self.userProtectionStageId, mask: 0b11, params: params)
+            } else if let policy = outputProtection {
+                let clamped = UnifiedGraphOutputProtection.clampedUserParameters(params)
+                if policy.independent {
+                    for lane in 0..<count {
+                        add(N60_STAGE_PROTECTION, UnifiedGraphOutputProtection.userLaneStageBase + UInt32(lane),
+                            mask: UInt64(1) << UInt64(lane), params: clamped)
+                    }
+                } else {
+                    add(N60_STAGE_PROTECTION, N60_LSTAGE_PROTECTION, mask: Self.mask(Array(0..<count)), params: clamped)
+                }
+                guard count + protectedSubLanes <= Int(spec.outputChannels) else {
+                    throw UnifiedGraphFallbackReason.laneCountMismatch
+                }
+                for lane in count..<(count + protectedSubLanes) {
+                    add(N60_STAGE_PROTECTION, UnifiedGraphOutputProtection.userLaneStageBase + UInt32(lane),
+                        mask: UInt64(1) << UInt64(lane), params: clamped)
+                }
             } else {
                 add(N60_STAGE_PROTECTION, N60_LSTAGE_PROTECTION, mask: Self.mask(Array(0..<count)), params: params)
             }

@@ -432,6 +432,94 @@ final class UnifiedGraphProgramDSPTests: XCTestCase {
 // MARK: E9 S3 long FIR (262,144 taps, firScheme 1, flag e9.long-fir)
 
 extension UnifiedGraphProgramDSPTests {
+    // MARK: E9 S5 protection on every output
+
+    private func protectedStereoWithSub(
+        rate: Double, user: UnifiedGraphProtection?, independent: Bool, policy: Bool = true
+    ) -> UnifiedGraphConfiguration {
+        var configuration = stereo(rate: rate)
+        configuration.bassManagement = UnifiedGraphBassManagement(
+            crossoverHz: 80, redirectDB: UnifiedGraphBassManagement.twoMainMeanRedirectDB, subwoofers: [UnifiedGraphSubwoofer()])
+        configuration.protection = user
+        configuration.outputProtection = policy ? UnifiedGraphOutputProtection(independent: independent) : nil
+        return configuration
+    }
+
+    /// Per-lane peak over the second half of a 40 Hz loud tone on both mains.
+    private func loudPeaks(_ configuration: UnifiedGraphConfiguration, amp: Float) throws -> [Float] {
+        let spec = try configuration.makeSpec()
+        let host = try UnifiedGraphHost(spec: spec)
+        let rate = configuration.sampleRate
+        let lanes = Int(spec.outputChannels)
+        var peaks = [Float](repeating: 0, count: lanes)
+        let total = Int(rate * 0.5) / block * block
+        var position = 0
+        while position < total {
+            let tone = (0..<block).map { amp * Float(sin(2.0 * .pi * 40.0 * Double(position + $0) / rate)) }
+            var input = [[Float]](repeating: [Float](repeating: 0, count: block), count: Int(spec.inputChannels))
+            input[0] = tone; input[1] = tone
+            let out = try host.processOffline(input: input, frames: block)
+            if position > total / 2 { for lane in 0..<lanes { peaks[lane] = max(peaks[lane], out[lane].map(abs).max() ?? 0) } }
+            position += block
+        }
+        return peaks
+    }
+
+    func testHardLimitHoldsEveryOutputAtMinusOneDBWithUserProtectionOffAtEveryRate() throws {
+        let ceiling = Float(pow(10.0, -1.0 / 20.0)) * 1.02
+        for rate in Self.rates {
+            for independent in [false, true] {
+                let configuration = protectedStereoWithSub(rate: rate, user: nil, independent: independent)
+                let spec = try configuration.makeSpec()
+                XCTAssertEqual(spec.outputChannels, 3)
+                let hard = spec.stages.filter { $0.stageId >= UnifiedGraphOutputProtection.hardLimitStageBase
+                    && $0.stageId < UnifiedGraphOutputProtection.hardLimitStageBase + 3 }
+                XCTAssertEqual(hard.count, 3, "one hard limit per output at \(rate)")
+                XCTAssertTrue(hard.allSatisfy { $0.params == UnifiedGraphOutputProtection.hardLimitParameters })
+                let peaks = try loudPeaks(configuration, amp: 4)
+                for lane in 0..<3 {
+                    XCTAssertLessThanOrEqual(peaks[lane], ceiling, "lane \(lane) held at \(rate) independent=\(independent)")
+                }
+                XCTAssertGreaterThan(peaks[2], 0.05, "the sub plays at \(rate)")
+            }
+        }
+    }
+
+    func testSubLaneUserProtectionHoldsTheUserCeilingAtEveryRate() throws {
+        let user = UnifiedGraphProtection(
+            limiterEnabled: true, ceilingDB: -12, attackMilliseconds: 1, releaseMilliseconds: 50,
+            lookAheadMilliseconds: 2, truePeakGuard: true, oversampling: 2)
+        let limit = Float(pow(10.0, -12.0 / 20.0)) * 1.1
+        for rate in Self.rates {
+            for independent in [false, true] {
+                let peaks = try loudPeaks(protectedStereoWithSub(rate: rate, user: user, independent: independent), amp: 4)
+                for lane in 0..<3 {
+                    XCTAssertLessThanOrEqual(peaks[lane], limit, "lane \(lane) at \(rate) independent=\(independent)")
+                }
+                XCTAssertGreaterThan(peaks[2], 0.05)
+            }
+        }
+    }
+
+    func testHardLimitAddsNoLatencyAndAFlagOffSpecIsUnchanged() throws {
+        for rate in Self.rates {
+            let off = try protectedStereoWithSub(rate: rate, user: nil, independent: false, policy: false).makeSpec()
+            let on = try protectedStereoWithSub(rate: rate, user: nil, independent: false).makeSpec()
+            XCTAssertEqual(off.stages.count + 3, on.stages.count)
+            XCTAssertEqual(try UnifiedGraphHost(spec: on).latencyFrames, try UnifiedGraphHost(spec: off).latencyFrames, "zero added latency at \(rate)")
+            let plain = try protectedStereoWithSub(rate: rate, user: nil, independent: false, policy: false).makeSpec()
+            XCTAssertEqual(off.stages, plain.stages)
+        }
+    }
+
+    @MainActor func testOutputProtectionFlagIsRegisteredAndOffByDefault() throws {
+        XCTAssertTrue(FeatureFlag.all.contains(.outputProtection))
+        XCTAssertFalse(FeatureFlag.outputProtection.defaultEnabled)
+        XCTAssertNil(UnifiedGraphOutputProtection.current())
+        XCTAssertEqual(UnifiedGraphOutputProtection.clampedUserParameters([1, 0, 1, 100, 0, 0, 1])[1], -1)
+        XCTAssertEqual(UnifiedGraphOutputProtection.clampedUserParameters([1, -6, 1, 100, 0, 0, 1])[1], -6)
+    }
+
     @MainActor private func longFlags(on: Bool) throws -> FeatureFlags {
         let suite = "E9LongFIR-\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))

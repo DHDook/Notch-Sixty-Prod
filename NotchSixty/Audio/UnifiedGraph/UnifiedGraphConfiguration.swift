@@ -209,6 +209,9 @@ struct UnifiedGraphConfiguration: Equatable, Sendable {
     var programDSP: UnifiedGraphProgramDSP?
     /// E9 S3: the core's FIR engine for this graph (`UnifiedGraphFIRScheme`); it sets every FIR tap limit below.
     var firScheme: UInt32 = UnifiedGraphFIRScheme.current()
+    /// E9 S5: protection on every output (`e9.output-protection`): sub lanes protected, the independent switch and the
+    /// always-on hard limit. nil (the flag off) leaves the graph exactly as before.
+    var outputProtection: UnifiedGraphOutputProtection? = UnifiedGraphOutputProtection.current()
     /// E8 S3: speaker routing (ROUTE, XOVER and per-output delay and protection). nil leaves the graph exactly as before.
     var routing: UnifiedGraphRouting?
     /// E26 S6a: ANC guard, inject and capture stages with the sub lane as an actuator. nil leaves the graph as before.
@@ -538,8 +541,26 @@ struct UnifiedGraphConfiguration: Equatable, Sendable {
         if let protection, routing == nil {
             var mask: UInt64 = 0
             for index in 0..<programLanes { mask |= UInt64(1) << UInt64(index) }
-            let params = Self.protectionParameters(protection)
-            add(N60_STAGE_PROTECTION, N60_LSTAGE_PROTECTION, mask: mask, params: params)
+            if let policy = outputProtection {
+                // E9 S5: sub lanes get their own stage with the program settings (so every lane has the same look-ahead
+                // and oversampling latency); independent mode gives every program lane one too.
+                let params = UnifiedGraphOutputProtection.clampedUserParameters(Self.protectionParameters(protection))
+                if policy.independent {
+                    for lane in 0..<programLanes {
+                        add(N60_STAGE_PROTECTION, UnifiedGraphOutputProtection.userLaneStageBase + UInt32(lane),
+                            mask: UInt64(1) << UInt64(lane), params: params)
+                    }
+                } else {
+                    add(N60_STAGE_PROTECTION, N60_LSTAGE_PROTECTION, mask: mask, params: params)
+                }
+                for lane in programLanes..<(programLanes + subwooferCount) {
+                    add(N60_STAGE_PROTECTION, UnifiedGraphOutputProtection.userLaneStageBase + UInt32(lane),
+                        mask: UInt64(1) << UInt64(lane), params: params)
+                }
+            } else {
+                let params = Self.protectionParameters(protection)
+                add(N60_STAGE_PROTECTION, N60_LSTAGE_PROTECTION, mask: mask, params: params)
+            }
         }
         if deltaAudition {
             stages.append(UnifiedGraphStageSpec(
@@ -555,8 +576,17 @@ struct UnifiedGraphConfiguration: Equatable, Sendable {
             denoiserPark: stereo.denoiser == nil ? denoiserPark : nil,
             firScheme: firScheme
         )
-        try programDSP?.apply(to: &spec)
+        if var dsp = programDSP, let policy = outputProtection {
+            dsp.outputProtection = policy
+            dsp.protectedSubLanes = routing == nil ? subwooferCount : 0
+            try dsp.apply(to: &spec)
+        } else {
+            try programDSP?.apply(to: &spec)
+        }
         try ancActuators?.apply(to: &spec, existingLanes: ancLaneBase)
+        if let policy = outputProtection, programDSP?.virtualSpeakers != true {
+            policy.addHardLimits(to: &spec, lanes: channelCount)
+        }
         if spec.stages.count > UnifiedGraphProgramDSP.maxStages { throw UnifiedGraphFallbackReason.stageBudget }
         return spec
     }
