@@ -183,7 +183,7 @@ Gate G2 passed on 2026-10-25 (commit 07e82c6)
   - [~] S12f stereo crossover and room/IR with subs, oversampling-only protection, the three ordering guards and named refusals built (`e6/port-stereo-subs-and-guards`, PR #414, ABI v27); stereo crossover with subs refused as `crossoverWithSubwoofer` (G32 open question; no wiring slice); state carry and the UI-range tests moved to S12f2 (G33–G35)
   - [~] S12f2 `e6/stage-state-carry` (PR pending): cleanup, image and de-ess state carry, double-precision cleanup, UI-range property test and oversampling latency asserts built; not ticked while G36 and G38 (S12h) and G37 (E23 first slice) are open
   - [x] S12g old N-channel and legacy binaural path reasons onto the graph; `binauralBudget` raised within measured cost, refused beyond (E6 decision 18); part 1 (#416) polarity and 48 dB crossover; S12g2 lane delay under bass management (ABI v28); S12g3 (G39) and S12g4 (#419, ABI v29): optimizer FIR with program FIR, N-channel cleanup, image, loudness, de-ess, multiband, no-legacy and eight-rate tests; per-rate binaural cost is an E22 bench item (G43)
-  - [~] S12h stereo Active Quiet Zone on the graph, authorisation unchanged (needs-owner, ANC; E6 decision 15): part 1 (#420) and part 2a (G20, G22, G26, G45 closed) built; part 2b (the AQZ port, G46) open
+  - [~] S12h stereo Active Quiet Zone on the graph, authorisation unchanged (needs-owner, ANC; E6 decision 15): part 1 (#420) and part 2a (G20, G22, G26, G45 closed) built; part 2b built (PR pending, G46 closed)
 
 ### E7 384 kHz everywhere
 

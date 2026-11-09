@@ -32,8 +32,8 @@ struct UnifiedGraphAncActuators: Equatable, Sendable {
     /// Guard growth and ceiling limits, from the E4 defaults.
     var outputCeiling: Float = 0.9
     /// E26 S7b2: the anti-noise source lanes are filled by an `N60AncLaneFeed` registered as the graph's EXTERNAL
-    /// stage (lanes: the two programme lanes, then the three source lanes). Needs exactly three actuators (left main,
-    /// right main, sub), and no other EXTERNAL stage in the spec. The guards then have no error input.
+    /// stage (lanes: the two programme lanes, then the three source lanes; `stereoDirect`: then the two). Needs exactly
+    /// three actuators (left main, right main, sub; two with `stereoDirect`), and no other EXTERNAL stage in the spec. The guards then have no error input.
     var hostFed = false
     /// E26 S7b2: the user's software volume, linear. With a host feed the bridge gain stays 1 and this gain sits in
     /// OUTPUT_GAIN stages on the programme and sub lanes, ahead of ANC_INJECT, so the anti-noise ignores app volume.
@@ -41,12 +41,21 @@ struct UnifiedGraphAncActuators: Equatable, Sendable {
     /// E26 S7b2: bumped to re-arm a tripped guard (ANC_GUARD param 11, ANC_INJECT param 3; both live).
     var rearmRevision: UInt32 = 0
 
+    /// E6 S12h part 2b: the stereo session's feed (direct stereo, `N60AncLaneFeedConfig.directStereo`): two actuators
+    /// (the left and right main), no sub lane and no splitter, so the EXTERNAL stage covers four lanes. Needs `hostFed`.
+    var stereoDirect = false
+    /// E6 S12h part 2b: the host callback's declared latency in frames, carried by the EXTERNAL stage (the AU rack's
+    /// latency when the rack shares the stage through the feed's inner processor). 0 otherwise.
+    var externalLatencyFrames: UInt32 = 0
+
     static let feedStageId: UInt32 = 730
     static let hostFedActuatorCount = 3
+    static let stereoDirectActuatorCount = 2
+    var feedActuatorCount: Int { stereoDirect ? Self.stereoDirectActuatorCount : Self.hostFedActuatorCount }
     /// The lanes the feed's EXTERNAL stage runs over, in the feed's channel order: programme left and right, then
     /// the left, right and sub anti-noise sources.
     func feedLaneMask(base: Int) -> UInt64 {
-        (UInt64(1) << 0) | (UInt64(1) << 1) | (0..<Self.hostFedActuatorCount).reduce(into: UInt64(0)) {
+        (UInt64(1) << 0) | (UInt64(1) << 1) | (0..<feedActuatorCount).reduce(into: UInt64(0)) {
             $0 |= UInt64(1) << UInt64(sourceLane($1, base: base))
         }
     }
@@ -63,7 +72,9 @@ struct UnifiedGraphAncActuators: Equatable, Sendable {
               captureFrames >= 1, captureFrames <= N60_GRAPH_MAX_DELAY_FRAMES,
               outputCeiling > 0, outputCeiling <= 1,
               userOutputGain >= 0, userOutputGain <= 10_000,
-              !hostFed || actuators.count == Self.hostFedActuatorCount,
+              !hostFed || actuators.count == feedActuatorCount,
+              hostFed || (!stereoDirect && externalLatencyFrames == 0),
+              externalLatencyFrames <= N60_GRAPH_MAX_DELAY_FRAMES,
               Set(actuators.map(\.targetLane)).count == actuators.count else {
             throw UnifiedGraphError.invalidConfiguration("ANC actuators")
         }
@@ -115,7 +126,7 @@ struct UnifiedGraphAncActuators: Equatable, Sendable {
             } ?? spec.stages.count
             spec.stages.insert(UnifiedGraphStageSpec(
                 kind: N60_STAGE_EXTERNAL.rawValue, stageId: Self.feedStageId, laneA: 0,
-                laneMask: feedLaneMask(base: base), capacityFrames: 0, params: [1]), at: feedAt)
+                laneMask: feedLaneMask(base: base), capacityFrames: externalLatencyFrames, params: [1]), at: feedAt)
         }
         let injectAt = spec.stages.firstIndex { tail.contains($0.kind) } ?? spec.stages.count
         spec.stages.insert(contentsOf: guards + injects, at: injectAt)

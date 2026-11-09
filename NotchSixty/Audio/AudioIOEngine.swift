@@ -1393,7 +1393,7 @@ final class AudioIOEngine: ObservableObject {
     /// E26 S7b2: the session that renders Quiet Zone anti-noise: the stereo session, or the profile session when its
     /// graph carries the ANC lane feed (class A). nil otherwise, so every passthrough below answers "no session".
     private var quietZoneHost: (any QuietZoneRuntimeHost)? {
-        if let transportSession { return transportSession }
+        if let transportSession { return transportSession.quietZoneRuntimeHost }
         if let profile = nChannelTransportSession, profile.hostsQuietZone { return profile }
         return nil
     }
@@ -1477,6 +1477,13 @@ final class AudioIOEngine: ObservableObject {
     /// Called by the arm owner on disarm: targets built under the old arm can no longer play.
     func revokeLiveTreatmentArm() {
         liveTreatmentGeneration &+= 1
+        // E6 S12h part 2b: the stereo session's hosted feed fades out at once; the next publish carries the revoke.
+        transportSession?.revokeHostedQuietZone()
+        // A republish (an EQ change, say) must not re-authorise the revoked target: the hosted feed is armed by the snapshot.
+        if transportSession?.hostedQuietZoneFeed != nil, activeQuietZoneRuntimeTarget.active {
+            activeQuietZoneRuntimeTarget = ActiveQuietZoneRuntimeTarget(tones: [], transitionMilliseconds: 100)
+            syncActiveQuietZoneLease(active: false)
+        }
         // E26 S7b2b: the profile session's ANC_INJECT authorisation ends with the arm (the feed fades out in 20 ms).
         if let profile = nChannelTransportSession, profile.hostsQuietZone, profile.quietZoneInjectAuthorised {
             try? profile.setQuietZoneInjectAuthorised(false)
@@ -5665,6 +5672,14 @@ final class AudioIOEngine: ObservableObject {
             programFoldPlan: foldPlan
         )
         session.unifiedGraphEnabled = unifiedGraphEnabled
+        // E6 S12h part 2b: a plain stereo speaker session renders the Quiet Zone on the unified graph (the ANC lane feed
+        // as its EXTERNAL stage). Decided here, before the first graph is built, and never changed for the session.
+        // Authorisation is unchanged: only a snapshot carrying `activeQuietZone.enabled` (an armed target) arms the feed.
+        session.hostsQuietZoneFeedRequested = unifiedGraphEnabled && FeatureFlags().isEnabled(.subAwareAnc)
+            && headphoneSnapshot == nil && foldSource == nil
+            && headphoneDeviceProfileConfiguration?.enabled != true
+            && outputDeviceProfileConfiguration?.enabled != true
+            && multiOutputRoutingConfiguration?.enabled != true
         session.setInitialStereoAlignment(stereoAlignment)
         session.setInitialAnalyserTaps(installed: analyserTapsInstalled)
         try session.configureHeadphoneDSP(

@@ -8,7 +8,7 @@
   builds one slice in a fresh context), realtime-reviewer (Sonnet), and code-scout,
   build-test-runner, plan-tracker, pr-writer (Haiku). `/next` itself runs on Sonnet.
 
-**Current focus:** E6 (unified graph) S12e delta audition and bypass lab case built (PR pending, ABI v30; G27, G28 closed), S12h part 2b (stereo AQZ) and part 3 (G50 to G52) next; E27 (Equalizer page polish), S4 `e27/ship` built (PR #407, flag removed; live-window checks are E22 items); E9 (multichannel protection and FIR parity), S2c merged (#392), S2d built (PR #410, needs-owner); G10 (E9 S5) next. E26 (sub-aware Quiet Zone), S7 software items and G37 tests done (G38 closed; G39 is an E22 bench check); E22 bench gaps and flag removal remain
+**Current focus:** E6 (unified graph) S12e delta audition merged (#423, ABI v30; G27, G28 closed), S12h part 2b (stereo AQZ, G46) merged (#422); S12h part 3 (G50 to G52) next, then the S12h and E6 ticks; E27 (Equalizer page polish), S4 `e27/ship` built (PR #407, flag removed; live-window checks are E22 items); E9 (multichannel protection and FIR parity), S2c merged (#392), S2d built (PR #410, needs-owner); G10 (E9 S5) next. E26 (sub-aware Quiet Zone), S7 software items and G37 tests done (G38 closed; G39 is an E22 bench check); E22 bench gaps and flag removal remain
 <!-- plan-tracker keeps the line above current -->
 
 @AGENTS.md
