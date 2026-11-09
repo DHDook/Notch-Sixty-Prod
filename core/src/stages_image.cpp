@@ -85,11 +85,26 @@ struct Bq {
 struct BqState {
     float z1, z2;
 };
+// G36: the widener's 80 Hz corner at 384 kHz needs more than float (poles within 1e-3 of the unit circle), so its
+// crossover biquads keep double coefficients and state; everything else in the stages stays float.
+struct BqD {
+    double b0, b1, b2, a1, a2;
+};
+struct BqStateD {
+    double z1, z2;
+};
 
 float smoothToward(float current, float target, float coef) { return target + coef * (current - target); }
 bool nearZero(float v) { return std::fabs(v) <= kParkEps; }
 bool nearOne(float v) { return std::fabs(v - 1.0f) <= kParkEps; }
 Bq identityBq() { return Bq{1.0f, 0.0f, 0.0f, 0.0f, 0.0f}; }
+
+double runBqD(const BqD &c, BqStateD &s, double in) {
+    const double out = c.b0 * in + s.z1;
+    s.z1 = c.b1 * in - c.a1 * out + s.z2;
+    s.z2 = c.b2 * in - c.a2 * out;
+    return out;
+}
 
 float runBq(const Bq &c, BqState &s, float in) {
     const float out = c.b0 * in + s.z1;
@@ -101,7 +116,7 @@ float runBq(const Bq &c, BqState &s, float in) {
 // RBJ low-pass, high-pass and high shelf, normalised in double and stored as float (the kernel's N60BiquadDesign).
 enum class Kind { LowPass, HighPass, HighShelf };
 
-bool designBq(Kind kind, double rate, double f, double gainDb, double q, Bq &out) {
+bool designBqD(Kind kind, double rate, double f, double gainDb, double q, BqD &out) {
     if (!std::isfinite(f) || f <= 0.0 || f >= rate * 0.5 || !std::isfinite(q) || q <= 0.0 || !std::isfinite(gainDb)) return false;
     const double omega = 2.0 * kPi * f / rate;
     const double cosO = std::cos(omega);
@@ -125,8 +140,17 @@ bool designBq(Kind kind, double rate, double f, double gainDb, double q, Bq &out
         a2 = (A + 1.0) - (A - 1.0) * cosO - beta;
     }
     if (!std::isfinite(a0) || std::fabs(a0) < 1.0e-20) return false;
-    const Bq c{static_cast<float>(b0 / a0), static_cast<float>(b1 / a0), static_cast<float>(b2 / a0),
-               static_cast<float>(a1 / a0), static_cast<float>(a2 / a0)};
+    const BqD c{b0 / a0, b1 / a0, b2 / a0, a1 / a0, a2 / a0};
+    if (!std::isfinite(c.b0) || !std::isfinite(c.b1) || !std::isfinite(c.b2) || !std::isfinite(c.a1) || !std::isfinite(c.a2)) return false;
+    out = c;
+    return true;
+}
+
+bool designBq(Kind kind, double rate, double f, double gainDb, double q, Bq &out) {
+    BqD d;
+    if (!designBqD(kind, rate, f, gainDb, q, d)) return false;
+    const Bq c{static_cast<float>(d.b0), static_cast<float>(d.b1), static_cast<float>(d.b2), static_cast<float>(d.a1),
+               static_cast<float>(d.a2)};
     if (!std::isfinite(c.b0) || !std::isfinite(c.b1) || !std::isfinite(c.b2) || !std::isfinite(c.a1) || !std::isfinite(c.a2)) return false;
     out = c;
     return true;
@@ -152,14 +176,14 @@ struct ImgShared {
     float lowW, midW, highW;
     uint32_t wideParked;
     float seenLowMid, seenMidHigh;
-    Bq lowPass[2], highPass[2];
-    BqState lowSt[2], highSt[2];
+    BqD lowPass[2], highPass[2];
+    BqStateD lowSt[2], highSt[2];
 };
 
 void designWidener(ImgShared &S, double rate, float lowMid, float midHigh) {
     for (int i = 0; i < 2; ++i) {
-        if (!designBq(Kind::LowPass, rate, double(lowMid), 0.0, kQ, S.lowPass[i])) S.lowPass[i] = identityBq();
-        if (!designBq(Kind::HighPass, rate, double(midHigh), 0.0, kQ, S.highPass[i])) S.highPass[i] = identityBq();
+        if (!designBqD(Kind::LowPass, rate, double(lowMid), 0.0, kQ, S.lowPass[i])) S.lowPass[i] = BqD{1.0, 0.0, 0.0, 0.0, 0.0};
+        if (!designBqD(Kind::HighPass, rate, double(midHigh), 0.0, kQ, S.highPass[i])) S.highPass[i] = BqD{1.0, 0.0, 0.0, 0.0, 0.0};
     }
     S.seenLowMid = lowMid;
     S.seenMidHigh = midHigh;
@@ -219,13 +243,13 @@ void runWidener(ImgShared &S, const float *p, double rate, float *L, float *R, u
         }
         const float mid = 0.5f * (dryL + dryR);
         const float side = 0.5f * (dryL - dryR);
-        float lowSide = side;
-        float highSide = side;
+        double lowSide = side;
+        double highSide = side;
         for (int k = 0; k < 2; ++k) {
-            lowSide = runBq(S.lowPass[k], S.lowSt[k], lowSide);
-            highSide = runBq(S.highPass[k], S.highSt[k], highSide);
+            lowSide = runBqD(S.lowPass[k], S.lowSt[k], lowSide);
+            highSide = runBqD(S.highPass[k], S.highSt[k], highSide);
         }
-        const float midSide = side - lowSide - highSide;
+        const double midSide = double(side) - lowSide - highSide;
         S.lowW = smoothToward(S.lowW, lowTarget, c);
         S.midW = smoothToward(S.midW, midTarget, c);
         S.highW = smoothToward(S.highW, highTarget, c);
@@ -236,7 +260,7 @@ void runWidener(ImgShared &S, const float *p, double rate, float *L, float *R, u
             S.wideParked = 1;
             return;
         }
-        const float processed = lowSide * S.lowW + midSide * S.midW + highSide * S.highW;
+        const float processed = static_cast<float>(lowSide * S.lowW + midSide * S.midW + highSide * S.highW);
         L[i] = mid + processed;
         R[i] = mid - processed;
     }
@@ -486,6 +510,7 @@ void imageInit(SnapHeader *h, const StageRec &r) {
 
 // Denormal guard, once per block: decayed filter state below 1e-30 (-600 dBFS) is flushed to zero.
 static inline void flush(float &v) { if (std::fabs(v) < 1.0e-30f) v = 0.0f; }
+static inline void flush(double &v) { if (std::fabs(v) < 1.0e-30) v = 0.0; }
 
 void runImage(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) {
     const float *p = paramsOf(h, r);
@@ -509,8 +534,9 @@ void runImage(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) 
     }
 }
 
-void imageCarry(SnapHeader *from, SnapHeader *to) {
-    if (from == nullptr || to == nullptr || from->sampleRate != to->sampleRate) return;
+uint64_t imageCarry(SnapHeader *from, SnapHeader *to) {
+    uint64_t bytes = 0;
+    if (from == nullptr || to == nullptr || from->sampleRate != to->sampleRate) return bytes;
     const StageRec *src = stages(from);
     StageRec *dst = stages(to);
     for (uint32_t i = 0; i < to->stageCount; ++i) {
@@ -520,6 +546,7 @@ void imageCarry(SnapHeader *from, SnapHeader *to) {
             if (dst[i].kind == N60_STAGE_IMAGE) {
                 const ImgShared &a = *reinterpret_cast<const ImgShared *>(sharedState(from, src[j]));
                 ImgShared &b = *reinterpret_cast<ImgShared *>(sharedState(to, dst[i]));
+                bytes += sizeof(ImgShared);
                 b.mLL = a.mLL; b.mLR = a.mLR; b.mRL = a.mRL; b.mRR = a.mRR;
                 b.modeParked = a.modeParked;
                 b.lowW = a.lowW; b.midW = a.midW; b.highW = a.highW;
@@ -529,6 +556,7 @@ void imageCarry(SnapHeader *from, SnapHeader *to) {
             } else {
                 const DeShared &a = *reinterpret_cast<const DeShared *>(sharedState(from, src[j]));
                 DeShared &b = *reinterpret_cast<DeShared *>(sharedState(to, dst[i]));
+                bytes += sizeof(DeShared);
                 b.shelfL = a.shelfL; b.shelfR = a.shelfR;
                 b.harshMix = a.harshMix;
                 b.harshParked = a.harshParked;
@@ -540,6 +568,7 @@ void imageCarry(SnapHeader *from, SnapHeader *to) {
             break;
         }
     }
+    return bytes;
 }
 
 n60_status validateImageParam(const SnapHeader *h, const StageRec &r, uint32_t idx, float value) {

@@ -22,6 +22,12 @@ void multibandSizes(const n60_stage_desc &s, double sampleRate, size_t &perLane,
 // Control thread, while the snapshot is being built (arena zeroed, StageRec filled).
 void multibandInit(SnapHeader *h, const StageRec &r);
 
+// Realtime thread, at adopt (E6 S12h, G21): a MULTIBAND stage of `to` starts from the running state of the stage with the
+// same id in `from`: the crossover and band high-pass filter state, the three band gain smoothers and the parked flag.
+// Coefficients stay the new snapshot's own. Bounded copy, no allocation. Returns the bytes copied, for the caller to
+// charge to the callback budget (G38).
+uint64_t multibandCarry(SnapHeader *from, SnapHeader *to);
+
 // Realtime thread. Runs the stage in place over `frames` frames of the pair.
 void runMultiband(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames);
 

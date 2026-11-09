@@ -137,6 +137,7 @@ struct n60_graph {
     std::atomic<uint64_t> budgetPeak{0};
     std::atomic<uint32_t> carryAbandoned{0};  // lazy carries given up for an upstream parameter post (S2b)
     bool carryActive = false;  // a lazy FIR carry from current to incoming still has bytes to copy
+    uint64_t smallCarryBytes = 0;  // bytes the small stage-state carries copy (G38), for the deferred swap's re-carry
     n60::FirCarryCursor carry;
 
     // ABI v13: the EXTERNAL stage's host callback and its rebuild-fade scratch.
@@ -217,6 +218,17 @@ void settleDenoiser(n60_graph *g, n60::SnapHeader *old, n60::SnapHeader *next) {
     }
 }
 
+// Realtime thread: the running state of the small stages (rider, cleanup, image, de-ess, loudness, multiband) of `to`
+// starts from `from`'s, which must be at the same tick. Bounded copies, no allocation; returns the bytes copied.
+uint64_t carrySmallState(n60::SnapHeader *from, n60::SnapHeader *to) {
+    uint64_t bytes = n60::systemRiderCarry(from, to);  // ABI v12
+    bytes += n60::cleanupCarry(from, to);              // E6 S12f2: cleanup, image and de-ess state
+    bytes += n60::imageCarry(from, to);
+    bytes += n60::loudnessCarry(from, to);             // E6 S12h: loudness and multiband running state (G16, G21)
+    bytes += n60::multibandCarry(from, to);
+    return bytes;
+}
+
 // Realtime thread: take a published snapshot. A fade-less snapshot replaces the live one at once;
 // otherwise it starts a rebuild. While a rebuild runs the next published snapshot waits in pending.
 void adopt(n60_graph *g) {
@@ -227,11 +239,13 @@ void adopt(n60_graph *g) {
     carryDenoiserIn(g, g->current, next);
     // ABI v10: a FIR stage that is unchanged keeps its running state; one that is new or changed needs its whole
     // tap length of silent history before it is heard.
+    // G38: the small state carries (rider, cleanup, image and de-ess) are charged to this callback's bulk-copy budget
+    // before the FIR carry decides how much it can copy now, so the whole adopt() stays within the allowance.
+    const uint64_t smallCarryBytes = carrySmallState(g->current, next);
+    g->smallCarryBytes = smallCarryBytes;
+    g->rtBudget -= std::min(g->rtBudget, smallCarryBytes);
     bool carryPending = false;
     const uint32_t firWarm = n60::dspFirCarry(g->current, next, next->fadeFrames != 0, &carryPending, &g->rtBudget);
-    n60::systemRiderCarry(g->current, next);  // ABI v12
-    n60::cleanupCarry(g->current, next);      // E6 S12f2: cleanup, image and de-ess state
-    n60::imageCarry(g->current, next);
     // A fade-less snapshot replaces the live one at once, unless a FIR lane is too large to copy within this
     // callback's budget (E9 S2b): then it runs next to the live one in lockstep, is swapped in without a fade
     // when the copy and settle are done, and is never refused for CPU.
@@ -405,7 +419,12 @@ void rebuildBlock(n60_graph *g, float *const *out, uint32_t frames) {
     // Equal-power crossfade: old * cos + new * sin, advanced by rotation so no trig per sample.
     const uint32_t fade = g->incoming->fadeFrames;
     if (fade == 0) {  // deferred fade-less snapshot: the incoming instance is heard from now on
-        for (uint32_t c = 0; c < outCount; ++c) std::memcpy(out[c], g->scratchLane[c], bytes);
+        // G38: stages downstream of the lazily carried FIR ran on the incoming side's not-yet-warm FIR output, so their
+        // running state drifted from the live one's. Both instances have just rendered the same block (same tick):
+        // carry the small stage state again, then hear the live instance for this block and the incoming from the next.
+        // It waits for a callback whose allowance covers the copy (a block too small for it swaps regardless).
+        if (g->rtBudget < g->smallCarryBytes && g->rtBudgetStart >= g->smallCarryBytes) return;
+        g->rtBudget -= std::min(g->rtBudget, carrySmallState(g->current, g->incoming));
         finishRebuild(g, 1);
         return;
     }

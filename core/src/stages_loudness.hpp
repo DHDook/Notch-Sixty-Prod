@@ -22,6 +22,12 @@ void loudnessSizes(const n60_stage_desc &s, double sampleRate, size_t &perLane, 
 // Control thread, while the snapshot is being built (arena zeroed, StageRec filled).
 void loudnessInit(SnapHeader *h, const StageRec &r);
 
+// Realtime thread, at adopt (E6 S12h, G16): a LOUDNESS stage of `to` starts from the running state of the stage with the
+// same id in `from`: K-weighting and contour and leveler filter state, the loudness mean square, the match gain, the contour
+// mix and gains, the leveler envelopes and boost, and the parked flags. Coefficients and parameters stay the new snapshot's
+// own. Bounded copy, no allocation. Returns the bytes copied, for the caller to charge to the callback budget (G38).
+uint64_t loudnessCarry(SnapHeader *from, SnapHeader *to);
+
 // Realtime thread. Runs the stage in place over `frames` frames of the pair.
 void runLoudness(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames);
 

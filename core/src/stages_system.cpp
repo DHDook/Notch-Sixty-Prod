@@ -2018,8 +2018,9 @@ void runSystem(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames)
 
 // ---- rebuild support ---------------------------------------------------------------------------
 
-void systemRiderCarry(SnapHeader *from, SnapHeader *to) {
-    if (from == nullptr || to == nullptr) return;
+uint64_t systemRiderCarry(SnapHeader *from, SnapHeader *to) {
+    uint64_t bytes = 0;
+    if (from == nullptr || to == nullptr) return bytes;
     const StageRec *src = stages(from);
     StageRec *dst = stages(to);
     for (uint32_t i = 0; i < to->stageCount; ++i) {
@@ -2030,9 +2031,11 @@ void systemRiderCarry(SnapHeader *from, SnapHeader *to) {
             ProtShared &b = *reinterpret_cast<ProtShared *>(sharedState(to, dst[i]));
             b.riderSustained = a.riderSustained;
             b.riderAtten = a.riderAtten;
+            bytes += 2 * sizeof(float);
             break;
         }
     }
+    return bytes;
 }
 
 uint32_t systemRebuildMute(SnapHeader *h, bool silentNow) {

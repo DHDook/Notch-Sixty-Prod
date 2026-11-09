@@ -177,6 +177,18 @@ add_executable(n60core_state_carry_test tests/test_state_carry.cpp)
 target_link_libraries(n60core_state_carry_test PRIVATE n60core)
 add_test(NAME n60core_state_carry COMMAND n60core_state_carry_test)
 
+# E6 S12h: loudness and multiband carry, carry bytes charged to the budget, deferred-swap path.
+add_executable(n60core_stage_carry2_test tests/test_stage_carry2.cpp)
+target_include_directories(n60core_stage_carry2_test PRIVATE src)
+target_link_libraries(n60core_stage_carry2_test PRIVATE n60core)
+add_test(NAME n60core_stage_carry2 COMMAND n60core_stage_carry2_test)
+
+# E6 S12h (G36): float image and de-ess stages against a double reference at 80 Hz and a 1000 ms release.
+add_executable(n60core_image_precision_test tests/test_image_precision.cpp)
+target_include_directories(n60core_image_precision_test PRIVATE src)
+target_link_libraries(n60core_image_precision_test PRIVATE n60core)
+add_test(NAME n60core_image_precision COMMAND n60core_image_precision_test)
+
 # E6 S12c: loudness (match, contour, dialogue leveler) stage (ABI v24).
 add_executable(n60core_loudness_test tests/test_loudness.cpp)
 target_link_libraries(n60core_loudness_test PRIVATE n60core)
