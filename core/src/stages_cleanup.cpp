@@ -435,8 +435,9 @@ void cleanupInit(SnapHeader *h, const StageRec &r) {
     S.detConfBits.store(0, std::memory_order_relaxed);
 }
 
-void cleanupCarry(SnapHeader *from, SnapHeader *to) {
-    if (from == nullptr || to == nullptr) return;
+uint64_t cleanupCarry(SnapHeader *from, SnapHeader *to) {
+    uint64_t bytes = 0;
+    if (from == nullptr || to == nullptr) return bytes;
     const StageRec *src = stages(from);
     StageRec *dst = stages(to);
     for (uint32_t i = 0; i < to->stageCount; ++i) {
@@ -446,6 +447,7 @@ void cleanupCarry(SnapHeader *from, SnapHeader *to) {
             if (from->sampleRate != to->sampleRate) break;
             const CleanShared &a = *reinterpret_cast<const CleanShared *>(sharedState(from, src[j]));
             CleanShared &b = *reinterpret_cast<CleanShared *>(sharedState(to, dst[i]));
+            bytes += sizeof(CleanShared);  // G38: the caller charges the copy to the callback budget
             b.dcMix = a.dcMix;
             b.dcPrevInL = a.dcPrevInL; b.dcPrevInR = a.dcPrevInR;
             b.dcPrevOutL = a.dcPrevOutL; b.dcPrevOutR = a.dcPrevOutR;
@@ -486,6 +488,7 @@ void cleanupCarry(SnapHeader *from, SnapHeader *to) {
             break;
         }
     }
+    return bytes;
 }
 
 void runCleanup(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) {

@@ -25,7 +25,8 @@ void imageInit(SnapHeader *h, const StageRec &r);
 // Realtime thread, at adopt (E6 S12f2, G11): an IMAGE or DEESS stage of `to` starts from the running state of the stage
 // with the same id and kind in `from`: filter state, the smoothed matrix, widths and mixes, the de-esser gain and the
 // parked flags. Coefficients stay the new snapshot's own. Bounded copies, no allocation.
-void imageCarry(SnapHeader *from, SnapHeader *to);
+// Returns the bytes of running state it copied, for the caller to charge to the callback budget (G38).
+uint64_t imageCarry(SnapHeader *from, SnapHeader *to);
 
 // Realtime thread. Runs the stage in place over `frames` frames of the pair.
 void runImage(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames);

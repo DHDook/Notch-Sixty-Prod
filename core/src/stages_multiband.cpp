@@ -255,6 +255,35 @@ void multibandInit(SnapHeader *h, const StageRec &r) {
     }
 }
 
+uint64_t multibandCarry(SnapHeader *from, SnapHeader *to) {
+    uint64_t bytes = 0;
+    if (from == nullptr || to == nullptr || from->sampleRate != to->sampleRate) return bytes;
+    const StageRec *src = stages(from);
+    StageRec *dst = stages(to);
+    for (uint32_t i = 0; i < to->stageCount; ++i) {
+        if (dst[i].kind != N60_STAGE_MULTIBAND) continue;
+        for (uint32_t j = 0; j < from->stageCount; ++j) {
+            if (src[j].kind != N60_STAGE_MULTIBAND || src[j].id != dst[i].id) continue;
+            const MbShared &a = *reinterpret_cast<const MbShared *>(sharedState(from, src[j]));
+            MbShared &b = *reinterpret_cast<MbShared *>(sharedState(to, dst[i]));
+            bytes += sizeof(MbShared);
+            std::memcpy(b.lowL, a.lowL, sizeof b.lowL);
+            std::memcpy(b.lowR, a.lowR, sizeof b.lowR);
+            std::memcpy(b.highL, a.highL, sizeof b.highL);
+            std::memcpy(b.highR, a.highR, sizeof b.highR);
+            std::memcpy(b.hpL, a.hpL, sizeof b.hpL);
+            std::memcpy(b.hpR, a.hpR, sizeof b.hpR);
+            std::memcpy(b.gainDb, a.gainDb, sizeof b.gainDb);
+            b.parked = a.parked;
+            for (uint32_t k = 0; k < kBands; ++k) {
+                b.grNowBits[k].store(a.grNowBits[k].load(std::memory_order_relaxed), std::memory_order_relaxed);
+            }
+            break;
+        }
+    }
+    return bytes;
+}
+
 // Denormal guard, once per block: decayed filter state below 1e-30 (-600 dBFS) is flushed to zero.
 static_assert(std::atomic<uint32_t>::is_always_lock_free, "telemetry atomics must be lock free");
 static inline void flush(float &v) { if (std::fabs(v) < 1.0e-30f) v = 0.0f; }

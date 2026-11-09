@@ -588,6 +588,39 @@ n60_status validateLoudnessParam(const SnapHeader *h, const StageRec &r, uint32_
     return loudnessParamOk(paramsOf(h, r), idx, value, h->sampleRate) ? N60_STATUS_OK : N60_STATUS_BAD_ARGUMENT;
 }
 
+uint64_t loudnessCarry(SnapHeader *from, SnapHeader *to) {
+    uint64_t bytes = 0;
+    if (from == nullptr || to == nullptr || from->sampleRate != to->sampleRate) return bytes;
+    const StageRec *src = stages(from);
+    StageRec *dst = stages(to);
+    for (uint32_t i = 0; i < to->stageCount; ++i) {
+        if (dst[i].kind != N60_STAGE_LOUDNESS) continue;
+        for (uint32_t j = 0; j < from->stageCount; ++j) {
+            if (src[j].kind != N60_STAGE_LOUDNESS || src[j].id != dst[i].id) continue;
+            const LdShared &a = *reinterpret_cast<const LdShared *>(sharedState(from, src[j]));
+            LdShared &b = *reinterpret_cast<LdShared *>(sharedState(to, dst[i]));
+            bytes += sizeof(LdShared);
+            // match
+            b.kHpL = a.kHpL; b.kHpR = a.kHpR; b.kShL = a.kShL; b.kShR = a.kShR;
+            b.meanSquare = a.meanSquare; b.primed = a.primed;
+            b.matchGainDb = a.matchGainDb; b.matchParked = a.matchParked;
+            // contour
+            b.lowShL = a.lowShL; b.lowShR = a.lowShR; b.highShL = a.highShL; b.highShR = a.highShR;
+            b.lowBandL = a.lowBandL; b.lowBandR = a.lowBandR; b.highBandL = a.highBandL; b.highBandR = a.highBandR;
+            b.mix = a.mix; b.lowGainDb = a.lowGainDb; b.highGainDb = a.highGainDb; b.phons = a.phons;
+            b.contourParked = a.contourParked;
+            // leveler
+            b.hpL = a.hpL; b.hpR = a.hpR; b.lpL = a.lpL; b.lpR = a.lpR;
+            b.progMs = a.progMs; b.bandMs = a.bandMs; b.voiceEnv = a.voiceEnv; b.modPrev = a.modPrev;
+            b.modHpOut = a.modHpOut; b.modLpOut = a.modLpOut; b.modMs = a.modMs; b.boostDb = a.boostDb;
+            b.progDbfs = a.progDbfs; b.bandDbfs = a.bandDbfs; b.gapDb = a.gapDb; b.confidence = a.confidence;
+            b.levParked = a.levParked;
+            break;
+        }
+    }
+    return bytes;
+}
+
 bool readLoudness(const SnapHeader *h, uint32_t stageId, n60_loudness_readback *out) {
     const StageRec *r = findStage(const_cast<SnapHeader *>(h), stageId);
     if (r == nullptr || r->kind != N60_STAGE_LOUDNESS) return false;

@@ -550,6 +550,36 @@ if selected e6_state_carry; then
     fi
 fi
 
+# E6 S12h: loudness and multiband carry, carry bytes charged to the budget, deferred-swap re-carry (G16, G21, G38).
+if selected e6_stage_carry2; then
+    build_core_objs
+    if [ "$CORE_OK" = 1 ]; then
+        if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -Icore/include -Icore/src core/tests/test_stage_carry2.cpp \
+            "${CORE_OBJS[@]}" -o "$OUT/e6_core_stage_carry2" && "$OUT/e6_core_stage_carry2"; then
+            passed+=(e6_core_stage_carry2)
+        else
+            failed+=(e6_core_stage_carry2)
+        fi
+    else
+        failed+=(e6_stage_carry2)
+    fi
+fi
+
+# E6 S12h (G36): float image and de-ess stages against a double reference (widener corner, 1000 ms release).
+if selected e6_image_precision; then
+    build_core_objs
+    if [ "$CORE_OK" = 1 ]; then
+        if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -Icore/include -Icore/src core/tests/test_image_precision.cpp \
+            "${CORE_OBJS[@]}" -o "$OUT/e6_core_image_precision" && "$OUT/e6_core_image_precision"; then
+            passed+=(e6_core_image_precision)
+        else
+            failed+=(e6_core_image_precision)
+        fi
+    else
+        failed+=(e6_image_precision)
+    fi
+fi
+
 # E6 S12a: the cleanup stage (DC, infrasonic, mains notch, hum detector): behaviour at the eight standard rates.
 if selected e6_cleanup; then
     build_core_objs
