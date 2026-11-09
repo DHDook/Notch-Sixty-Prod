@@ -1240,16 +1240,21 @@ private struct StereoSignatureVUMeterPanel: View {
             resetMeters()
         }
 
+        // E28 S1: the shared hub is the only reader of the read-and-reset meters, so this
+        // loop and the Meters page see the same maxima. Idle while the window is hidden.
+        let hub = ProductionMeterHub.shared(for: engine)
+        let token = hub.subscribe(hertz: 20)
+        defer { hub.unsubscribe(token) }
         while !Task.isCancelled && engine.lifecycleState == .running && vuMetersEnabled {
-            if let diagnostics = engine.diagnosticsSnapshot().renderKernelDiagnostics {
-                let meter = diagnostics.outputMeter
+            let readings = hub.take(token)
+            if let left = readings["output.L"], let right = readings["output.R"] {
                 leftVU = ProductionVUScale.smoothed(
                     current: leftVU,
-                    target: ProductionVUScale.vu(fromLinearRMS: meter.rmsLeft)
+                    target: ProductionVUScale.vu(fromLinearRMS: left.rmsLinear)
                 )
                 rightVU = ProductionVUScale.smoothed(
                     current: rightVU,
-                    target: ProductionVUScale.vu(fromLinearRMS: meter.rmsRight)
+                    target: ProductionVUScale.vu(fromLinearRMS: right.rmsLinear)
                 )
             }
             try? await Task.sleep(nanoseconds: 50_000_000)
