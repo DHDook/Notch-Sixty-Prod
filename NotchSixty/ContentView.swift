@@ -227,12 +227,13 @@ struct ContentView: View {
                 Spacer()
                 Toggle("Global Bypass", isOn: globalBypassBinding).toggleStyle(.switch)
                 Picker("Audition", selection: auditionModeBinding) {
-                    ForEach(AuditionMode.allCases) { mode in
+                    ForEach(AuditionMode.allCases.filter { $0 != .delta || engine.deltaAuditionAvailable || engine.playbackControlConfiguration.auditionMode == .delta }) { mode in
                         Text(mode.displayName).tag(mode)
                     }
                 }
                 .pickerStyle(.segmented)
                 .frame(width: 300)
+                .help(engine.deltaAuditionAvailable ? "" : "Delta is not available with speaker routing or Virtual Speakers.")
             }
             HStack(spacing: 12) {
                 Text("Master").frame(width: 90, alignment: .leading)
