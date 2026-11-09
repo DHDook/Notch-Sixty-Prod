@@ -294,14 +294,17 @@ struct UnifiedGraphProgramDSP: Equatable, Sendable {
         // room and speaker convolvers, so the frozen kernel order (after the convolvers) is recorded exception P6.
         if let params = st.cleanup {
             guard params.count == 26 else { throw UnifiedGraphFallbackReason.specRejected }
-            guard !shape.pairs.isEmpty || shape.centerLane != nil else { throw UnifiedGraphFallbackReason.noFrontPair }
+            // Every program lane the pairs do not cover (centre, LFE, back centre, odd lanes) gets a single-lane instance
+            // (ABI v29, laneB == laneA): the filters are per-channel, so each lane is filtered like a pair member.
+            let pairLanes = Set(shape.pairs.flatMap { [$0.a, $0.b] })
+            let singles = (0..<count).filter { !pairLanes.contains($0) }
+            guard !shape.pairs.isEmpty || !singles.isEmpty else { throw UnifiedGraphFallbackReason.noFrontPair }
             for (index, pair) in shape.pairs.enumerated() {
                 add(N60_STAGE_CLEANUP, Self.cleanupStageBase + UInt32(index), lane: UInt32(pair.a), laneB: UInt32(pair.b),
                     params: params)
             }
-            // ABI v29: the unpaired centre lane gets a single-lane instance (laneB == laneA).
-            if let centre = shape.centerLane {
-                add(N60_STAGE_CLEANUP, Self.cleanupStageBase + 100, lane: UInt32(centre), laneB: UInt32(centre),
+            for lane in singles {
+                add(N60_STAGE_CLEANUP, Self.cleanupStageBase + 100 + UInt32(lane), lane: UInt32(lane), laneB: UInt32(lane),
                     params: params)
             }
         }

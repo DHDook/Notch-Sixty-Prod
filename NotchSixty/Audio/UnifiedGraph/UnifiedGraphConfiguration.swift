@@ -342,7 +342,9 @@ struct UnifiedGraphConfiguration: Equatable, Sendable {
         }
         if let optimizer = optimizerFIR {
             let lengths = Set(optimizer.taps.values.map(\.count))
-            guard stereo.programFIR == nil, programDSP?.hasProgramLatency != true, !optimizer.taps.isEmpty,
+            // A program FIR or denoiser composes with the optimizer FIR: both are linear per lane and each stage set
+            // carries its own delta alignment, so every lane's latency is the sum.
+            guard !optimizer.taps.isEmpty,
                   lengths.count == 1, let length = lengths.first, length >= 1,
                   length <= UnifiedGraphFIRScheme.maxTaps(firScheme),
                   optimizer.declaredLatencyFrames == UInt32((length - 1) / 2),

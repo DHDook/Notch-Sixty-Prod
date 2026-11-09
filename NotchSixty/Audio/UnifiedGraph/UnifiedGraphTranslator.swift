@@ -394,8 +394,9 @@ enum UnifiedGraphTranslator {
                 perLane[lane] = source.taps
             }
             guard !perLane.isEmpty, fir.tapCount % 2 == 1, fir.declaredGroupDelayFrames == (fir.tapCount - 1) / 2,
-                  fir.tapCount <= UnifiedGraphFIRScheme.maxTaps(UnifiedGraphFIRScheme.current()),
-                  programDSP?.hasProgramLatency != true else { return .failure(.optimizerFIR) }
+                  fir.tapCount <= UnifiedGraphFIRScheme.maxTaps(UnifiedGraphFIRScheme.current()) else {
+                return .failure(.optimizerFIR)
+            }
             optimizerGraphFIR = UnifiedGraphOptimizerFIR(
                 declaredLatencyFrames: UInt32(fir.declaredGroupDelayFrames), taps: perLane)
         }

@@ -176,4 +176,31 @@ final class UnifiedGraphBinauralTests: XCTestCase {
         XCTAssertEqual(try host.setBinauralPose(yaw: -170, pitch: 0, roll: 0), .unchanged)
         host.release()
     }
+    /// E6 S12g4 (G42): the largest legacy-supported set, 16 channels x 8192 taps x 24 head orientations, fits the graph
+    /// budget; one tap more is refused with the named reason.
+    func testLargestLegacyHRTFSetFitsTheBudgetAndOneTapMoreIsRefused() throws {
+        let rate = 48_000.0
+        var asset = BinauralProfileAsset.validationStereo(sampleRate: rate)
+        let taps = Int(N60_GRAPH_BINAURAL_MAX_TAPS)
+        asset.measurements = asset.measurements.map {
+            var m = $0
+            m.leftIR += [Float](repeating: 0, count: taps - m.leftIR.count)
+            m.rightIR += [Float](repeating: 0, count: taps - m.rightIR.count)
+            return m
+        }
+        asset.tapCount = taps
+        let layout = OutputProgramLayout.nineOneSix
+        XCTAssertEqual(layout.roles.count, 16)
+        XCTAssertNoThrow(try spec(rate: rate, layout: layout, headTracking: true, asset: asset).get())
+        asset.tapCount = taps + 1
+        guard case .failure(let reason) = spec(rate: rate, layout: layout, headTracking: true, asset: asset) else {
+            return XCTFail("one tap over the cap must be refused")
+        }
+        XCTAssertEqual(reason, .binauralBudget)
+        // A mismatched asset rate is refused by name (the engine resamples through its asset cache first).
+        guard case .failure(let mismatch) = spec(rate: rate, asset: BinauralProfileAsset.validationStereo(sampleRate: 44_100)) else {
+            return XCTFail("a rate mismatch must be refused")
+        }
+        XCTAssertEqual(mismatch, .sampleRateMismatch)
+    }
 }
