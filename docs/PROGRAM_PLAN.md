@@ -182,7 +182,7 @@ Gate G2 passed on 2026-10-25 (commit 07e82c6)
   - [~] S12e stereo global bypass and reference audition on the graph (D5, parity exception P1) and wide PEQ (over 16 sections, types 8–10) built (`e6/port-bypass-audition-eq`, #413, ABI v26); delta audition and the bypass lab case remain (G27, G28); bench: E22 (G29)
   - [~] S12f stereo crossover and room/IR with subs, oversampling-only protection, the three ordering guards and named refusals built (`e6/port-stereo-subs-and-guards`, PR #414, ABI v27); stereo crossover with subs refused as `crossoverWithSubwoofer` (G32 open question; no wiring slice); state carry and the UI-range tests moved to S12f2 (G33–G35)
   - [~] S12f2 `e6/stage-state-carry` (PR pending): cleanup, image and de-ess state carry, double-precision cleanup, UI-range property test and oversampling latency asserts built; not ticked while G36 and G38 (S12h) and G37 (E23 first slice) are open
-  - [ ] S12g old N-channel and legacy binaural path reasons onto the graph; `binauralBudget` raised within measured cost, refused beyond (E6 decision 18)
+  - [~] S12g old N-channel and legacy binaural path reasons onto the graph; `binauralBudget` raised within measured cost, refused beyond (E6 decision 18); part 1 (#416) polarity and 48 dB crossover; S12g2 lane delay under bass management (ABI v28); remainder S12g3 (G39)
   - [ ] S12h stereo Active Quiet Zone on the graph, authorisation unchanged (needs-owner, ANC; E6 decision 15)
 
 ### E7 384 kHz everywhere

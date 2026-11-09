@@ -187,6 +187,18 @@ final class LiveNChannelUnifiedGraphTests: XCTestCase {
         }
     }
 
+    /// E6 S12g2: the legacy order delays a lane before the crossover, so the bass sum (and the subs) carry the delay.
+    func testLaneDelayUnderBassManagementMatchesLegacyAtEveryRate() throws {
+        let speakers: [OutputProgramRole: SemanticSpeakerCalibration] = [
+            .frontLeft: SemanticSpeakerCalibration(delayMilliseconds: 3),
+            .frontRight: SemanticSpeakerCalibration(trimDB: -1.5, delayMilliseconds: 1.25),
+            .sideLeft: SemanticSpeakerCalibration(delayMilliseconds: 7.5),
+        ]
+        var bass = BassManagementConfiguration(enabled: true)
+        bass.frequencyHz = 80
+        try assertParity(plan: plan(subs: 2, bass: true, speakers: speakers), bass: bass, label: "lane delay + bass")
+    }
+
     func testLanesWithoutBassManagementMatchLegacyAtEveryRate() throws {
         let speakers: [OutputProgramRole: SemanticSpeakerCalibration] = [
             .frontLeft: SemanticSpeakerCalibration(
@@ -300,10 +312,12 @@ final class LiveNChannelUnifiedGraphTests: XCTestCase {
         XCTAssertEqual(configuration(
             plan(subs: 0, bass: false, speakers: [.frontLeft: SemanticSpeakerCalibration(polarityInverted: true)]),
             off)?.lanes[0].polarityInverted, true)
-        // Lane delay under bass management: the legacy order is delay before the crossover.
-        XCTAssertNil(configuration(
+        // E6 S12g2: lane delay under bass management is a LANE_DELAY stage ahead of BASS_MGMT.
+        let delayed = configuration(
             plan(subs: 1, bass: true, speakers: [.frontLeft: SemanticSpeakerCalibration(delayMilliseconds: 3)]),
-            bass))
+            bass)
+        XCTAssertEqual(delayed?.lanes[0].preBassDelayMilliseconds, 3)
+        XCTAssertEqual(delayed?.lanes[0].delayMilliseconds, 0)
         // Bass management without a sub is legacy-only; a 48 dB crossover is a graph feature.
         XCTAssertNil(configuration(plan(subs: 0, bass: true), bass))
         bass.topology = .linkwitzRiley48
@@ -358,9 +372,9 @@ final class LiveNChannelUnifiedGraphTests: XCTestCase {
         XCTAssertNil(reason(
             plan(subs: 0, bass: false, speakers: [.frontLeft: SemanticSpeakerCalibration(polarityInverted: true)]),
             off))
-        XCTAssertEqual(reason(
+        XCTAssertNil(reason(
             plan(subs: 1, bass: true, speakers: [.frontLeft: SemanticSpeakerCalibration(delayMilliseconds: 3)]),
-            bass), .laneDelayUnderBassMgmt)
+            bass))
         XCTAssertEqual(reason(plan(subs: 0, bass: true), bass), .noSubForBassManagement)
         XCTAssertEqual(reason(plan(subs: 9, bass: true), bass), .tooManySubs)
         XCTAssertEqual(reason(

@@ -249,6 +249,7 @@ uint32_t rankBase(uint32_t kind) {
 uint32_t rankOf(uint32_t kind) {
     if (kind == N60_STAGE_BINAURAL) return 175;
     if (kind == N60_STAGE_EXTERNAL) return 125;
+    if (kind == N60_STAGE_LANE_DELAY) return 126;       // ABI v28: after EXTERNAL, before BASS_MGMT (130); runs as DELAY
     if (kind == N60_STAGE_GENERATOR) return 35;
     if (kind == N60_STAGE_CLEANUP) return 37;           // ABI v22: after the generator, before the denoiser (rank 40)
     if (kind == N60_STAGE_IMAGE) return 96;             // ABI v23: after the EQ tap, before the de-esser and the compressor
@@ -267,6 +268,7 @@ uint32_t rankOf(uint32_t kind) {
 // rank (position in the chain) differs.
 uint32_t canonKind(uint32_t kind) {
     switch (kind) {
+        case N60_STAGE_LANE_DELAY: return N60_STAGE_DELAY;
         case N60_STAGE_ROOM_FIR:
         case N60_STAGE_SPEAKER_IR:
         case N60_STAGE_DRIVER_FIR: return N60_STAGE_FIR;

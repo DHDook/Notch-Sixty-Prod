@@ -38,6 +38,10 @@ struct UnifiedGraphLane: Equatable, Sendable {
     /// ordinary lane delay and is real latency (not an inter-channel tap the kernel path also applies).
     var polarityInverted = false
     var calibrationDelayFrames: Double = 0
+    /// E6 S12g2: the N-channel path's lane delay, which the legacy render core applies before the crossover so the
+    /// bass sum carries it. With bass management it becomes a LANE_DELAY stage ahead of BASS_MGMT; without bass
+    /// management the translator uses `delayMilliseconds` and this stays zero.
+    var preBassDelayMilliseconds: Double = 0
     var eq: [UnifiedGraphPEQSection] = []
 }
 
@@ -372,6 +376,16 @@ struct UnifiedGraphConfiguration: Equatable, Sendable {
         }
         add(N60_STAGE_METER_OUT, N60_LSTAGE_METER_OUT, lane: all)
 
+        if bassManagement != nil {
+            for (index, lane) in lanes.enumerated() {
+                if let frames = try Self.delayFrames(lane.preBassDelayMilliseconds, sampleRate: sampleRate) {
+                    add(N60_STAGE_LANE_DELAY, Self.preBassDelayStageBase + UInt32(index), lane: UInt32(index),
+                        capacity: frames, params: [Float(frames)])
+                }
+            }
+        } else if lanes.contains(where: { $0.preBassDelayMilliseconds != 0 }) {
+            throw UnifiedGraphError.invalidConfiguration("lane delay ahead of bass management without bass management")
+        }
         if let params = stereo.crossover {
             stages.append(UnifiedGraphStageSpec(
                 kind: N60_STAGE_STEREO_CROSSOVER.rawValue, stageId: Self.crossoverStageId, laneA: 0, laneB: 1,
@@ -492,6 +506,8 @@ struct UnifiedGraphConfiguration: Equatable, Sendable {
     static let preGainStageBase: UInt32 = 400
     static let delayStageBase: UInt32 = 500
     static let calibrationDelayStageBase: UInt32 = 520
+    /// E6 S12g2: LANE_DELAY stages ahead of BASS_MGMT (+ lane).
+    static let preBassDelayStageBase: UInt32 = 540
     static let bassStageId: UInt32 = 90
     /// E6 S12e: PEQ stages after the first on a lane carrying more than 16 slots (+ lane * 64 + chunk).
     static let wideEQStageId: UInt32 = 2000
