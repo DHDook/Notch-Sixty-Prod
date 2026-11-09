@@ -655,6 +655,22 @@ if selected e6_lane_delay; then
     fi
 fi
 
+# E6 S12h part 2b: delta audition capture and subtract (ABI v30): exact alignment per lane, protection latency, validation
+# and ring carry at the eight standard rates.
+if selected e6_delta_audition; then
+    build_core_objs
+    if [ "$CORE_OK" = 1 ]; then
+        if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -Icore/include -Icore/src core/tests/test_delta_audition.cpp \
+            "${CORE_OBJS[@]}" -o "$OUT/e6_core_delta_audition" && "$OUT/e6_core_delta_audition"; then
+            passed+=(e6_core_delta_audition)
+        else
+            failed+=(e6_core_delta_audition)
+        fi
+    else
+        failed+=(e6_delta_audition)
+    fi
+fi
+
 # E6 S12c: the loudness stage (match, contour, dialogue leveler): behaviour at the eight standard rates.
 if selected e6_loudness; then
     build_core_objs

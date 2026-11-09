@@ -250,6 +250,8 @@ uint32_t rankOf(uint32_t kind) {
     if (kind == N60_STAGE_BINAURAL) return 175;
     if (kind == N60_STAGE_EXTERNAL) return 125;
     if (kind == N60_STAGE_LANE_DELAY) return 126;       // ABI v28: after EXTERNAL, before BASS_MGMT (130); runs as DELAY
+    if (kind == N60_STAGE_DELTA_CAPTURE) return 15;     // ABI v30: after SANITISE (10), before METER_IN (20)
+    if (kind == N60_STAGE_DELTA_SUBTRACT) return 275;   // ABI v30: after PROTECTION (270), before MUTE (280)
     if (kind == N60_STAGE_GENERATOR) return 35;
     if (kind == N60_STAGE_CLEANUP) return 37;           // ABI v22: after the generator, before the denoiser (rank 40)
     if (kind == N60_STAGE_IMAGE) return 96;             // ABI v23: after the EQ tap, before the de-esser and the compressor
@@ -476,6 +478,19 @@ n60_status validateDesc(const n60_graph_desc &d) {
         total += stateStrideFor(s, d.sampleRate, d.firScheme) * laneCountFor(s, d.outputChannels);
         if (total > kMaxArenaBytes) return N60_STATUS_OUT_OF_MEMORY;
     }
+    // ABI v30: a delta audition is a capture and a subtract on the same pair, in that order, one pair per graph.
+    {
+        uint32_t captures = 0, subtracts = 0, capIdx = 0, subIdx = 0;
+        for (uint32_t i = 0; i < d.stageCount; ++i) {
+            if (d.stages[i].kind == N60_STAGE_DELTA_CAPTURE) { ++captures; capIdx = i; }
+            if (d.stages[i].kind == N60_STAGE_DELTA_SUBTRACT) { ++subtracts; subIdx = i; }
+        }
+        if (captures != subtracts || captures > 1) return N60_STATUS_BAD_ARGUMENT;
+        if (captures == 1 && (d.stages[capIdx].laneA != d.stages[subIdx].laneA || d.stages[capIdx].laneB != d.stages[subIdx].laneB ||
+                              capIdx > subIdx)) {
+            return N60_STATUS_BAD_ARGUMENT;
+        }
+    }
     // Every M/S decode must undo exactly one earlier encode on the same lane pair.
     bool used[N60_GRAPH_MAX_STAGES] = {};
     for (uint32_t i = 0; i < d.stageCount; ++i) {
@@ -610,6 +625,10 @@ n60_status buildSnapshot(const n60_graph_desc &d, uint32_t epoch, SnapHeader **o
             }
         }
     }
+    if (!deltaFinalize(h)) {  // ABI v30: the delta ring must hold each lane's latency plus a block
+        freeSnapshot(h);
+        return N60_STATUS_BAD_ARGUMENT;
+    }
     *out = h;
     return N60_STATUS_OK;
 }
@@ -634,6 +653,11 @@ n60_status validateParam(const SnapHeader *snap, const StageRec &r, uint32_t par
         case N60_STAGE_GAIN:
             return (paramIndex != 0 || value < -10000.0f || value > 10000.0f) ? N60_STATUS_BAD_ARGUMENT : N60_STATUS_OK;  // ABI v19: negative inverts polarity
         case N60_STAGE_DELAY:
+            // A delta audition fixes each lane's alignment ring delay at build time, so a live delay edit would
+            // misalign the subtraction: the change rebuilds the graph instead.
+            for (uint32_t i = 0; i < snap->stageCount; ++i) {
+                if (stages(snap)[i].kind == N60_STAGE_DELTA_CAPTURE) return N60_STATUS_UNSUPPORTED;
+            }
             return (paramIndex != 0 || value < 0.0f || value > static_cast<float>(r.capacity))
                        ? N60_STATUS_BAD_ARGUMENT
                        : N60_STATUS_OK;
@@ -678,10 +702,11 @@ bool applyParam(SnapHeader *snap, uint32_t stageId, uint32_t paramIndex, float v
     return false;
 }
 
-uint32_t snapshotLatency(const SnapHeader *snap) {
-    uint32_t perLane[N60_GRAPH_MAX_CHANNELS] = {};
+// Frames of latency each lane has accumulated through the stages before `upTo` (stage count for the whole chain).
+void snapshotLaneLatency(const SnapHeader *snap, uint32_t upTo, uint32_t *perLane) {
+    for (uint32_t l = 0; l < N60_GRAPH_MAX_CHANNELS; ++l) perLane[l] = 0;
     const StageRec *table = stages(snap);
-    for (uint32_t i = 0; i < snap->stageCount; ++i) {
+    for (uint32_t i = 0; i < snap->stageCount && i < upTo; ++i) {
         const StageRec &r = table[i];
         uint32_t frames = 0;
         if (r.kind == N60_STAGE_DELAY) {
@@ -701,6 +726,11 @@ uint32_t snapshotLatency(const SnapHeader *snap) {
         if (frames == 0) continue;
         for (uint32_t l = 0; l < r.laneCount; ++l) perLane[laneOf(r, l)] += frames;
     }
+}
+
+uint32_t snapshotLatency(const SnapHeader *snap) {
+    uint32_t perLane[N60_GRAPH_MAX_CHANNELS];
+    snapshotLaneLatency(snap, snap->stageCount, perLane);
     uint32_t worst = 0;
     for (uint32_t l = 0; l < snap->outputChannels; ++l) worst = std::max(worst, perLane[l]);
     return worst;

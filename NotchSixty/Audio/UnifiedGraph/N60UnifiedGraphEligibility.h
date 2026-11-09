@@ -698,10 +698,9 @@ static inline bool N60UnifiedGraphConvolutionState(const N60ConvolutionGraphStat
 static inline N60UnifiedGraphUnsupportedReason N60UnifiedGraphSnapshotUnsupportedReason(
     const N60DSPGraphSnapshot * _Nonnull s, uint32_t maxFIRTaps
 ) {
-    // E6 S12e: delta audition (processed minus the aligned reference) still belongs to the kernel. Global bypass and the
-    // reference audition run on the graph as the D5 path (decision 16): program DSP removed; the lane calibration, the
+    // E6 S12e: delta audition (processed minus the aligned input) runs on the graph as a CAPTURE and SUBTRACT pair
+    // (ABI v30, G27). Global bypass and the reference audition run on the graph as the D5 path (decision 16): program DSP removed; the lane calibration, the
     // bass management and the protection kept. Only those stages are checked then.
-    if (s->auditionMode == N60AuditionModeDelta) return N60UnifiedGraphUnsupportedBypassOrAudition;
     const bool d5 = s->bypassed || s->auditionMode == N60AuditionModeReference;
     // E6 S8d group 4: the stereo crossover. The core rebuilds its coefficients from the user-level values, so the
     // topology, monitor mode, frequency and alignment must be ones it accepts.

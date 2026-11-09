@@ -1291,9 +1291,7 @@ extension UnifiedGraphStageParityTests {
         var delta = N60DSPGraphSnapshotMakeUnity(rate)
         delta.auditionMode = N60AuditionModeDelta
         if case .failure(let reason) = UnifiedGraphTranslator.stereoEligibility(snapshot: &delta, sampleRate: rate) {
-            XCTAssertEqual(reason, .snapshotBypassOrAudition)
-        } else {
-            XCTFail("delta audition must stay on the kernel")
+            XCTFail("delta audition attaches on the graph (G27), got \(reason)")
         }
         if case .failure(let reason) = UnifiedGraphTranslator.stereoEligibility(
             snapshot: &s, sampleRate: rate, programs: lookup(.roomCorrection, [p])) {
