@@ -398,6 +398,30 @@ extension SpeakerRoutingTests {
         return 2 * (re * re + im * im).squareRoot() / wsum
     }
 
+    /// E6 S12h part 3 (G51): a delta cannot be compared across a routing, so a routed session refuses it by name.
+    func testRoutedSessionRefusesTheDeltaAudition() throws {
+        let engine = try engineReady(subs: false)
+        let routing = SpeakerRoutingTemplate.twoWay.build(
+            mains: [.init(lane: 0, name: "L", endpoints: [ep(0, device: "fixture"), ep(1, device: "fixture")]),
+                    .init(lane: 1, name: "R", endpoints: [ep(2, device: "fixture"), ep(3, device: "fixture")])],
+            crossoverHz: [2_000])!
+        let device = fixtureDevice("fixture", rate: 48_000, channels: 4)
+        let plan = try routing.makeLivePlan(
+            programLayout: .stereo, availableDevices: [device], sampleRate: 48_000, selectedOutputUID: "fixture",
+            bassManagementEnabled: false)
+        var inputs = engine.currentLiveGraphInputs
+        XCTAssertNoThrow(try engine.makeRoutedGraphConfiguration(
+            routing: routing, routePlan: plan, sampleRate: 48_000, inputs: inputs))
+        inputs.playback.auditionMode = .delta
+        XCTAssertThrowsError(try engine.makeRoutedGraphConfiguration(
+            routing: routing, routePlan: plan, sampleRate: 48_000, inputs: inputs)) { error in
+            guard case LiveNChannelTransportError.routingRefused(let reason) = error else {
+                return XCTFail("expected a named routing refusal, got \(error)")
+            }
+            XCTAssertTrue(reason.contains("delta"))
+        }
+    }
+
     // MARK: Plan
 
     func testLivePlanFlattensDevicesWithSelectedOutputFirst() throws {

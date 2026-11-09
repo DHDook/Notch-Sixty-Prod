@@ -699,7 +699,7 @@ static inline N60UnifiedGraphUnsupportedReason N60UnifiedGraphSnapshotUnsupporte
     const N60DSPGraphSnapshot * _Nonnull s, uint32_t maxFIRTaps
 ) {
     // E6 S12e: delta audition (processed minus the aligned input) runs on the graph as a CAPTURE and SUBTRACT pair
-    // (ABI v30, G27). Global bypass and the reference audition run on the graph as the D5 path (decision 16): program DSP removed; the lane calibration, the
+    // (ABI v30, G27; mask form ABI v31). Global bypass and the reference audition run on the graph as the D5 path (decision 16): program DSP removed; the lane calibration, the
     // bass management and the protection kept. Only those stages are checked then.
     const bool d5 = s->bypassed || s->auditionMode == N60AuditionModeReference;
     // E6 S8d group 4: the stereo crossover. The core rebuilds its coefficients from the user-level values, so the

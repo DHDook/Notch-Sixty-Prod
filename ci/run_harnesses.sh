@@ -656,7 +656,7 @@ if selected e6_lane_delay; then
     fi
 fi
 
-# E6 S12h part 2b: delta audition capture and subtract (ABI v30): exact alignment per lane, protection latency, validation
+# E6 S12h parts 2b and 3: delta audition capture and subtract (ABI v31, mask form, fractional alignment): exact alignment per lane, protection latency, validation
 # and ring carry at the eight standard rates.
 if selected e6_delta_audition; then
     build_core_objs

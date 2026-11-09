@@ -4,7 +4,11 @@
 //    delay on one lane only (so the two lanes have different latencies);
 //  - the protection stage's lookahead and half-band latency are part of that alignment;
 //  - the pair is validated (both or neither, same lanes, a ring that holds a block plus the lane latency, no live edit);
-//  - a rebuild carries the ring (a published copy of the graph gives the same delta as one that was never rebuilt).
+//  - a rebuild carries the ring (a published copy of the graph gives the same delta as one that was never rebuilt);
+//  - ABI v31 (part 3): a lane mask in place of the pair (G50): exact per-lane alignment on six lanes with the masked
+//    lanes only, validation of mask against pair, and a ring carry of a mask capture;
+//  - ABI v31 (G52): a protection look-ahead that is not a whole number of frames is aligned to a fraction of a frame by
+//    an interpolated reference, so the residual of an untouched signal stays near the half-band ripple at every rate.
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -250,6 +254,148 @@ void testCarry(double rate, uint32_t newCap) {
     n60_graph_retire(swap);
     n60_graph_retire(ref);
 }
+
+// ---- ABI v31: lane masks -----------------------------------------------------------------------
+
+constexpr uint32_t kLanes = 6;
+
+n60_stage_desc maskStage(uint32_t kind, uint32_t id, uint64_t mask, const float *p, uint32_t count, uint32_t capacity = 0) {
+    n60_stage_desc s = stage(kind, id, 0, 0, p, count, capacity);
+    s.laneMask = mask;
+    return s;
+}
+
+n60_graph_desc descN(double rate, n60_stage_desc *st, uint32_t n, uint32_t ch) {
+    n60_graph_desc d = desc(rate, st, n);
+    d.inputChannels = d.outputChannels = ch;
+    return d;
+}
+
+void signalN(double rate, size_t from, size_t n, std::vector<Vec> &lanes) {
+    lanes.assign(kLanes, Vec(n));
+    for (uint32_t k = 0; k < kLanes; ++k) {
+        for (size_t i = 0; i < n; ++i) {
+            const double t = double(from + i) / rate;
+            lanes[k][i] = 0.1f * (float)std::sin(2 * M_PI * (300.0 + 170.0 * k) * t) + 0.02f * (float)std::cos(2 * M_PI * (41.0 + 7.0 * k) * t);
+        }
+    }
+}
+
+void processN(n60_graph *g, const std::vector<Vec> &in, std::vector<Vec> &out) {
+    const size_t n = in[0].size();
+    out.assign(in.size(), Vec(n));
+    for (size_t off = 0; off < n; off += kBlock) {
+        const uint32_t c = (uint32_t)std::fmin((double)kBlock, (double)(n - off));
+        const float *ip[kLanes];
+        float *op[kLanes];
+        for (uint32_t k = 0; k < kLanes; ++k) { ip[k] = in[k].data() + off; op[k] = out[k].data() + off; }
+        n60_graph_process(g, ip, op, c);
+    }
+}
+
+// Lanes 0, 1, 2, 3 and 5 are in the mask; lane 4 is not. GAIN 0.5 on all six, DELAY 0 on lane 1 (21 frames) and lane 5 (60).
+void testMaskExact(double rate) {
+    const size_t frames = 6000;
+    const uint64_t mask = 0b101111;
+    const float half[1] = {0.5f}, d21[1] = {21.0f}, d60[1] = {60.0f};
+    n60_stage_desc st[5];
+    st[0] = maskStage(N60_STAGE_DELTA_CAPTURE, 1, mask, kOne, 1, 4096);
+    st[1] = stage(N60_STAGE_GAIN, 2, N60_LANE_ALL, 0, half, 1);
+    st[2] = stage(N60_STAGE_DELAY, 3, 1, 0, d21, 1, 64);
+    st[3] = stage(N60_STAGE_DELAY, 4, 5, 0, d60, 1, 64);
+    st[4] = maskStage(N60_STAGE_DELTA_SUBTRACT, 5, mask, kOne, 1);
+    n60_graph_desc d = descN(rate, st, 5, kLanes);
+    n60_graph *g = nullptr;
+    check(n60_graph_build(&d, &g) == N60_STATUS_OK, "build mask chain", rate);
+    if (!g) return;
+    check(n60_graph_latency_frames(g) == 60, "the mask pair adds no latency", rate);
+    std::vector<Vec> in, out;
+    signalN(rate, 0, frames, in);
+    processN(g, in, out);
+    const uint32_t delay[kLanes] = {0, 21, 0, 0, 0, 60};
+    bool exact = true;
+    for (uint32_t k = 0; k < kLanes; ++k) {
+        for (size_t i = 0; i < frames; ++i) {
+            const float aligned = i >= delay[k] ? in[k][i - delay[k]] : 0.0f;
+            const float processed = i >= delay[k] ? 0.5f * in[k][i - delay[k]] : 0.0f;
+            const float want = (mask >> k & 1) ? processed - aligned : processed;
+            // The reference for a masked lane is the lane's own undelayed input delayed by the lane's latency.
+            if (k == 4) exact = exact && out[k][i] == 0.5f * in[k][i];
+            else exact = exact && out[k][i] == want;
+        }
+    }
+    check(exact, "a mask delta is processed minus the lane-aligned input on the masked lanes only", rate);
+    n60_graph_retire(g);
+}
+
+void testMaskValidation(double rate) {
+    n60_stage_desc st[2];
+    n60_graph *g = nullptr;
+    const uint64_t mask = 0b0111;
+    st[0] = maskStage(N60_STAGE_DELTA_CAPTURE, 1, mask, kOne, 1, 4096);
+    st[1] = maskStage(N60_STAGE_DELTA_SUBTRACT, 2, 0b0011, kOne, 1);
+    n60_graph_desc d = descN(rate, st, 2, kLanes);
+    check(n60_graph_build(&d, &g) == N60_STATUS_BAD_ARGUMENT, "a subtract on another mask is refused", rate);
+    st[1] = stage(N60_STAGE_DELTA_SUBTRACT, 2, 0, 1, kOne, 1);
+    d = descN(rate, st, 2, kLanes);
+    check(n60_graph_build(&d, &g) == N60_STATUS_BAD_ARGUMENT, "a pair subtract on a mask capture is refused", rate);
+    st[1] = maskStage(N60_STAGE_DELTA_SUBTRACT, 2, mask, kOne, 1);
+    st[0] = maskStage(N60_STAGE_DELTA_CAPTURE, 1, uint64_t(1) << 6, kOne, 1, 4096);
+    st[1] = maskStage(N60_STAGE_DELTA_SUBTRACT, 2, uint64_t(1) << 6, kOne, 1);
+    d = descN(rate, st, 2, kLanes);
+    check(n60_graph_build(&d, &g) == N60_STATUS_BAD_ARGUMENT, "a mask beyond the output lanes is refused", rate);
+    st[0] = maskStage(N60_STAGE_DELTA_CAPTURE, 1, mask, kOne, 1, 4096);
+    st[1] = maskStage(N60_STAGE_DELTA_SUBTRACT, 2, mask, kOne, 1);
+    st[0].laneA = 1;
+    d = descN(rate, st, 2, kLanes);
+    check(n60_graph_build(&d, &g) == N60_STATUS_BAD_ARGUMENT, "a mask with a lane index is refused", rate);
+    st[0].laneA = 0;
+    d = descN(rate, st, 2, kLanes);
+    check(n60_graph_build(&d, &g) == N60_STATUS_OK, "a mask pair builds", rate);
+    if (g) n60_graph_retire(g);
+}
+
+// A rebuild with the same mask carries the ring (the first frames after the swap use the history); a rebuild with another
+// lane set carries nothing and still builds and runs.
+void testMaskCarry(double rate) {
+    const size_t pre = 5 * kBlock, post = 2 * kBlock;
+    const uint64_t mask = 0b001111;
+    const float half[1] = {0.5f}, d37[1] = {37.0f};
+    n60_stage_desc st[4];
+    auto make = [&](uint64_t m, uint32_t cap) {
+        st[0] = maskStage(N60_STAGE_DELTA_CAPTURE, 1, m, kOne, 1, cap);
+        st[1] = stage(N60_STAGE_GAIN, 2, N60_LANE_ALL, 0, half, 1);
+        st[2] = stage(N60_STAGE_DELAY, 3, 0, 0, d37, 1, 64);
+        st[3] = maskStage(N60_STAGE_DELTA_SUBTRACT, 4, m, kOne, 1);
+        return descN(rate, st, 4, kLanes);
+    };
+    n60_graph_desc d = make(mask, 4096);
+    n60_graph *g = nullptr;
+    check(n60_graph_build(&d, &g) == N60_STATUS_OK, "build mask carry", rate);
+    if (!g) return;
+    n60_rebuild_options o;
+    std::memset(&o, 0, sizeof o);
+    o.structSize = sizeof o;
+    o.fadeMs = 0.0f;
+    n60_graph_set_rebuild_options(g, &o);
+    std::vector<Vec> in1, in2, out1, out2;
+    signalN(rate, 0, pre, in1);
+    signalN(rate, pre, post, in2);
+    processN(g, in1, out1);
+    n60_graph_desc d2 = make(mask, 2048);
+    check(n60_graph_publish(g, &d2) == N60_STATUS_OK, "publish same mask", rate);
+    processN(g, in2, out2);
+    bool head = true;
+    for (size_t i = 0; i < 37; ++i) head = head && out2[0][i] == -in1[0][pre + i - 37];
+    check(head, "after a rebuild the first frames of a mask lane use the carried ring", rate);
+    d2 = make(0b000011, 4096);
+    check(n60_graph_publish(g, &d2) == N60_STATUS_OK, "publish another mask", rate);
+    processN(g, in2, out2);
+    bool finite = true;
+    for (uint32_t k = 0; k < kLanes; ++k) for (float v : out2[k]) finite = finite && std::isfinite(v);
+    check(finite, "a rebuild to another lane set runs", rate);
+    n60_graph_retire(g);
+}
 }  // namespace
 
 int main() {
@@ -257,7 +403,13 @@ int main() {
     for (double rate : rates) {
         testExact(rate);
         testProtectionLatency(rate, 0.0f, 0.002);
-        testProtectionLatency(rate, 2.0f, 0.1);
+        testProtectionLatency(rate, 2.0f, 0.01);
+        testProtectionLatency(rate, 1.0f, 0.01);
+        testProtectionLatency(rate, 1.7f, 0.01);
+        testProtectionLatency(rate, 2.3f, 0.01);
+        testMaskExact(rate);
+        testMaskValidation(rate);
+        testMaskCarry(rate);
         testValidation(rate);
         testCarry(rate, 4096);
         testCarry(rate, 2048);

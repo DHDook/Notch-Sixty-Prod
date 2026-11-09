@@ -34,7 +34,7 @@ extern "C" {
 #endif
 
 /* Bumped on any incompatible change to a struct or function below. */
-#define N60_GRAPH_ABI_VERSION 30u
+#define N60_GRAPH_ABI_VERSION 31u
 
 typedef struct n60_graph n60_graph; /* opaque */
 
@@ -129,15 +129,22 @@ typedef enum n60_stage_kind {
     N60_STAGE_DELTA_SUBTRACT = 51    /* position 27.5: after PROTECTION, before MUTE. Pair stage: output minus the aligned input. */
 } n60_stage_kind;
 
-/* Delta audition (ABI v30, E6 S12h part 2b). The stereo kernel's delta mode: what the chain changed, output minus the
- * input aligned to the output's latency. N60_STAGE_DELTA_CAPTURE copies the (sanitised) input of its two lanes into a
- * ring; N60_STAGE_DELTA_SUBTRACT, after the protection stage, subtracts it, each lane delayed by the latency its own lane
- * has accumulated before the subtract (the graph works the delay out when the snapshot is built). Both are pair stages
- * (laneA, laneB distinct, laneMask 0), paramCount 1 with params[0] = 1 (the pair is on; a graph without the pair is
- * not in delta mode). CAPTURE's capacityFrames (1..N60_GRAPH_MAX_DELAY_FRAMES) is the ring length per lane and must be at
- * least maxBlockFrames plus the lane's latency before the subtract, otherwise the build is refused (BAD_ARGUMENT). A
- * SUBTRACT needs one CAPTURE on the same pair earlier in the chain and a CAPTURE needs one SUBTRACT (both or neither).
- * Neither adds latency. No live parameters. A rebuild carries the ring of a CAPTURE with the same id. */
+/* Delta audition (ABI v30, E6 S12h part 2b; lane masks and fractional alignment in ABI v31, part 3). The stereo kernel's
+ * delta mode: what the chain changed, output minus the input aligned to the output's latency. N60_STAGE_DELTA_CAPTURE
+ * copies the (sanitised) input of its lanes into a ring; N60_STAGE_DELTA_SUBTRACT, after the protection stage, subtracts it,
+ * each lane delayed by the latency that lane has accumulated before the subtract (the graph works the delay out when the
+ * snapshot is built). The lanes are a pair (laneA, laneB distinct, laneMask 0) or, from ABI v31, a lane mask (laneMask
+ * non-zero, laneA = laneB = 0; every set lane is captured and subtracted, in ascending order). The SUBTRACT must name the
+ * same lanes as its CAPTURE. paramCount 1 with params[0] = 1 (the stage is on; a graph without the pair is not in delta
+ * mode). CAPTURE's capacityFrames (1..N60_GRAPH_MAX_DELAY_FRAMES) is the ring length per lane and must be at least
+ * maxBlockFrames plus the lane's latency before the subtract (plus 16 for a fractional lane), otherwise the build is
+ * refused (BAD_ARGUMENT). A SUBTRACT needs one CAPTURE earlier in the chain and a CAPTURE needs one SUBTRACT (both or
+ * neither). Neither adds latency. No live parameters. A rebuild carries the ring of a CAPTURE with the same id and lane
+ * count. Fractional alignment (ABI v31): a protection stage with look-ahead reports its latency rounded up to a whole
+ * frame; when the look-ahead is not a whole number of frames (an odd number of oversampled samples at 2x, 44.1 and
+ * 88.2 kHz among them) the lane's true delay is the reported latency minus the rounding, and the reference is read through
+ * a 32-tap Kaiser windowed-sinc interpolator at that fraction. It needs the whole part of the delay to be at least 15
+ * frames, otherwise the build is refused. */
 
 /* Image and de-ess (ABI v23, E6 S12b). The stereo kernel's stereo mode, widener, de-harsh and de-esser, same arithmetic.
  * Both are pair stages (laneA, laneB distinct, laneMask 0, capacityFrames 0); an off part is parked and costs nothing.

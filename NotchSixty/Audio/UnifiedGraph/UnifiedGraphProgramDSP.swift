@@ -100,6 +100,8 @@ struct UnifiedGraphProgramDSP: Equatable, Sendable {
     /// E24 S3c: the subwoofer source lanes after the program lanes (`count ..< count + subLaneCount`). A lane plan may
     /// cover them (joint bass grids); on a routed graph the routed output lanes after them are outside the plan.
     var subLaneCount = 0
+    /// E6 S12h part 3 (G50): the delta audition (processed minus input, aligned per lane) over the program lanes.
+    var deltaAudition = false
 
     init(
         stereo: UnifiedGraphConfiguration,
@@ -126,7 +128,7 @@ struct UnifiedGraphProgramDSP: Equatable, Sendable {
             guard lane.delayMilliseconds == 0, lane.delayFrames == 0 else { return false }
             return lane.fractionalDelayFrames == nil
         }
-        guard rest.isEmpty, roomLanes == nil, laneDelayFrames.isEmpty, plain(left), plain(right), inputGain == 1 else { return false }
+        guard rest.isEmpty, !deltaAudition, roomLanes == nil, laneDelayFrames.isEmpty, plain(left), plain(right), inputGain == 1 else { return false }
         return protection == nil
     }
 
@@ -497,5 +499,6 @@ struct UnifiedGraphProgramDSP: Equatable, Sendable {
         N60_STAGE_DEESS.rawValue: 9.8, N60_STAGE_MULTIBAND.rawValue: 9.9,
         N60_STAGE_ROUTE.rawValue: 23.5, N60_STAGE_XOVER.rawValue: 23.6,
         N60_STAGE_DRIVER_FIR.rawValue: 23.7, N60_STAGE_DRIVER_FIR_TWO_BAND.rawValue: 23.7,
+        N60_STAGE_DELTA_CAPTURE.rawValue: 1.5, N60_STAGE_DELTA_SUBTRACT.rawValue: 27.5,
     ]
 }
