@@ -185,6 +185,9 @@ struct UnifiedGraphOptimizerFIR: Equatable, Sendable {
 struct UnifiedGraphConfiguration: Equatable, Sendable {
     var sampleRate: Double
     var maxBlockFrames: UInt32 = 65_536
+    /// E6 S12e follow-up (G27): delta audition. A CAPTURE stage records each front lane right after the input sanitiser and
+    /// a SUBTRACT stage after the protection leaves processed minus the lane-aligned input, as the kernel does.
+    var deltaAudition = false
     var lanes: [UnifiedGraphLane]
     var inputGain: Float = 1
     /// E11 S7: measurement source stage params (11 floats from `SignalGeneratorSettings.stageParams`), placed after the
@@ -286,6 +289,14 @@ struct UnifiedGraphConfiguration: Equatable, Sendable {
             }
         }
         add(N60_STAGE_SANITISE, N60_LSTAGE_SANITISE, lane: all)
+        if deltaAudition {
+            guard programLanes == 2 else { throw UnifiedGraphError.invalidConfiguration("delta audition lanes") }
+            // The ring must hold a block plus the longest lane latency (the core refuses a build that does not fit).
+            let ring = min(maxBlockFrames + Self.deltaRingMargin, N60_GRAPH_MAX_DELAY_FRAMES)
+            stages.append(UnifiedGraphStageSpec(
+                kind: N60_STAGE_DELTA_CAPTURE.rawValue, stageId: Self.deltaCaptureStageId, laneA: 0, laneB: 1,
+                capacityFrames: ring, params: [1]))
+        }
         add(N60_STAGE_METER_IN, N60_LSTAGE_METER_IN, lane: all)
         add(N60_STAGE_GAIN, N60_LSTAGE_INPUT_GAIN, lane: all, params: [inputGain])
         for (index, lane) in lanes.enumerated() {
@@ -529,6 +540,11 @@ struct UnifiedGraphConfiguration: Equatable, Sendable {
             let params = Self.protectionParameters(protection)
             add(N60_STAGE_PROTECTION, N60_LSTAGE_PROTECTION, mask: mask, params: params)
         }
+        if deltaAudition {
+            stages.append(UnifiedGraphStageSpec(
+                kind: N60_STAGE_DELTA_SUBTRACT.rawValue, stageId: Self.deltaSubtractStageId, laneA: 0, laneB: 1,
+                params: [1]))
+        }
         add(N60_STAGE_FINAL_SANITISE, N60_LSTAGE_FINAL_SANITISE, lane: all)
         add(N60_STAGE_FINAL_METER, N60_LSTAGE_FINAL_METER, lane: all)
         var spec = UnifiedGraphSpec(
@@ -569,6 +585,10 @@ struct UnifiedGraphConfiguration: Equatable, Sendable {
     static let deessStageId: UInt32 = 624
     static let loudnessStageId: UInt32 = 625
     static let multibandStageId: UInt32 = 626
+    static let deltaCaptureStageId: UInt32 = 627
+    static let deltaSubtractStageId: UInt32 = 628
+    /// Ring frames beyond one block: the largest lane latency the delta audition can align (FIR, protection, delays).
+    static let deltaRingMargin: UInt32 = 131_072
     static let analyserTapEQStageId: UInt32 = 620
     static let analyserTapDynStageId: UInt32 = 621
     /// FIR stages take two consecutive ids (left, right) when the channels differ.

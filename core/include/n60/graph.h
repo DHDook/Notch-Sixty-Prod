@@ -34,7 +34,7 @@ extern "C" {
 #endif
 
 /* Bumped on any incompatible change to a struct or function below. */
-#define N60_GRAPH_ABI_VERSION 29u
+#define N60_GRAPH_ABI_VERSION 30u
 
 typedef struct n60_graph n60_graph; /* opaque */
 
@@ -123,8 +123,21 @@ typedef enum n60_stage_kind {
     N60_STAGE_MULTIBAND = 48,        /* position 9.9: after DEESS, before the compressor. Pair stage: three-band compressor. */
     /* ABI v28 (E6 S12g2). Lane delay ahead of bass management: the N-channel path delays a program lane before the
      * crossover, so the bass sum carries the delay. Same parameters, state, crossfade and latency as N60_STAGE_DELAY. */
-    N60_STAGE_LANE_DELAY = 49        /* position 12.6: after EXTERNAL, before BASS_MGMT. Integer delay (DELAY rules). */
+    N60_STAGE_LANE_DELAY = 49,       /* position 12.6: after EXTERNAL, before BASS_MGMT. Integer delay (DELAY rules). */
+    /* ABI v30 (E6 S12h part 2b). Delta audition: see "Delta audition" below. */
+    N60_STAGE_DELTA_CAPTURE = 50,    /* position 1.5: after SANITISE, before METER_IN. Pair stage: records the input. */
+    N60_STAGE_DELTA_SUBTRACT = 51    /* position 27.5: after PROTECTION, before MUTE. Pair stage: output minus the aligned input. */
 } n60_stage_kind;
+
+/* Delta audition (ABI v30, E6 S12h part 2b). The stereo kernel's delta mode: what the chain changed, output minus the
+ * input aligned to the output's latency. N60_STAGE_DELTA_CAPTURE copies the (sanitised) input of its two lanes into a
+ * ring; N60_STAGE_DELTA_SUBTRACT, after the protection stage, subtracts it, each lane delayed by the latency its own lane
+ * has accumulated before the subtract (the graph works the delay out when the snapshot is built). Both are pair stages
+ * (laneA, laneB distinct, laneMask 0), paramCount 1 with params[0] = 1 (the pair is on; a graph without the pair is
+ * not in delta mode). CAPTURE's capacityFrames (1..N60_GRAPH_MAX_DELAY_FRAMES) is the ring length per lane and must be at
+ * least maxBlockFrames plus the lane's latency before the subtract, otherwise the build is refused (BAD_ARGUMENT). A
+ * SUBTRACT needs one CAPTURE on the same pair earlier in the chain and a CAPTURE needs one SUBTRACT (both or neither).
+ * Neither adds latency. No live parameters. A rebuild carries the ring of a CAPTURE with the same id. */
 
 /* Image and de-ess (ABI v23, E6 S12b). The stereo kernel's stereo mode, widener, de-harsh and de-esser, same arithmetic.
  * Both are pair stages (laneA, laneB distinct, laneMask 0, capacityFrames 0); an off part is parked and costs nothing.

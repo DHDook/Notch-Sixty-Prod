@@ -40,6 +40,13 @@ uint32_t systemRebuildMute(SnapHeader *h, bool silentNow);
 // Returns the bytes copied, for the caller to charge to the callback budget (G38).
 uint64_t systemRiderCarry(SnapHeader *from, SnapHeader *to);
 
+// ABI v30. Control thread, last step of a snapshot build: works out each delta lane's delay from the latency the lane has
+// before the subtract, and binds the subtract to its capture. False when the ring cannot hold a block plus the delay.
+bool deltaFinalize(SnapHeader *h);
+// Realtime thread, at adopt: the capture ring of `to` starts from the same-id ring of `from` (bounded copy, no allocation).
+// Returns the bytes copied for the callback budget.
+uint64_t deltaCarry(SnapHeader *from, SnapHeader *to);
+
 // Control thread. Protection limiter and true-peak readback (ABI v8); false for other kinds or lanes.
 bool readProtectionDynamics(SnapHeader *h, const StageRec &r, uint32_t lane, n60_dynamics_readback *out);
 

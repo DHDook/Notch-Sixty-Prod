@@ -3,7 +3,7 @@ import XCTest
 
 /// E6 S12e: global bypass and the reference audition run on the unified graph as the D5 path (decision 16, parity
 /// exception P1), and the wide EQ (more than 16 sections per lane, constant-Q and Linkwitz bands) matches the kernel.
-/// Delta audition keeps the kernel (gap G27).
+/// Delta audition (processed minus the aligned input) runs on the graph as a CAPTURE and SUBTRACT pair (G27).
 @MainActor
 final class UnifiedGraphBypassAuditionTests: XCTestCase {
     private func engine(rate: Double) throws -> AudioIOEngine {
@@ -121,10 +121,73 @@ final class UnifiedGraphBypassAuditionTests: XCTestCase {
         }
     }
 
-    func testDeltaAuditionKeepsTheKernel() throws {
-        var snapshot = N60DSPGraphSnapshotMakeUnity(48_000)
-        snapshot.auditionMode = N60AuditionModeDelta
-        XCTAssertNil(UnifiedGraphTranslator.stereoConfiguration(snapshot: &snapshot, sampleRate: 48_000))
+    /// E6 S12e follow-up (G27): the delta audition runs on the graph as processed minus the lane-aligned input, the
+    /// kernel's definition, at every rate. The reference is the same snapshot rendered without the audition.
+    func testDeltaAuditionIsProcessedMinusTheAlignedInputAtEveryRate() throws {
+        for rate in EQRenderHarness.rates {
+            let engine = try engine(rate: rate)
+            try engine.addEQBand(EQBand(type: .peaking, frequencyHz: 1_000, gainDB: 6, q: 1))
+            var dynamics = DynamicsConfiguration()
+            dynamics.compressor.enabled = true
+            try engine.replaceDynamicsConfiguration(dynamics)
+            var processed = try engine.stereoTransportStartGraph(sampleRate: rate)
+            processed.latencyFrames = 0
+            var delta = processed
+            delta.auditionMode = N60AuditionModeDelta
+            var plainSnapshot = processed
+            let plain = try XCTUnwrap(UnifiedGraphTranslator.stereoConfiguration(snapshot: &plainSnapshot, sampleRate: rate))
+            let audition = try XCTUnwrap(
+                UnifiedGraphTranslator.stereoConfiguration(snapshot: &delta, sampleRate: rate),
+                "delta audition is eligible on the graph at \(rate)")
+            XCTAssertTrue(audition.deltaAudition)
+            XCTAssertFalse(plain.deltaAudition)
+            let input = noise(8_192, amplitude: 0.5)
+            let plainHost = try UnifiedGraphHost(spec: try plain.makeSpec())
+            let deltaHost = try UnifiedGraphHost(spec: try audition.makeSpec())
+            XCTAssertEqual(deltaHost.latencyFrames, plainHost.latencyFrames, "the pair adds no latency at \(rate)")
+            let latency = Int(plainHost.latencyFrames)
+            let expectedProcessed = try render(plainHost, input)
+            let actual = try render(deltaHost, input)
+            var worst: Float = 0
+            for n in 0..<actual.count {
+                let aligned: Float = n >= latency ? input[n - latency] : 0
+                worst = max(worst, abs(actual[n] - (expectedProcessed[n] - aligned)))
+            }
+            XCTAssertLessThan(worst, 1e-5, "delta equals processed minus aligned input at \(rate)")
+            XCTAssertGreaterThan(actual.map { abs($0) }.max() ?? 0, 0.01, "the delta is audible at \(rate)")
+        }
+    }
+
+    /// E6 S12e follow-up (G28): bypass and the reference audition with a room correction and a limiter on. The room
+    /// correction leaves the path (D5), its latency is kept as a pad, and the limiter ceiling still holds, at every rate.
+    func testBypassWithRoomCorrectionAndLimiterEqualsAProgramFreeGraphAtEveryRate() throws {
+        for rate in EQRenderHarness.rates {
+            let engine = try engine(rate: rate)
+            var processed = try processedSnapshot(engine, rate: rate)
+            processed.roomCorrection.enabled = true
+            processed.latencyFrames = 700 + processed.protection.latencyFrames
+            var unity = N60DSPGraphSnapshotMakeUnity(rate)
+            protect(&unity)
+            unity.latencyFrames = processed.latencyFrames
+            let referenceConfig = padded(
+                try XCTUnwrap(UnifiedGraphTranslator.stereoConfiguration(snapshot: &unity, sampleRate: rate)), processed)
+            let reference = try UnifiedGraphHost(spec: try referenceConfig.makeSpec())
+            let expected = try render(reference, noise(8_192))
+            for mode in 0..<2 {
+                var snapshot = processed
+                if mode == 0 { snapshot.bypassed = true } else { snapshot.auditionMode = N60AuditionModeReference }
+                let configuration = try XCTUnwrap(
+                    UnifiedGraphTranslator.stereoConfiguration(snapshot: &snapshot, sampleRate: rate),
+                    "bypass with room correction stays on the graph at \(rate)")
+                XCTAssertNil(configuration.stereoStages.roomFIR, "room correction removed from the path")
+                let host = try UnifiedGraphHost(spec: try configuration.makeSpec())
+                XCTAssertEqual(host.latencyFrames, reference.latencyFrames, "latency kept at \(rate)")
+                let actual = try render(host, noise(8_192))
+                let worst = zip(actual, expected).map { abs($0 - $1) }.max() ?? 0
+                XCTAssertLessThan(worst, 1e-6, "mode \(mode) at \(rate)")
+                XCTAssertLessThanOrEqual(actual.map { abs($0) }.max() ?? 0, 0.5 + 1e-3, "limiter ceiling at \(rate)")
+            }
+        }
     }
 
     func testWideEQMatchesTheKernelAtEveryRate() throws {
