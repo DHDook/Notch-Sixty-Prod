@@ -130,6 +130,11 @@ struct UnifiedGraphProgramDSP: Equatable, Sendable {
         return protection == nil
     }
 
+    /// True when the program DSP adds latency ahead of bass management (a program FIR or a denoiser), which an optimizer
+    /// FIR on the same graph could not align.
+    var hasProgramLatency: Bool { stages.programFIR != nil || stages.denoiser != nil }
+
+    static let cleanupStageBase: UInt32 = 3_500
     static let firStageBase: UInt32 = 2_000
     static let roomStageBase: UInt32 = 2_100
     static let speakerStageBase: UInt32 = 2_200
@@ -283,6 +288,37 @@ struct UnifiedGraphProgramDSP: Equatable, Sendable {
             var taps = [Float](repeating: 0, count: delta)
             taps.append(1)
             add(N60_STAGE_FIR, Self.deltaFIRStageId, mask: Self.mask(uncovered), capacity: UInt32(delta), params: taps)
+        }
+        // E6 S12g4 (G8, G12, G17): cleanup runs on every layout pair (it is per-channel linear); the stereo image, loudness,
+        // de-esser and multiband stages run on the front pair. The core ranks all of them ahead of the compressor and the
+        // room and speaker convolvers, so the frozen kernel order (after the convolvers) is recorded exception P6.
+        if let params = st.cleanup {
+            guard params.count == 26 else { throw UnifiedGraphFallbackReason.specRejected }
+            // Every program lane the pairs do not cover (centre, LFE, back centre, odd lanes) gets a single-lane instance
+            // (ABI v29, laneB == laneA): the filters are per-channel, so each lane is filtered like a pair member.
+            let pairLanes = Set(shape.pairs.flatMap { [$0.a, $0.b] })
+            let singles = (0..<count).filter { !pairLanes.contains($0) }
+            guard !shape.pairs.isEmpty || !singles.isEmpty else { throw UnifiedGraphFallbackReason.noFrontPair }
+            for (index, pair) in shape.pairs.enumerated() {
+                add(N60_STAGE_CLEANUP, Self.cleanupStageBase + UInt32(index), lane: UInt32(pair.a), laneB: UInt32(pair.b),
+                    params: params)
+            }
+            for lane in singles {
+                add(N60_STAGE_CLEANUP, Self.cleanupStageBase + 100 + UInt32(lane), lane: UInt32(lane), laneB: UInt32(lane),
+                    params: params)
+            }
+        }
+        let pairStages: [(n60_stage_kind, UInt32, [Float]?, Int)] = [
+            (N60_STAGE_IMAGE, UnifiedGraphConfiguration.imageStageId, st.image, 8),
+            (N60_STAGE_LOUDNESS, UnifiedGraphConfiguration.loudnessStageId, st.loudness, 32),
+            (N60_STAGE_DEESS, UnifiedGraphConfiguration.deessStageId, st.deess, 12),
+            (N60_STAGE_MULTIBAND, UnifiedGraphConfiguration.multibandStageId, st.multiband, 29),
+        ]
+        for (kind, id, params, size) in pairStages {
+            guard let params else { continue }
+            guard params.count == size else { throw UnifiedGraphFallbackReason.specRejected }
+            guard let fl = shape.frontLeft, let fr = shape.frontRight else { throw UnifiedGraphFallbackReason.noFrontPair }
+            add(kind, id, lane: UInt32(fl), laneB: UInt32(fr), params: params)
         }
         if let params = st.compressor {
             add(N60_STAGE_COMPRESSOR, UnifiedGraphConfiguration.compressorStageId, mask: programMask, params: params)
@@ -457,6 +493,8 @@ struct UnifiedGraphProgramDSP: Equatable, Sendable {
         N60_STAGE_ANC_GUARD.rawValue: 25, N60_STAGE_ANC_INJECT.rawValue: 26, N60_STAGE_PROTECTION.rawValue: 27,
         N60_STAGE_MUTE.rawValue: 28, N60_STAGE_ANC_CAPTURE.rawValue: 29, N60_STAGE_FINAL_SANITISE.rawValue: 30,
         N60_STAGE_FINAL_METER.rawValue: 31,
+        N60_STAGE_CLEANUP.rawValue: 3.7, N60_STAGE_IMAGE.rawValue: 9.6, N60_STAGE_LOUDNESS.rawValue: 9.7,
+        N60_STAGE_DEESS.rawValue: 9.8, N60_STAGE_MULTIBAND.rawValue: 9.9,
         N60_STAGE_ROUTE.rawValue: 23.5, N60_STAGE_XOVER.rawValue: 23.6,
         N60_STAGE_DRIVER_FIR.rawValue: 23.7, N60_STAGE_DRIVER_FIR_TWO_BAND.rawValue: 23.7,
     ]

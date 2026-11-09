@@ -8,6 +8,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <vector>
 #include <initializer_list>
 #include <new>
 
@@ -1048,6 +1049,60 @@ int main() {
             armed = false;
             CHECK(s2 == N60_STATUS_OK, "process wide peq");
             CHECK(allocs == 0 && frees == 0, "wide peq rate %.0f round %d: allocated %ld / freed %ld", rate, round, allocs.load(), frees.load());
+        }
+        n60_graph_retire(g);
+    }
+    // E6 S12g4: a 9.1.6 (16 lane) graph with the whole program family on every lane or pair: cleanup on eight pairs and on one
+    // lane (ABI v29), a PEQ, an optimizer-style FIR on a lane, image and de-ess on the front pair, and a delay. Live edits
+    // redesign the cleanup filters between blocks; the realtime call allocates and frees nothing at the eight rates.
+    for (double rate : rates) {
+        constexpr uint32_t N = 512, C = 16;
+        float clean[26] = {1, 1, 20, 1, 1, 50, 3, 20, 1, 50};
+        for (int i = 10; i < 26; ++i) clean[i] = -30;
+        const float img[8] = {1, 1, 0, 200, 4000, 0.5f, 1.5f, 1.5f};
+        const float dee[12] = {1, 3500, -3, 1, 6500, -30, 6, -12, 2, 1, 50, 0};
+        const float peq[8] = {0, static_cast<float>(1000 * rate / 48000), 3, 1, 1, static_cast<float>(200 * rate / 48000), -2, 0.7f};
+        const float delay = 64;
+        float taps[301] = {};
+        taps[150] = 1.0f;
+        std::vector<n60_stage_desc> st;
+        for (uint32_t pair = 0; pair < C / 2; ++pair) st.push_back(stage(N60_STAGE_CLEANUP, 10 + pair, 2 * pair, clean, 26, 0, 2 * pair + 1));
+        st.push_back(stage(N60_STAGE_CLEANUP, 30, 3, clean, 26, 0, 3));
+        st.push_back(stage(N60_STAGE_PEQ, 40, N60_LANE_ALL, peq, 8));
+        st.push_back(stage(N60_STAGE_FIR, 41, 2, taps, 301, 150));
+        st.push_back(stage(N60_STAGE_IMAGE, 42, 0, img, 8, 0, 1));
+        st.push_back(stage(N60_STAGE_DEESS, 43, 0, dee, 12, 0, 1));
+        st.push_back(stage(N60_STAGE_DELAY, 44, N60_LANE_ALL, &delay, 1, 128));
+        n60_graph_desc d{};
+        d.structSize = sizeof d;
+        d.abiVersion = N60_GRAPH_ABI_VERSION;
+        d.sampleRate = rate;
+        d.maxBlockFrames = N;
+        d.inputChannels = d.outputChannels = C;
+        d.stages = st.data();
+        d.stageCount = static_cast<uint32_t>(st.size());
+        n60_graph *g = nullptr;
+        CHECK(n60_graph_build(&d, &g) == N60_STATUS_OK, "build 9.1.6");
+        std::vector<std::vector<float>> in(C, std::vector<float>(N)), out(C, std::vector<float>(N));
+        const float *ip[C];
+        float *op[C];
+        for (uint32_t c = 0; c < C; ++c) {
+            for (uint32_t i = 0; i < N; ++i) in[c][i] = 0.1f * std::sin(0.03f * static_cast<float>(i) * static_cast<float>(c + 1)) + 0.05f;
+            ip[c] = in[c].data();
+            op[c] = out[c].data();
+        }
+        for (int round = 0; round < 20; ++round) {
+            n60_param_record rec[3] = {{10, 2, 12.0f + static_cast<float>(round % 10), 0}, {30, 0, static_cast<float>(round & 1), 0},
+                                       {13, 5, 50.0f + 0.5f * static_cast<float>(round % 8), 0}};
+            CHECK(n60_graph_post_params(g, rec, 3) == N60_STATUS_OK, "post 9.1.6");
+            allocs = 0;
+            frees = 0;
+            armed = true;
+            n60_status s2 = n60_graph_process(g, ip, op, N);
+            for (int k = 0; k < 3; k++) s2 = static_cast<n60_status>(s2 | n60_graph_process(g, ip, op, 1 + 97 * k));
+            armed = false;
+            CHECK(s2 == N60_STATUS_OK, "process 9.1.6");
+            CHECK(allocs == 0 && frees == 0, "9.1.6 rate %.0f round %d: allocated %ld / freed %ld", rate, round, allocs.load(), frees.load());
         }
         n60_graph_retire(g);
     }

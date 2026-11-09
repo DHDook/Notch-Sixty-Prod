@@ -5368,7 +5368,9 @@ final class AudioIOEngine: ObservableObject {
             audioUnitRack: stagedAudioUnitRack,
             unifiedGraphConfiguration: graphConfiguration,
             unifiedGraphIneligibility: graphIneligibility,
-            unifiedGraphRequired: programDSP != nil || needsGraphForSubs,
+            // E6 S12g4: with the graph on, every N-channel session runs on it or activation throws the named reason; only an
+            // Audio Unit rack (not a graph stage) keeps the legacy pipeline.
+            unifiedGraphRequired: unifiedGraphEnabled && stagedAudioUnitRack == nil || needsGraphForSubs,
             ancFeedSplitter: ancSplitter
         )
         activeEQFIRProgram = nil
@@ -5526,7 +5528,7 @@ final class AudioIOEngine: ObservableObject {
             unifiedGraphSpec: graphSpec,
             unifiedGraphBaseSpec: graphBaseSpec,
             unifiedGraphIneligibility: graphIneligibility,
-            unifiedGraphRequired: programDSP != nil
+            unifiedGraphRequired: unifiedGraphEnabled && stagedAudioUnitRack == nil
         )
         activeEQFIRProgram = nil
         activeRoomCorrectionProgram = nil

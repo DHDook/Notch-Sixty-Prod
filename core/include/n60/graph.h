@@ -34,7 +34,7 @@ extern "C" {
 #endif
 
 /* Bumped on any incompatible change to a struct or function below. */
-#define N60_GRAPH_ABI_VERSION 28u
+#define N60_GRAPH_ABI_VERSION 29u
 
 typedef struct n60_graph n60_graph; /* opaque */
 
@@ -151,7 +151,7 @@ typedef enum n60_stage_kind {
 
 /* Cleanup (ABI v22, E6 S12a). The stereo kernel's pre-EQ block as one pair stage: DC offset filter, infrasonic high-pass
  * cascade, mains hum detector tap and mains notch bank, in that order, with the kernel's arithmetic. Lanes: a pair
- * (laneA, laneB, laneMask 0). paramCount 26, every parameter live (posted with n60_graph_post_params, applied at block
+ * (laneA, laneB, laneMask 0), or from ABI v29 one lane (laneA == laneB), which an N-channel layout uses for its centre. paramCount 26, every parameter live (posted with n60_graph_post_params, applied at block
  * start; a changed filter redesigns its coefficients on the realtime thread: at most 8 biquads, 16 notches, 25 oscillator
  * steps, no allocation):
  *  [0] DC offset filter on (0/1; 0.5 Hz corner)  [1] infrasonic high-pass on (0/1)  [2] infrasonic cutoff Hz (10..30,
