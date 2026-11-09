@@ -1699,15 +1699,32 @@ void runDeltaSubtract(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t 
         }
         // Fractional alignment (a protection look-ahead that is not a whole number of frames): ring[pos] is the input
         // delayed by the whole part; the taps read it from kDeltaTaps / 2 - 1 frames newer to kDeltaTaps / 2 older.
+        // The 32 history samples newest-first end at `newest`; when they do not wrap the ring they are a contiguous run read
+        // backwards, so the dot product has no per-tap wrap test. The float32 accumulator is enough: the taps sum to 1
+        // (designDeltaTaps normalises them) and the 32 products are of one signal, so the rounding error is a few 1e-7
+        // relative to the signal, far below the 24-bit-equivalent floor of the delta being listened to. Four partial sums
+        // keep the loop free of a serial dependency.
         const float *tap = deltaTaps(&d, k);
+        constexpr uint32_t kOldest = kDeltaTaps - 1;
         for (uint32_t i = 0; i < frames; ++i) {
-            uint32_t idx = (pos + kDeltaTaps / 2 - 1) % cap;
-            float acc = 0.0f;
-            for (uint32_t j = 0; j < kDeltaTaps; ++j) {
-                acc += ring[idx] * tap[j];
-                idx = idx == 0 ? cap - 1 : idx - 1;
+            uint32_t newest = pos + kDeltaTaps / 2 - 1;
+            if (newest >= cap) newest -= cap;
+            const float *run;
+            float window[kDeltaTaps];
+            if (newest >= kOldest) {
+                run = ring + (newest - kOldest);  // oldest..newest, ascending
+            } else {  // the run wraps (rare: once per ring revolution); gather it in the same order
+                for (uint32_t j = 0; j < kDeltaTaps; ++j) window[kOldest - j] = ring[newest >= j ? newest - j : newest + cap - j];
+                run = window;
             }
-            out[i] -= acc;
+            float a0 = 0.0f, a1 = 0.0f, a2 = 0.0f, a3 = 0.0f;
+            for (uint32_t j = 0; j < kDeltaTaps; j += 4) {
+                a0 += run[kOldest - j] * tap[j];
+                a1 += run[kOldest - j - 1] * tap[j + 1];
+                a2 += run[kOldest - j - 2] * tap[j + 2];
+                a3 += run[kOldest - j - 3] * tap[j + 3];
+            }
+            out[i] -= (a0 + a1) + (a2 + a3);
             if (++pos == cap) pos = 0;
         }
     }

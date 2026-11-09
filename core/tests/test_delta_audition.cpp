@@ -396,6 +396,52 @@ void testMaskCarry(double rate) {
     check(finite, "a rebuild to another lane set runs", rate);
     n60_graph_retire(g);
 }
+
+// Ring sizing at the largest sizes: 16 masked lanes, maxBlockFrames 4096 and a delay of 100 on the last lane at 384 kHz
+// (and every other rate). A ring of exactly block + delay builds and gives the exact delta over full-size blocks; one
+// frame less is refused.
+void testSixteenLanesMaxBlock(double rate) {
+    constexpr uint32_t kN = 16, kMaxBlock = 4096, kDelay = 100;
+    const uint64_t mask = 0xFFFFu;
+    const float half[1] = {0.5f}, dly[1] = {(float)kDelay};
+    for (uint32_t cap : {kMaxBlock + kDelay - 1, kMaxBlock + kDelay}) {
+        n60_stage_desc st[4];
+        st[0] = maskStage(N60_STAGE_DELTA_CAPTURE, 1, mask, kOne, 1, cap);
+        st[1] = stage(N60_STAGE_GAIN, 2, N60_LANE_ALL, 0, half, 1);
+        st[2] = stage(N60_STAGE_DELAY, 3, kN - 1, 0, dly, 1, 256);
+        st[3] = maskStage(N60_STAGE_DELTA_SUBTRACT, 4, mask, kOne, 1);
+        n60_graph_desc d = descN(rate, st, 4, kN);
+        d.maxBlockFrames = kMaxBlock;
+        n60_graph *g = nullptr;
+        const n60_status status = n60_graph_build(&d, &g);
+        if (cap < kMaxBlock + kDelay) {
+            check(status == N60_STATUS_BAD_ARGUMENT, "16 lanes: a ring one frame short is refused", rate);
+            continue;
+        }
+        check(status == N60_STATUS_OK, "16 lanes at max block: the ring builds", rate);
+        if (!g) return;
+        const size_t frames = 2 * kMaxBlock;
+        std::vector<Vec> in(kN, Vec(frames)), out(kN, Vec(frames));
+        for (uint32_t k = 0; k < kN; ++k)
+            for (size_t i = 0; i < frames; ++i) in[k][i] = 0.1f * (float)std::sin(2 * M_PI * (200.0 + 90.0 * k) * double(i) / rate);
+        for (size_t off = 0; off < frames; off += kMaxBlock) {
+            const float *ip[kN];
+            float *op[kN];
+            for (uint32_t k = 0; k < kN; ++k) { ip[k] = in[k].data() + off; op[k] = out[k].data() + off; }
+            n60_graph_process(g, ip, op, kMaxBlock);
+        }
+        bool exact = true;
+        for (uint32_t k = 0; k < kN; ++k) {
+            const uint32_t delay = k == kN - 1 ? kDelay : 0;
+            for (size_t i = 0; i < frames; ++i) {
+                const float aligned = i >= delay ? in[k][i - delay] : 0.0f;
+                exact = exact && out[k][i] == (i >= delay ? 0.5f * aligned - aligned : 0.0f);
+            }
+        }
+        check(exact, "16 lanes at max block: exact delta", rate);
+        n60_graph_retire(g);
+    }
+}
 }  // namespace
 
 int main() {
@@ -407,6 +453,12 @@ int main() {
         testProtectionLatency(rate, 1.0f, 0.01);
         testProtectionLatency(rate, 1.7f, 0.01);
         testProtectionLatency(rate, 2.3f, 0.01);
+        // One oversampled sample of look-ahead (the smallest fraction): the fractional path at its smallest whole delay.
+        // The whole delay is the half-band latency (at least 32 frames) plus the rounded look-ahead, so deltaFinalize's
+        // refusal of a fractional lane with a whole delay below 15 frames cannot be reached through a protection stage;
+        // it is a defensive guard.
+        testProtectionLatency(rate, 0.0005f, 0.01);
+        testSixteenLanesMaxBlock(rate);
         testMaskExact(rate);
         testMaskValidation(rate);
         testMaskCarry(rate);
