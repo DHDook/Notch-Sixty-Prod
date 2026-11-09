@@ -63,6 +63,8 @@ harness() {
 
 # build_core_objs: compiles libn60core once into CORE_OBJS (CORE_OK=0 on failure).
 # The realtime bridge calls n60_graph_*, so bridge harnesses link these objects too.
+# shellcheck source=ci/core_sources.sh
+source "$(dirname "${BASH_SOURCE[0]}")/core_sources.sh"
 CORE_BUILT=0
 CORE_OK=0
 CORE_OBJS=()
@@ -71,8 +73,7 @@ build_core_objs() {
     CORE_BUILT=1
     CORE_OK=1
     local src
-    for src in graph snapshot fft stages_dsp conv/nufir stages_system stages_matrix stages_generator stages_cleanup stages_image stages_loudness stages_multiband stages_route fold layout \
-        measure/offline_fft measure/ess measure/deconvolve measure/reference_room measure/timing measure/distortion measure/decay measure/waterfall measure/monitor_ring measure/spl measure/rta correct/minphase correct/design correct/synth correct/bass correct/multisub_search xover/xover; do
+    for src in "${CORE_SOURCES[@]}"; do
         local obj="$OUT/n60core_${src//\//_}.o"
         if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -fno-exceptions -fno-rtti -Icore/include -Icore/src \
             -c "core/src/$src.cpp" -o "$obj"; then
