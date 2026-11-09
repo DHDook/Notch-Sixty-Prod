@@ -86,4 +86,46 @@ final class UnifiedGraphMultibandTests: XCTestCase {
         XCTAssertEqual(params[20], 80, accuracy: 0.01)
         XCTAssertEqual(params[25], 3, accuracy: 0.001)
     }
+
+    /// E6 S12h (G26): three-band compression, the graph against the kernel on a low, mid and high programme signal.
+    /// The compressed level of each band must match the kernel within 0.05 dB at the eight rates.
+    func testThreeBandCompressionLevelMatchesKernelAtEveryRate() throws {
+        for rate in EQRenderHarness.rates {
+            let engine = try engine(rate: rate)
+            var configuration = DynamicsConfiguration()
+            configuration.multibandCompressor.enabled = true
+            configuration.multibandCompressor.lowThresholdDB = -28
+            configuration.multibandCompressor.midThresholdDB = -30
+            configuration.multibandCompressor.highThresholdDB = -32
+            configuration.multibandCompressor.midRatio = 4
+            try engine.replaceDynamicsConfiguration(configuration)
+            var snapshot = try engine.stereoTransportStartGraph(sampleRate: rate)
+            let graphConfiguration = try XCTUnwrap(UnifiedGraphTranslator.stereoConfiguration(snapshot: &snapshot, sampleRate: rate))
+            let host = try UnifiedGraphHost(spec: try graphConfiguration.makeSpec())
+            let kernel = try XCTUnwrap(N60RenderKernelCreate())
+            defer { N60RenderKernelDestroy(kernel) }
+            XCTAssertTrue(N60RenderKernelPublishSnapshot(kernel, snapshot))
+            for (hz, amplitude) in [(80.0, 0.25), (1_000.0, 0.25), (6_000.0, 0.25)] {
+                let input = tone(rate, hz, amplitude)
+                var kernelOut = [Float](repeating: 0, count: input.count)
+                var left: Float = 0, right: Float = 0
+                for (frame, x) in input.enumerated() {
+                    N60RenderKernelProcessStereoFrame(kernel, x, x, &left, &right)
+                    kernelOut[frame] = left
+                }
+                var graphOut: [Float] = []
+                var position = 0
+                while position < input.count {
+                    let count = min(512, input.count - position)
+                    let block = Array(input[position..<position + count])
+                    graphOut += try host.processOffline(input: [block, block], frames: count)[0]
+                    position += count
+                }
+                let kernelRMS = rms(kernelOut), graphRMS = rms(graphOut)
+                XCTAssertGreaterThan(kernelRMS, 0)
+                let differenceDB = 20 * log10(graphRMS / kernelRMS)
+                XCTAssertEqual(differenceDB, 0, accuracy: 0.05, "\(hz) Hz level, graph against kernel at \(rate)")
+            }
+        }
+    }
 }
