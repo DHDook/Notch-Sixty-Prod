@@ -74,6 +74,29 @@ extension QuietZoneRuntimeHost {
 final class ProfileAncFeed: @unchecked Sendable {
     let pointer: OpaquePointer
     static let channelCount: UInt32 = 5
+    /// E6 S12h part 2b: the stereo session's direct feed has four channels: the programme pair and the two anti-noise
+    /// sources (no sub lane, no splitter).
+    static let stereoChannelCount: UInt32 = 4
+    /// The channel count this feed's EXTERNAL stage runs over.
+    let channels: UInt32
+
+    /// E6 S12h part 2b: the stereo session's feed. The anti-noise pair goes straight to the two main actuators, as the
+    /// stereo kernel adds it. Created disarmed; nothing plays until `N60AncLaneFeedArm` and a lease.
+    init?(stereoSampleRate sampleRate: Double, peakLimit: Float = 0.5, fadeInSeconds: Double? = nil) {
+        var config = N60AncLaneFeedConfig()
+        config.sampleRate = sampleRate
+        config.maxBlockFrames = UInt32(N60AncLaneFeedMaxBlockFrames)
+        config.channels = Self.stereoChannelCount
+        config.programmeLeft = 0; config.programmeRight = 1
+        config.sourceLeft = 2; config.sourceRight = 3
+        config.directStereo = true
+        config.peakLimit = peakLimit
+        config.feedForward = true
+        if let fadeInSeconds { config.fadeInSeconds = fadeInSeconds }
+        guard let created = N60AncLaneFeedCreate(&config) else { return nil }
+        pointer = created
+        channels = Self.stereoChannelCount
+    }
 
     init?(sampleRate: Double, splitter: N60SpeakerBusSplitterSnapshot, peakLimit: Float = 0.5, fadeInSeconds: Double? = nil) {
         var config = N60AncLaneFeedConfig()
@@ -88,6 +111,7 @@ final class ProfileAncFeed: @unchecked Sendable {
         if let fadeInSeconds { config.fadeInSeconds = fadeInSeconds }
         guard let created = N60AncLaneFeedCreate(&config) else { return nil }
         pointer = created
+        channels = Self.channelCount
     }
 
     deinit { N60AncLaneFeedDestroy(pointer) }

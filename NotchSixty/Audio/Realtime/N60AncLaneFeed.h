@@ -31,7 +31,7 @@ extern "C" {
 /*
  * E26 S7b (G1): the host feed for the anti-noise lanes. C interface over a C++20 core (n60_anc_lane_feed.cpp),
  * no Apple framework. It is the profile graph's EXTERNAL processor (position 12.5, after the playback DSP and
- * before BASS_MGMT): `N60AncLaneFeedProcess` has the n60_external_process_fn signature. Its channels are the
+ * before BASS_MGMT): `N60AncLaneFeedProcess` has the N60AncLaneFeedInnerFn signature. Its channels are the
  * programme left and right (read, passed through untouched) and three actuator source lanes (written): the left
  * main, the right main and the sub. The graph's ANC_GUARD, ANC_INJECT and the output stages take them from there.
  *
@@ -66,6 +66,10 @@ extern "C" {
 
 typedef struct N60AncLaneFeed N60AncLaneFeed;
 
+/* The graph's external-processor callback signature (n60/graph.h), repeated so this header stays standalone. */
+typedef int (*N60AncLaneFeedInnerFn)(void * N60_ALF_NULLABLE context, const float * N60_ALF_NONNULL const * N60_ALF_NONNULL in,
+                                     float * N60_ALF_NONNULL const * N60_ALF_NONNULL out, uint32_t channels, uint32_t frames);
+
 enum {
     N60AncLaneFeedMaxBlockFrames = 8192,
     N60AncLaneFeedMaxChannels = 16,
@@ -87,6 +91,8 @@ typedef struct {
     N60SpeakerBusSplitterSnapshot splitter; /* enabled mains + sub (N60SpeakerCrossoverModeMainsSub) */
     float peakLimit;                 /* linear full scale per source lane, (0, 1]; 0 = 1 */
     double fadeInSeconds;            /* 0 = default 3 s; else 0.01 to 30 */
+    bool directStereo;               /* E6 S12h part 2b: channels >= 4, no sub lane (sourceSub unused), no splitter; the
+                                        anti-noise pair is written to sourceLeft/Right unsplit, as the stereo kernel adds it */
     bool feedForward;                /* create the live feed-forward filter and its reference ring */
 } N60AncLaneFeedConfig;
 
@@ -148,6 +154,15 @@ void N60AncLaneFeedDestroy(N60AncLaneFeed * N60_ALF_NULLABLE feed);
    other channels are left alone. in and out may be the same pointers. Returns non-zero on success. */
 int N60AncLaneFeedProcess(void * N60_ALF_NULLABLE context, const float * N60_ALF_NONNULL const * N60_ALF_NONNULL in,
                           float * N60_ALF_NONNULL const * N60_ALF_NONNULL out, uint32_t channels, uint32_t frames);
+
+/* Control thread, IO stopped or the callback not running. Runs `process` in place on lanes 0 and 1 (2 channels, the
+   programme pair; programmeLeft/Right must be 0 and 1) at the start of every Process, before the anti-noise is made, so
+   the AU rack can share the graph's single EXTERNAL stage. Its failure fails the block. NULL clears. Returns false when
+   the lane layout does not allow it. */
+/* Control thread, only while the graph that runs this feed is not rendering (a fresh graph before attach): the function and
+   context are plain fields read by the callback. */
+bool N60AncLaneFeedSetInnerProcessor(N60AncLaneFeed * N60_ALF_NONNULL feed, N60AncLaneFeedInnerFn N60_ALF_NULLABLE process,
+                                     void * N60_ALF_NULLABLE context);
 
 /* Control thread, single writer. The tonal canceller's snapshot (enabled, tones, caps, arm generation); the
    audio thread takes the newest at the start of its next block, as the kernel does on a snapshot change. */

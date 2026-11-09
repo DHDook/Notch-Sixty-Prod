@@ -174,6 +174,19 @@ bool N60RealtimeAudioBridgeSetUnifiedGraph(
     uint32_t maxFrames,
     double sampleRate
 );
+// E6 S12h part 2b. As SetUnifiedGraph for a graph with `lanes` (2...8) input and output lanes: the stereo graph that
+// carries the Quiet Zone feed's appended lanes (programme pair, then anti-noise sources and the error lane). Input
+// lanes past the second are zero, the output is read from lanes 0 and 1. `lanes` is fixed by the first attach.
+bool N60RealtimeAudioBridgeSetUnifiedGraphLanes(
+    N60RealtimeAudioBridge * _Nonnull bridge,
+    void * _Nullable graph,
+    uint32_t maxFrames,
+    double sampleRate,
+    uint32_t lanes
+);
+// E6 S12h part 2b. Control thread. While true the graph carries live anti-noise and a kernel/graph hand-over switches in
+// one frame after its warm-up instead of crossfading, so two renders of the same anti-noise never mix.
+void N60RealtimeAudioBridgeSetUnifiedGraphAncLive(N60RealtimeAudioBridge * _Nonnull bridge, bool live);
 // Control thread. Publishes the graph's path latency (n60_graph_latency_frames) for the fade
 // alignment. Call before the attach and after every graph update. The applied alignment is
 // capped at a quarter of the 20 ms fade (and by the warm-up and a 16384-frame ring).
@@ -188,6 +201,10 @@ int32_t N60RealtimeAudioBridgeUnifiedGraphAlignmentFrames(const N60RealtimeAudio
 // Returns false without a configured rack or when the graph refuses. Call after ConfigureAudioUnitRack and before the
 // graph is attached. Unbind (before the rack or the graph is freed) clears the callback.
 bool N60RealtimeAudioBridgeBindRackToGraph(N60RealtimeAudioBridge * _Nonnull bridge, void * _Nonnull graph);
+// E6 S12h part 2b. As BindRackToGraph for a graph whose EXTERNAL stage is an N60AncLaneFeed (stereo Quiet Zone): the rack
+// runs first inside the feed as its inner processor (lanes 0 and 1), so the two share the single stage. Unbind clears
+// only the inner processor. `feed` is the N60AncLaneFeed pointer and must outlive the binding.
+bool N60RealtimeAudioBridgeBindRackToAncFeed(N60RealtimeAudioBridge * _Nonnull bridge, void * _Nonnull graph, void * _Nonnull feed);
 // Lifetime: ReleaseUnifiedGraph and Destroy unbind automatically, so call ReleaseUnifiedGraph (or Unbind) before the graph is destroyed. IO must be stopped while binding or unbinding.
 void N60RealtimeAudioBridgeUnbindRackFromGraph(N60RealtimeAudioBridge * _Nonnull bridge, void * _Nullable graph);
 // Drops the graph reference and returns the callback to kernel-only. IO must be stopped.

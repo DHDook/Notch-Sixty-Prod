@@ -445,7 +445,25 @@ final class CoreAudioTransportSession {
     /// E27 S3b: set by the engine while it republishes an EQ change (bypass, A/B, audition), so the
     /// rebuild crossfade uses the linear law. Every other republish keeps the equal-power law.
     var linearFadeForEQRepublish = false
-    private var unifiedGraphHost: UnifiedGraphHost?
+    private(set) var unifiedGraphHost: UnifiedGraphHost?
+    /// E6 S12h part 2b: set once by the engine, before the first publish, when this stereo session's graph carries the
+    /// Quiet Zone feed (the unified graph renders the anti-noise; the kernel's own copy is bypassed). Never changes
+    /// after the first graph is built.
+    var hostsQuietZoneFeedRequested = false
+    /// The hosted feed's control-plane record (authorisation mirror, arm state, trips). See `StereoHostedQuietZone.swift`.
+    let ancHostState = StereoAncHostState()
+    /// Serialises graph refreshes (a guard re-arm races the engine's publishes otherwise).
+    private let graphRefreshLock = NSRecursiveLock()
+    /// The `QuietZoneRuntimeHost` the engine talks to: the feed while the graph carries it, the kernel otherwise.
+    private var quietZoneRuntimeHostStorage: (any QuietZoneRuntimeHost)?
+    /// The Quiet Zone control surface of this session (created once, under the refresh lock).
+    var quietZoneRuntimeHost: any QuietZoneRuntimeHost {
+        graphRefreshLock.lock(); defer { graphRefreshLock.unlock() }
+        if let existing = quietZoneRuntimeHostStorage { return existing }
+        let created = StereoHostedQuietZone(session: self)
+        quietZoneRuntimeHostStorage = created
+        return created
+    }
     /// E27 S2c (design note 16): whether the stereo graph carries the Equalizer analyser taps, and which are wanted
     /// (bit 0 the EQ tap, bit 1 the after-dynamics tap). The demand is a live parameter; installing is a rebuild.
     private var analyserTapsInstalled = false
@@ -1494,6 +1512,7 @@ final class CoreAudioTransportSession {
     private func refreshUnifiedGraph(
         for snapshot: N60DSPGraphSnapshot, headphone candidate: HeadphoneDeviceProfileConfiguration? = nil
     ) -> Bool {
+        graphRefreshLock.lock(); defer { graphRefreshLock.unlock() }
         guard let bridge else { return false }
         lastGraphSnapshot = snapshot
         unifiedGraphFallbackReason = nil
@@ -1502,6 +1521,8 @@ final class CoreAudioTransportSession {
         let profile = candidate ?? headphoneProfile
         let kernelWouldBeWrong = kernelHeadphoneStale || (headphoneDSPConfigured && profile != kernelHeadphoneProfile)
         func refuse(_ reason: UnifiedGraphFallbackReason) -> Bool {
+            // The kernel plays the anti-noise from here (its own snapshot copy), so the feed goes silent first.
+            silenceHostedQuietZoneFeed()
             unifiedGraphFallbackReason = reason
             // The kernel never plays the generator, so a refusal ends the noise instead of leaving stale state.
             liveGenerator = nil
@@ -1510,6 +1531,7 @@ final class CoreAudioTransportSession {
         }
         guard unifiedGraphEnabled else {
             if kernelWouldBeWrong { return false }
+            silenceHostedQuietZoneFeed()
             detachUnifiedGraph()
             return true
         }
@@ -1517,7 +1539,15 @@ final class CoreAudioTransportSession {
         // EXTERNAL stage, the speaker-bus split in the bridge). A stereo headphone profile is the HEADPHONE stage
         // and ear delays (E6 S9d); one the stage cannot reproduce, or a kernel-only headphone setup, keeps the kernel.
         if headphoneDSPConfigured, headphoneProfile == nil { return refuse(.headphoneDSP) }
+        // E6 S12h part 2b: with the feed hosted, the graph renders the Quiet Zone. The eligibility check sees the snapshot
+        // with the kernel's copy bypassed; authorisation is the snapshot's own `enabled` (set only under an armed
+        // `LiveTreatmentArm`), and nothing else.
+        let hosting = hostsQuietZoneFeedRequested && !headphoneDSPConfigured
+            && (unifiedGraphHost == nil || unifiedGraphHost?.retainedResource is ProfileAncFeed)
+        let wantAuthorised = hosting && snapshot.activeQuietZone.enabled
+        if hosting, !wantAuthorised { silenceHostedQuietZoneFeed() }
         var mutable = snapshot
+        if hosting { mutable.activeQuietZone = N60ActiveQuietZoneSnapshotMakeBypassed() }
         var configuration: UnifiedGraphConfiguration
         switch UnifiedGraphTranslator.stereoEligibility(
             snapshot: &mutable, sampleRate: outputFormat.sampleRate,
@@ -1536,6 +1566,13 @@ final class CoreAudioTransportSession {
             configuration.analyserTaps = UnifiedGraphAnalyserTaps(
                 eqDemand: analyserTapDemand & 1 != 0, dynDemand: analyserTapDemand & 2 != 0)
         }
+        if hosting {
+            let frames = UInt32(min(Double(N60_GRAPH_MAX_DELAY_FRAMES), max(1, (outputFormat.sampleRate * 0.1).rounded())))
+            configuration.ancActuators = UnifiedGraphAncActuators(
+                actuators: [.init(targetLane: 0), .init(targetLane: 1)], authorised: wantAuthorised, captureFrames: frames,
+                hostFed: true, rearmRevision: ancHostState.rearmRevision, stereoDirect: true,
+                externalLatencyFrames: UInt32(clamping: max(audioUnitRack?.latencyFrames ?? 0, 0)))
+        }
         guard var spec = try? configuration.makeSpec() else { return refuse(.specRejected) }
         var earDelayFrames: [UInt32] = [0, 0]
         if headphoneDSPConfigured, let profile {
@@ -1546,21 +1583,34 @@ final class CoreAudioTransportSession {
                 earDelayFrames = applied.earDelayFrames
             }
         }
-        if let audioUnitRack {
+        // With the feed hosted the graph's one EXTERNAL stage is the feed's; the rack runs inside it (its latency is on
+        // that stage), so no second EXTERNAL stage is inserted.
+        if let audioUnitRack, !hosting {
             spec = spec.insertingExternalRackStage(latencyFrames: UInt32(clamping: max(audioUnitRack.latencyFrames, 0)))
         }
         do {
             if let host = unifiedGraphHost {
                 try host.apply(spec, linearFade: linearFadeForEQRepublish)
             } else {
-                unifiedGraphHost = try UnifiedGraphHost(spec: spec)
+                let created = try UnifiedGraphHost(spec: spec)
+                if hosting, !installQuietZoneFeed(on: created) {
+                    created.release()
+                    throw UnifiedGraphError.unsupportedConfiguration("Quiet Zone feed")
+                }
+                unifiedGraphHost = created
             }
             guard let host = unifiedGraphHost, let raw = host.rawGraph else { return true }
             // E6 S8e: the graph's EXTERNAL stage calls this transport's AU rack (once per graph; the graph
             // is attached only after this succeeds).
             if audioUnitRack != nil, rackBoundGraph != raw {
-                guard N60RealtimeAudioBridgeBindRackToGraph(bridge, raw) else {
-                    return refuse(.attachFailed)
+                if hosting, let feed = host.retainedResource as? ProfileAncFeed {
+                    guard N60RealtimeAudioBridgeBindRackToAncFeed(bridge, raw, UnsafeMutableRawPointer(feed.pointer)) else {
+                        return refuse(.attachFailed)
+                    }
+                } else {
+                    guard N60RealtimeAudioBridgeBindRackToGraph(bridge, raw) else {
+                        return refuse(.attachFailed)
+                    }
                 }
                 rackBoundGraph = raw
             }
@@ -1576,10 +1626,24 @@ final class CoreAudioTransportSession {
             }.max() ?? 0
             unifiedGraphLaneTapFrames = taps
             N60RealtimeAudioBridgeSetUnifiedGraphLatency(bridge, host.latencyFrames &- min(host.latencyFrames, taps))
+            // Live anti-noise on the graph is never crossfaded against a second render of itself (see the bridge).
             if !N60RealtimeAudioBridgeUnifiedGraphActive(bridge) {
-                guard N60RealtimeAudioBridgeSetUnifiedGraph(bridge, raw, spec.maxBlockFrames, spec.sampleRate) else {
+                guard N60RealtimeAudioBridgeSetUnifiedGraphLanes(
+                    bridge, raw, spec.maxBlockFrames, spec.sampleRate, UInt32(configuration.channelCount)
+                ) else {
                     return refuse(.attachFailed)
                 }
+            }
+            // After the attach, so the flag lands on the live attachment on the very first hand-over too.
+            N60RealtimeAudioBridgeSetUnifiedGraphAncLive(bridge, wantAuthorised)
+            if hosting, let feed = host.retainedResource as? ProfileAncFeed {
+                N60AncLaneFeedSetProgrammeScale(
+                    feed.pointer, max(0, snapshot.outputGainLinear * snapshot.masterGainLinear))
+                var tonal = snapshot.activeQuietZone
+                if !N60AncLaneFeedSetTonalSnapshot(feed.pointer, &tonal) {
+                    return refuse(.specRejected)
+                }
+                armHostedQuietZoneFeed(feed, authorised: wantAuthorised)
             }
             unifiedGraphHost?.collect()
             if let candidate { headphoneProfile = candidate }
@@ -1589,19 +1653,91 @@ final class CoreAudioTransportSession {
         }
     }
 
+    // MARK: Hosted Quiet Zone feed (E6 S12h part 2b)
+
+    /// Registers the stereo feed as the graph's EXTERNAL processor (control thread, IO stopped, once per graph). The host
+    /// keeps it alive until the graph is retired.
+    private func installQuietZoneFeed(on host: UnifiedGraphHost) -> Bool {
+        guard let raw = host.rawGraph, let feed = ProfileAncFeed(stereoSampleRate: outputFormat.sampleRate) else { return false }
+        let process = unsafeBitCast(
+            N60AncLaneFeedProcess as @convention(c) (
+                UnsafeMutableRawPointer?, UnsafePointer<UnsafePointer<Float>>, UnsafePointer<UnsafeMutablePointer<Float>>,
+                UInt32, UInt32
+            ) -> Int32,
+            to: n60_external_process_fn.self)
+        guard n60_graph_set_external_processor(
+            OpaquePointer(raw), process, UnsafeMutableRawPointer(feed.pointer), feed.channels
+        ) == N60_STATUS_OK else { return false }
+        host.retainedResource = feed
+        return true
+    }
+
+    /// The feed, while this session's graph carries it and renders (nil when the kernel renders).
+    var hostedQuietZoneFeed: ProfileAncFeed? {
+        graphRefreshLock.lock(); defer { graphRefreshLock.unlock() }
+        guard hostsQuietZoneFeedRequested, unifiedGraphActive else { return nil }
+        return unifiedGraphHost?.retainedResource as? ProfileAncFeed
+    }
+
+    /// Fades the feed out (20 ms) and drops its lease. Idempotent.
+    private func silenceHostedQuietZoneFeed() {
+        graphRefreshLock.lock(); defer { graphRefreshLock.unlock() }
+        guard ancHostState.takeArmed(), let feed = unifiedGraphHost?.retainedResource as? ProfileAncFeed else { return }
+        N60AncLaneFeedDisarm(feed.pointer)
+        N60AncLaneFeedReleaseLease(feed.pointer)
+    }
+
+    /// Arms the feed on the transition to authorised only (its 3 s fade-in and the lease still gate the output).
+    private func armHostedQuietZoneFeed(_ feed: ProfileAncFeed, authorised: Bool) {
+        graphRefreshLock.lock(); defer { graphRefreshLock.unlock() }
+        if authorised {
+            if ancHostState.markArmed() { N60AncLaneFeedArm(feed.pointer) }
+        } else {
+            silenceHostedQuietZoneFeed()
+        }
+    }
+
+    /// What the kernel receives: the original, or with its own Quiet Zone bypassed while the graph renders it.
+    private func snapshotForKernel(_ snapshot: N60DSPGraphSnapshot) -> N60DSPGraphSnapshot {
+        guard hostedQuietZoneFeed != nil else { return snapshot }
+        var copy = snapshot
+        copy.activeQuietZone = N60ActiveQuietZoneSnapshotMakeBypassed()
+        return copy
+    }
+
+    /// Immediate revoke (arm switch): the feed fades out now; the next graph publish carries the unauthorised record.
+    func revokeHostedQuietZone() { silenceHostedQuietZoneFeed() }
+
+    /// Sum of the stereo graph guards' trip counts.
+    func hostedGuardTripCount() -> UInt64 {
+        graphRefreshLock.lock(); defer { graphRefreshLock.unlock() }
+        let ids = (0..<UnifiedGraphAncActuators.stereoDirectActuatorCount).map { UnifiedGraphAncActuators.guardStageBase + UInt32($0) }
+        return unifiedGraphHost?.guardTripCount(stageIds: ids) ?? 0
+    }
+
+    /// Re-arms the graph guards (a live revision bump through a republish of the newest snapshot).
+    func rearmHostedGuards() {
+        guard hostedQuietZoneFeed != nil, let snapshot = lastGraphSnapshot else { return }
+        ancHostState.bumpRearmRevision()
+        refreshUnifiedGraph(for: snapshot)
+    }
+
     private func detachUnifiedGraph() {
         unifiedGraphLaneTapFrames = 0
         if let bridge, N60RealtimeAudioBridgeUnifiedGraphActive(bridge) {
+            N60RealtimeAudioBridgeSetUnifiedGraphAncLive(bridge, false)
             _ = N60RealtimeAudioBridgeSetUnifiedGraph(bridge, nil, 0, 0)
         }
     }
 
 
-    func publishDSPGraph(_ snapshot: N60DSPGraphSnapshot) throws {
+    func publishDSPGraph(_ original: N60DSPGraphSnapshot) throws {
         guard let bridge else { throw CoreAudioTransportError.dspGraphPublicationFailed }
-        if !refreshUnifiedGraph(for: snapshot), kernelHeadphoneStale {
+        if !refreshUnifiedGraph(for: original), kernelHeadphoneStale {
             throw CoreAudioTransportError.dspGraphPublicationFailed
         }
+        // The kernel never plays a Quiet Zone the graph renders.
+        let snapshot = snapshotForKernel(original)
         if !isOutputStarted || !isCaptureStarted {
             // E4 S15: IO is stopped, so the howl guard can be created here. Always on; the guard
             // does nothing while no anti-noise plays.
@@ -1629,14 +1765,15 @@ final class CoreAudioTransportSession {
         graphPublicationCoordinator.enqueuePublish(snapshot)
     }
 
-    func transitionDSPGraph(_ snapshot: N60DSPGraphSnapshot) throws {
+    func transitionDSPGraph(_ original: N60DSPGraphSnapshot) throws {
         guard bridge != nil else { throw CoreAudioTransportError.dspGraphPublicationFailed }
-        if !refreshUnifiedGraph(for: snapshot), kernelHeadphoneStale {
+        if !refreshUnifiedGraph(for: original), kernelHeadphoneStale {
             throw CoreAudioTransportError.dspGraphPublicationFailed
         }
+        let snapshot = snapshotForKernel(original)
 
         if !isOutputStarted || !isCaptureStarted {
-            try publishDSPGraph(snapshot)
+            try publishDSPGraph(original)
             return
         }
 
@@ -1710,8 +1847,10 @@ final class CoreAudioTransportSession {
             self.bridge = nil
         }
         // The host outlives the bridge that rendered it; release it only after destroy.
+        graphRefreshLock.lock()
         unifiedGraphHost?.release()
         unifiedGraphHost = nil
+        graphRefreshLock.unlock()
         rackBoundGraph = nil
         audioUnitRack = nil
         graphPublicationCoordinator = nil

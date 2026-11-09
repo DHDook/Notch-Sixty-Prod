@@ -66,6 +66,9 @@ static_assert(static_cast<int>(N60AncLaneFeedDriveRingFrames) >= static_cast<int
 struct N60AncLaneFeed {
     N60AncLaneFeedConfig config{};
     uint32_t chunkFrames{0};
+    // Optional inner processor (the AU rack) run in place on lanes 0 and 1 before the anti-noise is made.
+    N60AncLaneFeedInnerFn inner{nullptr};
+    void *innerContext{nullptr};
 
     // Tonal canceller.
     N60ActiveQuietZoneRuntime tonal{};
@@ -121,9 +124,10 @@ namespace {
 
 bool laneIndexesValid(const N60AncLaneFeedConfig &c) {
     const uint32_t lanes[5] = {c.programmeLeft, c.programmeRight, c.sourceLeft, c.sourceRight, c.sourceSub};
-    for (uint32_t i = 0; i < 5; ++i) {
+    const uint32_t count = c.directStereo ? 4u : 5u;  // direct stereo has no sub lane
+    for (uint32_t i = 0; i < count; ++i) {
         if (lanes[i] >= c.channels) return false;
-        for (uint32_t j = i + 1; j < 5; ++j) {
+        for (uint32_t j = i + 1; j < count; ++j) {
             if (lanes[i] == lanes[j]) return false;
         }
     }
@@ -244,7 +248,7 @@ void renderChunk(N60AncLaneFeed &f, const float *const *in, float *const *out, u
     const float *progR = in[c.programmeRight] + offset;
     float *srcL = out[c.sourceLeft] + offset;
     float *srcR = out[c.sourceRight] + offset;
-    float *srcS = out[c.sourceSub] + offset;
+    float *srcS = c.directStereo ? nullptr : out[c.sourceSub] + offset;
     const bool haveFF = f.ff != nullptr;
     uint64_t clamps = 0;
     uint64_t nonFinite = 0;
@@ -299,18 +303,26 @@ void renderChunk(N60AncLaneFeed &f, const float *const *in, float *const *out, u
         if (i < quietZoneRoom) f.tapQuietZone.data[(quietZoneAt + i) & (f.tapQuietZone.capacity - 1u)] = {cl, cr};
         if (i < driveRoom) f.tapDrive.data[(driveAt + i) & (f.tapDrive.capacity - 1u)] = {dl, dr};
 
-        float buses[N60_SPLITTER_BUS_COUNT];
-        N60SpeakerBusSplitterProcess(&f.splitter, cl, cr, buses);
-        float laneL = buses[N60_SPLITTER_BUS_LEFT_LOW] + buses[N60_SPLITTER_BUS_LEFT_MID]
-            + buses[N60_SPLITTER_BUS_LEFT_HIGH];
-        float laneR = buses[N60_SPLITTER_BUS_RIGHT_LOW] + buses[N60_SPLITTER_BUS_RIGHT_MID]
-            + buses[N60_SPLITTER_BUS_RIGHT_HIGH];
-        float laneS = buses[N60_SPLITTER_BUS_SUB_MONO];
+        float laneL, laneR, laneS = 0.0f;
+        if (c.directStereo) {
+            // Direct stereo (E6 S12h part 2b): the anti-noise pair goes straight to the two actuators, as the stereo
+            // kernel adds it to the left and right outputs. No splitter, no sub lane.
+            laneL = cl;
+            laneR = cr;
+        } else {
+            float buses[N60_SPLITTER_BUS_COUNT];
+            N60SpeakerBusSplitterProcess(&f.splitter, cl, cr, buses);
+            laneL = buses[N60_SPLITTER_BUS_LEFT_LOW] + buses[N60_SPLITTER_BUS_LEFT_MID]
+                + buses[N60_SPLITTER_BUS_LEFT_HIGH];
+            laneR = buses[N60_SPLITTER_BUS_RIGHT_LOW] + buses[N60_SPLITTER_BUS_RIGHT_MID]
+                + buses[N60_SPLITTER_BUS_RIGHT_HIGH];
+            laneS = buses[N60_SPLITTER_BUS_SUB_MONO];
+        }
         // Exactly zero while the gain is zero (the splitter tail would otherwise leave a decaying residue).
         if (f.gain == 0.0 && tgt == 0.0) laneL = laneR = laneS = 0.0f;
         srcL[i] = std::clamp(laneL, -limit, limit);
         srcR[i] = std::clamp(laneR, -limit, limit);
-        srcS[i] = std::clamp(laneS, -limit, limit);
+        if (srcS != nullptr) srcS[i] = std::clamp(laneS, -limit, limit);
     }
     f.previousChunk = haveFF ? n : 0u;
     if (wantAmbient) {
@@ -362,9 +374,12 @@ bool N60AncLaneFeedConfigIsValid(const N60AncLaneFeedConfig *config) {
     const N60AncLaneFeedConfig &c = *config;
     if (!(c.sampleRate >= 8000.0 && c.sampleRate <= 768000.0)) return false;
     if (c.maxBlockFrames < 16u || c.maxBlockFrames > N60AncLaneFeedMaxBlockFrames) return false;
-    if (c.channels < 5u || c.channels > N60AncLaneFeedMaxChannels || !laneIndexesValid(c)) return false;
-    if (!c.splitter.enabled || c.splitter.mode != N60SpeakerCrossoverModeMainsSub
-        || c.splitter.lowerSectionCount == 0u || c.splitter.lowerSectionCount > N60_MAX_CROSSOVER_SECTIONS) {
+    if (c.channels < (c.directStereo ? 4u : 5u) || c.channels > N60AncLaneFeedMaxChannels || !laneIndexesValid(c)) {
+        return false;
+    }
+    if (!c.directStereo
+        && (!c.splitter.enabled || c.splitter.mode != N60SpeakerCrossoverModeMainsSub
+            || c.splitter.lowerSectionCount == 0u || c.splitter.lowerSectionCount > N60_MAX_CROSSOVER_SECTIONS)) {
         return false;
     }
     if (!(c.peakLimit >= 0.0f && c.peakLimit <= 1.0f)) return false;
@@ -438,10 +453,22 @@ int N60AncLaneFeedProcess(void *context, const float *const *in, float *const *o
             return 0;
         }
     }
+    if (f->inner != nullptr && !f->inner(f->innerContext, in, out, 2u, frames)) {
+        f->faults.fetch_add(1, std::memory_order_relaxed);
+        return 0;
+    }
     for (uint32_t offset = 0; offset < frames; offset += f->chunkFrames) {
         renderChunk(*f, in, out, offset, std::min(f->chunkFrames, frames - offset));
     }
     return 1;
+}
+
+bool N60AncLaneFeedSetInnerProcessor(N60AncLaneFeed *feed, N60AncLaneFeedInnerFn process, void *context) {
+    if (feed == nullptr) return false;
+    if (process != nullptr && (feed->config.programmeLeft != 0u || feed->config.programmeRight != 1u)) return false;
+    feed->inner = process;
+    feed->innerContext = process != nullptr ? context : nullptr;
+    return true;
 }
 
 bool N60AncLaneFeedSetTonalSnapshot(N60AncLaneFeed *feed, const N60ActiveQuietZoneSnapshot *snapshot) {

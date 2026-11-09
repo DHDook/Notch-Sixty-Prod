@@ -127,7 +127,86 @@ static void runFrames(Rig &r, uint64_t frames) {
     for (uint64_t done = 0; done < frames; done += kBlock) block(r);
 }
 
+// E6 S12h part 2b: direct-stereo mode (no splitter, no sub lane) and the inner processor.
+static int innerScaleHalf(void *, const float *const *in, float *const *out, uint32_t channels, uint32_t frames) {
+    if (channels != 2) return 0;
+    for (uint32_t ch = 0; ch < 2; ++ch)
+        for (uint32_t i = 0; i < frames; ++i) out[ch][i] = in[ch][i] * 0.5f;
+    return 1;
+}
+
+static void directStereoTests() {
+    for (double rate : kRates) {
+        Rig r;
+        r.rate = rate;
+        CHECK(makeSnapshots(r, true), "snapshots at %.0f", rate);
+        N60AncLaneFeedConfig c = {};
+        c.sampleRate = rate;
+        c.maxBlockFrames = 4096;
+        c.channels = 5;  // two programme lanes, two sources, one spare (the error lane)
+        c.programmeLeft = 0; c.programmeRight = 1; c.sourceLeft = 2; c.sourceRight = 3;
+        c.peakLimit = 1.0f; c.fadeInSeconds = 0.05; c.directStereo = true;
+        CHECK(N60AncLaneFeedConfigIsValid(&c), "direct config rejected at %.0f", rate);
+        N60AncLaneFeedConfig bad = c; bad.channels = 3;
+        CHECK(!N60AncLaneFeedConfigIsValid(&bad), "direct config with 3 channels accepted");
+        bad = c; bad.sourceRight = bad.sourceLeft;
+        CHECK(!N60AncLaneFeedConfigIsValid(&bad), "duplicate lanes accepted");
+        r.feed = N60AncLaneFeedCreate(&c);
+        CHECK(r.feed != nullptr, "direct feed create at %.0f", rate);
+        if (r.feed == nullptr) continue;
+        const uint32_t ch = 5;
+        std::vector<float> lane[5];
+        const float *ip[5]; float *op[5];
+        for (uint32_t k = 0; k < ch; ++k) { lane[k].assign(kBlock, 0.0f); ip[k] = lane[k].data(); op[k] = lane[k].data(); }
+        N60AncLaneFeedSetTonalSnapshot(r.feed, &r.tonal);
+        N60AncLaneFeedSetTapDemand(r.feed, N60AncLaneFeedTapQuietZone, true);
+        // Zero until armed with a lease.
+        for (int i = 0; i < 20; ++i) {
+            CHECK(N60AncLaneFeedProcess(r.feed, ip, op, ch, kBlock) == 1, "direct process");
+            for (uint32_t k = 2; k <= 3; ++k) for (float x : lane[k]) CHECK(x == 0.0f, "direct output while disarmed");
+        }
+        N60AncLaneFeedArm(r.feed);
+        N60AncLaneFeedRenewLease(r.feed, static_cast<uint64_t>(rate * 600.0));
+        N60AncLaneFeedTapDiscard(r.feed, N60AncLaneFeedTapQuietZone);
+        double peak = 0.0, maxErr = 0.0;
+        std::vector<N60AncLaneFeedFramePair> qz(kBlock);
+        for (uint64_t done = 0; done < static_cast<uint64_t>(rate * 0.3); done += kBlock) {
+            N60AncLaneFeedProcess(r.feed, ip, op, ch, kBlock);
+            const uint32_t n = N60AncLaneFeedTapRead(r.feed, N60AncLaneFeedTapQuietZone, qz.data(), kBlock);
+            CHECK(n == kBlock, "direct tap frames %u", n);
+            for (uint32_t i = 0; i < n; ++i) {
+                maxErr = std::fmax(maxErr, std::fabs(lane[2][i] - qz[i].left));
+                maxErr = std::fmax(maxErr, std::fabs(lane[3][i] - qz[i].right));
+                peak = std::fmax(peak, std::fabs(lane[2][i]));
+            }
+        }
+        CHECK(peak > 1e-4, "direct feed made no anti-noise at %.0f (peak %g)", rate, peak);
+        CHECK(maxErr == 0.0, "direct lanes differ from the unsplit pair by %g at %.0f", maxErr, rate);
+        // Disarm silences it exactly after the 20 ms fade.
+        N60AncLaneFeedDisarm(r.feed);
+        for (uint64_t done = 0; done < static_cast<uint64_t>(rate * 0.1); done += kBlock) N60AncLaneFeedProcess(r.feed, ip, op, ch, kBlock);
+        for (uint32_t k = 2; k <= 3; ++k) for (float x : lane[k]) CHECK(x == 0.0f, "direct output after disarm at %.0f", rate);
+        // Inner processor: programme halves before the feed sees it; layout rule enforced.
+        CHECK(N60AncLaneFeedSetInnerProcessor(r.feed, innerScaleHalf, nullptr), "inner refused");
+        N60AncLaneFeedSetTapDemand(r.feed, N60AncLaneFeedTapAmbient, true);
+        for (uint32_t i = 0; i < kBlock; ++i) { lane[0][i] = 0.4f; lane[1][i] = -0.4f; }
+        N60AncLaneFeedProcess(r.feed, ip, op, ch, kBlock);
+        CHECK(std::fabs(lane[0][0] - 0.2f) < 1e-7 && std::fabs(lane[1][0] + 0.2f) < 1e-7, "inner did not run in place");
+        std::vector<N60AncLaneFeedFramePair> amb(kBlock);
+        N60AncLaneFeedTapRead(r.feed, N60AncLaneFeedTapAmbient, amb.data(), kBlock);
+        CHECK(std::fabs(amb[0].left - 0.2f) < 1e-7, "feed did not see the inner output (%g)", amb[0].left);
+        // Allocation-free while processing.
+        allocs.store(0); armedCount.store(true);
+        for (int i = 0; i < 20; ++i) N60AncLaneFeedProcess(r.feed, ip, op, ch, kBlock);
+        armedCount.store(false);
+        CHECK(allocs.load() == 0, "direct process allocated %ld times", allocs.load());
+        CHECK(N60AncLaneFeedSetInnerProcessor(r.feed, nullptr, nullptr), "inner clear refused");
+        N60AncLaneFeedDestroy(r.feed);
+    }
+}
+
 int main() {
+    directStereoTests();
     for (double rate : kRates) {
         const uint64_t leaseLong = static_cast<uint64_t>(rate * 600.0);
 

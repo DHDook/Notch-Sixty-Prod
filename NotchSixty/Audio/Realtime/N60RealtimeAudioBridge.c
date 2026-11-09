@@ -1,5 +1,6 @@
 #include "N60RealtimeAudioBridge.h"
 #include "N60SpeakerBusSplitter.h"
+#include "N60AncLaneFeed.h"
 
 #include "n60/fold.h"
 #include "n60/graph.h"
@@ -95,11 +96,19 @@ _Static_assert((int)N60_SPLITTER_BUS_RIGHT_HIGH == (int)N60SpeakerOutputBusRight
 // graph keeps its state but is warmed the same way because it was not processed meanwhile.
 // E6 S8d: the spectral-denoiser noise profile is the one thing that is not discarded or left stale at a
 // hand-over: it is copied from the side that was rendering to the side that takes over.
+#define N60_UNIFIED_GRAPH_MAX_LANES 8u
+
 typedef struct N60UnifiedGraphAttachment {
     _Atomic(n60_graph *) graph;
     _Atomic bool wantGraph;
     _Atomic uint32_t publishedMixBits;  // callback -> control, for diagnostics and tests
-    float *scratch;       // 4 * maxFrames floats: planar in (2 lanes) then planar out (2 lanes)
+    float *scratch;       // 2 * lanes * maxFrames floats: planar in (`lanes`) then planar out (`lanes`)
+    // E6 S12h part 2b: the graph's lane count (2, or 5 with the stereo Quiet Zone feed's appended lanes). Fixed by the
+    // first attach. Input lanes past 1 stay zero; the output is read from lanes 0 and 1.
+    uint32_t lanes;
+    // E6 S12h part 2b: true while the graph carries live anti-noise. A hand-over then switches in one frame after the
+    // warm-up instead of crossfading, so two renders of the same anti-noise never mix (control thread -> callback).
+    _Atomic bool ancLive;
     // E6 S8b2c: latency alignment across the hand-over fade. Four delay rings of
     // N60_ALIGN_RING_FRAMES (kernel L, kernel R, graph L, graph R), allocated with the scratch.
     // The control thread publishes the graph's latency; the callback reads the kernel's from
@@ -160,6 +169,7 @@ typedef struct N60UnifiedGraphPlan {
 struct N60RealtimeAudioBridge {
     _Atomic(N60UnifiedGraphAttachment *) unifiedGraph;
     _Atomic uint32_t unifiedGraphLatency;  // control -> callback: attached graph's latency frames
+    N60AncLaneFeed *rackBoundFeed;         // E6 S12h part 2b: control-thread only; the feed running the rack as its inner processor
     void *rackBoundGraph;                  // E6 S8e: control-thread only; the graph whose callback points at this bridge
     _Atomic bool unifiedGraphHostsRack;    // E6 S8e: the graph's EXTERNAL stage calls this bridge's AU rack
     double graphRackSampleTime;            // callback thread only: output sample time of the graph chunk being rendered
@@ -555,7 +565,24 @@ bool N60RealtimeAudioBridgeSetUnifiedGraph(
     uint32_t maxFrames,
     double sampleRate
 ) {
+    return N60RealtimeAudioBridgeSetUnifiedGraphLanes(bridge, graph, maxFrames, sampleRate, 2u);
+}
+
+void N60RealtimeAudioBridgeSetUnifiedGraphAncLive(N60RealtimeAudioBridge *bridge, bool live) {
+    if (bridge == NULL) return;
+    N60UnifiedGraphAttachment *attachment = atomic_load_explicit(&bridge->unifiedGraph, memory_order_acquire);
+    if (attachment != NULL) atomic_store_explicit(&attachment->ancLive, live, memory_order_release);
+}
+
+bool N60RealtimeAudioBridgeSetUnifiedGraphLanes(
+    N60RealtimeAudioBridge *bridge,
+    void *graph,
+    uint32_t maxFrames,
+    double sampleRate,
+    uint32_t lanes
+) {
     if (bridge == NULL) return false;
+    if (lanes < 2u || lanes > N60_UNIFIED_GRAPH_MAX_LANES) return false;
     N60UnifiedGraphAttachment *attachment = atomic_load_explicit(
         &bridge->unifiedGraph, memory_order_acquire
     );
@@ -574,7 +601,8 @@ bool N60RealtimeAudioBridgeSetUnifiedGraph(
     if (attachment == NULL) {
         attachment = calloc(1, sizeof(N60UnifiedGraphAttachment));
         if (attachment == NULL) return false;
-        attachment->scratch = calloc((size_t)maxFrames * 4u, sizeof(float));
+        attachment->lanes = lanes;
+        attachment->scratch = calloc((size_t)maxFrames * 2u * lanes, sizeof(float));
         if (attachment->scratch == NULL) {
             free(attachment);
             return false;
@@ -596,7 +624,7 @@ bool N60RealtimeAudioBridgeSetUnifiedGraph(
     }
     // The scratch size and the warm-up/fade lengths are fixed by the first attach; a graph built
     // for larger blocks or another sample rate is refused (Release first, with IO stopped).
-    if (maxFrames > attachment->maxFrames) return false;
+    if (maxFrames > attachment->maxFrames || lanes != attachment->lanes) return false;
     if (warmFrames != attachment->warmFrames || fadeFrames != attachment->fadeFrames) return false;
     // A different graph object is accepted only once the previous hand-over has fully ended
     // (not wanted, mix published as 0), so the callback never sees the pointer change mid-use.
@@ -665,9 +693,30 @@ bool N60RealtimeAudioBridgeBindRackToGraph(N60RealtimeAudioBridge *bridge, void 
     return true;
 }
 
+bool N60RealtimeAudioBridgeBindRackToAncFeed(N60RealtimeAudioBridge *bridge, void *graph, void *feed) {
+    if (bridge == NULL || graph == NULL || feed == NULL
+        || !N60AudioUnitLiveRackProcessorIsValid(&bridge->audioUnitRack)
+        || bridge->audioUnitRackScratch == NULL) {
+        return false;
+    }
+    // The graph's single EXTERNAL stage is the feed's; the rack runs first inside it, on the programme lanes.
+    if (!N60AncLaneFeedSetInnerProcessor((N60AncLaneFeed *)feed, graph_rack_trampoline, bridge)) return false;
+    bridge->rackBoundGraph = graph;
+    bridge->rackBoundFeed = (N60AncLaneFeed *)feed;
+    atomic_store_explicit(&bridge->unifiedGraphHostsRack, true, memory_order_release);
+    return true;
+}
+
 void N60RealtimeAudioBridgeUnbindRackFromGraph(N60RealtimeAudioBridge *bridge, void *graph) {
     if (bridge == NULL) return;
     atomic_store_explicit(&bridge->unifiedGraphHostsRack, false, memory_order_release);
+    if (bridge->rackBoundFeed != NULL) {
+        // The feed keeps the graph's EXTERNAL stage; only its inner processor is removed.
+        (void)N60AncLaneFeedSetInnerProcessor(bridge->rackBoundFeed, NULL, NULL);
+        bridge->rackBoundFeed = NULL;
+        bridge->rackBoundGraph = NULL;
+        return;
+    }
     if (graph == NULL) graph = bridge->rackBoundGraph;
     if (graph != NULL) {
         (void)n60_graph_set_external_processor((n60_graph *)graph, NULL, NULL, 0u);
@@ -784,7 +833,9 @@ static N60UnifiedGraphPlan plan_unified_block(
     }
     (void)framesToRead;
     plan.graph = graph;
-    const float step = a->fadeFrames > 0u ? 1.0f / (float)a->fadeFrames : 1.0f;
+    // Live anti-noise is never crossfaded against a second render of itself: after the warm-up the sides switch in one frame.
+    const float step = (a->fadeFrames > 0u && !atomic_load_explicit(&a->ancLive, memory_order_acquire))
+        ? 1.0f / (float)a->fadeFrames : 1.0f;
     if (want) {
         a->kernelWarmLeft = 0u;
         if (a->graphCold) {
@@ -2994,7 +3045,8 @@ OSStatus N60OutputIOProc(
         uint32_t graphReadPosition = ringReadIndex;
         uint32_t graphChunkStart = 0u;
         uint32_t graphChunkFrames = 0u;
-        float *graphOut = graphRuns ? unified->scratch + (size_t)unified->maxFrames * 2u : NULL;
+        const uint32_t graphLanes = graphRuns ? unified->lanes : 2u;
+        float *graphOut = graphRuns ? unified->scratch + (size_t)unified->maxFrames * graphLanes : NULL;
         for (UInt32 frameIndex = 0;
              frameIndex < framesToRead;
              ++frameIndex) {
@@ -3037,8 +3089,12 @@ OSStatus N60OutputIOProc(
                     planarIn[unified->maxFrames + i] = source.right;
                 }
                 bridge->graphRackSampleTime = outputSampleTime + (double)graphChunkStart;
-                const float *inLanes[2] = { planarIn, planarIn + unified->maxFrames };
-                float *outLanes[2] = { graphOut, graphOut + unified->maxFrames };
+                const float *inLanes[N60_UNIFIED_GRAPH_MAX_LANES];
+                float *outLanes[N60_UNIFIED_GRAPH_MAX_LANES];
+                for (uint32_t lane = 0; lane < graphLanes; ++lane) {
+                    inLanes[lane] = planarIn + (size_t)lane * unified->maxFrames;
+                    outLanes[lane] = graphOut + (size_t)lane * unified->maxFrames;
+                }
                 // On a process error the chunk is silence, never a splice of stale state.
                 if (n60_graph_process(unifiedPlan.graph, inLanes, outLanes,
                                       graphChunkFrames) != N60_STATUS_OK) {
