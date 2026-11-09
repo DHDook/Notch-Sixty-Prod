@@ -995,6 +995,24 @@ UpstreamKind upstreamKindOf(uint32_t kind) {
         case N60_STAGE_AMBIENT:
         case N60_STAGE_CLEANUP: return UpstreamKind::Carry;
         case N60_STAGE_FIR: return UpstreamKind::Fir;
+        // Named as refused (E9 S5, G10): each keeps running state that is not proven copyable in lockstep (all-pass and
+        // crossover histories, the gate and routing ramps, the generator and external processor, the image, loudness,
+        // de-ess and multiband detectors), so a lazily carried FIR behind one warms in full. test_conv_rebuild covers
+        // every kind below at the eight standard rates. Any new stateful kind must be added here deliberately.
+        case N60_STAGE_SYMMETRY:
+        case N60_STAGE_CROSSFEED:
+        case N60_STAGE_CROSSTALK:
+        case N60_STAGE_HEADPHONE:
+        case N60_STAGE_PAUSE_GATE:
+        case N60_STAGE_FRAC_DELAY:
+        case N60_STAGE_ROUTE:
+        case N60_STAGE_XOVER:
+        case N60_STAGE_GENERATOR:
+        case N60_STAGE_EXTERNAL:
+        case N60_STAGE_IMAGE:
+        case N60_STAGE_LOUDNESS:
+        case N60_STAGE_DEESS:
+        case N60_STAGE_MULTIBAND:
         default: return UpstreamKind::Refuse;
     }
 }

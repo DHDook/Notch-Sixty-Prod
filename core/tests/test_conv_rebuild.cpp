@@ -698,6 +698,77 @@ void testRefused(double rate, int what) {
     for (size_t i = 0; i < test.out.size(); ++i) CHECK(std::isfinite(test.out[i]), "rate %.0f refused %d finite output", rate, what);
 }
 
+// E9 S5 (G10): every other stateful kind ahead of a lazily carried FIR is named as refused. The FIR behind it warms in
+// full next to the live instance (no lockstep carry), the rebuild completes, and the output is finite. Each kind sits
+// ahead of the FIR kind that follows it in the stage order (ROUTE, XOVER and the pair stages ahead of the driver FIR,
+// the generator, the external processor, image, loudness, de-ess and multiband ahead of the room FIR).
+struct RefusedKind {
+    const char *name;
+    uint32_t kind;
+    uint32_t firKind;
+};
+constexpr RefusedKind kRefusedKinds[] = {
+    {"SYMMETRY", N60_STAGE_SYMMETRY, N60_STAGE_DRIVER_FIR},   {"CROSSFEED", N60_STAGE_CROSSFEED, N60_STAGE_DRIVER_FIR},
+    {"CROSSTALK", N60_STAGE_CROSSTALK, N60_STAGE_DRIVER_FIR}, {"HEADPHONE", N60_STAGE_HEADPHONE, N60_STAGE_DRIVER_FIR},
+    {"PAUSE_GATE", N60_STAGE_PAUSE_GATE, N60_STAGE_DRIVER_FIR}, {"ROUTE", N60_STAGE_ROUTE, N60_STAGE_DRIVER_FIR},
+    {"XOVER", N60_STAGE_XOVER, N60_STAGE_DRIVER_FIR},         {"GENERATOR", N60_STAGE_GENERATOR, N60_STAGE_ROOM_FIR},
+    {"EXTERNAL", N60_STAGE_EXTERNAL, N60_STAGE_ROOM_FIR},     {"IMAGE", N60_STAGE_IMAGE, N60_STAGE_ROOM_FIR},
+    {"LOUDNESS", N60_STAGE_LOUDNESS, N60_STAGE_ROOM_FIR},     {"DEESS", N60_STAGE_DEESS, N60_STAGE_ROOM_FIR},
+    {"MULTIBAND", N60_STAGE_MULTIBAND, N60_STAGE_ROOM_FIR},
+};
+
+void testRefusedKind(double rate, size_t which) {
+    const RefusedKind &k = kRefusedKinds[which];
+    const uint32_t taps = 32768;
+    std::vector<float> h = decaying(taps, 223, 0.02f);
+    const float sym[1] = {0.2f}, cf[1] = {0.2f}, ct[2] = {900, 0.3f}, gate[5] = {-90, 6, 10, 5, 5};
+    const float hp[11] = {-1, 0.5f, 45, 0.09f, 700, 0, 0, 0, 0, 0, 0};
+    const float gen[11] = {1, -20, -6, 1000, 1000, 4000, 4096, 1, 1, 1, 600};
+    const float ext[1] = {0};
+    const float img[8] = {0, 1, 0, 200, 4000, 1, 1.5f, 1.4f};
+    const float de[12] = {1, 3500, -3, 1, 6500, -40, 4, -24, 2, 1, 50, 1};
+    const float loud[32] = {1, 0, -16, 10, 0.5f, 2, 1, 0.6f, 1, 0, 80, 12, 3, 1, 1, 0, 300, 3500, 6, 3, 9, 200, 80, 600,
+                            -60, 3, 7, 12, 800, 0.1f, 0.5f, 0.3f};
+    const float mb[29] = {1, 120, 2500, 0, 0, -30, -30, -30, 4, 4, 4, 5, 5, 5, 100, 100, 100, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+    float route[16];
+    for (int i = 0; i < 16; ++i) route[i] = (i & 1) ? 0.0f : -1.0f;
+    route[0] = 0.0f;
+    route[1] = 0.5f;
+    const float xo[14] = {3, 0, 100, 3, 0, 1000, 0, 0, 0, 50, 0.707f, 25, 0.5f, 0};
+    n60_stage_desc up;
+    switch (k.kind) {
+        case N60_STAGE_SYMMETRY: up = stageLanes(k.kind, 4, 0, 1, 0, sym, 1); break;
+        case N60_STAGE_CROSSFEED: up = stageLanes(k.kind, 4, 0, 1, 0, cf, 1); break;
+        case N60_STAGE_CROSSTALK: up = stageLanes(k.kind, 4, 0, 1, 0, ct, 2); break;
+        case N60_STAGE_HEADPHONE: up = stageLanes(k.kind, 4, 0, 1, 0, hp, 11); break;
+        case N60_STAGE_PAUSE_GATE: up = stageLanes(k.kind, 4, 0, 0, 0x3, gate, 5); break;
+        case N60_STAGE_ROUTE: up = stageLanes(k.kind, 4, 0, 0, 1u << 1, route, 16); break;
+        case N60_STAGE_XOVER: up = stage(k.kind, 4, xo, 14); break;
+        case N60_STAGE_GENERATOR: up = stage(k.kind, 4, gen, 11); break;
+        case N60_STAGE_EXTERNAL: up = stageLanes(k.kind, 4, 0, 0, 0x3, ext, 1); break;
+        case N60_STAGE_IMAGE: up = stageLanes(k.kind, 4, 0, 1, 0, img, 8); break;
+        case N60_STAGE_LOUDNESS: up = stageLanes(k.kind, 4, 0, 1, 0, loud, 32); break;
+        case N60_STAGE_DEESS: up = stageLanes(k.kind, 4, 0, 1, 0, de, 12); break;
+        default: up = stageLanes(k.kind, 4, 0, 1, 0, mb, 29); break;
+    }
+    n60_stage_desc a[2], b[3];
+    a[0] = up;
+    a[1] = stage(k.firKind, 1, h.data(), taps);
+    b[0] = a[0];
+    b[1] = a[1];
+    b[2] = stage(N60_STAGE_FINAL_METER, 14, nullptr, 0);
+    const uint32_t blk = kBlock;
+    Rig test(rate, 4, a, 2);
+    runFrames(test, taps + 4096, blk);
+    test.publish(b, 3, rate);
+    test.step(blk);
+    const uint32_t warming = finishRebuild(test, 4000000, blk);
+    CHECK(test.status().completed == 1 && test.status().lastResult == 1, "rate %.0f %s completed", rate, k.name);
+    CHECK(warming >= taps / blk, "rate %.0f %s refused: FIR warms in full (%u callbacks)", rate, k.name, warming);
+    runFrames(test, 4 * 16384, blk);
+    for (size_t i = 0; i < test.out.size(); ++i) CHECK(std::isfinite(test.out[i]), "rate %.0f %s finite output", rate, k.name);
+}
+
 }  // namespace
 
 int main() {
@@ -729,6 +800,7 @@ int main() {
         testRefused(rate, 0);
         testRefused(rate, 1);
         testRefused(rate, 2);
+        for (size_t w = 0; w < sizeof kRefusedKinds / sizeof kRefusedKinds[0]; ++w) testRefusedKind(rate, w);
         std::printf("rate %.0f done\n", rate);
     }
     testSmallBlocks(384000, 8, 32);
