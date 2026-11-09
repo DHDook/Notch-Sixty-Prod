@@ -122,6 +122,8 @@ n60_status validateParam(const SnapHeader *snap, const StageRec &stage, uint32_t
 // *latencyMayChange when the applied parameter can change the reported latency.
 bool applyParam(SnapHeader *snap, uint32_t stageId, uint32_t paramIndex, float value, bool *latencyMayChange);
 uint32_t snapshotLatency(const SnapHeader *snap);
+// Frames of latency each of the N60_GRAPH_MAX_CHANNELS lanes has accumulated before stage index `upTo`.
+void snapshotLaneLatency(const SnapHeader *snap, uint32_t upTo, uint32_t *perLane);
 
 // Realtime thread (E9 S2c, closes G7; S2d, closes G9). The stages before index `i` of `to` are the same stages as in
 // `from` (the caller has checked kind, id, lanes and parameters).

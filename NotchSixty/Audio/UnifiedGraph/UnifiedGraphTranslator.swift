@@ -126,6 +126,8 @@ enum UnifiedGraphTranslator {
         }
         configuration.stereoStages = stages
         configuration.firScheme = firScheme
+        // E6 S12e follow-up (G27): the delta audition runs the full processed chain and subtracts the aligned input.
+        configuration.deltaAudition = snapshot.auditionMode == N60AuditionModeDelta
         if let alignment { apply(alignment, to: &configuration) }
         if d5 {
             // The processed path's latency is what the control plane reports for this snapshot; the graph pads the lanes

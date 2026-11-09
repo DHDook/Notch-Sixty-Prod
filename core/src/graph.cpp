@@ -226,6 +226,7 @@ uint64_t carrySmallState(n60::SnapHeader *from, n60::SnapHeader *to) {
     bytes += n60::imageCarry(from, to);
     bytes += n60::loudnessCarry(from, to);             // E6 S12h: loudness and multiband running state (G16, G21)
     bytes += n60::multibandCarry(from, to);
+    bytes += n60::deltaCarry(from, to);                // ABI v30: the delta capture ring
     return bytes;
 }
 

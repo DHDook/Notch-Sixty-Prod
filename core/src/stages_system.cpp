@@ -120,6 +120,8 @@ Lanes ruleOf(uint32_t kind) {
         case N60_STAGE_CROSSFEED:
         case N60_STAGE_CROSSTALK:
         case N60_STAGE_STEREO_CROSSOVER:
+        case N60_STAGE_DELTA_CAPTURE:
+        case N60_STAGE_DELTA_SUBTRACT:
         case N60_STAGE_HEADPHONE: return Lanes::Pair;
         case N60_STAGE_ANC_GUARD:
         case N60_STAGE_ANC_INJECT: return Lanes::Single;
@@ -204,6 +206,8 @@ uint32_t expectedParamCount(uint32_t kind, const float *p, uint32_t have) {
         case N60_STAGE_PROTECTION: return have == 7 ? 7u : (have == kProtParamsV12 ? kProtParamsV12 : 0u);
         case N60_STAGE_STEREO_CROSSOVER: return have == 8 || have == 12 ? have : 0u;  // ABI v19: 8, or 12 with a filter-spec trailer
         case N60_STAGE_MUTE: return 1;
+        case N60_STAGE_DELTA_CAPTURE:
+        case N60_STAGE_DELTA_SUBTRACT: return 1;
         case N60_STAGE_EXTERNAL: return 1;
         case N60_STAGE_FRAC_DELAY: return 2;
         case N60_STAGE_ANC_GUARD: return kGuardParams;
@@ -438,6 +442,16 @@ struct XoShared {
     float gain, pad;
 };
 
+// ABI v30 delta audition. CAPTURE keeps the last `cap` input frames of each lane; `wp` is the next write slot of both.
+struct DeltaShared {
+    uint32_t cap, wp, delayA, delayB;
+    // followed by float ringA[cap], ringB[cap]
+};
+struct DeltaTie {  // SUBTRACT: the index of its CAPTURE in the stage table, bound when the snapshot is built
+    uint32_t capture, bound;
+};
+inline float *deltaRing(DeltaShared *d, uint32_t lane) { return reinterpret_cast<float *>(d + 1) + size_t(lane) * d->cap; }
+
 struct GuardBand {
     double b0, b2, a1, a2, z1, z2;
 };
@@ -487,6 +501,8 @@ bool isSystemKind(uint32_t kind) {
         case N60_STAGE_MUTE:
         case N60_STAGE_FRAC_DELAY:
         case N60_STAGE_STEREO_CROSSOVER:
+        case N60_STAGE_DELTA_CAPTURE:
+        case N60_STAGE_DELTA_SUBTRACT:
         case N60_STAGE_EXTERNAL:
         case N60_STAGE_ANALYSER_TAP_EQ:
         case N60_STAGE_ANALYSER_TAP_DYN:
@@ -575,6 +591,8 @@ bool paramOk(uint32_t kind, uint32_t i, float v, const float *p, double rate, ui
                 default: return isInt(v) && v >= 0.0f && v <= 8.0f;  // 8..11: trailer family / order (checked as a pair below)
             }
         case N60_STAGE_MUTE: return v == 0.0f || v == 1.0f;
+        case N60_STAGE_DELTA_CAPTURE:
+        case N60_STAGE_DELTA_SUBTRACT: return v == 1.0f;
         case N60_STAGE_EXTERNAL: return v == 0.0f || v == 1.0f;
         case N60_STAGE_FRAC_DELAY: return i == 0 ? (isInt(v) && v >= 0.0f && v <= static_cast<float>(kFdCapacity - 2u)) : inR(v, 0.0, 1.0);
         case N60_STAGE_ANC_GUARD:
@@ -612,6 +630,8 @@ bool paramOk(uint32_t kind, uint32_t i, float v, const float *p, double rate, ui
 n60_status validateSystemStage(const n60_stage_desc &s, double rate, uint32_t outCh) {
     if (!lanesOk(s, outCh, ruleOf(s.kind))) return N60_STATUS_BAD_ARGUMENT;
     if (s.kind == N60_STAGE_ANC_CAPTURE || isAnalyserTap(s.kind)) {
+        if (s.capacityFrames < 1 || s.capacityFrames > N60_GRAPH_MAX_DELAY_FRAMES) return N60_STATUS_BAD_ARGUMENT;
+    } else if (s.kind == N60_STAGE_DELTA_CAPTURE) {
         if (s.capacityFrames < 1 || s.capacityFrames > N60_GRAPH_MAX_DELAY_FRAMES) return N60_STATUS_BAD_ARGUMENT;
     } else if (s.kind == N60_STAGE_EXTERNAL) {
         if (s.capacityFrames > N60_GRAPH_MAX_DELAY_FRAMES) return N60_STATUS_BAD_ARGUMENT;
@@ -719,6 +739,8 @@ void systemSizes(const n60_stage_desc &s, double rate, size_t &perLane, size_t &
         case N60_STAGE_MUTE: perLane = up(sizeof(MuteLane)); break;
         case N60_STAGE_FRAC_DELAY: perLane = up(sizeof(FdLane)); break;
         case N60_STAGE_STEREO_CROSSOVER: perLane = up(sizeof(XoLane)); shared = up(sizeof(XoShared)); break;
+        case N60_STAGE_DELTA_CAPTURE: shared = up(sizeof(DeltaShared) + 2u * size_t(s.capacityFrames) * sizeof(float)); break;
+        case N60_STAGE_DELTA_SUBTRACT: shared = up(sizeof(DeltaTie)); break;
         case N60_STAGE_ANC_INJECT: shared = up(sizeof(InjectShared)); break;
         case N60_STAGE_ANC_GUARD: shared = up(sizeof(GuardState)); break;
         case N60_STAGE_ANALYSER_TAP_EQ:
@@ -1617,6 +1639,42 @@ void runCapture(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames
     cs.written.store(w + frames, std::memory_order_release);
 }
 
+// ---- delta audition (ABI v30) ---------------------------------------------------------------
+
+void runDeltaCapture(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) {
+    DeltaShared &d = *reinterpret_cast<DeltaShared *>(sharedState(h, r));
+    const uint32_t cap = d.cap;
+    for (uint32_t k = 0; k < 2; ++k) {
+        float *ring = deltaRing(&d, k);
+        const float *in = lanes[k == 0 ? r.laneA : r.laneB];
+        uint32_t pos = d.wp;
+        for (uint32_t i = 0; i < frames; ++i) {
+            ring[pos] = in[i];
+            if (++pos == cap) pos = 0;
+        }
+    }
+    d.wp = (d.wp + frames) % cap;
+}
+
+void runDeltaSubtract(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) {
+    DeltaTie &t = *reinterpret_cast<DeltaTie *>(sharedState(h, r));
+    if (t.bound == 0) return;
+    StageRec &c = stages(h)[t.capture];
+    DeltaShared &d = *reinterpret_cast<DeltaShared *>(sharedState(h, c));
+    const uint32_t cap = d.cap;
+    for (uint32_t k = 0; k < 2; ++k) {
+        const float *ring = deltaRing(&d, k);
+        float *out = lanes[k == 0 ? r.laneA : r.laneB];
+        const uint32_t delay = k == 0 ? d.delayA : d.delayB;
+        // The capture ran first in this block: frame i of the block sits `frames - i` slots behind d.wp.
+        uint32_t pos = (d.wp + cap - ((frames + delay) % cap)) % cap;
+        for (uint32_t i = 0; i < frames; ++i) {
+            out[i] -= ring[pos];
+            if (++pos == cap) pos = 0;
+        }
+    }
+}
+
 // ---- protection ---------------------------------------------------------------------------
 
 constexpr uint32_t kHbTaps = 65;
@@ -2006,6 +2064,8 @@ void runSystem(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames)
         case N60_STAGE_EXTERNAL: runExternal(h, r, lanes, frames); break;
         case N60_STAGE_FRAC_DELAY: runFracDelay(h, r, lanes, frames); break;
         case N60_STAGE_STEREO_CROSSOVER: runStereoCrossover(h, r, lanes, frames); break;
+        case N60_STAGE_DELTA_CAPTURE: runDeltaCapture(h, r, lanes, frames); break;
+        case N60_STAGE_DELTA_SUBTRACT: runDeltaSubtract(h, r, lanes, frames); break;
         case N60_STAGE_ANC_INJECT: runInject(h, r, lanes, frames); break;
         case N60_STAGE_ANALYSER_TAP_EQ:
         case N60_STAGE_ANALYSER_TAP_DYN:
@@ -2115,6 +2175,71 @@ n60_status readCapture(const SnapHeader *h, uint32_t stageId, uint32_t lane, uin
     const uint64_t w2 = cs.claimed.load(std::memory_order_relaxed);
     if (w2 - startSample > cap) return N60_STATUS_UNSUPPORTED;  // overwritten while copying
     return N60_STATUS_OK;
+}
+
+}  // namespace n60
+
+// ---- delta audition: binding and rebuild carry -----------------------------------------------
+
+namespace n60 {
+
+bool deltaFinalize(SnapHeader *h) {
+    StageRec *table = stages(h);
+    uint32_t capIdx = h->stageCount, subIdx = h->stageCount;
+    for (uint32_t i = 0; i < h->stageCount; ++i) {
+        if (table[i].kind == N60_STAGE_DELTA_CAPTURE) capIdx = i;
+        if (table[i].kind == N60_STAGE_DELTA_SUBTRACT) subIdx = i;
+    }
+    if (capIdx == h->stageCount && subIdx == h->stageCount) return true;
+    if (capIdx >= subIdx || subIdx >= h->stageCount) return false;  // validateDesc already checked; be strict
+    uint32_t perLane[N60_GRAPH_MAX_CHANNELS];
+    uint32_t atCapture[N60_GRAPH_MAX_CHANNELS];
+    snapshotLaneLatency(h, subIdx, perLane);
+    snapshotLaneLatency(h, capIdx, atCapture);  // only the latency between the two stages must be bridged
+    for (uint32_t l = 0; l < N60_GRAPH_MAX_CHANNELS; ++l) perLane[l] = perLane[l] >= atCapture[l] ? perLane[l] - atCapture[l] : 0;
+    StageRec &c = table[capIdx];
+    DeltaShared &d = *reinterpret_cast<DeltaShared *>(sharedState(h, c));
+    d.cap = c.capacity;
+    d.wp = 0;
+    d.delayA = perLane[c.laneA];
+    d.delayB = perLane[c.laneB];
+    const uint64_t need = uint64_t(h->maxBlockFrames) + std::max(d.delayA, d.delayB);
+    if (need > d.cap) return false;
+    DeltaTie &t = *reinterpret_cast<DeltaTie *>(sharedState(h, table[subIdx]));
+    t.capture = capIdx;
+    t.bound = 1;
+    return true;
+}
+
+uint64_t deltaCarry(SnapHeader *from, SnapHeader *to) {
+    if (from == nullptr || to == nullptr) return 0;
+    StageRec *dst = stages(to);
+    const StageRec *src = stages(from);
+    uint64_t bytes = 0;
+    for (uint32_t i = 0; i < to->stageCount; ++i) {
+        if (dst[i].kind != N60_STAGE_DELTA_CAPTURE) continue;
+        for (uint32_t j = 0; j < from->stageCount; ++j) {
+            if (src[j].kind != N60_STAGE_DELTA_CAPTURE || src[j].id != dst[i].id) continue;
+            DeltaShared &a = *reinterpret_cast<DeltaShared *>(sharedState(from, src[j]));
+            DeltaShared &b = *reinterpret_cast<DeltaShared *>(sharedState(to, dst[i]));
+            // Copy the newest frames the new ring can keep and still take a block: oldest first, so the history ends at wp.
+            const uint32_t keep = std::min(a.cap, b.cap) > to->maxBlockFrames ? std::min(a.cap, b.cap) - to->maxBlockFrames : 0u;
+            for (uint32_t k = 0; k < 2; ++k) {
+                const float *ra = deltaRing(&a, k);
+                float *rb = deltaRing(&b, k);
+                uint32_t pa = (a.wp + a.cap - keep % a.cap) % a.cap;
+                for (uint32_t n = 0; n < keep; ++n) {
+                    rb[n] = ra[pa];
+                    if (++pa == a.cap) pa = 0;
+                }
+                for (uint32_t n = keep; n < b.cap; ++n) rb[n] = 0.0f;
+            }
+            b.wp = keep % b.cap;
+            bytes += 2u * uint64_t(keep) * sizeof(float);
+            break;
+        }
+    }
+    return bytes;
 }
 
 }  // namespace n60

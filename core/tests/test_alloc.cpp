@@ -157,6 +157,42 @@ int main() {
         n60_graph_retire(g);
     }
 
+    // E6 S12h part 2b: the delta audition pair (ABI v30) around a gain and a lane delay, with a rebuild that carries the
+    // capture ring: neither the blocks nor the adopt allocate or free.
+    for (double rate : rates) {
+        constexpr uint32_t N = 512;
+        const float one[1] = {1.0f}, g[1] = {0.5f}, dl[1] = {37.0f};
+        n60_stage_desc st[4] = {stage(N60_STAGE_DELTA_CAPTURE, 1, 0, one, 1, 4096, 1), stage(N60_STAGE_GAIN, 2, N60_LANE_ALL, g, 1),
+                                stage(N60_STAGE_DELAY, 3, 0, dl, 1, 64), stage(N60_STAGE_DELTA_SUBTRACT, 4, 0, one, 1, 0, 1)};
+        n60_graph_desc d{};
+        d.structSize = sizeof d;
+        d.abiVersion = N60_GRAPH_ABI_VERSION;
+        d.sampleRate = rate;
+        d.maxBlockFrames = N;
+        d.inputChannels = d.outputChannels = 2;
+        d.stages = st;
+        d.stageCount = 4;
+        n60_graph *gr = nullptr;
+        CHECK(n60_graph_build(&d, &gr) == N60_STATUS_OK, "build delta");
+        float l[N], r[N], ol[N], orr[N];
+        for (uint32_t i = 0; i < N; i++) { l[i] = 0.3f * std::sin(0.9f * i); r[i] = 0.3f * std::cos(1.1f * i); }
+        const float *in[2] = {l, r};
+        float *out[2] = {ol, orr};
+        for (int round = 0; round < 12; round++) {
+            if (round % 4 == 3) CHECK(n60_graph_publish(gr, &d) == N60_STATUS_OK, "publish delta");
+            allocs = 0;
+            frees = 0;
+            armed = true;
+            n60_status s2 = n60_graph_process(gr, in, out, N);
+            for (int k = 0; k < 3; k++) s2 = static_cast<n60_status>(s2 | n60_graph_process(gr, in, out, 1 + 97 * k));
+            armed = false;
+            CHECK(s2 == N60_STATUS_OK, "process delta");
+            CHECK(allocs == 0 && frees == 0, "delta rate %.0f round %d: allocated %ld / freed %ld", rate, round, allocs.load(), frees.load());
+            n60_graph_collect(gr);
+        }
+        n60_graph_retire(gr);
+    }
+
     // E6 S12c: LOUDNESS with every part on, live edits that redesign the filters (strength, band edges, windows, enable
     // edges, per-band mode, master gain) between blocks: the realtime call allocates and frees nothing.
     for (double rate : rates) {
