@@ -133,4 +133,20 @@ final class StereoHostedQuietZoneTests: XCTestCase {
             for n in 0..<block { XCTAssertEqual(out[0][n], tone[n] * 0.5, accuracy: 1e-6, "rate \(rate) frame \(n)") }
         }
     }
+
+    /// A howl trip latches: a republish that still carries the enabled snapshot must not re-arm the feed until the
+    /// guards are re-armed or the authorisation ends.
+    func testTripLatchBlocksRearmUntilRearmOrRevoke() {
+        let state = StereoAncHostState()
+        XCTAssertTrue(state.markArmed())
+        XCTAssertFalse(state.markArmed(), "already armed")
+        XCTAssertTrue(state.takeArmed())
+        state.markTripped()
+        XCTAssertFalse(state.markArmed(), "latched after a trip")
+        state.bumpRearmRevision()
+        XCTAssertTrue(state.markArmed(), "re-arming the guards clears the latch")
+        _ = state.takeArmed(); state.markTripped()
+        state.clearTripped()
+        XCTAssertTrue(state.markArmed(), "a revoke or unauthorised publish clears the latch")
+    }
 }

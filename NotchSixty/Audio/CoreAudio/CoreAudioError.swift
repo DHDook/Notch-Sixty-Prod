@@ -1682,6 +1682,8 @@ final class CoreAudioTransportSession {
     /// Fades the feed out (20 ms) and drops its lease. Idempotent.
     private func silenceHostedQuietZoneFeed() {
         graphRefreshLock.lock(); defer { graphRefreshLock.unlock() }
+        // A revoke or an unauthorised publish ends the authorisation, so a tripped latch ends with it.
+        ancHostState.clearTripped()
         guard ancHostState.takeArmed(), let feed = unifiedGraphHost?.retainedResource as? ProfileAncFeed else { return }
         N60AncLaneFeedDisarm(feed.pointer)
         N60AncLaneFeedReleaseLease(feed.pointer)
@@ -1705,6 +1707,18 @@ final class CoreAudioTransportSession {
         return copy
     }
 
+    /// A howl trip (manual request or a graph guard): disarms the feed and clears the armed mark in one step under the
+    /// refresh lock, so a concurrent arm cannot interleave and leave the feed armed with the mark cleared.
+    func tripHostedQuietZone(manual: Bool) {
+        graphRefreshLock.lock(); defer { graphRefreshLock.unlock() }
+        guard let feed = unifiedGraphHost?.retainedResource as? ProfileAncFeed else { return }
+        N60AncLaneFeedDisarm(feed.pointer)
+        _ = ancHostState.takeArmed()
+        // Latched: a republish that still carries the enabled snapshot must not re-arm after a trip.
+        ancHostState.markTripped()
+        if manual { ancHostState.addManualTrip() }
+    }
+
     /// Immediate revoke (arm switch): the feed fades out now; the next graph publish carries the unauthorised record.
     func revokeHostedQuietZone() { silenceHostedQuietZoneFeed() }
 
@@ -1717,6 +1731,7 @@ final class CoreAudioTransportSession {
 
     /// Re-arms the graph guards (a live revision bump through a republish of the newest snapshot).
     func rearmHostedGuards() {
+        graphRefreshLock.lock(); defer { graphRefreshLock.unlock() }
         guard hostedQuietZoneFeed != nil, let snapshot = lastGraphSnapshot else { return }
         ancHostState.bumpRearmRevision()
         refreshUnifiedGraph(for: snapshot)
@@ -1842,12 +1857,13 @@ final class CoreAudioTransportSession {
             AudioHardwareDestroyProcessTap(tapID)
             tapID = AudioObjectID(kAudioObjectUnknown)
         }
+        // Under the refresh lock so a worker's refresh or trip cannot use the bridge while it is destroyed.
+        graphRefreshLock.lock()
         if let bridge {
             N60RealtimeAudioBridgeDestroy(bridge)
             self.bridge = nil
         }
         // The host outlives the bridge that rendered it; release it only after destroy.
-        graphRefreshLock.lock()
         unifiedGraphHost?.release()
         unifiedGraphHost = nil
         graphRefreshLock.unlock()

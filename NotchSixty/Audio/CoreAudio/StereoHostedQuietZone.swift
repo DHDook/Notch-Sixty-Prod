@@ -9,6 +9,7 @@ import Foundation
 final class StereoAncHostState: @unchecked Sendable {
     private let lock = NSLock()
     private var armed = false
+    private var tripped = false
     private var revision: UInt32 = 0
     private var manualTrips: UInt64 = 0
     private var seenGuardTrips: UInt64 = 0
@@ -20,12 +21,16 @@ final class StereoAncHostState: @unchecked Sendable {
         return armed
     }
 
-    /// True when this call moved the feed from disarmed to armed.
+    /// True when this call moved the feed from disarmed to armed. Never while a howl trip is latched.
     func markArmed() -> Bool {
         lock.lock(); defer { lock.unlock() }
+        if tripped { return false }
         defer { armed = true }
         return !armed
     }
+
+    func markTripped() { lock.lock(); tripped = true; lock.unlock() }
+    func clearTripped() { lock.lock(); tripped = false; lock.unlock() }
 
     var rearmRevision: UInt32 {
         lock.lock(); defer { lock.unlock() }
@@ -33,7 +38,7 @@ final class StereoAncHostState: @unchecked Sendable {
     }
 
     func bumpRearmRevision() {
-        lock.lock(); revision = (revision % 1_000_000) + 1; lock.unlock()
+        lock.lock(); revision = (revision % 1_000_000) + 1; tripped = false; lock.unlock()
     }
 
     func addManualTrip() {
@@ -93,12 +98,9 @@ final class StereoHostedQuietZone: QuietZoneRuntimeHost, @unchecked Sendable {
     /// Latches the 20 ms fade (any thread). The graph's own guards also trip on their own; `howlGuardTripCount` counts
     /// both, so `LiveTreatmentArm` disarms on either.
     func requestHowlTrip() {
-        if let feed, let session {
-            N60AncLaneFeedDisarm(feed.pointer)
-            _ = session.ancHostState.takeArmed()
-            session.ancHostState.addManualTrip()
-        }
+        // The kernel bridge first (lock-free), then the feed, so the safety fade never waits on a rebuild for the kernel.
         session?.requestHowlTrip()
+        session?.tripHostedQuietZone(manual: true)
     }
 
     var howlGuardTripCount: UInt64 {
@@ -108,10 +110,9 @@ final class StereoHostedQuietZone: QuietZoneRuntimeHost, @unchecked Sendable {
 
     /// A graph-guard trip newly seen since the last poll disarms the feed at once (20 ms fade).
     func pollQuietZoneGuards() {
-        guard let feed, let session else { return }
+        guard let session, session.hostedQuietZoneFeed != nil else { return }
         if session.ancHostState.noteGuardTrips(session.hostedGuardTripCount()) {
-            N60AncLaneFeedDisarm(feed.pointer)
-            _ = session.ancHostState.takeArmed()
+            session.tripHostedQuietZone(manual: false)
         }
     }
 
