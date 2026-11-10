@@ -238,7 +238,7 @@ int32_t n60_measure_decay_analyze(const float *ir, uint64_t count, double sample
     }
     uint32_t produced = 0;
     const int step = bands_per_octave == 1 ? 3 : 1;  // index n of 1000 * 10^(0.1 n)
-    for (int index = -12; index <= 9; index += step) {
+    for (int index = -18; index <= 9; index += step) {  // 15.8 Hz .. 7.9 kHz; callers pick the range (E19 S1 reaches 25 Hz)
         const double centre = 1000.0 * std::pow(10.0, 0.1 * index);
         if (centre < min_centre_hz * 0.99 || centre > max_centre_hz * 1.01) continue;
         std::vector<Biquad> filter;
