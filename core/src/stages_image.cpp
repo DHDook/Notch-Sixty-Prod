@@ -428,7 +428,7 @@ void runEss(DeShared &S, const float *p, double rate, float *L, float *R, uint32
 
 }  // namespace
 
-bool isImageKind(uint32_t kind) { return kind == N60_STAGE_IMAGE || kind == N60_STAGE_DEESS; }
+bool isImageKind(uint32_t kind) N60_RT_NONBLOCKING { return kind == N60_STAGE_IMAGE || kind == N60_STAGE_DEESS; }
 
 n60_status validateImageStage(const n60_stage_desc &s, double rate, uint32_t outCh) {
     if (!(rate >= 8000.0 && rate <= 768000.0) || !isImageKind(s.kind) || s.capacityFrames != 0) return N60_STATUS_BAD_ARGUMENT;
@@ -512,7 +512,7 @@ void imageInit(SnapHeader *h, const StageRec &r) {
 static inline void flush(float &v) { if (std::fabs(v) < 1.0e-30f) v = 0.0f; }
 static inline void flush(double &v) { if (std::fabs(v) < 1.0e-30) v = 0.0; }
 
-void runImage(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) {
+void runImage(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) N60_RT_NONBLOCKING {
     const float *p = paramsOf(h, r);
     float *L = lanes[r.laneA];
     float *R = lanes[r.laneB];
@@ -534,7 +534,7 @@ void runImage(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) 
     }
 }
 
-uint64_t imageCarry(SnapHeader *from, SnapHeader *to) {
+uint64_t imageCarry(SnapHeader *from, SnapHeader *to) N60_RT_NONBLOCKING {
     uint64_t bytes = 0;
     if (from == nullptr || to == nullptr || from->sampleRate != to->sampleRate) return bytes;
     const StageRec *src = stages(from);
@@ -571,7 +571,7 @@ uint64_t imageCarry(SnapHeader *from, SnapHeader *to) {
     return bytes;
 }
 
-n60_status validateImageParam(const SnapHeader *h, const StageRec &r, uint32_t idx, float value) {
+n60_status validateImageParam(const SnapHeader *h, const StageRec &r, uint32_t idx, float value) N60_RT_NONBLOCKING {
     if (idx >= r.paramCount) return N60_STATUS_BAD_ARGUMENT;
     return imageParamOk(r.kind, idx, value, h->sampleRate) ? N60_STATUS_OK : N60_STATUS_BAD_ARGUMENT;
 }

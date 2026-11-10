@@ -678,8 +678,18 @@ uint32_t n60_graph_collect(n60_graph *graph);
  * == out[c]) is allowed. frames == 0 is a no-op. Channel c is copied to lane c;
  * output channels with no input are written with silence; then the stages run in
  * place on the output buffers. Buffers of different channels must not overlap.
- * Callers must not pass NULL pointers. */
-n60_status n60_graph_process(n60_graph *graph, const float *const *in, float *const *out, uint32_t frames);
+ * Callers must not pass NULL pointers.
+ * E20 S2: C++ callers with clang function effects see it as noexcept and nonblocking (verified in the core build).
+ * The call runs with subnormal flush-to-zero set and restores the caller's floating-point mode on return. */
+#if defined(__cplusplus) && defined(__clang__) && defined(__has_cpp_attribute)
+#if __has_cpp_attribute(clang::nonblocking)
+#define N60_GRAPH_PROCESS_EFFECTS noexcept [[clang::nonblocking]]
+#endif
+#endif
+#ifndef N60_GRAPH_PROCESS_EFFECTS
+#define N60_GRAPH_PROCESS_EFFECTS
+#endif
+n60_status n60_graph_process(n60_graph *graph, const float *const *in, float *const *out, uint32_t frames) N60_GRAPH_PROCESS_EFFECTS;
 
 /* One parameter target for a stage (latest wins, coalesced at block start).
  * Live parameters: see each stage kind (GAIN params[0] linear 0..10000, DELAY params[0] frames rounded
@@ -774,6 +784,19 @@ n60_status n60_graph_read_multiband(n60_graph *graph, uint32_t stageId, n60_mult
 n60_status n60_graph_read_over_range(n60_graph *graph, uint32_t stageId, uint32_t lane, uint64_t *count);
 
 void n60_graph_get_stats(const n60_graph *graph, n60_graph_stats *outStats);
+
+/* E20 S2. Render load over the last completed one-second window: render time of n60_graph_process divided by the
+ * block period (frames / sampleRate), on the calling thread. meanLoad is total render time over total period;
+ * peakLoad is the worst single block. 1.0 means the callback used its whole period. windowBlocks is 0 until the
+ * first window completes (loads read 0 then). Control thread, any time; values are the realtime thread's last
+ * published window. Set outLoad->structSize = sizeof(n60_graph_load). */
+typedef struct n60_graph_load {
+    uint32_t structSize;
+    uint32_t windowBlocks;       /* blocks in the published window */
+    float meanLoad;
+    float peakLoad;
+} n60_graph_load;
+n60_status n60_graph_read_load(const n60_graph *graph, n60_graph_load *outLoad);
 
 /* Control thread. Frees the graph and every snapshot, only after the realtime
  * thread has stopped using it. NULL is allowed. */

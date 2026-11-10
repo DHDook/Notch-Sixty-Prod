@@ -5,10 +5,11 @@
 #define N60_CORE_STAGES_CLEANUP_HPP
 
 #include "snapshot.hpp"
+#include "platform/rt.hpp"
 
 namespace n60 {
 
-bool isCleanupKind(uint32_t kind);
+bool isCleanupKind(uint32_t kind) N60_RT_NONBLOCKING;
 
 // Control thread. Checks lanes (a pair), parameter count and ranges of a cleanup stage.
 n60_status validateCleanupStage(const n60_stage_desc &s, double sampleRate, uint32_t outputChannels);
@@ -23,13 +24,13 @@ void cleanupInit(SnapHeader *h, const StageRec &r);
 // same id in `from`: DC, infrasonic and notch filter state, the mix fades (including one in flight), the retune
 // crossfade and the hum detector window. Coefficients stay the new snapshot's own. Bounded copies, no allocation.
 // Returns the bytes of running state it copied, for the caller to charge to the callback budget (G38).
-uint64_t cleanupCarry(SnapHeader *from, SnapHeader *to);
+uint64_t cleanupCarry(SnapHeader *from, SnapHeader *to) N60_RT_NONBLOCKING;
 
 // Realtime thread. Runs the stage in place over `frames` frames of the pair.
-void runCleanup(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames);
+void runCleanup(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) N60_RT_NONBLOCKING;
 
 // Pure range check for one parameter (see validateParam).
-n60_status validateCleanupParam(const SnapHeader *h, const StageRec &r, uint32_t idx, float value);
+n60_status validateCleanupParam(const SnapHeader *h, const StageRec &r, uint32_t idx, float value) N60_RT_NONBLOCKING;
 
 // Control thread. Detector telemetry of the newest snapshot (relaxed atomics written by the realtime thread).
 bool readMains(const SnapHeader *h, uint32_t stageId, n60_mains_readback *out);

@@ -332,9 +332,9 @@ void init(void *shared, const float *taps, uint32_t n) {
     // The scratch is dead after init; the realtime thread overwrites it before every use.
 }
 
-uint32_t laneEpoch(const void *lane) { return *static_cast<const uint32_t *>(lane); }
+uint32_t laneEpoch(const void *lane) N60_RT_NONBLOCKING { return *static_cast<const uint32_t *>(lane); }
 
-bool resetStep(const void *shared, void *lane, uint32_t epoch, uint64_t *budget) {
+bool resetStep(const void *shared, void *lane, uint32_t epoch, uint64_t *budget) N60_RT_NONBLOCKING {
     const Shared &S = *static_cast<const Shared *>(shared);
     uint8_t *lb = static_cast<uint8_t *>(lane);
     if (S.mode == 1) {
@@ -372,7 +372,7 @@ void resetLane(const void *shared, void *lane, uint32_t epoch) { resetStep(share
 
 // ---- lazy carry ----------------------------------------------------------------------
 
-void carryHeader(const void *shared, const void *src, void *dst, uint32_t epoch) {
+void carryHeader(const void *shared, const void *src, void *dst, uint32_t epoch) N60_RT_NONBLOCKING {
     const Shared &S = *static_cast<const Shared *>(shared);
     if (S.mode == 1) {
         std::memcpy(dst, src, sizeof(DelayHdr));
@@ -386,14 +386,14 @@ void carryHeader(const void *shared, const void *src, void *dst, uint32_t epoch)
     h.rPos = 0;
 }
 
-size_t carryBytes(const void *shared) {
+size_t carryBytes(const void *shared) N60_RT_NONBLOCKING {
     const Shared &S = *static_cast<const Shared *>(shared);
     if (S.mode == 1) return sizeof(float) * (size_t(S.delay) + kBlock);
     const LLayout LL = lLayout(S.parts);
     return sizeof(float) * LL.ringLen + (LL.total - LL.fdl[0]);
 }
 
-size_t carryCopy(const void *shared, const void *src, void *dst, size_t offset, size_t maxBytes) {
+size_t carryCopy(const void *shared, const void *src, void *dst, size_t offset, size_t maxBytes) N60_RT_NONBLOCKING {
     const Shared &S = *static_cast<const Shared *>(shared);
     const uint8_t *sb = static_cast<const uint8_t *>(src);
     uint8_t *db = static_cast<uint8_t *>(dst);
@@ -419,11 +419,11 @@ size_t carryCopy(const void *shared, const void *src, void *dst, size_t offset, 
     return n;
 }
 
-uint32_t carrySettleFrames(const void *shared) {
+uint32_t carrySettleFrames(const void *shared) N60_RT_NONBLOCKING {
     return static_cast<const Shared *>(shared)->mode == 1 ? 0u : kSettleFrames;
 }
 
-void process(void *shared, void *lane, float *buf, uint32_t frames, Counter *counter) {
+void process(void *shared, void *lane, float *buf, uint32_t frames, Counter *counter) N60_RT_NONBLOCKING {
     uint8_t *sh = static_cast<uint8_t *>(shared);
     Shared &S = *reinterpret_cast<Shared *>(sh);
     uint8_t *lb = static_cast<uint8_t *>(lane);

@@ -15,6 +15,9 @@
 #include <cstring>
 
 #include "n60/graph.h"
+#include "platform/rt.hpp"
+#include "platform/rt_libc.hpp"
+#include "platform/rt_clock.hpp"
 
 namespace n60 {
 
@@ -100,7 +103,7 @@ inline uint32_t laneOf(const StageRec &r, uint32_t k) {
 }
 
 // RBJ Audio EQ Cookbook biquad, normalised by a0 (b0 b1 b2 a1 a2), double precision.
-bool designBiquad(uint32_t type, double rate, double f, double gainDb, double q, double out[5]);
+bool designBiquad(uint32_t type, double rate, double f, double gainDb, double q, double out[5]) N60_RT_NONBLOCKING;
 
 // Control thread. Validates the description (everything in n60_graph_desc) and builds
 // the snapshot. Never touches live state.
@@ -111,7 +114,7 @@ void freeSnapshot(SnapHeader *snap);
 // Realtime thread. Runs the stages in place on `lanes` (outputChannels pointers).
 // follower: the incoming side of a rebuild (see "External processor" in graph.h).
 void runSnapshot(SnapHeader *snap, float *const *lanes, uint32_t frames,
-                 std::atomic<uint64_t> &sanitisedSamples, bool follower = false);
+                 std::atomic<uint64_t> &sanitisedSamples, bool follower = false) N60_RT_NONBLOCKING;
 
 // Control or realtime thread (pure). Checks one live parameter edit against the stage's
 // kind and ranges: OK, BAD_ARGUMENT (index or value out of range) or UNSUPPORTED (the
@@ -120,8 +123,8 @@ n60_status validateParam(const SnapHeader *snap, const StageRec &stage, uint32_t
 
 // Realtime thread. Applies one mailbox record; false when it no longer fits. Sets
 // *latencyMayChange when the applied parameter can change the reported latency.
-bool applyParam(SnapHeader *snap, uint32_t stageId, uint32_t paramIndex, float value, bool *latencyMayChange);
-uint32_t snapshotLatency(const SnapHeader *snap);
+bool applyParam(SnapHeader *snap, uint32_t stageId, uint32_t paramIndex, float value, bool *latencyMayChange) N60_RT_NONBLOCKING;
+uint32_t snapshotLatency(const SnapHeader *snap) N60_RT_NONBLOCKING;
 // Frames of latency each of the N60_GRAPH_MAX_CHANNELS lanes has accumulated before stage index `upTo`.
 void snapshotLaneLatency(const SnapHeader *snap, uint32_t upTo, uint32_t *perLane);
 
@@ -136,10 +139,10 @@ void snapshotLaneLatency(const SnapHeader *snap, uint32_t upTo, uint32_t *perLan
 // whose bytes exceed `budget` together (`unbudgeted`: no limit), and for an upstream FIR unless firExact[j] says it was
 // copied whole; the caller then does not run the FIR in lockstep and it warms in full. Pure: copies nothing.
 bool upstreamStateCarriable(const SnapHeader *from, const SnapHeader *to, uint32_t i, uint64_t budget, bool unbudgeted,
-                            uint32_t first, const uint8_t *firExact);
+                            uint32_t first, const uint8_t *firExact) N60_RT_NONBLOCKING;
 // Copies that state (call only after upstreamStateCarriable). The bytes are deducted from `*budget` (saturating; null =
 // unbudgeted). Stages before `first` are skipped (already copied for an earlier FIR). Returns the stages copied.
-uint32_t carryUpstreamState(SnapHeader *from, SnapHeader *to, uint32_t i, uint64_t *budget, uint32_t first = 0);
+uint32_t carryUpstreamState(SnapHeader *from, SnapHeader *to, uint32_t i, uint64_t *budget, uint32_t first = 0) N60_RT_NONBLOCKING;
 
 // Control thread (immutable fields only).
 const StageRec *findStage(const SnapHeader *snap, uint32_t stageId);
