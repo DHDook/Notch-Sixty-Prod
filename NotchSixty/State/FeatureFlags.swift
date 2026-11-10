@@ -152,11 +152,11 @@ extension FeatureFlag {
         epic: "E9"
     )
 
-    /// E13 S7 (S3 to S6 join it): the guided personal-BRIR capture in the Headphones workspace. Off: no capture
-    /// button and the workspace is unchanged. Removed when E13 ships.
+    /// E13 S3 and S7 (S4 to S6 join it): live headphone tuning (fixed 16-section layout, Apply while playing) and the
+    /// guided personal-BRIR capture in the Headphones workspace. Off: the workspace is unchanged. Removed when E13 ships.
     static let headphones = FeatureFlag(
         id: "e13.headphones",
-        title: "Headphones: personal BRIR capture",
+        title: "Headphones: live tuning and personal BRIR capture",
         epic: "E13"
     )
 

@@ -433,6 +433,10 @@ typedef int (*n60_external_process_fn)(void *context, const float *const *in, fl
  * HEADPHONE (pair A, B). params: [0] headroom dB (-30..0), [1] crossfeed amount 0..1 (live), [2] angle 15..90 deg,
  *  [3] radius 0.06..0.12 m, [4] crossfeed low-pass Hz (200..2000), [5] gain A dB, [6] gain B dB (live, -24..24),
  *  [7] polarity A, [8] polarity B (0/1), [9] sections nA, [10] sections nB (0..16), then 4 per section (A, then B).
+ *  Live (E13 S3): [0] headroom, [1], [2] angle and [3] radius (crossfaded delay), [4] low-pass, [5], [6], and every section
+ *  value (type, Hz, dB, Q), each crossfaded over the ramp; [7]..[10] stay build-time. Pad each ear to 16 sections (unity)
+ *  so a band add or remove is a value edit. Each change crossfades over the ramp (32..4096 frames, about 5 ms); an edit
+ *  that arrives mid-crossfade is deferred until it ends. No added latency.
  * PAUSE_GATE (linked). params: [0] threshold dBFS (-120..-20), [1] hysteresis dB (0..24), [2] hold ms (0..5000),
  *  [3] fade-out ms (0.05..1000), [4] fade-in ms (0.05..5000). paramCount 5. Starts open.
  * PROTECTION (linked over its lanes). params: [0] limiter on (0/1), [1] ceiling dB (live, -20..0), [2] attack ms
