@@ -91,7 +91,7 @@ enum ProductionAnalysisMath {
 /// by energy after the transforms so anti-phase stereo content cannot disappear
 /// through a time-domain mono sum.
 final class ProductionSpectrumAnalyzer {
-    private static let bandCount = 96
+    private static let bandCount = 288
     private static let peakHoldUpdates = 20       // ~1 s at the worker's 20 Hz cadence.
     private static let peakDecayDBPerUpdate: Float = 0.75
 

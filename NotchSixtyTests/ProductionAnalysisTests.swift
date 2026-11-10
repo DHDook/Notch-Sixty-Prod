@@ -130,7 +130,7 @@ final class ProductionAnalysisTests: XCTestCase {
                 sampleRate: sampleRate
             )
 
-            XCTAssertEqual(bands.count, 96, "Unexpected band count at \(sampleRate) Hz")
+            XCTAssertEqual(bands.count, 288, "Unexpected band count at \(sampleRate) Hz")
             for band in bands {
                 XCTAssertTrue(band.inputDB.isFinite)
                 XCTAssertTrue(band.outputDB.isFinite)
