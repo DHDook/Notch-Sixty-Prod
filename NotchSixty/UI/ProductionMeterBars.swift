@@ -210,6 +210,61 @@ struct MeterBarView: View {
 struct ProductionMeterContext {
     var diagnostics: AudioDiagnosticsSnapshot
     var transport: ProductionTransportMeterSnapshot?
+    /// E28 S6: per-route meters of a same-device speaker map (stereo session with several DAC channels).
+    var routes: [ProductionRouteMeter] = []
+    /// E28 S6: E9 per-output protection readings, keyed by lane. Empty when the flag is off.
+    var protection: [UnifiedGraphOutputProtectionReading] = []
+}
+
+/// E28 S6: the channel ids the hub publishes for routes and output protection, and the pure builder the hub and the
+/// matrix tests share, so a synthetic snapshot exercises exactly the production encoding.
+enum MultichannelMeterChannels {
+    static func routeID(_ route: ProductionRouteMeter) -> String { route.id }
+    static func protectionHardID(lane: Int) -> String { "protect.\(lane).hard" }
+    static func protectionUserID(lane: Int) -> String { "protect.\(lane).user" }
+
+    /// Route and protection channels. Protection gain reduction rides `peakLinear` as positive dB (like `gr.*`), and the
+    /// output true peak rides `truePeakLinear`.
+    static func channels(
+        routes: [ProductionRouteMeter],
+        protection: [UnifiedGraphOutputProtectionReading]
+    ) -> [String: MeterChannelReading] {
+        var channels: [String: MeterChannelReading] = [:]
+        for route in routes {
+            channels[routeID(route)] = MeterChannelReading(
+                peakLinear: route.peakLinear, rmsLinear: route.rmsLinear,
+                overRangeSamples: route.overRangeSamples, truePeakLinear: nil)
+        }
+        for reading in protection {
+            channels[protectionHardID(lane: reading.lane)] = MeterChannelReading(
+                peakLinear: reading.hardLimitGainReductionDB, rmsLinear: 0,
+                overRangeSamples: nil, truePeakLinear: reading.outputTruePeakLinear)
+            if let user = reading.userGainReductionDB {
+                channels[protectionUserID(lane: reading.lane)] = MeterChannelReading(
+                    peakLinear: user, rmsLinear: 0, overRangeSamples: nil,
+                    truePeakLinear: reading.userTruePeakLinear)
+            }
+        }
+        return channels
+    }
+
+    /// Inverse of the protection encoding: the per-lane readings a hub `take` carries.
+    static func protectionReadings(
+        from taken: [String: MeterChannelReading], lanes: [Int]
+    ) -> [Int: UnifiedGraphOutputProtectionReading] {
+        var result: [Int: UnifiedGraphOutputProtectionReading] = [:]
+        for lane in lanes {
+            guard let hard = taken[protectionHardID(lane: lane)] else { continue }
+            let user = taken[protectionUserID(lane: lane)]
+            result[lane] = UnifiedGraphOutputProtectionReading(
+                lane: lane,
+                userGainReductionDB: user?.peakLinear,
+                userTruePeakLinear: user?.truePeakLinear,
+                hardLimitGainReductionDB: hard.peakLinear,
+                outputTruePeakLinear: hard.truePeakLinear ?? 0)
+        }
+        return result
+    }
 }
 
 @MainActor
@@ -272,8 +327,13 @@ enum ProductionMeterHub {
         if let kernel = diagnostics.renderKernelDiagnostics {
             channels.merge(GainReductionSource.channels(from: kernel)) { _, new in new }
         }
+        // E28 S6: per-route and per-output-protection readings, also read-and-reset and so read only here.
+        let routes = engine.productionRouteMeters()
+        let protection = engine.outputProtectionReadings()
+        channels.merge(MultichannelMeterChannels.channels(routes: routes, protection: protection)) { _, new in new }
         return MeterFrame(
             channels: channels,
-            context: ProductionMeterContext(diagnostics: diagnostics, transport: transport))
+            context: ProductionMeterContext(
+                diagnostics: diagnostics, transport: transport, routes: routes, protection: protection))
     }
 }

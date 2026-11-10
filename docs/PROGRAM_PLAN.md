@@ -74,7 +74,7 @@ reviewers compare with Dirac and REW), then engine depth, then breadth.
    - then the programme audit of all completed epics, before item 2 and again after every epic completes (owner, 6 Nov 2026; see `docs/epics/README.md`)
    - then E27 Equalizer page polish, S1, S2, S3a, S3b, S2b, S2c, S4 in written order, once #395 (merged 7 Nov 2026) and the plan are merged (owner, 7 Nov 2026; placement before item 4 confirmed, owner decision 7 in `docs/epics/E27.md`)
    - then E6 S12a–S12h legacy-kernel migration, in written order, after E27 S4 (owner, 7 Nov 2026; E6 decisions 13–19): every stage still on `N60RenderKernel`, the old N-channel path or the legacy binaural pipeline moves to the unified graph. E28 S1 starts only after all of them have merged
-   - then E28 Dynamics and Meters polish, S1–S6, S7a–S7d, S8 in written order, after E6 S12a–S12h and before E9 FIR limits (item 4) (owner, 7 Nov 2026; owner decisions 1, 6–8 and 12 in `docs/epics/E28.md`)
+   - then E28 Dynamics and Meters polish, S1–S6b, S7a–S7d, S8 in written order, after E6 S12a–S12h and before E9 FIR limits (item 4) (owner, 7 Nov 2026; owner decisions 1, 6–8 and 12 in `docs/epics/E28.md`)
 2. E12 Guided setup and information architecture, S7 `e12/ship` (merged #243, 26 Oct 2026)
 3. E11 Measurement suite, S10 `e11/overlays-and-ship` (merged #222, 25 Oct 2026)
 4. E9 Multichannel protection and FIR parity, FIR limits: 262,144-tap program FIR and the 32,768-tap cap (S1 built dark in #361; S2 onward only after E26 S2–S7, owner 5 Nov 2026)
@@ -371,14 +371,15 @@ on the Equalizer page; S1 and S2 flagless, the engine-facing S3 items were behin
 ### E28 Dynamics and Meters polish (owner, 7 Nov 2026)
 
 Plan: `docs/epics/E28.md`. Absorbs E20's dynamics-meter and Canvas items; E28 owns the Meters page.
-S1–S6 flagless; every dynamics extra (S7a–S7d) behind the one flag `e28.dynamics-extras`. Scope widened 7 Nov 2026 (owner): anything useful in playback toward a world-class dynamics suite, latency only when optional; external sidechain input stays out.
+S1–S6b flagless; every dynamics extra (S7a–S7d) behind the one flag `e28.dynamics-extras`. Scope widened 7 Nov 2026 (owner): anything useful in playback toward a world-class dynamics suite, latency only when optional; external sidechain input stays out.
 
 - [x] S1 meter levels: display-rate bars, true-peak bars, peak hold, latching clip with reset, ballistics, VoiceOver values, pause when hidden
 - [x] S2 loudness: momentary, short-term, integrated with reset, loudness range and true-peak max per ITU-R BS.1770-4 and EBU R128; per-channel weighting with LFE excluded (inert until the capture carries more than stereo)
 - [x] S3 spectrum options: smoothing, averaging, tilt, freeze and reference trace, hover read-out, input and output overlay
 - [ ] S4 dynamics feel: log sliders, unit-aware fields, stepping, reset, fine drag, undo, sidechain range fix, auto makeup, accessibility
 - [x] S5 dynamics visualisation: transfer curves, gain-reduction bars and history, navigator bars; built, PR pending (G21 to S7d, G22 to S6, G23 to S7d, G24 to S7b; Loudness readouts moved to S7d)
-- [ ] S6 per-output and sub meters on every output configuration (needs-owner)
+- [x] S6 per-output and sub meters on every output configuration, per-route bridge meter, E9 protection on the hub (needs-owner, PR pending)
+- [ ] S6b loudness fed the semantic program channels on N-channel and binaural sessions, loudness and dynamics lab cases, L/R over-range pairing (needs-owner)
 - [ ] S7a compressor mix, link amount, peak/RMS detector and optional lookahead, reported in the path latency (needs-owner, engine)
 - [ ] S7b expander hold, soft knee, detector, sidechain high-pass and link; sidechain and delta listen (needs-owner, engine)
 - [ ] S7c multiband extras on the core stage ported by E6 S12d: per-band bypass, solo, listen and detector, one lookahead, auto-release toggle (needs-owner, engine)

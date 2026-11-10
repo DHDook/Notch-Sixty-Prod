@@ -23,6 +23,7 @@
 		E28A00000000000000000006 /* LoudnessMeterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E28A00000000000000000106 /* LoudnessMeterTests.swift */; };
 		E28A00000000000000000002 /* ProductionMeterBars.swift in Sources */ = {isa = PBXBuildFile; fileRef = E28A00000000000000000102 /* ProductionMeterBars.swift */; };
 		E28A00000000000000000003 /* MeterLevelModelsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E28A00000000000000000103 /* MeterLevelModelsTests.swift */; };
+		E28A0000000000000000006A /* MultichannelMeterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E28A0000000000000000016A /* MultichannelMeterTests.swift */; };
 		E27C295049611000000B0000 /* EQComparisonTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E27C295049610000000A0000 /* EQComparisonTests.swift */; };
 		E27C913354471000000B0000 /* ProductionEQCompareBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = E27C913354470000000A0000 /* ProductionEQCompareBar.swift */; };
 		E27D100000001000000B0000 /* EQFIRProgramCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = E27D100000000000000A0000 /* EQFIRProgramCache.swift */; };
@@ -713,6 +714,7 @@
 		E28A00000000000000000106 /* LoudnessMeterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoudnessMeterTests.swift; sourceTree = "<group>"; };
 		E28A00000000000000000102 /* ProductionMeterBars.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductionMeterBars.swift; sourceTree = "<group>"; };
 		E28A00000000000000000103 /* MeterLevelModelsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeterLevelModelsTests.swift; sourceTree = "<group>"; };
+		E28A0000000000000000016A /* MultichannelMeterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MultichannelMeterTests.swift; sourceTree = "<group>"; };
 		E27C295049610000000A0000 /* EQComparisonTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EQComparisonTests.swift; sourceTree = "<group>"; };
 		E27C913354470000000A0000 /* ProductionEQCompareBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductionEQCompareBar.swift; sourceTree = "<group>"; };
 		E27D100000000000000A0000 /* EQFIRProgramCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EQFIRProgramCache.swift; sourceTree = "<group>"; };
@@ -1643,6 +1645,7 @@
 				E27A00000000000000000206 /* EQValueParserTests.swift */,
 				E27A00000000000000000207 /* EQNudgeTests.swift */,
 				E28A00000000000000000103 /* MeterLevelModelsTests.swift */,
+				E28A0000000000000000016A /* MultichannelMeterTests.swift */,
 				E28A00000000000000000106 /* LoudnessMeterTests.swift */,
 				E28A00000000000000000108 /* SpectrumDisplayProcessorTests.swift */,
 				E27A00000000000000000208 /* EQEditHistoryTests.swift */,
@@ -2623,6 +2626,7 @@
 				E27A00000000000000000106 /* EQValueParserTests.swift in Sources */,
 				E27A00000000000000000107 /* EQNudgeTests.swift in Sources */,
 				E28A00000000000000000003 /* MeterLevelModelsTests.swift in Sources */,
+				E28A0000000000000000006A /* MultichannelMeterTests.swift in Sources */,
 				E28A00000000000000000006 /* LoudnessMeterTests.swift in Sources */,
 				E28A00000000000000000008 /* SpectrumDisplayProcessorTests.swift in Sources */,
 				E27A00000000000000000108 /* EQEditHistoryTests.swift in Sources */,
