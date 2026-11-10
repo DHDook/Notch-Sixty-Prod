@@ -268,6 +268,10 @@ enum ProductionMeterHub {
             add("postEQ", kernel.postEQMeter, truePeak: nil)
             add("output", kernel.outputMeter, truePeak: kernel.outputTruePeakLinear)
         }
+        // E28 S5: gain-reduction maxima ride the same hub so it stays the only reader of the read-and-reset values.
+        if let kernel = diagnostics.renderKernelDiagnostics {
+            channels.merge(GainReductionSource.channels(from: kernel)) { _, new in new }
+        }
         return MeterFrame(
             channels: channels,
             context: ProductionMeterContext(diagnostics: diagnostics, transport: transport))

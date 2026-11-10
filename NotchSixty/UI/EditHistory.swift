@@ -18,7 +18,7 @@ final class EditHistory<State: Equatable> {
     static var depth: Int { 100 }
     static var coalescingWindow: TimeInterval { 0.75 }
 
-    private final class Entry {
+    fileprivate final class Entry {
         let before: State
         var after: State
         let name: String
@@ -30,6 +30,14 @@ final class EditHistory<State: Equatable> {
         }
     }
 
+    /// The undo steps of one slot (E27 S3b A/B), set aside while another slot is active. Redo steps are not
+    /// kept across a switch (an `UndoManager` cannot register a redo outside an undo).
+    struct SlotSteps {
+        fileprivate var undo: [Entry] = []
+        init() {}
+        var count: Int { undo.count }
+    }
+
     private var undoEntries: [Entry] = []
     private var redoEntries: [Entry] = []
 
@@ -37,6 +45,10 @@ final class EditHistory<State: Equatable> {
     private var live: (() -> State)?
     private var apply: ((State) throws -> Void)?
     private let normalize: (State) -> State
+    /// Menu wording derived from the two values, when the name cannot be known when a gesture begins (EQ).
+    private let nameFor: ((State, State) -> String)?
+    /// Adjusts the value an undo or redo applies, given the live value (EQ keeps the live bypass).
+    private let adjustRestored: (State, State) -> State
     var now: () -> Date = Date.init
 
     private var expected: State?
@@ -46,8 +58,14 @@ final class EditHistory<State: Equatable> {
     private var lastKey: String?
     private var lastTime = Date.distantPast
 
-    init(normalize: @escaping (State) -> State = { $0 }) {
+    init(
+        normalize: @escaping (State) -> State = { $0 },
+        nameFor: ((State, State) -> String)? = nil,
+        adjustRestored: @escaping (State, State) -> State = { target, _ in target }
+    ) {
         self.normalize = normalize
+        self.nameFor = nameFor
+        self.adjustRestored = adjustRestored
     }
 
     var undoCount: Int { undoEntries.count }
@@ -72,7 +90,7 @@ final class EditHistory<State: Equatable> {
 
     /// Records one finished edit. A no-op edit is ignored. `coalesceKey` joins edits of the same
     /// field made within the coalescing window into one step.
-    func record(before: State, after: State, name: String, coalesceKey: String? = nil) {
+    func record(before: State, after: State, name: String = "Edit", coalesceKey: String? = nil) {
         guard gestureBefore == nil else { return }
         let normalizedBefore = normalize(before)
         defer { expected = after }
@@ -90,7 +108,7 @@ final class EditHistory<State: Equatable> {
             return
         }
 
-        let entry = Entry(before: before, after: after, name: name)
+        let entry = Entry(before: before, after: after, name: nameFor?(before, after) ?? name)
         registerUndo(entry)
         undoEntries.append(entry)
         if undoEntries.count > Self.depth { undoEntries.removeFirst(undoEntries.count - Self.depth) }
@@ -101,7 +119,7 @@ final class EditHistory<State: Equatable> {
     }
 
     /// Starts a drag: edits made until `endGesture` become one step.
-    func beginGesture(before: State, name: String) {
+    func beginGesture(before: State, name: String = "Edit") {
         guard gestureBefore == nil else { return }
         gestureBefore = before
         gestureName = name
@@ -123,6 +141,30 @@ final class EditHistory<State: Equatable> {
         let current = live()
         if let expected, normalize(expected) != normalize(current) { clear() }
         expected = current
+    }
+
+    /// Removes this history's steps from the undo manager and returns them, so another slot can have its own.
+    /// The live state is not touched.
+    func detachSteps() -> SlotSteps {
+        var saved = SlotSteps()
+        saved.undo = undoEntries
+        undoEntries.removeAll()
+        redoEntries.removeAll()
+        gestureBefore = nil
+        gestureName = nil
+        lastEntry = nil
+        lastKey = nil
+        undoManager?.removeAllActions(withTarget: self)
+        return saved
+    }
+
+    /// Registers `steps` (oldest first) on the undo manager and re-bases on the live state.
+    func attachSteps(_ steps: SlotSteps) {
+        undoManager?.removeAllActions(withTarget: self)
+        undoEntries = steps.undo
+        redoEntries.removeAll()
+        for entry in steps.undo { registerUndo(entry) }
+        if let live { expected = live() }
     }
 
     /// Drops every step. Called when the page goes away so no registration outlives it.
@@ -171,7 +213,7 @@ final class EditHistory<State: Equatable> {
             return
         }
         do {
-            try apply(toBefore ? entry.before : entry.after)
+            try apply(adjustRestored(toBefore ? entry.before : entry.after, current))
         } catch {
             clear()
             expected = live()

@@ -2,8 +2,8 @@ import Foundation
 
 /// E28 S4: unit-aware text entry, stepping and slider scaling for parameter fields, generalised
 /// from E27 S1's `EQValueParser` and `EQNudge`. Plain Swift, no UI and no engine access, so every
-/// rule can be tested without an audio device. The EQ types keep their own field enums and share
-/// the number scanner and the step tables with these.
+/// rule can be tested without an audio device. E28 S5 (G17): the EQ types are thin wrappers that keep their
+/// field enums and share the number scanner and the step tables defined here.
 
 /// The unit a parameter is shown and typed in.
 enum ParameterUnit: Equatable, Sendable {
@@ -111,7 +111,7 @@ enum ParameterStepKind: Equatable, Sendable {
 enum ValueParser {
     /// Parses `text` in `unit`; nil when it is not a valid entry (the caller keeps the old value).
     static func parse(_ text: String, unit: ParameterUnit, locale: Locale = .current) -> Double? {
-        guard let (number, suffix) = EQValueParser.split(text, locale: locale), number.isFinite else { return nil }
+        guard let (number, suffix) = split(text, locale: locale), number.isFinite else { return nil }
         switch unit {
         case .hertz:
             switch suffix {
@@ -155,12 +155,12 @@ enum ValueParser {
     }
 
     /// Text for a field at rest, in the user's decimal separator, without grouping so it parses back.
-    static func displayText(_ value: Double, digits: Int, locale: Locale = .current) -> String {
+    static func displayText(_ value: Double, digits: Int, minimumDigits: Int? = nil, locale: Locale = .current) -> String {
         let formatter = NumberFormatter()
         formatter.locale = locale
         formatter.numberStyle = .decimal
         formatter.usesGroupingSeparator = false
-        formatter.minimumFractionDigits = digits
+        formatter.minimumFractionDigits = minimumDigits ?? digits
         formatter.maximumFractionDigits = digits
         return formatter.string(from: NSNumber(value: value)) ?? String(value)
     }
@@ -170,23 +170,124 @@ enum ValueParser {
         let text = displayText(value, digits: digits, locale: locale)
         return unit.spoken.isEmpty ? text : "\(text) \(unit.spoken)"
     }
+
+    // MARK: Number scanning
+
+    /// Splits "-3.5 dB" into (-3.5, "db"). The unit is lower-cased and trimmed.
+    static func split(_ text: String, locale: Locale) -> (Double, String)? {
+        var rest = Substring(text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())
+        guard !rest.isEmpty else { return nil }
+
+        var negative = false
+        if let first = rest.first, first == "+" || first == "-" || first == "\u{2212}" {
+            negative = first != "+"
+            rest = rest.dropFirst()
+        }
+
+        var digits = ""
+        while let character = rest.first, character.isASCII && character.isNumber || character == "." || character == "," {
+            digits.append(character)
+            rest = rest.dropFirst()
+        }
+        guard let magnitude = number(from: digits, locale: locale) else { return nil }
+        let unit = rest.trimmingCharacters(in: .whitespaces)
+        return (negative ? -magnitude : magnitude, unit)
+    }
+
+    /// One separator is a decimal point, except a lone locale grouping separator followed by
+    /// exactly three digits ("1,500" in en_US). With both, the last is the decimal point.
+    private static func number(from digits: String, locale: Locale) -> Double? {
+        guard digits.contains(where: \.isNumber) else { return nil }
+        let dots = digits.filter { $0 == "." }.count
+        let commas = digits.filter { $0 == "," }.count
+        var normalized = digits
+
+        if dots > 0 && commas > 0 {
+            guard let lastDot = digits.lastIndex(of: "."), let lastComma = digits.lastIndex(of: ",") else { return nil }
+            let decimal: Character = lastDot > lastComma ? "." : ","
+            let grouping: Character = decimal == "." ? "," : "."
+            // The grouping character may repeat; the decimal point may not.
+            guard digits.filter({ $0 == decimal }).count == 1 else { return nil }
+            normalized = digits.replacingOccurrences(of: String(grouping), with: "")
+            if decimal == "," { normalized = normalized.replacingOccurrences(of: ",", with: ".") }
+        } else if dots + commas > 1 {
+            return nil
+        } else if dots + commas == 1 {
+            let separator: Character = dots == 1 ? "." : ","
+            let parts = digits.split(separator: separator, omittingEmptySubsequences: false)
+            let groupingSeparator = locale.groupingSeparator.flatMap(\.first)
+            if separator == groupingSeparator, parts.count == 2, parts[0].count >= 1, parts[1].count == 3 {
+                normalized = digits.replacingOccurrences(of: String(separator), with: "")
+            } else {
+                normalized = digits.replacingOccurrences(of: String(separator), with: ".")
+            }
+        }
+
+        guard let value = Double(normalized), value.isFinite else { return nil }
+        return value
+    }
 }
 
 enum ValueNudge {
+    enum Step: Equatable, Sendable {
+        case normal
+        /// Shift.
+        case coarse
+        /// Option.
+        case fine
+
+        init(shift: Bool, option: Bool) {
+            self = option ? .fine : (shift ? .coarse : .normal)
+        }
+    }
+
+    /// +1 or -1.
+    enum Direction: Int, Sendable {
+        case down = -1
+        case up = 1
+    }
+
+    /// Time and frequency ratio per step: 2^(1/12), 2^(1/3) (Shift), 2^(1/96) (Option).
+    static func timeRatio(_ step: Step) -> Double {
+        switch step {
+        case .normal: return pow(2, 1.0 / 12.0)
+        case .coarse: return pow(2, 1.0 / 3.0)
+        case .fine: return pow(2, 1.0 / 96.0)
+        }
+    }
+
+    /// dB per step: 0.5, 3, 0.1.
+    static func decibelStep(_ step: Step) -> Double {
+        switch step {
+        case .normal: return 0.5
+        case .coarse: return 3
+        case .fine: return 0.1
+        }
+    }
+
+    /// Ratio (and Q) per step: 1.1, 1.5, 1.02.
+    static func ratioStep(_ step: Step) -> Double {
+        switch step {
+        case .normal: return 1.1
+        case .coarse: return 1.5
+        case .fine: return 1.02
+        }
+    }
+
     /// The value one step from `value`, clamped to `range`. On a multiplicative kind a value of 0 steps up
     /// to `floor` and a value that would fall below `floor` goes to the range's lower bound when that is 0.
     static func nudged(
         _ value: Double,
         kind: ParameterStepKind,
-        direction: EQNudge.Direction,
-        step: EQNudge.Step,
+        direction: Direction,
+        step: Step,
         range: ClosedRange<Double>,
         floor: Double
     ) -> Double {
         let moved: Double
         switch kind {
         case .decibels:
-            moved = rounded(value + Double(direction.rawValue) * EQNudge.gainStep(step))
+            moved = rounded(value + Double(direction.rawValue) * decibelStep(step))
         case .linear(let increment):
             let scale: Double
             switch step {
@@ -196,7 +297,7 @@ enum ValueNudge {
             }
             moved = rounded(value + Double(direction.rawValue) * increment * scale)
         case .multiplicativeTime, .ratio:
-            let ratio = kind == .ratio ? EQNudge.qRatio(step) : EQNudge.frequencyRatio(step)
+            let ratio = kind == .ratio ? ratioStep(step) : timeRatio(step)
             if value <= 0 {
                 moved = direction == .up ? floor : value
             } else {
