@@ -21,7 +21,7 @@ extension FeatureFlag {
     static let all: [FeatureFlag] = [
         .legacyKernel, .ancEngineLease, .adaptiveTonalLive, .earnedCap, .feedForwardLive,
         .noiseSurvey, .conversationUnmasking, .virtualMicrophone, .zones, .headPositionCamera, .overnight,
-        .subAwareAnc, .longFIR, .outputProtection
+        .subAwareAnc, .longFIR, .outputProtection, .headphones
     ]
 
     /// E6 S11: the unified graph is the default renderer. Turning this on selects the frozen
@@ -150,6 +150,14 @@ extension FeatureFlag {
         id: "e9.output-protection",
         title: "Protection on every output",
         epic: "E9"
+    )
+
+    /// E13 S7 (S3 to S6 join it): the guided personal-BRIR capture in the Headphones workspace. Off: no capture
+    /// button and the workspace is unchanged. Removed when E13 ships.
+    static let headphones = FeatureFlag(
+        id: "e13.headphones",
+        title: "Headphones: personal BRIR capture",
+        epic: "E13"
     )
 }
 

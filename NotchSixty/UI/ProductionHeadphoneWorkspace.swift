@@ -5,6 +5,8 @@ import UniformTypeIdentifiers
 struct ProductionHeadphoneWorkspace: View {
     @ObservedObject var engine: AudioIOEngine
     @ObservedObject var profiles: ProductProfileController
+    /// E13 S7: the measurement path the BRIR capture uses; nil hides the capture button.
+    var calibration: MultichannelCalibrationController?
 
     @State private var draft = HeadphoneDeviceProfileConfiguration()
     @State private var importingSpatialProfile = false
@@ -25,6 +27,7 @@ struct ProductionHeadphoneWorkspace: View {
     @State private var oneClick = HeadphoneOneClickSession()
     @State private var oneClickFit: HeadphoneAutoFitResult?
     @State private var fitting = false
+    @State private var brirFlow: BRIRCaptureFlow?
     private static let sofaFileType: UTType =
         UTType(filenameExtension: "sofa")
             ?? UTType(importedAs: "org.aes69.sofa", conformingTo: .data)
@@ -84,6 +87,17 @@ struct ProductionHeadphoneWorkspace: View {
             loadResponsesAndTargets()
         }
         .task(id: profiles.selectedSystemProfileID) { syncFromSelectedSystem() }
+        .sheet(isPresented: Binding(
+            get: { brirFlow != nil },
+            set: { if !$0 { brirFlow?.cancel(); brirFlow = nil } }
+        )) {
+            if let brirFlow, let calibration {
+                BRIRCaptureSheet(
+                    flow: brirFlow, microphone: calibration.microphone,
+                    onSaved: { brirCaptured($0) },
+                    onClose: { brirFlow.cancel(); self.brirFlow = nil })
+            }
+        }
         .fileImporter(
             isPresented: $importingSpatialProfile,
             allowedContentTypes: [.json, Self.sofaFileType],
@@ -859,6 +873,13 @@ struct ProductionHeadphoneWorkspace: View {
                 .buttonStyle(.glass)
             }
 
+            if FeatureFlags().isEnabled(.headphones), let calibration {
+                Button("Capture your own BRIR…") { startBRIRCapture(calibration) }
+                    .buttonStyle(.glass)
+                    .disabled(selectedSampleRate == nil)
+                    .help("Record your speakers with in-ear microphones.")
+            }
+
             if !availableImportedHRTFs.isEmpty {
                 Picker(
                     "Previously imported spatial profile",
@@ -1043,6 +1064,20 @@ struct ProductionHeadphoneWorkspace: View {
         } catch {
             actionError = error.localizedDescription
         }
+    }
+
+    private func startBRIRCapture(_ calibration: MultichannelCalibrationController) {
+        guard let rate = selectedSampleRate else { return }
+        let roles = calibration.profile?.programLayout.roles ?? []
+        brirFlow = BRIRCaptureFlow(
+            environment: BRIRLiveCaptureEnvironment(calibration: calibration),
+            sampleRate: rate, availableSpeakers: roles)
+    }
+
+    private func brirCaptured(_ reference: BinauralProfileReference) {
+        draft.binauralProfile = reference
+        loadImportedHRTFs()
+        statusMessage = "Captured \(reference.displayName). Apply to persist the selection with this Playback System."
     }
 
     private func importSpatialProfile(_ result: Result<[URL], Error>) {
