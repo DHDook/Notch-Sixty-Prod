@@ -6,6 +6,10 @@ struct StereoMeterReading: Equatable, Sendable {
     let rmsLeft: Float
     let rmsRight: Float
     let overRangeSamples: UInt64
+    /// E28 S6b: per-side over-range counts so the L and R clip latches set independently. A source that counts one
+    /// total per stage (the frozen kernel) reports that total for both sides.
+    let overRangeLeft: UInt64
+    let overRangeRight: UInt64
 
     init(_ reading: N60StereoMeterReading) {
         peakLeft = reading.peakLeft
@@ -13,6 +17,8 @@ struct StereoMeterReading: Equatable, Sendable {
         rmsLeft = reading.rmsLeft
         rmsRight = reading.rmsRight
         overRangeSamples = reading.overRangeSamples
+        overRangeLeft = reading.overRangePaired ? reading.overRangeLeft : reading.overRangeSamples
+        overRangeRight = reading.overRangePaired ? reading.overRangeRight : reading.overRangeSamples
     }
 }
 

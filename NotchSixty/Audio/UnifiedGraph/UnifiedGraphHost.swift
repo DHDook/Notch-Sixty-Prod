@@ -322,7 +322,8 @@ final class UnifiedGraphHost: @unchecked Sendable {
                 _ = n60_graph_read_meter(graph, stage, UInt32(lane), &peak[lane], &rms[lane])
             }
             return N60StereoMeterReading(
-                peakLeft: peak[0], peakRight: peak[1], rmsLeft: rms[0], rmsRight: rms[1], overRangeSamples: over[0] &+ over[1]
+                peakLeft: peak[0], peakRight: peak[1], rmsLeft: rms[0], rmsRight: rms[1], overRangeSamples: over[0] &+ over[1],
+                overRangeLeft: over[0], overRangeRight: over[1], overRangePaired: true
             )
         }
         diagnostics.inputMeter = reading(N60_LSTAGE_METER_IN)
