@@ -205,7 +205,7 @@ Gate G2 passed on 2026-10-25 (commit 07e82c6)
 - [x] Raise the subwoofer limit from 4 to 8 (core bass management already supports 8 sub lanes since E6 S7b, ABI v7)
 - [x] Advanced pipeline view for power users, plus CamillaDSP YAML import alongside the existing export
 - [x] Migrate existing bi/tri-amp profiles automatically
-- [~] Stereo crossover with subwoofer lanes (E8 S11, G32): translator built (PR pending); not reachable from the UI until the stereo session passes subwoofers (E8 G3)
+- [~] Stereo crossover with subwoofer lanes (E8 S11 built dark, PR #431; S11b `e8/crossover-subs-nchannel` wires it into the N-channel session, G2, G3, E6 G32)
 
 ### E9 Multichannel protection and FIR parity
 
