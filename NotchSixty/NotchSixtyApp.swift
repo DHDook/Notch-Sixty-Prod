@@ -150,6 +150,7 @@ final class ProductController: ObservableObject {
             projects: roomProjects
         )
         self.ambientCompensation = ambientCompensation
+        ambientCompensation.unmaskingInputsEnabled = FeatureFlags().isEnabled(.conversationUnmasking)
         let activeQuietZone = ActiveQuietZoneController(
             engine: audioEngine,
             profiles: profiles,
@@ -292,6 +293,7 @@ final class ProductController: ObservableObject {
             projects: roomProjects
         )
         self.ambientCompensation = ambientCompensation
+        ambientCompensation.unmaskingInputsEnabled = FeatureFlags().isEnabled(.conversationUnmasking)
         let activeQuietZone = ActiveQuietZoneController(
             engine: audioEngine,
             profiles: profiles,
