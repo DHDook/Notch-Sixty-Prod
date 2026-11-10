@@ -123,7 +123,7 @@ enum EQValueParser {
     // MARK: Number scanning
 
     /// Splits "-3.5 dB" into (-3.5, "db"). The unit is lower-cased and trimmed.
-    private static func split(_ text: String, locale: Locale) -> (Double, String)? {
+    static func split(_ text: String, locale: Locale) -> (Double, String)? {
         var rest = Substring(text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())
         guard !rest.isEmpty else { return nil }
 
