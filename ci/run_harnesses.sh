@@ -417,6 +417,21 @@ if selected e8_xover_core; then
     fi
 fi
 
+# E9 S6: per-output headroom maths at the eight standard rates.
+if selected e9_headroom_core; then
+    build_core_objs
+    if [ "$CORE_OK" = 1 ]; then
+        if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -Icore/include -Icore/src core/tests/test_headroom.cpp \
+            "${CORE_OBJS[@]}" -o "$OUT/e9_core_headroom" && "$OUT/e9_core_headroom"; then
+            passed+=(e9_core_headroom)
+        else
+            failed+=(e9_core_headroom)
+        fi
+    else
+        failed+=(e9_headroom_core)
+    fi
+fi
+
 # E8 S7: linear-phase FIR crossovers and the DRIVER_FIR stages (ABI v18), at the eight standard rates.
 if selected e8_xover_fir_core; then
     build_core_objs
