@@ -67,6 +67,13 @@ struct UnifiedGraphLayoutShape: Equatable, Sendable {
     var rightMembers: [Int] { pairs.map(\.b) }
 }
 
+/// E8 S11b: bass management produced by folding the stereo crossover (`UnifiedGraphTranslator.stereoEligibility` with
+/// sub lanes), and the lanes the monitor mode mutes.
+struct UnifiedGraphFoldedBass: Equatable, Sendable {
+    var bass: UnifiedGraphBassManagement
+    var mutedLanes: UInt64
+}
+
 /// E6 S9a: the program DSP the stereo engine would apply (EQ, dynamics, FIR, denoiser, balance, headroom, image,
 /// inter-channel delay, room correction, speaker IR), as the verified two-lane stage lists, ready to be mapped onto
 /// the lane sets of an N-channel or binaural layout (decision D2 in `docs/epics/E6.md`).
@@ -106,6 +113,10 @@ struct UnifiedGraphProgramDSP: Equatable, Sendable {
     /// program settings; independent mode gives every program lane one. nil leaves the graph as before.
     var outputProtection: UnifiedGraphOutputProtection?
     var protectedSubLanes = 0
+    /// E8 S11b: the stereo crossover folded into bass management (stereo plus sub lanes), with the monitor mute mask.
+    /// `UnifiedGraphTranslator.nChannelEligibility` takes the crossover, filter spec, sub gain, polarity and
+    /// phase-alignment all-pass from it in place of rebuilding them. Not program DSP: `isNeutral` ignores it.
+    var foldedBass: UnifiedGraphFoldedBass?
 
     init(
         stereo: UnifiedGraphConfiguration,
@@ -120,6 +131,7 @@ struct UnifiedGraphProgramDSP: Equatable, Sendable {
         inputGain = stereo.inputGain
         stages = stereo.stereoStages
         protection = stereo.protection
+        foldedBass = stereo.bassManagement.map { UnifiedGraphFoldedBass(bass: $0, mutedLanes: stereo.mutedLanes) }
         self.virtualSpeakers = virtualSpeakers
     }
 

@@ -503,28 +503,39 @@ enum UnifiedGraphTranslator {
         var configuration = UnifiedGraphConfiguration(sampleRate: sampleRate, lanes: lanes)
         configuration.optimizerFIR = optimizerGraphFIR
         if bassEnabled {
+            // E8 S11b: the stereo crossover folded by `stereoEligibility` (two mains, no LFE) supplies the split, the sub
+            // gain and polarity, the phase-alignment all-pass and the monitor mute; the route plan's calibrations add on.
+            let folded = programDSP?.foldedBass
+            if let candidate = folded, roles.count != 2 || candidate.bass.subwoofers.count != subCount {
+                return .failure(.laneCountMismatch)
+            }
             var subs: [UnifiedGraphSubwoofer] = []
             for index in 0..<subCount {
                 let calibration = routePlan.subwooferCalibrations[index]
-                let gainDB = bassManagementConfiguration.subGainDB + (calibration?.gainDB ?? 0)
+                let foldedSub = folded?.bass.subwoofers[index]
+                let gainDB = (foldedSub?.gainDB ?? bassManagementConfiguration.subGainDB) + (calibration?.gainDB ?? 0)
                 guard (-60.0...24.0).contains(gainDB) else { return .failure(.subGainOutOfRange) }
-                guard (calibration?.eqBands.count ?? 0) <= 8 else { return .failure(.subEQTooLarge) }
+                let eq = (foldedSub?.eq ?? []) + sections(calibration?.eqBands ?? [])
+                guard eq.count <= 8 else { return .failure(.subEQTooLarge) }
                 subs.append(UnifiedGraphSubwoofer(
                     gainDB: gainDB,
-                    polarityInverted: bassManagementConfiguration.subPolarityInverted
+                    polarityInverted: (foldedSub?.polarityInverted ?? bassManagementConfiguration.subPolarityInverted)
                         != (calibration?.polarityInverted ?? false),
                     delayMilliseconds: calibration?.delayMilliseconds ?? 0,
-                    eq: sections(calibration?.eqBands ?? [])
+                    eq: eq
                 ))
             }
-            configuration.bassManagement = UnifiedGraphBassManagement(
-                crossoverHz: bassManagementConfiguration.frequencyHz,
+            var bass = UnifiedGraphBassManagement(
+                crossoverHz: folded?.bass.crossoverHz ?? bassManagementConfiguration.frequencyHz,
                 lfeLane: lfeLane,
                 lfeLowPassHz: LiveNChannelRenderGraphCompiler.lfeLowPassHz,
                 lfeGainDB: LiveNChannelRenderGraphCompiler.lfeInBandGainDB,
-                steepSplit: bassManagementConfiguration.topology == .linkwitzRiley48,
+                steepSplit: folded?.bass.steepSplit ?? (bassManagementConfiguration.topology == .linkwitzRiley48),
                 subwoofers: subs
             )
+            bass.filterSpec = folded?.bass.filterSpec
+            configuration.bassManagement = bass
+            configuration.mutedLanes = folded?.mutedLanes ?? 0
             // E26 G38: two mains and no LFE (stereo plus sub, class A) play the sub at the stereo path's level.
             if roles.count == 2, lfeLane == nil {
                 configuration.bassManagement?.redirectDB = UnifiedGraphBassManagement.twoMainMeanRedirectDB
@@ -543,6 +554,11 @@ enum UnifiedGraphTranslator {
                 configuration.deltaAudition = programDSP.deltaAudition
             }
             // Dry run, so the reason is known here and not as a bare "spec rejected" at session start.
+            do { _ = try configuration.makeSpec() } catch let reason as UnifiedGraphFallbackReason {
+                return .failure(reason)
+            } catch { return .failure(.specRejected) }
+        } else if configuration.mutedLanes != 0 {
+            // The monitor mute is a stage the plain build adds; name a refusal (the ANC actuators) here, not at session start.
             do { _ = try configuration.makeSpec() } catch let reason as UnifiedGraphFallbackReason {
                 return .failure(reason)
             } catch { return .failure(.specRejected) }
