@@ -371,10 +371,10 @@ final class UnifiedGraphHost: @unchecked Sendable {
 
     /// The reading for lane 0 (linked groups publish the same value on every lane); nil when the
     /// stage is not in the live graph. Caller holds `lock`.
-    private func dynamicsReading(_ graph: OpaquePointer, stageId: UInt32) -> n60_dynamics_readback? {
+    private func dynamicsReading(_ graph: OpaquePointer, stageId: UInt32, lane: UInt32 = 0) -> n60_dynamics_readback? {
         var out = n60_dynamics_readback()
         out.structSize = UInt32(MemoryLayout<n60_dynamics_readback>.size)
-        guard n60_graph_read_dynamics(graph, stageId, 0, &out) == N60_STATUS_OK else { return nil }
+        guard n60_graph_read_dynamics(graph, stageId, lane, &out) == N60_STATUS_OK else { return nil }
         return out
     }
 
@@ -403,10 +403,10 @@ final class UnifiedGraphHost: @unchecked Sendable {
         guard let graph else { return [] }
         var out: [UnifiedGraphOutputProtectionReading] = []
         for lane in 0..<lanes {
-            guard let hard = dynamicsReading(graph, stageId: UnifiedGraphOutputProtection.hardLimitStageBase + UInt32(lane)) else {
+            guard let hard = dynamicsReading(graph, stageId: UnifiedGraphOutputProtection.hardLimitStageBase + UInt32(lane), lane: UInt32(lane)) else {
                 continue
             }
-            let user = dynamicsReading(graph, stageId: UnifiedGraphOutputProtection.userLaneStageBase + UInt32(lane))
+            let user = dynamicsReading(graph, stageId: UnifiedGraphOutputProtection.userLaneStageBase + UInt32(lane), lane: UInt32(lane))
             out.append(UnifiedGraphOutputProtectionReading(
                 lane: lane, userGainReductionDB: user?.grMaxDb, userTruePeakLinear: user?.outTruePeak,
                 hardLimitGainReductionDB: hard.grMaxDb, outputTruePeakLinear: hard.outTruePeak))

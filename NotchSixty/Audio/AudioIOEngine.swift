@@ -1153,7 +1153,10 @@ final class AudioIOEngine: ObservableObject {
     @Published private(set) var outputDeviceProfileConfiguration: OutputDeviceProfileConfiguration?
     @Published private(set) var headphoneDeviceProfileConfiguration: HeadphoneDeviceProfileConfiguration?
     @Published private(set) var speakerDriverProcessingConfiguration = SpeakerDriverProcessingConfiguration()
-    @Published private(set) var dynamicsConfiguration = DynamicsConfiguration()
+    @Published private(set) var dynamicsConfiguration = DynamicsConfiguration() {
+        // E9 S5b: keeps the output-protection policy in step with restored and replaced settings.
+        didSet { UnifiedGraphOutputProtection.apply(settings: dynamicsConfiguration.outputProtection ?? OutputProtectionSettings()) }
+    }
     @Published private(set) var roomCorrectionConfiguration = RoomCorrectionConfiguration()
     /// E24 S3b: why an enabled lane-plan correction is not shaping playback right now, for Room Correction to show.
     @Published private(set) var roomCorrectionInactiveReason: RoomCorrectionInactiveReason?
@@ -2346,6 +2349,9 @@ final class AudioIOEngine: ObservableObject {
                 ambientTarget: clampedAmbientTarget
             )
 
+        // E9 S5b: the graph builders read the output-protection policy; whatever happens, leave it matching the stored settings.
+        UnifiedGraphOutputProtection.apply(settings: state.dynamics.outputProtection ?? OutputProtectionSettings())
+        defer { UnifiedGraphOutputProtection.apply(settings: dynamicsConfiguration.outputProtection ?? OutputProtectionSettings()) }
         if immutableSemanticTransportActive {
             if state.stereoEQ != stereoEQConfiguration
                 || state.dynamics != dynamicsConfiguration
@@ -2971,6 +2977,42 @@ final class AudioIOEngine: ObservableObject {
         try replaceDynamicsConfiguration(updated)
     }
 
+    /// E9 S5b: one output the Protection card's Outputs list can show.
+    struct OutputProtectionLane: Equatable, Identifiable, Sendable {
+        let index: Int
+        let label: String
+        let isSub: Bool
+        var id: Int { index }
+    }
+
+    /// E9 S5b: the outputs that have user protection of their own under `e9.output-protection`: the program lanes (one linked
+    /// group unless "Independent per output" is on) then each subwoofer lane. Empty when the flag is off, or for a routed or
+    /// binaural session (those keep their own stages; E9 S5c). A stereo session shows its two lanes.
+    var outputProtectionLanes: [OutputProtectionLane] {
+        guard UnifiedGraphOutputProtection.current() != nil else { return [] }
+        if let session = nChannelTransportSession {
+            guard !session.routePlan.isRouted else { return [] }
+            var lanes = session.routePlan.programLayout.roles.enumerated().map {
+                OutputProtectionLane(index: $0.offset, label: $0.element.displayName, isSub: false)
+            }
+            for sub in 0..<Int(session.routePlan.subwooferCount) {
+                lanes.append(OutputProtectionLane(index: lanes.count, label: "Sub \(sub + 1)", isSub: true))
+            }
+            return lanes
+        }
+        if binauralHeadphoneTransportSession != nil { return [] }
+        return [OutputProtectionLane(index: 0, label: "Left", isSub: false), OutputProtectionLane(index: 1, label: "Right", isSub: false)]
+    }
+
+    /// E9 S5b (G14): gain reduction and true peak per output since the last call (read-and-reset in the core). Empty when no
+    /// graph renders or the flag is off. Only the Outputs list calls this, so no other reader loses its values.
+    func outputProtectionReadings() -> [UnifiedGraphOutputProtectionReading] {
+        let lanes = outputProtectionLanes.count
+        guard lanes > 0,
+              let host = transportSession?.unifiedGraphReadback ?? nChannelTransportSession?.unifiedGraphReadback else { return [] }
+        return host.outputProtectionReadings(lanes: lanes)
+    }
+
     func replaceDynamicsConfiguration(_ configuration: DynamicsConfiguration) throws {
         let validationRate = transportSession?.outputFormat.sampleRate
             ?? nChannelTransportSession?.outputFormat.sampleRate
@@ -2978,11 +3020,19 @@ final class AudioIOEngine: ObservableObject {
             ?? 48_000
         _ = try configuration.makeSnapshot(sampleRate: validationRate)
         let newProtection = try configuration.mergingFoldProtection(foldMatrixInUse).makeProtectionSnapshot(sampleRate: validationRate)
+        // E9 S5b: the graph builders read the output-protection policy from here, so it is set before they run and put back if
+        // the edit is refused (the running graph and the stored configuration then stay as they were).
+        let previousOutputProtection = UnifiedGraphOutputProtection.apply(settings: configuration.outputProtection ?? OutputProtectionSettings())
+        // Main-actor only: the policy static is written from here, the dynamicsConfiguration didSet and state restore.
+        var committed = false
+        defer { if !committed { UnifiedGraphOutputProtection.apply(settings: previousOutputProtection) } }
         if immutableSemanticTransportActive, configuration != dynamicsConfiguration {
             try requireLiveGraphEdits()
             var inputs = currentLiveGraphInputs
             inputs.dynamics = configuration
             try republishLiveGraph(inputs)
+            // The live graph now carries the new policy; keep it even if a later step throws.
+            committed = true
         }
         if let session = transportSession {
             let oldProtection = try renderDynamicsConfiguration().makeProtectionSnapshot(sampleRate: session.outputFormat.sampleRate)
@@ -3011,6 +3061,7 @@ final class AudioIOEngine: ObservableObject {
                 || oldProtection.effectiveFactor != newProtection.effectiveFactor
                 || oldProtection.limiterEnabled != newProtection.limiterEnabled
                 || dynamicsConfiguration.softClipper.enabled != configuration.softClipper.enabled
+                || (dynamicsConfiguration.outputProtection?.independent ?? false) != (configuration.outputProtection?.independent ?? false)
             let denoiserStructureChanged = dynamicsConfiguration.spectralDenoiser.enabled != configuration.spectralDenoiser.enabled
                 || (configuration.spectralDenoiser.enabled
                     && dynamicsConfiguration.spectralDenoiser.quality != configuration.spectralDenoiser.quality)
@@ -3019,10 +3070,11 @@ final class AudioIOEngine: ObservableObject {
                 try session.transitionDSPGraph(graph)
             } else {
                 try applyAudioUnitRackLatency(to: &graph)
-            try session.publishDSPGraph(graph)
+                try session.publishDSPGraph(graph)
             }
         }
         dynamicsConfiguration = configuration
+        committed = true
         lastErrorDescription = nil
     }
 
