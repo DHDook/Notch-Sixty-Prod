@@ -395,6 +395,25 @@ final class UnifiedGraphHost: @unchecked Sendable {
         )
     }
 
+    /// E9 S5: the protection readings of each output lane `0..<lanes` (user stage of a sub lane or an independent program lane,
+    /// the always-on hard limit). A lane without a stage reads nil for it. Empty when the graph has no hard limits (the flag
+    /// is off). Control plane.
+    func outputProtectionReadings(lanes: Int) -> [UnifiedGraphOutputProtectionReading] {
+        lock.lock(); defer { lock.unlock() }
+        guard let graph else { return [] }
+        var out: [UnifiedGraphOutputProtectionReading] = []
+        for lane in 0..<lanes {
+            guard let hard = dynamicsReading(graph, stageId: UnifiedGraphOutputProtection.hardLimitStageBase + UInt32(lane)) else {
+                continue
+            }
+            let user = dynamicsReading(graph, stageId: UnifiedGraphOutputProtection.userLaneStageBase + UInt32(lane))
+            out.append(UnifiedGraphOutputProtectionReading(
+                lane: lane, userGainReductionDB: user?.grMaxDb, userTruePeakLinear: user?.outTruePeak,
+                hardLimitGainReductionDB: hard.grMaxDb, outputTruePeakLinear: hard.outTruePeak))
+        }
+        return out
+    }
+
     var latencyFrames: UInt32 {
         lock.lock(); defer { lock.unlock() }
         guard let graph else { return 0 }
@@ -460,6 +479,15 @@ final class UnifiedGraphHost: @unchecked Sendable {
 }
 
 /// E6 S8c: graph gain-reduction, true-peak and guard readbacks (values since the last read).
+/// E9 S5: one output lane's protection readings (gain reduction in dB as the core reports it, true peak linear).
+struct UnifiedGraphOutputProtectionReading: Equatable, Sendable {
+    var lane: Int
+    var userGainReductionDB: Float?
+    var userTruePeakLinear: Float?
+    var hardLimitGainReductionDB: Float
+    var outputTruePeakLinear: Float
+}
+
 struct UnifiedGraphDynamicsReading: Equatable, Sendable {
     let compressorGainReductionDB: Float
     let limiterGainReductionDB: Float

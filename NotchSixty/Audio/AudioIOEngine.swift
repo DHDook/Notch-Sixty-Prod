@@ -1630,6 +1630,18 @@ final class AudioIOEngine: ObservableObject {
 
     var liveNChannelActive: Bool { nChannelTransportSession != nil }
 
+    /// E6 S12h part 3 (G50, G51): the delta audition runs on the program lanes of an unrouted speaker graph. A routed
+    /// session (each output has its own crossover, delay and protection) and Virtual Speakers (the ears are rendered
+    /// from the lanes) refuse it, so the picker does not offer it there.
+    var deltaAuditionAvailable: Bool {
+        if nChannelTransportSession?.routePlan.isRouted == true { return false }
+        if binauralHeadphoneTransportSession != nil { return false }
+        if let headphone = headphoneDeviceProfileConfiguration, headphone.enabled, headphone.spatialMode == .virtualSpeakers {
+            return false
+        }
+        return true
+    }
+
     /// Test seam (E6 S9c2): puts the engine in `.running` with a hardware-free N-channel session, so the live
     /// setters, the planner and the session-kind paths run against a real bridge and graph without Core Audio.
     func installTestingNChannelSession(_ session: CoreAudioNChannelTransportSession) throws {
@@ -2246,6 +2258,9 @@ final class AudioIOEngine: ObservableObject {
     }
 
     func setAuditionMode(_ mode: AuditionMode) throws {
+        if mode == .delta, !deltaAuditionAvailable {
+            throw LiveNChannelTransportError.routingRefused("the delta audition is not available with speaker routing or Virtual Speakers; switch to Processed or Reference.")
+        }
         var updated = playbackControlConfiguration
         updated.auditionMode = mode
         try applyPlaybackControlConfiguration(updated)
@@ -4735,6 +4750,10 @@ final class AudioIOEngine: ObservableObject {
     ) throws {
         if let session = nChannelTransportSession {
             let rate = session.outputFormat.sampleRate
+            // The delta refusal comes before the program build so a refused edit costs nothing (G51).
+            if session.routePlan.isRouted, inputs.playback.auditionMode == .delta {
+                throw LiveNChannelTransportError.routingRefused("the delta audition is not available with speaker routing; switch to Processed or Reference.")
+            }
             guard let shape = UnifiedGraphLayoutShape(roles: session.routePlan.programLayout.roles) else {
                 throw LiveNChannelTransportError.unifiedGraphRejected(.laneCountMismatch)
             }

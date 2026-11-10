@@ -61,6 +61,58 @@ enum UnifiedGraphFIRScheme {
     }
 }
 
+/// E9 S5: protection on every output of a graph (`e9.output-protection`). Swift decides; the core only sees the stages.
+/// nil on a configuration means the graph is exactly what it was before the flag.
+struct UnifiedGraphOutputProtection: Equatable, Sendable {
+    /// The Advanced "Independent per output" switch: every program lane gets its own PROTECTION stage instead of one
+    /// linked group (the group preserves the image). Sub lanes always have their own stage.
+    var independent = false
+
+    /// The hard limit: limiter on, -1 dBFS, 1 ms attack, 100 ms release, no look-ahead, no guard or oversampling, so
+    /// zero latency (`core/src/layout.cpp` safety limiter). One unlinked stage per output, not affected by the user's
+    /// protection being off.
+    static let hardLimitCeilingDB: Float = -1
+    static let hardLimitParameters: [Float] = [1, hardLimitCeilingDB, 1, 100, 0, 0, 1]
+    static let hardLimitStageBase: UInt32 = 4_000
+    static let userLaneStageBase: UInt32 = 4_100
+
+    /// The user ceiling never exceeds the hard ceiling.
+    static func clampedUserParameters(_ params: [Float]) -> [Float] {
+        var out = params
+        if out.count > 1 { out[1] = min(out[1], hardLimitCeilingDB) }
+        return out
+    }
+
+    /// One unlinked hard-limit stage per output lane (`0..<lanes`), placed after every stage at the protection position or
+    /// earlier and ahead of mute, capture and the final sanitise. A binaural graph keeps its layout safety limiter instead.
+    func addHardLimits(to spec: inout UnifiedGraphSpec, lanes: Int) {
+        let at = spec.stages.lastIndex { UnifiedGraphProgramDSP.position(of: $0.kind) <= 27 }.map { $0 + 1 } ?? 0
+        let stages = (0..<lanes).map { lane in
+            UnifiedGraphStageSpec(
+                kind: N60_STAGE_PROTECTION.rawValue, stageId: Self.hardLimitStageBase + UInt32(lane), laneA: 0,
+                laneMask: UInt64(1) << UInt64(lane), params: Self.hardLimitParameters)
+        }
+        spec.stages.insert(contentsOf: stages, at: at)
+    }
+
+    private static let lock = NSLock()
+    nonisolated(unsafe) private static var launch: UnifiedGraphOutputProtection?
+
+    /// The policy new graph configurations use by default: set once at launch from `e9.output-protection` (feature flags are
+    /// main-actor, graph configurations are built on any thread). nil with the flag off.
+    static func current() -> UnifiedGraphOutputProtection? {
+        lock.lock(); defer { lock.unlock() }
+        return launch
+    }
+
+    /// Reads the flag. `independent` is the persisted Advanced switch (the Dynamics view wires it in a later slice).
+    @MainActor static func refresh(_ flags: FeatureFlags? = nil, independent: Bool = false) {
+        let value: UnifiedGraphOutputProtection? = (flags ?? FeatureFlags()).isEnabled(.outputProtection)
+            ? UnifiedGraphOutputProtection(independent: independent) : nil
+        lock.lock(); launch = value; lock.unlock()
+    }
+}
+
 struct UnifiedGraphSpec: Equatable {
     var sampleRate: Double
     var maxBlockFrames: UInt32

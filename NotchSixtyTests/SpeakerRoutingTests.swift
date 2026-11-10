@@ -422,6 +422,30 @@ extension SpeakerRoutingTests {
         }
     }
 
+    /// E6 S12h part 3 review: a routed session does not offer the delta; selecting it throws by name, the republish
+    /// refuses it before the program build, and Processed and Reference stay selectable.
+    func testRoutedSessionDoesNotOfferTheDeltaAudition() throws {
+        let engine = try engineReady(subs: false)
+        XCTAssertTrue(engine.deltaAuditionAvailable, "an idle engine offers the delta")
+        let routing = SpeakerRoutingTemplate.twoWay.build(
+            mains: [.init(lane: 0, name: "L", endpoints: [ep(0, device: "fixture"), ep(1, device: "fixture")]),
+                    .init(lane: 1, name: "R", endpoints: [ep(2, device: "fixture"), ep(3, device: "fixture")])],
+            crossoverHz: [2_000])!
+        _ = try routedSession(
+            engine: engine, routing: routing, layout: .stereo,
+            labels: [kAudioChannelLabel_Left, kAudioChannelLabel_Right], rate: 48_000, channels: 4)
+        XCTAssertFalse(engine.deltaAuditionAvailable)
+        XCTAssertThrowsError(try engine.setAuditionMode(.delta)) { error in
+            guard case LiveNChannelTransportError.routingRefused(let reason) = error else {
+                return XCTFail("expected a named refusal, got \(error)")
+            }
+            XCTAssertTrue(reason.contains("delta"))
+        }
+        XCTAssertNotEqual(engine.playbackControlConfiguration.auditionMode, .delta, "the refused edit changed nothing")
+        XCTAssertNoThrow(try engine.setAuditionMode(.reference))
+        XCTAssertNoThrow(try engine.setAuditionMode(.processed))
+    }
+
     // MARK: Plan
 
     func testLivePlanFlattensDevicesWithSelectedOutputFirst() throws {

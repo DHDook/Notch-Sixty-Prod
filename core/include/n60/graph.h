@@ -144,7 +144,9 @@ typedef enum n60_stage_kind {
  * frame; when the look-ahead is not a whole number of frames (an odd number of oversampled samples at 2x, 44.1 and
  * 88.2 kHz among them) the lane's true delay is the reported latency minus the rounding, and the reference is read through
  * a 32-tap Kaiser windowed-sinc interpolator at that fraction. It needs the whole part of the delay to be at least 15
- * frames, otherwise the build is refused. */
+ * frames, otherwise the build is refused (a protection stage always puts at least 32 frames before the subtract, so
+ * this is a guard). Channel limit: a mask or pair names lanes below N60_GRAPH_MAX_CHANNELS (64); the ring is allocated
+ * per captured lane (capacityFrames + 32 floats each), so a mask of 64 lanes at the maximum ring is the largest case. */
 
 /* Image and de-ess (ABI v23, E6 S12b). The stereo kernel's stereo mode, widener, de-harsh and de-esser, same arithmetic.
  * Both are pair stages (laneA, laneB distinct, laneMask 0, capacityFrames 0); an off part is parked and costs nothing.
