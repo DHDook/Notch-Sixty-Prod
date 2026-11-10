@@ -11,53 +11,21 @@ enum EQNudge {
     /// Q of a band added by double-clicking the empty graph.
     static let addedBandQ = 1.0
 
-    enum Step: Equatable, Sendable {
-        case normal
-        /// Shift.
-        case coarse
-        /// Option.
-        case fine
-
-        init(shift: Bool, option: Bool) {
-            self = option ? .fine : (shift ? .coarse : .normal)
-        }
-    }
-
-    /// +1 or -1.
-    enum Direction: Int, Sendable {
-        case down = -1
-        case up = 1
-    }
+    /// G17: the step and direction types are the generic ones.
+    typealias Step = ValueNudge.Step
+    typealias Direction = ValueNudge.Direction
 
     // MARK: Tables
 
     /// Frequency ratio per step: a semitone (2^(1/12)), a third of an octave (2^(1/3)),
     /// 1/96 octave (2^(1/96)).
-    static func frequencyRatio(_ step: Step) -> Double {
-        switch step {
-        case .normal: return pow(2, 1.0 / 12.0)
-        case .coarse: return pow(2, 1.0 / 3.0)
-        case .fine: return pow(2, 1.0 / 96.0)
-        }
-    }
+    static func frequencyRatio(_ step: Step) -> Double { ValueNudge.timeRatio(step) }
 
     /// Gain per step in dB: 0.5, 3, 0.1.
-    static func gainStep(_ step: Step) -> Double {
-        switch step {
-        case .normal: return 0.5
-        case .coarse: return 3
-        case .fine: return 0.1
-        }
-    }
+    static func gainStep(_ step: Step) -> Double { ValueNudge.decibelStep(step) }
 
     /// Q ratio per step: 1.1, 1.5, 1.02.
-    static func qRatio(_ step: Step) -> Double {
-        switch step {
-        case .normal: return 1.1
-        case .coarse: return 1.5
-        case .fine: return 1.02
-        }
-    }
+    static func qRatio(_ step: Step) -> Double { ValueNudge.ratioStep(step) }
 
     // MARK: Nudges
 
@@ -67,9 +35,7 @@ enum EQNudge {
         step: Step,
         range: ClosedRange<Double>
     ) -> Double {
-        let ratio = frequencyRatio(step)
-        let moved = direction == .up ? hertz * ratio : hertz / ratio
-        return clamp(moved, to: range)
+        ValueNudge.nudged(hertz, kind: .multiplicativeTime, direction: direction, step: step, range: range, floor: range.lowerBound)
     }
 
     static func gain(
@@ -78,9 +44,7 @@ enum EQNudge {
         step: Step,
         range: ClosedRange<Double> = StereoEQConfiguration.bandGainRange
     ) -> Double {
-        let moved = decibels + Double(direction.rawValue) * gainStep(step)
-        // Rounded to 1e-6 dB so repeated 0.1 steps do not drift.
-        return clamp((moved * 1_000_000).rounded() / 1_000_000, to: range)
+        ValueNudge.nudged(decibels, kind: .decibels, direction: direction, step: step, range: range, floor: range.lowerBound)
     }
 
     static func q(
@@ -89,8 +53,7 @@ enum EQNudge {
         step: Step,
         range: ClosedRange<Double> = qRange
     ) -> Double {
-        let ratio = qRatio(step)
-        return clamp(direction == .up ? value * ratio : value / ratio, to: range)
+        ValueNudge.nudged(value, kind: .ratio, direction: direction, step: step, range: range, floor: range.lowerBound)
     }
 
     /// Nudges the field's value in place of the arrow keys.

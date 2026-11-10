@@ -423,15 +423,17 @@ struct ProductionMetersView: View {
                 .foregroundStyle(.secondary)
 
             headroomAssistantCard
+                .onAppear { GainReductionMonitor.shared(for: engine).attach() }
+                .onDisappear { GainReductionMonitor.shared(for: engine).detach() }
 
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 180), spacing: 12)], spacing: 12) {
-                dynamicsMetric("Compressor GR", snapshot.compressorGainReductionDB)
-                dynamicsMetric("De-Esser GR", snapshot.deEsserGainReductionDB)
-                dynamicsMetric("Multiband Low GR", snapshot.multibandLowGainReductionDB)
-                dynamicsMetric("Multiband Mid GR", snapshot.multibandMidGainReductionDB)
-                dynamicsMetric("Multiband High GR", snapshot.multibandHighGainReductionDB)
-                dynamicsMetric("Expander Attenuation", snapshot.expanderAttenuationDB)
-                dynamicsMetric("Limiter GR", snapshot.limiterGainReductionDB)
+                grMetric("Compressor GR", .compressor, snapshot.compressorGainReductionDB)
+                grMetric("De-Esser GR", .deEsser, snapshot.deEsserGainReductionDB)
+                grMetric("Multiband Low GR", .multibandLow, snapshot.multibandLowGainReductionDB)
+                grMetric("Multiband Mid GR", .multibandMid, snapshot.multibandMidGainReductionDB)
+                grMetric("Multiband High GR", .multibandHigh, snapshot.multibandHighGainReductionDB)
+                grMetric("Expander Attenuation", .expander, snapshot.expanderAttenuationDB)
+                grMetric("Limiter GR", .limiter, snapshot.limiterGainReductionDB)
                 dynamicsMetric("Gain Rider", snapshot.gainRiderAttenuationDB)
                 dynamicsMetric("Denoiser Suppression", snapshot.denoiserMeanSuppressionDB)
 
@@ -785,6 +787,20 @@ struct ProductionMetersView: View {
 
     private func normalizedLevel(_ db: Double) -> Double {
         min(max((db - ProductionMeterMath.floorDB) / -ProductionMeterMath.floorDB, 0), 1)
+    }
+
+    /// E28 S5: a gain-reduction card with the shared bar (the hub is the only reader, so the figures match the Dynamics page).
+    private func grMetric(_ title: String, _ source: GainReductionSource, _ value: Float) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title).font(.caption).foregroundStyle(.secondary)
+            Text(ProductionMeterMath.formattedGain(value))
+                .font(.system(.title3, design: .monospaced).weight(.semibold))
+                .monospacedDigit()
+            GainReductionBar(monitor: GainReductionMonitor.shared(for: engine), source: source)
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, minHeight: 88, alignment: .topLeading)
+        .background(.quaternary.opacity(0.22), in: .rect(cornerRadius: 16))
     }
 
     private func dynamicsMetric(_ title: String, _ value: Float) -> some View {

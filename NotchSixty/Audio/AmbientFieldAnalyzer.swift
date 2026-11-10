@@ -92,6 +92,25 @@ struct AmbientAnalysisDetailedResult: Equatable, Sendable {
     /// Positive means microphone[index] aligned best with modeledPlayback[index-lag].
     let playbackAlignmentLagFrames: Int?
     let playbackAlignmentConfidence: Double?
+    /// E4 S30b: band spectrum of the scaled, aligned playback prediction at the microphone (the same bands
+    /// and dBFS convention as `snapshot.spectrum`). Nil unless the playback model separated the window.
+    /// The prediction is built from the engine's rendered reference, which is tapped after the ambient
+    /// stage, so it carries any applied ambient cut (pinned by `ConversationUnmaskingInputTests`).
+    let modeledPlaybackSpectrum: [AmbientSpectrumBand]?
+
+    init(
+        snapshot: AmbientAnalysisSnapshot,
+        separatedResidualSamples: [Float],
+        playbackAlignmentLagFrames: Int?,
+        playbackAlignmentConfidence: Double?,
+        modeledPlaybackSpectrum: [AmbientSpectrumBand]? = nil
+    ) {
+        self.snapshot = snapshot
+        self.separatedResidualSamples = separatedResidualSamples
+        self.playbackAlignmentLagFrames = playbackAlignmentLagFrames
+        self.playbackAlignmentConfidence = playbackAlignmentConfidence
+        self.modeledPlaybackSpectrum = modeledPlaybackSpectrum
+    }
 }
 
 struct AmbientAnalysisConfiguration: Equatable, Sendable {
@@ -293,6 +312,7 @@ struct AmbientFieldAnalyzer: Sendable {
         var residual = microphoneWindow
         var playbackAlignmentLagFrames: Int?
         var playbackAlignmentConfidence: Double?
+        var modeledPlaybackSpectrum: [AmbientSpectrumBand]?
 
         let audibleSources = sourceWindows.filter {
             Self.dbfs(amplitude: Self.rms($0.samples))
@@ -347,6 +367,16 @@ struct AmbientFieldAnalyzer: Sendable {
                             - estimate.gain * Double($0.1)
                     )
                 }
+                let scaledPrediction = alignedPrediction.map {
+                    Float(Double($0) * estimate.gain)
+                }
+                modeledPlaybackSpectrum = makeSpectrumBands(
+                    spectralFrame: try makeSpectralFrame(
+                        samples: scaledPrediction,
+                        sampleRate: sampleRate
+                    ),
+                    sampleRate: sampleRate
+                )
                 separationMode = .modeledPlaybackSubtraction
                 confidence = estimate.confidence
                     * alignment.confidence
@@ -414,7 +444,8 @@ struct AmbientFieldAnalyzer: Sendable {
             playbackAlignmentLagFrames:
                 playbackAlignmentLagFrames,
             playbackAlignmentConfidence:
-                playbackAlignmentConfidence
+                playbackAlignmentConfidence,
+            modeledPlaybackSpectrum: modeledPlaybackSpectrum
         )
     }
 
