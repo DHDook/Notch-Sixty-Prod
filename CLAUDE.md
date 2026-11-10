@@ -8,7 +8,7 @@
   builds one slice in a fresh context), realtime-reviewer (Sonnet), and code-scout,
   build-test-runner, plan-tracker, pr-writer (Haiku). `/next` itself runs on Sonnet.
 
-**Current focus:** E9 (multichannel protection and FIR parity), S5c merged (#436), S6 `e9/headroom-core` (PR #439); E19 (MIMO room treatment), S2 `e19/mimo-design-core` built dark (PR #442, needs-owner; S3 `e19/mimo-fir-realisation` next); E28 (Dynamics and Meters polish), S4 merged (#438), S5 `e28/dynamics-visualisation` in progress; E23 S1 merged (#437), S1b next; E8 complete (S11b #434)
+**Current focus:** E9 (multichannel protection and FIR parity), S6 merged (#439), S7 next (needs-owner); E19 (MIMO room treatment), S2 `e19/mimo-design-core` (PR #442, needs-owner; S3 next); E28 (Dynamics and Meters polish), S5 `e28/dynamics-visualisation` (PR #445; S6 next, needs-owner); E23 S1 merged (#437), S1b next; E4 S30 unmasking: S30b in progress, S30a and S30c need a needs-owner slot; E8 complete
 <!-- plan-tracker keeps the line above current -->
 
 @AGENTS.md

@@ -7,5 +7,5 @@ CORE_SOURCES=(
     measure/offline_fft measure/ess measure/deconvolve measure/reference_room measure/timing
     measure/distortion measure/decay measure/waterfall measure/monitor_ring measure/spl
     measure/rta correct/minphase correct/design correct/synth correct/bass
-    correct/multisub_search xover/xover
+    correct/multisub_search xover/xover headroom/headroom
 )
