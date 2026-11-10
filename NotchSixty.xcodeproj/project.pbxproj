@@ -218,6 +218,7 @@
 		E6C100000000000000000022 /* stages_loudness.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E6C100000000000000000021 /* stages_loudness.cpp */; };
 		E6C100000000000000000032 /* stages_multiband.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E6C100000000000000000031 /* stages_multiband.cpp */; };
 		E8A000000000000000000022 /* stages_route.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E8A000000000000000000012 /* stages_route.cpp */; };
+		E19B00000000000000000022 /* stages_mimo.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E19B00000000000000000012 /* stages_mimo.cpp */; };
 		E25F0000000000000000F002 /* fold.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E25F0000000000000000F001 /* fold.cpp */; };
 		E6C000000000000000000036 /* layout.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E6C000000000000000000016 /* layout.cpp */; };
 		F10200000000000000000001 /* ThirdPartyNotices.txt in Resources */ = {isa = PBXBuildFile; fileRef = F10200000000000000000011 /* ThirdPartyNotices.txt */; };
@@ -925,8 +926,10 @@
 		E6C100000000000000000023 /* stages_loudness.hpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.h; path = stages_loudness.hpp; sourceTree = "<group>"; };
 		E6C100000000000000000033 /* stages_multiband.hpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.h; path = stages_multiband.hpp; sourceTree = "<group>"; };
 		E8A000000000000000000012 /* stages_route.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = stages_route.cpp; sourceTree = "<group>"; };
+		E19B00000000000000000012 /* stages_mimo.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = stages_mimo.cpp; sourceTree = "<group>"; };
 		E25F0000000000000000F001 /* fold.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = fold.cpp; sourceTree = "<group>"; };
 		E8A000000000000000000013 /* stages_route.hpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.h; path = stages_route.hpp; sourceTree = "<group>"; };
+		E19B00000000000000000013 /* stages_mimo.hpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.h; path = stages_mimo.hpp; sourceTree = "<group>"; };
 		F10200000000000000000011 /* ThirdPartyNotices.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = ThirdPartyNotices.txt; sourceTree = "<group>"; };
 		A10000000000000000000020 /* NotchSixtyApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotchSixtyApp.swift; sourceTree = "<group>"; };
 		A10000000000000000000021 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
@@ -1486,6 +1489,7 @@
 				E6C100000000000000000021 /* stages_loudness.cpp */,
 				E6C100000000000000000031 /* stages_multiband.cpp */,
 				E8A000000000000000000012 /* stages_route.cpp */,
+				E19B00000000000000000012 /* stages_mimo.cpp */,
 				E25F0000000000000000F001 /* fold.cpp */,
 				E6C000000000000000000016 /* layout.cpp */,
 				E11C00000000000000000011 /* offline_fft.cpp */,
@@ -1518,6 +1522,7 @@
 				E6C100000000000000000023 /* stages_loudness.hpp */,
 				E6C100000000000000000033 /* stages_multiband.hpp */,
 				E8A000000000000000000013 /* stages_route.hpp */,
+				E19B00000000000000000013 /* stages_mimo.hpp */,
 			);
 			name = libn60core;
 			path = core/src;
@@ -2160,6 +2165,7 @@
 				E6C100000000000000000022 /* stages_loudness.cpp in Sources */,
 				E6C100000000000000000032 /* stages_multiband.cpp in Sources */,
 				E8A000000000000000000022 /* stages_route.cpp in Sources */,
+				E19B00000000000000000022 /* stages_mimo.cpp in Sources */,
 				E25F0000000000000000F002 /* fold.cpp in Sources */,
 				E6C000000000000000000036 /* layout.cpp in Sources */,
 				E11C00000000000000000031 /* offline_fft.cpp in Sources */,

@@ -469,6 +469,21 @@ if selected e8_xover_linearise_core; then
     fi
 fi
 
+# E19 S4: MIMO treatment graph stage (ABI v32): delay, arm ramp, trip, monitor, rebuild mute at the standard rates.
+if selected e19_mimo_stage; then
+    build_core_objs
+    if [ "$CORE_OK" = 1 ]; then
+        if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -Icore/include -Icore/src core/tests/test_mimo_stage.cpp \
+            "${CORE_OBJS[@]}" -o "$OUT/e19_core_mimo_stage" && "$OUT/e19_core_mimo_stage"; then
+            passed+=(e19_core_mimo_stage)
+        else
+            failed+=(e19_core_mimo_stage)
+        fi
+    else
+        failed+=(e19_mimo_stage)
+    fi
+fi
+
 # E8 S2: ROUTE and XOVER graph stages (ABI v17), the BASS_MGMT filter-spec trailer, at the eight standard rates.
 if selected e8_route_core; then
     build_core_objs

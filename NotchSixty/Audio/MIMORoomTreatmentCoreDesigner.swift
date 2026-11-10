@@ -39,8 +39,8 @@ struct MIMOTreatmentRequest: Sendable {
     var sources: [MIMOTreatmentSourceSpec]
     var seats: [MIMOTreatmentSeatSpec]
     var primarySeat = 0
-    /// Bass time target, 0 to 20 ms (D1).
-    var tauSeconds = 0.0
+    /// Bass time target, 0 to 20 ms (D1). Default 15 ms (E19 G11, owner decision of 10 Nov 2026).
+    var tauSeconds = MIMOTreatmentRealisationLimits.recommendedTauSeconds
     /// T_target as a T60, 0.05 to 2 s (D2 supplies the default from the room).
     var decaySeconds = 0.3
     var taps = 4_096
@@ -54,6 +54,21 @@ struct MIMOTreatmentRequest: Sendable {
 /// Realisation limits: the existing PR74 overshoot limits plus the in-band match of design note 3.
 struct MIMOTreatmentRealisationLimits: Equatable, Sendable {
     var maximumDeviationDB = 0.25
+    /// Gate used when the bass time target is below `shortTauSeconds`. Measured worst case over the eight standard
+    /// rates and tau 0 to 10 ms is 0.28 dB (48 kHz, tau 0), so 0.35 dB leaves a margin (G11).
+    var shortTauMaximumDeviationDB = 0.35
+    static let shortTauSeconds = 0.010
+    static let recommendedTauSeconds = 0.015
+
+    func deviationGateDB(tau: Double) -> Double {
+        tau < Self.shortTauSeconds - 1e-9 ? shortTauMaximumDeviationDB : maximumDeviationDB
+    }
+
+    /// Shown beside the bass time control when the target is below 10 ms; nil otherwise.
+    static func shortTauNote(tau: Double) -> String? {
+        guard tau < shortTauSeconds - 1e-9 else { return nil }
+        return "A bass time target below 10 ms allows a slightly looser match. 15 ms is recommended."
+    }
     var maximumEdgeEnergyFraction = MIMORoomTreatmentFIRCompileConfiguration.conservative.maximumEdgeEnergyFraction
     var maximumOvershootDB = MIMORoomTreatmentFIRCompileConfiguration.conservative.maximumCoefficientOvershootDB
     /// Energy before t = 0 above this (re total) earns advice to raise the bass time target.
@@ -346,10 +361,11 @@ enum MIMORoomTreatmentCoreDesigner {
                 )
             }
         }
-        if realisation.maximumDeviationDB > limits.maximumDeviationDB {
+        let gate = limits.deviationGateDB(tau: request.tauSeconds)
+        if realisation.maximumDeviationDB > gate {
             throw MIMORoomTreatmentCoreDesignError.realisationDeviation(
                 actualDB: realisation.maximumDeviationDB, atHz: realisation.maximumDeviationHz,
-                maximumDB: limits.maximumDeviationDB
+                maximumDB: gate
             )
         }
     }
@@ -385,8 +401,10 @@ enum MIMORoomTreatmentCoreDesigner {
     private static func advice(
         preEnergyDB: Double, tau: Double, limits: MIMOTreatmentRealisationLimits
     ) -> [String] {
-        guard preEnergyDB > limits.adviseAbovePreEnergyDB, let suggested = suggestedTau(from: tau) else { return [] }
-        return [
+        var notes: [String] = []
+        if let note = MIMOTreatmentRealisationLimits.shortTauNote(tau: tau) { notes.append(note) }
+        guard preEnergyDB > limits.adviseAbovePreEnergyDB, let suggested = suggestedTau(from: tau) else { return notes }
+        return notes + [
             "\(Int(preEnergyDB.rounded())) dB of the solution lies before t = 0. A later bass time target "
                 + "(about \(Int((suggested * 1_000).rounded())) ms) gives a closer match."
         ]

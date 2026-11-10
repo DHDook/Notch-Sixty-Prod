@@ -146,6 +146,7 @@ Dirac now sells ART on the Mac, so this needs the same path to authorisation as 
 
 - [ ] Bench campaign with two or more subwoofers plus mains: modal decay (T20/T30 below 150 Hz) before and after at several seats
 - [ ] Speaker support-range and exclusion controls, and an explicit LFE time target
+- [~] S4 `e19/mimo-stage`: realtime `N60_STAGE_MIMO` (ABI 32) built dark, not published until S6 (see `docs/epics/E19.md`)
 - [ ] Headroom and excursion safety per contributing speaker
 - [ ] Authorise live treatment only through the PR75 verification path, then re-qualify on the unified graph
 
