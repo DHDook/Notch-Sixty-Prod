@@ -288,9 +288,13 @@ extension UnifiedGraphConfiguration {
         for output in routing.outputs {
             guard let protection = output.protection else { continue }
             let id = UInt32(output.lane)
+            // E9 S5c (G16): a routed output keeps its own limiter, but with output protection on its ceiling never exceeds the
+            // hard ceiling (the always-on hard limit sits behind it either way).
+            var params = Self.protectionParameters(protection)
+            if outputProtection != nil { params = UnifiedGraphOutputProtection.clampedUserParameters(params) }
             rest.append(UnifiedGraphStageSpec(
                 kind: N60_STAGE_PROTECTION.rawValue, stageId: Self.outputProtectionStageBase + id,
-                laneA: 0, laneMask: UInt64(1) << UInt64(id), params: Self.protectionParameters(protection)))
+                laneA: 0, laneMask: UInt64(1) << UInt64(id), params: params))
         }
         return ([route], rest)
     }
