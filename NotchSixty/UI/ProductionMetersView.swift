@@ -31,7 +31,7 @@ private enum ProductionMetersPage: String, CaseIterable, Identifiable {
     }
 }
 
-private enum ProductionMeterMath {
+enum ProductionMeterMath {
     static let floorDB = -60.0
 
     static func decibels(_ linear: Float) -> Double {
@@ -118,6 +118,9 @@ struct ProductionMetersView: View {
     @State private var bank = MeterBankDisplay()
     @State private var meterRevision = 0
     @State private var windowVisible = true
+    @AppStorage("meters.loudnessSource") private var loudnessSourceRaw = LoudnessSource.output.rawValue
+    @State private var inputTruePeakHold = TruePeakMaxHold()
+    @State private var outputTruePeakHold = TruePeakMaxHold()
 
     var body: some View {
         ScrollView {
@@ -208,6 +211,15 @@ struct ProductionMetersView: View {
                 .accessibilityIdentifier("meters.resetLatches")
                 Spacer()
             }
+            ProductionLoudnessCard(
+                snapshot: analysisSnapshot,
+                source: loudnessSource,
+                truePeak: loudnessSource == .output ? outputTruePeakHold : inputTruePeakHold,
+                isRunning: engine.lifecycleState == .running,
+                unavailableReason: transportMeterSnapshot != nil ? LoudnessCardText.wideSessionNote : nil,
+                onSource: { loudnessSourceRaw = $0.rawValue },
+                onReset: resetLoudness
+            )
             if let transportMeterSnapshot {
                 semanticLevelsPage(transportMeterSnapshot)
             } else {
@@ -424,7 +436,7 @@ struct ProductionMetersView: View {
                 dynamicsMetric("Denoiser Suppression", snapshot.denoiserMeanSuppressionDB)
 
                 metricCard(
-                    title: "Short-Term Loudness",
+                    title: "Loudness Match Detector (short-term)",
                     value: String(format: "%.1f LUFS", Double(snapshot.loudnessShortTermLUFS)),
                     detail: String(format: "Loudness Match %.1f dB", Double(snapshot.loudnessMatchGainDB))
                 )
@@ -822,6 +834,22 @@ struct ProductionMetersView: View {
             .background(.quaternary.opacity(0.18), in: .rect(cornerRadius: 12))
     }
 
+    private var loudnessSource: LoudnessSource {
+        LoudnessSource(rawValue: loudnessSourceRaw) ?? .output
+    }
+
+    /// Loudness rides the capture ring through the stereo bit plus the worker's
+    /// own loudness bit; the reset bit is a one-shot command.
+    private static let loudnessDemand = UInt32(N60_ANALYSIS_DEMAND_STEREO) | ProductionAnalysisDemand.loudness
+
+    private func resetLoudness() {
+        inputTruePeakHold.reset()
+        outputTruePeakHold.reset()
+        if engine.lifecycleState == .running {
+            engine.setAnalysisDemand(Self.loudnessDemand | ProductionAnalysisDemand.resetLoudness)
+        }
+    }
+
     private var ballistics: MeterBallistics {
         MeterBallistics(rawValue: ballisticsRaw) ?? .peak
     }
@@ -840,7 +868,9 @@ struct ProductionMetersView: View {
             analysisDemand = UInt32(N60_ANALYSIS_DEMAND_SPECTRUM)
         case .stereo:
             analysisDemand = UInt32(N60_ANALYSIS_DEMAND_STEREO)
-        case .levels, .dynamics, .transport:
+        case .levels:
+            analysisDemand = Self.loudnessDemand
+        case .dynamics, .transport:
             analysisDemand = UInt32(N60_ANALYSIS_DEMAND_NONE)
         }
         if analysisDemand != 0, engine.lifecycleState == .running {
@@ -940,6 +970,8 @@ struct ProductionMetersView: View {
             )
         }
 
+        inputTruePeakHold.update(dbtp: ProductionMeterMath.decibels(diagnostics.inputTruePeakLinear))
+        outputTruePeakHold.update(dbtp: ProductionMeterMath.decibels(diagnostics.outputTruePeakLinear))
         snapshot = ProductionMetersSnapshot(
             input: levels(
                 peakLeft: diagnostics.inputMeter.peakLeft,

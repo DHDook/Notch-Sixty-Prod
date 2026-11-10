@@ -26,8 +26,22 @@ struct ProductionAnalysisSnapshot: Equatable, Sendable {
     var phaseCorrelation: Float = 0
     var phaseCorrelationValid = false
     var goniometer: [ProductionGoniometerPoint] = []
+    /// BS.1770-4 loudness of the stereo capture (after the fold), nil unless the
+    /// loudness demand is held.
+    var loudnessInput: LoudnessReadout?
+    var loudnessOutput: LoudnessReadout?
 
     static let empty = ProductionAnalysisSnapshot()
+}
+
+/// Worker-only demand bits above the bridge's own two. A loudness request also
+/// carries the bridge's STEREO bit so the capture ring runs; the worker then
+/// drops its stereo views (E28 S2, G7: no bridge change is needed).
+enum ProductionAnalysisDemand {
+    static let loudness: UInt32 = 1 << 2
+    /// One-shot command: clear the loudness measurement, then carry on.
+    static let resetLoudness: UInt32 = 1 << 3
+    static let workerBits: UInt32 = loudness | resetLoudness
 }
 
 enum ProductionAnalysisMath {
@@ -387,6 +401,7 @@ final class ProductionAnalysisWorker: @unchecked Sendable {
     private var latestRight = [Float](repeating: 0, count: ProductionAnalysisWorker.correlationCapacity)
 
     private let spectrumAnalyzer = ProductionSpectrumAnalyzer()
+    private let loudnessFeed = ProductionLoudnessFeed()
     private var publishedSnapshot = ProductionAnalysisSnapshot.empty
 
     init(bridge: OpaquePointer) {
@@ -394,12 +409,19 @@ final class ProductionAnalysisWorker: @unchecked Sendable {
     }
 
     func setDemand(_ requestedMask: UInt32, sampleRate: Double) {
-        let sanitized = requestedMask & UInt32(N60_ANALYSIS_DEMAND_ALL)
+        var sanitized = requestedMask & (UInt32(N60_ANALYSIS_DEMAND_ALL) | ProductionAnalysisDemand.workerBits)
+        let resetLoudness = (sanitized & ProductionAnalysisDemand.resetLoudness) != 0
+        sanitized &= ~ProductionAnalysisDemand.resetLoudness
+        let wantsLoudness = (sanitized & ProductionAnalysisDemand.loudness) != 0
+        if wantsLoudness { sanitized &= ~UInt32(N60_ANALYSIS_DEMAND_STEREO) }
         queue.async { [weak self] in
             guard let self, !self.stopped else { return }
             let changed = self.demandMask != sanitized || self.sampleRate != sampleRate
             self.demandMask = sanitized
             self.sampleRate = sampleRate
+            // Loudness pauses (keeps its measurement) when the demand drops.
+            self.loudnessFeed.setActive(wantsLoudness, sampleRate: sampleRate)
+            if resetLoudness { self.loudnessFeed.reset() }
             if changed {
                 N60RealtimeAudioBridgeDiscardAnalysisFrames(self.bridge)
                 self.clearHistory()
@@ -460,6 +482,7 @@ final class ProductionAnalysisWorker: @unchecked Sendable {
         drainCapturedFrames()
 
         let capture = N60RealtimeAudioBridgeGetAnalysisCaptureSnapshot(bridge)
+        loudnessFeed.noteDroppedFrames(capture.droppedFrames)
         var next = ProductionAnalysisSnapshot(
             demandMask: demandMask,
             sampleRate: sampleRate,
@@ -506,6 +529,11 @@ final class ProductionAnalysisWorker: @unchecked Sendable {
             next.goniometer = makeGoniometerPoints()
         }
 
+        if let readouts = loudnessFeed.readouts() {
+            next.loudnessInput = readouts.input
+            next.loudnessOutput = readouts.output
+        }
+
         publish(next)
     }
 
@@ -519,6 +547,10 @@ final class ProductionAnalysisWorker: @unchecked Sendable {
                 ))
             }
             if readCount == 0 { break }
+
+            drainBuffer.withUnsafeBufferPointer { buffer in
+                loudnessFeed.ingest(UnsafeBufferPointer(rebasing: buffer[0..<readCount]))
+            }
 
             for index in 0..<readCount {
                 let frame = drainBuffer[index]
