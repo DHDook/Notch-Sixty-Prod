@@ -237,6 +237,10 @@ add_test(NAME n60core_conv_rebuild COMMAND n60core_conv_rebuild_test)
 add_executable(n60core_mimo_test tests/test_mimo.cpp)
 target_link_libraries(n60core_mimo_test PRIVATE n60core)
 add_test(NAME n60core_mimo COMMAND n60core_mimo_test)
+# E19 S3: realisation check (solved response against the taps, edge energy, overshoot).
+add_executable(n60core_mimo_realise_test tests/test_mimo_realise.cpp)
+target_link_libraries(n60core_mimo_realise_test PRIVATE n60core)
+add_test(NAME n60core_mimo_realise COMMAND n60core_mimo_realise_test)
 
 # E9 S6: per-output headroom maths (n60/headroom.h).
 add_executable(n60core_headroom_test tests/test_headroom.cpp)

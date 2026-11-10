@@ -190,6 +190,7 @@
 		E10A00000000000000000024 /* bass.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E10A00000000000000000014 /* bass.cpp */; };
 		E8A600000000000000000002 /* multisub_search.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E8A600000000000000000001 /* multisub_search.cpp */; };
 		E8A000000000000000000021 /* xover.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E8A000000000000000000011 /* xover.cpp */; };
+		E19A00000000000000000021 /* design.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E19A00000000000000000011 /* design.cpp */; };
 		E8A000000000000000000031 /* CrossoverCore.swift in Sources */ = {isa = PBXBuildFile; fileRef = E8A000000000000000000041 /* CrossoverCore.swift */; };
 		E8A000000000000000000032 /* CrossoverCoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E8A000000000000000000042 /* CrossoverCoreTests.swift */; };
 		E24C00000000000000000001 /* RoomCorrectionLaneComposer.swift in Sources */ = {isa = PBXBuildFile; fileRef = E24C00000000000000000002 /* RoomCorrectionLaneComposer.swift */; };
@@ -489,6 +490,8 @@
 		F73000000000000000000001 /* MIMORoomTreatmentDesigner.swift in Sources */ = {isa = PBXBuildFile; fileRef = F73000000000000000000011 /* MIMORoomTreatmentDesigner.swift */; };
 		F73000000000000000000002 /* MIMORoomTreatmentDesignerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F73000000000000000000012 /* MIMORoomTreatmentDesignerTests.swift */; };
 		F74000000000000000000001 /* MIMORoomTreatmentFIRCompiler.swift in Sources */ = {isa = PBXBuildFile; fileRef = F74000000000000000000011 /* MIMORoomTreatmentFIRCompiler.swift */; };
+		E19A00000000000000000022 /* MIMORoomTreatmentCoreDesigner.swift in Sources */ = {isa = PBXBuildFile; fileRef = E19A00000000000000000012 /* MIMORoomTreatmentCoreDesigner.swift */; };
+		E19A00000000000000000023 /* MIMORoomTreatmentCoreDesignerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E19A00000000000000000013 /* MIMORoomTreatmentCoreDesignerTests.swift */; };
 		F74000000000000000000002 /* MIMORoomTreatmentFIRCompilerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F74000000000000000000012 /* MIMORoomTreatmentFIRCompilerTests.swift */; };
 		F75000000000000000000001 /* MIMORoomTreatmentVerification.swift in Sources */ = {isa = PBXBuildFile; fileRef = F75000000000000000000011 /* MIMORoomTreatmentVerification.swift */; };
 		F75000000000000000000002 /* MIMORoomTreatmentVerificationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F75000000000000000000012 /* MIMORoomTreatmentVerificationTests.swift */; };
@@ -881,6 +884,7 @@
 		E24B00000000000000000002 /* RoomCorrectionLaneInstall.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomCorrectionLaneInstall.swift; sourceTree = "<group>"; };
 		E10A00000000000000000014 /* bass.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = correct/bass.cpp; sourceTree = "<group>"; };
 		E8A600000000000000000001 /* multisub_search.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = correct/multisub_search.cpp; sourceTree = "<group>"; };
+		E19A00000000000000000011 /* design.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = mimo/design.cpp; sourceTree = "<group>"; };
 		E8A000000000000000000011 /* xover.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = xover/xover.cpp; sourceTree = "<group>"; };
 		E8A000000000000000000041 /* CrossoverCore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrossoverCore.swift; sourceTree = "<group>"; };
 		E8A000000000000000000042 /* CrossoverCoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrossoverCoreTests.swift; sourceTree = "<group>"; };
@@ -1221,6 +1225,8 @@
 		F98800000000000000000011 /* QuietZonePhysicalSpectralEvidence.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuietZonePhysicalSpectralEvidence.swift; sourceTree = "<group>"; };
 		F73000000000000000000011 /* MIMORoomTreatmentDesigner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MIMORoomTreatmentDesigner.swift; sourceTree = "<group>"; };
 		F73000000000000000000012 /* MIMORoomTreatmentDesignerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MIMORoomTreatmentDesignerTests.swift; sourceTree = "<group>"; };
+		E19A00000000000000000012 /* MIMORoomTreatmentCoreDesigner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MIMORoomTreatmentCoreDesigner.swift; sourceTree = "<group>"; };
+		E19A00000000000000000013 /* MIMORoomTreatmentCoreDesignerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MIMORoomTreatmentCoreDesignerTests.swift; sourceTree = "<group>"; };
 		F74000000000000000000011 /* MIMORoomTreatmentFIRCompiler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MIMORoomTreatmentFIRCompiler.swift; sourceTree = "<group>"; };
 		F74000000000000000000012 /* MIMORoomTreatmentFIRCompilerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MIMORoomTreatmentFIRCompilerTests.swift; sourceTree = "<group>"; };
 		F75000000000000000000011 /* MIMORoomTreatmentVerification.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MIMORoomTreatmentVerification.swift; sourceTree = "<group>"; };
@@ -1495,6 +1501,7 @@
 				E10A00000000000000000014 /* bass.cpp */,
 				E8A600000000000000000001 /* multisub_search.cpp */,
 				E8A000000000000000000011 /* xover.cpp */,
+				E19A00000000000000000011 /* design.cpp */,
 				E11C0000000000000000001C /* spl.cpp */,
 				E11C0000000000000000001B /* monitor_ring.cpp */,
 				E11C00000000000000000020 /* offline_fft.hpp */,
@@ -1725,6 +1732,7 @@
 				F98700000000000000000012 /* QuietZonePhysicalVerificationCampaignTests.swift */,
 				F73000000000000000000012 /* MIMORoomTreatmentDesignerTests.swift */,
 				F74000000000000000000012 /* MIMORoomTreatmentFIRCompilerTests.swift */,
+				E19A00000000000000000013 /* MIMORoomTreatmentCoreDesignerTests.swift */,
 				F75000000000000000000012 /* MIMORoomTreatmentVerificationTests.swift */,
 				F76000000000000000000012 /* MIMORoomTreatmentActivationPermitTests.swift */,
 				F78000000000000000000013 /* ProductionInformationArchitectureTests.swift */,
@@ -1956,6 +1964,7 @@
 				F95000000000000000000013 /* ActiveQuietZoneSpatialSurvey.swift */,
 				F73000000000000000000011 /* MIMORoomTreatmentDesigner.swift */,
 				F74000000000000000000011 /* MIMORoomTreatmentFIRCompiler.swift */,
+				E19A00000000000000000012 /* MIMORoomTreatmentCoreDesigner.swift */,
 				F75000000000000000000011 /* MIMORoomTreatmentVerification.swift */,
 				F76000000000000000000011 /* MIMORoomTreatmentActivationPermit.swift */,
 				F92000000000000000000011 /* RoomTreatmentAdvisor.swift */,
@@ -2165,6 +2174,7 @@
 				E10A00000000000000000024 /* bass.cpp in Sources */,
 				E8A600000000000000000002 /* multisub_search.cpp in Sources */,
 				E8A000000000000000000021 /* xover.cpp in Sources */,
+				E19A00000000000000000021 /* design.cpp in Sources */,
 				E11C0000000000000000003B /* spl.cpp in Sources */,
 				E11C0000000000000000003A /* monitor_ring.cpp in Sources */,
 				A10000000000000000000011 /* ContentView.swift in Sources */,
@@ -2495,6 +2505,7 @@
 				F98800000000000000000001 /* QuietZonePhysicalSpectralEvidence.swift in Sources */,
 				F73000000000000000000001 /* MIMORoomTreatmentDesigner.swift in Sources */,
 				F74000000000000000000001 /* MIMORoomTreatmentFIRCompiler.swift in Sources */,
+				E19A00000000000000000022 /* MIMORoomTreatmentCoreDesigner.swift in Sources */,
 				F75000000000000000000001 /* MIMORoomTreatmentVerification.swift in Sources */,
 				F76000000000000000000001 /* MIMORoomTreatmentActivationPermit.swift in Sources */,
 				F92000000000000000000001 /* RoomTreatmentAdvisor.swift in Sources */,
@@ -2702,6 +2713,7 @@
 				F98700000000000000000002 /* QuietZonePhysicalVerificationCampaignTests.swift in Sources */,
 				F73000000000000000000002 /* MIMORoomTreatmentDesignerTests.swift in Sources */,
 				F74000000000000000000002 /* MIMORoomTreatmentFIRCompilerTests.swift in Sources */,
+				E19A00000000000000000023 /* MIMORoomTreatmentCoreDesignerTests.swift in Sources */,
 				F75000000000000000000002 /* MIMORoomTreatmentVerificationTests.swift in Sources */,
 				F76000000000000000000002 /* MIMORoomTreatmentActivationPermitTests.swift in Sources */,
 				F78000000000000000000003 /* ProductionInformationArchitectureTests.swift in Sources */,

@@ -21,7 +21,7 @@ extension FeatureFlag {
     static let all: [FeatureFlag] = [
         .legacyKernel, .ancEngineLease, .adaptiveTonalLive, .earnedCap, .feedForwardLive,
         .noiseSurvey, .conversationUnmasking, .virtualMicrophone, .zones, .headPositionCamera, .overnight,
-        .subAwareAnc, .longFIR, .outputProtection, .headphones
+        .subAwareAnc, .longFIR, .outputProtection, .headphones, .mimoTreatment
     ]
 
     /// E6 S11: the unified graph is the default renderer. Turning this on selects the frozen
@@ -158,6 +158,15 @@ extension FeatureFlag {
         id: "e13.headphones",
         title: "Headphones: personal BRIR capture",
         epic: "E13"
+    )
+
+    /// E19: MIMO room treatment on the unified graph. S3 gates the Swift designer on it; later slices add the stages,
+    /// the safety layer, the verifier and the controls. Off: today's code paths, UI and routing refusal. On: the new
+    /// designer and controls; live output still needs a permit and the user's arm. Removed when E19 ships.
+    static let mimoTreatment = FeatureFlag(
+        id: "e19.mimo-treatment",
+        title: "MIMO room treatment",
+        epic: "E19"
     )
 }
 
