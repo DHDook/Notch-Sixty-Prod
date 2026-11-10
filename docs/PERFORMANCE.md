@@ -1,0 +1,75 @@
+# Performance
+
+Owner: E20 (engine performance). This file records the method, the baseline, the hot list and the
+budgets for the portable engine core (`libn60core`). Harness: `core/bench/n60_bench.cpp`.
+
+## Method
+
+- Load = render time / buffer period, measured with the core only (no Core Audio, no Swift).
+- Reference block: 128 frames at 48 kHz, doubled per octave above 48 kHz (1024 frames at 384 kHz), so
+  the period stays about 2.7 ms. Stress block: a quarter of that.
+- Eight rates: 44.1, 48, 88.2, 96, 176.4, 192, 352.8, 384 kHz.
+- Each cell is the median of N runs of the mean and the p99.9, and the worst max.
+- Scenarios:
+
+| ID | Layout and chain |
+|---|---|
+| R1 | Full chain, 2 mains + 2 subs, room FIR 8192 taps |
+| R2 | Full chain, 6 mains + 2 subs, room FIR 4096 |
+| R3 | Full chain, 12 mains + 4 subs, room FIR 4096 |
+| R4a / R4b | 262144-tap FIR on 2 / 8 lanes |
+| R5 | Layout 9.1.6 binaural, 8192 taps |
+| R6 | 32 PEQ stages x 16 sections (512-slot cap) |
+| R7 | ANC lane feed, offline compute only (workflow build, `-DN60_BENCH_ANC`); nothing reaches a device |
+
+- Gate (macos-full): fail above 1.5x the committed baseline, warn above 1.2x. Budgets in
+  `core/bench/budgets.json` warn only until `--enforce-budgets` (turned on by E20 S10).
+- Per-stage cost: `N60_GRAPH_PROFILE` builds (`n60_bench_profile`) record ns per lane-sample for each
+  stage kind. The hooks are compiled out of product builds; `core/tests/test_profile.cpp` asserts the
+  symbols are absent there.
+- Run locally: `ci/run_harnesses.sh e20_` (self-tests) or build `n60_bench` as in `macos-full.yml` and run
+  `n60_bench --out bench.json --budgets core/bench/budgets.json`.
+
+## Baseline (local, Apple M4, -O3, reference block, mean load %)
+
+These are local numbers on an M4, not the M1 target and not a CI runner. The committed CI baseline
+(`core/bench/baseline-macos-arm64.json`) comes from the first nightly.
+
+| Scenario | 44.1 | 48 | 88.2 | 96 | 176.4 | 192 | 352.8 | 384 |
+|---|---|---|---|---|---|---|---|---|
+| R1 | 2.5 | 2.7 | 5.1 | 5.6 | 10.3 | 11.2 | 20.5 | 23.2 |
+| R2 | 6.9 | 10.7 | 18.6 | 17.4 | 37.8 | 41.5 | 79.9 | 41.8 |
+| R3 | 9.7 | 10.3 | 19.3 | 21.1 | 39.6 | 41.7 | 77.2 | 90.0 |
+| R4a | 0.5 | 0.5 | 1.0 | 1.2 | 2.3 | 2.5 | 5.1 | 5.6 |
+| R4b | 2.1 | 2.2 | 4.3 | 4.8 | 9.3 | 9.9 | 20.8 | 22.5 |
+| R5 | 3.4 | 3.7 | 6.8 | 7.5 | 13.8 | 15.0 | 27.5 | 30.1 |
+| R6 | 2.9 | 3.2 | 5.7 | 6.2 | 11.4 | 12.4 | 22.7 | 24.7 |
+
+The R2 384 kHz cell is lower than 352.8 kHz because the period doubling stops at 1024 frames and the
+FIR partitioning changes there; treat it as a harness artefact to re-check on the CI baseline.
+
+## Hot list (ns per lane-sample, profile build)
+
+| Scenario / rate | Top stages |
+|---|---|
+| R1 48 kHz | PROTECTION 80.9, FIR 57.6, CLEANUP 10.0, PEQ 7.3, DYN_EQ 6.6 |
+| R1 384 kHz | PROTECTION 65.1, FIR 45.3, CLEANUP 7.3, PEQ 5.7, DYN_EQ 5.1 |
+| R3 48 kHz | PROTECTION 50.2, FIR 35.0, CLEANUP 8.2, DYN_EQ 6.3, EXPANDER 6.2 |
+| R3 384 kHz | PROTECTION 58.9, FIR 35.3, CLEANUP 7.5, BASS_MGMT 5.8, PEQ 5.6 |
+| R5 | BINAURAL 44.2, PROTECTION 7.7 |
+| R6 | PEQ 10.2 |
+
+Protection and the FIR dominate the full chain; S3 (SIMD, section loops) and S4 (FFT, convolution)
+target them, and S5/S7 spread or decimate the rest.
+
+## Budgets (E20 Q1)
+
+`core/bench/budgets.json`: R1 mean 0.25, R1 p99.9 0.5, R1 fade 2x 0.8, R2 mean 0.5, R3 mean 0.5.
+Today R2 (352.8 kHz) and R3 (352.8, 384 kHz) exceed the 0.5 mean budget on a single thread. The R2/R3
+fade budget is judged on the critical path with workers (S5, S6, S10), not on the single-thread run.
+
+## Release optimisation
+
+Xcode Release for the app target now sets `-O3` for C++ (`OTHER_CPLUSPLUSFLAGS`). On the M4, -O3 ran
+about 35% faster than -Os/-O2 on R1 and R3, over the plan's 10% threshold. Measured on an M4, not an
+M1 (re-check at the E22 bench).
