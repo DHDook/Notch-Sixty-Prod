@@ -373,7 +373,7 @@ S1–S6 flagless; every dynamics extra (S7a–S7d) behind the one flag `e28.dyna
 
 - [x] S1 meter levels: display-rate bars, true-peak bars, peak hold, latching clip with reset, ballistics, VoiceOver values, pause when hidden
 - [x] S2 loudness: momentary, short-term, integrated with reset, loudness range and true-peak max per ITU-R BS.1770-4 and EBU R128; per-channel weighting with LFE excluded (inert until the capture carries more than stereo)
-- [ ] S3 spectrum options: smoothing, averaging, tilt, freeze and reference trace, hover read-out, input and output overlay
+- [x] S3 spectrum options: smoothing, averaging, tilt, freeze and reference trace, hover read-out, input and output overlay
 - [ ] S4 dynamics feel: log sliders, unit-aware fields, stepping, reset, fine drag, undo, sidechain range fix, auto makeup, accessibility
 - [ ] S5 dynamics visualisation: transfer curves, gain-reduction bars and history, navigator bars
 - [ ] S6 per-output and sub meters on every output configuration (needs-owner)
