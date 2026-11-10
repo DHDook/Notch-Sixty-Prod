@@ -75,7 +75,7 @@ build_core_objs() {
     local src
     for src in "${CORE_SOURCES[@]}"; do
         local obj="$OUT/n60core_${src//\//_}.o"
-        if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -fno-exceptions -fno-rtti -Icore/include -Icore/src \
+        if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -Wno-unknown-warning-option -Werror=function-effects -fno-exceptions -fno-rtti -Icore/include -Icore/src \
             -c "core/src/$src.cpp" -o "$obj"; then
             CORE_OBJS+=("$obj")
         else
@@ -84,7 +84,7 @@ build_core_objs() {
     done
 }
 # Bridge harnesses: build the core only when one of them is selected.
-if selected pr35_transition_ack || selected pr41_same_device_output_map || selected pr101_realtime_resource_soak || selected e6_graph_takeover || selected e6_fade_alignment || selected e6_nchannel_graph || selected e6_shutdown_fade || selected e8_routed_output || selected e4_speaker_drive || selected e25_fold || selected e28_route_meter; then
+if selected pr35_transition_ack || selected pr41_same_device_output_map || selected pr101_realtime_resource_soak || selected e6_graph_takeover || selected e6_fade_alignment || selected e6_nchannel_graph || selected e6_shutdown_fade || selected e8_routed_output || selected e4_speaker_drive || selected e25_fold || selected e20_bridge_fastpath || selected e28_route_meter; then
     build_core_objs
 fi
 
@@ -136,6 +136,9 @@ harness pr35_transition_ack "${STRICT[@]}" -O2 -include stddef.h -I"$RT" ci/vali
     -Icore/include ${CORE_OBJS[@]+"${CORE_OBJS[@]}"} -lc++ -framework Accelerate -framework CoreAudio
 # shellcheck disable=SC2086
 harness e6_graph_takeover "${STRICT[@]}" -O2 -include stddef.h -I"$RT" ci/validate_e6_graph_takeover.c $ALL_RT \
+    -Icore/include ${CORE_OBJS[@]+"${CORE_OBJS[@]}"} -lc++ -framework Accelerate -framework CoreAudio
+# shellcheck disable=SC2086
+harness e20_bridge_fastpath "${STRICT[@]}" -O2 -include stddef.h -I"$RT" ci/harness_e20_bridge_fastpath.c $ALL_RT \
     -Icore/include ${CORE_OBJS[@]+"${CORE_OBJS[@]}"} -lc++ -framework Accelerate -framework CoreAudio
 # shellcheck disable=SC2086
 harness e25_fold "${STRICT[@]}" -O2 -include stddef.h -I"$RT" ci/harness_e25_fold.c $ALL_RT \
@@ -830,6 +833,13 @@ if selected e6_core_graph; then
         if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -Icore/include core/tests/test_alloc.cpp \
             "${CORE_OBJS[@]}" -o "$OUT/e6_core_alloc" \
             && "$OUT/e6_core_alloc"; then :; else failed+=(e6_core_alloc); fi
+        # E20 S2: the realtime annotations only check anything where the compiler supports clang function effects.
+        # -Wno-unknown-warning-option would hide a toolchain without it, so fail loudly instead.
+        if printf '#if !(defined(__has_cpp_attribute) && __has_cpp_attribute(clang::nonblocking))\n#error no function effects\n#endif\nint main(){return 0;}\n' \
+            | clang++ -std=c++20 -x c++ -fsyntax-only - 2>/dev/null; then :; else failed+=(e20_function_effects_unsupported); fi
+        if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -Icore/include -Icore/src core/tests/test_fpenv.cpp \
+            "${CORE_OBJS[@]}" -o "$OUT/e20_core_fpenv" \
+            && "$OUT/e20_core_fpenv"; then :; else failed+=(e20_core_fpenv); fi
     else
         failed+=(e6_core_graph)
     fi

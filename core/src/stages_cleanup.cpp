@@ -385,7 +385,7 @@ void activatePre(CleanShared &S) {
 
 }  // namespace
 
-bool isCleanupKind(uint32_t kind) { return kind == N60_STAGE_CLEANUP; }
+bool isCleanupKind(uint32_t kind) N60_RT_NONBLOCKING { return kind == N60_STAGE_CLEANUP; }
 
 n60_status validateCleanupStage(const n60_stage_desc &s, double rate, uint32_t outCh) {
     if (!(rate >= 8000.0 && rate <= 768000.0) || s.kind != N60_STAGE_CLEANUP || s.capacityFrames != 0) {
@@ -435,7 +435,7 @@ void cleanupInit(SnapHeader *h, const StageRec &r) {
     S.detConfBits.store(0, std::memory_order_relaxed);
 }
 
-uint64_t cleanupCarry(SnapHeader *from, SnapHeader *to) {
+uint64_t cleanupCarry(SnapHeader *from, SnapHeader *to) N60_RT_NONBLOCKING {
     uint64_t bytes = 0;
     if (from == nullptr || to == nullptr) return bytes;
     const StageRec *src = stages(from);
@@ -491,7 +491,7 @@ uint64_t cleanupCarry(SnapHeader *from, SnapHeader *to) {
     return bytes;
 }
 
-void runCleanup(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) {
+void runCleanup(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) N60_RT_NONBLOCKING {
     const float *p = paramsOf(h, r);
     CleanShared &S = *reinterpret_cast<CleanShared *>(sharedState(h, r));
     const double rate = h->sampleRate;
@@ -642,7 +642,7 @@ void runCleanup(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames
     }
 }
 
-n60_status validateCleanupParam(const SnapHeader *h, const StageRec &r, uint32_t idx, float value) {
+n60_status validateCleanupParam(const SnapHeader *h, const StageRec &r, uint32_t idx, float value) N60_RT_NONBLOCKING {
     if (idx >= r.paramCount) return N60_STATUS_BAD_ARGUMENT;
     switch (idx) {
         case kDc:

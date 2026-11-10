@@ -21,6 +21,8 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "platform/rt.hpp"
+
 namespace n60::fft {
 
 struct Complex {
@@ -32,7 +34,7 @@ constexpr uint32_t kMaxSize = 32768;  // largest transform a plan supports
 
 // Bytes a plan for an n-point transform occupies. n must be a power of two in [2, kMaxSize];
 // returns 0 otherwise.
-size_t planBytes(uint32_t n);
+size_t planBytes(uint32_t n) N60_RT_NONBLOCKING;
 
 // Control thread. Builds a plan in `mem` (planBytes(n) bytes, 16-byte aligned).
 bool planInit(void *mem, uint32_t n);
@@ -40,8 +42,8 @@ bool planInit(void *mem, uint32_t n);
 // In-place complex transforms of plan->n points. forward is unnormalised
 // (X[k] = sum x[j] exp(-2 pi i jk/n)); inverse applies exp(+...) and scales by 1/n,
 // so inverse(forward(x)) == x.
-void forward(const void *plan, Complex *x);
-void inverse(const void *plan, Complex *x);
+void forward(const void *plan, Complex *x) N60_RT_NONBLOCKING;
+void inverse(const void *plan, Complex *x) N60_RT_NONBLOCKING;
 
 }  // namespace n60::fft
 

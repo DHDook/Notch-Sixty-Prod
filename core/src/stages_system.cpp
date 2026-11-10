@@ -520,7 +520,7 @@ inline float *protRing(ProtLane *l) { return reinterpret_cast<float *>(l + 1); }
 
 }  // namespace
 
-bool isSystemKind(uint32_t kind) {
+bool isSystemKind(uint32_t kind) N60_RT_NONBLOCKING {
     switch (kind) {
         case N60_STAGE_BASS_MGMT:
         case N60_STAGE_AMBIENT:
@@ -1113,7 +1113,7 @@ void systemInit(SnapHeader *h, const StageRec &r) {
 
 // ---- live parameters and latency --------------------------------------------------------
 
-n60_status validateSystemParam(const SnapHeader *h, const StageRec &r, uint32_t idx, float value) {
+n60_status validateSystemParam(const SnapHeader *h, const StageRec &r, uint32_t idx, float value) N60_RT_NONBLOCKING {
     if (idx >= r.paramCount) return N60_STATUS_BAD_ARGUMENT;
     bool live = false;
     switch (r.kind) {
@@ -1169,7 +1169,7 @@ n60_status validateSystemParam(const SnapHeader *h, const StageRec &r, uint32_t 
     return live ? N60_STATUS_OK : N60_STATUS_UNSUPPORTED;
 }
 
-uint32_t systemLatency(const SnapHeader *h, const StageRec &r) {
+uint32_t systemLatency(const SnapHeader *h, const StageRec &r) N60_RT_NONBLOCKING {
     if (r.kind == N60_STAGE_FRAC_DELAY) return static_cast<uint32_t>(paramsOf(h, r)[0]);
     if (r.kind == N60_STAGE_EXTERNAL) return r.capacity;
     if (r.kind != N60_STAGE_PROTECTION) return 0;
@@ -1606,12 +1606,6 @@ void runStereoCrossover(SnapHeader *h, StageRec &r, float *const *lanes, uint32_
             }
         }
     }
-    for (uint32_t k = 0; k < x.nHp; ++k) {  // keep denormals out of silent input
-        bqFlush(st.hp[0][k]);
-        bqFlush(st.hp[1][k]);
-    }
-    for (uint32_t k = 0; k < x.nLp; ++k) bqFlush(x.lpState[k]);
-    bqFlush(x.apState);
 }
 
 void runFracDelay(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) {
@@ -1647,6 +1641,13 @@ void runFracDelay(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t fram
 // The cached effect is exact for a processor that is linear in its input; during the short rebuild crossfade it is an
 // approximation for nonlinear or time-varying racks and settles exactly when the fade ends. The host owns processor
 // reset; the callback sees the graph's sample rate.
+// The host callback is documented (graph.h) to obey the realtime rules itself; the compiler cannot verify a function pointer.
+bool callExternal(n60_external_process_fn fn, void *context, float *const *ptr, uint32_t n, uint32_t frames) N60_RT_NONBLOCKING {
+    N60_RT_TRUST_BEGIN
+    return fn(context, ptr, ptr, n, frames) != 0;
+    N60_RT_TRUST_END
+}
+
 void runExternal(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) {
     ExternalSlot *x = h->external;
     if (x == nullptr || paramsOf(h, r)[0] == 0.0f) return;
@@ -1672,7 +1673,7 @@ void runExternal(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frame
         std::memcpy(x->delta + static_cast<size_t>(k) * x->deltaStride, ptr[k], sizeof(float) * frames);
     }
     x->calls.fetch_add(1, std::memory_order_relaxed);
-    const bool ok = fn(x->context, ptr, ptr, n, frames) != 0;
+    const bool ok = callExternal(fn, x->context, ptr, n, frames);
     for (uint32_t k = 0; k < n; ++k) {
         float *d = x->delta + static_cast<size_t>(k) * x->deltaStride;
         if (!ok) std::memset(ptr[k], 0, sizeof(float) * frames);
@@ -2190,7 +2191,7 @@ void runGuard(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) 
 
 }  // namespace
 
-void runSystem(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) {
+void runSystem(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) N60_RT_NONBLOCKING {
     switch (r.kind) {
         case N60_STAGE_AMBIENT: runAmbient(h, r, lanes, frames); break;
         case N60_STAGE_SYMMETRY: runSymmetry(h, r, lanes, frames); break;
@@ -2217,7 +2218,7 @@ void runSystem(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames)
 
 // ---- rebuild support ---------------------------------------------------------------------------
 
-uint64_t systemRiderCarry(SnapHeader *from, SnapHeader *to) {
+uint64_t systemRiderCarry(SnapHeader *from, SnapHeader *to) N60_RT_NONBLOCKING {
     uint64_t bytes = 0;
     if (from == nullptr || to == nullptr) return bytes;
     const StageRec *src = stages(from);
@@ -2237,7 +2238,7 @@ uint64_t systemRiderCarry(SnapHeader *from, SnapHeader *to) {
     return bytes;
 }
 
-uint32_t systemRebuildMute(SnapHeader *h, bool silentNow) {
+uint32_t systemRebuildMute(SnapHeader *h, bool silentNow) N60_RT_NONBLOCKING {
     uint32_t n = 0;
     StageRec *table = stages(h);
     for (uint32_t i = 0; i < h->stageCount; ++i) {
@@ -2407,7 +2408,7 @@ bool deltaFinalize(SnapHeader *h) {
     return true;
 }
 
-uint64_t deltaCarry(SnapHeader *from, SnapHeader *to) {
+uint64_t deltaCarry(SnapHeader *from, SnapHeader *to) N60_RT_NONBLOCKING {
     if (from == nullptr || to == nullptr) return 0;
     StageRec *dst = stages(to);
     const StageRec *src = stages(from);

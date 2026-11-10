@@ -157,7 +157,7 @@ void readSeen(const XBlock &b, const float *p, float seen[4]) {
 
 }  // namespace
 
-bool isRouteKind(uint32_t kind) { return kind == N60_STAGE_ROUTE || kind == N60_STAGE_XOVER; }
+bool isRouteKind(uint32_t kind) N60_RT_NONBLOCKING { return kind == N60_STAGE_ROUTE || kind == N60_STAGE_XOVER; }
 
 n60_status validateRouteStage(const n60_stage_desc &s, double rate, uint32_t outCh) {
     if (!(rate >= N60_GRAPH_MIN_SAMPLE_RATE && rate <= N60_GRAPH_MAX_SAMPLE_RATE) || s.capacityFrames != 0 || s.laneB != 0) {
@@ -391,12 +391,12 @@ static void runXoverStage(SnapHeader *h, StageRec &r, float *const *lanes, uint3
     }
 }
 
-void runRoute(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) {
+void runRoute(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) N60_RT_NONBLOCKING {
     if (r.kind == N60_STAGE_ROUTE) runRouteStage(h, r, lanes, frames);
     else runXoverStage(h, r, lanes, frames);
 }
 
-n60_status validateRouteParam(const SnapHeader *h, const StageRec &r, uint32_t idx, float value) {
+n60_status validateRouteParam(const SnapHeader *h, const StageRec &r, uint32_t idx, float value) N60_RT_NONBLOCKING {
     if (idx >= r.paramCount) return N60_STATUS_BAD_ARGUMENT;
     if (r.kind == N60_STAGE_ROUTE) {
         if (idx % 2 == 0) return N60_STATUS_UNSUPPORTED;               // source lane: topology

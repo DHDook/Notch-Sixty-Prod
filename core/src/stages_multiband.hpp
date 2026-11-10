@@ -5,10 +5,11 @@
 #define N60_CORE_STAGES_MULTIBAND_HPP
 
 #include "snapshot.hpp"
+#include "platform/rt.hpp"
 
 namespace n60 {
 
-bool isMultibandKind(uint32_t kind);
+bool isMultibandKind(uint32_t kind) N60_RT_NONBLOCKING;
 
 // Control thread. Checks lanes (a pair), parameter count and ranges.
 n60_status validateMultibandStage(const n60_stage_desc &s, double sampleRate, uint32_t outputChannels);
@@ -26,13 +27,13 @@ void multibandInit(SnapHeader *h, const StageRec &r);
 // same id in `from`: the crossover and band high-pass filter state, the three band gain smoothers and the parked flag.
 // Coefficients stay the new snapshot's own. Bounded copy, no allocation. Returns the bytes copied, for the caller to
 // charge to the callback budget (G38).
-uint64_t multibandCarry(SnapHeader *from, SnapHeader *to);
+uint64_t multibandCarry(SnapHeader *from, SnapHeader *to) N60_RT_NONBLOCKING;
 
 // Realtime thread. Runs the stage in place over `frames` frames of the pair.
-void runMultiband(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames);
+void runMultiband(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) N60_RT_NONBLOCKING;
 
 // Live-edit check for one parameter (see validateParam): the two slopes are topology and are not live.
-n60_status validateMultibandParam(const SnapHeader *h, const StageRec &r, uint32_t idx, float value);
+n60_status validateMultibandParam(const SnapHeader *h, const StageRec &r, uint32_t idx, float value) N60_RT_NONBLOCKING;
 
 // Control thread. Band gain reduction (grMaxDb reset by the read).
 bool readMultiband(const SnapHeader *h, uint32_t stageId, n60_multiband_readback *out);

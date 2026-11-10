@@ -70,14 +70,16 @@ float biquad(const double c[5], double z[2], float in) {
     return static_cast<float>(y);
 }
 
-// Zero tiny or non-finite float state so quiet tails never sit in denormals.
-void fz(float &v) {
-    if (!(std::fabs(v) >= 1e-20f) || !std::isfinite(v)) v = 0.0f;
+// E20 S2: quiet tails no longer need hand-written flushes; n60_graph_process runs under a flush-to-zero guard
+// (platform/fpenv.hpp), so decaying state falls to exact zero in hardware. Recursive state still self-heals
+// from a non-finite burst once per block (flush-to-zero does not touch NaN or Inf).
+void heal(float &v) N60_RT_NONBLOCKING {
+    if (!std::isfinite(v)) v = 0.0f;
 }
 
-void flush(double z[2]) {
-    if (std::fabs(z[0]) < 1e-30) z[0] = 0.0;
-    if (std::fabs(z[1]) < 1e-30) z[1] = 0.0;
+void heal(double z[2]) N60_RT_NONBLOCKING {
+    if (!std::isfinite(z[0])) z[0] = 0.0;
+    if (!std::isfinite(z[1])) z[1] = 0.0;
 }
 
 // ---- parameter tables --------------------------------------------------------------
@@ -245,8 +247,8 @@ void runCompressor(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t fra
         }
     }
     for (uint32_t l = 0; l < n; ++l) {
-        flush(st[l]->z);
-        fz(st[l]->gainDB);
+        heal(st[l]->z);
+        heal(st[l]->gainDB);
     }
     publishReduction(st, per, groups, grMax);
 }
@@ -280,9 +282,7 @@ void runExpander(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frame
             for (uint32_t k = 0; k < per; ++k) lp[g * per + k][i] *= gain;
         }
     }
-    for (uint32_t l = 0; l < n; ++l) {
-        fz(st[l]->gainDB);
-    }
+    for (uint32_t l = 0; l < n; ++l) heal(st[l]->gainDB);
     publishReduction(st, per, groups, grMax);
 }
 
@@ -431,12 +431,12 @@ void runDynEq(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) 
     }
     for (uint32_t l = 0; l < n; ++l) {
         for (uint32_t b = 0; b < nb; ++b) {
-            flush(lb[l][b].aZ);
-            flush(lb[l][b].pZ);
-            flush(lb[l][b].sZ);
-            fz(lb[l][b].dyn);
-            fz(lb[l][b].rms);
-            fz(lb[l][b].stat);
+            heal(lb[l][b].aZ);
+            heal(lb[l][b].pZ);
+            heal(lb[l][b].sZ);
+            heal(lb[l][b].dyn);
+            heal(lb[l][b].rms);
+            heal(lb[l][b].stat);
         }
     }
 }
@@ -1034,7 +1034,7 @@ bool readDspDynamics(SnapHeader *h, const StageRec &r, uint32_t lane, n60_dynami
     return true;
 }
 
-bool isDspKind(uint32_t kind) {
+bool isDspKind(uint32_t kind) N60_RT_NONBLOCKING {
     return kind == N60_STAGE_COMPRESSOR || kind == N60_STAGE_EXPANDER || kind == N60_STAGE_DYN_EQ ||
            kind == N60_STAGE_DENOISER || kind == N60_STAGE_FIR || kind == N60_STAGE_ROOM_FIR_TWO_BAND;
 }
@@ -1240,7 +1240,7 @@ void dspInit(SnapHeader *h, const StageRec &r) {
     }
 }
 
-void runDsp(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) {
+void runDsp(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) N60_RT_NONBLOCKING {
     switch (r.kind) {
         case N60_STAGE_COMPRESSOR: runCompressor(h, r, lanes, frames); break;
         case N60_STAGE_EXPANDER: runExpander(h, r, lanes, frames); break;
@@ -1252,7 +1252,7 @@ void runDsp(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) {
     }
 }
 
-n60_status validateDspParam(const SnapHeader *h, const StageRec &r, uint32_t idx, float value) {
+n60_status validateDspParam(const SnapHeader *h, const StageRec &r, uint32_t idx, float value) N60_RT_NONBLOCKING {
     if (r.kind == N60_STAGE_FIR || r.kind == N60_STAGE_ROOM_FIR_TWO_BAND) {
         return idx < r.paramCount ? N60_STATUS_UNSUPPORTED : N60_STATUS_BAD_ARGUMENT;
     }
@@ -1261,7 +1261,7 @@ n60_status validateDspParam(const SnapHeader *h, const StageRec &r, uint32_t idx
     return paramLive(r.kind, idx) ? N60_STATUS_OK : N60_STATUS_UNSUPPORTED;
 }
 
-uint32_t dspLatency(const SnapHeader *h, const StageRec &r) {
+uint32_t dspLatency(const SnapHeader *h, const StageRec &r) N60_RT_NONBLOCKING {
     if (r.kind == N60_STAGE_FIR) return kPart + r.capacity;
     if (r.kind == N60_STAGE_ROOM_FIR_TWO_BAND) {
         return reinterpret_cast<const RfShared *>(bytes(h) + r.sharedOff)->lowLatency + r.capacity;
@@ -1384,7 +1384,7 @@ static uint32_t rfCarry(SnapHeader *from, SnapHeader *to, StageRec &b) {
     return rfWarmFrames(y);
 }
 
-uint32_t dspFirCarry(SnapHeader *from, SnapHeader *to, bool lazy, bool *pending, uint64_t *syncBudget) {
+uint32_t dspFirCarry(SnapHeader *from, SnapHeader *to, bool lazy, bool *pending, uint64_t *syncBudget) N60_RT_NONBLOCKING {
     uint32_t warm = 0, upCopied = 0;
     // Stages of `to` that are FIR lanes copied whole in this call: the only upstream FIRs a later lockstep stage may
     // sit behind (a lazily carried or warming one is not yet exact), E9 S2d.
@@ -1522,7 +1522,7 @@ uint32_t dspFirCarry(SnapHeader *from, SnapHeader *to, bool lazy, bool *pending,
     return warm;
 }
 
-uint64_t dspFirCarryStep(SnapHeader *from, SnapHeader *to, FirCarryCursor &c, uint64_t maxBytes, bool *done) {
+uint64_t dspFirCarryStep(SnapHeader *from, SnapHeader *to, FirCarryCursor &c, uint64_t maxBytes, bool *done) N60_RT_NONBLOCKING {
     uint64_t spent = 0;
     StageRec *dst = stages(to);
     StageRec *src = stages(from);
@@ -1559,7 +1559,7 @@ uint64_t dspFirCarryStep(SnapHeader *from, SnapHeader *to, FirCarryCursor &c, ui
     return spent;
 }
 
-uint32_t dspFirHistoryFrames(const SnapHeader *h) {
+uint32_t dspFirHistoryFrames(const SnapHeader *h) N60_RT_NONBLOCKING {
     if (h == nullptr) return 0;
     uint32_t frames = 0;
     const StageRec *s = stages(h);
@@ -1605,7 +1605,7 @@ void denoiserStateFresh(n60_denoiser_state *st, uint32_t fftSize, uint32_t lastR
     st->lastRevision = lastRevision;
 }
 
-void denoiserParkedApplyView(n60_denoiser_state *st, uint32_t fftSize, uint32_t revision, uint32_t command) {
+void denoiserParkedApplyView(n60_denoiser_state *st, uint32_t fftSize, uint32_t revision, uint32_t command) N60_RT_NONBLOCKING {
     if (fftSize == 0) return;
     if (st->fftSize != fftSize) {  // the kernel resets on a quality change, then reads the command
         denoiserStateFresh(st, fftSize, revision);
@@ -1619,7 +1619,7 @@ void denoiserParkedApplyView(n60_denoiser_state *st, uint32_t fftSize, uint32_t 
     }
 }
 
-bool dspDenoiserCarry(SnapHeader *from, SnapHeader *to) {
+bool dspDenoiserCarry(SnapHeader *from, SnapHeader *to) N60_RT_NONBLOCKING {
     StageRec *a = firstDenoiser(from);
     StageRec *b = firstDenoiser(to);
     if (a == nullptr || b == nullptr) return false;
@@ -1645,7 +1645,7 @@ bool dspDenoiserCarry(SnapHeader *from, SnapHeader *to) {
     return true;
 }
 
-bool dspDenoiserExport(SnapHeader *h, n60_denoiser_state *out) {
+bool dspDenoiserExport(SnapHeader *h, n60_denoiser_state *out) N60_RT_NONBLOCKING {
     StageRec *r = firstDenoiser(h);
     if (r == nullptr) return false;
     DnView V = dnView(sharedState(h, *r));
@@ -1666,7 +1666,7 @@ bool dspDenoiserExport(SnapHeader *h, n60_denoiser_state *out) {
     return true;
 }
 
-bool dspDenoiserImport(SnapHeader *h, const n60_denoiser_state *in) {
+bool dspDenoiserImport(SnapHeader *h, const n60_denoiser_state *in) N60_RT_NONBLOCKING {
     StageRec *r = firstDenoiser(h);
     if (r == nullptr) return false;
     DnView V = dnView(sharedState(h, *r));
@@ -1693,7 +1693,7 @@ bool dspDenoiserImport(SnapHeader *h, const n60_denoiser_state *in) {
     return true;
 }
 
-bool dspFirCarryUpstream(const SnapHeader *to, uint32_t stageId) {
+bool dspFirCarryUpstream(const SnapHeader *to, uint32_t stageId) N60_RT_NONBLOCKING {
     const StageRec *st = stages(to);
     int64_t at = -1, last = -1;
     for (uint32_t i = 0; i < to->stageCount; ++i) {
