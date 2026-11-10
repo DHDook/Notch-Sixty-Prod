@@ -113,6 +113,9 @@ struct ProductionMetersView: View {
     @State private var snapshot = ProductionMetersSnapshot()
     @State private var analysisSnapshot = ProductionAnalysisSnapshot.empty
     @State private var transportMeterSnapshot: ProductionTransportMeterSnapshot?
+    /// E28 S6: same-device speaker routes and E9 per-output protection from the hub's latest context.
+    @State private var routeMeters: [ProductionRouteMeter] = []
+    @State private var protectionReadings: [Int: UnifiedGraphOutputProtectionReading] = [:]
     @State private var transportDiagnostics: AudioDiagnosticsSnapshot?
     @AppStorage("meters.ballistics") private var ballisticsRaw = MeterBallistics.peak.rawValue
     @State private var bank = MeterBankDisplay()
@@ -242,6 +245,13 @@ struct ProductionMetersView: View {
                 stereoLevelCard(title: "Output", subtitle: "Final DSP output", stage: "output", levels: snapshot.output)
             }
 
+            if !routeMeters.isEmpty {
+                Text("Speaker Outputs").font(.title2.bold())
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 220), spacing: 12)], spacing: 12) {
+                    ForEach(routeMeters) { route in routeCard(route) }
+                }
+            }
+
             HStack(alignment: .top, spacing: 14) {
                 metricCard(
                     title: "Input True Peak",
@@ -305,16 +315,12 @@ struct ProductionMetersView: View {
 
             if let input = transport.inputTruePeakLinear, let output = transport.outputTruePeakLinear {
                 HStack(alignment: .top, spacing: 14) {
-                    metricCard(
-                        title: "Spatial Input True Peak",
-                        value: ProductionMeterMath.formattedDB(ProductionMeterMath.decibels(input), suffix: "dBTP"),
-                        detail: "Downstream protection detector"
-                    )
-                    metricCard(
-                        title: "Headphone Output True Peak",
-                        value: ProductionMeterMath.formattedDB(ProductionMeterMath.decibels(output), suffix: "dBTP"),
-                        detail: "After headphone correction and protection"
-                    )
+                    truePeakBarCard(
+                        title: "Spatial Input True Peak", id: "input.truePeak", linear: input,
+                        detail: "Downstream protection detector")
+                    truePeakBarCard(
+                        title: "Headphone Output True Peak", id: "output.truePeak", linear: output,
+                        detail: "After headphone correction and protection")
                 }
             }
 
@@ -712,6 +718,62 @@ struct ProductionMetersView: View {
         return String(format: "%.1f dBTP", value)
     }
 
+    /// E28 S6: one routed DAC channel of a stereo same-device speaker map, drawn with the shared bar.
+    private func routeCard(_ route: ProductionRouteMeter) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text(route.label).font(.headline)
+                Spacer()
+                Text("CH \(route.physicalChannel + 1)")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
+            channelLevelRow(
+                id: route.id, label: "",
+                peak: ProductionMeterMath.decibels(route.peakLinear),
+                rms: ProductionMeterMath.decibels(route.rmsLinear))
+            HStack {
+                Text("Over-range").font(.caption).foregroundStyle(.secondary)
+                Spacer()
+                Text("\(route.overRangeSamples)").font(.caption.monospacedDigit())
+            }
+        }
+        .padding(14)
+        .background(.quaternary.opacity(0.22), in: .rect(cornerRadius: 16))
+        .accessibilityElement(children: .contain)
+    }
+
+    /// E28 S6 (G13): true-peak detectors drawn with the shared bar instead of a text-only card.
+    private func truePeakBarCard(title: String, id: String, linear: Float, detail: String) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title).font(.caption).foregroundStyle(.secondary)
+            Text(ProductionMeterMath.formattedDB(ProductionMeterMath.decibels(linear), suffix: "dBTP"))
+                .font(.system(.title3, design: .monospaced).weight(.semibold))
+                .monospacedDigit()
+            MeterBarView(
+                channel: bank.channel(id: id, label: "TP"),
+                paused: !windowVisible || page != .levels,
+                onReset: { bank.channel(id: id, label: "TP").resetLatch(); meterRevision &+= 1 }
+            )
+            .id("\(id)-\(meterRevision)")
+            Text(detail).font(.caption).foregroundStyle(.secondary)
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.quaternary.opacity(0.18), in: .rect(cornerRadius: 12))
+    }
+
+    /// E28 S6: the E9 protection readout for the physical output card whose label matches a protection lane.
+    private func protectionText(for channel: ProductionTransportChannelMeter) -> String? {
+        guard let lane = engine.outputProtectionLanes.first(where: { $0.label == channel.label }),
+              let reading = protectionReadings[lane.index] else { return nil }
+        var parts: [String] = []
+        if let user = reading.userGainReductionDB { parts.append(String(format: "limiter %.1f dB", Double(user))) }
+        parts.append(String(format: "hard limit %.1f dB", Double(reading.hardLimitGainReductionDB)))
+        parts.append(ProductionOutputProtectionSection.peakDB(reading.outputTruePeakLinear))
+        return parts.joined(separator: "  ·  ")
+    }
+
     private func transportChannelCard(_ channel: ProductionTransportChannelMeter) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
@@ -730,6 +792,9 @@ struct ProductionMetersView: View {
                 Text("Over-range").font(.caption).foregroundStyle(.secondary)
                 Spacer()
                 Text("\(channel.overRangeSamples)").font(.caption.monospacedDigit())
+            }
+            if let text = protectionText(for: channel) {
+                Text(text).font(.caption.monospaced()).foregroundStyle(.secondary)
             }
         }
         .padding(14)
@@ -953,7 +1018,12 @@ struct ProductionMetersView: View {
         if engine.lifecycleState == .running, let context = hub.latestContext {
             transportDiagnostics = context.diagnostics
             transportMeterSnapshot = context.transport
+            routeMeters = context.routes
+            protectionReadings = Dictionary(
+                context.protection.map { ($0.lane, $0) }, uniquingKeysWith: { _, new in new })
         } else {
+            routeMeters = []
+            protectionReadings = [:]
             transportDiagnostics = engine.diagnosticsSnapshot()
             transportMeterSnapshot = engine.productionTransportMeterSnapshot()
         }

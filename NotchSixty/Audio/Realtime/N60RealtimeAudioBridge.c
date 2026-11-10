@@ -14,6 +14,7 @@
 
 static _Atomic bool gMeteringDemand = false;
 static _Atomic bool gOutputVUMeterDemand = false;
+static _Atomic bool gRouteMeterDemand = false;
 
 #define N60_ANALYSIS_CAPTURE_MASK (N60_ANALYSIS_CAPTURE_CAPACITY_FRAMES - 1u)
 _Static_assert(
@@ -214,6 +215,12 @@ struct N60RealtimeAudioBridge {
     _Atomic uint32_t outputVURMSLeftBits;
     _Atomic uint32_t outputVURMSRightBits;
     _Atomic uint64_t outputVUOverRangeSamples;
+
+    // E28 S6: per-route meters of the same-device output map (see N60RouteMeterSnapshot). Peak and RMS hold
+    // non-negative float bits, so unsigned order equals float order and a CAS max-merge is exact.
+    _Atomic uint32_t routePeakBits[N60_SPEAKER_OUTPUT_MAX_ROUTES];
+    _Atomic uint32_t routeRMSBits[N60_SPEAKER_OUTPUT_MAX_ROUTES];
+    _Atomic uint64_t routeOverRangeSamples[N60_SPEAKER_OUTPUT_MAX_ROUTES];
 
     // Demand-gated Input/DSP-Output analysis capture. This is a bounded
     // single-producer/single-consumer ring: the audio callback never waits
@@ -1002,6 +1009,11 @@ void N60RealtimeAudioBridgeReset(N60RealtimeAudioBridge *bridge) {
     atomic_store_explicit(&bridge->outputVURMSLeftBits, 0, memory_order_relaxed);
     atomic_store_explicit(&bridge->outputVURMSRightBits, 0, memory_order_relaxed);
     atomic_store_explicit(&bridge->outputVUOverRangeSamples, 0, memory_order_relaxed);
+    for (uint32_t route = 0; route < N60_SPEAKER_OUTPUT_MAX_ROUTES; ++route) {
+        atomic_store_explicit(&bridge->routePeakBits[route], 0, memory_order_relaxed);
+        atomic_store_explicit(&bridge->routeRMSBits[route], 0, memory_order_relaxed);
+        atomic_store_explicit(&bridge->routeOverRangeSamples[route], 0, memory_order_relaxed);
+    }
     atomic_store_explicit(&bridge->analysisDemandMask, N60_ANALYSIS_DEMAND_NONE, memory_order_release);
     atomic_store_explicit(&bridge->analysisWriteIndex, 0, memory_order_release);
     atomic_store_explicit(&bridge->analysisReadIndex, 0, memory_order_release);
@@ -1231,6 +1243,75 @@ N60OutputVUMeterSnapshot N60RealtimeAudioBridgeGetOutputVUMeterSnapshot(
     snapshot.rmsLeft = bits_to_float(atomic_load_explicit(&bridge->outputVURMSLeftBits, memory_order_relaxed));
     snapshot.rmsRight = bits_to_float(atomic_load_explicit(&bridge->outputVURMSRightBits, memory_order_relaxed));
     snapshot.overRangeSamples = atomic_load_explicit(&bridge->outputVUOverRangeSamples, memory_order_relaxed);
+    return snapshot;
+}
+
+void N60RealtimeAudioBridgeSetRouteMeterDemand(bool enabled) {
+    atomic_store_explicit(&gRouteMeterDemand, enabled, memory_order_release);
+}
+
+bool N60RealtimeAudioBridgeRouteMeterDemand(void) {
+    return atomic_load_explicit(&gRouteMeterDemand, memory_order_acquire);
+}
+
+void N60RouteMeterAccumulate(
+    N60RouteMeterAccumulator *accumulator,
+    const N60SameDeviceOutputMap *map,
+    const N60SpeakerBusFrame *frame
+) {
+    if (accumulator == NULL || map == NULL || frame == NULL || !map->valid) return;
+    for (uint32_t route = 0; route < map->routeCount && route < N60_SPEAKER_OUTPUT_MAX_ROUTES; ++route) {
+        const float value = N60SpeakerBusFrameGet(frame, map->routes[route].bus);
+        const float magnitude = fabsf(value);
+        if (!(magnitude == magnitude)) continue; // NaN: not metered
+        if (magnitude > accumulator->peak[route]) accumulator->peak[route] = magnitude;
+        accumulator->squareSum[route] += (double)value * (double)value;
+        if (magnitude > 1.0f) accumulator->overRange[route] += 1u;
+    }
+}
+
+static void route_meter_merge_max(_Atomic uint32_t *slot, uint32_t bits) {
+    uint32_t current = atomic_load_explicit(slot, memory_order_relaxed);
+    while (bits > current
+           && !atomic_compare_exchange_weak_explicit(
+               slot, &current, bits, memory_order_relaxed, memory_order_relaxed)) {
+    }
+}
+
+void N60RealtimeAudioBridgePublishRouteMeter(
+    N60RealtimeAudioBridge *bridge,
+    const N60RouteMeterAccumulator *accumulator,
+    uint32_t routeCount,
+    uint32_t frameCount
+) {
+    if (bridge == NULL || accumulator == NULL || frameCount == 0) return;
+    if (routeCount > N60_SPEAKER_OUTPUT_MAX_ROUTES) routeCount = N60_SPEAKER_OUTPUT_MAX_ROUTES;
+    for (uint32_t route = 0; route < routeCount; ++route) {
+        const float rms = (float)sqrt(accumulator->squareSum[route] / (double)frameCount);
+        route_meter_merge_max(&bridge->routePeakBits[route], float_to_bits(accumulator->peak[route]));
+        route_meter_merge_max(&bridge->routeRMSBits[route], float_to_bits(rms));
+        if (accumulator->overRange[route] != 0u) {
+            atomic_fetch_add_explicit(
+                &bridge->routeOverRangeSamples[route], accumulator->overRange[route], memory_order_relaxed);
+        }
+    }
+}
+
+N60RouteMeterSnapshot N60RealtimeAudioBridgeTakeRouteMeterSnapshot(N60RealtimeAudioBridge *bridge) {
+    N60RouteMeterSnapshot snapshot = {0};
+    if (bridge == NULL) return snapshot;
+    snapshot.enabled = N60RealtimeAudioBridgeRouteMeterDemand();
+    snapshot.routeCount = bridge->sameDeviceOutputMap.valid ? bridge->sameDeviceOutputMap.routeCount : 0u;
+    if (snapshot.routeCount > N60_SPEAKER_OUTPUT_MAX_ROUTES) snapshot.routeCount = N60_SPEAKER_OUTPUT_MAX_ROUTES;
+    for (uint32_t route = 0; route < snapshot.routeCount; ++route) {
+        snapshot.routes[route] = bridge->sameDeviceOutputMap.routes[route];
+        snapshot.peak[route] = bits_to_float(
+            atomic_exchange_explicit(&bridge->routePeakBits[route], 0u, memory_order_relaxed));
+        snapshot.rms[route] = bits_to_float(
+            atomic_exchange_explicit(&bridge->routeRMSBits[route], 0u, memory_order_relaxed));
+        snapshot.overRangeSamples[route] = atomic_load_explicit(
+            &bridge->routeOverRangeSamples[route], memory_order_relaxed);
+    }
     return snapshot;
 }
 
@@ -1978,6 +2059,12 @@ bool N60RealtimeAudioBridgeConfigureSameDeviceOutputMap(
         return false;
     }
     bridge->sameDeviceOutputMap = map;
+    // E28 S6: maxima measured against the previous map must not be reported against the new routes.
+    for (uint32_t route = 0; route < N60_SPEAKER_OUTPUT_MAX_ROUTES; ++route) {
+        atomic_store_explicit(&bridge->routePeakBits[route], 0u, memory_order_relaxed);
+        atomic_store_explicit(&bridge->routeRMSBits[route], 0u, memory_order_relaxed);
+        atomic_store_explicit(&bridge->routeOverRangeSamples[route], 0u, memory_order_relaxed);
+    }
     return true;
 }
 
@@ -2609,6 +2696,9 @@ static OSStatus N60OutputIOProcBody(
         atomic_load_explicit(&bridge->outputGainBits, memory_order_acquire)
     );
     bool outputVUMeterEnabled = N60RealtimeAudioBridgeOutputVUMeterDemand();
+    const bool routeMeterEnabled = N60RealtimeAudioBridgeRouteMeterDemand() && bridge->sameDeviceOutputMap.valid;
+    N60RouteMeterAccumulator routeMeter;
+    memset(&routeMeter, 0, sizeof(routeMeter));
     uint32_t analysisDemand = atomic_load_explicit(&bridge->analysisDemandMask, memory_order_acquire);
     uint64_t analysisWriteIndex = 0;
     uint32_t analysisFramesToWrite = 0;
@@ -2979,6 +3069,9 @@ static OSStatus N60OutputIOProcBody(
                     &bridge->speakerDriverProcessing,
                     busFrame.values
                 );
+                if (routeMeterEnabled) {
+                    N60RouteMeterAccumulate(&routeMeter, &bridge->sameDeviceOutputMap, &busFrame);
+                }
                 if (!N60SameDeviceOutputMapWriteFrame(
                         &bridge->sameDeviceOutputMap,
                         &busFrame,
@@ -3296,6 +3389,9 @@ static OSStatus N60OutputIOProcBody(
                     &bridge->speakerDriverProcessing,
                     busFrame.values
                 );
+                if (routeMeterEnabled) {
+                    N60RouteMeterAccumulate(&routeMeter, &bridge->sameDeviceOutputMap, &busFrame);
+                }
                 if (!N60SameDeviceOutputMapWriteFrame(
                         &bridge->sameDeviceOutputMap,
                         &busFrame,
@@ -3467,6 +3563,11 @@ static OSStatus N60OutputIOProcBody(
             outputLeft += outputView.leftStride;
             outputRight += outputView.rightStride;
         }
+    }
+
+    if (routeMeterEnabled) {
+        N60RealtimeAudioBridgePublishRouteMeter(
+            bridge, &routeMeter, bridge->sameDeviceOutputMap.routeCount, frameCount);
     }
 
     if (outputVUMeterEnabled) {
