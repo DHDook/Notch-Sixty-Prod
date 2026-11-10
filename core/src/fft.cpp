@@ -71,7 +71,7 @@ void transform(const void *plan, Complex *x) {
 
 }  // namespace
 
-size_t planBytes(uint32_t n) {
+size_t planBytes(uint32_t n) N60_RT_NONBLOCKING {
     if (!validSize(n)) return 0;
     return sizeof(PlanHeader) + alignUp16(size_t(n) * sizeof(uint16_t)) + size_t(n / 2) * sizeof(Complex);
 }
@@ -101,7 +101,7 @@ bool planInit(void *mem, uint32_t n) {
     return true;
 }
 
-void forward(const void *plan, Complex *x) { transform<false>(plan, x); }
-void inverse(const void *plan, Complex *x) { transform<true>(plan, x); }
+void forward(const void *plan, Complex *x) N60_RT_NONBLOCKING { transform<false>(plan, x); }
+void inverse(const void *plan, Complex *x) N60_RT_NONBLOCKING { transform<true>(plan, x); }
 
 }  // namespace n60::fft

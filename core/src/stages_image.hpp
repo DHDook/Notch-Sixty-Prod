@@ -5,10 +5,11 @@
 #define N60_CORE_STAGES_IMAGE_HPP
 
 #include "snapshot.hpp"
+#include "platform/rt.hpp"
 
 namespace n60 {
 
-bool isImageKind(uint32_t kind);
+bool isImageKind(uint32_t kind) N60_RT_NONBLOCKING;
 
 // Control thread. Checks lanes (a pair), parameter count and ranges.
 n60_status validateImageStage(const n60_stage_desc &s, double sampleRate, uint32_t outputChannels);
@@ -26,13 +27,13 @@ void imageInit(SnapHeader *h, const StageRec &r);
 // with the same id and kind in `from`: filter state, the smoothed matrix, widths and mixes, the de-esser gain and the
 // parked flags. Coefficients stay the new snapshot's own. Bounded copies, no allocation.
 // Returns the bytes of running state it copied, for the caller to charge to the callback budget (G38).
-uint64_t imageCarry(SnapHeader *from, SnapHeader *to);
+uint64_t imageCarry(SnapHeader *from, SnapHeader *to) N60_RT_NONBLOCKING;
 
 // Realtime thread. Runs the stage in place over `frames` frames of the pair.
-void runImage(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames);
+void runImage(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) N60_RT_NONBLOCKING;
 
 // Pure range check for one parameter (see validateParam).
-n60_status validateImageParam(const SnapHeader *h, const StageRec &r, uint32_t idx, float value);
+n60_status validateImageParam(const SnapHeader *h, const StageRec &r, uint32_t idx, float value) N60_RT_NONBLOCKING;
 
 // Control thread. De-esser gain reduction (either lane of the pair; grMaxDb reset by the read).
 bool readDeEss(SnapHeader *h, const StageRec &r, uint32_t lane, n60_dynamics_readback *out);

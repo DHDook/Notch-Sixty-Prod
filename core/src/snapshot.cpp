@@ -98,7 +98,7 @@ uint32_t rampFramesFor(double rate) {
 
 // RBJ Audio EQ Cookbook biquads, normalised by a0, in double precision.
 // Same forms and limits as the kernel's control-plane design (N60Biquad.h).
-bool designBiquad(uint32_t type, double rate, double f, double gainDb, double q, double out[5]) {
+bool designBiquad(uint32_t type, double rate, double f, double gainDb, double q, double out[5]) N60_RT_NONBLOCKING {
     if (!std::isfinite(f) || f <= 0.0 || f >= rate * 0.5 || !std::isfinite(gainDb) || gainDb < -24.0 ||
         gainDb > 24.0 || !std::isfinite(q) || q <= 0.0) {
         return false;
@@ -688,7 +688,7 @@ n60_status validateParam(const SnapHeader *snap, const StageRec &r, uint32_t par
     }
 }
 
-bool applyParam(SnapHeader *snap, uint32_t stageId, uint32_t paramIndex, float value, bool *latencyMayChange) {
+bool applyParam(SnapHeader *snap, uint32_t stageId, uint32_t paramIndex, float value, bool *latencyMayChange) N60_RT_NONBLOCKING {
     StageRec *table = stages(snap);
     for (uint32_t i = 0; i < snap->stageCount; ++i) {
         StageRec &r = table[i];
@@ -730,7 +730,7 @@ void snapshotLaneLatency(const SnapHeader *snap, uint32_t upTo, uint32_t *perLan
     }
 }
 
-uint32_t snapshotLatency(const SnapHeader *snap) {
+uint32_t snapshotLatency(const SnapHeader *snap) N60_RT_NONBLOCKING {
     uint32_t perLane[N60_GRAPH_MAX_CHANNELS];
     snapshotLaneLatency(snap, snap->stageCount, perLane);
     uint32_t worst = 0;
@@ -899,13 +899,7 @@ void runPeq(SnapHeader *h, const StageRec &r, float *const *lanes, uint32_t fram
             }
             buf[i] = static_cast<float>(x);
         }
-        // Flush decayed state so a quiet tail never lingers in denormals (slow on some CPUs).
-        for (uint32_t s = 0; s < sections; ++s) {
-            for (int k = 0; k < 2; ++k) {
-                if (std::fabs(z[s][k]) < 1e-30) z[s][k] = 0.0;
-                if (std::fabs(zn[s][k]) < 1e-30) zn[s][k] = 0.0;
-            }
-        }
+        // Quiet tails: the caller runs under the flush-to-zero guard (platform/fpenv.hpp), no manual flush.
         std::memcpy(st.z, z, sizeof z);
         std::memcpy(st.zn, zn, sizeof zn);
     }
@@ -1047,7 +1041,7 @@ bool upstreamBytes(const SnapHeader *from, const SnapHeader *to, uint32_t j, siz
 }  // namespace
 
 bool upstreamStateCarriable(const SnapHeader *from, const SnapHeader *to, uint32_t i, uint64_t budget, bool unbudgeted,
-                            uint32_t first, const uint8_t *firExact) {
+                            uint32_t first, const uint8_t *firExact) N60_RT_NONBLOCKING {
     if (i > from->stageCount || i > to->stageCount) return false;
     uint64_t total = 0;
     for (uint32_t j = first; j < i; ++j) {
@@ -1069,7 +1063,7 @@ bool upstreamStateCarriable(const SnapHeader *from, const SnapHeader *to, uint32
     return unbudgeted || total <= budget;
 }
 
-uint32_t carryUpstreamState(SnapHeader *from, SnapHeader *to, uint32_t i, uint64_t *budget, uint32_t first) {
+uint32_t carryUpstreamState(SnapHeader *from, SnapHeader *to, uint32_t i, uint64_t *budget, uint32_t first) N60_RT_NONBLOCKING {
     if (i > from->stageCount || i > to->stageCount) return 0;
     const StageRec *a = stages(from);
     StageRec *b = stages(to);
@@ -1169,15 +1163,15 @@ extern "C" uint32_t n60_profile_read(n60_profile_entry *out, uint32_t capacity) 
 #endif
 
 void runSnapshot(SnapHeader *h, float *const *lanes, uint32_t frames, std::atomic<uint64_t> &sanitisedSamples,
-                 bool follower) {
+                 bool follower) N60_RT_NONBLOCKING {
     h->follower = follower ? 1u : 0u;
     StageRec *table = stages(h);
     for (uint32_t i = 0; i < h->stageCount; ++i) {
         StageRec &r = table[i];
 #ifdef N60_GRAPH_PROFILE
-        const auto t0 = std::chrono::steady_clock::now();
+        const auto t0 = n60::rtNow();
         runStage(h, r, lanes, frames, sanitisedSamples);
-        const auto t1 = std::chrono::steady_clock::now();
+        const auto t1 = n60::rtNow();
         if (r.kind < kProfileKinds) {
             n60_profile_entry &e = gProfile[r.kind];
             e.ns += static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count());
