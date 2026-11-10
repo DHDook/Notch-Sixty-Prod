@@ -5,7 +5,7 @@ project(n60core LANGUAGES C CXX)
 add_library(n60core STATIC src/graph.cpp src/snapshot.cpp src/fft.cpp src/stages_dsp.cpp src/conv/nufir.cpp src/stages_system.cpp src/stages_matrix.cpp src/stages_generator.cpp src/stages_cleanup.cpp src/stages_image.cpp src/stages_loudness.cpp src/stages_multiband.cpp src/stages_route.cpp src/layout.cpp
     src/measure/offline_fft.cpp src/measure/ess.cpp src/measure/deconvolve.cpp src/measure/reference_room.cpp src/measure/timing.cpp src/measure/distortion.cpp src/measure/decay.cpp src/measure/waterfall.cpp src/measure/monitor_ring.cpp src/measure/spl.cpp src/measure/rta.cpp src/measure/predict.cpp
     src/correct/minphase.cpp src/correct/design.cpp src/correct/synth.cpp src/correct/bass.cpp src/correct/multisub_search.cpp
-    src/xover/xover.cpp)
+    src/xover/xover.cpp src/headroom/headroom.cpp)
 target_compile_features(n60core PUBLIC cxx_std_20)
 target_include_directories(n60core PUBLIC include)
 target_include_directories(n60core PRIVATE src)
@@ -232,3 +232,8 @@ add_executable(n60core_conv_rebuild_test tests/test_conv_rebuild.cpp)
 target_link_libraries(n60core_conv_rebuild_test PRIVATE n60core)
 target_include_directories(n60core_conv_rebuild_test PRIVATE src)
 add_test(NAME n60core_conv_rebuild COMMAND n60core_conv_rebuild_test)
+
+# E9 S6: per-output headroom maths (n60/headroom.h).
+add_executable(n60core_headroom_test tests/test_headroom.cpp)
+target_link_libraries(n60core_headroom_test PRIVATE n60core)
+add_test(NAME n60core_headroom COMMAND n60core_headroom_test)
