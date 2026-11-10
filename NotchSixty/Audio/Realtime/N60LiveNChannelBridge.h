@@ -15,6 +15,7 @@
 #include "N60AdaptiveSampleRate.h"
 #include "N60AudioUnitLiveRackBridge.h"
 #include "N60LiveNChannelRenderCore.h"
+#include "N60LoudnessCapture.h"
 #include "N60MIMOTreatmentLiveIntegration.h"
 #include "N60ProgramTransport.h"
 
@@ -84,6 +85,10 @@ typedef struct N60LiveNChannelBridge {
     float * _Nullable graphScratch;
     uint32_t graphChannels;
     uint32_t graphMaxFrames;
+
+    // E28 S6b: demand-gated capture of the program channels (Input) and the same roles after the render (Output) for
+    // BS.1770-4 loudness. Created with the bridge, written by the output callback only while the worker holds demand.
+    N60LoudnessCapture * _Nullable loudnessCapture;
 
     uint32_t outputGateMinimumBufferedFrames;
     uint32_t startupFadeFrames;
@@ -202,6 +207,12 @@ static inline N60LiveNChannelBridge * _Nullable N60LiveNChannelBridgeCreate(
 
     bridge->inputMap = inputMap;
     bridge->graph = graph;
+    // Output loudness needs each program role mapped to a physical channel; a routed session has lanes, not roles.
+    bridge->loudnessCapture = N60LoudnessCaptureCreate(
+        graph.programLayout.channelCount,
+        graph.outputMap.routedLaneCount == 0u ? graph.programLayout.channelCount : 0u,
+        graph.sampleRate
+    );
     bridge->outputGateMinimumBufferedFrames = outputGateMinimumBufferedFrames;
     bridge->startupFadeFrames = startupFadeFrames;
     bridge->startupFadeRemaining = 0u;
@@ -347,6 +358,8 @@ static inline void N60LiveNChannelBridgeDestroy(
     free(bridge->adaptiveOutputScratch);
     free(bridge->audioUnitRackScratch);
     free(bridge->graphScratch);
+    N60LoudnessCaptureDestroy(bridge->loudnessCapture);
+    bridge->loudnessCapture = NULL;
     bridge->graphScratch = NULL;
     bridge->unifiedGraph = NULL;
     bridge->transport = NULL;
@@ -1011,6 +1024,9 @@ static inline OSStatus N60LiveNChannelOutputIOProc(
 
     const uint32_t programChannels =
         bridge->graph.programLayout.channelCount;
+    // E28 S6b: loudness capture for this block (frames == 0 without demand).
+    N60LoudnessCapture * const loudness = bridge->loudnessCapture;
+    const N60LoudnessCaptureBlock loudnessBlock = N60LoudnessCaptureBeginBlock(loudness, frameCount);
     const bool rackConfigured =
         N60AudioUnitLiveRackProcessorIsValid(&bridge->audioUnitRack);
     if (rackConfigured) {
@@ -1119,6 +1135,7 @@ static inline OSStatus N60LiveNChannelOutputIOProc(
             for (uint32_t channel = 0; channel < programChannels; ++channel) {
                 planarIn[channel * stride + frameIndex] = source[channel];
             }
+            if (loudnessBlock.frames != 0u) N60LoudnessCaptureWriteInput(loudness, loudnessBlock, frameIndex, source);
         }
         // Sub lanes ignore their input; keep it silent.
         for (uint32_t channel = programChannels; channel < graphChannels; ++channel) {
@@ -1169,6 +1186,9 @@ static inline OSStatus N60LiveNChannelOutputIOProc(
                 bridge->transport,
                 &input
             );
+        }
+        if (!graphActive && loudnessBlock.frames != 0u) {
+            N60LoudnessCaptureWriteInput(loudness, loudnessBlock, frameIndex, input.channels);
         }
 
         N60LiveNChannelPhysicalFrame physical = {0};
@@ -1272,6 +1292,15 @@ static inline OSStatus N60LiveNChannelOutputIOProc(
             );
         }
         gain = 1.0f;
+        if (loudnessBlock.frames != 0u && loudness->outputChannels != 0u) {
+            // The program roles as heard: physical values (limiter and master gain applied) mapped back by role.
+            float heard[N60_MAX_PROGRAM_CHANNELS];
+            for (uint32_t program = 0; program < programChannels; ++program) {
+                const uint32_t target = bridge->graph.outputMap.physicalChannelForProgram[program];
+                heard[program] = target < physical.physicalChannelCount ? physical.values[target] : 0.0f;
+            }
+            N60LoudnessCaptureWriteOutput(loudness, loudnessBlock, frameIndex, heard);
+        }
         if (meterDemand) {
             for (uint32_t physicalIndex = 0; physicalIndex < physical.physicalChannelCount; ++physicalIndex) {
                 const float value = physical.values[physicalIndex] * gain;
@@ -1337,6 +1366,7 @@ static inline OSStatus N60LiveNChannelOutputIOProc(
             }
         }
     }
+    if (loudnessBlock.frames != 0u) N60LoudnessCaptureCommit(loudness, loudnessBlock);
     if (underrunFadeOut) {
         atomic_store_explicit(&bridge->outputGateOpen, false, memory_order_release);
         bridge->startupFadeRemaining = bridge->startupFadeFrames;

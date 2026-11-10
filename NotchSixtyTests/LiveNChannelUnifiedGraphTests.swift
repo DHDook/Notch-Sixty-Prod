@@ -527,6 +527,9 @@ final class LiveNChannelUnifiedGraphTests: XCTestCase {
             graphHost.collect()
         }
         publishes = 60
+        // Let the poller overlap the publishes: on a loaded runner the 60 rounds can finish before its queue starts.
+        let pollDeadline = Date().addingTimeInterval(10)
+        while polls.value == 0, Date() < pollDeadline { Thread.sleep(forTimeInterval: 0.001) }
         finished.increment()
         XCTAssertEqual(group.wait(timeout: .now() + 30), .success)
         XCTAssertGreaterThan(polls.value, 0)

@@ -219,7 +219,8 @@ struct ProductionMetersView: View {
                 source: loudnessSource,
                 truePeak: loudnessSource == .output ? outputTruePeakHold : inputTruePeakHold,
                 isRunning: engine.lifecycleState == .running,
-                unavailableReason: transportMeterSnapshot != nil ? LoudnessCardText.wideSessionNote : nil,
+                unavailableReason: nil,
+                isWide: transportMeterSnapshot != nil,
                 onSource: { loudnessSourceRaw = $0.rawValue },
                 onReset: resetLoudness
             )

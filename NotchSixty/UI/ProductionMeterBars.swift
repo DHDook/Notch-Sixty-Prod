@@ -314,10 +314,10 @@ enum ProductionMeterHub {
             func add(_ stage: String, _ meter: StereoMeterReading, truePeak: Float?) {
                 channels["\(stage).L"] = MeterChannelReading(
                     peakLinear: meter.peakLeft, rmsLinear: meter.rmsLeft,
-                    overRangeSamples: meter.overRangeSamples, truePeakLinear: truePeak)
+                    overRangeSamples: meter.overRangeLeft, truePeakLinear: truePeak)
                 channels["\(stage).R"] = MeterChannelReading(
                     peakLinear: meter.peakRight, rmsLinear: meter.rmsRight,
-                    overRangeSamples: meter.overRangeSamples, truePeakLinear: truePeak)
+                    overRangeSamples: meter.overRangeRight, truePeakLinear: truePeak)
             }
             add("input", kernel.inputMeter, truePeak: kernel.inputTruePeakLinear)
             add("postEQ", kernel.postEQMeter, truePeak: nil)
