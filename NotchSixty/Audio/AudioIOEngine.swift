@@ -3177,6 +3177,8 @@ final class AudioIOEngine: ObservableObject {
             session.setDetailedMeteringDemand(enabled)
             return
         }
+        // E28 S6: the per-route meters of a same-device speaker map share the detailed-meter demand.
+        N60RealtimeAudioBridgeSetRouteMeterDemand(enabled)
         let previousDemand = N60RealtimeAudioBridgeMeteringDemand()
         guard previousDemand != enabled else { return }
 
@@ -3407,6 +3409,12 @@ final class AudioIOEngine: ObservableObject {
 
     func resetSpectrumPeakHold() {
         transportSession?.resetSpectrumPeakHold()
+    }
+
+    /// E28 S6: per-route maxima for a stereo session whose output map drives several DAC channels (speakers plus subs on
+    /// one device). Empty for every other session. Read-and-reset: the meter hub is the only caller while processing runs.
+    func productionRouteMeters() -> [ProductionRouteMeter] {
+        transportSession?.routeMeters() ?? []
     }
 
     func productionTransportMeterSnapshot() -> ProductionTransportMeterSnapshot? {
