@@ -394,7 +394,7 @@ complete, speaker ANC qualified, and a full hardware regression passing at every
 
 - [x] Bring-your-own import: AutoEq CSV, REW and squig.link frequency-response text, plus user target curves
 - [x] One-click PEQ from an imported response and a chosen target, using the existing model fitter
-- [ ] Live PEQ and crossfeed tuning while playing (from E6)
+- [~] Live PEQ and crossfeed tuning while playing (from E6): S3 built behind `e13.headphones` (`e13/live-headphone-tuning`, PR pending; needs-owner); bench in E22
 - [ ] Raise the HRIR cap for room-included BRIRs; live HRTF interpolation with head tracking
 - [~] In-ear-microphone BRIR capture for personal virtual speakers (S6 core merged; S7 guided flow built behind `e13.headphones`; bench in E22)
 

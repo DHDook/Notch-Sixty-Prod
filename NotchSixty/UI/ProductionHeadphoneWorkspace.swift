@@ -9,6 +9,8 @@ struct ProductionHeadphoneWorkspace: View {
     var calibration: MultichannelCalibrationController?
 
     @State private var draft = HeadphoneDeviceProfileConfiguration()
+    /// E13 S3: previews draft edits on the running graph without saving them.
+    @State private var tuner: HeadphoneLiveTuner?
     @State private var importingSpatialProfile = false
     @State private var importingEQProposal = false
     @State private var pendingEQProposal: HeadphoneCorrectionProposal?
@@ -87,6 +89,9 @@ struct ProductionHeadphoneWorkspace: View {
             loadResponsesAndTargets()
         }
         .task(id: profiles.selectedSystemProfileID) { syncFromSelectedSystem() }
+        .onChange(of: draft) { _, newDraft in previewLive(newDraft) }
+        .onChange(of: engine.lifecycleState) { _, _ in restoreLivePreview() }
+        .onDisappear { restoreLivePreview() }
         .sheet(isPresented: Binding(
             get: { brirFlow != nil },
             set: { if !$0 { brirFlow?.cancel(); brirFlow = nil } }
@@ -998,7 +1003,7 @@ struct ProductionHeadphoneWorkspace: View {
                     .buttonStyle(.glass)
                 Button("Apply") { applyDraft() }
                     .buttonStyle(.glassProminent)
-                    .disabled(engine.lifecycleState != .idle || engine.selectedOutputDevice == nil)
+                    .disabled(!canApply)
             }
         }
         .productionCard()
@@ -1032,7 +1037,43 @@ struct ProductionHeadphoneWorkspace: View {
         Binding(get: { draft[keyPath: keyPath] }, set: { draft[keyPath: keyPath] = $0 })
     }
 
+    /// E13 S3: with live tuning on, Apply also works while playing when the draft is a live edit of what renders.
+    private var canApply: Bool {
+        guard engine.selectedOutputDevice != nil else { return false }
+        if engine.lifecycleState == .idle { return true }
+        return liveTuningAvailable
+    }
+
+    private var liveTuningAvailable: Bool {
+        guard FeatureFlags().isEnabled(.headphones), engine.lifecycleState == .running else { return false }
+        return HeadphoneLiveTuner.isLiveEditable(saved: profiles.selectedSystemHeadphoneDeviceProfile, draft: draft)
+    }
+
+    private func previewLive(_ newDraft: HeadphoneDeviceProfileConfiguration) {
+        guard liveTuningAvailable, let saved = profiles.selectedSystemHeadphoneDeviceProfile else {
+            restoreLivePreview()
+            return
+        }
+        if tuner == nil {
+            let engine = engine
+            tuner = HeadphoneLiveTuner(apply: { try engine.replaceHeadphoneDeviceProfileConfiguration($0) })
+            tuner?.begin(from: engine.headphoneDeviceProfileConfiguration ?? saved)
+        }
+        var candidate = newDraft
+        candidate.outputDeviceUID = saved.outputDeviceUID
+        tuner?.submit(candidate)
+        if let error = tuner?.lastError { actionError = error }
+    }
+
+    /// Puts the saved profile back on the engine (Revert, leaving, a lifecycle change) and drops the preview.
+    private func restoreLivePreview() {
+        guard let tuner else { return }
+        if let saved = profiles.selectedSystemHeadphoneDeviceProfile { tuner.restore(saved) }
+        self.tuner = nil
+    }
+
     private func syncFromSelectedSystem() {
+        restoreLivePreview()
         if let saved = profiles.selectedSystemHeadphoneDeviceProfile {
             draft = saved
         } else {
@@ -1057,6 +1098,7 @@ struct ProductionHeadphoneWorkspace: View {
                 )
             }
             try draft.validateStructure(sampleRate: rate)
+            tuner = nil  // the engine is about to take the draft as the saved profile
             try profiles.replaceSelectedSystemHeadphoneDeviceProfile(draft)
             statusMessage = draft.enabled
                 ? "Headphone Device Profile deployed. Start processing to use \(draft.spatialMode.displayName)."
