@@ -18,7 +18,7 @@
 extern "C" {
 #endif
 
-#define N60_MEASURE_ABI_VERSION 3
+#define N60_MEASURE_ABI_VERSION 4
 
 #define N60_MEASURE_OK 0
 #define N60_MEASURE_ERR_ARGUMENT (-1)
@@ -142,6 +142,12 @@ typedef struct n60_measure_multiroom_params {
     double allpass_f0_hz[N60_MEASURE_MULTIROOM_ALLPASS];
     double allpass_q[N60_MEASURE_MULTIROOM_ALLPASS];
     double ir_noise_dbfs;             /* seeded white noise added per (source, seat) IR; <= -200 off */
+    /* E19 S1: per-source modal gain and phase, so two sources can cancel a mode. Source s drives mode m with
+     * gain source_mode_gain[s][m] (re the seat's modal level) and phase source_mode_phase_rad[s][m] added to
+     * the mode's sine. n60_measure_multiroom_defaults sets gain 1 and phase 0 (the E10 room unchanged). Read
+     * only when struct_size covers them, so callers built against ABI 3 keep their rooms. */
+    double source_mode_gain[N60_MEASURE_MULTIROOM_MAX][4];
+    double source_mode_phase_rad[N60_MEASURE_MULTIROOM_MAX][4];
 } n60_measure_multiroom_params;
 
 void n60_measure_multiroom_defaults(double sample_rate, n60_measure_multiroom_params *params);
@@ -153,6 +159,23 @@ double n60_measure_multiroom_arrival_frames(const n60_measure_multiroom_params *
 /* Analytic phase (radians, continuous from 0) and group delay (seconds) of the allpass sections. */
 double n60_measure_multiroom_allpass_phase(const n60_measure_multiroom_params *params, double hz);
 double n60_measure_multiroom_allpass_group_delay(const n60_measure_multiroom_params *params, double hz);
+
+/* ---- Predicted treated impulse response (E19 S1, design note 2) ----
+ * One seat, 1 .. PREDICT_MAX_SOURCES sources: out = sum over s of plants[s] * filters[s] (linear convolution).
+ * The plant is the source's measured IR at the seat, already through the known downstream chain; the filter
+ * is that source's treatment filter. Plants and filters share one rate (the device rate or fs/D); the maths
+ * has no rate. A one-tap filter is applied exactly (identity gives the measured sum); longer filters use
+ * double-precision FFT convolution (error under -120 dB re the output peak). Every source needs at least one
+ * plant sample and one filter tap; an excluded source is passed with the single tap 0. Output length is
+ * max over s of (plant_counts[s] + filter_counts[s] - 1). Offline; allocates; never on an audio thread.
+ */
+#define N60_MEASURE_PREDICT_MAX_SOURCES 8
+
+int32_t n60_measure_predict_treated_length(uint32_t source_count, const uint64_t *plant_counts,
+                                           const uint64_t *filter_counts, uint64_t *frames_out);
+int32_t n60_measure_predict_treated_ir(uint32_t source_count, const float *const *plants, const uint64_t *plant_counts,
+                                       const float *const *filters, const uint64_t *filter_counts,
+                                       float *out, uint64_t capacity, uint64_t *count_out);
 
 /* ---- Timing reference and repeat averaging (E11 S2, design notes 4 and 5) ---- */
 
@@ -300,7 +323,7 @@ typedef struct n60_measure_decay_band {
 /*
  * Causal IEC 61260-1 base-10 band filters (double, order 3 Butterworth band-pass), Lundeby
  * truncation with noise compensation, Schroeder backward integration. Bands are those with
- * nominal centres in [min_centre_hz, max_centre_hz] (63..8000 by default) whose upper edge is
+ * nominal centres in [min_centre_hz, max_centre_hz] (63..8000 by default; the analyser itself reaches down to 16 Hz) whose upper edge is
  * under 0.45 fs. bands_per_octave is 1 or 3.
  */
 int32_t n60_measure_decay_analyze(const float *ir, uint64_t count, double sample_rate,

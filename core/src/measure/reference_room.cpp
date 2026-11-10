@@ -6,6 +6,7 @@
 // every analysis test has a ground truth; it is shipped in the core so XCTest can reach it.
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <vector>
 
@@ -290,6 +291,12 @@ int32_t n60_measure_room_capture(const n60_measure_room_params *params,
 // ---- Multi-source, multi-seat room (E10 S1) ----
 namespace {
 
+// The per-source mode fields arrived with ABI 4; older callers' struct_size ends before them.
+bool hasSourceModes(const n60_measure_multiroom_params *p) {
+    return p->struct_size >= offsetof(n60_measure_multiroom_params, source_mode_phase_rad) +
+                                 sizeof(p->source_mode_phase_rad);
+}
+
 bool validMulti(const n60_measure_multiroom_params *p) {
     if (p == nullptr || !validRoom(&p->base)) return false;
     if (p->source_count < 1 || p->source_count > N60_MEASURE_MULTIROOM_MAX) return false;
@@ -307,6 +314,12 @@ bool validMulti(const n60_measure_multiroom_params *p) {
     for (uint32_t i = 0; i < p->allpass_count; ++i) {
         if (!std::isfinite(p->allpass_f0_hz[i]) || p->allpass_f0_hz[i] <= 0.0 || p->allpass_f0_hz[i] >= 0.2 * p->base.sample_rate) return false;
         if (!std::isfinite(p->allpass_q[i]) || p->allpass_q[i] < 0.3 || p->allpass_q[i] > 20.0) return false;
+    }
+    if (!hasSourceModes(p)) return std::isfinite(p->ir_noise_dbfs);
+    for (uint32_t s = 0; s < N60_MEASURE_MULTIROOM_MAX; ++s) {
+        for (int m = 0; m < 4; ++m) {
+            if (!std::isfinite(p->source_mode_gain[s][m]) || !std::isfinite(p->source_mode_phase_rad[s][m])) return false;
+        }
     }
     return std::isfinite(p->ir_noise_dbfs);
 }
@@ -366,6 +379,12 @@ void n60_measure_multiroom_defaults(double sample_rate, n60_measure_multiroom_pa
     p->reflection_delay_seconds[1] = 0.0075;
     p->reflection_gain_db[1] = -12.0;
     p->ir_noise_dbfs = -200.0;
+    for (uint32_t s = 0; s < N60_MEASURE_MULTIROOM_MAX; ++s) {
+        for (int m = 0; m < 4; ++m) {
+            p->source_mode_gain[s][m] = 1.0;
+            p->source_mode_phase_rad[s][m] = 0.0;
+        }
+    }
 }
 
 int32_t n60_measure_multiroom_ir_length(const n60_measure_multiroom_params *params, uint64_t *frames_out) {
@@ -417,10 +436,12 @@ int32_t n60_measure_multiroom_ir(const n60_measure_multiroom_params *params, uin
         const double u = 2.0 * seatRng.uniform() - 1.0;  // drawn for every mode: stable stream
         const double f = base.mode_frequencies_hz[m];
         if (f <= 0 || base.mode_decay_seconds[m] <= 0 || f >= fs * 0.45) continue;
-        const double level = base.direct_gain * std::pow(10.0, base.mode_level_db[m] / 20.0) * (1.0 + params->modal_variation * u);
+        const double sourceGain = hasSourceModes(params) ? params->source_mode_gain[source][m] : 1.0;
+        const double sourcePhase = hasSourceModes(params) ? params->source_mode_phase_rad[source][m] : 0.0;
+        const double level = base.direct_gain * std::pow(10.0, base.mode_level_db[m] / 20.0) * (1.0 + params->modal_variation * u) * sourceGain;
         for (uint64_t i = delay + 1; i < len; ++i) {
             const double t = static_cast<double>(i - delay) / fs;
-            ir[i] += level * std::exp(-kLn1000 * t / base.mode_decay_seconds[m]) * std::sin(2.0 * kPi * f * t);
+            ir[i] += level * std::exp(-kLn1000 * t / base.mode_decay_seconds[m]) * std::sin(2.0 * kPi * f * t + sourcePhase);
         }
     }
     // Early reflections: the same absolute times and gains at every seat.
