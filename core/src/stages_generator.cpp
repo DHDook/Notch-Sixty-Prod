@@ -157,7 +157,7 @@ void startStreams(SnapHeader *h, const StageRec &r, GenShared &S) {
 
 }  // namespace
 
-bool isGeneratorKind(uint32_t kind) { return kind == N60_STAGE_GENERATOR; }
+bool isGeneratorKind(uint32_t kind) N60_RT_NONBLOCKING { return kind == N60_STAGE_GENERATOR; }
 
 n60_status validateGeneratorStage(const n60_stage_desc &s, double rate, uint32_t outCh) {
     if (!(rate >= 8000.0 && rate <= 768000.0) || s.kind != N60_STAGE_GENERATOR || s.capacityFrames != 0) {
@@ -258,7 +258,7 @@ void generatorInit(SnapHeader *h, const StageRec &r) {
     startStreams(h, r, S);
 }
 
-void runGenerator(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) {
+void runGenerator(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) N60_RT_NONBLOCKING {
     const float *p = paramsOf(h, r);
     uint8_t *sh = sharedState(h, r);
     GenShared &S = *reinterpret_cast<GenShared *>(sh);
@@ -352,7 +352,7 @@ void runGenerator(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t fram
     }
 }
 
-n60_status validateGeneratorParam(const SnapHeader *h, const StageRec &r, uint32_t idx, float value) {
+n60_status validateGeneratorParam(const SnapHeader *h, const StageRec &r, uint32_t idx, float value) N60_RT_NONBLOCKING {
     (void)h;
     if (idx >= r.paramCount) return N60_STATUS_BAD_ARGUMENT;
     switch (idx) {

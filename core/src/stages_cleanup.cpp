@@ -385,7 +385,7 @@ void activatePre(CleanShared &S) {
 
 }  // namespace
 
-bool isCleanupKind(uint32_t kind) { return kind == N60_STAGE_CLEANUP; }
+bool isCleanupKind(uint32_t kind) N60_RT_NONBLOCKING { return kind == N60_STAGE_CLEANUP; }
 
 n60_status validateCleanupStage(const n60_stage_desc &s, double rate, uint32_t outCh) {
     if (!(rate >= 8000.0 && rate <= 768000.0) || s.kind != N60_STAGE_CLEANUP || s.capacityFrames != 0) {
@@ -435,7 +435,7 @@ void cleanupInit(SnapHeader *h, const StageRec &r) {
     S.detConfBits.store(0, std::memory_order_relaxed);
 }
 
-uint64_t cleanupCarry(SnapHeader *from, SnapHeader *to) {
+uint64_t cleanupCarry(SnapHeader *from, SnapHeader *to) N60_RT_NONBLOCKING {
     uint64_t bytes = 0;
     if (from == nullptr || to == nullptr) return bytes;
     const StageRec *src = stages(from);
@@ -491,7 +491,7 @@ uint64_t cleanupCarry(SnapHeader *from, SnapHeader *to) {
     return bytes;
 }
 
-void runCleanup(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) {
+void runCleanup(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) N60_RT_NONBLOCKING {
     const float *p = paramsOf(h, r);
     CleanShared &S = *reinterpret_cast<CleanShared *>(sharedState(h, r));
     const double rate = h->sampleRate;
@@ -629,20 +629,10 @@ void runCleanup(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames
         L[i] = left;
         R[i] = right;
     }
-    // Denormal guard, once per block: decayed filter state below 1e-30 (-600 dBFS) is flushed to zero so a long tail
-    // after loud input never runs the float units in denormal mode. Bounded work, no allocation.
-    auto flushD = [](double &v) { if (std::fabs(v) < 1.0e-30) v = 0.0; };
-    flushD(S.dcPrevInL); flushD(S.dcPrevInR); flushD(S.dcPrevOutL); flushD(S.dcPrevOutR);
-    for (uint32_t k = 0; k < kMaxInfra; ++k) {
-        flushD(S.infraL[k].z1); flushD(S.infraL[k].z2); flushD(S.infraR[k].z1); flushD(S.infraR[k].z2);
-    }
-    for (uint32_t k = 0; k < kMaxHarm; ++k) {
-        flushD(S.curL[k].z1); flushD(S.curL[k].z2); flushD(S.curR[k].z1); flushD(S.curR[k].z2);
-        flushD(S.pendL[k].z1); flushD(S.pendL[k].z2); flushD(S.pendR[k].z1); flushD(S.pendR[k].z2);
-    }
+    // E20 S3: no per-block denormal flush; n60_graph_process runs under the flush-to-zero guard (platform/fpenv.hpp).
 }
 
-n60_status validateCleanupParam(const SnapHeader *h, const StageRec &r, uint32_t idx, float value) {
+n60_status validateCleanupParam(const SnapHeader *h, const StageRec &r, uint32_t idx, float value) N60_RT_NONBLOCKING {
     if (idx >= r.paramCount) return N60_STATUS_BAD_ARGUMENT;
     switch (idx) {
         case kDc:

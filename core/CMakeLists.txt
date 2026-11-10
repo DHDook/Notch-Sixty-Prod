@@ -9,7 +9,7 @@ add_library(n60core STATIC src/graph.cpp src/snapshot.cpp src/fft.cpp src/stages
 target_compile_features(n60core PUBLIC cxx_std_20)
 target_include_directories(n60core PUBLIC include)
 target_include_directories(n60core PRIVATE src)
-target_compile_options(n60core PRIVATE -Wall -Wextra -Werror -fno-exceptions -fno-rtti)
+target_compile_options(n60core PRIVATE -Wall -Wextra -Werror -Wno-unknown-warning-option -Werror=function-effects -fno-exceptions -fno-rtti)
 
 enable_testing()
 add_executable(n60core_graph_test tests/test_graph.c)
@@ -28,6 +28,15 @@ add_executable(n60core_alloc_test tests/test_alloc.cpp)
 target_link_libraries(n60core_alloc_test PRIVATE n60core)
 add_test(NAME n60core_alloc COMMAND n60core_alloc_test)
 
+add_executable(n60core_fpenv_test tests/test_fpenv.cpp)
+target_link_libraries(n60core_fpenv_test PRIVATE n60core)
+target_include_directories(n60core_fpenv_test PRIVATE src)
+add_test(NAME n60core_fpenv COMMAND n60core_fpenv_test)
+add_executable(n60core_simd_parity_test tests/test_simd_parity.cpp)
+target_link_libraries(n60core_simd_parity_test PRIVATE n60core)
+target_include_directories(n60core_simd_parity_test PRIVATE src)
+add_test(NAME n60core_simd_parity COMMAND n60core_simd_parity_test check)
+
 add_executable(n60core_dsp_test tests/test_dsp.c)
 set_target_properties(n60core_dsp_test PROPERTIES C_STANDARD 11 LINKER_LANGUAGE CXX)
 target_link_libraries(n60core_dsp_test PRIVATE n60core m)
@@ -37,6 +46,11 @@ add_executable(n60core_system_test tests/test_system.c)
 set_target_properties(n60core_system_test PROPERTIES C_STANDARD 11 LINKER_LANGUAGE CXX)
 target_link_libraries(n60core_system_test PRIVATE n60core m)
 add_test(NAME n60core_system COMMAND n60core_system_test)
+
+add_executable(n60core_ambient_sections_test tests/test_ambient_sections.c)
+set_target_properties(n60core_ambient_sections_test PROPERTIES C_STANDARD 11 LINKER_LANGUAGE CXX)
+target_link_libraries(n60core_ambient_sections_test PRIVATE n60core m)
+add_test(NAME n60core_ambient_sections COMMAND n60core_ambient_sections_test)
 
 add_executable(n60core_external_test tests/test_external.c)
 set_target_properties(n60core_external_test PROPERTIES C_STANDARD 11 LINKER_LANGUAGE CXX)
@@ -237,6 +251,10 @@ add_test(NAME n60core_conv_rebuild COMMAND n60core_conv_rebuild_test)
 add_executable(n60core_mimo_test tests/test_mimo.cpp)
 target_link_libraries(n60core_mimo_test PRIVATE n60core)
 add_test(NAME n60core_mimo COMMAND n60core_mimo_test)
+# E19 S3: realisation check (solved response against the taps, edge energy, overshoot).
+add_executable(n60core_mimo_realise_test tests/test_mimo_realise.cpp)
+target_link_libraries(n60core_mimo_realise_test PRIVATE n60core)
+add_test(NAME n60core_mimo_realise COMMAND n60core_mimo_realise_test)
 
 # E9 S6: per-output headroom maths (n60/headroom.h).
 add_executable(n60core_headroom_test tests/test_headroom.cpp)

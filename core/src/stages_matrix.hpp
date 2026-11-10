@@ -4,10 +4,11 @@
 #define N60_CORE_STAGES_MATRIX_HPP
 
 #include "snapshot.hpp"
+#include "platform/rt.hpp"
 
 namespace n60 {
 
-bool isMatrixKind(uint32_t kind);
+bool isMatrixKind(uint32_t kind) N60_RT_NONBLOCKING;
 
 // Control thread. Checks lanes, parameter count and ranges of a matrix stage.
 n60_status validateMatrixStage(const n60_stage_desc &s, double sampleRate, uint32_t outputChannels);
@@ -19,13 +20,13 @@ void matrixSizes(const n60_stage_desc &s, size_t &perLane, size_t &shared);
 void matrixInit(SnapHeader *h, const StageRec &r);
 
 // Realtime thread. Runs the stage in place over `frames` frames of the output lanes.
-void runMatrix(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames);
+void runMatrix(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) N60_RT_NONBLOCKING;
 
 // Pure range and liveness check for one parameter (see validateParam).
-n60_status validateMatrixParam(const SnapHeader *h, const StageRec &r, uint32_t idx, float value);
+n60_status validateMatrixParam(const SnapHeader *h, const StageRec &r, uint32_t idx, float value) N60_RT_NONBLOCKING;
 
 // Frames of latency the stage adds between its source lanes and its ear lanes.
-uint32_t matrixLatency(const SnapHeader *h, const StageRec &r);
+uint32_t matrixLatency(const SnapHeader *h, const StageRec &r) N60_RT_NONBLOCKING;
 
 }  // namespace n60
 

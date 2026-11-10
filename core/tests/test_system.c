@@ -273,6 +273,141 @@ static void testPairs(double rate) {
     }
 }
 
+
+/* E13 S3: every HEADPHONE parameter is live. 16 sections per ear (unused ones at unity) so adding or removing a band is a
+ * parameter edit. Edits must never step the output beyond the tone's own slope (times the gain change), and any edit
+ * sequence must end on the static design. */
+#define HPL_N 32
+static void hpFill(float *hp, const float *sec /* [32][4] */) {
+    hp[0] = 0; hp[1] = 0; hp[2] = 45; hp[3] = 0.09f; hp[4] = 700; hp[5] = 0; hp[6] = 0; hp[7] = 0; hp[8] = 0;
+    hp[9] = 16; hp[10] = 16;
+    memcpy(hp + 11, sec, sizeof(float) * 4 * HPL_N);
+}
+static uint32_t lcg = 12345u;
+static float frand(void) { lcg = lcg * 1664525u + 1013904223u; return (float)((lcg >> 8) & 0xFFFF) / 65535.0f; }
+static void testHeadphoneLive(double rate) {
+    static float sec[HPL_N][4], hp[11 + 4 * HPL_N];
+    for (int k = 0; k < HPL_N; k++) { sec[k][0] = 0; sec[k][1] = 1000; sec[k][2] = 0; sec[k][3] = 1; }
+    hpFill(hp, &sec[0][0]);
+    n60_stage_desc st[1] = {stgPair(N60_STAGE_HEADPHONE, 1, 0, 1, hp, 11 + 4 * HPL_N)};
+    n60_graph *g = NULL;
+    CHECK(build(rate, 2, st, 1, &g) == N60_STATUS_OK && g, "rate %.0f headphone 16+16 sections build", rate);
+    if (!g) return;
+    uint64_t pos = 0;
+    const double hz = 1000.0, amp = 0.4;
+    const double slope = 2.0 * kPi * hz / rate * amp;
+    double last = 0;
+    int haveLast = 0;
+    /* section edits: gain up 6 dB (+boost), Hz, Q, type, then back to unity ("remove"). Slope may grow by the gain change. */
+    const struct { uint32_t idx; float v; double gainFactor; } edits[] = {
+        {11 + 2, 6.0f, 2.0}, {11 + 1, 1500.0f, 2.0}, {11 + 3, 3.0f, 2.0}, {11 + 0, 0.0f, 2.0}, {11 + 2, 0.0f, 2.0},
+        {11 + 4 * 20 + 2, -9.0f, 1.0},                 /* B ear band */
+        {11 + 4 * 20 + 2, 0.0f, 1.0},
+    };
+    for (unsigned e = 0; e < sizeof edits / sizeof edits[0]; e++) {
+        n60_param_record rec = {1, edits[e].idx, edits[e].v, 0};
+        CHECK(n60_graph_post_params(g, &rec, 1) == N60_STATUS_OK, "rate %.0f headphone section post %u", rate, e);
+        for (uint32_t b = 0; b < SEC(rate, 0.12) + 2; b++) {
+            tone(bufIn[0], 1024, rate, hz, amp, pos);
+            tone(bufIn[1], 1024, rate, hz, amp, pos);
+            pos += 1024;
+            run(g, 2, 1024);
+            for (uint32_t i = 0; i < 1024; i++) {
+                if (haveLast && b > 0) { double d = fabs(bufOut[0][i] - last) / (slope * edits[e].gainFactor); if (d > 1.25) { CHECK(0, "rate %.0f headphone edit %u step %.3f x slope", rate, e, d); haveLast = 0; } }
+                last = bufOut[0][i];
+                haveLast = 1;
+            }
+        }
+    }
+    /* angle, radius, low-pass and headroom are live with the crossfeed on: no step beyond a few times the tone slope. */
+    {
+        n60_param_record on = {1, 1, 1.0f, 0};
+        n60_graph_post_params(g, &on, 1);
+        const struct { uint32_t idx; float v; } more[] = {{2, 80.0f}, {3, 0.12f}, {4, 1800.0f}, {0, -6.0f}, {2, 20.0f}};
+        for (unsigned e = 0; e < 5; e++) {
+            n60_param_record rec = {1, more[e].idx, more[e].v, 0};
+            CHECK(n60_graph_post_params(g, &rec, 1) == N60_STATUS_OK, "rate %.0f headphone fixed-param post %u", rate, e);
+            for (uint32_t b = 0; b < SEC(rate, 0.12) + 2; b++) {
+                tone(bufIn[0], 1024, rate, hz, amp, pos);
+                tone(bufIn[1], 1024, rate, hz, amp, pos);
+                pos += 1024;
+                run(g, 2, 1024);
+                for (uint32_t i = 0; i < 1024; i++) {
+                    double d = fabs(bufOut[0][i] - last) / slope;
+                    if (d > 2.5 && b > 0) { CHECK(0, "rate %.0f headphone param %u step %.3f x slope", rate, more[e].idx, d); }
+                    last = bufOut[0][i];
+                }
+            }
+        }
+    }
+    /* Out-of-range section values are refused; counts stay topology. */
+    {
+        n60_param_record bad = {1, 11 + 1, 1.0e7f, 0};
+        CHECK(n60_graph_post_params(g, &bad, 1) != N60_STATUS_OK, "rate %.0f headphone bad section Hz refused", rate);
+        n60_param_record cnt = {1, 9, 8.0f, 0};
+        CHECK(n60_graph_post_params(g, &cnt, 1) != N60_STATUS_OK, "rate %.0f headphone section count not live", rate);
+    }
+    n60_graph_retire(g);
+
+    /* 1,000 random edits stay finite and end on the static design. */
+    static float finalSec[HPL_N][4];
+    memcpy(finalSec, sec, sizeof sec);
+    lcg = 777u;
+    CHECK(build(rate, 2, st, 1, &g) == N60_STATUS_OK && g, "rate %.0f headphone random build", rate);
+    if (!g) return;
+    pos = 0;
+    int finite = 1;
+    for (int e = 0; e < 1000; e++) {
+        n60_param_record rec[4];
+        for (int j = 0; j < 4; j++) {
+            const uint32_t k = (uint32_t)(frand() * HPL_N) % HPL_N, f = (uint32_t)(frand() * 4) % 4;
+            float v;
+            switch (f) {
+                case 0: v = (float)((int)(frand() * 8) % 8 == 3 ? 4 : (int)(frand() * 3)); break; /* peaking, shelves */
+                case 1: v = 100.0f + 4000.0f * frand(); break;
+                case 2: v = -9.0f + 15.0f * frand(); break;
+                default: v = 0.4f + 3.0f * frand(); break;
+            }
+            if (f == 0) v = (float)((int)(frand() * 3));
+            rec[j].stageId = 1; rec[j].paramIndex = 11 + 4 * k + f; rec[j].value = v; rec[j].reserved = 0;
+            finalSec[k][f] = v;
+        }
+        { n60_status ps = n60_graph_post_params(g, rec, 4); if (ps != N60_STATUS_OK) { CHECK(0, "rate %.0f random post status %d (e=%d)", rate, ps, e); break; } }
+        tone(bufIn[0], 1024, rate, 300.0, 0.2, pos);
+        tone(bufIn[1], 1024, rate, 300.0, 0.2, pos);
+        pos += 1024;
+        run(g, 2, 1024);
+        for (uint32_t i = 0; i < 1024; i++) if (!isfinite(bufOut[0][i]) || !isfinite(bufOut[1][i])) finite = 0;
+    }
+    CHECK(finite, "rate %.0f headphone random edits stay finite", rate);
+    /* Settle: post the final design explicitly (an edit swallowed during a crossfade is retried until it lands). */
+    for (int k = 0; k < HPL_N; k++) for (int f = 0; f < 4; f++) {
+        n60_param_record rec = {1, (uint32_t)(11 + 4 * k + f), finalSec[k][f], 0};
+        CHECK(n60_graph_post_params(g, &rec, 1) == N60_STATUS_OK, "rate %.0f headphone final post", rate);
+        if ((k * 4 + f) % 8 == 7) { tone(bufIn[0], 1024, rate, 300.0, 0.2, pos); tone(bufIn[1], 1024, rate, 300.0, 0.2, pos); pos += 1024; run(g, 2, 1024); }
+    }
+    n60_graph *fresh = NULL;
+    hpFill(hp, &finalSec[0][0]);
+    CHECK(build(rate, 2, st, 1, &fresh) == N60_STATUS_OK && fresh, "rate %.0f headphone fresh build", rate);
+    if (!fresh) { n60_graph_retire(g); return; }
+    static float outA[1024], outB[1024];
+    double maxd = 0;
+    const uint32_t settle = SEC(rate, 1.5) + 4;
+    for (uint32_t b = 0; b < settle + 1; b++) {
+        tone(bufIn[0], 1024, rate, 300.0, 0.2, pos); tone(bufIn[1], 1024, rate, 300.0, 0.2, pos);
+        run(g, 2, 1024);
+        memcpy(outA, bufOut[0], sizeof outA);
+        tone(bufIn[0], 1024, rate, 300.0, 0.2, pos); tone(bufIn[1], 1024, rate, 300.0, 0.2, pos);
+        run(fresh, 2, 1024);
+        memcpy(outB, bufOut[0], sizeof outB);
+        pos += 1024;
+    }
+    for (uint32_t i = 0; i < 1024; i++) { double d = fabs((double)outA[i] - (double)outB[i]); if (d > maxd) maxd = d; }
+    CHECK(maxd < 1e-6, "rate %.0f headphone random edits end on the static design (%.3g)", rate, maxd);
+    n60_graph_retire(g);
+    n60_graph_retire(fresh);
+}
+
 static void testGate(double rate) {
     const float gate[5] = {-60, 6, 10, 5, 5};
     n60_stage_desc st[1] = {stgMask(N60_STAGE_PAUSE_GATE, 1, 0x3, gate, 5)};
@@ -505,6 +640,7 @@ int main(void) {
         testProtectionNonFinite(rate);
         testBass(rate);
         testPairs(rate);
+        testHeadphoneLive(rate);
         testGate(rate);
         testAnc(rate);
         testGuard(rate);

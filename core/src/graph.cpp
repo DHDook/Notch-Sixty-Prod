@@ -41,6 +41,9 @@
 #include "stages_multiband.hpp"
 #include "stages_dsp.hpp"
 #include "stages_system.hpp"
+#include "platform/fpenv.hpp"
+#include "platform/rt.hpp"
+#include "platform/rt_clock.hpp"
 
 namespace {
 
@@ -135,6 +138,15 @@ struct n60_graph {
     uint64_t rtBudget = 0;
     uint64_t rtBudgetStart = 0;  // this callback's allowance, for the peak
     std::atomic<uint64_t> budgetPeak{0};
+    // E20 S2. Render load window. The accumulators belong to the realtime thread; the published values are atomics
+    // the control thread reads (bits of a float, and the block count that makes them valid).
+    double loadBusy = 0.0;      // seconds spent rendering in the open window
+    double loadPeriod = 0.0;    // seconds of audio in the open window
+    double loadPeak = 0.0;      // worst block in the open window
+    uint32_t loadBlocks = 0;
+    std::atomic<uint32_t> loadMeanBits{0};
+    std::atomic<uint32_t> loadPeakBits{0};
+    std::atomic<uint32_t> loadWindowBlocks{0};
     std::atomic<uint32_t> carryAbandoned{0};  // lazy carries given up for an upstream parameter post (S2b)
     bool carryActive = false;  // a lazy FIR carry from current to incoming still has bytes to copy
     uint64_t smallCarryBytes = 0;  // bytes the small stage-state carries copy (G38), for the deferred swap's re-carry
@@ -363,7 +375,7 @@ void rebuildBlock(n60_graph *g, float *const *out, uint32_t frames) {
     const float budget = loadFloat(g->cpuBudgetBits);
     const bool timed = g->phase == 1 && budget > 0.0f && g->incoming->fadeFrames != 0;
     std::chrono::steady_clock::time_point t0{};  // epoch unless timed
-    if (timed) t0 = std::chrono::steady_clock::now();
+    if (timed) t0 = n60::rtNow();
 
     const size_t bytes = static_cast<size_t>(frames) * sizeof(float);
     for (uint32_t c = 0; c < outCount; ++c) std::memcpy(g->scratchLane[c], out[c], bytes);
@@ -385,7 +397,7 @@ void rebuildBlock(n60_graph *g, float *const *out, uint32_t frames) {
     // The CPU cost of the block is what the two instances took to render it: read the clock before the carry copy
     // (E9 S2b), which is one-off bulk memory traffic and must not push the load over the refusal budget.
     double blockCost = 0.0;
-    if (timed) blockCost = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+    if (timed) blockCost = std::chrono::duration<double>(n60::rtNow() - t0).count();
 
     // Lazy FIR carry (E9 S2). Both instances have just rendered the same block, so they are at the same tick: copy
     // what is left of the budget of the outgoing lanes' bulk state, any order. The warm-up waits for it.
@@ -596,7 +608,7 @@ uint32_t n60_graph_collect(n60_graph *g) {
     return freed;
 }
 
-n60_status n60_graph_process(n60_graph *g, const float *const *in, float *const *out, uint32_t frames) {
+n60_status n60_graph_process(n60_graph *g, const float *const *in, float *const *out, uint32_t frames) N60_RT_NONBLOCKING {
     if (g == nullptr || in == nullptr || out == nullptr) return N60_STATUS_BAD_ARGUMENT;
     if (frames > g->maxBlockFrames) return N60_STATUS_BAD_ARGUMENT;
     if (frames == 0) return N60_STATUS_OK;
@@ -606,6 +618,9 @@ n60_status n60_graph_process(n60_graph *g, const float *const *in, float *const 
     for (uint32_t c = 0; c < outCount; ++c) {
         if (out[c] == nullptr || (c < inCount && in[c] == nullptr)) return N60_STATUS_BAD_ARGUMENT;
     }
+    // E20 S2: subnormals flush to zero for the whole block; the caller's FP mode is restored on return.
+    const n60::ScopedFlushToZero flushGuard;
+    const auto loadStart = n60::rtNow();
     g->rtBudgetStart = g->rtBudget = rtBudgetFor(frames);
     adopt(g);
     drainMailbox(g);
@@ -628,6 +643,21 @@ n60_status n60_graph_process(n60_graph *g, const float *const *in, float *const 
     }
     g->budgetPeak.store(std::max(g->budgetPeak.load(std::memory_order_relaxed), g->rtBudgetStart - g->rtBudget),
                         std::memory_order_relaxed);
+    {
+        const double busy = std::chrono::duration<double>(n60::rtNow() - loadStart).count();
+        const double period = static_cast<double>(frames) / g->sampleRate;
+        g->loadBusy += busy;
+        g->loadPeriod += period;
+        g->loadPeak = std::max(g->loadPeak, busy / period);
+        ++g->loadBlocks;
+        if (g->loadPeriod >= 1.0) {
+            storeFloat(g->loadMeanBits, static_cast<float>(g->loadBusy / g->loadPeriod));
+            storeFloat(g->loadPeakBits, static_cast<float>(g->loadPeak));
+            g->loadWindowBlocks.store(g->loadBlocks, std::memory_order_release);
+            g->loadBusy = g->loadPeriod = g->loadPeak = 0.0;
+            g->loadBlocks = 0;
+        }
+    }
     return N60_STATUS_OK;
 }
 
@@ -709,6 +739,15 @@ n60_status n60_graph_read_capture(n60_graph *g, uint32_t stageId, uint32_t lane,
     if (g == nullptr || (dst == nullptr && frames != 0)) return N60_STATUS_BAD_ARGUMENT;
     syncLatest(g);
     return n60::readCapture(g->latest, stageId, lane, startSample, dst, frames, written);
+}
+
+n60_status n60_graph_read_load(const n60_graph *g, n60_graph_load *out) {
+    if (g == nullptr || out == nullptr) return N60_STATUS_BAD_ARGUMENT;
+    if (out->structSize != sizeof(n60_graph_load)) return N60_STATUS_ABI_MISMATCH;
+    out->windowBlocks = g->loadWindowBlocks.load(std::memory_order_acquire);
+    out->meanLoad = out->windowBlocks != 0 ? loadFloat(g->loadMeanBits) : 0.0f;
+    out->peakLoad = out->windowBlocks != 0 ? loadFloat(g->loadPeakBits) : 0.0f;
+    return N60_STATUS_OK;
 }
 
 void n60_graph_get_stats(const n60_graph *g, n60_graph_stats *s) {

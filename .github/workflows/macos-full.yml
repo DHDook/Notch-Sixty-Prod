@@ -80,7 +80,7 @@ jobs:
           CORE_OBJS=()
           for f in "${CORE_SOURCES[@]}"; do
             obj="$OUT/n60core_${f//\//_}.o"
-            clang++ -std=c++20 -O3 -Wall -Wextra -fno-exceptions -fno-rtti -Icore/include -Icore/src -c "core/src/$f.cpp" -o "$obj"
+            clang++ -std=c++20 -O3 -Wall -Wextra -Wno-unknown-warning-option -Werror=function-effects -fno-exceptions -fno-rtti -Icore/include -Icore/src -c "core/src/$f.cpp" -o "$obj"
             CORE_OBJS+=("$obj")
           done
           for opt in O0 O3; do
@@ -158,8 +158,8 @@ jobs:
           LIB=()
           for f in "${CORE_SOURCES[@]}"; do
             obj="$RUNNER_TEMP/n60core_${f//\//_}.o"
-            clang++ -std=c++20 -O2 -Wall -Wextra -Werror -fno-exceptions -fno-rtti -Icore/include -Icore/src \
-              -c core/src/$f.cpp -o "$obj"
+            clang++ -std=c++20 -O2 -Wall -Wextra -Werror -Wno-unknown-warning-option -Werror=function-effects \
+              -fno-exceptions -fno-rtti -Icore/include -Icore/src -c core/src/$f.cpp -o "$obj"
             LIB+=("$obj")
           done
           for t in test_graph test_stages test_dsp test_system test_rebuild test_denoiser_carry test_layout test_multisub test_readbacks; do
@@ -170,7 +170,53 @@ jobs:
           clang++ -std=c++20 -O2 -Wall -Wextra -Werror -Icore/include core/tests/test_alloc.cpp \
             "${LIB[@]}" -o "$RUNNER_TEMP/test_alloc"
           "$RUNNER_TEMP/test_alloc"
+          clang++ -std=c++20 -O2 -Wall -Wextra -Werror -Icore/include -Icore/src core/tests/test_fpenv.cpp \
+            "${LIB[@]}" -o "$RUNNER_TEMP/test_fpenv"
+          "$RUNNER_TEMP/test_fpenv"
           clang++ -std=c++20 -O2 -Wall -Wextra -Werror -Icore/include -Icore/src core/tests/test_conv.cpp \
             "${LIB[@]}" -o "$RUNNER_TEMP/test_conv"
           "$RUNNER_TEMP/test_conv"
           "$RUNNER_TEMP/test_graph"
+
+  # E20 S2: RealtimeSanitizer. Apple's clang does not ship -fsanitize=realtime, so the core tests run on Linux with
+  # upstream LLVM 20 (apt.llvm.org; CI only, nothing shipped; owner decision Q6, 9 Nov 2026). Every function the audio
+  # thread calls is [[clang::nonblocking]]; the sanitizer aborts a test that allocates, locks or blocks inside one.
+  core-rtsan:
+    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-ci')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Install LLVM 20
+        run: |
+          set -euo pipefail
+          wget -q https://apt.llvm.org/llvm.sh
+          chmod +x llvm.sh
+          sudo ./llvm.sh 20
+          clang++-20 --version
+
+      - name: Core tests under RealtimeSanitizer
+        run: |
+          set -euo pipefail
+          CXX=clang++-20
+          CC=clang-20
+          source ci/core_sources.sh
+          SAN="-fsanitize=realtime"
+          LIB=()
+          for f in "${CORE_SOURCES[@]}"; do
+            obj="$RUNNER_TEMP/rtsan_${f//\//_}.o"
+            $CXX -std=c++20 -O1 -g -Wall -Wextra -Werror -Werror=function-effects $SAN -fno-exceptions -fno-rtti \
+              -Icore/include -Icore/src -c core/src/$f.cpp -o "$obj"
+            LIB+=("$obj")
+          done
+          for t in test_graph test_stages test_rebuild; do
+            $CC -std=c11 -O1 -g -Wall -Wextra -Werror -Icore/include -c core/tests/$t.c -o "$RUNNER_TEMP/rtsan_$t.o"
+            $CXX $SAN "$RUNNER_TEMP/rtsan_$t.o" "${LIB[@]}" -lm -pthread -o "$RUNNER_TEMP/rtsan_$t"
+            "$RUNNER_TEMP/rtsan_$t"
+          done
+          for t in test_alloc test_fpenv test_conv_rebuild; do
+            $CXX -std=c++20 -O1 -g -Wall -Wextra -Werror $SAN -Icore/include -Icore/src core/tests/$t.cpp \
+              "${LIB[@]}" -pthread -o "$RUNNER_TEMP/rtsan_$t"
+            "$RUNNER_TEMP/rtsan_$t"
+          done

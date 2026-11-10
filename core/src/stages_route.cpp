@@ -22,6 +22,7 @@
 #include <cstring>
 
 #include "n60/xover.h"
+#include "simd/simd.hpp"
 
 namespace n60 {
 namespace {
@@ -65,15 +66,32 @@ inline float rampNext(Ramp &r) {
 struct Bq {
     double z1, z2;
 };
-inline double bqRun(const double *c, Bq &s, double x) {  // transposed direct form II
-    const double y = c[0] * x + s.z1;
-    s.z1 = c[1] * x - c[3] * y + s.z2;
-    s.z2 = c[2] * x - c[4] * y;
-    return y;
+// E20 S3: one section over n samples for a pair of lanes at once (x[i] holds lane A in element 0, lane B in element 1).
+// Each lane's arithmetic is exactly a single-lane run (lanes are independent); fused multiply-adds in both the SIMD and
+// scalar builds. `sb` is null for an odd last lane, whose spare element is a throwaway copy.
+inline void bqRun2(const double *c, Bq &sa, Bq *sb, simd::f64x2 *x, uint32_t n) {
+    using namespace simd;
+    const f64x2 b0 = splat2(c[0]), b1 = splat2(c[1]), b2 = splat2(c[2]), na1 = splat2(-c[3]), na2 = splat2(-c[4]);
+    f64x2 z1 = pair(sa.z1, sb != nullptr ? sb->z1 : sa.z1);
+    f64x2 z2 = pair(sa.z2, sb != nullptr ? sb->z2 : sa.z2);
+    for (uint32_t i = 0; i < n; ++i) {
+        const f64x2 xi = x[i];
+        const f64x2 y = fma(b0, xi, z1);
+        z1 = fma(na1, y, fma(b1, xi, z2));
+        z2 = fma(na2, y, mul(b2, xi));
+        x[i] = y;
+    }
+    sa.z1 = lane(z1, 0);
+    sa.z2 = lane(z2, 0);
+    if (sb != nullptr) {
+        sb->z1 = lane(z1, 1);
+        sb->z2 = lane(z2, 1);
+    }
 }
 inline void bqFlush(Bq &s) {
-    if (!(std::fabs(s.z1) >= 1e-30) || !std::isfinite(s.z1)) s.z1 = 0.0;
-    if (!(std::fabs(s.z2) >= 1e-30) || !std::isfinite(s.z2)) s.z2 = 0.0;
+    // E20 S3: denormals are flushed in hardware (platform/fpenv.hpp); only a non-finite burst needs healing.
+    if (!std::isfinite(s.z1)) s.z1 = 0.0;
+    if (!std::isfinite(s.z2)) s.z2 = 0.0;
 }
 
 // ---- ROUTE ---------------------------------------------------------------------------
@@ -157,7 +175,7 @@ void readSeen(const XBlock &b, const float *p, float seen[4]) {
 
 }  // namespace
 
-bool isRouteKind(uint32_t kind) { return kind == N60_STAGE_ROUTE || kind == N60_STAGE_XOVER; }
+bool isRouteKind(uint32_t kind) N60_RT_NONBLOCKING { return kind == N60_STAGE_ROUTE || kind == N60_STAGE_XOVER; }
 
 n60_status validateRouteStage(const n60_stage_desc &s, double rate, uint32_t outCh) {
     if (!(rate >= N60_GRAPH_MIN_SAMPLE_RATE && rate <= N60_GRAPH_MAX_SAMPLE_RATE) || s.capacityFrames != 0 || s.laneB != 0) {
@@ -336,7 +354,7 @@ static void runXoverStage(SnapHeader *h, StageRec &r, float *const *lanes, uint3
     const float gt = gainTarget(p);
     if (gt != S.gain.target) rampSet(S.gain, gt, S.rampFrames);
 
-    double x[kChunk], y[kChunk];
+    simd::f64x2 x[kChunk], y[kChunk];
     float gv[kChunk];
     double tv[kChunk];
     for (uint32_t done = 0; done < frames;) {
@@ -347,30 +365,40 @@ static void runXoverStage(SnapHeader *h, StageRec &r, float *const *lanes, uint3
             for (uint32_t i = 0; i < n; ++i) tv[i] = double(S.rampFrames - S.xfLeft + i + 1) / double(S.rampFrames);
         }
         for (uint32_t i = 0; i < n; ++i) gv[i] = rampNext(S.gain);
-        for (uint32_t l = 0; l < r.laneCount; ++l) {
-            XLane &L = *reinterpret_cast<XLane *>(laneState(h, r, l));
-            float *buf = lanes[laneOf(r, l)] + done;
-            for (uint32_t i = 0; i < n; ++i) x[i] = buf[i];
+        for (uint32_t l = 0; l < r.laneCount; l += 2) {  // lane pairs; an odd last lane pairs with a spare element
+            const bool two = l + 1 < r.laneCount;
+            XLane &LA = *reinterpret_cast<XLane *>(laneState(h, r, l));
+            XLane *LB = two ? reinterpret_cast<XLane *>(laneState(h, r, l + 1)) : nullptr;
+            float *bufA = lanes[laneOf(r, l)] + done;
+            float *bufB = two ? lanes[laneOf(r, l + 1)] + done : bufA;
+            for (uint32_t i = 0; i < n; ++i) x[i] = simd::toDouble(bufA[i], bufB[i]);
             for (uint32_t b = 0; b < S.nBlocks; ++b) {
                 XBlock &B = S.blocks[b];
                 if (B.fading) {
-                    std::memcpy(y, x, sizeof(double) * n);
+                    std::memcpy(y, x, sizeof(simd::f64x2) * n);
                     for (uint32_t s = 0; s < B.nsec; ++s) {
-                        for (uint32_t i = 0; i < n; ++i) x[i] = bqRun(B.cur[s], L.z[b][s], x[i]);
-                        for (uint32_t i = 0; i < n; ++i) y[i] = bqRun(B.nxt[s], L.zn[b][s], y[i]);
+                        bqRun2(B.cur[s], LA.z[b][s], LB != nullptr ? &LB->z[b][s] : nullptr, x, n);
+                        bqRun2(B.nxt[s], LA.zn[b][s], LB != nullptr ? &LB->zn[b][s] : nullptr, y, n);
                     }
-                    for (uint32_t i = 0; i < n; ++i) x[i] += tv[i] * (y[i] - x[i]);
+                    for (uint32_t i = 0; i < n; ++i) x[i] = simd::fma(simd::splat2(tv[i]), simd::sub(y[i], x[i]), x[i]);
                 } else {
                     for (uint32_t s = 0; s < B.nsec; ++s) {
-                        for (uint32_t i = 0; i < n; ++i) x[i] = bqRun(B.cur[s], L.z[b][s], x[i]);
+                        bqRun2(B.cur[s], LA.z[b][s], LB != nullptr ? &LB->z[b][s] : nullptr, x, n);
                     }
                 }
                 for (uint32_t s = 0; s < B.nsec; ++s) {
-                    bqFlush(L.z[b][s]);
-                    if (B.fading) bqFlush(L.zn[b][s]);
+                    bqFlush(LA.z[b][s]);
+                    if (LB != nullptr) bqFlush(LB->z[b][s]);
+                    if (B.fading) {
+                        bqFlush(LA.zn[b][s]);
+                        if (LB != nullptr) bqFlush(LB->zn[b][s]);
+                    }
                 }
             }
-            for (uint32_t i = 0; i < n; ++i) buf[i] = static_cast<float>(x[i] * double(gv[i]));
+            for (uint32_t i = 0; i < n; ++i) bufA[i] = static_cast<float>(simd::lane(x[i], 0) * double(gv[i]));
+            if (two) {
+                for (uint32_t i = 0; i < n; ++i) bufB[i] = static_cast<float>(simd::lane(x[i], 1) * double(gv[i]));
+            }
         }
         if (fading) {
             S.xfLeft -= n;
@@ -391,12 +419,12 @@ static void runXoverStage(SnapHeader *h, StageRec &r, float *const *lanes, uint3
     }
 }
 
-void runRoute(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) {
+void runRoute(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) N60_RT_NONBLOCKING {
     if (r.kind == N60_STAGE_ROUTE) runRouteStage(h, r, lanes, frames);
     else runXoverStage(h, r, lanes, frames);
 }
 
-n60_status validateRouteParam(const SnapHeader *h, const StageRec &r, uint32_t idx, float value) {
+n60_status validateRouteParam(const SnapHeader *h, const StageRec &r, uint32_t idx, float value) N60_RT_NONBLOCKING {
     if (idx >= r.paramCount) return N60_STATUS_BAD_ARGUMENT;
     if (r.kind == N60_STAGE_ROUTE) {
         if (idx % 2 == 0) return N60_STATUS_UNSUPPORTED;               // source lane: topology

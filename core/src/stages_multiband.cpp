@@ -204,7 +204,7 @@ float cascade(const Bq *c, BqState *st, uint32_t n, float in) {
 
 }  // namespace
 
-bool isMultibandKind(uint32_t kind) { return kind == N60_STAGE_MULTIBAND; }
+bool isMultibandKind(uint32_t kind) N60_RT_NONBLOCKING { return kind == N60_STAGE_MULTIBAND; }
 
 bool multibandParamOk(uint32_t idx, float v, double rate) {
     if (idx == kOn || (idx >= kAutoRelease && idx < kAutoRelease + kBands)) return isFlag(v);
@@ -255,7 +255,7 @@ void multibandInit(SnapHeader *h, const StageRec &r) {
     }
 }
 
-uint64_t multibandCarry(SnapHeader *from, SnapHeader *to) {
+uint64_t multibandCarry(SnapHeader *from, SnapHeader *to) N60_RT_NONBLOCKING {
     uint64_t bytes = 0;
     if (from == nullptr || to == nullptr || from->sampleRate != to->sampleRate) return bytes;
     const StageRec *src = stages(from);
@@ -284,12 +284,10 @@ uint64_t multibandCarry(SnapHeader *from, SnapHeader *to) {
     return bytes;
 }
 
-// Denormal guard, once per block: decayed filter state below 1e-30 (-600 dBFS) is flushed to zero.
+// E20 S3: denormals are flushed in hardware (platform/fpenv.hpp, the guard in n60_graph_process), so no per-block flush.
 static_assert(std::atomic<uint32_t>::is_always_lock_free, "telemetry atomics must be lock free");
-static inline void flush(float &v) { if (std::fabs(v) < 1.0e-30f) v = 0.0f; }
-static inline void flushSt(BqState &s) { flush(s.z1); flush(s.z2); }
 
-void runMultiband(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) {
+void runMultiband(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) N60_RT_NONBLOCKING {
     const float *p = paramsOf(h, r);
     MbShared &S = *reinterpret_cast<MbShared *>(sharedState(h, r));
     const double rate = h->sampleRate;
@@ -369,17 +367,13 @@ void runMultiband(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t fram
         L[i] = outL;
         R[i] = outR;
     }
-    for (uint32_t i = 0; i < kMaxSections; ++i) {
-        flushSt(S.lowL[i]); flushSt(S.lowR[i]); flushSt(S.highL[i]); flushSt(S.highR[i]);
-    }
     for (uint32_t b = 0; b < kBands; ++b) {
-        flushSt(S.hpL[b]); flushSt(S.hpR[b]);
         S.grNowBits[b].store(floatToBits(std::fmax(0.0f, -S.gainDb[b])), std::memory_order_relaxed);
         atomicMaxFloat(S.grMaxBits[b], grMax[b]);
     }
 }
 
-n60_status validateMultibandParam(const SnapHeader *h, const StageRec &r, uint32_t idx, float value) {
+n60_status validateMultibandParam(const SnapHeader *h, const StageRec &r, uint32_t idx, float value) N60_RT_NONBLOCKING {
     if (idx >= r.paramCount || !multibandParamOk(idx, value, h->sampleRate)) return N60_STATUS_BAD_ARGUMENT;
     return (idx == kLowSlope || idx == kHighSlope) ? N60_STATUS_UNSUPPORTED : N60_STATUS_OK;
 }

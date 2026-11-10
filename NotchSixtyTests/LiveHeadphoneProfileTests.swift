@@ -167,6 +167,67 @@ final class LiveHeadphoneProfileTests: XCTestCase {
         host.release()
     }
 
+    // MARK: E13 S3 live tuning
+
+    func testBandAddRemoveAndTypeEditsArePostedWithTheFixedSectionLayout() throws {
+        UnifiedGraphLiveHeadphoneTuning.set(true)
+        defer { UnifiedGraphLiveHeadphoneTuning.set(false) }
+        for rate in Self.rates {
+            let start = try base(rate, profile())
+            let host = try UnifiedGraphHost(spec: start)
+            var edits: [HeadphoneDeviceProfileConfiguration] = []
+            edits.append(profile { $0.left.eqBands = [HeadphoneCorrectionEQBand(type: .peaking, frequencyHz: 1_000, gainDB: -3, q: 1)] })
+            edits.append(profile { $0.left.eqBands = [HeadphoneCorrectionEQBand(type: .lowShelf, frequencyHz: 120, gainDB: 2, q: 0.7),
+                                                      HeadphoneCorrectionEQBand(type: .peaking, frequencyHz: 3_000, gainDB: -2, q: 2)] })
+            edits.append(profile { $0.left.gainDB = -1; $0.crossfeed.amount = 0.5 })
+            edits.append(profile())
+            for edit in edits {
+                let next = try UnifiedGraphTranslator.binauralApplyHeadphone(base: start, profile: edit).get()
+                guard case .posted = try host.apply(next) else { return XCTFail("a correction edit must post at \(rate)") }
+            }
+            host.release()
+        }
+    }
+
+    @MainActor func testTunerCoalescesRaisesHeadroomFirstAndRestores() async throws {
+        var posts: [HeadphoneDeviceProfileConfiguration] = []
+        let tuner = HeadphoneLiveTuner(apply: { posts.append($0) }, sleep: { _ in })
+        var saved = HeadphoneDeviceProfileConfiguration()
+        saved.headroomAttenuationDB = 6
+        tuner.begin(from: saved)
+        var draft = saved
+        draft.left.eqBands = [HeadphoneCorrectionEQBand(type: .peaking, frequencyHz: 1_000, gainDB: 9, q: 1)]
+        draft.headroomAttenuationDB = 0  // below what the +9 dB band needs
+        tuner.submit(draft)
+        draft.left.eqBands[0].gainDB = 10
+        tuner.submit(draft)
+        await tuner.drain()
+        XCTAssertEqual(posts.count, 2, "a headroom raise, then the draft")
+        XCTAssertGreaterThanOrEqual(posts[0].headroomAttenuationDB, 9, "headroom rises before the gain")
+        XCTAssertTrue(posts[0].left.eqBands.isEmpty, "the first post has not added the gain yet")
+        XCTAssertEqual(posts[1].left.eqBands.first?.gainDB, 10, "only the newest draft is applied")
+        tuner.restore(saved)
+        XCTAssertEqual(posts.last, saved)
+        XCTAssertEqual(tuner.applied, saved)
+    }
+
+    @MainActor func testTunerSkipsIdenticalDraftsAndReportsFailures() async {
+        struct Boom: Error {}
+        var calls = 0
+        let tuner = HeadphoneLiveTuner(apply: { _ in calls += 1; throw Boom() }, sleep: { _ in })
+        let saved = HeadphoneDeviceProfileConfiguration()
+        tuner.begin(from: saved)
+        tuner.submit(saved)
+        await tuner.drain()
+        XCTAssertEqual(calls, 0)
+        var draft = saved; draft.left.gainDB = -2
+        tuner.submit(draft)
+        await tuner.drain()
+        XCTAssertEqual(calls, 1)
+        XCTAssertNotNil(tuner.lastError)
+        XCTAssertEqual(tuner.applied, saved, "a refused post leaves the applied profile unchanged")
+    }
+
     // MARK: refusals
 
     func testHeadroomAboveThirtyAndHugeDelayAreRefusedAndTheRunningGraphKeepsRendering() throws {

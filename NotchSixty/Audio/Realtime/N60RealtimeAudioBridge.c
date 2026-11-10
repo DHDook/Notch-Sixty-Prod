@@ -1,6 +1,7 @@
 #include "N60RealtimeAudioBridge.h"
 #include "N60SpeakerBusSplitter.h"
 #include "N60AncLaneFeed.h"
+#include "N60FloatEnv.h"
 
 #include "n60/fold.h"
 #include "n60/graph.h"
@@ -2561,7 +2562,43 @@ OSStatus N60CaptureIOProc(
     return noErr;
 }
 
+// E20 S2: planar copy of `count` interleaved stereo frames (no wrap handling; callers split at the ring end).
+static inline void N60DeinterleaveFrames(const N60StereoFrame *src, uint32_t count, float *left, float *right) {
+    for (uint32_t i = 0; i < count; ++i) {
+        left[i] = src[i].left;
+        right[i] = src[i].right;
+    }
+}
+
+static OSStatus N60OutputIOProcBody(
+    AudioDeviceID inDevice,
+    const AudioTimeStamp *inNow,
+    const AudioBufferList *inInputData,
+    const AudioTimeStamp *inInputTime,
+    AudioBufferList *outOutputData,
+    const AudioTimeStamp *inOutputTime,
+    void *inClientData
+);
+
+// E20 S2: the whole output callback runs with subnormal flush-to-zero (the legacy kernel, speaker bus, drivers and
+// the graph); the caller's floating-point mode is restored on return, so the HAL thread is left as it was found.
 OSStatus N60OutputIOProc(
+    AudioDeviceID inDevice,
+    const AudioTimeStamp *inNow,
+    const AudioBufferList *inInputData,
+    const AudioTimeStamp *inInputTime,
+    AudioBufferList *outOutputData,
+    const AudioTimeStamp *inOutputTime,
+    void *inClientData
+) {
+    const uint64_t savedFloatEnv = N60FloatEnvEnterFlushToZero();
+    const OSStatus status = N60OutputIOProcBody(
+        inDevice, inNow, inInputData, inInputTime, outOutputData, inOutputTime, inClientData);
+    N60FloatEnvRestore(savedFloatEnv);
+    return status;
+}
+
+static OSStatus N60OutputIOProcBody(
     AudioDeviceID inDevice,
     const AudioTimeStamp *inNow,
     const AudioBufferList *inInputData,
@@ -3180,21 +3217,25 @@ OSStatus N60OutputIOProc(
                 graphChunkFrames = framesToRead - frameIndex;
                 if (graphChunkFrames > unified->maxFrames) graphChunkFrames = unified->maxFrames;
                 float *planarIn = unified->scratch;
-                for (uint32_t i = 0; i < graphChunkFrames; ++i) {
-                    N60StereoFrame source;
-                    if (adaptiveSampleRate) {
-                        const size_t base = ((size_t)graphChunkStart + i) * 2u;
-                        source = (N60StereoFrame){
-                            bridge->adaptiveOutputScratch[base],
-                            bridge->adaptiveOutputScratch[base + 1u]
-                        };
-                    } else {
-                        source = bridge->frames[graphReadPosition];
-                        graphReadPosition += 1u;
+                // E20 S2: bulk deinterleave. The ring wrap is resolved once per contiguous run, so the copy
+                // loops carry no per-sample branch.
+                if (adaptiveSampleRate) {
+                    const float *interleaved = bridge->adaptiveOutputScratch + (size_t)graphChunkStart * 2u;
+                    for (uint32_t i = 0; i < graphChunkFrames; ++i) {
+                        planarIn[i] = interleaved[(size_t)i * 2u];
+                        planarIn[unified->maxFrames + i] = interleaved[(size_t)i * 2u + 1u];
+                    }
+                } else {
+                    uint32_t done = 0u;
+                    while (done < graphChunkFrames) {
+                        uint32_t run = bridge->capacityFrames - graphReadPosition;
+                        if (run > graphChunkFrames - done) run = graphChunkFrames - done;
+                        N60DeinterleaveFrames(bridge->frames + graphReadPosition, run, planarIn + done,
+                                              planarIn + unified->maxFrames + done);
+                        done += run;
+                        graphReadPosition += run;
                         if (graphReadPosition == bridge->capacityFrames) graphReadPosition = 0u;
                     }
-                    planarIn[i] = source.left;
-                    planarIn[unified->maxFrames + i] = source.right;
                 }
                 bridge->graphRackSampleTime = outputSampleTime + (double)graphChunkStart;
                 const float *inLanes[N60_UNIFIED_GRAPH_MAX_LANES];

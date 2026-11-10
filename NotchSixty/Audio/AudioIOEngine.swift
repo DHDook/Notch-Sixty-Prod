@@ -4633,7 +4633,7 @@ final class AudioIOEngine: ObservableObject {
             }
         }
         let programs = retained
-        let stereo: UnifiedGraphConfiguration
+        var stereo: UnifiedGraphConfiguration
         // Neutral placeholders: the fold adds the crossover's sub gain, polarity and all-pass; the route plan's
         // calibrations are added by `nChannelEligibility`.
         switch UnifiedGraphTranslator.stereoEligibility(
@@ -4644,6 +4644,13 @@ final class AudioIOEngine: ObservableObject {
         ) {
         case .success(let configuration): stereo = configuration
         case .failure(let reason): throw LiveNChannelTransportError.unifiedGraphRejected(reason)
+        }
+        // E4 S30a: planned unmasking cuts ride as the AMBIENT stage's section trailer (graph ABI v32). nil cuts, an
+        // invalid plan or Virtual Speakers keep the plain stage. A neutral base is made when the kernel left ambient off.
+        if !virtualSpeakers, let cuts = inputs.ambient.unmaskingCutsDB,
+           let params = AmbientUnmaskOverlay.stageParameters(
+            base: stereo.stereoStages.ambient, plannedCutsDB: cuts, sampleRate: sampleRate) {
+            stereo.stereoStages.ambient = params
         }
         // Bypassed EQ covers every lane (the other program stages follow the lane set of the EQ mode).
         let mode: UnifiedGraphProgramDSP.EQMode
