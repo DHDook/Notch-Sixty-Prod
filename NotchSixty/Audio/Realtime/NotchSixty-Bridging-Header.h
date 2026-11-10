@@ -30,6 +30,7 @@
 #import "N60MultichannelBassManagement.h"
 #import "N60LiveNChannelRenderCore.h"
 #import "N60LiveNChannelBridge.h"
+#import "N60LoudnessCapture.h"
 #import "N60BinauralHeadphoneBridge.h"
 #import "N60SubwooferTuning.h"
 #import "N60MultichannelCalibration.h"

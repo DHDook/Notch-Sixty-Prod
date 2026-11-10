@@ -214,6 +214,8 @@ struct N60RealtimeAudioBridge {
     _Atomic uint32_t outputVURMSLeftBits;
     _Atomic uint32_t outputVURMSRightBits;
     _Atomic uint64_t outputVUOverRangeSamples;
+    _Atomic uint64_t outputVUOverRangeLeft;
+    _Atomic uint64_t outputVUOverRangeRight;
 
     // E28 S6: per-route meters of the same-device output map (see N60RouteMeterSnapshot). Peak and RMS hold
     // non-negative float bits, so unsigned order equals float order and a CAS max-merge is exact.
@@ -537,7 +539,8 @@ static void publish_output_vu_meter(
     float peakRight,
     double squareSumLeft,
     double squareSumRight,
-    uint64_t overRangeSamples,
+    uint64_t overRangeLeft,
+    uint64_t overRangeRight,
     uint32_t frameCount
 ) {
     if (bridge == NULL || frameCount == 0) return;
@@ -547,7 +550,11 @@ static void publish_output_vu_meter(
     atomic_store_explicit(&bridge->outputVUPeakRightBits, float_to_bits(peakRight), memory_order_relaxed);
     atomic_store_explicit(&bridge->outputVURMSLeftBits, float_to_bits(rmsLeft), memory_order_relaxed);
     atomic_store_explicit(&bridge->outputVURMSRightBits, float_to_bits(rmsRight), memory_order_relaxed);
-    atomic_fetch_add_explicit(&bridge->outputVUOverRangeSamples, overRangeSamples, memory_order_relaxed);
+    // E28 S6b: the two sides count separately so the L and R clip latches set independently; the total stays for
+    // readers that want one number.
+    atomic_fetch_add_explicit(&bridge->outputVUOverRangeSamples, overRangeLeft + overRangeRight, memory_order_relaxed);
+    atomic_fetch_add_explicit(&bridge->outputVUOverRangeLeft, overRangeLeft, memory_order_relaxed);
+    atomic_fetch_add_explicit(&bridge->outputVUOverRangeRight, overRangeRight, memory_order_relaxed);
 }
 
 static void process_speaker_bus_splitter(
@@ -1008,6 +1015,8 @@ void N60RealtimeAudioBridgeReset(N60RealtimeAudioBridge *bridge) {
     atomic_store_explicit(&bridge->outputVURMSLeftBits, 0, memory_order_relaxed);
     atomic_store_explicit(&bridge->outputVURMSRightBits, 0, memory_order_relaxed);
     atomic_store_explicit(&bridge->outputVUOverRangeSamples, 0, memory_order_relaxed);
+    atomic_store_explicit(&bridge->outputVUOverRangeLeft, 0, memory_order_relaxed);
+    atomic_store_explicit(&bridge->outputVUOverRangeRight, 0, memory_order_relaxed);
     for (uint32_t route = 0; route < N60_SPEAKER_OUTPUT_MAX_ROUTES; ++route) {
         atomic_store_explicit(&bridge->routePeakBits[route], 0, memory_order_relaxed);
         atomic_store_explicit(&bridge->routeRMSBits[route], 0, memory_order_relaxed);
@@ -1242,6 +1251,8 @@ N60OutputVUMeterSnapshot N60RealtimeAudioBridgeGetOutputVUMeterSnapshot(
     snapshot.rmsLeft = bits_to_float(atomic_load_explicit(&bridge->outputVURMSLeftBits, memory_order_relaxed));
     snapshot.rmsRight = bits_to_float(atomic_load_explicit(&bridge->outputVURMSRightBits, memory_order_relaxed));
     snapshot.overRangeSamples = atomic_load_explicit(&bridge->outputVUOverRangeSamples, memory_order_relaxed);
+    snapshot.overRangeLeft = atomic_load_explicit(&bridge->outputVUOverRangeLeft, memory_order_relaxed);
+    snapshot.overRangeRight = atomic_load_explicit(&bridge->outputVUOverRangeRight, memory_order_relaxed);
     return snapshot;
 }
 
@@ -1983,6 +1994,9 @@ N60RenderKernelDiagnostics N60RealtimeAudioBridgeGetRenderDiagnostics(
         diagnostics.outputMeter.rmsLeft = vu.rmsLeft;
         diagnostics.outputMeter.rmsRight = vu.rmsRight;
         diagnostics.outputMeter.overRangeSamples = vu.overRangeSamples;
+        diagnostics.outputMeter.overRangeLeft = vu.overRangeLeft;
+        diagnostics.outputMeter.overRangeRight = vu.overRangeRight;
+        diagnostics.outputMeter.overRangePaired = true;
     }
     return diagnostics;
 }
@@ -2799,7 +2813,8 @@ OSStatus N60OutputIOProc(
     float outputVUPeakRight = 0.0f;
     double outputVUSquareSumLeft = 0.0;
     double outputVUSquareSumRight = 0.0;
-    uint64_t outputVUOverRangeSamples = 0;
+    uint64_t outputVUOverRangeLeft = 0;
+    uint64_t outputVUOverRangeRight = 0;
 
     latch_transition_command(bridge);
     latch_startup_fade_command(bridge);
@@ -3075,10 +3090,10 @@ OSStatus N60OutputIOProc(
                 outputVUSquareSumRight +=
                     (double)finalRight * (double)finalRight;
                 if (absLeft > 1.0f) {
-                    outputVUOverRangeSamples += 1u;
+                    outputVUOverRangeLeft += 1u;
                 }
                 if (absRight > 1.0f) {
-                    outputVUOverRangeSamples += 1u;
+                    outputVUOverRangeRight += 1u;
                 }
             }
             if (!sameDeviceMultiOutput) {
@@ -3391,10 +3406,10 @@ OSStatus N60OutputIOProc(
                 outputVUSquareSumRight +=
                     (double)finalRight * (double)finalRight;
                 if (absLeft > 1.0f) {
-                    outputVUOverRangeSamples += 1u;
+                    outputVUOverRangeLeft += 1u;
                 }
                 if (absRight > 1.0f) {
-                    outputVUOverRangeSamples += 1u;
+                    outputVUOverRangeRight += 1u;
                 }
             }
             if (!sameDeviceMultiOutput) {
@@ -3536,7 +3551,8 @@ OSStatus N60OutputIOProc(
             outputVUPeakRight,
             outputVUSquareSumLeft,
             outputVUSquareSumRight,
-            outputVUOverRangeSamples,
+            outputVUOverRangeLeft,
+            outputVUOverRangeRight,
             frameCount
         );
     }

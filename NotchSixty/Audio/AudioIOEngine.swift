@@ -3177,6 +3177,15 @@ final class AudioIOEngine: ObservableObject {
     }
 
     func setAnalysisDemand(_ demandMask: UInt32) {
+        // E28 S6b: wide sessions carry loudness only (the spectrum and stereo views are stereo-bridge views).
+        if let session = nChannelTransportSession {
+            session.setAnalysisDemand(demandMask)
+            return
+        }
+        if let session = binauralHeadphoneTransportSession {
+            session.setAnalysisDemand(demandMask)
+            return
+        }
         transportSession?.setAnalysisDemand(demandMask)
     }
 
@@ -3395,7 +3404,9 @@ final class AudioIOEngine: ObservableObject {
     }
 
     func productionAnalysisSnapshot() -> ProductionAnalysisSnapshot {
-        transportSession?.productionAnalysisSnapshot() ?? .empty
+        if let session = nChannelTransportSession { return session.productionAnalysisSnapshot() }
+        if let session = binauralHeadphoneTransportSession { return session.productionAnalysisSnapshot() }
+        return transportSession?.productionAnalysisSnapshot() ?? .empty
     }
 
     func resetSpectrumPeakHold() {

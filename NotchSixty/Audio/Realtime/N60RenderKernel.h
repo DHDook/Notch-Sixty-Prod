@@ -162,6 +162,11 @@ typedef struct {
     float rmsLeft;
     float rmsRight;
     uint64_t overRangeSamples;
+    /// E28 S6b: the count split by side. Only meaningful when overRangePaired; the frozen kernel counts one total per
+    /// stage and leaves this false, in which case readers treat the total as both sides.
+    uint64_t overRangeLeft;
+    uint64_t overRangeRight;
+    bool overRangePaired;
 } N60StereoMeterReading;
 
 typedef struct {

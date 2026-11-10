@@ -378,6 +378,195 @@ final class LoudnessMeterTests: XCTestCase {
         XCTAssertNil(worker.snapshot().loudnessOutput, "no readout while the card is hidden")
     }
 
+    // MARK: Wide sessions and the loudness lab (E28 S6b)
+
+    /// Deterministic pink noise (Paul Kellett's economy filter over xorshift white noise), scaled to `peak`.
+    static func pinkNoise(count: Int, seed: UInt64, peak: Float = 0.25) -> [Float] {
+        let white = noise(count: count, seed: seed, peak: 1)
+        var b0 = 0.0, b1 = 0.0, b2 = 0.0
+        return white.map { w in
+            let x = Double(w)
+            b0 = 0.99765 * b0 + x * 0.0990460
+            b1 = 0.96300 * b1 + x * 0.2965164
+            b2 = 0.57000 * b2 + x * 1.0526913
+            return Float((b0 + b1 + b2 + x * 0.1848) * 0.25) * peak
+        }
+    }
+
+    func testRolesMapToBS1770Positions() {
+        XCTAssertEqual(LoudnessChannelPosition(role: .frontLeft).weight, 1)
+        XCTAssertEqual(LoudnessChannelPosition(role: .frontCenter).weight, 1)
+        XCTAssertEqual(LoudnessChannelPosition(role: .lowFrequencyEffects).weight, 0)
+        for role in [OutputProgramRole.sideLeft, .sideRight, .rearLeft, .rearRight] {
+            XCTAssertEqual(LoudnessChannelPosition(role: role).weight, 1.41, "\(role)")
+        }
+        for role in [OutputProgramRole.topFrontLeft, .topFrontRight, .topMiddleLeft, .topMiddleRight, .topRearLeft, .topRearRight] {
+            XCTAssertEqual(LoudnessChannelPosition(role: role).weight, 1, "\(role) is elevated")
+        }
+        XCTAssertEqual(LoudnessChannelPosition(role: .wideLeft).weight, 1)
+        XCTAssertEqual(OutputProgramRole.allCases.count, 16, "a new role needs a position")
+    }
+
+    /// G14: pink noise through the production feed, Output within 0.1 LU of the offline meter at the eight rates.
+    func testLoudnessLabPinkNoiseOutputMatchesTheOfflineMeterAtEveryRate() {
+        for rate in Self.rates {
+            let count = Int(rate * 8)
+            let left = Self.pinkNoise(count: count, seed: 0x1234_5678_9ABC_DEF1)
+            let right = Self.pinkNoise(count: count, seed: 0x0FED_CBA9_8765_4321, peak: 0.2)
+            var reference = LoudnessMeter(sampleRate: rate)
+            reference.process(planar: [left, right])
+            let expected = reference.readout()
+
+            let feed = ProductionLoudnessFeed()
+            feed.setActive(true, sampleRate: rate)
+            let chunk = 480
+            var start = 0
+            while start < count {
+                let end = min(start + chunk, count)
+                let frames = (start..<end).map {
+                    N60AnalysisFrame(inputLeft: 0, inputRight: 0, outputLeft: left[$0], outputRight: right[$0])
+                }
+                frames.withUnsafeBufferPointer { feed.ingest($0) }
+                start = end
+            }
+            let shown = feed.readouts()?.output
+            XCTAssertNotNil(expected.integrated, "rate \(rate)")
+            XCTAssertEqual(shown?.integrated ?? .nan, expected.integrated ?? .infinity, accuracy: 0.1, "integrated at \(rate)")
+            XCTAssertEqual(shown?.shortTerm ?? .nan, expected.shortTerm ?? .infinity, accuracy: 0.1, "short-term at \(rate)")
+            XCTAssertEqual(shown?.momentary ?? .nan, expected.momentary ?? .infinity, accuracy: 0.1, "momentary at \(rate)")
+            // Absolute sanity: stereo pink noise of this level sits well above the -70 LUFS gate.
+            XCTAssertGreaterThan(shown?.integrated ?? -200, -40, "rate \(rate)")
+        }
+    }
+
+    private static let fiveOneRoles: [OutputProgramRole] = [.frontLeft, .frontRight, .frontCenter, .lowFrequencyEffects, .sideLeft, .sideRight]
+
+    /// Writes `planar` into the ring in real-time-sized blocks, waiting for the worker to drain each block, and returns
+    /// the snapshot once every frame has been consumed.
+    private func pump(
+        _ capture: UnsafeMutablePointer<N60LoudnessCapture>, worker: ProductionWideLoudnessWorker,
+        input: [[Float]], output: [[Float]]?, rate: Double
+    ) -> ProductionAnalysisSnapshot {
+        let total = input[0].count
+        let block = Int(rate / 10)
+        var start = 0
+        var written: UInt64 = 0
+        while start < total {
+            let end = min(start + block, total)
+            let granted = N60LoudnessCaptureBeginBlock(capture, UInt32(end - start))
+            XCTAssertEqual(Int(granted.frames), end - start, "the ring must have room for a 100 ms block")
+            for n in 0..<Int(granted.frames) {
+                var frame = input.map { $0[start + n] }
+                N60LoudnessCaptureWriteInput(capture, granted, UInt32(n), &frame)
+                if let output {
+                    var heard = output.map { $0[start + n] }
+                    N60LoudnessCaptureWriteOutput(capture, granted, UInt32(n), &heard)
+                }
+            }
+            N60LoudnessCaptureCommit(capture, granted)
+            written += UInt64(granted.frames)
+            start = end
+            let deadline = Date().addingTimeInterval(3)
+            while Date() < deadline {
+                let s = worker.snapshot()
+                if s.capturedFrames == written, s.availableFrames == 0 { break }
+                Thread.sleep(forTimeInterval: 0.01)
+            }
+        }
+        return worker.snapshot()
+    }
+
+    /// G9: the semantic program channels reach the meter with their BS.1770-4 weights, at the eight rates, through the
+    /// real capture ring and worker.
+    func testWideWorkerMeasuresWeightedProgramChannelsFromTheRingAtEveryRate() throws {
+        let positions = LoudnessChannelPosition.positions(for: Self.fiveOneRoles)
+        for rate in Self.rates {
+            let capture = try XCTUnwrap(N60LoudnessCaptureCreate(6, 6, rate))
+            defer { N60LoudnessCaptureDestroy(capture) }
+            let worker = try XCTUnwrap(ProductionWideLoudnessWorker(
+                capture: capture, sampleRate: rate, inputPositions: positions, outputPositions: positions))
+            defer { worker.stop() }
+            worker.setDemand(ProductionAnalysisDemand.loudness)
+            Thread.sleep(forTimeInterval: 0.1)
+
+            let count = Int(rate * 2)
+            let input = (0..<6).map { Self.pinkNoise(count: count, seed: 0xA5A5_0000 + UInt64($0) * 7_919) }
+            // The LFE carries a loud signal on purpose: it must change nothing.
+            let output = input.map { $0.map { $0 * 0.5 } }
+            let snapshot = pump(capture, worker: worker, input: input, output: output, rate: rate)
+
+            var inputReference = LoudnessMeter(sampleRate: rate, channels: positions)
+            inputReference.process(planar: input)
+            var outputReference = LoudnessMeter(sampleRate: rate, channels: positions)
+            outputReference.process(planar: output)
+            XCTAssertEqual(snapshot.droppedFrames, 0, "rate \(rate)")
+            XCTAssertEqual(snapshot.loudnessInput?.integrated ?? .nan, inputReference.readout().integrated ?? .infinity,
+                           accuracy: 0.1, "input at \(rate)")
+            XCTAssertEqual(snapshot.loudnessOutput?.integrated ?? .nan, outputReference.readout().integrated ?? .infinity,
+                           accuracy: 0.1, "output at \(rate)")
+            // Half amplitude is 6.02 LU lower.
+            let delta = (snapshot.loudnessInput?.integrated ?? 0) - (snapshot.loudnessOutput?.integrated ?? 0)
+            XCTAssertEqual(delta, 6.02, accuracy: 0.1, "rate \(rate)")
+            // The side channels weigh +1.5 dB: muting them must lower the reading by more than muting nothing changes.
+            var noSides = LoudnessMeter(sampleRate: rate, channels: positions)
+            var muted = input
+            muted[4] = [Float](repeating: 0, count: count)
+            muted[5] = [Float](repeating: 0, count: count)
+            noSides.process(planar: muted)
+            XCTAssertLessThan(noSides.readout().integrated ?? 0, (snapshot.loudnessInput?.integrated ?? 0) - 0.5, "rate \(rate)")
+        }
+    }
+
+    func testWideWorkerWithoutOutputChannelsPublishesInputOnlyAndHonoursDemand() throws {
+        let rate = 48_000.0
+        let positions = LoudnessChannelPosition.positions(for: [.frontLeft, .frontRight, .frontCenter])
+        let capture = try XCTUnwrap(N60LoudnessCaptureCreate(3, 0, rate))
+        defer { N60LoudnessCaptureDestroy(capture) }
+        let worker = try XCTUnwrap(ProductionWideLoudnessWorker(
+            capture: capture, sampleRate: rate, inputPositions: positions, outputPositions: nil))
+        defer { worker.stop() }
+        XCTAssertNil(ProductionWideLoudnessWorker(capture: capture, sampleRate: rate, inputPositions: positions,
+                                                  outputPositions: positions), "channel counts must agree with the ring")
+        XCTAssertFalse(N60LoudnessCaptureDemand(capture))
+        worker.setDemand(ProductionAnalysisDemand.loudness)
+        let deadline = Date().addingTimeInterval(2)
+        while !N60LoudnessCaptureDemand(capture), Date() < deadline { Thread.sleep(forTimeInterval: 0.01) }
+        XCTAssertTrue(N60LoudnessCaptureDemand(capture), "the loudness bit opens the ring")
+
+        let input = (0..<3).map { Self.pinkNoise(count: Int(rate * 2), seed: 0xBEEF + UInt64($0)) }
+        var snapshot = pump(capture, worker: worker, input: input, output: nil, rate: rate)
+        XCTAssertNotNil(snapshot.loudnessInput?.integrated)
+        XCTAssertNil(snapshot.loudnessOutput, "a routed lane map has no Output")
+
+        worker.setDemand(ProductionAnalysisDemand.loudness | ProductionAnalysisDemand.resetLoudness)
+        Thread.sleep(forTimeInterval: 0.2)
+        snapshot = worker.snapshot()
+        XCTAssertNil(snapshot.loudnessInput?.integrated, "Reset clears the measurement")
+
+        worker.setDemand(UInt32(N60_ANALYSIS_DEMAND_NONE))
+        let idle = Date().addingTimeInterval(2)
+        while N60LoudnessCaptureDemand(capture), Date() < idle { Thread.sleep(forTimeInterval: 0.01) }
+        XCTAssertFalse(N60LoudnessCaptureDemand(capture), "no demand, no capture")
+        XCTAssertNil(worker.snapshot().loudnessInput)
+    }
+
+    func testWideFeedMarksGappedWhenTheRingDropsFrames() {
+        let feed = WideLoudnessFeed(sampleRate: 48_000, inputPositions: LoudnessChannelPosition.stereo, outputPositions: nil)
+        feed.setActive(true)
+        feed.noteDroppedFrames(0)
+        XCTAssertEqual(feed.readouts()?.input.isGapped, false)
+        feed.noteDroppedFrames(5)
+        XCTAssertEqual(feed.readouts()?.input.isGapped, true)
+        XCTAssertNil(feed.readouts()?.output)
+    }
+
+    func testCardTextNamesTheMeasuredChannelsPerSessionKind() {
+        XCTAssertTrue(LoudnessCardText.foldNote.contains("stereo capture"))
+        XCTAssertFalse(LoudnessCardText.wideNote.contains("stereo capture"))
+        XCTAssertTrue(LoudnessCardText.wideNote.contains("program channels"))
+        XCTAssertTrue(LoudnessCardText.wideOutputUnavailableNote.contains("routed"))
+    }
+
     // MARK: Card text and true peak
 
     func testTruePeakMaxHoldKeepsTheMaximumUntilReset() {

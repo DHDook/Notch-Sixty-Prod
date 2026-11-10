@@ -17,11 +17,15 @@ enum LoudnessCardText {
         return String(format: "%.1f dBTP", value)
     }
 
-    static let foldNote = "Measured on the stereo capture, after any wider program has been folded to two channels. "
-        + "BS.1770-4 channel weights (LFE excluded) apply once loudness is fed more than the stereo capture."
+    static let foldNote = "Measured on the stereo capture, after any wider program has been folded to two channels, "
+        + "with BS.1770-4 gating."
 
-    static let wideSessionNote = "Loudness is measured on the stereo capture. This session renders more than two channels, "
-        + "so no capture ring is available and the card stays empty."
+    /// E28 S6b: wide (N-channel and binaural) sessions are measured on the semantic program channels.
+    static let wideNote = "Measured on the semantic program channels with BS.1770-4 channel weights (LFE excluded). "
+        + "Output is taken after the render, protection and master gain; subwoofer feeds are not included."
+
+    static let wideOutputUnavailableNote = "Output loudness is not measured on a routed output map, because its lanes "
+        + "do not map back to program channels. Choose Input."
 }
 
 enum LoudnessSource: String, CaseIterable, Identifiable {
@@ -40,6 +44,8 @@ struct ProductionLoudnessCard: View {
     let truePeak: TruePeakMaxHold
     let isRunning: Bool
     let unavailableReason: String?
+    /// True for N-channel and binaural sessions (E28 S6b).
+    var isWide = false
     let onSource: (LoudnessSource) -> Void
     let onReset: () -> Void
 
@@ -84,7 +90,11 @@ struct ProductionLoudnessCard: View {
                         .font(.caption)
                         .accessibilityIdentifier("meters.loudness.gapped")
                 }
-                Text(LoudnessCardText.foldNote).font(.caption2).foregroundStyle(.tertiary)
+                Text(isWide ? LoudnessCardText.wideNote : LoudnessCardText.foldNote)
+                    .font(.caption2).foregroundStyle(.tertiary)
+                if isWide, source == .output, snapshot.loudnessInput != nil, snapshot.loudnessOutput == nil {
+                    Text(LoudnessCardText.wideOutputUnavailableNote).font(.caption2).foregroundStyle(.secondary)
+                }
             }
         }
         .padding(14)
