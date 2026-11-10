@@ -891,6 +891,28 @@ final class CoreAudioTransportSession {
         analysisWorker?.setDemand(demandMask, sampleRate: outputFormat.sampleRate)
     }
 
+    /// E28 S6: read-and-reset per-route maxima of the same-device output map. Empty without a map. Control thread; the
+    /// meter hub is the only caller while processing runs.
+    func routeMeters() -> [ProductionRouteMeter] {
+        guard let bridge else { return [] }
+        let raw = N60RealtimeAudioBridgeTakeRouteMeterSnapshot(bridge)
+        let count = min(Int(raw.routeCount), Int(N60_SPEAKER_OUTPUT_MAX_ROUTES))
+        guard count > 0 else { return [] }
+        let routes = withUnsafeBytes(of: raw.routes) { Array($0.bindMemory(to: N60SpeakerOutputRouteDescriptor.self)) }
+        let peaks = withUnsafeBytes(of: raw.peak) { Array($0.bindMemory(to: Float.self)) }
+        let rmses = withUnsafeBytes(of: raw.rms) { Array($0.bindMemory(to: Float.self)) }
+        let overs = withUnsafeBytes(of: raw.overRangeSamples) { Array($0.bindMemory(to: UInt64.self)) }
+        return (0..<count).map { index in
+            let bus = UInt32(routes[index].bus.rawValue)
+            let channel = routes[index].physicalChannelIndex
+            return ProductionRouteMeter(
+                id: SpeakerRouteMeterNaming.channelID(busRawValue: bus, physicalChannel: channel),
+                label: SpeakerRouteMeterNaming.label(busRawValue: bus),
+                physicalChannel: channel,
+                peakLinear: peaks[index], rmsLinear: rmses[index], overRangeSamples: overs[index])
+        }
+    }
+
     func productionAnalysisSnapshot() -> ProductionAnalysisSnapshot {
         analysisWorker?.snapshot() ?? .empty
     }

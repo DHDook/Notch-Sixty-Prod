@@ -84,7 +84,7 @@ build_core_objs() {
     done
 }
 # Bridge harnesses: build the core only when one of them is selected.
-if selected pr35_transition_ack || selected pr41_same_device_output_map || selected pr101_realtime_resource_soak || selected e6_graph_takeover || selected e6_fade_alignment || selected e6_nchannel_graph || selected e6_shutdown_fade || selected e8_routed_output || selected e4_speaker_drive || selected e25_fold; then
+if selected pr35_transition_ack || selected pr41_same_device_output_map || selected pr101_realtime_resource_soak || selected e6_graph_takeover || selected e6_fade_alignment || selected e6_nchannel_graph || selected e6_shutdown_fade || selected e8_routed_output || selected e4_speaker_drive || selected e25_fold || selected e28_route_meter; then
     build_core_objs
 fi
 
@@ -160,6 +160,10 @@ harness pr38_denoiser_advanced "${STRICT[@]}" -O2 -include stddef.h -I"$RT" ci/v
     -framework Accelerate
 # shellcheck disable=SC2086
 harness pr41_same_device_output_map "${STRICT[@]}" -O2 -include stddef.h -I"$RT" ci/validate_pr41_same_device_output_map.c $ALL_RT \
+    -Icore/include ${CORE_OBJS[@]+"${CORE_OBJS[@]}"} -lc++ -framework Accelerate -framework CoreAudio
+
+# shellcheck disable=SC2086
+harness e28_route_meter "${STRICT[@]}" -O2 -include stddef.h -I"$RT" ci/harness_e28_route_meter.c $ALL_RT \
     -Icore/include ${CORE_OBJS[@]+"${CORE_OBJS[@]}"} -lc++ -framework Accelerate -framework CoreAudio
 
 # Adaptive-rate transport (PR69-71).

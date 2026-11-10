@@ -1135,13 +1135,17 @@ struct ProductionOutputProtectionSection: View {
         return parts.joined(separator: "  ·  ")
     }
 
+    /// E28 S6 (E9 G21): reads through the shared meter hub, the only reader of the read-and-reset protection values.
     @MainActor
     private func poll() async {
+        let hub = ProductionMeterHub.shared(for: engine)
+        let token = hub.subscribe(hertz: 8)
+        defer { hub.unsubscribe(token) }
         while !Task.isCancelled {
+            let taken = hub.take(token)
             if engine.lifecycleState == .running {
-                var next: [Int: UnifiedGraphOutputProtectionReading] = [:]
-                for reading in engine.outputProtectionReadings() { next[reading.lane] = reading }
-                readings = next
+                readings = MultichannelMeterChannels.protectionReadings(
+                    from: taken, lanes: engine.outputProtectionLanes.map(\.index))
             } else {
                 readings = [:]
             }
