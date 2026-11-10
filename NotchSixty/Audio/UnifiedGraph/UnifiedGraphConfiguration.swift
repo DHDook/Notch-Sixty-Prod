@@ -124,6 +124,9 @@ struct UnifiedGraphBassManagement: Equatable, Sendable {
     var lfeGainDB: Double = 10
     /// E6 S12g: the Linkwitz-Riley 8 (48 dB per octave) split in place of the default Linkwitz-Riley 4.
     var steepSplit = false
+    /// E8 S11: the split's filter spec `[hp family, hp order, lp family, lp order]` (the stereo crossover's own filters
+    /// when the crossover feeds the sub lanes). Takes the place of `steepSplit` when set.
+    var filterSpec: [Float]?
     var subwoofers: [UnifiedGraphSubwoofer]
 }
 
@@ -197,6 +200,9 @@ struct UnifiedGraphConfiguration: Equatable, Sendable {
     /// other lanes while the generator is active, so one lane at a time can be level-set.
     var generatorLaneMask: UInt64?
     var bassManagement: UnifiedGraphBassManagement?
+    /// E8 S11: lanes (bit n = lane n, sub lanes after the program lanes) a MUTE stage silences, for the stereo
+    /// crossover's monitor audition when it feeds sub lanes. 0 adds no stage.
+    var mutedLanes: UInt64 = 0
     var protection: UnifiedGraphProtection?
     /// Two-lane configurations only.
     var stereoStages = UnifiedGraphStereoStages()
@@ -544,18 +550,19 @@ struct UnifiedGraphConfiguration: Equatable, Sendable {
             if let policy = outputProtection {
                 // E9 S5: sub lanes get their own stage with the program settings (so every lane has the same look-ahead
                 // and oversampling latency); independent mode gives every program lane one too.
-                let params = UnifiedGraphOutputProtection.clampedUserParameters(Self.protectionParameters(protection))
+                let base = Self.protectionParameters(protection)
                 if policy.independent {
                     for lane in 0..<programLanes {
                         add(N60_STAGE_PROTECTION, UnifiedGraphOutputProtection.userLaneStageBase + UInt32(lane),
-                            mask: UInt64(1) << UInt64(lane), params: params)
+                            mask: UInt64(1) << UInt64(lane), params: policy.laneParameters(base, lane: lane))
                     }
                 } else {
-                    add(N60_STAGE_PROTECTION, N60_LSTAGE_PROTECTION, mask: mask, params: params)
+                    add(N60_STAGE_PROTECTION, N60_LSTAGE_PROTECTION, mask: mask,
+                        params: UnifiedGraphOutputProtection.clampedUserParameters(base))
                 }
                 for lane in programLanes..<(programLanes + subwooferCount) {
                     add(N60_STAGE_PROTECTION, UnifiedGraphOutputProtection.userLaneStageBase + UInt32(lane),
-                        mask: UInt64(1) << UInt64(lane), params: params)
+                        mask: UInt64(1) << UInt64(lane), params: policy.laneParameters(base, lane: lane))
                 }
             } else {
                 let params = Self.protectionParameters(protection)
@@ -566,6 +573,12 @@ struct UnifiedGraphConfiguration: Equatable, Sendable {
             stages.append(UnifiedGraphStageSpec(
                 kind: N60_STAGE_DELTA_SUBTRACT.rawValue, stageId: Self.deltaSubtractStageId, laneA: 0, laneMask: programMask,
                 params: [1]))
+        }
+        if mutedLanes != 0 {
+            // The MUTE rank is after ANC_INJECT, so a muted lane would also silence anti-noise on it.
+            guard ancActuators == nil else { throw UnifiedGraphError.unsupportedConfiguration("monitor mute with ANC actuators") }
+            // E8 S11: the stereo crossover's mains-only and sub-only audition mutes the other side (ramped by the core).
+            add(N60_STAGE_MUTE, Self.monitorMuteStageId, mask: mutedLanes, params: [1])
         }
         add(N60_STAGE_FINAL_SANITISE, N60_LSTAGE_FINAL_SANITISE, lane: all)
         add(N60_STAGE_FINAL_METER, N60_LSTAGE_FINAL_METER, lane: all)
@@ -618,6 +631,7 @@ struct UnifiedGraphConfiguration: Equatable, Sendable {
     static let multibandStageId: UInt32 = 626
     static let deltaCaptureStageId: UInt32 = 627
     static let deltaSubtractStageId: UInt32 = 628
+    static let monitorMuteStageId: UInt32 = 629
     /// Ring frames beyond one block: the largest lane latency the delta audition can align (FIR, protection, delays).
     static let deltaRingMargin: UInt32 = 131_072
     static let analyserTapEQStageId: UInt32 = 620
@@ -727,10 +741,12 @@ struct UnifiedGraphConfiguration: Equatable, Sendable {
                       subs[index].polarityInverted ? 1 : 0, Float(subs[index].eq.count)]
                 p += try peqParameters(subs[index].eq)
             }
-        } else if bass.steepSplit {
+        } else if bass.steepSplit || bass.filterSpec != nil {
             p.append(0) // the filter-spec trailer needs the extension word (plain one-sub list)
         }
-        if bass.steepSplit {
+        if let spec = bass.filterSpec, spec.count == 4 {
+            p += spec
+        } else if bass.steepSplit {
             let family = Float(N60_GRAPH_FILTER_LINKWITZ_RILEY)
             p += [family, 8, family, 8]
         }

@@ -538,6 +538,10 @@ struct ProductionDynamicsView: View {
             DynamicsParameterRow("Release", value: doubleBinding({ $0.limiter.releaseMs }, { $0.limiter.releaseMs = $1 }), range: 5...500, step: 5, unit: "ms", digits: 0)
             DynamicsParameterRow("Look-Ahead", value: doubleBinding({ $0.limiter.lookAheadMs }, { $0.limiter.lookAheadMs = $1 }), range: 0...20, step: 0.5, unit: "ms", digits: 1)
             Toggle("True-Peak Guard", isOn: boolBinding({ $0.limiter.truePeakGuardEnabled }, { $0.limiter.truePeakGuardEnabled = $1 }))
+            // E9 S5b: per-output protection (empty unless `e9.output-protection` is on).
+            ProductionOutputProtectionSection(
+                engine: engine, settings: configuration.outputProtection ?? OutputProtectionSettings(),
+                apply: { next in update { $0.outputProtection = next == OutputProtectionSettings() ? nil : next } })
         }
     }
 
@@ -1085,4 +1089,122 @@ enum ProductionDynamicsLayout {
             folded: [.oversampling]
         ),
     ]
+}
+
+// MARK: - E9 S5b output protection
+
+/// E9 S5b: the Protection card's "Outputs" list (`e9.output-protection`). One row per output with its own on/off and ceiling
+/// (live: a ceiling edit is a parameter post, not a rebuild) and the live gain reduction and true peak of that output, plus
+/// the Advanced "Independent per output" switch. Shows nothing while the flag is off.
+struct ProductionOutputProtectionSection: View {
+    @ObservedObject var engine: AudioIOEngine
+    let settings: OutputProtectionSettings
+    let apply: (OutputProtectionSettings) -> Void
+
+    @State private var readings: [Int: UnifiedGraphOutputProtectionReading] = [:]
+
+    var body: some View {
+        let lanes = engine.outputProtectionLanes
+        if lanes.isEmpty {
+            EmptyView()
+        } else {
+            GroupBox("Outputs") {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Every output also has an always-on hard limit at \(Int(UnifiedGraphOutputProtection.hardLimitCeilingDB)) dBFS that these settings cannot lower. Turning an output off parks its own ceiling at the hard limit.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    DisclosureGroup("Advanced") {
+                        Toggle("Independent per output", isOn: Binding(
+                            get: { settings.independent },
+                            set: { value in var next = settings; next.independent = value; apply(next) }
+                        ))
+                        Text("Off keeps the program outputs as one linked group so the stereo image is preserved. On gives every program output its own limiter. Switching rebuilds the graph with a short fade.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    ForEach(lanes) { lane in row(lane) }
+                }
+                .padding(.vertical, 5)
+            }
+            .task { await poll() }
+        }
+    }
+
+    private func row(_ lane: AudioIOEngine.OutputProtectionLane) -> some View {
+        let own = lane.isSub || settings.independent
+        let setting = settings.lane(lane.index)
+        return VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text(lane.label).font(.subheadline.weight(.medium))
+                Spacer()
+                if own {
+                    Toggle("On", isOn: Binding(
+                        get: { setting.enabled },
+                        set: { value in
+                            var next = settings
+                            var updated = setting
+                            updated.enabled = value
+                            next.set(updated, at: lane.index)
+                            apply(next)
+                        }
+                    ))
+                    .toggleStyle(.switch)
+                    .labelsHidden()
+                    .accessibilityLabel("\(lane.label) protection")
+                } else {
+                    Text("Linked").font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            if own {
+                HStack {
+                    Text("Ceiling").font(.caption).foregroundStyle(.secondary)
+                    Slider(value: Binding(
+                        get: { setting.ceilingDB ?? Double(UnifiedGraphOutputProtection.hardLimitCeilingDB) },
+                        set: { value in
+                            var next = settings
+                            var updated = setting
+                            updated.ceilingDB = value
+                            next.set(updated, at: lane.index)
+                            apply(next)
+                        }
+                    ), in: OutputProtectionSettings.ceilingRangeDB, step: 0.1)
+                    .disabled(!setting.enabled)
+                    Text(String(format: "%.1f dB", setting.ceilingDB ?? Double(UnifiedGraphOutputProtection.hardLimitCeilingDB)))
+                        .font(.caption.monospacedDigit())
+                        .frame(width: 64, alignment: .trailing)
+                }
+            }
+            if let reading = readings[lane.index] {
+                Text(readoutText(reading, own: own))
+                    .font(.caption.monospaced())
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    static func peakDB(_ linear: Float) -> String {
+        linear > 0 ? String(format: "%.1f dBTP", Double(20 * log10(linear))) : "-inf dBTP"
+    }
+
+    private func readoutText(_ reading: UnifiedGraphOutputProtectionReading, own: Bool) -> String {
+        var parts: [String] = []
+        if own, let gr = reading.userGainReductionDB { parts.append(String(format: "limiter %.1f dB", Double(gr))) }
+        parts.append(String(format: "hard limit %.1f dB", Double(reading.hardLimitGainReductionDB)))
+        parts.append("peak " + Self.peakDB(reading.outputTruePeakLinear))
+        return parts.joined(separator: "  ·  ")
+    }
+
+    @MainActor
+    private func poll() async {
+        while !Task.isCancelled {
+            if engine.lifecycleState == .running {
+                var next: [Int: UnifiedGraphOutputProtectionReading] = [:]
+                for reading in engine.outputProtectionReadings() { next[reading.lane] = reading }
+                readings = next
+            } else {
+                readings = [:]
+            }
+            try? await Task.sleep(nanoseconds: 125_000_000)
+        }
+    }
 }
