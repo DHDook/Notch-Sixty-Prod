@@ -433,7 +433,8 @@ struct ProductionRootView: View {
         case .speakers:
             ProductionSpeakersView(engine: engine, profiles: product.profiles)
         case .headphones:
-            ProductionHeadphoneWorkspace(engine: engine, profiles: product.profiles)
+            ProductionHeadphoneWorkspace(
+                engine: engine, profiles: product.profiles, calibration: product.multichannelCalibration)
         case .speakerCalibration:
             ProductionMultichannelCalibrationWorkspace(
                 engine: engine,
