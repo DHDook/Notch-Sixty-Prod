@@ -51,6 +51,8 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "../platform/rt.hpp"
+
 namespace n60::conv {
 
 constexpr uint32_t kBlock = 256;
@@ -87,23 +89,23 @@ void init(void *shared, const float *taps, uint32_t n);
 
 // Realtime. Epoch bookkeeping: the owner compares laneEpoch with its history epoch and calls resetStep (or
 // resetLane, which finishes the whole reset at once; tests and the control thread only).
-uint32_t laneEpoch(const void *lane);
+uint32_t laneEpoch(const void *lane) N60_RT_NONBLOCKING;
 void resetLane(const void *shared, void *lane, uint32_t epoch);
 // Realtime. Clears the lane for `epoch` in steps. `budget` (bytes, may be null for unlimited) is reduced by what
 // this call cleared. Returns true when the lane is reset and on `epoch`.
-bool resetStep(const void *shared, void *lane, uint32_t epoch, uint64_t *budget);
+bool resetStep(const void *shared, void *lane, uint32_t epoch, uint64_t *budget) N60_RT_NONBLOCKING;
 
 // Realtime. Lazy lane carry between two lanes of the same tap schedule (same Shared parts and mode).
 // carryHeader copies the fixed part now and puts `dst` on `epoch`. carryBytes is the size of the rest;
 // carryCopy copies up to `maxBytes` of it from byte `offset` and returns the bytes copied (0 at the end).
-void carryHeader(const void *shared, const void *src, void *dst, uint32_t epoch);
-size_t carryBytes(const void *shared);
-size_t carryCopy(const void *shared, const void *src, void *dst, size_t offset, size_t maxBytes);
+void carryHeader(const void *shared, const void *src, void *dst, uint32_t epoch) N60_RT_NONBLOCKING;
+size_t carryBytes(const void *shared) N60_RT_NONBLOCKING;
+size_t carryCopy(const void *shared, const void *src, void *dst, size_t offset, size_t maxBytes) N60_RT_NONBLOCKING;
 // Frames after the copy completes before the lane output matches the source lane (0 in delay mode).
-uint32_t carrySettleFrames(const void *shared);
+uint32_t carrySettleFrames(const void *shared) N60_RT_NONBLOCKING;
 
 // Realtime. In place over `frames` frames of one lane. `counter` may be null.
-void process(void *shared, void *lane, float *buf, uint32_t frames, Counter *counter);
+void process(void *shared, void *lane, float *buf, uint32_t frames, Counter *counter) N60_RT_NONBLOCKING;
 
 }  // namespace n60::conv
 

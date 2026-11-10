@@ -471,7 +471,7 @@ void store(LdShared &S, Tel slot, float v) { S.tel[slot].store(floatToBits(v), s
 
 }  // namespace
 
-bool isLoudnessKind(uint32_t kind) { return kind == N60_STAGE_LOUDNESS; }
+bool isLoudnessKind(uint32_t kind) N60_RT_NONBLOCKING { return kind == N60_STAGE_LOUDNESS; }
 
 bool loudnessParamOk(const float *params, uint32_t idx, float v, double rate) {
     auto g = [&](uint32_t i) { return getParam(params, i, idx, v); };
@@ -550,7 +550,7 @@ static_assert(std::atomic<uint32_t>::is_always_lock_free, "telemetry atomics mus
 static inline void flush(float &v) { if (std::fabs(v) < 1.0e-30f) v = 0.0f; }
 static inline void flushSt(BqState &s) { flush(s.z1); flush(s.z2); }
 
-void runLoudness(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) {
+void runLoudness(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) N60_RT_NONBLOCKING {
     const float *p = paramsOf(h, r);
     LdShared &S = *reinterpret_cast<LdShared *>(sharedState(h, r));
     const double rate = h->sampleRate;
@@ -583,12 +583,12 @@ void runLoudness(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frame
     store(S, kTBoost, S.boostDb);
 }
 
-n60_status validateLoudnessParam(const SnapHeader *h, const StageRec &r, uint32_t idx, float value) {
+n60_status validateLoudnessParam(const SnapHeader *h, const StageRec &r, uint32_t idx, float value) N60_RT_NONBLOCKING {
     if (idx >= r.paramCount) return N60_STATUS_BAD_ARGUMENT;
     return loudnessParamOk(paramsOf(h, r), idx, value, h->sampleRate) ? N60_STATUS_OK : N60_STATUS_BAD_ARGUMENT;
 }
 
-uint64_t loudnessCarry(SnapHeader *from, SnapHeader *to) {
+uint64_t loudnessCarry(SnapHeader *from, SnapHeader *to) N60_RT_NONBLOCKING {
     uint64_t bytes = 0;
     if (from == nullptr || to == nullptr || from->sampleRate != to->sampleRate) return bytes;
     const StageRec *src = stages(from);
