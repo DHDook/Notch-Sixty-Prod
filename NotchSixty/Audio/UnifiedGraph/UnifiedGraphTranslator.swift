@@ -598,7 +598,8 @@ enum UnifiedGraphTranslator {
         headTracking: Bool,
         maxBlockFrames: UInt32 = 16_384,
         programDSP: UnifiedGraphProgramDSP? = nil,
-        programGain: Float = 1
+        programGain: Float = 1,
+        outputProtection: UnifiedGraphOutputProtection? = UnifiedGraphOutputProtection.current()
     ) -> Result<UnifiedGraphSpec, UnifiedGraphFallbackReason> {
         switch binauralBaseSpec(
             asset: asset, layout: layout, profile: profile, outputChannels: outputChannels,
@@ -606,7 +607,7 @@ enum UnifiedGraphTranslator {
             programGain: programGain
         ) {
         case .failure(let reason): return .failure(reason)
-        case .success(let base): return binauralApplyProgram(base: base, programDSP: programDSP, programGain: programGain)
+        case .success(let base): return binauralApplyProgram(base: base, programDSP: programDSP, programGain: programGain, outputProtection: outputProtection)
         }
     }
 
@@ -616,7 +617,8 @@ enum UnifiedGraphTranslator {
     static func binauralApplyProgram(
         base: UnifiedGraphSpec,
         programDSP: UnifiedGraphProgramDSP?,
-        programGain: Float
+        programGain: Float,
+        outputProtection: UnifiedGraphOutputProtection? = UnifiedGraphOutputProtection.current()
     ) -> Result<UnifiedGraphSpec, UnifiedGraphFallbackReason> {
         guard programGain.isFinite, programGain > 0, programGain <= 16 else { return .failure(.gainOutOfRange) }
         var spec = base
@@ -629,6 +631,11 @@ enum UnifiedGraphTranslator {
                 return .failure(reason)
             } catch { return .failure(.specRejected) }
         }
+        // E9 S5c (G15): the layout's safety limiter on the ears is one linked stage; with output protection on, each ear also
+        // gets its own unlinked hard limit (zero latency), so one ear peaking never ducks the other.
+        // `binauralBaseSpec` refuses any output that is not two-channel, so the ears are always lanes 0 and 1.
+        outputProtection?.addHardLimits(to: &spec, lanes: 2)
+        if spec.stages.count > UnifiedGraphProgramDSP.maxStages { return .failure(.stageBudget) }
         return .success(spec)
     }
 

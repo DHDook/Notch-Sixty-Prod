@@ -111,7 +111,7 @@ struct UnifiedGraphOutputProtection: Equatable, Sendable {
     }
 
     /// One unlinked hard-limit stage per output lane (`0..<lanes`), placed after every stage at the protection position or
-    /// earlier and ahead of mute, capture and the final sanitise. A binaural graph keeps its layout safety limiter instead.
+    /// earlier and ahead of mute, capture and the final sanitise. A binaural graph adds them on the two ears only (`UnifiedGraphTranslator.binauralApplyProgram`), behind its linked layout safety limiter.
     func addHardLimits(to spec: inout UnifiedGraphSpec, lanes: Int) {
         let at = spec.stages.lastIndex { UnifiedGraphProgramDSP.position(of: $0.kind) <= 27 }.map { $0 + 1 } ?? 0
         let stages = (0..<lanes).map { lane in
