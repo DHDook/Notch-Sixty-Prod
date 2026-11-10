@@ -813,6 +813,8 @@ if selected e6_core_graph; then
             "${CORE_OBJS[@]}" -lc++ -lm
         harness e6_core_system "${STRICT[@]}" -O2 -Icore/include core/tests/test_system.c \
             "${CORE_OBJS[@]}" -lc++ -lm
+        harness e4_core_ambient_sections "${STRICT[@]}" -O2 -Icore/include core/tests/test_ambient_sections.c \
+            "${CORE_OBJS[@]}" -lc++ -lm
         harness e6_core_rebuild "${STRICT[@]}" -O2 -Icore/include core/tests/test_rebuild.c \
             "${CORE_OBJS[@]}" -lc++ -lm
         harness e6_core_denoiser_carry "${STRICT[@]}" -O2 -Icore/include core/tests/test_denoiser_carry.c \

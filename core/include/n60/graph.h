@@ -34,7 +34,7 @@ extern "C" {
 #endif
 
 /* Bumped on any incompatible change to a struct or function below. */
-#define N60_GRAPH_ABI_VERSION 31u
+#define N60_GRAPH_ABI_VERSION 32u
 
 typedef struct n60_graph n60_graph; /* opaque */
 
@@ -428,6 +428,11 @@ typedef int (*n60_external_process_fn)(void *context, const float *const *in, fl
  *  paramCount is then longer by 4.
  *  No added latency.
  * AMBIENT. params: [0] level dB (live, -60..24), then low-shelf, peaking and high-shelf bands (Hz, dB, Q). paramCount 10.
+ *  ABI v32 (E4 S30a): an optional trailer [10] n (0..17, topology; the Swift host sends 0 or 17), then 3 per section
+ *  (Hz 20..0.45 fs, dB -8..0, Q 0.3..20), peaking, cuts only: paramCount 11 + 3 n. The three bands and every
+ *  section are now live (a post of Hz, dB or Q crossfades that section's coefficients over the ramp window, state
+ *  continued, never reset); the level ramps as before. A section at 0 dB with no state is skipped. A trailer of n = 0
+ *  or no trailer is bit-identical to the ABI v31 stage; no added latency.
  * SYMMETRY. params: [0] position -1..1 (live). CROSSFEED. params: [0] amount 0..0.5 (live).
  * CROSSTALK. params: [0] shadow low-pass Hz 200..2000 (live), [1] amount 0..1 (live).
  * HEADPHONE (pair A, B). params: [0] headroom dB (-30..0), [1] crossfeed amount 0..1 (live), [2] angle 15..90 deg,
