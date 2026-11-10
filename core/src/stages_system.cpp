@@ -136,6 +136,10 @@ Lanes ruleOf(uint32_t kind) {
 // ---- parameter layouts ---------------------------------------------------------------
 
 constexpr uint32_t kHpFixed = 11;
+constexpr uint32_t kAmbMaxTrailer = 17;                // ABI v32: live peaking sections after the three bands
+constexpr uint32_t kAmbMaxSec = 3 + kAmbMaxTrailer;
+constexpr double kAmbMinDb = -8.0, kAmbMaxDb = 0.0;    // trailer sections cut only
+constexpr double kAmbMinQ = 0.3, kAmbMaxQ = 20.0;
 constexpr uint32_t kProtParamsV12 = 18;
 constexpr uint32_t kGuardParams = 12 + N60_ANC_GUARD_BANDS;
 constexpr uint32_t kHpRing = 512;
@@ -197,7 +201,11 @@ uint32_t expectedParamCount(uint32_t kind, const float *p, uint32_t have) {
             BassLayout L;
             return parseBass(p, have, L) ? L.end : 0u;
         }
-        case N60_STAGE_AMBIENT: return 10;
+        case N60_STAGE_AMBIENT:  // ABI v32: 10, or 11 + 3 n with the section trailer (n 0..17)
+            if (have == 10) return 10;
+            return have >= 11 && isInt(p[10]) && p[10] >= 0.0f && p[10] <= static_cast<float>(kAmbMaxTrailer)
+                       ? 11u + 3u * static_cast<uint32_t>(p[10])
+                       : 0u;
         case N60_STAGE_SYMMETRY: return 1;
         case N60_STAGE_CROSSFEED: return 1;
         case N60_STAGE_CROSSTALK: return 2;
@@ -288,10 +296,16 @@ struct AmbLane {
     Ramp g;
     float seen;
     float pad;
-    Bq z[3];
+    Bq z[kAmbMaxSec];
+    Bq zN[kAmbMaxSec];  // incoming section during a coefficient crossfade
 };
 struct AmbShared {
-    double coef[3][5];
+    double coef[kAmbMaxSec][5];
+    double coefN[kAmbMaxSec][5];
+    float seen[kAmbMaxSec][3];  // Hz, dB, Q the current design was made from (or is fading to)
+    uint32_t xf[kAmbMaxSec];    // frames left in a section's coefficient crossfade
+    uint32_t n;                 // sections in use: 3 + trailer count
+    uint32_t pad;
 };
 struct SymShared {
     Ramp gl, gr;
@@ -550,9 +564,19 @@ bool paramOk(uint32_t kind, uint32_t i, float v, const float *p, double rate, ui
                 case 8: return true;  // checked by expectedParamCount
                 default: return true;  // extra subs and sections: checked by parseBass and the full validation
             }
-        case N60_STAGE_AMBIENT:
+        case N60_STAGE_AMBIENT: {
             if (i == 0) return inR(v, -60.0, 24.0);
-            return true;  // bands: checked below
+            if (i == 10) return isInt(v) && v >= 0.0f && v <= static_cast<float>(kAmbMaxTrailer);
+            // A band or trailer section field: the section as it would be with this value must design.
+            const uint32_t sec = i <= 9 ? (i - 1) / 3 : 3 + (i - 11) / 3;
+            const uint32_t base = i <= 9 ? 1 + 3 * sec : 11 + 3 * (sec - 3);
+            double t[3];
+            for (uint32_t f = 0; f < 3; ++f) t[f] = base + f == i ? static_cast<double>(v) : static_cast<double>(p[base + f]);
+            double c[5];
+            if (!designBiquad(i <= 9 ? (sec == 0 ? 1u : (sec == 2 ? 2u : 0u)) : 0u, rate, t[0], t[1], t[2], c)) return false;
+            if (i >= 11) return inR(t[0], 20.0, rate * 0.45) && inR(t[1], kAmbMinDb, kAmbMaxDb) && inR(t[2], kAmbMinQ, kAmbMaxQ);
+            return true;
+        }
         case N60_STAGE_SYMMETRY: return inR(v, -1.0, 1.0);
         case N60_STAGE_CROSSFEED: return inR(v, 0.0, 0.5);
         case N60_STAGE_CROSSTALK: return i == 0 ? inR(v, 200.0, 2000.0) : inR(v, 0.0, 1.0);
@@ -716,7 +740,7 @@ n60_status validateSystemStage(const n60_stage_desc &s, double rate, uint32_t ou
                 double c[5];
                 if (!designBiquad(0, rate, p[1 + 3 * k], p[2 + 3 * k], p[3 + 3 * k], c)) return N60_STATUS_BAD_ARGUMENT;
             }
-            break;
+            break;  // trailer sections: paramOk (range) and the full-parameter loop above
         case N60_STAGE_HEADPHONE: {
             const uint32_t n = static_cast<uint32_t>(p[9]) + static_cast<uint32_t>(p[10]);
             for (uint32_t k = 0; k < n; ++k) {
@@ -857,7 +881,13 @@ void systemInit(SnapHeader *h, const StageRec &r) {
     switch (r.kind) {
         case N60_STAGE_AMBIENT: {
             AmbShared *s = reinterpret_cast<AmbShared *>(sh);
-            for (uint32_t k = 0; k < 3; ++k) designInto(k == 0 ? 1u : (k == 2 ? 2u : 0u), rate, p[1 + 3 * k], p[2 + 3 * k], p[3 + 3 * k], s->coef[k]);
+            s->n = r.paramCount > 10 ? 3u + static_cast<uint32_t>(p[10]) : 3u;
+            for (uint32_t k = 0; k < s->n; ++k) {
+                const float *q = k < 3 ? p + 1 + 3 * k : p + 11 + 3 * (k - 3);
+                designInto(k == 0 ? 1u : (k == 2 ? 2u : 0u), rate, q[0], q[1], q[2], s->coef[k]);
+                std::memcpy(s->seen[k], q, sizeof s->seen[k]);
+                s->xf[k] = 0;
+            }
             for (uint32_t l = 0; l < r.laneCount; ++l) {
                 AmbLane *a = reinterpret_cast<AmbLane *>(laneState(h, r, l));
                 rampInit(a->g, static_cast<float>(db2lin(p[0])));
@@ -1120,7 +1150,7 @@ n60_status validateSystemParam(const SnapHeader *h, const StageRec &r, uint32_t 
             if (idx == 2 || idx == 3 || idx == 8) return paramOk(r.kind, idx, value, bp, h->sampleRate, h->outputChannels) ? N60_STATUS_UNSUPPORTED : N60_STATUS_BAD_ARGUMENT;
             return N60_STATUS_UNSUPPORTED;  // lane indexes, section counts, extra-sub count
         }
-        case N60_STAGE_AMBIENT: live = idx == 0; break;
+        case N60_STAGE_AMBIENT: live = idx != 10; break;  // ABI v32: bands and trailer sections are live; the count is topology
         case N60_STAGE_SYMMETRY:
         case N60_STAGE_CROSSFEED: live = true; break;
         case N60_STAGE_CROSSTALK: live = true; break;
@@ -1152,20 +1182,74 @@ namespace {
 
 void runAmbient(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) {
     const float *p = paramsOf(h, r);
-    const double(*coef)[5] = reinterpret_cast<AmbShared *>(sharedState(h, r))->coef;
+    AmbShared &s = *reinterpret_cast<AmbShared *>(sharedState(h, r));
+    const uint32_t ramp = h->rampFrames;
+    const double rate = h->sampleRate;
+    // A changed section runs as a second instance (new coefficients, state continued from the old one) and the
+    // two are crossfaded over the ramp window; an edit that arrives mid-crossfade is picked up when it ends.
+    for (uint32_t k = 0; k < s.n; ++k) {
+        const float *q = k < 3 ? p + 1 + 3 * k : p + 11 + 3 * (k - 3);
+        if ((q[0] != s.seen[k][0] || q[1] != s.seen[k][1] || q[2] != s.seen[k][2]) && s.xf[k] == 0) {
+            std::memcpy(s.seen[k], q, sizeof s.seen[k]);
+            designInto(k == 0 ? 1u : (k == 2 ? 2u : 0u), rate, q[0], q[1], q[2], s.coefN[k]);
+            if (ramp == 0) {
+                std::memcpy(s.coef[k], s.coefN[k], sizeof s.coef[k]);
+            } else {
+                for (uint32_t l = 0; l < r.laneCount; ++l) {
+                    AmbLane &a = *reinterpret_cast<AmbLane *>(laneState(h, r, l));
+                    a.zN[k] = a.z[k];
+                }
+                s.xf[k] = ramp;
+            }
+        }
+    }
+    const double invRamp = ramp != 0 ? 1.0 / static_cast<double>(ramp) : 0.0;
     for (uint32_t l = 0; l < r.laneCount; ++l) {
         AmbLane &a = *reinterpret_cast<AmbLane *>(laneState(h, r, l));
         if (p[0] != a.seen) {
             a.seen = p[0];
-            rampSet(a.g, static_cast<float>(db2lin(p[0])), h->rampFrames);
+            rampSet(a.g, static_cast<float>(db2lin(p[0])), ramp);
+        }
+        uint32_t left[kAmbMaxSec];
+        const double *cur[kAmbMaxSec];
+        bool idle[kAmbMaxSec];
+        for (uint32_t k = 0; k < s.n; ++k) {
+            left[k] = s.xf[k];
+            cur[k] = s.coef[k];
+            // Trailer sections at 0 dB with no state are an exact identity: skipped at no cost.
+            idle[k] = k >= 3 && left[k] == 0 && s.seen[k][1] == 0.0f && a.z[k].z1 == 0.0 && a.z[k].z2 == 0.0;
         }
         float *buf = lanes[laneOf(r, l)];
         for (uint32_t i = 0; i < frames; ++i) {
             double x = buf[i];
-            for (uint32_t b = 0; b < 3; ++b) x = bqRun(coef[b], a.z[b], x);
+            for (uint32_t b = 0; b < s.n; ++b) {
+                if (idle[b]) continue;
+                double o = bqRun(cur[b], a.z[b], x);
+                if (left[b] != 0) {
+                    const double on = bqRun(s.coefN[b], a.zN[b], x);
+                    o += (static_cast<double>(ramp - left[b] + 1) * invRamp) * (on - o);
+                    if (--left[b] == 0) {
+                        a.z[b] = a.zN[b];
+                        cur[b] = s.coefN[b];
+                    }
+                }
+                x = o;
+            }
             buf[i] = static_cast<float>(x) * rampNext(a.g);
         }
-        for (Bq &z : a.z) bqFlush(z);
+        for (uint32_t k = 0; k < s.n; ++k) {
+            bqFlush(a.z[k]);
+            if (left[k] != 0) bqFlush(a.zN[k]);
+        }
+    }
+    for (uint32_t k = 0; k < s.n; ++k) {  // adopt finished designs (every lane has run the same frames)
+        if (s.xf[k] == 0) continue;
+        if (s.xf[k] <= frames) {
+            std::memcpy(s.coef[k], s.coefN[k], sizeof s.coef[k]);
+            s.xf[k] = 0;
+        } else {
+            s.xf[k] -= frames;
+        }
     }
 }
 

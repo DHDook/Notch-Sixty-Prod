@@ -345,6 +345,7 @@
 		E4F7000000000000000000A4 /* QuietZoneNoiseSurvey.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4F7000000000000000000A2 /* QuietZoneNoiseSurvey.swift */; };
 		E4F7000000000000000000B4 /* ConversationUnmasking.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4F7000000000000000000B2 /* ConversationUnmasking.swift */; };
 		E4F730B00000000000000001 /* ConversationUnmaskingInputs.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4F730B00000000000000000 /* ConversationUnmaskingInputs.swift */; };
+		E4F730A00000000000000011 /* AmbientUnmaskOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4F730A00000000000000010 /* AmbientUnmaskOverlay.swift */; };
 		E4F730B00000000000000003 /* SpeechEnvelopeHistory.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4F730B00000000000000002 /* SpeechEnvelopeHistory.swift */; };
 		E4F200000000000000000002 /* QuietZoneFeedForwardNoiseSurvey.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4F200000000000000000012 /* QuietZoneFeedForwardNoiseSurvey.swift */; };
 		E4F200000000000000000003 /* QuietZoneFeedForwardSurveyController.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4F200000000000000000013 /* QuietZoneFeedForwardSurveyController.swift */; };
@@ -385,6 +386,7 @@
 		E4F7000000000000000000A5 /* QuietZoneNoiseSurveyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4F7000000000000000000A3 /* QuietZoneNoiseSurveyTests.swift */; };
 		E4F7000000000000000000B5 /* ConversationUnmaskingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4F7000000000000000000B3 /* ConversationUnmaskingTests.swift */; };
 		E4F730B00000000000000005 /* ConversationUnmaskingInputTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4F730B00000000000000004 /* ConversationUnmaskingInputTests.swift */; };
+		E4F730A00000000000000021 /* AmbientUnmaskOverlayTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4F730A00000000000000020 /* AmbientUnmaskOverlayTests.swift */; };
 		E4F300000000000000000001 /* QuietZoneFeedForwardShadowPlan.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4F300000000000000000011 /* QuietZoneFeedForwardShadowPlan.swift */; };
 		E4F300000000000000000002 /* QuietZoneFeedForwardShadow.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4F300000000000000000012 /* QuietZoneFeedForwardShadow.swift */; };
 		E4F700000000000000000F11 /* FeedForwardLiveEchoFeed.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4F700000000000000000F12 /* FeedForwardLiveEchoFeed.swift */; };
@@ -1073,6 +1075,7 @@
 		E4F7000000000000000000A2 /* QuietZoneNoiseSurvey.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuietZoneNoiseSurvey.swift; sourceTree = "<group>"; };
 		E4F7000000000000000000B2 /* ConversationUnmasking.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationUnmasking.swift; sourceTree = "<group>"; };
 		E4F730B00000000000000000 /* ConversationUnmaskingInputs.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationUnmaskingInputs.swift; sourceTree = "<group>"; };
+		E4F730A00000000000000010 /* AmbientUnmaskOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AmbientUnmaskOverlay.swift; sourceTree = "<group>"; };
 		E4F730B00000000000000002 /* SpeechEnvelopeHistory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechEnvelopeHistory.swift; sourceTree = "<group>"; };
 		E4F200000000000000000012 /* QuietZoneFeedForwardNoiseSurvey.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuietZoneFeedForwardNoiseSurvey.swift; sourceTree = "<group>"; };
 		E4F200000000000000000013 /* QuietZoneFeedForwardSurveyController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuietZoneFeedForwardSurveyController.swift; sourceTree = "<group>"; };
@@ -1113,6 +1116,7 @@
 		E4F7000000000000000000A3 /* QuietZoneNoiseSurveyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuietZoneNoiseSurveyTests.swift; sourceTree = "<group>"; };
 		E4F7000000000000000000B3 /* ConversationUnmaskingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationUnmaskingTests.swift; sourceTree = "<group>"; };
 		E4F730B00000000000000004 /* ConversationUnmaskingInputTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationUnmaskingInputTests.swift; sourceTree = "<group>"; };
+		E4F730A00000000000000020 /* AmbientUnmaskOverlayTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AmbientUnmaskOverlayTests.swift; sourceTree = "<group>"; };
 		E4F300000000000000000011 /* QuietZoneFeedForwardShadowPlan.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuietZoneFeedForwardShadowPlan.swift; sourceTree = "<group>"; };
 		E4F300000000000000000012 /* QuietZoneFeedForwardShadow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuietZoneFeedForwardShadow.swift; sourceTree = "<group>"; };
 		E4F700000000000000000F12 /* FeedForwardLiveEchoFeed.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeedForwardLiveEchoFeed.swift; sourceTree = "<group>"; };
@@ -1694,6 +1698,7 @@
 				E4F7000000000000000000A3 /* QuietZoneNoiseSurveyTests.swift */,
 				E4F7000000000000000000B3 /* ConversationUnmaskingTests.swift */,
 				E4F730B00000000000000004 /* ConversationUnmaskingInputTests.swift */,
+				E4F730A00000000000000020 /* AmbientUnmaskOverlayTests.swift */,
 				E4F7000000000000000000C3 /* QuietZoneVirtualMicrophoneTests.swift */,
 				E4F7000000000000000000E3 /* QuietZoneHeadPositionTests.swift */,
 				E4F7000000000000000000D3 /* QuietZoneZonesTests.swift */,
@@ -1921,6 +1926,7 @@
 				E4F7000000000000000000A2 /* QuietZoneNoiseSurvey.swift */,
 				E4F7000000000000000000B2 /* ConversationUnmasking.swift */,
 				E4F730B00000000000000000 /* ConversationUnmaskingInputs.swift */,
+				E4F730A00000000000000010 /* AmbientUnmaskOverlay.swift */,
 				E4F730B00000000000000002 /* SpeechEnvelopeHistory.swift */,
 				E4F7000000000000000000C2 /* QuietZoneVirtualMicrophone.swift */,
 				E4F7000000000000000000E2 /* QuietZoneHeadPosition.swift */,
@@ -2428,6 +2434,7 @@
 				E4F7000000000000000000A4 /* QuietZoneNoiseSurvey.swift in Sources */,
 				E4F7000000000000000000B4 /* ConversationUnmasking.swift in Sources */,
 				E4F730B00000000000000001 /* ConversationUnmaskingInputs.swift in Sources */,
+				E4F730A00000000000000011 /* AmbientUnmaskOverlay.swift in Sources */,
 				E4F730B00000000000000003 /* SpeechEnvelopeHistory.swift in Sources */,
 				E4F7000000000000000000C4 /* QuietZoneVirtualMicrophone.swift in Sources */,
 				E4F7000000000000000000E4 /* QuietZoneHeadPosition.swift in Sources */,
@@ -2671,6 +2678,7 @@
 				E4F7000000000000000000A5 /* QuietZoneNoiseSurveyTests.swift in Sources */,
 				E4F7000000000000000000B5 /* ConversationUnmaskingTests.swift in Sources */,
 				E4F730B00000000000000005 /* ConversationUnmaskingInputTests.swift in Sources */,
+				E4F730A00000000000000021 /* AmbientUnmaskOverlayTests.swift in Sources */,
 				E4F7000000000000000000C5 /* QuietZoneVirtualMicrophoneTests.swift in Sources */,
 				E4F7000000000000000000E5 /* QuietZoneHeadPositionTests.swift in Sources */,
 				E4F7000000000000000000D5 /* QuietZoneZonesTests.swift in Sources */,
