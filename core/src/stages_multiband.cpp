@@ -284,10 +284,8 @@ uint64_t multibandCarry(SnapHeader *from, SnapHeader *to) N60_RT_NONBLOCKING {
     return bytes;
 }
 
-// Denormal guard, once per block: decayed filter state below 1e-30 (-600 dBFS) is flushed to zero.
+// E20 S3: denormals are flushed in hardware (platform/fpenv.hpp, the guard in n60_graph_process), so no per-block flush.
 static_assert(std::atomic<uint32_t>::is_always_lock_free, "telemetry atomics must be lock free");
-static inline void flush(float &v) { if (std::fabs(v) < 1.0e-30f) v = 0.0f; }
-static inline void flushSt(BqState &s) { flush(s.z1); flush(s.z2); }
 
 void runMultiband(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) N60_RT_NONBLOCKING {
     const float *p = paramsOf(h, r);
@@ -369,11 +367,7 @@ void runMultiband(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t fram
         L[i] = outL;
         R[i] = outR;
     }
-    for (uint32_t i = 0; i < kMaxSections; ++i) {
-        flushSt(S.lowL[i]); flushSt(S.lowR[i]); flushSt(S.highL[i]); flushSt(S.highR[i]);
-    }
     for (uint32_t b = 0; b < kBands; ++b) {
-        flushSt(S.hpL[b]); flushSt(S.hpR[b]);
         S.grNowBits[b].store(floatToBits(std::fmax(0.0f, -S.gainDb[b])), std::memory_order_relaxed);
         atomicMaxFloat(S.grMaxBits[b], grMax[b]);
     }

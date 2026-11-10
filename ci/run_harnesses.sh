@@ -840,6 +840,24 @@ if selected e6_core_graph; then
         if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -Icore/include -Icore/src core/tests/test_fpenv.cpp \
             "${CORE_OBJS[@]}" -o "$OUT/e20_core_fpenv" \
             && "$OUT/e20_core_fpenv"; then :; else failed+=(e20_core_fpenv); fi
+        # E20 S3: SIMD primitives and lane independence, then the SIMD build against the scalar build (N60_SIMD=0):
+        # a chain through every SIMD stage must hash identically at every rate, lane count and block size.
+        if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -Icore/include -Icore/src core/tests/test_simd_parity.cpp \
+            "${CORE_OBJS[@]}" -o "$OUT/e20_simd_parity" && "$OUT/e20_simd_parity" check; then :; else failed+=(e20_simd_parity); fi
+        simd_scalar_ok=1
+        simd_scalar_objs=()
+        for src in "${CORE_SOURCES[@]}"; do
+            obj="$OUT/n60scalar_${src//\//_}.o"
+            if clang++ -std=c++20 -O2 -DN60_SIMD=0 -Wno-unknown-warning-option -fno-exceptions -fno-rtti -Icore/include -Icore/src \
+                -c "core/src/$src.cpp" -o "$obj"; then simd_scalar_objs+=("$obj"); else simd_scalar_ok=0; fi
+        done
+        if [ "$simd_scalar_ok" = 1 ] \
+            && clang++ -std=c++20 -O2 -DN60_SIMD=0 -Icore/include -Icore/src core/tests/test_simd_parity.cpp \
+                "${simd_scalar_objs[@]}" -o "$OUT/e20_simd_parity_scalar" \
+            && "$OUT/e20_simd_parity_scalar" check \
+            && "$OUT/e20_simd_parity" dump > "$OUT/e20_simd_dump_vector.txt" \
+            && "$OUT/e20_simd_parity_scalar" dump > "$OUT/e20_simd_dump_scalar.txt" \
+            && cmp "$OUT/e20_simd_dump_vector.txt" "$OUT/e20_simd_dump_scalar.txt"; then :; else failed+=(e20_simd_scalar_parity); fi
     else
         failed+=(e6_core_graph)
     fi
