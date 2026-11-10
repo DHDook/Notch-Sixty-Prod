@@ -1,0 +1,235 @@
+# Shared room position model (design note, parked)
+
+## Status
+
+- Design note only, for owner review (owner question of 9 Nov 2026: what would it entail?).
+- Parked: Execution order item 14 (owner, 3 Nov 2026). Not in the active order; nothing is built.
+- No epic ID or flag yet; proposed `E29` and `e29.room-model` if the owner unparks it (Q1).
+- Open owner decisions: Q1–Q9 below.
+
+## Goal
+
+Measure once, use everywhere. One versioned store of the room's points (speakers, subs, seats, ears,
+reference microphones) and the measured transfer functions between them, with optional positions
+and a bounded, honest interpolation, so E24/E10 room correction, E4 Quiet Zone and Conversation
+Focus, E26 sub-aware Quiet Zone and E19 MIMO treatment read the same data, see the same staleness,
+and never ask the user to measure the same path twice.
+
+Non-goals: wave-based room simulation, microphone-array sound-field capture, and any use of
+predicted (interpolated) data to design a live ANC or MIMO filter.
+
+## What exists today
+
+Each feature keeps its own form of the same physics; there is no shared model.
+
+| Data | Where | Form |
+| --- | --- | --- |
+| Room correction seats | `ProductProfiles.swift:2469` `RoomCorrectionMeasurementPosition` | name, included, weight, rate, L/R `RoomCorrectionChannelMeasurement` (`:2461`: `rawCapture`, `impulseResponse`, `transferFunction`) inline in profile JSON; `ancBassFingerprint` (`:2480`); output-gain stamp (`:586`). No coordinates |
+| Seat weights | `RoomCorrectionCore.swift:56,63,473` | `SeatImpulseResponse`, `defaultSeatWeights` (main seat 2), `RoomCorrectionDesignRecord.seatWeights` |
+| Measurement library | `MeasurementLibrary.swift:7` | `MeasurementRecord`: `seat: String?`, `timingTier` (loopback, reference, none), IR and raw capture as files |
+| Multi-mic seats | `MeasurementSeatPlan.swift:9,30`, `MeasurementMultiMic.swift:26,50` | seat = input device UID + channel, up to 16 |
+| Geometry | `RoomGeometryPlacement.swift:3,16,22` | `RoomGeometryModel` v1: room dimensions, listener, L and R speakers in metres; sub positions in `RoomAdvancedPlacementState` (`:1383`). Used only by the passive-treatment advisor (`ProductionRoomGeometrySection.swift`) and rectangular-mode predictions (`:210,365`) |
+| Arrangement | `Arrangement/SystemArrangement.swift:66,79,209` | roles and feeds; `SpeakerFeedCalibration.delayMs`, no distances |
+| Quiet Zone head survey | `QuietZoneHeadPosition.swift:46,58,78` | surveyed points (x, y, z) with virtual-mic tone ratios; inverse-distance-squared blend of 3 neighbours, refused beyond 0.5 m |
+| Virtual seat design | `QuietZoneVirtualSeatDesigner.swift:6` | per-frequency complex source→reference, source→listener, secondary→listener, leakage |
+| E26 sub paths | `QuietZone/AncBassPath.swift:101,177`, `SubPathMeasurement.swift:13` | `CombinedAncPathRecord`: source, destination, band, window, rate, `AncBassPathFingerprint`, IR (plain form, owner 3 Nov 2026) |
+| E19 plants | `MIMORoomTreatmentDesigner.swift:3,52`; `docs/epics/E19.md` design note 2 | per-output raw IRs from E24 captures, per-seat include and weight |
+| Reference room | `core/include/n60/measure.h:121-160` | synthetic N-source × K-seat IRs (max 8 × 8), seat delays, modal variation; no geometry |
+| Conversation Focus | `ConversationUnmasking.swift`; `docs/epics/E4.md` S30 and Log 3 Nov 2026 | needs music-at-seat band levels; today from the analysis microphone's playback prediction |
+
+Data gaps this exposes (recorded here; they become ledger entries if the note is unparked):
+seats have no stable identity across features (name strings, device-channel ids, survey points);
+only the geometry advisor stores coordinates, and it does not link to any measurement; timing tier
+is recorded in the library but not in room-correction positions, so cross-source phase cannot be
+trusted from those; E26 G33 (multichannel seat positions not stamped).
+
+## Design note
+
+1. **Model.** A `RoomModel` has *points* and *paths*.
+   - Point: stable UUID, kind (speaker feed, sub lane, seat, ear, reference mic, survey point),
+     name, optional position (x, y, z in metres, room frame; origin front-left floor corner, x
+     across, y into the room, z up), position source (typed, acoustic locate, camera, unknown) and
+     its uncertainty.
+   - Path: source point → receiver point, measured once, with: rate, timing tier, window and band,
+     microphone calibration name, output-gain stamp, `AncBassPathFingerprint` or arrangement
+     revision, output device UID, date, quality, and a reference to the IR file. A path is
+     *measured* or *derived*; derived paths are never persisted and always carry confidence.
+   - The model is an index over existing records first (S1). It adopts
+     `RoomCorrectionMeasurementPosition`, `MeasurementRecord`, `CombinedAncPathRecord` and the head
+     survey as path sources without changing them; E26's plain record is absorbed unchanged.
+2. **Measured data is authoritative; positions are an index.** Every feature works with named
+   points and no coordinates. Coordinates only enable interpolation, acoustic checks and the seat
+   map.
+3. **Timing.** Relative phase between sources is trusted only for paths with loopback or reference
+   timing captured in one session at one rate. Paths with timing tier none are magnitude-only for any
+   cross-source use. This is the condition the E19 plant and E4 virtual seat already assume.
+4. **Interpolation (derived paths), per band.**
+   - Low band, below f_c = c / (4 d), where d is the spacing to the nearest neighbours (0.5 m gives
+     about 170 Hz): complex inverse-distance blend of up to three neighbours after removing each
+     path's direct-arrival delay, then restoring the delay for the query position when it has a
+     position. This generalises today's head-survey blend.
+   - Above f_c: third-octave energy magnitude only (power average, distance-weighted), no phase.
+   - Trust radius 0.5 m (as today); outside it, or with neighbours that disagree by more than a
+     per-band spread limit, the query returns "not measured" with the reason.
+   - Confidence per band: the neighbour spread plus repeat-measurement scatter.
+   - Deferred (Q6): a modal fit (rectangular modes from `RoomModePrediction`, amplitudes and
+     damping fitted to measured points) below the Schroeder frequency (about 150–200 Hz in a living
+     room), for display only; it fails in irregular rooms.
+5. **Who may use what.**
+
+   | Consumer | Measured paths | Derived paths |
+   | --- | --- | --- |
+   | E24/E10 room correction design | yes | no (seat suggestions and display only) |
+   | E4 S30 music at seat (ambient EQ cut, bounded 6 dB per band, 3 dB overall) | yes | yes, third-octave magnitude, with confidence |
+   | E4 Quiet Zone and E26 filter design, arming | yes | no |
+   | E4 S26 virtual mic head selection | survey points | existing 3-neighbour blend only, inside 0.5 m |
+   | E19 MIMO design and verification | yes | no (predicted-decay display only) |
+   | Passive-treatment advisor | geometry | modal predictions |
+
+6. **Rates.** Frequency-domain queries are rate-free up to the lower of the capture Nyquist and
+   20 kHz. Time-domain IR queries return the capture rate; a consumer at another rate refuses, or
+   resamples offline with the resample recorded in the path (an explicit design decision, never
+   transport SRC). All eight standard rates up to 384 kHz are valid capture rates.
+7. **Staleness.** A path is stale when its fingerprint, arrangement revision, output device UID,
+   output-gain stamp or microphone calibration no longer matches. One rule, one message, shared by
+   every consumer ("Your speakers or bass settings changed. Measure this seat again.").
+8. **Acoustic locate (offline).** With loopback timing and entered speaker positions, the
+   time of flight from each full-range speaker (onset of the IR high-passed above 2 kHz, so the
+   tweeter's arrival, after subtracting the loopback latency) gives distances; two speakers locate
+   the mic in the horizontal plane at an assumed height, resolving the front-back mirror by
+   "seat is in front of the speakers"; three or more give a least-squares fix. Subs are excluded
+   (low-pass group delay). The same distances cross-check `SpeakerFeedCalibration.delayMs`.
+9. **Storage.** `RoomModel.json` (schema v1: points, paths metadata, references) in the profile's
+   sandbox container folder, IRs as 32-bit float WAV beside it, like the measurement library.
+   Profile JSON keeps only the model ID. Inline `rawCapture` arrays in existing profiles are read
+   through the S1 adapter, not migrated (Q4). IR length is windowed at capture (1 s at 384 kHz is
+   1.5 MB, so 8 sources × 16 points stays near 200 MB at the top rate; the store warns above a size
+   cap).
+10. **Core.** The interpolation, locate and modal maths go in `libn60core` behind the C interface
+    (`n60/roommodel.h`, ABI bump), off the realtime path; Swift owns the store, UI and flags. The
+    model never runs in a render callback, never arms anything and never changes an engine
+    snapshot by itself.
+11. **UI.** Rooms page gains a top-down seat map, built on `ProductionRoomGeometrySection`: drag
+    speakers, subs and seats; optional room size; height field; metres or feet by locale.
+    "Locate from measurement" fills a seat's position from item 8 and shows its uncertainty.
+    Unpositioned points list beside the map. Each path shows its state (measured, stale, not
+    measured) and which features use it. Camera head positions (E4 S26b) are shown live and never
+    stored.
+12. **Safety and privacy.** Do-no-harm gates, arming and trip rules are unchanged; interpolated data
+    never reaches a live ANC or MIMO design (table above). No new recording: the store keeps only
+    sweep IRs that features already keep. Camera poses are not persisted; survey positions are.
+
+## Slices
+
+Sizes are product code, excluding tests. Order assumes the note is unparked as one epic.
+
+### S1 `e29/model-index` (low-risk, about 1,000 lines)
+- [ ] `RoomModel` types (points, paths, kinds, timing tier, staleness rule) and a read-only adapter
+      over room-correction positions, the measurement library, `CombinedAncPathRecord` and the head
+      survey; stable point IDs; query by source and receiver; completeness report.
+- Tests: adapter returns every existing record exactly once; staleness flips on fingerprint,
+  arrangement, device, gain-stamp and calibration change; timing tier none is magnitude-only;
+  queries at all eight standard rates. Bench: none.
+
+### S2 `e29/model-store` (low-risk, about 900 lines)
+- [ ] `RoomModel.json` schema v1 plus WAV IRs, profile reference, export and import, size cap.
+- Tests: round trip byte-stable; unknown schema refused by name; corrupt WAV refused; IRs at all
+  eight rates round-trip bit-exact. Bench: none.
+
+### S3 `e29/interpolation-core` (needs-owner: engine core C interface, about 1,200 lines)
+- [ ] `n60/roommodel.h`: delay-compensated complex blend below f_c, third-octave energy above,
+      trust radius, spread limit, per-band confidence; a shoebox image-source reference room in the
+      test harness that generates ground-truth IRs at arbitrary positions.
+- Tests (C harness and XCTest, at 44.1, 48, 88.2, 96, 176.4, 192, 352.8 and 384 kHz): held-out
+  point 0.25 m inside a 0.5 m grid: complex error at or below −15 dB re the measured response below
+  f_c, third-octave magnitude within 2 dB from 200 Hz to 8 kHz; query 0.6 m away refused;
+  deterministic output. Bench: E22 held-out grid point in a real room.
+
+### S4 `e29/seat-map` (low-risk, about 1,200 lines)
+- [ ] Seat map UI on the Rooms page, position entry, units, path states, feature usage; links
+      `RoomGeometryModel` points to model points instead of a separate store.
+- Tests: view-model edits persist; unpositioned points still listed; VoiceOver labels; reachable
+  from the Rooms page. Bench: none.
+
+### S5 `e29/acoustic-locate` (low-risk, about 800 lines; maths in core)
+- [ ] Time-of-flight locate (design note 8) and the delay cross-check, offered only with loopback
+      timing.
+- Tests at all eight rates: anechoic synthetic within 2 cm, image-source room within 5 cm; two
+  speakers give the front solution; sub excluded; refused without loopback timing. Bench: E22 tape
+  measure versus locate at three seats.
+
+### S6 `e29/music-at-seat` (needs-owner: E4 Conversation Focus input, about 900 lines)
+- [ ] Programme third-octave levels times the seat's measured (or derived, with confidence)
+      magnitude plus the output-gain stamp give music SPL per band at the seat, for the S30
+      planner; low confidence falls back to today's analysis-mic prediction. Depends on E4's own S30
+      overlay design note (fit onto three sections or more overlay sections), not solved here.
+- Tests at all eight rates: synthetic seat, known programme levels: predicted band levels within
+  0.5 dB of the convolution truth; fallback taken when confidence is low; no recording kept.
+  Bench: E22 pink noise, predicted versus measured music at the seat.
+
+### S7 `e29/consumer-adoption` (needs-owner: ANC, MIMO and room-correction design inputs, about 1,400 lines)
+- [ ] E24/E10 design, E26 sub paths, E4 virtual seat and head survey, and the E19 plant builder read
+      through the model; one staleness message; E26 G33 seat stamping covered by the model's rule.
+- Tests: every consumer's design is bit-identical through the model and through today's direct
+  inputs, at all eight rates; derived paths refused by the ANC, MIMO and room-correction designers.
+  Bench: E22 Quiet Zone and MIMO repeat at the seat, same results as before adoption.
+
+### S8 `e29/modal-fit` (optional, needs-owner: engine core, about 1,000 lines)
+- [ ] Low-frequency modal fit for display and seat-map heat maps only.
+- Tests: shoebox reference: fitted mode frequencies within 2 percent, predicted level at a held-out
+  point within 3 dB below the Schroeder frequency; irregular-room case reports low confidence.
+
+### S9 `e29/ship` (needs-owner: removes the flag in ANC-adjacent code, about 300 lines)
+- [ ] Flag removal, end-to-end test from the seat map through a consumer, every gap closed.
+
+Total: 8 slices without S8, about 7,700 lines of product code plus tests; 9 with S8.
+
+## Feature flag
+
+Proposed `e29.room-model` in `FeatureFlag.all`, default off. Off: every feature reads its own
+records exactly as today. On: the seat map shows, and S6/S7 consumers read through the model.
+Removed in S9.
+
+## Bench checks (deferred to E22)
+
+- Real room, 5 points on a 0.5 m grid around the main seat: hold out the centre; interpolation
+  meets the S3 limits, or the shortfall is recorded.
+- Acoustic locate versus tape measure at three seats (S5).
+- Music at seat: pink-noise programme, predicted versus measured third-octave levels (S6).
+- Quiet Zone, E26 and E19 results unchanged after adoption (S7).
+- Large store at 384 kHz: load time and size on the slowest supported Mac.
+
+## Risks
+
+- Plausible but wrong interpolation. Mitigation: derived data never drives live ANC, MIMO or room
+  correction design; trust radius, spread limit and confidence on every derived value.
+- Inconsistent timing or calibration across sessions makes cross-source phase meaningless.
+  Mitigation: design note 3; paths from different sessions are magnitude-only together.
+- Five record types adopted at once can regress shipped designs. Mitigation: read-only adapter
+  first, bit-identical equivalence tests in S7, flag off by default.
+- Storage size at 384 kHz. Mitigation: windowed IRs, size cap, warning.
+- Rooms change (furniture, people); only dates and staleness warnings help.
+
+## Open questions for the owner
+
+1. **Placement and ID.** Keep parked at item 14 as an un-numbered note, or open it as E29 with flag
+   `e29.room-model`? Recommended: stays parked; assign E29 only when unparked.
+2. **Does E4 S30 wait for it?** S30's wiring note says it needs music-at-seat levels from this model.
+   Recommended: no. S30 ships with today's analysis-mic playback prediction (the mic is at the seat
+   for Quiet Zone); S6 refines it later.
+3. **Coordinates optional?** Recommended: yes; every feature works with named points only.
+4. **Existing inline captures.** Migrate `rawCapture` arrays out of profile JSON, or read them in
+   place? Recommended: read in place through the S1 adapter; new captures go to the store.
+5. **Derived data for live design.** Recommended: never for ANC, MIMO or room correction design;
+   allowed for S30 (bounded ambient cut) and display.
+6. **Modal fit (S8).** Recommended: optional, after v1 unless the seat map needs heat maps.
+7. **Acoustic locate (S5).** Recommended: include; it gives positions without a tape measure and
+   checks delays.
+8. **Rate policy.** Recommended: frequency-domain queries rate-free; time-domain same-rate only,
+   with explicit recorded offline resampling.
+9. **v1 or after.** Recommended: after v1, with S1–S2 pulled forward only if an epic needs a shared
+   seat identity before then (E26 G33 is covered by its own S7 slice today).
+
+## Gaps
+
+## Log
