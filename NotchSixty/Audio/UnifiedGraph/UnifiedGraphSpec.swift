@@ -80,6 +80,12 @@ struct UnifiedGraphOutputProtection: Equatable, Sendable {
         self.init(independent: settings.independent, laneSettings: settings.lanes)
     }
 
+    /// E9 S7: the headroom assistant's trim for output `lane` as a linear gain (1 when none), applied by the lane's OUTPUT_GAIN stage.
+    func trimGain(lane: Int) -> Float {
+        guard let trim = laneSettings[lane]?.trimDB, trim.isFinite, trim < 0 else { return 1 }
+        return Float(pow(10, max(trim, OutputProtectionSettings.trimRangeDB.lowerBound) / 20))
+    }
+
     /// The parameters of the user stage that guards output `lane` alone: the program parameters with the ceiling clamped to
     /// the hard ceiling and the lane's override applied. Only the ceiling moves (live parameter 1), so every lane keeps the
     /// program look-ahead and oversampling, hence the same latency, and an edit never needs a rebuild.

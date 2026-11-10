@@ -158,6 +158,9 @@ final class UnifiedGraphHost: @unchecked Sendable {
         return written
     }
 
+    /// E9 S7: a copy of the published spec, read under the host lock. Control plane.
+    var currentSpec: UnifiedGraphSpec { lock.lock(); defer { lock.unlock() }; return spec }
+
     var inputChannels: UInt32 { lock.lock(); defer { lock.unlock() }; return spec.inputChannels }
     var outputChannels: UInt32 { lock.lock(); defer { lock.unlock() }; return spec.outputChannels }
 

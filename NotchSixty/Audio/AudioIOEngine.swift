@@ -3013,6 +3013,15 @@ final class AudioIOEngine: ObservableObject {
         return host.outputProtectionReadings(lanes: lanes)
     }
 
+    /// E9 S7: the published graph spec of the running render, with the output lane count, for the headroom assistant. nil when
+    /// no graph renders. Control plane (the host lock); the model itself runs off the main actor on the copy.
+    func headroomSpecSnapshot() -> (spec: UnifiedGraphSpec, lanes: Int)? {
+        let lanes = outputProtectionLanes.count
+        guard lanes > 0,
+              let host = transportSession?.unifiedGraphReadback ?? nChannelTransportSession?.unifiedGraphReadback else { return nil }
+        return (host.currentSpec, lanes)
+    }
+
     func replaceDynamicsConfiguration(_ configuration: DynamicsConfiguration) throws {
         let validationRate = transportSession?.outputFormat.sampleRate
             ?? nChannelTransportSession?.outputFormat.sampleRate

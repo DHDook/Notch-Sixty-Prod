@@ -1048,6 +1048,9 @@ struct ProductionOutputProtectionSection: View {
     var programLimiterOn = true
 
     @State private var readings: [Int: UnifiedGraphOutputProtectionReading] = [:]
+    /// E9 S7: the assistant's latest estimate per output, and the settings to restore on Undo.
+    @State private var headroom: [Int: OutputHeadroom] = [:]
+    @State private var undoSettings: OutputProtectionSettings?
 
     var body: some View {
         let lanes = engine.outputProtectionLanes
@@ -1068,6 +1071,7 @@ struct ProductionOutputProtectionSection: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
+                    headroomControls
                     if !programLimiterOn {
                         Text("The program Limiter is off, so these ceilings have no effect. The \(Int(UnifiedGraphOutputProtection.hardLimitCeilingDB)) dBFS hard limit still holds every output.")
                             .font(.caption)
@@ -1078,7 +1082,63 @@ struct ProductionOutputProtectionSection: View {
                 .padding(.vertical, 5)
             }
             .task { await poll() }
+            .task(id: HeadroomKey(settings: settings, running: engine.lifecycleState == .running)) { await refreshHeadroom() }
         }
+    }
+
+    private struct HeadroomKey: Equatable {
+        let settings: OutputProtectionSettings
+        let running: Bool
+    }
+
+    private var headroomControls: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text("Headroom").font(.subheadline.weight(.medium))
+                Spacer()
+                Button("Apply") {
+                    undoSettings = settings
+                    apply(HeadroomAssistant.applying(headroom.values.sorted { $0.lane < $1.lane }, to: settings))
+                }
+                .disabled(!headroom.values.contains { $0.isComplete && !$0.isSatisfied })
+                .accessibilityLabel("Apply headroom trims")
+                Button("Undo") {
+                    if let previous = undoSettings { apply(previous); undoSettings = nil }
+                }
+                .disabled(undoSettings == nil)
+                .accessibilityLabel("Undo headroom trims")
+            }
+            Toggle("Strict (assume redirected bass adds coherently)", isOn: Binding(
+                get: { settings.headroomStrict },
+                set: { value in var next = settings; next.headroomStrict = value; apply(next) }
+            ))
+            .font(.caption)
+            Text("Apply trims each output just enough that a full-scale input stays under its ceiling, using the EQ, room correction, crossover and bass management in the graph. A trim never boosts. Outputs the estimate cannot cover are skipped.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    @MainActor
+    private func refreshHeadroom() async {
+        guard engine.lifecycleState == .running, let snapshot = engine.headroomSpecSnapshot() else {
+            headroom = [:]
+            return
+        }
+        var trims: [Int: Double] = [:]
+        for (index, lane) in settings.lanes { trims[index] = lane.trimDB }
+        let results = await HeadroomRecompute.run(spec: snapshot.spec, laneCount: snapshot.lanes, strict: settings.headroomStrict, trimsDB: trims)
+        guard !Task.isCancelled else { return }
+        headroom = Dictionary(uniqueKeysWithValues: results.map { ($0.lane, $0) })
+    }
+
+    static func headroomText(_ result: OutputHeadroom) -> String {
+        if !result.isComplete { return "headroom: estimate incomplete (\(result.incomplete.joined(separator: ", ")))" }
+        var text = String(format: "peak gain %+.1f dB at %.0f Hz", result.peakGainDB, result.peakHz)
+        if result.neededDB > 0.05 { text += String(format: "  ·  needs %.1f dB", result.neededDB) }
+        if result.currentTrimDB < 0 { text += String(format: "  ·  trim %.1f dB", result.currentTrimDB) }
+        if result.limiterPredicted { text += "  ·  limiter will engage" }
+        return text
     }
 
     private func row(_ lane: AudioIOEngine.OutputProtectionLane) -> some View {
@@ -1114,6 +1174,11 @@ struct ProductionOutputProtectionSection: View {
                     next.set(updated, at: lane.index)
                     apply(next)
                 }
+            }
+            if let result = headroom[lane.index] {
+                Text(Self.headroomText(result))
+                    .font(.caption.monospaced())
+                    .foregroundStyle(result.limiterPredicted || !result.isComplete ? Color.orange : Color.secondary)
             }
             if let reading = readings[lane.index] {
                 Text(readoutText(reading, own: own))

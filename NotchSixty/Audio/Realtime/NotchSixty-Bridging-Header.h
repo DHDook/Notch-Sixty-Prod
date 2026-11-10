@@ -6,6 +6,7 @@
 #import "n60/measure.h"
 #import "n60/correct.h"
 #import "n60/xover.h"
+#import "n60/headroom.h"
 #import "n60/fold.h"
 #import "N60MeasurementMonitorProc.h"
 #import "N60LevelSessionProc.h"
