@@ -5,9 +5,7 @@ struct ProductionSpectrumView: View {
     let isRunning: Bool
     let resetPeakHold: () -> Void
 
-    @State private var showInput = true
-    @State private var showOutput = true
-    @State private var showPeakHold = true
+    @State private var model = SpectrumDisplayModel()
 
     private let frequencyMarks: [Double] = [20, 50, 100, 200, 500, 1_000, 2_000, 5_000, 10_000, 20_000]
     private let levelMarks: [Float] = [0, -20, -40, -60, -80]
@@ -18,7 +16,7 @@ struct ProductionSpectrumView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Input / Output Spectrum")
                         .font(.title2.bold())
-                    Text("96 logarithmic display bands · −80…0 dBFS · off-callback analysis")
+                    Text("288 logarithmic display bands · −80…0 dBFS · off-callback analysis")
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
@@ -29,17 +27,20 @@ struct ProductionSpectrumView: View {
             }
 
             HStack(spacing: 18) {
-                Toggle("Input", isOn: $showInput)
-                Toggle("Output", isOn: $showOutput)
-                Toggle("Peak Hold", isOn: $showPeakHold)
+                Toggle("Input", isOn: $model.options.showInput)
+                Toggle("Output", isOn: $model.options.showOutput)
+                Toggle("Peak Hold", isOn: $model.options.showPeakHold)
             }
             .toggleStyle(.switch)
+
+            spectrumOptionsBar
+            spectrumHoverLine
 
             if !isRunning {
                 analysisStatusBanner(
                     "Start processing to view the spectrum. Capture, FFT, and display updates are parked while processing is stopped."
                 )
-            } else if snapshot.spectrum.isEmpty {
+            } else if snapshot.spectrum.isEmpty && model.bands.isEmpty {
                 analysisStatusBanner("Spectrum capture is filling the analysis window…")
             }
 
@@ -47,12 +48,18 @@ struct ProductionSpectrumView: View {
                 .frame(minHeight: 360)
                 .padding(14)
                 .background(.quaternary.opacity(0.20), in: .rect(cornerRadius: 20))
+                .onChange(of: snapshot.spectrum) { _, bands in
+                    model.ingest(bands, now: ProcessInfo.processInfo.systemUptime)
+                }
 
             HStack(spacing: 20) {
                 Label("Input", systemImage: "line.diagonal")
                     .foregroundStyle(.secondary)
                 Label("Output", systemImage: "waveform")
-                if showPeakHold {
+                if model.reference != nil {
+                    Label("Reference", systemImage: "minus")
+                }
+                if model.options.showPeakHold {
                     Label("Peak hold", systemImage: "ellipsis")
                         .foregroundStyle(.secondary)
                 }
@@ -85,8 +92,8 @@ struct ProductionSpectrumView: View {
 
                 Canvas { context, size in
                     drawSpectrumGrid(context: &context, size: size)
-                    if showPeakHold {
-                        if showInput {
+                    if model.options.showPeakHold {
+                        if model.options.showInput {
                             drawSpectrumTrace(
                                 context: &context,
                                 size: size,
@@ -96,7 +103,7 @@ struct ProductionSpectrumView: View {
                                 dash: [4, 4]
                             )
                         }
-                        if showOutput {
+                        if model.options.showOutput {
                             drawSpectrumTrace(
                                 context: &context,
                                 size: size,
@@ -107,7 +114,7 @@ struct ProductionSpectrumView: View {
                             )
                         }
                     }
-                    if showInput {
+                    if model.options.showInput {
                         drawSpectrumTrace(
                             context: &context,
                             size: size,
@@ -117,7 +124,7 @@ struct ProductionSpectrumView: View {
                             dash: [6, 3]
                         )
                     }
-                    if showOutput {
+                    if model.options.showOutput {
                         drawSpectrumTrace(
                             context: &context,
                             size: size,
@@ -126,6 +133,25 @@ struct ProductionSpectrumView: View {
                             lineWidth: 2.2,
                             dash: []
                         )
+                    }
+                    drawReferenceTrace(context: &context, size: size)
+                    drawHoverMarker(context: &context, size: size)
+                }
+                .accessibilityIdentifier("meters.spectrum.plot")
+                .accessibilityLabel("Spectrum plot")
+                .accessibilityValue(spectrumAccessibilityValue)
+                .overlay {
+                    GeometryReader { proxy in
+                        Color.clear
+                            .contentShape(Rectangle())
+                            .onContinuousHover { phase in
+                                switch phase {
+                                case .active(let location):
+                                    model.hoverFraction = Double(min(max(location.x / max(proxy.size.width, 1), 0), 1))
+                                case .ended:
+                                    model.hoverFraction = nil
+                                }
+                            }
                     }
                 }
             }
@@ -151,7 +177,7 @@ struct ProductionSpectrumView: View {
     }
 
     private var visibleFrequencyMarks: [Double] {
-        guard let highest = snapshot.spectrum.last?.frequencyHz else { return frequencyMarks }
+        guard let highest = model.bands.last?.frequencyHz else { return frequencyMarks }
         return frequencyMarks.filter { $0 <= highest * 1.08 }
     }
 
@@ -180,9 +206,9 @@ struct ProductionSpectrumView: View {
         lineWidth: CGFloat,
         dash: [CGFloat]
     ) {
-        guard !snapshot.spectrum.isEmpty else { return }
+        guard !model.bands.isEmpty else { return }
         var path = Path()
-        for (index, band) in snapshot.spectrum.enumerated() {
+        for (index, band) in model.bands.enumerated() {
             let point = CGPoint(
                 x: frequencyX(band.frequencyHz, width: size.width),
                 y: levelY(value(band), height: size.height)
@@ -201,10 +227,7 @@ struct ProductionSpectrumView: View {
     }
 
     private func frequencyX(_ frequency: Double, width: CGFloat) -> CGFloat {
-        let maximumFrequency = max(snapshot.spectrum.last?.frequencyHz ?? 20_000, 21)
-        let clamped = min(max(frequency, 20), maximumFrequency)
-        let fraction = log10(clamped / 20) / log10(maximumFrequency / 20)
-        return width * CGFloat(fraction)
+        width * CGFloat(model.axis.fraction(frequency: frequency))
     }
 
     private func levelY(_ level: Float, height: CGFloat) -> CGFloat {
@@ -218,6 +241,81 @@ struct ProductionSpectrumView: View {
             return String(format: "%.0fk", frequency / 1_000)
         }
         return "\(Int(frequency))"
+    }
+
+    private var spectrumOptionsBar: some View {
+        HStack(spacing: 14) {
+            Picker("Smoothing", selection: $model.options.smoothing) {
+                ForEach(SpectrumSmoothing.allCases) { Text($0.title).tag($0) }
+            }
+            .accessibilityIdentifier("meters.spectrum.smoothing")
+            Picker("Averaging", selection: $model.options.averaging) {
+                ForEach(SpectrumAveraging.allCases) { Text($0.title).tag($0) }
+            }
+            .accessibilityIdentifier("meters.spectrum.averaging")
+            Picker("Tilt", selection: $model.options.tilt) {
+                ForEach(SpectrumTilt.allCases) { Text($0.title).tag($0) }
+            }
+            .accessibilityIdentifier("meters.spectrum.tilt")
+            Toggle("Freeze", isOn: Binding(get: { model.isFrozen }, set: { model.setFrozen($0) }))
+                .toggleStyle(.button)
+                .accessibilityIdentifier("meters.spectrum.freeze")
+            Button("Set Reference") { model.captureReference() }
+                .disabled(model.bands.isEmpty)
+                .accessibilityIdentifier("meters.spectrum.setReference")
+            Button("Clear Reference") { model.clearReference() }
+                .disabled(model.reference == nil)
+                .accessibilityIdentifier("meters.spectrum.clearReference")
+            Spacer()
+        }
+        .pickerStyle(.menu)
+        .controlSize(.small)
+    }
+
+    private var spectrumHoverLine: some View {
+        Group {
+            if let readout = model.hoverReadout {
+                Text(SpectrumReadoutText.line(readout))
+            } else {
+                Text("Hover over the plot to read frequency and level.")
+            }
+        }
+        .font(.caption.monospacedDigit())
+        .foregroundStyle(.secondary)
+        .accessibilityIdentifier("meters.spectrum.hover")
+    }
+
+    private var spectrumAccessibilityValue: String {
+        if model.isFrozen { return "Frozen" }
+        guard let peak = model.bands.max(by: { $0.outputDB < $1.outputDB }) else { return "No data" }
+        return "Output peak \(SpectrumReadoutText.level(peak.outputDB)) near \(SpectrumReadoutText.frequency(peak.frequencyHz))"
+    }
+
+    private func drawReferenceTrace(context: inout GraphicsContext, size: CGSize) {
+        guard let reference = model.reference, reference.frequencies.count == reference.levelsDB.count,
+              !reference.frequencies.isEmpty else { return }
+        var path = Path()
+        for index in reference.frequencies.indices {
+            let point = CGPoint(
+                x: frequencyX(reference.frequencies[index], width: size.width),
+                y: levelY(reference.levelsDB[index], height: size.height)
+            )
+            if index == 0 { path.move(to: point) } else { path.addLine(to: point) }
+        }
+        context.stroke(
+            path,
+            with: .color(.accentColor.opacity(0.9)),
+            style: StrokeStyle(lineWidth: 1.4, lineJoin: .round, dash: [2, 3])
+        )
+    }
+
+    private func drawHoverMarker(context: inout GraphicsContext, size: CGSize) {
+        guard let readout = model.hoverReadout else { return }
+        let x = frequencyX(readout.frequencyHz, width: size.width)
+        var path = Path()
+        path.move(to: CGPoint(x: x, y: 0))
+        path.addLine(to: CGPoint(x: x, y: size.height))
+        context.stroke(path, with: .color(.primary.opacity(0.45)), lineWidth: 0.8)
     }
 
     private var analysisCaptureStatus: some View {
@@ -426,5 +524,25 @@ struct ProductionStereoAnalysisView: View {
             .padding(12)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(.quaternary.opacity(0.18), in: .rect(cornerRadius: 12))
+    }
+}
+
+
+/// Text for the spectrum read-out; plain functions so the tests can check them.
+enum SpectrumReadoutText {
+    static func frequency(_ hertz: Double) -> String {
+        hertz >= 1_000 ? String(format: "%.2f kHz", hertz / 1_000) : String(format: "%.0f Hz", hertz)
+    }
+
+    static func level(_ db: Float) -> String {
+        String(format: "%.1f dB", db)
+    }
+
+    static func line(_ readout: SpectrumHoverReadout) -> String {
+        var text = "\(frequency(readout.frequencyHz))  Input \(level(readout.inputDB))  Output \(level(readout.outputDB))"
+        if let reference = readout.referenceDB {
+            text += "  Reference \(level(reference)) (Output \(String(format: "%+.1f", readout.outputDB - reference)) dB)"
+        }
+        return text
     }
 }
