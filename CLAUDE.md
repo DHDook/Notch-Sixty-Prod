@@ -8,7 +8,7 @@
   builds one slice in a fresh context), realtime-reviewer (Sonnet), and code-scout,
   build-test-runner, plan-tracker, pr-writer (Haiku). `/next` itself runs on Sonnet.
 
-**Current focus:** E9 (multichannel protection and FIR parity), S6 headroom core `e9/headroom-core` (G17 closed, S5c ticked; S7 next, needs-owner); E19 (MIMO room treatment), S1 merged (#435; G1, G2 open; S2 `e19/mimo-design-core` next, needs-owner); E28 (Dynamics and Meters polish), S4 `e28/dynamics-feel` (PR #438; S5 next); E23 S1 `e23/graph-kernel-parity` (PR #437; S1b next); E8 S11b `e8/crossover-subs-nchannel` (needs-owner, PR #434); E20 (Engine performance) S1 `e20/bench-baselines` (PR pending; needs-owner; S2 next)
+**Current focus:** E9 (multichannel protection and FIR parity), S6 headroom core `e9/headroom-core` (G17 closed, S5c ticked; S7 next, needs-owner); E19 (MIMO room treatment), S1 merged (#435; G1, G2 open; S2 `e19/mimo-design-core` next, needs-owner); E28 (Dynamics and Meters polish), S4 `e28/dynamics-feel` (PR #438; S5 next); E23 S1 `e23/graph-kernel-parity` (PR #437; S1b next); E8 S11b `e8/crossover-subs-nchannel` (needs-owner, PR #434); E20 (Engine performance) S1 `e20/bench-baselines` (PR #448; needs-owner; S2 next)
 <!-- plan-tracker keeps the line above current -->
 
 @AGENTS.md
