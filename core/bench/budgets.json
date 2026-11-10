@@ -1,0 +1,8 @@
+{
+  "note": "E20 Q1 (owner agreed 9 Nov 2026). Load = render time / buffer period on one M1 performance core, 2.67 ms block. R1: mean at most 25%, p99.9 at most 50%, and twice the mean under 80% (a rebuild fade renders two snapshots). R2 and R3: mean at most 50% single thread (the critical path once workers exist, E20 S5-S6); their fade rule is checked on that critical path, not here. R4-R7 have no published budget; they are tracked against the baseline only. Breaches warn until --enforce-budgets (E20 S10).",
+  "R1/mean": 0.25,
+  "R1/p999": 0.5,
+  "R1/fade2x": 0.8,
+  "R2/mean": 0.5,
+  "R3/mean": 0.5
+}
