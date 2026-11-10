@@ -699,6 +699,8 @@ struct MultibandCompressorConfiguration: Equatable, Codable, Sendable {
     var lowMakeupGainDB = 0.0
     var midMakeupGainDB = 0.0
     var highMakeupGainDB = 0.0
+    /// E28 S4: bands (0 low, 1 mid, 2 high) whose makeup the Dynamics page keeps automatic (nil decodes as none).
+    var autoMakeupBands: Set<Int>?
 
     // Compatibility convenience for the previous shared slope control.
     var slope: MultibandSlope {
@@ -756,6 +758,8 @@ struct CompressorConfiguration: Equatable, Codable, Sendable {
     var topology: CompressorTopology = .feedForward
     var programDependentRelease = false
     var sidechainHighPassHz = 0.0
+    /// E28 S4: when true the Dynamics page keeps `makeupGainDB` at the automatic value (nil decodes as off).
+    var autoMakeupGain: Bool?
 
     func validate() throws {
         guard thresholdDB.isFinite, Self.thresholdRange.contains(thresholdDB),
