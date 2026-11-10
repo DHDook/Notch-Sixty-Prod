@@ -1065,6 +1065,9 @@ struct DynamicsConfiguration: Equatable, Codable, Sendable {
     var automaticHeadroom = AutomaticHeadroomConfiguration()
     var oversampling: OversamplingFactor = .one
     var pauseGate = PauseGateConfiguration()
+    /// E9 S5b: the "Independent per output" switch and the per-output ceiling and on/off overrides. nil is the defaults (and
+    /// an old saved configuration without the key). Only used with `e9.output-protection`; it never reaches the DSP snapshot.
+    var outputProtection: OutputProtectionSettings?
 
     func makeSnapshot(sampleRate: Double) throws -> N60DynamicsSnapshot {
         try stereoWidener.validate()

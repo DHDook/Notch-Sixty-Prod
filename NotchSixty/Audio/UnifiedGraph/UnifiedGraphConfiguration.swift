@@ -544,18 +544,19 @@ struct UnifiedGraphConfiguration: Equatable, Sendable {
             if let policy = outputProtection {
                 // E9 S5: sub lanes get their own stage with the program settings (so every lane has the same look-ahead
                 // and oversampling latency); independent mode gives every program lane one too.
-                let params = UnifiedGraphOutputProtection.clampedUserParameters(Self.protectionParameters(protection))
+                let base = Self.protectionParameters(protection)
                 if policy.independent {
                     for lane in 0..<programLanes {
                         add(N60_STAGE_PROTECTION, UnifiedGraphOutputProtection.userLaneStageBase + UInt32(lane),
-                            mask: UInt64(1) << UInt64(lane), params: params)
+                            mask: UInt64(1) << UInt64(lane), params: policy.laneParameters(base, lane: lane))
                     }
                 } else {
-                    add(N60_STAGE_PROTECTION, N60_LSTAGE_PROTECTION, mask: mask, params: params)
+                    add(N60_STAGE_PROTECTION, N60_LSTAGE_PROTECTION, mask: mask,
+                        params: UnifiedGraphOutputProtection.clampedUserParameters(base))
                 }
                 for lane in programLanes..<(programLanes + subwooferCount) {
                     add(N60_STAGE_PROTECTION, UnifiedGraphOutputProtection.userLaneStageBase + UInt32(lane),
-                        mask: UInt64(1) << UInt64(lane), params: params)
+                        mask: UInt64(1) << UInt64(lane), params: policy.laneParameters(base, lane: lane))
                 }
             } else {
                 let params = Self.protectionParameters(protection)

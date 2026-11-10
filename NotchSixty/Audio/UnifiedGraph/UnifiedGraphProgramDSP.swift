@@ -440,21 +440,21 @@ struct UnifiedGraphProgramDSP: Equatable, Sendable {
                 guard virtualSpeakers else { throw UnifiedGraphFallbackReason.specRejected }
                 add(N60_STAGE_PROTECTION, Self.userProtectionStageId, mask: 0b11, params: params)
             } else if let policy = outputProtection {
-                let clamped = UnifiedGraphOutputProtection.clampedUserParameters(params)
                 if policy.independent {
                     for lane in 0..<count {
                         add(N60_STAGE_PROTECTION, UnifiedGraphOutputProtection.userLaneStageBase + UInt32(lane),
-                            mask: UInt64(1) << UInt64(lane), params: clamped)
+                            mask: UInt64(1) << UInt64(lane), params: policy.laneParameters(params, lane: lane))
                     }
                 } else {
-                    add(N60_STAGE_PROTECTION, N60_LSTAGE_PROTECTION, mask: Self.mask(Array(0..<count)), params: clamped)
+                    add(N60_STAGE_PROTECTION, N60_LSTAGE_PROTECTION, mask: Self.mask(Array(0..<count)),
+                        params: UnifiedGraphOutputProtection.clampedUserParameters(params))
                 }
                 guard count + protectedSubLanes <= Int(spec.outputChannels) else {
                     throw UnifiedGraphFallbackReason.laneCountMismatch
                 }
                 for lane in count..<(count + protectedSubLanes) {
                     add(N60_STAGE_PROTECTION, UnifiedGraphOutputProtection.userLaneStageBase + UInt32(lane),
-                        mask: UInt64(1) << UInt64(lane), params: clamped)
+                        mask: UInt64(1) << UInt64(lane), params: policy.laneParameters(params, lane: lane))
                 }
             } else {
                 add(N60_STAGE_PROTECTION, N60_LSTAGE_PROTECTION, mask: Self.mask(Array(0..<count)), params: params)

@@ -67,6 +67,33 @@ struct UnifiedGraphOutputProtection: Equatable, Sendable {
     /// The Advanced "Independent per output" switch: every program lane gets its own PROTECTION stage instead of one
     /// linked group (the group preserves the image). Sub lanes always have their own stage.
     var independent = false
+    /// E9 S5b: per-output ceiling and on/off overrides (`OutputProtectionSettings.lanes`). They apply to lanes that have their
+    /// own stage: sub lanes always, program lanes in independent mode. The linked program group uses the program settings.
+    var laneSettings: [Int: OutputProtectionSettings.Lane] = [:]
+
+    init(independent: Bool = false, laneSettings: [Int: OutputProtectionSettings.Lane] = [:]) {
+        self.independent = independent
+        self.laneSettings = laneSettings
+    }
+
+    init(_ settings: OutputProtectionSettings) {
+        self.init(independent: settings.independent, laneSettings: settings.lanes)
+    }
+
+    /// The parameters of the user stage that guards output `lane` alone: the program parameters with the ceiling clamped to
+    /// the hard ceiling and the lane's override applied. Only the ceiling moves (live parameter 1), so every lane keeps the
+    /// program look-ahead and oversampling, hence the same latency, and an edit never needs a rebuild.
+    func laneParameters(_ params: [Float], lane: Int) -> [Float] {
+        var out = Self.clampedUserParameters(params)
+        guard out.count > 1, let setting = laneSettings[lane] else { return out }
+        if !setting.enabled {
+            out[1] = Self.hardLimitCeilingDB
+        } else if let ceiling = setting.ceilingDB, ceiling.isFinite {
+            let range = OutputProtectionSettings.ceilingRangeDB
+            out[1] = Float(min(max(ceiling, range.lowerBound), range.upperBound))
+        }
+        return out
+    }
 
     /// The hard limit: limiter on, -1 dBFS, 1 ms attack, 100 ms release, no look-ahead, no guard or oversampling, so
     /// zero latency (`core/src/layout.cpp` safety limiter). One unlinked stage per output, not affected by the user's
@@ -105,11 +132,28 @@ struct UnifiedGraphOutputProtection: Equatable, Sendable {
         return launch
     }
 
-    /// Reads the flag. `independent` is the persisted Advanced switch (the Dynamics view wires it in a later slice).
-    @MainActor static func refresh(_ flags: FeatureFlags? = nil, independent: Bool = false) {
-        let value: UnifiedGraphOutputProtection? = (flags ?? FeatureFlags()).isEnabled(.outputProtection)
-            ? UnifiedGraphOutputProtection(independent: independent) : nil
-        lock.lock(); launch = value; lock.unlock()
+    nonisolated(unsafe) private static var flagOn = false
+    nonisolated(unsafe) private static var settings = OutputProtectionSettings()
+
+    /// Reads the flag; `settings` are the persisted Dynamics settings (the independent switch and the per-output overrides).
+    @MainActor static func refresh(_ flags: FeatureFlags? = nil, settings: OutputProtectionSettings? = nil) {
+        let on = (flags ?? FeatureFlags()).isEnabled(.outputProtection)
+        lock.lock()
+        flagOn = on
+        if let settings { Self.settings = settings }
+        launch = on ? UnifiedGraphOutputProtection(Self.settings) : nil
+        lock.unlock()
+    }
+
+    /// The persisted settings changed (control plane, before the graph is rebuilt from them). Returns the previous settings
+    /// so a failed publish can put them back. No effect on the policy while the flag is off.
+    @discardableResult
+    static func apply(settings new: OutputProtectionSettings) -> OutputProtectionSettings {
+        lock.lock(); defer { lock.unlock() }
+        let old = settings
+        settings = new
+        launch = flagOn ? UnifiedGraphOutputProtection(new) : nil
+        return old
     }
 }
 
