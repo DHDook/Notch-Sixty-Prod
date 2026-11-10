@@ -22,6 +22,9 @@ struct ProductionDynamicsTelemetryView: View {
     var body: some View {
         GroupBox("Live Status") {
             VStack(alignment: .leading, spacing: 8) {
+                ForEach(panels, id: \.0) { source, curve in
+                    GainReductionPanel(engine: engine, source: source, curve: curve)
+                }
                 if let statusText {
                     Text(statusText).font(.caption).foregroundStyle(.secondary)
                 }
@@ -45,6 +48,24 @@ struct ProductionDynamicsTelemetryView: View {
             .padding(.vertical, 5)
         }
         .task(id: kind) { await pollSelectedProcessor() }
+        .onAppear { GainReductionMonitor.shared(for: engine).attach() }
+        .onDisappear { GainReductionMonitor.shared(for: engine).detach() }
+    }
+
+    /// E28 S5: the gain-reduction panels for this stage (bar, 10 s history and, where a static law exists, the curve).
+    private var panels: [(GainReductionSource, DynamicsTransferCurve?)] {
+        let d = engine.dynamicsConfiguration
+        switch kind {
+        case .compressor: return [(.compressor, DynamicsTransferCurve(d.compressor))]
+        case .expander: return [(.expander, DynamicsTransferCurve(d.expander))]
+        case .limiter: return [(.limiter, DynamicsTransferCurve(d.limiter))]
+        case .deEsser: return [(.deEsser, DynamicsTransferCurve(d.deEsser))]
+        case .multiband:
+            return [(.multibandLow, DynamicsTransferCurve(d.multibandCompressor, band: 0)),
+                    (.multibandMid, DynamicsTransferCurve(d.multibandCompressor, band: 1)),
+                    (.multibandHigh, DynamicsTransferCurve(d.multibandCompressor, band: 2))]
+        default: return []
+        }
     }
 
     @MainActor
@@ -57,8 +78,9 @@ struct ProductionDynamicsTelemetryView: View {
 
     @MainActor
     private func refresh() {
+        // The hub is the only reader of the read-and-reset readbacks (E28 G5); the monitor keeps it polling.
         guard engine.lifecycleState == .running,
-              let diagnostics = engine.diagnosticsSnapshot().renderKernelDiagnostics else {
+              let diagnostics = ProductionMeterHub.shared(for: engine).latestContext?.diagnostics.renderKernelDiagnostics else {
             items = []
             statusText = nil
             return

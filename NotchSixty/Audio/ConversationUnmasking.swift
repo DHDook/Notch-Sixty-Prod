@@ -96,6 +96,9 @@ struct ConversationUnmaskingConfiguration: Sendable, Equatable {
     /// Per-update movement limits, so a raised voice (Lombard) cannot drive cuts quickly.
     var maximumAttackStepDB = 1.0
     var maximumReleaseStepDB = 0.25
+    /// A band is cut only while the music is at least this share of what masks the speech there (music plus
+    /// the room's quiet baseline); a band the room noise already masks is left alone.
+    var minimumMusicMaskerShare = 0.5
 }
 
 struct ConversationUnmaskingInput: Sendable, Equatable {
@@ -106,6 +109,9 @@ struct ConversationUnmaskingInput: Sendable, Equatable {
     /// Music level of everything below the first band (untouched), dB; counts toward overall level.
     var lowMusicLevelDB: Double
     var speechConfidence: Double
+    /// E4 S30b: the room's quiet-baseline level per band, dB. It masks speech like music does but cannot be
+    /// cut. Empty means no noise masker (the pre-S30b behaviour).
+    var noiseBandLevelsDB: [Double] = []
 }
 
 struct ConversationUnmaskingPlan: Sendable, Equatable {
@@ -119,11 +125,13 @@ struct ConversationUnmaskingPlan: Sendable, Equatable {
 struct ConversationUnmaskingPlanner: Sendable {
     var configuration = ConversationUnmaskingConfiguration()
 
-    func sii(speech: [Double], music: [Double], cuts: [Double]) -> Double {
+    func sii(speech: [Double], music: [Double], cuts: [Double], noise: [Double] = []) -> Double {
         var total = 0.0
         for i in 0..<SpeechIntelligibilityBands.centersHz.count {
+            var masker = music[i] - cuts[i]
+            if !noise.isEmpty { masker = 10 * log10(pow(10, masker / 10) + pow(10, noise[i] / 10)) }
             total += SpeechIntelligibilityBands.importance[i]
-                * SpeechIntelligibilityBands.audibility(snrDB: speech[i] - (music[i] - cuts[i]))
+                * SpeechIntelligibilityBands.audibility(snrDB: speech[i] - masker)
         }
         return total
     }
@@ -131,11 +139,14 @@ struct ConversationUnmaskingPlanner: Sendable {
     /// Greedy: repeatedly cut the band with the most SII gained per dB, until the limits or no gain remain.
     func plan(_ input: ConversationUnmaskingInput) -> ConversationUnmaskingPlan? {
         let n = SpeechIntelligibilityBands.centersHz.count
+        let noise = input.noiseBandLevelsDB
         guard input.speechBandLevelsDB.count == n, input.musicBandLevelsDB.count == n,
-              (input.speechBandLevelsDB + input.musicBandLevelsDB + [input.lowMusicLevelDB, input.speechConfidence])
+              noise.isEmpty || noise.count == n,
+              (input.speechBandLevelsDB + input.musicBandLevelsDB + noise
+                + [input.lowMusicLevelDB, input.speechConfidence])
                 .allSatisfy(\.isFinite) else { return nil }
         var cuts = [Double](repeating: 0, count: n)
-        let before = sii(speech: input.speechBandLevelsDB, music: input.musicBandLevelsDB, cuts: cuts)
+        let before = sii(speech: input.speechBandLevelsDB, music: input.musicBandLevelsDB, cuts: cuts, noise: noise)
         guard input.speechConfidence >= configuration.minimumSpeechConfidence else {
             return ConversationUnmaskingPlan(bandCutsDB: cuts, siiBefore: before, siiAfter: before, overallChangeDB: 0)
         }
@@ -145,18 +156,19 @@ struct ConversationUnmaskingPlanner: Sendable {
             var best = -1
             var bestGain = 1e-9
             for i in 0..<n where SpeechIntelligibilityBands.centersHz[i] >= configuration.untouchedBelowHz
-                && cuts[i] + step <= configuration.maximumBandCutDB + 1e-9 {
+                && cuts[i] + step <= configuration.maximumBandCutDB + 1e-9
+                && musicShare(input, band: i, cut: cuts[i]) >= configuration.minimumMusicMaskerShare {
                 var trial = cuts
                 trial[i] += step
                 if overall(input, cuts: trial, base: basePower) < -configuration.maximumOverallCutDB { continue }
-                let gain = sii(speech: input.speechBandLevelsDB, music: input.musicBandLevelsDB, cuts: trial)
-                    - sii(speech: input.speechBandLevelsDB, music: input.musicBandLevelsDB, cuts: cuts)
+                let gain = sii(speech: input.speechBandLevelsDB, music: input.musicBandLevelsDB, cuts: trial, noise: noise)
+                    - sii(speech: input.speechBandLevelsDB, music: input.musicBandLevelsDB, cuts: cuts, noise: noise)
                 if gain > bestGain { bestGain = gain; best = i }
             }
             if best < 0 { break }
             cuts[best] += step
         }
-        let after = sii(speech: input.speechBandLevelsDB, music: input.musicBandLevelsDB, cuts: cuts)
+        let after = sii(speech: input.speechBandLevelsDB, music: input.musicBandLevelsDB, cuts: cuts, noise: noise)
         return ConversationUnmaskingPlan(
             bandCutsDB: cuts, siiBefore: before, siiAfter: after,
             overallChangeDB: overall(input, cuts: cuts, base: basePower)
@@ -168,6 +180,13 @@ struct ConversationUnmaskingPlanner: Sendable {
         zip(previous, target).map { p, t in
             t > p ? min(t, p + configuration.maximumAttackStepDB) : max(t, p - configuration.maximumReleaseStepDB)
         }
+    }
+
+    /// Music power as a share of music plus noise power in one band, 1 with no noise masker.
+    private func musicShare(_ input: ConversationUnmaskingInput, band: Int, cut: Double) -> Double {
+        guard !input.noiseBandLevelsDB.isEmpty else { return 1 }
+        let music = pow(10, (input.musicBandLevelsDB[band] - cut) / 10)
+        return music / (music + pow(10, input.noiseBandLevelsDB[band] / 10))
     }
 
     private func power(_ input: ConversationUnmaskingInput, cuts: [Double]) -> Double {

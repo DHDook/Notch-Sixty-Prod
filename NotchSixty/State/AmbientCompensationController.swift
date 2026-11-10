@@ -122,6 +122,21 @@ final class AmbientCompensationController: ObservableObject {
     private var latestQuietZoneRawRight: [Float] = []
     private var activeSystemID: UUID?
     private var quietZoneObservationDemand = false
+    /// E4 S30b (`e4.conversation-unmasking`, set by the app shell; off by default). On: each poll feeds the
+    /// 4 s speech-envelope history, passes its confidence to the Conversation Focus planner (which then skips
+    /// the non-stationary hold for speech), and plans per-band cuts into `latestUnmasking`. Nothing is sent to
+    /// the engine until S30c.
+    var unmaskingInputsEnabled = false
+    private var speechHistory = SpeechEnvelopeHistory()
+    /// The quiet-room spectrum captured with the quiet baseline. Held in memory only (the persisted baseline is
+    /// a single level); until S30c persists it, the planner falls back when it is missing.
+    private var quietBaselineSpectrum: [AmbientSpectrumBand]?
+    /// Positive dB cut per SII band that is currently in the playback reference. Nothing applies cuts until
+    /// S30c, which sets this from the cuts it sends.
+    var unmaskingAppliedCutsDB = [Double](
+        repeating: 0, count: SpeechIntelligibilityBands.centersHz.count
+    )
+    private(set) var latestUnmasking: ConversationUnmaskingEvaluation?
     /// E4 S6: receives every block of error-microphone frames this controller
     /// reads (frames, sample rate, monitor epoch, and whether frames were
     /// skipped since the previous block). The adaptive Quiet Zone shadow uses
@@ -388,12 +403,14 @@ final class AmbientCompensationController: ObservableObject {
         updated.baselineAmbientLevelDBFS =
             analysis.ambientLevelDBFS
         try persist(updated)
+        quietBaselineSpectrum = analysis.spectrum
     }
 
     func clearQuietBaseline() throws {
         var updated = configuration
         updated.baselineAmbientLevelDBFS = nil
         try persist(updated)
+        quietBaselineSpectrum = nil
     }
 
     func startMonitoring() throws {
@@ -622,6 +639,9 @@ final class AmbientCompensationController: ObservableObject {
             analysisRevision &+= 1
 
             let mode = playbackAdaptationMode
+            let speechConfidence = updateUnmaskingInputs(
+                detailed: detailed, mode: mode, running: running
+            )
             let planned: AmbientCompensationTarget
             if mode == .off {
                 planned = .unity
@@ -667,7 +687,8 @@ final class AmbientCompensationController: ObservableObject {
                     planned = try conversationPlanner.plan(
                         snapshot: analysis,
                         configuration: configuration,
-                        previousActivity: appliedTarget.activity
+                        previousActivity: appliedTarget.activity,
+                        speechModulationConfidence: speechConfidence
                     )
                 }
             }
@@ -932,6 +953,7 @@ final class AmbientCompensationController: ObservableObject {
         try? engine.clearAmbientCompensationRuntimeTarget()
         envelope.reset()
         resetAnalysisHistory()
+        quietBaselineSpectrum = nil
         appliedTarget = .unity
         configuration =
             profiles.selectedSystemProfile?.state
@@ -973,7 +995,42 @@ final class AmbientCompensationController: ObservableObject {
         )
     }
 
+    /// Feeds the speech-envelope history and refreshes `latestUnmasking`. Returns the speech confidence for the
+    /// planners, or nil with the flag off (today's behaviour exactly).
+    private func updateUnmaskingInputs(
+        detailed: AmbientAnalysisDetailedResult,
+        mode: ActiveAcousticsPlaybackAdaptationMode,
+        running: Bool
+    ) -> Double? {
+        guard unmaskingInputsEnabled else {
+            speechHistory.reset()
+            latestUnmasking = nil
+            return nil
+        }
+        speechHistory.append(
+            window: detailed.separatedResidualSamples,
+            endFrame: spatialMicrophoneFrameEnd,
+            sampleRate: detailed.snapshot.sampleRate,
+            epoch: spatialMicrophoneEpoch,
+            microphoneID: microphone.selectedInputDevice?.uid
+        )
+        let confidence = speechHistory.confidence
+        latestUnmasking = ConversationUnmaskingEvaluator.evaluate(
+            mode: mode,
+            running: running,
+            detailed: detailed,
+            quietBaseline: quietBaselineSpectrum,
+            envelopeSeconds: speechHistory.seconds,
+            speechConfidence: confidence,
+            appliedCutsDB: unmaskingAppliedCutsDB,
+            minimumSeparationConfidence: configuration.minimumSeparationConfidence
+        )
+        return confidence
+    }
+
     private func resetAnalysisHistory() {
+        speechHistory.reset()
+        latestUnmasking = nil
         spatialMicrophoneEpoch = UUID()
         spatialMicrophoneFrameEnd = 0
         spatialLatestWindowEndFrame = 0

@@ -336,6 +336,10 @@ final class UnifiedGraphHost: @unchecked Sendable {
         if let comp = dynamicsReading(graph, stageId: UnifiedGraphConfiguration.compressorStageId) {
             diagnostics.compressorGainReductionDB = comp.grMaxDb
         }
+        // E28 S5 (G4): the expander's attenuation (positive dB; read-and-reset maximum, like the compressor).
+        if let exp = dynamicsReading(graph, stageId: UnifiedGraphConfiguration.expanderStageId) {
+            diagnostics.expanderAttenuationDB = exp.grMaxDb
+        }
         // E6 S12b: the de-esser's gain reduction (positive dB, as the kernel reports it).
         if let ess = dynamicsReading(graph, stageId: UnifiedGraphConfiguration.deessStageId) {
             diagnostics.deEsserGainReductionDB = ess.grMaxDb

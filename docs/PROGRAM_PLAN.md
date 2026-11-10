@@ -227,7 +227,7 @@ chain once per frame, with no SIMD, on one thread.
 - [ ] **Right algorithms:** non-uniform partitioned convolution in every FIR path (program FIR, binaural, MIMO), long partitions spread across callbacks, double-precision or state-variable filters at high rates, polyphase sample-rate conversion
 - [ ] Set flush-to-zero at callback entry instead of scanning every sample for denormals; keep the NaN guard at the output
 - [ ] RealtimeSanitizer plus `nonblocking` / `nonallocating` attributes on every realtime entry point, run in CI
-- [ ] CI benchmarks: per-stage ns/sample and worst-case callback time at 48, 192 and 384 kHz, with fail thresholds
+- [~] CI benchmarks: per-stage ns/sample and worst-case callback time at 48, 192 and 384 kHz, with fail thresholds (E20 S1 `e20/bench-baselines` built, PR #448: harness, profile hooks, `macos-full` step, `budgets.json` warn only; baseline JSON is an owner step after the first nightly (G2); fail enforcement wiring is E20 S10 (G3))
 - [ ] UI: move `ObservableObject` controllers (23 `@Published` in `AudioIOEngine`, 33 in `RoomTreatmentAdvisorController`) to `@Observable` (drawing meters with Canvas at display rate moved to E28 S1 and S5, owner, 7 Nov 2026)
 - Moved to E28 (owner, 7 Nov 2026): user-facing dynamics meters from the E6 S8c readbacks (gain reduction on the compressor, expander and limiter controls in E28 S5; true-peak beside the output meter and a latching over-range indicator in E28 S1)
 
@@ -375,7 +375,7 @@ S1–S6 flagless; every dynamics extra (S7a–S7d) behind the one flag `e28.dyna
 - [x] S2 loudness: momentary, short-term, integrated with reset, loudness range and true-peak max per ITU-R BS.1770-4 and EBU R128; per-channel weighting with LFE excluded (inert until the capture carries more than stereo)
 - [x] S3 spectrum options: smoothing, averaging, tilt, freeze and reference trace, hover read-out, input and output overlay
 - [ ] S4 dynamics feel: log sliders, unit-aware fields, stepping, reset, fine drag, undo, sidechain range fix, auto makeup, accessibility
-- [ ] S5 dynamics visualisation: transfer curves, gain-reduction bars and history, navigator bars
+- [x] S5 dynamics visualisation: transfer curves, gain-reduction bars and history, navigator bars; built, PR pending (G21 to S7d, G22 to S6, G23 to S7d, G24 to S7b; Loudness readouts moved to S7d)
 - [ ] S6 per-output and sub meters on every output configuration (needs-owner)
 - [ ] S7a compressor mix, link amount, peak/RMS detector and optional lookahead, reported in the path latency (needs-owner, engine)
 - [ ] S7b expander hold, soft knee, detector, sidechain high-pass and link; sidechain and delta listen (needs-owner, engine)
@@ -395,7 +395,7 @@ complete, speaker ANC qualified, and a full hardware regression passing at every
 - [x] One-click PEQ from an imported response and a chosen target, using the existing model fitter
 - [ ] Live PEQ and crossfeed tuning while playing (from E6)
 - [ ] Raise the HRIR cap for room-included BRIRs; live HRTF interpolation with head tracking
-- [~] In-ear-microphone BRIR capture for personal virtual speakers (S6 core built dark; S7 wires the guided flow)
+- [~] In-ear-microphone BRIR capture for personal virtual speakers (S6 core merged; S7 guided flow built behind `e13.headphones`; bench in E22)
 
 ### E14 Upmixer
 
