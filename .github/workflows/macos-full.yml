@@ -70,21 +70,24 @@ jobs:
           clang++ -std=c++20 -O3 -Wall -Wextra -I"$RT" -c "$RT/n60_ff_live.cpp" -o "$OUT/n60_ff_live.o"
           clang++ -std=c++20 -O3 -Wall -Wextra -I"$RT" -c "$RT/n60_ff_echo.cpp" -o "$OUT/n60_ff_echo.o"
           clang++ -std=c++20 -O3 -Wall -Wextra -I"$RT" -c "$RT/n60_fxlms.cpp" -o "$OUT/n60_fxlms.o"
-          NO_BRIDGE="$(find "$RT" -name '*.c' ! -name 'N60RealtimeAudioBridge.c' ! -name 'N60MeasurementMonitorProc.c' -print) $OUT/n60_anc_guard.o $OUT/n60_ff_live.o $OUT/n60_ff_echo.o $OUT/n60_fxlms.o"
-          ALL="$(find "$RT" -name '*.c' -print) $OUT/n60_anc_guard.o $OUT/n60_ff_live.o $OUT/n60_ff_echo.o $OUT/n60_fxlms.o"
-          for opt in O0 O3; do
-            clang -std=c11 -"$opt" -Wall -Wextra -include stddef.h -I"$RT" -Icore/include \
-              ci/benchmark_pr35_render_kernel.c $NO_BRIDGE -lc++ -framework Accelerate -o "$OUT/render-$opt"
-            echo "=== render kernel $opt ===" | tee -a "$OUT/benchmarks.txt"
-            "$OUT/render-$opt" | tee -a "$OUT/benchmarks.txt"
-          done
-          # The realtime bridge calls libn60core (n60_graph_*) since E6 S8a, so link the core
-          # objects too, built the same way as ci/run_harnesses.sh build_core_objs.
+          # E26: the bridge feeds the ANC lane (N60AncLaneFeed).
+          clang++ -std=c++20 -O3 -Wall -Wextra -I"$RT" -c "$RT/n60_anc_lane_feed.cpp" -o "$OUT/n60_anc_lane_feed.o"
+          NO_BRIDGE="$(find "$RT" -name '*.c' ! -name 'N60RealtimeAudioBridge.c' ! -name 'N60MeasurementMonitorProc.c' -print) $OUT/n60_anc_guard.o $OUT/n60_ff_live.o $OUT/n60_ff_echo.o $OUT/n60_fxlms.o $OUT/n60_anc_lane_feed.o"
+          ALL="$(find "$RT" -name '*.c' -print) $OUT/n60_anc_guard.o $OUT/n60_ff_live.o $OUT/n60_ff_echo.o $OUT/n60_fxlms.o $OUT/n60_anc_lane_feed.o"
+          # libn60core objects, from the shared list (ci/core_sources.sh). The render kernel and
+          # the realtime bridge both link them (N60LevelSessionProc, n60_graph_*).
+          source ci/core_sources.sh
           CORE_OBJS=()
-          for f in graph snapshot fft stages_dsp conv/nufir stages_system stages_matrix stages_generator stages_cleanup stages_route layout measure/offline_fft measure/ess measure/deconvolve measure/reference_room measure/timing measure/distortion measure/decay measure/waterfall measure/monitor_ring measure/spl measure/rta correct/minphase correct/design correct/synth correct/bass correct/multisub_search xover/xover; do
+          for f in "${CORE_SOURCES[@]}"; do
             obj="$OUT/n60core_${f//\//_}.o"
             clang++ -std=c++20 -O3 -Wall -Wextra -fno-exceptions -fno-rtti -Icore/include -Icore/src -c "core/src/$f.cpp" -o "$obj"
             CORE_OBJS+=("$obj")
+          done
+          for opt in O0 O3; do
+            clang -std=c11 -"$opt" -Wall -Wextra -include stddef.h -I"$RT" -Icore/include \
+              ci/benchmark_pr35_render_kernel.c $NO_BRIDGE "${CORE_OBJS[@]}" -lc++ -framework Accelerate -o "$OUT/render-$opt"
+            echo "=== render kernel $opt ===" | tee -a "$OUT/benchmarks.txt"
+            "$OUT/render-$opt" | tee -a "$OUT/benchmarks.txt"
           done
           clang -std=c11 -O3 -Wall -Wextra -include stddef.h -I"$RT" -Icore/include \
             ci/benchmark_pr35_realtime_bridge.c $ALL "${CORE_OBJS[@]}" -lc++ \
@@ -128,8 +131,9 @@ jobs:
           set -euo pipefail
           clang++ --version
           # Keep this list in step with build_core_objs in ci/run_harnesses.sh.
+          source ci/core_sources.sh
           LIB=()
-          for f in graph snapshot fft stages_dsp conv/nufir stages_system stages_matrix stages_generator stages_cleanup stages_route layout measure/offline_fft measure/ess measure/deconvolve measure/reference_room measure/timing measure/distortion measure/decay measure/waterfall measure/monitor_ring measure/spl measure/rta correct/minphase correct/design correct/synth correct/bass correct/multisub_search xover/xover; do
+          for f in "${CORE_SOURCES[@]}"; do
             obj="$RUNNER_TEMP/n60core_${f//\//_}.o"
             clang++ -std=c++20 -O2 -Wall -Wextra -Werror -fno-exceptions -fno-rtti -Icore/include -Icore/src \
               -c core/src/$f.cpp -o "$obj"
