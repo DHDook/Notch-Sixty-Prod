@@ -114,6 +114,10 @@ struct ProductionMetersView: View {
     @State private var analysisSnapshot = ProductionAnalysisSnapshot.empty
     @State private var transportMeterSnapshot: ProductionTransportMeterSnapshot?
     @State private var transportDiagnostics: AudioDiagnosticsSnapshot?
+    @AppStorage("meters.ballistics") private var ballisticsRaw = MeterBallistics.peak.rawValue
+    @State private var bank = MeterBankDisplay()
+    @State private var meterRevision = 0
+    @State private var windowVisible = true
 
     var body: some View {
         ScrollView {
@@ -189,10 +193,26 @@ struct ProductionMetersView: View {
 
     @ViewBuilder
     private var levelsPage: some View {
-        if let transportMeterSnapshot {
-            semanticLevelsPage(transportMeterSnapshot)
-        } else {
-            legacyLevelsPage
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 12) {
+                Picker("Ballistics", selection: $ballisticsRaw) {
+                    ForEach(MeterBallistics.allCases) { Text($0.title).tag($0.rawValue) }
+                }
+                .pickerStyle(.segmented)
+                .frame(maxWidth: 260)
+                .accessibilityIdentifier("meters.ballistics")
+                Button("Reset Clip Latches") {
+                    bank.resetAllLatches()
+                    meterRevision &+= 1
+                }
+                .accessibilityIdentifier("meters.resetLatches")
+                Spacer()
+            }
+            if let transportMeterSnapshot {
+                semanticLevelsPage(transportMeterSnapshot)
+            } else {
+                legacyLevelsPage
+            }
         }
     }
 
@@ -205,9 +225,9 @@ struct ProductionMetersView: View {
             }
 
             LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 14) {
-                stereoLevelCard(title: "Input", subtitle: "Render input", levels: snapshot.input)
-                stereoLevelCard(title: "Post-EQ", subtitle: "After the main EQ stage", levels: snapshot.postEQ)
-                stereoLevelCard(title: "Output", subtitle: "Final DSP output", levels: snapshot.output)
+                stereoLevelCard(title: "Input", subtitle: "Render input", stage: "input", levels: snapshot.input)
+                stereoLevelCard(title: "Post-EQ", subtitle: "After the main EQ stage", stage: "postEQ", levels: snapshot.postEQ)
+                stereoLevelCard(title: "Output", subtitle: "Final DSP output", stage: "output", levels: snapshot.output)
             }
 
             HStack(alignment: .top, spacing: 14) {
@@ -688,7 +708,7 @@ struct ProductionMetersView: View {
                     .foregroundStyle(.secondary)
             }
             channelLevelRow(
-                label: "",
+                id: channel.id, label: "",
                 peak: ProductionMeterMath.decibels(channel.peakLinear),
                 rms: ProductionMeterMath.decibels(channel.rmsLinear)
             )
@@ -705,6 +725,7 @@ struct ProductionMetersView: View {
     private func stereoLevelCard(
         title: String,
         subtitle: String,
+        stage: String,
         levels: ProductionStereoLevelSnapshot
     ) -> some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -713,8 +734,8 @@ struct ProductionMetersView: View {
                 Text(subtitle).font(.caption).foregroundStyle(.secondary)
             }
 
-            channelLevelRow(label: "L", peak: levels.peakLeft, rms: levels.rmsLeft)
-            channelLevelRow(label: "R", peak: levels.peakRight, rms: levels.rmsRight)
+            channelLevelRow(id: "\(stage).L", label: "L", peak: levels.peakLeft, rms: levels.rmsLeft)
+            channelLevelRow(id: "\(stage).R", label: "R", peak: levels.peakRight, rms: levels.rmsRight)
 
             Divider()
             HStack {
@@ -731,10 +752,9 @@ struct ProductionMetersView: View {
         .background(.quaternary.opacity(0.24), in: .rect(cornerRadius: 18))
     }
 
-    private func channelLevelRow(label: String, peak: Double, rms: Double) -> some View {
+    private func channelLevelRow(id: String, label: String, peak: Double, rms: Double) -> some View {
         VStack(alignment: .leading, spacing: 5) {
             HStack {
-                Text(label).font(.caption.bold()).frame(width: 18, alignment: .leading)
                 Text("Peak \(ProductionMeterMath.formattedDB(peak))")
                     .font(.caption.monospacedDigit())
                 Spacer()
@@ -742,16 +762,12 @@ struct ProductionMetersView: View {
                     .font(.caption.monospacedDigit())
                     .foregroundStyle(.secondary)
             }
-            GeometryReader { proxy in
-                let rmsWidth = proxy.size.width * normalizedLevel(rms)
-                let peakPosition = proxy.size.width * normalizedLevel(peak)
-                ZStack(alignment: .leading) {
-                    Capsule().fill(.quaternary)
-                    Capsule().fill(.primary.opacity(0.55)).frame(width: rmsWidth)
-                    Rectangle().fill(.primary).frame(width: 2).offset(x: max(0, peakPosition - 1))
-                }
-            }
-            .frame(height: 8)
+            MeterBarView(
+                channel: bank.channel(id: id, label: label.isEmpty ? "Ch" : label),
+                paused: !windowVisible || page != .levels,
+                onReset: { bank.channel(id: id, label: label).resetLatch(); meterRevision &+= 1 }
+            )
+            .id("\(id)-\(meterRevision)")
         }
     }
 
@@ -806,6 +822,10 @@ struct ProductionMetersView: View {
             .background(.quaternary.opacity(0.18), in: .rect(cornerRadius: 12))
     }
 
+    private var ballistics: MeterBallistics {
+        MeterBallistics(rawValue: ballisticsRaw) ?? .peak
+    }
+
     @MainActor
     private func runVisiblePageLoop() async {
         let activePage = page
@@ -827,7 +847,19 @@ struct ProductionMetersView: View {
             engine.setAnalysisDemand(analysisDemand)
         }
 
+        let hub = ProductionMeterHub.shared(for: engine)
+        let hertz: Double
+        switch activePage {
+        case .levels, .stereo: hertz = 60
+        case .spectrum: hertz = 20
+        case .dynamics: hertz = 8
+        case .transport: hertz = 4
+        }
+        let token = hub.subscribe(hertz: hertz)
+        bank.clearTick()
+
         defer {
+            hub.unsubscribe(token)
             if let demandToken {
                 ProductionDetailedMeterDemand.release(demandToken, engine: engine)
             }
@@ -836,18 +868,28 @@ struct ProductionMetersView: View {
             }
         }
 
+        var lastRevisionBump = 0.0
         while !Task.isCancelled {
-            refreshSnapshot()
-            if analysisDemand != 0, engine.lifecycleState == .running {
-                analysisSnapshot = engine.productionAnalysisSnapshot()
-            } else {
-                analysisSnapshot = .empty
+            let now = ProcessInfo.processInfo.systemUptime
+            windowVisible = hub.shouldPoll || engine.lifecycleState != .running
+            if windowVisible {
+                bank.ingest(hub.take(token), mode: ballistics, now: now)
+                refreshSnapshot(hub: hub)
+                if analysisDemand != 0, engine.lifecycleState == .running {
+                    analysisSnapshot = engine.productionAnalysisSnapshot()
+                } else {
+                    analysisSnapshot = .empty
+                }
+                if now - lastRevisionBump >= 0.5 {
+                    lastRevisionBump = now
+                    meterRevision &+= 1
+                }
             }
 
             let interval: UInt64
             switch activePage {
             case .levels, .stereo:
-                interval = 16_666_667
+                interval = windowVisible ? 16_666_667 : 250_000_000
             case .spectrum:
                 interval = 50_000_000
             case .dynamics:
@@ -860,9 +902,15 @@ struct ProductionMetersView: View {
     }
 
     @MainActor
-    private func refreshSnapshot() {
-        transportDiagnostics = engine.diagnosticsSnapshot()
-        transportMeterSnapshot = engine.productionTransportMeterSnapshot()
+    private func refreshSnapshot(hub: MeterReadbackHub<ProductionMeterContext>) {
+        // While processing runs the hub is the only reader of the read-and-reset meters.
+        if engine.lifecycleState == .running, let context = hub.latestContext {
+            transportDiagnostics = context.diagnostics
+            transportMeterSnapshot = context.transport
+        } else {
+            transportDiagnostics = engine.diagnosticsSnapshot()
+            transportMeterSnapshot = engine.productionTransportMeterSnapshot()
+        }
         guard engine.lifecycleState == .running else {
             snapshot = ProductionMetersSnapshot()
             return
