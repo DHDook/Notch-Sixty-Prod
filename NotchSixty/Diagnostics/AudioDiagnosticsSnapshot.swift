@@ -381,6 +381,40 @@ struct ProductionTransportChannelMeter: Identifiable, Equatable, Sendable {
     let overRangeSamples: UInt64
 }
 
+/// E28 S6: one routed output of a stereo session that drives several DAC channels (same-device routes): the bus
+/// feeding it and the maxima the bridge measured since the previous read.
+struct ProductionRouteMeter: Identifiable, Equatable, Sendable {
+    let id: String
+    let label: String
+    let physicalChannel: UInt32
+    let peakLinear: Float
+    let rmsLinear: Float
+    let overRangeSamples: UInt64
+}
+
+/// Names and ids for the speaker buses a route can carry, so the Meters page labels each output the way the Routing page does.
+enum SpeakerRouteMeterNaming {
+    static func label(busRawValue: UInt32) -> String {
+        switch busRawValue {
+        case 0: return "Left"
+        case 1: return "Right"
+        case 2: return "Left Low"
+        case 3: return "Right Low"
+        case 4: return "Left Mid"
+        case 5: return "Right Mid"
+        case 6: return "Left High"
+        case 7: return "Right High"
+        case 8: return "Sub"
+        default: return "Bus \(busRawValue)"
+        }
+    }
+
+    /// Unique per route: two routes may carry the same bus to different DAC channels.
+    static func channelID(busRawValue: UInt32, physicalChannel: UInt32) -> String {
+        "route-\(busRawValue)-ch\(physicalChannel)"
+    }
+}
+
 struct ProductionRoomTreatmentDiagnostics: Equatable, Sendable {
     let authorized: Bool
     let armRequested: Bool

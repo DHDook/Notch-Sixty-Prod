@@ -277,6 +277,48 @@ N60OutputVUMeterSnapshot N60RealtimeAudioBridgeGetOutputVUMeterSnapshot(
     const N60RealtimeAudioBridge * _Nonnull bridge
 );
 
+// E28 S6: per-route meters for the same-device speaker output map. The callback measures each routed
+// bus (after the speaker-bus splitter and driver processing, as written to the DAC channel), keeps the
+// maximum block peak and block RMS since the reader last took them, and counts samples above 1.0
+// (cumulative, like the other over-range counters). Demand is read once per callback; while it is off
+// the callback does no route-meter work. The reader's Take clears peak and RMS (read-and-reset).
+// Allocation: none (fixed arrays). Synchronisation: relaxed atomics, a lock-free max-merge for peak and
+// RMS, one writer (the output callback) and one reader. Latency: none. Rates: any. Channels: at most
+// N60_SPEAKER_OUTPUT_MAX_ROUTES routes. Reset: cleared by the bridge reset and when the map changes.
+typedef struct {
+    bool enabled;
+    uint32_t routeCount;
+    N60SpeakerOutputRouteDescriptor routes[N60_SPEAKER_OUTPUT_MAX_ROUTES];
+    float peak[N60_SPEAKER_OUTPUT_MAX_ROUTES];
+    float rms[N60_SPEAKER_OUTPUT_MAX_ROUTES];
+    uint64_t overRangeSamples[N60_SPEAKER_OUTPUT_MAX_ROUTES];
+} N60RouteMeterSnapshot;
+
+typedef struct {
+    float peak[N60_SPEAKER_OUTPUT_MAX_ROUTES];
+    double squareSum[N60_SPEAKER_OUTPUT_MAX_ROUTES];
+    uint64_t overRange[N60_SPEAKER_OUTPUT_MAX_ROUTES];
+} N60RouteMeterAccumulator;
+
+void N60RealtimeAudioBridgeSetRouteMeterDemand(bool enabled);
+bool N60RealtimeAudioBridgeRouteMeterDemand(void);
+// Control thread. Returns the maxima since the previous call and clears them.
+N60RouteMeterSnapshot N60RealtimeAudioBridgeTakeRouteMeterSnapshot(
+    N60RealtimeAudioBridge * _Nonnull bridge
+);
+// Callback helpers, exposed so a harness can drive them without Core Audio.
+void N60RouteMeterAccumulate(
+    N60RouteMeterAccumulator * _Nonnull accumulator,
+    const N60SameDeviceOutputMap * _Nonnull map,
+    const N60SpeakerBusFrame * _Nonnull frame
+);
+void N60RealtimeAudioBridgePublishRouteMeter(
+    N60RealtimeAudioBridge * _Nonnull bridge,
+    const N60RouteMeterAccumulator * _Nonnull accumulator,
+    uint32_t routeCount,
+    uint32_t frameCount
+);
+
 // Spectrum and stereo analysis share one bounded SPSC capture ring. The
 // physical-output callback writes exact render Input and DSP Output samples
 // only while one of these demand bits is active. Consumers read/copy off the
