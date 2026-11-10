@@ -4490,6 +4490,7 @@ final class AudioIOEngine: ObservableObject {
         shape: UnifiedGraphLayoutShape,
         virtualSpeakers: Bool,
         subwooferCount: Int? = nil,
+        foldStereoCrossover: Bool = false,
         inputs candidate: LiveGraphInputs? = nil
     ) throws -> UnifiedGraphProgramDSP? {
         guard unifiedGraphEnabled else {
@@ -4506,10 +4507,16 @@ final class AudioIOEngine: ObservableObject {
         if deltaAudition, virtualSpeakers {
             throw LiveNChannelTransportError.unsupportedActiveDSP("delta audition in Virtual Speakers mode")
         }
+        // E8 S11b: stereo plus sub lanes folds the user's crossover (monitor mode, phase alignment, filter) into the
+        // session's one bass management; every other layout keeps the route plan's own split and a disabled crossover.
+        let subLaneTotal = subwooferCount ?? 0
+        let fold = foldStereoCrossover && !virtualSpeakers && subLaneTotal > 0 && shape.laneCount == 2
+            && shape.lfeLane == nil && renderBassManagementConfiguration(inputs.bass).enabled
+        let foldedBassSettings = fold ? renderBassManagementConfiguration(inputs.bass) : BassManagementConfiguration()
         var snapshot = try inputs.stereoEQ.makeGraphSnapshot(
             sampleRate: sampleRate,
             gainConfiguration: DSPGainConfiguration(),
-            bassManagementConfiguration: BassManagementConfiguration(),
+            bassManagementConfiguration: foldedBassSettings,
             dynamicsConfiguration: inputs.dynamics,
             playbackConfiguration: playback,
             masterGainLinear: 1
@@ -4608,8 +4615,13 @@ final class AudioIOEngine: ObservableObject {
         }
         let programs = retained
         let stereo: UnifiedGraphConfiguration
+        // Neutral placeholders: the fold adds the crossover's sub gain, polarity and all-pass; the route plan's
+        // calibrations are added by `nChannelEligibility`.
         switch UnifiedGraphTranslator.stereoEligibility(
-            snapshot: &snapshot, sampleRate: sampleRate, programs: { _, generation in programs[generation] }
+            snapshot: &snapshot, sampleRate: sampleRate,
+            subwoofers: fold ? Array(repeating: UnifiedGraphSubwoofer(), count: subLaneTotal) : [],
+            crossoverHz: foldedBassSettings.frequencyHz,
+            programs: { _, generation in programs[generation] }
         ) {
         case .success(let configuration): stereo = configuration
         case .failure(let reason): throw LiveNChannelTransportError.unifiedGraphRejected(reason)
@@ -4631,7 +4643,7 @@ final class AudioIOEngine: ObservableObject {
             program.subLaneCount = subwooferCount ?? 0
         }
         roomCorrectionInactiveReason = inactive
-        return program.isNeutral ? nil : program
+        return program.isNeutral && program.foldedBass == nil ? nil : program
     }
 
     // MARK: E6 S9b live edits on a graph-rendered N-channel or binaural session
@@ -4809,9 +4821,12 @@ final class AudioIOEngine: ObservableObject {
             guard let shape = UnifiedGraphLayoutShape(roles: session.routePlan.programLayout.roles) else {
                 throw LiveNChannelTransportError.unifiedGraphRejected(.laneCountMismatch)
             }
+            let folds = foldsStereoCrossover(
+                routePlan: session.routePlan, bass: renderBassManagementConfiguration(inputs.bass), requiresRackFree: true)
+            if !folds { try requireNoCrossoverAudition(inputs.bass) }
             let program = try makeUnifiedProgramDSP(
                 sampleRate: rate, shape: shape, virtualSpeakers: false,
-                subwooferCount: Int(session.routePlan.subwooferCount), inputs: inputs)
+                subwooferCount: Int(session.routePlan.subwooferCount), foldStereoCrossover: folds, inputs: inputs)
             var configuration: UnifiedGraphConfiguration
             if session.routePlan.isRouted {
                 guard let activeRouting = routing ?? speakerRoutingConfiguration, activeRouting.enabled else {
@@ -5296,6 +5311,7 @@ final class AudioIOEngine: ObservableObject {
     private func buildRoutedTransport(output: AudioOutputDevice, routing: SpeakerRoutingConfiguration) throws {
         try validateSpeakerRoutingActivation(routing)
         try validateLiveNChannelActivation()
+        try requireNoCrossoverAudition(bassManagementConfiguration)
         if stagedRoomTreatment != nil {
             throw LiveNChannelTransportError.routingRefused("room treatment cannot run with the routing matrix.")
         }
@@ -5375,10 +5391,26 @@ final class AudioIOEngine: ObservableObject {
         if bassManagementConfiguration.physicalOutputMode != nil {
             throw LiveNChannelTransportError.unsupportedActiveDSP("legacy physical crossover routing")
         }
-        if bassManagementConfiguration.subPhaseAlignmentEnabled {
+    }
+
+    /// E8 S11b: true when the session is stereo plus 1 to 8 subs on the unified graph, unrouted, so the stereo
+    /// crossover's monitor mode, phase-alignment all-pass and filter family fold into its bass management.
+    private func foldsStereoCrossover(
+        routePlan: LiveNChannelOutputRoutePlan, bass: BassManagementConfiguration, requiresRackFree: Bool = false
+    ) -> Bool {
+        guard unifiedGraphEnabled, bass.enabled, !routePlan.isRouted, routePlan.subwooferCount >= 1,
+              !(requiresRackFree && stagedAudioUnitRack != nil),
+              let shape = UnifiedGraphLayoutShape(roles: routePlan.programLayout.roles),
+              shape.laneCount == 2, shape.lfeLane == nil else { return false }
+        return true
+    }
+
+    /// Where the crossover does not fold, its monitor audition and single-sub phase alignment have no stage to run in.
+    private func requireNoCrossoverAudition(_ bass: BassManagementConfiguration) throws {
+        if bass.subPhaseAlignmentEnabled {
             throw LiveNChannelTransportError.unsupportedActiveDSP("legacy single-sub phase alignment")
         }
-        if bassManagementConfiguration.monitorMode != .recombined {
+        if bass.monitorMode != .recombined {
             throw LiveNChannelTransportError.unsupportedActiveDSP("stereo crossover monitor audition")
         }
     }
@@ -5394,6 +5426,9 @@ final class AudioIOEngine: ObservableObject {
             selectedOutputUID: output.uid,
             bassManagementEnabled: bassManagementConfiguration.enabled
         )
+        let foldsCrossover = foldsStereoCrossover(
+            routePlan: routePlan, bass: renderBassManagementConfiguration(), requiresRackFree: true)
+        if !foldsCrossover { try requireNoCrossoverAudition(bassManagementConfiguration) }
         if let stagedRoomTreatment {
             guard stagedRoomTreatment.acceptedProfile == profile,
                   stagedRoomTreatment.acceptedSelectedOutputUID == output.uid else {
@@ -5425,7 +5460,7 @@ final class AudioIOEngine: ObservableObject {
             }
             programDSP = try makeUnifiedProgramDSP(
                 sampleRate: output.nominalSampleRate, shape: shape, virtualSpeakers: false,
-                subwooferCount: Int(routePlan.subwooferCount))
+                subwooferCount: Int(routePlan.subwooferCount), foldStereoCrossover: foldsCrossover)
             switch UnifiedGraphTranslator.nChannelEligibility(
                 routePlan: routePlan,
                 sampleRate: output.nominalSampleRate,
