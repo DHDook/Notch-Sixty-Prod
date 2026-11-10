@@ -47,6 +47,11 @@ set_target_properties(n60core_system_test PROPERTIES C_STANDARD 11 LINKER_LANGUA
 target_link_libraries(n60core_system_test PRIVATE n60core m)
 add_test(NAME n60core_system COMMAND n60core_system_test)
 
+add_executable(n60core_ambient_sections_test tests/test_ambient_sections.c)
+set_target_properties(n60core_ambient_sections_test PROPERTIES C_STANDARD 11 LINKER_LANGUAGE CXX)
+target_link_libraries(n60core_ambient_sections_test PRIVATE n60core m)
+add_test(NAME n60core_ambient_sections COMMAND n60core_ambient_sections_test)
+
 add_executable(n60core_external_test tests/test_external.c)
 set_target_properties(n60core_external_test PROPERTIES C_STANDARD 11 LINKER_LANGUAGE CXX)
 target_link_libraries(n60core_external_test PRIVATE n60core m)

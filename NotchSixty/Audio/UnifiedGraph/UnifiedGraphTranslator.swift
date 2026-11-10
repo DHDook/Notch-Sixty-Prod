@@ -767,7 +767,7 @@ enum UnifiedGraphTranslator {
     static let headphoneDelayStageBase: UInt32 = 2_400
 
     /// True when the HEADPHONE stage and the ear DELAY stages reproduce `profile`: headroom 0 to 30 dB (the profile's
-    /// full range), at most `N60_HEADPHONE_MAX_EQ_SECTIONS` (16, the legacy maximum, which `validateStructure` also
+    /// full range), at most `N60_PEQ_MAX_SECTIONS` (16, the legacy maximum, which `validateStructure` also
     /// enforces) enabled bands a side, channel gain within the stage's range and a delay within the delay capacity.
     /// A profile that passed `validateStructure` always satisfies this; it guards hand-built configurations.
     static func headphoneStagesEligible(profile: HeadphoneDeviceProfileConfiguration, sampleRate: Double) -> Bool {
@@ -781,8 +781,8 @@ enum UnifiedGraphTranslator {
             else { return false }
         }
         guard profile.headroomAttenuationDB.isFinite, (0.0...30.0).contains(profile.headroomAttenuationDB),
-              profile.left.eqBands.filter(\.enabled).count <= Int(N60_HEADPHONE_MAX_EQ_SECTIONS),
-              profile.right.eqBands.filter(\.enabled).count <= Int(N60_HEADPHONE_MAX_EQ_SECTIONS),
+              profile.left.eqBands.filter(\.enabled).count <= Int(N60_PEQ_MAX_SECTIONS),
+              profile.right.eqBands.filter(\.enabled).count <= Int(N60_PEQ_MAX_SECTIONS),
               (-24.0...24.0).contains(profile.left.gainDB), (-24.0...24.0).contains(profile.right.gainDB),
               sampleRate.isFinite, sampleRate > 0 else { return false }
         for side in [profile.left, profile.right] {
@@ -795,11 +795,21 @@ enum UnifiedGraphTranslator {
     }
 
     /// The HEADPHONE pair stage (lanes 0 and 1) for `profile`; call only when `headphoneStagesEligible`.
-    static func headphoneStage(profile: HeadphoneDeviceProfileConfiguration) -> UnifiedGraphStageSpec {
+    /// E13 S3: with `fixedSections` (live tuning on) each ear always carries `N60_PEQ_MAX_SECTIONS` sections, the
+    /// unused ones at unity, so adding or removing a band changes parameter values and never the parameter count (a
+    /// posted edit, not a rebuild).
+    static func headphoneStage(
+        profile: HeadphoneDeviceProfileConfiguration,
+        fixedSections: Bool = UnifiedGraphLiveHeadphoneTuning.isOn
+    ) -> UnifiedGraphStageSpec {
         func bands(_ side: HeadphoneChannelCorrection) -> [Float] {
-            side.eqBands.filter(\.enabled).flatMap { band -> [Float] in
+            var out = side.eqBands.filter(\.enabled).flatMap { band -> [Float] in
                 [Float(band.type.realtimeCType.rawValue), Float(band.frequencyHz), Float(band.gainDB), Float(band.q)]
             }
+            if fixedSections {
+                while out.count < 4 * Int(N60_PEQ_MAX_SECTIONS) { out += UnifiedGraphLiveHeadphoneTuning.unitySection }
+            }
+            return out
         }
         let leftBands = bands(profile.left)
         let rightBands = bands(profile.right)
