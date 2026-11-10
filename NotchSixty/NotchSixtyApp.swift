@@ -158,6 +158,7 @@ final class ProductController: ObservableObject {
         )
         UnifiedGraphFIRScheme.refresh()
         UnifiedGraphOutputProtection.refresh()
+        UnifiedGraphLiveHeadphoneTuning.refresh()
         activeQuietZone.subAwareAncEnabled = FeatureFlags().isEnabled(.subAwareAnc)
         if activeQuietZone.subAwareAncEnabled {
             roomProjects.ancBassStamp = { [weak activeQuietZone] in activeQuietZone?.ancBassPathState.fingerprint }
@@ -301,6 +302,7 @@ final class ProductController: ObservableObject {
         )
         UnifiedGraphFIRScheme.refresh()
         UnifiedGraphOutputProtection.refresh()
+        UnifiedGraphLiveHeadphoneTuning.refresh()
         activeQuietZone.subAwareAncEnabled = FeatureFlags().isEnabled(.subAwareAnc)
         if activeQuietZone.subAwareAncEnabled {
             roomProjects.ancBassStamp = { [weak activeQuietZone] in activeQuietZone?.ancBassPathState.fingerprint }

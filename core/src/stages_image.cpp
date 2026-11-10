@@ -508,9 +508,7 @@ void imageInit(SnapHeader *h, const StageRec &r) {
     }
 }
 
-// Denormal guard, once per block: decayed filter state below 1e-30 (-600 dBFS) is flushed to zero.
-static inline void flush(float &v) { if (std::fabs(v) < 1.0e-30f) v = 0.0f; }
-static inline void flush(double &v) { if (std::fabs(v) < 1.0e-30) v = 0.0; }
+// E20 S3: denormals are flushed in hardware (platform/fpenv.hpp, the guard in n60_graph_process), so no per-block flush.
 
 void runImage(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) N60_RT_NONBLOCKING {
     const float *p = paramsOf(h, r);
@@ -521,16 +519,10 @@ void runImage(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) 
         ImgShared &S = *reinterpret_cast<ImgShared *>(sharedState(h, r));
         runMode(S, p, L, R, frames);
         runWidener(S, p, rate, L, R, frames);
-        for (int i = 0; i < 2; ++i) {
-            flush(S.lowSt[i].z1); flush(S.lowSt[i].z2); flush(S.highSt[i].z1); flush(S.highSt[i].z2);
-        }
     } else {
         DeShared &S = *reinterpret_cast<DeShared *>(sharedState(h, r));
         runHarsh(S, p, rate, L, R, frames);
         runEss(S, p, rate, L, R, frames);
-        flush(S.shelfL.z1); flush(S.shelfL.z2); flush(S.shelfR.z1); flush(S.shelfR.z2);
-        flush(S.hpL.z1); flush(S.hpL.z2); flush(S.hpR.z1); flush(S.hpR.z2);
-        flush(S.lpL.z1); flush(S.lpL.z2); flush(S.lpR.z1); flush(S.lpR.z2);
     }
 }
 

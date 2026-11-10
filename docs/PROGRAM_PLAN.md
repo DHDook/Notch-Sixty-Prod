@@ -132,6 +132,8 @@ decision, so Phase 2 starts without it; every later bench check is collected the
 - [ ] Define the live-ANC authorisation criteria in writing, then switch `liveANCQualified` only through that path
 - [ ] Re-qualify on the unified graph after E6 lands, and publish the measurement method for reviewers
 - [ ] Class-leading roadmap (owner, 27 Oct 2026; `docs/epics/E4.md` S12–S31): safety foundation (arm hardening, acoustic twin, engine lease, live howl guard, "do no harm" verifier, flight recorder); adaptive tonal live with tone glide, earned cap and excursion cap; upstream reference microphone with cross-device clocking; virtual microphone and head-tracked zones; noise survey, overnight mode, Conversation Focus unmasking, reviewer kit
+  - [~] S30a `e4/unmask-ambient-stage`: `AMBIENT` stage carries up to 17 live cut-only peaking sections (ABI v32); built, but nothing sets the cuts until S30c, so the stage is dark; wired by S30c
+  - [~] S30a overlay: `AmbientUnmaskOverlay` section fit and trailer builder built dark behind `AmbientCompensationTarget.unmaskingCutsDB`; wired by S30c
 
 ### E5 UI scope clean-up
 
@@ -223,10 +225,10 @@ chain once per frame, with no SIMD, on one thread.
 
 - [ ] **Whole-buffer processing:** each stage processes the full buffer instead of the per-frame `N60RenderKernelProcessStereoFrameInContext` call; fuse adjacent stages with templates so audio stays in cache
 - [ ] **Multirate:** run ANC, MIMO room treatment, subwoofer and bass-management processing and low-frequency analysis at decimated rates (32–64× below 384 kHz), with polyphase decimation and interpolation and exact latency accounting
-- [ ] **SIMD:** Google Highway with runtime dispatch (NEON, SSE, AVX2, AVX-512); vectorise biquad cascades across channels
+- [~] **SIMD:** Google Highway with runtime dispatch (NEON, SSE, AVX2, AVX-512); vectorise biquad cascades across channels (E20 S3 `e20/simd-biquads-and-loops` built, partial: in-house portable layer `core/src/simd/simd.hpp` (design note 5, replaces Highway) with PEQ, XOVER, PROTECTION half-band, meters, M/S; remaining cascades and loops G14, G15, E20 S4)
 - [ ] **Multiple threads:** Audio Workgroups on Apple (and the equivalent realtime thread groups elsewhere) for lanes, MIMO and long convolution, with a lock-free job graph and a deterministic join before output
 - [ ] **Right algorithms:** non-uniform partitioned convolution in every FIR path (program FIR, binaural, MIMO), long partitions spread across callbacks, double-precision or state-variable filters at high rates, polyphase sample-rate conversion
-- [~] Set flush-to-zero at callback entry instead of scanning every sample for denormals; keep the NaN guard at the output (E20 S2 `e20/fp-env-and-rt-checks` built, partial: FTZ guard at graph and bridge entry done; per-sample flushes remain in loudness, image, multiband, route and rider: G10, E20 S3)
+- [~] Set flush-to-zero at callback entry instead of scanning every sample for denormals; keep the NaN guard at the output (E20 S2 `e20/fp-env-and-rt-checks` built, partial: FTZ guard at graph and bridge entry done; per-sample flushes removed in E20 S3 `e20/simd-biquads-and-loops` (G10 closed); zero-tail tests for the removed flushes G15, E20 S4)
 - [~] RealtimeSanitizer plus `nonblocking` / `nonallocating` attributes on every realtime entry point, run in CI (E20 S2 `e20/fp-env-and-rt-checks` built, partial: `core-rtsan` job and core function-effects annotations done; bridge callbacks cannot take the attribute and parity suite is not under RTSan: G9, G11, E20 S10)
 - [~] CI benchmarks: per-stage ns/sample and worst-case callback time at 48, 192 and 384 kHz, with fail thresholds (E20 S1 `e20/bench-baselines` built, PR #448: harness, profile hooks, `macos-full` step, `budgets.json` warn only; baseline JSON is an owner step after the first nightly (G2); fail enforcement wiring is E20 S10 (G3))
 - [ ] UI: move `ObservableObject` controllers (23 `@Published` in `AudioIOEngine`, 33 in `RoomTreatmentAdvisorController`) to `@Observable` (drawing meters with Canvas at display rate moved to E28 S1 and S5, owner, 7 Nov 2026)
@@ -395,7 +397,7 @@ complete, speaker ANC qualified, and a full hardware regression passing at every
 
 - [x] Bring-your-own import: AutoEq CSV, REW and squig.link frequency-response text, plus user target curves
 - [x] One-click PEQ from an imported response and a chosen target, using the existing model fitter
-- [ ] Live PEQ and crossfeed tuning while playing (from E6)
+- [~] Live PEQ and crossfeed tuning while playing (from E6): S3 built behind `e13.headphones` (`e13/live-headphone-tuning`, PR #456; needs-owner); bench in E22
 - [ ] Raise the HRIR cap for room-included BRIRs; live HRTF interpolation with head tracking
 - [~] In-ear-microphone BRIR capture for personal virtual speakers (S6 core merged; S7 guided flow built behind `e13.headphones`; bench in E22)
 

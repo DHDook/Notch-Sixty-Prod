@@ -629,17 +629,7 @@ void runCleanup(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames
         L[i] = left;
         R[i] = right;
     }
-    // Denormal guard, once per block: decayed filter state below 1e-30 (-600 dBFS) is flushed to zero so a long tail
-    // after loud input never runs the float units in denormal mode. Bounded work, no allocation.
-    auto flushD = [](double &v) { if (std::fabs(v) < 1.0e-30) v = 0.0; };
-    flushD(S.dcPrevInL); flushD(S.dcPrevInR); flushD(S.dcPrevOutL); flushD(S.dcPrevOutR);
-    for (uint32_t k = 0; k < kMaxInfra; ++k) {
-        flushD(S.infraL[k].z1); flushD(S.infraL[k].z2); flushD(S.infraR[k].z1); flushD(S.infraR[k].z2);
-    }
-    for (uint32_t k = 0; k < kMaxHarm; ++k) {
-        flushD(S.curL[k].z1); flushD(S.curL[k].z2); flushD(S.curR[k].z1); flushD(S.curR[k].z2);
-        flushD(S.pendL[k].z1); flushD(S.pendL[k].z2); flushD(S.pendR[k].z1); flushD(S.pendR[k].z2);
-    }
+    // E20 S3: no per-block denormal flush; n60_graph_process runs under the flush-to-zero guard (platform/fpenv.hpp).
 }
 
 n60_status validateCleanupParam(const SnapHeader *h, const StageRec &r, uint32_t idx, float value) N60_RT_NONBLOCKING {
