@@ -48,7 +48,28 @@ These are local numbers on an M4, not the M1 target and not a CI runner. The com
 The R2 384 kHz cell is lower than 352.8 kHz because the period doubling stops at 1024 frames and the
 FIR partitioning changes there; treat it as a harness artefact to re-check on the CI baseline.
 
-## Hot list (ns per lane-sample, profile build)
+## After E20 S3 (portable SIMD layer, local M4, -O3, reference block, mean load %)
+
+Same machine and method as the baseline above, three runs, one second each; before is the S2 tree, after is
+this slice. The SIMD changes are PEQ and crossover lane pairs (`f64x2`), the 64-tap half-band dot product in
+PROTECTION (`f32x4`, four accumulators), meters, gain and M/S, and the removal of the per-block manual denormal flushes.
+
+| Scenario / rate | Before | After | Change |
+|---|---|---|---|
+| R1 48 kHz | 2.71 | 2.19 | -19% |
+| R1 384 kHz | 21.62 | 17.62 | -19% |
+| R2 48 kHz | 5.07 | 4.32 | -15% |
+| R2 384 kHz | 41.00 | 34.22 | -17% |
+| R3 48 kHz | 10.71 | 9.42 | -12% |
+| R3 384 kHz | 88.05 | 75.36 | -14% |
+| R6 48 kHz | 3.15 | 1.86 | -41% |
+| R6 384 kHz | 24.74 | 17.71 | -28% |
+
+Per-stage (ns per lane-sample, profile build, R1): PROTECTION 94.5 to 38.8 at 48 kHz (63.0 to 40.8 at 384 kHz),
+PEQ 8.7 to 2.0 at 48 kHz in R1 (R6 PEQ 10.1 to 6.0). FIR is untouched (S4) and is now the top stage at 48 kHz.
+Bit-identical SIMD and scalar (`N60_SIMD=0`) builds are checked by `core/tests/test_simd_parity.cpp`.
+
+## Hot list (ns per lane-sample, profile build, before S3)
 
 | Scenario / rate | Top stages |
 |---|---|

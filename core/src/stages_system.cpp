@@ -31,6 +31,7 @@
 #include <new>
 
 #include "n60/xover.h"
+#include "simd/simd.hpp"
 
 namespace n60 {
 namespace {
@@ -83,8 +84,9 @@ inline double bqRun(const double *c, Bq &s, double x) {  // transposed direct fo
     return y;
 }
 inline void bqFlush(Bq &s) {
-    if (!(std::fabs(s.z1) >= 1e-30) || !std::isfinite(s.z1)) s.z1 = 0.0;
-    if (!(std::fabs(s.z2) >= 1e-30) || !std::isfinite(s.z2)) s.z2 = 0.0;
+    // E20 S3: denormals are flushed in hardware (platform/fpenv.hpp); only a non-finite burst needs healing.
+    if (!std::isfinite(s.z1)) s.z1 = 0.0;
+    if (!std::isfinite(s.z2)) s.z2 = 0.0;
 }
 
 constexpr double kButterQ = 0.70710678118654752440;
@@ -1231,8 +1233,6 @@ void runCrosstalk(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t fram
         a[i] = static_cast<float>(l - amt * s.sR);
         b[i] = static_cast<float>(rr - amt * s.sL);
     }
-    if (std::fabs(s.sL) < 1e-30) s.sL = 0.0;
-    if (std::fabs(s.sR) < 1e-30) s.sR = 0.0;
 }
 
 void runHeadphone(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) {
@@ -1276,10 +1276,6 @@ void runHeadphone(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t fram
     s.wp = wp;
     for (uint32_t k = 0; k < s.nA; ++k) bqFlush(s.zA[k]);
     for (uint32_t k = 0; k < s.nB; ++k) bqFlush(s.zB[k]);
-    if (std::fabs(s.lowA) < 1e-30) s.lowA = 0.0;
-    if (std::fabs(s.lowB) < 1e-30) s.lowB = 0.0;
-    if (std::fabs(s.dlowA) < 1e-30) s.dlowA = 0.0;
-    if (std::fabs(s.dlowB) < 1e-30) s.dlowB = 0.0;
 }
 
 void runGate(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) {
@@ -1314,7 +1310,7 @@ void runGate(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) {
         const float g = static_cast<float>(gain);
         for (uint32_t l = 0; l < r.laneCount; ++l) ptr[l][i] *= g;
     }
-    s.env = (env < 1e-30 || !std::isfinite(env)) ? 0.0 : env;
+    s.env = std::isfinite(env) ? env : 0.0;
     s.gain = std::isfinite(gain) ? gain : 1.0;
 }
 
@@ -1734,8 +1730,7 @@ void runDeltaSubtract(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t 
 // ---- protection ---------------------------------------------------------------------------
 
 constexpr uint32_t kHbTaps = 65;
-constexpr uint32_t kHbCenter = 32;
-const float kHalfBand[kHbTaps] = {
+constexpr float kHalfBand[kHbTaps] = {
     0.0f, -8.93785157026247e-06f, 0.0f, 8.8329163000838e-05f,
     0.0f, -0.000276868159748326f, 0.0f, 0.000625180796064176f,
     0.0f, -0.00120674594714632f, 0.0f, 0.00211986552642504f,
@@ -1754,15 +1749,22 @@ const float kHalfBand[kHbTaps] = {
     0.000625180796064177f, 0.0f, -0.000276868159748327f, 0.0f,
     8.83291630008379e-05f, 0.0f, -8.93785157026247e-06f, 0.0f};
 
+// The half-band taps in window order: kHalfBandRev[j] pairs with the sample j - 63 steps from the newest, so the 64-tap
+// dot product reads the history window forwards (the 65th tap is zero). E20 S3: four independent SIMD accumulators
+// replace the serial float chain, in both the SIMD and scalar builds (simd::dot16), so the two agree bit for bit.
+struct HalfBandRev {
+    alignas(16) float t[64];
+    constexpr HalfBandRev() : t{} { for (uint32_t j = 0; j < 64; ++j) t[j] = kHalfBand[63 - j]; }
+};
+constexpr HalfBandRev kHalfBandRev;
+
 inline float hbPush(Hb &f, float in) {
     const uint32_t newest = f.w;
     f.s[newest] = in;
     f.s[newest + kHbTaps] = in;
-    const float *base = f.s + newest + kHbTaps;  // base[-tap] is the sample `tap` steps old
-    float out = kHalfBand[kHbCenter] * base[-static_cast<int>(kHbCenter)];
-    for (uint32_t tap = 1; tap < kHbTaps; tap += 2) out += kHalfBand[tap] * base[-static_cast<int>(tap)];
+    const float *win = f.s + newest + kHbTaps - 63u;  // win[j] is the sample 63 - j steps old
     f.w = newest + 1 == kHbTaps ? 0u : newest + 1;
-    return out;
+    return simd::dot16(win, kHalfBandRev.t, 64);
 }
 inline void interp2(Hb &f, float in, float out[2]) {
     out[0] = 2.0f * hbPush(f, in);
@@ -1913,7 +1915,7 @@ void runProtection(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t fra
                 desired = std::fmin(static_cast<double>(c.riderMax), std::fmax(0.0, atten + (sustained - static_cast<double>(c.riderTarget))));
             }
             atten = desired + c.riderRespCoef * (atten - desired);
-            if (atten < 1e-6) atten = 0.0;  // flush the decaying tail (no denormals, no endless pow)
+            if (atten < 1e-6) atten = 0.0;  // idle cutoff: below 1e-6 dB the rider is off (skips the lane multiply), not a denormal flush
             if (atten != 0.0) {
                 // The rider moves over seconds: redo the pow only after a 1e-4 dB change (a 1e-5 relative gain error).
                 if (std::fabs(atten - gainAtten) > 1.0e-4) {
