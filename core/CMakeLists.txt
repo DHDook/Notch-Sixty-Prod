@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.20)
 project(n60core LANGUAGES C CXX)
 
 add_library(n60core STATIC src/graph.cpp src/snapshot.cpp src/fft.cpp src/stages_dsp.cpp src/conv/nufir.cpp src/stages_system.cpp src/stages_matrix.cpp src/stages_generator.cpp src/stages_cleanup.cpp src/stages_image.cpp src/stages_loudness.cpp src/stages_multiband.cpp src/stages_route.cpp src/layout.cpp
-    src/measure/offline_fft.cpp src/measure/ess.cpp src/measure/deconvolve.cpp src/measure/reference_room.cpp src/measure/timing.cpp src/measure/distortion.cpp src/measure/decay.cpp src/measure/waterfall.cpp src/measure/monitor_ring.cpp src/measure/spl.cpp src/measure/rta.cpp
+    src/measure/offline_fft.cpp src/measure/ess.cpp src/measure/deconvolve.cpp src/measure/reference_room.cpp src/measure/timing.cpp src/measure/distortion.cpp src/measure/decay.cpp src/measure/waterfall.cpp src/measure/monitor_ring.cpp src/measure/spl.cpp src/measure/rta.cpp src/measure/predict.cpp
     src/correct/minphase.cpp src/correct/design.cpp src/correct/synth.cpp src/correct/bass.cpp src/correct/multisub_search.cpp
     src/xover/xover.cpp)
 target_compile_features(n60core PUBLIC cxx_std_20)
@@ -88,6 +88,11 @@ add_test(NAME n60core_measure_timing COMMAND n60core_measure_timing_test)
 add_executable(n60core_measure_analysis_test tests/test_measure_analysis.cpp)
 target_link_libraries(n60core_measure_analysis_test PRIVATE n60core)
 add_test(NAME n60core_measure_analysis COMMAND n60core_measure_analysis_test)
+
+# E19 S1: predicted treated IR and per-source modes in the reference room.
+add_executable(n60core_measure_predict_test tests/test_measure_predict.cpp)
+target_link_libraries(n60core_measure_predict_test PRIVATE n60core)
+add_test(NAME n60core_measure_predict COMMAND n60core_measure_predict_test)
 
 # E11 S4: waterfall (CSD) and spectrogram.
 add_executable(n60core_measure_waterfall_test tests/test_measure_waterfall.cpp)
