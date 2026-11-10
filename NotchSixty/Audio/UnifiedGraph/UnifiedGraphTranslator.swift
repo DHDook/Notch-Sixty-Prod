@@ -119,11 +119,8 @@ enum UnifiedGraphTranslator {
             return .failure(.midSideProgramFIR)
         }
         // E6 S12f: a room or speaker IR convolver with subwoofer lanes renders on the graph in the core's order (the
-        // convolvers delay the front pair, the other lanes catch up). Two bass managers on one path do not: the stereo
-        // crossover and the subwoofer split would each take the low band (G32).
-        if stages.crossover != nil, !subwoofers.isEmpty {
-            return .failure(.crossoverWithSubwoofer)
-        }
+        // convolvers delay the front pair, the other lanes catch up). E8 S11 (G2, G32): the stereo crossover with sub
+        // lanes is folded into the one bass management below instead of a second split.
         configuration.stereoStages = stages
         configuration.firScheme = firScheme
         // E6 S12e follow-up (G27): the delta audition runs the full processed chain and subtracts the aligned input.
@@ -176,11 +173,63 @@ enum UnifiedGraphTranslator {
             configuration.protection = protection
         }
         if !subwoofers.isEmpty {
-            configuration.bassManagement = UnifiedGraphBassManagement(
-                crossoverHz: crossoverHz, lfeLane: nil, subwoofers: subwoofers
-            )
+            var bass = UnifiedGraphBassManagement(crossoverHz: crossoverHz, lfeLane: nil, subwoofers: subwoofers)
+            if let crossover = configuration.stereoStages.crossover {
+                // The crossover is the only split: the sub lanes take its low band (after the alignment's mono-bass
+                // filter, which `apply(_:to:)` has already written into the parameters).
+                guard let folded = foldCrossover(crossover, into: bass) else { return .failure(.stageParametersUnreadable) }
+                if let failure = folded.failure { return .failure(failure) }
+                bass = folded.bass
+                configuration.stereoStages.crossover = nil
+                let subLanes = UInt64((1 << subwoofers.count) - 1) << UInt64(configuration.lanes.count)
+                configuration.mutedLanes = (folded.mutesMains ? 0b11 : 0) | (folded.mutesSubs ? subLanes : 0)
+            }
+            configuration.bassManagement = bass
         }
         return .success(configuration)
+    }
+
+    /// E8 S11: the stereo crossover's parameters as the bass management that takes its place when sub lanes exist.
+    /// `BASS_MGMT` high-passes each main lane and sums their low-passes, which is the crossover's mains high-pass and its
+    /// sub `(A + B) / 2` low-pass; the redirect carries the 1/2 mean, the crossover's sub gain and polarity go to every
+    /// sub, and the phase alignment becomes an all-pass at the head of each sub's EQ. Nil when the parameters are not an
+    /// 8 or 12 value list. With N subs the bass sum takes `BASS_MGMT`'s 1/N, so N subs together play the level one
+    /// sub would. Must run after `apply(_:to:)` (it writes the mono-bass trailer and polarity). No added latency; the
+    /// monitor mode is fixed at build time (a change is a rebuild with the core's fade). The mute mask assumes the
+    /// stereo path's two program lanes.
+    private static func foldCrossover(
+        _ x: [Float], into bass: UnifiedGraphBassManagement
+    ) -> (bass: UnifiedGraphBassManagement, failure: UnifiedGraphFallbackReason?, mutesMains: Bool, mutesSubs: Bool)? {
+        guard x.count == 8 || x.count == 12 else { return nil }
+        var result = bass
+        result.crossoverHz = Double(x[0])
+        result.redirectDB = UnifiedGraphBassManagement.twoMainMeanRedirectDB
+        if x.count == 12 {
+            result.filterSpec = Array(x[8...11])
+        } else {
+            result.steepSplit = x[1] != 0
+        }
+        let mode = Int(x[2])
+        let gain = Double(x[3])
+        // A gain under -60 dB (the sub range's floor) is a mute, as a zero gain is.
+        let silent = gain < 0.001
+        let gainDB = silent ? 0 : 20 * log10(gain)
+        let invert = x[4] != 0
+        let align = x[5] != 0
+        for index in result.subwoofers.indices {
+            result.subwoofers[index].gainDB += gainDB
+            guard (-60.0...24.0).contains(result.subwoofers[index].gainDB) else {
+                return (result, .subGainOutOfRange, false, false)
+            }
+            if invert { result.subwoofers[index].polarityInverted.toggle() }
+            if align {
+                guard result.subwoofers[index].eq.count < 8 else { return (result, .subEQTooLarge, false, false) }
+                result.subwoofers[index].eq.insert(
+                    UnifiedGraphPEQSection(type: 6, frequencyHz: Double(x[6]), gainDB: 0, q: Double(x[7])), at: 0)
+            }
+        }
+        // Monitor modes 1 (mains only) and 2 (sub only); a zero sub gain silences the subs in every mode.
+        return (result, nil, mode == 2, mode == 1 || silent)
     }
 
     /// E25 S2: compiles the mono-bass filter into the pair crossover (ABI v19 trailer, with the sum-polarity fix for
@@ -901,7 +950,7 @@ enum UnifiedGraphFallbackReason: String, Error, Equatable, Sendable, CaseIterabl
     case convolutionProgramUnavailable
     /// Retired in E6 S12f (room correction or speaker IR with a subwoofer lane renders on the graph); kept so diagnostics stay stable.
     case convolverWithSubwoofer
-    /// E6 S12f: the stereo crossover and subwoofer lanes together would split the bass twice (G32).
+    /// Retired in E8 S11 (the stereo crossover feeds the subwoofer lanes from its low band); kept so diagnostics stay stable.
     case crossoverWithSubwoofer
     /// E6 S12f: the snapshot's unsupported stage group, by name (replaces the generic kernel-stage refusal).
     case snapshotBypassOrAudition
