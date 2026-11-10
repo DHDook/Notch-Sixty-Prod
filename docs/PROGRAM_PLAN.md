@@ -227,7 +227,7 @@ chain once per frame, with no SIMD, on one thread.
 - [ ] **Right algorithms:** non-uniform partitioned convolution in every FIR path (program FIR, binaural, MIMO), long partitions spread across callbacks, double-precision or state-variable filters at high rates, polyphase sample-rate conversion
 - [ ] Set flush-to-zero at callback entry instead of scanning every sample for denormals; keep the NaN guard at the output
 - [ ] RealtimeSanitizer plus `nonblocking` / `nonallocating` attributes on every realtime entry point, run in CI
-- [ ] CI benchmarks: per-stage ns/sample and worst-case callback time at 48, 192 and 384 kHz, with fail thresholds
+- [~] CI benchmarks: per-stage ns/sample and worst-case callback time at 48, 192 and 384 kHz, with fail thresholds (E20 S1 `e20/bench-baselines` built, PR pending: harness, profile hooks, `macos-full` step, `budgets.json` warn only; baseline JSON is an owner step after the first nightly (G2); fail enforcement wiring is E20 S10 (G3))
 - [ ] UI: move `ObservableObject` controllers (23 `@Published` in `AudioIOEngine`, 33 in `RoomTreatmentAdvisorController`) to `@Observable` (drawing meters with Canvas at display rate moved to E28 S1 and S5, owner, 7 Nov 2026)
 - Moved to E28 (owner, 7 Nov 2026): user-facing dynamics meters from the E6 S8c readbacks (gain reduction on the compressor, expander and limiter controls in E28 S5; true-peak beside the output meter and a latching over-range indicator in E28 S1)
 

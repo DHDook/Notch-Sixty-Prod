@@ -12,6 +12,7 @@
 //  - reset: a fresh snapshot starts with zero filter and delay memory and meters at 0.
 //    There is no in-place reset; a new topology is a new snapshot.
 #include "snapshot.hpp"
+#include "n60/profile.h"
 
 #include "stages_dsp.hpp"
 #include "stages_cleanup.hpp"
@@ -25,6 +26,7 @@
 
 #include <algorithm>
 #include <cfloat>
+#include <chrono>
 #include <cmath>
 #include <cstddef>
 #include <cstring>
@@ -1099,52 +1101,93 @@ uint32_t carryUpstreamState(SnapHeader *from, SnapHeader *to, uint32_t i, uint64
     return copied;
 }
 
+namespace {
+
+void runStage(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames, std::atomic<uint64_t> &sanitisedSamples) {
+    switch (r.kind) {
+        case N60_STAGE_SANITISE: {
+            uint64_t bad = 0;
+            for (uint32_t l = 0; l < r.laneCount; ++l) runSanitise(lanes[r.laneFirst + l], frames, bad);
+            if (bad != 0) sanitisedSamples.fetch_add(bad, std::memory_order_relaxed);
+            break;
+        }
+        case N60_STAGE_METER_IN:
+        case N60_STAGE_METER_OUT:
+            for (uint32_t l = 0; l < r.laneCount; ++l) {
+                runMeter(*reinterpret_cast<MeterLane *>(laneState(h, r, l)), lanes[r.laneFirst + l], frames);
+            }
+            break;
+        case N60_STAGE_GAIN: runGain(h, r, lanes, frames); break;
+        case N60_STAGE_MS_ENCODE: runMSEncode(lanes[r.laneA], lanes[r.laneB], frames); break;
+        case N60_STAGE_PEQ: runPeq(h, r, lanes, frames); break;
+        case N60_STAGE_MS_DECODE: runMSDecode(lanes[r.laneA], lanes[r.laneB], frames); break;
+        case N60_STAGE_DELAY: runDelay(h, r, lanes, frames); break;
+        default:
+            if (isSystemKind(r.kind)) {
+                runSystem(h, r, lanes, frames);
+            } else if (isMatrixKind(r.kind)) {
+                runMatrix(h, r, lanes, frames);
+            } else if (isGeneratorKind(r.kind)) {
+                runGenerator(h, r, lanes, frames);
+            } else if (isCleanupKind(r.kind)) {
+                runCleanup(h, r, lanes, frames);
+            } else if (isImageKind(r.kind)) {
+                runImage(h, r, lanes, frames);
+            } else if (isLoudnessKind(r.kind)) {
+                runLoudness(h, r, lanes, frames);
+            } else if (isMultibandKind(r.kind)) {
+                runMultiband(h, r, lanes, frames);
+            } else if (isRouteKind(r.kind)) {
+                runRoute(h, r, lanes, frames);
+            } else {
+                runDsp(h, r, lanes, frames);
+            }
+            break;
+    }
+}
+
+}  // namespace
+
+#ifdef N60_GRAPH_PROFILE
+// E20 S1: per-stage-kind timing for the benchmark harness. Compiled out of product builds (the symbols below do not
+// exist there). Single audio thread only; the harness reads between runs.
+namespace {
+constexpr uint32_t kProfileKinds = 64;
+n60_profile_entry gProfile[kProfileKinds];
+}  // namespace
+extern "C" void n60_profile_reset(void) { std::memset(gProfile, 0, sizeof gProfile); }
+extern "C" uint32_t n60_profile_read(n60_profile_entry *out, uint32_t capacity) {
+    uint32_t n = 0;
+    for (uint32_t k = 0; k < kProfileKinds && n < capacity; ++k) {
+        if (gProfile[k].calls == 0) continue;
+        out[n] = gProfile[k];
+        out[n].kind = k;
+        ++n;
+    }
+    return n;
+}
+#endif
+
 void runSnapshot(SnapHeader *h, float *const *lanes, uint32_t frames, std::atomic<uint64_t> &sanitisedSamples,
                  bool follower) {
     h->follower = follower ? 1u : 0u;
     StageRec *table = stages(h);
     for (uint32_t i = 0; i < h->stageCount; ++i) {
         StageRec &r = table[i];
-        switch (r.kind) {
-            case N60_STAGE_SANITISE: {
-                uint64_t bad = 0;
-                for (uint32_t l = 0; l < r.laneCount; ++l) runSanitise(lanes[r.laneFirst + l], frames, bad);
-                if (bad != 0) sanitisedSamples.fetch_add(bad, std::memory_order_relaxed);
-                break;
-            }
-            case N60_STAGE_METER_IN:
-            case N60_STAGE_METER_OUT:
-                for (uint32_t l = 0; l < r.laneCount; ++l) {
-                    runMeter(*reinterpret_cast<MeterLane *>(laneState(h, r, l)), lanes[r.laneFirst + l], frames);
-                }
-                break;
-            case N60_STAGE_GAIN: runGain(h, r, lanes, frames); break;
-            case N60_STAGE_MS_ENCODE: runMSEncode(lanes[r.laneA], lanes[r.laneB], frames); break;
-            case N60_STAGE_PEQ: runPeq(h, r, lanes, frames); break;
-            case N60_STAGE_MS_DECODE: runMSDecode(lanes[r.laneA], lanes[r.laneB], frames); break;
-            case N60_STAGE_DELAY: runDelay(h, r, lanes, frames); break;
-            default:
-                if (isSystemKind(r.kind)) {
-                    runSystem(h, r, lanes, frames);
-                } else if (isMatrixKind(r.kind)) {
-                    runMatrix(h, r, lanes, frames);
-                } else if (isGeneratorKind(r.kind)) {
-                    runGenerator(h, r, lanes, frames);
-                } else if (isCleanupKind(r.kind)) {
-                    runCleanup(h, r, lanes, frames);
-                } else if (isImageKind(r.kind)) {
-                    runImage(h, r, lanes, frames);
-                } else if (isLoudnessKind(r.kind)) {
-                    runLoudness(h, r, lanes, frames);
-                } else if (isMultibandKind(r.kind)) {
-                    runMultiband(h, r, lanes, frames);
-                } else if (isRouteKind(r.kind)) {
-                    runRoute(h, r, lanes, frames);
-                } else {
-                    runDsp(h, r, lanes, frames);
-                }
-                break;
+#ifdef N60_GRAPH_PROFILE
+        const auto t0 = std::chrono::steady_clock::now();
+        runStage(h, r, lanes, frames, sanitisedSamples);
+        const auto t1 = std::chrono::steady_clock::now();
+        if (r.kind < kProfileKinds) {
+            n60_profile_entry &e = gProfile[r.kind];
+            e.ns += static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count());
+            e.calls += 1;
+            e.frames += frames;
+            e.laneFrames += static_cast<uint64_t>(frames) * (r.laneCount != 0 ? r.laneCount : 1u);
         }
+#else
+        runStage(h, r, lanes, frames, sanitisedSamples);
+#endif
     }
 }
 

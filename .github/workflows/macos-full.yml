@@ -105,6 +105,27 @@ jobs:
             -framework Accelerate -o "$OUT/convolution"
           echo "=== non-uniform convolution ===" | tee -a "$OUT/benchmarks.txt"
           "$OUT/convolution" | tee -a "$OUT/benchmarks.txt"
+          # E20 S1: graph render benchmark (core/bench/n60_bench.cpp). The timing binary links product objects (no profile
+          # hooks) and the ANC lane feed (R7); a second binary links a -DN60_GRAPH_PROFILE snapshot object for the
+          # per-stage ns/sample rows. Regressions above 1.5x of core/bench/baseline-macos-arm64.json fail the step; budget
+          # breaches only warn until E20 S10 adds --enforce-budgets. JSON goes to the uploaded artifact.
+          clang -std=c11 -O3 -Wall -Wextra -include stddef.h -I"$RT" -c "$RT/N60ActiveQuietZone.c" -o "$OUT/n60_aqz.o"
+          clang++ -std=c++20 -O3 -Wall -Wextra -fno-exceptions -fno-rtti -DN60_GRAPH_PROFILE -Icore/include -Icore/src \
+            -c core/src/snapshot.cpp -o "$OUT/n60core_snapshot_profile.o"
+          PROFILE_OBJS=()
+          for obj in "${CORE_OBJS[@]}"; do
+            if [ "$obj" = "$OUT/n60core_snapshot.o" ]; then PROFILE_OBJS+=("$OUT/n60core_snapshot_profile.o"); else PROFILE_OBJS+=("$obj"); fi
+          done
+          ANC_OBJS="$OUT/n60_aqz.o $OUT/n60_anc_lane_feed.o $OUT/n60_ff_live.o $OUT/n60_ff_echo.o $OUT/n60_fxlms.o"
+          # shellcheck disable=SC2086
+          clang++ -std=c++20 -O3 -Wall -Wextra -DN60_BENCH_ANC -I"$RT" -Icore/include -Icore/src core/bench/n60_bench.cpp \
+            "${CORE_OBJS[@]}" $ANC_OBJS -framework Accelerate -o "$OUT/n60_bench"
+          clang++ -std=c++20 -O3 -Wall -Wextra -DN60_BENCH_PROFILE -Icore/include -Icore/src core/bench/n60_bench.cpp \
+            "${PROFILE_OBJS[@]}" -framework Accelerate -o "$OUT/n60_bench_profile"
+          echo "=== graph render benchmark ===" | tee -a "$OUT/benchmarks.txt"
+          "$OUT/n60_bench" --out "$OUT/bench.json" --baseline core/bench/baseline-macos-arm64.json \
+            --budgets core/bench/budgets.json | tee -a "$OUT/benchmarks.txt"
+          "$OUT/n60_bench_profile" --profile-only --out "$OUT/bench-profile.json" > /dev/null
 
       - name: Upload logs and benchmarks
         if: always()
@@ -114,6 +135,8 @@ jobs:
           path: |
             ${{ runner.temp }}/xctest.log
             ${{ runner.temp }}/benchmarks/benchmarks.txt
+            ${{ runner.temp }}/benchmarks/bench.json
+            ${{ runner.temp }}/benchmarks/bench-profile.json
           if-no-files-found: warn
           retention-days: 14
 
