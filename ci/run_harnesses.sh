@@ -735,6 +735,21 @@ if selected e6_delta_audition; then
     fi
 fi
 
+# E28 S7a: compressor mix, link amount, detector and lookahead (ABI v33): behaviour at the eight standard rates.
+if selected e28_comp_extras; then
+    build_core_objs
+    if [ "$CORE_OK" = 1 ]; then
+        if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -Icore/include -Icore/src core/tests/test_comp_extras.cpp \
+            "${CORE_OBJS[@]}" -o "$OUT/e28_core_comp_extras" && "$OUT/e28_core_comp_extras"; then
+            passed+=(e28_core_comp_extras)
+        else
+            failed+=(e28_core_comp_extras)
+        fi
+    else
+        failed+=(e28_comp_extras)
+    fi
+fi
+
 # E6 S12c: the loudness stage (match, contour, dialogue leveler): behaviour at the eight standard rates.
 if selected e6_loudness; then
     build_core_objs
