@@ -209,7 +209,7 @@ Gate G2 passed on 2026-10-25 (commit 07e82c6)
 
 ### E9 Multichannel protection and FIR parity
 
-- [~] Per-output limiter, true-peak guard and soft clip, matching the stereo chain (E9 S5 built dark behind `e9.output-protection`, PR pending; wiring: E9 S5b for the Outputs UI and S5c for routed outputs)
+- [~] Per-output limiter, true-peak guard and soft clip, matching the stereo chain (E9 S5 built dark behind `e9.output-protection`; wiring: E9 S5b for the Outputs UI and S5c for routed outputs, binaural and debounce done; G17 pending owner)
 - [~] Move the program FIR onto the 262,144-tap non-uniform convolver (E9 S1 built dark; S3 sets firScheme 1 and lifts the Swift guards behind e9.long-fir, PR pending; flag stays dark until S2c and E22 bench)
 - [~] Long FIR rebuild: lockstep lazy carry with 256 KiB per-callback budget, changed-tap seeding, chunked or O(1) scheme 1 reset (E9 S2 built dark, PR pending; S3 wires Swift behind e9.long-fir; S2b follow-ups and E22 bench items open)
 - [ ] Per-output headroom assistant
@@ -424,7 +424,7 @@ Owner decision, 20 Oct 2026: the kernel stays behind `e6.legacy-kernel` until la
 then this epic deletes it before E22 hardware validation, so v1 ships and is validated on the
 unified graph only.
 
-- [ ] First slice (owner decision 7 Nov 2026, E6 G1): graph-vs-kernel full-config corpus (every stage on, all layouts, eight rates) plus the E6 S5 stereo-chain parity and latency test (latency report equals measured impulse delay). `N60RenderKernel` must not be deleted until it is green
+- [~] First slice (owner decision 7 Nov 2026, E6 G1): graph-vs-kernel full-config corpus (every stage on, all layouts, eight rates) plus the E6 S5 stereo-chain parity and latency test (latency report equals measured impulse delay). `N60RenderKernel` must not be deleted until it is green. S1 `e23/graph-kernel-parity` built in part (PR pending); the rest is S1b `e23/precision-and-cleanup`
 - [ ] Confirm nothing falls back to the kernel, the old N-channel path or the legacy binaural pipeline (E6 S12a–S12h)
 - [ ] Delete `N60RenderKernel`, the old N-channel path and the `e6.legacy-kernel` flag
 - [ ] Update `docs/DSP_KERNEL.md`, `docs/ARCHITECTURE.md` and the `AGENTS.md` mention, in coordination with E21

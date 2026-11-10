@@ -154,6 +154,7 @@
 		E6D000000000000000000108 /* UnifiedGraphRoutesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6D000000000000000000009 /* UnifiedGraphRoutesTests.swift */; };
 		E6D000000000000000000106 /* UnifiedGraphEngineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6D000000000000000000006 /* UnifiedGraphEngineTests.swift */; };
 		E6D0000000000000000000B8 /* UnifiedGraphConfigurationMatrixTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6D0000000000000000000B7 /* UnifiedGraphConfigurationMatrixTests.swift */; };
+		E23D0000000000000000001A /* UnifiedGraphKernelCorpusTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E23D00000000000000000019 /* UnifiedGraphKernelCorpusTests.swift */; };
 		E6D0000000000000000001A0 /* UnifiedGraphBinauralTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6D0000000000000000000A0 /* UnifiedGraphBinauralTests.swift */; };
 		E6D0000000000000000001E5 /* UnifiedGraphLiveEditTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6D0000000000000000000E5 /* UnifiedGraphLiveEditTests.swift */; };
 		E6D0000000000000000001B1 /* UnifiedGraphProgramDSPTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6D0000000000000000000B1 /* UnifiedGraphProgramDSPTests.swift */; };
@@ -835,6 +836,7 @@
 		E6D000000000000000000009 /* UnifiedGraphRoutesTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnifiedGraphRoutesTests.swift; sourceTree = "<group>"; };
 		E6D000000000000000000006 /* UnifiedGraphEngineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnifiedGraphEngineTests.swift; sourceTree = "<group>"; };
 		E6D0000000000000000000B7 /* UnifiedGraphConfigurationMatrixTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnifiedGraphConfigurationMatrixTests.swift; sourceTree = "<group>"; };
+		E23D00000000000000000019 /* UnifiedGraphKernelCorpusTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnifiedGraphKernelCorpusTests.swift; sourceTree = "<group>"; };
 		E6C000000000000000000010 /* graph.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = graph.cpp; sourceTree = "<group>"; };
 		E6C000000000000000000011 /* snapshot.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = snapshot.cpp; sourceTree = "<group>"; };
 		E6C000000000000000000012 /* fft.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = fft.cpp; sourceTree = "<group>"; };
@@ -1543,6 +1545,7 @@
 				E6D100000000000000000031 /* UnifiedGraphMultibandTests.swift */,
 				E6D100000000000000000041 /* UnifiedGraphBypassAuditionTests.swift */,
 				E6D0000000000000000000B7 /* UnifiedGraphConfigurationMatrixTests.swift */,
+				E23D00000000000000000019 /* UnifiedGraphKernelCorpusTests.swift */,
 				E6D0000000000000000000A0 /* UnifiedGraphBinauralTests.swift */,
 				E6D0000000000000000000E5 /* UnifiedGraphLiveEditTests.swift */,
 				E6D0000000000000000009A3 /* LiveHeadphoneProfileTests.swift */,
@@ -2502,6 +2505,7 @@
 				E6D100000000000000000032 /* UnifiedGraphMultibandTests.swift in Sources */,
 				E6D100000000000000000042 /* UnifiedGraphBypassAuditionTests.swift in Sources */,
 				E6D0000000000000000000B8 /* UnifiedGraphConfigurationMatrixTests.swift in Sources */,
+				E23D0000000000000000001A /* UnifiedGraphKernelCorpusTests.swift in Sources */,
 				E6D0000000000000000001A0 /* UnifiedGraphBinauralTests.swift in Sources */,
 				E6D0000000000000000001E5 /* UnifiedGraphLiveEditTests.swift in Sources */,
 				E6D0000000000000000109A3 /* LiveHeadphoneProfileTests.swift in Sources */,

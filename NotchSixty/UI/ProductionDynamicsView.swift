@@ -519,7 +519,8 @@ struct ProductionDynamicsView: View {
             // E9 S5b: per-output protection (empty unless `e9.output-protection` is on).
             ProductionOutputProtectionSection(
                 engine: engine, settings: configuration.outputProtection ?? OutputProtectionSettings(),
-                apply: { next in update { $0.outputProtection = next == OutputProtectionSettings() ? nil : next } })
+                apply: { next in update { $0.outputProtection = next == OutputProtectionSettings() ? nil : next } },
+                programLimiterOn: configuration.limiter.enabled)
         }
     }
 
@@ -1020,6 +1021,8 @@ struct ProductionOutputProtectionSection: View {
     @ObservedObject var engine: AudioIOEngine
     let settings: OutputProtectionSettings
     let apply: (OutputProtectionSettings) -> Void
+    /// E9 S5c (G19): per-output ceilings ride on the program limiter's stages, so they do nothing while it is off.
+    var programLimiterOn = true
 
     @State private var readings: [Int: UnifiedGraphOutputProtectionReading] = [:]
 
@@ -1041,6 +1044,11 @@ struct ProductionOutputProtectionSection: View {
                         Text("Off keeps the program outputs as one linked group so the stereo image is preserved. On gives every program output its own limiter. Switching rebuilds the graph with a short fade.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
+                    }
+                    if !programLimiterOn {
+                        Text("The program Limiter is off, so these ceilings have no effect. The \(Int(UnifiedGraphOutputProtection.hardLimitCeilingDB)) dBFS hard limit still holds every output.")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
                     }
                     ForEach(lanes) { lane in row(lane) }
                 }
@@ -1076,22 +1084,12 @@ struct ProductionOutputProtectionSection: View {
                 }
             }
             if own {
-                HStack {
-                    Text("Ceiling").font(.caption).foregroundStyle(.secondary)
-                    Slider(value: Binding(
-                        get: { setting.ceilingDB ?? Double(UnifiedGraphOutputProtection.hardLimitCeilingDB) },
-                        set: { value in
-                            var next = settings
-                            var updated = setting
-                            updated.ceilingDB = value
-                            next.set(updated, at: lane.index)
-                            apply(next)
-                        }
-                    ), in: OutputProtectionSettings.ceilingRangeDB, step: 0.1)
-                    .disabled(!setting.enabled)
-                    Text(String(format: "%.1f dB", setting.ceilingDB ?? Double(UnifiedGraphOutputProtection.hardLimitCeilingDB)))
-                        .font(.caption.monospacedDigit())
-                        .frame(width: 64, alignment: .trailing)
+                OutputCeilingSlider(value: setting.ceilingDB ?? Double(UnifiedGraphOutputProtection.hardLimitCeilingDB), isEnabled: setting.enabled) { value in
+                    var next = settings
+                    var updated = setting
+                    updated.ceilingDB = value
+                    next.set(updated, at: lane.index)
+                    apply(next)
                 }
             }
             if let reading = readings[lane.index] {
@@ -1125,6 +1123,46 @@ struct ProductionOutputProtectionSection: View {
                 readings = [:]
             }
             try? await Task.sleep(nanoseconds: 125_000_000)
+        }
+    }
+}
+
+/// E9 S5c (G20): the per-output ceiling slider. The label follows the drag at once; the edit reaches the engine once the drag
+/// pauses (`OutputProtectionEditDebouncer`) or ends, instead of publishing the whole graph on every tick.
+private struct OutputCeilingSlider: View {
+    let value: Double
+    let isEnabled: Bool
+    let commit: (Double) -> Void
+
+    @State private var draft: Double?
+    @State private var holder = Holder()
+
+    @MainActor final class Holder {
+        var commit: ((Double) -> Void)?
+        lazy var debouncer = OutputProtectionEditDebouncer<Double> { [unowned self] in self.commit?($0) }
+    }
+
+    var body: some View {
+        let _ = holder.commit = { [commit] value in commit(value) }
+        HStack {
+            Text("Ceiling").font(.caption).foregroundStyle(.secondary)
+            Slider(value: Binding(
+                get: { draft ?? value },
+                set: { next in
+                    draft = next
+                    holder.debouncer.submit(next)
+                }
+            ), in: OutputProtectionSettings.ceilingRangeDB, step: 0.1) { editing in
+                if !editing {
+                    holder.debouncer.flush()
+                    draft = nil
+                }
+            }
+            .disabled(!isEnabled)
+            .onDisappear { holder.debouncer.flush() }
+            Text(String(format: "%.1f dB", draft ?? value))
+                .font(.caption.monospacedDigit())
+                .frame(width: 64, alignment: .trailing)
         }
     }
 }

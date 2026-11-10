@@ -41,3 +41,52 @@ struct OutputProtectionSettings: Equatable, Codable, Sendable {
         if value == Lane() { lanes[index] = nil } else { lanes[index] = value }
     }
 }
+
+/// E9 S5c (G20): coalesces the ceiling slider's drag ticks. Each tick would otherwise publish the whole graph; the debouncer keeps
+/// only the latest value and delivers it once the drag has paused for `delay`, or at once on `flush` (drag end).
+@MainActor
+final class OutputProtectionEditDebouncer<Value> {
+    private let delay: Duration
+    private let sleep: @Sendable (Duration) async throws -> Void
+    private let deliver: (Value) -> Void
+    private var pending: Value?
+    private var task: Task<Void, Never>?
+
+    init(
+        delay: Duration = .milliseconds(150),
+        sleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) },
+        deliver: @escaping (Value) -> Void
+    ) {
+        self.delay = delay
+        self.sleep = sleep
+        self.deliver = deliver
+    }
+
+    /// Replaces any value still waiting and restarts the pause.
+    func submit(_ value: Value) {
+        pending = value
+        task?.cancel()
+        let wait = delay
+        let sleep = self.sleep
+        task = Task { [weak self] in
+            do { try await sleep(wait) } catch { return }
+            guard !Task.isCancelled else { return }
+            self?.flush()
+        }
+    }
+
+    /// Delivers the waiting value now, if any.
+    func flush() {
+        task?.cancel()
+        task = nil
+        guard let value = pending else { return }
+        pending = nil
+        deliver(value)
+    }
+
+    func cancel() {
+        task?.cancel()
+        task = nil
+        pending = nil
+    }
+}

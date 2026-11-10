@@ -312,4 +312,146 @@ final class OutputProtectionTests: XCTestCase {
             XCTAssertGreaterThan(sub.outputTruePeakLinear, 0)
         }
     }
+
+    // MARK: E9 S5c
+
+    private func ep(_ index: UInt32) -> PhysicalOutputEndpoint { PhysicalOutputEndpoint(deviceUID: "dev", channelIndex: index) }
+
+    /// Stereo mains, a way on each with a limiter whose ceiling is `wayCeilingDB`, no crossover: two routed outputs.
+    private func routed(rate: Double, wayCeilingDB: Double, policy: UnifiedGraphOutputProtection?) throws -> UnifiedGraphConfiguration {
+        var routing = SpeakerRoutingTemplate.mainsPlusSub.build(
+            mains: [.init(lane: 0, name: "L", endpoints: [ep(0)]), .init(lane: 1, name: "R", endpoints: [ep(1)])], subs: [])!
+        for index in routing.speakers.indices {
+            routing.speakers[index].ways[0].limiter = RoutingLimiter(ceilingDB: wayCeilingDB, lookAheadMilliseconds: 1)
+        }
+        var base = UnifiedGraphConfiguration(sampleRate: rate, lanes: [UnifiedGraphLane(), UnifiedGraphLane()])
+        base.outputProtection = policy
+        return try SpeakerRoutingCompiler.compile(routing, onto: base)
+    }
+
+    func testRoutedOutputKeepsItsOwnLimiterButItsCeilingIsClampedWhileProtectionIsOn() throws {
+        for rate in Self.rates {
+            func wayCeilings(_ configuration: UnifiedGraphConfiguration) throws -> [Float] {
+                try configuration.makeSpec().stages
+                    .filter { $0.stageId >= UnifiedGraphConfiguration.outputProtectionStageBase && $0.stageId < UnifiedGraphConfiguration.driverFIRStageBase }
+                    .map { $0.params[1] }
+            }
+            XCTAssertEqual(try wayCeilings(routed(rate: rate, wayCeilingDB: 0, policy: nil)), [0, 0], "flag off keeps the way ceiling at \(rate)")
+            XCTAssertEqual(try wayCeilings(routed(rate: rate, wayCeilingDB: 0, policy: UnifiedGraphOutputProtection())), [-1, -1], "clamped at \(rate)")
+            XCTAssertEqual(try wayCeilings(routed(rate: rate, wayCeilingDB: -6, policy: UnifiedGraphOutputProtection())), [-6, -6], "a lower ceiling is kept at \(rate)")
+        }
+    }
+
+    func testRoutedOutputsGetTheHardLimitAndHoldMinusOneDBAtEveryRate() throws {
+        let ceiling = Float(pow(10.0, -1.0 / 20.0)) * 1.02
+        for rate in Self.rates {
+            let configuration = try routed(rate: rate, wayCeilingDB: 0, policy: UnifiedGraphOutputProtection())
+            let spec = try configuration.makeSpec()
+            let hard = spec.stages.filter { $0.stageId >= UnifiedGraphOutputProtection.hardLimitStageBase && $0.stageId < UnifiedGraphOutputProtection.userLaneStageBase }
+            XCTAssertEqual(hard.count, Int(spec.outputChannels), "one hard limit on every lane, routed included, at \(rate)")
+            let host = try UnifiedGraphHost(spec: spec)
+            let out = try render(host, rate: rate, inputs: 2, seconds: 0.5, tone: (0, 1_000, 4), (1, 1_000, 4))
+            for lane in 2..<4 {
+                XCTAssertLessThanOrEqual(peak(settled(out[lane])), ceiling, "routed lane \(lane) held at \(rate)")
+                XCTAssertGreaterThan(peak(settled(out[lane])), 0.5, "routed lane \(lane) plays at \(rate)")
+            }
+        }
+    }
+
+    func testAnOutputCeilingAboveTheProgramCeilingIsHonouredAtEveryRate() throws {
+        for rate in Self.rates {
+            var settings = OutputProtectionSettings()
+            settings.set(.init(enabled: true, ceilingDB: -3), at: 2)
+            let spec = try make(rate: rate, user: user(ceilingDB: -12), policy: UnifiedGraphOutputProtection(settings)).makeSpec()
+            let out = try render(try UnifiedGraphHost(spec: spec), rate: rate, inputs: 2, seconds: 0.6, tone: (0, 40, 2), (1, 40, 2))
+            XCTAssertEqual(truePeakDB(settled(out[2])), -3, accuracy: 0.2, "the sub keeps its own, higher ceiling at \(rate)")
+            XCTAssertLessThanOrEqual(truePeakDB(settled(out[0])), -12 + 0.2, "the mains keep the program ceiling at \(rate)")
+        }
+    }
+
+    func testOutputCeilingsDoNothingWhileTheProgramLimiterIsOffButTheHardLimitHolds() throws {
+        let ceiling = Float(pow(10.0, -1.0 / 20.0)) * 1.02
+        var settings = OutputProtectionSettings()
+        settings.set(.init(enabled: true, ceilingDB: -12), at: 2)
+        for rate in Self.rates {
+            var off = user(ceilingDB: -3)
+            off.limiterEnabled = false
+            off.truePeakGuard = false
+            for protection in [Optional(off), nil] {
+                let spec = try make(rate: rate, user: protection, policy: UnifiedGraphOutputProtection(settings)).makeSpec()
+                let out = try render(try UnifiedGraphHost(spec: spec), rate: rate, inputs: 2, seconds: 0.6, tone: (0, 40, 2), (1, 40, 2))
+                let sub = peak(settled(out[2]))
+                XCTAssertGreaterThan(sub, Float(pow(10.0, -6.0 / 20.0)), "the -12 dB override is inert with the limiter off at \(rate)")
+                XCTAssertLessThanOrEqual(sub, ceiling, "the hard limit still holds the sub at \(rate)")
+            }
+        }
+    }
+
+    private func binaural(rate: Double, policy: UnifiedGraphOutputProtection?) throws -> UnifiedGraphSpec {
+        var profile = HeadphoneDeviceProfileConfiguration()
+        profile.programLayout = .fiveOne
+        return try UnifiedGraphTranslator.binauralSpec(
+            asset: BinauralProfileAsset.validationStereo(sampleRate: rate), layout: .fiveOne, profile: profile,
+            outputChannels: 2, sampleRate: rate, headTracking: false, outputProtection: policy).get()
+    }
+
+    func testBinauralEarsGetUnlinkedHardLimitsAndFlagOffIsUnchangedAtEveryRate() throws {
+        let ceiling = Float(pow(10.0, -1.0 / 20.0)) * 1.02
+        for rate in Self.rates {
+            let off = try binaural(rate: rate, policy: nil)
+            let on = try binaural(rate: rate, policy: UnifiedGraphOutputProtection())
+            XCTAssertEqual(on.stages.count, off.stages.count + 2, "one hard limit per ear at \(rate)")
+            let ears = on.stages.filter { $0.stageId >= UnifiedGraphOutputProtection.hardLimitStageBase && $0.stageId < UnifiedGraphOutputProtection.userLaneStageBase }
+            XCTAssertEqual(ears.map(\.laneMask), [1, 2], "each ear alone at \(rate)")
+            XCTAssertEqual(on.stages.filter { $0.stageId == N60_LSTAGE_PROTECTION }.count, 1, "the layout safety limiter stays at \(rate)")
+            XCTAssertEqual(try UnifiedGraphHost(spec: on).latencyFrames, try UnifiedGraphHost(spec: off).latencyFrames, "no added latency at \(rate)")
+            let host = try UnifiedGraphHost(spec: on)
+            let out = try render(host, rate: rate, inputs: 6, seconds: 0.4, tone: (0, 1_000, 40))
+            for ear in 0..<2 { XCTAssertLessThanOrEqual(peak(settled(out[ear])), ceiling, "ear \(ear) held at \(rate)") }
+        }
+    }
+
+    func testBinauralHardLimitsAloneLimitEachEarIndependentlyAtEveryRate() throws {
+        for rate in Self.rates {
+            var bare = try binaural(rate: rate, policy: nil)
+            bare.stages.removeAll { $0.stageId == N60_LSTAGE_PROTECTION }
+            let reference = try render(try UnifiedGraphHost(spec: bare), rate: rate, inputs: 6, seconds: 0.4, tone: (0, 1_000, 1))
+            let nearUnit = peak(settled(reference[0])), farUnit = peak(settled(reference[1]))
+            // Drive the near ear to 2.0 (+6 dBFS); the far ear is then well under the hard ceiling.
+            let amp = 2 / nearUnit
+            XCTAssertLessThan(farUnit * amp, 0.6, "the test drives only one ear into its limit at \(rate)")
+            var spec = try binaural(rate: rate, policy: UnifiedGraphOutputProtection())
+            spec.stages.removeAll { $0.stageId == N60_LSTAGE_PROTECTION }
+            let out = try render(try UnifiedGraphHost(spec: spec), rate: rate, inputs: 6, seconds: 0.4, tone: (0, 1_000, amp))
+            XCTAssertLessThanOrEqual(peak(settled(out[0])), Float(pow(10.0, -1.0 / 20.0)) * 1.02, "the loud ear is limited at \(rate)")
+            XCTAssertEqual(peak(settled(out[1])), farUnit * amp, accuracy: farUnit * amp * 0.02, "the far ear is not ducked at \(rate)")
+        }
+    }
+
+    // MARK: Ceiling edit debounce (G20)
+
+    @MainActor func testCeilingDragTicksAreCoalescedIntoOneEditAfterThePause() async throws {
+        var delivered: [Double] = []
+        let debouncer = OutputProtectionEditDebouncer<Double>(delay: .milliseconds(60)) { delivered.append($0) }
+        for tick in stride(from: -3.0, through: -9.0, by: -0.5) { debouncer.submit(tick) }
+        XCTAssertTrue(delivered.isEmpty, "nothing is published while the drag moves")
+        try await Task.sleep(for: .milliseconds(400))
+        XCTAssertEqual(delivered, [-9], "one edit with the last value")
+    }
+
+    @MainActor func testFlushDeliversTheLastTickAtOnceAndNothingIsDeliveredTwice() async throws {
+        var delivered: [Double] = []
+        let debouncer = OutputProtectionEditDebouncer<Double>(delay: .milliseconds(60)) { delivered.append($0) }
+        debouncer.submit(-4)
+        debouncer.submit(-5)
+        debouncer.flush()
+        XCTAssertEqual(delivered, [-5])
+        debouncer.flush()
+        try await Task.sleep(for: .milliseconds(300))
+        XCTAssertEqual(delivered, [-5], "the pause timer was cancelled by the flush")
+        debouncer.submit(-6)
+        debouncer.cancel()
+        try await Task.sleep(for: .milliseconds(300))
+        XCTAssertEqual(delivered, [-5], "a cancelled edit is dropped")
+    }
 }
