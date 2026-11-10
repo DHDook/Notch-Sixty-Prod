@@ -86,8 +86,8 @@ reviewers compare with Dirac and REW), then engine depth, then breadth.
 10. E21 Portable C++ core, remaining items
 11. E14 Upmixer, E15 Device-aware profiles, E17 Export and dither, E16 Automation and remote
 12. E23 Legacy engine removal
-13. E22 Hardware validation and E18 Launch readiness (owner-led)
-14. Shared room model: design note only (owner, 3 Nov 2026: parked to the end of the roadmap; E26 S2 stores its sub measurements in a plain form a later model can absorb)
+13. E29 Shared room position model (owner, 9 Nov 2026: unparked, in v1; plan `docs/epics/E29.md`; flag `e29.room-model`)
+14. E22 Hardware validation and E18 Launch readiness (owner-led)
 
 ## Phase 1 — Consolidate and qualify
 
@@ -375,7 +375,7 @@ S1–S6 flagless; every dynamics extra (S7a–S7d) behind the one flag `e28.dyna
 - [x] S2 loudness: momentary, short-term, integrated with reset, loudness range and true-peak max per ITU-R BS.1770-4 and EBU R128; per-channel weighting with LFE excluded (inert until the capture carries more than stereo)
 - [x] S3 spectrum options: smoothing, averaging, tilt, freeze and reference trace, hover read-out, input and output overlay
 - [ ] S4 dynamics feel: log sliders, unit-aware fields, stepping, reset, fine drag, undo, sidechain range fix, auto makeup, accessibility
-- [ ] S5 dynamics visualisation: transfer curves, gain-reduction bars and history, navigator bars
+- [x] S5 dynamics visualisation: transfer curves, gain-reduction bars and history, navigator bars; built, PR pending (G21 to S7d, G22 to S6, G23 to S7d, G24 to S7b; Loudness readouts moved to S7d)
 - [ ] S6 per-output and sub meters on every output configuration (needs-owner)
 - [ ] S7a compressor mix, link amount, peak/RMS detector and optional lookahead, reported in the path latency (needs-owner, engine)
 - [ ] S7b expander hold, soft knee, detector, sidechain high-pass and link; sidechain and delta listen (needs-owner, engine)

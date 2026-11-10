@@ -40,10 +40,16 @@ struct ProductionDynamicsView: View {
             }
         }
         .padding(24)
-        .onAppear { configureHistory() }
+        .onAppear {
+            configureHistory()
+            GainReductionMonitor.shared(for: engine).attach()
+        }
         .onChange(of: undoManager.map(ObjectIdentifier.init)) { _, _ in configureHistory() }
         .onChange(of: engine.dynamicsConfiguration) { _, _ in history.observeLiveChange() }
-        .onDisappear { history.clear() }
+        .onDisappear {
+            history.clear()
+            GainReductionMonitor.shared(for: engine).detach()
+        }
     }
 
     private var header: some View {
@@ -150,6 +156,10 @@ struct ProductionDynamicsView: View {
                         .lineLimit(1)
                 }
                 Spacer(minLength: 4)
+                if let source = module.gainReductionSource {
+                    GainReductionBar(monitor: GainReductionMonitor.shared(for: engine), source: source, compact: true)
+                        .frame(width: 36)
+                }
                 Circle()
                     .fill(moduleIsActive(module) ? Color.green : Color.secondary.opacity(0.28))
                     .frame(width: 7, height: 7)
@@ -813,6 +823,19 @@ struct ProductionDynamicsView: View {
     }
 }
 
+extension ProductionDynamicsModule {
+    /// The stage whose gain reduction the navigator row shows (E28 S5).
+    var gainReductionSource: GainReductionSource? {
+        switch self {
+        case .compressor: return .compressor
+        case .expander: return .expander
+        case .deEsser: return .deEsser
+        case .limiter: return .limiter
+        default: return nil
+        }
+    }
+}
+
 enum ProductionDynamicsModule: String, CaseIterable, Identifiable, Hashable {
     case compressor
     case multiband
@@ -1127,6 +1150,22 @@ struct ProductionOutputProtectionSection: View {
     }
 }
 
+/// E28 S5 (G20): VoiceOver wording and stepping for the output-protection ceiling slider, kept out of the view so
+/// a test can pin them.
+enum OutputCeilingAccessibility {
+    static let label = "Output protection ceiling"
+    static let identifier = "output-protection-ceiling"
+    static let step = 0.1
+
+    static func value(_ db: Double) -> String { String(format: "%.1f decibels", db) }
+
+    static func adjusted(_ db: Double, up: Bool) -> Double {
+        let range = OutputProtectionSettings.ceilingRangeDB
+        let next = ((db + (up ? step : -step)) * 10).rounded() / 10
+        return min(range.upperBound, max(range.lowerBound, next))
+    }
+}
+
 /// E9 S5c (G20): the per-output ceiling slider. The label follows the drag at once; the edit reaches the engine once the drag
 /// pauses (`OutputProtectionEditDebouncer`) or ends, instead of publishing the whole graph on every tick.
 private struct OutputCeilingSlider: View {
@@ -1160,6 +1199,17 @@ private struct OutputCeilingSlider: View {
             }
             .disabled(!isEnabled)
             .onDisappear { holder.debouncer.flush() }
+            .accessibilityLabel(OutputCeilingAccessibility.label)
+            .accessibilityValue(OutputCeilingAccessibility.value(draft ?? value))
+            .accessibilityIdentifier(OutputCeilingAccessibility.identifier)
+            .accessibilityAdjustableAction { direction in
+                let current = draft ?? value
+                let next = OutputCeilingAccessibility.adjusted(current, up: direction == .increment)
+                draft = next
+                holder.debouncer.submit(next)
+                holder.debouncer.flush()
+                draft = nil
+            }
             Text(String(format: "%.1f dB", draft ?? value))
                 .font(.caption.monospacedDigit())
                 .frame(width: 64, alignment: .trailing)
