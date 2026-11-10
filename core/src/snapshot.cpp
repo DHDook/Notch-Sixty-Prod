@@ -13,6 +13,7 @@
 //    There is no in-place reset; a new topology is a new snapshot.
 #include "snapshot.hpp"
 #include "n60/profile.h"
+#include "simd/simd.hpp"
 
 #include "stages_dsp.hpp"
 #include "stages_cleanup.hpp"
@@ -98,7 +99,7 @@ uint32_t rampFramesFor(double rate) {
 
 // RBJ Audio EQ Cookbook biquads, normalised by a0, in double precision.
 // Same forms and limits as the kernel's control-plane design (N60Biquad.h).
-bool designBiquad(uint32_t type, double rate, double f, double gainDb, double q, double out[5]) {
+bool designBiquad(uint32_t type, double rate, double f, double gainDb, double q, double out[5]) N60_RT_NONBLOCKING {
     if (!std::isfinite(f) || f <= 0.0 || f >= rate * 0.5 || !std::isfinite(gainDb) || gainDb < -24.0 ||
         gainDb > 24.0 || !std::isfinite(q) || q <= 0.0) {
         return false;
@@ -688,7 +689,7 @@ n60_status validateParam(const SnapHeader *snap, const StageRec &r, uint32_t par
     }
 }
 
-bool applyParam(SnapHeader *snap, uint32_t stageId, uint32_t paramIndex, float value, bool *latencyMayChange) {
+bool applyParam(SnapHeader *snap, uint32_t stageId, uint32_t paramIndex, float value, bool *latencyMayChange) N60_RT_NONBLOCKING {
     StageRec *table = stages(snap);
     for (uint32_t i = 0; i < snap->stageCount; ++i) {
         StageRec &r = table[i];
@@ -730,7 +731,7 @@ void snapshotLaneLatency(const SnapHeader *snap, uint32_t upTo, uint32_t *perLan
     }
 }
 
-uint32_t snapshotLatency(const SnapHeader *snap) {
+uint32_t snapshotLatency(const SnapHeader *snap) N60_RT_NONBLOCKING {
     uint32_t perLane[N60_GRAPH_MAX_CHANNELS];
     snapshotLaneLatency(snap, snap->stageCount, perLane);
     uint32_t worst = 0;
@@ -781,14 +782,31 @@ void runSanitise(float *buf, uint32_t frames, uint64_t &bad) {
 }
 
 void runMeter(MeterLane &m, const float *buf, uint32_t frames) {
-    float peak = 0.0f;
-    double sum = 0.0;
-    uint64_t over = 0;
-    for (uint32_t i = 0; i < frames; ++i) {
+    // E20 S3: peak, over-range count and the double-precision energy sum run four samples at a time. Peak and count are
+    // exact whatever the order; the energy sum has a fixed grouping (two f64x2 accumulators, then the tail), the same in
+    // the SIMD and scalar builds.
+    using namespace simd;
+    f32x4 pk = splat4(0.0f), cnt = splat4(0.0f);
+    const f32x4 one = splat4(1.0f), zero = splat4(0.0f);
+    f64x2 s0 = splat2(0.0), s1 = splat2(0.0);
+    uint32_t i = 0;
+    for (; i + 4 <= frames; i += 4) {
+        const f32x4 v = load4(buf + i);
+        const f32x4 a = abs(v);
+        pk = maxGt(a, pk);
+        cnt = add(cnt, selectGt(a, one, one, zero));  // false for NaN
+        const f64x2 d0 = toDouble(lane(v, 0), lane(v, 1)), d1 = toDouble(lane(v, 2), lane(v, 3));
+        s0 = fma(d0, d0, s0);
+        s1 = fma(d1, d1, s1);
+    }
+    float peak = hmax(pk);
+    uint64_t over = static_cast<uint64_t>(hsum(cnt));
+    double sum = hsum(add(s0, s1));
+    for (; i < frames; ++i) {
         const float a = std::fabs(buf[i]);
         peak = a > peak ? a : peak;
-        over += a > 1.0f ? 1u : 0u;  // false for NaN
-        sum += double(buf[i]) * double(buf[i]);
+        over += a > 1.0f ? 1u : 0u;
+        sum = std::fma(double(buf[i]), double(buf[i]), sum);
     }
     if (over != 0) m.overRange.fetch_add(over, std::memory_order_relaxed);
     const uint32_t pb = floatBits(peak);
@@ -819,13 +837,19 @@ void runGain(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) {
             g.cur = g.target - g.step * static_cast<float>(g.remaining);
             buf[i] *= g.cur;
         }
-        const float c = g.cur;
-        for (; i < frames; ++i) buf[i] *= c;
+        simd::scale(buf + i, frames - i, g.cur);
     }
 }
 
 void runMSEncode(float *a, float *b, uint32_t frames) {
-    for (uint32_t i = 0; i < frames; ++i) {
+    const simd::f32x4 half = simd::splat4(0.5f);
+    uint32_t i = 0;
+    for (; i + 4 <= frames; i += 4) {
+        const simd::f32x4 l = simd::load4(a + i), r = simd::load4(b + i);
+        simd::store4(a + i, simd::mul(half, simd::add(l, r)));
+        simd::store4(b + i, simd::mul(half, simd::sub(l, r)));
+    }
+    for (; i < frames; ++i) {
         const float l = a[i], r = b[i];
         a[i] = 0.5f * (l + r);
         b[i] = 0.5f * (l - r);
@@ -833,7 +857,13 @@ void runMSEncode(float *a, float *b, uint32_t frames) {
 }
 
 void runMSDecode(float *a, float *b, uint32_t frames) {
-    for (uint32_t i = 0; i < frames; ++i) {
+    uint32_t i = 0;
+    for (; i + 4 <= frames; i += 4) {
+        const simd::f32x4 m = simd::load4(a + i), s = simd::load4(b + i);
+        simd::store4(a + i, simd::add(m, s));
+        simd::store4(b + i, simd::sub(m, s));
+    }
+    for (; i < frames; ++i) {
         const float m = a[i], s = b[i];
         a[i] = m + s;
         b[i] = m - s;
@@ -864,50 +894,67 @@ void runPeq(SnapHeader *h, const StageRec &r, float *const *lanes, uint32_t fram
             st.zn[s][1] = st.z[s][1];
         }
     }
-    for (uint32_t l = 0; l < r.laneCount; ++l) {
-        PeqLane &st = *reinterpret_cast<PeqLane *>(laneState(h, r, l));
-        float *buf = lanes[r.laneFirst + l];
-        double z[N60_PEQ_MAX_SECTIONS][2], zn[N60_PEQ_MAX_SECTIONS][2];
-        std::memcpy(z, st.z, sizeof z);
-        std::memcpy(zn, st.zn, sizeof zn);
+    // E20 S3: lanes run two at a time in one f64x2 per state variable (lanes are independent, so each lane's arithmetic is
+    // exactly what a single-lane run does). An odd last lane pairs with a copy of itself and only its own state is stored.
+    // Every multiply-add is a fused fma in both the SIMD and scalar builds, so the two builds agree bit for bit.
+    using simd::f64x2;
+    for (uint32_t l = 0; l < r.laneCount; l += 2) {
+        const bool two = l + 1 < r.laneCount;
+        PeqLane &sa = *reinterpret_cast<PeqLane *>(laneState(h, r, l));
+        PeqLane &sb = two ? *reinterpret_cast<PeqLane *>(laneState(h, r, l + 1)) : sa;
+        float *bufA = lanes[r.laneFirst + l];
+        float *bufB = two ? lanes[r.laneFirst + l + 1] : bufA;
+        f64x2 z0[N60_PEQ_MAX_SECTIONS], z1[N60_PEQ_MAX_SECTIONS], n0[N60_PEQ_MAX_SECTIONS], n1[N60_PEQ_MAX_SECTIONS];
         uint32_t xf[N60_PEQ_MAX_SECTIONS];
         const double *live[N60_PEQ_MAX_SECTIONS];
         for (uint32_t s = 0; s < sections; ++s) {
+            z0[s] = simd::pair(sa.z[s][0], sb.z[s][0]);
+            z1[s] = simd::pair(sa.z[s][1], sb.z[s][1]);
+            n0[s] = simd::pair(sa.zn[s][0], sb.zn[s][0]);
+            n1[s] = simd::pair(sa.zn[s][1], sb.zn[s][1]);
             xf[s] = sec[s].xfLeft;
             live[s] = sec[s].cur;
         }
         for (uint32_t i = 0; i < frames; ++i) {
-            double x = buf[i];
+            f64x2 x = simd::toDouble(bufA[i], bufB[i]);
             for (uint32_t s = 0; s < sections; ++s) {  // transposed direct form II
                 const double *c = live[s];
-                double y = c[0] * x + z[s][0];
-                z[s][0] = c[1] * x - c[3] * y + z[s][1];
-                z[s][1] = c[2] * x - c[4] * y;
+                const f64x2 b0 = simd::splat2(c[0]), b1 = simd::splat2(c[1]), b2 = simd::splat2(c[2]);
+                const f64x2 na1 = simd::splat2(-c[3]), na2 = simd::splat2(-c[4]);
+                f64x2 y = simd::fma(b0, x, z0[s]);
+                z0[s] = simd::fma(na1, y, simd::fma(b1, x, z1[s]));
+                z1[s] = simd::fma(na2, y, simd::mul(b2, x));
                 if (xf[s] != 0) {
                     const double *n = sec[s].nxt;
-                    const double yn = n[0] * x + zn[s][0];
-                    zn[s][0] = n[1] * x - n[3] * yn + zn[s][1];
-                    zn[s][1] = n[2] * x - n[4] * yn;
-                    y += (static_cast<double>(ramp - xf[s] + 1) / static_cast<double>(ramp)) * (yn - y);
+                    const f64x2 yn = simd::fma(simd::splat2(n[0]), x, n0[s]);
+                    n0[s] = simd::fma(simd::splat2(-n[3]), yn, simd::fma(simd::splat2(n[1]), x, n1[s]));
+                    n1[s] = simd::fma(simd::splat2(-n[4]), yn, simd::mul(simd::splat2(n[2]), x));
+                    const double w = static_cast<double>(ramp - xf[s] + 1) / static_cast<double>(ramp);
+                    y = simd::fma(simd::splat2(w), simd::sub(yn, y), y);
                     if (--xf[s] == 0) {  // the incoming section takes over, state and all
-                        z[s][0] = zn[s][0];
-                        z[s][1] = zn[s][1];
+                        z0[s] = n0[s];
+                        z1[s] = n1[s];
                         live[s] = sec[s].nxt;
                     }
                 }
                 x = y;
             }
-            buf[i] = static_cast<float>(x);
+            bufA[i] = static_cast<float>(simd::lane(x, 0));
+            if (two) bufB[i] = static_cast<float>(simd::lane(x, 1));
         }
-        // Flush decayed state so a quiet tail never lingers in denormals (slow on some CPUs).
+        // Quiet tails: the caller runs under the flush-to-zero guard (platform/fpenv.hpp), no manual flush.
         for (uint32_t s = 0; s < sections; ++s) {
-            for (int k = 0; k < 2; ++k) {
-                if (std::fabs(z[s][k]) < 1e-30) z[s][k] = 0.0;
-                if (std::fabs(zn[s][k]) < 1e-30) zn[s][k] = 0.0;
+            sa.z[s][0] = simd::lane(z0[s], 0);
+            sa.z[s][1] = simd::lane(z1[s], 0);
+            sa.zn[s][0] = simd::lane(n0[s], 0);
+            sa.zn[s][1] = simd::lane(n1[s], 0);
+            if (two) {
+                sb.z[s][0] = simd::lane(z0[s], 1);
+                sb.z[s][1] = simd::lane(z1[s], 1);
+                sb.zn[s][0] = simd::lane(n0[s], 1);
+                sb.zn[s][1] = simd::lane(n1[s], 1);
             }
         }
-        std::memcpy(st.z, z, sizeof z);
-        std::memcpy(st.zn, zn, sizeof zn);
     }
     for (uint32_t s = 0; s < sections; ++s) {
         PeqSec &q = sec[s];
@@ -1047,7 +1094,7 @@ bool upstreamBytes(const SnapHeader *from, const SnapHeader *to, uint32_t j, siz
 }  // namespace
 
 bool upstreamStateCarriable(const SnapHeader *from, const SnapHeader *to, uint32_t i, uint64_t budget, bool unbudgeted,
-                            uint32_t first, const uint8_t *firExact) {
+                            uint32_t first, const uint8_t *firExact) N60_RT_NONBLOCKING {
     if (i > from->stageCount || i > to->stageCount) return false;
     uint64_t total = 0;
     for (uint32_t j = first; j < i; ++j) {
@@ -1069,7 +1116,7 @@ bool upstreamStateCarriable(const SnapHeader *from, const SnapHeader *to, uint32
     return unbudgeted || total <= budget;
 }
 
-uint32_t carryUpstreamState(SnapHeader *from, SnapHeader *to, uint32_t i, uint64_t *budget, uint32_t first) {
+uint32_t carryUpstreamState(SnapHeader *from, SnapHeader *to, uint32_t i, uint64_t *budget, uint32_t first) N60_RT_NONBLOCKING {
     if (i > from->stageCount || i > to->stageCount) return 0;
     const StageRec *a = stages(from);
     StageRec *b = stages(to);
@@ -1169,15 +1216,15 @@ extern "C" uint32_t n60_profile_read(n60_profile_entry *out, uint32_t capacity) 
 #endif
 
 void runSnapshot(SnapHeader *h, float *const *lanes, uint32_t frames, std::atomic<uint64_t> &sanitisedSamples,
-                 bool follower) {
+                 bool follower) N60_RT_NONBLOCKING {
     h->follower = follower ? 1u : 0u;
     StageRec *table = stages(h);
     for (uint32_t i = 0; i < h->stageCount; ++i) {
         StageRec &r = table[i];
 #ifdef N60_GRAPH_PROFILE
-        const auto t0 = std::chrono::steady_clock::now();
+        const auto t0 = n60::rtNow();
         runStage(h, r, lanes, frames, sanitisedSamples);
-        const auto t1 = std::chrono::steady_clock::now();
+        const auto t1 = n60::rtNow();
         if (r.kind < kProfileKinds) {
             n60_profile_entry &e = gProfile[r.kind];
             e.ns += static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count());

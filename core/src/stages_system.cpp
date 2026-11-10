@@ -31,6 +31,7 @@
 #include <new>
 
 #include "n60/xover.h"
+#include "simd/simd.hpp"
 
 namespace n60 {
 namespace {
@@ -83,8 +84,9 @@ inline double bqRun(const double *c, Bq &s, double x) {  // transposed direct fo
     return y;
 }
 inline void bqFlush(Bq &s) {
-    if (!(std::fabs(s.z1) >= 1e-30) || !std::isfinite(s.z1)) s.z1 = 0.0;
-    if (!(std::fabs(s.z2) >= 1e-30) || !std::isfinite(s.z2)) s.z2 = 0.0;
+    // E20 S3: denormals are flushed in hardware (platform/fpenv.hpp); only a non-finite burst needs healing.
+    if (!std::isfinite(s.z1)) s.z1 = 0.0;
+    if (!std::isfinite(s.z2)) s.z2 = 0.0;
 }
 
 constexpr double kButterQ = 0.70710678118654752440;
@@ -136,6 +138,10 @@ Lanes ruleOf(uint32_t kind) {
 // ---- parameter layouts ---------------------------------------------------------------
 
 constexpr uint32_t kHpFixed = 11;
+constexpr uint32_t kAmbMaxTrailer = 17;                // ABI v32: live peaking sections after the three bands
+constexpr uint32_t kAmbMaxSec = 3 + kAmbMaxTrailer;
+constexpr double kAmbMinDb = -8.0, kAmbMaxDb = 0.0;    // trailer sections cut only
+constexpr double kAmbMinQ = 0.3, kAmbMaxQ = 20.0;
 constexpr uint32_t kProtParamsV12 = 18;
 constexpr uint32_t kGuardParams = 12 + N60_ANC_GUARD_BANDS;
 constexpr uint32_t kHpRing = 512;
@@ -197,7 +203,11 @@ uint32_t expectedParamCount(uint32_t kind, const float *p, uint32_t have) {
             BassLayout L;
             return parseBass(p, have, L) ? L.end : 0u;
         }
-        case N60_STAGE_AMBIENT: return 10;
+        case N60_STAGE_AMBIENT:  // ABI v32: 10, or 11 + 3 n with the section trailer (n 0..17)
+            if (have == 10) return 10;
+            return have >= 11 && isInt(p[10]) && p[10] >= 0.0f && p[10] <= static_cast<float>(kAmbMaxTrailer)
+                       ? 11u + 3u * static_cast<uint32_t>(p[10])
+                       : 0u;
         case N60_STAGE_SYMMETRY: return 1;
         case N60_STAGE_CROSSFEED: return 1;
         case N60_STAGE_CROSSTALK: return 2;
@@ -288,10 +298,16 @@ struct AmbLane {
     Ramp g;
     float seen;
     float pad;
-    Bq z[3];
+    Bq z[kAmbMaxSec];
+    Bq zN[kAmbMaxSec];  // incoming section during a coefficient crossfade
 };
 struct AmbShared {
-    double coef[3][5];
+    double coef[kAmbMaxSec][5];
+    double coefN[kAmbMaxSec][5];
+    float seen[kAmbMaxSec][3];  // Hz, dB, Q the current design was made from (or is fading to)
+    uint32_t xf[kAmbMaxSec];    // frames left in a section's coefficient crossfade
+    uint32_t n;                 // sections in use: 3 + trailer count
+    uint32_t pad;
 };
 struct SymShared {
     Ramp gl, gr;
@@ -308,15 +324,22 @@ struct CtShared {
     double alphaTarget, alphaStep;  // shadow low-pass coefficient ramps over the ramp window
     uint32_t alphaLeft, pad;
 };
+// HEADPHONE (E13 S3): headroom, crossfeed amount, angle, radius, low-pass, gains and every section's type / Hz / dB / Q are
+// live. Sections are indexed 0..nA-1 (A) then nA..nA+nB-1 (B). A changed section crossfades old and new coefficients over
+// the ramp window; a changed angle or radius crossfades between the old and new ring tap; the low-pass coefficient ramps.
 struct HpShared {
-    Ramp mix, gA, gB;
-    float seenMix, seenGA, seenGB, headroom;
+    Ramp mix, gA, gB, hr;
+    float seenMix, seenGA, seenGB, seenHr;
+    float seenAngle, seenRadius, seenLp, pad0;
     float polA, polB;
-    uint32_t delay, nA, nB, wp;
-    double alpha, lowA, lowB, dlowA, dlowB;
+    uint32_t delay, delayN, delayLeft, nA, nB, wp;
+    double alpha, alphaTarget, alphaStep, lowA, lowB, dlowA, dlowB;
+    uint32_t alphaLeft, pad1;
     float ringA[kHpRing], ringB[kHpRing];
-    Bq zA[16], zB[16];
-    double coef[32][5];
+    Bq z[32], zN[32];
+    float seenSec[32][4];
+    uint32_t xf[32];
+    double coef[32][5], coefN[32][5];
 };
 struct GateShared {
     double env, gain;
@@ -506,7 +529,7 @@ inline float *protRing(ProtLane *l) { return reinterpret_cast<float *>(l + 1); }
 
 }  // namespace
 
-bool isSystemKind(uint32_t kind) {
+bool isSystemKind(uint32_t kind) N60_RT_NONBLOCKING {
     switch (kind) {
         case N60_STAGE_BASS_MGMT:
         case N60_STAGE_AMBIENT:
@@ -550,9 +573,19 @@ bool paramOk(uint32_t kind, uint32_t i, float v, const float *p, double rate, ui
                 case 8: return true;  // checked by expectedParamCount
                 default: return true;  // extra subs and sections: checked by parseBass and the full validation
             }
-        case N60_STAGE_AMBIENT:
+        case N60_STAGE_AMBIENT: {
             if (i == 0) return inR(v, -60.0, 24.0);
-            return true;  // bands: checked below
+            if (i == 10) return isInt(v) && v >= 0.0f && v <= static_cast<float>(kAmbMaxTrailer);
+            // A band or trailer section field: the section as it would be with this value must design.
+            const uint32_t sec = i <= 9 ? (i - 1) / 3 : 3 + (i - 11) / 3;
+            const uint32_t base = i <= 9 ? 1 + 3 * sec : 11 + 3 * (sec - 3);
+            double t[3];
+            for (uint32_t f = 0; f < 3; ++f) t[f] = base + f == i ? static_cast<double>(v) : static_cast<double>(p[base + f]);
+            double c[5];
+            if (!designBiquad(i <= 9 ? (sec == 0 ? 1u : (sec == 2 ? 2u : 0u)) : 0u, rate, t[0], t[1], t[2], c)) return false;
+            if (i >= 11) return inR(t[0], 20.0, rate * 0.45) && inR(t[1], kAmbMinDb, kAmbMaxDb) && inR(t[2], kAmbMinQ, kAmbMaxQ);
+            return true;
+        }
         case N60_STAGE_SYMMETRY: return inR(v, -1.0, 1.0);
         case N60_STAGE_CROSSFEED: return inR(v, 0.0, 0.5);
         case N60_STAGE_CROSSTALK: return i == 0 ? inR(v, 200.0, 2000.0) : inR(v, 0.0, 1.0);
@@ -716,7 +749,7 @@ n60_status validateSystemStage(const n60_stage_desc &s, double rate, uint32_t ou
                 double c[5];
                 if (!designBiquad(0, rate, p[1 + 3 * k], p[2 + 3 * k], p[3 + 3 * k], c)) return N60_STATUS_BAD_ARGUMENT;
             }
-            break;
+            break;  // trailer sections: paramOk (range) and the full-parameter loop above
         case N60_STAGE_HEADPHONE: {
             const uint32_t n = static_cast<uint32_t>(p[9]) + static_cast<uint32_t>(p[10]);
             for (uint32_t k = 0; k < n; ++k) {
@@ -809,6 +842,11 @@ void xoDesign(uint32_t type, double rate, double hz, double q, double *c) {
     }
 }
 
+uint32_t hpDelay(double rate, double angleDeg, double radiusM) {
+    const double d = std::llround(rate * (radiusM / 343.0) * std::sin(angleDeg * kPi / 180.0));
+    return static_cast<uint32_t>(std::min<double>(d, kHpRing - 1));
+}
+
 void designInto(uint32_t type, double rate, double f, double db, double q, double *out) {
     double c[5];
     if (designBiquad(type, rate, f, db, q, c)) std::memcpy(out, c, sizeof c);
@@ -857,7 +895,13 @@ void systemInit(SnapHeader *h, const StageRec &r) {
     switch (r.kind) {
         case N60_STAGE_AMBIENT: {
             AmbShared *s = reinterpret_cast<AmbShared *>(sh);
-            for (uint32_t k = 0; k < 3; ++k) designInto(k == 0 ? 1u : (k == 2 ? 2u : 0u), rate, p[1 + 3 * k], p[2 + 3 * k], p[3 + 3 * k], s->coef[k]);
+            s->n = r.paramCount > 10 ? 3u + static_cast<uint32_t>(p[10]) : 3u;
+            for (uint32_t k = 0; k < s->n; ++k) {
+                const float *q = k < 3 ? p + 1 + 3 * k : p + 11 + 3 * (k - 3);
+                designInto(k == 0 ? 1u : (k == 2 ? 2u : 0u), rate, q[0], q[1], q[2], s->coef[k]);
+                std::memcpy(s->seen[k], q, sizeof s->seen[k]);
+                s->xf[k] = 0;
+            }
             for (uint32_t l = 0; l < r.laneCount; ++l) {
                 AmbLane *a = reinterpret_cast<AmbLane *>(laneState(h, r, l));
                 rampInit(a->g, static_cast<float>(db2lin(p[0])));
@@ -889,7 +933,11 @@ void systemInit(SnapHeader *h, const StageRec &r) {
         }
         case N60_STAGE_HEADPHONE: {
             HpShared *s = reinterpret_cast<HpShared *>(sh);
-            s->headroom = static_cast<float>(db2lin(p[0]));
+            rampInit(s->hr, static_cast<float>(db2lin(p[0])));
+            s->seenHr = p[0];
+            s->seenAngle = p[2];
+            s->seenRadius = p[3];
+            s->seenLp = p[4];
             rampInit(s->mix, 0.5f * p[1]);
             rampInit(s->gA, static_cast<float>(db2lin(p[5])));
             rampInit(s->gB, static_cast<float>(db2lin(p[6])));
@@ -901,12 +949,12 @@ void systemInit(SnapHeader *h, const StageRec &r) {
             s->nA = static_cast<uint32_t>(p[9]);
             s->nB = static_cast<uint32_t>(p[10]);
             const double f = p[4];
-            s->alpha = 1.0 - std::exp(-2.0 * kPi * f / rate);
-            const double d = std::llround(rate * (static_cast<double>(p[3]) / 343.0) * std::sin(static_cast<double>(p[2]) * kPi / 180.0));
-            s->delay = static_cast<uint32_t>(std::min<double>(d, kHpRing - 1));
+            s->alpha = s->alphaTarget = 1.0 - std::exp(-2.0 * kPi * f / rate);
+            s->delay = s->delayN = hpDelay(rate, p[2], p[3]);
             for (uint32_t k = 0; k < s->nA + s->nB; ++k) {
                 const float *q = p + kHpFixed + 4 * k;
                 designInto(static_cast<uint32_t>(q[0]), rate, q[1], q[2], q[3], s->coef[k]);
+                std::memcpy(s->seenSec[k], q, sizeof s->seenSec[k]);
             }
             break;
         }
@@ -1083,7 +1131,7 @@ void systemInit(SnapHeader *h, const StageRec &r) {
 
 // ---- live parameters and latency --------------------------------------------------------
 
-n60_status validateSystemParam(const SnapHeader *h, const StageRec &r, uint32_t idx, float value) {
+n60_status validateSystemParam(const SnapHeader *h, const StageRec &r, uint32_t idx, float value) N60_RT_NONBLOCKING {
     if (idx >= r.paramCount) return N60_STATUS_BAD_ARGUMENT;
     bool live = false;
     switch (r.kind) {
@@ -1120,11 +1168,22 @@ n60_status validateSystemParam(const SnapHeader *h, const StageRec &r, uint32_t 
             if (idx == 2 || idx == 3 || idx == 8) return paramOk(r.kind, idx, value, bp, h->sampleRate, h->outputChannels) ? N60_STATUS_UNSUPPORTED : N60_STATUS_BAD_ARGUMENT;
             return N60_STATUS_UNSUPPORTED;  // lane indexes, section counts, extra-sub count
         }
-        case N60_STAGE_AMBIENT: live = idx == 0; break;
+        case N60_STAGE_AMBIENT: live = idx != 10; break;  // ABI v32: bands and trailer sections are live; the count is topology
         case N60_STAGE_SYMMETRY:
         case N60_STAGE_CROSSFEED: live = true; break;
         case N60_STAGE_CROSSTALK: live = true; break;
-        case N60_STAGE_HEADPHONE: live = idx == 1 || idx == 5 || idx == 6; break;
+        case N60_STAGE_HEADPHONE: {
+            if (idx >= kHpFixed) {  // section type / Hz / dB / Q (E13 S3); counts and polarity stay topology
+                const float *hp = paramsOf(h, r);
+                float sec[4];
+                const uint32_t k = (idx - kHpFixed) / 4;
+                std::memcpy(sec, hp + kHpFixed + 4 * k, sizeof sec);
+                sec[(idx - kHpFixed) % 4] = value;
+                return sectionOk(sec, h->sampleRate) ? N60_STATUS_OK : N60_STATUS_BAD_ARGUMENT;
+            }
+            live = idx <= 6;
+            break;
+        }
         case N60_STAGE_PROTECTION: live = idx >= 1 && idx <= 3; break;
         case N60_STAGE_MUTE: live = true; break;
         case N60_STAGE_EXTERNAL: live = idx == 0; break;
@@ -1139,7 +1198,7 @@ n60_status validateSystemParam(const SnapHeader *h, const StageRec &r, uint32_t 
     return live ? N60_STATUS_OK : N60_STATUS_UNSUPPORTED;
 }
 
-uint32_t systemLatency(const SnapHeader *h, const StageRec &r) {
+uint32_t systemLatency(const SnapHeader *h, const StageRec &r) N60_RT_NONBLOCKING {
     if (r.kind == N60_STAGE_FRAC_DELAY) return static_cast<uint32_t>(paramsOf(h, r)[0]);
     if (r.kind == N60_STAGE_EXTERNAL) return r.capacity;
     if (r.kind != N60_STAGE_PROTECTION) return 0;
@@ -1152,20 +1211,74 @@ namespace {
 
 void runAmbient(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) {
     const float *p = paramsOf(h, r);
-    const double(*coef)[5] = reinterpret_cast<AmbShared *>(sharedState(h, r))->coef;
+    AmbShared &s = *reinterpret_cast<AmbShared *>(sharedState(h, r));
+    const uint32_t ramp = h->rampFrames;
+    const double rate = h->sampleRate;
+    // A changed section runs as a second instance (new coefficients, state continued from the old one) and the
+    // two are crossfaded over the ramp window; an edit that arrives mid-crossfade is picked up when it ends.
+    for (uint32_t k = 0; k < s.n; ++k) {
+        const float *q = k < 3 ? p + 1 + 3 * k : p + 11 + 3 * (k - 3);
+        if ((q[0] != s.seen[k][0] || q[1] != s.seen[k][1] || q[2] != s.seen[k][2]) && s.xf[k] == 0) {
+            std::memcpy(s.seen[k], q, sizeof s.seen[k]);
+            designInto(k == 0 ? 1u : (k == 2 ? 2u : 0u), rate, q[0], q[1], q[2], s.coefN[k]);
+            if (ramp == 0) {
+                std::memcpy(s.coef[k], s.coefN[k], sizeof s.coef[k]);
+            } else {
+                for (uint32_t l = 0; l < r.laneCount; ++l) {
+                    AmbLane &a = *reinterpret_cast<AmbLane *>(laneState(h, r, l));
+                    a.zN[k] = a.z[k];
+                }
+                s.xf[k] = ramp;
+            }
+        }
+    }
+    const double invRamp = ramp != 0 ? 1.0 / static_cast<double>(ramp) : 0.0;
     for (uint32_t l = 0; l < r.laneCount; ++l) {
         AmbLane &a = *reinterpret_cast<AmbLane *>(laneState(h, r, l));
         if (p[0] != a.seen) {
             a.seen = p[0];
-            rampSet(a.g, static_cast<float>(db2lin(p[0])), h->rampFrames);
+            rampSet(a.g, static_cast<float>(db2lin(p[0])), ramp);
+        }
+        uint32_t left[kAmbMaxSec];
+        const double *cur[kAmbMaxSec];
+        bool idle[kAmbMaxSec];
+        for (uint32_t k = 0; k < s.n; ++k) {
+            left[k] = s.xf[k];
+            cur[k] = s.coef[k];
+            // Trailer sections at 0 dB with no state are an exact identity: skipped at no cost.
+            idle[k] = k >= 3 && left[k] == 0 && s.seen[k][1] == 0.0f && a.z[k].z1 == 0.0 && a.z[k].z2 == 0.0;
         }
         float *buf = lanes[laneOf(r, l)];
         for (uint32_t i = 0; i < frames; ++i) {
             double x = buf[i];
-            for (uint32_t b = 0; b < 3; ++b) x = bqRun(coef[b], a.z[b], x);
+            for (uint32_t b = 0; b < s.n; ++b) {
+                if (idle[b]) continue;
+                double o = bqRun(cur[b], a.z[b], x);
+                if (left[b] != 0) {
+                    const double on = bqRun(s.coefN[b], a.zN[b], x);
+                    o += (static_cast<double>(ramp - left[b] + 1) * invRamp) * (on - o);
+                    if (--left[b] == 0) {
+                        a.z[b] = a.zN[b];
+                        cur[b] = s.coefN[b];
+                    }
+                }
+                x = o;
+            }
             buf[i] = static_cast<float>(x) * rampNext(a.g);
         }
-        for (Bq &z : a.z) bqFlush(z);
+        for (uint32_t k = 0; k < s.n; ++k) {
+            bqFlush(a.z[k]);
+            if (left[k] != 0) bqFlush(a.zN[k]);
+        }
+    }
+    for (uint32_t k = 0; k < s.n; ++k) {  // adopt finished designs (every lane has run the same frames)
+        if (s.xf[k] == 0) continue;
+        if (s.xf[k] <= frames) {
+            std::memcpy(s.coef[k], s.coefN[k], sizeof s.coef[k]);
+            s.xf[k] = 0;
+        } else {
+            s.xf[k] -= frames;
+        }
     }
 }
 
@@ -1231,55 +1344,112 @@ void runCrosstalk(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t fram
         a[i] = static_cast<float>(l - amt * s.sR);
         b[i] = static_cast<float>(rr - amt * s.sL);
     }
-    if (std::fabs(s.sL) < 1e-30) s.sL = 0.0;
-    if (std::fabs(s.sR) < 1e-30) s.sR = 0.0;
 }
 
 void runHeadphone(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) {
     HpShared &s = *reinterpret_cast<HpShared *>(sharedState(h, r));
     const float *p = paramsOf(h, r);
+    const double rate = h->sampleRate;
+    const uint32_t ramp = h->rampFrames;
+    if (p[0] != s.seenHr) {
+        s.seenHr = p[0];
+        rampSet(s.hr, static_cast<float>(db2lin(p[0])), ramp);
+    }
     if (p[1] != s.seenMix) {
         s.seenMix = p[1];
-        rampSet(s.mix, 0.5f * p[1], h->rampFrames);
+        rampSet(s.mix, 0.5f * p[1], ramp);
     }
     if (p[5] != s.seenGA) {
         s.seenGA = p[5];
-        rampSet(s.gA, static_cast<float>(db2lin(p[5])), h->rampFrames);
+        rampSet(s.gA, static_cast<float>(db2lin(p[5])), ramp);
     }
     if (p[6] != s.seenGB) {
         s.seenGB = p[6];
-        rampSet(s.gB, static_cast<float>(db2lin(p[6])), h->rampFrames);
+        rampSet(s.gB, static_cast<float>(db2lin(p[6])), ramp);
+    }
+    if ((p[2] != s.seenAngle || p[3] != s.seenRadius) && s.delayLeft == 0) {
+        s.seenAngle = p[2];
+        s.seenRadius = p[3];
+        s.delayN = hpDelay(rate, p[2], p[3]);
+        if (s.delayN != s.delay) {
+            if (ramp == 0) s.delay = s.delayN;
+            else s.delayLeft = ramp;
+        }
+    }
+    if (p[4] != s.seenLp && s.alphaLeft == 0) {
+        s.seenLp = p[4];
+        s.alphaTarget = 1.0 - std::exp(-2.0 * kPi * static_cast<double>(p[4]) / rate);
+        if (ramp == 0) {
+            s.alpha = s.alphaTarget;
+        } else {
+            s.alphaLeft = ramp;  // ramped, not stepped (see CROSSTALK)
+            s.alphaStep = (s.alphaTarget - s.alpha) / static_cast<double>(ramp);
+        }
+    }
+    const uint32_t nSec = s.nA + s.nB;
+    for (uint32_t k = 0; k < nSec; ++k) {
+        const float *e = p + kHpFixed + 4 * k;
+        if (s.xf[k] == 0 && (e[0] != s.seenSec[k][0] || e[1] != s.seenSec[k][1] || e[2] != s.seenSec[k][2] || e[3] != s.seenSec[k][3])) {
+            // validateSystemParam has already vetted type/Hz/dB/Q, so the design cannot fail here.
+            std::memcpy(s.seenSec[k], e, sizeof s.seenSec[k]);
+            designInto(static_cast<uint32_t>(e[0]), rate, e[1], e[2], e[3], s.coefN[k]);
+            if (ramp == 0) {
+                std::memcpy(s.coef[k], s.coefN[k], sizeof s.coef[k]);
+            } else {
+                s.zN[k] = s.z[k];  // incoming section continues from the live one's state
+                s.xf[k] = ramp;
+            }
+        }
     }
     float *a = lanes[r.laneA];
     float *b = lanes[r.laneB];
     uint32_t wp = s.wp;
+    const double invRamp = ramp != 0 ? 1.0 / static_cast<double>(ramp) : 0.0;
     for (uint32_t i = 0; i < frames; ++i) {
+        const float hr = rampNext(s.hr);
         float xa = a[i], xb = b[i];
-        xa = std::isfinite(xa) ? xa * s.headroom : 0.0f;
-        xb = std::isfinite(xb) ? xb * s.headroom : 0.0f;
+        xa = std::isfinite(xa) ? xa * hr : 0.0f;
+        xb = std::isfinite(xb) ? xb * hr : 0.0f;
         s.ringA[wp] = xa;
         s.ringB[wp] = xb;
+        if (s.alphaLeft != 0) {
+            --s.alphaLeft;
+            s.alpha = s.alphaTarget - s.alphaStep * static_cast<double>(s.alphaLeft);
+        }
         const uint32_t rp = (wp + kHpRing - s.delay) & (kHpRing - 1);
+        double dA = s.ringA[rp], dB = s.ringB[rp];
+        if (s.delayLeft != 0) {
+            const uint32_t rn = (wp + kHpRing - s.delayN) & (kHpRing - 1);
+            const double t = static_cast<double>(ramp - s.delayLeft + 1) * invRamp;
+            dA += t * (static_cast<double>(s.ringA[rn]) - dA);
+            dB += t * (static_cast<double>(s.ringB[rn]) - dB);
+            if (--s.delayLeft == 0) s.delay = s.delayN;
+        }
         s.lowA += s.alpha * (static_cast<double>(xa) - s.lowA);
         s.lowB += s.alpha * (static_cast<double>(xb) - s.lowB);
-        s.dlowA += s.alpha * (static_cast<double>(s.ringA[rp]) - s.dlowA);
-        s.dlowB += s.alpha * (static_cast<double>(s.ringB[rp]) - s.dlowB);
+        s.dlowA += s.alpha * (dA - s.dlowA);
+        s.dlowB += s.alpha * (dB - s.dlowB);
         const double mix = rampNext(s.mix);
         double ya = (xa - s.lowA) + (1.0 - mix) * s.lowA + mix * s.dlowB;
         double yb = (xb - s.lowB) + (1.0 - mix) * s.lowB + mix * s.dlowA;
-        for (uint32_t k = 0; k < s.nA; ++k) ya = bqRun(s.coef[k], s.zA[k], ya);
-        for (uint32_t k = 0; k < s.nB; ++k) yb = bqRun(s.coef[s.nA + k], s.zB[k], yb);
+        for (uint32_t k = 0; k < nSec; ++k) {
+            double &y = k < s.nA ? ya : yb;
+            double o = bqRun(s.coef[k], s.z[k], y);
+            if (s.xf[k] != 0) {
+                const double on = bqRun(s.coefN[k], s.zN[k], y);
+                o += (static_cast<double>(ramp - s.xf[k] + 1) * invRamp) * (on - o);
+                if (--s.xf[k] == 0) {
+                    std::memcpy(s.coef[k], s.coefN[k], sizeof s.coef[k]);
+                    s.z[k] = s.zN[k];
+                }
+            }
+            y = o;
+        }
         a[i] = static_cast<float>(ya) * rampNext(s.gA) * s.polA;
         b[i] = static_cast<float>(yb) * rampNext(s.gB) * s.polB;
         wp = (wp + 1) & (kHpRing - 1);
     }
     s.wp = wp;
-    for (uint32_t k = 0; k < s.nA; ++k) bqFlush(s.zA[k]);
-    for (uint32_t k = 0; k < s.nB; ++k) bqFlush(s.zB[k]);
-    if (std::fabs(s.lowA) < 1e-30) s.lowA = 0.0;
-    if (std::fabs(s.lowB) < 1e-30) s.lowB = 0.0;
-    if (std::fabs(s.dlowA) < 1e-30) s.dlowA = 0.0;
-    if (std::fabs(s.dlowB) < 1e-30) s.dlowB = 0.0;
 }
 
 void runGate(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) {
@@ -1314,7 +1484,7 @@ void runGate(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) {
         const float g = static_cast<float>(gain);
         for (uint32_t l = 0; l < r.laneCount; ++l) ptr[l][i] *= g;
     }
-    s.env = (env < 1e-30 || !std::isfinite(env)) ? 0.0 : env;
+    s.env = std::isfinite(env) ? env : 0.0;
     s.gain = std::isfinite(gain) ? gain : 1.0;
 }
 
@@ -1522,12 +1692,6 @@ void runStereoCrossover(SnapHeader *h, StageRec &r, float *const *lanes, uint32_
             }
         }
     }
-    for (uint32_t k = 0; k < x.nHp; ++k) {  // keep denormals out of silent input
-        bqFlush(st.hp[0][k]);
-        bqFlush(st.hp[1][k]);
-    }
-    for (uint32_t k = 0; k < x.nLp; ++k) bqFlush(x.lpState[k]);
-    bqFlush(x.apState);
 }
 
 void runFracDelay(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) {
@@ -1563,6 +1727,13 @@ void runFracDelay(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t fram
 // The cached effect is exact for a processor that is linear in its input; during the short rebuild crossfade it is an
 // approximation for nonlinear or time-varying racks and settles exactly when the fade ends. The host owns processor
 // reset; the callback sees the graph's sample rate.
+// The host callback is documented (graph.h) to obey the realtime rules itself; the compiler cannot verify a function pointer.
+bool callExternal(n60_external_process_fn fn, void *context, float *const *ptr, uint32_t n, uint32_t frames) N60_RT_NONBLOCKING {
+    N60_RT_TRUST_BEGIN
+    return fn(context, ptr, ptr, n, frames) != 0;
+    N60_RT_TRUST_END
+}
+
 void runExternal(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) {
     ExternalSlot *x = h->external;
     if (x == nullptr || paramsOf(h, r)[0] == 0.0f) return;
@@ -1588,7 +1759,7 @@ void runExternal(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frame
         std::memcpy(x->delta + static_cast<size_t>(k) * x->deltaStride, ptr[k], sizeof(float) * frames);
     }
     x->calls.fetch_add(1, std::memory_order_relaxed);
-    const bool ok = fn(x->context, ptr, ptr, n, frames) != 0;
+    const bool ok = callExternal(fn, x->context, ptr, n, frames);
     for (uint32_t k = 0; k < n; ++k) {
         float *d = x->delta + static_cast<size_t>(k) * x->deltaStride;
         if (!ok) std::memset(ptr[k], 0, sizeof(float) * frames);
@@ -1733,8 +1904,7 @@ void runDeltaSubtract(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t 
 // ---- protection ---------------------------------------------------------------------------
 
 constexpr uint32_t kHbTaps = 65;
-constexpr uint32_t kHbCenter = 32;
-const float kHalfBand[kHbTaps] = {
+constexpr float kHalfBand[kHbTaps] = {
     0.0f, -8.93785157026247e-06f, 0.0f, 8.8329163000838e-05f,
     0.0f, -0.000276868159748326f, 0.0f, 0.000625180796064176f,
     0.0f, -0.00120674594714632f, 0.0f, 0.00211986552642504f,
@@ -1753,15 +1923,22 @@ const float kHalfBand[kHbTaps] = {
     0.000625180796064177f, 0.0f, -0.000276868159748327f, 0.0f,
     8.83291630008379e-05f, 0.0f, -8.93785157026247e-06f, 0.0f};
 
+// The half-band taps in window order: kHalfBandRev[j] pairs with the sample j - 63 steps from the newest, so the 64-tap
+// dot product reads the history window forwards (the 65th tap is zero). E20 S3: four independent SIMD accumulators
+// replace the serial float chain, in both the SIMD and scalar builds (simd::dot16), so the two agree bit for bit.
+struct HalfBandRev {
+    alignas(16) float t[64];
+    constexpr HalfBandRev() : t{} { for (uint32_t j = 0; j < 64; ++j) t[j] = kHalfBand[63 - j]; }
+};
+constexpr HalfBandRev kHalfBandRev;
+
 inline float hbPush(Hb &f, float in) {
     const uint32_t newest = f.w;
     f.s[newest] = in;
     f.s[newest + kHbTaps] = in;
-    const float *base = f.s + newest + kHbTaps;  // base[-tap] is the sample `tap` steps old
-    float out = kHalfBand[kHbCenter] * base[-static_cast<int>(kHbCenter)];
-    for (uint32_t tap = 1; tap < kHbTaps; tap += 2) out += kHalfBand[tap] * base[-static_cast<int>(tap)];
+    const float *win = f.s + newest + kHbTaps - 63u;  // win[j] is the sample 63 - j steps old
     f.w = newest + 1 == kHbTaps ? 0u : newest + 1;
-    return out;
+    return simd::dot16(win, kHalfBandRev.t, 64);
 }
 inline void interp2(Hb &f, float in, float out[2]) {
     out[0] = 2.0f * hbPush(f, in);
@@ -1912,7 +2089,7 @@ void runProtection(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t fra
                 desired = std::fmin(static_cast<double>(c.riderMax), std::fmax(0.0, atten + (sustained - static_cast<double>(c.riderTarget))));
             }
             atten = desired + c.riderRespCoef * (atten - desired);
-            if (atten < 1e-6) atten = 0.0;  // flush the decaying tail (no denormals, no endless pow)
+            if (atten < 1e-6) atten = 0.0;  // idle cutoff: below 1e-6 dB the rider is off (skips the lane multiply), not a denormal flush
             if (atten != 0.0) {
                 // The rider moves over seconds: redo the pow only after a 1e-4 dB change (a 1e-5 relative gain error).
                 if (std::fabs(atten - gainAtten) > 1.0e-4) {
@@ -2106,7 +2283,7 @@ void runGuard(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) 
 
 }  // namespace
 
-void runSystem(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) {
+void runSystem(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) N60_RT_NONBLOCKING {
     switch (r.kind) {
         case N60_STAGE_AMBIENT: runAmbient(h, r, lanes, frames); break;
         case N60_STAGE_SYMMETRY: runSymmetry(h, r, lanes, frames); break;
@@ -2133,7 +2310,7 @@ void runSystem(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames)
 
 // ---- rebuild support ---------------------------------------------------------------------------
 
-uint64_t systemRiderCarry(SnapHeader *from, SnapHeader *to) {
+uint64_t systemRiderCarry(SnapHeader *from, SnapHeader *to) N60_RT_NONBLOCKING {
     uint64_t bytes = 0;
     if (from == nullptr || to == nullptr) return bytes;
     const StageRec *src = stages(from);
@@ -2153,7 +2330,7 @@ uint64_t systemRiderCarry(SnapHeader *from, SnapHeader *to) {
     return bytes;
 }
 
-uint32_t systemRebuildMute(SnapHeader *h, bool silentNow) {
+uint32_t systemRebuildMute(SnapHeader *h, bool silentNow) N60_RT_NONBLOCKING {
     uint32_t n = 0;
     StageRec *table = stages(h);
     for (uint32_t i = 0; i < h->stageCount; ++i) {
@@ -2323,7 +2500,7 @@ bool deltaFinalize(SnapHeader *h) {
     return true;
 }
 
-uint64_t deltaCarry(SnapHeader *from, SnapHeader *to) {
+uint64_t deltaCarry(SnapHeader *from, SnapHeader *to) N60_RT_NONBLOCKING {
     if (from == nullptr || to == nullptr) return 0;
     StageRec *dst = stages(to);
     const StageRec *src = stages(from);

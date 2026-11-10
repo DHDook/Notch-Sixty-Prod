@@ -471,7 +471,7 @@ void store(LdShared &S, Tel slot, float v) { S.tel[slot].store(floatToBits(v), s
 
 }  // namespace
 
-bool isLoudnessKind(uint32_t kind) { return kind == N60_STAGE_LOUDNESS; }
+bool isLoudnessKind(uint32_t kind) N60_RT_NONBLOCKING { return kind == N60_STAGE_LOUDNESS; }
 
 bool loudnessParamOk(const float *params, uint32_t idx, float v, double rate) {
     auto g = [&](uint32_t i) { return getParam(params, i, idx, v); };
@@ -543,14 +543,12 @@ void loudnessInit(SnapHeader *h, const StageRec &r) {
     for (auto &t : S.tel) t.store(0, std::memory_order_relaxed);
 }
 
-// Denormal guard, once per block: decayed filter state below 1e-30 (-600 dBFS) is flushed to zero.
+// E20 S3: denormals are flushed in hardware (platform/fpenv.hpp, the guard in n60_graph_process), so no per-block flush.
 static_assert(std::atomic<uint32_t>::is_always_lock_free, "telemetry atomics must be lock free");
 // Telemetry fields are separate relaxed stores, so a reader may see a mix of two blocks; a NaN input persists in the
 // filter state until the next rebuild, as in the kernel.
-static inline void flush(float &v) { if (std::fabs(v) < 1.0e-30f) v = 0.0f; }
-static inline void flushSt(BqState &s) { flush(s.z1); flush(s.z2); }
 
-void runLoudness(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) {
+void runLoudness(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) N60_RT_NONBLOCKING {
     const float *p = paramsOf(h, r);
     LdShared &S = *reinterpret_cast<LdShared *>(sharedState(h, r));
     const double rate = h->sampleRate;
@@ -564,12 +562,6 @@ void runLoudness(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frame
         contourSample(S, p, &L[i], &R[i]);
         levelerSample(S, p, &L[i], &R[i]);
     }
-    BqState *all[] = {&S.kHpL, &S.kHpR, &S.kShL, &S.kShR, &S.lowShL, &S.lowShR, &S.highShL, &S.highShR, &S.lowBandL,
-                      &S.lowBandR, &S.highBandL, &S.highBandR, &S.hpL, &S.hpR, &S.lpL, &S.lpR};
-    for (BqState *s : all) flushSt(*s);
-    flush(S.meanSquare);
-    flush(S.progMs); flush(S.bandMs); flush(S.voiceEnv); flush(S.modPrev); flush(S.modHpOut); flush(S.modLpOut);
-    flush(S.modMs);
     store(S, kTLufs, -0.691f + 10.0f * std::log10(std::fmax(S.meanSquare, kEpsilon)));
     store(S, kTMatch, S.matchGainDb);
     store(S, kTScale, S.mix);
@@ -583,12 +575,12 @@ void runLoudness(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frame
     store(S, kTBoost, S.boostDb);
 }
 
-n60_status validateLoudnessParam(const SnapHeader *h, const StageRec &r, uint32_t idx, float value) {
+n60_status validateLoudnessParam(const SnapHeader *h, const StageRec &r, uint32_t idx, float value) N60_RT_NONBLOCKING {
     if (idx >= r.paramCount) return N60_STATUS_BAD_ARGUMENT;
     return loudnessParamOk(paramsOf(h, r), idx, value, h->sampleRate) ? N60_STATUS_OK : N60_STATUS_BAD_ARGUMENT;
 }
 
-uint64_t loudnessCarry(SnapHeader *from, SnapHeader *to) {
+uint64_t loudnessCarry(SnapHeader *from, SnapHeader *to) N60_RT_NONBLOCKING {
     uint64_t bytes = 0;
     if (from == nullptr || to == nullptr || from->sampleRate != to->sampleRate) return bytes;
     const StageRec *src = stages(from);

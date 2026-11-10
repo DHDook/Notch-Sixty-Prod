@@ -34,7 +34,7 @@ extern "C" {
 #endif
 
 /* Bumped on any incompatible change to a struct or function below. */
-#define N60_GRAPH_ABI_VERSION 31u
+#define N60_GRAPH_ABI_VERSION 32u
 
 typedef struct n60_graph n60_graph; /* opaque */
 
@@ -428,11 +428,20 @@ typedef int (*n60_external_process_fn)(void *context, const float *const *in, fl
  *  paramCount is then longer by 4.
  *  No added latency.
  * AMBIENT. params: [0] level dB (live, -60..24), then low-shelf, peaking and high-shelf bands (Hz, dB, Q). paramCount 10.
+ *  ABI v32 (E4 S30a): an optional trailer [10] n (0..17, topology; the Swift host sends 0 or 17), then 3 per section
+ *  (Hz 20..0.45 fs, dB -8..0, Q 0.3..20), peaking, cuts only: paramCount 11 + 3 n. The three bands and every
+ *  section are now live (a post of Hz, dB or Q crossfades that section's coefficients over the ramp window, state
+ *  continued, never reset); the level ramps as before. A section at 0 dB with no state is skipped. A trailer of n = 0
+ *  or no trailer is bit-identical to the ABI v31 stage; no added latency.
  * SYMMETRY. params: [0] position -1..1 (live). CROSSFEED. params: [0] amount 0..0.5 (live).
  * CROSSTALK. params: [0] shadow low-pass Hz 200..2000 (live), [1] amount 0..1 (live).
  * HEADPHONE (pair A, B). params: [0] headroom dB (-30..0), [1] crossfeed amount 0..1 (live), [2] angle 15..90 deg,
  *  [3] radius 0.06..0.12 m, [4] crossfeed low-pass Hz (200..2000), [5] gain A dB, [6] gain B dB (live, -24..24),
  *  [7] polarity A, [8] polarity B (0/1), [9] sections nA, [10] sections nB (0..16), then 4 per section (A, then B).
+ *  Live (E13 S3): [0] headroom, [1], [2] angle and [3] radius (crossfaded delay), [4] low-pass, [5], [6], and every section
+ *  value (type, Hz, dB, Q), each crossfaded over the ramp; [7]..[10] stay build-time. Pad each ear to 16 sections (unity)
+ *  so a band add or remove is a value edit. Each change crossfades over the ramp (32..4096 frames, about 5 ms); an edit
+ *  that arrives mid-crossfade is deferred until it ends. No added latency.
  * PAUSE_GATE (linked). params: [0] threshold dBFS (-120..-20), [1] hysteresis dB (0..24), [2] hold ms (0..5000),
  *  [3] fade-out ms (0.05..1000), [4] fade-in ms (0.05..5000). paramCount 5. Starts open.
  * PROTECTION (linked over its lanes). params: [0] limiter on (0/1), [1] ceiling dB (live, -20..0), [2] attack ms
@@ -674,8 +683,18 @@ uint32_t n60_graph_collect(n60_graph *graph);
  * == out[c]) is allowed. frames == 0 is a no-op. Channel c is copied to lane c;
  * output channels with no input are written with silence; then the stages run in
  * place on the output buffers. Buffers of different channels must not overlap.
- * Callers must not pass NULL pointers. */
-n60_status n60_graph_process(n60_graph *graph, const float *const *in, float *const *out, uint32_t frames);
+ * Callers must not pass NULL pointers.
+ * E20 S2: C++ callers with clang function effects see it as noexcept and nonblocking (verified in the core build).
+ * The call runs with subnormal flush-to-zero set and restores the caller's floating-point mode on return. */
+#if defined(__cplusplus) && defined(__clang__) && defined(__has_cpp_attribute)
+#if __has_cpp_attribute(clang::nonblocking)
+#define N60_GRAPH_PROCESS_EFFECTS noexcept [[clang::nonblocking]]
+#endif
+#endif
+#ifndef N60_GRAPH_PROCESS_EFFECTS
+#define N60_GRAPH_PROCESS_EFFECTS
+#endif
+n60_status n60_graph_process(n60_graph *graph, const float *const *in, float *const *out, uint32_t frames) N60_GRAPH_PROCESS_EFFECTS;
 
 /* One parameter target for a stage (latest wins, coalesced at block start).
  * Live parameters: see each stage kind (GAIN params[0] linear 0..10000, DELAY params[0] frames rounded
@@ -770,6 +789,19 @@ n60_status n60_graph_read_multiband(n60_graph *graph, uint32_t stageId, n60_mult
 n60_status n60_graph_read_over_range(n60_graph *graph, uint32_t stageId, uint32_t lane, uint64_t *count);
 
 void n60_graph_get_stats(const n60_graph *graph, n60_graph_stats *outStats);
+
+/* E20 S2. Render load over the last completed one-second window: render time of n60_graph_process divided by the
+ * block period (frames / sampleRate), on the calling thread. meanLoad is total render time over total period;
+ * peakLoad is the worst single block. 1.0 means the callback used its whole period. windowBlocks is 0 until the
+ * first window completes (loads read 0 then). Control thread, any time; values are the realtime thread's last
+ * published window. Set outLoad->structSize = sizeof(n60_graph_load). */
+typedef struct n60_graph_load {
+    uint32_t structSize;
+    uint32_t windowBlocks;       /* blocks in the published window */
+    float meanLoad;
+    float peakLoad;
+} n60_graph_load;
+n60_status n60_graph_read_load(const n60_graph *graph, n60_graph_load *outLoad);
 
 /* Control thread. Frees the graph and every snapshot, only after the realtime
  * thread has stopped using it. NULL is allowed. */

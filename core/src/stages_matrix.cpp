@@ -211,7 +211,7 @@ void runBlock(SnapHeader *h, StageRec &r, MxShared &S, uint8_t *sh, const MxLayo
 
 }  // namespace
 
-bool isMatrixKind(uint32_t kind) { return kind == N60_STAGE_BINAURAL; }
+bool isMatrixKind(uint32_t kind) N60_RT_NONBLOCKING { return kind == N60_STAGE_BINAURAL; }
 
 n60_status validateMatrixStage(const n60_stage_desc &s, double rate, uint32_t outCh) {
     if (!(rate >= 8000.0 && rate <= 768000.0)) return N60_STATUS_BAD_ARGUMENT;
@@ -294,7 +294,7 @@ void matrixInit(SnapHeader *h, const StageRec &r) {
     std::memset(work, 0, sizeof(Complex) * kFft);
 }
 
-void runMatrix(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) {
+void runMatrix(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) N60_RT_NONBLOCKING {
     uint8_t *sh = sharedState(h, r);
     MxShared &S = *reinterpret_cast<MxShared *>(sh);
     const MxLayout L = mxLayout(S.parts, S.orient, S.srcs);
@@ -322,7 +322,7 @@ void runMatrix(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames)
     }
 }
 
-n60_status validateMatrixParam(const SnapHeader *h, const StageRec &r, uint32_t idx, float value) {
+n60_status validateMatrixParam(const SnapHeader *h, const StageRec &r, uint32_t idx, float value) N60_RT_NONBLOCKING {
     (void)h;
     if (idx >= r.paramCount) return N60_STATUS_BAD_ARGUMENT;
     switch (idx) {
@@ -333,7 +333,7 @@ n60_status validateMatrixParam(const SnapHeader *h, const StageRec &r, uint32_t 
     }
 }
 
-uint32_t matrixLatency(const SnapHeader *h, const StageRec &r) {
+uint32_t matrixLatency(const SnapHeader *h, const StageRec &r) N60_RT_NONBLOCKING {
     return kPart + static_cast<uint32_t>(paramsOf(h, r)[9]);
 }
 

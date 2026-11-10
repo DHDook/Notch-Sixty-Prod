@@ -239,7 +239,24 @@ void n60_mimo_tap_response(const float *taps, uint32_t count, double sample_rate
     if (im_out != nullptr) *im_out = im;
 }
 
+namespace {
+int32_t designImpl(const n60_mimo_problem *p, float *delta_out, uint64_t capacity, float *solved_out,
+                   uint64_t solved_capacity, n60_mimo_info *infoOut);
+}  // namespace
+
 int32_t n60_mimo_design(const n60_mimo_problem *p, float *delta_out, uint64_t capacity, n60_mimo_info *infoOut) {
+    return designImpl(p, delta_out, capacity, nullptr, 0, infoOut);
+}
+
+int32_t n60_mimo_design_solved(const n60_mimo_problem *p, float *delta_out, uint64_t capacity, float *solved_out,
+                               uint64_t solved_capacity, n60_mimo_info *infoOut) {
+    if (solved_out == nullptr) return N60_MIMO_ERR_ARGUMENT;
+    return designImpl(p, delta_out, capacity, solved_out, solved_capacity, infoOut);
+}
+
+namespace {
+int32_t designImpl(const n60_mimo_problem *p, float *delta_out, uint64_t capacity, float *solved_out,
+                   uint64_t solved_capacity, n60_mimo_info *infoOut) {
     n60_mimo_info scratch{};
     n60_mimo_info &info = infoOut != nullptr ? *infoOut : scratch;
     info = n60_mimo_info{};
@@ -528,6 +545,22 @@ int32_t n60_mimo_design(const n60_mimo_problem *p, float *delta_out, uint64_t ca
     }
     if (failure != N60_MIMO_OK) return failure;
 
+    // Optional readback of the solved (pre-synthesis) response, for the realisation check.
+    if (solved_out != nullptr) {
+        const uint64_t need = static_cast<uint64_t>(N) * N * K * 2u;
+        if (solved_capacity < need) return N60_MIMO_ERR_CAPACITY;
+        std::fill(solved_out, solved_out + need, 0.0f);
+        for (size_t i = 0; i < A; ++i)
+            for (size_t ta = 0; ta < A; ++ta) {
+                float *dst = solved_out + ((static_cast<uint64_t>(active[i]) * N + active[ta]) * K) * 2u;
+                for (size_t k = 0; k < K; ++k) {
+                    const Cx e = E[(i * A + ta) * K + k];
+                    dst[2 * k] = static_cast<float>(e.real());
+                    dst[2 * k + 1] = static_cast<float>(e.imag());
+                }
+            }
+    }
+
     // Synthesis on the Hz grid: c[n] = (df / fs) * sum_k 2 Re(E_k exp(j w_k n)), for n from -pre to taps - 1.
     const uint32_t taps = p->taps, pre = taps / 4;
     const size_t span = static_cast<size_t>(pre) + taps;
@@ -569,6 +602,122 @@ int32_t n60_mimo_design(const n60_mimo_problem *p, float *delta_out, uint64_t ca
     }
     info.pre_energy_db = allEnergy > 1e-30 ? 10.0 * std::log10(std::max(preEnergy, 1e-40) / allEnergy) : -400.0;
     if (info.pre_energy_db > p->causality_limit_db) return N60_MIMO_ERR_CAUSALITY;
+    return N60_MIMO_OK;
+}
+}  // namespace
+
+int32_t n60_mimo_problem_set_plant(n60_mimo_problem *p, uint32_t source, uint32_t seat, const float *program,
+                                   uint64_t program_count, const float *injection, uint64_t injection_count,
+                                   double program_arrival_seconds) {
+    if (p == nullptr || source >= N60_MIMO_MAX_SOURCES || seat >= N60_MIMO_MAX_SEATS) return N60_MIMO_ERR_ARGUMENT;
+    p->program_plant[source][seat] = program;
+    p->program_count[source][seat] = program != nullptr ? program_count : 0;
+    p->injection_plant[source][seat] = injection;
+    p->injection_count[source][seat] = injection != nullptr ? injection_count : 0;
+    p->program_arrival_seconds[source][seat] = program_arrival_seconds;
+    return N60_MIMO_OK;
+}
+
+int32_t n60_mimo_problem_set_source(n60_mimo_problem *p, uint32_t source, const n60_mimo_source *value) {
+    if (p == nullptr || value == nullptr || source >= N60_MIMO_MAX_SOURCES) return N60_MIMO_ERR_ARGUMENT;
+    p->sources[source] = *value;
+    return N60_MIMO_OK;
+}
+
+int32_t n60_mimo_problem_set_seat(n60_mimo_problem *p, uint32_t seat, const n60_mimo_seat *value) {
+    if (p == nullptr || value == nullptr || seat >= N60_MIMO_MAX_SEATS) return N60_MIMO_ERR_ARGUMENT;
+    p->seats[seat] = *value;
+    return N60_MIMO_OK;
+}
+
+int32_t n60_mimo_realise_check(const n60_mimo_problem *p, const float *delta, uint64_t delta_count, const float *solved,
+                               uint64_t solved_count, const n60_mimo_info *info, n60_mimo_realisation *out) {
+    if (p == nullptr || delta == nullptr || solved == nullptr || info == nullptr || out == nullptr ||
+        p->struct_size < sizeof(n60_mimo_problem))
+        return N60_MIMO_ERR_ARGUMENT;
+    *out = n60_mimo_realisation{};
+    const uint32_t N = p->source_count, taps = p->taps, K = info->grid_bins;
+    if (N < 1 || N > N60_MIMO_MAX_SOURCES || K < 2 || info->decimation == 0 || !(info->low_rate_hz > 0.0))
+        return N60_MIMO_ERR_ARGUMENT;
+    if (delta_count < static_cast<uint64_t>(N) * N * taps || solved_count < static_cast<uint64_t>(N) * N * K * 2u)
+        return N60_MIMO_ERR_CAPACITY;
+    const double fs = info->low_rate_hz;
+    const double step = N60_MIMO_GRID_STEP_HZ;
+    for (uint32_t s = 0; s < N60_MIMO_MAX_SOURCES; ++s) {
+        out->gain_overshoot_db[s] = -400.0;
+        out->effort_overshoot_db[s] = -400.0;
+    }
+    // Edge energy: the last eighth of every filter against the whole filter (the tail is windowed in the design).
+    const uint32_t edge = taps / 8;
+    for (uint32_t s = 0; s < N; ++s)
+        for (uint32_t t = 0; t < N; ++t) {
+            const float *h = delta + (static_cast<uint64_t>(s) * N + t) * taps;
+            double all = 0, tail = 0;
+            for (uint32_t n = 0; n < taps; ++n) {
+                const double v = static_cast<double>(h[n]) * h[n];
+                all += v;
+                if (n >= taps - edge) tail += v;
+            }
+            if (all > 1e-30) out->edge_energy_fraction = std::max(out->edge_energy_fraction, tail / all);
+        }
+    // Dense response over each source's support range, against the solved response interpolated on its grid.
+    const double dense = N60_MIMO_DENSE_STEP_HZ;
+    const double tau = p->tau_seconds;
+    for (uint32_t s = 0; s < N; ++s) {
+        const n60_mimo_source &src = p->sources[s];
+        if (src.excluded) continue;
+        // The judged band is the support range less a third of an octave at each edge, where the design's own
+        // roll-off (row taper, rising regularisation) is steep and a hard comparison would judge the taper.
+        const double inset = std::pow(2.0, 1.0 / 3.0);
+        const double lo = std::max(src.support_low_hz * inset, info->grid_low_hz);
+        const double hi = std::min(src.support_high_hz / inset, info->grid_high_hz);
+        double devMax = 0, gainPeak = 0, effortPeak = 0;
+        // Gain and effort are peaks over the whole solved band; deviation is judged in the support range.
+        for (double f = info->grid_low_hz; f <= info->grid_high_hz + 1e-9; f += dense) {
+            double gain = 0, eff2 = 0, err2 = 0;
+            const double pos = (f - info->grid_low_hz) / step;
+            uint32_t k0 = static_cast<uint32_t>(std::floor(pos));
+            if (k0 >= K - 1) k0 = K - 2;
+            const double frac = pos - k0;
+            const double om = 2.0 * kPi * f * tau;
+            for (uint32_t t = 0; t < N; ++t) {
+                const float *h = delta + (static_cast<uint64_t>(s) * N + t) * taps;
+                double re = 0, im = 0;
+                {   // Rotating phasor, re-seeded every 64 taps (same sum as n60_mimo_tap_response, much cheaper).
+                    const double w = 2.0 * kPi * f / fs;
+                    const double cs = std::cos(w), sn = std::sin(w);
+                    double zr = 1.0, zi = 0.0;
+                    for (uint32_t n = 0; n < taps; ++n) {
+                        if ((n & 63u) == 0) { zr = std::cos(w * n); zi = std::sin(w * n); }
+                        re += h[n] * zr;
+                        im -= h[n] * zi;
+                        const double nr = zr * cs - zi * sn;
+                        zi = zr * sn + zi * cs;
+                        zr = nr;
+                    }
+                }
+                const float *sv = solved + (static_cast<uint64_t>(s) * N + t) * K * 2u;
+                const double sre = sv[2 * k0] * (1.0 - frac) + sv[2 * (k0 + 1)] * frac;
+                const double sim = sv[2 * k0 + 1] * (1.0 - frac) + sv[2 * (k0 + 1) + 1] * frac;
+                eff2 += re * re + im * im;
+                err2 += (re - sre) * (re - sre) + (im - sim) * (im - sim);
+                const double cre = re + (t == s ? std::cos(om) : 0.0);
+                const double cim = im + (t == s ? -std::sin(om) : 0.0);
+                gain += std::sqrt(cre * cre + cim * cim);
+            }
+            gainPeak = std::max(gainPeak, gain);
+            effortPeak = std::max(effortPeak, std::sqrt(eff2));
+            if (f >= lo && f <= hi) {
+                const double d = 20.0 * std::log10(1.0 + std::sqrt(err2) / std::max(gain, 1e-6));
+                if (d > devMax) { devMax = d; if (d > out->max_deviation_db) out->max_deviation_hz = f; }
+            }
+        }
+        out->max_deviation_db = std::max(out->max_deviation_db, devMax);
+        out->gain_peak_db[s] = 20.0 * std::log10(std::max(gainPeak, 1e-20));
+        out->effort_peak_db[s] = 20.0 * std::log10(std::max(effortPeak, 1e-20));
+        out->gain_overshoot_db[s] = out->gain_peak_db[s] - src.gain_limit_db;
+        out->effort_overshoot_db[s] = out->effort_peak_db[s] - src.effort_limit_db;
+    }
     return N60_MIMO_OK;
 }
 

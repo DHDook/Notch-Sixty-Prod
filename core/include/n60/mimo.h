@@ -36,7 +36,7 @@
 extern "C" {
 #endif
 
-#define N60_MIMO_ABI_VERSION 1
+#define N60_MIMO_ABI_VERSION 2
 
 #define N60_MIMO_OK 0
 #define N60_MIMO_ERR_ARGUMENT (-1)
@@ -56,6 +56,7 @@ extern "C" {
 #define N60_MIMO_MAX_TAPS 4096u
 #define N60_MIMO_MAX_TAU_SECONDS 0.020
 #define N60_MIMO_GRID_STEP_HZ 0.5
+#define N60_MIMO_DENSE_STEP_HZ 0.25 /* post-realisation check grid */
 
 typedef struct n60_mimo_source {
     uint32_t excluded;            /* 1: plays its own program only; delta row and column exactly zero */
@@ -120,6 +121,14 @@ uint32_t n60_mimo_abi_version(void);
  * source active with support 25 .. 150 Hz, effort limit +9 dB, gain limit +9 dB. */
 void n60_mimo_defaults(double sample_rate, uint32_t source_count, uint32_t seat_count, n60_mimo_problem *problem);
 
+/* Setters for hosts that cannot index the fixed pointer tables (Swift). Bounds are checked; the plant pointers must
+ * stay valid until n60_mimo_design returns. `injection` may be NULL (same as program); a negative arrival detects it. */
+int32_t n60_mimo_problem_set_plant(n60_mimo_problem *problem, uint32_t source, uint32_t seat, const float *program,
+                                   uint64_t program_count, const float *injection, uint64_t injection_count,
+                                   double program_arrival_seconds);
+int32_t n60_mimo_problem_set_source(n60_mimo_problem *problem, uint32_t source, const n60_mimo_source *value);
+int32_t n60_mimo_problem_set_seat(n60_mimo_problem *problem, uint32_t seat, const n60_mimo_seat *value);
+
 /* Decimation factor and low rate for a plant rate (D = 16, 32, 64, 128 by family). */
 int32_t n60_mimo_low_rate(double sample_rate, uint32_t *decimation_out, double *low_rate_out);
 
@@ -144,6 +153,34 @@ void n60_mimo_tap_response(const float *taps, uint32_t count, double sample_rate
  * Errors name the source or seat in info (bad_source, bad_seat), which is filled on every return.
  */
 int32_t n60_mimo_design(const n60_mimo_problem *problem, float *delta_out, uint64_t capacity, n60_mimo_info *info);
+
+/*
+ * Same as n60_mimo_design, and also writes the solved per-bin response E_st(f_k) before it is synthesised into
+ * taps: `solved_out` holds source_count * source_count * grid_bins complex values as interleaved floats (re, im),
+ * E_st bin k at ((s * source_count + t) * grid_bins + k) * 2, on the grid f_k = grid_low_hz + k * 0.5 Hz.
+ * Needs source_count^2 * grid_bins * 2 floats (grid_bins is at most 1,700; there is no size query:
+ * allocate source_count^2 * 1700 * 2 and pass that capacity).
+ */
+int32_t n60_mimo_design_solved(const n60_mimo_problem *problem, float *delta_out, uint64_t capacity, float *solved_out,
+                               uint64_t solved_capacity, n60_mimo_info *info);
+
+/* E19 S3 post-realisation check of the taps against the solved response (design note 3, the existing overshoot
+ * limits). Dense (0.25 Hz) over the solved band. Deviation is judged inside each active source's support range
+ * (its support range less a third of an octave at each end, where the design's own roll-off is steep): 20 log10(1 + |E_realised - E_solved| / sum_t |C_st|) with the row error taken
+ * over all t, so 0.25 dB is a 2.9 percent row error. */
+typedef struct n60_mimo_realisation {
+    double max_deviation_db;                              /* worst in-band deviation over active sources */
+    double max_deviation_hz;                              /* where it occurs */
+    double edge_energy_fraction;                          /* worst filter: energy in the last eighth of the taps */
+    double gain_peak_db[N60_MIMO_MAX_SOURCES];            /* dense max over frequency of sum_t |C_st| */
+    double effort_peak_db[N60_MIMO_MAX_SOURCES];          /* dense max of sqrt(sum_t |E_st|^2) */
+    double gain_overshoot_db[N60_MIMO_MAX_SOURCES];       /* gain peak re the source's gain limit; -400 if excluded */
+    double effort_overshoot_db[N60_MIMO_MAX_SOURCES];     /* effort peak re the source's effort limit; -400 if excluded */
+} n60_mimo_realisation;
+
+int32_t n60_mimo_realise_check(const n60_mimo_problem *problem, const float *delta, uint64_t delta_count,
+                               const float *solved, uint64_t solved_count, const n60_mimo_info *info,
+                               n60_mimo_realisation *out);
 
 #ifdef __cplusplus
 }

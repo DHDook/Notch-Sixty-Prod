@@ -89,13 +89,21 @@ uint32_t n60_xover_abi_version(void);
 int n60_xover_prototype_design(uint32_t family, uint32_t order, n60_xover_prototype *out);
 
 /* Realtime-safe. Bilinear transform with the prewarp on corner_hz; high-pass is the s -> 1/s image. */
-int n60_xover_realise(const n60_xover_prototype *proto, int highpass, double corner_hz, double fs, n60_xover_cascade *out);
+#if defined(__cplusplus) && defined(__clang__) && defined(__has_cpp_attribute)
+#if __has_cpp_attribute(clang::nonblocking)
+#define N60_XOVER_REALISE_EFFECTS noexcept [[clang::nonblocking]] /* E20 S2: callable from the render path */
+#endif
+#endif
+#ifndef N60_XOVER_REALISE_EFFECTS
+#define N60_XOVER_REALISE_EFFECTS
+#endif
+int n60_xover_realise(const n60_xover_prototype *proto, int highpass, double corner_hz, double fs, n60_xover_cascade *out) N60_XOVER_REALISE_EFFECTS;
 
 /* Designs a low-pass (highpass == 0) or high-pass cascade at sample rate fs. */
 int n60_xover_design(const n60_xover_spec *spec, int highpass, double fs, n60_xover_cascade *out);
 
 /* Linkwitz transform: moves a closed-box response (f0, q0) to (fp, qp). One biquad; H(s) = (s^2 + w0/q0 s + w0^2) / (s^2 + wp/qp s + wp^2). */
-int n60_xover_linkwitz(double f0_hz, double q0, double fp_hz, double qp, double fs, n60_xover_cascade *out);
+int n60_xover_linkwitz(double f0_hz, double q0, double fp_hz, double qp, double fs, n60_xover_cascade *out) N60_XOVER_REALISE_EFFECTS;
 
 /* Complex response of a cascade at hz. */
 int n60_xover_response(const n60_xover_cascade *cascade, double fs, double hz, double *re, double *im);

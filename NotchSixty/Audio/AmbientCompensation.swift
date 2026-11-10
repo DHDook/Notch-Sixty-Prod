@@ -163,6 +163,10 @@ struct AmbientCompensationTarget: Equatable, Sendable {
     var mode: ActiveAcousticsPlaybackAdaptationMode = .musicFocus
     var conversationEvidence: Double = 0
     var estimatedClearanceDB: Double = 0
+    /// E4 S30a: planned conversation-unmasking cuts, 17 values at `SpeechIntelligibilityBands.centersHz`, positive dB
+    /// of cut (0...6). nil (every shipping path until S30c) leaves the AMBIENT stage as the plain three bands; a list
+    /// appends the live section trailer (graph ABI v32). Only the unified graph realises it; the legacy kernel ignores it.
+    var unmaskingCutsDB: [Double]?
 
     var active: Bool {
         holdReason == nil

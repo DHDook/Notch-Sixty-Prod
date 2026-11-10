@@ -9,6 +9,7 @@
 // Krall and Frink (1949); Linkwitz-Riley, Linkwitz (1976); Linkwitz transform, Linkwitz (2001).
 #include "n60/correct.h"
 #include "n60/xover.h"
+#include "../platform/rt_libc.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -166,7 +167,7 @@ int n60_xover_prototype_design(uint32_t family, uint32_t order, n60_xover_protot
     return N60_XOVER_OK;
 }
 
-int n60_xover_realise(const n60_xover_prototype *proto, int highpass, double corner_hz, double fs, n60_xover_cascade *out) {
+int n60_xover_realise(const n60_xover_prototype *proto, int highpass, double corner_hz, double fs, n60_xover_cascade *out) N60_XOVER_REALISE_EFFECTS {
     if (!out) return N60_XOVER_ERR_ARGUMENT;
     out->count = 0;
     if (!proto || !validFs(fs) || proto->count == 0 || proto->count > N60_XOVER_MAX_SECTIONS || proto->copies < 1 ||
@@ -203,7 +204,7 @@ int n60_xover_design(const n60_xover_spec *spec, int highpass, double fs, n60_xo
     return n60_xover_realise(&proto, highpass, spec->corner_hz, fs, out);
 }
 
-int n60_xover_linkwitz(double f0, double q0, double fp, double qp, double fs, n60_xover_cascade *out) {
+int n60_xover_linkwitz(double f0, double q0, double fp, double qp, double fs, n60_xover_cascade *out) N60_XOVER_REALISE_EFFECTS {
     if (!out) return N60_XOVER_ERR_ARGUMENT;
     out->count = 0;
     if (!validFs(fs) || !(f0 > 0.0) || !(fp > 0.0) || !(q0 > 0.0) || !(qp > 0.0) || !std::isfinite(f0 + fp + q0 + qp)) return N60_XOVER_ERR_ARGUMENT;
