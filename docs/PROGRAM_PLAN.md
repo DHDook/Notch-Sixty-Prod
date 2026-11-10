@@ -86,8 +86,8 @@ reviewers compare with Dirac and REW), then engine depth, then breadth.
 10. E21 Portable C++ core, remaining items
 11. E14 Upmixer, E15 Device-aware profiles, E17 Export and dither, E16 Automation and remote
 12. E23 Legacy engine removal
-13. E22 Hardware validation and E18 Launch readiness (owner-led)
-14. Shared room model: design note only (owner, 3 Nov 2026: parked to the end of the roadmap; E26 S2 stores its sub measurements in a plain form a later model can absorb)
+13. E29 Shared room position model (owner, 9 Nov 2026: unparked, in v1; plan `docs/epics/E29.md`; flag `e29.room-model`)
+14. E22 Hardware validation and E18 Launch readiness (owner-led)
 
 ## Phase 1 — Consolidate and qualify
 
