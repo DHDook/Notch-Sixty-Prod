@@ -806,9 +806,11 @@ final class UnifiedGraphStageParityTests: XCTestCase {
         var s = N60DSPGraphSnapshotMakeUnity(48_000)
         XCTAssertTrue(N60CrossoverSnapshotMake(48_000, 90, N60CrossoverTopologyLinkwitzRiley24, N60CrossoverMonitorModeRecombined, 1, false, true, &s.crossover))
         XCTAssertNotNil(UnifiedGraphTranslator.stereoConfiguration(snapshot: &s, sampleRate: 48_000))
-        // The core has no stereo crossover beside the sub-lane bass management.
-        XCTAssertNil(UnifiedGraphTranslator.stereoConfiguration(
-            snapshot: &s, sampleRate: 48_000, subwoofers: [UnifiedGraphSubwoofer()]))
+        // E8 S11: the crossover feeds the sub lanes from its low band (one split, no crossover stage left).
+        let withSub = UnifiedGraphTranslator.stereoConfiguration(
+            snapshot: &s, sampleRate: 48_000, subwoofers: [UnifiedGraphSubwoofer()])
+        XCTAssertEqual(withSub?.bassManagement?.crossoverHz, 90)
+        XCTAssertNil(withSub?.stereoStages.crossover)
         // E6 S12f: oversampling with neither limiter nor clipper is an oversampling round trip in the core, with the
         // kernel's latency (parity in the e6_core_xover_clipper_parity harness).
         s = N60DSPGraphSnapshotMakeUnity(48_000)
@@ -1671,5 +1673,156 @@ final class StereoBassAlignmentTests: XCTestCase {
         feed = StereoBassAlignment()
         feed.right.delayMs = 50.5
         XCTAssertEqual(feed.issue, .calibrationOutOfRange)
+    }
+
+    // MARK: E8 S11 stereo crossover feeding the subwoofer lanes (G2, G32)
+
+    private struct CrossoverCase {
+        var hz = 80.0
+        var topology = N60CrossoverTopologyLinkwitzRiley24
+        var mode = N60CrossoverMonitorModeRecombined
+        var gain: Float = 1
+        var invert = false
+        var align = false
+        var subs = 0
+    }
+
+    private func crossoverConfiguration(_ c: CrossoverCase, rate: Double) throws -> UnifiedGraphConfiguration {
+        var snapshot = N60DSPGraphSnapshotMakeUnity(rate)
+        XCTAssertTrue(N60DSPGraphSnapshotSetCrossover(&snapshot, c.hz, c.topology, c.mode, c.gain, c.invert, true))
+        if c.align { XCTAssertTrue(N60DSPGraphSnapshotSetSubPhaseAlignment(&snapshot, 70, 0.9, true)) }
+        let subs = [UnifiedGraphSubwoofer](repeating: UnifiedGraphSubwoofer(), count: c.subs)
+        return try UnifiedGraphTranslator.stereoEligibility(snapshot: &snapshot, sampleRate: rate, subwoofers: subs).get()
+    }
+
+    /// Mono programme (left = right), so the crossover's sub `(L + R) / 2` equals the programme's low band.
+    private func renderCrossover(
+        _ c: CrossoverCase, rate: Double, tone: [Float]
+    ) throws -> (lanes: [[Float]], spec: UnifiedGraphSpec) {
+        let spec = try crossoverConfiguration(c, rate: rate).makeSpec()
+        let host = try UnifiedGraphHost(spec: spec)
+        let block = 512
+        let total = tone.count / block * block
+        var out = [[Float]](repeating: [], count: Int(host.outputChannels))
+        var position = 0
+        while position < total {
+            let chunk = Array(tone[position..<position + block])
+            var input = [chunk, chunk]
+            if c.subs > 0 { input += [[Float]](repeating: [Float](repeating: 0, count: block), count: c.subs) }
+            let rendered = try host.processOffline(input: input, frames: block)
+            for lane in 0..<rendered.count { out[lane] += rendered[lane] }
+            position += block
+        }
+        return (out, spec)
+    }
+
+    private func crossoverTone(_ rate: Double) -> [Float] {
+        let frames = Int(rate * 0.5)
+        return (0..<frames).map { i in
+            let t = Double(i) / rate
+            return Float(0.1 * sin(2 * .pi * 35 * t) + 0.1 * sin(2 * .pi * 80 * t) + 0.1 * sin(2 * .pi * 180 * t)
+                         + 0.1 * sin(2 * .pi * 1_300 * t))
+        }
+    }
+
+    private func settledMaxDifference(_ a: [Float], _ b: [Float]) -> Float {
+        let start = a.count / 2
+        var worst: Float = 0
+        for i in start..<a.count { worst = max(worst, abs(a[i] - b[i])) }
+        return worst
+    }
+
+    func testCrossoverWithSubFeedsTheSubLaneFromItsLowBandWithoutASecondSplit() throws {
+        for rate in Self.rates {
+            let tone = crossoverTone(rate)
+            let reference = try renderCrossover(CrossoverCase(), rate: rate, tone: tone)
+            let withSub = try renderCrossover(CrossoverCase(subs: 1), rate: rate, tone: tone)
+            let kinds = withSub.spec.stages.map(\.kind)
+            XCTAssertFalse(kinds.contains(N60_STAGE_STEREO_CROSSOVER.rawValue), "no crossover stage at \(rate)")
+            XCTAssertEqual(kinds.filter { $0 == N60_STAGE_BASS_MGMT.rawValue }.count, 1, "one split at \(rate)")
+            // Front plus sub sums to what the stand-alone crossover recombines: flat through the one split.
+            let sum = zip(withSub.lanes[0], withSub.lanes[2]).map { $0 + $1 }
+            XCTAssertLessThan(settledMaxDifference(sum, reference.lanes[0]), 2e-4, "front + sub at \(rate)")
+            let right = zip(withSub.lanes[1], withSub.lanes[2]).map { $0 + $1 }
+            XCTAssertLessThan(settledMaxDifference(right, reference.lanes[1]), 2e-4, "right + sub at \(rate)")
+            let half = tone.count / 2
+            let inputRMS = rms(tone[half...])
+            XCTAssertEqual(rms(sum[half...]), inputRMS, accuracy: inputRMS * 0.02, "flat magnitude at \(rate)")
+            // The sub lane carries the low band only.
+            XCTAssertLessThan(rms(withSub.lanes[2][half...]), inputRMS)
+            XCTAssertGreaterThan(rms(withSub.lanes[2][half...]), inputRMS * 0.1)
+        }
+    }
+
+    func testCrossoverWithTwoSubsSharesTheLowBandAndNeverSplitsTwice() throws {
+        for rate in Self.rates {
+            let tone = crossoverTone(rate)
+            let reference = try renderCrossover(CrossoverCase(topology: N60CrossoverTopologyLinkwitzRiley48), rate: rate, tone: tone)
+            let two = try renderCrossover(
+                CrossoverCase(topology: N60CrossoverTopologyLinkwitzRiley48, subs: 2), rate: rate, tone: tone)
+            XCTAssertEqual(two.spec.stages.filter { $0.kind == N60_STAGE_BASS_MGMT.rawValue }.count, 1)
+            let sum = (0..<tone.count / 512 * 512).map { two.lanes[0][$0] + two.lanes[2][$0] + two.lanes[3][$0] }
+            XCTAssertLessThan(settledMaxDifference(sum, reference.lanes[0]), 2e-4, "two subs at \(rate)")
+        }
+    }
+
+    func testCrossoverSubGainPolarityAndPhaseAlignmentReachTheSubLane() throws {
+        for rate in Self.rates {
+            let tone = crossoverTone(rate)
+            let c = CrossoverCase(gain: 0.5, invert: true, align: true)
+            let reference = try renderCrossover(c, rate: rate, tone: tone)
+            var withSub = c
+            withSub.subs = 1
+            let folded = try renderCrossover(withSub, rate: rate, tone: tone)
+            let sum = zip(folded.lanes[0], folded.lanes[2]).map { $0 + $1 }
+            XCTAssertLessThan(settledMaxDifference(sum, reference.lanes[0]), 3e-4, "gain, polarity, alignment at \(rate)")
+        }
+    }
+
+    func testCrossoverMonitorModesSilenceTheOtherSide() throws {
+        for rate in Self.rates {
+            let tone = crossoverTone(rate)
+            let half = tone.count / 2
+            let mains = try renderCrossover(CrossoverCase(mode: N60CrossoverMonitorModeMainsOnly, subs: 1), rate: rate, tone: tone)
+            let mainsRef = try renderCrossover(CrossoverCase(mode: N60CrossoverMonitorModeMainsOnly), rate: rate, tone: tone)
+            XCTAssertLessThan(rms(mains.lanes[2][half...]), 1e-6, "mains only silences the sub at \(rate)")
+            XCTAssertLessThan(settledMaxDifference(mains.lanes[0], mainsRef.lanes[0]), 2e-4)
+            let sub = try renderCrossover(CrossoverCase(mode: N60CrossoverMonitorModeSubOnly, subs: 1), rate: rate, tone: tone)
+            let subRef = try renderCrossover(CrossoverCase(mode: N60CrossoverMonitorModeSubOnly), rate: rate, tone: tone)
+            XCTAssertLessThan(rms(sub.lanes[0][half...]), 1e-6, "sub only silences the mains at \(rate)")
+            XCTAssertLessThan(settledMaxDifference(sub.lanes[2], subRef.lanes[0]), 2e-4)
+        }
+    }
+
+    func testCrossoverWithSubLiveEditIsClickFree() throws {
+        for rate in Self.rates {
+            let block = 512
+            func channels(_ chunk: [Float]) -> [[Float]] { [chunk, chunk, [Float](repeating: 0, count: block)] }
+            let first = try crossoverConfiguration(CrossoverCase(hz: 80, subs: 1), rate: rate).makeSpec()
+            let edited = try crossoverConfiguration(CrossoverCase(hz: 110, gain: 0.7, subs: 1), rate: rate).makeSpec()
+            let host = try UnifiedGraphHost(spec: first)
+            var position = 0
+            var lanes = [[Float]](repeating: [], count: 3)
+            let steadyBlocks = Int(rate * 0.4) / block
+            for step in 0..<(steadyBlocks * 3) {
+                if step == steadyBlocks { _ = try host.apply(edited) }
+                let chunk = (0..<block).map { Float(0.4 * sin(2 * .pi * 60 * Double(position + $0) / rate)) }
+                let out = try host.processOffline(input: channels(chunk), frames: block)
+                for lane in 0..<3 { lanes[lane] += out[lane] }
+                position += block
+            }
+            for lane in [0, 2] {
+                let x = lanes[lane]
+                func worstStep(_ range: Range<Int>) -> Float {
+                    var worst: Float = 0
+                    for i in range.lowerBound + 1..<range.upperBound { worst = max(worst, abs(x[i] - x[i - 1])) }
+                    return worst
+                }
+                let steady = max(worstStep(block * (steadyBlocks / 2)..<block * steadyBlocks),
+                                 worstStep(block * steadyBlocks * 2..<x.count))
+                let edit = worstStep(block * steadyBlocks..<block * steadyBlocks * 2)
+                XCTAssertLessThan(edit, steady * 1.6 + 1e-4, "lane \(lane) click at \(rate)")
+            }
+        }
     }
 }
