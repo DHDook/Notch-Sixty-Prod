@@ -108,10 +108,11 @@ final class DynamicsExtrasGapsTests: XCTestCase {
 
             let mb = try XCTUnwrap(on.multiband), mbBase = try XCTUnwrap(off.multiband)
             XCTAssertEqual(mbBase.count, 29)
-            XCTAssertEqual(mb.count, 43)
+            XCTAssertEqual(mb.count, 44)
             XCTAssertEqual(Array(mb[0..<26]), Array(mbBase[0..<26]))
             XCTAssertEqual(Array(mb[26..<29]), [1, 0, 1], "auto-release flags replace the three zeros")
-            XCTAssertEqual(Array(mb[29...]), Array(d.multibandCompressor.coreExtras(sampleRate: rate)[3...]))
+            XCTAssertEqual(Array(mb[29..<43]), Array(d.multibandCompressor.coreExtras(sampleRate: rate)[3...]))
+            XCTAssertEqual(mb[43], 1, "E28 G42: the band-pass split is on with the extras")
             XCTAssertEqual(Int(mb[42]), CompressorConfiguration.lookaheadFrames(ms: 5, sampleRate: rate))
         }
     }
@@ -268,6 +269,24 @@ final class DynamicsExtrasGapsTests: XCTestCase {
         }
     }
 
+    /// G42: the band-pass split is IIR and adds no latency; the reported graph latency is the multiband lookahead only.
+    func testMultibandSplitLatencyIsLookaheadOnlyAtEveryRate() throws {
+        for rate in rates {
+            let e = try engine(rate: rate)
+            var d = DynamicsConfiguration()
+            d.multibandCompressor.enabled = true
+            var latencies: [Int] = []
+            for ms in [0.0, 5.0] {
+                d.multibandCompressor.lookaheadMs = ms
+                let host = try UnifiedGraphHost(spec: try configuration(d, engine: e, rate: rate).makeSpec())
+                latencies.append(Int(host.latencyFrames))
+                host.release()
+            }
+            XCTAssertEqual(latencies[1] - latencies[0], CompressorConfiguration.lookaheadFrames(ms: 5, sampleRate: rate), "lookahead only at \(rate)")
+            XCTAssertEqual(latencies[0], Int(CompressorConfiguration.lookaheadFrames(ms: 0, sampleRate: rate)), "split adds none at \(rate)")
+        }
+    }
+
     /// Three bands soloed one at a time through the production translator: the soloed tone passes, the others fall away.
     func testMultibandSoloLabCaseAtEveryRate() throws {
         for rate in rates {
@@ -295,9 +314,10 @@ final class DynamicsExtrasGapsTests: XCTestCase {
                     if t.band == soloed {
                         XCTAssertEqual(level, 0.1, accuracy: 0.015, "soloed band \(soloed) tone passes at \(rate)")
                     } else if soloed == 1 {
-                        // G42: the mid band is the dry signal minus the two crossover bands, so it carries the allpass
-                        // residual of the crossover sum (about 0.11 at 50 Hz, 0.1 at 9 kHz for a 0.1 tone). Not pinned here.
+                        // G42: the mid band is a true band-pass (allpass-compensated tree), so the 0.1 tone at 50 Hz and
+                        // 9 kHz no longer leaks into it (the old dry-minus-low-minus-high residual left about 0.1).
                         print("NUMBERS mid solo leak tone \(t.hz) level \(level) rate \(rate)")
+                        XCTAssertLessThan(level, 0.005, "mid soloed: the \(t.hz) Hz tone falls away at \(rate): \(level)")
                     } else {
                         print("NUMBERS solo \(soloed) tone \(t.hz) level \(level) rate \(rate)")
                         XCTAssertLessThan(level, 0.005, "band \(soloed) soloed: the \(t.hz) Hz tone falls away at \(rate): \(level)")
