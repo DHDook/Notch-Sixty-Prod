@@ -142,6 +142,14 @@ final class EQFIRPrewarmTests: XCTestCase {
         XCTAssertEqual(engine.stereoEQConfiguration, eq)
     }
 
+    /// Polls (25 ms steps, 10 s deadline) so slow CI runners do not flake.
+    private func waitUntilAuditionEnds(_ engine: AudioIOEngine) async throws {
+        let deadline = ContinuousClock.now + .seconds(10)
+        while engine.eqAudition != nil, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(25))
+        }
+    }
+
     func testAuditionEndsAfterTheTimeLimit() async throws {
         let engine = try engine()
         let product = profiles(engine)
@@ -153,7 +161,7 @@ final class EQFIRPrewarmTests: XCTestCase {
         controller.start(band: eq.linkedBands[0])
         XCTAssertNotNil(engine.eqAudition)
         XCTAssertEqual(EQAuditionOverride.maxDuration, 30, "the shipped limit is 30 s")
-        try await Task.sleep(for: .milliseconds(400))
+        try await waitUntilAuditionEnds(engine)
         XCTAssertNil(engine.eqAudition)
         XCTAssertNil(controller.active)
     }
@@ -167,7 +175,7 @@ final class EQFIRPrewarmTests: XCTestCase {
         try engine.replaceStereoEQConfiguration(eq)
         controller.start(band: eq.linkedBands[0])
         NotificationCenter.default.post(name: NSWindow.willCloseNotification, object: nil)
-        try await Task.sleep(for: .milliseconds(200))
+        try await waitUntilAuditionEnds(engine)
         XCTAssertNil(engine.eqAudition)
         XCTAssertNil(controller.active)
     }
