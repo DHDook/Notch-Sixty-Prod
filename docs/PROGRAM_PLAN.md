@@ -190,8 +190,8 @@ Gate G2 passed on 2026-10-25 (commit 07e82c6)
 
 ### E7 384 kHz everywhere
 
-- [ ] Express every buffer capacity in time, not frames, and size it at the 384 kHz worst case
-- [ ] Lift the known frame caps: program FIR 32,768 taps, headphone delay 4,096 frames (binaural 8,192 taps moved to E13, owner 31 Oct 2026)
+- [~] Express every buffer capacity in time, not frames, and size it at the 384 kHz worst case (E7 S1 done; E7 G2-G4 close in S5, G1 in E23)
+- [~] Lift the known frame caps: program FIR 32,768 taps, headphone delay 4,096 frames (headphone delay to 20 ms done in E7 S1; kernel 4,095 limit stays until E23, E7 G1) (binaural 8,192 taps moved to E13, owner 31 Oct 2026)
 - [ ] Extend the PR117A double-precision fix beyond the crossover: user EQ, lane EQ, subwoofer EQ and headphone PEQ still use float32 coefficients and state, which loses low-frequency accuracy at high rates
 - [ ] Keep HRIR resampling on activation; add the same policy for any imported IR or SOFA asset
 - [ ] Run the XCTest acoustic reference lab at 44.1, 48, 88.2, 96, 176.4, 192, 352.8 and 384 kHz
@@ -430,6 +430,7 @@ unified graph only.
 
 - [~] First slice (owner decision 7 Nov 2026, E6 G1): graph-vs-kernel full-config corpus (every stage on, all layouts, eight rates) plus the E6 S5 stereo-chain parity and latency test (latency report equals measured impulse delay). `N60RenderKernel` must not be deleted until it is green. S1 `e23/graph-kernel-parity` built in part (PR #464); the rest is S1b `e23/precision-and-cleanup`
 - [ ] Confirm nothing falls back to the kernel, the old N-channel path or the legacy binaural pipeline (E6 S12a–S12h)
+- [ ] Remove the kernel headphone-delay clamp (4,095 frames) with the kernel (E7 G1)
 - [ ] Delete `N60RenderKernel`, the old N-channel path and the `e6.legacy-kernel` flag
 - [ ] Update `docs/DSP_KERNEL.md`, `docs/ARCHITECTURE.md` and the `AGENTS.md` mention, in coordination with E21
 

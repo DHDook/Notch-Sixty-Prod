@@ -753,6 +753,21 @@ if selected e6_lane_delay; then
     fi
 fi
 
+# E7 S1: capacities in time at the eight standard rates (20 ms delay, 500 ms split fractional delay, 20 ms look-ahead).
+if selected e7_rate_capacity; then
+    build_core_objs
+    if [ "$CORE_OK" = 1 ]; then
+        if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -Icore/include -Icore/src core/tests/test_rate_capacity.cpp \
+            "${CORE_OBJS[@]}" -o "$OUT/e7_core_rate_capacity" && "$OUT/e7_core_rate_capacity"; then
+            passed+=(e7_core_rate_capacity)
+        else
+            failed+=(e7_core_rate_capacity)
+        fi
+    else
+        failed+=(e7_rate_capacity)
+    fi
+fi
+
 # E6 S12h parts 2b and 3: delta audition capture and subtract (ABI v31, mask form, fractional alignment): exact alignment per lane, protection latency, validation
 # and ring carry at the eight standard rates.
 if selected e6_delta_audition; then
