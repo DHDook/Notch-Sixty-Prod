@@ -216,6 +216,11 @@ add_executable(n60core_exp_extras_test tests/test_exp_extras.cpp)
 target_link_libraries(n60core_exp_extras_test PRIVATE n60core)
 add_test(NAME n60core_exp_extras COMMAND n60core_exp_extras_test)
 
+# E28 S7c: multiband bypass, solo, listen, detector and lookahead (ABI v36).
+add_executable(n60core_mb_extras_test tests/test_mb_extras.cpp)
+target_link_libraries(n60core_mb_extras_test PRIVATE n60core)
+add_test(NAME n60core_mb_extras COMMAND n60core_mb_extras_test)
+
 # E6 S12c: loudness (match, contour, dialogue leveler) stage (ABI v24).
 add_executable(n60core_loudness_test tests/test_loudness.cpp)
 target_link_libraries(n60core_loudness_test PRIVATE n60core)

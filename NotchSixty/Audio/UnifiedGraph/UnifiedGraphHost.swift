@@ -198,7 +198,8 @@ final class UnifiedGraphHost: @unchecked Sendable {
 
     /// The one listener of this graph. Session state: never part of the spec, so it is never encoded.
     let listenSession = DynamicsListenSession()
-    private var postedListen: [UInt32: Float] = [:]
+    private var postedListen: [UInt64: Float] = [:]
+    private static func listenKey(_ stageId: UInt32, _ paramIndex: UInt32) -> UInt64 { UInt64(stageId) << 32 | UInt64(paramIndex) }
 
     /// Makes `listener` the only listener (nil stops listening) and posts the stages' live listen parameters: the
     /// listened stage gets its mode, every other listen-capable stage gets 0. Control thread; no rebuild. A stage whose
@@ -226,6 +227,28 @@ final class UnifiedGraphHost: @unchecked Sendable {
         _ = try? postListenLocked()
     }
 
+    /// Solos the given multiband bands (0 low, 1 mid, 2 high; empty clears). Session state like the listener: never in
+    /// the spec, re-posted on publish. Control thread; no rebuild. Throws when the stage has no solo slots.
+    @discardableResult
+    func setSoloBands(_ bands: Set<Int>) throws -> UnifiedGraphApplyResult {
+        lock.lock(); defer { lock.unlock() }
+        guard graph != nil else { throw UnifiedGraphError.invalidConfiguration("graph released") }
+        if !bands.isEmpty, !canSoloLocked() {
+            throw UnifiedGraphError.unsupportedConfiguration("Multiband has no solo parameter")
+        }
+        let previous = listenSession.soloBands
+        listenSession.setSolo(bands)
+        do { return try postListenLocked() } catch {
+            listenSession.setSolo(previous)
+            throw error
+        }
+    }
+
+    private func canSoloLocked() -> Bool {
+        guard let index = spec.stages.firstIndex(where: { $0.stageId == UnifiedGraphConfiguration.multibandStageId }) else { return false }
+        return spec.stages[index].params.count > 34
+    }
+
     private func canListenLocked(_ stage: DynamicsListenStage) -> Bool {
         guard let index = spec.stages.firstIndex(where: { $0.stageId == stage.stageId }) else { return false }
         return spec.stages[index].params.count > Int(stage.paramIndex)
@@ -234,16 +257,25 @@ final class UnifiedGraphHost: @unchecked Sendable {
     private func postListenLocked(force: Bool = false) throws -> UnifiedGraphApplyResult {
         guard let graph else { throw UnifiedGraphError.invalidConfiguration("graph released") }
         var records: [n60_param_record] = []
+        func consider(_ stageId: UInt32, _ paramIndex: UInt32, _ value: Float) {
+            let key = Self.listenKey(stageId, paramIndex)
+            if force ? value != 0 : postedListen[key, default: 0] != value {
+                records.append(n60_param_record(stageId: stageId, paramIndex: paramIndex, value: value, reserved: 0))
+            }
+        }
         for stage in DynamicsListenStage.allCases where canListenLocked(stage) {
-            let value = listenSession.parameterValue(for: stage)
-            if force ? value != 0 : postedListen[stage.stageId, default: 0] != value {
-                records.append(n60_param_record(stageId: stage.stageId, paramIndex: stage.paramIndex, value: value, reserved: 0))
+            consider(stage.stageId, stage.paramIndex, listenSession.parameterValue(for: stage))
+        }
+        if canSoloLocked() {
+            let soloed = listenSession.soloBands
+            for band in 0..<3 {
+                consider(UnifiedGraphConfiguration.multibandStageId, UInt32(32 + band), soloed.contains(band) ? 1 : 0)
             }
         }
         guard !records.isEmpty else { return .unchanged }
         let status = records.withUnsafeBufferPointer { n60_graph_post_params(graph, $0.baseAddress, UInt32($0.count)) }
         guard status == N60_STATUS_OK else { throw UnifiedGraphError.coreStatus(status.rawValue) }
-        for record in records { postedListen[record.stageId] = record.value }
+        for record in records { postedListen[Self.listenKey(record.stageId, record.paramIndex)] = record.value }
         return .posted(count: records.count)
     }
 

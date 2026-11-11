@@ -34,7 +34,7 @@ extern "C" {
 #endif
 
 /* Bumped on any incompatible change to a struct or function below. */
-#define N60_GRAPH_ABI_VERSION 35u
+#define N60_GRAPH_ABI_VERSION 36u
 
 typedef struct n60_graph n60_graph; /* opaque */
 
@@ -195,7 +195,18 @@ typedef enum n60_stage_kind {
  *   14 release ms (10..1000), 17 knee dB (0..20), 20 sidechain HPF Hz (0..300, 0 off), 23 make-up dB (-12..12),
  *   26 auto release (0/1; program-dependent release, 0 = kernel parity).
  * Every parameter is live except the two slopes (topology; changing them needs a rebuild: UNSUPPORTED).
- * Latency 0. Running state is not carried across a rebuild. Telemetry: n60_graph_read_multiband. */
+ * ABI v36 (E28 S7c): paramCount 43 adds, per band (low, mid, high): 29 bypass (0/1; the band's target gain is 0 dB, so it
+ *  passes at unity once the smoother settles), 32 solo (0/1; a band with solo off has its output gain ramped to 0 over
+ *  5 ms while any band is soloed, soloed bands sum), 35 listen (0 off, 1 sidechain, 2 delta; the stage outputs, on both
+ *  lanes, the delayed band after its sidechain filter, or the delayed band times (1 - gain without make-up); 5 ms
+ *  crossfade; Swift allows one listener in the whole graph), 38 detector (0 peak, 1 RMS), then 41 RMS window ms (5..200)
+ *  and 42 lookahead frames (0..8192, topology: UNSUPPORTED live). One lookahead serves the stage: the detectors read the
+ *  undelayed bands and the audio path the delayed ones, so the bands stay aligned; the frames are the stage latency.
+ *  Memory: 6 rings of the lookahead length (4 bytes each) in the stage-shared block. paramCount 29 is bit-identical to
+ *  v25; a 43-value block with defaults (all 0, window 50 ms) is bit-identical too. Lookahead is in frames (Swift converts
+ *  from ms, up to 16384), both lanes, and reset (enabling from parked) clears the rings. Running state is carried across a
+ *  rebuild (E6 S12h), the rings only when the lookahead is unchanged; a stage with a lookahead never parks.
+ * Latency 0 unless the lookahead is set. Telemetry: n60_graph_read_multiband. */
 
 /* Loudness (ABI v24, E6 S12c). The stereo kernel's loudness match, loudness contour (simple and per-band) and dialogue
  * leveler, same arithmetic and order. One pair stage (laneA, laneB distinct, laneMask 0, capacityFrames 0); an off part is

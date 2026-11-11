@@ -23,6 +23,9 @@ void multibandSizes(const n60_stage_desc &s, double sampleRate, size_t &perLane,
 // Control thread, while the snapshot is being built (arena zeroed, StageRec filled).
 void multibandInit(SnapHeader *h, const StageRec &r);
 
+// Realtime thread. Frames of latency: the stage lookahead (ABI v36 parameter 42), 0 for the 29-value block.
+uint32_t multibandLatency(const SnapHeader *h, const StageRec &r) N60_RT_NONBLOCKING;
+
 // Realtime thread, at adopt (E6 S12h, G21): a MULTIBAND stage of `to` starts from the running state of the stage with the
 // same id in `from`: the crossover and band high-pass filter state, the three band gain smoothers and the parked flag.
 // Coefficients stay the new snapshot's own. Bounded copy, no allocation. Returns the bytes copied, for the caller to

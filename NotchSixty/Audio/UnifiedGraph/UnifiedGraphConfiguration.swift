@@ -91,7 +91,7 @@ struct UnifiedGraphStereoStages: Equatable, Sendable {
     var deess: [Float]?
     /// E6 S12c: loudness match, contour and dialogue leveler (LOUDNESS, 32 parameters); nil when all off.
     var loudness: [Float]?
-    /// E6 S12d: the three-band multiband compressor (MULTIBAND, 29 parameters); nil when off.
+    /// E6 S12d: the three-band multiband compressor (MULTIBAND, 29 parameters; 43 with the E28 S7c extras); nil when off.
     var multiband: [Float]?
     /// Program convolution (kernel: after the EQ, before the compressor).
     var programFIR: UnifiedGraphFIRProgram?
@@ -419,7 +419,7 @@ struct UnifiedGraphConfiguration: Equatable, Sendable {
                 kind: N60_STAGE_DEESS.rawValue, stageId: Self.deessStageId, laneA: 0, laneB: 1, params: params))
         }
         if let params = stereo.multiband {
-            guard params.count == 29 else { throw UnifiedGraphError.invalidConfiguration("multiband") }
+            guard params.count == 29 || params.count == 43 else { throw UnifiedGraphError.invalidConfiguration("multiband") }
             guard programLanes == 2 else { throw UnifiedGraphError.unsupportedConfiguration("multiband needs two lanes") }
             stages.append(UnifiedGraphStageSpec(
                 kind: N60_STAGE_MULTIBAND.rawValue, stageId: Self.multibandStageId, laneA: 0, laneB: 1, params: params))

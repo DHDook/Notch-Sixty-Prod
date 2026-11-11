@@ -233,6 +233,7 @@
 		A10000000000000000000014 /* ConvolutionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000027 /* ConvolutionTests.swift */; };
 		A100000000000000000E2205 /* FeatureFlagsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000E2206 /* FeatureFlagsTests.swift */; };
 		E28B700000000000000000B1 /* DynamicsExtrasS7bTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E28B700000000000000000B2 /* DynamicsExtrasS7bTests.swift */; };
+		E28B700000000000000000C1 /* DynamicsExtrasS7cTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E28B700000000000000000C2 /* DynamicsExtrasS7cTests.swift */; };
 		E4M100000000000000000014 /* SpeakerDriveDemandPolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4M100000000000000000013 /* SpeakerDriveDemandPolicyTests.swift */; };
 		A100000000000000000E1301 /* PresetInterchangeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000E1302 /* PresetInterchangeTests.swift */; };
 		A100000000000000000E1303 /* MultichannelCalibrationDesignerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000E1304 /* MultichannelCalibrationDesignerTests.swift */; };
@@ -952,6 +953,7 @@
 		A10000000000000000000027 /* ConvolutionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConvolutionTests.swift; sourceTree = "<group>"; };
 		A100000000000000000E2206 /* FeatureFlagsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeatureFlagsTests.swift; sourceTree = "<group>"; };
 		E28B700000000000000000B2 /* DynamicsExtrasS7bTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DynamicsExtrasS7bTests.swift; sourceTree = "<group>"; };
+		E28B700000000000000000C2 /* DynamicsExtrasS7cTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DynamicsExtrasS7cTests.swift; sourceTree = "<group>"; };
 		E4M100000000000000000013 /* SpeakerDriveDemandPolicyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerDriveDemandPolicyTests.swift; sourceTree = "<group>"; };
 		A100000000000000000E1302 /* PresetInterchangeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PresetInterchangeTests.swift; sourceTree = "<group>"; };
 		A100000000000000000E1304 /* MultichannelCalibrationDesignerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MultichannelCalibrationDesignerTests.swift; sourceTree = "<group>"; };
@@ -1615,6 +1617,7 @@
 				A10000000000000000000027 /* ConvolutionTests.swift */,
 				A100000000000000000E2206 /* FeatureFlagsTests.swift */,
 				E28B700000000000000000B2 /* DynamicsExtrasS7bTests.swift */,
+				E28B700000000000000000C2 /* DynamicsExtrasS7cTests.swift */,
 				E4M100000000000000000013 /* SpeakerDriveDemandPolicyTests.swift */,
 				E11D00000000000000000012 /* MeasurementCoreTests.swift */,
 				E10A00000000000000000042 /* RoomCorrectionCoreTests.swift */,
@@ -2604,6 +2607,7 @@
 				A10000000000000000000014 /* ConvolutionTests.swift in Sources */,
 				A100000000000000000E2205 /* FeatureFlagsTests.swift in Sources */,
 				E28B700000000000000000B1 /* DynamicsExtrasS7bTests.swift in Sources */,
+				E28B700000000000000000C1 /* DynamicsExtrasS7cTests.swift in Sources */,
 				E4M100000000000000000014 /* SpeakerDriveDemandPolicyTests.swift in Sources */,
 				E11D00000000000000000002 /* MeasurementCoreTests.swift in Sources */,
 				E10A00000000000000000032 /* RoomCorrectionCoreTests.swift in Sources */,

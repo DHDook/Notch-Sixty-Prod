@@ -4653,7 +4653,9 @@ final class AudioIOEngine: ObservableObject {
             compressorExtras: FeatureFlags().isEnabled(.dynamicsExtras)
                 ? inputs.dynamics.compressor.coreExtras(sampleRate: sampleRate) : nil,
             expanderExtras: FeatureFlags().isEnabled(.dynamicsExtras)
-                ? inputs.dynamics.expander.coreExtras() : nil
+                ? inputs.dynamics.expander.coreExtras() : nil,
+            multibandExtras: FeatureFlags().isEnabled(.dynamicsExtras)
+                ? inputs.dynamics.multibandCompressor.coreExtras(sampleRate: sampleRate) : nil
         ) {
         case .success(let configuration): stereo = configuration
         case .failure(let reason): throw LiveNChannelTransportError.unifiedGraphRejected(reason)
