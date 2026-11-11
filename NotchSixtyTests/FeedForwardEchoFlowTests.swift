@@ -167,6 +167,7 @@ final class FeedForwardEchoFlowTests: XCTestCase {
         let source = RecordingDriveSource()
         let shadow = QuietZoneFeedForwardShadow(pollsAutomatically: false)
         shadow.driveSource = source
+        shadow.feedForwardLiveForTesting = false
         let rate = 48_000.0
         let base = impulse(rate: rate, delaySeconds: 0.01, gain: 0.05)
         let model = try FeedForwardEchoModelBuilder.build(

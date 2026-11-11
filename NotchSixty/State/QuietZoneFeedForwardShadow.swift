@@ -644,7 +644,7 @@ final class QuietZoneFeedForwardShadow: ObservableObject {
 
     /// Why echo removal cannot run now (nil when it can). Question 15: off with a subwoofer.
     func echoBlockedReason(_ inputs: QuietZoneFeedForwardShadowInputs) -> String? {
-        guard FeatureFlags().isEnabled(.feedForwardLive) || forceEchoForTesting else {
+        guard forceEchoForTesting || (feedForwardLiveForTesting ?? FeatureFlags().isEnabled(.feedForwardLive)) else {
             return "Echo removal is off (feature flag)."
         }
         guard inputs.echoModel != nil else { return "Measure speaker leakage to enable echo removal." }
@@ -668,6 +668,9 @@ final class QuietZoneFeedForwardShadow: ObservableObject {
 
     /// Tests only: bypasses the feature flag.
     var forceEchoForTesting = false
+
+    /// Tests only: replaces the feed-forward-live flag read (the flag is graduated, so it defaults on).
+    var feedForwardLiveForTesting: Bool?
 
     private func setDemand(_ requested: Bool) {
         guard demandSet != requested else { return }
