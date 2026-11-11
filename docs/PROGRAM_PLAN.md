@@ -483,7 +483,7 @@ Owner decision, 18 Oct 2026: there is no bench access for now, so every bench ch
 Plan: `docs/epics/FC.md`. Epics graduate their flag at the end (default on, stays in `FeatureFlag.all`; AGENTS.md
 section 11); this phase removes the flags after the E22 bench, as small per-epic PRs.
 
-- [ ] FC1 `fc/flags-off-ci`: nightly `macos-full` runs the suite with graduated flags off as well as on (before the first graduation)
+- [x] FC1 `fc/flags-off-ci`: nightly `macos-full` runs the suite with graduated flags off as well as on (before the first graduation)
 - [ ] Per-epic removal PRs, in order: E26, E28, E9, E13, E4, E19, E7, E15, E17, E20, E21, E29 (`e6.legacy-kernel` goes with E23)
 - [ ] Never remove a flag with an open E22 bench item against its feature; live ANC and MIMO keep `LiveTreatmentArm`
 

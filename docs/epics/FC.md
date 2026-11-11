@@ -2,8 +2,7 @@
 
 ## Status
 
-- Not started. Runs after E22 and before E18 (owner decision, 11 Nov 2026, flag graduation).
-- FC1 (flags-off matrix in `macos-full`) must land before the first epic graduates a flag.
+- FC1 done (flags-off nightly, G1 closed). Runs after E22 and before E18 (owner decision, 11 Nov 2026, flag graduation).
 - Open owner decisions: none.
 - Plan: `docs/PROGRAM_PLAN.md` (FC); registry and audit in `docs/FEATURE_FLAGS.md`.
 
@@ -17,9 +16,9 @@ PRs rather than one giant epic. Flags are removed only when the bench has no ope
 
 ### FC1 `fc/flags-off-ci` (needs-owner: workflows; before the first graduation)
 
-- [ ] `macos-full.yml` runs the full XCTest suite twice, graduated flags on (the default) and then with every graduated
+- [x] `macos-full.yml` runs the full XCTest suite twice, graduated flags on (the default) and then with every graduated
   flag off through `-NotchSixtyFeatures -<id>`, so the flags-off path stays tested while flags exist (G1).
-- [ ] A behavioural XCTest that a release-style `FeatureFlags` resolves every `graduated` flag on and the
+- [x] A behavioural XCTest that a release-style `FeatureFlags` resolves every `graduated` flag on and the
   launch argument turns each off.
 
 ### FC2 onward `fc/remove-<epic>-flags` (one small PR per epic, in the order below)
@@ -33,8 +32,9 @@ PRs rather than one giant epic. Flags are removed only when the bench has no ope
 
 ## Gaps
 
-- G1 [scoped] The nightly `macos-full` run does not yet run the suite with graduated flags off (found in the flag graduation policy PR, 11 Nov 2026; owner slice: FC1, which must land before the first epic graduates a flag)
+- G1 [closed, FC1 PR, 11 Nov 2026: `macos-full` runs the suite a second time with `TEST_RUNNER_NOTCHSIXTY_GRADUATED_FLAGS_OFF=1`, a debug-only env var that `FeatureFlags` maps to every graduated flag off] The nightly `macos-full` run does not yet run the suite with graduated flags off (found in the flag graduation policy PR, 11 Nov 2026; owner slice: FC1, which must land before the first epic graduates a flag)
 
 ## Log
 
 - 11 Nov 2026: epic created by the flag graduation policy PR.
+- 11 Nov 2026: FC1 built. The XCTest host cannot take launch arguments, so debug builds read `NOTCHSIXTY_GRADUATED_FLAGS_OFF=1` (forwarded by xcodebuild as `TEST_RUNNER_`-prefixed); release ignores it.
