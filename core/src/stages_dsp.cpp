@@ -1153,7 +1153,7 @@ void runFirNonUniform(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t 
             std::memset(buf, 0, sizeof(float) * frames);  // still clearing: silent, input dropped
             continue;
         }
-        dspFirLaneRun(h, r, l, buf, frames, nullptr);
+        dspFirLaneRun(h, r, l, buf, frames, nullptr, h->tailHost);
     }
 }
 
@@ -1618,8 +1618,9 @@ bool dspFirLaneReady(SnapHeader *h, const StageRec &r, uint32_t laneIndex) N60_R
     return conv::laneEpoch(lb) == h->historyEpoch || conv::resetStep(sharedState(h, r), lb, h->historyEpoch, h->rtBudget);
 }
 
-void dspFirLaneRun(SnapHeader *h, const StageRec &r, uint32_t laneIndex, float *buf, uint32_t frames, void *scratch) N60_RT_NONBLOCKING {
-    conv::process(sharedState(h, r), laneState(h, r, laneIndex), buf, frames, nullptr, scratch);
+void dspFirLaneRun(SnapHeader *h, const StageRec &r, uint32_t laneIndex, float *buf, uint32_t frames, void *scratch,
+                   const conv::TailHost *tail) N60_RT_NONBLOCKING {
+    conv::process(sharedState(h, r), laneState(h, r, laneIndex), buf, frames, nullptr, scratch, tail);
 }
 
 size_t dspFirScratchBytes() { return conv::scratchBytes(); }

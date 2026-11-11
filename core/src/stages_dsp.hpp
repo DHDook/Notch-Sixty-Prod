@@ -29,7 +29,8 @@ void runDsp(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) N6
 // place with the caller's own FFT scratch (dspFirScratchBytes bytes, 16-byte aligned; null = the stage's shared one).
 bool dspFirParallel(const SnapHeader *h, const StageRec &r) N60_RT_NONBLOCKING;
 bool dspFirLaneReady(SnapHeader *h, const StageRec &r, uint32_t laneIndex) N60_RT_NONBLOCKING;
-void dspFirLaneRun(SnapHeader *h, const StageRec &r, uint32_t laneIndex, float *buf, uint32_t frames, void *scratch) N60_RT_NONBLOCKING;
+void dspFirLaneRun(SnapHeader *h, const StageRec &r, uint32_t laneIndex, float *buf, uint32_t frames, void *scratch,
+                   const conv::TailHost *tail = nullptr) N60_RT_NONBLOCKING;
 size_t dspFirScratchBytes();
 
 // Pure range and liveness check for one parameter (see validateParam).

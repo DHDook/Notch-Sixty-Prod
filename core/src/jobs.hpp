@@ -16,6 +16,7 @@
 #include <atomic>
 #include <cstdint>
 
+#include "conv/nufir.hpp"
 #include "n60/graph.h"
 #include "platform/rt.hpp"
 
@@ -36,6 +37,16 @@ struct PhaseDesc {
     uint64_t skip[kMaxPhaseStages];    // per stage, bit k: lane k of the stage is still clearing its history (silent)
 };
 
+// E20 S6b (G21): one lane job posted by the calling thread while a single long FIR lane runs serially (the FIR tail, see
+// conv::TailHost). state: 0 idle, 1 posted, 2 running, 3 done. fn/arg are written before the release store of state 1 and read
+// after the acquire exchange to 2. The caller always joins: it runs the job itself when no worker has claimed it, so an
+// absent or late worker never stalls it; it spins only on a job a worker has claimed (same contract as lane jobs).
+struct TailJob {
+    alignas(64) std::atomic<uint32_t> state{0};
+    void (*fn)(void *arg, void *scratch) = nullptr;
+    void *arg = nullptr;
+};
+
 struct JobHost {
     // Control writes, realtime reads.
     std::atomic<uint32_t> workers{0};
@@ -46,6 +57,9 @@ struct JobHost {
     alignas(64) std::atomic<uint64_t> claim{0};  // generation << 32 | next job << 16 | job count
     alignas(64) std::atomic<uint32_t> done{0};
     alignas(64) PhaseDesc phase{};
+    TailJob tailJob;
+    conv::TailHost tailHost{};  // calling thread only; ctx = this
+
     // Calling thread only.
     uint32_t generation = 0;
     bool woken = false;

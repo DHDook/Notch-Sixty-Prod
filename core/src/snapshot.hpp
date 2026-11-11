@@ -15,6 +15,7 @@
 #include <cstring>
 
 #include "n60/graph.h"
+#include "conv/nufir.hpp"
 #include "jobs.hpp"
 #include "platform/rt.hpp"
 #include "platform/rt_libc.hpp"
@@ -73,9 +74,10 @@ struct SnapHeader {
     uint32_t historyEpoch;  // ABI v10: bumped (realtime thread) to drop the FIR input history; lanes compare it
     uint32_t follower;      // ABI v13: realtime thread only; 1 while this snapshot is the incoming side of a rebuild
     uint32_t firScheme;     // ABI v20: 0 uniform FIR engine, 1 non-uniform (N60_FIR_SCHEME_*)
-    uint32_t pad2;
+    uint32_t parallelEnd;   // E20 S6b (G27): 1 + index of the last stage with phase != 0 (0 = none); set at build
     ExternalSlot *external; // ABI v13: the graph's EXTERNAL callback slot (set by the graph before publication)
     uint64_t *rtBudget;     // E9 S2: bytes of bulk clearing / copying left in this callback (the graph's; null = unlimited)
+    const conv::TailHost *tailHost;  // E20 S6b: realtime thread only; set by runSnapshot while workers are on, else null
 };
 
 // PEQ parameters per section (type, Hz, dB, Q); the coefficient region holds one PeqSec per section.

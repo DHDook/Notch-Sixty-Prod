@@ -28,7 +28,9 @@
 // Realtime documentation (AGENTS.md section 4):
 //  - allocation: none. All state lives in caller-provided memory sized by sharedBytes / laneBytes
 //    and built on the control thread by init; process allocates nothing and takes no lock.
-//  - synchronisation: none. The shared block holds FFT plans, tap spectra (immutable after init) and
+//  - synchronisation: none, except through an optional TailHost (E20 S6b): segment 2's per-tick work (it reads input only up
+//    to the previous block and writes only its own state and the output half not being read) may run on another thread
+//    while segments 0 and 1 run here; the lane joins it before the tick ends. The shared block holds FFT plans, tap spectra (immutable after init) and
 //    one scratch FFT buffer that the lane being processed owns for the duration of a process call.
 //  - latency: exactly kBlock (256) frames, any tap count.
 //  - sample rate: not applicable (frame counts only). Any block length from 1 up gives bit-identical
@@ -108,7 +110,16 @@ uint32_t carrySettleFrames(const void *shared) N60_RT_NONBLOCKING;
 // `scratch` (E20 S5): null uses the stage's shared scratch FFT buffer, which two lanes of one stage must not do at the same
 // time. A parallel job passes its own buffer of scratchBytes() bytes (16-byte aligned); results are bit-identical.
 size_t scratchBytes();
-void process(void *shared, void *lane, float *buf, uint32_t frames, Counter *counter, void *scratch = nullptr) N60_RT_NONBLOCKING;
+// `tailHost` (E20 S6b): when set, each tick's segment 2 work (the long tail, taps from 5,120) is posted to the host before the
+// segment 0 and 1 work and joined after it, so another thread can run it at the same time. The output is bit-identical with or
+// without a host, and whoever runs the job. The host runs the job function with the executing thread's own FFT scratch.
+struct TailHost {
+    void *ctx;
+    void (*post)(void *ctx, void (*fn)(void *arg, void *scratch), void *arg);  // fn(arg, scratch) must run before join returns
+    void (*join)(void *ctx);                                                  // returns when the posted job has finished
+};
+void process(void *shared, void *lane, float *buf, uint32_t frames, Counter *counter, void *scratch = nullptr,
+             const TailHost *tailHost = nullptr) N60_RT_NONBLOCKING;
 
 }  // namespace n60::conv
 
