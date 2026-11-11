@@ -431,7 +431,6 @@ int main() {
     for (double rate : rates) {
         constexpr uint32_t N = 512;
         const float bm[9] = {80, 0, 2, 3, 120, 0, 0, 0, 0};
-        const float amb[10] = {3, 100, 0, 1, 1000, 1, 1, 8000, 0, 1};
         // E4 S30c (G9): the same stage with the live section trailer (n = 17), so the audio callback's zero-allocation
         // check covers the 20-section path and its crossfades.
         float ambT[62] = {3, 100, 0, 1, 1000, 1, 1, 8000, 0, 1, 17};
@@ -886,7 +885,6 @@ int main() {
         const float comp[10] = {-20, 4, 6, 1, 100, 0, 0, 1, 80, 1};
         const float exp6[6] = {-50, 2, -30, 1, 100, 0};
         const float bm[9] = {80, 0, 10, 11, 120, 0, 0, 0, 0};
-        const float amb[10] = {3, 100, 0, 1, 1000, 1, 1, 8000, 0, 1};
         // E4 S30c (G9): the same stage with the live section trailer (n = 17), so the audio callback's zero-allocation
         // check covers the 20-section path and its crossfades.
         float ambT[62] = {3, 100, 0, 1, 1000, 1, 1, 8000, 0, 1, 17};
