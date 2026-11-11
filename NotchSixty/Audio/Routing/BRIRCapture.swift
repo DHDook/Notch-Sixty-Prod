@@ -69,7 +69,7 @@ struct BRIRCapturePlan: Equatable, Sendable {
     func validate() throws {
         var seat = MeasurementSeatPlan()
         guard sampleRate.isFinite, sampleRate > 0,
-              tapCount > 0, tapCount <= Int(N60_BINAURAL_MAX_TAPS),
+              tapCount > 0, tapCount <= BinauralProfileAsset.maxTapCount(sampleRate: sampleRate),
               !speakers.isEmpty,
               Set(speakers).count == speakers.count,
               !speakers.contains(.lowFrequencyEffects),

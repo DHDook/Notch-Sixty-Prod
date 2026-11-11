@@ -34,7 +34,7 @@ extern "C" {
 #endif
 
 /* Bumped on any incompatible change to a struct or function below. */
-#define N60_GRAPH_ABI_VERSION 34u
+#define N60_GRAPH_ABI_VERSION 35u
 
 typedef struct n60_graph n60_graph; /* opaque */
 
@@ -495,6 +495,17 @@ typedef int (*n60_external_process_fn)(void *context, const float *const *in, fl
  *  both ears, as the kernel does for the LFE), [9] declared extra latency of the responses in frames
  *  (0..N60_GRAPH_MAX_DELAY_FRAMES; reported, never applied), then 10 + (set, source, ear, tap) floats:
  *  paramCount = 10 + O * N * 2 * taps, set-major, then source, then ear (0 left, 1 right), then tap.
+ * ABI v35 (E13 S4): long responses. [10] = tail taps T (0 = none, else 1..one second at the graph rate) and
+ *  [11] = 0 (reserved), and paramCount = 12 + O * N * 2 * taps + N * 2 * T: after the early responses come the
+ *  late tails, one pair per source (no orientation index: the tail is shared by every orientation; with
+ *  [8] the equal-ear source's two tails are averaged). The tail is response samples taps..taps+T-1 of the
+ *  full BRIR (the host splits it about 20 ms after the common onset, so taps <= 8192 holds at any rate). It
+ *  runs in a non-uniform partitioned convolver (conv/nufir.hpp: 256 -> 1024 -> 4096 frames), below
+ *  N60_GRAPH_BINAURAL_TAIL_MAX_RATE through half-band decimation (73-tap Kaiser, N60_STAGE_ROOM_FIR_TWO_BAND's
+ *  filter) by 2, 4 or 8, and is aligned so that tail tap i lands exactly at tap i of the early path: the
+ *  total stage latency stays 128 + [9]. A stage needs taps >= tail path delay - 128 (the host's 20 ms split
+ *  always satisfies it); the tail path adds no latency of its own. Cost per source per ear: one non-uniform
+ *  convolver at the internal rate. Not live, like every other parameter except the head pose.
  * Cost: the whole partition runs at the 128th frame of each block (spiky for small host buffers); it scales with
  * sources x partitions x 129 bins x 2 ears, doubled for a two-set blend and again while the head moves. Hosts
  * budget taps and source counts accordingly (rebuild CPU-budget refusal covers publishes). Responses must be finite.
@@ -508,6 +519,7 @@ typedef int (*n60_external_process_fn)(void *context, const float *const *in, fl
 #define N60_GRAPH_BINAURAL_PARTITION_FRAMES 128u
 #define N60_GRAPH_BINAURAL_MAX_TAPS 8192u
 #define N60_GRAPH_BINAURAL_MAX_SETS 64u
+#define N60_GRAPH_BINAURAL_TAIL_MAX_RATE 96000.0 /* the tail convolver's internal rate never exceeds this */
 #define N60_ANC_GUARD_BANDS 16u
 #define N60_FIR_PARTITION_FRAMES 256u
 #define N60_FIR_MAX_TAPS (128u * N60_FIR_PARTITION_FRAMES)
@@ -965,6 +977,8 @@ typedef struct n60_binaural_profile {
     uint32_t wrap;
     int32_t equalEarChannel;  /* layout channel index averaged to both ears (the LFE), or -1 */
     uint32_t declaredLatency;
+    uint32_t tailTaps;        /* ABI v35: late-tail taps per response (0 = none); see the Binaural stage */
+    const float *tailResponses; /* tailTaps * layout.channelCount * 2 floats (copied): channel, ear, tap */
     float headYawDeg, headPitchDeg, headRollDeg;  /* initial head pose */
     const float *responses;   /* orientations * layout.channelCount * 2 * taps floats (copied) */
 } n60_binaural_profile;

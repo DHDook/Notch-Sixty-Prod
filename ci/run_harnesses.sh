@@ -861,6 +861,9 @@ if selected e6_core_graph; then
             "${CORE_OBJS[@]}" -lc++ -lm
         harness e6_core_binaural_parity "${STRICT[@]}" -O2 -Icore/include -I"$RT" core/tests/test_binaural_parity.c \
             "${CORE_OBJS[@]}" -lc++ -lm
+        # E13 S4: shared multirate BRIR tail against an offline FFT convolution at the eight rates.
+        if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -Icore/include core/tests/test_binaural_tail.cpp \
+            "${CORE_OBJS[@]}" -o "$OUT/e13_binaural_tail" && "$OUT/e13_binaural_tail" >/dev/null; then :; else failed+=(e13_binaural_tail); fi
         # E6 S10: whole-graph parity suite (short corpus; N60_PARITY_FULL=1 runs the full corpus and timings).
         harness e6_core_parity_suite "${STRICT[@]}" -O2 -Icore/include core/tests/test_parity_suite.c \
             "${CORE_OBJS[@]}" -lc++ -lm -framework Accelerate

@@ -5675,11 +5675,17 @@ final class AudioIOEngine: ObservableObject {
             case .failure(let reason): graphIneligibility = reason
             }
         }
+        // E13 S4: a response longer than the legacy renderer's taps renders only through the unified graph's
+        // early/tail split; the dormant legacy bridge gets the truncation, and without a graph the setup is refused.
+        let longResponse = asset.tapCount > Int(N60_BINAURAL_MAX_TAPS)
+        if longResponse, graphSpec == nil {
+            throw BinauralHeadphoneTransportError.longResponseNeedsUnifiedGraph
+        }
         let session = try CoreAudioBinauralHeadphoneTransportSession(
             selectedOutput: output,
             programSource: source,
             programLayout: profile.programLayout,
-            preparedProfile: prepared,
+            preparedProfile: prepared.truncated(toTaps: Int(N60_BINAURAL_MAX_TAPS)),
             headphoneSnapshot: headphoneSnapshot,
             programGain: programGain,
             outputGain: currentMasterSoftwareGain,
@@ -5687,7 +5693,7 @@ final class AudioIOEngine: ObservableObject {
             unifiedGraphSpec: graphSpec,
             unifiedGraphBaseSpec: graphBaseSpec,
             unifiedGraphIneligibility: graphIneligibility,
-            unifiedGraphRequired: unifiedGraphEnabled && stagedAudioUnitRack == nil
+            unifiedGraphRequired: (unifiedGraphEnabled && stagedAudioUnitRack == nil) || longResponse
         )
         activeEQFIRProgram = nil
         activeRoomCorrectionProgram = nil

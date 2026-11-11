@@ -14,10 +14,10 @@ bool isMatrixKind(uint32_t kind) N60_RT_NONBLOCKING;
 n60_status validateMatrixStage(const n60_stage_desc &s, double sampleRate, uint32_t outputChannels);
 
 // Control thread. Bytes of per-lane state and of stage-shared state.
-void matrixSizes(const n60_stage_desc &s, size_t &perLane, size_t &shared);
+void matrixSizes(const n60_stage_desc &s, double sampleRate, size_t &perLane, size_t &shared);
 
 // Control thread, while the snapshot is being built (arena zeroed, StageRec filled).
-void matrixInit(SnapHeader *h, const StageRec &r);
+bool matrixInit(SnapHeader *h, const StageRec &r);  // false: out of memory building the tail (the build fails)
 
 // Realtime thread. Runs the stage in place over `frames` frames of the output lanes.
 void runMatrix(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) N60_RT_NONBLOCKING;

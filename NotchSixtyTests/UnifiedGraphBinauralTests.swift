@@ -67,7 +67,7 @@ final class UnifiedGraphBinauralTests: XCTestCase {
         XCTAssertEqual(stereoProgram, .noProgramLanes)
 
         var big = BinauralProfileAsset.validationStereo(sampleRate: rate)
-        big.tapCount = Int(N60_GRAPH_BINAURAL_MAX_TAPS) + 1
+        big.tapCount = BinauralProfileAsset.maxTapCount(sampleRate: rate) + 1
         guard case .failure(let budget) = spec(rate: rate, asset: big) else {
             return XCTFail("an over-budget set must fall back")
         }
@@ -192,9 +192,10 @@ final class UnifiedGraphBinauralTests: XCTestCase {
         let layout = OutputProgramLayout.nineOneSix
         XCTAssertEqual(layout.roles.count, 16)
         XCTAssertNoThrow(try spec(rate: rate, layout: layout, headTracking: true, asset: asset).get())
-        asset.tapCount = taps + 1
+        // E13 S4: the limit is time-based (1 s), no longer 8192 taps; one tap over it is refused.
+        asset.tapCount = BinauralProfileAsset.maxTapCount(sampleRate: rate) + 1
         guard case .failure(let reason) = spec(rate: rate, layout: layout, headTracking: true, asset: asset) else {
-            return XCTFail("one tap over the cap must be refused")
+            return XCTFail("one tap over the time limit must be refused")
         }
         XCTAssertEqual(reason, .binauralBudget)
         // A mismatched asset rate is refused by name (the engine resamples through its asset cache first).
@@ -202,5 +203,160 @@ final class UnifiedGraphBinauralTests: XCTestCase {
             return XCTFail("a rate mismatch must be refused")
         }
         XCTAssertEqual(mismatch, .sampleRateMismatch)
+    }
+
+    // MARK: E13 S4 long BRIR (early/tail split, onset trim, time-based limits)
+
+    /// A validation asset whose responses are `seconds` long: a direct impulse at `direct` (the original gains) and,
+    /// when `echoAt` is given, an echo at that tap with `echoGain` times the direct amplitude on both ears.
+    private func longAsset(rate: Double, seconds: Double, direct: Int = 0, echoAt: Int? = nil, echoGain: Float = 0.5)
+        -> BinauralProfileAsset {
+        var asset = BinauralProfileAsset.validationStereo(sampleRate: rate)
+        let taps = Int((seconds * rate).rounded())
+        asset.measurements = asset.measurements.map { source in
+            var m = source
+            func stretch(_ ir: [Float]) -> [Float] {
+                var out = [Float](repeating: 0, count: taps)
+                out[direct] = ir[0]
+                if let echoAt {
+                    // A smooth 0.4 ms pulse: the tail path is band-limited (a lone sample would lose level above its
+                    // internal Nyquist), so the echo stays well inside the band.
+                    let width = max(5, Int(rate * 0.0004) | 1)
+                    for k in 0..<width {
+                        let window = 0.5 * (1 - cos(2 * Double.pi * Double(k) / Double(width - 1)))
+                        out[echoAt - width / 2 + k] += ir[0] * echoGain * Float(window)
+                    }
+                }
+                return out
+            }
+            m.leftIR = stretch(source.leftIR)
+            m.rightIR = stretch(source.rightIR)
+            return m
+        }
+        asset.tapCount = taps
+        return asset
+    }
+
+    /// Renders one impulse on lane 0 and returns the left ear for `frames` frames.
+    private func impulseResponse(spec built: UnifiedGraphSpec, frames: Int, lanes: Int = 6) throws -> [Float] {
+        let host = try UnifiedGraphHost(spec: built)
+        defer { host.release() }
+        let block = 512
+        var left: [Float] = []
+        var position = 0
+        while position < frames {
+            var input = [[Float]](repeating: [Float](repeating: 0, count: block), count: lanes)
+            if position == 0 { input[0][0] = 1 }
+            left += try host.processOffline(input: input, frames: block)[0]
+            position += block
+        }
+        return left
+    }
+
+    private func peak(_ x: [Float], around center: Int, radius: Int) -> (index: Int, value: Float) {
+        var best = (index: center, value: Float(0))
+        for i in max(0, center - radius)...min(x.count - 1, center + radius) where abs(x[i]) > abs(best.value) {
+            best = (i, x[i])
+        }
+        return best
+    }
+
+    /// A 1.0 s response with an echo at 0.6 s renders its direct sound and its echo (which lives in the shared tail)
+    /// at every rate, with the declared latency unchanged.
+    func testOneSecondBRIRRendersEarlyAndTailAtEveryRate() throws {
+        for rate in Self.rates {
+            let echo = Int(0.6 * rate)
+            let built = try spec(rate: rate, asset: longAsset(rate: rate, seconds: 1.0, echoAt: echo)).get()
+            let stage = try XCTUnwrap(built.stages.first { $0.stageId == N60_LSTAGE_BINAURAL })
+            XCTAssertGreaterThan(stage.params[10], 0, "rate \(rate): a 1 s response has a tail")
+            XCTAssertEqual(Int(stage.params[3]), Int((0.02 * rate).rounded()), "rate \(rate): early is 20 ms")
+            // The whole graph's latency (stage plus the safety limiter's look-ahead) is the same as for a response with
+            // no tail; the direct sound and the echo arrive that many frames after the input.
+            let shortBuilt = try spec(rate: rate, asset: longAsset(rate: rate, seconds: 0.02)).get()
+            let shortHost = try UnifiedGraphHost(spec: shortBuilt)
+            let base = Int(shortHost.latencyFrames)
+            shortHost.release()
+            let host = try UnifiedGraphHost(spec: built)
+            XCTAssertEqual(Double(host.latencyFrames), Double(base), accuracy: 1, "rate \(rate): latency unchanged")
+            host.release()
+            let out = try impulseResponse(spec: built, frames: Int(1.1 * rate))
+            let direct = peak(out, around: base, radius: 3)
+            XCTAssertEqual(Double(direct.index), Double(base), accuracy: 1, "rate \(rate)")
+            XCTAssertGreaterThan(abs(direct.value), 0.1, "rate \(rate)")
+            let late = peak(out, around: base + echo, radius: 4)
+            XCTAssertEqual(Double(late.index), Double(base + echo), accuracy: 1, "rate \(rate): echo position")
+            // The limiter's fractional look-ahead can split the lone direct sample over two frames, so the direct level
+            // is the energy of its neighbourhood, not one sample.
+            var energy: Float = 0
+            for i in (direct.index - 4)...(direct.index + 4) { energy += out[i] * out[i] }
+            XCTAssertEqual(abs(late.value) / energy.squareRoot(), 0.5, accuracy: 0.1, "rate \(rate): echo level")
+        }
+    }
+
+    /// The common onset is trimmed to a 1 ms margin and the declared latency falls with it: a response whose direct
+    /// sound sits 2000 taps in arrives (128 + margin) frames after the input.
+    func testOnsetIsTrimmedToTheMarginAndShortensTheDeclaredLatency() throws {
+        for rate in Self.rates {
+            var asset = longAsset(rate: rate, seconds: 0.3, direct: 2_000)
+            asset.declaredLatencyFrames = 2_000
+            let built = try spec(rate: rate, asset: asset).get()
+            let margin = Int((0.001 * rate).rounded(.up))
+            let baseBuilt = try spec(rate: rate, asset: longAsset(rate: rate, seconds: 0.3)).get()
+            let baseHost = try UnifiedGraphHost(spec: baseBuilt)
+            let base = Int(baseHost.latencyFrames)
+            baseHost.release()
+            let host = try UnifiedGraphHost(spec: built)
+            let expected: Int = base + margin
+            XCTAssertEqual(Double(host.latencyFrames), Double(expected), accuracy: 1, "rate \(rate): declared latency falls with the trim")
+            host.release()
+            let out = try impulseResponse(spec: built, frames: 4_096)
+            let direct = peak(out, around: expected, radius: 3)
+            XCTAssertEqual(Double(direct.index), Double(expected), accuracy: 1, "rate \(rate)")
+        }
+    }
+
+    /// 7.1.4 with 24 head orientations of a 20 ms early part fits the early budget at 384 kHz, and the 1 s tail fits
+    /// its own budget.
+    func testSevenOneFourTrackedLongBRIRFitsTheBudgetAt384k() throws {
+        let rate = 384_000.0
+        let layout = OutputProgramLayout.sevenOneFour
+        XCTAssertEqual(layout.roles.count, 12)
+        let asset = longAsset(rate: rate, seconds: 1.0, echoAt: Int(0.5 * rate))
+        let built = try spec(rate: rate, layout: layout, headTracking: true, asset: asset).get()
+        let stage = try XCTUnwrap(built.stages.first { $0.stageId == N60_LSTAGE_BINAURAL })
+        let early = Int(stage.params[3])
+        XCTAssertEqual(early, 7_680)
+        XCTAssertLessThanOrEqual(12 * 2 * early * 24, UnifiedGraphTranslator.binauralMaxResponseFloats)
+        XCTAssertEqual(Int(stage.params[10]), Int(rate) - early)
+    }
+
+    /// A 0.5 s asset recorded at 48 kHz converts to 352.8 and 384 kHz (time-based limit) and builds with a tail.
+    func testHalfSecondAssetAt48kActivatesAtTheHighestRates() throws {
+        let stored = longAsset(rate: 48_000, seconds: 0.5, echoAt: 20_000)
+        for rate in [352_800.0, 384_000.0] {
+            let converted = try stored.resampled(to: rate)
+            XCTAssertLessThanOrEqual(converted.tapCount, BinauralProfileAsset.maxTapCount(sampleRate: rate))
+            let built = try spec(rate: rate, asset: converted).get()
+            let stage = try XCTUnwrap(built.stages.first { $0.stageId == N60_LSTAGE_BINAURAL })
+            XCTAssertGreaterThan(stage.params[10], 0, "rate \(rate)")
+        }
+    }
+
+    /// The asset limit is one second at every rate (so a 1 s response validates and a longer one does not), and the
+    /// legacy renderer's copy of a long response is cut to its 8192 taps.
+    func testAssetLimitIsTimeBasedAndLegacyTruncationKeepsTheFirstTaps() throws {
+        for rate in Self.rates {
+            XCTAssertNoThrow(try longAsset(rate: rate, seconds: 1.0).validate(), "rate \(rate)")
+            var over = longAsset(rate: rate, seconds: 0.1)
+            over.tapCount = BinauralProfileAsset.maxTapCount(sampleRate: rate) + 1
+            XCTAssertThrowsError(try over.validate(), "rate \(rate)")
+        }
+        let asset = longAsset(rate: 48_000, seconds: 1.0, direct: 5, echoAt: 30_000)
+        let prepared = try asset.prepare(for: .fiveOne)
+        let cut = prepared.truncated(toTaps: Int(N60_BINAURAL_MAX_TAPS))
+        XCTAssertEqual(Int(cut.descriptor.tapCount), Int(N60_BINAURAL_MAX_TAPS))
+        XCTAssertEqual(cut.leftIRs.count, 6 * Int(N60_BINAURAL_MAX_TAPS))
+        XCTAssertEqual(cut.leftIRs[5], prepared.leftIRs[5])
+        XCTAssertEqual(cut.leftIRs[Int(N60_BINAURAL_MAX_TAPS) + 5], prepared.leftIRs[48_000 + 5])
     }
 }

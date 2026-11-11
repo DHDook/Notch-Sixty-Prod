@@ -195,7 +195,9 @@ final class BRIRCaptureTests: XCTestCase {
         XCTAssertThrowsError(try plan(rate: 48_000, tapCount: 512, speakers: []).validate())
         XCTAssertThrowsError(try plan(rate: 48_000, tapCount: 512, speakers: [.lowFrequencyEffects]).validate())
         XCTAssertThrowsError(try plan(rate: 48_000, tapCount: 512, speakers: [.frontLeft, .frontLeft]).validate())
-        XCTAssertThrowsError(try plan(rate: 48_000, tapCount: 9_000).validate(), "above the renderer cap")
+        // E13 S4: the cap is one second of taps, not 8192.
+        XCTAssertNoThrow(try plan(rate: 48_000, tapCount: 9_000).validate(), "long responses are allowed")
+        XCTAssertThrowsError(try plan(rate: 48_000, tapCount: 48_049).validate(), "above one second")
     }
 
     private func markedResults(_ p: BRIRCapturePlan) -> [BRIRCaptureResult] {

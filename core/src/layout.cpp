@@ -182,16 +182,18 @@ n60_status n60_layout_graph_build(const n60_layout_options *o, n60_layout_graph 
         o->headphoneCrossfeed < 0.0f || o->headphoneCrossfeed > 1.0f) {
         return N60_STATUS_BAD_ARGUMENT;
     }
-    uint64_t respCount = 0;
+    uint64_t respCount = 0, tailCount = 0;
     const n60_binaural_profile *bp = o->binaural;
     if (binaural) {
         if (bp == nullptr || bp->structSize != sizeof(n60_binaural_profile) || bp->responses == nullptr ||
             bp->taps < 1 || bp->taps > N60_GRAPH_BINAURAL_MAX_TAPS || bp->orientations < 1 ||
             bp->orientations > N60_GRAPH_BINAURAL_MAX_SETS || bp->equalEarChannel < -1 ||
-            bp->equalEarChannel >= static_cast<int32_t>(N) || bp->wrap > 1) {
+            bp->equalEarChannel >= static_cast<int32_t>(N) || bp->wrap > 1 ||
+            (bp->tailTaps != 0 && bp->tailResponses == nullptr) || !(o->sampleRate > 0.0 && o->sampleRate < 4.0e6) || bp->tailTaps > static_cast<uint32_t>(std::ceil(o->sampleRate))) {  // at most 1 s
             return N60_STATUS_BAD_ARGUMENT;
         }
         respCount = uint64_t(bp->orientations) * N * 2 * bp->taps;
+        tailCount = uint64_t(N) * 2 * bp->tailTaps;
     }
     n60_layout_info info;
     info.structSize = sizeof(info);
@@ -202,7 +204,7 @@ n60_status n60_layout_graph_build(const n60_layout_options *o, n60_layout_graph 
     if (g == nullptr) return N60_STATUS_OUT_OF_MEMORY;
     std::memset(g, 0, sizeof(*g));
     g->stages = new (std::nothrow) n60_stage_desc[N60_GRAPH_MAX_STAGES];
-    g->poolSize = size_t(2048) + o->peqParamCount + (binaural ? size_t(10) + respCount : 0);
+    g->poolSize = size_t(2048) + o->peqParamCount + (binaural ? size_t(12) + respCount + tailCount : 0);
     g->pool = new (std::nothrow) float[g->poolSize];
     if (g->stages == nullptr || g->pool == nullptr) {
         n60_layout_graph_free(g);
@@ -248,7 +250,7 @@ n60_status n60_layout_graph_build(const n60_layout_options *o, n60_layout_graph 
     uint64_t outMask = layoutMask;
     if (binaural) {
         n60_stage_desc *s = b.add(N60_STAGE_BINAURAL, N60_LSTAGE_BINAURAL, 0, 1, layoutMask, nullptr,
-                                  static_cast<uint32_t>(10 + respCount));
+                                  static_cast<uint32_t>(12 + respCount + tailCount));
         if (s != nullptr) {
             float *p = const_cast<float *>(s->params);
             p[0] = bp->headYawDeg;
@@ -261,7 +263,12 @@ n60_status n60_layout_graph_build(const n60_layout_options *o, n60_layout_graph 
             p[7] = bp->wrap != 0 ? 1.0f : 0.0f;
             p[8] = static_cast<float>(bp->equalEarChannel);
             p[9] = static_cast<float>(bp->declaredLatency);
-            std::memcpy(p + 10, bp->responses, sizeof(float) * static_cast<size_t>(respCount));
+            p[10] = static_cast<float>(bp->tailTaps);
+            p[11] = 0.0f;
+            std::memcpy(p + 12, bp->responses, sizeof(float) * static_cast<size_t>(respCount));
+            if (tailCount != 0) {
+                std::memcpy(p + 12 + respCount, bp->tailResponses, sizeof(float) * static_cast<size_t>(tailCount));
+            }
         }
         outMask = 3;
         b.gain(N60_STAGE_OUTPUT_GAIN, N60_LSTAGE_OUTPUT_GAIN + 0, 0, outGain);

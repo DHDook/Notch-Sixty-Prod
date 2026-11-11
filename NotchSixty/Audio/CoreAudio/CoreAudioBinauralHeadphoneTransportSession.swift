@@ -12,6 +12,7 @@ enum BinauralHeadphoneTransportError: Error, Equatable, LocalizedError {
     case outputBufferExceedsBridgeCapacity(bufferFrames: UInt32, capacityFrames: UInt32)
     case captureBufferSizeMismatch(capture: UInt32, output: UInt32)
     case headTrackingGenerationFailed
+    case longResponseNeedsUnifiedGraph
 
     var errorDescription: String? {
         switch self {
@@ -23,6 +24,8 @@ enum BinauralHeadphoneTransportError: Error, Equatable, LocalizedError {
             return "Virtual Speakers requires a two-channel headphone output; the selected output exposes \(channels) channels."
         case .sampleRateMismatch(let source, let output):
             return "Virtual Speakers requires native-rate program and headphone endpoints; source is \(source) Hz and output is \(output) Hz."
+        case .longResponseNeedsUnifiedGraph:
+            return "This binaural response is longer than the legacy renderer supports and needs the unified graph, which is not available for the current setup."
         case .bridgeAllocationFailed:
             return "Unable to prepare the realtime binaural/headphone renderer."
         case .protectionConfigurationFailed:
