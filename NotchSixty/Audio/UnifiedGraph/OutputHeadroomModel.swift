@@ -33,7 +33,7 @@ enum HeadroomStageKind: Equatable, Sendable {
              N60_STAGE_LANE_DELAY, N60_STAGE_AMBIENT, N60_STAGE_BASS_MGMT, N60_STAGE_ROUTE, N60_STAGE_XOVER,
              N60_STAGE_ROOM_FIR_TWO_BAND, N60_STAGE_DRIVER_FIR_TWO_BAND, N60_STAGE_BINAURAL], .modelled)
         set([N60_STAGE_SYMMETRY, N60_STAGE_CROSSTALK, N60_STAGE_HEADPHONE, N60_STAGE_IMAGE, N60_STAGE_LOUDNESS,
-             N60_STAGE_MULTIBAND, N60_STAGE_STEREO_CROSSOVER, N60_STAGE_ANC_INJECT], .bounded)
+             N60_STAGE_MULTIBAND, N60_STAGE_STEREO_CROSSOVER, N60_STAGE_ANC_INJECT, N60_STAGE_MIMO], .bounded)
         set([N60_STAGE_EXTERNAL, N60_STAGE_DELTA_SUBTRACT], .unmodelled)
         return t
     }()
@@ -348,6 +348,16 @@ struct HeadroomModel {
         case N60_STAGE_ANC_INJECT.rawValue:
             // Only when authorised: the (at most full-scale) source lane is added at gain dB.
             if p.count > 2, p[1] == 1 { add(1 + pow(10, Double(min(0, p[2])) / 20), to: selected) }
+        case N60_STAGE_MIMO.rawValue:
+            // Row s of the treatment: the program path plus the realised correction, bounded by the DTFT of the taps
+            // (n60_headroom_mimo_term). Source s is the s-th selected lane; an unarmed stage passes the program through.
+            for (source, index) in selected.enumerated() where !lanes[index].silent {
+                var peakDB = 0.0, hz = 0.0
+                let status = p.withUnsafeBufferPointer {
+                    n60_headroom_mimo_term(spec.sampleRate, $0.baseAddress, UInt32($0.count), UInt32(source), &peakDB, &hz)
+                }
+                if status == N60_HEADROOM_OK { add(pow(10, peakDB / 20), to: [index]) } else { lanes[index].incomplete.insert("MIMO treatment") }
+            }
         case N60_STAGE_HEADPHONE.rawValue:
             guard p.count >= 11 else { return }
             let nA = Int(p[9]), nB = Int(p[10])
