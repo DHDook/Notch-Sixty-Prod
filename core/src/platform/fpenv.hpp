@@ -51,6 +51,18 @@ constexpr bool fpenvSupported() noexcept {
 #endif
 }
 
+// The register bits the guard sets. Tests use this to pre-set the flush mode; writing any other bit is unsafe
+// (MXCSR bit 24 is reserved on x86, and a write that sets it faults with #GP, seen as SIGSEGV on Linux).
+constexpr uint64_t fpenvFlushMask() noexcept {
+#if defined(N60_FPENV_AARCH64)
+    return 1ull << 24;
+#elif defined(N60_FPENV_X86)
+    return (1ull << 15) | (1ull << 6);
+#else
+    return 0;
+#endif
+}
+
 class ScopedFlushToZero {
 public:
     ScopedFlushToZero() noexcept : saved_(fpenvRead()) {
