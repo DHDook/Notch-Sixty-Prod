@@ -870,6 +870,8 @@ n60_status n60_graph_read_multiband(n60_graph *graph, uint32_t stageId, n60_mult
  * delta power above 10^(-6/10) (-6 dB) of the program power latches a fault the same way (`faultReason` 2), so an overload
  * that straddles a window boundary still trips (the step adds at most 1 % of power, 0.04 dB, of uncertainty); -6.1 dB
  * passes. The window restarts whenever g returns to 0. A window whose program power is below -120 dB is not judged.
+ * Window cost (E19 S7, G28): each 0.1 s step closes one bin and sums the 100 bins per source, O(100 * S) adds, bounded and
+ * allocation free. The control plane caches the tap fingerprint of a staged design, so the 250 ms poll does not rehash taps.
  * Realtime: no allocation (every byte is in the snapshot arena), no locks, bounded work; one 128-point FFT per source and
  * one inverse per source every 64 low-rate samples (a bounded burst of S * S * (T / 64) complex multiply-adds). Sample
  * rates 44.1 to 384 kHz and the families above; 1..8 channels. Reset: a new snapshot only (history is zero, g = 0, held

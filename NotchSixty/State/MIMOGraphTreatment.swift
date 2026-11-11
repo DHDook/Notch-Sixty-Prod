@@ -16,10 +16,14 @@ import Foundation
 /// Control plane only (main actor). The realtime path sees nothing but the two live words in the snapshot.
 @MainActor
 final class MIMOGraphTreatment: ObservableObject {
-    /// The permit binding of design note 7. S7 issues real permits (verification, repeat measurement, acceptance);
-    /// until then no production code constructs one, so nothing can arm in production.
+    /// The permit binding of design note 7. `issuePermit` (E19 S7, `MIMOTreatmentPermit.swift`) is the production issuer:
+    /// verification, repeat measurement and acceptance or class qualification. It refuses until S8 wires the video latency input
+    /// and E22 fills the qualification table, so nothing arms in production before then.
     struct Permit: Equatable, Sendable {
+        enum Basis: Equatable, Sendable { case unspecified, hardwareAcceptance, classQualification }
         var fingerprint: String
+        var issuedAt: Date? = nil
+        var basis: Basis = .unspecified
     }
 
     enum ArmRefusal: Error, Equatable, LocalizedError {
@@ -82,6 +86,9 @@ final class MIMOGraphTreatment: ObservableObject {
     var publish: ((UnifiedGraphMIMOStage) throws -> Void)?
     private var pendingPublish: UnifiedGraphMIMOStage?
     private var tapDigest: String?
+    /// Digest of the room correction, speaker IR and per-lane delay and polarity chain after the stage; the engine sets it
+    /// whenever it builds a graph (`chainDigest(of:)`). Part of the fingerprint, so a change of the chain disarms (note 7).
+    var chainDigest = ""
     /// Time the core needs to see arm = 0 and trip = 0 before a re-arm; injectable so tests do not wait.
     var settle: () async throws -> Void = { try await Task.sleep(nanoseconds: 100_000_000) }
 
@@ -100,8 +107,29 @@ final class MIMOGraphTreatment: ObservableObject {
         return hasher.finalize().map { String(format: "%02x", $0) }.joined()
     }
 
+    /// Digest of the chain downstream of the stage that the plant depends on: room correction and speaker IR taps, and each
+    /// lane's delay, calibration delay and polarity. Trims are listed separately; the master volume is deliberately absent.
+    static func chainDigest(of configuration: UnifiedGraphConfiguration) -> String {
+        var hasher = SHA256()
+        func add(_ program: UnifiedGraphFIRProgram?) {
+            guard let program else { hasher.update(data: Data([0])); return }
+            hasher.update(data: Data([1]))
+            program.left.withUnsafeBytes { hasher.update(bufferPointer: $0) }
+            (program.right ?? []).withUnsafeBytes { hasher.update(bufferPointer: $0) }
+            withUnsafeBytes(of: program.declaredLatencyFrames) { hasher.update(bufferPointer: $0) }
+        }
+        add(configuration.stereoStages.roomFIR)
+        add(configuration.stereoStages.speakerIR)
+        for lane in configuration.lanes {
+            let text = "\(lane.delayMilliseconds)|\(lane.delayFrames)|\(lane.fractionalDelayFrames ?? -1)|\(lane.polarityInverted)|\(lane.calibrationDelayFrames)|\(lane.preBassDelayMilliseconds);"
+            hasher.update(data: Data(text.utf8))
+        }
+        return hasher.finalize().map { String(format: "%02x", $0) }.joined()
+    }
+
     static func fingerprint(
-        stage: UnifiedGraphMIMOStage, outputUID: String?, trimsDB: [Double], laneCount: Int, tapDigest: String? = nil
+        stage: UnifiedGraphMIMOStage, outputUID: String?, trimsDB: [Double], laneCount: Int, tapDigest: String? = nil,
+        chainDigest: String = ""
     ) -> String {
         let digest = tapDigest ?? Self.tapDigest(stage)
         let trims = trimsDB.map { String(format: "%.3f", $0) }.joined(separator: ",")
@@ -110,6 +138,7 @@ final class MIMOGraphTreatment: ObservableObject {
             digest, "src=" + sources,
             "tau=\(stage.tauFrames)", "D=\(stage.filters.decimation)", "T=\(stage.filters.tapCount)",
             "rate=\(stage.filters.sampleRate)", "uid=\(outputUID ?? "-")", "lanes=\(laneCount)", "trim=" + trims,
+            "support=" + stage.supportRangesHz.map { String(format: "%.2f", $0) }.joined(separator: ","), "chain=" + chainDigest,
         ].joined(separator: "|")
     }
 
@@ -128,10 +157,10 @@ final class MIMOGraphTreatment: ObservableObject {
         latchMayBeHeld = true
     }
 
-    private func currentFingerprint(_ stage: UnifiedGraphMIMOStage, _ context: Context) -> String {
+    func currentFingerprint(_ stage: UnifiedGraphMIMOStage, _ context: Context) -> String {
         Self.fingerprint(
             stage: stage, outputUID: context.outputDeviceUID, trimsDB: context.outputTrimsDB, laneCount: context.laneCount,
-            tapDigest: tapDigest)
+            tapDigest: tapDigest, chainDigest: chainDigest)
     }
 
     private func post(_ next: UnifiedGraphMIMOStage) {
