@@ -264,7 +264,7 @@ uint32_t rankOf(uint32_t kind) {
     if (kind == N60_STAGE_DEESS) return 98;             // ABI v23: after IMAGE (and the S12c loudness slot at 97), before the compressor (100)
     if (kind == N60_STAGE_ANALYSER_TAP_EQ) return 95;   // ABI v21: after FIR, before the compressor
     if (kind == N60_STAGE_ANALYSER_TAP_DYN) return 115; // ABI v21: after the expander, before METER_OUT
-    if (kind == N60_STAGE_MIMO) return 135;             // ABI v32: after BASS_MGMT (130), before ROOM_FIR (140)
+    if (kind == N60_STAGE_MIMO) return 135;             // ABI v33: after BASS_MGMT (130), before ROOM_FIR (140)
     if (kind == N60_STAGE_ROUTE) return 235;
     if (kind == N60_STAGE_XOVER) return 236;
     if (kind == N60_STAGE_DRIVER_FIR || kind == N60_STAGE_DRIVER_FIR_TWO_BAND) return 237;

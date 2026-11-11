@@ -34,7 +34,7 @@ extern "C" {
 #endif
 
 /* Bumped on any incompatible change to a struct or function below. */
-#define N60_GRAPH_ABI_VERSION 32u
+#define N60_GRAPH_ABI_VERSION 33u
 
 typedef struct n60_graph n60_graph; /* opaque */
 
@@ -127,7 +127,7 @@ typedef enum n60_stage_kind {
     /* ABI v30 (E6 S12h part 2b). Delta audition: see "Delta audition" below. */
     N60_STAGE_DELTA_CAPTURE = 50,    /* position 1.5: after SANITISE, before METER_IN. Pair stage: records the input. */
     N60_STAGE_DELTA_SUBTRACT = 51,   /* position 27.5: after PROTECTION, before MUTE. Pair stage: output minus the aligned input. */
-    /* ABI v32 (E19 S4). MIMO room treatment: see "MIMO treatment" below. */
+    /* ABI v33 (E19 S4). MIMO room treatment: see "MIMO treatment" below. */
     N60_STAGE_MIMO = 52              /* position 13.5: after BASS_MGMT and STEREO_CROSSOVER, before ROOM_FIR. Lane mask of 1..8 source lanes. */
 } n60_stage_kind;
 
@@ -786,7 +786,7 @@ typedef struct n60_multiband_readback {
 } n60_multiband_readback;
 n60_status n60_graph_read_multiband(n60_graph *graph, uint32_t stageId, n60_multiband_readback *out);
 
-/* MIMO treatment (ABI v32, E19 S4; design maths in n60/mimo.h). One stage on a lane mask of S = 1..8 source lanes (laneMask
+/* MIMO treatment (ABI v33, E19 S4; design maths in n60/mimo.h). One stage on a lane mask of S = 1..8 source lanes (laneMask
  * non-zero, laneA = laneB = 0, capacityFrames 0); the k-th lane of the mask is source k of the design. Delta form:
  *     y_s = x_s z^-L + g(n) * up( sum over t of E_st * down(x_t) ),     L = 10 D + tauFrames
  * where down / up are the Kaiser-sinc resamplers of n60/mimo.h (decimation D = 16, 32, 64, 128; 5 D samples of delay each),

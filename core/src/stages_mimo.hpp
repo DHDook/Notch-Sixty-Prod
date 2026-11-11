@@ -1,4 +1,4 @@
-// libn60core ABI v32 MIMO room treatment stage (E19 S4). Declarations shared with snapshot.cpp and graph.cpp, which own
+// libn60core ABI v33 MIMO room treatment stage (E19 S4). Declarations shared with snapshot.cpp and graph.cpp, which own
 // the arena layout, the stage table and the rebuild. The contract, parameter layout and realtime documentation are in
 // n60/graph.h ("MIMO treatment"); the design maths are in n60/mimo.h.
 #ifndef N60_CORE_STAGES_MIMO_HPP

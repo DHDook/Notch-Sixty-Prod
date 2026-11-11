@@ -1,4 +1,4 @@
-// libn60core ABI v32 MIMO room treatment stage (E19 S4). Portable C++20, standard library plus the FFT abstraction; no
+// libn60core ABI v33 MIMO room treatment stage (E19 S4). Portable C++20, standard library plus the FFT abstraction; no
 // Apple framework, no exceptions, no RTTI.
 //
 // Derivation. Treatment adds a delta to each source feed: y_s = x_s z^-L + g * up(sum_t E_st * down(x_t)) (design note 5 of

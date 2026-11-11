@@ -1,4 +1,4 @@
-// E19 S4: behavioural harness for the MIMO treatment graph stage (libn60core ABI v32) through the C ABI at the eight
+// E19 S4: behavioural harness for the MIMO treatment graph stage (libn60core ABI v33) through the C ABI at the eight
 // standard rates. References are written here: a double-precision direct matrix convolution around the public
 // decimate and interpolate calls; closed-form delays, ramps and monitor thresholds.
 #include <algorithm>

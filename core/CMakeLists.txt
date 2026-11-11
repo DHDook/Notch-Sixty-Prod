@@ -261,7 +261,7 @@ add_executable(n60core_headroom_test tests/test_headroom.cpp)
 target_link_libraries(n60core_headroom_test PRIVATE n60core)
 add_test(NAME n60core_headroom COMMAND n60core_headroom_test)
 
-# E19 S4: MIMO treatment graph stage (ABI v32).
+# E19 S4: MIMO treatment graph stage (ABI v33).
 add_executable(n60core_mimo_stage_test tests/test_mimo_stage.cpp)
 target_include_directories(n60core_mimo_stage_test PRIVATE src)
 target_link_libraries(n60core_mimo_stage_test PRIVATE n60core)

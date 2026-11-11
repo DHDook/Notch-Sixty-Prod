@@ -473,7 +473,7 @@ if selected e8_xover_linearise_core; then
     fi
 fi
 
-# E19 S4: MIMO treatment graph stage (ABI v32): delay, arm ramp, trip, monitor, rebuild mute at the standard rates.
+# E19 S4: MIMO treatment graph stage (ABI v33): delay, arm ramp, trip, monitor, rebuild mute at the standard rates.
 if selected e19_mimo_stage; then
     build_core_objs
     if [ "$CORE_OK" = 1 ]; then
