@@ -449,6 +449,16 @@ final class UnifiedGraphHost: @unchecked Sendable {
         return .published
     }
 
+    /// E19 S6: the MIMO stage's readback (`n60_graph_read_mimo`); the worst-ratio and peak fields reset on the read.
+    func mimoReadback(stageId: UInt32) -> n60_mimo_readback? {
+        lock.lock(); defer { lock.unlock() }
+        guard let graph else { return nil }
+        var out = n60_mimo_readback()
+        out.structSize = UInt32(MemoryLayout<n60_mimo_readback>.size)
+        guard n60_graph_read_mimo(graph, stageId, &out) == N60_STATUS_OK else { return nil }
+        return out
+    }
+
     /// Peak and RMS of a meter stage lane (for example `N60_LSTAGE_FINAL_METER`).
     func meter(stageId: UInt32, lane: UInt32) -> (peak: Float, rms: Float)? {
         lock.lock(); defer { lock.unlock() }

@@ -671,6 +671,7 @@ n60_status buildSnapshot(const n60_graph_desc &d, uint32_t epoch, SnapHeader **o
     // is at most kMaxPhaseStages long; every other stage keeps phase 0 and runs on the calling thread.
     {
         uint32_t phaseId = 0, run = 0;
+        h->parallelEnd = 0;
         for (uint32_t i = 0; i < h->stageCount; ++i) {
             StageRec &r = stages(h)[i];
             if (!dspFirParallel(h, r) || r.laneCount == 0 || r.laneCount > N60_GRAPH_MAX_CHANNELS) {
@@ -683,6 +684,7 @@ n60_status buildSnapshot(const n60_graph_desc &d, uint32_t epoch, SnapHeader **o
             }
             r.phase = phaseId;
             ++run;
+            h->parallelEnd = i + 1;  // G27: workers have nothing left to claim after this stage
         }
     }
     if (!deltaFinalize(h)) {  // ABI v30: the delta ring must hold each lane's latency plus a block
@@ -1353,6 +1355,57 @@ bool claimJob(JobHost &j, uint32_t &job) N60_RT_NONBLOCKING {
     }
 }
 
+// Wakes the host's workers once per callback (they spin on claims until jobHostEnd).
+void wakeWorkers(JobHost &j) N60_RT_NONBLOCKING {
+    if (j.woken) return;
+    j.woken = true;
+    j.active.store(1, std::memory_order_release);
+    const n60_graph_wake_fn wake = j.wake.load(std::memory_order_acquire);
+    const uint32_t w = j.workers.load(std::memory_order_relaxed);
+    if (wake != nullptr && w != 0) {
+        N60_RT_TRUST_BEGIN  // the host's wake function is documented to only signal a semaphore (graph.h)
+        wake(j.wakeContext, w);
+        N60_RT_TRUST_END
+        j.wakes.fetch_add(1, std::memory_order_relaxed);
+    }
+}
+
+// E20 S6b (G21): the FIR tail job. Calling thread: post publishes it (waking the workers if needed), join runs it here when
+// no worker has claimed it, else waits for the worker that did.
+void tailPost(void *ctx, void (*fn)(void *, void *), void *arg) N60_RT_NONBLOCKING {
+    JobHost &j = *static_cast<JobHost *>(ctx);
+    wakeWorkers(j);
+    j.tailJob.fn = fn;
+    j.tailJob.arg = arg;
+    j.tailJob.state.store(1, std::memory_order_release);
+}
+void tailJoin(void *ctx) N60_RT_NONBLOCKING {
+    JobHost &j = *static_cast<JobHost *>(ctx);
+    uint32_t expect = 1;
+    if (j.tailJob.state.compare_exchange_strong(expect, 2, std::memory_order_acq_rel, std::memory_order_acquire)) {
+        N60_RT_TRUST_BEGIN  // the job is conv tail work: FFT and multiply-adds, no allocation or lock
+        j.tailJob.fn(j.tailJob.arg, j.scratch[0]);
+        N60_RT_TRUST_END
+        j.jobsOnCaller.fetch_add(1, std::memory_order_relaxed);
+    } else {  // a worker claimed it
+        j.lateJoins.fetch_add(1, std::memory_order_relaxed);
+        uint32_t spins = 0;
+        while (j.tailJob.state.load(std::memory_order_acquire) != 3) spinWait(spins);
+        j.jobsOnWorkers.fetch_add(1, std::memory_order_relaxed);
+    }
+    j.tailJob.state.store(0, std::memory_order_relaxed);
+}
+// Worker thread: claims the posted tail job if nobody has.
+bool tailWorkerRun(JobHost &j, uint32_t workerIndex) N60_RT_NONBLOCKING {
+    uint32_t expect = 1;
+    if (!j.tailJob.state.compare_exchange_strong(expect, 2, std::memory_order_acq_rel, std::memory_order_acquire)) return false;
+    N60_RT_TRUST_BEGIN
+    j.tailJob.fn(j.tailJob.arg, j.scratch[workerIndex]);
+    N60_RT_TRUST_END
+    j.tailJob.state.store(3, std::memory_order_release);
+    return true;
+}
+
 // Runs the phase [first, first + count) as jobs. False (nothing done) when it has fewer than two lanes.
 bool runPhaseParallel(JobHost &j, SnapHeader *h, float *const *lanes, uint32_t frames, uint32_t first, uint32_t count) N60_RT_NONBLOCKING {
     StageRec *table = stages(h);
@@ -1376,18 +1429,7 @@ bool runPhaseParallel(JobHost &j, SnapHeader *h, float *const *lanes, uint32_t f
         }
         p.skip[s] = skip;
     }
-    if (!j.woken) {
-        j.woken = true;
-        j.active.store(1, std::memory_order_release);
-        const n60_graph_wake_fn wake = j.wake.load(std::memory_order_acquire);
-        const uint32_t w = j.workers.load(std::memory_order_relaxed);
-        if (wake != nullptr && w != 0) {
-            N60_RT_TRUST_BEGIN  // the host's wake function is documented to only signal a semaphore (graph.h)
-            wake(j.wakeContext, w);
-            N60_RT_TRUST_END
-            j.wakes.fetch_add(1, std::memory_order_relaxed);
-        }
-    }
+    wakeWorkers(j);
     j.done.store(0, std::memory_order_relaxed);
     ++j.generation;
     j.claim.store((uint64_t(j.generation) << 32) | jobs, std::memory_order_release);
@@ -1427,6 +1469,9 @@ uint32_t jobHostWorkerRun(JobHost &j, uint32_t workerIndex) N60_RT_NONBLOCKING {
             j.done.fetch_add(1, std::memory_order_release);
             ++ran;
             spins = 0;
+        } else if (tailWorkerRun(j, workerIndex)) {
+            ++ran;
+            spins = 0;
         } else {
             spinWait(spins);
         }
@@ -1439,6 +1484,12 @@ void runSnapshot(SnapHeader *h, float *const *lanes, uint32_t frames, std::atomi
     h->follower = follower ? 1u : 0u;
     StageRec *table = stages(h);
     const bool parallel = jobs != nullptr && jobs->workers.load(std::memory_order_relaxed) != 0;
+    if (parallel) {
+        jobs->tailHost = conv::TailHost{jobs, &tailPost, &tailJoin};
+        h->tailHost = &jobs->tailHost;
+    } else {
+        h->tailHost = nullptr;
+    }
     for (uint32_t i = 0; i < h->stageCount; ++i) {
         StageRec &r = table[i];
 #ifdef N60_GRAPH_PROFILE
@@ -1463,11 +1514,7 @@ void runSnapshot(SnapHeader *h, float *const *lanes, uint32_t frames, std::atomi
                 // E20 S6 (G22): after this snapshot's last parallel phase the workers have nothing left to claim, so they
                 // are released (they return to their semaphore) instead of spinning to the end of the callback. A second
                 // snapshot in the same callback (a rebuild fade) wakes them again for its own phases.
-                bool more = false;
-                for (uint32_t k = end; k < h->stageCount; ++k) {
-                    if (table[k].phase != 0) { more = true; break; }
-                }
-                if (!more) jobHostEnd(*jobs);
+                if (end >= h->parallelEnd) jobHostEnd(*jobs);  // G27: precomputed at build, no scan
                 i = end - 1;
                 continue;
             }
@@ -1485,7 +1532,10 @@ void runSnapshot(SnapHeader *h, float *const *lanes, uint32_t frames, std::atomi
 #else
         runStage(h, r, lanes, frames, sanitisedSamples);
 #endif
+        // A phase member that ran serially (one lane: its FIR tail may have used the workers) can be the last one.
+        if (parallel && r.phase != 0 && i + 1 >= h->parallelEnd) jobHostEnd(*jobs);
     }
+    h->tailHost = nullptr;
 }
 
 }  // namespace n60

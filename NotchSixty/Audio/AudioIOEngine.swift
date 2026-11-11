@@ -1086,7 +1086,7 @@ final class AudioIOEngine: ObservableObject {
     /// for the same output (external change, device-list refresh) never
     /// overwrites the user's current level.
     private var masterVolumeSynchronizedOutputUID: String?
-    private var lifecycle: AudioLifecycleStateMachine
+    var lifecycle: AudioLifecycleStateMachine
     private var transportSession: CoreAudioTransportSession?
     /// E25 S2: applied to each new stereo session.
     private var stereoAlignment: StereoBassAlignment?
@@ -1098,7 +1098,7 @@ final class AudioIOEngine: ObservableObject {
     /// E25 S8c: read-only views of the applied arrangement state, so profile load and the wizard are comparable.
     var appliedStereoAlignment: StereoBassAlignment? { stereoAlignment }
     var appliedProgramFoldPlan: ProgramFoldDownPlan? { programFoldPlan }
-    private var nChannelTransportSession: CoreAudioNChannelTransportSession?
+    var nChannelTransportSession: CoreAudioNChannelTransportSession?
     private var binauralHeadphoneTransportSession: CoreAudioBinauralHeadphoneTransportSession?
     private var headTrackingController: SpatialHeadTrackingController?
     private var lifetimeArchivedCounters = AudioTransportCounters()
@@ -1120,6 +1120,11 @@ final class AudioIOEngine: ObservableObject {
     private var activeSpeakerIRProgram: PreparedSpeakerIRProgram?
     private var nextSpeakerIRProgramSlot: UInt32 = 0
     private var stagedRoomTreatment: LiveMIMORoomTreatmentPreparation?
+    /// E19 S6: the graph MIMO treatment controller (stage, permit, arm switch); see `AudioIOEngine+MIMOTreatment.swift`.
+    lazy var mimoGraphTreatment: MIMOGraphTreatment = makeMIMOGraphTreatment()
+    var mimoPollTask: Task<Void, Never>?
+    /// E19 S6: set by the room-correction latency mode when it is video (the treatment refuses to arm in it; S8 wires it).
+    var mimoVideoLatencyMode = false
     private var stagedAudioUnitRack: AudioUnitLiveRackSwitchboard?
     /// Set when a rate change or output recovery dropped a rack built for the
     /// previous format; cleared once the rebuild request has been issued.
@@ -2415,6 +2420,12 @@ final class AudioIOEngine: ObservableObject {
                 try republishLiveGraph(inputs)
             }
         } else if let session = transportSession {
+            // E28 S8: a profile switch changes the dynamics, so the stereo session's extras follow it (put back if refused).
+            let previousExtras = session.dynamicsExtras
+            session.setDynamicsExtras(DynamicsGraphExtras.make(
+                state.dynamics, sampleRate: session.outputFormat.sampleRate, flagOn: FeatureFlags().isEnabled(.dynamicsExtras)))
+            var extrasAdopted = false
+            defer { if !extrasAdopted { session.setDynamicsExtras(previousExtras) } }
             var graph = try state.stereoEQ.makeGraphSnapshot(
                 sampleRate: session.outputFormat.sampleRate,
                 gainConfiguration: targetGain,
@@ -2457,6 +2468,7 @@ final class AudioIOEngine: ObservableObject {
             // Even when only biquad/gain values differ this avoids an
             // instantaneous coefficient/gain discontinuity at the output.
             try session.transitionDSPGraph(graph)
+            extrasAdopted = true
             activeEQFIRProgram = preparedEQFIRProgram
             linearPhaseDesignInfo = preparedEQFIRProgram?.designInfo
         } else {
@@ -3106,7 +3118,13 @@ final class AudioIOEngine: ObservableObject {
         let previousOutputProtection = UnifiedGraphOutputProtection.apply(settings: configuration.outputProtection ?? OutputProtectionSettings())
         // Main-actor only: the policy static is written from here, the dynamicsConfiguration didSet and state restore.
         var committed = false
-        defer { if !committed { UnifiedGraphOutputProtection.apply(settings: previousOutputProtection) } }
+        // The stereo session's extras are restored on any throw before the edit is stored, whatever `committed` says.
+        var extrasStored = false
+        let previousStereoExtras = transportSession?.dynamicsExtras
+        defer {
+            if !extrasStored { transportSession?.setDynamicsExtras(previousStereoExtras) }
+            if !committed { UnifiedGraphOutputProtection.apply(settings: previousOutputProtection) }
+        }
         // E28 S7d part 3 (G34): a lookahead-only edit crossfades two copies of one signal, so it uses the linear law.
         let lookaheadOnly = FeatureFlags().isEnabled(.dynamicsExtras) && configuration.differsOnlyInLookahead(from: dynamicsConfiguration)
         let previousStereoFade = transportSession?.linearFadeForEQRepublish ?? false
@@ -3130,6 +3148,9 @@ final class AudioIOEngine: ObservableObject {
             committed = true
         }
         if let session = transportSession {
+            // E28 S8: the stereo graph is built with the new configuration's extras (the stored one is replaced below).
+            session.setDynamicsExtras(DynamicsGraphExtras.make(
+                configuration, sampleRate: session.outputFormat.sampleRate, flagOn: FeatureFlags().isEnabled(.dynamicsExtras)))
             let oldProtection = try renderDynamicsConfiguration().makeProtectionSnapshot(sampleRate: session.outputFormat.sampleRate)
             var graph = try renderStereoEQConfiguration.makeGraphSnapshot(
                 sampleRate: session.outputFormat.sampleRate,
@@ -3169,6 +3190,7 @@ final class AudioIOEngine: ObservableObject {
             }
         }
         dynamicsConfiguration = configuration
+        extrasStored = true
         committed = true
         lastErrorDescription = nil
         surfaceDynamicsListenRepostFailure()  // E28 S7d part 3 (G37): a rebuild that lost the listener is reported, not swallowed
@@ -4979,6 +5001,9 @@ final class AudioIOEngine: ObservableObject {
                 configuration.generatorParams = params
                 configuration.generatorLaneMask = mask
             }
+            // E19 S6: a new topology rebuilds the graph, so the switch goes off first: the disarm word is stored with the
+            // stage and the rebuilt graph carries it disarmed (a rebuild never fades through live treatment).
+            if session.mimoStageAttached { mimoGraphTreatment.graphRebuilt() }
             try session.republishGraph(configuration)
         } else if let session = binauralHeadphoneTransportSession {
             guard let base = headphoneBase ?? session.unifiedGraphBaseSpec,
@@ -5602,7 +5627,9 @@ final class AudioIOEngine: ObservableObject {
                 ancHostFeed: ancSplitter != nil,
                 userOutputGain: currentMasterSoftwareGain
             ) {
-            case .success(let configuration): graphConfiguration = configuration
+            case .success(var configuration):
+                attachStagedMIMOTreatment(to: &configuration)
+                graphConfiguration = configuration
             case .failure(let reason): graphIneligibility = reason
             }
         }
@@ -5934,6 +5961,8 @@ final class AudioIOEngine: ObservableObject {
             && outputDeviceProfileConfiguration?.enabled != true
             && multiOutputRoutingConfiguration?.enabled != true
         session.setInitialStereoAlignment(stereoAlignment)
+        session.setDynamicsExtras(DynamicsGraphExtras.make(
+            dynamicsConfiguration, sampleRate: session.outputFormat.sampleRate, flagOn: FeatureFlags().isEnabled(.dynamicsExtras)))
         session.setInitialAnalyserTaps(installed: analyserTapsInstalled)
         try session.configureHeadphoneDSP(
             headphoneSnapshot, profile: headphoneSnapshot == nil ? nil : headphoneDeviceProfileConfiguration)

@@ -38,6 +38,12 @@ enum LiveTreatmentDisarmReason: String, Equatable, Sendable {
     case bassPathChanged
     /// E4 S27: the zone mode changed while armed (it is part of the earned-cap binding).
     case zoneChanged
+    /// E19 S6: the MIMO stage's monitor or thermal budget latched a fault (the delta faded out in 10 ms).
+    case treatmentFault
+    /// E19 S6: a per-output trim or another part of the chain after the MIMO stage changed.
+    case downstreamChainChanged
+    /// E19 S6: the feature flag was switched off while armed.
+    case featureSwitchedOff
 
     /// Shown in the UI after an automatic disarm. Nil for the user's own action.
     var message: String? {
@@ -61,6 +67,9 @@ enum LiveTreatmentDisarmReason: String, Equatable, Sendable {
         case .adaptiveFault: return "Disarmed: the adaptive tuning faulted. Re-arm to continue."
         case .bassPathChanged: return "Disarmed: your receiver's level or bass settings changed. Re-arm to continue."
         case .zoneChanged: return "Disarmed: the quiet zone changed. Re-arm to continue; the output starts at the starting level again."
+        case .treatmentFault: return "Muted: the room treatment went outside its safe bounds. Re-arm to continue."
+        case .downstreamChainChanged: return "Disarmed: an output trim or the chain after the treatment changed. Re-arm to continue."
+        case .featureSwitchedOff: return "Disarmed: room treatment was switched off."
         }
     }
 }
@@ -232,7 +241,7 @@ final class LiveTreatmentArm: ObservableObject {
         } else if let level = environment.microphoneLevelDBFS {
             lastAnalysisAt = now
             observeMicrophone(level: level, now: now)
-        } else if let last = lastAnalysisAt,
+        } else if feature != .mimoRoomTreatment, let last = lastAnalysisAt,
                   now.timeIntervalSince(last) >= LiveTreatmentSafeguards.analysisStallSeconds {
             // No new analysis: a frozen or starved microphone path must not leave the arm on.
             disarm(.microphoneStalled)

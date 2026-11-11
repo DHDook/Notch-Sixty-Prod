@@ -370,6 +370,37 @@ static void testThermalBudget() {
     }
 }
 
+// E19 S6, G18: the thermal window slides. Taps {c, -c} make the delta gain frequency dependent (2 c |sin(w/2)| at the 3 kHz low
+// rate): 0.21 c at 100 Hz, 1.73 c at 1 kHz. With c set so 1 kHz sits at -5.9 dB, a 100 Hz program for 5 s then 10.3 s of 1 kHz
+// overloads only a window that starts at 5 s: tumbling 10 s windows [0, 10) and [10, 20) each see half of it and never trip,
+// the sliding window must. Rates with a 3 kHz low rate (48 and 384 kHz families).
+static void testThermalSlidingWindow() {
+    for (double rate : {48000.0, 384000.0}) {
+        const float c = float(std::pow(10.0, -5.9 / 20.0) / 1.7320508);
+        Cfg cfg{1, 2, uint32_t(0.015 * rate), {10.0f}, {c, -c}};
+        cfg.arm = 1.0f;
+        std::vector<float> keep;
+        n60_graph *g = buildMimo(rate, cfg, keep);
+        uint64_t pos = 0;
+        auto chunk = [&](double seconds, double hz) {
+            const uint32_t N = uint32_t(seconds * rate);
+            Lanes in(1, std::vector<float>(N));
+            for (uint32_t i = 0; i < N; ++i) in[0][i] = 0.1f * float(std::sin(2.0 * 3.14159265358979 * hz * double(pos + i) / rate));
+            pos += N;
+            run(g, in, 480);
+        };
+        chunk(5.0, 100.0);
+        chunk(9.0, 1000.0);
+        n60_mimo_readback rb = readMimo(g);
+        CHECK(rb.faultLatched == 0, "fs %.0f: sliding window faulted before the overload filled a window (reason %u)", rate, rb.faultReason);
+        chunk(1.5, 1000.0);
+        rb = readMimo(g);
+        CHECK(rb.faultLatched == 1 && rb.faultReason == 2 && rb.faultSource == 1 && rb.held == 1,
+              "fs %.0f: a 10 s overload straddling a window boundary must trip: latched %u reason %u", rate, rb.faultLatched, rb.faultReason);
+        n60_graph_retire(g);
+    }
+}
+
 static void testRebuildMute() {
     const double rate = 48000;
     Cfg c{1, 4, uint32_t(0.015 * rate), {50.0f}, {0.5f, 0, 0, 0}};
@@ -477,6 +508,7 @@ int main() {
     testRampAndTrip();
     testMonitor();
     testThermalBudget();
+    testThermalSlidingWindow();
     testRebuildMute();
     testBlockSizeIndependence();
     testNoAllocations();

@@ -864,11 +864,12 @@ n60_status n60_graph_read_multiband(n60_graph *graph, uint32_t stageId, n60_mult
  * bound). A source is over bound when its delta envelope exceeds 10^(6/10) * G_s^2 times the input envelope (6 dB in
  * amplitude, 5.9 dB is within bound); 50 ms of continuous over-bound on any source latches a fault: `faultSource` names it,
  * g falls in 10 ms and `held` is set (`faultReason` 1).
- * Thermal budget (E19 S5, design note 6, owner decision D5). Armed time (g > 0) is cut into consecutive 10 s windows; per
- * source the window sums the delta power (before g, as the monitor) and the in-band program power (the decimated source
- * feed). When a window ends with delta power above 10^(-6/10) (-6 dB) of the program power the stage latches a fault the
- * same way (`faultReason` 2); -6.1 dB passes. Windows restart whenever g returns to 0. A window whose program power is
- * below -120 dB is not judged.
+ * Thermal budget (E19 S5, design note 6, owner decision D5; sliding since E19 S6, G18). Armed time (g > 0) feeds a sliding
+ * 10 s window that moves in 0.1 s steps; per source the window sums the delta power (before g, as the monitor) and the
+ * in-band program power (the decimated source feed). Once 10 s of armed time exist, every 0.1 s the last 10 s are judged:
+ * delta power above 10^(-6/10) (-6 dB) of the program power latches a fault the same way (`faultReason` 2), so an overload
+ * that straddles a window boundary still trips (the step adds at most 1 % of power, 0.04 dB, of uncertainty); -6.1 dB
+ * passes. The window restarts whenever g returns to 0. A window whose program power is below -120 dB is not judged.
  * Realtime: no allocation (every byte is in the snapshot arena), no locks, bounded work; one 128-point FFT per source and
  * one inverse per source every 64 low-rate samples (a bounded burst of S * S * (T / 64) complex multiply-adds). Sample
  * rates 44.1 to 384 kHz and the families above; 1..8 channels. Reset: a new snapshot only (history is zero, g = 0, held

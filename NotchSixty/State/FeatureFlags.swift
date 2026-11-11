@@ -190,11 +190,13 @@ extension FeatureFlag {
     )
 
     /// E28 S7: compressor mix, link amount, peak/RMS detector and lookahead on the unified graph (ABI v33). Swift decides;
-    /// the core only sees the 15-value compressor block. Off: the 10-value block, unchanged. Removed when E28 ships.
+    /// the core only sees the widened compressor, expander and multiband blocks. Off: today's 10, 6 and 29 value blocks.
+    /// Graduated by E28 S8 (default on, available not armed); the flag-cleanup phase after E22 removes it.
     static let dynamicsExtras = FeatureFlag(
         id: "e28.dynamics-extras",
         title: "Dynamics extras",
-        epic: "E28"
+        epic: "E28",
+        graduated: true
     )
 
     /// E29: the shared room position model. S1 builds the read-only index; the seat map (S4) and the consumers (S6, S7)
