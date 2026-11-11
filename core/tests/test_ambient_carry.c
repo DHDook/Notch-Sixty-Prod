@@ -1,9 +1,8 @@
-/* E4 S30c (G9): an AMBIENT stage with the section trailer (n = 17) across a topology rebuild (an output-gain stage
- * is appended). Pins what the engine does today: the rebuilt instance starts its biquads from silence, so for a few
- * milliseconds it differs from a graph built with that topology from the start (a bounded transient, never above the
- * input peak, always finite), and then converges to the same output (the stage's response and a mid-crossfade edit
- * are kept). Bit-identical carry of the filter state is not implemented: ledger G12 (owner slice E4 S30d). Run both
- * in steady state and with a section edit 1 block before the rebuild. Eight standard rates, noise input. */
+/* E4 S30c (G9), tightened in S30d (G12): an AMBIENT stage with the section trailer (n = 17) across a topology rebuild
+ * (an output-gain stage is appended). The rebuilt instance carries the filter state, the coefficient crossfades and the
+ * gain ramp, so it matches a graph built with that topology from the start sample for sample (bit-identical with an instant swap; a linear fade of two equal
+ * signals is within float rounding), in steady state and with a section edit 1 block before the rebuild (mid-crossfade at the
+ * hand-over). A section-count change keeps the shared sections' state. Eight standard rates, noise input. */
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -89,7 +88,7 @@ static void settle(n60_graph *a, n60_graph *b, double *worst) {
 }
 
 /* edit: 0 = steady state at the rebuild; 1 = a section edit posted 1 ms before the rebuild (xf != 0 at hand-over). */
-static void testCarry(double rate, int edit) {
+static void testCarry(double rate, int edit, int linearFade) {
     float p0[62], p1[62];
     params(p0, -2.0f);
     params(p1, edit ? -6.0f : -2.0f);
@@ -113,22 +112,31 @@ static void testCarry(double rate, int edit) {
         const int part = (int)(rate * 0.001 / BLOCK) + 1; /* 1 block: well inside the 5 ms crossfade at most rates */
         for (int i = 0; i < part; i++) { double w = step(a, b); if (w > worst) worst = w; }
     }
+    n60_rebuild_options ro;
+    memset(&ro, 0, sizeof ro);
+    ro.structSize = sizeof ro;
+    ro.fadeMs = linearFade ? 20.0f : 0.0f;  /* 0: instant swap (exactly equal); else a linear fade of two equal signals */
+    ro.reserved = linearFade ? 1u : 0u;
+    CHECK(n60_graph_set_rebuild_options(a, &ro) == N60_STATUS_OK, "options");
     n60_graph_desc dc = desc(rate, p1, 62, (const float *)&unity, sc);
     CHECK(n60_graph_publish(a, &dc) == N60_STATUS_OK, "rate %.0f edit %d publish", rate, edit);
     double during = 0, after = 0;
     settle(a, b, &during);
     if (getenv("N60_VERBOSE")) fprintf(stderr, "rate %.0f edit %d: during rebuild %g\n", rate, edit, during);
     for (int i = 0; i < (int)(rate * 0.1 / BLOCK); i++) { double w = step(a, b); if (w > after) after = w; }
-    CHECK(during < 1.0, "rate %.0f edit %d: transient during the rebuild %g exceeds the input range", rate, edit, during);
-    CHECK(after < 1e-3, "rate %.0f edit %d: rebuilt graph has not converged to the uninterrupted one (%g)", rate, edit, after);
+    const double tol = linearFade ? 1e-6 : 0.0;  /* instant swap: bit-identical; linear fade: float rounding of old*(1-t)+new*t */
+    CHECK(during <= tol, "rate %.0f edit %d fade %d: rebuilt graph differs from the uninterrupted one during the rebuild (%g)", rate, edit, linearFade, during);
+    CHECK(after <= tol, "rate %.0f edit %d fade %d: rebuilt graph differs from the uninterrupted one afterwards (%g)", rate, edit, linearFade, after);
     n60_graph_retire(a);
     n60_graph_retire(b);
 }
 
 int main(void) {
     for (size_t r = 0; r < sizeof kRates / sizeof kRates[0]; r++) {
-        testCarry(kRates[r], 0);
-        testCarry(kRates[r], 1);
+        for (int f = 0; f < 2; f++) {
+            testCarry(kRates[r], 0, f);
+            testCarry(kRates[r], 1, f);
+        }
     }
     if (failures) { fprintf(stderr, "%d failures\n", failures); return 1; }
     printf("ambient carry OK\n");
