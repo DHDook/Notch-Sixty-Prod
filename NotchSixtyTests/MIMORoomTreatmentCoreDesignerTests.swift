@@ -180,6 +180,16 @@ final class MIMORoomTreatmentCoreDesignerTests: XCTestCase {
         XCTAssertThrowsError(try MIMORoomTreatmentCoreDesigner.designUnchecked(shape))
     }
 
+    func testDefaultTauAndShortTauGate() {
+        XCTAssertEqual(MIMOTreatmentRequest(sampleRate: 48_000, sources: [], seats: [], plants: []).tauSeconds, 0.015)
+        let limits = MIMOTreatmentRealisationLimits.standard
+        XCTAssertEqual(limits.deviationGateDB(tau: 0.015), 0.25)
+        XCTAssertEqual(limits.deviationGateDB(tau: 0.010), 0.25)
+        XCTAssertEqual(limits.deviationGateDB(tau: 0.005), 0.35)
+        XCTAssertNil(MIMOTreatmentRealisationLimits.shortTauNote(tau: 0.010))
+        XCTAssertTrue(try XCTUnwrap(MIMOTreatmentRealisationLimits.shortTauNote(tau: 0.005)).contains("15 ms"))
+    }
+
     func testPreEnergyIsShownAndAdvisesRaisingTau() throws {
         let late = try MIMORoomTreatmentCoreDesigner.designUnchecked(request(rate: 48_000, tau: 0.02), limits: loose)
         XCTAssertTrue(late.summary.advice.isEmpty, "tau at the 20 ms limit has nothing to raise")

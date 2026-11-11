@@ -39,6 +39,7 @@
 #include "stages_image.hpp"
 #include "stages_loudness.hpp"
 #include "stages_multiband.hpp"
+#include "stages_mimo.hpp"
 #include "stages_dsp.hpp"
 #include "stages_system.hpp"
 #include "platform/fpenv.hpp"
@@ -102,6 +103,7 @@ struct n60_graph {
     uint32_t warmLeft = 0;
     uint32_t fadePos = 0;
     uint32_t ancStages = 0;
+    uint32_t mimoStages = 0;  // MIMO treatment stages muted by the rebuild in progress
     double warmSeconds = 0.0;  // audio time covered by the warm-up so far
     double warmCost = 0.0;     // processing time spent on it
     float *scratch = nullptr;  // outputChannels * maxBlockFrames, incoming render target
@@ -263,6 +265,8 @@ void adopt(n60_graph *g) {
     // callback's budget (E9 S2b): then it runs next to the live one in lockstep, is swapped in without a fade
     // when the copy and settle are done, and is never refused for CPU.
     const bool deferred = next->fadeFrames == 0 && carryPending;
+    // MIMO treatment goes silent in whichever instance is replaced and stays so until the host disarms and re-arms it.
+    n60::mimoRebuildMute(next, true);
     if (next->fadeFrames == 0 && !deferred) {
         settleDenoiser(g, g->current, next);
         retireSnapshot(g, g->current);
@@ -285,6 +289,7 @@ void adopt(n60_graph *g) {
     // re-arms it with a new revision.
     // Mute both instances; the count is the larger of the two (the same stage in each is one stage).
     g->ancStages = std::max(n60::systemRebuildMute(g->current, false), n60::systemRebuildMute(next, true));
+    g->mimoStages = std::max(n60::mimoRebuildMute(g->current, false), n60::mimoRebuildMute(next, true));
     g->phase = 1;
     g->rbAnc.store(g->ancStages, std::memory_order_relaxed);
     g->rbState.store(1, std::memory_order_release);
@@ -308,6 +313,7 @@ void finishRebuild(n60_graph *g, uint32_t result) {
     g->incoming = nullptr;
     g->carryActive = false;
     g->phase = 0;
+    g->mimoStages = 0;
     g->ancStages = 0;  // rbAnc keeps the count from the last rebuild
     g->rbLast.store(result, std::memory_order_relaxed);
     g->rbState.store(0, std::memory_order_release);
@@ -382,6 +388,10 @@ void rebuildBlock(n60_graph *g, float *const *out, uint32_t frames) {
     if (g->ancStages != 0) {  // a revision that arrived during the rebuild is not a re-arm
         n60::systemRebuildMute(g->current, false);
         n60::systemRebuildMute(g->incoming, false);
+    }
+    if (g->mimoStages != 0) {
+        n60::mimoRebuildMute(g->current, false);
+        n60::mimoRebuildMute(g->incoming, false);
     }
     g->external.deltaFrames = 0;
     n60::runSnapshot(g->current, out, frames, g->sanitised);
@@ -705,6 +715,13 @@ n60_status n60_graph_read_mains(n60_graph *g, uint32_t stageId, n60_mains_readba
     if (out->structSize != sizeof(n60_mains_readback)) return N60_STATUS_ABI_MISMATCH;
     syncLatest(g);
     return n60::readMains(g->latest, stageId, out) ? N60_STATUS_OK : N60_STATUS_BAD_ARGUMENT;
+}
+
+n60_status n60_graph_read_mimo(n60_graph *g, uint32_t stageId, n60_mimo_readback *out) {
+    if (g == nullptr || out == nullptr) return N60_STATUS_BAD_ARGUMENT;
+    if (out->structSize != sizeof(n60_mimo_readback)) return N60_STATUS_ABI_MISMATCH;
+    syncLatest(g);
+    return n60::readMimo(g->latest, stageId, out) ? N60_STATUS_OK : N60_STATUS_BAD_ARGUMENT;
 }
 
 n60_status n60_graph_read_multiband(n60_graph *g, uint32_t stageId, n60_multiband_readback *out) {

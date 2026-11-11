@@ -34,7 +34,8 @@ enum UnifiedGraphTranslator {
         crossoverHz: Double = 80,
         programs: UnifiedGraphProgramLookup = { _, _ in nil },
         alignment: StereoBassAlignment? = nil,
-        firScheme: UInt32 = UnifiedGraphFIRScheme.current()
+        firScheme: UInt32 = UnifiedGraphFIRScheme.current(),
+        compressorExtras: [Float]? = nil
     ) -> Result<UnifiedGraphConfiguration, UnifiedGraphFallbackReason> {
         if let alignment, alignment.issue != nil { return .failure(.alignmentInvalid) }
         let eligibility = withUnsafePointer(to: &snapshot) {
@@ -95,6 +96,11 @@ enum UnifiedGraphTranslator {
                 return .failure(.stageParametersUnreadable)
             }
             stages = built
+            // E28 S7: the snapshot carries no extras; the caller passes the five values only when
+            // `e28.dynamics-extras` is on and any is non-default, and the 10-value block becomes the 15-value one.
+            if let extras = compressorExtras, extras.count == 5, let base = stages.compressor, base.count == 10 {
+                stages.compressor = base + extras
+            }
         }
         // E6 S8d: recover each enabled convolver's taps by generation and verify them against the snapshot's record.
         let states = [

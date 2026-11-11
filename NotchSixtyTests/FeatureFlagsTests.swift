@@ -131,3 +131,32 @@ final class FeatureFlagsTests: XCTestCase {
         XCTAssertEqual(PreferenceKeys.featureFlagPrefix, "feature.")
     }
 }
+
+/// E28 S7a: compressor extras config and translator inputs.
+final class CompressorExtrasConfigTests: XCTestCase {
+    func testDefaultsGiveNoExtrasAndOldProfilesDecode() throws {
+        var c = CompressorConfiguration()
+        XCTAssertNil(c.coreExtras(sampleRate: 48_000))
+        let json = try JSONEncoder().encode(c)
+        let back = try JSONDecoder().decode(CompressorConfiguration.self, from: json)
+        XCTAssertEqual(back, c)
+        c.mixPercent = 50; c.linkPercent = 0; c.rmsDetector = true; c.lookaheadMs = 5
+        let extras = try XCTUnwrap(c.coreExtras(sampleRate: 96_000))
+        XCTAssertEqual(extras, [50, 0, 1, 50, 480])
+    }
+
+    func testLookaheadFramesClampAndValidation() {
+        XCTAssertEqual(CompressorConfiguration.lookaheadFrames(ms: 20, sampleRate: 384_000), 7_680)
+        XCTAssertEqual(CompressorConfiguration.lookaheadFrames(ms: 1_000, sampleRate: 384_000), 8_192)
+        XCTAssertEqual(CompressorConfiguration.lookaheadFrames(ms: 0, sampleRate: 48_000), 0)
+        var c = CompressorConfiguration()
+        c.mixPercent = 101
+        XCTAssertThrowsError(try c.validate())
+        c.mixPercent = 50; c.lookaheadMs = 25
+        XCTAssertThrowsError(try c.validate())
+    }
+
+    @MainActor func testFlagRegisteredAndOff() {
+        XCTAssertTrue(FeatureFlag.all.contains(.dynamicsExtras))
+    }
+}

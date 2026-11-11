@@ -117,7 +117,7 @@ typedef struct n60_mimo_info {
 
 uint32_t n60_mimo_abi_version(void);
 
-/* Fills deterministic defaults: tau 0, T_target 0.3 s, 4096 taps, every seat included at weight 1, every
+/* Fills deterministic defaults: tau 15 ms, T_target 0.3 s, 4096 taps, every seat included at weight 1, every
  * source active with support 25 .. 150 Hz, effort limit +9 dB, gain limit +9 dB. */
 void n60_mimo_defaults(double sample_rate, uint32_t source_count, uint32_t seat_count, n60_mimo_problem *problem);
 

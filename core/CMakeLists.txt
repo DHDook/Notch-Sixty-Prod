@@ -2,7 +2,7 @@
 cmake_minimum_required(VERSION 3.20)
 project(n60core LANGUAGES C CXX)
 
-add_library(n60core STATIC src/graph.cpp src/snapshot.cpp src/fft.cpp src/stages_dsp.cpp src/conv/nufir.cpp src/stages_system.cpp src/stages_matrix.cpp src/stages_generator.cpp src/stages_cleanup.cpp src/stages_image.cpp src/stages_loudness.cpp src/stages_multiband.cpp src/stages_route.cpp src/layout.cpp
+add_library(n60core STATIC src/graph.cpp src/snapshot.cpp src/fft.cpp src/stages_dsp.cpp src/conv/nufir.cpp src/stages_system.cpp src/stages_matrix.cpp src/stages_generator.cpp src/stages_cleanup.cpp src/stages_image.cpp src/stages_loudness.cpp src/stages_multiband.cpp src/stages_route.cpp src/stages_mimo.cpp src/layout.cpp
     src/measure/offline_fft.cpp src/measure/ess.cpp src/measure/deconvolve.cpp src/measure/reference_room.cpp src/measure/timing.cpp src/measure/distortion.cpp src/measure/decay.cpp src/measure/waterfall.cpp src/measure/monitor_ring.cpp src/measure/spl.cpp src/measure/rta.cpp src/measure/predict.cpp src/mimo/design.cpp
     src/correct/minphase.cpp src/correct/design.cpp src/correct/synth.cpp src/correct/bass.cpp src/correct/multisub_search.cpp
     src/xover/xover.cpp src/headroom/headroom.cpp)
@@ -208,6 +208,11 @@ target_include_directories(n60core_image_precision_test PRIVATE src)
 target_link_libraries(n60core_image_precision_test PRIVATE n60core)
 add_test(NAME n60core_image_precision COMMAND n60core_image_precision_test)
 
+# E28 S7a: compressor mix, link amount, detector, lookahead (ABI v33).
+add_executable(n60core_comp_extras_test tests/test_comp_extras.cpp)
+target_link_libraries(n60core_comp_extras_test PRIVATE n60core)
+add_test(NAME n60core_comp_extras COMMAND n60core_comp_extras_test)
+
 # E6 S12c: loudness (match, contour, dialogue leveler) stage (ABI v24).
 add_executable(n60core_loudness_test tests/test_loudness.cpp)
 target_link_libraries(n60core_loudness_test PRIVATE n60core)
@@ -260,3 +265,9 @@ add_test(NAME n60core_mimo_realise COMMAND n60core_mimo_realise_test)
 add_executable(n60core_headroom_test tests/test_headroom.cpp)
 target_link_libraries(n60core_headroom_test PRIVATE n60core)
 add_test(NAME n60core_headroom COMMAND n60core_headroom_test)
+
+# E19 S4: MIMO treatment graph stage (ABI v33).
+add_executable(n60core_mimo_stage_test tests/test_mimo_stage.cpp)
+target_include_directories(n60core_mimo_stage_test PRIVATE src)
+target_link_libraries(n60core_mimo_stage_test PRIVATE n60core)
+add_test(NAME n60core_mimo_stage COMMAND n60core_mimo_stage_test)

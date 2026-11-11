@@ -760,8 +760,46 @@ struct CompressorConfiguration: Equatable, Codable, Sendable {
     var sidechainHighPassHz = 0.0
     /// E28 S4: when true the Dynamics page keeps `makeupGainDB` at the automatic value (nil decodes as off).
     var autoMakeupGain: Bool?
+    /// E28 S7: extras behind `e28.dynamics-extras`. All optional so older profiles decode as the defaults
+    /// (mix 100 %, link 100 %, peak detector, 50 ms RMS window, lookahead off).
+    var mixPercent: Double?
+    var linkPercent: Double?
+    var rmsDetector: Bool?
+    var rmsWindowMs: Double?
+    var lookaheadMs: Double?
+
+    static let mixRange = 0.0...100.0
+    static let linkRange = 0.0...100.0
+    static let rmsWindowRange = 5.0...200.0
+    static let lookaheadRange = 0.0...20.0
+
+    /// The five extra core parameters (mix, link, detector, RMS window, lookahead frames) at `sampleRate`, or nil when
+    /// every extra is at its default so the 10-value block (bit-identical to ABI v32) is used.
+    func coreExtras(sampleRate: Double) -> [Float]? {
+        let mix = mixPercent ?? 100, link = linkPercent ?? 100, rms = rmsDetector ?? false
+        let window = rmsWindowMs ?? 50, look = lookaheadMs ?? 0
+        if mix == 100, link == 100, !rms, look == 0 { return nil }
+        let frames = Self.lookaheadFrames(ms: look, sampleRate: sampleRate)
+        return [
+            Float(min(max(mix, Self.mixRange.lowerBound), Self.mixRange.upperBound)),
+            Float(min(max(link, Self.linkRange.lowerBound), Self.linkRange.upperBound)),
+            rms ? 1 : 0,
+            Float(min(max(window, Self.rmsWindowRange.lowerBound), Self.rmsWindowRange.upperBound)),
+            Float(frames),
+        ]
+    }
+
+    /// Lookahead in frames at `sampleRate`, clamped to the core's 8192-frame ring.
+    static func lookaheadFrames(ms: Double, sampleRate: Double) -> Int {
+        guard ms.isFinite, sampleRate.isFinite, ms > 0, sampleRate > 0 else { return 0 }
+        return min(8192, Int((ms * sampleRate / 1000).rounded()))
+    }
 
     func validate() throws {
+        if let v = mixPercent, !(v.isFinite && Self.mixRange.contains(v)) { throw DynamicsConfigurationError.invalidCompressor }
+        if let v = linkPercent, !(v.isFinite && Self.linkRange.contains(v)) { throw DynamicsConfigurationError.invalidCompressor }
+        if let v = rmsWindowMs, !(v.isFinite && Self.rmsWindowRange.contains(v)) { throw DynamicsConfigurationError.invalidCompressor }
+        if let v = lookaheadMs, !(v.isFinite && Self.lookaheadRange.contains(v)) { throw DynamicsConfigurationError.invalidCompressor }
         guard thresholdDB.isFinite, Self.thresholdRange.contains(thresholdDB),
               ratio.isFinite, Self.ratioRange.contains(ratio),
               kneeWidthDB.isFinite, Self.kneeRange.contains(kneeWidthDB),

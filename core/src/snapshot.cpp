@@ -22,6 +22,7 @@
 #include "stages_multiband.hpp"
 #include "stages_generator.hpp"
 #include "stages_route.hpp"
+#include "stages_mimo.hpp"
 #include "stages_matrix.hpp"
 #include "stages_system.hpp"
 
@@ -283,6 +284,7 @@ uint32_t rankOf(uint32_t kind) {
     if (kind == N60_STAGE_DEESS) return 98;             // ABI v23: after IMAGE (and the S12c loudness slot at 97), before the compressor (100)
     if (kind == N60_STAGE_ANALYSER_TAP_EQ) return 95;   // ABI v21: after FIR, before the compressor
     if (kind == N60_STAGE_ANALYSER_TAP_DYN) return 115; // ABI v21: after the expander, before METER_OUT
+    if (kind == N60_STAGE_MIMO) return 135;             // ABI v33: after BASS_MGMT (130), before ROOM_FIR (140)
     if (kind == N60_STAGE_ROUTE) return 235;
     if (kind == N60_STAGE_XOVER) return 236;
     if (kind == N60_STAGE_DRIVER_FIR || kind == N60_STAGE_DRIVER_FIR_TWO_BAND) return 237;
@@ -326,6 +328,7 @@ size_t stateStrideFor(const n60_stage_desc &s, double rate, uint32_t firScheme) 
             else if (isLoudnessKind(s.kind)) loudnessSizes(s, rate, lane, shared);
             else if (isMultibandKind(s.kind)) multibandSizes(s, rate, lane, shared);
             else if (isRouteKind(s.kind)) routeSizes(s, lane, shared);
+            else if (isMimoKind(s.kind)) mimoSizes(s, lane, shared);
             return lane;
         }
     }
@@ -342,6 +345,7 @@ size_t sharedBytesFor(const n60_stage_desc &s, double rate, uint32_t firScheme) 
     else if (isLoudnessKind(s.kind)) loudnessSizes(s, rate, lane, shared);
     else if (isMultibandKind(s.kind)) multibandSizes(s, rate, lane, shared);
     else if (isRouteKind(s.kind)) routeSizes(s, lane, shared);
+    else if (isMimoKind(s.kind)) mimoSizes(s, lane, shared);
     return shared;
 }
 
@@ -442,6 +446,14 @@ n60_status validateDesc(const n60_graph_desc &d) {
         }
         if (isMultibandKind(s.kind)) {
             const n60_status v = validateMultibandStage(s, d.sampleRate, d.outputChannels);
+            if (v != N60_STATUS_OK) return v;
+            total += (stateStrideFor(s, d.sampleRate, d.firScheme) * laneCountFor(s, d.outputChannels)) + sharedBytesFor(s, d.sampleRate, d.firScheme) +
+                     size_t(s.paramCount) * sizeof(float);
+            if (total > kMaxArenaBytes) return N60_STATUS_OUT_OF_MEMORY;
+            continue;
+        }
+        if (isMimoKind(s.kind)) {
+            const n60_status v = validateMimoStage(s, d.sampleRate, d.outputChannels);
             if (v != N60_STATUS_OK) return v;
             total += (stateStrideFor(s, d.sampleRate, d.firScheme) * laneCountFor(s, d.outputChannels)) + sharedBytesFor(s, d.sampleRate, d.firScheme) +
                      size_t(s.paramCount) * sizeof(float);
@@ -639,6 +651,7 @@ n60_status buildSnapshot(const n60_graph_desc &d, uint32_t epoch, SnapHeader **o
         if (isLoudnessKind(s.kind)) loudnessInit(h, r);
         if (isMultibandKind(s.kind)) multibandInit(h, r);
         if (isRouteKind(s.kind)) routeInit(h, r);
+        if (isMimoKind(s.kind)) mimoInit(h, r);
         if (s.kind == N60_STAGE_PEQ) {
             PeqSec *sec = reinterpret_cast<PeqSec *>(bytes(h) + r.coefOff);
             for (uint32_t k = 0; k < s.paramCount / 4; ++k) {
@@ -706,6 +719,7 @@ n60_status validateParam(const SnapHeader *snap, const StageRec &r, uint32_t par
             if (isLoudnessKind(r.kind)) return validateLoudnessParam(snap, r, paramIndex, value);
             if (isMultibandKind(r.kind)) return validateMultibandParam(snap, r, paramIndex, value);
             if (isRouteKind(r.kind)) return validateRouteParam(snap, r, paramIndex, value);
+            if (isMimoKind(r.kind)) return validateMimoParam(snap, r, paramIndex, value);
             return isDspKind(r.kind) ? validateDspParam(snap, r, paramIndex, value) : N60_STATUS_UNSUPPORTED;
     }
 }
@@ -739,6 +753,8 @@ void snapshotLaneLatency(const SnapHeader *snap, uint32_t upTo, uint32_t *perLan
             frames = dspLatency(snap, r);
         } else if (isSystemKind(r.kind)) {
             frames = systemLatency(snap, r);
+        } else if (isMimoKind(r.kind)) {
+            frames = mimoLatency(snap, r);
         } else if (isMatrixKind(r.kind)) {
             // N source lanes collapse onto two ear lanes: the ears carry the worst source latency.
             uint32_t worstSrc = 0;
@@ -1086,6 +1102,7 @@ UpstreamKind upstreamKindOf(uint32_t kind) {
         case N60_STAGE_LOUDNESS:
         case N60_STAGE_DEESS:
         case N60_STAGE_MULTIBAND:
+        case N60_STAGE_MIMO:
         default: return UpstreamKind::Refuse;
     }
 }
@@ -1210,6 +1227,8 @@ void runStage(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames, 
                 runMultiband(h, r, lanes, frames);
             } else if (isRouteKind(r.kind)) {
                 runRoute(h, r, lanes, frames);
+            } else if (isMimoKind(r.kind)) {
+                runMimo(h, r, lanes, frames);
             } else {
                 runDsp(h, r, lanes, frames);
             }

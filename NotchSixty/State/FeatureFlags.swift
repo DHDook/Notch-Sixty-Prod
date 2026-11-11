@@ -21,7 +21,7 @@ extension FeatureFlag {
     static let all: [FeatureFlag] = [
         .legacyKernel, .ancEngineLease, .adaptiveTonalLive, .earnedCap, .feedForwardLive,
         .noiseSurvey, .conversationUnmasking, .virtualMicrophone, .zones, .headPositionCamera, .overnight,
-        .subAwareAnc, .longFIR, .outputProtection, .headphones, .mimoTreatment
+        .subAwareAnc, .longFIR, .outputProtection, .headphones, .mimoTreatment, .dynamicsExtras
     ]
 
     /// E6 S11: the unified graph is the default renderer. Turning this on selects the frozen
@@ -167,6 +167,14 @@ extension FeatureFlag {
         id: "e19.mimo-treatment",
         title: "MIMO room treatment",
         epic: "E19"
+    )
+
+    /// E28 S7: compressor mix, link amount, peak/RMS detector and lookahead on the unified graph (ABI v33). Swift decides;
+    /// the core only sees the 15-value compressor block. Off: the 10-value block, unchanged. Removed when E28 ships.
+    static let dynamicsExtras = FeatureFlag(
+        id: "e28.dynamics-extras",
+        title: "Dynamics extras",
+        epic: "E28"
     )
 }
 
