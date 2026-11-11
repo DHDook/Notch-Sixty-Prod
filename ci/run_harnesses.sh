@@ -38,6 +38,23 @@ FILTERS=("$@")
 passed=()
 failed=()
 
+# run_timed <cmd...>: runs one harness binary, names it in the log, and kills it after HARNESS_TIMEOUT seconds
+# (default 900) so a hang fails that harness and names itself instead of stalling the whole job.
+HARNESS_TIMEOUT=${HARNESS_TIMEOUT:-900}
+run_timed() {
+    echo "[harness] running: $* (timeout ${HARNESS_TIMEOUT}s)" >&2  # stderr: some callers redirect stdout to a file they compare
+    "$@" &
+    local pid=$! watchdog rc
+    # The watchdog reports and kills only if its sleep ran to the end (exit 0); a sleep killed by us does nothing.
+    ( sleep "$HARNESS_TIMEOUT" && { echo "[harness] TIMEOUT after ${HARNESS_TIMEOUT}s, killing: $*" >&2; kill -9 "$pid" 2>/dev/null; } ) &
+    watchdog=$!
+    wait "$pid"
+    rc=$?
+    # Stop the watchdog subshell first, then its sleep, so the subshell cannot go on to the timeout branch.
+    { kill "$watchdog"; pkill -P "$watchdog"; wait "$watchdog"; } 2>/dev/null  # the shell reports the killed job on stderr; hide that
+    return $rc
+}
+
 selected() {
     [ ${#FILTERS[@]} -eq 0 ] && return 0
     local filter
@@ -53,7 +70,7 @@ harness() {
     shift
     selected "$name" || return 0
     echo "::group::$name"
-    if clang "$@" -lc++ -o "$OUT/$name" && "$OUT/$name"; then
+    if clang "$@" -lc++ -o "$OUT/$name" && run_timed "$OUT/$name"; then
         passed+=("$name")
     else
         failed+=("$name")
@@ -241,8 +258,8 @@ if selected e4_acoustic_twin; then
         && clang++ -std=c++20 -O2 -Wall -Wextra -Werror -I"$RT" -Ici ci/harness_e4_acoustic_twin.cpp \
             "$OUT/n60_anc_guard_twin.o" "$OUT/n60_fxlms_twin.o" -o "$OUT/e4_acoustic_twin"; then
         echo "::group::e4_acoustic_twin"
-        if "$OUT/e4_acoustic_twin" && { [ "${SOAK:-0}" != 1 ] || "$OUT/e4_acoustic_twin" --soak; } \
-            && { [ "${SOAK:-0}" != 1 ] || "$OUT/e4_acoustic_twin" --overnight; }; then
+        if run_timed "$OUT/e4_acoustic_twin" && { [ "${SOAK:-0}" != 1 ] || run_timed "$OUT/e4_acoustic_twin" --soak; } \
+            && { [ "${SOAK:-0}" != 1 ] || run_timed "$OUT/e4_acoustic_twin" --overnight; }; then
             passed+=(e4_acoustic_twin)
         else
             failed+=(e4_acoustic_twin)
@@ -255,7 +272,7 @@ fi
 # E26 S1: the twin's downstream-sub and app-splitter bass-path models.
 if selected e26_bass_path; then
     echo "::group::e26_bass_path"
-    if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -Ici ci/harness_e26_bass_path.cpp -o "$OUT/e26_bass_path" && "$OUT/e26_bass_path"; then
+    if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -Ici ci/harness_e26_bass_path.cpp -o "$OUT/e26_bass_path" && run_timed "$OUT/e26_bass_path"; then
         passed+=(e26_bass_path)
     else
         failed+=(e26_bass_path)
@@ -268,7 +285,7 @@ if selected e4_remote_tonal; then
     if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -include stddef.h -I"$RT" -Ici ci/harness_e4_remote_tonal.cpp \
             "$RT/n60_remote_tonal.cpp" -o "$OUT/e4_remote_tonal"; then
         echo "::group::e4_remote_tonal"
-        if "$OUT/e4_remote_tonal" && { [ "${SOAK:-0}" != 1 ] || "$OUT/e4_remote_tonal" --soak; }; then
+        if run_timed "$OUT/e4_remote_tonal" && { [ "${SOAK:-0}" != 1 ] || run_timed "$OUT/e4_remote_tonal" --soak; }; then
             passed+=(e4_remote_tonal)
         else
             failed+=(e4_remote_tonal)
@@ -285,7 +302,7 @@ if selected e4_programme_removal; then
         && clang++ -std=c++20 -O2 -Wall -Wextra -Werror -include stddef.h -I"$RT" ci/harness_e4_programme_removal.cpp \
             "$RT/n60_remote_tonal.cpp" "$OUT/n60_aqz_programme.o" -o "$OUT/e4_programme_removal"; then
         echo "::group::e4_programme_removal"
-        if "$OUT/e4_programme_removal"; then
+        if run_timed "$OUT/e4_programme_removal"; then
             passed+=(e4_programme_removal)
         else
             failed+=(e4_programme_removal)
@@ -373,7 +390,7 @@ if selected e10_correct_core; then
     build_core_objs
     if [ "$CORE_OK" = 1 ]; then
         if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -Icore/include -Icore/src core/tests/test_correct.cpp \
-            "${CORE_OBJS[@]}" -o "$OUT/e10_core_correct" && "$OUT/e10_core_correct"; then
+            "${CORE_OBJS[@]}" -o "$OUT/e10_core_correct" && run_timed "$OUT/e10_core_correct"; then
             passed+=(e10_core_correct)
         else
             failed+=(e10_core_correct)
@@ -388,7 +405,7 @@ if selected e8_multisub_core; then
     build_core_objs
     if [ "$CORE_OK" = 1 ]; then
         if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -Icore/include -Icore/src core/tests/test_correct_multisub.cpp \
-            "${CORE_OBJS[@]}" -o "$OUT/e8_core_correct_multisub" && "$OUT/e8_core_correct_multisub"; then
+            "${CORE_OBJS[@]}" -o "$OUT/e8_core_correct_multisub" && run_timed "$OUT/e8_core_correct_multisub"; then
             passed+=(e8_core_correct_multisub)
         else
             failed+=(e8_core_correct_multisub)
@@ -403,7 +420,7 @@ if selected e10_bass_core; then
     build_core_objs
     if [ "$CORE_OK" = 1 ]; then
         if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -Icore/include -Icore/src core/tests/test_correct_bass.cpp \
-            "${CORE_OBJS[@]}" -o "$OUT/e10_core_correct_bass" && "$OUT/e10_core_correct_bass"; then
+            "${CORE_OBJS[@]}" -o "$OUT/e10_core_correct_bass" && run_timed "$OUT/e10_core_correct_bass"; then
             passed+=(e10_core_correct_bass)
         else
             failed+=(e10_core_correct_bass)
@@ -418,7 +435,7 @@ if selected e8_xover_core; then
     build_core_objs
     if [ "$CORE_OK" = 1 ]; then
         if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -Icore/include -Icore/src core/tests/test_xover.cpp \
-            "${CORE_OBJS[@]}" -o "$OUT/e8_core_xover" && "$OUT/e8_core_xover"; then
+            "${CORE_OBJS[@]}" -o "$OUT/e8_core_xover" && run_timed "$OUT/e8_core_xover"; then
             passed+=(e8_core_xover)
         else
             failed+=(e8_core_xover)
@@ -433,7 +450,7 @@ if selected e9_headroom_core; then
     build_core_objs
     if [ "$CORE_OK" = 1 ]; then
         if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -Icore/include -Icore/src core/tests/test_headroom.cpp \
-            "${CORE_OBJS[@]}" -o "$OUT/e9_core_headroom" && "$OUT/e9_core_headroom"; then
+            "${CORE_OBJS[@]}" -o "$OUT/e9_core_headroom" && run_timed "$OUT/e9_core_headroom"; then
             passed+=(e9_core_headroom)
         else
             failed+=(e9_core_headroom)
@@ -448,7 +465,7 @@ if selected e8_xover_fir_core; then
     build_core_objs
     if [ "$CORE_OK" = 1 ]; then
         if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -Icore/include -Icore/src core/tests/test_xover_fir.cpp \
-            "${CORE_OBJS[@]}" -o "$OUT/e8_core_xover_fir" && "$OUT/e8_core_xover_fir"; then
+            "${CORE_OBJS[@]}" -o "$OUT/e8_core_xover_fir" && run_timed "$OUT/e8_core_xover_fir"; then
             passed+=(e8_core_xover_fir)
         else
             failed+=(e8_core_xover_fir)
@@ -463,7 +480,7 @@ if selected e8_xover_linearise_core; then
     build_core_objs
     if [ "$CORE_OK" = 1 ]; then
         if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -Icore/include -Icore/src core/tests/test_xover_linearise.cpp \
-            "${CORE_OBJS[@]}" -o "$OUT/e8_core_xover_linearise" && "$OUT/e8_core_xover_linearise"; then
+            "${CORE_OBJS[@]}" -o "$OUT/e8_core_xover_linearise" && run_timed "$OUT/e8_core_xover_linearise"; then
             passed+=(e8_core_xover_linearise)
         else
             failed+=(e8_core_xover_linearise)
@@ -478,7 +495,7 @@ if selected e19_mimo_stage; then
     build_core_objs
     if [ "$CORE_OK" = 1 ]; then
         if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -Icore/include -Icore/src core/tests/test_mimo_stage.cpp \
-            "${CORE_OBJS[@]}" -o "$OUT/e19_core_mimo_stage" && "$OUT/e19_core_mimo_stage"; then
+            "${CORE_OBJS[@]}" -o "$OUT/e19_core_mimo_stage" && run_timed "$OUT/e19_core_mimo_stage"; then
             passed+=(e19_core_mimo_stage)
         else
             failed+=(e19_core_mimo_stage)
@@ -493,7 +510,7 @@ if selected e19_mimo_safety; then
     build_core_objs
     if [ "$CORE_OK" = 1 ]; then
         if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -Icore/include -Icore/src core/tests/test_mimo_safety.cpp \
-            "${CORE_OBJS[@]}" -o "$OUT/e19_core_mimo_safety" && "$OUT/e19_core_mimo_safety"; then
+            "${CORE_OBJS[@]}" -o "$OUT/e19_core_mimo_safety" && run_timed "$OUT/e19_core_mimo_safety"; then
             passed+=(e19_core_mimo_safety)
         else
             failed+=(e19_core_mimo_safety)
@@ -508,7 +525,7 @@ if selected e8_route_core; then
     build_core_objs
     if [ "$CORE_OK" = 1 ]; then
         if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -Icore/include -Icore/src core/tests/test_route.cpp \
-            "${CORE_OBJS[@]}" -o "$OUT/e8_core_route" && "$OUT/e8_core_route"; then
+            "${CORE_OBJS[@]}" -o "$OUT/e8_core_route" && run_timed "$OUT/e8_core_route"; then
             passed+=(e8_core_route)
         else
             failed+=(e8_core_route)
@@ -523,7 +540,7 @@ if selected e9_conv; then
     build_core_objs
     if [ "$CORE_OK" = 1 ]; then
         if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -Icore/include -Icore/src core/tests/test_conv.cpp \
-            "${CORE_OBJS[@]}" -o "$OUT/e9_core_conv" && "$OUT/e9_core_conv"; then
+            "${CORE_OBJS[@]}" -o "$OUT/e9_core_conv" && run_timed "$OUT/e9_core_conv"; then
             passed+=(e9_core_conv)
         else
             failed+=(e9_core_conv)
@@ -538,7 +555,7 @@ if selected e9_conv_rebuild; then
     build_core_objs
     if [ "$CORE_OK" = 1 ]; then
         if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -Icore/include -Icore/src core/tests/test_conv_rebuild.cpp \
-            "${CORE_OBJS[@]}" -o "$OUT/e9_core_conv_rebuild" && "$OUT/e9_core_conv_rebuild"; then
+            "${CORE_OBJS[@]}" -o "$OUT/e9_core_conv_rebuild" && run_timed "$OUT/e9_core_conv_rebuild"; then
             passed+=(e9_core_conv_rebuild)
         else
             failed+=(e9_core_conv_rebuild)
@@ -561,9 +578,9 @@ if selected e20_bench || selected e20_profile; then
             if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -fno-exceptions -fno-rtti -DN60_GRAPH_PROFILE -Icore/include -Icore/src \
                     -c core/src/snapshot.cpp -o "$OUT/n60core_snapshot_profile.o" \
                 && clang++ -std=c++20 -O2 -Wall -Wextra -Werror -Icore/include core/tests/test_profile.cpp "${CORE_OBJS[@]}" \
-                    -Wl,-U,_n60_profile_read -Wl,-U,_n60_profile_reset -o "$OUT/e20_profile_absent" && "$OUT/e20_profile_absent" absent \
+                    -Wl,-U,_n60_profile_read -Wl,-U,_n60_profile_reset -o "$OUT/e20_profile_absent" && run_timed "$OUT/e20_profile_absent" absent \
                 && clang++ -std=c++20 -O2 -Wall -Wextra -Werror -Icore/include core/tests/test_profile.cpp "${PROFILE_OBJS[@]}" \
-                    -o "$OUT/e20_profile_present" && "$OUT/e20_profile_present" present; then
+                    -o "$OUT/e20_profile_present" && run_timed "$OUT/e20_profile_present" present; then
                 passed+=(e20_profile)
             else
                 failed+=(e20_profile)
@@ -575,9 +592,9 @@ if selected e20_bench || selected e20_profile; then
                     -o "$OUT/n60core_snapshot_profile.o"
             fi
             if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -Icore/include -Icore/src core/bench/n60_bench.cpp "${CORE_OBJS[@]}" \
-                    -framework Accelerate -o "$OUT/e20_bench_product" && "$OUT/e20_bench_product" --self-test \
+                    -framework Accelerate -o "$OUT/e20_bench_product" && run_timed "$OUT/e20_bench_product" --self-test \
                 && clang++ -std=c++20 -O2 -Wall -Wextra -Werror -DN60_BENCH_PROFILE -Icore/include -Icore/src core/bench/n60_bench.cpp \
-                    "${PROFILE_OBJS[@]}" -framework Accelerate -o "$OUT/e20_bench_profile" && "$OUT/e20_bench_profile" --self-test; then
+                    "${PROFILE_OBJS[@]}" -framework Accelerate -o "$OUT/e20_bench_profile" && run_timed "$OUT/e20_bench_profile" --self-test; then
                 passed+=(e20_bench)
             else
                 failed+=(e20_bench)
@@ -593,7 +610,7 @@ if selected e25_stereo_bass; then
     build_core_objs
     if [ "$CORE_OK" = 1 ]; then
         if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -Icore/include -Icore/src core/tests/test_stereo_bass.cpp \
-            "${CORE_OBJS[@]}" -o "$OUT/e25_core_stereo_bass" && "$OUT/e25_core_stereo_bass"; then
+            "${CORE_OBJS[@]}" -o "$OUT/e25_core_stereo_bass" && run_timed "$OUT/e25_core_stereo_bass"; then
             passed+=(e25_core_stereo_bass)
         else
             failed+=(e25_core_stereo_bass)
@@ -608,7 +625,7 @@ if selected e26_anc_actuators; then
     build_core_objs
     if [ "$CORE_OK" = 1 ]; then
         if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -Icore/include -Icore/src core/tests/test_anc_actuators.cpp \
-            "${CORE_OBJS[@]}" -o "$OUT/e26_core_anc_actuators" && "$OUT/e26_core_anc_actuators"; then
+            "${CORE_OBJS[@]}" -o "$OUT/e26_core_anc_actuators" && run_timed "$OUT/e26_core_anc_actuators"; then
             passed+=(e26_core_anc_actuators)
         else
             failed+=(e26_core_anc_actuators)
@@ -623,7 +640,7 @@ if selected e27_analyser_tap; then
     build_core_objs
     if [ "$CORE_OK" = 1 ]; then
         if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -Icore/include -Icore/src core/tests/test_analyser_tap.cpp \
-            "${CORE_OBJS[@]}" -o "$OUT/e27_core_analyser_tap" && "$OUT/e27_core_analyser_tap"; then
+            "${CORE_OBJS[@]}" -o "$OUT/e27_core_analyser_tap" && run_timed "$OUT/e27_core_analyser_tap"; then
             passed+=(e27_core_analyser_tap)
         else
             failed+=(e27_core_analyser_tap)
@@ -638,7 +655,7 @@ if selected e6_state_carry; then
     build_core_objs
     if [ "$CORE_OK" = 1 ]; then
         if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -Icore/include -Icore/src core/tests/test_state_carry.cpp \
-            "${CORE_OBJS[@]}" -o "$OUT/e6_core_state_carry" && "$OUT/e6_core_state_carry"; then
+            "${CORE_OBJS[@]}" -o "$OUT/e6_core_state_carry" && run_timed "$OUT/e6_core_state_carry"; then
             passed+=(e6_core_state_carry)
         else
             failed+=(e6_core_state_carry)
@@ -653,7 +670,7 @@ if selected e6_stage_carry2; then
     build_core_objs
     if [ "$CORE_OK" = 1 ]; then
         if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -Icore/include -Icore/src core/tests/test_stage_carry2.cpp \
-            "${CORE_OBJS[@]}" -o "$OUT/e6_core_stage_carry2" && "$OUT/e6_core_stage_carry2"; then
+            "${CORE_OBJS[@]}" -o "$OUT/e6_core_stage_carry2" && run_timed "$OUT/e6_core_stage_carry2"; then
             passed+=(e6_core_stage_carry2)
         else
             failed+=(e6_core_stage_carry2)
@@ -668,7 +685,7 @@ if selected e6_image_precision; then
     build_core_objs
     if [ "$CORE_OK" = 1 ]; then
         if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -Icore/include -Icore/src core/tests/test_image_precision.cpp \
-            "${CORE_OBJS[@]}" -o "$OUT/e6_core_image_precision" && "$OUT/e6_core_image_precision"; then
+            "${CORE_OBJS[@]}" -o "$OUT/e6_core_image_precision" && run_timed "$OUT/e6_core_image_precision"; then
             passed+=(e6_core_image_precision)
         else
             failed+=(e6_core_image_precision)
@@ -683,7 +700,7 @@ if selected e6_cleanup; then
     build_core_objs
     if [ "$CORE_OK" = 1 ]; then
         if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -Icore/include -Icore/src core/tests/test_cleanup.cpp \
-            "${CORE_OBJS[@]}" -o "$OUT/e6_core_cleanup" && "$OUT/e6_core_cleanup"; then
+            "${CORE_OBJS[@]}" -o "$OUT/e6_core_cleanup" && run_timed "$OUT/e6_core_cleanup"; then
             passed+=(e6_core_cleanup)
         else
             failed+=(e6_core_cleanup)
@@ -698,7 +715,7 @@ if selected e6_image; then
     build_core_objs
     if [ "$CORE_OK" = 1 ]; then
         if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -Icore/include -Icore/src core/tests/test_image.cpp \
-            "${CORE_OBJS[@]}" -o "$OUT/e6_core_image" && "$OUT/e6_core_image"; then
+            "${CORE_OBJS[@]}" -o "$OUT/e6_core_image" && run_timed "$OUT/e6_core_image"; then
             passed+=(e6_core_image)
         else
             failed+=(e6_core_image)
@@ -713,7 +730,7 @@ if selected e6_multiband; then
     build_core_objs
     if [ "$CORE_OK" = 1 ]; then
         if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -Icore/include -Icore/src core/tests/test_multiband.cpp \
-            "${CORE_OBJS[@]}" -o "$OUT/e6_core_multiband" && "$OUT/e6_core_multiband"; then
+            "${CORE_OBJS[@]}" -o "$OUT/e6_core_multiband" && run_timed "$OUT/e6_core_multiband"; then
             passed+=(e6_core_multiband)
         else
             failed+=(e6_core_multiband)
@@ -728,7 +745,7 @@ if selected e6_peq_wide; then
     build_core_objs
     if [ "$CORE_OK" = 1 ]; then
         if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -Icore/include -Icore/src core/tests/test_peq_wide.cpp \
-            "${CORE_OBJS[@]}" -o "$OUT/e6_core_peq_wide" && "$OUT/e6_core_peq_wide"; then
+            "${CORE_OBJS[@]}" -o "$OUT/e6_core_peq_wide" && run_timed "$OUT/e6_core_peq_wide"; then
             passed+=(e6_core_peq_wide)
         else
             failed+=(e6_core_peq_wide)
@@ -743,7 +760,7 @@ if selected e6_lane_delay; then
     build_core_objs
     if [ "$CORE_OK" = 1 ]; then
         if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -Icore/include -Icore/src core/tests/test_lane_delay.cpp \
-            "${CORE_OBJS[@]}" -o "$OUT/e6_core_lane_delay" && "$OUT/e6_core_lane_delay"; then
+            "${CORE_OBJS[@]}" -o "$OUT/e6_core_lane_delay" && run_timed "$OUT/e6_core_lane_delay"; then
             passed+=(e6_core_lane_delay)
         else
             failed+=(e6_core_lane_delay)
@@ -758,7 +775,7 @@ if selected e7_rate_capacity; then
     build_core_objs
     if [ "$CORE_OK" = 1 ]; then
         if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -Icore/include -Icore/src core/tests/test_rate_capacity.cpp \
-            "${CORE_OBJS[@]}" -o "$OUT/e7_core_rate_capacity" && "$OUT/e7_core_rate_capacity"; then
+            "${CORE_OBJS[@]}" -o "$OUT/e7_core_rate_capacity" && run_timed "$OUT/e7_core_rate_capacity"; then
             passed+=(e7_core_rate_capacity)
         else
             failed+=(e7_core_rate_capacity)
@@ -774,7 +791,7 @@ if selected e6_delta_audition; then
     build_core_objs
     if [ "$CORE_OK" = 1 ]; then
         if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -Icore/include -Icore/src core/tests/test_delta_audition.cpp \
-            "${CORE_OBJS[@]}" -o "$OUT/e6_core_delta_audition" && "$OUT/e6_core_delta_audition"; then
+            "${CORE_OBJS[@]}" -o "$OUT/e6_core_delta_audition" && run_timed "$OUT/e6_core_delta_audition"; then
             passed+=(e6_core_delta_audition)
         else
             failed+=(e6_core_delta_audition)
@@ -789,7 +806,7 @@ if selected e28_comp_extras; then
     build_core_objs
     if [ "$CORE_OK" = 1 ]; then
         if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -Icore/include -Icore/src core/tests/test_comp_extras.cpp \
-            "${CORE_OBJS[@]}" -o "$OUT/e28_core_comp_extras" && "$OUT/e28_core_comp_extras"; then
+            "${CORE_OBJS[@]}" -o "$OUT/e28_core_comp_extras" && run_timed "$OUT/e28_core_comp_extras"; then
             passed+=(e28_core_comp_extras)
         else
             failed+=(e28_core_comp_extras)
@@ -804,7 +821,7 @@ if selected e28_exp_extras; then
     build_core_objs
     if [ "$CORE_OK" = 1 ]; then
         if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -Icore/include -Icore/src core/tests/test_exp_extras.cpp \
-            "${CORE_OBJS[@]}" -o "$OUT/e28_core_exp_extras" && "$OUT/e28_core_exp_extras"; then
+            "${CORE_OBJS[@]}" -o "$OUT/e28_core_exp_extras" && run_timed "$OUT/e28_core_exp_extras"; then
             passed+=(e28_core_exp_extras)
         else
             failed+=(e28_core_exp_extras)
@@ -834,7 +851,7 @@ if selected e6_loudness; then
     build_core_objs
     if [ "$CORE_OK" = 1 ]; then
         if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -Icore/include -Icore/src core/tests/test_loudness.cpp \
-            "${CORE_OBJS[@]}" -o "$OUT/e6_core_loudness" && "$OUT/e6_core_loudness"; then
+            "${CORE_OBJS[@]}" -o "$OUT/e6_core_loudness" && run_timed "$OUT/e6_core_loudness"; then
             passed+=(e6_core_loudness)
         else
             failed+=(e6_core_loudness)
@@ -853,7 +870,7 @@ if selected e26_anc_lane_feed; then
         && clang++ -std=c++20 -O2 -Wall -Wextra -Werror -I"$RT" -c "$RT/n60_anc_lane_feed.cpp" -o "$OUT/e26_alf_feed.o" \
         && clang++ -std=c++20 -O2 -Wall -Wextra -Werror -I"$RT" core/tests/test_anc_lane_feed.cpp \
             "$OUT/e26_alf_feed.o" "$OUT/e26_alf_aqz.o" "$OUT/e26_alf_ff_live.o" "$OUT/e26_alf_ff_echo.o" \
-            "$OUT/e26_alf_fxlms.o" -o "$OUT/e26_anc_lane_feed" && "$OUT/e26_anc_lane_feed"; then
+            "$OUT/e26_alf_fxlms.o" -o "$OUT/e26_anc_lane_feed" && run_timed "$OUT/e26_anc_lane_feed"; then
         passed+=(e26_anc_lane_feed)
     else
         failed+=(e26_anc_lane_feed)
@@ -926,18 +943,21 @@ if selected e6_core_graph; then
             "${CORE_OBJS[@]}" -lc++ -lm -framework Accelerate
         if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -Icore/include core/tests/test_alloc.cpp \
             "${CORE_OBJS[@]}" -o "$OUT/e6_core_alloc" \
-            && "$OUT/e6_core_alloc"; then :; else failed+=(e6_core_alloc); fi
+            && run_timed "$OUT/e6_core_alloc"; then :; else failed+=(e6_core_alloc); fi
         # E20 S2: the realtime annotations only check anything where the compiler supports clang function effects.
         # -Wno-unknown-warning-option would hide a toolchain without it, so fail loudly instead.
         if printf '#if !(defined(__has_cpp_attribute) && __has_cpp_attribute(clang::nonblocking))\n#error no function effects\n#endif\nint main(){return 0;}\n' \
             | clang++ -std=c++20 -x c++ -fsyntax-only - 2>/dev/null; then :; else failed+=(e20_function_effects_unsupported); fi
         if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -Icore/include -Icore/src core/tests/test_fpenv.cpp \
             "${CORE_OBJS[@]}" -o "$OUT/e20_core_fpenv" \
-            && "$OUT/e20_core_fpenv"; then :; else failed+=(e20_core_fpenv); fi
+            && run_timed "$OUT/e20_core_fpenv"; then :; else failed+=(e20_core_fpenv); fi
+        # E20 S5: parallel render core, bit-identical output at 0 to 3 workers, delayed and absent workers, no allocation.
+        if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -Icore/include core/tests/test_parallel.cpp \
+            "${CORE_OBJS[@]}" -pthread -o "$OUT/e20_core_parallel" && run_timed "$OUT/e20_core_parallel"; then :; else failed+=(e20_core_parallel); fi
         # E20 S3: SIMD primitives and lane independence, then the SIMD build against the scalar build (N60_SIMD=0):
         # a chain through every SIMD stage must hash identically at every rate, lane count and block size.
         if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -Icore/include -Icore/src core/tests/test_simd_parity.cpp \
-            "${CORE_OBJS[@]}" -o "$OUT/e20_simd_parity" && "$OUT/e20_simd_parity" check; then :; else failed+=(e20_simd_parity); fi
+            "${CORE_OBJS[@]}" -o "$OUT/e20_simd_parity" && run_timed "$OUT/e20_simd_parity" check; then :; else failed+=(e20_simd_parity); fi
         simd_scalar_ok=1
         simd_scalar_objs=()
         for src in "${CORE_SOURCES[@]}"; do
@@ -948,18 +968,18 @@ if selected e6_core_graph; then
         if [ "$simd_scalar_ok" = 1 ] \
             && clang++ -std=c++20 -O2 -DN60_SIMD=0 -Icore/include -Icore/src core/tests/test_simd_parity.cpp \
                 "${simd_scalar_objs[@]}" -o "$OUT/e20_simd_parity_scalar" \
-            && "$OUT/e20_simd_parity_scalar" check \
-            && "$OUT/e20_simd_parity" dump > "$OUT/e20_simd_dump_vector.txt" \
-            && "$OUT/e20_simd_parity_scalar" dump > "$OUT/e20_simd_dump_scalar.txt" \
+            && run_timed "$OUT/e20_simd_parity_scalar" check \
+            && run_timed "$OUT/e20_simd_parity" dump > "$OUT/e20_simd_dump_vector.txt" \
+            && run_timed "$OUT/e20_simd_parity_scalar" dump > "$OUT/e20_simd_dump_scalar.txt" \
             && cmp "$OUT/e20_simd_dump_vector.txt" "$OUT/e20_simd_dump_scalar.txt"; then :; else failed+=(e20_simd_scalar_parity); fi
         # E20 S4: FFT (SIMD butterflies, real-input packing) and convolution against a double reference, then SIMD against scalar.
         if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -Icore/include -Icore/src core/tests/test_fft_conv.cpp \
-            "${CORE_OBJS[@]}" -o "$OUT/e20_fft_conv" && "$OUT/e20_fft_conv" check; then :; else failed+=(e20_fft_conv); fi
+            "${CORE_OBJS[@]}" -o "$OUT/e20_fft_conv" && run_timed "$OUT/e20_fft_conv" check; then :; else failed+=(e20_fft_conv); fi
         if [ "$simd_scalar_ok" = 1 ] \
             && clang++ -std=c++20 -O2 -DN60_SIMD=0 -Icore/include -Icore/src core/tests/test_fft_conv.cpp \
                 "${simd_scalar_objs[@]}" -o "$OUT/e20_fft_conv_scalar" \
-            && "$OUT/e20_fft_conv" dump > "$OUT/e20_fft_dump_vector.txt" \
-            && "$OUT/e20_fft_conv_scalar" dump > "$OUT/e20_fft_dump_scalar.txt" \
+            && run_timed "$OUT/e20_fft_conv" dump > "$OUT/e20_fft_dump_vector.txt" \
+            && run_timed "$OUT/e20_fft_conv_scalar" dump > "$OUT/e20_fft_dump_scalar.txt" \
             && cmp "$OUT/e20_fft_dump_vector.txt" "$OUT/e20_fft_dump_scalar.txt"; then :; else failed+=(e20_fft_scalar_parity); fi
     else
         failed+=(e6_core_graph)

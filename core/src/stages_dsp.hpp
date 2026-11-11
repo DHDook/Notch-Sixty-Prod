@@ -23,6 +23,15 @@ void dspInit(SnapHeader *h, const StageRec &r);
 // Realtime thread. Runs the stage in place over `frames` frames of the output lanes.
 void runDsp(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) N60_RT_NONBLOCKING;
 
+// E20 S5. A non-uniform FIR stage (firScheme 1) keeps all running state per lane, so its lanes can run on different
+// threads. dspFirLaneReady finishes or steps the lane's history reset (spends the callback's byte budget: IO thread only,
+// before the parallel phase) and returns false while the lane is still clearing. dspFirLaneRun processes one lane in
+// place with the caller's own FFT scratch (dspFirScratchBytes bytes, 16-byte aligned; null = the stage's shared one).
+bool dspFirParallel(const SnapHeader *h, const StageRec &r) N60_RT_NONBLOCKING;
+bool dspFirLaneReady(SnapHeader *h, const StageRec &r, uint32_t laneIndex) N60_RT_NONBLOCKING;
+void dspFirLaneRun(SnapHeader *h, const StageRec &r, uint32_t laneIndex, float *buf, uint32_t frames, void *scratch) N60_RT_NONBLOCKING;
+size_t dspFirScratchBytes();
+
 // Pure range and liveness check for one parameter (see validateParam).
 n60_status validateDspParam(const SnapHeader *h, const StageRec &r, uint32_t idx, float value) N60_RT_NONBLOCKING;
 

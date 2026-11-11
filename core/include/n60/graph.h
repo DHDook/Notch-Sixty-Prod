@@ -892,6 +892,52 @@ typedef struct n60_graph_load {
 } n60_graph_load;
 n60_status n60_graph_read_load(const n60_graph *graph, n60_graph_load *outLoad);
 
+/* E20 S5. Parallel render: worker threads owned by the host. The core creates none.
+ *
+ * The builder marks runs of consecutive stages whose lanes are independent (today: program, room, speaker and driver FIR
+ * stages in firScheme 1) as phases. With workers set and a phase of two or more lanes, n60_graph_process publishes one
+ * job per lane, runs jobs itself, and waits only for jobs another thread has already claimed before it moves on, so the
+ * output is bit-identical at any worker count (each job writes only its own lane and every lane's arithmetic is unchanged).
+ * Everything else, cross-lane stages included, runs on the thread that calls n60_graph_process. Added to the ABI version current when it merged, without a
+ * version bump: only new functions, no layout change.
+ *
+ * Wake protocol. Once per callback, at its first parallel phase, process calls the wake function (realtime thread:
+ * the host must only signal a semaphore) with the worker count. Each woken worker thread calls n60_graph_worker_run with
+ * its own index 1..N60_GRAPH_MAX_WORKERS; the call claims and runs jobs until the callback ends, then returns. A worker
+ * that never runs (or runs late) costs nothing: the calling thread runs every unclaimed job. The calling thread spins
+ * only on jobs another thread has claimed, and counts each such wait as a late join. Two threads must not use the
+ * same worker index at the same time. n60_graph_worker_run allocates nothing and takes no lock.
+ *
+ * Host duties. Workers must run at realtime priority in the same audio workgroup (or platform equivalent) as the render
+ * thread: the calling thread spins (yielding the core every few thousand spins), without a timeout, on a job a worker has already claimed, so a descheduled worker
+ * delays the callback (n60_graph_parallel_stats.lateJoins counts these waits). Workers run with flush-to-zero on, as the
+ * calling thread does. n60_graph_set_wake and n60_graph_set_workers are for use while no callback is running (stop the
+ * stream first). Stop and join every worker before n60_graph_retire. A worker spins for the rest of the callback once
+ * woken, so ask for no more workers than the cost model says pay off.
+ *
+ * The worker count is a ceiling: the caller decides (S1 cost model) whether to ask for workers at all. */
+#define N60_GRAPH_MAX_WORKERS 3u
+typedef void (*n60_graph_wake_fn)(void *context, uint32_t workerCount);
+
+/* Control thread. 0 = single-threaded (the default). Fails with BAD_ARGUMENT above N60_GRAPH_MAX_WORKERS. */
+n60_status n60_graph_set_workers(n60_graph *graph, uint32_t workers);
+/* Control thread. Registers or clears (NULL) the wake function. Clear it, or stop the workers, before freeing context. */
+n60_status n60_graph_set_wake(n60_graph *graph, n60_graph_wake_fn wake, void *context);
+/* Worker thread. Returns the number of jobs this call ran. */
+uint32_t n60_graph_worker_run(n60_graph *graph, uint32_t workerIndex);
+
+typedef struct n60_graph_parallel_stats {
+    uint32_t structSize;          /* set to sizeof(n60_graph_parallel_stats) */
+    uint32_t workers;             /* current setting */
+    uint64_t parallelPhases;      /* phases published as jobs */
+    uint64_t jobsOnWorkers;       /* jobs a worker ran */
+    uint64_t jobsOnCaller;        /* jobs the calling thread ran */
+    uint64_t lateJoins;           /* phases where the caller waited for a claimed job */
+    uint64_t wakes;               /* callbacks that woke the workers */
+} n60_graph_parallel_stats;
+/* Any thread. */
+n60_status n60_graph_read_parallel(const n60_graph *graph, n60_graph_parallel_stats *out);
+
 /* Control thread. Frees the graph and every snapshot, only after the realtime
  * thread has stopped using it. NULL is allowed. */
 void n60_graph_retire(n60_graph *graph);
