@@ -199,6 +199,7 @@ final class UnifiedGraphHost: @unchecked Sendable {
     /// The one listener of this graph. Session state: never part of the spec, so it is never encoded.
     let listenSession = DynamicsListenSession()
     private var postedListen: [UInt64: Float] = [:]
+    private var clearPending = false
     private static func listenKey(_ stageId: UInt32, _ paramIndex: UInt32) -> UInt64 { UInt64(stageId) << 32 | UInt64(paramIndex) }
 
     /// Makes `listener` the only listener (nil stops listening) and posts the stages' live listen parameters: the
@@ -221,10 +222,14 @@ final class UnifiedGraphHost: @unchecked Sendable {
     }
 
     /// Stops listening (profile switch, Stop, output change, Quit). Idempotent.
-    func clearListener() {
+    /// Returns false when the post failed: the state is cleared and the core may still be listening, so the caller retries
+    /// or reports it (E28 S7d, G37).
+    @discardableResult
+    func clearListener() -> Bool {
         lock.lock(); defer { lock.unlock() }
-        guard listenSession.clear() else { return }
-        _ = try? postListenLocked()
+        let changed = listenSession.clear()
+        guard changed || clearPending else { return true }
+        do { _ = try postListenLocked(); clearPending = false; return true } catch { clearPending = true; return false }
     }
 
     /// Solos the given multiband bands (0 low, 1 mid, 2 high; empty clears). Session state like the listener: never in

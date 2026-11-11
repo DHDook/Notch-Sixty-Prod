@@ -7,6 +7,9 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		E28D700000000000000000C1 /* DynamicsExtrasS7dTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E28D700000000000000000C2 /* DynamicsExtrasS7dTests.swift */; };
+		E28D700000000000000000B1 /* DynamicsListenControls.swift in Sources */ = {isa = PBXBuildFile; fileRef = E28D700000000000000000B2 /* DynamicsListenControls.swift */; };
+		E28D700000000000000000A1 /* DynamicsExtrasAccessors.swift in Sources */ = {isa = PBXBuildFile; fileRef = E28D700000000000000000A2 /* DynamicsExtrasAccessors.swift */; };
 		E28E00600000000000000000 /* DynamicsTransferCurve.swift in Sources */ = {isa = PBXBuildFile; fileRef = E28D00600000000000000000 /* DynamicsTransferCurve.swift */; };
 		E28E00700000000000000000 /* GainReductionHistory.swift in Sources */ = {isa = PBXBuildFile; fileRef = E28D00700000000000000000 /* GainReductionHistory.swift */; };
 		E28E00800000000000000000 /* GainReductionMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = E28D00800000000000000000 /* GainReductionMonitor.swift */; };
@@ -711,6 +714,9 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		E28D700000000000000000C2 /* DynamicsExtrasS7dTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DynamicsExtrasS7dTests.swift; sourceTree = "<group>"; };
+		E28D700000000000000000B2 /* DynamicsListenControls.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DynamicsListenControls.swift; sourceTree = "<group>"; };
+		E28D700000000000000000A2 /* DynamicsExtrasAccessors.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DynamicsExtrasAccessors.swift; sourceTree = "<group>"; };
 		E28D00600000000000000000 /* DynamicsTransferCurve.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DynamicsTransferCurve.swift; sourceTree = "<group>"; };
 		E28D00700000000000000000 /* GainReductionHistory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GainReductionHistory.swift; sourceTree = "<group>"; };
 		E28D00800000000000000000 /* GainReductionMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GainReductionMonitor.swift; sourceTree = "<group>"; };
@@ -1634,6 +1640,7 @@
 				A100000000000000000E2206 /* FeatureFlagsTests.swift */,
 				E28B700000000000000000B2 /* DynamicsExtrasS7bTests.swift */,
 				E28B700000000000000000C2 /* DynamicsExtrasS7cTests.swift */,
+				E28D700000000000000000C2 /* DynamicsExtrasS7dTests.swift */,
 				E4M100000000000000000013 /* SpeakerDriveDemandPolicyTests.swift */,
 				E11D00000000000000000012 /* MeasurementCoreTests.swift */,
 				E10A00000000000000000042 /* RoomCorrectionCoreTests.swift */,
@@ -1878,12 +1885,14 @@
 				E26A00000000000000000050 /* QuietZone */,
 				A30000000000000000000050 /* Realtime */,
 				A20000000000000000000020 /* AudioIOEngine.swift */,
+				E28D700000000000000000B2 /* DynamicsListenControls.swift */,
 				E27D100000000000000A0000 /* EQFIRProgramCache.swift */,
 				E4J500000000000000000011 /* AdaptiveTonalLiveLink.swift */,
 				F89200000000000000000011 /* AmbientMonitorTransport.swift */,
 				F96100000000000000000015 /* FeedForwardReferenceTransport.swift */,
 				A20000000000000000000027 /* StereoPlaybackControl.swift */,
 				A20000000000000000000029 /* DynamicsConfiguration.swift */,
+				E28D700000000000000000A2 /* DynamicsExtrasAccessors.swift */,
 				F66000000000000000000011 /* HeadTrackingController.swift */,
 				F64000000000000000000012 /* MultichannelCalibrationDesigner.swift */,
 				F10300000000000000000011 /* SpeakerOptimizerMeasurementEvidence.swift */,
@@ -2262,6 +2271,7 @@
 				F112A0000000000000000003 /* ProductionHardwareAcceptanceWorkspace.swift in Sources */,
 				F11300000000000000000001 /* ProductionUserGuideView.swift in Sources */,
 				A20000000000000000000010 /* AudioIOEngine.swift in Sources */,
+				E28D700000000000000000B1 /* DynamicsListenControls.swift in Sources */,
 				E27D100000001000000B0000 /* EQFIRProgramCache.swift in Sources */,
 				A20000000000000000000011 /* CoreAudioError.swift in Sources */,
 				F63000000000000000000001 /* CoreAudioNChannelTransportSession.swift in Sources */,
@@ -2428,6 +2438,7 @@
 				B50000000000000000000001 /* OptionalAcousticResearch.swift in Sources */,
 				A20000000000000000000017 /* StereoPlaybackControl.swift in Sources */,
 				A20000000000000000000019 /* DynamicsConfiguration.swift in Sources */,
+				E28D700000000000000000A1 /* DynamicsExtrasAccessors.swift in Sources */,
 				A20000000000000000000018 /* MasterVolumeDeviceController.swift in Sources */,
 				A30000000000000000000010 /* N60RealtimeAudioBridge.c in Sources */,
 				F89200000000000000000001 /* AmbientMonitorTransport.swift in Sources */,
@@ -2634,6 +2645,7 @@
 				A100000000000000000E2205 /* FeatureFlagsTests.swift in Sources */,
 				E28B700000000000000000B1 /* DynamicsExtrasS7bTests.swift in Sources */,
 				E28B700000000000000000C1 /* DynamicsExtrasS7cTests.swift in Sources */,
+				E28D700000000000000000C1 /* DynamicsExtrasS7dTests.swift in Sources */,
 				E4M100000000000000000014 /* SpeakerDriveDemandPolicyTests.swift in Sources */,
 				E11D00000000000000000002 /* MeasurementCoreTests.swift in Sources */,
 				E10A00000000000000000032 /* RoomCorrectionCoreTests.swift in Sources */,
