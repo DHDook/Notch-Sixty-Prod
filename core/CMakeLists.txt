@@ -245,6 +245,11 @@ add_executable(n60core_mb_extras_test tests/test_mb_extras.cpp)
 target_link_libraries(n60core_mb_extras_test PRIVATE n60core)
 add_test(NAME n60core_mb_extras COMMAND n60core_mb_extras_test)
 
+# E28 G42: multiband band-pass tree (split mode, parameter 43).
+add_executable(n60core_mb_split_test tests/test_mb_split.cpp)
+target_link_libraries(n60core_mb_split_test PRIVATE n60core)
+add_test(NAME n60core_mb_split COMMAND n60core_mb_split_test)
+
 # E6 S12c: loudness (match, contour, dialogue leveler) stage (ABI v24).
 add_executable(n60core_loudness_test tests/test_loudness.cpp)
 target_link_libraries(n60core_loudness_test PRIVATE n60core)

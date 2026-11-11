@@ -206,6 +206,10 @@ typedef enum n60_stage_kind {
  *  v25; a 43-value block with defaults (all 0, window 50 ms) is bit-identical too. Lookahead is in frames (Swift converts
  *  from ms, up to 16384), both lanes, and reset (enabling from parked) clears the rings. Running state is carried across a
  *  rebuild (E6 S12h), the rings only when the lookahead is unchanged; a stage with a lookahead never parks.
+ * E28 G42 (no ABI number): paramCount 44 adds 43 band split (0/1, topology: UNSUPPORTED live). 0 is the residual mid band
+ *  (dry - low - high), bit-identical to the 43-value block. 1 is a band-pass tree: low = LP1(LP2 x), mid = HP1(LP2 x),
+ *  high = AP1(HP2 x) with AP1 the low crossover's all-pass, so the bands sum flat (AP1.AP2) and each holds only its own
+ *  range. No added latency (IIR); with no lookahead the stage fades against the dry signal over 5 ms on enable and disable.
  * Latency 0 unless the lookahead is set. Telemetry: n60_graph_read_multiband. */
 
 /* Loudness (ABI v24, E6 S12c). The stereo kernel's loudness match, loudness contour (simple and per-band) and dialogue

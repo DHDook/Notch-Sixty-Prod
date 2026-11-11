@@ -424,7 +424,7 @@ struct UnifiedGraphConfiguration: Equatable, Sendable {
                 kind: N60_STAGE_DEESS.rawValue, stageId: Self.deessStageId, laneA: 0, laneB: 1, params: params))
         }
         if let params = stereo.multiband {
-            guard params.count == 29 || params.count == 43 else { throw UnifiedGraphError.invalidConfiguration("multiband") }
+            guard params.count == 29 || params.count == 43 || params.count == 44 else { throw UnifiedGraphError.invalidConfiguration("multiband") }
             guard programLanes == 2 else { throw UnifiedGraphError.unsupportedConfiguration("multiband needs two lanes") }
             stages.append(UnifiedGraphStageSpec(
                 kind: N60_STAGE_MULTIBAND.rawValue, stageId: Self.multibandStageId, laneA: 0, laneB: 1, params: params))
