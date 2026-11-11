@@ -773,12 +773,12 @@ struct CompressorConfiguration: Equatable, Codable, Sendable {
     static let rmsWindowRange = 5.0...200.0
     static let lookaheadRange = 0.0...20.0
 
-    /// The five extra core parameters (mix, link, detector, RMS window, lookahead frames) at `sampleRate`, or nil when
-    /// every extra is at its default so the 10-value block (bit-identical to ABI v32) is used.
-    func coreExtras(sampleRate: Double) -> [Float]? {
+    /// The six extra core parameters (mix, link, detector, RMS window, lookahead frames, listen = 0) at `sampleRate`. With
+    /// `e28.dynamics-extras` on the 16-value block is always used (E28 S7b), so a listen switch is a live post and never a
+    /// rebuild; with the flag off the caller passes nothing and the 10-value block (bit-identical to ABI v32) stays.
+    func coreExtras(sampleRate: Double) -> [Float] {
         let mix = mixPercent ?? 100, link = linkPercent ?? 100, rms = rmsDetector ?? false
         let window = rmsWindowMs ?? 50, look = lookaheadMs ?? 0
-        if mix == 100, link == 100, !rms, look == 0 { return nil }
         let frames = Self.lookaheadFrames(ms: look, sampleRate: sampleRate)
         return [
             Float(min(max(mix, Self.mixRange.lowerBound), Self.mixRange.upperBound)),
@@ -786,6 +786,7 @@ struct CompressorConfiguration: Equatable, Codable, Sendable {
             rms ? 1 : 0,
             Float(min(max(window, Self.rmsWindowRange.lowerBound), Self.rmsWindowRange.upperBound)),
             Float(frames),
+            0,
         ]
     }
 
@@ -825,8 +826,38 @@ struct ExpanderConfiguration: Equatable, Codable, Sendable {
     var rangeDB = -12.0
     var attackMs = 5.0
     var releaseMs = 200.0
+    /// E28 S7: extras behind `e28.dynamics-extras`; nil decodes as the defaults (hold 0 ms, hard knee, peak detector,
+    /// 50 ms RMS window, sidechain filter off, link 100 %).
+    var holdMs: Double?
+    var kneeDB: Double?
+    var rmsDetector: Bool?
+    var rmsWindowMs: Double?
+    var sidechainHighPassHz: Double?
+    var linkPercent: Double?
+
+    static let holdRange = 0.0...500.0
+    static let kneeRange = 0.0...24.0
+    static let rmsWindowRange = 5.0...200.0
+    static let sidechainHighPassRange = 0.0...300.0
+    static let linkRange = 0.0...100.0
+
+    /// The seven extra core parameters (hold, knee, detector, RMS window, sidechain filter, link, listen = 0) for the
+    /// 13-value block. Always returned when the flag is on: the listen slot has to exist for a switch to be a live post.
+    /// The hold is in milliseconds; the core converts it per rate.
+    func coreExtras() -> [Float] {
+        func clamp(_ v: Double, _ r: ClosedRange<Double>) -> Float { Float(min(max(v, r.lowerBound), r.upperBound)) }
+        return [
+            clamp(holdMs ?? 0, Self.holdRange), clamp(kneeDB ?? 0, Self.kneeRange), (rmsDetector ?? false) ? 1 : 0,
+            clamp(rmsWindowMs ?? 50, Self.rmsWindowRange), clamp(sidechainHighPassHz ?? 0, Self.sidechainHighPassRange),
+            clamp(linkPercent ?? 100, Self.linkRange), 0,
+        ]
+    }
 
     func validate() throws {
+        for (value, range) in [(holdMs, Self.holdRange), (kneeDB, Self.kneeRange), (rmsWindowMs, Self.rmsWindowRange),
+                               (sidechainHighPassHz, Self.sidechainHighPassRange), (linkPercent, Self.linkRange)] {
+            if let value, !(value.isFinite && range.contains(value)) { throw DynamicsConfigurationError.invalidExpander }
+        }
         guard thresholdDB.isFinite, Self.thresholdRange.contains(thresholdDB),
               ratio.isFinite, Self.ratioRange.contains(ratio),
               rangeDB.isFinite, Self.rangeRange.contains(rangeDB),

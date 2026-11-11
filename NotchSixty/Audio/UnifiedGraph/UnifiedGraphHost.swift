@@ -52,6 +52,8 @@ final class UnifiedGraphHost: @unchecked Sendable {
         lock.lock(); defer { lock.unlock() }
         if let graph { n60_graph_retire(graph) }
         graph = nil
+        listenSession.clear()
+        postedListen.removeAll()
         // A registered EXTERNAL processor's context (E26 S7b2) is freed only after the graph is retired.
         retained = nil
     }
@@ -192,6 +194,59 @@ final class UnifiedGraphHost: @unchecked Sendable {
         if n60_graph_set_rebuild_options(graph, &options) == N60_STATUS_OK { fadeLawLinear = linear }
     }
 
+    // MARK: Dynamics listen (E28 S7b)
+
+    /// The one listener of this graph. Session state: never part of the spec, so it is never encoded.
+    let listenSession = DynamicsListenSession()
+    private var postedListen: [UInt32: Float] = [:]
+
+    /// Makes `listener` the only listener (nil stops listening) and posts the stages' live listen parameters: the
+    /// listened stage gets its mode, every other listen-capable stage gets 0. Control thread; no rebuild. A stage whose
+    /// block has no listen slot (flag off, or the kernel path) is skipped, and the call throws when a listener was
+    /// requested and no stage can play it.
+    @discardableResult
+    func setListener(_ listener: DynamicsListener?) throws -> UnifiedGraphApplyResult {
+        lock.lock(); defer { lock.unlock() }
+        guard graph != nil else { throw UnifiedGraphError.invalidConfiguration("graph released") }
+        if let listener, !canListenLocked(listener.stage) {
+            throw UnifiedGraphError.unsupportedConfiguration("\(listener.stage.displayName) has no listen parameter")
+        }
+        let previous = listenSession.listener
+        listenSession.request(listener)
+        do { return try postListenLocked() } catch {
+            listenSession.request(previous)  // the session must not claim a listener the core never got
+            throw error
+        }
+    }
+
+    /// Stops listening (profile switch, Stop, output change, Quit). Idempotent.
+    func clearListener() {
+        lock.lock(); defer { lock.unlock() }
+        guard listenSession.clear() else { return }
+        _ = try? postListenLocked()
+    }
+
+    private func canListenLocked(_ stage: DynamicsListenStage) -> Bool {
+        guard let index = spec.stages.firstIndex(where: { $0.stageId == stage.stageId }) else { return false }
+        return spec.stages[index].params.count > Int(stage.paramIndex)
+    }
+
+    private func postListenLocked(force: Bool = false) throws -> UnifiedGraphApplyResult {
+        guard let graph else { throw UnifiedGraphError.invalidConfiguration("graph released") }
+        var records: [n60_param_record] = []
+        for stage in DynamicsListenStage.allCases where canListenLocked(stage) {
+            let value = listenSession.parameterValue(for: stage)
+            if force ? value != 0 : postedListen[stage.stageId, default: 0] != value {
+                records.append(n60_param_record(stageId: stage.stageId, paramIndex: stage.paramIndex, value: value, reserved: 0))
+            }
+        }
+        guard !records.isEmpty else { return .unchanged }
+        let status = records.withUnsafeBufferPointer { n60_graph_post_params(graph, $0.baseAddress, UInt32($0.count)) }
+        guard status == N60_STATUS_OK else { throw UnifiedGraphError.coreStatus(status.rawValue) }
+        for record in records { postedListen[record.stageId] = record.value }
+        return .posted(count: records.count)
+    }
+
     /// Posts a head pose to the BINAURAL stage (yaw, pitch and roll are its live parameters 0 to 2;
     /// the stage glides between the response cells). Control thread; no rebuild and no spec copy:
     /// three parameter records go straight to the mailbox. Throws when the stage was built with a
@@ -252,6 +307,9 @@ final class UnifiedGraphHost: @unchecked Sendable {
         let status = newSpec.withDescription { n60_graph_publish(graph, $0) }
         guard status == N60_STATUS_OK else { throw UnifiedGraphError.coreStatus(status.rawValue) }
         spec = newSpec
+        // E28 S7b: a new snapshot starts with listen off; the session's listener is posted again.
+        postedListen.removeAll()
+        _ = try? postListenLocked(force: true)
         // E27 S4 (G17): a new snapshot starts with empty tap rings, so the marked baselines no longer apply.
         analyserTapBaselines.removeAll()
         return .published
@@ -361,13 +419,14 @@ final class UnifiedGraphHost: @unchecked Sendable {
             diagnostics.dialogueVoiceConfidence = loud.dialogueVoiceConfidence
             diagnostics.dialogueBoostDB = loud.dialogueBoostDb
         }
-        // E6 S12d: per-band multiband gain reduction (the kernel reports the value at the end of the block).
+        // E6 S12d: per-band multiband gain reduction. E28 S7b (G24): the read-and-reset maximum since the last read, like the
+        // compressor and expander, so bars and the curve dot see short reductions between polls.
         var band = n60_multiband_readback()
         band.structSize = UInt32(MemoryLayout<n60_multiband_readback>.size)
         if n60_graph_read_multiband(graph, UnifiedGraphConfiguration.multibandStageId, &band) == N60_STATUS_OK {
-            diagnostics.multibandLowGainReductionDB = band.grNowDb.0
-            diagnostics.multibandMidGainReductionDB = band.grNowDb.1
-            diagnostics.multibandHighGainReductionDB = band.grNowDb.2
+            diagnostics.multibandLowGainReductionDB = band.grMaxDb.0
+            diagnostics.multibandMidGainReductionDB = band.grMaxDb.1
+            diagnostics.multibandHighGainReductionDB = band.grMaxDb.2
         }
         if let prot = dynamicsReading(graph, stageId: N60_LSTAGE_PROTECTION) {
             diagnostics.limiterGainReductionDB = prot.grMaxDb

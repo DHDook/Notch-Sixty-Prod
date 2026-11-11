@@ -178,15 +178,15 @@ Gate G2 passed on 2026-10-25 (commit 07e82c6)
 - [x] S9b `e6/live-session-edits` (needs-owner): setters live while an N-channel or binaural graph renders, with a fresh-build equality test at eight rates; bench in E22
 - [x] S9c `e6/live-headphone-profile` (needs-owner): headphone profile edits live on graph-rendered binaural sessions, asset swap off the main actor, ear delay stages; bench in E22
 - [x] S12 legacy-kernel migration (owner, 7 Nov 2026; after E27 S4, before E28 S1; all needs-owner, engine; no new flag, `e6.legacy-kernel` stays the escape hatch until E23; eight-rate kernel parity within E6 decision 1). Remaining open items are owned by E8 S11 (G32), E22 (bench), E23 (G1, G18, G25, G30, G31, G37, G48) and E28 S7c (G23).
-  - [x] S12a DC offset, infrasonic, mains notch and hum detector in the core (migration audit table row 1 done, `docs/epics/E6.md`; PR pending)
+  - [x] S12a DC offset, infrasonic, mains notch and hum detector in the core (migration audit table row 1 done, `docs/epics/E6.md`; PR #464)
   - [x] S12b stereo mode, widener, de-harsh and de-esser in the core (`e6/port-image-and-deess`, #409, ABI v23; built in the core, wiring: S12g for N-channel (G12) and S12f for state carry and refusals (G11, G13, G14); bench: E22). Remaining owner: E22 only (G15).
   - [x] S12c loudness match, loudness contour, per-band loudness and dialogue leveler in the core
   - [x] S12d multiband compressor in the core, with per-band auto release (closes E28 G11; `e6/port-multiband`, #412, ABI v25; per-band auto release is core-only, wiring: E28 S7c; bench: E22). Remaining owners: E28 S7c (G23), E23 (G25), E22 (G26 bench).
   - [x] S12e stereo global bypass and reference audition on the graph (D5, parity exception P1) and wide PEQ (over 16 sections, types 8–10) built (`e6/port-bypass-audition-eq`, #413, ABI v26); delta audition and the bypass lab case remain (G27, G28); bench: E22 (G29). Remaining owners: E22 (G29), E23 (G30, G31).
-  - [x] S12f stereo crossover and room/IR with subs, oversampling-only protection, the three ordering guards and named refusals built (`e6/port-stereo-subs-and-guards`, PR #414, ABI v27); stereo crossover with subs refused as `crossoverWithSubwoofer` (G32 open question; no wiring slice); state carry and the UI-range tests moved to S12f2 (G33–G35). Remaining owner: E8 S11 (G32): translator built (PR pending), production wiring open (E8 G3).
-  - [x] S12f2 `e6/stage-state-carry` (PR pending): cleanup, image and de-ess state carry, double-precision cleanup, UI-range property test and oversampling latency asserts built; G36 and G38 closed in S12h. Remaining owner: E23 first slice (G37).
+  - [x] S12f stereo crossover and room/IR with subs, oversampling-only protection, the three ordering guards and named refusals built (`e6/port-stereo-subs-and-guards`, PR #414, ABI v27); stereo crossover with subs refused as `crossoverWithSubwoofer` (G32 open question; no wiring slice); state carry and the UI-range tests moved to S12f2 (G33–G35). Remaining owner: E8 S11 (G32): translator built (PR #464), production wiring open (E8 G3).
+  - [x] S12f2 `e6/stage-state-carry` (PR #464): cleanup, image and de-ess state carry, double-precision cleanup, UI-range property test and oversampling latency asserts built; G36 and G38 closed in S12h. Remaining owner: E23 first slice (G37).
   - [x] S12g old N-channel and legacy binaural path reasons onto the graph; `binauralBudget` raised within measured cost, refused beyond (E6 decision 18); part 1 (#416) polarity and 48 dB crossover; S12g2 lane delay under bass management (ABI v28); S12g3 (G39) and S12g4 (#419, ABI v29): optimizer FIR with program FIR, N-channel cleanup, image, loudness, de-ess, multiband, no-legacy and eight-rate tests; per-rate binaural cost is an E22 bench item (G43)
-  - [x] S12h stereo Active Quiet Zone on the graph, authorisation unchanged (needs-owner, ANC; E6 decision 15): part 1 (#420) and part 2a (G20, G22, G26, G45 closed) built; part 2b (#422, G46 closed); part 3 (ABI v31, G50 to G52 closed, PR pending). Remaining work is bench only, in E22.
+  - [x] S12h stereo Active Quiet Zone on the graph, authorisation unchanged (needs-owner, ANC; E6 decision 15): part 1 (#420) and part 2a (G20, G22, G26, G45 closed) built; part 2b (#422, G46 closed); part 3 (ABI v31, G50 to G52 closed, PR #464). Remaining work is bench only, in E22.
 
 ### E7 384 kHz everywhere
 
@@ -208,14 +208,14 @@ Gate G2 passed on 2026-10-25 (commit 07e82c6)
 - [x] Raise the subwoofer limit from 4 to 8 (core bass management already supports 8 sub lanes since E6 S7b, ABI v7)
 - [x] Advanced pipeline view for power users, plus CamillaDSP YAML import alongside the existing export
 - [x] Migrate existing bi/tri-amp profiles automatically
-- [~] Stereo crossover with subwoofer lanes (E8 S11 merged #431; S11b `e8/crossover-subs-nchannel` wires it into the N-channel session, PR pending; G2, G3, E6 G32 closed there; G4 bench wiring checks open in E22)
+- [~] Stereo crossover with subwoofer lanes (E8 S11 merged #431; S11b `e8/crossover-subs-nchannel` wires it into the N-channel session, PR #464; G2, G3, E6 G32 closed there; G4 bench wiring checks open in E22)
 
 ### E9 Multichannel protection and FIR parity
 
 - [~] Per-output limiter, true-peak guard and soft clip, matching the stereo chain (E9 S5 built dark behind `e9.output-protection`; wiring: E9 S5b for the Outputs UI and S5c for routed outputs, binaural and debounce done; G17 dropped by the owner)
-- [~] Move the program FIR onto the 262,144-tap non-uniform convolver (E9 S1 built dark; S3 sets firScheme 1 and lifts the Swift guards behind e9.long-fir, PR pending; flag stays dark until S2c and E22 bench)
-- [~] Long FIR rebuild: lockstep lazy carry with 256 KiB per-callback budget, changed-tap seeding, chunked or O(1) scheme 1 reset (E9 S2 built dark, PR pending; S3 wires Swift behind e9.long-fir; S2b follow-ups and E22 bench items open)
-- [~] Per-output headroom assistant (E9 S6 core maths `n60/headroom.h` merged; E9 S7 Swift model, readout and Apply/Undo built behind e9.output-protection, PR pending; S7b coverage and bit-exact Undo test next)
+- [~] Move the program FIR onto the 262,144-tap non-uniform convolver (E9 S1 built dark; S3 sets firScheme 1 and lifts the Swift guards behind e9.long-fir, PR #464; flag stays dark until S2c and E22 bench)
+- [~] Long FIR rebuild: lockstep lazy carry with 256 KiB per-callback budget, changed-tap seeding, chunked or O(1) scheme 1 reset (E9 S2 built dark, PR #464; S3 wires Swift behind e9.long-fir; S2b follow-ups and E22 bench items open)
+- [~] Per-output headroom assistant (E9 S6 core maths `n60/headroom.h` merged; E9 S7 Swift model, readout and Apply/Undo built behind e9.output-protection, PR #464; S7b coverage and bit-exact Undo test next)
 
 ### E20 Engine performance
 
@@ -225,10 +225,10 @@ chain once per frame, with no SIMD, on one thread.
 
 - [ ] **Whole-buffer processing:** each stage processes the full buffer instead of the per-frame `N60RenderKernelProcessStereoFrameInContext` call; fuse adjacent stages with templates so audio stays in cache
 - [ ] **Multirate:** run ANC, MIMO room treatment, subwoofer and bass-management processing and low-frequency analysis at decimated rates (32–64× below 384 kHz), with polyphase decimation and interpolation and exact latency accounting
-- [~] **SIMD:** Google Highway with runtime dispatch (NEON, SSE, AVX2, AVX-512); vectorise biquad cascades across channels (E20 S3 `e20/simd-biquads-and-loops` built, partial: in-house portable layer `core/src/simd/simd.hpp` (design note 5, replaces Highway) with PEQ, XOVER, PROTECTION half-band, meters, M/S; remaining cascades and loops G14, G15, E20 S4)
+- [~] **SIMD:** Google Highway with runtime dispatch (NEON, SSE, AVX2, AVX-512); vectorise biquad cascades across channels (E20 S3 `e20/simd-biquads-and-loops` built, partial: in-house portable layer `core/src/simd/simd.hpp` (design note 5, replaces Highway) with PEQ, XOVER, PROTECTION half-band, meters, M/S; remaining cascades and loops G14 (owner S10); E20 S4 `e20/fft-and-convolution` (PR #464, needs-owner) added the SIMD complex MAC and the half-band dot product; radix-4 FFT G16 and the x86 FMA default G17 owner S10)
 - [ ] **Multiple threads:** Audio Workgroups on Apple (and the equivalent realtime thread groups elsewhere) for lanes, MIMO and long convolution, with a lock-free job graph and a deterministic join before output
 - [ ] **Right algorithms:** non-uniform partitioned convolution in every FIR path (program FIR, binaural, MIMO), long partitions spread across callbacks, double-precision or state-variable filters at high rates, polyphase sample-rate conversion
-- [~] Set flush-to-zero at callback entry instead of scanning every sample for denormals; keep the NaN guard at the output (E20 S2 `e20/fp-env-and-rt-checks` built, partial: FTZ guard at graph and bridge entry done; per-sample flushes removed in E20 S3 `e20/simd-biquads-and-loops` (G10 closed); zero-tail tests for the removed flushes G15, E20 S4)
+- [~] Set flush-to-zero at callback entry instead of scanning every sample for denormals; keep the NaN guard at the output (E20 S2 `e20/fp-env-and-rt-checks` built, partial: FTZ guard at graph and bridge entry done; per-sample flushes removed in E20 S3 `e20/simd-biquads-and-loops` (G10 closed); zero-tail tests for the removed flushes done in E20 S4 with no-subnormal checks only; tails not settled to zero is G18, owner S10)
 - [~] RealtimeSanitizer plus `nonblocking` / `nonallocating` attributes on every realtime entry point, run in CI (E20 S2 `e20/fp-env-and-rt-checks` built, partial: `core-rtsan` job and core function-effects annotations done; bridge callbacks cannot take the attribute and parity suite is not under RTSan: G9, G11, E20 S10)
 - [~] CI benchmarks: per-stage ns/sample and worst-case callback time at 48, 192 and 384 kHz, with fail thresholds (E20 S1 `e20/bench-baselines` built, PR #448: harness, profile hooks, `macos-full` step, `budgets.json` warn only; baseline JSON is an owner step after the first nightly (G2); fail enforcement wiring is E20 S10 (G3))
 - [ ] UI: move `ObservableObject` controllers (23 `@Published` in `AudioIOEngine`, 33 in `RoomTreatmentAdvisorController`) to `@Observable` (drawing meters with Canvas at display rate moved to E28 S1 and S5, owner, 7 Nov 2026)
@@ -344,7 +344,7 @@ it, behind `e26.sub-aware-anc`. Live output stays behind the per-feature arm.
   - [~] S6a `e26/sub-multibus-transport` (#370)
   - [~] S6b `e26/sub-readiness-from-sweeps` (#372): open-preout check, per-band eligibility and sub-band render verification feed readiness behind `e26.sub-aware-anc`; multi-bus profile-session passes and the `measureSubPath` harness move to S7
   - [~] S6c `e26/sub-multiseat-plant` (#373): measured per-seat 2x2 plant in the spatial planner, conditioning and the stricter-of rule in the controller, behind `e26.sub-aware-anc`; driving the multi-seat branch through production wiring moves to S7 (G12)
-  - [~] S7b `e26/profile-anc-host-feed`: S7b1 (#376) built the N60AncLaneFeed host feed dark; S7b2 part 1 (#378) registers the feed and the engine routing; S7b2b part 1 (#379) built the engine profile branch; S7b2c part 1 (#380) built the reference taps, host time and tonal gate; S7b2c part 2 (#381) added the class A end-to-end, guard, revoke and latency tests; the S7 software leftovers (Room Correction output-gain stamp G17, G31, G32, multibus measure test) are in PR pending; remaining: E22 bench gaps and flag removal
+  - [~] S7b `e26/profile-anc-host-feed`: S7b1 (#376) built the N60AncLaneFeed host feed dark; S7b2 part 1 (#378) registers the feed and the engine routing; S7b2b part 1 (#379) built the engine profile branch; S7b2c part 1 (#380) built the reference taps, host time and tonal gate; S7b2c part 2 (#381) added the class A end-to-end, guard, revoke and latency tests; the S7 software leftovers (Room Correction output-gain stamp G17, G31, G32, multibus measure test) are in PR #464; remaining: E22 bench gaps and flag removal
 - [ ] Quiet Zone with a sub on its own output (profile session, sub lane as an actuator)
   - [~] S6: run `OpenPreoutCheck` on measured sweeps and set `openPreoutRefusal` (S6b, behind the flag)
   - [~] S6: feed `PerBandAncEligibility` (`feedForwardBandCount`) from `CombinedPathBandAnalyzer` into readiness (S6b, behind the flag)
@@ -361,12 +361,12 @@ on the Equalizer page; S1 and S2 flagless, the engine-facing S3 items were behin
 
 - [x] S1 feel and precision: hover read-out, Q by scroll or pinch, double-click add and reset, axis-locked and fine drag, keyboard nudging, unit-aware number fields, undo and redo
 - [x] S2 filter views: band curves, other-lane ghost, y-range and auto, x-range to 0.49 fs at every rate, phase, group delay, impulse and step from the engine's filter math (lab case moved to gap G6, owned by S4)
-- [~] S3a headroom badge with post-EQ clip light, auto preamp, preamp and output gain on the page (PR pending): badge and page gains reachable; auto preamp built behind `e27.eq-safety` until S4 removes the flag; bench: E22
-- [~] S3b EQ-level A/B with loudness match, band listen, click-free bypass proved at eight rates (PR pending)
+- [~] S3a headroom badge with post-EQ clip light, auto preamp, preamp and output gain on the page (PR #464): badge and page gains reachable; auto preamp built behind `e27.eq-safety` until S4 removes the flag; bench: E22
+- [~] S3b EQ-level A/B with loudness match, band listen, click-free bypass proved at eight rates (PR #464)
   - [~] EQ A/B built dark behind `e27.eq-safety`; prepared linear-phase FIR designs are cached in S3c (G10 closed); flag removal in S4
 - [x] S3c `e27/eq-ab-fir-prewarm` prepared FIR programs for linear-phase A/B and engine-level tests (G10, G11; owner slice for both)
 - [~] S2b program analyser overlay (Input and "Output (full chain)" spectrum on the existing render capture, no engine tap; built dark behind e27.eq-safety, PR #405; the EQ-only view is S2c)
-- [~] S2c `e27/analyser-eq-taps`: EQ-only and EQ + Dynamics spectrum taps with a toggle (needs-owner, realtime; owner, 7 Nov 2026; built dark behind e27.eq-safety, PR pending; G16 and G17 and flag removal to S4)
+- [~] S2c `e27/analyser-eq-taps`: EQ-only and EQ + Dynamics spectrum taps with a toggle (needs-owner, realtime; owner, 7 Nov 2026; built dark behind e27.eq-safety, PR #464; G16 and G17 and flag removal to S4)
 - [x] S4 `e27/ship` flag `e27.eq-safety` removed, offline lab cases, end-to-end tests and dynamic metric fields (PR #407, needs-owner); live-window and DAC remainders are E22 items (owner decision 7 Nov 2026)
 
 ### E28 Dynamics and Meters polish (owner, 7 Nov 2026)
@@ -378,11 +378,11 @@ S1–S6b flagless; every dynamics extra (S7a–S7d) behind the one flag `e28.dyn
 - [x] S2 loudness: momentary, short-term, integrated with reset, loudness range and true-peak max per ITU-R BS.1770-4 and EBU R128; per-channel weighting with LFE excluded (inert until the capture carries more than stereo)
 - [x] S3 spectrum options: smoothing, averaging, tilt, freeze and reference trace, hover read-out, input and output overlay
 - [ ] S4 dynamics feel: log sliders, unit-aware fields, stepping, reset, fine drag, undo, sidechain range fix, auto makeup, accessibility
-- [x] S5 dynamics visualisation: transfer curves, gain-reduction bars and history, navigator bars; built, PR pending (G21 to S7d, G22 to S6, G23 to S7d, G24 to S7b; Loudness readouts moved to S7d)
-- [x] S6 per-output and sub meters on every output configuration, per-route bridge meter, E9 protection on the hub (needs-owner, PR pending)
+- [x] S5 dynamics visualisation: transfer curves, gain-reduction bars and history, navigator bars; built, PR #464 (G21 to S7d, G22 to S6, G23 to S7d, G24 to S7b; Loudness readouts moved to S7d)
+- [x] S6 per-output and sub meters on every output configuration, per-route bridge meter, E9 protection on the hub (needs-owner, PR #464)
 - [x] S6b loudness fed the semantic program channels on N-channel and binaural sessions, loudness and dynamics lab cases, L/R over-range pairing (needs-owner)
 - [~] S7a compressor mix, link amount, peak/RMS detector and optional lookahead, reported in the path latency (needs-owner, engine; built dark behind `e28.dynamics-extras`, PR open; wiring in S7d, G10 open)
-- [ ] S7b expander hold, soft knee, detector, sidechain high-pass and link; sidechain and delta listen (needs-owner, engine)
+- [~] S7b expander hold, soft knee, detector, sidechain high-pass and link; sidechain and delta listen (needs-owner, engine; built dark behind `e28.dynamics-extras`, PR pending; wiring in S7d)
 - [ ] S7c multiband extras on the core stage ported by E6 S12d: per-band bypass, solo, listen and detector, one lookahead, auto-release toggle (needs-owner, engine)
 - [ ] S7d Dynamics page controls for every extra, disabled with a reason where the kernel renders
 - [ ] S8 flag removed (owner decision; after S7a–S7d and the owner's listen)
@@ -428,7 +428,7 @@ Owner decision, 20 Oct 2026: the kernel stays behind `e6.legacy-kernel` until la
 then this epic deletes it before E22 hardware validation, so v1 ships and is validated on the
 unified graph only.
 
-- [~] First slice (owner decision 7 Nov 2026, E6 G1): graph-vs-kernel full-config corpus (every stage on, all layouts, eight rates) plus the E6 S5 stereo-chain parity and latency test (latency report equals measured impulse delay). `N60RenderKernel` must not be deleted until it is green. S1 `e23/graph-kernel-parity` built in part (PR pending); the rest is S1b `e23/precision-and-cleanup`
+- [~] First slice (owner decision 7 Nov 2026, E6 G1): graph-vs-kernel full-config corpus (every stage on, all layouts, eight rates) plus the E6 S5 stereo-chain parity and latency test (latency report equals measured impulse delay). `N60RenderKernel` must not be deleted until it is green. S1 `e23/graph-kernel-parity` built in part (PR #464); the rest is S1b `e23/precision-and-cleanup`
 - [~] S1b `e23/precision-and-cleanup` (PR pending, needs-owner, engine): double state for E6 G18, G25 and the Linkwitz form for G31 built; cleanup whole-buffer pass (E6 G37) partly built, per-section hoisting open as E23 G5; wiring slice: graph path, not yet on the shipped UI as a separate check
 - [ ] S1c `e23/parity-and-host-fold` (needs-owner, engine): G2 latency report at 44.1 and 88.2 kHz, G3 clipped-input level difference, E6 G48 Quiet Zone host fold
 - [ ] Confirm nothing falls back to the kernel, the old N-channel path or the legacy binaural pipeline (E6 S12a–S12h)

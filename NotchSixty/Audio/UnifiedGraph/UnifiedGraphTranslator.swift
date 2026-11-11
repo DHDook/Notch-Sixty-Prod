@@ -35,7 +35,8 @@ enum UnifiedGraphTranslator {
         programs: UnifiedGraphProgramLookup = { _, _ in nil },
         alignment: StereoBassAlignment? = nil,
         firScheme: UInt32 = UnifiedGraphFIRScheme.current(),
-        compressorExtras: [Float]? = nil
+        compressorExtras: [Float]? = nil,
+        expanderExtras: [Float]? = nil
     ) -> Result<UnifiedGraphConfiguration, UnifiedGraphFallbackReason> {
         if let alignment, alignment.issue != nil { return .failure(.alignmentInvalid) }
         let eligibility = withUnsafePointer(to: &snapshot) {
@@ -96,10 +97,14 @@ enum UnifiedGraphTranslator {
                 return .failure(.stageParametersUnreadable)
             }
             stages = built
-            // E28 S7: the snapshot carries no extras; the caller passes the five values only when
-            // `e28.dynamics-extras` is on and any is non-default, and the 10-value block becomes the 15-value one.
-            if let extras = compressorExtras, extras.count == 5, let base = stages.compressor, base.count == 10 {
+            // E28 S7: the snapshot carries no extras; the caller passes the six values (ending in the
+            // listen slot) when `e28.dynamics-extras` is on, and the 10-value block becomes the 16-value one.
+            if let extras = compressorExtras, extras.count == 6, let base = stages.compressor, base.count == 10 {
                 stages.compressor = base + extras
+            }
+            // E28 S7b: the 6-value expander block becomes the 13-value one (hold, knee, detector, window, filter, link, listen).
+            if let extras = expanderExtras, extras.count == 7, let base = stages.expander, base.count == 6 {
+                stages.expander = base + extras
             }
         }
         // E6 S8d: recover each enabled convolver's taps by generation and verify them against the snapshot's record.

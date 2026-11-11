@@ -4660,7 +4660,9 @@ final class AudioIOEngine: ObservableObject {
             crossoverHz: foldedBassSettings.frequencyHz,
             programs: { _, generation in programs[generation] },
             compressorExtras: FeatureFlags().isEnabled(.dynamicsExtras)
-                ? inputs.dynamics.compressor.coreExtras(sampleRate: sampleRate) : nil
+                ? inputs.dynamics.compressor.coreExtras(sampleRate: sampleRate) : nil,
+            expanderExtras: FeatureFlags().isEnabled(.dynamicsExtras)
+                ? inputs.dynamics.expander.coreExtras() : nil
         ) {
         case .success(let configuration): stereo = configuration
         case .failure(let reason): throw LiveNChannelTransportError.unifiedGraphRejected(reason)

@@ -30,20 +30,18 @@ enum HeadroomStageKind: Equatable, Sendable {
              N60_STAGE_CROSSFEED, N60_STAGE_MS_ENCODE, N60_STAGE_MS_DECODE], .passive)
         set([N60_STAGE_GAIN, N60_STAGE_OUTPUT_GAIN, N60_STAGE_PEQ, N60_STAGE_DYN_EQ, N60_STAGE_FIR, N60_STAGE_ROOM_FIR,
              N60_STAGE_SPEAKER_IR, N60_STAGE_DRIVER_FIR, N60_STAGE_COMPRESSOR, N60_STAGE_CORE_DYNAMICS, N60_STAGE_DELAY,
-             N60_STAGE_LANE_DELAY, N60_STAGE_AMBIENT, N60_STAGE_BASS_MGMT, N60_STAGE_ROUTE, N60_STAGE_XOVER], .modelled)
+             N60_STAGE_LANE_DELAY, N60_STAGE_AMBIENT, N60_STAGE_BASS_MGMT, N60_STAGE_ROUTE, N60_STAGE_XOVER,
+             N60_STAGE_ROOM_FIR_TWO_BAND, N60_STAGE_DRIVER_FIR_TWO_BAND, N60_STAGE_BINAURAL], .modelled)
         set([N60_STAGE_SYMMETRY, N60_STAGE_CROSSTALK, N60_STAGE_HEADPHONE, N60_STAGE_IMAGE, N60_STAGE_LOUDNESS,
              N60_STAGE_MULTIBAND, N60_STAGE_STEREO_CROSSOVER, N60_STAGE_ANC_INJECT], .bounded)
-        set([N60_STAGE_BINAURAL, N60_STAGE_EXTERNAL, N60_STAGE_ROOM_FIR_TWO_BAND, N60_STAGE_DRIVER_FIR_TWO_BAND,
-             N60_STAGE_DELTA_SUBTRACT], .unmodelled)
+        set([N60_STAGE_EXTERNAL, N60_STAGE_DELTA_SUBTRACT], .unmodelled)
         return t
     }()
 
     /// A short name for a kind in the "estimate incomplete" note.
     static func name(_ kind: UInt32) -> String {
         switch kind {
-        case N60_STAGE_BINAURAL.rawValue: return "binaural rendering"
         case N60_STAGE_EXTERNAL.rawValue: return "Audio Unit rack"
-        case N60_STAGE_ROOM_FIR_TWO_BAND.rawValue, N60_STAGE_DRIVER_FIR_TWO_BAND.rawValue: return "two-band FIR"
         case N60_STAGE_DELTA_SUBTRACT.rawValue: return "delta audition"
         default: return "stage \(kind)"
         }
@@ -128,9 +126,12 @@ struct HeadroomModel {
         var tail: [Stage] = []
         var silent = false
         var incomplete: Set<String> = []
+        /// Binaural ears: one complete path set per further orientation set (`paths` is set 0). The ear's peak is the highest of
+        /// the sets, because a head-tracking blend of two sets never exceeds the larger of the two at any frequency.
+        var alternatives: [[Path]] = []
 
         mutating func append(_ stage: Stage) {
-            if paths.count == 1 { paths[0].stages.append(stage) } else { tail.append(stage) }
+            if paths.count == 1 && alternatives.isEmpty { paths[0].stages.append(stage) } else { tail.append(stage) }
         }
 
         /// The paths with this lane's tail folded in (distributive for gain, EQ and delay; a power path stays a power path).
@@ -178,7 +179,13 @@ struct HeadroomModel {
                                       currentTrimDB: trim, incomplete: incomplete.sorted())
             }
             var peak = -200.0, hz = 0.0
-            if let result = evaluate(lane, ceiling: ceiling) {
+            var best: n60_headroom_result?
+            var failed = false
+            for set in [lane.paths] + lane.alternatives {
+                guard let result = evaluate(paths: set, tail: lane.tail, ceiling: ceiling) else { failed = true; break }
+                if best == nil || result.peak_gain_db > best!.peak_gain_db { best = result }
+            }
+            if !failed, let result = best {
                 peak = result.peak_gain_db - trim
                 hz = result.peak_hz
             } else {
@@ -258,15 +265,27 @@ struct HeadroomModel {
                 var s = [Self.gainDB(Double(p[0]))]
                 s += Self.peqStages([(1, p[1], p[2], p[3]), (0, p[4], p[5], p[6]), (2, p[7], p[8], p[9])])
                 each { _ in s }
+            case N60_STAGE_ROOM_FIR_TWO_BAND.rawValue, N60_STAGE_DRIVER_FIR_TWO_BAND.rawValue:
+                if let taps = Self.twoBandEquivalentTaps(p) {
+                    each { _ in [Stage(kind: UInt32(N60_HEADROOM_STAGE_FIR), taps: taps)] }
+                } else {
+                    for index in selected { lanes[index].incomplete.insert("two-band FIR") }
+                }
+            case N60_STAGE_BINAURAL.rawValue:
+                binaural(&lanes, stage: stage, sources: selected)
             case N60_STAGE_BASS_MGMT.rawValue:
                 bassManage(&lanes, stage: stage, mask: selected)
             case N60_STAGE_ROUTE.rawValue:
                 route(&lanes, stage: stage, destinations: selected)
             case N60_STAGE_XOVER.rawValue:
                 guard p.count >= 14 else { continue }
-                if p[8] == 1 { for index in selected { lanes[index].incomplete.insert("Linkwitz transform") } }
                 let n = Int(p[13])
                 var s = [Self.gainDB(Double(p[6]))]
+                if p[8] == 1 {
+                    if let lt = linkwitzTransform(p) { s.append(lt) } else {
+                        for index in selected { lanes[index].incomplete.insert("Linkwitz transform") }
+                    }
+                }
                 if n > 0, p.count >= 14 + 4 * n {
                     s += Self.peqStages((0..<n).map { (p[14 + 4 * $0], p[15 + 4 * $0], p[16 + 4 * $0], p[17 + 4 * $0]) })
                 }
@@ -354,6 +373,119 @@ struct HeadroomModel {
         }
     }
 
+    // MARK: Linkwitz transform, two-band FIR and binaural
+
+    /// The Linkwitz transform of an XOVER stage; the core designs it in double, as the graph's XOVER stage does.
+    private func linkwitzTransform(_ p: [Float]) -> Stage? {
+        guard p.count >= 13 else { return nil }
+        var cascade = n60_xover_cascade()
+        guard n60_xover_linkwitz(Double(p[9]), Double(p[10]), Double(p[11]), Double(p[12]), spec.sampleRate, &cascade) == Int32(N60_XOVER_OK) else { return nil }
+        return Stage(kind: UInt32(N60_HEADROOM_STAGE_LINKWITZ), params: [p[9], p[10], p[11], p[12]])
+    }
+
+    private static func besselI0(_ x: Double) -> Double {
+        var sum = 1.0, term = 1.0, k = 1.0
+        while term > 1e-12 * sum { term *= (x / (2 * k)) * (x / (2 * k)); sum += term; k += 1 }
+        return sum
+    }
+
+    /// One full-rate FIR with the response of a two-band stage (`n60/graph.h`, "Two-band room FIR"): the full-rate taps after the
+    /// pure delay E, plus the low taps zero-stuffed by D and smoothed by a linear-phase unity-gain image-rejection low-pass with its
+    /// cut-off at half of the low band's Nyquist (the core's half-band cascade passes to 0.4 of it and stops from 0.6, and the
+    /// designer confines the low taps to 0.4, so the two agree where the taps have energy). Both paths are shifted by the
+    /// kernel's centre delay, which leaves the magnitude unchanged. Nil when the stage is malformed or the equivalent filter would
+    /// exceed the core's tap limit (the output then reports an incomplete estimate).
+    static func twoBandEquivalentTaps(_ p: [Float]) -> [Float]? {
+        guard p.count >= 3, p[0].isFinite, p[1].isFinite, p[2].isFinite else { return nil }
+        let d = Int(p[0]), n = Int(p[1]), m = Int(p[2])
+        guard [1, 2, 4, 8, 16, 32].contains(d), n >= 1, m >= 1 else { return nil }
+        let header: Int
+        if p.count == 4 + n + m { header = 4 } else if p.count == 3 + n + m { header = 3 } else { return nil }
+        let e = header == 4 ? Int(p[3]) : 0
+        guard e >= 0, e <= Int(N60_HEADROOM_MAX_FIR_TAPS) else { return nil }
+        let h = d == 1 ? 0 : 32 * d
+        let total = max(h + e + n, d * (m - 1) + 2 * h + 1)
+        guard total <= Int(N60_HEADROOM_MAX_FIR_TAPS) else { return nil }
+        var kernel = [Double](repeating: 0, count: 2 * h + 1)
+        if d == 1 { kernel[0] = 1 } else {
+            let cutoff = 0.5 / Double(d), beta = 5.65
+            let norm = besselI0(beta)
+            for i in 0...(2 * h) {
+                let t = Double(i - h)
+                let sinc = t == 0 ? cutoff : sin(.pi * cutoff * t) / (.pi * t)
+                let r = Double(i - h) / Double(h)
+                kernel[i] = sinc * besselI0(beta * (1 - r * r).squareRoot()) / norm
+            }
+            let sum = kernel.reduce(0, +)
+            kernel = kernel.map { $0 / sum }
+        }
+        var out = [Double](repeating: 0, count: total)
+        for i in 0..<n { out[h + e + i] += Double(p[header + i]) }
+        for j in 0..<m {
+            let v = Double(p[header + n + j])
+            if v == 0 { continue }
+            for k in 0..<kernel.count { out[d * j + k] += v * kernel[k] }
+        }
+        return out.map(Float.init)
+    }
+
+    /// BINAURAL: each ear is the sum, over the source lanes, of the source (as it reaches the stage) through its ear response.
+    /// Sources combine as the bass sums do (front pair coherent, the rest as power, everything coherent when Strict). The
+    /// equal-ear source uses the mean of its two responses for both ears.
+    private func binaural(_ lanes: inout [Lane], stage: UnifiedGraphStageSpec, sources: [Int]) {
+        let p = stage.params
+        let count = lanes.count
+        let ears = [Int(stage.laneA), Int(stage.laneB)]
+        let ordered = sources.sorted()
+        func fail() {
+            for index in Set(ordered + ears) where index >= 0 && index < count { lanes[index].incomplete.insert("binaural rendering") }
+        }
+        guard p.count >= 10, ears.allSatisfy({ $0 >= 0 && $0 < count }), ears[0] != ears[1], !ordered.isEmpty,
+              p[3] >= 1, p[4] >= 1 else { return fail() }
+        let taps = Int(p[3]), sets = Int(p[4]), n = ordered.count, equalEar = Int(p[8])
+        guard sets <= Int(N60_GRAPH_BINAURAL_MAX_SETS), taps <= Int(N60_GRAPH_BINAURAL_MAX_TAPS),
+              p.count == 10 + sets * n * 2 * taps else { return fail() }
+        let before = lanes
+        var incomplete = Set<String>()
+        for index in ordered { incomplete.formUnion(before[index].incomplete) }
+        let front = Set(ordered.prefix(2))
+        func response(set: Int, source: Int, ear: Int) -> [Float] {
+            let base = 10 + ((set * n + source) * 2) * taps
+            if source == equalEar {
+                return (0..<taps).map { 0.5 * (p[base + $0] + p[base + taps + $0]) }
+            }
+            return Array(p[(base + ear * taps)..<(base + (ear + 1) * taps)])
+        }
+        var earLanes = [Lane(), Lane()]
+        for ear in 0..<2 {
+            var perSet: [[Path]] = []
+            for set in 0..<sets {
+                var paths: [Path] = []
+                for (k, index) in ordered.enumerated() where !before[index].silent {
+                    for var path in before[index].flattened {
+                        path.stages.append(Stage(kind: UInt32(N60_HEADROOM_STAGE_FIR), taps: response(set: set, source: k, ear: ear)))
+                        path.combine = UInt32(front.contains(index) ? N60_HEADROOM_COMBINE_COHERENT : N60_HEADROOM_COMBINE_POWER)
+                        paths.append(path)
+                    }
+                }
+                perSet.append(paths)
+            }
+            var lane = Lane()
+            lane.paths = perSet[0]
+            lane.alternatives = Array(perSet.dropFirst())
+            lane.silent = lane.paths.isEmpty
+            lane.incomplete = incomplete
+            earLanes[ear] = lane
+        }
+        for index in ordered where !ears.contains(index) {
+            lanes[index].silent = true
+            lanes[index].paths = []
+            lanes[index].tail = []
+        }
+        lanes[ears[0]] = earLanes[0]
+        lanes[ears[1]] = earLanes[1]
+    }
+
     // MARK: Bass management and routing
 
     private func bassManage(_ lanes: inout [Lane], stage: UnifiedGraphStageSpec, mask: [Int]) {
@@ -411,7 +543,10 @@ struct HeadroomModel {
             }
         }
         var incomplete = Set<String>()
-        for index in mask { incomplete.formUnion(lanes[index].incomplete) }
+        for index in mask {
+            incomplete.formUnion(lanes[index].incomplete)
+            if !lanes[index].alternatives.isEmpty { incomplete.insert("binaural rendering") }
+        }
         let lfeIncomplete = (lfeLane >= 0 && lfeLane < count) ? lanes[lfeLane].incomplete : []
         incomplete.formUnion(lfeIncomplete)
         // Sub lanes are replaced; the LFE lane is cleared unless it is a sub lane.
@@ -449,6 +584,7 @@ struct HeadroomModel {
                 guard source >= 0, source < before.count else { continue }
                 sources.insert(source)
                 next.incomplete.formUnion(before[source].incomplete)
+                if !before[source].alternatives.isEmpty { next.incomplete.insert("binaural rendering") }
                 guard !before[source].silent else { continue }
                 for var path in before[source].flattened {
                     // ROUTE runs after OUTPUT_GAIN, so a source lane's trim is already in its path: take it out again, because
@@ -471,7 +607,8 @@ struct HeadroomModel {
 
     // MARK: Core call
 
-    private func evaluate(_ lane: Lane, ceiling: Double) -> n60_headroom_result? {
+    private func evaluate(paths: [Path], tail: [Stage], ceiling: Double) -> n60_headroom_result? {
+        let lane = (paths: paths, tail: tail)
         guard (1...64).contains(lane.paths.count), lane.tail.count <= 64 else { return nil }
         var owned: [UnsafeMutableRawPointer] = []
         defer { owned.forEach { $0.deallocate() } }
