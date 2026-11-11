@@ -23,8 +23,18 @@ States:
   unchecked plan item. Only that slice (or the owner, e.g. "fix G3") may fix it.
 - `closed`: fixed or dropped, with the PR number.
 
-Rules: a slice with an `open-question` gap is not ticked; a flag-removal or ship slice needs every
-gap in its epic `closed`. Numbers are never reused. See AGENTS.md section 12.
+Rules: a slice with an `open-question` gap is not ticked; a flag-graduation or ship slice needs every
+gap in its epic `closed`. A gap whose only remaining work is a bench or owner acceptance check may be
+closed as "moved to E22 item X" only when E22 (`docs/PROGRAM_PLAN.md`) holds a matching unchecked item.
+Software gaps are never moved. (Owner confirmed 11 Nov 2026.) Numbers are never reused. See AGENTS.md section 12.
+
+## Flag graduation (owner, 11 Nov 2026)
+
+An epic's last slice is "graduate flag", not "remove flag": the flag stays in `FeatureFlag.all` with
+`graduated: true` (defaults on, release builds too) once the software is done, wired through the UI
+and tested, with every gap closed. Graduated means available, never armed (live ANC and MIMO keep
+`LiveTreatmentArm`). Bench "is it good" acceptance belongs to E22. Removal of graduated flags is the
+flag-cleanup phase (FC) after E22 and before E18. The registry and audit are in `docs/FEATURE_FLAGS.md`.
 
 ## Programme audit
 

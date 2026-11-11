@@ -50,7 +50,9 @@ The owner already has a local test build of `main`; do not rebuild a baseline un
 2. **Plan only for a new epic** (epic-planner, Opus) or a slice whose approach isn't recorded
    yet; the plan goes to `docs/epics/E<n>.md` for approval. Otherwise build straight away.
 3. **One branch per PR** named `e<n>/<slice>`, behind the epic's feature flag (add it to
-   `FeatureFlag.all`; see `docs/FEATURE_FLAGS.md`). PRs aim for about 800–1,500 changed lines of
+   `FeatureFlag.all`; see `docs/FEATURE_FLAGS.md`). The epic's last slice *graduates* the flag
+   (defaults on, stays in `FeatureFlag.all`); it does not remove it. Removal is the flag-cleanup
+   phase (FC) after E22. Graduation is "available", never "armed": live ANC and MIMO keep their arm. PRs aim for about 800–1,500 changed lines of
    product code: combine small slices, split only to separate risk classes. Never open a PR that
    only edits plans or records decisions (a new epic plan from epic-planner is the exception).
    The order of epics is the "Execution order" list in `docs/PROGRAM_PLAN.md`.
@@ -104,3 +106,5 @@ owner made in this session. Drop: file contents, diffs, build and test logs, and
   rates (44.1, 48, 88.2, 96, 176.4, 192, 352.8, 384 kHz).
 - Do not add new `ci/validate_*.py` source-text validators; write behavioural XCTests instead.
 - List required bench/hardware checks in each PR; remote CI never substitutes for them.
+- Flags: graduate at epic end, never remove (owner, 11 Nov 2026; AGENTS.md section 11). No new code
+  may depend on a graduated flag. Bench "is it good" acceptance belongs to E22, not the epic.
