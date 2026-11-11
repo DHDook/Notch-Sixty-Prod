@@ -424,6 +424,8 @@ under "Platform reach after v1". The local API must stay usable by that future i
 
 ### E17 Export and dither
 
+Plan: `docs/epics/E17.md` (awaiting owner approval; flags `e17.export`, `e17.dither`).
+
 - [ ] Filter export to MiniDSP, Equalizer APO and WAV convolution sets
 - [ ] Automatic TPDF dither only when the device's physical format is 16-bit integer
 
