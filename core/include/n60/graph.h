@@ -820,7 +820,12 @@ n60_status n60_graph_read_multiband(n60_graph *graph, uint32_t stageId, n60_mult
  * source inputs, each peak-held with a 1 s release (so a filter's tail after the program stops is not counted as over
  * bound). A source is over bound when its delta envelope exceeds 10^(6/10) * G_s^2 times the input envelope (6 dB in
  * amplitude, 5.9 dB is within bound); 50 ms of continuous over-bound on any source latches a fault: `faultSource` names it,
- * g falls in 10 ms and `held` is set.
+ * g falls in 10 ms and `held` is set (`faultReason` 1).
+ * Thermal budget (E19 S5, design note 6, owner decision D5). Armed time (g > 0) is cut into consecutive 10 s windows; per
+ * source the window sums the delta power (before g, as the monitor) and the in-band program power (the decimated source
+ * feed). When a window ends with delta power above 10^(-6/10) (-6 dB) of the program power the stage latches a fault the
+ * same way (`faultReason` 2); -6.1 dB passes. Windows restart whenever g returns to 0. A window whose program power is
+ * below -120 dB is not judged.
  * Realtime: no allocation (every byte is in the snapshot arena), no locks, bounded work; one 128-point FFT per source and
  * one inverse per source every 64 low-rate samples (a bounded burst of S * S * (T / 64) complex multiply-adds). Sample
  * rates 44.1 to 384 kHz and the families above; 1..8 channels. Reset: a new snapshot only (history is zero, g = 0, held
@@ -837,7 +842,7 @@ typedef struct n60_mimo_readback {
     uint32_t latencyFrames;   /* L */
     float boundRatioMax[8];   /* worst delta envelope over (G_s^2 * input envelope), linear power ratio, since the previous read (reset by the read) */
     float deltaPeak[8];       /* peak |delta| per source (before g) since the previous read (reset by the read) */
-    uint32_t reserved;
+    uint32_t faultReason;     /* E19 S5: with faultLatched, 1 monitor bound, 2 thermal budget; 0 otherwise (was `reserved`, always 0; same size) */
 } n60_mimo_readback;
 n60_status n60_graph_read_mimo(n60_graph *graph, uint32_t stageId, n60_mimo_readback *out);
 

@@ -205,4 +205,43 @@ int n60_headroom_evaluate(const n60_headroom_output *o, n60_headroom_result *r) 
     return N60_HEADROOM_OK;
 }
 
+int n60_headroom_mimo_term(double sample_rate, const float *params, uint32_t param_count, uint32_t source,
+                           double *peak_gain_db, double *peak_hz) {
+    if (params == nullptr || peak_gain_db == nullptr || !std::isfinite(sample_rate) || sample_rate < 44100.0 ||
+        sample_rate > 384000.5 || param_count < 8) {
+        return N60_HEADROOM_ERR_ARGUMENT;
+    }
+    const double dD = params[0], dT = params[1], dS = params[2], dTau = params[3];
+    if (!(dD >= 1.0 && dD <= 128.0) || !(dT >= 1.0 && dT <= 4096.0) || !(dS >= 1.0 && dS <= 8.0) || !(dTau >= 0.0) || !std::isfinite(dTau) ||
+        dD != std::floor(dD) || dT != std::floor(dT) || dS != std::floor(dS)) {
+        return N60_HEADROOM_ERR_ARGUMENT;
+    }
+    const uint32_t D = static_cast<uint32_t>(dD), T = static_cast<uint32_t>(dT), S = static_cast<uint32_t>(dS);
+    if (source >= S || param_count != 8u + S + S * S * T) return N60_HEADROOM_ERR_ARGUMENT;
+    const double fsLow = sample_rate / D, tauSeconds = dTau / sample_rate;
+    const float *taps = params + 8 + S;
+    const double maxHz = std::min(0.4 * fsLow, 1000.0);
+    double best = 1.0, bestHz = 0.0;  // the direct path alone is 0 dB
+    for (double hz = 5.0; hz <= maxHz; hz += 0.25) {
+        const double wLow = 2.0 * kPi * hz / fsLow;
+        double gain = 0.0;
+        for (uint32_t t = 0; t < S; ++t) {
+            Cx e = firAt(taps + (static_cast<size_t>(source) * S + t) * T, T, wLow);
+            if (t == source) e += std::polar(1.0, -2.0 * kPi * hz * tauSeconds);
+            gain += std::abs(e);
+        }
+        if (gain > best) {
+            best = gain;
+            bestHz = hz;
+        }
+    }
+    *peak_gain_db = 20.0 * std::log10(best);
+    if (peak_hz != nullptr) *peak_hz = bestHz;
+    return N60_HEADROOM_OK;
+}
+
+double n60_headroom_mimo_budget_db(double ceiling_db, double trim_allowance_db, double chain_peak_db) {
+    return ceiling_db - N60_HEADROOM_TRUE_PEAK_MARGIN_DB - chain_peak_db + trim_allowance_db;
+}
+
 }  // extern "C"

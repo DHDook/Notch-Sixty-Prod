@@ -35,7 +35,7 @@
 extern "C" {
 #endif
 
-#define N60_HEADROOM_ABI_VERSION 1
+#define N60_HEADROOM_ABI_VERSION 2 /* 2 (E19 S5): MIMO term and budget */
 
 #define N60_HEADROOM_OK 0
 #define N60_HEADROOM_ERR_ARGUMENT (-1) /* null pointer, bad struct size, bad rate or count */
@@ -99,6 +99,33 @@ uint32_t n60_headroom_abi_version(void);
 
 /* Evaluates one output. Control or worker thread only. */
 int n60_headroom_evaluate(const n60_headroom_output *output, n60_headroom_result *result);
+
+/*
+ * MIMO term (E19 S5, design note 6). The MIMO stage (graph kind N60_STAGE_MIMO, `n60/graph.h`) sends program
+ * source s through y_s = x_s z^-L + delta_s; for a full-scale input on every source the worst gain of row s is
+ *     G_s(f) = sum over t of | E_st(f) + [t == s] e^(-j 2 pi f tau) |,
+ * the same sum the design checks (`n60_mimo_info.peak_gain_db`, `n60_mimo_realisation.gain_peak_db`), here evaluated
+ * on the stage's own published parameters so the headroom model and the stage cannot disagree. `params` is the
+ * stage's parameter array in the graph layout (8 + S + S*S*T floats: D, T, S, tauFrames, ..., bounds, taps) and
+ * `sample_rate` the graph rate. The grid is 0.25 Hz from 5 Hz to min(0.4 fs/D, 1,000 Hz); above it the delta is
+ * zero and the gain is 1, so the result is never below 0 dB. Control or worker thread only; allocates nothing.
+ * Returns N60_HEADROOM_OK, or N60_HEADROOM_ERR_ARGUMENT for a null pointer, bad source, rate or layout.
+ */
+int n60_headroom_mimo_term(double sample_rate, const float *params, uint32_t param_count, uint32_t source,
+                           double *peak_gain_db, double *peak_hz);
+
+/*
+ * The gain budget of a MIMO source (dB re 1): the most the MIMO row's peak gain may reach. With `chain_peak_db` the
+ * peak composite gain of everything after the stage on that output (`n60_headroom_evaluate` with the stage left out),
+ * a full-scale input reaches the ceiling when row gain + chain peak + N60_HEADROOM_TRUE_PEAK_MARGIN_DB = ceiling_db.
+ * The treatment may cost the program up to `trim_allowance_db` of output trim (the headroom assistant's Apply, E9 S7;
+ * 3 dB by default, `N60_HEADROOM_MIMO_TRIM_ALLOWANCE_DB`), so
+ *     budget = ceiling_db - N60_HEADROOM_TRUE_PEAK_MARGIN_DB - chain_peak_db + trim_allowance_db.
+ * Pass it as the source's `gain_limit_db` in `n60_mimo_problem`; the design re-solves with more regularisation (at most
+ * 4 steps) and then refuses by name. A budget below 0 dB means even the untreated path does not fit.
+ */
+#define N60_HEADROOM_MIMO_TRIM_ALLOWANCE_DB 3.0
+double n60_headroom_mimo_budget_db(double ceiling_db, double trim_allowance_db, double chain_peak_db);
 
 #ifdef __cplusplus
 }
