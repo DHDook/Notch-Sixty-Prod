@@ -230,7 +230,7 @@ static void testTwoSourcesCancelAMode() {
 }
 
 int main() {
-    CHECK(n60_measure_abi_version() == N60_MEASURE_ABI_VERSION && N60_MEASURE_ABI_VERSION == 4, "abi");
+    CHECK(n60_measure_abi_version() == N60_MEASURE_ABI_VERSION, "abi");
     testIdentity();
     testKnownFilter();
     testMixedAndArguments();

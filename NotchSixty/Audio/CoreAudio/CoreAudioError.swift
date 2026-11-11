@@ -214,6 +214,8 @@ enum CoreAudioTransportError: Error, LocalizedError, Equatable {
     case headphoneDSPConfigurationFailed
     case audioUnitRackConfigurationFailed
     case programFoldFailed(ProgramFoldDownError)
+    /// E7 S1 (Q6): v1 is tested, and protection and plug-ins are limited, to 384 kHz; a faster device is refused by name.
+    case sampleRateAboveSupportedMaximum(rate: Double, maximum: Double)
 
     var errorDescription: String? {
         switch self {
@@ -223,6 +225,8 @@ enum CoreAudioTransportError: Error, LocalizedError, Equatable {
             return "Core Audio \(operation) failed with status \(status)."
         case .programFoldFailed(let error):
             return error.errorDescription
+        case .sampleRateAboveSupportedMaximum(let rate, let maximum):
+            return "This output is running at \(Int(rate)) Hz. Notch Sixty supports rates up to \(Int(maximum)) Hz; set the device to \(Int(maximum)) Hz or lower in Audio MIDI Setup."
         case .unsupportedFormat(let role, let format):
             return "Unsupported \(role) format: \(format.sampleRate) Hz, \(format.channelCount) channels, \(format.bitsPerChannel)-bit."
         case .sampleRateMismatch(let tap, let output):
@@ -413,7 +417,7 @@ private final class DSPGraphPublicationCoordinator: @unchecked Sendable {
 }
 
 final class CoreAudioTransportSession {
-    private static let bridgeCapacityFrames: UInt32 = 65_536
+    static let bridgeCapacityFrames: UInt32 = RateCapacity.fixedRingFrames
     private static let graphTransitionFadeMilliseconds = 8.0
     private static let shutdownFadePollMicroseconds: UInt32 = 250
     private static let shutdownFadeTimeoutMicroseconds: UInt32 = 100_000
@@ -1554,7 +1558,10 @@ final class CoreAudioTransportSession {
         // A refusal normally hands rendering to the kernel. After a live headphone edit the kernel holds the older
         // correction, so the running graph stays instead and the caller sees the refusal (E6 S9d).
         let profile = candidate ?? headphoneProfile
-        let kernelWouldBeWrong = kernelHeadphoneStale || (headphoneDSPConfigured && profile != kernelHeadphoneProfile)
+        // E7 S1: an ear delay past the kernel's 4,095 frames renders on the graph only, so the kernel is wrong for it too.
+        let kernelDelayClamped = headphoneDSPConfigured && profile?.kernelRendersDelays(sampleRate: snapshot.sampleRate) == false
+        let kernelWouldBeWrong = kernelHeadphoneStale || kernelDelayClamped
+            || (headphoneDSPConfigured && profile != kernelHeadphoneProfile)
         func refuse(_ reason: UnifiedGraphFallbackReason) -> Bool {
             // The kernel plays the anti-noise from here (its own snapshot copy), so the feed goes silent first.
             silenceHostedQuietZoneFeed()
