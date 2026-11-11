@@ -24,6 +24,9 @@ struct UnifiedGraphMIMOStage: Equatable, Sendable {
     let rowGainBounds: [Float]
     /// Live word [4]. Written only by the arm controller.
     var armed = false
+    /// Support range [low, high] Hz of every source, flattened (low0, high0, low1, ...): bound by the permit's fingerprint
+    /// (E19 S7). Not a stage parameter; the design's own filters already carry it.
+    var supportRangesHz: [Double] = []
     /// Live word [5]: a trip (10 ms fade, latches `held` until the host writes arm = 0 and trip = 0).
     var trip = false
 

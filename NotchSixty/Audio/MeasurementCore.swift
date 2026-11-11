@@ -398,3 +398,49 @@ extension MeasurementCore {
             levelsDB: (0..<frames).map { Array(cells[($0 * bins)..<(($0 + 1) * bins)]) })
     }
 }
+
+// MARK: - E19 S7: predicted treated impulse response
+
+extension MeasurementCore {
+    /// The treated response at one seat predicted from the measured plants: the sum over sources of plant convolved with that
+    /// source's treatment filter (`n60_measure_predict_treated_ir`, E19 design note 2). Plants must already be through the known
+    /// downstream chain and share one rate with the filters (the device rate, or fs/D when both are decimated). An excluded
+    /// source passes the single tap 0. Offline: allocates; never call it from an audio callback.
+    static func predictTreatedIR(plants: [[Float]], filters: [[Float]]) throws -> [Float] {
+        let count = plants.count
+        guard count >= 1, count <= Int(N60_MEASURE_PREDICT_MAX_SOURCES), filters.count == count,
+              plants.allSatisfy({ !$0.isEmpty }), filters.allSatisfy({ !$0.isEmpty }) else {
+            throw MeasurementAnalysisError.invalidArguments
+        }
+        let plantCounts = plants.map { UInt64($0.count) }
+        let filterCounts = filters.map { UInt64($0.count) }
+        var length: UInt64 = 0
+        guard n60_measure_predict_treated_length(UInt32(count), plantCounts, filterCounts, &length) == N60_MEASURE_OK else {
+            throw MeasurementAnalysisError.invalidArguments
+        }
+        let flatPlants = plants.flatMap { $0 }
+        let flatFilters = filters.flatMap { $0 }
+        var out = [Float](repeating: 0, count: Int(length))
+        var written: UInt64 = 0
+        let status: Int32 = flatPlants.withUnsafeBufferPointer { plantBuffer in
+            flatFilters.withUnsafeBufferPointer { filterBuffer in
+                var plantPointers: [UnsafePointer<Float>?] = []
+                var filterPointers: [UnsafePointer<Float>?] = []
+                var plantOffset = 0, filterOffset = 0
+                for index in 0..<count {
+                    plantPointers.append(plantBuffer.baseAddress! + plantOffset)
+                    filterPointers.append(filterBuffer.baseAddress! + filterOffset)
+                    plantOffset += plants[index].count
+                    filterOffset += filters[index].count
+                }
+                return out.withUnsafeMutableBufferPointer { outBuffer in
+                    n60_measure_predict_treated_ir(
+                        UInt32(count), plantPointers, plantCounts, filterPointers, filterCounts, outBuffer.baseAddress,
+                        length, &written)
+                }
+            }
+        }
+        guard status == N60_MEASURE_OK else { throw analysisError(status) }
+        return Array(out.prefix(Int(written)))
+    }
+}
