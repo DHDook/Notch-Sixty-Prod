@@ -5227,6 +5227,10 @@ final class AudioIOEngine: ObservableObject {
     }
 
     private func buildTransport(output: AudioOutputDevice) throws {
+        guard output.nominalSampleRate <= RateCapacity.supportedMaximumSampleRate else {
+            throw CoreAudioTransportError.sampleRateAboveSupportedMaximum(
+                rate: output.nominalSampleRate, maximum: RateCapacity.supportedMaximumSampleRate)
+        }
         applyLowLatencyOutputProfile(to: output)
         if let headphone = headphoneDeviceProfileConfiguration, headphone.enabled {
             if outputDeviceProfileConfiguration?.enabled == true {

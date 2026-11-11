@@ -218,6 +218,8 @@ extension UnifiedGraphConfiguration {
     static let xoverStageBase: UInt32 = 3_100
     static let outputProtectionStageBase: UInt32 = 3_200
     static let driverFIRStageBase: UInt32 = 3_300
+    /// E7 S1: the DELAY half of a fractional way delay longer than the FRAC_DELAY ring.
+    static let wayWholeDelayBase: UInt32 = 3_400
 
     /// ROUTE, XOVER, per-output DELAY or FRAC_DELAY and PROTECTION stages, appended in the core's order by `makeSpec`.
     func routeStages(programLanes: Int) throws -> (route: [UnifiedGraphStageSpec], rest: [UnifiedGraphStageSpec]) {
@@ -272,10 +274,16 @@ extension UnifiedGraphConfiguration {
                 throw UnifiedGraphError.invalidConfiguration("way delay")
             }
             let whole = total.rounded(.down)
-            if total - whole > 1e-6, total < 8190 {
+            if total - whole > 1e-6, let split = RateCapacity.splitFractionalDelay(totalFrames: total) {
+                // E7 S1: a fractional way delay longer than the FRAC_DELAY ring keeps its fraction; whole frames go to DELAY.
+                if split.wholeFrames >= 1 {
+                    rest.append(UnifiedGraphStageSpec(
+                        kind: N60_STAGE_DELAY.rawValue, stageId: Self.wayWholeDelayBase + id, laneA: id,
+                        capacityFrames: split.wholeFrames, params: [Float(split.wholeFrames)]))
+                }
                 rest.append(UnifiedGraphStageSpec(
                     kind: N60_STAGE_FRAC_DELAY.rawValue, stageId: Self.delayStageBase + id, laneA: id,
-                    params: [Float(whole), Float(total - whole)]))
+                    params: [Float(split.stageWhole), Float(split.fraction)]))
             } else {
                 let frames = UInt32(total.rounded())
                 if frames >= 1 {

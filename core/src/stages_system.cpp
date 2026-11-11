@@ -30,6 +30,7 @@
 #include <cstring>
 #include <new>
 
+#include "n60/rate_capacity.h"
 #include "n60/xover.h"
 #include "simd/simd.hpp"
 
@@ -266,7 +267,7 @@ ProtCfg protCfg(const float *p, double rate, uint32_t n) {
     c.factor = (c.limiter && tp) ? 4u : static_cast<uint32_t>(p[6]);
     const double highRate = rate * static_cast<double>(c.factor);
     c.ceilLin = std::pow(10.0f, p[1] / 20.0f);
-    c.laHigh = c.limiter ? static_cast<uint32_t>(std::ceil(static_cast<double>(p[4]) * 0.001 * highRate)) : 0u;
+    c.laHigh = c.limiter ? n60::framesFor(static_cast<double>(p[4]) * 0.001, highRate) : 0u;
     c.atkHigh = c.limiter ? static_cast<uint32_t>(std::fmax(1.0, std::ceil(static_cast<double>(p[2]) * 0.001 * highRate))) : 1u;
     c.relCoef = c.limiter ? std::exp(-1.0 / std::fmax(1.0, static_cast<double>(p[3]) * 0.001 * highRate)) : 0.0;
     const uint32_t laFrames = c.laHigh == 0 ? 0u : (c.laHigh + c.factor - 1u) / c.factor;
