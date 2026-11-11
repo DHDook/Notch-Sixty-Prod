@@ -126,3 +126,21 @@ extension DynamicsConfiguration {
         return a == b
     }
 }
+
+/// E28 S8: the three extras blocks the translator appends to the stereo compressor, expander and multiband parameters.
+/// The stereo transport session holds the latest one so every republish of the stereo graph (EQ, FIR, protection and
+/// dynamics edits alike) carries the same extras the N-channel path passes from its live inputs.
+struct DynamicsGraphExtras: Equatable {
+    var compressor: [Float]
+    var expander: [Float]
+    var multiband: [Float]
+
+    /// nil when the flag is off (the translator then keeps today's 10, 6 and 29 value blocks).
+    static func make(_ dynamics: DynamicsConfiguration, sampleRate: Double, flagOn: Bool) -> DynamicsGraphExtras? {
+        guard flagOn else { return nil }
+        return DynamicsGraphExtras(
+            compressor: dynamics.compressor.coreExtras(sampleRate: sampleRate),
+            expander: dynamics.expander.coreExtras(),
+            multiband: dynamics.multibandCompressor.coreExtras(sampleRate: sampleRate))
+    }
+}

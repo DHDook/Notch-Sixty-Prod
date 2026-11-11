@@ -294,9 +294,18 @@ final class SpeakerOptimizerGuidedFIRController: ObservableObject {
     private let transaction = SpeakerOptimizerFIRApplyTransaction()
     private let latencyPlanner = SpeakerOptimizerFIRLatencyPlanner()
     private let avPolicy = SpeakerOptimizerFIRAVSyncPolicy()
-    /// E28 S7d (G33): compressor and multiband lookahead frames the program path also carries; the owner of this
-    /// controller sets it from `DynamicsLatency.programFrames` before `prepareReview`.
-    var additionalProgramLatencyFrames: UInt64 = 0
+    /// E28 S8 (G41): the compressor and multiband lookahead frames the program path also carries at a sample rate, read
+    /// each time the A/V-sync check runs. Production passes `makeProgramLatencyProvider(engine:)`.
+    private let programLatencyFrames: (Double) -> UInt64
+
+    /// The lookahead the engine's live dynamics configuration adds to the program path at `sampleRate` (zero with the
+    /// flag off or no lookahead on), so the A/V-sync check counts what the core reports.
+    static func makeProgramLatencyProvider(engine: AudioIOEngine) -> (Double) -> UInt64 {
+        { sampleRate in
+            UInt64(DynamicsLatency.programFrames(
+                engine.dynamicsConfiguration, sampleRate: sampleRate, flagOn: FeatureFlags().isEnabled(.dynamicsExtras)))
+        }
+    }
 
     @Published private(set) var state:
         SpeakerOptimizerGuidedFIRState = .idle
@@ -322,6 +331,7 @@ final class SpeakerOptimizerGuidedFIRController: ObservableObject {
 
     init(
         profileStore: any SpeakerOptimizerFIRProfileMutating,
+        programLatencyFrames: @escaping (Double) -> UInt64,
         designOperation:
             @escaping SpeakerOptimizerGuidedFIRDesignOperation = {
                 characterization, baseline in
@@ -333,6 +343,7 @@ final class SpeakerOptimizerGuidedFIRController: ObservableObject {
             }
     ) {
         self.profileStore = profileStore
+        self.programLatencyFrames = programLatencyFrames
         self.designOperation = designOperation
     }
 
@@ -428,7 +439,7 @@ final class SpeakerOptimizerGuidedFIRController: ObservableObject {
                     plan: planned,
                     context: avSyncContext,
                     additionalProgramLatencyFrames:
-                        additionalProgramLatencyFrames
+                        programLatencyFrames(planned.sampleRate)
                 )
             } else {
                 latency = nil
@@ -464,7 +475,7 @@ final class SpeakerOptimizerGuidedFIRController: ObservableObject {
                 plan: latencyPlan,
                 context: context,
                 additionalProgramLatencyFrames:
-                    additionalProgramLatencyFrames
+                    programLatencyFrames(latencyPlan.sampleRate)
             )
             lastErrorDescription = nil
         } catch {

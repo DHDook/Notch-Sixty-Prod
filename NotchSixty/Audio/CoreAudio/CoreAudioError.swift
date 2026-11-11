@@ -509,6 +509,9 @@ final class CoreAudioTransportSession {
     /// E25 S2: the mono-bass filter and speaker feed calibration compiled into the stereo graph. nil is the standard
     /// session.
     private(set) var stereoAlignment: StereoBassAlignment?
+    /// E28 S8: the dynamics extras the stereo graph is built with (nil: flag off, the unextended blocks). The engine sets it
+    /// before the first publish and before each dynamics edit publishes, on the control thread.
+    private(set) var dynamicsExtras: DynamicsGraphExtras?
     private var graphPublicationCoordinator: DSPGraphPublicationCoordinator?
     private var analysisWorker: ProductionAnalysisWorker?
     private var audioUnitRack: AudioUnitLiveRackSwitchboard?
@@ -1531,6 +1534,8 @@ final class CoreAudioTransportSession {
     /// E25 S2. Before the session starts: the alignment its first graph is built with.
     func setInitialStereoAlignment(_ alignment: StereoBassAlignment?) { stereoAlignment = alignment }
 
+    func setDynamicsExtras(_ extras: DynamicsGraphExtras?) { dynamicsExtras = extras }
+
     /// E25 S2. Control thread. Sets the mono-bass filter and speaker feed calibration of this stereo session. The
     /// legacy kernel cannot apply a non-standard alignment, so with the graph off it is refused with a reason; the
     /// stored alignment changes only once the graph accepted it.
@@ -1600,7 +1605,10 @@ final class CoreAudioTransportSession {
         switch UnifiedGraphTranslator.stereoEligibility(
             snapshot: &mutable, sampleRate: outputFormat.sampleRate,
             programs: { [self] kind, generation in retainedProgram(kind, generation: generation) },
-            alignment: stereoAlignment
+            alignment: stereoAlignment,
+            compressorExtras: dynamicsExtras?.compressor,
+            expanderExtras: dynamicsExtras?.expander,
+            multibandExtras: dynamicsExtras?.multiband
         ) {
         case .success(let accepted): configuration = accepted
         case .failure(let reason):
