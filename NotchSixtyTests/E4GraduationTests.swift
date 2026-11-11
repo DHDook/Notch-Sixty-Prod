@@ -59,6 +59,17 @@ final class E4GraduationTests: XCTestCase {
         // The real controller graph (the same wiring `ProductController` uses), with the default flag store.
         let product = ProductController(audioEngine: AudioIOEngine(deviceCatalog: OfflineOutputCatalog(devices: [])))
         let quietZone = product.activeQuietZone
+        // `ProductController` reads the process-wide flag store. The nightly flags-off run (FC1) switches every
+        // graduated flag off through the environment, so there the same controller must leave the paths absent.
+        if ProcessInfo.processInfo.environment[FeatureFlags.graduatedOffEnvironmentKey] == "1" {
+            XCTAssertNil(quietZone.adaptiveLive)
+            XCTAssertNil(quietZone.noiseSurvey)
+            XCTAssertNil(quietZone.earnedCap)
+            XCTAssertNil(quietZone.feedForwardArming)
+            XCTAssertNil(product.feedForwardArming)
+            XCTAssertFalse(quietZone.arm.isArmed)
+            return
+        }
         XCTAssertNotNil(quietZone.adaptiveLive)
         XCTAssertNotNil(quietZone.noiseSurvey)
         XCTAssertNotNil(quietZone.earnedCap)
