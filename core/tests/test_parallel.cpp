@@ -16,6 +16,9 @@
 #include <vector>
 
 #include <unistd.h>
+#ifdef __linux__
+#include <sched.h>
+#endif
 
 #include "n60/graph.h"
 
@@ -371,8 +374,82 @@ static void parkingRegression() {
     n60_graph_retire(g);
 }
 
+// G26: run the whole test on a real 2-core budget. Linux only (macOS has no affinity API); N60_PARALLEL_TEST_CPUS=2 pins this
+// process to its first two allowed cores, so three workers plus the render thread contend for two, as on a small CI runner.
+static void limitCpus() {
+    const char *env = std::getenv("N60_PARALLEL_TEST_CPUS");
+    if (env == nullptr) return;
+#ifdef __linux__
+    const int want = std::atoi(env);
+    cpu_set_t all, pick;
+    CPU_ZERO(&pick);
+    if (want > 0 && sched_getaffinity(0, sizeof all, &all) == 0) {
+        int taken = 0;
+        for (int c = 0; c < CPU_SETSIZE && taken < want; c++) {
+            if (CPU_ISSET(c, &all)) { CPU_SET(c, &pick); taken++; }
+        }
+        if (taken > 0 && sched_setaffinity(0, sizeof pick, &pick) == 0) {
+            std::printf("test_parallel: limited to %d cores\n", taken);
+            return;
+        }
+    }
+    std::fprintf(stderr, "FAIL test_parallel: could not limit to %s cores\n", env);
+    failures++;
+#else
+    std::printf("test_parallel: N60_PARALLEL_TEST_CPUS ignored (no affinity API on this platform)\n");
+#endif
+}
+
+// E20 S6b (G21): a single long FIR lane runs its tail (segment 2) as a job. One lane means no lane jobs, so any worker
+// activity here is the tail job. Output must equal the single-thread run bit for bit at 0 to 3 workers, with worker delays
+// and an absent worker, and the jobs must really be posted and (with workers) taken.
+static void tailJobTests(const double *rates, size_t rateCount, bool lite) {
+    struct T { const char *name; uint32_t lanes; uint32_t taps; uint64_t mask; };
+    const T cases[] = {
+        {"tail: one lane, 2 tail partitions", 1, 14000, 0},
+        {"tail: one lane, 262144 taps", 1, 262144, 0},
+        {"tail: two lanes, one in the mask", 2, 30000, 0x2u},
+    };
+    for (const T &t : cases) {
+        const bool heavy = t.taps > 100000;
+        for (size_t ri = 0; ri < rateCount; ri++) {
+            const double rate = rates[ri];
+            if (heavy && rate != 48000 && rate != 384000) continue;
+            if (lite && rate != 48000 && rate != 384000) continue;
+            const Layout L{t.name, t.lanes, t.taps, 0, t.mask, false};
+            gWhere = t.name;
+            gRate = rate;
+            std::printf("test_parallel: %s at %.0f Hz\n", t.name, rate);
+            std::fflush(stdout);
+            std::vector<float> ref, got;
+            CHECK(render(L, rate, 0, 0, false, ref, nullptr, nullptr), "%s ref build", t.name);
+            for (uint32_t w = 1; w <= 3; w++) {
+                n60_graph_parallel_stats stats{};
+                long ac = 0;
+                CHECK(render(L, rate, w, 0, false, got, &ac, &stats), "%s w%u build", t.name, w);
+                CHECK(got.size() == ref.size() && std::memcmp(got.data(), ref.data(), ref.size() * sizeof(float)) == 0,
+                      "%s rate %.0f workers %u: output differs from single thread", t.name, rate, w);
+                CHECK(ac == 0, "%s rate %.0f workers %u: realtime call allocated %ld times", t.name, rate, w, ac);
+                CHECK(stats.parallelPhases == 0, "%s: a one-lane phase must not run as lane jobs", t.name);
+                CHECK(stats.jobsOnCaller + stats.jobsOnWorkers > 0, "%s workers %u: no tail job ran", t.name, w);
+                CHECK(stats.wakes > 0, "%s workers %u: workers were never woken", t.name, w);
+            }
+            CHECK(render(L, rate, 3, 400, false, got, nullptr, nullptr) &&
+                      std::memcmp(got.data(), ref.data(), ref.size() * sizeof(float)) == 0,
+                  "%s rate %.0f delayed workers differ", t.name, rate);
+            n60_graph_parallel_stats ab{};
+            CHECK(render(L, rate, 2, 0, true, got, nullptr, &ab) && std::memcmp(got.data(), ref.data(), ref.size() * sizeof(float)) == 0,
+                  "%s rate %.0f absent worker differs", t.name, rate);
+            CHECK(ab.jobsOnWorkers == 0, "%s absent worker ran %llu jobs", t.name, static_cast<unsigned long long>(ab.jobsOnWorkers));
+            CHECK(ab.jobsOnCaller > 0, "%s absent worker: the caller ran no tail job", t.name);
+        }
+    }
+}
+
 int main() {
     startWatchdog();
+    limitCpus();
+    const bool lite = std::getenv("N60_PARALLEL_TEST_LITE") != nullptr;
     std::printf("test_parallel: %u hardware threads\n", std::thread::hardware_concurrency());
     const double rates[] = {44100, 48000, 88200, 96000, 176400, 192000, 352800, 384000};
     const Layout layouts[] = {
@@ -385,7 +462,7 @@ int main() {
     for (const Layout &L : layouts) {
         const bool heavy = L.tapsA > 100000;
         for (double rate : rates) {
-            if (heavy && rate != 48000 && rate != 384000) continue;  // keep the long-tap case affordable
+            if ((heavy || lite) && rate != 48000 && rate != 384000) continue;  // keep the long-tap case affordable
             std::vector<float> ref, got;
             long ac = 0;
             gWhere = L.name;
@@ -415,6 +492,7 @@ int main() {
         }
     }
 
+    tailJobTests(rates, 8, lite);
     oversubscribedRegression();
     parkingRegression();
 

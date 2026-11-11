@@ -192,13 +192,50 @@ void macOlder(Ctx &c, uint32_t s, Complex *acc, uint32_t qLo, uint32_t qHi, uint
     }
 }
 
-void tick(Ctx &c, uint64_t &ops) {
+// Segment 2 work of tick T (E20 S6b). It reads the input ring only up to the end of block T-1 (the window ends at wp - kBlock),
+// writes only the segment's own spectrum delay line, accumulator and the output half NOT being read (outCur ^ 1), and
+// touches no field the segment 0 and 1 work of the same tick touches, so it may run on another thread at the same time as
+// tickHead, provided the caller joins before the lane's next tick (outCur is flipped only by tick() before the split).
+// It runs on `c.scratch`, which must not be the scratch tickHead uses.
+void tickTail(Ctx &c, uint64_t &ops) {
+    LaneHdr &h = *c.hdr;
+    const uint32_t T = h.tick;
+    const uint32_t wp = h.wp;
+    const Shared &S = *c.S;
+    const uint32_t ph16 = T & 15;
+    if (S.parts[2] > 0) {
+        Complex *acc = c.acc(2);
+        const uint32_t bins = binsOf(2);
+        if (ph16 == 0) {
+            fwdWindow(c.plan(2), 2, c.ring, c.mask, wp - kBlock, c.scratch);
+            pushSpectrum(c, 2);
+            ops += fftOps(2) + fftN(2);
+        } else if (ph16 == 1) {
+            if (h.cnt[2] > 0) {
+                macAdd(acc, c.H(2, 0), c.fdl(2, h.head[2]), bins);
+                ops += 8ull * bins;
+            }
+        } else if (ph16 == 2) {
+            std::memcpy(c.scratch, acc, sizeof(Complex) * bins);
+            std::memset(acc, 0, sizeof(Complex) * bins);
+            invertHalf(c.plan(2), c.scratch);
+            float *o = c.out2(h.outCur ^ 1);
+            for (uint32_t j = 0; j < kL[2]; ++j) o[j] = tail(c.scratch, 2)[j];
+            ops += fftOps(2) + 3 * fftN(2);
+        } else if (S.parts[2] > 1) {
+            const uint32_t nq = S.parts[2] - 1, j = ph16 - 3;
+            macOlder(c, 2, acc, 1 + j * nq / 13, 1 + (j + 1) * nq / 13, ops);
+        }
+    }
+}
+
+// Segment 0 and 1 work and the output sum of tick T. Everything segment 2 contributes was computed in earlier ticks.
+void tickHead(Ctx &c, uint64_t &ops) {
     LaneHdr &h = *c.hdr;
     const uint32_t T = h.tick;
     const uint32_t wp = h.wp;  // = 256 (T + 1) (mod 2^32)
     const Shared &S = *c.S;
     const uint32_t ph4 = T & 3, ph16 = T & 15;
-    if (S.parts[2] > 0 && ph16 == 4) h.outCur ^= 1;
 
     // Segment 0: a whole overlap-save step. The product is built in the scratch after the spectrum is saved.
     {
@@ -239,31 +276,37 @@ void tick(Ctx &c, uint64_t &ops) {
             ops += fftOps(1) * 2 + 8ull * bins + 3 * fftN(1);
         }
     }
-    // Segment 2 work.
-    if (S.parts[2] > 0) {
-        Complex *acc = c.acc(2);
-        const uint32_t bins = binsOf(2);
-        if (ph16 == 0) {
-            fwdWindow(c.plan(2), 2, c.ring, c.mask, wp - kBlock, c.scratch);
-            pushSpectrum(c, 2);
-            ops += fftOps(2) + fftN(2);
-        } else if (ph16 == 1) {
-            if (h.cnt[2] > 0) {
-                macAdd(acc, c.H(2, 0), c.fdl(2, h.head[2]), bins);
-                ops += 8ull * bins;
-            }
-        } else if (ph16 == 2) {
-            std::memcpy(c.scratch, acc, sizeof(Complex) * bins);
-            std::memset(acc, 0, sizeof(Complex) * bins);
-            invertHalf(c.plan(2), c.scratch);
-            float *o = c.out2(h.outCur ^ 1);
-            for (uint32_t j = 0; j < kL[2]; ++j) o[j] = tail(c.scratch, 2)[j];
-            ops += fftOps(2) + 3 * fftN(2);
-        } else if (S.parts[2] > 1) {
-            const uint32_t nq = S.parts[2] - 1, j = ph16 - 3;
-            macOlder(c, 2, acc, 1 + j * nq / 13, 1 + (j + 1) * nq / 13, ops);
-        }
+}
+
+struct TailArg {
+    Ctx c;
+    uint64_t ops;
+};
+void runTail(void *arg, void *scratch) N60_RT_NONBLOCKING {
+    TailArg &a = *static_cast<TailArg *>(arg);
+    a.c.scratch = static_cast<Complex *>(scratch);
+    tickTail(a.c, a.ops);
+}
+
+// One tick. With a tail host the segment 2 work is posted before the head work and joined after it.
+void tick(Ctx &c, uint64_t &ops, const TailHost *host) N60_RT_NONBLOCKING {
+    LaneHdr &h = *c.hdr;
+    if (c.S->parts[2] > 0 && (h.tick & 15) == 4) h.outCur ^= 1;  // before the split: the tail reads outCur
+    // With a single tail partition, ticks 3..15 of the cycle have no tail work: nothing to post.
+    if (host != nullptr && c.S->parts[2] > 0 && !(c.S->parts[2] == 1 && (h.tick & 15) >= 3)) {
+        TailArg a{c, 0};
+        N60_RT_TRUST_BEGIN  // the host's post and join only use atomics (jobs.hpp)
+        host->post(host->ctx, &runTail, &a);
+        N60_RT_TRUST_END
+        tickHead(c, ops);
+        N60_RT_TRUST_BEGIN
+        host->join(host->ctx);
+        N60_RT_TRUST_END
+        ops += a.ops;
+        return;
     }
+    tickHead(c, ops);
+    tickTail(c, ops);
 }
 
 Ctx make(Shared *S, uint8_t *sh, uint8_t *lane) {
@@ -423,7 +466,7 @@ uint32_t carrySettleFrames(const void *shared) N60_RT_NONBLOCKING {
 
 size_t scratchBytes() { return sizeof(Complex) * fftN(kSegs - 1); }
 
-void process(void *shared, void *lane, float *buf, uint32_t frames, Counter *counter, void *scratch) N60_RT_NONBLOCKING {
+void process(void *shared, void *lane, float *buf, uint32_t frames, Counter *counter, void *scratch, const TailHost *tailHost) N60_RT_NONBLOCKING {
     uint8_t *sh = static_cast<uint8_t *>(shared);
     Shared &S = *reinterpret_cast<Shared *>(sh);
     uint8_t *lb = static_cast<uint8_t *>(lane);
@@ -466,7 +509,7 @@ void process(void *shared, void *lane, float *buf, uint32_t frames, Counter *cou
         if (h.fill == kBlock) {
             h.fill = 0;
             uint64_t ops = 0;
-            tick(c, ops);
+            tick(c, ops, tailHost);
             ++h.tick;
             if (counter != nullptr) {
                 counter->lastTick = ops;
