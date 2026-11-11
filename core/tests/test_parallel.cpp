@@ -37,7 +37,9 @@ static int failures = 0;
     std::fprintf(stderr, __VA_ARGS__); std::fputc('\n', stderr); failures++; } } while (0)
 
 // Portable worker host: workers sleep on a condition variable, the wake function (called from the render thread) only
-// bumps an epoch and notifies.
+// bumps an epoch and notifies. Every state change the workers' predicate reads is made under the mutex, so a notify can
+// never fall between a worker's predicate check and its block (a lost wakeup left stop() joining a sleeping worker forever
+// on a loaded 3-core CI runner; the engine core was never involved).
 struct Host {
     n60_graph *g = nullptr;
     std::mutex m;
@@ -49,7 +51,10 @@ struct Host {
 
     static void wake(void *ctx, uint32_t) {
         Host *h = static_cast<Host *>(ctx);
-        h->epoch.fetch_add(1);
+        {
+            std::lock_guard<std::mutex> lk(h->m);
+            h->epoch.fetch_add(1);
+        }
         h->cv.notify_all();
     }
     void start(n60_graph *graph, uint32_t workers) {
@@ -77,7 +82,10 @@ struct Host {
     }
     void stop() {
         n60_graph_set_workers(g, 0);
-        quit = true;
+        {
+            std::lock_guard<std::mutex> lk(m);
+            quit = true;
+        }
         cv.notify_all();
         for (auto &t : threads) t.join();
         threads.clear();
@@ -200,6 +208,53 @@ static void startWatchdog() {
     }).detach();
 }
 
+// Regression for the CI hang of E20 S5 (run 43016826202): more runnable threads than cores. Spinner threads (twice the
+// hardware threads) keep every core busy while the render thread drives 3 workers over 8 lanes at 176.4 kHz, with worker
+// delays, and the host is started and stopped many times (the stop path is where the lost wakeup hung). Output must
+// match the single-thread reference bit for bit and every join must return.
+static void oversubscribedRegression() {
+    const Layout L{"R3 8 lanes mixed (oversubscribed)", 8, 16384, 8192, 0, false};
+    gWhere = L.name;
+    gRate = 176400;
+    std::printf("test_parallel: %s\n", L.name);
+    std::fflush(stdout);
+    const uint32_t hw = std::thread::hardware_concurrency() != 0 ? std::thread::hardware_concurrency() : 4;
+    std::atomic<bool> stopSpin{false};
+    std::vector<std::thread> spinners;
+    for (uint32_t i = 0; i < hw * 2; i++) spinners.emplace_back([&] { while (!stopSpin.load(std::memory_order_relaxed)) {} });
+    std::vector<float> ref, got;
+    CHECK(render(L, 176400, 0, 0, false, ref, nullptr, nullptr), "oversubscribed ref build");
+    for (int i = 0; i < 40; i++) {
+        CHECK(render(L, 176400, 3, (i % 2) ? 200 : 0, false, got, nullptr, nullptr) && got.size() == ref.size() &&
+                  std::memcmp(got.data(), ref.data(), ref.size() * sizeof(float)) == 0,
+              "oversubscribed iteration %d differs", i);
+    }
+    // Pure start/stop churn: workers parked on the condition variable while stop() races their predicate check.
+    {
+        const float one = 1.0f;
+        n60_stage_desc st = firStage(1, &one, 1, 0);
+        n60_graph_desc d{};
+        d.structSize = sizeof d;
+        d.abiVersion = N60_GRAPH_ABI_VERSION;
+        d.sampleRate = 48000;
+        d.maxBlockFrames = 64;
+        d.inputChannels = d.outputChannels = 2;
+        d.stages = &st;
+        d.stageCount = 1;
+        n60_graph *g = nullptr;
+        CHECK(n60_graph_build(&d, &g) == N60_STATUS_OK, "churn build");
+        for (int i = 0; i < 3000 && g != nullptr; i++) {
+            Host host;
+            host.start(g, 3);
+            if (i % 3 == 0) std::this_thread::yield();
+            host.stop();
+        }
+        n60_graph_retire(g);
+    }
+    stopSpin = true;
+    for (auto &t : spinners) t.join();
+}
+
 int main() {
     startWatchdog();
     std::printf("test_parallel: %u hardware threads\n", std::thread::hardware_concurrency());
@@ -243,6 +298,8 @@ int main() {
             CHECK(ab.jobsOnWorkers == 0, "%s absent worker ran %llu jobs", L.name, static_cast<unsigned long long>(ab.jobsOnWorkers));
         }
     }
+
+    oversubscribedRegression();
 
     // Subnormal inputs: lanes run on workers must match the calling thread (flush-to-zero on both).
     {
