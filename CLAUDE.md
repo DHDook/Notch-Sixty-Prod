@@ -8,7 +8,7 @@
   builds one slice in a fresh context), realtime-reviewer (Sonnet), and code-scout,
   build-test-runner, plan-tracker, pr-writer (Haiku). `/next` itself runs on Sonnet.
 
-**Current focus:** E9 (multichannel protection and FIR parity), S6 merged (#439), S7 `e9/headroom-assistant` (PR #454 merged), S7b next; E19 (MIMO room treatment), S3 merged (#453), S4 merged (#458), S5 `e19/mimo-safety` (PR open, needs-owner; S6 next); E28 (Dynamics and Meters polish), S6 merged (#450), S6b merged, S7a `e28/compressor-extras` (PR #459, needs-owner), S7b next; E20 (performance), S1 merged (#448), S2 `e20/fp-env-and-rt-checks` (PR #451, needs-owner); E4 S30a `e4/unmask-ambient-stage` (PR #452, needs-owner), S30c next; E7 plan merged, S1 next; E23 S1b next; E29 plan merged; E8 complete
+**Current focus:** E9 (multichannel protection and FIR parity), S6 merged (#439), S7 `e9/headroom-assistant` (PR #454 merged), S7b next; E19 (MIMO room treatment), S3 merged (#453), S4 merged (#458), S5 `e19/mimo-safety` (PR #462, needs-owner; S6 next); E28 (Dynamics and Meters polish), S6 merged (#450), S6b merged, S7a `e28/compressor-extras` (PR #459, needs-owner), S7b next; E20 (performance), S1 merged (#448), S2 `e20/fp-env-and-rt-checks` (PR #451, needs-owner); E4 S30a `e4/unmask-ambient-stage` (PR #452, needs-owner), S30c next; E7 plan merged, S1 next; E23 S1b next; E29 plan merged; E8 complete
 <!-- plan-tracker keeps the line above current -->
 
 @AGENTS.md
