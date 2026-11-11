@@ -8,7 +8,7 @@
   builds one slice in a fresh context), realtime-reviewer (Sonnet), and code-scout,
   build-test-runner, plan-tracker, pr-writer (Haiku). `/next` itself runs on Sonnet.
 
-**Current focus:** E9 (multichannel protection and FIR parity), S7b `e9/headroom-assistant-coverage` (PR pending, needs-owner); E19 (MIMO room treatment), S3 merged (#453), S4 `e19/mimo-stage` (needs-owner, G11 closed; S5 next); E28 (Dynamics and Meters polish), S7a merged (#459), S7b `e28/expander-extras-and-listen` (PR #463, needs-owner), S7c next; E20 (performance), S1 merged (#448), S2 `e20/fp-env-and-rt-checks` (PR #451, needs-owner), S3 merged (#457), S4 `e20/fft-and-convolution` (PR #464, needs-owner), S5 `e20/parallel-render-core` (PR pending, needs-owner), S6 next; E4 S30a `e4/unmask-ambient-stage` (PR #452, needs-owner), S30c next; E7 plan merged, S1 next; E23 S1b next; E29 plan merged; E8 complete
+**Current focus:** not tracked here (it caused merge conflicts). Current status lives in the `**Status**` block of each `docs/epics/E<n>.md`; `/next` reads it from there. Agents never edit this file for status.
 <!-- plan-tracker keeps the line above current -->
 
 @AGENTS.md

@@ -7,7 +7,7 @@ model: sonnet
 effort: low
 ---
 
-Continue the v1 program plan. Target: $ARGUMENTS (if empty, use "Current focus" in `CLAUDE.md`).
+Continue the v1 program plan. Target: $ARGUMENTS (if empty, read the `**Status**` blocks of `docs/epics/E*.md` and pick per the Execution order).
 The owner does not use git directly: do every git and GitHub step and explain anything that
 needs their action in plain words.
 

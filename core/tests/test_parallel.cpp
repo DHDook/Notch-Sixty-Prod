@@ -15,6 +15,8 @@
 #include <thread>
 #include <vector>
 
+#include <unistd.h>
+
 #include "n60/graph.h"
 
 static std::atomic<bool> armed{false};
@@ -182,7 +184,25 @@ static bool render(const Layout &L, double rate, uint32_t workers, uint32_t dela
     return true;
 }
 
+// A worker or the render thread that never finishes must fail this test, not stall the job: the watchdog reports where
+// the run was and exits non-zero. Override the limit with N60_PARALLEL_TEST_TIMEOUT_S.
+static std::atomic<const char *> gWhere{"start"};
+static std::atomic<double> gRate{0};
+static void startWatchdog() {
+    const char *env = std::getenv("N60_PARALLEL_TEST_TIMEOUT_S");
+    const long limit = env != nullptr ? std::atol(env) : 600;
+    std::thread([limit] {
+        std::this_thread::sleep_for(std::chrono::seconds(limit > 0 ? limit : 600));
+        std::fprintf(stderr, "FAIL test_parallel: no result after %lds (layout '%s', rate %.0f): a worker or the caller is stuck\n",
+                     limit, gWhere.load(), gRate.load());
+        std::fflush(stderr);
+        _exit(3);
+    }).detach();
+}
+
 int main() {
+    startWatchdog();
+    std::printf("test_parallel: %u hardware threads\n", std::thread::hardware_concurrency());
     const double rates[] = {44100, 48000, 88200, 96000, 176400, 192000, 352800, 384000};
     const Layout layouts[] = {
         {"R2 6 lanes short+long", 6, 4096, 20000, 0, false},
@@ -197,6 +217,10 @@ int main() {
             if (heavy && rate != 48000 && rate != 384000) continue;  // keep the long-tap case affordable
             std::vector<float> ref, got;
             long ac = 0;
+            gWhere = L.name;
+            gRate = rate;
+            std::printf("test_parallel: %s at %.0f Hz\n", L.name, rate);
+            std::fflush(stdout);
             CHECK(render(L, rate, 0, 0, false, ref, nullptr, nullptr), "%s ref build", L.name);
             for (uint32_t w = 1; w <= 3; w++) {
                 n60_graph_parallel_stats stats{};

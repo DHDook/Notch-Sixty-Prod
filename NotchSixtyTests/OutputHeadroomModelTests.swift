@@ -379,6 +379,28 @@ final class OutputHeadroomModelTests: XCTestCase {
         XCTAssertEqual(results.count, 2)
         XCTAssertFalse(onMain.value)
     }
+
+    /// E19 S5: a MIMO stage is a bounded kind. Zero taps pass the program (0 dB); a unit in-band diagonal tap doubles it.
+    func testMIMOStageIsBoundedByItsRealisedTaps() {
+        for rate in Self.rates {
+            func spec(diagonal: Float) -> UnifiedGraphSpec {
+                var params = [Float](repeating: 0, count: 8 + 2 + 2 * 2 * 1)
+                params[0] = rate <= 48_000 ? 16 : 32
+                params[1] = 1; params[2] = 2; params[3] = 0
+                params[8] = 12; params[9] = 12
+                params[10] = diagonal // E(0,0), the first tap
+                let stage = UnifiedGraphStageSpec(kind: N60_STAGE_MIMO.rawValue, stageId: 1, laneA: 0, laneMask: 0b11, params: params)
+                return UnifiedGraphSpec(sampleRate: rate, maxBlockFrames: 512, inputChannels: 2, outputChannels: 2, stages: [stage], denoiserPark: nil)
+            }
+            let off = analyse(spec(diagonal: 0), lanes: 2)
+            XCTAssertTrue(off[0].isComplete, "rate \(rate)")
+            XCTAssertEqual(off[0].peakGainDB, 0, accuracy: 0.3, "rate \(rate)")
+            let on = analyse(spec(diagonal: 1), lanes: 2)
+            XCTAssertTrue(on[0].isComplete, "rate \(rate)")
+            XCTAssertGreaterThan(on[0].peakGainDB, 5, "rate \(rate)")
+            XCTAssertEqual(on[1].peakGainDB, off[1].peakGainDB, accuracy: 0.3, "the other source is untouched at rate \(rate)")
+        }
+    }
 }
 
 private final class LockedFlag: @unchecked Sendable {

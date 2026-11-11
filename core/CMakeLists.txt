@@ -248,6 +248,11 @@ add_executable(n60core_lane_delay_test tests/test_lane_delay.cpp)
 target_link_libraries(n60core_lane_delay_test PRIVATE n60core)
 add_test(NAME n60core_lane_delay COMMAND n60core_lane_delay_test)
 
+# E7 S1: capacities in time (20 ms delay, 500 ms split fractional delay, 20 ms look-ahead at 4x) at the eight rates.
+add_executable(n60core_rate_capacity_test tests/test_rate_capacity.cpp)
+target_link_libraries(n60core_rate_capacity_test PRIVATE n60core)
+add_test(NAME n60core_rate_capacity COMMAND n60core_rate_capacity_test)
+
 add_executable(n60core_delta_audition_test tests/test_delta_audition.cpp)
 target_link_libraries(n60core_delta_audition_test PRIVATE n60core)
 add_test(NAME n60core_delta_audition COMMAND n60core_delta_audition_test)
@@ -291,3 +296,8 @@ add_executable(n60core_mimo_stage_test tests/test_mimo_stage.cpp)
 target_include_directories(n60core_mimo_stage_test PRIVATE src)
 target_link_libraries(n60core_mimo_stage_test PRIVATE n60core)
 add_test(NAME n60core_mimo_stage COMMAND n60core_mimo_stage_test)
+
+# E19 S5: MIMO safety (headroom term, budget, excursion cap).
+add_executable(n60core_mimo_safety_test tests/test_mimo_safety.cpp)
+target_link_libraries(n60core_mimo_safety_test PRIVATE n60core)
+add_test(NAME n60core_mimo_safety COMMAND n60core_mimo_safety_test)

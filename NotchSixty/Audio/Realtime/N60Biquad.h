@@ -51,6 +51,11 @@ typedef struct {
     double gainDB;
     double q;
     N60BiquadCoefficients coefficients;
+    // E23 S1b (E6 G31): the Linkwitz transform in double deviation form (n0, n1, n2, d0, d1; see
+    // N60BiquadDesignLinkwitzTransformDeviation), valid when linkwitzDeviationValid. The unified graph uses it so the
+    // poles near z = 1 are not quantised to float; the kernel keeps `coefficients`.
+    double linkwitzDeviation[5];
+    bool linkwitzDeviationValid;
 } N60BiquadBandSnapshot;
 
 static inline N60BiquadCoefficients N60BiquadCoefficientsMakeIdentity(void) {
@@ -358,6 +363,47 @@ static inline bool N60BiquadDesignLinkwitzTransform(
     );
     if (!N60BiquadCoefficientsAreFinite(normalized)) return false;
     *coefficients = normalized;
+    return true;
+}
+
+// The same transform as N60BiquadDesignLinkwitzTransform in deviation form, for a numerator and denominator whose zeros and
+// poles sit near z = 1. With y = 1 - 1/z the normalised numerator is n0 + n1 y + n2 y^2 and the denominator is
+// d0 + d1 y + (1 - d0 - d1) y^2, so n0, n1, d0 and d1 (all small at a low corner and a high rate) are formed without the
+// cancellation of b0 + b1 + b2 and 1 + a1 + a2. out = {n0, n1, n2, d0, d1}.
+static inline bool N60BiquadDesignLinkwitzTransformDeviation(
+    double sampleRate,
+    double f0Hz,
+    double q0,
+    double fpHz,
+    double qp,
+    double * _Nonnull out
+) {
+    if (out == NULL
+        || !isfinite(sampleRate) || sampleRate <= 0.0
+        || !isfinite(f0Hz) || f0Hz <= 0.0 || f0Hz >= sampleRate * 0.5
+        || !isfinite(fpHz) || fpHz <= 0.0 || fpHz >= sampleRate * 0.5
+        || !isfinite(q0) || q0 <= 0.0
+        || !isfinite(qp) || qp <= 0.0) {
+        return false;
+    }
+    double k = 2.0 * sampleRate;
+    double w0 = k * tan(M_PI * f0Hz / sampleRate);
+    double wp = k * tan(M_PI * fpHz / sampleRate);
+    double k2 = k * k;
+    double w02 = w0 * w0;
+    double wp2 = wp * wp;
+    double nd = (w0 / q0) * k;
+    double dd = (wp / qp) * k;
+    double a0 = k2 + dd + wp2;
+    if (!isfinite(a0) || fabs(a0) < 1.0e-30) return false;
+    out[0] = 4.0 * w02 / a0;
+    out[1] = (2.0 * nd - 4.0 * w02) / a0;
+    out[2] = (k2 - nd + w02) / a0;
+    out[3] = 4.0 * wp2 / a0;
+    out[4] = (2.0 * dd - 4.0 * wp2) / a0;
+    for (int i = 0; i < 5; ++i) {
+        if (!isfinite(out[i])) return false;
+    }
     return true;
 }
 
