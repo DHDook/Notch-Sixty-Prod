@@ -76,6 +76,14 @@ inline f64x2 pair(double lo, double hi) { return f64x2{lo, hi}; }
 inline double lane(f64x2 v, int i) { return v[i]; }
 inline float lane(f32x4 v, int i) { return v[i]; }
 
+// Interleaved complex helpers (E20 S4): a f32x4 holds two complex values {re0, im0, re1, im1}.
+inline f32x4 swapRI(f32x4 a) { return __builtin_shufflevector(a, a, 1, 0, 3, 2); }
+inline f32x4 dupRe(f32x4 a) { return __builtin_shufflevector(a, a, 0, 0, 2, 2); }
+inline f32x4 dupIm(f32x4 a) { return __builtin_shufflevector(a, a, 1, 1, 3, 3); }
+inline f32x4 lowPairDup(f32x4 a) { return __builtin_shufflevector(a, a, 0, 1, 0, 1); }
+inline f32x4 highPairDup(f32x4 a) { return __builtin_shufflevector(a, a, 2, 3, 2, 3); }
+inline f32x4 make4(float a, float b, float c, float d) { return f32x4{a, b, c, d}; }
+
 #else  // scalar build
 
 struct f32x4 { float e[4]; };
@@ -112,6 +120,13 @@ inline f64x2 pair(double lo, double hi) { return f64x2{{lo, hi}}; }
 inline double lane(f64x2 v, int i) { return v.e[i]; }
 inline float lane(f32x4 v, int i) { return v.e[i]; }
 
+inline f32x4 swapRI(f32x4 a) { return f32x4{{a.e[1], a.e[0], a.e[3], a.e[2]}}; }
+inline f32x4 dupRe(f32x4 a) { return f32x4{{a.e[0], a.e[0], a.e[2], a.e[2]}}; }
+inline f32x4 dupIm(f32x4 a) { return f32x4{{a.e[1], a.e[1], a.e[3], a.e[3]}}; }
+inline f32x4 lowPairDup(f32x4 a) { return f32x4{{a.e[0], a.e[1], a.e[0], a.e[1]}}; }
+inline f32x4 highPairDup(f32x4 a) { return f32x4{{a.e[2], a.e[3], a.e[2], a.e[3]}}; }
+inline f32x4 make4(float a, float b, float c, float d) { return f32x4{{a, b, c, d}}; }
+
 #endif
 
 // Horizontal reductions, fixed order in both builds.
@@ -122,6 +137,33 @@ inline float hmax(f32x4 v) {
     return a > b ? a : b;
 }
 inline double hsum(f64x2 v) { return lane(v, 0) + lane(v, 1); }
+
+// Complex product of two interleaved pairs: h * x per complex lane (re = hr xr - hi xi, im = hr xi + hi xr), the real part
+// a single fused rounding of xr hr and the exactly negated product xi hi. Identical in both builds.
+inline f32x4 cmul(f32x4 h, f32x4 x) {
+    const f32x4 t = mul(mul(swapRI(x), dupIm(h)), make4(-1.0f, 1.0f, -1.0f, 1.0f));
+    return fma(x, dupRe(h), t);
+}
+// acc + h * x per complex lane.
+inline f32x4 cmac(f32x4 acc, f32x4 h, f32x4 x) { return add(acc, cmul(h, x)); }
+
+// dst = acc + h * x over `bins` interleaved complex bins (float pairs), two bins per step; an odd last bin runs through a
+// zero-padded pair. dst may equal acc or x. Every bin gets the same arithmetic as cmac, so the result does not depend on `bins`.
+inline void cmacSpan(float *dst, const float *acc, const float *h, const float *x, uint32_t bins) {
+    uint32_t k = 0;
+    for (; k + 2 <= bins; k += 2) {
+        const size_t i = 2 * size_t(k);
+        store4(dst + i, cmac(load4(acc + i), load4(h + i), load4(x + i)));
+    }
+    if (k < bins) {
+        const size_t i = 2 * size_t(k);
+        const float pa[4] = {acc[i], acc[i + 1], 0.0f, 0.0f}, ph[4] = {h[i], h[i + 1], 0.0f, 0.0f}, px[4] = {x[i], x[i + 1], 0.0f, 0.0f};
+        float o[4];
+        store4(o, cmac(load4(pa), load4(ph), load4(px)));
+        dst[i] = o[0];
+        dst[i + 1] = o[1];
+    }
+}
 
 // Dot product of n floats, n a multiple of 16: four independent f32x4 accumulators (element j goes to accumulator
 // (j / 4) % 4), combined as (a0 + a1) + (a2 + a3), then hsum. The same order in both builds.
