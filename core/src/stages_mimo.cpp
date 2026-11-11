@@ -42,6 +42,7 @@ constexpr double kEnvSeconds = 0.010;      // fast envelope
 constexpr double kHoldSeconds = 1.0;       // peak-hold release
 constexpr float kOverPower = 3.98107171f;  // 10^(6/10): 6 dB in amplitude
 constexpr double kThermalSeconds = 10.0;   // thermal integration window (D5)
+constexpr uint32_t kThermalBuckets = 100;  // the sliding window moves in 0.1 s steps (G18: at most 1 % of power uncertainty)
 constexpr double kThermalPower = 0.25118864315095801;  // 10^(-6/10): delta power at most -6 dB re the in-band program power
 constexpr double kThermalQuiet = 1e-12;    // program power below this (-120 dB) is not judged
 constexpr float kQuiet = 1e-12f;           // below this delta power (-120 dB) nothing is over bound
@@ -67,8 +68,12 @@ struct MimoShared {
     uint32_t held, fault, faultSource, tripCount, lastTrip;
     float u;              // arm fade phase 0..1 (gain = smoothstep(u))
     uint64_t overFrames;
-    uint64_t thermalWindow, thermalCount;  // window length and position in low-rate samples (counted while g > 0)
-    double thermalProg[kMaxS], thermalDelta[kMaxS];
+    // Sliding thermal window (G18): kThermalBuckets bins of thermalBucket low-rate samples each (counted while g > 0);
+    // the window is the last kThermalBuckets complete bins, evaluated at every bin end.
+    uint64_t thermalBucket, thermalCount;
+    uint32_t thermalHead, thermalFilled;
+    double thermalCurProg[kMaxS], thermalCurDelta[kMaxS];
+    double thermalBinProg[kThermalBuckets][kMaxS], thermalBinDelta[kThermalBuckets][kMaxS];
     uint32_t faultReason;                  // 0 none, 1 monitor bound, 2 thermal budget
     float msx;            // envelope of the summed input power
     float pkx;
@@ -204,29 +209,46 @@ void lowStep(SnapHeader *h, const StageRec &r, MimoShared &M, const float *xl) N
             overSource = s + 1;
         }
     }
-    // Thermal budget (D5): tumbling 10 s windows of armed time; delta power (before g, like the monitor above) against the
-    // in-band program power (the decimated source feed). Over -6 dB at the end of a window latches a fault.
+    // Thermal budget (D5, G18): a sliding 10 s window of armed time (100 bins of 0.1 s); delta power (before g, like the
+    // monitor above) against the in-band program power (the decimated source feed). Once 10 s of armed time exist, every
+    // bin end judges the last 10 s, so an overload that straddles a bin boundary is still caught. Over -6 dB latches a fault.
     if (M.u > 0.0f) {
         for (uint32_t s = 0; s < S; ++s) {
-            M.thermalProg[s] += static_cast<double>(xl[s]) * xl[s];
-            M.thermalDelta[s] += static_cast<double>(yl[s]) * yl[s];
+            M.thermalCurProg[s] += static_cast<double>(xl[s]) * xl[s];
+            M.thermalCurDelta[s] += static_cast<double>(yl[s]) * yl[s];
         }
-        if (++M.thermalCount >= M.thermalWindow) {
+        if (++M.thermalCount >= M.thermalBucket) {
+            const uint32_t slot = M.thermalHead;
             for (uint32_t s = 0; s < S; ++s) {
-                if (M.thermalProg[s] > kThermalQuiet * static_cast<double>(M.thermalCount) &&
-                    M.thermalDelta[s] > kThermalPower * M.thermalProg[s] && M.fault == 0) {
-                    M.fault = 1;
-                    M.held = 1;
-                    M.faultSource = s + 1;
-                    M.faultReason = 2;
-                }
-                M.thermalProg[s] = M.thermalDelta[s] = 0.0;
+                M.thermalBinProg[slot][s] = M.thermalCurProg[s];
+                M.thermalBinDelta[slot][s] = M.thermalCurDelta[s];
+                M.thermalCurProg[s] = M.thermalCurDelta[s] = 0.0;
             }
+            M.thermalHead = (slot + 1) % kThermalBuckets;
+            if (M.thermalFilled < kThermalBuckets) ++M.thermalFilled;
             M.thermalCount = 0;
+            if (M.thermalFilled >= kThermalBuckets) {
+                const double samples = static_cast<double>(M.thermalBucket) * kThermalBuckets;
+                for (uint32_t s = 0; s < S; ++s) {
+                    double prog = 0.0, delta = 0.0;
+                    for (uint32_t b = 0; b < kThermalBuckets; ++b) {
+                        prog += M.thermalBinProg[b][s];
+                        delta += M.thermalBinDelta[b][s];
+                    }
+                    if (prog > kThermalQuiet * samples && delta > kThermalPower * prog && M.fault == 0) {
+                        M.fault = 1;
+                        M.held = 1;
+                        M.faultSource = s + 1;
+                        M.faultReason = 2;
+                    }
+                }
+            }
         }
-    } else if (M.thermalCount != 0) {
+    } else if (M.thermalCount != 0 || M.thermalFilled != 0) {
         M.thermalCount = 0;
-        for (uint32_t s = 0; s < S; ++s) M.thermalProg[s] = M.thermalDelta[s] = 0.0;
+        M.thermalFilled = 0;
+        M.thermalHead = 0;
+        for (uint32_t s = 0; s < S; ++s) M.thermalCurProg[s] = M.thermalCurDelta[s] = 0.0;
     }
     if (over) {
         M.overFrames += M.D;
@@ -319,7 +341,7 @@ void mimoInit(SnapHeader *h, const StageRec &r) {
     M.fallStep = static_cast<float>(1.0 / (kFallSeconds * fs));
     M.envA = static_cast<float>(1.0 - std::exp(-1.0 / (kEnvSeconds * fsLow)));
     M.holdR = static_cast<float>(std::exp(-1.0 / (kHoldSeconds * fsLow)));
-    M.thermalWindow = static_cast<uint64_t>(std::llround(kThermalSeconds * fsLow));
+    M.thermalBucket = std::max<uint64_t>(1, static_cast<uint64_t>(std::llround(kThermalSeconds * fsLow / kThermalBuckets)));
     M.faultFrames = static_cast<uint32_t>(std::ceil(kFaultSeconds * fs));
     for (uint32_t s = 0; s < d.S; ++s) M.bound2[s] = p[kHeader + s] * p[kHeader + s];
     M.decCount = M.half;

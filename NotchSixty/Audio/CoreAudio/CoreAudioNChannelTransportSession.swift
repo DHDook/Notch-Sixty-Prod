@@ -425,6 +425,11 @@ final class CoreAudioNChannelTransportSession {
     private var ancSeenGuardTrips: UInt64 = 0
     private var hostedAnc: UnifiedGraphAncActuators?
     private var hostedConfiguration: UnifiedGraphConfiguration?
+    /// E19 S6: the staged MIMO treatment stage the graph carries and the last configuration published (both under
+    /// `ancLock`). `republishGraph` re-applies the stage, so engine edits that rebuild the configuration keep it and its
+    /// live arm words; only `applyMIMOStage` changes them.
+    private var mimoStage: UnifiedGraphMIMOStage?
+    private var lastGraphConfiguration: UnifiedGraphConfiguration?
     private var ancManualTrips: UInt64 = 0
     /// A revoke disarmed the feed but its graph publish failed, so the record still says authorised (under `ancLock`).
     /// The next authorisation must then arm the feed itself instead of returning early (G27).
@@ -703,6 +708,8 @@ final class CoreAudioNChannelTransportSession {
                     unifiedGraphHost = host
                     hostedAnc = configuration.ancActuators?.hostFed == true ? configuration.ancActuators : nil
                     hostedConfiguration = hostedAnc == nil ? nil : configuration
+                    mimoStage = configuration.mimo
+                    lastGraphConfiguration = configuration
                 case .failure(let reason):
                     if unifiedGraphRequired {
                         N60LiveNChannelBridgeDestroy(newBridge)
@@ -863,6 +870,8 @@ final class CoreAudioNChannelTransportSession {
                 unifiedGraphHost = host
                 hostedAnc = configuration.ancActuators?.hostFed == true ? configuration.ancActuators : nil
                 hostedConfiguration = hostedAnc == nil ? nil : configuration
+                mimoStage = configuration.mimo
+                lastGraphConfiguration = configuration
             case .failure(let reason): unifiedGraphFallbackReason = reason
             }
         }
@@ -1030,6 +1039,7 @@ final class CoreAudioNChannelTransportSession {
         var configuration = configuration
         ancLock.lock()
         if let anc = hostedAnc { configuration.ancActuators = anc }
+        if let mimo = mimoStage { configuration.mimo = mimo }
         ancLock.unlock()
         guard abs(configuration.sampleRate - outputFormat.sampleRate) < 0.5 else {
             throw LiveNChannelTransportError.unifiedGraphRejected(.sampleRateMismatch)
@@ -1046,11 +1056,44 @@ final class CoreAudioNChannelTransportSession {
             let result = try host.apply(spec, linearFade: linearFadeForEQRepublish)
             ancLock.lock()
             if hostedAnc != nil { hostedConfiguration = configuration }
+            lastGraphConfiguration = configuration
             ancLock.unlock()
             return result
         } catch {
             throw LiveNChannelTransportError.graphRepublishRefused(String(describing: error))
         }
+    }
+
+    /// E19 S6: posts a new MIMO stage (the live arm and trip words change as parameters; a changed design republishes).
+    /// Control plane only. Throws when the graph is not running or the session carries no MIMO stage to update.
+    @discardableResult
+    func applyMIMOStage(_ stage: UnifiedGraphMIMOStage) throws -> UnifiedGraphApplyResult {
+        ancLock.lock()
+        let configuration = lastGraphConfiguration
+        let previous = mimoStage
+        mimoStage = stage
+        ancLock.unlock()
+        guard let configuration else {
+            ancLock.lock(); mimoStage = previous; ancLock.unlock()
+            throw LiveNChannelTransportError.configurationChangeRequiresRestart
+        }
+        do { return try republishGraph(configuration) } catch {
+            ancLock.lock(); mimoStage = previous; ancLock.unlock()
+            throw error
+        }
+    }
+
+    /// E19 S6: the stage's telemetry (state, fault, worst bound ratios); nil without a graph or a MIMO stage. Read-and-reset.
+    func mimoReadback() -> n60_mimo_readback? {
+        ancLock.lock(); let attached = mimoStage != nil; ancLock.unlock()
+        guard attached else { return nil }
+        return unifiedGraphReadback?.mimoReadback(stageId: UnifiedGraphMIMOStage.stageId)
+    }
+
+    /// True when the running graph carries the MIMO stage (the arm gate "stage attached").
+    var mimoStageAttached: Bool {
+        ancLock.lock(); defer { ancLock.unlock() }
+        return mimoStage != nil && unifiedGraphActive
     }
 
     /// Builds the graph for a session and attaches it to `bridge`, or says why it cannot.
