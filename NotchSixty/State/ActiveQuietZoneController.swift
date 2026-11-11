@@ -338,6 +338,59 @@ final class ActiveQuietZoneController: ObservableObject {
         objectWillChange.send()
     }
 
+    /// E4 S26a: the virtual-microphone survey and design at the ear. Control plane only; never arms anything.
+    private(set) var virtualMic: QuietZoneVirtualMicSurveyController?
+
+    func attachVirtualMicrophone(_ survey: QuietZoneVirtualMicSurveyController?) {
+        virtualMic = survey
+        survey?.paths = { [weak self] frequency, earID in
+            guard let self else { throw ActiveQuietZoneControllerError.acousticModelRequired }
+            return try self.surveyPaths(frequencyHz: frequency, earPositionID: earID)
+        }
+        survey?.candidates = { [weak self] in
+            guard let self else { return [] }
+            let anchor = self.ambient.selectedModelPosition?.id
+            return self.ambient.availableModelPositions
+                .filter { $0.id != anchor }
+                .map { ($0.id, $0.name) }
+        }
+        objectWillChange.send()
+    }
+
+    /// Speaker paths to the monitor microphone (the selected playback model) and to the ear position.
+    func surveyPaths(frequencyHz: Double, earPositionID: UUID) throws -> QuietZoneSurveyPaths {
+        guard let model = ambient.selectedModelPosition,
+              let earPosition = ambient.availableModelPositions.first(where: { $0.id == earPositionID }),
+              abs(earPosition.sampleRate - model.sampleRate) < 0.5 else {
+            throw ActiveQuietZoneControllerError.acousticModelRequired
+        }
+        func path(_ position: RoomCorrectionMeasurementPosition, _ channel: RoomCorrectionChannelMeasurement) throws
+            -> ActiveQuietZoneComplex {
+            try planner.secondaryPath(
+                impulseResponse: channel.impulseResponse, frequencyHz: frequencyHz, sampleRate: position.sampleRate)
+        }
+        return QuietZoneSurveyPaths(
+            monitorLeft: try path(model, model.left), monitorRight: try path(model, model.right),
+            earLeft: try path(earPosition, earPosition.left), earRight: try path(earPosition, earPosition.right))
+    }
+
+    /// E4 S26a: the design for one tone at the ear, or nil to keep the fixed-seat design.
+    func virtualEarDesign(
+        frequencyHz: Double,
+        monitorDisturbance: ActiveQuietZoneComplex,
+        monitorLeft: ActiveQuietZoneComplex,
+        monitorRight: ActiveQuietZoneComplex,
+        bassMode: BassPlantConditioningMode,
+        injectionPeakOverride: Double? = nil
+    ) throws -> QuietZoneVirtualDesignResult? {
+        guard let tone = virtualMic?.earTone(near: frequencyHz) else { return nil }
+        return try QuietZoneVirtualDesign.solve(
+            planner: planner, tone: tone, frequencyHz: frequencyHz,
+            monitorDisturbance: monitorDisturbance, monitorLeft: monitorLeft, monitorRight: monitorRight,
+            availableInjectionPeak: injectionPeakOverride ?? availableInjectionPeak, configuration: configuration,
+            bassConditioning: bassMode)
+    }
+
     func attachOvernightPower(_ assertion: OvernightPowerAssertion?) {
         overnightPower?.release()
         overnightPower = assertion
@@ -1570,6 +1623,8 @@ final class ActiveQuietZoneController: ObservableObject {
             [ActiveQuietZoneSpatialSeatPrediction] = []
         var telemetry: [ActiveQuietZoneToneTelemetry] = []
         var seeds: [AdaptiveQuietZoneSeed] = []
+        var anyVirtualTone = false
+        var surveyWindow: [Double: ActiveQuietZoneComplex] = [:]
         var decisions:
             [ActiveQuietZoneVerification.Decision] = []
 
@@ -1628,6 +1683,11 @@ final class ActiveQuietZoneController: ObservableObject {
                 errorPhasor
                 - leftPath * leftReference
                 - rightPath * rightReference
+            // E4 S26a: the survey reads the uncancelled monitor noise against the locked oscillator.
+            if virtualMic?.isCapturing == true {
+                surveyWindow[frequency] = try planner.runtimeCoefficient(
+                    sourcePhasorInMicrophoneBasis: disturbance, oscillatorPhaseBasis: basis)
+            }
             let outputLeft: ActiveQuietZoneComplex
             let outputRight: ActiveQuietZoneComplex
             let predictedDB: Double
@@ -1663,6 +1723,15 @@ final class ActiveQuietZoneController: ObservableObject {
                     }
                     bassMode = measured.mode
                 }
+                // E4 S26a: a surveyed ear position designs at the ear; the monitor microphone stays the judge.
+                if let virtual = try virtualEarDesign(
+                    frequencyHz: frequency, monitorDisturbance: disturbance,
+                    monitorLeft: leftPath, monitorRight: rightPath, bassMode: bassMode) {
+                    anyVirtualTone = true
+                    outputLeft = virtual.left
+                    outputRight = virtual.right
+                    predictedDB = virtual.predictedReductionAtEarDB
+                } else {
                 let solution = try planner.solveStereo(
                     frequencyHz: frequency,
                     disturbance: disturbance,
@@ -1676,6 +1745,7 @@ final class ActiveQuietZoneController: ObservableObject {
                 outputLeft = solution.leftOutput
                 outputRight = solution.rightOutput
                 predictedDB = solution.predictedReductionDB
+                }
             }
 
             let desiredLeft =
@@ -1736,7 +1806,10 @@ final class ActiveQuietZoneController: ObservableObject {
         }
 
         spatialPredictions = latestSpatialPredictions
-        adaptiveSeeds = seeds
+        // E4 S26a: the adaptive worker adapts on the monitor error, which would pull a design made at the ear
+        // back to the monitor, so it gets no seeds while any tone is designed at the ear (gap G18).
+        adaptiveSeeds = anyVirtualTone ? [] : seeds
+        if virtualMic?.isCapturing == true { virtualMic?.ingestWindow(surveyWindow) }
         let desired = try aggregateLimitedTarget(
             tones: desiredTones
         )

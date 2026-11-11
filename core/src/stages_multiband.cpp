@@ -92,7 +92,9 @@ struct BqState {
     double z1, z2;
 };
 
-float smoothToward(float current, float target, float coef) { return target + coef * (current - target); }
+float smoothToward(float current, float target, double coef) {
+    return static_cast<float>(double(target) + coef * (double(current) - double(target)));
+}
 bool nearZero(float v) { return std::fabs(v) <= kParkEps; }
 Bq identityBq() { return Bq{1.0, 0.0, 0.0, 0.0, 0.0}; }
 
@@ -151,9 +153,9 @@ uint32_t sectionQs(bool lr8, double q[kMaxSections]) {
 }
 
 // The kernel's coefficient_for_time_ms (clamped to 0.05 .. 5000 ms).
-float poleForMs(double rate, float ms) {
+double poleForMs(double rate, float ms) {
     const float safe = std::min(std::max(ms, 0.05f), 5000.0f);
-    return static_cast<float>(std::exp(-1.0 / (rate * (double(safe) / 1000.0))));
+    return std::exp(-1.0 / (rate * (double(safe) / 1000.0)));  // double: a float pole at 5 s and 384 kHz is 1 - 5e-7, below its own spacing (E28 G40)
 }
 
 float dbToLinear(float db) { return std::pow(10.0f, db / 20.0f); }
@@ -189,7 +191,7 @@ struct MbShared {
     Bq hp[kBands];
     BqState hpL[kBands], hpR[kBands];
     float seenAttack[kBands], seenRelease[kBands];
-    float attackPole[kBands], releasePole[kBands], fastPole[kBands], slowPole[kBands];
+    double attackPole[kBands], releasePole[kBands], fastPole[kBands], slowPole[kBands];
     float gainDb[kBands];
     std::atomic<uint32_t> grMaxBits[kBands];
     std::atomic<uint32_t> grNowBits[kBands];
@@ -285,6 +287,24 @@ float cascade(const Bq *c, BqState *st, uint32_t n, float in) {
     for (uint32_t i = 0; i < n; ++i) out = runBqD(c[i], st[i], out);
     return static_cast<float>(out);
 }
+
+// E28 S7d, G35: one lookahead delay as block passes. Reads the oldest `n` samples into `out` and writes `in` (non-finite values
+// stored as zero, so they are never replayed `len` frames later), in contiguous runs; returns the new position.
+uint32_t ringExchange(float *ring, uint32_t len, uint32_t pos, const float *in, float *out, uint32_t n) {
+    uint32_t done = 0;
+    if (pos >= len) pos = 0;
+    while (done < n) {
+        const uint32_t run = std::min(n - done, len - pos);
+        std::memcpy(out + done, ring + pos, size_t(run) * sizeof(float));
+        for (uint32_t k = 0; k < run; ++k) ring[pos + k] = std::isfinite(in[done + k]) ? in[done + k] : 0.0f;
+        done += run;
+        pos += run;
+        if (pos == len) pos = 0;
+    }
+    return pos;
+}
+
+constexpr uint32_t kChunk = 128;
 
 }  // namespace
 
@@ -392,10 +412,22 @@ uint64_t multibandCarry(SnapHeader *from, SnapHeader *to) N60_RT_NONBLOCKING {
                 std::memcpy(b.ap1R, a.ap1R, sizeof b.ap1R);
                 b.splitMix = a.splitMix;
             }
-            if (a.ringLen == b.ringLen && a.split == b.split && b.ringLen != 0) {  // (slot 0 holds mid in split mode) the lookahead is topology: same length keeps the delayed audio
-                std::memcpy(ringsOf(b), ringsOf(const_cast<MbShared &>(a)), size_t(6) * b.ringLen * sizeof(float));
-                b.ringPos = a.ringPos;
-                bytes += size_t(6) * b.ringLen * sizeof(float);
+            if (b.ringLen != 0 && a.ringLen != 0 && a.split == b.split) {  // slot 0 holds mid in split mode: carry only within one mode
+                // The lookahead is topology, so a change rebuilds: carry the most recent min(old, new) frames of each ring, aligned
+                // by age (oldest first, read position 0). A longer new ring starts with zeros (the extra delay is silence).
+                const float *ra = ringsOf(const_cast<MbShared &>(a));
+                float *rb = ringsOf(b);
+                const uint32_t la = a.ringLen, lb = b.ringLen;
+                for (uint32_t r6 = 0; r6 < 6; ++r6) {
+                    const float *src = ra + size_t(r6) * la;
+                    float *dst = rb + size_t(r6) * lb;
+                    for (uint32_t k = 0; k < lb; ++k) {
+                        const uint32_t age = lb - k;  // 1 is the newest sample
+                        dst[k] = age <= la ? src[(a.ringPos + la - age) % la] : 0.0f;
+                    }
+                }
+                b.ringPos = 0;
+                bytes += size_t(6) * lb * sizeof(float);
             }
             for (uint32_t k = 0; k < kBands; ++k) {
                 b.grNowBits[k].store(a.grNowBits[k].load(std::memory_order_relaxed), std::memory_order_relaxed);
@@ -448,7 +480,7 @@ void runMultiband(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t fram
     const double mixTarget = enabled ? 1.0 : 0.0;
     const double mixPole = std::exp(-1.0 / (rate * 0.005));
     float *rings = ringLen != 0 ? ringsOf(S) : nullptr;
-    const float rampC = poleForMs(rate, 5.0f);
+    const float rampC = static_cast<float>(poleForMs(rate, 5.0f));
     const double rmsC = x ? std::exp(-1.0 / (rate * (double(std::min(std::max(p[kWindow], 0.05f), 5000.0f)) / 1000.0))) : 0.0;
     bool soloAny = false;
     float soloT[kBands], sideT[kBands], deltaT[kBands], mk[kBands];
@@ -468,47 +500,59 @@ void runMultiband(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t fram
         listening = listening || sideT[b] != 0.0f || deltaT[b] != 0.0f || S.listenSide[b] != 0.0f || S.listenDelta[b] != 0.0f;
     }
     for (uint32_t b = 0; b < kBands; ++b) soloT[b] = (soloAny && p[kSolo + b] < 0.5f) ? 0.0f : 1.0f;
-    for (uint32_t i = 0; i < frames; ++i) {
-        const float dryL = L[i];
-        const float dryR = R[i];
-        float lowL, lowR, highL, highR, midL, midR;
-        if (split) {
-            // Band-pass tree (E28 G42): split at the high corner, then split the lower part at the low corner; the high band
-            // takes the low corner's all-pass so the three bands stay phase-consistent and sum flat. Each band holds only
-            // its own range.
-            const float lo2L = cascade(S.lp2, S.lp2L, S.highN, dryL);
-            const float lo2R = cascade(S.lp2, S.lp2R, S.highN, dryR);
-            lowL = cascade(S.lowPass, S.lowL, S.lowN, lo2L);
-            lowR = cascade(S.lowPass, S.lowR, S.lowN, lo2R);
-            midL = cascade(S.hp1, S.hp1L, S.lowN, lo2L);
-            midR = cascade(S.hp1, S.hp1R, S.lowN, lo2R);
-            highL = cascade(S.ap1, S.ap1L, S.apN, cascade(S.highPass, S.highL, S.highN, dryL));
-            highR = cascade(S.ap1, S.ap1R, S.apN, cascade(S.highPass, S.highR, S.highN, dryR));
-        } else {
-            lowL = cascade(S.lowPass, S.lowL, S.lowN, dryL);
-            lowR = cascade(S.lowPass, S.lowR, S.lowN, dryR);
-            highL = cascade(S.highPass, S.highL, S.highN, dryL);
-            highR = cascade(S.highPass, S.highR, S.highN, dryR);
-            midL = dryL - lowL - highL;
-            midR = dryR - lowR - highR;
+    bool parkedNow = false;
+    for (uint32_t base = 0; base < frames && !parkedNow; base += kChunk) {
+        const uint32_t cn = std::min(kChunk, frames - base);
+        // Pass 1: the crossover split of the block (the IIR state is sequential, the rest is not).
+        float dryLa[kChunk], dryRa[kChunk], lowLa[kChunk], lowRa[kChunk], highLa[kChunk], highRa[kChunk];
+        float midLa[kChunk], midRa[kChunk];  // split mode only: the true band-pass mid (E28 G42)
+        for (uint32_t c = 0; c < cn; ++c) {
+            const float dl = L[base + c], dr = R[base + c];
+            dryLa[c] = dl;
+            dryRa[c] = dr;
+            if (split) {
+                // Band-pass tree: split at the high corner, then split the lower part at the low corner; the high band takes
+                // the low corner's all-pass so the three bands stay phase-consistent and sum flat. Each band holds only its
+                // own range.
+                const float lo2L = cascade(S.lp2, S.lp2L, S.highN, dl);
+                const float lo2R = cascade(S.lp2, S.lp2R, S.highN, dr);
+                lowLa[c] = cascade(S.lowPass, S.lowL, S.lowN, lo2L);
+                lowRa[c] = cascade(S.lowPass, S.lowR, S.lowN, lo2R);
+                midLa[c] = cascade(S.hp1, S.hp1L, S.lowN, lo2L);
+                midRa[c] = cascade(S.hp1, S.hp1R, S.lowN, lo2R);
+                highLa[c] = cascade(S.ap1, S.ap1L, S.apN, cascade(S.highPass, S.highL, S.highN, dl));
+                highRa[c] = cascade(S.ap1, S.ap1R, S.apN, cascade(S.highPass, S.highR, S.highN, dr));
+            } else {
+                lowLa[c] = cascade(S.lowPass, S.lowL, S.lowN, dl);
+                lowRa[c] = cascade(S.lowPass, S.lowR, S.lowN, dr);
+                highLa[c] = cascade(S.highPass, S.highL, S.highN, dl);
+                highRa[c] = cascade(S.highPass, S.highR, S.highN, dr);
+            }
         }
+        // Pass 2: one lookahead for the whole stage. The detectors read the undelayed bands, the audio path the delayed ones,
+        // so the bands stay aligned and the crossover sum stays flat. Ring slot 0 holds the mid band in split mode, dry otherwise.
+        float oDryLa[kChunk], oDryRa[kChunk], oLowLa[kChunk], oLowRa[kChunk], oHighLa[kChunk], oHighRa[kChunk];
+        if (ringLen != 0) {
+            const uint32_t pos = S.ringPos;
+            float *rl = rings, *rr = rings + size_t(3) * ringLen;
+            ringExchange(rl, ringLen, pos, split ? midLa : dryLa, oDryLa, cn);
+            ringExchange(rl + ringLen, ringLen, pos, lowLa, oLowLa, cn);
+            ringExchange(rl + 2 * size_t(ringLen), ringLen, pos, highLa, oHighLa, cn);
+            ringExchange(rr, ringLen, pos, split ? midRa : dryRa, oDryRa, cn);
+            ringExchange(rr + ringLen, ringLen, pos, lowRa, oLowRa, cn);
+            S.ringPos = ringExchange(rr + 2 * size_t(ringLen), ringLen, pos, highRa, oHighRa, cn);
+        }
+        for (uint32_t c = 0; c < cn; ++c) {
+        const uint32_t i = base + c;
+        const float dryL = dryLa[c], dryR = dryRa[c], lowL = lowLa[c], lowR = lowRa[c], highL = highLa[c], highR = highRa[c];
+        const float midL = split ? midLa[c] : dryL - lowL - highL, midR = split ? midRa[c] : dryR - lowR - highR;
         const float bandL[kBands] = {lowL, midL, highL};
         const float bandR[kBands] = {lowR, midR, highR};
-        // One lookahead for the whole stage: the detectors read the undelayed bands, the audio path the delayed ones, so
-        // the bands stay aligned and the crossover sum stays flat.
         float dBandL[kBands] = {bandL[0], bandL[1], bandL[2]};
         float dBandR[kBands] = {bandR[0], bandR[1], bandR[2]};
         if (ringLen != 0) {
-            float *rl = rings + size_t(S.ringPos), *rr = rl + size_t(3) * ringLen;
-            const float oDryL = rl[0], oLowL = rl[ringLen], oHighL = rl[2 * size_t(ringLen)];
-            const float oDryR = rr[0], oLowR = rr[ringLen], oHighR = rr[2 * size_t(ringLen)];
-            // A non-finite sample never enters the ring (it would be replayed ringLen frames later).
-            const auto fin = [](float v) { return std::isfinite(v) ? v : 0.0f; };
-            rl[0] = fin(split ? midL : dryL); rl[ringLen] = fin(lowL); rl[2 * size_t(ringLen)] = fin(highL);
-            rr[0] = fin(split ? midR : dryR); rr[ringLen] = fin(lowR); rr[2 * size_t(ringLen)] = fin(highR);
-            S.ringPos = S.ringPos + 1 == ringLen ? 0 : S.ringPos + 1;
-            dBandL[0] = oLowL; dBandL[1] = split ? oDryL : oDryL - oLowL - oHighL; dBandL[2] = oHighL;
-            dBandR[0] = oLowR; dBandR[1] = split ? oDryR : oDryR - oLowR - oHighR; dBandR[2] = oHighR;
+            dBandL[0] = oLowLa[c]; dBandL[1] = split ? oDryLa[c] : oDryLa[c] - oLowLa[c] - oHighLa[c]; dBandL[2] = oHighLa[c];
+            dBandR[0] = oLowRa[c]; dBandR[1] = split ? oDryRa[c] : oDryRa[c] - oLowRa[c] - oHighRa[c]; dBandR[2] = oHighRa[c];
         }
         float outL = 0.0f, outR = 0.0f;
         float lsL = 0.0f, lsR = 0.0f, wSum = 0.0f;
@@ -530,7 +574,7 @@ void runMultiband(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t fram
                     targetDb += p[kMakeup + b];
                 }
             }
-            float coef;
+            double coef;
             if (!enabled) {
                 coef = S.bypassCoef;
             } else if (targetDb < S.gainDb[b]) {
@@ -592,6 +636,7 @@ void runMultiband(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t fram
         if (!enabled && neutral && ringLen == 0) {
             clearState(S);
             S.parked = 1;
+            parkedNow = true;
             break;
         }
         if (listening && wSum != 0.0f) {
@@ -601,6 +646,7 @@ void runMultiband(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t fram
         }
         L[i] = outL;
         R[i] = outR;
+        }
     }
     for (uint32_t b = 0; b < kBands; ++b) {
         S.grNowBits[b].store(floatToBits(std::fmax(0.0f, -S.gainDb[b])), std::memory_order_relaxed);

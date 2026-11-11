@@ -239,6 +239,22 @@ float compTargetDb(float detDb, float thr, float slope, float knee, float makeup
     return c + makeup;
 }
 
+// E28 S7d, G35: a lookahead ring as block passes. Reads the oldest `n` samples into `out` and writes `in` (non-finite values
+// stored as zero), in contiguous runs; returns the new position.
+uint32_t ringExchange(float *ring, uint32_t len, uint32_t pos, const float *in, float *out, uint32_t n) {
+    uint32_t done = 0;
+    if (pos >= len) pos = 0;
+    while (done < n) {
+        const uint32_t run = std::min(n - done, len - pos);
+        std::memcpy(out + done, ring + pos, size_t(run) * sizeof(float));
+        for (uint32_t k = 0; k < run; ++k) ring[pos + k] = std::isfinite(in[done + k]) ? in[done + k] : 0.0f;
+        done += run;
+        pos += run;
+        if (pos == len) pos = 0;
+    }
+    return pos;
+}
+
 // ABI v34 (E28 S7a): the compressor with mix, link amount, peak/RMS detector and lookahead. Every lane keeps its own
 // gain; the detector of a lane is link * (loudest lane of its group) + (1 - link) * its own level, so link 1 reproduces
 // the shared gain exactly and link 0 leaves each lane independent. Lookahead delays the audio by a ring of
@@ -278,15 +294,28 @@ void runCompressorX(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t fr
     }
     const uint32_t per = linked ? n : 1, groups = linked ? 1 : n;
     float grMax[kMaxLanes] = {};
-    float level[kMaxLanes], side[kMaxLanes];
-    for (uint32_t i = 0; i < frames; ++i) {
+    float level[kMaxLanes];
+    // E28 S7d, G35: the gain follower is sequential, so it runs per frame over a short chunk and records each frame's gain,
+    // sidechain and the mix and listen ramps. The lookahead ring and the mix then run as block passes per lane.
+    constexpr uint32_t kChunk = 64;
+    static_assert(kChunk * kMaxLanes * 3 * sizeof(float) <= 64 * 1024, "chunk scratch stays small on the stack");
+    float gainA[kMaxLanes][kChunk], gainNoMkA[kMaxLanes][kChunk], sideA[kMaxLanes][kChunk];
+    float mixA[kChunk], lsSA[kChunk], lsDA[kChunk];
+    for (uint32_t base = 0; base < frames; base += kChunk) {
+      const uint32_t cn = std::min(kChunk, frames - base);
+      bool listenAny = false;
+      for (uint32_t c = 0; c < cn; ++c) {
+        const uint32_t i = base + c;
         sh.mixS = mixT + rampC * (sh.mixS - mixT);
         sh.linkS = linkT + rampC * (sh.linkS - linkT);
         sh.listenSide = rampSnap(sh.listenSide, sideT, rampC);
         sh.listenDelta = rampSnap(sh.listenDelta, deltaT, rampC);
-        const float mix = sh.mixS, link = sh.linkS;
-        const float lsS = sh.listenSide, lsD = sh.listenDelta;
-        const bool listening = lsS != 0.0f || lsD != 0.0f;
+        const float link = sh.linkS;
+        mixA[c] = sh.mixS;
+        lsSA[c] = sh.listenSide;
+        lsDA[c] = sh.listenDelta;
+        const bool listening = lsSA[c] != 0.0f || lsDA[c] != 0.0f;
+        listenAny = listenAny || listening;
         for (uint32_t g = 0; g < groups; ++g) {
             float loudest = 0.0f;
             for (uint32_t k = 0; k < per; ++k) {
@@ -304,7 +333,7 @@ void runCompressorX(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t fr
                     d = std::fabs(y);
                 }
                 level[l] = d;
-                side[l] = y;
+                sideA[l][c] = y;
                 loudest = std::max(loudest, d);
             }
             for (uint32_t k = 0; k < per; ++k) {
@@ -312,44 +341,57 @@ void runCompressorX(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t fr
                 CompLane &gs = *st[l];
                 const float det = std::min(link * loudest + (1.0f - link) * level[l], 1e6f);
                 const float target = compTargetDb(lin2db(det, 1e-12f), thr, slope, knee, makeup);
-                float c;
+                float cf;
                 if (target < gs.gainDB) {
-                    c = atk;
+                    cf = atk;
                 } else if (pdr) {
                     const float depth = std::clamp(-gs.gainDB / 12.0f, 0.0f, 1.0f);
-                    c = fast + depth * (slow - fast);
+                    cf = fast + depth * (slow - fast);
                 } else {
-                    c = rel;
+                    cf = rel;
                 }
-                gs.gainDB = target + c * (gs.gainDB - target);
+                gs.gainDB = target + cf * (gs.gainDB - target);
                 grMax[g] = std::max(grMax[g], -gs.gainDB);
-                const float gain = db2lin(gs.gainDB);
-                float dry = lp[l][i];
-                float sc = side[l];
-                if (ringLen != 0) {
-                    float *rg = ring[l];
-                    const float old = rg[gs.ringPos];
-                    // A non-finite sample never enters the ring (it would be replayed ringLen frames later).
-                    rg[gs.ringPos] = std::isfinite(dry) ? dry : 0.0f;
-                    if (hasListen) {
-                        const float oldSide = sideRing[l][gs.ringPos];
-                        sideRing[l][gs.ringPos] = std::isfinite(sc) ? sc : 0.0f;
-                        sc = oldSide;
-                    }
-                    gs.ringPos = gs.ringPos + 1 == ringLen ? 0 : gs.ringPos + 1;
-                    dry = old;
-                }
-                const float wet = mix == 1.0f ? dry * gain : dry + mix * (dry * gain - dry);
-                if (!listening) {
-                    lp[l][i] = wet;
-                } else {
-                    // Listen outputs never carry make-up: the sidechain is taken before the gain, the delta is what the
-                    // gain (without make-up) removed from the delayed dry.
-                    const float delta = dry - dry * db2lin(gs.gainDB - makeup);
-                    lp[l][i] = std::max(0.0f, 1.0f - lsS - lsD) * wet + lsS * sc + lsD * delta;
-                }
+                gainA[l][c] = db2lin(gs.gainDB);
+                // Listen outputs never carry make-up: the delta is what the gain (without make-up) removed.
+                if (listening) gainNoMkA[l][c] = db2lin(gs.gainDB - makeup);
             }
         }
+      }
+      for (uint32_t l = 0; l < n; ++l) {
+        CompLane &gs = *st[l];
+        float dryA[kChunk], scA[kChunk];
+        std::memcpy(dryA, lp[l] + base, size_t(cn) * sizeof(float));
+        if (ringLen != 0) {
+            // A non-finite sample never enters the ring (it would be replayed ringLen frames later).
+            float oldDry[kChunk];
+            const uint32_t pos = gs.ringPos;
+            gs.ringPos = ringExchange(ring[l], ringLen, pos, dryA, oldDry, cn);
+            if (hasListen) {
+                ringExchange(sideRing[l], ringLen, pos, sideA[l], scA, cn);
+            } else {
+                std::memcpy(scA, sideA[l], size_t(cn) * sizeof(float));
+            }
+            std::memcpy(dryA, oldDry, size_t(cn) * sizeof(float));
+        } else {
+            std::memcpy(scA, sideA[l], size_t(cn) * sizeof(float));
+        }
+        float *out = lp[l] + base;
+        for (uint32_t c = 0; c < cn; ++c) {
+            const float dry = dryA[c], gain = gainA[l][c], mix = mixA[c];
+            const float wet = mix == 1.0f ? dry * gain : dry + mix * (dry * gain - dry);
+            out[c] = wet;
+        }
+        if (listenAny) {
+            for (uint32_t c = 0; c < cn; ++c) {
+                const float lsS = lsSA[c], lsD = lsDA[c];
+                if (lsS == 0.0f && lsD == 0.0f) continue;
+                const float dry = dryA[c];
+                const float delta = dry - dry * gainNoMkA[l][c];
+                out[c] = std::max(0.0f, 1.0f - lsS - lsD) * out[c] + lsS * scA[c] + lsD * delta;
+            }
+        }
+      }
     }
     float nowDb[kMaxLanes] = {};
     for (uint32_t l = 0; l < n; ++l) {

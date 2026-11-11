@@ -466,6 +466,7 @@ Owner decision, 18 Oct 2026: there is no bench access for now, so every bench ch
 - [ ] Collect every epic's "Bench checks" list and the E3 cases H01–H08 into one campaign
 - [ ] Run E4 S8 (PR97 timing calibration and PR99 verification) and record results against `docs/ANC_QUALIFICATION.md`
 - [ ] Run E4 S11 (owner, 1 Nov 2026: moved here from the E4 execution order): repeat S8 on the unified E6 graph, then fill the placeholder reduction table in `docs/ANC_QUALIFICATION.md` §4.1 from the S31 reviewer-kit noise files
+- [ ] E4 S26a: ear-microphone check of the virtual-microphone design with a real head at the eight rates (E4 S26a wiring)
 - [ ] Run the remaining bench checks at every rate from 44.1 to 384 kHz
 - [ ] E6 G19: listening for level riding on speech and music at the eight rates (LOUDNESS stage, E6 S12c)
 - [ ] E6 G43: binaural convolution cost per rate (16 channels, 8192 taps, 24 head orientations, 44.1 to 384 kHz) on the build machine (E6 S12g4)

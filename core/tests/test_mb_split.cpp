@@ -233,11 +233,66 @@ void testRate(double rate) {
         check(build(rate, m.p, 44, &st) == nullptr && st != N60_STATUS_OK, "reject split 2", rate);
     }
 }
+
+// E28 G42: in split mode the rings (mid in slot 0) and the tree's filter state carry across a rebuild, including a lookahead change.
+// Bands bypassed, so the output is the all-pass-phased sum delayed by the lookahead; after the swap the carried graph must equal a
+// graph built at the new lookahead from the start.
+void testSplitCarry(double rate) {
+    const size_t pre = (size_t)(rate * 0.2) / 512 * 512, post = (size_t)(rate * 0.1) / 512 * 512;
+    const Vec all = noise(pre + post, 0.4f);
+    const Vec in1(all.begin(), all.begin() + (long)pre), in2(all.begin() + (long)pre, all.end());
+    const uint32_t looks[3][2] = {{(uint32_t)(rate * 0.004), (uint32_t)(rate * 0.0015)},
+                                  {(uint32_t)(rate * 0.0015), (uint32_t)(rate * 0.004)},
+                                  {(uint32_t)(rate * 0.003), (uint32_t)(rate * 0.003)}};
+    for (const auto &lk : looks) {
+        Mb a, b;
+        a.p[42] = (float)lk[0];
+        b.p[42] = (float)lk[1];
+        n60_graph *g = build(rate, a.p, 44), *ref = build(rate, b.p, 44);
+        if (!g || !ref) { check(false, "split carry builds", rate); return; }
+        n60_rebuild_options o;
+        std::memset(&o, 0, sizeof o);
+        o.structSize = sizeof o;
+        o.fadeMs = 0.0f;
+        n60_graph_set_rebuild_options(g, &o);
+        run(g, in1);
+        const Vec refAll = run(ref, all);
+        n60_stage_desc sd;
+        std::memset(&sd, 0, sizeof sd);
+        sd.structSize = sizeof sd;
+        sd.kind = N60_STAGE_MULTIBAND;
+        sd.stageId = 5;
+        sd.laneA = 0;
+        sd.laneB = 1;
+        sd.params = b.p;
+        sd.paramCount = 44;
+        n60_graph_desc d;
+        std::memset(&d, 0, sizeof d);
+        d.structSize = sizeof d;
+        d.abiVersion = N60_GRAPH_ABI_VERSION;
+        d.sampleRate = rate;
+        d.maxBlockFrames = 512;
+        d.inputChannels = d.outputChannels = 2;
+        d.stages = &sd;
+        d.stageCount = 1;
+        check(n60_graph_publish(g, &d) == N60_STATUS_OK, "split carry publish", rate);
+        const Vec out2 = run(g, in2);
+        const size_t skip = lk[1] > lk[0] ? lk[1] - lk[0] : 0;
+        double m = 0;
+        for (size_t i = skip + 512; i < out2.size(); ++i) m = std::max(m, std::fabs((double)out2[i] - (double)refAll[pre + i]));
+        check(m < 1e-5, "split-mode carry matches a graph built at the new lookahead", rate, m, (double)lk[1]);
+        n60_graph_retire(g);
+        n60_graph_retire(ref);
+    }
+}
 }  // namespace
 
 int main() {
     const double rates[] = {44100, 48000, 88200, 96000, 176400, 192000, 352800, 384000};
-    for (double rate : rates) testRate(rate);
+    for (double rate : rates) {
+        testRate(rate);
+        testSplitCarry(rate);
+    }
     if (failures) {
         std::fprintf(stderr, "n60core multiband split: %d failures\n", failures);
         return 1;
