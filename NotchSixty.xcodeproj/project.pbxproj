@@ -191,6 +191,9 @@
 		E10A00000000000000000024 /* bass.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E10A00000000000000000014 /* bass.cpp */; };
 		E8A600000000000000000002 /* multisub_search.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E8A600000000000000000001 /* multisub_search.cpp */; };
 		E8A000000000000000000021 /* xover.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E8A000000000000000000011 /* xover.cpp */; };
+		E9B600000000000000000001 /* headroom.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E9B600000000000000000002 /* headroom.cpp */; };
+		E9B600000000000000000003 /* OutputHeadroomModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9B600000000000000000004 /* OutputHeadroomModel.swift */; };
+		E9B600000000000000000005 /* OutputHeadroomModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9B600000000000000000006 /* OutputHeadroomModelTests.swift */; };
 		E19A00000000000000000021 /* design.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E19A00000000000000000011 /* design.cpp */; };
 		E8A000000000000000000031 /* CrossoverCore.swift in Sources */ = {isa = PBXBuildFile; fileRef = E8A000000000000000000041 /* CrossoverCore.swift */; };
 		E8A000000000000000000032 /* CrossoverCoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E8A000000000000000000042 /* CrossoverCoreTests.swift */; };
@@ -891,6 +894,9 @@
 		E8A600000000000000000001 /* multisub_search.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = correct/multisub_search.cpp; sourceTree = "<group>"; };
 		E19A00000000000000000011 /* design.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = mimo/design.cpp; sourceTree = "<group>"; };
 		E8A000000000000000000011 /* xover.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = xover/xover.cpp; sourceTree = "<group>"; };
+		E9B600000000000000000002 /* headroom.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = headroom/headroom.cpp; sourceTree = "<group>"; };
+		E9B600000000000000000004 /* OutputHeadroomModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OutputHeadroomModel.swift; sourceTree = "<group>"; };
+		E9B600000000000000000006 /* OutputHeadroomModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OutputHeadroomModelTests.swift; sourceTree = "<group>"; };
 		E8A000000000000000000041 /* CrossoverCore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrossoverCore.swift; sourceTree = "<group>"; };
 		E8A000000000000000000042 /* CrossoverCoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrossoverCoreTests.swift; sourceTree = "<group>"; };
 		E24C00000000000000000002 /* RoomCorrectionLaneComposer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomCorrectionLaneComposer.swift; sourceTree = "<group>"; };
@@ -1466,6 +1472,7 @@
 				E6D000000000000000000001 /* UnifiedGraphSpec.swift */,
 				E6D0000000000000000000B0 /* UnifiedGraphProgramDSP.swift */,
 				E9B500000000000000000002 /* OutputProtectionSettings.swift */,
+				E9B600000000000000000004 /* OutputHeadroomModel.swift */,
 				E6D000000000000000000002 /* UnifiedGraphHost.swift */,
 				E6D000000000000000000003 /* UnifiedGraphConfiguration.swift */,
 				E26A00000000000000000103 /* UnifiedGraphAncActuators.swift */,
@@ -1511,6 +1518,7 @@
 				E10A00000000000000000014 /* bass.cpp */,
 				E8A600000000000000000001 /* multisub_search.cpp */,
 				E8A000000000000000000011 /* xover.cpp */,
+				E9B600000000000000000002 /* headroom.cpp */,
 				E19A00000000000000000011 /* design.cpp */,
 				E11C0000000000000000001C /* spl.cpp */,
 				E11C0000000000000000001B /* monitor_ring.cpp */,
@@ -1597,6 +1605,7 @@
 				E6D0000000000000000009B1 /* LiveSessionFixtureTests.swift */,
 				E6D0000000000000000000B1 /* UnifiedGraphProgramDSPTests.swift */,
 				E9B500000000000000000004 /* OutputProtectionTests.swift */,
+				E9B600000000000000000006 /* OutputHeadroomModelTests.swift */,
 				E6D000000000000000000007 /* LiveNChannelUnifiedGraphTests.swift */,
 				A10000000000000000000027 /* ConvolutionTests.swift */,
 				A100000000000000000E2206 /* FeatureFlagsTests.swift */,
@@ -2140,6 +2149,7 @@
 				E6D000000000000000000101 /* UnifiedGraphSpec.swift in Sources */,
 				E6D0000000000000000001B0 /* UnifiedGraphProgramDSP.swift in Sources */,
 				E9B500000000000000000001 /* OutputProtectionSettings.swift in Sources */,
+				E9B600000000000000000003 /* OutputHeadroomModel.swift in Sources */,
 				E6D000000000000000000102 /* UnifiedGraphHost.swift in Sources */,
 				E6D000000000000000000103 /* UnifiedGraphConfiguration.swift in Sources */,
 				E26A00000000000000000104 /* UnifiedGraphAncActuators.swift in Sources */,
@@ -2189,6 +2199,7 @@
 				E10A00000000000000000024 /* bass.cpp in Sources */,
 				E8A600000000000000000002 /* multisub_search.cpp in Sources */,
 				E8A000000000000000000021 /* xover.cpp in Sources */,
+				E9B600000000000000000001 /* headroom.cpp in Sources */,
 				E19A00000000000000000021 /* design.cpp in Sources */,
 				E11C0000000000000000003B /* spl.cpp in Sources */,
 				E11C0000000000000000003A /* monitor_ring.cpp in Sources */,
@@ -2580,6 +2591,7 @@
 				E6D0000000000000000109B1 /* LiveSessionFixtureTests.swift in Sources */,
 				E6D0000000000000000001B1 /* UnifiedGraphProgramDSPTests.swift in Sources */,
 				E9B500000000000000000003 /* OutputProtectionTests.swift in Sources */,
+				E9B600000000000000000005 /* OutputHeadroomModelTests.swift in Sources */,
 				E6D000000000000000000107 /* LiveNChannelUnifiedGraphTests.swift in Sources */,
 				A10000000000000000000013 /* NotchSixtyTests.swift in Sources */,
 				A10000000000000000000014 /* ConvolutionTests.swift in Sources */,

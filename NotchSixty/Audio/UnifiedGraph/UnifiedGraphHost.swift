@@ -158,6 +158,9 @@ final class UnifiedGraphHost: @unchecked Sendable {
         return written
     }
 
+    /// E9 S7: a copy of the published spec, read under the host lock. Control plane.
+    var currentSpec: UnifiedGraphSpec { lock.lock(); defer { lock.unlock() }; return spec }
+
     var inputChannels: UInt32 { lock.lock(); defer { lock.unlock() }; return spec.inputChannels }
     var outputChannels: UInt32 { lock.lock(); defer { lock.unlock() }; return spec.outputChannels }
 
@@ -319,7 +322,8 @@ final class UnifiedGraphHost: @unchecked Sendable {
                 _ = n60_graph_read_meter(graph, stage, UInt32(lane), &peak[lane], &rms[lane])
             }
             return N60StereoMeterReading(
-                peakLeft: peak[0], peakRight: peak[1], rmsLeft: rms[0], rmsRight: rms[1], overRangeSamples: over[0] &+ over[1]
+                peakLeft: peak[0], peakRight: peak[1], rmsLeft: rms[0], rmsRight: rms[1], overRangeSamples: over[0] &+ over[1],
+                overRangeLeft: over[0], overRangeRight: over[1], overRangePaired: true
             )
         }
         diagnostics.inputMeter = reading(N60_LSTAGE_METER_IN)

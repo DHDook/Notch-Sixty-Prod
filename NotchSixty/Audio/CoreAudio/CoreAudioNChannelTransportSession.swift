@@ -718,6 +718,7 @@ final class CoreAudioNChannelTransportSession {
                 unifiedGraphFallbackReason = unifiedGraphIneligibility
             }
             bridge = newBridge
+            installLoudnessWorker(newBridge, sampleRate: outputFormat.sampleRate)
             registerHostTimeSink(newBridge, host: unifiedGraphHost)
             if hostedAnc != nil, let feed = unifiedGraphHost?.retainedResource as? ProfileAncFeed {
                 N60AncLaneFeedSetProgrammeScale(feed.pointer, max(0, outputGain))
@@ -866,6 +867,7 @@ final class CoreAudioNChannelTransportSession {
             }
         }
         bridge = newBridge
+        installLoudnessWorker(newBridge, sampleRate: sampleRate)
         registerHostTimeSink(newBridge, host: unifiedGraphHost)
         if hostedAnc != nil { N60LiveNChannelBridgeSetOutputGain(newBridge, 1) }
     }
@@ -979,6 +981,27 @@ final class CoreAudioNChannelTransportSession {
 
     func setDetailedMeteringDemand(_ enabled: Bool) {
         N60LiveNChannelBridgeSetMeteringDemand(bridge, enabled)
+    }
+
+    /// E28 S6b: BS.1770-4 loudness of the semantic program channels. Input is every program role as dequeued (LFE is
+    /// metered at weight 0); Output is the same roles after the render and limiter, nil for a routed lane map.
+    private var wideLoudnessWorker: ProductionWideLoudnessWorker?
+
+    private func installLoudnessWorker(_ bridge: UnsafeMutablePointer<N60LiveNChannelBridge>, sampleRate: Double) {
+        let positions = LoudnessChannelPosition.positions(for: routePlan.programLayout.roles)
+        let capture = bridge.pointee.loudnessCapture
+        let hasOutput = (capture?.pointee.outputChannels ?? 0) > 0
+        wideLoudnessWorker = ProductionWideLoudnessWorker(
+            capture: capture, sampleRate: sampleRate, inputPositions: positions,
+            outputPositions: hasOutput ? positions : nil)
+    }
+
+    func setAnalysisDemand(_ demandMask: UInt32) {
+        wideLoudnessWorker?.setDemand(demandMask)
+    }
+
+    func productionAnalysisSnapshot() -> ProductionAnalysisSnapshot {
+        wideLoudnessWorker?.snapshot() ?? .empty
     }
 
     /// Bridge counters and meters. With the graph attached, the program lane levels come from
@@ -1166,6 +1189,9 @@ final class CoreAudioNChannelTransportSession {
             AudioHardwareDestroyProcessTap(tapID)
             tapID = AudioObjectID(kAudioObjectUnknown)
         }
+        // The worker reads the bridge's loudness ring; it must be quiet before the bridge goes.
+        wideLoudnessWorker?.stop()
+        wideLoudnessWorker = nil
         if let bridge {
             N60LiveNChannelBridgeDestroy(bridge)
             self.bridge = nil

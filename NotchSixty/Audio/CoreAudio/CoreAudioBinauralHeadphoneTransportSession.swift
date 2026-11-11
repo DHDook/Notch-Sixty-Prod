@@ -292,6 +292,7 @@ final class CoreAudioBinauralHeadphoneTransportSession {
                 unifiedGraphFallbackReason = unifiedGraphIneligibility
             }
             bridge = newBridge
+            installLoudnessWorker(newBridge, sampleRate: outputFormat.sampleRate)
             N60BinauralHeadphoneBridgeSetOutputGain(newBridge, outputGain)
 
             let tapEntry: [String: Any] = [
@@ -383,6 +384,25 @@ final class CoreAudioBinauralHeadphoneTransportSession {
 
     func setDetailedMeteringDemand(_ enabled: Bool) {
         N60BinauralHeadphoneBridgeSetMeteringDemand(bridge, enabled)
+    }
+
+    /// E28 S6b: BS.1770-4 loudness. Input is the semantic program channels after the program gain; Output is the two
+    /// ear signals (left and right at weight 1) after the render and master gain.
+    private var wideLoudnessWorker: ProductionWideLoudnessWorker?
+
+    private func installLoudnessWorker(_ bridge: UnsafeMutablePointer<N60BinauralHeadphoneBridge>, sampleRate: Double) {
+        wideLoudnessWorker = ProductionWideLoudnessWorker(
+            capture: bridge.pointee.loudnessCapture, sampleRate: sampleRate,
+            inputPositions: LoudnessChannelPosition.positions(for: programLayout.roles),
+            outputPositions: LoudnessChannelPosition.stereo)
+    }
+
+    func setAnalysisDemand(_ demandMask: UInt32) {
+        wideLoudnessWorker?.setDemand(demandMask)
+    }
+
+    func productionAnalysisSnapshot() -> ProductionAnalysisSnapshot {
+        wideLoudnessWorker?.snapshot() ?? .empty
     }
 
     func bridgeSnapshot() -> N60BinauralHeadphoneBridgeSnapshot? {
@@ -573,6 +593,8 @@ final class CoreAudioBinauralHeadphoneTransportSession {
             AudioHardwareDestroyProcessTap(tapID)
             tapID = AudioObjectID(kAudioObjectUnknown)
         }
+        wideLoudnessWorker?.stop()
+        wideLoudnessWorker = nil
         if let bridge {
             N60BinauralHeadphoneBridgeDestroy(bridge)
             self.bridge = nil
