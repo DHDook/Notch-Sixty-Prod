@@ -336,7 +336,7 @@ struct UnifiedGraphProgramDSP: Equatable, Sendable {
         ]
         for (kind, id, params, size) in pairStages {
             guard let params else { continue }
-            guard params.count == size else { throw UnifiedGraphFallbackReason.specRejected }
+            guard params.count == size || (kind == N60_STAGE_MULTIBAND && params.count == 43) else { throw UnifiedGraphFallbackReason.specRejected }
             guard let fl = shape.frontLeft, let fr = shape.frontRight else { throw UnifiedGraphFallbackReason.noFrontPair }
             add(kind, id, lane: UInt32(fl), laneB: UInt32(fr), params: params)
         }
