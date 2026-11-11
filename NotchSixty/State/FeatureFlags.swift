@@ -21,7 +21,7 @@ extension FeatureFlag {
     static let all: [FeatureFlag] = [
         .legacyKernel, .ancEngineLease, .adaptiveTonalLive, .earnedCap, .feedForwardLive,
         .noiseSurvey, .conversationUnmasking, .virtualMicrophone, .zones, .headPositionCamera, .overnight,
-        .subAwareAnc, .longFIR, .outputProtection, .headphones, .mimoTreatment, .dynamicsExtras
+        .subAwareAnc, .longFIR, .outputProtection, .headphones, .mimoTreatment, .dynamicsExtras, .roomModel
     ]
 
     /// E6 S11: the unified graph is the default renderer. Turning this on selects the frozen
@@ -175,6 +175,14 @@ extension FeatureFlag {
         id: "e28.dynamics-extras",
         title: "Dynamics extras",
         epic: "E28"
+    )
+
+    /// E29: the shared room position model. S1 builds the read-only index; the seat map (S4) and the consumers (S6, S7)
+    /// follow. Off: every feature reads its own records exactly as today. Removed when E29 ships.
+    static let roomModel = FeatureFlag(
+        id: "e29.room-model",
+        title: "Shared room position model",
+        epic: "E29"
     )
 }
 

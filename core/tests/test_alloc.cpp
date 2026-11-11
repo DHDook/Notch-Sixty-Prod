@@ -431,7 +431,14 @@ int main() {
     for (double rate : rates) {
         constexpr uint32_t N = 512;
         const float bm[9] = {80, 0, 2, 3, 120, 0, 0, 0, 0};
-        const float amb[10] = {3, 100, 0, 1, 1000, 1, 1, 8000, 0, 1};
+        // E4 S30c (G9): the same stage with the live section trailer (n = 17), so the audio callback's zero-allocation
+        // check covers the 20-section path and its crossfades.
+        float ambT[62] = {3, 100, 0, 1, 1000, 1, 1, 8000, 0, 1, 17};
+        for (int k = 0; k < 17; k++) {
+            ambT[11 + 3 * k] = 200.0f * std::pow(2.0f, static_cast<float>(k) / 3.0f);
+            ambT[12 + 3 * k] = -1.0f - 0.2f * static_cast<float>(k % 4);
+            ambT[13 + 3 * k] = 4.32f;
+        }
         const float sym[1] = {0.2f}, cf[1] = {0.2f}, ct[2] = {900, 0.3f}, og[1] = {0.9f};
         const float hp[11] = {-1, 0.5f, 45, 0.09f, 700, 0, 0, 0, 0, 0, 0};
         const float gate[5] = {-90, 6, 10, 5, 5};
@@ -443,7 +450,7 @@ int main() {
         n60_stage_desc a[14] = {
             stage(N60_STAGE_BASS_MGMT, 1, 0, bm, 9),
             stage(N60_STAGE_ROOM_FIR, 2, 0, taps, 300),
-            stage(N60_STAGE_AMBIENT, 3, N60_LANE_ALL, amb, 10),
+            stage(N60_STAGE_AMBIENT, 3, N60_LANE_ALL, ambT, 62),
             stage(N60_STAGE_SYMMETRY, 4, 0, sym, 1, 0, 1),
             stage(N60_STAGE_CROSSFEED, 5, 0, cf, 1, 0, 1),
             stage(N60_STAGE_CROSSTALK, 6, 0, ct, 2, 0, 1),
@@ -878,7 +885,14 @@ int main() {
         const float comp[10] = {-20, 4, 6, 1, 100, 0, 0, 1, 80, 1};
         const float exp6[6] = {-50, 2, -30, 1, 100, 0};
         const float bm[9] = {80, 0, 10, 11, 120, 0, 0, 0, 0};
-        const float amb[10] = {3, 100, 0, 1, 1000, 1, 1, 8000, 0, 1};
+        // E4 S30c (G9): the same stage with the live section trailer (n = 17), so the audio callback's zero-allocation
+        // check covers the 20-section path and its crossfades.
+        float ambT[62] = {3, 100, 0, 1, 1000, 1, 1, 8000, 0, 1, 17};
+        for (int k = 0; k < 17; k++) {
+            ambT[11 + 3 * k] = 200.0f * std::pow(2.0f, static_cast<float>(k) / 3.0f);
+            ambT[12 + 3 * k] = -1.0f - 0.2f * static_cast<float>(k % 4);
+            ambT[13 + 3 * k] = 4.32f;
+        }
         const float sym[1] = {0.2f}, cf[1] = {0.2f}, ct[2] = {900, 0.3f}, og[1] = {0.9f};
         const float gate[5] = {-90, 6, 10, 5, 5};
         const float prot[7] = {1, -1, 1, 50, 5, 1, 2};
@@ -902,7 +916,7 @@ int main() {
             stage(N60_STAGE_BASS_MGMT, 13, 0, bm, 9),
             stage(N60_STAGE_ROOM_FIR, 14, 0, room, 300),
             stage(N60_STAGE_SPEAKER_IR, 15, 0, room, 150),
-            stage(N60_STAGE_AMBIENT, 16, 0, amb, 10),
+            stage(N60_STAGE_AMBIENT, 16, 0, ambT, 62),
             stage(N60_STAGE_SYMMETRY, 17, 0, sym, 1, 0, 1),
             stage(N60_STAGE_CROSSFEED, 18, 0, cf, 1, 0, 1),
             stage(N60_STAGE_CROSSTALK, 19, 0, ct, 2, 0, 1),

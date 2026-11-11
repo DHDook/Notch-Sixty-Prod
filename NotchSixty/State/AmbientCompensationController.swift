@@ -91,8 +91,21 @@ enum AmbientCompensationControllerError:
 @MainActor
 final class AmbientCompensationController: ObservableObject {
     static let pollIntervalNanoseconds: UInt64 = 250_000_000
-    static let maximumHistoryFrames = 65_536
+    static let maximumHistoryFrames = 131_072
     static let preferredAnalysisFrames = 32_768
+    /// E4 S30c (G4): the analysis window must span a whole poll or the speech history sees a gap each time (and the
+    /// microphone ring drops frames). At 48 kHz a poll is 12,000 frames; at 384 kHz it is 96,000. The window is 1.2
+    /// polls, never less than the preferred 32,768 frames, and the read limit is two polls, capped at `maximumHistoryFrames` (at 384 kHz that is about 1.4 polls, still more than one).
+    static func analysisFrames(sampleRate: Double) -> Int {
+        guard sampleRate.isFinite, sampleRate > 0 else { return preferredAnalysisFrames }
+        let poll = sampleRate * Double(pollIntervalNanoseconds) / 1_000_000_000
+        return min(max(preferredAnalysisFrames, Int((poll * 1.2).rounded(.up))), maximumHistoryFrames)
+    }
+    static func readLimitFrames(sampleRate: Double) -> Int {
+        guard sampleRate.isFinite, sampleRate > 0 else { return preferredAnalysisFrames }
+        let poll = sampleRate * Double(pollIntervalNanoseconds) / 1_000_000_000
+        return min(max(preferredAnalysisFrames, Int((poll * 2).rounded(.up))), maximumHistoryFrames)
+    }
     static let minimumAnalysisFrames = 4_096
     static let maximumImpulseTaps = 8_192
 
@@ -133,10 +146,16 @@ final class AmbientCompensationController: ObservableObject {
     private var quietBaselineSpectrum: [AmbientSpectrumBand]?
     /// Positive dB cut per SII band that is currently in the playback reference. Nothing applies cuts until
     /// S30c, which sets this from the cuts it sends.
-    var unmaskingAppliedCutsDB = [Double](
+    private(set) var unmaskingAppliedCutsDB = [Double](
         repeating: 0, count: SpeechIntelligibilityBands.centersHz.count
     )
+    /// E4 S30c: rate-limits the planned cuts and releases them (see `ConversationUnmaskingGovernor`).
+    private var unmaskingGovernor = ConversationUnmaskingGovernor()
+    /// True while the target carries the cut trailer, so a poll with nothing to cut does not flip the graph topology.
+    private var unmaskingTrailerSent = false
     private(set) var latestUnmasking: ConversationUnmaskingEvaluation?
+    /// E4 S30c: the Conversation Focus card, refreshed each poll; nil with the flag off or outside Conversation Focus.
+    @Published private(set) var unmaskingCard: ConversationUnmaskingCardModel?
     /// E4 S6: receives every block of error-microphone frames this controller
     /// reads (frames, sample rate, monitor epoch, and whether frames were
     /// skipped since the previous block). The adaptive Quiet Zone shadow uses
@@ -499,7 +518,7 @@ final class AmbientCompensationController: ObservableObject {
             var firstFrameHostTime: UInt64?
             if anchoredMicrophoneFramesObserver != nil {
                 let read = try monitor.readAvailableFramesWithAnchor(
-                    maximumFrames: Self.preferredAnalysisFrames
+                    maximumFrames: Self.readLimitFrames(sampleRate: monitor.sampleRate)
                 )
                 newlyCaptured = read.samples
                 if let anchor = read.anchor, monitor.sampleRate > 0 {
@@ -509,7 +528,7 @@ final class AmbientCompensationController: ObservableObject {
                 }
             } else {
                 newlyCaptured = try monitor.readAvailableFrames(
-                    maximumFrames: Self.preferredAnalysisFrames
+                    maximumFrames: Self.readLimitFrames(sampleRate: monitor.sampleRate)
                 )
             }
             spatialMicrophoneFrameEnd &+= UInt64(newlyCaptured.count)
@@ -544,7 +563,7 @@ final class AmbientCompensationController: ObservableObject {
                 let frames =
                     engine.readAmbientPlaybackReferenceFrames(
                         maximumFrames:
-                            Self.preferredAnalysisFrames
+                            Self.readLimitFrames(sampleRate: monitor.sampleRate)
                     )
                 if !frames.isEmpty {
                     Self.appendCapped(
@@ -560,7 +579,7 @@ final class AmbientCompensationController: ObservableObject {
                 let quietFrames =
                     engine.readActiveQuietZoneReferenceFrames(
                         maximumFrames:
-                            Self.preferredAnalysisFrames
+                            Self.readLimitFrames(sampleRate: monitor.sampleRate)
                     )
                 if !quietFrames.isEmpty {
                     Self.appendCapped(
@@ -610,18 +629,20 @@ final class AmbientCompensationController: ObservableObject {
                     holdReason: .invalidEvidence,
                     mode: playbackAdaptationMode
                 )
-                let smoothed = try envelope.update(
+                var smoothed = try envelope.update(
                     toward: held,
                     configuration: configuration,
                     elapsedSeconds:
                         Double(Self.pollIntervalNanoseconds)
                             / 1_000_000_000
                 )
+                attachUnmaskingCuts(to: &smoothed, mode: playbackAdaptationMode, freshAnalysis: false)
                 try engine
                     .replaceAmbientCompensationRuntimeTarget(
                         smoothed
                     )
                 appliedTarget = smoothed
+                unmaskingCutsWereSent(smoothed)
                 monitorStatus = .held
                 lastErrorDescription = nil
                 return
@@ -684,26 +705,48 @@ final class AmbientCompensationController: ObservableObject {
                         previousActivity: appliedTarget.activity
                     )
                 case .conversationFocus:
-                    planned = try conversationPlanner.plan(
+                    let broad = try conversationPlanner.plan(
                         snapshot: analysis,
                         configuration: configuration,
                         previousActivity: appliedTarget.activity,
                         speechModulationConfidence: speechConfidence
                     )
+                    // E4 S30c: with a complete per-band plan, Conversation Focus sends the unmasking cuts only
+                    // (level and the three bands at 0). Missing inputs keep today's broad cut.
+                    if unmaskingInputsEnabled, engine.ambientUnmaskingRuntimeAvailable,
+                       case .planned(let plan)? = latestUnmasking?.status {
+                        planned = AmbientCompensationTarget(
+                            activity: broad.activity,
+                            levelDB: 0,
+                            lowSupportDB: 0,
+                            presenceSupportDB: 0,
+                            detailSupportDB: 0,
+                            confidence: broad.confidence,
+                            ambientDeltaDB: broad.ambientDeltaDB,
+                            holdReason: nil,
+                            mode: .conversationFocus,
+                            conversationEvidence: speechConfidence ?? broad.conversationEvidence,
+                            estimatedClearanceDB: max(-plan.overallChangeDB, 0)
+                        )
+                    } else {
+                        planned = broad
+                    }
                 }
             }
 
-            let smoothed = try envelope.update(
+            var smoothed = try envelope.update(
                 toward: planned,
                 configuration: configuration,
                 elapsedSeconds:
                     Double(Self.pollIntervalNanoseconds)
                         / 1_000_000_000
             )
+            attachUnmaskingCuts(to: &smoothed, mode: mode, freshAnalysis: true)
             try engine.replaceAmbientCompensationRuntimeTarget(
                 smoothed
             )
             appliedTarget = smoothed
+            unmaskingCutsWereSent(smoothed)
             if smoothed.holdReason != nil {
                 monitorStatus = .held
             } else if smoothed.active {
@@ -726,6 +769,8 @@ final class AmbientCompensationController: ObservableObject {
             AmbientAnalysisConfiguration.production
         analysisConfiguration.optionalDBSPLAt0DBFS =
             configuration.optionalDBSPLAt0DBFS
+        let windowFrames = Self.analysisFrames(sampleRate: monitorSampleRate)
+        analysisConfiguration.maximumAnalysisFrames = max(analysisConfiguration.maximumAnalysisFrames, windowFrames)
         let analyzer = AmbientFieldAnalyzer(
             configuration: analysisConfiguration
         )
@@ -733,7 +778,7 @@ final class AmbientCompensationController: ObservableObject {
         if !playbackRunning {
             let count = min(
                 microphoneHistory.count,
-                Self.preferredAnalysisFrames
+                windowFrames
             )
             let microphoneWindow =
                 Array(microphoneHistory.suffix(count))
@@ -753,7 +798,7 @@ final class AmbientCompensationController: ObservableObject {
                 engine.ambientPlaybackReferenceSampleRate else {
             let count = min(
                 microphoneHistory.count,
-                Self.preferredAnalysisFrames
+                windowFrames
             )
             let microphoneWindow =
                 Array(microphoneHistory.suffix(count))
@@ -789,7 +834,7 @@ final class AmbientCompensationController: ObservableObject {
             playbackLeftHistory.count,
             playbackRightHistory.count,
             quietCount,
-            Self.preferredAnalysisFrames
+            windowFrames
         )
         guard count >= Self.minimumAnalysisFrames else {
             throw AmbientAnalysisError.insufficientSamples(
@@ -1004,6 +1049,7 @@ final class AmbientCompensationController: ObservableObject {
     ) -> Double? {
         guard unmaskingInputsEnabled else {
             speechHistory.reset()
+            unmaskingGovernor.reset()
             latestUnmasking = nil
             return nil
         }
@@ -1028,8 +1074,58 @@ final class AmbientCompensationController: ObservableObject {
         return confidence
     }
 
+    /// E4 S30c: puts the governed cuts on the target about to be sent, or none. Cuts go out only with the flag on, in
+    /// Conversation Focus, and where the live graph can realise them (not the legacy kernel); otherwise the governor
+    /// is cleared at once (flag off, mode change) and the target carries none.
+    private func attachUnmaskingCuts(
+        to target: inout AmbientCompensationTarget,
+        mode: ActiveAcousticsPlaybackAdaptationMode,
+        freshAnalysis: Bool
+    ) {
+        let elapsed = Double(Self.pollIntervalNanoseconds) / 1_000_000_000
+        guard unmaskingInputsEnabled, mode == .conversationFocus, engine.ambientUnmaskingRuntimeAvailable else {
+            unmaskingGovernor.reset()
+            unmaskingTrailerSent = false
+            return
+        }
+        let cuts = freshAnalysis
+            ? unmaskingGovernor.update(evaluation: latestUnmasking, elapsedSeconds: elapsed)
+            : unmaskingGovernor.noAnalysis(elapsedSeconds: elapsed)
+        var planned = false
+        if freshAnalysis, case .planned? = latestUnmasking?.status { planned = true }
+        guard unmaskingGovernor.isEngaged || planned || (unmaskingTrailerSent && !freshAnalysis) else {
+            unmaskingTrailerSent = false
+            return
+        }
+        target.unmaskingCutsDB = cuts
+        // A transient hold resolves to a default target mode; the engine accepts cuts only in Conversation Focus.
+        target.mode = .conversationFocus
+    }
+
+    /// The engine accepted `target`: the cuts it carried are now in the playback reference (G7).
+    private func unmaskingCutsWereSent(_ target: AmbientCompensationTarget) {
+        unmaskingAppliedCutsDB = target.unmaskingCutsDB
+            ?? [Double](repeating: 0, count: SpeechIntelligibilityBands.centersHz.count)
+        unmaskingTrailerSent = target.unmaskingCutsDB != nil
+        refreshUnmaskingCard()
+    }
+
+    private func refreshUnmaskingCard() {
+        guard unmaskingInputsEnabled, playbackAdaptationMode == .conversationFocus,
+              let evaluation = latestUnmasking, let rate = latestAnalysis?.sampleRate else {
+            if unmaskingCard != nil { unmaskingCard = nil }
+            return
+        }
+        unmaskingCard = ConversationUnmaskingCardModel(
+            evaluation: evaluation, appliedCutsDB: unmaskingAppliedCutsDB, sampleRate: rate)
+    }
+
     private func resetAnalysisHistory() {
         speechHistory.reset()
+        unmaskingGovernor.reset()
+        unmaskingTrailerSent = false
+        unmaskingAppliedCutsDB = [Double](repeating: 0, count: SpeechIntelligibilityBands.centersHz.count)
+        unmaskingCard = nil
         latestUnmasking = nil
         spatialMicrophoneEpoch = UUID()
         spatialMicrophoneFrameEnd = 0

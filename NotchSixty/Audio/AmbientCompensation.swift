@@ -175,6 +175,7 @@ struct AmbientCompensationTarget: Equatable, Sendable {
                 || abs(lowSupportDB) > 0.001
                 || abs(presenceSupportDB) > 0.001
                 || abs(detailSupportDB) > 0.001
+                || (unmaskingCutsDB?.contains { $0 > 0.001 } ?? false)
             )
     }
 }
