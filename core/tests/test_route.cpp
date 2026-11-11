@@ -664,7 +664,7 @@ static void testNoAllocation(double rate) {
 }
 
 int main() {
-    CHECK(N60_GRAPH_ABI_VERSION == 33u && n60_graph_abi_version() == 33u, "ABI version");
+    CHECK(N60_GRAPH_ABI_VERSION == 34u && n60_graph_abi_version() == 34u, "ABI version");
     testRouteRejects();
     testXoverRejects();
     testBassSpecRejects();

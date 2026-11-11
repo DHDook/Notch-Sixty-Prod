@@ -4649,7 +4649,9 @@ final class AudioIOEngine: ObservableObject {
             snapshot: &snapshot, sampleRate: sampleRate,
             subwoofers: fold ? Array(repeating: UnifiedGraphSubwoofer(), count: subLaneTotal) : [],
             crossoverHz: foldedBassSettings.frequencyHz,
-            programs: { _, generation in programs[generation] }
+            programs: { _, generation in programs[generation] },
+            compressorExtras: FeatureFlags().isEnabled(.dynamicsExtras)
+                ? inputs.dynamics.compressor.coreExtras(sampleRate: sampleRate) : nil
         ) {
         case .success(let configuration): stereo = configuration
         case .failure(let reason): throw LiveNChannelTransportError.unifiedGraphRejected(reason)

@@ -34,7 +34,7 @@ extern "C" {
 #endif
 
 /* Bumped on any incompatible change to a struct or function below. */
-#define N60_GRAPH_ABI_VERSION 33u
+#define N60_GRAPH_ABI_VERSION 34u
 
 typedef struct n60_graph n60_graph; /* opaque */
 
@@ -350,6 +350,15 @@ typedef int (*n60_external_process_fn)(void *context, const float *const *in, fl
  *  [8] sidechain high-pass Hz (0 = off, up to 300), [9] linked (0/1; 1 = one detector
  *  and one gain for the whole lane group). paramCount 10. Live: [0]..[8]. Peak detector,
  *  dB-domain gain smoothing, soft knee, as in the stereo kernel path.
+ *  ABI v34 (E28 S7a): paramCount 15 adds [10] mix % (0..100; 100 = fully processed), [11] link % (0..100; each
+ *  lane's detector is link * the loudest lane of its group + (1 - link) * its own level), [12] detector (0 peak,
+ *  1 RMS), [13] RMS window ms (5..200, one-pole mean square), [14] lookahead frames (0..8192; topology): the audio
+ *  is delayed by that many frames while the detector reads the undelayed signal, and the frames join the stage's
+ *  latency; mix 0 is the delayed dry. Each lane keeps its own gain. Live: [0]..[8], [10]..[13]; mix and link ramp
+ *  over 5 ms. Link only matters when linked = 1 (an unlinked lane is its own group). Make-up applies to the processed
+ *  path only, so mix 0 is the unity-gain delayed dry. Memory: lanes x lookahead x 4 bytes of snapshot arena (at most
+ *  8192 frames). A changed [12] keeps the mean square running, so there is no reset transient. Sample rate and lane
+ *  count are unchanged. paramCount 10 is bit-identical to ABI v32: peak, shared gain, mix 100, no delay.
  *
  * Expander / gate. params: [0] threshold dB (-120..0), [1] ratio (1..20), [2] range dB
  *  (-96..0), [3] attack ms, [4] release ms (as above), [5] linked (0/1). paramCount 6.

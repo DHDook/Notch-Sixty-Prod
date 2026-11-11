@@ -381,7 +381,7 @@ S1–S6b flagless; every dynamics extra (S7a–S7d) behind the one flag `e28.dyn
 - [x] S5 dynamics visualisation: transfer curves, gain-reduction bars and history, navigator bars; built, PR pending (G21 to S7d, G22 to S6, G23 to S7d, G24 to S7b; Loudness readouts moved to S7d)
 - [x] S6 per-output and sub meters on every output configuration, per-route bridge meter, E9 protection on the hub (needs-owner, PR pending)
 - [x] S6b loudness fed the semantic program channels on N-channel and binaural sessions, loudness and dynamics lab cases, L/R over-range pairing (needs-owner)
-- [ ] S7a compressor mix, link amount, peak/RMS detector and optional lookahead, reported in the path latency (needs-owner, engine)
+- [~] S7a compressor mix, link amount, peak/RMS detector and optional lookahead, reported in the path latency (needs-owner, engine; built dark behind `e28.dynamics-extras`, PR open; wiring in S7d, G10 open)
 - [ ] S7b expander hold, soft knee, detector, sidechain high-pass and link; sidechain and delta listen (needs-owner, engine)
 - [ ] S7c multiband extras on the core stage ported by E6 S12d: per-band bypass, solo, listen and detector, one lookahead, auto-release toggle (needs-owner, engine)
 - [ ] S7d Dynamics page controls for every extra, disabled with a reason where the kernel renders
