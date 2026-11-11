@@ -54,7 +54,7 @@ platforms; E6 (the unified graph) is the critical path, because eleven later epi
 | E13 | Headphones complete | 4 | E6, E7 | Claude Code (Mac) | BYO files to PEQ in one click; live tuning |
 | E14 | Upmixer | 4 | E6 | Claude Code + bench | Stereo plays on 5.1–7.1.4 layouts |
 | E15 | Device-aware profiles | 4 | E6 | Claude Code (Mac) | Profile follows the output when the user opts in |
-| E16 | Automation and remote | 4 | E6 | Claude Code (Mac) | App Intents, local API and iPhone remote ship |
+| E16 | Automation and remote | 4 | E6 | Claude Code (Mac) | App Intents and the local API ship; the API is ready for a future iPhone client |
 | E17 | Export and dither | 4 | E8, E10 | Claude Code (Mac) | MiniDSP, APO and WAV exports; automatic dither |
 | E23 | Legacy engine removal | 4 | E6 (incl. S12a–S12h), E4 S11, E7–E17 | Claude Code (Mac) | `N60RenderKernel`, the old N-channel path and the `e6.*` flags are gone; full suite green |
 | E22 | Hardware validation | 4 | all software epics | Bench | Every deferred bench check passes on `main` at every rate |
@@ -87,7 +87,7 @@ reviewers compare with Dirac and REW), then engine depth, then breadth.
 11. E14 Upmixer, E15 Device-aware profiles, E17 Export and dither, E16 Automation and remote
 12. E23 Legacy engine removal
 13. E29 Shared room position model (owner, 9 Nov 2026: unparked, in v1; plan `docs/epics/E29.md`; flag `e29.room-model`)
-14. E22 Hardware validation and E18 Launch readiness (owner-led)
+14. E3 Hardware acceptance, then E22 Hardware validation, then E18 Launch readiness (owner-led, last) (owner, 11 Nov 2026)
 
 ## Phase 1 — Consolidate and qualify
 
@@ -408,6 +408,8 @@ complete, speaker ANC qualified, and a full hardware regression passing at every
 
 ### E15 Device-aware profiles
 
+Plan: `docs/epics/E15.md` (awaiting owner approval; flag `e15.follow-output`).
+
 - [ ] Opt-in "follow system output" mode that recalls the profile bound to each output UID
 - [ ] Keep today's fixed-output policy as the default
 
@@ -415,7 +417,10 @@ complete, speaker ANC qualified, and a full hardware regression passing at every
 
 - [ ] App Intents and Shortcuts for profile, volume, mute, bypass and correction on/off
 - [ ] Local authenticated REST/websocket API, off by default
-- [ ] iPhone remote app using that API
+
+Owner decision, 11 Nov 2026: the iPhone remote moved to the post-v1 "iPhone companion app" entry
+under "Platform reach after v1". The local API must stay usable by that future iPhone client
+(documented, versioned, authenticated pairing that a phone can complete).
 
 ### E17 Export and dither
 
@@ -477,6 +482,15 @@ and has not been verified; check each before committing.
 SwiftUI runs only on Apple platforms, so each non-Apple platform needs its own UI shell or a
 cross-platform UI choice; that decision can wait until after v1. The rule until then: nothing in
 the C++ core may depend on an Apple framework.
+
+### Post-v1: iPhone companion app (owner, 11 Nov 2026; no epic number yet)
+
+Outside the v1 completion requirement: v1 ships without it.
+
+- [ ] iPhone remote for the Mac app, using the E16 local API
+- [ ] iPhone as a measurement microphone for the Mac's measurement suite; needs its own
+      calibration and accuracy design (per-model microphone response, timing against the Mac's
+      clock, and the limits under which a phone capture is trusted) before any design path uses it
 
 ## How to run each epic in Claude Code
 
