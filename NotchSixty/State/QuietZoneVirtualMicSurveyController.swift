@@ -185,6 +185,8 @@ final class QuietZoneVirtualMicSurveyController: ObservableObject {
 
     /// E4 S26b: when set and following the head, the head position picks the ear tone instead of the one fixed survey.
     private(set) var headFollow: QuietZoneHeadFollowController?
+    /// E4 S27: with the zone chooser attached, head follow picks the tone only in follow mode. Always true without it.
+    var headFollowGate: () -> Bool = { true }
 
     func attachHeadFollow(_ follow: QuietZoneHeadFollowController?) {
         headFollow = follow
@@ -197,6 +199,7 @@ final class QuietZoneVirtualMicSurveyController: ObservableObject {
         guard isActive else { return nil }
         guard let fixed = tones.min(by: { abs($0.frequencyHz - frequencyHz) < abs($1.frequencyHz - frequencyHz) }),
               abs(fixed.frequencyHz - frequencyHz) <= 0.5 else { return nil }
+        guard headFollowGate() else { return fixed }
         return headFollow?.tone(near: frequencyHz) ?? fixed
     }
 }

@@ -58,6 +58,10 @@ enum QuietZoneFlagWiring {
             activeQuietZone.attachVirtualMicrophone(QuietZoneVirtualMicSurveyController())
         }
         attachHeadFollow(to: activeQuietZone.virtualMic, flags: flags, source: headPoseSource)
+        // E4 S27: the zone chooser needs the ear survey it chooses between, so it exists only with both flags on.
+        if flags.isEnabled(.zones), activeQuietZone.virtualMic != nil {
+            activeQuietZone.attachZones(QuietZoneZoneController())
+        }
         if flags.isEnabled(.overnight) {
             activeQuietZone.attachOvernightPower(OvernightPowerAssertion())
         }

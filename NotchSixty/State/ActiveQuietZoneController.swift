@@ -391,6 +391,76 @@ final class ActiveQuietZoneController: ObservableObject {
             bassConditioning: bassMode)
     }
 
+    /// E4 S27: the zone chooser (fixed seat, follow, two zones). Control plane only; never arms anything.
+    private(set) var zones: QuietZoneZoneController?
+
+    /// Zone mode for the earned-cap binding; fixed seat when no chooser is attached.
+    var zoneMode: QuietZoneZoneMode { zones?.mode ?? .fixedSeat }
+
+    func attachZones(_ chooser: QuietZoneZoneController?) {
+        zones = chooser
+        guard let chooser else { objectWillChange.send(); return }
+        chooser.firstSurvey = { [weak self] in self?.virtualMic }
+        chooser.headFollowReady = { [weak self] in
+            guard let follow = self?.virtualMic?.headFollow else { return false }
+            return follow.isEnabled && follow.positions.count >= 2
+        }
+        chooser.surveyedPointIDs = { [weak self] in self?.ambient.availableModelPositions.map(\.id) ?? [] }
+        chooser.second.paths = { [weak self] frequency, earID in
+            guard let self else { throw ActiveQuietZoneControllerError.acousticModelRequired }
+            return try self.surveyPaths(frequencyHz: frequency, earPositionID: earID)
+        }
+        chooser.second.candidates = { [weak self, weak chooser] in
+            guard let self else { return [] }
+            let anchor = self.ambient.selectedModelPosition?.id
+            let first = chooser?.firstSurvey()?.ear?.id
+            return self.ambient.availableModelPositions
+                .filter { $0.id != anchor && $0.id != first }
+                .map { ($0.id, $0.name) }
+        }
+        // Head follow picks the ear tone only in follow mode.
+        virtualMic?.headFollowGate = { [weak chooser] in chooser?.mode == .follow }
+        // The mode is part of the S20 binding: a change while armed disarms, and the next arm starts at -40 dBFS.
+        chooser.onModeChanged = { [weak self] in
+            guard let self else { return }
+            if self.arm.isArmed {
+                self.arm.disarm(.zoneChanged)
+                if self.configuration.enabled { self.applyDisarm(.zoneChanged) }
+            }
+            self.objectWillChange.send()
+        }
+        objectWillChange.send()
+    }
+
+    /// E4 S27: two zones, one complex L/R gain per tone from the 2 x 2 core with the monitor microphone as the S16
+    /// other-seat point. Nil keeps the fixed-seat design (not in two-zone mode, tone not surveyed in both zones, bass
+    /// path conditioned, or the pair cannot be helped).
+    func twoZoneDesign(
+        frequencyHz: Double,
+        monitorDisturbance: ActiveQuietZoneComplex,
+        monitorLeft: ActiveQuietZoneComplex,
+        monitorRight: ActiveQuietZoneComplex,
+        bassMode: BassPlantConditioningMode,
+        injectionPeakOverride: Double? = nil
+    ) throws -> QuietZoneZoneSolution? {
+        guard let zones, zones.mode == .twoZones, case .free = bassMode,
+              let a = zones.firstTone(near: frequencyHz), let b = zones.secondTone(near: frequencyHz) else { return nil }
+        let cfg = try configuration.validated()
+        let peak = min(
+            pow(10, cfg.maximumPerSourceTonePeakDBFS / 20),
+            pow(10, cfg.maximumAggregateSourcePeakDBFS / 20),
+            injectionPeakOverride ?? availableInjectionPeak)
+        guard peak.isFinite, peak > 0 else { return nil }
+        let solution = try QuietZoneTwoZoneSolver(maximumOutputMagnitude: peak).solve(
+            zones: [
+                QuietZoneZoneTone(uncancelled: a.ratio * monitorDisturbance, leftPath: a.earLeft, rightPath: a.earRight),
+                QuietZoneZoneTone(uncancelled: b.ratio * monitorDisturbance, leftPath: b.earLeft, rightPath: b.earRight)
+            ],
+            others: [QuietZoneZoneTone(
+                uncancelled: monitorDisturbance, leftPath: monitorLeft, rightPath: monitorRight)])
+        return solution.rejected ? nil : solution
+    }
+
     func attachOvernightPower(_ assertion: OvernightPowerAssertion?) {
         overnightPower?.release()
         overnightPower = assertion
@@ -416,7 +486,8 @@ final class ActiveQuietZoneController: ObservableObject {
         return EarnedCapBinding(
             outputDeviceUID: output,
             inputDeviceUID: environment.inputDeviceUID ?? "",
-            sampleRate: rate
+            sampleRate: rate,
+            zoneMode: zoneMode
         )
     }
 
@@ -1684,7 +1755,7 @@ final class ActiveQuietZoneController: ObservableObject {
                 - leftPath * leftReference
                 - rightPath * rightReference
             // E4 S26a: the survey reads the uncancelled monitor noise against the locked oscillator.
-            if virtualMic?.isCapturing == true {
+            if virtualMic?.isCapturing == true || zones?.second.isCapturing == true {
                 surveyWindow[frequency] = try planner.runtimeCoefficient(
                     sourcePhasorInMicrophoneBasis: disturbance, oscillatorPhaseBasis: basis)
             }
@@ -1723,6 +1794,15 @@ final class ActiveQuietZoneController: ObservableObject {
                     }
                     bassMode = measured.mode
                 }
+                // E4 S27: two zones solve both ears at once, with the monitor microphone as the other-seat point.
+                if let two = try twoZoneDesign(
+                    frequencyHz: frequency, monitorDisturbance: disturbance,
+                    monitorLeft: leftPath, monitorRight: rightPath, bassMode: bassMode) {
+                    anyVirtualTone = true
+                    outputLeft = two.left
+                    outputRight = two.right
+                    predictedDB = two.zones.map(\.reductionDB).min() ?? 0
+                } else
                 // E4 S26a: a surveyed ear position designs at the ear; the monitor microphone stays the judge.
                 if let virtual = try virtualEarDesign(
                     frequencyHz: frequency, monitorDisturbance: disturbance,
@@ -1810,6 +1890,7 @@ final class ActiveQuietZoneController: ObservableObject {
         // back to the monitor, so it gets no seeds while any tone is designed at the ear (gap G18).
         adaptiveSeeds = anyVirtualTone ? [] : seeds
         if virtualMic?.isCapturing == true { virtualMic?.ingestWindow(surveyWindow) }
+        if zones?.second.isCapturing == true { zones?.second.ingestWindow(surveyWindow) }
         let desired = try aggregateLimitedTarget(
             tones: desiredTones
         )
