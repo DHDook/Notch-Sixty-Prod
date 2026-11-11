@@ -15,6 +15,7 @@
 #include <vector>
 
 #include "n60/mimo.h"
+#include "kernel.hpp"
 
 namespace {
 
@@ -23,33 +24,10 @@ constexpr double kPi = 3.14159265358979323846;
 constexpr double kLn1000 = 6.907755278982137;
 constexpr uint32_t kCausalIterations = 5;       // proximal causality iterations per regularisation step
 constexpr double kCausalPull = 1.0;             // weight of the pull towards the causal projection, re the mean plant power
-constexpr uint32_t kKernelHalfWidthFactor = 5;   // decimator half width in output samples
-
-double besselI0(double x) {
-    double sum = 1.0, term = 1.0;
-    for (int k = 1; k < 60; ++k) {
-        term *= (x / (2.0 * k)) * (x / (2.0 * k));
-        sum += term;
-        if (term < 1e-18 * sum) break;
-    }
-    return sum;
-}
 
 std::vector<double> decimationKernel(uint32_t d) {
-    const int half = static_cast<int>(kKernelHalfWidthFactor * d);
-    std::vector<double> h(2 * half + 1);
-    const double beta = 8.0, denom = besselI0(beta);
-    const double cutoff = 0.8 / d;   // 0.4 of the low rate, in cycles per input sample times 2
-    double sum = 0;
-    for (int i = -half; i <= half; ++i) {
-        const double x = cutoff * i;
-        const double sinc = (i == 0) ? cutoff : std::sin(kPi * x) / (kPi * i);
-        const double r = static_cast<double>(i) / half;
-        const double w = besselI0(beta * std::sqrt(std::max(0.0, 1.0 - r * r))) / denom;
-        h[i + half] = sinc * w;
-        sum += h[i + half];
-    }
-    for (double &v : h) v /= sum;
+    std::vector<double> h(::n60::mimo::kernelTaps(d));
+    ::n60::mimo::designKernel(d, h.data());
     return h;
 }
 
@@ -154,7 +132,7 @@ void n60_mimo_defaults(double sample_rate, uint32_t source_count, uint32_t seat_
     p->source_count = source_count;
     p->seat_count = seat_count;
     p->primary_seat = 0;
-    p->tau_seconds = 0.0;
+    p->tau_seconds = 0.015; /* G11: recommended bass time target */
     p->decay_seconds = 0.3;
     p->taps = N60_MIMO_MAX_TAPS;
     p->regularisation = 1e-3;

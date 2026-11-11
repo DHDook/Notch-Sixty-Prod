@@ -34,7 +34,7 @@ extern "C" {
 #endif
 
 /* Bumped on any incompatible change to a struct or function below. */
-#define N60_GRAPH_ABI_VERSION 32u
+#define N60_GRAPH_ABI_VERSION 33u
 
 typedef struct n60_graph n60_graph; /* opaque */
 
@@ -126,7 +126,9 @@ typedef enum n60_stage_kind {
     N60_STAGE_LANE_DELAY = 49,       /* position 12.6: after EXTERNAL, before BASS_MGMT. Integer delay (DELAY rules). */
     /* ABI v30 (E6 S12h part 2b). Delta audition: see "Delta audition" below. */
     N60_STAGE_DELTA_CAPTURE = 50,    /* position 1.5: after SANITISE, before METER_IN. Pair stage: records the input. */
-    N60_STAGE_DELTA_SUBTRACT = 51    /* position 27.5: after PROTECTION, before MUTE. Pair stage: output minus the aligned input. */
+    N60_STAGE_DELTA_SUBTRACT = 51,   /* position 27.5: after PROTECTION, before MUTE. Pair stage: output minus the aligned input. */
+    /* ABI v33 (E19 S4). MIMO room treatment: see "MIMO treatment" below. */
+    N60_STAGE_MIMO = 52              /* position 13.5: after BASS_MGMT and STEREO_CROSSOVER, before ROOM_FIR. Lane mask of 1..8 source lanes. */
 } n60_stage_kind;
 
 /* Delta audition (ABI v30, E6 S12h part 2b; lane masks and fractional alignment in ABI v31, part 3). The stereo kernel's
@@ -783,6 +785,52 @@ typedef struct n60_multiband_readback {
     uint32_t reserved;
 } n60_multiband_readback;
 n60_status n60_graph_read_multiband(n60_graph *graph, uint32_t stageId, n60_multiband_readback *out);
+
+/* MIMO treatment (ABI v33, E19 S4; design maths in n60/mimo.h). One stage on a lane mask of S = 1..8 source lanes (laneMask
+ * non-zero, laneA = laneB = 0, capacityFrames 0); the k-th lane of the mask is source k of the design. Delta form:
+ *     y_s = x_s z^-L + g(n) * up( sum over t of E_st * down(x_t) ),     L = 10 D + tauFrames
+ * where down / up are the Kaiser-sinc resamplers of n60/mimo.h (decimation D = 16, 32, 64, 128; 5 D samples of delay each),
+ * E is the S x S matrix of low-rate FIR filters designed by n60_mimo_design and g is the arm gain. The stage runs at fs/D
+ * for the filters: a direct-form head of 64 low-rate taps per filter plus a uniform-partition overlap-save FFT tail
+ * (partition 64, FFT 128), so the matrix convolution adds no latency of its own. Unarmed (g = 0) the output is the input
+ * delayed by exactly L frames, bit for bit; L is the same armed or not, and the same on every lane of the stage. The
+ * host latency-matches the lanes outside the mask (E19 S6).
+ * paramCount = 8 + S + S * S * T, all copied into the snapshot:
+ *   [0] D (16, 32, 64 or 128; must be the family of the graph rate)  [1] T taps per filter (1..4096)
+ *   [2] S (equals the lane count)  [3] tauFrames (integer, 0 .. 0.02 s of frames)
+ *   [4] arm (0/1, LIVE)  [5] trip (0/1, LIVE)  [6], [7] reserved, 0
+ *   [8 .. 8+S) per-source row gain bound G_s (linear, > 0): the design's bound on the RMS of delta_s over the RMS of the
+ *        program feeds
+ *   [8+S ..) taps, E_st at ((s * S + t) * T + n), n = 0 .. T-1 (the layout of n60_mimo_design).
+ * Only [4] and [5] are live; everything else is topology (UNSUPPORTED).
+ * Arming. arm = 1 starts a 3 s monotonic (smoothstep) fade of g from 0 to 1; arm = 0, trip = 1 or a latched fault brings it
+ * back to 0 in 10 ms. trip = 1 also latches `held`. A graph rebuild latches `held` in both instances and starts the
+ * incoming instance at g = 0 (the delta is never faded through a rebuild). While `held`, g stays 0; `held` and the fault
+ * latch clear only when the host has written arm = 0 and trip = 0, so a re-arm always goes through the arm path.
+ * Monitor. At the low rate the stage keeps a fast (10 ms) mean-square envelope of each source's delta and of the sum of the
+ * source inputs, each peak-held with a 1 s release (so a filter's tail after the program stops is not counted as over
+ * bound). A source is over bound when its delta envelope exceeds 10^(6/10) * G_s^2 times the input envelope (6 dB in
+ * amplitude, 5.9 dB is within bound); 50 ms of continuous over-bound on any source latches a fault: `faultSource` names it,
+ * g falls in 10 ms and `held` is set.
+ * Realtime: no allocation (every byte is in the snapshot arena), no locks, bounded work; one 128-point FFT per source and
+ * one inverse per source every 64 low-rate samples (a bounded burst of S * S * (T / 64) complex multiply-adds). Sample
+ * rates 44.1 to 384 kHz and the families above; 1..8 channels. Reset: a new snapshot only (history is zero, g = 0, held
+ * after a rebuild). Latency L above. Telemetry: n60_graph_read_mimo. */
+typedef struct n60_mimo_readback {
+    uint32_t structSize;      /* sizeof(n60_mimo_readback) as seen by the caller */
+    uint32_t state;           /* 0 off, 1 fading in, 2 armed, 3 fading out */
+    float armGain;            /* g, 0..1 */
+    uint32_t held;            /* 1 after a rebuild, trip or fault, until the host writes arm = 0 and trip = 0 */
+    uint32_t faultLatched;    /* 1 after a monitor fault, same clearing rule */
+    uint32_t faultSource;     /* 1 + the source that latched the fault, else 0 */
+    uint32_t tripCount;       /* trips requested through param [5] */
+    uint32_t sourceCount;
+    uint32_t latencyFrames;   /* L */
+    float boundRatioMax[8];   /* worst delta envelope over (G_s^2 * input envelope), linear power ratio, since the previous read (reset by the read) */
+    float deltaPeak[8];       /* peak |delta| per source (before g) since the previous read (reset by the read) */
+    uint32_t reserved;
+} n60_mimo_readback;
+n60_status n60_graph_read_mimo(n60_graph *graph, uint32_t stageId, n60_mimo_readback *out);
 
 /* Reads the over-range counter of a METER_IN, METER_OUT or FINAL_METER stage lane: samples with
  * |x| > 1.0 since the previous read (reset by the read). */
