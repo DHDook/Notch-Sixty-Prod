@@ -52,6 +52,19 @@ extension AudioIOEngine {
         try await mimoGraphTreatment.requestArm(context: mimoTreatmentContext(), refresh: { [unowned self] in self.mimoTreatmentContext() })
     }
 
+    /// E19 S7: verifies and issues (or refuses) the permit for the staged design against the engine's own context. The video
+    /// latency input is `mimoVideoLatencyInput`, `.unknown` until E19 S8 wires the latency mode, so no permit is issued before
+    /// then; the qualification table is empty until E22 files bench records. Never arms.
+    @discardableResult
+    func issueMIMOTreatmentPermit(
+        verification: MIMOTreatmentVerificationResult?, acceptance: MIMORoomTreatmentHardwareAcceptance?,
+        registry: MIMOTreatmentQualificationRegistry = .production
+    ) -> Result<MIMOGraphTreatment.Permit, MIMOTreatmentPermitRefusal> {
+        mimoGraphTreatment.issuePermit(
+            context: mimoTreatmentContext(), videoLatency: mimoVideoLatencyInput, verification: verification,
+            acceptance: acceptance, registry: registry)
+    }
+
     func disarmMIMOTreatment() { mimoGraphTreatment.userDisarm() }
 
     /// Called while a new session's configuration is built: attaches the staged stage (disarmed, held) when the flag is on
@@ -59,11 +72,13 @@ extension AudioIOEngine {
     /// stage, so audio is never lost to the treatment, and the arm gate "stage attached" stays closed.
     func attachStagedMIMOTreatment(to configuration: inout UnifiedGraphConfiguration) {
         mimoGraphTreatment.graphRebuilt()
+        mimoGraphTreatment.chainDigest = ""
         guard FeatureFlags().isEnabled(.mimoTreatment), let stage = mimoGraphTreatment.stage else { return }
         var candidate = configuration
         candidate.mimo = stage
         guard (try? candidate.makeSpec()) != nil else { return }
         configuration.mimo = stage
+        mimoGraphTreatment.chainDigest = MIMOGraphTreatment.chainDigest(of: configuration)
         startMIMOPoll()
     }
 

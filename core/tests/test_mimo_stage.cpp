@@ -370,33 +370,84 @@ static void testThermalBudget() {
     }
 }
 
-// E19 S6, G18: the thermal window slides. Taps {c, -c} make the delta gain frequency dependent (2 c |sin(w/2)| at the 3 kHz low
-// rate): 0.21 c at 100 Hz, 1.73 c at 1 kHz. With c set so 1 kHz sits at -5.9 dB, a 100 Hz program for 5 s then 10.3 s of 1 kHz
-// overloads only a window that starts at 5 s: tumbling 10 s windows [0, 10) and [10, 20) each see half of it and never trip,
-// the sliding window must. Rates with a 3 kHz low rate (48 and 384 kHz families).
+// E19 S6, G18 and S7, G26/G29: the thermal window slides. Taps {c, -c} make the delta gain frequency dependent
+// (2 c |sin(pi f / fsLow)|): about 0.19 c at 100 Hz, 1.6 to 1.7 c at 800 Hz. With c set so 800 Hz sits at `db`, a 100 Hz program for
+// 5 s then 800 Hz overloads only a window that starts at 5 s: tumbling 10 s windows [0, 10) and [10, 20) each see half of it and
+// never trip, the sliding window must. Every standard rate, so both low rates (3 kHz and 2756.25 Hz; at 44.1 and 88.2 kHz the
+// 0.1 s bin is 275.6 low-rate samples, rounded to 276).
+static double lowRateOf(double rate) {
+    const double d = rate < 60000 ? 16 : rate < 120000 ? 32 : rate < 250000 ? 64 : 128;
+    return rate / d;
+}
+
+static n60_graph *buildSliding(double rate, double db, std::vector<float> &keep) {
+    const double fsLow = lowRateOf(rate);
+    const float c = float(std::pow(10.0, db / 20.0) / (2.0 * std::sin(3.14159265358979 * 800.0 / fsLow)));
+    Cfg cfg{1, 2, uint32_t(0.015 * rate), {10.0f}, {c, -c}};
+    cfg.arm = 1.0f;
+    return buildMimo(rate, cfg, keep);
+}
+
+static void tone(n60_graph *g, double rate, uint64_t &pos, double seconds, double hz) {
+    const uint32_t N = uint32_t(seconds * rate);
+    Lanes in(1, std::vector<float>(N));
+    for (uint32_t i = 0; i < N; ++i) in[0][i] = 0.1f * float(std::sin(2.0 * 3.14159265358979 * hz * double(pos + i) / rate));
+    pos += N;
+    run(g, in, 480);
+}
+
 static void testThermalSlidingWindow() {
-    for (double rate : {48000.0, 384000.0}) {
-        const float c = float(std::pow(10.0, -5.9 / 20.0) / 1.7320508);
-        Cfg cfg{1, 2, uint32_t(0.015 * rate), {10.0f}, {c, -c}};
-        cfg.arm = 1.0f;
+    for (double rate : kRates) {
         std::vector<float> keep;
-        n60_graph *g = buildMimo(rate, cfg, keep);
+        n60_graph *g = buildSliding(rate, -5.9, keep);
         uint64_t pos = 0;
-        auto chunk = [&](double seconds, double hz) {
-            const uint32_t N = uint32_t(seconds * rate);
-            Lanes in(1, std::vector<float>(N));
-            for (uint32_t i = 0; i < N; ++i) in[0][i] = 0.1f * float(std::sin(2.0 * 3.14159265358979 * hz * double(pos + i) / rate));
-            pos += N;
-            run(g, in, 480);
-        };
-        chunk(5.0, 100.0);
-        chunk(9.0, 1000.0);
+        tone(g, rate, pos, 5.0, 100.0);
+        tone(g, rate, pos, 9.0, 800.0);
         n60_mimo_readback rb = readMimo(g);
         CHECK(rb.faultLatched == 0, "fs %.0f: sliding window faulted before the overload filled a window (reason %u)", rate, rb.faultReason);
-        chunk(1.5, 1000.0);
+        tone(g, rate, pos, 1.5, 800.0);
         rb = readMimo(g);
         CHECK(rb.faultLatched == 1 && rb.faultReason == 2 && rb.faultSource == 1 && rb.held == 1,
               "fs %.0f: a 10 s overload straddling a window boundary must trip: latched %u reason %u", rate, rb.faultLatched, rb.faultReason);
+        n60_graph_retire(g);
+    }
+}
+
+// G29: the same straddling pattern at -6.1 dB never trips, across several window boundaries.
+static void testThermalSlidingWindowPasses() {
+    for (double rate : kRates) {
+        std::vector<float> keep;
+        n60_graph *g = buildSliding(rate, -6.1, keep);
+        uint64_t pos = 0;
+        tone(g, rate, pos, 5.0, 100.0);
+        tone(g, rate, pos, 25.0, 800.0);
+        const n60_mimo_readback rb = readMimo(g);
+        CHECK(rb.faultLatched == 0 && rb.state == 2, "fs %.0f: -6.1 dB across window boundaries must pass: latched %u reason %u state %u",
+              rate, rb.faultLatched, rb.faultReason, rb.state);
+        n60_graph_retire(g);
+    }
+}
+
+// G29: the window restarts when g returns to 0. 6 s of overload, a disarm (the 10 ms fade ends at g = 0), a re-arm, then 9.5 s of
+// overload: the window never holds 10 s of armed time, so no fault; 1.2 s more completes it and the monitor must trip.
+static void testThermalWindowResetsAtZeroGain() {
+    for (double rate : kRates) {
+        std::vector<float> keep;
+        n60_graph *g = buildSliding(rate, -5.9, keep);
+        uint64_t pos = 0;
+        tone(g, rate, pos, 6.0, 800.0);
+        CHECK(post(g, 7, 4, 0.0f) == N60_STATUS_OK, "disarm post");
+        tone(g, rate, pos, 0.5, 800.0);
+        n60_mimo_readback rb = readMimo(g);
+        CHECK(rb.faultLatched == 0 && rb.state == 0, "fs %.0f: disarmed: latched %u state %u", rate, rb.faultLatched, rb.state);
+        CHECK(post(g, 7, 4, 1.0f) == N60_STATUS_OK, "re-arm post");
+        tone(g, rate, pos, 9.5, 800.0);
+        rb = readMimo(g);
+        CHECK(rb.faultLatched == 0, "fs %.0f: the window must restart at g = 0 (reason %u)", rate, rb.faultReason);
+        tone(g, rate, pos, 1.2, 800.0);
+        rb = readMimo(g);
+        CHECK(rb.faultLatched == 1 && rb.faultReason == 2, "fs %.0f: a full 10 s of armed overload must trip: latched %u reason %u", rate,
+              rb.faultLatched, rb.faultReason);
         n60_graph_retire(g);
     }
 }
@@ -509,6 +560,8 @@ int main() {
     testMonitor();
     testThermalBudget();
     testThermalSlidingWindow();
+    testThermalSlidingWindowPasses();
+    testThermalWindowResetsAtZeroGain();
     testRebuildMute();
     testBlockSizeIndependence();
     testNoAllocations();
