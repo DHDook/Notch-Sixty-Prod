@@ -33,7 +33,8 @@ extension FeatureFlag {
     static let all: [FeatureFlag] = [
         .legacyKernel, .ancEngineLease, .adaptiveTonalLive, .earnedCap, .feedForwardLive,
         .noiseSurvey, .conversationUnmasking, .virtualMicrophone, .zones, .headPositionCamera, .overnight,
-        .subAwareAnc, .longFIR, .outputProtection, .headphones, .mimoTreatment, .dynamicsExtras, .roomModel
+        .subAwareAnc, .longFIR, .outputProtection, .headphones, .mimoTreatment, .dynamicsExtras, .roomModel,
+        .parallelRender
     ]
 
     /// E6 S11: the unified graph is the default renderer. Turning this on selects the frozen
@@ -202,6 +203,15 @@ extension FeatureFlag {
         id: "e29.room-model",
         title: "Shared room position model",
         epic: "E29"
+    )
+
+    /// E20 S6: parallel rendering of the non-uniform FIR lanes on up to three extra realtime worker threads in the
+    /// output device's Audio Workgroup. Swift decides the worker count (`ParallelRenderPolicy`); the core never reads the
+    /// flag. Read once at launch. Off: no worker thread exists and the graph renders on the audio thread alone.
+    static let parallelRender = FeatureFlag(
+        id: "e20.parallel-render",
+        title: "Parallel render workers",
+        epic: "E20"
     )
 }
 

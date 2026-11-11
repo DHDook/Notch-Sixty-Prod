@@ -580,6 +580,11 @@ final class CoreAudioBinauralHeadphoneTransportSession {
             AudioDeviceStop(aggregateDeviceID, captureIOProcID)
             isCaptureStarted = false
         }
+        // E20 S6: no callback renders now; the render workers leave the device workgroup and exit.
+        graphReferenceLock.lock()
+        let renderHost = unifiedGraphHost
+        graphReferenceLock.unlock()
+        renderHost?.endParallelRender()
         if let outputIOProcID {
             AudioDeviceDestroyIOProcID(selectedOutput.deviceID, outputIOProcID)
             self.outputIOProcID = nil
@@ -618,10 +623,17 @@ final class CoreAudioBinauralHeadphoneTransportSession {
               aggregateDeviceID != AudioDeviceID(kAudioObjectUnknown) else {
             throw BinauralHeadphoneTransportError.ioProcUnavailable(role: "startup")
         }
-        try CoreAudioSemanticTransportSupport.check(
-            AudioDeviceStart(selectedOutput.deviceID, outputIOProcID),
-            operation: "start Virtual Speakers headphone output"
-        )
+        // E20 S6: the render workers join the output device's IO workgroup before its first callback.
+        unifiedGraphHost?.beginParallelRender(workgroup: AudioWorkgroupWorkerPool.deviceWorkgroup(selectedOutput.deviceID))
+        do {
+            try CoreAudioSemanticTransportSupport.check(
+                AudioDeviceStart(selectedOutput.deviceID, outputIOProcID),
+                operation: "start Virtual Speakers headphone output"
+            )
+        } catch {
+            unifiedGraphHost?.endParallelRender()
+            throw error
+        }
         isOutputStarted = true
         do {
             try CoreAudioSemanticTransportSupport.check(
@@ -632,6 +644,7 @@ final class CoreAudioBinauralHeadphoneTransportSession {
         } catch {
             AudioDeviceStop(selectedOutput.deviceID, outputIOProcID)
             isOutputStarted = false
+            unifiedGraphHost?.endParallelRender()
             throw error
         }
     }

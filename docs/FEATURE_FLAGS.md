@@ -96,7 +96,8 @@ FC phase's per-epic PR (`docs/epics/FC.md`) unless stated.
 | `e7.rate-adapt` | E7 | planned | none | FC (E7) |
 | `e15.follow-output` | E15 | planned | none | FC (E15) |
 | `e17.export`, `e17.dither` | E17 | planned | none | FC (E17) |
-| `e20.parallel-render`, `e20.multirate` | E20 | planned (E20 S6 to S8) | none | FC (E20) |
+| `e20.parallel-render` | E20 | dark (S6: worker pool in the output workgroup) | none | FC (E20) |
+| `e20.multirate` | E20 | planned (E20 S7, S8) | none | FC (E20) |
 | `e21.core-designers` | E21 | planned | none | FC (E21) |
 | `e8.routing-matrix`, `e8.lab-routed-ways`, `e10.mixed-phase-correction`, `e11.measurement-suite`, `e12.guided-setup`, `e13.byo-import`, `e25.outputs-and-speakers`, `e27.eq-safety` | E8, E10, E11, E12, E13, E25, E27 | removed (before this policy, at epic ship) | n/a | done |
 
@@ -121,7 +122,7 @@ gap may then be closed as "moved to E22" once E22 holds a matching unchecked ite
 | E13 | `e13.headphones` | S3, S4, S7 reachable behind the flag; S5 not built | S5; software gaps G7, G9, G10, G12; bench gaps G2 to G6, G8, G11 move to E22; S8 reworded |
 | E15, E17, E21 | planned flags | Nothing built | Whole epics; ship slices reworded |
 | E19 | `e19.mimo-treatment` | Designer only; S5 PR open; stage not published (S6 to S11 unbuilt) | Not reachable; 16 scoped gaps; live treatment keeps its arm; S11 reworded |
-| E20 | `e20.parallel-render`, `e20.multirate` (planned) | S5 core built, no host threads, no flag in code | S6 to S10; S10 and G1 reworded (graduate before the bench, remove in FC) |
+| E20 | `e20.parallel-render`, `e20.multirate` (planned) | S6: flag in code, worker pool and policy wired in all three transports (dark); core parallel API from S5 | S6 to S10; S10 and G1 reworded (graduate before the bench, remove in FC) |
 | E26 | `e26.sub-aware-anc` | On by default, 36 `[~]` items | G13, G14, G33, G35, G39, G40 software gaps; bench gaps G10, G11, G19, G23, G24, G28, G30 move to E22; G18 is post-v1 |
 | E28 | `e28.dynamics-extras` | S7a to S7c merged, S7d part 1 merged, part 2 PR #475 open; reachable on the Dynamics page | S7d part 2 gaps (G21, G23, G26, G33 to G35, G37, G39, G40); S8 reworded (owner listen moves to E22) |
 | E29 | `e29.room-model` | S1 only; no production reader | S2 to S8 |
@@ -152,3 +153,4 @@ E22; the software part graduates.
 | `e19.mimo-treatment` | E19 | Off by default. MIMO room treatment (S3 so far: the Swift designer calling the portable design core and checking the realised filters; nothing in the app calls it yet). Off: today's code paths, UI and routing refusal. On: the new designer and, in later slices, the stage, safety layer, verifier and controls; live output still needs a permit and the arm |
 | `e28.dynamics-extras` | E28 | Off by default. Compressor mix, link amount, peak/RMS detector and lookahead (S7a: config fields and translator; the Dynamics page controls arrive in S7d). On: a non-default extra widens the compressor stage to the 15-value block (graph ABI v34) and lookahead frames add to the graph latency. Off: the 10-value block, bit-identical to before |
 | `e29.room-model` | E29 | Off by default. The shared room position model: S1 is a read-only index over room-correction positions, the measurement library, combined ANC path records and the head survey (no UI yet); the seat map, music-at-seat and consumer adoption follow. Off: every feature reads its own records exactly as today |
+| `e20.parallel-render` | E20 | Off by default. Up to three extra realtime worker threads in the output device's Audio Workgroup render the non-uniform FIR lanes in parallel (needs `e9.long-fir`); Swift picks the worker count from the graph's estimated load. Read once at launch. Off: no worker thread exists, the audio thread renders alone |
