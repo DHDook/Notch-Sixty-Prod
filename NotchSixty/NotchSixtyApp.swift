@@ -176,6 +176,9 @@ final class ProductController: ObservableObject {
             survey.attach(to: ambientCompensation)
             activeQuietZone.attachNoiseSurvey(survey)
         }
+        if FeatureFlags().isEnabled(.virtualMicrophone) {
+            activeQuietZone.attachVirtualMicrophone(QuietZoneVirtualMicSurveyController())
+        }
         if FeatureFlags().isEnabled(.overnight) {
             activeQuietZone.attachOvernightPower(OvernightPowerAssertion())
         }
