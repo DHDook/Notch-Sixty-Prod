@@ -222,6 +222,8 @@ final class FeatureFlags: ObservableObject {
     }
 
     nonisolated static let launchArgument = "-NotchSixtyFeatures"
+    /// Debug builds only: `NOTCHSIXTY_GRADUATED_FLAGS_OFF=1` behaves like `-NotchSixtyFeatures -<id>` for every graduated flag.
+    nonisolated static let graduatedOffEnvironmentKey = "NOTCHSIXTY_GRADUATED_FLAGS_OFF"
 
     nonisolated static var buildPolicy: OverridePolicy {
         #if DEBUG
@@ -241,14 +243,21 @@ final class FeatureFlags: ObservableObject {
         known: [FeatureFlag] = FeatureFlag.all,
         defaults: UserDefaults = .standard,
         policy: OverridePolicy = FeatureFlags.buildPolicy,
-        arguments: [String] = ProcessInfo.processInfo.arguments
+        arguments: [String] = ProcessInfo.processInfo.arguments,
+        environment: [String: String] = ProcessInfo.processInfo.environment
     ) {
         self.known = known
         self.defaults = defaults
         self.policy = policy
         let parsed = Self.launchSwitches(in: arguments)
         self.launchEnabledIDs = parsed.on
-        self.launchDisabledIDs = parsed.off
+        var off = parsed.off
+        // Flags-off CI run (FC1): the test host cannot take launch arguments, so debug builds also accept this
+        // environment variable to switch every graduated flag off. Release builds ignore it.
+        if policy == .storedOverrides, environment[Self.graduatedOffEnvironmentKey] == "1" {
+            off.formUnion(known.filter(\.graduated).map(\.id))
+        }
+        self.launchDisabledIDs = off
     }
 
     var canEditOverrides: Bool { policy == .storedOverrides }

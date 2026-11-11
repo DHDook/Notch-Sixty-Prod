@@ -467,6 +467,7 @@ Owner decision, 18 Oct 2026: there is no bench access for now, so every bench ch
 - [ ] Run every E4 bench list in `docs/epics/E4.md` "Bench checks" (S4, S6, S7, S18b, S22a, S22b1 to S22b3, S25 arming, S26b, S30) after the graduation of the E4 flags (11 Nov 2026), including the 384 kHz feed-forward bridge shadow timing
 - [ ] Run E4 S8 (PR97 timing calibration and PR99 verification) and record results against `docs/ANC_QUALIFICATION.md`
 - [ ] Run E4 S11 (owner, 1 Nov 2026: moved here from the E4 execution order): repeat S8 on the unified E6 graph, then fill the placeholder reduction table in `docs/ANC_QUALIFICATION.md` §4.1 from the S31 reviewer-kit noise files
+- [ ] E4 S26a: ear-microphone check of the virtual-microphone design with a real head at the eight rates (E4 S26a wiring)
 - [ ] Run the remaining bench checks at every rate from 44.1 to 384 kHz
 - [ ] E6 G19: listening for level riding on speech and music at the eight rates (LOUDNESS stage, E6 S12c)
 - [ ] E6 G43: binaural convolution cost per rate (16 channels, 8192 taps, 24 head orientations, 44.1 to 384 kHz) on the build machine (E6 S12g4)
@@ -484,7 +485,7 @@ Owner decision, 18 Oct 2026: there is no bench access for now, so every bench ch
 Plan: `docs/epics/FC.md`. Epics graduate their flag at the end (default on, stays in `FeatureFlag.all`; AGENTS.md
 section 11); this phase removes the flags after the E22 bench, as small per-epic PRs.
 
-- [ ] FC1 `fc/flags-off-ci`: nightly `macos-full` runs the suite with graduated flags off as well as on (before the first graduation)
+- [x] FC1 `fc/flags-off-ci`: nightly `macos-full` runs the suite with graduated flags off as well as on (before the first graduation)
 - [ ] Per-epic removal PRs, in order: E26, E28, E9, E13, E4, E19, E7, E15, E17, E20, E21, E29 (`e6.legacy-kernel` goes with E23)
 - [ ] Never remove a flag with an open E22 bench item against its feature; live ANC and MIMO keep `LiveTreatmentArm`
 

@@ -21,7 +21,7 @@ final class FeatureFlagsTests: XCTestCase {
         _ policy: FeatureFlags.OverridePolicy,
         arguments: [String] = []
     ) -> FeatureFlags {
-        FeatureFlags(known: [draft, onByDefault], defaults: defaults, policy: policy, arguments: arguments)
+        FeatureFlags(known: [draft, onByDefault], defaults: defaults, policy: policy, arguments: arguments, environment: [:])
     }
 
     func testFlagsUseTheirCompiledDefaultsWithoutOverrides() {
@@ -36,7 +36,7 @@ final class FeatureFlagsTests: XCTestCase {
     /// ignored, no launch argument), even with a stored "off" override, and the live ANC flags stay off.
     func testSubAwareAncResolvesOnInAReleaseConfiguration() {
         defaults.set(false, forKey: FeatureFlags.key(for: .subAwareAnc))
-        let release = FeatureFlags(known: FeatureFlag.all, defaults: defaults, policy: .launchArgumentOnly, arguments: [])
+        let release = FeatureFlags(known: FeatureFlag.all, defaults: defaults, policy: .launchArgumentOnly, arguments: [], environment: [:])
         XCTAssertTrue(release.isEnabled(.subAwareAnc))
         XCTAssertFalse(release.isEnabled(.mimoTreatment))
     }
@@ -82,7 +82,7 @@ final class FeatureFlagsTests: XCTestCase {
     private let graduatedFlag = FeatureFlag(id: "grad", title: "Graduated", epic: "E5", graduated: true)
 
     private func gradStore(_ policy: FeatureFlags.OverridePolicy, arguments: [String] = []) -> FeatureFlags {
-        FeatureFlags(known: [draft, graduatedFlag], defaults: defaults, policy: policy, arguments: arguments)
+        FeatureFlags(known: [draft, graduatedFlag], defaults: defaults, policy: policy, arguments: arguments, environment: [:])
     }
 
     func testGraduatedFlagDefaultsOnInReleaseAndDebug() {
@@ -100,6 +100,32 @@ final class FeatureFlagsTests: XCTestCase {
         let on = gradStore(.launchArgumentOnly, arguments: ["App", "-NotchSixtyFeatures", "unifiedGraph=on,-grad"])
         XCTAssertTrue(on.isEnabled(draft))
         XCTAssertFalse(on.isEnabled(graduatedFlag))
+    }
+
+    func testReleaseStyleResolvesEveryGraduatedFlagOnAndLaunchArgumentTurnsEachOff() {
+        let synthetic = FeatureFlag(id: "synthetic.grad", title: "Synthetic", epic: "FC", graduated: true)
+        let known = FeatureFlag.all + [synthetic]
+        let graduated = known.filter(\.graduated)
+        let release = FeatureFlags(known: known, defaults: defaults, policy: .launchArgumentOnly, arguments: [], environment: [:])
+        for flag in graduated { XCTAssertTrue(release.isEnabled(flag), flag.id) }
+        for flag in graduated {
+            let off = FeatureFlags(
+                known: known, defaults: defaults, policy: .launchArgumentOnly,
+                arguments: ["App", "-NotchSixtyFeatures", "-\(flag.id)"], environment: [:])
+            XCTAssertFalse(off.isEnabled(flag), flag.id)
+        }
+    }
+
+    func testGraduatedOffEnvironmentSwitchesEveryGraduatedFlagOffInDebugOnly() {
+        let env = [FeatureFlags.graduatedOffEnvironmentKey: "1"]
+        let known = [draft, graduatedFlag]
+        let debug = FeatureFlags(known: known, defaults: defaults, policy: .storedOverrides, arguments: [], environment: env)
+        XCTAssertFalse(debug.isEnabled(graduatedFlag))
+        XCTAssertFalse(debug.isEnabled(draft), "a dark flag stays off")
+        let release = FeatureFlags(known: known, defaults: defaults, policy: .launchArgumentOnly, arguments: [], environment: env)
+        XCTAssertTrue(release.isEnabled(graduatedFlag), "release builds ignore the environment variable")
+        let other = FeatureFlags(known: known, defaults: defaults, policy: .storedOverrides, arguments: [], environment: [:])
+        XCTAssertTrue(other.isEnabled(graduatedFlag))
     }
 
     func testExplicitOffBeatsOnAndStoredOverrides() {
@@ -157,7 +183,7 @@ final class FeatureFlagsTests: XCTestCase {
     func testGraphIsDefaultAndLegacyKernelFlagSelectsFallback() {
         XCTAssertTrue(FeatureFlag.all.contains(.legacyKernel))
         XCTAssertEqual(FeatureFlag.legacyKernel.id, "e6.legacy-kernel")
-        let plain = FeatureFlags(known: FeatureFlag.all, defaults: defaults, policy: .launchArgumentOnly, arguments: [])
+        let plain = FeatureFlags(known: FeatureFlag.all, defaults: defaults, policy: .launchArgumentOnly, arguments: [], environment: [:])
         XCTAssertFalse(plain.isEnabled(.legacyKernel), "graph renders by default")
         let fallback = FeatureFlags(
             known: FeatureFlag.all, defaults: defaults, policy: .launchArgumentOnly,

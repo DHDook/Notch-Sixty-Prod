@@ -37,6 +37,9 @@ enum QuietZoneFlagWiring {
             survey.attach(to: ambientCompensation)
             activeQuietZone.attachNoiseSurvey(survey)
         }
+        if flags.isEnabled(.virtualMicrophone) {
+            activeQuietZone.attachVirtualMicrophone(QuietZoneVirtualMicSurveyController())
+        }
         if flags.isEnabled(.overnight) {
             activeQuietZone.attachOvernightPower(OvernightPowerAssertion())
         }

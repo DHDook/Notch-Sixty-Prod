@@ -37,6 +37,9 @@ Hard rules:
 Off wins if the same id appears both ways. The launch argument beats a stored override (debug builds) and the
 compiled default. Unknown ids and malformed entries are ignored. Example: `-NotchSixtyFeatures e4.zones,-e28.dynamics-extras`.
 
+Debug builds also read `NOTCHSIXTY_GRADUATED_FLAGS_OFF=1`, which switches every graduated flag off. Nightly `macos-full` sets it
+(as `TEST_RUNNER_NOTCHSIXTY_GRADUATED_FLAGS_OFF`) for a second XCTest run. Release builds ignore it.
+
 ## Adding a flag
 
 1. Add an entry to `FeatureFlag.all` in `NotchSixty/State/FeatureFlags.swift`, with a stable `id`,

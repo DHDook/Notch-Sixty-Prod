@@ -1237,6 +1237,11 @@ struct ProductionActiveAcousticsWorkspace: View {
             if let noiseSurvey = quietZone.noiseSurvey {
                 ProductionNoiseSurveyCard(survey: noiseSurvey)
             }
+            if let virtualMic = quietZone.virtualMic {
+                ProductionVirtualMicrophoneCard(
+                    survey: virtualMic,
+                    quietZoneRunning: quietZone.configuration.enabled && quietZone.status != .fault)
+            }
             spatialQuietZoneCard
             ProductionFeedForwardReadinessCard(quietZone: quietZone)
             ProductionSubAwareQuietZoneCard(quietZone: quietZone, survey: feedForwardSurvey)
