@@ -69,23 +69,23 @@ depends on a graduated flag.
 ## Flag registry (11 Nov 2026)
 
 Status: dark (default off), graduated (default on, stays until cleanup), removed (gone from `FeatureFlag.all`),
-planned (in an epic plan, not yet in code). Nothing is graduated yet; `e26.sub-aware-anc` is already on by default
+planned (in an epic plan, not yet in code). The seven E4 flags with a production reader graduated on 11 Nov 2026; `e26.sub-aware-anc` is already on by default
 through `defaultEnabled` (owner decision, E26 S7) and converts to `graduated: true` in E26 S7. Cleanup owner is the
 FC phase's per-epic PR (`docs/epics/FC.md`) unless stated.
 
 | flag | epic | status | graduated-since | cleanup owner |
 | --- | --- | --- | --- | --- |
 | `e6.legacy-kernel` | E6 | dark (inverse escape hatch; never graduates) | n/a | E23 |
-| `e4.engine-lease` | E4 | dark | none | FC (E4) |
-| `e4.adaptive-tonal-live` | E4 | dark | none | FC (E4) |
-| `e4.earned-cap` | E4 | dark | none | FC (E4) |
-| `e4.feedforward-live` | E4 | dark | none | FC (E4) |
-| `e4.noise-survey` | E4 | dark | none | FC (E4) |
-| `e4.conversation-unmasking` | E4 | dark | none | FC (E4) |
+| `e4.engine-lease` | E4 | graduated | 11 Nov 2026 (S32) | FC (E4) |
+| `e4.adaptive-tonal-live` | E4 | graduated | 11 Nov 2026 (S32) | FC (E4) |
+| `e4.earned-cap` | E4 | graduated | 11 Nov 2026 (S32) | FC (E4) |
+| `e4.feedforward-live` | E4 | graduated | 11 Nov 2026 (S32) | FC (E4) |
+| `e4.noise-survey` | E4 | graduated | 11 Nov 2026 (S32) | FC (E4) |
+| `e4.conversation-unmasking` | E4 | graduated | 11 Nov 2026 (S32) | FC (E4) |
 | `e4.virtual-microphone` | E4 | dark, no production reader | none | FC (E4) |
 | `e4.head-position-camera` | E4 | dark, no production reader | none | FC (E4) |
 | `e4.zones` | E4 | dark, no production reader | none | FC (E4) |
-| `e4.overnight` | E4 | dark | none | FC (E4) |
+| `e4.overnight` | E4 | graduated | 11 Nov 2026 (S32) | FC (E4) |
 | `e26.sub-aware-anc` | E26 | on by default (pre-policy `defaultEnabled`) | 6 Nov 2026 (as default) | FC (E26) |
 | `e9.long-fir` | E9 | dark | none | FC (E9) |
 | `e9.output-protection` | E9 | dark | none | FC (E9) |
@@ -112,9 +112,9 @@ gap may then be closed as "moved to E22" once E22 holds a matching unchecked ite
 
 | Epic | Flag | State | Blockers to graduation |
 | --- | --- | --- | --- |
-| E4 | `e4.engine-lease`, `e4.adaptive-tonal-live`, `e4.earned-cap`, `e4.feedforward-live` | Built and reachable (Quiet Zone card, behind the arm) | E4 G17 closed (owner YES, 11 Nov 2026), G8 (feed-forward bridge refuses above 192 kHz), S30d G12 to G14 (PR #476 open), then the new slice S32 |
-| E4 | `e4.noise-survey`, `e4.conversation-unmasking`, `e4.overnight` | Built and reachable | S30d G12 to G14 (unmasking), then S32 |
-| E4 | `e4.virtual-microphone`, `e4.head-position-camera`, `e4.zones` | Offline maths only; no production reader, so still `[~]` built dark | E4 G16: wiring has no owning slice until S32 |
+| E4 | `e4.engine-lease`, `e4.adaptive-tonal-live`, `e4.earned-cap`, `e4.feedforward-live` | Graduated 11 Nov 2026 (S32): Turn On available, never armed | none |
+| E4 | `e4.noise-survey`, `e4.conversation-unmasking`, `e4.overnight` | Graduated 11 Nov 2026 (S32) | none |
+| E4 | `e4.virtual-microphone`, `e4.head-position-camera`, `e4.zones` | Offline maths only; no production reader, so still `[~]` built dark | E4 G16 (open-question: wire, or drop from v1) |
 | E6 | `e6.legacy-kernel` | Software complete bar S12h part 3; the inverse escape hatch | Never graduates; E23 deletes it; scoped gaps owned by E22 and E23 |
 | E7 | `e7.rate-adapt` (planned) | Only S1 built; flag not yet in code | S2 to S5; S5 reworded to graduate |
 | E9 | `e9.long-fir`, `e9.output-protection` | Reachable (Outputs UI, headroom assistant); 11 items `[~]` (S2d G9, S5 hard-limit and flag-off tests, S7b) | Close `[~]` items; G18, G25, G26 are bench (move to E22); no ship slice existed, new S8 |
