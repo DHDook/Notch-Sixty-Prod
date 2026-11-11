@@ -285,11 +285,12 @@ int main() {
         constexpr uint32_t N = 512;
         float comp[16] = {-30, 4, 6, 1, 100, 3, 0, 1, 80, 1, 50, 0, 1, 80, 240, 0};
         float expa[13] = {-50, 2, -30, 2, 80, 1, 50, 6, 1, 60, 80, 50, 0};
-        float mb[43] = {1, 120, 2500, 0, 0, -30, -26, -28, 4, 3, 6, 10, 5, 2, 120, 80, 60, 6, 4, 0, 60, 0, 120, 0, 1, 0, 1,
-                        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 80, 240};
-        n60_stage_desc st[3] = {stage(N60_STAGE_COMPRESSOR, 1, N60_LANE_ALL, comp, 16),
-                                stage(N60_STAGE_EXPANDER, 2, N60_LANE_ALL, expa, 13),
-                                stage(N60_STAGE_MULTIBAND, 3, 0, mb, 43, 0, 1)};
+        float mb[43] = {1, 120, 2500, 0, 0, -30, -30, -30, 4, 4, 4, 5, 5, 5, 100, 100, 100, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 50, 240};
+        // Stage order is the core's rank order: the multiband sits before the compressor and expander.
+        n60_stage_desc st[3] = {stage(N60_STAGE_MULTIBAND, 3, 0, mb, 43, 0, 1),
+                                stage(N60_STAGE_COMPRESSOR, 1, N60_LANE_ALL, comp, 16),
+                                stage(N60_STAGE_EXPANDER, 2, N60_LANE_ALL, expa, 13)};
         n60_graph_desc d{};
         d.structSize = sizeof d;
         d.abiVersion = N60_GRAPH_ABI_VERSION;
@@ -299,7 +300,7 @@ int main() {
         d.stages = st;
         d.stageCount = 3;
         n60_graph *g = nullptr;
-        CHECK(n60_graph_build(&d, &g) == N60_STATUS_OK, "build dynamics extras");
+        { const n60_status bs = n60_graph_build(&d, &g); CHECK(bs == N60_STATUS_OK, "build dynamics extras (status %d)", static_cast<int>(bs)); }
         float l[N], r[N], ol[N], orr[N];
         for (uint32_t i = 0; i < N; i++) { l[i] = 0.5f * std::sin(0.05f * i); r[i] = 0.5f * std::cos(0.07f * i); }
         const float *in[2] = {l, r};
@@ -314,10 +315,10 @@ int main() {
                                         {1, 15, static_cast<float>(round % 3), 0},
                                         {2, 12, static_cast<float>((round / 2) % 3), 0},
                                         {2, 7, static_cast<float>(round % 25), 0},
-                                        {3, 32 + (round % 3), static_cast<float>((round / 3) & 1), 0},
-                                        {3, 35 + ((round + 1) % 3), static_cast<float>((round / 4) % 3), 0},
-                                        {3, 29 + (round % 3), static_cast<float>((round / 5) & 1), 0},
-                                        {3, 38 + (round % 3), static_cast<float>(round & 1), 0},
+                                        {3, static_cast<uint32_t>(32 + (round % 3)), static_cast<float>((round / 3) & 1), 0},
+                                        {3, static_cast<uint32_t>(35 + ((round + 1) % 3)), static_cast<float>((round / 4) % 3), 0},
+                                        {3, static_cast<uint32_t>(29 + (round % 3)), static_cast<float>((round / 5) & 1), 0},
+                                        {3, static_cast<uint32_t>(38 + (round % 3)), static_cast<float>(round & 1), 0},
                                         {3, 41, 5.0f + 6.0f * static_cast<float>(round % 30), 0}};
             CHECK(n60_graph_post_params(g, rec, 12) == N60_STATUS_OK, "post dynamics extras");
             allocs = 0;
