@@ -32,7 +32,7 @@ PRs rather than one giant epic. Flags are removed only when the bench has no ope
 
 ## Gaps
 
-- G1 [closed, FC1 PR, 12 Nov 2026: `macos-full` runs the suite a second time with `TEST_RUNNER_NOTCHSIXTY_GRADUATED_FLAGS_OFF=1`, a debug-only env var that `FeatureFlags` maps to every graduated flag off] The nightly `macos-full` run does not yet run the suite with graduated flags off (found in the flag graduation policy PR, 11 Nov 2026; owner slice: FC1, which must land before the first epic graduates a flag)
+- G1 [closed, FC1 PR, 11 Nov 2026: `macos-full` runs the suite a second time with `TEST_RUNNER_NOTCHSIXTY_GRADUATED_FLAGS_OFF=1`, a debug-only env var that `FeatureFlags` maps to every graduated flag off] The nightly `macos-full` run does not yet run the suite with graduated flags off (found in the flag graduation policy PR, 11 Nov 2026; owner slice: FC1, which must land before the first epic graduates a flag)
 
 ## Log
 
