@@ -466,6 +466,10 @@ struct ProductionActiveAcousticsWorkspace: View {
                 }
             }
 
+            if ambient.playbackAdaptationMode == .conversationFocus, let card = ambient.unmaskingCard {
+                unmaskingCardView(card)
+            }
+
             if let analysis = ambient.latestAnalysis {
                 LazyVGrid(
                     columns: [
@@ -1903,6 +1907,48 @@ struct ProductionActiveAcousticsWorkspace: View {
         .padding(18)
         .frame(maxWidth: .infinity, alignment: .leading)
         .glassEffect(.regular, in: .rect(cornerRadius: 18))
+    }
+
+    /// E4 S30c: the Conversation Focus card (`e4.conversation-unmasking`): speech detected, the realised cut curve,
+    /// estimated intelligibility before and after, and why per-band unmasking fell back.
+    private func unmaskingCardView(_ card: ConversationUnmaskingCardModel) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Conversation unmasking")
+                .font(.headline)
+            HStack(spacing: 20) {
+                LabeledContent("Speech") {
+                    Text(card.speechDetected ? "Detected (\(card.speechConfidencePercent)%)" : "Not detected")
+                }
+                if let before = card.siiBefore, let after = card.siiAfter {
+                    LabeledContent("Intelligibility (SII)") {
+                        Text(String(format: "%.2f to %.2f", before, after)).monospacedDigit()
+                    }
+                }
+                LabeledContent("Largest cut") {
+                    Text(String(format: "%.1f dB in %d bands", card.maximumCutDB, card.cutBandCount)).monospacedDigit()
+                }
+            }
+            .font(.subheadline)
+            if !card.curve.isEmpty {
+                AmbientCompensationResponseCurveView(
+                    points: card.curve,
+                    minimumGainDB: card.curve.map(\.gainDB).min() ?? 0,
+                    maximumGainDB: 0
+                )
+                .frame(height: 140)
+            }
+            if let reason = card.fallbackReason {
+                Label(reason, systemImage: "info.circle")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+            Text(ConversationUnmaskingCardModel.estimateNote + " " + ConversationUnmaskingCardModel.microphoneNote)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .glassEffect(.regular, in: .rect(cornerRadius: 14))
     }
 
     private func metricCard(
