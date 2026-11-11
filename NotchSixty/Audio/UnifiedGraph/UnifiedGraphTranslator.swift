@@ -61,7 +61,9 @@ enum UnifiedGraphTranslator {
                 let section = UnifiedGraphPEQSection(
                     type: Int(band.type), frequencyHz: band.frequencyHz,
                     gainDB: band.gainDB, q: band.q,
-                    coefficients: band.type == 9 ? [band.b0, band.b1, band.b2, band.a1, band.a2] : nil
+                    coefficients: band.type == 9 ? [band.b0, band.b1, band.b2, band.a1, band.a2] : nil,
+                    linkwitzDeviation: band.type == 9 && band.hasDeviation
+                        ? withUnsafeBytes(of: band.deviation) { Array($0.bindMemory(to: Double.self)) } : nil
                 )
                 if band.channelMask & UInt8(N60_EQ_CHANNEL_LEFT) != 0 { left.append(section) }
                 if band.channelMask & UInt8(N60_EQ_CHANNEL_RIGHT) != 0 { right.append(section) }

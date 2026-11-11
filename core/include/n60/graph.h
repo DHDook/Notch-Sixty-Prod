@@ -535,6 +535,11 @@ typedef int (*n60_external_process_fn)(void *context, const float *const *in, fl
  * the two halves of one prepared biquad (the stereo kernel's Linkwitz transform): a type 9 section is the numerator
  * (b0, b1, b2 in the Hz, dB and Q slots) and the section after it, type 10, is the denominator (a1, a2, unused). The
  * cascade is the biquad. The denominator must be strictly stable (|a2| < 1, |a1| < 1 + a2) or the snapshot is refused.
+ * E23 S1b: a type 10 fourth slot of 1 selects deviation form for low corners at high rates, where float coefficients
+ * quantise the poles near z = 1. With y = 1 - 1/z the numerator is n0 + n1 y + n2 y^2 and the denominator is
+ * d0 + d1 y + (1 - d0 - d1) y^2; the type 9 slots are (n0, n1, n2) and the type 10 slots (d0, d1, 1), and the core forms
+ * b0 = n0 + n1 + n2, b1 = -n1 - 2 n2, b2 = n2, a1 = d1 + 2 d0 - 2, a2 = 1 - d0 - d1 in double. A zero fourth slot is the
+ * original form; this adds no ABI version (a previously ignored slot). The form of a pair must not change in a live edit.
  * Types 8 to 10 add no latency, reset like the other types and, for 9 and 10, ignore the sample rate: the prepared
  * coefficients belong to the rate they were designed at, so the caller re-prepares them on a rate change. A caller needing more than N60_PEQ_MAX_SECTIONS sections chains several PEQ stages. */
 #define N60_PEQ_MAX_SECTIONS 16u

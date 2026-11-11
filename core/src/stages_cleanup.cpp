@@ -32,6 +32,8 @@
 //    5 ms bypass mix at 0, as the kernel does. State is not carried across a rebuild (ledger).
 #include "stages_cleanup.hpp"
 
+#include "simd/simd.hpp"
+
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -212,17 +214,33 @@ void designBank(NotchBank &b, double rate, const float *p) {
     }
 }
 
-float runNotches(const Nc *c, NState *st, uint32_t n, float x) {
-    double out = double(x);
+// One biquad section in transposed direct form II. Every multiply-add is a fused fma, in the scalar and the L/R pair
+// forms alike, so the per-sample path and the whole-buffer path agree bit for bit (E23 S1b, G37).
+
+// The same cascade for the left and right channels at once, one f64x2 per state variable. The channels are independent,
+// so each lane's arithmetic is exactly the scalar fma cascade on that channel.
+void runNotchesPair(const Nc *c, NState *sl, NState *sr, uint32_t n, float xl, float xr, float &outL, float &outR) {
+    using namespace n60::simd;
+    f64x2 out = pair(double(xl), double(xr));
     for (uint32_t i = 0; i < n; ++i) {
         const Nc k = c[i];
-        const double next = k.b0 * out + st[i].z1;
-        st[i].z1 = k.b1 * out - k.a1 * next + st[i].z2;
-        st[i].z2 = k.b2 * out - k.a2 * next;
+        const f64x2 z1 = pair(sl[i].z1, sr[i].z1);
+        const f64x2 z2 = pair(sl[i].z2, sr[i].z2);
+        const f64x2 next = fma(splat2(k.b0), out, z1);
+        const f64x2 nz1 = fma(splat2(-k.a1), next, fma(splat2(k.b1), out, z2));
+        const f64x2 nz2 = fma(splat2(-k.a2), next, mul(splat2(k.b2), out));
+        sl[i].z1 = lane(nz1, 0); sr[i].z1 = lane(nz1, 1);
+        sl[i].z2 = lane(nz2, 0); sr[i].z2 = lane(nz2, 1);
         out = next;
     }
-    return static_cast<float>(out);
+    outL = static_cast<float>(lane(out, 0));
+    outR = static_cast<float>(lane(out, 1));
 }
+
+// The kernel's DC blocker step: y = x - x1 + p y1 (fused), and the 5 ms bypass mix applied in float.
+double dcStep(double pole, double dry, double prevIn, double prevOut) { return std::fma(pole, prevOut, dry - prevIn); }
+float dcMixed(float dry, double dc, float mix) { return dry + static_cast<float>((dc - double(dry)) * double(mix)); }
+float wetMixed(float dry, float wet, float mix) { return dry + (wet - dry) * mix; }
 
 void resetDetectorWindow(CleanShared &S) {
     S.detCount = 0;
@@ -337,6 +355,12 @@ void promotePending(CleanShared &S) {
     S.transRemaining = 0;
 }
 
+bool sameBanks(const NotchBank &a, const NotchBank &b) {
+    bool same = a.fundamental == b.fundamental && a.q == b.q && a.count == b.count;
+    for (uint32_t i = 0; same && i < kMaxHarm; ++i) same = a.depths[i] == b.depths[i];
+    return same;
+}
+
 void scheduleRetune(CleanShared &S) {
     if (!S.notchInit) {
         S.cur = S.want;
@@ -347,9 +371,7 @@ void scheduleRetune(CleanShared &S) {
     }
     if (S.transRemaining > 0) promotePending(S);
     const NotchBank &w = S.want;
-    bool same = S.cur.fundamental == w.fundamental && S.cur.q == w.q && S.cur.count == w.count;
-    for (uint32_t i = 0; same && i < kMaxHarm; ++i) same = S.cur.depths[i] == w.depths[i];
-    if (same) return;
+    if (sameBanks(S.cur, w)) return;
     S.pend = w;
     std::memcpy(S.pendL, S.curL, sizeof S.pendL);
     std::memcpy(S.pendR, S.curR, sizeof S.pendR);
@@ -381,6 +403,65 @@ void activatePre(CleanShared &S) {
     std::memset(S.pendR, 0, sizeof S.pendR);
     S.notchInit = 0;
     S.preParked = 0;
+}
+
+// E23 S1b (G37): the whole-buffer pass. When every enabled section has finished its 5 ms bypass mix (mix exactly 1), no
+// notch retune is running and every sample is finite, the block runs one section at a time over the whole buffer instead
+// of one frame at a time through every section, with the left and right channels in one f64x2. The arithmetic is the
+// per-sample path's (shared helpers, fused multiply-adds), so the two paths agree bit for bit and a block that is not
+// settled simply takes the per-sample loop. Returns false, having changed nothing, when the block is not eligible.
+bool runCleanupSettled(CleanShared &S, bool dcOn, bool infraOn, bool mainsOn, bool detOn, float *L, float *R, uint32_t frames) {
+    const bool dcRun = dcOn && !S.dcParked && S.dcMix == 1.0f;
+    const bool infraRun = infraOn && !S.infraParked && S.infraMix == 1.0f;
+    const bool mainsRun = mainsOn && !S.mainsParked && S.mainsMix == 1.0f && S.notchInit != 0 && S.transRemaining == 0 &&
+                          sameBanks(S.cur, S.want);
+    if ((dcOn && !dcRun) || (infraOn && !infraRun) || (mainsOn && !mainsRun)) return false;
+    // A section that is off must already be parked (its mix is settled at 0); the detector's park/unpark is a frame-0
+    // event the per-sample path handles.
+    if ((!dcOn && !S.dcParked) || (!infraOn && !S.infraParked) || (!mainsOn && !S.mainsParked)) return false;
+    if ((dcOn || infraOn || mainsOn) && S.preParked) return false;
+    if (!(dcOn || infraOn || mainsOn) && !S.preParked) return false;
+    for (uint32_t i = 0; i < frames; ++i) {
+        if (!std::isfinite(L[i]) || !std::isfinite(R[i])) return false;
+    }
+    if (dcRun) {
+        for (uint32_t i = 0; i < frames; ++i) {
+            const float dryL = L[i];
+            const float dryR = R[i];
+            const double dcL = dcStep(S.dcPole, double(dryL), S.dcPrevInL, S.dcPrevOutL);
+            const double dcR = dcStep(S.dcPole, double(dryR), S.dcPrevInR, S.dcPrevOutR);
+            S.dcPrevInL = double(dryL);
+            S.dcPrevInR = double(dryR);
+            S.dcPrevOutL = dcL;
+            S.dcPrevOutR = dcR;
+            L[i] = dcMixed(dryL, dcL, 1.0f);
+            R[i] = dcMixed(dryR, dcR, 1.0f);
+        }
+    }
+    if (infraRun) {
+        for (uint32_t i = 0; i < frames; ++i) {
+            const float dryL = L[i];
+            const float dryR = R[i];
+            float hpL, hpR;
+            runNotchesPair(S.infra, S.infraL, S.infraR, S.infraSections, dryL, dryR, hpL, hpR);
+            L[i] = wetMixed(dryL, hpL, 1.0f);
+            R[i] = wetMixed(dryR, hpR, 1.0f);
+        }
+    }
+    if (detOn || !S.detParked) {
+        for (uint32_t i = 0; i < frames; ++i) detectorFrame(S, detOn, L[i], R[i]);
+    }
+    if (mainsRun) {
+        for (uint32_t i = 0; i < frames; ++i) {
+            const float dryL = L[i];
+            const float dryR = R[i];
+            float nL, nR;
+            runNotchesPair(S.cur.coef, S.curL, S.curR, S.cur.count, dryL, dryR, nL, nR);
+            L[i] = wetMixed(dryL, nL, 1.0f);
+            R[i] = wetMixed(dryR, nR, 1.0f);
+        }
+    }
+    return true;
 }
 
 }  // namespace
@@ -507,6 +588,7 @@ void runCleanup(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames
     float *L = lanes[r.laneA];
     float *R = lanes[r.laneB];
     const float bypass = S.bypassCoef;
+    if (runCleanupSettled(S, dcOn, infraOn, mainsOn, detOn, L, R, frames)) return;
     for (uint32_t i = 0; i < frames; ++i) {
         float left = L[i];
         float right = R[i];
@@ -543,8 +625,8 @@ void runCleanup(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames
         if (!S.dcParked) {
             const float dryL = left;
             const float dryR = right;
-            const double dcL = double(dryL) - S.dcPrevInL + S.dcPole * S.dcPrevOutL;
-            const double dcR = double(dryR) - S.dcPrevInR + S.dcPole * S.dcPrevOutR;
+            const double dcL = dcStep(S.dcPole, double(dryL), S.dcPrevInL, S.dcPrevOutL);
+            const double dcR = dcStep(S.dcPole, double(dryR), S.dcPrevInR, S.dcPrevOutR);
             S.dcPrevInL = double(dryL);
             S.dcPrevInR = double(dryR);
             S.dcPrevOutL = dcL;
@@ -555,8 +637,8 @@ void runCleanup(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames
                 S.dcPrevInL = S.dcPrevInR = S.dcPrevOutL = S.dcPrevOutR = 0.0;
                 S.dcParked = 1;
             } else {
-                left = dryL + static_cast<float>((dcL - double(dryL)) * double(S.dcMix));
-                right = dryR + static_cast<float>((dcR - double(dryR)) * double(S.dcMix));
+                left = dcMixed(dryL, dcL, S.dcMix);
+                right = dcMixed(dryR, dcR, S.dcMix);
             }
         }
 
@@ -569,8 +651,8 @@ void runCleanup(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames
         if (!S.infraParked) {
             const float dryL = left;
             const float dryR = right;
-            const float hpL = runNotches(S.infra, S.infraL, S.infraSections, dryL);
-            const float hpR = runNotches(S.infra, S.infraR, S.infraSections, dryR);
+            float hpL, hpR;
+            runNotchesPair(S.infra, S.infraL, S.infraR, S.infraSections, dryL, dryR, hpL, hpR);
             S.infraMix = smoothToward(S.infraMix, infraOn ? 1.0f : 0.0f, bypass);
             if (!infraOn && nearZero(S.infraMix)) {
                 S.infraMix = 0.0f;
@@ -578,8 +660,8 @@ void runCleanup(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames
                 std::memset(S.infraR, 0, sizeof S.infraR);
                 S.infraParked = 1;
             } else {
-                left = dryL + (hpL - dryL) * S.infraMix;
-                right = dryR + (hpR - dryR) * S.infraMix;
+                left = wetMixed(dryL, hpL, S.infraMix);
+                right = wetMixed(dryR, hpR, S.infraMix);
             }
         }
 
@@ -600,11 +682,11 @@ void runCleanup(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames
             const float dryL = left;
             const float dryR = right;
             if (mainsOn) scheduleRetune(S);
-            float nL = runNotches(S.cur.coef, S.curL, S.cur.count, dryL);
-            float nR = runNotches(S.cur.coef, S.curR, S.cur.count, dryR);
+            float nL, nR;
+            runNotchesPair(S.cur.coef, S.curL, S.curR, S.cur.count, dryL, dryR, nL, nR);
             if (S.transRemaining > 0) {
-                const float pL = runNotches(S.pend.coef, S.pendL, S.pend.count, dryL);
-                const float pR = runNotches(S.pend.coef, S.pendR, S.pend.count, dryR);
+                float pL, pR;
+                runNotchesPair(S.pend.coef, S.pendL, S.pendR, S.pend.count, dryL, dryR, pL, pR);
                 const uint32_t completed = S.transTotal - S.transRemaining + 1;
                 const float mix = float(completed) / float(S.transTotal);
                 nL += (pL - nL) * mix;
@@ -622,8 +704,8 @@ void runCleanup(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames
                 std::memset(S.pendR, 0, sizeof S.pendR);
                 S.mainsParked = 1;
             } else {
-                left = dryL + (nL - dryL) * S.mainsMix;
-                right = dryR + (nR - dryR) * S.mainsMix;
+                left = wetMixed(dryL, nL, S.mainsMix);
+                right = wetMixed(dryR, nR, S.mainsMix);
             }
         }
         L[i] = left;
