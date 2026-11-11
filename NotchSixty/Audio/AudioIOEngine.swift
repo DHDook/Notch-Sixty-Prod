@@ -1086,7 +1086,7 @@ final class AudioIOEngine: ObservableObject {
     /// for the same output (external change, device-list refresh) never
     /// overwrites the user's current level.
     private var masterVolumeSynchronizedOutputUID: String?
-    private var lifecycle: AudioLifecycleStateMachine
+    var lifecycle: AudioLifecycleStateMachine
     private var transportSession: CoreAudioTransportSession?
     /// E25 S2: applied to each new stereo session.
     private var stereoAlignment: StereoBassAlignment?
@@ -1098,7 +1098,7 @@ final class AudioIOEngine: ObservableObject {
     /// E25 S8c: read-only views of the applied arrangement state, so profile load and the wizard are comparable.
     var appliedStereoAlignment: StereoBassAlignment? { stereoAlignment }
     var appliedProgramFoldPlan: ProgramFoldDownPlan? { programFoldPlan }
-    private var nChannelTransportSession: CoreAudioNChannelTransportSession?
+    var nChannelTransportSession: CoreAudioNChannelTransportSession?
     private var binauralHeadphoneTransportSession: CoreAudioBinauralHeadphoneTransportSession?
     private var headTrackingController: SpatialHeadTrackingController?
     private var lifetimeArchivedCounters = AudioTransportCounters()
@@ -1120,6 +1120,11 @@ final class AudioIOEngine: ObservableObject {
     private var activeSpeakerIRProgram: PreparedSpeakerIRProgram?
     private var nextSpeakerIRProgramSlot: UInt32 = 0
     private var stagedRoomTreatment: LiveMIMORoomTreatmentPreparation?
+    /// E19 S6: the graph MIMO treatment controller (stage, permit, arm switch); see `AudioIOEngine+MIMOTreatment.swift`.
+    lazy var mimoGraphTreatment: MIMOGraphTreatment = makeMIMOGraphTreatment()
+    var mimoPollTask: Task<Void, Never>?
+    /// E19 S6: set by the room-correction latency mode when it is video (the treatment refuses to arm in it; S8 wires it).
+    var mimoVideoLatencyMode = false
     private var stagedAudioUnitRack: AudioUnitLiveRackSwitchboard?
     /// Set when a rate change or output recovery dropped a rack built for the
     /// previous format; cleared once the rebuild request has been issued.
@@ -4979,6 +4984,9 @@ final class AudioIOEngine: ObservableObject {
                 configuration.generatorParams = params
                 configuration.generatorLaneMask = mask
             }
+            // E19 S6: a new topology rebuilds the graph, so the switch goes off first: the disarm word is stored with the
+            // stage and the rebuilt graph carries it disarmed (a rebuild never fades through live treatment).
+            if session.mimoStageAttached { mimoGraphTreatment.graphRebuilt() }
             try session.republishGraph(configuration)
         } else if let session = binauralHeadphoneTransportSession {
             guard let base = headphoneBase ?? session.unifiedGraphBaseSpec,
@@ -5602,7 +5610,9 @@ final class AudioIOEngine: ObservableObject {
                 ancHostFeed: ancSplitter != nil,
                 userOutputGain: currentMasterSoftwareGain
             ) {
-            case .success(let configuration): graphConfiguration = configuration
+            case .success(var configuration):
+                attachStagedMIMOTreatment(to: &configuration)
+                graphConfiguration = configuration
             case .failure(let reason): graphIneligibility = reason
             }
         }

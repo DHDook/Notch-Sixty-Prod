@@ -109,6 +109,9 @@ struct SafetyFlightRecorder: Sendable {
         case .microphoneMoved: return "The measurement microphone moved and the supervised re-tune did not recover, so the anti-noise was stopped."
         case .adaptiveFault: return "The adaptive tuning faulted, so the anti-noise was stopped."
         case .bassPathChanged: return "The bass path changed (receiver level, bass settings or sub polarity), so the cancellation no longer matched."
+        case .treatmentFault: return "The room treatment went outside its safe bounds, so it was muted."
+        case .downstreamChainChanged: return "A trim or the output chain changed, so the room treatment was stopped."
+        case .featureSwitchedOff: return "The room treatment feature was switched off."
         }
     }
 }

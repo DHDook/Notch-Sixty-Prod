@@ -155,6 +155,7 @@ Dirac now sells ART on the Mac, so this needs the same path to authorisation as 
 - [ ] Speaker support-range and exclusion controls, and an explicit LFE time target
 - [~] S4 `e19/mimo-stage`: realtime `N60_STAGE_MIMO` (ABI 32) built dark, not published until S6 (see `docs/epics/E19.md`)
 - [~] Headroom and excursion safety per contributing speaker: S5 `e19/mimo-safety` built dark, PR open; not published until S6 (see `docs/epics/E19.md`)
+- [~] S6 `e19/mimo-graph-wiring`: `N60_STAGE_MIMO` on the unified graph, arm controller, sliding thermal window built dark, PR open, no open-question gaps; wired by S7/S8 (see `docs/epics/E19.md`)
 - [ ] Authorise live treatment only through the PR75 verification path, then re-qualify on the unified graph
 - [ ] S11 graduate `e19.mimo-treatment` (available, never armed; arm and permit unchanged; the bench no longer gates it; removal is the FC phase)
 
@@ -454,6 +455,7 @@ unified graph only.
 - [ ] S1c `e23/parity-and-host-fold` (needs-owner, engine): G2 latency report at 44.1 and 88.2 kHz, G3 clipped-input level difference, E6 G48 Quiet Zone host fold
 - [ ] Confirm nothing falls back to the kernel, the old N-channel path or the legacy binaural pipeline (E6 S12a–S12h)
 - [ ] Remove the kernel headphone-delay clamp (4,095 frames) with the kernel (E7 G1)
+- [ ] Delete the legacy bridge MIMO path (`N60MIMOTreatment*.h`, `stagedRoomTreatment`), frozen since E19 S6 (E19 G25)
 - [ ] Delete `N60RenderKernel`, the old N-channel path and the `e6.legacy-kernel` flag
 - [ ] Update `docs/DSP_KERNEL.md`, `docs/ARCHITECTURE.md` and the `AGENTS.md` mention, in coordination with E21
 

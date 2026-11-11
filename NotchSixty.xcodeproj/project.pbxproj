@@ -200,6 +200,8 @@
 		E8A000000000000000000021 /* xover.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E8A000000000000000000011 /* xover.cpp */; };
 		E9B600000000000000000001 /* headroom.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E9B600000000000000000002 /* headroom.cpp */; };
 		E9B600000000000000000003 /* OutputHeadroomModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9B600000000000000000004 /* OutputHeadroomModel.swift */; };
+		E19S6B000000000000000002 /* MIMOGraphHeadroom.swift in Sources */ = {isa = PBXBuildFile; fileRef = E19S6B000000000000000001 /* MIMOGraphHeadroom.swift */; };
+		E19S6A000000000000000002 /* UnifiedGraphMIMO.swift in Sources */ = {isa = PBXBuildFile; fileRef = E19S6A000000000000000001 /* UnifiedGraphMIMO.swift */; };
 		E9B600000000000000000005 /* OutputHeadroomModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9B600000000000000000006 /* OutputHeadroomModelTests.swift */; };
 		E19A00000000000000000021 /* design.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E19A00000000000000000011 /* design.cpp */; };
 		E8A000000000000000000031 /* CrossoverCore.swift in Sources */ = {isa = PBXBuildFile; fileRef = E8A000000000000000000041 /* CrossoverCore.swift */; };
@@ -261,6 +263,7 @@
 		A1000000000000000000001E /* RoomCorrectionTargetDesignerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000033 /* RoomCorrectionTargetDesignerTests.swift */; };
 		E10000000000000000000002 /* RoomCorrectionFIRDesignerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E10000000000000000000012 /* RoomCorrectionFIRDesignerTests.swift */; };
 		A20000000000000000000010 /* AudioIOEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000020 /* AudioIOEngine.swift */; };
+		E19S6D000000000000000002 /* AudioIOEngine+MIMOTreatment.swift in Sources */ = {isa = PBXBuildFile; fileRef = E19S6D000000000000000001 /* AudioIOEngine+MIMOTreatment.swift */; };
 		A20000000000000000000011 /* CoreAudioError.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000021 /* CoreAudioError.swift */; };
 		F63000000000000000000001 /* CoreAudioNChannelTransportSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = F63000000000000000000011 /* CoreAudioNChannelTransportSession.swift */; };
 		F6A000000000000000000001 /* StereoHostedQuietZone.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6A000000000000000000011 /* StereoHostedQuietZone.swift */; };
@@ -421,6 +424,7 @@
 		E4FA00000000000000000002 /* ProductionNoiseSurveyCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4FA00000000000000000012 /* ProductionNoiseSurveyCard.swift */; };
 		E4B984924D1CAD717941AB51 /* ProductionVirtualMicrophoneCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4B724647414C81BC81D88DE /* ProductionVirtualMicrophoneCard.swift */; };
 		E4G000000000000000000001 /* LiveTreatmentArm.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4G000000000000000000011 /* LiveTreatmentArm.swift */; };
+		E19S6C000000000000000002 /* MIMOGraphTreatment.swift in Sources */ = {isa = PBXBuildFile; fileRef = E19S6C000000000000000001 /* MIMOGraphTreatment.swift */; };
 		E4H000000000000000000001 /* DoNoHarmVerifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4H000000000000000000011 /* DoNoHarmVerifier.swift */; };
 		E4S310000000000000000021 /* ANCMeasurementReport.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4S310000000000000000031 /* ANCMeasurementReport.swift */; };
 		E4S310000000000000000022 /* ANCMeasurementReportTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4S310000000000000000032 /* ANCMeasurementReportTests.swift */; };
@@ -477,6 +481,7 @@
 		E4A000000000000000000001 /* LiveTreatmentSafeguards.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4A000000000000000000011 /* LiveTreatmentSafeguards.swift */; };
 		E4A000000000000000000021 /* ActiveQuietZoneLeaseKeeper.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4A000000000000000000031 /* ActiveQuietZoneLeaseKeeper.swift */; };
 		E4A000000000000000000002 /* LiveTreatmentArmTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4A000000000000000000012 /* LiveTreatmentArmTests.swift */; };
+		E19S6E0000000000000000F2 /* MIMOGraphWiringTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E19S6E0000000000000000F1 /* MIMOGraphWiringTests.swift */; };
 		E4A000000000000000000022 /* ActiveQuietZoneLeaseKeeperTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4A000000000000000000032 /* ActiveQuietZoneLeaseKeeperTests.swift */; };
 		E4E000000000000000000001 /* OutputBufferSizeController.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4E000000000000000000011 /* OutputBufferSizeController.swift */; };
 		E4E000000000000000000002 /* QuietZoneMeasuredLatency.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4E000000000000000000012 /* QuietZoneMeasuredLatency.swift */; };
@@ -923,6 +928,8 @@
 		E8A000000000000000000011 /* xover.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = xover/xover.cpp; sourceTree = "<group>"; };
 		E9B600000000000000000002 /* headroom.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = headroom/headroom.cpp; sourceTree = "<group>"; };
 		E9B600000000000000000004 /* OutputHeadroomModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OutputHeadroomModel.swift; sourceTree = "<group>"; };
+		E19S6B000000000000000001 /* MIMOGraphHeadroom.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MIMOGraphHeadroom.swift; sourceTree = "<group>"; };
+		E19S6A000000000000000001 /* UnifiedGraphMIMO.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnifiedGraphMIMO.swift; sourceTree = "<group>"; };
 		E9B600000000000000000006 /* OutputHeadroomModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OutputHeadroomModelTests.swift; sourceTree = "<group>"; };
 		E8A000000000000000000041 /* CrossoverCore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrossoverCore.swift; sourceTree = "<group>"; };
 		E8A000000000000000000042 /* CrossoverCoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrossoverCoreTests.swift; sourceTree = "<group>"; };
@@ -998,6 +1005,7 @@
 		A10000000000000000000033 /* RoomCorrectionTargetDesignerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomCorrectionTargetDesignerTests.swift; sourceTree = "<group>"; };
 		E10000000000000000000012 /* RoomCorrectionFIRDesignerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomCorrectionFIRDesignerTests.swift; sourceTree = "<group>"; };
 		A20000000000000000000020 /* AudioIOEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioIOEngine.swift; sourceTree = "<group>"; };
+		E19S6D000000000000000001 /* AudioIOEngine+MIMOTreatment.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AudioIOEngine+MIMOTreatment.swift"; sourceTree = "<group>"; };
 		A20000000000000000000021 /* CoreAudioError.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreAudioError.swift; sourceTree = "<group>"; };
 		F63000000000000000000011 /* CoreAudioNChannelTransportSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreAudioNChannelTransportSession.swift; sourceTree = "<group>"; };
 		F6A000000000000000000011 /* StereoHostedQuietZone.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StereoHostedQuietZone.swift; sourceTree = "<group>"; };
@@ -1186,6 +1194,7 @@
 		E4H000000000000000000012 /* DoNoHarmVerifierTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DoNoHarmVerifierTests.swift; sourceTree = "<group>"; };
 		E4H000000000000000000032 /* SafetyFlightRecorderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SafetyFlightRecorderTests.swift; sourceTree = "<group>"; };
 		E4G000000000000000000011 /* LiveTreatmentArm.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveTreatmentArm.swift; sourceTree = "<group>"; };
+		E19S6C000000000000000001 /* MIMOGraphTreatment.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MIMOGraphTreatment.swift; sourceTree = "<group>"; };
 		E4D000000000000000000011 /* AdaptiveQuietZoneShadow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdaptiveQuietZoneShadow.swift; sourceTree = "<group>"; };
 		E4D000000000000000000012 /* ProductionAdaptiveQuietZoneCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductionAdaptiveQuietZoneCard.swift; sourceTree = "<group>"; };
 		E4D000000000000000000013 /* AdaptiveQuietZoneShadowTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdaptiveQuietZoneShadowTests.swift; sourceTree = "<group>"; };
@@ -1240,6 +1249,7 @@
 		E4A000000000000000000011 /* LiveTreatmentSafeguards.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveTreatmentSafeguards.swift; sourceTree = "<group>"; };
 		E4A000000000000000000031 /* ActiveQuietZoneLeaseKeeper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActiveQuietZoneLeaseKeeper.swift; sourceTree = "<group>"; };
 		E4A000000000000000000012 /* LiveTreatmentArmTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveTreatmentArmTests.swift; sourceTree = "<group>"; };
+		E19S6E0000000000000000F1 /* MIMOGraphWiringTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MIMOGraphWiringTests.swift; sourceTree = "<group>"; };
 		E4A000000000000000000032 /* ActiveQuietZoneLeaseKeeperTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActiveQuietZoneLeaseKeeperTests.swift; sourceTree = "<group>"; };
 		E4E000000000000000000011 /* OutputBufferSizeController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OutputBufferSizeController.swift; sourceTree = "<group>"; };
 		E4E000000000000000000012 /* QuietZoneMeasuredLatency.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuietZoneMeasuredLatency.swift; sourceTree = "<group>"; };
@@ -1513,6 +1523,8 @@
 				E6D0000000000000000000B0 /* UnifiedGraphProgramDSP.swift */,
 				E9B500000000000000000002 /* OutputProtectionSettings.swift */,
 				E9B600000000000000000004 /* OutputHeadroomModel.swift */,
+				E19S6B000000000000000001 /* MIMOGraphHeadroom.swift */,
+				E19S6A000000000000000001 /* UnifiedGraphMIMO.swift */,
 				E6D000000000000000000002 /* UnifiedGraphHost.swift */,
 				E6D000000000000000000003 /* UnifiedGraphConfiguration.swift */,
 				E26A00000000000000000103 /* UnifiedGraphAncActuators.swift */,
@@ -1782,6 +1794,7 @@
 				E4F300000000000000000014 /* QuietZoneFeedForwardShadowTests.swift */,
 				E4D000000000000000000013 /* AdaptiveQuietZoneShadowTests.swift */,
 				E4A000000000000000000012 /* LiveTreatmentArmTests.swift */,
+				E19S6E0000000000000000F1 /* MIMOGraphWiringTests.swift */,
 				E4H000000000000000000012 /* DoNoHarmVerifierTests.swift */,
 				E4J800000000000000000011 /* AdaptiveTonalLiveCoordinatorTests.swift */,
 				E4K200000000000000000011 /* EarnedCapPolicyTests.swift */,
@@ -1903,6 +1916,7 @@
 				E26A00000000000000000050 /* QuietZone */,
 				A30000000000000000000050 /* Realtime */,
 				A20000000000000000000020 /* AudioIOEngine.swift */,
+				E19S6D000000000000000001 /* AudioIOEngine+MIMOTreatment.swift */,
 				E28D700000000000000000B2 /* DynamicsListenControls.swift */,
 				E27D100000000000000A0000 /* EQFIRProgramCache.swift */,
 				E4J500000000000000000011 /* AdaptiveTonalLiveLink.swift */,
@@ -2075,7 +2089,7 @@
 			path = Backup;
 			sourceTree = "<group>";
 		};
-		A20000000000000000000054 /* State */ = {isa = PBXGroup; children = (E27B00000000000000000403 /* EQAutoPreampController.swift */, E27D00000000000000000501 /* EQProgramAnalyser.swift */, E27C996876870000000A0000 /* EQComparison.swift */, E27C398164120000000A0000 /* EQAudition.swift */, E25F000000000000000000B1 /* ProgramSourceController.swift */, E4FA00000000000000000011 /* QuietZoneNoiseSurveyController.swift */, E4B99B7815EFCCD340673139 /* QuietZoneVirtualMicSurveyController.swift */, E4BF6B6B8BAE4472C8459781 /* QuietZoneVirtualDesign.swift */, E24F00000000000000009003 /* RoomCorrectionABXController.swift */, E24E00000000000000000011 /* MeasurementReadiness.swift */, A20000000000000000000025 /* AudioLifecycleState.swift */, A100000000000000000E2204 /* FeatureFlags.swift */, E4M100000000000000000011 /* SpeakerDriveDemandPolicy.swift */, A100000000000000000E2202 /* PreferenceKeys.swift */, A2000000000000000000002B /* ProductProfiles.swift */, E12B00000000000000000011 /* SystemSetupFlow.swift */, E12C00000000000000000011 /* SystemSetupStartSteps.swift */, E25C00000000000000000011 /* SystemSetupArrangementPlanner.swift */, E25D00000000000000000011 /* SystemSetupAdaptiveSteps.swift */, E25E00000000000000000011 /* SystemCapabilityText.swift */, E12D00000000000000000011 /* SystemSetupMeasureAlign.swift */, E12E00000000000000000011 /* SystemSetupBassCorrect.swift */, E12F00000000000000000011 /* SystemSetupVerifySave.swift */, E24A00000000000000000011 /* SystemSetupProduction.swift */, E24D00000000000000000011 /* SystemSetupLevelSession.swift */, E24D000000000000000000B1 /* SystemSetupSeatMeasurer.swift */, E13F00000000000000000025 /* BRIRLiveCaptureEnvironment.swift */, E13F00000000000000000023 /* BRIRCaptureFlow.swift */, E24F00000000000000000011 /* EngineRoomCorrectionTrialHost.swift */, E24D00000000000000000021 /* MeasurementGeneratorController.swift */, B113B0000000000000000061 /* ProductRecovery.swift */, B113B0000000000000000071 /* HeadroomAssistant.swift */, F64000000000000000000014 /* MultichannelCalibrationController.swift */, A2000000000000000000002D /* RoomCorrectionCalibrationController.swift */, A2000000000000000000002F /* RoomCorrectionProjectController.swift */, F89300000000000000000011 /* AmbientCompensationController.swift */, F90200000000000000000011 /* ActiveQuietZoneController.swift */, E4D000000000000000000011 /* AdaptiveQuietZoneShadow.swift */, E4G000000000000000000011 /* LiveTreatmentArm.swift */, E4H000000000000000000011 /* DoNoHarmVerifier.swift */, E4J100000000000000000011 /* AdaptiveTonalOutputGate.swift */, E4J200000000000000000011 /* MicrophoneMoveResolver.swift */, E4J300000000000000000011 /* AdaptiveTonalLiveWorker.swift */, E4J400000000000000000011 /* AdaptiveTonalLiveCoordinator.swift */, E4K100000000000000000011 /* EarnedCapPolicy.swift */, E4L100000000000000000011 /* ExcursionCap.swift */, E4N100000000000000000011 /* OvernightPowerAssertion.swift */, E4H000000000000000000031 /* SafetyFlightRecorder.swift */, E4S310000000000000000031 /* ANCMeasurementReport.swift */, E4F200000000000000000013 /* QuietZoneFeedForwardSurveyController.swift */, E4F300000000000000000012 /* QuietZoneFeedForwardShadow.swift */, E4F700000000000000000F02 /* FeedForwardLiveWeightsFeed.swift */, E4F700000000000000000F12 /* FeedForwardLiveEchoFeed.swift */, E4F7000000000000000000E6 /* QuietZoneCameraHeadSource.swift */, F92000000000000000000012 /* RoomTreatmentAdvisorController.swift */, E10B00000000000000000004 /* RoomCorrectionDeployController.swift */, E4F900000000000000000A02 /* FeedForwardLiveArming.swift */,); path = State; sourceTree = "<group>"; };
+		A20000000000000000000054 /* State */ = {isa = PBXGroup; children = (E27B00000000000000000403 /* EQAutoPreampController.swift */, E27D00000000000000000501 /* EQProgramAnalyser.swift */, E27C996876870000000A0000 /* EQComparison.swift */, E27C398164120000000A0000 /* EQAudition.swift */, E25F000000000000000000B1 /* ProgramSourceController.swift */, E4FA00000000000000000011 /* QuietZoneNoiseSurveyController.swift */, E4B99B7815EFCCD340673139 /* QuietZoneVirtualMicSurveyController.swift */, E4BF6B6B8BAE4472C8459781 /* QuietZoneVirtualDesign.swift */, E24F00000000000000009003 /* RoomCorrectionABXController.swift */, E24E00000000000000000011 /* MeasurementReadiness.swift */, A20000000000000000000025 /* AudioLifecycleState.swift */, A100000000000000000E2204 /* FeatureFlags.swift */, E4M100000000000000000011 /* SpeakerDriveDemandPolicy.swift */, A100000000000000000E2202 /* PreferenceKeys.swift */, A2000000000000000000002B /* ProductProfiles.swift */, E12B00000000000000000011 /* SystemSetupFlow.swift */, E12C00000000000000000011 /* SystemSetupStartSteps.swift */, E25C00000000000000000011 /* SystemSetupArrangementPlanner.swift */, E25D00000000000000000011 /* SystemSetupAdaptiveSteps.swift */, E25E00000000000000000011 /* SystemCapabilityText.swift */, E12D00000000000000000011 /* SystemSetupMeasureAlign.swift */, E12E00000000000000000011 /* SystemSetupBassCorrect.swift */, E12F00000000000000000011 /* SystemSetupVerifySave.swift */, E24A00000000000000000011 /* SystemSetupProduction.swift */, E24D00000000000000000011 /* SystemSetupLevelSession.swift */, E24D000000000000000000B1 /* SystemSetupSeatMeasurer.swift */, E13F00000000000000000025 /* BRIRLiveCaptureEnvironment.swift */, E13F00000000000000000023 /* BRIRCaptureFlow.swift */, E24F00000000000000000011 /* EngineRoomCorrectionTrialHost.swift */, E24D00000000000000000021 /* MeasurementGeneratorController.swift */, B113B0000000000000000061 /* ProductRecovery.swift */, B113B0000000000000000071 /* HeadroomAssistant.swift */, F64000000000000000000014 /* MultichannelCalibrationController.swift */, A2000000000000000000002D /* RoomCorrectionCalibrationController.swift */, A2000000000000000000002F /* RoomCorrectionProjectController.swift */, F89300000000000000000011 /* AmbientCompensationController.swift */, F90200000000000000000011 /* ActiveQuietZoneController.swift */, E4D000000000000000000011 /* AdaptiveQuietZoneShadow.swift */, E4G000000000000000000011 /* LiveTreatmentArm.swift */, E19S6C000000000000000001 /* MIMOGraphTreatment.swift */, E4H000000000000000000011 /* DoNoHarmVerifier.swift */, E4J100000000000000000011 /* AdaptiveTonalOutputGate.swift */, E4J200000000000000000011 /* MicrophoneMoveResolver.swift */, E4J300000000000000000011 /* AdaptiveTonalLiveWorker.swift */, E4J400000000000000000011 /* AdaptiveTonalLiveCoordinator.swift */, E4K100000000000000000011 /* EarnedCapPolicy.swift */, E4L100000000000000000011 /* ExcursionCap.swift */, E4N100000000000000000011 /* OvernightPowerAssertion.swift */, E4H000000000000000000031 /* SafetyFlightRecorder.swift */, E4S310000000000000000031 /* ANCMeasurementReport.swift */, E4F200000000000000000013 /* QuietZoneFeedForwardSurveyController.swift */, E4F300000000000000000012 /* QuietZoneFeedForwardShadow.swift */, E4F700000000000000000F02 /* FeedForwardLiveWeightsFeed.swift */, E4F700000000000000000F12 /* FeedForwardLiveEchoFeed.swift */, E4F7000000000000000000E6 /* QuietZoneCameraHeadSource.swift */, F92000000000000000000012 /* RoomTreatmentAdvisorController.swift */, E10B00000000000000000004 /* RoomCorrectionDeployController.swift */, E4F900000000000000000A02 /* FeedForwardLiveArming.swift */,); path = State; sourceTree = "<group>"; };
 		A20000000000000000000055 /* Diagnostics */ = {isa = PBXGroup; children = (A20000000000000000000026 /* AudioDiagnosticsSnapshot.swift */, A2000000000000000000002A /* ProductionAnalysisWorker.swift */,); path = Diagnostics; sourceTree = "<group>"; };
 		A30000000000000000000050 /* Realtime */ = {
 			isa = PBXGroup;
@@ -2207,6 +2221,8 @@
 				E6D0000000000000000001B0 /* UnifiedGraphProgramDSP.swift in Sources */,
 				E9B500000000000000000001 /* OutputProtectionSettings.swift in Sources */,
 				E9B600000000000000000003 /* OutputHeadroomModel.swift in Sources */,
+				E19S6B000000000000000002 /* MIMOGraphHeadroom.swift in Sources */,
+				E19S6A000000000000000002 /* UnifiedGraphMIMO.swift in Sources */,
 				E6D000000000000000000102 /* UnifiedGraphHost.swift in Sources */,
 				E6D000000000000000000103 /* UnifiedGraphConfiguration.swift in Sources */,
 				E26A00000000000000000104 /* UnifiedGraphAncActuators.swift in Sources */,
@@ -2289,6 +2305,7 @@
 				F112A0000000000000000003 /* ProductionHardwareAcceptanceWorkspace.swift in Sources */,
 				F11300000000000000000001 /* ProductionUserGuideView.swift in Sources */,
 				A20000000000000000000010 /* AudioIOEngine.swift in Sources */,
+				E19S6D000000000000000002 /* AudioIOEngine+MIMOTreatment.swift in Sources */,
 				E28D700000000000000000B1 /* DynamicsListenControls.swift in Sources */,
 				E27D100000001000000B0000 /* EQFIRProgramCache.swift in Sources */,
 				A20000000000000000000011 /* CoreAudioError.swift in Sources */,
@@ -2469,6 +2486,7 @@
 				E4B984924D1CAD717941AB51 /* ProductionVirtualMicrophoneCard.swift in Sources */,
 				E4D000000000000000000001 /* AdaptiveQuietZoneShadow.swift in Sources */,
 				E4G000000000000000000001 /* LiveTreatmentArm.swift in Sources */,
+				E19S6C000000000000000002 /* MIMOGraphTreatment.swift in Sources */,
 				E4H000000000000000000001 /* DoNoHarmVerifier.swift in Sources */,
 				E4J500000000000000000001 /* AdaptiveTonalLiveLink.swift in Sources */,
 				E4J400000000000000000001 /* AdaptiveTonalLiveCoordinator.swift in Sources */,
@@ -2796,6 +2814,7 @@
 				E4F300000000000000000004 /* QuietZoneFeedForwardShadowTests.swift in Sources */,
 				E4D000000000000000000003 /* AdaptiveQuietZoneShadowTests.swift in Sources */,
 				E4A000000000000000000002 /* LiveTreatmentArmTests.swift in Sources */,
+				E19S6E0000000000000000F2 /* MIMOGraphWiringTests.swift in Sources */,
 				E4H000000000000000000002 /* DoNoHarmVerifierTests.swift in Sources */,
 				E4J800000000000000000001 /* AdaptiveTonalLiveCoordinatorTests.swift in Sources */,
 				E4K200000000000000000001 /* EarnedCapPolicyTests.swift in Sources */,
