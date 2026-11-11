@@ -77,10 +77,12 @@ final class DynamicsListenSessionTests: XCTestCase {
     func testListenerIsNotPartOfAnyEncodedProfile() throws {
         var config = DynamicsConfiguration()
         config.compressor.enabled = true
-        let before = try JSONEncoder().encode(config)
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .sortedKeys
+        let before = try encoder.encode(config)
         let session = DynamicsListenSession()
         session.request(DynamicsListener(stage: .compressor, mode: .delta))
-        XCTAssertEqual(try JSONEncoder().encode(config), before)
+        XCTAssertEqual(try encoder.encode(config), before)
         XCTAssertFalse(String(decoding: before, as: UTF8.self).lowercased().contains("listen"))
     }
 }
