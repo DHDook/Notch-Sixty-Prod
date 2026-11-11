@@ -34,7 +34,7 @@ extern "C" {
 #endif
 
 /* Bumped on any incompatible change to a struct or function below. */
-#define N60_GRAPH_ABI_VERSION 36u
+#define N60_GRAPH_ABI_VERSION 37u
 
 typedef struct n60_graph n60_graph; /* opaque */
 
@@ -195,7 +195,7 @@ typedef enum n60_stage_kind {
  *   14 release ms (10..1000), 17 knee dB (0..20), 20 sidechain HPF Hz (0..300, 0 off), 23 make-up dB (-12..12),
  *   26 auto release (0/1; program-dependent release, 0 = kernel parity).
  * Every parameter is live except the two slopes (topology; changing them needs a rebuild: UNSUPPORTED).
- * ABI v36 (E28 S7c): paramCount 43 adds, per band (low, mid, high): 29 bypass (0/1; the band's target gain is 0 dB, so it
+ * ABI v37 (E28 S7c): paramCount 43 adds, per band (low, mid, high): 29 bypass (0/1; the band's target gain is 0 dB, so it
  *  passes at unity once the smoother settles), 32 solo (0/1; a band with solo off has its output gain ramped to 0 over
  *  5 ms while any band is soloed, soloed bands sum), 35 listen (0 off, 1 sidechain, 2 delta; the stage outputs, on both
  *  lanes, the delayed band after its sidechain filter, or the delayed band times (1 - gain without make-up); 5 ms
@@ -546,6 +546,11 @@ typedef int (*n60_external_process_fn)(void *context, const float *const *in, fl
  * the two halves of one prepared biquad (the stereo kernel's Linkwitz transform): a type 9 section is the numerator
  * (b0, b1, b2 in the Hz, dB and Q slots) and the section after it, type 10, is the denominator (a1, a2, unused). The
  * cascade is the biquad. The denominator must be strictly stable (|a2| < 1, |a1| < 1 + a2) or the snapshot is refused.
+ * E23 S1b: a type 10 fourth slot of 1 selects deviation form for low corners at high rates, where float coefficients
+ * quantise the poles near z = 1. With y = 1 - 1/z the numerator is n0 + n1 y + n2 y^2 and the denominator is
+ * d0 + d1 y + (1 - d0 - d1) y^2; the type 9 slots are (n0, n1, n2) and the type 10 slots (d0, d1, 1), and the core forms
+ * b0 = n0 + n1 + n2, b1 = -n1 - 2 n2, b2 = n2, a1 = d1 + 2 d0 - 2, a2 = 1 - d0 - d1 in double. A zero fourth slot is the
+ * original form; this adds no ABI version (a previously ignored slot). The form of a pair must not change in a live edit.
  * Types 8 to 10 add no latency, reset like the other types and, for 9 and 10, ignore the sample rate: the prepared
  * coefficients belong to the rate they were designed at, so the caller re-prepares them on a rate change. A caller needing more than N60_PEQ_MAX_SECTIONS sections chains several PEQ stages. */
 #define N60_PEQ_MAX_SECTIONS 16u
@@ -842,7 +847,12 @@ n60_status n60_graph_read_multiband(n60_graph *graph, uint32_t stageId, n60_mult
  * source inputs, each peak-held with a 1 s release (so a filter's tail after the program stops is not counted as over
  * bound). A source is over bound when its delta envelope exceeds 10^(6/10) * G_s^2 times the input envelope (6 dB in
  * amplitude, 5.9 dB is within bound); 50 ms of continuous over-bound on any source latches a fault: `faultSource` names it,
- * g falls in 10 ms and `held` is set.
+ * g falls in 10 ms and `held` is set (`faultReason` 1).
+ * Thermal budget (E19 S5, design note 6, owner decision D5). Armed time (g > 0) is cut into consecutive 10 s windows; per
+ * source the window sums the delta power (before g, as the monitor) and the in-band program power (the decimated source
+ * feed). When a window ends with delta power above 10^(-6/10) (-6 dB) of the program power the stage latches a fault the
+ * same way (`faultReason` 2); -6.1 dB passes. Windows restart whenever g returns to 0. A window whose program power is
+ * below -120 dB is not judged.
  * Realtime: no allocation (every byte is in the snapshot arena), no locks, bounded work; one 128-point FFT per source and
  * one inverse per source every 64 low-rate samples (a bounded burst of S * S * (T / 64) complex multiply-adds). Sample
  * rates 44.1 to 384 kHz and the families above; 1..8 channels. Reset: a new snapshot only (history is zero, g = 0, held
@@ -859,7 +869,7 @@ typedef struct n60_mimo_readback {
     uint32_t latencyFrames;   /* L */
     float boundRatioMax[8];   /* worst delta envelope over (G_s^2 * input envelope), linear power ratio, since the previous read (reset by the read) */
     float deltaPeak[8];       /* peak |delta| per source (before g) since the previous read (reset by the read) */
-    uint32_t reserved;
+    uint32_t faultReason;     /* E19 S5: with faultLatched, 1 monitor bound, 2 thermal budget; 0 otherwise (was `reserved`, always 0; same size) */
 } n60_mimo_readback;
 n60_status n60_graph_read_mimo(n60_graph *graph, uint32_t stageId, n60_mimo_readback *out);
 

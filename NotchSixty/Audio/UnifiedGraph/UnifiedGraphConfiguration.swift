@@ -9,13 +9,18 @@ struct UnifiedGraphPEQSection: Equatable, Sendable {
     var q: Double
     /// b0, b1, b2, a1, a2 of the prepared biquad; required for type 9, ignored otherwise.
     var coefficients: [Float]?
+    /// E23 S1b (E6 G31): the same biquad in double deviation form (n0, n1, n2, d0, d1; see graph.h), which the core reads
+    /// when set so poles near z = 1 are not quantised to float. Type 9 only.
+    var linkwitzDeviation: [Double]?
 
-    init(type: Int, frequencyHz: Double, gainDB: Double, q: Double, coefficients: [Float]? = nil) {
+    init(type: Int, frequencyHz: Double, gainDB: Double, q: Double, coefficients: [Float]? = nil,
+         linkwitzDeviation: [Double]? = nil) {
         self.type = type
         self.frequencyHz = frequencyHz
         self.gainDB = gainDB
         self.q = q
         self.coefficients = coefficients
+        self.linkwitzDeviation = linkwitzDeviation
     }
 
     /// Core PEQ slots this section takes.
@@ -164,7 +169,7 @@ struct UnifiedGraphGainRider: Equatable, Sendable {
 /// demand flags are live parameters, so toggling a tap never rebuilds the graph.
 struct UnifiedGraphAnalyserTaps: Equatable, Sendable {
     /// Ring length per lane; covers the largest analysis transform (32,768 frames at 384 kHz) with headroom.
-    static let capacityFrames: UInt32 = 65_536
+    static let capacityFrames: UInt32 = RateCapacity.fixedRingFrames
     var eqDemand = false
     var dynDemand = false
 }
@@ -187,7 +192,7 @@ struct UnifiedGraphOptimizerFIR: Equatable, Sendable {
 /// stage list, so the stereo hook, the multichannel path and the tests all agree.
 struct UnifiedGraphConfiguration: Equatable, Sendable {
     var sampleRate: Double
-    var maxBlockFrames: UInt32 = 65_536
+    var maxBlockFrames: UInt32 = RateCapacity.fixedRingFrames
     /// E6 S12e follow-up (G27): delta audition. A CAPTURE stage records each front lane right after the input sanitiser and
     /// a SUBTRACT stage after the protection leaves processed minus the lane-aligned input, as the kernel does.
     var deltaAudition = false
@@ -529,11 +534,17 @@ struct UnifiedGraphConfiguration: Equatable, Sendable {
                 add(N60_STAGE_FRAC_DELAY, Self.delayStageBase + UInt32(index), lane: UInt32(index),
                     params: [Float(whole - split), Float(total - whole)])
             } else if let total = lane.fractionalDelayFrames {
-                guard total.isFinite, total >= 0, total < 8190 else {
+                // E7 S1: a fractional delay longer than the FRAC_DELAY ring puts its whole frames in a DELAY stage
+                // (the calibration branch above is the other user of this id, so the two never both exist).
+                guard let split = RateCapacity.splitFractionalDelay(totalFrames: total) else {
                     throw UnifiedGraphError.invalidConfiguration("fractional delay")
                 }
+                if split.wholeFrames >= 1 {
+                    add(N60_STAGE_DELAY, Self.calibrationDelayStageBase + UInt32(index), lane: UInt32(index),
+                        capacity: split.wholeFrames, params: [Float(split.wholeFrames)])
+                }
                 add(N60_STAGE_FRAC_DELAY, Self.delayStageBase + UInt32(index), lane: UInt32(index),
-                    params: [Float(total.rounded(.down)), Float(total - total.rounded(.down))])
+                    params: [Float(split.stageWhole), Float(split.fraction)])
             } else if let frames = try Self.delayFrames(lane.delayMilliseconds, extraFrames: lane.delayFrames,
                                                  sampleRate: sampleRate) {
                 add(N60_STAGE_DELAY, Self.delayStageBase + UInt32(index), lane: UInt32(index),
@@ -697,6 +708,13 @@ struct UnifiedGraphConfiguration: Equatable, Sendable {
     }
 
     private static func peqSlots(_ section: UnifiedGraphPEQSection) throws -> [Float] {
+        if section.type == 9, let v = section.linkwitzDeviation {
+            guard v.count == 5, v.allSatisfy(\.isFinite) else {
+                throw UnifiedGraphError.unsupportedConfiguration("Linkwitz transform coefficients")
+            }
+            // Deviation form: the type 10 fourth slot is 1 (graph.h, ABI v26 note).
+            return [9, Float(v[0]), Float(v[1]), Float(v[2]), 10, Float(v[3]), Float(v[4]), 1]
+        }
         if section.type == 9 {
             guard let c = section.coefficients, c.count == 5, c.allSatisfy(\.isFinite) else {
                 throw UnifiedGraphError.unsupportedConfiguration("Linkwitz transform coefficients")

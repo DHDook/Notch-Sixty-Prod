@@ -1,4 +1,4 @@
-// E28 S7c (ABI v36): behaviour of the multiband extras at the eight standard rates: a 43-value block with defaults is
+// E28 S7c (ABI v37): behaviour of the multiband extras at the eight standard rates: a 43-value block with defaults is
 // bit-identical to the 29-value block, per-band bypass (flat sum within 0.01 dB for LR4 and LR8), solo against the
 // crossover's own output, two solos summing, the 5 ms solo ramp, the shared lookahead (latency reported, bands aligned),
 // sidechain and delta listen, the RMS detector and validation (lookahead is topology).

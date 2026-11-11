@@ -6,6 +6,7 @@
 #include <cstring>
 
 #include "../fft.hpp"
+#include "../simd/simd.hpp"
 
 namespace n60::conv {
 namespace {
@@ -62,7 +63,7 @@ SLayout sLayout(const uint32_t parts[kSegs]) {
     for (uint32_t s = 0; s < kSegs; ++s) {
         if (parts[s] == 0) continue;
         L.plan[s] = off;
-        off += up(fft::planBytes(fftN(s)));
+        off += up(fft::realPlanBytes(fftN(s)));
         maxN = fftN(s);
     }
     L.scratch = off;
@@ -122,27 +123,26 @@ LLayout lLayout(const uint32_t parts[kSegs]) {
 
 // ---- kernels -------------------------------------------------------------------------
 
-inline void macAdd(Complex *acc, const Complex *h, const Complex *x, uint32_t bins) {
-    for (uint32_t k = 0; k < bins; ++k) {
-        acc[k].re += h[k].re * x[k].re - h[k].im * x[k].im;
-        acc[k].im += h[k].re * x[k].im + h[k].im * x[k].re;
-    }
+// dst = acc + h * x over `bins` complex bins, two bins per SIMD step (E20 S4); an odd last bin runs through a zero-padded
+// pair. dst may equal acc or x.
+inline void macTo(Complex *dst, const Complex *acc, const Complex *h, const Complex *x, uint32_t bins) {
+    simd::cmacSpan(reinterpret_cast<float *>(dst), reinterpret_cast<const float *>(acc), reinterpret_cast<const float *>(h),
+                   reinterpret_cast<const float *>(x), bins);
 }
+inline void macAdd(Complex *acc, const Complex *h, const Complex *x, uint32_t bins) { macTo(acc, acc, h, x, bins); }
 
 // Forward FFT of the 2L-sample window of the ring ending (exclusive) at `end`, into `sc`.
 void fwdWindow(const void *plan, uint32_t s, const float *ring, uint32_t mask, uint32_t end, Complex *sc) {
     const uint32_t N = fftN(s);
     const uint32_t start = end - N;
-    for (uint32_t k = 0; k < N; ++k) sc[k] = {ring[(start + k) & mask], 0.0f};
-    fft::forward(plan, sc);
+    float *f = reinterpret_cast<float *>(sc);
+    for (uint32_t k = 0; k < N; ++k) f[k] = ring[(start + k) & mask];
+    fft::forwardReal(plan, f);  // sc[0..L] now holds bins 0..L
 }
 
-// Mirrors bins L+1..N-1 from bins 1..L-1 (real signal), inverse transforms, leaves the valid half at sc[L..N).
-void invertHalf(const void *plan, uint32_t s, Complex *sc) {
-    const uint32_t L = kL[s], N = fftN(s);
-    for (uint32_t k = 1; k < L; ++k) sc[N - k] = {sc[k].re, -sc[k].im};
-    fft::inverse(plan, sc);
-}
+// Real inverse transform of bins 0..L in sc; the valid half is left at samples L..N of the float view (see `tail`).
+void invertHalf(const void *plan, Complex *sc) { fft::inverseReal(plan, reinterpret_cast<float *>(sc)); }
+inline const float *tail(const Complex *sc, uint32_t s) { return reinterpret_cast<const float *>(sc) + kL[s]; }
 
 uint64_t fftOps(uint32_t s) { return 5ull * fftN(s) * log2u(fftN(s)); }
 
@@ -208,8 +208,8 @@ void tick(Ctx &c, uint64_t &ops) {
         const uint32_t bins = binsOf(0);
         for (uint32_t k = 0; k < bins; ++k) c.scratch[k] = {0.0f, 0.0f};
         for (uint32_t q = 0; q < n; ++q) macAdd(c.scratch, c.H(0, q), c.fdl(0, slotBack(c, 0, q)), bins);
-        invertHalf(c.plan(0), 0, c.scratch);
-        for (uint32_t j = 0; j < kBlock; ++j) c.outBuf[j] = c.scratch[kL[0] + j].re;
+        invertHalf(c.plan(0), c.scratch);
+        for (uint32_t j = 0; j < kBlock; ++j) c.outBuf[j] = tail(c.scratch, 0)[j];
         ops += fftOps(0) * 2 + 8ull * bins * n + 2 * fftN(0);
     }
     // Slices of the longer segments that are due this tick.
@@ -231,14 +231,11 @@ void tick(Ctx &c, uint64_t &ops) {
             pushSpectrum(c, 1);
             const uint32_t bins = binsOf(1);
             const Complex *h0 = c.H(1, 0);
-            for (uint32_t k = 0; k < bins; ++k) {
-                Complex x = c.scratch[k];
-                c.scratch[k] = {acc[k].re + h0[k].re * x.re - h0[k].im * x.im, acc[k].im + h0[k].re * x.im + h0[k].im * x.re};
-            }
+            macTo(c.scratch, acc, h0, c.scratch, bins);
             std::memset(acc, 0, sizeof(Complex) * bins);
-            invertHalf(c.plan(1), 1, c.scratch);
+            invertHalf(c.plan(1), c.scratch);
             float *o = c.out1();
-            for (uint32_t j = 0; j < kL[1]; ++j) o[j] = c.scratch[kL[1] + j].re;
+            for (uint32_t j = 0; j < kL[1]; ++j) o[j] = tail(c.scratch, 1)[j];
             ops += fftOps(1) * 2 + 8ull * bins + 3 * fftN(1);
         }
     }
@@ -258,9 +255,9 @@ void tick(Ctx &c, uint64_t &ops) {
         } else if (ph16 == 2) {
             std::memcpy(c.scratch, acc, sizeof(Complex) * bins);
             std::memset(acc, 0, sizeof(Complex) * bins);
-            invertHalf(c.plan(2), 2, c.scratch);
+            invertHalf(c.plan(2), c.scratch);
             float *o = c.out2(h.outCur ^ 1);
-            for (uint32_t j = 0; j < kL[2]; ++j) o[j] = c.scratch[kL[2] + j].re;
+            for (uint32_t j = 0; j < kL[2]; ++j) o[j] = tail(c.scratch, 2)[j];
             ops += fftOps(2) + 3 * fftN(2);
         } else if (S.parts[2] > 1) {
             const uint32_t nq = S.parts[2] - 1, j = ph16 - 3;
@@ -317,15 +314,16 @@ void init(void *shared, const float *taps, uint32_t n) {
     Complex *sc = reinterpret_cast<Complex *>(sh + L.scratch);
     for (uint32_t s = 0; s < kSegs; ++s) {
         if (S.parts[s] == 0) continue;
-        fft::planInit(sh + L.plan[s], fftN(s));
+        fft::realPlanInit(sh + L.plan[s], fftN(s));
         Complex *H = reinterpret_cast<Complex *>(sh + L.h[s]);
         for (uint32_t q = 0; q < S.parts[s]; ++q) {
             const size_t t0 = size_t(kOff[s]) + size_t(q) * kL[s];
+            float *f = reinterpret_cast<float *>(sc);
             for (uint32_t k = 0; k < fftN(s); ++k) {
                 const size_t t = t0 + k;
-                sc[k] = {k < kL[s] && t < n ? taps[t] : 0.0f, 0.0f};
+                f[k] = k < kL[s] && t < n ? taps[t] : 0.0f;
             }
-            fft::forward(sh + L.plan[s], sc);
+            fft::forwardReal(sh + L.plan[s], f);
             std::memcpy(H + size_t(q) * binsOf(s), sc, sizeof(Complex) * binsOf(s));
         }
     }

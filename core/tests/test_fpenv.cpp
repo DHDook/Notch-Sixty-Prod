@@ -123,6 +123,39 @@ int main() {
             CHECK(settled, "fir not settled to zero at %.0f", rate);
             n60_graph_retire(g);
         }
+
+        // E20 S4 (G15): the pair and linked stages added since E6 settle to exact zero with no subnormal output.
+        {
+            float clean[26] = {1, 1, 20, 1, 1, 50, 3, 20, 1, 50};
+            for (int i = 10; i < 26; ++i) clean[i] = -30;
+            const float img[8] = {1, 1, 0, 200, 4000, 0.5f, 1.5f, 1.5f};
+            const float ld[32] = {1, 1, -20, 10, 0.5f, 2, 1, 0.6f, 1, 1, 80, 12, 3, 0.5f,
+                                  1, 1, 1000, 5000, 3, 6, 9, 200, 80, 600, -60, 3, 7, 12, 800, 0.1f, 0.5f, 0.3f};
+            const float mb[29] = {1, 120, 2500, 1, 0, -30, -26, -28, 4, 3, 6, 10, 5, 2, 120, 80, 60, 6, 4, 0, 60, 0, 120, 0, 1, 0, 1, 0, 1};
+            const float xt[2] = {800, 0.5f};
+            const float hp[11] = {-3, 0.5f, 30, 0.09f, 700, 0, 0, 0, 0, 0, 0};
+            const float pg[5] = {-90, 6, 10, 5, 5};
+            struct Case { const char *name; uint32_t kind; const float *p; uint32_t np; bool pair; bool exactZero; } cases[] = {
+                {"cleanup", N60_STAGE_CLEANUP, clean, 26, true, false}, {"image", N60_STAGE_IMAGE, img, 8, true, true},
+                {"loudness", N60_STAGE_LOUDNESS, ld, 32, true, false}, {"multiband", N60_STAGE_MULTIBAND, mb, 29, true, false},
+                {"crosstalk", N60_STAGE_CROSSTALK, xt, 2, true, true}, {"headphone", N60_STAGE_HEADPHONE, hp, 11, true, true},
+                {"pause gate", N60_STAGE_PAUSE_GATE, pg, 5, false, true}};
+            for (const Case &c : cases) {
+                n60_stage_desc st[1] = {stage(c.kind, 1, c.p, c.np)};
+                st[0].laneA = 0;
+                if (c.pair) st[0].laneB = 1; else st[0].laneMask = 3;
+                n60_graph *g = build(rate, 512, st, 1);
+                CHECK(g != nullptr, "%s build %.0f", c.name, rate);
+                if (!g) continue;
+                bool sub, settled;
+                runTail(g, rate, sub, settled);
+                CHECK(!sub, "%s subnormal output at %.0f", c.name, rate);
+                // CLEANUP, LOUDNESS and MULTIBAND carry slow detectors and gated noise floors that do not reach exact zero in 1.5 s (E20 G16);
+                // they are held to the no-subnormal rule only.
+                if (c.exactZero) CHECK(settled, "%s not settled to zero at %.0f", c.name, rate);
+                n60_graph_retire(g);
+            }
+        }
     }
 
     // A non-finite burst must not poison the dynamics stages' recursive state (a SANITISE stage normally precedes them): the stages recover once clean input returns.

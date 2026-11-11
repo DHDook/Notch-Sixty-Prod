@@ -162,6 +162,8 @@ struct UnifiedGraphProgramDSP: Equatable, Sendable {
     static let programPEQBase: UInt32 = 800
     static let interChannelDelayBase: UInt32 = 1_000
     static let laneDelayBase: UInt32 = 1_100
+    /// E7 S1: the DELAY half of a fractional inter-channel delay longer than the FRAC_DELAY ring.
+    static let interChannelWholeDelayBase: UInt32 = 1_200
     static let firPartitionFrames: UInt32 = 256
     static let maxStages = 256
     /// The user's protection on the ears of a binaural graph, ahead of the layout's own safety limiter.
@@ -403,11 +405,15 @@ struct UnifiedGraphProgramDSP: Equatable, Sendable {
             }
             for (stereoLane, lane) in [(left, fl), (right, fr)] {
                 if let total = stereoLane.fractionalDelayFrames {
-                    guard total.isFinite, total >= 0, total < 8_190 else {
+                    guard let split = RateCapacity.splitFractionalDelay(totalFrames: total) else {
                         throw UnifiedGraphFallbackReason.specRejected
                     }
+                    if split.wholeFrames >= 1 {
+                        add(N60_STAGE_DELAY, Self.interChannelWholeDelayBase + UInt32(lane), lane: UInt32(lane),
+                            capacity: split.wholeFrames, params: [Float(split.wholeFrames)])
+                    }
                     add(N60_STAGE_FRAC_DELAY, Self.interChannelDelayBase + UInt32(lane), lane: UInt32(lane),
-                        params: [Float(total.rounded(.down)), Float(total - total.rounded(.down))])
+                        params: [Float(split.stageWhole), Float(split.fraction)])
                 } else if let frames = try UnifiedGraphConfiguration.delayFrames(
                     stereoLane.delayMilliseconds, extraFrames: stereoLane.delayFrames, sampleRate: spec.sampleRate) {
                     add(N60_STAGE_DELAY, Self.interChannelDelayBase + UInt32(lane), lane: UInt32(lane),

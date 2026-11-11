@@ -60,14 +60,14 @@ enum MbParam : uint32_t {
     kSidechain = 20,   // 3 bands, 0..300 Hz (0 off)
     kMakeup = 23,      // 3 bands, -12..12 dB
     kAutoRelease = 26, // 3 bands, 0/1
-    kBypass = 29,      // ABI v36: 3 bands, 0/1 (band at unity)
-    kSolo = 32,        // ABI v36: 3 bands, 0/1 (live; session state in Swift)
-    kListen = 35,      // ABI v36: 3 bands, 0 off, 1 sidechain, 2 delta (live; session state in Swift)
-    kDetector = 38,    // ABI v36: 3 bands, 0 peak, 1 RMS
-    kWindow = 41,      // ABI v36: RMS window ms, 5..200
-    kLookahead = 42,   // ABI v36: lookahead frames, 0..8192 (topology: not live)
+    kBypass = 29,      // ABI v37: 3 bands, 0/1 (band at unity)
+    kSolo = 32,        // ABI v37: 3 bands, 0/1 (live; session state in Swift)
+    kListen = 35,      // ABI v37: 3 bands, 0 off, 1 sidechain, 2 delta (live; session state in Swift)
+    kDetector = 38,    // ABI v37: 3 bands, 0 peak, 1 RMS
+    kWindow = 41,      // ABI v37: RMS window ms, 5..200
+    kLookahead = 42,   // ABI v37: lookahead frames, 0..8192 (topology: not live)
     kParams = 29,      // the v25 block
-    kParamsX = 43      // the v36 block
+    kParamsX = 43      // the v37 block
 };
 constexpr uint32_t kMaxLookahead = 16384;  // 20 ms at 768 kHz is 15,360 frames
 
@@ -75,23 +75,26 @@ size_t up(size_t v) { return (v + (kAlign - 1)) & ~(kAlign - 1); }
 bool inR(double v, double lo, double hi) { return std::isfinite(v) && v >= lo && v <= hi; }
 bool isFlag(float v) { return v == 0.0f || v == 1.0f; }
 
+// E23 S1b: coefficients and state are double (E6 G25: float state at the 38 Hz-class corners loses about 50 dB at
+// 384 kHz); input and output stay float.
 struct Bq {
-    float b0, b1, b2, a1, a2;
+    double b0, b1, b2, a1, a2;
 };
 struct BqState {
-    float z1, z2;
+    double z1, z2;
 };
 
 float smoothToward(float current, float target, float coef) { return target + coef * (current - target); }
 bool nearZero(float v) { return std::fabs(v) <= kParkEps; }
-Bq identityBq() { return Bq{1.0f, 0.0f, 0.0f, 0.0f, 0.0f}; }
+Bq identityBq() { return Bq{1.0, 0.0, 0.0, 0.0, 0.0}; }
 
-float runBq(const Bq &c, BqState &s, float in) {
-    const float out = c.b0 * in + s.z1;
+double runBqD(const Bq &c, BqState &s, double in) {
+    const double out = c.b0 * in + s.z1;
     s.z1 = c.b1 * in - c.a1 * out + s.z2;
     s.z2 = c.b2 * in - c.a2 * out;
     return out;
 }
+float runBq(const Bq &c, BqState &s, float in) { return static_cast<float>(runBqD(c, s, static_cast<double>(in))); }
 
 // RBJ low-pass and high-pass, normalised in double and stored as float (the kernel's N60BiquadDesign).
 bool designBq(bool highPass, double rate, double f, double q, Bq &out) {
@@ -108,8 +111,7 @@ bool designBq(bool highPass, double rate, double f, double q, Bq &out) {
     }
     const double a0 = 1.0 + alpha, a1 = -2.0 * cosO, a2 = 1.0 - alpha;
     if (!std::isfinite(a0) || std::fabs(a0) < 1.0e-20) return false;
-    const Bq c{static_cast<float>(b0 / a0), static_cast<float>(b1 / a0), static_cast<float>(b2 / a0),
-               static_cast<float>(a1 / a0), static_cast<float>(a2 / a0)};
+    const Bq c{b0 / a0, b1 / a0, b2 / a0, a1 / a0, a2 / a0};
     if (!std::isfinite(c.b0) || !std::isfinite(c.b1) || !std::isfinite(c.b2) || !std::isfinite(c.a1) || !std::isfinite(c.a2)) return false;
     out = c;
     return true;
@@ -169,7 +171,7 @@ struct MbShared {
     float gainDb[kBands];
     std::atomic<uint32_t> grMaxBits[kBands];
     std::atomic<uint32_t> grNowBits[kBands];
-    // ABI v36 (E28 S7c): solo gains and listen weights ramp over 5 ms; one lookahead ring set follows the struct.
+    // ABI v37 (E28 S7c): solo gains and listen weights ramp over 5 ms; one lookahead ring set follows the struct.
     float soloG[kBands], listenSide[kBands], listenDelta[kBands], meanSq[kBands];
     BqState lhpL[kBands], lhpR[kBands];  // sidechain filters of the listened band, run on the delayed band
     uint32_t ringLen, ringPos;
@@ -220,9 +222,9 @@ void clearState(MbShared &S) {
 }
 
 float cascade(const Bq *c, BqState *st, uint32_t n, float in) {
-    float out = in;
-    for (uint32_t i = 0; i < n; ++i) out = runBq(c[i], st[i], out);
-    return out;
+    double out = static_cast<double>(in);
+    for (uint32_t i = 0; i < n; ++i) out = runBqD(c[i], st[i], out);
+    return static_cast<float>(out);
 }
 
 }  // namespace
@@ -370,7 +372,7 @@ void runMultiband(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t fram
         S.parked = 0;
     }
     float grMax[kBands] = {0.0f, 0.0f, 0.0f};
-    // ABI v36 (E28 S7c). With the 29-value block every extra below is at its default and the arithmetic is the v25 one.
+    // ABI v37 (E28 S7c). With the 29-value block every extra below is at its default and the arithmetic is the v25 one.
     const bool x = r.paramCount >= kParamsX;
     const uint32_t ringLen = x ? S.ringLen : 0;
     float *rings = ringLen != 0 ? ringsOf(S) : nullptr;

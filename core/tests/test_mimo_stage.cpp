@@ -228,6 +228,9 @@ static void testArmedMatchesReference() {
         std::vector<float> keep;
         n60_graph *g = buildMimo(rate, c, keep);
         const uint32_t L = latencyOf(rate, c.tau);
+        uint32_t Dq = 0;
+        double lrq = 0;
+        n60_mimo_low_rate(rate, &Dq, &lrq);
         const uint32_t N = uint32_t(5.0 * rate);
         // Low-passed, quiet source so the delta sits inside the decimator pass band.
         Lanes in = noise(3, N, 3, 0.2f);
@@ -240,7 +243,7 @@ static void testArmedMatchesReference() {
             std::vector<float> got, want;
             for (uint32_t i = from; i < N; ++i) {
                 got.push_back(out[s][i] - in[s][i - L]);
-                want.push_back(ref[s][i - L]);
+                want.push_back(ref[s][i - 10 * Dq]);  // the delta is 10 D late, the direct path L = 10 D + tau (E19 S5)
             }
             const double e = dbRel(got, want, 0);
             CHECK(e < -80.0, "armed delta vs reference %.1f dB (source %u, %.0f)", e, s, rate);
@@ -317,8 +320,53 @@ static void testMonitor() {
         rb.structSize = sizeof rb;
         n60_graph_read_mimo(g, 7, &rb);
         CHECK((rb.faultLatched == 1) == expectFault, "ratio %.4f: fault %u (expected %d), boundMax %g", ratio, rb.faultLatched, int(expectFault), rb.boundRatioMax[0]);
-        if (expectFault) CHECK(rb.faultSource == 1 && rb.held == 1, "fault source/held");
+        if (expectFault) CHECK(rb.faultSource == 1 && rb.held == 1 && rb.faultReason == 1, "fault source/held/reason");
         n60_graph_retire(g);
+    }
+}
+
+// E19 S5, design note 6 and decision D5: the thermal budget. One source, one tap c: the delta is c times the in-band feed, so the
+// delta power over the program power is c^2 exactly. The monitor bound is set far above it, so only the 10 s thermal window can
+// fault. -5.9 dB faults when the first 10 s window ends and not before; -6.1 dB never does.
+static n60_mimo_readback readMimo(n60_graph *g) {
+    n60_mimo_readback rb;
+    std::memset(&rb, 0, sizeof rb);
+    rb.structSize = sizeof rb;
+    n60_graph_read_mimo(g, 7, &rb);
+    return rb;
+}
+
+static void testThermalBudget() {
+    struct Case { double db; bool trips; };
+    const Case cases[] = {{-5.9, true}, {-6.1, false}};
+    for (const Case &cs : cases) {
+        for (double rate : kRates) {
+            if (!cs.trips && rate != 48000 && rate != 384000) continue;
+            Cfg c{1, 1, uint32_t(0.015 * rate), {10.0f}, {float(std::pow(10.0, cs.db / 20.0))}};
+            c.arm = 1.0f;
+            std::vector<float> keep;
+            n60_graph *g = buildMimo(rate, c, keep);
+            auto chunk = [&](double seconds, uint64_t &pos) {
+                const uint32_t N = uint32_t(seconds * rate);
+                Lanes in(1, std::vector<float>(N));
+                for (uint32_t i = 0; i < N; ++i) in[0][i] = 0.1f * float(std::sin(2.0 * 3.14159265358979 * 100.0 * double(pos + i) / rate));
+                pos += N;
+                run(g, in, 480);
+            };
+            uint64_t pos = 0;
+            chunk(9.8, pos);
+            n60_mimo_readback rb = readMimo(g);
+            CHECK(rb.faultLatched == 0, "fs %.0f %.1f dB: fault before the window ends (reason %u)", rate, cs.db, rb.faultReason);
+            chunk(cs.trips ? 0.6 : 15.0, pos);
+            rb = readMimo(g);
+            if (cs.trips) {
+                CHECK(rb.faultLatched == 1 && rb.faultReason == 2 && rb.faultSource == 1 && rb.held == 1,
+                      "fs %.0f %.1f dB: expected a thermal fault, got latched %u reason %u source %u", rate, cs.db, rb.faultLatched, rb.faultReason, rb.faultSource);
+            } else {
+                CHECK(rb.faultLatched == 0 && rb.state == 2, "fs %.0f %.1f dB: unexpected fault %u reason %u state %u", rate, cs.db, rb.faultLatched, rb.faultReason, rb.state);
+            }
+            n60_graph_retire(g);
+        }
     }
 }
 
@@ -428,6 +476,7 @@ int main() {
     testArmedMatchesReference();
     testRampAndTrip();
     testMonitor();
+    testThermalBudget();
     testRebuildMute();
     testBlockSizeIndependence();
     testNoAllocations();

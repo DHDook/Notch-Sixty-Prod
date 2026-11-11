@@ -1023,7 +1023,7 @@ struct ProductionHeadphoneWorkspace: View {
             }
             HStack {
                 Text("Delay")
-                Slider(value: correction.delayMilliseconds, in: 0...10, step: 0.01)
+                Slider(value: correction.delayMilliseconds, in: 0...20, step: 0.01)
                 Text("\(correction.wrappedValue.delayMilliseconds, specifier: "%.2f") ms")
                     .monospacedDigit().frame(width: 76, alignment: .trailing)
             }

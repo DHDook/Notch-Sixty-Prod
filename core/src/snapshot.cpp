@@ -69,7 +69,7 @@ struct PeqSec {
     double nxt[5];       // incoming coefficients while xfLeft != 0
     float seen[4];       // parameters the live/incoming design was made from
     uint32_t xfLeft;     // frames left in the crossfade (0 = none)
-    uint32_t pad;
+    uint32_t form;       // type 9 only: the partner's form slot (type 10 slot 3) the design was made with
 };
 
 struct MeterLane {
@@ -174,7 +174,15 @@ namespace {
 
 // One PEQ section (ABI v26): types 0..7 as designBiquad, 8 constant-Q peaking (cookbook Q = Q / A, so Q is the classic
 // electrical Q), 9 the numerator half and 10 the denominator half of one prepared biquad (see graph.h).
-bool designPeqSection(const float *p, double rate, double out[5]) {
+// E23 S1b (E6 G31): a prepared biquad whose type 10 half carries a non-zero fourth slot (1) is in deviation form, for a
+// pole pair and a zero pair near z = 1 (low corners at high rates), where float coefficients quantise the poles. With
+// y = 1 - 1/z the numerator is n0 + n1 y + n2 y^2 and the denominator d0 + d1 y + (1 - d0 - d1) y^2, so
+//   type 9 slots (n0, n1, n2):  b0 = n0 + n1 + n2, b1 = -n1 - 2 n2, b2 = n2
+//   type 10 slots (d0, d1, 1):  a1 = d1 + 2 d0 - 2, a2 = 1 - d0 - d1
+// all evaluated in double from the float slots; n0, n1, d0 and d1 are small and keep full relative precision. A zero
+// fourth slot is the original form (b0, b1, b2 and a1, a2 stored directly), so existing callers are unchanged.
+// `next` is the section after p (the type 10 half of a type 9), or null at the end of the stage.
+bool designPeqSection(const float *p, const float *next, double rate, double out[5]) {
     const uint32_t type = static_cast<uint32_t>(p[0]);
     if (type <= 7) return designBiquad(type, rate, p[1], p[2], p[3], out);
     if (type == 8) {
@@ -183,11 +191,23 @@ bool designPeqSection(const float *p, double rate, double out[5]) {
     }
     if (!std::isfinite(p[1]) || !std::isfinite(p[2]) || !std::isfinite(p[3])) return false;
     if (type == 9) {
-        out[0] = p[1]; out[1] = p[2]; out[2] = p[3]; out[3] = 0.0; out[4] = 0.0;
+        if (next != nullptr && next[3] == 1.0f) {
+            const double n0 = p[1], n1 = p[2], n2 = p[3];
+            out[0] = n0 + n1 + n2; out[1] = -n1 - 2.0 * n2; out[2] = n2;
+        } else {
+            out[0] = p[1]; out[1] = p[2]; out[2] = p[3];
+        }
+        out[3] = 0.0; out[4] = 0.0;
     } else {
         // The denominator must be strictly stable (inside the stability triangle), or a hostile snapshot could build a
         // runaway recursion.
-        const double a1 = p[1], a2 = p[2];
+        if (p[3] != 0.0f && p[3] != 1.0f) return false;  // the form slot is 0 (coefficients) or 1 (deviation form)
+        double a1 = p[1], a2 = p[2];
+        if (p[3] == 1.0f) {
+            const double d0 = p[1], d1 = p[2];
+            a2 = 1.0 - d0 - d1;
+            a1 = d1 + 2.0 * d0 - 2.0;
+        }
         if (!(std::fabs(a2) < 1.0 && std::fabs(a1) < 1.0 + a2)) return false;
         out[0] = 1.0; out[1] = 0.0; out[2] = 0.0; out[3] = a1; out[4] = a2;
     }
@@ -475,7 +495,7 @@ n60_status validateDesc(const n60_graph_desc &d) {
                     const float *p = s.params + 4 * k;
                     double c[5];
                     if (!(p[0] >= 0.0f && p[0] <= 10.0f) || p[0] != std::floor(p[0]) ||
-                        !designPeqSection(p, d.sampleRate, c)) {
+                        !designPeqSection(p, k + 1 < s.paramCount / 4 ? p + 4 : nullptr, d.sampleRate, c)) {
                         return N60_STATUS_BAD_ARGUMENT;
                     }
                     // A type 9 numerator is followed by its type 10 denominator, and a type 10 follows a type 9.
@@ -636,8 +656,9 @@ n60_status buildSnapshot(const n60_graph_desc &d, uint32_t epoch, SnapHeader **o
             PeqSec *sec = reinterpret_cast<PeqSec *>(bytes(h) + r.coefOff);
             for (uint32_t k = 0; k < s.paramCount / 4; ++k) {
                 const float *p = s.params + 4 * k;
-                designPeqSection(p, d.sampleRate, sec[k].cur);
+                designPeqSection(p, k + 1 < s.paramCount / 4 ? p + 4 : nullptr, d.sampleRate, sec[k].cur);
                 for (int j = 0; j < 4; ++j) sec[k].seen[j] = p[j];
+                sec[k].form = (p[0] == 9.0f && k + 1 < s.paramCount / 4 && p[7] != 0.0f) ? 1u : 0u;
             }
         }
     }
@@ -899,12 +920,15 @@ void runPeq(SnapHeader *h, const StageRec &r, float *const *lanes, uint32_t fram
     for (uint32_t s = 0; s < sections; ++s) {
         const float *p = params + 4 * s;
         PeqSec &q = sec[s];
-        if (q.xfLeft != 0 || (p[0] == q.seen[0] && p[1] == q.seen[1] && p[2] == q.seen[2] && p[3] == q.seen[3])) continue;
-        if (!designPeqSection(p, h->sampleRate, q.nxt)) {
+        const uint32_t form = (p[0] == 9.0f && s + 1 < sections && p[7] != 0.0f) ? 1u : 0u;  // a flip redesigns the numerator
+        if (q.xfLeft != 0 || (form == q.form && p[0] == q.seen[0] && p[1] == q.seen[1] && p[2] == q.seen[2] && p[3] == q.seen[3])) continue;
+        if (!designPeqSection(p, s + 1 < sections ? p + 4 : nullptr, h->sampleRate, q.nxt)) {
             for (int j = 0; j < 4; ++j) q.seen[j] = p[j];  // unreachable for validated values; keep the old design
+            q.form = form;
             continue;
         }
         for (int j = 0; j < 4; ++j) q.seen[j] = p[j];
+        q.form = form;
         q.xfLeft = ramp;
         for (uint32_t l = 0; l < r.laneCount; ++l) {
             PeqLane &st = *reinterpret_cast<PeqLane *>(laneState(h, r, l));

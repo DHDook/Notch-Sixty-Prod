@@ -30,6 +30,7 @@
 #include <cstring>
 #include <new>
 
+#include "n60/rate_capacity.h"
 #include "n60/xover.h"
 #include "simd/simd.hpp"
 
@@ -266,7 +267,7 @@ ProtCfg protCfg(const float *p, double rate, uint32_t n) {
     c.factor = (c.limiter && tp) ? 4u : static_cast<uint32_t>(p[6]);
     const double highRate = rate * static_cast<double>(c.factor);
     c.ceilLin = std::pow(10.0f, p[1] / 20.0f);
-    c.laHigh = c.limiter ? static_cast<uint32_t>(std::ceil(static_cast<double>(p[4]) * 0.001 * highRate)) : 0u;
+    c.laHigh = c.limiter ? n60::framesFor(static_cast<double>(p[4]) * 0.001, highRate) : 0u;
     c.atkHigh = c.limiter ? static_cast<uint32_t>(std::fmax(1.0, std::ceil(static_cast<double>(p[2]) * 0.001 * highRate))) : 1u;
     c.relCoef = c.limiter ? std::exp(-1.0 / std::fmax(1.0, static_cast<double>(p[3]) * 0.001 * highRate)) : 0.0;
     const uint32_t laFrames = c.laHigh == 0 ? 0u : (c.laHigh + c.factor - 1u) / c.factor;
@@ -1932,17 +1933,38 @@ struct HalfBandRev {
 };
 constexpr HalfBandRev kHalfBandRev;
 
-inline float hbPush(Hb &f, float in) {
+// E20 S4 (G15 c): the half-band's even taps are zero, so each polyphase branch is half the length.
+//  - A decimating filter still takes every input into its history, but only computes the 64-tap dot product when its output
+//    is kept (hbWrite then hbDot); a discarded output costs a store. The kept outputs are bit-identical to before.
+//  - An interpolating filter (zero-stuffed input) keeps only its real inputs: out[0] is the centre tap on the input 16 back
+//    (one multiply, equal to the old sum of one non-zero product and zeros), out[1] is a 32-tap dot over the odd taps.
+inline void hbWrite(Hb &f, float in) {
     const uint32_t newest = f.w;
     f.s[newest] = in;
     f.s[newest + kHbTaps] = in;
-    const float *win = f.s + newest + kHbTaps - 63u;  // win[j] is the sample 63 - j steps old
     f.w = newest + 1 == kHbTaps ? 0u : newest + 1;
-    return simd::dot16(win, kHalfBandRev.t, 64);
 }
+inline float hbDot(const Hb &f) {
+    const uint32_t newest = f.w == 0 ? kHbTaps - 1 : f.w - 1;  // the sample hbWrite stored last
+    return simd::dot16(f.s + newest + kHbTaps - 63u, kHalfBandRev.t, 64);
+}
+
+constexpr uint32_t kHbUp = 32;  // real inputs an interpolating half-band holds (kHbUp doubled in Hb::s)
+// Odd taps in window order: kHalfBandOddRev[j] pairs with the input kHbUp - 1 - j steps old.
+struct HalfBandOddRev {
+    alignas(16) float t[kHbUp];
+    constexpr HalfBandOddRev() : t{} { for (uint32_t j = 0; j < kHbUp; ++j) t[j] = kHalfBand[63 - 2 * j]; }
+};
+constexpr HalfBandOddRev kHalfBandOddRev;
+
 inline void interp2(Hb &f, float in, float out[2]) {
-    out[0] = 2.0f * hbPush(f, in);
-    out[1] = 2.0f * hbPush(f, 0.0f);
+    const uint32_t newest = f.w;
+    f.s[newest] = in;
+    f.s[newest + kHbUp] = in;
+    f.w = newest + 1 == kHbUp ? 0u : newest + 1;
+    const float *win = f.s + newest + 1;  // oldest .. newest (= in)
+    out[0] = 2.0f * (kHalfBand[32] * win[kHbUp - 1 - 16]);
+    out[1] = 2.0f * simd::dot16(win, kHalfBandOddRev.t, kHbUp);
 }
 
 constexpr float kEps = 1.0e-12f;
@@ -2127,8 +2149,8 @@ void runProtection(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t fra
                 const bool emit = sh.ph1 == 0u;
                 sh.ph1 ^= 1u;
                 for (uint32_t l = 0; l < n; ++l) {
-                    const float f = hbPush(pl[l]->dn1, hi[l][k]);
-                    if (emit) ptr[l][i] = f;
+                    hbWrite(pl[l]->dn1, hi[l][k]);
+                    if (emit) ptr[l][i] = hbDot(pl[l]->dn1);
                 }
             }
             continue;
@@ -2140,8 +2162,8 @@ void runProtection(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t fra
             const bool emit = sh.ph2 == 0u;
             sh.ph2 ^= 1u;
             for (uint32_t l = 0; l < n; ++l) {
-                const float f = hbPush(pl[l]->dn2, hi[l][k]);
-                if (emit && emitted < 2u) down[l][emitted] = f;
+                hbWrite(pl[l]->dn2, hi[l][k]);
+                if (emit && emitted < 2u) down[l][emitted] = hbDot(pl[l]->dn2);
             }
             if (emit) emitted += 1u;
         }
@@ -2149,8 +2171,8 @@ void runProtection(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t fra
             const bool emit = sh.ph1 == 0u;
             sh.ph1 ^= 1u;
             for (uint32_t l = 0; l < n; ++l) {
-                const float f = hbPush(pl[l]->dn1, down[l][k]);
-                if (emit) ptr[l][i] = f;
+                hbWrite(pl[l]->dn1, down[l][k]);
+                if (emit) ptr[l][i] = hbDot(pl[l]->dn1);
             }
         }
     }

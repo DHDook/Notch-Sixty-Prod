@@ -380,9 +380,9 @@ enum LiveNChannelRenderGraphCompiler {
 /// lives beside, rather than inside, CoreAudioTransportSession so the mature
 /// stereo session remains untouched and is still the fallback/default path.
 final class CoreAudioNChannelTransportSession {
-    private static let bridgeCapacityFrames: UInt32 = 65_536
+    static let bridgeCapacityFrames: UInt32 = RateCapacity.fixedRingFrames
     /// Largest Core Audio buffer the graph path renders in one block.
-    static let graphMaxBlockFrames: UInt32 = 32_768
+    static let graphMaxBlockFrames: UInt32 = RateCapacity.largestDeviceBufferFrames
 
     let selectedOutput: AudioOutputDevice
     let routePlan: LiveNChannelOutputRoutePlan
