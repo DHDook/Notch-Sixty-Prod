@@ -769,6 +769,21 @@ if selected e28_comp_extras; then
     fi
 fi
 
+# E28 S7b: expander hold, knee, detector, sidechain filter, link and sidechain / delta listen (ABI v35).
+if selected e28_exp_extras; then
+    build_core_objs
+    if [ "$CORE_OK" = 1 ]; then
+        if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -Icore/include -Icore/src core/tests/test_exp_extras.cpp \
+            "${CORE_OBJS[@]}" -o "$OUT/e28_core_exp_extras" && "$OUT/e28_core_exp_extras"; then
+            passed+=(e28_core_exp_extras)
+        else
+            failed+=(e28_core_exp_extras)
+        fi
+    else
+        failed+=(e28_exp_extras)
+    fi
+fi
+
 # E6 S12c: the loudness stage (match, contour, dialogue leveler): behaviour at the eight standard rates.
 if selected e6_loudness; then
     build_core_objs
