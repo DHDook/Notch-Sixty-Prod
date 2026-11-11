@@ -2338,6 +2338,37 @@ uint64_t systemRiderCarry(SnapHeader *from, SnapHeader *to) N60_RT_NONBLOCKING {
     const StageRec *src = stages(from);
     StageRec *dst = stages(to);
     for (uint32_t i = 0; i < to->stageCount; ++i) {
+        if (dst[i].kind == N60_STAGE_AMBIENT) {  // E4 S30d (G12): biquad state, crossfades and gain ramp continue
+            if (from->sampleRate != to->sampleRate) continue;
+            for (uint32_t j = 0; j < from->stageCount; ++j) {
+                if (src[j].kind != N60_STAGE_AMBIENT || src[j].id != dst[i].id || src[j].laneCount != dst[i].laneCount) continue;
+                const AmbShared &a = *reinterpret_cast<const AmbShared *>(sharedState(from, src[j]));
+                AmbShared &b = *reinterpret_cast<AmbShared *>(sharedState(to, dst[i]));
+                // Sections are indexed by band, so index k is the same filter in both; the section count is topology and
+                // sections beyond the shorter list start fresh. A changed parameter is picked up by runAmbient (seen).
+                const uint32_t n = std::min(a.n, b.n);
+                for (uint32_t k = 0; k < n; ++k) {
+                    std::memcpy(b.coef[k], a.coef[k], sizeof b.coef[k]);
+                    std::memcpy(b.coefN[k], a.coefN[k], sizeof b.coefN[k]);
+                    std::memcpy(b.seen[k], a.seen[k], sizeof b.seen[k]);
+                    b.xf[k] = a.xf[k];
+                }
+                for (uint32_t l = 0; l < dst[i].laneCount; ++l) {
+                    const AmbLane &la = *reinterpret_cast<const AmbLane *>(laneState(from, src[j], l));
+                    AmbLane &lb = *reinterpret_cast<AmbLane *>(laneState(to, dst[i], l));
+                    lb.g = la.g;
+                    lb.seen = la.seen;
+                    for (uint32_t k = 0; k < n; ++k) {
+                        lb.z[k] = la.z[k];
+                        lb.zN[k] = la.zN[k];
+                    }
+                    bytes += sizeof(Ramp) + sizeof(float) + 2 * n * sizeof(Bq);
+                }
+                bytes += n * (2 * sizeof(double[5]) + sizeof(float[3]) + sizeof(uint32_t));
+                break;
+            }
+            continue;
+        }
         if (dst[i].kind != N60_STAGE_PROTECTION) continue;
         for (uint32_t j = 0; j < from->stageCount; ++j) {
             if (src[j].kind != N60_STAGE_PROTECTION || src[j].id != dst[i].id) continue;

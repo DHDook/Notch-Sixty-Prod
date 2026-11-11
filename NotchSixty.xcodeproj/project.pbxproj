@@ -400,6 +400,7 @@
 		E4F7000000000000000000A5 /* QuietZoneNoiseSurveyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4F7000000000000000000A3 /* QuietZoneNoiseSurveyTests.swift */; };
 		E4F7000000000000000000B5 /* ConversationUnmaskingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4F7000000000000000000B3 /* ConversationUnmaskingTests.swift */; };
 		E4F730B00000000000000005 /* ConversationUnmaskingInputTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4F730B00000000000000004 /* ConversationUnmaskingInputTests.swift */; };
+		E4F730C00000000000000011 /* ConversationUnmaskingControllerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4F730C00000000000000010 /* ConversationUnmaskingControllerTests.swift */; };
 		E4F730C00000000000000005 /* ConversationUnmaskingWiringTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4F730C00000000000000004 /* ConversationUnmaskingWiringTests.swift */; };
 		E4F730A00000000000000021 /* AmbientUnmaskOverlayTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4F730A00000000000000020 /* AmbientUnmaskOverlayTests.swift */; };
 		E4F300000000000000000001 /* QuietZoneFeedForwardShadowPlan.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4F300000000000000000011 /* QuietZoneFeedForwardShadowPlan.swift */; };
@@ -1152,6 +1153,7 @@
 		E4F7000000000000000000A3 /* QuietZoneNoiseSurveyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuietZoneNoiseSurveyTests.swift; sourceTree = "<group>"; };
 		E4F7000000000000000000B3 /* ConversationUnmaskingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationUnmaskingTests.swift; sourceTree = "<group>"; };
 		E4F730B00000000000000004 /* ConversationUnmaskingInputTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationUnmaskingInputTests.swift; sourceTree = "<group>"; };
+		E4F730C00000000000000010 /* ConversationUnmaskingControllerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationUnmaskingControllerTests.swift; sourceTree = "<group>"; };
 		E4F730C00000000000000004 /* ConversationUnmaskingWiringTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationUnmaskingWiringTests.swift; sourceTree = "<group>"; };
 		E4F730A00000000000000020 /* AmbientUnmaskOverlayTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AmbientUnmaskOverlayTests.swift; sourceTree = "<group>"; };
 		E4F300000000000000000011 /* QuietZoneFeedForwardShadowPlan.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuietZoneFeedForwardShadowPlan.swift; sourceTree = "<group>"; };
@@ -1754,6 +1756,7 @@
 				E4F7000000000000000000A3 /* QuietZoneNoiseSurveyTests.swift */,
 				E4F7000000000000000000B3 /* ConversationUnmaskingTests.swift */,
 				E4F730B00000000000000004 /* ConversationUnmaskingInputTests.swift */,
+				E4F730C00000000000000010 /* ConversationUnmaskingControllerTests.swift */,
 				E4F730C00000000000000004 /* ConversationUnmaskingWiringTests.swift */,
 				E4F730A00000000000000020 /* AmbientUnmaskOverlayTests.swift */,
 				E4F7000000000000000000C3 /* QuietZoneVirtualMicrophoneTests.swift */,
@@ -2761,6 +2764,7 @@
 				E4F7000000000000000000A5 /* QuietZoneNoiseSurveyTests.swift in Sources */,
 				E4F7000000000000000000B5 /* ConversationUnmaskingTests.swift in Sources */,
 				E4F730B00000000000000005 /* ConversationUnmaskingInputTests.swift in Sources */,
+				E4F730C00000000000000011 /* ConversationUnmaskingControllerTests.swift in Sources */,
 				E4F730C00000000000000005 /* ConversationUnmaskingWiringTests.swift in Sources */,
 				E4F730A00000000000000021 /* AmbientUnmaskOverlayTests.swift in Sources */,
 				E4F7000000000000000000C5 /* QuietZoneVirtualMicrophoneTests.swift in Sources */,

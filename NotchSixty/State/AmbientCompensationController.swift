@@ -240,6 +240,26 @@ final class AmbientCompensationController: ObservableObject {
         self.microphone = microphone
         self.projects = projects
         self.transportFactory = transportFactory
+        // E4 S30d (G14): a transport teardown (rebuild, rate change, device change) drops the graph that held the
+        // unmasking cuts, so the governor, the applied-cuts record and the speech history restart with the new session.
+        // The observer holds self weakly.
+        _ = engine.addTransportTeardownObserver { [weak self] _ in
+            self?.resetAnalysisHistory()
+        }
+    }
+
+    /// E4 S30d: whether the live graph can realise unmasking cuts. The engine's answer unless a test injects one.
+    var unmaskingRuntimeAvailableProvider: (() -> Bool)?
+    private var unmaskingRuntimeAvailable: Bool {
+        unmaskingRuntimeAvailableProvider?() ?? engine.ambientUnmaskingRuntimeAvailable
+    }
+
+    /// Test seams (E4 S30d, G13): the planner result of the latest poll, and the configuration, without a monitor.
+    func setUnmaskingEvaluationForTesting(_ evaluation: ConversationUnmaskingEvaluation?) {
+        latestUnmasking = evaluation
+    }
+    func installConfigurationForTesting(_ configuration: AmbientCompensationConfiguration) {
+        self.configuration = configuration
     }
 
     var availableModelPositions: [RoomCorrectionMeasurementPosition] {
@@ -713,7 +733,7 @@ final class AmbientCompensationController: ObservableObject {
                     )
                     // E4 S30c: with a complete per-band plan, Conversation Focus sends the unmasking cuts only
                     // (level and the three bands at 0). Missing inputs keep today's broad cut.
-                    if unmaskingInputsEnabled, engine.ambientUnmaskingRuntimeAvailable,
+                    if unmaskingInputsEnabled, unmaskingRuntimeAvailable,
                        case .planned(let plan)? = latestUnmasking?.status {
                         planned = AmbientCompensationTarget(
                             activity: broad.activity,
@@ -1077,13 +1097,13 @@ final class AmbientCompensationController: ObservableObject {
     /// E4 S30c: puts the governed cuts on the target about to be sent, or none. Cuts go out only with the flag on, in
     /// Conversation Focus, and where the live graph can realise them (not the legacy kernel); otherwise the governor
     /// is cleared at once (flag off, mode change) and the target carries none.
-    private func attachUnmaskingCuts(
+    func attachUnmaskingCuts(
         to target: inout AmbientCompensationTarget,
         mode: ActiveAcousticsPlaybackAdaptationMode,
         freshAnalysis: Bool
     ) {
         let elapsed = Double(Self.pollIntervalNanoseconds) / 1_000_000_000
-        guard unmaskingInputsEnabled, mode == .conversationFocus, engine.ambientUnmaskingRuntimeAvailable else {
+        guard unmaskingInputsEnabled, mode == .conversationFocus, unmaskingRuntimeAvailable else {
             unmaskingGovernor.reset()
             unmaskingTrailerSent = false
             return
@@ -1103,7 +1123,7 @@ final class AmbientCompensationController: ObservableObject {
     }
 
     /// The engine accepted `target`: the cuts it carried are now in the playback reference (G7).
-    private func unmaskingCutsWereSent(_ target: AmbientCompensationTarget) {
+    func unmaskingCutsWereSent(_ target: AmbientCompensationTarget) {
         unmaskingAppliedCutsDB = target.unmaskingCutsDB
             ?? [Double](repeating: 0, count: SpeechIntelligibilityBands.centersHz.count)
         unmaskingTrailerSent = target.unmaskingCutsDB != nil
@@ -1120,7 +1140,7 @@ final class AmbientCompensationController: ObservableObject {
             evaluation: evaluation, appliedCutsDB: unmaskingAppliedCutsDB, sampleRate: rate)
     }
 
-    private func resetAnalysisHistory() {
+    func resetAnalysisHistory() {
         speechHistory.reset()
         unmaskingGovernor.reset()
         unmaskingTrailerSent = false

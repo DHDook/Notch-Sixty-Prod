@@ -1253,7 +1253,7 @@ final class AudioIOEngine: ObservableObject {
     var ambientUnmaskingRuntimeAvailable: Bool {
         if ambientCompensationGraphRuntimeAvailable { return true }
         guard let session = transportSession, ambientCompensationStereoSpeakerRuntimeAvailable else { return false }
-        return session.unifiedGraphEnabled && session.unifiedGraphFallbackReason == nil
+        return session.unifiedGraphRendersLocked
     }
 
     /// E4 S30c: the engine's own check of a conversation target's cuts (the controller's planner already limits them):
@@ -1509,6 +1509,12 @@ final class AudioIOEngine: ObservableObject {
         let id = UUID()
         transportTeardownObservers.append((id, handler))
         return id
+    }
+
+    /// Every transport teardown path (Stop, Quit, sleep, output lost, rate or route reconfiguration) ends in
+    /// `tearDownTransport`, which calls this last. Also called directly by tests, which have no Core Audio session.
+    func notifyTransportTeardown(_ cause: TransportTeardownCause) {
+        for observer in transportTeardownObservers { observer.handler(cause) }
     }
 
     func removeTransportTeardownObserver(_ id: UUID) {
@@ -6050,7 +6056,7 @@ final class AudioIOEngine: ObservableObject {
         syncActiveQuietZoneLease(active: false)
         // The app's own profile switch happens while arming and keeps the arm (see `disarmReason`).
         if cause != .plannedProfileChange { liveTreatmentGeneration &+= 1 }
-        for observer in transportTeardownObservers { observer.handler(cause) }
+        notifyTransportTeardown(cause)
     }
 
     private func forceFailedState(_ error: Error) {
