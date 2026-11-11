@@ -1,5 +1,6 @@
 // E9 S6: per-output headroom maths (n60/headroom.h). Offline; control or worker thread only.
 #include "n60/headroom.h"
+#include "n60/xover.h"
 
 #include <algorithm>
 #include <cmath>
@@ -75,6 +76,15 @@ bool prepare(const n60_headroom_stage &s, double rate, Prepared &out) {
                 out.sections.push_back({p[i], p[i + 1], p[i + 2], p[i + 3], p[i + 4]});
             }
             return true;
+        case N60_HEADROOM_STAGE_LINKWITZ: {
+            // Designed in double exactly as the graph's XOVER stage does: float biquad coefficients lose the low-frequency
+            // response of a 20 Hz transform at 352.8 and 384 kHz.
+            if (s.param_count != 4) return false;
+            n60_xover_cascade c;
+            if (n60_xover_linkwitz(p[0], p[1], p[2], p[3], rate, &c) != N60_XOVER_OK || c.count != 1) return false;
+            out.sections.push_back({c.sections[0].b0, c.sections[0].b1, c.sections[0].b2, c.sections[0].a1, c.sections[0].a2});
+            return true;
+        }
         case N60_HEADROOM_STAGE_FIR:
             if (s.tap_count < 1 || s.tap_count > N60_HEADROOM_MAX_FIR_TAPS || s.taps == nullptr) return false;
             if (!allFinite(s.taps, s.tap_count)) return false;

@@ -302,7 +302,7 @@ static void testExcursionCap(double fs) {
 }
 
 int main() {
-    CHECK(n60_headroom_abi_version() == N60_HEADROOM_ABI_VERSION && N60_HEADROOM_ABI_VERSION == 2, "abi");
+    CHECK(n60_headroom_abi_version() == N60_HEADROOM_ABI_VERSION && N60_HEADROOM_ABI_VERSION == 3, "abi");
     testBudgetArithmetic();
     for (double fs : kRates) {
         testPredictedPeaks(fs);
