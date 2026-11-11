@@ -22,13 +22,6 @@ final class DynamicsParameterSpecTests: XCTestCase {
         }
     }
 
-    /// Band Low must stay below Band High, so Low's top and High's bottom are not reachable together: the
-    /// engine refuses them with a message naming the field (covered by the rejected-apply test).
-    private func isInfeasiblePairBound(_ spec: DynamicsParameterSpec, _ bound: Double) -> Bool {
-        (spec.id == "dialogueRelativeLevelerBandLowHz" && bound == 8_000)
-            || (spec.id == "dialogueRelativeLevelerBandHighHz" && bound == 100)
-    }
-
     func testSpecIDsAreUnique() {
         XCTAssertEqual(Set(specs.map(\.id)).count, specs.count)
     }
@@ -44,7 +37,6 @@ final class DynamicsParameterSpecTests: XCTestCase {
         for spec in specs {
             for bound in [spec.config.lowerBound, spec.config.upperBound] {
                 var c = DynamicsConfiguration()
-                if isInfeasiblePairBound(spec, bound) { continue }
                 prepared(spec, &c, atLower: bound == spec.config.lowerBound)
                 spec.apply(bound, to: &c)
                 XCTAssertTrue(validates(c), "\(spec.id) at \(bound)")
@@ -56,7 +48,6 @@ final class DynamicsParameterSpecTests: XCTestCase {
         for spec in specs {
             for bound in [spec.slider.lowerBound, spec.slider.upperBound] {
                 var c = DynamicsConfiguration()
-                if isInfeasiblePairBound(spec, bound) { continue }
                 prepared(spec, &c, atLower: bound == spec.slider.lowerBound)
                 spec.apply(bound, to: &c)
                 XCTAssertTrue(validates(c), "\(spec.id) slider at \(bound)")

@@ -15,6 +15,7 @@
 #include <cstring>
 
 #include "n60/graph.h"
+#include "jobs.hpp"
 #include "platform/rt.hpp"
 #include "platform/rt_libc.hpp"
 #include "platform/rt_clock.hpp"
@@ -37,6 +38,7 @@ struct StageRec {
     uint32_t coefOff;    // PEQ: PeqSec[sections] (live and incoming biquad coefficients, crossfade counter)
     uint32_t sharedOff;  // ABI v3 stages: state shared by all of the stage's lanes
     float applied;       // last target the state acted on (GAIN, DELAY)
+    uint32_t phase;      // E20 S5: 0 = runs on the calling thread; n > 0 = member of parallel phase n (consecutive stages with the same n)
     uint32_t carrySrc;   // ABI v20 (E9 S2): 1 + index of the stage in the outgoing snapshot a lazy FIR carry copies from (0 = none)
 };
 
@@ -113,8 +115,9 @@ void freeSnapshot(SnapHeader *snap);
 
 // Realtime thread. Runs the stages in place on `lanes` (outputChannels pointers).
 // follower: the incoming side of a rebuild (see "External processor" in graph.h).
+// jobs (E20 S5): when set and it has workers, phases of lane-independent stages run as one job per lane (jobs.hpp).
 void runSnapshot(SnapHeader *snap, float *const *lanes, uint32_t frames,
-                 std::atomic<uint64_t> &sanitisedSamples, bool follower = false) N60_RT_NONBLOCKING;
+                 std::atomic<uint64_t> &sanitisedSamples, bool follower = false, JobHost *jobs = nullptr) N60_RT_NONBLOCKING;
 
 // Control or realtime thread (pure). Checks one live parameter edit against the stage's
 // kind and ranges: OK, BAD_ARGUMENT (index or value out of range) or UNSUPPORTED (the

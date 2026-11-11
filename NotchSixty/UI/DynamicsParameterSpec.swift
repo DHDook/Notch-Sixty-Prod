@@ -20,6 +20,10 @@ struct DynamicsParameterSpec: Identifiable {
         case floorBelowCeiling
         /// Voice Gate ceiling stays at least 0.01 above the floor.
         case ceilingAboveFloor
+        /// Dialogue Leveler Band Low stays at least 1 Hz below Band High (G19): the pair cannot be refused.
+        case bandLowBelowHigh
+        /// Dialogue Leveler Band High stays at least 1 Hz above Band Low.
+        case bandHighAboveLow
     }
 
     let id: String
@@ -125,6 +129,10 @@ struct DynamicsParameterSpec: Identifiable {
         case .voiceSensitivity:
             configuration.dialogueRelativeLeveler.voiceGate.confidenceCeilingIndex = v
             configuration.dialogueRelativeLeveler.voiceGate.confidenceFloorIndex = max(0, v - 0.30)
+        case .bandLowBelowHigh:
+            configuration[keyPath: keyPath] = min(v, configuration.dialogueRelativeLeveler.bandHighHz - 1)
+        case .bandHighAboveLow:
+            configuration[keyPath: keyPath] = max(v, configuration.dialogueRelativeLeveler.bandLowHz + 1)
         case .floorBelowCeiling:
             let ceiling = configuration.dialogueRelativeLeveler.voiceGate.confidenceCeilingIndex
             configuration[keyPath: keyPath] = min(v, ceiling - 0.01)
@@ -189,8 +197,8 @@ extension DynamicsParameterSpec {
     static let loudnessContourReferencePhons = DynamicsParameterSpec("loudnessContourReferencePhons", stage: "Loudness Contour", "Reference Level", .phon, \.loudnessContour.referencePhons, config: LoudnessContourConfiguration.referencePhonsRange, slider: 60.0...95.0, step: 1, digits: 0)
     static let loudnessContourMaxBoostDB = DynamicsParameterSpec("loudnessContourMaxBoostDB", stage: "Loudness Contour", "Maximum Boost", .decibels, \.loudnessContour.maxBoostDB, config: LoudnessContourConfiguration.maxBoostRange, slider: 6.0...20.0, step: 0.5, digits: 1)
     static let loudnessContourMaxCutDB = DynamicsParameterSpec("loudnessContourMaxCutDB", stage: "Loudness Contour", "Maximum Cut", .decibels, \.loudnessContour.maxCutDB, config: LoudnessContourConfiguration.maxCutRange, slider: 0.0...6.0, step: 0.5, digits: 1)
-    static let dialogueRelativeLevelerBandLowHz = DynamicsParameterSpec("dialogueRelativeLevelerBandLowHz", stage: "Dialogue Leveler", "Band Low", .hertz, \.dialogueRelativeLeveler.bandLowHz, config: DialogueRelativeLevelerConfiguration.bandRange, slider: 100.0...8000.0, step: 50, digits: 0)
-    static let dialogueRelativeLevelerBandHighHz = DynamicsParameterSpec("dialogueRelativeLevelerBandHighHz", stage: "Dialogue Leveler", "Band High", .hertz, \.dialogueRelativeLeveler.bandHighHz, config: DialogueRelativeLevelerConfiguration.bandRange, slider: 100.0...8000.0, step: 50, digits: 0)
+    static let dialogueRelativeLevelerBandLowHz = DynamicsParameterSpec("dialogueRelativeLevelerBandLowHz", stage: "Dialogue Leveler", "Band Low", .hertz, \.dialogueRelativeLeveler.bandLowHz, config: DialogueRelativeLevelerConfiguration.bandRange, slider: 100.0...8000.0, step: 50, digits: 0, coupling: .bandLowBelowHigh)
+    static let dialogueRelativeLevelerBandHighHz = DynamicsParameterSpec("dialogueRelativeLevelerBandHighHz", stage: "Dialogue Leveler", "Band High", .hertz, \.dialogueRelativeLeveler.bandHighHz, config: DialogueRelativeLevelerConfiguration.bandRange, slider: 100.0...8000.0, step: 50, digits: 0, coupling: .bandHighAboveLow)
     static let dialogueRelativeLevelerTargetGapDB = DynamicsParameterSpec("dialogueRelativeLevelerTargetGapDB", stage: "Dialogue Leveler", "Target Gap", .decibels, \.dialogueRelativeLeveler.targetGapDB, config: DialogueRelativeLevelerConfiguration.targetGapRange, slider: 3.0...20.0, step: 0.5, digits: 1)
     static let dialogueRelativeLevelerBoostRatio = DynamicsParameterSpec("dialogueRelativeLevelerBoostRatio", stage: "Dialogue Leveler", "Boost Ratio", .ratio, \.dialogueRelativeLeveler.boostRatio, config: DialogueRelativeLevelerConfiguration.boostRatioRange, slider: 1.0...6.0, step: 0.1, digits: 1)
     static let dialogueRelativeLevelerMaxBoostDB = DynamicsParameterSpec("dialogueRelativeLevelerMaxBoostDB", stage: "Dialogue Leveler", "Maximum Boost", .decibels, \.dialogueRelativeLeveler.maxBoostDB, config: DialogueRelativeLevelerConfiguration.maxBoostRange, slider: 0.0...15.0, step: 0.5, digits: 1)
@@ -222,6 +230,26 @@ extension DynamicsParameterSpec {
     static let stereoWidenerMidWidth = DynamicsParameterSpec("stereoWidenerMidWidth", stage: "Stereo Widener", "Mid Width", .multiplier, \.stereoWidener.midWidth, config: StereoWidenerConfiguration.midWidthRange, slider: 1.0...2.0, step: 0.01, digits: 2)
     static let stereoWidenerMidHighFrequencyHz = DynamicsParameterSpec("stereoWidenerMidHighFrequencyHz", stage: "Stereo Widener", "Mid / High Crossover", .hertz, \.stereoWidener.midHighFrequencyHz, config: StereoWidenerConfiguration.midHighFrequencyRange, slider: 1500.0...8000.0, step: 100, digits: 0)
     static let stereoWidenerHighWidth = DynamicsParameterSpec("stereoWidenerHighWidth", stage: "Stereo Widener", "High Width", .multiplier, \.stereoWidener.highWidth, config: StereoWidenerConfiguration.highWidthRange, slider: 1.0...2.0, step: 0.01, digits: 2)
+
+    // E28 S7d: the extras (behind `e28.dynamics-extras`). Percent rows use the plain unit with "(%)" in the title.
+    static let compressorMixPercent = DynamicsParameterSpec("compressorMixPercent", stage: "Compressor", "Mix (%)", .plain, \.compressor.mixPercentValue, config: CompressorConfiguration.mixRange, slider: 0.0...100.0, step: 1, digits: 0)
+    static let compressorLinkPercent = DynamicsParameterSpec("compressorLinkPercent", stage: "Compressor", "Link (%)", .plain, \.compressor.linkPercentValue, config: CompressorConfiguration.linkRange, slider: 0.0...100.0, step: 1, digits: 0)
+    static let compressorRMSWindowMs = DynamicsParameterSpec("compressorRMSWindowMs", stage: "Compressor", "Detector Window", .milliseconds, \.compressor.rmsWindowMsValue, config: CompressorConfiguration.rmsWindowRange, slider: 5.0...200.0, step: 1, digits: 0)
+    static let compressorLookaheadMs = DynamicsParameterSpec("compressorLookaheadMs", stage: "Compressor", "Lookahead", .milliseconds, \.compressor.lookaheadTimeMs, config: CompressorConfiguration.lookaheadPageRange, slider: 1.0...10.0, step: 0.5, digits: 1)
+    static let expanderHoldMs = DynamicsParameterSpec("expanderHoldMs", stage: "Expander", "Hold", .milliseconds, \.expander.holdMsValue, config: ExpanderConfiguration.holdRange, slider: 0.0...500.0, step: 5, digits: 0)
+    static let expanderKneeDB = DynamicsParameterSpec("expanderKneeDB", stage: "Expander", "Knee", .decibels, \.expander.kneeDBValue, config: ExpanderConfiguration.kneeRange, slider: 0.0...24.0, step: 0.5, digits: 1)
+    static let expanderRMSWindowMs = DynamicsParameterSpec("expanderRMSWindowMs", stage: "Expander", "Detector Window", .milliseconds, \.expander.rmsWindowMsValue, config: ExpanderConfiguration.rmsWindowRange, slider: 5.0...200.0, step: 1, digits: 0)
+    static let expanderSidechainHighPassHz = DynamicsParameterSpec("expanderSidechainHighPassHz", stage: "Expander", "Sidechain High-Pass", .hertz, \.expander.sidechainHighPassHzValue, config: ExpanderConfiguration.sidechainHighPassRange, slider: 0.0...300.0, step: 5, digits: 0)
+    static let expanderLinkPercent = DynamicsParameterSpec("expanderLinkPercent", stage: "Expander", "Link (%)", .plain, \.expander.linkPercentValue, config: ExpanderConfiguration.linkRange, slider: 0.0...100.0, step: 1, digits: 0)
+    static let multibandRMSWindowMs = DynamicsParameterSpec("multibandRMSWindowMs", stage: "Multiband", "Detector Window", .milliseconds, \.multibandCompressor.rmsWindowMsValue, config: MultibandCompressorConfiguration.rmsWindowRange, slider: 5.0...200.0, step: 1, digits: 0)
+    static let multibandLookaheadMs = DynamicsParameterSpec("multibandLookaheadMs", stage: "Multiband", "Lookahead", .milliseconds, \.multibandCompressor.lookaheadTimeMs, config: CompressorConfiguration.lookaheadPageRange, slider: 1.0...10.0, step: 0.5, digits: 1)
+
+    /// The S7 extra rows with a numeric field (every one is disabled with a reason where the kernel renders).
+    static let extras: [DynamicsParameterSpec] = [
+        compressorMixPercent, compressorLinkPercent, compressorRMSWindowMs, compressorLookaheadMs,
+        expanderHoldMs, expanderKneeDB, expanderRMSWindowMs, expanderSidechainHighPassHz, expanderLinkPercent,
+        multibandRMSWindowMs, multibandLookaheadMs,
+    ]
 
     /// The Mains Hum harmonic depth for harmonic `index` (0-based).
     static func harmonicDepth(_ index: Int) -> DynamicsParameterSpec {
@@ -279,7 +307,7 @@ extension DynamicsParameterSpec {
     }
 
     /// Every fixed row of the page (harmonic depths are built per index).
-    static let all: [DynamicsParameterSpec] = [
+    static let all: [DynamicsParameterSpec] = extras + [
         compressorThresholdDB,
         compressorRatio,
         compressorKneeWidthDB,

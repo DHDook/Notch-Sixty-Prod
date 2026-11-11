@@ -105,7 +105,10 @@ size_t carryCopy(const void *shared, const void *src, void *dst, size_t offset, 
 uint32_t carrySettleFrames(const void *shared) N60_RT_NONBLOCKING;
 
 // Realtime. In place over `frames` frames of one lane. `counter` may be null.
-void process(void *shared, void *lane, float *buf, uint32_t frames, Counter *counter) N60_RT_NONBLOCKING;
+// `scratch` (E20 S5): null uses the stage's shared scratch FFT buffer, which two lanes of one stage must not do at the same
+// time. A parallel job passes its own buffer of scratchBytes() bytes (16-byte aligned); results are bit-identical.
+size_t scratchBytes();
+void process(void *shared, void *lane, float *buf, uint32_t frames, Counter *counter, void *scratch = nullptr) N60_RT_NONBLOCKING;
 
 }  // namespace n60::conv
 

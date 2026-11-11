@@ -421,7 +421,9 @@ uint32_t carrySettleFrames(const void *shared) N60_RT_NONBLOCKING {
     return static_cast<const Shared *>(shared)->mode == 1 ? 0u : kSettleFrames;
 }
 
-void process(void *shared, void *lane, float *buf, uint32_t frames, Counter *counter) N60_RT_NONBLOCKING {
+size_t scratchBytes() { return sizeof(Complex) * fftN(kSegs - 1); }
+
+void process(void *shared, void *lane, float *buf, uint32_t frames, Counter *counter, void *scratch) N60_RT_NONBLOCKING {
     uint8_t *sh = static_cast<uint8_t *>(shared);
     Shared &S = *reinterpret_cast<Shared *>(sh);
     uint8_t *lb = static_cast<uint8_t *>(lane);
@@ -447,6 +449,7 @@ void process(void *shared, void *lane, float *buf, uint32_t frames, Counter *cou
         return;
     }
     Ctx c = make(&S, sh, lb);
+    if (scratch != nullptr) c.scratch = static_cast<Complex *>(scratch);  // E20 S5: a parallel job's own FFT scratch
     LaneHdr &h = *c.hdr;
     while (frames > 0) {
         const uint32_t n = std::min(frames, kBlock - h.fill);
