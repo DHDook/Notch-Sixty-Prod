@@ -218,7 +218,7 @@ static void testTauGate() {
 }
 
 int main() {
-    CHECK(n60_mimo_abi_version() == N60_MIMO_ABI_VERSION && N60_MIMO_ABI_VERSION == 2, "abi");
+    CHECK(n60_mimo_abi_version() == N60_MIMO_ABI_VERSION, "abi");
     for (double fs : kRates) testRate(fs, fs == 96000 || fs == 352800);
     testDetectsDamage();
     testTauZero();

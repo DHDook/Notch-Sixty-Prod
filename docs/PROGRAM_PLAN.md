@@ -54,7 +54,7 @@ platforms; E6 (the unified graph) is the critical path, because eleven later epi
 | E13 | Headphones complete | 4 | E6, E7 | Claude Code (Mac) | BYO files to PEQ in one click; live tuning |
 | E14 | Upmixer | 4 | E6 | Claude Code + bench | Stereo plays on 5.1–7.1.4 layouts |
 | E15 | Device-aware profiles | 4 | E6 | Claude Code (Mac) | Profile follows the output when the user opts in |
-| E16 | Automation and remote | 4 | E6 | Claude Code (Mac) | App Intents, local API and iPhone remote ship |
+| E16 | Automation and remote | 4 | E6 | Claude Code (Mac) | App Intents and the local API ship; the API is ready for a future iPhone client |
 | E17 | Export and dither | 4 | E8, E10 | Claude Code (Mac) | MiniDSP, APO and WAV exports; automatic dither |
 | E23 | Legacy engine removal | 4 | E6 (incl. S12a–S12h), E4 S11, E7–E17 | Claude Code (Mac) | `N60RenderKernel`, the old N-channel path and the `e6.*` flags are gone; full suite green |
 | E22 | Hardware validation | 4 | all software epics | Bench | Every deferred bench check passes on `main` at every rate |
@@ -87,7 +87,7 @@ reviewers compare with Dirac and REW), then engine depth, then breadth.
 11. E14 Upmixer, E15 Device-aware profiles, E17 Export and dither, E16 Automation and remote
 12. E23 Legacy engine removal
 13. E29 Shared room position model (owner, 9 Nov 2026: unparked, in v1; plan `docs/epics/E29.md`; flag `e29.room-model`)
-14. E22 Hardware validation and E18 Launch readiness (owner-led)
+14. E3 Hardware acceptance, then E22 Hardware validation, then E18 Launch readiness (owner-led, last) (owner, 11 Nov 2026)
 
 ## Phase 1 — Consolidate and qualify
 
@@ -190,8 +190,8 @@ Gate G2 passed on 2026-10-25 (commit 07e82c6)
 
 ### E7 384 kHz everywhere
 
-- [ ] Express every buffer capacity in time, not frames, and size it at the 384 kHz worst case
-- [ ] Lift the known frame caps: program FIR 32,768 taps, headphone delay 4,096 frames (binaural 8,192 taps moved to E13, owner 31 Oct 2026)
+- [~] Express every buffer capacity in time, not frames, and size it at the 384 kHz worst case (E7 S1 done; E7 G2-G4 close in S5, G1 in E23)
+- [~] Lift the known frame caps: program FIR 32,768 taps, headphone delay 4,096 frames (headphone delay to 20 ms done in E7 S1; kernel 4,095 limit stays until E23, E7 G1) (binaural 8,192 taps moved to E13, owner 31 Oct 2026)
 - [ ] Extend the PR117A double-precision fix beyond the crossover: user EQ, lane EQ, subwoofer EQ and headphone PEQ still use float32 coefficients and state, which loses low-frequency accuracy at high rates
 - [ ] Keep HRIR resampling on activation; add the same policy for any imported IR or SOFA asset
 - [ ] Run the XCTest acoustic reference lab at 44.1, 48, 88.2, 96, 176.4, 192, 352.8 and 384 kHz
@@ -408,6 +408,8 @@ complete, speaker ANC qualified, and a full hardware regression passing at every
 
 ### E15 Device-aware profiles
 
+Plan: `docs/epics/E15.md` (awaiting owner approval; flag `e15.follow-output`).
+
 - [ ] Opt-in "follow system output" mode that recalls the profile bound to each output UID
 - [ ] Keep today's fixed-output policy as the default
 
@@ -415,9 +417,14 @@ complete, speaker ANC qualified, and a full hardware regression passing at every
 
 - [ ] App Intents and Shortcuts for profile, volume, mute, bypass and correction on/off
 - [ ] Local authenticated REST/websocket API, off by default
-- [ ] iPhone remote app using that API
+
+Owner decision, 11 Nov 2026: the iPhone remote moved to the post-v1 "iPhone companion app" entry
+under "Platform reach after v1". The local API must stay usable by that future iPhone client
+(documented, versioned, authenticated pairing that a phone can complete).
 
 ### E17 Export and dither
+
+Plan: `docs/epics/E17.md` (awaiting owner approval; flags `e17.export`, `e17.dither`).
 
 - [ ] Filter export to MiniDSP, Equalizer APO and WAV convolution sets
 - [ ] Automatic TPDF dither only when the device's physical format is 16-bit integer
@@ -429,7 +436,10 @@ then this epic deletes it before E22 hardware validation, so v1 ships and is val
 unified graph only.
 
 - [~] First slice (owner decision 7 Nov 2026, E6 G1): graph-vs-kernel full-config corpus (every stage on, all layouts, eight rates) plus the E6 S5 stereo-chain parity and latency test (latency report equals measured impulse delay). `N60RenderKernel` must not be deleted until it is green. S1 `e23/graph-kernel-parity` built in part (PR #464); the rest is S1b `e23/precision-and-cleanup`
+- [~] S1b `e23/precision-and-cleanup` (PR pending, needs-owner, engine): double state for E6 G18, G25 and the Linkwitz form for G31 built; cleanup whole-buffer pass (E6 G37) partly built, per-section hoisting open as E23 G5; wiring slice: graph path, not yet on the shipped UI as a separate check
+- [ ] S1c `e23/parity-and-host-fold` (needs-owner, engine): G2 latency report at 44.1 and 88.2 kHz, G3 clipped-input level difference, E6 G48 Quiet Zone host fold
 - [ ] Confirm nothing falls back to the kernel, the old N-channel path or the legacy binaural pipeline (E6 S12a–S12h)
+- [ ] Remove the kernel headphone-delay clamp (4,095 frames) with the kernel (E7 G1)
 - [ ] Delete `N60RenderKernel`, the old N-channel path and the `e6.legacy-kernel` flag
 - [ ] Update `docs/DSP_KERNEL.md`, `docs/ARCHITECTURE.md` and the `AGENTS.md` mention, in coordination with E21
 
@@ -476,6 +486,15 @@ and has not been verified; check each before committing.
 SwiftUI runs only on Apple platforms, so each non-Apple platform needs its own UI shell or a
 cross-platform UI choice; that decision can wait until after v1. The rule until then: nothing in
 the C++ core may depend on an Apple framework.
+
+### Post-v1: iPhone companion app (owner, 11 Nov 2026; no epic number yet)
+
+Outside the v1 completion requirement: v1 ships without it.
+
+- [ ] iPhone remote for the Mac app, using the E16 local API
+- [ ] iPhone as a measurement microphone for the Mac's measurement suite; needs its own
+      calibration and accuracy design (per-model microphone response, timing against the Mac's
+      clock, and the limits under which a phone capture is trusted) before any design path uses it
 
 ## How to run each epic in Claude Code
 
