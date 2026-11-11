@@ -36,6 +36,8 @@ enum LiveTreatmentDisarmReason: String, Equatable, Sendable {
     case adaptiveFault
     /// E26 S4: the bass path changed (fingerprint, or sub-band gain or phase moved past the watch window).
     case bassPathChanged
+    /// E4 S27: the zone mode changed while armed (it is part of the earned-cap binding).
+    case zoneChanged
     /// E19 S6: the MIMO stage's monitor or thermal budget latched a fault (the delta faded out in 10 ms).
     case treatmentFault
     /// E19 S6: a per-output trim or another part of the chain after the MIMO stage changed.
@@ -64,6 +66,7 @@ enum LiveTreatmentDisarmReason: String, Equatable, Sendable {
         case .microphoneMoved: return "Disarmed: the microphone moved and could not be re-tuned. Re-arm to continue."
         case .adaptiveFault: return "Disarmed: the adaptive tuning faulted. Re-arm to continue."
         case .bassPathChanged: return "Disarmed: your receiver's level or bass settings changed. Re-arm to continue."
+        case .zoneChanged: return "Disarmed: the quiet zone changed. Re-arm to continue; the output starts at the starting level again."
         case .treatmentFault: return "Muted: the room treatment went outside its safe bounds. Re-arm to continue."
         case .downstreamChainChanged: return "Disarmed: an output trim or the chain after the treatment changed. Re-arm to continue."
         case .featureSwitchedOff: return "Disarmed: room treatment was switched off."

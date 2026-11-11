@@ -32,6 +32,9 @@ final class QuietZoneVirtualMicWiringTests: XCTestCase {
         // Noise arrival (samples) at each position.
         var noiseMonitorK: Int
         var noiseEarK: Int
+        // E4 S27: a second ear position (the other side of the bed).
+        var ear2: (l: (g: Double, k: Int), r: (g: Double, k: Int)) = ((0.35, 1), (0.20, 1))
+        var noiseEar2K: Int = 1
 
         func phasor(gain: Double, delay: Int, f: Double) -> ActiveQuietZoneComplex {
             let w = 2 * Double.pi * f * Double(delay) / rate
@@ -39,6 +42,7 @@ final class QuietZoneVirtualMicWiringTests: XCTestCase {
         }
         func noiseAtMonitor(_ f: Double) -> ActiveQuietZoneComplex { phasor(gain: 0.05, delay: noiseMonitorK, f: f) }
         func noiseAtEar(_ f: Double) -> ActiveQuietZoneComplex { phasor(gain: 0.045, delay: noiseEarK, f: f) }
+        func noiseAtEar2(_ f: Double) -> ActiveQuietZoneComplex { phasor(gain: 0.04, delay: noiseEar2K, f: f) }
     }
 
     func twin(rate: Double) -> Twin {
@@ -48,7 +52,8 @@ final class QuietZoneVirtualMicWiringTests: XCTestCase {
             rate: rate,
             monitor: ((0.30, k(3.0)), (0.30, k(3.4))),
             ear: ((0.22, k(4.1)), (0.34, k(2.6))),
-            noiseMonitorK: k(1.0), noiseEarK: k(1.5))
+            noiseMonitorK: k(1.0), noiseEarK: k(1.5),
+            ear2: ((0.34, k(2.4)), (0.21, k(4.3))), noiseEar2K: k(1.9))
     }
 
     private func impulse(rate: Double, gain: Double, delay: Int) -> RoomCorrectionChannelMeasurement {
@@ -63,6 +68,7 @@ final class QuietZoneVirtualMicWiringTests: XCTestCase {
         var quietZone: ActiveQuietZoneController
         var survey: QuietZoneVirtualMicSurveyController
         var earID: UUID
+        var ear2ID: UUID
         var twin: Twin
     }
 
@@ -98,7 +104,11 @@ final class QuietZoneVirtualMicWiringTests: XCTestCase {
             name: "Left ear", sampleRate: rate,
             left: impulse(rate: rate, gain: t.ear.l.g, delay: t.ear.l.k),
             right: impulse(rate: rate, gain: t.ear.r.g, delay: t.ear.r.k))
-        project.measurements = [monitorPosition, earPosition]
+        let ear2Position = RoomCorrectionMeasurementPosition(
+            name: "Right ear", sampleRate: rate,
+            left: impulse(rate: rate, gain: t.ear2.l.g, delay: t.ear2.l.k),
+            right: impulse(rate: rate, gain: t.ear2.r.g, delay: t.ear2.r.k))
+        project.measurements = [monitorPosition, earPosition, ear2Position]
         try projects.adoptProject(project)
         let ambient = AmbientCompensationController(
             engine: engine, profiles: profiles, microphone: calibration, projects: projects)
@@ -106,7 +116,7 @@ final class QuietZoneVirtualMicWiringTests: XCTestCase {
         let quietZone = ActiveQuietZoneController(engine: engine, profiles: profiles, ambient: ambient)
         let survey = QuietZoneVirtualMicSurveyController()
         quietZone.attachVirtualMicrophone(survey)
-        return Rig(quietZone: quietZone, survey: survey, earID: earPosition.id, twin: t)
+        return Rig(quietZone: quietZone, survey: survey, earID: earPosition.id, ear2ID: ear2Position.id, twin: t)
     }
 
     /// Runs both visits with the twin's noise phasors, as the controller's evaluate would hand them over.
@@ -205,7 +215,7 @@ final class QuietZoneVirtualMicWiringTests: XCTestCase {
 
     func testEarPositionsExcludeTheMonitorModelAndChangingEarDiscardsTheSurvey() throws {
         let rig = try makeRig(rate: 48_000)
-        XCTAssertEqual(rig.survey.earPositionCandidates.map(\.id), [rig.earID])
+        XCTAssertEqual(rig.survey.earPositionCandidates.map(\.id), [rig.earID, rig.ear2ID])
         runSurvey(rig, frequencies: [60])
         XCTAssertFalse(rig.survey.tones.isEmpty)
         rig.survey.selectEar(nil)
