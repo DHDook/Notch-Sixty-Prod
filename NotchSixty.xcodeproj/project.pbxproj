@@ -692,6 +692,9 @@
 		E25F000000000000000000A1 /* ProgramSourceController.swift in Sources */ = {isa = PBXBuildFile; fileRef = E25F000000000000000000B1 /* ProgramSourceController.swift */; };
 		E25F000000000000000000A2 /* ProductionProgramSourceCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = E25F000000000000000000B2 /* ProductionProgramSourceCard.swift */; };
 		E25F000000000000000000A3 /* ProgramSourceControllerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E25F000000000000000000B3 /* ProgramSourceControllerTests.swift */; };
+		E29A0000000000000000B001 /* RoomModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = E29A0000000000000000A001 /* RoomModel.swift */; };
+		E29A0000000000000000B002 /* RoomModelAdapter.swift in Sources */ = {isa = PBXBuildFile; fileRef = E29A0000000000000000A002 /* RoomModelAdapter.swift */; };
+		E29A0000000000000000B003 /* RoomModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E29A0000000000000000A003 /* RoomModelTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -1439,6 +1442,9 @@
 		E25F000000000000000000B1 /* ProgramSourceController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProgramSourceController.swift; sourceTree = "<group>"; };
 		E25F000000000000000000B2 /* ProductionProgramSourceCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductionProgramSourceCard.swift; sourceTree = "<group>"; };
 		E25F000000000000000000B3 /* ProgramSourceControllerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProgramSourceControllerTests.swift; sourceTree = "<group>"; };
+		E29A0000000000000000A001 /* RoomModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomModel.swift; sourceTree = "<group>"; };
+		E29A0000000000000000A002 /* RoomModelAdapter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomModelAdapter.swift; sourceTree = "<group>"; };
+		E29A0000000000000000A003 /* RoomModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomModelTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -1737,6 +1743,7 @@
 				E4F730A00000000000000020 /* AmbientUnmaskOverlayTests.swift */,
 				E4F7000000000000000000C3 /* QuietZoneVirtualMicrophoneTests.swift */,
 				E4F7000000000000000000E3 /* QuietZoneHeadPositionTests.swift */,
+				E29A0000000000000000A003 /* RoomModelTests.swift */,
 				E4F7000000000000000000D3 /* QuietZoneZonesTests.swift */,
 				E4N100000000000000000012 /* OvernightPowerAssertionTests.swift */,
 				E4F300000000000000000014 /* QuietZoneFeedForwardShadowTests.swift */,
@@ -1967,6 +1974,8 @@
 				E4F730B00000000000000002 /* SpeechEnvelopeHistory.swift */,
 				E4F7000000000000000000C2 /* QuietZoneVirtualMicrophone.swift */,
 				E4F7000000000000000000E2 /* QuietZoneHeadPosition.swift */,
+				E29A0000000000000000A002 /* RoomModelAdapter.swift */,
+				E29A0000000000000000A001 /* RoomModel.swift */,
 				E4F7000000000000000000D2 /* QuietZoneZones.swift */,
 				E4F200000000000000000012 /* QuietZoneFeedForwardNoiseSurvey.swift */,
 				E4F300000000000000000011 /* QuietZoneFeedForwardShadowPlan.swift */,
@@ -2482,6 +2491,8 @@
 				E4F730B00000000000000003 /* SpeechEnvelopeHistory.swift in Sources */,
 				E4F7000000000000000000C4 /* QuietZoneVirtualMicrophone.swift in Sources */,
 				E4F7000000000000000000E4 /* QuietZoneHeadPosition.swift in Sources */,
+				E29A0000000000000000B002 /* RoomModelAdapter.swift in Sources */,
+				E29A0000000000000000B001 /* RoomModel.swift in Sources */,
 				E4F7000000000000000000E7 /* QuietZoneCameraHeadSource.swift in Sources */,
 				E4F7000000000000000000D4 /* QuietZoneZones.swift in Sources */,
 				E4F200000000000000000002 /* QuietZoneFeedForwardNoiseSurvey.swift in Sources */,
@@ -2730,6 +2741,7 @@
 				E4F730A00000000000000021 /* AmbientUnmaskOverlayTests.swift in Sources */,
 				E4F7000000000000000000C5 /* QuietZoneVirtualMicrophoneTests.swift in Sources */,
 				E4F7000000000000000000E5 /* QuietZoneHeadPositionTests.swift in Sources */,
+				E29A0000000000000000B003 /* RoomModelTests.swift in Sources */,
 				E4F7000000000000000000D5 /* QuietZoneZonesTests.swift in Sources */,
 				E4N100000000000000000002 /* OvernightPowerAssertionTests.swift in Sources */,
 				E4F300000000000000000004 /* QuietZoneFeedForwardShadowTests.swift in Sources */,
