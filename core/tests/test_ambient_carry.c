@@ -18,6 +18,17 @@ static int failures = 0;
 static const double kRates[] = {44100, 48000, 88200, 96000, 176400, 192000, 352800, 384000};
 static const float kCentres[17] = {200, 250, 315, 400, 500, 630, 800, 1000, 1250, 1600, 2000, 2500, 3150, 4000, 5000, 6300, 8000};
 
+static void paramsN(float *p, uint32_t n) {
+    const float base[10] = {0, 120, 0, 0.7f, 2200, 0, 1.0f, 6500, 0, 0.7f};
+    memcpy(p, base, sizeof base);
+    p[10] = (float)n;
+    for (uint32_t k = 0; k < n; k++) {
+        p[11 + 3 * k] = kCentres[k];
+        p[12 + 3 * k] = (k >= 12) ? 0.0f : -1.0f - 0.25f * (float)(k % 5) - ((k == 7) ? 1.0f : 0.0f);
+        p[13 + 3 * k] = 4.32f;
+    }
+}
+
 static void params(float *p, float sec7Db) {
     const float base[10] = {0, 120, 0, 0.7f, 2200, 0, 1.0f, 6500, 0, 0.7f};
     memcpy(p, base, sizeof base);
@@ -131,12 +142,48 @@ static void testCarry(double rate, int edit, int linearFade) {
     n60_graph_retire(b);
 }
 
+/* G15: the section count changes across a rebuild (17 -> 12 and 12 -> 17), instant swap. The shared first sections keep their state, so
+ * shrinking is bit-identical to a graph that always had 12 sections (the cascade of sections 0..11 never depends on the later ones);
+ * growing starts the new sections (0 dB) fresh and stays within a small bound of a graph that always had 17. */
+static void testCountChange(double rate, uint32_t from, uint32_t to) {
+    float p0[62], p1[62];
+    paramsN(p0, from);
+    paramsN(p1, to);
+    n60_stage_desc sa[2], sb[2], sc[2];
+    n60_graph_desc da = desc(rate, p0, 11 + 3 * from, NULL, sa);
+    n60_graph_desc db = desc(rate, p1, 11 + 3 * to, NULL, sb);   /* uninterrupted reference with the target count */
+    n60_graph *a = NULL, *b = NULL;
+    CHECK(n60_graph_build(&da, &a) == N60_STATUS_OK && a, "rate %.0f build a", rate);
+    CHECK(n60_graph_build(&db, &b) == N60_STATUS_OK && b, "rate %.0f build b", rate);
+    if (!a || !b) return;
+    const int warm = (int)(rate * 0.3 / BLOCK);
+    double ignore = 0;
+    for (int i = 0; i < warm; i++) { double w = step(a, b); if (w > ignore) ignore = w; }
+    n60_rebuild_options ro;
+    memset(&ro, 0, sizeof ro);
+    ro.structSize = sizeof ro;
+    CHECK(n60_graph_set_rebuild_options(a, &ro) == N60_STATUS_OK, "options");
+    n60_graph_desc dc = desc(rate, p1, 11 + 3 * to, NULL, sc);
+    CHECK(n60_graph_publish(a, &dc) == N60_STATUS_OK, "rate %.0f %u->%u publish", rate, from, to);
+    double during = 0, after = 0;
+    settle(a, b, &during);
+    for (int i = 0; i < (int)(rate * 0.1 / BLOCK); i++) { double w = step(a, b); if (w > after) after = w; }
+    const double tol = (to < from) ? 0.0 : 1e-3;
+    if (getenv("N60_VERBOSE")) fprintf(stderr, "rate %.0f %u->%u: during %g after %g\n", rate, from, to, during, after);
+    CHECK(during <= tol, "rate %.0f %u->%u: differs during the rebuild (%g)", rate, from, to, during);
+    CHECK(after <= tol, "rate %.0f %u->%u: differs afterwards (%g)", rate, from, to, after);
+    n60_graph_retire(a);
+    n60_graph_retire(b);
+}
+
 int main(void) {
     for (size_t r = 0; r < sizeof kRates / sizeof kRates[0]; r++) {
         for (int f = 0; f < 2; f++) {
             testCarry(kRates[r], 0, f);
             testCarry(kRates[r], 1, f);
         }
+        testCountChange(kRates[r], 17, 12);
+        testCountChange(kRates[r], 12, 17);
     }
     if (failures) { fprintf(stderr, "%d failures\n", failures); return 1; }
     printf("ambient carry OK\n");

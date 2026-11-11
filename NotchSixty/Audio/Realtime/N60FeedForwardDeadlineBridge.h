@@ -8,7 +8,12 @@
 extern "C" {
 #endif
 
-#define N60_FF_DEADLINE_MAX_FRAMES 4096u
+// The record ring is metadata only (one entry per reference frame). The cap is
+// a memory bound, not a physical limit: 16,384 entries is 42.7 ms at 384 kHz,
+// the same drain budget 4,096 gave at 96 kHz. The rate cap matches the other
+// PR97 measurement stages (768 kHz); nothing in the timing maths depends on rate.
+#define N60_FF_DEADLINE_MAX_FRAMES 16384u
+#define N60_FF_DEADLINE_MAX_SAMPLE_RATE 768000.0
 #define N60_FF_DEADLINE_MAX_TAPS 64u
 #define N60_FF_SHADOW_MAX_STEREO_SUM 0.10f
 #define N60_FF_SHADOW_FADE_FRAMES 128u

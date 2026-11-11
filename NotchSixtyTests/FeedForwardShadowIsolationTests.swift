@@ -16,7 +16,6 @@ final class FeedForwardShadowIsolationTests: XCTestCase {
     private static let standardSampleRates: [Double] = [
         44_100, 48_000, 88_200, 96_000, 176_400, 192_000, 352_800, 384_000
     ]
-    private static let maximumShadowSampleRate = 192_000.0
 
     private let block = 256
     private let blocks = 96
@@ -27,6 +26,18 @@ final class FeedForwardShadowIsolationTests: XCTestCase {
         for rate in Self.standardSampleRates {
             try assertShadowIsolation(sampleRate: rate)
         }
+    }
+
+    /// G8: the bridge works at every standard rate up to 384 kHz and still
+    /// refuses a rate beyond its stated bound, or a ring above its memory cap.
+    func testDeadlineBridgeLimits() {
+        var tooFast = plan(sampleRate: Double(N60_FF_DEADLINE_MAX_SAMPLE_RATE) * 2)
+        XCTAssertNil(N60FFDeadlineBridgeCreate(2_048, &tooFast, leftTaps, rightTaps, UInt32(leftTaps.count)))
+        var fine = plan(sampleRate: 384_000)
+        XCTAssertNil(N60FFDeadlineBridgeCreate(N60_FF_DEADLINE_MAX_FRAMES * 2, &fine, leftTaps, rightTaps, UInt32(leftTaps.count)))
+        let bridge = N60FFDeadlineBridgeCreate(N60_FF_DEADLINE_MAX_FRAMES, &fine, leftTaps, rightTaps, UInt32(leftTaps.count))
+        XCTAssertNotNil(bridge)
+        if let bridge { N60FFDeadlineBridgeDestroy(bridge) }
     }
 
     private func plan(sampleRate: Double) -> N60FFDeadlinePlan {
@@ -46,12 +57,6 @@ final class FeedForwardShadowIsolationTests: XCTestCase {
         var deadlinePlan = plan(sampleRate: sampleRate)
         let shadow = N60FFDeadlineBridgeCreate(2_048, &deadlinePlan, leftTaps, rightTaps, UInt32(leftTaps.count))
         defer { if let shadow { N60FFDeadlineBridgeDestroy(shadow) } }
-        guard sampleRate <= Self.maximumShadowSampleRate else {
-            // The shadow scheduler is not available above 192 kHz; it must
-            // refuse to start rather than run with an unchecked plan.
-            XCTAssertNil(shadow, "\(sampleRate) Hz: shadow plan accepted above its validated range")
-            return
-        }
         let shadowBridge = try XCTUnwrap(shadow, "\(sampleRate) Hz: valid shadow plan rejected")
 
         let baseline = try makeLiveBridge(sampleRate: sampleRate)

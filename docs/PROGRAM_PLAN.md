@@ -133,12 +133,12 @@ decision, so Phase 2 starts without it; every later bench check is collected the
 - [ ] Run the PR97 hardware timing calibration and the PR99 physical verification campaign on the bench
 - [ ] Define the live-ANC authorisation criteria in writing, then switch `liveANCQualified` only through that path
 - [ ] Re-qualify on the unified graph after E6 lands, and publish the measurement method for reviewers
-- [ ] S32 `e4/graduate-flags`: graduate the E4 flags (non-live flags first; live-output flags approved by the owner 11 Nov 2026, G17 closed; arm unchanged); wiring of `e4.virtual-microphone`, `e4.head-position-camera`, `e4.zones` first (G16)
+- [~] S32 `e4/graduate-flags` (S32 PR: seven flags graduated, G8, G15 closed, end-to-end test; the three flags without a production reader wait on the owner answer to G16): graduate the E4 flags (non-live flags first; live-output flags approved by the owner 11 Nov 2026, G17 closed; arm unchanged); wiring of `e4.virtual-microphone`, `e4.head-position-camera`, `e4.zones` first (G16)
 - [ ] Class-leading roadmap (owner, 27 Oct 2026; `docs/epics/E4.md` S12–S31): safety foundation (arm hardening, acoustic twin, engine lease, live howl guard, "do no harm" verifier, flight recorder); adaptive tonal live with tone glide, earned cap and excursion cap; upstream reference microphone with cross-device clocking; virtual microphone and head-tracked zones; noise survey, overnight mode, Conversation Focus unmasking, reviewer kit
   - [~] S30a `e4/unmask-ambient-stage`: `AMBIENT` stage carries up to 17 live cut-only peaking sections (ABI v32); built, but nothing sets the cuts until S30c, so the stage is dark; wired by S30c
   - [~] S30a overlay: `AmbientUnmaskOverlay` section fit and trailer builder built dark behind `AmbientCompensationTarget.unmaskingCutsDB`; wired by S30c
   - [x] S30c `e4/unmask-wiring`: controller cuts, governor, engine validation and Conversation Focus card built behind `e4.conversation-unmasking`; #468 merged; carry gaps G12–G14 in S30d; bench: E22 S30 checks
-  - [~] S30d `e4/unmask-rebuild-carry`: AMBIENT state carried across rebuild (G12), controller end-to-end tests (G13), locked graph-fallback read and transport-teardown reset (G14); built behind `e4.conversation-unmasking`, PR in review (needs-owner); not ticked because the flag is off and the slice is unreviewed; wiring: S30c (flag-gated); bench: E22 S30 checks
+  - [x] S30d `e4/unmask-rebuild-carry` (#476): AMBIENT state carried across rebuild (G12), controller end-to-end tests (G13), locked graph-fallback read and transport-teardown reset (G14); merged; `e4.conversation-unmasking` graduated in S32; G15 closed there; bench: E22 S30 checks
 
 ### E5 UI scope clean-up
 
@@ -464,6 +464,7 @@ Owner decision, 11 Nov 2026 (flag graduation): bench-dependent "is it good" acce
 Owner decision, 18 Oct 2026: there is no bench access for now, so every bench check is deferred to this epic, which runs once the software work is built. Software slices keep listing their checks under "Bench checks" in `docs/epics/E<n>.md`; this epic collects and runs them.
 
 - [ ] Collect every epic's "Bench checks" list and the E3 cases H01–H08 into one campaign
+- [ ] Run every E4 bench list in `docs/epics/E4.md` "Bench checks" (S4, S6, S7, S18b, S22a, S22b1 to S22b3, S25 arming, S26b, S30) after the graduation of the E4 flags (11 Nov 2026), including the 384 kHz feed-forward bridge shadow timing
 - [ ] Run E4 S8 (PR97 timing calibration and PR99 verification) and record results against `docs/ANC_QUALIFICATION.md`
 - [ ] Run E4 S11 (owner, 1 Nov 2026: moved here from the E4 execution order): repeat S8 on the unified E6 graph, then fill the placeholder reduction table in `docs/ANC_QUALIFICATION.md` §4.1 from the S31 reviewer-kit noise files
 - [ ] Run the remaining bench checks at every rate from 44.1 to 384 kHz
