@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 
 /// E4 S32: how the Quiet Zone feature flags turn into engine switches and attached controllers. `ProductController.init()`
@@ -18,13 +19,29 @@ enum QuietZoneFlagWiring {
         return adaptiveTonalLive
     }
 
+    /// E4 S26b: head follow needs the ear survey it chooses between, so it exists only with both flags on. The camera is
+    /// not touched until the listener switches head follow on.
+    static func attachHeadFollow(
+        to survey: QuietZoneVirtualMicSurveyController?,
+        flags: FeatureFlags,
+        source: @escaping QuietZoneHeadFollowController.SourceFactory,
+        clock: @escaping () -> Double = { ProcessInfo.processInfo.systemUptime },
+        workspaceCenter: NotificationCenter = NSWorkspace.shared.notificationCenter,
+        appCenter: NotificationCenter = .default
+    ) {
+        guard flags.isEnabled(.headPositionCamera), let survey else { return }
+        survey.attachHeadFollow(QuietZoneHeadFollowController(
+            makeSource: source, clock: clock, workspaceCenter: workspaceCenter, appCenter: appCenter))
+    }
+
     static func attachControllers(
         to activeQuietZone: ActiveQuietZoneController,
         engine audioEngine: AudioIOEngine,
         ambient ambientCompensation: AmbientCompensationController,
         roomProjects: RoomCorrectionProjectController,
         adaptiveTonalLive: Bool,
-        flags: FeatureFlags
+        flags: FeatureFlags,
+        headPoseSource: @escaping QuietZoneHeadFollowController.SourceFactory = QuietZoneHeadFollowController.cameraSourceFactory()
     ) {
         if adaptiveTonalLive {
             activeQuietZone.attachAdaptiveLive(AdaptiveTonalLiveCoordinator(
@@ -40,6 +57,7 @@ enum QuietZoneFlagWiring {
         if flags.isEnabled(.virtualMicrophone) {
             activeQuietZone.attachVirtualMicrophone(QuietZoneVirtualMicSurveyController())
         }
+        attachHeadFollow(to: activeQuietZone.virtualMic, flags: flags, source: headPoseSource)
         if flags.isEnabled(.overnight) {
             activeQuietZone.attachOvernightPower(OvernightPowerAssertion())
         }

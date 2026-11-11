@@ -183,10 +183,20 @@ final class QuietZoneVirtualMicSurveyController: ObservableObject {
         message = "Capture the noise at the monitor microphone, then at the ear position."
     }
 
-    /// The surveyed tone for a controlled frequency, or nil when none lies within 0.5 Hz of it.
+    /// E4 S26b: when set and following the head, the head position picks the ear tone instead of the one fixed survey.
+    private(set) var headFollow: QuietZoneHeadFollowController?
+
+    func attachHeadFollow(_ follow: QuietZoneHeadFollowController?) {
+        headFollow = follow
+        objectWillChange.send()
+    }
+
+    /// The surveyed tone for a controlled frequency, or nil when none lies within 0.5 Hz of it. While head follow has a
+    /// fresh pose inside the saved positions, the tone is blended for the head's position; otherwise the fixed survey.
     func earTone(near frequencyHz: Double) -> QuietZoneEarTone? {
         guard isActive else { return nil }
-        return tones.min { abs($0.frequencyHz - frequencyHz) < abs($1.frequencyHz - frequencyHz) }
-            .flatMap { abs($0.frequencyHz - frequencyHz) <= 0.5 ? $0 : nil }
+        guard let fixed = tones.min(by: { abs($0.frequencyHz - frequencyHz) < abs($1.frequencyHz - frequencyHz) }),
+              abs(fixed.frequencyHz - frequencyHz) <= 0.5 else { return nil }
+        return headFollow?.tone(near: frequencyHz) ?? fixed
     }
 }

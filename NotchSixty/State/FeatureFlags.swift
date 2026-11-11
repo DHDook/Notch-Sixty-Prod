@@ -114,7 +114,7 @@ extension FeatureFlag {
     )
 
     /// E4 S26b: camera head position (Vision body pose, on-device) selects the surveyed virtual-microphone
-    /// ratios. Maths and camera source only in this slice; nothing drives output while off. Removed when E4 ships.
+    /// ratios. Production reader: head follow card (S26b); graduates in the final G16 PR.
     static let headPositionCamera = FeatureFlag(
         id: "e4.head-position-camera",
         title: "Camera head position for the quiet zone",

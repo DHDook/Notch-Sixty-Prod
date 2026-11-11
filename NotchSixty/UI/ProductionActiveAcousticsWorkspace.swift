@@ -1241,6 +1241,9 @@ struct ProductionActiveAcousticsWorkspace: View {
                 ProductionVirtualMicrophoneCard(
                     survey: virtualMic,
                     quietZoneRunning: quietZone.configuration.enabled && quietZone.status != .fault)
+                if let headFollow = virtualMic.headFollow {
+                    ProductionHeadFollowCard(follow: headFollow, survey: virtualMic)
+                }
             }
             spatialQuietZoneCard
             ProductionFeedForwardReadinessCard(quietZone: quietZone)
