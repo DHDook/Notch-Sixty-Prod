@@ -168,6 +168,37 @@ enum MIMORoomTreatmentCoreDesignError: Error, Equatable, LocalizedError {
     }
 }
 
+extension MIMOTreatmentSourceSpec {
+    /// The gain budget (dB) a source may reach, from the headroom of what follows the MIMO stage on its output.
+    /// `headroom` is the `HeadroomModel` result for that output with the MIMO stage left out; the treatment may cost the
+    /// program up to `trimAllowanceDB` of output trim (the assistant's Apply). Negative: even the untreated path does not fit.
+    static func gainBudgetDB(
+        after headroom: OutputHeadroom,
+        trimAllowanceDB: Double = N60_HEADROOM_MIMO_TRIM_ALLOWANCE_DB
+    ) -> Double {
+        n60_headroom_mimo_budget_db(headroom.ceilingDB, trimAllowanceDB, headroom.peakGainDB)
+    }
+}
+
+extension MIMOTreatmentRequest {
+    /// This request with every included source's `gainLimitDB` set to the lower of its own limit and the headroom budget
+    /// of its output. `headrooms[s]` is nil when the chain is unknown (the source keeps its own limit). A source whose
+    /// budget is below 0 dB refuses by name instead of designing against an impossible limit.
+    func applyingHeadroomBudgets(
+        _ headrooms: [OutputHeadroom?],
+        trimAllowanceDB: Double = N60_HEADROOM_MIMO_TRIM_ALLOWANCE_DB
+    ) throws -> MIMOTreatmentRequest {
+        var out = self
+        for index in out.sources.indices where !out.sources[index].excluded && index < headrooms.count {
+            guard let headroom = headrooms[index] else { continue }
+            let budget = MIMOTreatmentSourceSpec.gainBudgetDB(after: headroom, trimAllowanceDB: trimAllowanceDB)
+            guard budget >= 0 else { throw MIMORoomTreatmentCoreDesignError.headroom(source: index) }
+            out.sources[index].gainLimitDB = min(out.sources[index].gainLimitDB, budget)
+        }
+        return out
+    }
+}
+
 enum MIMORoomTreatmentCoreDesigner {
     static var abiVersion: UInt32 { n60_mimo_abi_version() }
 
