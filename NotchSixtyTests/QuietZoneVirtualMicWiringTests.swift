@@ -21,10 +21,10 @@ final class QuietZoneVirtualMicWiringTests: XCTestCase {
         func requestAccess() async -> MicrophonePermissionStatus { .authorized }
     }
 
-    private let rates: [Double] = [44_100, 48_000, 88_200, 96_000, 176_400, 192_000, 352_800, 384_000]
+    let rates: [Double] = [44_100, 48_000, 88_200, 96_000, 176_400, 192_000, 352_800, 384_000]
 
     /// Free-field twin: delays in samples, so the paths are exact at every rate.
-    private struct Twin {
+    struct Twin {
         var rate: Double
         // Speaker-to-position delays and gains.
         var monitor: (l: (g: Double, k: Int), r: (g: Double, k: Int))
@@ -41,7 +41,7 @@ final class QuietZoneVirtualMicWiringTests: XCTestCase {
         func noiseAtEar(_ f: Double) -> ActiveQuietZoneComplex { phasor(gain: 0.045, delay: noiseEarK, f: f) }
     }
 
-    private func twin(rate: Double) -> Twin {
+    func twin(rate: Double) -> Twin {
         // About 3 ms, 4 ms, 2.6 ms and 3.2 ms of path; the ear is nearer the right speaker.
         func k(_ ms: Double) -> Int { Int((rate * ms / 1000).rounded()) }
         return Twin(
@@ -59,14 +59,14 @@ final class QuietZoneVirtualMicWiringTests: XCTestCase {
             capturedAt: Date(), rawCapture: [0], impulseResponse: ir, transferFunction: nil, quality: quality)
     }
 
-    private struct Rig {
+    struct Rig {
         var quietZone: ActiveQuietZoneController
         var survey: QuietZoneVirtualMicSurveyController
         var earID: UUID
         var twin: Twin
     }
 
-    private func makeRig(rate: Double) throws -> Rig {
+    func makeRig(rate: Double) throws -> Rig {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         addTeardownBlock { try? FileManager.default.removeItem(at: root) }
         let output = AudioOutputDevice(
@@ -110,7 +110,7 @@ final class QuietZoneVirtualMicWiringTests: XCTestCase {
     }
 
     /// Runs both visits with the twin's noise phasors, as the controller's evaluate would hand them over.
-    private func runSurvey(_ rig: Rig, frequencies: [Double], steady: Bool = true) {
+    func runSurvey(_ rig: Rig, frequencies: [Double], steady: Bool = true) {
         let survey = rig.survey
         survey.selectEar(rig.earID)
         survey.beginVisit(.monitor)
