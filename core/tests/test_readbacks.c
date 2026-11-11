@@ -396,7 +396,7 @@ static void testArguments(void) {
     CHECK(n60_graph_read_over_range(g, 10, 0, &c) == N60_STATUS_BAD_ARGUMENT, "over-range of a compressor");
     CHECK(n60_graph_read_over_range(g, 2, 5, &c) == N60_STATUS_BAD_ARGUMENT, "over-range lane out of range");
     CHECK(n60_graph_read_over_range(g, 2, 0, NULL) == N60_STATUS_BAD_ARGUMENT, "over-range null count");
-    CHECK(n60_graph_abi_version() == 35u && N60_GRAPH_ABI_VERSION == 35u, "ABI v36");
+    CHECK(n60_graph_abi_version() == 36u && N60_GRAPH_ABI_VERSION == 36u, "ABI v36");
     n60_graph_retire(g);
 }
 
