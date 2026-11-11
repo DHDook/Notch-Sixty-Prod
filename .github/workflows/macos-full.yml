@@ -41,6 +41,24 @@ jobs:
             ENABLE_TESTABILITY=YES \
             test 2>&1 | tee "$RUNNER_TEMP/xctest.log"
 
+      # FC1: flags-off matrix. While graduated flags exist, the flags-off path must keep passing (AGENTS.md section 11).
+      # The XCTest host cannot take launch arguments, so a debug-build environment variable switches every graduated
+      # flag off (FeatureFlags.graduatedOffEnvironmentKey); xcodebuild forwards TEST_RUNNER_-prefixed variables.
+      - name: Test with graduated flags off (Debug)
+        env:
+          TEST_RUNNER_NOTCHSIXTY_GRADUATED_FLAGS_OFF: "1"
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project NotchSixty.xcodeproj \
+            -scheme NotchSixty \
+            -configuration Debug \
+            -destination 'platform=macOS,arch=arm64' \
+            -derivedDataPath "$RUNNER_TEMP/DerivedData" \
+            CODE_SIGNING_ALLOWED=NO \
+            ENABLE_TESTABILITY=YES \
+            test 2>&1 | tee "$RUNNER_TEMP/xctest-flags-off.log"
+
       - name: Build Release performance scheme
         run: >-
           xcodebuild
@@ -134,6 +152,7 @@ jobs:
           name: macos-full-${{ github.run_id }}
           path: |
             ${{ runner.temp }}/xctest.log
+            ${{ runner.temp }}/xctest-flags-off.log
             ${{ runner.temp }}/benchmarks/benchmarks.txt
             ${{ runner.temp }}/benchmarks/bench.json
             ${{ runner.temp }}/benchmarks/bench-profile.json
