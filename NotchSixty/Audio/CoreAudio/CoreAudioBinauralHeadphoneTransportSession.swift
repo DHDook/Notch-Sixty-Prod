@@ -49,7 +49,7 @@ enum BinauralHeadphoneTransportError: Error, Equatable, LocalizedError {
 /// required for true 5.1/7.1.4 virtualization because channels already discarded
 /// by an upstream stereo mix cannot be reconstructed at the headphone endpoint.
 final class CoreAudioBinauralHeadphoneTransportSession {
-    private static let bridgeCapacityFrames: UInt32 = 65_536
+    static let bridgeCapacityFrames: UInt32 = RateCapacity.fixedRingFrames
 
     let selectedOutput: AudioOutputDevice
     let programSource: AudioOutputDevice

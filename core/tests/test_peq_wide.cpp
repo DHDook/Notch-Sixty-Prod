@@ -110,6 +110,46 @@ int main() {
             check(maxDiff(run(g, in), ref) < 1e-5, "prepared biquad parity", rate);
             n60_graph_retire(g);
         }
+        // E23 S1b (E6 G31): the deviation form (type 10 fourth slot = 1) keeps a low-corner Linkwitz transform accurate where
+        // the float form quantises its poles. 25 Hz zeros to 15 Hz poles; the double biquad is the reference.
+        {
+            const double f0 = 25, q0 = 0.7, fp = 15, qp = 0.6;
+            const double k = 2.0 * rate, w0 = k * std::tan(M_PI * f0 / rate), wp = k * std::tan(M_PI * fp / rate);
+            const double k2 = k * k, w02 = w0 * w0, wp2 = wp * wp, nd = (w0 / q0) * k, dd = (wp / qp) * k;
+            const double A0 = k2 + dd + wp2;
+            Bq ref0 = {(k2 + nd + w02) / A0, 2.0 * (w02 - k2) / A0, (k2 - nd + w02) / A0, 2.0 * (wp2 - k2) / A0, (k2 - dd + wp2) / A0};
+            const double n0 = 4.0 * w02 / A0, n1 = (2.0 * nd - 4.0 * w02) / A0, n2 = (k2 - nd + w02) / A0;
+            const double d0 = 4.0 * wp2 / A0, d1 = (2.0 * dd - 4.0 * wp2) / A0;
+            const float dev[8] = {9, (float)n0, (float)n1, (float)n2, 10, (float)d0, (float)d1, 1};
+            const float legacy[8] = {9, (float)ref0.b0, (float)ref0.b1, (float)ref0.b2, 10, (float)ref0.a1, (float)ref0.a2, 0};
+            std::vector<float> tone((size_t)(rate * 0.4));
+            for (size_t i = 0; i < tone.size(); ++i) tone[i] = 0.5f * (float)std::sin(2.0 * M_PI * 20.0 * (double)i / rate);
+            Bq c = ref0;
+            std::vector<double> ref(tone.size());
+            for (size_t i = 0; i < tone.size(); ++i) ref[i] = step(c, tone[i]);
+            double err[2] = {0, 0};
+            const float *forms[2] = {dev, legacy};
+            for (int f = 0; f < 2; ++f) {
+                n60_stage_desc st[1] = {stage(1, forms[f], 8)};
+                n60_graph *g = nullptr;
+                const n60_status bs = build(rate, st, 1, &g);
+                // The float form may be rejected outright at the high rates: its quantised poles leave the stability triangle.
+                if (f == 1 && bs != N60_STATUS_OK) { err[1] = 1.0; continue; }
+                check(bs == N60_STATUS_OK, "build deviation pair", rate);
+                if (!g) continue;
+                err[f] = maxDiff(run(g, tone), ref);
+                n60_graph_retire(g);
+            }
+            {
+                float bad[8] = {9, (float)n0, (float)n1, (float)n2, 10, (float)d0, (float)d1, 0.5f};
+                n60_stage_desc bs[1] = {stage(1, bad, 8)};
+                n60_graph *bg = nullptr;
+                check(build(rate, bs, 1, &bg) != N60_STATUS_OK, "reject form slot other than 0 or 1", rate);
+                if (bg) n60_graph_retire(bg);
+            }
+            check(err[0] < 2e-4, "deviation-form Linkwitz tracks the double reference", rate);
+            if (rate >= 176400) check(err[0] * 4.0 < err[1] || err[1] < 2e-4, "deviation form beats float coefficients", rate);
+        }
         // 40 peaking sections over three stages equal the sections run in order.
         {
             std::vector<float> a(64), b(64), c3(32);

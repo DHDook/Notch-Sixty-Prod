@@ -309,7 +309,7 @@ static void testRta() {
 }
 
 int main() {
-    CHECK(n60_measure_abi_version() == 4, "abi 4");
+    CHECK(n60_measure_abi_version() == N60_MEASURE_ABI_VERSION, "measure ABI");
     testRing();
     testWeighting();
     testMeter();

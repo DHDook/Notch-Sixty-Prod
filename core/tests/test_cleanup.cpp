@@ -166,6 +166,45 @@ int main() {
                 check(rmsTail(oc, m / 2) > 0.1 && std::fabs([&] { double mean = 0; for (size_t i = m / 2; i < m; ++i) mean += oc[i]; return mean / (double)(m - m / 2); }()) < 0.01, "single lane removes DC", rate);
             }
         }
+        // E23 S1b (E6 G37): the whole-buffer settled pass and the per-sample loop give identical bits. Block sizes of 512 and
+        // 37 frames split the signal at different points, so the settled switch happens mid-block in one and on a block
+        // edge in the other, and a live retune in the middle crosses back to the per-sample loop.
+        {
+            Params pp; pp.p[0] = 1; pp.p[1] = 1; pp.p[2] = 20; pp.p[3] = 2; pp.p[4] = 1; pp.p[8] = 1;
+            const size_t m = (size_t)(rate * 0.6);
+            std::vector<float> sig = sine(rate, 50.0, 0.3, 0.1, m);
+            for (size_t i = 0; i < m; ++i) sig[i] += 0.1f * (float)std::sin(2.0 * M_PI * 1000.0 * (double)i / rate);
+            std::vector<float> out[2], outR[2];
+            std::vector<float> sigR = sine(rate, 60.0, 0.2, -0.05, m);
+            const uint32_t blocks[2] = {512, 37};
+            for (int v = 0; v < 2; ++v) {
+                n60_graph *g = build(rate, pp);
+                check(g != nullptr, "build bit-identity", rate);
+                if (!g) break;
+                out[v].assign(m, 0.0f);
+                outR[v].assign(m, 0.0f);
+                const std::vector<float> &inR = sigR;
+                for (size_t off = 0; off < m; off += blocks[v]) {
+                    if (off >= m / 2 && off - blocks[v] < m / 2) {
+                        n60_param_record rec[1] = {{7, 5, 60.0f, 0}};
+                        n60_graph_post_params(g, rec, 1);
+                    }
+                    const uint32_t cnt = (uint32_t)std::fmin((double)blocks[v], (double)(m - off));
+                    const float *ip[2] = {sig.data() + off, inR.data() + off};
+                    float tmp[512], tmp2[512];
+                    float *op[2] = {tmp, tmp2};
+                    n60_graph_process(g, ip, op, cnt);
+                    std::memcpy(out[v].data() + off, tmp, cnt * sizeof(float));
+                    std::memcpy(outR[v].data() + off, tmp2, cnt * sizeof(float));
+                }
+                n60_graph_retire(g);
+            }
+            // The retune lands on different frames in the two runs, so compare only the stretch before it.
+            const size_t pre = m / 2 - 512;
+            check(out[0].size() == m && out[1].size() == m && std::memcmp(out[0].data(), out[1].data(), pre * sizeof(float)) == 0 &&
+                      std::memcmp(outR[0].data(), outR[1].data(), pre * sizeof(float)) == 0,
+                  "whole-buffer pass is bit-identical across block sizes, both channels", rate);
+        }
         // Validation.
         {
             Params pp; n60_status st; pp.p[5] = 90;

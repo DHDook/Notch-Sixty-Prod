@@ -26,6 +26,7 @@ so everything you need is in the task message, `CLAUDE.md`, the epic's section o
    Create branch `<epic-lowercase>/<slice-name>` from an up-to-date `main`. Use the code-scout
    agent to find files instead of reading large files. Never read `AudioIOEngine.swift`,
    `N60RenderKernel.c` or `ProductProfiles.swift` whole; read line ranges.
+   ABI numbers: if the slice bumps a graph or headroom ABI, check and claim the next number in `docs/ABI_NUMBERS.md` at slice start; renumber only your own claim if another merges first. Tests compare to the header macros, never literals.
 4. Make the change, following `AGENTS.md` and `CLAUDE.md` (flags, realtime rules, tests at the
    standard rates for DSP). Trace the feature from the user action to the engine (AGENTS.md
    section 12): no `Unconnected*` production defaults; anything not wired is `[~]` with an owning
@@ -35,7 +36,7 @@ so everything you need is in the task message, `CLAUDE.md`, the epic's section o
    an audio callback, run the realtime-reviewer agent and fix what it flags. At most two fix
    rounds; if still failing, push the branch, and return "BLOCKED" with the failure.
 6. Use the plan-tracker agent (give it the PR title and a one-line summary) to tick the slice in `docs/PROGRAM_PLAN.md`, update
-   `docs/epics/<EPIC>.md` and the Current focus line in `CLAUDE.md`, on this branch.
+   `docs/epics/<EPIC>.md` Status, on this branch. Never edit `CLAUDE.md` for status.
 7. Commit, push with `git push -u origin <branch>`, get the PR text from the pr-writer agent,
    and open the PR with `gh pr create`. Add the label `needs-owner` if the PR touches anything
    in the owner-review list in `CLAUDE.md` (Merge policy).

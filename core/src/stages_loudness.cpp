@@ -101,23 +101,26 @@ size_t up(size_t v) { return (v + (kAlign - 1)) & ~(kAlign - 1); }
 bool inR(double v, double lo, double hi) { return std::isfinite(v) && v >= lo && v <= hi; }
 bool isFlag(float v) { return v == 0.0f || v == 1.0f; }
 
+// E23 S1b: coefficients and state are double. A float transposed-direct-form-II state at a 38 Hz corner loses
+// about 50 dB of accuracy at 384 kHz (measured in S1, E23); input and output stay float.
 struct Bq {
-    float b0, b1, b2, a1, a2;
+    double b0, b1, b2, a1, a2;
 };
 struct BqState {
-    float z1, z2;
+    double z1, z2;
 };
 
 float smoothToward(float current, float target, float coef) { return target + coef * (current - target); }
 bool nearZero(float v) { return std::fabs(v) <= kParkEps; }
-Bq identityBq() { return Bq{1.0f, 0.0f, 0.0f, 0.0f, 0.0f}; }
+Bq identityBq() { return Bq{1.0, 0.0, 0.0, 0.0, 0.0}; }
 
-float runBq(const Bq &c, BqState &s, float in) {
-    const float out = c.b0 * in + s.z1;
+double runBqD(const Bq &c, BqState &s, double in) {
+    const double out = c.b0 * in + s.z1;
     s.z1 = c.b1 * in - c.a1 * out + s.z2;
     s.z2 = c.b2 * in - c.a2 * out;
     return out;
 }
+float runBq(const Bq &c, BqState &s, float in) { return static_cast<float>(runBqD(c, s, static_cast<double>(in))); }
 
 enum class Kind { LowPass, HighPass, LowShelf, HighShelf };
 
@@ -155,8 +158,7 @@ bool designBq(Kind kind, double rate, double f, double gainDb, double q, Bq &out
         a2 = (A + 1.0) - (A - 1.0) * cosO - beta;
     }
     if (!std::isfinite(a0) || std::fabs(a0) < 1.0e-20) return false;
-    const Bq c{static_cast<float>(b0 / a0), static_cast<float>(b1 / a0), static_cast<float>(b2 / a0),
-               static_cast<float>(a1 / a0), static_cast<float>(a2 / a0)};
+    const Bq c{b0 / a0, b1 / a0, b2 / a0, a1 / a0, a2 / a0};
     if (!std::isfinite(c.b0) || !std::isfinite(c.b1) || !std::isfinite(c.b2) || !std::isfinite(c.a1) || !std::isfinite(c.a2)) return false;
     out = c;
     return true;
@@ -168,6 +170,9 @@ float poleForMs(double rate, float ms) {
     return static_cast<float>(std::exp(-1.0 / (rate * (double(safe) / 1000.0))));
 }
 
+float meanSquareLufs(double ms) {
+    return static_cast<float>(-0.691 + 10.0 * std::log10(std::fmax(ms, static_cast<double>(kEpsilon))));
+}
 float dbToLinear(float db) { return std::pow(10.0f, db / 20.0f); }
 float linearToDb(float x) { return 20.0f * std::log10(std::fmax(x, kEpsilon)); }
 float clampf(float v, float lo, float hi) { return std::fmin(std::fmax(v, lo), hi); }
@@ -177,9 +182,10 @@ struct LdShared {
     float seen[kParams];  // parameter values the derived coefficients were last built from
     // match
     Bq kHp, kShelf;
-    float measCoef, attackPole, releasePole;
+    double measCoef;
+    float attackPole, releasePole;
     BqState kHpL, kHpR, kShL, kShR;
-    float meanSquare;
+    double meanSquare;
     uint32_t primed;
     float matchGainDb;
     uint32_t matchParked;
@@ -204,22 +210,22 @@ struct LdShared {
 enum Tel { kTLufs, kTMatch, kTScale, kTLowComp, kTHighComp, kTPhons, kTProg, kTBand, kTGap, kTConf, kTBoost };
 
 void clearMatchState(LdShared &S) {
-    S.kHpL = S.kHpR = S.kShL = S.kShR = BqState{0.0f, 0.0f};
+    S.kHpL = S.kHpR = S.kShL = S.kShR = BqState{0.0, 0.0};
 }
 void clearContourSimple(LdShared &S) {
-    S.lowShL = S.lowShR = S.highShL = S.highShR = BqState{0.0f, 0.0f};
+    S.lowShL = S.lowShR = S.highShL = S.highShR = BqState{0.0, 0.0};
 }
 void clearContourBands(LdShared &S) {
-    S.lowBandL = S.lowBandR = S.highBandL = S.highBandR = BqState{0.0f, 0.0f};
+    S.lowBandL = S.lowBandR = S.highBandL = S.highBandR = BqState{0.0, 0.0};
 }
 void clearLevelerFilters(LdShared &S) {
-    S.hpL = S.hpR = S.lpL = S.lpR = BqState{0.0f, 0.0f};
+    S.hpL = S.hpR = S.lpL = S.lpR = BqState{0.0, 0.0};
 }
 
 // ---- derived coefficients (control thread at init, realtime thread at a block start when a parameter moved) ----------
 
 void designMatch(LdShared &S, double rate, const float *p) {
-    S.measCoef = static_cast<float>(std::exp(-1.0 / (rate * kMeasureSeconds)));
+    S.measCoef = std::exp(-1.0 / (rate * kMeasureSeconds));
     S.attackPole = poleForMs(rate, p[kMatchAttack] * 1000.0f);
     S.releasePole = poleForMs(rate, p[kMatchRelease] * 1000.0f);
     S.seen[kMatchAttack] = p[kMatchAttack];
@@ -259,7 +265,7 @@ bool levelerMoved(const LdShared &S, const float *p) {
 
 void clearMatchAll(LdShared &S) {
     clearMatchState(S);
-    S.meanSquare = 0.0f;
+    S.meanSquare = 0.0;
     S.primed = 0;
 }
 
@@ -274,18 +280,18 @@ void matchSample(LdShared &S, const float *p, float *left, float *right) {
     }
     float measuredLufs = -120.0f;
     if (measurementNeeded) {
-        float wl = runBq(S.kHp, S.kHpL, *left);
-        wl = runBq(S.kShelf, S.kShL, wl);
-        float wr = runBq(S.kHp, S.kHpR, *right);
-        wr = runBq(S.kShelf, S.kShR, wr);
-        const float instant = 0.5f * (wl * wl + wr * wr);
-        if (S.primed == 0 && instant > kEpsilon) {
+        double wl = runBqD(S.kHp, S.kHpL, static_cast<double>(*left));
+        wl = runBqD(S.kShelf, S.kShL, wl);
+        double wr = runBqD(S.kHp, S.kHpR, static_cast<double>(*right));
+        wr = runBqD(S.kShelf, S.kShR, wr);
+        const double instant = 0.5 * (wl * wl + wr * wr);
+        if (S.primed == 0 && instant > static_cast<double>(kEpsilon)) {
             S.meanSquare = instant;
             S.primed = 1;
         } else {
-            S.meanSquare = smoothToward(S.meanSquare, instant, S.measCoef);
+            S.meanSquare = instant + S.measCoef * (S.meanSquare - instant);
         }
-        measuredLufs = -0.691f + 10.0f * std::log10(std::fmax(S.meanSquare, kEpsilon));
+        measuredLufs = meanSquareLufs(S.meanSquare);
     }
     if (!enabled) {
         if (!nearZero(S.matchGainDb)) {
@@ -371,7 +377,7 @@ void contourSample(LdShared &S, const float *p, float *left, float *right) {
     const float lowR = runBq(S.lowBand, S.lowBandR, dryR);
     const float highL = runBq(S.highBand, S.highBandL, dryL);
     const float highR = runBq(S.highBand, S.highBandR, dryR);
-    const float measuredLufs = -0.691f + 10.0f * std::log10(std::fmax(S.meanSquare, kEpsilon));
+    const float measuredLufs = meanSquareLufs(S.meanSquare);
     float estimated;
     if (p[kLevelSource] > 0.5f) {
         estimated = p[kRefPhons] + (measuredLufs - kIntegratedRefLufs);
@@ -562,7 +568,7 @@ void runLoudness(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frame
         contourSample(S, p, &L[i], &R[i]);
         levelerSample(S, p, &L[i], &R[i]);
     }
-    store(S, kTLufs, -0.691f + 10.0f * std::log10(std::fmax(S.meanSquare, kEpsilon)));
+    store(S, kTLufs, meanSquareLufs(S.meanSquare));
     store(S, kTMatch, S.matchGainDb);
     store(S, kTScale, S.mix);
     store(S, kTLowComp, S.lowGainDb);

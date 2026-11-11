@@ -74,6 +74,15 @@ static void post(n60_graph *g, const Cfg *c) {
     if (n60_graph_post_params(g, rec, (uint32_t)n) != N60_STATUS_OK) { fprintf(stderr, "post failed\n"); exit(1); }
 }
 
+/* The core keeps its filter state in double (E23 S1b); the legacy kernel keeps it in float. The two agree to the kernel's
+ * float state error, which grows with the rate (measured in E23 S1: about -81 dB at 44.1 kHz to -52 dB at 384 kHz). */
+static double parityPeakDb(double rate) {
+    if (rate <= 48000.5) return -70.0;
+    if (rate <= 96000.5) return -60.0;
+    if (rate <= 192000.5) return -50.0;
+    return -40.0;
+}
+
 int main(void) {
     const double rates[] = {44100, 48000, 88200, 96000, 176400, 192000, 352800, 384000};
     const Cfg cfgs[5] = {
@@ -148,9 +157,9 @@ int main(void) {
                    20 * log10(peak + 1e-30), 20 * log10(rms + 1e-30), rb.grNowDb[0], rb.grNowDb[1], rb.grNowDb[2],
                    tel.multibandLowGainReductionDB, tel.multibandMidGainReductionDB, tel.multibandHighGainReductionDB);
             if (!(moved > 1e-3)) { fprintf(stderr, "FAIL stage did not change the signal\n"); failures++; }
-            if (!(20 * log10(peak + 1e-30) < -120.0)) { fprintf(stderr, "FAIL peak\n"); failures++; }
-            if (!(20 * log10(rms + 1e-30) < -130.0)) { fprintf(stderr, "FAIL rms\n"); failures++; }
-            if (!(grDiff < 0.01)) { fprintf(stderr, "FAIL gain reduction\n"); failures++; }
+            if (!(20 * log10(peak + 1e-30) < parityPeakDb(rate))) { fprintf(stderr, "FAIL peak\n"); failures++; }
+            if (!(20 * log10(rms + 1e-30) < parityPeakDb(rate) - 12.0)) { fprintf(stderr, "FAIL rms\n"); failures++; }
+            if (!(grDiff < (rate <= 48000.5 ? 0.01 : (rate <= 96000.5 ? 0.03 : (rate <= 192000.5 ? 0.06 : 0.25))))) { fprintf(stderr, "FAIL gain reduction\n"); failures++; }
             n60_graph_retire(g);
         }
     }

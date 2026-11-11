@@ -85,11 +85,9 @@ struct HeadphoneChannelCorrection: Codable, Equatable, Sendable {
               eqBands.count <= Int(N60_HEADPHONE_MAX_EQ_SECTIONS) else {
             throw HeadphoneDeviceProfileError.invalidChannelCorrection
         }
-        let delayFrames = delayMilliseconds * sampleRate / 1_000.0
-        guard delayFrames.isFinite,
-              delayFrames <= Double(N60_HEADPHONE_MAX_DELAY_FRAMES) else {
-            throw HeadphoneDeviceProfileError.invalidChannelCorrection
-        }
+        // E7 S1: the model's 0 to 20 ms holds at every rate. The graph's DELAY stage is sized from the time; only
+        // the legacy kernel snapshot is limited to its 4,095 frames (see `makeRealtimeSnapshot`).
+        guard sampleRate.isFinite, sampleRate > 0 else { throw HeadphoneDeviceProfileError.invalidChannelCorrection }
         for band in eqBands { try band.validate(sampleRate: sampleRate) }
     }
 
@@ -418,6 +416,18 @@ struct HeadphoneDeviceProfileConfiguration: Codable, Equatable, Sendable {
         return snapshot
     }
 
+    /// The longest ear delay the legacy kernel's headphone stage holds at `sampleRate`. A longer delay (up to the
+    /// model's 20 ms) renders on the graph only; the kernel snapshot clamps to this until E23 removes the kernel.
+    static func kernelDelayLimitMilliseconds(sampleRate: Double) -> Double {
+        Double(N60_HEADPHONE_MAX_DELAY_FRAMES) / sampleRate * 1_000.0
+    }
+
+    /// True when the legacy kernel can render both ear delays exactly at `sampleRate`.
+    func kernelRendersDelays(sampleRate: Double) -> Bool {
+        let limit = Self.kernelDelayLimitMilliseconds(sampleRate: sampleRate)
+        return left.delayMilliseconds <= limit && right.delayMilliseconds <= limit
+    }
+
     private func applyChannel(
         _ correction: HeadphoneChannelCorrection,
         index: UInt32,
@@ -434,7 +444,7 @@ struct HeadphoneDeviceProfileConfiguration: Codable, Equatable, Sendable {
               N60HeadphoneDSPSetChannelDelayMs(
                 &snapshot,
                 index,
-                correction.delayMilliseconds
+                min(correction.delayMilliseconds, Self.kernelDelayLimitMilliseconds(sampleRate: sampleRate))
               ) else { return false }
         for (bandIndex, band) in correction.eqBands.enumerated() {
             guard N60HeadphoneDSPSetChannelEQBand(

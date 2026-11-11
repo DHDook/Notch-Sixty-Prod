@@ -61,7 +61,9 @@ enum UnifiedGraphTranslator {
                 let section = UnifiedGraphPEQSection(
                     type: Int(band.type), frequencyHz: band.frequencyHz,
                     gainDB: band.gainDB, q: band.q,
-                    coefficients: band.type == 9 ? [band.b0, band.b1, band.b2, band.a1, band.a2] : nil
+                    coefficients: band.type == 9 ? [band.b0, band.b1, band.b2, band.a1, band.a2] : nil,
+                    linkwitzDeviation: band.type == 9 && band.hasDeviation
+                        ? withUnsafeBytes(of: band.deviation) { Array($0.bindMemory(to: Double.self)) } : nil
                 )
                 if band.channelMask & UInt8(N60_EQ_CHANNEL_LEFT) != 0 { left.append(section) }
                 if band.channelMask & UInt8(N60_EQ_CHANNEL_RIGHT) != 0 { right.append(section) }
@@ -863,8 +865,12 @@ enum UnifiedGraphTranslator {
               (-24.0...24.0).contains(profile.left.gainDB), (-24.0...24.0).contains(profile.right.gainDB),
               sampleRate.isFinite, sampleRate > 0 else { return false }
         for side in [profile.left, profile.right] {
+            // E7 S1: the DELAY stage's capacity is the model's 20 ms at this rate, so the legacy kernel's 4,095 frames
+            // no longer limit the graph.
             guard side.delayMilliseconds.isFinite, side.delayMilliseconds >= 0,
-                  sampleRate * side.delayMilliseconds * 0.001 <= Double(N60_HEADPHONE_MAX_DELAY_FRAMES) else {
+                  side.delayMilliseconds * 0.001 <= RateCapacity.headphoneDelayMaximumSeconds,
+                  RateCapacity.frames(seconds: RateCapacity.headphoneDelayMaximumSeconds, sampleRate: sampleRate)
+                    <= N60_GRAPH_MAX_DELAY_FRAMES else {
                 return false
             }
         }
@@ -912,11 +918,12 @@ enum UnifiedGraphTranslator {
     static func headphoneDelayStages(
         profile: HeadphoneDeviceProfileConfiguration, sampleRate: Double
     ) -> [UnifiedGraphStageSpec] {
-        [profile.left, profile.right].enumerated().map { lane, side in
-            let frames = min(UInt32(N60_HEADPHONE_MAX_DELAY_FRAMES), UInt32((sampleRate * side.delayMilliseconds * 0.001).rounded()))
+        let capacity = RateCapacity.frames(seconds: RateCapacity.headphoneDelayMaximumSeconds, sampleRate: sampleRate)
+        return [profile.left, profile.right].enumerated().map { lane, side in
+            let frames = min(capacity, UInt32((sampleRate * side.delayMilliseconds * 0.001).rounded()))
             return UnifiedGraphStageSpec(
                 kind: UInt32(N60_STAGE_DELAY.rawValue), stageId: headphoneDelayStageBase + UInt32(lane),
-                laneA: UInt32(lane), laneB: 0, laneMask: 0, capacityFrames: UInt32(N60_HEADPHONE_MAX_DELAY_FRAMES),
+                laneA: UInt32(lane), laneB: 0, laneMask: 0, capacityFrames: max(1, capacity),
                 params: [Float(frames)])
         }
     }

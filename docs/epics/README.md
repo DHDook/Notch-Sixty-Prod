@@ -32,3 +32,9 @@ Owner decision 6 Nov 2026: once E26 is done, audit every completed epic against 
 (`[x]` means reachable from the shipped UI, end-to-end tests through production wiring for ship
 slices, no stale ticks or unrecorded gaps). Then repeat the audit after each epic completes. Findings
 are recorded as gaps in the audited epic's `## Gaps`; the audit fixes nothing unprompted.
+
+## ABI number reservation
+
+Parallel slices that bump the graph ABI collide on the number. See `docs/ABI_NUMBERS.md`: claim the
+next number there at slice start, and renumber only your own claim if another slice merges first.
+Tests compare against `N60_GRAPH_ABI_VERSION` (and the other `N60_*_ABI_VERSION` macros), never a literal.

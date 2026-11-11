@@ -80,8 +80,18 @@ static void post(n60_graph *g, const Cfg *c) {
     if (n60_graph_post_params(g, rec, 32) != N60_STATUS_OK) { fprintf(stderr, "post failed\n"); exit(1); }
 }
 
+/* The core keeps its filter state in double (E23 S1b); the legacy kernel keeps it in float. The two agree to the kernel's
+ * float state error, which grows with the rate (measured in E23 S1: about -81 dB at 44.1 kHz to -52 dB at 384 kHz). */
+static double parityPeakDb(double rate) {
+    if (rate <= 48000.5) return -70.0;
+    if (rate <= 96000.5) return -60.0;
+    if (rate <= 192000.5) return -50.0;
+    return -40.0;
+}
+
+static double gTolScale = 1.0; /* telemetry follows the kernel's float state error: wider at high rates */
 static int near(double a, double b, double tol, const char *what) {
-    if (fabs(a - b) <= tol) return 0;
+    if (fabs(a - b) <= tol * gTolScale) return 0;
     fprintf(stderr, "FAIL %s: core %.4f kernel %.4f\n", what, a, b);
     return 1;
 }
@@ -158,8 +168,9 @@ int main(void) {
                    20 * log10(peak + 1e-30), 20 * log10(rms + 1e-30), rb.shortTermLufs, tel.loudnessShortTermLUFS,
                    rb.matchGainDb, tel.loudnessMatchGainDB, rb.dialogueBoostDb, tel.dialogueBoostDB);
             if (m != 6 && !(moved > 1e-3)) { fprintf(stderr, "FAIL stage did not change the signal (cfg %u)\n", m); failures++; }
-            if (!(20 * log10(peak + 1e-30) < -120.0)) { fprintf(stderr, "FAIL peak\n"); failures++; }
-            if (!(20 * log10(rms + 1e-30) < -130.0)) { fprintf(stderr, "FAIL rms\n"); failures++; }
+            if (!(20 * log10(peak + 1e-30) < parityPeakDb(rate))) { fprintf(stderr, "FAIL peak\n"); failures++; }
+            if (!(20 * log10(rms + 1e-30) < parityPeakDb(rate) - 12.0)) { fprintf(stderr, "FAIL rms\n"); failures++; }
+            gTolScale = rate <= 96000.5 ? 1.0 : (rate <= 192000.5 ? 2.0 : 4.0);
             failures += near(rb.shortTermLufs, tel.loudnessShortTermLUFS, 0.01, "lufs");
             failures += near(rb.matchGainDb, tel.loudnessMatchGainDB, 0.01, "match gain");
             failures += near(rb.contourScale, tel.loudnessContourScale, 0.001, "contour scale");

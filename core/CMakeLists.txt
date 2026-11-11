@@ -247,6 +247,11 @@ add_executable(n60core_lane_delay_test tests/test_lane_delay.cpp)
 target_link_libraries(n60core_lane_delay_test PRIVATE n60core)
 add_test(NAME n60core_lane_delay COMMAND n60core_lane_delay_test)
 
+# E7 S1: capacities in time (20 ms delay, 500 ms split fractional delay, 20 ms look-ahead at 4x) at the eight rates.
+add_executable(n60core_rate_capacity_test tests/test_rate_capacity.cpp)
+target_link_libraries(n60core_rate_capacity_test PRIVATE n60core)
+add_test(NAME n60core_rate_capacity COMMAND n60core_rate_capacity_test)
+
 add_executable(n60core_delta_audition_test tests/test_delta_audition.cpp)
 target_link_libraries(n60core_delta_audition_test PRIVATE n60core)
 add_test(NAME n60core_delta_audition COMMAND n60core_delta_audition_test)
