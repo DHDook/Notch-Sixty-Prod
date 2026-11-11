@@ -42,16 +42,16 @@ failed=()
 # (default 900) so a hang fails that harness and names itself instead of stalling the whole job.
 HARNESS_TIMEOUT=${HARNESS_TIMEOUT:-900}
 run_timed() {
-    echo "[harness] running: $* (timeout ${HARNESS_TIMEOUT}s)"
+    echo "[harness] running: $* (timeout ${HARNESS_TIMEOUT}s)" >&2  # stderr: some callers redirect stdout to a file they compare
     "$@" &
     local pid=$! watchdog rc
-    ( sleep "$HARNESS_TIMEOUT"; echo "[harness] TIMEOUT after ${HARNESS_TIMEOUT}s, killing: $*" >&2; kill -9 "$pid" 2>/dev/null ) &
+    # The watchdog reports and kills only if its sleep ran to the end (exit 0); a sleep killed by us does nothing.
+    ( sleep "$HARNESS_TIMEOUT" && { echo "[harness] TIMEOUT after ${HARNESS_TIMEOUT}s, killing: $*" >&2; kill -9 "$pid" 2>/dev/null; } ) &
     watchdog=$!
     wait "$pid"
     rc=$?
-    pkill -P "$watchdog" 2>/dev/null
-    kill "$watchdog" 2>/dev/null
-    wait "$watchdog" 2>/dev/null
+    # Stop the watchdog subshell first, then its sleep, so the subshell cannot go on to the timeout branch.
+    { kill "$watchdog"; pkill -P "$watchdog"; wait "$watchdog"; } 2>/dev/null  # the shell reports the killed job on stderr; hide that
     return $rc
 }
 
