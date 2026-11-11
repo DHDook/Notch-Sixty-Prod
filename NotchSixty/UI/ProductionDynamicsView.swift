@@ -27,6 +27,7 @@ struct ProductionDynamicsView: View {
         VStack(alignment: .leading, spacing: 16) {
             header
             ProductionActionErrorBanner(message: $actionError)
+            listeningBanner
 
             HStack(alignment: .top, spacing: 12) {
                 moduleNavigator
@@ -242,6 +243,196 @@ struct ProductionDynamicsView: View {
                 .help("Release starts at half the set time for light gain reduction and lengthens to twice the set time as the reduction deepens toward 12 dB, so brief peaks recover quickly and sustained material does not pump.")
             row(.compressorSidechainHighPassHz)
                 .help("0 Hz disables the sidechain high-pass filter.")
+            compressorExtras
+        }
+    }
+
+    // MARK: - Extras (E28 S7d)
+
+    private var extrasAvailability: DynamicsExtrasAvailability {
+        DynamicsExtrasAvailability(
+            flagOn: FeatureFlags().isEnabled(.dynamicsExtras),
+            kernelRenders: engine.dynamicsKernelRenders,
+            running: engine.dynamicsListenHost != nil
+        )
+    }
+
+    private func reasonNote(_ reason: String?) -> some View {
+        Group {
+            if let reason {
+                Text(reason).font(.caption).foregroundStyle(.secondary)
+                    .accessibilityLabel("Unavailable: \(reason)")
+            }
+        }
+    }
+
+    private func extraToggle(
+        _ title: String, id: String, enabled: Bool, help: String? = nil,
+        get: @escaping (DynamicsConfiguration) -> Bool, set: @escaping (inout DynamicsConfiguration, Bool) -> Void
+    ) -> some View {
+        Toggle(title, isOn: binding(get, set))
+            .disabled(!enabled)
+            .help(help ?? title)
+            .accessibilityIdentifier(id)
+    }
+
+    /// Listen (sidechain) and Delta buttons for one stage; one listener in the whole graph.
+    private func listenButtons(_ stage: DynamicsListenStage, id: String) -> some View {
+        let av = extrasAvailability
+        func isOn(_ mode: DynamicsListenMode) -> Bool { engine.dynamicsListener == DynamicsListener(stage: stage, mode: mode) }
+        func toggle(_ mode: DynamicsListenMode, _ title: String, _ help: String) -> some View {
+            Toggle(title, isOn: Binding(
+                get: { isOn(mode) },
+                set: { on in perform { try engine.setDynamicsListener(on ? DynamicsListener(stage: stage, mode: mode) : nil) } }
+            ))
+            .toggleStyle(.button)
+            .disabled(!av.listenEnabled)
+            .help(av.listenDisabledReason ?? help)
+            .accessibilityIdentifier("\(id).\(mode == .sidechain ? "listen" : "delta")")
+            .accessibilityValue(isOn(mode) ? "Listening" : "Off")
+        }
+        return HStack(spacing: 8) {
+            toggle(.sidechain, "Listen", "Plays the detector input after the sidechain filter and before any gain. Session only; one listener at a time.")
+            toggle(.delta, "Delta", "Plays what this stage removes (dry minus processed, before make-up). Session only; one listener at a time.")
+        }
+    }
+
+    @ViewBuilder
+    private var listeningBanner: some View {
+        if let listener = engine.dynamicsListener {
+            HStack {
+                Label(listener.bannerText, systemImage: "ear")
+                Spacer()
+                Button("Stop Listening") { perform { try engine.setDynamicsListener(nil) } }
+                    .accessibilityIdentifier("dynamics.listen.stop")
+            }
+            .padding(8)
+            .background(.yellow.opacity(0.18), in: RoundedRectangle(cornerRadius: 8))
+            .accessibilityElement(children: .combine)
+            .accessibilityIdentifier("dynamics.listen.banner")
+        }
+        if !engine.dynamicsSoloBands.isEmpty {
+            HStack {
+                let names = engine.dynamicsSoloBands.sorted().map { ["low", "mid", "high"][$0] }.joined(separator: ", ")
+                Label("Soloing the multiband \(names) band\(engine.dynamicsSoloBands.count == 1 ? "" : "s"). Downstream protection still applies.", systemImage: "speaker.wave.2")
+                Spacer()
+                Button("Clear Solo") { perform { try engine.setDynamicsSoloBands([]) } }
+                    .accessibilityIdentifier("dynamics.solo.clear")
+            }
+            .padding(8)
+            .background(.yellow.opacity(0.18), in: RoundedRectangle(cornerRadius: 8))
+            .accessibilityElement(children: .combine)
+            .accessibilityIdentifier("dynamics.solo.banner")
+        }
+    }
+
+    @ViewBuilder
+    private var compressorExtras: some View {
+        if extrasAvailability.flagOn {
+            let av = extrasAvailability
+            let c = configuration.compressor
+            Divider()
+            Text("Extras").font(.headline)
+            reasonNote(av.extrasDisabledReason)
+            row(.compressorMixPercent, enabled: av.extrasEnabled)
+            row(.compressorLinkPercent, enabled: av.extrasEnabled)
+            extraToggle("RMS Detector", id: "dynamics.compressor.rms", enabled: av.extrasEnabled,
+                        help: "Off reads peaks; on reads a one-pole RMS over the detector window.",
+                        get: { $0.compressor.rmsDetectorOn }, set: { $0.compressor.rmsDetectorOn = $1 })
+            row(.compressorRMSWindowMs, enabled: av.extrasEnabled && c.rmsDetectorOn)
+            extraToggle("Lookahead", id: "dynamics.compressor.lookahead", enabled: av.extrasEnabled,
+                        help: "Delays the audio so the compressor can react before a peak. It adds latency.",
+                        get: { $0.compressor.lookaheadOn }, set: { $0.compressor.lookaheadOn = $1 })
+            row(.compressorLookaheadMs, enabled: av.extrasEnabled && c.lookaheadOn)
+            if c.lookaheadOn {
+                Text(DynamicsExtrasAvailability.addsText(ms: c.lookaheadTimeMs, sampleRate: engine.liveTreatmentSampleRate))
+                    .font(.caption).foregroundStyle(.secondary)
+                    .accessibilityIdentifier("dynamics.compressor.lookahead.adds")
+            }
+            reasonNote(av.listenDisabledReason)
+            listenButtons(.compressor, id: "dynamics.compressor")
+        }
+    }
+
+    @ViewBuilder
+    private var expanderExtras: some View {
+        if extrasAvailability.flagOn {
+            let av = extrasAvailability
+            Divider()
+            Text("Extras").font(.headline)
+            reasonNote(av.extrasDisabledReason)
+            row(.expanderHoldMs, enabled: av.extrasEnabled)
+            row(.expanderKneeDB, enabled: av.extrasEnabled)
+            extraToggle("RMS Detector", id: "dynamics.expander.rms", enabled: av.extrasEnabled,
+                        help: "Off reads peaks; on reads a one-pole RMS over the detector window.",
+                        get: { $0.expander.rmsDetectorOn }, set: { $0.expander.rmsDetectorOn = $1 })
+            row(.expanderRMSWindowMs, enabled: av.extrasEnabled && configuration.expander.rmsDetectorOn)
+            row(.expanderSidechainHighPassHz, enabled: av.extrasEnabled)
+                .help("0 Hz disables the sidechain high-pass filter.")
+            row(.expanderLinkPercent, enabled: av.extrasEnabled)
+            reasonNote(av.listenDisabledReason)
+            listenButtons(.expander, id: "dynamics.expander")
+        }
+    }
+
+    @ViewBuilder
+    private var multibandExtras: some View {
+        if extrasAvailability.flagOn {
+            let av = extrasAvailability
+            let m = configuration.multibandCompressor
+            GroupBox("Extras") {
+                VStack(alignment: .leading, spacing: 10) {
+                    reasonNote(av.extrasDisabledReason)
+                    row(.multibandRMSWindowMs, enabled: av.extrasEnabled)
+                    extraToggle("Lookahead (all bands)", id: "dynamics.multiband.lookahead", enabled: av.extrasEnabled,
+                                help: "One delay for the whole stage so the bands stay aligned. It adds latency.",
+                                get: { $0.multibandCompressor.lookaheadOn }, set: { $0.multibandCompressor.lookaheadOn = $1 })
+                    row(.multibandLookaheadMs, enabled: av.extrasEnabled && m.lookaheadOn)
+                    if m.lookaheadOn {
+                        Text(DynamicsExtrasAvailability.addsText(ms: m.lookaheadTimeMs, sampleRate: engine.liveTreatmentSampleRate))
+                            .font(.caption).foregroundStyle(.secondary)
+                            .accessibilityIdentifier("dynamics.multiband.lookahead.adds")
+                    }
+                }
+                .padding(.vertical, 6)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func multibandBandExtras(band: Int) -> some View {
+        if extrasAvailability.flagOn {
+            let av = extrasAvailability
+            let id = "dynamics.multiband.\(band)"
+            Divider()
+            reasonNote(av.extrasDisabledReason)
+            extraToggle("Bypass", id: "\(id).bypass", enabled: av.bypassEnabled,
+                        help: "Passes this band at unity. Works on the legacy kernel too.",
+                        get: { MultibandCompressorConfiguration.contains($0.multibandCompressor.bypassedBands, band) },
+                        set: { $0.multibandCompressor.bypassedBands = MultibandCompressorConfiguration.toggled($0.multibandCompressor.bypassedBands, band: band, on: $1) })
+            extraToggle("RMS Detector", id: "\(id).rms", enabled: av.extrasEnabled,
+                        get: { MultibandCompressorConfiguration.contains($0.multibandCompressor.rmsDetectorBands, band) },
+                        set: { $0.multibandCompressor.rmsDetectorBands = MultibandCompressorConfiguration.toggled($0.multibandCompressor.rmsDetectorBands, band: band, on: $1) })
+            extraToggle("Auto Release", id: "\(id).autoRelease", enabled: av.extrasEnabled,
+                        help: "Program-dependent release for this band.",
+                        get: { MultibandCompressorConfiguration.contains($0.multibandCompressor.autoReleaseBands, band) },
+                        set: { $0.multibandCompressor.autoReleaseBands = MultibandCompressorConfiguration.toggled($0.multibandCompressor.autoReleaseBands, band: band, on: $1) })
+            reasonNote(av.listenDisabledReason)
+            HStack(spacing: 8) {
+                Toggle("Solo", isOn: Binding(
+                    get: { engine.dynamicsSoloBands.contains(band) },
+                    set: { on in
+                        var bands = engine.dynamicsSoloBands
+                        if on { bands.insert(band) } else { bands.remove(band) }
+                        perform { try engine.setDynamicsSoloBands(bands) }
+                    }
+                ))
+                .toggleStyle(.button)
+                .disabled(!av.listenEnabled)
+                .help(av.listenDisabledReason ?? "Plays only this band. Session only.")
+                .accessibilityIdentifier("\(id).solo")
+                listenButtons([DynamicsListenStage.multibandLow, .multibandMid, .multibandHigh][band], id: id)
+            }
         }
     }
 
@@ -266,6 +457,7 @@ struct ProductionDynamicsView: View {
                 .padding(.vertical, 6)
             }
 
+            multibandExtras
             multibandBandEditor(band: 0, title: "Low Band")
             multibandBandEditor(band: 1, title: "Mid Band")
             multibandBandEditor(band: 2, title: "High Band")
@@ -280,6 +472,7 @@ struct ProductionDynamicsView: View {
             row(.expanderRangeDB)
             row(.expanderAttackMs)
             row(.expanderReleaseMs)
+            expanderExtras
         }
     }
 
@@ -675,6 +868,7 @@ struct ProductionDynamicsView: View {
                         .accessibilityIdentifier("dynamics.multiband.\(band).autoMakeup")
                     }
                 }
+                multibandBandExtras(band: band)
             }
             .padding(.top, 8)
         }

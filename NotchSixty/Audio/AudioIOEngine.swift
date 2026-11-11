@@ -1166,6 +1166,11 @@ final class AudioIOEngine: ObservableObject {
         // E9 S5b: keeps the output-protection policy in step with restored and replaced settings.
         didSet { UnifiedGraphOutputProtection.apply(settings: dynamicsConfiguration.outputProtection ?? OutputProtectionSettings()) }
     }
+    /// E28 S7d: session state of dynamics listening and multiband solo (never encoded, never persisted). The graph host holds
+    /// the same state; these mirror it for the Dynamics page and the banner. Cleared on a profile switch, Stop, an output
+    /// change and Quit.
+    @Published private(set) var dynamicsListener: DynamicsListener?
+    @Published private(set) var dynamicsSoloBands: Set<Int> = []
     @Published private(set) var roomCorrectionConfiguration = RoomCorrectionConfiguration()
     /// E24 S3b: why an enabled lane-plan correction is not shaping playback right now, for Room Correction to show.
     @Published private(set) var roomCorrectionInactiveReason: RoomCorrectionInactiveReason?
@@ -2469,6 +2474,7 @@ final class AudioIOEngine: ObservableObject {
         stereoEQConfiguration = state.stereoEQ
         eqConfiguration = legacyEQConfiguration(from: state.stereoEQ)
         dynamicsConfiguration = state.dynamics
+        clearDynamicsListening()  // E28 S7d (G36): a profile switch ends listening and solo
         gainConfiguration = targetGain
         ambientCompensationRuntimeTarget = clampedAmbientTarget
         activeQuietZoneRuntimeTarget = candidateQuietZone
@@ -3058,6 +3064,28 @@ final class AudioIOEngine: ObservableObject {
         guard lanes > 0,
               let host = transportSession?.unifiedGraphReadback ?? nChannelTransportSession?.unifiedGraphReadback else { return nil }
         return (host.currentSpec, lanes)
+    }
+
+    /// E28 S7d: the graph host of whichever session renders now (stereo, N-channel or binaural), for listen and solo.
+    var dynamicsListenHost: UnifiedGraphHost? {
+        transportSession?.unifiedGraphReadback
+            ?? nChannelTransportSession?.unifiedGraphReadback
+            ?? binauralHeadphoneTransportSession?.unifiedGraphReadback
+    }
+
+    func setDynamicsListenerMirror(_ listener: DynamicsListener?, solo: Set<Int>) {
+        if dynamicsListener != listener { dynamicsListener = listener }
+        if dynamicsSoloBands != solo { dynamicsSoloBands = solo }
+    }
+
+    var dynamicsHasStereoSession: Bool { transportSession != nil }
+
+    func reportDynamicsListenError(_ message: String) { lastErrorDescription = message }
+
+    /// Where the live graph runs, `true` when the frozen kernel renders instead (so the extras cannot play).
+    var dynamicsKernelRenders: Bool {
+        if let session = transportSession { return !session.unifiedGraphActive }
+        return !unifiedGraphEnabled
     }
 
     func replaceDynamicsConfiguration(_ configuration: DynamicsConfiguration) throws {
@@ -5964,6 +5992,9 @@ final class AudioIOEngine: ObservableObject {
         roomCorrectionABXOverride = nil
         // E27 S3b: an audition never outlives the transport. The stored EQ is untouched.
         if eqAudition != nil { eqAudition = nil }
+        // E28 S7d (G36): the graph dies with the transport, and so does listening and solo (Stop, output change, Quit).
+        dynamicsListener = nil
+        dynamicsSoloBands = []
         if let controller = headTrackingController {
             controller.stop()
             headTrackingController = nil
