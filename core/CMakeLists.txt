@@ -215,6 +215,9 @@ add_test(NAME n60core_image_precision COMMAND n60core_image_precision_test)
 add_executable(n60core_comp_extras_test tests/test_comp_extras.cpp)
 target_link_libraries(n60core_comp_extras_test PRIVATE n60core)
 add_test(NAME n60core_comp_extras COMMAND n60core_comp_extras_test)
+add_executable(n60core_exp_extras_test tests/test_exp_extras.cpp)
+target_link_libraries(n60core_exp_extras_test PRIVATE n60core)
+add_test(NAME n60core_exp_extras COMMAND n60core_exp_extras_test)
 
 # E6 S12c: loudness (match, contour, dialogue leveler) stage (ABI v24).
 add_executable(n60core_loudness_test tests/test_loudness.cpp)

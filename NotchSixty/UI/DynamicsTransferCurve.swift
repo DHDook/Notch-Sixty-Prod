@@ -45,7 +45,8 @@ struct DynamicsTransferCurve: Equatable, Sendable {
     }
 
     init(_ expander: ExpanderConfiguration) {
-        self.init(kind: .expander, thresholdDB: expander.thresholdDB, ratio: expander.ratio, floorDB: expander.rangeDB)
+        self.init(kind: .expander, thresholdDB: expander.thresholdDB, ratio: expander.ratio,
+                  kneeDB: expander.kneeDB ?? 0, floorDB: expander.rangeDB)
     }
 
     init(_ limiter: LimiterConfiguration) {
@@ -81,9 +82,7 @@ struct DynamicsTransferCurve: Equatable, Sendable {
         case .limiter:
             return min(0, thresholdDB - input)
         case .expander:
-            guard input < thresholdDB else { return 0 }
-            let gain = (ratio - 1) * (input - thresholdDB)
-            return max(gain, floorDB ?? -.infinity)
+            return max(expansionDB(atInput: input), floorDB ?? -.infinity)
         case .compressor:
             let compression = max(compressionDB(atInput: input), floorDB ?? -.infinity)
             return compression + makeupDB
@@ -94,6 +93,21 @@ struct DynamicsTransferCurve: Equatable, Sendable {
 
     /// What the engine reports: max(0, -gain).
     func reductionDB(atInput input: Double) -> Double { max(0, -gainDB(atInput: input)) }
+
+    /// Expansion gain (zero or negative) before the floor: (ratio - 1) dB per dB below the threshold, with a quadratic knee
+    /// centred on the threshold, the compressor's law mirrored (E28 S7b; core `expTargetDb`). Knee 0 is the hard law.
+    private func expansionDB(atInput input: Double) -> Double {
+        let over = input - thresholdDB
+        let slope = ratio - 1
+        if kneeDB <= 0 { return over >= 0 ? 0 : slope * over }
+        let half = kneeDB / 2
+        if over >= half { return 0 }
+        if over > -half {
+            let position = over - half
+            return -slope * position * position / (2 * kneeDB)
+        }
+        return slope * over
+    }
 
     /// Compression below 0 dB before makeup and floor.
     private func compressionDB(atInput input: Double) -> Double {
@@ -123,7 +137,12 @@ struct DynamicsTransferCurve: Equatable, Sendable {
             guard ratio > 1 else { return nil }
             let limit = floorDB.map { -$0 } ?? .infinity
             guard reduction <= limit else { return nil }
-            return thresholdDB - reduction / (ratio - 1)
+            let slope = ratio - 1
+            if kneeDB <= 0 { return thresholdDB - reduction / slope }
+            let half = kneeDB / 2
+            if reduction >= slope * half { return thresholdDB - reduction / slope }
+            // Inside the knee: reduction = slope * (half - over)^2 / (2 * knee).
+            return thresholdDB + half - (2 * kneeDB * reduction / slope).squareRoot()
         case .compressor:
             guard ratio > 1 else { return nil }
             // Compression (before makeup) that gives this reduction: gain = compression + makeup = -reduction.
@@ -163,6 +182,9 @@ struct DynamicsTransferCurve: Equatable, Sendable {
         case .limiter: return "Ceiling \(threshold)"
         case .expander:
             let ratioText = ValueParser.spokenText(ratio, unit: .ratio, digits: 1)
+            if kneeDB > 0 {
+                return "Threshold \(threshold), ratio \(ratioText), knee \(ValueParser.spokenText(kneeDB, unit: .decibels, digits: 1))"
+            }
             return "Threshold \(threshold), ratio \(ratioText)"
         case .compressor:
             let ratioText = ValueParser.spokenText(ratio, unit: .ratio, digits: 1)

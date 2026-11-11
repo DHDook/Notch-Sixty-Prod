@@ -34,7 +34,7 @@ extern "C" {
 #endif
 
 /* Bumped on any incompatible change to a struct or function below. */
-#define N60_GRAPH_ABI_VERSION 35u
+#define N60_GRAPH_ABI_VERSION 36u
 
 typedef struct n60_graph n60_graph; /* opaque */
 
@@ -359,10 +359,21 @@ typedef int (*n60_external_process_fn)(void *context, const float *const *in, fl
  *  path only, so mix 0 is the unity-gain delayed dry. Memory: lanes x lookahead x 4 bytes of snapshot arena (at most
  *  8192 frames). A changed [12] keeps the mean square running, so there is no reset transient. Sample rate and lane
  *  count are unchanged. paramCount 10 is bit-identical to ABI v32: peak, shared gain, mix 100, no delay.
+ *  ABI v35 (E28 S7b): paramCount 16 adds [15] listen (0 off, 1 sidechain, 2 delta; live). Sidechain listen outputs the
+ *  detector input (after the sidechain filter, before any gain, so no make-up) on every lane of the stage; delta
+ *  listen outputs the delayed dry minus the delayed dry times the gain without make-up. Both pass through a second
+ *  ring of the lookahead length so latency never changes, and crossfade in and out over 5 ms. Memory: twice the ring.
+ *  Delta ignores mix. With the feedback detector the sidechain is the fed-back signal (it carries the stage's gain).
+ *  Listen 0 is bit-identical to the 15-value block.
  *
  * Expander / gate. params: [0] threshold dB (-120..0), [1] ratio (1..20), [2] range dB
  *  (-96..0), [3] attack ms, [4] release ms (as above), [5] linked (0/1). paramCount 6.
- *  Live: [0]..[4].
+ *  Live: [0]..[4]. ABI v35 (E28 S7b): paramCount 13 adds [6] hold ms (0..500; the gain stays open that long after the
+ *  detector falls below the knee), [7] knee dB (0..24; quadratic, centred on the threshold, C1 at both edges, 0 is the
+ *  hard law), [8] detector (0 peak, 1 RMS), [9] RMS window ms (5..200), [10] sidechain high-pass Hz (0..300; the
+ *  compressor's 4th-order design, 0 off), [11] link % (0..100, as the compressor), [12] listen (0 off, 1 sidechain,
+ *  2 delta; no ring, so no latency; 5 ms crossfade). Each lane keeps its own gain. Live: [0]..[4], [6]..[12]. paramCount 6
+ *  is bit-identical to ABI v34. Memory: one shared filter record plus one state record per lane.
  *
  * Dynamic EQ. params: [0] linked (0/1), then per band 15 values: shape (0 peak, 1 low
  *  shelf, 2 high shelf, 3 notch, 4 band pass, 5 tilt), Hz (20..20000, below Nyquist),
@@ -495,7 +506,7 @@ typedef int (*n60_external_process_fn)(void *context, const float *const *in, fl
  *  both ears, as the kernel does for the LFE), [9] declared extra latency of the responses in frames
  *  (0..N60_GRAPH_MAX_DELAY_FRAMES; reported, never applied), then 10 + (set, source, ear, tap) floats:
  *  paramCount = 10 + O * N * 2 * taps, set-major, then source, then ear (0 left, 1 right), then tap.
- * ABI v35 (E13 S4): long responses. [10] = tail taps T (0 = none, else 1..one second at the graph rate) and
+ * ABI v36 (E13 S4): long responses. [10] = tail taps T (0 = none, else 1..one second at the graph rate) and
  *  [11] = 0 (reserved), and paramCount = 12 + O * N * 2 * taps + N * 2 * T: after the early responses come the
  *  late tails, one pair per source (no orientation index: the tail is shared by every orientation; with
  *  [8] the equal-ear source's two tails are averaged). The tail is response samples taps..taps+T-1 of the
@@ -977,7 +988,7 @@ typedef struct n60_binaural_profile {
     uint32_t wrap;
     int32_t equalEarChannel;  /* layout channel index averaged to both ears (the LFE), or -1 */
     uint32_t declaredLatency;
-    uint32_t tailTaps;        /* ABI v35: late-tail taps per response (0 = none); see the Binaural stage */
+    uint32_t tailTaps;        /* ABI v36: late-tail taps per response (0 = none); see the Binaural stage */
     const float *tailResponses; /* tailTaps * layout.channelCount * 2 floats (copied): channel, ear, tap */
     float headYawDeg, headPitchDeg, headRollDeg;  /* initial head pose */
     const float *responses;   /* orientations * layout.channelCount * 2 * taps floats (copied) */
