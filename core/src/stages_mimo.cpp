@@ -41,6 +41,9 @@ constexpr double kFaultSeconds = 0.050;    // continuous over-bound before a fau
 constexpr double kEnvSeconds = 0.010;      // fast envelope
 constexpr double kHoldSeconds = 1.0;       // peak-hold release
 constexpr float kOverPower = 3.98107171f;  // 10^(6/10): 6 dB in amplitude
+constexpr double kThermalSeconds = 10.0;   // thermal integration window (D5)
+constexpr double kThermalPower = 0.25118864315095801;  // 10^(-6/10): delta power at most -6 dB re the in-band program power
+constexpr double kThermalQuiet = 1e-12;    // program power below this (-120 dB) is not judged
 constexpr float kQuiet = 1e-12f;           // below this delta power (-120 dB) nothing is over bound
 
 size_t up(size_t v) { return (v + (kAlign - 1)) & ~(kAlign - 1); }
@@ -64,11 +67,14 @@ struct MimoShared {
     uint32_t held, fault, faultSource, tripCount, lastTrip;
     float u;              // arm fade phase 0..1 (gain = smoothstep(u))
     uint64_t overFrames;
+    uint64_t thermalWindow, thermalCount;  // window length and position in low-rate samples (counted while g > 0)
+    double thermalProg[kMaxS], thermalDelta[kMaxS];
+    uint32_t faultReason;                  // 0 none, 1 monitor bound, 2 thermal budget
     float msx;            // envelope of the summed input power
     float pkx;
     float msd[kMaxS], pkd[kMaxS];
     // Telemetry (relaxed atomics, control thread reads).
-    std::atomic<uint32_t> outState, outGainBits, outHeld, outFault, outFaultSource, outTrips;
+    std::atomic<uint32_t> outState, outGainBits, outHeld, outFault, outFaultSource, outTrips, outFaultReason;
     std::atomic<uint32_t> boundMaxBits[kMaxS], peakBits[kMaxS];
 };
 
@@ -198,12 +204,37 @@ void lowStep(SnapHeader *h, const StageRec &r, MimoShared &M, const float *xl) N
             overSource = s + 1;
         }
     }
+    // Thermal budget (D5): tumbling 10 s windows of armed time; delta power (before g, like the monitor above) against the
+    // in-band program power (the decimated source feed). Over -6 dB at the end of a window latches a fault.
+    if (M.u > 0.0f) {
+        for (uint32_t s = 0; s < S; ++s) {
+            M.thermalProg[s] += static_cast<double>(xl[s]) * xl[s];
+            M.thermalDelta[s] += static_cast<double>(yl[s]) * yl[s];
+        }
+        if (++M.thermalCount >= M.thermalWindow) {
+            for (uint32_t s = 0; s < S; ++s) {
+                if (M.thermalProg[s] > kThermalQuiet * static_cast<double>(M.thermalCount) &&
+                    M.thermalDelta[s] > kThermalPower * M.thermalProg[s] && M.fault == 0) {
+                    M.fault = 1;
+                    M.held = 1;
+                    M.faultSource = s + 1;
+                    M.faultReason = 2;
+                }
+                M.thermalProg[s] = M.thermalDelta[s] = 0.0;
+            }
+            M.thermalCount = 0;
+        }
+    } else if (M.thermalCount != 0) {
+        M.thermalCount = 0;
+        for (uint32_t s = 0; s < S; ++s) M.thermalProg[s] = M.thermalDelta[s] = 0.0;
+    }
     if (over) {
         M.overFrames += M.D;
         if (M.overFrames >= M.faultFrames && M.fault == 0) {
             M.fault = 1;
             M.held = 1;
             M.faultSource = overSource;
+            M.faultReason = 1;
         }
     } else {
         M.overFrames = 0;
@@ -288,6 +319,7 @@ void mimoInit(SnapHeader *h, const StageRec &r) {
     M.fallStep = static_cast<float>(1.0 / (kFallSeconds * fs));
     M.envA = static_cast<float>(1.0 - std::exp(-1.0 / (kEnvSeconds * fsLow)));
     M.holdR = static_cast<float>(std::exp(-1.0 / (kHoldSeconds * fsLow)));
+    M.thermalWindow = static_cast<uint64_t>(std::llround(kThermalSeconds * fsLow));
     M.faultFrames = static_cast<uint32_t>(std::ceil(kFaultSeconds * fs));
     for (uint32_t s = 0; s < d.S; ++s) M.bound2[s] = p[kHeader + s] * p[kHeader + s];
     M.decCount = M.half;
@@ -333,6 +365,7 @@ void runMimo(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) N
         M.held = 0;
         M.fault = 0;
         M.faultSource = 0;
+        M.faultReason = 0;
     }
     const float *kernel = at<float>(M, M.offKernel);
     float *hist = at<float>(M, M.offHist);
@@ -361,11 +394,13 @@ void runMimo(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) N
             --M.decCount;
         }
         const float g = M.u > 0.0f ? smooth(M.u) : 0.0f;
-        // Program sample i = n - L: direct path and, once armed, the delta from the low-rate ring.
-        const uint64_t q = n - L + half;  // wraps for n < L; guarded below
+        // Direct path: program sample n - L. Delta: the resampler chain's own delay is 10 D = 2 * half, so the delta of program
+        // sample n - 2 * half is complete now; the direct path is tau frames later, which is the design's relative delay
+        // (n60/mimo.h: row gain |E_st + [t==s] e^(-j w tau)|, the phase on the direct path). E19 S5 fixed this: S4 delayed the delta by L as well.
+        const uint64_t q = n - half;  // wraps for n < 2 * half; guarded below
         for (uint32_t s = 0; s < S; ++s) {
             float out = hist[size_t(s) * M.ringN + ((n - L) & ringMask)];
-            if (g > 0.0f && n >= L) {
+            if (g > 0.0f && n >= 2 * half) {
                 const uint64_t jhi = q / D;
                 const uint32_t rem = static_cast<uint32_t>(q - jhi * D);
                 const float *ls = low + size_t(s) * M.lowN;
@@ -385,6 +420,7 @@ void runMimo(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) N
     M.outFault.store(M.fault, std::memory_order_relaxed);
     M.outFaultSource.store(M.faultSource, std::memory_order_relaxed);
     M.outTrips.store(M.tripCount, std::memory_order_relaxed);
+    M.outFaultReason.store(M.faultReason, std::memory_order_relaxed);
 }
 
 n60_status validateMimoParam(const SnapHeader *, const StageRec &r, uint32_t idx, float value) N60_RT_NONBLOCKING {
@@ -424,7 +460,7 @@ bool readMimo(SnapHeader *h, uint32_t stageId, n60_mimo_readback *out) {
         out->boundRatioMax[s] = s < M.S ? bitsToFloat(M.boundMaxBits[s].exchange(0, std::memory_order_relaxed)) : 0.0f;
         out->deltaPeak[s] = s < M.S ? bitsToFloat(M.peakBits[s].exchange(0, std::memory_order_relaxed)) : 0.0f;
     }
-    out->reserved = 0;
+    out->faultReason = M.outFaultReason.load(std::memory_order_relaxed);
     return true;
 }
 

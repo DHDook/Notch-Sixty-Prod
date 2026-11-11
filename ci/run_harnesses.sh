@@ -488,6 +488,21 @@ if selected e19_mimo_stage; then
     fi
 fi
 
+# E19 S5: MIMO headroom term, per-source budget, excursion cap and rendered peak check at the standard rates.
+if selected e19_mimo_safety; then
+    build_core_objs
+    if [ "$CORE_OK" = 1 ]; then
+        if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -Icore/include -Icore/src core/tests/test_mimo_safety.cpp \
+            "${CORE_OBJS[@]}" -o "$OUT/e19_core_mimo_safety" && "$OUT/e19_core_mimo_safety"; then
+            passed+=(e19_core_mimo_safety)
+        else
+            failed+=(e19_core_mimo_safety)
+        fi
+    else
+        failed+=(e19_mimo_safety)
+    fi
+fi
+
 # E8 S2: ROUTE and XOVER graph stages (ABI v17), the BASS_MGMT filter-spec trailer, at the eight standard rates.
 if selected e8_route_core; then
     build_core_objs
