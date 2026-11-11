@@ -69,6 +69,27 @@ Per-stage (ns per lane-sample, profile build, R1): PROTECTION 94.5 to 38.8 at 48
 PEQ 8.7 to 2.0 at 48 kHz in R1 (R6 PEQ 10.1 to 6.0). FIR is untouched (S4) and is now the top stage at 48 kHz.
 Bit-identical SIMD and scalar (`N60_SIMD=0`) builds are checked by `core/tests/test_simd_parity.cpp`.
 
+## After E20 S4 (real FFT, SIMD FFT and complex multiply-accumulate, half-band dot product, local M4, -O3, reference block, mean load %)
+
+Same machine and method, base is `main` at S3, after is this slice (one run, two seconds each, so figures carry a few percent of noise).
+Changes: real-input packing (one n/2-point complex FFT per real transform) and SIMD butterflies in `fft.cpp`, SIMD
+complex multiply-accumulate (`simd::cmacSpan`) in the non-uniform FIR and the binaural convolver, and PROTECTION half-bands that
+compute the dot product only on emitted outputs (decimators) and over the real inputs only (interpolators).
+
+| Scenario / rate | Before | After | Change |
+|---|---|---|---|
+| R1 48 kHz | 2.22 | 1.52 | -32% |
+| R1 384 kHz | 17.75 | 11.85 | -33% |
+| R4a 48 kHz | 0.58 | 0.23 | -60% |
+| R4a 384 kHz | 5.62 | 2.74 | -51% |
+| R4b 48 kHz | 2.29 | 0.92 | -60% |
+| R4b 384 kHz | 22.91 | 11.18 | -51% |
+| R5 48 kHz | 3.64 | 2.87 | -21% |
+| R5 384 kHz | 29.20 | 23.15 | -21% |
+
+R1 and R4 were measured before the binaural convolver was converted; R5 after. Radix-4 butterflies and the remaining loop conversions
+(G14) are not in this slice. SIMD and scalar builds stay bit-identical (`ci/run_harnesses.sh` `e20_fft_scalar_parity`).
+
 ## Hot list (ns per lane-sample, profile build, before S3)
 
 | Scenario / rate | Top stages |

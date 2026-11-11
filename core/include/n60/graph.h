@@ -34,7 +34,7 @@ extern "C" {
 #endif
 
 /* Bumped on any incompatible change to a struct or function below. */
-#define N60_GRAPH_ABI_VERSION 34u
+#define N60_GRAPH_ABI_VERSION 35u
 
 typedef struct n60_graph n60_graph; /* opaque */
 
@@ -359,10 +359,21 @@ typedef int (*n60_external_process_fn)(void *context, const float *const *in, fl
  *  path only, so mix 0 is the unity-gain delayed dry. Memory: lanes x lookahead x 4 bytes of snapshot arena (at most
  *  8192 frames). A changed [12] keeps the mean square running, so there is no reset transient. Sample rate and lane
  *  count are unchanged. paramCount 10 is bit-identical to ABI v32: peak, shared gain, mix 100, no delay.
+ *  ABI v35 (E28 S7b): paramCount 16 adds [15] listen (0 off, 1 sidechain, 2 delta; live). Sidechain listen outputs the
+ *  detector input (after the sidechain filter, before any gain, so no make-up) on every lane of the stage; delta
+ *  listen outputs the delayed dry minus the delayed dry times the gain without make-up. Both pass through a second
+ *  ring of the lookahead length so latency never changes, and crossfade in and out over 5 ms. Memory: twice the ring.
+ *  Delta ignores mix. With the feedback detector the sidechain is the fed-back signal (it carries the stage's gain).
+ *  Listen 0 is bit-identical to the 15-value block.
  *
  * Expander / gate. params: [0] threshold dB (-120..0), [1] ratio (1..20), [2] range dB
  *  (-96..0), [3] attack ms, [4] release ms (as above), [5] linked (0/1). paramCount 6.
- *  Live: [0]..[4].
+ *  Live: [0]..[4]. ABI v35 (E28 S7b): paramCount 13 adds [6] hold ms (0..500; the gain stays open that long after the
+ *  detector falls below the knee), [7] knee dB (0..24; quadratic, centred on the threshold, C1 at both edges, 0 is the
+ *  hard law), [8] detector (0 peak, 1 RMS), [9] RMS window ms (5..200), [10] sidechain high-pass Hz (0..300; the
+ *  compressor's 4th-order design, 0 off), [11] link % (0..100, as the compressor), [12] listen (0 off, 1 sidechain,
+ *  2 delta; no ring, so no latency; 5 ms crossfade). Each lane keeps its own gain. Live: [0]..[4], [6]..[12]. paramCount 6
+ *  is bit-identical to ABI v34. Memory: one shared filter record plus one state record per lane.
  *
  * Dynamic EQ. params: [0] linked (0/1), then per band 15 values: shape (0 peak, 1 low
  *  shelf, 2 high shelf, 3 notch, 4 band pass, 5 tilt), Hz (20..20000, below Nyquist),
@@ -820,7 +831,12 @@ n60_status n60_graph_read_multiband(n60_graph *graph, uint32_t stageId, n60_mult
  * source inputs, each peak-held with a 1 s release (so a filter's tail after the program stops is not counted as over
  * bound). A source is over bound when its delta envelope exceeds 10^(6/10) * G_s^2 times the input envelope (6 dB in
  * amplitude, 5.9 dB is within bound); 50 ms of continuous over-bound on any source latches a fault: `faultSource` names it,
- * g falls in 10 ms and `held` is set.
+ * g falls in 10 ms and `held` is set (`faultReason` 1).
+ * Thermal budget (E19 S5, design note 6, owner decision D5). Armed time (g > 0) is cut into consecutive 10 s windows; per
+ * source the window sums the delta power (before g, as the monitor) and the in-band program power (the decimated source
+ * feed). When a window ends with delta power above 10^(-6/10) (-6 dB) of the program power the stage latches a fault the
+ * same way (`faultReason` 2); -6.1 dB passes. Windows restart whenever g returns to 0. A window whose program power is
+ * below -120 dB is not judged.
  * Realtime: no allocation (every byte is in the snapshot arena), no locks, bounded work; one 128-point FFT per source and
  * one inverse per source every 64 low-rate samples (a bounded burst of S * S * (T / 64) complex multiply-adds). Sample
  * rates 44.1 to 384 kHz and the families above; 1..8 channels. Reset: a new snapshot only (history is zero, g = 0, held
@@ -837,7 +853,7 @@ typedef struct n60_mimo_readback {
     uint32_t latencyFrames;   /* L */
     float boundRatioMax[8];   /* worst delta envelope over (G_s^2 * input envelope), linear power ratio, since the previous read (reset by the read) */
     float deltaPeak[8];       /* peak |delta| per source (before g) since the previous read (reset by the read) */
-    uint32_t reserved;
+    uint32_t faultReason;     /* E19 S5: with faultLatched, 1 monitor bound, 2 thermal budget; 0 otherwise (was `reserved`, always 0; same size) */
 } n60_mimo_readback;
 n60_status n60_graph_read_mimo(n60_graph *graph, uint32_t stageId, n60_mimo_readback *out);
 

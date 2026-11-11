@@ -210,4 +210,21 @@ final class MIMORoomTreatmentCoreDesignerTests: XCTestCase {
             .errorDescription
         XCTAssertTrue(message?.contains("10 ms") == true)
     }
+
+    /// E19 S5: the headroom budget reaches the core as each source's `gainLimitDB`, and an impossible one refuses by name.
+    func testHeadroomBudgetSetsLimitsAndRefusesByName() throws {
+        func headroom(peak: Double, ceiling: Double) -> OutputHeadroom {
+            OutputHeadroom(lane: 0, peakGainDB: peak, peakHz: 0, ceilingDB: ceiling, neededDB: 0, currentTrimDB: 0, incomplete: [])
+        }
+        XCTAssertEqual(MIMOTreatmentSourceSpec.gainBudgetDB(after: headroom(peak: 0, ceiling: 0)), 2.5, accuracy: 1e-9)
+        XCTAssertEqual(MIMOTreatmentSourceSpec.gainBudgetDB(after: headroom(peak: 4, ceiling: -1), trimAllowanceDB: 0), -5.5, accuracy: 1e-9)
+
+        let base = request(rate: 48_000)
+        let budgeted = try base.applyingHeadroomBudgets([headroom(peak: 0, ceiling: 0), nil])
+        XCTAssertEqual(budgeted.sources[0].gainLimitDB, 2.5, accuracy: 1e-9)
+        XCTAssertEqual(budgeted.sources[1].gainLimitDB, base.sources[1].gainLimitDB)
+        XCTAssertThrowsError(try base.applyingHeadroomBudgets([headroom(peak: 0, ceiling: 0), headroom(peak: 6, ceiling: 0)])) {
+            XCTAssertEqual($0 as? MIMORoomTreatmentCoreDesignError, .headroom(source: 1))
+        }
+    }
 }

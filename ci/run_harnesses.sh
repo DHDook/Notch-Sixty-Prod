@@ -488,6 +488,21 @@ if selected e19_mimo_stage; then
     fi
 fi
 
+# E19 S5: MIMO headroom term, per-source budget, excursion cap and rendered peak check at the standard rates.
+if selected e19_mimo_safety; then
+    build_core_objs
+    if [ "$CORE_OK" = 1 ]; then
+        if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -Icore/include -Icore/src core/tests/test_mimo_safety.cpp \
+            "${CORE_OBJS[@]}" -o "$OUT/e19_core_mimo_safety" && "$OUT/e19_core_mimo_safety"; then
+            passed+=(e19_core_mimo_safety)
+        else
+            failed+=(e19_core_mimo_safety)
+        fi
+    else
+        failed+=(e19_mimo_safety)
+    fi
+fi
+
 # E8 S2: ROUTE and XOVER graph stages (ABI v17), the BASS_MGMT filter-spec trailer, at the eight standard rates.
 if selected e8_route_core; then
     build_core_objs
@@ -769,6 +784,21 @@ if selected e28_comp_extras; then
     fi
 fi
 
+# E28 S7b: expander hold, knee, detector, sidechain filter, link and sidechain / delta listen (ABI v35).
+if selected e28_exp_extras; then
+    build_core_objs
+    if [ "$CORE_OK" = 1 ]; then
+        if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -Icore/include -Icore/src core/tests/test_exp_extras.cpp \
+            "${CORE_OBJS[@]}" -o "$OUT/e28_core_exp_extras" && "$OUT/e28_core_exp_extras"; then
+            passed+=(e28_core_exp_extras)
+        else
+            failed+=(e28_core_exp_extras)
+        fi
+    else
+        failed+=(e28_exp_extras)
+    fi
+fi
+
 # E6 S12c: the loudness stage (match, contour, dialogue leveler): behaviour at the eight standard rates.
 if selected e6_loudness; then
     build_core_objs
@@ -892,6 +922,15 @@ if selected e6_core_graph; then
             && "$OUT/e20_simd_parity" dump > "$OUT/e20_simd_dump_vector.txt" \
             && "$OUT/e20_simd_parity_scalar" dump > "$OUT/e20_simd_dump_scalar.txt" \
             && cmp "$OUT/e20_simd_dump_vector.txt" "$OUT/e20_simd_dump_scalar.txt"; then :; else failed+=(e20_simd_scalar_parity); fi
+        # E20 S4: FFT (SIMD butterflies, real-input packing) and convolution against a double reference, then SIMD against scalar.
+        if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -Icore/include -Icore/src core/tests/test_fft_conv.cpp \
+            "${CORE_OBJS[@]}" -o "$OUT/e20_fft_conv" && "$OUT/e20_fft_conv" check; then :; else failed+=(e20_fft_conv); fi
+        if [ "$simd_scalar_ok" = 1 ] \
+            && clang++ -std=c++20 -O2 -DN60_SIMD=0 -Icore/include -Icore/src core/tests/test_fft_conv.cpp \
+                "${simd_scalar_objs[@]}" -o "$OUT/e20_fft_conv_scalar" \
+            && "$OUT/e20_fft_conv" dump > "$OUT/e20_fft_dump_vector.txt" \
+            && "$OUT/e20_fft_conv_scalar" dump > "$OUT/e20_fft_dump_scalar.txt" \
+            && cmp "$OUT/e20_fft_dump_vector.txt" "$OUT/e20_fft_dump_scalar.txt"; then :; else failed+=(e20_fft_scalar_parity); fi
     else
         failed+=(e6_core_graph)
     fi

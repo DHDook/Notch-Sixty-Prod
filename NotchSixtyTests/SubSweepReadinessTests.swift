@@ -183,7 +183,7 @@ final class SubSweepReadinessTests: XCTestCase {
     }
 
     func testGraphAbiVersionConstantMatchesTheLoadedLibrary() {
-        XCTAssertEqual(N60_GRAPH_ABI_VERSION, 34)
+        XCTAssertEqual(N60_GRAPH_ABI_VERSION, 35)
         XCTAssertEqual(n60_graph_abi_version(), UInt32(N60_GRAPH_ABI_VERSION))
     }
 

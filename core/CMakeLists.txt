@@ -11,6 +11,14 @@ target_include_directories(n60core PUBLIC include)
 target_include_directories(n60core PRIVATE src)
 target_compile_options(n60core PRIVATE -Wall -Wextra -Werror -Wno-unknown-warning-option -Werror=function-effects -fno-exceptions -fno-rtti)
 
+# E20 S4 (G15): x86-64 builds default to the SSE2 baseline, where simd::fma is a separate multiply and add. Turning this on
+# builds with FMA3 (-mfma, plus -mavx2 for 256-bit moves) so simd::fma becomes one fused operation. The result is not
+# bit-identical to the baseline build, so it stays off until the E22 x86 measurement decides the default (E20 S10).
+option(N60_X86_FMA "Build the engine core with FMA3 on x86-64" OFF)
+if(N60_X86_FMA AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
+  target_compile_options(n60core PRIVATE -mfma -mavx2)
+endif()
+
 enable_testing()
 add_executable(n60core_graph_test tests/test_graph.c)
 set_target_properties(n60core_graph_test PROPERTIES C_STANDARD 11)
@@ -36,6 +44,11 @@ add_executable(n60core_simd_parity_test tests/test_simd_parity.cpp)
 target_link_libraries(n60core_simd_parity_test PRIVATE n60core)
 target_include_directories(n60core_simd_parity_test PRIVATE src)
 add_test(NAME n60core_simd_parity COMMAND n60core_simd_parity_test check)
+
+add_executable(n60core_fft_conv_test tests/test_fft_conv.cpp)
+target_link_libraries(n60core_fft_conv_test PRIVATE n60core)
+target_include_directories(n60core_fft_conv_test PRIVATE src)
+add_test(NAME n60core_fft_conv COMMAND n60core_fft_conv_test check)
 
 add_executable(n60core_dsp_test tests/test_dsp.c)
 set_target_properties(n60core_dsp_test PROPERTIES C_STANDARD 11 LINKER_LANGUAGE CXX)
@@ -216,6 +229,9 @@ add_test(NAME n60core_image_precision COMMAND n60core_image_precision_test)
 add_executable(n60core_comp_extras_test tests/test_comp_extras.cpp)
 target_link_libraries(n60core_comp_extras_test PRIVATE n60core)
 add_test(NAME n60core_comp_extras COMMAND n60core_comp_extras_test)
+add_executable(n60core_exp_extras_test tests/test_exp_extras.cpp)
+target_link_libraries(n60core_exp_extras_test PRIVATE n60core)
+add_test(NAME n60core_exp_extras COMMAND n60core_exp_extras_test)
 
 # E6 S12c: loudness (match, contour, dialogue leveler) stage (ABI v24).
 add_executable(n60core_loudness_test tests/test_loudness.cpp)
@@ -275,3 +291,8 @@ add_executable(n60core_mimo_stage_test tests/test_mimo_stage.cpp)
 target_include_directories(n60core_mimo_stage_test PRIVATE src)
 target_link_libraries(n60core_mimo_stage_test PRIVATE n60core)
 add_test(NAME n60core_mimo_stage COMMAND n60core_mimo_stage_test)
+
+# E19 S5: MIMO safety (headroom term, budget, excursion cap).
+add_executable(n60core_mimo_safety_test tests/test_mimo_safety.cpp)
+target_link_libraries(n60core_mimo_safety_test PRIVATE n60core)
+add_test(NAME n60core_mimo_safety COMMAND n60core_mimo_safety_test)
