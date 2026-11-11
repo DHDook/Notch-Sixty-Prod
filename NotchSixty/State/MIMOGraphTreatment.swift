@@ -122,6 +122,7 @@ final class MIMOGraphTreatment: ObservableObject {
         next?.armed = false
         next?.trip = false
         stage = next
+        pendingPublish = nil
         tapDigest = next.map(Self.tapDigest)
         permit = nil
         latchMayBeHeld = true
@@ -161,7 +162,9 @@ final class MIMOGraphTreatment: ObservableObject {
 
     /// The only way the stage's arm word becomes 1. Checks the gates, lets the core clear a held latch, checks them
     /// again and only then starts the fade-in (the core ramps 0 to 1 over 3 s).
-    func requestArm(context: Context) async throws {
+    /// `refresh` re-reads the engine's context after the settle wait, so the arm decision uses the facts at that moment.
+    func requestArm(context initial: Context, refresh: (() -> Context)? = nil) async throws {
+        var context = initial
         guard !arm.isArmed else { throw ArmRefusal.alreadyArmed }
         if let failure = gateFailure(context) { lastRefusal = failure; throw failure }
         if latchMayBeHeld, var idle = stage {
@@ -170,6 +173,8 @@ final class MIMOGraphTreatment: ObservableObject {
             stage = idle
             post(idle)
             try await settle()
+            guard !arm.isArmed else { throw ArmRefusal.alreadyArmed }
+            if let refresh { context = refresh() }
             latchMayBeHeld = false
             if let failure = gateFailure(context) { lastRefusal = failure; throw failure }
         }

@@ -17,6 +17,8 @@ extension AudioIOEngine {
         }
         _ = addTransportTeardownObserver { [weak treatment, weak self] cause in
             treatment?.arm.transportTornDown(cause)
+            // A planned stop is not a disarm cause of the switch, but the lease ends with the poll: the switch goes off too.
+            if treatment?.isArmed == true { treatment?.arm.disarm(.engineStopped) }
             self?.stopMIMOPoll()
         }
         return treatment
@@ -47,7 +49,7 @@ extension AudioIOEngine {
 
     /// The single user action that starts the 3 s fade-in. Throws the named refusal when a gate fails.
     func requestMIMOTreatmentArm() async throws {
-        try await mimoGraphTreatment.requestArm(context: mimoTreatmentContext())
+        try await mimoGraphTreatment.requestArm(context: mimoTreatmentContext(), refresh: { [unowned self] in self.mimoTreatmentContext() })
     }
 
     func disarmMIMOTreatment() { mimoGraphTreatment.userDisarm() }

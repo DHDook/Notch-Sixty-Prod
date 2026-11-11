@@ -321,4 +321,27 @@ final class MIMOGraphWiringTests: XCTestCase {
             XCTAssertEqual(rig.published.stages.last?.trip, true)
         }
     }
+
+    func testContextIsReReadAfterTheSettleWait() async throws {
+        let rig = try rig()
+        do {
+            try await rig.treatment.requestArm(context: context(), refresh: { self.context(running: false) })
+            XCTFail("armed on a stale context")
+        } catch {
+            XCTAssertEqual(error as? MIMOGraphTreatment.ArmRefusal, .engineNotRunning)
+        }
+        XCTAssertFalse(rig.treatment.isArmed)
+    }
+
+    func testRestagingDropsAPendingPost() async throws {
+        let rig = try rig()
+        struct PostFailed: Error {}
+        rig.treatment.publish = { _ in throw PostFailed() }
+        try? await rig.treatment.requestArm(context: context())
+        var landed = 0
+        rig.treatment.publish = { _ in landed += 1 }
+        rig.treatment.stage(rig.stage)
+        rig.treatment.observe(context: context(), readback: nil)
+        XCTAssertEqual(landed, 0, "the old stage is not re-posted over a restaged design")
+    }
 }
