@@ -889,6 +889,9 @@ if selected e6_core_graph; then
         if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -Icore/include -Icore/src core/tests/test_fpenv.cpp \
             "${CORE_OBJS[@]}" -o "$OUT/e20_core_fpenv" \
             && "$OUT/e20_core_fpenv"; then :; else failed+=(e20_core_fpenv); fi
+        # E20 S5: parallel render core, bit-identical output at 0 to 3 workers, delayed and absent workers, no allocation.
+        if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -Icore/include core/tests/test_parallel.cpp \
+            "${CORE_OBJS[@]}" -pthread -o "$OUT/e20_core_parallel" && "$OUT/e20_core_parallel"; then :; else failed+=(e20_core_parallel); fi
         # E20 S3: SIMD primitives and lane independence, then the SIMD build against the scalar build (N60_SIMD=0):
         # a chain through every SIMD stage must hash identically at every rate, lane count and block size.
         if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -Icore/include -Icore/src core/tests/test_simd_parity.cpp \

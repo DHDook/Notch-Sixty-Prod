@@ -1092,15 +1092,13 @@ inline float firStep(const FirCtx &c, FirLane &st, float *in, float *out, Comple
 
 // Non-uniform engine (ABI v20, firScheme 1).
 void runFirNonUniform(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) {
-    uint8_t *shBase = sharedState(h, r);
     for (uint32_t l = 0; l < r.laneCount; ++l) {
-        uint8_t *lb = laneState(h, r, l);
-        if (conv::laneEpoch(lb) != h->historyEpoch &&
-            !conv::resetStep(shBase, lb, h->historyEpoch, h->rtBudget)) {
-            std::memset(lanes[laneOf(r, l)], 0, sizeof(float) * frames);  // still clearing: silent, input dropped
+        float *buf = lanes[laneOf(r, l)];
+        if (!dspFirLaneReady(h, r, l)) {
+            std::memset(buf, 0, sizeof(float) * frames);  // still clearing: silent, input dropped
             continue;
         }
-        conv::process(shBase, lb, lanes[laneOf(r, l)], frames, nullptr);
+        dspFirLaneRun(h, r, l, buf, frames, nullptr);
     }
 }
 
@@ -1555,6 +1553,21 @@ void dspInit(SnapHeader *h, const StageRec &r) {
         default: break;
     }
 }
+
+bool dspFirParallel(const SnapHeader *h, const StageRec &r) N60_RT_NONBLOCKING {
+    return r.kind == N60_STAGE_FIR && h->firScheme == N60_FIR_SCHEME_NONUNIFORM;
+}
+
+bool dspFirLaneReady(SnapHeader *h, const StageRec &r, uint32_t laneIndex) N60_RT_NONBLOCKING {
+    uint8_t *lb = laneState(h, r, laneIndex);
+    return conv::laneEpoch(lb) == h->historyEpoch || conv::resetStep(sharedState(h, r), lb, h->historyEpoch, h->rtBudget);
+}
+
+void dspFirLaneRun(SnapHeader *h, const StageRec &r, uint32_t laneIndex, float *buf, uint32_t frames, void *scratch) N60_RT_NONBLOCKING {
+    conv::process(sharedState(h, r), laneState(h, r, laneIndex), buf, frames, nullptr, scratch);
+}
+
+size_t dspFirScratchBytes() { return conv::scratchBytes(); }
 
 void runDsp(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) N60_RT_NONBLOCKING {
     switch (r.kind) {

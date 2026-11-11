@@ -173,6 +173,9 @@ jobs:
           clang++ -std=c++20 -O2 -Wall -Wextra -Werror -Icore/include -Icore/src core/tests/test_fpenv.cpp \
             "${LIB[@]}" -o "$RUNNER_TEMP/test_fpenv"
           "$RUNNER_TEMP/test_fpenv"
+          clang++ -std=c++20 -O2 -Wall -Wextra -Werror -Icore/include core/tests/test_parallel.cpp \
+            "${LIB[@]}" -pthread -o "$RUNNER_TEMP/test_parallel"
+          "$RUNNER_TEMP/test_parallel"
           clang++ -std=c++20 -O2 -Wall -Wextra -Werror -Icore/include -Icore/src core/tests/test_conv.cpp \
             "${LIB[@]}" -o "$RUNNER_TEMP/test_conv"
           "$RUNNER_TEMP/test_conv"

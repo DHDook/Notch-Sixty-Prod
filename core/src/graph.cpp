@@ -109,6 +109,9 @@ struct n60_graph {
     float *scratch = nullptr;  // outputChannels * maxBlockFrames, incoming render target
     float *scratchLane[N60_GRAPH_MAX_CHANNELS] = {};
 
+    // E20 S5. Parallel render jobs and the per-thread FFT scratch (jobs.hpp). Workers are the host's threads.
+    n60::JobHost jobs;
+
     std::atomic<uint32_t> rbState{0};
     std::atomic<uint32_t> rbLast{0};
     std::atomic<uint32_t> rbAnc{0};
@@ -394,8 +397,8 @@ void rebuildBlock(n60_graph *g, float *const *out, uint32_t frames) {
         n60::mimoRebuildMute(g->incoming, false);
     }
     g->external.deltaFrames = 0;
-    n60::runSnapshot(g->current, out, frames, g->sanitised);
-    n60::runSnapshot(g->incoming, g->scratchLane, frames, g->sanitised, true);
+    n60::runSnapshot(g->current, out, frames, g->sanitised, false, &g->jobs);
+    n60::runSnapshot(g->incoming, g->scratchLane, frames, g->sanitised, true, &g->jobs);
 
     for (uint32_t c = 0; c < outCount; ++c) {
         if (!allFinite(g->scratchLane[c], frames)) {
@@ -563,6 +566,18 @@ n60_status n60_graph_build(const n60_graph_desc *desc, n60_graph **outGraph) {
     for (uint32_t c = 0; c < desc->outputChannels; ++c) {
         g->scratchLane[c] = g->scratch + static_cast<size_t>(c) * desc->maxBlockFrames;
     }
+    {   // E20 S5: one FFT scratch per thread that may run a job (the calling thread and the workers)
+        const size_t each = (n60::dspFirScratchBytes() + 63) & ~size_t(63);
+        g->jobs.scratchBase = new (std::nothrow) uint8_t[each * (N60_GRAPH_MAX_WORKERS + 1) + 64];
+        if (g->jobs.scratchBase == nullptr) {
+            delete[] g->scratch;
+            n60::freeSnapshot(snap);
+            delete g;
+            return N60_STATUS_OUT_OF_MEMORY;
+        }
+        uint8_t *base = g->jobs.scratchBase + ((64 - (reinterpret_cast<uintptr_t>(g->jobs.scratchBase) & 63)) & 63);
+        for (uint32_t k = 0; k <= N60_GRAPH_MAX_WORKERS; ++k) g->jobs.scratch[k] = base + k * each;
+    }
     g->fadeFrames = static_cast<uint32_t>(std::lround(0.020 * desc->sampleRate));
     g->parked.fftSize = 0;
     if (!hasDenoiser(snap)) settleDenoiser(g, snap, snap);
@@ -630,6 +645,10 @@ n60_status n60_graph_process(n60_graph *g, const float *const *in, float *const 
     }
     // E20 S2: subnormals flush to zero for the whole block; the caller's FP mode is restored on return.
     const n60::ScopedFlushToZero flushGuard;
+    struct JobsGuard {  // E20 S5: the callback ends when this scope does, on every return path
+        n60::JobHost &j;
+        ~JobsGuard() { n60::jobHostEnd(j); }
+    } jobsGuard{g->jobs};
     const auto loadStart = n60::rtNow();
     g->rtBudgetStart = g->rtBudget = rtBudgetFor(frames);
     adopt(g);
@@ -647,7 +666,7 @@ n60_status n60_graph_process(n60_graph *g, const float *const *in, float *const 
         }
     }
     if (g->incoming == nullptr) {
-        n60::runSnapshot(g->current, out, frames, g->sanitised);
+        n60::runSnapshot(g->current, out, frames, g->sanitised, false, &g->jobs);
     } else {
         rebuildBlock(g, out, frames);
     }
@@ -781,13 +800,47 @@ uint64_t n60_graph_debug_rt_budget(uint32_t frames) { return rtBudgetFor(frames)
 uint32_t n60_graph_debug_carry_abandoned(const n60_graph *g) { return g == nullptr ? 0 : g->carryAbandoned.load(std::memory_order_relaxed); }
 uint64_t n60_graph_debug_peak_rt_bytes(const n60_graph *g) { return g == nullptr ? 0 : g->budgetPeak.load(std::memory_order_relaxed); }
 
+n60_status n60_graph_set_workers(n60_graph *g, uint32_t workers) {
+    if (g == nullptr || workers > N60_GRAPH_MAX_WORKERS) return N60_STATUS_BAD_ARGUMENT;
+    g->jobs.workers.store(workers, std::memory_order_release);
+    return N60_STATUS_OK;
+}
+
+n60_status n60_graph_set_wake(n60_graph *g, n60_graph_wake_fn wake, void *context) {
+    if (g == nullptr) return N60_STATUS_BAD_ARGUMENT;
+    g->jobs.wake.store(nullptr, std::memory_order_release);
+    g->jobs.wakeContext = context;
+    g->jobs.wake.store(wake, std::memory_order_release);
+    return N60_STATUS_OK;
+}
+
+uint32_t n60_graph_worker_run(n60_graph *g, uint32_t workerIndex) {
+    return g == nullptr ? 0u : n60::jobHostWorkerRun(g->jobs, workerIndex);
+}
+
+n60_status n60_graph_read_parallel(const n60_graph *g, n60_graph_parallel_stats *out) {
+    if (g == nullptr || out == nullptr) return N60_STATUS_BAD_ARGUMENT;
+    if (out->structSize != sizeof(n60_graph_parallel_stats)) return N60_STATUS_ABI_MISMATCH;
+    const n60::JobHost &j = g->jobs;
+    out->workers = j.workers.load(std::memory_order_relaxed);
+    out->parallelPhases = j.parallelPhases.load(std::memory_order_relaxed);
+    out->jobsOnWorkers = j.jobsOnWorkers.load(std::memory_order_relaxed);
+    out->jobsOnCaller = j.jobsOnCaller.load(std::memory_order_relaxed);
+    out->lateJoins = j.lateJoins.load(std::memory_order_relaxed);
+    out->wakes = j.wakes.load(std::memory_order_relaxed);
+    return N60_STATUS_OK;
+}
+
 void n60_graph_retire(n60_graph *g) {
     if (g == nullptr) return;
+    g->jobs.workers.store(0, std::memory_order_release);  // best effort: workers must already be stopped and joined
+    g->jobs.active.store(0, std::memory_order_release);
     n60_graph_collect(g);
     n60::freeSnapshot(g->pending.exchange(nullptr, std::memory_order_acq_rel));
     n60::freeSnapshot(g->incoming);
     n60::freeSnapshot(g->current);
     delete[] g->scratch;
+    delete[] g->jobs.scratchBase;
     delete[] g->external.delta;
     delete g;
 }
