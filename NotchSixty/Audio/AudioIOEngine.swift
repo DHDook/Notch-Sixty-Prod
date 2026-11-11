@@ -1233,9 +1233,30 @@ final class AudioIOEngine: ObservableObject {
         nChannelTransportSession != nil && liveGraphEditsAvailable
     }
 
+    /// E4 S30c: whether the live graph can realise conversation-unmasking cuts now: a graph-rendered N-channel session,
+    /// or a stereo speaker session whose unified graph is active (not `e6.legacy-kernel`, no fallback to the kernel).
+    /// The legacy kernel never receives cuts, so the controller falls back to the broad cut when this is false.
+    var ambientUnmaskingRuntimeAvailable: Bool {
+        if ambientCompensationGraphRuntimeAvailable { return true }
+        guard let session = transportSession, ambientCompensationStereoSpeakerRuntimeAvailable else { return false }
+        return session.unifiedGraphEnabled && session.unifiedGraphFallbackReason == nil
+    }
+
+    /// E4 S30c: the engine's own check of a conversation target's cuts (the controller's planner already limits them):
+    /// 17 finite values, each 0...6 dB of cut, only in Conversation Focus, and only where the graph can realise them.
+    private func validateUnmaskingCuts(_ target: AmbientCompensationTarget) throws {
+        guard let cuts = target.unmaskingCutsDB else { return }
+        guard target.mode == .conversationFocus,
+              AmbientUnmaskOverlay.isValid(plannedCutsDB: cuts),
+              ambientUnmaskingRuntimeAvailable else {
+            throw AmbientCompensationError.invalidConfiguration
+        }
+    }
+
     func replaceAmbientCompensationRuntimeTarget(
         _ target: AmbientCompensationTarget
     ) throws {
+        try validateUnmaskingCuts(target)
         let values = [
             target.levelDB,
             target.lowSupportDB,
@@ -1283,6 +1304,7 @@ final class AudioIOEngine: ObservableObject {
         }
 
         let requestsDSP = abs(target.levelDB) > 0.000_1
+            || (target.unmaskingCutsDB?.contains { $0 > 0.000_1 } ?? false)
             || abs(target.lowSupportDB) > 0.000_1
             || abs(target.presenceSupportDB) > 0.000_1
             || abs(target.detailSupportDB) > 0.000_1
@@ -1341,7 +1363,14 @@ final class AudioIOEngine: ObservableObject {
             candidateQuietZone,
             to: &graph
         )
-        try session.publishDSPGraph(graph)
+        // E4 S30c: the cuts ride on the session's unified graph, not the kernel snapshot.
+        // A failed publish restores the previous cuts, so a later republish never renders cuts the engine refused.
+        let previousCuts = session.currentAmbientUnmaskCuts
+        session.setAmbientUnmaskCuts(target.unmaskingCutsDB)
+        do { try session.publishDSPGraph(graph) } catch {
+            session.setAmbientUnmaskCuts(previousCuts)
+            throw error
+        }
         ambientCompensationRuntimeTarget = target
         activeQuietZoneRuntimeTarget = candidateQuietZone
         lastErrorDescription = nil
@@ -5968,6 +5997,8 @@ final class AudioIOEngine: ObservableObject {
         activeEQFIRProgram = nil
         activeRoomCorrectionProgram = nil
         activeSpeakerIRProgram = nil
+        // E4 S30c: a transport rebuild clears the unmasking cuts (the session that held them is gone).
+        ambientCompensationRuntimeTarget.unmaskingCutsDB = nil
         syncActiveQuietZoneLease(active: false)
         // The app's own profile switch happens while arming and keeps the arm (see `disarmReason`).
         if cause != .plannedProfileChange { liveTreatmentGeneration &+= 1 }
