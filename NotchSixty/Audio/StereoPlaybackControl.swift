@@ -639,7 +639,11 @@ struct StereoEQConfiguration: Equatable, Codable, Sendable {
             ? UInt64(graph.dynamics.spectralDenoiser.latencyFrames)
             : 0
         let protectionLatency = UInt64(graph.protection.latencyFrames)
-        let totalLatency = UInt64(graph.latencyFrames) + denoiserLatency + protectionLatency
+        // E28 S7d (G33): the compressor and multiband lookahead are program-path latency the core reports; counting them here
+        // keeps the hand-over alignment and the processing-off pad equal to the graph's own figure.
+        let dynamicsLookahead = UInt64(DynamicsLatency.programFrames(
+            compiledDynamics, sampleRate: sampleRate, flagOn: Thread.isMainThread && MainActor.assumeIsolated { FeatureFlags().isEnabled(.dynamicsExtras) }))
+        let totalLatency = UInt64(graph.latencyFrames) + denoiserLatency + protectionLatency + dynamicsLookahead
         guard totalLatency < UInt64(N60_MAX_AUDITION_DELAY_FRAMES) else {
             throw DynamicsConfigurationError.invalidOversampling
         }
