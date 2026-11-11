@@ -97,6 +97,10 @@ FC phase's per-epic PR (`docs/epics/FC.md`) unless stated.
 | `e21.core-designers` | E21 | planned | none | FC (E21) |
 | `e8.routing-matrix`, `e8.lab-routed-ways`, `e10.mixed-phase-correction`, `e11.measurement-suite`, `e12.guided-setup`, `e13.byo-import`, `e25.outputs-and-speakers`, `e27.eq-safety` | E8, E10, E11, E12, E13, E25, E27 | removed (before this policy, at epic ship) | n/a | done |
 
+Owner decisions, 11 Nov 2026: (1) the four live-output E4 flags may graduate (Turn On available in release builds,
+still behind `LiveTreatmentArm` and the written authorisation path; the user must enable it). (2) A bench-only gap may
+be closed as "moved to E22" only against a matching unchecked E22 item; software gaps never move.
+
 ## Audit of completed and partly completed epics (11 Nov 2026)
 
 Read against AGENTS.md section 12. "Reachable" means a production reader of the flag and a UI path. No open-question
@@ -105,7 +109,7 @@ gap may then be closed as "moved to E22" once E22 holds a matching unchecked ite
 
 | Epic | Flag | State | Blockers to graduation |
 | --- | --- | --- | --- |
-| E4 | `e4.engine-lease`, `e4.adaptive-tonal-live`, `e4.earned-cap`, `e4.feedforward-live` | Built and reachable (Quiet Zone card, behind the arm) | G16 (open-question: may live-output flags graduate before E22), G8 (feed-forward bridge refuses above 192 kHz), S30d G12 to G14 (PR #476 open), then the new slice S32 |
+| E4 | `e4.engine-lease`, `e4.adaptive-tonal-live`, `e4.earned-cap`, `e4.feedforward-live` | Built and reachable (Quiet Zone card, behind the arm) | G16 closed (owner YES, 11 Nov 2026), G8 (feed-forward bridge refuses above 192 kHz), S30d G12 to G14 (PR #476 open), then the new slice S32 |
 | E4 | `e4.noise-survey`, `e4.conversation-unmasking`, `e4.overnight` | Built and reachable | S30d G12 to G14 (unmasking), then S32 |
 | E4 | `e4.virtual-microphone`, `e4.head-position-camera`, `e4.zones` | Offline maths only; no production reader, so still `[~]` built dark | G15: wiring has no owning slice until S32 |
 | E6 | `e6.legacy-kernel` | Software complete bar S12h part 3; the inverse escape hatch | Never graduates; E23 deletes it; scoped gaps owned by E22 and E23 |

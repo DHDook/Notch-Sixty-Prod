@@ -26,7 +26,7 @@ States:
 Rules: a slice with an `open-question` gap is not ticked; a flag-graduation or ship slice needs every
 gap in its epic `closed`. A gap whose only remaining work is a bench or owner acceptance check may be
 closed as "moved to E22 item X" only when E22 (`docs/PROGRAM_PLAN.md`) holds a matching unchecked item.
-Software gaps are never moved. Numbers are never reused. See AGENTS.md section 12.
+Software gaps are never moved. (Owner confirmed 11 Nov 2026.) Numbers are never reused. See AGENTS.md section 12.
 
 ## Flag graduation (owner, 11 Nov 2026)
 
