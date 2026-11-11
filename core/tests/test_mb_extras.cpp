@@ -126,8 +126,8 @@ Vec refBand(double rate, bool hp, double f, const Vec &in) {
 void testRate(double rate) {
     const size_t n = (size_t)(rate * 0.6), from = n / 2;
     const Vec in = noise(n, 0.5f);
-    // Measured worst case is 4.5e-5 at every rate (the multiband crossover path still rounds through float, G39), so one 1e-4 bound.
-    const double tol = 1e-4;
+    // The planned 1e-5 holds once the 5 ms solo ramp has settled (G39: the earlier 4.5e-5 was the ramp tail, not float rounding).
+    const double tol = 1e-5;
     // 1. A 43-value block with defaults equals the 29-value block, bit for bit (compression active).
     {
         Mb m;
@@ -153,7 +153,7 @@ void testRate(double rate) {
         mid.p[33] = 1;
         lm.p[32] = lm.p[33] = 1;
         const Vec oLo = render(rate, lo, in), oHi = render(rate, hi, in), oMid = render(rate, mid, in), oLm = render(rate, lm, in);
-        const size_t settle = (size_t)(rate * 0.05);
+        const size_t settle = (size_t)(rate * 0.15);  // 30 time constants of the 5 ms ramp (0.05 s left e^-10 = 4.5e-5 of it)
         const Vec rLo = refBand(rate, false, 250, in), rHi = refBand(rate, true, 2500, in);
         check(maxDiff(oLo, rLo, settle) < tol, "solo low equals the low crossover output", rate, maxDiff(oLo, rLo, settle));
         check(maxDiff(oHi, rHi, settle) < tol, "solo high equals the high crossover output", rate, maxDiff(oHi, rHi, settle));
@@ -211,7 +211,7 @@ void testRate(double rate) {
         side.p[35] = 1;
         const Vec oSide = render(rate, side, in);
         const Vec rLo = refBand(rate, false, 250, in);
-        const size_t settle = (size_t)(rate * 0.05);
+        const size_t settle = (size_t)(rate * 0.15);  // 30 time constants of the 5 ms ramp (0.05 s left e^-10 = 4.5e-5 of it)
         check(maxDiff(oSide, rLo, settle) < tol, "sidechain listen plays the band", rate, maxDiff(oSide, rLo, settle));
         Mb la = side;
         const uint32_t look = (uint32_t)(rate * 0.002);
@@ -278,11 +278,68 @@ void testRate(double rate) {
         n60_graph_retire(g);
     }
 }
+
+// E28 S7d (G40): the lookahead rings carry across a rebuild even when the lookahead changes. Bands bypassed, so the output is the
+// input delayed by the lookahead; after the swap the carried graph must equal a graph built at the new lookahead from the start,
+// wherever the carried ring holds audio (all of it when shortening, from `new - old` frames in when lengthening).
+void testRingCarry(double rate) {
+    const size_t pre = (size_t)(rate * 0.2) / 512 * 512, post = (size_t)(rate * 0.1) / 512 * 512;
+    const Vec all = noise(pre + post, 0.4f);
+    const Vec in1(all.begin(), all.begin() + (long)pre), in2(all.begin() + (long)pre, all.end());
+    const uint32_t looks[2][2] = {{(uint32_t)(rate * 0.004), (uint32_t)(rate * 0.0015)}, {(uint32_t)(rate * 0.0015), (uint32_t)(rate * 0.004)}};
+    for (const auto &lk : looks) {
+        Mb a, b;
+        a.p[29] = a.p[30] = a.p[31] = b.p[29] = b.p[30] = b.p[31] = 1;
+        a.p[42] = (float)lk[0];
+        b.p[42] = (float)lk[1];
+        n60_graph *g = build(rate, a.p, 43), *ref = build(rate, b.p, 43);
+        if (!g || !ref) { check(false, "ring carry builds", rate); return; }
+        n60_rebuild_options o;
+        std::memset(&o, 0, sizeof o);
+        o.structSize = sizeof o;
+        o.fadeMs = 0.0f;
+        n60_graph_set_rebuild_options(g, &o);
+        run(g, in1);
+        const Vec refAll = run(ref, all);
+        n60_stage_desc sd;
+        std::memset(&sd, 0, sizeof sd);
+        sd.structSize = sizeof sd;
+        sd.kind = N60_STAGE_MULTIBAND;
+        sd.stageId = 5;
+        sd.laneA = 0;
+        sd.laneB = 1;
+        sd.params = b.p;
+        sd.paramCount = 43;
+        n60_graph_desc d;
+        std::memset(&d, 0, sizeof d);
+        d.structSize = sizeof d;
+        d.abiVersion = N60_GRAPH_ABI_VERSION;
+        d.sampleRate = rate;
+        d.maxBlockFrames = 512;
+        d.inputChannels = d.outputChannels = 2;
+        d.stages = &sd;
+        d.stageCount = 1;
+        check(n60_graph_publish(g, &d) == N60_STATUS_OK, "ring carry publish", rate);
+        const Vec out2 = run(g, in2);
+        const size_t skip = lk[1] > lk[0] ? lk[1] - lk[0] : 0;
+        double m = 0;
+        for (size_t i = skip + 512; i < out2.size(); ++i) m = std::max(m, std::fabs((double)out2[i] - (double)refAll[pre + i]));
+        check(m < 1e-6, "carried ring matches a graph built at the new lookahead", rate, m, (double)lk[1]);
+        double lead = 0;
+        for (size_t i = 0; i < 64 && i + 512 < out2.size(); ++i) lead = std::max(lead, std::fabs((double)out2[i]));
+        check(lead > 1e-4 || lk[1] > lk[0], "the shorter ring keeps the delayed audio (no silent gap)", rate, lead);
+        n60_graph_retire(g);
+        n60_graph_retire(ref);
+    }
+}
 }  // namespace
 
 int main() {
     const double rates[] = {44100, 48000, 88200, 96000, 176400, 192000, 352800, 384000};
-    for (double rate : rates) testRate(rate);
+    for (double rate : rates) {
+        testRate(rate);
+        testRingCarry(rate);
+    }
     if (failures) {
         std::fprintf(stderr, "n60core multiband extras: %d failures\n", failures);
         return 1;
