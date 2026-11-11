@@ -44,6 +44,7 @@
 #include "conv/nufir.hpp"
 #include "fft.hpp"
 #include "halfband.hpp"
+#include "simd/simd.hpp"
 
 namespace n60 {
 namespace {
@@ -198,7 +199,7 @@ MxLayout mxLayout(uint32_t parts, uint32_t orient, uint32_t srcs) {
     MxLayout L;
     size_t off = up(sizeof(MxShared));
     L.plan = off;
-    off += up(fft::planBytes(kFft));
+    off += up(fft::realPlanBytes(kFft));
     L.work = off;
     off += up(sizeof(Complex) * kFft);
     L.acc = off;  // six work spectra: new, previous and second-set blends, left and right
@@ -277,9 +278,10 @@ void runBlock(SnapHeader *h, StageRec &r, MxShared &S, uint8_t *sh, const MxLayo
         uint8_t *lb = laneState(h, r, k);
         const float *in = reinterpret_cast<const float *>(lb);
         Complex *fdl = reinterpret_cast<Complex *>(lb + sizeof(float) * kPart);
-        for (uint32_t j = 0; j < kPart; ++j) work[j] = {in[j], 0.0f};
-        for (uint32_t j = kPart; j < kFft; ++j) work[j] = {0.0f, 0.0f};
-        fft::forward(plan, work);
+        float *wf = reinterpret_cast<float *>(work);
+        for (uint32_t j = 0; j < kPart; ++j) wf[j] = in[j];
+        for (uint32_t j = kPart; j < kFft; ++j) wf[j] = 0.0f;
+        fft::forwardReal(plan, wf);  // E20 S4: real-input transform, bins 0..kPart
         std::memcpy(fdl + size_t(head) * kBins, work, sizeof(Complex) * kBins);
     }
 
@@ -295,12 +297,10 @@ void runBlock(SnapHeader *h, StageRec &r, MxShared &S, uint8_t *sh, const MxLayo
                 const Complex *x = fdl + size_t(slot) * kBins;
                 const Complex *hl = kl + size_t(q) * kBins;
                 const Complex *hr = kr + size_t(q) * kBins;
-                for (uint32_t b = 0; b < kBins; ++b) {
-                    accL[b].re += hl[b].re * x[b].re - hl[b].im * x[b].im;
-                    accL[b].im += hl[b].re * x[b].im + hl[b].im * x[b].re;
-                    accR[b].re += hr[b].re * x[b].re - hr[b].im * x[b].im;
-                    accR[b].im += hr[b].re * x[b].im + hr[b].im * x[b].re;
-                }
+                float *al = reinterpret_cast<float *>(accL), *ar = reinterpret_cast<float *>(accR);
+                const float *xf = reinterpret_cast<const float *>(x);
+                simd::cmacSpan(al, al, reinterpret_cast<const float *>(hl), xf, kBins);
+                simd::cmacSpan(ar, ar, reinterpret_cast<const float *>(hr), xf, kBins);
                 slot = slot == 0 ? P - 1 : slot - 1;
             }
         }
@@ -323,10 +323,9 @@ void runBlock(SnapHeader *h, StageRec &r, MxShared &S, uint8_t *sh, const MxLayo
         Complex *ears[2] = {dL, dR};
         for (uint32_t e = 0; e < 2; ++e) {
             Complex *x = ears[e];
-            for (uint32_t b = 1; b < kPart; ++b) x[kFft - b] = {x[b].re, -x[b].im};
             x[0].im = 0.0f;
             x[kPart].im = 0.0f;
-            fft::inverse(plan, x);
+            fft::inverseReal(plan, reinterpret_cast<float *>(x));
         }
     };
     blendTime(S.cell, nL, nR);
@@ -334,19 +333,19 @@ void runBlock(SnapHeader *h, StageRec &r, MxShared &S, uint8_t *sh, const MxLayo
     // one, so a change of orientation weights never steps at a block boundary.
     const bool moving = S.cell != prevCell;
     if (moving) blendTime(prevCell, pL, pR);
-    Complex *newer[2] = {nL, nR};
-    Complex *older[2] = {pL, pR};
+    const float *newer[2] = {reinterpret_cast<const float *>(nL), reinterpret_cast<const float *>(nR)};
+    const float *older[2] = {reinterpret_cast<const float *>(pL), reinterpret_cast<const float *>(pR)};
     for (uint32_t e = 0; e < 2; ++e) {
         float *ob = outBlk + size_t(e) * kPart;
         float *ov = overlap + size_t(e) * kPart;
         for (uint32_t j = 0; j < kPart; ++j) {
-            float y = newer[e][j].re;
+            float y = newer[e][j];
             if (moving) {
                 const float t = static_cast<float>(j + 1) / static_cast<float>(kPart);
-                y = (1.0f - t) * older[e][j].re + t * y;
+                y = (1.0f - t) * older[e][j] + t * y;
             }
             ob[j] = y + ov[j];
-            ov[j] = newer[e][kPart + j].re;
+            ov[j] = newer[e][kPart + j];
         }
     }
     S.head = head + 1 == P ? 0 : head + 1;
@@ -481,7 +480,7 @@ bool matrixInit(SnapHeader *h, const StageRec &r) {
     // matrixSizes (called by validation) already rejected a tail the geometry cannot carry, so G.ok holds whenever p[10] != 0.
     S.tailTaps = G.ok ? static_cast<uint32_t>(p[10]) : 0;
     S.laneStride = static_cast<uint32_t>(laneBytes(S.parts, G));
-    fft::planInit(sh + L.plan, kFft);
+    fft::realPlanInit(sh + L.plan, kFft);
     Complex *work = reinterpret_cast<Complex *>(sh + L.work);
     Complex *kernels = reinterpret_cast<Complex *>(sh + L.kernels);
     const float *ir = p + kFixed;
@@ -491,6 +490,7 @@ bool matrixInit(SnapHeader *h, const StageRec &r) {
             const float *base = ir + ((size_t(o) * S.srcs + k) * 2) * S.taps;
             for (uint32_t ear = 0; ear < 2; ++ear) {
                 for (uint32_t q = 0; q < S.parts; ++q) {
+                    float *wf = reinterpret_cast<float *>(work);
                     for (uint32_t j = 0; j < kFft; ++j) {
                         const size_t t = size_t(q) * kPart + j;
                         float v = 0.0f;
@@ -498,9 +498,9 @@ bool matrixInit(SnapHeader *h, const StageRec &r) {
                             v = (S.equalEar == static_cast<int32_t>(k)) ? 0.5f * (base[t] + base[S.taps + t])
                                                                        : base[size_t(ear) * S.taps + t];
                         }
-                        work[j] = {v, 0.0f};
+                        wf[j] = v;
                     }
-                    fft::forward(sh + L.plan, work);
+                    fft::forwardReal(sh + L.plan, wf);
                     std::memcpy(kernels + (((size_t(o) * S.srcs + k) * 2 + ear) * S.parts + q) * kBins, work,
                                 sizeof(Complex) * kBins);
                 }

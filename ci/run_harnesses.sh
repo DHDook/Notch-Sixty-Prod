@@ -910,6 +910,15 @@ if selected e6_core_graph; then
             && "$OUT/e20_simd_parity" dump > "$OUT/e20_simd_dump_vector.txt" \
             && "$OUT/e20_simd_parity_scalar" dump > "$OUT/e20_simd_dump_scalar.txt" \
             && cmp "$OUT/e20_simd_dump_vector.txt" "$OUT/e20_simd_dump_scalar.txt"; then :; else failed+=(e20_simd_scalar_parity); fi
+        # E20 S4: FFT (SIMD butterflies, real-input packing) and convolution against a double reference, then SIMD against scalar.
+        if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -Icore/include -Icore/src core/tests/test_fft_conv.cpp \
+            "${CORE_OBJS[@]}" -o "$OUT/e20_fft_conv" && "$OUT/e20_fft_conv" check; then :; else failed+=(e20_fft_conv); fi
+        if [ "$simd_scalar_ok" = 1 ] \
+            && clang++ -std=c++20 -O2 -DN60_SIMD=0 -Icore/include -Icore/src core/tests/test_fft_conv.cpp \
+                "${simd_scalar_objs[@]}" -o "$OUT/e20_fft_conv_scalar" \
+            && "$OUT/e20_fft_conv" dump > "$OUT/e20_fft_dump_vector.txt" \
+            && "$OUT/e20_fft_conv_scalar" dump > "$OUT/e20_fft_dump_scalar.txt" \
+            && cmp "$OUT/e20_fft_dump_vector.txt" "$OUT/e20_fft_dump_scalar.txt"; then :; else failed+=(e20_fft_scalar_parity); fi
     else
         failed+=(e6_core_graph)
     fi
