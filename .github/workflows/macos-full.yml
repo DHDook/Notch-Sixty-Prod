@@ -205,7 +205,8 @@ jobs:
   # thread calls is [[clang::nonblocking]]; the sanitizer aborts a test that allocates, locks or blocks inside one.
   core-rtsan:
     if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-ci')
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    # Pinned: ubuntu-latest moved to 'resolute', which apt.llvm.org does not serve. Move this when LLVM 20 is published for it.
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
