@@ -309,7 +309,16 @@ struct EQBand: Identifiable, Equatable, Codable, Sendable {
             guard let coefficients = linkwitzCoefficients(sampleRate: sampleRate) else {
                 throw EQConfigurationError.invalidBand(index: 0)
             }
-            return [snapshot(type: compiledCType, gainDB: 0, q: q, coefficients: coefficients)]
+            var result = snapshot(type: compiledCType, gainDB: 0, q: q, coefficients: coefficients)
+            // E23 S1b (E6 G31): the double deviation form the unified graph uses at low corners and high rates.
+            var deviation = [Double](repeating: 0, count: 5)
+            if N60BiquadDesignLinkwitzTransformDeviation(sampleRate, frequencyHz, q, linkwitzTargetHz, linkwitzTargetQ, &deviation) {
+                withUnsafeMutableBytes(of: &result.linkwitzDeviation) { raw in
+                    for (i, value) in deviation.enumerated() { raw.storeBytes(of: value, toByteOffset: i * MemoryLayout<Double>.stride, as: Double.self) }
+                }
+                result.linkwitzDeviationValid = true
+            }
+            return [result]
         }
 
         if type == .tilt {

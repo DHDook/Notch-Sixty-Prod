@@ -9,13 +9,18 @@ struct UnifiedGraphPEQSection: Equatable, Sendable {
     var q: Double
     /// b0, b1, b2, a1, a2 of the prepared biquad; required for type 9, ignored otherwise.
     var coefficients: [Float]?
+    /// E23 S1b (E6 G31): the same biquad in double deviation form (n0, n1, n2, d0, d1; see graph.h), which the core reads
+    /// when set so poles near z = 1 are not quantised to float. Type 9 only.
+    var linkwitzDeviation: [Double]?
 
-    init(type: Int, frequencyHz: Double, gainDB: Double, q: Double, coefficients: [Float]? = nil) {
+    init(type: Int, frequencyHz: Double, gainDB: Double, q: Double, coefficients: [Float]? = nil,
+         linkwitzDeviation: [Double]? = nil) {
         self.type = type
         self.frequencyHz = frequencyHz
         self.gainDB = gainDB
         self.q = q
         self.coefficients = coefficients
+        self.linkwitzDeviation = linkwitzDeviation
     }
 
     /// Core PEQ slots this section takes.
@@ -697,6 +702,13 @@ struct UnifiedGraphConfiguration: Equatable, Sendable {
     }
 
     private static func peqSlots(_ section: UnifiedGraphPEQSection) throws -> [Float] {
+        if section.type == 9, let v = section.linkwitzDeviation {
+            guard v.count == 5, v.allSatisfy(\.isFinite) else {
+                throw UnifiedGraphError.unsupportedConfiguration("Linkwitz transform coefficients")
+            }
+            // Deviation form: the type 10 fourth slot is 1 (graph.h, ABI v26 note).
+            return [9, Float(v[0]), Float(v[1]), Float(v[2]), 10, Float(v[3]), Float(v[4]), 1]
+        }
         if section.type == 9 {
             guard let c = section.coefficients, c.count == 5, c.allSatisfy(\.isFinite) else {
                 throw UnifiedGraphError.unsupportedConfiguration("Linkwitz transform coefficients")
