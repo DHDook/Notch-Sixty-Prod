@@ -84,7 +84,7 @@ FC phase's per-epic PR (`docs/epics/FC.md`) unless stated.
 | `e4.conversation-unmasking` | E4 | graduated | 11 Nov 2026 (S32) | FC (E4) |
 | `e4.virtual-microphone` | E4 | dark, no production reader | none | FC (E4) |
 | `e4.head-position-camera` | E4 | dark, no production reader | none | FC (E4) |
-| `e4.zones` | E4 | dark, no production reader | none | FC (E4) |
+| `e4.zones` | E4 | dark, zone chooser wired (S27), graduates in the final G16 PR | none | FC (E4) |
 | `e4.overnight` | E4 | graduated | 11 Nov 2026 (S32) | FC (E4) |
 | `e26.sub-aware-anc` | E26 | on by default (pre-policy `defaultEnabled`) | 6 Nov 2026 (as default) | FC (E26) |
 | `e9.long-fir` | E9 | dark | none | FC (E9) |

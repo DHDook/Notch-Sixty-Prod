@@ -109,6 +109,7 @@ struct SafetyFlightRecorder: Sendable {
         case .microphoneMoved: return "The measurement microphone moved and the supervised re-tune did not recover, so the anti-noise was stopped."
         case .adaptiveFault: return "The adaptive tuning faulted, so the anti-noise was stopped."
         case .bassPathChanged: return "The bass path changed (receiver level, bass settings or sub polarity), so the cancellation no longer matched."
+        case .zoneChanged: return "The quiet zone mode changed, so the output restarts from its starting level."
         }
     }
 }

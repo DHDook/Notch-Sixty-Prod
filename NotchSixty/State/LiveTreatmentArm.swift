@@ -36,6 +36,8 @@ enum LiveTreatmentDisarmReason: String, Equatable, Sendable {
     case adaptiveFault
     /// E26 S4: the bass path changed (fingerprint, or sub-band gain or phase moved past the watch window).
     case bassPathChanged
+    /// E4 S27: the zone mode changed while armed (it is part of the earned-cap binding).
+    case zoneChanged
 
     /// Shown in the UI after an automatic disarm. Nil for the user's own action.
     var message: String? {
@@ -58,6 +60,7 @@ enum LiveTreatmentDisarmReason: String, Equatable, Sendable {
         case .microphoneMoved: return "Disarmed: the microphone moved and could not be re-tuned. Re-arm to continue."
         case .adaptiveFault: return "Disarmed: the adaptive tuning faulted. Re-arm to continue."
         case .bassPathChanged: return "Disarmed: your receiver's level or bass settings changed. Re-arm to continue."
+        case .zoneChanged: return "Disarmed: the quiet zone changed. Re-arm to continue; the output starts at the starting level again."
         }
     }
 }
