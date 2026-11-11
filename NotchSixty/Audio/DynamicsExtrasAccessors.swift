@@ -87,3 +87,27 @@ extension MultibandCompressorConfiguration {
         return bands.isEmpty ? nil : bands
     }
 }
+
+/// E28 S7d (G33, G10): the lookahead the compressor and multiband add to the program path, as plan stages, so the routing
+/// editor's total, the FIR A/V-sync assessment and the hand-over alignment check all count what the core reports through
+/// `n60_graph_latency_frames`. Both stages delay every program lane equally, so one figure is the path latency.
+enum DynamicsLatency {
+    /// Frames the enabled compressor and multiband lookaheads add at `sampleRate` (0 when the flag is off or none is on).
+    static func programFrames(_ dynamics: DynamicsConfiguration, sampleRate: Double, flagOn: Bool) -> Int {
+        stages(dynamics, sampleRate: sampleRate, flagOn: flagOn).reduce(0) { $0 + Int($1.latencyFrames) }
+    }
+
+    static func stages(_ dynamics: DynamicsConfiguration, sampleRate: Double, flagOn: Bool) -> [SpeakerRoutingProgramStage] {
+        guard flagOn else { return [] }
+        var out: [SpeakerRoutingProgramStage] = []
+        if dynamics.compressor.enabled, let ms = dynamics.compressor.lookaheadMs, ms > 0 {
+            let frames = CompressorConfiguration.lookaheadFrames(ms: ms, sampleRate: sampleRate)
+            if frames > 0 { out.append(SpeakerRoutingProgramStage(name: "Compressor lookahead", latencyFrames: Double(frames))) }
+        }
+        if dynamics.multibandCompressor.enabled, let ms = dynamics.multibandCompressor.lookaheadMs, ms > 0 {
+            let frames = CompressorConfiguration.lookaheadFrames(ms: ms, sampleRate: sampleRate)
+            if frames > 0 { out.append(SpeakerRoutingProgramStage(name: "Multiband lookahead", latencyFrames: Double(frames))) }
+        }
+        return out
+    }
+}

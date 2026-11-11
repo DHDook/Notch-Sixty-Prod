@@ -109,9 +109,9 @@ gap may then be closed as "moved to E22" once E22 holds a matching unchecked ite
 
 | Epic | Flag | State | Blockers to graduation |
 | --- | --- | --- | --- |
-| E4 | `e4.engine-lease`, `e4.adaptive-tonal-live`, `e4.earned-cap`, `e4.feedforward-live` | Built and reachable (Quiet Zone card, behind the arm) | G16 closed (owner YES, 11 Nov 2026), G8 (feed-forward bridge refuses above 192 kHz), S30d G12 to G14 (PR #476 open), then the new slice S32 |
+| E4 | `e4.engine-lease`, `e4.adaptive-tonal-live`, `e4.earned-cap`, `e4.feedforward-live` | Built and reachable (Quiet Zone card, behind the arm) | E4 G17 closed (owner YES, 11 Nov 2026), G8 (feed-forward bridge refuses above 192 kHz), S30d G12 to G14 (PR #476 open), then the new slice S32 |
 | E4 | `e4.noise-survey`, `e4.conversation-unmasking`, `e4.overnight` | Built and reachable | S30d G12 to G14 (unmasking), then S32 |
-| E4 | `e4.virtual-microphone`, `e4.head-position-camera`, `e4.zones` | Offline maths only; no production reader, so still `[~]` built dark | G15: wiring has no owning slice until S32 |
+| E4 | `e4.virtual-microphone`, `e4.head-position-camera`, `e4.zones` | Offline maths only; no production reader, so still `[~]` built dark | E4 G16: wiring has no owning slice until S32 |
 | E6 | `e6.legacy-kernel` | Software complete bar S12h part 3; the inverse escape hatch | Never graduates; E23 deletes it; scoped gaps owned by E22 and E23 |
 | E7 | `e7.rate-adapt` (planned) | Only S1 built; flag not yet in code | S2 to S5; S5 reworded to graduate |
 | E9 | `e9.long-fir`, `e9.output-protection` | Reachable (Outputs UI, headroom assistant); 11 items `[~]` (S2d G9, S5 hard-limit and flag-off tests, S7b) | Close `[~]` items; G18, G25, G26 are bench (move to E22); no ship slice existed, new S8 |

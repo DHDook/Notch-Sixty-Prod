@@ -494,6 +494,12 @@ final class CoreAudioTransportSession {
     private let retainedProgramsLock = NSLock()
     /// Why the kernel renders although the graph is enabled; nil while the graph renders or is off.
     private(set) var unifiedGraphFallbackReason: UnifiedGraphFallbackReason?
+    /// E4 S30d (G14): whether the unified graph renders this session now (enabled and no fallback to the kernel), read
+    /// under `graphRefreshLock`, which is held while a refresh sets or clears the fallback reason.
+    var unifiedGraphRendersLocked: Bool {
+        graphRefreshLock.lock(); defer { graphRefreshLock.unlock() }
+        return unifiedGraphEnabled && unifiedGraphFallbackReason == nil
+    }
     private var headphoneDSPConfigured = false
     /// E6 S9d: the profile the HEADPHONE stage renders (nil without a stereo headphone profile) and the one the
     /// kernel was configured with. They differ after a live edit; the kernel cannot be reconfigured while IO runs.

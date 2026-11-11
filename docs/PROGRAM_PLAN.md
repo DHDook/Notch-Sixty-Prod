@@ -133,11 +133,12 @@ decision, so Phase 2 starts without it; every later bench check is collected the
 - [ ] Run the PR97 hardware timing calibration and the PR99 physical verification campaign on the bench
 - [ ] Define the live-ANC authorisation criteria in writing, then switch `liveANCQualified` only through that path
 - [ ] Re-qualify on the unified graph after E6 lands, and publish the measurement method for reviewers
-- [ ] S32 `e4/graduate-flags`: graduate the E4 flags (non-live flags first; live-output flags only after the owner answers G16; arm unchanged); wiring of `e4.virtual-microphone`, `e4.head-position-camera`, `e4.zones` first (G15)
+- [ ] S32 `e4/graduate-flags`: graduate the E4 flags (non-live flags first; live-output flags approved by the owner 11 Nov 2026, G17 closed; arm unchanged); wiring of `e4.virtual-microphone`, `e4.head-position-camera`, `e4.zones` first (G16)
 - [ ] Class-leading roadmap (owner, 27 Oct 2026; `docs/epics/E4.md` S12–S31): safety foundation (arm hardening, acoustic twin, engine lease, live howl guard, "do no harm" verifier, flight recorder); adaptive tonal live with tone glide, earned cap and excursion cap; upstream reference microphone with cross-device clocking; virtual microphone and head-tracked zones; noise survey, overnight mode, Conversation Focus unmasking, reviewer kit
   - [~] S30a `e4/unmask-ambient-stage`: `AMBIENT` stage carries up to 17 live cut-only peaking sections (ABI v32); built, but nothing sets the cuts until S30c, so the stage is dark; wired by S30c
   - [~] S30a overlay: `AmbientUnmaskOverlay` section fit and trailer builder built dark behind `AmbientCompensationTarget.unmaskingCutsDB`; wired by S30c
-  - [x] S30c `e4/unmask-wiring`: controller cuts, governor, engine validation and Conversation Focus card built behind `e4.conversation-unmasking`; PR pending (needs-owner); carry gaps G12–G14 in S30d; bench: E22 S30 checks
+  - [x] S30c `e4/unmask-wiring`: controller cuts, governor, engine validation and Conversation Focus card built behind `e4.conversation-unmasking`; #468 merged; carry gaps G12–G14 in S30d; bench: E22 S30 checks
+  - [~] S30d `e4/unmask-rebuild-carry`: AMBIENT state carried across rebuild (G12), controller end-to-end tests (G13), locked graph-fallback read and transport-teardown reset (G14); built behind `e4.conversation-unmasking`, PR in review (needs-owner); not ticked because the flag is off and the slice is unreviewed; wiring: S30c (flag-gated); bench: E22 S30 checks
 
 ### E5 UI scope clean-up
 
@@ -393,7 +394,8 @@ S1–S6b flagless; every dynamics extra (S7a–S7d) behind the one flag `e28.dyn
 - [~] S7a compressor mix, link amount, peak/RMS detector and optional lookahead, reported in the path latency (needs-owner, engine; built dark behind `e28.dynamics-extras`, PR open; wiring in S7d, G10 open)
 - [~] S7b expander hold, soft knee, detector, sidechain high-pass and link; sidechain and delta listen (needs-owner, engine; built dark behind `e28.dynamics-extras`, PR pending; wiring in S7d)
 - [~] S7c multiband extras on the core stage ported by E6 S12d: per-band bypass, solo, listen and detector, one lookahead, auto-release toggle (needs-owner, engine; built dark behind `e28.dynamics-extras`, ABI v37, PR pending; wiring in S7d; G39, G40)
-- [~] S7d Dynamics page controls for every extra, disabled with a reason where the kernel renders (part 1 built behind `e28.dynamics-extras`: rows, listen, solo, banner, G8, G19, G36; part 2 open: lab and zero-allocation cases, latency totals, readouts, G21, G23, G26, G33 to G35, G37, G39, G40)
+- [~] S7d Dynamics page controls for every extra, disabled with a reason where the kernel renders (part 1 built behind `e28.dynamics-extras`: rows, listen, solo, banner, G8, G19, G36; part 2 built: zero-allocation cases, latency totals, double RMS and ring sanitising, G10 and G33 except the AV-sync caller (G41); part 3 open: lab cases, translator tests, readouts, G21, G23, G26, G34, G35, G37, G39, G40)
+- [ ] S7d part 3 (re-owned from part 2; holds the open remainder of G21, G23, G26, G34, G35, G37, G39, G40): `ReferenceRoomTransport` lab cases (compressor extras, expander extras, three-band solo), translator XCTests (10 to 16, 6 to 13, 29 to 43), link-0 and fade-law tests, surfacing the failed listen clear, RMS block-pass of the delay ring and mix, ring carry across a rebuild, Loudness Match and Contour readouts, the 0.1 dB core-versus-curve sweep, and the 0.245 dB gap.
 - [ ] S8 flag graduated (after S7a–S7d; the owner's listen moves to E22; removal is the FC phase)
 
 ## Phase 4 — Complete scope and launch

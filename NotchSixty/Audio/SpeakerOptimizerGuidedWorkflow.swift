@@ -294,6 +294,9 @@ final class SpeakerOptimizerGuidedFIRController: ObservableObject {
     private let transaction = SpeakerOptimizerFIRApplyTransaction()
     private let latencyPlanner = SpeakerOptimizerFIRLatencyPlanner()
     private let avPolicy = SpeakerOptimizerFIRAVSyncPolicy()
+    /// E28 S7d (G33): compressor and multiband lookahead frames the program path also carries; the owner of this
+    /// controller sets it from `DynamicsLatency.programFrames` before `prepareReview`.
+    var additionalProgramLatencyFrames: UInt64 = 0
 
     @Published private(set) var state:
         SpeakerOptimizerGuidedFIRState = .idle
@@ -423,7 +426,9 @@ final class SpeakerOptimizerGuidedFIRController: ObservableObject {
                 latency = planned
                 av = try avPolicy.assess(
                     plan: planned,
-                    context: avSyncContext
+                    context: avSyncContext,
+                    additionalProgramLatencyFrames:
+                        additionalProgramLatencyFrames
                 )
             } else {
                 latency = nil
@@ -457,7 +462,9 @@ final class SpeakerOptimizerGuidedFIRController: ObservableObject {
         do {
             avSyncDecision = try avPolicy.assess(
                 plan: latencyPlan,
-                context: context
+                context: context,
+                additionalProgramLatencyFrames:
+                    additionalProgramLatencyFrames
             )
             lastErrorDescription = nil
         } catch {
