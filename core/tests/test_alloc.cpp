@@ -278,6 +278,62 @@ int main() {
         n60_graph_retire(g);
     }
 
+    // E28 S7d (G34, G37, G40): the compressor (16 values), expander (13) and multiband (43) extras, with live edits of
+    // mix, link, detector, window, listen, solo and bypass between blocks, a lookahead ring and a non-finite burst:
+    // the realtime call allocates and frees nothing.
+    for (double rate : rates) {
+        constexpr uint32_t N = 512;
+        float comp[16] = {-30, 4, 6, 1, 100, 3, 0, 1, 80, 1, 50, 0, 1, 80, 240, 0};
+        float expa[13] = {-50, 2, -30, 2, 80, 1, 50, 6, 1, 60, 80, 50, 0};
+        float mb[43] = {1, 120, 2500, 0, 0, -30, -30, -30, 4, 4, 4, 5, 5, 5, 100, 100, 100, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 50, 240};
+        // Stage order is the core's rank order: the multiband sits before the compressor and expander.
+        n60_stage_desc st[3] = {stage(N60_STAGE_MULTIBAND, 3, 0, mb, 43, 0, 1),
+                                stage(N60_STAGE_COMPRESSOR, 1, N60_LANE_ALL, comp, 16),
+                                stage(N60_STAGE_EXPANDER, 2, N60_LANE_ALL, expa, 13)};
+        n60_graph_desc d{};
+        d.structSize = sizeof d;
+        d.abiVersion = N60_GRAPH_ABI_VERSION;
+        d.sampleRate = rate;
+        d.maxBlockFrames = N;
+        d.inputChannels = d.outputChannels = 2;
+        d.stages = st;
+        d.stageCount = 3;
+        n60_graph *g = nullptr;
+        { const n60_status bs = n60_graph_build(&d, &g); CHECK(bs == N60_STATUS_OK, "build dynamics extras (status %d)", static_cast<int>(bs)); }
+        float l[N], r[N], ol[N], orr[N];
+        for (uint32_t i = 0; i < N; i++) { l[i] = 0.5f * std::sin(0.05f * i); r[i] = 0.5f * std::cos(0.07f * i); }
+        const float *in[2] = {l, r};
+        float *out[2] = {ol, orr};
+        for (int round = 0; round < 30; round++) {
+            if (round == 12) { l[100] = std::nanf(""); r[300] = INFINITY; }  // a non-finite burst: sanitised, still no allocation
+            if (round == 13) { l[100] = 0.1f; r[300] = 0.1f; }
+            n60_param_record rec[12] = {{1, 10, static_cast<float>(10 * (round % 11)), 0},
+                                        {1, 11, static_cast<float>(25 * (round % 5)), 0},
+                                        {1, 12, static_cast<float>(round & 1), 0},
+                                        {1, 13, 5.0f + 7.0f * static_cast<float>(round % 20), 0},
+                                        {1, 15, static_cast<float>(round % 3), 0},
+                                        {2, 12, static_cast<float>((round / 2) % 3), 0},
+                                        {2, 7, static_cast<float>(round % 25), 0},
+                                        {3, static_cast<uint32_t>(32 + (round % 3)), static_cast<float>((round / 3) & 1), 0},
+                                        {3, static_cast<uint32_t>(35 + ((round + 1) % 3)), static_cast<float>((round / 4) % 3), 0},
+                                        {3, static_cast<uint32_t>(29 + (round % 3)), static_cast<float>((round / 5) & 1), 0},
+                                        {3, static_cast<uint32_t>(38 + (round % 3)), static_cast<float>(round & 1), 0},
+                                        {3, 41, 5.0f + 6.0f * static_cast<float>(round % 30), 0}};
+            CHECK(n60_graph_post_params(g, rec, 12) == N60_STATUS_OK, "post dynamics extras");
+            allocs = 0;
+            frees = 0;
+            armed = true;
+            n60_status s2 = n60_graph_process(g, in, out, N);
+            for (int k = 0; k < 3; k++) s2 = static_cast<n60_status>(s2 | n60_graph_process(g, in, out, 1 + 97 * k));
+            armed = false;
+            CHECK(s2 == N60_STATUS_OK, "process dynamics extras");
+            CHECK(allocs == 0 && frees == 0, "dynamics extras rate %.0f round %d: allocated %ld / freed %ld", rate, round,
+                  allocs.load(), frees.load());
+        }
+        n60_graph_retire(g);
+    }
+
     // S4 stages: denoiser, dynamic EQ, FIR, compressor and expander on four lanes, with
     // lane masks, published, edited live and rendered with blocks that straddle FFT frames.
     for (double rate : rates) {

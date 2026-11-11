@@ -85,13 +85,16 @@ enum SpeakerOptimizerFIRAVSyncError:
 /// exact program-path delay created by the FIR/lane contract and determines
 /// whether an explicitly declared external video-delay path has enough range.
 struct SpeakerOptimizerFIRAVSyncPolicy: Sendable {
+    /// `additionalProgramLatencyFrames` is latency from outside the FIR plan that every program lane also carries
+    /// (E28 S7d, G33: the compressor and multiband lookahead). It counts toward the program path, not the incremental FIR.
     func assess(
         plan: SpeakerOptimizerFIRLatencyPlan,
-        context: SpeakerOptimizerFIRAVSyncContext
+        context: SpeakerOptimizerFIRAVSyncContext,
+        additionalProgramLatencyFrames: UInt64 = 0
     ) throws -> SpeakerOptimizerFIRAVSyncDecision {
         try assess(
             programPathLatencyFrames:
-                UInt64(plan.maximumEndToEndProgramLatencyFrames),
+                UInt64(plan.maximumEndToEndProgramLatencyFrames) + additionalProgramLatencyFrames,
             incrementalFIRLatencyFrames:
                 UInt64(plan.addedFIRLatencyFrames),
             sampleRate: plan.sampleRate,

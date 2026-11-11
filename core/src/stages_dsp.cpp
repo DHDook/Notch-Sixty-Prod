@@ -49,6 +49,12 @@ float lin2db(float x, float eps) { return kLinToDb * std::log2(std::max(x, eps))
 
 // One-pole smoothing coefficient for a time constant in milliseconds (as the kernel:
 // exp(-1 / samples), time clamped to 0.05 .. 5000 ms).
+// Double pole for the RMS windows: at 384 kHz with a 200 ms window the float pole is 1 - 1.3e-7, within a few ulp of 1.
+double poleD(double rate, float ms) {
+    const double t = std::clamp<double>(ms, 0.05, 5000.0);
+    return std::exp(-1.0 / (rate * t / 1000.0));
+}
+
 float pole(double rate, float ms) {
     const double t = std::clamp<double>(ms, 0.05, 5000.0);
     return static_cast<float>(std::exp(-1.0 / (rate * t / 1000.0)));
@@ -75,6 +81,10 @@ float biquad(const double c[5], double z[2], float in) {
 // from a non-finite burst once per block (flush-to-zero does not touch NaN or Inf).
 void heal(float &v) N60_RT_NONBLOCKING {
     if (!std::isfinite(v)) v = 0.0f;
+}
+
+void heal(double &v) N60_RT_NONBLOCKING {
+    if (!std::isfinite(v)) v = 0.0;
 }
 
 void heal(double z[2]) N60_RT_NONBLOCKING {
@@ -155,7 +165,7 @@ struct CompLane {
     float gainDB;    // smoothed gain; the shared gain of a linked group lives in the group's first lane
     std::atomic<uint32_t> grMaxBits;  // ABI v8: deepest reduction (dB, >= 0) since the last read, on every lane of the group
     std::atomic<uint32_t> grNowBits;  // reduction at the end of the last block
-    float meanSq;                     // ABI v34: RMS detector mean square of this lane's sidechain
+    double meanSq;                    // ABI v34: RMS detector mean square of this lane's sidechain (double since E28 S7d: a 200 ms window at 384 kHz)
     uint32_t ringPos;                 // ABI v34: lookahead ring write position (the ring follows the struct)
 };
 
@@ -174,7 +184,7 @@ struct ExpLane {
     float gainDB;
     std::atomic<uint32_t> grMaxBits;  // as CompLane
     std::atomic<uint32_t> grNowBits;
-    float meanSq;       // ABI v35: RMS detector mean square
+    double meanSq;      // ABI v35: RMS detector mean square (double since E28 S7d)
     double z[2];        // ABI v35: sidechain high-pass state
     uint32_t holdCnt;   // ABI v35: frames of hold left
     uint32_t pad;
@@ -247,7 +257,8 @@ void runCompressorX(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t fr
     const float slope = 1.0f / ratio - 1.0f;
     const float atk = pole(rate, p[3]), rel = pole(rate, p[4]);
     const float fast = pole(rate, std::max(p[4] * 0.5f, 1.0f)), slow = pole(rate, std::min(p[4] * 2.0f, 5000.0f));
-    const float rmsC = pole(rate, p[13]), rampC = pole(rate, 5.0f);
+    const double rmsC = poleD(rate, p[13]);
+    const float rampC = pole(rate, 5.0f);
     CompShared &sh = *reinterpret_cast<CompShared *>(sharedState(h, r));
     if (hpHz != sh.usedHz) {
         sh.usedHz = hpHz;
@@ -286,9 +297,9 @@ void runCompressorX(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t fr
                 const float y = sh.hasHp ? biquad(sh.hp, ln.z, xin) : xin;
                 float d;
                 if (rms) {
-                    const float yy = std::min(std::fabs(y), 1e6f);
+                    const double yy = std::min(std::fabs(y), 1e6f);
                     ln.meanSq = yy * yy + rmsC * (ln.meanSq - yy * yy);
-                    d = std::sqrt(std::max(ln.meanSq, 0.0f));
+                    d = static_cast<float>(std::sqrt(std::max(ln.meanSq, 0.0)));
                 } else {
                     d = std::fabs(y);
                 }
@@ -318,10 +329,11 @@ void runCompressorX(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t fr
                 if (ringLen != 0) {
                     float *rg = ring[l];
                     const float old = rg[gs.ringPos];
-                    rg[gs.ringPos] = dry;
+                    // A non-finite sample never enters the ring (it would be replayed ringLen frames later).
+                    rg[gs.ringPos] = std::isfinite(dry) ? dry : 0.0f;
                     if (hasListen) {
                         const float oldSide = sideRing[l][gs.ringPos];
-                        sideRing[l][gs.ringPos] = sc;
+                        sideRing[l][gs.ringPos] = std::isfinite(sc) ? sc : 0.0f;
                         sc = oldSide;
                     }
                     gs.ringPos = gs.ringPos + 1 == ringLen ? 0 : gs.ringPos + 1;
@@ -446,7 +458,8 @@ void runExpanderX(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t fram
     const uint32_t holdFrames = static_cast<uint32_t>(std::lround(static_cast<double>(p[6]) * rate / 1000.0));
     const float linkT = p[11] * 0.01f;
     const float sideT = p[12] == 1.0f ? 1.0f : 0.0f, deltaT = p[12] == 2.0f ? 1.0f : 0.0f;
-    const float atk = pole(rate, p[3]), rel = pole(rate, p[4]), rmsC = pole(rate, p[9]), rampC = pole(rate, 5.0f);
+    const float atk = pole(rate, p[3]), rel = pole(rate, p[4]), rampC = pole(rate, 5.0f);
+    const double rmsC = poleD(rate, p[9]);
     ExpShared &sh = *reinterpret_cast<ExpShared *>(sharedState(h, r));
     if (hpHz != sh.usedHz) {
         sh.usedHz = hpHz;
@@ -477,9 +490,9 @@ void runExpanderX(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t fram
                 const float y = sh.hasHp ? biquad(sh.hp, ln.z, lp[l][i]) : lp[l][i];
                 float d;
                 if (rms) {
-                    const float yy = std::min(std::fabs(y), 1e6f);
+                    const double yy = std::min(std::fabs(y), 1e6f);
                     ln.meanSq = yy * yy + rmsC * (ln.meanSq - yy * yy);
-                    d = std::sqrt(std::max(ln.meanSq, 0.0f));
+                    d = static_cast<float>(std::sqrt(std::max(ln.meanSq, 0.0)));
                 } else {
                     d = std::fabs(y);
                 }

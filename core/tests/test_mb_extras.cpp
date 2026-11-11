@@ -126,8 +126,8 @@ Vec refBand(double rate, bool hp, double f, const Vec &in) {
 void testRate(double rate) {
     const size_t n = (size_t)(rate * 0.6), from = n / 2;
     const Vec in = noise(n, 0.5f);
-    // Float crossover state (E6 G25) limits agreement with the double reference; E23 S1b's double state tightens it to 1e-5.
-    const double tol = rate > 300000 ? 2e-4 : 1e-4;
+    // Measured worst case is 4.5e-5 at every rate (the multiband crossover path still rounds through float, G39), so one 1e-4 bound.
+    const double tol = 1e-4;
     // 1. A 43-value block with defaults equals the 29-value block, bit for bit (compression active).
     {
         Mb m;

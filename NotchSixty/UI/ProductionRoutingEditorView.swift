@@ -411,7 +411,10 @@ struct ProductionRoutingEditorView: View {
     }
 
     private var pipelineCard: some View {
-        let rows = SpeakerRoutingPipeline.rows(model.configuration, context: model.context)
+        let rows = SpeakerRoutingPipeline.rows(
+            model.configuration, context: model.context,
+            programStages: DynamicsLatency.stages(
+                engine.dynamicsConfiguration, sampleRate: model.context.sampleRate, flagOn: FeatureFlags().isEnabled(.dynamicsExtras)))
         return DisclosureGroup("Pipeline") {
             VStack(alignment: .leading, spacing: 10) {
                 if rows.isEmpty { Text("Nothing is routed yet.").foregroundStyle(.secondary) }

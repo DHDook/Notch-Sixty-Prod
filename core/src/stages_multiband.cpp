@@ -172,7 +172,8 @@ struct MbShared {
     std::atomic<uint32_t> grMaxBits[kBands];
     std::atomic<uint32_t> grNowBits[kBands];
     // ABI v37 (E28 S7c): solo gains and listen weights ramp over 5 ms; one lookahead ring set follows the struct.
-    float soloG[kBands], listenSide[kBands], listenDelta[kBands], meanSq[kBands];
+    float soloG[kBands], listenSide[kBands], listenDelta[kBands];
+    double meanSq[kBands];  // RMS mean square in double (E28 S7d, G40)
     BqState lhpL[kBands], lhpR[kBands];  // sidechain filters of the listened band, run on the delayed band
     uint32_t ringLen, ringPos;
 };
@@ -377,7 +378,7 @@ void runMultiband(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t fram
     const uint32_t ringLen = x ? S.ringLen : 0;
     float *rings = ringLen != 0 ? ringsOf(S) : nullptr;
     const float rampC = poleForMs(rate, 5.0f);
-    const float rmsC = x ? poleForMs(rate, p[kWindow]) : 0.0f;
+    const double rmsC = x ? std::exp(-1.0 / (rate * (double(std::min(std::max(p[kWindow], 0.05f), 5000.0f)) / 1000.0))) : 0.0;
     bool soloAny = false;
     float soloT[kBands], sideT[kBands], deltaT[kBands], mk[kBands];
     bool bypass[kBands], rms[kBands];
@@ -413,8 +414,10 @@ void runMultiband(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t fram
             float *rl = rings + size_t(S.ringPos), *rr = rl + size_t(3) * ringLen;
             const float oDryL = rl[0], oLowL = rl[ringLen], oHighL = rl[2 * size_t(ringLen)];
             const float oDryR = rr[0], oLowR = rr[ringLen], oHighR = rr[2 * size_t(ringLen)];
-            rl[0] = dryL; rl[ringLen] = lowL; rl[2 * size_t(ringLen)] = highL;
-            rr[0] = dryR; rr[ringLen] = lowR; rr[2 * size_t(ringLen)] = highR;
+            // A non-finite sample never enters the ring (it would be replayed ringLen frames later).
+            const auto fin = [](float v) { return std::isfinite(v) ? v : 0.0f; };
+            rl[0] = fin(dryL); rl[ringLen] = fin(lowL); rl[2 * size_t(ringLen)] = fin(highL);
+            rr[0] = fin(dryR); rr[ringLen] = fin(lowR); rr[2 * size_t(ringLen)] = fin(highR);
             S.ringPos = S.ringPos + 1 == ringLen ? 0 : S.ringPos + 1;
             dBandL[0] = oLowL; dBandL[1] = oDryL - oLowL - oHighL; dBandL[2] = oHighL;
             dBandR[0] = oLowR; dBandR[1] = oDryR - oLowR - oHighR; dBandR[2] = oHighR;
@@ -429,10 +432,10 @@ void runMultiband(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t fram
                 const float detR = runBq(S.hp[b], S.hpR[b], bandR[b]);
                 float detector = std::fmax(std::fabs(detL), std::fabs(detR));
                 if (rms[b]) {
-                    const float yy = std::fmin(detector, 1.0e6f);
+                    const double yy = std::fmin(detector, 1.0e6f);
                     S.meanSq[b] = yy * yy + rmsC * (S.meanSq[b] - yy * yy);
-                    if (S.meanSq[b] < 1e-30f) S.meanSq[b] = 0.0f;  // no denormals in silence
-                    detector = std::sqrt(std::fmax(S.meanSq[b], 0.0f));
+                    if (S.meanSq[b] < 1e-30) S.meanSq[b] = 0.0;  // no denormals in silence
+                    detector = static_cast<float>(std::sqrt(std::fmax(S.meanSq[b], 0.0)));
                 }
                 if (!bypass[b]) {
                     targetDb = bandTarget(linearToDb(detector), p[kThreshold + b], p[kRatio + b], p[kKnee + b]);
