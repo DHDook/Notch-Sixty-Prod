@@ -1,4 +1,4 @@
-// E28 S7a (ABI v33): behaviour of the compressor extras at the eight standard rates: a 15-value block with defaults is
+// E28 S7a (ABI v34): behaviour of the compressor extras at the eight standard rates: a 15-value block with defaults is
 // bit-identical to the 10-value block, mix, link amount, the RMS detector and its window, lookahead (delay equals the
 // reported latency, a burst no longer overshoots), the switch-on step, block-size independence, validation, and live
 // edits that allocate nothing is covered in test_alloc.cpp.

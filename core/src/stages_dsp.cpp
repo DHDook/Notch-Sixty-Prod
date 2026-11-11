@@ -89,7 +89,7 @@ struct Range {
     bool integer;
 };
 
-// ABI v33 (E28 S7a): [10] mix %, [11] link %, [12] detector (0 peak, 1 RMS), [13] RMS window ms, [14] lookahead frames.
+// ABI v34 (E28 S7a): [10] mix %, [11] link %, [12] detector (0 peak, 1 RMS), [13] RMS window ms, [14] lookahead frames.
 constexpr uint32_t kMaxCompLookahead = 8192;  // 10 ms at 768 kHz is 7,680 frames
 constexpr Range kComp[15] = {{-96, 0, false}, {1, 100, false}, {0, 24, false}, {0.05f, 1000, false}, {1, 5000, false},
                              {-24, 24, false}, {0, 1, true},   {0, 1, true},   {0, 300, false},      {0, 1, true},
@@ -152,19 +152,19 @@ struct CompLane {
     float gainDB;    // smoothed gain; the shared gain of a linked group lives in the group's first lane
     std::atomic<uint32_t> grMaxBits;  // ABI v8: deepest reduction (dB, >= 0) since the last read, on every lane of the group
     std::atomic<uint32_t> grNowBits;  // reduction at the end of the last block
-    float meanSq;                     // ABI v33: RMS detector mean square of this lane's sidechain
-    uint32_t ringPos;                 // ABI v33: lookahead ring write position (the ring follows the struct)
+    float meanSq;                     // ABI v34: RMS detector mean square of this lane's sidechain
+    uint32_t ringPos;                 // ABI v34: lookahead ring write position (the ring follows the struct)
 };
 
 struct CompShared {
     double hp[5];
     float usedHz;
     uint32_t hasHp;
-    float mixS, linkS;  // ABI v33: mix and link fractions, smoothed over 5 ms
+    float mixS, linkS;  // ABI v34: mix and link fractions, smoothed over 5 ms
     float pad[2];
 };
 
-// ABI v33: parameter blocks of 15 values carry the extras; the 10-value block keeps the v20 arithmetic exactly.
+// ABI v34: parameter blocks of 15 values carry the extras; the 10-value block keeps the v20 arithmetic exactly.
 bool compExtended(const StageRec &r) { return r.paramCount >= 15; }
 
 struct ExpLane {
@@ -206,7 +206,7 @@ float compTargetDb(float detDb, float thr, float slope, float knee, float makeup
     return c + makeup;
 }
 
-// ABI v33 (E28 S7a): the compressor with mix, link amount, peak/RMS detector and lookahead. Every lane keeps its own
+// ABI v34 (E28 S7a): the compressor with mix, link amount, peak/RMS detector and lookahead. Every lane keeps its own
 // gain; the detector of a lane is link * (loudest lane of its group) + (1 - link) * its own level, so link 1 reproduces
 // the shared gain exactly and link 0 leaves each lane independent. Lookahead delays the audio by a ring of
 // params[14] frames while the detector reads the undelayed signal. Mix blends the delayed dry with the processed

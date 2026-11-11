@@ -76,6 +76,7 @@ static Room makeRoom(double fs) {
 
 static void fillProblem(const Room &room, n60_mimo_problem &prob) {
     n60_mimo_defaults(room.fs, kSources, kSeats, &prob);
+    prob.tau_seconds = 0.0;  // these cases were written for tau 0; the default is 15 ms since G11 (test_mimo_realise covers it)
     for (uint32_t s = 0; s < kSources; ++s) {
         prob.sources[s].support_low_hz = s < 2 ? 30.0 : 20.0;
         prob.sources[s].support_high_hz = s < 2 ? 150.0 : 120.0;

@@ -84,7 +84,7 @@ build_core_objs() {
     done
 }
 # Bridge harnesses: build the core only when one of them is selected.
-if selected pr35_transition_ack || selected pr41_same_device_output_map || selected pr101_realtime_resource_soak || selected e6_graph_takeover || selected e6_fade_alignment || selected e6_nchannel_graph || selected e6_shutdown_fade || selected e8_routed_output || selected e4_speaker_drive || selected e25_fold || selected e20_bridge_fastpath || selected e28_route_meter; then
+if selected pr35_transition_ack || selected pr41_same_device_output_map || selected pr101_realtime_resource_soak || selected e6_graph_takeover || selected e6_fade_alignment || selected e6_nchannel_graph || selected e6_shutdown_fade || selected e8_routed_output || selected e4_speaker_drive || selected e25_fold || selected e20_bridge_fastpath || selected e28_route_meter || selected e28_loudness_capture; then
     build_core_objs
 fi
 
@@ -167,6 +167,10 @@ harness pr41_same_device_output_map "${STRICT[@]}" -O2 -include stddef.h -I"$RT"
 
 # shellcheck disable=SC2086
 harness e28_route_meter "${STRICT[@]}" -O2 -include stddef.h -I"$RT" ci/harness_e28_route_meter.c $ALL_RT \
+    -Icore/include ${CORE_OBJS[@]+"${CORE_OBJS[@]}"} -lc++ -framework Accelerate -framework CoreAudio
+
+# shellcheck disable=SC2086
+harness e28_loudness_capture "${STRICT[@]}" -O2 -include stddef.h -I"$RT" ci/harness_e28_loudness_capture.c $ALL_RT \
     -Icore/include ${CORE_OBJS[@]+"${CORE_OBJS[@]}"} -lc++ -framework Accelerate -framework CoreAudio
 
 # Adaptive-rate transport (PR69-71).
@@ -466,6 +470,21 @@ if selected e8_xover_linearise_core; then
         fi
     else
         failed+=(e8_xover_linearise_core)
+    fi
+fi
+
+# E19 S4: MIMO treatment graph stage (ABI v33): delay, arm ramp, trip, monitor, rebuild mute at the standard rates.
+if selected e19_mimo_stage; then
+    build_core_objs
+    if [ "$CORE_OK" = 1 ]; then
+        if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -Icore/include -Icore/src core/tests/test_mimo_stage.cpp \
+            "${CORE_OBJS[@]}" -o "$OUT/e19_core_mimo_stage" && "$OUT/e19_core_mimo_stage"; then
+            passed+=(e19_core_mimo_stage)
+        else
+            failed+=(e19_core_mimo_stage)
+        fi
+    else
+        failed+=(e19_mimo_stage)
     fi
 fi
 

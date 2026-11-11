@@ -23,6 +23,9 @@ typedef struct {
     float rmsLeft;
     float rmsRight;
     uint64_t overRangeSamples;
+    /// E28 S6b: the same count split by side (left + right == overRangeSamples).
+    uint64_t overRangeLeft;
+    uint64_t overRangeRight;
 } N60OutputVUMeterSnapshot;
 
 #define N60_ANALYSIS_DEMAND_NONE 0u

@@ -148,6 +148,7 @@ Dirac now sells ART on the Mac, so this needs the same path to authorisation as 
 
 - [ ] Bench campaign with two or more subwoofers plus mains: modal decay (T20/T30 below 150 Hz) before and after at several seats
 - [ ] Speaker support-range and exclusion controls, and an explicit LFE time target
+- [~] S4 `e19/mimo-stage`: realtime `N60_STAGE_MIMO` (ABI 32) built dark, not published until S6 (see `docs/epics/E19.md`)
 - [ ] Headroom and excursion safety per contributing speaker
 - [ ] Authorise live treatment only through the PR75 verification path, then re-qualify on the unified graph
 
@@ -214,7 +215,7 @@ Gate G2 passed on 2026-10-25 (commit 07e82c6)
 - [~] Per-output limiter, true-peak guard and soft clip, matching the stereo chain (E9 S5 built dark behind `e9.output-protection`; wiring: E9 S5b for the Outputs UI and S5c for routed outputs, binaural and debounce done; G17 dropped by the owner)
 - [~] Move the program FIR onto the 262,144-tap non-uniform convolver (E9 S1 built dark; S3 sets firScheme 1 and lifts the Swift guards behind e9.long-fir, PR pending; flag stays dark until S2c and E22 bench)
 - [~] Long FIR rebuild: lockstep lazy carry with 256 KiB per-callback budget, changed-tap seeding, chunked or O(1) scheme 1 reset (E9 S2 built dark, PR pending; S3 wires Swift behind e9.long-fir; S2b follow-ups and E22 bench items open)
-- [~] Per-output headroom assistant (E9 S6 core maths built, `n60/headroom.h`; S7 wires the Swift model, readout and Apply)
+- [~] Per-output headroom assistant (E9 S6 core maths `n60/headroom.h` merged; E9 S7 Swift model, readout and Apply/Undo built behind e9.output-protection, PR pending; S7b coverage and bit-exact Undo test next)
 
 ### E20 Engine performance
 
@@ -379,7 +380,7 @@ S1–S6b flagless; every dynamics extra (S7a–S7d) behind the one flag `e28.dyn
 - [ ] S4 dynamics feel: log sliders, unit-aware fields, stepping, reset, fine drag, undo, sidechain range fix, auto makeup, accessibility
 - [x] S5 dynamics visualisation: transfer curves, gain-reduction bars and history, navigator bars; built, PR pending (G21 to S7d, G22 to S6, G23 to S7d, G24 to S7b; Loudness readouts moved to S7d)
 - [x] S6 per-output and sub meters on every output configuration, per-route bridge meter, E9 protection on the hub (needs-owner, PR pending)
-- [ ] S6b loudness fed the semantic program channels on N-channel and binaural sessions, loudness and dynamics lab cases, L/R over-range pairing (needs-owner)
+- [x] S6b loudness fed the semantic program channels on N-channel and binaural sessions, loudness and dynamics lab cases, L/R over-range pairing (needs-owner)
 - [~] S7a compressor mix, link amount, peak/RMS detector and optional lookahead, reported in the path latency (needs-owner, engine; built dark behind `e28.dynamics-extras`, PR open; wiring in S7d, G10 open)
 - [ ] S7b expander hold, soft knee, detector, sidechain high-pass and link; sidechain and delta listen (needs-owner, engine)
 - [ ] S7c multiband extras on the core stage ported by E6 S12d: per-band bypass, solo, listen and detector, one lookahead, auto-release toggle (needs-owner, engine)

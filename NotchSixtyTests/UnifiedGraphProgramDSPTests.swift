@@ -505,7 +505,8 @@ extension UnifiedGraphProgramDSPTests {
         for rate in Self.rates {
             let off = try protectedStereoWithSub(rate: rate, user: nil, independent: false, policy: false).makeSpec()
             let on = try protectedStereoWithSub(rate: rate, user: nil, independent: false).makeSpec()
-            XCTAssertEqual(off.stages.count + 3, on.stages.count)
+            // Three hard limits plus (E9 S7) the sub lane's OUTPUT_GAIN stage that carries the headroom trim.
+            XCTAssertEqual(off.stages.count + 4, on.stages.count)
             XCTAssertEqual(try UnifiedGraphHost(spec: on).latencyFrames, try UnifiedGraphHost(spec: off).latencyFrames, "zero added latency at \(rate)")
             let plain = try protectedStereoWithSub(rate: rate, user: nil, independent: false, policy: false).makeSpec()
             XCTAssertEqual(off.stages, plain.stages)

@@ -190,11 +190,39 @@ static void testTauZero() {
     if (r2.status == 0) CHECK(r2.info.pre_energy_db < r.info.pre_energy_db - 3.0, "raising tau lowers the energy before t = 0 (%.1f vs %.1f dB)", r2.info.pre_energy_db, r.info.pre_energy_db);
 }
 
+// G11 (owner decision of 10 Nov 2026): the gate is 0.25 dB for tau >= 10 ms and 0.35 dB below. Measured worst case at
+// the eight standard rates, tau 0 to 15 ms, is 0.28 dB (tau 0, 48 kHz).
+static void testTauGate() {
+    const double taus[] = {0.0, 0.004, 0.0099, 0.010, 0.015};
+    double worstShort = 0.0;
+    for (double fs : kRates) {
+        const Room room = makeRoom(fs);
+        for (double tau : taus) {
+            n60_mimo_problem prob;
+            fillProblem(room, prob);
+            prob.tau_seconds = tau;
+            const Result r = run(prob);
+            CHECK(r.status == 0, "fs %.0f tau %.4f design status %d", fs, tau, r.status);
+            if (r.status != 0) continue;
+            n60_mimo_realisation rep;
+            CHECK(n60_mimo_realise_check(&prob, r.taps.data(), r.taps.size(), r.solved.data(), r.solved.size(), &r.info, &rep) == 0, "check");
+            const double gate = tau < 0.010 ? 0.35 : 0.25;
+            if (tau < 0.010 && rep.max_deviation_db > worstShort) worstShort = rep.max_deviation_db;
+            CHECK(rep.max_deviation_db <= gate, "fs %.0f tau %.4f deviation %.3f dB over gate %.2f", fs, tau, rep.max_deviation_db, gate);
+        }
+    }
+    std::printf("worst deviation below 10 ms: %.3f dB\n", worstShort);
+    n60_mimo_problem d;
+    n60_mimo_defaults(48000.0, 4, 3, &d);
+    CHECK(d.tau_seconds == 0.015, "default bass time target is 15 ms");
+}
+
 int main() {
     CHECK(n60_mimo_abi_version() == N60_MIMO_ABI_VERSION && N60_MIMO_ABI_VERSION == 2, "abi");
     for (double fs : kRates) testRate(fs, fs == 96000 || fs == 352800);
     testDetectsDamage();
     testTauZero();
+    testTauGate();
     if (failures) { std::fprintf(stderr, "%d failure(s)\n", failures); return 1; }
     std::puts("mimo realise tests passed");
     return 0;

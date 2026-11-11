@@ -98,6 +98,26 @@ final class DynamicsVisualisationTests: XCTestCase {
         }
     }
 
+    /// G22: a settled tone burst's displayed gain-reduction maximum sits within 0.3 dB of the drawn curve at the eight rates (the detector settles about 0.25 dB under the sine peak, equal at every rate; E28 gap G26).
+    func testToneBurstGainReductionMatchesTheCurveWithinThreeTenthsAtEveryRate() throws {
+        for rate in EQRenderHarness.rates {
+            let engine = try engine(rate: rate)
+            var configuration = DynamicsConfiguration()
+            configuration.compressor.enabled = true
+            configuration.compressor.thresholdDB = -30
+            configuration.compressor.ratio = 4
+            configuration.compressor.kneeWidthDB = 0
+            configuration.compressor.attackMs = 1
+            configuration.compressor.releaseMs = 100
+            try engine.replaceDynamicsConfiguration(configuration)
+            let diagnostics = try readback(engine, rate: rate, amplitude: 0.1, seconds: 2)
+            let curve = DynamicsTransferCurve(configuration.compressor)
+            let measured = Double(diagnostics.compressorGainReductionDB)
+            // The detector measures the burst's peak level (-20 dBFS for a 0.1 amplitude sine).
+            XCTAssertEqual(measured, curve.reductionDB(atInput: 20 * log10(0.1)), accuracy: 0.3, "rate \(rate)")
+        }
+    }
+
     func testExpanderAttenuationIsReadFromTheGraph() throws {
         for rate in EQRenderHarness.rates {
             let engine = try engine(rate: rate)

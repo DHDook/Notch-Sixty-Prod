@@ -478,3 +478,102 @@ final class ProductionLoudnessFeed {
         return (input!.readout(), output!.readout())
     }
 }
+
+// MARK: - Wide sessions (E28 S6b)
+
+extension LoudnessChannelPosition {
+    /// BS.1770-4 position of a semantic program role (ITU-R BS.2051 nominal angles). The weight follows
+    /// `weight`: the surround and rear roles get +1.5 dB, height roles and the LFE follow Table 3.
+    init(role: OutputProgramRole) {
+        switch role {
+        case .frontLeft, .frontRight: self = .left
+        case .frontCenter: self = .centre
+        case .lowFrequencyEffects: self = .lfe
+        case .sideLeft, .sideRight: self = LoudnessChannelPosition(azimuthDegrees: 90, elevationDegrees: 0, isLFE: false)
+        case .rearLeft, .rearRight: self = .leftRearSurround
+        case .wideLeft, .wideRight: self = LoudnessChannelPosition(azimuthDegrees: 60, elevationDegrees: 0, isLFE: false)
+        case .topFrontLeft, .topFrontRight: self = .leftHeight
+        case .topMiddleLeft, .topMiddleRight:
+            self = LoudnessChannelPosition(azimuthDegrees: 90, elevationDegrees: 45, isLFE: false)
+        case .topRearLeft, .topRearRight: self = .leftRearHeight
+        }
+    }
+
+    static func positions(for roles: [OutputProgramRole]) -> [LoudnessChannelPosition] {
+        roles.map { LoudnessChannelPosition(role: $0) }
+    }
+}
+
+/// Loudness feed for the N-channel and binaural sessions: interleaved Input and Output frames drained from the bridge's
+/// `N60LoudnessCapture`, one meter per side with that side's own channel positions. Output is nil when the session cannot
+/// map its output back to program roles (a routed lane map). Runs on the analysis queue only.
+final class WideLoudnessFeed {
+    let inputPositions: [LoudnessChannelPosition]
+    let outputPositions: [LoudnessChannelPosition]?
+    private(set) var input: LoudnessMeter
+    private(set) var output: LoudnessMeter?
+    private var active = false
+    private var lastDropped: UInt64 = 0
+    private var inputScratch: [[Float]]
+    private var outputScratch: [[Float]]
+
+    var isActive: Bool { active }
+
+    init(sampleRate: Double, inputPositions: [LoudnessChannelPosition], outputPositions: [LoudnessChannelPosition]?) {
+        self.inputPositions = inputPositions
+        self.outputPositions = outputPositions
+        input = LoudnessMeter(sampleRate: sampleRate, channels: inputPositions)
+        output = outputPositions.map { LoudnessMeter(sampleRate: sampleRate, channels: $0) }
+        inputScratch = Array(repeating: [], count: inputPositions.count)
+        outputScratch = Array(repeating: [], count: outputPositions?.count ?? 0)
+    }
+
+    /// Resuming after a pause restarts the momentary and short-term windows but keeps the integrated history.
+    func setActive(_ nowActive: Bool) {
+        if nowActive, !active {
+            input.markDiscontinuity(gapped: false)
+            output?.markDiscontinuity(gapped: false)
+        }
+        active = nowActive
+    }
+
+    func reset() {
+        input.reset()
+        output?.reset()
+    }
+
+    /// `inputFrames` and `outputFrames` are interleaved with the position count as the stride.
+    func ingest(input inputFrames: UnsafePointer<Float>, output outputFrames: UnsafePointer<Float>?, frames: Int) {
+        guard active, frames > 0 else { return }
+        Self.deinterleave(inputFrames, frames: frames, into: &inputScratch)
+        input.process(planar: inputScratch)
+        if output != nil, let outputFrames {
+            Self.deinterleave(outputFrames, frames: frames, into: &outputScratch)
+            output?.process(planar: outputScratch)
+        }
+    }
+
+    private static func deinterleave(_ source: UnsafePointer<Float>, frames: Int, into planar: inout [[Float]]) {
+        let stride = planar.count
+        for c in 0..<stride {
+            if planar[c].count != frames { planar[c] = [Float](repeating: 0, count: frames) }
+            planar[c].withUnsafeMutableBufferPointer { buffer in
+                for n in 0..<frames { buffer[n] = source[n * stride + c] }
+            }
+        }
+    }
+
+    /// A rising dropped-frame counter means the ring overflowed, so the signal has a hole.
+    func noteDroppedFrames(_ total: UInt64) {
+        if active, total > lastDropped {
+            input.markDiscontinuity(gapped: true)
+            output?.markDiscontinuity(gapped: true)
+        }
+        lastDropped = total
+    }
+
+    func readouts() -> (input: LoudnessReadout, output: LoudnessReadout?)? {
+        guard active else { return nil }
+        return (input.readout(), output?.readout())
+    }
+}

@@ -621,3 +621,126 @@ final class ProductionAnalysisWorker: @unchecked Sendable {
         snapshotLock.unlock()
     }
 }
+
+// MARK: - Wide-session loudness (E28 S6b)
+
+/// Drains the loudness capture ring of an N-channel or binaural bridge every 50 ms and publishes BS.1770-4 readouts.
+/// It owns no other analysis (the spectrum and stereo views stay stereo-only). The owning session stops it before it
+/// destroys the bridge, because the worker reads the ring that the bridge owns.
+final class ProductionWideLoudnessWorker {
+    private static let drainFrames = 8_192
+    private static let maxLapsPerTick = 32
+
+    private let capture: UnsafeMutablePointer<N60LoudnessCapture>
+    private let sampleRate: Double
+    private let feed: WideLoudnessFeed
+    private let queue = DispatchQueue(label: "com.dhdook.NotchSixty.wide-loudness", qos: .userInitiated)
+    private let snapshotLock = NSLock()
+    private var published = ProductionAnalysisSnapshot.empty
+    private var timer: DispatchSourceTimer?
+    private var stopped = false
+    private var inputBuffer: [Float]
+    private var outputBuffer: [Float]
+
+    /// `outputPositions` is nil when the capture ring carries no output channels.
+    init?(capture: UnsafeMutablePointer<N60LoudnessCapture>?, sampleRate: Double, inputPositions: [LoudnessChannelPosition],
+          outputPositions: [LoudnessChannelPosition]?) {
+        guard let capture, sampleRate > 0,
+              Int(capture.pointee.inputChannels) == inputPositions.count,
+              Int(capture.pointee.outputChannels) == (outputPositions?.count ?? 0) else { return nil }
+        self.capture = capture
+        self.sampleRate = sampleRate
+        feed = WideLoudnessFeed(sampleRate: sampleRate, inputPositions: inputPositions, outputPositions: outputPositions)
+        inputBuffer = [Float](repeating: 0, count: Self.drainFrames * inputPositions.count)
+        outputBuffer = [Float](repeating: 0, count: Self.drainFrames * (outputPositions?.count ?? 0))
+    }
+
+    /// Only the loudness and reset bits mean anything here; the bridge-level bits belong to the stereo bridge.
+    func setDemand(_ mask: UInt32) {
+        let wants = (mask & ProductionAnalysisDemand.loudness) != 0
+        let reset = (mask & ProductionAnalysisDemand.resetLoudness) != 0
+        queue.async { [weak self] in
+            guard let self, !self.stopped else { return }
+            if wants, !self.feed.isActive {
+                N60LoudnessCaptureDiscard(self.capture)
+            }
+            self.feed.setActive(wants)
+            if reset { self.feed.reset() }
+            N60LoudnessCaptureSetDemand(self.capture, wants)
+            if wants {
+                self.startTimerIfNeeded()
+            } else {
+                self.cancelTimer()
+                self.publish(.empty)
+            }
+        }
+    }
+
+    func snapshot() -> ProductionAnalysisSnapshot {
+        snapshotLock.lock()
+        defer { snapshotLock.unlock() }
+        return published
+    }
+
+    /// Synchronous. After it returns the ring is no longer touched, so the bridge may be destroyed.
+    func stop() {
+        queue.sync {
+            stopped = true
+            cancelTimer()
+            N60LoudnessCaptureSetDemand(capture, false)
+        }
+    }
+
+    private func startTimerIfNeeded() {
+        guard timer == nil else { return }
+        let source = DispatchSource.makeTimerSource(queue: queue)
+        source.schedule(deadline: .now() + .milliseconds(50), repeating: .milliseconds(50), leeway: .milliseconds(5))
+        source.setEventHandler { [weak self] in self?.tick() }
+        timer = source
+        source.resume()
+    }
+
+    private func cancelTimer() {
+        timer?.cancel()
+        timer = nil
+    }
+
+    private func tick() {
+        guard !stopped, feed.isActive else { return }
+        let hasOutput = feed.outputPositions != nil
+        for _ in 0..<Self.maxLapsPerTick {
+            let count = inputBuffer.withUnsafeMutableBufferPointer { input in
+                outputBuffer.withUnsafeMutableBufferPointer { output in
+                    Int(N60LoudnessCaptureRead(
+                        capture, input.baseAddress!, hasOutput ? output.baseAddress : nil, UInt32(Self.drainFrames)))
+                }
+            }
+            if count == 0 { break }
+            inputBuffer.withUnsafeBufferPointer { input in
+                outputBuffer.withUnsafeBufferPointer { output in
+                    feed.ingest(input: input.baseAddress!, output: hasOutput ? output.baseAddress : nil, frames: count)
+                }
+            }
+            if count < Self.drainFrames { break }
+        }
+        let counters = N60LoudnessCaptureGetSnapshot(capture)
+        feed.noteDroppedFrames(counters.droppedFrames)
+        var next = ProductionAnalysisSnapshot()
+        next.demandMask = ProductionAnalysisDemand.loudness
+        next.sampleRate = sampleRate
+        next.availableFrames = counters.availableFrames
+        next.capturedFrames = counters.capturedFrames
+        next.droppedFrames = counters.droppedFrames
+        if let readouts = feed.readouts() {
+            next.loudnessInput = readouts.input
+            next.loudnessOutput = readouts.output
+        }
+        publish(next)
+    }
+
+    private func publish(_ snapshot: ProductionAnalysisSnapshot) {
+        snapshotLock.lock()
+        published = snapshot
+        snapshotLock.unlock()
+    }
+}

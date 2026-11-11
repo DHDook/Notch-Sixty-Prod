@@ -3013,6 +3013,15 @@ final class AudioIOEngine: ObservableObject {
         return host.outputProtectionReadings(lanes: lanes)
     }
 
+    /// E9 S7: the published graph spec of the running render, with the output lane count, for the headroom assistant. nil when
+    /// no graph renders. Control plane (the host lock); the model itself runs off the main actor on the copy.
+    func headroomSpecSnapshot() -> (spec: UnifiedGraphSpec, lanes: Int)? {
+        let lanes = outputProtectionLanes.count
+        guard lanes > 0,
+              let host = transportSession?.unifiedGraphReadback ?? nChannelTransportSession?.unifiedGraphReadback else { return nil }
+        return (host.currentSpec, lanes)
+    }
+
     func replaceDynamicsConfiguration(_ configuration: DynamicsConfiguration) throws {
         let validationRate = transportSession?.outputFormat.sampleRate
             ?? nChannelTransportSession?.outputFormat.sampleRate
@@ -3177,6 +3186,15 @@ final class AudioIOEngine: ObservableObject {
     }
 
     func setAnalysisDemand(_ demandMask: UInt32) {
+        // E28 S6b: wide sessions carry loudness only (the spectrum and stereo views are stereo-bridge views).
+        if let session = nChannelTransportSession {
+            session.setAnalysisDemand(demandMask)
+            return
+        }
+        if let session = binauralHeadphoneTransportSession {
+            session.setAnalysisDemand(demandMask)
+            return
+        }
         transportSession?.setAnalysisDemand(demandMask)
     }
 
@@ -3395,7 +3413,9 @@ final class AudioIOEngine: ObservableObject {
     }
 
     func productionAnalysisSnapshot() -> ProductionAnalysisSnapshot {
-        transportSession?.productionAnalysisSnapshot() ?? .empty
+        if let session = nChannelTransportSession { return session.productionAnalysisSnapshot() }
+        if let session = binauralHeadphoneTransportSession { return session.productionAnalysisSnapshot() }
+        return transportSession?.productionAnalysisSnapshot() ?? .empty
     }
 
     func resetSpectrumPeakHold() {

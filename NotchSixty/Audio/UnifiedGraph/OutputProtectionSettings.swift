@@ -11,23 +11,48 @@ struct OutputProtectionSettings: Equatable, Codable, Sendable {
         var enabled = true
         /// nil follows the program ceiling. Always held between `ceilingRangeDB` and the hard ceiling.
         var ceilingDB: Double?
+        /// E9 S7: the headroom assistant's trim (dB, 0 or negative), applied through the lane's output gain stage ahead of the
+        /// protection stage. Held within `trimRangeDB`; 0 is no trim.
+        var trimDB: Double = 0
 
-        init(enabled: Bool = true, ceilingDB: Double? = nil) {
+        init(enabled: Bool = true, ceilingDB: Double? = nil, trimDB: Double = 0) {
             self.enabled = enabled
             self.ceilingDB = ceilingDB
+            self.trimDB = trimDB
+        }
+
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            enabled = try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? true
+            ceilingDB = try c.decodeIfPresent(Double.self, forKey: .ceilingDB)
+            trimDB = try c.decodeIfPresent(Double.self, forKey: .trimDB) ?? 0
         }
     }
+
+    /// The assistant never boosts and never trims further than this.
+    static let trimRangeDB: ClosedRange<Double> = -60 ... 0
 
     static let ceilingRangeDB: ClosedRange<Double> = -20 ... Double(UnifiedGraphOutputProtection.hardLimitCeilingDB)
 
     /// The Advanced "Independent per output" switch.
     var independent = false
+    /// E9 S7: Strict headroom combines every redirected lane coherently (owner Q3); off combines the front pair coherently
+    /// and the other redirected lanes as power.
+    var headroomStrict = false
     /// Overrides by output lane index (program lanes first, then sub lanes). Absent means the defaults.
     var lanes: [Int: Lane] = [:]
 
-    init(independent: Bool = false, lanes: [Int: Lane] = [:]) {
+    init(independent: Bool = false, lanes: [Int: Lane] = [:], headroomStrict: Bool = false) {
         self.independent = independent
         self.lanes = lanes
+        self.headroomStrict = headroomStrict
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        independent = try c.decodeIfPresent(Bool.self, forKey: .independent) ?? false
+        headroomStrict = try c.decodeIfPresent(Bool.self, forKey: .headroomStrict) ?? false
+        lanes = try c.decodeIfPresent([Int: Lane].self, forKey: .lanes) ?? [:]
     }
 
     func lane(_ index: Int) -> Lane { lanes[index] ?? Lane() }
@@ -38,6 +63,7 @@ struct OutputProtectionSettings: Equatable, Codable, Sendable {
         if let ceiling = value.ceilingDB {
             value.ceilingDB = ceiling.isFinite ? min(max(ceiling, Self.ceilingRangeDB.lowerBound), Self.ceilingRangeDB.upperBound) : nil
         }
+        value.trimDB = value.trimDB.isFinite ? min(max(value.trimDB, Self.trimRangeDB.lowerBound), Self.trimRangeDB.upperBound) : 0
         if value == Lane() { lanes[index] = nil } else { lanes[index] = value }
     }
 }

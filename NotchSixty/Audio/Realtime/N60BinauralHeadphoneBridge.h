@@ -14,6 +14,7 @@
 #include "N60AudioUnitLiveRackBridge.h"
 #include "N60HeadTrackedBinauralRuntime.h"
 #include "N60HeadphoneDSP.h"
+#include "N60LoudnessCapture.h"
 #include "N60Protection.h"
 #include "n60/graph.h"
 
@@ -68,6 +69,10 @@ typedef struct N60BinauralHeadphoneBridge {
     n60_graph * _Nullable unifiedGraph;
     float * _Nullable graphScratch;
     uint32_t graphMaxFrames;
+
+    // E28 S6b: demand-gated capture of the program channels (Input) and the two ear signals (Output) for BS.1770-4
+    // loudness. Created with the bridge; the output callback writes it only while the worker holds demand.
+    N60LoudnessCapture * _Nullable loudnessCapture;
 
     uint32_t outputGateMinimumBufferedFrames;
     uint32_t startupFadeFrames;
@@ -210,6 +215,9 @@ static inline N60BinauralHeadphoneBridge * _Nullable N60BinauralHeadphoneBridgeC
     bridge->headphoneSnapshot = headphoneSnapshot;
     bridge->protectionSnapshot = protectionSnapshot;
     bridge->programGainLinear = programGainLinear;
+    bridge->loudnessCapture = N60LoudnessCaptureCreate(
+        binauralDescriptor.programLayout.channelCount, 2u, binauralDescriptor.sampleRate
+    );
     bridge->outputGateMinimumBufferedFrames = outputGateMinimumBufferedFrames;
     bridge->startupFadeFrames = startupFadeFrames;
     bridge->startupFadeRemaining = 0u;
@@ -270,6 +278,8 @@ static inline void N60BinauralHeadphoneBridgeDestroy(
     N60ProtectionRuntimeDestroy(bridge->protectionRuntime);
     free(bridge->audioUnitRackScratch);
     free(bridge->graphScratch);
+    N60LoudnessCaptureDestroy(bridge->loudnessCapture);
+    bridge->loudnessCapture = NULL;
     bridge->graphScratch = NULL;
     bridge->unifiedGraph = NULL;
     bridge->transport = NULL;
@@ -641,6 +651,9 @@ static inline OSStatus N60BinauralHeadphoneOutputIOProc(
         bridge->binauralDescriptor.programLayout.channelCount;
     const bool rackConfigured =
         N60AudioUnitLiveRackProcessorIsValid(&bridge->audioUnitRack);
+    // E28 S6b: loudness capture for this block (frames == 0 without demand).
+    N60LoudnessCapture * const loudness = bridge->loudnessCapture;
+    const N60LoudnessCaptureBlock loudnessBlock = N60LoudnessCaptureBeginBlock(loudness, frameCount);
 
     if (rackConfigured) {
         if (frameCount > bridge->audioUnitRack.maximumFramesPerSlice
@@ -740,6 +753,7 @@ static inline OSStatus N60BinauralHeadphoneOutputIOProc(
             for (uint32_t channel = 0; channel < programChannels; ++channel) {
                 planarIn[channel * stride + frameIndex] = source[channel];
             }
+            if (loudnessBlock.frames != 0u) N60LoudnessCaptureWriteInput(loudness, loudnessBlock, frameIndex, source);
         }
         const float *inPointers[N60_GRAPH_MAX_CHANNELS];
         float *outPointers[N60_GRAPH_MAX_CHANNELS];
@@ -769,6 +783,10 @@ static inline OSStatus N60BinauralHeadphoneOutputIOProc(
             }
             left *= gain;
             right *= gain;
+            if (loudnessBlock.frames != 0u) {
+                const float ears[2] = { left, right };
+                N60LoudnessCaptureWriteOutput(loudness, loudnessBlock, frameIndex, ears);
+            }
             if (meterDemand) {
                 const float leftMagnitude = fabsf(left);
                 const float rightMagnitude = fabsf(right);
@@ -806,6 +824,10 @@ static inline OSStatus N60BinauralHeadphoneOutputIOProc(
                 program.channels[channel] *=
                     bridge->programGainLinear;
             }
+        }
+
+        if (loudnessBlock.frames != 0u) {
+            N60LoudnessCaptureWriteInput(loudness, loudnessBlock, frameIndex, program.channels);
         }
 
         float left = 0.0f;
@@ -850,6 +872,10 @@ static inline OSStatus N60BinauralHeadphoneOutputIOProc(
         }
         left *= gain;
         right *= gain;
+        if (loudnessBlock.frames != 0u) {
+            const float ears[2] = { left, right };
+            N60LoudnessCaptureWriteOutput(loudness, loudnessBlock, frameIndex, ears);
+        }
         if (meterDemand) {
             const float leftMagnitude = fabsf(left);
             const float rightMagnitude = fabsf(right);
@@ -871,6 +897,7 @@ static inline OSStatus N60BinauralHeadphoneOutputIOProc(
         }
         atomic_fetch_add_explicit(&bridge->renderedFrames, 1u, memory_order_relaxed);
     }
+    if (loudnessBlock.frames != 0u) N60LoudnessCaptureCommit(loudness, loudnessBlock);
     if (meterDemand && frameCount > 0u) {
         atomic_store_explicit(&bridge->meterPeakLeftBits, N60BinauralHeadphoneFloatToBits(meterPeakLeft), memory_order_relaxed);
         atomic_store_explicit(&bridge->meterPeakRightBits, N60BinauralHeadphoneFloatToBits(meterPeakRight), memory_order_relaxed);

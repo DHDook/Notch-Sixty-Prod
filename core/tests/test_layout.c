@@ -700,7 +700,7 @@ static void testModeSwitch(void) {
 }
 
 int main(void) {
-    CHECK(n60_graph_abi_version() == N60_GRAPH_ABI_VERSION && N60_GRAPH_ABI_VERSION == 33u, "ABI v33");
+    CHECK(n60_graph_abi_version() == N60_GRAPH_ABI_VERSION && N60_GRAPH_ABI_VERSION == 34u, "ABI v34");
     testLayouts();
     testBuilderRejects();
     testStereoParity();
