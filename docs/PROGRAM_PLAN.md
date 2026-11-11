@@ -388,16 +388,16 @@ S1–S6b flagless; every dynamics extra (S7a–S7d) behind the one flag `e28.dyn
 - [x] S1 meter levels: display-rate bars, true-peak bars, peak hold, latching clip with reset, ballistics, VoiceOver values, pause when hidden
 - [x] S2 loudness: momentary, short-term, integrated with reset, loudness range and true-peak max per ITU-R BS.1770-4 and EBU R128; per-channel weighting with LFE excluded (inert until the capture carries more than stereo)
 - [x] S3 spectrum options: smoothing, averaging, tilt, freeze and reference trace, hover read-out, input and output overlay
-- [ ] S4 dynamics feel: log sliders, unit-aware fields, stepping, reset, fine drag, undo, sidechain range fix, auto makeup, accessibility
+- [x] S4 dynamics feel: log sliders, unit-aware fields, stepping, reset, fine drag, undo, sidechain range fix, auto makeup, accessibility
 - [x] S5 dynamics visualisation: transfer curves, gain-reduction bars and history, navigator bars; built, PR #464 (G21 to S7d, G22 to S6, G23 to S7d, G24 to S7b; Loudness readouts moved to S7d)
 - [x] S6 per-output and sub meters on every output configuration, per-route bridge meter, E9 protection on the hub (needs-owner, PR #464)
 - [x] S6b loudness fed the semantic program channels on N-channel and binaural sessions, loudness and dynamics lab cases, L/R over-range pairing (needs-owner)
 - [~] S7a compressor mix, link amount, peak/RMS detector and optional lookahead, reported in the path latency (needs-owner, engine; built dark behind `e28.dynamics-extras`, PR open; wiring in S7d, G10 open)
 - [~] S7b expander hold, soft knee, detector, sidechain high-pass and link; sidechain and delta listen (needs-owner, engine; built dark behind `e28.dynamics-extras`, PR pending; wiring in S7d)
 - [~] S7c multiband extras on the core stage ported by E6 S12d: per-band bypass, solo, listen and detector, one lookahead, auto-release toggle (needs-owner, engine; built dark behind `e28.dynamics-extras`, ABI v37, PR pending; wiring in S7d; G39, G40)
-- [~] S7d Dynamics page controls for every extra, disabled with a reason where the kernel renders (part 1 built behind `e28.dynamics-extras`: rows, listen, solo, banner, G8, G19, G36; part 2 built: zero-allocation cases, latency totals, double RMS and ring sanitising, G10 and G33 except the AV-sync caller (G41); part 3 open: lab cases, translator tests, readouts, G21, G23, G26, G34, G35, G37, G39, G40)
-- [ ] S7d part 3 (re-owned from part 2; holds the open remainder of G21, G23, G26, G34, G35, G37, G39, G40): `ReferenceRoomTransport` lab cases (compressor extras, expander extras, three-band solo), translator XCTests (10 to 16, 6 to 13, 29 to 43), link-0 and fade-law tests, surfacing the failed listen clear, RMS block-pass of the delay ring and mix, ring carry across a rebuild, Loudness Match and Contour readouts, the 0.1 dB core-versus-curve sweep, and the 0.245 dB gap.
-- [ ] S8 flag graduated (after S7a–S7d; the owner's listen moves to E22; removal is the FC phase)
+- [x] S7d Dynamics page controls for every extra, disabled with a reason where the kernel renders (parts 1 to 3 and core PR B merged or built; G41 closed by S8)
+- [x] S7d part 3 (re-owned from part 2; holds the open remainder of G21, G23, G26, G34, G35, G37, G39, G40): `ReferenceRoomTransport` lab cases (compressor extras, expander extras, three-band solo), translator XCTests (10 to 16, 6 to 13, 29 to 43), link-0 and fade-law tests, surfacing the failed listen clear, RMS block-pass of the delay ring and mix, ring carry across a rebuild, Loudness Match and Contour readouts, the 0.1 dB core-versus-curve sweep, and the 0.245 dB gap.
+- [x] S8 flag graduated (`e28/s8-graduate`; end-to-end test through the Dynamics page model to the core blocks at the eight rates, stereo-path extras wiring fixed, FIR A/V-sync lookahead provider, compressor ring-carry test; the owner's listen moves to E22; removal is the FC phase). G44 (guided FIR controller has no production owner) is scoped to E24
 
 ## Phase 4 — Complete scope and launch
 
@@ -481,6 +481,7 @@ Owner decision, 18 Oct 2026: there is no bench access for now, so every bench ch
 - [ ] E27 owner release-build verification (owner decision 7 Nov 2026): Equalizer page running-window checks G3, G5, G9, G12, G16 and the DAC checks G14 (Listen ends on transport stop, glitch-free linear-phase A/B), per the checklist in `docs/epics/E27.md` Bench checks
 - [ ] E9 S5 (G18): sub output under a +6 dB bass-heavy track, limiter audible check and loopback peak (E9 S5 bench item)
 - [ ] Feed the results into the live-authorisation slices (E4 S10, E19), which still need real evidence
+- [ ] E28 bench (docs/epics/E28.md Bench checks): spectrum readability on music (G16), VoiceOver and keyboard use of Dynamics rows and loudness editors (G18), route meters on 2.1 and 5.1 devices (G25), routed-session loudness (G27), binaural capture (G30), wide loudness against an offline meter (G31), band-pass multiband listen and summed-band phase against dry (G43), compressor lookahead edit while playing for an audible dip from the cold-started ring (G46), and every dynamics extra by ear (compressor mix, link, RMS, lookahead; expander hold, knee, sidechain high-pass and listen; multiband bypass, solo, listen) on stereo and N-channel at the eight rates
 - [ ] Carried in by flag graduation (11 Nov 2026): E4 S30 checks, E19 modal-decay campaign, E20 no-overload-with-workers (gates FC removal of `e20.*`), E26 sub bench gaps (G10, G11, G19, G23, G24, G28, G30), E28 owner listen to S7a to S7d, E13 G8 (96 kHz tail versus 384 kHz benchmark), E9 bench lines (G18, G25, G26)
 
 ### FC Flag cleanup (owner, 11 Nov 2026)

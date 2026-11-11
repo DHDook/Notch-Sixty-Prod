@@ -2420,6 +2420,12 @@ final class AudioIOEngine: ObservableObject {
                 try republishLiveGraph(inputs)
             }
         } else if let session = transportSession {
+            // E28 S8: a profile switch changes the dynamics, so the stereo session's extras follow it (put back if refused).
+            let previousExtras = session.dynamicsExtras
+            session.setDynamicsExtras(DynamicsGraphExtras.make(
+                state.dynamics, sampleRate: session.outputFormat.sampleRate, flagOn: FeatureFlags().isEnabled(.dynamicsExtras)))
+            var extrasAdopted = false
+            defer { if !extrasAdopted { session.setDynamicsExtras(previousExtras) } }
             var graph = try state.stereoEQ.makeGraphSnapshot(
                 sampleRate: session.outputFormat.sampleRate,
                 gainConfiguration: targetGain,
@@ -2462,6 +2468,7 @@ final class AudioIOEngine: ObservableObject {
             // Even when only biquad/gain values differ this avoids an
             // instantaneous coefficient/gain discontinuity at the output.
             try session.transitionDSPGraph(graph)
+            extrasAdopted = true
             activeEQFIRProgram = preparedEQFIRProgram
             linearPhaseDesignInfo = preparedEQFIRProgram?.designInfo
         } else {
@@ -3111,7 +3118,13 @@ final class AudioIOEngine: ObservableObject {
         let previousOutputProtection = UnifiedGraphOutputProtection.apply(settings: configuration.outputProtection ?? OutputProtectionSettings())
         // Main-actor only: the policy static is written from here, the dynamicsConfiguration didSet and state restore.
         var committed = false
-        defer { if !committed { UnifiedGraphOutputProtection.apply(settings: previousOutputProtection) } }
+        // The stereo session's extras are restored on any throw before the edit is stored, whatever `committed` says.
+        var extrasStored = false
+        let previousStereoExtras = transportSession?.dynamicsExtras
+        defer {
+            if !extrasStored { transportSession?.setDynamicsExtras(previousStereoExtras) }
+            if !committed { UnifiedGraphOutputProtection.apply(settings: previousOutputProtection) }
+        }
         // E28 S7d part 3 (G34): a lookahead-only edit crossfades two copies of one signal, so it uses the linear law.
         let lookaheadOnly = FeatureFlags().isEnabled(.dynamicsExtras) && configuration.differsOnlyInLookahead(from: dynamicsConfiguration)
         let previousStereoFade = transportSession?.linearFadeForEQRepublish ?? false
@@ -3135,6 +3148,9 @@ final class AudioIOEngine: ObservableObject {
             committed = true
         }
         if let session = transportSession {
+            // E28 S8: the stereo graph is built with the new configuration's extras (the stored one is replaced below).
+            session.setDynamicsExtras(DynamicsGraphExtras.make(
+                configuration, sampleRate: session.outputFormat.sampleRate, flagOn: FeatureFlags().isEnabled(.dynamicsExtras)))
             let oldProtection = try renderDynamicsConfiguration().makeProtectionSnapshot(sampleRate: session.outputFormat.sampleRate)
             var graph = try renderStereoEQConfiguration.makeGraphSnapshot(
                 sampleRate: session.outputFormat.sampleRate,
@@ -3174,6 +3190,7 @@ final class AudioIOEngine: ObservableObject {
             }
         }
         dynamicsConfiguration = configuration
+        extrasStored = true
         committed = true
         lastErrorDescription = nil
         surfaceDynamicsListenRepostFailure()  // E28 S7d part 3 (G37): a rebuild that lost the listener is reported, not swallowed
@@ -5944,6 +5961,8 @@ final class AudioIOEngine: ObservableObject {
             && outputDeviceProfileConfiguration?.enabled != true
             && multiOutputRoutingConfiguration?.enabled != true
         session.setInitialStereoAlignment(stereoAlignment)
+        session.setDynamicsExtras(DynamicsGraphExtras.make(
+            dynamicsConfiguration, sampleRate: session.outputFormat.sampleRate, flagOn: FeatureFlags().isEnabled(.dynamicsExtras)))
         session.setInitialAnalyserTaps(installed: analyserTapsInstalled)
         try session.configureHeadphoneDSP(
             headphoneSnapshot, profile: headphoneSnapshot == nil ? nil : headphoneDeviceProfileConfiguration)

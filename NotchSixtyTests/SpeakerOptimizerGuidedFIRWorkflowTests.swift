@@ -11,6 +11,7 @@ final class SpeakerOptimizerGuidedFIRWorkflowTests:
         )
         let controller = SpeakerOptimizerGuidedFIRController(
             profileStore: store,
+            programLatencyFrames: { _ in 0 },
             designOperation: { _, _ in fixture.plan }
         )
 
@@ -80,6 +81,7 @@ final class SpeakerOptimizerGuidedFIRWorkflowTests:
         )
         let controller = SpeakerOptimizerGuidedFIRController(
             profileStore: store,
+            programLatencyFrames: { _ in 0 },
             designOperation: { _, _ in fixture.plan }
         )
 
@@ -134,6 +136,7 @@ final class SpeakerOptimizerGuidedFIRWorkflowTests:
         )
         let controller = SpeakerOptimizerGuidedFIRController(
             profileStore: store,
+            programLatencyFrames: { _ in 0 },
             designOperation: { _, _ in fixture.plan }
         )
         try controller.prepareReview(
@@ -164,6 +167,7 @@ final class SpeakerOptimizerGuidedFIRWorkflowTests:
         )
         let controller = SpeakerOptimizerGuidedFIRController(
             profileStore: store,
+            programLatencyFrames: { _ in 0 },
             designOperation: { _, _ in fixture.plan }
         )
         try controller.prepareReview(
@@ -249,6 +253,47 @@ final class SpeakerOptimizerGuidedFIRWorkflowTests:
             ],
             warnings: []
         )
+    }
+
+    /// E28 S8 (G41): the A/V-sync program path latency is the FIR plan plus the lookahead the engine's live dynamics adds,
+    /// read through the production provider on review and again when the A/V context changes.
+    @MainActor func testAVSyncProgramPathCountsTheEnginesCompressorAndMultibandLookahead() throws {
+        let fixture = makeFixture()
+        let engine = AudioIOEngine()
+        var dynamics = DynamicsConfiguration()
+        dynamics.compressor.enabled = true
+        dynamics.compressor.lookaheadMs = 5
+        dynamics.multibandCompressor.enabled = true
+        dynamics.multibandCompressor.lookaheadMs = 10
+        try engine.replaceDynamicsConfiguration(dynamics)
+
+        func decision(provider: @escaping (Double) -> UInt64) throws -> (SpeakerOptimizerGuidedFIRController, SpeakerOptimizerFIRAVSyncDecision) {
+            let controller = SpeakerOptimizerGuidedFIRController(
+                profileStore: GuidedFIRFakeProfileStore(profile: fixture.profile),
+                programLatencyFrames: provider,
+                designOperation: { _, _ in fixture.plan })
+            try controller.prepareReview(
+                baseline: fixture.baseline, characterization: fixture.characterization, avSyncContext: .audioOnly)
+            return (controller, try XCTUnwrap(controller.avSyncDecision))
+        }
+        let (_, plain) = try decision { _ in 0 }
+        let (controller, withEngine) = try decision(provider: SpeakerOptimizerGuidedFIRController.makeProgramLatencyProvider(engine: engine))
+        let rate = withEngine.sampleRate
+        let flagOn = FeatureFlags().isEnabled(.dynamicsExtras)
+        let lookahead = flagOn
+            ? UInt64(CompressorConfiguration.lookaheadFrames(ms: 5, sampleRate: rate) + CompressorConfiguration.lookaheadFrames(ms: 10, sampleRate: rate))
+            : 0
+        XCTAssertEqual(withEngine.programPathLatencyFrames, plain.programPathLatencyFrames + lookahead)
+        XCTAssertEqual(withEngine.incrementalFIRLatencyFrames, plain.incrementalFIRLatencyFrames, "lookahead is not incremental FIR latency")
+        if flagOn { XCTAssertGreaterThan(lookahead, 0) }
+
+        // A later A/V-context change reads the engine again, so a lookahead edit in between is counted.
+        dynamics.compressor.lookaheadMs = nil
+        try engine.replaceDynamicsConfiguration(dynamics)
+        try controller.updateAVSyncContext(.audioOnly)
+        let after = try XCTUnwrap(controller.avSyncDecision)
+        let tenOnly = flagOn ? UInt64(CompressorConfiguration.lookaheadFrames(ms: 10, sampleRate: rate)) : 0
+        XCTAssertEqual(after.programPathLatencyFrames, plain.programPathLatencyFrames + tenOnly)
     }
 
     private func makeFixture() -> (
