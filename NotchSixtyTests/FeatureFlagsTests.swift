@@ -136,13 +136,12 @@ final class FeatureFlagsTests: XCTestCase {
 final class CompressorExtrasConfigTests: XCTestCase {
     func testDefaultsGiveNoExtrasAndOldProfilesDecode() throws {
         var c = CompressorConfiguration()
-        XCTAssertNil(c.coreExtras(sampleRate: 48_000))
+        XCTAssertEqual(c.coreExtras(sampleRate: 48_000), [100, 100, 0, 50, 0, 0])
         let json = try JSONEncoder().encode(c)
         let back = try JSONDecoder().decode(CompressorConfiguration.self, from: json)
         XCTAssertEqual(back, c)
         c.mixPercent = 50; c.linkPercent = 0; c.rmsDetector = true; c.lookaheadMs = 5
-        let extras = try XCTUnwrap(c.coreExtras(sampleRate: 96_000))
-        XCTAssertEqual(extras, [50, 0, 1, 50, 480])
+        XCTAssertEqual(c.coreExtras(sampleRate: 96_000), [50, 0, 1, 50, 480, 0])
     }
 
     func testLookaheadFramesClampAndValidation() {

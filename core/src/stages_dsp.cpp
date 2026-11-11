@@ -90,13 +90,16 @@ struct Range {
 };
 
 // ABI v34 (E28 S7a): [10] mix %, [11] link %, [12] detector (0 peak, 1 RMS), [13] RMS window ms, [14] lookahead frames.
+// ABI v35 (E28 S7b): [15] listen (0 off, 1 sidechain, 2 delta); expander [6] hold ms, [7] knee dB, [8] detector, [9] RMS
+// window ms, [10] sidechain high-pass Hz, [11] link %, [12] listen.
 constexpr uint32_t kMaxCompLookahead = 8192;  // 10 ms at 768 kHz is 7,680 frames
-constexpr Range kComp[15] = {{-96, 0, false}, {1, 100, false}, {0, 24, false}, {0.05f, 1000, false}, {1, 5000, false},
+constexpr Range kComp[16] = {{-96, 0, false}, {1, 100, false}, {0, 24, false}, {0.05f, 1000, false}, {1, 5000, false},
                              {-24, 24, false}, {0, 1, true},   {0, 1, true},   {0, 300, false},      {0, 1, true},
                              {0, 100, false},  {0, 100, false}, {0, 1, true},   {5, 200, false},
-                             {0, static_cast<float>(kMaxCompLookahead), true}};
-constexpr Range kExp[6] = {{-120, 0, false}, {1, 20, false}, {-96, 0, false}, {0.05f, 1000, false}, {1, 5000, false},
-                           {0, 1, true}};
+                             {0, static_cast<float>(kMaxCompLookahead), true}, {0, 2, true}};
+constexpr Range kExp[13] = {{-120, 0, false}, {1, 20, false}, {-96, 0, false}, {0.05f, 1000, false}, {1, 5000, false},
+                            {0, 1, true},     {0, 500, false}, {0, 24, false},  {0, 1, true},         {5, 200, false},
+                            {0, 300, false},  {0, 100, false}, {0, 2, true}};
 constexpr Range kBand[N60_DYN_EQ_BAND_PARAMS] = {
     {0, 5, true},       {20, 20000, false}, {0.4f, 8, false}, {-18, 6, false}, {-60, 0, false},
     {1, 10, false},     {-24, 0, false},    {1, 100, false},  {10, 1000, false}, {0, 2, true},
@@ -112,8 +115,8 @@ uint32_t bandCountOf(uint32_t paramCount) { return paramCount >= 1 ? (paramCount
 
 bool paramOk(uint32_t kind, uint32_t idx, float v, double rate) {
     switch (kind) {
-        case N60_STAGE_COMPRESSOR: return idx < 15 && inRange(kComp[idx], v);
-        case N60_STAGE_EXPANDER: return idx < 6 && inRange(kExp[idx], v);
+        case N60_STAGE_COMPRESSOR: return idx < 16 && inRange(kComp[idx], v);
+        case N60_STAGE_EXPANDER: return idx < 13 && inRange(kExp[idx], v);
         case N60_STAGE_DYN_EQ: {
             if (idx == 0) return v == 0.0f || v == 1.0f;
             const uint32_t f = (idx - 1) % N60_DYN_EQ_BAND_PARAMS;
@@ -131,8 +134,8 @@ bool paramOk(uint32_t kind, uint32_t idx, float v, double rate) {
 // Which parameters may change on a published snapshot (the rest need a new topology).
 bool paramLive(uint32_t kind, uint32_t idx) {
     switch (kind) {
-        case N60_STAGE_COMPRESSOR: return idx <= 8 || (idx >= 10 && idx <= 13);
-        case N60_STAGE_EXPANDER: return idx <= 4;
+        case N60_STAGE_COMPRESSOR: return idx <= 8 || (idx >= 10 && idx <= 13) || idx == 15;
+        case N60_STAGE_EXPANDER: return idx <= 4 || idx >= 6;
         case N60_STAGE_DYN_EQ: {
             if (idx == 0) return false;
             const uint32_t f = (idx - 1) % N60_DYN_EQ_BAND_PARAMS;
@@ -161,7 +164,7 @@ struct CompShared {
     float usedHz;
     uint32_t hasHp;
     float mixS, linkS;  // ABI v34: mix and link fractions, smoothed over 5 ms
-    float pad[2];
+    float listenSide, listenDelta;  // ABI v35: crossfade weights of the sidechain and delta listen, ramped over 5 ms
 };
 
 // ABI v34: parameter blocks of 15 values carry the extras; the 10-value block keeps the v20 arithmetic exactly.
@@ -171,8 +174,21 @@ struct ExpLane {
     float gainDB;
     std::atomic<uint32_t> grMaxBits;  // as CompLane
     std::atomic<uint32_t> grNowBits;
-    float pad;
+    float meanSq;       // ABI v35: RMS detector mean square
+    double z[2];        // ABI v35: sidechain high-pass state
+    uint32_t holdCnt;   // ABI v35: frames of hold left
+    uint32_t pad;
 };
+
+// ABI v35: the 13-value block adds hold, knee, detector, sidechain filter, link and listen; 6 values keep v20 exactly.
+struct ExpShared {
+    double hp[5];
+    float usedHz;
+    uint32_t hasHp;
+    float linkS, listenSide, listenDelta, pad;
+};
+
+bool expExtended(const StageRec &r) { return r.paramCount >= 13; }
 
 // Publishes the per-group gain reduction of one block to every lane of the group (control-thread readback).
 // The caller has already flushed denormals in the gain; st[g * per] holds the group's gain.
@@ -187,6 +203,13 @@ void publishReduction(Lane *const *st, uint32_t per, uint32_t groups, const floa
             ln.grNowBits.store(floatToBits(now), std::memory_order_relaxed);
         }
     }
+}
+
+// One-pole ramp of a 0..1 weight toward its target that lands exactly on 0 and 1 (no tail, no denormal).
+float rampSnap(float cur, float target, float c) {
+    const float v = target + c * (cur - target);
+    if (std::fabs(v - target) < 1e-6f) return target;
+    return v;
 }
 
 float compTargetDb(float detDb, float thr, float slope, float knee, float makeup) {
@@ -218,6 +241,9 @@ void runCompressorX(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t fr
     const bool feedback = p[6] >= 0.5f, pdr = p[7] >= 0.5f, linked = p[9] >= 0.5f, rms = p[12] >= 0.5f;
     const float mixT = p[10] * 0.01f, linkT = p[11] * 0.01f;
     const uint32_t ringLen = static_cast<uint32_t>(p[14]);
+    const bool hasListen = r.paramCount >= 16;
+    const float listenMode = hasListen ? p[15] : 0.0f;
+    const float sideT = listenMode == 1.0f ? 1.0f : 0.0f, deltaT = listenMode == 2.0f ? 1.0f : 0.0f;
     const float slope = 1.0f / ratio - 1.0f;
     const float atk = pole(rate, p[3]), rel = pole(rate, p[4]);
     const float fast = pole(rate, std::max(p[4] * 0.5f, 1.0f)), slow = pole(rate, std::min(p[4] * 2.0f, 5000.0f));
@@ -232,18 +258,24 @@ void runCompressorX(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t fr
     float *lp[kMaxLanes];
     CompLane *st[kMaxLanes];
     float *ring[kMaxLanes];
+    float *sideRing[kMaxLanes];  // ABI v35: the sidechain, delayed like the audio, so listening never changes latency
     for (uint32_t l = 0; l < n; ++l) {
         lp[l] = lanes[laneOf(r, l)];
         st[l] = reinterpret_cast<CompLane *>(laneState(h, r, l));
         ring[l] = reinterpret_cast<float *>(reinterpret_cast<uint8_t *>(st[l]) + up(sizeof(CompLane)));
+        sideRing[l] = ring[l] + ringLen;
     }
     const uint32_t per = linked ? n : 1, groups = linked ? 1 : n;
     float grMax[kMaxLanes] = {};
-    float level[kMaxLanes];
+    float level[kMaxLanes], side[kMaxLanes];
     for (uint32_t i = 0; i < frames; ++i) {
         sh.mixS = mixT + rampC * (sh.mixS - mixT);
         sh.linkS = linkT + rampC * (sh.linkS - linkT);
+        sh.listenSide = rampSnap(sh.listenSide, sideT, rampC);
+        sh.listenDelta = rampSnap(sh.listenDelta, deltaT, rampC);
         const float mix = sh.mixS, link = sh.linkS;
+        const float lsS = sh.listenSide, lsD = sh.listenDelta;
+        const bool listening = lsS != 0.0f || lsD != 0.0f;
         for (uint32_t g = 0; g < groups; ++g) {
             float loudest = 0.0f;
             for (uint32_t k = 0; k < per; ++k) {
@@ -261,6 +293,7 @@ void runCompressorX(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t fr
                     d = std::fabs(y);
                 }
                 level[l] = d;
+                side[l] = y;
                 loudest = std::max(loudest, d);
             }
             for (uint32_t k = 0; k < per; ++k) {
@@ -281,14 +314,28 @@ void runCompressorX(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t fr
                 grMax[g] = std::max(grMax[g], -gs.gainDB);
                 const float gain = db2lin(gs.gainDB);
                 float dry = lp[l][i];
+                float sc = side[l];
                 if (ringLen != 0) {
                     float *rg = ring[l];
                     const float old = rg[gs.ringPos];
                     rg[gs.ringPos] = dry;
+                    if (hasListen) {
+                        const float oldSide = sideRing[l][gs.ringPos];
+                        sideRing[l][gs.ringPos] = sc;
+                        sc = oldSide;
+                    }
                     gs.ringPos = gs.ringPos + 1 == ringLen ? 0 : gs.ringPos + 1;
                     dry = old;
                 }
-                lp[l][i] = mix == 1.0f ? dry * gain : dry + mix * (dry * gain - dry);
+                const float wet = mix == 1.0f ? dry * gain : dry + mix * (dry * gain - dry);
+                if (!listening) {
+                    lp[l][i] = wet;
+                } else {
+                    // Listen outputs never carry make-up: the sidechain is taken before the gain, the delta is what the
+                    // gain (without make-up) removed from the delayed dry.
+                    const float delta = dry - dry * db2lin(gs.gainDB - makeup);
+                    lp[l][i] = std::max(0.0f, 1.0f - lsS - lsD) * wet + lsS * sc + lsD * delta;
+                }
             }
         }
     }
@@ -372,7 +419,124 @@ void runCompressor(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t fra
     publishReduction(st, per, groups, grMax);
 }
 
+// Expander gain computer (ABI v35): below the threshold the gain falls by (ratio - 1) dB per dB, with a quadratic soft knee
+// centred on the threshold (the compressor's law mirrored, Giannoulis, Massberg and Reiss, JAES 60(6), 2012), floored at
+// the range. Knee 0 is the v20 hard law.
+float expTargetDb(float detDb, float thr, float ratio, float knee, float range) {
+    const float over = detDb - thr, s = ratio - 1.0f;
+    if (knee <= 0.0f) return over >= 0.0f ? 0.0f : std::max(s * over, range);
+    const float half = knee * 0.5f;
+    float c;
+    if (over >= half) {
+        c = 0.0f;
+    } else if (over > -half) {
+        const float k = over - half;
+        c = -s * k * k / (2.0f * knee);
+    } else {
+        c = s * over;
+    }
+    return std::max(c, range);
+}
+
+void runExpanderX(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) {
+    const float *p = paramsOf(h, r);
+    const double rate = h->sampleRate;
+    const float thr = p[0], ratio = p[1], range = p[2], knee = p[7], hpHz = p[10];
+    const bool linked = p[5] >= 0.5f, rms = p[8] >= 0.5f;
+    const uint32_t holdFrames = static_cast<uint32_t>(std::lround(static_cast<double>(p[6]) * rate / 1000.0));
+    const float linkT = p[11] * 0.01f;
+    const float sideT = p[12] == 1.0f ? 1.0f : 0.0f, deltaT = p[12] == 2.0f ? 1.0f : 0.0f;
+    const float atk = pole(rate, p[3]), rel = pole(rate, p[4]), rmsC = pole(rate, p[9]), rampC = pole(rate, 5.0f);
+    ExpShared &sh = *reinterpret_cast<ExpShared *>(sharedState(h, r));
+    if (hpHz != sh.usedHz) {
+        sh.usedHz = hpHz;
+        sh.hasHp = 0;
+        if (hpHz > 0.0f && designBiquad(4, rate, hpHz, 0.0, 0.7071067811865476, sh.hp)) sh.hasHp = 1;
+    }
+    const uint32_t n = r.laneCount;
+    float *lp[kMaxLanes];
+    ExpLane *st[kMaxLanes];
+    for (uint32_t l = 0; l < n; ++l) {
+        lp[l] = lanes[laneOf(r, l)];
+        st[l] = reinterpret_cast<ExpLane *>(laneState(h, r, l));
+    }
+    const uint32_t per = linked ? n : 1, groups = linked ? 1 : n;
+    float grMax[kMaxLanes] = {};
+    float level[kMaxLanes], side[kMaxLanes];
+    for (uint32_t i = 0; i < frames; ++i) {
+        sh.linkS = linkT + rampC * (sh.linkS - linkT);
+        sh.listenSide = rampSnap(sh.listenSide, sideT, rampC);
+        sh.listenDelta = rampSnap(sh.listenDelta, deltaT, rampC);
+        const float link = sh.linkS, lsS = sh.listenSide, lsD = sh.listenDelta;
+        const bool listening = lsS != 0.0f || lsD != 0.0f;
+        for (uint32_t g = 0; g < groups; ++g) {
+            float loudest = 0.0f;
+            for (uint32_t k = 0; k < per; ++k) {
+                const uint32_t l = g * per + k;
+                ExpLane &ln = *st[l];
+                const float y = sh.hasHp ? biquad(sh.hp, ln.z, lp[l][i]) : lp[l][i];
+                float d;
+                if (rms) {
+                    const float yy = std::min(std::fabs(y), 1e6f);
+                    ln.meanSq = yy * yy + rmsC * (ln.meanSq - yy * yy);
+                    d = std::sqrt(std::max(ln.meanSq, 0.0f));
+                } else {
+                    d = std::fabs(y);
+                }
+                level[l] = d;
+                side[l] = y;
+                loudest = std::max(loudest, d);
+            }
+            for (uint32_t k = 0; k < per; ++k) {
+                const uint32_t l = g * per + k;
+                ExpLane &gs = *st[l];
+                const float det = std::min(link * loudest + (1.0f - link) * level[l], 1e6f);
+                const float detDb = lin2db(det, 1e-12f);
+                float target = expTargetDb(detDb, thr, ratio, knee, range);
+                // Hold: while the detector sits fully above the knee the counter is refilled; after it falls the gain
+                // stays open for the hold time before the expansion may begin.
+                if (detDb - thr >= knee * 0.5f) {
+                    gs.holdCnt = holdFrames;
+                } else if (gs.holdCnt != 0) {
+                    --gs.holdCnt;
+                    target = 0.0f;
+                }
+                const float c = target < gs.gainDB ? atk : rel;
+                gs.gainDB = target + c * (gs.gainDB - target);
+                grMax[g] = std::max(grMax[g], -gs.gainDB);
+                const float dry = lp[l][i];
+                const float gain = db2lin(gs.gainDB);
+                const float wet = dry * gain;
+                if (!listening) {
+                    lp[l][i] = wet;
+                } else {
+                    lp[l][i] = std::max(0.0f, 1.0f - lsS - lsD) * wet + lsS * side[l] + lsD * (dry - wet);
+                }
+            }
+        }
+    }
+    for (uint32_t l = 0; l < n; ++l) {
+        heal(st[l]->gainDB);
+        heal(st[l]->meanSq);
+        heal(st[l]->z);
+    }
+    // Per-lane gains: every lane of a group reads the group's deepest reduction.
+    float nowDb[kMaxLanes] = {};
+    for (uint32_t l = 0; l < n; ++l) nowDb[l / per] = std::max(nowDb[l / per], -st[l]->gainDB);
+    for (uint32_t g = 0; g < groups; ++g) {
+        for (uint32_t k = 0; k < per; ++k) {
+            ExpLane &ln = *st[g * per + k];
+            atomicMaxFloat(ln.grMaxBits, std::max(0.0f, grMax[g]));
+            ln.grNowBits.store(floatToBits(std::max(0.0f, nowDb[g])), std::memory_order_relaxed);
+        }
+    }
+}
+
 void runExpander(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) {
+    if (expExtended(r)) {
+        runExpanderX(h, r, lanes, frames);
+        return;
+    }
     const float *p = paramsOf(h, r);
     const double rate = h->sampleRate;
     const float thr = p[0], ratio = p[1], range = p[2];
@@ -1193,10 +1357,13 @@ n60_status validateDspStage(const n60_stage_desc &s, double rate, uint32_t outCh
     uint32_t expected = 0;
     switch (s.kind) {
         case N60_STAGE_COMPRESSOR:
-            if (s.paramCount != 10 && s.paramCount != 15) return N60_STATUS_BAD_ARGUMENT;
+            if (s.paramCount != 10 && s.paramCount != 15 && s.paramCount != 16) return N60_STATUS_BAD_ARGUMENT;
             expected = s.paramCount;
             break;
-        case N60_STAGE_EXPANDER: expected = 6; break;
+        case N60_STAGE_EXPANDER:
+            if (s.paramCount != 6 && s.paramCount != 13) return N60_STATUS_BAD_ARGUMENT;
+            expected = s.paramCount;
+            break;
         case N60_STAGE_DENOISER: expected = 9; break;
         case N60_STAGE_DYN_EQ: {
             const uint32_t nb = bandCountOf(s.paramCount);
@@ -1226,10 +1393,13 @@ void dspSizes(const n60_stage_desc &s, uint32_t firScheme, size_t &perLane, size
     perLane = shared = 0;
     switch (s.kind) {
         case N60_STAGE_COMPRESSOR:
-            perLane = up(sizeof(CompLane) + (s.paramCount >= 15 ? size_t(s.params[14]) * sizeof(float) : 0));
+            perLane = up(sizeof(CompLane) + (s.paramCount >= 15 ? size_t(s.params[14]) * sizeof(float) * (s.paramCount >= 16 ? 2 : 1) : 0));
             shared = up(sizeof(CompShared));
             break;
-        case N60_STAGE_EXPANDER: perLane = up(sizeof(ExpLane)); break;
+        case N60_STAGE_EXPANDER:
+            perLane = up(sizeof(ExpLane));
+            if (s.paramCount >= 13) shared = up(sizeof(ExpShared));
+            break;
         case N60_STAGE_DYN_EQ: {
             const uint32_t nb = bandCountOf(s.paramCount);
             perLane = up(sizeof(DqLaneBand) * nb);
@@ -1275,8 +1445,21 @@ void dspInit(SnapHeader *h, const StageRec &r) {
                 cs->mixS = p[10] * 0.01f;
                 cs->linkS = p[11] * 0.01f;
             }
+            if (r.paramCount >= 16) {
+                cs->listenSide = p[15] == 1.0f ? 1.0f : 0.0f;
+                cs->listenDelta = p[15] == 2.0f ? 1.0f : 0.0f;
+            }
             break;
         }
+        case N60_STAGE_EXPANDER:
+            if (r.paramCount >= 13) {
+                ExpShared *es = reinterpret_cast<ExpShared *>(sh);
+                es->usedHz = -1.0f;
+                es->linkS = p[11] * 0.01f;
+                es->listenSide = p[12] == 1.0f ? 1.0f : 0.0f;
+                es->listenDelta = p[12] == 2.0f ? 1.0f : 0.0f;
+            }
+            break;
         case N60_STAGE_DYN_EQ: {
             DqShared *s = reinterpret_cast<DqShared *>(sh);
             s->bypassC = pole(h->sampleRate, 5.0f);
