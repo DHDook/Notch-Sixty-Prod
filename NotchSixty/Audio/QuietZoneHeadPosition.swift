@@ -74,31 +74,43 @@ struct QuietZoneHeadSurvey: Sendable {
         self.points = points
     }
 
+    /// Interpolation weights (summing to 1) over the surveyed points near `pose`, or nil when no point is within
+    /// the trust radius. A pose on a surveyed point returns that point alone.
+    static func weights(positions: [(x: Double, y: Double, z: Double)], at pose: QuietZoneHeadPose) -> [(index: Int, weight: Double)]? {
+        let ranked = positions.enumerated().map { (i, p) -> (Int, Double) in
+            let dx = p.x - pose.x, dy = p.y - pose.y, dz = p.z - pose.z
+            return (i, (dx * dx + dy * dy + dz * dz).squareRoot())
+        }.sorted { $0.1 < $1.1 }
+        guard let nearest = ranked.first, nearest.1 <= trustRadiusMetres else { return nil }
+        if nearest.1 < 1.0e-6 { return [(nearest.0, 1)] }
+        let used = ranked.prefix(neighbourCount).filter { $0.1 <= trustRadiusMetres }
+        let raw = used.map { 1 / ($0.1 * $0.1) }
+        let total = raw.reduce(0, +)
+        return zip(used, raw).map { ($0.0, $1 / total) }
+    }
+
     /// The virtual microphone for a head at `pose`, or nil when no surveyed point is within the trust radius.
     func microphone(at pose: QuietZoneHeadPose) -> QuietZoneVirtualMicrophone? {
-        let ranked = points.map { p -> (QuietZoneSurveyedPosition, Double) in
-            let dx = p.x - pose.x, dy = p.y - pose.y, dz = p.z - pose.z
-            return (p, (dx * dx + dy * dy + dz * dz).squareRoot())
-        }.sorted { $0.1 < $1.1 }
-        guard let nearest = ranked.first, nearest.1 <= Self.trustRadiusMetres else { return nil }
-        if nearest.1 < 1.0e-6 { return nearest.0.microphone }
-        let used = ranked.prefix(Self.neighbourCount).filter { $0.1 <= Self.trustRadiusMetres }
-        let weights = used.map { 1 / ($0.1 * $0.1) }
-        let total = weights.reduce(0, +)
+        guard let blend = Self.weights(positions: points.map { ($0.x, $0.y, $0.z) }, at: pose),
+              let first = blend.first else { return nil }
+        if blend.count == 1 { return points[first.index].microphone }
+        let nearest = points[first.index]
+        let used = blend.map { (points[$0.index], $0.weight) }
+        let weights = blend.map(\.weight)
         var tones: [QuietZoneVirtualMicTone] = []
-        for t in nearest.0.microphone.tones.indices {
+        for t in nearest.microphone.tones.indices {
             var ratio = ActiveQuietZoneComplex.zero
             var eff = ActiveQuietZoneComplex.zero
             var ear = ActiveQuietZoneComplex.zero
             for (k, entry) in used.enumerated() {
-                let w = weights[k] / total
+                let w = weights[k]
                 let tone = entry.0.microphone.tones[t]
                 ratio = ratio + tone.ratio * w
                 eff = eff + tone.effectiveSecondary * w
                 ear = ear + tone.earSecondary * w
             }
             tones.append(QuietZoneVirtualMicTone(
-                frequencyHz: nearest.0.microphone.tones[t].frequencyHz,
+                frequencyHz: nearest.microphone.tones[t].frequencyHz,
                 ratio: ratio, effectiveSecondary: eff, earSecondary: ear))
         }
         return QuietZoneVirtualMicrophone(tones: tones)

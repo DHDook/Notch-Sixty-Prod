@@ -1216,6 +1216,8 @@ final class CoreAudioNChannelTransportSession {
             AudioDeviceStop(aggregateDeviceID, captureIOProcID)
             isCaptureStarted = false
         }
+        // E20 S6: no callback renders now; the render workers leave the device workgroup and exit.
+        unifiedGraphHost?.endParallelRender()
         if let outputIOProcID {
             AudioDeviceDestroyIOProcID(outputDeviceID, outputIOProcID)
             self.outputIOProcID = nil
@@ -1263,10 +1265,17 @@ final class CoreAudioNChannelTransportSession {
             throw LiveNChannelTransportError.ioProcUnavailable(role: "capture")
         }
 
-        try Self.check(
-            AudioDeviceStart(outputDeviceID, outputIOProcID),
-            operation: "start semantic physical output"
-        )
+        // E20 S6: the render workers join the output device's IO workgroup before its first callback.
+        unifiedGraphHost?.beginParallelRender(workgroup: AudioWorkgroupWorkerPool.deviceWorkgroup(outputDeviceID))
+        do {
+            try Self.check(
+                AudioDeviceStart(outputDeviceID, outputIOProcID),
+                operation: "start semantic physical output"
+            )
+        } catch {
+            unifiedGraphHost?.endParallelRender()
+            throw error
+        }
         isOutputStarted = true
         do {
             try Self.check(
@@ -1277,6 +1286,7 @@ final class CoreAudioNChannelTransportSession {
         } catch {
             AudioDeviceStop(outputDeviceID, outputIOProcID)
             isOutputStarted = false
+            unifiedGraphHost?.endParallelRender()
             throw error
         }
     }

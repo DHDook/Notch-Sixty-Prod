@@ -36,7 +36,7 @@ static bool finite_nonnegative(double n) {
 static bool valid_plan(const N60FFDeadlinePlan *p) {
     if (!p || !p->routeLeaseToken || !p->synchronizedClockToken ||
         !isfinite(p->sampleRate) || p->sampleRate < 8000 ||
-        p->sampleRate > 192000 ||
+        p->sampleRate > N60_FF_DEADLINE_MAX_SAMPLE_RATE ||
         !finite_nonnegative(p->conservativeNoiseLeadSeconds) ||
         !finite_nonnegative(p->referenceAcquisitionSeconds) ||
         !finite_nonnegative(p->processingSeconds) ||

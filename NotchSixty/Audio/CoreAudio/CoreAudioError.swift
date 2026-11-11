@@ -1894,6 +1894,9 @@ final class CoreAudioTransportSession {
             AudioDeviceStop(aggregateDeviceID, captureIOProcID)
             isCaptureStarted = false
         }
+        // E20 S6: no callback renders now, so the render workers leave the device workgroup and exit (Stop, Quit, device
+        // loss and reconfiguration all pass through here; the next start joins the new device's workgroup).
+        unifiedGraphHost?.endParallelRender()
         if let outputIOProcID {
             AudioDeviceDestroyIOProcID(outputDeviceID, outputIOProcID)
             self.outputIOProcID = nil
@@ -1954,10 +1957,17 @@ final class CoreAudioTransportSession {
             isOutputStarted = false
         }
 
-        try Self.check(
-            AudioDeviceStart(outputDeviceID, outputIOProcID),
-            operation: "start physical output"
-        )
+        // E20 S6: the render workers join the output device's IO workgroup before its first callback (flag off: no thread).
+        unifiedGraphHost?.beginParallelRender(workgroup: AudioWorkgroupWorkerPool.deviceWorkgroup(outputDeviceID))
+        do {
+            try Self.check(
+                AudioDeviceStart(outputDeviceID, outputIOProcID),
+                operation: "start physical output"
+            )
+        } catch {
+            unifiedGraphHost?.endParallelRender()
+            throw error
+        }
         isOutputStarted = true
 
         do {
@@ -1969,6 +1979,7 @@ final class CoreAudioTransportSession {
         } catch {
             AudioDeviceStop(outputDeviceID, outputIOProcID)
             isOutputStarted = false
+            unifiedGraphHost?.endParallelRender()
             throw error
         }
     }

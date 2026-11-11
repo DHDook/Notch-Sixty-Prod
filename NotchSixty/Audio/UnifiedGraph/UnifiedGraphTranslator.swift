@@ -112,7 +112,8 @@ enum UnifiedGraphTranslator {
             // RMS window and lookahead frames.
             if let extras = multibandExtras, extras.count == 17, var base = stages.multiband, base.count == 29 {
                 base.replaceSubrange(26..<29, with: extras[0..<3])
-                stages.multiband = base + extras[3...]
+                // E28 G42: with the extras on the mid band is a true band-pass (parameter 43 = 1), not dry minus the others.
+                stages.multiband = base + extras[3...] + [1]
             }
         }
         // E6 S8d: recover each enabled convolver's taps by generation and verify them against the snapshot's record.

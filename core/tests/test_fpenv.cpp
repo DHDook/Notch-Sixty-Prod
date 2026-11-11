@@ -76,7 +76,7 @@ int main() {
         const uint64_t before = n60::fpenvRead();
         CHECK(n60_graph_process(gr, in, out, 64) == N60_STATUS_OK, "process");
         CHECK(n60::fpenvRead() == before, "FP state restored (clear)");
-        n60::fpenvWrite(before | (1ull << 24));
+        n60::fpenvWrite(before | n60::fpenvFlushMask());
         const uint64_t withFz = n60::fpenvRead();
         CHECK(n60_graph_process(gr, in, out, 64) == N60_STATUS_OK, "process");
         CHECK(n60::fpenvRead() == withFz, "FP state restored (FZ set)");

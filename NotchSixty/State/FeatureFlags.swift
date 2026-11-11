@@ -16,9 +16,10 @@ struct FeatureFlag: Hashable, Identifiable, Sendable {
     /// Flag graduation (owner decision, 11 Nov 2026): the epic's software is done, wired and tested, so the feature is
     /// available by default in release builds (and in debug builds, unless a stored override says otherwise). A
     /// graduated flag stays in `FeatureFlag.all` until the flag-cleanup phase removes it. "Graduated" means available,
-    /// never armed: live ANC and live MIMO treatment keep their arm switch and written authorisation path, and their
-    /// flags never graduate to arming anything. No new code may depend on a graduated flag. A user turns a graduated
-    /// feature off with `-NotchSixtyFeatures -<id>`. Nothing is graduated yet.
+    /// never armed: live ANC and live MIMO treatment keep their arm switch and written authorisation path, and
+    /// graduating never arms anything. No new code may depend on a graduated flag. A user turns a graduated
+    /// feature off with `-NotchSixtyFeatures -<id>`. The E4 flags with a production reader graduated on 11 Nov 2026
+    /// (the live-output ones make Turn On available, never armed); live MIMO room treatment never graduates in E4.
     var graduated = false
 
     /// The value used when neither a launch argument nor (debug builds) a stored override decides the flag.
@@ -32,7 +33,8 @@ extension FeatureFlag {
     static let all: [FeatureFlag] = [
         .legacyKernel, .ancEngineLease, .adaptiveTonalLive, .earnedCap, .feedForwardLive,
         .noiseSurvey, .conversationUnmasking, .virtualMicrophone, .zones, .headPositionCamera, .overnight,
-        .subAwareAnc, .longFIR, .outputProtection, .headphones, .mimoTreatment, .dynamicsExtras, .roomModel
+        .subAwareAnc, .longFIR, .outputProtection, .headphones, .mimoTreatment, .dynamicsExtras, .roomModel,
+        .parallelRender
     ]
 
     /// E6 S11: the unified graph is the default renderer. Turning this on selects the frozen
@@ -49,7 +51,8 @@ extension FeatureFlag {
     static let ancEngineLease = FeatureFlag(
         id: "e4.engine-lease",
         title: "Anti-noise dead-man lease",
-        epic: "E4"
+        epic: "E4",
+        graduated: true
     )
 
     /// E4 S18b: the adaptive tonal core drives the live anti-noise gains through the render
@@ -58,7 +61,8 @@ extension FeatureFlag {
     static let adaptiveTonalLive = FeatureFlag(
         id: "e4.adaptive-tonal-live",
         title: "Adaptive tonal anti-noise (live)",
-        epic: "E4"
+        epic: "E4",
+        graduated: true
     )
 
     /// E4 S20: the anti-noise cap starts at -40 dBFS and rises in 3 dB steps to -18 dBFS as the
@@ -68,7 +72,8 @@ extension FeatureFlag {
     static let earnedCap = FeatureFlag(
         id: "e4.earned-cap",
         title: "Earned anti-noise cap",
-        epic: "E4"
+        epic: "E4",
+        graduated: true
     )
 
     /// E4 S22: live feed-forward cancellation. S22b1 gates only the speaker-drive recording the
@@ -76,7 +81,8 @@ extension FeatureFlag {
     static let feedForwardLive = FeatureFlag(
         id: "e4.feedforward-live",
         title: "Live feed-forward cancellation",
-        epic: "E4"
+        epic: "E4",
+        graduated: true
     )
 
     /// E4 S28: the noise survey card (what is cancellable, predicted against achieved reduction, annoyance
@@ -85,7 +91,8 @@ extension FeatureFlag {
     static let noiseSurvey = FeatureFlag(
         id: "e4.noise-survey",
         title: "Noise survey before arming",
-        epic: "E4"
+        epic: "E4",
+        graduated: true
     )
 
     /// E4 S30: Conversation Focus unmasking by speech intelligibility index (per-third-octave music cuts,
@@ -94,7 +101,8 @@ extension FeatureFlag {
     static let conversationUnmasking = FeatureFlag(
         id: "e4.conversation-unmasking",
         title: "Conversation unmasking",
-        epic: "E4"
+        epic: "E4",
+        graduated: true
     )
 
     /// E4 S26a: tonal virtual microphone at the ears (monitor-to-ear ratio survey, effective secondary
@@ -106,7 +114,7 @@ extension FeatureFlag {
     )
 
     /// E4 S26b: camera head position (Vision body pose, on-device) selects the surveyed virtual-microphone
-    /// ratios. Maths and camera source only in this slice; nothing drives output while off. Removed when E4 ships.
+    /// ratios. Production reader: head follow card (S26b); graduates in the final G16 PR.
     static let headPositionCamera = FeatureFlag(
         id: "e4.head-position-camera",
         title: "Camera head position for the quiet zone",
@@ -128,7 +136,8 @@ extension FeatureFlag {
     static let overnight = FeatureFlag(
         id: "e4.overnight",
         title: "Overnight Quiet Zone runs",
-        epic: "E4"
+        epic: "E4",
+        graduated: true
     )
 
     /// E26: sub-aware Quiet Zone. Bass-path records, per-band eligibility and `SubAwareAncReadiness` replace the blanket
@@ -194,6 +203,15 @@ extension FeatureFlag {
         id: "e29.room-model",
         title: "Shared room position model",
         epic: "E29"
+    )
+
+    /// E20 S6: parallel rendering of the non-uniform FIR lanes on up to three extra realtime worker threads in the
+    /// output device's Audio Workgroup. Swift decides the worker count (`ParallelRenderPolicy`); the core never reads the
+    /// flag. Read once at launch. Off: no worker thread exists and the graph renders on the audio thread alone.
+    static let parallelRender = FeatureFlag(
+        id: "e20.parallel-render",
+        title: "Parallel render workers",
+        epic: "E20"
     )
 }
 
