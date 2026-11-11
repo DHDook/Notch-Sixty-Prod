@@ -923,8 +923,9 @@ n60_status n60_graph_read_load(const n60_graph *graph, n60_graph_load *outLoad);
  * Host duties. Workers must run at realtime priority in the same audio workgroup (or platform equivalent) as the render
  * thread: the calling thread spins (yielding the core every few thousand spins), without a timeout, on a job a worker has already claimed, so a descheduled worker
  * delays the callback (n60_graph_parallel_stats.lateJoins counts these waits). Workers run with flush-to-zero on, as the
- * calling thread does. n60_graph_set_wake and n60_graph_set_workers are for use while no callback is running (stop the
- * stream first). Stop and join every worker before n60_graph_retire. A worker spins for the rest of the callback once
+ * calling thread does. n60_graph_set_wake is for use while no callback is running (stop the stream first).
+ * n60_graph_set_workers stores an atomic and may also be called while rendering, to lower or raise the live count up
+ * to the thread count the host started (E20 S6 retunes it when a new spec is published); it needs no ABI change. Stop and join every worker before n60_graph_retire. A worker spins for the rest of the callback once
  * woken, so ask for no more workers than the cost model says pay off.
  *
  * The worker count is a ceiling: the caller decides (S1 cost model) whether to ask for workers at all. */

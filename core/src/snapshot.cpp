@@ -1460,6 +1460,14 @@ void runSnapshot(SnapHeader *h, float *const *lanes, uint32_t frames, std::atomi
                     for (uint32_t k = i; k < end; ++k) e.laneFrames += static_cast<uint64_t>(frames) * (table[k].laneCount != 0 ? table[k].laneCount : 1u);
                 }
 #endif
+                // E20 S6 (G22): after this snapshot's last parallel phase the workers have nothing left to claim, so they
+                // are released (they return to their semaphore) instead of spinning to the end of the callback. A second
+                // snapshot in the same callback (a rebuild fade) wakes them again for its own phases.
+                bool more = false;
+                for (uint32_t k = end; k < h->stageCount; ++k) {
+                    if (table[k].phase != 0) { more = true; break; }
+                }
+                if (!more) jobHostEnd(*jobs);
                 i = end - 1;
                 continue;
             }

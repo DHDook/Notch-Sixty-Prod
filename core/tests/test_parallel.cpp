@@ -255,6 +255,122 @@ static void oversubscribedRegression() {
     for (auto &t : spinners) t.join();
 }
 
+// E20 S6 (G22): after a snapshot's last parallel phase the woken workers are released instead of spinning to the end of
+// the callback. A graph of FIR lanes followed by an EXTERNAL stage: when the EXTERNAL callback runs (after the last
+// parallel phase) every woken worker must already have returned from n60_graph_worker_run. Without parking the workers
+// spin until the callback ends and the wait below times out.
+struct ParkProbe {
+    std::atomic<uint32_t> returns{0};
+    std::atomic<bool> parkedBeforeStage{false};
+    std::atomic<uint32_t> expect{0};
+};
+static int parkProbeExternal(void *ctx, const float *const *in, float *const *out, uint32_t channels, uint32_t frames) {
+    ParkProbe *p = static_cast<ParkProbe *>(ctx);
+    const uint32_t want = p->expect.load();
+    if (want != 0) {
+        const auto t0 = std::chrono::steady_clock::now();
+        while (p->returns.load() < want && std::chrono::steady_clock::now() - t0 < std::chrono::seconds(5)) std::this_thread::yield();
+        p->parkedBeforeStage.store(p->returns.load() >= want);
+    }
+    for (uint32_t c = 0; c < channels; c++) std::memcpy(out[c], in[c], sizeof(float) * frames);
+    return 1;
+}
+struct ParkCtx {
+    std::mutex *m;
+    std::condition_variable *cv;
+    std::atomic<uint64_t> *epoch;
+};
+static void parkWake(void *c, uint32_t) {
+    ParkCtx *x = static_cast<ParkCtx *>(c);
+    {
+        std::lock_guard<std::mutex> lk(*x->m);
+        x->epoch->fetch_add(1);
+    }
+    x->cv->notify_all();
+}
+static void parkingRegression() {
+    gWhere = "workers park after the last parallel phase";
+    std::printf("test_parallel: %s\n", gWhere.load());
+    std::fflush(stdout);
+    auto taps = makeTaps(6000, 3);
+    const uint32_t lanes = 4;
+    const float active = 1.0f;
+    n60_stage_desc st[2];
+    st[0] = firStage(1, taps.data(), 6000, 0);
+    std::memset(&st[1], 0, sizeof st[1]);
+    st[1].structSize = sizeof st[1];
+    st[1].kind = N60_STAGE_EXTERNAL;
+    st[1].stageId = 2;
+    st[1].laneA = N60_LANE_ALL;
+    st[1].params = &active;
+    st[1].paramCount = 1;
+    n60_graph_desc d{};
+    d.structSize = sizeof d;
+    d.abiVersion = N60_GRAPH_ABI_VERSION;
+    d.sampleRate = 48000;
+    d.maxBlockFrames = 512;
+    d.inputChannels = d.outputChannels = lanes;
+    d.firScheme = N60_FIR_SCHEME_NONUNIFORM;
+    d.stages = st;
+    d.stageCount = 2;
+    n60_graph *g = nullptr;
+    CHECK(n60_graph_build(&d, &g) == N60_STATUS_OK, "park build");
+    if (g == nullptr) return;
+    ParkProbe probe;
+    CHECK(n60_graph_set_external_processor(g, parkProbeExternal, &probe, lanes) == N60_STATUS_OK, "park register");
+    std::mutex m;
+    std::condition_variable cv;
+    std::atomic<uint64_t> epoch{0};
+    std::atomic<bool> quit{false};
+    ParkCtx cx{&m, &cv, &epoch};
+    n60_graph_set_wake(g, &parkWake, &cx);
+    const uint32_t workers = 2;
+    n60_graph_set_workers(g, workers);
+    std::vector<std::thread> threads;
+    for (uint32_t w = 1; w <= workers; w++) {
+        threads.emplace_back([&, w] {
+            uint64_t seen = 0;
+            for (;;) {
+                {
+                    std::unique_lock<std::mutex> lk(m);
+                    cv.wait(lk, [&] { return quit.load() || epoch.load() != seen; });
+                    if (quit.load()) return;
+                    seen = epoch.load();
+                }
+                n60_graph_worker_run(g, w);
+                probe.returns.fetch_add(1);
+            }
+        });
+    }
+    std::vector<std::vector<float>> in(lanes), o(lanes);
+    fill(in, 512, 9);
+    for (auto &v : o) v.assign(512, 0.0f);
+    std::vector<const float *> ip(lanes);
+    std::vector<float *> op(lanes);
+    for (uint32_t c = 0; c < lanes; c++) {
+        ip[c] = in[c].data();
+        op[c] = o[c].data();
+    }
+    for (int blk = 0; blk < 6; blk++) {
+        probe.returns.store(0);
+        probe.expect.store(workers);
+        probe.parkedBeforeStage.store(false);
+        CHECK(n60_graph_process(g, ip.data(), op.data(), 512) == N60_STATUS_OK, "park process");
+        CHECK(probe.parkedBeforeStage.load(), "block %d: workers still inside n60_graph_worker_run after the last parallel phase", blk);
+    }
+    probe.expect.store(0);
+    n60_graph_set_workers(g, 0);
+    {
+        std::lock_guard<std::mutex> lk(m);
+        quit = true;
+    }
+    cv.notify_all();
+    for (auto &t : threads) t.join();
+    n60_graph_set_wake(g, nullptr, nullptr);
+    n60_graph_set_external_processor(g, nullptr, nullptr, 0);
+    n60_graph_retire(g);
+}
+
 int main() {
     startWatchdog();
     std::printf("test_parallel: %u hardware threads\n", std::thread::hardware_concurrency());
@@ -300,6 +416,7 @@ int main() {
     }
 
     oversubscribedRegression();
+    parkingRegression();
 
     // Subnormal inputs: lanes run on workers must match the calling thread (flush-to-zero on both).
     {

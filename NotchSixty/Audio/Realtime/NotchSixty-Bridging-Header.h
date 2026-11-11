@@ -54,3 +54,4 @@
 
 #import "N60SpectralDenoiser.h"
 #import "N60DynamicsLegacyAdvanced.h"
+#import "N60WorkerWake.h"

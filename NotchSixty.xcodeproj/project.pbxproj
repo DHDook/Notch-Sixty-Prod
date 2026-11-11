@@ -149,6 +149,7 @@
 		E11D00000000000000000021 /* MeasurementGatedPlot.swift in Sources */ = {isa = PBXBuildFile; fileRef = E11D00000000000000000031 /* MeasurementGatedPlot.swift */; };
 		E6D0000000000000000109A3 /* LiveHeadphoneProfileTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6D0000000000000000009A3 /* LiveHeadphoneProfileTests.swift */; };
 		E6D0000000000000000109A4 /* UnifiedGraphStereoHeadphoneTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6D0000000000000000009A4 /* UnifiedGraphStereoHeadphoneTests.swift */; };
+		E20D0000000000000001A003 /* ParallelRenderWorkersTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E20D0000000000000000A003 /* ParallelRenderWorkersTests.swift */; };
 		E6D0000000000000000109B1 /* LiveSessionFixtureTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6D0000000000000000009B1 /* LiveSessionFixtureTests.swift */; };
 		E6D0000000000000000109A2 /* HeadphoneLiveEditPlanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6D0000000000000000009A2 /* HeadphoneLiveEditPlanner.swift */; };
 		E6D0000000000000000109A1 /* BinauralResampledAssetCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6D0000000000000000009A1 /* BinauralResampledAssetCache.swift */; };
@@ -156,6 +157,8 @@
 		E6D0000000000000000001B0 /* UnifiedGraphProgramDSP.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6D0000000000000000000B0 /* UnifiedGraphProgramDSP.swift */; };
 		E9B500000000000000000001 /* OutputProtectionSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9B500000000000000000002 /* OutputProtectionSettings.swift */; };
 		E6D000000000000000000102 /* UnifiedGraphHost.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6D000000000000000000002 /* UnifiedGraphHost.swift */; };
+		E20D0000000000000001A002 /* ParallelRenderPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = E20D0000000000000000A002 /* ParallelRenderPolicy.swift */; };
+		E20D0000000000000001A001 /* AudioWorkgroupWorkerPool.swift in Sources */ = {isa = PBXBuildFile; fileRef = E20D0000000000000000A001 /* AudioWorkgroupWorkerPool.swift */; };
 		E6D000000000000000000103 /* UnifiedGraphConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6D000000000000000000003 /* UnifiedGraphConfiguration.swift */; };
 		E6D000000000000000000104 /* UnifiedGraphTranslator.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6D000000000000000000004 /* UnifiedGraphTranslator.swift */; };
 		E28B700000000000000000A1 /* DynamicsListenSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = E28B700000000000000000A2 /* DynamicsListenSession.swift */; };
@@ -869,6 +872,7 @@
 		E11D00000000000000000031 /* MeasurementGatedPlot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeasurementGatedPlot.swift; sourceTree = "<group>"; };
 		E6D0000000000000000009A3 /* LiveHeadphoneProfileTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveHeadphoneProfileTests.swift; sourceTree = "<group>"; };
 		E6D0000000000000000009A4 /* UnifiedGraphStereoHeadphoneTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnifiedGraphStereoHeadphoneTests.swift; sourceTree = "<group>"; };
+		E20D0000000000000000A003 /* ParallelRenderWorkersTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ParallelRenderWorkersTests.swift; sourceTree = "<group>"; };
 		E6D0000000000000000009B1 /* LiveSessionFixtureTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveSessionFixtureTests.swift; sourceTree = "<group>"; };
 		E6D0000000000000000009A2 /* HeadphoneLiveEditPlanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HeadphoneLiveEditPlanner.swift; sourceTree = "<group>"; };
 		E6D0000000000000000009A1 /* BinauralResampledAssetCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BinauralResampledAssetCache.swift; sourceTree = "<group>"; };
@@ -876,6 +880,8 @@
 		E6D0000000000000000000B0 /* UnifiedGraphProgramDSP.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnifiedGraphProgramDSP.swift; sourceTree = "<group>"; };
 		E9B500000000000000000002 /* OutputProtectionSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OutputProtectionSettings.swift; sourceTree = "<group>"; };
 		E6D000000000000000000002 /* UnifiedGraphHost.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnifiedGraphHost.swift; sourceTree = "<group>"; };
+		E20D0000000000000000A002 /* ParallelRenderPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ParallelRenderPolicy.swift; sourceTree = "<group>"; };
+		E20D0000000000000000A001 /* AudioWorkgroupWorkerPool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioWorkgroupWorkerPool.swift; sourceTree = "<group>"; };
 		E6D000000000000000000003 /* UnifiedGraphConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnifiedGraphConfiguration.swift; sourceTree = "<group>"; };
 		E6D000000000000000000004 /* UnifiedGraphTranslator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnifiedGraphTranslator.swift; sourceTree = "<group>"; };
 		E28B700000000000000000A2 /* DynamicsListenSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DynamicsListenSession.swift; sourceTree = "<group>"; };
@@ -1514,6 +1520,8 @@
 				E9B500000000000000000002 /* OutputProtectionSettings.swift */,
 				E9B600000000000000000004 /* OutputHeadroomModel.swift */,
 				E6D000000000000000000002 /* UnifiedGraphHost.swift */,
+				E20D0000000000000000A002 /* ParallelRenderPolicy.swift */,
+				E20D0000000000000000A001 /* AudioWorkgroupWorkerPool.swift */,
 				E6D000000000000000000003 /* UnifiedGraphConfiguration.swift */,
 				E26A00000000000000000103 /* UnifiedGraphAncActuators.swift */,
 				E8B000000000000000000003 /* SpeakerRoutingCompiler.swift */,
@@ -1645,6 +1653,7 @@
 				E6D0000000000000000000E5 /* UnifiedGraphLiveEditTests.swift */,
 				E6D0000000000000000009A3 /* LiveHeadphoneProfileTests.swift */,
 				E6D0000000000000000009A4 /* UnifiedGraphStereoHeadphoneTests.swift */,
+				E20D0000000000000000A003 /* ParallelRenderWorkersTests.swift */,
 				E6D0000000000000000009B1 /* LiveSessionFixtureTests.swift */,
 				E6D0000000000000000000B1 /* UnifiedGraphProgramDSPTests.swift */,
 				E9B500000000000000000004 /* OutputProtectionTests.swift */,
@@ -2208,6 +2217,8 @@
 				E9B500000000000000000001 /* OutputProtectionSettings.swift in Sources */,
 				E9B600000000000000000003 /* OutputHeadroomModel.swift in Sources */,
 				E6D000000000000000000102 /* UnifiedGraphHost.swift in Sources */,
+				E20D0000000000000001A002 /* ParallelRenderPolicy.swift in Sources */,
+				E20D0000000000000001A001 /* AudioWorkgroupWorkerPool.swift in Sources */,
 				E6D000000000000000000103 /* UnifiedGraphConfiguration.swift in Sources */,
 				E26A00000000000000000104 /* UnifiedGraphAncActuators.swift in Sources */,
 				E26A00000000000000000102 /* SubActuatorMultibus.swift in Sources */,
@@ -2656,6 +2667,7 @@
 				E6D0000000000000000001E5 /* UnifiedGraphLiveEditTests.swift in Sources */,
 				E6D0000000000000000109A3 /* LiveHeadphoneProfileTests.swift in Sources */,
 				E6D0000000000000000109A4 /* UnifiedGraphStereoHeadphoneTests.swift in Sources */,
+				E20D0000000000000001A003 /* ParallelRenderWorkersTests.swift in Sources */,
 				E6D0000000000000000109B1 /* LiveSessionFixtureTests.swift in Sources */,
 				E6D0000000000000000001B1 /* UnifiedGraphProgramDSPTests.swift in Sources */,
 				E9B500000000000000000003 /* OutputProtectionTests.swift in Sources */,

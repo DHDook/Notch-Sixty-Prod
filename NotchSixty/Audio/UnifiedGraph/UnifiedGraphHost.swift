@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 enum UnifiedGraphError: Error, Equatable {
     case coreStatus(UInt32)
@@ -50,6 +51,8 @@ final class UnifiedGraphHost: @unchecked Sendable {
     /// renders the graph has been destroyed.
     func release() {
         lock.lock(); defer { lock.unlock() }
+        // E20 S6 (G22): the workers are stopped and joined before the graph they run on is retired.
+        endParallelRenderLocked()
         if let graph { n60_graph_retire(graph) }
         graph = nil
         listenSession.clear()
@@ -176,7 +179,89 @@ final class UnifiedGraphHost: @unchecked Sendable {
     @discardableResult
     func apply(_ newSpec: UnifiedGraphSpec, linearFade: Bool = false) throws -> UnifiedGraphApplyResult {
         lock.lock(); defer { lock.unlock() }
-        return try applyLocked(newSpec, linearFade: linearFade)
+        let result = try applyLocked(newSpec, linearFade: linearFade)
+        retuneParallelRenderLocked()
+        return result
+    }
+
+    // MARK: Parallel render workers (E20 S6)
+
+    private var parallelPool: AudioWorkgroupWorkerPool?
+
+    /// Starts the render worker pool for this graph on `workgroup` (the output device's IO workgroup; nil joins none).
+    /// Control thread, while IO is stopped: call it before `AudioDeviceStart`. A second call first stops the running
+    /// pool, which is how a reconfiguration, rate change or device change rejoins the new device's workgroup. Returns the
+    /// number of worker threads created (0 when `e20.parallel-render` is off, the graph is not on the non-uniform FIR
+    /// engine, or the machine has one core).
+    @discardableResult
+    func beginParallelRender(workgroup: WorkGroup?) -> Int {
+        lock.lock(); defer { lock.unlock() }
+        endParallelRenderLocked()
+        guard let graph else { return 0 }
+        let size = ParallelRenderPolicy.poolSize(scheme: spec.firScheme)
+        let period = spec.sampleRate > 0 ? Double(spec.maxBlockFrames) / spec.sampleRate : 0.01
+        guard size > 0, let pool = AudioWorkgroupWorkerPool(graph: graph, workers: size, workgroup: workgroup, periodSeconds: period) else {
+            return 0
+        }
+        pool.start()
+        parallelPool = pool
+        retuneParallelRenderLocked()
+        return size
+    }
+
+    /// Stops and joins the worker threads, which leave their workgroup. Idempotent. Call after `AudioDeviceStop` and
+    /// before the graph is released (`release()` also does it).
+    /// Returns the stopped pool's final counters (nil when none was running); tests check join and leave against them.
+    @discardableResult
+    func endParallelRender() -> AudioWorkgroupWorkerPool.Stats? {
+        lock.lock(); defer { lock.unlock() }
+        let pool = parallelPool
+        endParallelRenderLocked()
+        return pool?.stats
+    }
+
+    /// The running pool's counters (tests and diagnostics); nil when no pool is running.
+    var parallelRenderStats: AudioWorkgroupWorkerPool.Stats? {
+        lock.lock(); defer { lock.unlock() }
+        return parallelPool?.stats
+    }
+
+    /// Workers the audio thread currently wakes (0 when no pool is running).
+    var parallelRenderWorkerLimit: Int {
+        lock.lock(); defer { lock.unlock() }
+        return parallelActiveWorkers
+    }
+
+    private var parallelActiveWorkers = 0
+
+    /// Wake calls the audio thread has made to the running pool (diagnostic; tests check the workers were used).
+    var parallelRenderWakeCount: Int {
+        lock.lock(); defer { lock.unlock() }
+        return parallelPool?.wakeCount ?? 0
+    }
+
+    /// Test seam: sets the live worker count directly, bypassing the load estimate, so a small graph can exercise the
+    /// parallel path. The next `apply` retunes it from the policy again.
+    func forceParallelWorkersForTesting(_ count: Int) {
+        lock.lock(); defer { lock.unlock() }
+        guard let parallelPool else { return }
+        parallelPool.setActiveWorkers(count)
+        parallelActiveWorkers = min(count, parallelPool.workerCount)
+    }
+
+    private func endParallelRenderLocked() {
+        parallelPool?.stop()
+        parallelPool = nil
+        parallelActiveWorkers = 0
+    }
+
+    /// After a spec change the load estimate may differ: move the live worker count. `n60_graph_set_workers` is atomic,
+    /// the wake function and the threads stay as they are.
+    private func retuneParallelRenderLocked() {
+        guard let parallelPool else { return }
+        let count = ParallelRenderPolicy.workerCount(spec: spec)
+        parallelPool.setActiveWorkers(count)
+        parallelActiveWorkers = min(count, parallelPool.workerCount)
     }
 
     private var fadeLawLinear = false

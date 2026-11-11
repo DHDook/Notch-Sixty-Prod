@@ -158,6 +158,7 @@ final class ProductController: ObservableObject {
         )
         UnifiedGraphFIRScheme.refresh()
         UnifiedGraphOutputProtection.refresh()
+        ParallelRenderPolicy.refresh()
         UnifiedGraphLiveHeadphoneTuning.refresh()
         activeQuietZone.subAwareAncEnabled = FeatureFlags().isEnabled(.subAwareAnc)
         if activeQuietZone.subAwareAncEnabled {
@@ -305,6 +306,7 @@ final class ProductController: ObservableObject {
         )
         UnifiedGraphFIRScheme.refresh()
         UnifiedGraphOutputProtection.refresh()
+        ParallelRenderPolicy.refresh()
         UnifiedGraphLiveHeadphoneTuning.refresh()
         activeQuietZone.subAwareAncEnabled = FeatureFlags().isEnabled(.subAwareAnc)
         if activeQuietZone.subAwareAncEnabled {
