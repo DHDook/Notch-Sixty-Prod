@@ -156,6 +156,14 @@ int main() {
             const n60_headroom_result r = run(fs, {path(st)});
             CHECK(std::fabs(r.peak_gain_db) < 1e-6, "biquad flat %.9f", r.peak_gain_db);
         }
+        // LINKWITZ: f0 30 Hz Q 0.9 to fp 20 Hz Q 0.5; the low-frequency gain is (f0/fp)^2 = 7.04 dB at DC and the peak is
+        // read at the grid's lowest frequency (10 Hz) at every rate, including 384 kHz where float biquad coefficients fail.
+        {
+            std::vector<float> lt = {30.0f, 0.9f, 20.0f, 0.5f};
+            std::vector<n60_headroom_stage> st = {stage(N60_HEADROOM_STAGE_LINKWITZ, lt)};
+            const n60_headroom_result r = run(fs, {path(st)});
+            CHECK(r.peak_gain_db > 4.0 && r.peak_gain_db < 8.5 && r.peak_hz < 12.0, "linkwitz peak %.3f at %.2f Hz", r.peak_gain_db, r.peak_hz);
+        }
         // Grid: 10 Hz to 0.45 fs at 48 steps per octave.
         {
             std::vector<float> g = {1.0f};
