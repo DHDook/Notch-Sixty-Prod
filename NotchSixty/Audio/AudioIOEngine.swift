@@ -3107,6 +3107,20 @@ final class AudioIOEngine: ObservableObject {
         // Main-actor only: the policy static is written from here, the dynamicsConfiguration didSet and state restore.
         var committed = false
         defer { if !committed { UnifiedGraphOutputProtection.apply(settings: previousOutputProtection) } }
+        // E28 S7d part 3 (G34): a lookahead-only edit crossfades two copies of one signal, so it uses the linear law.
+        let lookaheadOnly = FeatureFlags().isEnabled(.dynamicsExtras) && configuration.differsOnlyInLookahead(from: dynamicsConfiguration)
+        let previousStereoFade = transportSession?.linearFadeForEQRepublish ?? false
+        let previousNChannelFade = nChannelTransportSession?.linearFadeForEQRepublish ?? false
+        if lookaheadOnly {
+            transportSession?.linearFadeForEQRepublish = true
+            nChannelTransportSession?.linearFadeForEQRepublish = true
+        }
+        defer {
+            if lookaheadOnly {
+                transportSession?.linearFadeForEQRepublish = previousStereoFade
+                nChannelTransportSession?.linearFadeForEQRepublish = previousNChannelFade
+            }
+        }
         if immutableSemanticTransportActive, configuration != dynamicsConfiguration {
             try requireLiveGraphEdits()
             var inputs = currentLiveGraphInputs
@@ -3157,6 +3171,7 @@ final class AudioIOEngine: ObservableObject {
         dynamicsConfiguration = configuration
         committed = true
         lastErrorDescription = nil
+        surfaceDynamicsListenRepostFailure()  // E28 S7d part 3 (G37): a rebuild that lost the listener is reported, not swallowed
     }
 
     func loadRoomCorrectionValidationFilter() throws {

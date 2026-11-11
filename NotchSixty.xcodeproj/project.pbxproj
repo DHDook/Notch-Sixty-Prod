@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		E28D700000000000000000C1 /* DynamicsExtrasS7dTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E28D700000000000000000C2 /* DynamicsExtrasS7dTests.swift */; };
 		E28D700000000000000000D1 /* DynamicsExtrasS7dLatencyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E28D700000000000000000D2 /* DynamicsExtrasS7dLatencyTests.swift */; };
+		E28D700000000000000000E1 /* DynamicsExtrasGapsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E28D700000000000000000E2 /* DynamicsExtrasGapsTests.swift */; };
 		E28D700000000000000000B1 /* DynamicsListenControls.swift in Sources */ = {isa = PBXBuildFile; fileRef = E28D700000000000000000B2 /* DynamicsListenControls.swift */; };
 		E28D700000000000000000A1 /* DynamicsExtrasAccessors.swift in Sources */ = {isa = PBXBuildFile; fileRef = E28D700000000000000000A2 /* DynamicsExtrasAccessors.swift */; };
 		E28E00600000000000000000 /* DynamicsTransferCurve.swift in Sources */ = {isa = PBXBuildFile; fileRef = E28D00600000000000000000 /* DynamicsTransferCurve.swift */; };
@@ -718,6 +719,7 @@
 /* Begin PBXFileReference section */
 		E28D700000000000000000C2 /* DynamicsExtrasS7dTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DynamicsExtrasS7dTests.swift; sourceTree = "<group>"; };
 		E28D700000000000000000D2 /* DynamicsExtrasS7dLatencyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DynamicsExtrasS7dLatencyTests.swift; sourceTree = "<group>"; };
+		E28D700000000000000000E2 /* DynamicsExtrasGapsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DynamicsExtrasGapsTests.swift; sourceTree = "<group>"; };
 		E28D700000000000000000B2 /* DynamicsListenControls.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DynamicsListenControls.swift; sourceTree = "<group>"; };
 		E28D700000000000000000A2 /* DynamicsExtrasAccessors.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DynamicsExtrasAccessors.swift; sourceTree = "<group>"; };
 		E28D00600000000000000000 /* DynamicsTransferCurve.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DynamicsTransferCurve.swift; sourceTree = "<group>"; };
@@ -1646,6 +1648,7 @@
 				E28B700000000000000000C2 /* DynamicsExtrasS7cTests.swift */,
 				E28D700000000000000000C2 /* DynamicsExtrasS7dTests.swift */,
 				E28D700000000000000000D2 /* DynamicsExtrasS7dLatencyTests.swift */,
+				E28D700000000000000000E2 /* DynamicsExtrasGapsTests.swift */,
 				E4M100000000000000000013 /* SpeakerDriveDemandPolicyTests.swift */,
 				E11D00000000000000000012 /* MeasurementCoreTests.swift */,
 				E10A00000000000000000042 /* RoomCorrectionCoreTests.swift */,
@@ -2653,6 +2656,7 @@
 				E28B700000000000000000C1 /* DynamicsExtrasS7cTests.swift in Sources */,
 				E28D700000000000000000C1 /* DynamicsExtrasS7dTests.swift in Sources */,
 				E28D700000000000000000D1 /* DynamicsExtrasS7dLatencyTests.swift in Sources */,
+				E28D700000000000000000E1 /* DynamicsExtrasGapsTests.swift in Sources */,
 				E4M100000000000000000014 /* SpeakerDriveDemandPolicyTests.swift in Sources */,
 				E11D00000000000000000002 /* MeasurementCoreTests.swift in Sources */,
 				E10A00000000000000000032 /* RoomCorrectionCoreTests.swift in Sources */,

@@ -200,6 +200,17 @@ final class UnifiedGraphHost: @unchecked Sendable {
     let listenSession = DynamicsListenSession()
     private var postedListen: [UInt64: Float] = [:]
     private var clearPending = false
+    private var listenRepostFailed = false
+    /// Test seam (G37): makes the next listen posts fail as a full mailbox would.
+    var listenPostFaultForTesting = false
+
+    /// True once when a rebuild could not post the listener again (the core may be silent while the page shows a listener).
+    /// The engine reads it after a Dynamics edit and tells the listener (E28 S7d part 3, G37).
+    func takeListenRepostFailure() -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        defer { listenRepostFailed = false }
+        return listenRepostFailed
+    }
     private static func listenKey(_ stageId: UInt32, _ paramIndex: UInt32) -> UInt64 { UInt64(stageId) << 32 | UInt64(paramIndex) }
 
     /// Makes `listener` the only listener (nil stops listening) and posts the stages' live listen parameters: the
@@ -261,6 +272,7 @@ final class UnifiedGraphHost: @unchecked Sendable {
 
     private func postListenLocked(force: Bool = false) throws -> UnifiedGraphApplyResult {
         guard let graph else { throw UnifiedGraphError.invalidConfiguration("graph released") }
+        if listenPostFaultForTesting { throw UnifiedGraphError.coreStatus(N60_STATUS_QUEUE_FULL.rawValue) }
         var records: [n60_param_record] = []
         func consider(_ stageId: UInt32, _ paramIndex: UInt32, _ value: Float) {
             let key = Self.listenKey(stageId, paramIndex)
@@ -346,7 +358,7 @@ final class UnifiedGraphHost: @unchecked Sendable {
         spec = newSpec
         // E28 S7b: a new snapshot starts with listen off; the session's listener is posted again.
         postedListen.removeAll()
-        _ = try? postListenLocked(force: true)
+        do { _ = try postListenLocked(force: true) } catch { listenRepostFailed = true }  // surfaced by `takeListenRepostFailure` (G37)
         // E27 S4 (G17): a new snapshot starts with empty tap rings, so the marked baselines no longer apply.
         analyserTapBaselines.removeAll()
         return .published

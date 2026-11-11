@@ -664,6 +664,9 @@ struct ProductionDynamicsView: View {
 
     private var loudnessContourEditor: some View {
         moduleCard(module: .loudnessContour, enabled: boolBinding({ $0.loudnessContour.enabled }, { $0.loudnessContour.enabled = $1 }), reset: { preserveEnabledReset(\.loudnessContour, defaultValue: LoudnessContourConfiguration()) }) {
+            if FeatureFlags().isEnabled(.dynamicsExtras) {  // E28 S7d part 3 (G21)
+                ProductionDynamicsTelemetryView(engine: engine, kind: .loudnessContour)
+            }
             row(.loudnessContourStrength)
             row(.loudnessContourReferencePhons)
             row(.loudnessContourMaxBoostDB)

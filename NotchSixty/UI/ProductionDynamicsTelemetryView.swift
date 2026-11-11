@@ -3,7 +3,7 @@ import SwiftUI
 
 enum ProductionDynamicsTelemetryKind: Hashable {
     case compressor, multiband, expander, pauseGate, gainRider
-    case denoiser, deEsser, mainsHum, loudnessMatch, dialogue, limiter
+    case denoiser, deEsser, mainsHum, loudnessMatch, loudnessContour, dialogue, limiter
 }
 
 private struct ProductionDynamicsTelemetryItem: Identifiable, Equatable {
@@ -140,10 +140,20 @@ struct ProductionDynamicsTelemetryView: View {
                 item("confidence", "Confidence", percent(diagnostics.mainsDetectionConfidence)),
             ]
         case .loudnessMatch:
-            statusText = nil
+            let readout = LoudnessReadouts.match(
+                shortTermLUFS: diagnostics.loudnessShortTermLUFS, gainDB: diagnostics.loudnessMatchGainDB,
+                maxCorrectionDB: engine.dynamicsConfiguration.loudnessMatch.maxCorrectionDB)
+            statusText = FeatureFlags().isEnabled(.dynamicsExtras) ? readout.status : nil
             items = [
                 item("lufs", "Short-Term Loudness", String(format: "%.1f LUFS", Double(diagnostics.loudnessShortTermLUFS))),
                 item("gain", "Match Gain", db(diagnostics.loudnessMatchGainDB)),
+            ]
+        case .loudnessContour:
+            let readout = LoudnessReadouts.contour(scale: diagnostics.loudnessContourScale)
+            statusText = readout.status
+            items = [
+                item("amount", "Contour Applied", percent(readout.scale)),
+                item("lufs", "Short-Term Loudness", String(format: "%.1f LUFS", Double(diagnostics.loudnessShortTermLUFS))),
             ]
         case .dialogue:
             statusText = nil
@@ -156,5 +166,25 @@ struct ProductionDynamicsTelemetryView: View {
             statusText = diagnostics.truePeakGuardActive ? "True-peak guard active" : nil
             items = [item("gr", "Gain Reduction", db(diagnostics.limiterGainReductionDB))]
         }
+    }
+}
+
+/// E28 S7d part 3 (G21): the words beside the Loudness Match and Loudness Contour numbers. Pure, so a test can pin them.
+enum LoudnessReadouts {
+    /// Within this many dB of zero the match gain reads as "at target".
+    static let settledDB: Float = 0.1
+
+    static func match(shortTermLUFS: Float, gainDB: Float, maxCorrectionDB: Double) -> (status: String, atLimit: Bool) {
+        guard shortTermLUFS.isFinite, gainDB.isFinite else { return ("Measuring", false) }
+        let atLimit = Double(abs(gainDB)) >= maxCorrectionDB - 0.05
+        if abs(gainDB) < settledDB { return ("At target", false) }
+        let direction = gainDB > 0 ? "Boosting" : "Cutting"
+        return (String(format: "%@ %.1f dB%@", direction, Double(abs(gainDB)), atLimit ? " (at the maximum correction)" : ""), atLimit)
+    }
+
+    static func contour(scale: Float) -> (status: String, scale: Float) {
+        let clamped = scale.isFinite ? min(max(scale, 0), 1) : 0
+        if clamped < 0.01 { return ("Contour idle (level at the reference)", 0) }
+        return (String(format: "Contour at %.0f%% of its full curve", Double(clamped * 100)), clamped)
     }
 }

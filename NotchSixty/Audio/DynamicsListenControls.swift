@@ -35,6 +35,7 @@ extension AudioIOEngine {
     /// Ends listening and solo (profile switch, Stop, output change, Quit). A failed clear post is retried once and then
     /// reported through `lastErrorDescription` instead of being swallowed (G37).
     func clearDynamicsListening() {
+        surfaceDynamicsListenRepostFailure(clearing: false)
         defer { setDynamicsListenerMirror(nil, solo: []) }
         guard let host = dynamicsListenHost else { return }
         if !host.clearListener() {
@@ -42,6 +43,16 @@ extension AudioIOEngine {
                 reportDynamicsListenError("Dynamics listening could not be switched off; stop and start processing to clear it.")
             }
         }
+    }
+}
+
+extension AudioIOEngine {
+    /// A rebuild that could not post the listener again leaves the core silent while the page shows a listener; say so and end
+    /// the listener so the page matches the core (E28 S7d part 3, G37).
+    func surfaceDynamicsListenRepostFailure(clearing: Bool = true) {
+        guard let host = dynamicsListenHost, host.takeListenRepostFailure() else { return }
+        if clearing { clearDynamicsListening() }
+        reportDynamicsListenError("Dynamics listening could not be restored after the change, so it was switched off. Choose Listen again.")
     }
 }
 

@@ -111,3 +111,18 @@ enum DynamicsLatency {
         return out
     }
 }
+
+extension DynamicsConfiguration {
+    /// True when `other` differs from `self` in the compressor or multiband lookahead and nothing else (E28 S7d part 3, G34).
+    /// Such an edit rebuilds the graph with the same signal delayed by a different amount, and an equal-power crossfade of two
+    /// copies of one signal swells 3 dB, so the host uses the linear fade law for it (as the EQ audition switch does).
+    func differsOnlyInLookahead(from other: DynamicsConfiguration) -> Bool {
+        guard self != other else { return false }
+        var a = self, b = other
+        a.compressor.lookaheadMs = nil
+        a.multibandCompressor.lookaheadMs = nil
+        b.compressor.lookaheadMs = nil
+        b.multibandCompressor.lookaheadMs = nil
+        return a == b
+    }
+}
