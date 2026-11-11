@@ -35,7 +35,7 @@
 extern "C" {
 #endif
 
-#define N60_HEADROOM_ABI_VERSION 1
+#define N60_HEADROOM_ABI_VERSION 2 /* 2 (E9 S7b): N60_HEADROOM_STAGE_LINKWITZ */
 
 #define N60_HEADROOM_OK 0
 #define N60_HEADROOM_ERR_ARGUMENT (-1) /* null pointer, bad struct size, bad rate or count */
@@ -53,6 +53,7 @@ extern "C" {
 #define N60_HEADROOM_STAGE_DELAY 4u    /* params[0] = frames (>= 0); count 1 */
 #define N60_HEADROOM_STAGE_FIR 5u      /* taps (floats) in the `taps` pointer; tap_count 1..262144 */
 #define N60_HEADROOM_STAGE_DYN_EQ 6u   /* params as the graph's Dynamic EQ: [0] linked, then 15 per band; 16, 31, ... */
+#define N60_HEADROOM_STAGE_LINKWITZ 8u /* params f0 Hz, Q0, fp Hz, Qp (the XOVER stage's transform, designed in double); count 4 */
 #define N60_HEADROOM_STAGE_COMPRESSOR 7u /* graph Compressor params; uses [5] make-up dB; count >= 6 */
 
 #define N60_HEADROOM_COMBINE_COHERENT 0u
