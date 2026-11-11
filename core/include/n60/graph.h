@@ -898,7 +898,7 @@ n60_status n60_graph_read_load(const n60_graph *graph, n60_graph_load *outLoad);
  * stages in firScheme 1) as phases. With workers set and a phase of two or more lanes, n60_graph_process publishes one
  * job per lane, runs jobs itself, and waits only for jobs another thread has already claimed before it moves on, so the
  * output is bit-identical at any worker count (each job writes only its own lane and every lane's arithmetic is unchanged).
- * Everything else, cross-lane stages included, runs on the thread that calls n60_graph_process. Added to ABI v35 without a
+ * Everything else, cross-lane stages included, runs on the thread that calls n60_graph_process. Added to the ABI version current when it merged, without a
  * version bump: only new functions, no layout change.
  *
  * Wake protocol. Once per callback, at its first parallel phase, process calls the wake function (realtime thread:
