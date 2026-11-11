@@ -450,21 +450,28 @@ struct HeadroomModel {
         func fail() {
             for index in Set(ordered + ears) where index >= 0 && index < count { lanes[index].incomplete.insert("binaural rendering") }
         }
-        guard p.count >= 10, ears.allSatisfy({ $0 >= 0 && $0 < count }), ears[0] != ears[1], !ordered.isEmpty,
+        guard p.count >= 12, ears.allSatisfy({ $0 >= 0 && $0 < count }), ears[0] != ears[1], !ordered.isEmpty,
               p[3] >= 1, p[4] >= 1 else { return fail() }
         let taps = Int(p[3]), sets = Int(p[4]), n = ordered.count, equalEar = Int(p[8])
-        guard sets <= Int(N60_GRAPH_BINAURAL_MAX_SETS), taps <= Int(N60_GRAPH_BINAURAL_MAX_TAPS),
-              p.count == 10 + sets * n * 2 * taps else { return fail() }
+        // ABI v38 (E13 S4): [10] = tail taps T, [11] reserved; the late tails (shared by every orientation) follow the early responses.
+        let tailTaps = Int(p[10])
+        guard p[10] >= 0, sets <= Int(N60_GRAPH_BINAURAL_MAX_SETS), taps <= Int(N60_GRAPH_BINAURAL_MAX_TAPS),
+              p.count == 12 + sets * n * 2 * taps + n * 2 * tailTaps else { return fail() }
+        let tailBase = 12 + sets * n * 2 * taps
         let before = lanes
         var incomplete = Set<String>()
         for index in ordered { incomplete.formUnion(before[index].incomplete) }
         let front = Set(ordered.prefix(2))
         func response(set: Int, source: Int, ear: Int) -> [Float] {
-            let base = 10 + ((set * n + source) * 2) * taps
+            // The full response is the set's early taps followed by the shared tail (tail tap i is response tap taps + i).
+            let base = 12 + ((set * n + source) * 2) * taps
+            let tb = tailBase + source * 2 * tailTaps
             if source == equalEar {
                 return (0..<taps).map { 0.5 * (p[base + $0] + p[base + taps + $0]) }
+                    + (0..<tailTaps).map { 0.5 * (p[tb + $0] + p[tb + tailTaps + $0]) }
             }
             return Array(p[(base + ear * taps)..<(base + (ear + 1) * taps)])
+                + Array(p[(tb + ear * tailTaps)..<(tb + (ear + 1) * tailTaps)])
         }
         var earLanes = [Lane(), Lane()]
         for ear in 0..<2 {

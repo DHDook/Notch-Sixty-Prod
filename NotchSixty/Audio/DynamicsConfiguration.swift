@@ -701,6 +701,37 @@ struct MultibandCompressorConfiguration: Equatable, Codable, Sendable {
     var highMakeupGainDB = 0.0
     /// E28 S4: bands (0 low, 1 mid, 2 high) whose makeup the Dynamics page keeps automatic (nil decodes as none).
     var autoMakeupBands: Set<Int>?
+    /// E28 S7c: extras behind `e28.dynamics-extras`; all optional so older profiles decode as the defaults (no band on
+    /// program-dependent release, none bypassed, peak detectors, 50 ms RMS window, lookahead off). Bands are 0 low, 1 mid,
+    /// 2 high. Solo and listen are session state and never part of this configuration.
+    var autoReleaseBands: Set<Int>?
+    var bypassedBands: Set<Int>?
+    var rmsDetectorBands: Set<Int>?
+    var rmsWindowMs: Double?
+    var lookaheadMs: Double?
+
+    static let rmsWindowRange = 5.0...200.0
+    static let lookaheadRange = 0.0...20.0
+
+    /// The 17 extra core parameters (auto release x3, bypass x3, solo x3 = 0, listen x3 = 0, detector x3, RMS window,
+    /// lookahead frames). With `e28.dynamics-extras` on the 43-value block is always used, so solo and listen are live posts.
+    func coreExtras(sampleRate: Double) -> [Float] {
+        func flags(_ set: Set<Int>?) -> [Float] { (0..<3).map { (set ?? []).contains($0) ? 1 : 0 } }
+        let window = min(max(rmsWindowMs ?? 50, Self.rmsWindowRange.lowerBound), Self.rmsWindowRange.upperBound)
+        return flags(autoReleaseBands) + flags(bypassedBands) + [0, 0, 0] + [0, 0, 0] + flags(rmsDetectorBands)
+            + [Float(window), Float(CompressorConfiguration.lookaheadFrames(ms: lookaheadMs ?? 0, sampleRate: sampleRate))]
+    }
+
+    /// The configuration the frozen kernel renders: a bypassed band is ratio 1 with no make-up, which passes it at unity
+    /// (the kernel has no bypass flag; the core stage reads the flag itself).
+    func kernelMapped() -> MultibandCompressorConfiguration {
+        var m = self
+        let bands = bypassedBands ?? []
+        if bands.contains(0) { m.lowRatio = 1; m.lowMakeupGainDB = 0 }
+        if bands.contains(1) { m.midRatio = 1; m.midMakeupGainDB = 0 }
+        if bands.contains(2) { m.highRatio = 1; m.highMakeupGainDB = 0 }
+        return m
+    }
 
     // Compatibility convenience for the previous shared slope control.
     var slope: MultibandSlope {
@@ -709,6 +740,11 @@ struct MultibandCompressorConfiguration: Equatable, Codable, Sendable {
     }
 
     func validate() throws {
+        for bands in [autoReleaseBands, bypassedBands, rmsDetectorBands] where !(bands ?? []).isSubset(of: [0, 1, 2]) {
+            throw DynamicsConfigurationError.invalidMultibandCompressor
+        }
+        if let v = rmsWindowMs, !(v.isFinite && Self.rmsWindowRange.contains(v)) { throw DynamicsConfigurationError.invalidMultibandCompressor }
+        if let v = lookaheadMs, !(v.isFinite && Self.lookaheadRange.contains(v)) { throw DynamicsConfigurationError.invalidMultibandCompressor }
         let thresholds = [lowThresholdDB, midThresholdDB, highThresholdDB]
         let ratios = [lowRatio, midRatio, highRatio]
         let attacks = [lowAttackMs, midAttackMs, highAttackMs]
@@ -1289,21 +1325,22 @@ struct DynamicsConfiguration: Equatable, Codable, Sendable {
             Float(deEsser.releaseMs),
             deEsser.dynamicEQMode
         ) else { throw DynamicsConfigurationError.invalidDeEsser }
+        let mapped = multibandCompressor.kernelMapped()
         guard N60DynamicsSnapshotSetMultibandCompressorAdvanced(
             &snapshot,
             sampleRate,
-            multibandCompressor.enabled,
-            multibandCompressor.lowMidFrequencyHz,
-            multibandCompressor.midHighFrequencyHz,
-            multibandCompressor.lowMidSlope.cType,
-            multibandCompressor.midHighSlope.cType,
-            Float(multibandCompressor.lowThresholdDB), Float(multibandCompressor.midThresholdDB), Float(multibandCompressor.highThresholdDB),
-            Float(multibandCompressor.lowRatio), Float(multibandCompressor.midRatio), Float(multibandCompressor.highRatio),
-            Float(multibandCompressor.lowAttackMs), Float(multibandCompressor.midAttackMs), Float(multibandCompressor.highAttackMs),
-            Float(multibandCompressor.lowReleaseMs), Float(multibandCompressor.midReleaseMs), Float(multibandCompressor.highReleaseMs),
-            Float(multibandCompressor.lowKneeDB), Float(multibandCompressor.midKneeDB), Float(multibandCompressor.highKneeDB),
-            Float(multibandCompressor.lowSidechainHighPassHz), Float(multibandCompressor.midSidechainHighPassHz), Float(multibandCompressor.highSidechainHighPassHz),
-            Float(multibandCompressor.lowMakeupGainDB), Float(multibandCompressor.midMakeupGainDB), Float(multibandCompressor.highMakeupGainDB)
+            mapped.enabled,
+            mapped.lowMidFrequencyHz,
+            mapped.midHighFrequencyHz,
+            mapped.lowMidSlope.cType,
+            mapped.midHighSlope.cType,
+            Float(mapped.lowThresholdDB), Float(mapped.midThresholdDB), Float(mapped.highThresholdDB),
+            Float(mapped.lowRatio), Float(mapped.midRatio), Float(mapped.highRatio),
+            Float(mapped.lowAttackMs), Float(mapped.midAttackMs), Float(mapped.highAttackMs),
+            Float(mapped.lowReleaseMs), Float(mapped.midReleaseMs), Float(mapped.highReleaseMs),
+            Float(mapped.lowKneeDB), Float(mapped.midKneeDB), Float(mapped.highKneeDB),
+            Float(mapped.lowSidechainHighPassHz), Float(mapped.midSidechainHighPassHz), Float(mapped.highSidechainHighPassHz),
+            Float(mapped.lowMakeupGainDB), Float(mapped.midMakeupGainDB), Float(mapped.highMakeupGainDB)
         ) else { throw DynamicsConfigurationError.invalidMultibandCompressor }
         guard N60DynamicsSnapshotSetCompressorAdvanced(
             &snapshot,

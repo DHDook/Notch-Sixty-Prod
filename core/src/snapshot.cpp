@@ -754,6 +754,8 @@ void snapshotLaneLatency(const SnapHeader *snap, uint32_t upTo, uint32_t *perLan
             frames = static_cast<uint32_t>(reinterpret_cast<const float *>(bytes(snap) + r.paramsOff)[0]);
         } else if (isDspKind(r.kind)) {
             frames = dspLatency(snap, r);
+        } else if (isMultibandKind(r.kind)) {
+            frames = multibandLatency(snap, r);
         } else if (isSystemKind(r.kind)) {
             frames = systemLatency(snap, r);
         } else if (isMimoKind(r.kind)) {

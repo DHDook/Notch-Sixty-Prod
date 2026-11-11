@@ -446,6 +446,19 @@ final class CoreAudioTransportSession {
     /// E6 S8: when true, each published stereo snapshot the core can reproduce is also
     /// rendered through a libn60core graph; anything else keeps the kernel path.
     var unifiedGraphEnabled = false
+    /// E4 S30c: the conversation-unmasking cuts (17 positive dB values, `AmbientUnmaskOverlay`) that ride on this
+    /// session's AMBIENT stage as the section trailer (graph ABI v32). Set by the engine before it publishes; read
+    /// under `graphRefreshLock` when the graph is built. nil leaves the plain stage. A new session starts with nil,
+    /// so a transport rebuild or rate change clears the cuts. The kernel never realises them.
+    private var ambientUnmaskCutsDB: [Double]?
+    var currentAmbientUnmaskCuts: [Double]? {
+        graphRefreshLock.lock(); defer { graphRefreshLock.unlock() }
+        return ambientUnmaskCutsDB
+    }
+    func setAmbientUnmaskCuts(_ cuts: [Double]?) {
+        graphRefreshLock.lock(); defer { graphRefreshLock.unlock() }
+        ambientUnmaskCutsDB = cuts
+    }
     /// E27 S3b: set by the engine while it republishes an EQ change (bypass, A/B, audition), so the
     /// rebuild crossfade uses the linear law. Every other republish keeps the equal-power law.
     var linearFadeForEQRepublish = false
@@ -1586,6 +1599,11 @@ final class CoreAudioTransportSession {
         case .success(let accepted): configuration = accepted
         case .failure(let reason):
             return refuse(reason)
+        }
+        if let cuts = ambientUnmaskCutsDB,
+           let params = AmbientUnmaskOverlay.stageParameters(
+            base: configuration.stereoStages.ambient, plannedCutsDB: cuts, sampleRate: outputFormat.sampleRate) {
+            configuration.stereoStages.ambient = params
         }
         if let liveGenerator {
             configuration.generatorParams = liveGenerator.params

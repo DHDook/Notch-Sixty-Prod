@@ -182,6 +182,13 @@ struct ConversationUnmaskingPlanner: Sendable {
         }
     }
 
+    /// Overall programme change (dB, negative or zero) for these cuts against the same input; the governor uses it to
+    /// keep the realised cuts, which move at their own rate limits, inside the overall limit.
+    func overallChangeDB(_ input: ConversationUnmaskingInput, cuts: [Double]) -> Double {
+        guard cuts.count == input.musicBandLevelsDB.count else { return 0 }
+        return overall(input, cuts: cuts, base: power(input, cuts: [Double](repeating: 0, count: cuts.count)))
+    }
+
     /// Music power as a share of music plus noise power in one band, 1 with no noise masker.
     private func musicShare(_ input: ConversationUnmaskingInput, band: Int, cut: Double) -> Double {
         guard !input.noiseBandLevelsDB.isEmpty else { return 1 }

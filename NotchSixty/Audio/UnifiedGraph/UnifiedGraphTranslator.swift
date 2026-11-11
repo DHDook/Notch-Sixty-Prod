@@ -36,7 +36,8 @@ enum UnifiedGraphTranslator {
         alignment: StereoBassAlignment? = nil,
         firScheme: UInt32 = UnifiedGraphFIRScheme.current(),
         compressorExtras: [Float]? = nil,
-        expanderExtras: [Float]? = nil
+        expanderExtras: [Float]? = nil,
+        multibandExtras: [Float]? = nil
     ) -> Result<UnifiedGraphConfiguration, UnifiedGraphFallbackReason> {
         if let alignment, alignment.issue != nil { return .failure(.alignmentInvalid) }
         let eligibility = withUnsafePointer(to: &snapshot) {
@@ -105,6 +106,13 @@ enum UnifiedGraphTranslator {
             // E28 S7b: the 6-value expander block becomes the 13-value one (hold, knee, detector, window, filter, link, listen).
             if let extras = expanderExtras, extras.count == 7, let base = stages.expander, base.count == 6 {
                 stages.expander = base + extras
+            }
+            // E28 S7c: the 29-value multiband block becomes the 43-value one. The 17 extras are the auto-release flags (they
+            // replace the three zeros at 26 to 28; E6 G23), then bypass, solo and listen (both live, session state), detector,
+            // RMS window and lookahead frames.
+            if let extras = multibandExtras, extras.count == 17, var base = stages.multiband, base.count == 29 {
+                base.replaceSubrange(26..<29, with: extras[0..<3])
+                stages.multiband = base + extras[3...]
             }
         }
         // E6 S8d: recover each enabled convolver's taps by generation and verify them against the snapshot's record.

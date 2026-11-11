@@ -157,5 +157,6 @@ final class CompressorExtrasConfigTests: XCTestCase {
 
     @MainActor func testFlagRegisteredAndOff() {
         XCTAssertTrue(FeatureFlag.all.contains(.dynamicsExtras))
+        XCTAssertTrue(FeatureFlag.all.contains(.roomModel))
     }
 }

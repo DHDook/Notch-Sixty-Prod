@@ -19,7 +19,7 @@
 //    starts at the yaw parameter of the descriptor with no glide. There is no in-place reset.
 // Results do not depend on the host block size.
 //
-// Late tail (ABI v36, E13 S4). Responses longer than the early part (about 20 ms after the onset, set by the host)
+// Late tail (ABI v38, E13 S4). Responses longer than the early part (about 20 ms after the onset, set by the host)
 // carry the rest as a tail shared by every orientation. The tail runs per source and ear through the non-uniform
 // partitioned convolver (conv/nufir.hpp), at an internal rate of at most 96 kHz: above that the source is decimated
 // by 2, 4 or 8 with the shared 73-tap half-band cascade (halfband.hpp) and the summed ears are interpolated back.

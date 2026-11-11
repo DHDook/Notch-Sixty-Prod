@@ -60,8 +60,16 @@ enum MbParam : uint32_t {
     kSidechain = 20,   // 3 bands, 0..300 Hz (0 off)
     kMakeup = 23,      // 3 bands, -12..12 dB
     kAutoRelease = 26, // 3 bands, 0/1
-    kParams = 29
+    kBypass = 29,      // ABI v37: 3 bands, 0/1 (band at unity)
+    kSolo = 32,        // ABI v37: 3 bands, 0/1 (live; session state in Swift)
+    kListen = 35,      // ABI v37: 3 bands, 0 off, 1 sidechain, 2 delta (live; session state in Swift)
+    kDetector = 38,    // ABI v37: 3 bands, 0 peak, 1 RMS
+    kWindow = 41,      // ABI v37: RMS window ms, 5..200
+    kLookahead = 42,   // ABI v37: lookahead frames, 0..8192 (topology: not live)
+    kParams = 29,      // the v25 block
+    kParamsX = 43      // the v37 block
 };
+constexpr uint32_t kMaxLookahead = 16384;  // 20 ms at 768 kHz is 15,360 frames
 
 size_t up(size_t v) { return (v + (kAlign - 1)) & ~(kAlign - 1); }
 bool inR(double v, double lo, double hi) { return std::isfinite(v) && v >= lo && v <= hi; }
@@ -163,7 +171,17 @@ struct MbShared {
     float gainDb[kBands];
     std::atomic<uint32_t> grMaxBits[kBands];
     std::atomic<uint32_t> grNowBits[kBands];
+    // ABI v37 (E28 S7c): solo gains and listen weights ramp over 5 ms; one lookahead ring set follows the struct.
+    float soloG[kBands], listenSide[kBands], listenDelta[kBands], meanSq[kBands];
+    BqState lhpL[kBands], lhpR[kBands];  // sidechain filters of the listened band, run on the delayed band
+    uint32_t ringLen, ringPos;
 };
+
+uint32_t lookaheadOf(const n60_stage_desc &s) {
+    return (s.params != nullptr && s.paramCount >= kParamsX) ? static_cast<uint32_t>(s.params[kLookahead]) : 0u;
+}
+// Six rings of ringLen floats after the struct: dry, low, high for the left lane, then for the right.
+float *ringsOf(MbShared &S) { return reinterpret_cast<float *>(reinterpret_cast<uint8_t *>(&S) + up(sizeof(MbShared))); }
 
 void designSplit(MbShared &S, double rate, float lowMid, float midHigh, bool lowLr8, bool highLr8) {
     double q[kMaxSections] = {};
@@ -196,6 +214,11 @@ void clearState(MbShared &S) {
     std::memset(S.highR, 0, sizeof S.highR);
     std::memset(S.hpL, 0, sizeof S.hpL);
     std::memset(S.hpR, 0, sizeof S.hpR);
+    std::memset(S.meanSq, 0, sizeof S.meanSq);
+    std::memset(S.lhpL, 0, sizeof S.lhpL);
+    std::memset(S.lhpR, 0, sizeof S.lhpR);
+    if (S.ringLen != 0) std::memset(ringsOf(S), 0, size_t(6) * S.ringLen * sizeof(float));
+    S.ringPos = 0;
 }
 
 float cascade(const Bq *c, BqState *st, uint32_t n, float in) {
@@ -210,6 +233,11 @@ bool isMultibandKind(uint32_t kind) N60_RT_NONBLOCKING { return kind == N60_STAG
 
 bool multibandParamOk(uint32_t idx, float v, double rate) {
     if (idx == kOn || (idx >= kAutoRelease && idx < kAutoRelease + kBands)) return isFlag(v);
+    if ((idx >= kBypass && idx < kBypass + kBands) || (idx >= kSolo && idx < kSolo + kBands)) return isFlag(v);
+    if (idx >= kListen && idx < kListen + kBands) return v == 0.0f || v == 1.0f || v == 2.0f;
+    if (idx >= kDetector && idx < kDetector + kBands) return isFlag(v);
+    if (idx == kWindow) return inR(v, 5.0, 200.0);
+    if (idx == kLookahead) return inR(v, 0.0, double(kMaxLookahead)) && v == std::floor(v);
     if (idx == kLowMidHz) return inR(v, 40.0, 250.0) && double(v) < rate * 0.45;
     if (idx == kMidHighHz) return inR(v, 1000.0, 8000.0) && double(v) < rate * 0.45;
     if (idx == kLowSlope || idx == kHighSlope) return isFlag(v);
@@ -226,16 +254,20 @@ bool multibandParamOk(uint32_t idx, float v, double rate) {
 n60_status validateMultibandStage(const n60_stage_desc &s, double rate, uint32_t outCh) {
     if (!(rate >= 8000.0 && rate <= 768000.0) || !isMultibandKind(s.kind) || s.capacityFrames != 0) return N60_STATUS_BAD_ARGUMENT;
     if (s.laneMask != 0 || s.laneA >= outCh || s.laneB >= outCh || s.laneA == s.laneB) return N60_STATUS_BAD_ARGUMENT;
-    if (s.params == nullptr || s.paramCount != kParams) return N60_STATUS_BAD_ARGUMENT;
-    for (uint32_t i = 0; i < kParams; ++i) {
+    if (s.params == nullptr || (s.paramCount != kParams && s.paramCount != kParamsX)) return N60_STATUS_BAD_ARGUMENT;
+    for (uint32_t i = 0; i < s.paramCount; ++i) {
         if (!multibandParamOk(i, s.params[i], rate)) return N60_STATUS_BAD_ARGUMENT;
     }
     return N60_STATUS_OK;
 }
 
-void multibandSizes(const n60_stage_desc &, double, size_t &perLane, size_t &shared) {
+void multibandSizes(const n60_stage_desc &s, double, size_t &perLane, size_t &shared) {
     perLane = 0;
-    shared = up(sizeof(MbShared));
+    shared = up(sizeof(MbShared)) + up(size_t(6) * lookaheadOf(s) * sizeof(float));
+}
+
+uint32_t multibandLatency(const SnapHeader *h, const StageRec &r) N60_RT_NONBLOCKING {
+    return r.paramCount >= kParamsX ? static_cast<uint32_t>(paramsOf(h, r)[kLookahead]) : 0u;
 }
 
 void multibandInit(SnapHeader *h, const StageRec &r) {
@@ -244,6 +276,14 @@ void multibandInit(SnapHeader *h, const StageRec &r) {
     MbShared &S = *new (sharedState(h, r)) MbShared{};
     S.bypassCoef = static_cast<float>(std::exp(-1.0 / (rate * (5.0 / 1000.0))));
     S.parked = 1;
+    for (uint32_t b = 0; b < kBands; ++b) S.soloG[b] = 1.0f;
+    if (r.paramCount >= kParamsX) {
+        S.ringLen = static_cast<uint32_t>(p[kLookahead]);
+        for (uint32_t b = 0; b < kBands; ++b) {
+            S.listenSide[b] = p[kListen + b] == 1.0f ? 1.0f : 0.0f;
+            S.listenDelta[b] = p[kListen + b] == 2.0f ? 1.0f : 0.0f;
+        }
+    }
     designSplit(S, rate, p[kLowMidHz], p[kMidHighHz], p[kLowSlope] > 0.5f, p[kHighSlope] > 0.5f);
     for (uint32_t b = 0; b < kBands; ++b) {
         designHpf(S, rate, b, p[kSidechain + b]);
@@ -277,6 +317,17 @@ uint64_t multibandCarry(SnapHeader *from, SnapHeader *to) N60_RT_NONBLOCKING {
             std::memcpy(b.hpR, a.hpR, sizeof b.hpR);
             std::memcpy(b.gainDb, a.gainDb, sizeof b.gainDb);
             b.parked = a.parked;
+            std::memcpy(b.soloG, a.soloG, sizeof b.soloG);
+            std::memcpy(b.listenSide, a.listenSide, sizeof b.listenSide);
+            std::memcpy(b.listenDelta, a.listenDelta, sizeof b.listenDelta);
+            std::memcpy(b.meanSq, a.meanSq, sizeof b.meanSq);
+            std::memcpy(b.lhpL, a.lhpL, sizeof b.lhpL);
+            std::memcpy(b.lhpR, a.lhpR, sizeof b.lhpR);
+            if (a.ringLen == b.ringLen && b.ringLen != 0) {  // the lookahead is topology: same length keeps the delayed audio
+                std::memcpy(ringsOf(b), ringsOf(const_cast<MbShared &>(a)), size_t(6) * b.ringLen * sizeof(float));
+                b.ringPos = a.ringPos;
+                bytes += size_t(6) * b.ringLen * sizeof(float);
+            }
             for (uint32_t k = 0; k < kBands; ++k) {
                 b.grNowBits[k].store(a.grNowBits[k].load(std::memory_order_relaxed), std::memory_order_relaxed);
             }
@@ -321,6 +372,30 @@ void runMultiband(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t fram
         S.parked = 0;
     }
     float grMax[kBands] = {0.0f, 0.0f, 0.0f};
+    // ABI v37 (E28 S7c). With the 29-value block every extra below is at its default and the arithmetic is the v25 one.
+    const bool x = r.paramCount >= kParamsX;
+    const uint32_t ringLen = x ? S.ringLen : 0;
+    float *rings = ringLen != 0 ? ringsOf(S) : nullptr;
+    const float rampC = poleForMs(rate, 5.0f);
+    const float rmsC = x ? poleForMs(rate, p[kWindow]) : 0.0f;
+    bool soloAny = false;
+    float soloT[kBands], sideT[kBands], deltaT[kBands], mk[kBands];
+    bool bypass[kBands], rms[kBands];
+    bool listening = false;
+    for (uint32_t b = 0; b < kBands; ++b) {
+        soloAny = soloAny || (x && p[kSolo + b] > 0.5f);
+        bypass[b] = x && p[kBypass + b] > 0.5f;
+        rms[b] = x && p[kDetector + b] > 0.5f;
+        sideT[b] = x && p[kListen + b] == 1.0f ? 1.0f : 0.0f;
+        deltaT[b] = x && p[kListen + b] == 2.0f ? 1.0f : 0.0f;
+        mk[b] = bypass[b] ? 0.0f : p[kMakeup + b];
+        if (sideT[b] == 0.0f && S.listenSide[b] == 0.0f) {  // not listened: the sidechain filter state starts clean
+            S.lhpL[b] = BqState{};
+            S.lhpR[b] = BqState{};
+        }
+        listening = listening || sideT[b] != 0.0f || deltaT[b] != 0.0f || S.listenSide[b] != 0.0f || S.listenDelta[b] != 0.0f;
+    }
+    for (uint32_t b = 0; b < kBands; ++b) soloT[b] = (soloAny && p[kSolo + b] < 0.5f) ? 0.0f : 1.0f;
     for (uint32_t i = 0; i < frames; ++i) {
         const float dryL = L[i];
         const float dryR = R[i];
@@ -330,16 +405,39 @@ void runMultiband(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t fram
         const float highR = cascade(S.highPass, S.highR, S.highN, dryR);
         const float bandL[kBands] = {lowL, dryL - lowL - highL, highL};
         const float bandR[kBands] = {lowR, dryR - lowR - highR, highR};
+        // One lookahead for the whole stage: the detectors read the undelayed bands, the audio path the delayed ones, so
+        // the bands stay aligned and the crossover sum stays flat.
+        float dBandL[kBands] = {bandL[0], bandL[1], bandL[2]};
+        float dBandR[kBands] = {bandR[0], bandR[1], bandR[2]};
+        if (ringLen != 0) {
+            float *rl = rings + size_t(S.ringPos), *rr = rl + size_t(3) * ringLen;
+            const float oDryL = rl[0], oLowL = rl[ringLen], oHighL = rl[2 * size_t(ringLen)];
+            const float oDryR = rr[0], oLowR = rr[ringLen], oHighR = rr[2 * size_t(ringLen)];
+            rl[0] = dryL; rl[ringLen] = lowL; rl[2 * size_t(ringLen)] = highL;
+            rr[0] = dryR; rr[ringLen] = lowR; rr[2 * size_t(ringLen)] = highR;
+            S.ringPos = S.ringPos + 1 == ringLen ? 0 : S.ringPos + 1;
+            dBandL[0] = oLowL; dBandL[1] = oDryL - oLowL - oHighL; dBandL[2] = oHighL;
+            dBandR[0] = oLowR; dBandR[1] = oDryR - oLowR - oHighR; dBandR[2] = oHighR;
+        }
         float outL = 0.0f, outR = 0.0f;
+        float lsL = 0.0f, lsR = 0.0f, wSum = 0.0f;
         bool neutral = true;
         for (uint32_t b = 0; b < kBands; ++b) {
             float targetDb = 0.0f;
             if (enabled) {
                 const float detL = runBq(S.hp[b], S.hpL[b], bandL[b]);
                 const float detR = runBq(S.hp[b], S.hpR[b], bandR[b]);
-                const float detector = std::fmax(std::fabs(detL), std::fabs(detR));
-                targetDb = bandTarget(linearToDb(detector), p[kThreshold + b], p[kRatio + b], p[kKnee + b]);
-                targetDb += p[kMakeup + b];
+                float detector = std::fmax(std::fabs(detL), std::fabs(detR));
+                if (rms[b]) {
+                    const float yy = std::fmin(detector, 1.0e6f);
+                    S.meanSq[b] = yy * yy + rmsC * (S.meanSq[b] - yy * yy);
+                    if (S.meanSq[b] < 1e-30f) S.meanSq[b] = 0.0f;  // no denormals in silence
+                    detector = std::sqrt(std::fmax(S.meanSq[b], 0.0f));
+                }
+                if (!bypass[b]) {
+                    targetDb = bandTarget(linearToDb(detector), p[kThreshold + b], p[kRatio + b], p[kKnee + b]);
+                    targetDb += p[kMakeup + b];
+                }
             }
             float coef;
             if (!enabled) {
@@ -356,15 +454,47 @@ void runMultiband(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t fram
             if (nearZero(S.gainDb[b])) S.gainDb[b] = 0.0f;
             else neutral = false;
             const float gain = dbToLinear(S.gainDb[b]);
-            outL += bandL[b] * gain;
-            outR += bandR[b] * gain;
+            if (x) {
+                // Solo: a 0/1 band gain ramped over 5 ms (soloed bands sum). Exactly 1 when no band is soloed.
+                const float v = soloT[b] + rampC * (S.soloG[b] - soloT[b]);
+                S.soloG[b] = std::fabs(v - soloT[b]) < 1.0e-6f ? soloT[b] : v;
+            }
+            const float sg = S.soloG[b];
+            outL += dBandL[b] * gain * sg;
+            outR += dBandR[b] * gain * sg;
+            if (listening) {
+                // Listen: the delayed band after its sidechain filter, or what the stage removed from it (dry minus wet
+                // before make-up). Ramped over 5 ms; the listened signal never carries make-up or the solo gain.
+                float &wS = S.listenSide[b], &wD = S.listenDelta[b];
+                wS = sideT[b] + rampC * (wS - sideT[b]);
+                if (std::fabs(wS - sideT[b]) < 1.0e-6f) wS = sideT[b];
+                wD = deltaT[b] + rampC * (wD - deltaT[b]);
+                if (std::fabs(wD - deltaT[b]) < 1.0e-6f) wD = deltaT[b];
+                if (wS != 0.0f) {
+                    lsL += wS * runBq(S.hp[b], S.lhpL[b], dBandL[b]);
+                    lsR += wS * runBq(S.hp[b], S.lhpR[b], dBandR[b]);
+                    wSum += wS;
+                }
+                if (wD != 0.0f) {
+                    const float removed = 1.0f - dbToLinear(S.gainDb[b] - mk[b]);
+                    lsL += wD * dBandL[b] * removed;
+                    lsR += wD * dBandR[b] * removed;
+                    wSum += wD;
+                }
+            }
             const float gr = std::fmax(0.0f, -S.gainDb[b]);
             grMax[b] = gr > grMax[b] ? gr : grMax[b];
         }
-        if (!enabled && neutral) {
+        // With a lookahead the stage keeps running (it is the delay) so the audio does not jump when it would park.
+        if (!enabled && neutral && ringLen == 0) {
             clearState(S);
             S.parked = 1;
             break;
+        }
+        if (listening && wSum != 0.0f) {
+            const float keep = std::fmax(0.0f, 1.0f - wSum);
+            outL = keep * outL + lsL;
+            outR = keep * outR + lsR;
         }
         L[i] = outL;
         R[i] = outR;
@@ -377,7 +507,7 @@ void runMultiband(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t fram
 
 n60_status validateMultibandParam(const SnapHeader *h, const StageRec &r, uint32_t idx, float value) N60_RT_NONBLOCKING {
     if (idx >= r.paramCount || !multibandParamOk(idx, value, h->sampleRate)) return N60_STATUS_BAD_ARGUMENT;
-    return (idx == kLowSlope || idx == kHighSlope) ? N60_STATUS_UNSUPPORTED : N60_STATUS_OK;
+    return (idx == kLowSlope || idx == kHighSlope || idx == kLookahead) ? N60_STATUS_UNSUPPORTED : N60_STATUS_OK;
 }
 
 bool readMultiband(const SnapHeader *h, uint32_t stageId, n60_multiband_readback *out) {

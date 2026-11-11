@@ -34,7 +34,7 @@ extern "C" {
 #endif
 
 /* Bumped on any incompatible change to a struct or function below. */
-#define N60_GRAPH_ABI_VERSION 36u
+#define N60_GRAPH_ABI_VERSION 38u
 
 typedef struct n60_graph n60_graph; /* opaque */
 
@@ -195,7 +195,18 @@ typedef enum n60_stage_kind {
  *   14 release ms (10..1000), 17 knee dB (0..20), 20 sidechain HPF Hz (0..300, 0 off), 23 make-up dB (-12..12),
  *   26 auto release (0/1; program-dependent release, 0 = kernel parity).
  * Every parameter is live except the two slopes (topology; changing them needs a rebuild: UNSUPPORTED).
- * Latency 0. Running state is not carried across a rebuild. Telemetry: n60_graph_read_multiband. */
+ * ABI v37 (E28 S7c): paramCount 43 adds, per band (low, mid, high): 29 bypass (0/1; the band's target gain is 0 dB, so it
+ *  passes at unity once the smoother settles), 32 solo (0/1; a band with solo off has its output gain ramped to 0 over
+ *  5 ms while any band is soloed, soloed bands sum), 35 listen (0 off, 1 sidechain, 2 delta; the stage outputs, on both
+ *  lanes, the delayed band after its sidechain filter, or the delayed band times (1 - gain without make-up); 5 ms
+ *  crossfade; Swift allows one listener in the whole graph), 38 detector (0 peak, 1 RMS), then 41 RMS window ms (5..200)
+ *  and 42 lookahead frames (0..8192, topology: UNSUPPORTED live). One lookahead serves the stage: the detectors read the
+ *  undelayed bands and the audio path the delayed ones, so the bands stay aligned; the frames are the stage latency.
+ *  Memory: 6 rings of the lookahead length (4 bytes each) in the stage-shared block. paramCount 29 is bit-identical to
+ *  v25; a 43-value block with defaults (all 0, window 50 ms) is bit-identical too. Lookahead is in frames (Swift converts
+ *  from ms, up to 16384), both lanes, and reset (enabling from parked) clears the rings. Running state is carried across a
+ *  rebuild (E6 S12h), the rings only when the lookahead is unchanged; a stage with a lookahead never parks.
+ * Latency 0 unless the lookahead is set. Telemetry: n60_graph_read_multiband. */
 
 /* Loudness (ABI v24, E6 S12c). The stereo kernel's loudness match, loudness contour (simple and per-band) and dialogue
  * leveler, same arithmetic and order. One pair stage (laneA, laneB distinct, laneMask 0, capacityFrames 0); an off part is
@@ -506,7 +517,7 @@ typedef int (*n60_external_process_fn)(void *context, const float *const *in, fl
  *  both ears, as the kernel does for the LFE), [9] declared extra latency of the responses in frames
  *  (0..N60_GRAPH_MAX_DELAY_FRAMES; reported, never applied), then 10 + (set, source, ear, tap) floats:
  *  paramCount = 10 + O * N * 2 * taps, set-major, then source, then ear (0 left, 1 right), then tap.
- * ABI v36 (E13 S4): long responses. [10] = tail taps T (0 = none, else 1..one second at the graph rate) and
+ * ABI v38 (E13 S4): long responses. [10] = tail taps T (0 = none, else 1..one second at the graph rate) and
  *  [11] = 0 (reserved), and paramCount = 12 + O * N * 2 * taps + N * 2 * T: after the early responses come the
  *  late tails, one pair per source (no orientation index: the tail is shared by every orientation; with
  *  [8] the equal-ear source's two tails are averaged). The tail is response samples taps..taps+T-1 of the
@@ -998,7 +1009,7 @@ typedef struct n60_binaural_profile {
     uint32_t wrap;
     int32_t equalEarChannel;  /* layout channel index averaged to both ears (the LFE), or -1 */
     uint32_t declaredLatency;
-    uint32_t tailTaps;        /* ABI v36: late-tail taps per response (0 = none); see the Binaural stage */
+    uint32_t tailTaps;        /* ABI v38: late-tail taps per response (0 = none); see the Binaural stage */
     const float *tailResponses; /* tailTaps * layout.channelCount * 2 floats (copied): channel, ear, tap */
     float headYawDeg, headPitchDeg, headRollDeg;  /* initial head pose */
     const float *responses;   /* orientations * layout.channelCount * 2 * taps floats (copied) */

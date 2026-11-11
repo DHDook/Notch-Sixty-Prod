@@ -67,6 +67,10 @@ add_executable(n60core_ambient_sections_test tests/test_ambient_sections.c)
 set_target_properties(n60core_ambient_sections_test PROPERTIES C_STANDARD 11 LINKER_LANGUAGE CXX)
 target_link_libraries(n60core_ambient_sections_test PRIVATE n60core m)
 add_test(NAME n60core_ambient_sections COMMAND n60core_ambient_sections_test)
+add_executable(n60core_ambient_carry_test tests/test_ambient_carry.c)
+set_target_properties(n60core_ambient_carry_test PROPERTIES C_STANDARD 11 LINKER_LANGUAGE CXX)
+target_link_libraries(n60core_ambient_carry_test PRIVATE n60core m)
+add_test(NAME n60core_ambient_carry COMMAND n60core_ambient_carry_test)
 
 add_executable(n60core_external_test tests/test_external.c)
 set_target_properties(n60core_external_test PROPERTIES C_STANDARD 11 LINKER_LANGUAGE CXX)
@@ -231,6 +235,11 @@ add_test(NAME n60core_comp_extras COMMAND n60core_comp_extras_test)
 add_executable(n60core_exp_extras_test tests/test_exp_extras.cpp)
 target_link_libraries(n60core_exp_extras_test PRIVATE n60core)
 add_test(NAME n60core_exp_extras COMMAND n60core_exp_extras_test)
+
+# E28 S7c: multiband bypass, solo, listen, detector and lookahead (ABI v37).
+add_executable(n60core_mb_extras_test tests/test_mb_extras.cpp)
+target_link_libraries(n60core_mb_extras_test PRIVATE n60core)
+add_test(NAME n60core_mb_extras COMMAND n60core_mb_extras_test)
 
 # E6 S12c: loudness (match, contour, dialogue leveler) stage (ABI v24).
 add_executable(n60core_loudness_test tests/test_loudness.cpp)

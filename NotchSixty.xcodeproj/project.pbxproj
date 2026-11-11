@@ -234,6 +234,7 @@
 		A10000000000000000000014 /* ConvolutionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000027 /* ConvolutionTests.swift */; };
 		A100000000000000000E2205 /* FeatureFlagsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000E2206 /* FeatureFlagsTests.swift */; };
 		E28B700000000000000000B1 /* DynamicsExtrasS7bTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E28B700000000000000000B2 /* DynamicsExtrasS7bTests.swift */; };
+		E28B700000000000000000C1 /* DynamicsExtrasS7cTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E28B700000000000000000C2 /* DynamicsExtrasS7cTests.swift */; };
 		E4M100000000000000000014 /* SpeakerDriveDemandPolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4M100000000000000000013 /* SpeakerDriveDemandPolicyTests.swift */; };
 		A100000000000000000E1301 /* PresetInterchangeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000E1302 /* PresetInterchangeTests.swift */; };
 		A100000000000000000E1303 /* MultichannelCalibrationDesignerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000E1304 /* MultichannelCalibrationDesignerTests.swift */; };
@@ -354,6 +355,7 @@
 		E4F7000000000000000000A4 /* QuietZoneNoiseSurvey.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4F7000000000000000000A2 /* QuietZoneNoiseSurvey.swift */; };
 		E4F7000000000000000000B4 /* ConversationUnmasking.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4F7000000000000000000B2 /* ConversationUnmasking.swift */; };
 		E4F730B00000000000000001 /* ConversationUnmaskingInputs.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4F730B00000000000000000 /* ConversationUnmaskingInputs.swift */; };
+		E4F730C00000000000000001 /* ConversationUnmaskingGovernor.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4F730C00000000000000000 /* ConversationUnmaskingGovernor.swift */; };
 		E4F730A00000000000000011 /* AmbientUnmaskOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4F730A00000000000000010 /* AmbientUnmaskOverlay.swift */; };
 		E4F730B00000000000000003 /* SpeechEnvelopeHistory.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4F730B00000000000000002 /* SpeechEnvelopeHistory.swift */; };
 		E4F200000000000000000002 /* QuietZoneFeedForwardNoiseSurvey.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4F200000000000000000012 /* QuietZoneFeedForwardNoiseSurvey.swift */; };
@@ -395,6 +397,7 @@
 		E4F7000000000000000000A5 /* QuietZoneNoiseSurveyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4F7000000000000000000A3 /* QuietZoneNoiseSurveyTests.swift */; };
 		E4F7000000000000000000B5 /* ConversationUnmaskingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4F7000000000000000000B3 /* ConversationUnmaskingTests.swift */; };
 		E4F730B00000000000000005 /* ConversationUnmaskingInputTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4F730B00000000000000004 /* ConversationUnmaskingInputTests.swift */; };
+		E4F730C00000000000000005 /* ConversationUnmaskingWiringTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4F730C00000000000000004 /* ConversationUnmaskingWiringTests.swift */; };
 		E4F730A00000000000000021 /* AmbientUnmaskOverlayTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4F730A00000000000000020 /* AmbientUnmaskOverlayTests.swift */; };
 		E4F300000000000000000001 /* QuietZoneFeedForwardShadowPlan.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4F300000000000000000011 /* QuietZoneFeedForwardShadowPlan.swift */; };
 		E4F300000000000000000002 /* QuietZoneFeedForwardShadow.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4F300000000000000000012 /* QuietZoneFeedForwardShadow.swift */; };
@@ -692,6 +695,9 @@
 		E25F000000000000000000A1 /* ProgramSourceController.swift in Sources */ = {isa = PBXBuildFile; fileRef = E25F000000000000000000B1 /* ProgramSourceController.swift */; };
 		E25F000000000000000000A2 /* ProductionProgramSourceCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = E25F000000000000000000B2 /* ProductionProgramSourceCard.swift */; };
 		E25F000000000000000000A3 /* ProgramSourceControllerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E25F000000000000000000B3 /* ProgramSourceControllerTests.swift */; };
+		E29A0000000000000000B001 /* RoomModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = E29A0000000000000000A001 /* RoomModel.swift */; };
+		E29A0000000000000000B002 /* RoomModelAdapter.swift in Sources */ = {isa = PBXBuildFile; fileRef = E29A0000000000000000A002 /* RoomModelAdapter.swift */; };
+		E29A0000000000000000B003 /* RoomModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E29A0000000000000000A003 /* RoomModelTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -955,6 +961,7 @@
 		A10000000000000000000027 /* ConvolutionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConvolutionTests.swift; sourceTree = "<group>"; };
 		A100000000000000000E2206 /* FeatureFlagsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeatureFlagsTests.swift; sourceTree = "<group>"; };
 		E28B700000000000000000B2 /* DynamicsExtrasS7bTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DynamicsExtrasS7bTests.swift; sourceTree = "<group>"; };
+		E28B700000000000000000C2 /* DynamicsExtrasS7cTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DynamicsExtrasS7cTests.swift; sourceTree = "<group>"; };
 		E4M100000000000000000013 /* SpeakerDriveDemandPolicyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerDriveDemandPolicyTests.swift; sourceTree = "<group>"; };
 		A100000000000000000E1302 /* PresetInterchangeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PresetInterchangeTests.swift; sourceTree = "<group>"; };
 		A100000000000000000E1304 /* MultichannelCalibrationDesignerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MultichannelCalibrationDesignerTests.swift; sourceTree = "<group>"; };
@@ -1097,6 +1104,7 @@
 		E4F7000000000000000000A2 /* QuietZoneNoiseSurvey.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuietZoneNoiseSurvey.swift; sourceTree = "<group>"; };
 		E4F7000000000000000000B2 /* ConversationUnmasking.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationUnmasking.swift; sourceTree = "<group>"; };
 		E4F730B00000000000000000 /* ConversationUnmaskingInputs.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationUnmaskingInputs.swift; sourceTree = "<group>"; };
+		E4F730C00000000000000000 /* ConversationUnmaskingGovernor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationUnmaskingGovernor.swift; sourceTree = "<group>"; };
 		E4F730A00000000000000010 /* AmbientUnmaskOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AmbientUnmaskOverlay.swift; sourceTree = "<group>"; };
 		E4F730B00000000000000002 /* SpeechEnvelopeHistory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechEnvelopeHistory.swift; sourceTree = "<group>"; };
 		E4F200000000000000000012 /* QuietZoneFeedForwardNoiseSurvey.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuietZoneFeedForwardNoiseSurvey.swift; sourceTree = "<group>"; };
@@ -1138,6 +1146,7 @@
 		E4F7000000000000000000A3 /* QuietZoneNoiseSurveyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuietZoneNoiseSurveyTests.swift; sourceTree = "<group>"; };
 		E4F7000000000000000000B3 /* ConversationUnmaskingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationUnmaskingTests.swift; sourceTree = "<group>"; };
 		E4F730B00000000000000004 /* ConversationUnmaskingInputTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationUnmaskingInputTests.swift; sourceTree = "<group>"; };
+		E4F730C00000000000000004 /* ConversationUnmaskingWiringTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationUnmaskingWiringTests.swift; sourceTree = "<group>"; };
 		E4F730A00000000000000020 /* AmbientUnmaskOverlayTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AmbientUnmaskOverlayTests.swift; sourceTree = "<group>"; };
 		E4F300000000000000000011 /* QuietZoneFeedForwardShadowPlan.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuietZoneFeedForwardShadowPlan.swift; sourceTree = "<group>"; };
 		E4F300000000000000000012 /* QuietZoneFeedForwardShadow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuietZoneFeedForwardShadow.swift; sourceTree = "<group>"; };
@@ -1439,6 +1448,9 @@
 		E25F000000000000000000B1 /* ProgramSourceController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProgramSourceController.swift; sourceTree = "<group>"; };
 		E25F000000000000000000B2 /* ProductionProgramSourceCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductionProgramSourceCard.swift; sourceTree = "<group>"; };
 		E25F000000000000000000B3 /* ProgramSourceControllerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProgramSourceControllerTests.swift; sourceTree = "<group>"; };
+		E29A0000000000000000A001 /* RoomModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomModel.swift; sourceTree = "<group>"; };
+		E29A0000000000000000A002 /* RoomModelAdapter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomModelAdapter.swift; sourceTree = "<group>"; };
+		E29A0000000000000000A003 /* RoomModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomModelTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -1621,6 +1633,7 @@
 				A10000000000000000000027 /* ConvolutionTests.swift */,
 				A100000000000000000E2206 /* FeatureFlagsTests.swift */,
 				E28B700000000000000000B2 /* DynamicsExtrasS7bTests.swift */,
+				E28B700000000000000000C2 /* DynamicsExtrasS7cTests.swift */,
 				E4M100000000000000000013 /* SpeakerDriveDemandPolicyTests.swift */,
 				E11D00000000000000000012 /* MeasurementCoreTests.swift */,
 				E10A00000000000000000042 /* RoomCorrectionCoreTests.swift */,
@@ -1734,9 +1747,11 @@
 				E4F7000000000000000000A3 /* QuietZoneNoiseSurveyTests.swift */,
 				E4F7000000000000000000B3 /* ConversationUnmaskingTests.swift */,
 				E4F730B00000000000000004 /* ConversationUnmaskingInputTests.swift */,
+				E4F730C00000000000000004 /* ConversationUnmaskingWiringTests.swift */,
 				E4F730A00000000000000020 /* AmbientUnmaskOverlayTests.swift */,
 				E4F7000000000000000000C3 /* QuietZoneVirtualMicrophoneTests.swift */,
 				E4F7000000000000000000E3 /* QuietZoneHeadPositionTests.swift */,
+				E29A0000000000000000A003 /* RoomModelTests.swift */,
 				E4F7000000000000000000D3 /* QuietZoneZonesTests.swift */,
 				E4N100000000000000000012 /* OvernightPowerAssertionTests.swift */,
 				E4F300000000000000000014 /* QuietZoneFeedForwardShadowTests.swift */,
@@ -1963,10 +1978,13 @@
 				E4F7000000000000000000A2 /* QuietZoneNoiseSurvey.swift */,
 				E4F7000000000000000000B2 /* ConversationUnmasking.swift */,
 				E4F730B00000000000000000 /* ConversationUnmaskingInputs.swift */,
+				E4F730C00000000000000000 /* ConversationUnmaskingGovernor.swift */,
 				E4F730A00000000000000010 /* AmbientUnmaskOverlay.swift */,
 				E4F730B00000000000000002 /* SpeechEnvelopeHistory.swift */,
 				E4F7000000000000000000C2 /* QuietZoneVirtualMicrophone.swift */,
 				E4F7000000000000000000E2 /* QuietZoneHeadPosition.swift */,
+				E29A0000000000000000A002 /* RoomModelAdapter.swift */,
+				E29A0000000000000000A001 /* RoomModel.swift */,
 				E4F7000000000000000000D2 /* QuietZoneZones.swift */,
 				E4F200000000000000000012 /* QuietZoneFeedForwardNoiseSurvey.swift */,
 				E4F300000000000000000011 /* QuietZoneFeedForwardShadowPlan.swift */,
@@ -2478,10 +2496,13 @@
 				E4F7000000000000000000A4 /* QuietZoneNoiseSurvey.swift in Sources */,
 				E4F7000000000000000000B4 /* ConversationUnmasking.swift in Sources */,
 				E4F730B00000000000000001 /* ConversationUnmaskingInputs.swift in Sources */,
+				E4F730C00000000000000001 /* ConversationUnmaskingGovernor.swift in Sources */,
 				E4F730A00000000000000011 /* AmbientUnmaskOverlay.swift in Sources */,
 				E4F730B00000000000000003 /* SpeechEnvelopeHistory.swift in Sources */,
 				E4F7000000000000000000C4 /* QuietZoneVirtualMicrophone.swift in Sources */,
 				E4F7000000000000000000E4 /* QuietZoneHeadPosition.swift in Sources */,
+				E29A0000000000000000B002 /* RoomModelAdapter.swift in Sources */,
+				E29A0000000000000000B001 /* RoomModel.swift in Sources */,
 				E4F7000000000000000000E7 /* QuietZoneCameraHeadSource.swift in Sources */,
 				E4F7000000000000000000D4 /* QuietZoneZones.swift in Sources */,
 				E4F200000000000000000002 /* QuietZoneFeedForwardNoiseSurvey.swift in Sources */,
@@ -2612,6 +2633,7 @@
 				A10000000000000000000014 /* ConvolutionTests.swift in Sources */,
 				A100000000000000000E2205 /* FeatureFlagsTests.swift in Sources */,
 				E28B700000000000000000B1 /* DynamicsExtrasS7bTests.swift in Sources */,
+				E28B700000000000000000C1 /* DynamicsExtrasS7cTests.swift in Sources */,
 				E4M100000000000000000014 /* SpeakerDriveDemandPolicyTests.swift in Sources */,
 				E11D00000000000000000002 /* MeasurementCoreTests.swift in Sources */,
 				E10A00000000000000000032 /* RoomCorrectionCoreTests.swift in Sources */,
@@ -2727,9 +2749,11 @@
 				E4F7000000000000000000A5 /* QuietZoneNoiseSurveyTests.swift in Sources */,
 				E4F7000000000000000000B5 /* ConversationUnmaskingTests.swift in Sources */,
 				E4F730B00000000000000005 /* ConversationUnmaskingInputTests.swift in Sources */,
+				E4F730C00000000000000005 /* ConversationUnmaskingWiringTests.swift in Sources */,
 				E4F730A00000000000000021 /* AmbientUnmaskOverlayTests.swift in Sources */,
 				E4F7000000000000000000C5 /* QuietZoneVirtualMicrophoneTests.swift in Sources */,
 				E4F7000000000000000000E5 /* QuietZoneHeadPositionTests.swift in Sources */,
+				E29A0000000000000000B003 /* RoomModelTests.swift in Sources */,
 				E4F7000000000000000000D5 /* QuietZoneZonesTests.swift in Sources */,
 				E4N100000000000000000002 /* OvernightPowerAssertionTests.swift in Sources */,
 				E4F300000000000000000004 /* QuietZoneFeedForwardShadowTests.swift in Sources */,

@@ -367,6 +367,16 @@ final class ConversationUnmaskingInputTests: XCTestCase {
         }
     }
 
+    /// G6: the legacy kernel's ambient stage only boosts, so a cut can never reach the bridge's tap-point that way:
+    /// the snapshot refuses a negative level. Cuts exist only as the unified graph's AMBIENT trailer (S30a), which sits
+    /// before the same tap, and the engine refuses cuts when that graph is not running (ConversationUnmaskingWiringTests).
+    func testLegacyKernelSnapshotRefusesANegativeAmbientLevel() {
+        for rate in Self.rates {
+            var snapshot = N60DSPGraphSnapshotMakeUnity(rate)
+            XCTAssertFalse(N60DSPGraphSnapshotSetAmbientCompensation(&snapshot, -3, 0, 0, 0, true), "rate \(rate)")
+        }
+    }
+
     private static func rms(_ x: [Float]) -> Double {
         (x.reduce(0.0) { $0 + Double($1) * Double($1) } / Double(max(x.count, 1))).squareRoot()
     }
