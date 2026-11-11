@@ -287,3 +287,8 @@ add_executable(n60core_mimo_stage_test tests/test_mimo_stage.cpp)
 target_include_directories(n60core_mimo_stage_test PRIVATE src)
 target_link_libraries(n60core_mimo_stage_test PRIVATE n60core)
 add_test(NAME n60core_mimo_stage COMMAND n60core_mimo_stage_test)
+
+# E19 S5: MIMO safety (headroom term, budget, excursion cap).
+add_executable(n60core_mimo_safety_test tests/test_mimo_safety.cpp)
+target_link_libraries(n60core_mimo_safety_test PRIVATE n60core)
+add_test(NAME n60core_mimo_safety COMMAND n60core_mimo_safety_test)
