@@ -17,7 +17,7 @@ no conversation history.
    otherwise have to make; Slices, each sized for one PR of about 800–1,500 changed lines of
    product code, marked `needs-owner` or `low-risk` per the Merge policy in `CLAUDE.md`, each
    with its tests (deterministic, at the eight standard rates for DSP) and its bench checks
-   (deferred to E22); the feature flag; Open questions for the owner; an empty `## Gaps` section (convention in `docs/epics/README.md`); an empty `## Log`.
+   (deferred to E22); the feature flag (the last slice graduates it; removal is the FC phase after E22); Open questions for the owner; an empty `## Gaps` section (convention in `docs/epics/README.md`); an empty `## Log`.
 3. Keep it tight: decisions and acceptance criteria, not tutorials. Aim for under 2,500 words.
 4. Create branch `<epic-lowercase>/plan` from an up-to-date `main`, commit, push with
    `git push -u origin <branch>`, and open a PR labelled `needs-owner` titled

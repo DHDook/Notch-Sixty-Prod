@@ -3,6 +3,40 @@
 Unfinished epics merge to `main` dark, behind a feature flag that is off by default. This keeps
 `main` releasable while an epic lands over several PRs.
 
+## Lifecycle (owner decision, 11 Nov 2026: flag graduation)
+
+1. **Dark.** The flag defaults off. The epic's slices merge behind it.
+2. **Graduated.** The epic's software is done, wired through the production UI and passing its tests, every
+   gap in the epic closed. The flag gets `graduated: true` in `FeatureFlag.all`: it defaults **on**, in release
+   builds too (and in debug builds, where a stored override can still turn it off). The feature is available and
+   functional. Bench-dependent "is it good" acceptance is not part of the epic; it belongs to E22.
+3. **Removed.** The flag-cleanup phase (FC, after E22 and before E18) deletes the flag and its dead branch in small
+   per-epic PRs.
+
+Hard rules:
+
+- **Graduated means available, never armed.** Live ANC and live MIMO room treatment keep their arm switch
+  (`LiveTreatmentArm`, never persisted) and the written authorisation path. A flag graduating never arms anything.
+- **Definition of done is unchanged in strictness** (AGENTS.md section 12): a graduation slice needs an end-to-end
+  test through production wiring and every gap in its epic closed. A slice with an open ledger entry is not ticked.
+- **No new code may depend on a graduated flag.** It is an escape hatch until cleanup, nothing more.
+- **The flags-off path stays tested while flags exist:** nightly `macos-full` runs the suite with graduated flags
+  off as well as on (plan item FC1, `docs/epics/FC.md` G1).
+- **A release user can turn a graduated feature off** with the launch argument (below). Release builds still ignore
+  stored overrides.
+
+## Launch argument
+
+`-NotchSixtyFeatures <list>`: comma-separated entries, spaces around entries ignored.
+
+| Entry | Meaning |
+| --- | --- |
+| `id` or `id=on` | Switch the flag on |
+| `-id` or `id=off` | Switch the flag off (use this to disable a graduated feature) |
+
+Off wins if the same id appears both ways. The launch argument beats a stored override (debug builds) and the
+compiled default. Unknown ids and malformed entries are ignored. Example: `-NotchSixtyFeatures e4.zones,-e28.dynamics-extras`.
+
 ## Adding a flag
 
 1. Add an entry to `FeatureFlag.all` in `NotchSixty/State/FeatureFlags.swift`, with a stable `id`,
@@ -12,7 +46,9 @@ Unfinished epics merge to `main` dark, behind a feature flag that is off by defa
    Controllers take it as an initialiser argument so tests can inject one.
 3. Keep the shipping behaviour unchanged while the flag is off, and test both states.
 
-When the epic ships, delete the flag and every check that reads it in the same PR.
+When the epic's software is done, graduate the flag (`graduated: true`, keep it in `FeatureFlag.all`). Do not
+delete it; the flag-cleanup phase removes it, with every check that reads it, after E22. Do not add new code that
+depends on a graduated flag.
 
 ## Rules
 
@@ -21,12 +57,76 @@ When the epic ships, delete the flag and every check that reads it in the same P
 - **Debug builds** show a Developer section in Settings to switch flags on. The choice is stored
   as `feature.<id>` in `UserDefaults`.
 - **Release builds** ignore stored overrides, so a shipped build never shows unfinished work by
-  accident. For TestFlight testing, launch with `-NotchSixtyFeatures id1,id2`.
+  accident. Dark flags are off; graduated flags are on. For TestFlight testing, launch with
+  `-NotchSixtyFeatures id1,-id2` (see Launch argument).
 - Flags that aren't in `FeatureFlag.all` are always off. A stale override left by a removed
   flag, or a mistyped launch argument, can't switch anything on.
 - All persisted keys live in `NotchSixty/State/PreferenceKeys.swift`. Never rename a stored key.
 
-## Current flags
+## Flag registry (11 Nov 2026)
+
+Status: dark (default off), graduated (default on, stays until cleanup), removed (gone from `FeatureFlag.all`),
+planned (in an epic plan, not yet in code). Nothing is graduated yet; `e26.sub-aware-anc` is already on by default
+through `defaultEnabled` (owner decision, E26 S7) and converts to `graduated: true` in E26 S7. Cleanup owner is the
+FC phase's per-epic PR (`docs/epics/FC.md`) unless stated.
+
+| flag | epic | status | graduated-since | cleanup owner |
+| --- | --- | --- | --- | --- |
+| `e6.legacy-kernel` | E6 | dark (inverse escape hatch; never graduates) | n/a | E23 |
+| `e4.engine-lease` | E4 | dark | none | FC (E4) |
+| `e4.adaptive-tonal-live` | E4 | dark | none | FC (E4) |
+| `e4.earned-cap` | E4 | dark | none | FC (E4) |
+| `e4.feedforward-live` | E4 | dark | none | FC (E4) |
+| `e4.noise-survey` | E4 | dark | none | FC (E4) |
+| `e4.conversation-unmasking` | E4 | dark | none | FC (E4) |
+| `e4.virtual-microphone` | E4 | dark, no production reader | none | FC (E4) |
+| `e4.head-position-camera` | E4 | dark, no production reader | none | FC (E4) |
+| `e4.zones` | E4 | dark, no production reader | none | FC (E4) |
+| `e4.overnight` | E4 | dark | none | FC (E4) |
+| `e26.sub-aware-anc` | E26 | on by default (pre-policy `defaultEnabled`) | 6 Nov 2026 (as default) | FC (E26) |
+| `e9.long-fir` | E9 | dark | none | FC (E9) |
+| `e9.output-protection` | E9 | dark | none | FC (E9) |
+| `e13.headphones` | E13 | dark | none | FC (E13) |
+| `e19.mimo-treatment` | E19 | dark | none | FC (E19) |
+| `e28.dynamics-extras` | E28 | dark | none | FC (E28) |
+| `e29.room-model` | E29 | dark, no production reader | none | FC (E29) |
+| `e7.rate-adapt` | E7 | planned | none | FC (E7) |
+| `e15.follow-output` | E15 | planned | none | FC (E15) |
+| `e17.export`, `e17.dither` | E17 | planned | none | FC (E17) |
+| `e20.parallel-render`, `e20.multirate` | E20 | planned (E20 S6 to S8) | none | FC (E20) |
+| `e21.core-designers` | E21 | planned | none | FC (E21) |
+| `e8.routing-matrix`, `e8.lab-routed-ways`, `e10.mixed-phase-correction`, `e11.measurement-suite`, `e12.guided-setup`, `e13.byo-import`, `e25.outputs-and-speakers`, `e27.eq-safety` | E8, E10, E11, E12, E13, E25, E27 | removed (before this policy, at epic ship) | n/a | done |
+
+## Audit of completed and partly completed epics (11 Nov 2026)
+
+Read against AGENTS.md section 12. "Reachable" means a production reader of the flag and a UI path. No open-question
+gap blocks any epic except where stated. Bench or owner acceptance moves to E22 (`docs/PROGRAM_PLAN.md`); a bench-only
+gap may then be closed as "moved to E22" once E22 holds a matching unchecked item.
+
+| Epic | Flag | State | Blockers to graduation |
+| --- | --- | --- | --- |
+| E4 | `e4.engine-lease`, `e4.adaptive-tonal-live`, `e4.earned-cap`, `e4.feedforward-live` | Built and reachable (Quiet Zone card, behind the arm) | G16 (open-question: may live-output flags graduate before E22), G8 (feed-forward bridge refuses above 192 kHz), S30d G12 to G14 (PR #476 open), then the new slice S32 |
+| E4 | `e4.noise-survey`, `e4.conversation-unmasking`, `e4.overnight` | Built and reachable | S30d G12 to G14 (unmasking), then S32 |
+| E4 | `e4.virtual-microphone`, `e4.head-position-camera`, `e4.zones` | Offline maths only; no production reader, so still `[~]` built dark | G15: wiring has no owning slice until S32 |
+| E6 | `e6.legacy-kernel` | Software complete bar S12h part 3; the inverse escape hatch | Never graduates; E23 deletes it; scoped gaps owned by E22 and E23 |
+| E7 | `e7.rate-adapt` (planned) | Only S1 built; flag not yet in code | S2 to S5; S5 reworded to graduate |
+| E9 | `e9.long-fir`, `e9.output-protection` | Reachable (Outputs UI, headroom assistant); 11 items `[~]` (S2d G9, S5 hard-limit and flag-off tests, S7b) | Close `[~]` items; G18, G25, G26 are bench (move to E22); no ship slice existed, new S8 |
+| E13 | `e13.headphones` | S3, S4, S7 reachable behind the flag; S5 not built | S5; software gaps G7, G9, G10, G12; bench gaps G2 to G6, G8, G11 move to E22; S8 reworded |
+| E15, E17, E21 | planned flags | Nothing built | Whole epics; ship slices reworded |
+| E19 | `e19.mimo-treatment` | Designer only; S5 PR open; stage not published (S6 to S11 unbuilt) | Not reachable; 16 scoped gaps; live treatment keeps its arm; S11 reworded |
+| E20 | `e20.parallel-render`, `e20.multirate` (planned) | S5 core built, no host threads, no flag in code | S6 to S10; S10 and G1 reworded (graduate before the bench, remove in FC) |
+| E26 | `e26.sub-aware-anc` | On by default, 36 `[~]` items | G13, G14, G33, G35, G39, G40 software gaps; bench gaps G10, G11, G19, G23, G24, G28, G30 move to E22; G18 is post-v1 |
+| E28 | `e28.dynamics-extras` | S7a to S7c merged, S7d part 1 merged, part 2 PR #475 open; reachable on the Dynamics page | S7d part 2 gaps (G21, G23, G26, G33 to G35, G37, G39, G40); S8 reworded (owner listen moves to E22) |
+| E29 | `e29.room-model` | S1 only; no production reader | S2 to S8 |
+| E8, E10, E11, E12, E25, E27 | removed | Flags gone before this policy; audited by the 6 Nov programme audit | none |
+
+Flag-removal-at-ship slices found and reworded to "graduate" in this PR: E7 S5, E13 S8, E15 S4, E17 S5, E19 S11,
+E20 S10, E21 S14, E26 S7, E28 S8, E29 S9, and E4's S30 ship note. Epics whose completion depended on owner
+acceptance or the bench before the flag could go: E4 (S30 bench), E19 (E22 bench before ship), E20 (E22 bench before
+removal), E26 (E22 sub checks), E28 (owner listen), E9 ("owner enables"), E13 (G8 bench). The acceptance part moves to
+E22; the software part graduates.
+
+## Flag details
 
 | id | epic | gates |
 | --- | --- | --- |

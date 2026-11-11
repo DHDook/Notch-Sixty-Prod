@@ -80,6 +80,61 @@ final class FeatureFlagsTests: XCTestCase {
         XCTAssertFalse(flags(.launchArgumentOnly, arguments: ["-NotchSixtyFeatures"]).isEnabled(draft))
     }
 
+    // Flag graduation (owner decision, 11 Nov 2026).
+    private let graduatedFlag = FeatureFlag(id: "grad", title: "Graduated", epic: "E5", graduated: true)
+
+    private func gradStore(_ policy: FeatureFlags.OverridePolicy, arguments: [String] = []) -> FeatureFlags {
+        FeatureFlags(known: [draft, graduatedFlag], defaults: defaults, policy: policy, arguments: arguments)
+    }
+
+    func testGraduatedFlagDefaultsOnInReleaseAndDebug() {
+        XCTAssertTrue(gradStore(.launchArgumentOnly).isEnabled(graduatedFlag))
+        XCTAssertTrue(gradStore(.storedOverrides).isEnabled(graduatedFlag))
+        XCTAssertFalse(gradStore(.launchArgumentOnly).isEnabled(draft), "a dark flag stays off")
+    }
+
+    func testReleaseUserCanTurnAGraduatedFeatureOffWithEitherSyntax() {
+        for value in ["-grad", "grad=off", " -grad , unifiedGraph", "grad=OFF"] {
+            let store = gradStore(.launchArgumentOnly, arguments: ["App", "-NotchSixtyFeatures", value])
+            XCTAssertFalse(store.isEnabled(graduatedFlag), value)
+            XCTAssertTrue(store.isForcedByLaunchArgument(graduatedFlag), value)
+        }
+        let on = gradStore(.launchArgumentOnly, arguments: ["App", "-NotchSixtyFeatures", "unifiedGraph=on,-grad"])
+        XCTAssertTrue(on.isEnabled(draft))
+        XCTAssertFalse(on.isEnabled(graduatedFlag))
+    }
+
+    func testExplicitOffBeatsOnAndStoredOverrides() {
+        let both = gradStore(.launchArgumentOnly, arguments: ["-NotchSixtyFeatures", "grad,-grad"])
+        XCTAssertFalse(both.isEnabled(graduatedFlag), "off wins when an id is both on and off")
+        defaults.set(true, forKey: "feature.grad")
+        defaults.set(false, forKey: "feature.unifiedGraph")
+        let debug = gradStore(.storedOverrides, arguments: ["-NotchSixtyFeatures", "-grad,unifiedGraph"])
+        XCTAssertFalse(debug.isEnabled(graduatedFlag), "launch off beats a stored on")
+        XCTAssertTrue(debug.isEnabled(draft), "launch on beats a stored off")
+    }
+
+    func testReleaseIgnoresStoredOffForAGraduatedFlagButDebugHonoursIt() {
+        defaults.set(false, forKey: "feature.grad")
+        XCTAssertTrue(gradStore(.launchArgumentOnly).isEnabled(graduatedFlag))
+        XCTAssertFalse(gradStore(.storedOverrides).isEnabled(graduatedFlag))
+    }
+
+    func testMalformedLaunchEntriesAreIgnored() {
+        let parsed = FeatureFlags.launchSwitches(in: ["-NotchSixtyFeatures", "-, =off,a=maybe,,b=on,-c"])
+        XCTAssertEqual(parsed.on, ["b"])
+        XCTAssertEqual(parsed.off, ["c"])
+        XCTAssertFalse(gradStore(.launchArgumentOnly, arguments: ["-NotchSixtyFeatures", "-nosuch"]).isEnabled(draft))
+    }
+
+    /// Graduation means available, never armed: the live ANC and live MIMO flags must never graduate.
+    func testLiveTreatmentFlagsNeverGraduate() {
+        for flag in [FeatureFlag.ancEngineLease, .adaptiveTonalLive, .earnedCap, .feedForwardLive, .mimoTreatment] {
+            XCTAssertFalse(flag.graduated, flag.id)
+            XCTAssertFalse(flag.resolvedDefault, flag.id)
+        }
+    }
+
     func testUnknownFlagsAreAlwaysOff() {
         let retired = FeatureFlag(id: "retired", title: "Retired", epic: "E0", defaultEnabled: true)
         defaults.set(true, forKey: "feature.retired")

@@ -31,6 +31,10 @@ so everything you need is in the task message, `CLAUDE.md`, the epic's section o
    standard rates for DSP). Trace the feature from the user action to the engine (AGENTS.md
    section 12): no `Unconnected*` production defaults; anything not wired is `[~]` with an owning
    slice, and any "not wired" or "left for" note becomes an unchecked plan item.
+   Flags: an epic's last slice graduates its flag (`graduated: true`, default on, stays in
+   `FeatureFlag.all`); never remove a flag at ship (removal is the FC phase after E22). Graduated
+   means available, never armed (live ANC and MIMO keep `LiveTreatmentArm`). No new code may depend
+   on a graduated flag. Bench "is it good" acceptance goes to E22.
 5. Verify with the build-test-runner agent, affected test classes and harnesses only. If the
    change touches the engine, `NotchSixty/Audio/Realtime`, Core Audio, or anything called from
    an audio callback, run the realtime-reviewer agent and fix what it flags. At most two fix

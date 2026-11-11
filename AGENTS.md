@@ -200,7 +200,11 @@ If a PR introduces DSP math, cite the public specification or derivation used to
 - Name branches `e<n>/<slice>` and name the program-plan epic (`docs/PROGRAM_PLAN.md`) in every branch, commit and PR.
 - Unfinished user-visible work merges dark behind its epic's feature flag (`FeatureFlag.all` in `NotchSixty/State/FeatureFlags.swift`; see `docs/FEATURE_FLAGS.md`). Flags default off. Release builds ignore stored overrides and honour only the `-NotchSixtyFeatures` launch argument.
 - Only Swift reads flags. The realtime engine never does: Swift decides and publishes the resulting configuration through the normal snapshot path.
-- A flag is removed, with its dead branch, once the epic ships.
+- **Flag graduation (owner decision, 11 Nov 2026).** An epic ends when its software is done, wired through production UI and passing its tests, and its flag is *graduated*: it stays in `FeatureFlag.all` but defaults on, in release builds too (`graduated: true`). Owner acceptance and bench-dependent "is it good" checks are not part of the epic; they belong to E22. Flags are not removed at ship. Removal is a separate flag-cleanup phase after E22 and before E18, run as small per-epic PRs.
+  - Graduated means *available*, never *armed*. Live ANC and live MIMO room treatment keep their arm switch (`LiveTreatmentArm`, never persisted) and written authorisation path. Graduating a flag never arms anything.
+  - No new code may depend on a graduated flag. A graduated flag exists only as an escape hatch until cleanup.
+  - A release user can switch a graduated feature off with `-NotchSixtyFeatures -<id>` (or `<id>=off`); `<id>` or `<id>=on` switches one on. Off wins over on. Release builds still ignore stored overrides.
+  - While flags exist, the flags-off path stays tested: nightly `macos-full` runs the suite with graduated flags off as well as on (owned by FC1 in `docs/PROGRAM_PLAN.md`).
 
 CI is three workflows:
 
@@ -215,7 +219,7 @@ Do not add per-PR or per-branch workflows. Extend one of these three instead.
 
 - `[x]` in a plan means reachable from the shipped UI through production wiring. Code that is built but not wired is `[~]` ("built dark") and names the slice that wires it.
 - A "not wired", "left for" or "follow-up" note in an epic Log becomes an unchecked plan item with an owning slice. A slice with an open ledger entry is not ticked.
-- A flag-removal or "ship" slice needs an end-to-end test through production wiring and no open ledger entries for its epic.
+- A flag-graduation (or "ship") slice needs an end-to-end test through production wiring and no open ledger entries for its epic. A gap whose only remaining work is a bench or owner acceptance check may be closed with "moved to E22" only when E22 holds a matching unchecked item; every software gap must be fixed first. The same test is needed again by a flag-cleanup PR only for the behaviour it touches.
 - Production code has no `Unconnected*` (always-unavailable) defaults on injectable services; tests inject fakes explicitly.
 - Every PR body states "Reachable from UI: yes/no", with the path from the user action to the engine.
-- Every epic file has a `## Gaps` ledger (`docs/epics/README.md`). A slice with an `open-question` gap is not ticked. A `scoped` gap needs an unchecked plan item in its owning slice. A flag-removal or "ship" slice needs every gap in its epic `closed`.
+- Every epic file has a `## Gaps` ledger (`docs/epics/README.md`). A slice with an `open-question` gap is not ticked. A `scoped` gap needs an unchecked plan item in its owning slice. A flag-graduation or "ship" slice needs every gap in its epic `closed`.

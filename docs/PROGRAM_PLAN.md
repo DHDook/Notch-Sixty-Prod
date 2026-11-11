@@ -22,6 +22,7 @@ with them, these decisions win until E1/E21 update `AGENTS.md`.
 | v1 timing | Ship only when every scoped epic is complete, for a single high-impact launch |
 | Engine language | C++20/23 for the whole engine core (realtime kernel and design maths) behind one versioned C interface; Swift stays for the macOS app |
 | Engine performance architecture | Whole-buffer processing, multirate processing for low-frequency paths, multiple realtime threads, and best-in-class algorithms |
+| Flag graduation (11 Nov 2026) | An epic ends when its software is done, wired through the production UI and passing its tests, and its flag is graduated (stays in `FeatureFlag.all`, defaults on in release builds). Graduated means available, never armed: live ANC and MIMO keep `LiveTreatmentArm`. Flags are removed in the flag-cleanup phase (FC) after E22 and before E18. Bench "is it good" acceptance moves to E22. A release user can turn a graduated feature off with `-NotchSixtyFeatures -<id>` |
 | New engine quality (20 Oct 2026) | The unified graph is at least equal to `N60RenderKernel` in every area and better where it can be; the kernel stays as a frozen fallback until E23 deletes it before v1 |
 
 ## Epics at a glance
@@ -57,7 +58,8 @@ platforms; E6 (the unified graph) is the critical path, because eleven later epi
 | E16 | Automation and remote | 4 | E6 | Claude Code (Mac) | App Intents and the local API ship; the API is ready for a future iPhone client |
 | E17 | Export and dither | 4 | E8, E10 | Claude Code (Mac) | MiniDSP, APO and WAV exports; automatic dither |
 | E23 | Legacy engine removal | 4 | E6 (incl. S12a–S12h), E4 S11, E7–E17 | Claude Code (Mac) | `N60RenderKernel`, the old N-channel path and the `e6.*` flags are gone; full suite green |
-| E22 | Hardware validation | 4 | all software epics | Bench | Every deferred bench check passes on `main` at every rate |
+| E22 | Hardware validation | 4 | all software epics | Bench | Every deferred bench check and owner acceptance check (including those that no longer gate a flag graduation) passes on `main` at every rate |
+| FC | Flag cleanup (owner, 11 Nov 2026) | 4 | E22 | Claude Code (Mac) | Every graduated flag and its dead branch removed in small per-epic PRs; nightly flags-off CI ran while flags existed |
 | E18 | Launch readiness | 4 | all | Owner + Claude Code | Signed, reviewed, accessible, competitive ABX done, App Store live |
 
 ## Execution order (owner, 31 Oct 2026; E24 and E25 added 1 Nov 2026; E26 added 4 Nov 2026; E27 added 7 Nov 2026; E28 added 7 Nov 2026)
@@ -86,8 +88,8 @@ reviewers compare with Dirac and REW), then engine depth, then breadth.
 10. E21 Portable C++ core, remaining items
 11. E14 Upmixer, E15 Device-aware profiles, E17 Export and dither, E16 Automation and remote
 12. E23 Legacy engine removal
-13. E29 Shared room position model (owner, 9 Nov 2026: unparked, in v1; plan `docs/epics/E29.md`; flag `e29.room-model`)
-14. E3 Hardware acceptance, then E22 Hardware validation, then E18 Launch readiness (owner-led, last) (owner, 11 Nov 2026)
+13. E29 Shared room position model (owner, 9 Nov 2026: unparked, in v1; plan `docs/epics/E29.md`; flag `e29.room-model`, graduated in S9, removed in FC)
+14. E3 Hardware acceptance, then E22 Hardware validation, then FC flag cleanup, then E18 Launch readiness (owner-led, last) (owner, 11 Nov 2026; FC added 11 Nov 2026, flag graduation: epics graduate their flag instead of removing it; FC1, the flags-off nightly, lands before the first graduation)
 
 ## Phase 1 — Consolidate and qualify
 
@@ -131,6 +133,7 @@ decision, so Phase 2 starts without it; every later bench check is collected the
 - [ ] Run the PR97 hardware timing calibration and the PR99 physical verification campaign on the bench
 - [ ] Define the live-ANC authorisation criteria in writing, then switch `liveANCQualified` only through that path
 - [ ] Re-qualify on the unified graph after E6 lands, and publish the measurement method for reviewers
+- [ ] S32 `e4/graduate-flags`: graduate the E4 flags (non-live flags first; live-output flags only after the owner answers G16; arm unchanged); wiring of `e4.virtual-microphone`, `e4.head-position-camera`, `e4.zones` first (G15)
 - [ ] Class-leading roadmap (owner, 27 Oct 2026; `docs/epics/E4.md` S12–S31): safety foundation (arm hardening, acoustic twin, engine lease, live howl guard, "do no harm" verifier, flight recorder); adaptive tonal live with tone glide, earned cap and excursion cap; upstream reference microphone with cross-device clocking; virtual microphone and head-tracked zones; noise survey, overnight mode, Conversation Focus unmasking, reviewer kit
   - [~] S30a `e4/unmask-ambient-stage`: `AMBIENT` stage carries up to 17 live cut-only peaking sections (ABI v32); built, but nothing sets the cuts until S30c, so the stage is dark; wired by S30c
   - [~] S30a overlay: `AmbientUnmaskOverlay` section fit and trailer builder built dark behind `AmbientCompensationTarget.unmaskingCutsDB`; wired by S30c
@@ -152,6 +155,7 @@ Dirac now sells ART on the Mac, so this needs the same path to authorisation as 
 - [~] S4 `e19/mimo-stage`: realtime `N60_STAGE_MIMO` (ABI 32) built dark, not published until S6 (see `docs/epics/E19.md`)
 - [~] Headroom and excursion safety per contributing speaker: S5 `e19/mimo-safety` built dark, PR open; not published until S6 (see `docs/epics/E19.md`)
 - [ ] Authorise live treatment only through the PR75 verification path, then re-qualify on the unified graph
+- [ ] S11 graduate `e19.mimo-treatment` (available, never armed; arm and permit unchanged; the bench no longer gates it; removal is the FC phase)
 
 ## Phase 2 — Unified engine
 
@@ -198,6 +202,7 @@ Gate G2 passed on 2026-10-25 (commit 07e82c6)
 - [ ] Run the XCTest acoustic reference lab at 44.1, 48, 88.2, 96, 176.4, 192, 352.8 and 384 kHz
 - [ ] Check Audio Unit hosting: report clearly when a plug-in refuses a rate
 - [ ] Bench: confirm CPU headroom at 384 kHz on the slowest supported Mac
+- [ ] S5 `e7/rate-matrix-ship` graduates `e7.rate-adapt` (default on; removal is the FC phase)
 
 ### E8 Routing matrix and crossovers
 
@@ -216,6 +221,7 @@ Gate G2 passed on 2026-10-25 (commit 07e82c6)
 - [~] Per-output limiter, true-peak guard and soft clip, matching the stereo chain (E9 S5 built dark behind `e9.output-protection`; wiring: E9 S5b for the Outputs UI and S5c for routed outputs, binaural and debounce done; G17 dropped by the owner)
 - [~] Move the program FIR onto the 262,144-tap non-uniform convolver (E9 S1 built dark; S3 sets firScheme 1 and lifts the Swift guards behind e9.long-fir, PR #464; flag stays dark until S2c and E22 bench)
 - [~] Long FIR rebuild: lockstep lazy carry with 256 KiB per-callback budget, changed-tap seeding, chunked or O(1) scheme 1 reset (E9 S2 built dark, PR #464; S3 wires Swift behind e9.long-fir; S2b follow-ups and E22 bench items open)
+- [ ] S8 `e9/graduate-flags`: graduate `e9.long-fir` and `e9.output-protection` (default on) once the `[~]` software items close; bench items move to E22; removal is the FC phase
 - [~] Per-output headroom assistant (E9 S6 core maths `n60/headroom.h` merged; E9 S7 Swift model, readout and Apply/Undo built behind e9.output-protection, PR #464; S7b coverage and bit-exact Undo test next)
 
 ### E20 Engine performance
@@ -232,6 +238,7 @@ chain once per frame, with no SIMD, on one thread.
 - [~] Set flush-to-zero at callback entry instead of scanning every sample for denormals; keep the NaN guard at the output (E20 S2 `e20/fp-env-and-rt-checks` built, partial: FTZ guard at graph and bridge entry done; per-sample flushes removed in E20 S3 `e20/simd-biquads-and-loops` (G10 closed); zero-tail tests for the removed flushes done in E20 S4 with no-subnormal checks only; tails not settled to zero is G18, owner S10)
 - [~] RealtimeSanitizer plus `nonblocking` / `nonallocating` attributes on every realtime entry point, run in CI (E20 S2 `e20/fp-env-and-rt-checks` built, partial: `core-rtsan` job and core function-effects annotations done; bridge callbacks cannot take the attribute and parity suite is not under RTSan: G9, G11, E20 S10)
 - [~] CI benchmarks: per-stage ns/sample and worst-case callback time at 48, 192 and 384 kHz, with fail thresholds (E20 S1 `e20/bench-baselines` built, PR #448: harness, profile hooks, `macos-full` step, `budgets.json` warn only; baseline JSON is an owner step after the first nightly (G2); fail enforcement wiring is E20 S10 (G3))
+- [ ] S10 graduates `e20.parallel-render` and `e20.multirate` (default on, before the E22 bench); removal is the FC phase after the bench shows no overloads with workers
 - [ ] UI: move `ObservableObject` controllers (23 `@Published` in `AudioIOEngine`, 33 in `RoomTreatmentAdvisorController`) to `@Observable` (drawing meters with Canvas at display rate moved to E28 S1 and S5, owner, 7 Nov 2026)
 - Moved to E28 (owner, 7 Nov 2026): user-facing dynamics meters from the E6 S8c readbacks (gain reduction on the compressor, expander and limiter controls in E28 S5; true-peak beside the output meter and a latching over-range indicator in E28 S1)
 
@@ -249,6 +256,7 @@ Audio types in four bridges. The bigger gap is the DSP maths inside the Swift de
 - [ ] Choose a linear-algebra library after licence review (Eigen is MPL-2.0)
 - [ ] Replace `AudioBufferList` in the bridges with plain non-interleaved float buffers; keep Core Audio in the macOS backend
 - [ ] Move the DSP maths out of Swift into the core in order of value: measurement analysis, room-correction FIR and target design, multi-sub and MIMO design, speaker optimiser, ANC design
+- [ ] S14 graduates `e21.core-designers` (default on); deletion of the Swift implementations and the flag is the FC phase
 - [ ] Shared JSON schemas for profiles and projects
 - [ ] CMake build, with Linux and Windows CI running the core tests and the acoustic reference lab
 - [ ] Update `AGENTS.md`: the core may not depend on Apple frameworks, plus the C++ realtime rules
@@ -353,7 +361,7 @@ it, behind `e26.sub-aware-anc`. Live output stays behind the per-feature arm.
   - [ ] S6: full end-to-end twin harness from sweeps
   - [~] S7 `e26/ship` (#374), part 1: `e26.sub-aware-anc` defaults on, G5 and G12 closed; G1 host feed open (G9 closed in S7c), so S7 is not ticked and the flag stays
   - [x] S7c `e26/profile-sub-measurement` (PR #377): class A sub measurement (two seat passes, nine leakage passes, per-output leakage, record schema 2) reachable from the sub button under `e26.sub-aware-anc`; class A arming waits for S7b; bench: E22
-- [ ] Flag removed after the E22 sub bench checks (owner decision)
+- [ ] Flag graduated (E26 S7: `defaultEnabled` becomes `graduated: true`; software gaps closed, bench-only gaps moved to E22; owner decision 11 Nov 2026 replaces "removed after the E22 sub bench checks"); removal is the FC phase
 
 ### E27 Equalizer page world-class polish (owner, 7 Nov 2026)
 
@@ -386,7 +394,7 @@ S1–S6b flagless; every dynamics extra (S7a–S7d) behind the one flag `e28.dyn
 - [~] S7b expander hold, soft knee, detector, sidechain high-pass and link; sidechain and delta listen (needs-owner, engine; built dark behind `e28.dynamics-extras`, PR pending; wiring in S7d)
 - [~] S7c multiband extras on the core stage ported by E6 S12d: per-band bypass, solo, listen and detector, one lookahead, auto-release toggle (needs-owner, engine; built dark behind `e28.dynamics-extras`, ABI v37, PR pending; wiring in S7d; G39, G40)
 - [~] S7d Dynamics page controls for every extra, disabled with a reason where the kernel renders (part 1 built behind `e28.dynamics-extras`: rows, listen, solo, banner, G8, G19, G36; part 2 open: lab and zero-allocation cases, latency totals, readouts, G21, G23, G26, G33 to G35, G37, G39, G40)
-- [ ] S8 flag removed (owner decision; after S7a–S7d and the owner's listen)
+- [ ] S8 flag graduated (after S7a–S7d; the owner's listen moves to E22; removal is the FC phase)
 
 ## Phase 4 — Complete scope and launch
 
@@ -400,6 +408,7 @@ complete, speaker ANC qualified, and a full hardware regression passing at every
 - [x] One-click PEQ from an imported response and a chosen target, using the existing model fitter
 - [~] Live PEQ and crossfeed tuning while playing (from E6): S3 built behind `e13.headphones` (`e13/live-headphone-tuning`, PR #456; needs-owner); bench in E22
 - [~] Raise the HRIR cap for room-included BRIRs (S4 `e13/brir-long-tail` built behind `e13.headphones`, PR pending, needs-owner; SOFA long import is limit-level only, G10; wiring: E13 S8); live HRTF interpolation with head tracking (S5)
+- [ ] S8 `e13/ship` graduates `e13.headphones` (default on) once S5 and the software gaps close; bench gaps move to E22; removal is the FC phase
 - [~] In-ear-microphone BRIR capture for personal virtual speakers (S6 core merged; S7 guided flow built behind `e13.headphones`; bench in E22)
 
 ### E14 Upmixer
@@ -413,6 +422,7 @@ Plan: `docs/epics/E15.md` (awaiting owner approval; flag `e15.follow-output`).
 
 - [ ] Opt-in "follow system output" mode that recalls the profile bound to each output UID
 - [ ] Keep today's fixed-output policy as the default
+- [ ] S4 `e15/ship` graduates `e15.follow-output` (default on; the mode still defaults to fixed; removal is the FC phase)
 
 ### E16 Automation and remote
 
@@ -429,6 +439,7 @@ Plan: `docs/epics/E17.md` (awaiting owner approval; flags `e17.export`, `e17.dit
 
 - [ ] Filter export to MiniDSP, Equalizer APO and WAV convolution sets
 - [ ] Automatic TPDF dither only when the device's physical format is 16-bit integer
+- [ ] S5 `e17/ship` graduates `e17.export` and `e17.dither` (default on; removal is the FC phase)
 
 ### E23 Legacy engine removal
 
@@ -446,6 +457,8 @@ unified graph only.
 
 ### E22 Hardware validation
 
+Owner decision, 11 Nov 2026 (flag graduation): bench-dependent "is it good" acceptance and owner listening checks that used to gate an epic's flag removal live here; epics no longer wait for them to graduate their flag. A bench-only gap may be closed in its epic as "moved to E22" once an unchecked item here matches it.
+
 Owner decision, 18 Oct 2026: there is no bench access for now, so every bench check is deferred to this epic, which runs once the software work is built. Software slices keep listing their checks under "Bench checks" in `docs/epics/E<n>.md`; this epic collects and runs them.
 
 - [ ] Collect every epic's "Bench checks" list and the E3 cases H01–H08 into one campaign
@@ -461,8 +474,20 @@ Owner decision, 18 Oct 2026: there is no bench access for now, so every bench ch
 - [ ] E27 owner release-build verification (owner decision 7 Nov 2026): Equalizer page running-window checks G3, G5, G9, G12, G16 and the DAC checks G14 (Listen ends on transport stop, glitch-free linear-phase A/B), per the checklist in `docs/epics/E27.md` Bench checks
 - [ ] E9 S5 (G18): sub output under a +6 dB bass-heavy track, limiter audible check and loopback peak (E9 S5 bench item)
 - [ ] Feed the results into the live-authorisation slices (E4 S10, E19), which still need real evidence
+- [ ] Carried in by flag graduation (11 Nov 2026): E4 S30 checks, E19 modal-decay campaign, E20 no-overload-with-workers (gates FC removal of `e20.*`), E26 sub bench gaps (G10, G11, G19, G23, G24, G28, G30), E28 owner listen to S7a to S7d, E13 G8 (96 kHz tail versus 384 kHz benchmark), E9 bench lines (G18, G25, G26)
+
+### FC Flag cleanup (owner, 11 Nov 2026)
+
+Plan: `docs/epics/FC.md`. Epics graduate their flag at the end (default on, stays in `FeatureFlag.all`; AGENTS.md
+section 11); this phase removes the flags after the E22 bench, as small per-epic PRs.
+
+- [ ] FC1 `fc/flags-off-ci`: nightly `macos-full` runs the suite with graduated flags off as well as on (before the first graduation)
+- [ ] Per-epic removal PRs, in order: E26, E28, E9, E13, E4, E19, E7, E15, E17, E20, E21, E29 (`e6.legacy-kernel` goes with E23)
+- [ ] Never remove a flag with an open E22 bench item against its feature; live ANC and MIMO keep `LiveTreatmentArm`
 
 ### E18 Launch readiness
+
+Runs after the FC flag cleanup (owner, 11 Nov 2026).
 
 - [ ] Developer ID and App Store signing, notarisation and App Review
 - [ ] Legal and provenance review against `docs/PROVENANCE.md` and the SBOM

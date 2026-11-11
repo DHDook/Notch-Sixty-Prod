@@ -13,11 +13,22 @@ struct FeatureFlag: Hashable, Identifiable, Sendable {
     /// The program-plan epic that owns the flag, for example "E6".
     let epic: String
     var defaultEnabled = false
+    /// Flag graduation (owner decision, 11 Nov 2026): the epic's software is done, wired and tested, so the feature is
+    /// available by default in release builds (and in debug builds, unless a stored override says otherwise). A
+    /// graduated flag stays in `FeatureFlag.all` until the flag-cleanup phase removes it. "Graduated" means available,
+    /// never armed: live ANC and live MIMO treatment keep their arm switch and written authorisation path, and their
+    /// flags never graduate to arming anything. No new code may depend on a graduated flag. A user turns a graduated
+    /// feature off with `-NotchSixtyFeatures -<id>`. Nothing is graduated yet.
+    var graduated = false
+
+    /// The value used when neither a launch argument nor (debug builds) a stored override decides the flag.
+    var resolvedDefault: Bool { defaultEnabled || graduated }
 }
 
 extension FeatureFlag {
-    /// Every flag the app knows. Add one when an epic starts merging dark;
-    /// delete it, and the checks that read it, once the epic ships.
+    /// Every flag the app knows. Add one when an epic starts merging dark. When the epic's software is done and wired
+    /// the flag graduates (`graduated: true`, default on); the flag-cleanup phase after E22 deletes it and the checks
+    /// that read it. See `docs/FEATURE_FLAGS.md` for the registry.
     static let all: [FeatureFlag] = [
         .legacyKernel, .ancEngineLease, .adaptiveTonalLive, .earnedCap, .feedForwardLive,
         .noiseSurvey, .conversationUnmasking, .virtualMicrophone, .zones, .headPositionCamera, .overnight,
@@ -189,8 +200,10 @@ extension FeatureFlag {
 /// Resolves feature flags.
 ///
 /// - Debug builds honour overrides stored from the Developer section of Settings.
-/// - Release builds ignore stored overrides; testers can still enable flags with
-///   the launch argument `-NotchSixtyFeatures id1,id2`.
+/// - Release builds ignore stored overrides; the launch argument `-NotchSixtyFeatures` is the only switch.
+/// - Launch argument syntax: a comma-separated list. `id` or `id=on` turns a flag on; `-id` or `id=off` turns it off
+///   (so a release user can switch off a graduated feature). If an id appears both on and off, off wins.
+///   The launch argument beats a stored override and the compiled default.
 /// - Flags that are not in `known` are always off, so a stale stored override or
 ///   a mistyped launch argument can never switch anything on.
 @MainActor
@@ -214,6 +227,7 @@ final class FeatureFlags: ObservableObject {
     let policy: OverridePolicy
     private let defaults: UserDefaults
     private let launchEnabledIDs: Set<String>
+    private let launchDisabledIDs: Set<String>
 
     init(
         known: [FeatureFlag] = FeatureFlag.all,
@@ -224,23 +238,26 @@ final class FeatureFlags: ObservableObject {
         self.known = known
         self.defaults = defaults
         self.policy = policy
-        self.launchEnabledIDs = Self.launchEnabledIDs(in: arguments)
+        let parsed = Self.launchSwitches(in: arguments)
+        self.launchEnabledIDs = parsed.on
+        self.launchDisabledIDs = parsed.off
     }
 
     var canEditOverrides: Bool { policy == .storedOverrides }
 
     func isEnabled(_ flag: FeatureFlag) -> Bool {
         guard known.contains(flag) else { return false }
+        if launchDisabledIDs.contains(flag.id) { return false }
         if launchEnabledIDs.contains(flag.id) { return true }
         if canEditOverrides, let stored = defaults.object(forKey: Self.key(for: flag)) as? Bool {
             return stored
         }
-        return flag.defaultEnabled
+        return flag.resolvedDefault
     }
 
-    /// True when the launch argument, not a stored override, decides the flag.
+    /// True when the launch argument (on or off), not a stored override, decides the flag.
     func isForcedByLaunchArgument(_ flag: FeatureFlag) -> Bool {
-        known.contains(flag) && launchEnabledIDs.contains(flag.id)
+        known.contains(flag) && (launchEnabledIDs.contains(flag.id) || launchDisabledIDs.contains(flag.id))
     }
 
     func setEnabled(_ enabled: Bool, for flag: FeatureFlag) {
@@ -261,16 +278,30 @@ final class FeatureFlags: ObservableObject {
         PreferenceKeys.featureFlagPrefix + flag.id
     }
 
-    private static func launchEnabledIDs(in arguments: [String]) -> Set<String> {
+    /// Parses the value after `-NotchSixtyFeatures`. Entries are trimmed; `-id` and `id=off` switch off,
+    /// `id` and `id=on` switch on; anything else with `=` is ignored. Off wins over on for the same id.
+    nonisolated static func launchSwitches(in arguments: [String]) -> (on: Set<String>, off: Set<String>) {
         guard let index = arguments.firstIndex(of: launchArgument),
               arguments.indices.contains(index + 1) else {
-            return []
+            return ([], [])
         }
-        return Set(
-            arguments[index + 1]
-                .split(separator: ",")
-                .map { $0.trimmingCharacters(in: .whitespaces) }
-                .filter { !$0.isEmpty }
-        )
+        var on = Set<String>()
+        var off = Set<String>()
+        for raw in arguments[index + 1].split(separator: ",") {
+            let entry = raw.trimmingCharacters(in: .whitespaces)
+            guard !entry.isEmpty else { continue }
+            if entry.hasPrefix("-") {
+                let id = String(entry.dropFirst()).trimmingCharacters(in: .whitespaces)
+                if !id.isEmpty { off.insert(id) }
+            } else if let eq = entry.firstIndex(of: "=") {
+                let id = String(entry[..<eq]).trimmingCharacters(in: .whitespaces)
+                let value = String(entry[entry.index(after: eq)...]).trimmingCharacters(in: .whitespaces).lowercased()
+                guard !id.isEmpty else { continue }
+                if value == "off" { off.insert(id) } else if value == "on" { on.insert(id) }
+            } else {
+                on.insert(entry)
+            }
+        }
+        return (on.subtracting(off), off)
     }
 }

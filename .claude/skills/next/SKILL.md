@@ -33,7 +33,7 @@ yourself beyond what the steps below name. All building happens in subagents.
      to add it, record the gaps in the epic file and the PR body, and push.
    - Never pick up a `scoped` gap on its own. It runs only when its owning slice comes up in
      written order, or when the owner names it (for example "fix G3"). Gaps with an
-     `open-question` block ticking the owning slice and block flag-removal and ship slices.
+     `open-question` block ticking the owning slice and block flag-graduation and ship slices. Epics end by graduating their flag (default on), never by removing it; removal is the FC phase after E22.
    - "NEEDS PLAN": the slice's approach is not recorded; start epic-planner for that epic as in
      step 2.
    - "BLOCKED": report the failure in two lines and stop.
