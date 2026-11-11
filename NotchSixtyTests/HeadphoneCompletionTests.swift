@@ -119,8 +119,9 @@ final class HeadphoneCompletionTests: XCTestCase {
         try p.validateStructure(sampleRate: 384_000)
         try p.validateStructure(sampleRate: 48_000)
 
-        // A response that would exceed the renderer budget still fails closed.
-        p.binauralProfile?.tapCount = Int(N60_BINAURAL_MAX_TAPS)
+        // A response that would exceed one second after conversion still fails closed (E13 S4: time-based).
+        p.binauralProfile?.sampleRate = 44_100
+        p.binauralProfile?.tapCount = 44_145
         XCTAssertThrowsError(try p.validateStructure(sampleRate: 384_000)) {
             guard case HeadphoneDeviceProfileError
                 .binauralProfileSampleRateMismatch = $0 else {

@@ -68,7 +68,7 @@ struct BinauralProfileAsset: Codable, Equatable, Sendable, Identifiable {
         }
         guard !displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               sampleRate.isFinite, sampleRate > 0,
-              tapCount > 0, tapCount <= Int(N60_BINAURAL_MAX_TAPS),
+              tapCount > 0, tapCount <= Self.maxTapCount(sampleRate: sampleRate),
               declaredLatencyFrames >= 0,
               declaredLatencyFrames <= Int(UInt32.max),
               !measurements.isEmpty else {
@@ -105,6 +105,17 @@ struct BinauralProfileAsset: Codable, Equatable, Sendable, Identifiable {
         )
     }
 
+    /// Longest response an asset may carry, in seconds (E13 S4). The limit is time-based, so a 1 s BRIR is
+    /// valid at every rate; the renderer splits it into the per-orientation early part and the shared tail.
+    /// The 0.1% slack absorbs the rounding of a rate conversion at exactly 1.0 s.
+    static let maxDurationSeconds = 1.001
+
+    /// Most taps an asset at `sampleRate` may carry (`maxDurationSeconds`).
+    static func maxTapCount(sampleRate: Double) -> Int {
+        guard sampleRate.isFinite, sampleRate > 0 else { return Int(N60_BINAURAL_MAX_TAPS) }
+        return max(Int(N60_BINAURAL_MAX_TAPS), Int((sampleRate * maxDurationSeconds).rounded(.up)))
+    }
+
     /// Tap count after converting a `tapCount`-tap response between rates.
     static func resampledTapCount(_ tapCount: Int, from source: Double, to target: Double) -> Int {
         guard source.isFinite, source > 0, target.isFinite, target > 0 else { return tapCount }
@@ -122,7 +133,7 @@ struct BinauralProfileAsset: Codable, Equatable, Sendable, Identifiable {
         }
         guard abs(targetSampleRate - sampleRate) >= 0.5 else { return self }
         let outputCount = Self.resampledTapCount(tapCount, from: sampleRate, to: targetSampleRate)
-        guard outputCount <= Int(N60_BINAURAL_MAX_TAPS) else {
+        guard outputCount <= Self.maxTapCount(sampleRate: targetSampleRate) else {
             throw BinauralProfileAssetError.invalidMetadata
         }
         let step = sampleRate / targetSampleRate
@@ -206,7 +217,7 @@ struct BinauralProfileAsset: Codable, Equatable, Sendable, Identifiable {
         )
         worldDescriptor.declaredLatencyFrames = UInt32(declaredLatencyFrames)
         guard N60BinauralProfileDescriptorIsValid(
-            &worldDescriptor, UInt32(N60_BINAURAL_MAX_TAPS)
+            &worldDescriptor, UInt32(Self.maxTapCount(sampleRate: sampleRate))
         ) else {
             throw BinauralProfileAssetError.descriptorCompilationFailed
         }
@@ -214,7 +225,7 @@ struct BinauralProfileAsset: Codable, Equatable, Sendable, Identifiable {
         guard N60BinauralProfileDescriptorApplyHeadPose(
             &worldDescriptor, headPose, &descriptor
         ), N60BinauralProfileDescriptorIsValid(
-            &descriptor, UInt32(N60_BINAURAL_MAX_TAPS)
+            &descriptor, UInt32(Self.maxTapCount(sampleRate: sampleRate))
         ) else {
             throw BinauralProfileAssetError.descriptorCompilationFailed
         }
@@ -352,6 +363,30 @@ struct PreparedBinauralProfile: Sendable {
     var descriptor: N60BinauralProfileDescriptor
     var leftIRs: [Float]
     var rightIRs: [Float]
+
+    /// The first `maxTaps` taps of every response, for the legacy renderer (at most `N60_BINAURAL_MAX_TAPS`).
+    /// A long BRIR renders in full only through the unified graph's early and tail split (E13 S4); the legacy
+    /// bridge a graph session keeps dormant gets this truncation so it still allocates.
+    func truncated(toTaps maxTaps: Int) -> PreparedBinauralProfile {
+        let taps = Int(descriptor.tapCount)
+        guard maxTaps >= 1, taps > maxTaps, taps > 0 else { return self }
+        var copy = self
+        copy.descriptor.tapCount = UInt32(maxTaps)
+        copy.descriptor.declaredLatencyFrames = min(copy.descriptor.declaredLatencyFrames, UInt32(maxTaps - 1))
+        func cut(_ source: [Float]) -> [Float] {
+            var out = [Float]()
+            out.reserveCapacity(source.count / taps * maxTaps)
+            var base = 0
+            while base + taps <= source.count {
+                out.append(contentsOf: source[base..<(base + maxTaps)])
+                base += taps
+            }
+            return out
+        }
+        copy.leftIRs = cut(leftIRs)
+        copy.rightIRs = cut(rightIRs)
+        return copy
+    }
 }
 
 enum BinauralProfileAssetError: Error, LocalizedError, Equatable {

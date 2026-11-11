@@ -323,7 +323,7 @@ size_t stateStrideFor(const n60_stage_desc &s, double rate, uint32_t firScheme) 
             size_t lane = 0, shared = 0;
             if (isDspKind(s.kind)) dspSizes(s, firScheme, lane, shared);
             else if (isSystemKind(s.kind)) systemSizes(s, rate, lane, shared);
-            else if (isMatrixKind(s.kind)) matrixSizes(s, lane, shared);
+            else if (isMatrixKind(s.kind)) matrixSizes(s, rate, lane, shared);
             else if (isGeneratorKind(s.kind)) generatorSizes(s, rate, lane, shared);
             else if (isCleanupKind(s.kind)) cleanupSizes(s, rate, lane, shared);
             else if (isImageKind(s.kind)) imageSizes(s, rate, lane, shared);
@@ -340,7 +340,7 @@ size_t sharedBytesFor(const n60_stage_desc &s, double rate, uint32_t firScheme) 
     size_t lane = 0, shared = 0;
     if (isDspKind(s.kind)) dspSizes(s, firScheme, lane, shared);
     else if (isSystemKind(s.kind)) systemSizes(s, rate, lane, shared);
-    else if (isMatrixKind(s.kind)) matrixSizes(s, lane, shared);
+    else if (isMatrixKind(s.kind)) matrixSizes(s, rate, lane, shared);
     else if (isGeneratorKind(s.kind)) generatorSizes(s, rate, lane, shared);
     else if (isCleanupKind(s.kind)) cleanupSizes(s, rate, lane, shared);
     else if (isImageKind(s.kind)) imageSizes(s, rate, lane, shared);
@@ -646,7 +646,10 @@ n60_status buildSnapshot(const n60_graph_desc &d, uint32_t epoch, SnapHeader **o
         }
         if (isDspKind(s.kind)) dspInit(h, r);
         if (isSystemKind(s.kind)) systemInit(h, r);
-        if (isMatrixKind(s.kind)) matrixInit(h, r);
+        if (isMatrixKind(s.kind) && !matrixInit(h, r)) {
+            freeSnapshot(h);
+            return N60_STATUS_OUT_OF_MEMORY;
+        }
         if (isGeneratorKind(s.kind)) generatorInit(h, r);
         if (isCleanupKind(s.kind)) cleanupInit(h, r);
         if (isImageKind(s.kind)) imageInit(h, r);

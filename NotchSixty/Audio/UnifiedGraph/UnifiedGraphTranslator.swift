@@ -614,8 +614,38 @@ enum UnifiedGraphTranslator {
         var responses: [Float]
     }
 
-    /// Largest response set (floats) a binaural graph may carry: 8M floats, 32 MB.
+    /// Largest early response set (floats) a binaural graph may carry: 8M floats, 32 MB.
     static let binauralMaxResponseFloats = 8 * 1024 * 1024
+    /// Largest shared late tail (floats): 16M floats, 64 MB, one tail per layout channel and ear (E13 S4).
+    static let binauralMaxTailFloats = 16 * 1024 * 1024
+    /// The early part ends this long after the common onset (E13 S4, design note 9); 20 ms is at most 7,680 taps
+    /// at 384 kHz, inside `N60_GRAPH_BINAURAL_MAX_TAPS`.
+    static let binauralEarlySeconds = 0.020
+    /// The late tail ends 1.0 s after the (trimmed) response start.
+    static let binauralMaxResponseSeconds = 1.0
+    /// A response keeps this much before the reference set's first arrival, so a turned head's earlier ear is not cut.
+    static let binauralOnsetMarginSeconds = 0.001
+
+    /// Frames before the first sample whose magnitude reaches -60 dB of the set's peak (all responses of the set).
+    static func binauralOnsetFrames(left: [Float], right: [Float], taps: Int) -> Int {
+        guard taps > 0 else { return 0 }
+        var peak: Float = 0
+        for v in left { peak = max(peak, abs(v)) }
+        for v in right { peak = max(peak, abs(v)) }
+        guard peak > 0 else { return 0 }
+        let threshold = peak * 0.001
+        var onset = taps
+        for responses in [left, right] {
+            var base = 0
+            while base + taps <= responses.count {
+                var i = 0
+                while i < min(onset, taps), abs(responses[base + i]) < threshold { i += 1 }
+                onset = min(onset, i)
+                base += taps
+            }
+        }
+        return onset
+    }
     /// Head-yaw cells of a head-tracked set (15 degree steps, wrapped).
     static let binauralTrackedOrientations: UInt32 = 24
 
@@ -695,7 +725,7 @@ enum UnifiedGraphTranslator {
               layout.roles.count <= Int(N60_GRAPH_MAX_CHANNELS) else { return .failure(.tooManyChannels) }
         guard let asset else { return .failure(.binauralProfileMissing) }
         guard abs(asset.sampleRate - sampleRate) < 0.5 else { return .failure(.sampleRateMismatch) }
-        guard asset.tapCount >= 1, asset.tapCount <= Int(N60_GRAPH_BINAURAL_MAX_TAPS) else {
+        guard asset.tapCount >= 1, asset.tapCount <= BinauralProfileAsset.maxTapCount(sampleRate: sampleRate) else {
             return .failure(.binauralBudget)
         }
         // Headphone correction the stage cannot reproduce stays on the legacy path.
@@ -703,28 +733,60 @@ enum UnifiedGraphTranslator {
 
         let channels = layout.roles.count
         let orientations = headTracking ? binauralTrackedOrientations : 1
-        let perSet = channels * 2 * asset.tapCount
-        guard perSet * Int(orientations) <= binauralMaxResponseFloats else { return .failure(.binauralBudget) }
         let step: Float = headTracking ? 360 / Float(orientations) : 0
         let start: Float = headTracking ? -180 : 0
+        // E13 S4: the common onset is trimmed (the latency declaration drops by what was trimmed), then each response
+        // splits at 20 ms into the per-orientation early part and a tail shared by every orientation (the facing-forward
+        // set's), which the stage convolves with non-uniform partitions at a rate of at most 96 kHz.
+        let sourceTaps = asset.tapCount
+        let reference: PreparedBinauralProfile
+        do {
+            reference = try asset.prepare(
+                for: layout, headPose: N60HeadPose(yawDegrees: 0, pitchDegrees: 0, rollDegrees: 0))
+        } catch {
+            return .failure(.specRejected)
+        }
+        let margin = Int((binauralOnsetMarginSeconds * sampleRate).rounded(.up))
+        let trim = max(0, binauralOnsetFrames(left: reference.leftIRs, right: reference.rightIRs, taps: sourceTaps) - margin)
+        let usable = min(sourceTaps - trim, Int((binauralMaxResponseSeconds * sampleRate).rounded(.up)))
+        guard usable >= 1 else { return .failure(.binauralBudget) }
+        let earlyLimit = min(Int(N60_GRAPH_BINAURAL_MAX_TAPS), Int((binauralEarlySeconds * sampleRate).rounded()))
+        let earlyTaps = min(usable, earlyLimit)
+        let tailTaps = usable - earlyTaps
+        let perSet = channels * 2 * earlyTaps
+        guard perSet * Int(orientations) <= binauralMaxResponseFloats,
+              channels * 2 * tailTaps <= binauralMaxTailFloats else { return .failure(.binauralBudget) }
         var responses: [Float] = []
         responses.reserveCapacity(perSet * Int(orientations))
+        var tail: [Float] = []
+        tail.reserveCapacity(channels * 2 * tailTaps)
         var equalEar: Int32 = -1
+        if reference.descriptor.lfeMode == N60BinauralLFEModeEqualEar,
+           let lfe = layout.roles.firstIndex(of: .lowFrequencyEffects) {
+            equalEar = Int32(lfe)
+        }
+        for channel in 0..<channels {
+            let base = channel * sourceTaps + trim + earlyTaps
+            tail.append(contentsOf: reference.leftIRs[base..<(base + tailTaps)])
+            tail.append(contentsOf: reference.rightIRs[base..<(base + tailTaps)])
+        }
+        func appendEarly(_ prepared: PreparedBinauralProfile) {
+            for channel in 0..<channels {
+                let base = channel * sourceTaps + trim
+                responses.append(contentsOf: prepared.leftIRs[base..<(base + earlyTaps)])
+                responses.append(contentsOf: prepared.rightIRs[base..<(base + earlyTaps)])
+            }
+        }
         do {
             for set in 0..<Int(orientations) {
+                if !headTracking {
+                    appendEarly(reference)
+                    continue
+                }
                 let pose = N60HeadPose(
                     yawDegrees: N60HeadPoseWrap180(Double(start + step * Float(set))),
                     pitchDegrees: 0, rollDegrees: 0)
-                let prepared = try asset.prepare(for: layout, headPose: pose)
-                if set == 0, prepared.descriptor.lfeMode == N60BinauralLFEModeEqualEar,
-                   let lfe = layout.roles.firstIndex(of: .lowFrequencyEffects) {
-                    equalEar = Int32(lfe)
-                }
-                for channel in 0..<channels {
-                    let base = channel * asset.tapCount
-                    responses.append(contentsOf: prepared.leftIRs[base..<(base + asset.tapCount)])
-                    responses.append(contentsOf: prepared.rightIRs[base..<(base + asset.tapCount)])
-                }
+                appendEarly(try asset.prepare(for: layout, headPose: pose))
             }
         } catch {
             return .failure(.specRejected)
@@ -749,19 +811,23 @@ enum UnifiedGraphTranslator {
         let status: n60_status = responses.withUnsafeBufferPointer { responsePointer in
             var binaural = n60_binaural_profile()
             binaural.structSize = UInt32(MemoryLayout<n60_binaural_profile>.size)
-            binaural.taps = UInt32(asset.tapCount)
+            binaural.taps = UInt32(earlyTaps)
             binaural.orientations = orientations
             binaural.yawStartDeg = start
             binaural.yawStepDeg = step
             binaural.wrap = headTracking ? 1 : 0
             binaural.equalEarChannel = equalEar
-            binaural.declaredLatency = UInt32(max(0, asset.declaredLatencyFrames))
+            binaural.declaredLatency = UInt32(max(0, asset.declaredLatencyFrames - trim))
             binaural.responses = responsePointer.baseAddress
-            return withUnsafePointer(to: &layoutC) { layoutPointer in
-                options.layout = layoutPointer
-                return withUnsafePointer(to: &binaural) { binauralPointer in
-                    options.binaural = binauralPointer
-                    return n60_layout_graph_build(&options, &built)
+            return tail.withUnsafeBufferPointer { tailPointer in
+                binaural.tailTaps = UInt32(tailTaps)
+                binaural.tailResponses = tailTaps > 0 ? tailPointer.baseAddress : nil
+                return withUnsafePointer(to: &layoutC) { layoutPointer in
+                    options.layout = layoutPointer
+                    return withUnsafePointer(to: &binaural) { binauralPointer in
+                        options.binaural = binauralPointer
+                        return n60_layout_graph_build(&options, &built)
+                    }
                 }
             }
         }

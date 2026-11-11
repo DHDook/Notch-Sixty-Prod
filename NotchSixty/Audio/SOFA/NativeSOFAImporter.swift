@@ -523,7 +523,7 @@ struct SOFABinauralAssetAdapter: Sendable {
 
         guard normalizedTapCount > 0,
               normalizedTapCount
-                <= Int(N60_BINAURAL_MAX_TAPS) else {
+                <= BinauralProfileAsset.maxTapCount(sampleRate: dataset.sampleRate) else {
             throw SOFAImportError.normalizedTapCountTooLarge(
                 normalizedTapCount
             )

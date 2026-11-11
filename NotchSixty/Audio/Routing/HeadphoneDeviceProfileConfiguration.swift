@@ -194,7 +194,7 @@ struct BinauralProfileReference: Codable, Equatable, Sendable {
               sampleRate.isFinite,
               sampleRate > 0,
               tapCount > 0,
-              tapCount <= Int(N60_BINAURAL_MAX_TAPS) else {
+              tapCount <= BinauralProfileAsset.maxTapCount(sampleRate: sampleRate) else {
             throw HeadphoneDeviceProfileError.invalidBinauralProfileReference
         }
     }
@@ -334,7 +334,7 @@ struct HeadphoneDeviceProfileConfiguration: Codable, Equatable, Sendable {
                 binauralProfile.tapCount,
                 from: binauralProfile.sampleRate,
                 to: sampleRate
-            ) <= Int(N60_BINAURAL_MAX_TAPS) else {
+            ) <= BinauralProfileAsset.maxTapCount(sampleRate: sampleRate) else {
                 throw HeadphoneDeviceProfileError.binauralProfileSampleRateMismatch(
                     profile: binauralProfile.sampleRate,
                     output: sampleRate
