@@ -732,7 +732,16 @@ static inline N60UnifiedGraphUnsupportedReason N60UnifiedGraphSnapshotUnsupporte
         }
         if (type == 8 && !(b->q > 0.0f)) return N60UnifiedGraphUnsupportedEQSection;
         // The Linkwitz denominator must be strictly stable as a float, as the core demands, or the kernel keeps it.
-        if (type == 9 && !(isfinite(b->coefficients.b0) && isfinite(b->coefficients.b1) && isfinite(b->coefficients.b2)
+        if (type == 9 && b->linkwitzDeviationValid) {
+            // E23 S1b: the double deviation form; the core rebuilds a1 = d1 + 2 d0 - 2 and a2 = 1 - d0 - d1 in double.
+            const double *v = b->linkwitzDeviation;
+            const double a2 = 1.0 - v[3] - v[4];
+            const double a1 = v[4] + 2.0 * v[3] - 2.0;
+            if (!(isfinite(v[0]) && isfinite(v[1]) && isfinite(v[2]) && isfinite(v[3]) && isfinite(v[4])
+                  && fabs(a2) < 1.0 && fabs(a1) < 1.0 + a2)) {
+                return N60UnifiedGraphUnsupportedEQSection;
+            }
+        } else if (type == 9 && !(isfinite(b->coefficients.b0) && isfinite(b->coefficients.b1) && isfinite(b->coefficients.b2)
                            && isfinite(b->coefficients.a1) && isfinite(b->coefficients.a2)
                            && fabsf(b->coefficients.a2) < 1.0f && fabsf(b->coefficients.a1) < 1.0f + b->coefficients.a2)) {
             return N60UnifiedGraphUnsupportedEQSection;
@@ -863,7 +872,9 @@ typedef struct {
     double gainDB;
     double q;
     uint8_t channelMask;
-    float b0, b1, b2, a1, a2;  // the prepared coefficients (the Linkwitz transform is passed to the core as these)
+    float b0, b1, b2, a1, a2;  // the prepared coefficients (the Linkwitz transform, when there is no deviation form)
+    bool hasDeviation;         // E23 S1b: the double deviation form below is valid (Linkwitz transform only)
+    double deviation[5];       // n0, n1, n2, d0, d1 (N60BiquadDesignLinkwitzTransformDeviation)
 } N60UnifiedGraphBand;
 
 // Reads EQ band `index` of the snapshot into a flat struct so Swift need not index the
@@ -881,6 +892,8 @@ static inline bool N60UnifiedGraphReadBand(
     out->channelMask = s->eqBandChannelMasks[index];
     out->b0 = b->coefficients.b0; out->b1 = b->coefficients.b1; out->b2 = b->coefficients.b2;
     out->a1 = b->coefficients.a1; out->a2 = b->coefficients.a2;
+    out->hasDeviation = b->linkwitzDeviationValid;
+    for (int i = 0; i < 5; ++i) out->deviation[i] = b->linkwitzDeviation[i];
     return true;
 }
 

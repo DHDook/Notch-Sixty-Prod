@@ -156,6 +156,7 @@
 		E28B700000000000000000A1 /* DynamicsListenSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = E28B700000000000000000A2 /* DynamicsListenSession.swift */; };
 		E6D000000000000000000107 /* LiveNChannelUnifiedGraphTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6D000000000000000000007 /* LiveNChannelUnifiedGraphTests.swift */; };
 		E6D100000000000000000002 /* UnifiedGraphCleanupTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6D100000000000000000001 /* UnifiedGraphCleanupTests.swift */; };
+		E7A100000000000000000004 /* RateCapacityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E7A100000000000000000003 /* RateCapacityTests.swift */; };
 		E6D100000000000000000902 /* UnifiedGraphProgramFamilyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6D100000000000000000901 /* UnifiedGraphProgramFamilyTests.swift */; };
 		E6D100000000000000000012 /* UnifiedGraphImageTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6D100000000000000000011 /* UnifiedGraphImageTests.swift */; };
 		E6D100000000000000000043 /* UnifiedGraphUIRangeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6D100000000000000000044 /* UnifiedGraphUIRangeTests.swift */; };
@@ -662,6 +663,7 @@
 		E8B0000000000000000000A1 /* SpeakerRoutingConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = E8B000000000000000000001 /* SpeakerRoutingConfiguration.swift */; };
 		E8B0000000000000000000A2 /* SpeakerRoutingValidation.swift in Sources */ = {isa = PBXBuildFile; fileRef = E8B000000000000000000002 /* SpeakerRoutingValidation.swift */; };
 		E8B0000000000000000000A3 /* SpeakerRoutingCompiler.swift in Sources */ = {isa = PBXBuildFile; fileRef = E8B000000000000000000003 /* SpeakerRoutingCompiler.swift */; };
+		E7A100000000000000000002 /* RateCapacity.swift in Sources */ = {isa = PBXBuildFile; fileRef = E7A100000000000000000001 /* RateCapacity.swift */; };
 		E8B0000000000000000000A4 /* SpeakerRoutingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E8B000000000000000000004 /* SpeakerRoutingTests.swift */; };
 		E8B0000000000000000000A5 /* SpeakerRoutingMigration.swift in Sources */ = {isa = PBXBuildFile; fileRef = E8B000000000000000000005 /* SpeakerRoutingMigration.swift */; };
 		E8B0000000000000000000A6 /* SpeakerRoutingProtectedExcitation.swift in Sources */ = {isa = PBXBuildFile; fileRef = E8B000000000000000000006 /* SpeakerRoutingProtectedExcitation.swift */; };
@@ -863,6 +865,7 @@
 		E6D0000000000000000000B1 /* UnifiedGraphProgramDSPTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnifiedGraphProgramDSPTests.swift; sourceTree = "<group>"; };
 		E9B500000000000000000004 /* OutputProtectionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OutputProtectionTests.swift; sourceTree = "<group>"; };
 		E6D100000000000000000001 /* UnifiedGraphCleanupTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnifiedGraphCleanupTests.swift; sourceTree = "<group>"; };
+		E7A100000000000000000003 /* RateCapacityTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RateCapacityTests.swift; sourceTree = "<group>"; };
 		E6D100000000000000000901 /* UnifiedGraphProgramFamilyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnifiedGraphProgramFamilyTests.swift; sourceTree = "<group>"; };
 		E6D100000000000000000011 /* UnifiedGraphImageTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnifiedGraphImageTests.swift; sourceTree = "<group>"; };
 		E6D100000000000000000044 /* UnifiedGraphUIRangeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnifiedGraphUIRangeTests.swift; sourceTree = "<group>"; };
@@ -1407,6 +1410,7 @@
 		E8B000000000000000000001 /* SpeakerRoutingConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerRoutingConfiguration.swift; sourceTree = "<group>"; };
 		E8B000000000000000000002 /* SpeakerRoutingValidation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerRoutingValidation.swift; sourceTree = "<group>"; };
 		E8B000000000000000000003 /* SpeakerRoutingCompiler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerRoutingCompiler.swift; sourceTree = "<group>"; };
+		E7A100000000000000000001 /* RateCapacity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RateCapacity.swift; sourceTree = "<group>"; };
 		E8B000000000000000000004 /* SpeakerRoutingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerRoutingTests.swift; sourceTree = "<group>"; };
 		E8B000000000000000000005 /* SpeakerRoutingMigration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerRoutingMigration.swift; sourceTree = "<group>"; };
 		E8B000000000000000000006 /* SpeakerRoutingProtectedExcitation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerRoutingProtectedExcitation.swift; sourceTree = "<group>"; };
@@ -1481,6 +1485,7 @@
 				E6D000000000000000000003 /* UnifiedGraphConfiguration.swift */,
 				E26A00000000000000000103 /* UnifiedGraphAncActuators.swift */,
 				E8B000000000000000000003 /* SpeakerRoutingCompiler.swift */,
+				E7A100000000000000000001 /* RateCapacity.swift */,
 				E11D00000000000000000083 /* SignalGeneratorSettings.swift */,
 				E6D000000000000000000004 /* UnifiedGraphTranslator.swift */,
 				E28B700000000000000000A2 /* DynamicsListenSession.swift */,
@@ -1595,6 +1600,7 @@
 				E6D000000000000000000006 /* UnifiedGraphEngineTests.swift */,
 				E6D000000000000000000009 /* UnifiedGraphRoutesTests.swift */,
 				E6D100000000000000000001 /* UnifiedGraphCleanupTests.swift */,
+				E7A100000000000000000003 /* RateCapacityTests.swift */,
 				E6D100000000000000000901 /* UnifiedGraphProgramFamilyTests.swift */,
 				E6D100000000000000000011 /* UnifiedGraphImageTests.swift */,
 				E6D100000000000000000044 /* UnifiedGraphUIRangeTests.swift */,
@@ -2163,6 +2169,7 @@
 				E26A00000000000000000702 /* SubPathMeasurement.swift in Sources */,
 				E26B00000000000000000102 /* SubSweepAnalysis.swift in Sources */,
 				E8B0000000000000000000A3 /* SpeakerRoutingCompiler.swift in Sources */,
+				E7A100000000000000000002 /* RateCapacity.swift in Sources */,
 				E8B0000000000000000000A6 /* SpeakerRoutingProtectedExcitation.swift in Sources */,
 				E8C0000000000000000000A1 /* SpeakerRoutingLabAcquisition.swift in Sources */,
 				E8B0000000000000000000A5 /* SpeakerRoutingMigration.swift in Sources */,
@@ -2583,6 +2590,7 @@
 				E6D000000000000000000106 /* UnifiedGraphEngineTests.swift in Sources */,
 				E6D000000000000000000108 /* UnifiedGraphRoutesTests.swift in Sources */,
 				E6D100000000000000000002 /* UnifiedGraphCleanupTests.swift in Sources */,
+				E7A100000000000000000004 /* RateCapacityTests.swift in Sources */,
 				E6D100000000000000000902 /* UnifiedGraphProgramFamilyTests.swift in Sources */,
 				E6D100000000000000000012 /* UnifiedGraphImageTests.swift in Sources */,
 				E6D100000000000000000043 /* UnifiedGraphUIRangeTests.swift in Sources */,

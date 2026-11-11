@@ -307,7 +307,16 @@ struct HeadroomModel {
             let type = p[i]
             if type == 9, i + 7 < p.count, p[i + 4] == 10 {
                 flush()
-                out.append(Stage(kind: UInt32(N60_HEADROOM_STAGE_BIQUAD), params: [p[i + 1], p[i + 2], p[i + 3], p[i + 5], p[i + 6]]))
+                if p[i + 7] != 0 {
+                    // E23 S1b deviation form (graph.h): rebuild b0..b2, a1, a2 in double for the analysis.
+                    let n0 = Double(p[i + 1]), n1 = Double(p[i + 2]), n2 = Double(p[i + 3])
+                    let d0 = Double(p[i + 5]), d1 = Double(p[i + 6])
+                    out.append(Stage(kind: UInt32(N60_HEADROOM_STAGE_BIQUAD), params: [
+                        Float(n0 + n1 + n2), Float(-n1 - 2 * n2), Float(n2), Float(d1 + 2 * d0 - 2), Float(1 - d0 - d1),
+                    ]))
+                } else {
+                    out.append(Stage(kind: UInt32(N60_HEADROOM_STAGE_BIQUAD), params: [p[i + 1], p[i + 2], p[i + 3], p[i + 5], p[i + 6]]))
+                }
                 i += 8
                 continue
             }
