@@ -34,6 +34,8 @@ struct ProductionHeadFollowCard: View {
                 .font(.callout)
                 .foregroundStyle(.secondary)
 
+            placementSection
+
             if follow.cameraState == .denied {
                 Button("Open Camera Privacy Settings") {
                     if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Camera") {
@@ -55,7 +57,7 @@ struct ProductionHeadFollowCard: View {
                         .foregroundStyle(.secondary)
                 }
                 HStack(spacing: 12) {
-                    Button("Save this seat") { follow.savePosition(tones: survey.tones) }
+                    Button("Save this seat") { follow.savePosition(tones: survey.tones, earPositionID: survey.ear?.id, monitorID: survey.monitorID?()) }
                         .disabled(survey.tones.isEmpty || follow.pose == nil)
                     if !follow.positions.isEmpty {
                         Button("Clear seats") { follow.clearPositions() }
@@ -75,6 +77,40 @@ struct ProductionHeadFollowCard: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(18)
         .glassEffect(.regular, in: .rect(cornerRadius: 18))
+    }
+
+    /// E4 G20: where the camera is, measured from the middle of the screen. Changing it clears the saved seats.
+    private var placementSection: some View {
+        DisclosureGroup("Camera position") {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Where the camera is, in centimetres in the room frame you use for the listening seats (x and y along the floor, height up) and the direction it faces, in degrees from the x axis. Changing it clears the saved seats and switches head follow off.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                placementField("Room x (cm)", \.x, scale: 100)
+                placementField("Room y (cm)", \.y, scale: 100)
+                placementField("Height (cm)", \.z, scale: 100)
+                placementField("Facing (degrees)", \.yawRadians, scale: 180 / .pi)
+            }
+            .padding(.top, 4)
+        }
+        .font(.callout)
+    }
+
+    private func placementField(_ title: String, _ key: WritableKeyPath<QuietZoneCameraPlacement, Double>, scale: Double) -> some View {
+        HStack {
+            Text(title).frame(width: 130, alignment: .leading)
+            TextField(title, value: Binding(
+                get: { follow.placement[keyPath: key] * scale },
+                set: { value in
+                    var next = follow.placement
+                    next[keyPath: key] = value / scale
+                    follow.setPlacement(next)
+                }
+            ), format: .number.precision(.fractionLength(0...1)))
+            .textFieldStyle(.roundedBorder)
+            .frame(width: 80)
+            .labelsHidden()
+        }
     }
 
     private var readoutText: String {

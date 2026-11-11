@@ -6,13 +6,26 @@ import Foundation
 /// position, evaluated at the tone from that position's Room Correction impulse responses.
 /// `effectiveSecondary` is the S26a effective secondary path of the common (left plus right) drive,
 /// kept for the authority check and the card.
-struct QuietZoneEarTone: Equatable, Sendable, Identifiable {
+struct QuietZoneEarTone: Equatable, Codable, Sendable, Identifiable {
     var frequencyHz: Double
     var ratio: ActiveQuietZoneComplex
     var earLeft: ActiveQuietZoneComplex
     var earRight: ActiveQuietZoneComplex
     var effectiveSecondary: ActiveQuietZoneComplex
     var id: Double { frequencyHz }
+
+    /// True when every value is finite (a stored survey is checked before it is trusted again).
+    var isFinite: Bool {
+        frequencyHz.isFinite && [ratio, earLeft, earRight, effectiveSecondary].allSatisfy { $0.real.isFinite && $0.imaginary.isFinite }
+    }
+}
+
+/// E4 S27 (G21): another surveyed seat that must not get louder. The noise there is `ratio` times the monitor noise,
+/// and the speakers reach it by `left` and `right`. Its predicted change is limited like the monitor microphone's.
+struct QuietZoneOtherSeatPoint: Equatable, Sendable {
+    var ratio: ActiveQuietZoneComplex
+    var left: ActiveQuietZoneComplex
+    var right: ActiveQuietZoneComplex
 }
 
 struct QuietZoneVirtualDesignResult: Equatable, Sendable {
@@ -50,7 +63,8 @@ enum QuietZoneVirtualDesign {
         monitorRight: ActiveQuietZoneComplex,
         availableInjectionPeak: Double,
         configuration: ActiveQuietZoneConfiguration,
-        bassConditioning: BassPlantConditioningMode
+        bassConditioning: BassPlantConditioningMode,
+        otherSeats: [QuietZoneOtherSeatPoint] = []
     ) throws -> QuietZoneVirtualDesignResult? {
         let earDisturbance = tone.ratio * monitorDisturbance
         let solution = try planner.solveStereo(
@@ -70,12 +84,21 @@ enum QuietZoneVirtualDesign {
             return 20 * log10(max(residual.magnitude, 1.0e-15) / max(monitorDisturbance.magnitude, 1.0e-15))
         }
         let limit = QuietZoneQualificationTargets.maximumOtherSeatIncreaseDB
+        // G21: every other surveyed seat is predicted from its own ratio and speaker paths, like the monitor.
+        func seatChange(_ seat: QuietZoneOtherSeatPoint, _ scale: Double) -> Double {
+            let before = seat.ratio * monitorDisturbance
+            let residual = before + seat.left * (solution.leftOutput * scale) + seat.right * (solution.rightOutput * scale)
+            return 20 * log10(max(residual.magnitude, 1.0e-15) / max(before.magnitude, 1.0e-15))
+        }
+        func exceeds(_ scale: Double) -> Bool {
+            monitorChange(scale) > limit || otherSeats.contains { seatChange($0, scale) > limit }
+        }
         var scale = 1.0
-        if monitorChange(1) > limit {
+        if exceeds(1) {
             var low = 0.0, high = 1.0
             for _ in 0..<32 {
                 let middle = 0.5 * (low + high)
-                if monitorChange(middle) > limit { high = middle } else { low = middle }
+                if exceeds(middle) { high = middle } else { low = middle }
             }
             scale = low
         }

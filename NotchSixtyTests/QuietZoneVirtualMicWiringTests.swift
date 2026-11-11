@@ -226,4 +226,108 @@ final class QuietZoneVirtualMicWiringTests: XCTestCase {
     func testFlagIsOffByDefaultAndSurveyIsNotAttachedWithoutIt() throws {
         XCTAssertFalse(FeatureFlags(defaults: UserDefaults(suiteName: UUID().uuidString)!).isEnabled(.virtualMicrophone))
     }
+
+    // MARK: E4 G19 / G20 / G21
+
+    private func isolatedStore() -> QuietZoneSurveyStore {
+        QuietZoneSurveyStore(defaults: UserDefaults(suiteName: UUID().uuidString)!)
+    }
+
+    func testSurveyAndCameraPlacementSurviveARestartButSwitchesDoNotAtEightRates() throws {
+        for rate in rates {
+            let rig = try makeRig(rate: rate)
+            let store = isolatedStore()
+            let follow = QuietZoneHeadFollowController(makeSource: QuietZoneHeadFollowController.cameraSourceFactory())
+            rig.survey.attachHeadFollow(follow)
+            let first = QuietZoneSurveyPersistence(store: store)
+            rig.quietZone.attachSurveyPersistence(first)
+            runSurvey(rig, frequencies: [60, 80])
+            rig.survey.useAtEar = true
+            follow.setPlacement(QuietZoneCameraPlacement(x: 0.1, y: 0.2, z: 0.3, yawRadians: 0.4))
+
+            // A new launch: fresh controllers over the same room measurements and the same store.
+            let survey2 = QuietZoneVirtualMicSurveyController()
+            rig.quietZone.attachVirtualMicrophone(survey2)
+            let follow2 = QuietZoneHeadFollowController(makeSource: QuietZoneHeadFollowController.cameraSourceFactory())
+            survey2.attachHeadFollow(follow2)
+            rig.quietZone.attachSurveyPersistence(QuietZoneSurveyPersistence(store: store))
+            XCTAssertEqual(survey2.phase, .ready, "rate \(rate)")
+            XCTAssertEqual(survey2.tones.count, 2, "rate \(rate)")
+            XCTAssertFalse(survey2.useAtEar, "the switch is never restored, rate \(rate)")
+            XCTAssertEqual(follow2.placement, QuietZoneCameraPlacement(x: 0.1, y: 0.2, z: 0.3, yawRadians: 0.4))
+            XCTAssertFalse(follow2.isEnabled)
+        }
+    }
+
+    func testStoredSurveyIsDroppedWhenTheMonitorPositionChanged() throws {
+        let rig = try makeRig(rate: 48_000)
+        let store = isolatedStore()
+        rig.quietZone.attachSurveyPersistence(QuietZoneSurveyPersistence(store: store))
+        runSurvey(rig, frequencies: [60])
+        let survey2 = QuietZoneVirtualMicSurveyController()
+        rig.quietZone.attachVirtualMicrophone(survey2)
+        try rig.quietZone.ambient.setPlaybackModelPosition(rig.earID)
+        rig.quietZone.attachSurveyPersistence(QuietZoneSurveyPersistence(store: store))
+        XCTAssertTrue(survey2.tones.isEmpty)
+        XCTAssertFalse(survey2.useAtEar)
+    }
+
+    func testNonFiniteStoredValuesAreIgnored() throws {
+        let store = isolatedStore()
+        let bad = QuietZoneEarTone(
+            frequencyHz: 60, ratio: ActiveQuietZoneComplex(real: .nan, imaginary: 0),
+            earLeft: ActiveQuietZoneComplex(real: 1, imaginary: 0), earRight: ActiveQuietZoneComplex(real: 1, imaginary: 0),
+            effectiveSecondary: ActiveQuietZoneComplex(real: 1, imaginary: 0))
+        var record = QuietZoneSurveyRecord()
+        record.zoneA = .init(earID: UUID(), earName: "x", monitorID: UUID(), tones: [bad])
+        record.camera = QuietZoneCameraPlacement(x: .infinity, y: 0, z: 0, yawRadians: 0)
+        store.save(record)
+        let loaded = store.load()
+        XCTAssertNil(loaded.zoneA)
+        XCTAssertNil(loaded.camera)
+    }
+
+    func testChangingThePlacementClearsSeatsAndTurnsFollowOff() {
+        let follow = QuietZoneHeadFollowController(makeSource: QuietZoneHeadFollowController.cameraSourceFactory())
+        follow.offerStored(placement: nil, seats: [
+            .init(id: UUID(), name: "Seat 1", x: 0, y: 0, z: 0, tones: [], earID: UUID(), monitorID: UUID())])
+        XCTAssertTrue(follow.hasPendingSeats)
+        follow.setPlacement(QuietZoneCameraPlacement(x: 1, y: 0, z: 0, yawRadians: 0))
+        XCTAssertFalse(follow.hasPendingSeats)
+        XCTAssertTrue(follow.positions.isEmpty)
+        XCTAssertFalse(follow.isEnabled)
+    }
+
+    func testAnotherSeatIsHeldToTheLimitAtEightRates() throws {
+        for rate in rates {
+            let rig = try makeRig(rate: rate)
+            rig.survey.useAtEar = false
+            runSurvey(rig, frequencies: [60])
+            rig.survey.useAtEar = true
+            rig.quietZone.attachZones(QuietZoneZoneController())
+            let zones = try XCTUnwrap(rig.quietZone.zones)
+            zones.addOtherSeat()
+            let seat = try XCTUnwrap(zones.otherSeats.first)
+            seat.selectEar(rig.ear2ID)
+            seat.beginVisit(.monitor)
+            for _ in 0..<QuietZoneVirtualMicSurveyController.windowsPerVisit {
+                seat.ingestWindow([60: rig.twin.noiseAtMonitor(60)])
+            }
+            seat.beginVisit(.ear)
+            for _ in 0..<QuietZoneVirtualMicSurveyController.windowsPerVisit {
+                seat.ingestWindow([60: rig.twin.noiseAtEar2(60)])
+            }
+            XCTAssertEqual(zones.predictedOtherSeatCount, 2, "rate \(rate)")
+            let paths = try rig.quietZone.surveyPaths(frequencyHz: 60, earPositionID: rig.earID)
+            let paths2 = try rig.quietZone.surveyPaths(frequencyHz: 60, earPositionID: rig.ear2ID)
+            let design = try XCTUnwrap(try rig.quietZone.virtualEarDesign(
+                frequencyHz: 60, monitorDisturbance: rig.twin.noiseAtMonitor(60),
+                monitorLeft: paths.monitorLeft, monitorRight: paths.monitorRight,
+                bassMode: .free, injectionPeakOverride: 0.5), "rate \(rate)")
+            let noise2 = rig.twin.noiseAtEar2(60)
+            let after = noise2 + paths2.earLeft * design.left + paths2.earRight * design.right
+            let change = 20 * log10(after.magnitude / noise2.magnitude)
+            XCTAssertLessThanOrEqual(change, QuietZoneQualificationTargets.maximumOtherSeatIncreaseDB + 1e-6, "rate \(rate)")
+        }
+    }
 }

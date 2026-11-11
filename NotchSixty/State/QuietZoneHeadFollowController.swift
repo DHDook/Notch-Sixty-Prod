@@ -48,25 +48,38 @@ final class QuietZoneHeadFollowController: ObservableObject {
         case following(nearest: String, distanceCentimetres: Int)
     }
 
-    struct SavedPosition: Identifiable, Equatable, Sendable {
+    struct SavedPosition: Identifiable, Equatable, Codable, Sendable {
         var id: UUID
         var name: String
         var x: Double
         var y: Double
         var z: Double
         var tones: [QuietZoneEarTone]
+        /// The Room Correction position the ear survey behind `tones` was taken at, so a stored seat can be checked
+        /// against the room measurements before it is trusted again (E4 G19). Nil for a seat saved without one.
+        var earID: UUID? = nil
+        /// The Room Correction position the monitor microphone was at, so a seat is not reused after the monitor moved.
+        var monitorID: UUID? = nil
     }
+
+    /// Where the camera is in the room, set by the listener (E4 G20). Seats are in this frame, so a change clears them.
+    @Published private(set) var placement = QuietZoneCameraPlacement(x: 0, y: 0, z: 0, yawRadians: 0)
+    /// Called after the seats or the placement changed in a way worth saving.
+    var onChanged: (() -> Void)?
+    /// Stored seats waiting for the room measurements to load so they can be checked (E4 G19).
+    private var pendingSeats: [SavedPosition] = []
 
     /// Positions closer than this replace each other when saved.
     static let sameSeatMetres = 0.1
 
     typealias SourceFactory = @MainActor (@escaping @Sendable (QuietZoneHeadPose) -> Void) -> QuietZoneHeadPoseSourcing
 
-    /// The Mac camera, camera frame mapped to the room with `placement` (the camera at the room origin, facing along +x).
+    /// The Mac camera, camera frame mapped to the room with the placement read when the camera starts (E4 G20: the
+    /// listener's setting; the default is the camera at the room origin, facing along +x).
     nonisolated static func cameraSourceFactory(
-        placement: QuietZoneCameraPlacement = QuietZoneCameraPlacement(x: 0, y: 0, z: 0, yawRadians: 0)
+        placement: @escaping @MainActor () -> QuietZoneCameraPlacement = { QuietZoneCameraPlacement(x: 0, y: 0, z: 0, yawRadians: 0) }
     ) -> SourceFactory {
-        { onPose in QuietZoneCameraHeadSource(placement: placement, onPose: onPose) }
+        { onPose in QuietZoneCameraHeadSource(placement: placement(), onPose: onPose) }
     }
 
     /// The listener's switch. Off at every launch.
@@ -231,7 +244,7 @@ final class QuietZoneHeadFollowController: ObservableObject {
 
     /// Saves the ear survey just taken as the position where the head is now. Sit where the ear microphone was, then save.
     @discardableResult
-    func savePosition(tones: [QuietZoneEarTone]) -> Bool {
+    func savePosition(tones: [QuietZoneEarTone], earPositionID: UUID? = nil, monitorID: UUID? = nil) -> Bool {
         guard isCameraOn, let head = tracker.pose(at: clock()) else {
             message = "Switch head follow on and wait for the camera to find your head, then save."
             return false
@@ -243,7 +256,8 @@ final class QuietZoneHeadFollowController: ObservableObject {
             message = "The surveyed tones differ from the saved positions. Clear the positions and save again."
             return false
         }
-        var entry = SavedPosition(id: UUID(), name: "Seat \(positions.count + 1)", x: head.x, y: head.y, z: head.z, tones: tones)
+        var entry = SavedPosition(
+            id: UUID(), name: "Seat \(positions.count + 1)", x: head.x, y: head.y, z: head.z, tones: tones, earID: earPositionID, monitorID: monitorID)
         if let nearIndex = positions.firstIndex(where: {
             QuietZoneHeadPose(x: $0.x, y: $0.y, z: $0.z, confidence: 1, time: 0).distance(to: head) < Self.sameSeatMetres
         }) {
@@ -253,13 +267,68 @@ final class QuietZoneHeadFollowController: ObservableObject {
         } else {
             positions.append(entry)
         }
+        pendingSeats = []
         message = "Saved \(entry.name). Save more seats for the zone to follow between them."
+        onChanged?()
         return true
     }
 
     func clearPositions() {
         positions = []
+        pendingSeats = []
         message = "Saved positions cleared."
+        onChanged?()
+    }
+
+    /// Sets where the camera is. Saved seats were taken in the old frame, so they are cleared, and the camera is
+    /// switched off so the listener restarts it knowingly (E4 G20).
+    func setPlacement(_ new: QuietZoneCameraPlacement) {
+        guard new != placement, [new.x, new.y, new.z, new.yawRadians].allSatisfy(\.isFinite) else { return }
+        placement = new
+        let hadSeats = !positions.isEmpty || !pendingSeats.isEmpty
+        positions = []
+        pendingSeats = []
+        if isEnabled {
+            isEnabled = false
+            stopCamera(state: .off)
+        }
+        message = hadSeats
+            ? "Camera position changed, so the saved seats were cleared and head follow is off. Switch it on and save the seats again."
+            : "Camera position saved."
+        onChanged?()
+    }
+
+    /// Hands over the placement read from disk (no clearing: the seats read with it belong to it).
+    func offerStored(placement stored: QuietZoneCameraPlacement?, seats: [SavedPosition]) {
+        if let stored, [stored.x, stored.y, stored.z, stored.yawRadians].allSatisfy(\.isFinite) { placement = stored }
+        guard positions.isEmpty else { return }
+        pendingSeats = seats
+    }
+
+    /// The seats to save: the live ones, or ones still waiting to be checked after a launch.
+    var storedSeats: [SavedPosition] { positions.isEmpty ? pendingSeats : positions }
+
+    var hasPendingSeats: Bool { !pendingSeats.isEmpty }
+
+    /// Shows stored seats whose ear survey still matches the room measurements. `check` returns nil while the room
+    /// measurements are not loaded yet (the seats keep waiting), true when a seat still matches, false when it does not.
+    func restoreSeatsIfPossible(check: (SavedPosition) -> Bool?) {
+        guard !pendingSeats.isEmpty, positions.isEmpty else { return }
+        var verdicts: [Bool] = []
+        for seat in pendingSeats {
+            guard let verdict = check(seat) else { return }
+            verdicts.append(verdict)
+        }
+        let kept = zip(pendingSeats, verdicts).filter(\.1).map(\.0)
+        let dropped = pendingSeats.count - kept.count
+        pendingSeats = []
+        positions = kept
+        if dropped > 0 {
+            message = "The room measurements changed since the seats were saved, so \(dropped == 1 ? "a seat was" : "\(dropped) seats were") not reused. Save them again."
+            onChanged?()
+        } else if !kept.isEmpty {
+            message = "Reused \(kept.count) saved seat\(kept.count == 1 ? "" : "s") from last time."
+        }
     }
 
     /// The surveyed tone for the head's current position, blended from the nearest saved positions, or nil to keep the

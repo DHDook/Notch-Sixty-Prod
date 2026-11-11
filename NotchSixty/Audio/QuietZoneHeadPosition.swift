@@ -25,7 +25,7 @@ struct QuietZoneHeadPose: Equatable, Sendable {
 }
 
 /// Where the camera sits in the room frame: a position and a yaw about the vertical (z) axis.
-struct QuietZoneCameraPlacement: Equatable, Sendable {
+struct QuietZoneCameraPlacement: Equatable, Codable, Sendable {
     var x: Double
     var y: Double
     var z: Double

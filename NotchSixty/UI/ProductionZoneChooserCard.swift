@@ -86,13 +86,78 @@ struct ProductionZoneChooserCard: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+
+            otherSeatsSection
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(18)
         .glassEffect(.regular, in: .rect(cornerRadius: 18))
+        .onAppear { zones.restoreStoredOtherSeats() }
         .onChange(of: first.useAtEar) { _, _ in zones.revalidate() }
         .onChange(of: first.tones.count) { _, _ in zones.revalidate() }
         .onChange(of: second.useAtEar) { _, _ in zones.revalidate() }
         .onChange(of: second.tones.count) { _, _ in zones.revalidate() }
+    }
+
+    /// E4 G21: other surveyed positions (a partner's seat, a child's bed) that Quiet Zone predicts and keeps from getting louder.
+    @ViewBuilder private var otherSeatsSection: some View {
+        Divider()
+        Text("Other seats to protect")
+            .font(.subheadline.bold())
+        Text("Survey up to \(QuietZoneZoneController.maximumOtherSeats) more places with the microphone. Each one is predicted for every tone and the design is held so it does not get more than \(Int(QuietZoneQualificationTargets.maximumOtherSeatIncreaseDB)) dB louder. Predicted positions now: \(zones.predictedOtherSeatCount) (the monitor microphone always counts).")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        ForEach(zones.otherSeats.indices, id: \.self) { index in
+            OtherSeatRow(seat: zones.otherSeats[index], number: index + 1, quietZoneRunning: quietZoneRunning) {
+                zones.removeOtherSeat(zones.otherSeats[index])
+            }
+        }
+        if zones.otherSeats.count < QuietZoneZoneController.maximumOtherSeats {
+            Button("Add a seat to protect") { zones.addOtherSeat() }
+        }
+    }
+}
+
+private struct OtherSeatRow: View {
+    @ObservedObject var seat: QuietZoneVirtualMicSurveyController
+    var number: Int
+    var quietZoneRunning: Bool
+    var remove: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 12) {
+                Text("Seat \(number)").frame(width: 60, alignment: .leading)
+                Picker("Seat \(number) position", selection: Binding(
+                    get: { seat.ear?.id },
+                    set: { seat.selectEar($0) }
+                )) {
+                    Text("Select…").tag(UUID?.none)
+                    ForEach(seat.earPositionCandidates, id: \.id) { entry in
+                        Text(entry.name).tag(UUID?.some(entry.id))
+                    }
+                }
+                .labelsHidden()
+                .frame(maxWidth: 260)
+                .disabled(seat.isCapturing)
+                Spacer()
+                Button("Remove", role: .destructive, action: remove).disabled(seat.isCapturing)
+            }
+            HStack(spacing: 12) {
+                Button("Capture at monitor") { seat.beginVisit(.monitor) }
+                    .disabled(seat.ear == nil || seat.isCapturing || !quietZoneRunning)
+                Button("Capture at this seat") { seat.beginVisit(.ear) }
+                    .disabled(!seat.monitorCaptured || seat.isCapturing || !quietZoneRunning)
+                if seat.isCapturing {
+                    ProgressView(value: Double(seat.progress), total: Double(QuietZoneVirtualMicSurveyController.windowsPerVisit))
+                        .frame(width: 120)
+                    Button("Cancel") { seat.cancelVisit() }
+                }
+                if !seat.tones.isEmpty {
+                    Toggle("Keep it from getting louder", isOn: $seat.useAtEar).disabled(seat.isCapturing)
+                }
+            }
+            Text(seat.message).font(.caption).foregroundStyle(.secondary)
+        }
     }
 }
