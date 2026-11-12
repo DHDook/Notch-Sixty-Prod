@@ -9,6 +9,8 @@ struct ProductionMultichannelCalibrationWorkspace: View {
     @StateObject private var characterization: SpeakerOptimizerCharacterizationController
     @StateObject private var guidedOptimizer: SpeakerOptimizerGuidedPEQController
     @StateObject private var verification: SpeakerOptimizerVerificationController
+    @StateObject private var guidedFIR: SpeakerOptimizerGuidedFIRController
+    @StateObject private var firVerification: SpeakerOptimizerFIRVerificationController
 
     @State private var actionError: String?
     @State private var resetConfirmation = false
@@ -51,6 +53,16 @@ struct ProductionMultichannelCalibrationWorkspace: View {
                 microphone: microphone
             )
         )
+        _guidedFIR = StateObject(
+            wrappedValue: SpeakerOptimizerGuidedFIRController.production(engine: engine, profileStore: profiles)
+        )
+        _firVerification = StateObject(
+            wrappedValue: SpeakerOptimizerFIRVerificationController(
+                engine: engine,
+                profiles: profiles,
+                microphone: microphone
+            )
+        )
     }
 
     private var selectedInputBinding: Binding<String?> {
@@ -78,6 +90,14 @@ struct ProductionMultichannelCalibrationWorkspace: View {
                 speakerOptimizerCard
                 speakerCharacterizationCard
                 speakerOptimizerCommissioningCard
+                SpeakerOptimizerFIRCommissioningCard(
+                    engine: engine,
+                    guided: guidedFIR,
+                    verification: firVerification,
+                    baseline: optimizer.measurementSet,
+                    characterization: characterization.measurementSet,
+                    inputsReady: optimizer.evidenceReport?.optimizerReady == true && characterization.characterizationReady,
+                    otherDeploymentActive: guidedOptimizer.state == .appliedPendingVerification)
                 designCard
 
                 if let error = actionError
@@ -916,6 +936,7 @@ struct ProductionMultichannelCalibrationWorkspace: View {
                             == .appliedPendingVerification
                         || guidedOptimizer.state == .measuredAccepted
                         || guidedOptimizer.state == .measuredRejected
+                        || guidedFIR.state == .appliedPendingVerification
                 )
 
                 if let proposal = guidedOptimizer.proposal,

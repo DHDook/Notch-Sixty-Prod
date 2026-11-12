@@ -344,6 +344,7 @@ the shipped UI.
 - [x] E11 leftovers wired: repeat averaging and timing in Room Correction and multichannel; Analysis tab (distortion, RT60/EDT)
 - [x] E12 leftovers: shared microphone and seat cards; wizard multi-mic pass; target shaping persists (E24 S5, #323 to #328)
 - [x] E24 S11 audit leftovers: tab Deploy guard, verifier joint-bass paths, Verify from idle (G1 closed)
+- [x] E24 S12 guided FIR controller wired into the Speaker Calibration workspace with the A/V-sync verdict (E24 G3, E28 G44 closed)
 - [~] Acceptance: harness green with no expected-fails (done, S6); owner smoke checklist pending, after E24 and E25 (open audit items in `docs/epics/E24.md`)
 - [x] Process safeguards done (AGENTS.md section 12); ledger audit of E4, E6, E8, E9, E13 done (S8)
 - [x] S9 `e24/abx-wiring` (#335): UI caller for `RoomCorrectionABX` (E10 S9)
