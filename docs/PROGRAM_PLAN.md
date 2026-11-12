@@ -133,7 +133,7 @@ decision, so Phase 2 starts without it; every later bench check is collected the
 - [ ] Run the PR97 hardware timing calibration and the PR99 physical verification campaign on the bench
 - [ ] Define the live-ANC authorisation criteria in writing, then switch `liveANCQualified` only through that path
 - [ ] Re-qualify on the unified graph after E6 lands, and publish the measurement method for reviewers
-- [~] S32 `e4/graduate-flags` (S32 PR: seven flags graduated, G8, G15 closed, end-to-end test; owner decision 11 Nov 2026: build G16; `e4.virtual-microphone` S26a wiring #483 and `e4.head-position-camera` S26b head follow `e4/s26b-head-follow` are wired; `e4.zones` S27 still unwired): graduate the E4 flags (non-live flags first; live-output flags approved by the owner 11 Nov 2026, G17 closed; arm unchanged); wiring of `e4.virtual-microphone`, `e4.head-position-camera`, `e4.zones` first (G16)
+- [x] S32 `e4/graduate-flags` (S32 PR: seven flags graduated, G8, G15 closed, end-to-end test; owner decision 11 Nov 2026: build G16; `e4.virtual-microphone` S26a wiring #483 and `e4.head-position-camera` S26b head follow `e4/s26b-head-follow` are wired; `e4.zones` S27 still unwired): graduate the E4 flags (non-live flags first; live-output flags approved by the owner 11 Nov 2026, G17 closed; arm unchanged); wiring of `e4.virtual-microphone`, `e4.head-position-camera`, `e4.zones` first (G16)
 - [ ] Class-leading roadmap (owner, 27 Oct 2026; `docs/epics/E4.md` S12–S31): safety foundation (arm hardening, acoustic twin, engine lease, live howl guard, "do no harm" verifier, flight recorder); adaptive tonal live with tone glide, earned cap and excursion cap; upstream reference microphone with cross-device clocking; virtual microphone and head-tracked zones; noise survey, overnight mode, Conversation Focus unmasking, reviewer kit
   - [~] S30a `e4/unmask-ambient-stage`: `AMBIENT` stage carries up to 17 live cut-only peaking sections (ABI v32); built, but nothing sets the cuts until S30c, so the stage is dark; wired by S30c
   - [~] S30a overlay: `AmbientUnmaskOverlay` section fit and trailer builder built dark behind `AmbientCompensationTarget.unmaskingCutsDB`; wired by S30c
@@ -471,7 +471,7 @@ Owner decision, 18 Oct 2026: there is no bench access for now, so every bench ch
 - [ ] E4 G21 other-seat prediction: with a real microphone at a protected seat, the measured change with Quiet Zone on stays within 1 dB of the prediction and no louder than the limit (E4 G16 persistence PR).
 - [ ] Run E4 S8 (PR97 timing calibration and PR99 verification) and record results against `docs/ANC_QUALIFICATION.md`
 - [ ] Run E4 S11 (owner, 1 Nov 2026: moved here from the E4 execution order): repeat S8 on the unified E6 graph, then fill the placeholder reduction table in `docs/ANC_QUALIFICATION.md` §4.1 from the S31 reviewer-kit noise files
-- [ ] E4 S26a: ear-microphone check of the virtual-microphone design with a real head at the eight rates (E4 S26a wiring)
+- [ ] E4 S26a: ear-microphone check of the virtual-microphone design with a real head at the eight rates (E4 S26a wiring), including the adaptive worker holding the ear reduction as the noise drifts and the other-seat limit (G18)
 - [ ] Run the remaining bench checks at every rate from 44.1 to 384 kHz
 - [ ] E6 G19: listening for level riding on speech and music at the eight rates (LOUDNESS stage, E6 S12c)
 - [ ] E6 G43: binaural convolution cost per rate (16 channels, 8192 taps, 24 head orientations, 44.1 to 384 kHz) on the build machine (E6 S12g4)

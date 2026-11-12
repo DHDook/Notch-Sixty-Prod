@@ -10,7 +10,9 @@ extension QuietZoneVirtualMicWiringTests {
         let defaults = UserDefaults(suiteName: "QuietZoneZoneWiringTests.\(UUID().uuidString)")!
         return FeatureFlags(
             known: FeatureFlag.all, defaults: defaults, policy: .launchArgumentOnly,
-            arguments: on.isEmpty ? [] : ["-NotchSixtyFeatures", on.joined(separator: ",")])
+            // The three E4 survey flags graduated (G16): the list is the exact set that is on, the rest are off.
+            arguments: ["-NotchSixtyFeatures", (on + ["e4.virtual-microphone", "e4.head-position-camera", "e4.zones"]
+                .filter { !on.contains($0) }.map { "-" + $0 }).joined(separator: ",")])
     }
 
     /// Attaches the controllers the way `ProductController` does, for the given flags.

@@ -8,9 +8,10 @@ import XCTest
 final class E4GraduationTests: XCTestCase {
     private static let graduated: [FeatureFlag] = [
         .ancEngineLease, .adaptiveTonalLive, .earnedCap, .feedForwardLive, .noiseSurvey, .conversationUnmasking, .overnight,
+        .virtualMicrophone, .headPositionCamera, .zones,
     ]
-    /// No production reader yet (E4 G16, owner question): these stay dark.
-    private static let dark: [FeatureFlag] = [.virtualMicrophone, .headPositionCamera, .zones]
+    /// Nothing stays dark in E4 after G16.
+    private static let dark: [FeatureFlag] = []
 
     private var suiteName = ""
     private var defaults: UserDefaults!
@@ -64,6 +65,8 @@ final class E4GraduationTests: XCTestCase {
         if ProcessInfo.processInfo.environment[FeatureFlags.graduatedOffEnvironmentKey] == "1" {
             XCTAssertNil(quietZone.adaptiveLive)
             XCTAssertNil(quietZone.noiseSurvey)
+            XCTAssertNil(quietZone.virtualMic)
+            XCTAssertNil(quietZone.zones)
             XCTAssertNil(quietZone.earnedCap)
             XCTAssertNil(quietZone.feedForwardArming)
             XCTAssertNil(product.feedForwardArming)
@@ -72,6 +75,11 @@ final class E4GraduationTests: XCTestCase {
         }
         XCTAssertNotNil(quietZone.adaptiveLive)
         XCTAssertNotNil(quietZone.noiseSurvey)
+        // E4 G16: the ear survey, the camera follow and the zone chooser are attached, and still arm nothing.
+        XCTAssertNotNil(quietZone.virtualMic)
+        XCTAssertNotNil(quietZone.virtualMic?.headFollow)
+        XCTAssertNotNil(quietZone.zones)
+        XCTAssertEqual(quietZone.zoneMode, .fixedSeat)
         XCTAssertNotNil(quietZone.earnedCap)
         XCTAssertNotNil(quietZone.feedForwardArming)
         XCTAssertNotNil(product.feedForwardArming)
