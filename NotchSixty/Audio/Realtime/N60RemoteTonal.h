@@ -110,6 +110,26 @@ extern "C" {
  * the offset (at most a callback) matters only for programme that changes within a few ms.
  * Off by default.
  *
+ * Virtual ear error (E4 G18, remote-microphone technique). The microphone sits at the monitor
+ * position; the listener's ears are elsewhere. For a tone with earCount > 0 the survey gives, per
+ * ear i (one seat, or two zones), the monitor-to-ear ratio R_i of the noise (ear disturbance
+ * R_i D) and the speaker-to-ear path of the split, S_i = share_L earL_i + share_R earR_i. The
+ * weight adapts on the errors the ears would have if W played, instead of the monitor's:
+ *        Dm = M - Shat Gbar                  (the monitor disturbance, as the frequency loop sees it)
+ *        e_i = R_i Dm + S_i W
+ *        W <- (1 - lambda dt) W - a (sum_i conj(S_i) e_i) / (sum_i |S_i|^2)
+ * the gradient step on the summed ear power (one ear: e / S, the same step as above), so the fixed
+ * point is W = -(sum_i conj(S_i) R_i) D / ((sum_i |S_i|^2)(1 + lambda tau)): the weight the
+ * offline virtual design solves for, kept current as the noise and the monitor path drift. The
+ * path fit, programme removal, frequency loop, slew and mic-moved check stay on the monitor basis.
+ * Two ears share one weight along the fixed L/R split, so the adaptation only tracks the overall
+ * scale of the offline two-zone solve. The monitor is still the judge, and every other surveyed
+ * seat is a limit point: after each update W is scaled back, by bisection, until the predicted
+ * residual at the monitor, |Dm + Shat W|, and at each limit seat j, |R_j Dm + S_j W|, is at most
+ * its uncancelled level times 10^(monitorIncreaseLimitDB / 20) (the other-seat limit). The ear and
+ * seat paths are the survey's; the loop is stable while its phase is within 90 degrees of the
+ * true ear path. Tones with earCount 0 are unchanged (bit-identical).
+ *
  * Realtime behaviour: worker side only, one thread for every call. Create allocates; nothing
  * else does. Latency: none (no audio is passed through). Sample rate: the microphone's, any
  * (8 kHz to 768 kHz); the output rate does not enter. Channels: one microphone, stereo output
@@ -118,6 +138,8 @@ extern "C" {
  */
 
 #define N60_REMOTE_TONAL_HISTORY 2048u
+#define N60_REMOTE_TONAL_MAX_EARS 2u
+#define N60_REMOTE_TONAL_MAX_LIMIT_SEATS 3u
 
 typedef struct {
     double micSampleRate;                 /* nominal, 8 kHz to 768 kHz */
@@ -166,6 +188,17 @@ typedef struct {
     /// -D / (S + lambda scale tau Shat). The product leakagePerSecond * leakageScale must stay at or under 10.
     uint8_t bassMode[N60_FXLMS_MAX_TONES];
     float leakageScale[N60_FXLMS_MAX_TONES];
+    /// E4 G18: per-tone virtual ear error (see the header comment). earCount 0 (default) adapts on
+    /// the monitor error; 1 or 2 ears each give a ratio R_i and the split's speaker-to-ear path S_i
+    /// (finite, |R_i| > 0, |S_i| >= pathFloor). limitCount other seats (0 to 3) give R_j and S_j
+    /// (finite) for the limit. monitorIncreaseLimitDB is the other-seat limit (0 to 6, default 1).
+    uint8_t earCount[N60_FXLMS_MAX_TONES];
+    N60AncComplex earRatio[N60_FXLMS_MAX_TONES][N60_REMOTE_TONAL_MAX_EARS];
+    N60AncComplex earPath[N60_FXLMS_MAX_TONES][N60_REMOTE_TONAL_MAX_EARS];
+    uint8_t limitCount[N60_FXLMS_MAX_TONES];
+    N60AncComplex limitRatio[N60_FXLMS_MAX_TONES][N60_REMOTE_TONAL_MAX_LIMIT_SEATS];
+    N60AncComplex limitPath[N60_FXLMS_MAX_TONES][N60_REMOTE_TONAL_MAX_LIMIT_SEATS];
+    float monitorIncreaseLimitDB;
 } N60RemoteTonalConfig;
 
 #define N60_REMOTE_TONAL_BASS_FREE 0u
@@ -206,6 +239,10 @@ typedef struct {
     /// speaker-to-microphone path, summed over the two channels in power (peak amplitude).
     N60AncComplex programmeAtMic[N60_FXLMS_MAX_TONES];
     float programmeFeedLevel[N60_FXLMS_MAX_TONES];
+    /// E4 G18: the virtual ear residuals R_i Dm + S_i W of the last block (zero for a tone with no
+    /// ears), and whether a limit scaled the weight back in that block.
+    N60AncComplex earResidual[N60_FXLMS_MAX_TONES][N60_REMOTE_TONAL_MAX_EARS];
+    bool monitorLimited[N60_FXLMS_MAX_TONES];
 } N60RemoteTonalStatus;
 
 typedef struct N60RemoteTonal N60RemoteTonal;

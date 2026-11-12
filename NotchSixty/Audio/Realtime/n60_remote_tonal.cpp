@@ -88,6 +88,8 @@ struct N60RemoteTonal {
     Rls fit[N60_FXLMS_MAX_TONES];
     bool fitStarted = false;
     cd measured[N60_FXLMS_MAX_TONES];
+    cd earResidual[N60_FXLMS_MAX_TONES][N60_REMOTE_TONAL_MAX_EARS];
+    bool monitorLimited[N60_FXLMS_MAX_TONES] = {};
     bool adapting[N60_FXLMS_MAX_TONES] = {};
     bool hold = false;
     bool reidentify = false;
@@ -146,6 +148,8 @@ void reset_state(N60RemoteTonal &c) {
         c.freq[k] = c.cfg.toneHz[k];
         c.pll[k] = Pll{};
         c.measured[k] = 0;
+        for (cd &r : c.earResidual[k]) r = 0;
+        c.monitorLimited[k] = false;
         c.adapting[k] = false;
         c.dither[k] = 1.0;
     }
@@ -457,7 +461,18 @@ N60RemoteTonalConfig N60RemoteTonalConfigDefault(double micSampleRate, double ho
     for (uint32_t k = 0; k < N60_FXLMS_MAX_TONES; ++k) {
         c.bassMode[k] = N60_REMOTE_TONAL_BASS_FREE;
         c.leakageScale[k] = 1.0f;
+        c.earCount[k] = 0;
+        c.limitCount[k] = 0;
+        for (uint32_t i = 0; i < N60_REMOTE_TONAL_MAX_EARS; ++i) {
+            c.earRatio[k][i] = {1.0f, 0.0f};
+            c.earPath[k][i] = {1.0f, 0.0f};
+        }
+        for (uint32_t i = 0; i < N60_REMOTE_TONAL_MAX_LIMIT_SEATS; ++i) {
+            c.limitRatio[k][i] = {1.0f, 0.0f};
+            c.limitPath[k][i] = {1.0f, 0.0f};
+        }
     }
+    c.monitorIncreaseLimitDB = 1.0f;
     return c;
 }
 
@@ -479,7 +494,17 @@ bool N60RemoteTonalConfigIsValid(const N60RemoteTonalConfig *config) {
     if (!(c.trackBandwidthHz >= 0.05 && c.trackBandwidthHz <= 2.0)) return false;
     if (!(c.frequencySlewPerSecond >= 0.0 && c.frequencySlewPerSecond <= 0.05)) return false;
     if (!(c.trackRangeFraction >= 0.0 && c.trackRangeFraction <= 0.10)) return false;
+    if (!(c.monitorIncreaseLimitDB >= 0.0f && c.monitorIncreaseLimitDB <= 6.0f)) return false;
     for (uint32_t k = 0; k < c.toneCount; ++k) {
+        if (c.earCount[k] > N60_REMOTE_TONAL_MAX_EARS || c.limitCount[k] > N60_REMOTE_TONAL_MAX_LIMIT_SEATS) return false;
+        for (uint32_t i = 0; i < c.earCount[k]; ++i) {
+            const cd ratio = to_cd(c.earRatio[k][i]);
+            const cd ear = to_cd(c.earPath[k][i]);
+            if (!finite(ratio) || !finite(ear) || !(std::abs(ratio) > 0.0) || !(std::abs(ear) >= c.pathFloor)) return false;
+        }
+        for (uint32_t i = 0; i < c.limitCount[k]; ++i) {
+            if (!finite(to_cd(c.limitRatio[k][i])) || !finite(to_cd(c.limitPath[k][i]))) return false;
+        }
         if (!(c.toneHz[k] >= 20.0f && c.toneHz[k] <= 150.0f)) return false;
         if (!(c.toneHz[k] < 0.5 * c.micSampleRate)) return false;
         const cd seed = to_cd(c.pathSeed[k]);
@@ -743,10 +768,57 @@ bool N60RemoteTonalProcessMic(N60RemoteTonal *c, const float *samples, uint32_t 
             reset = true;
             continue;
         }
-        if (c->hold || std::abs(s) < c->cfg.pathFloor) continue;
-        const cd ev = m[k] - s * (gbar[k] - c->weight[k]);
+        if (c->hold || std::abs(s) < c->cfg.pathFloor) {
+            // Not adapting: the ear residuals and limit flag describe no block.
+            c->monitorLimited[k] = false;
+            for (cd &r : c->earResidual[k]) r = 0;
+            continue;
+        }
         const double leakage = c->cfg.leakagePerSecond * static_cast<double>(c->cfg.leakageScale[k]);
-        c->weight[k] = (1.0 - leakage * dt) * c->weight[k] - alpha * ev / s;
+        if (c->cfg.earCount[k] > 0) {
+            // E4 G18: adapt on the errors the ears would have, then keep the monitor and the other seats within the limit.
+            const cd dm = m[k] - s * gbar[k];
+            cd gradient = 0;
+            double power = 0;
+            for (uint32_t i = 0; i < c->cfg.earCount[k]; ++i) {
+                const cd ear = to_cd(c->cfg.earPath[k][i]);
+                const cd ev = to_cd(c->cfg.earRatio[k][i]) * dm + ear * c->weight[k];
+                gradient += std::conj(ear) * ev;
+                power += std::norm(ear);
+            }
+            cd w = (1.0 - leakage * dt) * c->weight[k] - alpha * gradient / power;
+            const double allowed = db_to_linear(c->cfg.monitorIncreaseLimitDB);
+            auto exceeds = [&](const cd &candidate) {
+                if (std::abs(dm + s * candidate) > std::abs(dm) * allowed) return true;
+                for (uint32_t j = 0; j < c->cfg.limitCount[k]; ++j) {
+                    const cd before = to_cd(c->cfg.limitRatio[k][j]) * dm;
+                    if (std::abs(before + to_cd(c->cfg.limitPath[k][j]) * candidate) > std::abs(before) * allowed) return true;
+                }
+                return false;
+            };
+            c->monitorLimited[k] = false;
+            if (!finite(w)) {
+                // Overflow from an extreme survey value: the whole set re-seeds, as for any non-finite state.
+                reset = true;
+                continue;
+            }
+            if (exceeds(w)) {
+                double low = 0.0, high = 1.0;
+                for (int it = 0; it < 24; ++it) {
+                    const double mid = 0.5 * (low + high);
+                    if (exceeds(w * mid)) high = mid; else low = mid;
+                }
+                w *= low;
+                c->monitorLimited[k] = true;
+            }
+            c->weight[k] = w;
+            for (uint32_t i = 0; i < c->cfg.earCount[k]; ++i) {
+                c->earResidual[k][i] = to_cd(c->cfg.earRatio[k][i]) * dm + to_cd(c->cfg.earPath[k][i]) * w;
+            }
+        } else {
+            const cd ev = m[k] - s * (gbar[k] - c->weight[k]);
+            c->weight[k] = (1.0 - leakage * dt) * c->weight[k] - alpha * ev / s;
+        }
         c->adapting[k] = true;
     }
     if (reset) {
@@ -910,6 +982,8 @@ N60RemoteTonalStatus N60RemoteTonalReadStatus(const N60RemoteTonal *c) {
         s.adapting[k] = c->adapting[k];
         s.programmeAtMic[k] = from_cd(c->programmeRemoved[k]);
         s.programmeFeedLevel[k] = c->programmeFeed[k];
+        for (uint32_t i = 0; i < N60_REMOTE_TONAL_MAX_EARS; ++i) s.earResidual[k][i] = from_cd(c->earResidual[k][i]);
+        s.monitorLimited[k] = c->monitorLimited[k];
     }
     s.micMoved = c->moved;
     s.micMovedKind = c->movedKind;

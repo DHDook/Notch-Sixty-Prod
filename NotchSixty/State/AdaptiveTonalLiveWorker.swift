@@ -164,6 +164,28 @@ final class AdaptiveTonalLiveWorker: @unchecked Sendable {
                 if case .tikhonov(let scale) = tone.bassMode { v[k] = Float(min(max(scale, 1), 10)) }
             }
         }
+        // E4 G18: ears the weight adapts for and other seats it must not worsen (the remote-microphone technique).
+        config.monitorIncreaseLimitDB = Float(min(max(QuietZoneQualificationTargets.maximumOtherSeatIncreaseDB, 0), 6))
+        for (k, tone) in tones.enumerated() {
+            withUnsafeMutableBytes(of: &config.earCount) { $0.bindMemory(to: UInt8.self)[k] = UInt8(tone.ears.count) }
+            withUnsafeMutableBytes(of: &config.limitCount) { $0.bindMemory(to: UInt8.self)[k] = UInt8(tone.limitSeats.count) }
+            withUnsafeMutableBytes(of: &config.earRatio) { raw in
+                let v = raw.bindMemory(to: N60AncComplex.self)
+                for (i, p) in tone.ears.enumerated() { v[k * Int(N60_REMOTE_TONAL_MAX_EARS) + i] = complex(p.ratio) }
+            }
+            withUnsafeMutableBytes(of: &config.earPath) { raw in
+                let v = raw.bindMemory(to: N60AncComplex.self)
+                for (i, p) in tone.ears.enumerated() { v[k * Int(N60_REMOTE_TONAL_MAX_EARS) + i] = complex(p.path) }
+            }
+            withUnsafeMutableBytes(of: &config.limitRatio) { raw in
+                let v = raw.bindMemory(to: N60AncComplex.self)
+                for (i, p) in tone.limitSeats.enumerated() { v[k * Int(N60_REMOTE_TONAL_MAX_LIMIT_SEATS) + i] = complex(p.ratio) }
+            }
+            withUnsafeMutableBytes(of: &config.limitPath) { raw in
+                let v = raw.bindMemory(to: N60AncComplex.self)
+                for (i, p) in tone.limitSeats.enumerated() { v[k * Int(N60_REMOTE_TONAL_MAX_LIMIT_SEATS) + i] = complex(p.path) }
+            }
+        }
         var guardConfig = N60AncGuardConfigDefault(sampleRate)
         guard N60RemoteTonalConfigIsValid(&config), let core = N60RemoteTonalCreate(&config) else {
             return nil
