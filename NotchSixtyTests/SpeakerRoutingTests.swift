@@ -718,3 +718,74 @@ extension SpeakerRoutingTests {
         XCTAssertNotNil(roundTrip.speakers[0].ways[1].linearisation)
     }
 }
+
+// MARK: - E28 S9: Output loudness on routed sessions
+
+extension SpeakerRoutingTests {
+    private func routedLaneRoutingFixture() -> SpeakerRoutingConfiguration {
+        // L: two ways (lanes 0, 1); R: two ways (lanes 2, 3); a sub (lane 4); a matrix-only output (lane 5).
+        var routing = SpeakerRoutingTemplate.twoWay.build(
+            mains: [.init(lane: 0, name: "L", endpoints: [ep(0, device: "fixture"), ep(1, device: "fixture")]),
+                    .init(lane: 1, name: "R", endpoints: [ep(2, device: "fixture"), ep(3, device: "fixture")])],
+            subs: [ep(4, device: "fixture")], crossoverHz: [2_000])!
+        routing.matrix = [RoutingMatrixEntry(source: .program(0), output: ep(5, device: "fixture"), gain: 0.5)]
+        return routing
+    }
+
+    func testRoutedPlanMapsLanesBackToProgramRoles() throws {
+        let routing = routedLaneRoutingFixture()
+        let device = fixtureDevice("fixture", rate: 48_000, channels: 8)
+        let plan = try routing.makeLivePlan(
+            programLayout: .stereo, availableDevices: [device], sampleRate: 48_000, selectedOutputUID: "fixture",
+            bassManagementEnabled: true)
+        XCTAssertEqual(plan.routedLaneProgramChannels, [0, 0, 1, 1, .max, .max])
+        var map = try plan.makeRealtimeOutputMap()
+        XCTAssertEqual(map.routedLaneCount, 6)
+        XCTAssertTrue(N60LiveNChannelOutputMapRoutedHasProgramLane(&map))
+        XCTAssertEqual(map.routedLaneProgramChannel.0, 0)
+        XCTAssertEqual(map.routedLaneProgramChannel.2, 1)
+        XCTAssertEqual(map.routedLaneProgramChannel.4, UInt32.max)
+        XCTAssertEqual(map.routedLaneProgramChannel.5, UInt32.max)
+    }
+
+    func testRoutedPlanWithOnlySubAndMatrixLanesCarriesNoRole() throws {
+        let routing = SpeakerRoutingConfiguration(
+            speakers: [RoutedSpeaker(name: "Sub", source: .sub(0), ways: [RoutedWay(name: "Sub", endpoint: ep(0, device: "fixture"))])],
+            matrix: [RoutingMatrixEntry(source: .program(0), output: ep(1, device: "fixture"))])
+        let device = fixtureDevice("fixture", rate: 48_000, channels: 2)
+        let plan = try routing.makeLivePlan(
+            programLayout: .stereo, availableDevices: [device], sampleRate: 48_000, selectedOutputUID: "fixture",
+            bassManagementEnabled: true)
+        XCTAssertEqual(plan.routedLaneProgramChannels, [.max, .max])
+        var map = try plan.makeRealtimeOutputMap()
+        XCTAssertFalse(N60LiveNChannelOutputMapRoutedHasProgramLane(&map))
+    }
+
+    /// A routed two-way session now has an Output loudness reading (it had none before S9).
+    func testRoutedSessionPublishesOutputLoudness() throws {
+        let engine = try engineReady(subs: false)
+        let routing = SpeakerRoutingTemplate.twoWay.build(
+            mains: [.init(lane: 0, name: "L", endpoints: [ep(0, device: "fixture"), ep(1, device: "fixture")]),
+                    .init(lane: 1, name: "R", endpoints: [ep(2, device: "fixture"), ep(3, device: "fixture")])],
+            crossoverHz: [2_000])!
+        let (session, _, _) = try routedSession(
+            engine: engine, routing: routing, layout: .stereo,
+            labels: [kAudioChannelLabel_Left, kAudioChannelLabel_Right], rate: 48_000, channels: 4)
+        session.setAnalysisDemand(ProductionAnalysisDemand.loudness)
+        Thread.sleep(forTimeInterval: 0.1)
+        for _ in 0..<40 { _ = session.testingRunBlock(frames: 512, programme: 0.25, outputChannels: 4) }
+        var snapshot = session.productionAnalysisSnapshot()
+        for _ in 0..<40 where snapshot.loudnessOutput == nil {
+            Thread.sleep(forTimeInterval: 0.05)
+            snapshot = session.productionAnalysisSnapshot()
+        }
+        XCTAssertNotNil(snapshot.loudnessInput, "Input")
+        XCTAssertNotNil(snapshot.loudnessOutput, "Output is measured on a routed session")
+        session.setAnalysisDemand(0)
+    }
+
+    func testRoutedLoudnessNotesDescribeTheSum() {
+        XCTAssertTrue(LoudnessCardText.wideNote.contains("sum of its speaker"))
+        XCTAssertFalse(LoudnessCardText.wideOutputUnavailableNote.contains("do not map back"))
+    }
+}

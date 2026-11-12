@@ -646,6 +646,10 @@ struct LiveNChannelOutputRoutePlan: Equatable, Sendable {
     /// is the flattened physical channel `routedOutputPhysicalChannels[i]`. A routed plan carries no program or sub
     /// channel map of its own: the graph's ROUTE stage owns every physical output.
     let routedOutputPhysicalChannels: [UInt32]
+    /// E28 S9: for each routed output lane, the program lane (an index into `programLayout.roles`) whose speaker the
+    /// lane drives, or `UInt32.max` for a sub or matrix-only lane. Empty (or all `UInt32.max`) means Output loudness is
+    /// not measured. Metering only: the render never reads it.
+    let routedLaneProgramChannels: [UInt32]
 
     var isRouted: Bool { !routedOutputPhysicalChannels.isEmpty }
 
@@ -665,7 +669,8 @@ struct LiveNChannelOutputRoutePlan: Equatable, Sendable {
             [OutputProgramRole: [SpeakerOptimizerDeployedPEQBand]] = [:],
         speakerOptimizerFIR:
             SpeakerOptimizerFIRDeploymentConfiguration? = nil,
-        routedOutputPhysicalChannels: [UInt32] = []
+        routedOutputPhysicalChannels: [UInt32] = [],
+        routedLaneProgramChannels: [UInt32] = []
     ) {
         self.programLayout = programLayout
         self.orderedDeviceUIDs = orderedDeviceUIDs
@@ -680,6 +685,7 @@ struct LiveNChannelOutputRoutePlan: Equatable, Sendable {
         self.speakerOptimizerPEQ = speakerOptimizerPEQ
         self.speakerOptimizerFIR = speakerOptimizerFIR
         self.routedOutputPhysicalChannels = routedOutputPhysicalChannels
+        self.routedLaneProgramChannels = routedLaneProgramChannels
     }
 
     var usesMultiplePhysicalDevices: Bool { orderedDeviceUIDs.count > 1 }
@@ -698,6 +704,12 @@ struct LiveNChannelOutputRoutePlan: Equatable, Sendable {
             }
             guard routedCompiled else {
                 throw OutputDeviceProfileError.realtimeOutputMapCompilationFailed
+            }
+            if routedLaneProgramChannels.count == routedOutputPhysicalChannels.count {
+                let recorded = routedLaneProgramChannels.withUnsafeBufferPointer { buffer in
+                    N60LiveNChannelOutputMapSetRoutedLaneProgram(&result, UInt32(buffer.count), buffer.baseAddress!)
+                }
+                guard recorded else { throw OutputDeviceProfileError.realtimeOutputMapCompilationFailed }
             }
             return result
         }
