@@ -359,6 +359,7 @@
 				GCC_C_LANGUAGE_STANDARD = gnu11;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = "Notch Sixty";
+				INFOPLIST_FILE = NotchSixty/Info.plist;
 				INFOPLIST_KEY_NSAudioCaptureUsageDescription = "Notch Sixty captures system audio so it can process and play it through your selected output device.";
 				INFOPLIST_KEY_NSCameraUsageDescription = "Notch Sixty uses the camera to find where your head is, on this Mac only, so the quiet zone can follow you. Images are never stored or sent.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Notch Sixty uses your selected measurement microphone to measure speaker and room response for room correction.";
@@ -394,6 +395,7 @@
 				GCC_C_LANGUAGE_STANDARD = gnu11;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = "Notch Sixty";
+				INFOPLIST_FILE = NotchSixty/Info.plist;
 				INFOPLIST_KEY_NSAudioCaptureUsageDescription = "Notch Sixty captures system audio so it can process and play it through your selected output device.";
 				INFOPLIST_KEY_NSCameraUsageDescription = "Notch Sixty uses the camera to find where your head is, on this Mac only, so the quiet zone can follow you. Images are never stored or sent.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Notch Sixty uses your selected measurement microphone to measure speaker and room response for room correction.";
