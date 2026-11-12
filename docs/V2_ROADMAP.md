@@ -19,7 +19,7 @@ constraints follow from that, and most of v2 is what becomes possible when one i
 | macOS only | V2-4, V2-5, V2-14 |
 | No licensed decoders or data | V2-6, V2-7, V2-8 |
 
-The remaining epics (V2-9 to V2-13, V2-15) are features that were deferred for priority only.
+The remaining epics (V2-9 to V2-13, V2-15, V2-16) are features that were deferred for priority only.
 
 ## Epics at a glance
 
@@ -40,6 +40,7 @@ The remaining epics (V2-9 to V2-13, V2-15) are features that were deferred for p
 | V2-13 | Virtual bass for small speakers | Small to medium | E6 | Yes: is an effect in scope? |
 | V2-14 | Windows edition | Very large | E21, V2-5 | Yes: driver, installer, UI shell |
 | V2-15 | Community sharing | Medium | E18 iCloud sync | Yes: first network feature, moderation |
+| V2-16 | Verification with music | Small to medium | E11, E4 path tracking | No |
 
 Sizes are rough: small is one or two slices, medium three to six, large more than six.
 
@@ -48,7 +49,7 @@ Sizes are rough: small is one or two slices, medium three to six, large more tha
 Three waves. The order inside a wave is by value for effort; the owner can reorder freely because
 only the listed dependencies are hard.
 
-1. **First update (no policy change, builds on v1 directly):** V2-9, V2-11, V2-2, V2-10.
+1. **First update (no policy change, builds on v1 directly):** V2-9, V2-11, V2-16, V2-2, V2-10.
 2. **Reach (new surfaces for the same engine):** V2-4, V2-1, V2-3, V2-12.
 3. **Platforms and licences:** V2-5, V2-7, V2-8, V2-6, V2-13, V2-14, V2-15.
 
@@ -161,9 +162,15 @@ which lists the first items and says it splits into three or four slices.
 
 - [ ] Share and browse profiles, targets and speaker presets. The first network feature: needs privacy, moderation and App Review decisions
 
-## Items that may move here from v1
+### V2-16 Verification with music (owner, 11 Nov 2026; moved from E11)
 
-- E11 S12 verification with music, if the E4 path tracking cannot be reused and the owner moves it.
+- [ ] First check whether the E4 online path tracking can be reused, and size the work from that
+- [ ] During normal listening, compare what the app plays with what a room microphone hears and estimate the response
+- [ ] Prompt when the response has moved away from the measured one, and offer to re-measure
+- [ ] The microphone is used only while the user has switched this on; state that clearly
+
+## Undecided items
+
 - Review item E31 (signal-path and history view) and cut candidates C1–C10 are undecided; they stay
   where they are until the owner decides.
 

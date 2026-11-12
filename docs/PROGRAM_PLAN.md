@@ -26,7 +26,7 @@ with them, these decisions win until E1/E21 update `AGENTS.md`.
 | New engine quality (20 Oct 2026) | The unified graph is at least equal to `N60RenderKernel` in every area and better where it can be; the kernel stays as a frozen fallback until E23 deletes it before v1 |
 | Preview release (11 Nov 2026) | Rejected. No preview or early release: v1 ships only when every scoped epic is complete and right |
 | Private beta (11 Nov 2026) | Rejected. The owner does the beta testing; no TestFlight or NDA beta before launch |
-| Roadmap review (11 Nov 2026) | Approved: E17 widened to output integrity and interchange; E15 source-rate investigation, connection switching, wireless defaults and schedules; E14 v1 is one upmix with one strength control (modes and tuning are v2); E16 two tiers; E18 named slices; E12 simple and expert modes; E9 active-speaker fail-safe check; new epic E30 Everyday listening controls; the codebase health items under E1, E12, E18, E21 and E23. Not decided: a signal-path and history epic, and any cut from v1 scope (nothing is cut) |
+| Roadmap review (11 Nov 2026) | Approved: E17 widened to output integrity and interchange; E15 source-rate investigation, connection switching, wireless defaults and schedules; E14 v1 is one upmix with one strength control (modes and tuning are v2); E16 two tiers; E18 named slices; E12 simple and expert modes; E9 active-speaker fail-safe check; new epic E30 Everyday listening controls (confirmed by name); the codebase health items under E1, E12, E18, E21 and E23. Not decided: a signal-path and history epic, and any cut from v1 scope (nothing is cut) |
 | Red nightly rule (11 Nov 2026) | A failing nightly `macos-full` on `main` is fixed before the next slice starts (`CLAUDE.md`, `/next` step 0) |
 | Engine code home (11 Nov 2026) | New engine C or C++ goes in `core/`, never in `NotchSixty/Audio/Realtime` (`CLAUDE.md`; checked by realtime-reviewer) |
 | After v1 (11 Nov 2026) | Post-v1 work is scoped in `docs/V2_ROADMAP.md`. It is not started, and `/next` does not read it, until the owner initiates it |
@@ -78,7 +78,7 @@ reviewers compare with Dirac and REW), then engine depth, then breadth.
 
 0. E24 Room correction completion, all of S0–S8 in written order (owner, 1 Nov 2026; S4–S8 no longer wait for E4; numbered 0 so later item numbers stay valid)
    - then E25 Outputs and speaker arrangement, S1–S8 in written order, before item 1 (owner, 1 Nov 2026)
-   - then the E1 codebase health slices S7–S9 in written order (owner approved the items on 11 Nov 2026; placing them ahead of feature slices is the review's proposal and is the owner's to confirm on this PR)
+   - then the E1 codebase health slices S7–S9 in written order (owner, 11 Nov 2026: they run before the next feature slice)
    - then E4 S22b echo stage in the live path (S22b3 echo stage built dark, PR open; S25 arming built), before item 1 (owner, 2 Nov 2026; arming approved with the four conditions in `docs/epics/E4.md` Open owner decisions: user-initiated only, slow 3 s fade-in, existing gates first, never persisted)
 1. E4 class-leading roadmap, S24–S31 in written order (owner, 31 Oct 2026; E4 S11 moved to E22 on 1 Nov 2026; S26 and S29 are skipped until the owner decides camera head position and the overnight power assertion; slices waiting on E8 or the bench are skipped until ready)
    - then E26 Sub-aware Quiet Zone, S1–S7 in written order, before item 2 (owner, 4 Nov 2026; owner 5 Nov 2026: all remaining slices S2–S7 complete before E9 FIR limits (item 4), so E9 S2 waits; S1 waits for E25 S8b; no live ANC path is enabled outside the per-feature arm)
@@ -304,7 +304,7 @@ minimum-phase in blind ABX at three or more seats, and measurement results match
 - [x] Measurement management: overlays, groups, notes, A/B against a reference
 - [x] Quasi-anechoic (gated) speaker response view in the Measurement Lab's Advanced tab, using the existing analyser (`SpeakerMeasurementLabQuasiAnechoic.swift`; from E5)
 - Moved to E17 S7 (owner, 11 Nov 2026): import and export of REW text, FRD and ZMA. The cross-check against REW on shared captures is an E22 item (no REW is available)
-- [ ] S12 `e11/verify-with-music` (owner, 11 Nov 2026): during normal listening, compare what the app plays with what a room microphone hears, estimate the response, and prompt when it has moved away from the measured one. First step: check whether the E4 online path tracking can be reused and record the size; if it cannot be reused, the owner decides whether the slice stays in v1 or moves to `docs/V2_ROADMAP.md`
+- Verification with music (compare what plays with what a room microphone hears during normal listening) is after v1: `docs/V2_ROADMAP.md`, V2-16 (owner, 11 Nov 2026)
 
 ### E10 Mixed-phase room correction and bass control
 
