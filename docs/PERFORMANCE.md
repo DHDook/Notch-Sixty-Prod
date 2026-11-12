@@ -20,6 +20,7 @@ budgets for the portable engine core (`libn60core`). Harness: `core/bench/n60_be
 | R4a / R4b | 262144-tap FIR on 2 / 8 lanes |
 | R5 | Layout 9.1.6 binaural, 8192 taps |
 | R6 | 32 PEQ stages x 16 sections (512-slot cap) |
+| R8 | E19 MIMO treatment stage, armed, 8 sources, 4096 taps per filter (runs at fs/D inside the stage) |
 | R7 | ANC lane feed, offline compute only (workflow build, `-DN60_BENCH_ANC`); nothing reaches a device |
 
 - Gate (macos-full): fail above 1.5x the committed baseline, warn above 1.2x. Budgets in
@@ -44,6 +45,7 @@ These are local numbers on an M4, not the M1 target and not a CI runner. The com
 | R4b | 2.1 | 2.2 | 4.3 | 4.8 | 9.3 | 9.9 | 20.8 | 22.5 |
 | R5 | 3.4 | 3.7 | 6.8 | 7.5 | 13.8 | 15.0 | 27.5 | 30.1 |
 | R6 | 2.9 | 3.2 | 5.7 | 6.2 | 11.4 | 12.4 | 22.7 | 24.7 |
+| R8 | 0.9 | 1.0 | 1.3 | 1.4 | 2.3 | 2.4 | 3.9 | 4.3 |
 
 The R2 384 kHz cell is lower than 352.8 kHz because the period doubling stops at 1024 frames and the
 FIR partitioning changes there; treat it as a harness artefact to re-check on the CI baseline.

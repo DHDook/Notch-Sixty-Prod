@@ -4,6 +4,7 @@
 //   R1 stereo, every stage on, plus 2 subs      R2 5.1 plus 2 subs, room FIR per lane
 //   R3 7.1.4 plus 4 subs                        R4 262,144-tap FIR on 2 and 8 lanes (R4a, R4b)
 //   R5 binaural, 16 sources, 8,192 taps         R6 wide PEQ at the 512-slot cap (E6 G30)
+//   R8 MIMO treatment stage, 8 sources, armed (E20 S8)
 //   R7 ANC lane feed maths, offline (built only with -DN60_BENCH_ANC; compute only, nothing reaches a device)
 // at the eight standard rates and two block sizes: "ref" is 2.67 ms (128 frames at 48 kHz, 1,024 at 384 kHz) and
 // "stress" a quarter of that. Load = render time / buffer period on one core. Each cell reports the median of
@@ -31,6 +32,7 @@
 #include <vector>
 
 #include "n60/graph.h"
+#include "n60/mimo.h"
 #include "n60/profile.h"
 
 #ifdef N60_BENCH_ANC
@@ -184,8 +186,25 @@ void widePeq(Built &b, double rate) {
     b.add(N60_STAGE_FINAL_METER, 3, {});
 }
 
+// R8 (E20 S8, G30): the E19 MIMO treatment stage armed on 8 source lanes with 4,096 low-rate taps per filter, the
+// largest the stage accepts. It already runs its filters at fs/D (graph.h "MIMO treatment"), so this is the cost of the
+// treatment injection filters as shipped.
+void mimoTreatment(Built &b, double rate) {
+    uint32_t D = 0;
+    double lr = 0;
+    n60_mimo_low_rate(rate, &D, &lr);
+    const uint32_t S = 8, T = 4096;
+    std::vector<float> p = {static_cast<float>(D), static_cast<float>(T), static_cast<float>(S), 0.0f, 1.0f, 0.0f, 0.0f, 0.0f};
+    for (uint32_t s = 0; s < S; ++s) p.push_back(10.0f);
+    const std::vector<float> taps = decaying(S * S * T, 11, 0.001f);
+    p.insert(p.end(), taps.begin(), taps.end());
+    b.add(N60_STAGE_SANITISE, 1, {});
+    b.add(N60_STAGE_MIMO, 2, p, maskOf(0, S));
+    b.add(N60_STAGE_FINAL_METER, 3, {});
+}
+
 // Scenario ids. R4 splits into 2 and 8 lanes.
-const char *const kScenarioIds[] = {"R1", "R2", "R3", "R4a", "R4b", "R5", "R6", "R7"};
+const char *const kScenarioIds[] = {"R1", "R2", "R3", "R4a", "R4b", "R5", "R6", "R7", "R8"};
 
 bool buildScenario(const std::string &id, double rate, uint32_t block, Built &b) {
     if (id == "R1") { b.begin(rate, block, 4); fullChain(b, rate, 2, 2, 8192); return true; }
@@ -193,6 +212,7 @@ bool buildScenario(const std::string &id, double rate, uint32_t block, Built &b)
     if (id == "R3") { b.begin(rate, block, 16); fullChain(b, rate, 12, 4, 4096); return true; }
     if (id == "R4a") { b.begin(rate, block, 2); longFir(b, 2); return true; }
     if (id == "R4b") { b.begin(rate, block, 8); longFir(b, 8); return true; }
+    if (id == "R8") { b.begin(rate, block, 8); mimoTreatment(b, rate); return true; }
     if (id == "R6") { b.begin(rate, block, 2); widePeq(b, rate); return true; }
     if (id == "R5") {
         n60_layout lay;
