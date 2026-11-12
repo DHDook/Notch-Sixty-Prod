@@ -219,17 +219,19 @@ final class LiveLinearPhaseTests: XCTestCase {
     func testProductControllerForwardsAudioEngineChanges() throws {
         let engine = AudioIOEngine()
         let product = ProductController(audioEngine: engine)
-        var notificationCount = 0
-        let observation = product.objectWillChange.sink {
-            notificationCount += 1
+        // E20 S9: the engine is `@Observable`; reading `product.configuration` tracks the engine directly.
+        var changed = false
+        withObservationTracking {
+            _ = product.configuration
+        } onChange: {
+            changed = true
         }
 
         try engine.setOutputGainDB(-3.0)
 
-        XCTAssertGreaterThan(notificationCount, 0)
+        XCTAssertTrue(changed)
         XCTAssertEqual(product.configuration.dsp.gain.outputGainDB, -3.0)
         XCTAssertEqual(product.configuration.dsp.dynamics, engine.dynamicsConfiguration)
-        withExtendedLifetime(observation) {}
     }
 
     func testProductConfigurationSchemaIsVersionSixForAdvancedDynamicsState() {
