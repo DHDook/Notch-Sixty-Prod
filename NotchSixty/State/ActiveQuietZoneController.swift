@@ -472,6 +472,29 @@ final class ActiveQuietZoneController: ObservableObject {
         objectWillChange.send()
     }
 
+    /// E4 G18: the ears a tone was designed for (both zones, or the one surveyed ear) and the other seats it must not
+    /// worsen, as the adaptive worker's seed carries them.
+    func adaptiveSeedPoints(near frequencyHz: Double, twoZones: Bool)
+        -> (ears: [AdaptiveQuietZoneSeedPoint], limits: [AdaptiveQuietZoneSeedPoint]) {
+        func point(_ t: QuietZoneEarTone) -> AdaptiveQuietZoneSeedPoint {
+            AdaptiveQuietZoneSeedPoint(ratio: t.ratio, left: t.earLeft, right: t.earRight)
+        }
+        var ears: [AdaptiveQuietZoneSeedPoint] = []
+        if twoZones {
+            if let a = zones?.firstTone(near: frequencyHz), let b = zones?.secondTone(near: frequencyHz) { ears = [point(a), point(b)] }
+        } else if let ear = virtualMic?.earTone(near: frequencyHz) {
+            ears = [point(ear)]
+        }
+        return (ears, adaptiveLimitSeats(near: frequencyHz))
+    }
+
+    /// E4 G18: the other surveyed seats at a tone, which the adaptive weight must not worsen.
+    func adaptiveLimitSeats(near frequencyHz: Double) -> [AdaptiveQuietZoneSeedPoint] {
+        (zones?.otherSeatPoints(near: frequencyHz) ?? []).map {
+            AdaptiveQuietZoneSeedPoint(ratio: $0.ratio, left: $0.left, right: $0.right)
+        }
+    }
+
     /// E4 S27: two zones, one complex L/R gain per tone from the 2 x 2 core with the monitor microphone as the S16
     /// other-seat point. Nil keeps the fixed-seat design (not in two-zone mode, tone not surveyed in both zones, bass
     /// path conditioned, or the pair cannot be helped).
@@ -1738,7 +1761,6 @@ final class ActiveQuietZoneController: ObservableObject {
             [ActiveQuietZoneSpatialSeatPrediction] = []
         var telemetry: [ActiveQuietZoneToneTelemetry] = []
         var seeds: [AdaptiveQuietZoneSeed] = []
-        var anyVirtualTone = false
         var surveyWindow: [Double: ActiveQuietZoneComplex] = [:]
         var decisions:
             [ActiveQuietZoneVerification.Decision] = []
@@ -1807,6 +1829,8 @@ final class ActiveQuietZoneController: ObservableObject {
             let outputRight: ActiveQuietZoneComplex
             let predictedDB: Double
             var bassMode = BassPlantConditioningMode.free
+            var seedEars: [AdaptiveQuietZoneSeedPoint] = []
+            var seedLimits: [AdaptiveQuietZoneSeedPoint] = []
             if spatial {
                 guard let calibration = spatialCalibration,
                       let project = ambient.projects.project,
@@ -1842,7 +1866,7 @@ final class ActiveQuietZoneController: ObservableObject {
                 if let two = try twoZoneDesign(
                     frequencyHz: frequency, monitorDisturbance: disturbance,
                     monitorLeft: leftPath, monitorRight: rightPath, bassMode: bassMode) {
-                    anyVirtualTone = true
+                    (seedEars, seedLimits) = adaptiveSeedPoints(near: frequency, twoZones: true)
                     outputLeft = two.left
                     outputRight = two.right
                     predictedDB = two.zones.map(\.reductionDB).min() ?? 0
@@ -1851,7 +1875,7 @@ final class ActiveQuietZoneController: ObservableObject {
                 if let virtual = try virtualEarDesign(
                     frequencyHz: frequency, monitorDisturbance: disturbance,
                     monitorLeft: leftPath, monitorRight: rightPath, bassMode: bassMode) {
-                    anyVirtualTone = true
+                    (seedEars, seedLimits) = adaptiveSeedPoints(near: frequency, twoZones: false)
                     outputLeft = virtual.left
                     outputRight = virtual.right
                     predictedDB = virtual.predictedReductionAtEarDB
@@ -1898,7 +1922,9 @@ final class ActiveQuietZoneController: ObservableObject {
                     rightPath: rightPath,
                     leftOutput: outputLeft,
                     rightOutput: outputRight,
-                    bassMode: bassMode
+                    bassMode: bassMode,
+                    ears: seedEars,
+                    limitSeats: seedLimits
                 )
             )
 
@@ -1930,9 +1956,8 @@ final class ActiveQuietZoneController: ObservableObject {
         }
 
         spatialPredictions = latestSpatialPredictions
-        // E4 S26a: the adaptive worker adapts on the monitor error, which would pull a design made at the ear
-        // back to the monitor, so it gets no seeds while any tone is designed at the ear (gap G18).
-        adaptiveSeeds = anyVirtualTone ? [] : seeds
+        // E4 G18: a tone designed at an ear carries its ears and limit seats, so the worker adapts on the ear error.
+        adaptiveSeeds = seeds
         if virtualMic?.isCapturing == true { virtualMic?.ingestWindow(surveyWindow) }
         if zones?.second.isCapturing == true { zones?.second.ingestWindow(surveyWindow) }
         let desired = try aggregateLimitedTarget(

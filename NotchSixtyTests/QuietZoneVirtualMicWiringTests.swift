@@ -223,8 +223,12 @@ final class QuietZoneVirtualMicWiringTests: XCTestCase {
         XCTAssertNil(rig.survey.ear)
     }
 
-    func testFlagIsOffByDefaultAndSurveyIsNotAttachedWithoutIt() throws {
-        XCTAssertFalse(FeatureFlags(defaults: UserDefaults(suiteName: UUID().uuidString)!).isEnabled(.virtualMicrophone))
+    func testFlagIsGraduatedAndCanBeSwitchedOffAtLaunch() throws {
+        let defaults = UserDefaults(suiteName: UUID().uuidString)!
+        XCTAssertTrue(FeatureFlag.virtualMicrophone.graduated)
+        XCTAssertFalse(FeatureFlags(
+            known: FeatureFlag.all, defaults: defaults, policy: .launchArgumentOnly,
+            arguments: ["-NotchSixtyFeatures", "-e4.virtual-microphone"]).isEnabled(.virtualMicrophone))
     }
 
     // MARK: E4 G19 / G20 / G21

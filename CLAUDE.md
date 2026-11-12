@@ -8,7 +8,7 @@
   builds one slice in a fresh context), realtime-reviewer (Sonnet), and code-scout,
   build-test-runner, plan-tracker, pr-writer (Haiku). `/next` itself runs on Sonnet.
 
-**Current focus:** not tracked here (it caused merge conflicts). Current status lives in the `**Status**` block of each `docs/epics/E<n>.md`; `/next` reads it from there. Agents never edit this file for status.
+**Current focus:** not tracked here (it caused merge conflicts). Current status lives in the Status block (a `**Status` line or a `## Status` heading) of each `docs/epics/E<n>.md`; `/next` reads it from there. Agents never edit this file for status.
 <!-- plan-tracker keeps the line above current -->
 
 @AGENTS.md
@@ -30,7 +30,8 @@ win until E21 updates `AGENTS.md`:
   room treatment outside their written authorisation paths.
 - Every feature must work at every device rate up to 384 kHz.
 - The engine core moves to C++20/23 behind one versioned C interface (E21). New engine code goes
-  in C++; existing C migrates file by file as E6 rewrites each stage. Swift stays for the macOS
+  in C++, and in `core/`, never in `NotchSixty/Audio/Realtime` (owner, 11 Nov 2026); existing C
+  migrates file by file as E6 rewrites each stage. Swift stays for the macOS
   app shell, Core Audio control and UI.
 - Nothing in the engine core may depend on an Apple framework; use the FFT abstraction (vDSP on
   Apple, a BSD-licensed FFT elsewhere). No GPL dependencies.
@@ -85,7 +86,7 @@ minimum OS, removing a user-visible feature, or enabling any live ANC or MIMO tr
   `build-test-runner`; plan updates to `plan-tracker`; PR text to `pr-writer`; engine reviews to
   `realtime-reviewer`. Any other subagent defaults to Haiku. Do not do these jobs in the main
   session.
-- Never read whole large files: `AudioIOEngine.swift` (4,500+ lines), `N60RenderKernel.c`,
+- Never read whole large files: `AudioIOEngine.swift` (6,300+ lines), `N60RenderKernel.c`,
   `ProductProfiles.swift`, `docs/PROGRAM_PLAN.md`. Grep first, then Read a line range.
 - Do not open `docs/PR*.md`, `docs/archive/`, `ci/validate_*.py` or per-PR workflows unless
   the task is about them.
@@ -108,3 +109,7 @@ owner made in this session. Drop: file contents, diffs, build and test logs, and
 - List required bench/hardware checks in each PR; remote CI never substitutes for them.
 - Flags: graduate at epic end, never remove (owner, 11 Nov 2026; AGENTS.md section 11). No new code
   may depend on a graduated flag. Bench "is it good" acceptance belongs to E22, not the epic.
+- Red nightly (owner, 11 Nov 2026): if the latest nightly `macos-full` on `main` failed, fix it
+  before starting another slice.
+- No slice makes `AudioIOEngine.swift` longer (owner, 11 Nov 2026); E23 S4 splits it.
+- Work after v1 is in `docs/V2_ROADMAP.md`; do not start it until the owner says so.

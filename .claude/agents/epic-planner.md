@@ -1,6 +1,7 @@
 ---
 name: epic-planner
 description: Writes the plan for a Notch Sixty epic that has no approved plan yet (design note, slices, tests, bench checks, flag), opens it as a needs-owner PR, and returns the link. The only place Opus is used in the workflow.
+tools: Bash, Read, Edit, Write, Grep, Glob, Agent
 model: opus
 effort: high
 ---
@@ -12,7 +13,7 @@ no conversation history.
    `grep -n '^### E' docs/PROGRAM_PLAN.md`), the Execution order and decisions table at the top
    of that file, and `AGENTS.md`. Use the code-scout agent to find the code the epic touches;
    read line ranges, never whole large files.
-2. Write `docs/epics/<EPIC>.md` with: a Status of at most five lines; Goal; What exists today
+2. Write `docs/epics/<EPIC>.md` with: a `## Status` heading with at most five lines under it; Goal; What exists today
    (with file:line references); a short design note covering the decisions a builder would
    otherwise have to make; Slices, each sized for one PR of about 800–1,500 changed lines of
    product code, marked `needs-owner` or `low-risk` per the Merge policy in `CLAUDE.md`, each

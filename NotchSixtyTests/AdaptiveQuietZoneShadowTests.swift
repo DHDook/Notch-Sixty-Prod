@@ -69,6 +69,49 @@ final class AdaptiveQuietZoneShadowTests: XCTestCase {
         XCTAssertEqual((t.path - path).magnitude, 0, accuracy: 1e-12)
     }
 
+    private final class NullLink: AdaptiveTonalLiveLink, @unchecked Sendable {
+        func popTelemetry() -> N60ActiveQuietZoneTelemetryRecord? { nil }
+        func publish(_ record: N60ActiveQuietZoneGainRecord) -> UInt64 { 0 }
+        func requestHowlTrip() {}
+    }
+
+    private func earSeed(ears: Int, limits: Int) -> AdaptiveQuietZoneSeed {
+        var s = seed()
+        s.ears = (0..<ears).map { AdaptiveQuietZoneSeedPoint(ratio: complex(0.8, Double(20 * $0)), left: complex(0.4, 10), right: complex(0.3, -50)) }
+        s.limitSeats = (0..<limits).map { _ in AdaptiveQuietZoneSeedPoint(ratio: complex(0.6, 5), left: complex(0.2, 30), right: complex(0.2, 60)) }
+        return s
+    }
+
+    /// E4 G18: ears and limit seats reach the shadow tone with the split's path, are capped at the core's sizes, and a
+    /// change in them rebuilds the core.
+    func testSeedEarsAndLimitSeatsReachTheToneWithTheSplitPath() {
+        let s = earSeed(ears: 3, limits: 4)
+        let t = AdaptiveQuietZoneShadowTone.tones(from: [s])[0]
+        XCTAssertEqual(t.ears.count, Int(N60_REMOTE_TONAL_MAX_EARS))
+        XCTAssertEqual(t.limitSeats.count, Int(N60_REMOTE_TONAL_MAX_LIMIT_SEATS))
+        let expected = t.leftShare * s.ears[0].left + t.rightShare * s.ears[0].right
+        XCTAssertEqual((t.ears[0].path - expected).magnitude, 0, accuracy: 1e-12)
+        XCTAssertEqual((t.ears[0].ratio - s.ears[0].ratio).magnitude, 0, accuracy: 1e-12)
+        XCTAssertTrue(AdaptiveQuietZoneShadowTone.tones(from: [seed()])[0].ears.isEmpty)
+        let plain = AdaptiveQuietZoneShadowTone.tones(from: [seed()])
+        XCTAssertFalse(AdaptiveQuietZoneShadowTone.sameDesign(plain, [t]))
+        var moved = s
+        moved.ears[0].ratio = moved.ears[0].ratio * 2
+        XCTAssertFalse(AdaptiveQuietZoneShadowTone.sameDesign([t], AdaptiveQuietZoneShadowTone.tones(from: [moved])))
+        XCTAssertTrue(AdaptiveQuietZoneShadowTone.sameDesign([t], AdaptiveQuietZoneShadowTone.tones(from: [s])))
+    }
+
+    /// E4 G18: the live worker accepts a virtual tone at every rate (the core validates the ears and limit seats).
+    func testWorkerBuildsWithEarsAndLimitSeatsAtEveryRate() {
+        let tones = AdaptiveQuietZoneShadowTone.tones(from: [earSeed(ears: 2, limits: 3)])
+        for rate in rates {
+            XCTAssertNotNil(AdaptiveTonalLiveWorker(sampleRate: rate, tones: tones, link: NullLink()), "\(rate)")
+        }
+        var bad = tones
+        bad[0].ears[0].path = ActiveQuietZoneComplex(real: 0, imaginary: 0)
+        XCTAssertNil(AdaptiveTonalLiveWorker(sampleRate: 48_000, tones: bad, link: NullLink()), "ear path below the floor")
+    }
+
     func testInactiveShadowCreatesNothing() async {
         let shadow = AdaptiveQuietZoneShadow()
         shadow.updateSeeds([seed()])

@@ -106,28 +106,30 @@ extension FeatureFlag {
     )
 
     /// E4 S26a: tonal virtual microphone at the ears (monitor-to-ear ratio survey, effective secondary
-    /// path). Offline maths in this slice; nothing drives output while the flag is off. Removed when E4 ships.
+    /// path). Graduated 11 Nov 2026 (E4 G16): available, never armed.
     static let virtualMicrophone = FeatureFlag(
         id: "e4.virtual-microphone",
         title: "Virtual microphone at the ears",
-        epic: "E4"
+        epic: "E4",
+        graduated: true
     )
 
     /// E4 S26b: camera head position (Vision body pose, on-device) selects the surveyed virtual-microphone
-    /// ratios. Production reader: head follow card (S26b); graduates in the final G16 PR.
+    /// ratios. Production reader: head follow card (S26b). Graduated 11 Nov 2026 (E4 G16).
     static let headPositionCamera = FeatureFlag(
         id: "e4.head-position-camera",
         title: "Camera head position for the quiet zone",
-        epic: "E4"
+        epic: "E4",
+        graduated: true
     )
 
     /// E4 S27: choose the zone (fixed seat, follow, or two zones) with the 2 x 2 per-tone core. Offline maths
-    /// and the zone mode in the earned-cap binding in this slice; nothing drives output while off.
-    /// Removed when E4 ships.
+    /// and the zone mode in the earned-cap binding. Graduated 11 Nov 2026 (E4 G16): available, never armed.
     static let zones = FeatureFlag(
         id: "e4.zones",
         title: "Choose the quiet zone",
-        epic: "E4"
+        epic: "E4",
+        graduated: true
     )
 
     /// E4 S29: overnight mode keeps the Mac awake (display may sleep) while Quiet Zone is armed, with the
