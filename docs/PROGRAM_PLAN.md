@@ -159,6 +159,7 @@ stopping slice work (a benchmark link error, a Linux `test_fpenv` crash, an LLVM
   - [~] S30a overlay: `AmbientUnmaskOverlay` section fit and trailer builder built dark behind `AmbientCompensationTarget.unmaskingCutsDB`; wired by S30c
   - [x] S30c `e4/unmask-wiring`: controller cuts, governor, engine validation and Conversation Focus card built behind `e4.conversation-unmasking`; #468 merged; carry gaps G12–G14 in S30d; bench: E22 S30 checks
   - [x] S30d `e4/unmask-rebuild-carry` (#476): AMBIENT state carried across rebuild (G12), controller end-to-end tests (G13), locked graph-fallback read and transport-teardown reset (G14); merged; `e4.conversation-unmasking` graduated in S32; G15 closed there; bench: E22 S30 checks
+- [x] S33 `e4/reconcile-unchecked` (owner approved 12 Nov 2026): four stale unchecked E4 lines (S4 kernel wiring, S18 route and path tracking, S26 virtual mic) reconciled against merged code (S15 #278, S18a #282, S18b #283, S26a #483/#494/#497); docs only, nothing armed
 
 ### E5 UI scope clean-up
 
