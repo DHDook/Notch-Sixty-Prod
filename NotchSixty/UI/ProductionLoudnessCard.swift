@@ -22,10 +22,12 @@ enum LoudnessCardText {
 
     /// E28 S6b: wide (N-channel and binaural) sessions are measured on the semantic program channels.
     static let wideNote = "Measured on the semantic program channels with BS.1770-4 channel weights (LFE excluded). "
-        + "Output is taken after the render, protection and master gain; subwoofer feeds are not included."
+        + "Output is taken after the render, protection and master gain; subwoofer feeds are not included. On a routed output map each program channel is "
+        + "the sum of its speaker's output lanes."
 
-    static let wideOutputUnavailableNote = "Output loudness is not measured on a routed output map, because its lanes "
-        + "do not map back to program channels. Choose Input."
+    /// Shown when a routed output map has no speaker lane that carries a program channel (sub or matrix-only routing).
+    static let wideOutputUnavailableNote = "Output loudness is not measured here, because none of the routed output lanes "
+        + "carries a program channel on its own (subwoofer and matrix-only outputs are not measured). Choose Input."
 }
 
 enum LoudnessSource: String, CaseIterable, Identifiable {

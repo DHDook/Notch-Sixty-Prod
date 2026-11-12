@@ -276,6 +276,15 @@ extension SpeakerRoutingConfiguration {
             physical.append(offset + endpoint.channelIndex)
         }
         let subs = subwooferSourceCount
+        // E28 S9: a lane carries a program role when a program-sourced speaker owns its endpoint (the ways of one speaker
+        // sum back to that role); sub and matrix-only lanes carry none.
+        let laneProgram: [UInt32] = endpoints.map { endpoint in
+            for speaker in speakers where speaker.source.kind == .program
+                && speaker.source.index >= 0 && speaker.source.index < programLayout.roles.count {
+                if speaker.ways.contains(where: { $0.endpoint == endpoint }) { return UInt32(speaker.source.index) }
+            }
+            return UInt32.max
+        }
         let plan = LiveNChannelOutputRoutePlan(
             programLayout: programLayout,
             orderedDeviceUIDs: orderedUIDs,
@@ -288,7 +297,8 @@ extension SpeakerRoutingConfiguration {
             bassManagementEnabled: bassManagementEnabled,
             speakerCalibrations: [:],
             subwooferCalibrations: [PhysicalSubwooferCalibration?](repeating: nil, count: subs),
-            routedOutputPhysicalChannels: physical
+            routedOutputPhysicalChannels: physical,
+            routedLaneProgramChannels: laneProgram
         )
         _ = try plan.makeRealtimeOutputMap()
         return plan

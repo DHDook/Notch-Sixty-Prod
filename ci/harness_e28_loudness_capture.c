@@ -1,8 +1,10 @@
-/* E28 S6b: behavioural harness for the loudness capture ring and the paired stereo over-range counts.
+/* E28 S6b and S9: behavioural harness for the loudness capture ring and the paired stereo over-range counts.
  *  - ring: demand-gated; frames round-trip exactly; a full ring drops and counts new frames and never overwrites unread
  *    ones; Discard empties it; a producer thread and a consumer thread stay contiguous (SPSC);
  *  - N-channel bridge (stereo layout) at the eight standard rates: Input is the dequeued program, Output is the rendered
  *    signal (0.5 gain graph halves it), nothing is captured while demand is off, Reset clears demand;
+ *  - routed N-channel bridge (S9): lanes that name a program role sum into that role's Output channel (two ways of one
+ *    speaker add), and a routed map with no such lane has no Output ring;
  *  - stereo bridge: an over-range on L only counts on the left, R only on the right, and the total is their sum. */
 #include <math.h>
 #include <pthread.h>
@@ -237,6 +239,134 @@ static void bridgeCase(double rate) {
     if (graph) n60_graph_retire(graph);
 }
 
+/* ---- routed N-channel bridge (E28 S9) ---- */
+
+#define ROUTED_LANES 3u
+#define ROUTED_PHYS 6u
+
+static N60LiveNChannelRenderGraph makeRoutedGraph(double rate, const uint32_t *laneProgram, bool *ok) {
+    const N60ProgramChannelLayout layout = N60ProgramChannelLayoutMakeStandard(N60ProgramLayoutStereo);
+    N60ProgramLaneGraphSnapshot lanes = N60ProgramLaneGraphSnapshotMakeUnity(rate, layout);
+    N60ProgramLaneGraphFinalize(&lanes);
+    const uint32_t physical[ROUTED_LANES] = {5u, 4u, 3u};
+    N60LiveNChannelOutputMap map = {0};
+    *ok = N60LiveNChannelOutputMapCompileRouted(layout, ROUTED_PHYS, ROUTED_LANES, physical, &map);
+    if (laneProgram != NULL) *ok = *ok && N60LiveNChannelOutputMapSetRoutedLaneProgram(&map, ROUTED_LANES, laneProgram);
+    N60MultichannelBassManagementSnapshot bass = {0};
+    N60LiveNChannelRenderGraph graph = {0};
+    *ok = *ok && N60LiveNChannelRenderGraphMake(rate, layout, lanes, false, bass, map, &graph);
+    return graph;
+}
+
+/* Lane 0 and lane 1 are two ways of the left speaker (0.3 and 0.2 of the source), lane 2 is the right speaker (0.5). */
+static n60_graph *makeRoutedRouteGraph(double rate) {
+    const float gains[ROUTED_LANES] = {0.3f, 0.2f, 0.5f};
+    const float source[ROUTED_LANES] = {0.0f, 0.0f, 1.0f};
+    float params[ROUTED_LANES * N60_ROUTE_PARAMS_PER_DEST];
+    uint64_t mask = 0;
+    for (uint32_t k = 0; k < ROUTED_LANES; ++k) {
+        float *p = params + k * N60_ROUTE_PARAMS_PER_DEST;
+        for (uint32_t e = 0; e < N60_ROUTE_MAX_ENTRIES; ++e) { p[e * 2u] = -1.0f; p[e * 2u + 1u] = 0.0f; }
+        p[0] = source[k];
+        p[1] = gains[k];
+        mask |= (uint64_t)1 << (2u + k);
+    }
+    n60_stage_desc st;
+    memset(&st, 0, sizeof st);
+    st.structSize = sizeof st; st.kind = N60_STAGE_ROUTE; st.stageId = 1; st.laneMask = mask;
+    st.params = params; st.paramCount = ROUTED_LANES * N60_ROUTE_PARAMS_PER_DEST;
+    n60_graph_desc d;
+    memset(&d, 0, sizeof d);
+    d.structSize = sizeof d; d.abiVersion = N60_GRAPH_ABI_VERSION; d.sampleRate = rate; d.maxBlockFrames = MAXB;
+    d.inputChannels = d.outputChannels = 2u + ROUTED_LANES; d.stages = &st; d.stageCount = 1;
+    n60_graph *graph = NULL;
+    if (n60_graph_build(&d, &graph) != N60_STATUS_OK) return NULL;
+    return graph;
+}
+
+static void runRoutedBlock(N60LiveNChannelBridge *b, uint32_t frames, uint32_t *position, double rate) {
+    float in[MAXB * 2u], out[MAXB * ROUTED_PHYS];
+    for (uint32_t i = 0; i < frames; ++i) {
+        const float v = sinf((float)(2.0 * M_PI * 1000.0 * (double)(*position + i) / rate));
+        in[i * 2u] = 0.4f * v;
+        in[i * 2u + 1u] = 0.2f * v;
+    }
+    *position += frames;
+    memset(out, 0, sizeof out);
+    AudioBufferList inList = {0}, outList = {0}, unused = {0};
+    inList.mNumberBuffers = 1;
+    inList.mBuffers[0].mNumberChannels = 2;
+    inList.mBuffers[0].mDataByteSize = frames * 2u * sizeof(float);
+    inList.mBuffers[0].mData = in;
+    outList.mNumberBuffers = 1;
+    outList.mBuffers[0].mNumberChannels = ROUTED_PHYS;
+    outList.mBuffers[0].mDataByteSize = frames * ROUTED_PHYS * sizeof(float);
+    outList.mBuffers[0].mData = out;
+    AudioTimeStamp ts = {0};
+    N60LiveNChannelCaptureIOProc(0, &ts, &inList, &ts, &unused, &ts, b);
+    N60LiveNChannelOutputIOProc(0, &ts, &unused, &ts, &outList, &ts, b);
+}
+
+static void routedCase(double rate) {
+    const uint32_t none = N60_LIVE_PHYSICAL_CHANNEL_UNMAPPED;
+    const uint32_t laneProgram[ROUTED_LANES] = {0u, 0u, 1u};
+    const uint32_t noProgram[ROUTED_LANES] = {none, none, none};
+    const uint32_t badProgram[ROUTED_LANES] = {0u, 2u, 1u};
+    bool ok = false;
+    N60LiveNChannelOutputMap probe = {0};
+    const uint32_t physical[ROUTED_LANES] = {5u, 4u, 3u};
+    CHECK(N60LiveNChannelOutputMapCompileRouted(N60ProgramChannelLayoutMakeStandard(N60ProgramLayoutStereo),
+                                                ROUTED_PHYS, ROUTED_LANES, physical, &probe), "routed compile");
+    CHECK(!N60LiveNChannelOutputMapRoutedHasProgramLane(&probe), "fresh routed map claims a program lane");
+    CHECK(!N60LiveNChannelOutputMapSetRoutedLaneProgram(&probe, ROUTED_LANES, badProgram), "role out of range accepted");
+    CHECK(!N60LiveNChannelOutputMapSetRoutedLaneProgram(&probe, ROUTED_LANES - 1u, laneProgram), "short lane list accepted");
+    CHECK(!N60LiveNChannelOutputMapRoutedHasProgramLane(&probe), "refused set changed the map");
+    CHECK(N60LiveNChannelOutputMapSetRoutedLaneProgram(&probe, ROUTED_LANES, laneProgram)
+              && N60LiveNChannelOutputMapRoutedHasProgramLane(&probe) && N60LiveNChannelOutputMapIsValid(&probe),
+          "set lane programs");
+
+    AudioChannelDescription desc[2] = {{kAudioChannelLabel_Left, 0, {0, 0, 0}}, {kAudioChannelLabel_Right, 0, {0, 0, 0}}};
+
+    /* lanes that carry roles: the ring has Output, each role is the sum of its lanes */
+    N60LiveNChannelRenderGraph g = makeRoutedGraph(rate, laneProgram, &ok);
+    CHECK(ok, "routed graph at %.0f", rate);
+    if (!ok) return;
+    N60ProgramInputMap map = {0};
+    CHECK(N60ProgramInputMapCompile(desc, 2u, g.programLayout, &map), "input map");
+    N60LiveNChannelBridge *b = N60LiveNChannelBridgeCreate(16384u, map, g, 0u, 1u);
+    CHECK(b != NULL && b->loudnessCapture != NULL && b->loudnessCapture->outputChannels == 2u,
+          "routed bridge keeps an Output ring at %.0f", rate);
+    n60_graph *graph = makeRoutedRouteGraph(rate);
+    if (b != NULL && graph != NULL && b->loudnessCapture != NULL && b->loudnessCapture->outputChannels == 2u
+        && N60LiveNChannelBridgeAttachGraph(b, graph, 2u + ROUTED_LANES, MAXB)) {
+        uint32_t pos = 0;
+        N60LoudnessCaptureSetDemand(b->loudnessCapture, true);
+        for (int i = 0; i < 16; ++i) runRoutedBlock(b, MAXB, &pos, rate);
+        float inBuf[2 * MAXB * 16], outBuf[2 * MAXB * 16];
+        const uint32_t got = N60LoudnessCaptureRead(b->loudnessCapture, inBuf, outBuf, MAXB * 16u);
+        CHECK(got == MAXB * 16u, "routed read %u at %.0f", got, rate);
+        const uint32_t skip = MAXB * 8u; /* the first blocks can carry the pre-graph tail */
+        const float left = peak(outBuf + skip * 2u, got - skip, 2u, 0u), right = peak(outBuf + skip * 2u, got - skip, 2u, 1u);
+        /* left role = 0.4 x (0.3 + 0.2); right role = 0.2 x 0.5 (route entry 1 reads the right program lane) */
+        CHECK(fabsf(left - 0.2f) < 0.01f, "left role peak %.4f expected 0.2 at %.0f", left, rate);
+        CHECK(fabsf(right - 0.1f) < 0.005f, "right role peak %.4f expected 0.1 at %.0f", right, rate);
+    } else {
+        CHECK(0, "routed attach at %.0f", rate);
+    }
+    N60LiveNChannelBridgeAttachGraph(b, NULL, 0u, 0u);
+    N60LiveNChannelBridgeDestroy(b);
+    if (graph) n60_graph_retire(graph);
+
+    /* no lane carries a role (sub or matrix-only routing): no Output ring, Input only */
+    g = makeRoutedGraph(rate, noProgram, &ok);
+    CHECK(ok, "unmapped routed graph");
+    if (!ok) return;
+    b = N60LiveNChannelBridgeCreate(16384u, map, g, 0u, 1u);
+    CHECK(b != NULL && b->loudnessCapture != NULL && b->loudnessCapture->outputChannels == 0u
+              && b->loudnessCapture->inputChannels == 2u, "routed bridge with no program lane has no Output ring");
+    N60LiveNChannelBridgeDestroy(b);
+}
+
 /* ---- stereo bridge: per-side over-range ---- */
 
 static void stereoOverRange(double rate) {
@@ -281,6 +411,7 @@ int main(void) {
     for (size_t r = 0; r < sizeof kRates / sizeof kRates[0]; ++r) {
         ringBasics(kRates[r]);
         bridgeCase(kRates[r]);
+        routedCase(kRates[r]);
         stereoOverRange(kRates[r]);
         printf("rate %.0f ok\n", kRates[r]);
     }
