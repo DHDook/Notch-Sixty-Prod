@@ -16,7 +16,9 @@ struct QuietZoneSurveyPaths: Equatable, Sendable {
 /// phasors from different microphone positions share one phase frame). The listener places the microphone
 /// at the monitor position, captures, then at the ear position, captures; the ratio per tone follows.
 /// Measurement and control plane only: it never plays anything, never arms anything, and is never read
-/// by the arm path. In memory only; a survey belongs to the noise tones present while it was taken.
+/// by the arm path. A finished survey is kept across launches (E4 G19, `QuietZoneSurveyPersistence`) and is trusted
+/// again only when the monitor position and the ear position's measured speaker paths are unchanged; the listener's
+/// "quiet the ear position" choice is never restored, so each launch starts with the monitor design.
 @MainActor
 final class QuietZoneVirtualMicSurveyController: ObservableObject {
     enum Visit: Equatable, Sendable { case monitor, ear }
@@ -43,6 +45,24 @@ final class QuietZoneVirtualMicSurveyController: ObservableObject {
     var paths: ((_ frequencyHz: Double, _ earPositionID: UUID) throws -> QuietZoneSurveyPaths)?
     /// Set by the controller: Room Correction positions that can serve as the ear position.
     var candidates: (() -> [(id: UUID, name: String)])?
+    /// Set by the controller: the Room Correction position the monitor microphone sits at.
+    var monitorID: (() -> UUID?)?
+    /// True for an other-seat survey (E4 G21): a finished or reused survey switches itself on, because it only ever
+    /// tightens the design (the output is scaled back so that seat does not get louder).
+    var autoUse = false
+    /// Called after the survey changed in a way worth saving (finished, discarded, restarted, other ear chosen).
+    var onChanged: (() -> Void)?
+
+    /// What is kept across launches for one survey.
+    struct Stored: Codable, Equatable, Sendable {
+        var earID: UUID
+        var earName: String
+        var monitorID: UUID?
+        var tones: [QuietZoneEarTone]
+    }
+
+    /// A stored survey waiting for the room measurements to load so it can be checked.
+    private var pending: Stored?
 
     private var monitorPhasors: [Double: [ActiveQuietZoneComplex]] = [:]
     private var earPhasors: [Double: [ActiveQuietZoneComplex]] = [:]
@@ -60,6 +80,51 @@ final class QuietZoneVirtualMicSurveyController: ObservableObject {
         discardSurvey()
         guard let id, let entry = earPositionCandidates.first(where: { $0.id == id }) else { ear = nil; return }
         ear = (entry.id, entry.name)
+        onChanged?()
+    }
+
+    /// The survey to save: the live one, or one still waiting to be checked after a launch.
+    var stored: Stored? {
+        if let ear, !tones.isEmpty { return Stored(earID: ear.id, earName: ear.name, monitorID: monitorID?(), tones: tones) }
+        return pending
+    }
+
+    var hasPendingRestore: Bool { pending != nil }
+
+    /// Hands over a survey read from disk. It is checked and shown by `restoreIfPossible`.
+    func offerStored(_ value: Stored?) {
+        guard tones.isEmpty, !isCapturing else { return }
+        pending = value
+    }
+
+    /// Shows a stored survey once the room measurements are loaded, and only if the ear position still exists, the
+    /// monitor position is the same and the ear's speaker paths are what they were. Otherwise it is dropped with a
+    /// message (after the measurements are available) or kept waiting (before).
+    func restoreIfPossible() {
+        guard let stored = pending, tones.isEmpty, ear == nil, !isCapturing, let paths,
+              let entry = earPositionCandidates.first(where: { $0.id == stored.earID }) else { return }
+        func close(_ a: ActiveQuietZoneComplex, _ b: ActiveQuietZoneComplex) -> Bool {
+            let scale = max(a.magnitude, b.magnitude, 1.0e-12)
+            return hypot(a.real - b.real, a.imaginary - b.imaginary) <= 1.0e-6 * scale
+        }
+        var changed = stored.monitorID != monitorID?() || stored.tones.isEmpty
+        if !changed {
+            for tone in stored.tones {
+                guard tone.isFinite, let now = try? paths(tone.frequencyHz, stored.earID),
+                      close(now.earLeft, tone.earLeft), close(now.earRight, tone.earRight) else { changed = true; break }
+            }
+        }
+        pending = nil
+        if changed {
+            message = "The room measurements changed since the last survey, so it was not reused. Capture it again."
+            onChanged?()
+            return
+        }
+        ear = (entry.id, entry.name)
+        tones = stored.tones
+        useAtEar = autoUse
+        phase = .ready
+        message = "Reused the survey from last time (\(stored.tones.count) tone\(stored.tones.count == 1 ? "" : "s")). Switch on the quiet zone at the ear when you want it."
     }
 
     func beginVisit(_ visit: Visit) {
@@ -69,11 +134,13 @@ final class QuietZoneVirtualMicSurveyController: ObservableObject {
         progress = 0
         switch visit {
         case .monitor:
+            pending = nil
             tones = []
             useAtEar = false
             monitorPhasors = [:]
             earPhasors = [:]
             monitorCaptured = false
+            onChanged?()
         case .ear:
             earPhasors = [:]
         }
@@ -149,7 +216,8 @@ final class QuietZoneVirtualMicSurveyController: ObservableObject {
             }
         }
         tones = out
-        useAtEar = false
+        useAtEar = autoUse && !out.isEmpty
+        defer { onChanged?() }
         if out.isEmpty {
             phase = .idle
             message = "No tone could be surveyed (" + skipped.joined(separator: "; ") + "). Capture again."
@@ -173,6 +241,8 @@ final class QuietZoneVirtualMicSurveyController: ObservableObject {
     }
 
     func discardSurvey() {
+        pending = nil
+        defer { onChanged?() }
         tones = []
         useAtEar = false
         monitorCaptured = false

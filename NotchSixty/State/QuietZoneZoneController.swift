@@ -14,6 +14,15 @@ final class QuietZoneZoneController: ObservableObject {
     /// Zone B's survey (zone A is the ear survey on the Quiet Zone card).
     let second = QuietZoneVirtualMicSurveyController()
 
+    /// E4 G21: other seats the listener surveyed the same way (an ear position and the monitor, two visits). Each one is a
+    /// predicted other-seat point: the design is scaled back until none of them is predicted to get more than 1 dB louder.
+    @Published private(set) var otherSeats: [QuietZoneVirtualMicSurveyController] = []
+    static let maximumOtherSeats = 3
+    /// Set by the controller: builds an other-seat survey wired to the room measurements.
+    var makeOtherSeat: (() -> QuietZoneVirtualMicSurveyController)?
+    /// Called after the other-seat list changed in a way worth saving.
+    var onOtherSeatsChanged: (() -> Void)?
+
     /// Set by the controller.
     var firstSurvey: () -> QuietZoneVirtualMicSurveyController? = { nil }
     var headFollowReady: () -> Bool = { false }
@@ -72,6 +81,58 @@ final class QuietZoneZoneController: ObservableObject {
         }
         return try? QuietZoneZonePlan(mode: mode, surveyedPointIDs: surveyedPointIDs(), zonePointIDs: ids)
     }
+
+    @discardableResult
+    func addOtherSeat() -> QuietZoneVirtualMicSurveyController? {
+        guard otherSeats.count < Self.maximumOtherSeats, let make = makeOtherSeat else { return nil }
+        let seat = make()
+        otherSeats.append(seat)
+        onOtherSeatsChanged?()
+        return seat
+    }
+
+    func removeOtherSeat(_ seat: QuietZoneVirtualMicSurveyController) {
+        guard let index = otherSeats.firstIndex(where: { $0 === seat }) else { return }
+        otherSeats.remove(at: index)
+        onOtherSeatsChanged?()
+    }
+
+    /// Hands over the other-seat surveys read from disk; each waits for the room measurements to check it.
+    func offerStoredOtherSeats(_ stored: [QuietZoneVirtualMicSurveyController.Stored]) {
+        guard otherSeats.isEmpty, let make = makeOtherSeat else { return }
+        for value in stored.prefix(Self.maximumOtherSeats) {
+            let seat = make()
+            seat.offerStored(value)
+            otherSeats.append(seat)
+        }
+    }
+
+    /// Checks stored other-seat surveys once the room measurements are loaded; one that fails its check is removed.
+    func restoreStoredOtherSeats() {
+        let waiting = otherSeats.filter(\.hasPendingRestore)
+        guard !waiting.isEmpty else { return }
+        for seat in waiting { seat.restoreIfPossible() }
+        let failed = waiting.filter { !$0.hasPendingRestore && $0.tones.isEmpty }
+        if !failed.isEmpty {
+            message = "A saved other-seat survey was not reused because the room measurements changed."
+            otherSeats.removeAll { seat in failed.contains { $0 === seat } }
+            onOtherSeatsChanged?()
+        }
+    }
+
+    /// The other-seat surveys to save (live, or still waiting to be checked).
+    var storedOtherSeats: [QuietZoneVirtualMicSurveyController.Stored] { otherSeats.compactMap(\.stored) }
+
+    /// Surveyed other seats that are predicted at this tone: ratio and speaker paths of each active one.
+    func otherSeatPoints(near frequencyHz: Double) -> [QuietZoneOtherSeatPoint] {
+        otherSeats.compactMap { seat in
+            guard let tone = seat.earTone(near: frequencyHz) else { return nil }
+            return QuietZoneOtherSeatPoint(ratio: tone.ratio, left: tone.earLeft, right: tone.earRight)
+        }
+    }
+
+    /// How many of the plan's other surveyed positions are predicted (the monitor microphone always is).
+    var predictedOtherSeatCount: Int { 1 + otherSeats.filter { $0.isActive }.count }
 
     /// The zone B ear tone near a controlled frequency, for the 2 x 2 design.
     func secondTone(near frequencyHz: Double) -> QuietZoneEarTone? { second.earTone(near: frequencyHz) }

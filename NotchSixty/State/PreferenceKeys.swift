@@ -20,6 +20,8 @@ enum PreferenceKeys {
     static let quietZoneMeasuredLatency = "quietZone.measuredLatency"
     /// E4 S20: the anti-noise cap earned per output, microphone, rate and output gain.
     static let quietZoneEarnedCaps = "quietZone.earnedCaps"
+    /// E4 G19/G20: the ear surveys, saved head-follow seats and camera placement, kept across launches.
+    static let quietZoneSurveys = "quietZone.surveys"
     /// E4 S9b2: the feed-forward reference microphone's input channel on the
     /// seat microphone's interface (zero-based).
     static let quietZoneFeedForwardReferenceChannel = "quietZone.feedForwardReferenceChannel"

@@ -354,7 +354,22 @@ final class ActiveQuietZoneController: ObservableObject {
                 .filter { $0.id != anchor }
                 .map { ($0.id, $0.name) }
         }
+        survey?.monitorID = { [weak self] in self?.ambient.selectedModelPosition?.id }
         objectWillChange.send()
+    }
+
+    /// E4 G19: keeps the surveys, saved seats and camera placement across launches. Control plane only.
+    private(set) var surveyPersistence: QuietZoneSurveyPersistence?
+
+    func attachSurveyPersistence(_ persistence: QuietZoneSurveyPersistence?) {
+        surveyPersistence = persistence
+        persistence?.attach(to: self)
+        objectWillChange.send()
+    }
+
+    /// Shows stored surveys and seats whose room measurements are now loaded. Cheap when nothing is waiting.
+    func restorePersistedSurveys() {
+        surveyPersistence?.restore()
     }
 
     /// Speaker paths to the monitor microphone (the selected playback model) and to the ear position.
@@ -388,7 +403,8 @@ final class ActiveQuietZoneController: ObservableObject {
             planner: planner, tone: tone, frequencyHz: frequencyHz,
             monitorDisturbance: monitorDisturbance, monitorLeft: monitorLeft, monitorRight: monitorRight,
             availableInjectionPeak: injectionPeakOverride ?? availableInjectionPeak, configuration: configuration,
-            bassConditioning: bassMode)
+            bassConditioning: bassMode,
+            otherSeats: zones?.otherSeatPoints(near: frequencyHz) ?? [])
     }
 
     /// E4 S27: the zone chooser (fixed seat, follow, two zones). Control plane only; never arms anything.
@@ -417,6 +433,30 @@ final class ActiveQuietZoneController: ObservableObject {
             return self.ambient.availableModelPositions
                 .filter { $0.id != anchor && $0.id != first }
                 .map { ($0.id, $0.name) }
+        }
+        chooser.second.monitorID = { [weak self] in self?.ambient.selectedModelPosition?.id }
+        // E4 G21: other seats, surveyed the same way, each a predicted other-seat point in every design.
+        chooser.makeOtherSeat = { [weak self, weak chooser] in
+            let seat = QuietZoneVirtualMicSurveyController()
+            seat.autoUse = true
+            seat.paths = { [weak self] frequency, earID in
+                guard let self else { throw ActiveQuietZoneControllerError.acousticModelRequired }
+                return try self.surveyPaths(frequencyHz: frequency, earPositionID: earID)
+            }
+            seat.monitorID = { [weak self] in self?.ambient.selectedModelPosition?.id }
+            seat.candidates = { [weak self, weak chooser, weak seat] in
+                guard let self else { return [] }
+                let anchor = self.ambient.selectedModelPosition?.id
+                var taken: Set<UUID> = []
+                if let first = chooser?.firstSurvey()?.ear?.id { taken.insert(first) }
+                if let second = chooser?.second.ear?.id { taken.insert(second) }
+                for other in chooser?.otherSeats ?? [] where other !== seat { if let id = other.ear?.id { taken.insert(id) } }
+                return self.ambient.availableModelPositions
+                    .filter { $0.id != anchor && !taken.contains($0.id) }
+                    .map { ($0.id, $0.name) }
+            }
+            seat.onChanged = { [weak chooser] in chooser?.onOtherSeatsChanged?() }
+            return seat
         }
         // Head follow picks the ear tone only in follow mode.
         virtualMic?.headFollowGate = { [weak chooser] in chooser?.mode == .follow }
@@ -457,7 +497,10 @@ final class ActiveQuietZoneController: ObservableObject {
                 QuietZoneZoneTone(uncancelled: b.ratio * monitorDisturbance, leftPath: b.earLeft, rightPath: b.earRight)
             ],
             others: [QuietZoneZoneTone(
-                uncancelled: monitorDisturbance, leftPath: monitorLeft, rightPath: monitorRight)])
+                uncancelled: monitorDisturbance, leftPath: monitorLeft, rightPath: monitorRight)]
+                + (zones.otherSeatPoints(near: frequencyHz)).map {
+                    QuietZoneZoneTone(uncancelled: $0.ratio * monitorDisturbance, leftPath: $0.left, rightPath: $0.right)
+                })
         return solution.rejected ? nil : solution
     }
 
@@ -1145,6 +1188,7 @@ final class ActiveQuietZoneController: ObservableObject {
     }
 
     private func pollOnce() async {
+        restorePersistedSurveys()
         do {
             try synchronizeSelectedPlaybackSystem()
             guard configuration.enabled else { return }

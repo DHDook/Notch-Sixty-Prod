@@ -468,6 +468,7 @@ Owner decision, 18 Oct 2026: there is no bench access for now, so every bench ch
 - [ ] Collect every epic's "Bench checks" list and the E3 cases H01–H08 into one campaign
 - [ ] Run every E4 bench list in `docs/epics/E4.md` "Bench checks" (S4, S6, S7, S18b, S22a, S22b1 to S22b3, S25 arming, S26b, S30) after the graduation of the E4 flags (11 Nov 2026), including the 384 kHz feed-forward bridge shadow timing
 - [ ] E4 S26b head follow: with the Mac camera (built-in and external) the head-pose estimate lands within tolerance of measured seat positions, the camera light is on only while head follow is on and stops on disable, sleep and background, and with a person moving the zone follows the head while the other-seat limit holds (`docs/epics/E4.md` Bench checks, S26b)
+- [ ] E4 G21 other-seat prediction: with a real microphone at a protected seat, the measured change with Quiet Zone on stays within 1 dB of the prediction and no louder than the limit (E4 G16 persistence PR).
 - [ ] Run E4 S8 (PR97 timing calibration and PR99 verification) and record results against `docs/ANC_QUALIFICATION.md`
 - [ ] Run E4 S11 (owner, 1 Nov 2026: moved here from the E4 execution order): repeat S8 on the unified E6 graph, then fill the placeholder reduction table in `docs/ANC_QUALIFICATION.md` §4.1 from the S31 reviewer-kit noise files
 - [ ] E4 S26a: ear-microphone check of the virtual-microphone design with a real head at the eight rates (E4 S26a wiring)

@@ -24,14 +24,21 @@ enum QuietZoneFlagWiring {
     static func attachHeadFollow(
         to survey: QuietZoneVirtualMicSurveyController?,
         flags: FeatureFlags,
-        source: @escaping QuietZoneHeadFollowController.SourceFactory,
+        source: QuietZoneHeadFollowController.SourceFactory? = nil,
         clock: @escaping () -> Double = { ProcessInfo.processInfo.systemUptime },
         workspaceCenter: NotificationCenter = NSWorkspace.shared.notificationCenter,
         appCenter: NotificationCenter = .default
     ) {
         guard flags.isEnabled(.headPositionCamera), let survey else { return }
-        survey.attachHeadFollow(QuietZoneHeadFollowController(
-            makeSource: source, clock: clock, workspaceCenter: workspaceCenter, appCenter: appCenter))
+        // E4 G20: the camera reads the listener's placement each time it starts, from the controller it belongs to.
+        final class Box { weak var follow: QuietZoneHeadFollowController? }
+        let box = Box()
+        let factory = source ?? QuietZoneHeadFollowController.cameraSourceFactory(
+            placement: { box.follow?.placement ?? QuietZoneCameraPlacement(x: 0, y: 0, z: 0, yawRadians: 0) })
+        let follow = QuietZoneHeadFollowController(
+            makeSource: factory, clock: clock, workspaceCenter: workspaceCenter, appCenter: appCenter)
+        box.follow = follow
+        survey.attachHeadFollow(follow)
     }
 
     static func attachControllers(
@@ -41,7 +48,8 @@ enum QuietZoneFlagWiring {
         roomProjects: RoomCorrectionProjectController,
         adaptiveTonalLive: Bool,
         flags: FeatureFlags,
-        headPoseSource: @escaping QuietZoneHeadFollowController.SourceFactory = QuietZoneHeadFollowController.cameraSourceFactory()
+        headPoseSource: QuietZoneHeadFollowController.SourceFactory? = nil,
+        surveyStore: QuietZoneSurveyStore = QuietZoneSurveyStore()
     ) {
         if adaptiveTonalLive {
             activeQuietZone.attachAdaptiveLive(AdaptiveTonalLiveCoordinator(
@@ -61,6 +69,11 @@ enum QuietZoneFlagWiring {
         // E4 S27: the zone chooser needs the ear survey it chooses between, so it exists only with both flags on.
         if flags.isEnabled(.zones), activeQuietZone.virtualMic != nil {
             activeQuietZone.attachZones(QuietZoneZoneController())
+        }
+        // E4 G19/G20: surveys, saved seats and the camera placement survive a restart (attached after every controller
+        // they cover exists; each part is optional).
+        if activeQuietZone.virtualMic != nil {
+            activeQuietZone.attachSurveyPersistence(QuietZoneSurveyPersistence(store: surveyStore))
         }
         if flags.isEnabled(.overnight) {
             activeQuietZone.attachOvernightPower(OvernightPowerAssertion())
