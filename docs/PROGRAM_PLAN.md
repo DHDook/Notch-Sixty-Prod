@@ -426,6 +426,7 @@ S1–S6b flagless; every dynamics extra (S7a–S7d) behind the one flag `e28.dyn
 - [x] S7d Dynamics page controls for every extra, disabled with a reason where the kernel renders (parts 1 to 3 and core PR B merged or built; G41 closed by S8)
 - [x] S7d part 3 (re-owned from part 2; holds the open remainder of G21, G23, G26, G34, G35, G37, G39, G40): `ReferenceRoomTransport` lab cases (compressor extras, expander extras, three-band solo), translator XCTests (10 to 16, 6 to 13, 29 to 43), link-0 and fade-law tests, surfacing the failed listen clear, RMS block-pass of the delay ring and mix, ring carry across a rebuild, Loudness Match and Contour readouts, the 0.1 dB core-versus-curve sweep, and the 0.245 dB gap.
 - [x] S8 flag graduated (`e28/s8-graduate`; end-to-end test through the Dynamics page model to the core blocks at the eight rates, stereo-path extras wiring fixed, FIR A/V-sync lookahead provider, compressor ring-carry test; the owner's listen moves to E22; removal is the FC phase). G44 (guided FIR controller has no production owner) is scoped to E24
+- [x] S9 Output loudness on routed sessions: the plan maps each output lane to its program role and the bridge sums a speaker's lanes (`e28/routed-output-loudness`, needs-owner: bridge header; G27 software part; bench: E22)
 
 ## Phase 4 — Complete scope and launch
 

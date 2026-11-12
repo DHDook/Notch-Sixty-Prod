@@ -993,7 +993,7 @@ final class CoreAudioNChannelTransportSession {
     }
 
     /// E28 S6b: BS.1770-4 loudness of the semantic program channels. Input is every program role as dequeued (LFE is
-    /// metered at weight 0); Output is the same roles after the render and limiter, nil for a routed lane map.
+    /// metered at weight 0); Output is the same roles after the render and limiter; on a routed lane map each role is the sum of its speaker's lanes (E28 S9), nil when no lane carries a role.
     private var wideLoudnessWorker: ProductionWideLoudnessWorker?
 
     private func installLoudnessWorker(_ bridge: UnsafeMutablePointer<N60LiveNChannelBridge>, sampleRate: Double) {

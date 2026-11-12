@@ -39,6 +39,10 @@ typedef struct {
     /// physical channel; the program and sub entries above are all unmapped. Zero for every other session.
     uint32_t routedLaneCount;
     uint32_t physicalChannelForRoutedLane[N60_LIVE_MAX_PHYSICAL_CHANNELS];
+    /// E28 S9: the program role (index into the program layout) whose full-range signal output lane i carries, or
+    /// `N60_LIVE_PHYSICAL_CHANNEL_UNMAPPED` (sub lanes, matrix-only lanes). Loudness metering only: the render never
+    /// reads it. A role's lanes (the ways of one speaker) are summed to measure that role as heard.
+    uint32_t routedLaneProgramChannel[N60_LIVE_MAX_PHYSICAL_CHANNELS];
     /// E8 A3: a non-routed graph session with 5 to 8 subs. Graph sub lane i (after the program lanes) goes to
     /// `physicalChannelForGraphSub[i]`. The legacy fields above hold no subs (`bassManagementEnabled` false,
     /// `subwooferCount` 0): the legacy kernel cannot render this map and the bridge silences it without a graph.
@@ -192,9 +196,42 @@ static inline bool N60LiveNChannelOutputMapCompileRouted(
         used[physical] = true;
         result.physicalChannelForRoutedLane[lane] = physical;
     }
+    for (uint32_t lane = 0; lane < N60_LIVE_MAX_PHYSICAL_CHANNELS; ++lane) {
+        result.routedLaneProgramChannel[lane] = N60_LIVE_PHYSICAL_CHANNEL_UNMAPPED;
+    }
     result.valid = true;
     *mapOut = result;
     return true;
+}
+
+/// E28 S9: (call before the bridge is created: it sizes the loudness Output ring from this) records which program role each routed output lane carries (control plane, after the routed compile).
+/// `programChannelForLane[i]` is a program index below the layout's channel count or `N60_LIVE_PHYSICAL_CHANNEL_UNMAPPED`.
+/// Returns false, and changes nothing, for a map that is not routed, a count that differs from the lane count, or an
+/// index out of range.
+static inline bool N60LiveNChannelOutputMapSetRoutedLaneProgram(
+    N60LiveNChannelOutputMap * _Nonnull map,
+    uint32_t laneCount,
+    const uint32_t * _Nonnull programChannelForLane
+) {
+    if (map == NULL || programChannelForLane == NULL || !map->valid || map->routedLaneCount == 0u
+        || laneCount != map->routedLaneCount) {
+        return false;
+    }
+    for (uint32_t lane = 0; lane < laneCount; ++lane) {
+        const uint32_t program = programChannelForLane[lane];
+        if (program != N60_LIVE_PHYSICAL_CHANNEL_UNMAPPED && program >= map->programLayout.channelCount) return false;
+    }
+    for (uint32_t lane = 0; lane < laneCount; ++lane) map->routedLaneProgramChannel[lane] = programChannelForLane[lane];
+    return true;
+}
+
+/// E28 S9: true when at least one routed lane carries a program role, so Output loudness has something to measure.
+static inline bool N60LiveNChannelOutputMapRoutedHasProgramLane(const N60LiveNChannelOutputMap * _Nonnull map) {
+    if (map == NULL || map->routedLaneCount == 0u) return false;
+    for (uint32_t lane = 0; lane < map->routedLaneCount; ++lane) {
+        if (map->routedLaneProgramChannel[lane] != N60_LIVE_PHYSICAL_CHANNEL_UNMAPPED) return true;
+    }
+    return false;
 }
 
 /// E8 A3: the map of a non-routed graph session whose bass management drives 5 to 8 physical subs. Program lanes map

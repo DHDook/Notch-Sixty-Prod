@@ -207,10 +207,12 @@ static inline N60LiveNChannelBridge * _Nullable N60LiveNChannelBridgeCreate(
 
     bridge->inputMap = inputMap;
     bridge->graph = graph;
-    // Output loudness needs each program role mapped to a physical channel; a routed session has lanes, not roles.
+    // Output loudness needs each program role mapped to physical channels. A routed session has lanes: it measures the
+    // roles whose speaker lanes the plan names (E28 S9) and has no Output when none do.
     bridge->loudnessCapture = N60LoudnessCaptureCreate(
         graph.programLayout.channelCount,
-        graph.outputMap.routedLaneCount == 0u ? graph.programLayout.channelCount : 0u,
+        (graph.outputMap.routedLaneCount == 0u
+            || N60LiveNChannelOutputMapRoutedHasProgramLane(&graph.outputMap)) ? graph.programLayout.channelCount : 0u,
         graph.sampleRate
     );
     bridge->outputGateMinimumBufferedFrames = outputGateMinimumBufferedFrames;
@@ -1298,6 +1300,18 @@ static inline OSStatus N60LiveNChannelOutputIOProc(
             for (uint32_t program = 0; program < programChannels; ++program) {
                 const uint32_t target = bridge->graph.outputMap.physicalChannelForProgram[program];
                 heard[program] = target < physical.physicalChannelCount ? physical.values[target] : 0.0f;
+            }
+            // E28 S9: a routed session maps no program role directly (heard[] starts at 0); a role is the sum of its
+            // speaker's lanes, taken after the limiter and master gain.
+            const uint32_t loudnessRoutedLanes = bridge->graph.outputMap.routedLaneCount;
+            if (loudnessRoutedLanes > 0u) {
+                for (uint32_t lane = 0; lane < loudnessRoutedLanes; ++lane) {
+                    const uint32_t program = bridge->graph.outputMap.routedLaneProgramChannel[lane];
+                    const uint32_t target = bridge->graph.outputMap.physicalChannelForRoutedLane[lane];
+                    if (program < programChannels && target < physical.physicalChannelCount) {
+                        heard[program] += physical.values[target];
+                    }
+                }
             }
             N60LoudnessCaptureWriteOutput(loudness, loudnessBlock, frameIndex, heard);
         }
