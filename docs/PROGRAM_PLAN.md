@@ -1,6 +1,6 @@
 # Notch Sixty — v1 Program Plan
 
-Last updated: 18 Oct 2026. It supersedes the old roadmap, now archived at `docs/archive/ROADMAP.md`.
+Last updated: 11 Nov 2026 (roadmap review; work after v1 is in `docs/V2_ROADMAP.md`). It supersedes the old roadmap, now archived at `docs/archive/ROADMAP.md`.
 The live, commentable version of this plan is the claude.ai doc "Notch Sixty — v1 Program Plan";
 the companion "Notch Sixty — Competitive Gap Analysis (Oct 2026)" explains why each epic exists.
 
@@ -24,10 +24,16 @@ with them, these decisions win until E1/E21 update `AGENTS.md`.
 | Engine performance architecture | Whole-buffer processing, multirate processing for low-frequency paths, multiple realtime threads, and best-in-class algorithms |
 | Flag graduation (11 Nov 2026) | An epic ends when its software is done, wired through the production UI and passing its tests, and its flag is graduated (stays in `FeatureFlag.all`, defaults on in release builds). Graduated means available, never armed: live ANC and MIMO keep `LiveTreatmentArm`. Flags are removed in the flag-cleanup phase (FC) after E22 and before E18. Bench "is it good" acceptance moves to E22. A release user can turn a graduated feature off with `-NotchSixtyFeatures -<id>` |
 | New engine quality (20 Oct 2026) | The unified graph is at least equal to `N60RenderKernel` in every area and better where it can be; the kernel stays as a frozen fallback until E23 deletes it before v1 |
+| Preview release (11 Nov 2026) | Rejected. No preview or early release: v1 ships only when every scoped epic is complete and right |
+| Private beta (11 Nov 2026) | Rejected. The owner does the beta testing; no TestFlight or NDA beta before launch |
+| Roadmap review (11 Nov 2026) | Approved: E17 widened to output integrity and interchange; E15 source-rate investigation, connection switching, wireless defaults and schedules; E14 v1 is one upmix with one strength control (modes and tuning are v2); E16 two tiers; E18 named slices; E12 simple and expert modes; E9 active-speaker fail-safe check; new epic E30 Everyday listening controls; the codebase health items under E1, E12, E18, E21 and E23. Not decided: a signal-path and history epic, and any cut from v1 scope (nothing is cut) |
+| Red nightly rule (11 Nov 2026) | A failing nightly `macos-full` on `main` is fixed before the next slice starts (`CLAUDE.md`, `/next` step 0) |
+| Engine code home (11 Nov 2026) | New engine C or C++ goes in `core/`, never in `NotchSixty/Audio/Realtime` (`CLAUDE.md`; checked by realtime-reviewer) |
+| After v1 (11 Nov 2026) | Post-v1 work is scoped in `docs/V2_ROADMAP.md`. It is not started, and `/next` does not read it, until the owner initiates it |
 
 ## Epics at a glance
 
-Twenty-eight epics in four phases close every gap in the analysis and set the engine up for other
+Thirty epics in four phases close every gap in the analysis and set the engine up for other
 platforms; E6 (the unified graph) is the critical path, because eleven later epics build on it.
 
 | ID | Epic | Phase | Depends on | Where the work happens | Done when |
@@ -56,7 +62,9 @@ platforms; E6 (the unified graph) is the critical path, because eleven later epi
 | E14 | Upmixer | 4 | E6 | Claude Code + bench | Stereo plays on 5.1–7.1.4 layouts |
 | E15 | Device-aware profiles | 4 | E6 | Claude Code (Mac) | Profile follows the output when the user opts in |
 | E16 | Automation and remote | 4 | E6 | Claude Code (Mac) | App Intents and the local API ship; the API is ready for a future iPhone client |
-| E17 | Export and dither | 4 | E8, E10 | Claude Code (Mac) | MiniDSP, APO and WAV exports; automatic dither |
+| E17 | Output integrity and interchange (was Export and dither) | 4 | E8, E10 | Claude Code (Mac) | MiniDSP, APO, WAV, FIR, biquad and CamillaDSP exports; REW, FRD, ZMA and APO import; device format shown; automatic dither |
+| E29 | Shared room position model | 4 | see `docs/epics/E29.md` | Claude Code (Mac) | One room position model feeds correction, treatment and Quiet Zone |
+| E30 | Everyday listening controls | 4 | E15, E17 (dither, for software volume) | Claude Code (Mac) | House curves, quick controls, volume features and per-app rules reachable from the Dashboard and the menu bar |
 | E23 | Legacy engine removal | 4 | E6 (incl. S12a–S12h), E4 S11, E7–E17 | Claude Code (Mac) | `N60RenderKernel`, the old N-channel path and the `e6.*` flags are gone; full suite green |
 | E22 | Hardware validation | 4 | all software epics | Bench | Every deferred bench check and owner acceptance check (including those that no longer gate a flag graduation) passes on `main` at every rate |
 | FC | Flag cleanup (owner, 11 Nov 2026) | 4 | E22 | Claude Code (Mac) | Every graduated flag and its dead branch removed in small per-epic PRs; nightly flags-off CI ran while flags existed |
@@ -70,6 +78,7 @@ reviewers compare with Dirac and REW), then engine depth, then breadth.
 
 0. E24 Room correction completion, all of S0–S8 in written order (owner, 1 Nov 2026; S4–S8 no longer wait for E4; numbered 0 so later item numbers stay valid)
    - then E25 Outputs and speaker arrangement, S1–S8 in written order, before item 1 (owner, 1 Nov 2026)
+   - then the E1 codebase health slices S7–S9 in written order (owner approved the items on 11 Nov 2026; placing them ahead of feature slices is the review's proposal and is the owner's to confirm on this PR)
    - then E4 S22b echo stage in the live path (S22b3 echo stage built dark, PR open; S25 arming built), before item 1 (owner, 2 Nov 2026; arming approved with the four conditions in `docs/epics/E4.md` Open owner decisions: user-initiated only, slow 3 s fade-in, existing gates first, never persisted)
 1. E4 class-leading roadmap, S24–S31 in written order (owner, 31 Oct 2026; E4 S11 moved to E22 on 1 Nov 2026; S26 and S29 are skipped until the owner decides camera head position and the overnight power assertion; slices waiting on E8 or the bench are skipped until ready)
    - then E26 Sub-aware Quiet Zone, S1–S7 in written order, before item 2 (owner, 4 Nov 2026; owner 5 Nov 2026: all remaining slices S2–S7 complete before E9 FIR limits (item 4), so E9 S2 waits; S1 waits for E25 S8b; no live ANC path is enabled outside the per-feature arm)
@@ -86,7 +95,7 @@ reviewers compare with Dirac and REW), then engine depth, then breadth.
 8. E7 384 kHz everywhere
 9. E20 Engine performance
 10. E21 Portable C++ core, remaining items
-11. E14 Upmixer, E15 Device-aware profiles, E17 Export and dither, E16 Automation and remote
+11. E14 Upmixer, E15 Device-aware profiles, E17 Output integrity and interchange, E16 Automation and remote, then E30 Everyday listening controls (owner, 11 Nov 2026; E30 needs E15 and the E17 dither stage)
 12. E23 Legacy engine removal
 13. E29 Shared room position model (owner, 9 Nov 2026: unparked, in v1; plan `docs/epics/E29.md`; flag `e29.room-model`, graduated in S9, removed in FC)
 14. E3 Hardware acceptance, then E22 Hardware validation, then FC flag cleanup, then E18 Launch readiness (owner-led, last) (owner, 11 Nov 2026; FC added 11 Nov 2026, flag graduation: epics graduate their flag instead of removing it; FC1, the flags-off nightly, lands before the first graduation)
@@ -106,6 +115,15 @@ decision, so Phase 2 starts without it; every later bench check is collected the
 - [x] Rewrite `ARCHITECTURE.md` and `DSP_KERNEL.md` for the current design; archive per-PR closure notes into `docs/archive/`
 - [x] Archive `docs/ROADMAP.md` (several `ci/validate_*.py` scripts still read it) once those validators are retired; this plan lives in `docs/PROGRAM_PLAN.md`
 - [x] Investigate the `SpeakerOptimizerCandidateComparisonTests` runner termination reported in #131
+
+Codebase health (owner, 11 Nov 2026). Nightly `macos-full` was red from 2 to 11 Nov 2026 without
+stopping slice work (a benchmark link error, a Linux `test_fpenv` crash, an LLVM install failure in
+`core-rtsan`); the fix `880856d` is on `main`.
+
+- [x] Red nightly rule: `/next` fixes a failing nightly `macos-full` on `main` before it starts another slice (`CLAUDE.md` and `.claude/skills/next/SKILL.md`, this PR)
+- [ ] S7 `e1/pr-ci-guards` (needs-owner: workflows): `pr.yml` links the render benchmarks and builds and tests the core on Linux, so the two failures above are caught on the PR
+- [ ] S8 `e1/repo-cleanup`: delete the `ci/validate_*.py` scripts nothing runs (55 exist, 4 are referenced) and the stale `PR40_SLICE_*_STATUS.md` files in the repository root; fix every Swift warning (first: `RoomCorrectionABXSheet.swift:38`) and turn on warnings-as-errors for the app target
+- [ ] S9 `e1/project-layout`: folder-synchronised Xcode groups so new files need no project edit; split `ci/run_harnesses.sh` into one script per epic
 
 ### E2 macOS 26 support
 
@@ -223,6 +241,7 @@ Gate G2 passed on 2026-10-25 (commit 07e82c6)
 - [~] Per-output limiter, true-peak guard and soft clip, matching the stereo chain (E9 S5 built dark behind `e9.output-protection`; wiring: E9 S5b for the Outputs UI and S5c for routed outputs, binaural and debounce done; G17 dropped by the owner)
 - [~] Move the program FIR onto the 262,144-tap non-uniform convolver (E9 S1 built dark; S3 sets firScheme 1 and lifts the Swift guards behind e9.long-fir, PR #464; flag stays dark until S2c and E22 bench)
 - [~] Long FIR rebuild: lockstep lazy carry with 256 KiB per-callback budget, changed-tap seeding, chunked or O(1) scheme 1 reset (E9 S2 built dark, PR #464; S3 wires Swift behind e9.long-fir; S2b follow-ups and E22 bench items open)
+- [ ] S9 `e9/active-speaker-failsafe` (owner, 11 Nov 2026; needs-owner: protection; runs before S8): find out what reaches the DAC of an any-way crossover system when the app is not running, has crashed or was force-quit, and record the finding. If unprocessed audio can reach it: setup detects that the macOS default output is the crossover DAC and requires a different default, the app warns at launch, and the user guide advises tweeter protection capacitors
 - [ ] S8 `e9/graduate-flags`: graduate `e9.long-fir` and `e9.output-protection` (default on) once the `[~]` software items close; bench items move to E22; removal is the FC phase
 - [~] Per-output headroom assistant (E9 S6 core maths `n60/headroom.h` merged; E9 S7 Swift model, readout and Apply/Undo built behind e9.output-protection, PR #464; S7b coverage and bit-exact Undo test next)
 
@@ -263,6 +282,8 @@ Audio types in four bridges. The bigger gap is the DSP maths inside the Swift de
 - [ ] CMake build, with Linux and Windows CI running the core tests and the acoustic reference lab
 - [ ] Update `AGENTS.md`: the core may not depend on Apple frameworks, plus the C++ realtime rules
 - [ ] Keep Swift for the macOS shell, Core Audio control and UI
+- [ ] S0 `e21/engine-code-home` (owner, 11 Nov 2026; needs-owner: realtime engine; first E21 slice): move `n60_fxlms.cpp` and `n60_remote_tonal.cpp` from the app into `core/`. The rule itself (new engine C or C++ goes in `core/`) is in `CLAUDE.md` and the realtime-reviewer agent from this PR
+- [ ] Re-estimate the remaining E21 slices from measured line counts of the C and Swift maths still to move, and record the figures in `docs/epics/E21.md` (owner, 11 Nov 2026; rides in S0)
 
 ## Phase 3 — Correction and measurement
 
@@ -282,7 +303,8 @@ minimum-phase in blind ABX at three or more seats, and measurement results match
   - [x] S9a processing: one record per seat from K simultaneous captures (shared-clock and separate-USB modes); K-input transport and seat picker in S9b
 - [x] Measurement management: overlays, groups, notes, A/B against a reference
 - [x] Quasi-anechoic (gated) speaker response view in the Measurement Lab's Advanced tab, using the existing analyser (`SpeakerMeasurementLabQuasiAnechoic.swift`; from E5)
-- [ ] Import and export REW text, FRD and ZMA; a cross-check suite against REW on shared captures
+- Moved to E17 S7 (owner, 11 Nov 2026): import and export of REW text, FRD and ZMA. The cross-check against REW on shared captures is an E22 item (no REW is available)
+- [ ] S12 `e11/verify-with-music` (owner, 11 Nov 2026): during normal listening, compare what the app plays with what a room microphone hears, estimate the response, and prompt when it has moved away from the measured one. First step: check whether the E4 online path tracking can be reused and record the size; if it cannot be reused, the owner decides whether the slice stays in v1 or moves to `docs/V2_ROADMAP.md`
 
 ### E10 Mixed-phase room correction and bass control
 
@@ -293,6 +315,7 @@ minimum-phase in blind ABX at three or more seats, and measurement results match
 - [x] Target editor with curtain, limited-range, per-channel offsets and saved target library
 - [x] Flip `canDeploy` only through the verification path, with prediction and post-apply measurement
 - [ ] Bench: blind ABX against minimum-phase on the reference room
+- [ ] S11 `e10/seat-presets` (owner, 11 Nov 2026): save named seat weightings ("just me", "whole sofa"), design each once, and switch between them from the Dashboard without re-measuring
 
 ### E12 Guided setup and information architecture
 
@@ -300,6 +323,9 @@ minimum-phase in blind ABX at three or more seats, and measurement results match
 - [x] Merge Speakers, Speaker Calibration, Measurement Lab and Room Correction into a clear System area
 - [x] Surface the room geometry and treatment advisor inside the flow
 - [ ] Usability test with someone who has never seen the app
+- [ ] S8 `e12/simple-expert-modes` (owner, 11 Nov 2026): a simple mode (Dashboard, guided setup, the E30 everyday controls once built, before/after comparison) and an expert mode with everything else; Acoustic Research and Hardware Acceptance sit behind a developer switch in release builds; the headphones flow states that a personal SOFA HRTF can be loaded
+- [ ] S8 also walks the path from driver measurement to an installed crossover with delay and polarity set; if it does not end in a single accept step, record a gap in the E8 ledger with an owning slice (owner, 11 Nov 2026)
+- [ ] S9 `e12/app-shell-split` (owner, 11 Nov 2026): split `NotchSixtyApp.swift` (3,121 lines) into scene, commands, composition root and window files, with no behaviour change
 
 ### E24 Room correction completion (owner, 1 Nov 2026)
 
@@ -416,8 +442,11 @@ complete, speaker ANC qualified, and a full hardware regression passing at every
 
 ### E14 Upmixer
 
-- [ ] Stereo to 5.1, 7.1 and 7.1.4 with centre extraction and ambience to surrounds
-- [ ] Per-layout presets and a bypass for content that is already multichannel
+No epic file yet: epic-planner writes `docs/epics/E14.md` when `/next` reaches it.
+
+- [ ] One stereo-to-layout upmix for 5.1, 7.1 and 7.1.4: centre extraction, ambience to surrounds and heights
+- [ ] A single strength control, and a bypass for content that is already multichannel
+- Owner decision, 11 Nov 2026: multiple upmix modes, per-layout presets and tuning controls are after v1 (`docs/V2_ROADMAP.md`, V2-9)
 
 ### E15 Device-aware profiles
 
@@ -425,24 +454,49 @@ Plan: `docs/epics/E15.md` (awaiting owner approval; flag `e15.follow-output`).
 
 - [ ] Opt-in "follow system output" mode that recalls the profile bound to each output UID
 - [ ] Keep today's fixed-output policy as the default
-- [ ] S4 `e15/ship` graduates `e15.follow-output` (default on; the mode still defaults to fixed; removal is the FC phase)
+- [ ] S5 `e15/source-rate-investigation` (owner, 11 Nov 2026): one investigation slice on following the source sample rate through the process tap; record the finding either way, and build it only if the finding supports it
+- [ ] S6 `e15/connection-and-wireless-defaults` (owner, 11 Nov 2026): the bound profile switches when headphones or another DAC connect (confirm what S1–S3b already cover and add the rest); Bluetooth and AirPlay outputs get sensible defaults (latency, rate, no long FIR)
+- [ ] S7 `e15/schedules` (owner, 11 Nov 2026): switch profile or night mode by time of day
+- [ ] S4 `e15/ship` (runs after S5–S7) graduates `e15.follow-output` (default on; the mode still defaults to fixed; removal is the FC phase)
 
 ### E16 Automation and remote
 
-- [ ] App Intents and Shortcuts for profile, volume, mute, bypass and correction on/off
-- [ ] Local authenticated REST/websocket API, off by default
+No epic file yet: epic-planner writes `docs/epics/E16.md` when `/next` reaches it. Two tiers (owner, 11 Nov 2026):
+
+- [ ] Tier 1, App Intents and Shortcuts for profile, volume, mute, bypass and correction on/off, and starting a Quiet Zone session (always subject to the arm; an intent never arms anything by itself)
+- [ ] Tier 1, global hotkeys, media-key volume for DACs without hardware volume, and richer menu-bar quick controls
+- [ ] Tier 2, local authenticated REST/websocket API, off by default
 
 Owner decision, 11 Nov 2026: the iPhone remote moved to the post-v1 "iPhone companion app" entry
 under "Platform reach after v1". The local API must stay usable by that future iPhone client
 (documented, versioned, authenticated pairing that a phone can complete).
 
-### E17 Export and dither
+### E17 Output integrity and interchange (was Export and dither; owner, 11 Nov 2026)
 
 Plan: `docs/epics/E17.md` (awaiting owner approval; flags `e17.export`, `e17.dither`).
 
 - [ ] Filter export to MiniDSP, Equalizer APO and WAV convolution sets
 - [ ] Automatic TPDF dither only when the device's physical format is 16-bit integer
-- [ ] S5 `e17/ship` graduates `e17.export` and `e17.dither` (default on; removal is the FC phase)
+- [ ] S6 `e17/device-format` (owner, 11 Nov 2026): read and show the device's physical format (bit depth, rate, integer or float) and let the user pick one where the device offers a choice. Dither stays automatic and limited to integer formats of 16 bits or fewer (E17 owner decisions Q5 and Q6); noise shaping, if S4's design note supports it, is chosen automatically too
+- [ ] S7 `e17/measurement-interchange` (owner, 11 Nov 2026; moved from E11): import and export REW text, FRD and ZMA
+- [ ] S8 `e17/correction-interchange` (owner, 11 Nov 2026): export a correction as FIR impulse files, biquad lists and a CamillaDSP configuration; import REW filter text and Equalizer APO configurations (extend the existing exporters and `EqualizerAPOPresetImporter`, do not duplicate them)
+- [ ] S5 `e17/ship` (runs after S6–S8) graduates `e17.export` and `e17.dither` (default on; removal is the FC phase)
+
+### E30 Everyday listening controls (owner, 11 Nov 2026)
+
+New epic from the roadmap review. No epic file yet: epic-planner writes `docs/epics/E30.md` when
+`/next` reaches it. Flag `e30.everyday`, graduated by the last slice. Runs after E15 and the E17
+dither stage. Suggested slice groups: controls first, rules second. Only Swift decides; the engine
+receives the result through the normal snapshot path.
+
+- [ ] House-curve library: named target tilts the user can pick without opening Room Correction
+- [ ] Quick controls on the Dashboard and the menu bar: bass, treble, tilt, balance, loudness compensation and night mode
+- [ ] Loudness matching as one switch in the quick controls, using the existing LUFS Loudness Match in Dynamics (no new engine work)
+- [ ] Volume: a maximum-level limit, volume remembered per profile, and a software volume control for DACs with none of their own (needs the E17 dither stage)
+- [ ] Per-app rules: exclude an app from processing, or give it its own profile
+- [ ] Per-app automatic low-latency mode: chosen apps (games, calls, video) switch the minimum-phase low-latency mode on while they play
+- [ ] Preference tuning by ear: a short series of level-matched A/B choices that adjusts tilt and bass level, using the Blind Listening machinery (last slice before the ship slice)
+- [ ] Ship slice graduates `e30.everyday` (default on; removal is the FC phase)
 
 ### E23 Legacy engine removal
 
@@ -454,6 +508,9 @@ unified graph only.
 - [~] S1b `e23/precision-and-cleanup` (PR pending, needs-owner, engine): double state for E6 G18, G25 and the Linkwitz form for G31 built; cleanup whole-buffer pass (E6 G37) partly built, per-section hoisting open as E23 G5; wiring slice: graph path, not yet on the shipped UI as a separate check
 - [ ] S1c `e23/parity-and-host-fold` (needs-owner, engine): G2 latency report at 44.1 and 88.2 kHz, G3 clipped-input level difference, E6 G48 Quiet Zone host fold
 - [ ] Confirm nothing falls back to the kernel, the old N-channel path or the legacy binaural pipeline (E6 S12a–S12h)
+- [ ] S2 `e23/kernel-reference-inventory` (owner, 11 Nov 2026): list the 17 files that still reference `N60RenderKernel` in `docs/epics/E23.md`, each with the slice that removes the reference
+- [ ] S3 `e23/content-view-removal` (owner, 11 Nov 2026; needs-owner if any user-visible control goes): remove `ContentView.swift` (1,607 lines, still instantiated from `NotchSixtyApp.swift`) once every control it holds is reachable elsewhere
+- [ ] S4 `e23/audio-io-engine-split` (owner, 11 Nov 2026; needs-owner: `AudioIOEngine.swift`): split `AudioIOEngine.swift` (6,382 lines) along its legacy-path seams as the kernel paths go. From now on no slice in any epic may make the file longer
 - [ ] Remove the kernel headphone-delay clamp (4,095 frames) with the kernel (E7 G1)
 - [ ] Delete the legacy bridge MIMO path (`N60MIMOTreatment*.h`, `stagedRoomTreatment`), frozen since E19 S6 (E19 G25)
 - [ ] Delete `N60RenderKernel`, the old N-channel path and the `e6.legacy-kernel` flag
@@ -491,7 +548,7 @@ Plan: `docs/epics/FC.md`. Epics graduate their flag at the end (default on, stay
 section 11); this phase removes the flags after the E22 bench, as small per-epic PRs.
 
 - [x] FC1 `fc/flags-off-ci`: nightly `macos-full` runs the suite with graduated flags off as well as on (before the first graduation)
-- [ ] Per-epic removal PRs, in order: E26, E28, E9, E13, E4, E19, E7, E15, E17, E20, E21, E29 (`e6.legacy-kernel` goes with E23)
+- [ ] Per-epic removal PRs, in order: E26, E28, E9, E13, E4, E19, E7, E15, E17, E30, E20, E21, E29 (`e6.legacy-kernel` goes with E23)
 - [ ] Never remove a flag with an open E22 bench item against its feature; live ANC and MIMO keep `LiveTreatmentArm`
 
 ### E18 Launch readiness
@@ -503,6 +560,15 @@ Runs after the FC flag cleanup (owner, 11 Nov 2026).
 - [ ] VoiceOver and keyboard accessibility pass; localisation for the launch markets
 - [ ] Competitive blind comparison against Dirac Live Processor and Clearroom on the same system
 - [ ] Pricing against the $549–$899 Dirac bundle range, trial length, website, screenshots and launch reviews
+
+Named slices (owner, 11 Nov 2026). No epic file yet: epic-planner writes `docs/epics/E18.md`.
+
+- [ ] Licensing and trial through the App Store, once the price is decided
+- [ ] String catalogues: every new user-visible string goes through a string catalogue from now on, and existing strings are moved before the localisation pass
+- [ ] Diagnostics: crash and performance reports, and an opt-in support bundle that never contains audio
+- [ ] Validation on macOS 27 and macOS 26
+- [ ] Optional iCloud sync of profiles
+- [ ] Staged move to the Swift 6 language mode (`SWIFT_VERSION` is 5.0 today; 25 `@unchecked Sendable` to review), one module at a time
 
 ## Platform reach after v1
 
@@ -524,7 +590,8 @@ the C++ core may depend on an Apple framework.
 
 ### Post-v1: iPhone companion app (owner, 11 Nov 2026; no epic number yet)
 
-Outside the v1 completion requirement: v1 ships without it.
+Outside the v1 completion requirement: v1 ships without it. Scoped as V2-4 in `docs/V2_ROADMAP.md`,
+which holds every post-v1 item.
 
 - [ ] iPhone remote for the Mac app, using the E16 local API
 - [ ] iPhone as a measurement microphone for the Mac's measurement suite; needs its own
@@ -563,7 +630,7 @@ Dirac and Clearroom keep shipping.
 | Risk | Mitigation |
 | --- | --- |
 | Speaker ANC fails or stalls physical qualification, holding v1 | Write the qualification criteria in Phase 1 and decide the fallback in advance |
-| Competitors gain ground during a long build | Private TestFlight beta from Phase 3, under NDA if needed, to build reviewers and feedback |
+| Competitors gain ground during a long build | Accepted by the owner (11 Nov 2026): no preview release and no private beta; the owner tests the app, and v1 launches once, complete |
 | E6 regresses today's stereo sound | Side-by-side parity suite and the old kernel kept behind a flag |
 | CPU at 384 kHz with ANC, MIMO treatment and 262k-tap FIR on a base Mac | Per-rate CPU budget measured on the slowest supported Mac; warn before enabling |
 | Bench time is a single-person bottleneck | Batch bench sessions per phase; prepare scripts in advance with the PR112A harness |
@@ -571,6 +638,8 @@ Dirac and Clearroom keep shipping.
 
 Open questions:
 
-- [ ] If speaker ANC cannot be qualified in time, does v1 wait, or ship with ANC as a labelled preview?
+- [x] If speaker ANC cannot be qualified in time, does v1 wait, or ship with ANC as a labelled preview? v1 waits (owner, 11 Nov 2026)
 - [ ] Target price and trial length
-- [ ] Is a private beta acceptable before the launch splash?
+- [x] Is a private beta acceptable before the launch splash? No; the owner does the beta testing (owner, 11 Nov 2026)
+- [ ] Signal-path and history view (review item E31, flag `e31.signal-path`): not decided, so not in the plan
+- [ ] Cut candidates C1–C10 from the review: not decided, so all stay in v1

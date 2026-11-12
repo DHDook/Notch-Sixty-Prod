@@ -18,6 +18,10 @@ yourself beyond what the steps below name. All building happens in subagents.
    changes, run `git pull --ff-only origin main`. If that changed `CLAUDE.md` or `.claude/`,
    tell the owner to restart the session and stop. If not on `main`, report the branch and its
    last commit and ask whether to continue there or return to `main`.
+   **Red nightly (owner, 11 Nov 2026).** Check the latest nightly with
+   `gh run list --workflow macos-full.yml --branch main --event schedule --limit 1`. If it
+   failed and no fix has merged since, the work for this session is fixing it (branch
+   `e1/fix-nightly-<cause>`); do not start another slice first.
 1. **Pick the work.** Read the order with
    `sed -n '/^## Execution order/,/^## Phase 1/p' docs/PROGRAM_PLAN.md` (or use the epic in
    $ARGUMENTS). Take the first epic in that order with open slices whose dependencies are met,
