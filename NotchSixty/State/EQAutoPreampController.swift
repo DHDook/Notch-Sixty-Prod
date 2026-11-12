@@ -21,17 +21,20 @@ final class EQAutoPreampController: ObservableObject {
     @Published private(set) var matchAttenuationDB = 0.0
 
     private let engine: AudioIOEngine
-    private var observation: AnyCancellable?
+    private var observation: ObservationSubscription?
     private var cacheKey: (configuration: StereoEQConfiguration, sampleRate: Double)?
 
     init(engine: AudioIOEngine) {
         self.engine = engine
         refreshPrediction()
-        observation = engine.objectWillChange
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in
-                MainActor.assumeIsolated { self?.reconcile() }
-            }
+        observation = ObservationSubscription(
+            track: { [engine] in
+                _ = engine.stereoEQConfiguration
+                _ = engine.gainConfiguration
+                _ = engine.selectedOutputDevice
+            },
+            onChange: { [weak self] in self?.reconcile() }
+        )
     }
 
     /// True when the controller is driving the preamp.

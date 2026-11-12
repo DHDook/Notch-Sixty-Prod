@@ -5,7 +5,7 @@ import SwiftUI
 // live where it can and reconfigures with the shutdown fade where it must.
 
 struct ProductionRoutingEditorView: View {
-    @ObservedObject var engine: AudioIOEngine
+    var engine: AudioIOEngine
     @StateObject private var model: SpeakerRoutingEditorModel
     @State private var actionError: String?
     @State private var interchangeNotes: [String] = []

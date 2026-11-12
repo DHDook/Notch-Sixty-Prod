@@ -240,7 +240,7 @@ private enum ActiveAcousticsTab: String, CaseIterable, Identifiable {
 }
 
 struct ProductionActiveAcousticsWorkspace: View {
-    @ObservedObject var engine: AudioIOEngine
+    var engine: AudioIOEngine
     @ObservedObject var ambient: AmbientCompensationController
     @ObservedObject var quietZone: ActiveQuietZoneController
     @ObservedObject var adaptiveQuietZone: AdaptiveQuietZoneShadow

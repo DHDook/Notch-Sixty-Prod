@@ -155,7 +155,7 @@ final class EQComparisonController: ObservableObject {
     private var savedSteps: [EQComparisonSlot: EQEditHistory.SlotSteps] = [:]
     /// What the engine's preamp held before the match trim was applied, when auto preamp is off.
     private var appliedManualTrimDB = 0.0
-    private var observation: AnyCancellable?
+    private var observation: ObservationSubscription?
 
     init(
         engine: AudioIOEngine, autoPreamp: EQAutoPreampController,
@@ -165,9 +165,10 @@ final class EQComparisonController: ObservableObject {
         self.autoPreamp = autoPreamp
         self.audition = audition
         slots = EQComparisonSlots(live: engine.stereoEQConfiguration)
-        observation = engine.objectWillChange
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in MainActor.assumeIsolated { self?.liveChanged() } }
+        observation = ObservationSubscription(
+            track: { [engine] in _ = engine.stereoEQConfiguration },
+            onChange: { [weak self] in self?.liveChanged() }
+        )
     }
 
     var activeSlot: EQComparisonSlot { slots.active }

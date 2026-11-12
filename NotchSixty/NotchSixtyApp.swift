@@ -85,7 +85,6 @@ final class ProductController: ObservableObject {
     let recovery: ProductRecoveryController
     let headroomAssistant: HeadroomAssistantController
     let reference: ProductionReferenceNavigator
-    private var audioEngineObservation: AnyCancellable?
     private var calibrationObservation: AnyCancellable?
     private var multichannelCalibrationObservation: AnyCancellable?
     private var ambientCompensationObservation: AnyCancellable?
@@ -94,7 +93,7 @@ final class ProductController: ObservableObject {
     private var recoveryObservation: AnyCancellable?
     private var terminationObservation: AnyCancellable?
     private var didShutdownForTermination = false
-    private var selectedOutputObservation: AnyCancellable?
+    private var selectedOutputObservation: ObservationSubscription?
     static let selectedOutputDefaultsKey = "audio.selectedOutputUID"
 
     init() {
@@ -214,17 +213,16 @@ final class ProductController: ObservableObject {
         observeTermination()
         // The explicitly selected output is authoritative across launches,
         // including for systems without an associated output.
-        selectedOutputObservation = audioEngine.$routeConfiguration
-            .map(\.selectedOutputUID)
-            .removeDuplicates()
-            .dropFirst()
-            .sink { uid in
+        selectedOutputObservation = ObservationSubscription(
+            value: { audioEngine.routeConfiguration.selectedOutputUID },
+            onChange: { uid in
                 if let uid {
                     UserDefaults.standard.set(uid, forKey: Self.selectedOutputDefaultsKey)
                 } else {
                     UserDefaults.standard.removeObject(forKey: Self.selectedOutputDefaultsKey)
                 }
             }
+        )
     }
 
     init(
@@ -674,9 +672,7 @@ final class ProductController: ObservableObject {
                 await self?.rebuildAudioUnitRackAfterFormatChange()
             }
         }
-        audioEngineObservation = audioEngine.objectWillChange.sink { [weak self] _ in
-            self?.objectWillChange.send()
-        }
+        // E20 S9: the engine is `@Observable`; views read its properties directly, so no relay.
         calibrationObservation = calibration.objectWillChange.sink { [weak self] _ in
             self?.objectWillChange.send()
         }
@@ -710,7 +706,7 @@ final class ProductController: ObservableObject {
 
 #if DEBUG
 private struct PR27ProtectionValidationView: View {
-    @ObservedObject var engine: AudioIOEngine
+    var engine: AudioIOEngine
 
     private func dynamicsBinding<Value>(_ keyPath: WritableKeyPath<DynamicsConfiguration, Value>) -> Binding<Value> {
         Binding(
@@ -891,7 +887,7 @@ private struct PR27ProtectionValidationView: View {
 }
 
 private struct PR28AdvancedDynamicsValidationView: View {
-    @ObservedObject var engine: AudioIOEngine
+    var engine: AudioIOEngine
 
     private func dynamicsBinding<Value>(_ keyPath: WritableKeyPath<DynamicsConfiguration, Value>) -> Binding<Value> {
         Binding(
@@ -1049,7 +1045,7 @@ private struct PR28AdvancedDynamicsValidationView: View {
 }
 
 private struct PR30PhaseTimeValidationView: View {
-    @ObservedObject var engine: AudioIOEngine
+    var engine: AudioIOEngine
 
     private var delayBinding: Binding<Double> {
         Binding(
@@ -1230,7 +1226,7 @@ private struct PR30PhaseTimeValidationView: View {
 }
 
 private struct PR31NoiseHumValidationView: View {
-    @ObservedObject var engine: AudioIOEngine
+    var engine: AudioIOEngine
     @State private var mainsDiagnostics: RenderKernelDiagnostics?
     private let trackingTimer = Timer.publish(every: 1.0, on: .main, in: .common).autoconnect()
 
@@ -1511,7 +1507,7 @@ private struct PR31NoiseHumValidationView: View {
 }
 
 private struct EngineeringValidationView: View {
-    @ObservedObject var engine: AudioIOEngine
+    var engine: AudioIOEngine
 
     var body: some View {
         TabView {
@@ -2003,7 +1999,7 @@ private struct VolumeFeedbackHUDView: View {
 }
 
 private struct MenuBarVolumeLabel: View {
-    @ObservedObject var engine: AudioIOEngine
+    var engine: AudioIOEngine
     @ObservedObject var preferences: ApplicationPreferences
 
     private var readout: String {
@@ -2126,7 +2122,7 @@ final class ApplicationPreferences: ObservableObject {
     }
 
     private let volumeHUD = VolumeFeedbackHUDController()
-    private var volumeFeedbackObservation: AnyCancellable?
+    private var volumeFeedbackObservation: ObservationSubscription?
 
     @Published private(set) var launchAtLoginEnabled: Bool
     @Published private(set) var launchAtLoginError: String?
@@ -2217,10 +2213,9 @@ final class ApplicationPreferences: ObservableObject {
         audioEngine.setSoftwareVolumeKeyStep(volumeStepResolution.keyStep)
         guard !didApplyInitialPreferences else { return }
         didApplyInitialPreferences = true
-        volumeFeedbackObservation = audioEngine.$masterVolumeConfiguration
-            .dropFirst()
-            .removeDuplicates()
-            .sink { [weak self] configuration in
+        volumeFeedbackObservation = ObservationSubscription(
+            value: { audioEngine.masterVolumeConfiguration },
+            onChange: { [weak self] configuration in
                 guard let self, self.showVolumePopup else { return }
                 self.volumeHUD.show(
                     configuration,
@@ -2230,6 +2225,7 @@ final class ApplicationPreferences: ObservableObject {
                     alwaysTenths: self.decibelReadoutShowsTenths
                 )
             }
+        )
         applyAppearance()
         applyActivationPolicy()
     }
@@ -2314,14 +2310,14 @@ final class ApplicationPreferences: ObservableObject {
 private struct ProductionMenuBarView: View {
     let product: ProductController
     @ObservedObject private var profiles: ProductProfileController
-    @ObservedObject private var engine: AudioIOEngine
+    private var engine: AudioIOEngine
     @Environment(\.openWindow) private var openWindow
     @State private var commandError: String?
 
     init(product: ProductController) {
         self.product = product
         _profiles = ObservedObject(wrappedValue: product.profiles)
-        _engine = ObservedObject(wrappedValue: product.audioEngine)
+        engine = product.audioEngine
     }
 
     private var presetSelection: Binding<UUID?> {

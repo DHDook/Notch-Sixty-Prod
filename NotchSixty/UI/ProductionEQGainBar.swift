@@ -5,7 +5,7 @@ import SwiftUI
 /// (or its trim while auto preamp is on), the auto preamp switch and
 /// the output gain. Every control uses the engine's existing gain setters.
 struct ProductionEQGainBar: View {
-    @ObservedObject var engine: AudioIOEngine
+    var engine: AudioIOEngine
     @ObservedObject var autoPreamp: EQAutoPreampController
     let perform: (() throws -> Void) -> Void
 

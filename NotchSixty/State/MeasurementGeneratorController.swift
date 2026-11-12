@@ -16,7 +16,7 @@ final class MeasurementGeneratorController: ObservableObject {
     private let session: MeasurementLevelSession
     private var usesLiveGraph = false
     private var startedUID: String?
-    private var outputObserver: AnyCancellable?
+    private var outputObserver: ObservationSubscription?
     private var countdown: Task<Void, Never>?
 
     init(engine: AudioIOEngine, profiles: ProductProfileController, microphone: RoomCorrectionCalibrationController,
@@ -58,12 +58,14 @@ final class MeasurementGeneratorController: ObservableObject {
         message = nil
         isPlaying = true
         startedUID = engine.routeConfiguration.selectedOutputUID
-        outputObserver = engine.$routeConfiguration.map(\.selectedOutputUID).removeDuplicates().dropFirst()
-            .sink { [weak self] uid in
+        outputObserver = ObservationSubscription(
+            value: { [engine] in engine.routeConfiguration.selectedOutputUID },
+            onChange: { [weak self] uid in
                 guard let self, self.isPlaying, uid != self.startedUID else { return }
                 self.stop()
                 self.message = "Stopped because the output device changed."
             }
+        )
         secondsRemaining = Int(settings.autoStopSeconds.rounded(.up))
         countdown?.cancel()
         countdown = Task { [weak self] in

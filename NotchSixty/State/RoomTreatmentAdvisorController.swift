@@ -1,4 +1,4 @@
-import Combine
+import Observation
 import Foundation
 
 /// Session-scoped, read-only ownership for the Room Advisor.
@@ -7,7 +7,8 @@ import Foundation
 /// It reads Room Correction projects directly from their store so selecting a
 /// project here cannot select or mutate a Playback System.
 @MainActor
-final class RoomTreatmentAdvisorController: ObservableObject {
+@Observable
+final class RoomTreatmentAdvisorController {
     let store: RoomCorrectionProjectStore
     let geometryStore: RoomGeometryStore
     let advancedPlacementStore: RoomAdvancedPlacementStore
@@ -20,48 +21,48 @@ final class RoomTreatmentAdvisorController: ObservableObject {
     private let geometryAnalyzer =
         RoomGeometryPlacementAnalyzer()
 
-    @Published private(set) var availableProjects:
+    private(set) var availableProjects:
         [RoomCorrectionProject] = []
-    @Published private(set) var selectedProjectID: UUID?
-    @Published private(set) var selectedProject:
+    private(set) var selectedProjectID: UUID?
+    private(set) var selectedProject:
         RoomCorrectionProject?
-    @Published private(set) var report:
+    private(set) var report:
         RoomTreatmentAdvisorReport?
-    @Published var geometryDraft: RoomGeometryModel?
-    @Published private(set) var savedGeometry:
+    var geometryDraft: RoomGeometryModel?
+    private(set) var savedGeometry:
         RoomGeometryModel?
-    @Published private(set) var geometryAnalysis:
+    private(set) var geometryAnalysis:
         RoomGeometryAnalysis?
-    @Published private(set) var geometryValidationMessage:
+    private(set) var geometryValidationMessage:
         String?
-    @Published private(set) var advancedPlacementDraft: RoomAdvancedPlacementSettings?
-    @Published private(set) var savedAdvancedPlacement: RoomAdvancedPlacementSettings?
-    @Published private(set) var advancedPlacementExperiments: [RoomAdvancedPlacementExperiment] = []
-    @Published private(set) var selectedAdvancedExperiment: RoomAdvancedPlacementExperiment?
-    @Published private(set) var advancedPlacementMessage: String?
-    @Published private(set) var toeInMeasurementEvidence: [RoomAdvancedToeInEvidence] = []
-    @Published private(set) var toeInEvidenceMessage: String?
-    @Published private(set) var availablePhysicalSubSets: [SpeakerOptimizerMeasurementSet] = []
-    @Published var physicalSubBaselineID: UUID?
-    @Published var physicalSubCandidateID: UUID?
-    @Published private(set) var physicalSubComparison: RoomAdvancedSubPlacementComparison?
-    @Published private(set) var physicalSubComparisonMessage: String?
+    private(set) var advancedPlacementDraft: RoomAdvancedPlacementSettings?
+    private(set) var savedAdvancedPlacement: RoomAdvancedPlacementSettings?
+    private(set) var advancedPlacementExperiments: [RoomAdvancedPlacementExperiment] = []
+    private(set) var selectedAdvancedExperiment: RoomAdvancedPlacementExperiment?
+    private(set) var advancedPlacementMessage: String?
+    private(set) var toeInMeasurementEvidence: [RoomAdvancedToeInEvidence] = []
+    private(set) var toeInEvidenceMessage: String?
+    private(set) var availablePhysicalSubSets: [SpeakerOptimizerMeasurementSet] = []
+    var physicalSubBaselineID: UUID?
+    var physicalSubCandidateID: UUID?
+    private(set) var physicalSubComparison: RoomAdvancedSubPlacementComparison?
+    private(set) var physicalSubComparisonMessage: String?
     // Explicit, user-selected read-only source evidence. No selection
     // automatically changes Playback System, measurements or DSP graph.
-    @Published private(set) var unifiedSpeakerBaselines: [SpeakerOptimizerMeasurementSet] = []
-    @Published var unifiedSpeakerBaselineID: UUID?
-    @Published private(set) var unifiedSpeakerComparison: SpeakerOptimizerComparisonPlan?
-    @Published private(set) var unifiedSpeakerMessage: String?
+    private(set) var unifiedSpeakerBaselines: [SpeakerOptimizerMeasurementSet] = []
+    var unifiedSpeakerBaselineID: UUID?
+    private(set) var unifiedSpeakerComparison: SpeakerOptimizerComparisonPlan?
+    private(set) var unifiedSpeakerMessage: String?
 
-    @Published private(set) var placementReviewHistory: [RoomAdvancedPlacementReviewRecord] = []
-    @Published private(set) var placementReviewMessage: String?
-    @Published var treatmentDraft: RoomPassiveTreatmentPlan?
-    @Published private(set) var savedTreatmentPlan: RoomPassiveTreatmentPlan?
-    @Published private(set) var treatmentAnalysis: RoomPassiveTreatmentDesignSummary?
-    @Published private(set) var treatmentMessage: String?
-    @Published private(set) var verificationReport: RoomTreatmentVerificationReport?
-    @Published var verificationFollowUpID: UUID?
-    @Published private(set) var lastErrorDescription: String?
+    private(set) var placementReviewHistory: [RoomAdvancedPlacementReviewRecord] = []
+    private(set) var placementReviewMessage: String?
+    var treatmentDraft: RoomPassiveTreatmentPlan?
+    private(set) var savedTreatmentPlan: RoomPassiveTreatmentPlan?
+    private(set) var treatmentAnalysis: RoomPassiveTreatmentDesignSummary?
+    private(set) var treatmentMessage: String?
+    private(set) var verificationReport: RoomTreatmentVerificationReport?
+    var verificationFollowUpID: UUID?
+    private(set) var lastErrorDescription: String?
 
     init(store: RoomCorrectionProjectStore) {
         self.store = store

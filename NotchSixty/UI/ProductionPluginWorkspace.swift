@@ -666,7 +666,7 @@ private struct PluginRackSlotRow: View {
 
 struct ProductionPluginWorkspace: View {
     let product: ProductController
-    @ObservedObject private var engine: AudioIOEngine
+    private var engine: AudioIOEngine
     @ObservedObject private var host: AudioUnitHostController
 
     @State private var addTarget: PluginAddTarget?
@@ -681,9 +681,7 @@ struct ProductionPluginWorkspace: View {
 
     init(product: ProductController) {
         self.product = product
-        _engine = ObservedObject(
-            wrappedValue: product.audioEngine
-        )
+        engine = product.audioEngine
         _host = ObservedObject(
             wrappedValue: product.audioUnitHost
         )

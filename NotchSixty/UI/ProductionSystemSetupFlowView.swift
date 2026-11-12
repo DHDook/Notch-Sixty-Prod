@@ -1311,11 +1311,11 @@ struct ProductionSystemSetupFlowView: View {
 
 private struct SystemSetupOutputStep: View {
     @ObservedObject var model: SystemSetupFlowModel
-    @ObservedObject private var engine: AudioIOEngine
+    private var engine: AudioIOEngine
 
     init(model: SystemSetupFlowModel) {
         self.model = model
-        _engine = ObservedObject(wrappedValue: model.engine)
+        engine = model.engine
     }
 
     var body: some View {

@@ -34,7 +34,7 @@ enum ProductionProfileToolbarPolicy {
 struct ProductionProfileToolbar: View {
     let product: ProductController
     @ObservedObject private var profiles: ProductProfileController
-    @ObservedObject private var engine: AudioIOEngine
+    private var engine: AudioIOEngine
     @ObservedObject private var comparison: ContentABComparisonController
 
     @State private var editorPrompt: EditorPrompt?
@@ -47,7 +47,7 @@ struct ProductionProfileToolbar: View {
     init(product: ProductController) {
         self.product = product
         _profiles = ObservedObject(wrappedValue: product.profiles)
-        _engine = ObservedObject(wrappedValue: product.audioEngine)
+        engine = product.audioEngine
         _comparison = ObservedObject(wrappedValue: product.abComparison)
     }
 

@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct ProductionRoomTreatmentAdvisorWorkspace: View {
-    @ObservedObject var advisor: RoomTreatmentAdvisorController
+    @Bindable var advisor: RoomTreatmentAdvisorController
     @ObservedObject var profiles: ProductProfileController
 
     var body: some View {
