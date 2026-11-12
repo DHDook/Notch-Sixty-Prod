@@ -8,7 +8,7 @@
   builds one slice in a fresh context), realtime-reviewer (Sonnet), and code-scout,
   build-test-runner, plan-tracker, pr-writer (Haiku). `/next` itself runs on Sonnet.
 
-**Current focus:** not tracked here (it caused merge conflicts). Current status lives in the `**Status**` block of each `docs/epics/E<n>.md`; `/next` reads it from there. Agents never edit this file for status.
+**Current focus:** not tracked here (it caused merge conflicts). Current status lives in the Status block (a `**Status` line or a `## Status` heading) of each `docs/epics/E<n>.md`; `/next` reads it from there. Agents never edit this file for status.
 <!-- plan-tracker keeps the line above current -->
 
 @AGENTS.md
