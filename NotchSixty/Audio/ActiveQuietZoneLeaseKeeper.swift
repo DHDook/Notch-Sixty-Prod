@@ -8,9 +8,9 @@ import Foundation
 /// the renew closure runs on it and must not block.
 @MainActor
 final class ActiveQuietZoneLeaseKeeper {
-    static let renewIntervalSeconds = 1.0
+    nonisolated static let renewIntervalSeconds = 1.0
     /// Three missed renewals fit before the fade starts.
-    static let leaseSeconds = 3.0
+    nonisolated static let leaseSeconds = 3.0
 
     private let renewIntervalSeconds: Double
     private let leaseSeconds: Double

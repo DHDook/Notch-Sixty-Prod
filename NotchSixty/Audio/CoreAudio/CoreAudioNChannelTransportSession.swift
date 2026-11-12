@@ -601,7 +601,7 @@ final class CoreAudioNChannelTransportSession {
                         try optimizerFIR.makeRuntimePreparation(
                             programLayout: routePlan.programLayout
                         )
-                    var taps = preparation.flattenedTaps
+                    let taps = preparation.flattenedTaps
                     let configured = taps.withUnsafeBufferPointer {
                         tapBuffer in
                         guard let base = tapBuffer.baseAddress else {
@@ -667,7 +667,7 @@ final class CoreAudioNChannelTransportSession {
                     N60LiveNChannelBridgeDestroy(newBridge)
                     throw LiveNChannelTransportError.roomTreatmentPermitMismatch
                 }
-                var taps = roomTreatment.firProgram.taps
+                let taps = roomTreatment.firProgram.taps
                 let configured = taps.withUnsafeBufferPointer { tapBuffer in
                     physicalChannels.withUnsafeBufferPointer { physicalBuffer in
                         N60LiveNChannelBridgeConfigureRoomTreatment(
@@ -1348,7 +1348,7 @@ final class CoreAudioNChannelTransportSession {
         _ layoutData: Data,
         expectedChannelCount: UInt32
     ) throws -> [AudioChannelDescription]? {
-        try layoutData.withUnsafeBytes { raw -> [AudioChannelDescription]? in
+        layoutData.withUnsafeBytes { raw -> [AudioChannelDescription]? in
             guard let base = raw.baseAddress,
                   raw.count >= MemoryLayout<AudioChannelLayout>.size else { return nil }
             let layout = base.assumingMemoryBound(to: AudioChannelLayout.self)

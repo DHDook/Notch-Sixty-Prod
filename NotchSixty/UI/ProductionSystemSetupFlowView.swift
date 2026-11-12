@@ -1287,9 +1287,6 @@ struct ProductionSystemSetupFlowView: View {
             Text("Optional. Describe the room so seat and speaker suggestions can pre-fill the next steps, or skip.")
                 .foregroundStyle(.secondary)
             ProductionRoomGeometrySection(advisor: advisor)
-        default:
-            Text("This step arrives in a later update of the guided setup. Your choices so far are kept.")
-                .foregroundStyle(.secondary)
         }
     }
 

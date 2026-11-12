@@ -96,11 +96,11 @@ final class RoomCorrectionDeployController: ObservableObject {
                 return RoomCorrectionPostApplyVerifier.failure(
                     candidate.designID, candidate.sampleRate, outcome, detail, criteria)
             }
-            await self?.set(.applying)
+            self?.set(.applying)
             do { try await host.applyTrial(candidate) } catch is CancellationError {
                 return await fail(.cancelled, "Cancelled while applying.")
             } catch { return await fail(.captureFailed, "The trial apply failed: \(error)") }
-            await self?.set(.capturing)
+            self?.set(.capturing)
             let capture: [Float]
             do {
                 capture = try await Self.withTimeout(seconds: timeoutSeconds) {
@@ -112,7 +112,7 @@ final class RoomCorrectionDeployController: ObservableObject {
                 return await fail(.timedOut, "The capture did not finish in \(timeoutSeconds) s.")
             } catch { return await fail(.captureFailed, "\(error)") }
             if Task.isCancelled { return await fail(.cancelled, "Cancelled before analysis.") }
-            await self?.set(.analysing)
+            self?.set(.analysing)
             do {
                 let response = try RoomCorrectionPostApplyVerifier.impulseResponse(
                     capture: capture, sweepStartHz: candidate.sweepStartHz, sweepEndHz: candidate.sweepEndHz,

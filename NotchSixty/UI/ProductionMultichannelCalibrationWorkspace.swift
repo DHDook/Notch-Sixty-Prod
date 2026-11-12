@@ -672,7 +672,7 @@ struct ProductionMultichannelCalibrationWorkspace: View {
                     }
                 }
 
-                if let set = characterization.measurementSet,
+                if characterization.measurementSet != nil,
                    let progress = characterization.progress {
                     Divider()
 

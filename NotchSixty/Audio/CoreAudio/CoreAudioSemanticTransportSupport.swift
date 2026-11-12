@@ -85,7 +85,7 @@ enum CoreAudioSemanticTransportSupport {
         _ layoutData: Data,
         expectedChannelCount: UInt32
     ) throws -> [AudioChannelDescription]? {
-        try layoutData.withUnsafeBytes { raw -> [AudioChannelDescription]? in
+        layoutData.withUnsafeBytes { raw -> [AudioChannelDescription]? in
             guard let base = raw.baseAddress,
                   raw.count >= MemoryLayout<AudioChannelLayout>.size else { return nil }
             let layout = base.assumingMemoryBound(to: AudioChannelLayout.self)

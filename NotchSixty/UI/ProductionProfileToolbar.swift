@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// Toolbar visibility rules and the preference keys Settings shares with
 /// the toolbar through UserDefaults.
@@ -499,7 +500,7 @@ struct ProductionProfileToolbar: View {
         panel.prompt = "Import"
         panel.allowsMultipleSelection = false
         panel.canChooseDirectories = false
-        panel.allowedFileTypes = ["eqpreset", "txt", "json"]
+        panel.allowedContentTypes = ["eqpreset", "txt", "json"].compactMap { UTType(filenameExtension: $0) }
         guard panel.runModal() == .OK, let url = panel.url else { return }
 
         let accessed = url.startAccessingSecurityScopedResource()
@@ -589,7 +590,7 @@ struct ProductionProfileToolbar: View {
         let panel = NSSavePanel()
         panel.title = "Export Preset"
         panel.nameFieldStringValue = suggestedName
-        panel.allowedFileTypes = allowedFileTypes
+        panel.allowedContentTypes = allowedFileTypes.compactMap { UTType(filenameExtension: $0) }
         guard panel.runModal() == .OK, let url = panel.url else { return }
         let accessed = url.startAccessingSecurityScopedResource()
         defer { if accessed { url.stopAccessingSecurityScopedResource() } }
