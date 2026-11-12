@@ -152,7 +152,7 @@ final class UnifiedGraphProgramDSPTests: XCTestCase {
 
         var delayLane = UnifiedGraphLane(); delayLane.delayFrames = 16
         let delayed = UnifiedGraphConfiguration(sampleRate: rate, lanes: [delayLane, delayLane])
-        var virtual = UnifiedGraphProgramDSP(stereo: delayed, shape: s, eqMode: .linked, virtualSpeakers: true)
+        let virtual = UnifiedGraphProgramDSP(stereo: delayed, shape: s, eqMode: .linked, virtualSpeakers: true)
         XCTAssertThrowsError(try virtual.apply(to: &spec)) {
             XCTAssertEqual($0 as? UnifiedGraphFallbackReason, .virtualSpeakersSpeakerStage)
         }

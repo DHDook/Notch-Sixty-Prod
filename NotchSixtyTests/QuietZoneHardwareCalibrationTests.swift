@@ -83,17 +83,17 @@ final class QuietZoneHardwareCalibrationTests: XCTestCase {
         )
         XCTAssertEqual(electrical.electricalRoundTripSeconds, 0.012, accuracy: 0.00001)
         XCTAssertEqual(session.nextStep, .listener)
-        try session.addAcousticCapture(
+        _ = try session.addAcousticCapture(
             acoustic(.listenerFirst, offset: 1200),
             projectID: r.projectID, now: start.addingTimeInterval(3)
         )
         XCTAssertEqual(session.nextStep, .upstream)
-        try session.addAcousticCapture(
+        _ = try session.addAcousticCapture(
             acoustic(.upstream, offset: 700),
             projectID: r.projectID, now: start.addingTimeInterval(4)
         )
         XCTAssertEqual(session.nextStep, .listenerReturn)
-        try session.addAcousticCapture(
+        _ = try session.addAcousticCapture(
             acoustic(.listenerReturn, offset: 1200),
             projectID: r.projectID, now: start.addingTimeInterval(5)
         )
@@ -196,11 +196,11 @@ final class QuietZoneHardwareCalibrationTests: XCTestCase {
         _ = try session.qualifyLoopback(
             loops(), now: start.addingTimeInterval(2)
         )
-        try session.addAcousticCapture(
+        _ = try session.addAcousticCapture(
             acoustic(.listenerFirst, offset: 1000),
             projectID: r.projectID, now: start.addingTimeInterval(3)
         )
-        try session.addAcousticCapture(
+        _ = try session.addAcousticCapture(
             acoustic(.upstream, offset: 600),
             projectID: r.projectID, now: start.addingTimeInterval(4)
         )

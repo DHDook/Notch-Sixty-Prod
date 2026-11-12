@@ -51,7 +51,8 @@ extern "C" {
 #define N60_MIMO_ERR_THERMAL (-10)      /* source bad_source cannot meet the thermal budget */
 #define N60_MIMO_ERR_CAUSALITY (-11)    /* too much of the solution lies before t = 0: raise tau */
 
-#define N60_MIMO_MAX_SOURCES 8
+/* Core designer limit; deliberately not N60_MIMO_MAX_SOURCES, which the app header defines as 32 (E1 S7, G3). */
+#define N60_MIMO_CORE_MAX_SOURCES 8
 #define N60_MIMO_MAX_SEATS 8
 #define N60_MIMO_MAX_TAPS 4096u
 #define N60_MIMO_MAX_TAU_SECONDS 0.020
@@ -84,16 +85,16 @@ typedef struct n60_mimo_problem {
     double regularisation;        /* relative to the mean in-band plant power; 1e-3 */
     double thermal_limit_db;      /* delta RMS re program RMS over the support range; -6 (D5) */
     double causality_limit_db;    /* energy before t = 0 re total; -12 (a causal projection pulls the solve towards t >= 0) */
-    n60_mimo_source sources[N60_MIMO_MAX_SOURCES];
+    n60_mimo_source sources[N60_MIMO_CORE_MAX_SOURCES];
     n60_mimo_seat seats[N60_MIMO_MAX_SEATS];
     /* Raw per-output IRs at the plant rate (already through the known downstream chain), one per active
      * source and included seat. program_* is what the feed plays untreated; injection_* is the control path
      * (NULL: same as program). program_arrival_seconds < 0 detects the arrival as the largest sample. */
-    const float *program_plant[N60_MIMO_MAX_SOURCES][N60_MIMO_MAX_SEATS];
-    uint64_t program_count[N60_MIMO_MAX_SOURCES][N60_MIMO_MAX_SEATS];
-    const float *injection_plant[N60_MIMO_MAX_SOURCES][N60_MIMO_MAX_SEATS];
-    uint64_t injection_count[N60_MIMO_MAX_SOURCES][N60_MIMO_MAX_SEATS];
-    double program_arrival_seconds[N60_MIMO_MAX_SOURCES][N60_MIMO_MAX_SEATS];
+    const float *program_plant[N60_MIMO_CORE_MAX_SOURCES][N60_MIMO_MAX_SEATS];
+    uint64_t program_count[N60_MIMO_CORE_MAX_SOURCES][N60_MIMO_MAX_SEATS];
+    const float *injection_plant[N60_MIMO_CORE_MAX_SOURCES][N60_MIMO_MAX_SEATS];
+    uint64_t injection_count[N60_MIMO_CORE_MAX_SOURCES][N60_MIMO_MAX_SEATS];
+    double program_arrival_seconds[N60_MIMO_CORE_MAX_SOURCES][N60_MIMO_MAX_SEATS];
 } n60_mimo_problem;
 
 typedef struct n60_mimo_info {
@@ -107,9 +108,9 @@ typedef struct n60_mimo_info {
     double regularisation_used;
     uint32_t regularisation_steps; /* 0 .. 4 re-solves with 4x more regularisation */
     uint32_t capped_bins;         /* bins where the effort cap acted */
-    double peak_gain_db[N60_MIMO_MAX_SOURCES];    /* max over frequency of sum_t |C_st| */
-    double effort_peak_db[N60_MIMO_MAX_SOURCES];  /* max over frequency of sqrt(sum_t |E_st|^2); -400 for an excluded source */
-    double thermal_db[N60_MIMO_MAX_SOURCES];      /* delta RMS re program RMS over the support range */
+    double peak_gain_db[N60_MIMO_CORE_MAX_SOURCES];    /* max over frequency of sum_t |C_st| */
+    double effort_peak_db[N60_MIMO_CORE_MAX_SOURCES];  /* max over frequency of sqrt(sum_t |E_st|^2); -400 for an excluded source */
+    double thermal_db[N60_MIMO_CORE_MAX_SOURCES];      /* delta RMS re program RMS over the support range */
     double pre_energy_db;         /* energy before t = 0 re total, over all of E */
     int32_t bad_source;           /* source named by a MISSING_PLANT, HEADROOM or THERMAL error, else -1 */
     int32_t bad_seat;
@@ -172,10 +173,10 @@ typedef struct n60_mimo_realisation {
     double max_deviation_db;                              /* worst in-band deviation over active sources */
     double max_deviation_hz;                              /* where it occurs */
     double edge_energy_fraction;                          /* worst filter: energy in the last eighth of the taps */
-    double gain_peak_db[N60_MIMO_MAX_SOURCES];            /* dense max over frequency of sum_t |C_st| */
-    double effort_peak_db[N60_MIMO_MAX_SOURCES];          /* dense max of sqrt(sum_t |E_st|^2) */
-    double gain_overshoot_db[N60_MIMO_MAX_SOURCES];       /* gain peak re the source's gain limit; -400 if excluded */
-    double effort_overshoot_db[N60_MIMO_MAX_SOURCES];     /* effort peak re the source's effort limit; -400 if excluded */
+    double gain_peak_db[N60_MIMO_CORE_MAX_SOURCES];            /* dense max over frequency of sum_t |C_st| */
+    double effort_peak_db[N60_MIMO_CORE_MAX_SOURCES];          /* dense max of sqrt(sum_t |E_st|^2) */
+    double gain_overshoot_db[N60_MIMO_CORE_MAX_SOURCES];       /* gain peak re the source's gain limit; -400 if excluded */
+    double effort_overshoot_db[N60_MIMO_CORE_MAX_SOURCES];     /* effort peak re the source's effort limit; -400 if excluded */
 } n60_mimo_realisation;
 
 int32_t n60_mimo_realise_check(const n60_mimo_problem *problem, const float *delta, uint64_t delta_count,

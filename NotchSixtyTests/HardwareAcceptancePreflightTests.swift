@@ -187,7 +187,7 @@ final class HardwareAcceptancePreflightTests: XCTestCase {
 
     func testH01ReadyRequiresIdleExactSystemAndStableOutput()
         throws {
-        let value = try HardwareAcceptancePreflightAnalyzer()
+        let value = HardwareAcceptancePreflightAnalyzer()
             .evaluate(
                 campaign: campaign(),
                 gateID: .h01DeviceLifecycleRecovery,

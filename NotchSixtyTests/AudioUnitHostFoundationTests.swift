@@ -29,7 +29,7 @@ final class AudioUnitHostFoundationTests: XCTestCase {
     }
 
     func testRackRoundTripPreservesOpaqueStateAndLatencyMetadata() throws {
-        var slot = AudioUnitRackSlotState(
+        let slot = AudioUnitRackSlotState(
             component: identity,
             displayName: "Mock Effect",
             manufacturerName: "Notch Labs",

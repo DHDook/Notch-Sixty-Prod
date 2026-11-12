@@ -2162,7 +2162,7 @@ extension NotchSixtyTests {
         XCTAssertEqual(configuration.configuration(for: .leftLow), low)
         XCTAssertTrue(configuration.configuration(for: .rightHigh).isNeutral)
 
-        var duplicate = SpeakerDriverProcessingConfiguration(buses: [low, low])
+        let duplicate = SpeakerDriverProcessingConfiguration(buses: [low, low])
         XCTAssertThrowsError(try duplicate.validateStructure()) { error in
             XCTAssertEqual(error as? SpeakerDriverProcessingError, .duplicateBus(.leftLow))
         }

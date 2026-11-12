@@ -46,7 +46,7 @@ final class SpeakerOptimizerMeasurementEvidenceTests: XCTestCase {
     }
 
     func testLowSNRAndClippingFailClosed() throws {
-        var lowSNR = makeCapture(snrDB: 25)
+        let lowSNR = makeCapture(snrDB: 25)
         var clipped = makeCapture(offsetDB: 0.1)
         clipped.quality.clipped = true
         let set = makeSet(captures: [

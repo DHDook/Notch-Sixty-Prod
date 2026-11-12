@@ -55,16 +55,16 @@ final class QuietZoneFeedForwardSurveyTests: XCTestCase {
         let now = Date()
         var session = try makeSession(projectID: id, now: now)
         XCTAssertEqual(session.nextStage, .listener)
-        try session.add(
+        _ = try session.add(
             capture(.listenerFirst, offset: 1200),
             projectID: id, capturedAt: now.addingTimeInterval(1)
         )
         XCTAssertEqual(session.nextStage, .upstream)
-        try session.add(
+        _ = try session.add(
             capture(.upstream, offset: 700),
             projectID: id, capturedAt: now.addingTimeInterval(2)
         )
-        try session.add(
+        _ = try session.add(
             capture(.listenerReturn, offset: 1200),
             projectID: id, capturedAt: now.addingTimeInterval(3)
         )
@@ -99,9 +99,9 @@ final class QuietZoneFeedForwardSurveyTests: XCTestCase {
     func testListenerReturnDriftInvalidatesSurvey() throws {
         let id = UUID(), now = Date()
         var session = try makeSession(projectID: id, now: now)
-        try session.add(capture(.listenerFirst, offset: 1000),
+        _ = try session.add(capture(.listenerFirst, offset: 1000),
                         projectID: id, capturedAt: now.addingTimeInterval(1))
-        try session.add(capture(.upstream, offset: 600),
+        _ = try session.add(capture(.upstream, offset: 600),
                         projectID: id, capturedAt: now.addingTimeInterval(2))
         XCTAssertThrowsError(try session.add(
             capture(.listenerReturn, offset: 1110),
@@ -114,7 +114,7 @@ final class QuietZoneFeedForwardSurveyTests: XCTestCase {
     func testTooQuickOrStaleCapturesFailClosed() throws {
         let id = UUID(), now = Date()
         var session = try makeSession(projectID: id, now: now)
-        try session.add(capture(.listenerFirst, offset: 1000),
+        _ = try session.add(capture(.listenerFirst, offset: 1000),
                         projectID: id, capturedAt: now.addingTimeInterval(1))
         XCTAssertThrowsError(try session.add(
             capture(.upstream, offset: 600),

@@ -3,7 +3,7 @@ import XCTest
 
 final class SpeakerOptimizerPEQDeploymentTests: XCTestCase {
     func testOptimizerPEQIsSeparateFromSpeakerCalibrationAndCompilesAfterIt() throws {
-        var profile = makeProfile(
+        let profile = makeProfile(
             calibrationBandCount: 1,
             optimizerBands: [
                 .init(frequencyHz: 2_000, gainDB: -3, q: 1.2)

@@ -22,7 +22,8 @@ final class SeparateDeviceTimingTests: XCTestCase {
             try rig.calibration.setSeatMicrophone(seat.id, MultichannelSeatMicrophone(
                 deviceUID: uids[index], channelIndex: index == 2 ? 0 : index, calibration: nil))
         }
-        rig.transports.seatOfInput = { $0.device.uid == OfflineSetupRig.secondInputUID ? 2 : $0.channelIndex }
+        let secondUID = OfflineSetupRig.secondInputUID
+        rig.transports.seatOfInput = { $0.device.uid == secondUID ? 2 : $0.channelIndex }
         rig.transports.deviceClock = [OfflineSetupRig.secondInputUID: (offsetFrames, driftPPM)]
         return rig
     }

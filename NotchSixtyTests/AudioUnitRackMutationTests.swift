@@ -40,7 +40,7 @@ final class AudioUnitRackMutationTests: XCTestCase {
         }
         await Task.yield()
 
-        var input = [Float](repeating: 1, count: 8)
+        let input = [Float](repeating: 1, count: 8)
         var output = [Float](repeating: -1, count: 8)
         let rendered = input.withUnsafeBufferPointer { source in
             output.withUnsafeMutableBufferPointer { destination in

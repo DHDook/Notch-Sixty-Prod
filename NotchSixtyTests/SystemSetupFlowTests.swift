@@ -124,7 +124,7 @@ final class SystemSetupFlowTests: XCTestCase {
             let services = SimulatedSystemSetupServices(initial: original)
             let driver = SystemSetupDriver(services: services, current: original)
             try driver.start()
-            try driver.update { _ in }
+            driver.update { _ in }
             var flow = driver.flow
             try fill(&flow, through: step)
             // Drive the trial changes the services would have applied by this step.

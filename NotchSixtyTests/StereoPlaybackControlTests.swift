@@ -375,7 +375,7 @@ final class StereoPlaybackControlTests: XCTestCase {
         defer { N60RenderKernelDestroy(kernel) }
 
         var program = N60ConvolutionProgramInfo()
-        var taps: [Float] = [1]
+        let taps: [Float] = [1]
         XCTAssertTrue(taps.withUnsafeBufferPointer { buffer in
             N60RenderKernelPrepareConvolutionProgram(
                 kernel,
