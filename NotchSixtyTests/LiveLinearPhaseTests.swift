@@ -45,7 +45,7 @@ final class LiveLinearPhaseTests: XCTestCase {
         }
         defer { N60PartitionedConvolverDestroy(convolver) }
 
-        var taps: [Float] = [1]
+        let taps: [Float] = [1]
         var generation0: UInt64 = 0
         XCTAssertTrue(
             taps.withUnsafeBufferPointer { buffer in
@@ -98,8 +98,8 @@ final class LiveLinearPhaseTests: XCTestCase {
         }
         defer { N60RealtimeAudioBridgeDestroy(bridge) }
 
-        var linearTaps: [Float] = [1]
-        var roomTaps: [Float] = [0.25, 0.5, 0.25]
+        let linearTaps: [Float] = [1]
+        let roomTaps: [Float] = [0.25, 0.5, 0.25]
         var linearInfo = N60ConvolutionProgramInfo()
         var roomInfo = N60ConvolutionProgramInfo()
 
@@ -220,16 +220,17 @@ final class LiveLinearPhaseTests: XCTestCase {
         let engine = AudioIOEngine()
         let product = ProductController(audioEngine: engine)
         // E20 S9: the engine is `@Observable`; reading `product.configuration` tracks the engine directly.
-        var changed = false
+        final class ChangeFlag: @unchecked Sendable { var value = false }
+        let changed = ChangeFlag()
         withObservationTracking {
             _ = product.configuration
         } onChange: {
-            changed = true
+            changed.value = true
         }
 
         try engine.setOutputGainDB(-3.0)
 
-        XCTAssertTrue(changed)
+        XCTAssertTrue(changed.value)
         XCTAssertEqual(product.configuration.dsp.gain.outputGainDB, -3.0)
         XCTAssertEqual(product.configuration.dsp.dynamics, engine.dynamicsConfiguration)
     }

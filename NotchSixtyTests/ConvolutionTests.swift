@@ -8,7 +8,7 @@ final class ConvolutionTests: XCTestCase {
         }
         defer { N60PartitionedConvolverDestroy(convolver) }
 
-        var taps: [Float] = [1.0]
+        let taps: [Float] = [1.0]
         var generation: UInt64 = 0
         XCTAssertTrue(
             taps.withUnsafeBufferPointer { buffer in
@@ -46,7 +46,7 @@ final class ConvolutionTests: XCTestCase {
         }
         defer { N60PartitionedConvolverDestroy(convolver) }
 
-        var taps: [Float] = [0.25, 0.5, 0.25]
+        let taps: [Float] = [0.25, 0.5, 0.25]
         var generation: UInt64 = 0
         XCTAssertTrue(
             taps.withUnsafeBufferPointer { buffer in
@@ -80,8 +80,8 @@ final class ConvolutionTests: XCTestCase {
         }
         defer { N60PartitionedConvolverDestroy(convolver) }
 
-        var leftTaps: [Float] = [1.0, 0.0]
-        var rightTaps: [Float] = [0.0, 1.0]
+        let leftTaps: [Float] = [1.0, 0.0]
+        let rightTaps: [Float] = [0.0, 1.0]
         var generation: UInt64 = 0
         let prepared = leftTaps.withUnsafeBufferPointer { leftBuffer in
             rightTaps.withUnsafeBufferPointer { rightBuffer in
@@ -153,7 +153,7 @@ final class ConvolutionTests: XCTestCase {
         }
         defer { N60RenderKernelDestroy(kernel) }
 
-        var taps: [Float] = [0.25, 0.5, 0.25]
+        let taps: [Float] = [0.25, 0.5, 0.25]
         var info = N60ConvolutionProgramInfo()
         XCTAssertTrue(
             taps.withUnsafeBufferPointer { buffer in
@@ -217,7 +217,7 @@ final class ConvolutionTests: XCTestCase {
         defer { N60RenderKernelDestroy(kernel) }
 
         let tapCount = 4_096
-        var taps = (0..<tapCount).map { index -> Float in
+        let taps = (0..<tapCount).map { index -> Float in
             if index == 2_047 { return 0.8 }
             let distance = abs(index - 2_047)
             return distance < 16 ? Float((16 - distance)) * 0.0002 : 0
@@ -325,7 +325,7 @@ final class ConvolutionTests: XCTestCase {
         band.frequencyHz = 1_000
         band.gainDB = 6
         band.q = 1.0
-        var bands = [band]
+        let bands = [band]
         var taps = [Float](repeating: 0, count: Int(N60_LINEAR_PHASE_MAX_TAPS))
         var info = N60LinearPhaseEQDesignInfo()
 
@@ -408,14 +408,14 @@ final class ConvolutionTests: XCTestCase {
         }
         defer { N60PartitionedConvolverDestroy(convolver) }
 
-        var bad: [Float] = [.nan]
+        let bad: [Float] = [.nan]
         XCTAssertFalse(
             bad.withUnsafeBufferPointer { buffer in
                 N60PartitionedConvolverPrepareProgram(convolver, 0, buffer.baseAddress!, nil, 1, 0, nil)
             }
         )
 
-        var one: [Float] = [1]
+        let one: [Float] = [1]
         XCTAssertFalse(
             one.withUnsafeBufferPointer { buffer in
                 N60PartitionedConvolverPrepareProgram(
@@ -461,8 +461,8 @@ extension ConvolutionTests {
         }
         defer { N60RenderKernelDestroy(kernel) }
 
-        var linearTaps: [Float] = [1.0]
-        var roomTaps: [Float] = [0.25, 0.5, 0.25]
+        let linearTaps: [Float] = [1.0]
+        let roomTaps: [Float] = [0.25, 0.5, 0.25]
         var linearInfo = N60ConvolutionProgramInfo()
         var roomInfo = N60ConvolutionProgramInfo()
 
@@ -525,7 +525,7 @@ extension ConvolutionTests {
         }
         defer { N60RenderKernelDestroy(kernel) }
 
-        var taps: [Float] = [1.0]
+        let taps: [Float] = [1.0]
         var linearInfo = N60ConvolutionProgramInfo()
         XCTAssertTrue(
             taps.withUnsafeBufferPointer { buffer in
@@ -546,7 +546,7 @@ extension ConvolutionTests {
         }
         defer { N60RenderKernelDestroy(kernel) }
 
-        var graph = N60DSPGraphSnapshotMakeUnity(192_000)
+        let graph = N60DSPGraphSnapshotMakeUnity(192_000)
         XCTAssertEqual(graph.latencyFrames, 0)
         XCTAssertFalse(graph.roomCorrection.enabled)
         XCTAssertTrue(N60RenderKernelPublishSnapshot(kernel, graph))

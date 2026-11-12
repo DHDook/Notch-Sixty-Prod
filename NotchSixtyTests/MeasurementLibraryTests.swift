@@ -50,7 +50,7 @@ final class MeasurementLibraryTests: XCTestCase {
         try library.save(good, impulseResponse: ir(64))
         try library.save(future, impulseResponse: ir(64))
         let url = root.appendingPathComponent(future.id.uuidString).appendingPathComponent("record.json")
-        let json = try String(contentsOf: url).replacingOccurrences(of: "\"schemaVersion\" : 1", with: "\"schemaVersion\" : 2")
+        let json = try String(contentsOf: url, encoding: .utf8).replacingOccurrences(of: "\"schemaVersion\" : 1", with: "\"schemaVersion\" : 2")
         try json.write(to: url, atomically: true, encoding: .utf8)
         XCTAssertThrowsError(try library.loadRecord(id: future.id)) {
             XCTAssertEqual($0 as? MeasurementLibraryError, .unsupportedSchema(found: 2, folder: future.id.uuidString))
@@ -78,7 +78,7 @@ final class MeasurementLibraryTests: XCTestCase {
         let library = MeasurementLibrary(root: root)
         try library.save(record(rate: 48_000), impulseResponse: ir(8))
         let index = root.appendingPathComponent("index.json")
-        try String(contentsOf: index).replacingOccurrences(of: "\"schemaVersion\" : 1", with: "\"schemaVersion\" : 9").write(to: index, atomically: true, encoding: .utf8)
+        try String(contentsOf: index, encoding: .utf8).replacingOccurrences(of: "\"schemaVersion\" : 1", with: "\"schemaVersion\" : 9").write(to: index, atomically: true, encoding: .utf8)
         XCTAssertThrowsError(try library.load())
     }
 

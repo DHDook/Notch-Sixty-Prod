@@ -138,7 +138,7 @@ void n60_mimo_defaults(double sample_rate, uint32_t source_count, uint32_t seat_
     p->regularisation = 1e-3;
     p->thermal_limit_db = -6.0;
     p->causality_limit_db = -12.0;
-    for (uint32_t s = 0; s < N60_MIMO_MAX_SOURCES; ++s) {
+    for (uint32_t s = 0; s < N60_MIMO_CORE_MAX_SOURCES; ++s) {
         p->sources[s].excluded = 0;
         p->sources[s].support_low_hz = 25.0;
         p->sources[s].support_high_hz = 150.0;
@@ -240,14 +240,14 @@ int32_t designImpl(const n60_mimo_problem *p, float *delta_out, uint64_t capacit
     info = n60_mimo_info{};
     info.bad_source = -1;
     info.bad_seat = -1;
-    for (uint32_t s = 0; s < N60_MIMO_MAX_SOURCES; ++s) {
+    for (uint32_t s = 0; s < N60_MIMO_CORE_MAX_SOURCES; ++s) {
         info.peak_gain_db[s] = 0.0;
         info.effort_peak_db[s] = -400.0;
         info.thermal_db[s] = -400.0;
     }
     if (p == nullptr || delta_out == nullptr || p->struct_size < sizeof(n60_mimo_problem)) return N60_MIMO_ERR_ARGUMENT;
     const uint32_t N = p->source_count, M = p->seat_count;
-    if (N < 1 || N > N60_MIMO_MAX_SOURCES || M < 1 || M > N60_MIMO_MAX_SEATS) return N60_MIMO_ERR_ARGUMENT;
+    if (N < 1 || N > N60_MIMO_CORE_MAX_SOURCES || M < 1 || M > N60_MIMO_MAX_SEATS) return N60_MIMO_ERR_ARGUMENT;
     if (p->taps < 64 || p->taps > N60_MIMO_MAX_TAPS) return N60_MIMO_ERR_ARGUMENT;
     if (!(p->decay_seconds >= 0.05 && p->decay_seconds <= 2.0)) return N60_MIMO_ERR_ARGUMENT;
     if (!(p->regularisation > 0.0) || !std::isfinite(p->regularisation)) return N60_MIMO_ERR_ARGUMENT;
@@ -587,7 +587,7 @@ int32_t designImpl(const n60_mimo_problem *p, float *delta_out, uint64_t capacit
 int32_t n60_mimo_problem_set_plant(n60_mimo_problem *p, uint32_t source, uint32_t seat, const float *program,
                                    uint64_t program_count, const float *injection, uint64_t injection_count,
                                    double program_arrival_seconds) {
-    if (p == nullptr || source >= N60_MIMO_MAX_SOURCES || seat >= N60_MIMO_MAX_SEATS) return N60_MIMO_ERR_ARGUMENT;
+    if (p == nullptr || source >= N60_MIMO_CORE_MAX_SOURCES || seat >= N60_MIMO_MAX_SEATS) return N60_MIMO_ERR_ARGUMENT;
     p->program_plant[source][seat] = program;
     p->program_count[source][seat] = program != nullptr ? program_count : 0;
     p->injection_plant[source][seat] = injection;
@@ -597,7 +597,7 @@ int32_t n60_mimo_problem_set_plant(n60_mimo_problem *p, uint32_t source, uint32_
 }
 
 int32_t n60_mimo_problem_set_source(n60_mimo_problem *p, uint32_t source, const n60_mimo_source *value) {
-    if (p == nullptr || value == nullptr || source >= N60_MIMO_MAX_SOURCES) return N60_MIMO_ERR_ARGUMENT;
+    if (p == nullptr || value == nullptr || source >= N60_MIMO_CORE_MAX_SOURCES) return N60_MIMO_ERR_ARGUMENT;
     p->sources[source] = *value;
     return N60_MIMO_OK;
 }
@@ -615,13 +615,13 @@ int32_t n60_mimo_realise_check(const n60_mimo_problem *p, const float *delta, ui
         return N60_MIMO_ERR_ARGUMENT;
     *out = n60_mimo_realisation{};
     const uint32_t N = p->source_count, taps = p->taps, K = info->grid_bins;
-    if (N < 1 || N > N60_MIMO_MAX_SOURCES || K < 2 || info->decimation == 0 || !(info->low_rate_hz > 0.0))
+    if (N < 1 || N > N60_MIMO_CORE_MAX_SOURCES || K < 2 || info->decimation == 0 || !(info->low_rate_hz > 0.0))
         return N60_MIMO_ERR_ARGUMENT;
     if (delta_count < static_cast<uint64_t>(N) * N * taps || solved_count < static_cast<uint64_t>(N) * N * K * 2u)
         return N60_MIMO_ERR_CAPACITY;
     const double fs = info->low_rate_hz;
     const double step = N60_MIMO_GRID_STEP_HZ;
-    for (uint32_t s = 0; s < N60_MIMO_MAX_SOURCES; ++s) {
+    for (uint32_t s = 0; s < N60_MIMO_CORE_MAX_SOURCES; ++s) {
         out->gain_overshoot_db[s] = -400.0;
         out->effort_overshoot_db[s] = -400.0;
     }

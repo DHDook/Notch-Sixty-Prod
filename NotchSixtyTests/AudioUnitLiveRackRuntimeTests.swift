@@ -127,7 +127,7 @@ final class AudioUnitLiveRackRuntimeTests: XCTestCase {
             stages: [stage],
             componentsBySlot: [nil]
         )
-        var input = [Float](repeating: 0.25, count: 66)
+        let input = [Float](repeating: 0.25, count: 66)
         var output = [Float](repeating: 1, count: 66)
 
         let ok = input.withUnsafeBufferPointer { source in

@@ -98,7 +98,7 @@ final class MIMORoomTreatmentFIRCompilerTests: XCTestCase {
             0.35
         )
 
-        var taps = compiled.taps
+        let taps = compiled.taps
         guard let cProgram = taps.withUnsafeBufferPointer({ buffer in
             N60MIMOFIRProgramCreate(
                 UInt32(sources.count),

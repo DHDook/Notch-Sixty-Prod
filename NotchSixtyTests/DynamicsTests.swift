@@ -707,7 +707,7 @@ final class DynamicsTests: XCTestCase {
             band.thresholdDB = -24
             return band
         }
-        var snapshot = try config.makeSnapshot(sampleRate: 384_000)
+        let snapshot = try config.makeSnapshot(sampleRate: 384_000)
         XCTAssertEqual(snapshot.dynamicEQ.bandCount, 64)
         XCTAssertTrue(N60DynamicEQSnapshotIsValid(snapshot.dynamicEQ))
     }

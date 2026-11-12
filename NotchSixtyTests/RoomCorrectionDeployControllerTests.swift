@@ -58,15 +58,17 @@ final class OfflineGraphTrialHost: RoomCorrectionTrialHost, @unchecked Sendable 
 
     init(room: ReferenceRoom, rate: Double) { self.room = room; self.rate = rate }
 
-    var applied: String? { lock.lock(); defer { lock.unlock() }; return _applied }
-    var reverts: Int { lock.lock(); defer { lock.unlock() }; return _reverts }
+    private func withLock<T>(_ body: () -> T) -> T { lock.lock(); defer { lock.unlock() }; return body() }
+
+    var applied: String? { withLock { _applied } }
+    var reverts: Int { withLock { _reverts } }
 
     func applyTrial(_ candidate: RoomCorrectionDeployCandidate) async throws {
-        lock.lock(); _applied = candidate.designID; lock.unlock()
+        withLock { _applied = candidate.designID }
     }
 
     func revertTrial() async {
-        lock.lock(); _applied = nil; _reverts += 1; lock.unlock()
+        withLock { _applied = nil; _reverts += 1 }
     }
 
     func captureSweep(for candidate: RoomCorrectionDeployCandidate) async throws -> [Float] {

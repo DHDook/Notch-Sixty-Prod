@@ -819,7 +819,7 @@ final class AdvancedPlacementSidecarTests: XCTestCase {
 
     @MainActor
     func testControllerDraftSaveReloadAndPureProposalPreview() throws {
-        let (store, project, root) = try makeFixture()
+        let (store, _, root) = try makeFixture()
         defer { try? FileManager.default.removeItem(at: root) }
         let first = RoomTreatmentAdvisorController(store: store)
         first.prepareForUse()

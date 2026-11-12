@@ -1,6 +1,6 @@
 name: PR check
 
-# Every pull request to main: build, XCTest limited to the groups of the changed paths
+# Every pull request to main: build (Swift warnings are errors), XCTest limited to the groups of the changed paths
 # (ci/select_tests.sh and ci/test_groups.map; the whole suite when engine or unmapped paths
 # change) and the behavioural C harnesses.
 # Target: under 10 minutes. The slowest every-sample-rate XCTest cases (each over 30 s on the
@@ -69,6 +69,7 @@ jobs:
             -derivedDataPath "$RUNNER_TEMP/DerivedData" \
             CODE_SIGNING_ALLOWED=NO \
             ENABLE_TESTABILITY=YES \
+            SWIFT_TREAT_WARNINGS_AS_ERRORS=YES \
             -skip-testing:NotchSixtyTests/SeparateDeviceTimingTests/testOnePassAcrossDevicesMatchesThreeSequentialPassesAtEveryRate \
             -skip-testing:NotchSixtyTests/SeatMeasurerTests/testOnePassMatchesThreeSequentialPassesAtEveryRate \
             -skip-testing:NotchSixtyTests/SystemSetupEndToEndTests/testAllTenStepsAtEveryRate \
@@ -99,6 +100,23 @@ jobs:
       - name: Behavioural C harnesses
         run: ci/run_harnesses.sh
 
+      # E1 S7: link only (nothing runs). Catches undefined symbols in the render and bridge benchmarks that
+      # nightly macos-full.yml used to find days later.
+      - name: Link render and bridge benchmarks
+        run: ci/build_benchmarks.sh "$RUNNER_TEMP/benchmarks"
+
       - name: Test selector behaviour
         run: ci/test_select_tests.sh
 
+
+  # E1 S7: the portable core builds with clang -Werror on Linux and passes its tests (same script as the
+  # nightly core-linux job, ci/run_core_linux.sh; about two minutes).
+  core-linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Build and test libn60core (clang, Linux)
+        run: ci/run_core_linux.sh

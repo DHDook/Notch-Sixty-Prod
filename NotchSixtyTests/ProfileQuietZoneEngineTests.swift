@@ -1,6 +1,6 @@
 import CoreAudio
 import XCTest
-@testable import NotchSixty
+@preconcurrency @testable import NotchSixty
 
 /// Shared hardware-free class A rig: a real bridge and graph host with the Quiet Zone feed behind the engine's seam.
 @MainActor

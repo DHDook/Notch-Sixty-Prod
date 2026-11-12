@@ -246,7 +246,7 @@ final class UnifiedGraphProgramFamilyTests: XCTestCase {
                 dsp.subLaneCount = 2
                 dsp.deltaAudition = delta
                 XCTAssertFalse(dsp.isNeutral)
-                var configuration = try UnifiedGraphTranslator.nChannelEligibility(
+                let configuration = try UnifiedGraphTranslator.nChannelEligibility(
                     routePlan: plan, sampleRate: rate, gainConfiguration: DSPGainConfiguration(),
                     bassManagementConfiguration: bass, programDSP: dsp).get()
                 XCTAssertEqual(configuration.deltaAudition, delta)
