@@ -19,6 +19,7 @@ Flag, with `path:line` and a one-line reason:
 - float32 coefficients or state where low-frequency accuracy at 384 kHz needs double precision;
 - buffer capacities sized in frames without a 384 kHz worst case;
 - any Apple framework dependency inside the portable engine core;
+- new engine C or C++ files outside `core/` (for example in `NotchSixty/Audio/Realtime`);
 - missing latency, reset, sample-rate or channel-count documentation for a new stage;
 - missing deterministic tests or reference-lab cases.
 
