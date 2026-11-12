@@ -90,7 +90,7 @@ final class LevelSessionNoisePlayer: SystemSetupNoisePlaying {
     private let session: MeasurementLevelSession
     private var usesLiveGraph = false
     private(set) var isPlaying = false
-    private var outputObserver: AnyCancellable?
+    private var outputObserver: ObservationSubscription?
     private var stopHandler: ((String) -> Void)?
 
     init(engine: AudioIOEngine, environment: LevelSessionEnvironment, monitor: MeasurementInputMonitor,
@@ -162,12 +162,13 @@ final class LevelSessionNoisePlayer: SystemSetupNoisePlaying {
     /// The noise belongs to the output it started on: any change of the selected output stops it.
     private func observeOutputChange() {
         let started = engine.routeConfiguration.selectedOutputUID
-        outputObserver = engine.$routeConfiguration
-            .map(\.selectedOutputUID).removeDuplicates().dropFirst()
-            .sink { [weak self] uid in
+        outputObserver = ObservationSubscription(
+            value: { [engine] in engine.routeConfiguration.selectedOutputUID },
+            onChange: { [weak self] uid in
                 guard let self, self.isPlaying, uid != started else { return }
                 self.stop()
                 self.stopHandler?("The noise stopped because the output device changed.")
             }
+        )
     }
 }

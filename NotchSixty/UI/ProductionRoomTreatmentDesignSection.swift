@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct ProductionRoomTreatmentDesignSection: View {
-    @ObservedObject var advisor: RoomTreatmentAdvisorController
+    @Bindable var advisor: RoomTreatmentAdvisorController
     @State private var manualKind: RoomPassiveTreatmentKind = .broadbandAbsorber
     @State private var manualSurface: RoomGeometrySurface = .frontWall
 

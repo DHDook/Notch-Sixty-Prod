@@ -24,7 +24,7 @@ private struct HardwareAcceptanceExportDocument: FileDocument {
 }
 
 struct ProductionHardwareAcceptanceWorkspace: View {
-    @ObservedObject var engine: AudioIOEngine
+    var engine: AudioIOEngine
     @ObservedObject var profiles: ProductProfileController
     @ObservedObject var acceptance: HardwareAcceptanceController
 

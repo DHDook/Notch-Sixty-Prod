@@ -24,7 +24,7 @@ private struct SpeakerMeasurementLabExportDocument: FileDocument {
 }
 
 struct ProductionSpeakerMeasurementLabWorkspace: View {
-    @ObservedObject var engine: AudioIOEngine
+    var engine: AudioIOEngine
     @ObservedObject var microphone: RoomCorrectionCalibrationController
     @ObservedObject var profiles: ProductProfileController
     var roomCorrectionProjects: RoomCorrectionProjectController?
@@ -69,7 +69,7 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
     ) {
         self.roomCorrectionProjects = roomCorrectionProjects
         self.multichannelCalibration = multichannelCalibration
-        _engine = ObservedObject(wrappedValue: engine)
+        self.engine = engine
         _microphone = ObservedObject(wrappedValue: microphone)
         _profiles = ObservedObject(wrappedValue: profiles)
         _lab = StateObject(

@@ -1138,7 +1138,8 @@ final class ProductProfileController: ObservableObject {
     private var didRestoreSelection = false
     private var didLoadArchive = false
     private var audioUnitHostObservation: AnyCancellable?
-    private var workingStateObservation: AnyCancellable?
+    private var workingStateObservation: ObservationSubscription?
+    private var workingStateHostObservation: AnyCancellable?
     private var workingContentState: ContentPresetState?
     private var workingContentPresetID: UUID?
 
@@ -1174,8 +1175,17 @@ final class ProductProfileController: ObservableObject {
         ensureContentPresetsSeeded()
         ensureDefaultSystemProfile()
         reconcileSelections()
-        workingStateObservation = engine.objectWillChange
-            .merge(with: self.audioUnitHost.objectWillChange)
+        // E20 S9: the engine is `@Observable`; track exactly the properties the working-state capture reads.
+        workingStateObservation = ObservationSubscription(
+            debounce: .seconds(1),
+            track: { [engine] in
+                _ = engine.stereoEQConfiguration
+                _ = engine.gainConfiguration
+                _ = engine.dynamicsConfiguration
+            },
+            onChange: { [weak self] in self?.recordWorkingContentStateIfNeeded() }
+        )
+        workingStateHostObservation = self.audioUnitHost.objectWillChange
             .debounce(for: .seconds(1), scheduler: RunLoop.main)
             .sink { [weak self] _ in
                 MainActor.assumeIsolated {

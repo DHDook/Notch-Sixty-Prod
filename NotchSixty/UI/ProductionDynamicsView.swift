@@ -2,7 +2,7 @@ import Foundation
 import SwiftUI
 
 struct ProductionDynamicsView: View {
-    @ObservedObject var engine: AudioIOEngine
+    var engine: AudioIOEngine
     var reference: ProductionReferenceNavigator? = nil
     @State private var selectedModule: ProductionDynamicsModule = .compressor
     @State private var expandedMoreGroups: Set<String> = []
@@ -1238,7 +1238,7 @@ enum ProductionDynamicsLayout {
 /// (live: a ceiling edit is a parameter post, not a rebuild) and the live gain reduction and true peak of that output, plus
 /// the Advanced "Independent per output" switch. Shows nothing while the flag is off.
 struct ProductionOutputProtectionSection: View {
-    @ObservedObject var engine: AudioIOEngine
+    var engine: AudioIOEngine
     let settings: OutputProtectionSettings
     let apply: (OutputProtectionSettings) -> Void
     /// E9 S5c (G19): per-output ceilings ride on the program limiter's stages, so they do nothing while it is off.

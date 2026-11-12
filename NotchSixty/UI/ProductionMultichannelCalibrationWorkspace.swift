@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct ProductionMultichannelCalibrationWorkspace: View {
-    @ObservedObject var engine: AudioIOEngine
+    var engine: AudioIOEngine
     @ObservedObject var calibration: MultichannelCalibrationController
     @ObservedObject var microphone: RoomCorrectionCalibrationController
     @ObservedObject var profiles: ProductProfileController
@@ -21,7 +21,7 @@ struct ProductionMultichannelCalibrationWorkspace: View {
         microphone: RoomCorrectionCalibrationController,
         profiles: ProductProfileController
     ) {
-        _engine = ObservedObject(wrappedValue: engine)
+        self.engine = engine
         _calibration = ObservedObject(wrappedValue: calibration)
         _microphone = ObservedObject(wrappedValue: microphone)
         _profiles = ObservedObject(wrappedValue: profiles)

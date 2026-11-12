@@ -4,7 +4,7 @@ import SwiftUI
 /// Optional research is read-only. The normal Room Correction and Headphones
 /// workspaces retain sole control of committed DSP and device profiles.
 struct ProductionOptionalAudioResearchWorkspace: View {
-    @ObservedObject var engine: AudioIOEngine
+    var engine: AudioIOEngine
 
     @State private var availableHRTFs: [BinauralProfileAsset] = []
     @State private var selectedHRTFID: UUID?

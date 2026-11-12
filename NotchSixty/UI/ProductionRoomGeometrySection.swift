@@ -24,7 +24,7 @@ private enum RoomGeometryDisplayUnit:
 }
 
 struct ProductionRoomGeometrySection: View {
-    @ObservedObject var advisor: RoomTreatmentAdvisorController
+    @Bindable var advisor: RoomTreatmentAdvisorController
     @State private var unit: RoomGeometryDisplayUnit = .meters
     @State private var showsAdvancedPredictions = false
     @State private var confirmsUnchangedLabGeometry = false

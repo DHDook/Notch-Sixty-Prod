@@ -106,7 +106,7 @@ private enum ProductionDetailedMeterDemand {
 }
 
 struct ProductionMetersView: View {
-    @ObservedObject var engine: AudioIOEngine
+    var engine: AudioIOEngine
     @ObservedObject var assistant: HeadroomAssistantController
     @State private var page: ProductionMetersPage = .levels
     @State private var assistantCommandError: String?

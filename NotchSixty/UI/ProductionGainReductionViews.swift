@@ -112,7 +112,7 @@ struct DynamicsTransferCurveView: View {
 
 /// Bar plus 10 s history plus curve for one stage; attaches the shared monitor while on screen.
 struct GainReductionPanel: View {
-    @ObservedObject var engine: AudioIOEngine
+    var engine: AudioIOEngine
     let source: GainReductionSource
     let curve: DynamicsTransferCurve?
 

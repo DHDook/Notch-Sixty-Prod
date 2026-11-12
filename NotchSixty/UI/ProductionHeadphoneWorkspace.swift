@@ -3,7 +3,7 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 struct ProductionHeadphoneWorkspace: View {
-    @ObservedObject var engine: AudioIOEngine
+    var engine: AudioIOEngine
     @ObservedObject var profiles: ProductProfileController
     /// E13 S7: the measurement path the BRIR capture uses; nil hides the capture button.
     var calibration: MultichannelCalibrationController?

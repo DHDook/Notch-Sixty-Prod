@@ -1,4 +1,4 @@
-import Combine
+import Observation
 import CoreAudio
 import Foundation
 
@@ -1033,7 +1033,8 @@ private struct PreparedSpeakerIRProgram {
 }
 
 @MainActor
-final class AudioIOEngine: ObservableObject {
+@Observable
+final class AudioIOEngine {
     /// E6 S8: set by the app shell (on unless `e6.legacy-kernel` is on). The engine never reads
     /// the flag itself; with this false the kernel path runs exactly as before.
     var unifiedGraphEnabled = false
@@ -1121,7 +1122,7 @@ final class AudioIOEngine: ObservableObject {
     private var nextSpeakerIRProgramSlot: UInt32 = 0
     private var stagedRoomTreatment: LiveMIMORoomTreatmentPreparation?
     /// E19 S6: the graph MIMO treatment controller (stage, permit, arm switch); see `AudioIOEngine+MIMOTreatment.swift`.
-    lazy var mimoGraphTreatment: MIMOGraphTreatment = makeMIMOGraphTreatment()
+    @ObservationIgnored lazy var mimoGraphTreatment: MIMOGraphTreatment = makeMIMOGraphTreatment()
     var mimoPollTask: Task<Void, Never>?
     /// E19 S6/S7: the room-correction latency mode as the treatment sees it. `.unknown` until E19 S8 sets it; while unknown no
     /// permit is issued (G30). Known and video: the treatment refuses to arm and no permit is issued.
@@ -1150,55 +1151,55 @@ final class AudioIOEngine: ObservableObject {
     private(set) var recoverySuccesses: UInt64 = 0
     private(set) var recoveryFailures: UInt64 = 0
 
-    @Published private(set) var outputDevices: [AudioOutputDevice] = []
-    @Published private(set) var routeConfiguration: AudioRouteConfiguration
-    @Published private(set) var eqConfiguration = EQConfiguration()
-    @Published private(set) var stereoEQConfiguration = StereoEQConfiguration()
+    private(set) var outputDevices: [AudioOutputDevice] = []
+    private(set) var routeConfiguration: AudioRouteConfiguration
+    private(set) var eqConfiguration = EQConfiguration()
+    private(set) var stereoEQConfiguration = StereoEQConfiguration()
     /// E27 S3b: the band-pass "Listen" audition, if one is held. Never stored in
     /// `stereoEQConfiguration`, the profile or undo; it only changes what is rendered.
-    @Published private(set) var eqAudition: EQAuditionOverride?
+    private(set) var eqAudition: EQAuditionOverride?
     /// The EQ as rendered: the stored EQ, or the audition band-pass while one is held.
     var renderStereoEQConfiguration: StereoEQConfiguration {
         eqAudition.map { stereoEQConfiguration.auditioned($0) } ?? stereoEQConfiguration
     }
-    @Published private(set) var playbackControlConfiguration = PlaybackControlConfiguration()
-    @Published private(set) var masterVolumeConfiguration = MasterVolumeConfiguration()
-    @Published private(set) var masterVolumeCapabilities = MasterVolumeDeviceCapabilities.softwareOnly
-    @Published private(set) var globalVolumeKeyMonitoringState: GlobalVolumeKeyMonitoringState = .stopped
+    private(set) var playbackControlConfiguration = PlaybackControlConfiguration()
+    private(set) var masterVolumeConfiguration = MasterVolumeConfiguration()
+    private(set) var masterVolumeCapabilities = MasterVolumeDeviceCapabilities.softwareOnly
+    private(set) var globalVolumeKeyMonitoringState: GlobalVolumeKeyMonitoringState = .stopped
     private(set) var softwareVolumeKeyStep = MasterVolumeKeyStep.fraction(denominator: 16)
-    @Published private(set) var gainConfiguration = DSPGainConfiguration()
-    @Published private(set) var bassManagementConfiguration = BassManagementConfiguration()
-    @Published private(set) var multiOutputRoutingConfiguration: MultiOutputRoutingConfiguration?
-    @Published private(set) var outputDeviceProfileConfiguration: OutputDeviceProfileConfiguration?
-    @Published private(set) var headphoneDeviceProfileConfiguration: HeadphoneDeviceProfileConfiguration?
-    @Published private(set) var speakerDriverProcessingConfiguration = SpeakerDriverProcessingConfiguration()
-    @Published private(set) var dynamicsConfiguration = DynamicsConfiguration() {
+    private(set) var gainConfiguration = DSPGainConfiguration()
+    private(set) var bassManagementConfiguration = BassManagementConfiguration()
+    private(set) var multiOutputRoutingConfiguration: MultiOutputRoutingConfiguration?
+    private(set) var outputDeviceProfileConfiguration: OutputDeviceProfileConfiguration?
+    private(set) var headphoneDeviceProfileConfiguration: HeadphoneDeviceProfileConfiguration?
+    private(set) var speakerDriverProcessingConfiguration = SpeakerDriverProcessingConfiguration()
+    private(set) var dynamicsConfiguration = DynamicsConfiguration() {
         // E9 S5b: keeps the output-protection policy in step with restored and replaced settings.
         didSet { UnifiedGraphOutputProtection.apply(settings: dynamicsConfiguration.outputProtection ?? OutputProtectionSettings()) }
     }
     /// E28 S7d: session state of dynamics listening and multiband solo (never encoded, never persisted). The graph host holds
     /// the same state; these mirror it for the Dynamics page and the banner. Cleared on a profile switch, Stop, an output
     /// change and Quit.
-    @Published private(set) var dynamicsListener: DynamicsListener?
-    @Published private(set) var dynamicsSoloBands: Set<Int> = []
-    @Published private(set) var roomCorrectionConfiguration = RoomCorrectionConfiguration()
+    private(set) var dynamicsListener: DynamicsListener?
+    private(set) var dynamicsSoloBands: Set<Int> = []
+    private(set) var roomCorrectionConfiguration = RoomCorrectionConfiguration()
     /// E24 S3b: why an enabled lane-plan correction is not shaping playback right now, for Room Correction to show.
-    @Published private(set) var roomCorrectionInactiveReason: RoomCorrectionInactiveReason?
+    private(set) var roomCorrectionInactiveReason: RoomCorrectionInactiveReason?
     /// E24 S3b: the engine's per-rate cache of lane-plan synthesis (design note 8).
     let roomCorrectionRateCache = RoomCorrectionRateCache()
-    @Published private(set) var speakerIRConfiguration = SpeakerIRConfiguration()
-    @Published private(set) var ambientCompensationRuntimeTarget =
+    private(set) var speakerIRConfiguration = SpeakerIRConfiguration()
+    private(set) var ambientCompensationRuntimeTarget =
         AmbientCompensationTarget.unity
-    @Published private(set) var activeQuietZoneRuntimeTarget =
+    private(set) var activeQuietZoneRuntimeTarget =
         ActiveQuietZoneRuntimeTarget.bypassed
-    @Published private(set) var linearPhaseDesignInfo: N60LinearPhaseEQDesignInfo?
-    @Published private(set) var headTrackingRuntimeStatus = HeadTrackingRuntimeStatus.disabled
-    @Published private(set) var lastErrorDescription: String?
-    @Published private(set) var lifecycleState: AudioLifecycleState
+    private(set) var linearPhaseDesignInfo: N60LinearPhaseEQDesignInfo?
+    private(set) var headTrackingRuntimeStatus = HeadTrackingRuntimeStatus.disabled
+    private(set) var lastErrorDescription: String?
+    private(set) var lifecycleState: AudioLifecycleState
     /// E4 S7: the low-latency output profile Quiet Zone requests, and the
     /// buffer size it set on the current output (nil when off or not applied).
-    @Published private(set) var lowLatencyOutputProfileActive = false
-    @Published private(set) var lowLatencyOutputBufferFrames: UInt32?
+    private(set) var lowLatencyOutputProfileActive = false
+    private(set) var lowLatencyOutputBufferFrames: UInt32?
     private let lowLatencyBufferProfile: LowLatencyOutputBufferProfile
     /// Restore deferred to the rebuild, so the physical output never changes
     /// size under a live tap aggregate.
@@ -3388,7 +3389,7 @@ final class AudioIOEngine: ObservableObject {
     private var speakerDriveDemandMux = SpeakerDriveDemandMux()
     private var speakerDriveAnchorFanout = SpeakerDriveAnchorFanout()
     /// E4 S25 follow-up: runs the live reference pump; idle unless the shadow asks and the flag is on.
-    private(set) lazy var feedForwardLiveDriver = FeedForwardLiveDriver(host: self)
+    @ObservationIgnored private(set) lazy var feedForwardLiveDriver = FeedForwardLiveDriver(host: self)
 
     func setSpeakerDriveDemand(_ requested: Bool) {
         speakerDriveDemandMux.shadow = requested

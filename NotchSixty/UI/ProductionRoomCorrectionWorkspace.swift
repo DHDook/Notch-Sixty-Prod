@@ -3,7 +3,7 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 struct ProductionRoomCorrectionWorkspace: View {
-    @ObservedObject var engine: AudioIOEngine
+    var engine: AudioIOEngine
     @ObservedObject var calibration: RoomCorrectionCalibrationController
     @ObservedObject var projects: RoomCorrectionProjectController
     @ObservedObject var profiles: ProductProfileController

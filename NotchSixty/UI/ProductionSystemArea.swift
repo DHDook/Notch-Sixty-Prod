@@ -187,7 +187,7 @@ struct ProductionSystemAreaView: View {
 }
 
 struct ProductionSystemOverviewView: View {
-    @ObservedObject var engine: AudioIOEngine
+    var engine: AudioIOEngine
     @ObservedObject var profiles: ProductProfileController
     @ObservedObject var navigation: ProductionNavigation
     var entryCard = AnyView(EmptyView())

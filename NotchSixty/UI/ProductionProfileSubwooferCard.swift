@@ -6,7 +6,7 @@ import SwiftUI
 // first and then clears them.
 
 struct ProductionProfileSubwooferCard: View {
-    @ObservedObject var engine: AudioIOEngine
+    var engine: AudioIOEngine
     @ObservedObject var profiles: ProductProfileController
     @State private var pending: OutputDeviceProfileSubwooferEdit?
     @State private var errorText: String?

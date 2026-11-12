@@ -13,7 +13,7 @@ private struct ProductionDynamicsTelemetryItem: Identifiable, Equatable {
 }
 
 struct ProductionDynamicsTelemetryView: View {
-    @ObservedObject var engine: AudioIOEngine
+    var engine: AudioIOEngine
     let kind: ProductionDynamicsTelemetryKind
 
     @State private var items: [ProductionDynamicsTelemetryItem] = []

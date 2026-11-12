@@ -19,7 +19,7 @@ private struct BlindABXExportFile: FileDocument {
 }
 
 struct ProductionBlindListeningWorkspace: View {
-    @ObservedObject var engine: AudioIOEngine
+    var engine: AudioIOEngine
     @State private var importingA = false
     @State private var importingB = false
     @State private var fileA: URL?

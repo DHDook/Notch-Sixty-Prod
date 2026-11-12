@@ -5,7 +5,7 @@ import Foundation
 import SwiftUI
 
 struct ContentView: View {
-    @ObservedObject var engine: AudioIOEngine
+    var engine: AudioIOEngine
 
     private var selectedUIDBinding: Binding<String?> {
         Binding(

@@ -71,23 +71,21 @@ final class EQAuditionController: ObservableObject {
     var maxDuration: TimeInterval = EQAuditionOverride.maxDuration
     private let engine: AudioIOEngine
     private var timer: Task<Void, Never>?
-    private var engineObservation: AnyCancellable?
+    private var engineObservation: ObservationSubscription?
     private var windowObservation: NSObjectProtocol?
 
     init(engine: AudioIOEngine) {
         self.engine = engine
-        engineObservation = engine.$eqAudition
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in
-                MainActor.assumeIsolated {
-                    // Read the engine's current value: the delivered one may be stale (the
-                    // subscription's initial nil arrives after an immediate start).
-                    guard let self, self.engine.eqAudition == nil, self.active != nil else { return }
-                    self.active = nil
-                    self.timer?.cancel()
-                    self.timer = nil
-                }
+        engineObservation = ObservationSubscription(
+            track: { [engine] in _ = engine.eqAudition },
+            onChange: { [weak self] in
+                // Read the engine's current value: the change signal fires before the new value lands.
+                guard let self, self.engine.eqAudition == nil, self.active != nil else { return }
+                self.active = nil
+                self.timer?.cancel()
+                self.timer = nil
             }
+        )
         windowObservation = NotificationCenter.default.addObserver(
             forName: NSWindow.willCloseNotification, object: nil, queue: .main
         ) { [weak self] _ in MainActor.assumeIsolated { self?.stop() } }

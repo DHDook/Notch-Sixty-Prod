@@ -3,7 +3,7 @@ import Foundation
 import SwiftUI
 
 struct ProductionEqualizerView: View {
-    @ObservedObject var engine: AudioIOEngine
+    var engine: AudioIOEngine
     @ObservedObject var autoPreamp: EQAutoPreampController
     var reference: ProductionReferenceNavigator? = nil
     /// E27 S3b: EQ A/B and Listen; nil or unavailable hides the controls.

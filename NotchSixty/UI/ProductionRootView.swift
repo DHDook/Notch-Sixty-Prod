@@ -816,7 +816,7 @@ private struct ProductSafeLaunchSheet: View {
 }
 
 private struct ProductionDashboardView: View {
-    @ObservedObject var engine: AudioIOEngine
+    var engine: AudioIOEngine
     var entryCard = AnyView(EmptyView())
     @AppStorage(PreferenceKeys.Application.volumeStepResolution)
     private var storedVolumeStepResolution = ApplicationVolumeStepResolution.standard.rawValue
@@ -1189,7 +1189,7 @@ private struct ProductionDashboardView: View {
 }
 
 private struct StereoSignatureVUMeterPanel: View {
-    @ObservedObject var engine: AudioIOEngine
+    var engine: AudioIOEngine
     @AppStorage(PreferenceKeys.vuMetersEnabled) private var vuMetersEnabled = true
     @State private var leftVU = ProductionVUScale.minimumVU
     @State private var rightVU = ProductionVUScale.minimumVU
@@ -1672,7 +1672,7 @@ private struct StereoSignatureVUScaleFace: View, Equatable {
 }
 
 private struct ProductionSpeakersView: View {
-    @ObservedObject var engine: AudioIOEngine
+    var engine: AudioIOEngine
     @ObservedObject var profiles: ProductProfileController
     @State private var actionError: String?
 
