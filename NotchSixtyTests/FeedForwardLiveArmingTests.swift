@@ -173,6 +173,69 @@ final class FeedForwardLiveArmingTests: XCTestCase {
         XCTAssertEqual(engine.disarmCalls, 1)
     }
 
+    // MARK: - E4 S35 turn-on guards (fakes only; nothing here arms a real filter)
+
+    /// Wake, device change and rate change while the filter is armed and live leave it off, back the
+    /// kernel out, and nothing brings it back until the user asks again.
+    func testWakeDeviceChangeAndRateChangeWhileArmedLeaveItOff() {
+        // A wake shows up as the engine safety lease lapsing and the transport being rebuilt on the
+        // same or a new device; the three shapes are covered here.
+        let cases: [(String, FeedForwardLiveQuietZoneFacts)] = [
+            ("wake: lease lapsed", facts(lease: false)),
+            ("wake: Quiet Zone disarmed", facts(armed: false)),
+            ("device change", facts(uid: "other-dac")),
+            ("device vanished", facts(uid: nil)),
+            ("rate change 48 to 96 kHz", facts(rate: 96_000)),
+            ("rate change 48 to 384 kHz", facts(rate: 384_000)),
+            ("rate unknown after rebuild", facts(rate: nil)),
+        ]
+        for (name, bad) in cases {
+            let (c, engine) = make()
+            XCTAssertTrue(c.request(quietZone: facts()), name)
+            engine.kernel = .init(state: .armed, gain: 1)
+            c.poll(quietZone: facts())
+            XCTAssertEqual(c.phase, .live, name)
+            let disarmsBefore = engine.disarmCalls
+            c.poll(quietZone: bad)
+            XCTAssertEqual(c.phase, .off, name)
+            XCTAssertGreaterThan(engine.disarmCalls, disarmsBefore, name)
+            XCTAssertEqual(engine.kernel?.state, .idle, name)
+            XCTAssertNotNil(c.statusMessage, name)
+            let armsBefore = engine.armCalls
+            for _ in 0..<10 { c.poll(quietZone: facts()) }
+            XCTAssertEqual(engine.armCalls, armsBefore, "\(name): must not come back by itself")
+            XCTAssertEqual(c.phase, .off, name)
+        }
+    }
+
+    func testSystemWakeStopsQuietZoneAndLeavesFeedForwardOff() {
+        let (c, engine) = make()
+        XCTAssertTrue(c.request(quietZone: facts()))
+        engine.kernel = .init(state: .armed, gain: 0.4)
+        c.quietZoneStopped()
+        XCTAssertEqual(c.phase, .off)
+        XCTAssertEqual(engine.kernel?.state, .idle)
+        let armsBefore = engine.armCalls
+        for _ in 0..<5 { c.poll(quietZone: facts()) }
+        XCTAssertEqual(engine.armCalls, armsBefore)
+        XCTAssertEqual(c.phase, .off)
+    }
+
+    /// Bass management (a subwoofer in the arrangement): Turn On is refused with the subwoofer
+    /// reason before any engine call, at every standard rate.
+    func testBassManagementRefusesTurnOnWithTheSubwooferReason() {
+        for rate in [44_100.0, 48_000, 88_200, 96_000, 176_400, 192_000, 352_800, 384_000] {
+            let (c, engine) = make()
+            XCTAssertFalse(c.request(quietZone: facts(rate: rate, subwoofer: true)), "\(rate)")
+            XCTAssertEqual(c.phase, .off, "\(rate)")
+            XCTAssertEqual(c.statusMessage, "Feed-forward is not available with a subwoofer yet.", "\(rate)")
+            XCTAssertEqual(engine.armCalls, 0, "\(rate)")
+            c.poll(quietZone: facts(rate: rate, subwoofer: true))
+            XCTAssertEqual(engine.armCalls, 0, "\(rate)")
+            XCTAssertEqual(c.phase, .off, "\(rate)")
+        }
+    }
+
     // MARK: - E4 S22b3 live echo stage
 
     func testRefusedWithASubwooferAndTurnsOffIfOneAppears() {
