@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 // E8 S6: the routing and crossover editor, shown on the Speakers tab. It edits a
 // `SpeakerRoutingConfiguration` through `SpeakerRoutingEditorModel` and hands each edit to the engine, which republishes
@@ -464,7 +465,7 @@ struct ProductionRoutingEditorView: View {
         panel.title = "Import CamillaDSP YAML"
         panel.allowsMultipleSelection = false
         panel.canChooseDirectories = false
-        panel.allowedFileTypes = ["yml", "yaml"]
+        panel.allowedContentTypes = ["yml", "yaml"].compactMap { UTType(filenameExtension: $0) }
         guard panel.runModal() == .OK, let url = panel.url else { return }
         let accessed = url.startAccessingSecurityScopedResource()
         defer { if accessed { url.stopAccessingSecurityScopedResource() } }
@@ -494,7 +495,7 @@ struct ProductionRoutingEditorView: View {
         let panel = NSSavePanel()
         panel.title = "Export CamillaDSP YAML"
         panel.nameFieldStringValue = "NotchSixty-routing.yml"
-        panel.allowedFileTypes = ["yml", "yaml"]
+        panel.allowedContentTypes = ["yml", "yaml"].compactMap { UTType(filenameExtension: $0) }
         guard panel.runModal() == .OK, let url = panel.url else { return }
         let accessed = url.startAccessingSecurityScopedResource()
         defer { if accessed { url.stopAccessingSecurityScopedResource() } }

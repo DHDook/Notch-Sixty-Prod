@@ -173,7 +173,7 @@ enum OutputProgramLayout: String, CaseIterable, Identifiable, Codable, Sendable 
         case .nineOneSix:
             return N60ProgramChannelLayoutMakeStandard(N60ProgramLayoutNineOneSix)
         case .threeOne:
-            var cRoles = roles.map(\.realtimeCType)
+            let cRoles = roles.map(\.realtimeCType)
             return cRoles.withUnsafeBufferPointer { buffer in
                 N60ProgramChannelLayoutMakeCustom(buffer.baseAddress, UInt32(buffer.count))
             }

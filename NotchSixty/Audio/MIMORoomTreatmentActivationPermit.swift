@@ -199,7 +199,7 @@ final class MIMORoomTreatmentPreparedTransition {
                 .invalidFadeConfiguration
         }
 
-        var taps = firProgram.taps
+        let taps = firProgram.taps
         guard let prepared = taps.withUnsafeBufferPointer({ buffer in
             N60MIMOFIRProgramCreate(
                 UInt32(firProgram.sources.count),

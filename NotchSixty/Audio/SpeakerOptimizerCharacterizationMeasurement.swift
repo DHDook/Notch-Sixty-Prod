@@ -182,7 +182,7 @@ extension SpeakerOptimizerCharacterizationMeasurementSet {
               listening.routingSignature == routingSignature,
               listening.microphone == microphone,
               abs(listening.sampleRate - sampleRate) < 0.5,
-              linkedListeningMeasurementSetID.map { $0 == listening.id } ?? true else {
+              (linkedListeningMeasurementSetID.map { $0 == listening.id } ?? true) else {
             throw SpeakerOptimizerCharacterizationError.incompatibleListeningEvidence
         }
     }

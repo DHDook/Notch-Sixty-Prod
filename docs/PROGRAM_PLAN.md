@@ -123,9 +123,9 @@ stopping slice work (a benchmark link error, a Linux `test_fpenv` crash, an LLVM
 
 - [x] Red nightly rule: `/next` fixes a failing nightly `macos-full` on `main` before it starts another slice (`CLAUDE.md` and `.claude/skills/next/SKILL.md`, this PR)
 - [ ] S7 `e1/pr-ci-guards` (needs-owner: workflows): `pr.yml` links the render benchmarks and builds and tests the core on Linux, so the two failures above are caught on the PR
-- [ ] S8 `e1/repo-cleanup`: delete the `ci/validate_*.py` scripts nothing runs (55 exist, 4 are referenced) and the stale `PR40_SLICE_*_STATUS.md` files in the repository root; fix every Swift warning (first: `RoomCorrectionABXSheet.swift:38`) and turn on warnings-as-errors for the app target
+- [x] S8 `e1/repo-cleanup`: delete the `ci/validate_*.py` scripts nothing runs (55 exist, 4 are referenced) and the stale `PR40_SLICE_*_STATUS.md` files in the repository root; fix every Swift warning (first: `RoomCorrectionABXSheet.swift:38`) (warnings-as-errors moved to S7)
 - [x] S9 `e1/project-layout`: folder-synchronised Xcode groups so new files need no project edit; split `ci/run_harnesses.sh` into one script per epic (`ci/harnesses/<epic>.sh`)
-- [ ] S10 `e1/info-plist-audio-capture-key` (G1): the built app's Info.plist lacks `NSAudioCaptureUsageDescription` (build settings set it, `GENERATE_INFOPLIST_FILE=YES`, `NotchSixty/Info.plist` is unused); confirm on `main` and fix so the system-audio permission prompt shows the text
+- [ ] S10 `e1/info-plist-audio-capture-key` (G4): the built app's Info.plist lacks `NSAudioCaptureUsageDescription` (build settings set it, `GENERATE_INFOPLIST_FILE=YES`, `NotchSixty/Info.plist` is unused); confirm on `main` and fix so the system-audio permission prompt shows the text
 
 ### E2 macOS 26 support
 

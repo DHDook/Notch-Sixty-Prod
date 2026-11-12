@@ -3544,7 +3544,7 @@ final class AudioIOEngine {
     }
 
     func productionTransportMeterSnapshot() -> ProductionTransportMeterSnapshot? {
-        if let session = nChannelTransportSession, var raw = session.bridgeSnapshot() {
+        if let session = nChannelTransportSession, let raw = session.bridgeSnapshot() {
             var meter = raw.meter
             let roles = session.routePlan.programLayout.roles
             let programChannels: [ProductionTransportChannelMeter] = roles.enumerated().map { index, role in

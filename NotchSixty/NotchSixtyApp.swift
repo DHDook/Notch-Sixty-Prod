@@ -2,6 +2,7 @@ import AppKit
 import Combine
 import ServiceManagement
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct ProductDSPConfiguration: Equatable, Sendable {
     var eq: EQConfiguration
@@ -2533,7 +2534,7 @@ private struct ProductionSettingsView: View {
         panel.title = "Save Notch Sixty Backup"
         panel.prompt = "Save Backup"
         panel.nameFieldStringValue = "Notch-Sixty-Backup.n60backup"
-        panel.allowedFileTypes = ["n60backup"]
+        panel.allowedContentTypes = [UTType(filenameExtension: "n60backup") ?? .data]
         guard panel.runModal() == .OK, let url = panel.url else {
             return
         }
@@ -2575,7 +2576,7 @@ private struct ProductionSettingsView: View {
         panel.prompt = "Review Backup"
         panel.allowsMultipleSelection = false
         panel.canChooseDirectories = false
-        panel.allowedFileTypes = ["n60backup"]
+        panel.allowedContentTypes = [UTType(filenameExtension: "n60backup") ?? .data]
         guard panel.runModal() == .OK, let url = panel.url else {
             return
         }

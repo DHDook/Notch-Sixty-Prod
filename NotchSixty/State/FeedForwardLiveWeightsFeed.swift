@@ -7,7 +7,7 @@ protocol FeedForwardLiveWeightsSink: AnyObject {
     func setFeedForwardLiveWeights(left: [Float], right: [Float]) -> Bool
 }
 
-extension AudioIOEngine: FeedForwardLiveWeightsSink {}
+extension AudioIOEngine: @preconcurrency FeedForwardLiveWeightsSink {}
 
 /// E4 S25 follow-up: decides when the feed-forward shadow's weights are published to the live
 /// mailbox. Publishing never arms anything: with no arm the kernel stays silent, and arming goes
