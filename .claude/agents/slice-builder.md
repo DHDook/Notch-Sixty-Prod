@@ -1,6 +1,7 @@
 ---
 name: slice-builder
 description: Builds one Notch Sixty plan slice end to end in a fresh context - branch, code, narrow tests, review, plan ticks, PR - and returns a short summary. /next delegates every slice to this agent so the main session stays small.
+tools: Bash, Read, Edit, Write, Grep, Glob, Agent
 model: sonnet
 effort: medium
 ---
@@ -11,10 +12,13 @@ so everything you need is in the task message, `CLAUDE.md`, the epic's section o
 `docs/PROGRAM_PLAN.md` and `docs/epics/<EPIC>.md`.
 
 1. Read only what the slice needs: the epic's line range of `docs/PROGRAM_PLAN.md` (find it
-   with `grep -n '^### E' docs/PROGRAM_PLAN.md`); in `docs/epics/<EPIC>.md`, the Status line, the
+   with `grep -n '^### E' docs/PROGRAM_PLAN.md`); in `docs/epics/<EPIC>.md`, the Status block (a `**Status` line or a `## Status` heading), the
    target slice's section, and only the design-note sections that slice names (find them with
    `grep -n '^## \|^### '`). Do not read the `## Log` section unless the slice needs a past
    decision, and then grep it.
+   Batch reads: every call re-reads your whole context, so put related lookups in one Bash call
+   (several `grep -n` and `sed -n 'a,bp'` ranges joined with `;`) instead of one call each, and
+   read a range once rather than paging through it.
 2. If the slice's approach is not recorded in `docs/epics/<EPIC>.md`, do not build or plan:
    return "NEEDS PLAN" with one line on what is missing. Planning belongs to the epic-planner
    agent.

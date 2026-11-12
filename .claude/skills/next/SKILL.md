@@ -7,7 +7,7 @@ model: sonnet
 effort: low
 ---
 
-Continue the v1 program plan. Target: $ARGUMENTS (if empty, read the `**Status**` blocks of `docs/epics/E*.md` and pick per the Execution order).
+Continue the v1 program plan. Target: $ARGUMENTS (if empty, read the Status blocks of `docs/epics/E*.md`, as in step 1, and pick per the Execution order).
 The owner does not use git directly: do every git and GitHub step and explain anything that
 needs their action in plain words.
 
@@ -25,7 +25,7 @@ yourself beyond what the steps below name. All building happens in subagents.
 1. **Pick the work.** Read the order with
    `sed -n '/^## Execution order/,/^## Phase 1/p' docs/PROGRAM_PLAN.md` (or use the epic in
    $ARGUMENTS). Take the first epic in that order with open slices whose dependencies are met,
-   and read only its Status with `grep -n -A5 '^\*\*Status' docs/epics/<EPIC>.md`. Pick the
+   and read only its Status with `grep -n -A7 '^\*\*Status\|^## Status' docs/epics/<EPIC>.md` (epic files use either form). Pick the
    next slice; slice-builder sizes the PR and may fold in the following small slice. Say what
    you picked in one sentence.
 2. **Plan a new epic with epic-planner.** If `docs/epics/<EPIC>.md` does not exist, start the
