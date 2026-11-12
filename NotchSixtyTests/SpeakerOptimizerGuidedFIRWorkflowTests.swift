@@ -296,6 +296,45 @@ final class SpeakerOptimizerGuidedFIRWorkflowTests:
         XCTAssertEqual(after.programPathLatencyFrames, plain.programPathLatencyFrames + tenOnly)
     }
 
+    /// E24 S12 (E28 G44, E24 G3): the workspace builds the controller with `production(engine:profileStore:)`; review shows
+    /// the A/V verdict including the engine's lookahead, synchronized video without declared capacity is blocked and
+    /// Apply refuses, a declared capacity unblocks it, and Apply then Rollback reach the profile store.
+    func testProductionConstructionShowsAVSyncVerdictAndGatesApply() throws {
+        let fixture = makeFixture()
+        let engine = AudioIOEngine()
+        var dynamics = DynamicsConfiguration()
+        dynamics.compressor.enabled = true
+        dynamics.compressor.lookaheadMs = 5
+        try engine.replaceDynamicsConfiguration(dynamics)
+        let store = GuidedFIRFakeProfileStore(profile: fixture.profile)
+        // Only the design step is substituted; the latency provider and store wiring are production's.
+        let designed = SpeakerOptimizerGuidedFIRController.production(
+            engine: engine, profileStore: store, designOperation: { _, _ in fixture.plan })
+        XCTAssertEqual(designed.state, .idle)
+
+        try designed.prepareReview(
+            baseline: fixture.baseline, characterization: fixture.characterization,
+            avSyncContext: .synchronizedVideo(externalVideoDelayCapacityMilliseconds: nil))
+        let blocked = SpeakerOptimizerFIRAVSyncVerdict(try XCTUnwrap(designed.avSyncDecision))
+        XCTAssertFalse(blocked.allowed)
+        XCTAssertEqual(blocked.title, "Synchronized video: blocked")
+        XCTAssertFalse(designed.canApproveAndApply)
+        XCTAssertThrowsError(try designed.approveAndApply(userInitiated: true))
+
+        try designed.updateAVSyncContext(.synchronizedVideo(externalVideoDelayCapacityMilliseconds: 500))
+        let allowed = SpeakerOptimizerFIRAVSyncVerdict(try XCTUnwrap(designed.avSyncDecision))
+        XCTAssertTrue(allowed.allowed)
+        XCTAssertTrue(designed.canApproveAndApply)
+        XCTAssertGreaterThan(try XCTUnwrap(designed.avSyncDecision).programPathLatencyFrames,
+                             try XCTUnwrap(designed.avSyncDecision).incrementalFIRLatencyFrames - 1)
+
+        try designed.approveAndApply(userInitiated: true)
+        XCTAssertEqual(designed.state, .appliedPendingVerification)
+        XCTAssertTrue(designed.canRollback)
+        try designed.rollback()
+        XCTAssertEqual(designed.state, .rolledBack)
+    }
+
     private func makeFixture() -> (
         profile: PlaybackSystemProfile,
         plan: SpeakerOptimizerClassificationAwareFIRPlan,

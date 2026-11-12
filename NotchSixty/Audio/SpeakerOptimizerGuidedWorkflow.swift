@@ -307,6 +307,21 @@ final class SpeakerOptimizerGuidedFIRController: ObservableObject {
         }
     }
 
+    /// Production construction (E24 S12): the A/V-sync check reads the live engine's lookahead through
+    /// `makeProgramLatencyProvider(engine:)`. `ProductProfileController` is the production profile store.
+    static func production(
+        engine: AudioIOEngine,
+        profileStore: any SpeakerOptimizerFIRProfileMutating,
+        designOperation: SpeakerOptimizerGuidedFIRDesignOperation? = nil
+    ) -> SpeakerOptimizerGuidedFIRController {
+        let latency = makeProgramLatencyProvider(engine: engine)
+        guard let designOperation else {
+            return SpeakerOptimizerGuidedFIRController(profileStore: profileStore, programLatencyFrames: latency)
+        }
+        return SpeakerOptimizerGuidedFIRController(
+            profileStore: profileStore, programLatencyFrames: latency, designOperation: designOperation)
+    }
+
     @Published private(set) var state:
         SpeakerOptimizerGuidedFIRState = .idle
     @Published private(set) var plan:
