@@ -472,6 +472,22 @@ final class ActiveQuietZoneController: ObservableObject {
         objectWillChange.send()
     }
 
+    /// E4 G18: the ears a tone was designed for (both zones, or the one surveyed ear) and the other seats it must not
+    /// worsen, as the adaptive worker's seed carries them.
+    func adaptiveSeedPoints(near frequencyHz: Double, twoZones: Bool)
+        -> (ears: [AdaptiveQuietZoneSeedPoint], limits: [AdaptiveQuietZoneSeedPoint]) {
+        func point(_ t: QuietZoneEarTone) -> AdaptiveQuietZoneSeedPoint {
+            AdaptiveQuietZoneSeedPoint(ratio: t.ratio, left: t.earLeft, right: t.earRight)
+        }
+        var ears: [AdaptiveQuietZoneSeedPoint] = []
+        if twoZones {
+            if let a = zones?.firstTone(near: frequencyHz), let b = zones?.secondTone(near: frequencyHz) { ears = [point(a), point(b)] }
+        } else if let ear = virtualMic?.earTone(near: frequencyHz) {
+            ears = [point(ear)]
+        }
+        return (ears, adaptiveLimitSeats(near: frequencyHz))
+    }
+
     /// E4 G18: the other surveyed seats at a tone, which the adaptive weight must not worsen.
     func adaptiveLimitSeats(near frequencyHz: Double) -> [AdaptiveQuietZoneSeedPoint] {
         (zones?.otherSeatPoints(near: frequencyHz) ?? []).map {
@@ -1850,10 +1866,7 @@ final class ActiveQuietZoneController: ObservableObject {
                 if let two = try twoZoneDesign(
                     frequencyHz: frequency, monitorDisturbance: disturbance,
                     monitorLeft: leftPath, monitorRight: rightPath, bassMode: bassMode) {
-                    if let a = zones?.firstTone(near: frequency), let b = zones?.secondTone(near: frequency) {
-                        seedEars = [a, b].map { AdaptiveQuietZoneSeedPoint(ratio: $0.ratio, left: $0.earLeft, right: $0.earRight) }
-                    }
-                    seedLimits = adaptiveLimitSeats(near: frequency)
+                    (seedEars, seedLimits) = adaptiveSeedPoints(near: frequency, twoZones: true)
                     outputLeft = two.left
                     outputRight = two.right
                     predictedDB = two.zones.map(\.reductionDB).min() ?? 0
@@ -1862,10 +1875,7 @@ final class ActiveQuietZoneController: ObservableObject {
                 if let virtual = try virtualEarDesign(
                     frequencyHz: frequency, monitorDisturbance: disturbance,
                     monitorLeft: leftPath, monitorRight: rightPath, bassMode: bassMode) {
-                    if let ear = virtualMic?.earTone(near: frequency) {
-                        seedEars = [AdaptiveQuietZoneSeedPoint(ratio: ear.ratio, left: ear.earLeft, right: ear.earRight)]
-                    }
-                    seedLimits = adaptiveLimitSeats(near: frequency)
+                    (seedEars, seedLimits) = adaptiveSeedPoints(near: frequency, twoZones: false)
                     outputLeft = virtual.left
                     outputRight = virtual.right
                     predictedDB = virtual.predictedReductionAtEarDB

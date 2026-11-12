@@ -90,6 +90,17 @@ final class E4GraduationTests: XCTestCase {
         XCTAssertFalse(product.feedForwardArming?.isRequested ?? true)
     }
 
+    /// The nightly flags-off run (macos-full.yml, `TEST_RUNNER_NOTCHSIXTY_GRADUATED_FLAGS_OFF=1`) reaches the test host as
+    /// an environment variable, and the process-wide store (debug policy, the one `ProductController` reads) honours it
+    /// for every graduated flag, the three G16 flags included. Without it they are on.
+    func testProcessFlagStoreHonoursTheFlagsOffEnvironmentForEveryGraduatedFlag() {
+        let flagsOff = ProcessInfo.processInfo.environment[FeatureFlags.graduatedOffEnvironmentKey] == "1"
+        let store = FeatureFlags(defaults: defaults)
+        for flag in Self.graduated {
+            XCTAssertEqual(store.isEnabled(flag), !flagsOff, "\(flag.id) flagsOff=\(flagsOff)")
+        }
+    }
+
     func testProductionWiringWithFlagsOffByLaunchArgumentLeavesEnginePathsShut() {
         let off = release(["-NotchSixtyFeatures", "-e4.engine-lease,-e4.adaptive-tonal-live,-e4.feedforward-live"])
         let engine = AudioIOEngine(deviceCatalog: OfflineOutputCatalog(devices: []))

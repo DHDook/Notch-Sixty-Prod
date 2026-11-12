@@ -105,6 +105,40 @@ extension QuietZoneVirtualMicWiringTests {
         }
     }
 
+    /// E4 G18: the controller hands the adaptive worker the ears each tone was designed for and the other seats it must
+    /// not worsen, and the seeds built from them become shadow tones with the split's path (the seeds are no longer withheld).
+    func testAdaptiveSeedPointsCarryTheEarsAndOtherSeatsForOneSeatAndTwoZones() throws {
+        for rate in rates {
+            let rig = try makeRig(rate: rate)
+            attachZonesLikeProduction(rig, flags: ["e4.zones", "e4.virtual-microphone"])
+            let zones = try XCTUnwrap(rig.quietZone.zones)
+            let frequencies = [60.0, 80.0]
+            runSurvey(rig, frequencies: frequencies)
+            rig.survey.useAtEar = true
+            let one = rig.quietZone.adaptiveSeedPoints(near: 60, twoZones: false)
+            XCTAssertEqual(one.ears.count, 1, "rate \(rate)")
+            XCTAssertTrue(one.limits.isEmpty, "rate \(rate)")
+            let ear = try XCTUnwrap(rig.survey.earTone(near: 60))
+            XCTAssertEqual((one.ears[0].ratio - ear.ratio).magnitude, 0, accuracy: 1e-12)
+            XCTAssertTrue(rig.quietZone.adaptiveSeedPoints(near: 60, twoZones: true).ears.isEmpty, "zones not surveyed")
+
+            surveySecond(rig, zones: zones, frequencies: frequencies)
+            XCTAssertTrue(zones.setMode(.twoZones), "rate \(rate): \(zones.message)")
+            let two = rig.quietZone.adaptiveSeedPoints(near: 60, twoZones: true)
+            XCTAssertEqual(two.ears.count, 2, "rate \(rate)")
+            let b = try XCTUnwrap(zones.secondTone(near: 60))
+            XCTAssertEqual((two.ears[1].left - b.earLeft).magnitude, 0, accuracy: 1e-12)
+
+            // The seed becomes a shadow tone, so the live worker adapts (it is built, not withheld).
+            let seed = AdaptiveQuietZoneSeed(
+                frequencyHz: 60, leftPath: ActiveQuietZoneComplex(real: 0.5, imaginary: 0.1),
+                rightPath: ActiveQuietZoneComplex(real: 0.4, imaginary: -0.2),
+                leftOutput: ActiveQuietZoneComplex(real: 0.03, imaginary: 0.01),
+                rightOutput: ActiveQuietZoneComplex(real: 0.02, imaginary: 0), ears: two.ears, limitSeats: two.limits)
+            XCTAssertEqual(AdaptiveQuietZoneShadowTone.tones(from: [seed])[0].ears.count, 2)
+        }
+    }
+
     func testOneSeatAndFollowModesNeverUseTheTwoZoneDesign() throws {
         let rig = try makeRig(rate: 96_000)
         attachZonesLikeProduction(rig, flags: ["e4.zones", "e4.virtual-microphone"])
