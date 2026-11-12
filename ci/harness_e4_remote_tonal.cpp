@@ -19,6 +19,7 @@
 #include <cstdio>
 #include <cstring>
 #include <deque>
+#include <memory>
 #include <vector>
 
 #include "N60RemoteTonal.h"
@@ -95,6 +96,11 @@ struct Sim {
     Config cfg;
     Twin plant;
     N60RemoteTonal *core = nullptr;
+    N60RemoteTonalConfig rc{};
+    /* E4 G18: a second twin with the listener at the ear, driven by the same output. */
+    std::unique_ptr<Twin> ear;
+    cd earAcc = 0;
+    uint64_t earN = 0;
     double fs;
     std::vector<double> hz;
     uint32_t n;
@@ -133,7 +139,7 @@ struct Sim {
         block.reserve(blockFrames);
         teleEvery = std::max<uint64_t>(1, static_cast<uint64_t>(0.005 * fs));
         fadeStep = 1.0 / (0.1 * fs);
-        N60RemoteTonalConfig rc = N60RemoteTonalConfigDefault(fs, kTicks);
+        rc = N60RemoteTonalConfigDefault(fs, kTicks);
         /* The core is told the nominal rate; the stream really runs micRatePPM faster. */
         rc.micSampleRate = fs * (1.0 - micRatePPM * 1e-6);
         rc.hostTicksPerSecond = kTicks;
@@ -152,6 +158,27 @@ struct Sim {
         fstep.assign(n, 0.0);
     }
     ~Sim() { N60RemoteTonalDestroy(core); }
+
+    /* E4 G18: adapt on the ear's error (ratio R and path Sear from the ear's truth), keep the monitor inside the limit. */
+    void enable_virtual(const Config &earCfg, cd ratio, cd earPath, float limitDB) {
+        ear = std::make_unique<Twin>(earCfg);
+        rc.earCount[0] = 1;
+        rc.earRatio[0][0] = {static_cast<float>(ratio.real()), static_cast<float>(ratio.imag())};
+        rc.earPath[0][0] = {static_cast<float>(earPath.real()), static_cast<float>(earPath.imag())};
+        rc.monitorIncreaseLimitDB = limitDB;
+        N60RemoteTonalDestroy(core);
+        core = N60RemoteTonalCreate(&rc);
+    }
+    void track_ear(float y) {
+        if (!ear) return;
+        const float e = ear->step(y).error;
+        if (k >= tailFrom) {
+            const double t = static_cast<double>(k) * drift / fs;
+            earAcc += static_cast<double>(e) * std::polar(1.0, -twin::kTau * hz[0] * t);
+            ++earN;
+        }
+    }
+    double ear_amp() const { return std::abs(2.0 * earAcc / static_cast<double>(std::max<uint64_t>(earN, 1))); }
 
     double seconds() const { return static_cast<double>(k) / fs; }
 
@@ -250,6 +277,7 @@ struct Sim {
                 }
             }
             const float e = plant.step(static_cast<float>(y)).error;
+            track_ear(static_cast<float>(y));
             block.push_back(e);
             if (k >= tailFrom) {
                 tailSq += static_cast<double>(e) * e;
@@ -269,6 +297,8 @@ struct Sim {
     /* Runs secs and returns the error-mic tone amplitude over the last second. */
     void run_measured(double secs) {
         tailFrom = k + static_cast<uint64_t>(std::max(0.0, secs - 1.0) * fs);
+        earAcc = 0;
+        earN = 0;
         for (cd &a : tailAcc) a = 0;
         tailN = 0;
         tailSq = 0;
@@ -500,6 +530,87 @@ static void test_config_validation() {
     CHECK(N60RemoteTonalCreate(&d) == nullptr, "invalid config created a core");
 }
 
+/* E4 G18: the worker adapts on the ear's error. The listener (ear) sits 0.45 m from the monitor
+ * microphone; the survey's ratio R and ear path come from calibrated copies of the twin. The ear
+ * must end well below its own uncancelled tone and near the oracle -D_ear / S_ear weight, the
+ * monitor must stay inside the other-seat limit, and a core adapting on the monitor error leaves
+ * the ear worse. */
+static void test_virtual(double fs, float limitDB, twin::Vec2 earAt = {1.35, 0.3}) {
+    const std::vector<double> hz = {80.0};
+    Config c = scenario(fs, hz);
+    Config earCfg = c;
+    earCfg.listener = earAt;
+    const Truth mon = calibrate(c, hz);
+    const Truth earTruth = calibrate(earCfg, hz);
+    const cd ratio = earTruth.D[0] / mon.D[0];
+    const double dEar = std::abs(earTruth.D[0]);
+    const double dMon = std::abs(mon.D[0]);
+    const double unlimitedMonitorDB = dbr(std::abs(1.0 - mon.S[0] * ratio / earTruth.S[0]));
+
+    Sim sim(c, hz, mon);
+    sim.enable_virtual(earCfg, ratio, earTruth.S[0], limitDB);
+    sim.run_measured(14.0);
+    const double earAfter = sim.ear_amp();
+    const double monAfter = sim.tail_amp(0);
+    const N60RemoteTonalStatus st = N60RemoteTonalReadStatus(sim.core);
+
+    Sim base(c, hz, mon);
+    base.enable_virtual(earCfg, ratio, earTruth.S[0], limitDB);
+    base.rc.earCount[0] = 0;
+    N60RemoteTonalDestroy(base.core);
+    base.core = N60RemoteTonalCreate(&base.rc);
+    base.run_measured(14.0);
+    const double earMonitorBasis = base.ear_amp();
+
+    CHECK(st.modelResets == 0 && st.uncoveredBlocks == 0, "%.0f Hz virtual: resets %llu uncovered %llu", fs,
+          static_cast<unsigned long long>(st.modelResets), static_cast<unsigned long long>(st.uncoveredBlocks));
+    CHECK(dbr(monAfter / dMon) <= static_cast<double>(limitDB) + 0.75, "%.0f Hz virtual: monitor %+.2f dB over limit %.2f", fs,
+          dbr(monAfter / dMon), static_cast<double>(limitDB));
+    if (unlimitedMonitorDB <= static_cast<double>(limitDB)) {
+        CHECK(dbr(earAfter / dEar) < -12.0, "%.0f Hz virtual: ear only %.1f dB down", fs, dbr(earAfter / dEar));
+        CHECK(earAfter < earMonitorBasis, "%.0f Hz virtual: ear %.4f not below the monitor-basis ear %.4f", fs, earAfter, earMonitorBasis);
+    } else {
+        CHECK(st.monitorLimited[0], "%.0f Hz virtual: the monitor limit never engaged (unlimited would be %+.2f dB)", fs, unlimitedMonitorDB);
+        CHECK(dbr(earAfter / dEar) < -1.0, "%.0f Hz virtual: limited ear only %.1f dB down", fs, dbr(earAfter / dEar));
+    }
+    printf("  virtual   %6.0f Hz (limit %.1f dB): ear %.1f dB (monitor basis %.1f dB), monitor %+.2f dB, unlimited %+.2f dB%s\n", fs,
+           static_cast<double>(limitDB), dbr(earAfter / dEar), dbr(earMonitorBasis / dEar), dbr(monAfter / dMon), unlimitedMonitorDB,
+           st.monitorLimited[0] ? " (limited)" : "");
+}
+
+static void test_virtual_validation() {
+    N60RemoteTonalConfig c = N60RemoteTonalConfigDefault(48000.0, kTicks);
+    c.toneCount = 1;
+    c.toneHz[0] = 80.0f;
+    c.earCount[0] = 1;
+    CHECK(N60RemoteTonalConfigIsValid(&c), "default virtual tone invalid");
+    N60RemoteTonalConfig d = c;
+    d.earPath[0][0] = {0.0f, 0.0f};
+    CHECK(!N60RemoteTonalConfigIsValid(&d), "zero ear path valid");
+    d = c;
+    d.earRatio[0][0] = {0.0f, 0.0f};
+    CHECK(!N60RemoteTonalConfigIsValid(&d), "zero ratio valid");
+    d = c;
+    d.earRatio[0][0] = {std::nanf(""), 0.0f};
+    CHECK(!N60RemoteTonalConfigIsValid(&d), "NaN ratio valid");
+    d = c;
+    d.earCount[0] = 3;
+    CHECK(!N60RemoteTonalConfigIsValid(&d), "three ears valid");
+    d = c;
+    d.limitCount[0] = 4;
+    CHECK(!N60RemoteTonalConfigIsValid(&d), "four limit seats valid");
+    d = c;
+    d.limitCount[0] = 1;
+    d.limitPath[0][0] = {std::nanf(""), 0.0f};
+    CHECK(!N60RemoteTonalConfigIsValid(&d), "NaN limit path valid");
+    d = c;
+    d.monitorIncreaseLimitDB = 7.0f;
+    CHECK(!N60RemoteTonalConfigIsValid(&d), "7 dB monitor limit valid");
+    d = c;
+    d.monitorIncreaseLimitDB = -1.0f;
+    CHECK(!N60RemoteTonalConfigIsValid(&d), "negative monitor limit valid");
+}
+
 /* One hour of slow temperature drift: nothing latches and the cancellation holds. */
 static void test_soak(double fs, double hours) {
     const std::vector<double> hz = {70.0, 100.0};
@@ -593,6 +704,7 @@ int main(int argc, char **argv) {
         test_soak(192000, 0.1);
     } else {
         test_config_validation();
+        test_virtual_validation();
         for (const double fs : kRates) {
             test_converge(fs);
             test_path_step(fs);
@@ -603,6 +715,8 @@ int main(int argc, char **argv) {
             test_robustness(fs);
             test_glide(fs);
             test_glide_lost(fs);
+            test_virtual(fs, 1.0f);                  /* ear beside the monitor: the limit stays idle */
+            test_virtual(fs, 1.0f, {0.0, 2.0});      /* ear where the unlimited solve would raise the monitor 8 dB */
         }
     }
     if (failures) {

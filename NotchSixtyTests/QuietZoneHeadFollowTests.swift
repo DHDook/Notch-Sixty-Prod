@@ -44,7 +44,9 @@ extension QuietZoneVirtualMicWiringTests {
         let defaults = UserDefaults(suiteName: "QuietZoneHeadFollowTests.\(UUID().uuidString)")!
         return FeatureFlags(
             known: FeatureFlag.all, defaults: defaults, policy: .launchArgumentOnly,
-            arguments: on.isEmpty ? [] : ["-NotchSixtyFeatures", on.joined(separator: ",")])
+            // The three E4 survey flags graduated (G16): the list is the exact set that is on, the rest are off.
+            arguments: ["-NotchSixtyFeatures", (on + ["e4.virtual-microphone", "e4.head-position-camera", "e4.zones"]
+                .filter { !on.contains($0) }.map { "-" + $0 }).joined(separator: ",")])
     }
 
     private func attachFollow(_ rig: Rig, _ head: HeadRig) throws -> QuietZoneHeadFollowController {
@@ -233,7 +235,7 @@ extension QuietZoneVirtualMicWiringTests {
         QuietZoneFlagWiring.attachHeadFollow(
             to: nil, flags: headFlags(["e4.head-position-camera"]), source: head.factory())
         XCTAssertTrue(head.made.isEmpty)
-        XCTAssertFalse(FeatureFlag.headPositionCamera.graduated)
+        XCTAssertTrue(FeatureFlag.headPositionCamera.graduated)
     }
 
     func testSavingNeedsALivePoseAndMatchingTonesAndNearbySeatsReplace() async throws {

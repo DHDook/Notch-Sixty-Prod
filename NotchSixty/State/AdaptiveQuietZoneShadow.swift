@@ -11,6 +11,24 @@ struct AdaptiveQuietZoneSeed: Equatable, Sendable {
     var rightOutput: ActiveQuietZoneComplex
     /// E26 S3b: how this tone's L/R split was solved (free unless a sub is in the path and the flag is on).
     var bassMode: BassPlantConditioningMode = .free
+    /// E4 G18: surveyed ears the tone was designed for (one seat, or two zones) and other seats that must not get
+    /// louder. Empty = adapt on the monitor error alone.
+    var ears: [AdaptiveQuietZoneSeedPoint] = []
+    var limitSeats: [AdaptiveQuietZoneSeedPoint] = []
+}
+
+/// E4 G18: a surveyed point away from the monitor: its noise is `ratio` times the monitor's, and each speaker
+/// reaches it by `left` and `right`.
+struct AdaptiveQuietZoneSeedPoint: Equatable, Sendable {
+    var ratio: ActiveQuietZoneComplex
+    var left: ActiveQuietZoneComplex
+    var right: ActiveQuietZoneComplex
+}
+
+/// E4 G18: a seed point reduced to what the core needs, with the split's path (leftShare left + rightShare right).
+struct AdaptiveQuietZoneShadowPoint: Equatable, Sendable {
+    var ratio: ActiveQuietZoneComplex
+    var path: ActiveQuietZoneComplex
 }
 
 /// One adaptive tone: a single complex weight W drives the left and right
@@ -40,6 +58,15 @@ struct AdaptiveQuietZoneShadowTone: Equatable, Sendable {
             && close(leftShare, other.leftShare)
             && close(rightShare, other.rightShare)
             && bassMode == other.bassMode
+            && Self.samePoints(ears, other.ears, close: close)
+            && Self.samePoints(limitSeats, other.limitSeats, close: close)
+    }
+
+    private static func samePoints(
+        _ a: [AdaptiveQuietZoneShadowPoint], _ b: [AdaptiveQuietZoneShadowPoint],
+        close: (ActiveQuietZoneComplex, ActiveQuietZoneComplex) -> Bool
+    ) -> Bool {
+        a.count == b.count && zip(a, b).allSatisfy { close($0.ratio, $1.ratio) && close($0.path, $1.path) }
     }
 
     static func sameDesign(_ a: [AdaptiveQuietZoneShadowTone], _ b: [AdaptiveQuietZoneShadowTone]) -> Bool {
@@ -58,6 +85,9 @@ struct AdaptiveQuietZoneShadowTone: Equatable, Sendable {
     var rightPath = ActiveQuietZoneComplex(real: 0, imaginary: 0)
     /// E26 S3b: common mode keeps the shares equal (validated by the core); Tikhonov scales the leakage term.
     var bassMode: BassPlantConditioningMode = .free
+    /// E4 G18: the ears the weight adapts for and the other seats it must not worsen (see the core header).
+    var ears: [AdaptiveQuietZoneShadowPoint] = []
+    var limitSeats: [AdaptiveQuietZoneShadowPoint] = []
 
     static func tones(from seeds: [AdaptiveQuietZoneSeed]) -> [AdaptiveQuietZoneShadowTone] {
         seeds
@@ -85,7 +115,13 @@ struct AdaptiveQuietZoneShadowTone: Equatable, Sendable {
                     offlineMagnitude: norm,
                     leftPath: seed.leftPath,
                     rightPath: seed.rightPath,
-                    bassMode: seed.bassMode
+                    bassMode: seed.bassMode,
+                    ears: seed.ears.prefix(Int(N60_REMOTE_TONAL_MAX_EARS)).map {
+                        AdaptiveQuietZoneShadowPoint(ratio: $0.ratio, path: left * $0.left + right * $0.right)
+                    },
+                    limitSeats: seed.limitSeats.prefix(Int(N60_REMOTE_TONAL_MAX_LIMIT_SEATS)).map {
+                        AdaptiveQuietZoneShadowPoint(ratio: $0.ratio, path: left * $0.left + right * $0.right)
+                    }
                 )
             }
     }
