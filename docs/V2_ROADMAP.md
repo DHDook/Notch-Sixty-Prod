@@ -169,10 +169,12 @@ which lists the first items and says it splits into three or four slices.
 - [ ] Prompt when the response has moved away from the measured one, and offer to re-measure
 - [ ] The microphone is used only while the user has switched this on; state that clearly
 
-## Undecided items
+## Conditional and undecided items
 
-- Review item E31 (signal-path and history view) and cut candidates C1–C10 are undecided; they stay
-  where they are until the owner decides.
+- E20 multirate (decimated low-frequency regions) leaves v1 if the E20 S8 re-measurement shows no
+  need (owner, 11 Nov 2026). It gets an epic here only if a later measurement shows a need.
+- Cut candidates C1, C2, C4, C5, C7 and C8 from the review are undecided; they stay in v1 until the
+  owner decides. The signal-path and history view is in v1 as E31.
 
 ## How to start
 

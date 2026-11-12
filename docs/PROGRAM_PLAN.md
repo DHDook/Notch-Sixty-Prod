@@ -26,14 +26,14 @@ with them, these decisions win until E1/E21 update `AGENTS.md`.
 | New engine quality (20 Oct 2026) | The unified graph is at least equal to `N60RenderKernel` in every area and better where it can be; the kernel stays as a frozen fallback until E23 deletes it before v1 |
 | Preview release (11 Nov 2026) | Rejected. No preview or early release: v1 ships only when every scoped epic is complete and right |
 | Private beta (11 Nov 2026) | Rejected. The owner does the beta testing; no TestFlight or NDA beta before launch |
-| Roadmap review (11 Nov 2026) | Approved: E17 widened to output integrity and interchange; E15 source-rate investigation, connection switching, wireless defaults and schedules; E14 v1 is one upmix with one strength control (modes and tuning are v2); E16 two tiers; E18 named slices; E12 simple and expert modes; E9 active-speaker fail-safe check; new epic E30 Everyday listening controls (confirmed by name); the codebase health items under E1, E12, E18, E21 and E23. Not decided: a signal-path and history epic, and any cut from v1 scope (nothing is cut) |
+| Roadmap review (11 Nov 2026) | Approved: E17 widened to output integrity and interchange; E15 source-rate investigation, connection switching, wireless defaults and schedules; E14 v1 is one upmix with one strength control (modes and tuning are v2); E16 two tiers; E18 named slices; E12 simple and expert modes; E9 active-speaker fail-safe check; new epic E30 Everyday listening controls (confirmed by name); the codebase health items under E1, E12, E18, E21 and E23. Later the same day: new epic E31 Signal path and history is in v1; cut candidate C3 accepted (E20 multirate leaves v1 if the S8 re-measurement shows no need); the other cut candidates are not decided, so nothing else is cut |
 | Red nightly rule (11 Nov 2026) | A failing nightly `macos-full` on `main` is fixed before the next slice starts (`CLAUDE.md`, `/next` step 0) |
 | Engine code home (11 Nov 2026) | New engine C or C++ goes in `core/`, never in `NotchSixty/Audio/Realtime` (`CLAUDE.md`; checked by realtime-reviewer) |
 | After v1 (11 Nov 2026) | Post-v1 work is scoped in `docs/V2_ROADMAP.md`. It is not started, and `/next` does not read it, until the owner initiates it |
 
 ## Epics at a glance
 
-Thirty epics in four phases close every gap in the analysis and set the engine up for other
+Thirty-one epics in four phases close every gap in the analysis and set the engine up for other
 platforms; E6 (the unified graph) is the critical path, because eleven later epics build on it.
 
 | ID | Epic | Phase | Depends on | Where the work happens | Done when |
@@ -65,6 +65,7 @@ platforms; E6 (the unified graph) is the critical path, because eleven later epi
 | E17 | Output integrity and interchange (was Export and dither) | 4 | E8, E10 | Claude Code (Mac) | MiniDSP, APO, WAV, FIR, biquad and CamillaDSP exports; REW, FRD, ZMA and APO import; device format shown; automatic dither |
 | E29 | Shared room position model | 4 | see `docs/epics/E29.md` | Claude Code (Mac) | One room position model feeds correction, treatment and Quiet Zone |
 | E30 | Everyday listening controls | 4 | E15, E17 (dither, for software volume) | Claude Code (Mac) | House curves, quick controls, volume features and per-app rules reachable from the Dashboard and the menu bar |
+| E31 | Signal path and history | 4 | E6, E12, E17 (output integrity), E30 | Claude Code (Mac) | One view shows every stage with rate, bit depth, latency, gain and headroom and says when the path is bit-exact; undo, redo and named snapshots with level-matched comparison on every page |
 | E23 | Legacy engine removal | 4 | E6 (incl. S12a–S12h), E4 S11, E7–E17 | Claude Code (Mac) | `N60RenderKernel`, the old N-channel path and the `e6.*` flags are gone; full suite green |
 | E22 | Hardware validation | 4 | all software epics | Bench | Every deferred bench check and owner acceptance check (including those that no longer gate a flag graduation) passes on `main` at every rate |
 | FC | Flag cleanup (owner, 11 Nov 2026) | 4 | E22 | Claude Code (Mac) | Every graduated flag and its dead branch removed in small per-epic PRs; nightly flags-off CI ran while flags existed |
@@ -95,7 +96,7 @@ reviewers compare with Dirac and REW), then engine depth, then breadth.
 8. E7 384 kHz everywhere
 9. E20 Engine performance
 10. E21 Portable C++ core, remaining items
-11. E14 Upmixer, E15 Device-aware profiles, E17 Output integrity and interchange, E16 Automation and remote, then E30 Everyday listening controls (owner, 11 Nov 2026; E30 needs E15 and the E17 dither stage)
+11. E14 Upmixer, E15 Device-aware profiles, E17 Output integrity and interchange, E16 Automation and remote, then E30 Everyday listening controls and E31 Signal path and history (owner, 11 Nov 2026; E30 needs E15 and the E17 dither stage; E31 follows E30)
 12. E23 Legacy engine removal
 13. E29 Shared room position model (owner, 9 Nov 2026: unparked, in v1; plan `docs/epics/E29.md`; flag `e29.room-model`, graduated in S9, removed in FC)
 14. E3 Hardware acceptance, then E22 Hardware validation, then FC flag cleanup, then E18 Launch readiness (owner-led, last) (owner, 11 Nov 2026; FC added 11 Nov 2026, flag graduation: epics graduate their flag instead of removing it; FC1, the flags-off nightly, lands before the first graduation)
@@ -252,7 +253,7 @@ paths, SIMD, multiple threads and the right algorithms. Today the stereo bridge 
 chain once per frame, with no SIMD, on one thread.
 
 - [ ] **Whole-buffer processing:** each stage processes the full buffer instead of the per-frame `N60RenderKernelProcessStereoFrameInContext` call; fuse adjacent stages with templates so audio stays in cache
-- [ ] **Multirate:** run ANC, MIMO room treatment, subwoofer and bass-management processing and low-frequency analysis at decimated rates (32–64× below 384 kHz), with polyphase decimation and interpolation and exact latency accounting
+- [ ] **Multirate:** run ANC, MIMO room treatment, subwoofer and bass-management processing and low-frequency analysis at decimated rates (32–64× below 384 kHz), with polyphase decimation and interpolation and exact latency accounting. Owner, 11 Nov 2026 (cut candidate C3): if the S8 re-measurement shows no stage over its entry threshold, multirate leaves v1, this item closes as not needed, and `e20.multirate` graduates with no regions
 - [~] **SIMD:** Google Highway with runtime dispatch (NEON, SSE, AVX2, AVX-512); vectorise biquad cascades across channels (E20 S3 `e20/simd-biquads-and-loops` built, partial: in-house portable layer `core/src/simd/simd.hpp` (design note 5, replaces Highway) with PEQ, XOVER, PROTECTION half-band, meters, M/S; remaining cascades and loops G14 (owner S10); E20 S4 `e20/fft-and-convolution` (PR #464, needs-owner) added the SIMD complex MAC and the half-band dot product; radix-4 FFT G16 and the x86 FMA default G17 owner S10)
 - [~] **Multiple threads (E20 S5 `e20/parallel-render-core` built, partial: core worker protocol, FIR lane jobs and deterministic join done and bit-identical at 0 to 3 workers; Apple host threads and workgroups built in E20 S6 `e20/audio-workgroups` behind `e20.parallel-render`, dark; the long-tail job built in E20 S6b `e20/fir-tail-job` (#490), dark until E20 S10):** Audio Workgroups on Apple (and the equivalent realtime thread groups elsewhere) for lanes, MIMO and long convolution, with a lock-free job graph and a deterministic join before output
 - [ ] **Right algorithms:** non-uniform partitioned convolution in every FIR path (program FIR, binaural, MIMO), long partitions spread across callbacks, double-precision or state-variable filters at high rates, polyphase sample-rate conversion
@@ -498,6 +499,21 @@ receives the result through the normal snapshot path.
 - [ ] Preference tuning by ear: a short series of level-matched A/B choices that adjusts tilt and bass level, using the Blind Listening machinery (last slice before the ship slice)
 - [ ] Ship slice graduates `e30.everyday` (default on; removal is the FC phase)
 
+### E31 Signal path and history (owner, 11 Nov 2026)
+
+New epic from the roadmap review. No epic file yet: epic-planner writes `docs/epics/E31.md` when
+`/next` reaches it. Flag `e31.signal-path`, graduated by the last slice. Runs after E30. The
+signal-path view reads what the engine already reports through the snapshot and telemetry paths;
+it adds no work to the audio callback.
+
+- [ ] Signal-path view: every stage in order with its sample rate, bit depth, latency, gain and remaining headroom
+- [ ] A clear bit-exact indication: shown only when no stage changes the samples (uses the E17 output-integrity checks)
+- [ ] Undo and redo on every page
+- [ ] Named snapshots of the whole configuration, with restore
+- [ ] Level-matched A/B comparison between two snapshots, using the Blind Listening level matching
+- [ ] Tests: the view matches the running graph at the eight rates; undo and redo restore the exact configuration; snapshot restore goes through the normal rebuild-with-fade path
+- [ ] Ship slice graduates `e31.signal-path` (default on; removal is the FC phase)
+
 ### E23 Legacy engine removal
 
 Owner decision, 20 Oct 2026: the kernel stays behind `e6.legacy-kernel` until late in the roadmap,
@@ -548,7 +564,7 @@ Plan: `docs/epics/FC.md`. Epics graduate their flag at the end (default on, stay
 section 11); this phase removes the flags after the E22 bench, as small per-epic PRs.
 
 - [x] FC1 `fc/flags-off-ci`: nightly `macos-full` runs the suite with graduated flags off as well as on (before the first graduation)
-- [ ] Per-epic removal PRs, in order: E26, E28, E9, E13, E4, E19, E7, E15, E17, E30, E20, E21, E29 (`e6.legacy-kernel` goes with E23)
+- [ ] Per-epic removal PRs, in order: E26, E28, E9, E13, E4, E19, E7, E15, E17, E30, E31, E20, E21, E29 (`e6.legacy-kernel` goes with E23)
 - [ ] Never remove a flag with an open E22 bench item against its feature; live ANC and MIMO keep `LiveTreatmentArm`
 
 ### E18 Launch readiness
@@ -641,5 +657,6 @@ Open questions:
 - [x] If speaker ANC cannot be qualified in time, does v1 wait, or ship with ANC as a labelled preview? v1 waits (owner, 11 Nov 2026)
 - [ ] Target price and trial length
 - [x] Is a private beta acceptable before the launch splash? No; the owner does the beta testing (owner, 11 Nov 2026)
-- [ ] Signal-path and history view (review item E31, flag `e31.signal-path`): not decided, so not in the plan
-- [ ] Cut candidates C1–C10 from the review: not decided, so all stay in v1
+- [x] Signal-path and history view: in v1 as E31 (owner, 11 Nov 2026)
+- [x] Cut candidate C3 (E20 multirate): accepted; it leaves v1 if the S8 re-measurement shows no need (owner, 11 Nov 2026)
+- [ ] Cut candidates C1, C2, C4, C5, C7 and C8 from the review: not decided, so they stay in v1 (C6 and C9 are covered by the E14 and E12 changes; C10 fell away with the preview release)
