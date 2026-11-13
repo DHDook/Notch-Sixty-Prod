@@ -12,6 +12,8 @@ final class SpeakerRoutingTests: XCTestCase {
 
     private func base(rate: Double = 48_000, lanes: Int, subs: Int = 0, lfe: Int? = nil) -> UnifiedGraphConfiguration {
         var c = UnifiedGraphConfiguration(sampleRate: rate, lanes: [UnifiedGraphLane](repeating: UnifiedGraphLane(), count: lanes))
+        // e9.output-protection is graduated (default on), so pin the policy off: these tests count routing stages only.
+        c.outputProtection = nil
         if subs > 0 {
             c.bassManagement = UnifiedGraphBassManagement(
                 lfeLane: lfe, subwoofers: [UnifiedGraphSubwoofer](repeating: UnifiedGraphSubwoofer(), count: subs))
