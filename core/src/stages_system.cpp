@@ -1565,26 +1565,56 @@ void runBass(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) {
     float *lfe = s.lfeLane >= 0 ? lanes[static_cast<uint32_t>(s.lfeLane)] : nullptr;
     const bool clearLfe = lfe != nullptr && s.clearLfe != 0;
     const double invRamp = 1.0 / static_cast<double>(ramp);
-    for (uint32_t i = 0; i < frames; ++i) {
+    // E20 S10 (G14): the split cascades run for lane pairs (one f64x2 per state variable, simd::biquadPair) a chunk at a time;
+    // the bass sum, redirect, LFE and per-sub chains then run per frame as before. Chunks end where a crossover crossfade ends,
+    // so the swap to the incoming instance happens on a chunk boundary. The per-lane sum keeps its order (lane 0, 1, 2 ...), so
+    // the result equals a per-frame run to rounding of the fused multiply-adds (lanes never mix before the sum).
+    constexpr uint32_t kBassChunk = 256;
+    static_assert(5 * sizeof(simd::f64x2) * kBassChunk + 2 * sizeof(double) * kBassChunk <= 32768, "stack scratch");
+    simd::f64x2 xs[kBassChunk], hpv[kBassChunk], lpv[kBassChunk], hnv[kBassChunk], lnv[kBassChunk];
+    double accv[kBassChunk], tv[kBassChunk];
+    for (uint32_t done = 0; done < frames;) {
+        uint32_t n = std::min(kBassChunk, frames - done);
         const bool xf = s.xfX != 0;
-        const double t = xf ? static_cast<double>(ramp - s.xfX + 1) * invRamp : 0.0;
-        double acc = 0.0;
-        for (uint32_t l = 0; l < r.laneCount; ++l) {
-            const double x = ptr[l][i];
-            double hp = x, lp = x;
-            for (uint32_t k = 0; k < s.nHp; ++k) hp = bqRun(s.hp[k], st[l]->hp[k], hp);
-            for (uint32_t k = 0; k < s.nLp; ++k) lp = bqRun(s.lp[k], st[l]->lp[k], lp);
-            if (xf) {
-                double hn = x, ln = x;
-                for (uint32_t k = 0; k < s.nHp; ++k) hn = bqRun(s.hpN[k], st[l]->nhp[k], hn);
-                for (uint32_t k = 0; k < s.nLp; ++k) ln = bqRun(s.lpN[k], st[l]->nlp[k], ln);
-                hp += t * (hn - hp);
-                lp += t * (ln - lp);
-            }
-            acc += lp;
-            ptr[l][i] = static_cast<float>(hp);
+        if (xf) {
+            n = std::min(n, s.xfX);
+            for (uint32_t i = 0; i < n; ++i) tv[i] = static_cast<double>(ramp - s.xfX + i + 1) * invRamp;
         }
-        if (xf && --s.xfX == 0) {  // finished: the incoming instance becomes the live one
+        for (uint32_t i = 0; i < n; ++i) accv[i] = 0.0;
+        for (uint32_t l = 0; l < r.laneCount; l += 2) {
+            const bool two = l + 1 < r.laneCount;
+            BassLane &la = *st[l];
+            BassLane *lb = two ? st[l + 1] : nullptr;
+            float *bufA = ptr[l] + done;
+            float *bufB = two ? ptr[l + 1] + done : bufA;
+            for (uint32_t i = 0; i < n; ++i) xs[i] = simd::toDouble(bufA[i], bufB[i]);
+            std::memcpy(hpv, xs, sizeof(simd::f64x2) * n);
+            std::memcpy(lpv, xs, sizeof(simd::f64x2) * n);
+            for (uint32_t k = 0; k < s.nHp; ++k) simd::biquadPair(s.hp[k], la.hp[k].z1, la.hp[k].z2, lb ? &lb->hp[k].z1 : nullptr, lb ? &lb->hp[k].z2 : nullptr, hpv, n);
+            for (uint32_t k = 0; k < s.nLp; ++k) simd::biquadPair(s.lp[k], la.lp[k].z1, la.lp[k].z2, lb ? &lb->lp[k].z1 : nullptr, lb ? &lb->lp[k].z2 : nullptr, lpv, n);
+            if (xf) {
+                std::memcpy(hnv, xs, sizeof(simd::f64x2) * n);
+                std::memcpy(lnv, xs, sizeof(simd::f64x2) * n);
+                for (uint32_t k = 0; k < s.nHp; ++k) simd::biquadPair(s.hpN[k], la.nhp[k].z1, la.nhp[k].z2, lb ? &lb->nhp[k].z1 : nullptr, lb ? &lb->nhp[k].z2 : nullptr, hnv, n);
+                for (uint32_t k = 0; k < s.nLp; ++k) simd::biquadPair(s.lpN[k], la.nlp[k].z1, la.nlp[k].z2, lb ? &lb->nlp[k].z1 : nullptr, lb ? &lb->nlp[k].z2 : nullptr, lnv, n);
+                for (uint32_t i = 0; i < n; ++i) {
+                    const simd::f64x2 t = simd::splat2(tv[i]);
+                    hpv[i] = simd::fma(t, simd::sub(hnv[i], hpv[i]), hpv[i]);
+                    lpv[i] = simd::fma(t, simd::sub(lnv[i], lpv[i]), lpv[i]);
+                }
+            }
+            for (uint32_t i = 0; i < n; ++i) {
+                accv[i] += simd::lane(lpv[i], 0);
+                bufA[i] = static_cast<float>(simd::lane(hpv[i], 0));
+            }
+            if (two) {
+                for (uint32_t i = 0; i < n; ++i) {
+                    accv[i] += simd::lane(lpv[i], 1);
+                    bufB[i] = static_cast<float>(simd::lane(hpv[i], 1));
+                }
+            }
+        }
+        if (xf && (s.xfX -= n) == 0) {  // finished: the incoming instance becomes the live one
             std::memcpy(s.hp, s.hpN, sizeof s.hp);
             std::memcpy(s.lp, s.lpN, sizeof s.lp);
             for (uint32_t l = 0; l < r.laneCount; ++l) {
@@ -1592,43 +1622,47 @@ void runBass(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) {
                 std::memcpy(st[l]->lp, st[l]->nlp, sizeof st[l]->lp);
             }
         }
-        double v = acc * rampNext(s.redirect);
-        if (lfe != nullptr) {
-            double lf = bqRun(s.lfe, s.lfe2, bqRun(s.lfe, s.lfe1, static_cast<double>(lfe[i])));
-            if (s.xfLfe != 0) {
-                const double ln = bqRun(s.lfeN, s.lfe2n, bqRun(s.lfeN, s.lfe1n, static_cast<double>(lfe[i])));
-                lf += (static_cast<double>(ramp - s.xfLfe + 1) * invRamp) * (ln - lf);
-                if (--s.xfLfe == 0) {
-                    std::memcpy(s.lfe, s.lfeN, sizeof s.lfe);
-                    s.lfe1 = s.lfe1n;
-                    s.lfe2 = s.lfe2n;
-                }
-            }
-            v += lf * rampNext(s.lfeG);
-        } else {
-            if (s.xfLfe != 0 && --s.xfLfe == 0) std::memcpy(s.lfe, s.lfeN, sizeof s.lfe);  // no LFE lane: adopt the design
-            rampNext(s.lfeG);
-        }
-        // One bass sum, then each sub's own gain, polarity and EQ. (The LFE lane may be a sub lane: it is read above.)
-        const double vn = v * s.norm;
-        for (uint32_t q = 0; q < s.nSubs; ++q) {
-            BassSub &b = s.sub[q];
-            double y = vn * (static_cast<double>(rampNext(b.g)) * static_cast<double>(rampNext(b.pol)));
-            for (uint32_t k = 0; k < b.nEq; ++k) {
-                double o = bqRun(b.eq[k], b.z[k], y);
-                if (b.xf[k] != 0) {
-                    const double on = bqRun(b.eqN[k], b.zN[k], y);
-                    o += (static_cast<double>(ramp - b.xf[k] + 1) * invRamp) * (on - o);
-                    if (--b.xf[k] == 0) {
-                        std::memcpy(b.eq[k], b.eqN[k], sizeof b.eq[k]);
-                        b.z[k] = b.zN[k];
+        for (uint32_t j = 0; j < n; ++j) {
+            const uint32_t i = done + j;
+            double v = accv[j] * rampNext(s.redirect);
+            if (lfe != nullptr) {
+                double lf = bqRun(s.lfe, s.lfe2, bqRun(s.lfe, s.lfe1, static_cast<double>(lfe[i])));
+                if (s.xfLfe != 0) {
+                    const double ln = bqRun(s.lfeN, s.lfe2n, bqRun(s.lfeN, s.lfe1n, static_cast<double>(lfe[i])));
+                    lf += (static_cast<double>(ramp - s.xfLfe + 1) * invRamp) * (ln - lf);
+                    if (--s.xfLfe == 0) {
+                        std::memcpy(s.lfe, s.lfeN, sizeof s.lfe);
+                        s.lfe1 = s.lfe1n;
+                        s.lfe2 = s.lfe2n;
                     }
                 }
-                y = o;
+                v += lf * rampNext(s.lfeG);
+            } else {
+                if (s.xfLfe != 0 && --s.xfLfe == 0) std::memcpy(s.lfe, s.lfeN, sizeof s.lfe);  // no LFE lane: adopt the design
+                rampNext(s.lfeG);
             }
-            sub[q][i] = static_cast<float>(y);
+            // One bass sum, then each sub's own gain, polarity and EQ. (The LFE lane may be a sub lane: it is read above.)
+            const double vn = v * s.norm;
+            for (uint32_t q = 0; q < s.nSubs; ++q) {
+                BassSub &b = s.sub[q];
+                double y = vn * (static_cast<double>(rampNext(b.g)) * static_cast<double>(rampNext(b.pol)));
+                for (uint32_t k = 0; k < b.nEq; ++k) {
+                    double o = bqRun(b.eq[k], b.z[k], y);
+                    if (b.xf[k] != 0) {
+                        const double on = bqRun(b.eqN[k], b.zN[k], y);
+                        o += (static_cast<double>(ramp - b.xf[k] + 1) * invRamp) * (on - o);
+                        if (--b.xf[k] == 0) {
+                            std::memcpy(b.eq[k], b.eqN[k], sizeof b.eq[k]);
+                            b.z[k] = b.zN[k];
+                        }
+                    }
+                    y = o;
+                }
+                sub[q][i] = static_cast<float>(y);
+            }
+            if (clearLfe) lfe[i] = 0.0f;
         }
-        if (clearLfe) lfe[i] = 0.0f;
+        done += n;
     }
     for (uint32_t l = 0; l < r.laneCount; ++l) {
         for (uint32_t k = 0; k < s.nHp; ++k) bqFlush(st[l]->hp[k]);
