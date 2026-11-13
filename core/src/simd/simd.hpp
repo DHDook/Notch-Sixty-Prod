@@ -186,6 +186,54 @@ inline void scale(float *buf, uint32_t n, float g) {
     for (; i < n; ++i) buf[i] *= g;
 }
 
+
+// Mix and ramp primitives (E20 S10, G14). Each element gets the same arithmetic in the vector body and the scalar tail
+// (std::fma is correctly rounded, as the vector fma), so the result does not depend on n or on the build.
+// dst[i] = g * x[i]
+inline void mulConst(float *dst, const float *x, float g, uint32_t n) {
+    const f32x4 gv = splat4(g);
+    uint32_t i = 0;
+    for (; i + 4 <= n; i += 4) store4(dst + i, mul(load4(x + i), gv));
+    for (; i < n; ++i) dst[i] = g * x[i];
+}
+// dst[i] = fma(g, x[i], dst[i])
+inline void macConst(float *dst, const float *x, float g, uint32_t n) {
+    const f32x4 gv = splat4(g);
+    uint32_t i = 0;
+    for (; i + 4 <= n; i += 4) store4(dst + i, fma(gv, load4(x + i), load4(dst + i)));
+    for (; i < n; ++i) dst[i] = std::fma(g, x[i], dst[i]);
+}
+// dst[i] = g[i] * x[i]; dst may equal x.
+inline void mulVec(float *dst, const float *x, const float *g, uint32_t n) {
+    uint32_t i = 0;
+    for (; i + 4 <= n; i += 4) store4(dst + i, mul(load4(g + i), load4(x + i)));
+    for (; i < n; ++i) dst[i] = g[i] * x[i];
+}
+// dst[i] = fma(g[i], x[i], dst[i])
+inline void macVec(float *dst, const float *x, const float *g, uint32_t n) {
+    uint32_t i = 0;
+    for (; i + 4 <= n; i += 4) store4(dst + i, fma(load4(g + i), load4(x + i), load4(dst + i)));
+    for (; i < n; ++i) dst[i] = std::fma(g[i], x[i], dst[i]);
+}
+// Linear gain ramp as the stages' rampNext, n samples at once: while `remaining` > 0 each sample is
+// target - step * (remaining after the decrement), one fused rounding, so the last ramp sample is exactly target;
+// afterwards the value holds. Updates cur and remaining as n calls of rampNext would.
+inline void rampFill(float *g, float &cur, float target, float step, uint32_t &remaining, uint32_t n) {
+    const uint32_t active = remaining < n ? remaining : n;
+    const f32x4 ns = splat4(-step), tv = splat4(target);
+    uint32_t i = 0;
+    for (; i + 4 <= active; i += 4) {
+        const float r0 = static_cast<float>(remaining - 1 - i);
+        store4(g + i, fma(ns, make4(r0, r0 - 1.0f, r0 - 2.0f, r0 - 3.0f), tv));
+    }
+    for (; i < active; ++i) g[i] = std::fma(-step, static_cast<float>(remaining - 1 - i), target);
+    if (active != 0) {
+        cur = g[active - 1];
+        remaining -= active;
+    }
+    for (i = active; i < n; ++i) g[i] = cur;
+}
+
 }  // namespace n60::simd
 
 #endif

@@ -82,6 +82,7 @@ void buildChain(Chain &c, uint32_t lanes, bool withCoupling) {
     c.add(N60_STAGE_PEQ, kPeqId, {0, 60, 9, 2, 2, 6000, -6, 0.7f, 0, 250, -3, 1.2f, 0, 1500, 2, 1.5f, 1, 90, -2, 0.9f});
     if (withCoupling && lanes >= 2) c.add(N60_STAGE_MS_DECODE, 6, {}, 0, 1);
     c.add(N60_STAGE_METER_OUT, 9, {});
+    if (withCoupling && lanes >= 2) c.add(N60_STAGE_SYMMETRY, 11, {0.35f}, 0, 1);  // ramps in on the first block (G14)
     // High-pass Linkwitz-Riley 4 at 60 Hz, low-pass off, trim -1 dB, one EQ section.
     c.add(N60_STAGE_XOVER, kXoverId, {2, 4, 60, 3, 0, 0, -1, 0, 0, 0, 0, 0, 0, 1, 0, 3000, 2, 1.1f});
     if (withCoupling) c.add(N60_STAGE_PROTECTION, kProtId, {1, -1, 1, 50, 5, 1, 2});
@@ -207,6 +208,51 @@ void checkPrimitives() {
 }
 
 // Lane independence: chain without coupling stages. Lane k of an N-lane graph equals a 1-lane graph fed lane k's signal.
+// G14: mix and ramp primitives against plain scalar maths (fma contraction as in the stages), every length 0..37.
+void checkMixAndRamp() {
+    using namespace n60::simd;
+    float x[40], g[40], dst[40], ref[40];
+    for (int i = 0; i < 40; ++i) { x[i] = 0.013f * static_cast<float>(i - 17); g[i] = 0.5f + 0.021f * static_cast<float>(i); }
+    for (uint32_t n = 0; n <= 37; ++n) {
+        for (int i = 0; i < 40; ++i) dst[i] = ref[i] = 0.1f * static_cast<float>(i);
+        mulConst(dst, x, 0.7f, n);
+        for (uint32_t i = 0; i < n; ++i) ref[i] = 0.7f * x[i];
+        CHECK(std::memcmp(dst, ref, sizeof dst) == 0, "mulConst n=%u", n);
+        macConst(dst, x, 0.3f, n);
+        for (uint32_t i = 0; i < n; ++i) ref[i] = std::fma(0.3f, x[i], ref[i]);
+        CHECK(std::memcmp(dst, ref, sizeof dst) == 0, "macConst n=%u", n);
+        macVec(dst, x, g, n);
+        for (uint32_t i = 0; i < n; ++i) ref[i] = std::fma(g[i], x[i], ref[i]);
+        CHECK(std::memcmp(dst, ref, sizeof dst) == 0, "macVec n=%u", n);
+        mulVec(dst, dst, g, n);  // in place
+        for (uint32_t i = 0; i < n; ++i) ref[i] = g[i] * ref[i];
+        CHECK(std::memcmp(dst, ref, sizeof dst) == 0, "mulVec n=%u", n);
+    }
+    // rampFill against the scalar rampNext recurrence, split across calls of any size.
+    for (uint32_t total : {1u, 5u, 64u, 200u}) {
+        for (uint32_t chunk : {1u, 3u, 4u, 7u, 16u, 37u}) {
+            float cur = 0.25f, step = (1.5f - cur) / static_cast<float>(total), target = 1.5f;
+            uint32_t rem = total;
+            float rc = cur, rs = step;
+            uint32_t rr = rem;
+            std::vector<float> got, want;
+            for (uint32_t done = 0; done < 3 * total + 5;) {
+                const uint32_t n = std::min(chunk, 3 * total + 5 - done);
+                float buf[40];
+                rampFill(buf, cur, target, step, rem, n);
+                got.insert(got.end(), buf, buf + n);
+                done += n;
+            }
+            for (uint32_t i = 0; i < 3 * total + 5; ++i) {
+                if (rr != 0) { --rr; rc = std::fma(-rs, static_cast<float>(rr), target); }
+                want.push_back(rc);
+            }
+            CHECK(got == want, "rampFill total=%u chunk=%u", total, chunk);
+            CHECK(got[total - 1] == target && rem == 0, "ramp ends exactly on target total=%u", total);
+        }
+    }
+}
+
 void checkLaneIndependence() {
     const double rates[] = {44100, 96000, 384000};
     for (double rate : rates) {
@@ -269,6 +315,7 @@ int main(int argc, char **argv) {
     if (mode == "dump") return dump();
     std::printf("simd backend: %s\n", n60::simd::kBackend);
     checkPrimitives();
+    checkMixAndRamp();
     checkLaneIndependence();
     checkNonFiniteBurst();
     if (failures != 0) { std::fprintf(stderr, "%d failure(s)\n", failures); return 1; }

@@ -19,6 +19,12 @@ constexpr double kPi = 3.14159265358979323846;
 
 size_t alignUp16(size_t v) { return (v + 15) & ~size_t(15); }
 
+uint32_t bitsOf(uint32_t n) {
+    uint32_t b = 0;
+    while ((1u << b) < n) ++b;
+    return b;
+}
+
 bool validSize(uint32_t n) { return n >= 2 && n <= kMaxSize && (n & (n - 1)) == 0; }
 
 const uint16_t *bitrevOf(const PlanHeader *p) {
@@ -55,19 +61,55 @@ void transform(const void *plan, Complex *x) {
         store4(f + 2 * size_t(i), add(lowPairDup(v), mul(highPairDup(v), sgn2)));
     }
     const f32x4 conj = make4(1.0f, -1.0f, 1.0f, -1.0f);
-    for (uint32_t half = 2; half < n; half <<= 1) {
-        const uint32_t len = half << 1;
+    // Remaining stages (half = 2 .. n/2), two at a time: a fused four-point pass (radix-2^2) keeps both butterfly layers in
+    // registers, halving the memory passes. The arithmetic of each butterfly is exactly the radix-2 stage's, so results are
+    // bit-identical to running the stages one by one. An odd stage count runs its first stage alone.
+    uint32_t half = 2;
+    auto twid = [&](const float *w) {
+        f32x4 wv = load4(w);
+        if (Inverse) wv = mul(wv, conj);
+        return wv;
+    };
+    if ((bitsOf(n) - 1) & 1u) {
         const float *w = wf + 2 * size_t(half - 1);
-        for (uint32_t base = 0; base < n; base += len) {
+        for (uint32_t base = 0; base < n; base += 2 * half) {
             float *pa = f + 2 * size_t(base);
             float *pb = pa + 2 * size_t(half);
             for (uint32_t k = 0; k < half; k += 2) {
-                f32x4 wv = load4(w + 2 * size_t(k));
-                if (Inverse) wv = mul(wv, conj);
+                const f32x4 wv = twid(w + 2 * size_t(k));
                 const f32x4 a = load4(pa + 2 * size_t(k));
                 const f32x4 t = cmul(wv, load4(pb + 2 * size_t(k)));
                 store4(pb + 2 * size_t(k), sub(a, t));
                 store4(pa + 2 * size_t(k), add(a, t));
+            }
+        }
+        half <<= 1;
+    }
+    for (; half < n; half <<= 2) {
+        const uint32_t h2 = half << 1;
+        const float *w1 = wf + 2 * size_t(half - 1);   // first layer, k < half
+        const float *w2 = wf + 2 * size_t(h2 - 1);     // second layer, k < 2 half
+        for (uint32_t base = 0; base < n; base += 4 * half) {
+            float *pA = f + 2 * size_t(base);
+            float *pB = pA + 2 * size_t(half);
+            float *pC = pB + 2 * size_t(half);
+            float *pD = pC + 2 * size_t(half);
+            for (uint32_t k = 0; k < half; k += 2) {
+                const size_t o = 2 * size_t(k);
+                const f32x4 wa = twid(w1 + o);
+                const f32x4 wc = twid(w2 + o);
+                const f32x4 wd = twid(w2 + o + 2 * size_t(half));
+                const f32x4 a = load4(pA + o), c = load4(pC + o);
+                const f32x4 tb = cmul(wa, load4(pB + o));
+                const f32x4 td = cmul(wa, load4(pD + o));
+                const f32x4 a1 = add(a, tb), b1 = sub(a, tb);
+                const f32x4 c1 = add(c, td), d1 = sub(c, td);
+                const f32x4 tc = cmul(wc, c1);
+                const f32x4 tdd = cmul(wd, d1);
+                store4(pC + o, sub(a1, tc));
+                store4(pA + o, add(a1, tc));
+                store4(pD + o, sub(b1, tdd));
+                store4(pB + o, add(b1, tdd));
             }
         }
     }
