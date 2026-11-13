@@ -43,7 +43,8 @@ struct MIMOTreatmentRequest: Sendable {
     var tauSeconds = MIMOTreatmentRealisationLimits.recommendedTauSeconds
     /// T_target as a T60, 0.05 to 2 s (D2 supplies the default from the room).
     var decaySeconds = 0.3
-    var taps = 4_096
+    static let defaultTaps = 4_096
+    var taps = MIMOTreatmentRequest.defaultTaps
     var regularisation = 1e-3
     var thermalLimitDB = -6.0
     var causalityLimitDB = -12.0

@@ -1124,8 +1124,8 @@ final class AudioIOEngine {
     /// E19 S6: the graph MIMO treatment controller (stage, permit, arm switch); see `AudioIOEngine+MIMOTreatment.swift`.
     @ObservationIgnored lazy var mimoGraphTreatment: MIMOGraphTreatment = makeMIMOGraphTreatment()
     var mimoPollTask: Task<Void, Never>?
-    /// E19 S6/S7: the room-correction latency mode as the treatment sees it. `.unknown` until E19 S8 sets it; while unknown no
-    /// permit is issued (G30). Known and video: the treatment refuses to arm and no permit is issued.
+    /// E19 S6/S7/S8: the room-correction latency mode as the treatment sees it, refreshed from the installed correction
+    /// (`refreshMIMOVideoLatencyInput`); while unknown no permit is issued (G30). Known and video: no arm and no permit.
     var mimoVideoLatencyInput: MIMOVideoLatencyInput = .unknown
     var mimoVideoLatencyMode: Bool {
         if case .known(let video) = mimoVideoLatencyInput { return video }
