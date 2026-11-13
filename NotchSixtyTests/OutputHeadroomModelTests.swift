@@ -295,6 +295,44 @@ final class OutputHeadroomModelTests: XCTestCase {
         }
     }
 
+    /// E13 S5 (G12): a long BRIR is evaluated whole while it fits `N60_HEADROOM_MAX_FIR_TAPS`; a response longer than that
+    /// is reported incomplete, so the assistant never sizes headroom from an estimate it could not make.
+    func testLongBRIRHeadroomIsCompleteWhileItFitsAndIncompleteBeyondTheFIRLimit() throws {
+        for rate in [48_000.0, 192_000.0, 352_800.0, 384_000.0] {
+            var asset = BinauralProfileAsset.validationStereo(sampleRate: rate)
+            let taps = Int(rate)
+            asset.measurements = asset.measurements.map { source in
+                var m = source
+                func stretch(_ ir: [Float]) -> [Float] {
+                    var out = [Float](repeating: 0, count: taps)
+                    out[0] = ir[0]
+                    out[taps / 2] = 0.3 * ir[0]
+                    return out
+                }
+                m.leftIR = stretch(source.leftIR)
+                m.rightIR = stretch(source.rightIR)
+                return m
+            }
+            asset.tapCount = taps
+            var profile = HeadphoneDeviceProfileConfiguration()
+            profile.programLayout = .fiveOne
+            let spec = try UnifiedGraphTranslator.binauralSpec(
+                asset: asset, layout: .fiveOne, profile: profile, outputChannels: 2, sampleRate: rate,
+                headTracking: false, outputProtection: nil).get()
+            let stage = try XCTUnwrap(spec.stages.first { $0.stageId == N60_LSTAGE_BINAURAL })
+            let total = Int(stage.params[3]) + Int(stage.params[10])
+            let results = analyse(spec, lanes: 2)
+            for ear in 0..<2 {
+                if total <= Int(N60_HEADROOM_MAX_FIR_TAPS) {
+                    XCTAssertTrue(results[ear].isComplete, "response of \(total) taps is evaluated at \(rate)")
+                    XCTAssertGreaterThan(results[ear].peakGainDB, -60, "rate \(rate)")
+                } else {
+                    XCTAssertFalse(results[ear].isComplete, "a response of \(total) taps is incomplete at \(rate)")
+                }
+            }
+        }
+    }
+
     /// Sweeps both program lanes at full scale from 20 Hz to 0.45 fs, as a worst-case programme through the whole graph.
     private func sweepPeaks(_ host: UnifiedGraphHost, rate: Double) throws -> [Float] {
         let seconds = 0.6, f0 = 20.0, f1 = 0.45 * rate

@@ -70,23 +70,7 @@ struct Bq {
 // Each lane's arithmetic is exactly a single-lane run (lanes are independent); fused multiply-adds in both the SIMD and
 // scalar builds. `sb` is null for an odd last lane, whose spare element is a throwaway copy.
 inline void bqRun2(const double *c, Bq &sa, Bq *sb, simd::f64x2 *x, uint32_t n) {
-    using namespace simd;
-    const f64x2 b0 = splat2(c[0]), b1 = splat2(c[1]), b2 = splat2(c[2]), na1 = splat2(-c[3]), na2 = splat2(-c[4]);
-    f64x2 z1 = pair(sa.z1, sb != nullptr ? sb->z1 : sa.z1);
-    f64x2 z2 = pair(sa.z2, sb != nullptr ? sb->z2 : sa.z2);
-    for (uint32_t i = 0; i < n; ++i) {
-        const f64x2 xi = x[i];
-        const f64x2 y = fma(b0, xi, z1);
-        z1 = fma(na1, y, fma(b1, xi, z2));
-        z2 = fma(na2, y, mul(b2, xi));
-        x[i] = y;
-    }
-    sa.z1 = lane(z1, 0);
-    sa.z2 = lane(z2, 0);
-    if (sb != nullptr) {
-        sb->z1 = lane(z1, 1);
-        sb->z2 = lane(z2, 1);
-    }
+    simd::biquadPair(c, sa.z1, sa.z2, sb != nullptr ? &sb->z1 : nullptr, sb != nullptr ? &sb->z2 : nullptr, x, n);
 }
 inline void bqFlush(Bq &s) {
     // E20 S3: denormals are flushed in hardware (platform/fpenv.hpp); only a non-finite burst needs healing.

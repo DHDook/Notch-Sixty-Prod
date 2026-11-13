@@ -32,6 +32,8 @@
 #include <cstring>
 #include <new>
 
+#include "simd/simd.hpp"
+
 namespace n60 {
 namespace {
 
@@ -269,7 +271,51 @@ void clearMatchAll(LdShared &S) {
     S.primed = 0;
 }
 
-void matchSample(LdShared &S, const float *p, float *left, float *right) {
+// E20 S10 (G14): the filters of all three parts run a chunk at a time with the left and right channels in one f64x2
+// (simd::biquadPair), ahead of the per-sample gain, smoothing and telemetry code, which is unchanged. This is valid because the
+// filters read only the audio at their own point in the chain and never the gain feedback, and a part's park state cannot change
+// inside a block while it is enabled (parking needs the part disabled, and every parameter is constant for the block).
+constexpr uint32_t kLdChunk = 256;
+static_assert(sizeof(Bq) == 5 * sizeof(double), "biquadPair reads the five coefficients as an array");
+using simd::f64x2;
+void bqPair(const Bq &c, BqState &l, BqState &r, f64x2 *x, uint32_t n) {
+    simd::biquadPair(&c.b0, l.z1, l.z2, &r.z1, &r.z2, x, n);
+}
+// The float rounding runBq applies to each section's output (the state keeps the double).
+void roundToFloat(f64x2 *x, uint32_t n) {
+    for (uint32_t i = 0; i < n; ++i) x[i] = simd::toDouble(static_cast<float>(simd::lane(x[i], 0)), static_cast<float>(simd::lane(x[i], 1)));
+}
+void loadPair(f64x2 *x, const float *l, const float *r, uint32_t n) {
+    for (uint32_t i = 0; i < n; ++i) x[i] = simd::toDouble(l[i], r[i]);
+}
+void storePair(float *l, float *r, const f64x2 *x, uint32_t n) {
+    for (uint32_t i = 0; i < n; ++i) {
+        l[i] = static_cast<float>(simd::lane(x[i], 0));
+        r[i] = static_cast<float>(simd::lane(x[i], 1));
+    }
+}
+// Filter outputs one chunk ahead of contourSample (simple: a0, a1 = wet left, right; per-band: low L, R, high L, R).
+struct ContourPre {
+    const float *a0, *a1, *a2, *a3;
+};
+
+void unparkContour(LdShared &S) {
+    clearContourSimple(S);
+    clearContourBands(S);
+    S.mix = 0.0f;
+    S.lowGainDb = 0.0f;
+    S.highGainDb = 0.0f;
+    S.contourParked = 0;
+}
+void unparkLeveler(LdShared &S) {
+    clearLevelerFilters(S);
+    S.progMs = S.bandMs = S.voiceEnv = S.modPrev = S.modHpOut = S.modLpOut = S.modMs = 0.0f;
+    S.boostDb = 0.0f;
+    S.levParked = 0;
+}
+
+// `instant` is the K-weighted mean square of this frame, valid when a measurement is needed (computed by the chunk pre-pass).
+void matchSample(LdShared &S, const float *p, float *left, float *right, double instant) {
     const bool enabled = p[kMatchOn] > 0.5f;
     const bool integrated = p[kContourOn] > 0.5f && p[kPerBand] > 0.5f && p[kLevelSource] > 0.5f;
     const bool measurementNeeded = enabled || integrated;
@@ -280,11 +326,6 @@ void matchSample(LdShared &S, const float *p, float *left, float *right) {
     }
     float measuredLufs = -120.0f;
     if (measurementNeeded) {
-        double wl = runBqD(S.kHp, S.kHpL, static_cast<double>(*left));
-        wl = runBqD(S.kShelf, S.kShL, wl);
-        double wr = runBqD(S.kHp, S.kHpR, static_cast<double>(*right));
-        wr = runBqD(S.kShelf, S.kShR, wr);
-        const double instant = 0.5 * (wl * wl + wr * wr);
         if (S.primed == 0 && instant > static_cast<double>(kEpsilon)) {
             S.meanSquare = instant;
             S.primed = 1;
@@ -323,7 +364,9 @@ void matchSample(LdShared &S, const float *p, float *left, float *right) {
     *right *= gain;
 }
 
-void contourSample(LdShared &S, const float *p, float *left, float *right) {
+// `meanSquare` is the match part's smoothed mean square after this frame; `pre` is null on the scalar path (a part that is
+// fading out) and otherwise holds the filter outputs for frame j of the chunk.
+void contourSample(LdShared &S, const float *p, float *left, float *right, double meanSquare, const ContourPre *pre, uint32_t j) {
     const float dryL = *left;
     const float dryR = *right;
     const bool enabled = p[kContourOn] > 0.5f;
@@ -332,19 +375,18 @@ void contourSample(LdShared &S, const float *p, float *left, float *right) {
     float master = p[kMasterGain];
     if (!std::isfinite(master) || master < 0.0f) master = 1.0f;
     if (!enabled && S.contourParked != 0) return;
-    if (enabled && S.contourParked != 0) {
-        clearContourSimple(S);
-        clearContourBands(S);
-        S.mix = 0.0f;
-        S.lowGainDb = 0.0f;
-        S.highGainDb = 0.0f;
-        S.contourParked = 0;
-    }
+    if (enabled && S.contourParked != 0) unparkContour(S);
     if (!perBand) {
-        float wetL = runBq(S.lowShelf, S.lowShL, dryL);
-        wetL = runBq(S.highShelf, S.highShL, wetL);
-        float wetR = runBq(S.lowShelf, S.lowShR, dryR);
-        wetR = runBq(S.highShelf, S.highShR, wetR);
+        float wetL, wetR;
+        if (pre != nullptr) {
+            wetL = pre->a0[j];
+            wetR = pre->a1[j];
+        } else {
+            wetL = runBq(S.lowShelf, S.lowShL, dryL);
+            wetL = runBq(S.highShelf, S.highShL, wetL);
+            wetR = runBq(S.lowShelf, S.lowShR, dryR);
+            wetR = runBq(S.highShelf, S.highShR, wetR);
+        }
         float volumeScale = 0.0f;
         const float fullLin = dbToLinear(kFullContourDb);
         const float flatLin = dbToLinear(kFlatContourDb);
@@ -373,11 +415,11 @@ void contourSample(LdShared &S, const float *p, float *left, float *right) {
         *right = dryR + (wetR - dryR) * S.mix;
         return;
     }
-    const float lowL = runBq(S.lowBand, S.lowBandL, dryL);
-    const float lowR = runBq(S.lowBand, S.lowBandR, dryR);
-    const float highL = runBq(S.highBand, S.highBandL, dryL);
-    const float highR = runBq(S.highBand, S.highBandR, dryR);
-    const float measuredLufs = meanSquareLufs(S.meanSquare);
+    const float lowL = pre != nullptr ? pre->a0[j] : runBq(S.lowBand, S.lowBandL, dryL);
+    const float lowR = pre != nullptr ? pre->a1[j] : runBq(S.lowBand, S.lowBandR, dryR);
+    const float highL = pre != nullptr ? pre->a2[j] : runBq(S.highBand, S.highBandL, dryL);
+    const float highR = pre != nullptr ? pre->a3[j] : runBq(S.highBand, S.highBandR, dryR);
+    const float measuredLufs = meanSquareLufs(meanSquare);
     float estimated;
     if (p[kLevelSource] > 0.5f) {
         estimated = p[kRefPhons] + (measuredLufs - kIntegratedRefLufs);
@@ -416,20 +458,22 @@ void contourSample(LdShared &S, const float *p, float *left, float *right) {
     S.mix = clampf(std::fmax(std::fabs(S.lowGainDb), std::fabs(S.highGainDb)) / normalization, 0.0f, 1.0f);
 }
 
-void levelerSample(LdShared &S, const float *p, float *left, float *right) {
+// `dialL`/`dialR` are the band-pass outputs of the chunk pre-pass for frame j (null arrays on the scalar fade-out path).
+void levelerSample(LdShared &S, const float *p, float *left, float *right, const float *dialLs, const float *dialRs, uint32_t j) {
     const bool enabled = p[kLevOn] > 0.5f;
     if (!enabled && S.levParked != 0) return;
-    if (enabled && S.levParked != 0) {
-        clearLevelerFilters(S);
-        S.progMs = S.bandMs = S.voiceEnv = S.modPrev = S.modHpOut = S.modLpOut = S.modMs = 0.0f;
-        S.boostDb = 0.0f;
-        S.levParked = 0;
-    }
+    if (enabled && S.levParked != 0) unparkLeveler(S);
     const float dryL = *left, dryR = *right;
-    float dialL = runBq(S.bandHp, S.hpL, dryL);
-    dialL = runBq(S.bandLp, S.lpL, dialL);
-    float dialR = runBq(S.bandHp, S.hpR, dryR);
-    dialR = runBq(S.bandLp, S.lpR, dialR);
+    float dialL, dialR;
+    if (dialLs != nullptr) {
+        dialL = dialLs[j];
+        dialR = dialRs[j];
+    } else {
+        dialL = runBq(S.bandHp, S.hpL, dryL);
+        dialL = runBq(S.bandLp, S.lpL, dialL);
+        dialR = runBq(S.bandHp, S.hpR, dryR);
+        dialR = runBq(S.bandLp, S.lpR, dialR);
+    }
     const float programPower = 0.5f * (dryL * dryL + dryR * dryR);
     const float dialoguePower = 0.5f * (dialL * dialL + dialR * dialR);
     S.progMs = smoothToward(S.progMs, programPower, S.detectorPole);
@@ -563,10 +607,70 @@ void runLoudness(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frame
     if (p[kMatchAttack] != S.seen[kMatchAttack] || p[kMatchRelease] != S.seen[kMatchRelease]) designMatch(S, rate, p);
     if (p[kStrength] != S.seen[kStrength]) designContour(S, rate, p);
     if (levelerMoved(S, p)) designLeveler(S, rate, p);
-    for (uint32_t i = 0; i < frames; ++i) {
-        matchSample(S, p, &L[i], &R[i]);
-        contourSample(S, p, &L[i], &R[i]);
-        levelerSample(S, p, &L[i], &R[i]);
+    const bool matchOn = p[kMatchOn] > 0.5f;
+    const bool contourOn = p[kContourOn] > 0.5f;
+    const bool perBand = p[kPerBand] > 0.5f;
+    const bool levOn = p[kLevOn] > 0.5f;
+    const bool measure = matchOn || (contourOn && perBand && p[kLevelSource] > 0.5f);
+    static_assert(2 * sizeof(f64x2) * kLdChunk + 2 * sizeof(double) * kLdChunk + 4 * sizeof(float) * kLdChunk <= 16384, "stack scratch");
+    f64x2 xv[kLdChunk], yv[kLdChunk];
+    double inst[kLdChunk], msv[kLdChunk];
+    float cw[4][kLdChunk];
+    for (uint32_t done = 0; done < frames;) {
+        const uint32_t n = std::min(kLdChunk, frames - done);
+        float *l = L + done, *rr = R + done;
+        // Match: the K-weighting filters need only the stage input.
+        if (measure) {
+            if (S.matchParked != 0) {
+                clearMatchAll(S);
+                S.matchParked = 0;
+            }
+            loadPair(xv, l, rr, n);
+            bqPair(S.kHp, S.kHpL, S.kHpR, xv, n);
+            bqPair(S.kShelf, S.kShL, S.kShR, xv, n);
+            for (uint32_t i = 0; i < n; ++i) {
+                const double wl = simd::lane(xv[i], 0), wr = simd::lane(xv[i], 1);
+                inst[i] = 0.5 * (wl * wl + wr * wr);
+            }
+        }
+        for (uint32_t i = 0; i < n; ++i) {
+            matchSample(S, p, &l[i], &rr[i], measure ? inst[i] : 0.0);
+            msv[i] = S.meanSquare;
+        }
+        // Contour: filters run ahead while it is enabled (it cannot park inside the block); a fade-out stays per sample.
+        ContourPre pre{cw[0], cw[1], cw[2], cw[3]};
+        if (contourOn) {
+            if (S.contourParked != 0) unparkContour(S);
+            loadPair(xv, l, rr, n);
+            if (!perBand) {
+                bqPair(S.lowShelf, S.lowShL, S.lowShR, xv, n);
+                roundToFloat(xv, n);
+                bqPair(S.highShelf, S.highShL, S.highShR, xv, n);
+                roundToFloat(xv, n);
+                storePair(cw[0], cw[1], xv, n);
+            } else {
+                std::memcpy(yv, xv, sizeof(f64x2) * n);
+                bqPair(S.lowBand, S.lowBandL, S.lowBandR, xv, n);
+                roundToFloat(xv, n);
+                storePair(cw[0], cw[1], xv, n);
+                bqPair(S.highBand, S.highBandL, S.highBandR, yv, n);
+                roundToFloat(yv, n);
+                storePair(cw[2], cw[3], yv, n);
+            }
+        }
+        for (uint32_t i = 0; i < n; ++i) contourSample(S, p, &l[i], &rr[i], msv[i], contourOn ? &pre : nullptr, i);
+        // Leveler: the dialogue band filters run ahead while it is enabled.
+        if (levOn) {
+            if (S.levParked != 0) unparkLeveler(S);
+            loadPair(xv, l, rr, n);
+            bqPair(S.bandHp, S.hpL, S.hpR, xv, n);
+            roundToFloat(xv, n);
+            bqPair(S.bandLp, S.lpL, S.lpR, xv, n);
+            roundToFloat(xv, n);
+            storePair(cw[0], cw[1], xv, n);
+        }
+        for (uint32_t i = 0; i < n; ++i) levelerSample(S, p, &l[i], &rr[i], levOn ? cw[0] : nullptr, levOn ? cw[1] : nullptr, i);
+        done += n;
     }
     store(S, kTLufs, meanSquareLufs(S.meanSquare));
     store(S, kTMatch, S.matchGainDb);
