@@ -41,23 +41,26 @@ static n60_graph *build(double rate, uint32_t maxBlock, n60_stage_desc *st, uint
 }
 
 // Impulse, then silence. Returns false on any subnormal output; sets settled when the last block is exactly zero.
-static void runTail(n60_graph *g, double rate, bool &subnormal, bool &settled) {
+static float gLastPeak = 0.0f;
+static void runTail(n60_graph *g, double rate, bool &subnormal, bool &settled, double seconds = 1.5) {
     constexpr uint32_t N = 512;
     std::vector<float> l(N, 0.0f), r(N, 0.0f), ol(N), orr(N);
     const float *in[2] = {l.data(), r.data()};
     float *out[2] = {ol.data(), orr.data()};
     subnormal = false;
     settled = false;
-    const long blocks = static_cast<long>(rate * 1.5 / N) + 1;
+    const long blocks = static_cast<long>(rate * seconds / N) + 1;
     for (long b = 0; b < blocks; b++) {
         if (b == 0) { l[0] = 0.5f; r[0] = -0.5f; } else { l[0] = r[0] = 0.0f; }
         if (n60_graph_process(g, in, out, N) != N60_STATUS_OK) { CHECK(false, "process"); return; }
         bool allZero = true;
+        float peak = 0.0f;
         for (uint32_t i = 0; i < N; i++) {
             if (std::fpclassify(ol[i]) == FP_SUBNORMAL || std::fpclassify(orr[i]) == FP_SUBNORMAL) subnormal = true;
             if (ol[i] != 0.0f || orr[i] != 0.0f) allZero = false;
+            peak = std::fmax(peak, std::fmax(std::fabs(ol[i]), std::fabs(orr[i])));
         }
-        if (b == blocks - 1) settled = allZero;
+        if (b == blocks - 1) { settled = allZero; gLastPeak = peak; }
     }
 }
 
@@ -137,7 +140,7 @@ int main() {
             const float pg[5] = {-90, 6, 10, 5, 5};
             struct Case { const char *name; uint32_t kind; const float *p; uint32_t np; bool pair; bool exactZero; } cases[] = {
                 {"cleanup", N60_STAGE_CLEANUP, clean, 26, true, false}, {"image", N60_STAGE_IMAGE, img, 8, true, true},
-                {"loudness", N60_STAGE_LOUDNESS, ld, 32, true, false}, {"multiband", N60_STAGE_MULTIBAND, mb, 29, true, false},
+                {"loudness", N60_STAGE_LOUDNESS, ld, 32, true, true}, {"multiband", N60_STAGE_MULTIBAND, mb, 29, true, true},
                 {"crosstalk", N60_STAGE_CROSSTALK, xt, 2, true, true}, {"headphone", N60_STAGE_HEADPHONE, hp, 11, true, true},
                 {"pause gate", N60_STAGE_PAUSE_GATE, pg, 5, false, true}};
             for (const Case &c : cases) {
@@ -148,10 +151,11 @@ int main() {
                 CHECK(g != nullptr, "%s build %.0f", c.name, rate);
                 if (!g) continue;
                 bool sub, settled;
-                runTail(g, rate, sub, settled);
+                runTail(g, rate, sub, settled, 1.5);
                 CHECK(!sub, "%s subnormal output at %.0f", c.name, rate);
-                // CLEANUP, LOUDNESS and MULTIBAND carry slow detectors and gated noise floors that do not reach exact zero in 1.5 s (E20 G16);
-                // they are held to the no-subnormal rule only.
+                // E20 G18: LOUDNESS and MULTIBAND settle to exact zero. CLEANUP keeps a gated noise floor (kEps 1e-12 in the denoiser
+                // detector) that leaves a constant residual near 2.1e-12 (-234 dBFS) at every rate; the recorded bound is 1e-11.
+                if (std::strcmp(c.name, "cleanup") == 0) CHECK(gLastPeak < 1.0e-11f, "cleanup residual %g at %.0f", gLastPeak, rate);
                 if (c.exactZero) CHECK(settled, "%s not settled to zero at %.0f", c.name, rate);
                 n60_graph_retire(g);
             }

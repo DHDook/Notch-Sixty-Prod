@@ -446,6 +446,102 @@ static void tailJobTests(const double *rates, size_t rateCount, bool lite) {
     }
 }
 
+
+// ---- E20 G23: rebuild fade with workers, budget refusal, worker changes mid-run, long phases, 32+ lanes ----
+
+struct G23Case {
+    const char *name;
+    uint32_t lanes;
+    uint32_t stages;      // consecutive FIR stages, each on every lane
+    uint32_t taps;
+    float fadeMs;         // rebuild crossfade length
+    float cpuBudgetPct;   // 0 = off; tiny = every rebuild refused
+    bool changeWorkers;   // retune set_workers between blocks
+};
+
+// Renders blocks, publishing a different filter set mid-run, and returns every output sample. workers < 0 means no host.
+static bool renderG23(const G23Case &C, double rate, int workers, std::vector<float> &out, uint64_t *refused) {
+    std::vector<std::vector<float>> tapsA(C.stages), tapsB(C.stages);
+    for (uint32_t i = 0; i < C.stages; i++) { tapsA[i] = makeTaps(C.taps, 100 + i); tapsB[i] = makeTaps(C.taps, 900 + i); }
+    n60_stage_desc stA[16], stB[16];
+    for (uint32_t i = 0; i < C.stages; i++) {
+        stA[i] = firStage(1 + i, tapsA[i].data(), C.taps, 0);
+        stB[i] = firStage(1 + i, tapsB[i].data(), C.taps, 0);
+    }
+    n60_graph_desc d{};
+    d.structSize = sizeof d;
+    d.abiVersion = N60_GRAPH_ABI_VERSION;
+    d.sampleRate = rate;
+    d.maxBlockFrames = 256;
+    d.inputChannels = d.outputChannels = C.lanes;
+    d.firScheme = N60_FIR_SCHEME_NONUNIFORM;
+    d.stages = stA;
+    d.stageCount = C.stages;
+    n60_graph *g = nullptr;
+    if (n60_graph_build(&d, &g) != N60_STATUS_OK) return false;
+    n60_rebuild_options ro{sizeof ro, C.fadeMs, C.cpuBudgetPct, 0};
+    n60_graph_set_rebuild_options(g, &ro);
+    Host host;
+    if (workers >= 0) host.start(g, static_cast<uint32_t>(workers));
+    std::vector<std::vector<float>> in(C.lanes), o(C.lanes);
+    fill(in, 8192, 9);
+    for (auto &v : o) v.assign(256, 0.0f);
+    std::vector<const float *> ip(C.lanes);
+    std::vector<float *> op(C.lanes);
+    out.clear();
+    // Enough blocks to finish the warm-up (the latency) and a 20 ms fade at every rate.
+    const uint32_t total = static_cast<uint32_t>(rate * 0.25 / 256.0) + 12;
+    for (uint32_t blk = 0; blk < total; blk++) {
+        for (uint32_t c = 0; c < C.lanes; c++) { ip[c] = in[c].data() + ((blk * 256) % 7000); op[c] = o[c].data(); }
+        if (blk == 4) { d.stages = stB; n60_graph_publish(g, &d); }
+        if (C.changeWorkers && workers > 0) {
+            const uint32_t w = 1 + (blk / 5) % static_cast<uint32_t>(workers);  // moves between 1 and `workers` while rendering
+            n60_graph_set_workers(g, w);
+        }
+        if (n60_graph_process(g, ip.data(), op.data(), 256) != N60_STATUS_OK) { if (workers >= 0) host.stop(); n60_graph_retire(g); return false; }
+        for (uint32_t c = 0; c < C.lanes; c++) out.insert(out.end(), o[c].begin(), o[c].end());
+        n60_graph_collect(g);
+    }
+    n60_rebuild_status rs{};
+    rs.structSize = sizeof rs;
+    if (refused && n60_graph_get_rebuild_status(g, &rs) == N60_STATUS_OK) *refused = rs.refused;
+    if (workers >= 0) host.stop();
+    n60_graph_retire(g);
+    return true;
+}
+
+static void g23Tests(const double *rates, size_t rateCount, bool lite) {
+    const G23Case cases[] = {
+        {"nonzero fade rebuild", 6, 2, 3000, 20.0f, 0.0f, false},
+        {"worker count changes mid-run", 6, 2, 3000, 20.0f, 0.0f, true},
+        {"nine consecutive FIR stages", 4, 9, 600, 20.0f, 0.0f, false},
+        {"32 lanes", 32, 1, 2000, 20.0f, 0.0f, false},
+        {"40 lanes", 40, 1, 2000, 20.0f, 0.0f, false},
+        {"budget refusal resets", 6, 2, 3000, 20.0f, 0.0001f, false},
+    };
+    for (const G23Case &C : cases) {
+        for (size_t ri = 0; ri < rateCount; ri++) {
+            const double rate = rates[ri];
+            if (lite && rate != 48000 && rate != 384000) continue;
+            gWhere = C.name;
+            gRate = rate;
+            std::printf("test_parallel: G23 %s at %.0f Hz\n", C.name, rate);
+            std::fflush(stdout);
+            std::vector<float> ref, got;
+            uint64_t refRef = 0, refGot = 0;
+            CHECK(renderG23(C, rate, -1, ref, &refRef), "%s ref build", C.name);
+            for (int w = 1; w <= 3; w++) {
+                CHECK(renderG23(C, rate, w, got, &refGot), "%s w%d build", C.name, w);
+                CHECK(got.size() == ref.size() && std::memcmp(got.data(), ref.data(), ref.size() * sizeof(float)) == 0,
+                      "%s rate %.0f workers %d: output differs from single thread", C.name, rate, w);
+                CHECK(refGot == refRef, "%s rate %.0f workers %d: refused %llu vs %llu", C.name, rate, w,
+                      static_cast<unsigned long long>(refGot), static_cast<unsigned long long>(refRef));
+            }
+            if (C.cpuBudgetPct > 0.0f) CHECK(refRef > 0, "%s: the tiny CPU budget refused no rebuild", C.name);
+        }
+    }
+}
+
 int main() {
     startWatchdog();
     limitCpus();
@@ -493,6 +589,7 @@ int main() {
     }
 
     tailJobTests(rates, 8, lite);
+    g23Tests(rates, 8, lite);
     oversubscribedRegression();
     parkingRegression();
 

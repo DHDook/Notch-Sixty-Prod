@@ -30,6 +30,10 @@ clang++ -std=c++20 -O2 -Wall -Wextra -Werror -Icore/include core/tests/test_para
 "$TMP/test_parallel"
 # E20 S6b (G26): the same test pinned to two cores, three workers plus the render thread contending for them.
 N60_PARALLEL_TEST_CPUS=2 N60_PARALLEL_TEST_LITE=1 "$TMP/test_parallel"
+# E20 G19: PROTECTION half-band path against the 65-tap double-precision form.
+clang++ -std=c++20 -O2 -Wall -Wextra -Werror -Icore/include core/tests/test_protection_halfband.cpp \
+  "${LIB[@]}" -o "$TMP/test_protection_halfband"
+"$TMP/test_protection_halfband"
 # E20 S10b (G33): lane-parallel PROTECTION is bit-identical to the serial stage at 1 to 3 workers.
 clang++ -std=c++20 -O2 -Wall -Wextra -Werror -Icore/include core/tests/test_protection_parallel.cpp \
   "${LIB[@]}" -pthread -o "$TMP/test_protection_parallel"

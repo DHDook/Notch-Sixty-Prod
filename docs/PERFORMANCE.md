@@ -24,7 +24,7 @@ budgets for the portable engine core (`libn60core`). Harness: `core/bench/n60_be
 | R7 | ANC lane feed, offline compute only (workflow build, `-DN60_BENCH_ANC`); nothing reaches a device |
 
 - Gate (macos-full): fail above 1.5x the committed baseline, warn above 1.2x. Budgets in
-  `core/bench/budgets.json` warn only until `--enforce-budgets` (turned on by E20 S10).
+  `core/bench/budgets.json` are enforced in `macos-full` (`--enforce-budgets --workers 2`, E20 S10).
 - Per-stage cost: `N60_GRAPH_PROFILE` builds (`n60_bench_profile`) record ns per lane-sample for each
   stage kind. The hooks are compiled out of product builds; `core/tests/test_profile.cpp` asserts the
   symbols are absent there.
@@ -106,11 +106,25 @@ R1 and R4 were measured before the binaural convolver was converted; R5 after. R
 Protection and the FIR dominate the full chain; S3 (SIMD, section loops) and S4 (FFT, convolution)
 target them, and S5/S7 spread or decimate the rest.
 
-## Budgets (E20 Q1)
+## Budgets (E20 Q1, enforced since E20 S10)
 
-`core/bench/budgets.json`: R1 mean 0.25, R1 p99.9 0.5, R1 fade 2x 0.8, R2 mean 0.5, R3 mean 0.5.
-Today R2 (352.8 kHz) and R3 (352.8, 384 kHz) exceed the 0.5 mean budget on a single thread. The R2/R3
-fade budget is judged on the critical path with workers (S5, S6, S10), not on the single-thread run.
+`core/bench/budgets.json`: R1 mean 0.25, R1 p99.9 0.5, R1 fade 2x 0.8 (single thread, `ref` rows); R2 mean 0.5, R2 fade 2x
+0.8, R3 mean 0.5 (judged on the `refw` rows: the caller's time with two worker threads, `n60_bench --workers 2`, so the
+parallel render counts). `macos-full` runs `n60_bench ... --enforce-budgets --workers 2`; a breach fails the step, and so
+does an R7 row missing from the JSON (the workflow build passes `-DN60_BENCH_ANC`). R3 has no fade entry yet (gap G33).
+
+Published table (Apple M4, -O3, one core for `ref`, caller plus two workers for `refw`, mean load %, reference block):
+
+| Row | 44.1 | 48 | 88.2 | 96 | 176.4 | 192 | 352.8 | 384 | Budget |
+|---|---|---|---|---|---|---|---|---|---|
+| R1 ref | 1.7 | 1.5 | 2.7 | 3.0 | 5.5 | 6.0 | 11.1 | 12.1 | 25 |
+| R2 refw | 2.7 | 2.7 | 4.5 | 5.0 | 8.8 | 9.6 | 17.2 | 18.8 | 50 |
+| R3 refw | 5.2 | 5.6 | 9.5 | 10.4 | 18.6 | 19.5 | 34.4 | 40.4 | 50 |
+| R3 ref (single thread) | 5.1 | 5.5 | 10.1 | 11.1 | 20.9 | 21.7 | 38.9 | 49.2 | not judged |
+
+R3 at 384 kHz gains little from workers (the serial PROTECTION stage dominates), so its fade rule (twice the mean under
+80%) is not met on this machine: 2 x 40.4% is 80.8%. These are local M4 numbers, not the M1 target or a CI runner; the
+CI baseline and M1 re-measurement are E22 items.
 
 ## Release optimisation
 
