@@ -6,6 +6,7 @@
 #define N60_CORE_STAGES_SYSTEM_HPP
 
 #include "snapshot.hpp"
+#include "jobs.hpp"
 #include "platform/rt.hpp"
 
 namespace n60 {
@@ -23,6 +24,15 @@ void systemInit(SnapHeader *h, const StageRec &r);
 
 // Realtime thread. Runs the stage in place over `frames` frames of the output lanes.
 void runSystem(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) N60_RT_NONBLOCKING;
+
+// Realtime thread. E20 S10b: PROTECTION with its lanes as jobs (oversample and clip per lane, the limiter across lanes on
+// this thread, then limiter output and downsample per lane). Bit-identical to runSystem. False (nothing done) when the stage
+// cannot run that way (bypass, no oversampling, the gain rider engaged); the caller then runs it serially.
+bool systemProtectionParallel(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames, JobHost &jobs) N60_RT_NONBLOCKING;
+// Control thread (snapshot build). True when the stage can ever run through systemProtectionParallel (static parameters).
+bool systemProtectionEligible(const SnapHeader *h, const StageRec &r);
+// Any thread. One lane job of a PROTECTION step (mode 1: up, clip; mode 2: down).
+void systemProtectionJob(void *ctx, uint32_t mode, uint32_t lane) N60_RT_NONBLOCKING;
 
 // Pure range and liveness check for one parameter (see validateParam).
 n60_status validateSystemParam(const SnapHeader *h, const StageRec &r, uint32_t idx, float value) N60_RT_NONBLOCKING;
