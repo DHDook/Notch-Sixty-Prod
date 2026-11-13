@@ -68,6 +68,8 @@ final class MIMOGraphTreatment: ObservableObject {
         /// Per-output trim (dB) of every graph lane, program lanes then sub lanes.
         var outputTrimsDB: [Double]
         var laneCount: Int
+        /// E19 S9: digest of the routing's ROUTE entries and way parameters (`MIMORoutedTreatmentPlanner.digest`); empty when unrouted.
+        var routedDigest = ""
     }
 
     let arm = LiveTreatmentArm(feature: .mimoRoomTreatment)
@@ -129,17 +131,18 @@ final class MIMOGraphTreatment: ObservableObject {
 
     static func fingerprint(
         stage: UnifiedGraphMIMOStage, outputUID: String?, trimsDB: [Double], laneCount: Int, tapDigest: String? = nil,
-        chainDigest: String = ""
+        chainDigest: String = "", routedDigest: String = ""
     ) -> String {
         let digest = tapDigest ?? Self.tapDigest(stage)
         let trims = trimsDB.map { String(format: "%.3f", $0) }.joined(separator: ",")
         let sources = stage.sourceLanes.map(String.init).joined(separator: ",")
-        return [
+        return ([
             digest, "src=" + sources,
             "tau=\(stage.tauFrames)", "D=\(stage.filters.decimation)", "T=\(stage.filters.tapCount)",
             "rate=\(stage.filters.sampleRate)", "uid=\(outputUID ?? "-")", "lanes=\(laneCount)", "trim=" + trims,
             "support=" + stage.supportRangesHz.map { String(format: "%.2f", $0) }.joined(separator: ","), "chain=" + chainDigest,
-        ].joined(separator: "|")
+        ] + (routedDigest.isEmpty ? [] : ["routed=" + routedDigest])
+        ).joined(separator: "|")
     }
 
     // MARK: Staging
@@ -160,7 +163,7 @@ final class MIMOGraphTreatment: ObservableObject {
     func currentFingerprint(_ stage: UnifiedGraphMIMOStage, _ context: Context) -> String {
         Self.fingerprint(
             stage: stage, outputUID: context.outputDeviceUID, trimsDB: context.outputTrimsDB, laneCount: context.laneCount,
-            tapDigest: tapDigest, chainDigest: chainDigest)
+            tapDigest: tapDigest, chainDigest: chainDigest, routedDigest: context.routedDigest)
     }
 
     private func post(_ next: UnifiedGraphMIMOStage) {
