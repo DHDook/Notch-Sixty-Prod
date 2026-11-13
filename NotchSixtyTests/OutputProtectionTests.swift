@@ -141,7 +141,7 @@ final class OutputProtectionTests: XCTestCase {
         addTeardownBlock { defaults.removePersistentDomain(forName: suite) }
         return FeatureFlags(
             known: FeatureFlag.all, defaults: defaults, policy: .launchArgumentOnly,
-            arguments: on ? ["-NotchSixtyFeatures", "e9.output-protection"] : [])
+            arguments: ["-NotchSixtyFeatures", on ? "e9.output-protection" : "-e9.output-protection"])
     }
 
     // MARK: Closing the S5 tests
@@ -254,10 +254,15 @@ final class OutputProtectionTests: XCTestCase {
         }
     }
 
-    func testFlagOffOutputIsBitIdenticalWhateverTheSettings() throws {
+    @MainActor func testFlagOffOutputIsBitIdenticalWhateverTheSettings() throws {
         let previous = UnifiedGraphOutputProtection.apply(settings: OutputProtectionSettings(
             independent: true, lanes: [2: .init(enabled: false, ceilingDB: -9)]))
-        defer { UnifiedGraphOutputProtection.apply(settings: previous) }
+        defer {
+            UnifiedGraphOutputProtection.apply(settings: previous)
+            UnifiedGraphOutputProtection.refresh()
+        }
+        // The flag is graduated (default on), so force it off explicitly.
+        UnifiedGraphOutputProtection.refresh(try flags(on: false))
         for rate in Self.rates {
             var plain = make(rate: rate, user: user(), policy: nil)
             var viaDefault = make(rate: rate, user: user(), policy: nil)

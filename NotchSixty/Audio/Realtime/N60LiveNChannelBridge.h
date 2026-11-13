@@ -211,13 +211,15 @@ static inline N60LiveNChannelBridge * _Nullable N60LiveNChannelBridgeCreate(
     bridge->inputMap = inputMap;
     bridge->graph = graph;
     // Output loudness needs each program role mapped to physical channels. A routed session has lanes: it measures the
-    // roles whose speaker lanes the plan names (E28 S9) and has no Output when none do.
+    // roles whose speaker lanes the plan names (E28 S9) and has no Output when none do and it has no sub lane.
     // E9 S10: driven subwoofer feeds (legacy kernel subs, or 5 to 8 graph subs) follow the program roles. A routed
-    // session's sub-sourced lanes are its sub feeds (E9 S10b).
+    // session's sub-sourced lanes are its sub feeds (E9 S10b). A routed plan with only sub lanes still has an Output plane
+    // (silent roles plus the feeds), and a lane shared by a program and a sub speaker counts as both (E9 S8, G31).
     bridge->loudnessSubFeedCount = 0u;
     for (uint32_t lane = 0; lane < graph.outputMap.routedLaneCount
          && bridge->loudnessSubFeedCount < N60_LOUDNESS_CAPTURE_MAX_SUB_FEEDS; ++lane) {
         if (graph.outputMap.routedLaneIsSub[lane] == 0u) continue;
+        if (graph.outputMap.physicalChannelForRoutedLane[lane] == N60_LIVE_PHYSICAL_CHANNEL_UNMAPPED) continue;
         bridge->loudnessSubFeedPhysical[bridge->loudnessSubFeedCount++] = graph.outputMap.physicalChannelForRoutedLane[lane];
     }
     if (graph.outputMap.routedLaneCount == 0u) {
@@ -238,7 +240,8 @@ static inline N60LiveNChannelBridge * _Nullable N60LiveNChannelBridgeCreate(
     bridge->loudnessCapture = N60LoudnessCaptureCreate(
         graph.programLayout.channelCount,
         (graph.outputMap.routedLaneCount == 0u
-            || N60LiveNChannelOutputMapRoutedHasProgramLane(&graph.outputMap))
+            || N60LiveNChannelOutputMapRoutedHasProgramLane(&graph.outputMap)
+            || bridge->loudnessSubFeedCount > 0u)
             ? graph.programLayout.channelCount + bridge->loudnessSubFeedCount : 0u,
         graph.sampleRate
     );

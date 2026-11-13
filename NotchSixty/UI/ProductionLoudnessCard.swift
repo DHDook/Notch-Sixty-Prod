@@ -25,9 +25,9 @@ enum LoudnessCardText {
         + "Output is taken after the render, protection and master gain; subwoofer feeds are not included. On a routed output map each program channel is "
         + "the sum of its speaker's output lanes."
 
-    /// Shown when a routed output map has no speaker lane that carries a program channel (sub or matrix-only routing).
+    /// Shown when a routed output map has no lane that carries a program channel or a subwoofer feed (matrix-only routing).
     static let wideOutputUnavailableNote = "Output loudness is not measured here, because none of the routed output lanes "
-        + "carries a program channel on its own (subwoofer and matrix-only outputs are not measured). Choose Input."
+        + "carries a program channel or a subwoofer feed (matrix-only outputs are not measured). Choose Input."
 }
 
 enum LoudnessSource: String, CaseIterable, Identifiable {

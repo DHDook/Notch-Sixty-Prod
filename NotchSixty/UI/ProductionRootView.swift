@@ -267,6 +267,7 @@ struct ProductionRootView: View {
     @State private var commandError: String?
     @State private var showingGuidedSetup = false
     @State private var failsafeVerdict: ActiveSpeakerFailsafe.Verdict = .safe
+    @ObservedObject private var defaultOutput = DefaultOutputMonitor.shared
 
     private var engine: AudioIOEngine { product.audioEngine }
 
@@ -303,7 +304,7 @@ struct ProductionRootView: View {
             return
         }
         failsafeVerdict = ActiveSpeakerFailsafe.verdict(
-            routing, defaultOutputUID: CoreAudioDefaultOutputDeviceReader().defaultOutputDeviceUID(),
+            routing, defaultOutputUID: defaultOutput.hasRead ? defaultOutput.defaultOutputUID : nil,
             devices: engine.outputDevices)
     }
 
@@ -351,7 +352,13 @@ struct ProductionRootView: View {
                 .toolbar { toolbar }
         }
         .frame(minWidth: minimumWindowWidth, minHeight: 680)
-        .task { refreshFailsafe() }
+        .task {
+            // E9 S8 (G28): a Core Audio listener keeps the default output current; the read runs off the main thread.
+            defaultOutput.start()
+            refreshFailsafe()
+        }
+        .onChange(of: defaultOutput.defaultOutputUID) { _, _ in refreshFailsafe() }
+        .onChange(of: defaultOutput.hasRead) { _, _ in refreshFailsafe() }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             refreshFailsafe()
         }
