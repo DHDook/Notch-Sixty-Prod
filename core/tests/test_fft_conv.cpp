@@ -241,12 +241,24 @@ int dump() {
 }
 }  // namespace
 
+// E20 G20: complex plan twiddles are stored per stage (n - 1 entries), so a plan is about 10 bytes per point
+// (8 for twiddles, 2 for the bit-reversal table). At the largest sizes that stays under 330 KiB per complex plan
+// and 500 KiB per real plan (a 65,536-point real transform), small beside the 262,144-tap FIR spectra a snapshot holds.
+static void checkPlanMemory() {
+    const size_t big = n60::fft::planBytes(n60::fft::kMaxSize);
+    const size_t real = n60::fft::realPlanBytes(2 * n60::fft::kMaxSize);
+    std::printf("plan bytes: complex %u points %zu, real %u points %zu\n", n60::fft::kMaxSize, big, 2 * n60::fft::kMaxSize, real);
+    CHECK(big <= size_t(n60::fft::kMaxSize) * 10 + 256, "complex plan bytes %zu", big);
+    CHECK(real <= 500u * 1024u, "real plan bytes %zu", real);
+}
+
 int main(int argc, char **argv) {
     const std::string mode = argc > 1 ? argv[1] : "check";
     if (mode == "dump") return dump();
     checkComplex();
     checkReal();
     checkNonFinite();
+    checkPlanMemory();
     if (failures == 0) std::printf("fft_conv ok\n");
     return failures == 0 ? 0 : 1;
 }

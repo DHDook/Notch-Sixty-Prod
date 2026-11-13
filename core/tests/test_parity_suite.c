@@ -15,7 +15,7 @@
  *
  * N60_PARITY_FULL=1 runs the full corpus at all eight rates and prints render timings (macos-full);
  * otherwise the short corpus runs at 48, 192 and 384 kHz (pr.yml). Apple-only: the binaural stage uses
- * the platform FFT, so the goldens are pinned to the macOS arm64 toolchain. */
+ * the platform FFT, so the goldens are pinned to the macOS arm64 toolchain. N60_PARITY_NO_GOLDENS=1 skips them (RTSan on Linux). */
 #define _POSIX_C_SOURCE 200809L
 #include <math.h>
 #include <stdint.h>
@@ -395,7 +395,10 @@ int main(void) {
         testLiveEdit(rate, N60_LAYOUT_5_1);
         testReferenceLab(rate);
     }
-    testGoldens(0);
+    /* E20 G11: N60_PARITY_NO_GOLDENS=1 skips only the platform-pinned hashes, so the front-pair, live-edit and reference-lab
+     * checks (every stage, every rate) run portably under RealtimeSanitizer on Linux (macos-full core-rtsan). */
+    const char *noGold = getenv("N60_PARITY_NO_GOLDENS");
+    if (!(noGold && noGold[0] == '1')) testGoldens(0);
     if (failures) {
         fprintf(stderr, "%d failure(s)\n", failures);
         return 1;

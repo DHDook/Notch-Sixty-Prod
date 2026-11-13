@@ -92,11 +92,12 @@ jobs:
           "$OUT/multisub" | grep '^benchmark' | tee -a "$OUT/benchmarks.txt"
           echo "=== non-uniform convolution ===" | tee -a "$OUT/benchmarks.txt"
           "$OUT/convolution" | tee -a "$OUT/benchmarks.txt"
-          # E20 S1: regressions above 1.5x of core/bench/baseline-macos-arm64.json fail the step; budget
-          # breaches only warn until E20 S10 adds --enforce-budgets. JSON goes to the uploaded artifact.
+          # E20 S1: regressions above 1.5x of core/bench/baseline-macos-arm64.json fail the step. E20 S10 (G3, G4, G6):
+          # budgets are enforced; R2 and R3 are judged with two worker threads (the critical path), and R7 must be in the
+          # JSON (the build passes -DN60_BENCH_ANC). JSON goes to the uploaded artifact.
           echo "=== graph render benchmark ===" | tee -a "$OUT/benchmarks.txt"
           "$OUT/n60_bench" --out "$OUT/bench.json" --baseline core/bench/baseline-macos-arm64.json \
-            --budgets core/bench/budgets.json | tee -a "$OUT/benchmarks.txt"
+            --budgets core/bench/budgets.json --enforce-budgets --workers 2 | tee -a "$OUT/benchmarks.txt"
           "$OUT/n60_bench_profile" --profile-only --out "$OUT/bench-profile.json" > /dev/null
 
       - name: Upload logs and benchmarks
@@ -124,6 +125,30 @@ jobs:
 
       - name: Build and test libn60core (clang, Linux)
         run: ci/run_core_linux.sh
+
+  # E20 G23: the parallel render under ThreadSanitizer (workers, join, rebuild fade, worker retune). Lite corpus: the
+  # sanitizer slows the render about tenfold.
+  core-tsan:
+    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-ci')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Parallel render test under ThreadSanitizer
+        run: |
+          set -euo pipefail
+          source ci/core_sources.sh
+          LIB=()
+          for f in "${CORE_SOURCES[@]}"; do
+            obj="$RUNNER_TEMP/tsan_${f//\//_}.o"
+            clang++ -std=c++20 -O1 -g -fsanitize=thread -Wno-unknown-warning-option -fno-exceptions -fno-rtti \
+              -Icore/include -Icore/src -c core/src/$f.cpp -o "$obj"
+            LIB+=("$obj")
+          done
+          clang++ -std=c++20 -O1 -g -fsanitize=thread -Icore/include core/tests/test_parallel.cpp "${LIB[@]}" -pthread \
+            -o "$RUNNER_TEMP/tsan_parallel"
+          N60_PARALLEL_TEST_LITE=1 TSAN_OPTIONS=halt_on_error=1 "$RUNNER_TEMP/tsan_parallel"
 
   # E20 S2: RealtimeSanitizer. Apple's clang does not ship -fsanitize=realtime, so the core tests run on Linux with
   # upstream LLVM 20 (apt.llvm.org; CI only, nothing shipped; owner decision Q6, 9 Nov 2026). Every function the audio
@@ -163,7 +188,13 @@ jobs:
             $CXX $SAN "$RUNNER_TEMP/rtsan_$t.o" "${LIB[@]}" -lm -pthread -o "$RUNNER_TEMP/rtsan_$t"
             "$RUNNER_TEMP/rtsan_$t"
           done
-          for t in test_alloc test_fpenv test_conv_rebuild; do
+          # E20 G11: the whole-graph parity suite (goldens skipped: they are pinned to the Apple FFT) and the portable half-band test.
+          for t in test_parity_suite; do
+            $CC -std=c11 -O1 -g -Wall -Wextra -Werror -Icore/include -c core/tests/$t.c -o "$RUNNER_TEMP/rtsan_$t.o"
+            $CXX $SAN "$RUNNER_TEMP/rtsan_$t.o" "${LIB[@]}" -lm -pthread -o "$RUNNER_TEMP/rtsan_$t"
+            N60_PARITY_NO_GOLDENS=1 "$RUNNER_TEMP/rtsan_$t"
+          done
+          for t in test_alloc test_fpenv test_conv_rebuild test_protection_halfband; do
             $CXX -std=c++20 -O1 -g -Wall -Wextra -Werror $SAN -Icore/include -Icore/src core/tests/$t.cpp \
               "${LIB[@]}" -pthread -o "$RUNNER_TEMP/rtsan_$t"
             "$RUNNER_TEMP/rtsan_$t"

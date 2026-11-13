@@ -26,7 +26,11 @@
 #include <cstring>
 #include <deque>
 #include <fstream>
+#include <condition_variable>
 #include <map>
+#include <mutex>
+#include <atomic>
+#include <thread>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -272,6 +276,7 @@ struct Config {
     double seconds = 0.2;
     int runs = 5;
     bool profile = false, profileOnly = false, enforceBudgets = false, selfTest = false;
+    uint32_t workers = 0;  // E20 S10: R2 and R3 also run on this many worker threads (label "refw"), the budget rows
     std::string out, baseline, budgets;
 };
 
@@ -397,7 +402,50 @@ bool profileAvailable() { return true; }
 bool profileAvailable() { return false; }
 #endif
 
-bool runCell(const std::string &id, double rate, uint32_t frames, const Config &cfg, Cell &cell, bool &finite, std::vector<n60_profile_entry> *prof) {
+// E20 S10 (G4): worker threads for the parallel render, as the Apple host runs them minus Workgroups. The R2/R3 fade
+// and mean budgets are judged on this critical path (the caller's time with workers), not on the single-thread run.
+struct WorkerHost {
+    n60_graph *g = nullptr;
+    std::mutex m;
+    std::condition_variable cv;
+    std::atomic<uint64_t> epoch{0};
+    std::atomic<bool> quit{false};
+    std::vector<std::thread> threads;
+    static void wake(void *ctx, uint32_t) {
+        WorkerHost *h = static_cast<WorkerHost *>(ctx);
+        { std::lock_guard<std::mutex> lk(h->m); h->epoch.fetch_add(1); }
+        h->cv.notify_all();
+    }
+    void start(n60_graph *graph, uint32_t n) {
+        g = graph;
+        n60_graph_set_wake(g, &WorkerHost::wake, this);
+        n60_graph_set_workers(g, n);
+        for (uint32_t w = 1; w <= n; ++w) {
+            threads.emplace_back([this, w] {
+                uint64_t seen = 0;
+                for (;;) {
+                    {
+                        std::unique_lock<std::mutex> lk(m);
+                        cv.wait(lk, [&] { return quit.load() || epoch.load() != seen; });
+                        if (quit.load()) return;
+                        seen = epoch.load();
+                    }
+                    n60_graph_worker_run(g, w);
+                }
+            });
+        }
+    }
+    void stop() {
+        n60_graph_set_workers(g, 0);
+        { std::lock_guard<std::mutex> lk(m); quit = true; }
+        cv.notify_all();
+        for (auto &t : threads) t.join();
+        threads.clear();
+        n60_graph_set_wake(g, nullptr, nullptr);
+    }
+};
+
+bool runCell(const std::string &id, double rate, uint32_t frames, const Config &cfg, Cell &cell, bool &finite, std::vector<n60_profile_entry> *prof, uint32_t workers = 0) {
     finite = true;
     if (id == "R7") {
 #ifdef N60_BENCH_ANC
@@ -412,7 +460,10 @@ bool runCell(const std::string &id, double rate, uint32_t frames, const Config &
     const n60_graph_desc *d = b.layoutGraph ? &b.desc : b.finish();
     const n60_status s = n60_graph_build(d, &g);
     if (s != N60_STATUS_OK || g == nullptr) { std::fprintf(stderr, "scenario %s at %.0f: build status %d\n", id.c_str(), rate, static_cast<int>(s)); return false; }
+    WorkerHost host;
+    if (workers != 0) host.start(g, workers);
     const bool ok = timeGraph(g, b.lanes, rate, frames, cfg, cell, finite);
+    if (workers != 0) host.stop();
     if (ok && prof != nullptr && profileAvailable()) {
         profReset();
         Config one = cfg;
@@ -492,8 +543,11 @@ Gate compareBudgets(const Results &cur, const Results &bud, bool enforce) {
     Gate g;
     for (const auto &kv : cur) {
         const size_t a = kv.first.find('/'), b = kv.first.find('/', a + 1), c = kv.first.find('/', b + 1);
-        if (c == std::string::npos || kv.first.compare(b + 1, c - b - 1, "ref") != 0) continue;
+        if (c == std::string::npos) continue;
         std::string scn = kv.first.substr(0, a);
+        // R2 and R3 are judged on the critical path with workers ("refw", E20 S10); the others on the single-thread "ref" row.
+        const char *judged = (scn == "R2" || scn == "R3") ? "refw" : "ref";
+        if (kv.first.compare(b + 1, c - b - 1, judged) != 0) continue;
         const std::string metric = kv.first.substr(c + 1);
         if (scn == "R4a" || scn == "R4b") scn = "R4";
         double limit = 0, value = kv.second;
@@ -540,6 +594,12 @@ int selfTest() {
     Results bud = {{"R1/mean", 0.25}, {"R1/p999", 0.5}, {"R1/fade2x", 0.5}};
     SELF(compareBudgets(cur, bud, true).fails == 2, "0.30 mean must break the 0.25 budget and the 0.5 fade rule");
     SELF(compareBudgets(cur, bud, false).fails == 0, "budget breaches only warn without --enforce-budgets");
+    // R2 is judged on the worker row only: a single-thread breach is ignored, a worker-row breach fails when enforcing.
+    Results r2 = {{"R2/48000/ref/mean", 0.9}, {"R2/48000/refw/mean", 0.3}};
+    Results r2bad = {{"R2/48000/ref/mean", 0.3}, {"R2/48000/refw/mean", 0.9}};
+    Results bud2 = {{"R2/mean", 0.5}, {"R2/fade2x", 0.8}};
+    SELF(compareBudgets(r2, bud2, true).fails == 0, "R2 single-thread row is not the judged row");
+    SELF(compareBudgets(r2bad, bud2, true).fails == 2, "R2 worker row over the mean and fade budgets fails");
 
     // 3. Flat JSON round trip.
     writeJson("n60_bench_selftest.json", cur, Config());
@@ -608,6 +668,7 @@ int main(int argc, char **argv) {
         else if (a == "--scenarios") cfg.scenarios = split(next());
         else if (a == "--profile") cfg.profile = true;
         else if (a == "--profile-only") { cfg.profile = cfg.profileOnly = true; }
+        else if (a == "--workers") cfg.workers = static_cast<uint32_t>(std::max(0, std::atoi(next().c_str())));
         else if (a == "--enforce-budgets") cfg.enforceBudgets = true;
         else if (a == "--self-test") cfg.selfTest = true;
         else { std::fprintf(stderr, "unknown argument %s\n", a.c_str()); return 2; }
@@ -649,6 +710,36 @@ int main(int argc, char **argv) {
                     res[k] = double(e.ns) / double(e.laneFrames);
                 }
             }
+        }
+    }
+    // E20 S10 (G4): the critical path with workers, reference block only, for the scenarios whose budget is judged there.
+    if (cfg.workers != 0 && !cfg.profileOnly) {
+        for (const std::string &id : cfg.scenarios) {
+            if (id != "R2" && id != "R3") continue;
+            for (double rate : cfg.rates) {
+                Cell cell;
+                bool finite = true;
+                const uint32_t frames = refFrames(rate);
+                if (!runCell(id, rate, frames, cfg, cell, finite, nullptr, cfg.workers) || !finite) {
+                    std::fprintf(stderr, "scenario %s rate %.0f with %u workers did not run\n", id.c_str(), rate, cfg.workers);
+                    ++errors;
+                    continue;
+                }
+                res[key(id, rate, "refw", "mean")] = cell.mean;
+                res[key(id, rate, "refw", "p999")] = cell.p999;
+                res[key(id, rate, "refw", "max")] = cell.max;
+                std::printf("%-4s %7.0f Hz %-6s %4u frames  mean %6.2f%%  p99.9 %6.2f%%  max %6.2f%%  (%u workers)\n", id.c_str(), rate, "refw", frames,
+                            100 * cell.mean, 100 * cell.p999, 100 * cell.max, cfg.workers);
+            }
+        }
+    }
+    // E20 S10 (G6): enforcing needs R7 (ANC lane feed) in the JSON, so a workflow build that lost -DN60_BENCH_ANC fails loudly.
+    if (cfg.enforceBudgets) {
+        for (const std::string &id : cfg.scenarios) {
+            if (id != "R7") continue;
+            bool have = false;
+            for (const auto &kv : res) if (kv.first.compare(0, 3, "R7/") == 0) have = true;
+            if (!have) { std::fputs("FAIL R7 missing from the results (build with -DN60_BENCH_ANC)\n", stderr); ++errors; }
         }
     }
     writeJson(cfg.out, res, cfg);
