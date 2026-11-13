@@ -1316,12 +1316,27 @@ void runCrossfeed(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t fram
     }
     float *a = lanes[r.laneA];
     float *b = lanes[r.laneB];
-    for (uint32_t i = 0; i < frames; ++i) {
-        const float c = rampNext(s.a);
-        const float d = 1.0f - c;
-        const float l = a[i], rr = b[i];
-        a[i] = d * l + c * rr;
-        b[i] = d * rr + c * l;
+    // E20 S10 part 4 (G14): the blend ramp is filled a chunk at a time and the blend runs four frames per step:
+    // a = fma(d, l, c * r), b = fma(d, r, c * l) with d = 1 - c, the same arithmetic in the vector body and the tail.
+    float cv[kSymChunk];
+    for (uint32_t done = 0; done < frames;) {
+        const uint32_t n = std::min(kSymChunk, frames - done);
+        simd::rampFill(cv, s.a.cur, s.a.target, s.a.step, s.a.remaining, n);
+        float *pa = a + done, *pb = b + done;
+        uint32_t i = 0;
+        const simd::f32x4 one = simd::splat4(1.0f);
+        for (; i + 4 <= n; i += 4) {
+            const simd::f32x4 c = simd::load4(cv + i), d = simd::sub(one, c);
+            const simd::f32x4 l = simd::load4(pa + i), rr = simd::load4(pb + i);
+            simd::store4(pa + i, simd::fma(d, l, simd::mul(c, rr)));
+            simd::store4(pb + i, simd::fma(d, rr, simd::mul(c, l)));
+        }
+        for (; i < n; ++i) {
+            const float c = cv[i], d = 1.0f - c, l = pa[i], rr = pb[i];
+            pa[i] = std::fma(d, l, c * rr);
+            pb[i] = std::fma(d, rr, c * l);
+        }
+        done += n;
     }
 }
 

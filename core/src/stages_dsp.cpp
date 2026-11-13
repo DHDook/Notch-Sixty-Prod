@@ -32,6 +32,7 @@
 #include "conv/nufir.hpp"
 #include "fft.hpp"
 #include "halfband.hpp"
+#include "simd/simd.hpp"
 
 namespace n60 {
 namespace {
@@ -74,6 +75,45 @@ float biquad(const double c[5], double z[2], float in) {
     z[0] = n1;
     z[1] = n2;
     return static_cast<float>(y);
+}
+
+// E20 S10 part 4 (G14): the detector side-chain high-pass of every lane over frames [base, base + cn), lane pairs at a time
+// through simd::biquadPair (one f64x2 per state variable), written to out[lane][0..cn). It replaces the per-sample biquad()
+// call and is valid when the filter input does not depend on this chunk's gain (no feedback detector). biquad() resets a
+// section whose result is not finite and outputs 0 for that sample; the pair form has no such branch, so a lane whose chunk
+// produced a non-finite value is restored from the saved state and re-run sample by sample with biquad() (rare path, bounded
+// by the chunk). Allocation: none (1 KB of stack). Latency 0. Rate and channel independent.
+constexpr uint32_t kSideChunk = 64;
+// G39: the hosts start render workers with a 512 KB stack (AudioWorkgroupWorkerPool); each stage's chunk scratch stays far below
+// it. The side-chain high-pass output of every lane is the largest new piece here (16 KB at 64 lanes).
+static_assert(kSideChunk * N60_GRAPH_MAX_CHANNELS * sizeof(float) <= 16 * 1024, "side-chain chunk scratch stays small on the stack");
+void sidechainHp(const double c[5], double *const *z, const float *const *in, uint32_t n, uint32_t base, uint32_t cn,
+                 float (*out)[kSideChunk]) {
+    simd::f64x2 x[kSideChunk];
+    for (uint32_t l = 0; l < n; l += 2) {
+        const bool two = l + 1 < n;
+        const double sa0 = z[l][0], sa1 = z[l][1], sb0 = two ? z[l + 1][0] : 0.0, sb1 = two ? z[l + 1][1] : 0.0;
+        for (uint32_t i = 0; i < cn; ++i) x[i] = simd::toDouble(in[l][base + i], two ? in[l + 1][base + i] : in[l][base + i]);
+        simd::biquadPair(c, z[l][0], z[l][1], two ? &z[l + 1][0] : nullptr, two ? &z[l + 1][1] : nullptr, x, cn);
+        bool bad[2] = {!std::isfinite(z[l][0]) || !std::isfinite(z[l][1]), two && (!std::isfinite(z[l + 1][0]) || !std::isfinite(z[l + 1][1]))};
+        for (uint32_t i = 0; i < cn; ++i) {
+            const double ya = simd::lane(x[i], 0), yb = simd::lane(x[i], 1);
+            bad[0] = bad[0] || !std::isfinite(ya);
+            bad[1] = bad[1] || (two && !std::isfinite(yb));
+            out[l][i] = static_cast<float>(ya);
+            if (two) out[l + 1][i] = static_cast<float>(yb);
+        }
+        if (bad[0]) {
+            z[l][0] = sa0;
+            z[l][1] = sa1;
+            for (uint32_t i = 0; i < cn; ++i) out[l][i] = biquad(c, z[l], in[l][base + i]);
+        }
+        if (bad[1]) {
+            z[l + 1][0] = sb0;
+            z[l + 1][1] = sb1;
+            for (uint32_t i = 0; i < cn; ++i) out[l + 1][i] = biquad(c, z[l + 1], in[l + 1][base + i]);
+        }
+    }
 }
 
 // E20 S2: quiet tails no longer need hand-written flushes; n60_graph_process runs under a flush-to-zero guard
@@ -301,8 +341,16 @@ void runCompressorX(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t fr
     static_assert(kChunk * kMaxLanes * 3 * sizeof(float) <= 64 * 1024, "chunk scratch stays small on the stack");
     float gainA[kMaxLanes][kChunk], gainNoMkA[kMaxLanes][kChunk], sideA[kMaxLanes][kChunk];
     float mixA[kChunk], lsSA[kChunk], lsDA[kChunk];
+    static_assert(kChunk == kSideChunk, "the side-chain high-pass chunk matches the follower chunk");
+    // E20 S10 part 4 (G14): without a feedback detector the side-chain high-pass input is the lane itself, so it runs for
+    // the whole chunk in lane pairs ahead of the gain follower.
+    const bool hpBulk = sh.hasHp != 0 && !feedback;
+    double *zp[kMaxLanes];
+    for (uint32_t l = 0; l < n; ++l) zp[l] = st[l]->z;
+    float hpY[kMaxLanes][kSideChunk];
     for (uint32_t base = 0; base < frames; base += kChunk) {
       const uint32_t cn = std::min(kChunk, frames - base);
+      if (hpBulk) sidechainHp(sh.hp, zp, lp, n, base, cn, hpY);
       bool listenAny = false;
       for (uint32_t c = 0; c < cn; ++c) {
         const uint32_t i = base + c;
@@ -323,7 +371,7 @@ void runCompressorX(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t fr
                 CompLane &ln = *st[l];
                 const float feed = feedback ? db2lin(ln.gainDB) : 1.0f;
                 const float xin = lp[l][i] * feed;
-                const float y = sh.hasHp ? biquad(sh.hp, ln.z, xin) : xin;
+                const float y = hpBulk ? hpY[l][c] : sh.hasHp ? biquad(sh.hp, ln.z, xin) : xin;
                 float d;
                 if (rms) {
                     const double yy = std::min(std::fabs(y), 1e6f);
@@ -438,7 +486,15 @@ void runCompressor(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t fra
     }
     const uint32_t per = linked ? n : 1, groups = linked ? 1 : n;
     float grMax[kMaxLanes] = {};
-    for (uint32_t i = 0; i < frames; ++i) {
+    const bool hpBulk = sh.hasHp != 0 && !feedback;  // E20 S10 part 4 (G14): see runCompressorX
+    double *zp[kMaxLanes];
+    for (uint32_t l = 0; l < n; ++l) zp[l] = st[l]->z;
+    float hpY[kMaxLanes][kSideChunk];
+    for (uint32_t base = 0; base < frames; base += kSideChunk) {
+      const uint32_t cn = std::min(kSideChunk, frames - base);
+      if (hpBulk) sidechainHp(sh.hp, zp, lp, n, base, cn, hpY);
+      for (uint32_t c = 0; c < cn; ++c) {
+        const uint32_t i = base + c;
         for (uint32_t g = 0; g < groups; ++g) {
             CompLane &gs = *st[g * per];
             const float feed = feedback ? db2lin(gs.gainDB) : 1.0f;
@@ -446,7 +502,7 @@ void runCompressor(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t fra
             for (uint32_t k = 0; k < per; ++k) {
                 const uint32_t l = g * per + k;
                 const float xin = lp[l][i] * feed;
-                const float y = sh.hasHp ? biquad(sh.hp, st[l]->z, xin) : xin;
+                const float y = hpBulk ? hpY[l][c] : sh.hasHp ? biquad(sh.hp, st[l]->z, xin) : xin;
                 det = std::max(det, std::fabs(y));
             }
             det = std::min(det, 1e6f);  // keeps an Inf input from poisoning the gain
@@ -465,6 +521,7 @@ void runCompressor(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t fra
             const float gain = db2lin(gs.gainDB);
             for (uint32_t k = 0; k < per; ++k) lp[g * per + k][i] *= gain;
         }
+      }
     }
     for (uint32_t l = 0; l < n; ++l) {
         heal(st[l]->z);
@@ -518,7 +575,14 @@ void runExpanderX(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t fram
     const uint32_t per = linked ? n : 1, groups = linked ? 1 : n;
     float grMax[kMaxLanes] = {};
     float level[kMaxLanes], side[kMaxLanes];
-    for (uint32_t i = 0; i < frames; ++i) {
+    double *zp[kMaxLanes];  // E20 S10 part 4 (G14): the side-chain high-pass runs a chunk at a time in lane pairs (input is the lane)
+    for (uint32_t l = 0; l < n; ++l) zp[l] = st[l]->z;
+    float hpY[kMaxLanes][kSideChunk];
+    for (uint32_t base = 0; base < frames; base += kSideChunk) {
+      const uint32_t cn = std::min(kSideChunk, frames - base);
+      if (sh.hasHp) sidechainHp(sh.hp, zp, lp, n, base, cn, hpY);
+      for (uint32_t c = 0; c < cn; ++c) {
+        const uint32_t i = base + c;
         sh.linkS = linkT + rampC * (sh.linkS - linkT);
         sh.listenSide = rampSnap(sh.listenSide, sideT, rampC);
         sh.listenDelta = rampSnap(sh.listenDelta, deltaT, rampC);
@@ -529,7 +593,7 @@ void runExpanderX(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t fram
             for (uint32_t k = 0; k < per; ++k) {
                 const uint32_t l = g * per + k;
                 ExpLane &ln = *st[l];
-                const float y = sh.hasHp ? biquad(sh.hp, ln.z, lp[l][i]) : lp[l][i];
+                const float y = sh.hasHp ? hpY[l][c] : lp[l][i];
                 float d;
                 if (rms) {
                     const double yy = std::min(std::fabs(y), 1e6f);
@@ -569,6 +633,7 @@ void runExpanderX(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t fram
                 }
             }
         }
+      }
     }
     for (uint32_t l = 0; l < n; ++l) {
         heal(st[l]->gainDB);

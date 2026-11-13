@@ -951,6 +951,8 @@ n60_status n60_graph_read_load(const n60_graph *graph, n60_graph_load *outLoad);
  * n60_graph_set_workers stores an atomic and may also be called while rendering, to lower or raise the live count up
  * to the thread count the host started (E20 S6 retunes it when a new spec is published); it needs no ABI change. Stop and join every worker before n60_graph_retire. A worker spins for the rest of the callback once
  * woken, so ask for no more workers than the cost model says pay off.
+ * Worker stack: stage chunk scratch (BASS_MGMT about 25 KB, LOUDNESS 16 KB, compressor 64 lanes about 82 KB, in separate stages) means a
+ * worker thread needs at least 128 KB of stack; the Apple host starts workers with 512 KB (E20 S10 part 4, G39).
  *
  * The worker count is a ceiling: the caller decides (S1 cost model) whether to ask for workers at all. */
 #define N60_GRAPH_MAX_WORKERS 3u

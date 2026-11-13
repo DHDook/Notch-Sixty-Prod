@@ -26,13 +26,15 @@
 //    a live plain float the mailbox wrote at block start. The band gain reduction is relaxed atomics read by the control
 //    thread.
 //  - latency: 0 frames.
-//  - sample rate: 8 kHz to 768 kHz (tested 44.1 to 384 kHz). Coefficients and filter state are float, as the kernel's, so
-//    the output matches it bit for bit (recorded in the ledger). Decayed state is flushed to zero once per block. At a
+//  - sample rate: 8 kHz to 768 kHz (tested 44.1 to 384 kHz). Coefficients and filter state are double (E23 S1b); the
+//    crossover split runs left and right together with fused multiply-adds (E20 S10 part 4), so the output matches the kernel
+//    to rounding, not bit for bit. Decayed state is flushed to zero once per block. At a
 //    block start a changed parameter redesigns its coefficients (at most 11 biquads: bounded libm, no allocation).
 //    Per-sample log10/pow are kernel-identical (hoisting them is deferred, as for the loudness stage).
 //  - channels: a stereo pair (laneA, laneB), as the kernel.
 //  - reset: a new snapshot starts parked and neutral; enabling from parked clears the state, as the kernel does. State is
 //    not carried across a rebuild (ledger).
+#include "simd/simd.hpp"
 #include "stages_multiband.hpp"
 
 #include <algorithm>
@@ -282,10 +284,21 @@ void clearState(MbShared &S) {
     S.ringPos = 0;
 }
 
-float cascade(const Bq *c, BqState *st, uint32_t n, float in) {
-    double out = static_cast<double>(in);
-    for (uint32_t i = 0; i < n; ++i) out = runBqD(c[i], st[i], out);
-    return static_cast<float>(out);
+// E20 S10 part 4 (G14): `n` cascaded sections for the left and right lane at once over `cn` samples (x element 0 is left, 1 is
+// right), the same per-section arithmetic as runBqD with fused multiply-adds (simd::biquadPair). Double in and out; the callers
+// round to float where the scalar cascade() did, so every lane's result is the single-lane result.
+static_assert(sizeof(Bq) == 5 * sizeof(double), "cascadePair reads the five coefficients as an array");
+void cascadePair(const Bq *c, BqState *sl, BqState *sr, uint32_t n, simd::f64x2 *x, uint32_t cn) {
+    for (uint32_t i = 0; i < n; ++i) simd::biquadPair(&c[i].b0, sl[i].z1, sl[i].z2, &sr[i].z1, &sr[i].z2, x, cn);
+}
+void roundToFloat(simd::f64x2 *x, uint32_t cn) {
+    for (uint32_t i = 0; i < cn; ++i) x[i] = simd::pair(static_cast<double>(static_cast<float>(simd::lane(x[i], 0))), static_cast<double>(static_cast<float>(simd::lane(x[i], 1))));
+}
+void storePair(const simd::f64x2 *x, float *l, float *r, uint32_t cn) {
+    for (uint32_t i = 0; i < cn; ++i) {
+        l[i] = static_cast<float>(simd::lane(x[i], 0));
+        r[i] = static_cast<float>(simd::lane(x[i], 1));
+    }
 }
 
 // E28 S7d, G35: one lookahead delay as block passes. Reads the oldest `n` samples into `out` and writes `in` (non-finite values
@@ -506,28 +519,35 @@ void runMultiband(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t fram
         // Pass 1: the crossover split of the block (the IIR state is sequential, the rest is not).
         float dryLa[kChunk], dryRa[kChunk], lowLa[kChunk], lowRa[kChunk], highLa[kChunk], highRa[kChunk];
         float midLa[kChunk], midRa[kChunk];  // split mode only: the true band-pass mid (E28 G42)
+        simd::f64x2 xin[kChunk], xa[kChunk], xb[kChunk];
         for (uint32_t c = 0; c < cn; ++c) {
-            const float dl = L[base + c], dr = R[base + c];
-            dryLa[c] = dl;
-            dryRa[c] = dr;
-            if (split) {
-                // Band-pass tree: split at the high corner, then split the lower part at the low corner; the high band takes
-                // the low corner's all-pass so the three bands stay phase-consistent and sum flat. Each band holds only its
-                // own range.
-                const float lo2L = cascade(S.lp2, S.lp2L, S.highN, dl);
-                const float lo2R = cascade(S.lp2, S.lp2R, S.highN, dr);
-                lowLa[c] = cascade(S.lowPass, S.lowL, S.lowN, lo2L);
-                lowRa[c] = cascade(S.lowPass, S.lowR, S.lowN, lo2R);
-                midLa[c] = cascade(S.hp1, S.hp1L, S.lowN, lo2L);
-                midRa[c] = cascade(S.hp1, S.hp1R, S.lowN, lo2R);
-                highLa[c] = cascade(S.ap1, S.ap1L, S.apN, cascade(S.highPass, S.highL, S.highN, dl));
-                highRa[c] = cascade(S.ap1, S.ap1R, S.apN, cascade(S.highPass, S.highR, S.highN, dr));
-            } else {
-                lowLa[c] = cascade(S.lowPass, S.lowL, S.lowN, dl);
-                lowRa[c] = cascade(S.lowPass, S.lowR, S.lowN, dr);
-                highLa[c] = cascade(S.highPass, S.highL, S.highN, dl);
-                highRa[c] = cascade(S.highPass, S.highR, S.highN, dr);
-            }
+            dryLa[c] = L[base + c];
+            dryRa[c] = R[base + c];
+            xin[c] = simd::toDouble(dryLa[c], dryRa[c]);
+        }
+        if (split) {
+            // Band-pass tree: split at the high corner, then split the lower part at the low corner; the high band takes
+            // the low corner's all-pass so the three bands stay phase-consistent and sum flat. Each band holds only its
+            // own range.
+            std::memcpy(xa, xin, sizeof(simd::f64x2) * cn);
+            cascadePair(S.lp2, S.lp2L, S.lp2R, S.highN, xa, cn);
+            roundToFloat(xa, cn);
+            std::memcpy(xb, xa, sizeof(simd::f64x2) * cn);
+            cascadePair(S.lowPass, S.lowL, S.lowR, S.lowN, xa, cn);
+            storePair(xa, lowLa, lowRa, cn);
+            cascadePair(S.hp1, S.hp1L, S.hp1R, S.lowN, xb, cn);
+            storePair(xb, midLa, midRa, cn);
+            std::memcpy(xa, xin, sizeof(simd::f64x2) * cn);
+            cascadePair(S.highPass, S.highL, S.highR, S.highN, xa, cn);
+            roundToFloat(xa, cn);
+            cascadePair(S.ap1, S.ap1L, S.ap1R, S.apN, xa, cn);
+            storePair(xa, highLa, highRa, cn);
+        } else {
+            std::memcpy(xa, xin, sizeof(simd::f64x2) * cn);
+            cascadePair(S.lowPass, S.lowL, S.lowR, S.lowN, xa, cn);
+            storePair(xa, lowLa, lowRa, cn);
+            cascadePair(S.highPass, S.highL, S.highR, S.highN, xin, cn);
+            storePair(xin, highLa, highRa, cn);
         }
         // Pass 2: one lookahead for the whole stage. The detectors read the undelayed bands, the audio path the delayed ones,
         // so the bands stay aligned and the crossover sum stays flat. Ring slot 0 holds the mid band in split mode, dry otherwise.

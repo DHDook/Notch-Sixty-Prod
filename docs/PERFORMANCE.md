@@ -92,6 +92,19 @@ compute the dot product only on emitted outputs (decimators) and over the real i
 R1 and R4 were measured before the binaural convolver was converted; R5 after. Radix-4 butterflies and the remaining loop conversions
 (G14) are not in this slice. SIMD and scalar builds stay bit-identical (`ci/run_harnesses.sh` `e20_fft_scalar_parity`).
 
+## After E20 S10 part 4 (G40 re-measure: compressor and expander side-chain high-pass, CROSSFEED, MULTIBAND split, local M4, -O3, reference block, mean load %)
+
+Base is `main` at S10 part 3 (de5689f), after is this slice; one run of three, two seconds each, so figures carry a few percent of noise.
+R1 and R6 contain no dynamics, crossfeed or multiband stage, so the conversions in this part are expected to leave them unchanged.
+
+| Scenario / rate | Before | After | Change |
+|---|---|---|---|
+| R1 48 kHz | 1.52 | 1.44 | -6% (noise) |
+| R1 384 kHz | 11.83 | 11.60 | -2% (noise) |
+| R6 48 kHz | 1.89 | 1.89 | 0% |
+| R6 384 kHz | 14.50 | 14.53 | 0% |
+
+
 ## Hot list (ns per lane-sample, profile build, before S3)
 
 | Scenario / rate | Top stages |
