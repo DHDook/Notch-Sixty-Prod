@@ -45,7 +45,7 @@ struct Chain {
     std::vector<std::vector<float>> keep;
     std::vector<n60_stage_desc> stages;
     n60_graph_desc desc{};
-    void add(uint32_t kind, uint32_t id, std::vector<float> p, uint32_t laneA = N60_LANE_ALL, uint32_t laneB = 0) {
+    void add(uint32_t kind, uint32_t id, std::vector<float> p, uint32_t laneA = N60_LANE_ALL, uint32_t laneB = 0, uint64_t mask = 0) {
         n60_stage_desc s;
         std::memset(&s, 0, sizeof s);
         s.structSize = sizeof s;
@@ -53,6 +53,7 @@ struct Chain {
         s.stageId = id;
         s.laneA = laneA;
         s.laneB = laneB;
+        s.laneMask = mask;
         keep.push_back(std::move(p));
         s.paramCount = static_cast<uint32_t>(keep.back().size());
         s.params = keep.back().empty() ? nullptr : keep.back().data();
@@ -71,7 +72,22 @@ struct Chain {
     }
 };
 
-enum { kPeqId = 5, kXoverId = 7, kProtId = 8 };
+enum { kPeqId = 5, kXoverId = 7, kProtId = 8, kBassId = 12, kLoudId = 13 };
+
+// E20 S10 (G14): the stereo LOUDNESS stage (match, per-band contour from the integrated level, leveler; rank 97) and BASS_MGMT
+// (split on every lane but the sub and LFE, an EQ section on the sub, an LFE lane from four lanes up; rank 130), added in rank
+// order, so the dumps cover both cascades.
+void addLoudness(Chain &c, uint32_t lanes) {
+    if (lanes >= 2) c.add(N60_STAGE_LOUDNESS, kLoudId, {1, 0, -20, 10, 0.5f, 2, 1, 0.6f, 1, 1, 80, 12, 3, 1,
+                                                       1, 0, 300, 3500, 6, 3, 9, 200, 80, 600, -60, 3, 7, 12, 800, 0.1f, 0.5f, 0.3f}, 0, 1);
+}
+void addBass(Chain &c, uint32_t lanes) {
+    if (lanes < 3) return;
+    const uint32_t split = lanes >= 4 ? lanes - 2 : lanes - 1;
+    const float lfeLane = lanes >= 4 ? static_cast<float>(lanes - 1) : -1.0f;
+    c.add(N60_STAGE_BASS_MGMT, kBassId, {80, 0, static_cast<float>(split), lfeLane, 120, -2, 3, 0, 1, 0, 50, 4, 1.0f}, 0, 0,
+          (uint64_t(1) << split) - 1);
+}
 
 // withCoupling: M/S on lanes 0 and 1 and the linked limiter (both couple lanes). Without it every lane is independent.
 void buildChain(Chain &c, uint32_t lanes, bool withCoupling) {
@@ -81,7 +97,9 @@ void buildChain(Chain &c, uint32_t lanes, bool withCoupling) {
     if (withCoupling && lanes >= 2) c.add(N60_STAGE_MS_ENCODE, 4, {}, 0, 1);
     c.add(N60_STAGE_PEQ, kPeqId, {0, 60, 9, 2, 2, 6000, -6, 0.7f, 0, 250, -3, 1.2f, 0, 1500, 2, 1.5f, 1, 90, -2, 0.9f});
     if (withCoupling && lanes >= 2) c.add(N60_STAGE_MS_DECODE, 6, {}, 0, 1);
+    if (withCoupling) addLoudness(c, lanes);
     c.add(N60_STAGE_METER_OUT, 9, {});
+    if (withCoupling) addBass(c, lanes);
     if (withCoupling && lanes >= 2) c.add(N60_STAGE_SYMMETRY, 11, {0.35f}, 0, 1);  // ramps in on the first block (G14)
     // High-pass Linkwitz-Riley 4 at 60 Hz, low-pass off, trim -1 dB, one EQ section.
     c.add(N60_STAGE_XOVER, kXoverId, {2, 4, 60, 3, 0, 0, -1, 0, 0, 0, 0, 0, 0, 1, 0, 3000, 2, 1.1f});
@@ -114,13 +132,20 @@ bool run(double rate, uint32_t lanes, uint32_t block, uint32_t total, bool withC
     for (uint32_t l = 0; l < lanes; ++l) { inp[l] = in[l].data(); outp[l] = ob[l].data(); }
     if (out != nullptr) out->assign(lanes, {});
     uint64_t pos = 0;
-    bool edited = false;
+    bool edited = false, edited2 = false;
     while (pos < total) {
         const uint32_t n = static_cast<uint32_t>(std::min<uint64_t>(block, total - pos));
         if (!edited && pos >= total / 3) {
             const n60_param_record rec[2] = {{kPeqId, 2, -8.0f, 0}, {kXoverId, 2, 120.0f, 0}};
             if (n60_graph_post_params(g, rec, 2) != N60_STATUS_OK) { n60_graph_retire(g); return false; }
             edited = true;
+        }
+        if (!edited2 && pos >= 2 * total / 3) {  // crossover and LFE corner moves (crossfades), then the loudness parts switch off
+            std::vector<n60_param_record> rec;
+            if (withCoupling && lanes >= 3) { rec.push_back({kBassId, 0, 110.0f, 0}); rec.push_back({kBassId, 4, 90.0f, 0}); }
+            if (withCoupling && lanes >= 2) { rec.push_back({kLoudId, 8, 0.0f, 0}); rec.push_back({kLoudId, 14, 0.0f, 0}); }
+            if (!rec.empty() && n60_graph_post_params(g, rec.data(), static_cast<uint32_t>(rec.size())) != N60_STATUS_OK) { n60_graph_retire(g); return false; }
+            edited2 = true;
         }
         for (uint32_t l = 0; l < lanes; ++l) {
             for (uint32_t i = 0; i < n; ++i) in[l][i] = sampleAt(rng[l], laneIds[l], pos + i, rate);
@@ -308,6 +333,60 @@ void checkNonFiniteBurst() {
     }
 }
 
+// G14: BASS_MGMT and LOUDNESS run a chunk (256 frames) at a time, so the output must not depend on the block size: the same
+// programme, with the same edits at sample positions every block size divides, hashes identically for blocks of 1 to 1,000
+// frames (which cross the chunk size in whole and part chunks), at the eight rates and with 3, 4 and 7 lanes.
+uint64_t chunkHash(double rate, uint32_t lanes, uint32_t block, bool simpleStart = false) {
+    const n60_param_record simpleRec = {kLoudId, 8, 0.0f, 0};
+    Chain c;
+    c.add(N60_STAGE_SANITISE, 1, {});
+    addLoudness(c, lanes);
+    addBass(c, lanes);
+    n60_graph *g = nullptr;
+    if (n60_graph_build(c.finish(rate, 1024, lanes), &g) != N60_STATUS_OK) return 0;
+    std::vector<Rng> rng(lanes);
+    for (uint32_t l = 0; l < lanes; ++l) rng[l].s = 0x9E3779B97F4A7C15ull * (l + 1);
+    std::vector<std::vector<float>> in(lanes, std::vector<float>(block)), ob(lanes, std::vector<float>(block));
+    std::vector<const float *> inp(lanes);
+    std::vector<float *> outp(lanes);
+    for (uint32_t l = 0; l < lanes; ++l) { inp[l] = in[l].data(); outp[l] = ob[l].data(); }
+    std::vector<Hash> hl(lanes);  // per lane, so the order does not depend on the block size
+    const uint32_t total = 9000;
+    for (uint32_t pos = 0; pos < total; pos += block) {
+        if (pos == 0 && simpleStart) n60_graph_post_params(g, &simpleRec, 1);
+        if (pos == 3000) {
+            std::vector<n60_param_record> rec = {{kLoudId, 8, 0.0f, 0}};
+            if (lanes >= 3) { rec.push_back({kBassId, 0, 110.0f, 0}); rec.push_back({kBassId, 4, 90.0f, 0}); }
+            n60_graph_post_params(g, rec.data(), static_cast<uint32_t>(rec.size()));
+        }
+        if (pos == 6000) {
+            std::vector<n60_param_record> rec = {{kLoudId, 14, 0.0f, 0}, {kLoudId, 6, 0.0f, 0}, {kLoudId, 0, 0.0f, 0}};
+            n60_graph_post_params(g, rec.data(), static_cast<uint32_t>(rec.size()));
+        }
+        for (uint32_t l = 0; l < lanes; ++l) for (uint32_t i = 0; i < block; ++i) in[l][i] = sampleAt(rng[l], l, pos + i, rate);
+        if (n60_graph_process(g, inp.data(), outp.data(), block) != N60_STATUS_OK) { n60_graph_retire(g); return 0; }
+        for (uint32_t l = 0; l < lanes; ++l) for (uint32_t i = 0; i < block; ++i) hl[l].addf(ob[l][i]);
+    }
+    n60_graph_retire(g);
+    Hash all;
+    for (const Hash &h : hl) all.add(&h.h, sizeof h.h);
+    return all.h;
+}
+
+void checkChunkInvariance() {
+    for (double rate : kRates) {
+        for (uint32_t lanes : {2u, 3u, 4u, 7u}) {
+            for (bool simple : {false, true}) {
+            const uint64_t ref = chunkHash(rate, lanes, 1000, simple);
+            CHECK(ref != 0, "chunk build %g/%u", rate, lanes);
+            for (uint32_t block : {1u, 8u, 50u, 250u, 500u}) {
+                CHECK(chunkHash(rate, lanes, block, simple) == ref, "BASS_MGMT/LOUDNESS output depends on block size %u (rate %g, %u lanes)", block, rate, lanes);
+            }
+            }
+        }
+    }
+}
+
 }  // namespace
 
 int main(int argc, char **argv) {
@@ -317,6 +396,7 @@ int main(int argc, char **argv) {
     checkPrimitives();
     checkMixAndRamp();
     checkLaneIndependence();
+    checkChunkInvariance();
     checkNonFiniteBurst();
     if (failures != 0) { std::fprintf(stderr, "%d failure(s)\n", failures); return 1; }
     std::puts("simd parity checks passed");

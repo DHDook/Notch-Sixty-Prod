@@ -234,6 +234,30 @@ inline void rampFill(float *g, float &cur, float target, float step, uint32_t &r
     for (i = active; i < n; ++i) g[i] = cur;
 }
 
+// One transposed direct form II biquad over n samples for a pair of channels at once (E20 S10, G14; the PEQ, XOVER, BASS_MGMT
+// and LOUDNESS lane pairs). x[i] holds channel A in element 0 and channel B in element 1. c = {b0, b1, b2, a1, a2}. State is
+// (a1z, a2z) for channel A and (*b1z, *b2z) for channel B; b1z null means an odd last channel, whose spare element is a
+// throwaway copy of A. Each channel's arithmetic is exactly a single-channel run (fused multiply-adds in both builds), so the
+// result does not depend on how channels are paired, on n, or on the build. x is overwritten with the output.
+inline void biquadPair(const double *c, double &a1z, double &a2z, double *b1z, double *b2z, f64x2 *x, uint32_t n) {
+    const f64x2 b0 = splat2(c[0]), b1 = splat2(c[1]), b2 = splat2(c[2]), na1 = splat2(-c[3]), na2 = splat2(-c[4]);
+    f64x2 z1 = pair(a1z, b1z != nullptr ? *b1z : a1z);
+    f64x2 z2 = pair(a2z, b2z != nullptr ? *b2z : a2z);
+    for (uint32_t i = 0; i < n; ++i) {
+        const f64x2 xi = x[i];
+        const f64x2 y = fma(b0, xi, z1);
+        z1 = fma(na1, y, fma(b1, xi, z2));
+        z2 = fma(na2, y, mul(b2, xi));
+        x[i] = y;
+    }
+    a1z = lane(z1, 0);
+    a2z = lane(z2, 0);
+    if (b1z != nullptr) {
+        *b1z = lane(z1, 1);
+        *b2z = lane(z2, 1);
+    }
+}
+
 }  // namespace n60::simd
 
 #endif
