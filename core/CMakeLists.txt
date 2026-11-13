@@ -50,6 +50,10 @@ add_executable(n60core_parallel_test tests/test_parallel.cpp)
 target_link_libraries(n60core_parallel_test PRIVATE n60core Threads::Threads)
 add_test(NAME n60core_parallel COMMAND n60core_parallel_test)
 
+add_executable(n60core_protection_parallel_test tests/test_protection_parallel.cpp)
+target_link_libraries(n60core_protection_parallel_test PRIVATE n60core Threads::Threads)
+add_test(NAME n60core_protection_parallel COMMAND n60core_protection_parallel_test)
+
 add_executable(n60core_simd_parity_test tests/test_simd_parity.cpp)
 target_link_libraries(n60core_simd_parity_test PRIVATE n60core)
 target_include_directories(n60core_simd_parity_test PRIVATE src)

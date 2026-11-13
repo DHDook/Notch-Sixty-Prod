@@ -1996,6 +1996,53 @@ inline float softClip(const ProtCfg &c, float input) {
     return sign * std::fmin(mixed, 1.0f) * c.comp;
 }
 
+// One high-rate limiter sample across all lanes (the kernel's limiter step). `hp[l][off]` is lane l's sample, replaced by the
+// limited one. Shared by the serial stage and the lane-parallel one (E20 S10b), so the two cannot drift apart.
+inline void protLimitSample(ProtShared &sh, const ProtCfg &c, double attackStep, uint32_t n, float *const *hp, uint32_t off,
+                            float *const *ring, float *val, uint64_t *idx, double &minGain) {
+    const uint32_t cap = sh.cap;
+    const uint64_t seq = sh.seq;
+    const uint32_t w = static_cast<uint32_t>(seq % cap);
+    float peak = 0.0f;
+    for (uint32_t l = 0; l < n; ++l) {
+        ring[l][w] = hp[l][off];
+        peak = std::fmax(peak, std::fabs(hp[l][off]));
+    }
+    while (sh.count > 0) {  // deque_push
+        const uint32_t tail = (sh.head + sh.count - 1u) % cap;
+        if (val[tail] > peak) break;
+        sh.count -= 1u;
+    }
+    const uint32_t ins = (sh.head + sh.count) % cap;
+    val[ins] = peak;
+    idx[ins] = seq;
+    sh.count += 1u;
+    const uint64_t outSeq = seq >= c.laHigh ? seq - c.laHigh : 0u;
+    while (sh.count > 0 && idx[sh.head] < outSeq) {  // deque_remove_expired
+        sh.head = (sh.head + 1u) % cap;
+        sh.count -= 1u;
+    }
+    const float window = sh.count > 0 ? val[sh.head] : 0.0f;
+    const double target = window > c.ceilLin ? static_cast<double>(c.ceilLin) / std::fmax(window, kEps) : 1.0;
+    if (target < sh.gain) {
+        sh.gain = std::fmax(target, sh.gain - attackStep);
+    } else {
+        sh.gain = target + c.relCoef * (sh.gain - target);
+    }
+    minGain = std::fmin(minGain, sh.gain);
+    float safety = 0.0f;
+    for (uint32_t l = 0; l < n; ++l) {
+        const float delayed = seq >= c.laHigh ? ring[l][static_cast<uint32_t>(outSeq % cap)] : 0.0f;
+        hp[l][off] = static_cast<float>(delayed * sh.gain);
+        safety = std::fmax(safety, std::fabs(hp[l][off]));
+    }
+    if (safety > c.ceilLin) {
+        const float sg = c.ceilLin / std::fmax(safety, kEps);
+        for (uint32_t l = 0; l < n; ++l) hp[l][off] *= sg;
+    }
+    sh.seq = seq + 1u;
+}
+
 void runProtection(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) {
     const float *p = paramsOf(h, r);
     ProtShared &sh = *reinterpret_cast<ProtShared *>(sharedState(h, r));
@@ -2030,54 +2077,16 @@ void runProtection(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t fra
         pl[l] = reinterpret_cast<ProtLane *>(laneState(h, r, l));
         ring[l] = protRing(pl[l]);
     }
-    const uint32_t cap = sh.cap;
     const double attackStep = 1.0 / static_cast<double>(std::max(1u, c.atkHigh));
     float hi[kMaxLanes][4];
     float inPeak[kMaxLanes] = {};   // readback peaks for this block (merged into the lane atomics at the end)
     float outPeak[kMaxLanes] = {};
     double minGain = 1.0;
 
+    float *hp[kMaxLanes];
+    for (uint32_t l = 0; l < n; ++l) hp[l] = hi[l];
     auto limitHigh = [&](uint32_t k) {  // one high-rate sample across all lanes
-        const uint64_t seq = sh.seq;
-        const uint32_t w = static_cast<uint32_t>(seq % cap);
-        float peak = 0.0f;
-        for (uint32_t l = 0; l < n; ++l) {
-            ring[l][w] = hi[l][k];
-            peak = std::fmax(peak, std::fabs(hi[l][k]));
-        }
-        while (sh.count > 0) {  // deque_push
-            const uint32_t tail = (sh.head + sh.count - 1u) % cap;
-            if (val[tail] > peak) break;
-            sh.count -= 1u;
-        }
-        const uint32_t ins = (sh.head + sh.count) % cap;
-        val[ins] = peak;
-        idx[ins] = seq;
-        sh.count += 1u;
-        const uint64_t outSeq = seq >= c.laHigh ? seq - c.laHigh : 0u;
-        while (sh.count > 0 && idx[sh.head] < outSeq) {  // deque_remove_expired
-            sh.head = (sh.head + 1u) % cap;
-            sh.count -= 1u;
-        }
-        const float window = sh.count > 0 ? val[sh.head] : 0.0f;
-        const double target = window > c.ceilLin ? static_cast<double>(c.ceilLin) / std::fmax(window, kEps) : 1.0;
-        if (target < sh.gain) {
-            sh.gain = std::fmax(target, sh.gain - attackStep);
-        } else {
-            sh.gain = target + c.relCoef * (sh.gain - target);
-        }
-        minGain = std::fmin(minGain, sh.gain);
-        float safety = 0.0f;
-        for (uint32_t l = 0; l < n; ++l) {
-            const float delayed = seq >= c.laHigh ? ring[l][static_cast<uint32_t>(outSeq % cap)] : 0.0f;
-            hi[l][k] = static_cast<float>(delayed * sh.gain);
-            safety = std::fmax(safety, std::fabs(hi[l][k]));
-        }
-        if (safety > c.ceilLin) {
-            const float sg = c.ceilLin / std::fmax(safety, kEps);
-            for (uint32_t l = 0; l < n; ++l) hi[l][k] *= sg;
-        }
-        sh.seq = seq + 1u;
+        protLimitSample(sh, c, attackStep, n, hp, k, ring, val, idx, minGain);
     };
 
     // One high-rate sample: input peak (before the clipper, as the kernel measures it), clipper, limiter, output peak.
@@ -2191,6 +2200,190 @@ void runProtection(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t fra
         pl[l]->grNowBits.store(floatToBits(grNow), std::memory_order_relaxed);
     }
 }
+
+// ---- lane-parallel protection (E20 S10b, G33) ---------------------------------------------------
+//
+// The serial stage walks frame by frame because the limiter couples the lanes and the gain rider feeds the limiter gain back
+// into the next frame's input. With no rider engaged that feedback is absent, so a chunk of at most 256 frames splits into
+// three steps that give the same bits as the serial stage:
+//   1. per lane (jobs): non-finite guard, half-band up-sampling, input peak, clipper -> oversampled row of the lane
+//   2. calling thread: the limiter over the oversampled rows (it needs every lane's peak; the same protLimitSample)
+//   3. per lane (jobs): output peak and half-band down-sampling back into the lane
+// Every lane's filters see the same inputs in the same order as in the serial stage, and the lane-independent maxima do not
+// depend on order, so the output and the readbacks are identical. The oversampled rows live in JobHost::protHi.
+//  - allocation: none (rows are allocated with the graph). synchronisation: the two phases of jobs.hpp; step 2 runs between
+//    them on the calling thread. latency, reset: as the serial stage (state is shared with it, a stage may switch between
+//    the two paths from one chunk to the next). sample rate: any; channels: 2 to 64 lanes, factor 2 or 4 only.
+struct ProtPar {
+    SnapHeader *h;
+    StageRec *r;
+    ProtShared *sh;
+    ProtCfg c;
+    uint32_t n, frames;
+    uint32_t ph1, ph2;  // half-band down-sampler phases at the start of the chunk (the same after every frame)
+    float *ptr[kMaxLanes];
+    ProtLane *pl[kMaxLanes];
+    float *row[kMaxLanes];  // oversampled samples of the lane: frame i at [i * factor .. i * factor + factor)
+    float inPeak[kMaxLanes];
+    float outPeak[kMaxLanes];
+};
+
+void protParUp(ProtPar &x, uint32_t l) N60_RT_NONBLOCKING {
+    const ProtCfg &c = x.c;
+    float *p = x.ptr[l];
+    float *row = x.row[l];
+    ProtLane *pl = x.pl[l];
+    for (uint32_t i = 0; i < x.frames; ++i) {  // non-finite input must never reach the filter or window state
+        if (!(std::fabs(p[i]) <= 3.0e38f)) p[i] = 0.0f;
+    }
+    float peak = 0.0f;
+    for (uint32_t i = 0; i < x.frames; ++i) {
+        float l1[2];
+        interp2(pl->up1, p[i], l1);
+        float *hi = row + size_t(i) * c.factor;
+        if (c.factor == 2) {
+            hi[0] = l1[0];
+            hi[1] = l1[1];
+        } else {
+            for (uint32_t k = 0; k < 2; ++k) {
+                float pair[2];
+                interp2(pl->up2, l1[k], pair);
+                hi[2 * k] = pair[0];
+                hi[2 * k + 1] = pair[1];
+            }
+        }
+        for (uint32_t k = 0; k < c.factor; ++k) {
+            peak = std::fmax(peak, std::fabs(hi[k]));
+            if (c.clipper) hi[k] = softClip(c, hi[k]);
+        }
+    }
+    x.inPeak[l] = peak;
+}
+
+void protParDown(ProtPar &x, uint32_t l) N60_RT_NONBLOCKING {
+    const ProtCfg &c = x.c;
+    float *p = x.ptr[l];
+    const float *row = x.row[l];
+    ProtLane *pl = x.pl[l];
+    uint32_t ph1 = x.ph1, ph2 = x.ph2;
+    float peak = 0.0f;
+    for (uint32_t i = 0; i < x.frames; ++i) {
+        const float *hi = row + size_t(i) * c.factor;
+        for (uint32_t k = 0; k < c.factor; ++k) peak = std::fmax(peak, std::fabs(hi[k]));
+        if (c.factor == 2) {
+            for (uint32_t k = 0; k < 2; ++k) {
+                const bool emit = ph1 == 0u;
+                ph1 ^= 1u;
+                hbWrite(pl->dn1, hi[k]);
+                if (emit) p[i] = hbDot(pl->dn1);
+            }
+            continue;
+        }
+        float down[2];
+        uint32_t emitted = 0;
+        for (uint32_t k = 0; k < 4; ++k) {
+            const bool emit = ph2 == 0u;
+            ph2 ^= 1u;
+            hbWrite(pl->dn2, hi[k]);
+            if (emit && emitted < 2u) down[emitted] = hbDot(pl->dn2);
+            if (emit) emitted += 1u;
+        }
+        for (uint32_t k = 0; k < 2; ++k) {
+            const bool emit = ph1 == 0u;
+            ph1 ^= 1u;
+            hbWrite(pl->dn1, down[k]);
+            if (emit) p[i] = hbDot(pl->dn1);
+        }
+    }
+    x.outPeak[l] = peak;
+}
+
+}  // namespace
+
+void systemProtectionJob(void *ctx, uint32_t mode, uint32_t lane) N60_RT_NONBLOCKING {
+    ProtPar &x = *static_cast<ProtPar *>(ctx);
+    if (mode == 1) protParUp(x, lane); else protParDown(x, lane);
+}
+
+bool systemProtectionEligible(const SnapHeader *h, const StageRec &r) {
+    if (r.kind != N60_STAGE_PROTECTION || r.laneCount < 2 || r.laneCount > kMaxLanes) return false;
+    const ProtCfg c = protCfg(paramsOf(h, r), h->sampleRate, r.paramCount);
+    return (c.factor == 2 || c.factor == 4) && (c.limiter || c.clipper) && !(c.rider && c.limiter);
+}
+
+bool systemProtectionParallel(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames, JobHost &jobs) N60_RT_NONBLOCKING {
+    if (r.kind != N60_STAGE_PROTECTION || r.laneCount < 2 || r.laneCount > kMaxLanes || jobs.protHi == nullptr) return false;
+    const float *p = paramsOf(h, r);
+    ProtShared &sh = *reinterpret_cast<ProtShared *>(sharedState(h, r));
+    if (sh.cfgValid == 0 || p[1] != sh.seenCeil || p[2] != sh.seenAtk || p[3] != sh.seenRel) return false;  // serial refreshes it
+    const ProtCfg c = sh.cfg;
+    // The rider multiplies the input by a gain that follows the limiter: engaged, or able to engage, it stays serial.
+    if ((c.factor != 2 && c.factor != 4) || (!c.limiter && !c.clipper) || (c.rider && c.limiter) || sh.riderAtten != 0.0) return false;
+    ProtPar x;
+    x.h = h;
+    x.r = &r;
+    x.sh = &sh;
+    x.c = c;
+    x.n = r.laneCount;
+    float *ring[kMaxLanes];
+    float *hp[kMaxLanes];
+    for (uint32_t l = 0; l < x.n; ++l) {
+        x.pl[l] = reinterpret_cast<ProtLane *>(laneState(h, r, l));
+        ring[l] = protRing(x.pl[l]);
+        x.row[l] = jobs.protHi + size_t(l) * kProtParRow;
+        x.inPeak[l] = x.outPeak[l] = 0.0f;
+    }
+    float *val = protVal(&sh);
+    uint64_t *idx = protIdx(&sh);
+    const double attackStep = 1.0 / static_cast<double>(std::max(1u, c.atkHigh));
+    double minGain = 1.0;
+    double sustained = sh.riderSustained;
+    float inPeak[kMaxLanes] = {}, outPeak[kMaxLanes] = {};
+    for (uint32_t done = 0; done < frames;) {
+        const uint32_t chunk = std::min(frames - done, kProtParChunk);
+        x.frames = chunk;
+        x.ph1 = sh.ph1;
+        x.ph2 = sh.ph2;
+        for (uint32_t l = 0; l < x.n; ++l) x.ptr[l] = lanes[laneOf(r, l)] + done;
+        jobHostRunPhase(jobs, 1, &x, x.n);
+        for (uint32_t l = 0; l < x.n; ++l) hp[l] = x.row[l];
+        if (c.limiter || c.riderCfg) {
+            for (uint32_t i = 0; i < chunk; ++i) {
+                if (c.riderCfg) {  // the serial stage tracks the sustained reduction even while the rider is off
+                    const double inst = c.limiter && sh.gain < 1.0
+                                            ? std::fmax(0.0, static_cast<double>(-20.0f * std::log10(std::fmax(static_cast<float>(sh.gain), kEps))))
+                                            : 0.0;
+                    sustained = inst + c.riderMeasCoef * (sustained - inst);
+                }
+                if (c.limiter) {
+                    for (uint32_t k = 0; k < c.factor; ++k) protLimitSample(sh, c, attackStep, x.n, hp, i * c.factor + k, ring, val, idx, minGain);
+                }
+            }
+        }
+        jobHostRunPhase(jobs, 2, &x, x.n);
+        for (uint32_t l = 0; l < x.n; ++l) {
+            inPeak[l] = std::fmax(inPeak[l], x.inPeak[l]);
+            outPeak[l] = std::fmax(outPeak[l], x.outPeak[l]);
+        }
+        done += chunk;
+    }
+    // sh.ph1 and sh.ph2 are unchanged: the down-samplers toggle an even number of times per frame.
+    if (c.riderCfg) {
+        sh.riderSustained = sustained;  // the rider attenuation stays at zero
+    }
+    const float grMax = minGain < 1.0 ? static_cast<float>(-20.0 * std::log10(std::fmax(minGain, 1e-12))) : 0.0f;
+    const float grNow = sh.gain < 1.0 ? static_cast<float>(-20.0 * std::log10(std::fmax(sh.gain, 1e-12))) : 0.0f;
+    sh.guardActive.store(c.limiter && c.factor > 1 ? 1u : 0u, std::memory_order_relaxed);
+    for (uint32_t l = 0; l < x.n; ++l) {
+        atomicMaxFloat(x.pl[l]->inTpBits, inPeak[l]);
+        atomicMaxFloat(x.pl[l]->outTpBits, outPeak[l]);
+        atomicMaxFloat(x.pl[l]->grMaxBits, grMax);
+        x.pl[l]->grNowBits.store(floatToBits(grNow), std::memory_order_relaxed);
+    }
+    return true;
+}
+
+namespace {
 
 // ---- howl guard -----------------------------------------------------------------------------
 

@@ -25,6 +25,8 @@ namespace n60 {
 struct SnapHeader;
 
 constexpr uint32_t kMaxPhaseStages = 8;
+constexpr uint32_t kProtParRow = 256 * 4 + 16;  // floats per lane row: a chunk at 4x plus padding so rows do not share cache sets
+constexpr uint32_t kProtParChunk = 256;  // frames per PROTECTION step (a block is already rendered in chunks of at most 256)
 
 // One published phase: stages [first, first + count) of the snapshot, run lane by lane.
 struct PhaseDesc {
@@ -35,6 +37,10 @@ struct PhaseDesc {
     uint32_t count;
     uint64_t laneUnion;                // output lanes any stage of the phase touches; job j is the j-th set bit
     uint64_t skip[kMaxPhaseStages];    // per stage, bit k: lane k of the stage is still clearing its history (silent)
+    // E20 S10b: mode 0 is the FIR lane phase above; modes 1 and 2 are the two lane-parallel steps of the PROTECTION stage
+    // (stages_system.cpp), where job j is lane j of the stage and ctx is the calling thread's step state.
+    uint32_t mode;
+    void *ctx;
 };
 
 // E20 S6b (G21): one lane job posted by the calling thread while a single long FIR lane runs serially (the FIR tail, see
@@ -58,6 +64,7 @@ struct JobHost {
     alignas(64) std::atomic<uint32_t> done{0};
     alignas(64) PhaseDesc phase{};
     TailJob tailJob;
+    float *protHi = nullptr;  // E20 S10b: oversampled PROTECTION samples, one 256 * 4 frame row per lane; allocated by the graph
     conv::TailHost tailHost{};  // calling thread only; ctx = this
 
     // Calling thread only.
@@ -70,6 +77,9 @@ struct JobHost {
     std::atomic<uint64_t> parallelPhases{0}, jobsOnWorkers{0}, jobsOnCaller{0}, lateJoins{0}, wakes{0};
 };
 
+// Calling thread. Publishes `jobs` jobs of a mode 1 or 2 phase (PROTECTION steps) and returns when every job is done;
+// workers and this thread claim jobs.
+void jobHostRunPhase(JobHost &j, uint32_t mode, void *ctx, uint32_t jobs) N60_RT_NONBLOCKING;
 // Calling thread. Ends the callback: workers stop claiming. Cheap when nothing woke them.
 void jobHostEnd(JobHost &j) N60_RT_NONBLOCKING;
 // Worker thread. Claims and runs jobs of the current phase while a callback is active; returns jobs run.

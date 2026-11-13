@@ -577,6 +577,15 @@ n60_status n60_graph_build(const n60_graph_desc *desc, n60_graph **outGraph) {
         }
         uint8_t *base = g->jobs.scratchBase + ((64 - (reinterpret_cast<uintptr_t>(g->jobs.scratchBase) & 63)) & 63);
         for (uint32_t k = 0; k <= N60_GRAPH_MAX_WORKERS; ++k) g->jobs.scratch[k] = base + k * each;
+        // E20 S10b: the lane-parallel PROTECTION keeps one chunk of oversampled samples per lane between its steps
+        g->jobs.protHi = new (std::nothrow) float[static_cast<size_t>(N60_GRAPH_MAX_CHANNELS) * n60::kProtParRow];
+        if (g->jobs.protHi == nullptr) {
+            delete[] g->jobs.scratchBase;
+            delete[] g->scratch;
+            n60::freeSnapshot(snap);
+            delete g;
+            return N60_STATUS_OUT_OF_MEMORY;
+        }
     }
     g->fadeFrames = static_cast<uint32_t>(std::lround(0.020 * desc->sampleRate));
     g->parked.fftSize = 0;
@@ -841,6 +850,7 @@ void n60_graph_retire(n60_graph *g) {
     n60::freeSnapshot(g->current);
     delete[] g->scratch;
     delete[] g->jobs.scratchBase;
+    delete[] g->jobs.protHi;
     delete[] g->external.delta;
     delete g;
 }
