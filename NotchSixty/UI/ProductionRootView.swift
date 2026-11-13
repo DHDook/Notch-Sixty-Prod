@@ -266,6 +266,7 @@ struct ProductionRootView: View {
     #endif
     @State private var commandError: String?
     @State private var showingGuidedSetup = false
+    @State private var failsafeVerdict: ActiveSpeakerFailsafe.Verdict = .safe
 
     private var engine: AudioIOEngine { product.audioEngine }
 
@@ -282,6 +283,28 @@ struct ProductionRootView: View {
                 }
             }
         )
+    }
+
+    /// E9 S9: launch warning when the macOS default output is a device that feeds drivers through the routing crossover.
+    @ViewBuilder private var failsafeBanner: some View {
+        if let text = ActiveSpeakerFailsafe.message(failsafeVerdict, launch: true) {
+            Label(text, systemImage: "exclamationmark.shield.fill")
+                .font(.callout)
+                .foregroundStyle(.primary)
+                .padding(10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.orange.opacity(0.25))
+        }
+    }
+
+    private func refreshFailsafe() {
+        guard FeatureFlags().isEnabled(.outputProtection), let routing = engine.speakerRoutingConfiguration else {
+            failsafeVerdict = .safe
+            return
+        }
+        failsafeVerdict = ActiveSpeakerFailsafe.verdict(
+            routing, defaultOutputUID: CoreAudioDefaultOutputDeviceReader().defaultOutputDeviceUID(),
+            devices: engine.outputDevices)
     }
 
     private var minimumWindowWidth: CGFloat {
@@ -322,11 +345,18 @@ struct ProductionRootView: View {
             .navigationSplitViewColumnWidth(min: 200, ideal: 232, max: 290)
         } detail: {
             detail(for: selection ?? .dashboard)
+                .safeAreaInset(edge: .top, spacing: 0) { failsafeBanner }
                 .navigationTitle((selection ?? .dashboard).title)
                 .navigationSubtitle(outputSubtitle)
                 .toolbar { toolbar }
         }
         .frame(minWidth: minimumWindowWidth, minHeight: 680)
+        .task { refreshFailsafe() }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            refreshFailsafe()
+        }
+        .onChange(of: engine.outputDevices) { _, _ in refreshFailsafe() }
+        .onChange(of: engine.speakerRoutingConfiguration) { _, _ in refreshFailsafe() }
         .onChange(of: navigation.selection) { _, new in
             // Programmatic selections of an old section land on its System tab.
             if let new, new.systemAreaDestination.section == .system, new != .system {

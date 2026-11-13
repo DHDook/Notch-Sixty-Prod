@@ -392,6 +392,14 @@ enum ProductionUserGuideCatalog {
                     ]
                 ),
                 section(
+                    "tweeter-protection",
+                    "Protect tweeters when the app is not running",
+                    [
+                        "With an active multi-way crossover, each DAC channel feeds a driver directly. Notch Sixty protects the drivers only while it runs. If it is closed, crashes or is force-quit, macOS plays full-range audio to the macOS default output, so never leave the DAC that feeds your drivers as the default output. Choose another device (the built-in speakers or a headset) in System Settings > Sound > Output; Notch Sixty keeps playing to the device you selected inside it.",
+                        "Fit a protection capacitor in series with each tweeter (a film capacitor sized for the crossover corner you use) so that full-range audio from any source, or a DAC fault, cannot send low-frequency energy into it."
+                    ]
+                ),
+                section(
                     "bass",
                     "Bass management",
                     [

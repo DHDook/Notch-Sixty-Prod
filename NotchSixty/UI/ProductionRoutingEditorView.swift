@@ -46,6 +46,10 @@ struct ProductionRoutingEditorView: View {
             pipelineCard
             camillaCard
             if !model.messages.isEmpty { messagesCard }
+            if let refusal = model.failsafeRefusal {
+                Label(refusal, systemImage: "exclamationmark.shield.fill")
+                    .font(.callout).foregroundStyle(.orange).textSelection(.enabled)
+            }
             if let actionError {
                 Label(actionError, systemImage: "exclamationmark.triangle.fill")
                     .font(.callout).foregroundStyle(.red).textSelection(.enabled)
@@ -53,6 +57,14 @@ struct ProductionRoutingEditorView: View {
         }
         .onAppear {
             model.onCommit = commit
+            if FeatureFlags().isEnabled(.outputProtection) {
+                let reader = CoreAudioDefaultOutputDeviceReader()
+                model.failsafe = (
+                    defaultOutputUID: { reader.defaultOutputDeviceUID() },
+                    devices: { engine.outputDevices })
+            } else {
+                model.failsafe = nil
+            }
             Self.syncContext(model, engine: engine)
         }
         .onChange(of: engine.outputDeviceProfileConfiguration) { _, _ in Self.syncContext(model, engine: engine) }
