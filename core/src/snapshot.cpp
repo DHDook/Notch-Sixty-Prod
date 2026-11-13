@@ -674,6 +674,10 @@ n60_status buildSnapshot(const n60_graph_desc &d, uint32_t epoch, SnapHeader **o
         h->parallelEnd = 0;
         for (uint32_t i = 0; i < h->stageCount; ++i) {
             StageRec &r = stages(h)[i];
+            if (r.kind == N60_STAGE_PROTECTION && systemProtectionEligible(h, r)) {
+                h->parallelEnd = i + 1;  // E20 S10b: PROTECTION runs its lanes as jobs, so the workers stay awake until it ends
+                continue;                // (it is not a phase: the stage carries its own two-step schedule)
+            }
             if (!dspFirParallel(h, r) || r.laneCount == 0 || r.laneCount > N60_GRAPH_MAX_CHANNELS) {
                 run = 0;
                 continue;
@@ -1326,6 +1330,10 @@ uint64_t stageLaneBits(const StageRec &r) N60_RT_NONBLOCKING {
 
 // One job: every stage of the phase on one output lane, in stage order.
 void runJob(const PhaseDesc &p, uint32_t job, void *scratch) N60_RT_NONBLOCKING {
+    if (p.mode != 0) {  // E20 S10b: a PROTECTION step, job = stage lane
+        systemProtectionJob(p.ctx, p.mode, job);
+        return;
+    }
     uint64_t m = p.laneUnion;
     for (uint32_t k = 0; k < job; ++k) m &= m - 1;
     const uint32_t lane = static_cast<uint32_t>(std::countr_zero(m));
@@ -1406,6 +1414,28 @@ bool tailWorkerRun(JobHost &j, uint32_t workerIndex) N60_RT_NONBLOCKING {
     return true;
 }
 
+// Publishes the phase already written to j.phase as `jobs` jobs, runs jobs on this thread and joins.
+void publishAndJoin(JobHost &j, uint32_t jobs) N60_RT_NONBLOCKING {
+    wakeWorkers(j);
+    j.done.store(0, std::memory_order_relaxed);
+    ++j.generation;
+    j.claim.store((uint64_t(j.generation) << 32) | jobs, std::memory_order_release);
+    uint32_t job = 0, mine = 0;
+    while (claimJob(j, job)) {
+        runJob(j.phase, job, j.scratch[0]);
+        j.done.fetch_add(1, std::memory_order_release);
+        ++mine;
+    }
+    if (j.done.load(std::memory_order_acquire) != jobs) {  // a worker claimed a job and has not finished it
+        j.lateJoins.fetch_add(1, std::memory_order_relaxed);
+        uint32_t spins = 0;
+        while (j.done.load(std::memory_order_acquire) != jobs) spinWait(spins);
+    }
+    j.parallelPhases.fetch_add(1, std::memory_order_relaxed);
+    j.jobsOnCaller.fetch_add(mine, std::memory_order_relaxed);
+    j.jobsOnWorkers.fetch_add(jobs - mine, std::memory_order_relaxed);
+}
+
 // Runs the phase [first, first + count) as jobs. False (nothing done) when it has fewer than two lanes.
 bool runPhaseParallel(JobHost &j, SnapHeader *h, float *const *lanes, uint32_t frames, uint32_t first, uint32_t count) N60_RT_NONBLOCKING {
     StageRec *table = stages(h);
@@ -1420,6 +1450,8 @@ bool runPhaseParallel(JobHost &j, SnapHeader *h, float *const *lanes, uint32_t f
     p.first = first;
     p.count = count;
     p.laneUnion = unionMask;
+    p.mode = 0;
+    p.ctx = nullptr;
     // History resets spend the callback's byte budget, which only this thread may touch, in the serial order.
     for (uint32_t s = 0; s < count; ++s) {
         uint64_t skip = 0;
@@ -1429,28 +1461,17 @@ bool runPhaseParallel(JobHost &j, SnapHeader *h, float *const *lanes, uint32_t f
         }
         p.skip[s] = skip;
     }
-    wakeWorkers(j);
-    j.done.store(0, std::memory_order_relaxed);
-    ++j.generation;
-    j.claim.store((uint64_t(j.generation) << 32) | jobs, std::memory_order_release);
-    uint32_t job = 0, mine = 0;
-    while (claimJob(j, job)) {
-        runJob(p, job, j.scratch[0]);
-        j.done.fetch_add(1, std::memory_order_release);
-        ++mine;
-    }
-    if (j.done.load(std::memory_order_acquire) != jobs) {  // a worker claimed a job and has not finished it
-        j.lateJoins.fetch_add(1, std::memory_order_relaxed);
-        uint32_t spins = 0;
-        while (j.done.load(std::memory_order_acquire) != jobs) spinWait(spins);
-    }
-    j.parallelPhases.fetch_add(1, std::memory_order_relaxed);
-    j.jobsOnCaller.fetch_add(mine, std::memory_order_relaxed);
-    j.jobsOnWorkers.fetch_add(jobs - mine, std::memory_order_relaxed);
+    publishAndJoin(j, jobs);
     return true;
 }
 
 }  // namespace
+
+void jobHostRunPhase(JobHost &j, uint32_t mode, void *ctx, uint32_t jobs) N60_RT_NONBLOCKING {
+    j.phase.mode = mode;
+    j.phase.ctx = ctx;
+    publishAndJoin(j, jobs);
+}
 
 void jobHostEnd(JobHost &j) N60_RT_NONBLOCKING {
     if (!j.woken) return;
@@ -1519,6 +1540,22 @@ void runSnapshot(SnapHeader *h, float *const *lanes, uint32_t frames, std::atomi
                 continue;
             }
         }
+        if (parallel && r.kind == N60_STAGE_PROTECTION && r.laneCount >= 2 && jobs->protHi != nullptr) {
+            if (systemProtectionParallel(h, r, lanes, frames, *jobs)) {
+#ifdef N60_GRAPH_PROFILE
+                const auto t1 = n60::rtNow();
+                if (r.kind < kProfileKinds) {
+                    n60_profile_entry &e = gProfile[r.kind];
+                    e.ns += static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count());
+                    e.calls += 1;
+                    e.frames += frames;
+                    e.laneFrames += static_cast<uint64_t>(frames) * r.laneCount;
+                }
+#endif
+                if (i + 1 >= h->parallelEnd) jobHostEnd(*jobs);
+                continue;
+            }
+        }
 #ifdef N60_GRAPH_PROFILE
         runStage(h, r, lanes, frames, sanitisedSamples);
         const auto t1 = n60::rtNow();
@@ -1533,7 +1570,7 @@ void runSnapshot(SnapHeader *h, float *const *lanes, uint32_t frames, std::atomi
         runStage(h, r, lanes, frames, sanitisedSamples);
 #endif
         // A phase member that ran serially (one lane: its FIR tail may have used the workers) can be the last one.
-        if (parallel && r.phase != 0 && i + 1 >= h->parallelEnd) jobHostEnd(*jobs);
+        if (parallel && (r.phase != 0 || r.kind == N60_STAGE_PROTECTION) && i + 1 >= h->parallelEnd) jobHostEnd(*jobs);
     }
     h->tailHost = nullptr;
 }
