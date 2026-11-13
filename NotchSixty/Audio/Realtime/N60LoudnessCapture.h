@@ -4,8 +4,8 @@
 // E28 S6b: demand-gated capture of the semantic program channels for BS.1770-4 loudness on the N-channel and binaural
 // bridges (design note 6). One single-producer single-consumer ring of paired Input and Output frames:
 //   Input  = the program channels as the render path sees them (after the AU rack or resampler when present; binaural: after program gain), in semantic role order (subwoofer lanes excluded);
-//   Output = the same channel order after the whole render (graph, protection, master gain), or the two ear signals on
-//            the binaural bridge. A bridge that cannot map its output back to program roles creates the ring with no
+//   Output = the same channel order after the whole render (graph, protection, master gain), then one channel per driven
+//            subwoofer feed (E9 S10, after the limiter and master gain), or the two ear signals on the binaural bridge. A bridge that cannot map its output back to program roles creates the ring with no
 //            output channels.
 //
 // Realtime contract (docs/REALTIME_RULES.md):
@@ -15,7 +15,7 @@
 //   Latency:          0. The ring only copies; it adds nothing to the render path.
 //   Sample rate:      capacity is sized at creation to a quarter of a second at the session rate, so any of the eight
 //                     standard rates (44.1 to 384 kHz) survives a worker that drains every 50 ms.
-//   Channels:         1 to N60_MAX_PROGRAM_CHANNELS input channels, 0 to N60_MAX_PROGRAM_CHANNELS output channels.
+//   Channels:         1 to N60_MAX_PROGRAM_CHANNELS input channels, 0 to N60_LOUDNESS_CAPTURE_MAX_OUTPUT_CHANNELS output channels.
 //   Reset:            the consumer discards pending frames by moving the read index to the write index; counters keep
 //                     counting. Unread frames are never overwritten: a full ring drops new frames and counts them.
 
@@ -34,6 +34,9 @@ extern "C" {
 
 #define N60_LOUDNESS_CAPTURE_MIN_CAPACITY_FRAMES 4096u
 #define N60_LOUDNESS_CAPTURE_MAX_CAPACITY_FRAMES (1u << 20)
+/// Output plane ceiling: every program role plus up to 8 subwoofer feeds (`N60_LIVE_MAX_GRAPH_SUBWOOFERS`).
+#define N60_LOUDNESS_CAPTURE_MAX_SUB_FEEDS 8u
+#define N60_LOUDNESS_CAPTURE_MAX_OUTPUT_CHANNELS (N60_MAX_PROGRAM_CHANNELS + N60_LOUDNESS_CAPTURE_MAX_SUB_FEEDS)
 
 typedef struct {
     uint32_t inputChannels;
@@ -74,7 +77,7 @@ static inline N60LoudnessCapture * _Nullable N60LoudnessCaptureCreate(
     uint32_t inputChannels, uint32_t outputChannels, double sampleRate
 ) {
     if (inputChannels == 0u || inputChannels > N60_MAX_PROGRAM_CHANNELS
-        || outputChannels > N60_MAX_PROGRAM_CHANNELS) {
+        || outputChannels > N60_LOUDNESS_CAPTURE_MAX_OUTPUT_CHANNELS) {
         return NULL;
     }
     N60LoudnessCapture *capture = (N60LoudnessCapture *)calloc(1u, sizeof(N60LoudnessCapture));

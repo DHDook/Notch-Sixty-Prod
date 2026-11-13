@@ -517,6 +517,45 @@ final class LoudnessMeterTests: XCTestCase {
         }
     }
 
+    /// E9 S10: driven subwoofer feeds ride after the program roles in the Output plane at weight 1.0; Input is unchanged.
+    func testSubwooferFeedsCountInWideOutputLoudnessAtEveryRate() throws {
+        let roles: [OutputProgramRole] = [.frontLeft, .frontRight]
+        let programPositions = LoudnessChannelPosition.positions(for: roles)
+        XCTAssertEqual(LoudnessChannelPosition.subwooferFeeds(outputChannels: 3, programChannels: 2),
+                       [LoudnessChannelPosition.subwooferFeed])
+        XCTAssertEqual(LoudnessChannelPosition.subwooferFeed.weight, 1)
+        XCTAssertTrue(LoudnessChannelPosition.subwooferFeeds(outputChannels: 2, programChannels: 2).isEmpty)
+        for rate in Self.rates {
+            let outputPositions = programPositions + LoudnessChannelPosition.subwooferFeeds(
+                outputChannels: 3, programChannels: 2)
+            let capture = try XCTUnwrap(N60LoudnessCaptureCreate(2, 3, rate))
+            defer { N60LoudnessCaptureDestroy(capture) }
+            let worker = try XCTUnwrap(ProductionWideLoudnessWorker(
+                capture: capture, sampleRate: rate, inputPositions: programPositions, outputPositions: outputPositions))
+            defer { worker.stop() }
+            worker.setDemand(ProductionAnalysisDemand.loudness)
+            Thread.sleep(forTimeInterval: 0.1)
+            let count = Int(rate * 2)
+            let input = (0..<2).map { Self.pinkNoise(count: count, seed: 0x5EED + UInt64($0) * 31) }
+            let sub = Self.pinkNoise(count: count, seed: 0xB455)
+            let output = input + [sub]
+            let snapshot = pump(capture, worker: worker, input: input, output: output, rate: rate)
+
+            var withSub = LoudnessMeter(sampleRate: rate, channels: outputPositions)
+            withSub.process(planar: output)
+            var programOnly = LoudnessMeter(sampleRate: rate, channels: programPositions)
+            programOnly.process(planar: input)
+            XCTAssertEqual(snapshot.droppedFrames, 0, "rate \(rate)")
+            XCTAssertEqual(snapshot.loudnessOutput?.integrated ?? .nan, withSub.readout().integrated ?? .infinity,
+                           accuracy: 0.1, "output with the sub feed at \(rate)")
+            XCTAssertEqual(snapshot.loudnessInput?.integrated ?? .nan, programOnly.readout().integrated ?? .infinity,
+                           accuracy: 0.1, "input stays program-only at \(rate)")
+            // A third equal-level channel at weight 1.0 adds 10 log10(3/2) = 1.76 LU to uncorrelated noise.
+            let delta = (snapshot.loudnessOutput?.integrated ?? 0) - (snapshot.loudnessInput?.integrated ?? 0)
+            XCTAssertEqual(delta, 1.76, accuracy: 0.2, "sub feed adds its power at \(rate)")
+        }
+    }
+
     func testWideWorkerWithoutOutputChannelsPublishesInputOnlyAndHonoursDemand() throws {
         let rate = 48_000.0
         let positions = LoudnessChannelPosition.positions(for: [.frontLeft, .frontRight, .frontCenter])

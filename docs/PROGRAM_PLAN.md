@@ -246,6 +246,8 @@ Gate G2 passed on 2026-10-25 (commit 07e82c6)
 - [~] Long FIR rebuild: lockstep lazy carry with 256 KiB per-callback budget, changed-tap seeding, chunked or O(1) scheme 1 reset (E9 S2 built dark, PR #464; S3 wires Swift behind e9.long-fir; S2b follow-ups and E22 bench items open)
 - [~] S9 `e9/active-speaker-failsafe` (owner, 11 Nov 2026; needs-owner: protection; runs before S8): find out what reaches the DAC of an any-way crossover system when the app is not running, has crashed or was force-quit, and record the finding. If unprocessed audio can reach it: setup detects that the macOS default output is the crossover DAC and requires a different default, the app warns at launch, and the user guide advises tweeter protection capacitors. Built behind `e9.output-protection` (default off, PR pending); wiring: S8 graduates the flag (G27 and G28 scoped)
 - [ ] S8 `e9/graduate-flags`: graduate `e9.long-fir` and `e9.output-protection` (default on) once the `[~]` software items close; bench items move to E22; removal is the FC phase
+- [x] S10 `e9/sub-feeds-output-loudness` (owner, 12 Nov 2026): driven sub feeds are extra channels in the wide Output loudness plane on N-channel sessions (G27); reachable: Levels > Loudness > Output, not flag-gated; PR #pending
+- [ ] S10b `e9/sub-feeds-output-loudness-routed` (owner, 12 Nov 2026; owns G30): routed (E8) sessions append their sub-sourced output lanes as sub feeds in the Output loudness plane
 - [~] Per-output headroom assistant (E9 S6 core maths `n60/headroom.h` merged; E9 S7 Swift model, readout and Apply/Undo built behind e9.output-protection, PR #464; S7b coverage and bit-exact Undo test next)
 
 ### E20 Engine performance
