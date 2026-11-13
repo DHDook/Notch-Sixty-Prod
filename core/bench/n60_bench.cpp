@@ -466,7 +466,10 @@ bool runCell(const std::string &id, double rate, uint32_t frames, const Config &
     WorkerHost host;
     if (workers != 0) host.start(g, workers);
     const bool ok = timeGraph(g, b.lanes, rate, frames, cfg, cell, finite);
-    if (workers != 0) host.stop();
+    // The profile pass runs while the workers are still up when asked with workers: a parallel phase is timed whole on the
+    // calling thread, so the rows are the critical path per stage kind.
+    const bool profWithWorkers = workers != 0;
+    if (!profWithWorkers || prof == nullptr) { if (workers != 0) host.stop(); }
     if (ok && prof != nullptr && profileAvailable()) {
         profReset();
         Config one = cfg;
@@ -478,6 +481,7 @@ bool runCell(const std::string &id, double rate, uint32_t frames, const Config &
         const uint32_t n = profRead(e, 64);
         prof->assign(e, e + n);
     }
+    if (profWithWorkers && prof != nullptr) host.stop();
     n60_graph_retire(g);
     return ok;
 }
@@ -716,21 +720,31 @@ int main(int argc, char **argv) {
         }
     }
     // E20 S10 (G4): the critical path with workers, reference block only, for the scenarios whose budget is judged there.
-    if (cfg.workers != 0 && !cfg.profileOnly) {
+    if (cfg.workers != 0 && (!cfg.profileOnly || cfg.profile)) {
         for (const std::string &id : cfg.scenarios) {
             if (id != "R2" && id != "R3") continue;
             for (double rate : cfg.rates) {
                 Cell cell;
                 bool finite = true;
                 const uint32_t frames = refFrames(rate);
-                if (!runCell(id, rate, frames, cfg, cell, finite, nullptr, cfg.workers) || !finite) {
+                std::vector<n60_profile_entry> wprof;
+                if (!runCell(id, rate, frames, cfg, cell, finite, cfg.profile ? &wprof : nullptr, cfg.workers) || !finite) {
                     std::fprintf(stderr, "scenario %s rate %.0f with %u workers did not run\n", id.c_str(), rate, cfg.workers);
                     ++errors;
                     continue;
                 }
-                res[key(id, rate, "refw", "mean")] = cell.mean;
-                res[key(id, rate, "refw", "p999")] = cell.p999;
-                res[key(id, rate, "refw", "max")] = cell.max;
+                if (!cfg.profileOnly) {
+                    res[key(id, rate, "refw", "mean")] = cell.mean;
+                    res[key(id, rate, "refw", "p999")] = cell.p999;
+                    res[key(id, rate, "refw", "max")] = cell.max;
+                }
+                for (const auto &e : wprof) {  // critical-path ns per lane-sample by stage kind, with workers
+                    if (e.laneFrames == 0) continue;
+                    char k[96];
+                    std::snprintf(k, sizeof k, "%s/%.0f/profw/%u", id.c_str(), rate, e.kind);
+                    res[k] = double(e.ns) / double(e.laneFrames);
+                    std::printf("   profw kind %2u: %8.2f ns/lane-sample, %6.1f ns/frame (critical path)\n", e.kind, double(e.ns) / double(e.laneFrames), double(e.ns) / double(e.frames));
+                }
                 std::printf("%-4s %7.0f Hz %-6s %4u frames  mean %6.2f%%  p99.9 %6.2f%%  max %6.2f%%  (%u workers)\n", id.c_str(), rate, "refw", frames,
                             100 * cell.mean, 100 * cell.p999, 100 * cell.max, cfg.workers);
             }

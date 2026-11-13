@@ -34,6 +34,13 @@ bool systemProtectionEligible(const SnapHeader *h, const StageRec &r);
 // Any thread. One lane job of a PROTECTION step (mode 1: up, clip; mode 2: down).
 void systemProtectionJob(void *ctx, uint32_t mode, uint32_t lane) N60_RT_NONBLOCKING;
 
+// E20 R3: stages whose lanes are independent and run as phase jobs next to the FIR lanes (AMBIENT). Prepare and Finish run on the
+// calling thread before and after the lane jobs; Run processes one lane (any thread). Bit-identical to runSystem.
+bool systemLaneParallel(const StageRec &r) N60_RT_NONBLOCKING;
+void systemLanePrepare(SnapHeader *h, StageRec &r) N60_RT_NONBLOCKING;
+void systemLaneRun(SnapHeader *h, const StageRec &r, uint32_t laneIndex, float *buf, uint32_t frames) N60_RT_NONBLOCKING;
+void systemLaneFinish(SnapHeader *h, StageRec &r, uint32_t frames) N60_RT_NONBLOCKING;
+
 // Pure range and liveness check for one parameter (see validateParam).
 n60_status validateSystemParam(const SnapHeader *h, const StageRec &r, uint32_t idx, float value) N60_RT_NONBLOCKING;
 

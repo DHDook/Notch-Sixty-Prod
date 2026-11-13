@@ -678,7 +678,7 @@ n60_status buildSnapshot(const n60_graph_desc &d, uint32_t epoch, SnapHeader **o
                 h->parallelEnd = i + 1;  // E20 S10b: PROTECTION runs its lanes as jobs, so the workers stay awake until it ends
                 continue;                // (it is not a phase: the stage carries its own two-step schedule)
             }
-            if (!dspFirParallel(h, r) || r.laneCount == 0 || r.laneCount > N60_GRAPH_MAX_CHANNELS) {
+            if (!(dspFirParallel(h, r) || systemLaneParallel(r)) || r.laneCount == 0 || r.laneCount > N60_GRAPH_MAX_CHANNELS) {
                 run = 0;
                 continue;
             }
@@ -1347,7 +1347,11 @@ void runJob(const PhaseDesc &p, uint32_t job, void *scratch) N60_RT_NONBLOCKING 
             std::memset(buf, 0, sizeof(float) * p.frames);  // still clearing: silent, input dropped (as the serial path)
             continue;
         }
-        dspFirLaneRun(p.snap, r, static_cast<uint32_t>(k), buf, p.frames, scratch);
+        if (r.kind == N60_STAGE_FIR) {
+            dspFirLaneRun(p.snap, r, static_cast<uint32_t>(k), buf, p.frames, scratch);
+        } else {
+            systemLaneRun(p.snap, r, static_cast<uint32_t>(k), buf, p.frames);
+        }
     }
 }
 
@@ -1456,12 +1460,19 @@ bool runPhaseParallel(JobHost &j, SnapHeader *h, float *const *lanes, uint32_t f
     for (uint32_t s = 0; s < count; ++s) {
         uint64_t skip = 0;
         const StageRec &r = table[first + s];
-        for (uint32_t k = 0; k < r.laneCount; ++k) {
-            if (!dspFirLaneReady(h, r, k)) skip |= uint64_t(1) << k;
+        if (r.kind == N60_STAGE_FIR) {
+            for (uint32_t k = 0; k < r.laneCount; ++k) {
+                if (!dspFirLaneReady(h, r, k)) skip |= uint64_t(1) << k;
+            }
+        } else {
+            systemLanePrepare(h, table[first + s]);
         }
         p.skip[s] = skip;
     }
     publishAndJoin(j, jobs);
+    for (uint32_t s = 0; s < count; ++s) {
+        if (table[first + s].kind != N60_STAGE_FIR) systemLaneFinish(h, table[first + s], frames);
+    }
     return true;
 }
 

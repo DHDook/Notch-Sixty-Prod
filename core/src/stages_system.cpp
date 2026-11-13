@@ -1210,7 +1210,8 @@ uint32_t systemLatency(const SnapHeader *h, const StageRec &r) N60_RT_NONBLOCKIN
 
 namespace {
 
-void runAmbient(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) {
+// E20 R3: AMBIENT in three steps so its lanes can run as jobs: prepare (designs and crossfade starts, serial), one lane, finish.
+void ambientPrepare(SnapHeader *h, StageRec &r) {
     const float *p = paramsOf(h, r);
     AmbShared &s = *reinterpret_cast<AmbShared *>(sharedState(h, r));
     const uint32_t ramp = h->rampFrames;
@@ -1233,45 +1234,52 @@ void runAmbient(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames
             }
         }
     }
+}
+
+void ambientLane(SnapHeader *h, const StageRec &r, uint32_t l, float *buf, uint32_t frames) {
+    const float *p = paramsOf(h, r);
+    const AmbShared &s = *reinterpret_cast<const AmbShared *>(sharedState(h, r));
+    const uint32_t ramp = h->rampFrames;
     const double invRamp = ramp != 0 ? 1.0 / static_cast<double>(ramp) : 0.0;
-    for (uint32_t l = 0; l < r.laneCount; ++l) {
-        AmbLane &a = *reinterpret_cast<AmbLane *>(laneState(h, r, l));
-        if (p[0] != a.seen) {
-            a.seen = p[0];
-            rampSet(a.g, static_cast<float>(db2lin(p[0])), ramp);
-        }
-        uint32_t left[kAmbMaxSec];
-        const double *cur[kAmbMaxSec];
-        bool idle[kAmbMaxSec];
-        for (uint32_t k = 0; k < s.n; ++k) {
-            left[k] = s.xf[k];
-            cur[k] = s.coef[k];
-            // Trailer sections at 0 dB with no state are an exact identity: skipped at no cost.
-            idle[k] = k >= 3 && left[k] == 0 && s.seen[k][1] == 0.0f && a.z[k].z1 == 0.0 && a.z[k].z2 == 0.0;
-        }
-        float *buf = lanes[laneOf(r, l)];
-        for (uint32_t i = 0; i < frames; ++i) {
-            double x = buf[i];
-            for (uint32_t b = 0; b < s.n; ++b) {
-                if (idle[b]) continue;
-                double o = bqRun(cur[b], a.z[b], x);
-                if (left[b] != 0) {
-                    const double on = bqRun(s.coefN[b], a.zN[b], x);
-                    o += (static_cast<double>(ramp - left[b] + 1) * invRamp) * (on - o);
-                    if (--left[b] == 0) {
-                        a.z[b] = a.zN[b];
-                        cur[b] = s.coefN[b];
-                    }
-                }
-                x = o;
-            }
-            buf[i] = static_cast<float>(x) * rampNext(a.g);
-        }
-        for (uint32_t k = 0; k < s.n; ++k) {
-            bqFlush(a.z[k]);
-            if (left[k] != 0) bqFlush(a.zN[k]);
-        }
+    AmbLane &a = *reinterpret_cast<AmbLane *>(laneState(h, r, l));
+    if (p[0] != a.seen) {
+        a.seen = p[0];
+        rampSet(a.g, static_cast<float>(db2lin(p[0])), ramp);
     }
+    uint32_t left[kAmbMaxSec];
+    const double *cur[kAmbMaxSec];
+    bool idle[kAmbMaxSec];
+    for (uint32_t k = 0; k < s.n; ++k) {
+        left[k] = s.xf[k];
+        cur[k] = s.coef[k];
+        // Trailer sections at 0 dB with no state are an exact identity: skipped at no cost.
+        idle[k] = k >= 3 && left[k] == 0 && s.seen[k][1] == 0.0f && a.z[k].z1 == 0.0 && a.z[k].z2 == 0.0;
+    }
+    for (uint32_t i = 0; i < frames; ++i) {
+        double x = buf[i];
+        for (uint32_t b = 0; b < s.n; ++b) {
+            if (idle[b]) continue;
+            double o = bqRun(cur[b], a.z[b], x);
+            if (left[b] != 0) {
+                const double on = bqRun(s.coefN[b], a.zN[b], x);
+                o += (static_cast<double>(ramp - left[b] + 1) * invRamp) * (on - o);
+                if (--left[b] == 0) {
+                    a.z[b] = a.zN[b];
+                    cur[b] = s.coefN[b];
+                }
+            }
+            x = o;
+        }
+        buf[i] = static_cast<float>(x) * rampNext(a.g);
+    }
+    for (uint32_t k = 0; k < s.n; ++k) {
+        bqFlush(a.z[k]);
+        if (left[k] != 0) bqFlush(a.zN[k]);
+    }
+}
+
+void ambientFinish(SnapHeader *h, StageRec &r, uint32_t frames) {
+    AmbShared &s = *reinterpret_cast<AmbShared *>(sharedState(h, r));
     for (uint32_t k = 0; k < s.n; ++k) {  // adopt finished designs (every lane has run the same frames)
         if (s.xf[k] == 0) continue;
         if (s.xf[k] <= frames) {
@@ -1281,6 +1289,12 @@ void runAmbient(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames
             s.xf[k] -= frames;
         }
     }
+}
+
+void runAmbient(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) {
+    ambientPrepare(h, r);
+    for (uint32_t l = 0; l < r.laneCount; ++l) ambientLane(h, r, l, lanes[laneOf(r, l)], frames);
+    ambientFinish(h, r, frames);
 }
 
 constexpr uint32_t kSymChunk = 256;
@@ -2099,6 +2113,85 @@ inline void protLimitSample(ProtShared &sh, const ProtCfg &c, double attackStep,
     sh.seq = seq + 1u;
 }
 
+// E20 R3 critical path: the limiter over `count` consecutive high-rate samples (at most kProtParRow) of every lane, in four
+// passes instead of one lane loop per sample: (1) the loudest lane per sample, (2) the limiter gain per sample (the window
+// deque and the gain follower, calling `perFrame(s)` before sample s so the caller can run its once-per-frame updates in the
+// same order), (3) per lane: the look-ahead delay and the gain, (4) the safety clamp where a sample still exceeds the ceiling.
+// Every sample sees the same operations in the same order as protLimitSample, so the output and the shared state are
+// identical; only the loops are turned inside out so each lane's row is read once, in order.
+template <typename PerFrame>
+void protLimitBulk(ProtShared &sh, const ProtCfg &c, double attackStep, uint32_t n, float *const *hp, uint32_t count, float *const *ring,
+                   float *val, uint64_t *idx, double &minGain, PerFrame &&perFrame) N60_RT_NONBLOCKING {
+    constexpr uint32_t kMax = kProtParRow;
+    if (count > kMax) count = kMax;  // callers pass at most kProtParChunk * factor
+    float peakA[kMax], safetyA[kMax];
+    double gainA[kMax];
+    for (uint32_t s = 0; s < count; ++s) peakA[s] = 0.0f;
+    for (uint32_t l = 0; l < n; ++l) {
+        const float *x = hp[l];
+        for (uint32_t s = 0; s < count; ++s) peakA[s] = std::fmax(peakA[s], std::fabs(x[s]));
+    }
+    const uint32_t cap = sh.cap;
+    const uint64_t seq0 = sh.seq;
+    for (uint32_t s = 0; s < count; ++s) {
+        perFrame(s);
+        const uint64_t seq = seq0 + s;
+        const float peak = peakA[s];
+        while (sh.count > 0) {  // deque_push
+            uint32_t tail = sh.head + sh.count - 1u;
+            if (tail >= cap) tail -= cap;  // head < cap and count <= cap, so one subtraction wraps
+            if (val[tail] > peak) break;
+            sh.count -= 1u;
+        }
+        uint32_t ins = sh.head + sh.count;
+        if (ins >= cap) ins -= cap;
+        val[ins] = peak;
+        idx[ins] = seq;
+        sh.count += 1u;
+        const uint64_t outSeq = seq >= c.laHigh ? seq - c.laHigh : 0u;
+        while (sh.count > 0 && idx[sh.head] < outSeq) {  // deque_remove_expired
+            sh.head = sh.head + 1u == cap ? 0u : sh.head + 1u;
+            sh.count -= 1u;
+        }
+        const float window = sh.count > 0 ? val[sh.head] : 0.0f;
+        const double target = window > c.ceilLin ? static_cast<double>(c.ceilLin) / std::fmax(window, kEps) : 1.0;
+        if (target < sh.gain) {
+            sh.gain = std::fmax(target, sh.gain - attackStep);
+        } else {
+            sh.gain = target + c.relCoef * (sh.gain - target);
+        }
+        minGain = std::fmin(minGain, sh.gain);
+        gainA[s] = sh.gain;
+    }
+    for (uint32_t s = 0; s < count; ++s) safetyA[s] = 0.0f;
+    for (uint32_t l = 0; l < n; ++l) {
+        float *x = hp[l];
+        float *rg = ring[l];
+        uint32_t w = static_cast<uint32_t>(seq0 % cap);
+        uint32_t rd = seq0 >= c.laHigh ? static_cast<uint32_t>((seq0 - c.laHigh) % cap) : 0u;
+        uint64_t seq = seq0;
+        for (uint32_t s = 0; s < count; ++s, ++seq) {
+            rg[w] = x[s];
+            w = w + 1u == cap ? 0u : w + 1u;
+            float delayed = 0.0f;
+            if (seq >= c.laHigh) {
+                delayed = rg[rd];
+                rd = rd + 1u == cap ? 0u : rd + 1u;
+            }
+            const float out = static_cast<float>(delayed * gainA[s]);
+            x[s] = out;
+            safetyA[s] = std::fmax(safetyA[s], std::fabs(out));
+        }
+    }
+    for (uint32_t s = 0; s < count; ++s) {
+        if (safetyA[s] > c.ceilLin) {
+            const float sg = c.ceilLin / std::fmax(safetyA[s], kEps);
+            for (uint32_t l = 0; l < n; ++l) hp[l][s] *= sg;
+        }
+    }
+    sh.seq = seq0 + count;
+}
+
 void runProtection(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) {
     const float *p = paramsOf(h, r);
     ProtShared &sh = *reinterpret_cast<ProtShared *>(sharedState(h, r));
@@ -2394,6 +2487,7 @@ bool systemProtectionParallel(SnapHeader *h, StageRec &r, float *const *lanes, u
     const double attackStep = 1.0 / static_cast<double>(std::max(1u, c.atkHigh));
     double minGain = 1.0;
     double sustained = sh.riderSustained;
+    double lastGain = -1.0, lastInst = 0.0;
     float inPeak[kMaxLanes] = {}, outPeak[kMaxLanes] = {};
     for (uint32_t done = 0; done < frames;) {
         const uint32_t chunk = std::min(frames - done, kProtParChunk);
@@ -2403,18 +2497,18 @@ bool systemProtectionParallel(SnapHeader *h, StageRec &r, float *const *lanes, u
         for (uint32_t l = 0; l < x.n; ++l) x.ptr[l] = lanes[laneOf(r, l)] + done;
         jobHostRunPhase(jobs, 1, &x, x.n);
         for (uint32_t l = 0; l < x.n; ++l) hp[l] = x.row[l];
-        if (c.limiter || c.riderCfg) {
-            for (uint32_t i = 0; i < chunk; ++i) {
-                if (c.riderCfg) {  // the serial stage tracks the sustained reduction even while the rider is off
-                    const double inst = c.limiter && sh.gain < 1.0
-                                            ? std::fmax(0.0, static_cast<double>(-20.0f * std::log10(std::fmax(static_cast<float>(sh.gain), kEps))))
-                                            : 0.0;
-                    sustained = inst + c.riderMeasCoef * (sustained - inst);
+        if (c.limiter) {
+            protLimitBulk(sh, c, attackStep, x.n, hp, chunk * c.factor, ring, val, idx, minGain, [&](uint32_t sIdx) {
+                if (c.riderCfg && sIdx % c.factor == 0) {  // the serial stage tracks the sustained reduction even while the rider is off
+                    if (sh.gain != lastGain) {  // the log is a pure function of the gain: reuse it while the gain holds
+                        lastGain = sh.gain;
+                        lastInst = sh.gain < 1.0 ? std::fmax(0.0, static_cast<double>(-20.0f * std::log10(std::fmax(static_cast<float>(sh.gain), kEps)))) : 0.0;
+                    }
+                    sustained = lastInst + c.riderMeasCoef * (sustained - lastInst);
                 }
-                if (c.limiter) {
-                    for (uint32_t k = 0; k < c.factor; ++k) protLimitSample(sh, c, attackStep, x.n, hp, i * c.factor + k, ring, val, idx, minGain);
-                }
-            }
+            });
+        } else if (c.riderCfg) {
+            for (uint32_t i = 0; i < chunk; ++i) sustained = 0.0 + c.riderMeasCoef * (sustained - 0.0);
         }
         jobHostRunPhase(jobs, 2, &x, x.n);
         for (uint32_t l = 0; l < x.n; ++l) {
@@ -2553,6 +2647,13 @@ void runGuard(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) 
 }
 
 }  // namespace
+
+bool systemLaneParallel(const StageRec &r) N60_RT_NONBLOCKING { return r.kind == N60_STAGE_AMBIENT; }
+void systemLanePrepare(SnapHeader *h, StageRec &r) N60_RT_NONBLOCKING { if (r.kind == N60_STAGE_AMBIENT) ambientPrepare(h, r); }
+void systemLaneRun(SnapHeader *h, const StageRec &r, uint32_t laneIndex, float *buf, uint32_t frames) N60_RT_NONBLOCKING {
+    if (r.kind == N60_STAGE_AMBIENT) ambientLane(h, r, laneIndex, buf, frames);
+}
+void systemLaneFinish(SnapHeader *h, StageRec &r, uint32_t frames) N60_RT_NONBLOCKING { if (r.kind == N60_STAGE_AMBIENT) ambientFinish(h, r, frames); }
 
 void runSystem(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) N60_RT_NONBLOCKING {
     switch (r.kind) {
