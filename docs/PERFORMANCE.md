@@ -139,6 +139,28 @@ R3 at 384 kHz gains little from workers (the serial PROTECTION stage dominates),
 80%) is not met on this machine: 2 x 40.4% is 80.8%. These are local M4 numbers, not the M1 target or a CI runner; the
 CI baseline and M1 re-measurement are E22 items.
 
+### R3 critical path (E20 `e20/r3-critical-path`, nightly bench gate)
+
+`n60_bench --profile --workers 2` now also prints `profw` rows: the caller's time per stage kind with workers (the critical
+path). R3 at 384 kHz before the fix, ns per frame (budget 2604 ns at 100%): PROTECTION 180 (parallel lane steps about 40 and 45
+around a serial limiter of about 95 at 4x oversampling), DYN_EQ 90, COMPRESSOR 84, EXPANDER 74, FIR 60, BASS_MGMT 54, AMBIENT 54,
+PEQ 30. Workers barely help (1 worker 24.5%, 3 workers 23.5% after the fix): the linked dynamics and BASS_MGMT are serial.
+
+Changes: linked DYN_EQ, COMPRESSOR and EXPANDER run as detector pass, scalar gain-follower pass and lane-major apply pass
+(bit-identical, goldens unchanged); the limiter deque avoids integer modulo and the rider log is cached while the gain holds;
+AMBIENT lanes run as phase jobs. Measured on this M4 (mean %, 2 workers, same binary build flags, 0.5 s runs):
+
+| Row | Before | After |
+|---|---|---|
+| R3 refw 352.8 kHz | 28.3 | 20.7 |
+| R3 refw 384 kHz | 30.6 | 22.4 |
+| R3 ref (single thread) 384 kHz | 47.7 | 41.3 |
+
+The hosted runner has measured about 2.0 to 2.1 times the M4 figure, which puts 384 kHz near 0.46 to 0.47: under the 0.5
+budget but with thin margin. PR #521's 0.88 was a noisy run. R1/384000/ref p99.9 was 0.5368 on the runner against 15% on
+the M4 (mean 11.5%): a scheduling tail on a shared runner, not a code regression; no R1 code changed.
+Remaining serial items (ns per frame at 384 kHz): PROTECTION about 175, DYN_EQ 58, BASS_MGMT 54, COMPRESSOR 40, PEQ 30.
+
 ## Release optimisation
 
 Xcode Release for the app target now sets `-O3` for C++ (`OTHER_CPLUSPLUSFLAGS`). On the M4, -O3 ran

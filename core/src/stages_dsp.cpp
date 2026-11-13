@@ -118,6 +118,19 @@ void sidechainHp(const double c[5], double *const *z, const float *const *in, ui
     }
 }
 
+// E20 R3 critical path: out[c] = largest |row[k][base + c]| over the rows, starting from 0 and taking each value only when
+// the running maximum is smaller (the std::max(det, std::fabs(x)) chain of the per-frame loops, so a NaN never wins).
+void absMaxRows(float *out, const float *const *rows, uint32_t count, uint32_t base, uint32_t cn) {
+    for (uint32_t c = 0; c < cn; ++c) out[c] = 0.0f;
+    for (uint32_t k = 0; k < count; ++k) {
+        const float *x = rows[k] + base;
+        for (uint32_t c = 0; c < cn; ++c) {
+            const float a = std::fabs(x[c]);
+            out[c] = out[c] < a ? a : out[c];
+        }
+    }
+}
+
 // E20 S2: quiet tails no longer need hand-written flushes; n60_graph_process runs under a flush-to-zero guard
 // (platform/fpenv.hpp), so decaying state falls to exact zero in hardware. Recursive state still self-heals
 // from a non-finite burst once per block (flush-to-zero does not touch NaN or Inf).
@@ -495,6 +508,38 @@ void runCompressor(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t fra
     for (uint32_t base = 0; base < frames; base += kSideChunk) {
       const uint32_t cn = std::min(kSideChunk, frames - base);
       if (hpBulk) sidechainHp(sh.hp, zp, lp, n, base, cn, hpY);
+      if (!feedback) {
+        // E20 R3 critical path: without feedback the level of a group never depends on its own gain, so the chunk runs in three
+        // passes (largest level over the group's lanes, the gain follower per sample, the gain applied lane by lane): the same
+        // operations per sample as the loop below, without touching every lane's row for every frame.
+        float detA[kSideChunk], gainA[kSideChunk];
+        const float *rows[kMaxLanes];
+        for (uint32_t l = 0; l < n; ++l) rows[l] = hpBulk ? hpY[l] : lp[l] + base;
+        for (uint32_t g = 0; g < groups; ++g) {
+            CompLane &gs = *st[g * per];
+            absMaxRows(detA, rows + g * per, per, 0, cn);
+            float gmax = grMax[g];
+            for (uint32_t c = 0; c < cn; ++c) {
+                const float det = std::min(detA[c], 1e6f);  // keeps an Inf input from poisoning the gain
+                const float target = compTargetDb(lin2db(det, 1e-12f), thr, slope, knee, makeup);
+                float cf;
+                if (target < gs.gainDB) {
+                    cf = atk;
+                } else if (pdr) {
+                    const float depth = std::clamp(-gs.gainDB / 12.0f, 0.0f, 1.0f);
+                    cf = fast + depth * (slow - fast);
+                } else {
+                    cf = rel;
+                }
+                gs.gainDB = target + cf * (gs.gainDB - target);
+                gmax = std::max(gmax, -gs.gainDB);
+                gainA[c] = db2lin(gs.gainDB);
+            }
+            grMax[g] = gmax;
+            for (uint32_t k = 0; k < per; ++k) simd::mulVec(lp[g * per + k] + base, lp[g * per + k] + base, gainA, cn);
+        }
+        continue;
+      }
       for (uint32_t c = 0; c < cn; ++c) {
         const uint32_t i = base + c;
         for (uint32_t g = 0; g < groups; ++g) {
@@ -673,18 +718,26 @@ void runExpander(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frame
     }
     const uint32_t per = linked ? n : 1, groups = linked ? 1 : n;
     float grMax[kMaxLanes] = {};
-    for (uint32_t i = 0; i < frames; ++i) {
+    // E20 R3 critical path: a chunk runs in three passes (largest level over the group's lanes, the gain follower per
+    // sample, the gain applied lane by lane) instead of one pass that touches every lane's row for every frame. Each sample
+    // sees the same operations in the same order, so the output is bit-identical.
+    float detA[kSideChunk], gainA[kSideChunk];
+    for (uint32_t base = 0; base < frames; base += kSideChunk) {
+        const uint32_t cn = std::min(kSideChunk, frames - base);
         for (uint32_t g = 0; g < groups; ++g) {
             ExpLane &gs = *st[g * per];
-            float det = 0.0f;
-            for (uint32_t k = 0; k < per; ++k) det = std::max(det, std::fabs(lp[g * per + k][i]));
-            const float detDb = lin2db(std::min(det, 1e6f), 1e-12f);
-            const float target = detDb >= thr ? 0.0f : std::max((ratio - 1.0f) * (detDb - thr), range);
-            const float c = target < gs.gainDB ? atk : rel;
-            gs.gainDB = target + c * (gs.gainDB - target);
-            grMax[g] = std::max(grMax[g], -gs.gainDB);
-            const float gain = db2lin(gs.gainDB);
-            for (uint32_t k = 0; k < per; ++k) lp[g * per + k][i] *= gain;
+            absMaxRows(detA, lp + g * per, per, base, cn);
+            float gmax = grMax[g];
+            for (uint32_t c = 0; c < cn; ++c) {
+                const float detDb = lin2db(std::min(detA[c], 1e6f), 1e-12f);
+                const float target = detDb >= thr ? 0.0f : std::max((ratio - 1.0f) * (detDb - thr), range);
+                const float cf = target < gs.gainDB ? atk : rel;
+                gs.gainDB = target + cf * (gs.gainDB - target);
+                gmax = std::max(gmax, -gs.gainDB);
+                gainA[c] = db2lin(gs.gainDB);
+            }
+            grMax[g] = gmax;
+            for (uint32_t k = 0; k < per; ++k) simd::mulVec(lp[g * per + k] + base, lp[g * per + k] + base, gainA, cn);
         }
     }
     for (uint32_t l = 0; l < n; ++l) heal(st[l]->gainDB);
@@ -808,24 +861,34 @@ void runDynEq(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) 
             sidechainHp(bc.an, zA, lp, n, base, cn, aY);
             sidechainHp(bc.pr, zP, lp, n, base, cn, pY);
             if (tilt) sidechainHp(bc.sc, zS, lp, n, base, cn, sY);
-            for (uint32_t c = 0; c < cn; ++c) {
-                const uint32_t i = base + c;
-                for (uint32_t g = 0; g < groups; ++g) {
-                    DqLaneBand &hold = lb[g * per][b];
-                    float peak = 0.0f, power = 0.0f;
-                    for (uint32_t k = 0; k < per; ++k) {
-                        const uint32_t l = g * per + k;
-                        const float a = std::clamp(aY[l][c], -1e6f, 1e6f);
-                        peak = std::max(peak, std::fabs(a));
-                        power += a * a;
+            // E20 R3 critical path: per group, the chunk runs in three passes (level over the group's lanes, the detector and gain
+            // follower per sample, the band's correction added lane by lane), with the same operations per sample as a loop over
+            // frames that visits every lane's row each time, so the output is bit-identical.
+            const bool rmsDet = prm[13] >= 0.5f;
+            float peakA[kDqChunk], powerA[kDqChunk], lowA[kDqChunk], highA[kDqChunk], flatA[kDqChunk];
+            for (uint32_t g = 0; g < groups; ++g) {
+                DqLaneBand &hold = lb[g * per][b];
+                for (uint32_t c = 0; c < cn; ++c) {
+                    peakA[c] = 0.0f;
+                    powerA[c] = 0.0f;
+                }
+                for (uint32_t k = 0; k < per; ++k) {
+                    const float *row = aY[g * per + k];
+                    for (uint32_t c = 0; c < cn; ++c) {
+                        const float a = std::clamp(row[c], -1e6f, 1e6f);
+                        const float m = std::fabs(a);
+                        peakA[c] = peakA[c] < m ? m : peakA[c];
+                        powerA[c] += a * a;
                     }
+                }
+                for (uint32_t c = 0; c < cn; ++c) {
                     float det;
-                    if (prm[13] >= 0.5f) {
-                        const float inst = power / static_cast<float>(per);
+                    if (rmsDet) {
+                        const float inst = powerA[c] / static_cast<float>(per);
                         hold.rms = inst + bc.rmsC * (hold.rms - inst);
                         det = std::sqrt(std::max(hold.rms, 0.0f));
                     } else {
-                        det = peak;
+                        det = peakA[c];
                         hold.rms = det * det;
                     }
                     const float target = dqTargetDb(lin2db(det, 1e-20f), prm);
@@ -835,13 +898,18 @@ void runDynEq(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) 
                     hold.wet = 1.0f + bypassC * (hold.wet - 1.0f);
                     const float total = std::clamp(hold.stat + hold.dyn, -42.0f, 18.0f);
                     const float half = 0.5f * total;
-                    const float lowScale = tilt ? (db2lin(-half) - 1.0f) * hold.wet : 0.0f;
-                    const float highScale = tilt ? (db2lin(half) - 1.0f) * hold.wet : 0.0f;
-                    const float flat = (db2lin(total) - 1.0f) * hold.wet;
-                    for (uint32_t k = 0; k < per; ++k) {
-                        const uint32_t l = g * per + k;
-                        const float xin = lp[l][i];
-                        lp[l][i] = tilt ? xin + lowScale * pY[l][c] + highScale * sY[l][c] : xin + flat * pY[l][c];
+                    lowA[c] = tilt ? (db2lin(-half) - 1.0f) * hold.wet : 0.0f;
+                    highA[c] = tilt ? (db2lin(half) - 1.0f) * hold.wet : 0.0f;
+                    flatA[c] = (db2lin(total) - 1.0f) * hold.wet;
+                }
+                for (uint32_t k = 0; k < per; ++k) {
+                    const uint32_t l = g * per + k;
+                    float *x = lp[l] + base;
+                    const float *pr = pY[l], *sc = sY[l];
+                    if (tilt) {
+                        for (uint32_t c = 0; c < cn; ++c) x[c] = x[c] + lowA[c] * pr[c] + highA[c] * sc[c];
+                    } else {
+                        for (uint32_t c = 0; c < cn; ++c) x[c] = x[c] + flatA[c] * pr[c];
                     }
                 }
             }
