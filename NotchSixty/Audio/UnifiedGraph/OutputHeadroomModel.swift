@@ -453,10 +453,15 @@ struct HeadroomModel {
         guard p.count >= 12, ears.allSatisfy({ $0 >= 0 && $0 < count }), ears[0] != ears[1], !ordered.isEmpty,
               p[3] >= 1, p[4] >= 1 else { return fail() }
         let taps = Int(p[3]), sets = Int(p[4]), n = ordered.count, equalEar = Int(p[8])
-        // ABI v38 (E13 S4): [10] = tail taps T, [11] reserved; the late tails (shared by every orientation) follow the early responses.
+        // ABI v38 (E13 S4): [10] = tail taps T; the late tails (shared by every orientation) follow the early responses.
+        // ABI v39 (E13 S5): [11] = elevation sets E; when E >= 1 a pitch start and step and one delay per (set, source, ear)
+        // follow the tails. The delays move each response in time without changing its magnitude, and the stage blends
+        // the onset-aligned sets with weights that sum to one, so every blend stays within the grid sets' peak: the
+        // alternatives below (one per set) already bound it. The extension is therefore skipped, not modelled.
         let tailTaps = Int(p[10])
-        guard p[10] >= 0, sets <= Int(N60_GRAPH_BINAURAL_MAX_SETS), taps <= Int(N60_GRAPH_BINAURAL_MAX_TAPS),
-              p.count == 12 + sets * n * 2 * taps + n * 2 * tailTaps else { return fail() }
+        let extraCount = p[11] != 0 ? 2 + sets * n * 2 : 0
+        guard p[10] >= 0, p[11] >= 0, p[11].isFinite, sets <= Int(N60_GRAPH_BINAURAL_MAX_SETS), taps <= Int(N60_GRAPH_BINAURAL_MAX_TAPS),
+              p.count == 12 + sets * n * 2 * taps + n * 2 * tailTaps + extraCount else { return fail() }
         let tailBase = 12 + sets * n * 2 * taps
         let before = lanes
         var incomplete = Set<String>()

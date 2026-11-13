@@ -19,6 +19,25 @@
 //    starts at the yaw parameter of the descriptor with no glide. There is no in-place reset.
 // Results do not depend on the host block size.
 //
+// Delay-separated responses and elevation sets (ABI v39, E13 S5). With [11] = E >= 1 the responses are onset-aligned and
+// each (set, source, ear) carries a delay in frames. A source is delayed for each ear by the blended delay of the sets
+// around the head position, through a 16-tap windowed-sinc fractional-delay line (binaural_fd.hpp) read from a ring
+// per source; the two ears therefore have their own delayed input, their own history spectra, and the aligned set
+// spectra are blended bilinearly over yaw and head pitch. Added realtime documentation:
+//  - allocation: none; the rings, the second history, the delay state and the coefficient table are in the arena.
+//  - synchronisation: none. The pose parameters are plain floats written at block start.
+//  - latency: 128 + declared + N60_GRAPH_BINAURAL_FD_LATENCY (the delay line's centre tap).
+//  - sample rate: any rate the stage accepts (as the early path); delays are frame counts, at most 0.03 s.
+//  - channels: as the early path.
+//  - reset: with the stage. The delay follows the head position one block late and ramps across the block. A history
+//    reset (stream restart) clears the early histories, the delay rings and the tail; up to about 256 frames of output already computed
+//    (the pending block and its overlap) still play out.
+//  - memory: per source lane two ear histories and a ring of the next power of two above the largest delay + 18 frames
+//    (at most 16384 floats at 384 kHz).
+//  - cost per 128-frame block: the history transform doubles (per ear) and a blend runs up to four set accumulations
+//    (eight while the head moves); the per-frame delay line is a 16-tap FIR per source and ear. The E20 R3 row for it
+//    at 384 kHz is a scoped gap (E13 G13).
+//
 // Late tail (ABI v38, E13 S4). Responses longer than the early part (about 20 ms after the onset, set by the host)
 // carry the rest as a tail shared by every orientation. The tail runs per source and ear through the non-uniform
 // partitioned convolver (conv/nufir.hpp), at an internal rate of at most 96 kHz: above that the source is decimated
@@ -41,6 +60,7 @@
 #include <new>
 #include <utility>
 
+#include "binaural_fd.hpp"
 #include "conv/nufir.hpp"
 #include "fft.hpp"
 #include "halfband.hpp"
@@ -63,7 +83,8 @@ bool inR(double v, double lo, double hi) { return std::isfinite(v) && v >= lo &&
 bool isInt(float v) { return std::isfinite(v) && v == std::floor(v); }
 
 struct MxShared {
-    double cell;       // smoothed fractional orientation position
+    double cell;       // smoothed fractional orientation position (yaw)
+    double cellE;      // smoothed fractional elevation position (head pitch); 0 without elevation sets
     float yawStart, yawStep;
     uint32_t parts, taps, orient, srcs;
     uint32_t outA, outB;
@@ -77,7 +98,14 @@ struct MxShared {
     uint32_t tailNufOff;   // ... of the first convolver lane (ear 0; ear 1 follows at tailNufStride)
     uint32_t tailNufStride;
     uint32_t laneStride;   // bytes of one source lane's state
-    uint32_t pad2;
+    uint32_t dm;           // 1: delay-separated responses (ABI v39)
+    uint32_t elev;         // elevation sets E (1 when dm == 0 for the arithmetic below)
+    uint32_t yawSets;      // orient / elev
+    uint32_t ring;         // delay ring length per source (power of two), 0 when dm == 0
+    uint32_t ringPos;
+    uint32_t histEpoch;    // the history epoch the early histories belong to
+    uint32_t dlyBase;      // index in the parameters of the first delay
+    float pitchStart, pitchStep;
 };
 
 // ---- late tail ------------------------------------------------------------------------------------
@@ -119,7 +147,7 @@ struct TailGeom {
 
 // Pure. Internal rate, alignment and tap count of a tail for `taps` early taps and `T` tail taps at `rate`.
 // Path delay at full rate: the convolver's 256 internal frames plus 36 frames at each half-band stage in and out.
-TailGeom tailGeometry(double rate, uint32_t taps, uint32_t T) {
+TailGeom tailGeometry(double rate, uint32_t taps, uint32_t T, uint32_t extra = 0) {
     TailGeom g;
     while (rate / g.f > static_cast<double>(kTailMaxRate) && g.stages < kMaxStages) {
         g.f *= 2;
@@ -127,7 +155,7 @@ TailGeom tailGeometry(double rate, uint32_t taps, uint32_t T) {
     }
     if (rate / g.f > static_cast<double>(kTailMaxRate)) return g;
     const uint64_t delay = uint64_t(g.f) * 256 + 72ull * (g.f - 1);
-    const uint64_t need = uint64_t(taps) + kPart;
+    const uint64_t need = uint64_t(taps) + kPart + extra;
     if (T == 0 || need < delay) return g;
     const uint64_t total = need - delay;
     g.r = static_cast<uint32_t>(total % g.f);
@@ -193,9 +221,12 @@ void interpPush(TailShared &T, uint32_t ear, int s, float v) N60_RT_NONBLOCKING 
 
 
 struct MxLayout {
-    size_t plan, work, acc, kernels, outBlk, overlap, total;
+    size_t plan, work, acc, kernels, outBlk, overlap, dly, total;
 };
-MxLayout mxLayout(uint32_t parts, uint32_t orient, uint32_t srcs) {
+// Delay-mode state: per (source, ear) the delay at the previous and the current block end, its integer part, the
+// interpolated taps and a flag for a pure integer delay, then the fractional-delay table.
+constexpr size_t kDlyFloats(uint32_t srcs) { return size_t(srcs) * 2 * (4 + kFdTaps) + size_t(kFdPhases + 1) * kFdTaps; }
+MxLayout mxLayout(uint32_t parts, uint32_t orient, uint32_t srcs, bool dm = false) {
     MxLayout L;
     size_t off = up(sizeof(MxShared));
     L.plan = off;
@@ -210,14 +241,20 @@ MxLayout mxLayout(uint32_t parts, uint32_t orient, uint32_t srcs) {
     off += up(sizeof(float) * 2 * kPart);
     L.overlap = off;
     off += up(sizeof(float) * 2 * kPart);
+    L.dly = off;
+    if (dm) off += up(sizeof(float) * kDlyFloats(srcs));
     L.total = off;
     return L;
 }
 // Per source lane: float in[128], Complex fdl[parts * 129]; with a tail then the decimator rings and two convolver lanes.
-size_t earlyLaneBytes(uint32_t parts) { return up(sizeof(float) * kPart + sizeof(Complex) * kBins * parts); }
+size_t earBlockBytes(uint32_t parts) { return up(sizeof(float) * kPart + sizeof(Complex) * kBins * parts); }
+// Delay mode: a second ear block (delayed input and history) and the delay ring follow the first.
+size_t earlyLaneBytes(uint32_t parts, uint32_t ring = 0) {
+    return ring == 0 ? earBlockBytes(parts) : 2 * earBlockBytes(parts) + up(sizeof(float) * ring);
+}
 const float kProbe = 0.5f;  // not a unit impulse: the convolver sizes itself for general taps
-size_t laneBytes(uint32_t parts, const TailGeom &g) {
-    size_t b = earlyLaneBytes(parts);
+size_t laneBytes(uint32_t parts, const TailGeom &g, uint32_t ring = 0) {
+    size_t b = earlyLaneBytes(parts, ring);
     if (g.ok) b += up(sizeof(HbRing) * kMaxStages) + 2 * up(conv::laneBytes(&kProbe, g.n));
     return b;
 }
@@ -236,7 +273,101 @@ double cellFor(double yaw, double start, double step, uint32_t orient, bool wrap
     return std::clamp(c, 0.0, static_cast<double>(orient - 1));
 }
 
+// Pure: elevation cell for a head pitch, in [0, E-1].
+double cellForPitch(double pitch, double start, double step, uint32_t elev) {
+    if (elev <= 1 || step <= 0.0) return 0.0;
+    return std::clamp((pitch - start) / step, 0.0, static_cast<double>(elev - 1));
+}
+
 inline float clean(float x) { return std::fabs(x) <= FLT_MAX ? x : 0.0f; }  // false for NaN and Inf
+
+// The sets around a head position and their weights (at most four: two elevations by two yaws).
+struct SetWeights {
+    uint32_t idx[4];
+    float w[4];
+    uint32_t n;
+};
+SetWeights weightsFor(double cellY, double cellE, const MxShared &S) {
+    SetWeights sw;
+    sw.n = 0;
+    const uint32_t Y = S.yawSets;
+    const uint32_t y0 = std::min(static_cast<uint32_t>(cellY), Y - 1);
+    double wy = cellY - static_cast<double>(y0);
+    const uint32_t y1 = S.wrap ? (y0 + 1 == Y ? 0 : y0 + 1) : std::min(y0 + 1, Y - 1);
+    if (y1 == y0 || wy < 1e-5) wy = 0.0;
+    const uint32_t e0 = std::min(static_cast<uint32_t>(cellE), S.elev - 1);
+    double we = cellE - static_cast<double>(e0);
+    const uint32_t e1 = std::min(e0 + 1, S.elev - 1);
+    if (e1 == e0 || we < 1e-5) we = 0.0;
+    const float fy1 = static_cast<float>(wy), fy0 = 1.0f - fy1;
+    const float fe1 = static_cast<float>(we), fe0 = 1.0f - fe1;
+    auto add = [&](uint32_t e, uint32_t y, float w) {
+        if (w <= 0.0f) return;
+        sw.idx[sw.n] = e * Y + y;
+        sw.w[sw.n] = w;
+        ++sw.n;
+    };
+    add(e0, y0, fe0 * fy0);
+    if (wy > 0.0) add(e0, y1, fe0 * fy1);
+    if (we > 0.0) {
+        add(e1, y0, fe1 * fy0);
+        if (wy > 0.0) add(e1, y1, fe1 * fy1);
+    }
+    return sw;
+}
+
+// Delay-mode state (see mxLayout).
+struct DlyState {
+    float *dPrev, *dCur, *ival, *exact, *cof, *tab;
+};
+DlyState dlyOf(uint8_t *sh, const MxLayout &L, uint32_t srcs) {
+    float *b = reinterpret_cast<float *>(sh + L.dly);
+    const size_t n2 = size_t(srcs) * 2;
+    return DlyState{b, b + n2, b + 2 * n2, b + 3 * n2, b + 4 * n2, b + 4 * n2 + n2 * kFdTaps};
+}
+
+// Integer part, whether the delay is a whole number of frames, and the 16 interpolated taps of delay `d` (>= 0).
+inline void fdSetup(const float *tab, float d, float &ipart, float &exact, float *cof) {
+    const float fl = std::floor(d);
+    const float a = d - fl;
+    ipart = fl;
+    const float p = a * static_cast<float>(kFdPhases);
+    uint32_t p0 = static_cast<uint32_t>(p);
+    if (p0 >= kFdPhases) p0 = kFdPhases - 1;
+    const float fr = p - static_cast<float>(p0);
+    exact = (p0 == 0 && fr == 0.0f) ? 1.0f : 0.0f;
+    const float *t0 = tab + size_t(p0) * kFdTaps, *t1 = t0 + kFdTaps;
+    for (uint32_t t = 0; t < kFdTaps; ++t) cof[t] = t0[t] * (1.0f - fr) + t1[t] * fr;
+}
+
+// Delay ring length for a stage whose parameters are `p`: 0 without delays, else a power of two above the largest delay.
+uint32_t ringLenFor(const float *p, uint32_t srcs, double rate) {
+    if (p[11] == 0.0f) return 0;
+    const uint64_t O = static_cast<uint64_t>(p[4]), T = static_cast<uint64_t>(p[10]);
+    const uint64_t base = kFixed + O * srcs * 2 * static_cast<uint64_t>(p[3]) + uint64_t(srcs) * 2 * T + 2;
+    float mx = 0.0f;
+    for (uint64_t i = 0; i < O * srcs * 2; ++i) mx = std::max(mx, p[base + i]);
+    (void)rate;
+    uint32_t need = static_cast<uint32_t>(std::ceil(mx)) + kFdTaps + 2;
+    uint32_t r = 32;
+    while (r < need) r <<= 1;
+    return r;
+}
+
+void updateDelays(const float *prm, MxShared &S, const DlyState &D) {
+    const SetWeights sw = weightsFor(S.cell, S.cellE, S);
+    const float *dly = prm + S.dlyBase;
+    for (uint32_t k = 0; k < S.srcs; ++k) {
+        for (uint32_t e = 0; e < 2; ++e) {
+            float v = 0.0f;
+            for (uint32_t i = 0; i < sw.n; ++i) v += sw.w[i] * dly[(size_t(sw.idx[i]) * S.srcs + k) * 2 + e];
+            const size_t at = size_t(k) * 2 + e;
+            D.dPrev[at] = D.dCur[at];
+            D.dCur[at] = v;
+            fdSetup(D.tab, v, D.ival[at], D.exact[at], D.cof + at * kFdTaps);
+        }
+    }
+}
 
 void runBlock(SnapHeader *h, StageRec &r, MxShared &S, uint8_t *sh, const MxLayout &L) {
     const void *plan = sh + L.plan;
@@ -245,79 +376,93 @@ void runBlock(SnapHeader *h, StageRec &r, MxShared &S, uint8_t *sh, const MxLayo
     const size_t accStride = up(sizeof(Complex) * kFft) / sizeof(Complex);
     Complex *nL = accBase, *nR = accBase + accStride;          // blend at the new head position
     Complex *pL = accBase + 2 * accStride, *pR = accBase + 3 * accStride;  // blend at the previous position
-    Complex *tL = accBase + 4 * accStride, *tR = accBase + 5 * accStride;  // second set of a blend
+    Complex *tL = accBase + 4 * accStride, *tR = accBase + 5 * accStride;  // another set of a blend
     const Complex *kernels = reinterpret_cast<const Complex *>(sh + L.kernels);
     float *outBlk = reinterpret_cast<float *>(sh + L.outBlk);
     float *overlap = reinterpret_cast<float *>(sh + L.overlap);
     const uint32_t P = S.parts;
     const float *prm = paramsOf(h, r);
+    const bool dm = S.dm != 0;
+    const size_t blk = earBlockBytes(P);
 
     // Head position: slew-smoothed fractional orientation index (about 10 ms, once per block).
-    const double prevCell = S.cell;
-    if (S.orient > 1) {
-        const double target = cellFor(prm[0], S.yawStart, S.yawStep, S.orient, S.wrap != 0);
-        const double a = 1.0 - std::exp(-static_cast<double>(kPart) / (h->sampleRate * kYawTauSeconds));
+    const double prevCell = S.cell, prevCellE = S.cellE;
+    const double a = 1.0 - std::exp(-static_cast<double>(kPart) / (h->sampleRate * kYawTauSeconds));
+    if (S.yawSets > 1) {
+        const double target = cellFor(prm[0], S.yawStart, S.yawStep, S.yawSets, S.wrap != 0);
         double d = target - S.cell;
-        if (S.wrap) d -= S.orient * std::floor(d / S.orient + 0.5);
+        if (S.wrap) d -= S.yawSets * std::floor(d / S.yawSets + 0.5);
         if (std::fabs(d) < 1e-4) {
             S.cell = target;
         } else {
             S.cell += a * d;
             if (S.wrap) {
-                S.cell = std::fmod(S.cell, static_cast<double>(S.orient));
-                if (S.cell < 0.0) S.cell += S.orient;
+                S.cell = std::fmod(S.cell, static_cast<double>(S.yawSets));
+                if (S.cell < 0.0) S.cell += S.yawSets;
             } else {
-                S.cell = std::clamp(S.cell, 0.0, static_cast<double>(S.orient - 1));
+                S.cell = std::clamp(S.cell, 0.0, static_cast<double>(S.yawSets - 1));
             }
         }
     }
+    if (S.elev > 1) {
+        const double target = cellForPitch(prm[1], S.pitchStart, S.pitchStep, S.elev);
+        const double d = target - S.cellE;
+        S.cellE = std::fabs(d) < 1e-4 ? target : std::clamp(S.cellE + a * d, 0.0, static_cast<double>(S.elev - 1));
+    }
 
-    // History: one forward transform per source, shared by both ears and every set.
+    // History: one forward transform per source (per ear in delay mode, where the ears hear different delays).
     const uint32_t head = S.head;
     for (uint32_t k = 0; k < S.srcs; ++k) {
         uint8_t *lb = laneState(h, r, k);
-        const float *in = reinterpret_cast<const float *>(lb);
-        Complex *fdl = reinterpret_cast<Complex *>(lb + sizeof(float) * kPart);
-        float *wf = reinterpret_cast<float *>(work);
-        for (uint32_t j = 0; j < kPart; ++j) wf[j] = in[j];
-        for (uint32_t j = kPart; j < kFft; ++j) wf[j] = 0.0f;
-        fft::forwardReal(plan, wf);  // E20 S4: real-input transform, bins 0..kPart
-        std::memcpy(fdl + size_t(head) * kBins, work, sizeof(Complex) * kBins);
+        for (uint32_t ear = 0; ear < (dm ? 2u : 1u); ++ear) {
+            uint8_t *eb = lb + ear * blk;
+            const float *in = reinterpret_cast<const float *>(eb);
+            Complex *fdl = reinterpret_cast<Complex *>(eb + sizeof(float) * kPart);
+            float *wf = reinterpret_cast<float *>(work);
+            for (uint32_t j = 0; j < kPart; ++j) wf[j] = in[j];
+            for (uint32_t j = kPart; j < kFft; ++j) wf[j] = 0.0f;
+            fft::forwardReal(plan, wf);  // E20 S4: real-input transform, bins 0..kPart
+            std::memcpy(fdl + size_t(head) * kBins, work, sizeof(Complex) * kBins);
+        }
     }
 
     auto accumulate = [&](uint32_t set, Complex *accL, Complex *accR) {
         for (uint32_t k = 0; k < kBins; ++k) accL[k] = accR[k] = {0.0f, 0.0f};
         for (uint32_t k = 0; k < S.srcs; ++k) {
             const uint8_t *lb = laneState(h, r, k);
-            const Complex *fdl = reinterpret_cast<const Complex *>(lb + sizeof(float) * kPart);
+            const Complex *fdl0 = reinterpret_cast<const Complex *>(lb + sizeof(float) * kPart);
+            const Complex *fdl1 = dm ? reinterpret_cast<const Complex *>(lb + blk + sizeof(float) * kPart) : fdl0;
             const Complex *kl = kernels + (((size_t(set) * S.srcs + k) * 2 + 0) * P) * kBins;
             const Complex *kr = kernels + (((size_t(set) * S.srcs + k) * 2 + 1) * P) * kBins;
             uint32_t slot = head;
             for (uint32_t q = 0; q < P; ++q) {
-                const Complex *x = fdl + size_t(slot) * kBins;
+                const Complex *x0 = fdl0 + size_t(slot) * kBins;
+                const Complex *x1 = fdl1 + size_t(slot) * kBins;
                 const Complex *hl = kl + size_t(q) * kBins;
                 const Complex *hr = kr + size_t(q) * kBins;
                 float *al = reinterpret_cast<float *>(accL), *ar = reinterpret_cast<float *>(accR);
-                const float *xf = reinterpret_cast<const float *>(x);
-                simd::cmacSpan(al, al, reinterpret_cast<const float *>(hl), xf, kBins);
-                simd::cmacSpan(ar, ar, reinterpret_cast<const float *>(hr), xf, kBins);
+                simd::cmacSpan(al, al, reinterpret_cast<const float *>(hl), reinterpret_cast<const float *>(x0), kBins);
+                simd::cmacSpan(ar, ar, reinterpret_cast<const float *>(hr), reinterpret_cast<const float *>(x1), kBins);
                 slot = slot == 0 ? P - 1 : slot - 1;
             }
         }
     };
-    // The two bracketing sets of a fractional position, blended in the frequency domain, then to time.
-    auto blendTime = [&](double cell, Complex *dL, Complex *dR) {
-        const uint32_t i0 = std::min(static_cast<uint32_t>(cell), S.orient - 1);
-        double w = cell - static_cast<double>(i0);
-        const uint32_t i1 = S.wrap ? (i0 + 1 == S.orient ? 0 : i0 + 1) : std::min(i0 + 1, S.orient - 1);
-        if (i1 == i0 || w < 1e-5) w = 0.0;
-        accumulate(i0, dL, dR);
-        if (w > 0.0) {
-            accumulate(i1, tL, tR);
-            const float w1 = static_cast<float>(w), w0 = 1.0f - w1;
+    // The sets around a fractional position (two yaws, two elevations), blended in the frequency domain, then to time.
+    auto blendTime = [&](double cell, double cellE, Complex *dL, Complex *dR) {
+        const SetWeights sw = weightsFor(cell, cellE, S);
+        accumulate(sw.idx[0], dL, dR);
+        if (sw.n > 1) {
             for (uint32_t b = 0; b < kBins; ++b) {
-                dL[b] = {w0 * dL[b].re + w1 * tL[b].re, w0 * dL[b].im + w1 * tL[b].im};
-                dR[b] = {w0 * dR[b].re + w1 * tR[b].re, w0 * dR[b].im + w1 * tR[b].im};
+                dL[b] = {sw.w[0] * dL[b].re, sw.w[0] * dL[b].im};
+                dR[b] = {sw.w[0] * dR[b].re, sw.w[0] * dR[b].im};
+            }
+            for (uint32_t i = 1; i < sw.n; ++i) {
+                accumulate(sw.idx[i], tL, tR);
+                const float wi = sw.w[i];
+                for (uint32_t b = 0; b < kBins; ++b) {
+                    dL[b] = {dL[b].re + wi * tL[b].re, dL[b].im + wi * tL[b].im};
+                    dR[b] = {dR[b].re + wi * tR[b].re, dR[b].im + wi * tR[b].im};
+                }
             }
         }
         Complex *ears[2] = {dL, dR};
@@ -328,11 +473,11 @@ void runBlock(SnapHeader *h, StageRec &r, MxShared &S, uint8_t *sh, const MxLayo
             fft::inverseReal(plan, reinterpret_cast<float *>(x));
         }
     };
-    blendTime(S.cell, nL, nR);
+    blendTime(S.cell, S.cellE, nL, nR);
     // While the head moves, the block fades linearly from the previous position's output to the new
     // one, so a change of orientation weights never steps at a block boundary.
-    const bool moving = S.cell != prevCell;
-    if (moving) blendTime(prevCell, pL, pR);
+    const bool moving = S.cell != prevCell || S.cellE != prevCellE;
+    if (moving) blendTime(prevCell, prevCellE, pL, pR);
     const float *newer[2] = {reinterpret_cast<const float *>(nL), reinterpret_cast<const float *>(nR)};
     const float *older[2] = {reinterpret_cast<const float *>(pL), reinterpret_cast<const float *>(pR)};
     for (uint32_t e = 0; e < 2; ++e) {
@@ -349,6 +494,7 @@ void runBlock(SnapHeader *h, StageRec &r, MxShared &S, uint8_t *sh, const MxLayo
         }
     }
     S.head = head + 1 == P ? 0 : head + 1;
+    if (dm) updateDelays(prm, S, dlyOf(sh, L, S.srcs));  // the next block's input is delayed to this position
 }
 
 }  // namespace
@@ -378,13 +524,28 @@ n60_status validateMatrixStage(const n60_stage_desc &s, double rate, uint32_t ou
     if (!isInt(p[8]) || p[8] < -1.0f || p[8] >= static_cast<float>(n)) return N60_STATUS_BAD_ARGUMENT;
     if (!isInt(p[9]) || p[9] < 0.0f || p[9] > static_cast<float>(N60_GRAPH_MAX_DELAY_FRAMES)) return N60_STATUS_BAD_ARGUMENT;
     if (!isInt(p[10]) || p[10] < 0.0f || p[10] > std::ceil(static_cast<float>(rate))) return N60_STATUS_BAD_ARGUMENT;
-    if (p[11] != 0.0f) return N60_STATUS_BAD_ARGUMENT;
+    if (!isInt(p[11]) || p[11] < 0.0f || p[11] > static_cast<float>(N60_GRAPH_BINAURAL_MAX_ELEVATIONS)) {
+        return N60_STATUS_BAD_ARGUMENT;
+    }
+    const uint32_t elev = static_cast<uint32_t>(p[11]);
     const uint32_t tailT = static_cast<uint32_t>(p[10]);
-    if (tailT != 0 && !tailGeometry(rate, taps, tailT).ok) return N60_STATUS_BAD_ARGUMENT;
-    const uint64_t expect = kFixed + uint64_t(orient) * n * 2 * taps + uint64_t(n) * 2 * tailT;
+    if (elev != 0 && orient % elev != 0) return N60_STATUS_BAD_ARGUMENT;
+    if (tailT != 0 && !tailGeometry(rate, taps, tailT, elev != 0 ? kFdHalf : 0).ok) return N60_STATUS_BAD_ARGUMENT;
+    const uint64_t body = kFixed + uint64_t(orient) * n * 2 * taps + uint64_t(n) * 2 * tailT;
+    const uint64_t expect = body + (elev != 0 ? 2 + uint64_t(orient) * n * 2 : 0);
     if (expect != s.paramCount) return N60_STATUS_BAD_ARGUMENT;
-    for (uint64_t i = kFixed; i < expect; i++) {
+    for (uint64_t i = kFixed; i < body; i++) {
         if (!(std::fabs(p[i]) <= 1.0e6f)) return N60_STATUS_BAD_ARGUMENT;  /* rejects NaN, Inf and absurd taps */
+    }
+    if (elev != 0) {
+        if (!inR(p[body], -180.0, 180.0)) return N60_STATUS_BAD_ARGUMENT;
+        if (elev > 1 ? !(p[body + 1] > 0.0f && p[body + 1] <= 180.0f) : !inR(p[body + 1], 0.0, 180.0)) {
+            return N60_STATUS_BAD_ARGUMENT;
+        }
+        const double maxDelay = N60_GRAPH_BINAURAL_MAX_DELAY_SECONDS * rate;
+        for (uint64_t i = body + 2; i < expect; i++) {
+            if (!inR(p[i], 0.0, maxDelay)) return N60_STATUS_BAD_ARGUMENT;
+        }
     }
     return N60_STATUS_OK;
 }
@@ -392,15 +553,16 @@ n60_status validateMatrixStage(const n60_stage_desc &s, double rate, uint32_t ou
 void matrixSizes(const n60_stage_desc &s, double rate, size_t &perLane, size_t &shared) {
     const uint32_t taps = static_cast<uint32_t>(s.params[3]);
     const uint32_t parts = (taps + kPart - 1) / kPart;
-    const TailGeom g = tailGeometry(rate, taps, static_cast<uint32_t>(s.params[10]));
-    perLane = laneBytes(parts, g);
-    shared = mxLayout(parts, static_cast<uint32_t>(s.params[4]), srcCount(s)).total;
+    const bool dm = s.params[11] != 0.0f;
+    const TailGeom g = tailGeometry(rate, taps, static_cast<uint32_t>(s.params[10]), dm ? kFdHalf : 0);
+    perLane = laneBytes(parts, g, ringLenFor(s.params, srcCount(s), rate));
+    shared = mxLayout(parts, static_cast<uint32_t>(s.params[4]), srcCount(s), dm).total;
     if (g.ok) shared += up(sizeof(TailShared)) + size_t(srcCount(s)) * 2 * up(conv::sharedBytes(&kProbe, g.n));
 }
 
 // Control thread. Builds the tail state: geometry, half-band taps and one convolver per source and ear.
 bool tailInit(const SnapHeader *h, uint8_t *sh, const MxLayout &L, MxShared &S, const TailGeom &G, const float *tailIr) {
-    const size_t earlyLane = earlyLaneBytes(S.parts);
+    const size_t earlyLane = earlyLaneBytes(S.parts, S.ring);
     S.tailLaneOff = static_cast<uint32_t>(earlyLane);
     S.tailNufOff = static_cast<uint32_t>(earlyLane + up(sizeof(HbRing) * kMaxStages));
     S.tailNufStride = static_cast<uint32_t>(up(conv::laneBytes(&kProbe, G.n)));
@@ -474,12 +636,19 @@ bool matrixInit(SnapHeader *h, const StageRec &r) {
     S.yawStep = p[6];
     S.wrap = p[7] != 0.0f ? 1u : 0u;
     S.equalEar = static_cast<int32_t>(p[8]);
-    S.cell = cellFor(p[0], S.yawStart, S.yawStep, S.orient, S.wrap != 0);
-    const MxLayout L = mxLayout(S.parts, S.orient, S.srcs);
-    const TailGeom G = tailGeometry(h->sampleRate, S.taps, static_cast<uint32_t>(p[10]));
+    S.dm = p[11] != 0.0f ? 1u : 0u;
+    S.elev = S.dm != 0 ? static_cast<uint32_t>(p[11]) : 1u;
+    S.yawSets = S.orient / S.elev;
+    S.ring = ringLenFor(p, S.srcs, h->sampleRate);
+    S.ringPos = 0;
+    S.histEpoch = h->historyEpoch;
+    S.cell = cellFor(p[0], S.yawStart, S.yawStep, S.yawSets, S.wrap != 0);
+    S.cellE = 0.0;
+    const MxLayout L = mxLayout(S.parts, S.orient, S.srcs, S.dm != 0);
+    const TailGeom G = tailGeometry(h->sampleRate, S.taps, static_cast<uint32_t>(p[10]), S.dm != 0 ? kFdHalf : 0);
     // matrixSizes (called by validation) already rejected a tail the geometry cannot carry, so G.ok holds whenever p[10] != 0.
     S.tailTaps = G.ok ? static_cast<uint32_t>(p[10]) : 0;
-    S.laneStride = static_cast<uint32_t>(laneBytes(S.parts, G));
+    S.laneStride = static_cast<uint32_t>(laneBytes(S.parts, G, S.ring));
     fft::realPlanInit(sh + L.plan, kFft);
     Complex *work = reinterpret_cast<Complex *>(sh + L.work);
     Complex *kernels = reinterpret_cast<Complex *>(sh + L.kernels);
@@ -508,6 +677,18 @@ bool matrixInit(SnapHeader *h, const StageRec &r) {
         }
     }
     std::memset(work, 0, sizeof(Complex) * kFft);
+    if (S.dm != 0) {
+        const size_t tailCount = size_t(S.srcs) * 2 * static_cast<size_t>(p[10]);
+        const float *ext = tailIr + tailCount;
+        S.pitchStart = ext[0];
+        S.pitchStep = ext[1];
+        S.dlyBase = static_cast<uint32_t>(ext + 2 - p);
+        S.cellE = cellForPitch(p[1], S.pitchStart, S.pitchStep, S.elev);
+        const DlyState D = dlyOf(sh, L, S.srcs);
+        fdTable(D.tab);
+        updateDelays(p, S, D);
+        std::memcpy(D.dPrev, D.dCur, sizeof(float) * S.srcs * 2);  // no ramp at the start
+    }
     return !G.ok || tailInit(h, sh, L, S, G, tailIr);
 }
 
@@ -586,14 +767,26 @@ void tailChunk(SnapHeader *h, StageRec &r, const MxShared &S, uint8_t *sh, float
 void runMatrix(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) N60_RT_NONBLOCKING {
     uint8_t *sh = sharedState(h, r);
     MxShared &S = *reinterpret_cast<MxShared *>(sh);
-    const MxLayout L = mxLayout(S.parts, S.orient, S.srcs);
+    const bool dm = S.dm != 0;
+    const MxLayout L = mxLayout(S.parts, S.orient, S.srcs, dm);
     float *outBlk = reinterpret_cast<float *>(sh + L.outBlk);
+    const DlyState D = dm ? dlyOf(sh, L, S.srcs) : DlyState{};
+    const size_t blk = earBlockBytes(S.parts);
+    const uint32_t ringMask = S.ring - 1;
     float *earL = lanes[S.outA];
     float *earR = lanes[S.outB];
     const size_t stride = S.laneStride;
     uint8_t *laneBase = laneState(h, r, 0);
     const bool tail = S.tailTaps != 0;
     const TailShared *T = tail ? reinterpret_cast<const TailShared *>(sh + S.tailShOff) : nullptr;
+    if (S.histEpoch != h->historyEpoch) {
+        // History reset (stream restart, seek): clear the early histories (both ear blocks and the delay ring) so no stale
+        // audio rings out; the delays restart without a ramp. Once per reset, bounded by the lane size.
+        S.histEpoch = h->historyEpoch;
+        const size_t laneLen = earlyLaneBytes(S.parts, S.ring);
+        for (uint32_t k = 0; k < S.srcs; ++k) std::memset(laneBase + k * stride, 0, laneLen);
+        if (dm) std::memcpy(D.dPrev, D.dCur, sizeof(float) * S.srcs * 2);
+    }
     uint32_t i = 0;
     while (i < frames) {
         const uint32_t m = tail ? std::min(frames - i, kChunk) : frames;
@@ -601,8 +794,38 @@ void runMatrix(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames)
         for (uint32_t j = 0; j < m; ++j, ++i) {
             const float yl = outBlk[S.fill];
             const float yr = outBlk[kPart + S.fill];
-            for (uint32_t k = 0; k < S.srcs; ++k) {
-                reinterpret_cast<float *>(laneBase + k * stride)[S.fill] = clean(lanes[laneOf(r, k)][i]);
+            if (!dm) {
+                for (uint32_t k = 0; k < S.srcs; ++k) {
+                    reinterpret_cast<float *>(laneBase + k * stride)[S.fill] = clean(lanes[laneOf(r, k)][i]);
+                }
+            } else {
+                const float ramp = static_cast<float>(S.fill + 1) * (1.0f / static_cast<float>(kPart));
+                const uint32_t pos = S.ringPos;
+                for (uint32_t k = 0; k < S.srcs; ++k) {
+                    uint8_t *lb = laneBase + k * stride;
+                    float *ring = reinterpret_cast<float *>(lb + 2 * blk);
+                    ring[pos] = clean(lanes[laneOf(r, k)][i]);
+                    for (uint32_t e = 0; e < 2; ++e) {
+                        const size_t at = size_t(k) * 2 + e;
+                        float ip = D.ival[at], exact = D.exact[at];
+                        float local[kFdTaps];
+                        const float *cof = D.cof + at * kFdTaps;
+                        if (D.dPrev[at] != D.dCur[at]) {  // gliding: this frame's delay on the ramp
+                            fdSetup(D.tab, D.dPrev[at] + (D.dCur[at] - D.dPrev[at]) * ramp, ip, exact, local);
+                            cof = local;
+                        }
+                        const uint32_t base = pos - static_cast<uint32_t>(ip);
+                        float y;
+                        if (exact != 0.0f) {
+                            y = ring[(base - kFdHalf) & ringMask];
+                        } else {
+                            y = 0.0f;
+                            for (uint32_t t = 0; t < kFdTaps; ++t) y += cof[t] * ring[(base - 1 - t) & ringMask];
+                        }
+                        reinterpret_cast<float *>(lb + e * blk)[S.fill] = y;
+                    }
+                }
+                S.ringPos = (pos + 1) & ringMask;
             }
             earL[i] = tail ? yl + T->out[0][j] : yl;
             earR[i] = tail ? yr + T->out[1][j] : yr;
@@ -630,7 +853,8 @@ n60_status validateMatrixParam(const SnapHeader *h, const StageRec &r, uint32_t 
 }
 
 uint32_t matrixLatency(const SnapHeader *h, const StageRec &r) N60_RT_NONBLOCKING {
-    return kPart + static_cast<uint32_t>(paramsOf(h, r)[9]);
+    const float *p = paramsOf(h, r);
+    return kPart + static_cast<uint32_t>(p[9]) + (p[11] != 0.0f ? N60_GRAPH_BINAURAL_FD_LATENCY : 0u);
 }
 
 }  // namespace n60
