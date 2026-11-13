@@ -87,8 +87,10 @@ constexpr uint32_t kSideChunk = 64;
 // G39: the hosts start render workers with a 512 KB stack (AudioWorkgroupWorkerPool); each stage's chunk scratch stays far below
 // it. The side-chain high-pass output of every lane is the largest new piece here (16 KB at 64 lanes).
 static_assert(kSideChunk * N60_GRAPH_MAX_CHANNELS * sizeof(float) <= 16 * 1024, "side-chain chunk scratch stays small on the stack");
+template <uint32_t M>
 void sidechainHp(const double c[5], double *const *z, const float *const *in, uint32_t n, uint32_t base, uint32_t cn,
-                 float (*out)[kSideChunk]) {
+                 float (*out)[M]) {
+    static_assert(M <= kSideChunk, "the pair scratch holds one side-chain chunk");
     simd::f64x2 x[kSideChunk];
     for (uint32_t l = 0; l < n; l += 2) {
         const bool two = l + 1 < n;
@@ -783,50 +785,63 @@ void runDynEq(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) 
     }
     const uint32_t per = linked ? n : 1, groups = linked ? 1 : n;
     const float bypassC = sh->bypassC;
-    float xin[kMaxLanes];
-    for (uint32_t i = 0; i < frames; ++i) {
-        for (uint32_t g = 0; g < groups; ++g) {
-            for (uint32_t b = 0; b < nb; ++b) {
-                const float *prm = p + 1 + N60_DYN_EQ_BAND_PARAMS * b;
-                const DqBand &bc = bands[b];
-                DqLaneBand &hold = lb[g * per][b];
-                float peak = 0.0f, power = 0.0f;
-                for (uint32_t k = 0; k < per; ++k) {
-                    const uint32_t l = g * per + k;
-                    xin[k] = lp[l][i];
-                    const float a = std::clamp(biquad(bc.an, lb[l][b].aZ, xin[k]), -1e6f, 1e6f);
-                    peak = std::max(peak, std::fabs(a));
-                    power += a * a;
-                }
-                float det;
-                if (prm[13] >= 0.5f) {
-                    const float inst = power / static_cast<float>(per);
-                    hold.rms = inst + bc.rmsC * (hold.rms - inst);
-                    det = std::sqrt(std::max(hold.rms, 0.0f));
-                } else {
-                    det = peak;
-                    hold.rms = det * det;
-                }
-                const float target = dqTargetDb(lin2db(det, 1e-20f), prm);
-                const float c = std::fabs(target) > std::fabs(hold.dyn) ? bc.atkC : bc.relC;
-                hold.dyn = target + c * (hold.dyn - target);
-                hold.stat = prm[3] + bypassC * (hold.stat - prm[3]);
-                hold.wet = 1.0f + bypassC * (hold.wet - 1.0f);
-                const float total = std::clamp(hold.stat + hold.dyn, -42.0f, 18.0f);
-                const bool tilt = prm[0] == 5.0f;
-                const float half = 0.5f * total;
-                const float lowScale = tilt ? (db2lin(-half) - 1.0f) * hold.wet : 0.0f;
-                const float highScale = tilt ? (db2lin(half) - 1.0f) * hold.wet : 0.0f;
-                const float flat = (db2lin(total) - 1.0f) * hold.wet;
-                for (uint32_t k = 0; k < per; ++k) {
-                    const uint32_t l = g * per + k;
-                    DqLaneBand &s = lb[l][b];
-                    const float prim = biquad(bc.pr, s.pZ, xin[k]);
-                    if (tilt) {
-                        const float sec = biquad(bc.sc, s.sZ, xin[k]);
-                        lp[l][i] = xin[k] + lowScale * prim + highScale * sec;
+    // E20 S10 part 5 (G14): the three basis filters of a band (analysis, primary, secondary) depend only on the band's input
+    // (the previous band's output), never on the band's gain, so they run for a whole chunk in lane pairs through
+    // simd::biquadPair, band by band; only the detector and gain follower stay per sample. Each band's input is complete for
+    // the chunk before the band runs, because bands are serial and lanes never mix except in the linked detector (which
+    // reads the filtered values, not state). Scratch: 3 x 32 x lanes floats on the stack (24 KB at 64 lanes, G39 limit 64 KB).
+    constexpr uint32_t kDqChunk = 32;
+    static_assert(3 * kDqChunk * kMaxLanes * sizeof(float) <= 24 * 1024, "dynamic EQ chunk scratch stays small on the stack");
+    float aY[kMaxLanes][kDqChunk], pY[kMaxLanes][kDqChunk], sY[kMaxLanes][kDqChunk];
+    double *zA[kMaxLanes], *zP[kMaxLanes], *zS[kMaxLanes];
+    for (uint32_t base = 0; base < frames; base += kDqChunk) {
+        const uint32_t cn = std::min(kDqChunk, frames - base);
+        for (uint32_t b = 0; b < nb; ++b) {
+            const float *prm = p + 1 + N60_DYN_EQ_BAND_PARAMS * b;
+            const DqBand &bc = bands[b];
+            const bool tilt = prm[0] == 5.0f;
+            for (uint32_t l = 0; l < n; ++l) {
+                zA[l] = lb[l][b].aZ;
+                zP[l] = lb[l][b].pZ;
+                zS[l] = lb[l][b].sZ;
+            }
+            sidechainHp(bc.an, zA, lp, n, base, cn, aY);
+            sidechainHp(bc.pr, zP, lp, n, base, cn, pY);
+            if (tilt) sidechainHp(bc.sc, zS, lp, n, base, cn, sY);
+            for (uint32_t c = 0; c < cn; ++c) {
+                const uint32_t i = base + c;
+                for (uint32_t g = 0; g < groups; ++g) {
+                    DqLaneBand &hold = lb[g * per][b];
+                    float peak = 0.0f, power = 0.0f;
+                    for (uint32_t k = 0; k < per; ++k) {
+                        const uint32_t l = g * per + k;
+                        const float a = std::clamp(aY[l][c], -1e6f, 1e6f);
+                        peak = std::max(peak, std::fabs(a));
+                        power += a * a;
+                    }
+                    float det;
+                    if (prm[13] >= 0.5f) {
+                        const float inst = power / static_cast<float>(per);
+                        hold.rms = inst + bc.rmsC * (hold.rms - inst);
+                        det = std::sqrt(std::max(hold.rms, 0.0f));
                     } else {
-                        lp[l][i] = xin[k] + flat * prim;
+                        det = peak;
+                        hold.rms = det * det;
+                    }
+                    const float target = dqTargetDb(lin2db(det, 1e-20f), prm);
+                    const float cf = std::fabs(target) > std::fabs(hold.dyn) ? bc.atkC : bc.relC;
+                    hold.dyn = target + cf * (hold.dyn - target);
+                    hold.stat = prm[3] + bypassC * (hold.stat - prm[3]);
+                    hold.wet = 1.0f + bypassC * (hold.wet - 1.0f);
+                    const float total = std::clamp(hold.stat + hold.dyn, -42.0f, 18.0f);
+                    const float half = 0.5f * total;
+                    const float lowScale = tilt ? (db2lin(-half) - 1.0f) * hold.wet : 0.0f;
+                    const float highScale = tilt ? (db2lin(half) - 1.0f) * hold.wet : 0.0f;
+                    const float flat = (db2lin(total) - 1.0f) * hold.wet;
+                    for (uint32_t k = 0; k < per; ++k) {
+                        const uint32_t l = g * per + k;
+                        const float xin = lp[l][i];
+                        lp[l][i] = tilt ? xin + lowScale * pY[l][c] + highScale * sY[l][c] : xin + flat * pY[l][c];
                     }
                 }
             }
