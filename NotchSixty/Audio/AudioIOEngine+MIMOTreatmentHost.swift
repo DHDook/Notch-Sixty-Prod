@@ -32,6 +32,17 @@ extension AudioIOEngine: MIMOTreatmentHost {
             let source = MultichannelCalibrationSource.subwoofer(UInt32(index))
             infos.append(MIMOTreatmentSourceInfo(source: source, lane: roles.count + index, name: source.displayName))
         }
+        if let routing = speakerRoutingConfiguration {
+            let window = MIMORoutedTreatmentPlanner.defaultSupportHz
+            for speaker in routing.speakers {
+                let lane = speaker.source.kind == .program ? speaker.source.index : roles.count + speaker.source.index
+                guard let index = infos.firstIndex(where: { $0.lane == lane }) else { continue }
+                infos[index].inBandWays = MIMORoutedTreatmentPlanner
+                    .inBandWays(of: speaker, lowHz: window.lowerBound, highHz: window.upperBound)
+                    .map { $0.name.isEmpty ? $0.id.uuidString : $0.name }
+                if !speaker.name.isEmpty { infos[index].name = speaker.name }
+            }
+        }
         return infos
     }
 

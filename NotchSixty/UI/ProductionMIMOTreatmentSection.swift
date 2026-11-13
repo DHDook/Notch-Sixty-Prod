@@ -33,6 +33,7 @@ struct ProductionMIMOTreatmentSection: View {
                     .font(.subheadline).foregroundStyle(.secondary)
             }
             ForEach(controller.rows) { row in
+                VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 14) {
                     Toggle(row.name, isOn: Binding(get: { row.included }, set: { controller.setIncluded($0, lane: row.lane) }))
                         .accessibilityLabel("Include \(row.name) in room treatment")
@@ -44,6 +45,12 @@ struct ProductionMIMOTreatmentSection: View {
                         controller.setSupport(lowHz: row.supportLowHz, highHz: $0, lane: row.lane)
                     }
                     Text("Hz").foregroundStyle(.secondary)
+                }
+                if !row.inBandWays.isEmpty {
+                    Text("Treated ways: \(row.inBandWays.joined(separator: ", ")). Other ways play their program only.")
+                        .font(.caption).foregroundStyle(.secondary)
+                        .accessibilityLabel("\(row.name) treated ways: \(row.inBandWays.joined(separator: ", "))")
+                }
                 }
             }
         }
