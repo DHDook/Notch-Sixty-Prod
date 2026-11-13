@@ -72,6 +72,8 @@ final class ProductController: ObservableObject {
     let abComparison: ContentABComparisonController
     let calibration: RoomCorrectionCalibrationController
     let multichannelCalibration: MultichannelCalibrationController
+    /// E19 S8: the Room Treatment screen's model (shown behind `e19.mimo-treatment`).
+    let mimoTreatment: MIMOTreatmentController
     let roomCorrectionProjects: RoomCorrectionProjectController
     let roomTreatmentAdvisor: RoomTreatmentAdvisorController
     let ambientCompensation: AmbientCompensationController
@@ -125,11 +127,16 @@ final class ProductController: ObservableObject {
         let abComparison = ContentABComparisonController(profiles: profiles)
         self.abComparison = abComparison
         self.calibration = calibration
-        self.multichannelCalibration = MultichannelCalibrationController(
+        let multichannelCalibration = MultichannelCalibrationController(
             engine: audioEngine,
             profiles: profiles,
             microphone: calibration
         )
+        self.multichannelCalibration = multichannelCalibration
+        self.mimoTreatment = MIMOTreatmentController(
+            host: audioEngine, flags: FeatureFlags(),
+            seats: { multichannelCalibration.seats },
+            baseline: { multichannelCalibration.measurements })
         let roomProjects =
             RoomCorrectionProjectController(profiles: profiles)
         self.roomCorrectionProjects = roomProjects
@@ -245,11 +252,16 @@ final class ProductController: ObservableObject {
         let abComparison = ContentABComparisonController(profiles: profiles)
         self.abComparison = abComparison
         self.calibration = calibration
-        self.multichannelCalibration = MultichannelCalibrationController(
+        let multichannelCalibration = MultichannelCalibrationController(
             engine: audioEngine,
             profiles: profiles,
             microphone: calibration
         )
+        self.multichannelCalibration = multichannelCalibration
+        self.mimoTreatment = MIMOTreatmentController(
+            host: audioEngine, flags: FeatureFlags(),
+            seats: { multichannelCalibration.seats },
+            baseline: { multichannelCalibration.measurements })
         let roomProjects =
             RoomCorrectionProjectController(profiles: profiles)
         self.roomCorrectionProjects = roomProjects
