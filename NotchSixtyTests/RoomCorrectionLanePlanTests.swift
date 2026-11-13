@@ -44,7 +44,7 @@ final class RoomCorrectionLanePlanTests: XCTestCase {
         let cache = RoomCorrectionRateCache()
         let probes: [Double] = [60, 90, 120, 200, 400, 800, 1_500, 3_000, 5_000, 8_000, 12_000]
         for rate in Self.rates {
-            let plan = try cache.plan(for: multi, sampleRate: rate)
+            let plan = try cache.plan(for: multi, sampleRate: rate, firScheme: UnifiedGraphFIRScheme.uniform)
             XCTAssertEqual(plan.sampleRate, rate)
             let taps = try XCTUnwrap(plan.stages.first).taps
             for f in probes {
@@ -99,7 +99,7 @@ final class RoomCorrectionLanePlanTests: XCTestCase {
         let multi = design(mode: .music20ms, laneGrids: [0: g], laneCount: 2)
         let cache = RoomCorrectionRateCache()
         for rate in [44_100.0, 48_000, 88_200, 96_000] {
-            let plan = try cache.plan(for: multi, sampleRate: rate)
+            let plan = try cache.plan(for: multi, sampleRate: rate, firScheme: UnifiedGraphFIRScheme.uniform)
             XCTAssertEqual(Int(plan.declaredLatencyFrames), Int((0.02 * rate).rounded()), "latency at \(rate)")
             let taps = try XCTUnwrap(plan.stages.first).taps
             for f in [120.0, 400, 3_000, 8_000] {
@@ -115,7 +115,7 @@ final class RoomCorrectionLanePlanTests: XCTestCase {
         let multi = design(mode: .music100ms, laneGrids: [0: g], laneCount: 2)
         let cache = RoomCorrectionRateCache()
         for rate in [44_100.0, 48_000, 88_200, 96_000, 176_400, 192_000, 352_800, 384_000] {
-            let plan = try cache.plan(for: multi, sampleRate: rate)
+            let plan = try cache.plan(for: multi, sampleRate: rate, firScheme: UnifiedGraphFIRScheme.uniform)
             let stage = try XCTUnwrap(plan.stages.first)
             XCTAssertEqual(Int(plan.declaredLatencyFrames), Int((0.1 * rate).rounded()), "latency at \(rate)")
             XCTAssertLessThanOrEqual(stage.taps.count, RoomCorrectionRateCache.maximumSingleBandTaps)
@@ -134,7 +134,7 @@ final class RoomCorrectionLanePlanTests: XCTestCase {
                 XCTAssertEqual(stage.graphParams.count, 4 + stage.taps.count + part.lowTaps.count)
             }
         }
-        let high = try cache.plan(for: multi, sampleRate: 384_000)
+        let high = try cache.plan(for: multi, sampleRate: 384_000, firScheme: UnifiedGraphFIRScheme.uniform)
         XCTAssertNotNil(high.stages.first?.twoBand)
     }
 
@@ -158,7 +158,7 @@ final class RoomCorrectionLanePlanTests: XCTestCase {
         let dup = RoomCorrectionMultiLaneDesign(
             latencyMode: .video, laneCount: 2,
             lanes: [RoomCorrectionLaneDesign(lane: 1, grid: g), RoomCorrectionLaneDesign(lane: 1, grid: g)])
-        XCTAssertThrowsError(try cache.plan(for: dup, sampleRate: 48_000)) {
+        XCTAssertThrowsError(try cache.plan(for: dup, sampleRate: 48_000, firScheme: UnifiedGraphFIRScheme.uniform)) {
             XCTAssertEqual($0 as? RoomCorrectionLanePlanError, .duplicateLane(1))
         }
     }
@@ -167,14 +167,14 @@ final class RoomCorrectionLanePlanTests: XCTestCase {
         let g = try grid(smooth)
         let multi = design(mode: .video, laneGrids: [0: g, 1: g], laneCount: 2)
         let cache = RoomCorrectionRateCache()
-        let first = try await cache.planAsync(for: multi, sampleRate: 48_000)
-        let again = try cache.plan(for: multi, sampleRate: 48_000)
+        let first = try await cache.planAsync(for: multi, sampleRate: 48_000, firScheme: UnifiedGraphFIRScheme.uniform)
+        let again = try cache.plan(for: multi, sampleRate: 48_000, firScheme: UnifiedGraphFIRScheme.uniform)
         XCTAssertEqual(first, again)
         XCTAssertEqual(cache.synthesisCount, 1, "two lanes with one grid share one synthesis")
-        _ = try cache.plan(for: multi, sampleRate: 96_000)
+        _ = try cache.plan(for: multi, sampleRate: 96_000, firScheme: UnifiedGraphFIRScheme.uniform)
         XCTAssertEqual(cache.synthesisCount, 2)
         cache.invalidate(designID: multi.id)
-        _ = try cache.plan(for: multi, sampleRate: 48_000)
+        _ = try cache.plan(for: multi, sampleRate: 48_000, firScheme: UnifiedGraphFIRScheme.uniform)
         XCTAssertEqual(cache.synthesisCount, 3)
     }
 
@@ -263,7 +263,7 @@ final class RoomCorrectionLanePlanTests: XCTestCase {
         let multi = design(mode: .video, laneGrids: Dictionary(uniqueKeysWithValues: (0..<6).map { ($0, all) }), laneCount: 6)
         let cache = RoomCorrectionRateCache()
         for rate in [48_000.0, 384_000, 48_000, 192_000] {
-            let plan = try cache.plan(for: multi, sampleRate: rate)
+            let plan = try cache.plan(for: multi, sampleRate: rate, firScheme: UnifiedGraphFIRScheme.uniform)
             XCTAssertEqual(plan.stages.count, 1)
             let built = try spec(rate: rate, layout: layout, plan: plan)
             XCTAssertEqual(built.sampleRate, rate)
