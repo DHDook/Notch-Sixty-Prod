@@ -11,10 +11,11 @@ target_include_directories(n60core PUBLIC include)
 target_include_directories(n60core PRIVATE src)
 target_compile_options(n60core PRIVATE -Wall -Wextra -Werror -Wno-unknown-warning-option -Werror=function-effects -fno-exceptions -fno-rtti)
 
-# E20 S4 (G15): x86-64 builds default to the SSE2 baseline, where simd::fma is a separate multiply and add. Turning this on
-# builds with FMA3 (-mfma, plus -mavx2 for 256-bit moves) so simd::fma becomes one fused operation. The result is not
-# bit-identical to the baseline build, so it stays off until the E22 x86 measurement decides the default (E20 S10).
-option(N60_X86_FMA "Build the engine core with FMA3 on x86-64" OFF)
+# E20 S10 part 6 (G17, owner decision 13 Nov 2026): x86-64 builds default to FMA3. -mfma makes simd::fma one fused operation
+# (the narrowest flag that gives it), -mavx2 allows 256-bit moves; pre-Haswell x86 is not supported and every Intel Mac that can
+# run macOS 26 has FMA3. The fused result is not bit-identical to a non-FMA x86 build (arm64 is fused too, so it matches arm64
+# rounding). Pass -DN60_X86_FMA=OFF to build the SSE2 baseline (simd::fma then falls back to libm per element).
+option(N60_X86_FMA "Build the engine core with FMA3 on x86-64" ON)
 if(N60_X86_FMA AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
   target_compile_options(n60core PRIVATE -mfma -mavx2)
 endif()

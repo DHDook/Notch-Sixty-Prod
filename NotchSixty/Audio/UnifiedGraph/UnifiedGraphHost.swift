@@ -589,6 +589,17 @@ final class UnifiedGraphHost: @unchecked Sendable {
         return out
     }
 
+    /// E20 S10 part 6 (G12): the render load over the last completed one-second window
+    /// (`n60_graph_read_load`); nil when no graph renders. Control plane.
+    func renderLoad() -> UnifiedGraphRenderLoad? {
+        lock.lock(); defer { lock.unlock() }
+        guard let graph else { return nil }
+        var out = n60_graph_load()
+        out.structSize = UInt32(MemoryLayout<n60_graph_load>.size)
+        guard n60_graph_read_load(graph, &out) == N60_STATUS_OK else { return nil }
+        return UnifiedGraphRenderLoad(windowBlocks: out.windowBlocks, meanLoad: out.meanLoad, peakLoad: out.peakLoad)
+    }
+
     /// Gain reduction, true-peak and guard readings of the graph's compressor and protection
     /// stages for the diagnostics record; nil when no stage is present. Control plane.
     func dynamicsReadings() -> UnifiedGraphDynamicsReading? {
@@ -697,6 +708,19 @@ struct UnifiedGraphOutputProtectionReading: Equatable, Sendable {
     var userTruePeakLinear: Float?
     var hardLimitGainReductionDB: Float
     var outputTruePeakLinear: Float
+}
+
+/// Render time over block period for the last completed one-second window: 1.0 means the callback used its whole period.
+/// `windowBlocks` is 0 until the first window completes (loads read 0 then).
+struct UnifiedGraphRenderLoad: Equatable, Sendable {
+    let windowBlocks: UInt32
+    let meanLoad: Float
+    let peakLoad: Float
+
+    var displayText: String {
+        guard windowBlocks > 0 else { return "measuring" }
+        return String(format: "mean %.1f%% / peak %.1f%% of the block period", Double(meanLoad) * 100.0, Double(peakLoad) * 100.0)
+    }
 }
 
 struct UnifiedGraphDynamicsReading: Equatable, Sendable {

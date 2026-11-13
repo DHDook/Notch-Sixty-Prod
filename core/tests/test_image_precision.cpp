@@ -164,6 +164,85 @@ void deessRelease(double rate) {
     check(std::fabs(grEnd - 3.0) < 0.1, "reduction settles within 0.1 dB of the relaxed range", rate);
     n60_graph_retire(g);
 }
+// E20 S10 part 6 (G45): the de-harsh high shelf (float coefficients, float state, single-rounded fma kernel) against a double
+// state reference that uses the SAME float coefficients, so what is measured is arithmetic rounding only, not coefficient
+// quantisation (which the kernel shares). The plain float form the legacy kernel used (b0*x + z1 and so on, no fma) is run
+// beside it: the bulk path must be no worse than that form, which shows the loosened kernel-parity bound
+// (test_image_parity.c) is float noise of either implementation and not a regression in the stage.
+void harshShelf(double rate) {
+    const float p[12] = {1, 3500, -3, 0, 6500, -40, 4, -6, 2, 1, 100, 0};
+    n60_graph *g = build(rate, N60_STAGE_DEESS, p, 12);
+    check(g != nullptr, "build harsh", rate);
+    if (!g) return;
+    // The stage's design: RBJ high shelf, Q = 0.7071067811865476, normalised in double, stored as float.
+    const double q = 0.7071067811865476, w = 2 * kPi * 3500.0 / rate, c = std::cos(w), sn = std::sin(w);
+    const double A = std::pow(10.0, -3.0 / 40.0), alpha = sn / (2 * q), beta = 2 * std::sqrt(A) * alpha;
+    const double a0 = (A + 1) - (A - 1) * c + beta;
+    const float cf[5] = {float(A * ((A + 1) + (A - 1) * c + beta) / a0), float(-2 * A * ((A - 1) + (A + 1) * c) / a0),
+                         float(A * ((A + 1) + (A - 1) * c - beta) / a0), float(2 * ((A - 1) - (A + 1) * c) / a0),
+                         float(((A + 1) - (A - 1) * c - beta) / a0)};
+    const size_t total = (size_t)(rate * 2.0) / kBlock * kBlock;
+    std::vector<float> l(total), r(total), ol(total), orr(total);
+    unsigned seed = 11;
+    for (size_t i = 0; i < total; ++i) {
+        seed = seed * 1664525u + 1013904223u;
+        const float noise = 0.05f * ((float)((seed >> 8) & 0xFFFF) / 65536.0f - 0.5f);
+        l[i] = 0.3f * (float)std::sin(2 * kPi * 440.0 * (double)i / rate) + 0.25f * (float)std::sin(2 * kPi * 6800.0 * (double)i / rate) + noise;
+        r[i] = -0.8f * l[i];
+    }
+    for (size_t off = 0; off < total; off += kBlock) {
+        const float *ip[2] = {l.data() + off, r.data() + off};
+        float *op[2] = {ol.data() + off, orr.data() + off};
+        n60_graph_process(g, ip, op, kBlock);
+    }
+    // The stage crossfades dry and shelf with a float-smoothed mix that settles near (not exactly at) 1, so the output is
+    // dry + m * (wet - dry) with m fixed over the measured second: fit m by least squares and measure the residual, which is
+    // the shelf's arithmetic rounding (plus the final blend's one rounding).
+    std::vector<double> dry(total), wet(total);
+    std::vector<float> plain(total);
+    double rz1 = 0, rz2 = 0;      // double reference, left channel
+    float fz1 = 0, fz2 = 0;       // plain float form (no fma)
+    for (size_t i = 0; i < total; ++i) {
+        const double x = l[i];
+        const double y = double(cf[0]) * x + rz1;
+        rz1 = double(cf[1]) * x - double(cf[3]) * y + rz2;
+        rz2 = double(cf[2]) * x - double(cf[4]) * y;
+        const float xf = l[i];
+        const float yf = cf[0] * xf + fz1;
+        fz1 = cf[1] * xf - cf[3] * yf + fz2;
+        fz2 = cf[2] * xf - cf[4] * yf;
+        dry[i] = x;
+        wet[i] = y;
+        plain[i] = yf;
+    }
+    const size_t from = (size_t)(rate * 1.0);  // the 5 ms bypass crossfade has settled
+    double num = 0, den = 0;
+    for (size_t i = from; i < total; ++i) {
+        num += (double(ol[i]) - dry[i]) * (wet[i] - dry[i]);
+        den += (wet[i] - dry[i]) * (wet[i] - dry[i]);
+    }
+    const double m = num / den;
+    double peakStage = 0, peakPlain = 0, sumStage = 0, sumPlain = 0;
+    const size_t counted = total - from;
+    for (size_t i = from; i < total; ++i) {
+        const double es = std::fabs(double(ol[i]) - (dry[i] + m * (wet[i] - dry[i]))), ep = std::fabs(double(plain[i]) - wet[i]);
+        peakStage = std::max(peakStage, es);
+        peakPlain = std::max(peakPlain, ep);
+        sumStage += es * es;
+        sumPlain += ep * ep;
+    }
+    const double dbS = 20 * std::log10(peakStage + 1e-30), dbP = 20 * std::log10(peakPlain + 1e-30);
+    const double rmsS = 10 * std::log10(sumStage / double(counted) + 1e-60), rmsP = 10 * std::log10(sumPlain / double(counted) + 1e-60);
+    std::printf("de-harsh shelf at %.0f: settled mix %.7f; stage vs double peak %.1f rms %.1f dBFS; plain float form peak %.1f rms %.1f dBFS\n",
+                rate, m, dbS, rmsS, dbP, rmsP);
+    check(std::fabs(m - 1.0) < 1.0e-3, "de-harsh mix settles within 1e-3 of 1", rate);
+    check(dbS < -105.0, "de-harsh shelf peak error below -105 dBFS against the double reference", rate);
+    check(rmsS < -120.0, "de-harsh shelf rms error below -120 dBFS against the double reference", rate);
+    // The stage's single-rounded form is no worse than the plain float form (3 dB of margin on the rms for run-to-run
+    // differences in which samples round the wrong way).
+    check(rmsS < rmsP + 3.0, "de-harsh shelf no noisier than the plain float form", rate);
+    n60_graph_retire(g);
+}
 }  // namespace
 
 int main() {
@@ -171,6 +250,7 @@ int main() {
     for (double rate : rates) {
         widener(rate);
         deessRelease(rate);
+        harshShelf(rate);
     }
     if (failures) return 1;
     std::puts("n60core image precision (G36): OK");

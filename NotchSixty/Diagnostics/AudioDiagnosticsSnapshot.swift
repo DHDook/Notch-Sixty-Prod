@@ -293,6 +293,8 @@ struct UnifiedGraphDiagnostics: Equatable, Sendable {
     /// E6 S8c: samples beyond full scale at the graph's final output, all lanes, since the previous
     /// snapshot (read-and-reset in the core); 0 when no graph renders.
     let overRangeSamples: UInt64
+    /// E20 S10 part 6 (G12): render load over the last completed second; nil when no graph renders.
+    let renderLoad: UnifiedGraphRenderLoad?
     /// Set when the graph was requested but the legacy path renders the session; the other
     /// fields are then empty. nil while the graph renders.
     let fallbackReason: UnifiedGraphFallbackReason?
@@ -308,6 +310,7 @@ struct UnifiedGraphDiagnostics: Equatable, Sendable {
         finalMeters = []
         dynamics = nil
         overRangeSamples = 0
+        renderLoad = nil
         self.fallbackReason = fallbackReason
     }
 
@@ -330,6 +333,7 @@ struct UnifiedGraphDiagnostics: Equatable, Sendable {
             finalMeters = []
             dynamics = nil
             overRangeSamples = 0
+            renderLoad = nil
             self.fallbackReason = fallbackReason
             return
         }
@@ -350,6 +354,7 @@ struct UnifiedGraphDiagnostics: Equatable, Sendable {
             for lane in 0..<count { overRange &+= host.overRangeSamples(stageId: N60_LSTAGE_FINAL_METER, lane: UInt32(lane)) }
         }
         self.overRangeSamples = overRange
+        self.renderLoad = host.renderLoad()
         self.finalMeters = (0..<count).map { lane in
             // Core peaks are read-and-reset: when the stereo diagnostics overlay already took this
             // snapshot's FINAL_METER reading, reuse it rather than read the stage a second time.
