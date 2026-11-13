@@ -503,6 +503,7 @@ struct ProductionRootView: View {
                 feedForwardSurvey: product.feedForwardSurvey,
                 feedForwardShadow: product.feedForwardShadow,
                 feedForwardArming: product.feedForwardArming,
+                mimoTreatment: product.mimoTreatment,
                 microphone: product.calibration,
                 projects: product.roomCorrectionProjects
             )

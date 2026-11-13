@@ -217,11 +217,12 @@ final class MIMOTreatmentPermitTests: XCTestCase {
         XCTAssertEqual(refusal(video), .videoLatencyMode)
     }
 
-    func testProductionEngineIssuesNoPermitBeforeS8() {
+    func testProductionEngineIssuesNoPermitWithoutAStagedDesignOrQualification() {
         let engine = AudioIOEngine()
-        XCTAssertEqual(engine.mimoVideoLatencyInput, .unknown)
+        // E19 S8 (G30): the input follows the installed room correction; with none installed it is known and not video.
         let r = engine.issueMIMOTreatmentPermit(verification: passing(), acceptance: acceptance())
-        XCTAssertEqual(refusal(r), .videoLatencyInputNotWired)
+        XCTAssertEqual(engine.mimoVideoLatencyInput, .known(videoLatencyMode: false))
+        XCTAssertEqual(refusal(r), .noStagedDesign)
         XCTAssertNil(engine.mimoGraphTreatment.permit)
         XCTAssertTrue(MIMOTreatmentQualificationRegistry.production.records.isEmpty, "E22 fills the table")
         engine.mimoVideoLatencyInput = .known(videoLatencyMode: false)
