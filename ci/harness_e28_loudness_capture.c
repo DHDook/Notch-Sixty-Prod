@@ -471,10 +471,20 @@ static void routedCase(double rate) {
 
 /* E9 S10b: a routed 2.1 plan. Lanes 0 and 1 are two ways of the left speaker, lane 2 is a sub-sourced lane: the Output
  * plane carries the program roles plus one sub feed (the lane's physical channel, after the limiter and master gain). */
+/* E9 S8 (G31): variant 0 is the S10b plan; variant 1 has only a sub lane (no program role, Output = silent roles plus
+ * the feed); variant 2 shares lane 0 between the left speaker and a sub speaker (it counts as the left role and as a feed). */
+static void routedSubFeedVariant(double rate, int variant);
 static void routedSubFeedCase(double rate) {
+    for (int variant = 0; variant < 3; ++variant) routedSubFeedVariant(rate, variant);
+}
+
+static void routedSubFeedVariant(double rate, int variant) {
     const uint32_t none = N60_LIVE_PHYSICAL_CHANNEL_UNMAPPED;
-    const uint32_t laneProgram[ROUTED_LANES] = {0u, 0u, none};
-    const uint8_t laneSub[ROUTED_LANES] = {0u, 0u, 1u};
+    const uint32_t laneProgramByVariant[3][ROUTED_LANES] = {{0u, 0u, none}, {none, none, none}, {0u, 0u, none}};
+    const uint8_t laneSubByVariant[3][ROUTED_LANES] = {{0u, 0u, 1u}, {0u, 0u, 1u}, {1u, 0u, 1u}};
+    const uint32_t *laneProgram = laneProgramByVariant[variant];
+    const uint8_t *laneSub = laneSubByVariant[variant];
+    const uint32_t feeds = variant == 2 ? 2u : 1u;
     bool ok = false;
     N60LiveNChannelRenderGraph g = makeRoutedGraph(rate, laneProgram, &ok);
     N60LiveNChannelOutputMap probe = g.outputMap;
@@ -488,23 +498,31 @@ static void routedSubFeedCase(double rate) {
     CHECK(N60ProgramInputMapCompile(desc, 2u, g.programLayout, &map), "input map");
     N60LiveNChannelBridge *b = N60LiveNChannelBridgeCreate(16384u, map, g, 0u, 1u);
     n60_graph *graph = makeRoutedRouteGraph(rate);
-    const bool ring = b != NULL && b->loudnessCapture != NULL && b->loudnessCapture->outputChannels == 3u
-        && b->loudnessSubFeedCount == 1u;
-    CHECK(ring, "routed 2.1 bridge has 2 roles plus 1 sub feed at %.0f", rate);
+    const uint32_t oc = 2u + feeds;
+    const bool ring = b != NULL && b->loudnessCapture != NULL && b->loudnessCapture->outputChannels == oc
+        && b->loudnessSubFeedCount == feeds;
+    CHECK(ring, "routed variant %d bridge has 2 roles plus %u sub feed(s) at %.0f", variant, feeds, rate);
     if (ring && graph != NULL && N60LiveNChannelBridgeAttachGraph(b, graph, 2u + ROUTED_LANES, MAXB)) {
         uint32_t pos = 0;
         N60LoudnessCaptureSetDemand(b->loudnessCapture, true);
         for (int i = 0; i < 16; ++i) runRoutedBlock(b, MAXB, &pos, rate);
-        float inBuf[2 * MAXB * 16], outBuf[3 * MAXB * 16];
+        float inBuf[2 * MAXB * 16], outBuf[4 * MAXB * 16];
         const uint32_t got = N60LoudnessCaptureRead(b->loudnessCapture, inBuf, outBuf, MAXB * 16u);
         CHECK(got == MAXB * 16u, "routed sub read %u at %.0f", got, rate);
         const uint32_t skip = MAXB * 8u;
-        const float left = peak(outBuf + skip * 3u, got - skip, 3u, 0u);
-        const float right = peak(outBuf + skip * 3u, got - skip, 3u, 1u);
-        const float sub = peak(outBuf + skip * 3u, got - skip, 3u, 2u);
-        CHECK(fabsf(left - 0.2f) < 0.01f, "left role peak %.4f expected 0.2 at %.0f", left, rate);
-        CHECK(right < 0.001f, "right role peak %.4f expected 0 (no lane) at %.0f", right, rate);
-        CHECK(fabsf(sub - 0.1f) < 0.005f, "routed sub feed peak %.4f expected 0.1 at %.0f", sub, rate);
+        const float left = peak(outBuf + skip * oc, got - skip, oc, 0u);
+        const float right = peak(outBuf + skip * oc, got - skip, oc, 1u);
+        const float feed0 = peak(outBuf + skip * oc, got - skip, oc, 2u);
+        const float roleLeft = variant == 1 ? 0.0f : 0.2f;
+        CHECK(fabsf(left - roleLeft) < 0.01f, "variant %d left role peak %.4f expected %.2f at %.0f", variant, left, roleLeft, rate);
+        CHECK(right < 0.001f, "variant %d right role peak %.4f expected 0 (no lane) at %.0f", variant, right, rate);
+        /* Variant 2: feed 0 is the shared lane 0 (0.3 of the left source), feed 1 the sub lane. */
+        const float expectFeed0 = variant == 2 ? 0.12f : 0.1f;
+        CHECK(fabsf(feed0 - expectFeed0) < 0.005f, "variant %d feed 0 peak %.4f expected %.3f at %.0f", variant, feed0, expectFeed0, rate);
+        if (variant == 2) {
+            const float feed1 = peak(outBuf + skip * oc, got - skip, oc, 3u);
+            CHECK(fabsf(feed1 - 0.1f) < 0.005f, "shared-lane variant feed 1 peak %.4f expected 0.1 at %.0f", feed1, rate);
+        }
     } else {
         CHECK(0, "routed sub attach at %.0f", rate);
     }

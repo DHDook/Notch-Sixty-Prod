@@ -83,6 +83,14 @@ final class SpeakerRoutingEditorModel: ObservableObject {
         onCommit?(configuration)
     }
 
+    /// E9 S8 (G28): applies a routing imported from an interchange file. Returns the note to show when the active-speaker
+    /// failsafe refused it (nothing was applied), nil when it went through.
+    func applyImportedRouting(_ routing: SpeakerRoutingConfiguration) -> String? {
+        replace(routing)
+        guard let refusal = failsafeRefusal else { return nil }
+        return "The imported routing was not applied. " + refusal
+    }
+
     func setEnabled(_ enabled: Bool) {
         mutate { $0.enabled = enabled }
     }

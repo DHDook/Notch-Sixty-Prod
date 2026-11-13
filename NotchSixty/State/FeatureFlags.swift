@@ -157,21 +157,25 @@ extension FeatureFlag {
 
     /// E9 S3: graph FIRs (program, room, speaker IR, driver) of up to 262,144 taps at the engine's 256-frame latency
     /// (`firScheme` 1, the non-uniform engine). Off: the uniform scheme, 32,768 taps, and a longer stereo filter keeps
-    /// the kernel's convolver. Swift decides; the core only sees `firScheme`. Removed with the uniform scheme when E9's
-    /// FIR part ships.
+    /// the kernel's convolver. Swift decides; the core only sees `firScheme`. Graduated by E9 S8 (default on, available
+    /// not armed); the flag-cleanup phase after E22 removes it with the uniform scheme.
     static let longFIR = FeatureFlag(
         id: "e9.long-fir",
         title: "Long FIR (up to 262,144 taps) on the graph",
-        epic: "E9"
+        epic: "E9",
+        graduated: true
     )
 
     /// E9 S5: protection on every output. Sub lanes get their own limiter, true-peak guard and soft clip with the program
     /// settings, an Advanced switch makes every program lane independent, and an always-on hard limit (-1 dBFS, zero
     /// latency) closes every output. Swift decides; the core only sees the stages. Off: the graph is unchanged.
+    /// Graduated by E9 S8 (default on, available not armed): also covers the headroom assistant and the active-speaker
+    /// failsafe. The flag-cleanup phase after E22 removes it.
     static let outputProtection = FeatureFlag(
         id: "e9.output-protection",
         title: "Protection on every output",
-        epic: "E9"
+        epic: "E9",
+        graduated: true
     )
 
     /// E13 S3 and S7 (S4 to S6 join it): live headphone tuning (fixed 16-section layout, Apply while playing) and the

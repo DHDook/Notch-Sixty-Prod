@@ -2,7 +2,7 @@
 //
 // Scenarios (docs/epics/E20.md design note 3):
 //   R1 stereo, every stage on, plus 2 subs      R2 5.1 plus 2 subs, room FIR per lane
-//   R3 7.1.4 plus 4 subs                        R4 262,144-tap FIR on 2 and 8 lanes (R4a, R4b)
+//   R3 7.1.4 plus 4 subs                        R4 262,144-tap FIR on 2 and 8 lanes (R4a, R4b); 32,768 taps (R4c, R4d, E9 S8)
 //   R5 binaural, 16 sources, 8,192 taps         R6 wide PEQ at the 512-slot cap (E6 G30)
 //   R8 MIMO treatment stage, 8 sources, armed (E20 S8)
 //   R7 ANC lane feed maths, offline (built only with -DN60_BENCH_ANC; compute only, nothing reaches a device)
@@ -166,9 +166,9 @@ void fullChain(Built &b, double rate, uint32_t mains, uint32_t subs, uint32_t ro
     (void)lanes;
 }
 
-void longFir(Built &b, uint32_t lanes) {
+void longFir(Built &b, uint32_t lanes, uint32_t taps = 262144) {
     b.add(N60_STAGE_SANITISE, 1, {});
-    b.add(N60_STAGE_FIR, 2, decaying(262144, 7, 0.01f));
+    b.add(N60_STAGE_FIR, 2, decaying(taps, 7, 0.01f));
     b.add(N60_STAGE_FINAL_METER, 3, {});
     (void)lanes;
 }
@@ -208,7 +208,7 @@ void mimoTreatment(Built &b, double rate) {
 }
 
 // Scenario ids. R4 splits into 2 and 8 lanes.
-const char *const kScenarioIds[] = {"R1", "R2", "R3", "R4a", "R4b", "R5", "R6", "R7", "R8"};
+const char *const kScenarioIds[] = {"R1", "R2", "R3", "R4a", "R4b", "R4c", "R4d", "R5", "R6", "R7", "R8"};
 
 bool buildScenario(const std::string &id, double rate, uint32_t block, Built &b) {
     if (id == "R1") { b.begin(rate, block, 4); fullChain(b, rate, 2, 2, 8192); return true; }
@@ -216,6 +216,9 @@ bool buildScenario(const std::string &id, double rate, uint32_t block, Built &b)
     if (id == "R3") { b.begin(rate, block, 16); fullChain(b, rate, 12, 4, 4096); return true; }
     if (id == "R4a") { b.begin(rate, block, 2); longFir(b, 2); return true; }
     if (id == "R4b") { b.begin(rate, block, 8); longFir(b, 8); return true; }
+    // E9 S1 benchmark rows: the 32,768-tap FIR (the uniform scheme's ceiling) on 2 and 8 lanes, the comparison for R4a and R4b.
+    if (id == "R4c") { b.begin(rate, block, 2); longFir(b, 2, 32768); return true; }
+    if (id == "R4d") { b.begin(rate, block, 8); longFir(b, 8, 32768); return true; }
     if (id == "R8") { b.begin(rate, block, 8); mimoTreatment(b, rate); return true; }
     if (id == "R6") { b.begin(rate, block, 2); widePeq(b, rate); return true; }
     if (id == "R5") {

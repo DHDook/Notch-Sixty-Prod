@@ -513,9 +513,9 @@ extension UnifiedGraphProgramDSPTests {
         }
     }
 
-    @MainActor func testOutputProtectionFlagIsRegisteredAndOffByDefault() throws {
+    @MainActor func testOutputProtectionFlagIsRegisteredAndGraduated() throws {
         XCTAssertTrue(FeatureFlag.all.contains(.outputProtection))
-        XCTAssertFalse(FeatureFlag.outputProtection.defaultEnabled)
+        XCTAssertTrue(FeatureFlag.outputProtection.graduated)
         XCTAssertNil(UnifiedGraphOutputProtection.current())
         XCTAssertEqual(UnifiedGraphOutputProtection.clampedUserParameters([1, 0, 1, 100, 0, 0, 1])[1], -1)
         XCTAssertEqual(UnifiedGraphOutputProtection.clampedUserParameters([1, -6, 1, 100, 0, 0, 1])[1], -6)
@@ -527,12 +527,13 @@ extension UnifiedGraphProgramDSPTests {
         addTeardownBlock { defaults.removePersistentDomain(forName: suite) }
         return FeatureFlags(
             known: FeatureFlag.all, defaults: defaults, policy: .launchArgumentOnly,
-            arguments: on ? ["-NotchSixtyFeatures", "e9.long-fir"] : [])
+            arguments: ["-NotchSixtyFeatures", on ? "e9.long-fir" : "-e9.long-fir"])
     }
 
-    @MainActor func testLongFIRFlagSelectsTheSchemeAndIsOffByDefault() throws {
+    @MainActor func testLongFIRFlagSelectsTheScheme() throws {
         XCTAssertTrue(FeatureFlag.all.contains(.longFIR))
-        XCTAssertFalse(FeatureFlag.longFIR.defaultEnabled)
+        XCTAssertTrue(FeatureFlag.longFIR.graduated)
+        XCTAssertEqual(UnifiedGraphFIRScheme.scheme(for: FeatureFlags(known: FeatureFlag.all, defaults: try XCTUnwrap(UserDefaults(suiteName: "E9LongFIRDefault-\(UUID().uuidString)")), policy: .launchArgumentOnly, arguments: [])), UnifiedGraphFIRScheme.nonUniform, "graduated: on by default")
         XCTAssertEqual(UnifiedGraphFIRScheme.scheme(for: try longFlags(on: false)), UnifiedGraphFIRScheme.uniform)
         XCTAssertEqual(UnifiedGraphFIRScheme.scheme(for: try longFlags(on: true)), UnifiedGraphFIRScheme.nonUniform)
         XCTAssertEqual(UnifiedGraphFIRScheme.maxTaps(0), 32_768)

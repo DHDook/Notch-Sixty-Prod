@@ -58,9 +58,10 @@ struct ProductionRoutingEditorView: View {
         .onAppear {
             model.onCommit = commit
             if FeatureFlags().isEnabled(.outputProtection) {
-                let reader = CoreAudioDefaultOutputDeviceReader()
+                let monitor = DefaultOutputMonitor.shared
+                monitor.start()
                 model.failsafe = (
-                    defaultOutputUID: { reader.defaultOutputDeviceUID() },
+                    defaultOutputUID: { monitor.uidForGate() },
                     devices: { engine.outputDevices })
             } else {
                 model.failsafe = nil
@@ -489,7 +490,7 @@ struct ProductionRoutingEditorView: View {
             if let routing = imported.routing {
                 var next = routing
                 next.enabled = model.configuration.enabled
-                model.replace(next)
+                if let note = model.applyImportedRouting(next) { interchangeNotes.append(note) }
             } else {
                 interchangeNotes.append("The file has no routing to import.")
             }

@@ -141,7 +141,7 @@ final class OutputProtectionTests: XCTestCase {
         addTeardownBlock { defaults.removePersistentDomain(forName: suite) }
         return FeatureFlags(
             known: FeatureFlag.all, defaults: defaults, policy: .launchArgumentOnly,
-            arguments: on ? ["-NotchSixtyFeatures", "e9.output-protection"] : [])
+            arguments: ["-NotchSixtyFeatures", on ? "e9.output-protection" : "-e9.output-protection"])
     }
 
     // MARK: Closing the S5 tests
