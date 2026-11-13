@@ -22,8 +22,20 @@
 
 #include "n60/graph.h"
 
+// Under ThreadSanitizer the runtime already defines operator new/delete (replacing them is a link error), so the
+// allocation counter is compiled out there: the allocation checks are covered by the plain harness and core-rtsan,
+// and the thread-safety checks all still run.
+#if defined(__SANITIZE_THREAD__)
+#define N60_TEST_TSAN 1
+#elif defined(__has_feature)
+#if __has_feature(thread_sanitizer)
+#define N60_TEST_TSAN 1
+#endif
+#endif
+
 static std::atomic<bool> armed{false};
 static std::atomic<long> allocs{0};
+#ifndef N60_TEST_TSAN
 static void *countedAlloc(std::size_t n) {
     if (armed.load()) allocs.fetch_add(1);
     return std::malloc(n ? n : 1);
@@ -34,6 +46,7 @@ void operator delete(void *p) noexcept { std::free(p); }
 void operator delete[](void *p) noexcept { std::free(p); }
 void operator delete(void *p, std::size_t) noexcept { std::free(p); }
 void operator delete[](void *p, std::size_t) noexcept { std::free(p); }
+#endif
 
 static int failures = 0;
 #define CHECK(cond, ...) do { if (!(cond)) { std::fprintf(stderr, "FAIL %s:%d: ", __FILE__, __LINE__); \
