@@ -44,6 +44,15 @@ struct LoudnessChannelPosition: Equatable, Sendable {
     static let rightRearHeight = LoudnessChannelPosition(azimuthDegrees: 135, elevationDegrees: 45, isLFE: false)
 
     static let stereo: [LoudnessChannelPosition] = [.left, .right]
+
+    /// E9 S10: a driven subwoofer feed in the wide Output reading. It is what the room hears, so it counts at weight 1.0
+    /// (a centre-like position, not the excluded LFE role); only Output carries these channels.
+    static let subwooferFeed = LoudnessChannelPosition(azimuthDegrees: 0, elevationDegrees: 0, isLFE: false)
+
+    /// The sub-feed positions that follow `programChannels` roles in an Output plane of `outputChannels` channels.
+    static func subwooferFeeds(outputChannels: Int, programChannels: Int) -> [LoudnessChannelPosition] {
+        [LoudnessChannelPosition](repeating: .subwooferFeed, count: max(0, outputChannels - programChannels))
+    }
 }
 
 // MARK: - K-weighting

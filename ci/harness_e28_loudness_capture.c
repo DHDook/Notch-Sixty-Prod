@@ -3,6 +3,9 @@
  *    ones; Discard empties it; a producer thread and a consumer thread stay contiguous (SPSC);
  *  - N-channel bridge (stereo layout) at the eight standard rates: Input is the dequeued program, Output is the rendered
  *    signal (0.5 gain graph halves it), nothing is captured while demand is off, Reset clears demand;
+ *  - subwoofer feeds (E9 S10): one legacy sub and five graph subs append Output channels after the program roles, carry
+ *    the generated sub-lane signal (and only it), leave the program roles untouched; the program count plus the feeds
+ *    caps at the ring's output ceiling;
  *  - routed N-channel bridge (S9): lanes that name a program role sum into that role's Output channel (two ways of one
  *    speaker add), and a routed map with no such lane has no Output ring;
  *  - stereo bridge: an over-range on L only counts on the left, R only on the right, and the total is their sum. */
@@ -30,6 +33,8 @@ static void ringBasics(double rate) {
     CHECK(c != NULL, "create at %.0f", rate);
     if (c == NULL) return;
     CHECK(c->capacityFrames >= (uint32_t)(rate * 0.25), "capacity %u too small for 250 ms at %.0f", c->capacityFrames, rate);
+    CHECK(N60LoudnessCaptureCreate(2u, N60_LOUDNESS_CAPTURE_MAX_OUTPUT_CHANNELS, rate) != NULL, "program roles plus sub feeds refused");
+    CHECK(N60LoudnessCaptureCreate(2u, N60_LOUDNESS_CAPTURE_MAX_OUTPUT_CHANNELS + 1u, rate) == NULL, "too many output channels accepted");
     CHECK(N60LoudnessCaptureCreate(0u, 0u, rate) == NULL && N60LoudnessCaptureCreate(N60_MAX_PROGRAM_CHANNELS + 1u, 0u, rate) == NULL,
           "bad channel counts accepted");
 
@@ -239,6 +244,103 @@ static void bridgeCase(double rate) {
     if (graph) n60_graph_retire(graph);
 }
 
+/* ---- subwoofer feeds (E9 S10) ---- */
+
+static void runSubBlock(N60LiveNChannelBridge *b, uint32_t frames, uint32_t phys, uint32_t *position, double rate) {
+    static float in[MAXB * 2u], out[MAXB * 16u];
+    for (uint32_t i = 0; i < frames; ++i) {
+        float v = 0.25f * sinf((float)(2.0 * M_PI * 1000.0 * (double)(*position + i) / rate));
+        in[i * 2u] = v;
+        in[i * 2u + 1u] = v;
+    }
+    *position += frames;
+    memset(out, 0, sizeof out);
+    AudioBufferList inList = {0}, outList = {0}, unused = {0};
+    inList.mNumberBuffers = 1;
+    inList.mBuffers[0].mNumberChannels = 2;
+    inList.mBuffers[0].mDataByteSize = frames * 2u * sizeof(float);
+    inList.mBuffers[0].mData = in;
+    outList.mNumberBuffers = 1;
+    outList.mBuffers[0].mNumberChannels = phys;
+    outList.mBuffers[0].mDataByteSize = frames * phys * sizeof(float);
+    outList.mBuffers[0].mData = out;
+    AudioTimeStamp ts = {0};
+    N60LiveNChannelCaptureIOProc(0, &ts, &inList, &ts, &unused, &ts, b);
+    N60LiveNChannelOutputIOProc(0, &ts, &unused, &ts, &outList, &ts, b);
+}
+
+/* `subs` sub lanes after two program lanes; legacy path (1..4 subs, bass management) or graph subs (5..8). */
+static void subFeedCase(double rate, uint32_t subs) {
+    const N60ProgramChannelLayout layout = N60ProgramChannelLayoutMakeStandard(N60ProgramLayoutStereo);
+    N60ProgramLaneGraphSnapshot lanes = N60ProgramLaneGraphSnapshotMakeUnity(rate, layout);
+    N60ProgramLaneGraphFinalize(&lanes);
+    const uint32_t phys = 2u + subs;
+    uint32_t prog[N60_MAX_PROGRAM_CHANNELS], subPhys[N60_LIVE_MAX_GRAPH_SUBWOOFERS];
+    for (uint32_t i = 0; i < N60_MAX_PROGRAM_CHANNELS; ++i) prog[i] = N60_LIVE_PHYSICAL_CHANNEL_UNMAPPED;
+    prog[0] = 0u;
+    prog[1] = 1u;
+    /* the sub feeds sit on shuffled physical channels so the mapping, not the order, is what is checked */
+    for (uint32_t i = 0; i < subs; ++i) subPhys[i] = 2u + (subs - 1u - i);
+    N60LiveNChannelOutputMap map = {0};
+    const bool legacy = subs <= N60_MAX_SUBWOOFER_OUTPUTS;
+    bool compiled = legacy
+        ? N60LiveNChannelOutputMapCompile(layout, phys, prog, true, subs, subPhys, &map)
+        : N60LiveNChannelOutputMapCompileGraphSubs(layout, phys, prog, subs, subPhys, &map);
+    CHECK(compiled, "sub map compile (%u subs)", subs);
+    if (!compiled) return;
+    N60MultichannelBassManagementSnapshot bass = {0};
+    if (legacy) bass = N60MultichannelBassManagementSnapshotMake(rate, layout, subs);
+    N60LiveNChannelRenderGraph g = {0};
+    CHECK(N60LiveNChannelRenderGraphMake(rate, layout, lanes, legacy, bass, map, &g), "graph make (%u subs)", subs);
+    AudioChannelDescription desc[2] = {{kAudioChannelLabel_Left, 0, {0, 0, 0}}, {kAudioChannelLabel_Right, 0, {0, 0, 0}}};
+    N60ProgramInputMap inMap = {0};
+    CHECK(N60ProgramInputMapCompile(desc, 2u, g.programLayout, &inMap), "input map");
+    N60LiveNChannelBridge *b = N60LiveNChannelBridgeCreate(16384u, inMap, g, 0u, 1u);
+    CHECK(b != NULL && b->loudnessCapture != NULL, "bridge (%u subs) at %.0f", subs, rate);
+    if (b == NULL) return;
+    CHECK(b->loudnessSubFeedCount == subs && b->loudnessCapture->outputChannels == 2u + subs,
+          "ring output channels %u for %u subs", b->loudnessCapture->outputChannels, subs);
+
+    /* a sine generator on the sub lanes only (RMS -12 dBFS, peak 0.355) */
+    float p[11] = {(float)N60_GENERATOR_SINE, -12.0f, -6.0f, 100.0f, 100.0f, 4000.0f, 4096.0f, 7.0f, 0.0f, 1.0f, 600.0f};
+    n60_stage_desc st;
+    memset(&st, 0, sizeof st);
+    st.structSize = sizeof st; st.kind = N60_STAGE_GENERATOR; st.stageId = 5; st.laneA = 0;
+    for (uint32_t i = 0; i < subs; ++i) st.laneMask |= 1ull << (2u + i);
+    st.params = p; st.paramCount = 11;
+    n60_graph_desc d;
+    memset(&d, 0, sizeof d);
+    d.structSize = sizeof d; d.abiVersion = N60_GRAPH_ABI_VERSION; d.sampleRate = rate; d.maxBlockFrames = MAXB;
+    d.inputChannels = d.outputChannels = phys; d.stages = &st; d.stageCount = 1;
+    n60_graph *graph = NULL;
+    CHECK(n60_graph_build(&d, &graph) == N60_STATUS_OK && graph, "sub graph build");
+    if (graph && N60LiveNChannelBridgeAttachGraph(b, graph, phys, MAXB)) {
+        N60LoudnessCaptureSetDemand(b->loudnessCapture, true);
+        uint32_t pos = 0;
+        /* the generator ramps over 100 ms: run past it, discard, then read a settled window */
+        const uint32_t settle = (uint32_t)(rate * 0.15 / MAXB) + 1u;
+        for (uint32_t i = 0; i < settle; ++i) runSubBlock(b, MAXB, phys, &pos, rate);
+        N60LoudnessCaptureDiscard(b->loudnessCapture);
+        for (int i = 0; i < 16; ++i) runSubBlock(b, MAXB, phys, &pos, rate);
+        static float inBuf[2 * MAXB * 16], outBuf[N60_LOUDNESS_CAPTURE_MAX_OUTPUT_CHANNELS * MAXB * 16];
+        const uint32_t got = N60LoudnessCaptureRead(b->loudnessCapture, inBuf, outBuf, MAXB * 16u);
+        CHECK(got == MAXB * 16u, "sub read %u", got);
+        const uint32_t stride = b->loudnessCapture->outputChannels;
+        for (uint32_t ch = 0; ch < stride; ++ch) {
+            const float pk = peak(outBuf, got, stride, ch);
+            if (ch < 2u) {
+                /* the program passes through at 0.25 and never picks up the 0.355 sub generator */
+                CHECK(pk > 0.22f && pk < 0.28f, "program role %u peak %.3f (want 0.25) at %.0f", ch, pk, rate);
+            } else {
+                CHECK(pk > 0.30f && pk < 0.40f, "sub feed %u peak %.3f at %.0f (%u subs)", ch - 2u, pk, rate, subs);
+            }
+        }
+        N60LiveNChannelBridgeAttachGraph(b, NULL, 0u, 0u);
+    }
+    N60LiveNChannelBridgeDestroy(b);
+    if (graph) n60_graph_retire(graph);
+}
+
 /* ---- routed N-channel bridge (E28 S9) ---- */
 
 #define ROUTED_LANES 3u
@@ -411,6 +513,9 @@ int main(void) {
     for (size_t r = 0; r < sizeof kRates / sizeof kRates[0]; ++r) {
         ringBasics(kRates[r]);
         bridgeCase(kRates[r]);
+        subFeedCase(kRates[r], 1u);
+        subFeedCase(kRates[r], 2u);
+        subFeedCase(kRates[r], 5u);
         routedCase(kRates[r]);
         stereoOverRange(kRates[r]);
         printf("rate %.0f ok\n", kRates[r]);

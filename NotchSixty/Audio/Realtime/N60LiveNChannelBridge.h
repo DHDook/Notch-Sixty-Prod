@@ -89,6 +89,9 @@ typedef struct N60LiveNChannelBridge {
     // E28 S6b: demand-gated capture of the program channels (Input) and the same roles after the render (Output) for
     // BS.1770-4 loudness. Created with the bridge, written by the output callback only while the worker holds demand.
     N60LoudnessCapture * _Nullable loudnessCapture;
+    // E9 S10: physical channels of the driven subwoofer feeds, appended after the program roles in the Output plane.
+    uint32_t loudnessSubFeedCount;
+    uint32_t loudnessSubFeedPhysical[N60_LOUDNESS_CAPTURE_MAX_SUB_FEEDS];
 
     uint32_t outputGateMinimumBufferedFrames;
     uint32_t startupFadeFrames;
@@ -209,10 +212,29 @@ static inline N60LiveNChannelBridge * _Nullable N60LiveNChannelBridgeCreate(
     bridge->graph = graph;
     // Output loudness needs each program role mapped to physical channels. A routed session has lanes: it measures the
     // roles whose speaker lanes the plan names (E28 S9) and has no Output when none do.
+    // E9 S10: driven subwoofer feeds (legacy kernel subs, or 5 to 8 graph subs) follow the program roles. A routed
+    // session has none here (its sub lanes are E9 S10b).
+    bridge->loudnessSubFeedCount = 0u;
+    if (graph.outputMap.routedLaneCount == 0u) {
+        const uint32_t legacySubs = graph.outputMap.bassManagementEnabled ? graph.outputMap.subwooferCount : 0u;
+        for (uint32_t sub = 0; sub < legacySubs && sub < N60_MAX_SUBWOOFER_OUTPUTS
+             && bridge->loudnessSubFeedCount < N60_LOUDNESS_CAPTURE_MAX_SUB_FEEDS; ++sub) {
+            const uint32_t target = graph.outputMap.physicalChannelForSubwoofer[sub];
+            if (target == N60_LIVE_PHYSICAL_CHANNEL_UNMAPPED) continue;
+            bridge->loudnessSubFeedPhysical[bridge->loudnessSubFeedCount++] = target;
+        }
+        for (uint32_t sub = 0; sub < graph.outputMap.graphSubLaneCount && sub < N60_LIVE_MAX_GRAPH_SUBWOOFERS
+             && bridge->loudnessSubFeedCount < N60_LOUDNESS_CAPTURE_MAX_SUB_FEEDS; ++sub) {
+            const uint32_t target = graph.outputMap.physicalChannelForGraphSub[sub];
+            if (target == N60_LIVE_PHYSICAL_CHANNEL_UNMAPPED) continue;
+            bridge->loudnessSubFeedPhysical[bridge->loudnessSubFeedCount++] = target;
+        }
+    }
     bridge->loudnessCapture = N60LoudnessCaptureCreate(
         graph.programLayout.channelCount,
         (graph.outputMap.routedLaneCount == 0u
-            || N60LiveNChannelOutputMapRoutedHasProgramLane(&graph.outputMap)) ? graph.programLayout.channelCount : 0u,
+            || N60LiveNChannelOutputMapRoutedHasProgramLane(&graph.outputMap))
+            ? graph.programLayout.channelCount + bridge->loudnessSubFeedCount : 0u,
         graph.sampleRate
     );
     bridge->outputGateMinimumBufferedFrames = outputGateMinimumBufferedFrames;
@@ -1296,7 +1318,8 @@ static inline OSStatus N60LiveNChannelOutputIOProc(
         gain = 1.0f;
         if (loudnessBlock.frames != 0u && loudness->outputChannels != 0u) {
             // The program roles as heard: physical values (limiter and master gain applied) mapped back by role.
-            float heard[N60_MAX_PROGRAM_CHANNELS];
+            float heard[N60_LOUDNESS_CAPTURE_MAX_OUTPUT_CHANNELS];
+            for (uint32_t extra = programChannels; extra < loudness->outputChannels; ++extra) heard[extra] = 0.0f;
             for (uint32_t program = 0; program < programChannels; ++program) {
                 const uint32_t target = bridge->graph.outputMap.physicalChannelForProgram[program];
                 heard[program] = target < physical.physicalChannelCount ? physical.values[target] : 0.0f;
@@ -1312,6 +1335,12 @@ static inline OSStatus N60LiveNChannelOutputIOProc(
                         heard[program] += physical.values[target];
                     }
                 }
+            }
+            // E9 S10: the subwoofer feeds as heard (after the limiter and master gain), one channel each.
+            for (uint32_t feed = 0; feed < bridge->loudnessSubFeedCount && programChannels + feed < loudness->outputChannels;
+                 ++feed) {
+                const uint32_t target = bridge->loudnessSubFeedPhysical[feed];
+                heard[programChannels + feed] = target < physical.physicalChannelCount ? physical.values[target] : 0.0f;
             }
             N60LoudnessCaptureWriteOutput(loudness, loudnessBlock, frameIndex, heard);
         }

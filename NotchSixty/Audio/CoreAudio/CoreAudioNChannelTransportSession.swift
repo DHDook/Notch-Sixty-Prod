@@ -993,7 +993,7 @@ final class CoreAudioNChannelTransportSession {
     }
 
     /// E28 S6b: BS.1770-4 loudness of the semantic program channels. Input is every program role as dequeued (LFE is
-    /// metered at weight 0); Output is the same roles after the render and limiter; on a routed lane map each role is the sum of its speaker's lanes (E28 S9), nil when no lane carries a role.
+    /// metered at weight 0); Output is the same roles after the render and limiter, then one channel per driven subwoofer feed (E9 S10); on a routed lane map each role is the sum of its speaker's lanes (E28 S9), nil when no lane carries a role.
     private var wideLoudnessWorker: ProductionWideLoudnessWorker?
 
     private func installLoudnessWorker(_ bridge: UnsafeMutablePointer<N60LiveNChannelBridge>, sampleRate: Double) {
@@ -1002,7 +1002,8 @@ final class CoreAudioNChannelTransportSession {
         let hasOutput = (capture?.pointee.outputChannels ?? 0) > 0
         wideLoudnessWorker = ProductionWideLoudnessWorker(
             capture: capture, sampleRate: sampleRate, inputPositions: positions,
-            outputPositions: hasOutput ? positions : nil)
+            outputPositions: hasOutput ? positions + LoudnessChannelPosition.subwooferFeeds(
+                outputChannels: Int(capture?.pointee.outputChannels ?? 0), programChannels: positions.count) : nil)
     }
 
     func setAnalysisDemand(_ demandMask: UInt32) {
