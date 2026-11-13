@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 /// E6 S8: turns what the shipping engine already computes (the kernel DSP snapshot, the
 /// multichannel route plan, the sub calibration) into a `UnifiedGraphConfiguration`.
@@ -649,6 +650,43 @@ enum UnifiedGraphTranslator {
     }
     /// Head-yaw cells of a head-tracked set (15 degree steps, wrapped).
     static let binauralTrackedOrientations: UInt32 = 24
+    /// Head pitches of the elevation sets of a head-tracked HRTF (E13 S5): the stage blends between them bilinearly
+    /// with the yaw cells, so a nod or tilt changes the image smoothly instead of staying at pitch 0.
+    static let binauralElevationDegrees: [Float] = [-30, 0, 30, 60]
+
+    /// The tracking grid a head-tracked binaural graph is built with (E13 S5).
+    struct BinauralTrackingPlan: Equatable, Sendable {
+        var yawSets: UInt32
+        var elevations: UInt32
+        /// True when the grid is coarser than the full one because the response budget could not hold it.
+        var coarsened: Bool
+        var yawStepDegrees: Float { 360 / Float(yawSets) }
+        var sets: UInt32 { yawSets * elevations }
+    }
+
+    /// The finest grid whose early responses fit `binauralMaxResponseFloats`: 15 degree yaw with elevation sets, then
+    /// 30 degree yaw with elevation sets, then yaw only at 15 and at 30 degrees. `elevationData` is false for assets
+    /// captured at one head pitch (role-tagged BRIRs), which have no elevation to interpolate. Nil: not even the
+    /// coarsest grid fits. A coarser grid is reported (the log, and `coarsened`), never applied silently.
+    static func binauralTrackingPlan(channels: Int, earlyTaps: Int, elevationData: Bool) -> BinauralTrackingPlan? {
+        let full = binauralTrackedOrientations
+        let elevations = UInt32(binauralElevationDegrees.count)
+        var candidates: [(UInt32, UInt32)] = []
+        if elevationData { candidates += [(full, elevations), (full / 2, elevations)] }
+        candidates += [(full, 1), (full / 2, 1)]
+        let perSet = channels * 2 * earlyTaps
+        let first = candidates[0]
+        for candidate in candidates where perSet * Int(candidate.0 * candidate.1) <= binauralMaxResponseFloats {
+            let coarse = candidate.0 != first.0 || candidate.1 != first.1
+            return BinauralTrackingPlan(yawSets: candidate.0, elevations: candidate.1, coarsened: coarse)
+        }
+        return nil
+    }
+
+    private static let binauralLog = Logger(subsystem: "com.notchsixty.app", category: "binaural")
+    /// Where a delay-separated response's arrival sits after alignment: 0.5 ms keeps the pre-ringing of the
+    /// fractional shift and a turned head's earlier ear (the margin above) inside the response.
+    static let binauralLeadSeconds = 0.0005
 
     /// Selection rule and spec for a binaural headphone session (E6 S8b2d): the output must be
     /// a 2-channel headphone endpoint, the program layout must have more than 2 channels and
@@ -733,9 +771,6 @@ enum UnifiedGraphTranslator {
         guard headphoneStagesEligible(profile: profile, sampleRate: sampleRate) else { return .failure(.headphoneDSP) }
 
         let channels = layout.roles.count
-        let orientations = headTracking ? binauralTrackedOrientations : 1
-        let step: Float = headTracking ? 360 / Float(orientations) : 0
-        let start: Float = headTracking ? -180 : 0
         // E13 S4: the common onset is trimmed (the latency declaration drops by what was trimmed), then each response
         // splits at 20 ms into the per-orientation early part and a tail shared by every orientation (the facing-forward
         // set's), which the stage convolves with non-uniform partitions at a rate of at most 96 kHz.
@@ -755,10 +790,32 @@ enum UnifiedGraphTranslator {
         let earlyTaps = min(usable, earlyLimit)
         let tailTaps = usable - earlyTaps
         let perSet = channels * 2 * earlyTaps
-        guard perSet * Int(orientations) <= binauralMaxResponseFloats,
-              channels * 2 * tailTaps <= binauralMaxTailFloats else { return .failure(.binauralBudget) }
+        guard channels * 2 * tailTaps <= binauralMaxTailFloats else { return .failure(.binauralBudget) }
+        // E13 S5: head tracking interpolates between delay-separated sets over yaw (and head pitch, for an HRTF that has
+        // elevation data); a fixed head keeps the single set as it is.
+        var plan = BinauralTrackingPlan(yawSets: 1, elevations: 1, coarsened: false)
+        if headTracking {
+            guard let chosen = binauralTrackingPlan(
+                channels: channels, earlyTaps: earlyTaps, elevationData: !asset.isRoleTagged) else {
+                return .failure(.binauralBudget)
+            }
+            plan = chosen
+            if plan.coarsened {
+                binauralLog.notice(
+                    "Head tracking grid coarsened to \(plan.yawSets) yaw x \(plan.elevations) pitch sets: \(channels) channels at \(sampleRate) Hz exceed the response budget")
+            }
+        } else {
+            guard perSet <= binauralMaxResponseFloats else { return .failure(.binauralBudget) }
+        }
+        let orientations = plan.sets
+        let step: Float = headTracking ? plan.yawStepDegrees : 0
+        let start: Float = headTracking ? -180 : 0
+        let pitches: [Float] = plan.elevations > 1 ? binauralElevationDegrees : [0]
+        // Aligning a set advances it by a fraction of a frame, so it reads a few frames past the early part.
+        let wide = min(usable, earlyTaps + 16)
         var responses: [Float] = []
         responses.reserveCapacity(perSet * Int(orientations))
+        var wideResponses: [Float] = []
         var tail: [Float] = []
         tail.reserveCapacity(channels * 2 * tailTaps)
         var equalEar: Int32 = -1
@@ -771,26 +828,45 @@ enum UnifiedGraphTranslator {
             tail.append(contentsOf: reference.leftIRs[base..<(base + tailTaps)])
             tail.append(contentsOf: reference.rightIRs[base..<(base + tailTaps)])
         }
-        func appendEarly(_ prepared: PreparedBinauralProfile) {
+        func appendEarly(_ prepared: PreparedBinauralProfile, length: Int, into out: inout [Float]) {
             for channel in 0..<channels {
                 let base = channel * sourceTaps + trim
-                responses.append(contentsOf: prepared.leftIRs[base..<(base + earlyTaps)])
-                responses.append(contentsOf: prepared.rightIRs[base..<(base + earlyTaps)])
+                out.append(contentsOf: prepared.leftIRs[base..<(base + length)])
+                out.append(contentsOf: prepared.rightIRs[base..<(base + length)])
             }
         }
         do {
-            for set in 0..<Int(orientations) {
-                if !headTracking {
-                    appendEarly(reference)
-                    continue
+            for pitch in pitches {
+                for yawSet in 0..<Int(plan.yawSets) {
+                    if !headTracking {
+                        appendEarly(reference, length: earlyTaps, into: &responses)
+                        continue
+                    }
+                    let pose = N60HeadPose(
+                        yawDegrees: N60HeadPoseWrap180(Double(start + step * Float(yawSet))),
+                        pitchDegrees: Double(pitch), rollDegrees: 0)
+                    appendEarly(try asset.prepare(for: layout, headPose: pose), length: wide, into: &wideResponses)
                 }
-                let pose = N60HeadPose(
-                    yawDegrees: N60HeadPoseWrap180(Double(start + step * Float(set))),
-                    pitchDegrees: 0, rollDegrees: 0)
-                appendEarly(try asset.prepare(for: layout, headPose: pose))
             }
         } catch {
             return .failure(.specRejected)
+        }
+        var setDelays: [Float] = []
+        if headTracking {
+            // Onset-aligned responses and one delay per set, source and ear (the stage restores the delay per ear).
+            responses = [Float](repeating: 0, count: perSet * Int(orientations))
+            setDelays = [Float](repeating: 0, count: channels * 2 * Int(orientations))
+            let lead = UInt32((binauralLeadSeconds * sampleRate).rounded(.up))
+            let separated = wideResponses.withUnsafeBufferPointer { input in
+                responses.withUnsafeMutableBufferPointer { aligned in
+                    setDelays.withUnsafeMutableBufferPointer { delayOut in
+                        n60_binaural_delay_separate(
+                            sampleRate, orientations, UInt32(channels), UInt32(wide), input.baseAddress, lead,
+                            UInt32(earlyTaps), equalEar, aligned.baseAddress, delayOut.baseAddress)
+                    }
+                }
+            }
+            guard separated == N60_STATUS_OK else { return .failure(.specRejected) }
         }
 
         var layoutC = n60_layout()
@@ -820,7 +896,14 @@ enum UnifiedGraphTranslator {
             binaural.equalEarChannel = equalEar
             binaural.declaredLatency = UInt32(max(0, asset.declaredLatencyFrames - trim))
             binaural.responses = responsePointer.baseAddress
-            return tail.withUnsafeBufferPointer { tailPointer in
+            return setDelays.withUnsafeBufferPointer { delayPointer in
+              tail.withUnsafeBufferPointer { tailPointer in
+                if headTracking {
+                    binaural.elevations = plan.elevations
+                    binaural.pitchStartDeg = pitches.first ?? 0
+                    binaural.pitchStepDeg = pitches.count > 1 ? pitches[1] - pitches[0] : 0
+                    binaural.delays = delayPointer.baseAddress
+                }
                 binaural.tailTaps = UInt32(tailTaps)
                 binaural.tailResponses = tailTaps > 0 ? tailPointer.baseAddress : nil
                 return withUnsafePointer(to: &layoutC) { layoutPointer in
@@ -830,6 +913,7 @@ enum UnifiedGraphTranslator {
                         return n60_layout_graph_build(&options, &built)
                     }
                 }
+              }
             }
         }
         guard status == N60_STATUS_OK, let built else { return .failure(.specRejected) }

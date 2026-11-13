@@ -175,6 +175,42 @@ final class UnifiedGraphLiveEditTests: XCTestCase {
         }
     }
 
+    /// E13 S5 (G7): a second edit that arrives in the middle of the first edit's 20 ms crossfade. The output stays
+    /// continuous (no step beyond the ramp slope) through both fades and settles on the last edit, as a fresh build of it.
+    func testSecondEditMidCrossfadeStaysContinuousAndSettlesOnTheLastEdit() throws {
+        let layout = OutputProgramLayout.fiveOne
+        for rate in Self.rates {
+            let first = try program(rate: rate, layout: layout, eq: 6)
+            let second = try program(rate: rate, layout: layout, eq: -6)
+            let amps: [Float] = [0.2, 0, 0, 0, 0, 0]
+            let host = try UnifiedGraphHost(spec: try spec(rate, layout, nil))
+            var position = 0
+            var out = try run(host, rate: rate, amps: amps, seconds: 0.1, from: &position)
+            _ = try host.apply(try spec(rate, layout, first))
+            // About 6 ms later (at least one block), well inside the 20 ms fade.
+            let midFrames = max(block, Int(0.006 * rate) / block * block)
+            let mid = try run(host, rate: rate, amps: amps, seconds: Double(midFrames) / rate, from: &position)
+            XCTAssertNoThrow(try host.apply(try spec(rate, layout, second)), "second edit at \(rate)")
+            let rest = try run(host, rate: rate, amps: amps, seconds: 0.6, from: &position)
+            out[0] += mid[0] + rest[0]
+            let slope = Float(0.2 * 2.0 * 2.0 * .pi * 1_000.0 / rate)
+            var maxStep: Float = 0
+            for index in 1..<out[0].count { maxStep = max(maxStep, abs(out[0][index] - out[0][index - 1])) }
+            XCTAssertLessThan(maxStep, 4 * slope + 1e-3, "continuity at \(rate)")
+
+            let fresh = try UnifiedGraphHost(spec: try spec(rate, layout, second))
+            var freshPosition = 0
+            try run(fresh, rate: rate, amps: amps, seconds: 0.7, from: &freshPosition)
+            let expected = try run(fresh, rate: rate, amps: amps, seconds: 0.2, from: &freshPosition)
+            let after = try run(host, rate: rate, amps: amps, seconds: 0.2, from: &position)
+            let a = rms(after[0][(after[0].count / 2)...]), b = rms(expected[0][(expected[0].count / 2)...])
+            XCTAssertGreaterThan(b, 0, "rate \(rate)")
+            XCTAssertEqual(a, b, accuracy: max(b * 0.03, 1e-5), "settles on the last edit at \(rate)")
+            host.release()
+            fresh.release()
+        }
+    }
+
     // MARK: binaural
 
     func testBinauralProgramGainIsLiveThroughTheInputGainStage() throws {

@@ -34,7 +34,7 @@ extern "C" {
 #endif
 
 /* Bumped on any incompatible change to a struct or function below. */
-#define N60_GRAPH_ABI_VERSION 38u
+#define N60_GRAPH_ABI_VERSION 39u
 
 typedef struct n60_graph n60_graph; /* opaque */
 
@@ -532,6 +532,20 @@ typedef int (*n60_external_process_fn)(void *context, const float *const *in, fl
  *  total stage latency stays 128 + [9]. A stage needs taps >= tail path delay - 128 (the host's 20 ms split
  *  always satisfies it); the tail path adds no latency of its own. Cost per source per ear: one non-uniform
  *  convolver at the internal rate. Not live, like every other parameter except the head pose.
+ * ABI v39 (E13 S5): delay-separated responses and elevation sets. [11] = E, the number of elevation sets (0 = none:
+ *  the layout above, unchanged; else 1..N60_GRAPH_BINAURAL_MAX_ELEVATIONS). With E >= 1 the O sets are elevation-major
+ *  (set = elevation * (O / E) + yaw index; O must divide by E), and paramCount = 12 + O * N * 2 * taps + N * 2 * T +
+ *  2 + O * N * 2: after the tails come the head pitch of elevation set 0 in degrees ([-180, 180]), the pitch step
+ *  between elevation sets ((0, 180], or 0..180 when E = 1) and one delay per (set, source, ear), in frames, set-major,
+ *  then source, then ear. The responses are then onset-aligned (n60_binaural_delay_separate makes them): the stage
+ *  delays each source for each ear by the set's delay with a fractional-delay line (16-tap Kaiser-windowed sinc, so the
+ *  stage latency becomes 128 + [9] + N60_GRAPH_BINAURAL_FD_LATENCY) and blends the aligned spectra bilinearly over the
+ *  yaw and the head pitch (live parameters [0] and [1], each slew-smoothed about 10 ms). A blend therefore moves the
+ *  interaural time difference continuously instead of mixing two copies at different delays (comb filtering). The delay
+ *  follows the head position one block (128 frames) late, ramped across the block. A delay is 0 .. N60_GRAPH_BINAURAL_
+ *  MAX_DELAY_SECONDS at the graph rate. The tail path is unchanged (undelayed, shared). Cost: one more forward
+ *  transform per source (the two ears hear different delays), and up to four set accumulations per ear while the head
+ *  moves in both angles (eight while the position changes). With E = 0 the stage is bit-identical to v38.
  * Cost: the whole partition runs at the 128th frame of each block (spiky for small host buffers); it scales with
  * sources x partitions x 129 bins x 2 ears, doubled for a two-set blend and again while the head moves. Hosts
  * budget taps and source counts accordingly (rebuild CPU-budget refusal covers publishes). Responses must be finite.
@@ -539,13 +553,16 @@ typedef int (*n60_external_process_fn)(void *context, const float *const *in, fl
  * Set k is the response set for head yaw = [5] + k * [6]. The live yaw is slew-smoothed (about 10 ms) into a
  * fractional set position and the two neighbouring sets are blended in the frequency domain, per 128-frame
  * block; while the position is moving the output fades linearly across the block from the previous
- * position's blend to the new one, so there is no step at block boundaries. Pitch and roll are accepted and stored for the host (and for later elevation sets) but do not yet
+ * position's blend to the new one, so there is no step at block boundaries. Pitch selects the elevation sets when E >= 1 (ABI v39, below); roll is accepted and stored for the host but does not
  * change the rendering. Latency 128 frames plus [9]. Not live: taps, sets, responses and every other
  * parameter (publish a new snapshot; the rebuild fade makes that click-free). */
 #define N60_GRAPH_BINAURAL_PARTITION_FRAMES 128u
 #define N60_GRAPH_BINAURAL_MAX_TAPS 8192u
-#define N60_GRAPH_BINAURAL_MAX_SETS 64u
+#define N60_GRAPH_BINAURAL_MAX_SETS 192u  /* ABI v39: 24 yaw cells x 8 elevations (was 64) */
 #define N60_GRAPH_BINAURAL_TAIL_MAX_RATE 96000.0 /* the tail convolver's internal rate never exceeds this */
+#define N60_GRAPH_BINAURAL_MAX_ELEVATIONS 8u   /* ABI v39 */
+#define N60_GRAPH_BINAURAL_MAX_DELAY_SECONDS 0.03 /* ABI v39: the largest per-ear source delay */
+#define N60_GRAPH_BINAURAL_FD_LATENCY 8u       /* ABI v39: frames the fractional-delay line adds when E >= 1 */
 #define N60_ANC_GUARD_BANDS 16u
 #define N60_FIR_PARTITION_FRAMES 256u
 #define N60_FIR_MAX_TAPS (128u * N60_FIR_PARTITION_FRAMES)
@@ -1067,7 +1084,26 @@ typedef struct n60_binaural_profile {
     const float *tailResponses; /* tailTaps * layout.channelCount * 2 floats (copied): channel, ear, tap */
     float headYawDeg, headPitchDeg, headRollDeg;  /* initial head pose */
     const float *responses;   /* orientations * layout.channelCount * 2 * taps floats (copied) */
+    /* ABI v39 (E13 S5). elevations == 0: none of the following is read. Else `orientations` is elevations * yaw sets
+     * (elevation-major), `responses` are onset-aligned and `delays` holds orientations * channelCount * 2 frames. */
+    uint32_t elevations;
+    float pitchStartDeg;      /* head pitch of elevation set 0 */
+    float pitchStepDeg;       /* head pitch between elevation sets */
+    const float *delays;      /* orientations * layout.channelCount * 2 floats (copied): set, channel, ear */
 } n60_binaural_profile;
+
+/* ABI v39. Splits each response into an onset-aligned response and a delay. `responses` holds sets * sources * 2 *
+ * length floats (set, source, ear, sample), already trimmed to a common start. The arrival of a response is the
+ * energy centroid around its peak (about 0.4 ms each side, sub-frame, stable against the fractional position of a
+ * band-limited pulse); the delay is that arrival minus `leadFrames` (not below 0) and the aligned response is the original advanced by the delay with a 16-tap
+ * windowed-sinc fractional shift, the same kernel the stage's delay line uses, so delay and shift cancel at the
+ * sets. `aligned` receives sets * sources * 2 * keepFrames floats; it holds the response from the delay on, zeroed
+ * from keepFrames - ceil(delay) so that delayed it ends at keepFrames (the host's early/tail split). The source
+ * `equalEarSource` (or -1) is copied unaligned with delay 0 for both ears. `delays` receives sets * sources * 2
+ * floats. BAD_ARGUMENT on a null pointer, zero count, keepFrames > length or a non-finite sample. Control thread. */
+n60_status n60_binaural_delay_separate(double sampleRate, uint32_t sets, uint32_t sources, uint32_t length,
+                                       const float *responses, uint32_t leadFrames, uint32_t keepFrames,
+                                       int32_t equalEarSource, float *aligned, float *delays);
 
 /* Well known stage ids in a built description, for live posts. */
 #define N60_LSTAGE_SANITISE 1u

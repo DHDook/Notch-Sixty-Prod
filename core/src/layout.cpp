@@ -3,10 +3,12 @@
 // N60ProgramChannelRole so the shell converts by value. The builder turns a layout and a render mode into
 // an ordinary n60_graph_desc: stereo is the 2-channel layout, and the binaural renderer is one graph stage,
 // so changing mode is publishing another description (the rebuild fade makes it click-free).
+#include <algorithm>
 #include <cmath>
 #include <cstring>
 #include <new>
 
+#include "binaural_fd.hpp"
 #include "n60/graph.h"
 #include "snapshot.hpp"
 
@@ -182,7 +184,7 @@ n60_status n60_layout_graph_build(const n60_layout_options *o, n60_layout_graph 
         o->headphoneCrossfeed < 0.0f || o->headphoneCrossfeed > 1.0f) {
         return N60_STATUS_BAD_ARGUMENT;
     }
-    uint64_t respCount = 0, tailCount = 0;
+    uint64_t respCount = 0, tailCount = 0, extCount = 0;
     const n60_binaural_profile *bp = o->binaural;
     if (binaural) {
         if (bp == nullptr || bp->structSize != sizeof(n60_binaural_profile) || bp->responses == nullptr ||
@@ -192,8 +194,13 @@ n60_status n60_layout_graph_build(const n60_layout_options *o, n60_layout_graph 
             (bp->tailTaps != 0 && bp->tailResponses == nullptr) || !(o->sampleRate > 0.0 && o->sampleRate < 4.0e6) || bp->tailTaps > static_cast<uint32_t>(std::ceil(o->sampleRate))) {  // at most 1 s
             return N60_STATUS_BAD_ARGUMENT;
         }
+        if (bp->elevations > N60_GRAPH_BINAURAL_MAX_ELEVATIONS ||
+            (bp->elevations != 0 && (bp->delays == nullptr || bp->orientations % bp->elevations != 0))) {
+            return N60_STATUS_BAD_ARGUMENT;
+        }
         respCount = uint64_t(bp->orientations) * N * 2 * bp->taps;
         tailCount = uint64_t(N) * 2 * bp->tailTaps;
+        extCount = bp->elevations != 0 ? 2 + uint64_t(bp->orientations) * N * 2 : 0;
     }
     n60_layout_info info;
     info.structSize = sizeof(info);
@@ -204,7 +211,7 @@ n60_status n60_layout_graph_build(const n60_layout_options *o, n60_layout_graph 
     if (g == nullptr) return N60_STATUS_OUT_OF_MEMORY;
     std::memset(g, 0, sizeof(*g));
     g->stages = new (std::nothrow) n60_stage_desc[N60_GRAPH_MAX_STAGES];
-    g->poolSize = size_t(2048) + o->peqParamCount + (binaural ? size_t(12) + respCount + tailCount : 0);
+    g->poolSize = size_t(2048) + o->peqParamCount + (binaural ? size_t(12) + respCount + tailCount + extCount : 0);
     g->pool = new (std::nothrow) float[g->poolSize];
     if (g->stages == nullptr || g->pool == nullptr) {
         n60_layout_graph_free(g);
@@ -250,7 +257,7 @@ n60_status n60_layout_graph_build(const n60_layout_options *o, n60_layout_graph 
     uint64_t outMask = layoutMask;
     if (binaural) {
         n60_stage_desc *s = b.add(N60_STAGE_BINAURAL, N60_LSTAGE_BINAURAL, 0, 1, layoutMask, nullptr,
-                                  static_cast<uint32_t>(12 + respCount + tailCount));
+                                  static_cast<uint32_t>(12 + respCount + tailCount + extCount));
         if (s != nullptr) {
             float *p = const_cast<float *>(s->params);
             p[0] = bp->headYawDeg;
@@ -264,10 +271,16 @@ n60_status n60_layout_graph_build(const n60_layout_options *o, n60_layout_graph 
             p[8] = static_cast<float>(bp->equalEarChannel);
             p[9] = static_cast<float>(bp->declaredLatency);
             p[10] = static_cast<float>(bp->tailTaps);
-            p[11] = 0.0f;
+            p[11] = static_cast<float>(bp->elevations);
             std::memcpy(p + 12, bp->responses, sizeof(float) * static_cast<size_t>(respCount));
             if (tailCount != 0) {
                 std::memcpy(p + 12 + respCount, bp->tailResponses, sizeof(float) * static_cast<size_t>(tailCount));
+            }
+            if (extCount != 0) {
+                float *ext = p + 12 + respCount + tailCount;
+                ext[0] = bp->pitchStartDeg;
+                ext[1] = bp->pitchStepDeg;
+                std::memcpy(ext + 2, bp->delays, sizeof(float) * static_cast<size_t>(extCount - 2));
             }
         }
         outMask = 3;
@@ -304,6 +317,76 @@ n60_status n60_layout_graph_build(const n60_layout_options *o, n60_layout_graph 
         return st;
     }
     *out = g;
+    return N60_STATUS_OK;
+}
+
+n60_status n60_binaural_delay_separate(double sampleRate, uint32_t sets, uint32_t sources, uint32_t length,
+                                       const float *responses, uint32_t leadFrames, uint32_t keepFrames,
+                                       int32_t equalEarSource, float *aligned, float *delays) {
+    if (responses == nullptr || aligned == nullptr || delays == nullptr || sets == 0 || sources == 0 || length == 0 ||
+        keepFrames == 0 || keepFrames > length || !(sampleRate > 0.0 && sampleRate < 4.0e6)) {
+        return N60_STATUS_BAD_ARGUMENT;
+    }
+    const size_t count = size_t(sets) * sources * 2;
+    for (size_t i = 0; i < count * length; ++i) {
+        if (!std::isfinite(responses[i])) return N60_STATUS_BAD_ARGUMENT;
+    }
+    const double maxDelay = std::min(N60_GRAPH_BINAURAL_MAX_DELAY_SECONDS * sampleRate, double(keepFrames) - 2.0);
+    for (size_t n = 0; n < count; ++n) {
+        const float *h = responses + n * length;
+        float *out = aligned + n * keepFrames;
+        const uint32_t source = static_cast<uint32_t>((n / 2) % sources);
+        float peak = 0.0f;
+        for (uint32_t i = 0; i < length; ++i) peak = std::max(peak, std::fabs(h[i]));
+        double d = 0.0;
+        if (static_cast<int32_t>(source) != equalEarSource && peak > 0.0f) {
+            // The arrival: the energy centroid of the response around its peak (raised-cosine weighted, window about
+            // 0.4 ms each side, re-centred twice). Unlike a threshold crossing it does not move with the fractional
+            // position of a band-limited pulse, so neighbouring sets align to a small fraction of a frame.
+            const double half = std::max(8.0, std::ceil(0.0004 * sampleRate));
+            uint32_t pk = 0;
+            for (uint32_t i = 0; i < length; ++i) {
+                if (std::fabs(h[i]) > std::fabs(h[pk])) pk = i;
+            }
+            double onset = pk;
+            for (int pass = 0; pass < 3; ++pass) {
+                const int64_t lo = std::max<int64_t>(0, static_cast<int64_t>(std::floor(onset - half)));
+                const int64_t hi = std::min<int64_t>(length - 1, static_cast<int64_t>(std::ceil(onset + half)));
+                double sw = 0.0, sx = 0.0;
+                for (int64_t i = lo; i <= hi; ++i) {
+                    const double x = (static_cast<double>(i) - onset) / (half + 1.0);
+                    if (std::fabs(x) >= 1.0) continue;
+                    const double w = 0.5 * (1.0 + std::cos(3.14159265358979323846 * x)) * double(h[i]) * double(h[i]);
+                    sw += w;
+                    sx += w * static_cast<double>(i);
+                }
+                if (sw > 0.0) onset = sx / sw;
+            }
+            d = std::clamp(onset - static_cast<double>(leadFrames), 0.0, std::max(0.0, maxDelay));
+        }
+        delays[n] = static_cast<float>(d);
+        const double fl = std::floor(d);
+        const double a = d - fl;
+        const uint32_t cut = keepFrames - std::min(keepFrames, static_cast<uint32_t>(std::ceil(d)));
+        for (uint32_t j = 0; j < keepFrames; ++j) {
+            if (j >= cut) {
+                out[j] = 0.0f;
+                continue;
+            }
+            const int64_t base = static_cast<int64_t>(fl) + j;
+            if (d == 0.0) {
+                out[j] = h[j];
+                continue;
+            }
+            double acc = 0.0;
+            for (int q = -static_cast<int>(n60::kFdFirst); q <= static_cast<int>(n60::kFdHalf); ++q) {
+                const int64_t idx = base + q;
+                if (idx < 0 || idx >= static_cast<int64_t>(length)) continue;
+                acc += static_cast<double>(h[idx]) * n60::fdKernel(a - static_cast<double>(q));
+            }
+            out[j] = static_cast<float>(acc);
+        }
+    }
     return N60_STATUS_OK;
 }
 
