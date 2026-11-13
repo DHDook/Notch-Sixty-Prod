@@ -43,6 +43,9 @@ typedef struct {
     /// `N60_LIVE_PHYSICAL_CHANNEL_UNMAPPED` (sub lanes, matrix-only lanes). Loudness metering only: the render never
     /// reads it. A role's lanes (the ways of one speaker) are summed to measure that role as heard.
     uint32_t routedLaneProgramChannel[N60_LIVE_MAX_PHYSICAL_CHANNELS];
+    /// E9 S10b: nonzero when output lane i is driven by a sub-sourced speaker (a subwoofer way). Loudness metering only:
+    /// the render never reads it. Each such lane is one sub feed in the Output loudness plane.
+    uint8_t routedLaneIsSub[N60_LIVE_MAX_PHYSICAL_CHANNELS];
     /// E8 A3: a non-routed graph session with 5 to 8 subs. Graph sub lane i (after the program lanes) goes to
     /// `physicalChannelForGraphSub[i]`. The legacy fields above hold no subs (`bassManagementEnabled` false,
     /// `subwooferCount` 0): the legacy kernel cannot render this map and the bridge silences it without a graph.
@@ -222,6 +225,21 @@ static inline bool N60LiveNChannelOutputMapSetRoutedLaneProgram(
         if (program != N60_LIVE_PHYSICAL_CHANNEL_UNMAPPED && program >= map->programLayout.channelCount) return false;
     }
     for (uint32_t lane = 0; lane < laneCount; ++lane) map->routedLaneProgramChannel[lane] = programChannelForLane[lane];
+    return true;
+}
+
+/// E9 S10b: (control plane, before the bridge is created) records which routed output lanes are sub-sourced.
+/// Returns false, and changes nothing, for a map that is not routed or a count that differs from the lane count.
+static inline bool N60LiveNChannelOutputMapSetRoutedLaneSub(
+    N60LiveNChannelOutputMap * _Nonnull map,
+    uint32_t laneCount,
+    const uint8_t * _Nonnull isSubForLane
+) {
+    if (map == NULL || isSubForLane == NULL || !map->valid || map->routedLaneCount == 0u
+        || laneCount != map->routedLaneCount) {
+        return false;
+    }
+    for (uint32_t lane = 0; lane < laneCount; ++lane) map->routedLaneIsSub[lane] = isSubForLane[lane] != 0u ? 1u : 0u;
     return true;
 }
 

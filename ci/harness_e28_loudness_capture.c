@@ -469,6 +469,50 @@ static void routedCase(double rate) {
     N60LiveNChannelBridgeDestroy(b);
 }
 
+/* E9 S10b: a routed 2.1 plan. Lanes 0 and 1 are two ways of the left speaker, lane 2 is a sub-sourced lane: the Output
+ * plane carries the program roles plus one sub feed (the lane's physical channel, after the limiter and master gain). */
+static void routedSubFeedCase(double rate) {
+    const uint32_t none = N60_LIVE_PHYSICAL_CHANNEL_UNMAPPED;
+    const uint32_t laneProgram[ROUTED_LANES] = {0u, 0u, none};
+    const uint8_t laneSub[ROUTED_LANES] = {0u, 0u, 1u};
+    bool ok = false;
+    N60LiveNChannelRenderGraph g = makeRoutedGraph(rate, laneProgram, &ok);
+    N60LiveNChannelOutputMap probe = g.outputMap;
+    CHECK(ok, "routed sub graph at %.0f", rate);
+    if (!ok) return;
+    CHECK(!N60LiveNChannelOutputMapSetRoutedLaneSub(&probe, ROUTED_LANES - 1u, laneSub), "short sub list accepted");
+    CHECK(N60LiveNChannelOutputMapSetRoutedLaneSub(&g.outputMap, ROUTED_LANES, laneSub)
+              && N60LiveNChannelOutputMapIsValid(&g.outputMap), "set sub lanes");
+    AudioChannelDescription desc[2] = {{kAudioChannelLabel_Left, 0, {0, 0, 0}}, {kAudioChannelLabel_Right, 0, {0, 0, 0}}};
+    N60ProgramInputMap map = {0};
+    CHECK(N60ProgramInputMapCompile(desc, 2u, g.programLayout, &map), "input map");
+    N60LiveNChannelBridge *b = N60LiveNChannelBridgeCreate(16384u, map, g, 0u, 1u);
+    n60_graph *graph = makeRoutedRouteGraph(rate);
+    const bool ring = b != NULL && b->loudnessCapture != NULL && b->loudnessCapture->outputChannels == 3u
+        && b->loudnessSubFeedCount == 1u;
+    CHECK(ring, "routed 2.1 bridge has 2 roles plus 1 sub feed at %.0f", rate);
+    if (ring && graph != NULL && N60LiveNChannelBridgeAttachGraph(b, graph, 2u + ROUTED_LANES, MAXB)) {
+        uint32_t pos = 0;
+        N60LoudnessCaptureSetDemand(b->loudnessCapture, true);
+        for (int i = 0; i < 16; ++i) runRoutedBlock(b, MAXB, &pos, rate);
+        float inBuf[2 * MAXB * 16], outBuf[3 * MAXB * 16];
+        const uint32_t got = N60LoudnessCaptureRead(b->loudnessCapture, inBuf, outBuf, MAXB * 16u);
+        CHECK(got == MAXB * 16u, "routed sub read %u at %.0f", got, rate);
+        const uint32_t skip = MAXB * 8u;
+        const float left = peak(outBuf + skip * 3u, got - skip, 3u, 0u);
+        const float right = peak(outBuf + skip * 3u, got - skip, 3u, 1u);
+        const float sub = peak(outBuf + skip * 3u, got - skip, 3u, 2u);
+        CHECK(fabsf(left - 0.2f) < 0.01f, "left role peak %.4f expected 0.2 at %.0f", left, rate);
+        CHECK(right < 0.001f, "right role peak %.4f expected 0 (no lane) at %.0f", right, rate);
+        CHECK(fabsf(sub - 0.1f) < 0.005f, "routed sub feed peak %.4f expected 0.1 at %.0f", sub, rate);
+    } else {
+        CHECK(0, "routed sub attach at %.0f", rate);
+    }
+    if (b != NULL) N60LiveNChannelBridgeAttachGraph(b, NULL, 0u, 0u);
+    N60LiveNChannelBridgeDestroy(b);
+    if (graph) n60_graph_retire(graph);
+}
+
 /* ---- stereo bridge: per-side over-range ---- */
 
 static void stereoOverRange(double rate) {
@@ -517,6 +561,7 @@ int main(void) {
         subFeedCase(kRates[r], 2u);
         subFeedCase(kRates[r], 5u);
         routedCase(kRates[r]);
+        routedSubFeedCase(kRates[r]);
         stereoOverRange(kRates[r]);
         printf("rate %.0f ok\n", kRates[r]);
     }

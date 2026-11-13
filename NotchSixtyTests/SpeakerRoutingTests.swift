@@ -739,6 +739,8 @@ extension SpeakerRoutingTests {
             programLayout: .stereo, availableDevices: [device], sampleRate: 48_000, selectedOutputUID: "fixture",
             bassManagementEnabled: true)
         XCTAssertEqual(plan.routedLaneProgramChannels, [0, 0, 1, 1, .max, .max])
+        // E9 S10b: only the sub-sourced lane (4) is a sub feed; the matrix-only lane (5) is not.
+        XCTAssertEqual(plan.routedLaneIsSub, [false, false, false, false, true, false])
         var map = try plan.makeRealtimeOutputMap()
         XCTAssertEqual(map.routedLaneCount, 6)
         XCTAssertTrue(N60LiveNChannelOutputMapRoutedHasProgramLane(&map))
@@ -746,6 +748,33 @@ extension SpeakerRoutingTests {
         XCTAssertEqual(map.routedLaneProgramChannel.2, 1)
         XCTAssertEqual(map.routedLaneProgramChannel.4, UInt32.max)
         XCTAssertEqual(map.routedLaneProgramChannel.5, UInt32.max)
+        XCTAssertEqual(map.routedLaneIsSub.4, 1)
+        XCTAssertEqual(map.routedLaneIsSub.0, 0)
+        XCTAssertEqual(map.routedLaneIsSub.5, 0)
+    }
+
+    /// E9 S10b: a routed 2.1 plan (stereo mains plus a sub) records the sub lane at every standard rate, so the wide
+    /// Output loudness card gets one extra feed channel (`subwooferFeeds` over the ring's channel count).
+    func testRoutedTwoPointOnePlanRecordsSubFeedAtEveryRate() throws {
+        for rate in [44_100.0, 48_000, 88_200, 96_000, 176_400, 192_000, 352_800, 384_000] {
+            let routing = SpeakerRoutingConfiguration(
+                speakers: [
+                    RoutedSpeaker(name: "L", source: .program(0), ways: [RoutedWay(name: "L", endpoint: ep(0, device: "fixture"))]),
+                    RoutedSpeaker(name: "R", source: .program(1), ways: [RoutedWay(name: "R", endpoint: ep(1, device: "fixture"))]),
+                    RoutedSpeaker(name: "Sub", source: .sub(0), ways: [RoutedWay(name: "Sub", endpoint: ep(2, device: "fixture"))])],
+                matrix: [])
+            let device = fixtureDevice("fixture", rate: rate, channels: 4)
+            let plan = try routing.makeLivePlan(
+                programLayout: .stereo, availableDevices: [device], sampleRate: rate, selectedOutputUID: "fixture",
+                bassManagementEnabled: true)
+            XCTAssertEqual(plan.routedLaneIsSub, [false, false, true], "rate \(rate)")
+            var map = try plan.makeRealtimeOutputMap()
+            XCTAssertEqual(map.routedLaneIsSub.0, 0)
+            XCTAssertEqual(map.routedLaneIsSub.2, 1, "rate \(rate)")
+            XCTAssertTrue(N60LiveNChannelOutputMapRoutedHasProgramLane(&map))
+            XCTAssertEqual(LoudnessChannelPosition.subwooferFeeds(outputChannels: 3, programChannels: 2),
+                           [LoudnessChannelPosition.subwooferFeed])
+        }
     }
 
     func testRoutedPlanWithOnlySubAndMatrixLanesCarriesNoRole() throws {

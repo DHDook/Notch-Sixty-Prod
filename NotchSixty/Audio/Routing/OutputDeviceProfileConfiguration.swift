@@ -650,6 +650,9 @@ struct LiveNChannelOutputRoutePlan: Equatable, Sendable {
     /// lane drives, or `UInt32.max` for a sub or matrix-only lane. Empty (or all `UInt32.max`) means Output loudness is
     /// not measured. Metering only: the render never reads it.
     let routedLaneProgramChannels: [UInt32]
+    /// E9 S10b: for each routed output lane, whether a sub-sourced speaker drives it (one Output loudness sub feed each).
+    /// Empty means none. Metering only: the render never reads it.
+    let routedLaneIsSub: [Bool]
 
     var isRouted: Bool { !routedOutputPhysicalChannels.isEmpty }
 
@@ -670,7 +673,8 @@ struct LiveNChannelOutputRoutePlan: Equatable, Sendable {
         speakerOptimizerFIR:
             SpeakerOptimizerFIRDeploymentConfiguration? = nil,
         routedOutputPhysicalChannels: [UInt32] = [],
-        routedLaneProgramChannels: [UInt32] = []
+        routedLaneProgramChannels: [UInt32] = [],
+        routedLaneIsSub: [Bool] = []
     ) {
         self.programLayout = programLayout
         self.orderedDeviceUIDs = orderedDeviceUIDs
@@ -686,6 +690,7 @@ struct LiveNChannelOutputRoutePlan: Equatable, Sendable {
         self.speakerOptimizerFIR = speakerOptimizerFIR
         self.routedOutputPhysicalChannels = routedOutputPhysicalChannels
         self.routedLaneProgramChannels = routedLaneProgramChannels
+        self.routedLaneIsSub = routedLaneIsSub
     }
 
     var usesMultiplePhysicalDevices: Bool { orderedDeviceUIDs.count > 1 }
@@ -708,6 +713,13 @@ struct LiveNChannelOutputRoutePlan: Equatable, Sendable {
             if routedLaneProgramChannels.count == routedOutputPhysicalChannels.count {
                 let recorded = routedLaneProgramChannels.withUnsafeBufferPointer { buffer in
                     N60LiveNChannelOutputMapSetRoutedLaneProgram(&result, UInt32(buffer.count), buffer.baseAddress!)
+                }
+                guard recorded else { throw OutputDeviceProfileError.realtimeOutputMapCompilationFailed }
+            }
+            if routedLaneIsSub.count == routedOutputPhysicalChannels.count {
+                let flags = routedLaneIsSub.map { $0 ? UInt8(1) : UInt8(0) }
+                let recorded = flags.withUnsafeBufferPointer { buffer in
+                    N60LiveNChannelOutputMapSetRoutedLaneSub(&result, UInt32(buffer.count), buffer.baseAddress!)
                 }
                 guard recorded else { throw OutputDeviceProfileError.realtimeOutputMapCompilationFailed }
             }

@@ -285,6 +285,10 @@ extension SpeakerRoutingConfiguration {
             }
             return UInt32.max
         }
+        // E9 S10b: a lane is a sub feed when a sub-sourced speaker owns its endpoint.
+        let laneIsSub: [Bool] = endpoints.map { endpoint in
+            speakers.contains { $0.source.kind == .sub && $0.ways.contains { $0.endpoint == endpoint } }
+        }
         let plan = LiveNChannelOutputRoutePlan(
             programLayout: programLayout,
             orderedDeviceUIDs: orderedUIDs,
@@ -298,7 +302,8 @@ extension SpeakerRoutingConfiguration {
             speakerCalibrations: [:],
             subwooferCalibrations: [PhysicalSubwooferCalibration?](repeating: nil, count: subs),
             routedOutputPhysicalChannels: physical,
-            routedLaneProgramChannels: laneProgram
+            routedLaneProgramChannels: laneProgram,
+            routedLaneIsSub: laneIsSub
         )
         _ = try plan.makeRealtimeOutputMap()
         return plan
