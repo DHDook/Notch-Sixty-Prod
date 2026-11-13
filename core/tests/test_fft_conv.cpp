@@ -14,6 +14,7 @@
 #include <vector>
 
 #include "fft.hpp"
+#include "simd/simd.hpp"
 #include "n60/graph.h"
 
 static int failures = 0;
@@ -108,6 +109,57 @@ void checkComplex() {
             const double mag = std::hypot(x[k].re, x[k].im);
             if (k == bin) CHECK(std::fabs(mag - n) < 0.05, "tone bin magnitude %g", mag);
             else CHECK(mag < 0.05, "tone leakage bin %u: %g", k, mag);
+        }
+    }
+}
+
+// G16: the fused four-point passes must equal running the radix-2 stages one at a time, bit for bit (same butterflies,
+// same twiddles, same operation order). Reference: plain radix-2 stages with the SIMD cmul and the plan's twiddle formula.
+void refRadix2(std::vector<Complex> &x, bool inverse) {
+    const uint32_t n = static_cast<uint32_t>(x.size());
+    uint32_t bits = 0;
+    while ((1u << bits) < n) ++bits;
+    for (uint32_t i = 0; i < n; ++i) {
+        uint32_t r = 0, s = i;
+        for (uint32_t b = 0; b < bits; ++b) { r = (r << 1) | (s & 1u); s >>= 1; }
+        if (r > i) std::swap(x[i], x[r]);
+    }
+    for (uint32_t half = 1; half < n; half <<= 1) {
+        const uint32_t len = half << 1;
+        for (uint32_t base = 0; base < n; base += len) {
+            for (uint32_t k = 0; k < half; ++k) {
+                const double ph = -2.0 * kPi * static_cast<double>(k) / static_cast<double>(len);
+                const float wr = static_cast<float>(std::cos(ph)), wi = static_cast<float>(std::sin(ph)) * (inverse ? -1.0f : 1.0f);
+                float *pa = &x[base + k].re, *pb = &x[base + k + half].re;
+                if (half == 1) {  // len 2: twiddle 1
+                    const float ar = pa[0], ai = pa[1];
+                    pa[0] = ar + pb[0]; pa[1] = ai + pb[1];
+                    pb[0] = ar - pb[0]; pb[1] = ai - pb[1];
+                    continue;
+                }
+                float hb[4] = {wr, wi, wr, wi}, xb[4] = {pb[0], pb[1], pb[0], pb[1]}, tt[4];
+                n60::simd::store4(tt, n60::simd::cmul(n60::simd::load4(hb), n60::simd::load4(xb)));
+                const float ar = pa[0], ai = pa[1];
+                pa[0] = ar + tt[0]; pa[1] = ai + tt[1];
+                pb[0] = ar - tt[0]; pb[1] = ai - tt[1];
+            }
+        }
+    }
+    if (inverse) for (auto &c : x) { c.re *= 1.0f / static_cast<float>(n); c.im *= 1.0f / static_cast<float>(n); }
+}
+
+void checkFusedStages() {
+    for (uint32_t n = 2; n <= n60::fft::kMaxSize; n <<= 1) {  // even and odd stage counts
+        Aligned plan(n60::fft::planBytes(n));
+        n60::fft::planInit(plan.p, n);
+        Rng rng{0x777ull + n};
+        std::vector<Complex> x(n);
+        for (auto &c : x) c = {rng.next(), rng.next()};
+        for (int inv = 0; inv < 2; ++inv) {
+            std::vector<Complex> a = x, b = x;
+            if (inv) n60::fft::inverse(plan.p, a.data()); else n60::fft::forward(plan.p, a.data());
+            refRadix2(b, inv != 0);
+            CHECK(std::memcmp(a.data(), b.data(), sizeof(Complex) * n) == 0, "fused passes differ from radix-2 stages n=%u inv=%d", n, inv);
         }
     }
 }
@@ -256,6 +308,7 @@ int main(int argc, char **argv) {
     const std::string mode = argc > 1 ? argv[1] : "check";
     if (mode == "dump") return dump();
     checkComplex();
+    checkFusedStages();
     checkReal();
     checkNonFinite();
     checkPlanMemory();

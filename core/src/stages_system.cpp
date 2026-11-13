@@ -70,7 +70,7 @@ void rampSet(Ramp &r, float t, uint32_t frames) {
 inline float rampNext(Ramp &r) {
     if (r.remaining != 0) {
         --r.remaining;
-        r.cur = r.target - r.step * static_cast<float>(r.remaining);
+        r.cur = std::fma(-r.step, static_cast<float>(r.remaining), r.target);  // explicit fma, as simd::rampFill
     }
     return r.cur;
 }
@@ -1283,6 +1283,8 @@ void runAmbient(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames
     }
 }
 
+constexpr uint32_t kSymChunk = 256;
+
 void runSymmetry(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) {
     SymShared &s = *reinterpret_cast<SymShared *>(sharedState(h, r));
     const float pos = paramsOf(h, r)[0];
@@ -1294,9 +1296,14 @@ void runSymmetry(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frame
     }
     float *a = lanes[r.laneA];
     float *b = lanes[r.laneB];
-    for (uint32_t i = 0; i < frames; ++i) {
-        a[i] *= rampNext(s.gl);
-        b[i] *= rampNext(s.gr);
+    float gv[kSymChunk];
+    for (uint32_t done = 0; done < frames;) {
+        const uint32_t n = std::min(kSymChunk, frames - done);
+        simd::rampFill(gv, s.gl.cur, s.gl.target, s.gl.step, s.gl.remaining, n);
+        simd::mulVec(a + done, a + done, gv, n);
+        simd::rampFill(gv, s.gr.cur, s.gr.target, s.gr.step, s.gr.remaining, n);
+        simd::mulVec(b + done, b + done, gv, n);
+        done += n;
     }
 }
 

@@ -14,6 +14,19 @@ final class SpeakerRoutingEditorModel: ObservableObject {
     /// holds nil while a way is bypassed, so nothing stale ever reaches a saved profile or the engine.
     @Published private(set) var bypassedLinearisations: [UUID: RoutedWayLinearisation] = [:]
 
+    /// E9 S9: the active-speaker failsafe. When set (the view sets it under `e9.output-protection`), an edit that
+    /// would leave an any-way crossover on the macOS default output is refused and `failsafeRefusal` says why.
+    var failsafe: (defaultOutputUID: () -> String?, devices: () -> [AudioOutputDevice])?
+    @Published private(set) var failsafeRefusal: String?
+
+    private func failsafeBlocks(_ next: SpeakerRoutingConfiguration) -> Bool {
+        guard let failsafe else { failsafeRefusal = nil; return false }
+        let verdict = ActiveSpeakerFailsafe.verdict(
+            next, defaultOutputUID: failsafe.defaultOutputUID(), devices: failsafe.devices())
+        failsafeRefusal = ActiveSpeakerFailsafe.message(verdict, launch: false)
+        return !verdict.isSafe
+    }
+
     /// Called after every edit with the new configuration. The view wires this to the engine.
     var onCommit: ((SpeakerRoutingConfiguration) -> Void)?
 
@@ -64,6 +77,7 @@ final class SpeakerRoutingEditorModel: ObservableObject {
     // MARK: Whole-configuration edits
 
     func replace(_ configuration: SpeakerRoutingConfiguration) {
+        if failsafeBlocks(configuration) { return }
         self.configuration = configuration
         refreshSubwoofers()
         onCommit?(configuration)
@@ -83,6 +97,7 @@ final class SpeakerRoutingEditorModel: ObservableObject {
     ) -> Bool {
         guard var built = template.build(mains: mains, subs: subs, crossoverHz: crossoverHz) else { return false }
         built.enabled = configuration.enabled
+        if failsafeBlocks(built) { return false }
         replace(built)
         return true
     }
@@ -430,6 +445,7 @@ final class SpeakerRoutingEditorModel: ObservableObject {
         var next = configuration
         change(&next)
         guard next != configuration else { return }
+        if failsafeBlocks(next) { return }
         configuration = next
         refreshSubwoofers()
         onCommit?(next)
