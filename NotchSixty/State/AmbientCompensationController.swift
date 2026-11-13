@@ -1029,6 +1029,18 @@ final class AmbientCompensationController: ObservableObject {
         monitorStatus = .stopped
     }
 
+    /// E4 G23 test seam: installs the control observation a live window would leave (the detailed analysis and the
+    /// raw rendered reference) so `ActiveQuietZoneController.evaluate` can be driven without a microphone. It only
+    /// stores the values the live path stores; nothing else changes.
+    func installQuietZoneObservationForTesting(
+        detailed: AmbientAnalysisDetailedResult, rawLeft: [Float], rawRight: [Float]
+    ) {
+        latestDetailedAnalysis = detailed
+        latestQuietZoneRawLeft = rawLeft
+        latestQuietZoneRawRight = rawRight
+        analysisRevision &+= 1
+    }
+
     func quietZoneReferenceAlignedToLatestAnalysis()
         -> (left: [Float], right: [Float])? {
         guard let detailed = latestDetailedAnalysis else {

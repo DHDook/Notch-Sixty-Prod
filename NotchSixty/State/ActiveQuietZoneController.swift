@@ -1718,6 +1718,17 @@ final class ActiveQuietZoneController: ObservableObject {
         return BassPlantConditioning.stricter(seatPlant.mode, bassPlantMap.mode(atHz: frequencyHz))
     }
 
+    /// E4 G23 test seam: runs `evaluate` with an injected analysis and injection headroom and returns its telemetry.
+    /// `evaluate` publishes `adaptiveSeeds` exactly as the live poll does; nothing else is bypassed.
+    func evaluateForTesting(
+        scheduledTarget: ActiveQuietZoneRuntimeTarget,
+        detailed: AmbientAnalysisDetailedResult,
+        availableInjectionPeak peak: Double
+    ) throws -> [ActiveQuietZoneToneTelemetry] {
+        availableInjectionPeak = peak
+        return try evaluate(scheduledTarget: scheduledTarget, detailed: detailed).telemetry
+    }
+
     private func evaluate(
         scheduledTarget: ActiveQuietZoneRuntimeTarget,
         detailed: AmbientAnalysisDetailedResult

@@ -139,6 +139,95 @@ extension QuietZoneVirtualMicWiringTests {
         }
     }
 
+    /// E4 G23: `ActiveQuietZoneController.evaluate` itself, driven with an injected analysis (a synthetic residual and
+    /// rendered reference carrying the twin's noise at the tones), through to the seeds, the shadow tones and the live
+    /// worker, at the eight rates. The only seams are the observation install and the injection headroom; the survey
+    /// and zone controllers are attached the way `QuietZoneFlagWiring` attaches them. Flag policy is launch-argument
+    /// only, so the nightly flags-off environment cannot change it (the production flags-off path is pinned in
+    /// `E4GraduationTests`).
+    func testEvaluateDrivesTheSeedsThroughToTheAdaptiveWorkerAtEightRates() throws {
+        for rate in rates {
+            let rig = try makeRig(rate: rate)
+            attachZonesLikeProduction(rig, flags: ["e4.zones", "e4.virtual-microphone"])
+            let zones = try XCTUnwrap(rig.quietZone.zones)
+            let frequencies = [60.0, 80.0]
+            runSurvey(rig, frequencies: frequencies)
+            rig.survey.useAtEar = true
+
+            // One window of rendered reference and residual: tone phasors in the planner's convention (A cos(wn + phi)
+            // reads back as A e^{j phi}); the residual is the twin's monitor noise plus the speakers' own path.
+            let count = Int(rate)
+            let refLeft = ActiveQuietZoneComplex(real: 0.2, imaginary: 0.05)
+            let refRight = ActiveQuietZoneComplex(real: 0.1, imaginary: -0.04)
+            var rawLeft = [Float](repeating: 0, count: count)
+            var rawRight = rawLeft
+            var residual = rawLeft
+            for f in frequencies {
+                let paths = try rig.quietZone.surveyPaths(frequencyHz: f, earPositionID: rig.earID)
+                let error = rig.twin.noiseAtMonitor(f) + paths.monitorLeft * refLeft + paths.monitorRight * refRight
+                let omega = 2 * Double.pi * f / rate
+                for n in 0..<count {
+                    let c = cos(omega * Double(n)), s = sin(omega * Double(n))
+                    rawLeft[n] += Float(refLeft.real * c - refLeft.imaginary * s)
+                    rawRight[n] += Float(refRight.real * c - refRight.imaginary * s)
+                    residual[n] += Float(error.real * c - error.imaginary * s)
+                }
+            }
+            let snapshot = AmbientAnalysisSnapshot(
+                sampleRate: rate, analyzedFrames: count, separationMode: .modeledPlaybackSubtraction,
+                separationConfidence: 0.9, predictionGain: 1, microphoneLevelDBFS: -24,
+                predictedPlaybackLevelDBFS: -28, ambientLevelDBFS: -34, ambientLevelDBSPL: nil,
+                stationarityScore: 0.9, periodicityScore: 0.9, periodicFrequencyHz: 60,
+                lowFrequencyEnergyFraction: 0.9, cancellationCandidateScore: 0.9, character: .tonal,
+                spectrum: [], tonalComponents: [])
+            let detailed = AmbientAnalysisDetailedResult(
+                snapshot: snapshot, separatedResidualSamples: residual,
+                playbackAlignmentLagFrames: nil, playbackAlignmentConfidence: nil)
+            rig.quietZone.ambient.installQuietZoneObservationForTesting(
+                detailed: detailed, rawLeft: rawLeft, rawRight: rawRight)
+            let target = ActiveQuietZoneRuntimeTarget(
+                tones: frequencies.map {
+                    ActiveQuietZoneRuntimeTone(
+                        frequencyHz: $0, leftOutput: ActiveQuietZoneComplex(real: 0.05, imaginary: 0.01),
+                        rightOutput: ActiveQuietZoneComplex(real: 0.03, imaginary: -0.01))
+                },
+                transitionMilliseconds: 100)
+
+            // One seat at the surveyed ear: each seed carries the ear, no other seats.
+            var telemetry = try rig.quietZone.evaluateForTesting(
+                scheduledTarget: target, detailed: detailed, availableInjectionPeak: 0.5)
+            XCTAssertEqual(telemetry.count, 2, "rate \(rate)")
+            var seeds = rig.quietZone.adaptiveSeeds
+            XCTAssertEqual(seeds.map(\.frequencyHz), frequencies, "rate \(rate)")
+            for seed in seeds {
+                XCTAssertEqual(seed.ears.count, 1, "one seat rate \(rate) f \(seed.frequencyHz)")
+                XCTAssertTrue(seed.limitSeats.isEmpty, "rate \(rate)")
+            }
+            func assertWorker(_ ears: Int, _ message: String) throws {
+                let tones = AdaptiveQuietZoneShadowTone.tones(from: rig.quietZone.adaptiveSeeds)
+                XCTAssertEqual(tones.map(\.ears.count), [ears, ears], message)
+                XCTAssertNotNil(
+                    AdaptiveTonalLiveWorker(
+                        sampleRate: rate, tones: tones, link: AdaptiveQuietZoneShadowTests.NullLink()), message)
+            }
+            try assertWorker(1, "one seat rate \(rate)")
+
+            // Two zones: each seed carries both ears.
+            surveySecond(rig, zones: zones, frequencies: frequencies)
+            XCTAssertTrue(zones.setMode(.twoZones), "rate \(rate): \(zones.message)")
+            telemetry = try rig.quietZone.evaluateForTesting(
+                scheduledTarget: target, detailed: detailed, availableInjectionPeak: 0.5)
+            XCTAssertEqual(telemetry.count, 2, "rate \(rate)")
+            seeds = rig.quietZone.adaptiveSeeds
+            for seed in seeds {
+                XCTAssertEqual(seed.ears.count, 2, "two zones rate \(rate) f \(seed.frequencyHz)")
+                // The monitor limit is the worker's own (monitorIncreaseLimitDB); seeds list only other surveyed seats.
+                XCTAssertTrue(seed.limitSeats.isEmpty, "no other surveyed seat, rate \(rate)")
+            }
+            try assertWorker(2, "two zones rate \(rate)")
+        }
+    }
+
     func testOneSeatAndFollowModesNeverUseTheTwoZoneDesign() throws {
         let rig = try makeRig(rate: 96_000)
         attachZonesLikeProduction(rig, flags: ["e4.zones", "e4.virtual-microphone"])

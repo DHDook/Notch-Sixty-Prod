@@ -69,7 +69,7 @@ final class AdaptiveQuietZoneShadowTests: XCTestCase {
         XCTAssertEqual((t.path - path).magnitude, 0, accuracy: 1e-12)
     }
 
-    private final class NullLink: AdaptiveTonalLiveLink, @unchecked Sendable {
+    final class NullLink: AdaptiveTonalLiveLink, @unchecked Sendable {
         func popTelemetry() -> N60ActiveQuietZoneTelemetryRecord? { nil }
         func publish(_ record: N60ActiveQuietZoneGainRecord) -> UInt64 { 0 }
         func requestHowlTrip() {}
