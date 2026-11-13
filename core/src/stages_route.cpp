@@ -58,7 +58,7 @@ void rampSet(Ramp &r, float t, uint32_t frames) {
 inline float rampNext(Ramp &r) {
     if (r.remaining != 0) {
         --r.remaining;
-        r.cur = r.target - r.step * static_cast<float>(r.remaining);
+        r.cur = std::fma(-r.step, static_cast<float>(r.remaining), r.target);  // explicit fma, as simd::rampFill
     }
     return r.cur;
 }
@@ -303,13 +303,12 @@ static void runRouteStage(SnapHeader *h, StageRec &r, float *const *lanes, uint3
                 const float *x = lanes[static_cast<uint32_t>(srcf)] + done;
                 Ramp &g = L.g[e];
                 if (g.remaining == 0) {
-                    const float c = g.cur;
-                    if (first) for (uint32_t i = 0; i < n; ++i) acc[i] = c * x[i];
-                    else for (uint32_t i = 0; i < n; ++i) acc[i] += c * x[i];
+                    if (first) simd::mulConst(acc, x, g.cur, n);
+                    else simd::macConst(acc, x, g.cur, n);
                 } else {
-                    for (uint32_t i = 0; i < n; ++i) gv[i] = rampNext(g);
-                    if (first) for (uint32_t i = 0; i < n; ++i) acc[i] = gv[i] * x[i];
-                    else for (uint32_t i = 0; i < n; ++i) acc[i] += gv[i] * x[i];
+                    simd::rampFill(gv, g.cur, g.target, g.step, g.remaining, n);
+                    if (first) simd::mulVec(acc, x, gv, n);
+                    else simd::macVec(acc, x, gv, n);
                 }
                 first = false;
             }
