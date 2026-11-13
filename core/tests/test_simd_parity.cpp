@@ -104,15 +104,38 @@ void addDynamics(Chain &c, uint32_t lanes) {
     c.add(N60_STAGE_EXPANDER, kExpId, {-50, 2, -20, 3, 60, 1, 20, 4, 1, 20, 90, 70, 0});
 }
 
+// E20 S10 part 5 (G14): CLEANUP (DC, 48 dB/oct infrasonic, three mains notches, detector; rank 3.7), the dynamic EQ (a peaking
+// band with a boost side and an RMS detector, then a tilt band; rank 7), IMAGE (wide mono off, widener on) and DEESS (de-harsh and
+// de-esser; ranks 9.6 and 9.8), in the chain on lane pairs so the scalar and vector builds are compared through their chunked paths.
+void addPrograms(Chain &c, uint32_t lanes, int where) {
+    if (where == 0) {  // after GAIN (rank 3.7)
+        if (lanes >= 2) {
+            std::vector<float> p = {1, 1, 20, 1, 1, 50, 3, 20, 1, 50};
+            for (int i = 0; i < 16; ++i) p.push_back(i < 3 ? -20.0f : 0.0f);
+            c.add(N60_STAGE_CLEANUP, 31, p, 0, 1);
+        }
+    } else if (where == 1) {  // after PEQ (rank 7)
+        c.add(N60_STAGE_DYN_EQ, 32, {0, 0, 500, 1.2f, 1, -40, 2, -12, 10, 100, 2, -50, 2, 6, 1, 20,
+                                     5, 2000, 0.8f, 0, -30, 3, -12, 5, 80, 0, -50, 2, 6, 0, 20});
+    } else if (lanes >= 2) {
+        if (where == 2) c.add(N60_STAGE_IMAGE, 33, {0, 1, 0, 200, 4000, 0.5f, 1.5f, 1.8f}, 0, 1);
+        else c.add(N60_STAGE_DEESS, 34, {1, 5000, -4, 1, 6000, -40, 4, -12, 2, 5, 80, 0}, 0, 1);
+    }
+}
+
 // withCoupling: M/S on lanes 0 and 1 and the linked limiter (both couple lanes). Without it every lane is independent.
 void buildChain(Chain &c, uint32_t lanes, bool withCoupling) {
     c.add(N60_STAGE_SANITISE, 1, {});
     c.add(N60_STAGE_METER_IN, 2, {});
     c.add(N60_STAGE_GAIN, 3, {0.7f});
+    if (withCoupling) addPrograms(c, lanes, 0);
     if (withCoupling && lanes >= 2) c.add(N60_STAGE_MS_ENCODE, 4, {}, 0, 1);
     c.add(N60_STAGE_PEQ, kPeqId, {0, 60, 9, 2, 2, 6000, -6, 0.7f, 0, 250, -3, 1.2f, 0, 1500, 2, 1.5f, 1, 90, -2, 0.9f});
+    if (withCoupling) addPrograms(c, lanes, 1);
     if (withCoupling && lanes >= 2) c.add(N60_STAGE_MS_DECODE, 6, {}, 0, 1);
+    if (withCoupling) addPrograms(c, lanes, 2);
     if (withCoupling) addLoudness(c, lanes);
+    if (withCoupling) addPrograms(c, lanes, 3);
     if (withCoupling) addDynamics(c, lanes);
     c.add(N60_STAGE_METER_OUT, 9, {});
     if (withCoupling) addBass(c, lanes);
@@ -575,36 +598,104 @@ void buildLeveler(Chain &c) {
     c.add(N60_STAGE_LOUDNESS, kLoudId, {0, 0, -20, 10, 0.5f, 2, 0, 0.6f, 0, 1, 80, 12, 3, 1, 1, 0, 300, 3500, 6, 3, 9, 200, 80, 600,
                                         -60, 3, 7, 12, 800, 0.1f, 0.5f, 0.3f}, 0, 1);
 }
+// E20 S10 part 5 (G42): a deterministic two-tone programme that engages the leveler's boost: 80 Hz at -26 dBFS (outside the
+// 300 to 3500 Hz dialogue band) and 1 kHz at -50 dBFS (inside it), so the programme sits 24 dB above the band, far over the
+// 6 dB target gap, and the boost runs to its 9 dB maximum (boost ratio 3 gives 12 dB, capped). Phase is a function of the
+// absolute frame index plus `offset`, so a fresh run can be fed the third segment of the long one.
+float toneAt(uint32_t lane, uint64_t n, double rate) {
+    const double t = static_cast<double>(n) / rate, sign = lane == 0 ? 1.0 : -0.5;
+    return static_cast<float>(sign * (0.0501187 * std::sin(2.0 * 3.14159265358979323846 * 80.0 * t) +
+                                      0.0031623 * std::sin(2.0 * 3.14159265358979323846 * 1000.0 * t)));
+}
+bool driveTone(double rate, uint32_t block, uint32_t total, uint64_t offset, const std::vector<Edit> &edits,
+               std::vector<std::vector<float>> &in, std::vector<std::vector<float>> &out) {
+    Chain c;
+    buildLeveler(c);
+    n60_graph *g = nullptr;
+    if (n60_graph_build(c.finish(rate, block, 2), &g) != N60_STATUS_OK) return false;
+    in.assign(2, {});
+    out.assign(2, {});
+    std::vector<std::vector<float>> ib(2, std::vector<float>(block)), ob(2, std::vector<float>(block));
+    const float *ip[2] = {ib[0].data(), ib[1].data()};
+    float *op[2] = {ob[0].data(), ob[1].data()};
+    std::vector<bool> done(edits.size(), false);
+    for (uint32_t pos = 0; pos < total; pos += block) {
+        for (size_t e = 0; e < edits.size(); ++e)
+            if (!done[e] && pos >= edits[e].frame) { done[e] = true; n60_graph_post_params(g, &edits[e].rec, 1); }
+        for (uint32_t l = 0; l < 2; ++l) {
+            for (uint32_t i = 0; i < block; ++i) ib[l][i] = toneAt(l, offset + pos + i, rate);
+            in[l].insert(in[l].end(), ib[l].begin(), ib[l].end());
+        }
+        if (n60_graph_process(g, ip, op, block) != N60_STATUS_OK) { n60_graph_retire(g); return false; }
+        for (uint32_t l = 0; l < 2; ++l) out[l].insert(out[l].end(), ob[l].begin(), ob[l].end());
+    }
+    n60_graph_retire(g);
+    return true;
+}
+// Phase 1 (leveler on): the boost engages (the output differs from the input by well over a rounding error, and by the amount
+// a 9 dB boost of the 1 kHz tone gives). Phase 2 (off): the stage parks and is bit-transparent. Phase 3 (on again): the first
+// segment's state is gone, so the third segment equals, to the last bit, a fresh graph run from reset on the same input.
 void checkLevelerPark() {
-    for (double rate : {44100.0, 96000.0, 384000.0}) {
+    for (double rate : kRates) {
         const uint32_t block = 128, seg = (static_cast<uint32_t>(rate * 0.4) / block) * block, total = 3 * seg;
         std::vector<std::vector<float>> inA, outA, inB, outB;
-        // A: on, then off for a stretch, then on. B: a fresh run that starts "on" at the third segment's input.
         const std::vector<Edit> edits = {{seg, {kLoudId, kLdLevOn, 0.0f, 0}}, {2 * seg, {kLoudId, kLdLevOn, 1.0f, 0}}};
-        if (!drive(rate, 2, block, total, buildLeveler, edits, inA, outA)) { CHECK(false, "leveler build"); continue; }
-        // Middle segment: the leveler's own fade-out may take a few blocks to park; the last quarter must be transparent.
+        if (!driveTone(rate, block, total, 0, edits, inA, outA)) { CHECK(false, "leveler build"); continue; }
+        double boosted = 0;
+        for (uint32_t i = seg * 3 / 4; i < seg; ++i) boosted = std::max(boosted, std::fabs(double(outA[0][i]) - double(inA[0][i])));
+        CHECK(boosted > 1.0e-3 && boosted < 3.0e-2, "leveler boost not engaged or out of range: peak change %g (rate %g)", boosted, rate);
         std::vector<float> midOut(outA[0].begin() + seg + 3 * seg / 4, outA[0].begin() + 2 * seg), midIn(inA[0].begin() + seg + 3 * seg / 4, inA[0].begin() + 2 * seg);
         CHECK(midOut == midIn, "leveler stage not transparent while parked (rate %g)", rate);
         for (int k = 0; k < 2; ++k) for (float v : outA[k]) CHECK(std::isfinite(v), "leveler output not finite (rate %g)", rate);
-        // The third segment of A equals a fresh stream with the same input (rebuild the programme with the same per-sample
-        // generator: the generator is a function of the absolute frame index, so a fresh graph fed the third segment needs
-        // an offset; rather than that, run a fresh graph for the whole length with the leveler on and compare its third
-        // segment against A's after both have settled).
-        if (!drive(rate, 2, block, total, buildLeveler, {}, inB, outB)) { CHECK(false, "leveler build B"); continue; }
-        CHECK(inA == inB, "leveler programmes differ");
-        double d = 0;
-        for (uint32_t i = 2 * seg + seg / 2; i < total; ++i) d = std::max(d, std::fabs(double(outA[0][i]) - double(outB[0][i])));
-        const double ref = maxDiff(outB[0], inB[0], 2 * seg + seg / 2);
-        CHECK(d <= std::max(0.05, ref * 2.0), "leveler after park/unpark far from a continuous run: %g (rate %g)", d, rate);
+        if (!driveTone(rate, block, seg, 2 * uint64_t(seg), {}, inB, outB)) { CHECK(false, "leveler build B"); continue; }
+        for (int k = 0; k < 2; ++k) {
+            const std::vector<float> third(outA[k].begin() + 2 * seg, outA[k].end());
+            const double d = maxDiff(third, outB[k]);
+            CHECK(d == 0.0, "leveler after park/unpark differs from a fresh run by %g (lane %d rate %g)", d, k, rate);
+        }
     }
 }
-
 
 // Non-finite input straight into the compressor and expander side-chain high-pass (no SANITISE stage): the output stays finite
 // of NaN latching and recovers, as the per-sample biquad() reset did before the lane-pair form (E20 S10 part 4).
 void buildDynOnly(Chain &c) {
     c.add(N60_STAGE_COMPRESSOR, kCompId, {-22, 3, 5, 3, 70, 0, 0, 1, 120, 0, 100, 0, 0, 20, 0, 0});
     c.add(N60_STAGE_EXPANDER, kExpId, {-50, 2, -20, 3, 60, 0, 20, 4, 0, 20, 90, 0, 0});
+}
+void buildExpOnly(Chain &c) { c.add(N60_STAGE_EXPANDER, kExpId, {-50, 2, -20, 3, 60, 0, 20, 4, 0, 20, 90, 0, 0}); }
+// G42: the expander alone (side-chain high-pass at 90 Hz), so nothing upstream hides a latched state: after a NaN and an Inf
+// burst the output is finite and still passes the programme (the gate is open for 0.3-amplitude noise, so the tail energy
+// stays near the input's, not collapsed by a poisoned detector).
+void checkExpanderNonFinite() {
+    for (double rate : kRates) {
+        for (uint32_t lanes : {1u, 2u, 3u}) {
+            Chain c;
+            buildExpOnly(c);
+            n60_graph *g = nullptr;
+            if (n60_graph_build(c.finish(rate, 256, lanes), &g) != N60_STATUS_OK) { CHECK(false, "exp build"); continue; }
+            std::vector<std::vector<float>> in(lanes, std::vector<float>(256)), ob(lanes, std::vector<float>(256));
+            std::vector<const float *> ip(lanes);
+            std::vector<float *> op(lanes);
+            for (uint32_t l = 0; l < lanes; ++l) { ip[l] = in[l].data(); op[l] = ob[l].data(); }
+            Rng rng{123};
+            bool finiteTail = true;
+            double eIn = 0, eOut = 0;
+            for (int blk = 0; blk < 16; ++blk) {
+                for (uint32_t l = 0; l < lanes; ++l)
+                    for (uint32_t i = 0; i < 256; ++i) in[l][i] = 0.3f * rng.next();
+                if (blk == 3) { in[0][10] = std::nanf(""); in[lanes - 1][200] = INFINITY; }
+                n60_graph_process(g, ip.data(), op.data(), 256);
+                if (blk >= 10) for (uint32_t l = 0; l < lanes; ++l) for (uint32_t i = 0; i < 256; ++i) {
+                    finiteTail = finiteTail && std::isfinite(ob[l][i]);
+                    eIn += double(in[l][i]) * in[l][i];
+                    eOut += double(ob[l][i]) * ob[l][i];
+                }
+            }
+            CHECK(finiteTail, "expander did not recover from a non-finite burst (rate %g lanes %u)", rate, lanes);
+            CHECK(eOut > 0.5 * eIn, "expander stayed closed after a non-finite burst: out %g in %g (rate %g lanes %u)", eOut, eIn, rate, lanes);
+            n60_graph_retire(g);
+        }
+    }
 }
 void checkDynNonFinite() {
     for (double rate : {48000.0, 384000.0}) {
@@ -647,6 +738,7 @@ int main(int argc, char **argv) {
     checkContourReference();
     checkLevelerPark();
     checkDynNonFinite();
+    checkExpanderNonFinite();
     checkNonFiniteBurst();
     if (failures != 0) { std::fprintf(stderr, "%d failure(s)\n", failures); return 1; }
     std::puts("simd parity checks passed");

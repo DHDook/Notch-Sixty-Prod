@@ -242,6 +242,30 @@ double dcStep(double pole, double dry, double prevIn, double prevOut) { return s
 float dcMixed(float dry, double dc, float mix) { return dry + static_cast<float>((dc - double(dry)) * double(mix)); }
 float wetMixed(float dry, float wet, float mix) { return dry + (wet - dry) * mix; }
 
+// E20 S10 part 5 (G14): the whole-buffer form of runNotchesPair followed by the settled bypass mix (mix exactly 1). The
+// cascade runs one section at a time over a chunk of frames (state stays in registers across the chunk), the left and right
+// channels in one f64x2 per sample; section k's input is section k-1's double output, as in the per-sample cascade, and
+// the multiply-adds are the same fused forms (simd::biquadPair), so the result is bit-identical to runNotchesPair per frame.
+// Allocation: none (1 KB of stack). Latency 0.
+void runNotchesBulk(const Nc *c, NState *sl, NState *sr, uint32_t n, float *L, float *R, uint32_t frames) {
+    constexpr uint32_t kChunk = 64;
+    simd::f64x2 x[kChunk];
+    for (uint32_t base = 0; base < frames; base += kChunk) {
+        const uint32_t cn = std::min(kChunk, frames - base);
+        for (uint32_t i = 0; i < cn; ++i) x[i] = simd::toDouble(L[base + i], R[base + i]);
+        for (uint32_t k = 0; k < n; ++k) {
+            const double cc[5] = {c[k].b0, c[k].b1, c[k].b2, c[k].a1, c[k].a2};
+            simd::biquadPair(cc, sl[k].z1, sl[k].z2, &sr[k].z1, &sr[k].z2, x, cn);
+        }
+        for (uint32_t i = 0; i < cn; ++i) {
+            const float wetL = static_cast<float>(simd::lane(x[i], 0)), wetR = static_cast<float>(simd::lane(x[i], 1));
+            L[base + i] = wetMixed(L[base + i], wetL, 1.0f);
+            R[base + i] = wetMixed(R[base + i], wetR, 1.0f);
+        }
+    }
+}
+
+
 void resetDetectorWindow(CleanShared &S) {
     S.detCount = 0;
     S.detEnergy = 0.0;
@@ -438,29 +462,11 @@ bool runCleanupSettled(CleanShared &S, bool dcOn, bool infraOn, bool mainsOn, bo
             R[i] = dcMixed(dryR, dcR, 1.0f);
         }
     }
-    if (infraRun) {
-        for (uint32_t i = 0; i < frames; ++i) {
-            const float dryL = L[i];
-            const float dryR = R[i];
-            float hpL, hpR;
-            runNotchesPair(S.infra, S.infraL, S.infraR, S.infraSections, dryL, dryR, hpL, hpR);
-            L[i] = wetMixed(dryL, hpL, 1.0f);
-            R[i] = wetMixed(dryR, hpR, 1.0f);
-        }
-    }
+    if (infraRun) runNotchesBulk(S.infra, S.infraL, S.infraR, S.infraSections, L, R, frames);
     if (detOn || !S.detParked) {
         for (uint32_t i = 0; i < frames; ++i) detectorFrame(S, detOn, L[i], R[i]);
     }
-    if (mainsRun) {
-        for (uint32_t i = 0; i < frames; ++i) {
-            const float dryL = L[i];
-            const float dryR = R[i];
-            float nL, nR;
-            runNotchesPair(S.cur.coef, S.curL, S.curR, S.cur.count, dryL, dryR, nL, nR);
-            L[i] = wetMixed(dryL, nL, 1.0f);
-            R[i] = wetMixed(dryR, nR, 1.0f);
-        }
-    }
+    if (mainsRun) runNotchesBulk(S.cur.coef, S.curL, S.curR, S.cur.count, L, R, frames);
     return true;
 }
 

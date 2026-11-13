@@ -31,6 +31,8 @@
 //    State is not carried across a rebuild (ledger).
 #include "stages_image.hpp"
 
+#include "simd/simd.hpp"
+
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -165,6 +167,18 @@ float poleForMs(double rate, float ms) {
 float dbToLinear(float db) { return std::pow(10.0f, db / 20.0f); }
 float linearToDb(float x) { return 20.0f * std::log10(std::fmax(x, kEpsilon)); }
 
+
+// E20 S10 part 5 (G14): the image filters run a chunk at a time in the SIMD layer when every sample of the block is finite
+// (a non-finite sample resets the recursions per sample, so such a block keeps the per-sample loop). The filter outputs do
+// not depend on the stage's smoothing or parking, which only mix them; at a park the state is cleared, which also discards
+// what a chunk ran past the parking frame. Scratch: up to 64 f32x4 or f64x2 (1 KB) of stack. Latency 0.
+constexpr uint32_t kImgChunk = 64;
+bool allFinite(const float *L, const float *R, uint32_t frames) {
+    bool ok = true;
+    for (uint32_t i = 0; i < frames; ++i) ok = ok && std::isfinite(L[i]) && std::isfinite(R[i]);
+    return ok;
+}
+
 // ---- IMAGE ---------------------------------------------------------------------------------------------------------
 
 struct ImgShared {
@@ -232,7 +246,23 @@ void runWidener(ImgShared &S, const float *p, double rate, float *L, float *R, u
     const float midTarget = enabled ? p[kMidWidth] : 1.0f;
     const float highTarget = enabled ? p[kHighWidth] : 1.0f;
     const float c = S.bypassCoef;
-    for (uint32_t i = 0; i < frames; ++i) {
+    const bool bulk = allFinite(L, R, frames);
+    simd::f64x2 sd[kImgChunk];
+    for (uint32_t base = 0; base < frames; base += kImgChunk) {
+      const uint32_t cn = std::min(kImgChunk, frames - base);
+      if (bulk) {
+        for (uint32_t j = 0; j < cn; ++j) {
+            const double side = 0.5f * (L[base + j] - R[base + j]);
+            sd[j] = simd::pair(side, side);
+        }
+        for (int k = 0; k < 2; ++k) {
+            const BqD &lo = S.lowPass[k], &hi = S.highPass[k];
+            const double cl[5] = {lo.b0, lo.b1, lo.b2, lo.a1, lo.a2}, ch[5] = {hi.b0, hi.b1, hi.b2, hi.a1, hi.a2};
+            simd::biquadDual(cl, ch, S.lowSt[k].z1, S.lowSt[k].z2, S.highSt[k].z1, S.highSt[k].z2, sd, cn);
+        }
+      }
+      for (uint32_t j = 0; j < cn; ++j) {
+        const uint32_t i = base + j;
         const float dryL = L[i];
         const float dryR = R[i];
         if (!std::isfinite(dryL) || !std::isfinite(dryR)) {  // G14: never let a non-finite sample into the recursions
@@ -245,9 +275,14 @@ void runWidener(ImgShared &S, const float *p, double rate, float *L, float *R, u
         const float side = 0.5f * (dryL - dryR);
         double lowSide = side;
         double highSide = side;
-        for (int k = 0; k < 2; ++k) {
-            lowSide = runBqD(S.lowPass[k], S.lowSt[k], lowSide);
-            highSide = runBqD(S.highPass[k], S.highSt[k], highSide);
+        if (bulk) {
+            lowSide = simd::lane(sd[j], 0);
+            highSide = simd::lane(sd[j], 1);
+        } else {
+            for (int k = 0; k < 2; ++k) {
+                lowSide = runBqD(S.lowPass[k], S.lowSt[k], lowSide);
+                highSide = runBqD(S.highPass[k], S.highSt[k], highSide);
+            }
         }
         const double midSide = double(side) - lowSide - highSide;
         S.lowW = smoothToward(S.lowW, lowTarget, c);
@@ -263,6 +298,7 @@ void runWidener(ImgShared &S, const float *p, double rate, float *L, float *R, u
         const float processed = static_cast<float>(lowSide * S.lowW + midSide * S.midW + highSide * S.highW);
         L[i] = mid + processed;
         R[i] = mid - processed;
+      }
     }
 }
 
@@ -320,7 +356,17 @@ void runHarsh(DeShared &S, const float *p, double rate, float *L, float *R, uint
         S.harshParked = 0;
     }
     const float target = enabled ? 1.0f : 0.0f;
-    for (uint32_t i = 0; i < frames; ++i) {
+    const bool bulk = allFinite(L, R, frames);
+    simd::f32x4 xs[kImgChunk];
+    const float sc[5] = {S.shelf.b0, S.shelf.b1, S.shelf.b2, S.shelf.a1, S.shelf.a2};
+    for (uint32_t base = 0; base < frames; base += kImgChunk) {
+      const uint32_t cn = std::min(kImgChunk, frames - base);
+      if (bulk) {
+        for (uint32_t j = 0; j < cn; ++j) xs[j] = simd::make4(L[base + j], R[base + j], 0.0f, 0.0f);
+        simd::biquadPairF(sc, S.shelfL.z1, S.shelfL.z2, S.shelfR.z1, S.shelfR.z2, xs, cn);
+      }
+      for (uint32_t j = 0; j < cn; ++j) {
+        const uint32_t i = base + j;
         const float dryL = L[i];
         const float dryR = R[i];
         if (!std::isfinite(dryL) || !std::isfinite(dryR)) {
@@ -328,8 +374,8 @@ void runHarsh(DeShared &S, const float *p, double rate, float *L, float *R, uint
             L[i] = R[i] = 0.0f;
             continue;
         }
-        const float wetL = runBq(S.shelf, S.shelfL, dryL);
-        const float wetR = runBq(S.shelf, S.shelfR, dryR);
+        const float wetL = bulk ? simd::lane(xs[j], 0) : runBq(S.shelf, S.shelfL, dryL);
+        const float wetR = bulk ? simd::lane(xs[j], 1) : runBq(S.shelf, S.shelfR, dryR);
         S.harshMix = smoothToward(S.harshMix, target, S.bypassCoef);
         if (!enabled && nearZero(S.harshMix)) {
             S.harshMix = 0.0f;
@@ -339,6 +385,7 @@ void runHarsh(DeShared &S, const float *p, double rate, float *L, float *R, uint
         }
         L[i] = dryL + (wetL - dryL) * S.harshMix;
         R[i] = dryR + (wetR - dryR) * S.harshMix;
+      }
     }
 }
 
@@ -380,7 +427,19 @@ void runEss(DeShared &S, const float *p, double rate, float *L, float *R, uint32
     const float range = p[kEssRange];
     const bool dynEq = p[kEssDynEq] > 0.5f;
     float grMax = 0.0f;
-    for (uint32_t i = 0; i < frames; ++i) {
+    const bool bulk = allFinite(L, R, frames);
+    simd::f32x4 xs[kImgChunk];
+    const float hpc[5] = {S.hp.b0, S.hp.b1, S.hp.b2, S.hp.a1, S.hp.a2}, lpc[5] = {S.lp.b0, S.lp.b1, S.lp.b2, S.lp.a1, S.lp.a2};
+    bool parked = false;
+    for (uint32_t base = 0; base < frames && !parked; base += kImgChunk) {
+      const uint32_t cn = std::min(kImgChunk, frames - base);
+      if (bulk) {  // the band-pass side chain of both channels, a chunk at a time
+        for (uint32_t j = 0; j < cn; ++j) xs[j] = simd::make4(L[base + j], R[base + j], 0.0f, 0.0f);
+        simd::biquadPairF(hpc, S.hpL.z1, S.hpL.z2, S.hpR.z1, S.hpR.z2, xs, cn);
+        simd::biquadPairF(lpc, S.lpL.z1, S.lpL.z2, S.lpR.z1, S.lpR.z2, xs, cn);
+      }
+      for (uint32_t j = 0; j < cn; ++j) {
+        const uint32_t i = base + j;
         const float dryL = L[i];
         const float dryR = R[i];
         if (!std::isfinite(dryL) || !std::isfinite(dryR)) {
@@ -388,10 +447,16 @@ void runEss(DeShared &S, const float *p, double rate, float *L, float *R, uint32
             L[i] = R[i] = 0.0f;
             continue;
         }
-        float bandL = runBq(S.hp, S.hpL, dryL);
-        bandL = runBq(S.lp, S.lpL, bandL);
-        float bandR = runBq(S.hp, S.hpR, dryR);
-        bandR = runBq(S.lp, S.lpR, bandR);
+        float bandL, bandR;
+        if (bulk) {
+            bandL = simd::lane(xs[j], 0);
+            bandR = simd::lane(xs[j], 1);
+        } else {
+            bandL = runBq(S.hp, S.hpL, dryL);
+            bandL = runBq(S.lp, S.lpL, bandL);
+            bandR = runBq(S.hp, S.hpR, dryR);
+            bandR = runBq(S.lp, S.lpR, bandR);
+        }
         const float detector = std::fmax(std::fabs(bandL), std::fabs(bandR));
         if (detector != S.lastDetector) {  // G13: the log is recomputed only when the detector moved (same value as before)
             S.lastDetector = detector;
@@ -405,6 +470,7 @@ void runEss(DeShared &S, const float *p, double rate, float *L, float *R, uint32
             S.essGainDb = 0.0f;
             clearEssState(S);
             S.essParked = 1;
+            parked = true;
             break;
         }
         if (S.essGainDb != S.lastGainDb) {  // the pow is recomputed only when the smoothed gain moved
@@ -421,6 +487,7 @@ void runEss(DeShared &S, const float *p, double rate, float *L, float *R, uint32
         }
         const float gr = std::fmax(0.0f, -S.essGainDb);
         grMax = gr > grMax ? gr : grMax;
+      }
     }
     S.grNowBits.store(floatToBits(std::fmax(0.0f, -S.essGainDb)), std::memory_order_relaxed);
     atomicMaxFloat(S.grMaxBits, grMax);
