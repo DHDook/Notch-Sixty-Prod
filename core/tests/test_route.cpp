@@ -527,11 +527,14 @@ static uint64_t bassHash(double rate, int variant) {
 }
 
 // Captured from the ABI v16 build before the filter-spec change: the default (no trailer) arithmetic is unchanged.
+// E20 S10 part 3: nine entries (variant 0 at 176.4k, 352.8k, 384k; variant 1 at 48k, 88.2k, 176.4k, 192k, 352.8k, 384k)
+// were regenerated when the split cascades moved to single-rounded fma lane pairs (simd::biquadPair); the output
+// differs from the contracted-multiply-add code only by rounding (about -156 dBFS), the other seven are unchanged.
 static const uint64_t kGolden[2][8] = {
     {0xc4a925243020e7c8ull, 0xb30e078a0e7171b6ull, 0x15734a5bbca86e5eull, 0x60eb22616da797ddull,
-     0x51d43ea7a05f505dull, 0xf0e291f851957e38ull, 0x935b0b879aba3f7eull, 0xdad13e2d922410e5ull},
-    {0x3395c9007bfa755aull, 0x98aed1fb12857ce0ull, 0x0b486e3c2c8b29bcull, 0x333fec4051695c9cull,
-     0xda2b1872918fb701ull, 0xc466961f3523f718ull, 0x0a205a547c2cfb67ull, 0x9a5daf8102331b90ull},
+     0xd79df62b01bec338ull, 0xf0e291f851957e38ull, 0x1fb7bfedc1c37b56ull, 0xedd20ef263542424ull},
+    {0x3395c9007bfa755aull, 0xa5bab687774f1d3bull, 0x908c98bb53bd86c6ull, 0x333fec4051695c9cull,
+     0x2c591d467e7ae741ull, 0xd0c0c3728384459full, 0x6b504d9b3406699full, 0xd91fe63bd773afd2ull},
 };
 
 static void testBassDefaultUnchanged() {
