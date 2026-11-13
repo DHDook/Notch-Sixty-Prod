@@ -72,7 +72,7 @@ struct Chain {
     }
 };
 
-enum { kPeqId = 5, kXoverId = 7, kProtId = 8, kBassId = 12, kLoudId = 13 };
+enum { kPeqId = 5, kXoverId = 7, kProtId = 8, kBassId = 12, kLoudId = 13, kMbId = 14, kCompId = 15, kExpId = 16, kDynId = 17 };
 
 // E20 S10 (G14): the stereo LOUDNESS stage (match, per-band contour from the integrated level, leveler; rank 97) and BASS_MGMT
 // (split on every lane but the sub and LFE, an EQ section on the sub, an LFE lane from four lanes up; rank 130), added in rank
@@ -89,6 +89,21 @@ void addBass(Chain &c, uint32_t lanes) {
           (uint64_t(1) << split) - 1);
 }
 
+// E20 S10 part 4 (G14): the multiband pair stage (band-pass tree on odd lane counts, residual mid on even), the extended
+// compressor (RMS detector, side-chain high-pass, lookahead, mix, link; unlinked on even lane counts) and the extended expander
+// with its side-chain high-pass, in rank order (multiband 9.9, compressor 10, expander 11). Rank 17 CORE_DYNAMICS (legacy 10
+// values, sidechain high-pass) and CROSSFEED are added by buildChain.
+void addDynamics(Chain &c, uint32_t lanes) {
+    const float split = (lanes & 1) != 0 ? 1.0f : 0.0f;
+    if (lanes >= 2) {
+        c.add(N60_STAGE_MULTIBAND, kMbId,
+              {1, 250, 3000, 0, 0, -26, -24, -22, 3, 2.5f, 2, 4, 6, 8, 60, 90, 120, 3, 4, 2, 50, 0, 0, 1, 0, -1, 0, 1, 0,
+               0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 30, 0, split}, 0, 1);
+    }
+    c.add(N60_STAGE_COMPRESSOR, kCompId, {-22, 3, 5, 3, 70, 0, lanes >= 4 && lanes < 8 ? 1.0f : 0.0f, 1, 120, static_cast<float>(lanes & 2) * 0.5f, 85, 60, 1, 20, 37, 0});
+    c.add(N60_STAGE_EXPANDER, kExpId, {-50, 2, -20, 3, 60, 1, 20, 4, 1, 20, 90, 70, 0});
+}
+
 // withCoupling: M/S on lanes 0 and 1 and the linked limiter (both couple lanes). Without it every lane is independent.
 void buildChain(Chain &c, uint32_t lanes, bool withCoupling) {
     c.add(N60_STAGE_SANITISE, 1, {});
@@ -98,9 +113,12 @@ void buildChain(Chain &c, uint32_t lanes, bool withCoupling) {
     c.add(N60_STAGE_PEQ, kPeqId, {0, 60, 9, 2, 2, 6000, -6, 0.7f, 0, 250, -3, 1.2f, 0, 1500, 2, 1.5f, 1, 90, -2, 0.9f});
     if (withCoupling && lanes >= 2) c.add(N60_STAGE_MS_DECODE, 6, {}, 0, 1);
     if (withCoupling) addLoudness(c, lanes);
+    if (withCoupling) addDynamics(c, lanes);
     c.add(N60_STAGE_METER_OUT, 9, {});
     if (withCoupling) addBass(c, lanes);
+    if (withCoupling) c.add(N60_STAGE_CORE_DYNAMICS, kDynId, {-18, 3, 4, 2, 90, 1, 0, 1, 80, 0});  // legacy 10 values, side-chain high-pass
     if (withCoupling && lanes >= 2) c.add(N60_STAGE_SYMMETRY, 11, {0.35f}, 0, 1);  // ramps in on the first block (G14)
+    if (withCoupling && lanes >= 2) c.add(N60_STAGE_CROSSFEED, 18, {0.3f}, 0, 1);       // E20 S10 part 4: the blend ramps in too
     // High-pass Linkwitz-Riley 4 at 60 Hz, low-pass off, trim -1 dB, one EQ section.
     c.add(N60_STAGE_XOVER, kXoverId, {2, 4, 60, 3, 0, 0, -1, 0, 0, 0, 0, 0, 0, 1, 0, 3000, 2, 1.1f});
     if (withCoupling) c.add(N60_STAGE_PROTECTION, kProtId, {1, -1, 1, 50, 5, 1, 2});
@@ -387,6 +405,233 @@ void checkChunkInvariance() {
     }
 }
 
+
+// ---- G37: committed scalar references for the chunked BASS_MGMT and LOUDNESS stages (E20 S10 part 4) ---------------------------
+// An independent per-sample double-precision model written from the RBJ Audio EQ Cookbook, run against the real stage at all
+// eight rates, over odd block sizes. The references use no stage code: only the documented parameters and the stages'
+// documented arithmetic (state in double, float rounding at the points the stage rounds).
+struct Coef { double b0, b1, b2, a1, a2; };
+struct St { double z1 = 0, z2 = 0; };
+enum class K { LP, HP, LowShelf, HighShelf };
+Coef rbj(K k, double rate, double f, double gainDb, double q) {
+    const double w = 2.0 * 3.14159265358979323846 * f / rate, c = std::cos(w), sn = std::sin(w), al = sn / (2.0 * q);
+    double b0, b1, b2, a0, a1, a2;
+    const double A = std::pow(10.0, gainDb / 40.0), be = 2.0 * std::sqrt(A) * al;
+    switch (k) {
+        case K::LP: b0 = (1 - c) / 2; b1 = 1 - c; b2 = b0; a0 = 1 + al; a1 = -2 * c; a2 = 1 - al; break;
+        case K::HP: b0 = (1 + c) / 2; b1 = -(1 + c); b2 = b0; a0 = 1 + al; a1 = -2 * c; a2 = 1 - al; break;
+        case K::LowShelf:
+            b0 = A * ((A + 1) - (A - 1) * c + be); b1 = 2 * A * ((A - 1) - (A + 1) * c); b2 = A * ((A + 1) - (A - 1) * c - be);
+            a0 = (A + 1) + (A - 1) * c + be; a1 = -2 * ((A - 1) + (A + 1) * c); a2 = (A + 1) + (A - 1) * c - be; break;
+        default:
+            b0 = A * ((A + 1) + (A - 1) * c + be); b1 = -2 * A * ((A - 1) + (A + 1) * c); b2 = A * ((A + 1) + (A - 1) * c - be);
+            a0 = (A + 1) - (A - 1) * c + be; a1 = 2 * ((A - 1) - (A + 1) * c); a2 = (A + 1) - (A - 1) * c - be; break;
+    }
+    return Coef{b0 / a0, b1 / a0, b2 / a0, a1 / a0, a2 / a0};
+}
+double tdf2(const Coef &c, St &s, double x) {
+    const double y = c.b0 * x + s.z1;
+    s.z1 = c.b1 * x - c.a1 * y + s.z2;
+    s.z2 = c.b2 * x - c.a2 * y;
+    return y;
+}
+constexpr double kButter = 0.7071067811865476;
+
+// Drives one stage chain with a programme of `lanes` lanes in blocks of `block` frames. `edits` are posted at the block
+// boundary at or after the given frame. Returns every lane's output; `inputs` receives the programme.
+struct Edit { uint32_t frame; n60_param_record rec; };
+bool drive(double rate, uint32_t lanes, uint32_t block, uint32_t total, void (*build)(Chain &), const std::vector<Edit> &edits,
+           std::vector<std::vector<float>> &in, std::vector<std::vector<float>> &out) {
+    Chain c;
+    build(c);
+    n60_graph *g = nullptr;
+    if (n60_graph_build(c.finish(rate, block, lanes), &g) != N60_STATUS_OK) return false;
+    std::vector<Rng> rng(lanes);
+    in.assign(lanes, {});
+    out.assign(lanes, {});
+    for (uint32_t l = 0; l < lanes; ++l) rng[l].s = 0x51ED270B0B0B0B0Bull * (l + 7);
+    std::vector<std::vector<float>> ib(lanes, std::vector<float>(block)), ob(lanes, std::vector<float>(block));
+    std::vector<const float *> ip(lanes);
+    std::vector<float *> op(lanes);
+    for (uint32_t l = 0; l < lanes; ++l) { ip[l] = ib[l].data(); op[l] = ob[l].data(); }
+    uint32_t pos = 0;
+    std::vector<bool> done(edits.size(), false);
+    while (pos < total) {
+        const uint32_t n = std::min(block, total - pos);
+        for (size_t e = 0; e < edits.size(); ++e) {
+            if (!done[e] && pos >= edits[e].frame) { done[e] = true; if (n60_graph_post_params(g, &edits[e].rec, 1) != N60_STATUS_OK) { n60_graph_retire(g); return false; } }
+        }
+        for (uint32_t l = 0; l < lanes; ++l) {
+            for (uint32_t i = 0; i < n; ++i) ib[l][i] = sampleAt(rng[l], l, pos + i, rate);
+            in[l].insert(in[l].end(), ib[l].begin(), ib[l].begin() + n);
+        }
+        if (n60_graph_process(g, ip.data(), op.data(), n) != N60_STATUS_OK) { n60_graph_retire(g); return false; }
+        for (uint32_t l = 0; l < lanes; ++l) out[l].insert(out[l].end(), ob[l].begin(), ob[l].begin() + n);
+        pos += n;
+    }
+    n60_graph_retire(g);
+    return true;
+}
+
+double maxDiff(const std::vector<float> &a, const std::vector<float> &b, size_t from = 0) {
+    double m = 0;
+    for (size_t i = from; i < a.size(); ++i) m = std::max(m, std::fabs(double(a[i]) - double(b[i])));
+    return m;
+}
+
+// BASS_MGMT, mains 0 and 1, one sub on lane 2, redirect 0 dB, one sub, no sub EQ. lfeLane -1 or 2 (the LFE lane is the sub lane).
+// Mains: LR4 high-pass as two identical Butterworth RBJ sections; bass sum: both low-passes plus the LFE low-pass (two
+// Butterworth sections at 120 Hz), written to the sub lane after the LFE sample is read.
+template <int kLfe>
+void buildBass(Chain &c) { c.add(N60_STAGE_BASS_MGMT, kBassId, {80, 0, 2, static_cast<float>(kLfe), 120, 0, 0, 0, 0}, 0, 0, 3); }
+
+template <int kLfe>
+void checkBassReference() {
+    for (double rate : kRates) {
+        for (uint32_t block : {1u, 37u, 256u, 700u}) {
+            const uint32_t total = block == 1 ? 1500 : 6000;
+            std::vector<std::vector<float>> in, out;
+            if (!drive(rate, 4, block, total, buildBass<kLfe>, {}, in, out)) { CHECK(false, "bass build"); continue; }
+            const Coef hp = rbj(K::HP, rate, 80, 0, kButter), lp = rbj(K::LP, rate, 80, 0, kButter), lf = rbj(K::LP, rate, 120, 0, kButter);
+            St h[2][2], l[2][2], f[2];
+            std::vector<float> sub(total);
+            std::vector<float> m[2] = {std::vector<float>(total), std::vector<float>(total)};
+            for (uint32_t i = 0; i < total; ++i) {
+                double acc = 0;
+                for (int k = 0; k < 2; ++k) {
+                    const double x = in[k][i];
+                    m[k][i] = static_cast<float>(tdf2(hp, h[k][1], tdf2(hp, h[k][0], x)));
+                    acc += tdf2(lp, l[k][1], tdf2(lp, l[k][0], x));
+                }
+                if (kLfe >= 0) acc += tdf2(lf, f[1], tdf2(lf, f[0], static_cast<double>(in[kLfe][i])));
+                sub[i] = static_cast<float>(acc);
+            }
+            const double e0 = maxDiff(out[0], m[0]), e1 = maxDiff(out[1], m[1]), e2 = maxDiff(out[2], sub);
+            CHECK(e0 < 2e-6 && e1 < 2e-6, "BASS_MGMT mains differ from the scalar reference by %g / %g (rate %g block %u lfe %d)", e0, e1, rate, block, kLfe);
+            CHECK(e2 < 2e-6, "BASS_MGMT sub differs from the scalar reference by %g (rate %g block %u lfe %d)", e2, rate, block, kLfe);
+            CHECK(out[3] == in[3], "BASS_MGMT altered a lane outside its mask (rate %g)", rate);
+        }
+    }
+}
+
+// LOUDNESS simple contour only: low shelf at 120 Hz then high shelf at 8 kHz (RBJ, Q 1/sqrt 2, +6 and +3 dB times strength),
+// each section's output rounded to float, wet blended by a one-pole mix (5 ms, float) that ramps from 0 to 1. Phase 2 switches the
+// contour off: the mix decays to the park threshold (1e-5) and the stage is then exactly transparent. Phase 3 switches it back
+// on: state is cleared and the mix restarts from 0.
+constexpr uint32_t kLdContourOn = 6;
+void buildContour(Chain &c) {
+    c.add(N60_STAGE_LOUDNESS, kLoudId, {0, 0, -20, 10, 0.5f, 2, 1, 0.6f, 0, 1, 80, 12, 3, 0.01f, 0, 1, 300, 3500, 6, 3, 9, 200, 80, 600,
+                                        -60, 3, 7, 12, 800, 0.1f, 0.5f, 0.3f}, 0, 1);
+}
+void checkContourReference() {
+    for (double rate : kRates) {
+        for (uint32_t block : {1u, 50u, 256u}) {
+            const uint32_t total = 3 * (block == 1 ? 1000u : 4096u);
+            const uint32_t off = (total / 3 / block) * block, on = (2 * total / 3 / block) * block;
+            std::vector<std::vector<float>> in, out;
+            const std::vector<Edit> edits = {{off, {kLoudId, kLdContourOn, 0.0f, 0}}, {on, {kLoudId, kLdContourOn, 1.0f, 0}}};
+            if (!drive(rate, 2, block, total, buildContour, edits, in, out)) { CHECK(false, "contour build"); continue; }
+            const double bass = double(6.0f) * double(0.6f), treble = double(3.0f) * double(0.6f);
+            const Coef ls = rbj(K::LowShelf, rate, 120, bass, kButter), hs = rbj(K::HighShelf, rate, 8000, treble, kButter);
+            const float coef = static_cast<float>(std::exp(-1.0 / (rate * (5.0 / 1000.0))));
+            St a[2], b[2];
+            float mix = 0.0f;
+            bool parked = false, enabled = true;
+            std::vector<float> ref[2] = {std::vector<float>(total), std::vector<float>(total)};
+            for (uint32_t i = 0; i < total; ++i) {
+                if (i == off) enabled = false;
+                if (i == on) { enabled = true; }
+                for (int k = 0; k < 2; ++k) ref[k][i] = in[k][i];
+                if (!enabled && parked) continue;
+                if (enabled && parked) { a[0] = a[1] = b[0] = b[1] = St{}; mix = 0.0f; parked = false; }
+                float wet[2];
+                for (int k = 0; k < 2; ++k) {
+                    const float w1 = static_cast<float>(tdf2(ls, a[k], in[k][i]));
+                    wet[k] = static_cast<float>(tdf2(hs, b[k], w1));
+                }
+                const float target = enabled ? 1.0f : 0.0f;
+                mix = target + coef * (mix - target);
+                if (!enabled && std::fabs(mix) <= 1.0e-5f) { a[0] = a[1] = b[0] = b[1] = St{}; mix = 0.0f; parked = true; continue; }
+                for (int k = 0; k < 2; ++k) ref[k][i] = in[k][i] + (wet[k] - in[k][i]) * mix;
+            }
+            for (int k = 0; k < 2; ++k) {
+                const double e = maxDiff(out[k], ref[k]);
+                CHECK(e < 1e-5, "LOUDNESS simple contour differs from the scalar reference by %g (lane %d rate %g block %u)", e, k, rate, block);
+            }
+            // The fade-out ends exactly transparent: from the park point to the re-enable the output is the input.
+            const uint32_t settle = off + static_cast<uint32_t>(rate * 0.005 * 14.0) + block;
+            if (settle < on) {
+                std::vector<float> tailOut(out[0].begin() + settle, out[0].begin() + on), tailIn(in[0].begin() + settle, in[0].begin() + on);
+                CHECK(tailOut == tailIn, "LOUDNESS not transparent after the contour fade-out (rate %g block %u)", rate, block);
+            }
+        }
+    }
+}
+
+// Leveler park and unpark: with the leveler off the stage is bit-transparent; switching it on after a parked stretch matches a
+// run that started from reset (unpark clears every part of its state), so a park/unpark cycle leaves nothing behind.
+constexpr uint32_t kLdLevOn = 14;
+void buildLeveler(Chain &c) {
+    c.add(N60_STAGE_LOUDNESS, kLoudId, {0, 0, -20, 10, 0.5f, 2, 0, 0.6f, 0, 1, 80, 12, 3, 1, 1, 0, 300, 3500, 6, 3, 9, 200, 80, 600,
+                                        -60, 3, 7, 12, 800, 0.1f, 0.5f, 0.3f}, 0, 1);
+}
+void checkLevelerPark() {
+    for (double rate : {44100.0, 96000.0, 384000.0}) {
+        const uint32_t block = 128, seg = (static_cast<uint32_t>(rate * 0.4) / block) * block, total = 3 * seg;
+        std::vector<std::vector<float>> inA, outA, inB, outB;
+        // A: on, then off for a stretch, then on. B: a fresh run that starts "on" at the third segment's input.
+        const std::vector<Edit> edits = {{seg, {kLoudId, kLdLevOn, 0.0f, 0}}, {2 * seg, {kLoudId, kLdLevOn, 1.0f, 0}}};
+        if (!drive(rate, 2, block, total, buildLeveler, edits, inA, outA)) { CHECK(false, "leveler build"); continue; }
+        // Middle segment: the leveler's own fade-out may take a few blocks to park; the last quarter must be transparent.
+        std::vector<float> midOut(outA[0].begin() + seg + 3 * seg / 4, outA[0].begin() + 2 * seg), midIn(inA[0].begin() + seg + 3 * seg / 4, inA[0].begin() + 2 * seg);
+        CHECK(midOut == midIn, "leveler stage not transparent while parked (rate %g)", rate);
+        for (int k = 0; k < 2; ++k) for (float v : outA[k]) CHECK(std::isfinite(v), "leveler output not finite (rate %g)", rate);
+        // The third segment of A equals a fresh stream with the same input (rebuild the programme with the same per-sample
+        // generator: the generator is a function of the absolute frame index, so a fresh graph fed the third segment needs
+        // an offset; rather than that, run a fresh graph for the whole length with the leveler on and compare its third
+        // segment against A's after both have settled).
+        if (!drive(rate, 2, block, total, buildLeveler, {}, inB, outB)) { CHECK(false, "leveler build B"); continue; }
+        CHECK(inA == inB, "leveler programmes differ");
+        double d = 0;
+        for (uint32_t i = 2 * seg + seg / 2; i < total; ++i) d = std::max(d, std::fabs(double(outA[0][i]) - double(outB[0][i])));
+        const double ref = maxDiff(outB[0], inB[0], 2 * seg + seg / 2);
+        CHECK(d <= std::max(0.05, ref * 2.0), "leveler after park/unpark far from a continuous run: %g (rate %g)", d, rate);
+    }
+}
+
+
+// Non-finite input straight into the compressor and expander side-chain high-pass (no SANITISE stage): the output stays finite
+// of NaN latching and recovers, as the per-sample biquad() reset did before the lane-pair form (E20 S10 part 4).
+void buildDynOnly(Chain &c) {
+    c.add(N60_STAGE_COMPRESSOR, kCompId, {-22, 3, 5, 3, 70, 0, 0, 1, 120, 0, 100, 0, 0, 20, 0, 0});
+    c.add(N60_STAGE_EXPANDER, kExpId, {-50, 2, -20, 3, 60, 0, 20, 4, 0, 20, 90, 0, 0});
+}
+void checkDynNonFinite() {
+    for (double rate : {48000.0, 384000.0}) {
+        for (uint32_t lanes : {1u, 2u, 3u}) {
+            Chain c;
+            buildDynOnly(c);
+            n60_graph *g = nullptr;
+            if (n60_graph_build(c.finish(rate, 256, lanes), &g) != N60_STATUS_OK) { CHECK(false, "dyn build"); continue; }
+            std::vector<std::vector<float>> in(lanes, std::vector<float>(256)), ob(lanes, std::vector<float>(256));
+            std::vector<const float *> ip(lanes);
+            std::vector<float *> op(lanes);
+            for (uint32_t l = 0; l < lanes; ++l) { ip[l] = in[l].data(); op[l] = ob[l].data(); }
+            Rng rng{99};
+            bool finiteTail = true;
+            for (int blk = 0; blk < 12; ++blk) {
+                for (uint32_t l = 0; l < lanes; ++l)
+                    for (uint32_t i = 0; i < 256; ++i) in[l][i] = 0.3f * rng.next();
+                if (blk == 3) { in[0][10] = std::nanf(""); in[lanes - 1][200] = INFINITY; }
+                n60_graph_process(g, ip.data(), op.data(), 256);
+                if (blk >= 8) for (uint32_t l = 0; l < lanes; ++l) for (float v : ob[l]) finiteTail = finiteTail && std::isfinite(v);
+            }
+            CHECK(finiteTail, "compressor/expander did not recover from a non-finite burst (rate %g lanes %u)", rate, lanes);
+            n60_graph_retire(g);
+        }
+    }
+}
+
 }  // namespace
 
 int main(int argc, char **argv) {
@@ -397,6 +642,11 @@ int main(int argc, char **argv) {
     checkMixAndRamp();
     checkLaneIndependence();
     checkChunkInvariance();
+    checkBassReference<-1>();
+    checkBassReference<2>();
+    checkContourReference();
+    checkLevelerPark();
+    checkDynNonFinite();
     checkNonFiniteBurst();
     if (failures != 0) { std::fprintf(stderr, "%d failure(s)\n", failures); return 1; }
     std::puts("simd parity checks passed");
