@@ -6,6 +6,8 @@ struct MIMOTreatmentSourceInfo: Equatable, Sendable {
     /// Graph lane: program lanes first, then sub lanes.
     var lane: Int
     var name: String
+    /// E19 S9: for a routed speaker, the names of the ways that play in the default treatment range (design note 10); empty when unrouted.
+    var inBandWays: [String] = []
 }
 
 /// What the Room Treatment screen's controller needs from the engine. `AudioIOEngine` conforms in
@@ -44,6 +46,8 @@ final class MIMOTreatmentController: ObservableObject {
         var included = true
         var supportLowHz = 25.0
         var supportHighHz = 150.0
+        /// Ways of a routed speaker that receive the treatment delta; empty when unrouted. Other ways get exactly zero.
+        var inBandWays: [String] = []
     }
 
     enum DecayTarget: Equatable {
@@ -156,8 +160,11 @@ final class MIMOTreatmentController: ObservableObject {
         let infos = host.treatmentSources().filter { measured.contains($0.source) }.sorted { $0.lane < $1.lane }
         let old = Dictionary(uniqueKeysWithValues: rows.map { ($0.lane, $0) })
         rows = infos.map { info in
-            if let existing = old[info.lane], existing.source == info.source { return existing }
-            return SourceRow(lane: info.lane, source: info.source, name: info.name)
+            if var existing = old[info.lane], existing.source == info.source {
+                existing.inBandWays = info.inBandWays
+                return existing
+            }
+            return SourceRow(lane: info.lane, source: info.source, name: info.name, inBandWays: info.inBandWays)
         }
     }
 

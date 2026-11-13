@@ -39,7 +39,8 @@ extension AudioIOEngine {
             engineLeaseHeld: mimoPollTask != nil,
             videoLatencyMode: mimoVideoLatencyMode,
             outputTrimsDB: (0..<laneCount).map { settings.lane($0).trimDB },
-            laneCount: laneCount)
+            laneCount: laneCount,
+            routedDigest: speakerRoutingConfiguration.map(MIMORoutedTreatmentPlanner.digest(of:)) ?? "")
     }
 
     /// Stages a designed stage for the next start (idle only, like the legacy staging). Never arms.
@@ -63,7 +64,8 @@ extension AudioIOEngine {
     ) -> Result<MIMOGraphTreatment.Permit, MIMOTreatmentPermitRefusal> {
         mimoGraphTreatment.issuePermit(
             context: mimoTreatmentContext(), videoLatency: mimoVideoLatencyInput, verification: verification,
-            acceptance: acceptance, registry: registry)
+            acceptance: acceptance, registry: registry, routed: speakerRoutingConfiguration != nil,
+            inBandWays: speakerRoutingConfiguration.map(MIMORoutedTreatmentPlanner.inBandWayCount(of:)) ?? 1)
     }
 
     func disarmMIMOTreatment() { mimoGraphTreatment.userDisarm() }

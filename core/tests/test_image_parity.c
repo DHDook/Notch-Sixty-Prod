@@ -150,7 +150,11 @@ int main(void) {
             /* E6 S12h (G36): the core widener's crossover biquads are double; the kernel's are float and drift from the
              * exact response at the low corners (measured -35 dB relative error at 352.8 kHz, 80 Hz). With the widener on
              * the difference to the kernel is the kernel's own float error, so the bound is looser (peak -85, rms -95). */
-            const double peakBound = c->wide ? -85.0 : -120.0, rmsBound = c->wide ? -95.0 : -130.0;
+            /* E20 S10 part 5 (G45): the de-harsh and de-esser shelves are float biquads run through the single-rounded fma
+             * pair kernels, so they differ from the kernel's own float rounding by up to about -107 dBFS peak at 384 kHz
+             * (measured; the response is identical). Bound -100 peak, -115 rms for those configs. */
+            const int shelf = c->harsh || c->ess || c2->harsh || c2->ess;
+            const double peakBound = c->wide ? -85.0 : (shelf ? -100.0 : -120.0), rmsBound = c->wide ? -95.0 : (shelf ? -115.0 : -130.0);
             if (!(20 * log10(peak + 1e-30) < peakBound)) { fprintf(stderr, "FAIL peak\n"); failures++; }
             if (!(20 * log10(rms + 1e-30) < rmsBound)) { fprintf(stderr, "FAIL rms\n"); failures++; }
             if (!(grDiff < 0.01)) { fprintf(stderr, "FAIL gain reduction\n"); failures++; }
