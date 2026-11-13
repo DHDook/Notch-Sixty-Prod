@@ -429,6 +429,7 @@ final class CoreAudioNChannelTransportSession {
     /// `ancLock`). `republishGraph` re-applies the stage, so engine edits that rebuild the configuration keep it and its
     /// live arm words; only `applyMIMOStage` changes them.
     private var mimoStage: UnifiedGraphMIMOStage?
+    private var mimoReadbackHold: n60_mimo_readback?
     private var lastGraphConfiguration: UnifiedGraphConfiguration?
     private var ancManualTrips: UInt64 = 0
     /// A revoke disarmed the feed but its graph publish failed, so the record still says authorised (under `ancLock`).
@@ -1088,7 +1089,30 @@ final class CoreAudioNChannelTransportSession {
     func mimoReadback() -> n60_mimo_readback? {
         ancLock.lock(); let attached = mimoStage != nil; ancLock.unlock()
         guard attached else { return nil }
-        return unifiedGraphReadback?.mimoReadback(stageId: UnifiedGraphMIMOStage.stageId)
+        guard let read = unifiedGraphReadback?.mimoReadback(stageId: UnifiedGraphMIMOStage.stageId) else { return nil }
+        // E19 S8 (G27): the 250 ms poll consumes the reset fields, so the screen reads this held copy instead: the worst
+        // ratio and peak fields keep their maximum until the stage is off again.
+        ancLock.lock()
+        defer { ancLock.unlock() }
+        var held = read
+        if read.state != 0, let previous = mimoReadbackHold, previous.state != 0 {
+            held.boundRatioMax = n60_mimo_readback.maxMerged(read.boundRatioMax, previous.boundRatioMax)
+            held.deltaPeak = n60_mimo_readback.maxMerged(read.deltaPeak, previous.deltaPeak)
+        }
+        mimoReadbackHold = held
+        return read
+    }
+
+    /// E19 S8 (G27): the last readback with max-held ratio and peak fields; reading it resets nothing.
+    func peekMIMOReadback() -> n60_mimo_readback? {
+        ancLock.lock(); defer { ancLock.unlock() }
+        return mimoReadbackHold
+    }
+
+    /// The graph configuration last published (control plane): the headroom model and the chain digest read it.
+    var publishedGraphConfiguration: UnifiedGraphConfiguration? {
+        ancLock.lock(); defer { ancLock.unlock() }
+        return lastGraphConfiguration
     }
 
     /// True when the running graph carries the MIMO stage (the arm gate "stage attached").

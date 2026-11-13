@@ -258,6 +258,46 @@ inline void biquadPair(const double *c, double &a1z, double &a2z, double *b1z, d
     }
 }
 
+// Two independent biquads with their own coefficients, one per f64x2 element (E20 S10 part 5: the image widener's low-pass and
+// high-pass side chains). ca and cb are {b0, b1, b2, a1, a2}; x[i] holds the input of A in element 0 and of B in element 1;
+// state (a1z, a2z) is A's, (b1z, b2z) is B's. Each element's arithmetic is the fused form of biquadPair, so a run does not
+// depend on n or on the build. x is overwritten with the output.
+inline void biquadDual(const double *ca, const double *cb, double &a1z, double &a2z, double &b1z, double &b2z, f64x2 *x, uint32_t n) {
+    const f64x2 b0 = pair(ca[0], cb[0]), b1 = pair(ca[1], cb[1]), b2 = pair(ca[2], cb[2]);
+    const f64x2 na1 = pair(-ca[3], -cb[3]), na2 = pair(-ca[4], -cb[4]);
+    f64x2 z1 = pair(a1z, b1z), z2 = pair(a2z, b2z);
+    for (uint32_t i = 0; i < n; ++i) {
+        const f64x2 xi = x[i];
+        const f64x2 y = fma(b0, xi, z1);
+        z1 = fma(na1, y, fma(b1, xi, z2));
+        z2 = fma(na2, y, mul(b2, xi));
+        x[i] = y;
+    }
+    a1z = lane(z1, 0);
+    a2z = lane(z2, 0);
+    b1z = lane(z1, 1);
+    b2z = lane(z2, 1);
+}
+
+// One float transposed direct form II biquad for a channel pair (elements 0 and 1 of an f32x4; elements 2 and 3 are unused
+// and stay zero), the float-state stages (image harsh, de-esser). c = {b0, b1, b2, a1, a2}; each channel's arithmetic is the
+// fused single-channel form, independent of n and the build. x is overwritten with the output.
+inline void biquadPairF(const float *c, float &a1z, float &a2z, float &b1z, float &b2z, f32x4 *x, uint32_t n) {
+    const f32x4 b0 = splat4(c[0]), b1 = splat4(c[1]), b2 = splat4(c[2]), na1 = splat4(-c[3]), na2 = splat4(-c[4]);
+    f32x4 z1 = make4(a1z, b1z, 0.0f, 0.0f), z2 = make4(a2z, b2z, 0.0f, 0.0f);
+    for (uint32_t i = 0; i < n; ++i) {
+        const f32x4 xi = x[i];
+        const f32x4 y = fma(b0, xi, z1);
+        z1 = fma(na1, y, fma(b1, xi, z2));
+        z2 = fma(na2, y, mul(b2, xi));
+        x[i] = y;
+    }
+    a1z = lane(z1, 0);
+    a2z = lane(z2, 0);
+    b1z = lane(z1, 1);
+    b2z = lane(z2, 1);
+}
+
 }  // namespace n60::simd
 
 #endif

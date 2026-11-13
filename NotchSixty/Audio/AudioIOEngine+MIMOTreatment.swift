@@ -4,7 +4,7 @@ import Foundation
 /// context (running, output, rate, stage attached, hard limit, lease, video mode, per-output trims), attaches the staged
 /// stage to a new graph, keeps a control-plane poll running (the lease of design note 8: the treatment is armed only while
 /// the poll runs) and forwards teardown causes. Nothing here arms: `requestMIMOTreatmentArm` is the user action, called by
-/// the E19 S8 UI; the realtime path is untouched.
+/// the E19 S8 screen (`MIMOTreatmentController`); the realtime path is untouched.
 extension AudioIOEngine {
     static let mimoPollNanoseconds: UInt64 = 250_000_000
 
@@ -26,6 +26,7 @@ extension AudioIOEngine {
 
     /// The facts the controller decides on, read on the main actor.
     func mimoTreatmentContext() -> MIMOGraphTreatment.Context {
+        refreshMIMOVideoLatencyInput()
         let session = nChannelTransportSession
         let laneCount = session.map { $0.routePlan.programLayout.roles.count + Int($0.routePlan.subwooferCount) } ?? 0
         let settings = dynamicsConfiguration.outputProtection ?? OutputProtectionSettings()
@@ -38,7 +39,8 @@ extension AudioIOEngine {
             engineLeaseHeld: mimoPollTask != nil,
             videoLatencyMode: mimoVideoLatencyMode,
             outputTrimsDB: (0..<laneCount).map { settings.lane($0).trimDB },
-            laneCount: laneCount)
+            laneCount: laneCount,
+            routedDigest: speakerRoutingConfiguration.map(MIMORoutedTreatmentPlanner.digest(of:)) ?? "")
     }
 
     /// Stages a designed stage for the next start (idle only, like the legacy staging). Never arms.
@@ -53,8 +55,8 @@ extension AudioIOEngine {
     }
 
     /// E19 S7: verifies and issues (or refuses) the permit for the staged design against the engine's own context. The video
-    /// latency input is `mimoVideoLatencyInput`, `.unknown` until E19 S8 wires the latency mode, so no permit is issued before
-    /// then; the qualification table is empty until E22 files bench records. Never arms.
+    /// latency input is `mimoVideoLatencyInput`, read from the installed room correction (E19 S8, G30); the qualification table
+    /// is empty until E22 files bench records, so production issues no permit before then. Never arms.
     @discardableResult
     func issueMIMOTreatmentPermit(
         verification: MIMOTreatmentVerificationResult?, acceptance: MIMORoomTreatmentHardwareAcceptance?,
@@ -62,7 +64,8 @@ extension AudioIOEngine {
     ) -> Result<MIMOGraphTreatment.Permit, MIMOTreatmentPermitRefusal> {
         mimoGraphTreatment.issuePermit(
             context: mimoTreatmentContext(), videoLatency: mimoVideoLatencyInput, verification: verification,
-            acceptance: acceptance, registry: registry)
+            acceptance: acceptance, registry: registry, routed: speakerRoutingConfiguration != nil,
+            inBandWays: speakerRoutingConfiguration.map(MIMORoutedTreatmentPlanner.inBandWayCount(of:)) ?? 1)
     }
 
     func disarmMIMOTreatment() { mimoGraphTreatment.userDisarm() }
