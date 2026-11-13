@@ -248,6 +248,8 @@ struct ProductionActiveAcousticsWorkspace: View {
     @ObservedObject var feedForwardShadow: QuietZoneFeedForwardShadow
     /// E4 S25: nil unless `e4.feedforward-live` is on.
     var feedForwardArming: FeedForwardLiveArmingController?
+    /// E19 S8: the Room Treatment controls, shown only behind `e19.mimo-treatment`.
+    var mimoTreatment: MIMOTreatmentController?
     @ObservedObject var microphone: RoomCorrectionCalibrationController
     @ObservedObject var projects: RoomCorrectionProjectController
 
@@ -1719,6 +1721,9 @@ struct ProductionActiveAcousticsWorkspace: View {
 
     private var roomTreatment: some View {
         VStack(alignment: .leading, spacing: 16) {
+            if let mimoTreatment, mimoTreatment.isAvailable {
+                ProductionMIMOTreatmentSection(controller: mimoTreatment)
+            }
             roomTreatmentStatusCard
 
             LazyVGrid(
@@ -1784,7 +1789,9 @@ struct ProductionActiveAcousticsWorkspace: View {
             .glassEffect(.regular, in: .rect(cornerRadius: 18))
 
             safetyNote(
-                "PR78 intentionally exposes status only. Room Treatment has no Arm, Bypass, or Stage control in the production UI until the real-hardware acceptance workflow is completed."
+                mimoTreatment?.isAvailable == true
+                    ? "Room Treatment is off until you arm it, and arming needs a permit. Without a hardware acceptance or bench qualification no permit is issued."
+                    : "PR78 intentionally exposes status only. Room Treatment has no Arm, Bypass, or Stage control in the production UI until the real-hardware acceptance workflow is completed."
             )
         }
     }
