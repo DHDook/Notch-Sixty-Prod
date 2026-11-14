@@ -845,7 +845,7 @@ void runDynEq(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) 
     // reads the filtered values, not state). Scratch: 3 x 32 x lanes floats on the stack (24 KB at 64 lanes, G39 limit 64 KB).
     constexpr uint32_t kDqChunk = 32;
     static_assert(3 * kDqChunk * kMaxLanes * sizeof(float) <= 24 * 1024, "dynamic EQ chunk scratch stays small on the stack");
-    float aY[kMaxLanes][kDqChunk], pY[kMaxLanes][kDqChunk], sY[kMaxLanes][kDqChunk];
+    float aY[kMaxLanes][kDqChunk], pY[kMaxLanes][kDqChunk], sY[kMaxLanes][kDqChunk] = {};  // sY is read only for tilt bands; zeroed so no path reads indeterminate data (G43)
     double *zA[kMaxLanes], *zP[kMaxLanes], *zS[kMaxLanes];
     for (uint32_t base = 0; base < frames; base += kDqChunk) {
         const uint32_t cn = std::min(kDqChunk, frames - base);

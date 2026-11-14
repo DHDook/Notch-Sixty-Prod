@@ -101,17 +101,19 @@ bool nearZero(float v) { return std::fabs(v) <= kParkEps; }
 bool nearOne(float v) { return std::fabs(v - 1.0f) <= kParkEps; }
 Bq identityBq() { return Bq{1.0f, 0.0f, 0.0f, 0.0f, 0.0f}; }
 
+// Explicit fused arithmetic, the same operations as simd::biquadDual / biquadPairF, so the per-sample fallback (a block holding a
+// non-finite sample) rounds exactly like the bulk path and not by compiler contraction (E20 S10 part 6, G43).
 double runBqD(const BqD &c, BqStateD &s, double in) {
-    const double out = c.b0 * in + s.z1;
-    s.z1 = c.b1 * in - c.a1 * out + s.z2;
-    s.z2 = c.b2 * in - c.a2 * out;
+    const double out = std::fma(c.b0, in, s.z1);
+    s.z1 = std::fma(-c.a1, out, std::fma(c.b1, in, s.z2));
+    s.z2 = std::fma(-c.a2, out, c.b2 * in);
     return out;
 }
 
 float runBq(const Bq &c, BqState &s, float in) {
-    const float out = c.b0 * in + s.z1;
-    s.z1 = c.b1 * in - c.a1 * out + s.z2;
-    s.z2 = c.b2 * in - c.a2 * out;
+    const float out = std::fma(c.b0, in, s.z1);
+    s.z1 = std::fma(-c.a1, out, std::fma(c.b1, in, s.z2));
+    s.z2 = std::fma(-c.a2, out, c.b2 * in);
     return out;
 }
 

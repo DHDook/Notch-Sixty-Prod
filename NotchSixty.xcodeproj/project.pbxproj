@@ -461,6 +461,8 @@
 			buildSettings = {
 				ARCHS = arm64;
 				CLANG_ENABLE_MODULES = YES;
+				"OTHER_CFLAGS[arch=x86_64]" = "$(inherited) -mfma -mavx2";
+				"OTHER_CPLUSPLUSFLAGS[arch=x86_64]" = "$(inherited) -mfma -mavx2";
 				MACOSX_DEPLOYMENT_TARGET = 26.0;
 				ONLY_ACTIVE_ARCH = YES;
 				SDKROOT = macosx;
@@ -474,6 +476,8 @@
 			buildSettings = {
 				ARCHS = arm64;
 				CLANG_ENABLE_MODULES = YES;
+				"OTHER_CFLAGS[arch=x86_64]" = "$(inherited) -mfma -mavx2";
+				"OTHER_CPLUSPLUSFLAGS[arch=x86_64]" = "$(inherited) -mfma -mavx2";
 				MACOSX_DEPLOYMENT_TARGET = 26.0;
 				SDKROOT = macosx;
 				SWIFT_COMPILATION_MODE = wholemodule;

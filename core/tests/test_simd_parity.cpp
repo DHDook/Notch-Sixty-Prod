@@ -215,6 +215,8 @@ bool run(double rate, uint32_t lanes, uint32_t block, uint32_t total, bool withC
 
 const double kRates[] = {44100, 48000, 88200, 96000, 176400, 192000, 352800, 384000};
 
+uint64_t burstHash(double rate, uint32_t block, bool &finite, double &tailEnergy);
+
 int dump() {
     uint32_t ids[16];
     for (uint32_t i = 0; i < 16; ++i) ids[i] = i;
@@ -226,6 +228,14 @@ int dump() {
                 if (!run(rate, lanes, block, total, true, ids, nullptr, &h)) { std::printf("%g %u %u BUILD-FAILED\n", rate, lanes, block); return 1; }
                 std::printf("%g %u %u %016llx\n", rate, lanes, block, static_cast<unsigned long long>(h.h));
             }
+        }
+    }
+    for (double rate : kRates) {
+        for (uint32_t block : {7u, 64u, 1024u}) {
+            bool finite = false;
+            double tail = 0;
+            const uint64_t h = burstHash(rate, block, finite, tail);
+            std::printf("%g burst %u %016llx\n", rate, block, static_cast<unsigned long long>(h));
         }
     }
     return 0;
@@ -723,6 +733,112 @@ void checkDynNonFinite() {
     }
 }
 
+// E20 S10 part 6 (G43): CLEANUP, DYN_EQ, IMAGE and DEESS on two lanes with NaN and Inf samples scattered through the programme.
+// A block holding a non-finite sample takes the per-sample fallback and a clean block the bulk path; both use the same fused
+// arithmetic, so the output (hashed here) must not depend on how the stream is cut into blocks, and the tail must be finite and
+// alive. The dump mode prints the same hashes so the SIMD and N60_SIMD=0 builds are compared too.
+uint64_t burstHash(double rate, uint32_t block, bool &finite, double &tailEnergy) {
+    Chain c;
+    // No SANITISE stage: the programs themselves see the non-finite samples.
+    addPrograms(c, 2, 0);
+    addPrograms(c, 2, 1);
+    addPrograms(c, 2, 2);
+    addPrograms(c, 2, 3);
+    n60_graph *g = nullptr;
+    finite = true;
+    tailEnergy = 0;
+    if (n60_graph_build(c.finish(rate, 1024, 2), &g) != N60_STATUS_OK) return 0;
+    std::vector<Rng> rng(2);
+    for (uint32_t l = 0; l < 2; ++l) rng[l].s = 0x9E3779B97F4A7C15ull * (l + 7);
+    std::vector<std::vector<float>> in(2, std::vector<float>(block)), ob(2, std::vector<float>(block));
+    const float *inp[2] = {in[0].data(), in[1].data()};
+    float *outp[2] = {ob[0].data(), ob[1].data()};
+    std::vector<Hash> hl(2);
+    const uint32_t total = 14336;  // divisible by every block size tried (1, 7, 64, 256, 1024)
+    for (uint32_t pos = 0; pos < total; pos += block) {
+        for (uint32_t l = 0; l < 2; ++l) {
+            for (uint32_t i = 0; i < block; ++i) {
+                const uint32_t n = pos + i;
+                float v = sampleAt(rng[l], l, n, rate);
+                if (n == 1500 + l) v = std::nanf("");
+                if (n == 1501 || n == 3000) v = INFINITY;
+                if (n == 3001 && l == 1) v = -INFINITY;
+                in[l][i] = v;
+            }
+        }
+        if (n60_graph_process(g, inp, outp, block) != N60_STATUS_OK) { n60_graph_retire(g); return 0; }
+        for (uint32_t l = 0; l < 2; ++l) {
+            for (uint32_t i = 0; i < block; ++i) {
+                hl[l].addf(ob[l][i]);
+                finite = finite && std::isfinite(ob[l][i]);
+                if (pos + i >= 10000) tailEnergy += double(ob[l][i]) * ob[l][i];
+            }
+        }
+    }
+    n60_graph_retire(g);
+    Hash all;
+    for (const Hash &h : hl) all.add(&h.h, sizeof h.h);
+    return all.h;
+}
+
+void checkProgramBurst() {
+    for (double rate : kRates) {
+        uint64_t ref = 0;
+        for (uint32_t block : {1u, 7u, 64u, 256u, 1024u}) {
+            bool finite = false;
+            double tail = 0;
+            const uint64_t h = burstHash(rate, block, finite, tail);
+            CHECK(h != 0, "burst build failed (rate %g block %u)", rate, block);
+            CHECK(finite, "non-finite output after a burst (rate %g block %u)", rate, block);
+            CHECK(tail > 1.0e-6, "output did not recover after a burst (rate %g block %u, tail energy %g)", rate, block, tail);
+            if (block == 1) ref = h;
+            else CHECK(h == ref, "burst output depends on the block size (rate %g block %u)", rate, block);
+        }
+    }
+}
+
+// E20 R3 (reviewer note on #525, S10 part 6): linked compressor, expander and dynamic EQ run a chunk in three passes (level,
+// detector and gain per sample, correction). With one-frame blocks the three passes degenerate to the per-sample order over
+// the lanes, so the output of any other block size must equal it bit for bit, at the eight rates, with 2, 3 and 6 lanes
+// (an odd count leaves a lane unpaired in the level and correction passes).
+uint64_t linkedHash(double rate, uint32_t lanes, uint32_t block) {
+    Chain c;
+    c.add(N60_STAGE_DYN_EQ, 5, {1, 0, 500, 1.2f, 1, -40, 2, -12, 10, 100, 2, -50, 2, 6, 1, 20,
+                                5, 2000, 0.8f, 0, -30, 3, -12, 5, 80, 0, -50, 2, 6, 0, 20});
+    c.add(N60_STAGE_COMPRESSOR, kCompId, {-22, 3, 5, 3, 70, 0, 0, 1, 120, 1, 85, 60, 1, 20, 37, 0});
+    c.add(N60_STAGE_EXPANDER, kExpId, {-50, 2, -20, 3, 60, 1, 20, 4, 1, 20, 90, 70, 0});
+    n60_graph *g = nullptr;
+    if (n60_graph_build(c.finish(rate, 1024, lanes), &g) != N60_STATUS_OK) return 0;
+    std::vector<Rng> rng(lanes);
+    for (uint32_t l = 0; l < lanes; ++l) rng[l].s = 0x9E3779B97F4A7C15ull * (l + 3);
+    std::vector<std::vector<float>> in(lanes, std::vector<float>(block)), ob(lanes, std::vector<float>(block));
+    std::vector<const float *> inp(lanes);
+    std::vector<float *> outp(lanes);
+    for (uint32_t l = 0; l < lanes; ++l) { inp[l] = in[l].data(); outp[l] = ob[l].data(); }
+    std::vector<Hash> hl(lanes);
+    const uint32_t total = 7168;  // divisible by 1, 7, 64 and 1024
+    for (uint32_t pos = 0; pos < total; pos += block) {
+        for (uint32_t l = 0; l < lanes; ++l) for (uint32_t i = 0; i < block; ++i) in[l][i] = sampleAt(rng[l], l, pos + i, rate);
+        if (n60_graph_process(g, inp.data(), outp.data(), block) != N60_STATUS_OK) { n60_graph_retire(g); return 0; }
+        for (uint32_t l = 0; l < lanes; ++l) for (uint32_t i = 0; i < block; ++i) hl[l].addf(ob[l][i]);
+    }
+    n60_graph_retire(g);
+    Hash all;
+    for (const Hash &h : hl) all.add(&h.h, sizeof h.h);
+    return all.h;
+}
+
+void checkLinkedDynamicsBlockInvariance() {
+    for (double rate : kRates) {
+        for (uint32_t lanes : {2u, 3u, 6u}) {
+            const uint64_t ref = linkedHash(rate, lanes, 1);
+            CHECK(ref != 0, "linked build (rate %g lanes %u)", rate, lanes);
+            for (uint32_t block : {7u, 64u, 1024u})
+                CHECK(linkedHash(rate, lanes, block) == ref, "linked dynamics depend on the block size (rate %g lanes %u block %u)", rate, lanes, block);
+        }
+    }
+}
+
 }  // namespace
 
 int main(int argc, char **argv) {
@@ -740,6 +856,8 @@ int main(int argc, char **argv) {
     checkDynNonFinite();
     checkExpanderNonFinite();
     checkNonFiniteBurst();
+    checkProgramBurst();
+    checkLinkedDynamicsBlockInvariance();
     if (failures != 0) { std::fprintf(stderr, "%d failure(s)\n", failures); return 1; }
     std::puts("simd parity checks passed");
     return 0;
