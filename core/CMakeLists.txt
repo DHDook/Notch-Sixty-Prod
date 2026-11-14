@@ -5,8 +5,11 @@ project(n60core LANGUAGES C CXX)
 add_library(n60core STATIC src/graph.cpp src/snapshot.cpp src/fft.cpp src/stages_dsp.cpp src/conv/nufir.cpp src/stages_system.cpp src/stages_matrix.cpp src/stages_generator.cpp src/stages_cleanup.cpp src/stages_image.cpp src/stages_loudness.cpp src/stages_multiband.cpp src/stages_route.cpp src/stages_mimo.cpp src/layout.cpp
     src/measure/offline_fft.cpp src/measure/ess.cpp src/measure/deconvolve.cpp src/measure/reference_room.cpp src/measure/timing.cpp src/measure/distortion.cpp src/measure/decay.cpp src/measure/waterfall.cpp src/measure/monitor_ring.cpp src/measure/spl.cpp src/measure/rta.cpp src/measure/predict.cpp src/mimo/design.cpp
     src/correct/minphase.cpp src/correct/design.cpp src/correct/synth.cpp src/correct/bass.cpp src/correct/multisub_search.cpp
-    src/xover/xover.cpp src/headroom/headroom.cpp)
+    src/xover/xover.cpp src/headroom/headroom.cpp src/anc/fxlms.cpp src/anc/remote_tonal.cpp)
 target_compile_features(n60core PUBLIC cxx_std_20)
+# E21 S0: the two ANC sources moved from the app unchanged. Their Create paths catch std::bad_alloc, so they keep
+# exceptions on until E21 S4 rewrites them with nothrow allocation (gap G1 in docs/epics/E21.md).
+set_source_files_properties(src/anc/fxlms.cpp src/anc/remote_tonal.cpp PROPERTIES COMPILE_OPTIONS "-fexceptions")
 target_include_directories(n60core PUBLIC include)
 target_include_directories(n60core PRIVATE src)
 target_compile_options(n60core PRIVATE -Wall -Wextra -Werror -Wno-unknown-warning-option -Werror=function-effects -fno-exceptions -fno-rtti)
@@ -334,3 +337,15 @@ add_test(NAME n60core_mimo_stage COMMAND n60core_mimo_stage_test)
 add_executable(n60core_mimo_safety_test tests/test_mimo_safety.cpp)
 target_link_libraries(n60core_mimo_safety_test PRIVATE n60core)
 add_test(NAME n60core_mimo_safety COMMAND n60core_mimo_safety_test)
+
+# E21 S0: the E4 ANC harnesses that exercise the moved sources (they live in ci/ with their shared plant helpers).
+add_executable(n60core_e4_fxlms_test ../ci/harness_e4_fxlms.c)
+set_target_properties(n60core_e4_fxlms_test PROPERTIES C_STANDARD 11 LINKER_LANGUAGE CXX)
+target_include_directories(n60core_e4_fxlms_test PRIVATE ../ci)
+target_link_libraries(n60core_e4_fxlms_test PRIVATE n60core m)
+add_test(NAME n60core_e4_fxlms COMMAND n60core_e4_fxlms_test)
+
+add_executable(n60core_e4_remote_tonal_test ../ci/harness_e4_remote_tonal.cpp)
+target_include_directories(n60core_e4_remote_tonal_test PRIVATE ../ci)
+target_link_libraries(n60core_e4_remote_tonal_test PRIVATE n60core)
+add_test(NAME n60core_e4_remote_tonal COMMAND n60core_e4_remote_tonal_test)

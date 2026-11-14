@@ -9,3 +9,5 @@ CORE_SOURCES=(
     measure/rta correct/minphase correct/design correct/synth correct/bass
     correct/multisub_search xover/xover headroom/headroom mimo/design
 )
+# E21 S0: core/src/anc/{fxlms,remote_tonal}.cpp are not in this list: they still use try/catch (exceptions on) and
+# the ANC harnesses compile them directly. They are in core/CMakeLists.txt. E21 S4 folds them in (gap G1).

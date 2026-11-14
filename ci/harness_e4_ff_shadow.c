@@ -16,7 +16,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "N60Fxlms.h"
+#include "n60/fxlms.h"
 
 /* Seeded xorshift Gaussian, as in ci/e4_fxlms_plant.h. */
 static uint64_t next_random(uint64_t *s) {

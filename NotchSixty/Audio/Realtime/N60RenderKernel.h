@@ -7,7 +7,7 @@
 #include "N60RealtimeAttributes.h"
 
 #include "N60Biquad.h"
-#include "N60ActiveQuietZone.h"
+#include "n60/active_quiet_zone.h"
 #include "N60FeedForwardLive.h"
 #include "N60Convolution.h"
 #include "N60Crossover.h"

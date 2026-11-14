@@ -4,7 +4,7 @@
 // Welch averaging at chosen band frequencies). The C interface, the estimator
 // and the threading contract are documented in N60Fxlms.h.
 
-#include "n60_fxlms.hpp"
+#include "n60/fxlms.hpp"
 
 #include <array>
 #include <cstdint>

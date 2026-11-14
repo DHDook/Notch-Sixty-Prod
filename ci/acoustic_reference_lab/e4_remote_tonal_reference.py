@@ -42,9 +42,9 @@ def build_and_run():
         binary = Path(work) / "probe"
         steps = [
             [cxx, "-std=c++20", "-O2", "-Wall", "-Wextra", "-Werror", "-include", "stddef.h",
-             "-I" + str(RT), "-c", str(RT / "n60_remote_tonal.cpp"), "-o", str(obj)],
+             "-I" + str(RT), "-I" + str(ROOT / "core/include"), "-c", str(ROOT / "core/src/anc/remote_tonal.cpp"), "-o", str(obj)],
             [cc, "-std=c11", "-O2", "-Wall", "-Wextra", "-Werror", "-include", "stddef.h",
-             "-I" + str(RT), str(PROBE), str(obj), "-lc++", "-lm", "-o", str(binary)],
+             "-I" + str(RT), "-I" + str(ROOT / "core/include"), str(PROBE), str(obj), "-lc++", "-lm", "-o", str(binary)],
         ]
         for step in steps:
             run = subprocess.run(step, capture_output=True, text=True, timeout=180)

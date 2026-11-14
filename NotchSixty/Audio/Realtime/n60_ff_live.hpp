@@ -5,7 +5,7 @@
 
 #include "N60FeedForwardLive.h"
 #include "n60_ff_echo.hpp"
-#include "n60_fxlms.hpp"
+#include "n60/fxlms.hpp"
 
 #include <array>
 #include <atomic>

@@ -13,7 +13,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "N60Fxlms.h"
+#include "n60/fxlms.h"
 #include "e4_fxlms_plant.h"
 
 static const double kRates[] = {

@@ -3,7 +3,7 @@
 // E4 S5: C++20 core of the adaptive speaker-ANC (FxLMS). The C interface, the
 // update rules and the realtime contract are documented in N60Fxlms.h.
 
-#include "N60Fxlms.h"
+#include "n60/fxlms.h"
 
 #include <array>
 #include <atomic>

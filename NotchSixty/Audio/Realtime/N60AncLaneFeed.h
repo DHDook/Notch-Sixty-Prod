@@ -4,7 +4,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#include "N60ActiveQuietZone.h"
+#include "n60/active_quiet_zone.h"
 #include "N60FeedForwardLive.h"
 // The crossover headers are C first; their zero initialisers are fine in C++ too.
 #if defined(__clang__)

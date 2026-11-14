@@ -7,6 +7,8 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		E21A00000000000000002002 /* remote_tonal.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E21A00000000000000002001 /* remote_tonal.cpp */; };
+		E21A00000000000000001002 /* fxlms.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E21A00000000000000001001 /* fxlms.cpp */; };
 
 		E6C000000000000000000030 /* graph.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E6C000000000000000000010 /* graph.cpp */; };
 		E6C000000000000000000031 /* snapshot.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E6C000000000000000000011 /* snapshot.cpp */; };
@@ -58,6 +60,8 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		E21A00000000000000002001 /* remote_tonal.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = anc/remote_tonal.cpp; sourceTree = "<group>"; };
+		E21A00000000000000001001 /* fxlms.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = anc/fxlms.cpp; sourceTree = "<group>"; };
 
 		E6C000000000000000000010 /* graph.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = graph.cpp; sourceTree = "<group>"; };
 		E6C000000000000000000011 /* snapshot.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = snapshot.cpp; sourceTree = "<group>"; };
@@ -184,6 +188,8 @@
 				E8A600000000000000000001 /* multisub_search.cpp */,
 				E8A000000000000000000011 /* xover.cpp */,
 				E9B600000000000000000002 /* headroom.cpp */,
+				E21A00000000000000002001 /* remote_tonal.cpp */,
+				E21A00000000000000001001 /* fxlms.cpp */,
 				E19A00000000000000000011 /* design.cpp */,
 				E11C0000000000000000001C /* spl.cpp */,
 				E11C0000000000000000001B /* monitor_ring.cpp */,
@@ -325,6 +331,8 @@
 				E8A600000000000000000002 /* multisub_search.cpp in Sources */,
 				E8A000000000000000000021 /* xover.cpp in Sources */,
 				E9B600000000000000000001 /* headroom.cpp in Sources */,
+				E21A00000000000000002002 /* remote_tonal.cpp in Sources */,
+				E21A00000000000000001002 /* fxlms.cpp in Sources */,
 				E19A00000000000000000021 /* design.cpp in Sources */,
 				E11C0000000000000000003B /* spl.cpp in Sources */,
 				E11C0000000000000000003A /* monitor_ring.cpp in Sources */,

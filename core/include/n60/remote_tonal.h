@@ -4,8 +4,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#include "N60ActiveQuietZone.h"
-#include "N60Fxlms.h"
+#include "n60/active_quiet_zone.h"
+#include "n60/fxlms.h"
 
 #ifdef __cplusplus
 extern "C" {

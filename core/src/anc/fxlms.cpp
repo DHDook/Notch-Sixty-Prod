@@ -7,7 +7,7 @@
 // RBJ Audio EQ Cookbook (R. Bristow-Johnson); window, R. B. Blackman and
 // J. W. Tukey, The Measurement of Power Spectra (1958).
 
-#include "n60_fxlms.hpp"
+#include "n60/fxlms.hpp"
 
 #include <algorithm>
 #include <cmath>

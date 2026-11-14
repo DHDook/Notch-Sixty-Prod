@@ -16,7 +16,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#include "N60Fxlms.h"
+#include "n60/fxlms.h"
 #include "e4_fxlms_plant.h"
 
 #define BUFFER 256u
