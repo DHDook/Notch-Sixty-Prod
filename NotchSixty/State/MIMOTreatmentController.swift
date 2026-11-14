@@ -35,10 +35,24 @@ protocol MIMOTreatmentHost: AnyObject {
     func treatmentRouting() -> SpeakerRoutingConfiguration?
     /// E19 S10 (G36): the raw per-way captures of the routed speakers, one per in-band way and seat.
     func treatmentWayCaptures() -> [MIMORoutedWayCapture]
+    /// E19 S10b (G38): the user's support overrides by speaker, for the speaker list and the permit's class key.
+    func setTreatmentSupportOverrides(_ overrides: [UUID: ClosedRange<Double>])
+}
+
+/// E19 S10b (G36): the production source and driver of per-way captures (the E24 seat flow). The controller asks it what is
+/// missing, runs the way pass on the user's action and reads the stored captures for the routed design.
+@MainActor
+protocol TreatmentWayMeasuring: AnyObject {
+    /// One line per missing (speaker, way, seat), by name; empty when the routed design has every capture.
+    func missingWayNotes(overrides: [UUID: ClosedRange<Double>], excluded: Set<UUID>) -> [String]
+    /// Plays and captures every missing in-band way; returns how many captures were stored. Playback stops for it.
+    func measureMissingWays(overrides: [UUID: ClosedRange<Double>], excluded: Set<UUID>) async throws -> Int
+    func wayCaptures() -> [MIMORoutedWayCapture]
 }
 
 extension MIMOTreatmentHost {
     func treatmentRouting() -> SpeakerRoutingConfiguration? { nil }
+    func setTreatmentSupportOverrides(_ overrides: [UUID: ClosedRange<Double>]) {}
     func treatmentWayCaptures() -> [MIMORoutedWayCapture] { [] }
 }
 
@@ -117,12 +131,21 @@ final class MIMOTreatmentController: ObservableObject {
     @Published private(set) var designedDecaySeconds: Double?
     @Published private(set) var isArmed = false
     @Published private(set) var armStateLabel = "Off"
+    /// E19 S10b (G39): outputs fed only by raw ROUTE entries; they get no treatment ("add as a speaker to include").
+    @Published private(set) var matrixOnlyOutputs: [String] = []
+    /// E19 S10b (G36): the driver captures a routed design still needs, one line each; empty when complete or unrouted.
+    @Published private(set) var missingWayNotes: [String] = []
+    @Published private(set) var wayMeasureStatus: String?
+    @Published private(set) var isMeasuringWays = false
 
     private let host: MIMOTreatmentHost
     private let flags: FeatureFlags
     private let seatsProvider: () -> [MultichannelCalibrationSeat]
     private let baselineProvider: () -> [MultichannelCalibrationMeasurement]
     private let treatedProvider: () -> [MultichannelCalibrationMeasurement]
+    private let wayMeasurer: TreatmentWayMeasuring?
+    /// Routed designs: the per-speaker baseline the permit's spatial check reads (the sum of the way plants at each seat).
+    private var routedBaseline: [MultichannelCalibrationMeasurement] = []
     private let limits: MIMOTreatmentRealisationLimits
     private let taps: Int
     private var designedSeatIDs: [UUID] = []
@@ -143,8 +166,10 @@ final class MIMOTreatmentController: ObservableObject {
         seats: @escaping () -> [MultichannelCalibrationSeat],
         baseline: @escaping () -> [MultichannelCalibrationMeasurement],
         treated: @escaping () -> [MultichannelCalibrationMeasurement] = { [] },
+        wayMeasurer: TreatmentWayMeasuring? = nil,
         limits: MIMOTreatmentRealisationLimits = .standard, taps: Int = MIMOTreatmentRequest.defaultTaps
     ) {
+        self.wayMeasurer = wayMeasurer
         self.limits = limits
         self.taps = taps
         self.host = host
@@ -169,8 +194,15 @@ final class MIMOTreatmentController: ObservableObject {
 
     /// Rebuilds the source list from the running layout, keeping the user's edits for sources that remain.
     func refreshSources() {
-        let measured = Set(baselineProvider().map(\.source))
-        let infos = host.treatmentSources().filter { measured.contains($0.source) }.sorted { $0.lane < $1.lane }
+        let routing = host.treatmentRouting().flatMap { $0.enabled ? $0 : nil }
+        let infos: [MIMOTreatmentSourceInfo]
+        if routing != nil {
+            // A routed speaker is measured per way, so its rows do not depend on per-source measurements (E19 S10b).
+            infos = host.treatmentSources().filter { !$0.inBandWays.isEmpty }.sorted { $0.lane < $1.lane }
+        } else {
+            let measured = Set(baselineProvider().map(\.source))
+            infos = host.treatmentSources().filter { measured.contains($0.source) }.sorted { $0.lane < $1.lane }
+        }
         let old = Dictionary(uniqueKeysWithValues: rows.map { ($0.lane, $0) })
         rows = infos.map { info in
             if var existing = old[info.lane], existing.source == info.source {
@@ -179,11 +211,66 @@ final class MIMOTreatmentController: ObservableObject {
             }
             return SourceRow(lane: info.lane, source: info.source, name: info.name, inBandWays: info.inBandWays)
         }
+        matrixOnlyOutputs = routing.map { routing in
+            MIMORoutedTreatmentPlanner.matrixOnlyOutputs(of: routing).map {
+                "Output \($0.channelIndex + 1) on \($0.deviceUID) is fed by routing entries only, so it gets no treatment. Add it as a speaker to include it."
+            }
+        } ?? []
+        refreshMissingWays()
     }
 
-    func setIncluded(_ included: Bool, lane: Int) { update(lane) { $0.included = included } }
+    /// E19 S10b (G36, G38): the user's support edits and exclusions by speaker, as the planner and the permit's class key read them.
+    private func routedSettings(_ routing: SpeakerRoutingConfiguration) -> (overrides: [UUID: ClosedRange<Double>], excluded: Set<UUID>) {
+        let programLanes = host.treatmentSources().filter { if case .speaker = $0.source { return true } else { return false } }.count
+        var overrides: [UUID: ClosedRange<Double>] = [:]
+        var excluded: Set<UUID> = []
+        for speaker in routing.speakers {
+            let lane = speaker.source.kind == .program ? speaker.source.index : programLanes + speaker.source.index
+            guard let row = rows.first(where: { $0.lane == lane }) else { continue }
+            if !row.included { excluded.insert(speaker.id) }
+            if (row.supportLowHz != 25 || row.supportHighHz != 150), row.supportHighHz > row.supportLowHz {
+                overrides[speaker.id] = row.supportLowHz...row.supportHighHz
+            }
+        }
+        return (overrides, excluded)
+    }
+
+    private func pushSupportOverrides() {
+        guard let routing = host.treatmentRouting(), routing.enabled else { return }
+        host.setTreatmentSupportOverrides(routedSettings(routing).overrides)
+    }
+
+    private func refreshMissingWays() {
+        guard let routing = host.treatmentRouting(), routing.enabled, let wayMeasurer else { missingWayNotes = []; return }
+        let settings = routedSettings(routing)
+        missingWayNotes = wayMeasurer.missingWayNotes(overrides: settings.overrides, excluded: settings.excluded)
+    }
+
+    /// Plays and captures the drivers the routed design still needs, at every included seat (the user's action; playback stops
+    /// for it). The design then reads the stored captures. Never arms anything.
+    func measureWays() async {
+        guard isAvailable, let wayMeasurer, let routing = host.treatmentRouting(), routing.enabled, !isMeasuringWays else { return }
+        isMeasuringWays = true
+        wayMeasureStatus = "Measuring drivers. Playback is stopped for the measurement; start it again before designing."
+        let settings = routedSettings(routing)
+        do {
+            let count = try await wayMeasurer.measureMissingWays(overrides: settings.overrides, excluded: settings.excluded)
+            wayMeasureStatus = "Stored \(count) driver capture\(count == 1 ? "" : "s"). Start audio processing, then design."
+        } catch {
+            wayMeasureStatus = Self.describe(error)
+        }
+        isMeasuringWays = false
+        refreshMissingWays()
+    }
+
+    func setIncluded(_ included: Bool, lane: Int) {
+        update(lane) { $0.included = included }
+        refreshMissingWays()
+    }
     func setSupport(lowHz: Double, highHz: Double, lane: Int) {
         update(lane) { $0.supportLowHz = lowHz; $0.supportHighHz = highHz; $0.supportEdited = true }
+        pushSupportOverrides()
+        refreshSources()
     }
 
     private func update(_ lane: Int, _ body: (inout SourceRow) -> Void) {
@@ -336,6 +423,7 @@ final class MIMOTreatmentController: ObservableObject {
         designAdvice = result.summary.advice
         designedSeatIDs = seats.map(\.id)
         designedRoutedSlots = [:]
+        routedBaseline = []
         designedSources = active.map(\.source)
         designedBudgets = Dictionary(uniqueKeysWithValues: zip(lanes, request.sources.map(\.gainLimitDB)))
         designedPeaks = Dictionary(uniqueKeysWithValues: zip(lanes, result.summary.peakGainDB))
@@ -352,21 +440,19 @@ final class MIMOTreatmentController: ObservableObject {
         let infos = host.treatmentSources()
         let programLanes = infos.filter { if case .speaker = $0.source { return true } else { return false } }.count
         let subwoofers = infos.count - programLanes
-        func lane(_ speaker: RoutedSpeaker) -> Int { speaker.source.kind == .program ? speaker.source.index : programLanes + speaker.source.index }
         var settings = MIMORoutedTreatmentSettings()
         settings.tauSeconds = tauMilliseconds / 1_000
         settings.taps = taps
-        for speaker in routing.speakers {
-            guard let row = rows.first(where: { $0.lane == lane(speaker) }) else { continue }
-            if !row.included { settings.excluded.insert(speaker.id) }
-            if row.supportLowHz != 25 || row.supportHighHz != 150 { settings.supportOverrides[speaker.id] = row.supportLowHz...row.supportHighHz }
-        }
+        let edits = routedSettings(routing)
+        settings.excluded = edits.excluded
+        settings.supportOverrides = edits.overrides
+        host.setTreatmentSupportOverrides(edits.overrides)
         if settings.excluded.count == routing.speakers.count { throw InputError.noSources }
         var plan: MIMORoutedTreatmentPlan
         do {
             plan = try await MIMORoutedTreatmentPlanner.plan(
                 routing: routing, sampleRate: rate, programLanes: programLanes, subwoofers: subwoofers, seats: seats,
-                captures: host.treatmentWayCaptures(), settings: settings)
+                captures: wayMeasurer?.wayCaptures() ?? host.treatmentWayCaptures(), settings: settings)
         } catch let refusal as MIMORoutedTreatmentRefusal {
             throw InputError.headroom(refusal.localizedDescription)
         }
@@ -402,6 +488,7 @@ final class MIMOTreatmentController: ObservableObject {
 
         let lanes = plan.speakers.map(\.lane)
         designedRoutedSlots = Dictionary(uniqueKeysWithValues: lanes.enumerated().map { ($0.element, $0.offset) })
+        routedBaseline = Self.speakerBaseline(plan: plan, rows: rows, seats: seats, sampleRate: rate)
         designedDecaySeconds = decay
         designAdvice = result.summary.advice
         designedSeatIDs = seats.map(\.id)
@@ -410,6 +497,26 @@ final class MIMOTreatmentController: ObservableObject {
         designedPeaks = Dictionary(uniqueKeysWithValues: zip(lanes, result.summary.peakGainDB))
         designedThermal = Dictionary(uniqueKeysWithValues: zip(lanes, result.summary.thermalDB))
         try await predict(seatPlants: floatPlants, filters: result.filters, seats: seats, rate: rate, feeds: nil)
+    }
+
+    /// E19 S10b (G42): the per-speaker baseline of a routed design, the way plants of each included speaker summed at each seat.
+    /// It stands in for the per-source measurements the unrouted permit path reads, keyed by the speaker's source.
+    static func speakerBaseline(
+        plan: MIMORoutedTreatmentPlan, rows: [SourceRow], seats: [MultichannelCalibrationSeat], sampleRate: Double
+    ) -> [MultichannelCalibrationMeasurement] {
+        var result: [MultichannelCalibrationMeasurement] = []
+        for (slot, speaker) in plan.speakers.enumerated() where speaker.included {
+            guard let row = rows.first(where: { $0.lane == speaker.lane }), plan.request.plants.indices.contains(slot) else { continue }
+            for (index, seat) in seats.enumerated() {
+                guard plan.request.plants[slot].indices.contains(index), let plant = plan.request.plants[slot][index] else { continue }
+                result.append(MultichannelCalibrationMeasurement(
+                    seatID: seat.id, source: row.source, sampleRate: sampleRate,
+                    channel: RoomCorrectionChannelMeasurement(
+                        capturedAt: Date(timeIntervalSince1970: 0), rawCapture: [], impulseResponse: plant.program,
+                        transferFunction: nil, quality: RoomCorrectionMeasurementQuality(sweepComplete: true))))
+            }
+        }
+        return result
     }
 
     /// Low-rate baseline and predicted seat responses for the decay readout and the verifier.
@@ -522,7 +629,8 @@ final class MIMOTreatmentController: ObservableObject {
             if summed.allSatisfy({ !$0.isEmpty }), let low = try? summed.map({ Self.upsample(try Self.decimate($0, rate: rate), by: analysisUpsample) }) {
                 measuredLow = low
                 spatial = try? MIMORoomTreatmentVerifier().verify(
-                    sources: designedSources, seats: ordered, baselineMeasurements: baselineProvider(),
+                    sources: designedSources, seats: ordered,
+                    baselineMeasurements: designedRoutedSlots.isEmpty ? baselineProvider() : routedBaseline,
                     treatedMeasurements: treated, sampleRate: rate)
             }
         }

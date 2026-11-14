@@ -91,6 +91,9 @@ final class MIMOGraphTreatment: ObservableObject {
     /// Digest of the room correction, speaker IR and per-lane delay and polarity chain after the stage; the engine sets it
     /// whenever it builds a graph (`chainDigest(of:)`). Part of the fingerprint, so a change of the chain disarms (note 7).
     var chainDigest = ""
+    /// E19 S10b (G38): the user's support overrides by speaker, so the speaker list and the permit's class key count in-band ways
+    /// over the window the design uses. Set by the screen's controller; empty means the default window.
+    var routedSupportOverrides: [UUID: ClosedRange<Double>] = [:]
     /// Time the core needs to see arm = 0 and trip = 0 before a re-arm; injectable so tests do not wait.
     var settle: () async throws -> Void = { try await Task.sleep(nanoseconds: 100_000_000) }
 

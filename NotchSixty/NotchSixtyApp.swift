@@ -136,7 +136,8 @@ final class ProductController: ObservableObject {
         self.mimoTreatment = MIMOTreatmentController(
             host: audioEngine, flags: FeatureFlags(),
             seats: { multichannelCalibration.seats },
-            baseline: { multichannelCalibration.measurements })
+            baseline: { multichannelCalibration.measurements },
+            wayMeasurer: CalibrationTreatmentWayMeasurer(calibration: multichannelCalibration))
         let roomProjects =
             RoomCorrectionProjectController(profiles: profiles)
         self.roomCorrectionProjects = roomProjects
@@ -261,7 +262,8 @@ final class ProductController: ObservableObject {
         self.mimoTreatment = MIMOTreatmentController(
             host: audioEngine, flags: FeatureFlags(),
             seats: { multichannelCalibration.seats },
-            baseline: { multichannelCalibration.measurements })
+            baseline: { multichannelCalibration.measurements },
+            wayMeasurer: CalibrationTreatmentWayMeasurer(calibration: multichannelCalibration))
         let roomProjects =
             RoomCorrectionProjectController(profiles: profiles)
         self.roomCorrectionProjects = roomProjects

@@ -65,7 +65,9 @@ extension AudioIOEngine {
         mimoGraphTreatment.issuePermit(
             context: mimoTreatmentContext(), videoLatency: mimoVideoLatencyInput, verification: verification,
             acceptance: acceptance, registry: registry, routed: speakerRoutingConfiguration != nil,
-            inBandWays: speakerRoutingConfiguration.map(MIMORoutedTreatmentPlanner.inBandWayCount(of:)) ?? 1)
+            inBandWays: speakerRoutingConfiguration.map {
+                MIMORoutedTreatmentPlanner.inBandWayCount(of: $0, overrides: mimoGraphTreatment.routedSupportOverrides)
+            } ?? 1)
     }
 
     func disarmMIMOTreatment() { mimoGraphTreatment.userDisarm() }

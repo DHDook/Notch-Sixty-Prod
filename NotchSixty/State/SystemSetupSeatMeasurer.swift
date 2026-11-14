@@ -90,11 +90,15 @@ final class CalibrationSeatMeasurer: SystemSetupSeatMeasuring {
     ) async throws -> RoomCorrectionChannelMeasurement
     typealias ArrivalOperation = @Sendable ([Float], RoomCorrectionSweepProgram) async throws -> [Double]?
 
+    /// E19 S10b: the transport for one routed way: the way's carrier route, its sweep, and the protected waveform it plays.
+    typealias WayTransportProvider = @MainActor (SpeakerMeasurementLabRoutedWayAcquisition, [AudioOutputDevice]) -> MultiMicTransportFactory
+
     let calibration: MultichannelCalibrationController
     private let transport: TransportProvider
-    private let analysis: SeatAnalysis
+    let wayTransport: WayTransportProvider
+    let analysis: SeatAnalysis
     private let arrivals: ArrivalOperation
-    private let pollSeconds: Double
+    let pollSeconds: Double
 
     init(
         calibration: MultichannelCalibrationController,
@@ -111,6 +115,12 @@ final class CalibrationSeatMeasurer: SystemSetupSeatMeasuring {
                     rawCapture: samples, program: program, microphoneCalibration: microphone, repeatArrivals: arrivals)
             }.value
         },
+        wayTransport: @escaping WayTransportProvider = { acquisition, outputs in
+            MultichannelCalibrationTransport.multiMicFactory(
+                routePlan: acquisition.binding.carrierRoutePlan, outputs: outputs, program: acquisition.sweepProgram,
+                physicalOutputChannelIndex: acquisition.binding.physicalOutputChannelIndex, referenceProgram: nil,
+                outputSweepSamples: acquisition.excitation.renderedSamples)
+        },
         arrivals: @escaping ArrivalOperation = { samples, program in
             try await Task.detached(priority: .userInitiated) {
                 try RoomCorrectionMeasurementAnalyzer().repeatArrivals(rawCapture: samples, program: program)
@@ -120,6 +130,7 @@ final class CalibrationSeatMeasurer: SystemSetupSeatMeasuring {
         self.calibration = calibration
         self.pollSeconds = pollSeconds
         self.transport = transport
+        self.wayTransport = wayTransport
         self.analysis = analysis
         self.arrivals = arrivals
     }
