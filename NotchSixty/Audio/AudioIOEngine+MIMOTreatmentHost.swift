@@ -10,11 +10,14 @@ extension AudioIOEngine: MIMOTreatmentHost {
     var sampleRate: Double? { nChannelTransportSession?.outputFormat.sampleRate }
 
     /// E19 G30: the room-correction latency mode as the treatment sees it. Video mode (minimum phase) refuses; a correction
-    /// without a lane plan has no stated mode, so it stays `.unknown` and no permit is issued.
+    /// with neither a lane plan nor a filter has no stated mode, so it stays `.unknown` and no permit is issued.
     static func videoLatencyInput(for room: RoomCorrectionConfiguration) -> MIMOVideoLatencyInput {
         guard room.enabled else { return .known(videoLatencyMode: false) }
-        guard let design = room.lanes?.design else { return .unknown }
-        return .known(videoLatencyMode: design.latencyMode == .video)
+        if let design = room.lanes?.design { return .known(videoLatencyMode: design.latencyMode == .video) }
+        // G35: a legacy single filter has no stated mode, but its declared latency is the mode: a minimum-phase filter
+        // declares none (video mode), a linear or mixed phase filter declares its group delay (music mode).
+        if let filter = room.filter { return .known(videoLatencyMode: filter.declaredLatencyFrames == 0) }
+        return .unknown
     }
 
     func refreshMIMOVideoLatencyInput() {
