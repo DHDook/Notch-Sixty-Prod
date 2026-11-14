@@ -7,9 +7,12 @@ import XCTest
 final class MIMORoutedWayCaptureTests: XCTestCase {
     private func ep(_ channel: UInt32) -> PhysicalOutputEndpoint { PhysicalOutputEndpoint(deviceUID: "DEV", channelIndex: channel) }
     private func lr(_ hz: Double) -> CrossoverCore.FilterSpec { .init(family: .linkwitzRiley, order: 4, cornerHz: hz) }
+    /// Way trim of the synthetic rig. The planner's budget is 1.5 dB at 0 dB trim, so G44 pulls it down to buy headroom.
+    private var wayTrimDB = 0.0
     private func way(_ name: String, _ channel: UInt32, high: CrossoverCore.FilterSpec? = nil, low: CrossoverCore.FilterSpec? = nil) -> RoutedWay {
         var w = RoutedWay(endpoint: ep(channel))
         w.name = name
+        w.trimDB = wayTrimDB
         w.highPass = high
         w.lowPass = low
         return w
@@ -29,6 +32,9 @@ final class MIMORoutedWayCaptureTests: XCTestCase {
     }
     private let seats = [MultichannelCalibrationSeat(name: "Seat 1"), MultichannelCalibrationSeat(name: "Seat 2")]
 
+    /// Strength of the two decaying modes in the synthetic room. The default is faint; G44 uses a room the designer must treat.
+    private var modeGain = 0.0008  // G44 sets 0.2, as the unrouted controller tests do
+
     private func rawIR(rate: Double, seed: Int, modes: Bool, seconds: Double = 1.2) -> [Float] {
         let length = Int(rate * seconds)
         var ir = [Float](repeating: 0, count: length)
@@ -36,7 +42,7 @@ final class MIMORoutedWayCaptureTests: XCTestCase {
         guard modes else { return ir }
         let alpha = 6.907755 / (0.8 * rate)
         for (index, hz) in [40.0, 70.0].enumerated() {
-            let gain = 0.0008 * (1 + 0.3 * Double((seed + index) % 3))
+            let gain = modeGain * (1 + 0.3 * Double((seed + index) % 3))
             let phase = 0.7 * Double(seed + index)
             for n in 0..<length {
                 ir[n] += Float(gain * exp(-alpha * Double(n)) * sin(2 * Double.pi * hz * Double(n) / rate + phase))
@@ -227,7 +233,7 @@ final class MIMORoutedWayCaptureTests: XCTestCase {
                 context: treatmentContext(), videoLatency: .known(videoLatencyMode: false), verification: verification,
                 acceptance: acceptance, routed: true)
         }
-        func requestTreatmentArm() async throws {}
+        func requestTreatmentArm() async throws { try await treatment.requestArm(context: treatmentContext()) }
         func disarmTreatment() { treatment.userDisarm() }
         func treatmentReadback() -> n60_mimo_readback? { nil }
         func hardwareAcceptance() -> MIMORoomTreatmentHardwareAcceptance? { nil }
@@ -318,5 +324,80 @@ final class MIMORoutedWayCaptureTests: XCTestCase {
         XCTAssertEqual(baseline.count, 4 * seats.count)
         XCTAssertEqual(Set(baseline.map(\.source)).count, 4)
         XCTAssertTrue(baseline.allSatisfy { !$0.channel.impulseResponse.isEmpty })
+    }
+
+    // MARK: E19 S11 (G44, G46)
+
+    /// A room the planner's headroom budget accepts: 6 dB of way trim buys the headroom the 1.5 dB default budget lacks
+    /// (E19 G44). Measure the ways, design, and read the stage and the permit baseline the verifier is given.
+    func testRoutedDesignEndToEndStagesAndTheVerifierReadsTheSpeakerBaseline() async throws {
+        wayTrimDB = -6
+        modeGain = 0.2
+        var baselineSeen: [MultichannelCalibrationMeasurement] = []
+        let (controller, host, measurer, routing) = try rig(treated: { baselineSeen })
+        await controller.measureWays()
+        await controller.design()
+        XCTAssertEqual(controller.phase, .designed, "\(controller.phase)")
+        let stage = try XCTUnwrap(host.staged.last)
+        XCTAssertNotNil(stage.routed, "a routed topology stages the routed stage")
+        XCTAssertFalse(stage.armed, "designing never arms")
+        XCTAssertEqual(controller.seatDecays.count, seats.count)
+        XCTAssertTrue(controller.seatDecays.allSatisfy { $0.beforeSeconds != nil && $0.afterSeconds != nil })
+        // The permit path: the verifier is given a result, nothing arms, no permit exists without acceptance.
+        controller.requestPermit()
+        XCTAssertNotNil(host.verifications.last ?? nil)
+        XCTAssertFalse(host.treatment.isArmed)
+        XCTAssertFalse(controller.permitRefusals.isEmpty, "no permit exists before the E22 qualification")
+        XCTAssertFalse(controller.permitRefusals.joined().lowercased().contains("baseline"), controller.permitRefusals.joined())
+        // The per-speaker baseline the spatial check reads: one measurement per included speaker and seat.
+        var settings = MIMORoutedTreatmentSettings()
+        settings.taps = 2_000
+        settings.tauSeconds = 0.02
+        let plan = try await MIMORoutedTreatmentPlanner.plan(
+            routing: routing, sampleRate: 48_000, programLanes: 2, subwoofers: 2, seats: seats, captures: measurer.captures,
+            settings: settings)
+        baselineSeen = MIMOTreatmentController.speakerBaseline(plan: plan, rows: controller.rows, seats: seats, sampleRate: 48_000)
+        XCTAssertEqual(baselineSeen.count, 4 * seats.count)
+        controller.requestPermit()
+        XCTAssertFalse(host.treatment.isArmed)
+        XCTAssertFalse(controller.permitRefusals.isEmpty)
+        // The treated repeat measurement here is the baseline itself (nothing changed), so the criteria fail by name, but the
+        // spatial report was built from the per-speaker baseline (no "report missing") and the predicted decay passes.
+        let result = try XCTUnwrap(host.verifications.last ?? nil)
+        XCTAssertFalse(result.failures.contains(.spatialReportMissing), "\(result.failures)")
+        XCTAssertTrue(result.failures.contains(.spatialCriteriaFailed))
+        XCTAssertFalse(result.failures.contains { if case .decayNotShortened(.predicted, _) = $0 { return true } else { return false } })
+    }
+
+    /// S11: a designed routed stage arms with a test permit (the production registry issues none before E22) and bypasses.
+    func testDesignedRoutedStageArmsOnlyWithATestPermitAndBypasses() async throws {
+        wayTrimDB = -6
+        modeGain = 0.2
+        let (controller, host, _, _) = try rig()
+        await controller.measureWays()
+        await controller.design()
+        XCTAssertEqual(controller.phase, .designed, "\(controller.phase)")
+        let stage = try XCTUnwrap(host.treatment.stage)
+        await controller.arm()
+        XCTAssertFalse(controller.isArmed, "no permit: the arm refuses")
+        host.treatment.setPermit(.init(fingerprint: host.treatment.currentFingerprint(stage, host.treatmentContext())))
+        controller.refreshReadout()
+        XCTAssertFalse(controller.isArmed, "a permit alone never arms")
+        await controller.arm()
+        XCTAssertTrue(controller.isArmed, controller.armMessage ?? "")
+        controller.bypass()
+        XCTAssertFalse(controller.isArmed)
+    }
+
+    /// G46: a routed prediction renders the programme at the stage per speaker (source lanes, before ROUTE), not an equal feed.
+    func testRoutedFeedsAreRenderedPerSourceLane() throws {
+        let routing = twoWayMainsAndSubs()
+        let host = try FakeHost(flags: flags(), routing: routing, rate: 48_000)
+        let configuration = try XCTUnwrap(host.configuration)
+        XCTAssertNotNil(configuration.routing)
+        XCTAssertNil(MIMOUnroutedPlantModel.upstreamConfiguration(of: configuration).routing)
+        let feeds = try MIMOUnroutedPlantModel.upstreamFeeds(of: configuration, lanes: [0, 1, 2, 3])
+        XCTAssertEqual(feeds.count, 4)
+        XCTAssertTrue(feeds.allSatisfy { $0.contains { $0 != 0 } }, "each speaker has a feed at the stage")
     }
 }

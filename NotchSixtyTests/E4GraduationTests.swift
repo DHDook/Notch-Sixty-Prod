@@ -40,7 +40,7 @@ final class E4GraduationTests: XCTestCase {
             XCTAssertFalse(flag.graduated, flag.id)
             XCTAssertFalse(store.isEnabled(flag), flag.id)
         }
-        XCTAssertFalse(store.isEnabled(.mimoTreatment))
+        XCTAssertTrue(store.isEnabled(.mimoTreatment), "E19 S11 graduated it (available, never armed: `E19GraduationTests`)")
     }
 
     func testEachGraduatedFlagCanBeSwitchedOffAtLaunch() {

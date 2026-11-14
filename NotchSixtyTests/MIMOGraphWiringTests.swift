@@ -28,7 +28,7 @@ final class MIMOGraphWiringTests: XCTestCase {
         FeatureFlags(
             defaults: UserDefaults(suiteName: "MIMOGraphWiringTests.\(UUID().uuidString)") ?? .standard,
             policy: .launchArgumentOnly,
-            arguments: on ? [FeatureFlags.launchArgument, FeatureFlag.mimoTreatment.id] : [])
+            arguments: [FeatureFlags.launchArgument, (on ? "" : "-") + FeatureFlag.mimoTreatment.id])
     }
 
     private func context(

@@ -188,13 +188,16 @@ extension FeatureFlag {
         graduated: true
     )
 
-    /// E19: MIMO room treatment on the unified graph. S3 gates the Swift designer on it; later slices add the stages,
-    /// the safety layer, the verifier and the controls. Off: today's code paths, UI and routing refusal. On: the new
-    /// designer and controls; live output still needs a permit and the user's arm. Removed when E19 ships.
+    /// E19: MIMO room treatment on the unified graph (designer, stage, safety layer, verifier and Room Treatment controls).
+    /// Off: today's code paths, UI and routing refusal. On: the new designer and controls; live output still needs a permit
+    /// and the user's arm. Graduated by E19 S11 (default on; `-NotchSixtyFeatures -e19.mimo-treatment` switches it off):
+    /// available, never armed. No permit exists before the E22 qualification, and the arm switch, the written authorisation
+    /// path and the PR75 verification are unchanged. The flag-cleanup phase after E22 removes it.
     static let mimoTreatment = FeatureFlag(
         id: "e19.mimo-treatment",
         title: "MIMO room treatment",
-        epic: "E19"
+        epic: "E19",
+        graduated: true
     )
 
     /// E28 S7: compressor mix, link amount, peak/RMS detector and lookahead on the unified graph (ABI v33). Swift decides;

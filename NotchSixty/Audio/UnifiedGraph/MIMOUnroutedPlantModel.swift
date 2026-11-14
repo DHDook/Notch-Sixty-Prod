@@ -128,6 +128,8 @@ enum MIMOUnroutedPlantModel {
     static func upstreamConfiguration(of configuration: UnifiedGraphConfiguration) -> UnifiedGraphConfiguration {
         var up = configuration
         up.mimo = nil
+        // E19 G46: a routed graph's feed at the stage is on the source lanes, before ROUTE, so a render stops there.
+        up.routing = nil
         up.deltaAudition = false
         up.stereoStages.roomFIR = nil
         up.stereoStages.speakerIR = nil
