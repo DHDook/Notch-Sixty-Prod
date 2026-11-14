@@ -34,7 +34,7 @@ extension FeatureFlag {
         .legacyKernel, .ancEngineLease, .adaptiveTonalLive, .earnedCap, .feedForwardLive,
         .noiseSurvey, .conversationUnmasking, .virtualMicrophone, .zones, .headPositionCamera, .overnight,
         .subAwareAnc, .longFIR, .outputProtection, .headphones, .mimoTreatment, .dynamicsExtras, .roomModel,
-        .parallelRender, .multirate
+        .parallelRender, .multirate, .rateAdapt
     ]
 
     /// E6 S11: the unified graph is the default renderer. Turning this on selects the frozen
@@ -228,6 +228,17 @@ extension FeatureFlag {
         title: "Parallel render workers",
         epic: "E20",
         graduated: true
+    )
+
+    /// E7 S2: imported assets follow the device rate. A speaker impulse response that carries a rate, and a SOFA
+    /// HRTF previewed in the research workspace, are resampled (core `n60/resample.h`, cached per rate, original kept)
+    /// when used at another rate, and the row says "Resampled from 48 kHz". Off: a rate mismatch refuses as before.
+    /// Measurements used for design or verification refuse a mismatch either way. Swift decides; the engine never
+    /// reads the flag. E7 S3 adds the per-rate plug-in bypass; S5 graduates it.
+    static let rateAdapt = FeatureFlag(
+        id: "e7.rate-adapt",
+        title: "Imported assets follow the device rate",
+        epic: "E7"
     )
 
     /// E20 S7 and S8 (multirate low-frequency paths) were skipped on the measured entry rule (12 Nov 2026), so no code

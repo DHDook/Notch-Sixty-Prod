@@ -4580,32 +4580,19 @@ final class AudioIOEngine {
         return PreparedRoomCorrectionProgram(slot: slot, programInfo: programInfo)
     }
 
-    private func validateSpeakerIRFilter(
-        _ filter: SpeakerIRFilter,
-        outputSampleRate: Double
-    ) throws {
-        let tapCount = filter.leftTaps.count
-        guard tapCount > 0, tapCount <= Int(N60_CONVOLUTION_MAX_TAPS) else {
-            throw SpeakerIRConfigurationError.invalidTapCount(tapCount)
-        }
-        if let rightTaps = filter.rightTaps, rightTaps.count != tapCount {
-            throw SpeakerIRConfigurationError.mismatchedStereoTapCount(left: tapCount, right: rightTaps.count)
-        }
-        guard filter.leftTaps.allSatisfy(\.isFinite),
-              filter.rightTaps?.allSatisfy(\.isFinite) ?? true else {
-            throw SpeakerIRConfigurationError.nonFiniteTap
-        }
-        try filter.validateSampleRate(forOutputSampleRate: outputSampleRate)
-        guard filter.declaredLatencyFrames < UInt32(tapCount) else {
-            throw SpeakerIRConfigurationError.invalidDeclaredLatency(filter.declaredLatencyFrames)
-        }
+    /// Validates `filter` for `outputSampleRate` and returns what plays: with `e7.rate-adapt` a filter that carries
+    /// another rate is resampled (cached, control plane; E7 S2), otherwise a rate mismatch refuses as before.
+    @discardableResult
+    private func validateSpeakerIRFilter(_ filter: SpeakerIRFilter, outputSampleRate: Double) throws -> SpeakerIRFilter {
+        try SpeakerIRRateAdapter.shared.validated(
+            filter, outputSampleRate: outputSampleRate, enabled: FeatureFlags().isEnabled(.rateAdapt))
     }
 
     private func prepareSpeakerIRProgram(
         _ filter: SpeakerIRFilter,
         for session: CoreAudioTransportSession
     ) throws -> PreparedSpeakerIRProgram {
-        try validateSpeakerIRFilter(filter, outputSampleRate: session.outputFormat.sampleRate)
+        let filter = try validateSpeakerIRFilter(filter, outputSampleRate: session.outputFormat.sampleRate)
 
         let slot = nextSpeakerIRProgramSlot % UInt32(N60_CONVOLUTION_PROGRAM_SLOTS)
         let programInfo: N60ConvolutionProgramInfo
@@ -4744,10 +4731,10 @@ final class AudioIOEngine {
             }
         }
         if inputs.speakerIR.enabled {
-            guard let filter = inputs.speakerIR.filter else {
+            guard let deployed = inputs.speakerIR.filter else {
                 throw SpeakerIRConfigurationError.filterRequired
             }
-            try validateSpeakerIRFilter(filter, outputSampleRate: sampleRate)
+            let filter = try validateSpeakerIRFilter(deployed, outputSampleRate: sampleRate)
             retained[3] = UnifiedGraphFIRProgram(
                 generation: 3, left: filter.leftTaps, right: filter.rightTaps,
                 declaredLatencyFrames: filter.declaredLatencyFrames)

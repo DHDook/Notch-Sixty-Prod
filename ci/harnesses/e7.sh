@@ -15,3 +15,18 @@ if selected e7_rate_capacity; then
         failed+=(e7_rate_capacity)
     fi
 fi
+
+# E7 S2: asset resampler (n60/resample.h) at all 64 rate pairs: passband, rejection, onset, tap count, reference match.
+if selected e7_resample; then
+    build_core_objs
+    if [ "$CORE_OK" = 1 ]; then
+        if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -Icore/include -Icore/src core/tests/test_resample.cpp \
+            "${CORE_OBJS[@]}" -o "$OUT/e7_core_resample" && run_timed "$OUT/e7_core_resample"; then
+            passed+=(e7_core_resample)
+        else
+            failed+=(e7_core_resample)
+        fi
+    else
+        failed+=(e7_resample)
+    fi
+fi

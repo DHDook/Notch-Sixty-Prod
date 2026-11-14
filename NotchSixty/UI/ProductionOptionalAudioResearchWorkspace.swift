@@ -77,14 +77,19 @@ struct ProductionOptionalAudioResearchWorkspace: View {
                 let matched = engine.selectedOutputDevice.map {
                     abs($0.nominalSampleRate - profile.sampleRate) < 0.5
                 } ?? false
+                // E7 S2 (`e7.rate-adapt`): with an output selected the profile is resampled when it is activated at the
+                // output rate (Headphones does it from the stored original), so a mismatch is a note, not a refusal.
+                let adapts = FeatureFlags().isEnabled(.rateAdapt) && engine.selectedOutputDevice != nil
                 Label(
                     matched
                         ? "Profile matches selected output nominal rate."
-                        : "Output rate mismatch or no output selected; no implicit SOFA resampling or deployment.",
-                    systemImage: matched ? "checkmark.shield" : "exclamationmark.shield"
+                        : adapts
+                            ? "\(SpeakerIRRateAdapter.resampledNote(fromHz: profile.sampleRate)) when activated at the output rate; the original is kept."
+                            : "Output rate mismatch or no output selected; no implicit SOFA resampling or deployment.",
+                    systemImage: matched ? "checkmark.shield" : (adapts ? "arrow.triangle.2.circlepath" : "exclamationmark.shield")
                 )
                 .font(.caption)
-                .foregroundStyle(matched ? Color.secondary : Color.orange)
+                .foregroundStyle(matched || adapts ? Color.secondary : Color.orange)
 
                 HStack {
                     Text("Azimuth")

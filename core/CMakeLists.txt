@@ -2,7 +2,7 @@
 cmake_minimum_required(VERSION 3.20)
 project(n60core LANGUAGES C CXX)
 
-add_library(n60core STATIC src/graph.cpp src/snapshot.cpp src/fft.cpp src/stages_dsp.cpp src/conv/nufir.cpp src/stages_system.cpp src/stages_matrix.cpp src/stages_generator.cpp src/stages_cleanup.cpp src/stages_image.cpp src/stages_loudness.cpp src/stages_multiband.cpp src/stages_route.cpp src/stages_mimo.cpp src/layout.cpp
+add_library(n60core STATIC src/graph.cpp src/snapshot.cpp src/fft.cpp src/stages_dsp.cpp src/conv/nufir.cpp src/stages_system.cpp src/stages_matrix.cpp src/stages_generator.cpp src/stages_cleanup.cpp src/stages_image.cpp src/stages_loudness.cpp src/stages_multiband.cpp src/stages_route.cpp src/stages_mimo.cpp src/layout.cpp src/resample.cpp
     src/measure/offline_fft.cpp src/measure/ess.cpp src/measure/deconvolve.cpp src/measure/reference_room.cpp src/measure/timing.cpp src/measure/distortion.cpp src/measure/decay.cpp src/measure/waterfall.cpp src/measure/monitor_ring.cpp src/measure/spl.cpp src/measure/rta.cpp src/measure/predict.cpp src/mimo/design.cpp
     src/correct/minphase.cpp src/correct/design.cpp src/correct/synth.cpp src/correct/bass.cpp src/correct/multisub_search.cpp
     src/xover/xover.cpp src/headroom/headroom.cpp src/anc/fxlms.cpp src/anc/remote_tonal.cpp)
@@ -288,6 +288,11 @@ add_test(NAME n60core_lane_delay COMMAND n60core_lane_delay_test)
 add_executable(n60core_rate_capacity_test tests/test_rate_capacity.cpp)
 target_link_libraries(n60core_rate_capacity_test PRIVATE n60core)
 add_test(NAME n60core_rate_capacity COMMAND n60core_rate_capacity_test)
+
+# E7 S2: control-plane asset resampler at all 64 pairs of the eight standard rates.
+add_executable(n60core_resample_test tests/test_resample.cpp)
+target_link_libraries(n60core_resample_test PRIVATE n60core)
+add_test(NAME n60core_resample COMMAND n60core_resample_test)
 
 add_executable(n60core_delta_audition_test tests/test_delta_audition.cpp)
 target_link_libraries(n60core_delta_audition_test PRIVATE n60core)
