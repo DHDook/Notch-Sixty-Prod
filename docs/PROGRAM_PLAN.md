@@ -178,6 +178,8 @@ Dirac now sells ART on the Mac, so this needs the same path to authorisation as 
 - [~] Headroom and excursion safety per contributing speaker: S5 `e19/mimo-safety` built dark, PR open; not published until S6 (see `docs/epics/E19.md`)
 - [~] S6 `e19/mimo-graph-wiring`: `N60_STAGE_MIMO` on the unified graph, arm controller, sliding thermal window built dark, PR open, no open-question gaps; wired by S7/S8 (see `docs/epics/E19.md`)
 - [~] S9 `e19/routed-design`: routed design maths (`MIMORoutedTreatmentPlanner`: speaker sources, in-band ways, plants through the rendered way chain, support range, per-way budget, excursion corner, routed fingerprint and class fields) and in-band ways in the speaker list built; the design call and `N60_STAGE_MIMO_ROUTED` for routed speakers are S10, per-way per-seat capture is G36 (see `docs/epics/E19.md`)
+- [~] S10 `e19/routed-stage-and-wiring`: routed MIMO stage (ABI v40), dead-man lease and routed design wiring built, PR open; the design call is open as G41 pending the owner, so not ticked (see `docs/epics/E19.md`)
+- [ ] S10b `e19/routed-way-capture`: per-way seat capture (G36), support overrides (G38), matrix-only outputs (G39), routed verification and permit (G42)
 - [ ] Authorise live treatment only through the PR75 verification path, then re-qualify on the unified graph
 - [ ] S11 graduate `e19.mimo-treatment` (available, never armed; arm and permit unchanged; the bench no longer gates it; removal is the FC phase)
 

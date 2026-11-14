@@ -34,7 +34,7 @@ extern "C" {
 #endif
 
 /* Bumped on any incompatible change to a struct or function below. */
-#define N60_GRAPH_ABI_VERSION 39u
+#define N60_GRAPH_ABI_VERSION 40u
 
 typedef struct n60_graph n60_graph; /* opaque */
 
@@ -128,7 +128,9 @@ typedef enum n60_stage_kind {
     N60_STAGE_DELTA_CAPTURE = 50,    /* position 1.5: after SANITISE, before METER_IN. Pair stage: records the input. */
     N60_STAGE_DELTA_SUBTRACT = 51,   /* position 27.5: after PROTECTION, before MUTE. Pair stage: output minus the aligned input. */
     /* ABI v33 (E19 S4). MIMO room treatment: see "MIMO treatment" below. */
-    N60_STAGE_MIMO = 52              /* position 13.5: after BASS_MGMT and STEREO_CROSSOVER, before ROOM_FIR. Lane mask of 1..8 source lanes. */
+    N60_STAGE_MIMO = 52,             /* position 13.5: after BASS_MGMT and STEREO_CROSSOVER, before ROOM_FIR. Lane mask of 1..8 source lanes. */
+    /* ABI v40 (E19 S10). MIMO treatment on a routed graph: position 23.55, after ROUTE, before XOVER. See "MIMO treatment, routed". */
+    N60_STAGE_MIMO_ROUTED = 53
 } n60_stage_kind;
 
 /* Delta audition (ABI v30, E6 S12h part 2b; lane masks and fractional alignment in ABI v31, part 3). The stereo kernel's
@@ -874,11 +876,11 @@ n60_status n60_graph_read_multiband(n60_graph *graph, uint32_t stageId, n60_mult
  * paramCount = 8 + S + S * S * T, all copied into the snapshot:
  *   [0] D (16, 32, 64 or 128; must be the family of the graph rate)  [1] T taps per filter (1..4096)
  *   [2] S (equals the lane count)  [3] tauFrames (integer, 0 .. 0.02 s of frames)
- *   [4] arm (0/1, LIVE)  [5] trip (0/1, LIVE)  [6], [7] reserved, 0
+ *   [4] arm (0/1, LIVE)  [5] trip (0/1, LIVE)  [6] heartbeat (LIVE), [7] lease ms (0 = none): see "MIMO treatment, routed"
  *   [8 .. 8+S) per-source row gain bound G_s (linear, > 0): the design's bound on the RMS of delta_s over the RMS of the
  *        program feeds
  *   [8+S ..) taps, E_st at ((s * S + t) * T + n), n = 0 .. T-1 (the layout of n60_mimo_design).
- * Only [4] and [5] are live; everything else is topology (UNSUPPORTED).
+ * Only [4], [5] and [6] are live; everything else is topology (UNSUPPORTED).
  * Arming. arm = 1 starts a 3 s monotonic (smoothstep) fade of g from 0 to 1; arm = 0, trip = 1 or a latched fault brings it
  * back to 0 in 10 ms. trip = 1 also latches `held`. A graph rebuild latches `held` in both instances and starts the
  * incoming instance at g = 0 (the delta is never faded through a rebuild). While `held`, g stays 0; `held` and the fault
@@ -912,9 +914,25 @@ typedef struct n60_mimo_readback {
     uint32_t latencyFrames;   /* L */
     float boundRatioMax[8];   /* worst delta envelope over (G_s^2 * input envelope), linear power ratio, since the previous read (reset by the read) */
     float deltaPeak[8];       /* peak |delta| per source (before g) since the previous read (reset by the read) */
-    uint32_t faultReason;     /* E19 S5: with faultLatched, 1 monitor bound, 2 thermal budget; 0 otherwise (was `reserved`, always 0; same size) */
+    uint32_t faultReason;     /* E19 S5: with faultLatched, 1 monitor bound, 2 thermal budget, 3 lease (E19 S10); 0 otherwise (was `reserved`, always 0; same size) */
 } n60_mimo_readback;
 n60_status n60_graph_read_mimo(n60_graph *graph, uint32_t stageId, n60_mimo_readback *out);
+
+/* MIMO treatment, routed (ABI v40, E19 S10; design note 10). N60_STAGE_MIMO_ROUTED runs the kernel above on a routed graph,
+ * at position 23.55 (after ROUTE, before XOVER, DRIVER_FIR, DELAY and PROTECTION), on a lane mask of W = 1..32 output lanes
+ * (every way lane of the routing). Sources are speakers, not lanes: S = 1..8 (parameter [2]); source s listens to the lane at
+ * mask position inPos_s (its lowest in-band way, its pre-crossover feed) and its delta is added to up to four lanes (its
+ * in-band ways); every other lane of the mask, tweeters included, carries the program delayed by L exactly as the kernel
+ * above delays it, so all lanes keep one latency. A lane takes the delta of at most one source. Unarmed, every lane is
+ * the input delayed by L bit for bit. Matrix-only outputs may be in the mask (delta zero) or aligned by the host.
+ * paramCount = 8 + S + S * S * T + 5 * S: the parameters of N60_STAGE_MIMO with parameter [2] = S, then per source
+ *   inPos, inj0, inj1, inj2, inj3   (mask positions, -1 = unused; at least inj0 is used).
+ * Arming, monitor, thermal budget, readback (`n60_graph_read_mimo`) and rebuild rules are the unrouted stage's.
+ * Dead-man lease (both kinds, E19 G22): parameter [7] = lease in milliseconds (0 = none, integer up to 60000), [6] = heartbeat
+ * word (LIVE, an integer of magnitude at most 10^6). When the lease is set and arm = 1, the host must change [6] at least
+ * once per lease; if the word stays unchanged for the lease the stage latches a fault (`faultReason` 3), fades the delta out
+ * in 10 ms and holds like any fault, so a stalled control plane cannot leave the stage armed. Counted in frames. Realtime:
+ * no allocation, one extra history ring per mask lane (4 * ringN bytes each), O(W) work per frame beyond the kernel. */
 
 /* Reads the over-range counter of a METER_IN, METER_OUT or FINAL_METER stage lane: samples with
  * |x| > 1.0 since the previous read (reset by the read). */

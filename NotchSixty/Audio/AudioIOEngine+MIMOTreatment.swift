@@ -71,7 +71,7 @@ extension AudioIOEngine {
     func disarmMIMOTreatment() { mimoGraphTreatment.userDisarm() }
 
     /// Called while a new session's configuration is built: attaches the staged stage (disarmed, held) when the flag is on
-    /// and the graph accepts it. A graph that refuses it (routed, Quiet Zone actuators, no hard limit) runs without the
+    /// and the graph accepts it. A graph that refuses it (a stage that does not match the routing, Quiet Zone actuators, no hard limit) runs without the
     /// stage, so audio is never lost to the treatment, and the arm gate "stage attached" stays closed.
     func attachStagedMIMOTreatment(to configuration: inout UnifiedGraphConfiguration) {
         mimoGraphTreatment.graphRebuilt()
@@ -83,6 +83,20 @@ extension AudioIOEngine {
         configuration.mimo = stage
         mimoGraphTreatment.chainDigest = MIMOGraphTreatment.chainDigest(of: configuration)
         startMIMOPoll()
+    }
+
+    /// E19 S10: compiles the routing onto the base graph and attaches the staged treatment (routed or not) to the result.
+    /// The attach keeps its own check (`makeSpec`), so a stage that does not fit this routing is left off and audio runs.
+    func compileRoutedAttachingTreatment(
+        _ routing: SpeakerRoutingConfiguration, onto base: UnifiedGraphConfiguration
+    ) throws -> UnifiedGraphConfiguration {
+        do {
+            var configuration = try SpeakerRoutingCompiler.compile(routing, onto: base)
+            attachStagedMIMOTreatment(to: &configuration)
+            return configuration
+        } catch SpeakerRoutingCompileError.invalid(let errors) {
+            throw LiveNChannelTransportError.routingRefused("the routing is not valid (\(errors.map { "\($0)" }.joined(separator: ", "))).")
+        }
     }
 
     /// The control-plane keeper. While it runs the lease gate is open; each tick re-checks the arm switch against the

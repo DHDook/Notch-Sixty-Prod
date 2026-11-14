@@ -86,6 +86,11 @@ extension AudioIOEngine: MIMOTreatmentHost {
 
     func treatmentReadback() -> n60_mimo_readback? { nChannelTransportSession?.peekMIMOReadback() }
 
+    func treatmentRouting() -> SpeakerRoutingConfiguration? { speakerRoutingConfiguration }
+
+    /// No production source of per-way captures exists yet (E19 G36, slice S10b): a routed design refuses by name until then.
+    func treatmentWayCaptures() -> [MIMORoutedWayCapture] { [] }
+
     /// No production source of hardware acceptance records exists before E22 (bench), so none is offered.
     func hardwareAcceptance() -> MIMORoomTreatmentHardwareAcceptance? { nil }
 }

@@ -5412,9 +5412,7 @@ final class AudioIOEngine {
             guard routing.outputEndpoints.count == routePlan.routedOutputPhysicalChannels.count else {
                 throw LiveNChannelTransportError.routingRefused("the routing outputs do not match the output plan.")
             }
-            do { return try SpeakerRoutingCompiler.compile(routing, onto: base) } catch SpeakerRoutingCompileError.invalid(let errors) {
-                throw LiveNChannelTransportError.routingRefused("the routing is not valid (\(errors.map { "\($0)" }.joined(separator: ", "))).")
-            }
+            return try compileRoutedAttachingTreatment(routing, onto: base)
         case .failure(let reason): throw LiveNChannelTransportError.unifiedGraphRejected(reason)
         }
     }

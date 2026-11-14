@@ -248,7 +248,13 @@ final class MIMOGraphTreatment: ObservableObject {
             arm.disarm(.downstreamChainChanged)
             return
         }
-        if let readback, readback.faultLatched != 0 { arm.disarm(.treatmentFault) }
+        if let readback, readback.faultLatched != 0 { arm.disarm(.treatmentFault); return }
+        // Dead-man lease (E19 G22): every poll tick while armed changes word [6]; a silent host latches the core's fault.
+        if var beating = stage {
+            beating.heartbeat = beating.heartbeat >= UnifiedGraphMIMOStage.maxHeartbeat ? 1 : beating.heartbeat + 1
+            stage = beating
+            post(beating)
+        }
     }
 
     private func environment(_ context: Context) -> LiveTreatmentEnvironment {

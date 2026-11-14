@@ -233,7 +233,7 @@ struct UnifiedGraphConfiguration: Equatable, Sendable {
     /// E6 S12g4: speaker optimizer FIR (N-channel graphs). nil leaves the graph as before.
     var optimizerFIR: UnifiedGraphOptimizerFIR?
     /// E19 S6: MIMO room treatment (`N60_STAGE_MIMO`, behind `e19.mimo-treatment`; the flag is read in Swift by the arm
-    /// controller, never here). nil leaves the graph bit-identical. Not valid on a routed graph (until E19 S10).
+    /// controller, never here). nil leaves the graph bit-identical. A routed graph takes only a routed design (E19 S10).
     var mimo: UnifiedGraphMIMOStage?
 
     var subwooferCount: Int { bassManagement?.subwoofers.count ?? 0 }
@@ -468,11 +468,12 @@ struct UnifiedGraphConfiguration: Equatable, Sendable {
             add(N60_STAGE_BASS_MGMT, Self.bassStageId, mask: mainMask,
                 params: try Self.bassParameters(bass, firstSubLane: programLanes))
         }
-        if let mimo {
-            stages += try mimo.stageSpecs(
-                sampleRate: sampleRate, graphLaneCount: programLanes + subwooferCount, hasRouting: routing != nil,
-                hasAncActuators: ancActuators != nil, hasHardLimit: outputProtection != nil)
+        let mimoSpecs = { (mimo: UnifiedGraphMIMOStage) throws -> [UnifiedGraphStageSpec] in
+            try mimo.stageSpecs(
+                sampleRate: self.sampleRate, graphLaneCount: programLanes + self.subwooferCount + (self.routing?.outputLaneCount ?? 0),
+                routing: self.routing, hasAncActuators: self.ancActuators != nil, hasHardLimit: self.outputProtection != nil)
         }
+        if let mimo, mimo.routed == nil { stages += try mimoSpecs(mimo) }
         if let room = stereo.roomFIR {
             try addFIR(N60_STAGE_ROOM_FIR, room, baseId: Self.roomFIRStageId)
         }
@@ -522,6 +523,7 @@ struct UnifiedGraphConfiguration: Equatable, Sendable {
         }
         let routed = try routeStages(programLanes: programLanes)
         stages += routed.route
+        if let mimo, mimo.routed != nil { stages += try mimoSpecs(mimo) }
         stages += routed.rest
         for (index, lane) in lanes.enumerated() {
             if lane.calibrationDelayFrames > 0 {

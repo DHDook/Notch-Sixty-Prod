@@ -328,11 +328,11 @@ static void testMonitor() {
 // E19 S5, design note 6 and decision D5: the thermal budget. One source, one tap c: the delta is c times the in-band feed, so the
 // delta power over the program power is c^2 exactly. The monitor bound is set far above it, so only the 10 s thermal window can
 // fault. -5.9 dB faults when the first 10 s window ends and not before; -6.1 dB never does.
-static n60_mimo_readback readMimo(n60_graph *g) {
+static n60_mimo_readback readMimo(n60_graph *g, uint32_t id = 7) {
     n60_mimo_readback rb;
     std::memset(&rb, 0, sizeof rb);
     rb.structSize = sizeof rb;
-    n60_graph_read_mimo(g, 7, &rb);
+    n60_graph_read_mimo(g, id, &rb);
     return rb;
 }
 
@@ -552,6 +552,171 @@ static void testBadDescs() {
     CHECK(tryBuild(48000, 2, &st, 1, &g) != N60_STATUS_OK, "empty mask accepted");
 }
 
+// ---- N60_STAGE_MIMO_ROUTED (ABI v40, E19 S10) -------------------------------------------------------------------------
+
+struct Routed {
+    Cfg c;
+    uint32_t W = 0;
+    std::vector<uint32_t> in;                  // per source: input position
+    std::vector<std::vector<int>> inj;         // per source: injection positions (up to 4)
+    float beat = 0.0f, leaseMs = 0.0f;
+    std::vector<float> params(double rate) {
+        std::vector<float> p = c.params(rate);
+        p[6] = beat;
+        p[7] = leaseMs;
+        for (uint32_t s = 0; s < c.S; ++s) {
+            p.push_back(float(in[s]));
+            for (uint32_t k = 0; k < 4; ++k) p.push_back(k < inj[s].size() ? float(inj[s][k]) : -1.0f);
+        }
+        return p;
+    }
+};
+
+static n60_status tryBuildRouted(double rate, Routed &r, std::vector<float> &keep, n60_graph **g) {
+    keep = r.params(rate);
+    uint64_t mask = 0;
+    for (uint32_t w = 0; w < r.W; ++w) mask |= uint64_t(1) << (w + 2);  // lanes 2.. so the mask is not the first lanes
+    n60_stage_desc st = stg(N60_STAGE_MIMO_ROUTED, 9, 0, keep.data(), uint32_t(keep.size()), mask);
+    return tryBuild(rate, r.W + 2, &st, 1, g);
+}
+
+// Two speakers: A = woofer (0) + tweeter (1); B = two woofers (2, 3) + tweeter (4); position 5 is a matrix-only output.
+static Routed twoSpeakers(double rate, float arm) {
+    Routed r;
+    r.c.S = 2; r.c.T = 120; r.c.tau = uint32_t(0.015 * rate);
+    r.c.gains = {20.0f, 20.0f};
+    r.c.taps.assign(size_t(2) * 2 * r.c.T, 0.0f);
+    uint32_t seed = 17;
+    for (size_t i = 0; i < r.c.taps.size(); ++i) {
+        seed = seed * 1664525u + 1013904223u;
+        r.c.taps[i] = 0.03f * (float(seed >> 8) / 8388608.0f - 1.0f) * float(std::exp(-double(i % r.c.T) / 30.0));
+    }
+    r.c.arm = arm;
+    r.W = 6;
+    r.in = {0, 2};
+    r.inj = {{0}, {2, 3}};
+    return r;
+}
+
+static void testRoutedUnarmedAndArmed() {
+    for (double rate : kRates) {
+        for (int armedRun = 0; armedRun < 2; ++armedRun) {
+            if (armedRun == 1 && (rate == 88200 || rate == 176400 || rate == 352800)) continue;  // same four families as the unrouted test
+            Routed r = twoSpeakers(rate, armedRun ? 1.0f : 0.0f);
+            std::vector<float> keep;
+            n60_graph *g = nullptr;
+            CHECK(tryBuildRouted(rate, r, keep, &g) == N60_STATUS_OK, "routed build at %.0f", rate);
+            if (g == nullptr) continue;
+            const uint32_t L = latencyOf(rate, r.c.tau);
+            CHECK(n60_graph_latency_frames(g) == L, "routed latency");
+            const uint32_t N = armedRun ? uint32_t(4.0 * rate) : L + 3000;
+            Lanes x = noise(r.W, N, 5, 0.2f);
+            for (auto &ch : x) { float z = 0; for (auto &v : ch) { z += 0.05f * (v - z); v = z * 4.0f; } }
+            Lanes in = zeros(r.W + 2, N);
+            for (uint32_t w = 0; w < r.W; ++w) in[w + 2] = x[w];
+            Lanes out = run(g, in, 417);
+            // Reference: each source's delta from its own input lane.
+            Cfg c = r.c;
+            Lanes src(2);
+            src[0] = x[r.in[0]];
+            src[1] = x[r.in[1]];
+            const Lanes ref = armedRun ? referenceDelta(rate, src, c) : zeros(2, N);
+            uint32_t Dq = 0;
+            double lr = 0;
+            n60_mimo_low_rate(rate, &Dq, &lr);
+            const uint32_t from = uint32_t(3.2 * rate);
+            for (uint32_t w = 0; w < r.W; ++w) {
+                int owner = -1;
+                for (uint32_t s = 0; s < 2; ++s)
+                    for (int v : r.inj[s]) owner = (uint32_t(v) == w) ? int(s) : owner;
+                if (!armedRun || owner < 0) {
+                    bool exact = true;
+                    for (uint32_t i = 0; i < N; ++i) exact &= (out[w + 2][i] == (i >= L ? x[w][i - L] : 0.0f));
+                    CHECK(exact, "routed lane %u is not the bit-exact delay by L (armed %d, %.0f)", w, armedRun, rate);
+                } else {
+                    std::vector<float> got, want;
+                    for (uint32_t i = from; i < N; ++i) {
+                        got.push_back(out[w + 2][i] - x[w][i - L]);
+                        want.push_back(ref[owner][i - 10 * Dq]);
+                    }
+                    const double e = dbRel(got, want, 0);
+                    CHECK(e < -80.0, "routed delta vs reference %.1f dB (lane %u, %.0f)", e, w, rate);
+                }
+            }
+            // The program lanes of the speakers' injected ways carry the same delta: ways 2 and 3 of speaker B are identical.
+            if (armedRun) {
+                bool same = true;
+                for (uint32_t i = from; i < N; ++i)
+                    same &= ((out[4][i] - x[2][i - L]) == (out[5][i] - x[3][i - L])) || std::fabs((out[4][i] - x[2][i - L]) - (out[5][i] - x[3][i - L])) < 1e-5f;
+                CHECK(same, "in-band ways of one speaker carry different deltas at %.0f", rate);
+            }
+            n60_graph_retire(g);
+        }
+    }
+}
+
+static void testRoutedLease() {
+    const double rate = 48000;
+    for (int beating = 0; beating < 2; ++beating) {
+        Routed r = twoSpeakers(rate, 1.0f);
+        r.leaseMs = 200.0f;
+        std::vector<float> keep;
+        n60_graph *g = nullptr;
+        CHECK(tryBuildRouted(rate, r, keep, &g) == N60_STATUS_OK, "lease build");
+        if (g == nullptr) continue;
+        Lanes in = noise(r.W + 2, uint32_t(1.0 * rate), 3, 0.1f);
+        run(g, in, 256, [&](uint32_t bi) {
+            if (beating) post(g, 9, 6, float(bi % 1000));
+        });
+        const n60_mimo_readback rb = readMimo(g, 9);
+        if (beating) {
+            CHECK(rb.faultLatched == 0 && rb.state != 0, "a live heartbeat kept the stage armed (state %u fault %u)", rb.state, rb.faultLatched);
+        } else {
+            CHECK(rb.faultLatched == 1 && rb.faultReason == 3 && rb.held == 1, "a silent host must latch the lease fault (fault %u reason %u)",
+                  rb.faultLatched, rb.faultReason);
+        }
+        n60_graph_retire(g);
+    }
+}
+
+static void testRoutedBadDescs() {
+    const double rate = 48000;
+    auto bad = [&](const char *what, const std::function<void(Routed &)> &edit) {
+        Routed r = twoSpeakers(rate, 0.0f);
+        edit(r);
+        std::vector<float> keep;
+        n60_graph *g = nullptr;
+        CHECK(tryBuildRouted(rate, r, keep, &g) != N60_STATUS_OK, "routed desc accepted: %s", what);
+        if (g != nullptr) n60_graph_retire(g);
+    };
+    bad("two sources inject one lane", [](Routed &r) { r.inj[1] = {0, 3}; });
+    bad("injection beyond the mask", [](Routed &r) { r.inj[0] = {6}; });
+    bad("input beyond the mask", [](Routed &r) { r.in[1] = 9; });
+    bad("no injection lane", [](Routed &r) { r.inj[0] = {}; });
+}
+
+static void testRoutedNoAllocations() {
+    const double rate = 384000;
+    Routed r;
+    r.c.S = 8; r.c.T = 200; r.c.tau = uint32_t(0.015 * rate);
+    r.c.gains.assign(8, 10.0f);
+    r.c.taps.assign(size_t(8) * 8 * r.c.T, 0.001f);
+    r.c.arm = 1.0f;
+    r.W = 24;
+    for (uint32_t s = 0; s < 8; ++s) {
+        r.in.push_back(s * 3);
+        r.inj.push_back({int(s * 3), int(s * 3 + 1)});
+    }
+    std::vector<float> keep;
+    n60_graph *g = nullptr;
+    CHECK(tryBuildRouted(rate, r, keep, &g) == N60_STATUS_OK, "24 way lane build");
+    if (g == nullptr) return;
+    Lanes in = noise(26, 40000, 9, 0.1f);
+    run(g, in, 256, {}, true);
+    CHECK(allocs.load() == 0, "routed allocations in the callback: %ld", allocs.load());
+    n60_graph_retire(g);
+}
+
 int main() {
     testBadDescs();
     testUnarmedDelay();
@@ -565,6 +730,10 @@ int main() {
     testRebuildMute();
     testBlockSizeIndependence();
     testNoAllocations();
+    testRoutedUnarmedAndArmed();
+    testRoutedLease();
+    testRoutedBadDescs();
+    testRoutedNoAllocations();
     if (failures == 0) std::printf("test_mimo_stage: all checks passed\n");
     return failures == 0 ? 0 : 1;
 }
