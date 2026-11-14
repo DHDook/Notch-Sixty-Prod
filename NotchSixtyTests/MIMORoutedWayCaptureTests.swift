@@ -293,7 +293,7 @@ final class MIMORoutedWayCaptureTests: XCTestCase {
     }
 
     func testMeasureWaysStoresCapturesThenRoutedDesignRunsAndPermitReadsTheSpeakerBaseline() async throws {
-        let (controller, host, measurer, _) = try rig()
+        let (controller, _, measurer, _) = try rig()
         XCTAssertEqual(controller.missingWayNotes.count, 1)
         await controller.measureWays()
         XCTAssertEqual(measurer.calls, 1)
