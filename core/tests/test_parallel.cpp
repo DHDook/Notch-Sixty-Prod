@@ -658,7 +658,8 @@ static void ambientAndLinkedTests(const double *rates, size_t rateCount, bool li
 // The bench harness itself builds these in n60_bench; this covers the same stage mixes in the test suite.
 static void benchShapedLayoutTests(const double *rates, size_t rateCount, bool lite) {
     struct Shape { const char *name; uint32_t lanes; uint32_t taps; };
-    const Shape shapes[] = {{"R1-shaped 2 lanes", 2, 4096}, {"R4-shaped 12 lanes", 12, 8192}, {"R5-shaped 8 lanes", 8, 24000}};
+    const Shape shapes[] = {{"R1-shaped 2 lanes", 2, 4096}, {"R4-shaped 12 lanes", 12, 8192}, {"R5-shaped 8 lanes", 8, 24000},
+                          {"odd 7 lanes", 7, 4096}, {"odd 5 lanes", 5, 2048}};
     for (const Shape &sh : shapes) {
         for (size_t ri = 0; ri < rateCount; ++ri) {
             const double rate = rates[ri];

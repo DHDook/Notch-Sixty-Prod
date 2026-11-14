@@ -100,6 +100,10 @@ uint32_t rampFramesFor(double rate) {
 
 }  // namespace
 
+namespace {
+bool peqParallelWorthIt(const StageRec &r, uint32_t frames) N60_RT_NONBLOCKING;  // defined with runPeq
+}
+
 // RBJ Audio EQ Cookbook biquads, normalised by a0, in double precision.
 // Same forms and limits as the kernel's control-plane design (N60Biquad.h).
 bool designBiquad(uint32_t type, double rate, double f, double gainDb, double q, double out[5]) N60_RT_NONBLOCKING {
@@ -674,7 +678,7 @@ n60_status buildSnapshot(const n60_graph_desc &d, uint32_t epoch, SnapHeader **o
         h->parallelEnd = 0;
         for (uint32_t i = 0; i < h->stageCount; ++i) {
             StageRec &r = stages(h)[i];
-            if (r.kind == N60_STAGE_PEQ && r.laneCount >= 4) {
+            if (r.kind == N60_STAGE_PEQ && peqParallelWorthIt(r, h->maxBlockFrames)) {
                 h->parallelEnd = i + 1;  // E20 R3: PEQ lane pairs may run as jobs (peqParallelWorthIt), so the workers stay awake
                 run = 0;
                 continue;
