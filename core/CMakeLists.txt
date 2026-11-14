@@ -181,6 +181,11 @@ add_executable(n60core_xover_test tests/test_xover.cpp)
 target_link_libraries(n60core_xover_test PRIVATE n60core)
 add_test(NAME n60core_xover COMMAND n60core_xover_test)
 
+# E8 housekeeping: the engine crossover stages summed coherently at all eight rates (issue #121 evidence).
+add_executable(n60core_xover_highrate_engine_test tests/test_xover_highrate_engine.cpp)
+target_link_libraries(n60core_xover_highrate_engine_test PRIVATE n60core)
+add_test(NAME n60core_xover_highrate_engine COMMAND n60core_xover_highrate_engine_test)
+
 # E8 S2: ROUTE and XOVER graph stages (ABI v17).
 add_executable(n60core_route_test tests/test_route.cpp)
 target_include_directories(n60core_route_test PRIVATE src)
