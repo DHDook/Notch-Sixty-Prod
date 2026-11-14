@@ -2,6 +2,7 @@
 #include "N60SpeakerBusSplitter.h"
 #include "N60AncLaneFeed.h"
 #include "N60FloatEnv.h"
+#include "N60RealtimeAttributes.h"
 
 #include "n60/fold.h"
 #include "n60/graph.h"
@@ -15,6 +16,9 @@
 static _Atomic bool gMeteringDemand = false;
 static _Atomic bool gOutputVUMeterDemand = false;
 static _Atomic bool gRouteMeterDemand = false;
+
+// E20 S10 part 7: frames per tile of the graph-only output side (a stack array of gains).
+#define N60_BRIDGE_TILE_FRAMES 128u
 
 #define N60_ANALYSIS_CAPTURE_MASK (N60_ANALYSIS_CAPTURE_CAPACITY_FRAMES - 1u)
 _Static_assert(
@@ -2446,7 +2450,7 @@ bool N60RealtimeAudioBridgeProgramFoldConfigured(const N60RealtimeAudioBridge *b
     return bridge != NULL && bridge->foldConfigured;
 }
 
-OSStatus N60CaptureIOProc(
+N60_RT_NONBLOCKING_C OSStatus N60CaptureIOProc(
     AudioDeviceID inDevice,
     const AudioTimeStamp *inNow,
     const AudioBufferList *inInputData,
@@ -2570,7 +2574,7 @@ static inline void N60DeinterleaveFrames(const N60StereoFrame *src, uint32_t cou
     }
 }
 
-static OSStatus N60OutputIOProcBody(
+static N60_RT_NONBLOCKING_C OSStatus N60OutputIOProcBody(
     AudioDeviceID inDevice,
     const AudioTimeStamp *inNow,
     const AudioBufferList *inInputData,
@@ -2582,7 +2586,7 @@ static OSStatus N60OutputIOProcBody(
 
 // E20 S2: the whole output callback runs with subnormal flush-to-zero (the legacy kernel, speaker bus, drivers and
 // the graph); the caller's floating-point mode is restored on return, so the HAL thread is left as it was found.
-OSStatus N60OutputIOProc(
+N60_RT_NONBLOCKING_C OSStatus N60OutputIOProc(
     AudioDeviceID inDevice,
     const AudioTimeStamp *inNow,
     const AudioBufferList *inInputData,
@@ -2598,7 +2602,7 @@ OSStatus N60OutputIOProc(
     return status;
 }
 
-static OSStatus N60OutputIOProcBody(
+static N60_RT_NONBLOCKING_C OSStatus N60OutputIOProcBody(
     AudioDeviceID inDevice,
     const AudioTimeStamp *inNow,
     const AudioBufferList *inInputData,
@@ -2859,12 +2863,17 @@ static OSStatus N60OutputIOProcBody(
     N60StartupFadeRuntime startupFade = bridge->startupFadeRuntime;
 
     // E6 S8b: decide the graph/kernel hand-over for this block before the kernel prepares.
+    // Trusted (G44): the hand-over calls the graph's denoiser/history control entry points and the legacy kernel's
+    // cold start once per graph attach. They are fixed-size copies and counters (no allocation, no lock), but the
+    // core's control-thread C functions cannot carry the attribute. The legacy kernel goes with E23.
+    N60_RT_TRUST_BEGIN_C
     N60UnifiedGraphPlan unifiedPlan = plan_unified_block(
         bridge,
         framesToRead,
         !N60AudioUnitLiveRackProcessorIsValid(&bridge->audioUnitRack)
             || atomic_load_explicit(&bridge->unifiedGraphHostsRack, memory_order_acquire)
     );
+    N60_RT_TRUST_END_C
     // E4 S18a: the output buffer's host time anchors the anti-noise phase for the adaptive worker.
     const uint64_t outputHostTime =
         inOutputTime != NULL && (inOutputTime->mFlags & kAudioTimeStampHostTimeValid) != 0
@@ -2951,14 +2960,19 @@ static OSStatus N60OutputIOProcBody(
         const bool processingActive =
             framesToRead > 0u
             && bridge->audioUnitRackPlaybackFrames[0].processingActive;
-        if (processingActive
-            && !N60AudioUnitLiveRackProcess(
+        // Trusted: the rack's process callback is the host AudioUnit render path, which the AudioUnit host contract
+        // requires to obey the realtime rules (G44).
+        N60_RT_TRUST_BEGIN_C
+        const bool rackProcessed = !processingActive
+            || N60AudioUnitLiveRackProcess(
                 &bridge->audioUnitRack,
                 bridge->audioUnitRackScratch,
                 bridge->audioUnitRackScratch,
                 framesToRead,
                 2u,
-                outputSampleTime)) {
+                outputSampleTime);
+        N60_RT_TRUST_END_C
+        if (!rackProcessed) {
             zero_output(outOutputData);
             atomic_fetch_add_explicit(
                 &bridge->unsupportedBufferLayouts,
@@ -3192,6 +3206,176 @@ static OSStatus N60OutputIOProcBody(
         uint32_t graphChunkFrames = 0u;
         const uint32_t graphLanes = graphRuns ? unified->lanes : 2u;
         float *graphOut = graphRuns ? unified->scratch + (size_t)unified->maxFrames * graphLanes : NULL;
+        // E20 S10 part 7 (G8): graph-only steady state. Whole-chunk deinterleave, graph, then the output side
+        // (analysis, speaker-drive, ambient and Quiet Zone rings, gain, output write) in tiles of
+        // N60_BRIDGE_TILE_FRAMES frames; every value is the one the per-frame loop below produces, in the same order
+        // of float operations (output is bit-identical), but each pass is a straight loop the compiler can vectorise.
+        // The legacy kernel is not running, so its per-frame getters return values that are constant for the block
+        // and are read once. No allocation, no locks.
+        if (graphRuns && !kernelRuns) {
+            // These two reads are valid only because !kernelRuns: nothing updates them during the block.
+            float ffDriveLeft = 0.0f, ffDriveRight = 0.0f, qzLeft = 0.0f, qzRight = 0.0f;
+            N60RenderKernelGetFeedForwardDriveFrame(bridge->renderKernel, &ffDriveLeft, &ffDriveRight);
+            N60RenderKernelGetActiveQuietZoneReferenceFrame(bridge->renderKernel, &qzLeft, &qzRight);
+            const uint32_t maxFrames = unified->maxFrames;
+            float *const outL = graphOut;
+            float *const outR = graphOut + maxFrames;
+            const float *const inL = unified->scratch;
+            const float *const inR = unified->scratch + maxFrames;
+            uint32_t chunkStart = 0u;
+            while (chunkStart < framesToRead) {
+                uint32_t chunkFrames = framesToRead - chunkStart;
+                if (chunkFrames > maxFrames) chunkFrames = maxFrames;
+                float *planarIn = unified->scratch;
+                if (adaptiveSampleRate) {
+                    const float *interleaved = bridge->adaptiveOutputScratch + (size_t)chunkStart * 2u;
+                    for (uint32_t i = 0; i < chunkFrames; ++i) {
+                        planarIn[i] = interleaved[(size_t)i * 2u];
+                        planarIn[maxFrames + i] = interleaved[(size_t)i * 2u + 1u];
+                    }
+                } else {
+                    uint32_t done = 0u;
+                    while (done < chunkFrames) {
+                        uint32_t run = bridge->capacityFrames - graphReadPosition;
+                        if (run > chunkFrames - done) run = chunkFrames - done;
+                        N60DeinterleaveFrames(bridge->frames + graphReadPosition, run, planarIn + done,
+                                              planarIn + maxFrames + done);
+                        done += run;
+                        graphReadPosition += run;
+                        if (graphReadPosition == bridge->capacityFrames) graphReadPosition = 0u;
+                    }
+                }
+                bridge->graphRackSampleTime = outputSampleTime + (double)chunkStart;
+                const float *inLanes[N60_UNIFIED_GRAPH_MAX_LANES];
+                float *outLanes[N60_UNIFIED_GRAPH_MAX_LANES];
+                for (uint32_t lane = 0; lane < graphLanes; ++lane) {
+                    inLanes[lane] = planarIn + (size_t)lane * maxFrames;
+                    outLanes[lane] = graphOut + (size_t)lane * maxFrames;
+                }
+                // On a process error the chunk is silence, never a splice of stale state.
+                if (n60_graph_process(unifiedPlan.graph, inLanes, outLanes, chunkFrames) != N60_STATUS_OK) {
+                    memset(outL, 0, (size_t)chunkFrames * sizeof(float));
+                    memset(outR, 0, (size_t)chunkFrames * sizeof(float));
+                }
+
+                for (uint32_t tile = 0u; tile < chunkFrames; tile += N60_BRIDGE_TILE_FRAMES) {
+                    const uint32_t tn = chunkFrames - tile < N60_BRIDGE_TILE_FRAMES
+                        ? chunkFrames - tile : N60_BRIDGE_TILE_FRAMES;
+                    const uint32_t blockFrame = chunkStart + tile;
+                    float *tl = outL + tile;
+                    float *tr = outR + tile;
+                    // Programme is the graph output; a graph-only block has no kernel side, so processed == graph.
+                    const uint32_t analysisCount = blockFrame < analysisFramesToWrite
+                        ? (analysisFramesToWrite - blockFrame < tn ? analysisFramesToWrite - blockFrame : tn) : 0u;
+                    for (uint32_t i = 0; i < analysisCount; ++i) {
+                        bridge->analysisFrames[analysisRingIndex] = (N60AnalysisFrame){
+                            inL[tile + i], inR[tile + i], tl[i], tr[i]
+                        };
+                        analysisRingIndex = (analysisRingIndex + 1u) & N60_ANALYSIS_CAPTURE_MASK;
+                    }
+                    float gains[N60_BRIDGE_TILE_FRAMES];
+                    for (uint32_t i = 0; i < tn; ++i) {
+                        const float transitionGain = next_transition_gain(&transitionRamp);
+                        gains[i] = startup_fade_gain(&startupFade, masterGain) * transitionGain * underrunFade;
+                        if (underrunFadeOut) {
+                            underrunFade -= underrunFadeStep;
+                            if (underrunFade < 0.0f) underrunFade = 0.0f;
+                        }
+                    }
+                    for (uint32_t i = 0; i < tn; ++i) {
+                        tl[i] = tl[i] * gains[i];
+                        tr[i] = tr[i] * gains[i];
+                    }
+                    N60RenderKernelStoreFeedForwardDriveFrames(bridge->renderKernel, tl, tr, tn);
+                    const uint32_t qzCount = blockFrame < activeQuietZoneReferenceFramesToWrite
+                        ? (activeQuietZoneReferenceFramesToWrite - blockFrame < tn
+                               ? activeQuietZoneReferenceFramesToWrite - blockFrame : tn) : 0u;
+                    for (uint32_t i = 0; i < qzCount; ++i) {
+                        bridge->activeQuietZoneReferenceFrames[activeQuietZoneReferenceRingIndex] =
+                            (N60ActiveQuietZoneReferenceFrame){ qzLeft * gains[i], qzRight * gains[i] };
+                        activeQuietZoneReferenceRingIndex = (activeQuietZoneReferenceRingIndex + 1u)
+                            & (N60_ACTIVE_QUIET_ZONE_REFERENCE_CAPACITY_FRAMES - 1u);
+                    }
+                    const uint32_t ambientCount = blockFrame < ambientReferenceFramesToWrite
+                        ? (ambientReferenceFramesToWrite - blockFrame < tn
+                               ? ambientReferenceFramesToWrite - blockFrame : tn) : 0u;
+                    for (uint32_t i = 0; i < ambientCount; ++i) {
+                        bridge->ambientReferenceFrames[ambientReferenceRingIndex] =
+                            (N60AmbientPlaybackReferenceFrame){ tl[i], tr[i] };
+                        ambientReferenceRingIndex = (ambientReferenceRingIndex + 1u)
+                            & (N60_AMBIENT_REFERENCE_CAPACITY_FRAMES - 1u);
+                    }
+                    const uint32_t driveCount = blockFrame < speakerDriveFramesToWrite
+                        ? (speakerDriveFramesToWrite - blockFrame < tn
+                               ? speakerDriveFramesToWrite - blockFrame : tn) : 0u;
+                    for (uint32_t i = 0; i < driveCount; ++i) {
+                        bridge->speakerDriveFrames[speakerDriveRingIndex] =
+                            (N60AmbientPlaybackReferenceFrame){ tl[i], tr[i] };
+                        bridge->speakerDriveFrames[N60_SPEAKER_DRIVE_CAPACITY_FRAMES + speakerDriveRingIndex] =
+                            (N60AmbientPlaybackReferenceFrame){ ffDriveLeft, ffDriveRight };
+                        speakerDriveRingIndex = (speakerDriveRingIndex + 1u) & (N60_SPEAKER_DRIVE_CAPACITY_FRAMES - 1u);
+                    }
+                    if (sameDeviceMultiOutput) {
+                        for (uint32_t i = 0; i < tn; ++i) {
+                            N60SpeakerBusFrame busFrame;
+                            process_speaker_bus_splitter(&bridge->speakerBusSplitter, tl[i], tr[i], &busFrame);
+                            N60SpeakerDriverProcessingRuntimeProcessValues(&bridge->speakerDriverProcessing,
+                                                                           busFrame.values);
+                            if (routeMeterEnabled) {
+                                N60RouteMeterAccumulate(&routeMeter, &bridge->sameDeviceOutputMap, &busFrame);
+                            }
+                            if (!N60SameDeviceOutputMapWriteFrame(&bridge->sameDeviceOutputMap, &busFrame,
+                                                                  outOutputData, blockFrame + i)) {
+                                zero_output(outOutputData);
+                                atomic_fetch_add_explicit(&bridge->unsupportedBufferLayouts, 1u, memory_order_relaxed);
+                                N60RenderKernelEndRender(bridge->renderKernel, &renderContext, blockFrame + i);
+                                advance_transition_through_silence(bridge, frameCount);
+                                consume_frames_after_failed_render(bridge, adaptiveSampleRate, readIndex,
+                                                                   framesToRead);
+                                return noErr;
+                            }
+                        }
+                    } else {
+                        for (uint32_t i = 0; i < tn; ++i) {
+                            *outputLeft = tl[i];
+                            *outputRight = tr[i];
+                            outputLeft += outputView.leftStride;
+                            outputRight += outputView.rightStride;
+                        }
+                    }
+                    if (outputVUMeterEnabled) {
+                        for (uint32_t i = 0; i < tn; ++i) {
+                            const float absLeft = fabsf(tl[i]);
+                            const float absRight = fabsf(tr[i]);
+                            if (absLeft > outputVUPeakLeft) outputVUPeakLeft = absLeft;
+                            if (absRight > outputVUPeakRight) outputVUPeakRight = absRight;
+                            outputVUSquareSumLeft += (double)tl[i] * (double)tl[i];
+                            outputVUSquareSumRight += (double)tr[i] * (double)tr[i];
+                            if (absLeft > 1.0f) outputVUOverRangeLeft += 1u;
+                            if (absRight > 1.0f) outputVUOverRangeRight += 1u;
+                        }
+                    }
+                    // The warm-up counters and the mix step advance once per frame even though only the graph is
+                    // audible (the mix is published and decides the next block's plan).
+                    uint32_t left = tn;
+                    uint32_t take = graphWarmLeft < left ? graphWarmLeft : left;
+                    graphWarmLeft -= take;
+                    left -= take;
+                    take = kernelWarmLeft < left ? kernelWarmLeft : left;
+                    kernelWarmLeft -= take;
+                    left -= take;
+                    if (unifiedPlan.mixStep != 0.0f) {
+                        for (; left > 0u; --left) {
+                            mix += unifiedPlan.mixStep;
+                            if (mix > 1.0f) mix = 1.0f;
+                            if (mix < 0.0f) mix = 0.0f;
+                        }
+                    }
+                    renderedFrames += tn;
+                }
+                chunkStart += chunkFrames;
+            }
+        } else
         for (UInt32 frameIndex = 0;
              frameIndex < framesToRead;
              ++frameIndex) {

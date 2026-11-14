@@ -762,6 +762,13 @@ uint32_t n60_graph_collect(n60_graph *graph);
 #define N60_GRAPH_PROCESS_EFFECTS noexcept [[clang::nonblocking]]
 #endif
 #endif
+/* E20 S10 part 7: a C caller (the bridge) sees the same effect as __attribute__((nonblocking)), so its own callbacks
+ * can be checked with -Wfunction-effects. */
+#if !defined(__cplusplus) && defined(__clang__) && defined(__has_attribute)
+#if __has_attribute(nonblocking)
+#define N60_GRAPH_PROCESS_EFFECTS __attribute__((nonblocking))
+#endif
+#endif
 #ifndef N60_GRAPH_PROCESS_EFFECTS
 #define N60_GRAPH_PROCESS_EFFECTS
 #endif

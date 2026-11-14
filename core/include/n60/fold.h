@@ -39,11 +39,25 @@ typedef struct n60_fold_matrix {
  * pointer or a non-finite gain (the matrix is then zeroed). */
 int n60_fold_matrix_make(n60_fold_matrix *matrix, uint32_t channel_count, const float *left, const float *right);
 
+/* E20 S10 part 7: declared non-blocking, so the bridge's realtime callbacks can be checked with -Wfunction-effects.
+ * The definition (fold.cpp) is verified under -Werror=function-effects in the core build. */
+#if defined(__clang__) && defined(__has_attribute) && !defined(__cplusplus)
+#if __has_attribute(nonblocking)
+#define N60_FOLD_PROCESS_EFFECTS __attribute__((nonblocking))
+#endif
+#elif defined(__cplusplus) && defined(__clang__) && defined(__has_cpp_attribute)
+#if __has_cpp_attribute(clang::nonblocking)
+#define N60_FOLD_PROCESS_EFFECTS noexcept [[clang::nonblocking]]
+#endif
+#endif
+#ifndef N60_FOLD_PROCESS_EFFECTS
+#define N60_FOLD_PROCESS_EFFECTS
+#endif
 /* Folds `frames` frames. channels[c] points at the first sample of channel c and strides[c] is the
  * distance in floats between consecutive frames of that channel. out receives interleaved L,R pairs
  * (2 * frames floats). A matrix of zero channels writes silence. Safe on a realtime thread. */
 void n60_fold_down_process(const n60_fold_matrix *matrix, const float *const *channels, const uint32_t *strides,
-                           uint32_t frames, float *out);
+                           uint32_t frames, float *out) N60_FOLD_PROCESS_EFFECTS;
 
 #ifdef __cplusplus
 }

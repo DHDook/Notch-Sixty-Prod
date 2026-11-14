@@ -5,6 +5,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "N60RealtimeAttributes.h"
 #include "N60AdaptiveSampleRate.h"
 #include "N60AudioUnitLiveRackBridge.h"
 #include "N60RenderKernel.h"
@@ -620,7 +621,7 @@ bool N60SameDeviceOutputMapWriteFrame(
     uint32_t frameIndex
 );
 
-OSStatus N60CaptureIOProc(
+N60_RT_NONBLOCKING_C OSStatus N60CaptureIOProc(
     AudioDeviceID inDevice,
     const AudioTimeStamp * _Nonnull inNow,
     const AudioBufferList * _Nonnull inInputData,
@@ -630,7 +631,7 @@ OSStatus N60CaptureIOProc(
     void * _Nullable inClientData
 );
 
-OSStatus N60OutputIOProc(
+N60_RT_NONBLOCKING_C OSStatus N60OutputIOProc(
     AudioDeviceID inDevice,
     const AudioTimeStamp * _Nonnull inNow,
     const AudioBufferList * _Nonnull inInputData,

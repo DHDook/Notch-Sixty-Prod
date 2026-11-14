@@ -538,6 +538,7 @@ unified graph only.
 - [ ] Remove the kernel headphone-delay clamp (4,095 frames) with the kernel (E7 G1)
 - [ ] Delete the legacy bridge MIMO path (`N60MIMOTreatment*.h`, `stagedRoomTreatment`), frozen since E19 S6 (E19 G25)
 - [ ] Delete `N60RenderKernel`, the old N-channel path and the `e6.legacy-kernel` flag
+- [ ] With the kernel: delete the bridge per-frame output loop (E20 G8), the hand-set flush-to-zero in `N60OutputIOProc` (E20 G9), and the trusted legacy `nonblocking` declarations (E20 G44)
 - [ ] Update `docs/DSP_KERNEL.md`, `docs/ARCHITECTURE.md` and the `AGENTS.md` mention, in coordination with E21
 
 ### E22 Hardware validation
