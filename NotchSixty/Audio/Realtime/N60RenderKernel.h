@@ -4,6 +4,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "N60RealtimeAttributes.h"
+
 #include "N60Biquad.h"
 #include "N60ActiveQuietZone.h"
 #include "N60FeedForwardLive.h"
@@ -466,7 +468,7 @@ uint32_t N60RenderKernelConvolutionHistoryFrames(N60RenderKernel * _Nonnull kern
 
 /* E6 S8d: hand the spectral-denoiser noise profile between the kernel and the unified graph. Audio callback only,
  * between blocks. Export reads the kernel's profile; import replaces it (after a ColdStart, which clears it). */
-void N60RenderKernelExportDenoiserProfile(const N60RenderKernel * _Nonnull kernel, N60SpectralDenoiserProfileState * _Nonnull out);
+N60_RT_NONBLOCKING_C void N60RenderKernelExportDenoiserProfile(const N60RenderKernel * _Nonnull kernel, N60SpectralDenoiserProfileState * _Nonnull out);
 void N60RenderKernelImportDenoiserProfile(N60RenderKernel * _Nonnull kernel, const N60SpectralDenoiserProfileState * _Nonnull state);
 bool N60RenderKernelPrepareConvolutionProgram(
     N60RenderKernel * _Nonnull kernel,
@@ -502,7 +504,7 @@ bool N60RenderKernelPublishSnapshot(
 N60RenderKernelRenderContext N60RenderKernelBeginRender(N60RenderKernel * _Nonnull kernel);
 /// E4 S18a: as BeginRender, with the output buffer's first-frame mHostTime (0 = unknown). Applies
 /// the adaptive gain mailbox and pushes a phase-anchor telemetry record (at most every 5 ms).
-N60RenderKernelRenderContext N60RenderKernelBeginRenderAtHostTime(
+N60_RT_NONBLOCKING_C N60RenderKernelRenderContext N60RenderKernelBeginRenderAtHostTime(
     N60RenderKernel * _Nonnull kernel,
     uint64_t outputHostTime
 );
@@ -511,14 +513,14 @@ N60ActiveQuietZoneGainMailbox * _Nullable N60RenderKernelActiveQuietZoneMailbox(
 N60ActiveQuietZoneTelemetry * _Nullable N60RenderKernelActiveQuietZoneTelemetry(N60RenderKernel * _Nonnull kernel);
 /// Any thread. Latches the same 20 ms anti-noise fade as a howl trip (cleared by Rearm).
 void N60RenderKernelRequestHowlTrip(N60RenderKernel * _Nonnull kernel);
-void N60RenderKernelProcessStereoPlaybackFrameInContext(
+N60_RT_NONBLOCKING_C void N60RenderKernelProcessStereoPlaybackFrameInContext(
     N60RenderKernel * _Nonnull kernel,
     N60RenderKernelRenderContext * _Nonnull context,
     float inputLeft,
     float inputRight,
     N60StereoPlaybackFrame * _Nonnull playbackFrame
 );
-void N60RenderKernelProcessStereoSystemFrameInContext(
+N60_RT_NONBLOCKING_C void N60RenderKernelProcessStereoSystemFrameInContext(
     N60RenderKernel * _Nonnull kernel,
     N60RenderKernelRenderContext * _Nonnull context,
     const N60StereoPlaybackFrame * _Nonnull playbackFrame,
@@ -597,7 +599,10 @@ void N60RenderKernelFeedForwardLiveDisarm(N60RenderKernel * _Nonnull kernel);
 bool N60RenderKernelFeedForwardLiveSetEcho(N60RenderKernel * _Nonnull kernel, const N60FeedForwardLiveEcho * _Nullable echo);
 bool N60RenderKernelFeedForwardLiveSetEchoTiming(N60RenderKernel * _Nonnull kernel, uint32_t baseLagFrames);
 /// Render thread, once per output frame after the final limiter: the speaker drive for the echo stage.
-void N60RenderKernelStoreFeedForwardDriveFrame(N60RenderKernel * _Nonnull kernel, float left, float right);
+N60_RT_NONBLOCKING_C void N60RenderKernelStoreFeedForwardDriveFrame(N60RenderKernel * _Nonnull kernel, float left, float right);
+/// Render thread, once per tile: the same as `count` calls of the per-frame store above.
+N60_RT_NONBLOCKING_C void N60RenderKernelStoreFeedForwardDriveFrames(
+    N60RenderKernel * _Nonnull kernel, const float * _Nonnull left, const float * _Nonnull right, uint32_t count);
 void N60RenderKernelFeedForwardLiveMarkReferenceLost(N60RenderKernel * _Nonnull kernel);
 N60RenderKernelFeedForwardLiveStatus N60RenderKernelFeedForwardLiveGetStatus(
     const N60RenderKernel * _Nonnull kernel
@@ -608,19 +613,19 @@ uint64_t N60RenderKernelFeedForwardLivePushReference(
     const float * _Nonnull samples,
     uint32_t count
 );
-uint64_t N60RenderKernelFeedForwardLiveOutputIndex(const N60RenderKernel * _Nonnull kernel);
-void N60RenderKernelPrepareFeedForward(N60RenderKernel * _Nonnull kernel, uint32_t frames);
-void N60RenderKernelGetFeedForwardDriveFrame(
+N60_RT_NONBLOCKING_C uint64_t N60RenderKernelFeedForwardLiveOutputIndex(const N60RenderKernel * _Nonnull kernel);
+N60_RT_NONBLOCKING_C void N60RenderKernelPrepareFeedForward(N60RenderKernel * _Nonnull kernel, uint32_t frames);
+N60_RT_NONBLOCKING_C void N60RenderKernelGetFeedForwardDriveFrame(
     const N60RenderKernel * _Nonnull kernel,
     float * _Nonnull left,
     float * _Nonnull right
 );
-void N60RenderKernelGetActiveQuietZoneReferenceFrame(
+N60_RT_NONBLOCKING_C void N60RenderKernelGetActiveQuietZoneReferenceFrame(
     const N60RenderKernel * _Nonnull kernel,
     float * _Nonnull left,
     float * _Nonnull right
 );
-void N60RenderKernelProcessStereoFrameInContext(
+N60_RT_NONBLOCKING_C void N60RenderKernelProcessStereoFrameInContext(
     N60RenderKernel * _Nonnull kernel,
     N60RenderKernelRenderContext * _Nonnull context,
     float inputLeft,
@@ -628,7 +633,7 @@ void N60RenderKernelProcessStereoFrameInContext(
     float * _Nonnull outputLeft,
     float * _Nonnull outputRight
 );
-void N60RenderKernelEndRender(
+N60_RT_NONBLOCKING_C void N60RenderKernelEndRender(
     N60RenderKernel * _Nonnull kernel,
     N60RenderKernelRenderContext * _Nonnull context,
     uint32_t renderedFrames

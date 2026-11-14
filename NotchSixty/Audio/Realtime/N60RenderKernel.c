@@ -1839,6 +1839,18 @@ void N60RenderKernelStoreFeedForwardDriveFrame(N60RenderKernel *kernel, float le
     kernel->ffDriveCursor += 1u;
 }
 
+// E20 S10 part 7: the same as `count` calls of the per-frame store, as two contiguous copies (render thread).
+void N60RenderKernelStoreFeedForwardDriveFrames(
+    N60RenderKernel *kernel, const float *left, const float *right, uint32_t count
+) {
+    if (kernel->ffLive == NULL || kernel->ffDriveCursor >= N60_FF_LIVE_MAX_BLOCK) return;
+    uint32_t room = N60_FF_LIVE_MAX_BLOCK - kernel->ffDriveCursor;
+    if (count > room) count = room;
+    memcpy(kernel->ffScratch + 3u * N60_FF_LIVE_MAX_BLOCK + kernel->ffDriveCursor, left, (size_t)count * sizeof(float));
+    memcpy(kernel->ffScratch + 4u * N60_FF_LIVE_MAX_BLOCK + kernel->ffDriveCursor, right, (size_t)count * sizeof(float));
+    kernel->ffDriveCursor += count;
+}
+
 void N60RenderKernelFeedForwardLiveMarkReferenceLost(N60RenderKernel *kernel) {
     if (kernel == NULL || kernel->ffLive == NULL) return;
     N60FeedForwardLiveMarkReferenceLost(kernel->ffLive);

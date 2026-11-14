@@ -4,6 +4,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "N60RealtimeAttributes.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -96,12 +98,12 @@ void N60AdaptiveSRCReset(N60AdaptiveSRC *src);
 // capture callback and the consumer an output callback. Input/output samples are
 // interleaved by channel. Pull may return fewer than requested frames until the
 // symmetric interpolation kernel has enough future input support.
-uint32_t N60AdaptiveSRCPushInterleaved(
+N60_RT_NONBLOCKING_C uint32_t N60AdaptiveSRCPushInterleaved(
     N60AdaptiveSRC *src,
     const float *input,
     uint32_t inputFrames
 );
-uint32_t N60AdaptiveSRCPullInterleaved(
+N60_RT_NONBLOCKING_C uint32_t N60AdaptiveSRCPullInterleaved(
     N60AdaptiveSRC *src,
     float *output,
     uint32_t requestedOutputFrames
@@ -110,9 +112,9 @@ uint32_t N60AdaptiveSRCPullInterleaved(
 // Consumer-thread realtime relock. Preserves ring contents, source position,
 // producer indices, and transport failure counters while resetting only the PI
 // correction state to the nominal ratio.
-void N60AdaptiveSRCRelockConsumer(N60AdaptiveSRC *src);
+N60_RT_NONBLOCKING_C void N60AdaptiveSRCRelockConsumer(N60AdaptiveSRC *src);
 
-N60AdaptiveSRCSnapshot N60AdaptiveSRCGetSnapshot(const N60AdaptiveSRC *src);
+N60_RT_NONBLOCKING_C N60AdaptiveSRCSnapshot N60AdaptiveSRCGetSnapshot(const N60AdaptiveSRC *src);
 bool N60AdaptiveSRCRealtimeAtomicsAreLockFree(const N60AdaptiveSRC *src);
 uint32_t N60AdaptiveSRCLatencyInputFrames(const N60AdaptiveSRC *src);
 
