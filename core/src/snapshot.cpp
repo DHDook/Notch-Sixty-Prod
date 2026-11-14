@@ -674,6 +674,11 @@ n60_status buildSnapshot(const n60_graph_desc &d, uint32_t epoch, SnapHeader **o
         h->parallelEnd = 0;
         for (uint32_t i = 0; i < h->stageCount; ++i) {
             StageRec &r = stages(h)[i];
+            if (r.kind == N60_STAGE_PEQ && r.laneCount >= 4) {
+                h->parallelEnd = i + 1;  // E20 R3: PEQ lane pairs may run as jobs (peqParallelWorthIt), so the workers stay awake
+                run = 0;
+                continue;
+            }
             if (r.kind == N60_STAGE_PROTECTION && systemProtectionEligible(h, r)) {
                 h->parallelEnd = i + 1;  // E20 S10b: PROTECTION runs its lanes as jobs, so the workers stay awake until it ends
                 continue;                // (it is not a phase: the stage carries its own two-step schedule)
@@ -938,7 +943,10 @@ void runMSDecode(float *a, float *b, uint32_t frames) {
     }
 }
 
-void runPeq(SnapHeader *h, const StageRec &r, float *const *lanes, uint32_t frames) {
+// E20 R3 critical path: PEQ lane pairs are independent, so a stage with enough work runs them as jobs (mode kPeqMode).
+// peqPrepare starts the coefficient crossfades (control order, calling thread), peqPairRun renders lanes (2p, 2p+1), and
+// peqFinish advances the crossfade counters. runPeq is the three in a row.
+void peqPrepare(SnapHeader *h, const StageRec &r) {
     const uint32_t sections = r.paramCount / 4;
     PeqSec *sec = reinterpret_cast<PeqSec *>(bytes(h) + r.coefOff);
     const float *params = paramsOf(h, r);
@@ -965,11 +973,17 @@ void runPeq(SnapHeader *h, const StageRec &r, float *const *lanes, uint32_t fram
             st.zn[s][1] = st.z[s][1];
         }
     }
-    // E20 S3: lanes run two at a time in one f64x2 per state variable (lanes are independent, so each lane's arithmetic is
-    // exactly what a single-lane run does). An odd last lane pairs with a copy of itself and only its own state is stored.
-    // Every multiply-add is a fused fma in both the SIMD and scalar builds, so the two builds agree bit for bit.
+}
+
+// E20 S3: lanes run two at a time in one f64x2 per state variable (lanes are independent, so each lane's arithmetic is
+// exactly what a single-lane run does). An odd last lane pairs with a copy of itself and only its own state is stored.
+// Every multiply-add is a fused fma in both the SIMD and scalar builds, so the two builds agree bit for bit.
+void peqPairRun(SnapHeader *h, const StageRec &r, float *const *lanes, uint32_t frames, uint32_t l) N60_RT_NONBLOCKING {
+    const uint32_t sections = r.paramCount / 4;
+    PeqSec *sec = reinterpret_cast<PeqSec *>(bytes(h) + r.coefOff);
+    const uint32_t ramp = h->rampFrames;
     using simd::f64x2;
-    for (uint32_t l = 0; l < r.laneCount; l += 2) {
+    {
         const bool two = l + 1 < r.laneCount;
         PeqLane &sa = *reinterpret_cast<PeqLane *>(laneState(h, r, l));
         PeqLane &sb = two ? *reinterpret_cast<PeqLane *>(laneState(h, r, l + 1)) : sa;
@@ -1027,6 +1041,11 @@ void runPeq(SnapHeader *h, const StageRec &r, float *const *lanes, uint32_t fram
             }
         }
     }
+}
+
+void peqFinish(SnapHeader *h, const StageRec &r, uint32_t frames) N60_RT_NONBLOCKING {
+    const uint32_t sections = r.paramCount / 4;
+    PeqSec *sec = reinterpret_cast<PeqSec *>(bytes(h) + r.coefOff);
     for (uint32_t s = 0; s < sections; ++s) {
         PeqSec &q = sec[s];
         if (q.xfLeft == 0) continue;
@@ -1037,6 +1056,20 @@ void runPeq(SnapHeader *h, const StageRec &r, float *const *lanes, uint32_t fram
             q.xfLeft -= frames;
         }
     }
+}
+
+// A PEQ stage runs its lane pairs as jobs when there are at least two pairs and the work (section-samples) outweighs the
+// two-way hand-off (about 2 us): 8192 section-samples at roughly 0.3 ns each. Static per stage and block size.
+constexpr uint32_t kPeqParallelMinWork = 8192;
+bool peqParallelWorthIt(const StageRec &r, uint32_t frames) N60_RT_NONBLOCKING {
+    if (r.kind != N60_STAGE_PEQ || r.laneCount < 4 || r.laneCount > N60_GRAPH_MAX_CHANNELS) return false;
+    return uint64_t(r.paramCount / 4) * r.laneCount * frames >= kPeqParallelMinWork;
+}
+
+void runPeq(SnapHeader *h, const StageRec &r, float *const *lanes, uint32_t frames) {
+    peqPrepare(h, r);
+    for (uint32_t l = 0; l < r.laneCount; l += 2) peqPairRun(h, r, lanes, frames, l);
+    peqFinish(h, r, frames);
 }
 
 void runDelay(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) {
@@ -1329,7 +1362,23 @@ uint64_t stageLaneBits(const StageRec &r) N60_RT_NONBLOCKING {
 }
 
 // One job: every stage of the phase on one output lane, in stage order.
-void runJob(const PhaseDesc &p, uint32_t job, void *scratch) N60_RT_NONBLOCKING {
+// E20 R3: the PEQ pair jobs of one stage (job j renders lanes 2j and 2j + 1). Lives on the calling thread's stack.
+constexpr uint32_t kPeqMode = 4;
+struct PeqPar {
+    SnapHeader *h;
+    const StageRec *r;
+    float *const *lanes;
+    uint32_t frames;
+};
+
+void runJob(JobHost &j, uint32_t slot, uint32_t job) N60_RT_NONBLOCKING {
+    const PhaseDesc &p = j.phase;
+    void *scratch = j.scratch[slot];
+    if (p.mode == kPeqMode) {
+        const PeqPar &x = *static_cast<const PeqPar *>(p.ctx);
+        peqPairRun(x.h, *x.r, x.lanes, x.frames, 2 * job);
+        return;
+    }
     if (p.mode != 0) {  // E20 S10b: a PROTECTION step, job = stage lane
         systemProtectionJob(p.ctx, p.mode, job);
         return;
@@ -1348,7 +1397,7 @@ void runJob(const PhaseDesc &p, uint32_t job, void *scratch) N60_RT_NONBLOCKING 
             continue;
         }
         if (r.kind == N60_STAGE_FIR) {
-            dspFirLaneRun(p.snap, r, static_cast<uint32_t>(k), buf, p.frames, scratch);
+            dspFirLaneRun(p.snap, r, static_cast<uint32_t>(k), buf, p.frames, scratch, &j.tails[slot].th);
         } else {
             systemLaneRun(p.snap, r, static_cast<uint32_t>(k), buf, p.frames);
         }
@@ -1382,40 +1431,48 @@ void wakeWorkers(JobHost &j) N60_RT_NONBLOCKING {
     }
 }
 
-// E20 S6b (G21): the FIR tail job. Calling thread: post publishes it (waking the workers if needed), join runs it here when
-// no worker has claimed it, else waits for the worker that did.
+// E20 S6b (G21), G29: the FIR tail job. The posting thread (the caller, or a worker running a lane job) publishes it in its
+// own slot; join runs it on the posting thread when no other thread has claimed it, else waits for the claimer. Idle
+// workers (and the caller while it waits for a phase) scan every slot. The caller wakes the workers on its first post.
 void tailPost(void *ctx, void (*fn)(void *, void *), void *arg) N60_RT_NONBLOCKING {
-    JobHost &j = *static_cast<JobHost *>(ctx);
-    wakeWorkers(j);
-    j.tailJob.fn = fn;
-    j.tailJob.arg = arg;
-    j.tailJob.state.store(1, std::memory_order_release);
+    TailSlot &t = *static_cast<TailSlot *>(ctx);
+    if (t.index == 0) wakeWorkers(*t.host);
+    t.job.fn = fn;
+    t.job.arg = arg;
+    t.job.state.store(1, std::memory_order_release);
 }
 void tailJoin(void *ctx) N60_RT_NONBLOCKING {
-    JobHost &j = *static_cast<JobHost *>(ctx);
+    TailSlot &t = *static_cast<TailSlot *>(ctx);
+    JobHost &j = *t.host;
     uint32_t expect = 1;
-    if (j.tailJob.state.compare_exchange_strong(expect, 2, std::memory_order_acq_rel, std::memory_order_acquire)) {
+    if (t.job.state.compare_exchange_strong(expect, 2, std::memory_order_acq_rel, std::memory_order_acquire)) {
         N60_RT_TRUST_BEGIN  // the job is conv tail work: FFT and multiply-adds, no allocation or lock
-        j.tailJob.fn(j.tailJob.arg, j.scratch[0]);
+        t.job.fn(t.job.arg, j.scratch[t.index]);
         N60_RT_TRUST_END
         j.jobsOnCaller.fetch_add(1, std::memory_order_relaxed);
-    } else {  // a worker claimed it
+    } else {  // another thread claimed it
         j.lateJoins.fetch_add(1, std::memory_order_relaxed);
         uint32_t spins = 0;
-        while (j.tailJob.state.load(std::memory_order_acquire) != 3) spinWait(spins);
+        while (t.job.state.load(std::memory_order_acquire) != 3) spinWait(spins);
         j.jobsOnWorkers.fetch_add(1, std::memory_order_relaxed);
     }
-    j.tailJob.state.store(0, std::memory_order_relaxed);
+    t.job.state.store(0, std::memory_order_relaxed);
 }
-// Worker thread: claims the posted tail job if nobody has.
-bool tailWorkerRun(JobHost &j, uint32_t workerIndex) N60_RT_NONBLOCKING {
-    uint32_t expect = 1;
-    if (!j.tailJob.state.compare_exchange_strong(expect, 2, std::memory_order_acq_rel, std::memory_order_acquire)) return false;
-    N60_RT_TRUST_BEGIN
-    j.tailJob.fn(j.tailJob.arg, j.scratch[workerIndex]);
-    N60_RT_TRUST_END
-    j.tailJob.state.store(3, std::memory_order_release);
-    return true;
+// Any thread that is idle: claims a posted tail job of another slot (never its own, which its owner joins itself).
+bool tailHelp(JobHost &j, uint32_t self) N60_RT_NONBLOCKING {
+    for (uint32_t i = 0; i <= N60_GRAPH_MAX_WORKERS; ++i) {
+        if (i == self) continue;
+        TailJob &t = j.tails[i].job;
+        if (t.state.load(std::memory_order_relaxed) != 1) continue;
+        uint32_t expect = 1;
+        if (!t.state.compare_exchange_strong(expect, 2, std::memory_order_acq_rel, std::memory_order_acquire)) continue;
+        N60_RT_TRUST_BEGIN
+        t.fn(t.arg, j.scratch[self]);
+        N60_RT_TRUST_END
+        t.state.store(3, std::memory_order_release);
+        return true;
+    }
+    return false;
 }
 
 // Publishes the phase already written to j.phase as `jobs` jobs, runs jobs on this thread and joins.
@@ -1426,14 +1483,16 @@ void publishAndJoin(JobHost &j, uint32_t jobs) N60_RT_NONBLOCKING {
     j.claim.store((uint64_t(j.generation) << 32) | jobs, std::memory_order_release);
     uint32_t job = 0, mine = 0;
     while (claimJob(j, job)) {
-        runJob(j.phase, job, j.scratch[0]);
+        runJob(j, 0, job);
         j.done.fetch_add(1, std::memory_order_release);
         ++mine;
     }
     if (j.done.load(std::memory_order_acquire) != jobs) {  // a worker claimed a job and has not finished it
         j.lateJoins.fetch_add(1, std::memory_order_relaxed);
         uint32_t spins = 0;
-        while (j.done.load(std::memory_order_acquire) != jobs) spinWait(spins);
+        while (j.done.load(std::memory_order_acquire) != jobs) {
+            if (tailHelp(j, 0)) spins = 0; else spinWait(spins);
+        }
     }
     j.parallelPhases.fetch_add(1, std::memory_order_relaxed);
     j.jobsOnCaller.fetch_add(mine, std::memory_order_relaxed);
@@ -1497,11 +1556,11 @@ uint32_t jobHostWorkerRun(JobHost &j, uint32_t workerIndex) N60_RT_NONBLOCKING {
     uint32_t ran = 0, job = 0, spins = 0;
     while (j.active.load(std::memory_order_acquire) != 0 && workerIndex <= j.workers.load(std::memory_order_relaxed)) {
         if (claimJob(j, job)) {
-            runJob(j.phase, job, j.scratch[workerIndex]);
+            runJob(j, workerIndex, job);
             j.done.fetch_add(1, std::memory_order_release);
             ++ran;
             spins = 0;
-        } else if (tailWorkerRun(j, workerIndex)) {
+        } else if (tailHelp(j, workerIndex)) {
             ++ran;
             spins = 0;
         } else {
@@ -1517,8 +1576,11 @@ void runSnapshot(SnapHeader *h, float *const *lanes, uint32_t frames, std::atomi
     StageRec *table = stages(h);
     const bool parallel = jobs != nullptr && jobs->workers.load(std::memory_order_relaxed) != 0;
     if (parallel) {
-        jobs->tailHost = conv::TailHost{jobs, &tailPost, &tailJoin};
-        h->tailHost = &jobs->tailHost;
+        if (!jobs->tailsReady) {  // once, before any worker has been woken
+            for (TailSlot &t : jobs->tails) t.th = conv::TailHost{&t, &tailPost, &tailJoin};
+            jobs->tailsReady = true;
+        }
+        h->tailHost = &jobs->tails[0].th;
     } else {
         h->tailHost = nullptr;
     }
@@ -1551,6 +1613,24 @@ void runSnapshot(SnapHeader *h, float *const *lanes, uint32_t frames, std::atomi
                 continue;
             }
         }
+        if (parallel && peqParallelWorthIt(r, frames)) {
+            peqPrepare(h, r);
+            PeqPar x{h, &r, lanes, frames};
+            jobHostRunPhase(*jobs, kPeqMode, &x, (r.laneCount + 1) / 2);
+            peqFinish(h, r, frames);
+#ifdef N60_GRAPH_PROFILE
+            const auto t1 = n60::rtNow();
+            if (r.kind < kProfileKinds) {
+                n60_profile_entry &e = gProfile[r.kind];
+                e.ns += static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count());
+                e.calls += 1;
+                e.frames += frames;
+                e.laneFrames += static_cast<uint64_t>(frames) * r.laneCount;
+            }
+#endif
+            if (i + 1 >= h->parallelEnd) jobHostEnd(*jobs);
+            continue;
+        }
         if (parallel && r.kind == N60_STAGE_PROTECTION && r.laneCount >= 2 && jobs->protHi != nullptr) {
             if (systemProtectionParallel(h, r, lanes, frames, *jobs)) {
 #ifdef N60_GRAPH_PROFILE
@@ -1581,7 +1661,7 @@ void runSnapshot(SnapHeader *h, float *const *lanes, uint32_t frames, std::atomi
         runStage(h, r, lanes, frames, sanitisedSamples);
 #endif
         // A phase member that ran serially (one lane: its FIR tail may have used the workers) can be the last one.
-        if (parallel && (r.phase != 0 || r.kind == N60_STAGE_PROTECTION) && i + 1 >= h->parallelEnd) jobHostEnd(*jobs);
+        if (parallel && (r.phase != 0 || r.kind == N60_STAGE_PROTECTION || r.kind == N60_STAGE_PEQ) && i + 1 >= h->parallelEnd) jobHostEnd(*jobs);
     }
     h->tailHost = nullptr;
 }
