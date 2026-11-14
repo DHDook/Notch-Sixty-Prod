@@ -16,7 +16,7 @@
 #include <vector>
 
 #include "N60AncGuard.h"
-#include "N60Fxlms.h"
+#include "n60/fxlms.h"
 #include "e4_acoustic_twin.hpp"
 
 using twin::Config;

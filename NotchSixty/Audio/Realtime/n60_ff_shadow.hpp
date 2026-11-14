@@ -4,7 +4,7 @@
 // outputs x 1 error, block FxLMS at the decimated rate). The C interface, the
 // update rules and the threading contract are documented in N60Fxlms.h.
 
-#include "n60_fxlms.hpp"
+#include "n60/fxlms.hpp"
 
 #include <array>
 #include <cstdint>

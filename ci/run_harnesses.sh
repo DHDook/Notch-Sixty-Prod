@@ -22,8 +22,10 @@ if ! clang++ -std=c++20 -O2 -Wall -Wextra -Werror -I"NotchSixty/Audio/Realtime" 
 fi
 # E6 S12h part 2b: the bridge binds the AU rack to the ANC lane feed, so every bridge harness links the feed object.
 # E4 S25b: the render kernel also links the live feed-forward filter (and the FxLMS primitives it uses).
-for src in n60_ff_live n60_ff_echo n60_fxlms n60_anc_lane_feed; do
-    if ! clang++ -std=c++20 -O2 -Wall -Wextra -Werror -I"NotchSixty/Audio/Realtime" -c "NotchSixty/Audio/Realtime/$src.cpp" -o "$OUT/${src}_rt.o"; then
+for src in n60_ff_live n60_ff_echo core/src/anc/fxlms n60_anc_lane_feed; do
+    case "$src" in core/*) srcpath="$src.cpp" ;; *) srcpath="NotchSixty/Audio/Realtime/$src.cpp" ;; esac
+    src="$(basename "$src" | sed 's/^fxlms$/n60_fxlms/')"
+    if ! clang++ -std=c++20 -O2 -Wall -Wextra -Werror -I"NotchSixty/Audio/Realtime" -Icore/include -c "$srcpath" -o "$OUT/${src}_rt.o"; then
         echo "failed to compile $src" >&2
         exit 1
     fi
@@ -32,7 +34,7 @@ $OUT/${src}_rt.o"
 done
 ALL_RT=$(find "$RT" -name '*.c' -print | sort; echo "$GUARD_OBJ")
 ALL_RT_NO_BRIDGE=$(find "$RT" -name '*.c' ! -name 'N60RealtimeAudioBridge.c' ! -name 'N60MeasurementMonitorProc.c' ! -name 'N60LevelSessionProc.c' -print | sort; echo "$GUARD_OBJ")
-STRICT=(-std=c11 -Wall -Wextra -Werror)
+STRICT=(-std=c11 -Wall -Wextra -Werror -Icore/include)
 FILTERS=("$@")
 
 passed=()

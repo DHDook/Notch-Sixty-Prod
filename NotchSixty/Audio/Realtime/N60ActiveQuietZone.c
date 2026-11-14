@@ -1,4 +1,4 @@
-#include "N60ActiveQuietZone.h"
+#include "n60/active_quiet_zone.h"
 
 #include <math.h>
 #include <stdatomic.h>

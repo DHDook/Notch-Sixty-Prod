@@ -15,7 +15,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "N60ActiveQuietZone.h"
+#include "n60/active_quiet_zone.h"
 #include "N60AmbientMonitorBridge.h"
 
 static const double kRates[] = {44100, 48000, 88200, 96000, 176400, 192000, 352800, 384000};

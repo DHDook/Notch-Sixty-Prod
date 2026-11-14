@@ -19,7 +19,7 @@
 // Reset: Reset() clears audio state; a model or timing change (applied only while idle) restarts the search.
 
 #include "N60FeedForwardLive.h"
-#include "n60_fxlms.hpp"
+#include "n60/fxlms.hpp"
 
 #include <array>
 #include <atomic>

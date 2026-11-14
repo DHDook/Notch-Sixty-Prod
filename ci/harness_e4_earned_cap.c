@@ -14,7 +14,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "N60ActiveQuietZone.h"
+#include "n60/active_quiet_zone.h"
 
 static const double kRates[] = {44100, 48000, 88200, 96000, 176400, 192000, 352800, 384000};
 static int failures = 0;

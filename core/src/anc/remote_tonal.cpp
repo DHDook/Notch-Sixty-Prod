@@ -1,6 +1,6 @@
 // E4 S18a: remote adaptive tonal canceller. See N60RemoteTonal.h for the design and maths.
 // Worker side only: one thread for every call, no realtime use.
-#include "N60RemoteTonal.h"
+#include "n60/remote_tonal.h"
 
 #include <algorithm>
 #include <cmath>

@@ -23,9 +23,9 @@
 #include <vector>
 
 extern "C" {
-#include "N60ActiveQuietZone.h"
+#include "n60/active_quiet_zone.h"
 }
-#include "N60RemoteTonal.h"
+#include "n60/remote_tonal.h"
 
 using cd = std::complex<double>;
 static const double kRates[] = {44100, 48000, 88200, 96000, 176400, 192000, 352800, 384000};

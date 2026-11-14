@@ -16,7 +16,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "N60RemoteTonal.h"
+#include "n60/remote_tonal.h"
 
 static const double kRates[] = {
     44100, 48000, 88200, 96000, 176400, 192000, 352800, 384000

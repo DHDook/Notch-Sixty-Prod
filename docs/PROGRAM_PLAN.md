@@ -292,8 +292,8 @@ Audio types in four bridges. The bigger gap is the DSP maths inside the Swift de
 - [ ] CMake build, with Linux and Windows CI running the core tests and the acoustic reference lab
 - [ ] Update `AGENTS.md`: the core may not depend on Apple frameworks, plus the C++ realtime rules
 - [ ] Keep Swift for the macOS shell, Core Audio control and UI
-- [ ] S0 `e21/engine-code-home` (owner, 11 Nov 2026; needs-owner: realtime engine; first E21 slice): move `n60_fxlms.cpp` and `n60_remote_tonal.cpp` from the app into `core/`. The rule itself (new engine C or C++ goes in `core/`) is in `CLAUDE.md` and the realtime-reviewer agent from this PR
-- [ ] Re-estimate the remaining E21 slices from measured line counts of the C and Swift maths still to move, and record the figures in `docs/epics/E21.md` (owner, 11 Nov 2026; rides in S0)
+- [x] S0 `e21/engine-code-home` (owner, 11 Nov 2026; needs-owner: realtime engine; first E21 slice): move `n60_fxlms.cpp` and `n60_remote_tonal.cpp` from the app into `core/`. The rule itself (new engine C or C++ goes in `core/`) is in `CLAUDE.md` and the realtime-reviewer agent from this PR
+- [~] Re-estimate the remaining E21 slices from measured line counts of the C and Swift maths still to move, and record the figures in `docs/epics/E21.md` (owner, 11 Nov 2026; rides in S0)
 
 ## Phase 3 — Correction and measurement
 

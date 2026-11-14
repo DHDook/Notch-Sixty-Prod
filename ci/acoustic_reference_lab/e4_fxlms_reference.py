@@ -44,9 +44,9 @@ def build_and_run():
         obj, binary = Path(work) / "fxlms.o", Path(work) / "probe"
         steps = [
             [cxx, "-std=c++20", "-O2", "-Wall", "-Wextra", "-Werror",
-             "-I" + str(RT), "-c", str(RT / "n60_fxlms.cpp"), "-o", str(obj)],
+             "-I" + str(RT), "-I" + str(ROOT / "core/include"), "-c", str(ROOT / "core/src/anc/fxlms.cpp"), "-o", str(obj)],
             [cc, "-std=c11", "-O2", "-Wall", "-Wextra", "-Werror",
-             "-I" + str(RT), "-I" + str(ROOT / "ci"), str(PROBE), str(obj),
+             "-I" + str(RT), "-I" + str(ROOT / "core/include"), "-I" + str(ROOT / "ci"), str(PROBE), str(obj),
              "-lc++", "-lm", "-o", str(binary)],
         ]
         for step in steps:

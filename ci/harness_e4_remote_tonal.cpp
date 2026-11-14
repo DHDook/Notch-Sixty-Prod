@@ -22,7 +22,7 @@
 #include <memory>
 #include <vector>
 
-#include "N60RemoteTonal.h"
+#include "n60/remote_tonal.h"
 #include "e4_acoustic_twin.hpp"
 
 using twin::Config;

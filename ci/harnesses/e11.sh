@@ -20,5 +20,5 @@ fi
 
 # E11 S2: targeted measurement bridge second-program playback and allocation-free process call.
 if selected e11_targeted_bridge; then
-    harness e11_targeted_bridge "${STRICT[@]}" -O2 -I"$RT" core/tests/test_targeted_bridge.c
+    harness e11_targeted_bridge "${STRICT[@]}" -O2 -I"$RT" -Icore/include core/tests/test_targeted_bridge.c
 fi

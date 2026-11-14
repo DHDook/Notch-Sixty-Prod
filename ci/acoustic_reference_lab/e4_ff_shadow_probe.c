@@ -15,7 +15,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#include "N60Fxlms.h"
+#include "n60/fxlms.h"
 
 #define BUFFER 512u
 #define TAPS 64u

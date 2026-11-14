@@ -15,7 +15,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "N60Fxlms.h"
+#include "n60/fxlms.h"
 
 static uint64_t next_random(uint64_t *s) {
     *s ^= *s >> 12;

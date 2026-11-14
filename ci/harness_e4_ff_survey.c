@@ -15,7 +15,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#include "N60Fxlms.h"
+#include "n60/fxlms.h"
 
 static const double kRates[] = {
     44100, 48000, 88200, 96000, 176400, 192000, 352800, 384000

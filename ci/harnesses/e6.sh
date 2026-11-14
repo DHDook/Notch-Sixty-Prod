@@ -169,13 +169,13 @@ if selected e6_core_graph; then
             "$RT/N60Protection.c" "${CORE_OBJS[@]}" -lc++ -lm
         harness e6_core_xover_clipper_parity "${STRICT[@]}" -O2 -Icore/include core/tests/test_xover_clipper_parity.c \
             "$RT/N60Protection.c" "${CORE_OBJS[@]}" -lc++ -lm
-        harness e6_core_cleanup_parity "${STRICT[@]}" -O2 -include stddef.h -Icore/include -I"$RT" core/tests/test_cleanup_parity.c \
+        harness e6_core_cleanup_parity "${STRICT[@]}" -O2 -include stddef.h -Icore/include -I"$RT" -Icore/include core/tests/test_cleanup_parity.c \
             "$RT/N60Dynamics.c" "$RT/N60DynamicEQ.c" "$RT/N60SpectralDenoiser.c" "$RT/N60Protection.c" "${CORE_OBJS[@]}" -lc++ -lm
-        harness e6_core_image_parity "${STRICT[@]}" -O2 -include stddef.h -Icore/include -I"$RT" core/tests/test_image_parity.c \
+        harness e6_core_image_parity "${STRICT[@]}" -O2 -include stddef.h -Icore/include -I"$RT" -Icore/include core/tests/test_image_parity.c \
             "$RT/N60Dynamics.c" "$RT/N60DynamicEQ.c" "$RT/N60SpectralDenoiser.c" "$RT/N60Protection.c" "${CORE_OBJS[@]}" -lc++ -lm
-        harness e6_core_loudness_parity "${STRICT[@]}" -O2 -include stddef.h -Icore/include -I"$RT" core/tests/test_loudness_parity.c \
+        harness e6_core_loudness_parity "${STRICT[@]}" -O2 -include stddef.h -Icore/include -I"$RT" -Icore/include core/tests/test_loudness_parity.c \
             "$RT/N60Dynamics.c" "$RT/N60DynamicEQ.c" "$RT/N60SpectralDenoiser.c" "$RT/N60Protection.c" "${CORE_OBJS[@]}" -lc++ -lm
-        harness e6_core_multiband_parity "${STRICT[@]}" -O2 -include stddef.h -Icore/include -I"$RT" core/tests/test_multiband_parity.c \
+        harness e6_core_multiband_parity "${STRICT[@]}" -O2 -include stddef.h -Icore/include -I"$RT" -Icore/include core/tests/test_multiband_parity.c \
             "$RT/N60Dynamics.c" "$RT/N60DynamicEQ.c" "$RT/N60SpectralDenoiser.c" "$RT/N60Protection.c" "${CORE_OBJS[@]}" -lc++ -lm
         harness e6_core_fracdelay_parity "${STRICT[@]}" -O2 -Icore/include core/tests/test_fracdelay_parity.c \
             "${CORE_OBJS[@]}" -lc++ -lm
@@ -195,7 +195,7 @@ if selected e6_core_graph; then
             "${CORE_OBJS[@]}" -lc++ -lm
         harness e6_core_readbacks "${STRICT[@]}" -O2 -Icore/include core/tests/test_readbacks.c \
             "${CORE_OBJS[@]}" -lc++ -lm
-        harness e6_core_binaural_parity "${STRICT[@]}" -O2 -Icore/include -I"$RT" core/tests/test_binaural_parity.c \
+        harness e6_core_binaural_parity "${STRICT[@]}" -O2 -Icore/include -I"$RT" -Icore/include core/tests/test_binaural_parity.c \
             "${CORE_OBJS[@]}" -lc++ -lm
         # E13 S4: shared multirate BRIR tail against an offline FFT convolution at the eight rates.
         if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -Icore/include core/tests/test_binaural_tail.cpp \
