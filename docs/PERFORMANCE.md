@@ -124,7 +124,7 @@ target them, and S5/S7 spread or decimate the rest.
 `core/bench/budgets.json`: R1 mean 0.25, R1 p99.9 0.5, R1 fade 2x 0.8 (single thread, `ref` rows); R2 mean 0.5, R2 fade 2x
 0.8, R3 mean 0.5 (judged on the `refw` rows: the caller's time with two worker threads, `n60_bench --workers 2`, so the
 parallel render counts). `macos-full` runs `n60_bench ... --enforce-budgets --workers 2`; a breach fails the step, and so
-does an R7 row missing from the JSON (the workflow build passes `-DN60_BENCH_ANC`). R3 is also held to the fade rule (twice the mean under 0.8; G33 closed, hosted R3 refw 384 kHz is 33% mean).
+does an R7 row missing from the JSON (the workflow build passes `-DN60_BENCH_ANC`). R3 has no fade entry yet (gap G33): the same code read 33% (nightly) and 47% (bench-only run) mean on the hosted runner, so twice the mean is not reliably under 0.8 there.
 
 Published table (Apple M4, -O3, one core for `ref`, caller plus two workers for `refw`, mean load %, reference block):
 
