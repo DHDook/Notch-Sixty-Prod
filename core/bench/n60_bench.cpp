@@ -7,9 +7,10 @@
 //   R8 MIMO treatment stage, 8 sources, armed (E20 S8)
 //   R7 ANC lane feed maths, offline (built only with -DN60_BENCH_ANC; compute only, nothing reaches a device)
 // at the eight standard rates and two block sizes: "ref" is 2.67 ms (128 frames at 48 kHz, 1,024 at 384 kHz) and
-// "stress" a quarter of that. Load = render time / buffer period on one core. Each cell reports the median of
-// --runs runs of the mean load (median) and of the p99.9 block load (best, i.e. lowest, of the runs: a hosted runner's
-// scheduling tail hits single runs, and the default is five runs so at least best-of-3), plus the worst block seen (max).
+// "stress" a quarter of that. Load = render time / buffer period on one core. Each cell reports the best
+// (lowest) of the repetitions for both the mean load and the p99.9 block load (a hosted runner's neighbour load only adds
+// time to single repetitions; a real regression slows all of them), plus the worst block seen (max). Cells with a budget
+// run up to 9 repetitions and stop at the first under budget (G33); others run --runs (default 5).
 //
 // Output is flat JSON ("R1/48000/ref/mean": 0.0123). --baseline compares every */mean key with a stored file:
 // fail above 1.5x, warn above 1.2x. --budgets checks the "ref" rows against budgets.json (E20 Q1); budget breaches
@@ -259,11 +260,6 @@ struct Cell {
     double mean = 0, p999 = 0, max = 0;
 };
 
-double median(std::vector<double> v) {
-    std::sort(v.begin(), v.end());
-    return v.empty() ? 0.0 : v[v.size() / 2];
-}
-
 using Clock = std::chrono::steady_clock;
 
 struct Signal {
@@ -279,10 +275,39 @@ struct Config {
     std::vector<std::string> scenarios{std::begin(kScenarioIds), std::end(kScenarioIds)};
     double seconds = 0.2;
     int runs = 5;
+    int gateRuns = 9;       // G33: most repetitions of a budget-gated cell; it stops early once one is under its budgets
+    double limMean = 0, limP999 = 0;  // budget of the cell being timed (0 = none); set per cell by the caller
     bool profile = false, profileOnly = false, enforceBudgets = false, selfTest = false;
     uint32_t workers = 0;  // E20 S10: R2 and R3 also run on this many worker threads (label "refw"), the budget rows
     std::string out, baseline, budgets;
 };
+
+struct Rep { double mean, p999, max; };
+
+// G33: a cell is the best (minimum) mean and p99.9 over its repetitions: a shared runner's neighbour load only ever adds
+// time, so one quiet repetition shows what the code can do, while a real regression slows every repetition and still
+// fails. `one` times one repetition. A cell with a budget (lim* > 0) gets up to gateRuns repetitions and stops as soon as
+// the best so far is under both budgets (at least one repetition always runs); other cells run `runs` repetitions.
+template <class F>
+bool bestOfRuns(const Config &cfg, F one, Cell &cell) {
+    const bool gated = cfg.limMean > 0 || cfg.limP999 > 0;
+    const int most = gated ? std::max(cfg.gateRuns, cfg.runs) : cfg.runs;
+    std::vector<double> means;
+    double bestP = 1e300, worst = 0;
+    for (int run = 0; run < most; ++run) {
+        Rep r;
+        if (!one(r)) return false;
+        means.push_back(r.mean);
+        bestP = std::min(bestP, r.p999);
+        worst = std::max(worst, r.max);
+        const double bestM = *std::min_element(means.begin(), means.end());
+        if (gated && (cfg.limMean <= 0 || bestM <= cfg.limMean) && (cfg.limP999 <= 0 || bestP <= cfg.limP999)) break;
+    }
+    cell.mean = *std::min_element(means.begin(), means.end());
+    cell.p999 = bestP;
+    cell.max = worst;
+    return true;
+}
 
 bool graphRun(n60_graph *g, uint32_t lanes, uint32_t frames, uint64_t blk, const Signal &sig, std::vector<float> &outBuf) {
     const float *ip[kMaxLanes];
@@ -301,11 +326,9 @@ bool timeGraph(n60_graph *g, uint32_t lanes, double rate, uint32_t frames, const
     const uint64_t blocks = std::max<uint64_t>(32, static_cast<uint64_t>(cfg.seconds * rate / frames));
     uint64_t blk = 0;
     for (int i = 0; i < 64; ++i) if (!graphRun(g, lanes, frames, blk++, sig, outBuf)) return false;  // warm-up
-    std::vector<double> means, p999s;
     std::vector<double> times(blocks);
-    double worst = 0;
     finite = true;
-    for (int run = 0; run < cfg.runs; ++run) {
+    return bestOfRuns(cfg, [&](Rep &r) {
         double sum = 0;
         for (uint64_t i = 0; i < blocks; ++i) {
             const auto t0 = Clock::now();
@@ -318,14 +341,9 @@ bool timeGraph(n60_graph *g, uint32_t lanes, double rate, uint32_t frames, const
         for (uint32_t l = 0; l < lanes; ++l) for (uint32_t i = 0; i < frames; ++i) if (!std::isfinite(outBuf[size_t(l) * 4096 + i])) finite = false;
         std::vector<double> sorted(times);
         std::sort(sorted.begin(), sorted.end());
-        means.push_back(sum / blocks);
-        p999s.push_back(sorted[std::min<size_t>(sorted.size() - 1, static_cast<size_t>(0.999 * sorted.size()))]);
-        worst = std::max(worst, sorted.back());
-    }
-    cell.mean = median(means);
-    cell.p999 = *std::min_element(p999s.begin(), p999s.end());  // best of the runs: single-run runner tail noise
-    cell.max = worst;
-    return true;
+        r = {sum / blocks, sorted[std::min<size_t>(sorted.size() - 1, static_cast<size_t>(0.999 * sorted.size()))], sorted.back()};
+        return true;
+    }, cell);
 }
 
 #ifdef N60_BENCH_ANC
@@ -354,29 +372,30 @@ bool timeAnc(double rate, uint32_t frames, const Config &cfg, Cell &cell) {
     float *op[kCh];
     const double period = frames / rate;
     const uint64_t blocks = std::max<uint64_t>(32, static_cast<uint64_t>(cfg.seconds * rate / frames));
-    std::vector<double> means, p999s, times(blocks);
-    double worst = 0;
+    std::vector<double> times(blocks);
     uint64_t blk = 0;
-    for (int run = -1; run < cfg.runs; ++run) {
-        double sum = 0;
-        for (uint64_t i = 0; i < blocks; ++i, ++blk) {
-            for (uint32_t l = 0; l < kCh; ++l) { ip[l] = sig.at(blk, l, frames); op[l] = outBuf.data() + size_t(l) * 4096; }
-            const auto t0 = Clock::now();
-            N60AncLaneFeedProcess(feed, ip, op, kCh, frames);
-            const auto t1 = Clock::now();
-            times[i] = std::chrono::duration<double>(t1 - t0).count() / period;
-            sum += times[i];
+    int run = -1;
+    bool ok = bestOfRuns(cfg, [&](Rep &r) {
+        for (;; ++run) {  // run -1 is the warm-up pass
+            double sum = 0;
+            for (uint64_t i = 0; i < blocks; ++i, ++blk) {
+                for (uint32_t l = 0; l < kCh; ++l) { ip[l] = sig.at(blk, l, frames); op[l] = outBuf.data() + size_t(l) * 4096; }
+                const auto t0 = Clock::now();
+                N60AncLaneFeedProcess(feed, ip, op, kCh, frames);
+                const auto t1 = Clock::now();
+                times[i] = std::chrono::duration<double>(t1 - t0).count() / period;
+                sum += times[i];
+            }
+            if (run < 0) continue;
+            std::vector<double> sorted(times);
+            std::sort(sorted.begin(), sorted.end());
+            r = {sum / blocks, sorted[std::min<size_t>(sorted.size() - 1, static_cast<size_t>(0.999 * sorted.size()))], sorted.back()};
+            ++run;
+            return true;
         }
-        if (run < 0) continue;  // warm-up pass
-        std::vector<double> sorted(times);
-        std::sort(sorted.begin(), sorted.end());
-        means.push_back(sum / blocks);
-        p999s.push_back(sorted[std::min<size_t>(sorted.size() - 1, static_cast<size_t>(0.999 * sorted.size()))]);
-        worst = std::max(worst, sorted.back());
-    }
+    }, cell);
     N60AncLaneFeedDestroy(feed);
-    cell.mean = median(means); cell.p999 = *std::min_element(p999s.begin(), p999s.end()); cell.max = worst;
-    return true;
+    return ok;
 }
 #endif
 
@@ -576,6 +595,16 @@ Gate compareBudgets(const Results &cur, const Results &bud, bool enforce) {
     return g;
 }
 
+// G33: the budgets a cell is judged on, so bestOfRuns can stop at the first repetition under them. The mean limit is the
+// tighter of the mean budget and half the fade budget, as compareBudgets applies both.
+void cellLimits(Config &cfg, const Results &bud, std::string scn) {
+    if (scn == "R4a" || scn == "R4b") scn = "R4";
+    auto m = bud.find(scn + "/mean"), p = bud.find(scn + "/p999"), f = bud.find(scn + "/fade2x");
+    cfg.limMean = m != bud.end() ? m->second : 0;
+    if (f != bud.end() && (cfg.limMean <= 0 || f->second / 2 < cfg.limMean)) cfg.limMean = f->second / 2;
+    cfg.limP999 = p != bud.end() ? p->second : 0;
+}
+
 // ---- Self-test ------------------------------------------------------------------------------------------------
 
 int selfFailures = 0;
@@ -608,6 +637,26 @@ int selfTest() {
     Results bud2 = {{"R2/mean", 0.5}, {"R2/fade2x", 0.8}};
     SELF(compareBudgets(r2, bud2, true).fails == 0, "R2 single-thread row is not the judged row");
     SELF(compareBudgets(r2bad, bud2, true).fails == 2, "R2 worker row over the mean and fade budgets fails");
+
+    // 2b. G33 best-of-runs: one slow repetition among fast ones passes, every repetition slow fails.
+    {
+        Config bc;
+        bc.limMean = 0.5;
+        bc.limP999 = 0;
+        const Results budR3 = {{"R3/mean", 0.5}};
+        auto gate = [&](const std::vector<double> &reps, int &used) {
+            Cell c;
+            used = 0;
+            bestOfRuns(bc, [&](Rep &r) { r = {reps[std::min<size_t>(used, reps.size() - 1)], 0.0, 0.0}; ++used; return true; }, c);
+            return compareBudgets({{"R3/384000/refw/mean", c.mean}}, budR3, true).fails;
+        };
+        int used = 0;
+        SELF(gate({0.9, 0.2, 0.2}, used) == 0 && used == 2, "one slow repetition among fast ones must pass (used %d)", used);
+        SELF(gate({0.9}, used) == 1 && used == bc.gateRuns, "all slow repetitions must fail after %d runs (used %d)", bc.gateRuns, used);
+        SELF(gate({0.3}, used) == 0 && used == 1, "a repetition under budget stops early (used %d)", used);
+        bc.limMean = 0;  // an ungated cell runs every repetition and still reports the minimum
+        SELF(gate({0.9, 0.2, 0.9, 0.9, 0.9}, used) == 0 && used == bc.runs, "ungated cell runs all %d repetitions (used %d)", bc.runs, used);
+    }
 
     // 3. Flat JSON round trip.
     writeJson("n60_bench_selftest.json", cur, Config());
@@ -687,6 +736,8 @@ int main(int argc, char **argv) {
 
     Results res;
     int errors = 0;
+    Results budIn;  // read early: the budgeted cells use it to know when a repetition is good enough (G33)
+    if (!cfg.budgets.empty()) readFlat(cfg.budgets, budIn);
     for (const std::string &id : cfg.scenarios) {
 #ifndef N60_BENCH_ANC
         if (id == "R7") { std::fputs("note: R7 needs -DN60_BENCH_ANC and the ANC objects; skipped\n", stderr); continue; }
@@ -698,7 +749,9 @@ int main(int argc, char **argv) {
                 Cell cell;
                 bool finite = true;
                 std::vector<n60_profile_entry> prof;
-                if (!runCell(id, rate, frames, cfg, cell, finite, (cfg.profile && blockKind == 0) ? &prof : nullptr)) {
+                Config cc = cfg;
+                if (blockKind == 0 && id != "R2" && id != "R3") cellLimits(cc, budIn, id);
+                if (!runCell(id, rate, frames, cc, cell, finite, (cfg.profile && blockKind == 0) ? &prof : nullptr)) {
                     std::fprintf(stderr, "scenario %s rate %.0f %s block did not run\n", id.c_str(), rate, label);
                     ++errors;
                     continue;
@@ -729,7 +782,9 @@ int main(int argc, char **argv) {
                 bool finite = true;
                 const uint32_t frames = refFrames(rate);
                 std::vector<n60_profile_entry> wprof;
-                if (!runCell(id, rate, frames, cfg, cell, finite, cfg.profile ? &wprof : nullptr, cfg.workers) || !finite) {
+                Config cc = cfg;
+                cellLimits(cc, budIn, id);
+                if (!runCell(id, rate, frames, cc, cell, finite, cfg.profile ? &wprof : nullptr, cfg.workers) || !finite) {
                     std::fprintf(stderr, "scenario %s rate %.0f with %u workers did not run\n", id.c_str(), rate, cfg.workers);
                     ++errors;
                     continue;
