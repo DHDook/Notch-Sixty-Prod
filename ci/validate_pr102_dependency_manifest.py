@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from pathlib import Path
 import json
+import re
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -39,6 +40,18 @@ declared_vendor_roots = set()
 declared_production_sources = set()
 project = PROJECT.read_text(encoding="utf-8")
 
+# The app target uses a folder-synchronised group (E1 S9): every file under NotchSixty/ is
+# compiled unless it is listed in the membership exceptions.
+_exceptions = set()
+for _block in re.findall(r"membershipExceptions = \((.*?)\);", project, re.S):
+    _exceptions.update(line.strip().rstrip(",") for line in _block.splitlines() if line.strip())
+
+
+def compiled_by_project(relative_path: str) -> bool:
+    prefix = "NotchSixty/"
+    return relative_path.startswith(prefix) and relative_path[len(prefix):] not in _exceptions
+
+
 for component in components:
     for field in (
         "id",
@@ -73,7 +86,7 @@ for component in components:
         path = ROOT / source
         require(path.is_file(), f"declared production source missing: {source}")
         declared_production_sources.add(source)
-        require(path.name in project, f"declared vendor source is not referenced by the Xcode project: {source}")
+        require(compiled_by_project(source), f"declared vendor source is not referenced by the Xcode project: {source}")
 
 # Every top-level Vendor/<component> directory in production source must be
 # classified. This prevents a new vendored dependency from entering silently.
@@ -99,7 +112,7 @@ for vendor_root in actual_vendor_roots:
         if not path.is_file() or path.suffix.lower() not in {".c", ".cc", ".cpp", ".m", ".mm"}:
             continue
         relative = str(path.relative_to(ROOT))
-        if path.name in project:
+        if compiled_by_project(relative):
             require(relative in declared_production_sources, f"compiled vendored source is unclassified: {relative}")
 
 # Catch packaged binary dependencies and Swift package dependency files. Apple
