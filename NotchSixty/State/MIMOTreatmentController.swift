@@ -69,6 +69,8 @@ final class MIMOTreatmentController: ObservableObject {
         var included = true
         var supportLowHz = 25.0
         var supportHighHz = 150.0
+        /// True once the user set the range; until then a design derives it from the captures' -10 dB point (G34).
+        var supportEdited = false
         /// Ways of a routed speaker that receive the treatment delta; empty when unrouted. Other ways get exactly zero.
         var inBandWays: [String] = []
     }
@@ -266,7 +268,7 @@ final class MIMOTreatmentController: ObservableObject {
         refreshMissingWays()
     }
     func setSupport(lowHz: Double, highHz: Double, lane: Int) {
-        update(lane) { $0.supportLowHz = lowHz; $0.supportHighHz = highHz }
+        update(lane) { $0.supportLowHz = lowHz; $0.supportHighHz = highHz; $0.supportEdited = true }
         pushSupportOverrides()
         refreshSources()
     }
@@ -289,6 +291,7 @@ final class MIMOTreatmentController: ObservableObject {
         case sampleRateMismatch(measured: Double, engine: Double)
         case missingMeasurement(source: String, seat: String)
         case headroom(String)
+        case plantModel(String)
 
         var errorDescription: String? {
             switch self {
@@ -299,6 +302,7 @@ final class MIMOTreatmentController: ObservableObject {
                 return String(format: "The seats were measured at %.1f kHz but audio runs at %.1f kHz. Re-measure at the running rate.", measured / 1_000, engine / 1_000)
             case .missingMeasurement(let source, let seat): return "\(source) has no measurement at \(seat)."
             case .headroom(let text): return text
+            case .plantModel(let text): return "The downstream chain or programme feed could not be built: \(text)"
             }
         }
     }
@@ -338,26 +342,43 @@ final class MIMOTreatmentController: ObservableObject {
             return
         }
         let measurements = baselineProvider()
-        let active = rows
+        var active = rows
         guard !active.isEmpty else { throw InputError.noSources }
         guard !seats.isEmpty else { throw InputError.noSeats }
         if let off = measurements.first(where: { abs($0.sampleRate - rate) > 0.5 }) {
             throw InputError.sampleRateMismatch(measured: off.sampleRate, engine: rate)
         }
-        var plants: [[MIMOTreatmentPlant?]] = []
-        var floatPlants: [[[Float]]] = []
+        // G33: the plant is the raw capture through the lane's known chain downstream of the stage, with the arrival onset
+        // (G6); the prediction uses the real programme feed at the stage. G34: unedited ranges come from the -10 dB point.
+        var raw: [[[Float]]] = []
         for row in active {
-            var perSeat: [MIMOTreatmentPlant?] = []
-            var perSeatIR: [[Float]] = []
+            var perSeat: [[Float]] = []
             for seat in seats {
                 guard let found = measurements.last(where: { $0.seatID == seat.id && $0.source == row.source }),
                       !found.channel.impulseResponse.isEmpty
                 else { throw InputError.missingMeasurement(source: row.name, seat: seat.name) }
-                perSeat.append(MIMOTreatmentPlant(program: found.channel.impulseResponse, injection: nil, arrivalSeconds: nil))
-                perSeatIR.append(found.channel.impulseResponse)
+                perSeat.append(found.channel.impulseResponse)
             }
-            plants.append(perSeat)
-            floatPlants.append(perSeatIR)
+            raw.append(perSeat)
+        }
+        let rowLanes = active.map(\.lane)
+        let model: PlantModel
+        do {
+            model = try await Task.detached(priority: .userInitiated) {
+                try Self.buildPlantModel(raw: raw, lanes: rowLanes, configuration: configuration, rate: rate)
+            }.value
+        } catch {
+            throw InputError.plantModel(String(describing: error))
+        }
+        for (index, row) in active.enumerated() where !row.supportEdited {
+            rows[index].supportLowHz = model.support[index].lowerBound
+            rows[index].supportHighHz = model.support[index].upperBound
+        }
+        active = rows
+        let floatPlants = model.plants
+        var plants: [[MIMOTreatmentPlant?]] = []
+        for (s, perSeat) in floatPlants.enumerated() {
+            plants.append(perSeat.enumerated().map { MIMOTreatmentPlant(program: $1, injection: nil, arrivalSeconds: model.arrivals[s][$0]) })
         }
         let seatBaselines = (0..<seats.count).map { seat in Self.sum(floatPlants.map { $0[seat] }) }
         let decay: Double
@@ -407,7 +428,7 @@ final class MIMOTreatmentController: ObservableObject {
         designedBudgets = Dictionary(uniqueKeysWithValues: zip(lanes, request.sources.map(\.gainLimitDB)))
         designedPeaks = Dictionary(uniqueKeysWithValues: zip(lanes, result.summary.peakGainDB))
         designedThermal = Dictionary(uniqueKeysWithValues: zip(lanes, result.summary.thermalDB))
-        try predict(seatPlants: floatPlants, filters: result.filters, seats: seats, rate: rate)
+        try await predict(seatPlants: floatPlants, filters: result.filters, seats: seats, rate: rate, feeds: model.feeds)
     }
 
     /// E19 S10: the routed design. The planner (design note 10) turns the way captures into the request, the stage carries the
@@ -475,7 +496,7 @@ final class MIMOTreatmentController: ObservableObject {
         designedBudgets = Dictionary(uniqueKeysWithValues: zip(lanes, plan.speakers.map(\.gainLimitDB)))
         designedPeaks = Dictionary(uniqueKeysWithValues: zip(lanes, result.summary.peakGainDB))
         designedThermal = Dictionary(uniqueKeysWithValues: zip(lanes, result.summary.thermalDB))
-        try predict(seatPlants: floatPlants, filters: result.filters, seats: seats, rate: rate)
+        try await predict(seatPlants: floatPlants, filters: result.filters, seats: seats, rate: rate, feeds: nil)
     }
 
     /// E19 S10b (G42): the per-speaker baseline of a routed design, the way plants of each included speaker summed at each seat.
@@ -499,34 +520,82 @@ final class MIMOTreatmentController: ObservableObject {
     }
 
     /// Low-rate baseline and predicted seat responses for the decay readout and the verifier.
+    /// Everything the unrouted design reads from the graph and the captures, built off the main actor.
+    struct PlantModel: Sendable {
+        var plants: [[[Float]]]
+        var arrivals: [[Double?]]
+        var support: [ClosedRange<Double>]
+        /// The programme's response at the stage per source, at the graph rate.
+        var feeds: [[Float]]
+    }
+
+    nonisolated static func buildPlantModel(
+        raw: [[[Float]]], lanes: [Int], configuration: UnifiedGraphConfiguration, rate: Double
+    ) throws -> PlantModel {
+        let feeds = try MIMOUnroutedPlantModel.upstreamFeeds(of: configuration, lanes: lanes)
+        var plants: [[[Float]]] = []
+        var arrivals: [[Double?]] = []
+        var support: [ClosedRange<Double>] = []
+        for (index, lane) in lanes.enumerated() {
+            let chain = MIMOUnroutedPlantModel.downstreamChain(of: configuration, lane: lane)
+            let through = raw[index].map { MIMOUnroutedPlantModel.convolve($0, chain) }
+            plants.append(through)
+            arrivals.append(through.map { MIMOUnroutedPlantModel.arrivalSeconds(of: $0, sampleRate: rate) })
+            support.append(MIMOUnroutedPlantModel.defaultSupportHz(captures: raw[index], sampleRate: rate))
+        }
+        return PlantModel(plants: plants, arrivals: arrivals, support: support, feeds: feeds)
+    }
+
+    /// Per-source filters at the low rate: the stage adds E on top of the tau-delayed direct path, and each source's lane
+    /// carries its own feed at the stage, so source s plays tau-delay of u_s plus the sum over r of E(s,r) through u_r. With
+    /// `feeds` nil every source carries the same unit feed.
+    nonisolated static func predictedFilters(filters: MIMOTreatmentFilterSet, feeds: [[Float]]?, rate: Double) throws -> (feed: [[Float]], treated: [[Float]]) {
+        let sources = filters.sourceCount
+        let taps = filters.tapCount
+        let tauIndex = Int((filters.tauSeconds * filters.lowRateHz).rounded())
+        let unit: [Float] = [1]
+        let low: [[Float]] = try (0..<sources).map { source in
+            guard let feeds, source < feeds.count else { return unit }
+            let decimated = MIMOUnroutedPlantModel.trimmed(try decimate(feeds[source], rate: rate))
+            return Array(decimated.prefix(256))
+        }
+        var treated: [[Float]] = []
+        for s in 0..<sources {
+            var f = [Float](repeating: 0, count: max(taps, tauIndex + 1) + 256)
+            for (t, v) in low[s].enumerated() { f[tauIndex + t] += v }
+            for r in 0..<sources {
+                let base = (s * sources + r) * taps
+                let u = low[r]
+                for t in 0..<taps {
+                    let e = filters.taps[base + t]
+                    if e == 0 { continue }
+                    for (k, v) in u.enumerated() { f[t + k] += e * v }
+                }
+            }
+            treated.append(f)
+        }
+        return (low, treated)
+    }
+
     private func predict(
-        seatPlants: [[[Float]]], filters: MIMOTreatmentFilterSet, seats: [MultichannelCalibrationSeat], rate: Double
-    ) throws {
+        seatPlants: [[[Float]]], filters: MIMOTreatmentFilterSet, seats: [MultichannelCalibrationSeat], rate: Double, feeds: [[Float]]?
+    ) async throws {
         let factor = Self.analysisFactor(lowRateHz: filters.lowRateHz)
         lowRate = filters.lowRateHz * Double(factor)
         analysisUpsample = factor
-        let tauIndex = Int((filters.tauSeconds * filters.lowRateHz).rounded())
         let sources = filters.sourceCount
-        let taps = filters.tapCount
-        // The stage adds E on top of the tau-delayed direct path; with one program feed on every source the filter of a
-        // source is that delay plus the sum of its row of E.
-        var perSource: [[Float]] = []
-        for s in 0..<sources {
-            var f = [Float](repeating: 0, count: max(taps, tauIndex + 1))
-            f[tauIndex] += 1
-            for r in 0..<sources {
-                let base = (s * sources + r) * taps
-                for t in 0..<taps { f[t] += filters.taps[base + t] }
+        let seatCount = seats.count
+        let (base, predicted) = try await Task.detached(priority: .userInitiated) { () throws -> ([[Float]], [[Float]]) in
+            let (feed, perSource) = try Self.predictedFilters(filters: filters, feeds: feeds, rate: rate)
+            var base: [[Float]] = []
+            var predicted: [[Float]] = []
+            for seat in 0..<seatCount {
+                let lowPlants = try (0..<sources).map { try Self.decimate(seatPlants[$0][seat], rate: rate) }
+                base.append(Self.upsample(try MeasurementCore.predictTreatedIR(plants: lowPlants, filters: feed), by: factor))
+                predicted.append(Self.upsample(try MeasurementCore.predictTreatedIR(plants: lowPlants, filters: perSource), by: factor))
             }
-            perSource.append(f)
-        }
-        var base: [[Float]] = []
-        var predicted: [[Float]] = []
-        for seat in 0..<seats.count {
-            let lowPlants = try (0..<sources).map { try Self.decimate(seatPlants[$0][seat], rate: rate) }
-            base.append(Self.upsample(Self.sum(lowPlants), by: factor))
-            predicted.append(Self.upsample(try MeasurementCore.predictTreatedIR(plants: lowPlants, filters: perSource), by: factor))
-        }
+            return (base, predicted)
+        }.value
         baselineLow = base
         predictedLow = predicted
         let verified = MIMOTreatmentVerifier.verify(
@@ -654,9 +723,9 @@ final class MIMOTreatmentController: ObservableObject {
 
     /// The decay analyser needs at least 8 kHz; the low rate is 2.7 to 3 kHz for the 44.1/48 families, so the bass
     /// responses are interpolated by the smallest integer that reaches it (the band of interest is far below the low rate).
-    static func analysisFactor(lowRateHz: Double) -> Int { max(1, Int((8_000 / max(lowRateHz, 1)).rounded(.up))) }
+    nonisolated static func analysisFactor(lowRateHz: Double) -> Int { max(1, Int((8_000 / max(lowRateHz, 1)).rounded(.up))) }
 
-    static func upsample(_ input: [Float], by factor: Int) -> [Float] {
+    nonisolated static func upsample(_ input: [Float], by factor: Int) -> [Float] {
         guard factor > 1, input.count > 1 else { return input }
         var out = [Float](repeating: 0, count: (input.count - 1) * factor + 1)
         for i in 0..<(input.count - 1) {
@@ -666,14 +735,14 @@ final class MIMOTreatmentController: ObservableObject {
         return out
     }
 
-    static func sum(_ responses: [[Float]]) -> [Float] {
+    nonisolated static func sum(_ responses: [[Float]]) -> [Float] {
         let length = responses.map(\.count).max() ?? 0
         var out = [Float](repeating: 0, count: length)
         for response in responses { for (i, v) in response.enumerated() { out[i] += v } }
         return out
     }
 
-    static func decimate(_ input: [Float], rate: Double) throws -> [Float] {
+    nonisolated static func decimate(_ input: [Float], rate: Double) throws -> [Float] {
         let (factor, _) = try MIMORoomTreatmentCoreDesigner.lowRate(forSampleRate: rate)
         var out = [Float](repeating: 0, count: input.count / factor + 2)
         var written: UInt64 = 0

@@ -118,7 +118,10 @@ final class MIMOTreatmentControllerTests: XCTestCase {
         await controller.design()
         XCTAssertEqual(controller.phase, .designed, "\(controller.phase)")
         let stage = try XCTUnwrap(host.staged.last)
-        XCTAssertEqual(stage.supportRangesHz, [30, 120, 25, 150])
+        XCTAssertEqual(Array(stage.supportRangesHz.prefix(3)), [30, 120, stage.supportRangesHz[2]])
+        // G34: the unedited row comes from the capture's -10 dB point, inside the planner's window; the edited row keeps its range.
+        XCTAssertTrue((15.0...60.0).contains(stage.supportRangesHz[2]), "\(stage.supportRangesHz)")
+        XCTAssertEqual(stage.supportRangesHz[3], 150)
         XCTAssertEqual(stage.filters.tauSeconds, 0.020, accuracy: 1e-9)
         XCTAssertEqual(controller.designedDecaySeconds, 0.3)
         // The excluded source's row of the delta is exactly zero.
@@ -282,6 +285,11 @@ final class MIMOTreatmentControllerTests: XCTestCase {
         XCTAssertEqual(AudioIOEngine.videoLatencyInput(for: room), .known(videoLatencyMode: false), "no correction, no video mode")
         room.enabled = true
         XCTAssertEqual(AudioIOEngine.videoLatencyInput(for: room), .unknown, "no lane plan states no mode")
+        // G35: a legacy single filter states its mode through its declared latency.
+        room.filter = RoomCorrectionFilter(name: "min", sampleRate: nil, leftTaps: [1, 0.5], rightTaps: nil, declaredLatencyFrames: 0)
+        XCTAssertEqual(AudioIOEngine.videoLatencyInput(for: room), .known(videoLatencyMode: true), "minimum phase is video mode")
+        room.filter?.declaredLatencyFrames = 128
+        XCTAssertEqual(AudioIOEngine.videoLatencyInput(for: room), .known(videoLatencyMode: false), "a declared latency is music mode")
     }
 
     func testEngineHeldReadbackIsNilWithoutASession() {
