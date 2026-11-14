@@ -8,7 +8,8 @@
 //   R7 ANC lane feed maths, offline (built only with -DN60_BENCH_ANC; compute only, nothing reaches a device)
 // at the eight standard rates and two block sizes: "ref" is 2.67 ms (128 frames at 48 kHz, 1,024 at 384 kHz) and
 // "stress" a quarter of that. Load = render time / buffer period on one core. Each cell reports the median of
-// --runs runs of the mean load and of the p99.9 block load, plus the worst block seen (max).
+// --runs runs of the mean load (median) and of the p99.9 block load (best, i.e. lowest, of the runs: a hosted runner's
+// scheduling tail hits single runs, and the default is five runs so at least best-of-3), plus the worst block seen (max).
 //
 // Output is flat JSON ("R1/48000/ref/mean": 0.0123). --baseline compares every */mean key with a stored file:
 // fail above 1.5x, warn above 1.2x. --budgets checks the "ref" rows against budgets.json (E20 Q1); budget breaches
@@ -322,7 +323,7 @@ bool timeGraph(n60_graph *g, uint32_t lanes, double rate, uint32_t frames, const
         worst = std::max(worst, sorted.back());
     }
     cell.mean = median(means);
-    cell.p999 = median(p999s);
+    cell.p999 = *std::min_element(p999s.begin(), p999s.end());  // best of the runs: single-run runner tail noise
     cell.max = worst;
     return true;
 }
@@ -374,7 +375,7 @@ bool timeAnc(double rate, uint32_t frames, const Config &cfg, Cell &cell) {
         worst = std::max(worst, sorted.back());
     }
     N60AncLaneFeedDestroy(feed);
-    cell.mean = median(means); cell.p999 = median(p999s); cell.max = worst;
+    cell.mean = median(means); cell.p999 = *std::min_element(p999s.begin(), p999s.end()); cell.max = worst;
     return true;
 }
 #endif

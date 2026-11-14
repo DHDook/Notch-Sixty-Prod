@@ -15,6 +15,11 @@ Testing is split into deterministic automated tests, realtime structural checks,
 - serialization/preset migrations
 - DSP bypass equivalence where applicable
 
+## CI benchmark re-run
+`macos-full.yml` runs the whole Debug XCTest (about 2 hours) before the benchmark step. To re-run only the render and
+bridge benchmarks (checkout, toolchain, `ci/build_benchmarks.sh`, budget gate, artifact upload), dispatch it with
+`bench_only`: `gh workflow run macos-full.yml --ref <branch> -f bench_only=true`. PR and nightly runs are unchanged.
+
 ## Realtime structural checks
 - zero allocations during render
 - no blocking locks in render path

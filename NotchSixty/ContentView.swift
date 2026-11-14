@@ -1464,6 +1464,7 @@ struct ContentView: View {
                     "\(graph.programChannelCount) program + \(graph.channelCount - graph.programChannelCount) sub lanes / latency \(graph.latencyFrames) frames\(graph.rebuildState == 0 ? "" : " / rebuilding")"
                 )
                 diagnosticRow("Graph dynamics", graphDynamicsText(graph))
+                if let load = graph.renderLoad { diagnosticRow("Graph load", load.displayText) }
             }
 
             if let render = snapshot.renderKernelDiagnostics {

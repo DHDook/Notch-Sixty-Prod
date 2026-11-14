@@ -11,6 +11,11 @@ on:
       - main
     types: [labeled, synchronize, opened, reopened]
   workflow_dispatch:
+    inputs:
+      bench_only:
+        description: 'Run only the render and bridge benchmarks (skips XCTest, the Release build and the harnesses)'
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -29,6 +34,7 @@ jobs:
           xcodebuild -version
 
       - name: Build and test (Debug)
+        if: ${{ !inputs.bench_only }}
         run: |
           set -o pipefail
           xcodebuild \
@@ -45,6 +51,7 @@ jobs:
       # The XCTest host cannot take launch arguments, so a debug-build environment variable switches every graduated
       # flag off (FeatureFlags.graduatedOffEnvironmentKey); xcodebuild forwards TEST_RUNNER_-prefixed variables.
       - name: Test with graduated flags off (Debug)
+        if: ${{ !inputs.bench_only }}
         env:
           TEST_RUNNER_NOTCHSIXTY_GRADUATED_FLAGS_OFF: "1"
         run: |
@@ -60,6 +67,7 @@ jobs:
             test 2>&1 | tee "$RUNNER_TEMP/xctest-flags-off.log"
 
       - name: Build Release performance scheme
+        if: ${{ !inputs.bench_only }}
         run: >-
           xcodebuild
           -project NotchSixty.xcodeproj
@@ -71,6 +79,7 @@ jobs:
           build
 
       - name: Behavioural C harnesses
+        if: ${{ !inputs.bench_only }}
         env:
           N60_PARITY_FULL: "1" # E6 S10: full parity corpus at all eight rates, with graph timings
           SOAK: "1" # E4 S13: long acoustic-twin drift and fault soak; S29: plus 8 simulated hours (about 80 s)
