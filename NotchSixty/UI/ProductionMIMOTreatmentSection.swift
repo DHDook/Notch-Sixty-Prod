@@ -53,6 +53,22 @@ struct ProductionMIMOTreatmentSection: View {
                 }
                 }
             }
+            ForEach(controller.matrixOnlyOutputs, id: \.self) { note in
+                Text(note).font(.caption).foregroundStyle(.secondary)
+                    .accessibilityLabel(note)
+            }
+            if !controller.missingWayNotes.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Driver measurements needed").font(.subheadline.weight(.semibold))
+                    ForEach(controller.missingWayNotes, id: \.self) { Text($0).font(.caption).foregroundStyle(.secondary) }
+                    Button("Measure drivers") { Task { await controller.measureWays() } }
+                        .disabled(controller.isMeasuringWays)
+                        .accessibilityLabel("Measure the listed drivers at the included seats")
+                }
+            }
+            if let status = controller.wayMeasureStatus {
+                Text(status).font(.caption).foregroundStyle(.secondary)
+            }
         }
         .padding(18)
         .glassEffect(.regular, in: .rect(cornerRadius: 18))

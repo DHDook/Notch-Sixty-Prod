@@ -33,8 +33,8 @@ extension AudioIOEngine: MIMOTreatmentHost {
             infos.append(MIMOTreatmentSourceInfo(source: source, lane: roles.count + index, name: source.displayName))
         }
         if let routing = speakerRoutingConfiguration {
-            let window = MIMORoutedTreatmentPlanner.defaultSupportHz
             for speaker in routing.speakers {
+                let window = mimoGraphTreatment.routedSupportOverrides[speaker.id] ?? MIMORoutedTreatmentPlanner.defaultSupportHz
                 let lane = speaker.source.kind == .program ? speaker.source.index : roles.count + speaker.source.index
                 guard let index = infos.firstIndex(where: { $0.lane == lane }) else { continue }
                 infos[index].inBandWays = MIMORoutedTreatmentPlanner
@@ -88,8 +88,12 @@ extension AudioIOEngine: MIMOTreatmentHost {
 
     func treatmentRouting() -> SpeakerRoutingConfiguration? { speakerRoutingConfiguration }
 
-    /// No production source of per-way captures exists yet (E19 G36, slice S10b): a routed design refuses by name until then.
+    /// The engine holds no captures: the Room Treatment controller reads them from the seat flow's store (E19 S10b, G36).
     func treatmentWayCaptures() -> [MIMORoutedWayCapture] { [] }
+
+    func setTreatmentSupportOverrides(_ overrides: [UUID: ClosedRange<Double>]) {
+        mimoGraphTreatment.routedSupportOverrides = overrides
+    }
 
     /// No production source of hardware acceptance records exists before E22 (bench), so none is offered.
     func hardwareAcceptance() -> MIMORoomTreatmentHardwareAcceptance? { nil }
