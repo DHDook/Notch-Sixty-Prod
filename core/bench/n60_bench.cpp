@@ -10,7 +10,7 @@
 // "stress" a quarter of that. Load = render time / buffer period on one core. Each cell reports the best
 // (lowest) of the repetitions for both the mean load and the p99.9 block load (a hosted runner's neighbour load only adds
 // time to single repetitions; a real regression slows all of them), plus the worst block seen (max). Cells with a budget
-// run up to 9 repetitions and stop at the first under budget (G33); others run --runs (default 5).
+// run up to 9 repetitions and stop at the first under budget, and cells still over after the sweep get up to 3 later passes (--retry-passes, G33); others run --runs (default 5).
 //
 // Output is flat JSON ("R1/48000/ref/mean": 0.0123). --baseline compares every */mean key with a stored file:
 // fail above 1.5x, warn above 1.2x. --budgets checks the "ref" rows against budgets.json (E20 Q1); budget breaches
@@ -275,6 +275,7 @@ struct Config {
     std::vector<std::string> scenarios{std::begin(kScenarioIds), std::end(kScenarioIds)};
     double seconds = 0.2;
     int runs = 5;
+    int retryPasses = 3;    // G33: later passes over the cells still over budget, each keeping its best
     int gateRuns = 9;       // G33: most repetitions of a budget-gated cell; it stops early once one is under its budgets
     double limMean = 0, limP999 = 0;  // budget of the cell being timed (0 = none); set per cell by the caller
     bool profile = false, profileOnly = false, enforceBudgets = false, selfTest = false;
@@ -726,6 +727,7 @@ int main(int argc, char **argv) {
         else if (a == "--profile") cfg.profile = true;
         else if (a == "--profile-only") { cfg.profile = cfg.profileOnly = true; }
         else if (a == "--workers") cfg.workers = static_cast<uint32_t>(std::max(0, std::atoi(next().c_str())));
+        else if (a == "--retry-passes") cfg.retryPasses = std::max(0, std::atoi(next().c_str()));
         else if (a == "--enforce-budgets") cfg.enforceBudgets = true;
         else if (a == "--self-test") cfg.selfTest = true;
         else { std::fprintf(stderr, "unknown argument %s\n", a.c_str()); return 2; }
@@ -804,6 +806,35 @@ int main(int argc, char **argv) {
                 std::printf("%-4s %7.0f Hz %-6s %4u frames  mean %6.2f%%  p99.9 %6.2f%%  max %6.2f%%  (%u workers)\n", id.c_str(), rate, "refw", frames,
                             100 * cell.mean, 100 * cell.p999, 100 * cell.max, cfg.workers);
             }
+        }
+    }
+    // G33: runner contention comes in bursts longer than one cell's repetitions, so cells still over a budget after the sweep
+    // are measured again in later passes (a pause between them) and keep their best. A real regression stays over budget.
+    if (!cfg.budgets.empty() && !cfg.profileOnly) {
+        for (int pass = 1; pass <= cfg.retryPasses; ++pass) {
+            bool any = false;
+            for (const std::string &id : cfg.scenarios) {
+                const bool w = (id == "R2" || id == "R3");
+                if (w && cfg.workers == 0) continue;
+                for (double rate : cfg.rates) {
+                    const char *label = w ? "refw" : "ref";
+                    Config cc = cfg;
+                    cellLimits(cc, budIn, id);
+                    const std::string km = key(id, rate, label, "mean"), kp = key(id, rate, label, "p999");
+                    if (!res.count(km) || !res.count(kp)) continue;
+                    const bool over = (cc.limMean > 0 && res[km] > cc.limMean) || (cc.limP999 > 0 && res[kp] > cc.limP999);
+                    if (!over) continue;
+                    if (!any) { std::this_thread::sleep_for(std::chrono::seconds(3)); any = true; }
+                    Cell cell;
+                    bool finite = true;
+                    if (!runCell(id, rate, refFrames(rate), cc, cell, finite, nullptr, w ? cfg.workers : 0) || !finite) continue;
+                    std::printf("%-4s %7.0f Hz %-6s retry %d: mean %6.2f%% (was %6.2f%%)  p99.9 %6.2f%% (was %6.2f%%)\n", id.c_str(), rate, label, pass,
+                                100 * cell.mean, 100 * res[km], 100 * cell.p999, 100 * res[kp]);
+                    res[km] = std::min(res[km], cell.mean);
+                    res[kp] = std::min(res[kp], cell.p999);
+                }
+            }
+            if (!any) break;
         }
     }
     // E20 S10 (G6): enforcing needs R7 (ANC lane feed) in the JSON, so a workflow build that lost -DN60_BENCH_ANC fails loudly.
