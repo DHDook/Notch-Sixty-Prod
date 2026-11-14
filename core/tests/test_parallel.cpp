@@ -555,6 +555,130 @@ static void g23Tests(const double *rates, size_t rateCount, bool lite) {
     }
 }
 
+// ---- E20 S10 part 6: AMBIENT lane jobs, linked dynamics and R1/R4/R5-shaped layouts through workers ----
+// A free-form stage list on `lanes` lanes, rendered in varied block sizes with a live AMBIENT level edit and a same-content
+// rebuild part-way; workers < 0 means no host. Every output sample is appended to `out`.
+struct StageSet {
+    std::vector<std::vector<float>> keep;
+    std::vector<n60_stage_desc> stages;
+    void add(uint32_t kind, uint32_t id, std::vector<float> p, uint32_t laneA = N60_LANE_ALL, uint32_t laneB = 0, uint64_t mask = 0) {
+        n60_stage_desc s;
+        std::memset(&s, 0, sizeof s);
+        s.structSize = sizeof s;
+        s.kind = kind;
+        s.stageId = id;
+        s.laneA = laneA;
+        s.laneB = laneB;
+        s.laneMask = mask;
+        keep.push_back(std::move(p));
+        s.paramCount = static_cast<uint32_t>(keep.back().size());
+        s.params = keep.back().empty() ? nullptr : keep.back().data();
+        stages.push_back(s);
+    }
+};
+
+static bool renderSet(StageSet &S, double rate, uint32_t lanes, int workers, uint32_t ambientId, std::vector<float> &out,
+                      n60_graph_parallel_stats *stats = nullptr) {
+    n60_graph_desc d{};
+    d.structSize = sizeof d;
+    d.abiVersion = N60_GRAPH_ABI_VERSION;
+    d.sampleRate = rate;
+    d.maxBlockFrames = 512;
+    d.inputChannels = d.outputChannels = lanes;
+    d.firScheme = N60_FIR_SCHEME_NONUNIFORM;
+    d.stages = S.stages.data();
+    d.stageCount = static_cast<uint32_t>(S.stages.size());
+    n60_graph *g = nullptr;
+    const n60_status bst = n60_graph_build(&d, &g);
+    if (bst != N60_STATUS_OK) { std::fprintf(stderr, "renderSet build status %d\n", static_cast<int>(bst)); return false; }
+    n60_rebuild_options instant{sizeof instant, 0.0f, 0.0f, 0};
+    n60_graph_set_rebuild_options(g, &instant);
+    Host host;
+    if (workers > 0) host.start(g, static_cast<uint32_t>(workers));
+    std::vector<std::vector<float>> in(lanes), o(lanes);
+    fill(in, 4096, 9);
+    for (auto &v : o) v.assign(512, 0.0f);
+    std::vector<const float *> ip(lanes);
+    std::vector<float *> op(lanes);
+    const uint32_t sizes[] = {512, 1, 37, 256, 100, 512, 480};
+    uint32_t pos = 0;
+    out.clear();
+    bool ok = true;
+    for (int blk = 0; blk < 16 && ok; blk++) {
+        const uint32_t n = sizes[blk % 7];
+        for (uint32_t c = 0; c < lanes; c++) { ip[c] = in[c].data() + (pos % 3000); op[c] = o[c].data(); }
+        pos += n;
+        if (blk == 6 && ambientId != 0) { const n60_param_record rec = {ambientId, 0, 4.0f, 0}; n60_graph_post_params(g, &rec, 1); }
+        if (blk == 10) n60_graph_publish(g, &d);
+        ok = n60_graph_process(g, ip.data(), op.data(), n) == N60_STATUS_OK;
+        for (uint32_t c = 0; c < lanes; c++) out.insert(out.end(), o[c].begin(), o[c].begin() + n);
+        n60_graph_collect(g);
+    }
+    if (stats) { stats->structSize = sizeof *stats; n60_graph_read_parallel(g, stats); }
+    if (workers > 0) host.stop();
+    n60_graph_retire(g);
+    return ok;
+}
+
+static void ambientAndLinkedTests(const double *rates, size_t rateCount, bool lite) {
+    for (size_t ri = 0; ri < rateCount; ++ri) {
+        const double rate = rates[ri];
+        if (lite && rate != 48000 && rate != 384000) continue;
+        gWhere = "ambient lane jobs and linked dynamics";
+        gRate = rate;
+        for (uint32_t lanes : {2u, 6u, 8u}) {
+            StageSet S;
+            // AMBIENT: level, three bands and 17 cut sections (the live ANC shape), on every lane (lane jobs).
+            std::vector<float> amb = {-6, 120, 3, 0.7f, 1000, -2, 1, 6000, 2, 0.7f, 17};
+            for (int k = 0; k < 17; ++k) { amb.push_back(60.0f * (1 + k)); amb.push_back(-1.0f - 0.25f * k); amb.push_back(1.5f); }
+            // Linked dynamics over all lanes: the three-pass loops (level, detector and gain, correction). Stages in rank order.
+            S.add(N60_STAGE_DYN_EQ, 5, {1, 0, 500, 1.2f, 1, -40, 2, -12, 10, 100, 2, -50, 2, 6, 1, 20,
+                                        5, 2000, 0.8f, 0, -30, 3, -12, 5, 80, 0, -50, 2, 6, 0, 20});
+            S.add(N60_STAGE_COMPRESSOR, 6, {-22, 3, 5, 3, 70, 0, 0, 1, 120, 1, 85, 60, 1, 20, 37, 0});
+            S.add(N60_STAGE_EXPANDER, 7, {-50, 2, -20, 3, 60, 1, 20, 4, 1, 20, 90, 70, 0});
+            S.add(N60_STAGE_AMBIENT, 4, amb);
+            std::vector<float> ref, got;
+            CHECK(renderSet(S, rate, lanes, -1, 4, ref), "ambient ref build (rate %.0f lanes %u)", rate, lanes);
+            for (int w = 1; w <= 3; ++w) {
+                n60_graph_parallel_stats ps{};
+                CHECK(renderSet(S, rate, lanes, w, 4, got, &ps), "ambient w%d build", w);
+                if (lanes >= 6) CHECK(ps.parallelPhases > 0 && ps.jobsOnCaller + ps.jobsOnWorkers > 0, "ambient lane jobs did not run in parallel (lanes %u workers %d)", lanes, w);
+                CHECK(got.size() == ref.size() && std::memcmp(got.data(), ref.data(), ref.size() * sizeof(float)) == 0,
+                      "AMBIENT lane jobs + linked dynamics: rate %.0f lanes %u workers %d differ from single thread", rate, lanes, w);
+            }
+        }
+    }
+}
+
+// G23b: layouts shaped like R1 (stereo chain with a short FIR), R4 (many lanes of long taps plus bass management) and R5
+// (convolution-heavy room layout) from the bench, through workers, compared with the single-thread run bit for bit.
+// The bench harness itself builds these in n60_bench; this covers the same stage mixes in the test suite.
+static void benchShapedLayoutTests(const double *rates, size_t rateCount, bool lite) {
+    struct Shape { const char *name; uint32_t lanes; uint32_t taps; };
+    const Shape shapes[] = {{"R1-shaped 2 lanes", 2, 4096}, {"R4-shaped 12 lanes", 12, 8192}, {"R5-shaped 8 lanes", 8, 24000}};
+    for (const Shape &sh : shapes) {
+        for (size_t ri = 0; ri < rateCount; ++ri) {
+            const double rate = rates[ri];
+            if (lite && rate != 48000 && rate != 384000) continue;
+            gWhere = sh.name;
+            gRate = rate;
+            auto taps = makeTaps(sh.taps, 31);
+            StageSet S;
+            S.add(N60_STAGE_GAIN, 1, {0.8f});
+            S.add(N60_STAGE_PEQ, 2, {0, 60, 6, 2, 2, 6000, -4, 0.7f, 0, 250, -3, 1.2f});
+            S.stages.push_back(firStage(8, taps.data(), sh.taps, 0));
+            S.add(N60_STAGE_COMPRESSOR, 9, {-22, 3, 5, 3, 70, 0, 0, 1, 120, 1, 85, 60, 1, 20, 37, 0});
+            std::vector<float> ref, got;
+            CHECK(renderSet(S, rate, sh.lanes, -1, 0, ref), "%s ref build at %.0f", sh.name, rate);
+            for (int w = 1; w <= 3; ++w) {
+                CHECK(renderSet(S, rate, sh.lanes, w, 0, got), "%s w%d build at %.0f", sh.name, w, rate);
+                CHECK(got.size() == ref.size() && std::memcmp(got.data(), ref.data(), ref.size() * sizeof(float)) == 0,
+                      "%s rate %.0f workers %d differ from single thread", sh.name, rate, w);
+            }
+        }
+    }
+}
+
 int main() {
     startWatchdog();
     limitCpus();
@@ -602,6 +726,8 @@ int main() {
     }
 
     tailJobTests(rates, 8, lite);
+    ambientAndLinkedTests(rates, 8, lite);
+    benchShapedLayoutTests(rates, 8, lite);
     g23Tests(rates, 8, lite);
     oversubscribedRegression();
     parkingRegression();

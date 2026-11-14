@@ -22,7 +22,7 @@ int n60_fold_matrix_make(n60_fold_matrix *matrix, uint32_t channel_count, const 
 }
 
 void n60_fold_down_process(const n60_fold_matrix *matrix, const float *const *channels, const uint32_t *strides,
-                           uint32_t frames, float *out) {
+                           uint32_t frames, float *out) N60_FOLD_PROCESS_EFFECTS {
     if (out == nullptr || frames == 0u) return;
     if (matrix == nullptr || channels == nullptr || strides == nullptr || matrix->channel_count == 0u ||
         matrix->channel_count > N60_FOLD_MAX_CHANNELS) {

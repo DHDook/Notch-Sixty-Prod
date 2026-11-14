@@ -317,6 +317,31 @@ final class UnifiedGraphEngineTests: XCTestCase {
         }
     }
 
+    /// E20 S10 part 6 (G12): the diagnostics record carries the graph's render load once a one-second window of blocks
+    /// has completed (none before), at every rate, and the developer row text is derived from it.
+    @MainActor
+    func testRenderLoadReachesDiagnosticsAtEveryRate() throws {
+        for rate in Self.rates {
+            var snapshot = N60DSPGraphSnapshotMakeUnity(rate)
+            let configuration = try XCTUnwrap(
+                UnifiedGraphTranslator.stereoConfiguration(snapshot: &snapshot, sampleRate: rate), "rate \(rate)")
+            let host = try UnifiedGraphHost(spec: try configuration.makeSpec())
+            let early = try XCTUnwrap(UnifiedGraphDiagnostics(host: host, programChannelCount: 2))
+            XCTAssertEqual(early.renderLoad?.windowBlocks, 0, "no window yet, rate \(rate)")
+            XCTAssertEqual(early.renderLoad?.displayText, "measuring")
+            let chunk = sine(1_000, rate: rate, frames: 512, amplitude: 0.2)
+            for _ in 0..<(Int(rate / 512.0) + 8) {
+                _ = try host.processOffline(input: [chunk, chunk], frames: 512)
+            }
+            let record = try XCTUnwrap(UnifiedGraphDiagnostics(host: host, programChannelCount: 2))
+            let load = try XCTUnwrap(record.renderLoad, "load rate \(rate)")
+            XCTAssertGreaterThan(load.windowBlocks, 0, "window rate \(rate)")
+            XCTAssertGreaterThanOrEqual(load.meanLoad, 0)
+            XCTAssertGreaterThanOrEqual(load.peakLoad, load.meanLoad)
+            XCTAssertNotEqual(load.displayText, "measuring")
+        }
+    }
+
     /// E6 S8c follow-up: switching the limiter off while the graph renders makes the limiter readbacks
     /// read zero (no reduction, no guard, no peaks) and the diagnostics row carry them; switching it
     /// back on brings them back. The flag is a topology change, so `apply` publishes.
