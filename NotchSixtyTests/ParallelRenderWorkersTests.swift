@@ -72,11 +72,39 @@ final class ParallelRenderWorkersTests: XCTestCase {
         XCTAssertEqual(ParallelRenderPolicy.poolSize(scheme: UnifiedGraphFIRScheme.nonUniform, cores: 2, enabled: true), 1)
     }
 
-    func testFeatureFlagIsRegisteredAndOffByDefault() {
+    func testFeatureFlagsAreRegisteredAndGraduated() {
         XCTAssertTrue(FeatureFlag.all.contains(.parallelRender))
+        XCTAssertTrue(FeatureFlag.all.contains(.multirate))
         XCTAssertEqual(FeatureFlag.parallelRender.id, "e20.parallel-render")
-        XCTAssertFalse(FeatureFlag.parallelRender.graduated)
+        XCTAssertEqual(FeatureFlag.multirate.id, "e20.multirate")
+        XCTAssertTrue(FeatureFlag.parallelRender.graduated)
+        XCTAssertTrue(FeatureFlag.multirate.graduated)
+    }
+
+    /// E20 ship, end to end through production wiring: a release-style launch (no stored overrides, no arguments) turns
+    /// the launch flag on, the policy sizes a worker pool, and the graph host starts it for a heavy graph. The launch
+    /// argument `-e20.parallel-render` is the escape hatch: it leaves no worker thread. The realtime engine never sees a flag.
+    @MainActor func testGraduatedFlagStartsWorkersAtLaunchAndLaunchArgumentSwitchesThemOff() throws {
+        try XCTSkipIf(ProcessInfo.processInfo.activeProcessorCount < 2, "needs a second core")
+        defer { ParallelRenderPolicy.setEnabledForTesting(false) }
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: "E20ShipTests-\(UUID().uuidString)"))
+        let release = FeatureFlags(defaults: defaults, policy: .launchArgumentOnly, arguments: ["App"], environment: [:])
+        ParallelRenderPolicy.setEnabledForTesting(false)
+        ParallelRenderPolicy.refresh(release)
+        XCTAssertTrue(ParallelRenderPolicy.isEnabled, "graduated: on with no argument, in a release build too")
+        let spec = firSpec(rate: 384_000, lanes: 8, stages: 2, taps: 65_536)
+        let host = try UnifiedGraphHost(spec: spec)
+        XCTAssertGreaterThan(host.beginParallelRender(workgroup: WorkGroupParallel(name: "n60.test.grad")), 0)
+        host.release()
+
+        let off = FeatureFlags(defaults: defaults, policy: .launchArgumentOnly,
+                               arguments: ["App", "-NotchSixtyFeatures", "-e20.parallel-render"], environment: [:])
+        ParallelRenderPolicy.refresh(off)
         XCTAssertFalse(ParallelRenderPolicy.isEnabled)
+        let hostOff = try UnifiedGraphHost(spec: spec)
+        XCTAssertEqual(hostOff.beginParallelRender(workgroup: WorkGroupParallel(name: "n60.test.gradoff")), 0)
+        XCTAssertNil(hostOff.parallelRenderStats)
+        hostOff.release()
     }
 
     // MARK: Pool lifecycle

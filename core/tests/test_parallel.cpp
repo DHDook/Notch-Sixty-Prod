@@ -422,6 +422,8 @@ static void tailJobTests(const double *rates, size_t rateCount, bool lite) {
         {"tail: one lane, 2 tail partitions", 1, 14000, 0},
         {"tail: one lane, 262144 taps", 1, 262144, 0},
         {"tail: two lanes, one in the mask", 2, 30000, 0x2u},
+        {"tail: G29 two lanes in a lane phase", 2, 30000, 0},
+        {"tail: G29 three lanes in a lane phase", 3, 14000, 0},
     };
     for (const T &t : cases) {
         const bool heavy = t.taps > 100000;
@@ -443,7 +445,8 @@ static void tailJobTests(const double *rates, size_t rateCount, bool lite) {
                 CHECK(got.size() == ref.size() && std::memcmp(got.data(), ref.data(), ref.size() * sizeof(float)) == 0,
                       "%s rate %.0f workers %u: output differs from single thread", t.name, rate, w);
                 CHECK(ac == 0, "%s rate %.0f workers %u: realtime call allocated %ld times", t.name, rate, w, ac);
-                CHECK(stats.parallelPhases == 0, "%s: a one-lane phase must not run as lane jobs", t.name);
+                const bool lanePhase = t.lanes >= 2 && t.mask == 0;  // G29: tails posted from inside lane jobs
+                CHECK(lanePhase ? stats.parallelPhases > 0 : stats.parallelPhases == 0, "%s: lane phase expectation", t.name);
                 CHECK(stats.jobsOnCaller + stats.jobsOnWorkers > 0, "%s workers %u: no tail job ran", t.name, w);
                 CHECK(stats.wakes > 0, "%s workers %u: workers were never woken", t.name, w);
             }
@@ -655,7 +658,8 @@ static void ambientAndLinkedTests(const double *rates, size_t rateCount, bool li
 // The bench harness itself builds these in n60_bench; this covers the same stage mixes in the test suite.
 static void benchShapedLayoutTests(const double *rates, size_t rateCount, bool lite) {
     struct Shape { const char *name; uint32_t lanes; uint32_t taps; };
-    const Shape shapes[] = {{"R1-shaped 2 lanes", 2, 4096}, {"R4-shaped 12 lanes", 12, 8192}, {"R5-shaped 8 lanes", 8, 24000}};
+    const Shape shapes[] = {{"R1-shaped 2 lanes", 2, 4096}, {"R4-shaped 12 lanes", 12, 8192}, {"R5-shaped 8 lanes", 8, 24000},
+                          {"odd 7 lanes", 7, 4096}, {"odd 5 lanes", 5, 2048}};
     for (const Shape &sh : shapes) {
         for (size_t ri = 0; ri < rateCount; ++ri) {
             const double rate = rates[ri];

@@ -161,6 +161,17 @@ budget but with thin margin. PR #521's 0.88 was a noisy run. R1/384000/ref p99.9
 the M4 (mean 11.5%): a scheduling tail on a shared runner, not a code regression; no R1 code changed.
 Remaining serial items (ns per frame at 384 kHz): PROTECTION about 175, DYN_EQ 58, BASS_MGMT 54, COMPRESSOR 40, PEQ 30.
 
+### E20 ship: R3 worker row, PEQ and PROTECTION jobs
+
+The limiter's look-ahead delay and true-peak max now run in the lane jobs (three phases per 256-frame chunk: up, delay and
+gain, down; a clamp pass runs only when a lane exceeds the ceiling), the gain pass keeps its state in locals, and PEQ stages
+with four or more lanes run lane pairs as jobs (8192 section-samples gate). Output is bit-identical to the serial stage.
+Apple M4, `--workers 2`, R3 384 kHz refw mean: 22.2% to about 20.5% (1 worker 22.8%, 3 workers 19.9%); the remaining serial
+share is about 5 to 7% (linked DYN_EQ and COMPRESSOR, BASS_MGMT, CLEANUP, the limiter gain pass). Three hosted bench-only
+runs read R3 refw 384 kHz at 33.3, 52.1 and 36.8% mean (352.8 kHz: 44.1, 50.9, 34.6%), so the R3 fade rule stays exempt in
+`budgets.json` (G33, E22 bench line). Lanes inside multi-lane FIR phases now post tails for idle workers (G29). Parallel
+PROTECTION was faster than serial at 2, 4 and 16 lanes (44.1 to 192 kHz), so there is no size gate (G36).
+
 ## Release optimisation
 
 Xcode Release for the app target now sets `-O3` for C++ (`OTHER_CPLUSPLUSFLAGS`). On the M4, -O3 ran

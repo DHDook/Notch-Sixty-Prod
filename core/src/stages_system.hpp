@@ -31,7 +31,7 @@ void runSystem(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames)
 bool systemProtectionParallel(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames, JobHost &jobs) N60_RT_NONBLOCKING;
 // Control thread (snapshot build). True when the stage can ever run through systemProtectionParallel (static parameters).
 bool systemProtectionEligible(const SnapHeader *h, const StageRec &r);
-// Any thread. One lane job of a PROTECTION step (mode 1: up, clip; mode 2: down).
+// Any thread. One lane job of a PROTECTION step (mode 1: up, clip; mode 2: look-ahead delay and gain; mode 3: down).
 void systemProtectionJob(void *ctx, uint32_t mode, uint32_t lane) N60_RT_NONBLOCKING;
 
 // E20 R3: stages whose lanes are independent and run as phase jobs next to the FIR lanes (AMBIENT). Prepare and Finish run on the
