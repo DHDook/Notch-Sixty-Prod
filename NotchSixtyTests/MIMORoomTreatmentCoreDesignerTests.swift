@@ -58,7 +58,7 @@ final class MIMORoomTreatmentCoreDesignerTests: XCTestCase {
         return FeatureFlags(
             defaults: UserDefaults(suiteName: suite) ?? .standard,
             policy: .launchArgumentOnly,
-            arguments: on ? [FeatureFlags.launchArgument, FeatureFlag.mimoTreatment.id] : []
+            arguments: on ? [FeatureFlags.launchArgument, FeatureFlag.mimoTreatment.id] : [FeatureFlags.launchArgument, "-" + FeatureFlag.mimoTreatment.id]
         )
     }
 
@@ -70,7 +70,7 @@ final class MIMORoomTreatmentCoreDesignerTests: XCTestCase {
         let result = try MIMORoomTreatmentCoreDesigner.design(request, flags: flags(on: true), limits: loose)
         XCTAssertEqual(result.filters.sourceCount, 2)
         XCTAssertEqual(result.filters.decimation, 16)
-        XCTAssertFalse(FeatureFlag.mimoTreatment.defaultEnabled)
+        XCTAssertTrue(FeatureFlag.mimoTreatment.graduated)
         XCTAssertTrue(FeatureFlag.all.contains(.mimoTreatment))
     }
 

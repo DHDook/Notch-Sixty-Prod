@@ -58,7 +58,7 @@ final class MIMOTreatmentControllerTests: XCTestCase {
         FeatureFlags(
             defaults: UserDefaults(suiteName: "MIMOTreatmentControllerTests.\(UUID().uuidString)") ?? .standard,
             policy: .launchArgumentOnly,
-            arguments: on ? [FeatureFlags.launchArgument, FeatureFlag.mimoTreatment.id] : [])
+            arguments: [FeatureFlags.launchArgument, (on ? "" : "-") + FeatureFlag.mimoTreatment.id])
     }
 
     private let seats = [MultichannelCalibrationSeat(name: "Seat 1"), MultichannelCalibrationSeat(name: "Seat 2")]

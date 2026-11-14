@@ -496,7 +496,17 @@ final class MIMOTreatmentController: ObservableObject {
         designedBudgets = Dictionary(uniqueKeysWithValues: zip(lanes, plan.speakers.map(\.gainLimitDB)))
         designedPeaks = Dictionary(uniqueKeysWithValues: zip(lanes, result.summary.peakGainDB))
         designedThermal = Dictionary(uniqueKeysWithValues: zip(lanes, result.summary.thermalDB))
-        try await predict(seatPlants: floatPlants, filters: result.filters, seats: seats, rate: rate, feeds: nil)
+        // G46: each speaker carries its own programme feed at the stage (the compiled routing's source lanes), not an equal one.
+        let feedLanes = plan.speakers.map(\.lane)
+        let feeds: [[Float]]
+        do {
+            feeds = try await Task.detached(priority: .userInitiated) {
+                try MIMOUnroutedPlantModel.upstreamFeeds(of: configuration, lanes: feedLanes)
+            }.value
+        } catch {
+            throw InputError.plantModel(String(describing: error))
+        }
+        try await predict(seatPlants: floatPlants, filters: result.filters, seats: seats, rate: rate, feeds: feeds)
     }
 
     /// E19 S10b (G42): the per-speaker baseline of a routed design, the way plants of each included speaker summed at each seat.
@@ -513,10 +523,34 @@ final class MIMOTreatmentController: ObservableObject {
                     seatID: seat.id, source: row.source, sampleRate: sampleRate,
                     channel: RoomCorrectionChannelMeasurement(
                         capturedAt: Date(timeIntervalSince1970: 0), rawCapture: [], impulseResponse: plant.program,
-                        transferFunction: nil, quality: RoomCorrectionMeasurementQuality(sweepComplete: true))))
+                        transferFunction: transferFunction(of: plant.program, sampleRate: sampleRate),
+                        quality: RoomCorrectionMeasurementQuality(sweepComplete: true))))
             }
         }
         return result
+    }
+
+    /// Magnitude of an impulse response on a log grid from 10 to 200 Hz (the verifier reads 20 to 150 Hz), by a direct sum with a
+    /// rotating phasor, so a 384 kHz plant costs one multiply-add per sample and point. The spatial check needs this form (E19 S11).
+    nonisolated static func transferFunction(of ir: [Float], sampleRate: Double, points: Int = 96) -> RoomCorrectionFrequencyResponse {
+        var frequencies: [Double] = [], magnitudes: [Double] = []
+        for index in 0..<points {
+            let hz = 10 * pow(20.0, Double(index) / Double(points - 1))
+            let step = 2 * Double.pi * hz / sampleRate
+            let rotateRe = cos(step), rotateIm = -sin(step)
+            var re = 0.0, im = 0.0, phaseRe = 1.0, phaseIm = 0.0
+            for sample in ir {
+                let x = Double(sample)
+                re += x * phaseRe
+                im += x * phaseIm
+                let nextRe = phaseRe * rotateRe - phaseIm * rotateIm
+                phaseIm = phaseRe * rotateIm + phaseIm * rotateRe
+                phaseRe = nextRe
+            }
+            frequencies.append(hz)
+            magnitudes.append(20 * log10(max((re * re + im * im).squareRoot(), 1e-12)))
+        }
+        return RoomCorrectionFrequencyResponse(frequenciesHz: frequencies, magnitudeDB: magnitudes, phaseRadians: nil)
     }
 
     /// Low-rate baseline and predicted seat responses for the decay readout and the verifier.

@@ -181,7 +181,7 @@ Dirac now sells ART on the Mac, so this needs the same path to authorisation as 
 - [x] S10 `e19/routed-stage-and-wiring`: routed MIMO stage (ABI v40), dead-man lease and routed design wiring (#533); Quiet Zone actuator graphs keep refusing the stage in v1 (G41 closed, owner)
 - [x] S10b `e19/routed-way-capture`: per-way seat capture (G36, Room Treatment "Measure drivers"), support overrides (G38), matrix-only outputs (G39), routed permit baseline (G42); G43-G45 scoped
 - [ ] Authorise live treatment only through the PR75 verification path, then re-qualify on the unified graph
-- [ ] S11 graduate `e19.mimo-treatment` (available, never armed; arm and permit unchanged; the bench no longer gates it; removal is the FC phase)
+- [x] S11 graduate `e19.mimo-treatment` (available, never armed; arm and permit unchanged; the bench no longer gates it; removal is the FC phase)
 
 ## Phase 2 — Unified engine
 
@@ -570,6 +570,7 @@ Owner decision, 18 Oct 2026: there is no bench access for now, so every bench ch
 - [ ] E4 S30 ANSI S3.5 band-importance values in `ConversationUnmasking.swift` against a licensed copy of the standard (owner item, moved from E4 on 12 Nov 2026; E4 G2 closed with the values kept as estimates, so this runs only if the owner obtains a copy)
 - [ ] Feed the results into the live-authorisation slices (E4 S10, E19), which still need real evidence
 - [ ] E19 G32 treated repeat measurement (owner decision 13 Nov 2026): a user-initiated, time-limited arm for the measurement only, under the same written authorisation path (arm and fade rules unchanged, never persisted), at 3 seats; scheduled with the E19 modal-decay campaign
+- [ ] E19 bench (docs/epics/E19.md Bench checks): re-prove on measured IRs the T30 acceptance (G3), the arrival onset from raw E24 plants (G6), the strict 0.25 dB realisation gate (G10) and the -100 dB armed-output reference (G15); worst-callback CPU of the stage tail at 8 sources and 384 kHz (G16); the routed way pass on a bi-amp or tri-amp rig (G43); moved-microphone way capture and the arrival-plus-50-ms way IR compaction (G45); file hardware acceptance or class qualifications into `MIMOTreatmentQualificationRegistry.production` (G31). No permit exists before this item
 - [ ] E28 bench (docs/epics/E28.md Bench checks): spectrum readability on music (G16), VoiceOver and keyboard use of Dynamics rows and loudness editors (G18), route meters on 2.1 and 5.1 devices (G25), routed-session loudness (G27), binaural capture (G30), wide loudness against an offline meter (G31), band-pass multiband listen and summed-band phase against dry (G43), compressor lookahead edit while playing for an audible dip from the cold-started ring (G46), and every dynamics extra by ear (compressor mix, link, RMS, lookahead; expander hold, knee, sidechain high-pass and listen; multiband bypass, solo, listen) on stereo and N-channel at the eight rates
 - [ ] E13 bench (docs/epics/E13.md Bench checks): capture with in-ear microphones and real reseats, head-yaw sign against the renderer, same-rate compensation (G2 to G4), headphone EQ drag at 384 kHz and Apply-while-playing restore (G5, G6), 7.1.4 tail CPU at 384 kHz (G11), elevation capture with in-ear microphones (G16)
 - [ ] E13 G13: cost per frame of the 16-tap Kaiser sinc delay-path FIR at 384 kHz, with an R3 cost row (E13 S5; E20 budgets)
@@ -582,6 +583,7 @@ Plan: `docs/epics/FC.md`. Epics graduate their flag at the end (default on, stay
 section 11); this phase removes the flags after the E22 bench, as small per-epic PRs.
 
 - [x] FC1 `fc/flags-off-ci`: nightly `macos-full` runs the suite with graduated flags off as well as on (before the first graduation)
+- [ ] Pin the e9 graduated flags explicitly in the test classes that assume them off (UnifiedGraphKernelCorpusTests, UnifiedGraphProgramDSPTests, UnifiedGraphStereoHeadphoneTests; E19 G40), so the flags-on run passes
 - [ ] Per-epic removal PRs, in order: E26, E28, E9, E13, E4, E19, E7, E15, E17, E30, E31, E20, E21, E29 (`e6.legacy-kernel` goes with E23)
 - [ ] Never remove a flag with an open E22 bench item against its feature; live ANC and MIMO keep `LiveTreatmentArm`
 

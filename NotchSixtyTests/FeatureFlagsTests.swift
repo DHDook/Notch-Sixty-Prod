@@ -38,7 +38,7 @@ final class FeatureFlagsTests: XCTestCase {
         defaults.set(false, forKey: FeatureFlags.key(for: .subAwareAnc))
         let release = FeatureFlags(known: FeatureFlag.all, defaults: defaults, policy: .launchArgumentOnly, arguments: [], environment: [:])
         XCTAssertTrue(release.isEnabled(.subAwareAnc))
-        XCTAssertFalse(release.isEnabled(.mimoTreatment))
+        XCTAssertTrue(release.isEnabled(.mimoTreatment), "E19 S11 graduated it: available, never armed")
     }
 
     func testDebugOverridesPersistAndReset() {
@@ -151,13 +151,12 @@ final class FeatureFlagsTests: XCTestCase {
         XCTAssertFalse(gradStore(.launchArgumentOnly, arguments: ["-NotchSixtyFeatures", "-nosuch"]).isEnabled(draft))
     }
 
-    /// Graduation means available, never armed (E4 S32 graduates the four live ANC output flags; `E4GraduationTests`
-    /// pins that nothing arms). Live MIMO room treatment never graduates.
-    func testLiveMIMOFlagNeverGraduates() {
-        for flag in [FeatureFlag.mimoTreatment] {
-            XCTAssertFalse(flag.graduated, flag.id)
-            XCTAssertFalse(flag.resolvedDefault, flag.id)
-        }
+    /// Graduation means available, never armed (E4 S32 graduates the live ANC output flags; E19 S11 graduates MIMO room
+    /// treatment). `E4GraduationTests` and `E19GraduationTests` pin that nothing arms and no permit exists.
+    func testLiveMIMOFlagGraduatesAsAvailableAndStaysRegistered() {
+        XCTAssertTrue(FeatureFlag.mimoTreatment.graduated)
+        XCTAssertTrue(FeatureFlag.mimoTreatment.resolvedDefault)
+        XCTAssertTrue(FeatureFlag.all.contains(.mimoTreatment))
     }
 
     func testUnknownFlagsAreAlwaysOff() {

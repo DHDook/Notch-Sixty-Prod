@@ -495,6 +495,47 @@ static void testRebuildMute() {
     n60_graph_retire(g);
 }
 
+// E19 G13: the direct path across a snapshot swap. A rebuild that fades warms the incoming graph for at least its latency
+// before the crossfade, so the DELAY of L on every lane holds real history: no hole, and the output after the fade is the
+// continuous x(n - L). (A fade-less swap would drop up to L frames of the direct path; the host never publishes one for a MIMO
+// graph, and `mimoRebuildMute` keeps the delta silent in whichever instance is replaced.) Unarmed stage, eight rates.
+static void testRebuildKeepsTheDirectPath() {
+    for (double rate : kRates) {
+        Cfg c{2, 4, uint32_t(0.020 * rate), {1.0f, 1.0f}, std::vector<float>(2 * 2 * 4, 0.0f)};
+        std::vector<float> keep;
+        n60_graph *g = buildMimo(rate, c, keep);
+        const uint32_t L = latencyOf(rate, c.tau);
+        const uint32_t N = uint32_t(rate);  // one second: a whole number of 200 Hz periods at every rate
+        Lanes in(2, std::vector<float>(N));
+        for (uint32_t i = 0; i < N; ++i)
+            for (uint32_t ch = 0; ch < 2; ++ch)
+                in[ch][i] = 0.1f * float(std::sin(2.0 * 3.14159265358979 * (200.0 + 30.0 * ch) * i / rate));
+        run(g, in, 480);
+        float gain = 1.0f;
+        std::vector<float> keep2 = c.params(rate);
+        n60_stage_desc st[2];
+        st[0] = stg(N60_STAGE_GAIN, 8, 0, &gain, 1);
+        st[1] = stg(N60_STAGE_MIMO, 7, 0, keep2.data(), uint32_t(keep2.size()), 3);
+        const n60_graph_desc d = descOf(rate, 2, st, 2);
+        const n60_status ps = n60_graph_publish(g, &d);
+        CHECK(ps == N60_STATUS_OK, "publish %d at %.0f", int(ps), rate);
+        Lanes out = run(g, in, 480);
+        double worst = 0, tail = 0, peak = 0.1;
+        for (uint32_t ch = 0; ch < 2; ++ch) {
+            for (uint32_t i = 0; i < N; ++i) {
+                const double ref = in[ch][(i + N - (L % N)) % N];
+                const double dev = std::fabs(double(out[ch][i]) - ref);
+                worst = std::max(worst, dev);
+                if (i >= N / 2) tail = std::max(tail, dev);
+            }
+        }
+        // Identical signals through an equal-power crossfade swell by at most sqrt(2) - 1; a hole would break the bound.
+        CHECK(worst <= 0.4143 * peak + 1e-4, "rebuild disturbs the direct path by %g at %.0f", worst, rate);
+        CHECK(tail < 1e-3, "direct path after the fade differs from x(n - L) by %g at %.0f", tail, rate);
+        n60_graph_retire(g);
+    }
+}
+
 static void testBlockSizeIndependence() {
     const double rate = 48000;
     Cfg c;
@@ -728,6 +769,7 @@ int main() {
     testThermalSlidingWindowPasses();
     testThermalWindowResetsAtZeroGain();
     testRebuildMute();
+    testRebuildKeepsTheDirectPath();
     testBlockSizeIndependence();
     testNoAllocations();
     testRoutedUnarmedAndArmed();
