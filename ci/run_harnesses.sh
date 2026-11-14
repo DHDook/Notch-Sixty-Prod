@@ -34,7 +34,7 @@ $OUT/${src}_rt.o"
 done
 ALL_RT=$(find "$RT" -name '*.c' -print | sort; echo "$GUARD_OBJ")
 ALL_RT_NO_BRIDGE=$(find "$RT" -name '*.c' ! -name 'N60RealtimeAudioBridge.c' ! -name 'N60MeasurementMonitorProc.c' ! -name 'N60LevelSessionProc.c' -print | sort; echo "$GUARD_OBJ")
-STRICT=(-std=c11 -Wall -Wextra -Werror)
+STRICT=(-std=c11 -Wall -Wextra -Werror -Icore/include)
 FILTERS=("$@")
 
 passed=()
