@@ -207,7 +207,40 @@ final class BRIRCaptureTests: XCTestCase {
             left[10 + index] = 1       // the marker position identifies the (role, yaw) pair
             right[40 + index] = 0.5
             return BRIRCaptureResult(
-                role: step.role, headYawDegrees: step.headYawDegrees, leftIR: left, rightIR: right)
+                role: step.role, headYawDegrees: step.headYawDegrees,
+                headPitchDegrees: step.headPitchDegrees, leftIR: left, rightIR: right)
+        }
+    }
+
+    /// G16: a capture at three head pitches records pitch, selects by role, yaw and pitch, and reports elevation sets.
+    func testTiltedCaptureRecordsPitchAndSelectsByIt() throws {
+        for rate in Self.rates {
+            var p = plan(rate: rate, tapCount: 128, positions: .one)
+            p.headTilt = .threePitches
+            XCTAssertEqual(p.steps.count, 6)
+            XCTAssertEqual(p.steps.map(\.headPitchDegrees), [-30, -30, 0, 0, 30, 30])
+            let asset = try BRIRCaptureAssembler.makeAsset(displayName: "Mine", plan: p, results: markedResults(p))
+            XCTAssertTrue(asset.providesElevationSets)
+            XCTAssertEqual(asset.reference.hasElevationSets, true)
+            func front(pitch: Double) throws -> Int {
+                let prepared = try asset.prepare(
+                    for: .stereo, headPose: N60HeadPose(yawDegrees: 0, pitchDegrees: pitch, rollDegrees: 0))
+                let ir = prepared.leftIRs[0..<128]
+                return ir.indices.max { ir[$0] < ir[$1] }! - ir.startIndex
+            }
+            XCTAssertEqual(try front(pitch: -40), 10, "nearest is -30 at \(rate)")
+            XCTAssertEqual(try front(pitch: 5), 12)
+            XCTAssertEqual(try front(pitch: 25), 14)
+
+            // A level-only capture has no elevation sets and records no pitch.
+            let level = plan(rate: rate, tapCount: 128, positions: .one)
+            let flat = try BRIRCaptureAssembler.makeAsset(displayName: "Flat", plan: level, results: markedResults(level))
+            XCTAssertFalse(flat.providesElevationSets)
+            XCTAssertTrue(flat.measurements.allSatisfy { $0.headPitchDegrees == nil })
+            // Results missing a pitch are an incomplete capture.
+            var wrong = markedResults(p)
+            wrong[0].headPitchDegrees = 10
+            XCTAssertThrowsError(try BRIRCaptureAssembler.makeAsset(displayName: "x", plan: p, results: wrong))
         }
     }
 

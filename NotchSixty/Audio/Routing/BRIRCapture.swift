@@ -48,9 +48,25 @@ enum BRIRHeadPositions: Int, Equatable, Sendable, CaseIterable {
     }
 }
 
+/// Head pitches captured per speaker and yaw (E13 S8, G16). Tilting the head gives role-tagged assets elevation sets,
+/// so head tracking can interpolate pitch from them instead of holding the level capture.
+enum BRIRHeadTilt: Int, Equatable, Sendable, CaseIterable {
+    case level = 1
+    case threePitches = 3
+
+    /// Degrees, positive looking up, same sign convention as `N60HeadPose.pitchDegrees`.
+    var pitchDegrees: [Double] {
+        switch self {
+        case .level: [0]
+        case .threePitches: [-30, 0, 30]
+        }
+    }
+}
+
 struct BRIRCaptureStep: Equatable, Sendable {
     var role: OutputProgramRole
     var headYawDegrees: Double
+    var headPitchDegrees: Double = 0
 }
 
 struct BRIRCapturePlan: Equatable, Sendable {
@@ -61,6 +77,7 @@ struct BRIRCapturePlan: Equatable, Sendable {
 
     var speakers: [OutputProgramRole]
     var headPositions: BRIRHeadPositions = .three
+    var headTilt: BRIRHeadTilt = .level
     var sampleRate: Double
     var tapCount: Int
     var leftEar: MeasurementSeat
@@ -77,10 +94,12 @@ struct BRIRCapturePlan: Equatable, Sendable {
               seat.mode == .sharedClock else { throw BRIRCaptureError.invalidPlan }
     }
 
-    /// Yaw is the outer loop: the listener turns their head once per position, not once per speaker.
+    /// Pitch, then yaw, are the outer loops: the listener moves their head once per position, not once per speaker.
     var steps: [BRIRCaptureStep] {
-        headPositions.yawDegrees.flatMap { yaw in
-            speakers.map { BRIRCaptureStep(role: $0, headYawDegrees: yaw) }
+        headTilt.pitchDegrees.flatMap { pitch in
+            headPositions.yawDegrees.flatMap { yaw in
+                speakers.map { BRIRCaptureStep(role: $0, headYawDegrees: yaw, headPitchDegrees: pitch) }
+            }
         }
     }
 
@@ -97,6 +116,7 @@ struct BRIRCapturePlan: Equatable, Sendable {
 struct BRIRCaptureResult: Equatable, Sendable {
     var role: OutputProgramRole
     var headYawDegrees: Double
+    var headPitchDegrees: Double = 0
     var leftIR: [Float]
     var rightIR: [Float]
 }
@@ -305,8 +325,8 @@ enum BRIRCaptureAssembler {
         compensation: BRIRHeadphoneCompensation? = nil
     ) throws -> BinauralProfileAsset {
         try plan.validate()
-        let expected = Set(plan.steps.map { "\($0.role.rawValue)@\($0.headYawDegrees)" })
-        let got = results.map { "\($0.role.rawValue)@\($0.headYawDegrees)" }
+        let expected = Set(plan.steps.map { "\($0.role.rawValue)@\($0.headYawDegrees)/\($0.headPitchDegrees)" })
+        let got = results.map { "\($0.role.rawValue)@\($0.headYawDegrees)/\($0.headPitchDegrees)" }
         guard got.count == expected.count, Set(got) == expected else { throw BRIRCaptureError.incompleteCapture }
 
         var compensated = results
@@ -338,7 +358,8 @@ enum BRIRCaptureAssembler {
                 leftIR: result.leftIR.map { $0 * gain },
                 rightIR: result.rightIR.map { $0 * gain },
                 channelRole: result.role,
-                headYawDegrees: result.headYawDegrees
+                headYawDegrees: result.headYawDegrees,
+                headPitchDegrees: plan.headTilt == .level ? nil : result.headPitchDegrees
             )
         }
         let asset = BinauralProfileAsset(

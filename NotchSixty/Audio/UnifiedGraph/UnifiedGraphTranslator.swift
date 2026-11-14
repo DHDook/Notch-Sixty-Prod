@@ -683,6 +683,22 @@ enum UnifiedGraphTranslator {
         return nil
     }
 
+    /// What head tracking will use for a binaural profile, in words, or nil when the finest grid fits (E13 S8, G14).
+    /// `earlyTaps` follows the translator's own rule without the onset trim, so a very short response can only make
+    /// the real grid finer than reported, never coarser.
+    static func binauralTrackingNote(
+        channels: Int, sampleRate: Double, tapCount: Int, elevationData: Bool
+    ) -> String? {
+        let earlyLimit = min(Int(N60_GRAPH_BINAURAL_MAX_TAPS), Int((binauralEarlySeconds * sampleRate).rounded()))
+        let earlyTaps = max(1, min(tapCount, earlyLimit))
+        guard let plan = binauralTrackingPlan(channels: channels, earlyTaps: earlyTaps, elevationData: elevationData) else {
+            return "Head tracking is unavailable: this many speakers at this rate exceed the response budget."
+        }
+        guard plan.coarsened else { return nil }
+        let pitch = plan.elevations > 1 ? "\(plan.elevations) head pitches" : "no head pitch"
+        return "Head tracking uses a coarser grid (\(Int(plan.yawStepDegrees.rounded())) degree yaw steps, \(pitch)) because \(channels) speakers at \(Int(sampleRate)) Hz exceed the response budget."
+    }
+
     private static let binauralLog = Logger(subsystem: "com.notchsixty.app", category: "binaural")
     /// Where a delay-separated response's arrival sits after alignment: 0.5 ms keeps the pre-ringing of the
     /// fractional shift and a turned head's earlier ear (the margin above) inside the response.
@@ -796,7 +812,7 @@ enum UnifiedGraphTranslator {
         var plan = BinauralTrackingPlan(yawSets: 1, elevations: 1, coarsened: false)
         if headTracking {
             guard let chosen = binauralTrackingPlan(
-                channels: channels, earlyTaps: earlyTaps, elevationData: !asset.isRoleTagged) else {
+                channels: channels, earlyTaps: earlyTaps, elevationData: asset.providesElevationSets) else {
                 return .failure(.binauralBudget)
             }
             plan = chosen

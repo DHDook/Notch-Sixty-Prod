@@ -179,11 +179,13 @@ extension FeatureFlag {
     )
 
     /// E13 S3 and S7 (S4 to S6 join it): live headphone tuning (fixed 16-section layout, Apply while playing) and the
-    /// guided personal-BRIR capture in the Headphones workspace. Off: the workspace is unchanged. Removed when E13 ships.
+    /// guided personal-BRIR capture in the Headphones workspace, with long BRIRs and head-tracked interpolation. Off: the
+    /// workspace is unchanged. Graduated by E13 S8 (default on); the flag-cleanup phase after E22 removes it.
     static let headphones = FeatureFlag(
         id: "e13.headphones",
         title: "Headphones: live tuning and personal BRIR capture",
-        epic: "E13"
+        epic: "E13",
+        graduated: true
     )
 
     /// E19: MIMO room treatment on the unified graph. S3 gates the Swift designer on it; later slices add the stages,
