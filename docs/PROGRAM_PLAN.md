@@ -445,10 +445,10 @@ complete, speaker ANC qualified, and a full hardware regression passing at every
 
 - [x] Bring-your-own import: AutoEq CSV, REW and squig.link frequency-response text, plus user target curves
 - [x] One-click PEQ from an imported response and a chosen target, using the existing model fitter
-- [~] Live PEQ and crossfeed tuning while playing (from E6): S3 built behind `e13.headphones` (`e13/live-headphone-tuning`, PR #456; needs-owner); bench in E22
-- [~] Raise the HRIR cap for room-included BRIRs (S4 `e13/brir-long-tail` built behind `e13.headphones`, PR pending, needs-owner; SOFA long import is limit-level only, G10; wiring: E13 S8); live HRTF interpolation with head tracking (S5 `e13/hrtf-interpolation` built behind `e13.headphones`, PR pending, ABI v39, needs-owner; wiring: E13 S8; bench in E22; G8 open)
+- [x] Live PEQ and crossfeed tuning while playing (from E6): S3 built behind `e13.headphones` (`e13/live-headphone-tuning`, PR #456; needs-owner); bench in E22
+- [x] Raise the HRIR cap for room-included BRIRs (S4 `e13/brir-long-tail` built behind `e13.headphones`, #465; SOFA long import is limit-level only, G10); live HRTF interpolation with head tracking (S5 `e13/hrtf-interpolation` built behind `e13.headphones`, #516, ABI v39, needs-owner; bench in E22)
 - [x] S8 `e13/ship` graduated `e13.headphones` (default on, 14 Nov 2026); software gaps closed (G14, G16 built in S8); bench gaps move to E22; removal is the FC phase
-- [~] In-ear-microphone BRIR capture for personal virtual speakers (S6 core merged; S7 guided flow built behind `e13.headphones`; bench in E22)
+- [x] In-ear-microphone BRIR capture for personal virtual speakers (S6 core merged; S7 guided flow built behind `e13.headphones`; bench in E22)
 
 ### E14 Upmixer
 
