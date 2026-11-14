@@ -188,6 +188,9 @@ struct BinauralProfileReference: Codable, Equatable, Sendable {
     var originalSourceName: String?
     var sampleRate: Double
     var tapCount: Int
+    /// E13 S8: whether the asset can interpolate head pitch (see `BinauralProfileAsset.providesElevationSets`).
+    /// `nil` in references saved before this field existed, which is read as "yes" (the finest grid).
+    var hasElevationSets: Bool? = nil
 
     func validate() throws {
         guard !displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,

@@ -34,7 +34,7 @@ extension FeatureFlag {
         .legacyKernel, .ancEngineLease, .adaptiveTonalLive, .earnedCap, .feedForwardLive,
         .noiseSurvey, .conversationUnmasking, .virtualMicrophone, .zones, .headPositionCamera, .overnight,
         .subAwareAnc, .longFIR, .outputProtection, .headphones, .mimoTreatment, .dynamicsExtras, .roomModel,
-        .parallelRender
+        .parallelRender, .multirate
     ]
 
     /// E6 S11: the unified graph is the default renderer. Turning this on selects the frozen
@@ -179,11 +179,13 @@ extension FeatureFlag {
     )
 
     /// E13 S3 and S7 (S4 to S6 join it): live headphone tuning (fixed 16-section layout, Apply while playing) and the
-    /// guided personal-BRIR capture in the Headphones workspace. Off: the workspace is unchanged. Removed when E13 ships.
+    /// guided personal-BRIR capture in the Headphones workspace, with long BRIRs and head-tracked interpolation. Off: the
+    /// workspace is unchanged. Graduated by E13 S8 (default on); the flag-cleanup phase after E22 removes it.
     static let headphones = FeatureFlag(
         id: "e13.headphones",
         title: "Headphones: live tuning and personal BRIR capture",
-        epic: "E13"
+        epic: "E13",
+        graduated: true
     )
 
     /// E19: MIMO room treatment on the unified graph. S3 gates the Swift designer on it; later slices add the stages,
@@ -216,10 +218,22 @@ extension FeatureFlag {
     /// E20 S6: parallel rendering of the non-uniform FIR lanes on up to three extra realtime worker threads in the
     /// output device's Audio Workgroup. Swift decides the worker count (`ParallelRenderPolicy`); the core never reads the
     /// flag. Read once at launch. Off: no worker thread exists and the graph renders on the audio thread alone.
+    /// Graduated at E20 ship (13 Nov 2026): on by default, `-NotchSixtyFeatures -e20.parallel-render` switches it off.
+    /// The policy still picks zero workers for graphs one thread can carry.
     static let parallelRender = FeatureFlag(
         id: "e20.parallel-render",
         title: "Parallel render workers",
-        epic: "E20"
+        epic: "E20",
+        graduated: true
+    )
+
+    /// E20 S7 and S8 (multirate low-frequency paths) were skipped on the measured entry rule (12 Nov 2026), so no code
+    /// reads this flag. It graduates empty with its epic and is removed in the flag-cleanup phase after E22.
+    static let multirate = FeatureFlag(
+        id: "e20.multirate",
+        title: "Multirate low-frequency paths",
+        epic: "E20",
+        graduated: true
     )
 }
 

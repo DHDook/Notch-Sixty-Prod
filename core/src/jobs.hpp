@@ -37,7 +37,7 @@ struct PhaseDesc {
     uint32_t count;
     uint64_t laneUnion;                // output lanes any stage of the phase touches; job j is the j-th set bit
     uint64_t skip[kMaxPhaseStages];    // per stage, bit k: lane k of the stage is still clearing its history (silent)
-    // E20 S10b: mode 0 is the FIR lane phase above; modes 1 and 2 are the two lane-parallel steps of the PROTECTION stage
+    // E20 S10b: mode 0 is the FIR lane phase above; modes 1 to 3 are the lane-parallel steps of the PROTECTION stage
     // (stages_system.cpp), where job j is lane j of the stage and ctx is the calling thread's step state.
     uint32_t mode;
     void *ctx;
@@ -53,7 +53,22 @@ struct TailJob {
     void *arg = nullptr;
 };
 
+struct JobHost;
+// E20 G29: one tail slot per thread (slot 0 is the calling thread, slot w is worker w), so a FIR lane running inside a
+// multi-lane phase can post its tail for idle workers too. th.ctx points at the slot.
+struct TailSlot {
+    TailJob job;
+    JobHost *host = nullptr;
+    uint32_t index = 0;
+    conv::TailHost th{};
+};
+
 struct JobHost {
+    JobHost() {
+        for (uint32_t i = 0; i <= N60_GRAPH_MAX_WORKERS; ++i) tails[i].index = i, tails[i].host = this;
+    }
+    JobHost(const JobHost &) = delete;
+    JobHost &operator=(const JobHost &) = delete;
     // Control writes, realtime reads.
     std::atomic<uint32_t> workers{0};
     std::atomic<n60_graph_wake_fn> wake{nullptr};
@@ -63,13 +78,13 @@ struct JobHost {
     alignas(64) std::atomic<uint64_t> claim{0};  // generation << 32 | next job << 16 | job count
     alignas(64) std::atomic<uint32_t> done{0};
     alignas(64) PhaseDesc phase{};
-    TailJob tailJob;
+    TailSlot tails[N60_GRAPH_MAX_WORKERS + 1];
     float *protHi = nullptr;  // E20 S10b: oversampled PROTECTION samples, one 256 * 4 frame row per lane; allocated by the graph
-    conv::TailHost tailHost{};  // calling thread only; ctx = this
 
     // Calling thread only.
     uint32_t generation = 0;
     bool woken = false;
+    bool tailsReady = false;
     // Per-thread FFT scratch, slot 0 is the calling thread. Allocated by the graph.
     uint8_t *scratchBase = nullptr;
     uint8_t *scratch[N60_GRAPH_MAX_WORKERS + 1] = {};
@@ -77,7 +92,7 @@ struct JobHost {
     std::atomic<uint64_t> parallelPhases{0}, jobsOnWorkers{0}, jobsOnCaller{0}, lateJoins{0}, wakes{0};
 };
 
-// Calling thread. Publishes `jobs` jobs of a mode 1 or 2 phase (PROTECTION steps) and returns when every job is done;
+// Calling thread. Publishes `jobs` jobs of a mode 1 to 3 phase (PROTECTION steps) and returns when every job is done;
 // workers and this thread claim jobs.
 void jobHostRunPhase(JobHost &j, uint32_t mode, void *ctx, uint32_t jobs) N60_RT_NONBLOCKING;
 // Calling thread. Ends the callback: workers stop claiming. Cheap when nothing woke them.

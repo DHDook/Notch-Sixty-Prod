@@ -28,6 +28,7 @@
 #include <bit>
 #include <cmath>
 #include <cstring>
+#include <type_traits>
 #include <new>
 
 #include "n60/rate_capacity.h"
@@ -2113,19 +2114,22 @@ inline void protLimitSample(ProtShared &sh, const ProtCfg &c, double attackStep,
     sh.seq = seq + 1u;
 }
 
-// E20 R3 critical path: the limiter over `count` consecutive high-rate samples (at most kProtParRow) of every lane, in four
-// passes instead of one lane loop per sample: (1) the loudest lane per sample, (2) the limiter gain per sample (the window
-// deque and the gain follower, calling `perFrame(s)` before sample s so the caller can run its once-per-frame updates in the
-// same order), (3) per lane: the look-ahead delay and the gain, (4) the safety clamp where a sample still exceeds the ceiling.
-// Every sample sees the same operations in the same order as protLimitSample, so the output and the shared state are
-// identical; only the loops are turned inside out so each lane's row is read once, in order.
+// E20 R3 critical path: the limiter over `count` consecutive high-rate samples (at most kProtParRow) of every lane, in three
+// steps instead of one lane loop per sample. Every sample sees the same operations in the same order as protLimitSample, so
+// the output and the shared state are identical; only the loops are turned inside out so each lane's row is read once, in order.
+//   protGainPass: (1) the loudest lane per sample, (2) the limiter gain per sample (the window deque and the gain follower,
+//     calling `perFrame(s)` before sample s so the caller can run its once-per-frame updates in the same order). Calling thread.
+//   protDelayLane: (3) one lane: the look-ahead delay and the gain, in place. Lanes are independent, so these run as jobs.
+//   protClampPass: (4) the safety clamp where a sample still exceeds the ceiling (needs every lane; rare).
+constexpr uint32_t kProtMax = kProtParRow;
+struct NoPerFrame {
+    void operator()(uint32_t) const N60_RT_NONBLOCKING {}
+};
+
 template <typename PerFrame>
-void protLimitBulk(ProtShared &sh, const ProtCfg &c, double attackStep, uint32_t n, float *const *hp, uint32_t count, float *const *ring,
-                   float *val, uint64_t *idx, double &minGain, PerFrame &&perFrame) N60_RT_NONBLOCKING {
-    constexpr uint32_t kMax = kProtParRow;
-    if (count > kMax) count = kMax;  // callers pass at most kProtParChunk * factor
-    float peakA[kMax], safetyA[kMax];
-    double gainA[kMax];
+void protGainPass(ProtShared &sh, const ProtCfg &c, double attackStep, uint32_t n, float *const *hp, uint32_t count, float *val,
+                  uint64_t *idx, double &minGain, double *gainA, PerFrame &&perFrame) N60_RT_NONBLOCKING {
+    float peakA[kProtMax];
     for (uint32_t s = 0; s < count; ++s) peakA[s] = 0.0f;
     for (uint32_t l = 0; l < n; ++l) {
         const float *x = hp[l];
@@ -2133,55 +2137,82 @@ void protLimitBulk(ProtShared &sh, const ProtCfg &c, double attackStep, uint32_t
     }
     const uint32_t cap = sh.cap;
     const uint64_t seq0 = sh.seq;
+    // The window state lives in locals for the loop (the stores to val and idx could otherwise alias the fields of `sh`);
+    // `perFrame` reads sh.gain, so the gain is written back before each call (the calls are rare and cheap).
+    uint32_t head = sh.head, cnt = sh.count;
+    double gain = sh.gain;
+    double minG = minGain;
+    const double ceilD = static_cast<double>(c.ceilLin);
+    const bool hasPerFrame = !std::is_same<std::remove_reference_t<PerFrame>, NoPerFrame>::value;
     for (uint32_t s = 0; s < count; ++s) {
-        perFrame(s);
+        if (hasPerFrame) {
+            sh.gain = gain;
+            perFrame(s);
+        }
         const uint64_t seq = seq0 + s;
         const float peak = peakA[s];
-        while (sh.count > 0) {  // deque_push
-            uint32_t tail = sh.head + sh.count - 1u;
+        while (cnt > 0) {  // deque_push
+            uint32_t tail = head + cnt - 1u;
             if (tail >= cap) tail -= cap;  // head < cap and count <= cap, so one subtraction wraps
             if (val[tail] > peak) break;
-            sh.count -= 1u;
+            cnt -= 1u;
         }
-        uint32_t ins = sh.head + sh.count;
+        uint32_t ins = head + cnt;
         if (ins >= cap) ins -= cap;
         val[ins] = peak;
         idx[ins] = seq;
-        sh.count += 1u;
+        cnt += 1u;
         const uint64_t outSeq = seq >= c.laHigh ? seq - c.laHigh : 0u;
-        while (sh.count > 0 && idx[sh.head] < outSeq) {  // deque_remove_expired
-            sh.head = sh.head + 1u == cap ? 0u : sh.head + 1u;
-            sh.count -= 1u;
+        while (cnt > 0 && idx[head] < outSeq) {  // deque_remove_expired
+            head = head + 1u == cap ? 0u : head + 1u;
+            cnt -= 1u;
         }
-        const float window = sh.count > 0 ? val[sh.head] : 0.0f;
-        const double target = window > c.ceilLin ? static_cast<double>(c.ceilLin) / std::fmax(window, kEps) : 1.0;
-        if (target < sh.gain) {
-            sh.gain = std::fmax(target, sh.gain - attackStep);
+        const float window = cnt > 0 ? val[head] : 0.0f;
+        const double target = window > c.ceilLin ? ceilD / std::fmax(window, kEps) : 1.0;
+        if (target < gain) {
+            gain = std::fmax(target, gain - attackStep);
         } else {
-            sh.gain = target + c.relCoef * (sh.gain - target);
+            gain = target + c.relCoef * (gain - target);
         }
-        minGain = std::fmin(minGain, sh.gain);
-        gainA[s] = sh.gain;
+        minG = std::fmin(minG, gain);
+        gainA[s] = gain;
     }
+    sh.head = head;
+    sh.count = cnt;
+    sh.gain = gain;
+    minGain = minG;
+    sh.seq = seq0 + count;
+}
+
+// One lane of step (3): `x` (count samples) goes through the look-ahead delay ring and the gain; returns the lane's largest
+// output magnitude (a NaN never raises it, as in the per-sample maximum).
+inline float protDelayLane(const ProtCfg &c, uint32_t cap, uint64_t seq0, float *x, float *rg, uint32_t count, const double *gainA) N60_RT_NONBLOCKING {
+    uint32_t w = static_cast<uint32_t>(seq0 % cap);
+    uint32_t rd = seq0 >= c.laHigh ? static_cast<uint32_t>((seq0 - c.laHigh) % cap) : 0u;
+    uint64_t seq = seq0;
+    float laneMax = 0.0f;
+    for (uint32_t s = 0; s < count; ++s, ++seq) {
+        rg[w] = x[s];
+        w = w + 1u == cap ? 0u : w + 1u;
+        float delayed = 0.0f;
+        if (seq >= c.laHigh) {
+            delayed = rg[rd];
+            rd = rd + 1u == cap ? 0u : rd + 1u;
+        }
+        const float out = static_cast<float>(delayed * gainA[s]);
+        x[s] = out;
+        laneMax = std::fmax(laneMax, std::fabs(out));
+    }
+    return laneMax;
+}
+
+// Step (4) over rows that already hold the limited samples.
+void protClampPass(const ProtCfg &c, uint32_t n, float *const *hp, uint32_t count) N60_RT_NONBLOCKING {
+    float safetyA[kProtMax];
     for (uint32_t s = 0; s < count; ++s) safetyA[s] = 0.0f;
     for (uint32_t l = 0; l < n; ++l) {
-        float *x = hp[l];
-        float *rg = ring[l];
-        uint32_t w = static_cast<uint32_t>(seq0 % cap);
-        uint32_t rd = seq0 >= c.laHigh ? static_cast<uint32_t>((seq0 - c.laHigh) % cap) : 0u;
-        uint64_t seq = seq0;
-        for (uint32_t s = 0; s < count; ++s, ++seq) {
-            rg[w] = x[s];
-            w = w + 1u == cap ? 0u : w + 1u;
-            float delayed = 0.0f;
-            if (seq >= c.laHigh) {
-                delayed = rg[rd];
-                rd = rd + 1u == cap ? 0u : rd + 1u;
-            }
-            const float out = static_cast<float>(delayed * gainA[s]);
-            x[s] = out;
-            safetyA[s] = std::fmax(safetyA[s], std::fabs(out));
-        }
+        const float *x = hp[l];
+        for (uint32_t s = 0; s < count; ++s) safetyA[s] = std::fmax(safetyA[s], std::fabs(x[s]));
     }
     for (uint32_t s = 0; s < count; ++s) {
         if (safetyA[s] > c.ceilLin) {
@@ -2189,7 +2220,6 @@ void protLimitBulk(ProtShared &sh, const ProtCfg &c, double attackStep, uint32_t
             for (uint32_t l = 0; l < n; ++l) hp[l][s] *= sg;
         }
     }
-    sh.seq = seq0 + count;
 }
 
 void runProtection(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) {
@@ -2375,6 +2405,11 @@ struct ProtPar {
     float *row[kMaxLanes];  // oversampled samples of the lane: frame i at [i * factor .. i * factor + factor)
     float inPeak[kMaxLanes];
     float outPeak[kMaxLanes];
+    float *ring[kMaxLanes];     // look-ahead delay ring of the lane (step 2 jobs)
+    float laneMax[kMaxLanes];   // largest limited sample of the lane in the chunk (step 2 jobs)
+    const double *gainA;        // limiter gain per oversampled sample of the chunk
+    uint64_t seq0;              // limiter sequence number of the chunk's first oversampled sample
+    uint32_t cap;               // ring capacity
 };
 
 void protParUp(ProtPar &x, uint32_t l) N60_RT_NONBLOCKING {
@@ -2407,6 +2442,10 @@ void protParUp(ProtPar &x, uint32_t l) N60_RT_NONBLOCKING {
         }
     }
     x.inPeak[l] = peak;
+}
+
+void protParDelay(ProtPar &x, uint32_t l) N60_RT_NONBLOCKING {
+    x.laneMax[l] = protDelayLane(x.c, x.cap, x.seq0, x.row[l], x.ring[l], x.frames * x.c.factor, x.gainA);
 }
 
 void protParDown(ProtPar &x, uint32_t l) N60_RT_NONBLOCKING {
@@ -2451,7 +2490,9 @@ void protParDown(ProtPar &x, uint32_t l) N60_RT_NONBLOCKING {
 
 void systemProtectionJob(void *ctx, uint32_t mode, uint32_t lane) N60_RT_NONBLOCKING {
     ProtPar &x = *static_cast<ProtPar *>(ctx);
-    if (mode == 1) protParUp(x, lane); else protParDown(x, lane);
+    if (mode == 1) protParUp(x, lane);
+    else if (mode == 2) protParDelay(x, lane);
+    else protParDown(x, lane);
 }
 
 bool systemProtectionEligible(const SnapHeader *h, const StageRec &r) {
@@ -2489,6 +2530,10 @@ bool systemProtectionParallel(SnapHeader *h, StageRec &r, float *const *lanes, u
     double sustained = sh.riderSustained;
     double lastGain = -1.0, lastInst = 0.0;
     float inPeak[kMaxLanes] = {}, outPeak[kMaxLanes] = {};
+    double gainA[kProtParRow];
+    x.gainA = gainA;
+    x.cap = sh.cap;
+    for (uint32_t l = 0; l < x.n; ++l) x.ring[l] = ring[l];
     for (uint32_t done = 0; done < frames;) {
         const uint32_t chunk = std::min(frames - done, kProtParChunk);
         x.frames = chunk;
@@ -2498,19 +2543,30 @@ bool systemProtectionParallel(SnapHeader *h, StageRec &r, float *const *lanes, u
         jobHostRunPhase(jobs, 1, &x, x.n);
         for (uint32_t l = 0; l < x.n; ++l) hp[l] = x.row[l];
         if (c.limiter) {
-            protLimitBulk(sh, c, attackStep, x.n, hp, chunk * c.factor, ring, val, idx, minGain, [&](uint32_t sIdx) {
-                if (c.riderCfg && sIdx % c.factor == 0) {  // the serial stage tracks the sustained reduction even while the rider is off
-                    if (sh.gain != lastGain) {  // the log is a pure function of the gain: reuse it while the gain holds
-                        lastGain = sh.gain;
-                        lastInst = sh.gain < 1.0 ? std::fmax(0.0, static_cast<double>(-20.0f * std::log10(std::fmax(static_cast<float>(sh.gain), kEps)))) : 0.0;
+            x.seq0 = sh.seq;
+            if (c.riderCfg) {
+                protGainPass(sh, c, attackStep, x.n, hp, chunk * c.factor, val, idx, minGain, gainA, [&](uint32_t sIdx) {
+                    if (sIdx % c.factor == 0) {  // the serial stage tracks the sustained reduction even while the rider is off
+                        if (sh.gain != lastGain) {  // the log is a pure function of the gain: reuse it while the gain holds
+                            lastGain = sh.gain;
+                            lastInst = sh.gain < 1.0 ? std::fmax(0.0, static_cast<double>(-20.0f * std::log10(std::fmax(static_cast<float>(sh.gain), kEps)))) : 0.0;
+                        }
+                        sustained = lastInst + c.riderMeasCoef * (sustained - lastInst);
                     }
-                    sustained = lastInst + c.riderMeasCoef * (sustained - lastInst);
-                }
-            });
+                });
+            } else {
+                protGainPass(sh, c, attackStep, x.n, hp, chunk * c.factor, val, idx, minGain, gainA, NoPerFrame{});
+            }
         } else if (c.riderCfg) {
             for (uint32_t i = 0; i < chunk; ++i) sustained = 0.0 + c.riderMeasCoef * (sustained - 0.0);
         }
-        jobHostRunPhase(jobs, 2, &x, x.n);
+        if (c.limiter) {
+            jobHostRunPhase(jobs, 2, &x, x.n);  // look-ahead delay and gain, per lane
+            float worst = 0.0f;
+            for (uint32_t l = 0; l < x.n; ++l) worst = std::fmax(worst, x.laneMax[l]);
+            if (worst > c.ceilLin) protClampPass(c, x.n, hp, chunk * c.factor);  // rare: a sample still over the ceiling
+        }
+        jobHostRunPhase(jobs, 3, &x, x.n);
         for (uint32_t l = 0; l < x.n; ++l) {
             inPeak[l] = std::fmax(inPeak[l], x.inPeak[l]);
             outPeak[l] = std::fmax(outPeak[l], x.outPeak[l]);

@@ -60,6 +60,7 @@ final class BRIRCaptureFlow: ObservableObject {
     @Published var rightEar: MeasurementSeat?
     @Published var speakers: [OutputProgramRole]
     @Published var headPositions: BRIRHeadPositions = .three
+    @Published var headTilt: BRIRHeadTilt = .level
     @Published var includeCompensation = false
     /// The user confirms the headphones are the selected output and are on, over the ear microphones.
     @Published var headphonesConfirmed = false
@@ -94,7 +95,7 @@ final class BRIRCaptureFlow: ObservableObject {
     var plan: BRIRCapturePlan? {
         guard let leftEar, let rightEar else { return nil }
         return BRIRCapturePlan(
-            speakers: speakers, headPositions: headPositions, sampleRate: sampleRate, tapCount: tapCount,
+            speakers: speakers, headPositions: headPositions, headTilt: headTilt, sampleRate: sampleRate, tapCount: tapCount,
             leftEar: leftEar, rightEar: rightEar)
     }
 
@@ -116,7 +117,11 @@ final class BRIRCaptureFlow: ObservableObject {
             let head = yaw == 0
                 ? "Face straight ahead."
                 : "Turn your head \(Int(abs(yaw))) degrees to the \(yaw < 0 ? "left" : "right")."
-            return "\(head) Keep still, then capture \(captureStep.role.displayName)."
+            let pitch = captureStep.headPitchDegrees
+            let tilt = pitch == 0
+                ? ""
+                : " Tilt your head \(Int(abs(pitch))) degrees \(pitch > 0 ? "up" : "down")."
+            return "\(head)\(tilt) Keep still, then capture \(captureStep.role.displayName)."
         case .reseat(let index):
             return "Put the headphones on over the microphones, then capture. Take them off and put them back on for each of the \(BRIRCapturePlan.compensationReseatCount) reseats (\(index + 1) of \(BRIRCapturePlan.compensationReseatCount))."
         case nil:
@@ -206,7 +211,7 @@ final class BRIRCaptureFlow: ObservableObject {
                 if let message = outcome.quality.problem { problem = message; return }
                 results.append(BRIRCaptureResult(
                     role: captureStep.role, headYawDegrees: captureStep.headYawDegrees,
-                    leftIR: outcome.left, rightIR: outcome.right))
+                    headPitchDegrees: captureStep.headPitchDegrees, leftIR: outcome.left, rightIR: outcome.right))
             case .reseat:
                 let leftCup = try await environment.headphonePass(plan: plan, channel: 0)
                 try Task.checkCancellation()

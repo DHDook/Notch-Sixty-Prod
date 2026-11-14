@@ -29,6 +29,21 @@ final class UnifiedGraphBinauralInterpolationTests: XCTestCase {
 
     // MARK: the tracking grid and its budget
 
+    /// G14: the user-facing note says what the coarsened grid is, and is absent when the finest grid fits.
+    func testTrackingNoteReportsTheCoarsenedGrid() throws {
+        let translator = UnifiedGraphTranslator.self
+        XCTAssertNil(translator.binauralTrackingNote(channels: 6, sampleRate: 48_000, tapCount: 8_192, elevationData: true))
+        let note = try XCTUnwrap(
+            translator.binauralTrackingNote(channels: 12, sampleRate: 192_000, tapCount: 48_000, elevationData: true))
+        XCTAssertTrue(note.contains("30 degree yaw"), note)
+        XCTAssertTrue(note.contains("4 head pitches"), note)
+        let yawOnly = try XCTUnwrap(
+            translator.binauralTrackingNote(channels: 12, sampleRate: 384_000, tapCount: 96_000, elevationData: true))
+        XCTAssertTrue(yawOnly.contains("15 degree yaw") && yawOnly.contains("no head pitch"), yawOnly)
+        XCTAssertNil(translator.binauralTrackingNote(channels: 12, sampleRate: 384_000, tapCount: 96_000, elevationData: false))
+        XCTAssertNotNil(translator.binauralTrackingNote(channels: 64, sampleRate: 384_000, tapCount: 96_000, elevationData: true))
+    }
+
     func testTrackingGridIsFullWhenItFitsAndCoarsensInStepsWhenItDoesNot() {
         let translator = UnifiedGraphTranslator.self
         let elevations = UInt32(translator.binauralElevationDegrees.count)
@@ -69,6 +84,48 @@ final class UnifiedGraphBinauralInterpolationTests: XCTestCase {
             XCTAssertEqual(added, expected, "rate \(rate)")
             host.release()
             fixedHost.release()
+        }
+    }
+
+    /// G16: a role-tagged BRIR captured at three head pitches publishes elevation sets; a level capture stays yaw only.
+    func testCapturedAssetWithHeadTiltPublishesElevationSets() throws {
+        let layout = OutputProgramLayout.fiveOne
+        func asset(tilt: BRIRHeadTilt, rate: Double) throws -> BinauralProfileAsset {
+            let taps = 256
+            let device = AudioInputDevice(
+                deviceID: 1, uid: "u", name: "m", nominalSampleRate: rate, availableSampleRateRanges: [])
+            let roles = layout.roles.filter { $0 != .lowFrequencyEffects }
+            let plan = BRIRCapturePlan(
+                speakers: roles, headPositions: .one, headTilt: tilt, sampleRate: rate, tapCount: taps,
+                leftEar: MeasurementSeat(device: device, channelIndex: 0),
+                rightEar: MeasurementSeat(device: device, channelIndex: 1))
+            let results = plan.steps.enumerated().map { index, step -> BRIRCaptureResult in
+                var left = [Float](repeating: 0, count: taps)
+                left[20 + index % 7] = 1
+                var right = left
+                right[24 + index % 5] = 0.8
+                return BRIRCaptureResult(
+                    role: step.role, headYawDegrees: step.headYawDegrees,
+                    headPitchDegrees: step.headPitchDegrees, leftIR: left, rightIR: right)
+            }
+            var made = try BRIRCaptureAssembler.makeAsset(displayName: "T", plan: plan, results: results)
+            // The 5.1 layout has an LFE channel the capture skips: reuse the centre response for it.
+            if let centre = made.measurements.first(where: { $0.channelRole == .frontCenter }) {
+                for m in made.measurements where m.channelRole == .frontCenter {
+                    var lfe = m
+                    lfe.channelRole = .lowFrequencyEffects
+                    made.measurements.append(lfe)
+                }
+                _ = centre
+            }
+            return made
+        }
+        let elevations = UnifiedGraphTranslator.binauralElevationDegrees.count
+        for rate in Self.rates {
+            let tilted = try spec(rate: rate, layout: layout, headTracking: true, asset: try asset(tilt: .threePitches, rate: rate)).get()
+            XCTAssertEqual(Int(try stage(tilted).params[11]), elevations, "rate \(rate)")
+            let level = try spec(rate: rate, layout: layout, headTracking: true, asset: try asset(tilt: .level, rate: rate)).get()
+            XCTAssertEqual(Int(try stage(level).params[11]), 1, "rate \(rate)")
         }
     }
 

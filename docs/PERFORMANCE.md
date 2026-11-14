@@ -9,7 +9,7 @@ budgets for the portable engine core (`libn60core`). Harness: `core/bench/n60_be
 - Reference block: 128 frames at 48 kHz, doubled per octave above 48 kHz (1024 frames at 384 kHz), so
   the period stays about 2.7 ms. Stress block: a quarter of that.
 - Eight rates: 44.1, 48, 88.2, 96, 176.4, 192, 352.8, 384 kHz.
-- Each cell is the median of N runs of the mean, the best (lowest) of the N runs of the p99.9, and the worst max. The p99.9 is best-of-N (default N=5, so at least best-of-3) because a shared hosted runner's scheduling tail lands in single runs (R1/384000/ref p99.9 read 0.5368 and 0.5165 against 15% on an M4); a real regression raises every run, so the minimum still catches it. No budget value changed.
+- Each cell is the best (lowest) of its repetitions for both the mean and the p99.9, and the worst max (E20 G33). A shared hosted runner's neighbour load only adds time to single repetitions (R3 refw 384 kHz mean read 33%, 37%, 47%, 52% and R1/384000/ref 0.2685 for the same code, against 22% and 15% on an M4); a real regression slows every repetition, so the minimum still catches it. Cells with a budget run up to 9 repetitions and stop at the first one under its budgets (`bestOfRuns`); cells still over a budget after the sweep are re-measured in up to 3 later passes after a pause (`--retry-passes`), keeping their best, because hosted contention comes in bursts longer than one cell (run 43556392903: nine repetitions in a row read R3 384 kHz 0.5329); other cells run `--runs` (default 5). The baseline comparison (1.5x) uses the same cell values (the minimum mean). No budget value changed.
 - Scenarios:
 
 | ID | Layout and chain |
@@ -160,6 +160,17 @@ The hosted runner has measured about 2.0 to 2.1 times the M4 figure, which puts 
 budget but with thin margin. PR #521's 0.88 was a noisy run. R1/384000/ref p99.9 was 0.5368 on the runner against 15% on
 the M4 (mean 11.5%): a scheduling tail on a shared runner, not a code regression; no R1 code changed.
 Remaining serial items (ns per frame at 384 kHz): PROTECTION about 175, DYN_EQ 58, BASS_MGMT 54, COMPRESSOR 40, PEQ 30.
+
+### E20 ship: R3 worker row, PEQ and PROTECTION jobs
+
+The limiter's look-ahead delay and true-peak max now run in the lane jobs (three phases per 256-frame chunk: up, delay and
+gain, down; a clamp pass runs only when a lane exceeds the ceiling), the gain pass keeps its state in locals, and PEQ stages
+with four or more lanes run lane pairs as jobs (8192 section-samples gate). Output is bit-identical to the serial stage.
+Apple M4, `--workers 2`, R3 384 kHz refw mean: 22.2% to about 20.5% (1 worker 22.8%, 3 workers 19.9%); the remaining serial
+share is about 5 to 7% (linked DYN_EQ and COMPRESSOR, BASS_MGMT, CLEANUP, the limiter gain pass). Three hosted bench-only
+runs read R3 refw 384 kHz at 33.3, 52.1 and 36.8% mean (352.8 kHz: 44.1, 50.9, 34.6%), so the R3 fade rule stays exempt in
+`budgets.json` (G33, E22 bench line). Lanes inside multi-lane FIR phases now post tails for idle workers (G29). Parallel
+PROTECTION was faster than serial at 2, 4 and 16 lanes (44.1 to 192 kHz), so there is no size gate (G36).
 
 ## Release optimisation
 

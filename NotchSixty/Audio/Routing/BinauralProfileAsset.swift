@@ -24,8 +24,16 @@ struct BinauralMeasurement: Codable, Equatable, Sendable {
     /// Schema 2: head yaw of the listener while this was captured, degrees, same sign convention
     /// as `N60HeadPose.yawDegrees`. Only meaningful with `channelRole`.
     var headYawDegrees: Double? = nil
+    /// Schema 2 (E13 S8, G16): head pitch while this was captured, degrees, positive looking up, same sign convention
+    /// as `N60HeadPose.pitchDegrees`. `nil` means level (0). Only meaningful with `channelRole`.
+    var headPitchDegrees: Double? = nil
 
     func validate(tapCount: Int) throws {
+        if let headPitchDegrees {
+            guard channelRole != nil, headPitchDegrees.isFinite, (-90.0...90.0).contains(headPitchDegrees) else {
+                throw BinauralProfileAssetError.invalidMeasurement
+            }
+        }
         if let headYawDegrees {
             guard channelRole != nil, headYawDegrees.isFinite, (-180.0...180.0).contains(headYawDegrees) else {
                 throw BinauralProfileAssetError.invalidMeasurement
@@ -86,7 +94,7 @@ struct BinauralProfileAsset: Codable, Equatable, Sendable, Identifiable {
             }
             var seen = Set<String>()
             for measurement in measurements {
-                let key = "\(measurement.channelRole!.rawValue)@\(measurement.headYawDegrees ?? 0)"
+                let key = "\(measurement.channelRole!.rawValue)@\(measurement.headYawDegrees ?? 0)/\(measurement.headPitchDegrees ?? 0)"
                 guard seen.insert(key).inserted else { throw BinauralProfileAssetError.invalidMetadata }
             }
         }
@@ -95,13 +103,21 @@ struct BinauralProfileAsset: Codable, Equatable, Sendable, Identifiable {
     /// True for personally captured BRIR sets that carry a speaker role per measurement.
     var isRoleTagged: Bool { measurements.contains { $0.channelRole != nil } }
 
+    /// True when head pitch can be interpolated: an HRTF set always can (it has elevations), a captured BRIR set only
+    /// when it was captured at more than one head pitch (E13 S8, G16).
+    var providesElevationSets: Bool {
+        guard isRoleTagged else { return true }
+        return Set(measurements.map { $0.headPitchDegrees ?? 0 }).count > 1
+    }
+
     var reference: BinauralProfileReference {
         BinauralProfileReference(
             assetID: id,
             displayName: displayName,
             originalSourceName: originalSourceName,
             sampleRate: sampleRate,
-            tapCount: tapCount
+            tapCount: tapCount,
+            hasElevationSets: providesElevationSets
         )
     }
 
@@ -238,9 +254,10 @@ struct BinauralProfileAsset: Codable, Equatable, Sendable, Identifiable {
         for channel in 0..<layout.roles.count {
             if isRoleTagged {
                 // Captured BRIRs are tied to their speaker: pick by role, then the capture yaw
-                // nearest the current head yaw (sets are not wrapped; the range is bounded).
+                // nearest the current head yaw and pitch (sets are not wrapped; the range is bounded).
                 guard let measurement = measurement(
-                    role: layout.roles[channel], yawDegrees: headPose.yawDegrees
+                    role: layout.roles[channel], yawDegrees: headPose.yawDegrees,
+                    pitchDegrees: headPose.pitchDegrees
                 ) else {
                     throw BinauralProfileAssetError.measurementUnavailable(
                         layout.roles[channel].displayName
@@ -279,11 +296,13 @@ struct BinauralProfileAsset: Codable, Equatable, Sendable, Identifiable {
         )
     }
 
-    /// The captured BRIR for `role` whose capture yaw is closest to `yawDegrees`.
-    func measurement(role: OutputProgramRole, yawDegrees: Double) -> BinauralMeasurement? {
-        measurements
-            .filter { $0.channelRole == role }
-            .min { abs(($0.headYawDegrees ?? 0) - yawDegrees) < abs(($1.headYawDegrees ?? 0) - yawDegrees) }
+    /// The captured BRIR for `role` whose capture yaw and pitch are closest to the head's (sum of the two angle
+    /// differences; a set captured at one pitch only has pitch difference zero throughout).
+    func measurement(role: OutputProgramRole, yawDegrees: Double, pitchDegrees: Double = 0) -> BinauralMeasurement? {
+        func distance(_ m: BinauralMeasurement) -> Double {
+            abs((m.headYawDegrees ?? 0) - yawDegrees) + abs((m.headPitchDegrees ?? 0) - pitchDegrees)
+        }
+        return measurements.filter { $0.channelRole == role }.min { distance($0) < distance($1) }
     }
 
     private func nearestMeasurement(
