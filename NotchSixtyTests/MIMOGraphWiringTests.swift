@@ -97,6 +97,17 @@ final class MIMOGraphWiringTests: XCTestCase {
         XCTAssertThrowsError(try config.makeSpec())
     }
 
+    /// E19 G41 (owner decision, Nov 2026): Quiet Zone actuator graphs keep refusing the MIMO stage in v1, at every rate.
+    func testQuietZoneActuatorsRefuseTheStage() throws {
+        for rate in rates {
+            var config = configuration(rate: rate)
+            config.mimo = try UnifiedGraphMIMOStage(filters: filters(rate: rate), sourceLanes: [0, 1])
+            config.ancActuators = UnifiedGraphAncActuators(
+                actuators: [.init(targetLane: 0), .init(targetLane: 1)], captureFrames: 64)
+            XCTAssertThrowsError(try config.makeSpec(), "rate \(rate)")
+        }
+    }
+
     func testStageRefusedAtAnotherRate() throws {
         var config = configuration(rate: 96_000)
         config.mimo = try UnifiedGraphMIMOStage(filters: filters(rate: 48_000), sourceLanes: [0, 1])

@@ -17,6 +17,10 @@ struct MIMORoutedWayCapture: Equatable, Sendable {
     var seatID: UUID
     var sampleRate: Double
     var impulseResponse: [Float]
+    /// E19 S10b (G36): true when the response was measured through the way's own chain (the protected excitation of the Lab is
+    /// rendered through ROUTE, XOVER, EQ, DELAY and the limiter before it plays, so the capture already holds them). The planner
+    /// then adds only the global alignment delay instead of the rendered chain. False: a raw driver response.
+    var includesChain = false
 }
 
 /// A refusal that names the speaker, way or seat so a screen can say what to fix.
@@ -117,8 +121,19 @@ enum MIMORoutedTreatmentPlanner {
     }
 
     /// The largest in-band way count over the routing's speakers for the default window, for the permit's configuration class.
-    static func inBandWayCount(of routing: SpeakerRoutingConfiguration) -> Int {
-        routing.speakers.map { inBandWays(of: $0, lowHz: defaultSupportHz.lowerBound, highHz: defaultSupportHz.upperBound).count }.max() ?? 1
+    /// E19 S10b (G38): a user support override replaces the default window for its speaker.
+    static func inBandWayCount(of routing: SpeakerRoutingConfiguration, overrides: [UUID: ClosedRange<Double>] = [:]) -> Int {
+        routing.speakers.map { speaker -> Int in
+            let window = overrides[speaker.id] ?? defaultSupportHz
+            return inBandWays(of: speaker, lowHz: window.lowerBound, highHz: window.upperBound).count
+        }.max() ?? 1
+    }
+
+    /// E19 S10b (G39): outputs fed only by raw ROUTE entries, with no speaker that owns a way on them. They are not sources and
+    /// their delta is exactly zero; the screen tells the user to add them as a speaker to include them.
+    static func matrixOnlyOutputs(of routing: SpeakerRoutingConfiguration) -> [PhysicalOutputEndpoint] {
+        let owned = Set(routing.speakers.flatMap { $0.ways.map(\.endpoint) })
+        return routing.outputEndpoints.filter { !owned.contains($0) }
     }
 
     // MARK: Digest
@@ -212,8 +227,8 @@ enum MIMORoutedTreatmentPlanner {
             guard inBand.count <= maxInBandWays else {
                 throw MIMORoutedTreatmentRefusal.tooManyInBandWays(speaker: name, count: inBand.count)
             }
-            let chains = try renderChains(
-                of: speaker, name: name, sampleRate: sampleRate, offsetFrames: max(0, target - miniTarget(of: speaker, sampleRate: sampleRate)))
+            let alignment = max(0, target - miniTarget(of: speaker, sampleRate: sampleRate))
+            let chains = try renderChains(of: speaker, name: name, sampleRate: sampleRate, offsetFrames: alignment)
             // Captures per way and seat; an in-band way needs all of them.
             func capture(_ way: RoutedWay, _ seat: MultichannelCalibrationSeat) -> MIMORoutedWayCapture? {
                 captures.last { $0.speakerID == speaker.id && $0.wayID == way.id && $0.seatID == seat.id && !$0.impulseResponse.isEmpty }
@@ -280,7 +295,7 @@ enum MIMORoutedTreatmentPlanner {
                     for way in ways {
                         guard let found = capture(way, seat), let chain = chains[way.id] else { continue }
                         raws.append(found.impulseResponse)
-                        filters.append(chain)
+                        filters.append(found.includesChain ? [Float](repeating: 0, count: alignment) + [1] : chain)
                     }
                     guard !raws.isEmpty else { return [] }
                     return try MeasurementCore.predictTreatedIR(plants: raws, filters: filters)
@@ -299,8 +314,7 @@ enum MIMORoutedTreatmentPlanner {
         request.tauSeconds = settings.tauSeconds
         request.decaySeconds = settings.decaySeconds
         request.taps = settings.taps
-        let owned = Set(routing.speakers.flatMap { $0.ways.map(\.endpoint) })
-        let matrixOnly = endpoints.filter { !owned.contains($0) }
+        let matrixOnly = matrixOnlyOutputs(of: routing)
         return MIMORoutedTreatmentPlan(
             speakers: speakerPlans, request: request, sourceLanes: speakerPlans.map(\.lane), matrixOnlyOutputs: matrixOnly,
             inBandWaysPerSpeaker: speakerPlans.filter(\.included).map { $0.inBandWayIDs.count }.max() ?? 1, digest: digest(of: routing))

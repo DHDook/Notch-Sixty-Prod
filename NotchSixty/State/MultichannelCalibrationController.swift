@@ -133,6 +133,8 @@ struct MultichannelCalibrationCampaignArchive: Codable, Equatable, Sendable {
     var modifiedAt: Date = Date()
     /// E24 S5b1: absent in older archives, which decode as one moved microphone.
     var seatMicrophoneMode: SeatMicrophoneMode?
+    /// E19 S10b (G36): per-way captures of a routed setup. Absent in older archives.
+    var wayCaptures: [MultichannelWayCapture]?
 }
 
 struct MultichannelCalibrationCampaignStore: Sendable {
@@ -243,6 +245,8 @@ final class MultichannelCalibrationController: ObservableObject {
     @Published private(set) var state: MultichannelCalibrationCampaignState = .idle
     @Published private(set) var seats: [MultichannelCalibrationSeat] = []
     @Published private(set) var measurements: [MultichannelCalibrationMeasurement] = []
+    /// E19 S10b (G36): per-way captures at each seat (routed setups only); see `MultichannelWayCaptures.swift`.
+    @Published private(set) var wayCaptures: [MultichannelWayCapture] = []
     @Published private(set) var latestDesign: MultichannelCalibrationDesign?
     @Published private(set) var latestPrediction:
         CalibrationPredictionReport?
@@ -443,9 +447,13 @@ final class MultichannelCalibrationController: ObservableObject {
                     && sources.contains(measurement.source)
                     && seats.contains(where: { $0.id == measurement.seatID })
             }
+            wayCaptures = (archive.wayCaptures ?? []).filter { capture in
+                abs(capture.sampleRate - sampleRate) < 0.5 && seats.contains(where: { $0.id == capture.seatID })
+            }
         } else {
             seats = [MultichannelCalibrationSeat(name: "Main Seat")]
             measurements = []
+            wayCaptures = []
             seatMicrophoneMode = .movedMicrophone
             try persistCampaign()
         }
@@ -505,6 +513,7 @@ final class MultichannelCalibrationController: ObservableObject {
         }
         seats.removeAll { $0.id == id }
         measurements.removeAll { $0.seatID == id }
+        wayCaptures.removeAll { $0.seatID == id }
         latestDesign = nil
         latestPrediction = nil
         intelligentTargetReport = nil
@@ -606,6 +615,7 @@ final class MultichannelCalibrationController: ObservableObject {
     func resetMeasurements() throws {
         cancelMeasurement()
         measurements = []
+        wayCaptures = []
         latestDesign = nil
         latestPrediction = nil
         intelligentTargetReport = nil
@@ -1021,9 +1031,25 @@ final class MultichannelCalibrationController: ObservableObject {
             seats: seats,
             measurements: measurements,
             modifiedAt: Date(),
-            seatMicrophoneMode: seatMicrophoneMode
+            seatMicrophoneMode: seatMicrophoneMode,
+            wayCaptures: wayCaptures
         )
         try store.save(archive)
+    }
+
+    func setPlaybackNotice(_ notice: String?) { playbackNotice = notice }
+
+    /// E19 S10b (G36): the storing half of `storeWayCaptures` (kept here for the private persist and compact helpers).
+    func replaceWayCaptures(
+        _ items: [(speakerID: UUID, wayID: UUID, seatID: UUID, channel: RoomCorrectionChannelMeasurement)], sampleRate: Double
+    ) throws {
+        for item in items {
+            wayCaptures.removeAll { $0.speakerID == item.speakerID && $0.wayID == item.wayID && $0.seatID == item.seatID }
+            wayCaptures.append(MultichannelWayCapture(
+                speakerID: item.speakerID, wayID: item.wayID, seatID: item.seatID, sampleRate: sampleRate,
+                channel: compactMeasurement(item.channel, sampleRate: sampleRate)))
+        }
+        try persistCampaign()
     }
 
     private func normalizedSeats(_ stored: [MultichannelCalibrationSeat]) -> [MultichannelCalibrationSeat] {
@@ -1047,6 +1073,7 @@ final class MultichannelCalibrationController: ObservableObject {
         campaignSampleRate = 0
         seats = []
         measurements = []
+        wayCaptures = []
         latestDesign = nil
         latestPrediction = nil
         lastErrorDescription = nil
