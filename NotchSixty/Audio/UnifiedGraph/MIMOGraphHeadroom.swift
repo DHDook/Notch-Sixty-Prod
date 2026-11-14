@@ -48,7 +48,7 @@ enum MIMOGraphHeadroom {
         do { spec = try with.makeSpec() } catch { throw Failure.graph(String(describing: error)) }
         let results = await HeadroomRecompute.run(
             spec: spec, laneCount: Int(spec.outputChannels), strict: strict, trimsDB: [:])
-        for (source, lane) in stage.sourceLanes.enumerated() {
+        for (source, lane) in stage.headroomChecks {
             guard let result = results.first(where: { $0.lane == lane }) else { continue }
             guard result.isComplete else { throw Failure.chainNotBounded(source: source, stages: result.incomplete.sorted()) }
             if result.neededDB > trimAllowanceDB + 0.05 { throw Failure.overBudget(source: source, neededDB: result.neededDB) }

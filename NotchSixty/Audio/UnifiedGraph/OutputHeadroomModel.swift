@@ -33,7 +33,7 @@ enum HeadroomStageKind: Equatable, Sendable {
              N60_STAGE_LANE_DELAY, N60_STAGE_AMBIENT, N60_STAGE_BASS_MGMT, N60_STAGE_ROUTE, N60_STAGE_XOVER,
              N60_STAGE_ROOM_FIR_TWO_BAND, N60_STAGE_DRIVER_FIR_TWO_BAND, N60_STAGE_BINAURAL], .modelled)
         set([N60_STAGE_SYMMETRY, N60_STAGE_CROSSTALK, N60_STAGE_HEADPHONE, N60_STAGE_IMAGE, N60_STAGE_LOUDNESS,
-             N60_STAGE_MULTIBAND, N60_STAGE_STEREO_CROSSOVER, N60_STAGE_ANC_INJECT, N60_STAGE_MIMO], .bounded)
+             N60_STAGE_MULTIBAND, N60_STAGE_STEREO_CROSSOVER, N60_STAGE_ANC_INJECT, N60_STAGE_MIMO, N60_STAGE_MIMO_ROUTED], .bounded)
         set([N60_STAGE_EXTERNAL, N60_STAGE_DELTA_SUBTRACT], .unmodelled)
         return t
     }()
@@ -366,6 +366,28 @@ struct HeadroomModel {
                     n60_headroom_mimo_term(spec.sampleRate, $0.baseAddress, UInt32($0.count), UInt32(source), &peakDB, &hz)
                 }
                 if status == N60_HEADROOM_OK { add(pow(10, peakDB / 20), to: [index]) } else { lanes[index].incomplete.insert("MIMO treatment") }
+            }
+        case N60_STAGE_MIMO_ROUTED.rawValue:
+            // E19 S10 (design note 10, G5): the delta of speaker s lands on each of its in-band way lanes, so every injection lane
+            // takes row s's term (the filters are the unrouted layout; the injection table follows them).
+            guard p.count > 8 else { return }
+            let sources = Int(p[2]), taps = Int(p[1]), core = 8 + sources + sources * sources * taps
+            guard sources >= 1, taps >= 1, p.count == core + 5 * sources else { return }
+            let filters = Array(p[0..<core])
+            for source in 0..<sources {
+                var targets: [Int] = []
+                for slot in 0..<4 {
+                    let position = Int(p[core + 5 * source + 1 + slot])
+                    if position >= 0, position < selected.count, !lanes[selected[position]].silent { targets.append(selected[position]) }
+                }
+                guard !targets.isEmpty else { continue }
+                var peakDB = 0.0, hz = 0.0
+                let status = filters.withUnsafeBufferPointer {
+                    n60_headroom_mimo_term(spec.sampleRate, $0.baseAddress, UInt32($0.count), UInt32(source), &peakDB, &hz)
+                }
+                if status == N60_HEADROOM_OK { add(pow(10, peakDB / 20), to: targets) } else {
+                    for lane in targets { lanes[lane].incomplete.insert("MIMO treatment") }
+                }
             }
         case N60_STAGE_HEADPHONE.rawValue:
             guard p.count >= 11 else { return }

@@ -31,6 +31,15 @@ protocol MIMOTreatmentHost: AnyObject {
     /// The held stage readback; reading it resets nothing (E19 G27).
     func treatmentReadback() -> n60_mimo_readback?
     func hardwareAcceptance() -> MIMORoomTreatmentHardwareAcceptance?
+    /// E19 S10: the active speaker routing (nil when unrouted). A routed session is designed per speaker, over its in-band ways.
+    func treatmentRouting() -> SpeakerRoutingConfiguration?
+    /// E19 S10 (G36): the raw per-way captures of the routed speakers, one per in-band way and seat.
+    func treatmentWayCaptures() -> [MIMORoutedWayCapture]
+}
+
+extension MIMOTreatmentHost {
+    func treatmentRouting() -> SpeakerRoutingConfiguration? { nil }
+    func treatmentWayCaptures() -> [MIMORoutedWayCapture] { [] }
 }
 
 /// E19 S8: the Room Treatment screen's model. It turns the user's settings and the stored seat measurements into a design
@@ -122,6 +131,8 @@ final class MIMOTreatmentController: ObservableObject {
     private var lowRate = 0.0
     private var analysisUpsample = 1
     private var designedBudgets: [Int: Double] = [:]
+    /// Routed designs: graph lane of a speaker's source to its row in the stage (empty when unrouted).
+    private var designedRoutedSlots: [Int: Int] = [:]
     private var designedPeaks: [Int: Double] = [:]
     private var designedThermal: [Int: Double] = [:]
 
@@ -235,6 +246,10 @@ final class MIMOTreatmentController: ObservableObject {
     private func runDesign() async throws {
         guard let configuration = host.treatmentGraphConfiguration(), let rate = host.sampleRate else { throw InputError.audioNotRunning }
         let seats = seatsProvider().filter { $0.included && $0.weight > 0 }
+        if let routing = host.treatmentRouting(), routing.enabled {
+            try await runRoutedDesign(routing: routing, configuration: configuration, rate: rate, seats: seats)
+            return
+        }
         let measurements = baselineProvider()
         let active = rows
         guard !active.isEmpty else { throw InputError.noSources }
@@ -299,8 +314,78 @@ final class MIMOTreatmentController: ObservableObject {
         designedDecaySeconds = decay
         designAdvice = result.summary.advice
         designedSeatIDs = seats.map(\.id)
+        designedRoutedSlots = [:]
         designedSources = active.map(\.source)
         designedBudgets = Dictionary(uniqueKeysWithValues: zip(lanes, request.sources.map(\.gainLimitDB)))
+        designedPeaks = Dictionary(uniqueKeysWithValues: zip(lanes, result.summary.peakGainDB))
+        designedThermal = Dictionary(uniqueKeysWithValues: zip(lanes, result.summary.thermalDB))
+        try predict(seatPlants: floatPlants, filters: result.filters, seats: seats, rate: rate)
+    }
+
+    /// E19 S10: the routed design. The planner (design note 10) turns the way captures into the request, the stage carries the
+    /// speaker table, and the headroom check runs on every injection lane. Never arms; a failure leaves the previous stage alone.
+    private func runRoutedDesign(
+        routing: SpeakerRoutingConfiguration, configuration: UnifiedGraphConfiguration, rate: Double, seats: [MultichannelCalibrationSeat]
+    ) async throws {
+        guard !seats.isEmpty else { throw InputError.noSeats }
+        let infos = host.treatmentSources()
+        let programLanes = infos.filter { if case .speaker = $0.source { return true } else { return false } }.count
+        let subwoofers = infos.count - programLanes
+        func lane(_ speaker: RoutedSpeaker) -> Int { speaker.source.kind == .program ? speaker.source.index : programLanes + speaker.source.index }
+        var settings = MIMORoutedTreatmentSettings()
+        settings.tauSeconds = tauMilliseconds / 1_000
+        settings.taps = taps
+        for speaker in routing.speakers {
+            guard let row = rows.first(where: { $0.lane == lane(speaker) }) else { continue }
+            if !row.included { settings.excluded.insert(speaker.id) }
+            if row.supportLowHz != 25 || row.supportHighHz != 150 { settings.supportOverrides[speaker.id] = row.supportLowHz...row.supportHighHz }
+        }
+        if settings.excluded.count == routing.speakers.count { throw InputError.noSources }
+        var plan: MIMORoutedTreatmentPlan
+        do {
+            plan = try await MIMORoutedTreatmentPlanner.plan(
+                routing: routing, sampleRate: rate, programLanes: programLanes, subwoofers: subwoofers, seats: seats,
+                captures: host.treatmentWayCaptures(), settings: settings)
+        } catch let refusal as MIMORoutedTreatmentRefusal {
+            throw InputError.headroom(refusal.localizedDescription)
+        }
+        // Zero plants stand in for excluded speakers so every source has a row in the prediction.
+        var floatPlants: [[[Float]]] = []
+        for source in plan.request.plants {
+            floatPlants.append(source.map { $0?.program ?? [] })
+        }
+        let longest = floatPlants.flatMap { $0 }.map(\.count).max() ?? 1
+        floatPlants = floatPlants.map { $0.map { $0.isEmpty ? [Float](repeating: 0, count: max(longest, 1)) : $0 } }
+        let seatBaselines = (0..<seats.count).map { seat in Self.sum(floatPlants.map { $0[seat] }) }
+        let decay: Double
+        switch decayTarget {
+        case .automatic: decay = Self.automaticDecaySeconds(baselineByIR: seatBaselines, sampleRate: rate)
+        case .seconds(let seconds): decay = min(max(seconds, Self.decayRangeSeconds.lowerBound), Self.decayRangeSeconds.upperBound)
+        }
+        plan.request.decaySeconds = decay
+        let designRequest = plan.request
+        let designLimits = limits
+        let result = try await Task.detached(priority: .userInitiated) {
+            try MIMORoomTreatmentCoreDesigner.designUnchecked(designRequest, limits: designLimits)
+        }.value
+        let firstOutputLane = programLanes + subwoofers
+        var stage = try UnifiedGraphMIMOStage(filters: result.filters, routed: UnifiedGraphMIMOStage.Routed.make(
+            routing: routing, plan: plan, firstOutputLane: firstOutputLane))
+        stage.supportRangesHz = plan.speakers.flatMap { [$0.supportLowHz, $0.supportHighHz] }
+        do {
+            try await MIMOGraphHeadroom.verifyDesignedStage(configuration: configuration, stage: stage)
+        } catch let failure as MIMOGraphHeadroom.Failure {
+            throw InputError.headroom(Self.describe(failure))
+        }
+        try host.stageTreatment(stage, configuration: configuration)
+
+        let lanes = plan.speakers.map(\.lane)
+        designedRoutedSlots = Dictionary(uniqueKeysWithValues: lanes.enumerated().map { ($0.element, $0.offset) })
+        designedDecaySeconds = decay
+        designAdvice = result.summary.advice
+        designedSeatIDs = seats.map(\.id)
+        designedSources = rows.filter { row in lanes.contains(row.lane) }.map(\.source)
+        designedBudgets = Dictionary(uniqueKeysWithValues: zip(lanes, plan.speakers.map(\.gainLimitDB)))
         designedPeaks = Dictionary(uniqueKeysWithValues: zip(lanes, result.summary.peakGainDB))
         designedThermal = Dictionary(uniqueKeysWithValues: zip(lanes, result.summary.thermalDB))
         try predict(seatPlants: floatPlants, filters: result.filters, seats: seats, rate: rate)
@@ -418,7 +503,7 @@ final class MIMOTreatmentController: ObservableObject {
             return scale * log10(Double(value))
         }
         readout = rows.map { row in
-            let slot = treatment.stage?.sourceLanes.firstIndex(of: row.lane)
+            let slot = designedRoutedSlots[row.lane] ?? treatment.stage?.sourceLanes.firstIndex(of: row.lane)
             return SourceReadout(
                 id: row.lane, name: row.name, included: row.included, headroomBudgetDB: designedBudgets[row.lane],
                 designedPeakGainDB: designedPeaks[row.lane], designedThermalDB: designedThermal[row.lane],

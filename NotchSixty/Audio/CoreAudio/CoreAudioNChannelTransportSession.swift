@@ -1041,7 +1041,11 @@ final class CoreAudioNChannelTransportSession {
         var configuration = configuration
         ancLock.lock()
         if let anc = hostedAnc { configuration.ancActuators = anc }
-        if let mimo = mimoStage { configuration.mimo = mimo }
+        // E19 S10: a stored stage that no longer fits the routing (routed stage, unrouted graph or the reverse) is dropped, so a
+        // routing edit never costs the republish.
+        if let mimo = mimoStage {
+            if (configuration.routing != nil) == (mimo.routed != nil) { configuration.mimo = mimo } else { mimoStage = nil }
+        }
         ancLock.unlock()
         guard abs(configuration.sampleRate - outputFormat.sampleRate) < 0.5 else {
             throw LiveNChannelTransportError.unifiedGraphRejected(.sampleRateMismatch)
