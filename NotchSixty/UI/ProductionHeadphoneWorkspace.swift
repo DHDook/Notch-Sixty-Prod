@@ -970,6 +970,14 @@ struct ProductionHeadphoneWorkspace: View {
                         .buttonStyle(.glass)
                         .disabled(!engine.headTrackingRuntimeStatus.isActivelyTracking)
                 }
+                if draft.spatialMode == .virtualSpeakers, let reference = draft.binauralProfile,
+                   let note = UnifiedGraphTranslator.binauralTrackingNote(
+                       channels: draft.programLayout.roles.count, sampleRate: reference.sampleRate,
+                       tapCount: reference.tapCount, elevationData: reference.hasElevationSets ?? true) {
+                    Text(note)
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                }
                 if let detail = engine.headTrackingRuntimeStatus.detail {
                     Text(detail)
                         .font(.caption)

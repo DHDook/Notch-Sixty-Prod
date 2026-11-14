@@ -445,10 +445,10 @@ complete, speaker ANC qualified, and a full hardware regression passing at every
 
 - [x] Bring-your-own import: AutoEq CSV, REW and squig.link frequency-response text, plus user target curves
 - [x] One-click PEQ from an imported response and a chosen target, using the existing model fitter
-- [~] Live PEQ and crossfeed tuning while playing (from E6): S3 built behind `e13.headphones` (`e13/live-headphone-tuning`, PR #456; needs-owner); bench in E22
-- [~] Raise the HRIR cap for room-included BRIRs (S4 `e13/brir-long-tail` built behind `e13.headphones`, PR pending, needs-owner; SOFA long import is limit-level only, G10; wiring: E13 S8); live HRTF interpolation with head tracking (S5 `e13/hrtf-interpolation` built behind `e13.headphones`, PR pending, ABI v39, needs-owner; wiring: E13 S8; bench in E22; G8 open)
-- [ ] S8 `e13/ship` graduates `e13.headphones` (default on) once S5 and the software gaps close; bench gaps move to E22; removal is the FC phase
-- [~] In-ear-microphone BRIR capture for personal virtual speakers (S6 core merged; S7 guided flow built behind `e13.headphones`; bench in E22)
+- [x] Live PEQ and crossfeed tuning while playing (from E6): S3 built behind `e13.headphones` (`e13/live-headphone-tuning`, PR #456; needs-owner); bench in E22
+- [x] Raise the HRIR cap for room-included BRIRs (S4 `e13/brir-long-tail` built behind `e13.headphones`, #465; SOFA long import is limit-level only, G10); live HRTF interpolation with head tracking (S5 `e13/hrtf-interpolation` built behind `e13.headphones`, #516, ABI v39, needs-owner; bench in E22)
+- [x] S8 `e13/ship` graduated `e13.headphones` (default on, 14 Nov 2026); software gaps closed (G14, G16 built in S8); bench gaps move to E22; removal is the FC phase
+- [x] In-ear-microphone BRIR capture for personal virtual speakers (S6 core merged; S7 guided flow built behind `e13.headphones`; bench in E22)
 
 ### E14 Upmixer
 
@@ -569,6 +569,7 @@ Owner decision, 18 Oct 2026: there is no bench access for now, so every bench ch
 - [ ] Feed the results into the live-authorisation slices (E4 S10, E19), which still need real evidence
 - [ ] E19 G32 treated repeat measurement (owner decision 13 Nov 2026): a user-initiated, time-limited arm for the measurement only, under the same written authorisation path (arm and fade rules unchanged, never persisted), at 3 seats; scheduled with the E19 modal-decay campaign
 - [ ] E28 bench (docs/epics/E28.md Bench checks): spectrum readability on music (G16), VoiceOver and keyboard use of Dynamics rows and loudness editors (G18), route meters on 2.1 and 5.1 devices (G25), routed-session loudness (G27), binaural capture (G30), wide loudness against an offline meter (G31), band-pass multiband listen and summed-band phase against dry (G43), compressor lookahead edit while playing for an audible dip from the cold-started ring (G46), and every dynamics extra by ear (compressor mix, link, RMS, lookahead; expander hold, knee, sidechain high-pass and listen; multiband bypass, solo, listen) on stereo and N-channel at the eight rates
+- [ ] E13 bench (docs/epics/E13.md Bench checks): capture with in-ear microphones and real reseats, head-yaw sign against the renderer, same-rate compensation (G2 to G4), headphone EQ drag at 384 kHz and Apply-while-playing restore (G5, G6), 7.1.4 tail CPU at 384 kHz (G11), elevation capture with in-ear microphones (G16)
 - [ ] E13 G13: cost per frame of the 16-tap Kaiser sinc delay-path FIR at 384 kHz, with an R3 cost row (E13 S5; E20 budgets)
 - [ ] E13 G15: head tracking with AirPods on a 7.1.4 layout, yaw and pitch blend without comb filtering or ITD jumps through a 360° sweep (E13 S5 bench item)
 - [ ] Carried in by flag graduation (11 Nov 2026): E4 S30 checks, E19 modal-decay campaign, E20 no-overload-with-workers (gates FC removal of `e20.*`), E26 sub bench gaps (G10, G11, G19, G23, G24, G28, G30), E28 owner listen to S7a to S7d, E13 G8 (96 kHz tail versus 384 kHz benchmark), E9 bench lines (G18, G25, G26)

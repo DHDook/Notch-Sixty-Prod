@@ -103,7 +103,12 @@ struct BRIRCaptureSheet: View {
                 Text("5 (most complete)").tag(BRIRHeadPositions.five)
             }
             .pickerStyle(.segmented)
-            Text("\(flow.speakers.count * flow.headPositions.rawValue) captures, about 10 seconds each.")
+            Picker("Head tilt", selection: $flow.headTilt) {
+                Text("Level only").tag(BRIRHeadTilt.level)
+                Text("Level, up and down (head tracking follows pitch)").tag(BRIRHeadTilt.threePitches)
+            }
+            .pickerStyle(.segmented)
+            Text("\(flow.speakers.count * flow.headPositions.rawValue * flow.headTilt.rawValue) captures, about 10 seconds each.")
                 .font(.caption).foregroundStyle(.secondary)
         }
     }
@@ -138,7 +143,7 @@ struct BRIRCaptureSheet: View {
                 Picker("Show", selection: $reviewIndex) {
                     ForEach(flow.results.indices, id: \.self) { index in
                         let result = flow.results[index]
-                        Text("\(result.role.displayName) at \(Int(result.headYawDegrees))°").tag(index)
+                        Text("\(result.role.displayName) at \(Int(result.headYawDegrees))°\(result.headPitchDegrees == 0 ? "" : ", tilt \(Int(result.headPitchDegrees))°")").tag(index)
                     }
                 }
                 BRIRPlot(result: flow.results[min(reviewIndex, flow.results.count - 1)])
