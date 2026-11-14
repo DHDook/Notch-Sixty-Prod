@@ -57,6 +57,11 @@ for path in (
     require(path.is_file(), f"missing Slice 3 artifact: {path.relative_to(ROOT)}")
 
 project = PROJECT.read_text(encoding="utf-8")
+import re as _re
+project_membership_exceptions = set()
+for _block in _re.findall(r"membershipExceptions = \((.*?)\);", project, _re.S):
+    project_membership_exceptions.update(
+        line.strip().rstrip(",") for line in _block.splitlines() if line.strip())
 dependencies = json.loads(DEPENDENCIES.read_text(encoding="utf-8"))
 baseline = json.loads(BASELINE.read_text(encoding="utf-8"))
 provenance = PROVENANCE.read_text(encoding="utf-8")
@@ -140,7 +145,11 @@ require(
 for source in lib.get("productionSourceFiles", []):
     path = ROOT / source
     require(path.is_file(), f"classified libmysofa source missing: {source}")
-    require(path.name in project, f"classified libmysofa source not compiled: {source}")
+    # The app target uses a folder-synchronised group (E1 S9): every file under NotchSixty/
+    # is compiled unless it is listed in the membership exceptions.
+    relative = source[len("NotchSixty/"):] if source.startswith("NotchSixty/") else None
+    require(relative is not None and relative not in project_membership_exceptions,
+            f"classified libmysofa source not compiled: {source}")
 
 for token in (
     "libmysofa v1.3.4",
