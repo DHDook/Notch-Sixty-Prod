@@ -77,6 +77,17 @@ final class MIMORoutedStageTests: XCTestCase {
         XCTAssertThrowsError(try noLimit.makeSpec(), "no hard limit")
     }
 
+    func testQuietZoneActuatorsRefuseTheStage() throws {
+        // Owner decision (G41, 13/14 Nov 2026): treatment and Quiet Zone stay apart in v1, routed or not.
+        let config = try routedConfiguration(rate: 48_000)
+        let routed = try UnifiedGraphMIMOStage(filters: filters(rate: 48_000), routed: routedLayout())
+        XCTAssertThrowsError(try routed.stageSpecs(
+            sampleRate: 48_000, graphLaneCount: 6, routing: config.routing, hasAncActuators: true, hasHardLimit: true))
+        let plain = try UnifiedGraphMIMOStage(filters: filters(rate: 48_000), sourceLanes: [0, 1])
+        XCTAssertThrowsError(try plain.stageSpecs(
+            sampleRate: 48_000, graphLaneCount: 2, routing: nil, hasAncActuators: true, hasHardLimit: true))
+    }
+
     func testBadLayoutsAreRefused() throws {
         let f = try filters(rate: 48_000)
         XCTAssertThrowsError(try UnifiedGraphMIMOStage(filters: f, routed: .init(
