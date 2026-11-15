@@ -19,7 +19,7 @@ struct ContentView: View {
     }
 
     private var eqPhaseModeBinding: Binding<EQPhaseMode> {
-        Binding(get: { engine.eqConfiguration.phaseMode }, set: { try? engine.setEQPhaseMode($0) })
+        Binding(get: { engine.eqConfiguration.phaseMode }, set: { mode in Task { try? await engine.setEQPhaseModeOffMain(mode) } })
     }
 
     private var inputPreampBinding: Binding<Double> {

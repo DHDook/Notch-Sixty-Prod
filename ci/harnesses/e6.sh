@@ -250,3 +250,6 @@ if selected e6_core_graph; then
         failed+=(e6_core_graph)
     fi
 fi
+
+# E6 EQ linear-phase hardening: a convolver slot in use by the render thread (outgoing fade side) is never rewritten.
+harness e6_convolution_slot_reuse "${STRICT[@]}" -O2 -include stddef.h -I"$RT" -Icore/include ci/harness_e6_convolution_slot_reuse.c -lm -framework Accelerate

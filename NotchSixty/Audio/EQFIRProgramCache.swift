@@ -74,6 +74,12 @@ struct EQFIRProgramCache {
 
     func hasDesign(_ key: EQFIRProgramKey) -> Bool { entries.contains { $0.key == key } }
 
+    /// Stores a design made elsewhere (off the main actor) so the next `design(for:)` for `key` hits.
+    /// Main actor only, like every other access. A key already present keeps its entry.
+    mutating func insert(_ design: EQFIRDesign, for key: EQFIRProgramKey) {
+        _ = self.design(for: key) { design }
+    }
+
     /// The designed FIR for `key`, running `make` only on a miss.
     mutating func design(
         for key: EQFIRProgramKey, make: () throws -> EQFIRDesign

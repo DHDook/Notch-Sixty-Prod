@@ -1074,7 +1074,7 @@ private struct PR30PhaseTimeValidationView: View {
     private var phaseModeBinding: Binding<EQPhaseMode> {
         Binding(
             get: { engine.stereoEQConfiguration.phaseMode },
-            set: { try? engine.setEQPhaseMode($0) }
+            set: { mode in Task { try? await engine.setEQPhaseModeOffMain(mode) } }
         )
     }
 

@@ -5,6 +5,7 @@
 #include <stdatomic.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 #define N60_PI 3.14159265358979323846
 
@@ -61,7 +62,7 @@ typedef struct {
 } N60ConvolutionSegmentProgram;
 
 typedef struct {
-    bool prepared;
+    _Atomic bool prepared;
     bool sharedKernel;
     uint64_t generation;
     uint32_t tapCount;
@@ -96,6 +97,9 @@ struct N60PartitionedConvolver {
     // Realtime scratch: one render thread per convolver.
     float *renderTime;
     _Atomic uint32_t activeSlot;
+    // Render-side handshake per slot: set while ProcessSample reads or writes the slot, so a re-prepare can wait out a
+    // render that started before `prepared` dropped (E6 EQ linear-phase hardening). Allocation-free, wait-free render.
+    _Atomic uint32_t slotInUse[N60_CONVOLUTION_PROGRAM_SLOTS];
     // Bumped (any thread) when the convolver has not been rendering and its slots hold stale audio. The render thread
     // restarts the active slot from silence lazily, in O(block) work.
     _Atomic uint32_t idleEpoch;
@@ -412,7 +416,19 @@ bool N60PartitionedConvolverPrepareProgram(
     if (time == NULL) return false;
 
     N60ConvolutionProgram *program = &convolver->programs[slot];
-    program->prepared = false;
+    // Retire the slot first: the render thread may still be reading it as the outgoing side of a graph fade. Once
+    // `prepared` is false no new sample enters (Dekker pairing with slotInUse, both sequentially consistent), and we
+    // wait out one that already did. A render stuck past the bound refuses the prepare rather than racing it.
+    atomic_store_explicit(&program->prepared, false, memory_order_seq_cst);
+    for (uint32_t spin = 0;
+         atomic_load_explicit(&convolver->slotInUse[slot], memory_order_seq_cst) != 0u;
+         ++spin) {
+        if (spin > 40000u) {  // about 2 s at 50 us per wait
+            free(time);
+            return false;
+        }
+        usleep(50);
+    }
     program->sharedKernel = rightTaps == NULL;
     const uint32_t kernelChannels = program->sharedKernel ? 1u : 2u;
 
@@ -452,7 +468,7 @@ bool N60PartitionedConvolverPrepareProgram(
     program->generation = ++convolver->nextGeneration;
     reset_runtime(program, &convolver->runtimes[slot],
                   atomic_load_explicit(&convolver->idleEpoch, memory_order_relaxed));
-    program->prepared = true;
+    atomic_store_explicit(&program->prepared, true, memory_order_seq_cst);
     if (generationOut != NULL) *generationOut = program->generation;
     return true;
 }
@@ -464,7 +480,7 @@ N60ConvolutionProgramInfo N60PartitionedConvolverProgramInfo(
     N60ConvolutionProgramInfo info = {0};
     if (convolver == NULL || slot >= N60_CONVOLUTION_PROGRAM_SLOTS) return info;
     const N60ConvolutionProgram *program = &convolver->programs[slot];
-    info.prepared = program->prepared;
+    info.prepared = atomic_load_explicit(&program->prepared, memory_order_acquire);
     info.generation = program->generation;
     info.tapCount = program->tapCount;
     info.partitionCount = program->partitionCount;
@@ -480,7 +496,7 @@ bool N60PartitionedConvolverProgramMatches(
 ) {
     return convolver != NULL
         && slot < N60_CONVOLUTION_PROGRAM_SLOTS
-        && convolver->programs[slot].prepared
+        && atomic_load_explicit(&convolver->programs[slot].prepared, memory_order_seq_cst)
         && convolver->programs[slot].generation == generation;
 }
 
@@ -591,7 +607,13 @@ bool N60PartitionedConvolverProcessSample(
     if (convolver == NULL
         || outputLeft == NULL
         || outputRight == NULL
-        || !N60PartitionedConvolverProgramMatches(convolver, slot, generation)) {
+        || slot >= N60_CONVOLUTION_PROGRAM_SLOTS) {
+        return false;
+    }
+    // Announce the slot before checking it (see PrepareProgram), and clear on every exit.
+    atomic_store_explicit(&convolver->slotInUse[slot], 1u, memory_order_seq_cst);
+    if (!N60PartitionedConvolverProgramMatches(convolver, slot, generation)) {
+        atomic_store_explicit(&convolver->slotInUse[slot], 0u, memory_order_release);
         return false;
     }
 
@@ -613,6 +635,7 @@ bool N60PartitionedConvolverProcessSample(
     if ((runtime->position & (N60_CONVOLUTION_PARTITION_FRAMES - 1u)) == 0u) {
         process_tick(convolver, &convolver->programs[slot], runtime);
     }
+    atomic_store_explicit(&convolver->slotInUse[slot], 0u, memory_order_release);
     return true;
 }
 

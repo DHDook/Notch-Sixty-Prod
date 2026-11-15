@@ -297,15 +297,42 @@ final class FeatureFlags: ObservableObject {
         self.known = known
         self.defaults = defaults
         self.policy = policy
-        let parsed = Self.launchSwitches(in: arguments)
-        self.launchEnabledIDs = parsed.on
+        let launch = Self.launchSets(known: known, policy: policy, arguments: arguments, environment: environment)
+        self.launchEnabledIDs = launch.on
+        self.launchDisabledIDs = launch.off
+    }
+
+    nonisolated private static func launchSets(
+        known: [FeatureFlag],
+        policy: OverridePolicy,
+        arguments: [String],
+        environment: [String: String]
+    ) -> (on: Set<String>, off: Set<String>) {
+        let parsed = launchSwitches(in: arguments)
         var off = parsed.off
         // Flags-off CI run (FC1): the test host cannot take launch arguments, so debug builds also accept this
         // environment variable to switch every graduated flag off. Release builds ignore it.
-        if policy == .storedOverrides, environment[Self.graduatedOffEnvironmentKey] == "1" {
+        if policy == .storedOverrides, environment[graduatedOffEnvironmentKey] == "1" {
             off.formUnion(known.filter(\.graduated).map(\.id))
         }
-        self.launchDisabledIDs = off
+        return (parsed.on, off)
+    }
+
+    /// Process-wide read of a flag with the same rules as `isEnabled`, safe from any thread (no instance, no MainActor).
+    /// Graph building runs off the MainActor executor too and must not trap on `MainActor.assumeIsolated`.
+    nonisolated static func isEnabledProcessWide(_ flag: FeatureFlag) -> Bool {
+        let known = FeatureFlag.all
+        guard known.contains(flag) else { return false }
+        let policy = buildPolicy
+        let launch = launchSets(
+            known: known, policy: policy,
+            arguments: ProcessInfo.processInfo.arguments, environment: ProcessInfo.processInfo.environment)
+        if launch.off.contains(flag.id) { return false }
+        if launch.on.contains(flag.id) { return true }
+        if policy == .storedOverrides, let stored = UserDefaults.standard.object(forKey: key(for: flag)) as? Bool {
+            return stored
+        }
+        return flag.resolvedDefault
     }
 
     var canEditOverrides: Bool { policy == .storedOverrides }
@@ -339,7 +366,7 @@ final class FeatureFlags: ObservableObject {
         }
     }
 
-    static func key(for flag: FeatureFlag) -> String {
+    nonisolated static func key(for flag: FeatureFlag) -> String {
         PreferenceKeys.featureFlagPrefix + flag.id
     }
 
