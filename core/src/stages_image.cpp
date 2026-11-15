@@ -97,6 +97,7 @@ struct BqStateD {
 };
 
 float smoothToward(float current, float target, float coef) { return target + coef * (current - target); }
+double smoothTowardD(double current, double target, double coef) { return target + coef * (current - target); }
 bool nearZero(float v) { return std::fabs(v) <= kParkEps; }
 bool nearOne(float v) { return std::fabs(v - 1.0f) <= kParkEps; }
 Bq identityBq() { return Bq{1.0f, 0.0f, 0.0f, 0.0f, 0.0f}; }
@@ -160,10 +161,12 @@ bool designBq(Kind kind, double rate, double f, double gainDb, double q, Bq &out
     return true;
 }
 
-// The kernel's coefficient_for_time_ms (clamped to 0.05 .. 5000 ms).
-float poleForMs(double rate, float ms) {
+// The kernel's coefficient_for_time_ms (clamped to 0.05 .. 5000 ms), in double.
+// E7 S4: the de-esser's attack and release (up to 1 s) keep a double pole and a double gain state; a float pole at 1 s and
+// 384 kHz is 1 - 2.6e-6, within 2.3 percent of its own spacing.
+double poleForMsD(double rate, float ms) {
     const float safe = std::min(std::max(ms, 0.05f), 5000.0f);
-    return static_cast<float>(std::exp(-1.0 / (rate * (double(safe) / 1000.0))));
+    return std::exp(-1.0 / (rate * (double(safe) / 1000.0)));
 }
 
 float dbToLinear(float db) { return std::pow(10.0f, db / 20.0f); }
@@ -317,9 +320,9 @@ struct DeShared {
     // de-esser
     float seenEssHz, seenEssQ, seenAttack, seenRelease;
     Bq hp, lp;
-    float attackPole, releasePole;
+    double attackPole, releasePole;
     BqState hpL, hpR, lpL, lpR;
-    float essGainDb;
+    double essGainDb;
     uint32_t essParked;
     float lastDetector, lastDetectorDb, lastGainDb, lastGainLin;  // pure caches of linearToDb / dbToLinear
     // telemetry (control thread reads)
@@ -412,11 +415,11 @@ void runEss(DeShared &S, const float *p, double rate, float *L, float *R, uint32
     if (!enabled && S.essParked != 0) return;
     if (p[kEssHz] != S.seenEssHz || p[kEssQ] != S.seenEssQ) designEss(S, rate, p[kEssHz], p[kEssQ]);
     if (p[kEssAttack] != S.seenAttack) {
-        S.attackPole = poleForMs(rate, p[kEssAttack]);
+        S.attackPole = poleForMsD(rate, p[kEssAttack]);
         S.seenAttack = p[kEssAttack];
     }
     if (p[kEssRelease] != S.seenRelease) {
-        S.releasePole = poleForMs(rate, p[kEssRelease]);
+        S.releasePole = poleForMsD(rate, p[kEssRelease]);
         S.seenRelease = p[kEssRelease];
     }
     if (enabled && S.essParked != 0) {
@@ -466,8 +469,8 @@ void runEss(DeShared &S, const float *p, double rate, float *L, float *R, uint32
         }
         float targetDb = essTarget(S.lastDetectorDb, enabled, thr, ratio);
         targetDb = std::fmax(targetDb, range);
-        const float coef = !enabled ? S.bypassCoef : (targetDb < S.essGainDb ? S.attackPole : S.releasePole);
-        S.essGainDb = smoothToward(S.essGainDb, targetDb, coef);
+        const double coef = !enabled ? double(S.bypassCoef) : (targetDb < S.essGainDb ? S.attackPole : S.releasePole);
+        S.essGainDb = smoothTowardD(S.essGainDb, targetDb, coef);
         if (!enabled && nearZero(S.essGainDb)) {
             S.essGainDb = 0.0f;
             clearEssState(S);
@@ -475,9 +478,9 @@ void runEss(DeShared &S, const float *p, double rate, float *L, float *R, uint32
             parked = true;
             break;
         }
-        if (S.essGainDb != S.lastGainDb) {  // the pow is recomputed only when the smoothed gain moved
-            S.lastGainDb = S.essGainDb;
-            S.lastGainLin = dbToLinear(S.essGainDb);
+        if (static_cast<float>(S.essGainDb) != S.lastGainDb) {  // the pow is recomputed only when the smoothed gain moved
+            S.lastGainDb = static_cast<float>(S.essGainDb);
+            S.lastGainLin = dbToLinear(S.lastGainDb);
         }
         const float gain = S.lastGainLin;
         if (dynEq) {
@@ -564,9 +567,9 @@ void imageInit(SnapHeader *h, const StageRec &r) {
         S.bypassCoef = bypass;
         designHarsh(S, rate, p[kHarshHz], p[kHarshDb]);
         designEss(S, rate, p[kEssHz], p[kEssQ]);
-        S.attackPole = poleForMs(rate, p[kEssAttack]);
+        S.attackPole = poleForMsD(rate, p[kEssAttack]);
         S.seenAttack = p[kEssAttack];
-        S.releasePole = poleForMs(rate, p[kEssRelease]);
+        S.releasePole = poleForMsD(rate, p[kEssRelease]);
         S.seenRelease = p[kEssRelease];
         S.harshParked = 1;
         S.essParked = 1;
