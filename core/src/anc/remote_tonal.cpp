@@ -20,7 +20,7 @@ constexpr double kWarmupSeconds = 4.0;
 
 cd to_cd(N60AncComplex v) { return {v.re, v.im}; }
 N60AncComplex from_cd(cd v) { return {static_cast<float>(v.real()), static_cast<float>(v.imag())}; }
-bool finite(cd v) { return std::isfinite(v.real()) && std::isfinite(v.imag()); }
+bool finiteC(cd v) { return std::isfinite(v.real()) && std::isfinite(v.imag()); }
 double db_to_linear(double db) { return std::pow(10.0, db / 20.0); }
 
 struct Rec {
@@ -296,7 +296,7 @@ void update_fit(N60RemoteTonal &c, uint32_t k, cd m, cd g, double dt) {
 void track_frequency(N60RemoteTonal &c, uint32_t k, cd dm, double dt, double demodHz) {
     Pll &p = c.pll[k];
     const double level = std::abs(dm);
-    if (!finite(dm) || level < 20.0 * c.cfg.measurementNoise) {
+    if (!finiteC(dm) || level < 20.0 * c.cfg.measurementNoise) {
         p.locked = false;
         p.turn = 0.0;
         // A primed tone whose disturbance falls under the gate has left the demodulation bin.
@@ -500,16 +500,16 @@ bool N60RemoteTonalConfigIsValid(const N60RemoteTonalConfig *config) {
         for (uint32_t i = 0; i < c.earCount[k]; ++i) {
             const cd ratio = to_cd(c.earRatio[k][i]);
             const cd ear = to_cd(c.earPath[k][i]);
-            if (!finite(ratio) || !finite(ear) || !(std::abs(ratio) > 0.0) || !(std::abs(ear) >= c.pathFloor)) return false;
+            if (!finiteC(ratio) || !finiteC(ear) || !(std::abs(ratio) > 0.0) || !(std::abs(ear) >= c.pathFloor)) return false;
         }
         for (uint32_t i = 0; i < c.limitCount[k]; ++i) {
-            if (!finite(to_cd(c.limitRatio[k][i])) || !finite(to_cd(c.limitPath[k][i]))) return false;
+            if (!finiteC(to_cd(c.limitRatio[k][i])) || !finiteC(to_cd(c.limitPath[k][i]))) return false;
         }
         if (!(c.toneHz[k] >= 20.0f && c.toneHz[k] <= 150.0f)) return false;
         if (!(c.toneHz[k] < 0.5 * c.micSampleRate)) return false;
         const cd seed = to_cd(c.pathSeed[k]);
-        if (!finite(seed) || !(std::abs(seed) >= c.pathFloor)) return false;
-        if (!finite(to_cd(c.weightSeed[k])) || !finite(to_cd(c.leftShare[k])) || !finite(to_cd(c.rightShare[k]))) {
+        if (!finiteC(seed) || !(std::abs(seed) >= c.pathFloor)) return false;
+        if (!finiteC(to_cd(c.weightSeed[k])) || !finiteC(to_cd(c.leftShare[k])) || !finiteC(to_cd(c.rightShare[k]))) {
             return false;
         }
         if (std::norm(to_cd(c.leftShare[k])) + std::norm(to_cd(c.rightShare[k])) <= 0.0) return false;
@@ -555,7 +555,7 @@ N60RemoteTonal *N60RemoteTonalCreate(const N60RemoteTonalConfig *config) {
         }
         c->rhoL[k] = pl / seed;
         c->rhoR[k] = pr / seed;
-        if (!finite(c->rhoL[k]) || !finite(c->rhoR[k])) {
+        if (!finiteC(c->rhoL[k]) || !finiteC(c->rhoR[k])) {
             c->rhoL[k] = 0;
             c->rhoR[k] = 0;
         }
@@ -588,7 +588,7 @@ void N60RemoteTonalPushTelemetry(N60RemoteTonal *c, const N60ActiveQuietZoneTele
         const double mag = std::abs(p);
         slot.phasor[k] = mag > 0.0 && std::isfinite(mag) ? p / mag : cd{1, 0};
         const cd w = weq_of(*c, *record, k);
-        slot.weq[k] = finite(w) ? w : cd{0, 0};
+        slot.weq[k] = finiteC(w) ? w : cd{0, 0};
         slot.freq[k] = record->frequencyHz[k];
         slot.progL[k] = 0;
         slot.progR[k] = 0;
@@ -596,7 +596,7 @@ void N60RemoteTonalPushTelemetry(N60RemoteTonal *c, const N60ActiveQuietZoneTele
         if (record->programmeFrames[k] > 0u) {
             const cd l{record->programme[k][0], record->programme[k][1]};
             const cd r{record->programme[k][2], record->programme[k][3]};
-            if (finite(l) && finite(r)) {
+            if (finiteC(l) && finiteC(r)) {
                 slot.progL[k] = l;
                 slot.progR[k] = r;
                 slot.progOk[k] = true;
@@ -729,13 +729,13 @@ bool N60RemoteTonalProcessMic(N60RemoteTonal *c, const float *samples, uint32_t 
             const cd pl = 2.0 * pbarL[k] / pbarW[k];
             const cd pr = 2.0 * pbarR[k] / pbarW[k];
             const cd removed = c->refPath[k] * (c->rhoL[k] * pl + c->rhoR[k] * pr);
-            if (finite(removed)) {
+            if (finiteC(removed)) {
                 m[k] -= removed;
                 c->programmeRemoved[k] = removed;
                 c->programmeFeed[k] = static_cast<float>(std::sqrt(std::norm(pl) + std::norm(pr)));
             }
         }
-        if (!finite(m[k]) || !finite(gbar[k])) fault = true;
+        if (!finiteC(m[k]) || !finiteC(gbar[k])) fault = true;
     }
     if (fault) {
         ++c->uncovered;
@@ -764,7 +764,7 @@ bool N60RemoteTonalProcessMic(N60RemoteTonal *c, const float *samples, uint32_t 
     for (uint32_t k = 0; k < c->tones; ++k) {
         const cd s = c->fit[k].s;
         c->adapting[k] = false;
-        if (!finite(s) || !finite(c->fit[k].d) || !finite(c->weight[k])) {
+        if (!finiteC(s) || !finiteC(c->fit[k].d) || !finiteC(c->weight[k])) {
             reset = true;
             continue;
         }
@@ -797,7 +797,7 @@ bool N60RemoteTonalProcessMic(N60RemoteTonal *c, const float *samples, uint32_t 
                 return false;
             };
             c->monitorLimited[k] = false;
-            if (!finite(w)) {
+            if (!finiteC(w)) {
                 // Overflow from an extreme survey value: the whole set re-seeds, as for any non-finite state.
                 reset = true;
                 continue;
@@ -855,7 +855,7 @@ bool N60RemoteTonalNextRecord(N60RemoteTonal *c, uint64_t armGeneration, float a
     record->toneCount = c->tones;
     record->attemptCapLinear = c->attemptCap;
     for (uint32_t k = 0; k < c->tones; ++k) {
-        if (!finite(c->weight[k])) return false;
+        if (!finiteC(c->weight[k])) return false;
         cd target = c->weight[k] * c->dither[k];
         const cd ref = playing.weq[k];
         if (std::abs(ref) > 1e-7 && std::abs(target) > 0.0) {
@@ -910,7 +910,7 @@ void N60RemoteTonalAcknowledgeMove(N60RemoteTonal *c) {
 bool N60RemoteTonalSetWeights(N60RemoteTonal *c, const N60AncComplex *weights, uint32_t count) {
     if (c == nullptr || weights == nullptr || count != c->tones) return false;
     for (uint32_t k = 0; k < count; ++k) {
-        if (!finite(to_cd(weights[k]))) return false;
+        if (!finiteC(to_cd(weights[k]))) return false;
     }
     for (uint32_t k = 0; k < count; ++k) c->weight[k] = to_cd(weights[k]);
     clamp_weights(*c);
@@ -926,9 +926,9 @@ bool N60RemoteTonalSetToneFrequency(N60RemoteTonal *c, uint32_t tone, double hz,
     cd ratio{1.0, 0.0};
     if (pathSeed != nullptr) {
         const cd next = to_cd(*pathSeed);
-        if (!finite(next) || !(std::abs(next) >= c->cfg.pathFloor)) return false;
+        if (!finiteC(next) || !(std::abs(next) >= c->cfg.pathFloor)) return false;
         ratio = next / c->curSeed[tone];
-        if (!finite(ratio)) return false;
+        if (!finiteC(ratio)) return false;
     }
     c->freq[tone] = hz;
     if (pathSeed != nullptr) {

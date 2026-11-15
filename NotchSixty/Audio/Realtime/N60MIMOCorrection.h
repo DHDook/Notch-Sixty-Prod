@@ -9,6 +9,7 @@
 #include <string.h>
 
 #include "N60ProgramLayout.h"
+#include "n60/mimo.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -16,7 +17,7 @@ extern "C" {
 
 #define N60_MIMO_MAX_FREQUENCY_BINS 64u
 #define N60_MIMO_MAX_MEASUREMENTS N60_MAX_PROGRAM_CHANNELS
-#define N60_MIMO_MAX_SOURCES N60_MAX_PROGRAM_CHANNELS
+_Static_assert(N60_MIMO_MAX_SOURCES == N60_MAX_PROGRAM_CHANNELS, "one MIMO source limit (core n60/mimo.h)");
 #define N60_MIMO_MIN_PIVOT_POWER 1.0e-16
 
 typedef struct {

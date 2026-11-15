@@ -5,6 +5,7 @@
 // and runs; a longer look-ahead than the 65,536-frame ring is refused.
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <vector>
 

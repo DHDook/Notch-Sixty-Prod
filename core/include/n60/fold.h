@@ -27,6 +27,9 @@
 extern "C" {
 #endif
 
+/* E21 S1: fold.h had no version. 1 = the layout and functions as of this slice. */
+#define N60_FOLD_ABI_VERSION 1u
+
 #define N60_FOLD_MAX_CHANNELS 16u
 #define N60_FOLD_OUTPUTS 2u
 

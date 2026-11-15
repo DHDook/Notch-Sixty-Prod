@@ -2,17 +2,30 @@
 cmake_minimum_required(VERSION 3.20)
 project(n60core LANGUAGES C CXX)
 
-add_library(n60core STATIC src/graph.cpp src/snapshot.cpp src/fft.cpp src/stages_dsp.cpp src/conv/nufir.cpp src/stages_system.cpp src/stages_matrix.cpp src/stages_generator.cpp src/stages_cleanup.cpp src/stages_image.cpp src/stages_loudness.cpp src/stages_multiband.cpp src/stages_route.cpp src/stages_mimo.cpp src/layout.cpp src/resample.cpp
-    src/measure/offline_fft.cpp src/measure/ess.cpp src/measure/deconvolve.cpp src/measure/reference_room.cpp src/measure/timing.cpp src/measure/distortion.cpp src/measure/decay.cpp src/measure/waterfall.cpp src/measure/monitor_ring.cpp src/measure/spl.cpp src/measure/rta.cpp src/measure/predict.cpp src/mimo/design.cpp
-    src/correct/minphase.cpp src/correct/design.cpp src/correct/synth.cpp src/correct/bass.cpp src/correct/multisub_search.cpp
-    src/xover/xover.cpp src/headroom/headroom.cpp src/anc/fxlms.cpp src/anc/remote_tonal.cpp)
+# E21 S1: core/sources.cmake is the one source list (ci/core_sources.sh reads it; the Xcode libn60core group is checked
+# against it by the app-target XCTest N60CoreABITests, which calls one entry point per translation unit).
+include(sources.cmake)
+add_library(n60core STATIC ${N60_CORE_SOURCES} ${N60_CORE_ANC_SOURCES})
 target_compile_features(n60core PUBLIC cxx_std_20)
 # E21 S0: the two ANC sources moved from the app unchanged. Their Create paths catch std::bad_alloc, so they keep
 # exceptions on until E21 S4 rewrites them with nothrow allocation (gap G1 in docs/epics/E21.md).
-set_source_files_properties(src/anc/fxlms.cpp src/anc/remote_tonal.cpp PROPERTIES COMPILE_OPTIONS "-fexceptions")
+if(MSVC)
+  set_source_files_properties(src/anc/fxlms.cpp src/anc/remote_tonal.cpp PROPERTIES COMPILE_OPTIONS "/EHsc")
+else()
+  set_source_files_properties(src/anc/fxlms.cpp src/anc/remote_tonal.cpp PROPERTIES COMPILE_OPTIONS "-fexceptions")
+endif()
 target_include_directories(n60core PUBLIC include)
 target_include_directories(n60core PRIVATE src)
-target_compile_options(n60core PRIVATE -Wall -Wextra -Werror -Wno-unknown-warning-option -Werror=function-effects -fno-exceptions -fno-rtti)
+# E21 S1: one flag set per toolchain family. clang and gcc style on Linux and macOS; clang-cl (MSVC command line) on
+# Windows, where /W4 is -Wall -Wextra, /WX is -Werror, /EHs-c- turns exceptions off and /GR- turns RTTI off.
+if(MSVC)
+  target_compile_options(n60core PRIVATE /W4 /WX /EHs-c- /GR- -Wno-unknown-warning-option -Werror=function-effects)
+  target_compile_definitions(n60core PRIVATE _CRT_SECURE_NO_WARNINGS NOMINMAX)
+  set(N60_M "")
+else()
+  target_compile_options(n60core PRIVATE -Wall -Wextra -Werror -Wno-unknown-warning-option -Werror=function-effects -fno-exceptions -fno-rtti)
+  set(N60_M m)
+endif()
 
 # E20 S10 part 6 (G17, owner decision 13 Nov 2026): x86-64 builds default to FMA3. -mfma makes simd::fma one fused operation
 # (the narrowest flag that gives it), -mavx2 allows 256-bit moves; pre-Haswell x86 is not supported and every Intel Mac that can
@@ -22,19 +35,32 @@ option(N60_X86_FMA "Build the engine core with FMA3 on x86-64" ON)
 if(N60_X86_FMA AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
   target_compile_options(n60core PRIVATE -mfma -mavx2)
 endif()
+# E21 S1: the tests' scalar references must round like the engine. The engine is built with FMA (above); a reference compiled
+# without it differs in the last bit on x86 (test_stereo_bass "bit for bit"), so every test target gets the same flags.
+if(N60_X86_FMA AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64" AND NOT MSVC)
+  add_compile_options(-mfma -mavx2)
+endif()
 
 enable_testing()
+# E21 S1: n60/n60.h as C and n60_core_abi.
+add_executable(n60core_core_abi_test tests/test_core_abi.c)
+set_target_properties(n60core_core_abi_test PROPERTIES C_STANDARD 11 LINKER_LANGUAGE CXX)
+target_link_libraries(n60core_core_abi_test PRIVATE n60core)
+add_test(NAME n60core_core_abi COMMAND n60core_core_abi_test)
 add_executable(n60core_graph_test tests/test_graph.c)
 set_target_properties(n60core_graph_test PROPERTIES C_STANDARD 11)
-target_link_libraries(n60core_graph_test PRIVATE n60core m)
+target_link_libraries(n60core_graph_test PRIVATE n60core ${N60_M})
 set_target_properties(n60core_graph_test PROPERTIES LINKER_LANGUAGE CXX)
 add_test(NAME n60core_graph COMMAND n60core_graph_test)
 
 find_package(Threads REQUIRED)
+# test_stages.c and test_parallel.cpp use POSIX threads, sched_setaffinity and unistd.h: not built on Windows (E21 gap G3).
+if(NOT WIN32)
 add_executable(n60core_stages_test tests/test_stages.c)
 set_target_properties(n60core_stages_test PROPERTIES C_STANDARD 11 LINKER_LANGUAGE CXX)
-target_link_libraries(n60core_stages_test PRIVATE n60core m Threads::Threads)
+target_link_libraries(n60core_stages_test PRIVATE n60core ${N60_M} Threads::Threads)
 add_test(NAME n60core_stages COMMAND n60core_stages_test)
+endif()
 
 add_executable(n60core_alloc_test tests/test_alloc.cpp)
 target_link_libraries(n60core_alloc_test PRIVATE n60core)
@@ -57,9 +83,14 @@ add_test(NAME n60core_binaural_tail COMMAND n60core_binaural_tail_test)
 add_executable(n60core_binaural_interp_test tests/test_binaural_interp.cpp)
 target_link_libraries(n60core_binaural_interp_test PRIVATE n60core)
 add_test(NAME n60core_binaural_interp COMMAND n60core_binaural_interp_test)
+if(NOT WIN32)
 add_executable(n60core_parallel_test tests/test_parallel.cpp)
 target_link_libraries(n60core_parallel_test PRIVATE n60core Threads::Threads)
 add_test(NAME n60core_parallel COMMAND n60core_parallel_test)
+# E20 S6b (G26): the same test pinned to two cores, three workers plus the render thread contending for them.
+add_test(NAME n60core_parallel_two_cores COMMAND n60core_parallel_test)
+set_tests_properties(n60core_parallel_two_cores PROPERTIES ENVIRONMENT "N60_PARALLEL_TEST_CPUS=2;N60_PARALLEL_TEST_LITE=1")
+endif()
 
 add_executable(n60core_protection_parallel_test tests/test_protection_parallel.cpp)
 target_link_libraries(n60core_protection_parallel_test PRIVATE n60core Threads::Threads)
@@ -77,51 +108,51 @@ add_test(NAME n60core_fft_conv COMMAND n60core_fft_conv_test check)
 
 add_executable(n60core_dsp_test tests/test_dsp.c)
 set_target_properties(n60core_dsp_test PROPERTIES C_STANDARD 11 LINKER_LANGUAGE CXX)
-target_link_libraries(n60core_dsp_test PRIVATE n60core m)
+target_link_libraries(n60core_dsp_test PRIVATE n60core ${N60_M})
 add_test(NAME n60core_dsp COMMAND n60core_dsp_test)
 
 add_executable(n60core_system_test tests/test_system.c)
 set_target_properties(n60core_system_test PROPERTIES C_STANDARD 11 LINKER_LANGUAGE CXX)
-target_link_libraries(n60core_system_test PRIVATE n60core m)
+target_link_libraries(n60core_system_test PRIVATE n60core ${N60_M})
 add_test(NAME n60core_system COMMAND n60core_system_test)
 
 add_executable(n60core_ambient_sections_test tests/test_ambient_sections.c)
 set_target_properties(n60core_ambient_sections_test PROPERTIES C_STANDARD 11 LINKER_LANGUAGE CXX)
-target_link_libraries(n60core_ambient_sections_test PRIVATE n60core m)
+target_link_libraries(n60core_ambient_sections_test PRIVATE n60core ${N60_M})
 add_test(NAME n60core_ambient_sections COMMAND n60core_ambient_sections_test)
 add_executable(n60core_ambient_carry_test tests/test_ambient_carry.c)
 set_target_properties(n60core_ambient_carry_test PROPERTIES C_STANDARD 11 LINKER_LANGUAGE CXX)
-target_link_libraries(n60core_ambient_carry_test PRIVATE n60core m)
+target_link_libraries(n60core_ambient_carry_test PRIVATE n60core ${N60_M})
 add_test(NAME n60core_ambient_carry COMMAND n60core_ambient_carry_test)
 
 add_executable(n60core_external_test tests/test_external.c)
 set_target_properties(n60core_external_test PROPERTIES C_STANDARD 11 LINKER_LANGUAGE CXX)
-target_link_libraries(n60core_external_test PRIVATE n60core m)
+target_link_libraries(n60core_external_test PRIVATE n60core ${N60_M})
 add_test(NAME n60core_external COMMAND n60core_external_test)
 
 add_executable(n60core_rebuild_test tests/test_rebuild.c)
 set_target_properties(n60core_rebuild_test PROPERTIES C_STANDARD 11 LINKER_LANGUAGE CXX)
-target_link_libraries(n60core_rebuild_test PRIVATE n60core m)
+target_link_libraries(n60core_rebuild_test PRIVATE n60core ${N60_M})
 add_test(NAME n60core_rebuild COMMAND n60core_rebuild_test)
 
 add_executable(n60core_denoiser_carry_test tests/test_denoiser_carry.c)
 set_target_properties(n60core_denoiser_carry_test PROPERTIES C_STANDARD 11 LINKER_LANGUAGE CXX)
-target_link_libraries(n60core_denoiser_carry_test PRIVATE n60core m)
+target_link_libraries(n60core_denoiser_carry_test PRIVATE n60core ${N60_M})
 add_test(NAME n60core_denoiser_carry COMMAND n60core_denoiser_carry_test)
 
 add_executable(n60core_layout_test tests/test_layout.c)
 set_target_properties(n60core_layout_test PROPERTIES C_STANDARD 11 LINKER_LANGUAGE CXX)
-target_link_libraries(n60core_layout_test PRIVATE n60core m)
+target_link_libraries(n60core_layout_test PRIVATE n60core ${N60_M})
 add_test(NAME n60core_layout COMMAND n60core_layout_test)
 
 add_executable(n60core_multisub_test tests/test_multisub.c)
 set_target_properties(n60core_multisub_test PROPERTIES C_STANDARD 11 LINKER_LANGUAGE CXX)
-target_link_libraries(n60core_multisub_test PRIVATE n60core m)
+target_link_libraries(n60core_multisub_test PRIVATE n60core ${N60_M})
 add_test(NAME n60core_multisub COMMAND n60core_multisub_test)
 
 add_executable(n60core_readbacks_test tests/test_readbacks.c)
 set_target_properties(n60core_readbacks_test PROPERTIES C_STANDARD 11 LINKER_LANGUAGE CXX)
-target_link_libraries(n60core_readbacks_test PRIVATE n60core m)
+target_link_libraries(n60core_readbacks_test PRIVATE n60core ${N60_M})
 add_test(NAME n60core_readbacks COMMAND n60core_readbacks_test)
 
 # E11 S1: measurement core (n60/measure.h). The tests reach the internal offline FFT, so they see src/.
@@ -351,7 +382,7 @@ add_test(NAME n60core_mimo_safety COMMAND n60core_mimo_safety_test)
 add_executable(n60core_e4_fxlms_test ../ci/harness_e4_fxlms.c)
 set_target_properties(n60core_e4_fxlms_test PROPERTIES C_STANDARD 11 LINKER_LANGUAGE CXX)
 target_include_directories(n60core_e4_fxlms_test PRIVATE ../ci)
-target_link_libraries(n60core_e4_fxlms_test PRIVATE n60core m)
+target_link_libraries(n60core_e4_fxlms_test PRIVATE n60core ${N60_M})
 add_test(NAME n60core_e4_fxlms COMMAND n60core_e4_fxlms_test)
 
 add_executable(n60core_e4_remote_tonal_test ../ci/harness_e4_remote_tonal.cpp)

@@ -174,7 +174,7 @@ static void one(double rate, double seconds) {
 static void epochReset() {
     const double rate = 48000;
     const uint32_t E = 960, T = 47040;
-    std::vector<float> early(size_t(2) * E, 0.0f), tail(size_t(2) * T);
+    std::vector<float> early(size_t(4) * E, 0.0f), tail(size_t(4) * T);  // stereo layout: 2 sources x 2 ears
     early[0] = 1.0f;
     early[E] = 1.0f;
     for (auto &v : tail) v = 0.2f * frand();

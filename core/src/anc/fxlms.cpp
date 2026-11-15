@@ -43,7 +43,7 @@ double amplitudeFromDB(double db) { return std::pow(10.0, db / 20.0); }
 
 double fraction(double x) { return x - std::floor(x); }
 
-bool finite(double v) { return std::isfinite(v); }
+bool finiteValue(double v) { return std::isfinite(v); }
 
 }  // namespace
 
@@ -52,7 +52,7 @@ namespace n60::anc {
 // Decimator ----------------------------------------------------------------
 
 std::uint32_t Decimator::factorFor(double sampleRate) noexcept {
-    if (!finite(sampleRate) || sampleRate < kMinimumRate || sampleRate > kMaximumRate) return 0;
+    if (!finiteValue(sampleRate) || sampleRate < kMinimumRate || sampleRate > kMaximumRate) return 0;
     return static_cast<std::uint32_t>(sampleRate / kAdaptationRateHz);
 }
 
@@ -628,11 +628,11 @@ bool N60AdaptiveTonalConfigIsValid(const N60AdaptiveTonalConfig *config) {
     const uint32_t factor = n60::anc::Decimator::factorFor(config->sampleRate);
     if (factor == 0) return false;
     const double decimatedRate = config->sampleRate / factor;
-    const auto in = [](double v, double lo, double hi) { return finite(v) && v >= lo && v <= hi; };
+    const auto in = [](double v, double lo, double hi) { return finiteValue(v) && v >= lo && v <= hi; };
     if (config->toneCount > N60_FXLMS_MAX_TONES) return false;
     for (uint32_t k = 0; k < config->toneCount; ++k) {
         if (!in(config->toneHz[k], 20, 150)) return false;
-        if (!finite(config->toneSeed[k].re) || !finite(config->toneSeed[k].im)) return false;
+        if (!finiteValue(config->toneSeed[k].re) || !finiteValue(config->toneSeed[k].im)) return false;
     }
     if (!in(config->convergenceSeconds, N60_FXLMS_MIN_CONVERGENCE_SECONDS, 60)) return false;
     if (!in(config->leakagePerSecond, 0, 10)) return false;
@@ -686,13 +686,13 @@ N60BlockFxlmsConfig N60BlockFxlmsConfigDefault(double sampleRate) {
 
 bool N60BlockFxlmsConfigIsValid(const N60BlockFxlmsConfig *config) {
     if (config == nullptr) return false;
-    if (!finite(config->sampleRate) || config->sampleRate < 1000
+    if (!finiteValue(config->sampleRate) || config->sampleRate < 1000
         || config->sampleRate > kMaximumRate) return false;
     if (config->taps < 1 || config->taps > N60_FXLMS_MAX_BLOCK_TAPS) return false;
     if (config->blockFrames < 1 || config->blockFrames > 1024) return false;
-    if (!finite(config->step) || config->step <= 0 || config->step > N60_FXLMS_MAX_BLOCK_STEP)
+    if (!finiteValue(config->step) || config->step <= 0 || config->step > N60_FXLMS_MAX_BLOCK_STEP)
         return false;
-    return finite(config->leakagePerSecond) && config->leakagePerSecond >= 0
+    return finiteValue(config->leakagePerSecond) && config->leakagePerSecond >= 0
            && config->leakagePerSecond <= 10;
 }
 

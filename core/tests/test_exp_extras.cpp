@@ -296,7 +296,7 @@ void switchStep(double rate) {
         if (off == 2 * n / 3) { n60_param_record r = {5, 15, 2.0f, 0}; (void)n60_graph_post_params(g, &r, 1); }
         const float *ip[1] = {in[0].data() + off};
         float *op[1] = {out[0].data() + off};
-        n60_graph_process(g, ip, op, block);
+        n60_graph_process(g, ip, op, (uint32_t)std::min<size_t>(block, n - off));  // the last block is short when n is not a multiple of 64
     }
     n60_graph_retire(g);
     double own = 0, step = 0;

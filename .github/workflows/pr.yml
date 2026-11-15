@@ -110,13 +110,14 @@ jobs:
 
 
   # E1 S7: the portable core builds with clang -Werror on Linux and passes its tests (same script as the
-  # nightly core-linux job, ci/run_core_linux.sh; about two minutes).
+  # nightly core-linux job, ci/run_core_linux.sh).
   core-linux:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
 
-      - name: Build and test libn60core (clang, Linux)
-        run: ci/run_core_linux.sh
+      # E21 S1: CMake + ctest over every portable core test (Release here; the nightly job adds Debug).
+      - name: Build and test libn60core (clang, Linux, ctest)
+        run: ci/run_core_linux.sh Release

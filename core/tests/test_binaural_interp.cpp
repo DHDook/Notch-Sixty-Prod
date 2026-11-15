@@ -194,8 +194,11 @@ static n60_binaural_profile profile(uint32_t len, uint32_t sets, float yawStart,
 
 // Onset (frames, fractional) of one response through the library's own detector.
 static double onsetOf(const std::vector<float> &h, uint32_t len, double rate) {
-    std::vector<float> al(len), d(1);
-    n60_binaural_delay_separate(rate, 1, 1, len, h.data(), 0, len, -1, al.data(), d.data());
+    // The library reads two ears per source: ear 0 is the response under test, ear 1 a copy (it only needs to be valid).
+    std::vector<float> two(h.begin(), h.begin() + len);
+    two.insert(two.end(), h.begin(), h.begin() + len);
+    std::vector<float> al(2u * len), d(2);
+    n60_binaural_delay_separate(rate, 1, 1, len, two.data(), 0, len, -1, al.data(), d.data());
     return d[0];
 }
 
