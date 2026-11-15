@@ -16,6 +16,6 @@ for cfg in "${CONFIGS[@]}"; do
   dir="$TMP/n60core_build_$cfg"
   cmake -S core -B "$dir" -DCMAKE_BUILD_TYPE="$cfg" -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
     -DCMAKE_C_FLAGS_DEBUG="-O1 -g" -DCMAKE_CXX_FLAGS_DEBUG="-O1 -g"
-  cmake --build "$dir" --parallel "$JOBS"
+  cmake --build "$dir" --parallel "$JOBS" -- -k  # -k: report every compile error in one run
   ctest --test-dir "$dir" --output-on-failure --parallel "$JOBS" --timeout 1200
 done
