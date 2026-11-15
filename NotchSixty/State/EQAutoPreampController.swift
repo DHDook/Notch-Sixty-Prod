@@ -20,12 +20,18 @@ final class EQAutoPreampController: ObservableObject {
     /// E27 S3b: extra attenuation, in dB (zero or positive), from the A/B loudness match.
     @Published private(set) var matchAttenuationDB = 0.0
 
+    /// E32 S1: why the last automatic preamp change failed; nil when it applied. The page shows it.
+    @Published private(set) var lastError: String?
+
     private let engine: AudioIOEngine
+    /// Writes the input preamp. The engine's setter in production; tests inject a failing one.
+    var preampWriter: (Double) throws -> Void
     private var observation: ObservationSubscription?
     private var cacheKey: (configuration: StereoEQConfiguration, sampleRate: Double)?
 
     init(engine: AudioIOEngine) {
         self.engine = engine
+        preampWriter = { [engine] in try engine.setInputPreampDB($0) }
         refreshPrediction()
         observation = ObservationSubscription(
             track: { [engine] in
@@ -88,7 +94,12 @@ final class EQAutoPreampController: ObservableObject {
 
     /// Brings the preamp to the target if it is not there (idempotent).
     func reconcile() {
-        try? reconcileThrowing()
+        do {
+            try reconcileThrowing()
+            if lastError != nil { lastError = nil }
+        } catch {
+            lastError = "Auto preamp could not set the input preamp: \(error.localizedDescription)"
+        }
     }
 
     private var clampedTrim: Double {
@@ -101,7 +112,7 @@ final class EQAutoPreampController: ObservableObject {
         guard isActive else { return }
         let target = targetPreampDB
         guard abs(target - engine.gainConfiguration.inputPreampDB) > 1e-9 else { return }
-        try engine.setInputPreampDB(target)
+        try preampWriter(target)
     }
 
     private func refreshPrediction() {

@@ -446,7 +446,7 @@ Plan: `docs/epics/E32.md`. Defects from the 15 Nov 2026 review of the three page
 UX redesign are a later epic. Engine fixes go in the C++ core; the legacy C stays frozen. S1–S4 flagless; the
 three sound-changing fixes in S5 behind `e32.dynamics-sound`, graduated in S6. Owner decisions 1–5 of 15 Nov 2026 are in the plan.
 
-- [ ] S1 `e32/eq-page-fixes`: one band rule, Nyquist band state and count, surfaced errors, analyser and response redraw, Phase picker off the main thread (E6 G55) (low-risk)
+- [x] S1 `e32/eq-page-fixes`: one band rule, Nyquist band state and count, surfaced errors, analyser and response redraw, Phase picker off the main thread (E6 G55), loudness block counter (R18 counter half) (low-risk; PR pending)
 - [ ] S2 `e32/eq-engine-validation`: engine validators use the band rule (dynamic EQ on every offered type, notch cut-only, import limits); drag publishing confirmed and fixed (needs-owner)
 - [ ] S3 `e32/meter-cadence`: idle meter loops, gain-reduction rates and paused timelines, per-tick models, demand tokens, loudness history, dBTP label, clip latch after reset (low-risk)
 - [ ] S4 `e32/dynamics-core-fixes`: makeup-free gain reduction, multiband crossover crossfade, limiter ring masks, R11 and R13 confirmed or closed (needs-owner, realtime)
@@ -613,7 +613,7 @@ Owner decision, 18 Oct 2026: there is no bench access for now, so every bench ch
 - [ ] E13 G15: head tracking with AirPods on a 7.1.4 layout, yaw and pitch blend without comb filtering or ITD jumps through a 360° sweep (E13 S5 bench item)
 - [ ] Carried in by flag graduation (11 Nov 2026): E4 S30 checks, E19 modal-decay campaign, E20 no-overload-with-workers (gates FC removal of `e20.*`), E26 sub bench gaps (G10, G11, G19, G23, G24, G28, G30), E28 owner listen to S7a to S7d, E13 G8 (96 kHz tail versus 384 kHz benchmark), E9 bench lines (G18, G25, G26)
 - [ ] E7 G10 and bench: insert a real Audio Unit that stops at 192 kHz and change the device rate 48 to 384 to 48 kHz while playing (per-rate bypass, row note, return at 48 kHz); listen to a 20 ms headphone delay, a resampled speaker IR and the precision-changed stages at 352.8 and 384 kHz (`docs/epics/E7.md` Bench checks)
-- [ ] E32 bench (`docs/epics/E32.md` slices): Equalizer page CPU with the analyser on and the Nyquist note on a real rate change (S1); dynamic low shelf on music and band drags without level dips at 44.1, 96 and 384 kHz (S2); meters and gain-reduction CPU with audio stopped and while playing, a 25 h loudness run (S3); multiband crossover drag on a DAC (S4); limiter with attack above lookahead, expander on speech and drums, loopback inter-sample peak at 176.4, 192 and 384 kHz (S5)
+- [ ] E32 bench (`docs/epics/E32.md` slices): Equalizer page CPU with the analyser on and the Nyquist note on a real rate change, add and remove band error banners (S1); dynamic low shelf on music and band drags without level dips at 44.1, 96 and 384 kHz (S2); meters and gain-reduction CPU with audio stopped and while playing, a 25 h loudness run (S3); multiband crossover drag on a DAC (S4); limiter with attack above lookahead, expander on speech and drums, loopback inter-sample peak at 176.4, 192 and 384 kHz (S5)
 
 ### FC Flag cleanup (owner, 11 Nov 2026)
 

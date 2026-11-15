@@ -146,10 +146,14 @@ final class EQComparisonController: ObservableObject {
     @Published private(set) var loudnessMatchEnabled = false
     /// The trim, in dB (zero or negative), currently taken off the louder slot.
     @Published private(set) var matchTrimDB = 0.0
+    /// E32 S1: why the last loudness-match trim failed; nil when it applied. The page shows it.
+    @Published private(set) var lastError: String?
 
     /// Wired by the content A/B controller: true while a content A/B session is open.
     var contentABActive: () -> Bool = { false }
     private let engine: AudioIOEngine
+    /// Writes the input preamp for the loudness match. The engine's setter in production; tests inject a failing one.
+    var preampWriter: (Double) throws -> Void
     private let autoPreamp: EQAutoPreampController
     private let audition: EQAuditionController?
     private var savedSteps: [EQComparisonSlot: EQEditHistory.SlotSteps] = [:]
@@ -164,6 +168,7 @@ final class EQComparisonController: ObservableObject {
         self.engine = engine
         self.autoPreamp = autoPreamp
         self.audition = audition
+        preampWriter = { [engine] in try engine.setInputPreampDB($0) }
         slots = EQComparisonSlots(live: engine.stereoEQConfiguration)
         observation = ObservationSubscription(
             track: { [engine] in _ = engine.stereoEQConfiguration },
@@ -289,6 +294,11 @@ final class EQComparisonController: ObservableObject {
         let current = engine.gainConfiguration.inputPreampDB
         let target = min(max(current - appliedManualTrimDB + desired, range.lowerBound), range.upperBound)
         appliedManualTrimDB = desired
-        try? engine.setInputPreampDB(target)
+        do {
+            try preampWriter(target)
+            if lastError != nil { lastError = nil }
+        } catch {
+            lastError = "The A/B loudness match could not set the preamp: \(error.localizedDescription)"
+        }
     }
 }

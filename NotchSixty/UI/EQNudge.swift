@@ -4,8 +4,8 @@ import Foundation
 /// scroll and pinch scaling for Q. Plain Swift; clamping is done here so a nudge can never
 /// leave the range the engine accepts.
 enum EQNudge {
-    static let minimumFrequency = 20.0
-    static let qRange = 0.1...20.0
+    static let minimumFrequency = EQBandRules.minimumFrequency
+    static let qRange = EQBandRules.qRange
     /// Q a band returns to on a double-click reset (the `EQBand` default for every type).
     static let defaultQ = 0.707
     /// Q of a band added by double-clicking the empty graph.

@@ -517,20 +517,10 @@ struct ProductionProfileToolbar: View {
                 fileName: url.lastPathComponent,
                 baseStereo: engine.stereoEQConfiguration
             )
-            do {
-                try engine.replaceStereoEQConfiguration(imported.stereoEQ)
-                if let inputPreampDB = imported.inputPreampDB {
-                    try engine.setInputPreampDB(inputPreampDB)
-                }
-                if let dynamics = imported.dynamics {
-                    try engine.replaceDynamicsConfiguration(dynamics)
-                }
-            } catch {
-                try? engine.replaceStereoEQConfiguration(previousStereo)
-                try? engine.setInputPreampDB(previousGain.inputPreampDB)
-                try? engine.replaceDynamicsConfiguration(previousDynamics)
-                throw error
-            }
+            try PresetImportApplier.apply(
+                imported, to: engine,
+                previousStereo: previousStereo, previousGain: previousGain, previousDynamics: previousDynamics
+            )
 
             profiles.saveCurrentContentPreset(named: imported.suggestedName)
             if imported.warnings.isEmpty {
@@ -609,6 +599,44 @@ struct PresetInterchangeImport {
     var dynamics: DynamicsConfiguration?
     var suggestedName: String
     var warnings: [String]
+}
+
+/// E32 S1: applies an imported preset and rolls the engine back when a step fails. A rollback that
+/// itself fails is reported (the profile may be partly applied) instead of being swallowed.
+enum PresetImportApplier {
+    struct RollbackError: LocalizedError {
+        let cause: String
+        let failures: [String]
+        var errorDescription: String? {
+            "\(cause) The previous settings could not be fully restored, so the profile may be partly applied (\(failures.joined(separator: "; ")))."
+        }
+    }
+
+    @MainActor
+    static func apply(
+        _ imported: PresetInterchangeImport,
+        to engine: AudioIOEngine,
+        previousStereo: StereoEQConfiguration,
+        previousGain: DSPGainConfiguration,
+        previousDynamics: DynamicsConfiguration
+    ) throws {
+        do {
+            try engine.replaceStereoEQConfiguration(imported.stereoEQ)
+            if let inputPreampDB = imported.inputPreampDB {
+                try engine.setInputPreampDB(inputPreampDB)
+            }
+            if let dynamics = imported.dynamics {
+                try engine.replaceDynamicsConfiguration(dynamics)
+            }
+        } catch {
+            var failures: [String] = []
+            do { try engine.replaceStereoEQConfiguration(previousStereo) } catch { failures.append("EQ: \(error.localizedDescription)") }
+            do { try engine.setInputPreampDB(previousGain.inputPreampDB) } catch { failures.append("preamp: \(error.localizedDescription)") }
+            do { try engine.replaceDynamicsConfiguration(previousDynamics) } catch { failures.append("dynamics: \(error.localizedDescription)") }
+            if failures.isEmpty { throw error }
+            throw RollbackError(cause: error.localizedDescription, failures: failures)
+        }
+    }
 }
 
 struct PresetInterchangeExport {
