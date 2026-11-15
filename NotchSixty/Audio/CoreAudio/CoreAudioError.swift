@@ -627,6 +627,7 @@ final class CoreAudioTransportSession {
                     throw CoreAudioTransportError.unsupportedFormat(role: "multichannel output reference", format: outputFormat)
                 }
             }
+            try RateCapacity.requireSupportedTapRate(tapFormat.sampleRate)
             let adaptiveSampleRateRequired = programFoldPlan == nil
                 && abs(tapFormat.sampleRate - outputFormat.sampleRate) >= 0.5
             if adaptiveSampleRateRequired, aggregateDeviceOutputPlan != nil {

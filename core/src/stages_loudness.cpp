@@ -515,7 +515,7 @@ void levelerSample(LdShared &S, const float *p, float *left, float *right, const
     if (!enabled && nearZero(S.boostDb)) {
         S.boostDb = 0.0f;
         S.progMs = S.bandMs = S.modMs = 0.0;
-    S.voiceEnv = S.modPrev = S.modHpOut = S.modLpOut = 0.0f;
+        S.voiceEnv = S.modPrev = S.modHpOut = S.modLpOut = 0.0f;
         S.progDbfs = S.bandDbfs = S.gapDb = S.confidence = 0.0f;
         clearLevelerFilters(S);
         S.levParked = 1;

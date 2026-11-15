@@ -93,7 +93,7 @@ FC phase's per-epic PR (`docs/epics/FC.md`) unless stated.
 | `e19.mimo-treatment` | E19 | graduated | 14 Nov 2026 (S11) | FC (E19) |
 | `e28.dynamics-extras` | E28 | graduated | 11 Nov 2026 (S8) | FC (E28) |
 | `e29.room-model` | E29 | dark, no production reader | none | FC (E29) |
-| `e7.rate-adapt` | E7 | dark (S2: speaker IR and SOFA resampling read it) | none | FC (E7) |
+| `e7.rate-adapt` | E7 | graduated (E7 S5, 15 Nov 2026): speaker IR and SOFA resampling and the per-rate plug-in bypass read it | none | FC (E7) |
 | `e15.follow-output` | E15 | planned | none | FC (E15) |
 | `e17.export`, `e17.dither` | E17 | planned | none | FC (E17) |
 | `e20.parallel-render` | E20 | graduated | 13 Nov 2026 (ship) | FC (E20) |
@@ -117,7 +117,7 @@ gap may then be closed as "moved to E22" once E22 holds a matching unchecked ite
 | E4 | `e4.noise-survey`, `e4.conversation-unmasking`, `e4.overnight` | Graduated 11 Nov 2026 (S32) | none |
 | E4 | `e4.virtual-microphone`, `e4.head-position-camera`, `e4.zones` | Graduated 11 Nov 2026 (G16): ear survey, camera follow and zone chooser wired, adaptive worker uses the ear error (G18); available, never armed | none |
 | E6 | `e6.legacy-kernel` | Software complete bar S12h part 3; the inverse escape hatch | Never graduates; E23 deletes it; scoped gaps owned by E22 and E23 |
-| E7 | `e7.rate-adapt` | S1 built (no flag); S2: flag in code, speaker IR and research SOFA resample on activation behind it | S2 to S5; S5 reworded to graduate |
+| E7 | `e7.rate-adapt` | Graduated in S5 (15 Nov 2026): S1 and S4 ship without a flag; S2 asset resampling and S3 per-rate plug-in bypass read it; bench lines move to E22 | none; flag removal is FC (E7) |
 | E9 | `e9.long-fir`, `e9.output-protection` | Graduated in S8 (13 Nov 2026); Outputs UI, headroom assistant, active-speaker failsafe and the 262,144-tap program FIR reachable | Bench gaps G18, G25, G26, G27 and the S1 to S10b bench lines move to E22; flag removal is FC (E9) |
 | E13 | `e13.headphones` | S3, S4, S7 reachable behind the flag; S5 not built | S5; software gaps G7, G9, G10, G12; bench gaps G2 to G6, G8, G11 move to E22; S8 reworded |
 | E15, E17, E21 | planned flags | Nothing built | Whole epics; ship slices reworded |
@@ -153,6 +153,6 @@ E22; the software part graduates.
 | `e19.mimo-treatment` | E19 | On by default (graduated, E19 S11; `-NotchSixtyFeatures -e19.mimo-treatment` switches it off). MIMO room treatment: Room Treatment screen, designer, unrouted and routed stage, safety layer, verifier. Available, never armed: no permit exists before the E22 qualification, and the arm switch and written authorisation path are unchanged. Off: today's code paths, UI and routing refusal |
 | `e28.dynamics-extras` | E28 | On by default (graduated, E28 S8). Compressor mix, link, peak/RMS detector, listen and lookahead; expander hold, knee, RMS, sidechain high-pass, link and listen; multiband auto-release, bypass, solo, listen, detector, lookahead and the band-pass split, all on the Dynamics page. On: the stage blocks widen to 16, 13 and 44 values and lookahead frames add to the graph latency (A/V-sync, routing total, hand-over check). Off (`-NotchSixtyFeatures -e28.dynamics-extras`): the 10, 6 and 29 value blocks, bit-identical to before |
 | `e29.room-model` | E29 | Off by default. The shared room position model: S1 is a read-only index over room-correction positions, the measurement library, combined ANC path records and the head survey (no UI yet); the seat map, music-at-seat and consumer adoption follow. Off: every feature reads its own records exactly as today |
-| `e7.rate-adapt` | E7 | Off by default. A speaker impulse response that carries a rate, and a SOFA HRTF in the research workspace, are resampled to the output device rate (cached per rate, original kept) and the row says "Resampled from X kHz". Off: a rate mismatch refuses as before. Read where the engine builds the Speaker IR program and in the two rows |
+| `e7.rate-adapt` | E7 | On by default (graduated). A speaker impulse response that carries a rate, and a SOFA HRTF in the research workspace, are resampled to the output device rate (cached per rate, original kept) and the row says "Resampled from X kHz". Off (`-NotchSixtyFeatures -e7.rate-adapt`): a rate mismatch refuses as before. Read where the engine builds the Speaker IR program and in the two rows |
 | `e20.parallel-render` | E20 | On by default (graduated, E20 ship). Up to three extra realtime worker threads in the output device's Audio Workgroup render the non-uniform FIR lanes in parallel (needs `e9.long-fir`); Swift picks the worker count from the graph's estimated load. Read once at launch. `-NotchSixtyFeatures -e20.parallel-render` turns it off: no worker thread exists, the audio thread renders alone |
 | `e20.multirate` | E20 | On by default (graduated, E20 ship), no reader: the multirate low-frequency slices (S7, S8) were skipped on the measured entry rule, so the flag changes nothing. Removed in FC (E20) |

@@ -1,14 +1,8 @@
 # Sourced by ci/run_harnesses.sh (shares its helpers: selected, OUT, passed, failed).
 # Acoustic reference lab and reviewer-noise checks (Python).
 
-# Acoustic reference lab: production-header probes checked against independent
-# Python oracles at every standard rate from 44.1 to 384 kHz.
-for name in pr117_acoustic_reference_lab pr117b_fir_latency_headroom pr117c_spatial_reference; do
-    selected "$name" || continue
-    echo "::group::$name"
-    if python3 "ci/validate_$name.py"; then passed+=("$name"); else failed+=("$name"); fi
-    echo "::endgroup::"
-done
+# Acoustic reference lab: the E4 production-header probes checked against independent Python oracles at every
+# standard rate from 44.1 to 384 kHz. (The PR117 lab's cases now run in `RateMatrixTests`; E7 S5.)
 if selected e4_anc_guard_reference; then
     echo "::group::e4_anc_guard_reference"
     if python3 ci/acoustic_reference_lab/e4_anc_guard_reference.py; then
