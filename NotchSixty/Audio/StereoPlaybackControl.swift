@@ -438,7 +438,8 @@ struct StereoEQConfiguration: Equatable, Codable, Sendable {
         bassManagementConfiguration: BassManagementConfiguration,
         dynamicsConfiguration: DynamicsConfiguration = DynamicsConfiguration(),
         playbackConfiguration: PlaybackControlConfiguration,
-        masterGainLinear: Float = 1.0
+        masterGainLinear: Float = 1.0,
+        dynamicsExtrasEnabled: Bool = FeatureFlags.isEnabledProcessWide(.dynamicsExtras)
     ) throws -> N60DSPGraphSnapshot {
         guard bassManagementConfiguration.frequencyHz.isFinite,
               BassManagementConfiguration.frequencyRange.contains(bassManagementConfiguration.frequencyHz) else {
@@ -642,7 +643,7 @@ struct StereoEQConfiguration: Equatable, Codable, Sendable {
         // E28 S7d (G33): the compressor and multiband lookahead are program-path latency the core reports; counting them here
         // keeps the hand-over alignment and the processing-off pad equal to the graph's own figure.
         let dynamicsLookahead = UInt64(DynamicsLatency.programFrames(
-            compiledDynamics, sampleRate: sampleRate, flagOn: Thread.isMainThread && MainActor.assumeIsolated { FeatureFlags().isEnabled(.dynamicsExtras) }))
+            compiledDynamics, sampleRate: sampleRate, flagOn: dynamicsExtrasEnabled))
         let totalLatency = UInt64(graph.latencyFrames) + denoiserLatency + protectionLatency + dynamicsLookahead
         guard totalLatency < UInt64(N60_MAX_AUDITION_DELAY_FRAMES) else {
             throw DynamicsConfigurationError.invalidOversampling

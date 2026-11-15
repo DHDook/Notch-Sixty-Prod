@@ -66,7 +66,9 @@ enum EQFilterType: String, CaseIterable, Identifiable, Codable, Sendable {
         case .linkwitzTransform: return N60BiquadFilterTypeLinkwitzTransform
         case .tilt: return N60BiquadFilterTypeTilt
         case .fir:
-            preconditionFailure("FIR EQ bands are convolution assets, not biquad filter types.")
+            // FIR bands are convolution assets, never biquad sections: callers filter them out first. A neutral
+            // type (never a trap on a control-plane path) is the safe answer if one ever reaches here.
+            return N60BiquadFilterTypePeaking
         case .notch: return N60BiquadFilterTypeNotch
         case .allPass: return N60BiquadFilterTypeAllPass
         }
@@ -206,10 +208,12 @@ enum EQFIRCompiler {
             let ok = combined.withUnsafeBufferPointer { lhs in
                 kernel.taps.withUnsafeBufferPointer { rhs in
                     output.withUnsafeMutableBufferPointer { destination in
-                        N60FIRConvolveControlPlane(
-                            lhs.baseAddress!, UInt32(lhs.count),
-                            rhs.baseAddress!, UInt32(rhs.count),
-                            destination.baseAddress!, UInt32(destination.count)
+                        guard let lhsBase = lhs.baseAddress, let rhsBase = rhs.baseAddress,
+                              let destinationBase = destination.baseAddress else { return false }
+                        return N60FIRConvolveControlPlane(
+                            lhsBase, UInt32(lhs.count),
+                            rhsBase, UInt32(rhs.count),
+                            destinationBase, UInt32(destination.count)
                         )
                     }
                 }
@@ -1088,7 +1092,7 @@ final class AudioIOEngine {
     /// overwrites the user's current level.
     private var masterVolumeSynchronizedOutputUID: String?
     var lifecycle: AudioLifecycleStateMachine
-    private var transportSession: CoreAudioTransportSession?
+    private(set) var transportSession: CoreAudioTransportSession?
     /// E25 S2: applied to each new stereo session.
     private var stereoAlignment: StereoBassAlignment?
     /// E25 S8a: the wider-source fold the user configured (nil: none), and the matrix of the session that is running or
@@ -1113,7 +1117,8 @@ final class AudioIOEngine {
     private var activeEQFIRProgram: PreparedEQFIRProgram?
     private var nextEQFIRProgramSlot: UInt32 = 0
     /// E27 S3c: designed taps of the recent EQ configurations, so an A/B toggle redesigns nothing.
-    private var eqFIRCache = EQFIRProgramCache()
+    var eqFIRCache = EQFIRProgramCache()
+    var eqPhaseModeRequestToken = 0
     /// Linear-phase designs run so far (a cache hit runs none). Tests read it.
     var eqFIRDesignCount: Int { eqFIRCache.designCount }
     private var activeRoomCorrectionProgram: PreparedRoomCorrectionProgram?
@@ -4343,77 +4348,6 @@ final class AudioIOEngine {
         lastErrorDescription = nil
     }
 
-    private func designLinearPhaseTaps(
-        _ configuration: StereoEQConfiguration,
-        channel: EQEditChannel,
-        sampleRate: Double,
-        tapCount: Int
-    ) throws -> (taps: [Float], info: N60LinearPhaseEQDesignInfo) {
-        let bands = try configuration.linearPhaseBands(for: channel, sampleRate: sampleRate)
-        var taps = [Float](repeating: 0, count: tapCount)
-        var designInfo = N60LinearPhaseEQDesignInfo()
-        let designed = taps.withUnsafeMutableBufferPointer { tapBuffer -> Bool in
-            if bands.isEmpty {
-                return N60LinearPhaseEQDesign(
-                    sampleRate,
-                    nil,
-                    0,
-                    tapBuffer.baseAddress!,
-                    UInt32(tapBuffer.count),
-                    &designInfo
-                )
-            }
-            return bands.withUnsafeBufferPointer { bandBuffer in
-                N60LinearPhaseEQDesign(
-                    sampleRate,
-                    bandBuffer.baseAddress!,
-                    UInt32(bandBuffer.count),
-                    tapBuffer.baseAddress!,
-                    UInt32(tapBuffer.count),
-                    &designInfo
-                )
-            }
-        }
-        guard designed else { throw EQConfigurationError.linearPhaseDesignFailed }
-        return (taps, designInfo)
-    }
-
-    private func prepareLaneEQFIRTaps(
-        _ configuration: StereoEQConfiguration,
-        channel: EQEditChannel,
-        sampleRate: Double
-    ) throws -> (taps: [Float], declaredLatencyFrames: UInt32, designInfo: N60LinearPhaseEQDesignInfo?) {
-        let baseTaps: [Float]
-        let declaredLatency: UInt32
-        let designInfo: N60LinearPhaseEQDesignInfo?
-        if configuration.phaseMode == .linearPhase {
-            let tapCount = Int(N60LinearPhaseEQRecommendedTapCount(sampleRate))
-            guard tapCount > 0, tapCount <= Int(N60_CONVOLUTION_MAX_TAPS) else {
-                throw EQConfigurationError.linearPhaseDesignFailed
-            }
-            let design = try designLinearPhaseTaps(
-                configuration,
-                channel: channel,
-                sampleRate: sampleRate,
-                tapCount: tapCount
-            )
-            baseTaps = design.taps
-            declaredLatency = design.info.groupDelayFrames
-            designInfo = design.info
-        } else {
-            baseTaps = [1.0]
-            declaredLatency = 0
-            designInfo = nil
-        }
-
-        let kernels = try configuration.firKernels(for: channel, sampleRate: sampleRate)
-        return (
-            try EQFIRCompiler.cascade(base: baseTaps, kernels: kernels),
-            declaredLatency,
-            designInfo
-        )
-    }
-
     /// The EQ FIR taps for the configured channel mode (left and optional second channel padded to one length), their
     /// declared latency and the linear-phase design report. Pure: prepares nothing.
     private func eqFIRTaps(
@@ -4421,51 +4355,12 @@ final class AudioIOEngine {
         sampleRate: Double
     ) throws -> (left: [Float], right: [Float]?, declaredLatencyFrames: UInt32, designInfo: N60LinearPhaseEQDesignInfo?) {
         let design = try eqFIRCache.design(for: EQFIRProgramKey(configuration, sampleRate: sampleRate)) {
-            let taps = try designEQFIRTaps(configuration, sampleRate: sampleRate)
+            let taps = try EQFIRDesigner.design(configuration, sampleRate: sampleRate)
             return EQFIRDesign(
                 left: taps.left, right: taps.right,
                 declaredLatencyFrames: taps.declaredLatencyFrames, designInfo: taps.designInfo)
         }
         return (design.left, design.right, design.declaredLatencyFrames, design.designInfo)
-    }
-
-    private func designEQFIRTaps(
-        _ configuration: StereoEQConfiguration,
-        sampleRate: Double
-    ) throws -> (left: [Float], right: [Float]?, declaredLatencyFrames: UInt32, designInfo: N60LinearPhaseEQDesignInfo?) {
-        let primaryChannel: EQEditChannel
-        switch configuration.channelMode {
-        case .linked: primaryChannel = .linked
-        case .independent: primaryChannel = .left
-        case .midSide: primaryChannel = .mid
-        }
-        var primary = try prepareLaneEQFIRTaps(
-            configuration,
-            channel: primaryChannel,
-            sampleRate: sampleRate
-        )
-
-        var secondaryTaps: [Float]?
-        if configuration.channelMode != .linked {
-            let secondaryChannel: EQEditChannel = configuration.channelMode == .midSide ? .side : .right
-            var secondary = try prepareLaneEQFIRTaps(
-                configuration,
-                channel: secondaryChannel,
-                sampleRate: sampleRate
-            )
-            guard secondary.declaredLatencyFrames == primary.declaredLatencyFrames else {
-                throw EQConfigurationError.linearPhaseDesignFailed
-            }
-            let commonCount = max(primary.taps.count, secondary.taps.count)
-            if primary.taps.count < commonCount {
-                primary.taps.append(contentsOf: repeatElement(0, count: commonCount - primary.taps.count))
-            }
-            if secondary.taps.count < commonCount {
-                secondary.taps.append(contentsOf: repeatElement(0, count: commonCount - secondary.taps.count))
-            }
-            secondaryTaps = secondary.taps
-        }
-        return (primary.taps, secondaryTaps, primary.declaredLatencyFrames, primary.designInfo)
     }
 
     private func prepareEQFIRProgram(
