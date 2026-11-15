@@ -34,7 +34,7 @@ extension FeatureFlag {
         .legacyKernel, .ancEngineLease, .adaptiveTonalLive, .earnedCap, .feedForwardLive,
         .noiseSurvey, .conversationUnmasking, .virtualMicrophone, .zones, .headPositionCamera, .overnight,
         .subAwareAnc, .longFIR, .outputProtection, .headphones, .mimoTreatment, .dynamicsExtras, .roomModel,
-        .parallelRender, .multirate, .rateAdapt
+        .parallelRender, .multirate, .rateAdapt, .coreDesigners
     ]
 
     /// E6 S11: the unified graph is the default renderer. Turning this on selects the frozen
@@ -250,6 +250,16 @@ extension FeatureFlag {
         title: "Multirate low-frequency paths",
         epic: "E20",
         graduated: true
+    )
+
+    /// E21 S5: the measurement and program-analyser maths (direct arrival, analysis window, log-grid response, stereo band
+    /// spectrum) runs in libn60core (`n60/measure.h`) instead of Swift and vDSP. Later E21 slices put the designers
+    /// behind the same flag. Off: the Swift path, unchanged. Read where the analysis starts (off the main thread, through
+    /// `FeatureFlags.isEnabledProcessWide`); the engine never reads it. Removed in the flag-cleanup phase.
+    static let coreDesigners = FeatureFlag(
+        id: "e21.core-designers",
+        title: "Portable core designers and analysis",
+        epic: "E21"
     )
 }
 

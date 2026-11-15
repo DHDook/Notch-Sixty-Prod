@@ -144,6 +144,7 @@ which lists the first items and says it splits into three or four slices.
 
 - [ ] Estimate level at the ear from the signal and the headphone's sensitivity (entered by the user)
 - [ ] Show exposure over the day and week, labelled as an estimate
+- [ ] Speaker listening level (SPL) and noise dose at the seat, deferred from E33 D9 (owner, 15 Nov 2026); needs an output-to-seat SPL reference, which v1 does not have
 
 ### V2-12 Plug-in edition of room correction
 

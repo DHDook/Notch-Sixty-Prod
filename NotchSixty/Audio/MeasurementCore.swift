@@ -444,3 +444,88 @@ extension MeasurementCore {
         return Array(out.prefix(Int(written)))
     }
 }
+
+/// Room-response analysis and program spectrum (`n60/measure.h`, E21 S5).
+extension MeasurementCore {
+    /// Direct arrival of a circular deconvolved response; nil when it is silent.
+    static func directArrival(impulse: [Float], sampleRate: Double, tailFrames: Int) throws -> Int? {
+        var arrival: UInt64 = 0
+        let status = impulse.withUnsafeBufferPointer {
+            n60_measure_direct_arrival($0.baseAddress, UInt64($0.count), sampleRate, UInt64(max(0, tailFrames)), &arrival)
+        }
+        switch status {
+        case N60_MEASURE_OK: return Int(arrival)
+        case N60_MEASURE_ERR_NO_ARRIVAL: return nil
+        default: throw RoomCorrectionMeasurementAnalysisError.invalidSweep
+        }
+    }
+
+    static func windowedImpulse(_ impulse: [Float], arrivalFrame: Int, sampleRate: Double) -> [Float] {
+        var out = [Float](repeating: 0, count: impulse.count)
+        let status = impulse.withUnsafeBufferPointer { source in
+            out.withUnsafeMutableBufferPointer {
+                n60_measure_window_impulse(source.baseAddress, UInt64(source.count), UInt64(max(0, arrivalFrame)),
+                                           sampleRate, $0.baseAddress, UInt64($0.count))
+            }
+        }
+        return status == N60_MEASURE_OK ? out : impulse
+    }
+
+    struct ResponseGrid: Equatable, Sendable {
+        var frequenciesHz: [Double]
+        var magnitudeDB: [Double]
+        var phaseRadians: [Double]
+    }
+
+    static func responseGrid(
+        windowed: [Float], sampleRate: Double, startHz: Double, endHz: Double,
+        pointCount: Int, arrivalFrames: Int
+    ) throws -> ResponseGrid {
+        var params = n60_measure_response_params(
+            sample_rate: sampleRate, start_hz: startHz, end_hz: endHz,
+            point_count: UInt32(pointCount), arrival_frames: Double(arrivalFrames))
+        var grid = ResponseGrid(
+            frequenciesHz: [Double](repeating: 0, count: pointCount),
+            magnitudeDB: [Double](repeating: 0, count: pointCount),
+            phaseRadians: [Double](repeating: 0, count: pointCount))
+        let status = windowed.withUnsafeBufferPointer { w in
+            grid.frequenciesHz.withUnsafeMutableBufferPointer { f in
+                grid.magnitudeDB.withUnsafeMutableBufferPointer { m in
+                    grid.phaseRadians.withUnsafeMutableBufferPointer { p in
+                        n60_measure_response_grid(&params, w.baseAddress, UInt64(w.count),
+                                                  f.baseAddress, m.baseAddress, p.baseAddress)
+                    }
+                }
+            }
+        }
+        switch status {
+        case N60_MEASURE_OK: return grid
+        case N60_MEASURE_ERR_SIZE: throw RoomCorrectionMeasurementAnalysisError.transformTooLarge(required: windowed.count)
+        default: throw RoomCorrectionMeasurementAnalysisError.invalidSweep
+        }
+    }
+
+    /// Linear band amplitudes of the stereo program spectrum; nil on invalid arguments.
+    static func stereoBandAmplitudes(
+        left: ArraySlice<Float>, right: ArraySlice<Float>, sampleRate: Double,
+        bandCount: Int, minHz: Double, maxHz: Double
+    ) -> (frequenciesHz: [Double], amplitude: [Double])? {
+        let size = left.count
+        guard size == right.count, size > 0 else { return nil }
+        var params = n60_measure_stereo_bands_params(
+            sample_rate: sampleRate, fft_size: UInt32(size), band_count: UInt32(bandCount),
+            min_hz: minHz, max_hz: maxHz)
+        var frequencies = [Double](repeating: 0, count: bandCount)
+        var amplitude = [Double](repeating: 0, count: bandCount)
+        let status = left.withUnsafeBufferPointer { l in
+            right.withUnsafeBufferPointer { r in
+                frequencies.withUnsafeMutableBufferPointer { f in
+                    amplitude.withUnsafeMutableBufferPointer { a in
+                        n60_measure_stereo_band_amplitude(&params, l.baseAddress, r.baseAddress, f.baseAddress, a.baseAddress)
+                    }
+                }
+            }
+        }
+        return status == N60_MEASURE_OK ? (frequencies, amplitude) : nil
+    }
+}
