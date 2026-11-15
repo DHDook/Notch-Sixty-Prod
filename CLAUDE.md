@@ -20,8 +20,7 @@ gates G1–G4). Read the relevant epic there before planning any change, and nam
 every branch, commit and PR (for example `e2/macos26-deployment-target`).
 
 Owner decisions of 17 Oct 2026. `AGENTS.md` records the trunk, macOS 26, feature-flag,
-behavioural-test and three-workflow rules (E1 S6). Where the rest conflicts with `AGENTS.md`, these
-win until E21 updates `AGENTS.md`:
+behavioural-test, three-workflow and portable-core rules (E1 S6, E21 S2):
 
 - `main` is the trunk. Use short-lived branches and PRs, one slice each, behind the epic's
   feature flag. Do not build stacked draft chains.

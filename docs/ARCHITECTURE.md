@@ -21,7 +21,8 @@ The stereo render kernel is described in `docs/DSP_KERNEL.md`; realtime rules ar
 | App and UI | `NotchSixtyApp.swift` (`NotchSixtyApp`, `ProductController`), `UI/` | SwiftUI views and the product model |
 | Control plane | `Audio/AudioIOEngine.swift`, `State/` | Lifecycle, device selection, transport build/teardown, recovery, graph compilation |
 | Core Audio transport | `Audio/CoreAudio/` | Process tap, aggregate device, IO procs, measurement and reference transports |
-| Render plane | `Audio/Realtime/` (`N60*.c/.h`) | Realtime bridge, render kernels, ANC and MIMO runtimes, AU rack exchange |
+| Render plane | `Audio/Realtime/` (`N60*.c/.h`, legacy C, migrating to `core/`) | Realtime bridge, render kernels, ANC and MIMO runtimes, AU rack exchange |
+| Portable core | `core/` (`libn60core`) | C++20 realtime graph and design maths, no Apple framework; public C interface `core/include/n60/n60.h`; platform backends in `core/platform/<os>/`. New engine code goes here |
 | Gates and evidence | `Acceptance/` | Hardware acceptance, authorisation of hardware-gated features |
 | Devices and routing | `Audio/Devices/`, `Audio/Routing/` | Output catalogue, route, output and headphone profiles |
 

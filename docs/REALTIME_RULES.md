@@ -47,6 +47,10 @@ Every realtime DSP component must document:
 8. bypass behavior
 9. denormal/NaN handling where relevant
 
+## C++ in the core (`core/`)
+
+New engine code is C++20 in `core/` (see `AGENTS.md` section 4a). On every path reachable from `process` the following are forbidden, in addition to the list above: exceptions (`throw`, `try`; build with `-fno-exceptions`), RTTI and `dynamic_cast` (`-fno-rtti`), `std::function` and other type-erased wrappers that may allocate, iostreams, `thread_local` with dynamic initialisation, and function-local statics with non-trivial constructors. Allocate in `prepare` or off thread and swap in. Off-thread design maths may allocate but must not throw across the C boundary and must be deterministic (fixed summation order, no threads, seeded noise). The core uses no Apple framework. Checks: compile flags, `test_alloc`, realtime-reviewer, RealtimeSanitizer when available.
+
 ## Allowed callback system interaction (libn60core rebuild)
 
 The only system interaction permitted in libn60core's callback path is the `steady_clock` read used for

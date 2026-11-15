@@ -97,6 +97,18 @@ Any new realtime component must document:
 
 See `docs/REALTIME_RULES.md`.
 
+## 4a. Portable core (owner decisions 17 Oct and 11 Nov 2026)
+
+The engine core is `libn60core`, in `core/`. New engine code (realtime and design maths) is C++ and goes in `core/`, never in `NotchSixty/Audio/Realtime`. Existing C migrates file by file as E6 rewrites each stage.
+
+- **Layout.** Portable sources live in `core/src`; public headers in `core/include/n60`. Platform backends of core interfaces live in `core/platform/<os>/` and compile only on that OS. The macOS audio backend (Core Audio bridges, tap, aggregate, `AudioBufferList`) stays in `NotchSixty/Audio/` and may be C. The macOS shell (app, Core Audio control, UI) is Swift. A future shell links `libn60core` and writes its own backend.
+- **No platform dependence.** The core must not depend on any Apple framework or platform audio API (no Accelerate, Core Audio, Foundation, Dispatch, `os_*`). Platform facilities come in through core-defined interfaces with a backend per OS.
+- **Language.** C++20 baseline. C++23 features only once every CI toolchain accepts them. C stays legal for tests and the macOS backend.
+- **C++ realtime subset.** On any path reachable from `process`: no allocation, locks, exceptions, RTTI, `dynamic_cast`, `std::function` or other allocating type-erased wrappers, iostreams, `thread_local` with dynamic initialisation, or function-local statics with non-trivial constructors. Off-thread design maths may allocate but never throws across the C boundary and is deterministic (fixed summation order, no threads, seeded noise). Enforcement: compile flags, `test_alloc`, realtime-reviewer, and RealtimeSanitizer when available.
+- **FFT and linear algebra.** One FFT contract (`core/src/fft.hpp`); vDSP is a backend on Apple, the in-house radix-2 elsewhere. Engine code never picks an implementation by flag. Dense linear algebra is in-house (`core/src/linalg/`) unless the owner approves a library after licence review.
+- **One versioned C interface.** `n60/n60.h` includes every domain header and `n60_core_abi` reports each domain version and struct size. Domains keep their own versions; changing one domain does not bump another.
+- **Licences.** No GPL or AGPL code in the core (no FFTW); BSD, MIT or similar only, recorded per section 7.
+
 ## 5. Lifecycle and recovery
 
 Use an explicit control-plane state machine. Production states should distinguish normal reconfiguration from hardware failure recovery.

@@ -9,8 +9,7 @@ all rates from 44.1 to 384 kHz.
 
 ## Decisions taken
 
-Owner decisions from 17 Oct 2026 (and later, where dated) fix the plan's shape. Where `AGENTS.md` conflicts
-with them, these decisions win until E1/E21 update `AGENTS.md`.
+Owner decisions from 17 Oct 2026 (and later, where dated) fix the plan's shape. `AGENTS.md` records them (E1 S6, E21 S2).
 
 | Decision | Choice |
 | --- | --- |
@@ -285,7 +284,7 @@ Audio types in four bridges. The bigger gap is the DSP maths inside the Swift de
 (room-correction FIR and targets, measurement analysis, optimisers), six of which use Accelerate.
 
 - [ ] Adopt C++20/23 for the whole core, behind one versioned C interface; migrate existing C file by file as E6 rewrites each stage
-- [ ] Write the realtime subset rules: no allocation, locks, exceptions or RTTI on the audio path, enforced by RealtimeSanitizer and review
+- [x] Write the realtime subset rules: no allocation, locks, exceptions or RTTI on the audio path, enforced by RealtimeSanitizer and review
 - [ ] Split into `libn60core` (realtime graph plus design maths), per-platform audio backends, and per-platform app shells
 - [ ] FFT abstraction: vDSP on Apple, PFFFT or KissFFT (BSD) elsewhere; no FFTW, which is GPL
 - [ ] Choose a linear-algebra library after licence review (Eigen is MPL-2.0)
@@ -294,7 +293,7 @@ Audio types in four bridges. The bigger gap is the DSP maths inside the Swift de
 - [ ] S14 graduates `e21.core-designers` (default on); deletion of the Swift implementations and the flag is the FC phase
 - [ ] Shared JSON schemas for profiles and projects
 - [ ] CMake build, with Linux and Windows CI running the core tests and the acoustic reference lab
-- [ ] Update `AGENTS.md`: the core may not depend on Apple frameworks, plus the C++ realtime rules
+- [x] Update `AGENTS.md`: the core may not depend on Apple frameworks, plus the C++ realtime rules
 - [ ] Keep Swift for the macOS shell, Core Audio control and UI
 - [x] S0 `e21/engine-code-home` (owner, 11 Nov 2026; needs-owner: realtime engine; first E21 slice): move `n60_fxlms.cpp` and `n60_remote_tonal.cpp` from the app into `core/`. The rule itself (new engine C or C++ goes in `core/`) is in `CLAUDE.md` and the realtime-reviewer agent from this PR
 - [~] Re-estimate the remaining E21 slices from measured line counts of the C and Swift maths still to move, and record the figures in `docs/epics/E21.md` (owner, 11 Nov 2026; rides in S0)
