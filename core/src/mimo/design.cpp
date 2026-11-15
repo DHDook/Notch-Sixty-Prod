@@ -76,7 +76,7 @@ double rowTaper(double f, double lo, double hi) {
     return std::pow(10.0, db / 20.0);
 }
 
-bool finite(const float *x, uint64_t n) {
+bool allFinite(const float *x, uint64_t n) {
     for (uint64_t i = 0; i < n; ++i) if (!std::isfinite(x[i])) return false;
     return true;
 }
@@ -290,8 +290,8 @@ int32_t designImpl(const n60_mimo_problem *p, float *delta_out, uint64_t capacit
                 info.bad_seat = static_cast<int32_t>(m);
                 return N60_MIMO_ERR_MISSING_PLANT;
             }
-            if (!finite(p->program_plant[s][m], p->program_count[s][m]) ||
-                (p->injection_plant[s][m] != nullptr && !finite(p->injection_plant[s][m], p->injection_count[s][m])))
+            if (!allFinite(p->program_plant[s][m], p->program_count[s][m]) ||
+                (p->injection_plant[s][m] != nullptr && !allFinite(p->injection_plant[s][m], p->injection_count[s][m])))
                 return N60_MIMO_ERR_ARGUMENT;
         }
     }
