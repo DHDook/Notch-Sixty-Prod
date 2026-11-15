@@ -88,6 +88,19 @@ final class LoudnessMeterTests: XCTestCase {
 
     // MARK: Tone levels at every rate
 
+    /// E32 S1: integrated loudness kept refreshing only until the first history trim, then froze
+    /// for about 100 s after each trim.
+    func testIntegratedLoudnessKeepsUpdatingAfterTheHistoryIsTrimmed() {
+        var meter = Self.stereoMeter(48_000)
+        meter.historyLimit = 100
+        var tone = ToneFeeder()
+        tone.feed(&meter, levels: [-23, -23], seconds: 140)  // past the trim (1,100 blocks = 110 s)
+        let before = meter.readout().integrated ?? .nan
+        tone.feed(&meter, levels: [-13, -13], seconds: 30)
+        let after = meter.readout().integrated ?? .nan
+        XCTAssertGreaterThan(after, before + 0.5, "a louder passage after a trim must move the readout")
+    }
+
     func testStereoSineAtMinusTwentyThreeDBFSReadsMinusTwentyThreeLUFSAtEveryRate() {
         for rate in Self.rates {
             var meter = Self.stereoMeter(rate)

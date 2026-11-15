@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import Foundation
 import SwiftUI
 
@@ -11,7 +12,8 @@ struct ProductionEqualizerView: View {
     var audition: EQAuditionController? = nil
     /// E27 S2b: program spectrum overlay; nil or unavailable hides the switch.
     var programAnalyser: EQProgramAnalyserController? = nil
-    @State private var programSpectrum = EQProgramSpectrum.none
+    /// E32 S1: one compiled response per (bands, rate), shared by the graph and its band curves.
+    @State private var responseCache = EQResponseCache()
     @ObservedObject private var liveOverlay = MeasurementLiveOverlayStore.shared
     @State private var selectedBandID: UUID?
     @State private var dragPreview: EQBand?
@@ -47,12 +49,32 @@ struct ProductionEqualizerView: View {
         history.record(before: before, after: engine.stereoEQConfiguration, coalesceKey: coalesceKey)
     }
 
+    /// `recorded` for an edit that finishes off the main actor (E6 G55: the Linear phase FIR design
+    /// runs off main, so the Phase picker returns at once). One undo step when the edit lands.
+    private func recordedOffMain(_ action: @escaping () async throws -> Void) {
+        let before = engine.stereoEQConfiguration
+        Task { @MainActor in
+            do {
+                try await action()
+                actionError = nil
+            } catch {
+                actionError = error.localizedDescription
+            }
+            history.record(before: before, after: engine.stereoEQConfiguration, coalesceKey: nil)
+        }
+    }
+
     private func configureHistory() {
         history.configure(
             undoManager: undoManager,
             live: { engine.stereoEQConfiguration },
             apply: { try engine.replaceStereoEQConfiguration($0) }
         )
+    }
+
+    /// A/B loudness-match failures, as a stream the banner follows (empty without A/B).
+    private var comparisonErrors: AnyPublisher<String, Never> {
+        comparison?.$lastError.compactMap { $0 }.eraseToAnyPublisher() ?? Empty().eraseToAnyPublisher()
     }
 
     private var configuration: StereoEQConfiguration { engine.stereoEQConfiguration }
@@ -64,7 +86,7 @@ struct ProductionEqualizerView: View {
             .map(\.element)
     }
     private var sampleRate: Double { engine.selectedOutputDevice?.nominalSampleRate ?? 48_000 }
-    private var maximumFrequency: Double { max(20, sampleRate * 0.49) }
+    private var maximumFrequency: Double { EQBandRules.maximumFrequency(sampleRate: sampleRate) }
     private var yRange: EQGraphYRange { EQGraphYRange(rawValue: yRangeRaw) ?? .plusMinus24 }
     private var xZoom: EQGraphXZoom { EQGraphXZoom(rawValue: xZoomRaw) ?? .full }
     private var bandCurvesMode: EQBandCurvesMode { EQBandCurvesMode(rawValue: bandCurvesRaw) ?? .selected }
@@ -120,6 +142,8 @@ struct ProductionEqualizerView: View {
         }
         .onChange(of: undoManager.map(ObjectIdentifier.init)) { _, _ in configureHistory() }
         .onChange(of: engine.stereoEQConfiguration) { _, _ in history.observeLiveChange() }
+        .onReceive(autoPreamp.$lastError.compactMap { $0 }) { actionError = $0 }
+        .onReceive(comparisonErrors) { actionError = $0 }
         .onChange(of: configuration.channelMode) { _, _ in resetSelectionForBank() }
         .onChange(of: configuration.editChannel) { _, _ in resetSelectionForBank() }
         .onChange(of: bands.map(\.id)) { _, _ in ensureSelection() }
@@ -137,6 +161,15 @@ struct ProductionEqualizerView: View {
         VStack(alignment: .leading, spacing: 8) {
             header
             ProductionActionErrorBanner(message: $actionError)
+            if inactiveBandCount > 0 {
+                Label(
+                    "\(inactiveBandCount) band\(inactiveBandCount == 1 ? "" : "s") sit above Nyquist (\(sampleRate / 2_000, specifier: "%.1f") kHz) at this device rate and are skipped. They are kept and play again at a higher rate.",
+                    systemImage: "exclamationmark.triangle"
+                )
+                .font(.caption)
+                .foregroundStyle(.orange)
+                .accessibilityIdentifier("eq.nyquist.note")
+            }
             modeBar
 
             if showCompare, let comparison, let audition {
@@ -168,12 +201,15 @@ struct ProductionEqualizerView: View {
                 .font(.callout)
                 .foregroundStyle(.secondary)
             Spacer()
-            Text("\(configuration.enabledBandCount) ACTIVE")
+            Text("\(activeBandCount) ACTIVE")
                 .font(.caption.bold())
                 .tracking(1.1)
                 .foregroundStyle(.secondary)
         }
     }
+
+    private var activeBandCount: Int { configuration.activeBandCount(sampleRate: sampleRate) }
+    private var inactiveBandCount: Int { configuration.aboveNyquistBandCount(sampleRate: sampleRate) }
 
     private var modeBar: some View {
         GlassEffectContainer(spacing: 10) {
@@ -224,7 +260,7 @@ struct ProductionEqualizerView: View {
 
                     Picker("Phase", selection: Binding(
                         get: { configuration.phaseMode },
-                        set: { mode in recorded { try engine.setEQPhaseMode(mode) } }
+                        set: { mode in recordedOffMain { try await engine.setEQPhaseModeOffMain(mode) } }
                     )) {
                         ForEach(EQPhaseMode.allCases) { mode in Text(mode.displayName).tag(mode) }
                     }
@@ -268,7 +304,7 @@ struct ProductionEqualizerView: View {
             graphControls
 
             let shown = shownBands
-            let program = ProductionEQResponseMath.compile(bands: shown, sampleRate: sampleRate)
+            let program = responseCache.program(bands: shown, sampleRate: sampleRate)
             let geometry = graphGeometry(program: program)
             ProductionEQResponseGraph(
                 geometry: geometry,
@@ -309,7 +345,9 @@ struct ProductionEqualizerView: View {
                 onAddBand: { frequency, gain in addBand(atFrequency: frequency, gain: gain) },
                 onResetBand: { id in resetBand(id) },
                 rtaOverlay: liveOverlay.showsRTA ? liveOverlay.rtaCurve : nil,
-                programSpectrum: programSpectrum
+                programAnalyser: programAnalyser,
+                program: program,
+                programFor: { [responseCache, sampleRate] bands in responseCache.program(bands: bands, sampleRate: sampleRate) }
             )
             .frame(minHeight: 200, idealHeight: 280, maxHeight: 340)
 
@@ -350,7 +388,7 @@ struct ProductionEqualizerView: View {
             Spacer(minLength: 8)
 
             if let programAnalyser {
-                EQProgramAnalyserSwitch(analyser: programAnalyser, spectrum: $programSpectrum)
+                EQProgramAnalyserSwitch(analyser: programAnalyser)
             }
 
             Picker("Band curves", selection: $bandCurvesRaw) {
@@ -483,6 +521,7 @@ struct ProductionEqualizerView: View {
     private func bandRow(index: Int, band storedBand: EQBand) -> some View {
         let isSelected = selectedBandID == storedBand.id
         let band = (dragPreview?.id == storedBand.id ? dragPreview : nil) ?? storedBand
+        let nyquistLimit = nyquistLimit(of: band)
         VStack(alignment: .leading, spacing: 0) {
             Button {
                 selectedBandID = band.id
@@ -513,7 +552,7 @@ struct ProductionEqualizerView: View {
                         .foregroundStyle(.secondary)
                         .frame(minWidth: 52, alignment: .trailing)
                     Circle()
-                        .fill(band.enabled ? Color.green : Color.secondary.opacity(0.35))
+                        .fill(!band.enabled ? Color.secondary.opacity(0.35) : (nyquistLimit == nil ? Color.green : Color.orange))
                         .frame(width: 7, height: 7)
                 }
                 .frame(minHeight: 34)
@@ -525,11 +564,25 @@ struct ProductionEqualizerView: View {
             .accessibilityLabel(EQBandPanelModel.accessibilityLabel(number: index + 1, band: band))
             .accessibilityAddTraits(isSelected ? .isSelected : [])
             .accessibilityIdentifier("eq.bands.row.\(index + 1)")
+            if let nyquistLimit {
+                Text(EQBandRules.nyquistText(limitHz: nyquistLimit))
+                    .font(.caption2)
+                    .foregroundStyle(.orange)
+                    .padding(.horizontal, 38)
+                    .padding(.bottom, 4)
+                    .accessibilityIdentifier("eq.bands.row.\(index + 1).nyquist")
+            }
         }
         .background(
             isSelected ? Color.accentColor.opacity(0.14) : Color.clear,
             in: .rect(cornerRadius: 12)
         )
+    }
+
+    /// The Nyquist limit when `band` is enabled but skipped above it; nil otherwise.
+    private func nyquistLimit(of band: EQBand) -> Double? {
+        guard band.enabled, case .aboveNyquist(let limit) = EQBandRules.renderState(band, sampleRate: sampleRate) else { return nil }
+        return limit
     }
 
     private var bandEditorPane: some View {
@@ -836,7 +889,9 @@ struct ProductionEqualizerView: View {
             try engine.addEQBand(band)
             selectedBandID = band.id
             history.record(before: before, after: engine.stereoEQConfiguration)
-        } catch { }
+        } catch {
+            actionError = "Could not add the band: \(error.localizedDescription)"
+        }
     }
 
     private func removeBand(_ id: UUID) {
@@ -850,7 +905,9 @@ struct ProductionEqualizerView: View {
                 bandsBefore: previousBands
             )
             history.record(before: before, after: engine.stereoEQConfiguration)
-        } catch { }
+        } catch {
+            actionError = "Could not remove the band: \(error.localizedDescription)"
+        }
     }
 
     // MARK: Graph gestures (E27 S1)
@@ -957,39 +1014,7 @@ struct ProductionEqualizerView: View {
     }
 
     private func sanitize(_ input: EQBand) -> EQBand {
-        var band = input
-        if !band.frequencyHz.isFinite { band.frequencyHz = 1_000 }
-        band.frequencyHz = min(max(band.frequencyHz, 1.0), maximumFrequency)
-
-        if !band.gainDB.isFinite { band.gainDB = 0 }
-        band.gainDB = min(max(band.gainDB, StereoEQConfiguration.bandGainRange.lowerBound), StereoEQConfiguration.bandGainRange.upperBound)
-
-        if !band.q.isFinite || band.q <= 0 { band.q = 0.707 }
-        band.q = min(max(band.q, 0.1), 20.0)
-
-        if !band.linkwitzTargetHz.isFinite || band.linkwitzTargetHz <= 0 { band.linkwitzTargetHz = 40 }
-        band.linkwitzTargetHz = min(max(band.linkwitzTargetHz, 1), maximumFrequency)
-        if !band.linkwitzTargetQ.isFinite || band.linkwitzTargetQ <= 0 { band.linkwitzTargetQ = 0.707 }
-        band.linkwitzTargetQ = min(max(band.linkwitzTargetQ, 0.1), 20)
-
-        if band.type != .peaking { band.constantQ = false }
-        if !band.type.supportsDynamicEQ { band.dynamic.enabled = false }
-        if band.type == .notch { band.dynamic.direction = .cutOnly }
-
-        if band.dynamic.enabled {
-            band.frequencyHz = min(max(band.frequencyHz, DynamicEQBandConfiguration.frequencyRange.lowerBound), DynamicEQBandConfiguration.frequencyRange.upperBound)
-            band.q = min(max(band.q, DynamicEQBandConfiguration.qRange.lowerBound), DynamicEQBandConfiguration.qRange.upperBound)
-            band.dynamic.thresholdDB = band.dynamic.thresholdDB.clamped(to: EQBandDynamicConfiguration.thresholdRange)
-            band.dynamic.ratio = band.dynamic.ratio.clamped(to: EQBandDynamicConfiguration.ratioRange)
-            band.dynamic.rangeDB = band.dynamic.rangeDB.clamped(to: EQBandDynamicConfiguration.rangeRange)
-            band.dynamic.attackMs = band.dynamic.attackMs.clamped(to: EQBandDynamicConfiguration.attackRange)
-            band.dynamic.releaseMs = band.dynamic.releaseMs.clamped(to: EQBandDynamicConfiguration.releaseRange)
-            band.dynamic.boostThresholdDB = band.dynamic.boostThresholdDB.clamped(to: EQBandDynamicConfiguration.boostThresholdRange)
-            band.dynamic.boostRatio = band.dynamic.boostRatio.clamped(to: EQBandDynamicConfiguration.boostRatioRange)
-            band.dynamic.maxBoostDB = band.dynamic.maxBoostDB.clamped(to: EQBandDynamicConfiguration.maxBoostRange)
-            band.dynamic.rmsWindowMs = band.dynamic.rmsWindowMs.clamped(to: EQBandDynamicConfiguration.rmsWindowRange)
-        }
-        return band
+        EQBandRules.sanitized(input, sampleRate: sampleRate)
     }
 }
 
@@ -1032,7 +1057,13 @@ private struct ProductionEQResponseGraph: View {
     /// E11 S10: live RTA of the measurement microphone, drawn behind the EQ curve.
     var rtaOverlay: RoomCorrectionFrequencyResponse?
     /// E27 S2b: program input and output spectrum, drawn first (behind everything).
-    var programSpectrum: EQProgramSpectrum = .none
+    /// E32 S1: the analyser model is read only by `EQProgramSpectrumLayer`, so its 20 Hz ticks redraw
+    /// that layer and not this graph or the page.
+    var programAnalyser: EQProgramAnalyserController?
+    /// The compiled response of `displayBands`, from the page's cache.
+    let program: [N60BiquadCoefficients]
+    /// Cached compile of any band set (band curves, dynamic envelopes, ghost lane).
+    let programFor: ([EQBand]) -> [N60BiquadCoefficients]
 
     @State private var hover = EQGraphHoverModel()
     @State private var dragSession: EQGraphGeometry.DragSession?
@@ -1055,7 +1086,6 @@ private struct ProductionEQResponseGraph: View {
     var body: some View {
         GeometryReader { proxy in
             let size = proxy.size
-            let program = ProductionEQResponseMath.compile(bands: displayBands, sampleRate: sampleRate)
             // Handles sit on the magnitude axes, so the other views are read-only.
             let handleBands = graphView == .magnitude
                 ? Array(displayBands.enumerated()).filter { $0.element.type != .fir }
@@ -1065,13 +1095,23 @@ private struct ProductionEQResponseGraph: View {
                     .fill(.black.opacity(0.17))
 
                 Canvas { context, _ in
+                    if graphView == .magnitude { drawGrid(context: &context, size: size) }
+                }
+                .opacity(bypassed ? 0.35 : 1)
+                .allowsHitTesting(false)
+
+                if graphView == .magnitude, let programAnalyser {
+                    EQProgramSpectrumLayer(
+                        analyser: programAnalyser, size: size,
+                        xPosition: { xPosition($0, width: size.width) },
+                        minimumFrequency: minimumFrequency, maximumFrequency: graphMaximumFrequency
+                    )
+                    .opacity(bypassed ? 0.35 : 1)
+                    .allowsHitTesting(false)
+                }
+
+                Canvas { context, _ in
                     if graphView == .magnitude {
-                        drawGrid(context: &context, size: size)
-                        EQProgramSpectrumDrawing.draw(
-                            context: &context, size: size, spectrum: programSpectrum,
-                            xPosition: { xPosition($0, width: size.width) },
-                            minimumFrequency: minimumFrequency, maximumFrequency: graphMaximumFrequency
-                        )
                         drawRTAOverlay(context: &context, size: size)
                         drawGhostLane(context: &context, size: size)
                         drawBandCurves(context: &context, size: size)
@@ -1333,8 +1373,8 @@ private struct ProductionEQResponseGraph: View {
         let zeroY = yPosition(0, height: size.height)
         for band in displayBands where band.enabled && band.dynamic.enabled {
             guard let envelope = EQBandCurves.dynamicEnvelope(of: band) else { continue }
-            let lowerProgram = ProductionEQResponseMath.compile(bands: [envelope.lower], sampleRate: sampleRate)
-            let upperProgram = ProductionEQResponseMath.compile(bands: [envelope.upper], sampleRate: sampleRate)
+            let lowerProgram = programFor([envelope.lower])
+            let upperProgram = programFor([envelope.upper])
             let lower = curvePath(size: size) { ProductionEQResponseMath.responseDB(program: lowerProgram, sampleRate: sampleRate, frequencyHz: $0) }
             let upper = curvePath(size: size) { ProductionEQResponseMath.responseDB(program: upperProgram, sampleRate: sampleRate, frequencyHz: $0) }
             var shade = Path()
@@ -1346,7 +1386,7 @@ private struct ProductionEQResponseGraph: View {
         }
 
         for band in EQBandCurves.drawn(mode: curvesMode, bands: displayBands, selectedID: selectedBandID) {
-            let bandProgram = ProductionEQResponseMath.compile(bands: [band], sampleRate: sampleRate)
+            let bandProgram = programFor([band])
             let curve = curvePath(size: size) { ProductionEQResponseMath.responseDB(program: bandProgram, sampleRate: sampleRate, frequencyHz: $0) }
             let isSelected = band.id == selectedBandID
             if isSelected, let first = curve.points.first, let last = curve.points.last {
@@ -1368,7 +1408,7 @@ private struct ProductionEQResponseGraph: View {
     /// The lane that is not being edited (Left/Right or Mid/Side), dashed and faint.
     private func drawGhostLane(context: inout GraphicsContext, size: CGSize) {
         guard let otherLane, !otherLane.bands.isEmpty else { return }
-        let program = ProductionEQResponseMath.compile(bands: otherLane.bands, sampleRate: sampleRate)
+        let program = programFor(otherLane.bands)
         guard !program.isEmpty else { return }
         let curve = curvePath(size: size) {
             ProductionEQResponseMath.responseDB(program: program, sampleRate: sampleRate, frequencyHz: $0)
@@ -1465,11 +1505,5 @@ private extension EQFilterType {
         case .tilt, .fir: return false
         default: return true
         }
-    }
-}
-
-private extension Comparable {
-    func clamped(to range: ClosedRange<Self>) -> Self {
-        min(max(self, range.lowerBound), range.upperBound)
     }
 }

@@ -195,6 +195,11 @@ struct LoudnessMeter {
     private var cachedIntegrated: Double?
     private var cachedRange: Double?
     private var cachedAtCount = -1
+    /// E32 S1: blocks ever appended since the last reset. Unlike `blockPowers.count` it never drops when
+    /// the history is trimmed, so I and LRA keep refreshing after the 24 h trim.
+    private var blocksAppended = 0
+    /// Entries kept per history; tests lower it to reach a trim quickly.
+    var historyLimit = LoudnessMeter.maxHistory
 
     init(sampleRate: Double, channels: [LoudnessChannelPosition] = LoudnessChannelPosition.stereo) {
         self.sampleRate = sampleRate
@@ -266,6 +271,7 @@ struct LoudnessMeter {
             currentMomentaryPower = power
             momentaryMaxPower = max(momentaryMaxPower, power)
             append(&blockPowers, power)
+            blocksAppended += 1
         }
         if ringCount >= Self.shortTermSubBlocks {
             let power = meanOfLatest(Self.shortTermSubBlocks)
@@ -285,7 +291,7 @@ struct LoudnessMeter {
 
     private func append(_ array: inout [Double], _ value: Double) {
         array.append(value)
-        if array.count > Self.maxHistory + 1_000 {
+        if array.count > historyLimit + 1_000 {
             array.removeFirst(1_000)
         }
     }
@@ -316,12 +322,13 @@ struct LoudnessMeter {
         cachedIntegrated = nil
         cachedRange = nil
         cachedAtCount = -1
+        blocksAppended = 0
     }
 
     /// Readout for the display. The integrated and range values are recomputed
     /// at most once per second of new blocks; use `exactReadout()` in tests.
     mutating func readout() -> LoudnessReadout {
-        if cachedAtCount < 0 || blockPowers.count - cachedAtCount >= 10 {
+        if cachedAtCount < 0 || blocksAppended - cachedAtCount >= 10 {
             refreshGatedValues()
         }
         return makeReadout()
@@ -335,7 +342,7 @@ struct LoudnessMeter {
     private mutating func refreshGatedValues() {
         cachedIntegrated = Self.integratedLoudness(blockPowers: blockPowers)
         cachedRange = Self.loudnessRange(shortTermPowers: shortTermPowers)
-        cachedAtCount = blockPowers.count
+        cachedAtCount = blocksAppended
     }
 
     private func makeReadout() -> LoudnessReadout {

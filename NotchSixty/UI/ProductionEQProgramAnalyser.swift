@@ -1,10 +1,10 @@
 import SwiftUI
 
 /// E27 S2b: the "Analyser" switch above the response graph. It drives the polling loop while the
-/// page is on screen and hands the latest spectrum to the page through `spectrum`.
+/// page is on screen. E32 S1: the spectrum is read only by `EQProgramSpectrumLayer`, so the
+/// analyser's ticks no longer re-run the page.
 struct EQProgramAnalyserSwitch: View {
     @ObservedObject var analyser: EQProgramAnalyserController
-    @Binding var spectrum: EQProgramSpectrum
 
     var body: some View {
         Group {
@@ -14,7 +14,6 @@ struct EQProgramAnalyserSwitch: View {
                 .fixedSize()
                 .help("Live program spectrum: grey is the input, blue the second curve chosen here")
                 .task(id: analyser.isOn) { await analyser.run() }
-                .onReceive(analyser.$spectrum) { spectrum = $0 }
             if analyser.isOn {
                 Picker("Analyser source", selection: Binding(get: { analyser.mode }, set: { analyser.setMode($0) })) {
                     ForEach(EQAnalyserMode.allCases) { mode in Text(mode.displayName).tag(mode) }
@@ -26,6 +25,26 @@ struct EQProgramAnalyserSwitch: View {
                 .help("EQ only: after the EQ. EQ + Dynamics: after the compressor and expander. Output: the whole chain")
             }
         }
+    }
+}
+
+/// E32 S1: the spectrum layer behind the EQ curve. It owns the subscription to the analyser, so each
+/// tick redraws this layer alone.
+struct EQProgramSpectrumLayer: View {
+    @ObservedObject var analyser: EQProgramAnalyserController
+    let size: CGSize
+    let xPosition: (Double) -> CGFloat
+    let minimumFrequency: Double
+    let maximumFrequency: Double
+
+    var body: some View {
+        Canvas { context, canvasSize in
+            EQProgramSpectrumDrawing.draw(
+                context: &context, size: canvasSize, spectrum: analyser.spectrum,
+                xPosition: xPosition, minimumFrequency: minimumFrequency, maximumFrequency: maximumFrequency
+            )
+        }
+        .frame(width: size.width, height: size.height)
     }
 }
 

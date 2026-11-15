@@ -58,7 +58,7 @@ enum EQValueParser {
     // MARK: Ranges
 
     /// The range a typed or stepped value clamps to for `band`. `maximumFrequency` is the
-    /// engine's 0.49 * sample rate ceiling.
+    /// engine's 0.49 * sample rate ceiling (`EQBandRules.maximumFrequency`).
     static func range(for field: Field, band: EQBand, maximumFrequency: Double) -> ClosedRange<Double> {
         let ceiling = max(maximumFrequency, EQNudge.minimumFrequency)
         switch field {
@@ -69,11 +69,11 @@ enum EQValueParser {
             }
             return EQNudge.minimumFrequency...ceiling
         case .gain:
-            return StereoEQConfiguration.bandGainRange
+            return EQBandRules.gainRange
         case .q:
             return band.dynamic.enabled ? DynamicEQBandConfiguration.qRange : EQNudge.qRange
         case .linkwitzTargetFrequency:
-            return 1...ceiling
+            return EQBandRules.linkwitzTargetMinimum...ceiling
         case .linkwitzTargetQ:
             return EQNudge.qRange
         }
