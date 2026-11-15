@@ -372,6 +372,7 @@ private struct PluginRackSlotRow: View {
     let sampleRate: Double
     let report: AudioUnitOfflinePreparationReport?
     let quarantineEntry: AudioUnitQuarantineEntry?
+    let rateNote: String?
     let isBusy: Bool
     let canMoveUp: Bool
     let canMoveDown: Bool
@@ -392,6 +393,7 @@ private struct PluginRackSlotRow: View {
         sampleRate: Double,
         report: AudioUnitOfflinePreparationReport?,
         quarantineEntry: AudioUnitQuarantineEntry?,
+        rateNote: String? = nil,
         isBusy: Bool,
         canMoveUp: Bool,
         canMoveDown: Bool,
@@ -409,6 +411,7 @@ private struct PluginRackSlotRow: View {
         self.sampleRate = sampleRate
         self.report = report
         self.quarantineEntry = quarantineEntry
+        self.rateNote = rateNote
         self.isBusy = isBusy
         self.canMoveUp = canMoveUp
         self.canMoveDown = canMoveDown
@@ -480,6 +483,11 @@ private struct PluginRackSlotRow: View {
 
                     if let quarantineEntry {
                         Text(quarantineEntry.lastFailureDescription)
+                            .font(.caption2)
+                            .foregroundStyle(.orange)
+                            .lineLimit(2)
+                    } else if let rateNote {
+                        Text(rateNote)
                             .font(.caption2)
                             .foregroundStyle(.orange)
                             .lineLimit(2)
@@ -1065,6 +1073,10 @@ struct ProductionPluginWorkspace: View {
                     sampleRate: processingFormat.sampleRate,
                     report: report,
                     quarantineEntry: quarantineEntry,
+                    rateNote: host.rateRefusalNote(
+                        forSlot: index,
+                        sampleRate: processingFormat.sampleRate
+                    ),
                     isBusy: mutationInFlight,
                     canMoveUp: index > 0,
                     canMoveDown:

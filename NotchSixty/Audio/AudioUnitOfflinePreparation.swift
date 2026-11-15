@@ -155,6 +155,9 @@ enum AudioUnitOfflinePreparationError: Error, Equatable, LocalizedError {
     case latencyChangedAcrossReset
     case tailChangedAcrossReset
     case renderResourcesNotReleased
+    /// E7 S3: the unit refused this sample rate (`setFormat` or `allocateRenderResources`). A per-rate
+    /// condition, never a quarantine entry when `e7.rate-adapt` is on.
+    case unsupportedSampleRate(component: AudioUnitComponentIdentity, rate: Double)
 
     var errorDescription: String? {
         switch self {
@@ -168,6 +171,8 @@ enum AudioUnitOfflinePreparationError: Error, Equatable, LocalizedError {
             return "Audio Unit has no input bus for effect processing."
         case .missingOutputBus:
             return "Audio Unit has no output bus for effect processing."
+        case .unsupportedSampleRate(_, let rate):
+            return AudioUnitRateRefusal.message(rate: rate)
         case .formatConfigurationFailed(let reason):
             return "Audio Unit format configuration failed. \(reason)"
         case .stateDecodeFailed:
@@ -255,8 +260,10 @@ struct SystemAudioUnitOfflinePreparationBackend: AudioUnitOfflinePreparing {
                 format.maximumFramesPerSlice
             )
         } catch {
-            throw AudioUnitOfflinePreparationError.formatConfigurationFailed(
-                error.localizedDescription
+            // Channel compatibility was checked above, so a bus format refusal is the sample rate.
+            throw AudioUnitOfflinePreparationError.unsupportedSampleRate(
+                component: component.identity,
+                rate: format.sampleRate
             )
         }
 
@@ -269,6 +276,12 @@ struct SystemAudioUnitOfflinePreparationBackend: AudioUnitOfflinePreparing {
         do {
             try au.allocateRenderResources()
         } catch {
+            if (error as NSError).code == Int(kAudioUnitErr_FormatNotSupported) {
+                throw AudioUnitOfflinePreparationError.unsupportedSampleRate(
+                    component: component.identity,
+                    rate: format.sampleRate
+                )
+            }
             throw AudioUnitOfflinePreparationError.renderResourceAllocationFailed(
                 error.localizedDescription
             )

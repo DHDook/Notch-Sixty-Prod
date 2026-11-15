@@ -119,6 +119,12 @@ final class AudioUnitHostController: ObservableObject {
         AudioUnitComponentIdentity: AudioUnitComponentLifecycleState
     ] = [:]
     @Published private(set) var quarantine = AudioUnitQuarantineRegistry()
+    /// E7 S3: per-rate refusals (never persisted, never quarantine). Written only when `rateAdaptEnabled`.
+    @Published private(set) var rateRefusals: [
+        AudioUnitComponentIdentity: Set<Double>
+    ] = [:]
+    /// `e7.rate-adapt`, set by Swift wiring. Off: a rate refusal quarantines as before.
+    var rateAdaptEnabled = false
     @Published private(set) var lastScanDate: Date?
     @Published private(set) var scanInFlight = false
     @Published private(set) var lastErrorDescription: String?
@@ -395,6 +401,7 @@ final class AudioUnitHostController: ObservableObject {
             lifecycleByComponent[identity] = .prepared
             lastErrorDescription = nil
         } catch {
+            if recordRateRefusal(error, component: identity) { return }
             let reason = Self.quarantineReason(for: error)
             quarantineComponent(
                 identity,
@@ -402,6 +409,40 @@ final class AudioUnitHostController: ObservableObject {
                 description: error.localizedDescription
             )
         }
+    }
+
+    /// True when `error` is a rate refusal that was recorded as a per-rate bypass (flag on).
+    private func recordRateRefusal(
+        _ error: Error,
+        component identity: AudioUnitComponentIdentity
+    ) -> Bool {
+        guard rateAdaptEnabled,
+              case AudioUnitOfflinePreparationError
+                .unsupportedSampleRate(_, let rate) = error else {
+            return false
+        }
+        rateRefusals[identity, default: []].insert(rate)
+        offlineReportsBySlotID = offlineReportsBySlotID.filter {
+            $0.value.component != identity
+                || abs($0.value.format.sampleRate - rate) >= 0.5
+        }
+        refreshLifecycle(for: identity)
+        lastErrorDescription = nil
+        return true
+    }
+
+    /// Note for a slot whose plug-in refuses `sampleRate`, for the rack row and diagnostics.
+    func rateRefusalNote(
+        forSlot index: Int,
+        sampleRate: Double
+    ) -> String? {
+        guard rackConfiguration.slots.indices.contains(index),
+              let component = rackConfiguration.slots[index].component,
+              AudioUnitRateRefusal.contains(
+                  rateRefusals[component],
+                  sampleRate
+              ) else { return nil }
+        return AudioUnitRateRefusal.message(rate: sampleRate)
     }
 
     func prepareSlotOffline(
@@ -490,6 +531,7 @@ final class AudioUnitHostController: ObservableObject {
             lifecycleByComponent[identity] = .prepared
             lastErrorDescription = nil
         } catch {
+            if recordRateRefusal(error, component: identity) { return }
             quarantineComponent(
                 identity,
                 reason: Self.quarantineReason(for: error),
@@ -647,7 +689,8 @@ final class AudioUnitHostController: ObservableObject {
             probes: [],
             slotProbes: slotProbes,
             quarantine: quarantine,
-            format: format
+            format: format,
+            rateRefusals: rateRefusals
         )
 
         var buildSlots: [AudioUnitLiveRackBuildSlot] = []
@@ -828,7 +871,11 @@ final class AudioUnitHostController: ObservableObject {
             let slot = rackConfiguration.slots[index]
             guard let component = slot.component,
                   !slot.bypassed,
-                  !quarantine.isQuarantined(component) else {
+                  !quarantine.isQuarantined(component),
+                  !AudioUnitRateRefusal.contains(
+                      rateRefusals[component],
+                      format.sampleRate
+                  ) else {
                 continue
             }
 
@@ -931,7 +978,8 @@ final class AudioUnitHostController: ObservableObject {
             probes: Array(probesByComponent.values),
             slotProbes: probesBySlotID,
             quarantine: quarantine,
-            format: format
+            format: format,
+            rateRefusals: rateRefusals
         )
     }
 
@@ -1036,7 +1084,8 @@ final class AudioUnitHostController: ObservableObject {
                 return .invalidLatency
             case .tailChangedAcrossReset:
                 return .invalidTail
-            case .renderResourceAllocationFailed,
+            case .unsupportedSampleRate,
+                 .renderResourceAllocationFailed,
                  .renderBlockUnavailable,
                  .renderResourcesNotReleased:
                 return .renderResourceFailure

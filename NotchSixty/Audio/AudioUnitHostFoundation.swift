@@ -410,6 +410,21 @@ struct AudioUnitProbeResult: Codable, Equatable, Sendable {
     }
 }
 
+/// E7 S3 (`e7.rate-adapt`): text for a plug-in that refuses the device rate.
+enum AudioUnitRateRefusal {
+    static func message(rate: Double) -> String {
+        let khz = rate / 1_000
+        let text = khz == khz.rounded()
+            ? String(Int(khz))
+            : String(format: "%.1f", khz)
+        return "Not available at \(text) kHz"
+    }
+
+    static func contains(_ rates: Set<Double>?, _ rate: Double) -> Bool {
+        rates?.contains { abs($0 - rate) < 0.5 } ?? false
+    }
+}
+
 enum AudioUnitSlotExecutionMode: String, Codable, Sendable {
     case empty
     case process
@@ -444,7 +459,8 @@ struct AudioUnitRackPreparationPlanner: Sendable {
         probes: [AudioUnitProbeResult],
         slotProbes: [UUID: AudioUnitProbeResult] = [:],
         quarantine: AudioUnitQuarantineRegistry,
-        format: AudioUnitRackProcessingFormat
+        format: AudioUnitRackProcessingFormat,
+        rateRefusals: [AudioUnitComponentIdentity: Set<Double>] = [:]
     ) throws -> AudioUnitRackExecutionPlan {
         try configuration.validate()
         try format.validate()
@@ -543,6 +559,36 @@ struct AudioUnitRackPreparationPlanner: Sendable {
                     component: component,
                     latency: latency,
                     reason: compatibility.reasons.joined(separator: " ")
+                ))
+                totalLatency = try addFrames(
+                    totalLatency,
+                    latency,
+                    limit: Int(format.sampleRate * AudioUnitProbeResult.maximumLatencySeconds)
+                )
+                requiresBypass = true
+                continue
+            }
+
+            if AudioUnitRateRefusal.contains(
+                rateRefusals[component],
+                format.sampleRate
+            ) {
+                // The unit never ran at this rate, so its latency is the
+                // last probe's seconds at this rate (0 if never probed).
+                let latency = probe.map {
+                    AudioUnitProbeResult.conservativeFrameCount(
+                        seconds: $0.latencySeconds,
+                        sampleRate: format.sampleRate
+                    )
+                } ?? 0
+                let reason = AudioUnitRateRefusal.message(
+                    rate: format.sampleRate
+                )
+                plans.append(bypassPlan(
+                    slot: slot,
+                    component: component,
+                    latency: latency,
+                    reason: reason
                 ))
                 totalLatency = try addFrames(
                     totalLatency,
