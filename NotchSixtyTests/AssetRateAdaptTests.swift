@@ -207,10 +207,11 @@ final class AssetRateAdaptTests: XCTestCase {
         XCTAssertNil(SpeakerIRRateAdapter.rowNote(for: nil, outputSampleRate: 96_000, enabled: true))
     }
 
-    func testTheFlagIsRegisteredDarkAndOnlySwiftReadsIt() {
+    func testTheFlagIsRegisteredGraduatedAndOnlySwiftReadsIt() {
         let flag = FeatureFlag.rateAdapt
         XCTAssertEqual(flag.id, "e7.rate-adapt")
         XCTAssertTrue(FeatureFlag.all.contains(flag))
-        XCTAssertFalse(flag.resolvedDefault)
+        XCTAssertTrue(flag.graduated)
+        XCTAssertTrue(flag.resolvedDefault)
     }
 }

@@ -113,6 +113,7 @@ struct BqState {
 };
 
 float smoothToward(float current, float target, float coef) { return target + coef * (current - target); }
+double smoothTowardD(double current, double target, double coef) { return target + coef * (current - target); }
 bool nearZero(float v) { return std::fabs(v) <= kParkEps; }
 Bq identityBq() { return Bq{1.0, 0.0, 0.0, 0.0, 0.0}; }
 
@@ -171,6 +172,12 @@ float poleForMs(double rate, float ms) {
     const float safe = std::min(std::max(ms, 0.05f), 5000.0f);
     return static_cast<float>(std::exp(-1.0 / (rate * (double(safe) / 1000.0))));
 }
+// E7 S4: the slow smoothers (match 0.3..5 s, detectors 50..500 ms, leveler release 3 s, modulation measure 1.5 s) keep a double
+// pole and double state; a float pole at 5 s and 384 kHz is 1 - 5e-8, below its own spacing.
+double poleForMsD(double rate, float ms) {
+    const float safe = std::min(std::max(ms, 0.05f), 5000.0f);
+    return std::exp(-1.0 / (rate * (double(safe) / 1000.0)));
+}
 
 float meanSquareLufs(double ms) {
     return static_cast<float>(-0.691 + 10.0 * std::log10(std::fmax(ms, static_cast<double>(kEpsilon))));
@@ -185,11 +192,11 @@ struct LdShared {
     // match
     Bq kHp, kShelf;
     double measCoef;
-    float attackPole, releasePole;
+    double attackPole, releasePole;
     BqState kHpL, kHpR, kShL, kShR;
     double meanSquare;
     uint32_t primed;
-    float matchGainDb;
+    double matchGainDb;
     uint32_t matchParked;
     // contour
     Bq lowShelf, highShelf, lowBand, highBand;
@@ -199,9 +206,11 @@ struct LdShared {
     uint32_t contourParked;
     // leveler
     Bq bandHp, bandLp;
-    float detectorPole, levAttackPole, levReleasePole, envPole, measPole, modHpPole, modLpPole;
+    double detectorPole, levAttackPole, levReleasePole, measPole;
+    float envPole, modHpPole, modLpPole;
     BqState hpL, hpR, lpL, lpR;
-    float progMs, bandMs, voiceEnv, modPrev, modHpOut, modLpOut, modMs, boostDb;
+    double progMs, bandMs, modMs, boostDb;
+    float voiceEnv, modPrev, modHpOut, modLpOut;
     float progDbfs, bandDbfs, gapDb, confidence;
     uint32_t levParked;
     // telemetry (control thread reads)
@@ -228,8 +237,8 @@ void clearLevelerFilters(LdShared &S) {
 
 void designMatch(LdShared &S, double rate, const float *p) {
     S.measCoef = std::exp(-1.0 / (rate * kMeasureSeconds));
-    S.attackPole = poleForMs(rate, p[kMatchAttack] * 1000.0f);
-    S.releasePole = poleForMs(rate, p[kMatchRelease] * 1000.0f);
+    S.attackPole = poleForMsD(rate, p[kMatchAttack] * 1000.0f);
+    S.releasePole = poleForMsD(rate, p[kMatchRelease] * 1000.0f);
     S.seen[kMatchAttack] = p[kMatchAttack];
     S.seen[kMatchRelease] = p[kMatchRelease];
 }
@@ -245,11 +254,11 @@ void designContour(LdShared &S, double rate, const float *p) {
 void designLeveler(LdShared &S, double rate, const float *p) {
     if (!designBq(Kind::HighPass, rate, double(p[kBandLow]), 0.0, kQ, S.bandHp)) S.bandHp = identityBq();
     if (!designBq(Kind::LowPass, rate, double(p[kBandHigh]), 0.0, kQ, S.bandLp)) S.bandLp = identityBq();
-    S.detectorPole = poleForMs(rate, p[kDetectorMs]);
-    S.levAttackPole = poleForMs(rate, p[kLevAttackMs]);
-    S.levReleasePole = poleForMs(rate, p[kLevReleaseMs]);
+    S.detectorPole = poleForMsD(rate, p[kDetectorMs]);
+    S.levAttackPole = poleForMsD(rate, p[kLevAttackMs]);
+    S.levReleasePole = poleForMsD(rate, p[kLevReleaseMs]);
     S.envPole = poleForMs(rate, p[kEnvelopeMs]);
-    S.measPole = poleForMs(rate, p[kMeasureMs]);
+    S.measPole = poleForMsD(rate, p[kMeasureMs]);
     S.modHpPole = static_cast<float>(std::exp(-2.0 * kPi * double(p[kModLowHz]) / rate));
     S.modLpPole = static_cast<float>(std::exp(-2.0 * kPi * double(p[kModHighHz]) / rate));
     for (uint32_t i = kBandLow; i <= kMeasureMs; ++i) S.seen[i] = p[i];
@@ -309,7 +318,8 @@ void unparkContour(LdShared &S) {
 }
 void unparkLeveler(LdShared &S) {
     clearLevelerFilters(S);
-    S.progMs = S.bandMs = S.voiceEnv = S.modPrev = S.modHpOut = S.modLpOut = S.modMs = 0.0f;
+    S.progMs = S.bandMs = S.modMs = 0.0;
+    S.voiceEnv = S.modPrev = S.modHpOut = S.modLpOut = 0.0f;
     S.boostDb = 0.0f;
     S.levParked = 0;
 }
@@ -336,7 +346,7 @@ void matchSample(LdShared &S, const float *p, float *left, float *right, double 
     }
     if (!enabled) {
         if (!nearZero(S.matchGainDb)) {
-            S.matchGainDb = smoothToward(S.matchGainDb, 0.0f, S.bypassCoef);
+            S.matchGainDb = smoothTowardD(S.matchGainDb, 0.0f, S.bypassCoef);
             if (!nearZero(S.matchGainDb)) {
                 const float gain = dbToLinear(S.matchGainDb);
                 *left *= gain;
@@ -357,8 +367,8 @@ void matchSample(LdShared &S, const float *p, float *left, float *right, double 
     if (!(p[kMatchGate] > 0.5f && measuredLufs < kGateLufs)) {
         targetGainDb = clampf(p[kTargetLufs] - measuredLufs, -p[kMaxCorrection], p[kMaxCorrection]);
     }
-    const float coef = targetGainDb < S.matchGainDb ? S.attackPole : S.releasePole;
-    S.matchGainDb = smoothToward(S.matchGainDb, targetGainDb, coef);
+    const double coef = targetGainDb < S.matchGainDb ? S.attackPole : S.releasePole;
+    S.matchGainDb = smoothTowardD(S.matchGainDb, targetGainDb, coef);
     const float gain = dbToLinear(S.matchGainDb);
     *left *= gain;
     *right *= gain;
@@ -476,8 +486,8 @@ void levelerSample(LdShared &S, const float *p, float *left, float *right, const
     }
     const float programPower = 0.5f * (dryL * dryL + dryR * dryR);
     const float dialoguePower = 0.5f * (dialL * dialL + dialR * dialR);
-    S.progMs = smoothToward(S.progMs, programPower, S.detectorPole);
-    S.bandMs = smoothToward(S.bandMs, dialoguePower, S.detectorPole);
+    S.progMs = smoothTowardD(S.progMs, programPower, S.detectorPole);
+    S.bandMs = smoothTowardD(S.bandMs, dialoguePower, S.detectorPole);
     S.progDbfs = 10.0f * std::log10(std::fmax(S.progMs, kEpsilon));
     S.bandDbfs = 10.0f * std::log10(std::fmax(S.bandMs, kEpsilon));
     S.gapDb = S.progDbfs - S.bandDbfs;
@@ -489,7 +499,7 @@ void levelerSample(LdShared &S, const float *p, float *left, float *right, const
     const float modLp = (1.0f - S.modLpPole) * modHp + S.modLpPole * S.modLpOut;
     S.modLpOut = modLp;
     const float modPower = modLp * modLp;
-    S.modMs = smoothToward(S.modMs, modPower, S.measPole);
+    S.modMs = smoothTowardD(S.modMs, modPower, S.measPole);
     const float modIndex = std::sqrt(std::fmax(S.modMs, 0.0f)) / std::fmax(S.voiceEnv, 1.0e-6f);
     float mapped = (modIndex - p[kConfFloor]) / std::fmax(p[kConfCeil] - p[kConfFloor], 1.0e-6f);
     mapped = clampf(mapped, 0.0f, 1.0f);
@@ -500,11 +510,12 @@ void levelerSample(LdShared &S, const float *p, float *left, float *right, const
         const float fraction = p[kBoostRatio] > 1.0f ? (1.0f - 1.0f / p[kBoostRatio]) : 0.0f;
         targetBoost = std::fmin(p[kLevMaxBoost], excess * fraction) * S.confidence;
     }
-    const float coef = !enabled ? S.bypassCoef : (targetBoost > S.boostDb ? S.levAttackPole : S.levReleasePole);
-    S.boostDb = smoothToward(S.boostDb, targetBoost, coef);
+    const double coef = !enabled ? double(S.bypassCoef) : (targetBoost > S.boostDb ? S.levAttackPole : S.levReleasePole);
+    S.boostDb = smoothTowardD(S.boostDb, targetBoost, coef);
     if (!enabled && nearZero(S.boostDb)) {
         S.boostDb = 0.0f;
-        S.progMs = S.bandMs = S.voiceEnv = S.modPrev = S.modHpOut = S.modLpOut = S.modMs = 0.0f;
+        S.progMs = S.bandMs = S.modMs = 0.0;
+        S.voiceEnv = S.modPrev = S.modHpOut = S.modLpOut = 0.0f;
         S.progDbfs = S.bandDbfs = S.gapDb = S.confidence = 0.0f;
         clearLevelerFilters(S);
         S.levParked = 1;

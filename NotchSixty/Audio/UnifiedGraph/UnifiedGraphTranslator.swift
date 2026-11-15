@@ -1054,7 +1054,12 @@ enum UnifiedGraphTranslator {
         }
         let delays = headphoneDelayStages(profile: profile, sampleRate: spec.sampleRate)
         result.stages.insert(headphoneStage(profile: profile), at: lastGain + 1)
-        let protection = result.stages.firstIndex(where: { $0.stageId == N60_LSTAGE_PROTECTION })
+        // The ear delays sit ahead of every protection stage: the program's (`N60_LSTAGE_PROTECTION`) or, with output
+        // protection on (E9 S5), the per-lane ones that replace it. A delay after a protection stage is out of order
+        // and the core refuses the graph (found by the E7 S5 rate matrix; it broke the E7 S1 20 ms ear-delay test).
+        let protection = result.stages.firstIndex(where: {
+            $0.stageId == N60_LSTAGE_PROTECTION || $0.kind == UInt32(N60_STAGE_PROTECTION.rawValue)
+        })
             ?? result.stages.firstIndex(where: { $0.stageId == N60_LSTAGE_FINAL_SANITISE })
             ?? result.stages.count
         result.stages.insert(contentsOf: delays, at: protection)

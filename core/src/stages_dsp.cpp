@@ -217,7 +217,7 @@ uint32_t denoiseFft(float quality) { return 1024u << static_cast<uint32_t>(quali
 
 struct CompLane {
     double z[2];     // sidechain high-pass state
-    float gainDB;    // smoothed gain; the shared gain of a linked group lives in the group's first lane
+    double gainDB;   // smoothed gain (double since E7 S4: a 5 s release pole at 384 kHz is 1 - 5e-8); the shared gain of a linked group lives in the group's first lane
     std::atomic<uint32_t> grMaxBits;  // ABI v8: deepest reduction (dB, >= 0) since the last read, on every lane of the group
     std::atomic<uint32_t> grNowBits;  // reduction at the end of the last block
     double meanSq;                    // ABI v34: RMS detector mean square of this lane's sidechain (double since E28 S7d: a 200 ms window at 384 kHz)
@@ -236,7 +236,7 @@ struct CompShared {
 bool compExtended(const StageRec &r) { return r.paramCount >= 15; }
 
 struct ExpLane {
-    float gainDB;
+    double gainDB;  // double since E7 S4, as CompLane
     std::atomic<uint32_t> grMaxBits;  // as CompLane
     std::atomic<uint32_t> grNowBits;
     double meanSq;      // ABI v35: RMS detector mean square (double since E28 S7d)
@@ -258,10 +258,10 @@ bool expExtended(const StageRec &r) { return r.paramCount >= 13; }
 // Publishes the per-group gain reduction of one block to every lane of the group (control-thread readback).
 // The caller has already flushed denormals in the gain; st[g * per] holds the group's gain.
 template <typename Lane>
-void publishReduction(Lane *const *st, uint32_t per, uint32_t groups, const float *grMax) {
+void publishReduction(Lane *const *st, uint32_t per, uint32_t groups, const double *grMax) {
     for (uint32_t g = 0; g < groups; ++g) {
-        const float now = std::max(0.0f, -st[g * per]->gainDB);
-        const float peak = std::max(0.0f, grMax[g]);
+        const float now = static_cast<float>(std::max(0.0, -st[g * per]->gainDB));
+        const float peak = static_cast<float>(std::max(0.0, grMax[g]));
         for (uint32_t k = 0; k < per; ++k) {
             Lane &ln = *st[g * per + k];
             atomicMaxFloat(ln.grMaxBits, peak);
@@ -326,8 +326,8 @@ void runCompressorX(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t fr
     const float listenMode = hasListen ? p[15] : 0.0f;
     const float sideT = listenMode == 1.0f ? 1.0f : 0.0f, deltaT = listenMode == 2.0f ? 1.0f : 0.0f;
     const float slope = 1.0f / ratio - 1.0f;
-    const float atk = pole(rate, p[3]), rel = pole(rate, p[4]);
-    const float fast = pole(rate, std::max(p[4] * 0.5f, 1.0f)), slow = pole(rate, std::min(p[4] * 2.0f, 5000.0f));
+    const double atk = poleD(rate, p[3]), rel = poleD(rate, p[4]);
+    const double fast = poleD(rate, std::max(p[4] * 0.5f, 1.0f)), slow = poleD(rate, std::min(p[4] * 2.0f, 5000.0f));
     const double rmsC = poleD(rate, p[13]);
     const float rampC = pole(rate, 5.0f);
     CompShared &sh = *reinterpret_cast<CompShared *>(sharedState(h, r));
@@ -348,7 +348,7 @@ void runCompressorX(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t fr
         sideRing[l] = ring[l] + ringLen;
     }
     const uint32_t per = linked ? n : 1, groups = linked ? 1 : n;
-    float grMax[kMaxLanes] = {};
+    double grMax[kMaxLanes] = {};
     float level[kMaxLanes];
     // E28 S7d, G35: the gain follower is sequential, so it runs per frame over a short chunk and records each frame's gain,
     // sidechain and the mix and listen ramps. The lookahead ring and the mix then run as block passes per lane.
@@ -404,11 +404,11 @@ void runCompressorX(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t fr
                 CompLane &gs = *st[l];
                 const float det = std::min(link * loudest + (1.0f - link) * level[l], 1e6f);
                 const float target = compTargetDb(lin2db(det, 1e-12f), thr, slope, knee, makeup);
-                float cf;
+                double cf;
                 if (target < gs.gainDB) {
                     cf = atk;
                 } else if (pdr) {
-                    const float depth = std::clamp(-gs.gainDB / 12.0f, 0.0f, 1.0f);
+                    const double depth = std::clamp(-gs.gainDB / 12.0, 0.0, 1.0);
                     cf = fast + depth * (slow - fast);
                 } else {
                     cf = rel;
@@ -456,7 +456,7 @@ void runCompressorX(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t fr
         }
       }
     }
-    float nowDb[kMaxLanes] = {};
+    double nowDb[kMaxLanes] = {};
     for (uint32_t l = 0; l < n; ++l) {
         heal(st[l]->z);
         heal(st[l]->gainDB);
@@ -464,12 +464,12 @@ void runCompressorX(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t fr
         nowDb[l / per] = std::max(nowDb[l / per], -st[l]->gainDB);
     }
     // Every lane of a group reads the group's deepest reduction, as the shared gain did.
-    float *const nowPtr = nowDb;
+    const double *const nowPtr = nowDb;
     for (uint32_t g = 0; g < groups; ++g) {
         for (uint32_t k = 0; k < per; ++k) {
             CompLane &ln = *st[g * per + k];
-            atomicMaxFloat(ln.grMaxBits, std::max(0.0f, grMax[g]));
-            ln.grNowBits.store(floatToBits(std::max(0.0f, nowPtr[g])), std::memory_order_relaxed);
+            atomicMaxFloat(ln.grMaxBits, static_cast<float>(std::max(0.0, grMax[g])));
+            ln.grNowBits.store(floatToBits(static_cast<float>(std::max(0.0, nowPtr[g]))), std::memory_order_relaxed);
         }
     }
 }
@@ -484,8 +484,8 @@ void runCompressor(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t fra
     const float thr = p[0], ratio = p[1], knee = p[2], makeup = p[5], hpHz = p[8];
     const bool feedback = p[6] >= 0.5f, pdr = p[7] >= 0.5f, linked = p[9] >= 0.5f;
     const float slope = 1.0f / ratio - 1.0f;
-    const float atk = pole(rate, p[3]), rel = pole(rate, p[4]);
-    const float fast = pole(rate, std::max(p[4] * 0.5f, 1.0f)), slow = pole(rate, std::min(p[4] * 2.0f, 5000.0f));
+    const double atk = poleD(rate, p[3]), rel = poleD(rate, p[4]);
+    const double fast = poleD(rate, std::max(p[4] * 0.5f, 1.0f)), slow = poleD(rate, std::min(p[4] * 2.0f, 5000.0f));
     CompShared &sh = *reinterpret_cast<CompShared *>(sharedState(h, r));
     if (hpHz != sh.usedHz) {
         sh.usedHz = hpHz;
@@ -500,7 +500,7 @@ void runCompressor(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t fra
         st[l] = reinterpret_cast<CompLane *>(laneState(h, r, l));
     }
     const uint32_t per = linked ? n : 1, groups = linked ? 1 : n;
-    float grMax[kMaxLanes] = {};
+    double grMax[kMaxLanes] = {};
     const bool hpBulk = sh.hasHp != 0 && !feedback;  // E20 S10 part 4 (G14): see runCompressorX
     double *zp[kMaxLanes];
     for (uint32_t l = 0; l < n; ++l) zp[l] = st[l]->z;
@@ -518,15 +518,15 @@ void runCompressor(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t fra
         for (uint32_t g = 0; g < groups; ++g) {
             CompLane &gs = *st[g * per];
             absMaxRows(detA, rows + g * per, per, 0, cn);
-            float gmax = grMax[g];
+            double gmax = grMax[g];
             for (uint32_t c = 0; c < cn; ++c) {
                 const float det = std::min(detA[c], 1e6f);  // keeps an Inf input from poisoning the gain
                 const float target = compTargetDb(lin2db(det, 1e-12f), thr, slope, knee, makeup);
-                float cf;
+                double cf;
                 if (target < gs.gainDB) {
                     cf = atk;
                 } else if (pdr) {
-                    const float depth = std::clamp(-gs.gainDB / 12.0f, 0.0f, 1.0f);
+                    const double depth = std::clamp(-gs.gainDB / 12.0, 0.0, 1.0);
                     cf = fast + depth * (slow - fast);
                 } else {
                     cf = rel;
@@ -554,11 +554,11 @@ void runCompressor(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t fra
             }
             det = std::min(det, 1e6f);  // keeps an Inf input from poisoning the gain
             const float target = compTargetDb(lin2db(det, 1e-12f), thr, slope, knee, makeup);
-            float c;
+            double c;
             if (target < gs.gainDB) {
                 c = atk;
             } else if (pdr) {
-                const float depth = std::clamp(-gs.gainDB / 12.0f, 0.0f, 1.0f);
+                const double depth = std::clamp(-gs.gainDB / 12.0, 0.0, 1.0);
                 c = fast + depth * (slow - fast);
             } else {
                 c = rel;
@@ -604,7 +604,8 @@ void runExpanderX(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t fram
     const uint32_t holdFrames = static_cast<uint32_t>(std::lround(static_cast<double>(p[6]) * rate / 1000.0));
     const float linkT = p[11] * 0.01f;
     const float sideT = p[12] == 1.0f ? 1.0f : 0.0f, deltaT = p[12] == 2.0f ? 1.0f : 0.0f;
-    const float atk = pole(rate, p[3]), rel = pole(rate, p[4]), rampC = pole(rate, 5.0f);
+    const double atk = poleD(rate, p[3]), rel = poleD(rate, p[4]);
+    const float rampC = pole(rate, 5.0f);
     const double rmsC = poleD(rate, p[9]);
     ExpShared &sh = *reinterpret_cast<ExpShared *>(sharedState(h, r));
     if (hpHz != sh.usedHz) {
@@ -620,7 +621,7 @@ void runExpanderX(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t fram
         st[l] = reinterpret_cast<ExpLane *>(laneState(h, r, l));
     }
     const uint32_t per = linked ? n : 1, groups = linked ? 1 : n;
-    float grMax[kMaxLanes] = {};
+    double grMax[kMaxLanes] = {};
     float level[kMaxLanes], side[kMaxLanes];
     double *zp[kMaxLanes];  // E20 S10 part 4 (G14): the side-chain high-pass runs a chunk at a time in lane pairs (input is the lane)
     for (uint32_t l = 0; l < n; ++l) zp[l] = st[l]->z;
@@ -667,7 +668,7 @@ void runExpanderX(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t fram
                     --gs.holdCnt;
                     target = 0.0f;
                 }
-                const float c = target < gs.gainDB ? atk : rel;
+                const double c = target < gs.gainDB ? atk : rel;
                 gs.gainDB = target + c * (gs.gainDB - target);
                 grMax[g] = std::max(grMax[g], -gs.gainDB);
                 const float dry = lp[l][i];
@@ -688,13 +689,13 @@ void runExpanderX(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t fram
         heal(st[l]->z);
     }
     // Per-lane gains: every lane of a group reads the group's deepest reduction.
-    float nowDb[kMaxLanes] = {};
+    double nowDb[kMaxLanes] = {};
     for (uint32_t l = 0; l < n; ++l) nowDb[l / per] = std::max(nowDb[l / per], -st[l]->gainDB);
     for (uint32_t g = 0; g < groups; ++g) {
         for (uint32_t k = 0; k < per; ++k) {
             ExpLane &ln = *st[g * per + k];
-            atomicMaxFloat(ln.grMaxBits, std::max(0.0f, grMax[g]));
-            ln.grNowBits.store(floatToBits(std::max(0.0f, nowDb[g])), std::memory_order_relaxed);
+            atomicMaxFloat(ln.grMaxBits, static_cast<float>(std::max(0.0, grMax[g])));
+            ln.grNowBits.store(floatToBits(static_cast<float>(std::max(0.0, nowDb[g]))), std::memory_order_relaxed);
         }
     }
 }
@@ -708,7 +709,7 @@ void runExpander(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frame
     const double rate = h->sampleRate;
     const float thr = p[0], ratio = p[1], range = p[2];
     const bool linked = p[5] >= 0.5f;
-    const float atk = pole(rate, p[3]), rel = pole(rate, p[4]);
+    const double atk = poleD(rate, p[3]), rel = poleD(rate, p[4]);
     const uint32_t n = r.laneCount;
     float *lp[kMaxLanes];
     ExpLane *st[kMaxLanes];
@@ -717,7 +718,7 @@ void runExpander(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frame
         st[l] = reinterpret_cast<ExpLane *>(laneState(h, r, l));
     }
     const uint32_t per = linked ? n : 1, groups = linked ? 1 : n;
-    float grMax[kMaxLanes] = {};
+    double grMax[kMaxLanes] = {};
     // E20 R3 critical path: a chunk runs in three passes (largest level over the group's lanes, the gain follower per
     // sample, the gain applied lane by lane) instead of one pass that touches every lane's row for every frame. Each sample
     // sees the same operations in the same order, so the output is bit-identical.
@@ -727,11 +728,11 @@ void runExpander(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frame
         for (uint32_t g = 0; g < groups; ++g) {
             ExpLane &gs = *st[g * per];
             absMaxRows(detA, lp + g * per, per, base, cn);
-            float gmax = grMax[g];
+            double gmax = grMax[g];
             for (uint32_t c = 0; c < cn; ++c) {
                 const float detDb = lin2db(std::min(detA[c], 1e6f), 1e-12f);
                 const float target = detDb >= thr ? 0.0f : std::max((ratio - 1.0f) * (detDb - thr), range);
-                const float cf = target < gs.gainDB ? atk : rel;
+                const double cf = target < gs.gainDB ? atk : rel;
                 gs.gainDB = target + cf * (gs.gainDB - target);
                 gmax = std::max(gmax, -gs.gainDB);
                 gainA[c] = db2lin(gs.gainDB);
@@ -748,7 +749,8 @@ void runExpander(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frame
 
 struct DqBand {
     double an[5], pr[5], sc[5];  // analysis, primary and secondary basis filters
-    float atkC, relC, rmsC, usedShape;
+    double atkC, relC, rmsC;  // double since E7 S4: a 1 s release or 200 ms window at 384 kHz is within a few float ulp of 1
+    float usedShape;
     float usedFreq, usedQ, pad0, pad1;
 };
 
@@ -760,7 +762,8 @@ struct DqShared {
 
 struct DqLaneBand {
     double aZ[2], pZ[2], sZ[2];
-    float rms, dyn, stat, wet;
+    double rms, dyn;  // double since E7 S4
+    float stat, wet;
 };
 
 DqBand *dqBands(DqShared *s) { return reinterpret_cast<DqBand *>(s + 1); }
@@ -804,9 +807,9 @@ void dqRefresh(const SnapHeader *h, const StageRec &r, DqShared *sh, const float
             bc.usedQ = prm[2];
             dqDesign(static_cast<uint32_t>(prm[0]), h->sampleRate, prm[1], prm[2], bc);
         }
-        bc.atkC = pole(h->sampleRate, prm[7]);
-        bc.relC = pole(h->sampleRate, prm[8]);
-        bc.rmsC = pole(h->sampleRate, prm[14]);
+        bc.atkC = poleD(h->sampleRate, prm[7]);
+        bc.relC = poleD(h->sampleRate, prm[8]);
+        bc.rmsC = poleD(h->sampleRate, prm[14]);
     }
 }
 
@@ -884,19 +887,19 @@ void runDynEq(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) 
                 for (uint32_t c = 0; c < cn; ++c) {
                     float det;
                     if (rmsDet) {
-                        const float inst = powerA[c] / static_cast<float>(per);
+                        const double inst = double(powerA[c]) / double(per);
                         hold.rms = inst + bc.rmsC * (hold.rms - inst);
-                        det = std::sqrt(std::max(hold.rms, 0.0f));
+                        det = static_cast<float>(std::sqrt(std::max(hold.rms, 0.0)));
                     } else {
                         det = peakA[c];
-                        hold.rms = det * det;
+                        hold.rms = double(det) * double(det);
                     }
                     const float target = dqTargetDb(lin2db(det, 1e-20f), prm);
-                    const float cf = std::fabs(target) > std::fabs(hold.dyn) ? bc.atkC : bc.relC;
+                    const double cf = std::fabs(double(target)) > std::fabs(hold.dyn) ? bc.atkC : bc.relC;
                     hold.dyn = target + cf * (hold.dyn - target);
                     hold.stat = prm[3] + bypassC * (hold.stat - prm[3]);
                     hold.wet = 1.0f + bypassC * (hold.wet - 1.0f);
-                    const float total = std::clamp(hold.stat + hold.dyn, -42.0f, 18.0f);
+                    const float total = std::clamp(hold.stat + static_cast<float>(hold.dyn), -42.0f, 18.0f);
                     const float half = 0.5f * total;
                     lowA[c] = tilt ? (db2lin(-half) - 1.0f) * hold.wet : 0.0f;
                     highA[c] = tilt ? (db2lin(half) - 1.0f) * hold.wet : 0.0f;

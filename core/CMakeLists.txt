@@ -40,6 +40,10 @@ add_executable(n60core_alloc_test tests/test_alloc.cpp)
 target_link_libraries(n60core_alloc_test PRIVATE n60core)
 add_test(NAME n60core_alloc COMMAND n60core_alloc_test)
 
+add_executable(n60core_precision_audit_test tests/test_precision_audit.cpp)
+target_link_libraries(n60core_precision_audit_test PRIVATE n60core)
+add_test(NAME n60core_precision_audit COMMAND n60core_precision_audit_test)
+
 add_executable(n60core_fpenv_test tests/test_fpenv.cpp)
 target_link_libraries(n60core_fpenv_test PRIVATE n60core)
 target_include_directories(n60core_fpenv_test PRIVATE src)

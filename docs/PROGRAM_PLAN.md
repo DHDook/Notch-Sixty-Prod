@@ -221,14 +221,14 @@ Gate G2 passed on 2026-10-25 (commit 07e82c6)
 
 ### E7 384 kHz everywhere
 
-- [~] Express every buffer capacity in time, not frames, and size it at the 384 kHz worst case (E7 S1 done; E7 G2-G4 close in S5, G1 in E23)
+- [x] Express every buffer capacity in time, not frames, and size it at the 384 kHz worst case (E7 S1 done; E7 G2-G4 close in S5, G1 in E23)
 - [~] Lift the known frame caps: program FIR 32,768 taps, headphone delay 4,096 frames (headphone delay to 20 ms done in E7 S1; kernel 4,095 limit stays until E23, E7 G1) (binaural 8,192 taps moved to E13, owner 31 Oct 2026)
-- [ ] Extend the PR117A double-precision fix beyond the crossover: user EQ, lane EQ, subwoofer EQ and headphone PEQ still use float32 coefficients and state, which loses low-frequency accuracy at high rates
-- [~] Keep HRIR resampling on activation; add the same policy for any imported IR or SOFA asset (E7 S2 built: speaker IR resampling dark behind `e7.rate-adapt`, no production importer yet (E7 G5); research SOFA is a note only (E7 G7); remaining owner: E7 S5)
-- [ ] Run the XCTest acoustic reference lab at 44.1, 48, 88.2, 96, 176.4, 192, 352.8 and 384 kHz
-- [~] Check Audio Unit hosting: report clearly when a plug-in refuses a rate (E7 S3 built: per-rate bypass dark behind `e7.rate-adapt`; production wiring in E7 S5, G9 and G10)
+- [x] Extend the PR117A double-precision fix beyond the crossover: user EQ, lane EQ, subwoofer EQ and headphone PEQ still use float32 coefficients and state, which loses low-frequency accuracy at high rates (note: PEQ, lane, sub and headphone PEQ were already double (E23 S1b); E7 S4 moved dynamics, loudness, de-esser, dynamic EQ and ESS smoothers to double)
+- [x] Keep HRIR resampling on activation; add the same policy for any imported IR or SOFA asset (E7 S2 built: speaker IR resampling dark behind `e7.rate-adapt`, no production importer yet (E7 G5); research SOFA is a note only (E7 G7); remaining owner: E7 S5) (note: speaker IR resamples from profile-restored filters; file importer re-homed to E17 S8 / E17 G2; HRIR stays on the standard kernel; research SOFA is note-only, accepted)
+- [x] Run the XCTest acoustic reference lab at 44.1, 48, 88.2, 96, 176.4, 192, 352.8 and 384 kHz (note: now RateMatrixTests at the eight rates plus 32 and 64 kHz; PR117 lab deleted)
+- [x] Check Audio Unit hosting: report clearly when a plug-in refuses a rate (E7 S3 built: per-rate bypass dark behind `e7.rate-adapt`; production wiring in E7 S5, G9 and G10) (note: real-plug-in check moved to E22)
 - [ ] Bench: confirm CPU headroom at 384 kHz on the slowest supported Mac
-- [ ] S5 `e7/rate-matrix-ship` graduates `e7.rate-adapt` (default on; removal is the FC phase)
+- [x] S5 `e7/rate-matrix-ship` graduates `e7.rate-adapt` (default on; removal is the FC phase) (graduated 15 Nov 2026)
 
 ### E8 Routing matrix and crossovers
 
@@ -492,6 +492,7 @@ Plan: `docs/epics/E17.md` (awaiting owner approval; flags `e17.export`, `e17.dit
 - [ ] S6 `e17/device-format` (owner, 11 Nov 2026): read and show the device's physical format (bit depth, rate, integer or float) and let the user pick one where the device offers a choice. Dither stays automatic and limited to integer formats of 16 bits or fewer (E17 owner decisions Q5 and Q6); noise shaping, if S4's design note supports it, is chosen automatically too
 - [ ] S7 `e17/measurement-interchange` (owner, 11 Nov 2026; moved from E11): import and export REW text, FRD and ZMA
 - [ ] S8 `e17/correction-interchange` (owner, 11 Nov 2026): export a correction as FIR impulse files, biquad lists and a CamillaDSP configuration; import REW filter text and Equalizer APO configurations (extend the existing exporters and `EqualizerAPOPresetImporter`, do not duplicate them)
+  - [ ] S8: import a WAV or AIFF speaker impulse response that carries its file rate so E7 rate adaptation reaches it (E17 G2, from E7 G5)
 - [ ] S5 `e17/ship` (runs after S6–S8) graduates `e17.export` and `e17.dither` (default on; removal is the FC phase)
 
 ### E30 Everyday listening controls (owner, 11 Nov 2026)
@@ -576,6 +577,7 @@ Owner decision, 18 Oct 2026: there is no bench access for now, so every bench ch
 - [ ] E13 G13: cost per frame of the 16-tap Kaiser sinc delay-path FIR at 384 kHz, with an R3 cost row (E13 S5; E20 budgets)
 - [ ] E13 G15: head tracking with AirPods on a 7.1.4 layout, yaw and pitch blend without comb filtering or ITD jumps through a 360° sweep (E13 S5 bench item)
 - [ ] Carried in by flag graduation (11 Nov 2026): E4 S30 checks, E19 modal-decay campaign, E20 no-overload-with-workers (gates FC removal of `e20.*`), E26 sub bench gaps (G10, G11, G19, G23, G24, G28, G30), E28 owner listen to S7a to S7d, E13 G8 (96 kHz tail versus 384 kHz benchmark), E9 bench lines (G18, G25, G26)
+- [ ] E7 G10 and bench: insert a real Audio Unit that stops at 192 kHz and change the device rate 48 to 384 to 48 kHz while playing (per-rate bypass, row note, return at 48 kHz); listen to a 20 ms headphone delay, a resampled speaker IR and the precision-changed stages at 352.8 and 384 kHz (`docs/epics/E7.md` Bench checks)
 
 ### FC Flag cleanup (owner, 11 Nov 2026)
 

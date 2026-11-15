@@ -5,7 +5,7 @@
 //  - the de-esser's 1000 ms release (the slowest allowed): the decay of the gain reduction after a burst, against the
 //    ideal exp(-t / 1 s), and the value the reduction settles at after the range is relaxed (a smoothing step that is
 //    smaller than half a float ulp of the running value stalls early).
-// Result (E6 S12h): the de-esser release stays float (time constant within 1 percent of 1 s at every rate, no stall); the
+// Result (E6 S12h, E7 S4): the de-esser release pole and gain state moved to double in E7 S4 (a float pole at 1 s and 384 kHz is within 2.3 percent of its own spacing); the
 // widener's crossover biquads moved to double (float error reached -35 dB at 352.8 kHz). The bounds fail if either worsens.
 #include <algorithm>
 #include <cmath>
@@ -150,7 +150,7 @@ void deessRelease(double rate) {
     const double tau = gr1 > 1e-3 && gr2 > 1e-3 ? 1.0 / std::log(gr1 / gr2) : 0.0;
     std::printf("de-esser release 1000 ms at %.0f: measured time constant %.4f s (reduction %.3f -> %.3f -> %.3f dB)\n", rate,
                 tau, gr0, gr1, gr2);
-    check(std::fabs(tau - 1.0) < 0.03, "release time constant within 3 percent of 1 s", rate);
+    check(std::fabs(tau - 1.0) < 0.01, "release time constant within 1 percent of 1 s", rate);
     // Relax the range to -3 dB under the same loud tone: the reduction moves 6 -> 3 dB with the release pole and
     // must end at the new target (a stall would leave it measurably above 3 dB after six time constants).
     n60_graph_retire(g);

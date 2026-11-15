@@ -49,6 +49,14 @@ enum RateCapacity {
     /// here and nothing above is tested, so a faster device is refused with a named reason.
     static let supportedMaximumSampleRate = 384_000.0
 
+    /// E7 S5 (G3): the tap or input side of a transport is held to the same ceiling as the output, so a tap device
+    /// that runs faster than the output is refused by name instead of reaching the adaptive converter. Control plane only.
+    static func requireSupportedTapRate(_ rate: Double) throws {
+        guard rate <= supportedMaximumSampleRate else {
+            throw CoreAudioTransportError.sampleRateAboveSupportedMaximum(rate: rate, maximum: supportedMaximumSampleRate)
+        }
+    }
+
     // MARK: Fixed rings (design note 4)
 
     /// Frames in every fixed ring and block of the live path: analyser taps, the three transports' bridges, analysis

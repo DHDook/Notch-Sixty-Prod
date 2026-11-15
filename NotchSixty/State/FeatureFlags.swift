@@ -234,11 +234,13 @@ extension FeatureFlag {
     /// HRTF previewed in the research workspace, are resampled (core `n60/resample.h`, cached per rate, original kept)
     /// when used at another rate, and the row says "Resampled from 48 kHz". Off: a rate mismatch refuses as before.
     /// Measurements used for design or verification refuse a mismatch either way. Swift decides; the engine never
-    /// reads the flag. E7 S3 adds the per-rate plug-in bypass; S5 graduates it.
+    /// reads the flag. E7 S3 adds the per-rate plug-in bypass. Graduated in E7 S5 (default on); the flag-cleanup phase
+    /// removes it. `-NotchSixtyFeatures -e7.rate-adapt` switches it off.
     static let rateAdapt = FeatureFlag(
         id: "e7.rate-adapt",
         title: "Imported assets follow the device rate",
-        epic: "E7"
+        epic: "E7",
+        graduated: true
     )
 
     /// E20 S7 and S8 (multirate low-frequency paths) were skipped on the measured entry rule (12 Nov 2026), so no code

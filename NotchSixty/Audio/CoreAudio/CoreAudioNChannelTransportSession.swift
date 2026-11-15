@@ -505,6 +505,7 @@ final class CoreAudioNChannelTransportSession {
                     profile: expectedChannels
                 )
             }
+            try RateCapacity.requireSupportedTapRate(tapFormat.sampleRate)
             let adaptiveSampleRateRequired = abs(tapFormat.sampleRate - outputFormat.sampleRate) >= 0.5
             if adaptiveSampleRateRequired, routePlan.usesMultiplePhysicalDevices {
                 // The existing semantic multi-device output uses one HAL
