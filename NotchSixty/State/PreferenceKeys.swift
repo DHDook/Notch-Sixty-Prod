@@ -27,6 +27,11 @@ enum PreferenceKeys {
     static let quietZoneFeedForwardReferenceChannel = "quietZone.feedForwardReferenceChannel"
 
     /// E27 S2: the Equalizer graph's visible ranges and band-curve choice.
+    enum Dynamics {
+        /// Whether a gain-reduction panel shows its transfer curve; one key per `GainReductionSource.rawValue`.
+        static func showTransferCurve(_ source: String) -> String { "dynamics.showTransferCurve.\(source)" }
+    }
+
     enum Equalizer {
         static let graphYRange = "equalizer.graphYRange"
         static let graphXZoom = "equalizer.graphXZoom"
