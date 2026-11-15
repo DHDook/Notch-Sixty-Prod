@@ -35,6 +35,11 @@ option(N60_X86_FMA "Build the engine core with FMA3 on x86-64" ON)
 if(N60_X86_FMA AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
   target_compile_options(n60core PRIVATE -mfma -mavx2)
 endif()
+# E21 S1: the tests' scalar references must round like the engine. The engine is built with FMA (above); a reference compiled
+# without it differs in the last bit on x86 (test_stereo_bass "bit for bit"), so every test target gets the same flags.
+if(N60_X86_FMA AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64" AND NOT MSVC)
+  add_compile_options(-mfma -mavx2)
+endif()
 
 enable_testing()
 # E21 S1: n60/n60.h as C and n60_core_abi.
