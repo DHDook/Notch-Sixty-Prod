@@ -33,7 +33,7 @@ with them, these decisions win until E1/E21 update `AGENTS.md`.
 
 ## Epics at a glance
 
-Thirty-one epics in four phases close every gap in the analysis and set the engine up for other
+Thirty-two epics in four phases close every gap in the analysis and set the engine up for other
 platforms; E6 (the unified graph) is the critical path, because eleven later epics build on it.
 
 | ID | Epic | Phase | Depends on | Where the work happens | Done when |
@@ -58,6 +58,7 @@ platforms; E6 (the unified graph) is the critical path, because eleven later epi
 | E26 | Sub-aware Quiet Zone | 3 | E4 S21, S22b, S25; E25 S8b (bench parts: E22) | Claude Code (Mac) + bench | Quiet Zone designs, limits and arms against the measured path through a sub or receiver; no blanket subwoofer refusal |
 | E27 | Equalizer page world-class polish | 3 | E11 S11 (#395) (bench parts: E22) | Claude Code (Mac) | Undo, precise entry, phase and impulse views at every rate to 384 kHz, headroom read-out, EQ A/B, band listen and click-free bypass, all reachable from the Equalizer page |
 | E28 | Dynamics and Meters polish | 3 | E27 S4, E6 S12a–S12h (bench parts: E22) | Claude Code (Mac) | Display-rate meters with hold, clip latch and VoiceOver values on every output configuration, BS.1770-4 loudness with channel weighting, spectrum options, transfer curves and gain-reduction history, Equalizer-grade parameter feel, and a world-class dynamics suite (compressor mix, link, detector and optional lookahead; expander hold, knee, detector and sidechain filter; sidechain listen; multiband solo and bypass), all reachable from the Dynamics and Meters pages |
+| E32 | Equalizer, Dynamics and Meters defect fixes (owner, 15 Nov 2026) | 3 | E27, E28 (bench parts: E22) | Claude Code (Mac) | The 15 Nov 2026 review defects are fixed or closed with evidence: dynamic EQ on every offered type, visible Nyquist bands, no swallowed errors, makeup-free gain reduction, click-free crossover edits, a limiter attack that fits the lookahead, idle meters that do no work, and loudness that never freezes |
 | E13 | Headphones complete | 4 | E6, E7 | Claude Code (Mac) | BYO files to PEQ in one click; live tuning |
 | E14 | Upmixer | 4 | E6 | Claude Code + bench | Stereo plays on 5.1–7.1.4 layouts |
 | E15 | Device-aware profiles | 4 | E6 | Claude Code (Mac) | Profile follows the output when the user opts in |
@@ -71,7 +72,7 @@ platforms; E6 (the unified graph) is the critical path, because eleven later epi
 | FC | Flag cleanup (owner, 11 Nov 2026) | 4 | E22 | Claude Code (Mac) | Every graduated flag and its dead branch removed in small per-epic PRs; nightly flags-off CI ran while flags existed |
 | E18 | Launch readiness | 4 | all | Owner + Claude Code | Signed, reviewed, accessible, competitive ABX done, App Store live |
 
-## Execution order (owner, 31 Oct 2026; E24 and E25 added 1 Nov 2026; E26 added 4 Nov 2026; E27 added 7 Nov 2026; E28 added 7 Nov 2026)
+## Execution order (owner, 31 Oct 2026; E24 and E25 added 1 Nov 2026; E26 added 4 Nov 2026; E27 added 7 Nov 2026; E28 added 7 Nov 2026; E32 added 15 Nov 2026)
 
 `/next` works down this list: the first epic with open slices whose dependencies are met. Within
 an epic, slices go in their written order. Competitive features come first (what buyers and
@@ -95,6 +96,7 @@ reviewers compare with Dirac and REW), then engine depth, then breadth.
 7. E13 Headphones complete, remainder (bring-your-own target and AutoEq import merged in #295 and #299)
 8. E7 384 kHz everywhere
 9. E20 Engine performance
+   - then E32 Equalizer, Dynamics and Meters defect fixes, S1–S6 in written order, before item 10 (owner, 15 Nov 2026, `docs/epics/E32.md` decision 1; S3 starts after the owner's `ProductionGainReductionViews.swift` change is on `main`)
 10. E21 Portable C++ core, remaining items
 11. E14 Upmixer, E15 Device-aware profiles, E17 Output integrity and interchange, E16 Automation and remote, then E30 Everyday listening controls and E31 Signal path and history (owner, 11 Nov 2026; E30 needs E15 and the E17 dither stage; E31 follows E30)
 12. E23 Legacy engine removal
@@ -437,6 +439,19 @@ S1–S6b flagless; every dynamics extra (S7a–S7d) behind the one flag `e28.dyn
 - [x] S8 flag graduated (`e28/s8-graduate`; end-to-end test through the Dynamics page model to the core blocks at the eight rates, stereo-path extras wiring fixed, FIR A/V-sync lookahead provider, compressor ring-carry test; the owner's listen moves to E22; removal is the FC phase). G44 (guided FIR controller has no production owner) is scoped to E24
 - [x] S9 Output loudness on routed sessions: the plan maps each output lane to its program role and the bridge sums a speaker's lanes (`e28/routed-output-loudness`, needs-owner: bridge header; G27 software part; bench: E22)
 
+### E32 Equalizer, Dynamics and Meters defect fixes (owner, 15 Nov 2026)
+
+Plan: `docs/epics/E32.md`. Defects from the 15 Nov 2026 review of the three pages (R1–R22); feature gaps and
+UX redesign are a later epic. Engine fixes go in the C++ core; the legacy C stays frozen. S1–S4 flagless; the
+three sound-changing fixes in S5 behind `e32.dynamics-sound`, graduated in S6. Owner decisions 1–5 of 15 Nov 2026 are in the plan.
+
+- [ ] S1 `e32/eq-page-fixes`: one band rule, Nyquist band state and count, surfaced errors, analyser and response redraw, Phase picker off the main thread (E6 G55) (low-risk)
+- [ ] S2 `e32/eq-engine-validation`: engine validators use the band rule (dynamic EQ on every offered type, notch cut-only, import limits); drag publishing confirmed and fixed (needs-owner)
+- [ ] S3 `e32/meter-cadence`: idle meter loops, gain-reduction rates and paused timelines, per-tick models, demand tokens, loudness history, dBTP label, clip latch after reset (low-risk)
+- [ ] S4 `e32/dynamics-core-fixes`: makeup-free gain reduction, multiband crossover crossfade, limiter ring masks, R11 and R13 confirmed or closed (needs-owner, realtime)
+- [ ] S5 `e32/dynamics-sound-fixes`: limiter attack capped at the lookahead, expander Attack as opening speed, true-peak factor by rate (4x/2x/1x), behind `e32.dynamics-sound` (needs-owner, realtime, ABI)
+- [ ] S6 `e32/ship`: end-to-end test, parity exceptions for the E23 corpus, flag graduated (needs-owner)
+
 ## Phase 4 — Complete scope and launch
 
 Phase 4 finishes the remaining scope and prepares the launch. **Gate G4 (v1):** every epic
@@ -578,6 +593,7 @@ Owner decision, 18 Oct 2026: there is no bench access for now, so every bench ch
 - [ ] E13 G15: head tracking with AirPods on a 7.1.4 layout, yaw and pitch blend without comb filtering or ITD jumps through a 360° sweep (E13 S5 bench item)
 - [ ] Carried in by flag graduation (11 Nov 2026): E4 S30 checks, E19 modal-decay campaign, E20 no-overload-with-workers (gates FC removal of `e20.*`), E26 sub bench gaps (G10, G11, G19, G23, G24, G28, G30), E28 owner listen to S7a to S7d, E13 G8 (96 kHz tail versus 384 kHz benchmark), E9 bench lines (G18, G25, G26)
 - [ ] E7 G10 and bench: insert a real Audio Unit that stops at 192 kHz and change the device rate 48 to 384 to 48 kHz while playing (per-rate bypass, row note, return at 48 kHz); listen to a 20 ms headphone delay, a resampled speaker IR and the precision-changed stages at 352.8 and 384 kHz (`docs/epics/E7.md` Bench checks)
+- [ ] E32 bench (`docs/epics/E32.md` slices): Equalizer page CPU with the analyser on and the Nyquist note on a real rate change (S1); dynamic low shelf on music and band drags without level dips at 44.1, 96 and 384 kHz (S2); meters and gain-reduction CPU with audio stopped and while playing, a 25 h loudness run (S3); multiband crossover drag on a DAC (S4); limiter with attack above lookahead, expander on speech and drums, loopback inter-sample peak at 176.4, 192 and 384 kHz (S5)
 
 ### FC Flag cleanup (owner, 11 Nov 2026)
 
