@@ -95,6 +95,9 @@ final class ProductionSpectrumAnalyzer {
     private static let peakHoldUpdates = 20       // ~1 s at the worker's 20 Hz cadence.
     private static let peakDecayDBPerUpdate: Float = 0.75
 
+    /// E21 S5: band amplitudes from libn60core (`n60_measure_stereo_band_amplitude`) instead of vDSP.
+    var useCoreMaths = FeatureFlags.isEnabledProcessWide(.coreDesigners)
+
     private var setup: vDSP_DFT_Setup?
     private var configuredSize = 0
     private var window: [Float] = []
@@ -149,6 +152,11 @@ final class ProductionSpectrumAnalyzer {
               sampleRate > 0,
               configureIfNeeded(size: transformSize) else {
             return []
+        }
+        if useCoreMaths, let bands = analyzeWithCore(
+            inputLeft: inputLeft, inputRight: inputRight, outputLeft: outputLeft, outputRight: outputRight,
+            count: count, transformSize: transformSize, sampleRate: sampleRate) {
+            return bands
         }
 
         let sourceOffset = count - transformSize
@@ -236,6 +244,34 @@ final class ProductionSpectrumAnalyzer {
             currentOutput[band] = decibels(amplitude: outputMagnitude * amplitudeScale)
         }
 
+        return finishBands(frequencies: frequencies, currentInput: currentInput, currentOutput: currentOutput)
+    }
+
+    private func analyzeWithCore(
+        inputLeft: [Float], inputRight: [Float], outputLeft: [Float], outputRight: [Float],
+        count: Int, transformSize: Int, sampleRate: Double
+    ) -> [ProductionSpectrumBand]? {
+        let maximumFrequency = min(20_000.0, sampleRate * 0.5 * 0.98)
+        guard maximumFrequency > 20 else { return [] }
+        let offset = count - transformSize
+        let range = offset..<count
+        guard let input = MeasurementCore.stereoBandAmplitudes(
+                left: inputLeft[range], right: inputRight[range], sampleRate: sampleRate,
+                bandCount: Self.bandCount, minHz: 20, maxHz: maximumFrequency),
+              let output = MeasurementCore.stereoBandAmplitudes(
+                left: outputLeft[range], right: outputRight[range], sampleRate: sampleRate,
+                bandCount: Self.bandCount, minHz: 20, maxHz: maximumFrequency) else {
+            return nil
+        }
+        return finishBands(
+            frequencies: input.frequenciesHz,
+            currentInput: input.amplitude.map { decibels(amplitude: $0) },
+            currentOutput: output.amplitude.map { decibels(amplitude: $0) })
+    }
+
+    private func finishBands(
+        frequencies: [Double], currentInput: [Float], currentOutput: [Float]
+    ) -> [ProductionSpectrumBand] {
         updatePeakHold(current: currentInput, hold: &inputPeakHold, age: &inputPeakAge)
         updatePeakHold(current: currentOutput, hold: &outputPeakHold, age: &outputPeakAge)
         resetPeakHoldRequested = false

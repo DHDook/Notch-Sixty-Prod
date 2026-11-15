@@ -186,6 +186,11 @@ add_executable(n60core_measure_waterfall_test tests/test_measure_waterfall.cpp)
 target_link_libraries(n60core_measure_waterfall_test PRIVATE n60core)
 add_test(NAME n60core_measure_waterfall COMMAND n60core_measure_waterfall_test)
 
+# E21 S5: room response analysis and program spectrum.
+add_executable(n60core_measure_room_analysis_test tests/test_measure_room_analysis.cpp)
+target_link_libraries(n60core_measure_room_analysis_test PRIVATE n60core)
+add_test(NAME n60core_measure_room_analysis COMMAND n60core_measure_room_analysis_test)
+
 # E11 S7: generator stage (ABI v14).
 add_executable(n60core_generator_test tests/test_generator.cpp)
 target_include_directories(n60core_generator_test PRIVATE src)
