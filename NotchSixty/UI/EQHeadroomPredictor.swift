@@ -184,6 +184,9 @@ enum EQHeadroomBadge: Equatable, Sendable {
     case covered(boostDB: Double, marginDB: Double)
     /// It does not: `shortfallDB` more cut would.
     case uncovered(boostDB: Double, shortfallDB: Double)
+    /// It does not, but a downstream stage will catch overs: a limiter (a hard guarantee) or a soft
+    /// clipper, compressor or gain rider (these reduce overs but promise nothing).
+    case uncoveredProtected(boostDB: Double, shortfallDB: Double, protection: EQClipProtection)
     /// The post-EQ meter clipped in the last two seconds.
     case clipped
 
@@ -193,12 +196,67 @@ enum EQHeadroomBadge: Equatable, Sendable {
         boostDB: Double,
         preampDB: Double,
         headroomAttenuationDB: Double,
-        clipTripped: Bool
+        clipTripped: Bool,
+        protection: EQClipProtection = .none
     ) -> EQHeadroomBadge {
-        if clipTripped { return .clipped }
         let margin = -(boostDB + preampDB + headroomAttenuationDB)
-        if margin >= -tolerance { return .covered(boostDB: boostDB, marginDB: max(0, margin)) }
+        if margin >= -tolerance {
+            return clipTripped ? .clipped : .covered(boostDB: boostDB, marginDB: max(0, margin))
+        }
+        // The post-EQ meter sits before the limiter, so with a brickwall guard its "clip" is the
+        // limiter's work, not output clipping.
+        if protection.hasLimiter { return .uncoveredProtected(boostDB: boostDB, shortfallDB: -margin, protection: protection) }
+        if clipTripped { return .clipped }
+        if protection.isActive { return .uncoveredProtected(boostDB: boostDB, shortfallDB: -margin, protection: protection) }
         return .uncovered(boostDB: boostDB, shortfallDB: -margin)
+    }
+}
+
+/// Which stages after the EQ can stop an over from reaching the output as hard clipping.
+struct EQClipProtection: Equatable, Sendable {
+    /// The Dynamics limiter is on (ceiling in dBFS).
+    var limiterCeilingDB: Double?
+    /// The always-on output hard limit (flag `e9.output-protection`), in dBFS.
+    var outputHardLimitDB: Double?
+    var softClipper = false
+    var compressor = false
+    var multiband = false
+    var gainRider = false
+
+    static let none = EQClipProtection()
+
+    var hasLimiter: Bool { limiterCeilingDB != nil || outputHardLimitDB != nil }
+    var isActive: Bool { hasLimiter || softClipper || compressor || multiband || gainRider }
+
+    /// Short name of the strongest stage, for the badge.
+    var primaryName: String {
+        if limiterCeilingDB != nil { return "limiter" }
+        if outputHardLimitDB != nil { return "output limit" }
+        if softClipper { return "soft clipper" }
+        if gainRider { return "gain rider" }
+        if compressor { return "compressor" }
+        return "multiband compressor"
+    }
+
+    init(limiterCeilingDB: Double? = nil, outputHardLimitDB: Double? = nil, softClipper: Bool = false,
+         compressor: Bool = false, multiband: Bool = false, gainRider: Bool = false) {
+        self.limiterCeilingDB = limiterCeilingDB
+        self.outputHardLimitDB = outputHardLimitDB
+        self.softClipper = softClipper
+        self.compressor = compressor
+        self.multiband = multiband
+        self.gainRider = gainRider
+    }
+
+    init(dynamics: DynamicsConfiguration, outputProtection: UnifiedGraphOutputProtection?) {
+        self.init(
+            limiterCeilingDB: dynamics.limiter.enabled ? dynamics.limiter.ceilingDB : nil,
+            outputHardLimitDB: outputProtection == nil ? nil : Double(UnifiedGraphOutputProtection.hardLimitCeilingDB),
+            softClipper: dynamics.softClipper.enabled,
+            compressor: dynamics.compressor.enabled,
+            multiband: dynamics.multibandCompressor.enabled,
+            gainRider: dynamics.gainRider.enabled
+        )
     }
 }
 

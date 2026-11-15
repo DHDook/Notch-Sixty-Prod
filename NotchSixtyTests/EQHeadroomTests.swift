@@ -375,3 +375,48 @@ final class EQHeadroomTests: XCTestCase {
         XCTAssertEqual(profiles.autoPreamp.trimDB, 0)
     }
 }
+
+@MainActor
+final class EQClipProtectionTests: XCTestCase {
+    func testLimiterDowngradesMayClipAndMeterTrip() {
+        let p = EQClipProtection(limiterCeilingDB: -0.2)
+        guard case .uncoveredProtected(_, let shortfall, _) = EQHeadroomBadge.evaluate(
+            boostDB: 6, preampDB: -2, headroomAttenuationDB: 0, clipTripped: true, protection: p
+        ) else { return XCTFail("expected protected") }
+        XCTAssertEqual(shortfall, 4, accuracy: 1e-9)
+    }
+
+    func testSoftStagesDoNotHideARealClip() {
+        let p = EQClipProtection(softClipper: true)
+        XCTAssertEqual(
+            EQHeadroomBadge.evaluate(boostDB: 6, preampDB: -2, headroomAttenuationDB: 0, clipTripped: true, protection: p),
+            .clipped
+        )
+        guard case .uncoveredProtected = EQHeadroomBadge.evaluate(
+            boostDB: 6, preampDB: -2, headroomAttenuationDB: 0, clipTripped: false, protection: p
+        ) else { return XCTFail("expected protected") }
+    }
+
+    func testCoveredAndNoProtectionUnchanged() {
+        let p = EQClipProtection(limiterCeilingDB: -0.2)
+        XCTAssertEqual(
+            EQHeadroomBadge.evaluate(boostDB: 6, preampDB: -6, headroomAttenuationDB: 0, clipTripped: false, protection: p),
+            .covered(boostDB: 6, marginDB: 0)
+        )
+        XCTAssertEqual(
+            EQHeadroomBadge.evaluate(boostDB: 6, preampDB: -2, headroomAttenuationDB: 0, clipTripped: false),
+            .uncovered(boostDB: 6, shortfallDB: 4)
+        )
+    }
+
+    func testBuildsFromDynamicsConfiguration() {
+        var d = DynamicsConfiguration()
+        XCTAssertFalse(EQClipProtection(dynamics: d, outputProtection: nil).isActive)
+        d.limiter.enabled = true
+        d.gainRider.enabled = true
+        let p = EQClipProtection(dynamics: d, outputProtection: nil)
+        XCTAssertTrue(p.hasLimiter)
+        XCTAssertTrue(p.gainRider)
+        XCTAssertEqual(p.primaryName, "limiter")
+    }
+}

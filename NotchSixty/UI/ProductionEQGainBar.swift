@@ -18,12 +18,16 @@ struct ProductionEQGainBar: View {
             boostDB: autoPreamp.prediction.boostDB,
             preampDB: engine.gainConfiguration.inputPreampDB,
             headroomAttenuationDB: engine.gainConfiguration.headroomAttenuationDB,
-            clipTripped: clipTripped
+            clipTripped: clipTripped,
+            protection: EQClipProtection(
+                dynamics: engine.dynamicsConfiguration,
+                outputProtection: UnifiedGraphOutputProtection.current()
+            )
         )
     }
 
     var body: some View {
-        HStack(alignment: .center, spacing: 16) {
+        HStack(alignment: .center, spacing: 12) {
             badgeView
 
             Spacer(minLength: 8)
@@ -35,7 +39,7 @@ struct ProductionEQGainBar: View {
                     range: DSPGainConfiguration.inputPreampRange,
                     set: { value in perform { try autoPreamp.setTrim(value) } }
                 )
-                .frame(maxWidth: 230)
+                .frame(maxWidth: 200)
                 .help("Your own input level. Auto preamp lowers the input by the EQ's predicted boost on top of it.")
                 Text(String(format: "Preamp %+.1f dB", engine.gainConfiguration.inputPreampDB))
                     .font(.caption.monospacedDigit())
@@ -47,7 +51,7 @@ struct ProductionEQGainBar: View {
                     range: DSPGainConfiguration.inputPreampRange,
                     set: { value in perform { try engine.setInputPreampDB(value) } }
                 )
-                .frame(maxWidth: 230)
+                .frame(maxWidth: 200)
                 .help("Gain before all processing. Lower it to leave headroom for EQ boosts.")
             }
 
@@ -65,10 +69,11 @@ struct ProductionEQGainBar: View {
                 range: DSPGainConfiguration.outputGainRange,
                 set: { value in perform { try engine.setOutputGainDB(value) } }
             )
-            .frame(maxWidth: 230)
+            .frame(maxWidth: 200)
             .help("Gain after all processing, before the output device.")
         }
-        .padding(12)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
         .background(.quaternary.opacity(0.24), in: .rect(cornerRadius: 14))
         .task { await pollMeter() }
         .onAppear { autoPreamp.reconcile() }
@@ -87,6 +92,7 @@ struct ProductionEQGainBar: View {
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
+        .frame(maxWidth: 280, alignment: .leading)
         .background(appearance.color.opacity(0.14), in: .rect(cornerRadius: 10))
         .help("A prediction from the filter math for a steady sine at full scale, not a bound on inter-sample peaks. The red state comes from the post-EQ meter.")
         .accessibilityElement(children: .combine)
@@ -115,6 +121,19 @@ struct ProductionEQGainBar: View {
             return Appearance(
                 title: "May clip",
                 detail: String(format: "EQ boosts up to %+.1f dB; lower the preamp by %.1f dB.", boost, shortfall),
+                symbol: "exclamationmark.triangle.fill",
+                color: .orange
+            )
+        case .uncoveredProtected(let boost, let shortfall, let protection):
+            let hard = protection.hasLimiter
+            let ceiling = protection.limiterCeilingDB ?? protection.outputHardLimitDB ?? 0
+            return Appearance(
+                title: hard ? "May clip: limiter will catch it" : "May clip: softened",
+                detail: hard
+                    ? String(format: "EQ boosts up to %+.1f dB, so peaks will likely hit the %@ (%.1f dB). Lower the preamp by %.1f dB to keep it from working.",
+                             boost, protection.primaryName, ceiling, shortfall)
+                    : String(format: "EQ boosts up to %+.1f dB; the %@ will reduce overs but cannot guarantee none. Lower the preamp by %.1f dB.",
+                             boost, protection.primaryName, shortfall),
                 symbol: "exclamationmark.triangle.fill",
                 color: .orange
             )
