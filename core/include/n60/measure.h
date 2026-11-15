@@ -18,7 +18,7 @@
 extern "C" {
 #endif
 
-#define N60_MEASURE_ABI_VERSION 4
+#define N60_MEASURE_ABI_VERSION 5
 
 #define N60_MEASURE_OK 0
 #define N60_MEASURE_ERR_ARGUMENT (-1)
@@ -28,6 +28,7 @@ extern "C" {
 #define N60_MEASURE_ERR_ALLOC (-5)
 #define N60_MEASURE_ERR_TIMING_REFERENCE (-6)   /* reference correlation peak too weak (E11 S2) */
 #define N60_MEASURE_ERR_NO_ACCEPTED_REPEATS (-7)
+#define N60_MEASURE_ERR_NO_ARRIVAL (-8)         /* no direct arrival above the noise (E21 S5) */
 
 /* Largest offline transform: 2^24 points (a 30 s sweep plus tail at 384 kHz). */
 #define N60_MEASURE_MAX_TRANSFORM 16777216u
@@ -487,6 +488,54 @@ uint32_t n60_rta_band_count(const n60_rta *rta);
 uint64_t n60_rta_frames_analysed(const n60_rta *rta);
 /* Writes band_count centres and levels (floor N60_SPL_FLOOR_DB); fails with ERR_CAPACITY when too small. */
 int32_t n60_rta_read(const n60_rta *rta, double *centre_hz, double *level_db, uint32_t capacity, uint32_t *band_count);
+
+/* ---- Room response analysis and program spectrum (E21 S5, ABI 5) ----
+ * The maths of RoomCorrectionMeasurementAnalyzer and the program analyser, offline only (allocates,
+ * deterministic, double precision). `impulse` is the full circular deconvolved response.
+ */
+
+/* Earliest credible onset (>= 10 % of the peak) in the first max(tail, 0.25 s) frames (at most half the
+ * response), then the largest |sample| within 3 ms of it. ERR_NO_ARRIVAL for a silent response. */
+int32_t n60_measure_direct_arrival(const float *impulse, uint64_t count, double sample_rate,
+                                   uint64_t tail_frames, uint64_t *arrival_out);
+
+/* Circular analysis window about the arrival: half-Hann rise over 10 ms before it, flat, half-Hann fall
+ * over the last quarter of 500 ms after it; zero elsewhere. out holds `count` frames. */
+int32_t n60_measure_window_impulse(const float *impulse, uint64_t count, uint64_t arrival_frame,
+                                   double sample_rate, float *out, uint64_t capacity);
+
+typedef struct n60_measure_response_params {
+    double sample_rate;
+    double start_hz;          /* sweep start; raised to one bin if lower */
+    double end_hz;            /* sweep end; limited to 0.98 of Nyquist */
+    uint32_t point_count;     /* log-spaced grid points, 2 .. 65536 (512 in the room-correction analyser) */
+    double arrival_frames;    /* bulk delay removed from the phase */
+} n60_measure_response_params;
+
+/*
+ * Transfer response of the windowed impulse (transform_size frames, a power of two) on a log grid:
+ * mean power over the bins between each point's geometric neighbours (one bin when narrower), dB with a
+ * -240 dB floor; phase with the arrival delay removed, wrapped then unwrapped along the grid.
+ */
+int32_t n60_measure_response_grid(const n60_measure_response_params *params, const float *windowed,
+                                  uint64_t transform_size, double *frequency_hz, double *magnitude_db,
+                                  double *phase_rad);
+
+typedef struct n60_measure_stereo_bands_params {
+    double sample_rate;
+    uint32_t fft_size;        /* power of two; left and right each hold fft_size frames */
+    uint32_t band_count;      /* log-spaced bands between min_hz and max_hz (288 in the analyser) */
+    double min_hz;
+    double max_hz;
+} n60_measure_stereo_bands_params;
+
+/*
+ * Program analyser: Hann-windowed (symmetric) spectra of both channels; each band's linear amplitude
+ * (2 / window sum) is the largest per-bin stereo energy mean sqrt((L^2 + R^2) / 2) across the band's bins.
+ * frequency_hz receives the geometric band centres; callers convert to dB and hold peaks.
+ */
+int32_t n60_measure_stereo_band_amplitude(const n60_measure_stereo_bands_params *params, const float *left,
+                                          const float *right, double *frequency_hz, double *amplitude);
 
 #ifdef __cplusplus
 }

@@ -21,6 +21,7 @@
 		E11C0000000000000000003C /* rta.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E11C0000000000000000001D /* rta.cpp */; };
 		E11C00000000000000000038 /* waterfall.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E11C00000000000000000018 /* waterfall.cpp */; };
 		E19S7A000000000000000008 /* predict.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E19S7A000000000000000007 /* predict.cpp */; };
+		E21S5A000000000000000002 /* room_analysis.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E21S5A000000000000000001 /* room_analysis.cpp */; };
 		E11C00000000000000000031 /* offline_fft.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E11C00000000000000000011 /* offline_fft.cpp */; };
 		E11C00000000000000000032 /* ess.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E11C00000000000000000012 /* ess.cpp */; };
 		E11C00000000000000000033 /* deconvolve.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E11C00000000000000000013 /* deconvolve.cpp */; };
@@ -80,6 +81,7 @@
 		E11C0000000000000000001D /* rta.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = measure/rta.cpp; sourceTree = "<group>"; };
 		E11C00000000000000000018 /* waterfall.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = measure/waterfall.cpp; sourceTree = "<group>"; };
 		E19S7A000000000000000007 /* predict.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = measure/predict.cpp; sourceTree = "<group>"; };
+		E21S5A000000000000000001 /* room_analysis.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = measure/room_analysis.cpp; sourceTree = "<group>"; };
 		E11C00000000000000000020 /* offline_fft.hpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.h; path = measure/offline_fft.hpp; sourceTree = "<group>"; };
 		E10A00000000000000000011 /* minphase.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = correct/minphase.cpp; sourceTree = "<group>"; };
 		E10A00000000000000000012 /* design.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = correct/design.cpp; sourceTree = "<group>"; };
@@ -186,6 +188,7 @@
 				E11C00000000000000000017 /* decay.cpp */,
 				E11C00000000000000000018 /* waterfall.cpp */,
 				E19S7A000000000000000007 /* predict.cpp */,
+				E21S5A000000000000000001 /* room_analysis.cpp */,
 				E11C0000000000000000001D /* rta.cpp */,
 				E10A00000000000000000011 /* minphase.cpp */,
 				E10A00000000000000000012 /* design.cpp */,
@@ -331,6 +334,7 @@
 				E11C00000000000000000037 /* decay.cpp in Sources */,
 				E11C00000000000000000038 /* waterfall.cpp in Sources */,
 				E19S7A000000000000000008 /* predict.cpp in Sources */,
+				E21S5A000000000000000002 /* room_analysis.cpp in Sources */,
 				E11C0000000000000000003C /* rta.cpp in Sources */,
 				E10A00000000000000000021 /* minphase.cpp in Sources */,
 				E10A00000000000000000022 /* design.cpp in Sources */,

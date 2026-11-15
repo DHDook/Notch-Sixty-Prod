@@ -69,6 +69,10 @@ struct RoomCorrectionMeasurementAnalyzer: Sendable {
     /// Fraction of the right window given to its half-Hann taper.
     static let rightWindowTaperFraction = 0.25
 
+    /// E21 S5: run arrival search, window and response grid in libn60core instead of Swift and vDSP. Resolved from
+    /// `e21.core-designers` when the analyzer is made; parity tests set it explicitly.
+    var useCoreMaths = FeatureFlags.isEnabledProcessWide(.coreDesigners)
+
     func analyze(
         capture: RoomCorrectionCalibrationCapture,
         plan: RoomCorrectionMeasurementPlan,
@@ -188,19 +192,50 @@ struct RoomCorrectionMeasurementAnalyzer: Sendable {
         }
 
         let transformSize = try Self.transformSize(requiredFrames: observed.count)
-        let dft = try RoomCorrectionDFT(size: transformSize)
         // Regularised division in the portable core (double precision), returning the full circular response.
         let fullImpulse = try MeasurementCore.deconvolve(
             excitation: excitation,
             observed: observed,
             regularizationRatio: Double(Self.regularizationPowerRatio)
         )
-        let arrivalFrame = try directArrivalFrame(
-            impulse: fullImpulse,
-            sampleRate: program.sampleRate,
-            tailFrames: program.tailFrames,
-            pass: pass
-        )
+        let arrivalFrame: Int
+        let response: RoomCorrectionFrequencyResponse
+        if useCoreMaths {
+            guard let arrival = try MeasurementCore.directArrival(
+                impulse: fullImpulse, sampleRate: program.sampleRate, tailFrames: program.tailFrames) else {
+                throw RoomCorrectionMeasurementAnalysisError.directArrivalNotFound(pass: pass)
+            }
+            arrivalFrame = arrival
+            response = try makeCoreFrequencyResponse(
+                windowed: MeasurementCore.windowedImpulse(
+                    fullImpulse, arrivalFrame: arrival, sampleRate: program.sampleRate),
+                sampleRate: program.sampleRate, settings: program.settings,
+                arrivalFrame: arrival, calibration: calibration)
+        } else {
+            let dft = try RoomCorrectionDFT(size: transformSize)
+            arrivalFrame = try directArrivalFrame(
+                impulse: fullImpulse,
+                sampleRate: program.sampleRate,
+                tailFrames: program.tailFrames,
+                pass: pass
+            )
+            let windowed = dft.forward(
+                Self.windowedImpulse(
+                    fullImpulse,
+                    arrivalFrame: arrivalFrame,
+                    sampleRate: program.sampleRate
+                )
+            )
+            response = try makeFrequencyResponse(
+                transferReal: windowed.real,
+                transferImaginary: windowed.imaginary,
+                transformSize: transformSize,
+                sampleRate: program.sampleRate,
+                settings: program.settings,
+                directArrivalFrame: arrivalFrame,
+                calibration: calibration
+            )
+        }
 
         let impulseFrameCount = min(
             fullImpulse.count / 2,
@@ -210,22 +245,6 @@ struct RoomCorrectionMeasurementAnalyzer: Sendable {
             )
         )
         let impulseResponse = Array(fullImpulse.prefix(max(1, impulseFrameCount)))
-        let windowed = dft.forward(
-            Self.windowedImpulse(
-                fullImpulse,
-                arrivalFrame: arrivalFrame,
-                sampleRate: program.sampleRate
-            )
-        )
-        let response = try makeFrequencyResponse(
-            transferReal: windowed.real,
-            transferImaginary: windowed.imaginary,
-            transformSize: transformSize,
-            sampleRate: program.sampleRate,
-            settings: program.settings,
-            directArrivalFrame: arrivalFrame,
-            calibration: calibration
-        )
         var quality = makeQuality(
             rawCapture: rawCapture,
             program: program,
@@ -448,6 +467,31 @@ struct RoomCorrectionMeasurementAnalyzer: Sendable {
             }
         }
         return arrival
+    }
+
+    /// The core's log-grid response, plus the microphone calibration (a Swift-side lookup added to the magnitude).
+    private func makeCoreFrequencyResponse(
+        windowed: [Float],
+        sampleRate: Double,
+        settings: RoomCorrectionSweepSettings,
+        arrivalFrame: Int,
+        calibration: RoomCorrectionMicrophoneCalibration?
+    ) throws -> RoomCorrectionFrequencyResponse {
+        var grid = try MeasurementCore.responseGrid(
+            windowed: windowed, sampleRate: sampleRate,
+            startHz: settings.startFrequencyHz, endHz: settings.endFrequencyHz,
+            pointCount: Self.responsePointCount, arrivalFrames: arrivalFrame)
+        if let calibration {
+            for index in grid.frequenciesHz.indices {
+                do {
+                    grid.magnitudeDB[index] += try calibration.gainDB(at: grid.frequenciesHz[index])
+                } catch {
+                    throw RoomCorrectionMeasurementAnalysisError.invalidMicrophoneCalibration
+                }
+            }
+        }
+        return RoomCorrectionFrequencyResponse(
+            frequenciesHz: grid.frequenciesHz, magnitudeDB: grid.magnitudeDB, phaseRadians: grid.phaseRadians)
     }
 
     private func makeFrequencyResponse(

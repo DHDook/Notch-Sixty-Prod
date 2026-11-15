@@ -5,7 +5,7 @@
 if selected e11_measure_core; then
     build_core_objs
     if [ "$CORE_OK" = 1 ]; then
-        for t in measure_fft measure measure_timing measure_analysis measure_waterfall measure_monitor generator; do
+        for t in measure_fft measure measure_timing measure_analysis measure_waterfall measure_room_analysis measure_monitor generator; do
             if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -Icore/include -Icore/src "core/tests/test_$t.cpp" \
                 "${CORE_OBJS[@]}" -o "$OUT/e11_core_$t" && "$OUT/e11_core_$t"; then
                 passed+=("e11_core_$t")
