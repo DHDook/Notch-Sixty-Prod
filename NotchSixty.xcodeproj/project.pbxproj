@@ -45,6 +45,7 @@
 		E8A000000000000000000022 /* stages_route.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E8A000000000000000000012 /* stages_route.cpp */; };
 		E19B00000000000000000022 /* stages_mimo.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E19B00000000000000000012 /* stages_mimo.cpp */; };
 		E25F0000000000000000F002 /* fold.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E25F0000000000000000F001 /* fold.cpp */; };
+		E7A20000000000000000A002 /* resample.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E7A20000000000000000A001 /* resample.cpp */; };
 		E6C000000000000000000036 /* layout.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E6C000000000000000000016 /* layout.cpp */; };
 
 /* End PBXBuildFile section */
@@ -110,6 +111,7 @@
 		E8A000000000000000000012 /* stages_route.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = stages_route.cpp; sourceTree = "<group>"; };
 		E19B00000000000000000012 /* stages_mimo.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = stages_mimo.cpp; sourceTree = "<group>"; };
 		E25F0000000000000000F001 /* fold.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = fold.cpp; sourceTree = "<group>"; };
+		E7A20000000000000000A001 /* resample.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = resample.cpp; sourceTree = "<group>"; };
 		E8A000000000000000000013 /* stages_route.hpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.h; path = stages_route.hpp; sourceTree = "<group>"; };
 		E19B00000000000000000013 /* stages_mimo.hpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.h; path = stages_mimo.hpp; sourceTree = "<group>"; };
 		A10000000000000000000025 /* Notch Sixty.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Notch Sixty.app"; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -170,6 +172,7 @@
 				E8A000000000000000000012 /* stages_route.cpp */,
 				E19B00000000000000000012 /* stages_mimo.cpp */,
 				E25F0000000000000000F001 /* fold.cpp */,
+				E7A20000000000000000A001 /* resample.cpp */,
 				E6C000000000000000000016 /* layout.cpp */,
 				E11C00000000000000000011 /* offline_fft.cpp */,
 				E11C00000000000000000012 /* ess.cpp */,
@@ -313,6 +316,7 @@
 				E8A000000000000000000022 /* stages_route.cpp in Sources */,
 				E19B00000000000000000022 /* stages_mimo.cpp in Sources */,
 				E25F0000000000000000F002 /* fold.cpp in Sources */,
+				E7A20000000000000000A002 /* resample.cpp in Sources */,
 				E6C000000000000000000036 /* layout.cpp in Sources */,
 				E11C00000000000000000031 /* offline_fft.cpp in Sources */,
 				E11C00000000000000000032 /* ess.cpp in Sources */,

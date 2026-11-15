@@ -138,8 +138,8 @@ struct BinauralProfileAsset: Codable, Equatable, Sendable, Identifiable {
         return max(1, Int(ceil(Double(tapCount) * target / source)))
     }
 
-    /// Converts every impulse response to `targetSampleRate` with Kaiser-windowed
-    /// band-limited interpolation (control plane only). Amplitudes are scaled by
+    /// Converts every impulse response to `targetSampleRate` with the core's Kaiser-windowed
+    /// band-limited interpolation (`AssetResampler`, control plane only). Amplitudes are scaled by
     /// source/target so each filter's frequency response, not just its
     /// waveform, is preserved; content above the lower Nyquist is band-limited.
     func resampled(to targetSampleRate: Double) throws -> BinauralProfileAsset {
@@ -153,60 +153,21 @@ struct BinauralProfileAsset: Codable, Equatable, Sendable, Identifiable {
             throw BinauralProfileAssetError.invalidMetadata
         }
         let step = sampleRate / targetSampleRate
-        // Normalized cutoff in source samples; 0.95 leaves a transition band
-        // below the lower Nyquist.
-        let cutoff = 0.95 * min(1.0, targetSampleRate / sampleRate)
-        let halfWidth = 32.0 / cutoff
-        let beta = 8.6
-        func besselI0(_ x: Double) -> Double {
-            var sum = 1.0, term = 1.0, k = 1.0
-            while term > 1.0e-12 * sum {
-                term *= (x / (2 * k)) * (x / (2 * k))
-                sum += term
-                k += 1
-            }
-            return sum
-        }
-        let i0Beta = besselI0(beta)
-        // Every IR shares the same sampling grid, so build the interpolation
-        // kernel once per output tap and reuse it across all measurements.
-        var kernelStart = [Int](repeating: 0, count: outputCount)
-        var kernels = [[Double]](repeating: [], count: outputCount)
-        for index in 0..<outputCount {
-            let position = Double(index) * step
-            let first = max(0, Int(ceil(position - halfWidth)))
-            let last = min(tapCount - 1, Int(floor(position + halfWidth)))
-            kernelStart[index] = first
-            guard first <= last else { continue }
-            kernels[index] = (first...last).map { k in
-                let distance = position - Double(k)
-                let x = cutoff * distance
-                let sinc = abs(x) < 1.0e-12 ? 1.0 : sin(Double.pi * x) / (Double.pi * x)
-                let ratio = distance / halfWidth
-                let window = besselI0(beta * sqrt(max(0, 1 - ratio * ratio))) / i0Beta
-                return cutoff * sinc * window * step
-            }
-        }
-        func convert(_ source: [Float]) -> [Float] {
-            var output = [Float](repeating: 0, count: outputCount)
-            for index in 0..<outputCount {
-                let first = kernelStart[index]
-                var acc = 0.0
-                for (offset, weight) in kernels[index].enumerated() {
-                    acc += Double(source[first + offset]) * weight
-                }
-                output[index] = Float(acc)
-            }
-            return output
+        // One core resampler (n60/resample.h, E7 S2): every IR shares the same sampling grid, so the whole set is
+        // converted in one batch with the standard (binaural) kernel.
+        let flat = measurements.flatMap { [$0.leftIR, $0.rightIR] }
+        guard let results = AssetResampler.resample(flat, from: sampleRate, to: targetSampleRate, quality: .standard),
+              results.allSatisfy({ $0.count == outputCount }) else {
+            throw BinauralProfileAssetError.invalidMetadata
         }
         var converted = self
         converted.sampleRate = targetSampleRate
         converted.tapCount = outputCount
         converted.declaredLatencyFrames = Int((Double(declaredLatencyFrames) / step).rounded())
-        converted.measurements = measurements.map { measurement in
+        converted.measurements = measurements.enumerated().map { index, measurement in
             var copy = measurement
-            copy.leftIR = convert(measurement.leftIR)
-            copy.rightIR = convert(measurement.rightIR)
+            copy.leftIR = results[2 * index]
+            copy.rightIR = results[2 * index + 1]
             return copy
         }
         try converted.validate()

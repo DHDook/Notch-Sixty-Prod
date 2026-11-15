@@ -1125,6 +1125,12 @@ struct ContentView: View {
             if let filter {
                 Text("Loaded: \(filter.name) — \(filter.leftTaps.count) taps / declared latency \(filter.declaredLatencyFrames) frame\(filter.declaredLatencyFrames == 1 ? "" : "s")")
                     .font(.caption)
+                // E7 S2: a rated impulse response is resampled to the output rate; the stored original is kept.
+                if let note = SpeakerIRRateAdapter.rowNote(
+                    for: filter, outputSampleRate: engine.selectedOutputDevice?.nominalSampleRate ?? 0,
+                    enabled: FeatureFlags().isEnabled(.rateAdapt)) {
+                    Text(note).font(.caption).foregroundStyle(.secondary)
+                }
             } else {
                 Text("No Speaker IR loaded. The independent global Speaker IR slot is bypassed.")
                     .font(.caption)

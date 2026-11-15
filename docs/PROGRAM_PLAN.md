@@ -224,7 +224,7 @@ Gate G2 passed on 2026-10-25 (commit 07e82c6)
 - [~] Express every buffer capacity in time, not frames, and size it at the 384 kHz worst case (E7 S1 done; E7 G2-G4 close in S5, G1 in E23)
 - [~] Lift the known frame caps: program FIR 32,768 taps, headphone delay 4,096 frames (headphone delay to 20 ms done in E7 S1; kernel 4,095 limit stays until E23, E7 G1) (binaural 8,192 taps moved to E13, owner 31 Oct 2026)
 - [ ] Extend the PR117A double-precision fix beyond the crossover: user EQ, lane EQ, subwoofer EQ and headphone PEQ still use float32 coefficients and state, which loses low-frequency accuracy at high rates
-- [ ] Keep HRIR resampling on activation; add the same policy for any imported IR or SOFA asset
+- [~] Keep HRIR resampling on activation; add the same policy for any imported IR or SOFA asset (E7 S2 built: speaker IR resampling dark behind `e7.rate-adapt`, no production importer yet (E7 G5); research SOFA is a note only (E7 G7); remaining owner: E7 S5)
 - [ ] Run the XCTest acoustic reference lab at 44.1, 48, 88.2, 96, 176.4, 192, 352.8 and 384 kHz
 - [ ] Check Audio Unit hosting: report clearly when a plug-in refuses a rate
 - [ ] Bench: confirm CPU headroom at 384 kHz on the slowest supported Mac
