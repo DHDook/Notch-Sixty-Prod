@@ -152,11 +152,15 @@ int main(void) {
              * the difference to the kernel is the kernel's own float error, so the bound is looser (peak -85, rms -95). */
             /* E20 S10 part 5 (G45): the de-harsh and de-esser shelves are float biquads run through the single-rounded fma
              * pair kernels, so they differ from the kernel's own float rounding by up to about -107 dBFS peak at 384 kHz
-             * (measured; the response is identical). Bound -100 peak, -115 rms for those configs. */
+             * (measured; the response is identical). Bound -100 peak, -115 rms for those configs.
+             * E7 S4: the core de-esser release pole and gain state are double now, the kernel's are still float, so at 352.8 kHz
+             * (1 s release pole within 2.3 percent of float spacing) the difference is the kernel's own float error: measured
+             * -95.3 dBFS peak (config 4 and the live-change config 6), rms -116.0 / -119.5, gain reduction within 0.001 dB.
+             * Peak bound for those configs is -93 (was -100); every other rate stays under -100 (384 kHz -103.5). */
             const int shelf = c->harsh || c->ess || c2->harsh || c2->ess;
-            const double peakBound = c->wide ? -85.0 : (shelf ? -100.0 : -120.0), rmsBound = c->wide ? -95.0 : (shelf ? -115.0 : -130.0);
-            if (!(20 * log10(peak + 1e-30) < peakBound)) { fprintf(stderr, "FAIL peak\n"); failures++; }
-            if (!(20 * log10(rms + 1e-30) < rmsBound)) { fprintf(stderr, "FAIL rms\n"); failures++; }
+            const double peakBound = c->wide ? -85.0 : (shelf ? -93.0 : -120.0), rmsBound = c->wide ? -95.0 : (shelf ? -115.0 : -130.0);
+            if (!(20 * log10(peak + 1e-30) < peakBound)) { fprintf(stderr, "FAIL peak rate %.0f m %u: %.1f dBFS (bound %.0f)\n", rate, m, 20 * log10(peak + 1e-30), peakBound); failures++; }
+            if (!(20 * log10(rms + 1e-30) < rmsBound)) { fprintf(stderr, "FAIL rms rate %.0f m %u: %.1f dBFS (bound %.0f)\n", rate, m, 20 * log10(rms + 1e-30), rmsBound); failures++; }
             if (!(grDiff < 0.01)) { fprintf(stderr, "FAIL gain reduction\n"); failures++; }
             n60_graph_retire(g);
         }
