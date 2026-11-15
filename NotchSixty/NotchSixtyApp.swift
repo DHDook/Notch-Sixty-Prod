@@ -114,6 +114,7 @@ final class ProductController: ObservableObject {
         // E4 S32: the live-output flags are decided in one place so a test drives the production configuration.
         let adaptiveTonalLive = QuietZoneFlagWiring.configureEngine(audioEngine, flags: FeatureFlags())
         let audioUnitHost = AudioUnitHostController()
+        audioUnitHost.rateAdaptEnabled = FeatureFlags().isEnabled(.rateAdapt)
         let profiles = ProductProfileController(
             engine: audioEngine,
             audioUnitHost: audioUnitHost
@@ -240,6 +241,7 @@ final class ProductController: ObservableObject {
             ProductRecoveryStore(storageURL: nil)
     ) {
         let audioUnitHost = AudioUnitHostController()
+        audioUnitHost.rateAdaptEnabled = FeatureFlags().isEnabled(.rateAdapt)
         let profiles = ProductProfileController(
             engine: audioEngine,
             audioUnitHost: audioUnitHost

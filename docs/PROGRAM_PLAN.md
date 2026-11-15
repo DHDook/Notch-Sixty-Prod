@@ -226,7 +226,7 @@ Gate G2 passed on 2026-10-25 (commit 07e82c6)
 - [ ] Extend the PR117A double-precision fix beyond the crossover: user EQ, lane EQ, subwoofer EQ and headphone PEQ still use float32 coefficients and state, which loses low-frequency accuracy at high rates
 - [~] Keep HRIR resampling on activation; add the same policy for any imported IR or SOFA asset (E7 S2 built: speaker IR resampling dark behind `e7.rate-adapt`, no production importer yet (E7 G5); research SOFA is a note only (E7 G7); remaining owner: E7 S5)
 - [ ] Run the XCTest acoustic reference lab at 44.1, 48, 88.2, 96, 176.4, 192, 352.8 and 384 kHz
-- [ ] Check Audio Unit hosting: report clearly when a plug-in refuses a rate
+- [~] Check Audio Unit hosting: report clearly when a plug-in refuses a rate (E7 S3 built: per-rate bypass dark behind `e7.rate-adapt`; production wiring in E7 S5, G9 and G10)
 - [ ] Bench: confirm CPU headroom at 384 kHz on the slowest supported Mac
 - [ ] S5 `e7/rate-matrix-ship` graduates `e7.rate-adapt` (default on; removal is the FC phase)
 
