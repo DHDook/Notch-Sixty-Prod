@@ -18,6 +18,7 @@ struct ProductionEqualizerView: View {
     @State private var pendingDragBand: EQBand?
     @State private var pendingPublishTask: Task<Void, Never>?
     @State private var actionError: String?
+    @State private var showCompare = false
     /// E27 S1: undo and redo for edits made on this page, on the window's undo manager.
     @Environment(\.undoManager) private var undoManager
     @State private var history = EQEditHistory()
@@ -55,7 +56,13 @@ struct ProductionEqualizerView: View {
     }
 
     private var configuration: StereoEQConfiguration { engine.stereoEQConfiguration }
-    private var bands: [EQBand] { configuration.editableBands }
+    /// Bands in frequency order, so band numbers always follow frequency (ties keep stored order).
+    private var bands: [EQBand] { Self.frequencyOrdered(configuration.editableBands) }
+    private static func frequencyOrdered(_ bands: [EQBand]) -> [EQBand] {
+        bands.enumerated()
+            .sorted { ($0.element.frequencyHz, $0.offset) < ($1.element.frequencyHz, $1.offset) }
+            .map(\.element)
+    }
     private var sampleRate: Double { engine.selectedOutputDevice?.nominalSampleRate ?? 48_000 }
     private var maximumFrequency: Double { max(20, sampleRate * 0.49) }
     private var yRange: EQGraphYRange { EQGraphYRange(rawValue: yRangeRaw) ?? .plusMinus24 }
@@ -63,7 +70,7 @@ struct ProductionEqualizerView: View {
     private var bandCurvesMode: EQBandCurvesMode { EQBandCurvesMode(rawValue: bandCurvesRaw) ?? .selected }
     /// The bands as drawn: the band under a drag shows its preview.
     private var shownBands: [EQBand] {
-        bands.map { band in dragPreview.flatMap { $0.id == band.id ? $0 : nil } ?? band }
+        Self.frequencyOrdered(bands.map { band in dragPreview.flatMap { $0.id == band.id ? $0 : nil } ?? band })
     }
 
     private struct AnalysisKey: Equatable {
@@ -88,42 +95,24 @@ struct ProductionEqualizerView: View {
         try? await Task.sleep(for: .milliseconds(50))
         guard !Task.isCancelled else { return }
         let upper = key.zoom.maximumFrequency(sampleRate: key.sampleRate)
-        let result = await Task.detached(priority: .userInitiated) {
+        // Cancel the detached work with the task, so rapid edits do not stack up
+        // large linear-phase designs (FFT buffers at high rates).
+        let work = Task.detached(priority: .userInitiated) { () -> EQAnalysisSeries? in
+            if Task.isCancelled { return nil }
             let analysis = EQFilterAnalysis(bands: key.bands, phaseMode: key.phaseMode, sampleRate: key.sampleRate)
             let grid = EQFilterAnalysis.frequencyGrid(lower: EQGraphGeometry.minimumFrequency, upper: upper, count: 360)
             return analysis.series(for: key.view, frequencies: grid)
-        }.value
+        }
+        let result = await withTaskCancellationHandler { await work.value } onCancel: { work.cancel() }
+        guard let result else { return }
         guard !Task.isCancelled else { return }
         series = result
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            header
-            ProductionActionErrorBanner(message: $actionError)
-            modeBar
-
-            if let comparison, let audition {
-                ProductionEQCompareBar(
-                    comparison: comparison, audition: audition, history: history,
-                    selectedBand: bands.first { $0.id == selectedBandID }, perform: { perform($0) }
-                )
-            }
-
-            ProductionEQGainBar(engine: engine, autoPreamp: autoPreamp, perform: { perform($0) })
-
-            responseGraph
-
-            HStack(alignment: .top, spacing: 12) {
-                bandsPanel
-                    .frame(minWidth: 300, maxWidth: .infinity)
-                bandEditorPane
-                    .frame(minWidth: 300, idealWidth: 330, maxWidth: 360)
-            }
-            .frame(minHeight: 240, idealHeight: 300, maxHeight: 300)
-            .layoutPriority(1)
+        ScrollView {
+            pageContent
         }
-        .padding(24)
         .task(id: analysisKey) { await refreshSeries(analysisKey) }
         .onAppear {
             ensureSelection()
@@ -144,12 +133,40 @@ struct ProductionEqualizerView: View {
         }
     }
 
+    private var pageContent: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            header
+            ProductionActionErrorBanner(message: $actionError)
+            modeBar
+
+            if showCompare, let comparison, let audition {
+                ProductionEQCompareBar(
+                    comparison: comparison, audition: audition, history: history,
+                    selectedBand: bands.first { $0.id == selectedBandID }, perform: { perform($0) }
+                )
+            }
+
+            ProductionEQGainBar(engine: engine, autoPreamp: autoPreamp, perform: { perform($0) })
+
+            responseGraph
+
+            HStack(alignment: .top, spacing: 12) {
+                bandsPanel
+                    .frame(minWidth: 260, maxWidth: .infinity)
+                bandEditorPane
+                    .frame(minWidth: 260, idealWidth: 300, maxWidth: 320)
+            }
+            .frame(height: 250)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+    }
+
     private var header: some View {
         HStack(alignment: .firstTextBaseline) {
-            VStack(alignment: .leading, spacing: 5) {
-                Text("Static and Dynamic EQ share one band model. Drag a band on the response graph or edit it in the Bands panel.")
-                    .foregroundStyle(.secondary)
-            }
+            Text("Static and Dynamic EQ share one band model. Drag a band on the response graph or edit it in the Bands panel.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
             Spacer()
             Text("\(configuration.enabledBandCount) ACTIVE")
                 .font(.caption.bold())
@@ -218,6 +235,12 @@ struct ProductionEqualizerView: View {
 
                 Spacer(minLength: 8)
 
+                if comparison != nil, audition != nil {
+                    Toggle("Compare", isOn: $showCompare)
+                        .toggleStyle(.switch)
+                        .fixedSize(horizontal: true, vertical: false)
+                }
+
                 Toggle("Bypass", isOn: Binding(
                     get: { configuration.bypassed },
                     set: { bypassed in perform { try engine.setEQBypassed(bypassed) } }
@@ -226,8 +249,9 @@ struct ProductionEqualizerView: View {
                 .fixedSize(horizontal: true, vertical: false)
                 .layoutPriority(1)
             }
-            .padding(12)
-            .glassEffect(.regular, in: .rect(cornerRadius: 18))
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .glassEffect(.regular, in: .rect(cornerRadius: 16))
         }
     }
 
@@ -287,7 +311,7 @@ struct ProductionEqualizerView: View {
                 rtaOverlay: liveOverlay.showsRTA ? liveOverlay.rtaCurve : nil,
                 programSpectrum: programSpectrum
             )
-            .frame(minHeight: 260, maxHeight: .infinity)
+            .frame(minHeight: 200, idealHeight: 280, maxHeight: 340)
 
             if let note = graphView == .magnitude ? nil : series?.note {
                 Label(note, systemImage: "info.circle")
@@ -309,9 +333,8 @@ struct ProductionEqualizerView: View {
                 .foregroundStyle(.secondary)
             }
         }
-        .padding(16)
-        .frame(maxHeight: .infinity, alignment: .top)
-        .background(.quaternary.opacity(0.24), in: .rect(cornerRadius: 20))
+        .padding(12)
+        .background(.quaternary.opacity(0.24), in: .rect(cornerRadius: 16))
     }
 
     private var graphControls: some View {
@@ -1095,8 +1118,9 @@ private struct ProductionEQResponseGraph: View {
                             .foregroundStyle(isSelected ? Color.white : Color.primary)
                     }
                     .frame(width: diameter, height: diameter)
-                    .position(point)
                     .opacity(band.enabled ? 1 : 0.42)
+                    // The hit shape must be set on the handle itself, before `.position` expands
+                    // the view to the whole graph; otherwise one handle swallows every click.
                     .contentShape(Circle().inset(by: -10))
                     .gesture(
                         DragGesture(minimumDistance: 0, coordinateSpace: .named("eq.graph"))
@@ -1113,12 +1137,18 @@ private struct ProductionEQResponseGraph: View {
                                 dragSession = nil
                             }
                     )
+                    // A plain click selects the band; the drag above only fires once the pointer moves.
+                    .simultaneousGesture(TapGesture().onEnded {
+                        graphFocused = true
+                        onSelect(band.id)
+                    })
                     .simultaneousGesture(TapGesture(count: 2).onEnded { onResetBand(band.id) })
                     .accessibilityElement(children: .ignore)
                     .accessibilityLabel(EQBandPanelModel.accessibilityLabel(number: index + 1, band: band))
                     .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
                     .accessibilityAction { onSelect(band.id) }
                     .accessibilityIdentifier("eq.graph.handle.\(index + 1)")
+                    .position(point)
                 }
                 if bypassed {
                     Text("EQ BYPASSED")
@@ -1172,6 +1202,7 @@ private struct ProductionEQResponseGraph: View {
                 }
             }
             .focusable()
+            .focusEffectDisabled()
             .focused($graphFocused)
             .onKeyPress(phases: [.down, .repeat]) { press in handleKey(press) }
         }

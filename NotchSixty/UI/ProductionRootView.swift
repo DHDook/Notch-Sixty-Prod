@@ -2101,7 +2101,8 @@ struct ProductionGainStepper: View {
             Text(title)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
-            Spacer(minLength: 8)
+                .fixedSize(horizontal: true, vertical: false)
+            Spacer(minLength: 6)
             Button {
                 commit(value - Self.step)
             } label: {
@@ -2116,7 +2117,7 @@ struct ProductionGainStepper: View {
                 .textFieldStyle(.roundedBorder)
                 .multilineTextAlignment(.trailing)
                 .monospacedDigit()
-                .frame(width: 70)
+                .frame(width: 62)
                 .focused($editing)
                 .onSubmit { commitDraft() }
                 .onChange(of: editing) { _, isEditing in

@@ -39,6 +39,8 @@ final class EQShipTests: XCTestCase {
         var snapshot = try engine.stereoTransportStartGraph(sampleRate: rate)
         var configuration = try XCTUnwrap(UnifiedGraphTranslator.stereoConfiguration(snapshot: &snapshot, sampleRate: rate))
         configuration.analyserTaps = taps
+        // These tests measure the EQ and gain stages themselves; the -1 dB output hard limit would cap every clip.
+        configuration.outputProtection = nil
         return try UnifiedGraphHost(spec: try configuration.makeSpec())
     }
 
