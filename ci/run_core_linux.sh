@@ -1,44 +1,21 @@
 #!/usr/bin/env bash
-# Build libn60core with clang (-Werror) and run its unit tests. Portable: runs on Linux (pr.yml and
-# macos-full.yml core-linux jobs) and on macOS. E1 S7; moved out of macos-full.yml so both share it.
+# Build libn60core and every portable core test from core/CMakeLists.txt with clang (-Werror) and run them with
+# ctest. CMake is the one source list (core/sources.cmake). Portable: Linux (pr.yml and macos-full.yml core-linux
+# jobs) and macOS. E1 S7; E21 S1 moved it from a hand-kept compile list to CMake, so every registered test runs.
+# Debug is built -O1 -g (no NDEBUG): unoptimised, the heaviest design tests run for more than ten minutes each.
+# Usage: ci/run_core_linux.sh [Release] [Debug] (default: both).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 TMP="${RUNNER_TEMP:-$(mktemp -d)}"
 clang++ --version
-# Keep this list in step with build_core_objs in ci/run_harnesses.sh.
-source ci/core_sources.sh
-LIB=()
-for f in "${CORE_SOURCES[@]}"; do
-  obj="$TMP/n60core_${f//\//_}.o"
-  clang++ -std=c++20 -O2 -Wall -Wextra -Werror -Wno-unknown-warning-option -Werror=function-effects \
-    -fno-exceptions -fno-rtti -Icore/include -Icore/src -c core/src/$f.cpp -o "$obj"
-  LIB+=("$obj")
+cmake --version | head -1
+CONFIGS=("$@")
+[ ${#CONFIGS[@]} -gt 0 ] || CONFIGS=(Release Debug)
+JOBS="$( (nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null) || echo 4)"
+for cfg in "${CONFIGS[@]}"; do
+  dir="$TMP/n60core_build_$cfg"
+  cmake -S core -B "$dir" -DCMAKE_BUILD_TYPE="$cfg" -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
+    -DCMAKE_C_FLAGS_DEBUG="-O1 -g" -DCMAKE_CXX_FLAGS_DEBUG="-O1 -g"
+  cmake --build "$dir" --parallel "$JOBS"
+  ctest --test-dir "$dir" --output-on-failure --parallel "$JOBS" --timeout 1200
 done
-for t in test_graph test_stages test_dsp test_system test_rebuild test_denoiser_carry test_layout test_multisub test_readbacks; do
-  clang -std=c11 -O2 -Wall -Wextra -Werror -Icore/include -c core/tests/$t.c -o "$TMP/$t.o"
-  clang++ "$TMP/$t.o" "${LIB[@]}" -lm -pthread -o "$TMP/$t"
-  "$TMP/$t"
-done
-clang++ -std=c++20 -O2 -Wall -Wextra -Werror -Icore/include core/tests/test_alloc.cpp \
-  "${LIB[@]}" -o "$TMP/test_alloc"
-"$TMP/test_alloc"
-clang++ -std=c++20 -O2 -Wall -Wextra -Werror -Icore/include -Icore/src core/tests/test_fpenv.cpp \
-  "${LIB[@]}" -o "$TMP/test_fpenv"
-"$TMP/test_fpenv"
-clang++ -std=c++20 -O2 -Wall -Wextra -Werror -Icore/include core/tests/test_parallel.cpp \
-  "${LIB[@]}" -pthread -o "$TMP/test_parallel"
-"$TMP/test_parallel"
-# E20 S6b (G26): the same test pinned to two cores, three workers plus the render thread contending for them.
-N60_PARALLEL_TEST_CPUS=2 N60_PARALLEL_TEST_LITE=1 "$TMP/test_parallel"
-# E20 G19: PROTECTION half-band path against the 65-tap double-precision form.
-clang++ -std=c++20 -O2 -Wall -Wextra -Werror -Icore/include core/tests/test_protection_halfband.cpp \
-  "${LIB[@]}" -o "$TMP/test_protection_halfband"
-"$TMP/test_protection_halfband"
-# E20 S10b (G33): lane-parallel PROTECTION is bit-identical to the serial stage at 1 to 3 workers.
-clang++ -std=c++20 -O2 -Wall -Wextra -Werror -Icore/include core/tests/test_protection_parallel.cpp \
-  "${LIB[@]}" -pthread -o "$TMP/test_protection_parallel"
-"$TMP/test_protection_parallel"
-clang++ -std=c++20 -O2 -Wall -Wextra -Werror -Icore/include -Icore/src core/tests/test_conv.cpp \
-  "${LIB[@]}" -o "$TMP/test_conv"
-"$TMP/test_conv"
-"$TMP/test_graph"

@@ -1,13 +1,10 @@
-# Single list of libn60core sources (paths under core/src, without .cpp).
-# Sourced by ci/run_harnesses.sh and .github/workflows/macos-full.yml so the
-# lists cannot drift apart. Keep in step with core/CMakeLists.txt.
-CORE_SOURCES=(
-    graph snapshot fft stages_dsp conv/nufir stages_system stages_matrix stages_generator
-    stages_cleanup stages_image stages_loudness stages_multiband stages_route stages_mimo fold layout resample
-    measure/offline_fft measure/ess measure/deconvolve measure/reference_room measure/timing
-    measure/distortion measure/decay measure/waterfall measure/monitor_ring measure/spl
-    measure/rta correct/minphase correct/design correct/synth correct/bass
-    correct/multisub_search xover/xover headroom/headroom mimo/design
-)
-# E21 S0: core/src/anc/{fxlms,remote_tonal}.cpp are not in this list: they still use try/catch (exceptions on) and
-# the ANC harnesses compile them directly. They are in core/CMakeLists.txt. E21 S4 folds them in (gap G1).
+# Single list of libn60core sources (paths under core/src, without .cpp), read from core/sources.cmake (E21 S1), which
+# is the one source of truth. Sourced by ci/run_harnesses.sh, ci/build_benchmarks.sh and the workflows.
+# core/src/anc/{fxlms,remote_tonal}.cpp are in N60_CORE_ANC_SOURCES, not here: they still use try/catch (exceptions on)
+# and the ANC harnesses compile them directly. E21 S4 folds them in (gap G1).
+_n60_sources_cmake="$(dirname "${BASH_SOURCE[0]}")/../core/sources.cmake"
+CORE_SOURCES=()
+while IFS= read -r _f; do
+    CORE_SOURCES+=("$_f")
+done < <(sed -n '/^set(N60_CORE_SOURCES/,/)/p' "$_n60_sources_cmake" | grep -o 'src/[A-Za-z0-9_/]*\.cpp' | sed 's|^src/||; s|\.cpp$||')
+unset _n60_sources_cmake _f

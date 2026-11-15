@@ -9,6 +9,7 @@
 #import "n60/headroom.h"
 #import "n60/mimo.h"
 #import "n60/fold.h"
+#import "n60/n60.h"
 #import "n60/resample.h"
 #import "N60MeasurementMonitorProc.h"
 #import "N60LevelSessionProc.h"

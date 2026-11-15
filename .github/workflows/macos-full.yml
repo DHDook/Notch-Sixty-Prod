@@ -128,12 +128,38 @@ jobs:
   core-linux:
     if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-ci')
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
 
-      - name: Build and test libn60core (clang, Linux)
-        run: ci/run_core_linux.sh
+      # E21 S1: CMake + ctest over every portable core test, Debug and Release.
+      - name: Build and test libn60core (clang, Linux, ctest, Debug and Release)
+        run: ci/run_core_linux.sh Release Debug
+
+  # E21 S1: the portable core on Windows (clang-cl): the same CMake list and ctest as Linux, with
+  # /W4 /WX /EHs-c- /GR-. No Apple framework is reachable from core/, so this is the proof for the Windows backend work later.
+  # Tests that need POSIX threads or sched affinity are not built there (gap G3 in docs/epics/E21.md).
+  core-windows:
+    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-ci')
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      # The Visual Studio generator with the ClangCL toolset needs no vcvars step and no third-party action (Ninja would).
+      - name: Configure libn60core (clang-cl via Visual Studio generator)
+        shell: cmd
+        run: cmake -S core -B "%RUNNER_TEMP%\n60core_win" -G "Visual Studio 17 2022" -A x64 -T ClangCL
+
+      - name: Build libn60core and its tests (Release)
+        shell: cmd
+        run: cmake --build "%RUNNER_TEMP%\n60core_win" --config Release --parallel 4
+
+      - name: Run ctest (Release)
+        shell: cmd
+        run: ctest --test-dir "%RUNNER_TEMP%\n60core_win" -C Release --output-on-failure --parallel 4 --timeout 1200
 
   # E20 G23: the parallel render under ThreadSanitizer (workers, join, rebuild fade, worker retune). Lite corpus: the
   # sanitizer slows the render about tenfold.

@@ -27,7 +27,6 @@
 #include "stages_matrix.hpp"
 #include "stages_system.hpp"
 
-#include <sched.h>
 #include <algorithm>
 #include <cfloat>
 #include <chrono>
@@ -35,6 +34,7 @@
 #include <cstddef>
 #include <cstring>
 #include <new>
+#include <thread>
 
 namespace n60 {
 namespace {
@@ -1349,8 +1349,8 @@ inline void spinWait(uint32_t &spins) N60_RT_NONBLOCKING {
         return;
     }
     spins = 0;
-    N60_RT_TRUST_BEGIN  // sched_yield does not block or allocate
-    sched_yield();
+    N60_RT_TRUST_BEGIN  // yield (sched_yield on POSIX, SwitchToThread on Windows) does not block or allocate
+    std::this_thread::yield();
     N60_RT_TRUST_END
 }
 
