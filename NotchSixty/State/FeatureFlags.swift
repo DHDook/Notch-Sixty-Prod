@@ -34,7 +34,8 @@ extension FeatureFlag {
         .legacyKernel, .ancEngineLease, .adaptiveTonalLive, .earnedCap, .feedForwardLive,
         .noiseSurvey, .conversationUnmasking, .virtualMicrophone, .zones, .headPositionCamera, .overnight,
         .subAwareAnc, .longFIR, .outputProtection, .headphones, .mimoTreatment, .dynamicsExtras, .roomModel,
-        .parallelRender, .multirate, .rateAdapt, .coreDesigners
+        .parallelRender, .multirate, .rateAdapt, .coreDesigners,
+        .eqPageEnhancements
     ]
 
     /// E6 S11: the unified graph is the default renderer. Turning this on selects the frozen
@@ -260,6 +261,13 @@ extension FeatureFlag {
         id: "e21.core-designers",
         title: "Portable core designers and analysis",
         epic: "E21"
+    )
+    /// E33 S1: Equalizer page layout (band list and two-column editor), range hint and moved-to-fit note, and the
+    /// sectioned filter picker; later slices add the Dynamics and Meters changes. Off: today's pages and parameters.
+    static let eqPageEnhancements = FeatureFlag(
+        id: "e33.page-enhancements",
+        title: "Equalizer, Dynamics and Meters enhancements",
+        epic: "E33"
     )
 }
 

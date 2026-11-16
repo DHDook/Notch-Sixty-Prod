@@ -31,6 +31,11 @@ struct ProductionEqualizerView: View {
     @State private var graphView: EQGraphView = .magnitude
     @State private var series: EQAnalysisSeries?
     @State private var autoMemory = EQAutoRangeMemory()
+    /// E33 S1: new layout, hint, picker and wording. Off keeps today's page.
+    private let enhanced = FeatureFlags().isEnabled(.eqPageEnhancements)
+    @State private var pageWidth = 1_000.0
+    /// The sanitiser moved this band to fit its range; cleared by the next edit of the band.
+    @State private var movedNote: (id: UUID, text: String)?
 
     private func perform(_ action: () throws -> Void) {
         do {
@@ -183,23 +188,44 @@ struct ProductionEqualizerView: View {
 
             responseGraph
 
-            HStack(alignment: .top, spacing: 12) {
-                bandsPanel
-                    .frame(minWidth: 260, maxWidth: .infinity)
-                bandEditorPane
-                    .frame(minWidth: 260, idealWidth: 300, maxWidth: 320)
+            if enhanced {
+                enhancedBandArea
+            } else {
+                HStack(alignment: .top, spacing: 12) {
+                    bandsPanel
+                        .frame(minWidth: 260, maxWidth: .infinity)
+                    bandEditorPane
+                        .frame(minWidth: 260, idealWidth: 300, maxWidth: 320)
+                }
+                .frame(height: 250)
             }
-            .frame(height: 250)
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 8)
+        .onGeometryChange(for: Double.self) { $0.size.width } action: { pageWidth = $0 }
+    }
+
+    /// E33 S1 (design 7): band list about one third of the width, editor beside it in two columns (static left,
+    /// dynamic right), or one scrolling column below the breakpoint. Panels size to content.
+    @ViewBuilder
+    private var enhancedBandArea: some View {
+        let columns = EQEditorLayout.columns(pageWidth: pageWidth)
+        HStack(alignment: .top, spacing: 12) {
+            bandsPanel
+                .frame(width: EQEditorLayout.listWidth(pageWidth: pageWidth))
+                .frame(height: EQEditorLayout.listHeight(bandCount: bands.count))
+            bandEditorPane(columns: columns)
+                .frame(maxWidth: .infinity)
+        }
     }
 
     private var header: some View {
         HStack(alignment: .firstTextBaseline) {
-            Text("Static and Dynamic EQ share one band model. Drag a band on the response graph or edit it in the Bands panel.")
-                .font(.callout)
-                .foregroundStyle(.secondary)
+            if !enhanced {
+                Text("Static and Dynamic EQ share one band model. Drag a band on the response graph or edit it in the Bands panel.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
             Spacer()
             Text("\(activeBandCount) ACTIVE")
                 .font(.caption.bold())
@@ -585,26 +611,37 @@ struct ProductionEqualizerView: View {
         return limit
     }
 
-    private var bandEditorPane: some View {
+    private var bandEditorPane: some View { bandEditorPane(columns: .one) }
+
+    private func bandEditorPane(columns: EQEditorLayout.Columns) -> some View {
         Group {
             if let id = selectedBandID,
                let index = bands.firstIndex(where: { $0.id == id }),
                let binding = selectedBandBinding(for: id) {
                 let band = binding.wrappedValue
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 16) {
+                if enhanced && columns == .two {
+                    VStack(alignment: .leading, spacing: 12) {
                         editorHeader(number: index + 1, band: band, binding: binding)
-                        staticControls(band: band, binding: binding)
-                        Divider()
-                        if band.type.supportsDynamicEQ {
-                            dynamicControls(band: band, binding: binding)
-                        } else {
-                            Label("Dynamic EQ is unavailable for this filter type.", systemImage: "bolt.slash")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                        HStack(alignment: .top, spacing: 18) {
+                            staticControls(band: band, binding: binding)
+                                .frame(maxWidth: .infinity, alignment: .topLeading)
+                            Divider()
+                            dynamicColumn(band: band, binding: binding)
+                                .frame(maxWidth: .infinity, alignment: .topLeading)
                         }
                     }
                     .padding(14)
+                    .accessibilityIdentifier("eq.bands.editor.twoColumn")
+                } else {
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 16) {
+                            editorHeader(number: index + 1, band: band, binding: binding)
+                            staticControls(band: band, binding: binding)
+                            Divider()
+                            dynamicColumn(band: band, binding: binding)
+                        }
+                        .padding(14)
+                    }
                 }
             } else {
                 Text(bands.isEmpty ? "Add a band to edit it here." : "Select a band to edit it here.")
@@ -615,10 +652,21 @@ struct ProductionEqualizerView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        .frame(maxHeight: .infinity)
+        .frame(maxHeight: enhanced && columns == .two ? nil : .infinity)
         .background(.quaternary.opacity(0.20), in: .rect(cornerRadius: 20))
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("eq.bands.editor")
+    }
+
+    @ViewBuilder
+    private func dynamicColumn(band: EQBand, binding: Binding<EQBand>) -> some View {
+        if band.type.supportsDynamicEQ {
+            dynamicControls(band: band, binding: binding)
+        } else {
+            Label("Dynamic EQ is unavailable for this filter type.", systemImage: "bolt.slash")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
     }
 
     private func editorHeader(number: Int, band: EQBand, binding: Binding<EQBand>) -> some View {
@@ -648,13 +696,14 @@ struct ProductionEqualizerView: View {
         VStack(alignment: .leading, spacing: 14) {
             LabeledContent("Filter") {
                 Picker("Filter", selection: binding.type) {
-                    ForEach(EQFilterType.allCases) { type in
-                        Text(type.displayName)
-                            .tag(type)
-                            .disabled(
-                                (type == .fir && band.firKernel == nil)
-                                    || (type == .allPass && configuration.phaseMode != .minimumPhase)
-                            )
+                    if enhanced {
+                        ForEach(EQFilterPickerModel.sections, id: \.title) { section in
+                            Section(section.title) {
+                                ForEach(section.types) { type in filterOption(type, band: band) }
+                            }
+                        }
+                    } else {
+                        ForEach(EQFilterType.allCases) { type in filterOption(type, band: band) }
                     }
                 }
                 .labelsHidden()
@@ -776,11 +825,22 @@ struct ProductionEqualizerView: View {
                     if let taps = band.firKernel?.taps.count {
                         Text("\(taps) taps").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
                     }
-                    Text("FIR asset import remains in Engineering Validation until the production import/persistence milestone.")
-                        .font(.caption).foregroundStyle(.secondary)
+                    if !enhanced {
+                        Text("FIR asset import remains in Engineering Validation until the production import/persistence milestone.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
                 }
             }
         }
+    }
+
+    private func filterOption(_ type: EQFilterType, band: EQBand) -> some View {
+        Text(type.displayName)
+            .tag(type)
+            .disabled(
+                (type == .fir && band.firKernel == nil)
+                    || (type == .allPass && configuration.phaseMode != .minimumPhase)
+            )
     }
 
     @ViewBuilder
@@ -790,6 +850,18 @@ struct ProductionEqualizerView: View {
                 Text("Dynamic EQ").font(.headline)
                 Spacer()
                 Toggle("Dynamic", isOn: binding.dynamic.enabled).toggleStyle(.switch)
+            }
+            if enhanced {
+                Text(EQDynamicHint.rangeText)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("eq.bands.editor.dynamicHint")
+            }
+            if enhanced, let movedNote, movedNote.id == band.id {
+                Text(movedNote.text)
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                    .accessibilityIdentifier("eq.bands.editor.movedNote")
             }
 
             if band.dynamic.enabled {
@@ -866,7 +938,7 @@ struct ProductionEqualizerView: View {
                 pendingPublishTask = nil
                 pendingDragBand = nil
                 dragPreview = nil
-                recorded { try engine.updateEQBand(sanitize(updated)) }
+                recorded { try engine.updateEQBand(fitted(updated)) }
             }
         )
     }
@@ -879,7 +951,7 @@ struct ProductionEqualizerView: View {
         pendingPublishTask = nil
         pendingDragBand = nil
         dragPreview = nil
-        recorded(coalesceKey: key.map { "\($0).\(band.id)" }) { try engine.updateEQBand(sanitize(updated)) }
+        recorded(coalesceKey: key.map { "\($0).\(band.id)" }) { try engine.updateEQBand(fitted(updated)) }
     }
 
     private func addBand() {
@@ -1011,6 +1083,16 @@ struct ProductionEqualizerView: View {
             }
             pendingPublishTask = nil
         }
+    }
+
+    /// `sanitize` for an edit the user made: records a "moved to fit" note when the rules changed it, and clears
+    /// the band's old note otherwise (E33 S1, design 8).
+    private func fitted(_ input: EQBand) -> EQBand {
+        let result = sanitize(input)
+        if enhanced {
+            movedNote = EQDynamicHint.movedNote(from: input, to: result).map { (id: input.id, text: $0) }
+        }
+        return result
     }
 
     private func sanitize(_ input: EQBand) -> EQBand {
