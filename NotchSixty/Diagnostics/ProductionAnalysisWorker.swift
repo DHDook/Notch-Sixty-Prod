@@ -34,6 +34,10 @@ struct ProductionAnalysisSnapshot: Equatable, Sendable {
     var analysisMeters: AnalysisMeterReadout?
     /// E33 S8: 31 third-octave band levels in dBFS (20 Hz...20 kHz); empty unless the RTA demand is held or while filling.
     var rtaBandsDB: [Float] = []
+    /// E33 S9: the spectrogram image ring; nil unless that demand is held.
+    var spectrogram: SpectrogramSnapshot?
+    /// E33 S9: per-channel bit activity of the program input; empty unless that demand is held.
+    var bitActivity: [BitActivityChannel] = []
 
     static let empty = ProductionAnalysisSnapshot()
 }
@@ -51,7 +55,15 @@ enum ProductionAnalysisDemand {
     static let rta: UInt32 = 1 << 5
     /// One-shot command: clear the analysis meters' maxima and windows.
     static let resetAnalysisMeters: UInt32 = 1 << 6
+    /// E33 S9: spectrogram image (Spectrum > Spectrogram); `spectrogramLong` selects the 60 s window over 10 s.
+    static let spectrogram: UInt32 = 1 << 7
+    static let spectrogramLong: UInt32 = 1 << 8
+    /// E33 S9: bit activity of the program input (Levels card).
+    static let bitActivity: UInt32 = 1 << 9
+    /// One-shot command: clear the bit-activity record.
+    static let resetBitActivity: UInt32 = 1 << 10
     static let workerBits: UInt32 = loudness | resetLoudness | analysisMeters | rta | resetAnalysisMeters
+        | spectrogram | spectrogramLong | bitActivity | resetBitActivity
 }
 
 enum ProductionAnalysisMath {
@@ -449,6 +461,7 @@ final class ProductionAnalysisWorker: @unchecked Sendable {
     private let spectrumAnalyzer = ProductionSpectrumAnalyzer()
     private let loudnessFeed = ProductionLoudnessFeed()
     private let meterFeed = ProductionAnalysisMeterFeed()
+    private let spectrogramFeed = ProductionSpectrogramFeed()
     private var publishedSnapshot = ProductionAnalysisSnapshot.empty
 
     init(bridge: OpaquePointer) {
@@ -461,10 +474,16 @@ final class ProductionAnalysisWorker: @unchecked Sendable {
         sanitized &= ~ProductionAnalysisDemand.resetLoudness
         let resetMeters = (sanitized & ProductionAnalysisDemand.resetAnalysisMeters) != 0
         sanitized &= ~ProductionAnalysisDemand.resetAnalysisMeters
+        let resetBits = (sanitized & ProductionAnalysisDemand.resetBitActivity) != 0
+        sanitized &= ~ProductionAnalysisDemand.resetBitActivity
+        let wantsSpectrogram = (sanitized & ProductionAnalysisDemand.spectrogram) != 0
+        let spectrogramWindow: SpectrogramWindow = (sanitized & ProductionAnalysisDemand.spectrogramLong) != 0
+            ? .sixtySeconds : .tenSeconds
+        let wantsBits = (sanitized & ProductionAnalysisDemand.bitActivity) != 0
         let wantsLoudness = (sanitized & ProductionAnalysisDemand.loudness) != 0
         let wantsMeters = (sanitized & ProductionAnalysisDemand.analysisMeters) != 0
         let wantsRTA = (sanitized & ProductionAnalysisDemand.rta) != 0
-        if wantsLoudness || wantsMeters || wantsRTA { sanitized &= ~UInt32(N60_ANALYSIS_DEMAND_STEREO) }
+        if wantsLoudness || wantsMeters || wantsRTA || wantsSpectrogram || wantsBits { sanitized &= ~UInt32(N60_ANALYSIS_DEMAND_STEREO) }
         queue.async { [weak self] in
             guard let self, !self.stopped else { return }
             let changed = self.demandMask != sanitized || self.sampleRate != sampleRate
@@ -476,6 +495,10 @@ final class ProductionAnalysisWorker: @unchecked Sendable {
             // E33 S8: the meters run only while their card is visible; a hidden card keeps no state.
             self.meterFeed.setActive(meters: wantsMeters, rta: wantsRTA, sampleRate: sampleRate)
             if resetMeters { self.meterFeed.reset() }
+            self.spectrogramFeed.setActive(
+                spectrogram: wantsSpectrogram, window: spectrogramWindow, bitActivity: wantsBits, sampleRate: sampleRate
+            )
+            if resetBits { self.spectrogramFeed.resetBitActivity() }
             if changed {
                 N60RealtimeAudioBridgeDiscardAnalysisFrames(self.bridge)
                 self.clearHistory()
@@ -589,6 +612,8 @@ final class ProductionAnalysisWorker: @unchecked Sendable {
         }
         next.analysisMeters = meterFeed.meterReadout(loudness: next.loudnessOutput)
         next.rtaBandsDB = meterFeed.rtaLevels()
+        next.spectrogram = spectrogramFeed.spectrogramSnapshot()
+        next.bitActivity = spectrogramFeed.bitActivity()
 
         publish(next)
     }
@@ -607,6 +632,7 @@ final class ProductionAnalysisWorker: @unchecked Sendable {
             drainBuffer.withUnsafeBufferPointer { buffer in
                 loudnessFeed.ingest(UnsafeBufferPointer(rebasing: buffer[0..<readCount]))
                 meterFeed.ingest(UnsafeBufferPointer(rebasing: buffer[0..<readCount]))
+                spectrogramFeed.ingest(UnsafeBufferPointer(rebasing: buffer[0..<readCount]))
             }
 
             for index in 0..<readCount {
