@@ -563,7 +563,7 @@ it follows). One flag `e33.page-enhancements`, graduated in S11. K-System scales
 - [ ] S6 `e33/meter-bars`: level zones, numeric peaks, scale option, one peak hold, one reset menu, one stopped state, VoiceOver pacing (low-risk)
 - [ ] S7 `e33/loudness-and-gain-reduction`: loudness maxima, history and target, one short-term label, one GR reader, total GR (low-risk)
 - [~] S8 `e33/analysis-meters`: PLR and crest, balance, per-band correlation, headroom strip, third-octave RTA, dropout counter (low-risk); built dark behind `e33.page-enhancements` (off); wiring: S11
-- [ ] S9 `e33/spectrogram-bit-activity`: live spectrogram and input bit activity (low-risk)
+- [~] S9 `e33/spectrogram-bit-activity`: live spectrogram and input bit activity (low-risk); built dark behind `e33.page-enhancements` (off); wiring: S11
 - [ ] S10 `e33/input-overs`: inter-sample over count at the chain input in the core (needs-owner, realtime)
 - [ ] S11 `e33/ship`: end-to-end tests, gaps closed, flag graduated (needs-owner)
 

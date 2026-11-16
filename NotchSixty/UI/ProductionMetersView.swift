@@ -105,6 +105,19 @@ private enum ProductionDetailedMeterDemand {
     }
 }
 
+/// E33: the modes of Meters > Spectrum when `e33.page-enhancements` is on.
+enum SpectrumPageMode: String, CaseIterable {
+    case spectrum, rta, spectrogram
+
+    var title: String {
+        switch self {
+        case .spectrum: return "Spectrum"
+        case .rta: return "RTA"
+        case .spectrogram: return "Spectrogram"
+        }
+    }
+}
+
 struct ProductionMetersView: View {
     var engine: AudioIOEngine
     @ObservedObject var assistant: HeadroomAssistantController
@@ -128,7 +141,8 @@ struct ProductionMetersView: View {
     private let enhanced = FeatureFlags().isEnabled(.eqPageEnhancements)
     @State private var headroomStrip = HeadroomStripModel()
     @State private var dropouts = DropoutCounter()
-    @State private var showsRTA = false
+    @State private var spectrumMode = SpectrumPageMode.spectrum
+    @State private var spectrogramWindow = SpectrogramWindow.tenSeconds
 
     var body: some View {
         ScrollView {
@@ -141,15 +155,20 @@ struct ProductionMetersView: View {
                     levelsPage
                 case .spectrum:
                     if enhanced {
-                        Picker("Spectrum Mode", selection: $showsRTA) {
-                            Text("Spectrum").tag(false)
-                            Text("RTA").tag(true)
+                        Picker("Spectrum Mode", selection: $spectrumMode) {
+                            ForEach(SpectrumPageMode.allCases, id: \.self) { Text($0.title).tag($0) }
                         }
                         .pickerStyle(.segmented)
-                        .frame(maxWidth: 240)
+                        .frame(maxWidth: 360)
                         .accessibilityIdentifier("meters.spectrum.mode")
                     }
-                    if enhanced && showsRTA {
+                    if enhanced && spectrumMode == .spectrogram {
+                        ProductionSpectrogramView(
+                            snapshot: analysisSnapshot.spectrogram,
+                            isRunning: engine.lifecycleState == .running,
+                            window: $spectrogramWindow
+                        )
+                    } else if enhanced && spectrumMode == .rta {
                         ProductionRTABarsView(
                             levelsDB: analysisSnapshot.rtaBandsDB,
                             isRunning: engine.lifecycleState == .running
@@ -175,7 +194,7 @@ struct ProductionMetersView: View {
             .padding(28)
             .frame(maxWidth: 1180, alignment: .topLeading)
         }
-        .task(id: "\(engine.lifecycleState.rawValue)|\(page.rawValue)|\(showsRTA)") {
+        .task(id: "\(engine.lifecycleState.rawValue)|\(page.rawValue)|\(spectrumMode.rawValue)|\(spectrogramWindow.rawValue)") {
             await runVisiblePageLoop()
         }
         .alert(
@@ -256,6 +275,11 @@ struct ProductionMetersView: View {
                     isAvailable: transportMeterSnapshot == nil,
                     isRunning: engine.lifecycleState == .running,
                     onReset: { headroomStrip.reset() }
+                )
+                ProductionBitActivityCard(
+                    channels: analysisSnapshot.bitActivity,
+                    isRunning: engine.lifecycleState == .running,
+                    onReset: resetBitActivity
                 )
                 ProductionDropoutCard(counter: dropouts, onReset: { dropouts.reset() })
             }
@@ -969,7 +993,26 @@ struct ProductionMetersView: View {
 
     /// Loudness plus, when the E33 cards are on, the worker's analysis-meter bit.
     private var levelsDemand: UInt32 {
-        Self.loudnessDemand | (enhanced ? ProductionAnalysisDemand.analysisMeters : 0)
+        Self.loudnessDemand | (enhanced ? ProductionAnalysisDemand.analysisMeters | ProductionAnalysisDemand.bitActivity : 0)
+    }
+
+    private func resetBitActivity() {
+        if engine.lifecycleState == .running {
+            engine.setAnalysisDemand(levelsDemand | ProductionAnalysisDemand.resetBitActivity)
+        }
+    }
+
+    /// Demand for Spectrum while an E33 mode is selected.
+    private var enhancedSpectrumDemand: UInt32 {
+        switch spectrumMode {
+        case .spectrum:
+            return UInt32(N60_ANALYSIS_DEMAND_SPECTRUM)
+        case .rta:
+            return UInt32(N60_ANALYSIS_DEMAND_STEREO) | ProductionAnalysisDemand.rta
+        case .spectrogram:
+            return UInt32(N60_ANALYSIS_DEMAND_STEREO) | ProductionAnalysisDemand.spectrogram
+                | (spectrogramWindow == .sixtySeconds ? ProductionAnalysisDemand.spectrogramLong : 0)
+        }
     }
 
     private func resetAnalysisMeters() {
@@ -993,9 +1036,7 @@ struct ProductionMetersView: View {
         let analysisDemand: UInt32
         switch activePage {
         case .spectrum:
-            analysisDemand = (enhanced && showsRTA)
-                ? UInt32(N60_ANALYSIS_DEMAND_STEREO) | ProductionAnalysisDemand.rta
-                : UInt32(N60_ANALYSIS_DEMAND_SPECTRUM)
+            analysisDemand = enhanced ? enhancedSpectrumDemand : UInt32(N60_ANALYSIS_DEMAND_SPECTRUM)
         case .stereo:
             analysisDemand = UInt32(N60_ANALYSIS_DEMAND_STEREO)
         case .levels:
