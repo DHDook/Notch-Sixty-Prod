@@ -4,7 +4,7 @@
 //   R1 stereo, every stage on, plus 2 subs      R2 5.1 plus 2 subs, room FIR per lane
 //   R3 7.1.4 plus 4 subs                        R4 262,144-tap FIR on 2 and 8 lanes (R4a, R4b); 32,768 taps (R4c, R4d, E9 S8)
 //   R5 binaural, 16 sources, 8,192 taps         R6 wide PEQ at the 512-slot cap (E6 G30)
-//   R8 MIMO treatment stage, 8 sources, armed (E20 S8)
+//   R8 MIMO treatment stage, 8 sources, armed (E20 S8)   R11 five-band multiband with lookahead (E33 S5b)
 //   R7 ANC lane feed maths, offline (built only with -DN60_BENCH_ANC; compute only, nothing reaches a device)
 // at the eight standard rates and two block sizes: "ref" is 2.67 ms (128 frames at 48 kHz, 1,024 at 384 kHz) and
 // "stress" a quarter of that. Load = render time / buffer period on one core. Each cell reports the best
@@ -209,8 +209,29 @@ void mimoTreatment(Built &b, double rate, uint32_t S = 8) {
     b.add(N60_STAGE_FINAL_METER, 3, {});
 }
 
+// R11 (E33 S5b): the multiband compressor stage on its own at its maximum: five bands, LR8 corners, RMS detectors, auto release
+// and a 10 ms lookahead, enabled. Pair stage on lanes 0 and 1.
+void multiband5(Built &b, double rate) {
+    std::vector<float> p(73, 0.0f);
+    p[0] = 1; p[44] = 5; p[1] = 80; p[2] = 400; p[45] = 2000; p[46] = 8000;
+    p[3] = p[4] = p[47] = p[48] = 1;  // LR8
+    for (uint32_t k = 0; k < 12; ++k) {
+        for (uint32_t band = 0; band < 5; ++band) {
+            const uint32_t idx = band < 3 ? 5 + 3 * k + band : 49 + 2 * k + (band - 3);
+            const float v[12] = {-24.0f, 3.0f, 10.0f, 150.0f, 6.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f};
+            p[idx] = v[k];
+        }
+    }
+    p[41] = 50;
+    p[42] = static_cast<float>(static_cast<uint32_t>(rate * 0.010));
+    p[43] = 1;
+    b.add(N60_STAGE_SANITISE, 1, {});
+    b.add(N60_STAGE_MULTIBAND, 2, p, 0, 0, 1);
+    b.add(N60_STAGE_FINAL_METER, 3, {});
+}
+
 // Scenario ids. R4 splits into 2 and 8 lanes.
-const char *const kScenarioIds[] = {"R1", "R2", "R3", "R4a", "R4b", "R4c", "R4d", "R5", "R6", "R7", "R8", "R9", "R10"};
+const char *const kScenarioIds[] = {"R1", "R2", "R3", "R4a", "R4b", "R4c", "R4d", "R5", "R6", "R7", "R8", "R9", "R10", "R11"};
 
 bool buildScenario(const std::string &id, double rate, uint32_t block, Built &b) {
     if (id == "R1") { b.begin(rate, block, 4); fullChain(b, rate, 2, 2, 8192); return true; }
@@ -226,6 +247,7 @@ bool buildScenario(const std::string &id, double rate, uint32_t block, Built &b)
     if (id == "R9") { b.begin(rate, block, N60_MIMO_MAX_SOURCES); mimoTreatment(b, rate, N60_MIMO_MAX_SOURCES); return true; }
     // R10 is the R1 full chain; runCell adds the ANC lane feed to every block (the combined cost; R7 is the feed alone).
     if (id == "R10") { b.begin(rate, block, 4); fullChain(b, rate, 2, 2, 8192); return true; }
+    if (id == "R11") { b.begin(rate, block, 2); multiband5(b, rate); return true; }
     if (id == "R6") { b.begin(rate, block, 2); widePeq(b, rate); return true; }
     if (id == "R5") {
         n60_layout lay;

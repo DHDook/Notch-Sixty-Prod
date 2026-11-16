@@ -18,6 +18,10 @@ final class DynamicsParameterSpecTests: XCTestCase {
         case "spectralDenoiserProtectedLowHz": c.spectralDenoiser.protectedHighHz = spec.config.upperBound
         case "dialogueRelativeLevelerBandLowHz": c.dialogueRelativeLeveler.bandHighHz = 8_000
         case "dialogueRelativeLevelerBandHighHz": c.dialogueRelativeLeveler.bandLowHz = 100
+        // E33 S5b: corners rise in order, so a corner at its far bound is only valid when the band count leaves it unused.
+        case "multibandCompressorLowMidFrequencyHz", "multibandCompressorMidHighFrequencyHz",
+             "multibandCompressorCorner2Hz", "multibandCompressorCorner3Hz":
+            c.multibandCompressor.bandCount = 2
         default: break
         }
     }

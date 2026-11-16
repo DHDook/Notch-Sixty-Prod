@@ -237,7 +237,7 @@ final class DynamicsTests: XCTestCase {
         XCTAssertThrowsError(try config.makeSnapshot(sampleRate: 96_000))
 
         config = DynamicsConfiguration()
-        config.multibandCompressor.lowMidFrequencyHz = 300
+        config.multibandCompressor.lowMidFrequencyHz = 39
         XCTAssertThrowsError(try config.makeSnapshot(sampleRate: 96_000))
 
         config = DynamicsConfiguration()
@@ -517,7 +517,7 @@ final class DynamicsTests: XCTestCase {
         config.deEsser.detectionQ = 8.1
         XCTAssertThrowsError(try config.makeSnapshot(sampleRate: 96_000))
         config = DynamicsConfiguration()
-        config.multibandCompressor.highRatio = 21
+        config.multibandCompressor.highRatio = 101
         XCTAssertThrowsError(try config.makeSnapshot(sampleRate: 96_000))
     }
 

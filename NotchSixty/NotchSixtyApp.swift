@@ -995,13 +995,13 @@ private struct PR28AdvancedDynamicsValidationView: View {
                         Toggle("Enable Multiband Compressor", isOn: multibandEnabled).toggleStyle(.switch)
                         HStack(spacing: 12) {
                             Text("Low / Mid").frame(width: 90, alignment: .leading)
-                            Slider(value: lowMid, in: MultibandCompressorConfiguration.lowMidFrequencyRange, step: 1)
+                            Slider(value: lowMid, in: MultibandCompressorConfiguration.kernelCornerRanges.low, step: 1)
                             Text("\(engine.dynamicsConfiguration.multibandCompressor.lowMidFrequencyHz, specifier: "%.0f") Hz")
                                 .monospacedDigit().frame(width: 80)
                         }
                         HStack(spacing: 12) {
                             Text("Mid / High").frame(width: 90, alignment: .leading)
-                            Slider(value: midHigh, in: MultibandCompressorConfiguration.midHighFrequencyRange, step: 25)
+                            Slider(value: midHigh, in: MultibandCompressorConfiguration.kernelCornerRanges.high, step: 25)
                             Text("\(engine.dynamicsConfiguration.multibandCompressor.midHighFrequencyHz, specifier: "%.0f") Hz")
                                 .monospacedDigit().frame(width: 80)
                         }

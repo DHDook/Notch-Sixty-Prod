@@ -772,10 +772,10 @@ struct ContentView: View {
             HStack(spacing: 12) {
                 Toggle("3-band Multiband", isOn: multibandEnabled).toggleStyle(.switch)
                 Text("Low/Mid")
-                Slider(value: multibandLowMid, in: MultibandCompressorConfiguration.lowMidFrequencyRange, step: 5).frame(width: 125)
+                Slider(value: multibandLowMid, in: MultibandCompressorConfiguration.kernelCornerRanges.low, step: 5).frame(width: 125)
                 Text("\(engine.dynamicsConfiguration.multibandCompressor.lowMidFrequencyHz, specifier: "%.0f") Hz").monospacedDigit().frame(width: 70)
                 Text("Mid/High")
-                Slider(value: multibandMidHigh, in: MultibandCompressorConfiguration.midHighFrequencyRange, step: 100).frame(width: 125)
+                Slider(value: multibandMidHigh, in: MultibandCompressorConfiguration.kernelCornerRanges.high, step: 100).frame(width: 125)
                 Text("\(engine.dynamicsConfiguration.multibandCompressor.midHighFrequencyHz, specifier: "%.0f") Hz").monospacedDigit().frame(width: 76)
                 Picker("Low slope", selection: multibandLowSlope) {
                     ForEach(MultibandSlope.allCases) { slope in Text(slope.displayName).tag(slope) }

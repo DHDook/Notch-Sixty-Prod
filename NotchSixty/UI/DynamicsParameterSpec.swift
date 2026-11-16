@@ -159,8 +159,11 @@ extension DynamicsParameterSpec {
     static let compressorReleaseMs = DynamicsParameterSpec("compressorReleaseMs", stage: "Compressor", "Release", .milliseconds, \.compressor.releaseMs, config: CompressorConfiguration.releaseRange, slider: 5.0...1000.0, step: 5, digits: 0, formula: "time-constant")
     static let compressorMakeupGainDB = DynamicsParameterSpec("compressorMakeupGainDB", stage: "Compressor", "Makeup Gain", .decibels, \.compressor.makeupGainDB, config: CompressorConfiguration.makeupRange, slider: -24.0...24.0, step: 0.5, digits: 1)
     static let compressorSidechainHighPassHz = DynamicsParameterSpec("compressorSidechainHighPassHz", stage: "Compressor", "Sidechain High-Pass", .hertz, \.compressor.sidechainHighPassHz, config: CompressorConfiguration.sidechainHighPassRange, slider: 0.0...300.0, step: 5, digits: 0)
-    static let multibandCompressorLowMidFrequencyHz = DynamicsParameterSpec("multibandCompressorLowMidFrequencyHz", stage: "Multiband", "Low / Mid", .hertz, \.multibandCompressor.lowMidFrequencyHz, config: MultibandCompressorConfiguration.lowMidFrequencyRange, slider: 40.0...250.0, step: 5, digits: 0)
-    static let multibandCompressorMidHighFrequencyHz = DynamicsParameterSpec("multibandCompressorMidHighFrequencyHz", stage: "Multiband", "Mid / High", .hertz, \.multibandCompressor.midHighFrequencyHz, config: MultibandCompressorConfiguration.midHighFrequencyRange, slider: 1000.0...8000.0, step: 100, digits: 0)
+    static let multibandCompressorLowMidFrequencyHz = DynamicsParameterSpec("multibandCompressorLowMidFrequencyHz", stage: "Multiband", "Low / Mid", .hertz, \.multibandCompressor.lowMidFrequencyHz, config: MultibandCompressorConfiguration.lowMidFrequencyRange, slider: 40.0...16000.0, step: 5, digits: 0)
+    static let multibandCompressorMidHighFrequencyHz = DynamicsParameterSpec("multibandCompressorMidHighFrequencyHz", stage: "Multiband", "Mid / High", .hertz, \.multibandCompressor.midHighFrequencyHz, config: MultibandCompressorConfiguration.midHighFrequencyRange, slider: 40.0...16000.0, step: 5, digits: 0)
+    // E33 S5b: corners 3 and 4 (used with 4 and 5 bands). Kept as optionals in the profile; the rows read the defaults.
+    static let multibandCompressorCorner2Hz = DynamicsParameterSpec("multibandCompressorCorner2Hz", stage: "Multiband", "Crossover 3", .hertz, \.multibandCompressor.corner2Value, config: MultibandCompressorConfiguration.cornerRange, slider: 40.0...16000.0, step: 5, digits: 0)
+    static let multibandCompressorCorner3Hz = DynamicsParameterSpec("multibandCompressorCorner3Hz", stage: "Multiband", "Crossover 4", .hertz, \.multibandCompressor.corner3Value, config: MultibandCompressorConfiguration.cornerRange, slider: 40.0...16000.0, step: 5, digits: 0)
     static let expanderThresholdDB = DynamicsParameterSpec("expanderThresholdDB", stage: "Expander", "Threshold", .decibels, \.expander.thresholdDB, config: ExpanderConfiguration.thresholdRange, slider: -60.0...0.0, step: 0.5, digits: 1)
     static let expanderRatio = DynamicsParameterSpec("expanderRatio", stage: "Expander", "Ratio", .ratio, \.expander.ratio, config: ExpanderConfiguration.ratioRange, slider: 1.0...4.0, step: 0.1, digits: 1, formula: "expander-ratio")
     static let expanderRangeDB = DynamicsParameterSpec("expanderRangeDB", stage: "Expander", "Range", .decibels, \.expander.rangeDB, config: ExpanderConfiguration.rangeRange, slider: -40.0...0.0, step: 0.5, digits: 1)
@@ -261,12 +264,23 @@ extension DynamicsParameterSpec {
         )
     }
 
-    /// One multiband band's seven rows. `band` is 0 low, 1 mid, 2 high.
+    /// One multiband band's seven rows. `band` is 0 low, 1 mid, 2 high, then 3 and 4 (E33 S5b).
     static func multibandBand(_ band: Int) -> [DynamicsParameterSpec] {
-        let prefix = ["low", "mid", "high"][band]
-        let stage = ["Multiband Low Band", "Multiband Mid Band", "Multiband High Band"][band]
+        let prefix = ["low", "mid", "high", "band4", "band5"][band]
+        let stage = ["Multiband Low Band", "Multiband Mid Band", "Multiband High Band", "Multiband Band 4", "Multiband Band 5"][band]
         typealias M = MultibandCompressorConfiguration
         func kp(_ suffix: String) -> WritableKeyPath<DynamicsConfiguration, Double> {
+            if band >= 3 {
+                switch suffix {
+                case "Threshold": return \.multibandCompressor[extraBand: band].thresholdDB
+                case "Ratio": return \.multibandCompressor[extraBand: band].ratio
+                case "Attack": return \.multibandCompressor[extraBand: band].attackMs
+                case "Release": return \.multibandCompressor[extraBand: band].releaseMs
+                case "Knee": return \.multibandCompressor[extraBand: band].kneeDB
+                case "Makeup": return \.multibandCompressor[extraBand: band].makeupGainDB
+                default: return \.multibandCompressor[extraBand: band].sidechainHighPassHz
+                }
+            }
             switch (prefix, suffix) {
             case ("low", "Threshold"): return \.multibandCompressor.lowThresholdDB
             case ("mid", "Threshold"): return \.multibandCompressor.midThresholdDB
@@ -319,6 +333,8 @@ extension DynamicsParameterSpec {
         compressorSidechainHighPassHz,
         multibandCompressorLowMidFrequencyHz,
         multibandCompressorMidHighFrequencyHz,
+        multibandCompressorCorner2Hz,
+        multibandCompressorCorner3Hz,
         expanderThresholdDB,
         expanderRatio,
         expanderRangeDB,
@@ -388,7 +404,7 @@ extension DynamicsParameterSpec {
         stereoWidenerMidWidth,
         stereoWidenerMidHighFrequencyHz,
         stereoWidenerHighWidth,
-    ] + (0..<3).flatMap { multibandBand($0) }
+    ] + (0..<5).flatMap { multibandBand($0) }
 }
 
 // MARK: - Automatic makeup
@@ -445,6 +461,10 @@ extension DynamicsConfiguration {
         }
         if bands.contains(2) {
             multibandCompressor.highMakeupGainDB = makeup(multibandCompressor.highThresholdDB, multibandCompressor.highRatio, multibandCompressor.highKneeDB)
+        }
+        for band in 3...4 where bands.contains(band) {
+            let e = multibandCompressor[extraBand: band]
+            multibandCompressor[extraBand: band].makeupGainDB = makeup(e.thresholdDB, e.ratio, e.kneeDB)
         }
     }
 }

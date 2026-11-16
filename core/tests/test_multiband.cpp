@@ -203,10 +203,10 @@ int main() {
             check(build(rate, ok.p, 28, &st) == nullptr && st != N60_STATUS_OK, "reject short params", rate);
             Mb a; a.p[1] = 20;
             check(build(rate, a.p, 29, &st) == nullptr && st != N60_STATUS_OK, "reject low/mid 20", rate);
-            Mb b; b.p[2] = 9000;
-            check(build(rate, b.p, 29, &st) == nullptr && st != N60_STATUS_OK, "reject mid/high 9000", rate);
-            Mb c; c.p[11] = 0.5f;
-            check(build(rate, c.p, 29, &st) == nullptr && st != N60_STATUS_OK, "reject attack 0.5", rate);
+            Mb b; b.p[2] = 20000;
+            check(build(rate, b.p, 29, &st) == nullptr && st != N60_STATUS_OK, "reject mid/high 20000", rate);
+            Mb c; c.p[11] = 0.01f;
+            check(build(rate, c.p, 29, &st) == nullptr && st != N60_STATUS_OK, "reject attack 0.01", rate);
             Mb d; d.p[26] = 2;
             check(build(rate, d.p, 29, &st) == nullptr && st != N60_STATUS_OK, "reject auto 2", rate);
             Mb e; e.p[3] = 2;

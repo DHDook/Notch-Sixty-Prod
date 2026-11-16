@@ -61,9 +61,12 @@ struct ProductionDynamicsTelemetryView: View {
         case .limiter: return [(.limiter, DynamicsTransferCurve(d.limiter))]
         case .deEsser: return [(.deEsser, DynamicsTransferCurve(d.deEsser))]
         case .multiband:
-            return [(.multibandLow, DynamicsTransferCurve(d.multibandCompressor, band: 0)),
-                    (.multibandMid, DynamicsTransferCurve(d.multibandCompressor, band: 1)),
-                    (.multibandHigh, DynamicsTransferCurve(d.multibandCompressor, band: 2))]
+            // E33 S5b: panels for the first three bands; bands 4 and 5 have chips only (the bar views take S6's list, G17).
+            let all: [(GainReductionSource, DynamicsTransferCurve?)] = [
+                (.multibandLow, DynamicsTransferCurve(d.multibandCompressor, band: 0)),
+                (.multibandMid, DynamicsTransferCurve(d.multibandCompressor, band: 1)),
+                (.multibandHigh, DynamicsTransferCurve(d.multibandCompressor, band: 2))]
+            return FeatureFlags().isEnabled(.eqPageEnhancements) ? Array(all.prefix(d.multibandCompressor.bandCountValue)) : all
         default: return []
         }
     }
@@ -98,11 +101,17 @@ struct ProductionDynamicsTelemetryView: View {
             items = [item("gr", "Gain Reduction", db(diagnostics.compressorGainReductionDB))]
         case .multiband:
             statusText = nil
-            items = [
-                item("low", "Low GR", db(diagnostics.multibandLowGainReductionDB)),
-                item("mid", "Mid GR", db(diagnostics.multibandMidGainReductionDB)),
-                item("high", "High GR", db(diagnostics.multibandHighGainReductionDB)),
-            ]
+            // E33 S5b: one chip per existing band (the kernel path reports no band count and keeps three).
+            let count = diagnostics.multibandBandCount >= 2 ? Int(diagnostics.multibandBandCount) : 3
+            let reductions = [diagnostics.multibandLowGainReductionDB, diagnostics.multibandMidGainReductionDB,
+                              diagnostics.multibandHighGainReductionDB, diagnostics.multibandBand4GainReductionDB,
+                              diagnostics.multibandBand5GainReductionDB]
+            let ids = ["low", "mid", "high", "band4", "band5"]
+            items = (0..<min(count, 5)).map { band in
+                item(count == 3 ? ids[band] : "band\(band + 1)",
+                     "\(ProductionDynamicsView.multibandBandTitle(band, of: count).replacingOccurrences(of: " Band", with: "")) GR",
+                     db(reductions[band]))
+            }
         case .expander:
             statusText = nil
             items = [item("attenuation", "Attenuation", db(diagnostics.expanderAttenuationDB))]

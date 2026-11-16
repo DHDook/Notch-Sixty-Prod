@@ -83,6 +83,9 @@ struct RenderKernelDiagnostics: Equatable, Sendable {
     let multibandLowGainReductionDB: Float
     let multibandMidGainReductionDB: Float
     let multibandHighGainReductionDB: Float
+    let multibandBand4GainReductionDB: Float
+    let multibandBand5GainReductionDB: Float
+    let multibandBandCount: UInt32
     let loudnessShortTermLUFS: Float
     let loudnessMatchGainDB: Float
     let loudnessContourScale: Float
@@ -195,6 +198,9 @@ struct RenderKernelDiagnostics: Equatable, Sendable {
         multibandLowGainReductionDB = diagnostics.multibandLowGainReductionDB
         multibandMidGainReductionDB = diagnostics.multibandMidGainReductionDB
         multibandHighGainReductionDB = diagnostics.multibandHighGainReductionDB
+        multibandBand4GainReductionDB = diagnostics.multibandBand4GainReductionDB
+        multibandBand5GainReductionDB = diagnostics.multibandBand5GainReductionDB
+        multibandBandCount = diagnostics.multibandBandCount
         loudnessShortTermLUFS = diagnostics.loudnessShortTermLUFS
         loudnessMatchGainDB = diagnostics.loudnessMatchGainDB
         loudnessContourScale = diagnostics.loudnessContourScale

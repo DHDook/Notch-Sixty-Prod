@@ -350,6 +350,14 @@ final class UnifiedGraphHost: @unchecked Sendable {
         return spec.stages[index].params.count > 34
     }
 
+    private func soloParamCountLocked() -> Int {
+        spec.stages.first(where: { $0.stageId == UnifiedGraphConfiguration.multibandStageId })?.params.count ?? 0
+    }
+
+    private func soloBandCountLocked() -> Float {
+        spec.stages.first(where: { $0.stageId == UnifiedGraphConfiguration.multibandStageId })?.params[44] ?? 3
+    }
+
     private func canListenLocked(_ stage: DynamicsListenStage) -> Bool {
         guard let index = spec.stages.firstIndex(where: { $0.stageId == stage.stageId }) else { return false }
         return spec.stages[index].params.count > Int(stage.paramIndex)
@@ -370,8 +378,11 @@ final class UnifiedGraphHost: @unchecked Sendable {
         }
         if canSoloLocked() {
             let soloed = listenSession.soloBands
-            for band in 0..<3 {
-                consider(UnifiedGraphConfiguration.multibandStageId, UInt32(32 + band), soloed.contains(band) ? 1 : 0)
+            // E33 S5b: a 73-value block has five bands (solo slots 32...34, then 67 and 68); only existing bands solo.
+            let wide = soloParamCountLocked() == UnifiedGraphConfiguration.multibandBandsParamCount
+            let live = wide ? Int(soloBandCountLocked()) : 3
+            for band in 0..<(wide ? 5 : 3) {
+                consider(UnifiedGraphConfiguration.multibandStageId, UInt32(band < 3 ? 32 + band : 67 + band - 3), soloed.contains(band) && band < live ? 1 : 0)
             }
         }
         guard !records.isEmpty else { return .unchanged }
@@ -571,6 +582,9 @@ final class UnifiedGraphHost: @unchecked Sendable {
             diagnostics.multibandLowGainReductionDB = band.grMaxDb.0
             diagnostics.multibandMidGainReductionDB = band.grMaxDb.1
             diagnostics.multibandHighGainReductionDB = band.grMaxDb.2
+            diagnostics.multibandBand4GainReductionDB = band.grMaxDb.3
+            diagnostics.multibandBand5GainReductionDB = band.grMaxDb.4
+            diagnostics.multibandBandCount = band.bandCount
         }
         if let prot = dynamicsReading(graph, stageId: N60_LSTAGE_PROTECTION) {
             diagnostics.limiterGainReductionDB = prot.grMaxDb

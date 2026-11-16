@@ -10,6 +10,8 @@ enum DynamicsListenStage: CaseIterable, Equatable, Sendable {
     case multibandLow
     case multibandMid
     case multibandHigh
+    case multibandBand4
+    case multibandBand5
 
     /// The band index of a multiband listener (0 low, 1 mid, 2 high); nil for the compressor and expander.
     var band: Int? {
@@ -17,6 +19,8 @@ enum DynamicsListenStage: CaseIterable, Equatable, Sendable {
         case .multibandLow: return 0
         case .multibandMid: return 1
         case .multibandHigh: return 2
+        case .multibandBand4: return 3
+        case .multibandBand5: return 4
         default: return nil
         }
     }
@@ -25,7 +29,7 @@ enum DynamicsListenStage: CaseIterable, Equatable, Sendable {
         switch self {
         case .compressor: return UnifiedGraphConfiguration.compressorStageId
         case .expander: return UnifiedGraphConfiguration.expanderStageId
-        case .multibandLow, .multibandMid, .multibandHigh: return UnifiedGraphConfiguration.multibandStageId
+        case .multibandLow, .multibandMid, .multibandHigh, .multibandBand4, .multibandBand5: return UnifiedGraphConfiguration.multibandStageId
         }
     }
 
@@ -37,6 +41,8 @@ enum DynamicsListenStage: CaseIterable, Equatable, Sendable {
         case .multibandLow: return 35
         case .multibandMid: return 36
         case .multibandHigh: return 37
+        case .multibandBand4: return 69  // E33 S5b: bands 4 and 5 live in the 73-value block
+        case .multibandBand5: return 70
         }
     }
 
@@ -47,6 +53,8 @@ enum DynamicsListenStage: CaseIterable, Equatable, Sendable {
         case .multibandLow: return "Multiband low band"
         case .multibandMid: return "Multiband mid band"
         case .multibandHigh: return "Multiband high band"
+        case .multibandBand4: return "Multiband band 4"
+        case .multibandBand5: return "Multiband band 5"
         }
     }
 }
@@ -101,7 +109,7 @@ final class DynamicsListenSession: @unchecked Sendable {
     @discardableResult
     func setSolo(_ bands: Set<Int>) -> Bool {
         lock.lock(); defer { lock.unlock() }
-        let valid = bands.intersection([0, 1, 2])
+        let valid = bands.intersection([0, 1, 2, 3, 4])
         guard soloed != valid else { return false }
         soloed = valid
         return true
