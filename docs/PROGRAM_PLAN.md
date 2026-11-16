@@ -559,7 +559,7 @@ it follows). One flag `e33.page-enhancements`, graduated in S11. K-System scales
 
 - [~] S1 `e33/eq-layout`: band list and two-column editor, Dynamic range hint, grouped filter picker, wording (low-risk); built dark behind `e33.page-enhancements` (off); wiring: S11
 - [~] S2 `e33/eq-clipboard-import-access`: APO import and export on the page, band clipboard and lane copy, graph accessibility (low-risk); built dark behind `e33.page-enhancements` (off); wiring: S11
-- [ ] S3 `e33/eq-preamp-subsonic`: one preamp model with each contribution shown, 5 Hz band floor (needs-owner)
+- [~] S3 `e33/eq-preamp-subsonic`: one preamp model with each contribution shown, 5 Hz band floor (needs-owner); built dark behind `e33.page-enhancements` (off); wiring: S11
 - [ ] S4 `e33/dynamics-page`: numbered chain, relative-grab sliders, shown field limits, dynamic EQ row, navigator accessibility, display polish (low-risk)
 - [ ] S5a `e33/expander-lookahead`: optional expander lookahead; shared compressor and de-esser internals only if bit-identical (needs-owner, realtime)
 - [ ] S5b `e33/multiband-bands`: multiband 2–5 bands, ranges aligned with the wideband compressor (needs-owner, realtime)

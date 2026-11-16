@@ -1857,12 +1857,15 @@ final class ProductProfileController: ObservableObject {
             try engine.replaceStereoEQConfiguration(state.stereoEQ)
             try engine.replaceDynamicsConfiguration(state.dynamics)
             try engine.replaceGainConfiguration(gain)
+            // E33 S3: the profile's preamp becomes the model's manual term (or, with auto on, the rule re-applies).
+            autoPreamp.reconcile()
         } catch {
             let rollbackGain = previous.composingGain(over: engine.gainConfiguration)
             autoPreamp.restore(isOn: previous.autoPreampEnabled, trimDB: previous.preampTrimDB)
             try? engine.replaceStereoEQConfiguration(previous.stereoEQ)
             try? engine.replaceDynamicsConfiguration(previous.dynamics)
             try? engine.replaceGainConfiguration(rollbackGain)
+            autoPreamp.reconcile()
             throw error
         }
     }

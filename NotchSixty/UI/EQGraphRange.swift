@@ -72,13 +72,21 @@ enum EQGraphYRange: String, CaseIterable, Identifiable, Sendable {
 enum EQGraphXZoom: String, CaseIterable, Identifiable, Sendable {
     case full
     case audible
+    /// E33 S3: 5 Hz to 0.49 fs, to see subsonic filters.
+    case subsonic
 
     var id: String { rawValue }
+
+    /// The left-hand edge: 20 Hz, or 5 Hz for `.subsonic`.
+    var minimumFrequency: Double {
+        self == .subsonic ? EQBandRules.subsonicMinimumFrequency : EQGraphGeometry.minimumFrequency
+    }
 
     var displayName: String {
         switch self {
         case .full: return "Full range"
         case .audible: return "Audible"
+        case .subsonic: return "Subsonic (5 Hz)"
         }
     }
 
@@ -90,7 +98,7 @@ enum EQGraphXZoom: String, CaseIterable, Identifiable, Sendable {
         let rate = sampleRate.isFinite && sampleRate > 0 ? sampleRate : 48_000
         let ceiling = max(EQGraphGeometry.minimumFrequency * 1.01, rate * 0.49)
         switch self {
-        case .full: return ceiling
+        case .full, .subsonic: return ceiling
         case .audible: return min(Self.audibleCeilingHz, ceiling)
         }
     }

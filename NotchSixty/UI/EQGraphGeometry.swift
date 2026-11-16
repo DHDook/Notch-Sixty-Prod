@@ -17,6 +17,8 @@ struct EQGraphGeometry: Equatable, Sendable {
     /// Hit radius of a handle in points (an 11 pt handle radius plus the 10 pt inset).
     static let handleHitRadius = 21.0
 
+    /// The left-hand edge of the visible frequency axis: 20 Hz, or 5 Hz for the subsonic zoom (E33 S3).
+    let minimumFrequency: Double
     /// The right-hand edge of the visible frequency axis.
     let maximumFrequency: Double
     /// The visible gain range; the fields and the band limits stay at `minimumDB`...`maximumDB`.
@@ -25,6 +27,7 @@ struct EQGraphGeometry: Equatable, Sendable {
 
     init(sampleRate: Double, zoom: EQGraphXZoom = .full, visibleDB: ClosedRange<Double> = EQGraphGeometry.minimumDB...EQGraphGeometry.maximumDB) {
         maximumFrequency = zoom.maximumFrequency(sampleRate: sampleRate)
+        minimumFrequency = zoom.minimumFrequency
         displayMinimumDB = visibleDB.lowerBound
         displayMaximumDB = max(visibleDB.upperBound, visibleDB.lowerBound + 0.001)
     }
@@ -32,14 +35,14 @@ struct EQGraphGeometry: Equatable, Sendable {
     // MARK: Maps
 
     func x(frequency: Double, width: CGFloat) -> CGFloat {
-        let clamped = min(max(frequency, Self.minimumFrequency), maximumFrequency)
-        let t = (log(clamped) - log(Self.minimumFrequency)) / (log(maximumFrequency) - log(Self.minimumFrequency))
+        let clamped = min(max(frequency, minimumFrequency), maximumFrequency)
+        let t = (log(clamped) - log(minimumFrequency)) / (log(maximumFrequency) - log(minimumFrequency))
         return CGFloat(t) * width
     }
 
     func frequency(x: CGFloat, width: CGFloat) -> Double {
         let t = min(max(Double(x / max(width, 1)), 0), 1)
-        return exp(log(Self.minimumFrequency) + t * (log(maximumFrequency) - log(Self.minimumFrequency)))
+        return exp(log(minimumFrequency) + t * (log(maximumFrequency) - log(minimumFrequency)))
     }
 
     func y(db: Double, height: CGFloat) -> CGFloat {

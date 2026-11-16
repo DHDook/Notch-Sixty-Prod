@@ -11,6 +11,7 @@ struct ProductionEQGainBar: View {
 
     @State private var monitor = EQClipMonitor()
     @State private var clipTripped = false
+    private let enhanced = FeatureFlags().isEnabled(.eqPageEnhancements)
     private let overRangeIsDelta = !FeatureFlags().isEnabled(.legacyKernel)
 
     private var badge: EQHeadroomBadge {
@@ -49,11 +50,13 @@ struct ProductionEQGainBar: View {
                     title: "Preamp",
                     value: engine.gainConfiguration.inputPreampDB,
                     range: DSPGainConfiguration.inputPreampRange,
-                    set: { value in perform { try engine.setInputPreampDB(value) } }
+                    set: { value in perform { try autoPreamp.setManual(value) } }
                 )
                 .frame(maxWidth: 200)
                 .help("Gain before all processing. Lower it to leave headroom for EQ boosts.")
             }
+
+            if enhanced { termsView }
 
             Toggle("Auto preamp", isOn: Binding(
                 get: { autoPreamp.isOn },
@@ -77,6 +80,23 @@ struct ProductionEQGainBar: View {
         .background(.quaternary.opacity(0.24), in: .rect(cornerRadius: 14))
         .task { await pollMeter() }
         .onAppear { autoPreamp.reconcile() }
+    }
+
+    /// E33 S3 (design 6): each term of the one preamp model and the total the engine gets.
+    private var termsView: some View {
+        let text = Self.termsText(autoPreamp.preamp)
+        return Text(text)
+            .font(.caption.monospacedDigit())
+            .foregroundStyle(.secondary)
+            .fixedSize()
+            .help("The input preamp is the sum of your own level, the auto-preamp attenuation and the A/B loudness-match trim.")
+            .accessibilityLabel("Preamp terms: \(text)")
+            .accessibilityIdentifier("eq.gain.preampTerms")
+    }
+
+    static func termsText(_ model: EQPreampModel) -> String {
+        String(format: "Manual %+.1f  Auto %+.1f  Match %+.1f  =  %+.1f dB",
+               model.manualDB, model.autoTrimDB, model.matchDB, model.totalDB)
     }
 
     private var badgeView: some View {

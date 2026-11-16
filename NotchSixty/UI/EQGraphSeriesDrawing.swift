@@ -37,8 +37,8 @@ enum EQGraphSeriesDrawing {
         let x: (Double) -> CGFloat
         if series.view.isFrequencyDomain {
             x = { geometry.x(frequency: $0, width: size.width) }
-            for frequency in [20.0, 50, 100, 200, 500, 1_000, 2_000, 5_000, 10_000, 20_000, 40_000, 80_000, 160_000]
-            where frequency <= geometry.maximumFrequency {
+            for frequency in [5.0, 10, 20, 50, 100, 200, 500, 1_000, 2_000, 5_000, 10_000, 20_000, 40_000, 80_000, 160_000]
+            where frequency <= geometry.maximumFrequency && frequency >= geometry.minimumFrequency {
                 let position = x(frequency)
                 var line = Path()
                 line.move(to: CGPoint(x: position, y: 0))

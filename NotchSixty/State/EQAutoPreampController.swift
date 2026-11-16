@@ -11,27 +11,35 @@ import Foundation
 /// EQ change (the engine publishes the EQ first, then the gain).
 @MainActor
 final class EQAutoPreampController: ObservableObject {
-    /// Stored toggle and trim, as saved in the profile.
-    @Published private(set) var isOn = false
-    @Published private(set) var trimDB = 0.0
+    /// E33 S3: the one preamp model. Stored toggle and trim (the manual term) live there.
+    let preamp: EQPreampModel
+    /// Stored toggle, as saved in the profile.
+    var isOn: Bool { preamp.autoOn }
+    /// Stored trim (the manual term), as saved in the profile.
+    var trimDB: Double { preamp.manualDB }
     /// The last prediction, for the badge.
     @Published private(set) var prediction = EQHeadroomPrediction.none
 
     /// E27 S3b: extra attenuation, in dB (zero or positive), from the A/B loudness match.
-    @Published private(set) var matchAttenuationDB = 0.0
+    var matchAttenuationDB: Double { -preamp.matchDB }
 
     /// E32 S1: why the last automatic preamp change failed; nil when it applied. The page shows it.
     @Published private(set) var lastError: String?
 
     private let engine: AudioIOEngine
     /// Writes the input preamp. The engine's setter in production; tests inject a failing one.
-    var preampWriter: (Double) throws -> Void
+    var preampWriter: (Double) throws -> Void {
+        get { preamp.writer }
+        set { preamp.writer = newValue }
+    }
+    private var preampSink: AnyCancellable?
     private var observation: ObservationSubscription?
     private var cacheKey: (configuration: StereoEQConfiguration, sampleRate: Double)?
 
     init(engine: AudioIOEngine) {
         self.engine = engine
-        preampWriter = { [engine] in try engine.setInputPreampDB($0) }
+        preamp = EQPreampModel(engine: engine)
+        preampSink = preamp.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }
         refreshPrediction()
         observation = ObservationSubscription(
             track: { [engine] in
@@ -51,45 +59,51 @@ final class EQAutoPreampController: ObservableObject {
 
     /// The preamp the rule asks for now.
     var targetPreampDB: Double {
-        let range = DSPGainConfiguration.inputPreampRange
-        let base = EQAutoPreamp.preampDB(trimDB: trimDB, boostDB: prediction.boostDB)
-        return min(max(base - matchAttenuationDB, range.lowerBound), range.upperBound)
+        EQPreampModel.total(manualDB: preamp.manualDB, autoTrimDB: -autoAttenuationDB, matchDB: preamp.matchDB)
     }
 
-    /// Sets the loudness-match attenuation; while the rule is active the preamp follows at once.
+    private var autoAttenuationDB: Double { EQAutoPreamp.attenuationDB(forBoost: prediction.boostDB) }
+
+    /// Sets the loudness-match attenuation; the total follows at once. Failures are surfaced as `lastError`.
     func setMatchAttenuation(_ value: Double) {
-        let clamped = max(0, value.isFinite ? value : 0)
-        guard clamped != matchAttenuationDB else { return }
-        matchAttenuationDB = clamped
-        if isActive { reconcile() }
+        do {
+            try applyMatch(trimDB: -max(0, value.isFinite ? value : 0))
+            if lastError != nil { lastError = nil }
+        } catch {
+            lastError = "Auto preamp could not set the input preamp: \(error.localizedDescription)"
+        }
+    }
+
+    /// The A/B loudness match (zero or negative dB) as the model's match term; one publish.
+    func applyMatch(trimDB: Double) throws {
+        preamp.adoptOutsideWrite()
+        try preamp.setMatch(trimDB)
+    }
+
+    /// Sets the manual term (the page's preamp control); one publish of the total.
+    func setManual(_ value: Double) throws {
+        preamp.adoptOutsideWrite()
+        try preamp.setManual(value)
     }
 
     /// Turns the rule on or off. On: the current preamp becomes the trim. Off: the preamp returns
     /// to the trim, so switching it off undoes the compensation.
     func setOn(_ on: Bool) throws {
         guard on != isOn else { return }
-        if on {
-            trimDB = engine.gainConfiguration.inputPreampDB
-            isOn = true
-            try reconcileThrowing()
-        } else {
-            isOn = false
-            try engine.setInputPreampDB(clampedTrim)
-        }
+        preamp.adoptOutsideWrite()
+        refreshPrediction()
+        try preamp.setAuto(on: on, trimDB: -autoAttenuationDB)
     }
 
     /// Edits the trim; while the rule is active the preamp follows at once.
     func setTrim(_ value: Double) throws {
-        let range = DSPGainConfiguration.inputPreampRange
-        trimDB = min(max(value, range.lowerBound), range.upperBound)
-        if isActive { try reconcileThrowing() }
+        try setManual(value)
     }
 
     /// Sets the stored values from a profile or a rollback. Does not touch the engine: the
     /// profile's own preamp value is applied with the rest of the content state.
     func restore(isOn: Bool, trimDB: Double) {
-        self.isOn = isOn
-        self.trimDB = trimDB.isFinite ? trimDB : 0
+        preamp.restore(manualDB: trimDB, autoOn: isOn)
     }
 
     /// Brings the preamp to the target if it is not there (idempotent).
@@ -102,17 +116,11 @@ final class EQAutoPreampController: ObservableObject {
         }
     }
 
-    private var clampedTrim: Double {
-        let range = DSPGainConfiguration.inputPreampRange
-        return min(max(trimDB, range.lowerBound), range.upperBound)
-    }
-
     private func reconcileThrowing() throws {
+        preamp.adoptOutsideWrite()
         refreshPrediction()
         guard isActive else { return }
-        let target = targetPreampDB
-        guard abs(target - engine.gainConfiguration.inputPreampDB) > 1e-9 else { return }
-        try preampWriter(target)
+        try preamp.setAutoTrim(-autoAttenuationDB)
     }
 
     /// Shared with the Equalizer page by default; a test passes its own.

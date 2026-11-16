@@ -12,6 +12,8 @@ struct EQTransferCommands {
     var apply: (StereoEQConfiguration) -> Void
     var selectedBandID: () -> UUID?
     var inputPreampDB: () -> Double
+    /// E33 S3 (G3): sets an imported `Preamp:` line as the manual preamp term.
+    var applyPreampDB: (Double) throws -> Void
     var reportError: (String) -> Void
 
     static let pasteboardType = NSPasteboard.PasteboardType(EQBandClipboard.privateTypeIdentifier)
@@ -68,7 +70,12 @@ struct EQTransferCommands {
             apply(outcome.configuration)
             var notes = outcome.notes
             if let preamp = parsed.preampDB {
-                notes.append("Preamp \(String(format: "%+.1f", preamp)) dB in the file was not applied; set it in the gain bar.")
+                do {
+                    try applyPreampDB(preamp)
+                    notes.append("Preamp \(String(format: "%+.1f", preamp)) dB in the file was set as the manual preamp.")
+                } catch {
+                    notes.append("Preamp \(String(format: "%+.1f", preamp)) dB in the file could not be applied: \(error.localizedDescription)")
+                }
             }
             if !notes.isEmpty { showNotes(title: "Imported \(parsed.bands.count) filters", notes: notes) }
         } catch {
