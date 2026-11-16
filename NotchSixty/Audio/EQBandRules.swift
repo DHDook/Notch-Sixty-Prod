@@ -1,8 +1,8 @@
 import Foundation
 
 /// E32 S1: the one rule for what an Equalizer band may hold and whether it can render at a
-/// sample rate. Pure Swift, no engine state. The page, its value parser and `sanitized` call it
-/// (E32 S2 moves the engine validators onto it).
+/// sample rate. Pure Swift, no engine state. The page, its value parser, `sanitized`, the engine
+/// validators, `StereoPlaybackControl` and the profile importers all call it.
 ///
 /// Limits: frequency 20 Hz up to 192 kHz (and under 0.49 of the device rate when edited),
 /// Q 0.1 to 20, gain `StereoEQConfiguration.bandGainRange`, dynamic ranges from
@@ -33,32 +33,56 @@ enum EQBandRules {
         var isActive: Bool { self == .active }
     }
 
-    /// Whether `band` renders at `sampleRate`. Disabled bands are judged on their values too;
-    /// callers filter on `enabled` themselves. FIR bands carry their own kernel and always render.
-    static func renderState(_ band: EQBand, sampleRate: Double) -> RenderState {
-        guard sampleRate.isFinite, sampleRate > 0 else { return .invalid(reason: "Unknown sample rate") }
-        if band.type == .fir { return .active }
-        guard band.frequencyHz.isFinite, band.frequencyHz > 0 else { return .invalid(reason: "Frequency is not valid") }
-        guard band.gainDB.isFinite, gainRange.contains(band.gainDB) else { return .invalid(reason: "Gain is out of range") }
-        guard band.q.isFinite, band.q > 0 else { return .invalid(reason: "Q is not valid") }
+    /// Why `band` breaks the rule at any sample rate, or nil. FIR bands carry their own kernel and
+    /// are judged by it. Disabled bands are judged on their values too; callers filter on `enabled`.
+    static func invalidReason(_ band: EQBand) -> String? {
+        if band.type == .fir { return nil }
+        guard band.frequencyHz.isFinite, frequencyRange.contains(band.frequencyHz) else { return "Frequency is not valid" }
+        guard band.gainDB.isFinite, gainRange.contains(band.gainDB) else { return "Gain is out of range" }
+        guard band.q.isFinite, qRange.contains(band.q) else { return "Q is not valid" }
         if band.type == .linkwitzTransform {
             guard band.linkwitzTargetHz.isFinite, band.linkwitzTargetHz > 0,
-                  band.linkwitzTargetHz < sampleRate * 0.5,
                   band.linkwitzTargetQ.isFinite, band.linkwitzTargetQ > 0 else {
-                return .invalid(reason: "Linkwitz target is not valid")
+                return "Linkwitz target is not valid"
             }
         }
         if band.dynamic.enabled {
-            guard band.type.supportsDynamicEQ else { return .invalid(reason: "Dynamic EQ is unavailable for this type") }
+            guard band.type.supportsDynamicEQ else { return "Dynamic EQ is unavailable for this type" }
             guard DynamicEQBandConfiguration.frequencyRange.contains(band.frequencyHz),
                   DynamicEQBandConfiguration.qRange.contains(band.q),
-                  band.dynamic.isValid else { return .invalid(reason: "Dynamic values are out of range") }
-            if band.type == .notch, band.dynamic.direction != .cutOnly {
-                return .invalid(reason: "A dynamic notch can only cut")
-            }
+                  band.dynamic.isValid else { return "Dynamic values are out of range" }
+            if band.type == .notch, band.dynamic.direction != .cutOnly { return "A dynamic notch can only cut" }
+        }
+        return nil
+    }
+
+    /// Whether `band` renders at `sampleRate`.
+    static func renderState(_ band: EQBand, sampleRate: Double) -> RenderState {
+        guard sampleRate.isFinite, sampleRate > 0 else { return .invalid(reason: "Unknown sample rate") }
+        if band.type == .fir { return .active }
+        if let reason = invalidReason(band) { return .invalid(reason: reason) }
+        if band.type == .linkwitzTransform, band.linkwitzTargetHz >= sampleRate * 0.5 {
+            return .invalid(reason: "Linkwitz target is not valid")
         }
         if band.frequencyHz >= sampleRate * 0.5 { return .aboveNyquist(limitHz: sampleRate * 0.5) }
         return .active
+    }
+
+    /// The engine's gate (E32 S2): throws `invalidBand(index:)` for a band outside the rule, and
+    /// returns whether the band renders at `sampleRate` (false above Nyquist, where the engine skips
+    /// it). `sampleRate` nil judges the values only (no stream is running).
+    static func validate(_ band: EQBand, index: Int, sampleRate: Double?) throws -> Bool {
+        if band.type == .fir {
+            guard let kernel = band.firKernel else { throw EQConfigurationError.firKernelRequired }
+            if let sampleRate { try kernel.validate(for: sampleRate) } else { try kernel.validateMetadata() }
+            return true
+        }
+        guard invalidReason(band) == nil else { throw EQConfigurationError.invalidBand(index: index) }
+        guard let sampleRate else { return true }
+        if band.type == .linkwitzTransform, band.linkwitzTargetHz >= sampleRate * 0.5 {
+            throw EQConfigurationError.invalidBand(index: index)
+        }
+        return band.frequencyHz < sampleRate * 0.5
     }
 
     /// Enabled bands the engine renders at `sampleRate` (what "N ACTIVE" counts).
@@ -81,7 +105,16 @@ enum EQBandRules {
 
     /// The band clamped to every limit above. Non-finite values fall back to defaults.
     static func sanitized(_ input: EQBand, sampleRate: Double) -> EQBand {
-        let ceiling = maximumFrequency(sampleRate: sampleRate)
+        sanitized(input, ceiling: maximumFrequency(sampleRate: sampleRate))
+    }
+
+    /// As above for a band whose device rate is not known (a profile import): the ceiling is the
+    /// highest frequency the rule allows at any rate.
+    static func sanitizedForImport(_ input: EQBand) -> EQBand {
+        sanitized(input, ceiling: maximumAbsoluteFrequency)
+    }
+
+    private static func sanitized(_ input: EQBand, ceiling: Double) -> EQBand {
         var band = input
         if !band.frequencyHz.isFinite { band.frequencyHz = 1_000 }
         band.frequencyHz = clamp(band.frequencyHz, minimumFrequency...ceiling)

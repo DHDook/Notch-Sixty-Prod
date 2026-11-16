@@ -811,41 +811,6 @@ struct EQConfiguration: Equatable, Sendable {
         }
     }
 
-    private func validateBand(_ band: EQBand, index: Int, sampleRate: Double) throws -> Bool {
-        if band.type == .fir {
-            guard let kernel = band.firKernel else { throw EQConfigurationError.firKernelRequired }
-            try kernel.validate(for: sampleRate)
-            return true
-        }
-        guard band.frequencyHz.isFinite,
-              band.frequencyHz > 0,
-              band.gainDB.isFinite,
-              StereoEQConfiguration.bandGainRange.contains(band.gainDB),
-              band.q.isFinite,
-              band.q > 0 else {
-            throw EQConfigurationError.invalidBand(index: index)
-        }
-        if band.type == .linkwitzTransform {
-            guard band.linkwitzTargetHz.isFinite,
-                  band.linkwitzTargetHz > 0,
-                  band.linkwitzTargetHz < sampleRate * 0.5,
-                  band.linkwitzTargetQ.isFinite,
-                  band.linkwitzTargetQ > 0 else {
-                throw EQConfigurationError.invalidBand(index: index)
-            }
-        }
-        if band.dynamic.enabled {
-            guard band.type.supportsDynamicEQ,
-                  DynamicEQBandConfiguration.frequencyRange.contains(band.frequencyHz),
-                  DynamicEQBandConfiguration.qRange.contains(band.q),
-                  band.dynamic.isValid,
-                  !(band.type == .notch && band.dynamic.direction != .cutOnly) else {
-                throw EQConfigurationError.invalidBand(index: index)
-            }
-        }
-        return band.frequencyHz < sampleRate * 0.5
-    }
-
     func makeGraphSnapshot(
         sampleRate: Double,
         gainConfiguration: DSPGainConfiguration = DSPGainConfiguration(),
@@ -896,7 +861,7 @@ struct EQConfiguration: Equatable, Sendable {
                 if phaseMode == .mixedPhase && band.type == .allPass {
                     throw EQConfigurationError.allPassRequiresMinimumPhase
                 }
-                guard try validateBand(band, index: modelIndex, sampleRate: sampleRate) else { continue }
+                guard try EQBandRules.validate(band, index: modelIndex, sampleRate: sampleRate) else { continue }
                 for section in try band.compiledSections(sampleRate: sampleRate) {
                     let compiledCapacity = UInt32(EQConfiguration.maximumBandCount * 2 * Int(N60_MAX_EQ_COMPILED_SECTIONS_PER_BAND))
                     guard renderIndex < compiledCapacity,
@@ -999,7 +964,7 @@ struct EQConfiguration: Equatable, Sendable {
         var result: [N60LinearPhaseEQBand] = []
         result.reserveCapacity(enabledBandCount)
         for (index, band) in bands.enumerated() where band.enabled {
-            guard try validateBand(band, index: index, sampleRate: sampleRate) else { continue }
+            guard try EQBandRules.validate(band, index: index, sampleRate: sampleRate) else { continue }
             guard band.type != .allPass else {
                 throw EQConfigurationError.allPassRequiresMinimumPhase
             }
@@ -3758,38 +3723,7 @@ final class AudioIOEngine {
                 throw EQConfigurationError.tooManyBands(bands.count)
             }
             for (index, band) in bands.enumerated() where band.enabled {
-                if band.type == .fir {
-                    guard let kernel = band.firKernel else { throw EQConfigurationError.firKernelRequired }
-                    try kernel.validateMetadata()
-                    if let activeSampleRate = transportSession?.outputFormat.sampleRate {
-                        try kernel.validate(for: activeSampleRate)
-                    }
-                    continue
-                }
-                guard band.frequencyHz.isFinite,
-                      band.frequencyHz > 0,
-                      band.gainDB.isFinite,
-                      StereoEQConfiguration.bandGainRange.contains(band.gainDB),
-                      band.q.isFinite,
-                      band.q > 0 else {
-                    throw EQConfigurationError.invalidBand(index: index)
-                }
-                if band.type == .linkwitzTransform {
-                    guard band.linkwitzTargetHz.isFinite,
-                          band.linkwitzTargetHz > 0,
-                          band.linkwitzTargetQ.isFinite,
-                          band.linkwitzTargetQ > 0 else {
-                        throw EQConfigurationError.invalidBand(index: index)
-                    }
-                }
-                if band.dynamic.enabled {
-                    guard band.type == .peaking,
-                          DynamicEQBandConfiguration.frequencyRange.contains(band.frequencyHz),
-                          DynamicEQBandConfiguration.qRange.contains(band.q),
-                          band.dynamic.isValid else {
-                        throw EQConfigurationError.invalidBand(index: index)
-                    }
-                }
+                _ = try EQBandRules.validate(band, index: index, sampleRate: transportSession?.outputFormat.sampleRate)
             }
         }
     }

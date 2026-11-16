@@ -36,7 +36,15 @@ enum EQHeadroomPredictor {
     /// - Phase mode does not change the magnitude, so the minimum-phase cascade stands for all
     ///   three; the linear-phase FIR is a finite approximation of the same target.
     /// - A sine prediction, not an inter-sample-peak bound.
-    static func predict(configuration: StereoEQConfiguration, sampleRate: Double) -> EQHeadroomPrediction {
+    ///
+    /// `programFor` compiles one lane's bands; the auto-preamp passes the page's `EQResponseCache`
+    /// so a set the graph already compiled is not compiled again (E32 S2, G3). The bands handed to
+    /// it are already at their upward limit, so a lane with no dynamic boost shares the page's entry.
+    static func predict(
+        configuration: StereoEQConfiguration,
+        sampleRate: Double,
+        programFor: (([EQBand], Double) -> [N60BiquadCoefficients])? = nil
+    ) -> EQHeadroomPrediction {
         guard sampleRate.isFinite, sampleRate > 0, !configuration.bypassed else { return .none }
 
         let lanes: [[EQBand]]
@@ -46,7 +54,7 @@ enum EQHeadroomPredictor {
         case .midSide: lanes = [configuration.midBands, configuration.sideBands]
         }
         let omitsFIR = lanes.contains { $0.contains { $0.enabled && $0.type == .fir } }
-        let compiled = lanes.map { sections(for: $0, sampleRate: sampleRate) }
+        let compiled = lanes.map { sections(for: $0, sampleRate: sampleRate, programFor: programFor) }
         let centres = lanes.flatMap { $0.filter { $0.enabled && $0.type != .fir }.map(\.frequencyHz) }
 
         var best = -Double.infinity
@@ -117,8 +125,12 @@ enum EQHeadroomPredictor {
         var power: Double { re * re + im * im }
     }
 
-    static func sections(for bands: [EQBand], sampleRate: Double) -> [N60BiquadCoefficients] {
-        ProductionEQResponseMath.compile(bands: bands.map(upwardLimit(of:)), sampleRate: sampleRate)
+    static func sections(
+        for bands: [EQBand], sampleRate: Double,
+        programFor: (([EQBand], Double) -> [N60BiquadCoefficients])? = nil
+    ) -> [N60BiquadCoefficients] {
+        let limited = bands.map(upwardLimit(of:))
+        return programFor?(limited, sampleRate) ?? ProductionEQResponseMath.compile(bands: limited, sampleRate: sampleRate)
     }
 
     static func response(_ sections: [N60BiquadCoefficients], sampleRate: Double, frequency: Double) -> Complex {

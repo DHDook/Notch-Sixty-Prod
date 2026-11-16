@@ -447,7 +447,7 @@ UX redesign are a later epic. Engine fixes go in the C++ core; the legacy C stay
 three sound-changing fixes in S5 behind `e32.dynamics-sound`, graduated in S6. Owner decisions 1–5 of 15 Nov 2026 are in the plan.
 
 - [x] S1 `e32/eq-page-fixes`: one band rule, Nyquist band state and count, surfaced errors, analyser and response redraw, Phase picker off the main thread (E6 G55), loudness block counter (R18 counter half) (low-risk; PR pending)
-- [ ] S2 `e32/eq-engine-validation`: engine validators use the band rule (dynamic EQ on every offered type, notch cut-only, import limits); drag publishing confirmed and fixed (needs-owner)
+- [x] S2 `e32/eq-engine-validation`: engine validators use the band rule (dynamic EQ on every offered type, notch cut-only, import limits); drag publishing confirmed (already live posts, no change needed) (needs-owner; bench in E22)
 - [ ] S3 `e32/meter-cadence`: idle meter loops, gain-reduction rates and paused timelines, per-tick models, demand tokens, loudness history, dBTP label, clip latch after reset (low-risk)
 - [ ] S4 `e32/dynamics-core-fixes`: makeup-free gain reduction, multiband crossover crossfade, limiter ring masks, R11 and R13 confirmed or closed (needs-owner, realtime)
 - [ ] S5 `e32/dynamics-sound-fixes`: limiter attack capped at the lookahead, expander Attack as opening speed, true-peak factor by rate (4x/2x/1x), behind `e32.dynamics-sound` (needs-owner, realtime, ABI)
