@@ -317,7 +317,7 @@ minimum-phase in blind ABX at three or more seats, and measurement results match
   - [x] S9a processing: one record per seat from K simultaneous captures (shared-clock and separate-USB modes); K-input transport and seat picker in S9b
 - [x] Measurement management: overlays, groups, notes, A/B against a reference
 - [x] Quasi-anechoic (gated) speaker response view in the Measurement Lab's Advanced tab, using the existing analyser (`SpeakerMeasurementLabQuasiAnechoic.swift`; from E5)
-- [ ] S12 `e11/distortion-vs-level` (strategic review, owner approved 15 Nov 2026); needs-owner (plays test signals at rising level): distortion and compression against level per speaker from stepped-level sweeps, with a hard level cap and stop rule; reports each speaker's clean-level limit and offers it to headroom and protection. H2–H5 at one level already exists (S3)
+- [ ] S12 `e11/distortion-vs-level` (strategic review, owner approved 15 Nov 2026); needs-owner (plays test signals at rising level): distortion and compression against level per speaker from stepped-level sweeps and a multitone test, with a hard level cap and stop rule; reports each speaker's clean-level limit and offers it to headroom and protection. H2–H5 at one level already exists (S3)
 - Moved to E17 S7 (owner, 11 Nov 2026): import and export of REW text, FRD and ZMA. The cross-check against REW on shared captures is an E22 item (no REW is available)
 - Verification with music (compare what plays with what a room microphone hears during normal listening) is after v1: `docs/V2_ROADMAP.md`, V2-16 (owner, 11 Nov 2026)
 
@@ -524,6 +524,7 @@ receives the result through the normal snapshot path.
 - [ ] House-curve library: named target tilts the user can pick without opening Room Correction
 - [ ] Quick controls on the Dashboard and the menu bar: bass, treble, tilt, balance, loudness compensation and night mode
 - [ ] Loudness matching as one switch in the quick controls, using the existing LUFS Loudness Match in Dynamics (no new engine work)
+- [ ] Loudness contour anchored to real playback level (strategic review, owner approved 15 Nov 2026): a third level source, "calibrated level", that maps system volume to SPL at the main seat using the level measured once in setup (no microphone during playback). The existing sources, system volume and integrated LUFS, stay as user choices and system volume stays the default; calibrated level is offered only when a setup calibration exists for the current output, and falls back to system volume when it does not
 - [ ] Volume: a maximum-level limit, volume remembered per profile, and a software volume control for DACs with none of their own (needs the E17 dither stage)
 - [ ] Per-app rules: exclude an app from processing, or give it its own profile
 - [ ] Per-app automatic low-latency mode: chosen apps (games, calls, video) switch the minimum-phase low-latency mode on while they play
