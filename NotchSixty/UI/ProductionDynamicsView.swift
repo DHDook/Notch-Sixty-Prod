@@ -370,6 +370,18 @@ struct ProductionDynamicsView: View {
             row(.expanderSidechainHighPassHz, enabled: av.extrasEnabled)
                 .help("0 Hz disables the sidechain high-pass filter.")
             row(.expanderLinkPercent, enabled: av.extrasEnabled)
+            if FeatureFlags().isEnabled(.eqPageEnhancements) {
+                // E33 S5a: the detector reads the undelayed signal; the audio is delayed so the gate is open for the first transient.
+                extraToggle("Lookahead", id: "dynamics.expander.lookahead", enabled: av.extrasEnabled,
+                            help: "Delays the audio so the expander opens before a transient arrives. It adds latency.",
+                            get: { $0.expander.lookaheadOn }, set: { $0.expander.lookaheadOn = $1 })
+                row(.expanderLookaheadMs, enabled: av.extrasEnabled && configuration.expander.lookaheadOn)
+                if configuration.expander.lookaheadOn {
+                    Text(DynamicsExtrasAvailability.addsText(ms: configuration.expander.lookaheadTimeMs, sampleRate: engine.liveTreatmentSampleRate))
+                        .font(.caption).foregroundStyle(.secondary)
+                        .accessibilityIdentifier("dynamics.expander.lookahead.adds")
+                }
+            }
             reasonNote(av.listenDisabledReason)
             listenButtons(.expander, id: "dynamics.expander")
         }

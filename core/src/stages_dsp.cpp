@@ -9,7 +9,8 @@
 //    snapshot arena, built on the control thread by dspInit.
 //  - synchronisation: none. The realtime thread owns the state once the snapshot is
 //    published; parameters are read as plain floats the mailbox wrote at block start.
-//  - latency: compressor (0 unless its lookahead is on: params[14] frames), expander and dynamic EQ add 0 frames; the denoiser adds its
+//  - latency: compressor (0 unless its lookahead is on: params[14] frames) and expander (0 unless params[13] frames, ABI v41) add
+//    their lookahead; dynamic EQ adds 0 frames; the denoiser adds its
 //    FFT size (1024, 2048 or 4096); the FIR adds 256 frames plus its declared latency.
 //    The host reports the per-lane sum through n60_graph_latency_frames.
 //  - sample rate: any rate in [8 kHz, 768 kHz]. Time constants are in milliseconds and
@@ -162,9 +163,10 @@ constexpr Range kComp[16] = {{-96, 0, false}, {1, 100, false}, {0, 24, false}, {
                              {-24, 24, false}, {0, 1, true},   {0, 1, true},   {0, 300, false},      {0, 1, true},
                              {0, 100, false},  {0, 100, false}, {0, 1, true},   {5, 200, false},
                              {0, static_cast<float>(kMaxCompLookahead), true}, {0, 2, true}};
-constexpr Range kExp[13] = {{-120, 0, false}, {1, 20, false}, {-96, 0, false}, {0.05f, 1000, false}, {1, 5000, false},
+constexpr Range kExp[14] = {{-120, 0, false}, {1, 20, false}, {-96, 0, false}, {0.05f, 1000, false}, {1, 5000, false},
                             {0, 1, true},     {0, 500, false}, {0, 24, false},  {0, 1, true},         {5, 200, false},
-                            {0, 300, false},  {0, 100, false}, {0, 2, true}};
+                            {0, 300, false},  {0, 100, false}, {0, 2, true},
+                            {0, static_cast<float>(kMaxCompLookahead), true}};  // ABI v41 (E33 S5a): [13] lookahead frames
 constexpr Range kBand[N60_DYN_EQ_BAND_PARAMS] = {
     {0, 5, true},       {20, 20000, false}, {0.4f, 8, false}, {-18, 6, false}, {-60, 0, false},
     {1, 10, false},     {-24, 0, false},    {1, 100, false},  {10, 1000, false}, {0, 2, true},
@@ -181,7 +183,7 @@ uint32_t bandCountOf(uint32_t paramCount) { return paramCount >= 1 ? (paramCount
 bool paramOk(uint32_t kind, uint32_t idx, float v, double rate) {
     switch (kind) {
         case N60_STAGE_COMPRESSOR: return idx < 16 && inRange(kComp[idx], v);
-        case N60_STAGE_EXPANDER: return idx < 13 && inRange(kExp[idx], v);
+        case N60_STAGE_EXPANDER: return idx < 14 && inRange(kExp[idx], v);
         case N60_STAGE_DYN_EQ: {
             if (idx == 0) return v == 0.0f || v == 1.0f;
             const uint32_t f = (idx - 1) % N60_DYN_EQ_BAND_PARAMS;
@@ -200,7 +202,7 @@ bool paramOk(uint32_t kind, uint32_t idx, float v, double rate) {
 bool paramLive(uint32_t kind, uint32_t idx) {
     switch (kind) {
         case N60_STAGE_COMPRESSOR: return idx <= 8 || (idx >= 10 && idx <= 13) || idx == 15;
-        case N60_STAGE_EXPANDER: return idx <= 4 || idx >= 6;
+        case N60_STAGE_EXPANDER: return idx <= 4 || (idx >= 6 && idx <= 12);  // [13] lookahead sizes the ring at build
         case N60_STAGE_DYN_EQ: {
             if (idx == 0) return false;
             const uint32_t f = (idx - 1) % N60_DYN_EQ_BAND_PARAMS;
@@ -242,7 +244,7 @@ struct ExpLane {
     double meanSq;      // ABI v35: RMS detector mean square (double since E28 S7d)
     double z[2];        // ABI v35: sidechain high-pass state
     uint32_t holdCnt;   // ABI v35: frames of hold left
-    uint32_t pad;
+    uint32_t ringPos;   // ABI v41: lookahead ring write position (two rings follow the struct: audio, then sidechain)
 };
 
 // ABI v35: the 13-value block adds hold, knee, detector, sidechain filter, link and listen; 6 values keep v20 exactly.
@@ -596,6 +598,8 @@ float expTargetDb(float detDb, float thr, float ratio, float knee, float range) 
     return std::max(c, range);
 }
 
+// Stack: per-chunk arrays gainA/sideA/lsSA/lsDA (kMaxLanes x kChunk floats each) stay within the realtime stack budget.
+// ABI v41: a 13-value block carries no ring; a 13-to-14 rebuild starts the ring empty and carries no gain state (documented in graph.h).
 void runExpanderX(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) {
     const float *p = paramsOf(h, r);
     const double rate = h->sampleRate;
@@ -607,6 +611,7 @@ void runExpanderX(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t fram
     const double atk = poleD(rate, p[3]), rel = poleD(rate, p[4]);
     const float rampC = pole(rate, 5.0f);
     const double rmsC = poleD(rate, p[9]);
+    const uint32_t ringLen = r.paramCount >= 14 ? static_cast<uint32_t>(p[13]) : 0;
     ExpShared &sh = *reinterpret_cast<ExpShared *>(sharedState(h, r));
     if (hpHz != sh.usedHz) {
         sh.usedHz = hpHz;
@@ -616,13 +621,18 @@ void runExpanderX(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t fram
     const uint32_t n = r.laneCount;
     float *lp[kMaxLanes];
     ExpLane *st[kMaxLanes];
+    float *ring[kMaxLanes];
     for (uint32_t l = 0; l < n; ++l) {
         lp[l] = lanes[laneOf(r, l)];
         st[l] = reinterpret_cast<ExpLane *>(laneState(h, r, l));
+        ring[l] = reinterpret_cast<float *>(reinterpret_cast<uint8_t *>(st[l]) + up(sizeof(ExpLane)));
     }
     const uint32_t per = linked ? n : 1, groups = linked ? 1 : n;
     double grMax[kMaxLanes] = {};
-    float level[kMaxLanes], side[kMaxLanes];
+    float level[kMaxLanes];
+    // E33 S5a (ABI v41): the follower records each frame's gain, sidechain and listen weights; the lookahead ring and the
+    // output then run as block passes per lane (the compressor's pattern). The detector reads the undelayed signal.
+    float gainA[kMaxLanes][kSideChunk], sideA[kMaxLanes][kSideChunk], lsSA[kSideChunk], lsDA[kSideChunk];
     double *zp[kMaxLanes];  // E20 S10 part 4 (G14): the side-chain high-pass runs a chunk at a time in lane pairs (input is the lane)
     for (uint32_t l = 0; l < n; ++l) zp[l] = st[l]->z;
     float hpY[kMaxLanes][kSideChunk];
@@ -635,7 +645,8 @@ void runExpanderX(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t fram
         sh.listenSide = rampSnap(sh.listenSide, sideT, rampC);
         sh.listenDelta = rampSnap(sh.listenDelta, deltaT, rampC);
         const float link = sh.linkS, lsS = sh.listenSide, lsD = sh.listenDelta;
-        const bool listening = lsS != 0.0f || lsD != 0.0f;
+        lsSA[c] = lsS;
+        lsDA[c] = lsD;
         for (uint32_t g = 0; g < groups; ++g) {
             float loudest = 0.0f;
             for (uint32_t k = 0; k < per; ++k) {
@@ -651,7 +662,7 @@ void runExpanderX(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t fram
                     d = std::fabs(y);
                 }
                 level[l] = d;
-                side[l] = y;
+                sideA[l][c] = y;
                 loudest = std::max(loudest, d);
             }
             for (uint32_t k = 0; k < per; ++k) {
@@ -668,18 +679,33 @@ void runExpanderX(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t fram
                     --gs.holdCnt;
                     target = 0.0f;
                 }
-                const double c = target < gs.gainDB ? atk : rel;
-                gs.gainDB = target + c * (gs.gainDB - target);
+                const double cf = target < gs.gainDB ? atk : rel;
+                gs.gainDB = target + cf * (gs.gainDB - target);
                 grMax[g] = std::max(grMax[g], -gs.gainDB);
-                const float dry = lp[l][i];
-                const float gain = db2lin(gs.gainDB);
-                const float wet = dry * gain;
-                if (!listening) {
-                    lp[l][i] = wet;
-                } else {
-                    lp[l][i] = std::max(0.0f, 1.0f - lsS - lsD) * wet + lsS * side[l] + lsD * (dry - wet);
-                }
+                gainA[l][c] = db2lin(gs.gainDB);
             }
+        }
+      }
+      for (uint32_t l = 0; l < n; ++l) {
+        float dryA[kSideChunk], scA[kSideChunk];
+        std::memcpy(dryA, lp[l] + base, size_t(cn) * sizeof(float));
+        if (ringLen != 0) {
+            // A non-finite sample never enters the ring (it would be replayed ringLen frames later). The sidechain is
+            // delayed like the audio, so listening never changes latency.
+            ExpLane &gs = *st[l];
+            float oldDry[kSideChunk];
+            const uint32_t pos = gs.ringPos;
+            gs.ringPos = ringExchange(ring[l], ringLen, pos, dryA, oldDry, cn);
+            ringExchange(ring[l] + ringLen, ringLen, pos, sideA[l], scA, cn);
+            std::memcpy(dryA, oldDry, size_t(cn) * sizeof(float));
+        } else {
+            std::memcpy(scA, sideA[l], size_t(cn) * sizeof(float));
+        }
+        float *out = lp[l] + base;
+        for (uint32_t c = 0; c < cn; ++c) {
+            const float dry = dryA[c], wet = dry * gainA[l][c];
+            const float lsS = lsSA[c], lsD = lsDA[c];
+            out[c] = (lsS == 0.0f && lsD == 0.0f) ? wet : std::max(0.0f, 1.0f - lsS - lsD) * wet + lsS * scA[c] + lsD * (dry - wet);
         }
       }
     }
@@ -1565,7 +1591,7 @@ n60_status validateDspStage(const n60_stage_desc &s, double rate, uint32_t outCh
             expected = s.paramCount;
             break;
         case N60_STAGE_EXPANDER:
-            if (s.paramCount != 6 && s.paramCount != 13) return N60_STATUS_BAD_ARGUMENT;
+            if (s.paramCount != 6 && s.paramCount != 13 && s.paramCount != 14) return N60_STATUS_BAD_ARGUMENT;
             expected = s.paramCount;
             break;
         case N60_STAGE_DENOISER: expected = 9; break;
@@ -1601,7 +1627,7 @@ void dspSizes(const n60_stage_desc &s, uint32_t firScheme, size_t &perLane, size
             shared = up(sizeof(CompShared));
             break;
         case N60_STAGE_EXPANDER:
-            perLane = up(sizeof(ExpLane));
+            perLane = up(sizeof(ExpLane) + (s.paramCount >= 14 ? size_t(s.params[13]) * sizeof(float) * 2 : 0));
             if (s.paramCount >= 13) shared = up(sizeof(ExpShared));
             break;
         case N60_STAGE_DYN_EQ: {
@@ -1797,6 +1823,60 @@ n60_status validateDspParam(const SnapHeader *h, const StageRec &r, uint32_t idx
     return paramLive(r.kind, idx) ? N60_STATUS_OK : N60_STATUS_UNSUPPORTED;
 }
 
+// E33 S5a (ABI v41): at adopt, an EXPANDER stage with a lookahead (14 values) starts from the running state of the stage with
+// the same id and lane count in `from`: gain, detector and filter state, hold counter, the listen and link smoothers, and
+// both lookahead rings. The lookahead is fixed at build, so an edit rebuilds; the most recent min(old, new) frames of each ring
+// are carried aligned by age (oldest first, read position 0), and a longer new ring starts with silence for the extra delay.
+// Bounded copy, no allocation; returns the bytes copied.
+uint64_t expanderCarry(SnapHeader *from, SnapHeader *to) N60_RT_NONBLOCKING {
+    uint64_t bytes = 0;
+    if (from == nullptr || to == nullptr || from->sampleRate != to->sampleRate) return bytes;
+    const StageRec *src = stages(from);
+    StageRec *dst = stages(to);
+    for (uint32_t i = 0; i < to->stageCount; ++i) {
+        if (dst[i].kind != N60_STAGE_EXPANDER || dst[i].paramCount < 14) continue;
+        for (uint32_t j = 0; j < from->stageCount; ++j) {
+            if (src[j].kind != N60_STAGE_EXPANDER || src[j].id != dst[i].id || src[j].paramCount < 14 ||
+                src[j].laneCount != dst[i].laneCount) {
+                continue;
+            }
+            const uint32_t la = static_cast<uint32_t>(paramsOf(from, src[j])[13]), lb = static_cast<uint32_t>(paramsOf(to, dst[i])[13]);
+            const ExpShared &sa = *reinterpret_cast<const ExpShared *>(sharedState(from, src[j]));
+            ExpShared &sb = *reinterpret_cast<ExpShared *>(sharedState(to, dst[i]));
+            sb.linkS = sa.linkS;
+            sb.listenSide = sa.listenSide;
+            sb.listenDelta = sa.listenDelta;
+            bytes += 3 * sizeof(float);
+            for (uint32_t l = 0; l < dst[i].laneCount; ++l) {
+                const ExpLane &a = *reinterpret_cast<const ExpLane *>(laneState(from, src[j], l));
+                ExpLane &b = *reinterpret_cast<ExpLane *>(laneState(to, dst[i], l));
+                b.gainDB = a.gainDB;
+                b.meanSq = a.meanSq;
+                b.z[0] = a.z[0];
+                b.z[1] = a.z[1];
+                b.holdCnt = a.holdCnt;
+                bytes += 5 * sizeof(double);
+                if (la == 0 || lb == 0) continue;
+                const float *ra = reinterpret_cast<const float *>(reinterpret_cast<const uint8_t *>(&a) + up(sizeof(ExpLane)));
+                float *rb = reinterpret_cast<float *>(reinterpret_cast<uint8_t *>(&b) + up(sizeof(ExpLane)));
+                const uint32_t pa = a.ringPos >= la ? 0 : a.ringPos;
+                for (uint32_t ring = 0; ring < 2; ++ring) {  // audio, then sidechain
+                    const float *x = ra + size_t(ring) * la;
+                    float *y = rb + size_t(ring) * lb;
+                    for (uint32_t k = 0; k < lb; ++k) {
+                        const uint32_t age = lb - k;  // 1 is the newest sample
+                        y[k] = age <= la ? x[(pa + la - age) % la] : 0.0f;
+                    }
+                }
+                b.ringPos = 0;
+                bytes += size_t(2) * lb * sizeof(float);
+            }
+            break;
+        }
+    }
+    return bytes;
+}
+
 uint32_t dspLatency(const SnapHeader *h, const StageRec &r) N60_RT_NONBLOCKING {
     if (r.kind == N60_STAGE_FIR) return kPart + r.capacity;
     if (r.kind == N60_STAGE_ROOM_FIR_TWO_BAND) {
@@ -1804,6 +1884,7 @@ uint32_t dspLatency(const SnapHeader *h, const StageRec &r) N60_RT_NONBLOCKING {
     }
     if (r.kind == N60_STAGE_DENOISER) return denoiseFft(paramsOf(h, r)[1]);
     if (r.kind == N60_STAGE_COMPRESSOR && r.paramCount >= 15) return static_cast<uint32_t>(paramsOf(h, r)[14]);
+    if (r.kind == N60_STAGE_EXPANDER && r.paramCount >= 14) return static_cast<uint32_t>(paramsOf(h, r)[13]);
     return 0;
 }
 

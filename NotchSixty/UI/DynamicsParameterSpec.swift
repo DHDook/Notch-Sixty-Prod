@@ -241,6 +241,7 @@ extension DynamicsParameterSpec {
     static let expanderRMSWindowMs = DynamicsParameterSpec("expanderRMSWindowMs", stage: "Expander", "Detector Window", .milliseconds, \.expander.rmsWindowMsValue, config: ExpanderConfiguration.rmsWindowRange, slider: 5.0...200.0, step: 1, digits: 0)
     static let expanderSidechainHighPassHz = DynamicsParameterSpec("expanderSidechainHighPassHz", stage: "Expander", "Sidechain High-Pass", .hertz, \.expander.sidechainHighPassHzValue, config: ExpanderConfiguration.sidechainHighPassRange, slider: 0.0...300.0, step: 5, digits: 0)
     static let expanderLinkPercent = DynamicsParameterSpec("expanderLinkPercent", stage: "Expander", "Link (%)", .plain, \.expander.linkPercentValue, config: ExpanderConfiguration.linkRange, slider: 0.0...100.0, step: 1, digits: 0)
+    static let expanderLookaheadMs = DynamicsParameterSpec("expanderLookaheadMs", stage: "Expander", "Lookahead", .milliseconds, \.expander.lookaheadTimeMs, config: ExpanderConfiguration.lookaheadPageRange, slider: 1.0...10.0, step: 0.5, digits: 1)
     static let multibandRMSWindowMs = DynamicsParameterSpec("multibandRMSWindowMs", stage: "Multiband", "Detector Window", .milliseconds, \.multibandCompressor.rmsWindowMsValue, config: MultibandCompressorConfiguration.rmsWindowRange, slider: 5.0...200.0, step: 1, digits: 0)
     static let multibandLookaheadMs = DynamicsParameterSpec("multibandLookaheadMs", stage: "Multiband", "Lookahead", .milliseconds, \.multibandCompressor.lookaheadTimeMs, config: CompressorConfiguration.lookaheadPageRange, slider: 1.0...10.0, step: 0.5, digits: 1)
 
@@ -308,6 +309,7 @@ extension DynamicsParameterSpec {
 
     /// Every fixed row of the page (harmonic depths are built per index).
     static let all: [DynamicsParameterSpec] = extras + [
+        expanderLookaheadMs,  // E33 S5a: behind `e33.page-enhancements`, so not an S7 extra
         compressorThresholdDB,
         compressorRatio,
         compressorKneeWidthDB,

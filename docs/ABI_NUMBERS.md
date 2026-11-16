@@ -13,3 +13,4 @@ If two claims collide, the one that merges second renumbers its own claim only.
 | none (no bump) | E4 S30d | claims no number. Changes only AMBIENT state carry in `systemRiderCarry`; no layout or version change |
 | none (no bump) | E28 G42 | claims no number. Adds multiband paramCount 44 (parameter 43 band split) inside the existing v37 layout; extras-off blocks (29 or 43 values) are unchanged |
 | graph v40 | E19 S10 `e19/routed-stage-and-wiring` | open; adds `N60_STAGE_MIMO_ROUTED` (53) at position 23.55 and renumbers the internal ranks of XOVER and DRIVER_FIR (no layout change) |
+| graph v41 | E33 S5a `e33/expander-lookahead` | open; expander paramCount 14 adds [13] lookahead frames (ring in lane state, latency reported); no layout change to other structs |
