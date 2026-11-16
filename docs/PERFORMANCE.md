@@ -172,6 +172,22 @@ runs read R3 refw 384 kHz at 33.3, 52.1 and 36.8% mean (352.8 kHz: 44.1, 50.9, 3
 `budgets.json` (G33, E22 bench line). Lanes inside multi-lane FIR phases now post tails for idle workers (G29). Parallel
 PROTECTION was faster than serial at 2, 4 and 16 lanes (44.1 to 192 kHz), so there is no size gate (G36).
 
+## App-level measurement (E1 S11)
+
+The core bench above does not see the app. Signposts (`AppSignposts`, subsystem `com.notchsixty.app`, category `performance`)
+mark `publishDSPGraph`, `eqFIRDesign`, `profileSave` and `launchServices`; view them in Instruments (os_signpost). Timed
+tests in `NotchSixtyTests/AppPerformanceTests.swift` keep budgets for edit-to-publish (0.25 s), graph publish (0.1 s),
+profile save (0.1 s) and launch services (1 s), median of several runs, at all eight rates where rate matters. The budgets
+are loose guards, not calibrated (E1 G8).
+
+New bench rows (no baseline or budget until the nightly artifact supplies one): R9 is the MIMO stage at 32 sources (R8
+uses 8); R10 is R1 plus the ANC lane feed in every block (needs `-DN60_BENCH_ANC`, offline compute only).
+Local M4 mean load %, reference block, 44.1 / 384 kHz: R8 0.9 / 4.5, R9 10 / 28, R10 1.3 / 11.4.
+
+Idle-energy method: launch a Release build, start the engine with no audio playing, then record 5 minutes in Instruments
+with the Energy Log (or `powermetrics --samplers tasks`) and note Energy Impact and wakeups per second for the app;
+repeat with the engine stopped. First reading: not yet taken (E1 G7, E22).
+
 ## Release optimisation
 
 Xcode Release for the app target now sets `-O3` for C++ (`OTHER_CPLUSPLUSFLAGS`). On the M4, -O3 ran

@@ -100,6 +100,8 @@ final class ProductController: ObservableObject {
     static let selectedOutputDefaultsKey = "audio.selectedOutputUID"
 
     init() {
+        let launchSignpost = AppSignposts.signposter.beginInterval("launchServices")
+        defer { AppSignposts.signposter.endInterval("launchServices", launchSignpost) }
         let audioEngine = AudioIOEngine(
             initialRouteConfiguration: AudioRouteConfiguration(
                 selectedOutputUID: UserDefaults.standard.string(

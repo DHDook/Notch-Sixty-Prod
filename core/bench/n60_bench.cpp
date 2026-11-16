@@ -58,7 +58,7 @@ static uint32_t profRead(n60_profile_entry *, uint32_t) { return 0; }
 namespace {
 
 constexpr double kRates[] = {44100, 48000, 88200, 96000, 176400, 192000, 352800, 384000};
-constexpr uint32_t kMaxLanes = 24;
+constexpr uint32_t kMaxLanes = 32;
 
 uint64_t mix(uint64_t x) {
     x += 0x9E3779B97F4A7C15ull;
@@ -195,11 +195,11 @@ void widePeq(Built &b, double rate) {
 // R8 (E20 S8, G30): the E19 MIMO treatment stage armed on 8 source lanes with 4,096 low-rate taps per filter, the
 // largest the stage accepts. It already runs its filters at fs/D (graph.h "MIMO treatment"), so this is the cost of the
 // treatment injection filters as shipped.
-void mimoTreatment(Built &b, double rate) {
+void mimoTreatment(Built &b, double rate, uint32_t S = 8) {
     uint32_t D = 0;
     double lr = 0;
     n60_mimo_low_rate(rate, &D, &lr);
-    const uint32_t S = 8, T = 4096;
+    const uint32_t T = 4096;
     std::vector<float> p = {static_cast<float>(D), static_cast<float>(T), static_cast<float>(S), 0.0f, 1.0f, 0.0f, 0.0f, 0.0f};
     for (uint32_t s = 0; s < S; ++s) p.push_back(10.0f);
     const std::vector<float> taps = decaying(S * S * T, 11, 0.001f);
@@ -210,7 +210,7 @@ void mimoTreatment(Built &b, double rate) {
 }
 
 // Scenario ids. R4 splits into 2 and 8 lanes.
-const char *const kScenarioIds[] = {"R1", "R2", "R3", "R4a", "R4b", "R4c", "R4d", "R5", "R6", "R7", "R8"};
+const char *const kScenarioIds[] = {"R1", "R2", "R3", "R4a", "R4b", "R4c", "R4d", "R5", "R6", "R7", "R8", "R9", "R10"};
 
 bool buildScenario(const std::string &id, double rate, uint32_t block, Built &b) {
     if (id == "R1") { b.begin(rate, block, 4); fullChain(b, rate, 2, 2, 8192); return true; }
@@ -222,6 +222,10 @@ bool buildScenario(const std::string &id, double rate, uint32_t block, Built &b)
     if (id == "R4c") { b.begin(rate, block, 2); longFir(b, 2, 32768); return true; }
     if (id == "R4d") { b.begin(rate, block, 8); longFir(b, 8, 32768); return true; }
     if (id == "R8") { b.begin(rate, block, 8); mimoTreatment(b, rate); return true; }
+    // E1 S11 (G6): R9 is the same stage at the approved maximum of 32 sources (R8 uses 8).
+    if (id == "R9") { b.begin(rate, block, N60_MIMO_MAX_SOURCES); mimoTreatment(b, rate, N60_MIMO_MAX_SOURCES); return true; }
+    // R10 is the R1 full chain; runCell adds the ANC lane feed to every block (the combined cost; R7 is the feed alone).
+    if (id == "R10") { b.begin(rate, block, 4); fullChain(b, rate, 2, 2, 8192); return true; }
     if (id == "R6") { b.begin(rate, block, 2); widePeq(b, rate); return true; }
     if (id == "R5") {
         n60_layout lay;
@@ -348,7 +352,7 @@ bool timeGraph(n60_graph *g, uint32_t lanes, double rate, uint32_t frames, const
 }
 
 #ifdef N60_BENCH_ANC
-bool timeAnc(double rate, uint32_t frames, const Config &cfg, Cell &cell) {
+bool timeAnc(double rate, uint32_t frames, const Config &cfg, Cell &cell, n60_graph *chain = nullptr, uint32_t chainLanes = 0) {
     constexpr uint32_t kCh = 6;
     N60AncLaneFeedConfig c = {};
     N60SpeakerBusSplitterSnapshot splitter;
@@ -369,6 +373,7 @@ bool timeAnc(double rate, uint32_t frames, const Config &cfg, Cell &cell) {
     N60AncLaneFeedRenewLease(feed, static_cast<uint64_t>(rate * 3600.0));
     static const Signal sig;
     std::vector<float> outBuf(size_t(kCh) * 4096);
+    std::vector<float> chainOut(size_t(chainLanes) * 4096);
     const float *ip[kCh];
     float *op[kCh];
     const double period = frames / rate;
@@ -382,6 +387,7 @@ bool timeAnc(double rate, uint32_t frames, const Config &cfg, Cell &cell) {
             for (uint64_t i = 0; i < blocks; ++i, ++blk) {
                 for (uint32_t l = 0; l < kCh; ++l) { ip[l] = sig.at(blk, l, frames); op[l] = outBuf.data() + size_t(l) * 4096; }
                 const auto t0 = Clock::now();
+                if (chain != nullptr && !graphRun(chain, chainLanes, frames, blk, sig, chainOut)) return false;
                 N60AncLaneFeedProcess(feed, ip, op, kCh, frames);
                 const auto t1 = Clock::now();
                 times[i] = std::chrono::duration<double>(t1 - t0).count() / period;
@@ -474,6 +480,19 @@ bool runCell(const std::string &id, double rate, uint32_t frames, const Config &
     if (id == "R7") {
 #ifdef N60_BENCH_ANC
         return timeAnc(rate, frames, cfg, cell);
+#else
+        return false;
+#endif
+    }
+    if (id == "R10") {
+#ifdef N60_BENCH_ANC
+        Built cb;
+        if (!buildScenario(id, rate, frames, cb)) return false;
+        n60_graph *cg = nullptr;
+        if (n60_graph_build(cb.finish(), &cg) != N60_STATUS_OK || cg == nullptr) return false;
+        const bool done = timeAnc(rate, frames, cfg, cell, cg, cb.lanes);
+        n60_graph_retire(cg);
+        return done;
 #else
         return false;
 #endif
@@ -670,7 +689,7 @@ int selfTest() {
     cfg.seconds = 0.01;
     cfg.runs = 1;
     for (const char *id : kScenarioIds) {
-        if (std::strcmp(id, "R7") == 0) {
+        if (std::strcmp(id, "R7") == 0 || std::strcmp(id, "R10") == 0) {
 #ifndef N60_BENCH_ANC
             continue;
 #endif
@@ -742,7 +761,7 @@ int main(int argc, char **argv) {
     if (!cfg.budgets.empty()) readFlat(cfg.budgets, budIn);
     for (const std::string &id : cfg.scenarios) {
 #ifndef N60_BENCH_ANC
-        if (id == "R7") { std::fputs("note: R7 needs -DN60_BENCH_ANC and the ANC objects; skipped\n", stderr); continue; }
+        if (id == "R7" || id == "R10") { std::fputs("note: R7 and R10 need -DN60_BENCH_ANC and the ANC objects; skipped\n", stderr); continue; }
 #endif
         for (double rate : cfg.rates) {
             for (int blockKind = 0; blockKind < (cfg.profileOnly ? 1 : 2); ++blockKind) {

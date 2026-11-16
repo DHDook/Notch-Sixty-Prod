@@ -2289,6 +2289,8 @@ final class ProductProfileController: ObservableObject {
     }
 
     private func persistThrowing() throws {
+        let signpost = AppSignposts.signposter.beginInterval("profileSave")
+        defer { AppSignposts.signposter.endInterval("profileSave", signpost) }
         let directory = storageURL.deletingLastPathComponent()
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let archive = Archive(
