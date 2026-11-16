@@ -1,6 +1,8 @@
 // Golden-hash scenarios shared by test_mb_nband.cpp: the legacy 29/43/44-value blocks rendered through the graph, hashed over
-// the output float bits. The hashes were captured from the three-band code before E33 S5b, so a match proves the N-band
-// generalisation leaves every legacy block bit-identical.
+// the output float bits. The hashes were captured on macOS (arm64) from the three-band code before E33 S5b, so a match
+// there proves the N-band generalisation leaves every legacy block bit-identical. The bits depend on the platform libm, so
+// other platforms check the same scenarios through the 73-value layout instead (scenario(..., true)): a legacy block and
+// its 73-value equivalent with a count of 3 must render bit-identically.
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
@@ -70,7 +72,7 @@ struct Legacy {
 };
 
 // One scenario: renders the block, optionally posting a live corner edit and a solo half way, and returns the hash.
-inline uint64_t scenario(int which, double rate) {
+inline uint64_t scenario(int which, double rate, bool widen = false) {
     Legacy m;
     uint32_t count = 44;
     switch (which) {
@@ -81,7 +83,19 @@ inline uint64_t scenario(int which, double rate) {
         case 4: m.p[35] = 1; m.p[37] = 2; m.p[17] = 0; m.p[20] = 80; break;               // residual, listen sidechain/delta
         default: break;
     }
-    n60_graph *g = buildBlock(rate, m.p, count);
+    float w[73] = {0};
+    const float *block = m.p;
+    uint32_t blockCount = count;
+    if (widen) {
+        // The legacy values plus count 3 and in-range settings for the unused bands 4 and 5 (corners 2 and 3 are unused too).
+        std::memcpy(w, m.p, sizeof m.p);
+        if (count == 29) w[43] = 0;
+        w[44] = 3; w[45] = 5000; w[46] = 9000;
+        w[51] = w[52] = 1; w[53] = w[54] = 10; w[55] = w[56] = 100;
+        block = w;
+        blockCount = 73;
+    }
+    n60_graph *g = buildBlock(rate, block, blockCount);
     if (!g) return 0;
     Vec l, r;
     const size_t n = (size_t)(rate * 0.35);
