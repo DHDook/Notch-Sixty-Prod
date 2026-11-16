@@ -284,13 +284,13 @@ int main() {
     for (double rate : rates) {
         constexpr uint32_t N = 512;
         float comp[16] = {-30, 4, 6, 1, 100, 3, 0, 1, 80, 1, 50, 0, 1, 80, 240, 0};
-        float expa[13] = {-50, 2, -30, 2, 80, 1, 50, 6, 1, 60, 80, 50, 0};
+        float expa[14] = {-50, 2, -30, 2, 80, 1, 50, 6, 1, 60, 80, 50, 0, 240};  // ABI v41: with a lookahead ring
         float mb[43] = {1, 120, 2500, 0, 0, -30, -30, -30, 4, 4, 4, 5, 5, 5, 100, 100, 100, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
                         0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 50, 240};
         // Stage order is the core's rank order: the multiband sits before the compressor and expander.
         n60_stage_desc st[3] = {stage(N60_STAGE_MULTIBAND, 3, 0, mb, 43, 0, 1),
                                 stage(N60_STAGE_COMPRESSOR, 1, N60_LANE_ALL, comp, 16),
-                                stage(N60_STAGE_EXPANDER, 2, N60_LANE_ALL, expa, 13)};
+                                stage(N60_STAGE_EXPANDER, 2, N60_LANE_ALL, expa, 14)};
         n60_graph_desc d{};
         d.structSize = sizeof d;
         d.abiVersion = N60_GRAPH_ABI_VERSION;

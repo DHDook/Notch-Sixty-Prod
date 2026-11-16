@@ -39,6 +39,10 @@ n60_status validateDspParam(const SnapHeader *h, const StageRec &r, uint32_t idx
 // Control thread. Gain-reduction readback of a COMPRESSOR or EXPANDER lane (ABI v8); false for other kinds.
 bool readDspDynamics(SnapHeader *h, const StageRec &r, uint32_t lane, n60_dynamics_readback *out);
 
+// E33 S5a (ABI v41). Realtime thread, at adopt: an EXPANDER stage with a lookahead starts from the running state (gain,
+// filters, hold, smoothers and both rings) of the same-id stage in `from`. Bounded copy; returns the bytes copied.
+uint64_t expanderCarry(SnapHeader *from, SnapHeader *to) N60_RT_NONBLOCKING;
+
 // Frames of latency one lane of this stage adds.
 uint32_t dspLatency(const SnapHeader *h, const StageRec &r) N60_RT_NONBLOCKING;
 

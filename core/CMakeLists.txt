@@ -299,6 +299,11 @@ add_executable(n60core_exp_extras_test tests/test_exp_extras.cpp)
 target_link_libraries(n60core_exp_extras_test PRIVATE n60core)
 add_test(NAME n60core_exp_extras COMMAND n60core_exp_extras_test)
 
+# E33 S5a: expander lookahead (ABI v41).
+add_executable(n60core_exp_lookahead_test tests/test_exp_lookahead.cpp)
+target_link_libraries(n60core_exp_lookahead_test PRIVATE n60core)
+add_test(NAME n60core_exp_lookahead COMMAND n60core_exp_lookahead_test)
+
 # E28 S7c: multiband bypass, solo, listen, detector and lookahead (ABI v37).
 add_executable(n60core_mb_extras_test tests/test_mb_extras.cpp)
 target_link_libraries(n60core_mb_extras_test PRIVATE n60core)

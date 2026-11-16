@@ -104,8 +104,9 @@ enum UnifiedGraphTranslator {
             if let extras = compressorExtras, extras.count == 6, let base = stages.compressor, base.count == 10 {
                 stages.compressor = base + extras
             }
-            // E28 S7b: the 6-value expander block becomes the 13-value one (hold, knee, detector, window, filter, link, listen).
-            if let extras = expanderExtras, extras.count == 7, let base = stages.expander, base.count == 6 {
+            // E28 S7b: the 6-value expander block becomes the 13-value one (hold, knee, detector, window, filter, link, listen);
+            // E33 S5a: an eighth extra, the lookahead frames, makes it the 14-value one.
+            if let extras = expanderExtras, extras.count == 7 || extras.count == 8, let base = stages.expander, base.count == 6 {
                 stages.expander = base + extras
             }
             // E28 S7c: the 29-value multiband block becomes the 43-value one. The 17 extras are the auto-release flags (they

@@ -870,28 +870,40 @@ struct ExpanderConfiguration: Equatable, Codable, Sendable {
     var rmsWindowMs: Double?
     var sidechainHighPassHz: Double?
     var linkPercent: Double?
+    /// E33 S5a (behind `e33.page-enhancements`): lookahead in ms; nil decodes as off. The detector reads the undelayed signal
+    /// and the audio is delayed by this much, so the stage adds the same latency.
+    var lookaheadMs: Double?
 
     static let holdRange = 0.0...500.0
     static let kneeRange = 0.0...24.0
     static let rmsWindowRange = 5.0...200.0
     static let sidechainHighPassRange = 0.0...300.0
     static let linkRange = 0.0...100.0
+    static let lookaheadRange = 0.0...10.0
+    /// The shortest and longest lookahead the page offers.
+    static let lookaheadPageRange = 1.0...10.0
 
     /// The seven extra core parameters (hold, knee, detector, RMS window, sidechain filter, link, listen = 0) for the
     /// 13-value block. Always returned when the flag is on: the listen slot has to exist for a switch to be a live post.
     /// The hold is in milliseconds; the core converts it per rate.
-    func coreExtras() -> [Float] {
+    /// With `lookahead` (the page flag is on; E33 S5a) an eighth value, the lookahead in frames at `sampleRate`, makes it the
+    /// 14-value block; without it the block is the 13-value one, so flags-off renders as before.
+    func coreExtras(sampleRate: Double = 48_000, lookahead: Bool = false) -> [Float] {
         func clamp(_ v: Double, _ r: ClosedRange<Double>) -> Float { Float(min(max(v, r.lowerBound), r.upperBound)) }
-        return [
+        let base: [Float] = [
             clamp(holdMs ?? 0, Self.holdRange), clamp(kneeDB ?? 0, Self.kneeRange), (rmsDetector ?? false) ? 1 : 0,
             clamp(rmsWindowMs ?? 50, Self.rmsWindowRange), clamp(sidechainHighPassHz ?? 0, Self.sidechainHighPassRange),
             clamp(linkPercent ?? 100, Self.linkRange), 0,
         ]
+        guard lookahead else { return base }
+        let ms = min(max(lookaheadMs ?? 0, Self.lookaheadRange.lowerBound), Self.lookaheadRange.upperBound)
+        let frames = CompressorConfiguration.lookaheadFrames(ms: ms, sampleRate: sampleRate)
+        return base + [Float(frames)]
     }
 
     func validate() throws {
         for (value, range) in [(holdMs, Self.holdRange), (kneeDB, Self.kneeRange), (rmsWindowMs, Self.rmsWindowRange),
-                               (sidechainHighPassHz, Self.sidechainHighPassRange), (linkPercent, Self.linkRange)] {
+                               (sidechainHighPassHz, Self.sidechainHighPassRange), (linkPercent, Self.linkRange), (lookaheadMs, Self.lookaheadRange)] {
             if let value, !(value.isFinite && range.contains(value)) { throw DynamicsConfigurationError.invalidExpander }
         }
         guard thresholdDB.isFinite, Self.thresholdRange.contains(thresholdDB),
