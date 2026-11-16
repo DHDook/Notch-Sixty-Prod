@@ -129,6 +129,7 @@ stopping slice work (a benchmark link error, a Linux `test_fpenv` crash, an LLVM
 - [x] S8 `e1/repo-cleanup`: delete the `ci/validate_*.py` scripts nothing runs (55 exist, 4 are referenced) and the stale `PR40_SLICE_*_STATUS.md` files in the repository root; fix every Swift warning (first: `RoomCorrectionABXSheet.swift:38`) (warnings-as-errors moved to S7)
 - [x] S9 `e1/project-layout`: folder-synchronised Xcode groups so new files need no project edit; split `ci/run_harnesses.sh` into one script per epic (`ci/harnesses/<epic>.sh`)
 - [x] S10 `e1/info-plist-audio-capture-key` (G4, closed): the built app's Info.plist lacks `NSAudioCaptureUsageDescription` (build settings set it, `GENERATE_INFOPLIST_FILE=YES`, `NotchSixty/Info.plist` is unused); confirm on `main` and fix so the system-audio permission prompt shows the text
+- [ ] S11 `e1/app-performance-tests` (performance review, owner approved 15 Nov 2026); needs-owner if `macos-full.yml` changes: signposts in the app; timed tests for edit-to-publish, graph publish and launch time; an idle-energy note in `docs/PERFORMANCE.md`; bench rows for ANC combined with a full chain (R7 is offline only) and MIMO at 32 sources (R8 uses 8)
 
 ### E2 macOS 26 support
 
@@ -573,6 +574,8 @@ unified graph only.
 - [ ] S2 `e23/kernel-reference-inventory` (owner, 11 Nov 2026): list the 17 files that still reference `N60RenderKernel` in `docs/epics/E23.md`, each with the slice that removes the reference
 - [ ] S3 `e23/content-view-removal` (owner, 11 Nov 2026; needs-owner if any user-visible control goes): remove `ContentView.swift` (1,607 lines, still instantiated from `NotchSixtyApp.swift`) once every control it holds is reachable elsewhere
 - [ ] S4 `e23/audio-io-engine-split` (owner, 11 Nov 2026; needs-owner: `AudioIOEngine.swift`): split `AudioIOEngine.swift` (6,382 lines) along its legacy-path seams as the kernel paths go. From now on no slice in any epic may make the file longer
+- [ ] S5 `e23/idle-render-path` (performance review, owner approved 15 Nov 2026); needs-owner, engine; after the kernel is deleted: skip or cut rendering when the input is silent and every tail has decayed, never while ANC, MIMO treatment or the generator is active; idle bench row
+- [ ] S6 `e23/rebuild-cost` (performance review, owner approved 15 Nov 2026); needs-owner, engine: "rebuild in progress" bench row, then switch the rebuild CPU budget on or reuse unchanged stages (the host sets `cpuBudgetPercent` to 0 today); build new graphs and linear-phase EQ designs off the main actor; debounce profile saving if drags reach it
 - [ ] Remove the kernel headphone-delay clamp (4,095 frames) with the kernel (E7 G1)
 - [ ] Delete the legacy bridge MIMO path (`N60MIMOTreatment*.h`, `stagedRoomTreatment`), frozen since E19 S6 (E19 G25)
 - [ ] Delete `N60RenderKernel`, the old N-channel path and the `e6.legacy-kernel` flag
@@ -593,6 +596,7 @@ Owner decision, 18 Oct 2026: there is no bench access for now, so every bench ch
 - [ ] Run E4 S11 (owner, 1 Nov 2026: moved here from the E4 execution order): repeat S8 on the unified E6 graph, then fill the placeholder reduction table in `docs/ANC_QUALIFICATION.md` §4.1 from the S31 reviewer-kit noise files
 - [ ] E4 S26a: ear-microphone check of the virtual-microphone design with a real head at the eight rates (E4 S26a wiring), including the adaptive worker holding the ear reduction as the noise drifts and the other-seat limit (G18)
 - [ ] Run the remaining bench checks at every rate from 44.1 to 384 kHz
+- [ ] From the E20 G32 main-thread measurement (performance review, owner approved 15 Nov 2026): if it shows a cost, fold the separate main-actor polling loops (8 to 60 Hz) into `MeterReadbackHub`
 - [ ] E6 G19: listening for level riding on speech and music at the eight rates (LOUDNESS stage, E6 S12c)
 - [ ] E6 G43: binaural convolution cost per rate (16 channels, 8192 taps, 24 head orientations, 44.1 to 384 kHz) on the build machine (E6 S12g4)
 - [ ] E6 G29: bypass and reference audition A/B while playing, and wide-EQ listening at the eight rates (E6 S12e)
