@@ -317,6 +317,7 @@ minimum-phase in blind ABX at three or more seats, and measurement results match
   - [x] S9a processing: one record per seat from K simultaneous captures (shared-clock and separate-USB modes); K-input transport and seat picker in S9b
 - [x] Measurement management: overlays, groups, notes, A/B against a reference
 - [x] Quasi-anechoic (gated) speaker response view in the Measurement Lab's Advanced tab, using the existing analyser (`SpeakerMeasurementLabQuasiAnechoic.swift`; from E5)
+- [ ] S12 `e11/distortion-vs-level` (strategic review, owner approved 15 Nov 2026); needs-owner (plays test signals at rising level): distortion and compression against level per speaker from stepped-level sweeps, with a hard level cap and stop rule; reports each speaker's clean-level limit and offers it to headroom and protection. H2–H5 at one level already exists (S3)
 - Moved to E17 S7 (owner, 11 Nov 2026): import and export of REW text, FRD and ZMA. The cross-check against REW on shared captures is an E22 item (no REW is available)
 - Verification with music (compare what plays with what a room microphone hears during normal listening) is after v1: `docs/V2_ROADMAP.md`, V2-16 (owner, 11 Nov 2026)
 
@@ -510,6 +511,7 @@ Plan: `docs/epics/E17.md` (awaiting owner approval; flags `e17.export`, `e17.dit
 - [ ] S7 `e17/measurement-interchange` (owner, 11 Nov 2026; moved from E11): import and export REW text, FRD and ZMA
 - [ ] S8 `e17/correction-interchange` (owner, 11 Nov 2026): export a correction as FIR impulse files, biquad lists and a CamillaDSP configuration; import REW filter text and Equalizer APO configurations (extend the existing exporters and `EqualizerAPOPresetImporter`, do not duplicate them)
   - [ ] S8: import a WAV or AIFF speaker impulse response that carries its file rate so E7 rate adaptation reaches it (E17 G2, from E7 G5)
+- [ ] S9 `e17/upsampling` (strategic review, owner approved 15 Nov 2026); investigation first, build only on its entry rule: (a) settle whether the process tap can deliver audio before macOS converts it to the device rate (open question, E17 gap); (b) measure what our own conversion and filter choice gains over the system's on real material; (c) only if both pass, an explicit, user-chosen upsampling mode with selectable reconstruction filter (changes the `AGENTS.md` section 3 no-SRC rule: owner approval needed). Runs before S5 or is dropped with a recorded reason
 - [ ] S5 `e17/ship` (runs after S6–S8) graduates `e17.export` and `e17.dither` (default on; removal is the FC phase)
 
 ### E30 Everyday listening controls (owner, 11 Nov 2026)
