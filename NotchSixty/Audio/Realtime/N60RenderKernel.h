@@ -235,6 +235,10 @@ typedef struct {
     float multibandLowGainReductionDB;
     float multibandMidGainReductionDB;
     float multibandHighGainReductionDB;
+    /* E33 S5b (graph ABI 42): bands 4 and 5 of the multiband stage and its band count; the frozen kernel leaves them 0. */
+    float multibandBand4GainReductionDB;
+    float multibandBand5GainReductionDB;
+    uint32_t multibandBandCount;
     float loudnessShortTermLUFS;
     float loudnessMatchGainDB;
     float loudnessContourScale;

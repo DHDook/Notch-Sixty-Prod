@@ -662,16 +662,33 @@ enum MultibandSlope: String, CaseIterable, Identifiable, Codable, Sendable {
     }
 }
 
+/// E33 S5b: the settings of multiband bands 4 and 5 (bands 0 to 2 keep their named fields so older profiles decode unchanged).
+struct MultibandExtraBandConfiguration: Equatable, Codable, Sendable {
+    var thresholdDB = -18.0
+    var ratio = 3.0
+    var attackMs = 10.0
+    var releaseMs = 150.0
+    var kneeDB = 6.0
+    var sidechainHighPassHz = 0.0
+    var makeupGainDB = 0.0
+}
+
 struct MultibandCompressorConfiguration: Equatable, Codable, Sendable {
-    static let lowMidFrequencyRange = 40.0...250.0
-    static let midHighFrequencyRange = 1_000.0...8_000.0
-    static let thresholdRange = -60.0...0.0
-    static let ratioRange = 1.0...20.0
-    static let attackRange = 1.0...200.0
-    static let releaseRange = 10.0...1_000.0
-    static let kneeRange = 0.0...20.0
+    // E33 S5b (design 13): the wideband compressor's limits; corners follow the core's 40 Hz to 16 kHz.
+    static let cornerRange = 40.0...16_000.0
+    static let lowMidFrequencyRange = cornerRange
+    static let midHighFrequencyRange = cornerRange
+    static let thresholdRange = -96.0...0.0
+    static let ratioRange = 1.0...100.0
+    static let attackRange = 0.05...1_000.0
+    static let releaseRange = 1.0...5_000.0
+    static let kneeRange = 0.0...24.0
     static let sidechainRange = 0.0...300.0
-    static let makeupRange = -12.0...12.0
+    static let makeupRange = -24.0...24.0
+    /// The limits the frozen kernel's setter accepts (it keeps the old three-band ranges).
+    static let kernelCornerRanges = (low: 40.0...250.0, high: 1_000.0...8_000.0)
+    static let bandCountRange = 2...5
+    static let defaultBandCount = 3
 
     var enabled = false
     var lowMidFrequencyHz = 120.0
@@ -709,9 +726,115 @@ struct MultibandCompressorConfiguration: Equatable, Codable, Sendable {
     var rmsDetectorBands: Set<Int>?
     var rmsWindowMs: Double?
     var lookaheadMs: Double?
+    /// E33 S5b: 2 to 5 bands (nil is 3). Corners 0 and 1 are the two fields above; corners 2 and 3 and their slopes, and
+    /// the settings of bands 4 and 5, are optional so older profiles decode as three bands. Behind `e33.page-enhancements`.
+    var bandCount: Int?
+    var corner2Hz: Double?
+    var corner3Hz: Double?
+    var slope2: MultibandSlope?
+    var slope3: MultibandSlope?
+    var extraBands: [MultibandExtraBandConfiguration]?
 
     static let rmsWindowRange = 5.0...200.0
     static let lookaheadRange = 0.0...20.0
+
+    var bandCountValue: Int {
+        get { bandCount ?? Self.defaultBandCount }
+        set { bandCount = newValue == Self.defaultBandCount ? nil : newValue }
+    }
+
+    /// Settings of band 3 or 4 (zero based); the defaults when none are stored.
+    subscript(extraBand band: Int) -> MultibandExtraBandConfiguration {
+        get {
+            let i = band - 3
+            guard let e = extraBands, e.indices.contains(i) else { return MultibandExtraBandConfiguration() }
+            return e[i]
+        }
+        set {
+            var e = extraBands ?? [MultibandExtraBandConfiguration(), MultibandExtraBandConfiguration()]
+            if e.count < 2 { e += Array(repeating: MultibandExtraBandConfiguration(), count: 2 - e.count) }
+            e[band - 3] = newValue
+            extraBands = e.allSatisfy({ $0 == MultibandExtraBandConfiguration() }) ? nil : e
+        }
+    }
+
+    var corner2Value: Double { get { corner2Hz ?? 1_600 } set { corner2Hz = newValue } }
+    var corner3Value: Double { get { corner3Hz ?? 6_400 } set { corner3Hz = newValue } }
+    var slope2Value: MultibandSlope { get { slope2 ?? .gentle } set { slope2 = newValue } }
+    var slope3Value: MultibandSlope { get { slope3 ?? .gentle } set { slope3 = newValue } }
+
+    /// Crossover corners in Hz for the current band count (count - 1 values, lowest first).
+    var corners: [Double] {
+        Array([lowMidFrequencyHz, midHighFrequencyHz, corner2Value, corner3Value].prefix(bandCountValue - 1))
+    }
+
+    /// Sensible corners for `count` bands, applied when the band count changes so the corners stay in order.
+    mutating func setBandCount(_ count: Int) {
+        let n = min(max(count, Self.bandCountRange.lowerBound), Self.bandCountRange.upperBound)
+        bandCountValue = n
+        // Per-band sets drop the bands that no longer exist so the profile stays valid.
+        func pruned(_ set: Set<Int>?) -> Set<Int>? { let r = (set ?? []).filter { $0 < n }; return r.isEmpty ? nil : r }
+        autoReleaseBands = pruned(autoReleaseBands); bypassedBands = pruned(bypassedBands)
+        rmsDetectorBands = pruned(rmsDetectorBands); autoMakeupBands = pruned(autoMakeupBands)
+        let preset: [Double]
+        switch n {
+        case 2: preset = [800, 3_500, 1_600, 6_400]
+        case 3: preset = [120, 3_500, 1_600, 6_400]
+        case 4: preset = [120, 800, 3_500, 6_400]
+        default: preset = [100, 400, 1_600, 6_400]
+        }
+        lowMidFrequencyHz = preset[0]
+        midHighFrequencyHz = preset[1]
+        corner2Hz = n >= 4 ? preset[2] : nil
+        corner3Hz = n >= 5 ? preset[3] : nil
+    }
+
+    /// Per band: threshold, ratio, attack, release, knee, sidechain, make-up (bands 0 to 4).
+    private func bandSettings(_ band: Int) -> [Double] {
+        switch band {
+        case 0: return [lowThresholdDB, lowRatio, lowAttackMs, lowReleaseMs, lowKneeDB, lowSidechainHighPassHz, lowMakeupGainDB]
+        case 1: return [midThresholdDB, midRatio, midAttackMs, midReleaseMs, midKneeDB, midSidechainHighPassHz, midMakeupGainDB]
+        case 2: return [highThresholdDB, highRatio, highAttackMs, highReleaseMs, highKneeDB, highSidechainHighPassHz, highMakeupGainDB]
+        default:
+            let e = self[extraBand: band]
+            return [e.thresholdDB, e.ratio, e.attackMs, e.releaseMs, e.kneeDB, e.sidechainHighPassHz, e.makeupGainDB]
+        }
+    }
+
+    /// The whole 73-value core block for 2 to 5 bands (graph ABI 42; layout in `n60/graph.h`). Solo and listen are 0: they
+    /// are live posts from the session. Used by the translator when `bandCount` is not 3.
+    func coreBlock(sampleRate: Double) -> [Float] {
+        var block = [Float](repeating: 0, count: UnifiedGraphConfiguration.multibandBandsParamCount)
+        block[0] = enabled ? 1 : 0
+        block[1] = Float(lowMidFrequencyHz)
+        block[2] = Float(midHighFrequencyHz)
+        block[3] = lowMidSlope == .steep ? 1 : 0
+        block[4] = midHighSlope == .steep ? 1 : 0
+        func flag(_ set: Set<Int>?, _ band: Int) -> Float { (set ?? []).contains(band) ? 1 : 0 }
+        for band in 0..<5 {
+            let v = bandSettings(band)
+            let extra = band >= 3
+            func at(_ kind: Int) -> Int { extra ? 49 + 2 * kind + (band - 3) : 5 + 3 * kind + band }
+            for kind in 0..<7 { block[at(kind)] = Float(v[kind]) }
+            block[at(7)] = flag(autoReleaseBands, band)
+            block[at(8)] = flag(bypassedBands, band)
+            block[at(11)] = flag(rmsDetectorBands, band)
+        }
+        block[41] = Float(min(max(rmsWindowMs ?? 50, Self.rmsWindowRange.lowerBound), Self.rmsWindowRange.upperBound))
+        block[42] = Float(CompressorConfiguration.lookaheadFrames(ms: lookaheadMs ?? 0, sampleRate: sampleRate))
+        block[43] = 1
+        block[44] = Float(bandCountValue)
+        block[45] = Float(corner2Value)
+        block[46] = Float(corner3Value)
+        block[47] = slope2Value == .steep ? 1 : 0
+        block[48] = slope3Value == .steep ? 1 : 0
+        return block
+    }
+
+    /// What the translator appends or substitutes: the 17 extras for three bands, the full block otherwise.
+    func translatorBlock(sampleRate: Double, bands: Bool) -> [Float] {
+        bands && bandCountValue != Self.defaultBandCount ? coreBlock(sampleRate: sampleRate) : coreExtras(sampleRate: sampleRate)
+    }
 
     /// The 17 extra core parameters (auto release x3, bypass x3, solo x3 = 0, listen x3 = 0, detector x3, RMS window,
     /// lookahead frames). With `e28.dynamics-extras` on the 43-value block is always used, so solo and listen are live posts.
@@ -730,6 +853,17 @@ struct MultibandCompressorConfiguration: Equatable, Codable, Sendable {
         if bands.contains(0) { m.lowRatio = 1; m.lowMakeupGainDB = 0 }
         if bands.contains(1) { m.midRatio = 1; m.midMakeupGainDB = 0 }
         if bands.contains(2) { m.highRatio = 1; m.highMakeupGainDB = 0 }
+        // E33 S5b: the kernel setter keeps the old ranges; values the widened limits allow are clamped for it (the unified
+        // graph renders the real ones). Only three bands, split by the first two corners.
+        func c(_ v: Double, _ r: ClosedRange<Double>) -> Double { min(max(v, r.lowerBound), r.upperBound) }
+        m.lowMidFrequencyHz = c(m.lowMidFrequencyHz, Self.kernelCornerRanges.low)
+        m.midHighFrequencyHz = c(m.midHighFrequencyHz, Self.kernelCornerRanges.high)
+        m.lowThresholdDB = c(m.lowThresholdDB, -60...0); m.midThresholdDB = c(m.midThresholdDB, -60...0); m.highThresholdDB = c(m.highThresholdDB, -60...0)
+        m.lowRatio = c(m.lowRatio, 1...20); m.midRatio = c(m.midRatio, 1...20); m.highRatio = c(m.highRatio, 1...20)
+        m.lowAttackMs = c(m.lowAttackMs, 1...200); m.midAttackMs = c(m.midAttackMs, 1...200); m.highAttackMs = c(m.highAttackMs, 1...200)
+        m.lowReleaseMs = c(m.lowReleaseMs, 10...1_000); m.midReleaseMs = c(m.midReleaseMs, 10...1_000); m.highReleaseMs = c(m.highReleaseMs, 10...1_000)
+        m.lowKneeDB = c(m.lowKneeDB, 0...20); m.midKneeDB = c(m.midKneeDB, 0...20); m.highKneeDB = c(m.highKneeDB, 0...20)
+        m.lowMakeupGainDB = c(m.lowMakeupGainDB, -12...12); m.midMakeupGainDB = c(m.midMakeupGainDB, -12...12); m.highMakeupGainDB = c(m.highMakeupGainDB, -12...12)
         return m
     }
 
@@ -740,7 +874,24 @@ struct MultibandCompressorConfiguration: Equatable, Codable, Sendable {
     }
 
     func validate() throws {
-        for bands in [autoReleaseBands, bypassedBands, rmsDetectorBands] where !(bands ?? []).isSubset(of: [0, 1, 2]) {
+        for bands in [autoReleaseBands, bypassedBands, rmsDetectorBands] where !(bands ?? []).isSubset(of: Set(0..<bandCountValue)) {
+            throw DynamicsConfigurationError.invalidMultibandCompressor
+        }
+        if !(autoMakeupBands ?? []).isSubset(of: Set(0..<bandCountValue)) { throw DynamicsConfigurationError.invalidMultibandCompressor }
+        if let n = bandCount, !Self.bandCountRange.contains(n) { throw DynamicsConfigurationError.invalidMultibandCompressor }
+        if let e = extraBands {
+            guard e.count == 2 else { throw DynamicsConfigurationError.invalidMultibandCompressor }
+            let ok = e.allSatisfy {
+                $0.thresholdDB.isFinite && Self.thresholdRange.contains($0.thresholdDB) && $0.ratio.isFinite && Self.ratioRange.contains($0.ratio)
+                    && $0.attackMs.isFinite && Self.attackRange.contains($0.attackMs) && $0.releaseMs.isFinite && Self.releaseRange.contains($0.releaseMs)
+                    && $0.kneeDB.isFinite && Self.kneeRange.contains($0.kneeDB) && $0.sidechainHighPassHz.isFinite && Self.sidechainRange.contains($0.sidechainHighPassHz)
+                    && $0.makeupGainDB.isFinite && Self.makeupRange.contains($0.makeupGainDB)
+            }
+            guard ok else { throw DynamicsConfigurationError.invalidMultibandCompressor }
+        }
+        // Corners rise in order, each in range, for the corners the band count uses.
+        let used = corners
+        guard used.allSatisfy({ $0.isFinite && Self.cornerRange.contains($0) }), zip(used, used.dropFirst()).allSatisfy({ $0 < $1 }) else {
             throw DynamicsConfigurationError.invalidMultibandCompressor
         }
         if let v = rmsWindowMs, !(v.isFinite && Self.rmsWindowRange.contains(v)) { throw DynamicsConfigurationError.invalidMultibandCompressor }
@@ -752,9 +903,7 @@ struct MultibandCompressorConfiguration: Equatable, Codable, Sendable {
         let knees = [lowKneeDB, midKneeDB, highKneeDB]
         let sidechains = [lowSidechainHighPassHz, midSidechainHighPassHz, highSidechainHighPassHz]
         let makeups = [lowMakeupGainDB, midMakeupGainDB, highMakeupGainDB]
-        guard lowMidFrequencyHz.isFinite, Self.lowMidFrequencyRange.contains(lowMidFrequencyHz),
-              midHighFrequencyHz.isFinite, Self.midHighFrequencyRange.contains(midHighFrequencyHz),
-              lowMidFrequencyHz < midHighFrequencyHz,
+        guard lowMidFrequencyHz.isFinite, midHighFrequencyHz.isFinite,
               thresholds.allSatisfy({ $0.isFinite && Self.thresholdRange.contains($0) }),
               ratios.allSatisfy({ $0.isFinite && Self.ratioRange.contains($0) }),
               attacks.allSatisfy({ $0.isFinite && Self.attackRange.contains($0) }),

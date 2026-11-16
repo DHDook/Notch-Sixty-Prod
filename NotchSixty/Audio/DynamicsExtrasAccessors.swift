@@ -160,6 +160,6 @@ struct DynamicsGraphExtras: Equatable {
         return DynamicsGraphExtras(
             compressor: dynamics.compressor.coreExtras(sampleRate: sampleRate),
             expander: dynamics.expander.coreExtras(sampleRate: sampleRate, lookahead: FeatureFlags.isEnabledProcessWide(.eqPageEnhancements)),
-            multiband: dynamics.multibandCompressor.coreExtras(sampleRate: sampleRate))
+            multiband: dynamics.multibandCompressor.translatorBlock(sampleRate: sampleRate, bands: FeatureFlags.isEnabledProcessWide(.eqPageEnhancements)))
     }
 }

@@ -309,6 +309,12 @@ add_executable(n60core_mb_extras_test tests/test_mb_extras.cpp)
 target_link_libraries(n60core_mb_extras_test PRIVATE n60core)
 add_test(NAME n60core_mb_extras COMMAND n60core_mb_extras_test)
 
+# E33 S5b: multiband with 2 to 5 bands (ABI v42).
+add_executable(n60core_mb_nband_test tests/test_mb_nband.cpp)
+target_link_libraries(n60core_mb_nband_test PRIVATE n60core)
+target_include_directories(n60core_mb_nband_test PRIVATE tests)
+add_test(NAME n60core_mb_nband COMMAND n60core_mb_nband_test)
+
 # E28 G42: multiband band-pass tree (split mode, parameter 43).
 add_executable(n60core_mb_split_test tests/test_mb_split.cpp)
 target_link_libraries(n60core_mb_split_test PRIVATE n60core)

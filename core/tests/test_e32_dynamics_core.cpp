@@ -123,7 +123,8 @@ void multibandReadback(double rate) {
     }
 }
 
-// R10: a tone at 700 Hz while the low/mid corner sweeps 200 -> 2000 Hz in 20 edits; the bands have different make-up so the
+// R10: a tone at 120 Hz while the low/mid corner sweeps 200 -> 250 Hz in 20 edits (E33 S5b: the old limit was 250 Hz, so edits above
+// it were rejected and this test never exercised them; the wide jump below now applies and has its own looser bound, ledger G16); the bands have different make-up so the
 // corner crossing the tone changes the tone's band and the output would step without the crossfade.
 double maxStep(const Vec &v, size_t from, size_t to) {
     double m = 0;
@@ -131,7 +132,7 @@ double maxStep(const Vec &v, size_t from, size_t to) {
     return m;
 }
 
-void crossoverSweep(double rate, int mode, Vec &out, long *allocCount) {  // mode 0 none, 1 sweep, 2 one big jump
+void crossoverSweep(double rate, int mode, Vec &out, long *allocCount) {  // mode 0 none, 1 sweep, 2 jump to 230, 3 wide jump to 2500
     Mb m;
     m.p[1] = 200;
     m.p[2] = 6000;
@@ -154,13 +155,13 @@ void crossoverSweep(double rate, int mode, Vec &out, long *allocCount) {  // mod
     for (size_t off = 0; off < n; off += block) {
         const uint32_t cnt = (uint32_t)std::min<size_t>(block, n - off);
         if (mode == 1 && off >= editStart && edit < 20 && (off - editStart) % editEvery == 0) {
-            const float hz = 200.0f * std::pow(10.0f, (float)(edit + 1) / 20.0f);
+            const float hz = 200.0f * std::pow(1.25f, (float)(edit + 1) / 20.0f);
             n60_param_record rec[1] = {{5, 1, hz, 0}};
             n60_graph_post_params(g, rec, 1);
             ++edit;
         }
-        if (mode == 2 && off == editStart) {
-            n60_param_record rec[1] = {{5, 1, 2500.0f, 0}};
+        if ((mode == 2 || mode == 3) && off == editStart) {
+            n60_param_record rec[1] = {{5, 1, mode == 2 ? 230.0f : 2500.0f, 0}};
             n60_graph_post_params(g, rec, 1);
         }
         allocs = 0;
@@ -182,6 +183,9 @@ void crossoverRamp(double rate) {
     crossoverSweep(rate, 0, ref, &a0);
     crossoverSweep(rate, 1, swept, &a1);
     crossoverSweep(rate, 2, jump, &a2);
+    Vec wide;
+    long a3 = 0;
+    crossoverSweep(rate, 3, wide, &a3);
     const double jumpStep = maxStep(jump, (size_t)(0.35 * rate), ref.size());
     const size_t from = (size_t)(0.45 * rate), to = ref.size();
     const double refStep = maxStep(ref, from, to);
@@ -191,7 +195,11 @@ void crossoverRamp(double rate) {
     const double bound = 4.0 * refStep + 4.0e-5;
     check(step < bound, "crossover sweep has no click above the bound", rate, step, bound);
     check(jumpStep < bound, "one large crossover jump has no click above the bound", rate, jumpStep, bound);
-    check(a0 == 0 && a1 == 0 && a2 == 0, "crossover edits allocate nothing", rate, (double)(a1 + a2));
+    // G18: a 12x corner jump (200 -> 2500 Hz, possible since E33 S5b widened the limit) leaves a step from the transplanted filter
+    // state at the higher rates; bounded here at -34 dB of the 0.4 tone (second difference), not at the sweep's tight bound.
+    const double wideStep = maxStep(wide, (size_t)(0.35 * rate), ref.size());
+    check(wideStep < 8.0e-3, "wide crossover jump stays under the loose bound", rate, wideStep, 8.0e-3);
+    check(a0 == 0 && a1 == 0 && a2 == 0 && a3 == 0, "crossover edits allocate nothing", rate, (double)(a1 + a2 + a3));
 }
 
 // R11: a limiter lookahead and true-peak toggle through a rebuild (publish) crossfades: no step above the fade bound.

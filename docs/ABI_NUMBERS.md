@@ -14,3 +14,4 @@ If two claims collide, the one that merges second renumbers its own claim only.
 | none (no bump) | E28 G42 | claims no number. Adds multiband paramCount 44 (parameter 43 band split) inside the existing v37 layout; extras-off blocks (29 or 43 values) are unchanged |
 | graph v40 | E19 S10 `e19/routed-stage-and-wiring` | open; adds `N60_STAGE_MIMO_ROUTED` (53) at position 23.55 and renumbers the internal ranks of XOVER and DRIVER_FIR (no layout change) |
 | graph v41 | E33 S5a `e33/expander-lookahead` | open; expander paramCount 14 adds [13] lookahead frames (ring in lane state, latency reported); no layout change to other structs |
+| graph v42 | E33 S5b `e33/multiband-bands` | open; multiband paramCount 73 (2 to 5 bands) and `n60_multiband_readback` grMaxDb[5], grNowDb[5], bandCount (struct size changes); extras blocks of 29, 43 and 44 values stay bit-identical |

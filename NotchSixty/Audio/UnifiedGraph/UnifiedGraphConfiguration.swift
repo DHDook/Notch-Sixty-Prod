@@ -427,7 +427,7 @@ struct UnifiedGraphConfiguration: Equatable, Sendable {
                 kind: N60_STAGE_DEESS.rawValue, stageId: Self.deessStageId, laneA: 0, laneB: 1, params: params))
         }
         if let params = stereo.multiband {
-            guard params.count == 29 || params.count == 43 || params.count == 44 else { throw UnifiedGraphError.invalidConfiguration("multiband") }
+            guard params.count == 29 || params.count == 43 || params.count == 44 || params.count == Self.multibandBandsParamCount else { throw UnifiedGraphError.invalidConfiguration("multiband") }
             guard programLanes == 2 else { throw UnifiedGraphError.unsupportedConfiguration("multiband needs two lanes") }
             stages.append(UnifiedGraphStageSpec(
                 kind: N60_STAGE_MULTIBAND.rawValue, stageId: Self.multibandStageId, laneA: 0, laneB: 1, params: params))
@@ -653,6 +653,8 @@ struct UnifiedGraphConfiguration: Equatable, Sendable {
     static let deessStageId: UInt32 = 624
     static let loudnessStageId: UInt32 = 625
     static let multibandStageId: UInt32 = 626
+    /// E33 S5b: the multiband block with 2 to 5 bands (graph ABI 42).
+    static let multibandBandsParamCount = 73
     static let deltaCaptureStageId: UInt32 = 627
     static let deltaSubtractStageId: UInt32 = 628
     static let monitorMuteStageId: UInt32 = 629

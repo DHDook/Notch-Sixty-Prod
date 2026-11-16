@@ -112,7 +112,10 @@ enum UnifiedGraphTranslator {
             // E28 S7c: the 29-value multiband block becomes the 43-value one. The 17 extras are the auto-release flags (they
             // replace the three zeros at 26 to 28; E6 G23), then bypass, solo and listen (both live, session state), detector,
             // RMS window and lookahead frames.
-            if let extras = multibandExtras, extras.count == 17, var base = stages.multiband, base.count == 29 {
+            // E33 S5b: a 73-value block (2 to 5 bands) replaces the base whole.
+            if let block = multibandExtras, block.count == UnifiedGraphConfiguration.multibandBandsParamCount, stages.multiband != nil {
+                stages.multiband = block
+            } else if let extras = multibandExtras, extras.count == 17, var base = stages.multiband, base.count == 29 {
                 base.replaceSubrange(26..<29, with: extras[0..<3])
                 // E28 G42: with the extras on the mid band is a true band-pass (parameter 43 = 1), not dry minus the others.
                 stages.multiband = base + extras[3...] + [1]

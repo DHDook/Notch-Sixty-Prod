@@ -1,4 +1,4 @@
-// libn60core ABI v25 multiband compressor stage (E6 S12d): the stereo kernel's three-band compressor, ported from
+// libn60core ABI v25 (v42 for N bands) multiband compressor stage (E6 S12d): the stereo kernel's three-band compressor, ported from
 // N60Dynamics.c (process_multiband_compressor) with the same float arithmetic, so the output matches the kernel to
 // rounding. One pair stage, N60_STAGE_MULTIBAND, at rank 9.9: after the de-esser, directly before the compressor, which
 // is where the kernel runs it.
@@ -13,6 +13,9 @@
 //    sections). The sum is AP1.AP2, flat in magnitude (Linkwitz and Riley, JAES 1976; Lipshitz and Vanderkooy, JAES 1986,
 //    for all-pass compensation of a cascaded split). Latency: none (IIR); the sum carries the all-pass phase, so the stage
 //    fades against the dry signal when it enables or disables (5 ms, no lookahead). Every band holds only its own range.
+//  - N bands (E33 S5b, paramCount 73, 2 to 5 bands): the same tree from the top corner down. Band c+1 = AP_0..AP_(c-1)
+//    (HP_c(y_(c+1))), y_c = LP_c(y_(c+1)), y_(N-1) = x; the lowest corner gives bands 0 and 1 as LP_0(y_1) and HP_0(y_1).
+//    The sum is the product of the corner all-passes, flat in magnitude. A count of 3 with split 0 keeps the residual mid.
 //  - Detector: per band, a 2nd-order Butterworth high-pass sidechain (0 Hz = off), detector = max(|L|, |R|) in dB.
 //  - Gain computer: downward compressor with a quadratic soft knee (Giannoulis, Massberg and Reiss, JAES 60(6), 2012)
 //    plus make-up, smoothed in dB with the attack pole (gain falling) or the release pole (gain rising).
@@ -53,35 +56,37 @@ constexpr size_t kAlign = 16;
 constexpr float kParkEps = 1.0e-5f;
 constexpr float kEpsilon = 1.0e-12f;  // the kernel's N60_DYNAMICS_EPSILON
 constexpr double kQ = 0.7071067811865476;
-constexpr uint32_t kBands = 3;
+constexpr uint32_t kBands = 5;       // E33 S5b: at most five bands
+constexpr uint32_t kCorners = kBands - 1;
 constexpr uint32_t kMaxSections = 4;
+constexpr uint32_t kApPairs = 6;     // (band, lower corner) all-pass pairs: bands 2..4 hold 1 + 2 + 3
+constexpr uint32_t kKinds = 12;      // per-band parameter kinds, in the legacy order below
 
 enum MbParam : uint32_t {
     kOn = 0,           // 0/1
-    kLowMidHz = 1,     // 40..250
-    kMidHighHz = 2,    // 1000..8000
-    kLowSlope = 3,     // 0 LR4, 1 LR8 (topology: not live)
-    kHighSlope = 4,    // 0 LR4, 1 LR8 (topology: not live)
-    kThreshold = 5,    // 3 bands, -60..0 dB
-    kRatio = 8,        // 3 bands, 1..20
-    kAttack = 11,      // 3 bands, 1..200 ms
-    kRelease = 14,     // 3 bands, 10..1000 ms
-    kKnee = 17,        // 3 bands, 0..20 dB
-    kSidechain = 20,   // 3 bands, 0..300 Hz (0 off)
-    kMakeup = 23,      // 3 bands, -12..12 dB
-    kAutoRelease = 26, // 3 bands, 0/1
-    kBypass = 29,      // ABI v37: 3 bands, 0/1 (band at unity)
-    kSolo = 32,        // ABI v37: 3 bands, 0/1 (live; session state in Swift)
-    kListen = 35,      // ABI v37: 3 bands, 0 off, 1 sidechain, 2 delta (live; session state in Swift)
-    kDetector = 38,    // ABI v37: 3 bands, 0 peak, 1 RMS
+    kLowMidHz = 1,     // corner 0, 40..16000
+    kMidHighHz = 2,    // corner 1
+    kLowSlope = 3,     // corner 0: 0 LR4, 1 LR8 (topology: not live)
+    kHighSlope = 4,    // corner 1 (topology: not live)
+    kBandBase = 5,     // 12 kinds of 3 bands (bands 0..2): thr, ratio, attack, release, knee, sidechain, makeup, auto,
+                       // bypass, solo, listen, detector at 5 + 3 * kind + band
     kWindow = 41,      // ABI v37: RMS window ms, 5..200
     kLookahead = 42,   // ABI v37: lookahead frames, 0..8192 (topology: not live)
-    kBandSplit = 43,   // E28 G42: 0 residual mid (dry - low - high), 1 band-pass tree (topology: not live)
+    kBandSplit = 43,   // E28 G42: 0 residual mid (dry - low - high), 1 band-pass tree (topology; three bands only)
+    kBandCount = 44,   // ABI v42 (E33 S5b): 2..5 (topology: not live)
+    kCorner2 = 45,     // corner 2 Hz
+    kCorner3 = 46,     // corner 3 Hz
+    kSlope2 = 47,      // corner 2 slope (topology)
+    kSlope3 = 48,      // corner 3 slope (topology)
+    kExtBase = 49,     // bands 3 and 4 of each kind at 49 + 2 * kind + (band - 3)
     kParams = 29,      // the v25 block
     kParamsX = 43,     // the v37 block
-    kParamsS = 44      // the v37 block plus the band-split mode (E28 G42, no ABI number)
+    kParamsS = 44,     // the v37 block plus the band-split mode (E28 G42)
+    kParamsN = 73      // ABI v42: the 44-value block plus the band count, corners 2 and 3, their slopes and bands 3 and 4
 };
+enum Kind : uint32_t { kThr, kRatio, kAtk, kRel, kKnee, kSc, kMk, kAuto, kByp, kSolo, kListenK, kDet };
 constexpr uint32_t kMaxLookahead = 16384;  // 20 ms at 768 kHz is 15,360 frames
+constexpr double kMinRatio = 1.4142135623730951;  // half an octave between neighbouring corners
 
 size_t up(size_t v) { return (v + (kAlign - 1)) & ~(kAlign - 1); }
 bool inR(double v, double lo, double hi) { return std::isfinite(v) && v >= lo && v <= hi; }
@@ -184,13 +189,28 @@ float bandTarget(float detectorDb, float thr, float ratio, float knee) {
     return comp;
 }
 
+// One crossover set: per corner c the low-pass LP_c and high-pass HP_c (2 or 4 sections) and the all-pass AP_c (1 or 2 sections,
+// the phase of LP_c + HP_c). The band-pass tree (see the header derivation) runs each all-pass once per band above its corner,
+// so the all-pass states are per (band, corner) pair. Coefficients and states are split so a crossfade copies both cheaply.
+struct XCoef {
+    Bq lp[kCorners][kMaxSections], hp[kCorners][kMaxSections], ap[kCorners][2];
+};
+struct XState {
+    BqState lpL[kCorners][kMaxSections], lpR[kCorners][kMaxSections], hpL[kCorners][kMaxSections], hpR[kCorners][kMaxSections];
+    BqState apL[kApPairs][2], apR[kApPairs][2];
+};
+uint32_t apPair(uint32_t band, uint32_t corner) { return (band - 1) * (band - 2) / 2 + corner; }  // band >= 2, corner <= band - 2
+
 struct MbShared {
     float bypassCoef;
     uint32_t parked;
-    uint32_t lowN, highN;  // LR4 = 2 sections, LR8 = 4; fixed by the snapshot
-    float seenLowMid, seenMidHigh;
-    Bq lowPass[kMaxSections], highPass[kMaxSections];
-    BqState lowL[kMaxSections], lowR[kMaxSections], highL[kMaxSections], highR[kMaxSections];
+    uint32_t n;            // band count 2..5, fixed by the snapshot
+    uint32_t split;        // 0 residual mid (three bands only), 1 band-pass tree
+    uint32_t lr8[kCorners];  // per corner: fixed by the snapshot
+    uint32_t sec[kCorners], apN[kCorners];
+    float seenCorner[kCorners];
+    XCoef coef;
+    XState st;
     float seenHpf[kBands];
     Bq hp[kBands];
     BqState hpL[kBands], hpR[kBands];
@@ -204,73 +224,75 @@ struct MbShared {
     double meanSq[kBands];  // RMS mean square in double (E28 S7d, G40)
     BqState lhpL[kBands], lhpR[kBands];  // sidechain filters of the listened band, run on the delayed band
     uint32_t ringLen, ringPos;
-    // E28 G42 band-pass tree (split == 1): low = LP1(LP2 x), mid = HP1(LP2 x), high = AP1(HP2 x), the allpass AP1 having
-    // the phase of the low crossover (LP1 + HP1), so the bands sum to AP1.AP2 (flat). lowPass/highPass above are LP1 and
-    // HP2; these are LP2 (the high crossover's low-pass), HP1 and AP1 (half the low crossover's sections). The ring's
-    // first slot holds the mid band in this mode. Zero in the residual mode. The mix ramps the stage in and out against the
-    // dry signal (no lookahead only), so parking cannot step by the allpass phase.
-    uint32_t split;
-    uint32_t apN;
+    // The tree's sum carries the all-pass phase, so the mix ramps the stage in and out against the dry signal (no lookahead
+    // only), so parking cannot step by the all-pass phase.
     double splitMix;  // double: a float one-pole stalls short of 1 at high rates (its step falls under half an ulp)
-    Bq lp2[kMaxSections], hp1[kMaxSections], ap1[kMaxSections / 2];
-    BqState lp2L[kMaxSections], lp2R[kMaxSections], hp1L[kMaxSections], hp1R[kMaxSections];
-    BqState ap1L[kMaxSections / 2], ap1R[kMaxSections / 2];
     // E32 S4 (R10): a crossover edit runs the previous filters (coefficients and state copied at the edit) beside the new ones
     // and blends the band signals over 5 ms. Preallocated here; no allocation at the edit. xActive is realtime-thread only.
     uint32_t xActive;
     double xw;  // blend weight of the new filters, 0..1
-    Bq oLowPass[kMaxSections], oHighPass[kMaxSections], oLp2[kMaxSections], oHp1[kMaxSections], oAp1[kMaxSections / 2];
-    BqState oLowL[kMaxSections], oLowR[kMaxSections], oHighL[kMaxSections], oHighR[kMaxSections];
-    BqState oLp2L[kMaxSections], oLp2R[kMaxSections], oHp1L[kMaxSections], oHp1R[kMaxSections];
-    BqState oAp1L[kMaxSections / 2], oAp1R[kMaxSections / 2];
+    XCoef oCoef;
+    XState oSt;
 };
 
-// Pointers to one crossover filter set (the live one in MbShared or the previous one kept for a crossfade).
-struct XoverRef {
-    const Bq *lowPass, *highPass, *lp2, *hp1, *ap1;
-    BqState *lowL, *lowR, *highL, *highR, *lp2L, *lp2R, *hp1L, *hp1R, *ap1L, *ap1R;
+// The parameters of a block as one band-indexed view (E33 S5b). The legacy 29, 43 and 44-value blocks decode as three bands;
+// the 73-value block carries 2..5. Decoded once per call: it is a few dozen float loads.
+struct Eff {
+    uint32_t n = 3;
+    float corner[kCorners] = {0, 0, 0, 0};
+    float v[kKinds][kBands] = {};
+    float window = 50.0f;
 };
+void decode(const float *p, uint32_t pc, Eff &e) {
+    const bool wide = pc >= kParamsN;
+    e.n = wide ? static_cast<uint32_t>(p[kBandCount]) : 3u;
+    e.corner[0] = p[kLowMidHz];
+    e.corner[1] = p[kMidHighHz];
+    e.corner[2] = wide ? p[kCorner2] : 0.0f;
+    e.corner[3] = wide ? p[kCorner3] : 0.0f;
+    for (uint32_t k = 0; k < kKinds; ++k) {
+        for (uint32_t b = 0; b < kBands; ++b) {
+            float val = 0.0f;
+            if (b < 3) {
+                const uint32_t idx = kBandBase + 3 * k + b;
+                if (idx < pc && !(k >= kByp && pc < kParamsX)) val = p[idx];
+            } else if (wide) {
+                val = p[kExtBase + 2 * k + (b - 3)];
+            }
+            e.v[k][b] = val;
+        }
+    }
+    e.window = pc >= kParamsX ? p[kWindow] : 50.0f;
+}
 
 uint32_t lookaheadOf(const n60_stage_desc &s) {
     return (s.params != nullptr && s.paramCount >= kParamsX) ? static_cast<uint32_t>(s.params[kLookahead]) : 0u;
 }
-// Six rings of ringLen floats after the struct: dry, low, high for the left lane, then for the right.
+uint32_t bandsOf(const n60_stage_desc &s) {
+    return (s.params != nullptr && s.paramCount >= kParamsN) ? static_cast<uint32_t>(s.params[kBandCount]) : 3u;
+}
+// 2 * n rings of ringLen floats after the struct: one per ring slot for the left lane, then for the right.
 float *ringsOf(MbShared &S) { return reinterpret_cast<float *>(reinterpret_cast<uint8_t *>(&S) + up(sizeof(MbShared))); }
 
-void designSplit(MbShared &S, double rate, float lowMid, float midHigh, bool lowLr8, bool highLr8) {
+void designCorner(MbShared &S, double rate, uint32_t c, float hz) {
     double q[kMaxSections] = {};
-    const uint32_t ln = sectionQs(lowLr8, q);
+    const bool lr8 = S.lr8[c] != 0;
+    const uint32_t n = sectionQs(lr8, q);
     for (uint32_t i = 0; i < kMaxSections; ++i) {
-        S.lowPass[i] = identityBq();
-        if (i < ln && !designBq(false, rate, double(lowMid), q[i], S.lowPass[i])) S.lowPass[i] = identityBq();
+        S.coef.lp[c][i] = identityBq();
+        if (i < n && !designBq(false, rate, double(hz), q[i], S.coef.lp[c][i])) S.coef.lp[c][i] = identityBq();
+        S.coef.hp[c][i] = identityBq();
+        if (i < n && !designBq(true, rate, double(hz), q[i], S.coef.hp[c][i])) S.coef.hp[c][i] = identityBq();
     }
-    const uint32_t hn = sectionQs(highLr8, q);
-    for (uint32_t i = 0; i < kMaxSections; ++i) {
-        S.highPass[i] = identityBq();
-        if (i < hn && !designBq(true, rate, double(midHigh), q[i], S.highPass[i])) S.highPass[i] = identityBq();
+    // AP has half the sections: LR4 is one Q = 1/sqrt(2) section, LR8 the two Butterworth-4 sections (LP + HP of an LRn is the
+    // all-pass of Butterworth n/2).
+    S.apN[c] = lr8 ? 2u : 1u;
+    for (uint32_t i = 0; i < 2; ++i) {
+        S.coef.ap[c][i] = identityBq();
+        if (i < S.apN[c] && !designAllPass(rate, double(hz), lr8 ? (i == 0 ? q[0] : q[1]) : kQ, S.coef.ap[c][i])) S.coef.ap[c][i] = identityBq();
     }
-    if (S.split != 0) {
-        // LP2 has the high crossover's Qs (hn sections), HP1 the low crossover's (ln), AP1 half of them: LR4 is one
-        // Q = 1/sqrt(2) section, LR8 the two Butterworth-4 sections (LP + HP of an LRn is the all-pass of Butterworth n/2).
-        double qh[kMaxSections] = {};
-        sectionQs(highLr8, qh);
-        sectionQs(lowLr8, q);
-        for (uint32_t i = 0; i < kMaxSections; ++i) {
-            S.lp2[i] = identityBq();
-            if (i < hn && !designBq(false, rate, double(midHigh), qh[i], S.lp2[i])) S.lp2[i] = identityBq();
-            S.hp1[i] = identityBq();
-            if (i < ln && !designBq(true, rate, double(lowMid), q[i], S.hp1[i])) S.hp1[i] = identityBq();
-        }
-        S.apN = lowLr8 ? 2u : 1u;
-        for (uint32_t i = 0; i < kMaxSections / 2; ++i) {
-            S.ap1[i] = identityBq();
-            if (i < S.apN && !designAllPass(rate, double(lowMid), lowLr8 ? (i == 0 ? q[0] : q[1]) : kQ, S.ap1[i])) S.ap1[i] = identityBq();
-        }
-    }
-    S.lowN = ln;
-    S.highN = hn;
-    S.seenLowMid = lowMid;
-    S.seenMidHigh = midHigh;
+    S.sec[c] = n;
+    S.seenCorner[c] = hz;
 }
 
 void designHpf(MbShared &S, double rate, uint32_t b, float hz) {
@@ -280,25 +302,16 @@ void designHpf(MbShared &S, double rate, uint32_t b, float hz) {
 }
 
 void clearState(MbShared &S) {
-    std::memset(S.lowL, 0, sizeof S.lowL);
-    std::memset(S.lowR, 0, sizeof S.lowR);
-    std::memset(S.highL, 0, sizeof S.highL);
-    std::memset(S.highR, 0, sizeof S.highR);
+    std::memset(&S.st, 0, sizeof S.st);
     std::memset(S.hpL, 0, sizeof S.hpL);
     std::memset(S.hpR, 0, sizeof S.hpR);
     std::memset(S.meanSq, 0, sizeof S.meanSq);
     std::memset(S.lhpL, 0, sizeof S.lhpL);
     std::memset(S.lhpR, 0, sizeof S.lhpR);
-    std::memset(S.lp2L, 0, sizeof S.lp2L);
-    std::memset(S.lp2R, 0, sizeof S.lp2R);
-    std::memset(S.hp1L, 0, sizeof S.hp1L);
-    std::memset(S.hp1R, 0, sizeof S.hp1R);
-    std::memset(S.ap1L, 0, sizeof S.ap1L);
-    std::memset(S.ap1R, 0, sizeof S.ap1R);
     S.splitMix = 0.0;
     S.xActive = 0;
     S.xw = 1.0;
-    if (S.ringLen != 0) std::memset(ringsOf(S), 0, size_t(6) * S.ringLen * sizeof(float));
+    if (S.ringLen != 0) std::memset(ringsOf(S), 0, size_t(2) * S.n * S.ringLen * sizeof(float));
     S.ringPos = 0;
 }
 
@@ -342,38 +355,48 @@ constexpr uint32_t kChunk = 128;
 bool isMultibandKind(uint32_t kind) N60_RT_NONBLOCKING { return kind == N60_STAGE_MULTIBAND; }
 
 bool multibandParamOk(uint32_t idx, float v, double rate) {
-    if (idx == kOn || (idx >= kAutoRelease && idx < kAutoRelease + kBands)) return isFlag(v);
-    if ((idx >= kBypass && idx < kBypass + kBands) || (idx >= kSolo && idx < kSolo + kBands)) return isFlag(v);
-    if (idx >= kListen && idx < kListen + kBands) return v == 0.0f || v == 1.0f || v == 2.0f;
-    if (idx >= kDetector && idx < kDetector + kBands) return isFlag(v);
+    if (idx == kOn || idx == kBandSplit || idx == kLowSlope || idx == kHighSlope || idx == kSlope2 || idx == kSlope3) return isFlag(v);
+    if (idx == kBandCount) return v == 2.0f || v == 3.0f || v == 4.0f || v == 5.0f;
+    if (idx == kLowMidHz || idx == kMidHighHz || idx == kCorner2 || idx == kCorner3) return inR(v, 40.0, 16000.0) && double(v) < rate * 0.45;
     if (idx == kWindow) return inR(v, 5.0, 200.0);
     if (idx == kLookahead) return inR(v, 0.0, double(kMaxLookahead)) && v == std::floor(v);
-    if (idx == kLowMidHz) return inR(v, 40.0, 250.0) && double(v) < rate * 0.45;
-    if (idx == kMidHighHz) return inR(v, 1000.0, 8000.0) && double(v) < rate * 0.45;
-    if (idx == kLowSlope || idx == kHighSlope || idx == kBandSplit) return isFlag(v);
-    if (idx >= kThreshold && idx < kThreshold + kBands) return inR(v, -60.0, 0.0);
-    if (idx >= kRatio && idx < kRatio + kBands) return inR(v, 1.0, 20.0);
-    if (idx >= kAttack && idx < kAttack + kBands) return inR(v, 1.0, 200.0);
-    if (idx >= kRelease && idx < kRelease + kBands) return inR(v, 10.0, 1000.0);
-    if (idx >= kKnee && idx < kKnee + kBands) return inR(v, 0.0, 20.0);
-    if (idx >= kSidechain && idx < kSidechain + kBands) return inR(v, 0.0, 300.0) && double(v) < rate * 0.45;
-    if (idx >= kMakeup && idx < kMakeup + kBands) return inR(v, -12.0, 12.0);
-    return false;
+    uint32_t kind;
+    if (idx >= kBandBase && idx < kWindow) kind = (idx - kBandBase) / 3;
+    else if (idx >= kExtBase && idx < kParamsN) kind = (idx - kExtBase) / 2;
+    else return false;
+    // The wideband compressor's limits (E33 decision 4).
+    switch (kind) {
+        case kThr: return inR(v, -96.0, 0.0);
+        case kRatio: return inR(v, 1.0, 100.0);
+        case kAtk: return inR(v, 0.05, 1000.0);
+        case kRel: return inR(v, 1.0, 5000.0);
+        case kKnee: return inR(v, 0.0, 24.0);
+        case kSc: return inR(v, 0.0, 300.0) && double(v) < rate * 0.45;
+        case kMk: return inR(v, -24.0, 24.0);
+        case kListenK: return v == 0.0f || v == 1.0f || v == 2.0f;
+        default: return isFlag(v);  // auto release, bypass, solo, detector
+    }
 }
 
 n60_status validateMultibandStage(const n60_stage_desc &s, double rate, uint32_t outCh) {
     if (!(rate >= 8000.0 && rate <= 768000.0) || !isMultibandKind(s.kind) || s.capacityFrames != 0) return N60_STATUS_BAD_ARGUMENT;
     if (s.laneMask != 0 || s.laneA >= outCh || s.laneB >= outCh || s.laneA == s.laneB) return N60_STATUS_BAD_ARGUMENT;
-    if (s.params == nullptr || (s.paramCount != kParams && s.paramCount != kParamsX && s.paramCount != kParamsS)) return N60_STATUS_BAD_ARGUMENT;
+    if (s.params == nullptr || (s.paramCount != kParams && s.paramCount != kParamsX && s.paramCount != kParamsS && s.paramCount != kParamsN)) return N60_STATUS_BAD_ARGUMENT;
     for (uint32_t i = 0; i < s.paramCount; ++i) {
         if (!multibandParamOk(i, s.params[i], rate)) return N60_STATUS_BAD_ARGUMENT;
+    }
+    Eff e;
+    decode(s.params, s.paramCount, e);
+    // The used corners ascend, at least half an octave apart (the unused ones only need to be in range).
+    for (uint32_t c = 0; c + 2 < e.n; ++c) {
+        if (!(double(e.corner[c + 1]) >= double(e.corner[c]) * kMinRatio * (1.0 - 1.0e-6))) return N60_STATUS_BAD_ARGUMENT;
     }
     return N60_STATUS_OK;
 }
 
 void multibandSizes(const n60_stage_desc &s, double, size_t &perLane, size_t &shared) {
     perLane = 0;
-    shared = up(sizeof(MbShared)) + up(size_t(6) * lookaheadOf(s) * sizeof(float));
+    shared = up(sizeof(MbShared)) + up(size_t(2) * bandsOf(s) * lookaheadOf(s) * sizeof(float));
 }
 
 uint32_t multibandLatency(const SnapHeader *h, const StageRec &r) N60_RT_NONBLOCKING {
@@ -384,23 +407,30 @@ void multibandInit(SnapHeader *h, const StageRec &r) {
     const float *p = paramsOf(h, r);
     const double rate = h->sampleRate;
     MbShared &S = *new (sharedState(h, r)) MbShared{};
+    Eff e;
+    decode(p, r.paramCount, e);
+    S.n = e.n;
     S.bypassCoef = static_cast<float>(std::exp(-1.0 / (rate * (5.0 / 1000.0))));
     S.parked = 1;
     for (uint32_t b = 0; b < kBands; ++b) S.soloG[b] = 1.0f;
-    S.split = (r.paramCount >= kParamsS && p[kBandSplit] > 0.5f) ? 1u : 0u;
+    S.split = (e.n != 3 || (r.paramCount >= kParamsS && p[kBandSplit] > 0.5f)) ? 1u : 0u;
     if (r.paramCount >= kParamsX) {
         S.ringLen = static_cast<uint32_t>(p[kLookahead]);
-        for (uint32_t b = 0; b < kBands; ++b) {
-            S.listenSide[b] = p[kListen + b] == 1.0f ? 1.0f : 0.0f;
-            S.listenDelta[b] = p[kListen + b] == 2.0f ? 1.0f : 0.0f;
+        for (uint32_t b = 0; b < e.n; ++b) {
+            S.listenSide[b] = e.v[kListenK][b] == 1.0f ? 1.0f : 0.0f;
+            S.listenDelta[b] = e.v[kListenK][b] == 2.0f ? 1.0f : 0.0f;
         }
     }
-    designSplit(S, rate, p[kLowMidHz], p[kMidHighHz], p[kLowSlope] > 0.5f, p[kHighSlope] > 0.5f);
-    for (uint32_t b = 0; b < kBands; ++b) {
-        designHpf(S, rate, b, p[kSidechain + b]);
-        S.attackPole[b] = poleForMs(rate, p[kAttack + b]);
-        S.seenAttack[b] = p[kAttack + b];
-        const float rel = p[kRelease + b];
+    const float slopes[kCorners] = {p[kLowSlope], p[kHighSlope], r.paramCount >= kParamsN ? p[kSlope2] : 0.0f, r.paramCount >= kParamsN ? p[kSlope3] : 0.0f};
+    for (uint32_t c = 0; c + 1 < e.n; ++c) {
+        S.lr8[c] = slopes[c] > 0.5f ? 1u : 0u;
+        designCorner(S, rate, c, e.corner[c]);
+    }
+    for (uint32_t b = 0; b < e.n; ++b) {
+        designHpf(S, rate, b, e.v[kSc][b]);
+        S.attackPole[b] = poleForMs(rate, e.v[kAtk][b]);
+        S.seenAttack[b] = e.v[kAtk][b];
+        const float rel = e.v[kRel][b];
         S.releasePole[b] = poleForMs(rate, rel);
         S.fastPole[b] = poleForMs(rate, std::fmax(rel * 0.5f, 1.0f));
         S.slowPole[b] = poleForMs(rate, std::fmin(rel * 2.0f, 5000.0f));
@@ -419,11 +449,18 @@ uint64_t multibandCarry(SnapHeader *from, SnapHeader *to) N60_RT_NONBLOCKING {
             if (src[j].kind != N60_STAGE_MULTIBAND || src[j].id != dst[i].id) continue;
             const MbShared &a = *reinterpret_cast<const MbShared *>(sharedState(from, src[j]));
             MbShared &b = *reinterpret_cast<MbShared *>(sharedState(to, dst[i]));
+            if (a.n != b.n) break;  // a band-count change is a rebuild with the normal fade: the new bands start clean (E33 S5b)
             bytes += sizeof(MbShared);
-            std::memcpy(b.lowL, a.lowL, sizeof b.lowL);
-            std::memcpy(b.lowR, a.lowR, sizeof b.lowR);
-            std::memcpy(b.highL, a.highL, sizeof b.highL);
-            std::memcpy(b.highR, a.highR, sizeof b.highR);
+            if (a.split == b.split) {
+                std::memcpy(&b.st, &a.st, sizeof b.st);
+                if (b.split != 0) b.splitMix = a.splitMix;
+            } else {
+                // The split mode is topology: only the residual mode's own filters (low-pass 0, high-pass 1) carry across it.
+                std::memcpy(b.st.lpL[0], a.st.lpL[0], sizeof b.st.lpL[0]);
+                std::memcpy(b.st.lpR[0], a.st.lpR[0], sizeof b.st.lpR[0]);
+                std::memcpy(b.st.hpL[1], a.st.hpL[1], sizeof b.st.hpL[1]);
+                std::memcpy(b.st.hpR[1], a.st.hpR[1], sizeof b.st.hpR[1]);
+            }
             std::memcpy(b.hpL, a.hpL, sizeof b.hpL);
             std::memcpy(b.hpR, a.hpR, sizeof b.hpR);
             std::memcpy(b.gainDb, a.gainDb, sizeof b.gainDb);
@@ -434,31 +471,22 @@ uint64_t multibandCarry(SnapHeader *from, SnapHeader *to) N60_RT_NONBLOCKING {
             std::memcpy(b.meanSq, a.meanSq, sizeof b.meanSq);
             std::memcpy(b.lhpL, a.lhpL, sizeof b.lhpL);
             std::memcpy(b.lhpR, a.lhpR, sizeof b.lhpR);
-            if (a.split == b.split && b.split != 0) {  // the split mode is topology: the tree's extra state carries only within it
-                std::memcpy(b.lp2L, a.lp2L, sizeof b.lp2L);
-                std::memcpy(b.lp2R, a.lp2R, sizeof b.lp2R);
-                std::memcpy(b.hp1L, a.hp1L, sizeof b.hp1L);
-                std::memcpy(b.hp1R, a.hp1R, sizeof b.hp1R);
-                std::memcpy(b.ap1L, a.ap1L, sizeof b.ap1L);
-                std::memcpy(b.ap1R, a.ap1R, sizeof b.ap1R);
-                b.splitMix = a.splitMix;
-            }
             if (b.ringLen != 0 && a.ringLen != 0 && a.split == b.split) {  // slot 0 holds mid in split mode: carry only within one mode
                 // The lookahead is topology, so a change rebuilds: carry the most recent min(old, new) frames of each ring, aligned
                 // by age (oldest first, read position 0). A longer new ring starts with zeros (the extra delay is silence).
                 const float *ra = ringsOf(const_cast<MbShared &>(a));
                 float *rb = ringsOf(b);
-                const uint32_t la = a.ringLen, lb = b.ringLen;
-                for (uint32_t r6 = 0; r6 < 6; ++r6) {
-                    const float *src = ra + size_t(r6) * la;
-                    float *dst = rb + size_t(r6) * lb;
+                const uint32_t la = a.ringLen, lb = b.ringLen, rings = 2 * b.n;
+                for (uint32_t r6 = 0; r6 < rings; ++r6) {
+                    const float *s = ra + size_t(r6) * la;
+                    float *dstp = rb + size_t(r6) * lb;
                     for (uint32_t k = 0; k < lb; ++k) {
                         const uint32_t age = lb - k;  // 1 is the newest sample
-                        dst[k] = age <= la ? src[(a.ringPos + la - age) % la] : 0.0f;
+                        dstp[k] = age <= la ? s[(a.ringPos + la - age) % la] : 0.0f;
                     }
                 }
                 b.ringPos = 0;
-                bytes += size_t(6) * lb * sizeof(float);
+                bytes += size_t(rings) * lb * sizeof(float);
             }
             for (uint32_t k = 0; k < kBands; ++k) {
                 b.grNowBits[k].store(a.grNowBits[k].load(std::memory_order_relaxed), std::memory_order_relaxed);
@@ -472,36 +500,41 @@ uint64_t multibandCarry(SnapHeader *from, SnapHeader *to) N60_RT_NONBLOCKING {
 // E20 S3: denormals are flushed in hardware (platform/fpenv.hpp, the guard in n60_graph_process), so no per-block flush.
 static_assert(std::atomic<uint32_t>::is_always_lock_free, "telemetry atomics must be lock free");
 
-// One crossover split of a chunk through the filter set `f`: low, mid (split mode only) and high bands (E28 G42 tree or residual).
-void splitChunk(const XoverRef &f, bool split, uint32_t lowN, uint32_t highN, uint32_t apN, const simd::f64x2 *xin, uint32_t cn,
-                float *lowLa, float *lowRa, float *midLa, float *midRa, float *highLa, float *highRa) N60_RT_NONBLOCKING {
-    simd::f64x2 xa[kChunk], xb[kChunk], xc[kChunk];
-    if (split) {
-        // Band-pass tree: split at the high corner, then split the lower part at the low corner; the high band takes
-        // the low corner's all-pass so the three bands stay phase-consistent and sum flat. Each band holds only its
-        // own range.
-        std::memcpy(xa, xin, sizeof(simd::f64x2) * cn);
-        cascadePair(f.lp2, f.lp2L, f.lp2R, highN, xa, cn);
-        roundToFloat(xa, cn);
-        std::memcpy(xb, xa, sizeof(simd::f64x2) * cn);
-        cascadePair(f.lowPass, f.lowL, f.lowR, lowN, xa, cn);
-        storePair(xa, lowLa, lowRa, cn);
-        cascadePair(f.hp1, f.hp1L, f.hp1R, lowN, xb, cn);
-        storePair(xb, midLa, midRa, cn);
-        std::memcpy(xa, xin, sizeof(simd::f64x2) * cn);
-        cascadePair(f.highPass, f.highL, f.highR, highN, xa, cn);
-        roundToFloat(xa, cn);
-        cascadePair(f.ap1, f.ap1L, f.ap1R, apN, xa, cn);
-        storePair(xa, highLa, highRa, cn);
-    } else {
-        std::memcpy(xa, xin, sizeof(simd::f64x2) * cn);
-        cascadePair(f.lowPass, f.lowL, f.lowR, lowN, xa, cn);
-        storePair(xa, lowLa, lowRa, cn);
-        std::memcpy(xc, xin, sizeof(simd::f64x2) * cn);
-        cascadePair(f.highPass, f.highL, f.highR, highN, xc, cn);
-        storePair(xc, highLa, highRa, cn);
+namespace {
+// One crossover split of a chunk through the set (c, s) into `n` bands (output pointers per band; in the residual mode
+// band 1 is left to the caller, which forms dry - low - high). Band-pass tree (E28 G42, generalised to N bands in E33 S5b): from the
+// top corner down, band c+1 = AP_0..AP_{c-1}(HP_c(y_{c+1})) and y_c = LP_c(y_{c+1}), with y_{n-1} = x; the lowest corner then
+// gives the two bottom bands LP_0(y_1) and HP_0(y_1). Each band holds only its own range and the sum is AP_0.AP_1... (flat).
+void splitChunk(const XCoef &k, XState &s, const uint32_t *sec, const uint32_t *apN, uint32_t n, bool tree, const simd::f64x2 *xin, uint32_t cn,
+                float *const *bl, float *const *br) N60_RT_NONBLOCKING {
+    simd::f64x2 y[kChunk], t[kChunk];
+    if (!tree) {
+        // Residual three-band mode: low = LP_0 x, high = HP_1 x.
+        std::memcpy(y, xin, sizeof(simd::f64x2) * cn);
+        cascadePair(k.lp[0], s.lpL[0], s.lpR[0], sec[0], y, cn);
+        storePair(y, bl[0], br[0], cn);
+        std::memcpy(t, xin, sizeof(simd::f64x2) * cn);
+        cascadePair(k.hp[1], s.hpL[1], s.hpR[1], sec[1], t, cn);
+        storePair(t, bl[2], br[2], cn);
+        return;
     }
+    std::memcpy(y, xin, sizeof(simd::f64x2) * cn);
+    for (uint32_t c = n - 2; c >= 1; --c) {
+        std::memcpy(t, y, sizeof(simd::f64x2) * cn);
+        cascadePair(k.hp[c], s.hpL[c], s.hpR[c], sec[c], t, cn);
+        roundToFloat(t, cn);
+        for (uint32_t a = 0; a < c; ++a) cascadePair(k.ap[a], s.apL[apPair(c + 1, a)], s.apR[apPair(c + 1, a)], apN[a], t, cn);
+        storePair(t, bl[c + 1], br[c + 1], cn);
+        cascadePair(k.lp[c], s.lpL[c], s.lpR[c], sec[c], y, cn);
+        roundToFloat(y, cn);
+    }
+    std::memcpy(t, y, sizeof(simd::f64x2) * cn);
+    cascadePair(k.lp[0], s.lpL[0], s.lpR[0], sec[0], t, cn);
+    storePair(t, bl[0], br[0], cn);
+    cascadePair(k.hp[0], s.hpL[0], s.hpR[0], sec[0], y, cn);
+    storePair(y, bl[1], br[1], cn);
 }
+}  // namespace
 
 void runMultiband(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) N60_RT_NONBLOCKING {
     const float *p = paramsOf(h, r);
@@ -511,38 +544,34 @@ void runMultiband(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t fram
     float *R = lanes[r.laneB];
     const bool enabled = p[kOn] > 0.5f;
     if (!enabled && S.parked != 0) return;
-    if (p[kLowMidHz] != S.seenLowMid || p[kMidHighHz] != S.seenMidHigh) {
-        // The slopes are topology (fixed at build), so the section counts do not change here.
-        if (S.xActive == 0) {
-            // E32 S4 (R10): keep the previous filters (coefficients and state) for a 5 ms crossfade to the new ones.
-            std::memcpy(S.oLowPass, S.lowPass, sizeof S.lowPass);
-            std::memcpy(S.oHighPass, S.highPass, sizeof S.highPass);
-            std::memcpy(S.oLp2, S.lp2, sizeof S.lp2);
-            std::memcpy(S.oHp1, S.hp1, sizeof S.hp1);
-            std::memcpy(S.oAp1, S.ap1, sizeof S.ap1);
-            std::memcpy(S.oLowL, S.lowL, sizeof S.lowL);
-            std::memcpy(S.oLowR, S.lowR, sizeof S.lowR);
-            std::memcpy(S.oHighL, S.highL, sizeof S.highL);
-            std::memcpy(S.oHighR, S.highR, sizeof S.highR);
-            std::memcpy(S.oLp2L, S.lp2L, sizeof S.lp2L);
-            std::memcpy(S.oLp2R, S.lp2R, sizeof S.lp2R);
-            std::memcpy(S.oHp1L, S.hp1L, sizeof S.hp1L);
-            std::memcpy(S.oHp1R, S.hp1R, sizeof S.hp1R);
-            std::memcpy(S.oAp1L, S.ap1L, sizeof S.ap1L);
-            std::memcpy(S.oAp1R, S.ap1R, sizeof S.ap1R);
-            S.xw = 0.0;
-            S.xActive = 1;
+    Eff e;
+    decode(p, r.paramCount, e);
+    const uint32_t N = S.n;
+    {
+        bool cornerEdit = false;
+        for (uint32_t c = 0; c + 1 < N; ++c) cornerEdit = cornerEdit || e.corner[c] != S.seenCorner[c];
+        if (cornerEdit) {
+            // The slopes are topology (fixed at build), so the section counts do not change here.
+            if (S.xActive == 0) {
+                // E32 S4 (R10): keep the previous filters (coefficients and state) for a 5 ms crossfade to the new ones.
+                std::memcpy(&S.oCoef, &S.coef, sizeof S.coef);
+                std::memcpy(&S.oSt, &S.st, sizeof S.st);
+                S.xw = 0.0;
+                S.xActive = 1;
+            }
+            for (uint32_t c = 0; c + 1 < N; ++c) {
+                if (e.corner[c] != S.seenCorner[c]) designCorner(S, rate, c, e.corner[c]);
+            }
         }
-        designSplit(S, rate, p[kLowMidHz], p[kMidHighHz], S.lowN == 4, S.highN == 4);
     }
-    for (uint32_t b = 0; b < kBands; ++b) {
-        if (p[kSidechain + b] != S.seenHpf[b]) designHpf(S, rate, b, p[kSidechain + b]);
-        if (p[kAttack + b] != S.seenAttack[b]) {
-            S.attackPole[b] = poleForMs(rate, p[kAttack + b]);
-            S.seenAttack[b] = p[kAttack + b];
+    for (uint32_t b = 0; b < N; ++b) {
+        if (e.v[kSc][b] != S.seenHpf[b]) designHpf(S, rate, b, e.v[kSc][b]);
+        if (e.v[kAtk][b] != S.seenAttack[b]) {
+            S.attackPole[b] = poleForMs(rate, e.v[kAtk][b]);
+            S.seenAttack[b] = e.v[kAtk][b];
         }
-        if (p[kRelease + b] != S.seenRelease[b]) {
-            const float rel = p[kRelease + b];
+        if (e.v[kRel][b] != S.seenRelease[b]) {
+            const float rel = e.v[kRel][b];
             S.releasePole[b] = poleForMs(rate, rel);
             S.fastPole[b] = poleForMs(rate, std::fmax(rel * 0.5f, 1.0f));
             S.slowPole[b] = poleForMs(rate, std::fmin(rel * 2.0f, 5000.0f));
@@ -554,99 +583,119 @@ void runMultiband(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t fram
         for (uint32_t b = 0; b < kBands; ++b) S.gainDb[b] = 0.0f;
         S.parked = 0;
     }
-    float grMax[kBands] = {0.0f, 0.0f, 0.0f};
+    float grMax[kBands] = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
     // ABI v37 (E28 S7c). With the 29-value block every extra below is at its default and the arithmetic is the v25 one.
     const bool x = r.paramCount >= kParamsX;
     const uint32_t ringLen = x ? S.ringLen : 0;
     const bool split = S.split != 0;
+    const bool three = N == 3;  // ring slots and the residual mid are the three-band layout; other counts use one slot per band
     const double mixTarget = enabled ? 1.0 : 0.0;
     const double mixPole = std::exp(-1.0 / (rate * 0.005));
     float *rings = ringLen != 0 ? ringsOf(S) : nullptr;
     const float rampC = static_cast<float>(poleForMs(rate, 5.0f));
-    const double rmsC = x ? std::exp(-1.0 / (rate * (double(std::min(std::max(p[kWindow], 0.05f), 5000.0f)) / 1000.0))) : 0.0;
+    const double rmsC = x ? std::exp(-1.0 / (rate * (double(std::min(std::max(e.window, 0.05f), 5000.0f)) / 1000.0))) : 0.0;
     bool soloAny = false;
     float soloT[kBands], sideT[kBands], deltaT[kBands], mk[kBands];
     bool bypass[kBands], rms[kBands];
     bool listening = false;
     for (uint32_t b = 0; b < kBands; ++b) {
-        soloAny = soloAny || (x && p[kSolo + b] > 0.5f);
-        bypass[b] = x && p[kBypass + b] > 0.5f;
-        rms[b] = x && p[kDetector + b] > 0.5f;
-        sideT[b] = x && p[kListen + b] == 1.0f ? 1.0f : 0.0f;
-        deltaT[b] = x && p[kListen + b] == 2.0f ? 1.0f : 0.0f;
-        mk[b] = bypass[b] ? 0.0f : p[kMakeup + b];
+        soloT[b] = 1.0f; sideT[b] = deltaT[b] = mk[b] = 0.0f;
+        bypass[b] = rms[b] = false;
+    }
+    for (uint32_t b = 0; b < N; ++b) {
+        soloAny = soloAny || (x && e.v[kSolo][b] > 0.5f);
+        bypass[b] = x && e.v[kByp][b] > 0.5f;
+        rms[b] = x && e.v[kDet][b] > 0.5f;
+        sideT[b] = x && e.v[kListenK][b] == 1.0f ? 1.0f : 0.0f;
+        deltaT[b] = x && e.v[kListenK][b] == 2.0f ? 1.0f : 0.0f;
+        mk[b] = bypass[b] ? 0.0f : e.v[kMk][b];
         if (sideT[b] == 0.0f && S.listenSide[b] == 0.0f) {  // not listened: the sidechain filter state starts clean
             S.lhpL[b] = BqState{};
             S.lhpR[b] = BqState{};
         }
         listening = listening || sideT[b] != 0.0f || deltaT[b] != 0.0f || S.listenSide[b] != 0.0f || S.listenDelta[b] != 0.0f;
     }
-    for (uint32_t b = 0; b < kBands; ++b) soloT[b] = (soloAny && p[kSolo + b] < 0.5f) ? 0.0f : 1.0f;
+    for (uint32_t b = 0; b < N; ++b) soloT[b] = (soloAny && e.v[kSolo][b] < 0.5f) ? 0.0f : 1.0f;
     bool parkedNow = false;
     for (uint32_t base = 0; base < frames && !parkedNow; base += kChunk) {
         const uint32_t cn = std::min(kChunk, frames - base);
         // Pass 1: the crossover split of the block (the IIR state is sequential, the rest is not).
-        float dryLa[kChunk], dryRa[kChunk], lowLa[kChunk], lowRa[kChunk], highLa[kChunk], highRa[kChunk];
-        float midLa[kChunk], midRa[kChunk];  // split mode only: the true band-pass mid (E28 G42)
+        float dryLa[kChunk], dryRa[kChunk];
+        float bandLa[kBands][kChunk], bandRa[kBands][kChunk];  // residual mode leaves band 1 for the per-sample loop
+        float *bl[kBands], *br[kBands];
+        for (uint32_t b = 0; b < kBands; ++b) { bl[b] = bandLa[b]; br[b] = bandRa[b]; }
         simd::f64x2 xin[kChunk];
         for (uint32_t c = 0; c < cn; ++c) {
             dryLa[c] = L[base + c];
             dryRa[c] = R[base + c];
             xin[c] = simd::toDouble(dryLa[c], dryRa[c]);
         }
-        const XoverRef live{S.lowPass, S.highPass, S.lp2, S.hp1, S.ap1, S.lowL, S.lowR, S.highL, S.highR, S.lp2L, S.lp2R, S.hp1L, S.hp1R, S.ap1L, S.ap1R};
-        splitChunk(live, split, S.lowN, S.highN, S.apN, xin, cn, lowLa, lowRa, midLa, midRa, highLa, highRa);
+        splitChunk(S.coef, S.st, S.sec, S.apN, N, split, xin, cn, bl, br);
         if (S.xActive != 0) {
             // E32 S4 (R10): the previous crossover keeps running; the bands blend to the new one over 5 ms (linear, exact end).
-            const XoverRef old{S.oLowPass, S.oHighPass, S.oLp2, S.oHp1, S.oAp1, S.oLowL, S.oLowR, S.oHighL, S.oHighR, S.oLp2L, S.oLp2R, S.oHp1L, S.oHp1R, S.oAp1L, S.oAp1R};
-            float oLa[kChunk], oRa[kChunk], oMidLa[kChunk], oMidRa[kChunk], oHiLa[kChunk], oHiRa[kChunk];
-            splitChunk(old, split, S.lowN, S.highN, S.apN, xin, cn, oLa, oRa, oMidLa, oMidRa, oHiLa, oHiRa);
+            float oLa[kBands][kChunk], oRa[kBands][kChunk];
+            float *ol[kBands], *orr[kBands];
+            for (uint32_t b = 0; b < kBands; ++b) { ol[b] = oLa[b]; orr[b] = oRa[b]; }
+            splitChunk(S.oCoef, S.oSt, S.sec, S.apN, N, split, xin, cn, ol, orr);
             const double step = 1.0 / (rate * 0.005);
             double w = S.xw;
             for (uint32_t c = 0; c < cn; ++c) {
                 w = std::fmin(1.0, w + step);
                 const float wf = static_cast<float>(w);
-                lowLa[c] = oLa[c] + wf * (lowLa[c] - oLa[c]);
-                lowRa[c] = oRa[c] + wf * (lowRa[c] - oRa[c]);
-                highLa[c] = oHiLa[c] + wf * (highLa[c] - oHiLa[c]);
-                highRa[c] = oHiRa[c] + wf * (highRa[c] - oHiRa[c]);
-                if (split) {
-                    midLa[c] = oMidLa[c] + wf * (midLa[c] - oMidLa[c]);
-                    midRa[c] = oMidRa[c] + wf * (midRa[c] - oMidRa[c]);
+                for (uint32_t b = 0; b < N; ++b) {
+                    if (!split && b == 1) continue;  // the residual mid is formed after the blend
+                    bandLa[b][c] = oLa[b][c] + wf * (bandLa[b][c] - oLa[b][c]);
+                    bandRa[b][c] = oRa[b][c] + wf * (bandRa[b][c] - oRa[b][c]);
                 }
             }
             S.xw = w;
             if (w >= 1.0) S.xActive = 0;
         }
         // Pass 2: one lookahead for the whole stage. The detectors read the undelayed bands, the audio path the delayed ones,
-        // so the bands stay aligned and the crossover sum stays flat. Ring slot 0 holds the mid band in split mode, dry otherwise.
-        float oDryLa[kChunk], oDryRa[kChunk], oLowLa[kChunk], oLowRa[kChunk], oHighLa[kChunk], oHighRa[kChunk];
+        // so the bands stay aligned and the crossover sum stays flat. Three bands keep the original ring slots (slot 0 the mid
+        // band in split mode, dry otherwise, then low, high); other counts hold one slot per band.
+        float oSlotL[kBands][kChunk], oSlotR[kBands][kChunk];
         if (ringLen != 0) {
             const uint32_t pos = S.ringPos;
-            float *rl = rings, *rr = rings + size_t(3) * ringLen;
-            ringExchange(rl, ringLen, pos, split ? midLa : dryLa, oDryLa, cn);
-            ringExchange(rl + ringLen, ringLen, pos, lowLa, oLowLa, cn);
-            ringExchange(rl + 2 * size_t(ringLen), ringLen, pos, highLa, oHighLa, cn);
-            ringExchange(rr, ringLen, pos, split ? midRa : dryRa, oDryRa, cn);
-            ringExchange(rr + ringLen, ringLen, pos, lowRa, oLowRa, cn);
-            S.ringPos = ringExchange(rr + 2 * size_t(ringLen), ringLen, pos, highRa, oHighRa, cn);
+            uint32_t np = pos;
+            float *rl = rings, *rr = rings + size_t(N) * ringLen;
+            for (uint32_t j = 0; j < N; ++j) {
+                const float *sl, *sr;
+                if (three) {
+                    sl = j == 0 ? (split ? bandLa[1] : dryLa) : (j == 1 ? bandLa[0] : bandLa[2]);
+                    sr = j == 0 ? (split ? bandRa[1] : dryRa) : (j == 1 ? bandRa[0] : bandRa[2]);
+                } else {
+                    sl = bandLa[j];
+                    sr = bandRa[j];
+                }
+                ringExchange(rl + size_t(j) * ringLen, ringLen, pos, sl, oSlotL[j], cn);
+                np = ringExchange(rr + size_t(j) * ringLen, ringLen, pos, sr, oSlotR[j], cn);
+            }
+            S.ringPos = np;
         }
         for (uint32_t c = 0; c < cn; ++c) {
         const uint32_t i = base + c;
-        const float dryL = dryLa[c], dryR = dryRa[c], lowL = lowLa[c], lowR = lowRa[c], highL = highLa[c], highR = highRa[c];
-        const float midL = split ? midLa[c] : dryL - lowL - highL, midR = split ? midRa[c] : dryR - lowR - highR;
-        const float bandL[kBands] = {lowL, midL, highL};
-        const float bandR[kBands] = {lowR, midR, highR};
-        float dBandL[kBands] = {bandL[0], bandL[1], bandL[2]};
-        float dBandR[kBands] = {bandR[0], bandR[1], bandR[2]};
+        const float dryL = dryLa[c], dryR = dryRa[c];
+        float bandL[kBands], bandR[kBands];
+        for (uint32_t b = 0; b < N; ++b) { bandL[b] = bandLa[b][c]; bandR[b] = bandRa[b][c]; }
+        if (three && !split) {
+            bandL[1] = dryL - bandL[0] - bandL[2];
+            bandR[1] = dryR - bandR[0] - bandR[2];
+        }
+        float dBandL[kBands], dBandR[kBands];
+        for (uint32_t b = 0; b < N; ++b) { dBandL[b] = bandL[b]; dBandR[b] = bandR[b]; }
         if (ringLen != 0) {
-            dBandL[0] = oLowLa[c]; dBandL[1] = split ? oDryLa[c] : oDryLa[c] - oLowLa[c] - oHighLa[c]; dBandL[2] = oHighLa[c];
-            dBandR[0] = oLowRa[c]; dBandR[1] = split ? oDryRa[c] : oDryRa[c] - oLowRa[c] - oHighRa[c]; dBandR[2] = oHighRa[c];
+            if (three) {
+                dBandL[0] = oSlotL[1][c]; dBandL[1] = split ? oSlotL[0][c] : oSlotL[0][c] - oSlotL[1][c] - oSlotL[2][c]; dBandL[2] = oSlotL[2][c];
+                dBandR[0] = oSlotR[1][c]; dBandR[1] = split ? oSlotR[0][c] : oSlotR[0][c] - oSlotR[1][c] - oSlotR[2][c]; dBandR[2] = oSlotR[2][c];
+            } else {
+                for (uint32_t b = 0; b < N; ++b) { dBandL[b] = oSlotL[b][c]; dBandR[b] = oSlotR[b][c]; }
+            }
         }
         float outL = 0.0f, outR = 0.0f;
         float lsL = 0.0f, lsR = 0.0f, wSum = 0.0f;
         bool neutral = true;
-        for (uint32_t b = 0; b < kBands; ++b) {
+        for (uint32_t b = 0; b < N; ++b) {
             float targetDb = 0.0f;
             if (enabled) {
                 const float detL = runBq(S.hp[b], S.hpL[b], bandL[b]);
@@ -659,8 +708,8 @@ void runMultiband(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t fram
                     detector = static_cast<float>(std::sqrt(std::fmax(S.meanSq[b], 0.0)));
                 }
                 if (!bypass[b]) {
-                    targetDb = bandTarget(linearToDb(detector), p[kThreshold + b], p[kRatio + b], p[kKnee + b]);
-                    targetDb += p[kMakeup + b];
+                    targetDb = bandTarget(linearToDb(detector), e.v[kThr][b], e.v[kRatio][b], e.v[kKnee][b]);
+                    targetDb += e.v[kMk][b];
                 }
             }
             double coef;
@@ -668,7 +717,7 @@ void runMultiband(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t fram
                 coef = S.bypassCoef;
             } else if (targetDb < S.gainDb[b]) {
                 coef = S.attackPole[b];
-            } else if (p[kAutoRelease + b] > 0.5f) {
+            } else if (e.v[kAuto][b] > 0.5f) {
                 const float depth = std::fmin(std::fmax(-S.gainDb[b] / 12.0f, 0.0f), 1.0f);
                 coef = S.fastPole[b] + depth * (S.slowPole[b] - S.fastPole[b]);
             } else {
@@ -737,7 +786,7 @@ void runMultiband(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t fram
         R[i] = outR;
         }
     }
-    for (uint32_t b = 0; b < kBands; ++b) {
+    for (uint32_t b = 0; b < N; ++b) {
         S.grNowBits[b].store(floatToBits(std::fmax(0.0f, mk[b] - S.gainDb[b])), std::memory_order_relaxed);
         atomicMaxFloat(S.grMaxBits[b], grMax[b]);
     }
@@ -745,7 +794,10 @@ void runMultiband(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t fram
 
 n60_status validateMultibandParam(const SnapHeader *h, const StageRec &r, uint32_t idx, float value) N60_RT_NONBLOCKING {
     if (idx >= r.paramCount || !multibandParamOk(idx, value, h->sampleRate)) return N60_STATUS_BAD_ARGUMENT;
-    return (idx == kLowSlope || idx == kHighSlope || idx == kLookahead || idx == kBandSplit) ? N60_STATUS_UNSUPPORTED : N60_STATUS_OK;
+    // Topology: the slopes, the lookahead, the band split and the band count need a rebuild. Corners are live (range only here;
+    // the build checks their order, and a live edit that crosses a neighbour is the caller's to avoid).
+    return (idx == kLowSlope || idx == kHighSlope || idx == kSlope2 || idx == kSlope3 || idx == kLookahead || idx == kBandSplit || idx == kBandCount)
+               ? N60_STATUS_UNSUPPORTED : N60_STATUS_OK;
 }
 
 bool readMultiband(const SnapHeader *h, uint32_t stageId, n60_multiband_readback *out) {
@@ -756,7 +808,7 @@ bool readMultiband(const SnapHeader *h, uint32_t stageId, n60_multiband_readback
         out->grMaxDb[b] = bitsToFloat(S.grMaxBits[b].exchange(0, std::memory_order_relaxed));
         out->grNowDb[b] = bitsToFloat(S.grNowBits[b].load(std::memory_order_relaxed));
     }
-    out->reserved = 0;
+    out->bandCount = S.n;
     return true;
 }
 

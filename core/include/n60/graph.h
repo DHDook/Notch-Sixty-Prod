@@ -34,7 +34,7 @@ extern "C" {
 #endif
 
 /* Bumped on any incompatible change to a struct or function below. */
-#define N60_GRAPH_ABI_VERSION 41u
+#define N60_GRAPH_ABI_VERSION 42u
 
 typedef struct n60_graph n60_graph; /* opaque */
 
@@ -212,7 +212,17 @@ typedef enum n60_stage_kind {
  *  (dry - low - high), bit-identical to the 43-value block. 1 is a band-pass tree: low = LP1(LP2 x), mid = HP1(LP2 x),
  *  high = AP1(HP2 x) with AP1 the low crossover's all-pass, so the bands sum flat (AP1.AP2) and each holds only its own
  *  range. No added latency (IIR); with no lookahead the stage fades against the dry signal over 5 ms on enable and disable.
- * Latency 0 unless the lookahead is set. Telemetry: n60_graph_read_multiband. */
+ * ABI v42 (E33 S5b): paramCount 73 adds 2 to 5 bands. Legacy indices 0..43 are unchanged (bands 0..2 of the twelve kinds at
+ *  5 + 3 x kind + band). New: 44 band count (2..5), 45 and 46 corners 2 and 3 in Hz, 47 and 48 their slopes (0/1), then
+ *  bands 3 and 4 at 49 + 2 x kind + (band - 3) for the same twelve kinds (thr, ratio, atk, rel, knee, sc, mk, auto, byp,
+ *  solo, listen, det). Corners must rise in order (checked at build; a live edit is range-checked only). With N bands the
+ *  corners are 0..N-2; the corner pair at 1 and 2 serve bands 0..2 as before, so a count of 3 is the 44-value block.
+ *  The band-pass tree extends to N: band c+1 = AP_0..AP_(c-1)(HP_c(y_(c+1))), y_c = LP_c(y_(c+1)), y_(N-1) = x, so the
+ *  bands sum flat (the product of the corner all-passes). A count of 3 with split 0 keeps the residual mid. The count,
+ *  slopes and lookahead are topology (UNSUPPORTED live); a count change is a rebuild with nothing carried (a new snapshot starts parked; enabling from parked clears every band slot). Limits are the
+ *  wideband compressor's (threshold -96..0, ratio 1..100, attack 0.05..1000 ms, release 1..5000, knee 0..24, sidechain HPF
+ *  0..300, make-up -24..24, corners 40..16000 and below 0.45 fs). Blocks of 29, 43 and 44 values stay bit-identical.
+ * Latency 0 unless the lookahead is set. Telemetry: n60_graph_read_multiband (grMaxDb[5], grNowDb[5], bandCount). */
 
 /* Loudness (ABI v24, E6 S12c). The stereo kernel's loudness match, loudness contour (simple and per-band) and dialogue
  * leveler, same arithmetic and order. One pair stage (laneA, laneB distinct, laneMask 0, capacityFrames 0); an off part is
@@ -863,9 +873,9 @@ n60_status n60_graph_read_loudness(n60_graph *graph, uint32_t stageId, n60_loudn
  * published snapshot. BAD_ARGUMENT for another kind of stage; ABI_MISMATCH on structSize. */
 typedef struct n60_multiband_readback {
     uint32_t structSize;            /* sizeof(n60_multiband_readback) as seen by the caller */
-    float grMaxDb[3];               /* low, mid, high */
-    float grNowDb[3];
-    uint32_t reserved;
+    float grMaxDb[5];               /* bands 0..4, lowest first; bands at or above bandCount read 0 (ABI v42: five slots) */
+    float grNowDb[5];
+    uint32_t bandCount;             /* ABI v42: the stage's band count, 3 for the older blocks */
 } n60_multiband_readback;
 n60_status n60_graph_read_multiband(n60_graph *graph, uint32_t stageId, n60_multiband_readback *out);
 

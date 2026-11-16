@@ -313,7 +313,7 @@ struct ProductionDynamicsView: View {
         }
         if !engine.dynamicsSoloBands.isEmpty {
             HStack {
-                let names = engine.dynamicsSoloBands.sorted().map { ["low", "mid", "high"][$0] }.joined(separator: ", ")
+                let names = engine.dynamicsSoloBands.sorted().map { ["low", "mid", "high", "band 4", "band 5"][$0] }.joined(separator: ", ")
                 Label("Soloing the multiband \(names) band\(engine.dynamicsSoloBands.count == 1 ? "" : "s"). Downstream protection still applies.", systemImage: "speaker.wave.2")
                 Spacer()
                 Button("Clear Solo") { perform { try engine.setDynamicsSoloBands([]) } }
@@ -443,7 +443,7 @@ struct ProductionDynamicsView: View {
                 .disabled(!av.listenEnabled)
                 .help(av.listenDisabledReason ?? "Plays only this band. Session only.")
                 .accessibilityIdentifier("\(id).solo")
-                listenButtons([DynamicsListenStage.multibandLow, .multibandMid, .multibandHigh][band], id: id)
+                listenButtons([DynamicsListenStage.multibandLow, .multibandMid, .multibandHigh, .multibandBand4, .multibandBand5][band], id: id)
             }
         }
     }
@@ -457,23 +457,65 @@ struct ProductionDynamicsView: View {
             ProductionDynamicsTelemetryView(engine: engine, kind: .multiband)
             GroupBox("Crossovers") {
                 VStack(spacing: 10) {
-                    row(.multibandCompressorLowMidFrequencyHz)
-                    Picker("Low / Mid Slope", selection: binding({ $0.multibandCompressor.lowMidSlope }, { $0.multibandCompressor.lowMidSlope = $1 })) {
+                    // E33 S5b: 2 to 5 bands behind `e33.page-enhancements`; the three-band page is unchanged with the flag off.
+                    let count = bandsEnabled ? configuration.multibandCompressor.bandCountValue : 3
+                    if bandsEnabled {
+                        Picker("Bands", selection: binding({ $0.multibandCompressor.bandCountValue }, { $0.multibandCompressor.setBandCount($1) })) {
+                            ForEach(Array(MultibandCompressorConfiguration.bandCountRange), id: \.self) { Text("\($0)").tag($0) }
+                        }
+                        .pickerStyle(.segmented)
+                        .accessibilityIdentifier("dynamics.multiband.bandCount")
+                        Text("Changing the band count rebuilds the stage and resets its filters; the crossovers move to a sensible spread.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    row(.multibandCompressorLowMidFrequencyHz, title: count == 3 || !bandsEnabled ? nil : "Crossover 1")
+                    Picker("Crossover 1 Slope", selection: binding({ $0.multibandCompressor.lowMidSlope }, { $0.multibandCompressor.lowMidSlope = $1 })) {
                         ForEach(MultibandSlope.allCases) { slope in Text(slope.displayName).tag(slope) }
                     }
-                    row(.multibandCompressorMidHighFrequencyHz)
-                    Picker("Mid / High Slope", selection: binding({ $0.multibandCompressor.midHighSlope }, { $0.multibandCompressor.midHighSlope = $1 })) {
-                        ForEach(MultibandSlope.allCases) { slope in Text(slope.displayName).tag(slope) }
+                    if count >= 3 {
+                        row(.multibandCompressorMidHighFrequencyHz, title: bandsEnabled ? "Crossover 2" : nil)
+                        Picker("Crossover 2 Slope", selection: binding({ $0.multibandCompressor.midHighSlope }, { $0.multibandCompressor.midHighSlope = $1 })) {
+                            ForEach(MultibandSlope.allCases) { slope in Text(slope.displayName).tag(slope) }
+                        }
+                    }
+                    if count >= 4 {
+                        row(.multibandCompressorCorner2Hz)
+                        Picker("Crossover 3 Slope", selection: binding({ $0.multibandCompressor.slope2Value }, { $0.multibandCompressor.slope2Value = $1 })) {
+                            ForEach(MultibandSlope.allCases) { slope in Text(slope.displayName).tag(slope) }
+                        }
+                    }
+                    if count >= 5 {
+                        row(.multibandCompressorCorner3Hz)
+                        Picker("Crossover 4 Slope", selection: binding({ $0.multibandCompressor.slope3Value }, { $0.multibandCompressor.slope3Value = $1 })) {
+                            ForEach(MultibandSlope.allCases) { slope in Text(slope.displayName).tag(slope) }
+                        }
+                    }
+                    if bandsEnabled, !configuration.multibandCompressor.corners.isEmpty,
+                       zip(configuration.multibandCompressor.corners, configuration.multibandCompressor.corners.dropFirst()).contains(where: { $0 >= $1 }) {
+                        Text("Crossovers must rise in order; the engine keeps the last valid setting until they do.")
+                            .font(.caption).foregroundStyle(.red)
+                            .accessibilityIdentifier("dynamics.multiband.cornerOrder")
                     }
                 }
                 .padding(.vertical, 6)
             }
 
             multibandExtras
-            multibandBandEditor(band: 0, title: "Low Band")
-            multibandBandEditor(band: 1, title: "Mid Band")
-            multibandBandEditor(band: 2, title: "High Band")
+            let bands = bandsEnabled ? configuration.multibandCompressor.bandCountValue : 3
+            ForEach(0..<bands, id: \.self) { band in
+                multibandBandEditor(band: band, title: Self.multibandBandTitle(band, of: bands))
+            }
         }
+    }
+
+    private var bandsEnabled: Bool { FeatureFlags().isEnabled(.eqPageEnhancements) }
+
+    /// "Low Band", "Mid Band", "High Band" for three bands (as before); numbered for 2, 4 and 5.
+    static func multibandBandTitle(_ band: Int, of count: Int) -> String {
+        if count == 3 { return ["Low Band", "Mid Band", "High Band"][band] }
+        if band == 0 { return "Low Band" }
+        if band == count - 1 { return "High Band" }
+        return "Band \(band + 1)"
     }
 
     private var expanderEditor: some View {
