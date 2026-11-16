@@ -70,6 +70,7 @@ unprocessed audio cannot reach an active speaker when the app is the chosen devi
 routing becomes simple. This is the largest single unlock.
 
 - [ ] Owner decision first: `AGENTS.md` section 2 lists installing audio drivers as out of scope and section 6 requires the sandbox. The App Store edition stays as it is; the virtual device is an optional component of a separate direct-download build
+- [ ] Automatic rate following (failure and rate review, owner approved 15 Nov 2026): with the source rate known, set the DAC to the source's rate (or its nearest supported multiple) as the source changes; off by default, with the v1 rate picker as the manual choice
 - [ ] User-space audio driver (no kernel extension), signed and notarised, with install, update and removal paths
 - [ ] Transport: the virtual device as a second input path beside the process tap, behind the same realtime bridge
 - [ ] Source-rate following, building on the E15 S5 finding
