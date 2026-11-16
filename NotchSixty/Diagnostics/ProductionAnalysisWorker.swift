@@ -30,6 +30,10 @@ struct ProductionAnalysisSnapshot: Equatable, Sendable {
     /// loudness demand is held.
     var loudnessInput: LoudnessReadout?
     var loudnessOutput: LoudnessReadout?
+    /// E33 S8: PLR, PSR, crest, balance and per-band correlation of the output; nil unless that demand is held.
+    var analysisMeters: AnalysisMeterReadout?
+    /// E33 S8: 31 third-octave band levels in dBFS (20 Hz...20 kHz); empty unless the RTA demand is held or while filling.
+    var rtaBandsDB: [Float] = []
 
     static let empty = ProductionAnalysisSnapshot()
 }
@@ -41,7 +45,13 @@ enum ProductionAnalysisDemand {
     static let loudness: UInt32 = 1 << 2
     /// One-shot command: clear the loudness measurement, then carry on.
     static let resetLoudness: UInt32 = 1 << 3
-    static let workerBits: UInt32 = loudness | resetLoudness
+    /// E33 S8: PLR and crest, balance and per-band correlation (Levels cards).
+    static let analysisMeters: UInt32 = 1 << 4
+    /// E33 S8: third-octave RTA bars (Spectrum > RTA).
+    static let rta: UInt32 = 1 << 5
+    /// One-shot command: clear the analysis meters' maxima and windows.
+    static let resetAnalysisMeters: UInt32 = 1 << 6
+    static let workerBits: UInt32 = loudness | resetLoudness | analysisMeters | rta | resetAnalysisMeters
 }
 
 enum ProductionAnalysisMath {
@@ -438,6 +448,7 @@ final class ProductionAnalysisWorker: @unchecked Sendable {
 
     private let spectrumAnalyzer = ProductionSpectrumAnalyzer()
     private let loudnessFeed = ProductionLoudnessFeed()
+    private let meterFeed = ProductionAnalysisMeterFeed()
     private var publishedSnapshot = ProductionAnalysisSnapshot.empty
 
     init(bridge: OpaquePointer) {
@@ -448,8 +459,12 @@ final class ProductionAnalysisWorker: @unchecked Sendable {
         var sanitized = requestedMask & (UInt32(N60_ANALYSIS_DEMAND_ALL) | ProductionAnalysisDemand.workerBits)
         let resetLoudness = (sanitized & ProductionAnalysisDemand.resetLoudness) != 0
         sanitized &= ~ProductionAnalysisDemand.resetLoudness
+        let resetMeters = (sanitized & ProductionAnalysisDemand.resetAnalysisMeters) != 0
+        sanitized &= ~ProductionAnalysisDemand.resetAnalysisMeters
         let wantsLoudness = (sanitized & ProductionAnalysisDemand.loudness) != 0
-        if wantsLoudness { sanitized &= ~UInt32(N60_ANALYSIS_DEMAND_STEREO) }
+        let wantsMeters = (sanitized & ProductionAnalysisDemand.analysisMeters) != 0
+        let wantsRTA = (sanitized & ProductionAnalysisDemand.rta) != 0
+        if wantsLoudness || wantsMeters || wantsRTA { sanitized &= ~UInt32(N60_ANALYSIS_DEMAND_STEREO) }
         queue.async { [weak self] in
             guard let self, !self.stopped else { return }
             let changed = self.demandMask != sanitized || self.sampleRate != sampleRate
@@ -458,6 +473,9 @@ final class ProductionAnalysisWorker: @unchecked Sendable {
             // Loudness pauses (keeps its measurement) when the demand drops.
             self.loudnessFeed.setActive(wantsLoudness, sampleRate: sampleRate)
             if resetLoudness { self.loudnessFeed.reset() }
+            // E33 S8: the meters run only while their card is visible; a hidden card keeps no state.
+            self.meterFeed.setActive(meters: wantsMeters, rta: wantsRTA, sampleRate: sampleRate)
+            if resetMeters { self.meterFeed.reset() }
             if changed {
                 N60RealtimeAudioBridgeDiscardAnalysisFrames(self.bridge)
                 self.clearHistory()
@@ -569,6 +587,8 @@ final class ProductionAnalysisWorker: @unchecked Sendable {
             next.loudnessInput = readouts.input
             next.loudnessOutput = readouts.output
         }
+        next.analysisMeters = meterFeed.meterReadout(loudness: next.loudnessOutput)
+        next.rtaBandsDB = meterFeed.rtaLevels()
 
         publish(next)
     }
@@ -586,6 +606,7 @@ final class ProductionAnalysisWorker: @unchecked Sendable {
 
             drainBuffer.withUnsafeBufferPointer { buffer in
                 loudnessFeed.ingest(UnsafeBufferPointer(rebasing: buffer[0..<readCount]))
+                meterFeed.ingest(UnsafeBufferPointer(rebasing: buffer[0..<readCount]))
             }
 
             for index in 0..<readCount {

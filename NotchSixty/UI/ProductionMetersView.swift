@@ -124,6 +124,11 @@ struct ProductionMetersView: View {
     @AppStorage("meters.loudnessSource") private var loudnessSourceRaw = LoudnessSource.output.rawValue
     @State private var inputTruePeakHold = TruePeakMaxHold()
     @State private var outputTruePeakHold = TruePeakMaxHold()
+    /// E33 S8 (behind `e33.page-enhancements`): analysis cards, headroom strip, dropout counter and RTA mode.
+    private let enhanced = FeatureFlags().isEnabled(.eqPageEnhancements)
+    @State private var headroomStrip = HeadroomStripModel()
+    @State private var dropouts = DropoutCounter()
+    @State private var showsRTA = false
 
     var body: some View {
         ScrollView {
@@ -135,11 +140,27 @@ struct ProductionMetersView: View {
                 case .levels:
                     levelsPage
                 case .spectrum:
-                    ProductionSpectrumView(
-                        snapshot: analysisSnapshot,
-                        isRunning: engine.lifecycleState == .running,
-                        resetPeakHold: { engine.resetSpectrumPeakHold() }
-                    )
+                    if enhanced {
+                        Picker("Spectrum Mode", selection: $showsRTA) {
+                            Text("Spectrum").tag(false)
+                            Text("RTA").tag(true)
+                        }
+                        .pickerStyle(.segmented)
+                        .frame(maxWidth: 240)
+                        .accessibilityIdentifier("meters.spectrum.mode")
+                    }
+                    if enhanced && showsRTA {
+                        ProductionRTABarsView(
+                            levelsDB: analysisSnapshot.rtaBandsDB,
+                            isRunning: engine.lifecycleState == .running
+                        )
+                    } else {
+                        ProductionSpectrumView(
+                            snapshot: analysisSnapshot,
+                            isRunning: engine.lifecycleState == .running,
+                            resetPeakHold: { engine.resetSpectrumPeakHold() }
+                        )
+                    }
                 case .stereo:
                     ProductionStereoAnalysisView(
                         snapshot: analysisSnapshot,
@@ -154,7 +175,7 @@ struct ProductionMetersView: View {
             .padding(28)
             .frame(maxWidth: 1180, alignment: .topLeading)
         }
-        .task(id: "\(engine.lifecycleState.rawValue)|\(page.rawValue)") {
+        .task(id: "\(engine.lifecycleState.rawValue)|\(page.rawValue)|\(showsRTA)") {
             await runVisiblePageLoop()
         }
         .alert(
@@ -224,6 +245,20 @@ struct ProductionMetersView: View {
                 onSource: { loudnessSourceRaw = $0.rawValue },
                 onReset: resetLoudness
             )
+            if enhanced {
+                ProductionAnalysisMetersCard(
+                    readout: analysisSnapshot.analysisMeters,
+                    isRunning: engine.lifecycleState == .running,
+                    onReset: resetAnalysisMeters
+                )
+                ProductionHeadroomStripCard(
+                    strip: headroomStrip,
+                    isAvailable: transportMeterSnapshot == nil,
+                    isRunning: engine.lifecycleState == .running,
+                    onReset: { headroomStrip.reset() }
+                )
+                ProductionDropoutCard(counter: dropouts, onReset: { dropouts.reset() })
+            }
             if let transportMeterSnapshot {
                 semanticLevelsPage(transportMeterSnapshot)
             } else {
@@ -928,7 +963,18 @@ struct ProductionMetersView: View {
         inputTruePeakHold.reset()
         outputTruePeakHold.reset()
         if engine.lifecycleState == .running {
-            engine.setAnalysisDemand(Self.loudnessDemand | ProductionAnalysisDemand.resetLoudness)
+            engine.setAnalysisDemand(levelsDemand | ProductionAnalysisDemand.resetLoudness)
+        }
+    }
+
+    /// Loudness plus, when the E33 cards are on, the worker's analysis-meter bit.
+    private var levelsDemand: UInt32 {
+        Self.loudnessDemand | (enhanced ? ProductionAnalysisDemand.analysisMeters : 0)
+    }
+
+    private func resetAnalysisMeters() {
+        if engine.lifecycleState == .running {
+            engine.setAnalysisDemand(levelsDemand | ProductionAnalysisDemand.resetAnalysisMeters)
         }
     }
 
@@ -947,11 +993,13 @@ struct ProductionMetersView: View {
         let analysisDemand: UInt32
         switch activePage {
         case .spectrum:
-            analysisDemand = UInt32(N60_ANALYSIS_DEMAND_SPECTRUM)
+            analysisDemand = (enhanced && showsRTA)
+                ? UInt32(N60_ANALYSIS_DEMAND_STEREO) | ProductionAnalysisDemand.rta
+                : UInt32(N60_ANALYSIS_DEMAND_SPECTRUM)
         case .stereo:
             analysisDemand = UInt32(N60_ANALYSIS_DEMAND_STEREO)
         case .levels:
-            analysisDemand = Self.loudnessDemand
+            analysisDemand = levelsDemand
         case .dynamics, .transport:
             analysisDemand = UInt32(N60_ANALYSIS_DEMAND_NONE)
         }
@@ -1028,6 +1076,9 @@ struct ProductionMetersView: View {
             transportDiagnostics = engine.diagnosticsSnapshot()
             transportMeterSnapshot = engine.productionTransportMeterSnapshot()
         }
+        if enhanced, engine.lifecycleState == .running, let counters = transportDiagnostics?.sessionTransportCounters {
+            dropouts.observe(underrunFrames: counters.underrunFrames, overrunFrames: counters.overrunFrames, now: Date())
+        }
         guard engine.lifecycleState == .running else {
             snapshot = ProductionMetersSnapshot()
             return
@@ -1057,6 +1108,13 @@ struct ProductionMetersView: View {
             )
         }
 
+        if enhanced {
+            headroomStrip.update(peaks: [
+                "input": max(diagnostics.inputMeter.peakLeft, diagnostics.inputMeter.peakRight),
+                "postEQ": max(diagnostics.postEQMeter.peakLeft, diagnostics.postEQMeter.peakRight),
+                "output": max(diagnostics.outputMeter.peakLeft, diagnostics.outputMeter.peakRight),
+            ])
+        }
         inputTruePeakHold.update(dbtp: ProductionMeterMath.decibels(diagnostics.inputTruePeakLinear))
         outputTruePeakHold.update(dbtp: ProductionMeterMath.decibels(diagnostics.outputTruePeakLinear))
         snapshot = ProductionMetersSnapshot(
