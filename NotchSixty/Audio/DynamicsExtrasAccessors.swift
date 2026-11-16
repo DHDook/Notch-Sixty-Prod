@@ -37,6 +37,16 @@ extension CompressorConfiguration {
 }
 
 extension ExpanderConfiguration {
+    static let defaultLookaheadMs = 5.0
+    var lookaheadOn: Bool {
+        get { (lookaheadMs ?? 0) > 0 }
+        set { lookaheadMs = newValue ? lookaheadTimeMs : nil }
+    }
+    /// The lookahead time; 5 ms while off (what it becomes when first turned on). Writing turns it on.
+    var lookaheadTimeMs: Double {
+        get { (lookaheadMs ?? 0) > 0 ? (lookaheadMs ?? Self.defaultLookaheadMs) : Self.defaultLookaheadMs }
+        set { lookaheadMs = newValue }
+    }
     var holdMsValue: Double {
         get { holdMs ?? 0 }
         set { holdMs = storedExtra(newValue, default: 0) }
@@ -93,11 +103,13 @@ extension MultibandCompressorConfiguration {
 /// `n60_graph_latency_frames`. Both stages delay every program lane equally, so one figure is the path latency.
 enum DynamicsLatency {
     /// Frames the enabled compressor and multiband lookaheads add at `sampleRate` (0 when the flag is off or none is on).
-    static func programFrames(_ dynamics: DynamicsConfiguration, sampleRate: Double, flagOn: Bool) -> Int {
-        stages(dynamics, sampleRate: sampleRate, flagOn: flagOn).reduce(0) { $0 + Int($1.latencyFrames) }
+    static func programFrames(_ dynamics: DynamicsConfiguration, sampleRate: Double, flagOn: Bool,
+                              expanderLookahead: Bool = FeatureFlags.isEnabledProcessWide(.eqPageEnhancements)) -> Int {
+        stages(dynamics, sampleRate: sampleRate, flagOn: flagOn, expanderLookahead: expanderLookahead).reduce(0) { $0 + Int($1.latencyFrames) }
     }
 
-    static func stages(_ dynamics: DynamicsConfiguration, sampleRate: Double, flagOn: Bool) -> [SpeakerRoutingProgramStage] {
+    static func stages(_ dynamics: DynamicsConfiguration, sampleRate: Double, flagOn: Bool,
+                       expanderLookahead: Bool = FeatureFlags.isEnabledProcessWide(.eqPageEnhancements)) -> [SpeakerRoutingProgramStage] {
         guard flagOn else { return [] }
         var out: [SpeakerRoutingProgramStage] = []
         if dynamics.compressor.enabled, let ms = dynamics.compressor.lookaheadMs, ms > 0 {
@@ -107,6 +119,11 @@ enum DynamicsLatency {
         if dynamics.multibandCompressor.enabled, let ms = dynamics.multibandCompressor.lookaheadMs, ms > 0 {
             let frames = CompressorConfiguration.lookaheadFrames(ms: ms, sampleRate: sampleRate)
             if frames > 0 { out.append(SpeakerRoutingProgramStage(name: "Multiband lookahead", latencyFrames: Double(frames))) }
+        }
+        // E33 S5a: the expander lookahead, only with the page flag on (the core only sees it then).
+        if expanderLookahead, dynamics.expander.enabled, let ms = dynamics.expander.lookaheadMs, ms > 0 {
+            let frames = CompressorConfiguration.lookaheadFrames(ms: ms, sampleRate: sampleRate)
+            if frames > 0 { out.append(SpeakerRoutingProgramStage(name: "Expander lookahead", latencyFrames: Double(frames))) }
         }
         return out
     }
@@ -121,8 +138,10 @@ extension DynamicsConfiguration {
         var a = self, b = other
         a.compressor.lookaheadMs = nil
         a.multibandCompressor.lookaheadMs = nil
+        a.expander.lookaheadMs = nil
         b.compressor.lookaheadMs = nil
         b.multibandCompressor.lookaheadMs = nil
+        b.expander.lookaheadMs = nil
         return a == b
     }
 }
@@ -140,7 +159,7 @@ struct DynamicsGraphExtras: Equatable {
         guard flagOn else { return nil }
         return DynamicsGraphExtras(
             compressor: dynamics.compressor.coreExtras(sampleRate: sampleRate),
-            expander: dynamics.expander.coreExtras(),
+            expander: dynamics.expander.coreExtras(sampleRate: sampleRate, lookahead: FeatureFlags.isEnabledProcessWide(.eqPageEnhancements)),
             multiband: dynamics.multibandCompressor.coreExtras(sampleRate: sampleRate))
     }
 }

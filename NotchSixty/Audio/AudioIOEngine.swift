@@ -4584,7 +4584,7 @@ final class AudioIOEngine {
             compressorExtras: FeatureFlags().isEnabled(.dynamicsExtras)
                 ? inputs.dynamics.compressor.coreExtras(sampleRate: sampleRate) : nil,
             expanderExtras: FeatureFlags().isEnabled(.dynamicsExtras)
-                ? inputs.dynamics.expander.coreExtras() : nil,
+                ? inputs.dynamics.expander.coreExtras(sampleRate: sampleRate, lookahead: FeatureFlags.isEnabledProcessWide(.eqPageEnhancements)) : nil,
             multibandExtras: FeatureFlags().isEnabled(.dynamicsExtras)
                 ? inputs.dynamics.multibandCompressor.coreExtras(sampleRate: sampleRate) : nil
         ) {

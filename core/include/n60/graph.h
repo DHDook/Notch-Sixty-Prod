@@ -34,7 +34,7 @@ extern "C" {
 #endif
 
 /* Bumped on any incompatible change to a struct or function below. */
-#define N60_GRAPH_ABI_VERSION 40u
+#define N60_GRAPH_ABI_VERSION 41u
 
 typedef struct n60_graph n60_graph; /* opaque */
 
@@ -391,6 +391,11 @@ typedef int (*n60_external_process_fn)(void *context, const float *const *in, fl
  *  compressor's 4th-order design, 0 off), [11] link % (0..100, as the compressor), [12] listen (0 off, 1 sidechain,
  *  2 delta; no ring, so no latency; 5 ms crossfade). Each lane keeps its own gain. Live: [0]..[4], [6]..[12]. paramCount 6
  *  is bit-identical to ABI v34. Memory: one shared filter record plus one state record per lane.
+ *  ABI v41 (E33 S5a): paramCount 14 adds [13] lookahead frames (0..8192, an integer; fixed at build, so not live). The
+ *  detector reads the undelayed signal and the audio is delayed by that many frames through a ring (the compressor's
+ *  pattern); the sidechain listen output is delayed alike, so listening never changes latency. The delay joins
+ *  n60_graph_latency_frames. Memory: two rings of that length per lane. The ring is lane state, so a rebuild with the same
+ *  lookahead carries it with the rest of the lane state. [13] = 0 and the 13-value block are bit-identical to ABI v40.
  *
  * Dynamic EQ. params: [0] linked (0/1), then per band 15 values: shape (0 peak, 1 low
  *  shelf, 2 high shelf, 3 notch, 4 band pass, 5 tilt), Hz (20..20000, below Nyquist),
