@@ -153,12 +153,13 @@ final class EQComparisonController: ObservableObject {
     var contentABActive: () -> Bool = { false }
     private let engine: AudioIOEngine
     /// Writes the input preamp for the loudness match. The engine's setter in production; tests inject a failing one.
-    var preampWriter: (Double) throws -> Void
+    var preampWriter: (Double) throws -> Void {
+        get { autoPreamp.preampWriter }
+        set { autoPreamp.preampWriter = newValue }
+    }
     private let autoPreamp: EQAutoPreampController
     private let audition: EQAuditionController?
     private var savedSteps: [EQComparisonSlot: EQEditHistory.SlotSteps] = [:]
-    /// What the engine's preamp held before the match trim was applied, when auto preamp is off.
-    private var appliedManualTrimDB = 0.0
     private var observation: ObservationSubscription?
 
     init(
@@ -168,7 +169,6 @@ final class EQComparisonController: ObservableObject {
         self.engine = engine
         self.autoPreamp = autoPreamp
         self.audition = audition
-        preampWriter = { [engine] in try engine.setInputPreampDB($0) }
         slots = EQComparisonSlots(live: engine.stereoEQConfiguration)
         observation = ObservationSubscription(
             track: { [engine] in _ = engine.stereoEQConfiguration },
@@ -279,23 +279,14 @@ final class EQComparisonController: ObservableObject {
         return difference > 0 ? -difference : 0
     }
 
-    /// Applies the match trim: through the auto-preamp rule when it is active, otherwise as a
-    /// delta on the engine's preamp that leaves the user's own edits in place.
+    /// Applies the match trim as the preamp model's match term (E33 S3, design 6): one publish of the
+    /// total whether or not auto preamp is on, leaving the user's own edits in place.
     private func reconcileMatch() {
         let desired = desiredTrimDB()
         guard abs(desired - matchTrimDB) > 1e-6 else { return }
         matchTrimDB = desired
-        if autoPreamp.isActive {
-            autoPreamp.setMatchAttenuation(-desired)
-            return
-        }
-        autoPreamp.setMatchAttenuation(0)
-        let range = DSPGainConfiguration.inputPreampRange
-        let current = engine.gainConfiguration.inputPreampDB
-        let target = min(max(current - appliedManualTrimDB + desired, range.lowerBound), range.upperBound)
-        appliedManualTrimDB = desired
         do {
-            try preampWriter(target)
+            try autoPreamp.applyMatch(trimDB: desired)
             if lastError != nil { lastError = nil }
         } catch {
             lastError = "The A/B loudness match could not set the preamp: \(error.localizedDescription)"

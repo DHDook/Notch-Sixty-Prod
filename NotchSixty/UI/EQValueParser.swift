@@ -61,13 +61,14 @@ enum EQValueParser {
     /// engine's 0.49 * sample rate ceiling (`EQBandRules.maximumFrequency`).
     static func range(for field: Field, band: EQBand, maximumFrequency: Double) -> ClosedRange<Double> {
         let ceiling = max(maximumFrequency, EQNudge.minimumFrequency)
+        let floor = EQBandRules.editFloor(for: band.type)
         switch field {
         case .frequency:
             if band.dynamic.enabled {
                 let limits = DynamicEQBandConfiguration.frequencyRange
                 return limits.lowerBound...min(limits.upperBound, ceiling)
             }
-            return EQNudge.minimumFrequency...ceiling
+            return floor...ceiling
         case .gain:
             return EQBandRules.gainRange
         case .q:
