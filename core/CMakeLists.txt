@@ -309,6 +309,11 @@ add_executable(n60core_mb_split_test tests/test_mb_split.cpp)
 target_link_libraries(n60core_mb_split_test PRIVATE n60core)
 add_test(NAME n60core_mb_split COMMAND n60core_mb_split_test)
 
+# E32 S4: gain-reduction telemetry without make-up, crossover edit crossfade, limiter lookahead toggle.
+add_executable(n60core_e32_dynamics_core_test tests/test_e32_dynamics_core.cpp)
+target_link_libraries(n60core_e32_dynamics_core_test PRIVATE n60core)
+add_test(NAME n60core_e32_dynamics_core COMMAND n60core_e32_dynamics_core_test)
+
 # E6 S12c: loudness (match, contour, dialogue leveler) stage (ABI v24).
 add_executable(n60core_loudness_test tests/test_loudness.cpp)
 target_link_libraries(n60core_loudness_test PRIVATE n60core)

@@ -258,9 +258,9 @@ bool expExtended(const StageRec &r) { return r.paramCount >= 13; }
 // Publishes the per-group gain reduction of one block to every lane of the group (control-thread readback).
 // The caller has already flushed denormals in the gain; st[g * per] holds the group's gain.
 template <typename Lane>
-void publishReduction(Lane *const *st, uint32_t per, uint32_t groups, const double *grMax) {
+void publishReduction(Lane *const *st, uint32_t per, uint32_t groups, const double *grMax, double makeup = 0.0) {
     for (uint32_t g = 0; g < groups; ++g) {
-        const float now = static_cast<float>(std::max(0.0, -st[g * per]->gainDB));
+        const float now = static_cast<float>(std::max(0.0, makeup - st[g * per]->gainDB));  // E32 S4 (R8): reduction without make-up
         const float peak = static_cast<float>(std::max(0.0, grMax[g]));
         for (uint32_t k = 0; k < per; ++k) {
             Lane &ln = *st[g * per + k];
@@ -414,7 +414,7 @@ void runCompressorX(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t fr
                     cf = rel;
                 }
                 gs.gainDB = target + cf * (gs.gainDB - target);
-                grMax[g] = std::max(grMax[g], -gs.gainDB);
+                grMax[g] = std::max(grMax[g], double(makeup) - gs.gainDB);  // E32 S4 (R8): reduction without make-up
                 gainA[l][c] = db2lin(gs.gainDB);
                 // Listen outputs never carry make-up: the delta is what the gain (without make-up) removed.
                 if (listening) gainNoMkA[l][c] = db2lin(gs.gainDB - makeup);
@@ -461,7 +461,7 @@ void runCompressorX(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t fr
         heal(st[l]->z);
         heal(st[l]->gainDB);
         heal(st[l]->meanSq);
-        nowDb[l / per] = std::max(nowDb[l / per], -st[l]->gainDB);
+        nowDb[l / per] = std::max(nowDb[l / per], double(makeup) - st[l]->gainDB);  // E32 S4 (R8)
     }
     // Every lane of a group reads the group's deepest reduction, as the shared gain did.
     const double *const nowPtr = nowDb;
@@ -532,7 +532,7 @@ void runCompressor(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t fra
                     cf = rel;
                 }
                 gs.gainDB = target + cf * (gs.gainDB - target);
-                gmax = std::max(gmax, -gs.gainDB);
+                gmax = std::max(gmax, double(makeup) - gs.gainDB);  // E32 S4 (R8)
                 gainA[c] = db2lin(gs.gainDB);
             }
             grMax[g] = gmax;
@@ -564,7 +564,7 @@ void runCompressor(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t fra
                 c = rel;
             }
             gs.gainDB = target + c * (gs.gainDB - target);
-            grMax[g] = std::max(grMax[g], -gs.gainDB);
+            grMax[g] = std::max(grMax[g], double(makeup) - gs.gainDB);  // E32 S4 (R8)
             const float gain = db2lin(gs.gainDB);
             for (uint32_t k = 0; k < per; ++k) lp[g * per + k][i] *= gain;
         }
@@ -574,7 +574,7 @@ void runCompressor(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t fra
         heal(st[l]->z);
         heal(st[l]->gainDB);
     }
-    publishReduction(st, per, groups, grMax);
+    publishReduction(st, per, groups, grMax, makeup);
 }
 
 // Expander gain computer (ABI v35): below the threshold the gain falls by (ratio - 1) dB per dB, with a quadratic soft knee

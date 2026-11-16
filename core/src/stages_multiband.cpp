@@ -29,7 +29,9 @@
 //  - sample rate: 8 kHz to 768 kHz (tested 44.1 to 384 kHz). Coefficients and filter state are double (E23 S1b); the
 //    crossover split runs left and right together with fused multiply-adds (E20 S10 part 4), so the output matches the kernel
 //    to rounding, not bit for bit. Decayed state is flushed to zero once per block. At a
-//    block start a changed parameter redesigns its coefficients (at most 11 biquads: bounded libm, no allocation).
+//    block start a changed parameter redesigns its coefficients (at most 11 biquads: bounded libm, no allocation). A crossover
+//    corner edit keeps the previous filters (preallocated copy, E32 S4) and blends the bands to the new ones over 5 ms at any
+//    rate; no latency; a reset clears the blend.
 //    Per-sample log10/pow are kernel-identical (hoisting them is deferred, as for the loudness stage).
 //  - channels: a stereo pair (laneA, laneB), as the kernel.
 //  - reset: a new snapshot starts parked and neutral; enabling from parked clears the state, as the kernel does. State is
@@ -213,6 +215,20 @@ struct MbShared {
     Bq lp2[kMaxSections], hp1[kMaxSections], ap1[kMaxSections / 2];
     BqState lp2L[kMaxSections], lp2R[kMaxSections], hp1L[kMaxSections], hp1R[kMaxSections];
     BqState ap1L[kMaxSections / 2], ap1R[kMaxSections / 2];
+    // E32 S4 (R10): a crossover edit runs the previous filters (coefficients and state copied at the edit) beside the new ones
+    // and blends the band signals over 5 ms. Preallocated here; no allocation at the edit. xActive is realtime-thread only.
+    uint32_t xActive;
+    double xw;  // blend weight of the new filters, 0..1
+    Bq oLowPass[kMaxSections], oHighPass[kMaxSections], oLp2[kMaxSections], oHp1[kMaxSections], oAp1[kMaxSections / 2];
+    BqState oLowL[kMaxSections], oLowR[kMaxSections], oHighL[kMaxSections], oHighR[kMaxSections];
+    BqState oLp2L[kMaxSections], oLp2R[kMaxSections], oHp1L[kMaxSections], oHp1R[kMaxSections];
+    BqState oAp1L[kMaxSections / 2], oAp1R[kMaxSections / 2];
+};
+
+// Pointers to one crossover filter set (the live one in MbShared or the previous one kept for a crossfade).
+struct XoverRef {
+    const Bq *lowPass, *highPass, *lp2, *hp1, *ap1;
+    BqState *lowL, *lowR, *highL, *highR, *lp2L, *lp2R, *hp1L, *hp1R, *ap1L, *ap1R;
 };
 
 uint32_t lookaheadOf(const n60_stage_desc &s) {
@@ -280,6 +296,8 @@ void clearState(MbShared &S) {
     std::memset(S.ap1L, 0, sizeof S.ap1L);
     std::memset(S.ap1R, 0, sizeof S.ap1R);
     S.splitMix = 0.0;
+    S.xActive = 0;
+    S.xw = 1.0;
     if (S.ringLen != 0) std::memset(ringsOf(S), 0, size_t(6) * S.ringLen * sizeof(float));
     S.ringPos = 0;
 }
@@ -454,6 +472,37 @@ uint64_t multibandCarry(SnapHeader *from, SnapHeader *to) N60_RT_NONBLOCKING {
 // E20 S3: denormals are flushed in hardware (platform/fpenv.hpp, the guard in n60_graph_process), so no per-block flush.
 static_assert(std::atomic<uint32_t>::is_always_lock_free, "telemetry atomics must be lock free");
 
+// One crossover split of a chunk through the filter set `f`: low, mid (split mode only) and high bands (E28 G42 tree or residual).
+void splitChunk(const XoverRef &f, bool split, uint32_t lowN, uint32_t highN, uint32_t apN, const simd::f64x2 *xin, uint32_t cn,
+                float *lowLa, float *lowRa, float *midLa, float *midRa, float *highLa, float *highRa) N60_RT_NONBLOCKING {
+    simd::f64x2 xa[kChunk], xb[kChunk], xc[kChunk];
+    if (split) {
+        // Band-pass tree: split at the high corner, then split the lower part at the low corner; the high band takes
+        // the low corner's all-pass so the three bands stay phase-consistent and sum flat. Each band holds only its
+        // own range.
+        std::memcpy(xa, xin, sizeof(simd::f64x2) * cn);
+        cascadePair(f.lp2, f.lp2L, f.lp2R, highN, xa, cn);
+        roundToFloat(xa, cn);
+        std::memcpy(xb, xa, sizeof(simd::f64x2) * cn);
+        cascadePair(f.lowPass, f.lowL, f.lowR, lowN, xa, cn);
+        storePair(xa, lowLa, lowRa, cn);
+        cascadePair(f.hp1, f.hp1L, f.hp1R, lowN, xb, cn);
+        storePair(xb, midLa, midRa, cn);
+        std::memcpy(xa, xin, sizeof(simd::f64x2) * cn);
+        cascadePair(f.highPass, f.highL, f.highR, highN, xa, cn);
+        roundToFloat(xa, cn);
+        cascadePair(f.ap1, f.ap1L, f.ap1R, apN, xa, cn);
+        storePair(xa, highLa, highRa, cn);
+    } else {
+        std::memcpy(xa, xin, sizeof(simd::f64x2) * cn);
+        cascadePair(f.lowPass, f.lowL, f.lowR, lowN, xa, cn);
+        storePair(xa, lowLa, lowRa, cn);
+        std::memcpy(xc, xin, sizeof(simd::f64x2) * cn);
+        cascadePair(f.highPass, f.highL, f.highR, highN, xc, cn);
+        storePair(xc, highLa, highRa, cn);
+    }
+}
+
 void runMultiband(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) N60_RT_NONBLOCKING {
     const float *p = paramsOf(h, r);
     MbShared &S = *reinterpret_cast<MbShared *>(sharedState(h, r));
@@ -464,6 +513,26 @@ void runMultiband(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t fram
     if (!enabled && S.parked != 0) return;
     if (p[kLowMidHz] != S.seenLowMid || p[kMidHighHz] != S.seenMidHigh) {
         // The slopes are topology (fixed at build), so the section counts do not change here.
+        if (S.xActive == 0) {
+            // E32 S4 (R10): keep the previous filters (coefficients and state) for a 5 ms crossfade to the new ones.
+            std::memcpy(S.oLowPass, S.lowPass, sizeof S.lowPass);
+            std::memcpy(S.oHighPass, S.highPass, sizeof S.highPass);
+            std::memcpy(S.oLp2, S.lp2, sizeof S.lp2);
+            std::memcpy(S.oHp1, S.hp1, sizeof S.hp1);
+            std::memcpy(S.oAp1, S.ap1, sizeof S.ap1);
+            std::memcpy(S.oLowL, S.lowL, sizeof S.lowL);
+            std::memcpy(S.oLowR, S.lowR, sizeof S.lowR);
+            std::memcpy(S.oHighL, S.highL, sizeof S.highL);
+            std::memcpy(S.oHighR, S.highR, sizeof S.highR);
+            std::memcpy(S.oLp2L, S.lp2L, sizeof S.lp2L);
+            std::memcpy(S.oLp2R, S.lp2R, sizeof S.lp2R);
+            std::memcpy(S.oHp1L, S.hp1L, sizeof S.hp1L);
+            std::memcpy(S.oHp1R, S.hp1R, sizeof S.hp1R);
+            std::memcpy(S.oAp1L, S.ap1L, sizeof S.ap1L);
+            std::memcpy(S.oAp1R, S.ap1R, sizeof S.ap1R);
+            S.xw = 0.0;
+            S.xActive = 1;
+        }
         designSplit(S, rate, p[kLowMidHz], p[kMidHighHz], S.lowN == 4, S.highN == 4);
     }
     for (uint32_t b = 0; b < kBands; ++b) {
@@ -519,35 +588,35 @@ void runMultiband(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t fram
         // Pass 1: the crossover split of the block (the IIR state is sequential, the rest is not).
         float dryLa[kChunk], dryRa[kChunk], lowLa[kChunk], lowRa[kChunk], highLa[kChunk], highRa[kChunk];
         float midLa[kChunk], midRa[kChunk];  // split mode only: the true band-pass mid (E28 G42)
-        simd::f64x2 xin[kChunk], xa[kChunk], xb[kChunk];
+        simd::f64x2 xin[kChunk];
         for (uint32_t c = 0; c < cn; ++c) {
             dryLa[c] = L[base + c];
             dryRa[c] = R[base + c];
             xin[c] = simd::toDouble(dryLa[c], dryRa[c]);
         }
-        if (split) {
-            // Band-pass tree: split at the high corner, then split the lower part at the low corner; the high band takes
-            // the low corner's all-pass so the three bands stay phase-consistent and sum flat. Each band holds only its
-            // own range.
-            std::memcpy(xa, xin, sizeof(simd::f64x2) * cn);
-            cascadePair(S.lp2, S.lp2L, S.lp2R, S.highN, xa, cn);
-            roundToFloat(xa, cn);
-            std::memcpy(xb, xa, sizeof(simd::f64x2) * cn);
-            cascadePair(S.lowPass, S.lowL, S.lowR, S.lowN, xa, cn);
-            storePair(xa, lowLa, lowRa, cn);
-            cascadePair(S.hp1, S.hp1L, S.hp1R, S.lowN, xb, cn);
-            storePair(xb, midLa, midRa, cn);
-            std::memcpy(xa, xin, sizeof(simd::f64x2) * cn);
-            cascadePair(S.highPass, S.highL, S.highR, S.highN, xa, cn);
-            roundToFloat(xa, cn);
-            cascadePair(S.ap1, S.ap1L, S.ap1R, S.apN, xa, cn);
-            storePair(xa, highLa, highRa, cn);
-        } else {
-            std::memcpy(xa, xin, sizeof(simd::f64x2) * cn);
-            cascadePair(S.lowPass, S.lowL, S.lowR, S.lowN, xa, cn);
-            storePair(xa, lowLa, lowRa, cn);
-            cascadePair(S.highPass, S.highL, S.highR, S.highN, xin, cn);
-            storePair(xin, highLa, highRa, cn);
+        const XoverRef live{S.lowPass, S.highPass, S.lp2, S.hp1, S.ap1, S.lowL, S.lowR, S.highL, S.highR, S.lp2L, S.lp2R, S.hp1L, S.hp1R, S.ap1L, S.ap1R};
+        splitChunk(live, split, S.lowN, S.highN, S.apN, xin, cn, lowLa, lowRa, midLa, midRa, highLa, highRa);
+        if (S.xActive != 0) {
+            // E32 S4 (R10): the previous crossover keeps running; the bands blend to the new one over 5 ms (linear, exact end).
+            const XoverRef old{S.oLowPass, S.oHighPass, S.oLp2, S.oHp1, S.oAp1, S.oLowL, S.oLowR, S.oHighL, S.oHighR, S.oLp2L, S.oLp2R, S.oHp1L, S.oHp1R, S.oAp1L, S.oAp1R};
+            float oLa[kChunk], oRa[kChunk], oMidLa[kChunk], oMidRa[kChunk], oHiLa[kChunk], oHiRa[kChunk];
+            splitChunk(old, split, S.lowN, S.highN, S.apN, xin, cn, oLa, oRa, oMidLa, oMidRa, oHiLa, oHiRa);
+            const double step = 1.0 / (rate * 0.005);
+            double w = S.xw;
+            for (uint32_t c = 0; c < cn; ++c) {
+                w = std::fmin(1.0, w + step);
+                const float wf = static_cast<float>(w);
+                lowLa[c] = oLa[c] + wf * (lowLa[c] - oLa[c]);
+                lowRa[c] = oRa[c] + wf * (lowRa[c] - oRa[c]);
+                highLa[c] = oHiLa[c] + wf * (highLa[c] - oHiLa[c]);
+                highRa[c] = oHiRa[c] + wf * (highRa[c] - oHiRa[c]);
+                if (split) {
+                    midLa[c] = oMidLa[c] + wf * (midLa[c] - oMidLa[c]);
+                    midRa[c] = oMidRa[c] + wf * (midRa[c] - oMidRa[c]);
+                }
+            }
+            S.xw = w;
+            if (w >= 1.0) S.xActive = 0;
         }
         // Pass 2: one lookahead for the whole stage. The detectors read the undelayed bands, the audio path the delayed ones,
         // so the bands stay aligned and the crossover sum stays flat. Ring slot 0 holds the mid band in split mode, dry otherwise.
@@ -637,7 +706,7 @@ void runMultiband(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t fram
                     wSum += wD;
                 }
             }
-            const float gr = std::fmax(0.0f, -S.gainDb[b]);
+            const float gr = std::fmax(0.0f, mk[b] - S.gainDb[b]);  // E32 S4 (R8): reduction without make-up
             grMax[b] = gr > grMax[b] ? gr : grMax[b];
         }
         // With a lookahead the stage keeps running (it is the delay) so the audio does not jump when it would park.
@@ -669,7 +738,7 @@ void runMultiband(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t fram
         }
     }
     for (uint32_t b = 0; b < kBands; ++b) {
-        S.grNowBits[b].store(floatToBits(std::fmax(0.0f, -S.gainDb[b])), std::memory_order_relaxed);
+        S.grNowBits[b].store(floatToBits(std::fmax(0.0f, mk[b] - S.gainDb[b])), std::memory_order_relaxed);
         atomicMaxFloat(S.grMaxBits[b], grMax[b]);
     }
 }
