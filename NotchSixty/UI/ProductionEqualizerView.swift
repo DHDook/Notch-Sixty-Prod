@@ -13,7 +13,7 @@ struct ProductionEqualizerView: View {
     /// E27 S2b: program spectrum overlay; nil or unavailable hides the switch.
     var programAnalyser: EQProgramAnalyserController? = nil
     /// E32 S1: one compiled response per (bands, rate), shared by the graph and its band curves.
-    @State private var responseCache = EQResponseCache()
+    @State private var responseCache = EQResponseCache.shared
     @ObservedObject private var liveOverlay = MeasurementLiveOverlayStore.shared
     @State private var selectedBandID: UUID?
     @State private var dragPreview: EQBand?

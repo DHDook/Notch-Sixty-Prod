@@ -673,7 +673,34 @@ private enum PresetInterchangeError: Error, LocalizedError {
 enum PresetInterchange {
     private static let defaultQ = 0.707
 
+    /// Imports `data` and clamps every band to `EQBandRules` (E32 S2), reporting what it changed, so
+    /// the engine, which refuses values outside the rule, never sees a stray one.
     static func importPreset(data: Data, fileName: String, baseStereo: StereoEQConfiguration) throws -> PresetInterchangeImport {
+        var imported = try importPresetUnclamped(data: data, fileName: fileName, baseStereo: baseStereo)
+        var notes: [String] = []
+        func clampLane(_ bands: inout [EQBand], lane: String) {
+            for index in bands.indices where bands[index].type != .fir {
+                let clamped = EQBandRules.sanitizedForImport(bands[index])
+                guard clamped != bands[index] else { continue }
+                var fields: [String] = []
+                if clamped.frequencyHz != bands[index].frequencyHz { fields.append("frequency") }
+                if clamped.gainDB != bands[index].gainDB { fields.append("gain") }
+                if clamped.q != bands[index].q { fields.append("Q") }
+                if fields.isEmpty { fields.append("settings") }
+                notes.append("\(lane) band \(index + 1): \(fields.joined(separator: ", ")) clamped to the supported range.")
+                bands[index] = clamped
+            }
+        }
+        clampLane(&imported.stereoEQ.linkedBands, lane: "Linked")
+        clampLane(&imported.stereoEQ.leftBands, lane: "Left")
+        clampLane(&imported.stereoEQ.rightBands, lane: "Right")
+        clampLane(&imported.stereoEQ.midBands, lane: "Mid")
+        clampLane(&imported.stereoEQ.sideBands, lane: "Side")
+        imported.warnings += notes
+        return imported
+    }
+
+    private static func importPresetUnclamped(data: Data, fileName: String, baseStereo: StereoEQConfiguration) throws -> PresetInterchangeImport {
         let ext = (fileName as NSString).pathExtension.lowercased()
         if ext == "eqpreset" {
             return try importLegacyPreset(data: data, fileName: fileName, baseStereo: baseStereo)

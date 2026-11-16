@@ -176,39 +176,7 @@ struct StereoEQConfiguration: Equatable, Codable, Sendable {
         var result: [EQBand] = []
         result.reserveCapacity(bands.count)
         for (index, band) in bands.enumerated() where band.enabled {
-            if band.type == .fir {
-                guard let kernel = band.firKernel else { throw EQConfigurationError.firKernelRequired }
-                try kernel.validate(for: sampleRate)
-                result.append(band)
-                continue
-            }
-            guard band.frequencyHz.isFinite,
-                  band.frequencyHz > 0,
-                  band.gainDB.isFinite,
-                  Self.bandGainRange.contains(band.gainDB),
-                  band.q.isFinite,
-                  band.q > 0 else {
-                throw EQConfigurationError.invalidBand(index: index)
-            }
-            if band.type == .linkwitzTransform {
-                guard band.linkwitzTargetHz.isFinite,
-                      band.linkwitzTargetHz > 0,
-                      band.linkwitzTargetHz < sampleRate * 0.5,
-                      band.linkwitzTargetQ.isFinite,
-                      band.linkwitzTargetQ > 0 else {
-                    throw EQConfigurationError.invalidBand(index: index)
-                }
-            }
-            if band.dynamic.enabled {
-                guard band.type.supportsDynamicEQ,
-                      DynamicEQBandConfiguration.frequencyRange.contains(band.frequencyHz),
-                      DynamicEQBandConfiguration.qRange.contains(band.q),
-                      band.dynamic.isValid,
-                      !(band.type == .notch && band.dynamic.direction != .cutOnly) else {
-                    throw EQConfigurationError.invalidBand(index: index)
-                }
-            }
-            if band.frequencyHz < sampleRate * 0.5 {
+            if try EQBandRules.validate(band, index: index, sampleRate: sampleRate) {
                 result.append(band)
             }
         }

@@ -18,6 +18,9 @@ final class EQResponseCache {
     /// How many compilations ran (for tests).
     private(set) var compileCount = 0
 
+    /// The one cache the Equalizer page and the auto-preamp's headroom predictor share (E32 S2, G3).
+    static let shared = EQResponseCache()
+
     init(capacity: Int = 96) {
         self.capacity = max(1, capacity)
     }

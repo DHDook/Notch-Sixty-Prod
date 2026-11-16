@@ -115,11 +115,16 @@ final class EQAutoPreampController: ObservableObject {
         try preampWriter(target)
     }
 
+    /// Shared with the Equalizer page by default; a test passes its own.
+    var responseCache = EQResponseCache.shared
+
     private func refreshPrediction() {
         let configuration = engine.stereoEQConfiguration
         let rate = sampleRate
         if let cacheKey, cacheKey.sampleRate == rate, cacheKey.configuration == configuration { return }
         cacheKey = (configuration, rate)
-        prediction = EQHeadroomPredictor.predict(configuration: configuration, sampleRate: rate)
+        prediction = EQHeadroomPredictor.predict(configuration: configuration, sampleRate: rate) { bands, rate in
+            self.responseCache.program(bands: bands, sampleRate: rate)
+        }
     }
 }
