@@ -4,13 +4,40 @@ import Foundation
 /// sample rate. Pure Swift, no engine state. The page, its value parser, `sanitized`, the engine
 /// validators, `StereoPlaybackControl` and the profile importers all call it.
 ///
-/// Limits: frequency 20 Hz up to 192 kHz (and under 0.49 of the device rate when edited),
+/// Limits: frequency 20 Hz (5 Hz for the PEQ types, E33 S3) up to 192 kHz (and under 0.49 of the device rate when edited),
 /// Q 0.1 to 20, gain `StereoEQConfiguration.bandGainRange`, dynamic ranges from
 /// `DynamicEQBandConfiguration`, and a notch is cut-only when dynamic.
 enum EQBandRules {
     static let minimumFrequency = 20.0
     static let maximumAbsoluteFrequency = 192_000.0
     static let frequencyRange = minimumFrequency...maximumAbsoluteFrequency
+    /// E33 S3 (design 3): the lowest frequency a PEQ type may hold, for subsonic filters. Dynamic bands
+    /// keep `DynamicEQBandConfiguration.frequencyRange`; Linkwitz Transform and Tilt keep 20 Hz.
+    static let subsonicMinimumFrequency = 5.0
+
+    /// Whether `type` may go below 20 Hz: peaking, shelves, high/low pass, notch, all-pass, band-pass.
+    static func supportsSubsonic(_ type: EQFilterType) -> Bool {
+        switch type {
+        case .peaking, .lowShelf, .highShelf, .lowPass, .highPass, .notch, .allPass, .bandPass: return true
+        case .linkwitzTransform, .tilt, .fir: return false
+        }
+    }
+
+    /// The lowest frequency an edit of `type` may reach; 5 Hz for a PEQ type when `subsonic`, else 20 Hz.
+    static func minimumFrequency(for type: EQFilterType, subsonic: Bool) -> Double {
+        subsonic && supportsSubsonic(type) ? subsonicMinimumFrequency : minimumFrequency
+    }
+
+    /// The floor the page, fields, nudges and import use: 5 Hz while `e33.page-enhancements` is on.
+    /// Swift only; the engine never reads the flag and always accepts the wider rule in `invalidReason`.
+    static func editFloor(for type: EQFilterType) -> Double {
+        minimumFrequency(for: type, subsonic: FeatureFlags.isEnabledProcessWide(.eqPageEnhancements))
+    }
+
+    /// The engine's lowest accepted frequency for `type`: 5 Hz for a PEQ type, 20 Hz otherwise.
+    private static func validationFloor(for type: EQFilterType) -> Double {
+        minimumFrequency(for: type, subsonic: true)
+    }
     static let qRange = 0.1...20.0
     static let defaultQ = 0.707
     static var gainRange: ClosedRange<Double> { StereoEQConfiguration.bandGainRange }
@@ -37,7 +64,9 @@ enum EQBandRules {
     /// are judged by it. Disabled bands are judged on their values too; callers filter on `enabled`.
     static func invalidReason(_ band: EQBand) -> String? {
         if band.type == .fir { return nil }
-        guard band.frequencyHz.isFinite, frequencyRange.contains(band.frequencyHz) else { return "Frequency is not valid" }
+        guard band.frequencyHz.isFinite,
+              (validationFloor(for: band.type)...maximumAbsoluteFrequency).contains(band.frequencyHz)
+        else { return "Frequency is not valid" }
         guard band.gainDB.isFinite, gainRange.contains(band.gainDB) else { return "Gain is out of range" }
         guard band.q.isFinite, qRange.contains(band.q) else { return "Q is not valid" }
         if band.type == .linkwitzTransform {
@@ -105,19 +134,25 @@ enum EQBandRules {
 
     /// The band clamped to every limit above. Non-finite values fall back to defaults.
     static func sanitized(_ input: EQBand, sampleRate: Double) -> EQBand {
-        sanitized(input, ceiling: maximumFrequency(sampleRate: sampleRate))
+        sanitized(input, ceiling: maximumFrequency(sampleRate: sampleRate), floor: editFloor(for: input.type))
     }
 
     /// As above for a band whose device rate is not known (a profile import): the ceiling is the
     /// highest frequency the rule allows at any rate.
     static func sanitizedForImport(_ input: EQBand) -> EQBand {
-        sanitized(input, ceiling: maximumAbsoluteFrequency)
+        sanitized(input, ceiling: maximumAbsoluteFrequency, floor: editFloor(for: input.type))
     }
 
-    private static func sanitized(_ input: EQBand, ceiling: Double) -> EQBand {
+    /// As `sanitized(_:sampleRate:)` with the subsonic choice made by the caller (tests, previews).
+    static func sanitized(_ input: EQBand, sampleRate: Double, subsonic: Bool) -> EQBand {
+        sanitized(input, ceiling: maximumFrequency(sampleRate: sampleRate),
+                  floor: minimumFrequency(for: input.type, subsonic: subsonic))
+    }
+
+    private static func sanitized(_ input: EQBand, ceiling: Double, floor: Double) -> EQBand {
         var band = input
         if !band.frequencyHz.isFinite { band.frequencyHz = 1_000 }
-        band.frequencyHz = clamp(band.frequencyHz, minimumFrequency...ceiling)
+        band.frequencyHz = clamp(band.frequencyHz, floor...max(floor, ceiling))
 
         if !band.gainDB.isFinite { band.gainDB = 0 }
         band.gainDB = clamp(band.gainDB, gainRange)

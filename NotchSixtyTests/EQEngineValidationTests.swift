@@ -19,7 +19,7 @@ final class EQEngineValidationTests: XCTestCase {
     func testEngineRefusesValuesOutsideTheRuleAndAcceptsInsideValues() throws {
         let engine = AudioIOEngine()
         let outside: [(String, EQBand)] = [
-            ("low frequency", EQBand(type: .peaking, frequencyHz: 10, gainDB: 0, q: 1)),
+            ("low frequency", EQBand(type: .peaking, frequencyHz: 4, gainDB: 0, q: 1)),
             ("high frequency", EQBand(type: .peaking, frequencyHz: 200_000, gainDB: 0, q: 1)),
             ("gain", EQBand(type: .peaking, frequencyHz: 1_000, gainDB: 30, q: 1)),
             ("low Q", EQBand(type: .peaking, frequencyHz: 1_000, gainDB: 0, q: 0.05)),
@@ -30,7 +30,9 @@ final class EQEngineValidationTests: XCTestCase {
             XCTAssertThrowsError(try engine.addEQBand(band), label)
             XCTAssertThrowsError(try engine.replaceStereoEQConfiguration(StereoEQConfiguration(linkedBands: [band])), label)
         }
+        XCTAssertNoThrow(try engine.addEQBand(EQBand(type: .peaking, frequencyHz: 5, gainDB: -24, q: 1)))
         XCTAssertNoThrow(try engine.addEQBand(EQBand(type: .peaking, frequencyHz: 20, gainDB: -24, q: 0.1)))
+        XCTAssertThrowsError(try engine.addEQBand(EQBand(type: .tilt, frequencyHz: 10, gainDB: 0, q: 0.7)), "tilt keeps 20 Hz")
         XCTAssertNoThrow(try engine.addEQBand(EQBand(type: .peaking, frequencyHz: 192_000, gainDB: 24, q: 20)))
     }
 

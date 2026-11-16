@@ -95,7 +95,10 @@ struct ProductionEqualizerView: View {
     private var sampleRate: Double { engine.selectedOutputDevice?.nominalSampleRate ?? 48_000 }
     private var maximumFrequency: Double { EQBandRules.maximumFrequency(sampleRate: sampleRate) }
     private var yRange: EQGraphYRange { EQGraphYRange(rawValue: yRangeRaw) ?? .plusMinus24 }
-    private var xZoom: EQGraphXZoom { EQGraphXZoom(rawValue: xZoomRaw) ?? .full }
+    private var xZoom: EQGraphXZoom {
+        let zoom = EQGraphXZoom(rawValue: xZoomRaw) ?? .full
+        return zoom == .subsonic && !enhanced ? .full : zoom
+    }
     private var bandCurvesMode: EQBandCurvesMode { EQBandCurvesMode(rawValue: bandCurvesRaw) ?? .selected }
     /// The bands as drawn: the band under a drag shows its preview.
     private var shownBands: [EQBand] {
@@ -129,7 +132,7 @@ struct ProductionEqualizerView: View {
         let work = Task.detached(priority: .userInitiated) { () -> EQAnalysisSeries? in
             if Task.isCancelled { return nil }
             let analysis = EQFilterAnalysis(bands: key.bands, phaseMode: key.phaseMode, sampleRate: key.sampleRate)
-            let grid = EQFilterAnalysis.frequencyGrid(lower: EQGraphGeometry.minimumFrequency, upper: upper, count: 360)
+            let grid = EQFilterAnalysis.frequencyGrid(lower: key.zoom.minimumFrequency, upper: upper, count: 360)
             return analysis.series(for: key.view, frequencies: grid)
         }
         let result = await withTaskCancellationHandler { await work.value } onCancel: { work.cancel() }
@@ -453,7 +456,7 @@ struct ProductionEqualizerView: View {
             .help("Visible gain range; Auto fits the largest response plus 3 dB")
 
             Picker("Frequencies", selection: $xZoomRaw) {
-                ForEach(EQGraphXZoom.allCases) { zoom in Text(zoom.displayName).tag(zoom.rawValue) }
+                ForEach(EQGraphXZoom.allCases.filter { enhanced || $0 != .subsonic }) { zoom in Text(zoom.displayName).tag(zoom.rawValue) }
             }
             .labelsHidden()
             .pickerStyle(.segmented)
@@ -469,7 +472,7 @@ struct ProductionEqualizerView: View {
         var half = yRange.fixedHalfRange ?? 24
         if graphView == .magnitude, yRange == .auto {
             let upper = xZoom.maximumFrequency(sampleRate: sampleRate)
-            let grid = EQFilterAnalysis.frequencyGrid(lower: EQGraphGeometry.minimumFrequency, upper: upper, count: 180)
+            let grid = EQFilterAnalysis.frequencyGrid(lower: xZoom.minimumFrequency, upper: upper, count: 180)
             let peak = grid.reduce(0.0) { max($0, abs(ProductionEQResponseMath.responseDB(program: program, sampleRate: sampleRate, frequencyHz: $1))) }
             half = autoMemory.resolve(.auto, peakMagnitudeDB: peak, growOnly: dragPreview != nil)
         }
@@ -619,6 +622,14 @@ struct ProductionEqualizerView: View {
                     .padding(.horizontal, 38)
                     .padding(.bottom, 4)
                     .accessibilityIdentifier("eq.bands.row.\(index + 1).nyquist")
+            }
+            if enhanced, let note = EQSubsonicNote.note(for: band) {
+                Text(note)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 38)
+                    .padding(.bottom, 4)
+                    .accessibilityIdentifier("eq.bands.row.\(index + 1).subsonic")
             }
         }
         .background(
@@ -986,6 +997,7 @@ struct ProductionEqualizerView: View {
             },
             selectedBandID: { selectedBandID },
             inputPreampDB: { engine.gainConfiguration.inputPreampDB },
+            applyPreampDB: { value in try autoPreamp.setManual(value) },
             reportError: { actionError = $0 }
         )
     }
@@ -1089,7 +1101,7 @@ struct ProductionEqualizerView: View {
         }
         let band = sanitize(EQBand(
             type: .peaking,
-            frequencyHz: min(max(frequency, EQNudge.minimumFrequency), maximumFrequency),
+            frequencyHz: min(max(frequency, EQBandRules.editFloor(for: .peaking)), maximumFrequency),
             gainDB: gain,
             q: EQNudge.addedBandQ
         ))
@@ -1216,7 +1228,7 @@ private struct ProductionEQResponseGraph: View {
     @State private var scrollAccumulator = EQNudge.ScrollAccumulator()
     @FocusState private var graphFocused: Bool
 
-    private let minimumFrequency = EQGraphGeometry.minimumFrequency
+    private var minimumFrequency: Double { geometry.minimumFrequency }
     private var minimumDB: Double { geometry.displayMinimumDB }
     private var maximumDB: Double { geometry.displayMaximumDB }
 
@@ -1451,8 +1463,8 @@ private struct ProductionEQResponseGraph: View {
     // MARK: Drawing
 
     private func drawGrid(context: inout GraphicsContext, size: CGSize) {
-        let frequencies: [Double] = [20, 50, 100, 200, 500, 1_000, 2_000, 5_000, 10_000, 20_000, 40_000, 80_000, 160_000]
-        for frequency in frequencies where frequency <= graphMaximumFrequency {
+        let frequencies: [Double] = [5, 10, 20, 50, 100, 200, 500, 1_000, 2_000, 5_000, 10_000, 20_000, 40_000, 80_000, 160_000]
+        for frequency in frequencies where frequency <= graphMaximumFrequency && frequency >= minimumFrequency {
             let x = xPosition(frequency, width: size.width)
             var path = Path()
             path.move(to: CGPoint(x: x, y: 0))

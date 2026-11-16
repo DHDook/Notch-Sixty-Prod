@@ -195,7 +195,7 @@ void crossoverRamp(double rate) {
     const double bound = 4.0 * refStep + 4.0e-5;
     check(step < bound, "crossover sweep has no click above the bound", rate, step, bound);
     check(jumpStep < bound, "one large crossover jump has no click above the bound", rate, jumpStep, bound);
-    // G16: a 12x corner jump (200 -> 2500 Hz, possible since E33 S5b widened the limit) leaves a step from the transplanted filter
+    // G18: a 12x corner jump (200 -> 2500 Hz, possible since E33 S5b widened the limit) leaves a step from the transplanted filter
     // state at the higher rates; bounded here at -34 dB of the 0.4 tone (second difference), not at the sweep's tight bound.
     const double wideStep = maxStep(wide, (size_t)(0.35 * rate), ref.size());
     check(wideStep < 8.0e-3, "wide crossover jump stays under the loose bound", rate, wideStep, 8.0e-3);
