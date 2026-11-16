@@ -149,15 +149,27 @@ int main(void) {
             double grDiff = 0;
             if (n60_graph_read_multiband(g, 7, &rb) != N60_STATUS_OK) { fprintf(stderr, "read_multiband failed\n"); failures++; }
             else {
-                grDiff = fmax(fabs((double)rb.grNowDb[0] - tel.multibandLowGainReductionDB),
-                         fmax(fabs((double)rb.grNowDb[1] - tel.multibandMidGainReductionDB),
-                              fabs((double)rb.grNowDb[2] - tel.multibandHighGainReductionDB)));
+                /* E32 S4 (R8): the core reads reduction without make-up, the legacy kernel net of it (max(0, -gain)). Where the kernel
+                 * reduces (net > 0) the core reads net + make-up; where it does not (gain >= 0) the core reads between 0 and the
+                 * make-up. */
+                const float kernelNet[3] = {tel.multibandLowGainReductionDB, tel.multibandMidGainReductionDB, tel.multibandHighGainReductionDB};
+                for (int b = 0; b < 3; b++) {
+                    const double mk = c2->on ? c2->mk[b] : 0.0;
+                    const double core = rb.grNowDb[b];
+                    double d;
+                    if (kernelNet[b] > 0.0f) d = fabs(core - fmax(0.0, (double)kernelNet[b] + mk));
+                    else d = core > fmax(0.0, mk) ? core - fmax(0.0, mk) : 0.0;
+                    if (d > grDiff) grDiff = d;
+                }
             }
             printf("rate %.0f cfg %u: peak %.1f dBFS rms %.1f dBFS gr %.3f/%.3f/%.3f (kernel %.3f/%.3f/%.3f)\n", rate, m,
                    20 * log10(peak + 1e-30), 20 * log10(rms + 1e-30), rb.grNowDb[0], rb.grNowDb[1], rb.grNowDb[2],
                    tel.multibandLowGainReductionDB, tel.multibandMidGainReductionDB, tel.multibandHighGainReductionDB);
             if (!(moved > 1e-3)) { fprintf(stderr, "FAIL stage did not change the signal\n"); failures++; }
-            if (!(20 * log10(peak + 1e-30) < parityPeakDb(rate))) { fprintf(stderr, "FAIL peak\n"); failures++; }
+            /* E32 S4 (R10): a live retune (m 5) crossfades over 5 ms in the core; the legacy kernel swaps the crossover at once, so the
+             * two differ by the click the crossfade removes (measured about -55 dBFS at most); the other modes keep the tight limit. */
+            const double peakLimit = m == 5 ? fmax(parityPeakDb(rate), -50.0) : parityPeakDb(rate);
+            if (!(20 * log10(peak + 1e-30) < peakLimit)) { fprintf(stderr, "FAIL peak\n"); failures++; }
             if (!(20 * log10(rms + 1e-30) < parityPeakDb(rate) - 12.0)) { fprintf(stderr, "FAIL rms\n"); failures++; }
             if (!(grDiff < (rate <= 48000.5 ? 0.01 : (rate <= 96000.5 ? 0.03 : (rate <= 192000.5 ? 0.06 : 0.25))))) { fprintf(stderr, "FAIL gain reduction\n"); failures++; }
             n60_graph_retire(g);
