@@ -15,8 +15,10 @@ final class EQAutoPreampController: ObservableObject {
     let preamp: EQPreampModel
     /// Stored toggle, as saved in the profile.
     var isOn: Bool { preamp.autoOn }
-    /// Stored trim (the manual term), as saved in the profile.
-    var trimDB: Double { preamp.manualDB }
+    /// Stored trim, as saved in the profile: the manual term while auto preamp is on; while off, the
+    /// value last restored or left by switching it off (so a profile that is not edited stays clean).
+    var trimDB: Double { isOn ? preamp.manualDB : offTrimDB }
+    private var offTrimDB = 0.0
     /// The last prediction, for the badge.
     @Published private(set) var prediction = EQHeadroomPrediction.none
 
@@ -84,6 +86,7 @@ final class EQAutoPreampController: ObservableObject {
     func setManual(_ value: Double) throws {
         preamp.adoptOutsideWrite()
         try preamp.setManual(value)
+        offTrimDB = preamp.manualDB
     }
 
     /// Turns the rule on or off. On: the current preamp becomes the trim. Off: the preamp returns
@@ -92,7 +95,9 @@ final class EQAutoPreampController: ObservableObject {
         guard on != isOn else { return }
         preamp.adoptOutsideWrite()
         refreshPrediction()
+        let manual = preamp.manualDB
         try preamp.setAuto(on: on, trimDB: -autoAttenuationDB)
+        if !on { offTrimDB = manual }
     }
 
     /// Edits the trim; while the rule is active the preamp follows at once.
@@ -103,6 +108,7 @@ final class EQAutoPreampController: ObservableObject {
     /// Sets the stored values from a profile or a rollback. Does not touch the engine: the
     /// profile's own preamp value is applied with the rest of the content state.
     func restore(isOn: Bool, trimDB: Double) {
+        offTrimDB = trimDB.isFinite ? trimDB : 0
         preamp.restore(manualDB: trimDB, autoOn: isOn)
     }
 
