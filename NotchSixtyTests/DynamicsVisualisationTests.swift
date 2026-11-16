@@ -38,6 +38,17 @@ final class DynamicsVisualisationTests: XCTestCase {
         }
     }
 
+    /// E32 S4 (R8): the core reads reduction without make-up, so the dot sits on the curve whatever the make-up.
+    func testDotIsOnTheCurveWithMakeup() {
+        for makeup in [0.0, 6.0, 12.0] {
+            let curve = DynamicsTransferCurve(kind: .compressor, thresholdDB: -24, ratio: 3, kneeDB: 0, makeupDB: makeup)
+            let input = -10.0
+            let reduction = curve.reductionDB(atInput: input)
+            let point = curve.livePoint(reductionDB: reduction)
+            XCTAssertEqual(point?.input ?? .nan, input, accuracy: 1e-9, "makeup \(makeup)")
+        }
+    }
+
     func testNoDotWhenThereIsNoReduction() {
         let curve = DynamicsTransferCurve(kind: .compressor, thresholdDB: -20, ratio: 4)
         XCTAssertNil(curve.livePoint(reductionDB: 0))

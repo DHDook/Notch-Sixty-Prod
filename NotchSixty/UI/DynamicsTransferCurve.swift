@@ -91,8 +91,11 @@ struct DynamicsTransferCurve: Equatable, Sendable {
 
     func outputDB(atInput input: Double) -> Double { input + gainDB(atInput: input) }
 
-    /// What the engine reports: max(0, -gain).
-    func reductionDB(atInput input: Double) -> Double { max(0, -gainDB(atInput: input)) }
+    /// What the engine reports: max(0, -gain), the compressor's before make-up (E32 S4, R8).
+    func reductionDB(atInput input: Double) -> Double {
+        guard kind == .compressor, input.isFinite else { return max(0, -gainDB(atInput: input)) }
+        return max(0, -(gainDB(atInput: input) - makeupDB))
+    }
 
     /// Expansion gain (zero or negative) before the floor: (ratio - 1) dB per dB below the threshold, with a quadratic knee
     /// centred on the threshold, the compressor's law mirrored (E28 S7b; core `expTargetDb`). Knee 0 is the hard law.
@@ -145,8 +148,8 @@ struct DynamicsTransferCurve: Equatable, Sendable {
             return thresholdDB + half - (2 * kneeDB * reduction / slope).squareRoot()
         case .compressor:
             guard ratio > 1 else { return nil }
-            // Compression (before makeup) that gives this reduction: gain = compression + makeup = -reduction.
-            let compression = reduction + makeupDB
+            // The readback is the compression before makeup (E32 S4, R8), so it is the compression directly.
+            let compression = reduction
             guard compression > 0 else { return nil }
             if let floorDB, compression > -floorDB { return nil }
             let k = 1 - 1 / ratio

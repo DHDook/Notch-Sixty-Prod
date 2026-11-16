@@ -518,9 +518,16 @@ struct GuardState {
 
 double fromDb10(double db) { return std::pow(10.0, db / 10.0); }
 
-size_t protRingBytes(const ProtCfg &c) { return up((size_t(c.laHigh) + 2) * sizeof(float)); }
+// E32 S4 (R12): the limiter's ring and window deque hold a power-of-two count (at least laHigh + 2), so every wrap is a mask
+// rather than a 64-bit modulo per high-rate sample. Only the capacity differs; the delayed samples and the window are the same.
+uint32_t protCapFor(uint32_t laHigh) {
+    uint32_t cap = 4u;
+    while (cap < laHigh + 2u) cap <<= 1;
+    return cap;
+}
+size_t protRingBytes(const ProtCfg &c) { return up(size_t(protCapFor(c.laHigh)) * sizeof(float)); }
 size_t protSharedBytes(const ProtCfg &c) {
-    const size_t cap = size_t(c.laHigh) + 2;
+    const size_t cap = protCapFor(c.laHigh);
     return up(sizeof(ProtShared) + cap * sizeof(float)) + up(cap * sizeof(uint64_t));
 }
 inline float *protVal(ProtShared *s) { return reinterpret_cast<float *>(s + 1); }
@@ -1092,7 +1099,7 @@ void systemInit(SnapHeader *h, const StageRec &r) {
             const ProtCfg c = protCfg(p, rate, r.paramCount);
             ProtShared *s = reinterpret_cast<ProtShared *>(sh);
             s->gain = 1.0;
-            s->cap = c.laHigh + 2;
+            s->cap = protCapFor(c.laHigh);
             break;
         }
         case N60_STAGE_ANC_GUARD: {
@@ -2071,26 +2078,26 @@ inline float softClip(const ProtCfg &c, float input) {
 // limited one. Shared by the serial stage and the lane-parallel one (E20 S10b), so the two cannot drift apart.
 inline void protLimitSample(ProtShared &sh, const ProtCfg &c, double attackStep, uint32_t n, float *const *hp, uint32_t off,
                             float *const *ring, float *val, uint64_t *idx, double &minGain) {
-    const uint32_t cap = sh.cap;
+    const uint32_t mask = sh.cap - 1u;  // a power of two (protCapFor)
     const uint64_t seq = sh.seq;
-    const uint32_t w = static_cast<uint32_t>(seq % cap);
+    const uint32_t w = static_cast<uint32_t>(seq) & mask;
     float peak = 0.0f;
     for (uint32_t l = 0; l < n; ++l) {
         ring[l][w] = hp[l][off];
         peak = std::fmax(peak, std::fabs(hp[l][off]));
     }
     while (sh.count > 0) {  // deque_push
-        const uint32_t tail = (sh.head + sh.count - 1u) % cap;
+        const uint32_t tail = (sh.head + sh.count - 1u) & mask;
         if (val[tail] > peak) break;
         sh.count -= 1u;
     }
-    const uint32_t ins = (sh.head + sh.count) % cap;
+    const uint32_t ins = (sh.head + sh.count) & mask;
     val[ins] = peak;
     idx[ins] = seq;
     sh.count += 1u;
     const uint64_t outSeq = seq >= c.laHigh ? seq - c.laHigh : 0u;
     while (sh.count > 0 && idx[sh.head] < outSeq) {  // deque_remove_expired
-        sh.head = (sh.head + 1u) % cap;
+        sh.head = (sh.head + 1u) & mask;
         sh.count -= 1u;
     }
     const float window = sh.count > 0 ? val[sh.head] : 0.0f;
@@ -2103,7 +2110,7 @@ inline void protLimitSample(ProtShared &sh, const ProtCfg &c, double attackStep,
     minGain = std::fmin(minGain, sh.gain);
     float safety = 0.0f;
     for (uint32_t l = 0; l < n; ++l) {
-        const float delayed = seq >= c.laHigh ? ring[l][static_cast<uint32_t>(outSeq % cap)] : 0.0f;
+        const float delayed = seq >= c.laHigh ? ring[l][static_cast<uint32_t>(outSeq) & mask] : 0.0f;
         hp[l][off] = static_cast<float>(delayed * sh.gain);
         safety = std::fmax(safety, std::fabs(hp[l][off]));
     }
@@ -2187,8 +2194,9 @@ void protGainPass(ProtShared &sh, const ProtCfg &c, double attackStep, uint32_t 
 // One lane of step (3): `x` (count samples) goes through the look-ahead delay ring and the gain; returns the lane's largest
 // output magnitude (a NaN never raises it, as in the per-sample maximum).
 inline float protDelayLane(const ProtCfg &c, uint32_t cap, uint64_t seq0, float *x, float *rg, uint32_t count, const double *gainA) N60_RT_NONBLOCKING {
-    uint32_t w = static_cast<uint32_t>(seq0 % cap);
-    uint32_t rd = seq0 >= c.laHigh ? static_cast<uint32_t>((seq0 - c.laHigh) % cap) : 0u;
+    const uint32_t mask = cap - 1u;  // cap is a power of two (protCapFor)
+    uint32_t w = static_cast<uint32_t>(seq0) & mask;
+    uint32_t rd = seq0 >= c.laHigh ? static_cast<uint32_t>(seq0 - c.laHigh) & mask : 0u;
     uint64_t seq = seq0;
     float laneMax = 0.0f;
     for (uint32_t s = 0; s < count; ++s, ++seq) {
