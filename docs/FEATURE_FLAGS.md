@@ -100,6 +100,7 @@ FC phase's per-epic PR (`docs/epics/FC.md`) unless stated.
 | `e20.multirate` | E20 | graduated, no reader (S7 and S8 skipped) | 13 Nov 2026 (ship) | FC (E20) |
 | `e21.core-designers` | E21 | dark; S5: room-response analysis and program spectrum read it | S14 | FC (E21) |
 | `e21.core-designers` | E21 | planned | none | FC (E21) |
+| `e33.page-enhancements` | E33 | dark; S1: Equalizer layout, range hint, moved-to-fit note and filter picker read it | S11 | FC (E33) |
 | `e8.routing-matrix`, `e8.lab-routed-ways`, `e10.mixed-phase-correction`, `e11.measurement-suite`, `e12.guided-setup`, `e13.byo-import`, `e25.outputs-and-speakers`, `e27.eq-safety` | E8, E10, E11, E12, E13, E25, E27 | removed (before this policy, at epic ship) | n/a | done |
 
 Owner decisions, 11 Nov 2026: (1) the four live-output E4 flags may graduate (Turn On available in release builds,
@@ -157,4 +158,5 @@ E22; the software part graduates.
 | `e7.rate-adapt` | E7 | On by default (graduated). A speaker impulse response that carries a rate, and a SOFA HRTF in the research workspace, are resampled to the output device rate (cached per rate, original kept) and the row says "Resampled from X kHz". Off (`-NotchSixtyFeatures -e7.rate-adapt`): a rate mismatch refuses as before. Read where the engine builds the Speaker IR program and in the two rows |
 | `e20.parallel-render` | E20 | On by default (graduated, E20 ship). Up to three extra realtime worker threads in the output device's Audio Workgroup render the non-uniform FIR lanes in parallel (needs `e9.long-fir`); Swift picks the worker count from the graph's estimated load. Read once at launch. `-NotchSixtyFeatures -e20.parallel-render` turns it off: no worker thread exists, the audio thread renders alone |
 | `e20.multirate` | E20 | On by default (graduated, E20 ship), no reader: the multirate low-frequency slices (S7, S8) were skipped on the measured entry rule, so the flag changes nothing. Removed in FC (E20) |
+| `e33.page-enhancements` | E33 | Off by default. Equalizer page: band list and two-column editor, dynamic range hint, moved-to-fit note, sectioned filter picker; later slices add Dynamics and Meters changes. Off: today's pages. Removed in FC (E33) |
 | `e21.core-designers` | E21 | Off by default. Room-measurement analysis (direct arrival, window, response grid) and the EQ program analyser's spectrum bands run in the portable core instead of Swift and vDSP; later E21 slices add the designers. Off: the Swift path. Removed in FC (E21) |

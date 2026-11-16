@@ -547,7 +547,7 @@ it adds no work to the audio callback.
 Plan: `docs/epics/E33.md`. Features from the 15 Nov 2026 review (defects are E32's; each slice names the E32 slice
 it follows). One flag `e33.page-enhancements`, graduated in S11. K-System scales excluded (owner rule); SPL and noise dose deferred to V2-11 (decision 8).
 
-- [ ] S1 `e33/eq-layout`: band list and two-column editor, Dynamic range hint, grouped filter picker, wording (low-risk)
+- [~] S1 `e33/eq-layout`: band list and two-column editor, Dynamic range hint, grouped filter picker, wording (low-risk); built dark behind `e33.page-enhancements` (off); wiring: S11
 - [ ] S2 `e33/eq-clipboard-import-access`: APO import and export on the page, band clipboard and lane copy, graph accessibility (low-risk)
 - [ ] S3 `e33/eq-preamp-subsonic`: one preamp model with each contribution shown, 5 Hz band floor (needs-owner)
 - [ ] S4 `e33/dynamics-page`: numbered chain, relative-grab sliders, shown field limits, dynamic EQ row, navigator accessibility, display polish (low-risk)
