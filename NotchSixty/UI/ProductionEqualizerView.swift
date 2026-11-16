@@ -34,6 +34,8 @@ struct ProductionEqualizerView: View {
     /// E33 S1: new layout, hint, picker and wording. Off keeps today's page.
     private let enhanced = FeatureFlags().isEnabled(.eqPageEnhancements)
     @State private var pageWidth = 1_000.0
+    /// E33 S2 (design 9): the one-line gesture hint, shown until dismissed or the user first works a handle.
+    @State private var gestureHintVisible = EQHandleAccessibility.shouldShowHint()
     /// The sanitiser moved this band to fit its range; cleared by the next edit of the band.
     @State private var movedNote: (id: UUID, text: String)?
 
@@ -203,6 +205,7 @@ struct ProductionEqualizerView: View {
         .padding(.horizontal, 14)
         .padding(.vertical, 8)
         .onGeometryChange(for: Double.self) { $0.size.width } action: { pageWidth = $0 }
+        .modifier(EQClipboardCommandsModifier(enabled: enhanced, commands: transferCommands))
     }
 
     /// E33 S1 (design 7): band list about one third of the width, editor beside it in two columns (static left,
@@ -343,7 +346,7 @@ struct ProductionEqualizerView: View {
                 previewBand: dragPreview,
                 sampleRate: sampleRate,
                 bypassed: configuration.bypassed,
-                onSelect: { selectedBandID = $0 },
+                onSelect: { selectedBandID = $0; dismissGestureHint() },
                 onPreview: { band in
                     // Option-press on a handle auditions that band until release.
                     if let audition, audition.active == nil,
@@ -370,12 +373,28 @@ struct ProductionEqualizerView: View {
                 onScaleQ: { id, scale in scaleQ(of: id, scale) },
                 onAddBand: { frequency, gain in addBand(atFrequency: frequency, gain: gain) },
                 onResetBand: { id in resetBand(id) },
+                enhancedAccessibility: enhanced,
+                onAdjustFrequency: { id, direction in adjustBandFrequency(id, direction) },
+                onAdjustGain: { id, action in adjustBandGain(id, action) },
                 rtaOverlay: liveOverlay.showsRTA ? liveOverlay.rtaCurve : nil,
                 programAnalyser: programAnalyser,
                 program: program,
                 programFor: { [responseCache, sampleRate] bands in responseCache.program(bands: bands, sampleRate: sampleRate) }
             )
             .frame(minHeight: 200, idealHeight: 280, maxHeight: 340)
+
+            if enhanced && gestureHintVisible && graphView == .magnitude {
+                HStack(spacing: 6) {
+                    Image(systemName: "hand.point.up.left")
+                    Text(EQHandleAccessibility.hintText)
+                    Button("Got it") { dismissGestureHint() }
+                        .buttonStyle(.link)
+                        .accessibilityIdentifier("eq.graph.hint.dismiss")
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .accessibilityIdentifier("eq.graph.hint")
+            }
 
             if let note = graphView == .magnitude ? nil : series?.note {
                 Label(note, systemImage: "info.circle")
@@ -509,6 +528,9 @@ struct ProductionEqualizerView: View {
                 .font(.caption.monospacedDigit())
                 .foregroundStyle(.secondary)
             Spacer(minLength: 4)
+            if enhanced {
+                EQTransferMenu(commands: transferCommands, canAddBands: bands.count < EQConfiguration.maximumBandCount)
+            }
             Button { selectAdjacentBand(offset: -1) } label: {
                 Image(systemName: "chevron.up")
             }
@@ -954,6 +976,26 @@ struct ProductionEqualizerView: View {
         recorded(coalesceKey: key.map { "\($0).\(band.id)" }) { try engine.updateEQBand(fitted(updated)) }
     }
 
+    /// E33 S2: Import, Export, copy, paste and "Copy lane to...". Each change is one undo step.
+    private var transferCommands: EQTransferCommands {
+        EQTransferCommands(
+            current: { engine.stereoEQConfiguration },
+            apply: { new in
+                recorded { try engine.replaceStereoEQConfiguration(new) }
+                if !bands.contains(where: { $0.id == selectedBandID }) { selectedBandID = bands.first?.id }
+            },
+            selectedBandID: { selectedBandID },
+            inputPreampDB: { engine.gainConfiguration.inputPreampDB },
+            reportError: { actionError = $0 }
+        )
+    }
+
+    private func dismissGestureHint() {
+        guard gestureHintVisible else { return }
+        gestureHintVisible = false
+        EQHandleAccessibility.markHintShown()
+    }
+
     private func addBand() {
         let band = EQBand(frequencyHz: suggestedFrequency(), q: 1.0)
         let before = engine.stereoEQConfiguration
@@ -1006,6 +1048,24 @@ struct ProductionEqualizerView: View {
             )
         }
         commitField(edited, key: "nudge.\(axis)") { _ in }
+    }
+
+    /// E33 S2: a VoiceOver frequency step on a handle (the arrow-key table), one undo step per action.
+    private func adjustBandFrequency(_ id: UUID, _ direction: EQNudge.Direction) {
+        guard let band = band(withID: id) else { return }
+        selectedBandID = id
+        let edited = EQHandleAccessibility.frequency(band, direction: direction, maximumFrequency: maximumFrequency)
+        guard edited != band else { return }
+        commitField(edited, key: "ax.frequency") { _ in }
+    }
+
+    /// E33 S2: a VoiceOver gain action on a handle.
+    private func adjustBandGain(_ id: UUID, _ action: EQHandleAccessibility.GainAction) {
+        guard let band = band(withID: id) else { return }
+        selectedBandID = id
+        let edited = EQHandleAccessibility.gain(band, action: action, maximumFrequency: maximumFrequency)
+        guard edited != band else { return }
+        commitField(edited, key: "ax.gain") { _ in }
     }
 
     /// Scroll or pinch over a handle. Does nothing for filters without a Q.
@@ -1136,6 +1196,10 @@ private struct ProductionEQResponseGraph: View {
     let onAddBand: (Double, Double) -> Void
     /// Double-click on a handle resets its gain and Q.
     let onResetBand: (UUID) -> Void
+    /// E33 S2: handle VoiceOver actions and the focus ring (flag-gated by the page).
+    let enhancedAccessibility: Bool
+    let onAdjustFrequency: (UUID, EQNudge.Direction) -> Void
+    let onAdjustGain: (UUID, EQHandleAccessibility.GainAction) -> Void
     /// E11 S10: live RTA of the measurement microphone, drawn behind the EQ curve.
     var rtaOverlay: RoomCorrectionFrequencyResponse?
     /// E27 S2b: program input and output spectrum, drawn first (behind everything).
@@ -1235,6 +1299,11 @@ private struct ProductionEQResponseGraph: View {
                                 .stroke(Color.orange, lineWidth: 1.5)
                                 .padding(-3.5)
                         }
+                        if enhancedAccessibility && isSelected && graphFocused {
+                            Circle()
+                                .stroke(Color.accentColor, lineWidth: 2)
+                                .padding(-6)
+                        }
                         Text("\(index + 1)")
                             .font(.system(size: index >= 99 ? 8 : 10, weight: .bold).monospacedDigit())
                             .foregroundStyle(isSelected ? Color.white : Color.primary)
@@ -1269,6 +1338,10 @@ private struct ProductionEQResponseGraph: View {
                     .accessibilityLabel(EQBandPanelModel.accessibilityLabel(number: index + 1, band: band))
                     .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
                     .accessibilityAction { onSelect(band.id) }
+                    .modifier(EQHandleAccessibilityActions(
+                        enabled: enhancedAccessibility, band: band,
+                        onAdjustFrequency: { onAdjustFrequency(band.id, $0) },
+                        onAdjustGain: { onAdjustGain(band.id, $0) }))
                     .accessibilityIdentifier("eq.graph.handle.\(index + 1)")
                     .position(point)
                 }
@@ -1573,7 +1646,7 @@ enum ProductionEQResponseMath {
     }
 }
 
-private extension EQFilterType {
+extension EQFilterType {
     var productionHasGainControl: Bool {
         switch self {
         case .peaking, .lowShelf, .highShelf, .tilt: return true

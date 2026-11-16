@@ -977,44 +977,17 @@ enum PresetInterchange {
     // MARK: REW
 
     private static func importREW(text: String, fileName: String, baseStereo: StereoEQConfiguration) throws -> PresetInterchangeImport {
-        var bands: [EQBand] = []
-        var warnings: [String] = []
+        // E33 S2: the one Equalizer APO codec reads the text (no second parser).
+        let parsed = EqualizerAPOCodec.parse(text)
+        var warnings = parsed.issues
         var preampDB: Double?
-        for line in text.split(whereSeparator: \.isNewline).map(String.init) {
-            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !trimmed.isEmpty, !trimmed.hasPrefix("#") else { continue }
-            let upper = trimmed.uppercased()
-            // Equalizer APO / AutoEQ "Preamp: -6.4 dB". AutoEQ relies on this
-            // negative gain to keep boosted filters from clipping.
-            if upper.hasPrefix("PREAMP") {
-                if let gain = regexNumber("^PREAMP\\s*:?\\s*([-+0-9.E]+)", in: upper) {
-                    let total = (preampDB ?? 0) + gain
-                    preampDB = clamp(total, to: DSPGainConfiguration.inputPreampRange)
-                    if abs(preampDB! - total) > 1.0e-9 {
-                        warnings.append("Preamp \(String(format: "%+.1f", total)) dB was limited to \(String(format: "%+.1f", preampDB!)) dB.")
-                    }
-                }
-                continue
+        if let preamp = parsed.preampDB {
+            preampDB = clamp(preamp, to: DSPGainConfiguration.inputPreampRange)
+            if abs(preampDB! - preamp) > 1.0e-9 {
+                warnings.append("Preamp \(String(format: "%+.1f", preamp)) dB was limited to \(String(format: "%+.1f", preampDB!)) dB.")
             }
-            if upper.contains(" NONE") || upper.hasSuffix("NONE") { continue }
-            guard let token = regexCapture("(?:ON|OFF)\\s+([A-Z]+)", in: upper, group: 1),
-                  let type = rewFilterType(token) else { continue }
-            guard let frequency = regexNumber("FC\\s+([-+0-9.E]+)", in: upper) else { continue }
-            let gain = regexNumber("GAIN\\s+([-+0-9.E]+)", in: upper) ?? 0
-            var q = regexNumber("\\bQ\\s+([-+0-9.E]+)", in: upper)
-            if q == nil, let bandwidth = regexNumber("BW(?:/60)?\\s+([-+0-9.E]+)", in: upper) {
-                q = qFromBandwidthOctaves(bandwidth)
-            }
-            let bypassed = upper.contains(" OFF ") || upper.contains(": OFF")
-            bands.append(EQBand(
-                enabled: !bypassed,
-                type: type,
-                frequencyHz: max(1, frequency),
-                gainDB: clamp(gain, to: StereoEQConfiguration.bandGainRange),
-                q: clamp(q ?? defaultQ, to: 0.1...20),
-                slope: .db12
-            ))
         }
+        let bands = parsed.bands
         guard !bands.isEmpty else { throw PresetInterchangeError.noUsableFilters }
         if bands.count > EQConfiguration.maximumBandCount { throw PresetInterchangeError.tooManyBands(bands.count) }
 
@@ -1034,25 +1007,14 @@ enum PresetInterchange {
     }
 
     static func exportREW(_ stereo: StereoEQConfiguration) throws -> PresetInterchangeExport {
-        let bands = stereo.editableBands
-        var lines = ["# Notch Sixty REW-compatible filter export", "# Channel lane: \(stereo.editChannel.displayName)"]
-        var warnings: [String] = []
-        var number = 1
-        for band in bands {
-            guard let token = rewToken(for: band.type) else {
-                warnings.append("\(band.type.displayName) band at \(Int(band.frequencyHz.rounded())) Hz is not representable in REW filter text and was omitted.")
-                continue
-            }
-            if band.slope != .db12 && band.type.supportsSlope {
-                warnings.append("REW generic text does not preserve \(band.slope.displayName) on \(band.type.displayName); filter \(number) exports its Q only.")
-            }
-            let state = band.enabled ? "ON" : "OFF"
-            lines.append(String(format: "Filter %d: %@ %@ Fc %.3f Hz Gain %+.3f dB Q %.5f", number, state, token, band.frequencyHz, band.gainDB, band.q))
-            number += 1
+        let written = EqualizerAPOCodec.write(
+            bands: stereo.editableBands,
+            header: ["Notch Sixty REW-compatible filter export", "Channel lane: \(stereo.editChannel.displayName)"])
+        guard stereo.editableBands.contains(where: { EqualizerAPOCodec.canWrite($0.type) }) else {
+            throw PresetInterchangeError.noUsableFilters
         }
-        guard number > 1 else { throw PresetInterchangeError.noUsableFilters }
-        guard let data = (lines.joined(separator: "\n") + "\n").data(using: .utf8) else { throw PresetInterchangeError.encodingFailed }
-        return PresetInterchangeExport(data: data, warnings: unique(warnings))
+        guard let data = written.text.data(using: .utf8) else { throw PresetInterchangeError.encodingFailed }
+        return PresetInterchangeExport(data: data, warnings: unique(written.issues))
     }
 
     // MARK: EasyEffects
@@ -1385,32 +1347,6 @@ enum PresetInterchange {
         return .db12
     }
 
-    private static func rewFilterType(_ token: String) -> EQFilterType? {
-        switch token.uppercased() {
-        case "PK", "PEQ", "PA", "PARAMETRIC": return .peaking
-        case "LS", "LOWSHELF": return .lowShelf
-        case "HS", "HIGHSHELF": return .highShelf
-        case "LP", "LOWPASS": return .lowPass
-        case "HP", "HIGHPASS": return .highPass
-        case "BP", "BANDPASS": return .bandPass
-        case "NOTCH": return .notch
-        default: return nil
-        }
-    }
-
-    private static func rewToken(for type: EQFilterType) -> String? {
-        switch type {
-        case .peaking: return "PK"
-        case .lowShelf: return "LS"
-        case .highShelf: return "HS"
-        case .lowPass: return "LP"
-        case .highPass: return "HP"
-        case .bandPass: return "BP"
-        case .notch: return "NOTCH"
-        case .allPass, .linkwitzTransform, .tilt, .fir: return nil
-        }
-    }
-
     private static func easyEffectsEqualizer(in root: [String: Any]) -> [String: Any]? {
         guard let output = root["output"] as? [String: Any] else { return nil }
         if let exact = output["equalizer#0"] as? [String: Any] { return exact }
@@ -1472,20 +1408,6 @@ enum PresetInterchange {
         let denominator = power - 1.0
         guard denominator > 0 else { return defaultQ }
         return sqrt(power) / denominator
-    }
-
-    private static func regexNumber(_ pattern: String, in text: String) -> Double? {
-        guard let capture = regexCapture(pattern, in: text, group: 1) else { return nil }
-        return Double(capture)
-    }
-
-    private static func regexCapture(_ pattern: String, in text: String, group: Int) -> String? {
-        guard let expression = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else { return nil }
-        let range = NSRange(text.startIndex..<text.endIndex, in: text)
-        guard let match = expression.firstMatch(in: text, range: range),
-              group < match.numberOfRanges,
-              let captureRange = Range(match.range(at: group), in: text) else { return nil }
-        return String(text[captureRange])
     }
 
     private static func normalize(_ value: String) -> String {
