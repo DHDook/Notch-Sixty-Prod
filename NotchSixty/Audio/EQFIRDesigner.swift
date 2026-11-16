@@ -12,6 +12,8 @@ enum EQFIRDesigner {
     typealias Result = (left: [Float], right: [Float]?, declaredLatencyFrames: UInt32, designInfo: N60LinearPhaseEQDesignInfo?)
 
     static func design(_ configuration: StereoEQConfiguration, sampleRate: Double) throws -> Result {
+        let signpost = AppSignposts.signposter.beginInterval("eqFIRDesign")
+        defer { AppSignposts.signposter.endInterval("eqFIRDesign", signpost) }
         let primaryChannel: EQEditChannel
         switch configuration.channelMode {
         case .linked: primaryChannel = .linked

@@ -1809,6 +1809,8 @@ final class CoreAudioTransportSession {
 
 
     func publishDSPGraph(_ original: N60DSPGraphSnapshot) throws {
+        let signpost = AppSignposts.signposter.beginInterval("publishDSPGraph")
+        defer { AppSignposts.signposter.endInterval("publishDSPGraph", signpost) }
         guard let bridge else { throw CoreAudioTransportError.dspGraphPublicationFailed }
         if !refreshUnifiedGraph(for: original), kernelHeadphoneStale {
             throw CoreAudioTransportError.dspGraphPublicationFailed

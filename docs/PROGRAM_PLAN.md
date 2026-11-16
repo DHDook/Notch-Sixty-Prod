@@ -129,7 +129,7 @@ stopping slice work (a benchmark link error, a Linux `test_fpenv` crash, an LLVM
 - [x] S8 `e1/repo-cleanup`: delete the `ci/validate_*.py` scripts nothing runs (55 exist, 4 are referenced) and the stale `PR40_SLICE_*_STATUS.md` files in the repository root; fix every Swift warning (first: `RoomCorrectionABXSheet.swift:38`) (warnings-as-errors moved to S7)
 - [x] S9 `e1/project-layout`: folder-synchronised Xcode groups so new files need no project edit; split `ci/run_harnesses.sh` into one script per epic (`ci/harnesses/<epic>.sh`)
 - [x] S10 `e1/info-plist-audio-capture-key` (G4, closed): the built app's Info.plist lacks `NSAudioCaptureUsageDescription` (build settings set it, `GENERATE_INFOPLIST_FILE=YES`, `NotchSixty/Info.plist` is unused); confirm on `main` and fix so the system-audio permission prompt shows the text
-- [ ] S11 `e1/app-performance-tests` (performance review, owner approved 15 Nov 2026); needs-owner if `macos-full.yml` changes: signposts in the app; timed tests for edit-to-publish, graph publish and launch time; an idle-energy note in `docs/PERFORMANCE.md`; bench rows for ANC combined with a full chain (R7 is offline only) and MIMO at 32 sources (R8 uses 8)
+- [x] S11 `e1/app-performance-tests` (performance review, owner approved 15 Nov 2026): `AppSignposts` around graph publish, EQ design, profile save and launch; timed `AppPerformanceTests` with budgets; idle-energy method in `docs/PERFORMANCE.md` (first reading is the E22 item below, E1 G7); bench rows R9 (MIMO 32 sources) and R10 (R1 chain plus ANC lane feed). `macos-full.yml` unchanged
 
 ### E2 macOS 26 support
 
@@ -599,6 +599,7 @@ Owner decision, 18 Oct 2026: there is no bench access for now, so every bench ch
 - [ ] Run E4 S11 (owner, 1 Nov 2026: moved here from the E4 execution order): repeat S8 on the unified E6 graph, then fill the placeholder reduction table in `docs/ANC_QUALIFICATION.md` §4.1 from the S31 reviewer-kit noise files
 - [ ] E4 S26a: ear-microphone check of the virtual-microphone design with a real head at the eight rates (E4 S26a wiring), including the adaptive worker holding the ear reduction as the noise drifts and the other-seat limit (G18)
 - [ ] Run the remaining bench checks at every rate from 44.1 to 384 kHz
+- [ ] E1 G7 idle energy: take the first reading of the idle-energy method in `docs/PERFORMANCE.md` (Energy Impact and wakeups per second of the running app with audio idle and a stopped engine, M-series Mac) and record it there
 - [ ] From the E20 G32 main-thread measurement (performance review, owner approved 15 Nov 2026): if it shows a cost, fold the separate main-actor polling loops (8 to 60 Hz) into `MeterReadbackHub`
 - [ ] E6 G19: listening for level riding on speech and music at the eight rates (LOUDNESS stage, E6 S12c)
 - [ ] E6 G43: binaural convolution cost per rate (16 channels, 8192 taps, 24 head orientations, 44.1 to 384 kHz) on the build machine (E6 S12g4)
