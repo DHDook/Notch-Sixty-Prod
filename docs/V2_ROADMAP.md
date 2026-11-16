@@ -41,6 +41,7 @@ The remaining epics (V2-9 to V2-13, V2-15, V2-16) are features that were deferre
 | V2-14 | Windows edition | Very large | E21, V2-5 | Yes: driver, installer, UI shell |
 | V2-15 | Community sharing | Medium | E18 iCloud sync | Yes: first network feature, moderation |
 | V2-16 | Verification with music | Small to medium | E11, E4 path tracking | No |
+| V2-17 | Speaker and room health check | Small | E11, V2-16 | No |
 
 Sizes are rough: small is one or two slices, medium three to six, large more than six.
 
@@ -49,7 +50,7 @@ Sizes are rough: small is one or two slices, medium three to six, large more tha
 Three waves. The order inside a wave is by value for effort; the owner can reorder freely because
 only the listed dependencies are hard.
 
-1. **First update (no policy change, builds on v1 directly):** V2-9, V2-11, V2-16, V2-2, V2-10.
+1. **First update (no policy change, builds on v1 directly):** V2-9, V2-11, V2-16, V2-17, V2-2, V2-10.
 2. **Reach (new surfaces for the same engine):** V2-4, V2-1, V2-3, V2-12.
 3. **Platforms and licences:** V2-5, V2-7, V2-8, V2-6, V2-13, V2-14, V2-15.
 
@@ -169,6 +170,12 @@ which lists the first items and says it splits into three or four slices.
 - [ ] During normal listening, compare what the app plays with what a room microphone hears and estimate the response
 - [ ] Prompt when the response has moved away from the measured one, and offer to re-measure
 - [ ] The microphone is used only while the user has switched this on; state that clearly
+
+### V2-17 Speaker and room health check (strategic review, owner approved 15 Nov 2026)
+
+- [ ] Compare a new measurement (or the V2-16 estimate) with the stored one per speaker and flag a likely cause: a failing or disconnected driver, a moved speaker or seat, a changed room
+- [ ] Keep a dated history per speaker so slow change is visible
+- [ ] Offer the matching action: re-measure, re-run correction, or check the speaker
 
 ## Conditional and undecided items
 
