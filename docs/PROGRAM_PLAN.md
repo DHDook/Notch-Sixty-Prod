@@ -109,6 +109,7 @@ reviewers compare with Dirac and REW), then engine depth, then breadth.
     - E12 S19–S22 Active Acoustics page run after E12 S15–S17, in written order (owner approved the slices 16 Nov 2026; this position is proposed, the owner may move it; `docs/epics/E12.md`)
     - E12 S23–S25 Settings window run after E12 S19–S22; S23 lands before E15, E16 or E18 add a setting where the order allows (owner approved the slices 17 Nov 2026; this position is proposed, the owner may move it; `docs/epics/E12.md`)
     - E12 S26 `e12/compare-service` runs before E12 S13; E12 S27–S28 run after E12 S13 and E33 S24 (owner approved the slices 17 Nov 2026; this position is proposed, the owner may move it; `docs/epics/E12.md`)
+    - E12 S29–S31 guided setup run after E12 S10, S11 and E34 S1; S30 after E12 S18; S31 last (owner approved the slices 17 Nov 2026; this position is proposed, the owner may move it; `docs/epics/E12.md`)
     - E34 S2–S7 run after the page slices above (E12 S12–S25, E13 S9–S12) and E33 S11, in written order, before item 14 (owner, 17 Nov 2026; `docs/epics/E34.md`)
 12. E23 Legacy engine removal
 13. E29 Shared room position model (owner, 9 Nov 2026: unparked, in v1; plan `docs/epics/E29.md`; flag `e29.room-model`, graduated in S9, removed in FC)
@@ -376,6 +377,9 @@ minimum-phase in blind ABX at three or more seats, and measurement results match
 - [ ] S26 `e12/compare-service` (owner, 17 Nov 2026; needs-owner; owns G45, G46, G55; before S13): one comparison service for any two configurations, computed level matching, fixed-time fade switch; the room-correction blind test moves onto it; behind `e12.blind-listening`
 - [ ] S27 `e12/blind-live` (low-risk; owns G43, G46, G47, G54): Blind Listening compares current settings, processing off and saved profiles live on the user's music; ABX and a blind preference test; keyboard shortcuts; "needed correct" guidance
 - [ ] S28 `e12/blind-files-history` (low-risk; owns G44, G48–G53): two-files mode on the selected output with loudness matching, loop and position keeping; level slider; history in the backup; plain wording; graduates `e12.blind-listening`
+- [ ] S29 `e12/setup-shell` (owner, 17 Nov 2026; low-risk; owns G56–G58, G60, G63–G65, G68): guided setup split into per-step files, step list, close and continue later, visible refusals, calibration import in the step, summary page, menu command; behind `e12.setup-flow` (added in S10)
+- [ ] S30 `e12/setup-graphs-guidance` (low-risk; owns G59, G61, G66): graphs on Measure, Bass, Correction and Verify, placement diagrams, plain terms
+- [ ] S31 `e12/setup-auto-level-rerun` (needs-owner: test-noise level; owns G62, G67): automatic level setting with the same ceiling, second-run shortcuts; graduates `e12.setup-flow`
 - Surface rule (owner, 16 Nov 2026): no control appears on both the menu bar and the Dashboard; master volume is menu bar only (`docs/epics/E12.md`)
 
 ### E24 Room correction completion (owner, 1 Nov 2026)
@@ -683,6 +687,7 @@ Owner decision, 18 Oct 2026: there is no bench access for now, so every bench ch
 - [ ] E12 S16 and S18 bench (owner, 16 Nov 2026): a 2.1 profile migrated from the older crossover cards sounds the same and one trim is nudged by ear (S16); measure once on the reference room, then align and correct from that one measurement (S18)
 - [ ] E12 Settings bench (S24, S25; owner, 17 Nov 2026): log out and in with resume on and the DAC connected, then with it unplugged; deny and re-grant each permission and watch the Privacy tab; erase all data and restore the automatic backup on the owner's Mac
 - [ ] E12 Blind Listening bench (S26–S28; owner, 17 Nov 2026): a live blind test of correction on against off and of two presets by ear, checking that the switch gives no audible clue and the matched levels sound equal; a preference test; a two-files test on the selected DAC with a looped passage; history after relaunch
+- [ ] E12 guided setup bench (S29–S31; owner, 17 Nov 2026): automatic level setting reaches the target on real speakers and a real microphone without overshoot and stops on a muted amplifier; close and continue later across a relaunch; the graphs match what is heard; each second-run shortcut
 - [ ] E12 S10 usability (setup and competitor review, owner approved 15 Nov 2026): someone who has never seen the app reaches a verified single-seat result through the quick path in ten minutes or less, unaided; and E12 S11: the verdict on a deliberately bad measurement (noisy room, moved microphone) and on a built-in microphone with no calibration file
 - [ ] Failure review (failure and rate review, owner approved 15 Nov 2026): force-quit with software volume at -30 dB on a real DAC (E30), a forced overload showing the step-down order and message (E23 S7), and an exclusive-mode player taking the DAC (E23 S8)
 - [ ] E1 G7 idle energy: take the first reading of the idle-energy method in `docs/PERFORMANCE.md` (Energy Impact and wakeups per second of the running app with audio idle and a stopped engine, M-series Mac) and record it there
