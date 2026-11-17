@@ -8,7 +8,7 @@
 // J. W. Tukey, The Measurement of Power Spectra (1958).
 
 #include "n60/fxlms.hpp"
-#include "optional_try.hpp"
+#include "../optional_try.hpp"
 
 #include <algorithm>
 #include <cmath>
