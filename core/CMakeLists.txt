@@ -20,7 +20,9 @@ target_include_directories(n60core PRIVATE src)
 # Windows, where /W4 is -Wall -Wextra, /WX is -Werror, /EHs-c- turns exceptions off and /GR- turns RTTI off.
 if(MSVC)
   target_compile_options(n60core PRIVATE /W4 /WX /EHs-c- /GR- -Wno-unknown-warning-option -Werror=function-effects)
-  target_compile_definitions(n60core PRIVATE _CRT_SECURE_NO_WARNINGS NOMINMAX)
+  target_compile_definitions(n60core PRIVATE _CRT_SECURE_NO_WARNINGS NOMINMAX _USE_MATH_DEFINES)
+  # M_PI and friends come from <math.h> only with _USE_MATH_DEFINES on MSVC; the tests use them too.
+  add_compile_definitions(_USE_MATH_DEFINES)
   set(N60_M "")
 else()
   target_compile_options(n60core PRIVATE -Wall -Wextra -Werror -Wno-unknown-warning-option -Werror=function-effects -fno-exceptions -fno-rtti)
@@ -37,7 +39,7 @@ if(N60_X86_FMA AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
 endif()
 # E21 S1: the tests' scalar references must round like the engine. The engine is built with FMA (above); a reference compiled
 # without it differs in the last bit on x86 (test_stereo_bass "bit for bit"), so every test target gets the same flags.
-if(N60_X86_FMA AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64" AND NOT MSVC)
+if(N60_X86_FMA AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
   add_compile_options(-mfma -mavx2)
 endif()
 
@@ -400,11 +402,14 @@ target_link_libraries(n60core_mimo_safety_test PRIVATE n60core)
 add_test(NAME n60core_mimo_safety COMMAND n60core_mimo_safety_test)
 
 # E21 S0: the E4 ANC harnesses that exercise the moved sources (they live in ci/ with their shared plant helpers).
+# The harness uses C99 _Complex (double complex), which MSVC-style C does not provide: not built on clang-cl (E21 gap G3).
+if(NOT MSVC)
 add_executable(n60core_e4_fxlms_test ../ci/harness_e4_fxlms.c)
 set_target_properties(n60core_e4_fxlms_test PROPERTIES C_STANDARD 11 LINKER_LANGUAGE CXX)
 target_include_directories(n60core_e4_fxlms_test PRIVATE ../ci)
 target_link_libraries(n60core_e4_fxlms_test PRIVATE n60core ${N60_M})
 add_test(NAME n60core_e4_fxlms COMMAND n60core_e4_fxlms_test)
+endif()
 
 add_executable(n60core_e4_remote_tonal_test ../ci/harness_e4_remote_tonal.cpp)
 target_include_directories(n60core_e4_remote_tonal_test PRIVATE ../ci)

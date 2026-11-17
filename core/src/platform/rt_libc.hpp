@@ -13,6 +13,10 @@
 
 #if defined(__clang__) && defined(__has_cpp_attribute)
 #if __has_cpp_attribute(clang::nonblocking)
+// On Windows the UCRT headers declare these dllimport; the redeclaration only adds the effect attribute, so the
+// inconsistency warning is silenced for this block alone.
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Winconsistent-dllimport"
 extern "C" {
 double sin(double) [[clang::nonblocking]];
 double cos(double) [[clang::nonblocking]];
@@ -33,5 +37,6 @@ float powf(float, float) [[clang::nonblocking]];
 float sqrtf(float) [[clang::nonblocking]];
 float tanhf(float) [[clang::nonblocking]];
 }
+#pragma clang diagnostic pop
 #endif
 #endif

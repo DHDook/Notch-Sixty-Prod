@@ -1,6 +1,7 @@
 // E4 S18a: remote adaptive tonal canceller. See N60RemoteTonal.h for the design and maths.
 // Worker side only: one thread for every call, no realtime use.
 #include "n60/remote_tonal.h"
+#include "../optional_try.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -530,14 +531,14 @@ N60RemoteTonal *N60RemoteTonalCreate(const N60RemoteTonalConfig *config) {
     if (!N60RemoteTonalConfigIsValid(config)) return nullptr;
     N60RemoteTonal *c = new (std::nothrow) N60RemoteTonal();
     if (c == nullptr) return nullptr;
-    try {
+    N60_TRY {
         c->cfg = *config;
         c->tones = config->toneCount;
         c->ticksPerSecond = config->hostTicksPerSecond;
         c->micRate = config->micSampleRate;
         c->history.resize(N60_REMOTE_TONAL_HISTORY);
         c->scratch.resize(static_cast<size_t>(2.0 * config->micSampleRate) + 16);
-    } catch (...) {
+    } N60_CATCH_ALL {
         delete c;
         return nullptr;
     }
