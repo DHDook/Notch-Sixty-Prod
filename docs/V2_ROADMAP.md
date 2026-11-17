@@ -43,6 +43,9 @@ The remaining epics (V2-9 to V2-13, V2-15, V2-16) are features that were deferre
 | V2-16 | Verification with music | Small to medium | E11, E4 path tracking | No |
 | V2-17 | Speaker and room health check | Small | E11, V2-16 | No |
 | V2-18 | Selective restore from a backup | Small | E12 S25 | No |
+| V2-19 | Rates above 384 kHz | Small to medium | E7 | Yes: changes the `AGENTS.md` section 8 rate list |
+| V2-20 | Second zone | Medium to large | E8 | Yes: changes the one-selected-output rule in `AGENTS.md` section 3 |
+| V2-21 | Speaker remapping and reflection control | Large | post-v1 multichannel playback, E19 | Yes: needs a multi-capsule microphone |
 
 Sizes are rough: small is one or two slices, medium three to six, large more than six.
 
@@ -218,12 +221,31 @@ which lists the first items and says it splits into three or four slices.
 - [ ] A restored system whose hardware is not on this Mac asks for mapping, as full restore does today; nothing is bound silently
 - [ ] Works while audio runs when the restored item is not the active one
 
+### V2-19 Rates above 384 kHz (owner, 17 Nov 2026; from the whole-app review)
+
+- [ ] Support devices at 705.6 and 768 kHz: two more standard rates in every DSP test and reference-lab case, and a CPU budget at twice today's top rate
+- v1 stops at 384 kHz and says so in the rate picker (E30)
+
+### V2-20 Second zone (owner, 17 Nov 2026; from the whole-app review)
+
+- [ ] Play to a second, separately processed output at the same time (another room, or headphones beside the speakers), each with its own profile and volume
+- [ ] Clock handling between the two devices is an explicit product decision under `AGENTS.md` section 3
+- Not this: one speaker system spread over two DACs. v1 already supports that through an aggregate output (E8); the clock warning is E8 S16
+
+### V2-21 Speaker remapping and reflection control (owner, 17 Nov 2026; from the whole-app review)
+
+- [ ] Find each speaker's true direction with a multi-capsule microphone and re-render a multichannel layout to its intended positions
+- [ ] From measurements first, decide whether early reflections above the bass range can be treated beyond what E10 and E19 already do
+- Needs more than two speakers, so it follows post-v1 multichannel playback
+
 ## Conditional and undecided items
 
 - E20 multirate (decimated low-frequency regions) leaves v1 if the E20 S8 re-measurement shows no
   need (owner, 11 Nov 2026). It gets an epic here only if a later measurement shows a need.
 - Cut candidates C1, C2, C4, C5, C7 and C8 from the review are undecided; they stay in v1 until the
   owner decides. The signal-path and history view is in v1 as E31.
+- Not planned (owner, 17 Nov 2026): DSD output (system audio from macOS is PCM, and every correction stage needs PCM), and
+  MIDI or OSC control (the E16 local API covers integrations).
 
 ## How to start
 
