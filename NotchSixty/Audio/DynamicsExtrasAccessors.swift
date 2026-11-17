@@ -159,7 +159,7 @@ struct DynamicsGraphExtras: Equatable {
         guard flagOn else { return nil }
         return DynamicsGraphExtras(
             compressor: dynamics.compressor.coreExtras(sampleRate: sampleRate),
-            expander: dynamics.expander.coreExtras(sampleRate: sampleRate, lookahead: FeatureFlags.isEnabledProcessWide(.eqPageEnhancements)),
+            expander: dynamics.expander.coreExtras(sampleRate: sampleRate, lookahead: FeatureFlags.isEnabledProcessWide(.eqPageEnhancements), swapTiming: FeatureFlags.isEnabledProcessWide(.dynamicsSound)),
             multiband: dynamics.multibandCompressor.translatorBlock(sampleRate: sampleRate, bands: FeatureFlags.isEnabledProcessWide(.eqPageEnhancements)))
     }
 }

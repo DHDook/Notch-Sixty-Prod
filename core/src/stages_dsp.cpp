@@ -163,10 +163,11 @@ constexpr Range kComp[16] = {{-96, 0, false}, {1, 100, false}, {0, 24, false}, {
                              {-24, 24, false}, {0, 1, true},   {0, 1, true},   {0, 300, false},      {0, 1, true},
                              {0, 100, false},  {0, 100, false}, {0, 1, true},   {5, 200, false},
                              {0, static_cast<float>(kMaxCompLookahead), true}, {0, 2, true}};
-constexpr Range kExp[14] = {{-120, 0, false}, {1, 20, false}, {-96, 0, false}, {0.05f, 1000, false}, {1, 5000, false},
+constexpr Range kExp[15] = {{-120, 0, false}, {1, 20, false}, {-96, 0, false}, {0.05f, 1000, false}, {1, 5000, false},
                             {0, 1, true},     {0, 500, false}, {0, 24, false},  {0, 1, true},         {5, 200, false},
                             {0, 300, false},  {0, 100, false}, {0, 2, true},
-                            {0, static_cast<float>(kMaxCompLookahead), true}};  // ABI v41 (E33 S5a): [13] lookahead frames
+                            {0, static_cast<float>(kMaxCompLookahead), true},  // ABI v41 (E33 S5a): [13] lookahead frames
+                            {0, 1, true}};                                       // ABI v43 (E32 S5): [14] timing swap
 constexpr Range kBand[N60_DYN_EQ_BAND_PARAMS] = {
     {0, 5, true},       {20, 20000, false}, {0.4f, 8, false}, {-18, 6, false}, {-60, 0, false},
     {1, 10, false},     {-24, 0, false},    {1, 100, false},  {10, 1000, false}, {0, 2, true},
@@ -183,7 +184,7 @@ uint32_t bandCountOf(uint32_t paramCount) { return paramCount >= 1 ? (paramCount
 bool paramOk(uint32_t kind, uint32_t idx, float v, double rate) {
     switch (kind) {
         case N60_STAGE_COMPRESSOR: return idx < 16 && inRange(kComp[idx], v);
-        case N60_STAGE_EXPANDER: return idx < 14 && inRange(kExp[idx], v);
+        case N60_STAGE_EXPANDER: return idx < 15 && inRange(kExp[idx], v);
         case N60_STAGE_DYN_EQ: {
             if (idx == 0) return v == 0.0f || v == 1.0f;
             const uint32_t f = (idx - 1) % N60_DYN_EQ_BAND_PARAMS;
@@ -202,7 +203,7 @@ bool paramOk(uint32_t kind, uint32_t idx, float v, double rate) {
 bool paramLive(uint32_t kind, uint32_t idx) {
     switch (kind) {
         case N60_STAGE_COMPRESSOR: return idx <= 8 || (idx >= 10 && idx <= 13) || idx == 15;
-        case N60_STAGE_EXPANDER: return idx <= 4 || (idx >= 6 && idx <= 12);  // [13] lookahead sizes the ring at build
+        case N60_STAGE_EXPANDER: return idx <= 4 || (idx >= 6 && idx <= 12) || idx == 14;  // [13] lookahead sizes the ring at build
         case N60_STAGE_DYN_EQ: {
             if (idx == 0) return false;
             const uint32_t f = (idx - 1) % N60_DYN_EQ_BAND_PARAMS;
@@ -224,6 +225,7 @@ struct CompLane {
     std::atomic<uint32_t> grNowBits;  // reduction at the end of the last block
     double meanSq;                    // ABI v34: RMS detector mean square of this lane's sidechain (double since E28 S7d: a 200 ms window at 384 kHz)
     uint32_t ringPos;                 // ABI v34: lookahead ring write position (the ring follows the struct)
+    double redDB;                     // E32 S5 (G8): the make-up-free reduction (dB, >= 0), smoothed with the gain's own pole, so a make-up edit never moves it
 };
 
 struct CompShared {
@@ -260,9 +262,9 @@ bool expExtended(const StageRec &r) { return r.paramCount >= 13; }
 // Publishes the per-group gain reduction of one block to every lane of the group (control-thread readback).
 // The caller has already flushed denormals in the gain; st[g * per] holds the group's gain.
 template <typename Lane>
-void publishReduction(Lane *const *st, uint32_t per, uint32_t groups, const double *grMax, double makeup = 0.0) {
+void publishReduction(Lane *const *st, uint32_t per, uint32_t groups, const double *grMax, double makeup = 0.0, const double *nowRed = nullptr) {
     for (uint32_t g = 0; g < groups; ++g) {
-        const float now = static_cast<float>(std::max(0.0, makeup - st[g * per]->gainDB));  // E32 S4 (R8): reduction without make-up
+        const float now = static_cast<float>(std::max(0.0, nowRed != nullptr ? nowRed[g] : makeup - st[g * per]->gainDB));  // E32 S4/S5: reduction without make-up
         const float peak = static_cast<float>(std::max(0.0, grMax[g]));
         for (uint32_t k = 0; k < per; ++k) {
             Lane &ln = *st[g * per + k];
@@ -416,7 +418,9 @@ void runCompressorX(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t fr
                     cf = rel;
                 }
                 gs.gainDB = target + cf * (gs.gainDB - target);
-                grMax[g] = std::max(grMax[g], double(makeup) - gs.gainDB);  // E32 S4 (R8): reduction without make-up
+                const double wantRed = double(makeup) - double(target);  // E32 S5 (G8): the same recursion on the make-up-free target
+                gs.redDB = wantRed + cf * (gs.redDB - wantRed);
+                grMax[g] = std::max(grMax[g], gs.redDB);
                 gainA[l][c] = db2lin(gs.gainDB);
                 // Listen outputs never carry make-up: the delta is what the gain (without make-up) removed.
                 if (listening) gainNoMkA[l][c] = db2lin(gs.gainDB - makeup);
@@ -463,7 +467,8 @@ void runCompressorX(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t fr
         heal(st[l]->z);
         heal(st[l]->gainDB);
         heal(st[l]->meanSq);
-        nowDb[l / per] = std::max(nowDb[l / per], double(makeup) - st[l]->gainDB);  // E32 S4 (R8)
+        heal(st[l]->redDB);
+        nowDb[l / per] = std::max(nowDb[l / per], st[l]->redDB);  // E32 S4 (R8), S5 (G8)
     }
     // Every lane of a group reads the group's deepest reduction, as the shared gain did.
     const double *const nowPtr = nowDb;
@@ -534,7 +539,9 @@ void runCompressor(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t fra
                     cf = rel;
                 }
                 gs.gainDB = target + cf * (gs.gainDB - target);
-                gmax = std::max(gmax, double(makeup) - gs.gainDB);  // E32 S4 (R8)
+                const double wantRed = double(makeup) - double(target);  // E32 S5 (G8)
+                gs.redDB = wantRed + cf * (gs.redDB - wantRed);
+                gmax = std::max(gmax, gs.redDB);
                 gainA[c] = db2lin(gs.gainDB);
             }
             grMax[g] = gmax;
@@ -566,7 +573,9 @@ void runCompressor(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t fra
                 c = rel;
             }
             gs.gainDB = target + c * (gs.gainDB - target);
-            grMax[g] = std::max(grMax[g], double(makeup) - gs.gainDB);  // E32 S4 (R8)
+            const double wantRed = double(makeup) - double(target);  // E32 S5 (G8)
+            gs.redDB = wantRed + c * (gs.redDB - wantRed);
+            grMax[g] = std::max(grMax[g], gs.redDB);
             const float gain = db2lin(gs.gainDB);
             for (uint32_t k = 0; k < per; ++k) lp[g * per + k][i] *= gain;
         }
@@ -575,8 +584,11 @@ void runCompressor(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t fra
     for (uint32_t l = 0; l < n; ++l) {
         heal(st[l]->z);
         heal(st[l]->gainDB);
+        heal(st[l]->redDB);
     }
-    publishReduction(st, per, groups, grMax, makeup);
+    double nowRed[kMaxLanes];
+    for (uint32_t g = 0; g < groups; ++g) nowRed[g] = st[g * per]->redDB;
+    publishReduction(st, per, groups, grMax, makeup, nowRed);
 }
 
 // Expander gain computer (ABI v35): below the threshold the gain falls by (ratio - 1) dB per dB, with a quadratic soft knee
@@ -608,7 +620,9 @@ void runExpanderX(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t fram
     const uint32_t holdFrames = static_cast<uint32_t>(std::lround(static_cast<double>(p[6]) * rate / 1000.0));
     const float linkT = p[11] * 0.01f;
     const float sideT = p[12] == 1.0f ? 1.0f : 0.0f, deltaT = p[12] == 2.0f ? 1.0f : 0.0f;
-    const double atk = poleD(rate, p[3]), rel = poleD(rate, p[4]);
+    // ABI v43 (E32 S5): with the swap, Attack opens the gain (the gate convention) and Release closes it.
+    const bool swapTiming = r.paramCount >= 15 && p[14] >= 0.5f;
+    const double closeC = poleD(rate, swapTiming ? p[4] : p[3]), openC = poleD(rate, swapTiming ? p[3] : p[4]);
     const float rampC = pole(rate, 5.0f);
     const double rmsC = poleD(rate, p[9]);
     const uint32_t ringLen = r.paramCount >= 14 ? static_cast<uint32_t>(p[13]) : 0;
@@ -679,7 +693,7 @@ void runExpanderX(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t fram
                     --gs.holdCnt;
                     target = 0.0f;
                 }
-                const double cf = target < gs.gainDB ? atk : rel;
+                const double cf = target < gs.gainDB ? closeC : openC;
                 gs.gainDB = target + cf * (gs.gainDB - target);
                 grMax[g] = std::max(grMax[g], -gs.gainDB);
                 gainA[l][c] = db2lin(gs.gainDB);
@@ -1591,7 +1605,7 @@ n60_status validateDspStage(const n60_stage_desc &s, double rate, uint32_t outCh
             expected = s.paramCount;
             break;
         case N60_STAGE_EXPANDER:
-            if (s.paramCount != 6 && s.paramCount != 13 && s.paramCount != 14) return N60_STATUS_BAD_ARGUMENT;
+            if (s.paramCount != 6 && s.paramCount != 13 && s.paramCount != 14 && s.paramCount != 15) return N60_STATUS_BAD_ARGUMENT;
             expected = s.paramCount;
             break;
         case N60_STAGE_DENOISER: expected = 9; break;
@@ -1623,11 +1637,11 @@ void dspSizes(const n60_stage_desc &s, uint32_t firScheme, size_t &perLane, size
     perLane = shared = 0;
     switch (s.kind) {
         case N60_STAGE_COMPRESSOR:
-            perLane = up(sizeof(CompLane) + (s.paramCount >= 15 ? size_t(s.params[14]) * sizeof(float) * (s.paramCount >= 16 ? 2 : 1) : 0));
+            perLane = up(up(sizeof(CompLane)) + (s.paramCount >= 15 ? size_t(s.params[14]) * sizeof(float) * (s.paramCount >= 16 ? 2 : 1) : 0));
             shared = up(sizeof(CompShared));
             break;
         case N60_STAGE_EXPANDER:
-            perLane = up(sizeof(ExpLane) + (s.paramCount >= 14 ? size_t(s.params[13]) * sizeof(float) * 2 : 0));
+            perLane = up(up(sizeof(ExpLane)) + (s.paramCount >= 14 ? size_t(s.params[13]) * sizeof(float) * 2 : 0));
             if (s.paramCount >= 13) shared = up(sizeof(ExpShared));
             break;
         case N60_STAGE_DYN_EQ: {

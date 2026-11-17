@@ -145,6 +145,8 @@ constexpr uint32_t kAmbMaxSec = 3 + kAmbMaxTrailer;
 constexpr double kAmbMinDb = -8.0, kAmbMaxDb = 0.0;    // trailer sections cut only
 constexpr double kAmbMinQ = 0.3, kAmbMaxQ = 20.0;
 constexpr uint32_t kProtParamsV12 = 18;
+constexpr uint32_t kProtWordParams7 = 8, kProtWordParams18 = 19;  // ABI v43 (E32 S5): the sound-fixes word is the last value
+constexpr uint32_t kProtCapAttack = 1u, kProtRateFactor = 2u;
 constexpr uint32_t kGuardParams = 12 + N60_ANC_GUARD_BANDS;
 constexpr uint32_t kHpRing = 512;
 
@@ -219,7 +221,8 @@ uint32_t expectedParamCount(uint32_t kind, const float *p, uint32_t have) {
                        ? kHpFixed + 4u * (static_cast<uint32_t>(p[9]) + static_cast<uint32_t>(p[10]))
                        : 0u;
         case N60_STAGE_PAUSE_GATE: return 5;
-        case N60_STAGE_PROTECTION: return have == 7 ? 7u : (have == kProtParamsV12 ? kProtParamsV12 : 0u);
+        case N60_STAGE_PROTECTION:
+            return have == 7 || have == kProtWordParams7 || have == kProtParamsV12 || have == kProtWordParams18 ? have : 0u;
         case N60_STAGE_STEREO_CROSSOVER: return have == 8 || have == 12 ? have : 0u;  // ABI v19: 8, or 12 with a filter-spec trailer
         case N60_STAGE_MUTE: return 1;
         case N60_STAGE_DELTA_CAPTURE:
@@ -257,7 +260,10 @@ uint32_t osLatency(uint32_t factor) { return factor == 2 ? 32u : (factor == 4 ? 
 
 inline float dbToLin(float db) { return std::pow(10.0f, db / 20.0f); }
 
-// n is the stage's parameter count: 7 (limiter only) or 18 (ABI v12).
+// ABI v43: the true-peak factor by rate: the smallest of 1, 2, 4 with rate x factor at least 176.4 kHz.
+uint32_t tpFactorForRate(double rate) { return rate >= 176399.0 ? 1u : (rate * 2.0 >= 176399.0 ? 2u : 4u); }
+
+// n is the stage's parameter count: 7 (limiter only), 18 (ABI v12), or either plus the sound-fixes word (ABI v43: 8, 19).
 ProtCfg protCfg(const float *p, double rate, uint32_t n) {
     ProtCfg c{};
     c.limiter = p[0] != 0.0f;
@@ -265,12 +271,17 @@ ProtCfg protCfg(const float *p, double rate, uint32_t n) {
     c.clipper = n >= kProtParamsV12 && p[7] != 0.0f;
     // The user's oversampling factor applies whenever it is above 1, as in the kernel: with the limiter and the clipper
     // both off the stage is a pure half-band round trip (E6 S12f, ABI v27), and a factor of 1 with both off is a bypass.
-    c.factor = (c.limiter && tp) ? 4u : static_cast<uint32_t>(p[6]);
+    const bool hasWord = n == kProtWordParams7 || n == kProtWordParams18;
+    const uint32_t word = hasWord ? static_cast<uint32_t>(p[n - 1u]) : 0u;
+    c.factor = (c.limiter && tp) ? ((word & kProtRateFactor) != 0u ? tpFactorForRate(rate) : 4u) : static_cast<uint32_t>(p[6]);
     const double highRate = rate * static_cast<double>(c.factor);
     c.ceilLin = std::pow(10.0f, p[1] / 20.0f);
     c.laHigh = c.limiter ? n60::framesFor(static_cast<double>(p[4]) * 0.001, highRate) : 0u;
     c.atkHigh = c.limiter ? static_cast<uint32_t>(std::fmax(1.0, std::ceil(static_cast<double>(p[2]) * 0.001 * highRate))) : 1u;
     c.relCoef = c.limiter ? std::exp(-1.0 / std::fmax(1.0, static_cast<double>(p[3]) * 0.001 * highRate)) : 0.0;
+    // ABI v43 (flag e32.dynamics-sound): the attack ramp cannot be longer than the look-ahead, or the gain is still moving when
+    // the peak arrives and the safety clamp does the limiting. Zero look-ahead is an instant attack.
+    if (c.limiter && (word & kProtCapAttack) != 0u) c.atkHigh = std::min(c.atkHigh, std::max(1u, c.laHigh));
     const uint32_t laFrames = c.laHigh == 0 ? 0u : (c.laHigh + c.factor - 1u) / c.factor;
     c.latency = osLatency(c.factor) + laFrames;
     if (c.clipper) {
@@ -451,7 +462,7 @@ struct ProtShared {
     double riderSustained, riderAtten;       // ABI v12: sustained limiter reduction and rider attenuation (dB)
     float seenCeil, seenAtk, seenRel, pad2;  // protCfg inputs the cached cfg was derived from
     std::atomic<uint32_t> guardActive;       // ABI v8: 1 when the limiter runs with oversampling
-    uint32_t pad3;
+    std::atomic<uint32_t> clamps;            // ABI v43: safety-clamp events since the last read (relaxed; read and reset by the control thread)
     ProtCfg cfg;                              // cached: pow/exp are not redone every block
     // followed by float val[cap]; uint64_t idx[cap]
 };
@@ -567,7 +578,7 @@ bool isSystemKind(uint32_t kind) N60_RT_NONBLOCKING {
 
 namespace {
 
-bool paramOk(uint32_t kind, uint32_t i, float v, const float *p, double rate, uint32_t outCh) {
+bool paramOk(uint32_t kind, uint32_t i, float v, const float *p, double rate, uint32_t outCh, uint32_t n) {
     switch (kind) {
         case N60_STAGE_BASS_MGMT:
             switch (i) {
@@ -629,6 +640,8 @@ bool paramOk(uint32_t kind, uint32_t i, float v, const float *p, double rate, ui
                 case 4: return inR(v, 0.0, 20.0);
                 case 6: return v == 1.0f || v == 2.0f || v == 4.0f;
                 case 7:
+                    if (n == kProtWordParams7) return isInt(v) && v >= 0.0f && v <= 3.0f;
+                    return v == 0.0f || v == 1.0f;
                 case 12:
                 case 14: return v == 0.0f || v == 1.0f;
                 case 8: return inR(v, 0.0, 12.0);
@@ -638,6 +651,7 @@ bool paramOk(uint32_t kind, uint32_t i, float v, const float *p, double rate, ui
                 case 13: return inR(v, -3.0, 3.0);
                 case 15: return inR(v, 0.5, 6.0);
                 case 16: return inR(v, 3.0, 12.0);
+                case 18: return isInt(v) && v >= 0.0f && v <= 3.0f;  // ABI v43: the sound-fixes word
                 default: return v == 0.0f || v == 1.0f || v == 2.0f;  // 17: rider speed
             }
         case N60_STAGE_STEREO_CROSSOVER:
@@ -705,7 +719,7 @@ n60_status validateSystemStage(const n60_stage_desc &s, double rate, uint32_t ou
     if (expect == 0 || s.paramCount != expect) return N60_STATUS_BAD_ARGUMENT;
     const float *p = s.params;
     for (uint32_t i = 0; i < s.paramCount; ++i) {
-        if (!paramOk(s.kind, i, p[i], p, rate, outCh)) return N60_STATUS_BAD_ARGUMENT;
+        if (!paramOk(s.kind, i, p[i], p, rate, outCh, s.paramCount)) return N60_STATUS_BAD_ARGUMENT;
     }
     switch (s.kind) {
         case N60_STAGE_STEREO_CROSSOVER:
@@ -1174,7 +1188,7 @@ n60_status validateSystemParam(const SnapHeader *h, const StageRec &r, uint32_t 
                 }
             }
             if (L.ext != 0 && idx == L.ext) return N60_STATUS_UNSUPPORTED;  // mode and counts are topology
-            if (idx == 2 || idx == 3 || idx == 8) return paramOk(r.kind, idx, value, bp, h->sampleRate, h->outputChannels) ? N60_STATUS_UNSUPPORTED : N60_STATUS_BAD_ARGUMENT;
+            if (idx == 2 || idx == 3 || idx == 8) return paramOk(r.kind, idx, value, bp, h->sampleRate, h->outputChannels, r.paramCount) ? N60_STATUS_UNSUPPORTED : N60_STATUS_BAD_ARGUMENT;
             return N60_STATUS_UNSUPPORTED;  // lane indexes, section counts, extra-sub count
         }
         case N60_STAGE_AMBIENT: live = idx != 10; break;  // ABI v32: bands and trailer sections are live; the count is topology
@@ -1203,7 +1217,7 @@ n60_status validateSystemParam(const SnapHeader *h, const StageRec &r, uint32_t 
         default: live = false; break;  // pause gate, ANC capture, authorisation: new snapshot only
     }
     const float *p = paramsOf(h, r);
-    if (!paramOk(r.kind, idx, value, p, h->sampleRate, h->outputChannels)) return N60_STATUS_BAD_ARGUMENT;
+    if (!paramOk(r.kind, idx, value, p, h->sampleRate, h->outputChannels, r.paramCount)) return N60_STATUS_BAD_ARGUMENT;
     return live ? N60_STATUS_OK : N60_STATUS_UNSUPPORTED;
 }
 
@@ -2115,6 +2129,7 @@ inline void protLimitSample(ProtShared &sh, const ProtCfg &c, double attackStep,
         safety = std::fmax(safety, std::fabs(hp[l][off]));
     }
     if (safety > c.ceilLin) {
+        sh.clamps.fetch_add(1u, std::memory_order_relaxed);
         const float sg = c.ceilLin / std::fmax(safety, kEps);
         for (uint32_t l = 0; l < n; ++l) hp[l][off] *= sg;
     }
@@ -2215,7 +2230,7 @@ inline float protDelayLane(const ProtCfg &c, uint32_t cap, uint64_t seq0, float 
 }
 
 // Step (4) over rows that already hold the limited samples.
-void protClampPass(const ProtCfg &c, uint32_t n, float *const *hp, uint32_t count) N60_RT_NONBLOCKING {
+void protClampPass(ProtShared &sh, const ProtCfg &c, uint32_t n, float *const *hp, uint32_t count) N60_RT_NONBLOCKING {
     float safetyA[kProtMax];
     for (uint32_t s = 0; s < count; ++s) safetyA[s] = 0.0f;
     for (uint32_t l = 0; l < n; ++l) {
@@ -2224,6 +2239,7 @@ void protClampPass(const ProtCfg &c, uint32_t n, float *const *hp, uint32_t coun
     }
     for (uint32_t s = 0; s < count; ++s) {
         if (safetyA[s] > c.ceilLin) {
+            sh.clamps.fetch_add(1u, std::memory_order_relaxed);
             const float sg = c.ceilLin / std::fmax(safetyA[s], kEps);
             for (uint32_t l = 0; l < n; ++l) hp[l][s] *= sg;
         }
@@ -2572,7 +2588,7 @@ bool systemProtectionParallel(SnapHeader *h, StageRec &r, float *const *lanes, u
             jobHostRunPhase(jobs, 2, &x, x.n);  // look-ahead delay and gain, per lane
             float worst = 0.0f;
             for (uint32_t l = 0; l < x.n; ++l) worst = std::fmax(worst, x.laneMax[l]);
-            if (worst > c.ceilLin) protClampPass(c, x.n, hp, chunk * c.factor);  // rare: a sample still over the ceiling
+            if (worst > c.ceilLin) protClampPass(sh, c, x.n, hp, chunk * c.factor);  // rare: a sample still over the ceiling
         }
         jobHostRunPhase(jobs, 3, &x, x.n);
         for (uint32_t l = 0; l < x.n; ++l) {
@@ -2833,7 +2849,7 @@ bool readProtectionDynamics(SnapHeader *h, const StageRec &r, uint32_t lane, n60
     out->inTruePeak = bitsToFloat(pl.inTpBits.exchange(0, std::memory_order_relaxed));
     out->outTruePeak = bitsToFloat(pl.outTpBits.exchange(0, std::memory_order_relaxed));
     out->guardActive = sh.guardActive.load(std::memory_order_relaxed);
-    out->reserved = 0;
+    out->reserved = sh.clamps.exchange(0u, std::memory_order_relaxed);
     return true;
 }
 

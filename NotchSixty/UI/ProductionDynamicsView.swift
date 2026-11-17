@@ -526,6 +526,11 @@ struct ProductionDynamicsView: View {
             row(.expanderRangeDB)
             row(.expanderAttackMs)
             row(.expanderReleaseMs)
+            if DynamicsSoundFixes.isEnabled {  // E32 S5: the core swaps the timing behind `e32.dynamics-sound`
+                Text("Attack sets how fast the expander opens; Release sets how fast it closes.")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .accessibilityIdentifier("dynamics.expander.timing.help")
+            }
             expanderExtras
         }
     }
@@ -775,6 +780,13 @@ struct ProductionDynamicsView: View {
             row(.limiterAttackMs)
             row(.limiterReleaseMs)
             row(.limiterLookAheadMs)
+            // E32 S5 (`e32.dynamics-sound`): the core caps the attack at the look-ahead; the stored value is kept.
+            if DynamicsSoundFixes.isEnabled, configuration.limiter.enabled,
+               DynamicsSoundFixes.attackIsLimited(attackMs: configuration.limiter.attackMs, lookAheadMs: configuration.limiter.lookAheadMs) {
+                Text("Attack limited to the lookahead")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .accessibilityIdentifier("dynamics.limiter.attack.limited")
+            }
             Toggle("True-Peak Guard", isOn: boolBinding({ $0.limiter.truePeakGuardEnabled }, { $0.limiter.truePeakGuardEnabled = $1 }))
             // E9 S5b: per-output protection (empty unless `e9.output-protection` is on).
             ProductionOutputProtectionSection(

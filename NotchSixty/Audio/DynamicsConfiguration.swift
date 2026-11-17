@@ -1036,18 +1036,20 @@ struct ExpanderConfiguration: Equatable, Codable, Sendable {
     /// 13-value block. Always returned when the flag is on: the listen slot has to exist for a switch to be a live post.
     /// The hold is in milliseconds; the core converts it per rate.
     /// With `lookahead` (the page flag is on; E33 S5a) an eighth value, the lookahead in frames at `sampleRate`, makes it the
-    /// 14-value block; without it the block is the 13-value one, so flags-off renders as before.
-    func coreExtras(sampleRate: Double = 48_000, lookahead: Bool = false) -> [Float] {
+    /// 14-value block; without it the block is the 13-value one, so flags-off renders as before. `swapTiming` (E32 S5) makes it
+    /// the 15-value block (the lookahead is 0 frames when `lookahead` is off).
+    func coreExtras(sampleRate: Double = 48_000, lookahead: Bool = false, swapTiming: Bool = false) -> [Float] {
         func clamp(_ v: Double, _ r: ClosedRange<Double>) -> Float { Float(min(max(v, r.lowerBound), r.upperBound)) }
         let base: [Float] = [
             clamp(holdMs ?? 0, Self.holdRange), clamp(kneeDB ?? 0, Self.kneeRange), (rmsDetector ?? false) ? 1 : 0,
             clamp(rmsWindowMs ?? 50, Self.rmsWindowRange), clamp(sidechainHighPassHz ?? 0, Self.sidechainHighPassRange),
             clamp(linkPercent ?? 100, Self.linkRange), 0,
         ]
-        guard lookahead else { return base }
+        guard lookahead || swapTiming else { return base }
         let ms = min(max(lookaheadMs ?? 0, Self.lookaheadRange.lowerBound), Self.lookaheadRange.upperBound)
-        let frames = CompressorConfiguration.lookaheadFrames(ms: ms, sampleRate: sampleRate)
-        return base + [Float(frames)]
+        let frames = lookahead ? CompressorConfiguration.lookaheadFrames(ms: ms, sampleRate: sampleRate) : 0
+        // E32 S5 (behind `e32.dynamics-sound`): a ninth value, 1, makes Attack the opening speed and Release the closing speed.
+        return base + [Float(frames)] + (swapTiming ? [1] : [])
     }
 
     func validate() throws {

@@ -324,6 +324,9 @@ add_test(NAME n60core_mb_split COMMAND n60core_mb_split_test)
 add_executable(n60core_e32_dynamics_core_test tests/test_e32_dynamics_core.cpp)
 target_link_libraries(n60core_e32_dynamics_core_test PRIVATE n60core)
 add_test(NAME n60core_e32_dynamics_core COMMAND n60core_e32_dynamics_core_test)
+add_executable(n60core_e32_dynamics_sound_test tests/test_e32_dynamics_sound.cpp)
+target_link_libraries(n60core_e32_dynamics_sound_test PRIVATE n60core)
+add_test(NAME n60core_e32_dynamics_sound COMMAND n60core_e32_dynamics_sound_test)
 
 # E6 S12c: loudness (match, contour, dialogue leveler) stage (ABI v24).
 add_executable(n60core_loudness_test tests/test_loudness.cpp)

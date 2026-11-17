@@ -55,15 +55,14 @@ enum SpeakerRoutingCompileError: Error, Equatable {
 
 extension UnifiedGraphProtection {
     /// The PROTECTION stage's latency in frames, as the core computes it (half-band plus look-ahead).
-    func latencyFrames(sampleRate: Double) -> UInt32 {
+    func latencyFrames(sampleRate: Double, soundFixes: Bool = DynamicsSoundFixes.isEnabled) -> UInt32 {
         let clipperOn = clipper?.enabled ?? false
         guard limiterEnabled || clipperOn else { return 0 }
-        let factor: UInt32 = (limiterEnabled && truePeakGuard) ? 4 : UInt32(max(1, oversampling))
-        let highRate = sampleRate * Double(factor)
-        let lookAheadHigh = limiterEnabled
-            ? UInt32((Double(Float(lookAheadMilliseconds)) * 0.001 * highRate).rounded(.up)) : 0
-        let osLatency: UInt32 = factor == 2 ? 32 : (factor == 4 ? 48 : 0)
-        return osLatency + (lookAheadHigh + factor - 1) / factor
+        // E32 S5: with `e32.dynamics-sound` the guard's factor follows the rate (the core applies the same rule).
+        let guardFactor: UInt32 = soundFixes ? DynamicsSoundFixes.truePeakFactor(sampleRate: sampleRate) : 4
+        let factor: UInt32 = (limiterEnabled && truePeakGuard) ? guardFactor : UInt32(max(1, oversampling))
+        return DynamicsSoundFixes.limiterLatencyFrames(
+            factor: factor, lookAheadMilliseconds: lookAheadMilliseconds, limiterEnabled: limiterEnabled, sampleRate: sampleRate)
     }
 }
 

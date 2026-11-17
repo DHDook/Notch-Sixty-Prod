@@ -34,7 +34,7 @@ extern "C" {
 #endif
 
 /* Bumped on any incompatible change to a struct or function below. */
-#define N60_GRAPH_ABI_VERSION 42u
+#define N60_GRAPH_ABI_VERSION 43u
 
 typedef struct n60_graph n60_graph; /* opaque */
 
@@ -406,6 +406,9 @@ typedef int (*n60_external_process_fn)(void *context, const float *const *in, fl
  *  pattern); the sidechain listen output is delayed alike, so listening never changes latency. The delay joins
  *  n60_graph_latency_frames. Memory: two rings of that length per lane. The ring is lane state, so a rebuild with the same
  *  lookahead carries it with the rest of the lane state. [13] = 0 and the 13-value block are bit-identical to ABI v40.
+ *  ABI v43 (E32 S5): paramCount 15 adds [14] timing swap (0/1, live). 1 makes Attack the opening speed and Release the closing
+ *  speed (the gate convention); 0 keeps Attack as closing and Release as opening. The 6, 13 and 14-value blocks are
+ *  bit-identical to ABI v42.
  *
  * Dynamic EQ. params: [0] linked (0/1), then per band 15 values: shape (0 peak, 1 low
  *  shelf, 2 high shelf, 3 notch, 4 band pass, 5 tilt), Hz (20..20000, below Nyquist),
@@ -507,7 +510,14 @@ typedef int (*n60_external_process_fn)(void *context, const float *const *in, fl
  *  (3, 10, 30 s). With the limiter and guard both on the factor is 4. Latency is the half-band delay (32 at 2x,
  *  48 at 4x) plus ceil(look-ahead high samples / factor) frames. With the limiter and clipper off the stage is a bypass
  *  at factor 1; at factor [6] above 1 it is an oversampling round trip (ABI v27, as the kernel's oversampling-only
- *  protection); the clipper runs at factor [6]. The clipper acts per oversampled sample before the
+ *  protection); the clipper runs at factor [6]. ABI v43 (E32 S5): paramCount 8 (7 plus [7]) and 19 (18 plus [18]) add a
+ *  sound-fixes word W (0..3, an integer; the last value): bit 0 caps the limiter's effective attack at its look-ahead
+ *  (zero look-ahead is an instant attack, so a long attack can no longer leave limiting to the safety clamp); bit 1 picks the
+ *  true-peak factor by rate when the limiter and guard are both on (the smallest of 1, 2, 4 with rate x factor >= 176.4 kHz:
+ *  4x at 44.1 and 48 kHz, 2x at 88.2 and 96 kHz, 1x from 176.4 kHz) instead of the fixed 4, and the latency follows. W = 0
+ *  and the 7 and 18-value blocks are bit-identical to ABI v42. n60_dynamics_readback.reserved carries the number of
+ *  safety-clamp events since the previous read (a limited sample that still exceeded the ceiling), reset by the read. The
+ *  clipper acts per oversampled sample before the
  *  limiter; the rider (active only with the limiter on) scales each frame by the sustained limiter reduction
  *  before oversampling. Its state is carried across a rebuild.
  * MUTE. params: [0] muted (0/1, live); 10 ms ramp.
@@ -827,7 +837,7 @@ typedef struct n60_dynamics_readback {
     float inTruePeak;         /* PROTECTION: largest |x| at the oversampled input of the limiter (factor 1 = sample peak), linear, since the previous read */
     float outTruePeak;        /* PROTECTION: the same after the limiter (factor 1 = sample peak) */
     uint32_t guardActive;     /* PROTECTION: 1 when the limiter runs with oversampling (the true-peak guard) */
-    uint32_t reserved;
+    uint32_t reserved;        /* PROTECTION (ABI v43): safety-clamp events since the previous read, reset by the read; 0 for the other kinds */
 } n60_dynamics_readback;
 
 /* Reads a COMPRESSOR, CORE_DYNAMICS, EXPANDER or PROTECTION stage for one output lane. A linked group

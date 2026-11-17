@@ -667,8 +667,9 @@ struct UnifiedGraphConfiguration: Equatable, Sendable {
     static let roomFIRStageId: UInt32 = 612
     static let speakerIRStageId: UInt32 = 614
 
-    /// PROTECTION stage parameters: 7 for limiter and true-peak guard, 18 when a soft clipper or gain rider exists.
-    static func protectionParameters(_ protection: UnifiedGraphProtection) -> [Float] {
+    /// PROTECTION stage parameters: 7 for limiter and true-peak guard, 18 when a soft clipper or gain rider exists; one more (the
+    /// sound-fixes word) with `e32.dynamics-sound`.
+    static func protectionParameters(_ protection: UnifiedGraphProtection, soundFixes: Bool = DynamicsSoundFixes.isEnabled) -> [Float] {
         var params: [Float] = [
             protection.limiterEnabled ? 1 : 0, Float(protection.ceilingDB), Float(protection.attackMilliseconds),
             Float(protection.releaseMilliseconds), Float(protection.lookAheadMilliseconds),
@@ -684,6 +685,8 @@ struct UnifiedGraphConfiguration: Equatable, Sendable {
                 r.enabled ? 1 : 0, Float(r.targetDB), Float(r.maxDB), Float(r.speed),
             ]
         }
+        // E32 S5 (graph ABI v43): the sound-fixes word, the last value, only with `e32.dynamics-sound` on.
+        if soundFixes { params.append(DynamicsSoundFixes.protectionWord) }
         return params
     }
 

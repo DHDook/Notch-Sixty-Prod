@@ -607,7 +607,7 @@ struct StereoEQConfiguration: Equatable, Codable, Sendable {
         let denoiserLatency = graph.dynamics.spectralDenoiser.enabled
             ? UInt64(graph.dynamics.spectralDenoiser.latencyFrames)
             : 0
-        let protectionLatency = UInt64(graph.protection.latencyFrames)
+        let protectionLatency = UInt64(DynamicsSoundFixes.protectionLatencyFrames(graph.protection, sampleRate: sampleRate))
         // E28 S7d (G33): the compressor and multiband lookahead are program-path latency the core reports; counting them here
         // keeps the hand-over alignment and the processing-off pad equal to the graph's own figure.
         let dynamicsLookahead = UInt64(DynamicsLatency.programFrames(
