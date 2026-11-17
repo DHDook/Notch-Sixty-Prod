@@ -315,7 +315,8 @@ struct UnifiedGraphConfiguration: Equatable, Sendable {
                 kind: N60_STAGE_DELTA_CAPTURE.rawValue, stageId: Self.deltaCaptureStageId, laneA: 0, laneMask: programMask,
                 capacityFrames: ring, params: [1]))
         }
-        add(N60_STAGE_METER_IN, N60_LSTAGE_METER_IN, lane: all)
+        // E33 S10 (graph ABI v44): detect and generation, both 0; the host publishes them live (UnifiedGraphHost).
+        add(N60_STAGE_METER_IN, N60_LSTAGE_METER_IN, lane: all, params: FeatureFlags.isEnabledProcessWide(.eqPageEnhancements) ? [0, 0] : [])
         add(N60_STAGE_GAIN, N60_LSTAGE_INPUT_GAIN, lane: all, params: [inputGain])
         for (index, lane) in lanes.enumerated() {
             guard lane.preGain > 0, lane.preGain <= 10_000, lane.outputGain > 0,

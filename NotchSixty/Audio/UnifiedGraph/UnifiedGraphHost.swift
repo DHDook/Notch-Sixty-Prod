@@ -31,6 +31,9 @@ final class UnifiedGraphHost: @unchecked Sendable {
     private let lock = NSLock()
     private var graph: OpaquePointer?
     private(set) var spec: UnifiedGraphSpec
+    /// E33 S10: the input-over detector's live state, kept here so a spec applied later never switches it back.
+    private var inputOverDetect = false
+    private var inputOverGeneration: Float = 0
 
     init(spec: UnifiedGraphSpec) throws {
         self.spec = spec
@@ -427,8 +430,58 @@ final class UnifiedGraphHost: @unchecked Sendable {
         return .posted(count: records.count)
     }
 
-    private func applyLocked(_ newSpec: UnifiedGraphSpec, linearFade: Bool = false) throws -> UnifiedGraphApplyResult {
+    // MARK: Input overs (E33 S10, graph ABI v44)
+
+    private func inputOversIndexLocked(in spec: UnifiedGraphSpec) -> Int? {
+        spec.stages.firstIndex(where: { $0.stageId == N60_LSTAGE_METER_IN && $0.kind == N60_STAGE_METER_IN.rawValue && $0.params.count == 2 })
+    }
+
+    /// Switches the detector on or off (live, no rebuild). Detect on only while the Levels page is visible. False when the
+    /// graph has no detector (flag off).
+    @discardableResult
+    func setInputOverDetect(_ on: Bool) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        guard let graph, let index = inputOversIndexLocked(in: spec) else { return false }
+        inputOverDetect = on
+        let value: Float = on ? 1 : 0
+        if spec.stages[index].params[0] == value { return true }
+        var record = n60_param_record(stageId: UInt32(N60_LSTAGE_METER_IN), paramIndex: 0, value: value, reserved: 0)
+        guard n60_graph_post_params(graph, &record, 1) == N60_STATUS_OK else { return false }
+        spec.stages[index].params[0] = value
+        return true
+    }
+
+    /// Zeroes the counts: a new generation, which the core applies at the next block.
+    func resetInputOvers() {
+        lock.lock(); defer { lock.unlock() }
+        guard let graph, let index = inputOversIndexLocked(in: spec) else { return }
+        let next: Float = inputOverGeneration >= 16_777_216 ? 1 : inputOverGeneration + 1
+        var record = n60_param_record(stageId: UInt32(N60_LSTAGE_METER_IN), paramIndex: 1, value: next, reserved: 0)
+        guard n60_graph_post_params(graph, &record, 1) == N60_STATUS_OK else { return }
+        inputOverGeneration = next
+        spec.stages[index].params[1] = next
+    }
+
+    /// Monotonic input-over counts of the first `lanes` lanes (control thread, the host lock). nil without a detector.
+    func inputOvers(lanes: Int) -> [UInt64]? {
+        lock.lock(); defer { lock.unlock() }
+        guard let graph, inputOversIndexLocked(in: spec) != nil else { return nil }
+        var counts: [UInt64] = []
+        for lane in 0..<max(0, lanes) {
+            var count: UInt64 = 0
+            guard n60_graph_read_input_overs(graph, UInt32(N60_LSTAGE_METER_IN), UInt32(lane), &count) == N60_STATUS_OK else { break }
+            counts.append(count)
+        }
+        return counts
+    }
+
+    private func applyLocked(_ requested: UnifiedGraphSpec, linearFade: Bool = false) throws -> UnifiedGraphApplyResult {
         guard let graph else { throw UnifiedGraphError.invalidConfiguration("graph released") }
+        // E33 S10: the live detector state belongs to the host; a spec from the translator carries detect 0, generation 0.
+        var newSpec = requested
+        if let index = inputOversIndexLocked(in: newSpec) {
+            newSpec.stages[index].params = [inputOverDetect ? 1 : 0, inputOverGeneration]
+        }
         if newSpec == spec { return .unchanged }
         if newSpec.hasSameTopology(as: spec) {
             let records = newSpec.changedParameters(since: spec)

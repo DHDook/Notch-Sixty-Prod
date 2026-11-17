@@ -34,7 +34,7 @@ extern "C" {
 #endif
 
 /* Bumped on any incompatible change to a struct or function below. */
-#define N60_GRAPH_ABI_VERSION 43u
+#define N60_GRAPH_ABI_VERSION 44u
 
 typedef struct n60_graph n60_graph; /* opaque */
 
@@ -58,7 +58,8 @@ typedef enum n60_status {
  * numeric values are identifiers, not the order: the ABI v3 kinds 9..13 slot in between. */
 typedef enum n60_stage_kind {
     N60_STAGE_SANITISE = 1,   /* position 1. NaN and Inf become 0; counted. No params. */
-    N60_STAGE_METER_IN = 2,   /* position 2. Peak and RMS per lane, audio untouched. No params. */
+    N60_STAGE_METER_IN = 2,   /* position 2. Peak and RMS per lane, audio untouched. paramCount 0 or 2 (ABI v44, E33 S10):
+                                  * [0] detect (0/1, live), [1] generation (integer 0..16777216, live). See "Input overs". */
     N60_STAGE_GAIN = 3,       /* position 3. Input gain x headroom. params[0] = linear gain, ramped over 5 ms. ABI v19 (E25 S2): -10000..10000;
                                   * a negative value inverts polarity (a ramp through zero when it flips). */
     N60_STAGE_DENOISER = 11,  /* position 4. Spectral denoiser, linked across its lanes. See "Denoiser" below. */
@@ -958,6 +959,14 @@ n60_status n60_graph_read_mimo(n60_graph *graph, uint32_t stageId, n60_mimo_read
  * once per lease; if the word stays unchanged for the lease the stage latches a fault (`faultReason` 3), fades the delta out
  * in 10 ms and holds like any fault, so a stalled control plane cannot leave the stage armed. Counted in frames. Realtime:
  * no allocation, one extra history ring per mask lane (4 * ringN bytes each), O(W) work per frame beyond the kernel. */
+
+/* Input overs (ABI v44, E33 S10). A METER_IN stage with paramCount 2 counts, per lane, the input frames whose reconstructed
+ * signal exceeds 0 dBTP while detect (param [0]) is 1: 4x polyphase interpolation at 44.1 and 48 kHz, 2x at 88.2 and 96 kHz,
+ * and plain sample overs from 176.4 kHz up (the limiter's true-peak factor rule; audio-band content can read up to about
+ * 0.56 dB low at 1x). The count is monotonic: a read never clears it; a change of the generation (param [1]) zeroes it
+ * (counting then continues from 0) and it survives a graph rebuild. Detect 0 runs nothing and changes no output bit; the
+ * audio is never touched. Realtime: no allocation, one relaxed atomic add per block per lane, latency 0, any rate. */
+n60_status n60_graph_read_input_overs(n60_graph *graph, uint32_t stageId, uint32_t lane, uint64_t *count);
 
 /* Reads the over-range counter of a METER_IN, METER_OUT or FINAL_METER stage lane: samples with
  * |x| > 1.0 since the previous read (reset by the read). */

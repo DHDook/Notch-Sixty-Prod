@@ -620,7 +620,7 @@ it follows). One flag `e33.page-enhancements`, graduated in S11. K-System scales
 - [ ] S7 `e33/loudness-and-gain-reduction`: loudness maxima, history and target, one short-term label, one GR reader, total GR (low-risk)
 - [~] S8 `e33/analysis-meters`: PLR and crest, balance, per-band correlation, headroom strip, third-octave RTA, dropout counter (low-risk); built dark behind `e33.page-enhancements` (off); wiring: S11
 - [~] S9 `e33/spectrogram-bit-activity`: live spectrogram and input bit activity (low-risk); built dark behind `e33.page-enhancements` (off); wiring: S11
-- [ ] S10 `e33/input-overs`: inter-sample over count at the chain input in the core (needs-owner, realtime)
+- [~] S10 `e33/input-overs`: inter-sample over count at the chain input in the core, graph ABI v44 (needs-owner, realtime); built dark behind `e33.page-enhancements` (off); wiring: S11
 - [ ] S12 `e33/dynamics-mapping` (owner, 16 Nov 2026; owns G22): every Dynamics processor's behaviour on N-channel, routed and binaural sessions written into the E6 D2 table and tested; an "Acts on" line per processor on the page
 - [ ] S13 `e33/surround-detector-and-dialogue` (owns G23, G24; needs-owner, realtime): LFE out of the compressor and expander detector; dialogue leveller detects on and lifts the centre channel when present
 - [ ] S14 `e33/limiter-auto-release` (owner, 16 Nov 2026: in v1; needs-owner, realtime): programme-dependent limiter release behind an Auto Release switch

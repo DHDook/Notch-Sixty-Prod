@@ -16,3 +16,4 @@ If two claims collide, the one that merges second renumbers its own claim only.
 | graph v41 | E33 S5a `e33/expander-lookahead` | open; expander paramCount 14 adds [13] lookahead frames (ring in lane state, latency reported); no layout change to other structs |
 | graph v42 | E33 S5b `e33/multiband-bands` | open; multiband paramCount 73 (2 to 5 bands) and `n60_multiband_readback` grMaxDb[5], grNowDb[5], bandCount (struct size changes); extras blocks of 29, 43 and 44 values stay bit-identical |
 | graph v43 | E32 S5 `e32/dynamics-sound-fixes` | open; expander paramCount 15 adds [14] timing swap; protection paramCount 8 and 19 add a sound-fixes word (attack cap, rate-based true-peak factor); `n60_dynamics_readback.reserved` carries the safety-clamp count (no struct size change) |
+| graph v44 | E33 S10 `e33/input-overs` | open; METER_IN paramCount 2 (detect, generation) and `n60_graph_read_input_overs`; no struct layout change |

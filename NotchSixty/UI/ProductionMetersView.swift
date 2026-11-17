@@ -140,6 +140,8 @@ struct ProductionMetersView: View {
     /// E33 S8 (behind `e33.page-enhancements`): analysis cards, headroom strip, dropout counter and RTA mode.
     private let enhanced = FeatureFlags().isEnabled(.eqPageEnhancements)
     @State private var headroomStrip = HeadroomStripModel()
+    /// E33 S10: input overs from the core's detector, polled only while this page is visible (detect is published then).
+    @State private var inputOvers = InputOversReading()
     @ObservedObject private var history = ProductionMeterHub.eventHistory
     @State private var spectrumMode = SpectrumPageMode.spectrum
     @State private var spectrogramWindow = SpectrogramWindow.tenSeconds
@@ -282,6 +284,7 @@ struct ProductionMetersView: View {
                     onReset: resetBitActivity
                 )
                 ProductionDropoutCard(counter: history.dropouts, onReset: { history.resetDropouts() })
+                ProductionInputOversCard(reading: inputOvers, isRunning: engine.lifecycleState == .running, onReset: resetInputOvers)
             }
             if let transportMeterSnapshot {
                 semanticLevelsPage(transportMeterSnapshot)
@@ -998,6 +1001,25 @@ struct ProductionMetersView: View {
         Self.loudnessDemand | (enhanced ? ProductionAnalysisDemand.analysisMeters | ProductionAnalysisDemand.bitActivity : 0)
     }
 
+    /// E33 S10: detect is on only while the Levels page is visible and processing runs; the counts feed the card and History.
+    @MainActor
+    private func pollInputOvers(now: Date) {
+        guard engine.lifecycleState == .running, let host = engine.dynamicsListenHost, host.setInputOverDetect(true) else {
+            if inputOvers.shownSince != nil { inputOvers.hide() }
+            return
+        }
+        let lanes = transportMeterSnapshot?.programChannels.count ?? 2
+        guard let counts = host.inputOvers(lanes: max(lanes, 2)) else { return }
+        let rate = transportMeterSnapshot?.sampleRate ?? transportDiagnostics?.outputSampleRate ?? 0
+        inputOvers.update(counts: counts, sampleRate: rate, now: now)
+        history.observeInputOvers(counts: counts, now: now)
+    }
+
+    private func resetInputOvers() {
+        engine.dynamicsListenHost?.resetInputOvers()
+        inputOvers.reset()
+    }
+
     private func resetBitActivity() {
         if engine.lifecycleState == .running {
             engine.setAnalysisDemand(levelsDemand | ProductionAnalysisDemand.resetBitActivity)
@@ -1063,6 +1085,10 @@ struct ProductionMetersView: View {
 
         defer {
             hub.unsubscribe(token)
+            if enhanced, activePage == .levels {
+                engine.dynamicsListenHost?.setInputOverDetect(false)
+                inputOvers.hide()
+            }
             if let demandToken {
                 ProductionDetailedMeterDemand.release(demandToken, engine: engine)
             }
@@ -1078,6 +1104,7 @@ struct ProductionMetersView: View {
             if windowVisible {
                 bank.ingest(hub.take(token), mode: ballistics, now: now)
                 refreshSnapshot(hub: hub)
+                if enhanced, activePage == .levels { pollInputOvers(now: Date()) }
                 if analysisDemand != 0, engine.lifecycleState == .running {
                     analysisSnapshot = engine.productionAnalysisSnapshot()
                 } else {
