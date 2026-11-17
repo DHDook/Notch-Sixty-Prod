@@ -328,23 +328,28 @@ struct UnifiedGraphProgramDSP: Equatable, Sendable {
                     params: params)
             }
         }
-        let pairStages: [(n60_stage_kind, UInt32, [Float]?, Int)] = [
-            (N60_STAGE_IMAGE, UnifiedGraphConfiguration.imageStageId, st.image, 8),
-            (N60_STAGE_LOUDNESS, UnifiedGraphConfiguration.loudnessStageId, st.loudness, 32),
-            (N60_STAGE_DEESS, UnifiedGraphConfiguration.deessStageId, st.deess, 12),
-            (N60_STAGE_MULTIBAND, UnifiedGraphConfiguration.multibandStageId, st.multiband, 29),
+        // E33 S12 (G22): the lane sets below come from `DynamicsSessionMapping`, the table the Dynamics page also prints.
+        func mapped(_ module: ProductionDynamicsModule) -> DynamicsSessionMapping.Mapping {
+            DynamicsSessionMapping.mapping(for: module, shape: shape, virtualSpeakers: virtualSpeakers, eqMode: eqMode)
+        }
+        let pairStages: [(n60_stage_kind, UInt32, [Float]?, Int, ProductionDynamicsModule)] = [
+            (N60_STAGE_IMAGE, UnifiedGraphConfiguration.imageStageId, st.image, 8, .stereoMode),
+            (N60_STAGE_LOUDNESS, UnifiedGraphConfiguration.loudnessStageId, st.loudness, 32, .loudnessMatch),
+            (N60_STAGE_DEESS, UnifiedGraphConfiguration.deessStageId, st.deess, 12, .deEsser),
+            (N60_STAGE_MULTIBAND, UnifiedGraphConfiguration.multibandStageId, st.multiband, 29, .multiband),
         ]
-        for (kind, id, params, size) in pairStages {
+        for (kind, id, params, size, module) in pairStages {
             guard let params else { continue }
             guard params.count == size || (kind == N60_STAGE_MULTIBAND && (params.count == 43 || params.count == 44)) else { throw UnifiedGraphFallbackReason.specRejected }
-            guard let fl = shape.frontLeft, let fr = shape.frontRight else { throw UnifiedGraphFallbackReason.noFrontPair }
-            add(kind, id, lane: UInt32(fl), laneB: UInt32(fr), params: params)
+            let target = mapped(module)
+            if let refusal = target.refusal { throw refusal }
+            add(kind, id, lane: UInt32(target.lanes[0]), laneB: UInt32(target.lanes[1]), params: params)
         }
         if let params = st.compressor {
-            add(N60_STAGE_COMPRESSOR, UnifiedGraphConfiguration.compressorStageId, mask: programMask, params: params)
+            add(N60_STAGE_COMPRESSOR, UnifiedGraphConfiguration.compressorStageId, mask: mapped(.compressor).laneMask, params: params)
         }
         if let params = st.expander {
-            add(N60_STAGE_EXPANDER, UnifiedGraphConfiguration.expanderStageId, mask: programMask, params: params)
+            add(N60_STAGE_EXPANDER, UnifiedGraphConfiguration.expanderStageId, mask: mapped(.expander).laneMask, params: params)
         }
         var postLatency: UInt32 = 0
         var lanePlanCovered: UInt64 = 0
@@ -431,8 +436,7 @@ struct UnifiedGraphProgramDSP: Equatable, Sendable {
                 capacity: frames, params: [Float(frames)])
         }
         if let params = st.pauseGate {
-            let mask = virtualSpeakers ? UInt64(0b11) : programMask
-            add(N60_STAGE_PAUSE_GATE, UnifiedGraphConfiguration.pauseGateStageId, mask: mask, params: params)
+            add(N60_STAGE_PAUSE_GATE, UnifiedGraphConfiguration.pauseGateStageId, mask: mapped(.pauseGate).laneMask, params: params)
         }
         // Room and IR convolvers delay the front pair only; every other lane (subs included) catches up. A lane plan
         // aligns the source lanes only: routed output lanes after them are aligned by the routing compiler.
