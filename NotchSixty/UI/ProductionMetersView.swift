@@ -140,7 +140,7 @@ struct ProductionMetersView: View {
     /// E33 S8 (behind `e33.page-enhancements`): analysis cards, headroom strip, dropout counter and RTA mode.
     private let enhanced = FeatureFlags().isEnabled(.eqPageEnhancements)
     @State private var headroomStrip = HeadroomStripModel()
-    @State private var dropouts = DropoutCounter()
+    @ObservedObject private var history = ProductionMeterHub.eventHistory
     @State private var spectrumMode = SpectrumPageMode.spectrum
     @State private var spectrogramWindow = SpectrogramWindow.tenSeconds
 
@@ -281,7 +281,7 @@ struct ProductionMetersView: View {
                     isRunning: engine.lifecycleState == .running,
                     onReset: resetBitActivity
                 )
-                ProductionDropoutCard(counter: dropouts, onReset: { dropouts.reset() })
+                ProductionDropoutCard(counter: history.dropouts, onReset: { history.resetDropouts() })
             }
             if let transportMeterSnapshot {
                 semanticLevelsPage(transportMeterSnapshot)
@@ -474,6 +474,8 @@ struct ProductionMetersView: View {
                     .foregroundStyle(.orange)
                     .textSelection(.enabled)
             }
+
+            if enhanced { ProductionEventHistoryCard(history: history) }
 
             Text("Recovery remains pinned to the selected stable device UID. Notch Sixty does not silently follow the macOS default output or substitute a different device after disconnect.")
                 .font(.caption)
@@ -1117,9 +1119,7 @@ struct ProductionMetersView: View {
             transportDiagnostics = engine.diagnosticsSnapshot()
             transportMeterSnapshot = engine.productionTransportMeterSnapshot()
         }
-        if enhanced, engine.lifecycleState == .running, let counters = transportDiagnostics?.sessionTransportCounters {
-            dropouts.observe(underrunFrames: counters.underrunFrames, overrunFrames: counters.overrunFrames, now: Date())
-        }
+        if enhanced, engine.lifecycleState != .running { history.noteStopped() }
         guard engine.lifecycleState == .running else {
             snapshot = ProductionMetersSnapshot()
             return

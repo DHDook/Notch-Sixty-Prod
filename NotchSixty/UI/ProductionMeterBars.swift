@@ -280,13 +280,26 @@ final class ProductionMeterWindowVisibility: MeterVisibilityProviding {
 enum ProductionMeterHub {
     private static var hub: MeterReadbackHub<ProductionMeterContext>?
     private static let visibility = ProductionMeterWindowVisibility()
+    /// E33 S16 (behind `e33.page-enhancements`): the session event log and session dropout counter. The hub's poll
+    /// feeds it, so it fills while any meter reader is polling, whichever page is open.
+    static let eventHistory = SessionEventHistory(store: SessionEventStore(url: SessionEventStore.defaultURL()))
 
     static func shared(for engine: AudioIOEngine) -> MeterReadbackHub<ProductionMeterContext> {
         if let hub { return hub }
+        let eventsEnabled = FeatureFlags().isEnabled(.eqPageEnhancements)
         let created = MeterReadbackHub<ProductionMeterContext>(
             visibility: visibility,
             isProcessing: { [weak engine] in engine?.lifecycleState == .running },
-            source: { [weak engine] in engine.map(frame(from:)) }
+            source: { [weak engine] in
+                guard let engine else { return nil }
+                let result = frame(from: engine)
+                if eventsEnabled {
+                    eventHistory.observe(SessionEventSample.make(
+                        channels: result.channels, diagnostics: result.context.diagnostics,
+                        protection: result.context.protection, now: Date()))
+                }
+                return result
+            }
         )
         hub = created
         return created
