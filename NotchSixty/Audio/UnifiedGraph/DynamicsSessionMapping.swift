@@ -77,7 +77,7 @@ enum DynamicsSessionMapping {
         }
     }
 
-    /// The short "Acts on" line for the Dynamics page. `sessionLanes` is 2 for a stereo session.
+    /// The short "Acts on" line for the Dynamics page. A two-lane shape is a stereo session.
     static func actsOnText(
         for module: ProductionDynamicsModule,
         shape: UnifiedGraphLayoutShape,
