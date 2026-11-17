@@ -531,7 +531,7 @@ N60RemoteTonal *N60RemoteTonalCreate(const N60RemoteTonalConfig *config) {
     if (!N60RemoteTonalConfigIsValid(config)) return nullptr;
     N60RemoteTonal *c = new (std::nothrow) N60RemoteTonal();
     if (c == nullptr) return nullptr;
-    try {
+    N60_TRY {
         c->cfg = *config;
         c->tones = config->toneCount;
         c->ticksPerSecond = config->hostTicksPerSecond;

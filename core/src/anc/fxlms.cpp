@@ -584,7 +584,7 @@ uint32_t N60AncDecimatorDelayFrames(double sampleRate) {
 
 N60AncDecimator *N60AncDecimatorCreate(double sampleRate) {
     if (n60::anc::Decimator::factorFor(sampleRate) == 0) return nullptr;
-    try {
+    N60_TRY {
         return new N60AncDecimator{n60::anc::Decimator(sampleRate)};
     } N60_CATCH_ALL {
         return nullptr;
@@ -649,7 +649,7 @@ bool N60AdaptiveTonalConfigIsValid(const N60AdaptiveTonalConfig *config) {
 
 N60AdaptiveTonal *N60AdaptiveTonalCreate(const N60AdaptiveTonalConfig *config) {
     if (!N60AdaptiveTonalConfigIsValid(config)) return nullptr;
-    try {
+    N60_TRY {
         return new N60AdaptiveTonal{n60::anc::AdaptiveTonal(*config)};
     } N60_CATCH_ALL {
         return nullptr;
@@ -699,7 +699,7 @@ bool N60BlockFxlmsConfigIsValid(const N60BlockFxlmsConfig *config) {
 
 N60BlockFxlms *N60BlockFxlmsCreate(const N60BlockFxlmsConfig *config) {
     if (!N60BlockFxlmsConfigIsValid(config)) return nullptr;
-    try {
+    N60_TRY {
         return new N60BlockFxlms{n60::anc::BlockFxlms(*config)};
     } N60_CATCH_ALL {
         return nullptr;
