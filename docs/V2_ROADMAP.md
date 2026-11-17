@@ -1,4 +1,4 @@
-# Notch Sixty — v2 Roadmap (after v1)
+# Notch Sixty — v2 and v3 Roadmap (after v1)
 
 Written 11 Nov 2026 from the roadmap review and the post-v1 notes already in the v1 plan.
 **Status: not started.** Nothing here is part of the v1 completion requirement, and `/next` does
@@ -6,6 +6,15 @@ not read this file. The owner initiates it after v1 ships (see "How to start").
 
 The v1 plan is `docs/PROGRAM_PLAN.md`. Epics here are numbered `V2-n` so they never collide with
 the v1 `E<n>` numbers; each gets a real epic number and a `docs/epics/` file when it is started.
+
+## Versions and pricing (owner, 17 Nov 2026)
+
+- **v1 is the core app**, **v2 expands its functionality on the Mac**, and **v3 takes it to other
+  platforms** (section "v3: other platforms" below; epics `V3-n`).
+- Only platform editions are charged separately. v2 is a free update for v1 owners, and every Mac
+  feature, the virtual audio driver (V2-1) included, comes with the one Mac purchase. A feature that
+  carries a per-copy licence fee (for example V2-6) needs its price checked before it is planned.
+- v3 starts after v2; the owner initiates it the same way (see "How to start").
 
 ## What v1 leaves out, and why
 
@@ -16,10 +25,10 @@ constraints follow from that, and most of v2 is what becomes possible when one i
 | --- | --- |
 | App Store sandbox, no audio driver | V2-1 |
 | System audio is the only source | V2-2, V2-3 |
-| macOS only | V2-4, V2-5, V2-14 |
+| macOS only | V2-4 (iPhone and iPad companion for the Mac app); other platforms are v3 (V3-1 to V3-3) |
 | No licensed decoders or data | V2-6, V2-7, V2-8 |
 
-The other epics (V2-9 to V2-13 and V2-15 to V2-24) are features left out of v1 for priority or scope; the last column of the table below says which need an owner decision first.
+The other epics (V2-9 to V2-11, V2-13 and V2-15 to V2-24) are features left out of v1 for priority or scope; the last column of the table below says which need an owner decision first.
 
 ## Epics at a glance
 
@@ -29,16 +38,16 @@ The other epics (V2-9 to V2-13 and V2-15 to V2-24) are features left out of v1 f
 | V2-2 | Input and preamp mode | Medium | v1 | No |
 | V2-3 | Network endpoint | Medium to large | V2-2 | Yes for anything needing certification |
 | V2-4 | iPhone and iPad companion | Large | E16 local API | No (already agreed as post-v1) |
-| V2-5 | Headless endpoint on the portable core | Large | E21 | Yes: UI shell and distribution |
+| V2-5 | Moved to v3 as V3-2 (owner, 17 Nov 2026) | | | |
 | V2-6 | Licensed immersive decoding | Large | E14, V2-9 | Yes: licence and product decision |
 | V2-7 | Built-in headphone and speaker data | Medium | E13 | Yes: licence |
 | V2-8 | Personal HRTF and hearing profile | Medium | E13, V2-4 | Yes if a partner or licence is used |
 | V2-9 | Upmixer modes and tuning | Small to medium | E14 | No |
 | V2-10 | Quiet Zone on any output count | Large | E26, E19 | Yes: written MIMO authorisation |
 | V2-11 | Headphone listening dose | Small | E13 | No |
-| V2-12 | Plug-in edition of room correction | Medium | E21, E10 | Yes: second product and price |
+| V2-12 | Parked: see "Conditional and undecided items" (owner, 17 Nov 2026) | | | |
 | V2-13 | Virtual bass for small speakers | Small to medium | E6 | Yes: is an effect in scope? |
-| V2-14 | Windows edition | Very large | E21, V2-5 | Yes: driver, installer, UI shell |
+| V2-14 | Moved to v3 as V3-1 (owner, 17 Nov 2026) | | | |
 | V2-15 | Community sharing | Medium | E18 iCloud sync | Yes: first network feature, moderation |
 | V2-16 | Verification with music | Small to medium | E11, E4 path tracking | No |
 | V2-17 | Speaker and room health check | Small | E11, V2-16 | No |
@@ -58,8 +67,8 @@ Three waves. The order inside a wave is by value for effort; the owner can reord
 only the listed dependencies are hard.
 
 1. **First update (no policy change, builds on v1 directly):** V2-9, V2-11, V2-16, V2-17, V2-18, V2-23, V2-2, V2-10.
-2. **Reach (new surfaces and markets for the same engine):** V2-4, V2-1, V2-3, V2-20, V2-24, V2-12.
-3. **Platforms, licences and larger features:** V2-5, V2-7, V2-8, V2-6, V2-13, V2-19, V2-21, V2-22, V2-14, V2-15.
+2. **Reach (new surfaces and markets for the same engine):** V2-4, V2-1, V2-3, V2-20, V2-24.
+3. **Platforms, licences and larger features:** V2-7, V2-8, V2-6, V2-13, V2-19, V2-21, V2-22, V2-15.
 
 If only one item is pulled forward, V2-2 is the recommended one: it is the main thing a hardware
 DSP box offers that v1 does not, and it needs no sandbox change.
@@ -71,6 +80,10 @@ unchanged: realtime rules, every device rate up to 384 kHz, no GPL, clean-room, 
 epic, live ANC and MIMO only through `LiveTreatmentArm` and written authorisation.
 
 ### V2-1 Optional virtual audio driver add-on (rescoped, owner 16 Nov 2026)
+
+Part of v2 and free to Mac owners (owner, 17 Nov 2026): not a separately sold product. It is still
+downloaded from the website with its own signed installer, because the App Store cannot carry an
+audio driver (`AGENTS.md` section 2).
 
 Notch Sixty's own virtual output device, as an optional add-on. The app installs and runs without
 it and the process tap stays the default input path. With the driver, apps play into a device
@@ -139,16 +152,14 @@ Receive audio from other players.
 
 ### V2-4 iPhone and iPad companion (owner, 11 Nov 2026)
 
+Free in v2: it extends the Mac app (remote and measurement microphone). Mobile editions that
+process audio themselves are v3 (V3-3).
+
 - [ ] Remote for the Mac app using the E16 local API: profile, volume, bypass, Quiet Zone session (subject to the arm), blind comparison from the seat
 - [ ] iPhone as a measurement microphone: needs its own calibration and accuracy design first (per-model microphone response, timing against the Mac's clock, and the limits under which a phone capture is trusted) before any design path uses it
 - [ ] Pairing, discovery and App Store distribution for the iOS app
 
-### V2-5 Headless endpoint on the portable core
-
-- [ ] Run a finished configuration on a Mac mini without a display
-- [ ] Linux build on PipeWire (virtual sink or filter chain, no root), using the E21 core
-- [ ] Configuration by exported project file and by the local API; the UI-shell decision for non-Apple platforms is made here
-- [ ] This is the route to a hardware partnership; decide the distribution model first
+### V2-5 Moved to v3 as V3-2 (owner, 17 Nov 2026)
 
 ### V2-6 Licensed immersive decoding
 
@@ -189,18 +200,15 @@ which lists the first items and says it splits into three or four slices.
 - [ ] Show exposure over the day and week, labelled as an estimate
 - [ ] Speaker listening level (SPL) and noise dose at the seat, deferred from E33 D9 (owner, 15 Nov 2026); needs an output-to-seat SPL reference, which v1 does not have
 
-### V2-12 Plug-in edition of room correction
+### V2-12 Parked (owner, 17 Nov 2026)
 
-- [ ] An Audio Unit of the correction stage for use inside players and DAWs, loading a correction designed in the app
+See "Conditional and undecided items".
 
 ### V2-13 Virtual bass for small speakers
 
 - [ ] Psychoacoustic bass extension below a small speaker's range. Borderline with "effects", so the owner decides scope first
 
-### V2-14 Windows edition
-
-- [ ] Needs a signed virtual audio driver or an APO (loopback capture cannot intercept the default output), an installer and a UI shell
-- [ ] Only after the portable core (E21) and the headless endpoint (V2-5) are complete
+### V2-14 Moved to v3 as V3-1 (owner, 17 Nov 2026)
 
 ### V2-15 Community sharing
 
@@ -267,7 +275,43 @@ v1 ships in English only (E18).
 - [ ] Then add translations, with screen checks of every page in each language
 - [ ] Settle before planning: which languages, and who translates
 
+## v3: other platforms (owner, 17 Nov 2026)
+
+Status: not started; after v2. Each edition is sold separately and runs the E21 portable core
+behind its own platform backend and UI shell.
+
+| ID | Epic | Size | Depends on | Owner decision needed before planning |
+| --- | --- | --- | --- | --- |
+| V3-1 | Windows edition (was V2-14) | Very large | E21, V3-2 | Yes: driver, installer, UI shell, price |
+| V3-2 | Headless endpoint and Linux (was V2-5) | Large | E21 | Yes: UI shell, distribution, price |
+| V3-3 | Mobile editions (exploration first) | Medium to large | E21, V2-4 | Yes: which platforms and options, after the investigation |
+
+### V3-1 Windows edition (was V2-14)
+
+- [ ] Needs a signed virtual audio driver or an APO (loopback capture cannot intercept the default output), an installer and a UI shell
+- [ ] Only after the portable core (E21) and the headless endpoint (V3-2) are complete
+
+### V3-2 Headless endpoint and Linux (was V2-5)
+
+- [ ] Run a finished configuration on a Mac mini without a display
+- [ ] Linux build on PipeWire (virtual sink or filter chain, no root), using the E21 core
+- [ ] Configuration by exported project file and by the local API; the UI-shell decision for non-Apple platforms is made here
+- [ ] This is the route to a hardware partnership; decide the distribution model first
+
+### V3-3 Mobile editions (exploration first)
+
+- [ ] Investigation before any plan: what each platform allows, checked against current platform documentation. Working assumptions to verify: iOS does not let an app process other apps' audio, so options there are a player that corrects its own playback, an AUv3 extension inside host apps, or correction profiles used by partner apps; Android has allowed system-wide equaliser apps, so system-wide headphone correction may be possible there
+- [ ] Choose which editions to build from the investigation. Headphone correction is the likely core, since phones mostly play through headphones; room correction matters when a phone or tablet drives a speaker system
+- [ ] Kept apart from V2-4, which stays a free companion to the Mac app
+
 ## Conditional and undecided items
+
+- Plug-in edition of room correction (was V2-12; parked, owner 17 Nov 2026): an Audio Unit (and
+  possibly VST3 or AAX) of the correction stage for players and DAWs. Parked because it serves the
+  studio market rather than listeners, carries only plain room correction (Quiet Zone, MIMO, bass
+  management, upmixing and 3D sound need the whole playback system), and adds per-host support;
+  v1 and V2-1 already process DAW playback. Revisit only if buyers after launch ask for it; the
+  E21 core makes it fairly cheap to add then.
 
 - E20 multirate (decimated low-frequency regions) leaves v1 if the E20 S8 re-measurement shows no
   need (owner, 11 Nov 2026). It gets an epic here only if a later measurement shows a need.
