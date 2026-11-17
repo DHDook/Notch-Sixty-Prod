@@ -17,7 +17,7 @@ phases with gates G1–G4. Each epic's approved plan and slice status live in
 [`docs/epics/`](docs/epics/). Unfinished epics merge dark behind feature flags
 (see [`docs/FEATURE_FLAGS.md`](docs/FEATURE_FLAGS.md)).
 
-Minimum macOS is **26**. v1 ships only when every scoped epic is complete and
+Minimum macOS is **27**. v1 ships only when every scoped epic is complete and
 the hardware regression passes at every rate from 44.1 to 384 kHz.
 
 The pre-trunk history (the stacked PR31–PR117 notes, batch and RC handoffs and

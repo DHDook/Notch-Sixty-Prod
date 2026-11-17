@@ -239,3 +239,22 @@ final class CompressorExtrasConfigTests: XCTestCase {
         XCTAssertTrue(FeatureFlag.all.contains(.roomModel))
     }
 }
+
+/// E34 S0: the design-language flag is registered, dark by default, and a release configuration keeps it off.
+final class DesignLanguageFlagTests: XCTestCase {
+    @MainActor
+    func testDesignLanguageFlagIsRegisteredAndOffByDefault() {
+        XCTAssertTrue(FeatureFlag.all.contains(.designLanguage))
+        XCTAssertEqual(FeatureFlag.designLanguage.id, "e34.design-language")
+        XCTAssertFalse(FeatureFlag.designLanguage.graduated)
+        let suite = "DesignLanguageFlagTests"
+        let defaults = UserDefaults(suiteName: suite)!
+        defaults.removePersistentDomain(forName: suite)
+        let release = FeatureFlags(known: FeatureFlag.all, defaults: defaults, policy: .launchArgumentOnly, arguments: [], environment: [:])
+        XCTAssertFalse(release.isEnabled(.designLanguage))
+        let on = FeatureFlags(known: FeatureFlag.all, defaults: defaults, policy: .launchArgumentOnly,
+                              arguments: ["-NotchSixtyFeatures", "e34.design-language"], environment: [:])
+        XCTAssertTrue(on.isEnabled(.designLanguage))
+        defaults.removePersistentDomain(forName: suite)
+    }
+}

@@ -19,12 +19,12 @@ All work follows the v1 program plan in `docs/PROGRAM_PLAN.md` (23 epics, E1–E
 gates G1–G4). Read the relevant epic there before planning any change, and name the epic ID in
 every branch, commit and PR (for example `e2/macos26-deployment-target`).
 
-Owner decisions of 17 Oct 2026. `AGENTS.md` records the trunk, macOS 26, feature-flag,
+Owner decisions of 17 Oct 2026. `AGENTS.md` records the trunk, macOS 27, feature-flag,
 behavioural-test, three-workflow and portable-core rules (E1 S6, E21 S2):
 
 - `main` is the trunk. Use short-lived branches and PRs, one slice each, behind the epic's
   feature flag. Do not build stacked draft chains.
-- Minimum macOS is 26.
+- Minimum macOS is 27 (owner, 17 Nov 2026; E34 S0).
 - Speaker ANC (Quiet Zone) is the flagship differentiator; never enable live ANC or live MIMO
   room treatment outside their written authorisation paths.
 - Every feature must work at every device rate up to 384 kHz.

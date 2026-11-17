@@ -3,6 +3,7 @@
 Mac App Store compatibility is an architectural constraint, not a release-time retrofit.
 
 ## Required posture
+- Minimum macOS 27 (owner decision, 17 Nov 2026, E34 S0): the deployment target and `LSMinimumSystemVersion` are 27.0, and macOS 27 APIs are used without availability checks
 - App Sandbox enabled in the shipping target
 - public Apple APIs only
 - no privileged installer

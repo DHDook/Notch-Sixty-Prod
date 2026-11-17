@@ -7,7 +7,7 @@ The stereo render kernel is described in `docs/DSP_KERNEL.md`; realtime rules ar
 ## Goals
 
 - Public Core Audio APIs only: no HAL driver, privileged helper or system extension.
-- App Sandbox and Mac App Store from day one (`docs/APP_STORE_REQUIREMENTS.md`). Minimum macOS 26.
+- App Sandbox and Mac App Store from day one (`docs/APP_STORE_REQUIREMENTS.md`). Minimum macOS 27.
 - A control plane (Swift, may block) kept strictly apart from the render plane (C today, may never
   block).
 - The selected physical output, identified by its stable UID, is authoritative.
