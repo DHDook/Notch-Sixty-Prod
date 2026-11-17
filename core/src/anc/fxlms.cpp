@@ -8,6 +8,7 @@
 // J. W. Tukey, The Measurement of Power Spectra (1958).
 
 #include "n60/fxlms.hpp"
+#include "optional_try.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -585,7 +586,7 @@ N60AncDecimator *N60AncDecimatorCreate(double sampleRate) {
     if (n60::anc::Decimator::factorFor(sampleRate) == 0) return nullptr;
     try {
         return new N60AncDecimator{n60::anc::Decimator(sampleRate)};
-    } catch (...) {
+    } N60_CATCH_ALL {
         return nullptr;
     }
 }
@@ -650,7 +651,7 @@ N60AdaptiveTonal *N60AdaptiveTonalCreate(const N60AdaptiveTonalConfig *config) {
     if (!N60AdaptiveTonalConfigIsValid(config)) return nullptr;
     try {
         return new N60AdaptiveTonal{n60::anc::AdaptiveTonal(*config)};
-    } catch (...) {
+    } N60_CATCH_ALL {
         return nullptr;
     }
 }
@@ -700,7 +701,7 @@ N60BlockFxlms *N60BlockFxlmsCreate(const N60BlockFxlmsConfig *config) {
     if (!N60BlockFxlmsConfigIsValid(config)) return nullptr;
     try {
         return new N60BlockFxlms{n60::anc::BlockFxlms(*config)};
-    } catch (...) {
+    } N60_CATCH_ALL {
         return nullptr;
     }
 }
