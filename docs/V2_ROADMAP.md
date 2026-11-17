@@ -19,7 +19,7 @@ constraints follow from that, and most of v2 is what becomes possible when one i
 | macOS only | V2-4, V2-5, V2-14 |
 | No licensed decoders or data | V2-6, V2-7, V2-8 |
 
-The remaining epics (V2-9 to V2-13, V2-15, V2-16) are features that were deferred for priority only.
+The other epics (V2-9 to V2-13 and V2-15 to V2-24) are features left out of v1 for priority or scope; the last column of the table below says which need an owner decision first.
 
 ## Epics at a glance
 
@@ -45,7 +45,10 @@ The remaining epics (V2-9 to V2-13, V2-15, V2-16) are features that were deferre
 | V2-18 | Selective restore from a backup | Small | E12 S25 | No |
 | V2-19 | Rates above 384 kHz | Small to medium | E7 | Yes: changes the `AGENTS.md` section 8 rate list |
 | V2-20 | Second zone | Medium to large | E8 | Yes: changes the one-selected-output rule in `AGENTS.md` section 3 |
-| V2-21 | Speaker remapping and reflection control | Large | post-v1 multichannel playback, E19 | Yes: needs a multi-capsule microphone |
+| V2-21 | Speaker remapping and reflection control | Large | E6, E10, E14, E19 | Yes: needs a multi-capsule microphone |
+| V2-22 | Dialogue separation | Medium to large | E14, E21, E33 S13 | Yes: which option after the investigation, and the training-data licence |
+| V2-23 | Per-band EQ placement and linear-phase multiband | Small to medium | E33 (S5b, S20, S27) | No |
+| V2-24 | Languages | Medium | v1 | Yes: which languages, and who translates |
 
 Sizes are rough: small is one or two slices, medium three to six, large more than six.
 
@@ -54,9 +57,9 @@ Sizes are rough: small is one or two slices, medium three to six, large more tha
 Three waves. The order inside a wave is by value for effort; the owner can reorder freely because
 only the listed dependencies are hard.
 
-1. **First update (no policy change, builds on v1 directly):** V2-9, V2-11, V2-16, V2-17, V2-2, V2-10.
-2. **Reach (new surfaces for the same engine):** V2-4, V2-1, V2-3, V2-12.
-3. **Platforms and licences:** V2-5, V2-7, V2-8, V2-6, V2-13, V2-14, V2-15.
+1. **First update (no policy change, builds on v1 directly):** V2-9, V2-11, V2-16, V2-17, V2-18, V2-23, V2-2, V2-10.
+2. **Reach (new surfaces and markets for the same engine):** V2-4, V2-1, V2-3, V2-20, V2-24, V2-12.
+3. **Platforms, licences and larger features:** V2-5, V2-7, V2-8, V2-6, V2-13, V2-19, V2-21, V2-22, V2-14, V2-15.
 
 If only one item is pulled forward, V2-2 is the recommended one: it is the main thing a hardware
 DSP box offers that v1 does not, and it needs no sandbox change.
@@ -104,6 +107,7 @@ driver say so in the app. The App Store listing is wanted but is not a hard requ
   - A multichannel DAC used for an active stereo system no longer has to be set to stereo in Audio MIDI Setup
   - Silence, not unprocessed audio, when the app stops. Builds on the E9 S9 finding
   - Players that take exclusive control can target the virtual device (E23 S8 finding)
+  - Lip sync: the device reports the app's total added delay to macOS as its latency and keeps it current, so video players stay in sync by themselves (owner, 17 Nov 2026; end-state review). v1 shows the delay in the E31 signal-path view
 - [ ] Tests: driver unit tests for the ring and clock; app tests with a fake device for both backends, the switch, a missing driver and an unknown driver version, at the eight rates. Bench: install, update and removal; rate changes; sleep and wake; DAC unplug; force-quit; a macOS update; the tap path unchanged with the driver installed but off
 
 ### V2-2 Input and preamp mode
@@ -128,8 +132,9 @@ Not planned (owner, 16 Nov 2026):
 
 Receive audio from other players.
 
-- [ ] An open UPnP/DLNA renderer first (no certification needed); licence review of any library
-- [ ] Roon Ready and AirPlay receiving only after an owner decision on certification and licence
+- [ ] First check macOS's own AirPlay Receiver, which lets an iPhone play to the Mac (owner, 17 Nov 2026; end-state review). If the tap processes its audio (the E22 check), that may be enough, and our own AirPlay receiver and its licence are not needed
+- [ ] Then an open UPnP/DLNA renderer (no certification needed); licence review of any library
+- [ ] Roon Ready, and our own AirPlay receiving if macOS's receiver is not enough, only after an owner decision on certification and licence
 - [ ] Gapless playback, rate changes between tracks, and volume control from the sender
 
 ### V2-4 iPhone and iPad companion (owner, 11 Nov 2026)
@@ -236,7 +241,31 @@ which lists the first items and says it splits into three or four slices.
 
 - [ ] Find each speaker's true direction with a multi-capsule microphone and re-render a multichannel layout to its intended positions
 - [ ] From measurements first, decide whether early reflections above the bass range can be treated beyond what E10 and E19 already do
-- Needs more than two speakers, so it follows post-v1 multichannel playback
+- Needs a multi-capsule microphone. Builds on v1's multichannel layouts and correction (E6, E10, E14) and on E19; v1 already plays multichannel layouts (corrected 17 Nov 2026)
+
+### V2-22 Dialogue separation (owner, 17 Nov 2026; from the end-state review)
+
+v1 lifts dialogue only where the source has a centre channel (E33 S13). This brings clearer dialogue to stereo sources.
+
+- [ ] Investigation first: compare a dialogue level on E14's upmixed centre channel with a trained separation model, on clarity, artefacts, added delay and CPU, including how a model trained at one rate serves every device rate up to 384 kHz; the owner chooses before planning
+- [ ] A trained model trains only on data we own or license (MUSDB18 and similar datasets are non-commercial); provenance and licence entries for every dataset and for the model
+- [ ] The model sits behind a core interface with a Core ML backend in `core/platform/macos`. It runs on its own thread with a fixed, reported delay, never in the audio callback
+- [ ] Tests at the eight rates; bench: dialogue clarity by ear on film and TV sources
+
+### V2-23 Per-band EQ placement and linear-phase multiband (owner, 17 Nov 2026; from the end-state review)
+
+- [ ] Per-band placement: each band works on both channels, left, right, mid or side, all within one EQ (today each lane of the linked, independent or mid/side mode has its own band list). Old profiles load unchanged
+- [ ] Then a linear-phase mode for the multiband compressor, built on the E33 S27 linear-phase design, with its added delay shown in the E31 signal-path view
+- [ ] Settle in planning: how placement combines with the E33 S20 speaker groups on wide sessions
+- [ ] Tests at the eight rates
+
+### V2-24 Languages (owner, 17 Nov 2026; from the end-state review)
+
+v1 ships in English only (E18).
+
+- [ ] Move all the app's text into a string catalogue, including text the code builds with `String(format:)`, and show and accept numbers and units in the user's format
+- [ ] Then add translations, with screen checks of every page in each language
+- [ ] Settle before planning: which languages, and who translates
 
 ## Conditional and undecided items
 
@@ -246,6 +275,7 @@ which lists the first items and says it splits into three or four slices.
   owner decides. The signal-path and history view is in v1 as E31.
 - Not planned (owner, 17 Nov 2026): DSD output (system audio from macOS is PCM, and every correction stage needs PCM), and
   MIDI or OSC control (the E16 local API covers integrations).
+- E35's filter method (owner, 17 Nov 2026; end-state review): look again at the regularisation calculated per frequency that E35 avoids (`docs/epics/E35.md` decision 3) once US 9,167,344 ends on 18 Apr 2032, with a patent attorney's check first, because Google's US 11,589,162 runs to about November 2039.
 
 ## How to start
 
