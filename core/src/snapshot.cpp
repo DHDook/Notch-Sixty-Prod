@@ -26,6 +26,7 @@
 #include "stages_mimo.hpp"
 #include "stages_matrix.hpp"
 #include "stages_system.hpp"
+#include "input_overs.hpp"
 
 #include <algorithm>
 #include <cfloat>
@@ -78,7 +79,19 @@ struct MeterLane {
     std::atomic<uint32_t> peakBits;  // positive floats order like their bit patterns
     std::atomic<uint32_t> rmsBits;
     std::atomic<uint64_t> overRange;  // ABI v8: samples with |x| > 1.0 since the last read
+    // ABI v44 (E33 S10): input overs, METER_IN only. Monotonic count of frames above 0 dBTP while detect = 1; a read never
+    // clears it, only the generation parameter does. Carried to the next snapshot at adoption (carryInputOvers).
+    std::atomic<uint64_t> inputOvers;
+    uint32_t oversGen;      // the generation parameter the count was last cleared for
+    uint32_t oversWasOn;    // detect was 1 in the previous block (the history is stale when it was 0)
+    OversDetector over;
 };
+
+n60_status validateInputOversParams(const float *p) {
+    const bool detect = p[0] == 0.0f || p[0] == 1.0f;
+    const bool gen = p[1] >= 0.0f && p[1] <= 16777216.0f && p[1] == std::floor(p[1]);
+    return detect && gen ? N60_STATUS_OK : N60_STATUS_BAD_ARGUMENT;
+}
 
 size_t alignUp(size_t v) { return (v + (kAlign - 1)) & ~(kAlign - 1); }
 
@@ -513,6 +526,10 @@ n60_status validateDesc(const n60_graph_desc &d) {
                 }
                 break;
             }
+            case N60_STAGE_METER_IN:  // ABI v44: no params, or [0] detect and [1] generation
+                if (s.paramCount != 0 && s.paramCount != 2) return N60_STATUS_BAD_ARGUMENT;
+                if (s.paramCount == 2 && (validateInputOversParams(s.params) != N60_STATUS_OK)) return N60_STATUS_BAD_ARGUMENT;
+                break;
             default:
                 if (s.paramCount != 0) return N60_STATUS_BAD_ARGUMENT;
                 break;
@@ -633,6 +650,10 @@ n60_status buildSnapshot(const n60_graph_desc &d, uint32_t epoch, SnapHeader **o
                     m->peakBits.store(0, std::memory_order_relaxed);
                     m->rmsBits.store(0, std::memory_order_relaxed);
                     m->overRange.store(0, std::memory_order_relaxed);
+                    m->inputOvers.store(0, std::memory_order_relaxed);
+                    m->oversGen = 0;
+                    m->oversWasOn = 0;
+                    m->over.init();
                     break;
                 }
                 case N60_STAGE_GAIN: {
@@ -726,6 +747,12 @@ const StageRec *findStage(const SnapHeader *snap, uint32_t stageId) {
 n60_status validateParam(const SnapHeader *snap, const StageRec &r, uint32_t paramIndex, float value) {
     if (!std::isfinite(value)) return N60_STATUS_BAD_ARGUMENT;
     switch (r.kind) {
+        case N60_STAGE_METER_IN:  // ABI v44: [0] detect (0 or 1), [1] generation (integer 0..16777216)
+            if (paramIndex == 0) return (value == 0.0f || value == 1.0f) ? N60_STATUS_OK : N60_STATUS_BAD_ARGUMENT;
+            if (paramIndex == 1) {
+                return (value >= 0.0f && value <= 16777216.0f && value == std::floor(value)) ? N60_STATUS_OK : N60_STATUS_BAD_ARGUMENT;
+            }
+            return N60_STATUS_BAD_ARGUMENT;
         case N60_STAGE_GAIN:
             return (paramIndex != 0 || value < -10000.0f || value > 10000.0f) ? N60_STATUS_BAD_ARGUMENT : N60_STATUS_OK;  // ABI v19: negative inverts polarity
         case N60_STAGE_DELAY:
@@ -828,6 +855,42 @@ bool readOverRange(SnapHeader *snap, uint32_t stageId, uint32_t lane, uint64_t *
     return true;
 }
 
+bool readInputOvers(SnapHeader *snap, uint32_t stageId, uint32_t lane, uint64_t *count) {
+    const StageRec *r = findStage(snap, stageId);
+    if (r == nullptr || r->kind != N60_STAGE_METER_IN || r->paramCount < 2 || lane < r->laneFirst ||
+        lane >= r->laneFirst + r->laneCount) {
+        return false;
+    }
+    const MeterLane *m = reinterpret_cast<const MeterLane *>(laneState(snap, *r, lane - r->laneFirst));
+    *count = m->inputOvers.load(std::memory_order_relaxed);
+    return true;
+}
+
+// Realtime thread, at adopt: the input-over totals and the generation of `to` continue from `from`'s (same stage id and
+// lane). A bounded copy of one counter per lane; returns the bytes copied.
+uint64_t carryInputOvers(SnapHeader *from, SnapHeader *to) N60_RT_NONBLOCKING {
+    if (from == nullptr || to == nullptr) return 0;
+    uint64_t bytes = 0;
+    const StageRec *src = stages(from);
+    StageRec *dst = stages(to);
+    for (uint32_t i = 0; i < to->stageCount; ++i) {
+        if (dst[i].kind != N60_STAGE_METER_IN || dst[i].paramCount < 2) continue;
+        for (uint32_t j = 0; j < from->stageCount; ++j) {
+            if (src[j].kind != N60_STAGE_METER_IN || src[j].id != dst[i].id || src[j].paramCount < 2) continue;
+            for (uint32_t l = 0; l < dst[i].laneCount; ++l) {
+                if (dst[i].laneFirst + l < src[j].laneFirst || dst[i].laneFirst + l >= src[j].laneFirst + src[j].laneCount) continue;
+                const MeterLane *a = reinterpret_cast<const MeterLane *>(laneState(from, src[j], dst[i].laneFirst + l - src[j].laneFirst));
+                MeterLane *b = reinterpret_cast<MeterLane *>(laneState(to, dst[i], l));
+                b->inputOvers.store(a->inputOvers.load(std::memory_order_relaxed), std::memory_order_relaxed);
+                b->oversGen = a->oversGen;
+                bytes += sizeof(uint64_t) + sizeof(uint32_t);
+            }
+            break;
+        }
+    }
+    return bytes;
+}
+
 bool readDynamics(SnapHeader *snap, uint32_t stageId, uint32_t lane, n60_dynamics_readback *out) {
     const StageRec *r = findStage(snap, stageId);
     if (r == nullptr) return false;
@@ -892,6 +955,26 @@ void runMeter(MeterLane &m, const float *buf, uint32_t frames) {
     while (pb > seen && !m.peakBits.compare_exchange_weak(seen, pb, std::memory_order_relaxed)) {
     }
     m.rmsBits.store(floatBits(static_cast<float>(std::sqrt(sum / frames))), std::memory_order_relaxed);
+}
+
+// ABI v44 (E33 S10): the input-over detector of a METER_IN lane. Params: [0] detect, [1] generation. Detect 0 does nothing.
+void runInputOvers(SnapHeader *h, const StageRec &r, MeterLane &m, const float *buf, uint32_t frames) {
+    const float *p = paramsOf(h, r);
+    const uint32_t gen = static_cast<uint32_t>(p[1]);
+    if (gen != m.oversGen) {
+        m.oversGen = gen;
+        m.inputOvers.store(0, std::memory_order_relaxed);
+    }
+    if (p[0] < 0.5f) {
+        m.oversWasOn = 0;
+        return;
+    }
+    if (m.oversWasOn == 0) {
+        m.over.clear();
+        m.oversWasOn = 1;
+    }
+    const uint64_t n = oversCount(m.over, buf, frames, oversFactorForRate(h->sampleRate));
+    if (n != 0) m.inputOvers.fetch_add(n, std::memory_order_relaxed);
 }
 
 void runGain(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) {
@@ -1272,7 +1355,9 @@ void runStage(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames, 
         case N60_STAGE_METER_IN:
         case N60_STAGE_METER_OUT:
             for (uint32_t l = 0; l < r.laneCount; ++l) {
-                runMeter(*reinterpret_cast<MeterLane *>(laneState(h, r, l)), lanes[r.laneFirst + l], frames);
+                MeterLane &ml = *reinterpret_cast<MeterLane *>(laneState(h, r, l));
+                runMeter(ml, lanes[r.laneFirst + l], frames);
+                if (r.kind == N60_STAGE_METER_IN && r.paramCount >= 2) runInputOvers(h, r, ml, lanes[r.laneFirst + l], frames);
             }
             break;
         case N60_STAGE_GAIN: runGain(h, r, lanes, frames); break;

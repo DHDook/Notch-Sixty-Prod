@@ -244,6 +244,7 @@ uint64_t carrySmallState(n60::SnapHeader *from, n60::SnapHeader *to) {
     bytes += n60::loudnessCarry(from, to);             // E6 S12h: loudness and multiband running state (G16, G21)
     bytes += n60::multibandCarry(from, to);
     bytes += n60::expanderCarry(from, to);             // ABI v41: the expander lookahead rings
+    bytes += n60::carryInputOvers(from, to);           // ABI v44: input-over totals
     bytes += n60::deltaCarry(from, to);                // ABI v30: the delta capture ring
     return bytes;
 }
@@ -771,6 +772,16 @@ n60_status n60_graph_read_over_range(n60_graph *g, uint32_t stageId, uint32_t la
     if (g == nullptr || count == nullptr) return N60_STATUS_BAD_ARGUMENT;
     syncLatest(g);
     return n60::readOverRange(g->latest, stageId, lane, count) ? N60_STATUS_OK : N60_STATUS_BAD_ARGUMENT;
+}
+
+n60_status n60_graph_read_input_overs(n60_graph *g, uint32_t stageId, uint32_t lane, uint64_t *count) {
+    if (g == nullptr || count == nullptr) return N60_STATUS_BAD_ARGUMENT;
+    syncLatest(g);
+    // The live snapshot carries the running total; a published one not yet adopted starts at 0 until adopt() carries it, so
+    // read the live one first (control thread: it is retired only by n60_graph_collect on this thread).
+    n60::SnapHeader *live = g->liveSnap.load(std::memory_order_acquire);
+    if (live != nullptr && n60::readInputOvers(live, stageId, lane, count)) return N60_STATUS_OK;
+    return n60::readInputOvers(g->latest, stageId, lane, count) ? N60_STATUS_OK : N60_STATUS_BAD_ARGUMENT;
 }
 
 n60_status n60_graph_read_guard(n60_graph *g, uint32_t stageId, n60_guard_status *out) {

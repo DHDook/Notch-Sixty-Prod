@@ -165,6 +165,38 @@ struct ProductionDropoutCard: View {
     }
 }
 
+/// Input overs (E33 S10): frames above 0 dBTP at the chain input, per lane, since the page was shown or reset.
+struct ProductionInputOversCard: View {
+    let reading: InputOversReading
+    let isRunning: Bool
+    let onReset: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(reading.title).font(.title3.bold())
+                Spacer()
+                Button("Reset", action: onReset).accessibilityIdentifier("meters.inputOvers.reset")
+            }
+            if isRunning, !reading.counts.isEmpty {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 120), spacing: 12)], spacing: 12) {
+                    meterTile("Total", "\(reading.total)", id: "meters.inputOvers.total")
+                    ForEach(Array(reading.perLane.prefix(8).enumerated()), id: \.offset) { lane, count in
+                        meterTile("Lane \(lane + 1)", "\(count)", id: "meters.inputOvers.lane\(lane + 1)")
+                    }
+                }
+            } else {
+                Text("Start processing to count input overs.").font(.callout).foregroundStyle(.secondary)
+            }
+            Text(reading.note).font(.caption).foregroundStyle(.secondary)
+        }
+        .padding(16)
+        .background(.quaternary.opacity(0.14), in: .rect(cornerRadius: 18))
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("meters.inputOvers")
+    }
+}
+
 /// Third-octave bars (D8): 31 bars, −90…0 dBFS.
 struct ProductionRTABarsView: View {
     let levelsDB: [Float]

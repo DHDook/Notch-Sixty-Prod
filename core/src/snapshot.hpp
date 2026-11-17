@@ -156,6 +156,10 @@ bool readMeter(SnapHeader *snap, uint32_t stageId, uint32_t lane, float *peak, f
 // dynamics readback of a compressor, expander or protection stage lane (grMaxDb, peaks reset by the read).
 bool readOverRange(SnapHeader *snap, uint32_t stageId, uint32_t lane, uint64_t *count);
 bool readDynamics(SnapHeader *snap, uint32_t stageId, uint32_t lane, n60_dynamics_readback *out);
+// ABI v44 (E33 S10). Control thread: monotonic input-over count of a METER_IN lane (paramCount 2; never reset by the read).
+bool readInputOvers(SnapHeader *snap, uint32_t stageId, uint32_t lane, uint64_t *count);
+// Realtime thread, at adopt: the totals continue across a rebuild. Returns the bytes copied.
+uint64_t carryInputOvers(SnapHeader *from, SnapHeader *to) N60_RT_NONBLOCKING;
 
 // Non-negative floats order like their bit patterns, so a peak-hold is an atomic max on the bits. The realtime
 // thread raises it; the control thread resets it with exchange(0). Wait-free on the realtime side apart from

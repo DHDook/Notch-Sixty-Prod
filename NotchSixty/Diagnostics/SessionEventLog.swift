@@ -5,7 +5,7 @@ import Foundation
 // is stored.
 
 enum SessionEventKind: String, Codable, CaseIterable, Sendable {
-    case clip, truePeakOver, limiter, protection, dropout, deviceLoss, deviceRecovered, rateChange
+    case clip, truePeakOver, limiter, protection, dropout, deviceLoss, deviceRecovered, rateChange, inputOver
 
     var title: String {
         switch self {
@@ -17,6 +17,7 @@ enum SessionEventKind: String, Codable, CaseIterable, Sendable {
         case .deviceLoss: return "Output lost"
         case .deviceRecovered: return "Output recovered"
         case .rateChange: return "Rate change"
+        case .inputOver: return "Input overs"
         }
     }
 }
@@ -45,6 +46,7 @@ struct SessionEvent: Codable, Equatable, Identifiable, Sendable {
         case .dropout: return "\(Int(amount)) frames"
         case .deviceLoss, .deviceRecovered: return ""
         case .rateChange: return String(format: "%.1f kHz", amount / 1_000)
+        case .inputOver: return "\(Int(amount)) overs"
         }
     }
 
@@ -91,6 +93,7 @@ struct SessionEventLog: Equatable, Sendable {
     private var lastAttempts: UInt64?
     private var lastSuccesses: UInt64?
     private var lastRate: Double?
+    private var lastInputOvers: [UInt64]?
     private var openEpisodes: [String: UUID] = [:]
 
     init(events: [SessionEvent] = []) {
@@ -106,7 +109,7 @@ struct SessionEventLog: Equatable, Sendable {
 
     /// A new session: counters rebaseline without an event.
     mutating func rebaseline() {
-        lastUnderrun = nil; lastOverrun = nil; lastAttempts = nil; lastSuccesses = nil; lastRate = nil
+        lastUnderrun = nil; lastOverrun = nil; lastAttempts = nil; lastSuccesses = nil; lastRate = nil; lastInputOvers = nil
         for i in events.indices { events[i].episodeOpen = false }
         openEpisodes = [:]
     }
@@ -150,6 +153,16 @@ struct SessionEventLog: Equatable, Sendable {
                 record(.rateChange, place: "", amount: rate, at: s.now, replace: true)
             }
             lastRate = rate
+        }
+    }
+
+    /// E33 S10 (closes G54): the core's monotonic input-over counts per lane, read while the Levels page shows them. The first
+    /// reading (and any reading after a reset, when a count falls) is the baseline; a rise is an event for that lane.
+    mutating func observeInputOvers(counts: [UInt64], at now: Date) {
+        defer { lastInputOvers = counts }
+        guard let last = lastInputOvers, last.count == counts.count else { return }
+        for (lane, count) in counts.enumerated() where count > last[lane] {
+            record(.inputOver, place: "Input \(lane + 1)", amount: Double(count - last[lane]), at: now, sum: true)
         }
     }
 
@@ -284,6 +297,15 @@ final class SessionEventHistory: ObservableObject {
         let archive = store?.load() ?? SessionEventArchive()
         previous = archive.current.isEmpty ? archive.previous : archive.current
         log = SessionEventLog()
+    }
+
+    /// E33 S10: input overs from the Levels page poll (the detector runs only while that page is shown).
+    func observeInputOvers(counts: [UInt64], now: Date) {
+        sessionActive = true
+        let before = log.events.last
+        let n = log.events.count
+        log.observeInputOvers(counts: counts, at: now)
+        if log.events.count != n || log.events.last != before { dirty = true }
     }
 
     func observe(_ sample: SessionEventSample) {
