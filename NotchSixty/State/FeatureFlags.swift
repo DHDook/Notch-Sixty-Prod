@@ -35,7 +35,7 @@ extension FeatureFlag {
         .noiseSurvey, .conversationUnmasking, .virtualMicrophone, .zones, .headPositionCamera, .overnight,
         .subAwareAnc, .longFIR, .outputProtection, .headphones, .mimoTreatment, .dynamicsExtras, .roomModel,
         .parallelRender, .multirate, .rateAdapt, .coreDesigners,
-        .eqPageEnhancements
+        .eqPageEnhancements, .dynamicsSound
     ]
 
     /// E6 S11: the unified graph is the default renderer. Turning this on selects the frozen
@@ -268,6 +268,15 @@ extension FeatureFlag {
         id: "e33.page-enhancements",
         title: "Equalizer, Dynamics and Meters enhancements",
         epic: "E33"
+    )
+    /// E32 S5: three sound changes in the graph's dynamics (the limiter's attack never exceeds its look-ahead, the expander's
+    /// Attack opens and Release closes, the true-peak factor follows the device rate). Swift decides and publishes them in the
+    /// stage parameters; the core never reads the flag. Off: every stage renders exactly as before. Removed in the
+    /// flag-cleanup phase.
+    static let dynamicsSound = FeatureFlag(
+        id: "e32.dynamics-sound",
+        title: "Dynamics sound fixes",
+        epic: "E32"
     )
 }
 

@@ -105,8 +105,8 @@ enum UnifiedGraphTranslator {
                 stages.compressor = base + extras
             }
             // E28 S7b: the 6-value expander block becomes the 13-value one (hold, knee, detector, window, filter, link, listen);
-            // E33 S5a: an eighth extra, the lookahead frames, makes it the 14-value one.
-            if let extras = expanderExtras, extras.count == 7 || extras.count == 8, let base = stages.expander, base.count == 6 {
+            // E33 S5a: an eighth extra, the lookahead frames, makes it the 14-value one; E32 S5: a ninth, the timing swap, the 15-value one.
+            if let extras = expanderExtras, (7...9).contains(extras.count), let base = stages.expander, base.count == 6 {
                 stages.expander = base + extras
             }
             // E28 S7c: the 29-value multiband block becomes the 43-value one. The 17 extras are the auto-release flags (they
@@ -156,7 +156,7 @@ enum UnifiedGraphTranslator {
         if d5 {
             // The processed path's latency is what the control plane reports for this snapshot; the graph pads the lanes
             // with whatever the removed program DSP contributed, so a toggle keeps the latency (decision 16).
-            let pad = Int(snapshot.latencyFrames) - Int(snapshot.protection.latencyFrames)
+            let pad = Int(snapshot.latencyFrames) - Int(DynamicsSoundFixes.protectionLatencyFrames(snapshot.protection, sampleRate: sampleRate))
             // A pad beyond the delay capacity cannot keep the latency, so the kernel keeps the snapshot instead.
             if pad > Int(N60_GRAPH_MAX_DELAY_FRAMES) / 2 { return .failure(.alignmentInvalid) }
             if pad > 0 {

@@ -238,7 +238,7 @@ void validation(double rate) {
     bad.p[13] = -1;
     check(build(rate, bad.p, 14, 2, &st) == nullptr && st == N60_STATUS_BAD_ARGUMENT, rate, "a negative lookahead refused");
     bad.p[13] = 0;
-    check(build(rate, bad.p, 15, 2, &st) == nullptr && st == N60_STATUS_BAD_ARGUMENT, rate, "a 15-value block is refused");
+    check(build(rate, bad.p, 16, 2, &st) == nullptr && st == N60_STATUS_BAD_ARGUMENT, rate, "a 16-value block is refused (15 is the E32 S5 timing swap)");
 }
 }  // namespace
 
