@@ -42,6 +42,7 @@ The remaining epics (V2-9 to V2-13, V2-15, V2-16) are features that were deferre
 | V2-15 | Community sharing | Medium | E18 iCloud sync | Yes: first network feature, moderation |
 | V2-16 | Verification with music | Small to medium | E11, E4 path tracking | No |
 | V2-17 | Speaker and room health check | Small | E11, V2-16 | No |
+| V2-18 | Selective restore from a backup | Small | E12 S25 | No |
 
 Sizes are rough: small is one or two slices, medium three to six, large more than six.
 
@@ -209,6 +210,13 @@ which lists the first items and says it splits into three or four slices.
 - [ ] Compare a new measurement (or the V2-16 estimate) with the stored one per speaker and flag a likely cause: a failing or disconnected driver, a moved speaker or seat, a changed room
 - [ ] Keep a dated history per speaker so slow change is visible
 - [ ] Offer the matching action: re-measure, re-run correction, or check the speaker
+
+### V2-18 Selective restore from a backup (owner, 17 Nov 2026; from the Settings review, E12 G38)
+
+- [ ] Open a backup (manual or automatic) and list what it holds: Content Presets, Playback Systems, Room Correction projects, measurement sessions, binaural profiles, settings
+- [ ] Restore chosen items only; nothing else is replaced. An item with the same name is kept alongside as a copy unless the user chooses to replace it
+- [ ] A restored system whose hardware is not on this Mac asks for mapping, as full restore does today; nothing is bound silently
+- [ ] Works while audio runs when the restored item is not the active one
 
 ## Conditional and undecided items
 
