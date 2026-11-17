@@ -4,7 +4,7 @@
 // an allocation failure terminates, as everywhere else in the core.
 #pragma once
 
-#if defined(__cpp_exceptions) || defined(__EXCEPTIONS)
+#if defined(__cpp_exceptions)
 #define N60_TRY try
 #define N60_CATCH_ALL catch (...)
 #else
