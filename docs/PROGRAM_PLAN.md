@@ -64,7 +64,7 @@ platforms; E6 (the unified graph) is the critical path, because eleven later epi
 | E16 | Automation and remote | 4 | E6 | Claude Code (Mac) | App Intents and the local API ship; the API is ready for a future iPhone client |
 | E17 | Output integrity and interchange (was Export and dither) | 4 | E8, E10 | Claude Code (Mac) | MiniDSP, APO, WAV, FIR, biquad and CamillaDSP exports; REW, FRD, ZMA and APO import; device format shown; automatic dither |
 | E29 | Shared room position model | 4 | see `docs/epics/E29.md` | Claude Code (Mac) | One room position model feeds correction, treatment and Quiet Zone |
-| E30 | Everyday listening controls | 4 | E15, E17 (dither, for software volume) | Claude Code (Mac) | House curves, quick controls, volume features and per-app rules reachable from the Dashboard and the menu bar |
+| E30 | Everyday listening controls | 4 | E15, E17 (dither, for software volume) | Claude Code (Mac) | House curves, quick controls, volume features and per-app rules reachable from the menu bar remote, with their state shown on the Dashboard |
 | E31 | Signal path and history | 4 | E6, E12, E17 (output integrity), E30 | Claude Code (Mac) | One view shows every stage with rate, bit depth, latency, gain and headroom and says when the path is bit-exact; undo, redo and named snapshots with level-matched comparison on every page |
 | E33 | Equalizer, Dynamics and Meters enhancements (owner, 15 Nov 2026) | 3–4 | E32, E27, E28 (bench parts: E22) | Claude Code (Mac) | The 15 Nov 2026 review's approved features are reachable from the three pages: two-column band editor, subsonic bands, APO import and export, band clipboard, one preamp model; numbered dynamics chain, expander lookahead, 2–5 multiband bands; meter zones, shared hold and resets, loudness history; PLR, spectrogram, bit activity, input overs, dropout counter, balance, per-band correlation, headroom strip and RTA |
 | E23 | Legacy engine removal | 4 | E6 (incl. S12a–S12h), E4 S11, E7–E17 | Claude Code (Mac) | `N60RenderKernel`, the old N-channel path and the `e6.*` flags are gone; full suite green |
@@ -101,6 +101,7 @@ reviewers compare with Dirac and REW), then engine depth, then breadth.
     - first E33 Equalizer, Dynamics and Meters enhancements, S1–S11 in written order, after E32 and before these E21 items (owner, 15 Nov 2026, `docs/epics/E33.md` decision 1)
 11. E14 Upmixer, E15 Device-aware profiles, E17 Output integrity and interchange, E16 Automation and remote, then E30 Everyday listening controls and E31 Signal path and history (owner, 11 Nov 2026; E30 needs E15 and the E17 dither stage; E31 follows E30)
     - then E8 S12–S16 active-speaker commissioning, in written order, before E12 S8 and before item 12 (owner approved the slices 16 Nov 2026; this position is proposed, the owner may move it; `docs/epics/E8.md`)
+    - E12 S9, then S12–S14 Dashboard and menu bar, run before E30 in this item so the E30 controls land in the remote (owner approved the slices 16 Nov 2026; this position is proposed, the owner may move it; `docs/epics/E12.md`)
 12. E23 Legacy engine removal
 13. E29 Shared room position model (owner, 9 Nov 2026: unparked, in v1; plan `docs/epics/E29.md`; flag `e29.room-model`, graduated in S9, removed in FC)
 14. E3 Hardware acceptance, then E22 Hardware validation, then FC flag cleanup, then E18 Launch readiness (owner-led, last) (owner, 11 Nov 2026; FC added 11 Nov 2026, flag graduation: epics graduate their flag instead of removing it; FC1, the flags-off nightly, lands before the first graduation)
@@ -336,7 +337,7 @@ minimum-phase in blind ABX at three or more seats, and measurement results match
 - [x] Target editor with curtain, limited-range, per-channel offsets and saved target library
 - [x] Flip `canDeploy` only through the verification path, with prediction and post-apply measurement
 - [ ] Bench: blind ABX against minimum-phase on the reference room
-- [ ] S11 `e10/seat-presets` (owner, 11 Nov 2026): save named seat weightings ("just me", "whole sofa"), design each once, and switch between them from the Dashboard without re-measuring
+- [ ] S11 `e10/seat-presets` (owner, 11 Nov 2026): save named seat weightings ("just me", "whole sofa"), design each once, and switch between them from the menu bar remote (E12 surface rule, owner 16 Nov 2026; the Dashboard shows the active one) without re-measuring
 
 ### E12 Guided setup and information architecture
 
@@ -344,11 +345,15 @@ minimum-phase in blind ABX at three or more seats, and measurement results match
 - [x] Merge Speakers, Speaker Calibration, Measurement Lab and Room Correction into a clear System area
 - [x] Surface the room geometry and treatment advisor inside the flow
 - [ ] Usability test with someone who has never seen the app
-- [ ] S8 `e12/simple-expert-modes` (owner, 11 Nov 2026): a simple mode (Dashboard, guided setup, the E30 everyday controls once built, before/after comparison) and an expert mode with everything else; Acoustic Research and Hardware Acceptance sit behind a developer switch in release builds; the headphones flow states that a personal SOFA HRTF can be loaded
+- [ ] S8 `e12/simple-expert-modes` (owner, 11 Nov 2026): a simple mode (Dashboard status page, the menu bar remote with the E30 everyday controls and before/after, guided setup) and an expert mode with everything else; Acoustic Research and Hardware Acceptance sit behind a developer switch in release builds; the headphones flow states that a personal SOFA HRTF can be loaded
 - [ ] S8 also walks the path from driver measurement to an installed crossover with delay and polarity set; if it does not end in a single accept step, record a gap in the E8 ledger with an owning slice (owner, 11 Nov 2026) The accept step is E8 S15 (E8 G8, 16 Nov 2026).
 - [ ] S9 `e12/app-shell-split` (owner, 11 Nov 2026): split `NotchSixtyApp.swift` (3,121 lines) into scene, commands, composition root and window files, with no behaviour change
 - [ ] S10 `e12/quick-setup` (setup and competitor review, owner approved 15 Nov 2026): a quick path through guided setup: one seat, defaults at every step, aimed at a verified result in ten minutes, with the full flow offered afterwards and nothing the quick path sets hidden from it. Reuses the existing steps and services; no second flow
 - [ ] S11 `e12/measurement-verdict` (setup and competitor review, owner approved 15 Nov 2026); needs-owner if it changes what correction may be applied: (a) one plain verdict per measurement and per seat (for example Good, Usable, Limited, Measure again) from the existing coherence, repeat-rejection, noise and level checks, and no correction is designed from a "Measure again" result; (b) with no microphone calibration file, correction is limited to the bass range (default up to 300 Hz, shown and adjustable in expert mode) and the app says so; a calibration file lifts the limit
+- [ ] S12 `e12/dashboard-status-page` (owner, 16 Nov 2026; owns G4–G8, G11, G13): the Dashboard becomes the status page: linked summary cards, correct summaries, health strip, attention area, profile and output shown read-only; everyday controls leave it
+- [ ] S13 `e12/menu-bar-remote` (owns G9, G12): the menu bar panel becomes the remote: volume, mute, balance, output, profile, slots for the E30 controls, level-matched before/after; a toolbar popover hosts the same panel when the menu bar item is off
+- [ ] S14 `e12/live-output-switch` (needs-owner: Core Audio control; owns G10): change output while audio runs through a fade and restart; graduates `e12.dashboard-remote`
+- Surface rule (owner, 16 Nov 2026): no control appears on both the menu bar and the Dashboard; master volume is menu bar only (`docs/epics/E12.md`)
 
 ### E24 Room correction completion (owner, 1 Nov 2026)
 
@@ -530,14 +535,14 @@ dither stage. Suggested slice groups: controls first, rules second. Only Swift d
 receives the result through the normal snapshot path.
 
 - [ ] House-curve library: named target tilts the user can pick without opening Room Correction
-- [ ] Quick controls on the Dashboard and the menu bar: bass, treble, tilt, balance, loudness compensation and night mode
+- [ ] Quick controls in the menu bar remote only (owner, 16 Nov 2026, E12 surface rule; the Dashboard shows their state, not the controls): bass, treble, tilt, balance, loudness compensation and night mode
 - [ ] Loudness matching as one switch in the quick controls, using the existing LUFS Loudness Match in Dynamics (no new engine work)
 - [ ] Loudness contour anchored to real playback level (strategic review, owner approved 15 Nov 2026): a third level source, "calibrated level", that maps system volume to SPL at the main seat using the level measured once in setup (no microphone during playback). The existing sources, system volume and integrated LUFS, stay as user choices and system volume stays the default; calibrated level is offered only when a setup calibration exists for the current output, and falls back to system volume when it does not
 - [ ] Volume: a maximum-level limit, volume remembered per profile, and a software volume control for DACs with none of their own (needs the E17 dither stage)
 - [ ] Correction strength (setup and competitor review, owner approved 15 Nov 2026): one control, in the quick controls and the guided-setup Correction step, that scales how much room correction is applied from none to full; Swift designs the scaled correction and publishes it through the normal snapshot path (no new engine work expected); bass alignment, crossovers and protection are never scaled
 - [ ] Per-app rules: exclude an app from processing, or give it its own profile
 - [ ] Software-volume crash safety (failure and rate review, owner approved 15 Nov 2026); needs-owner (protection), built with the software volume control, never after it: when the app quits, crashes or is force-quit, macOS plays unprocessed full-level audio to the default output (E9 S9 finding), so a DAC held at -30 dB in software would jump to full scale. Software volume and the maximum-level limit are offered only when the DAC is not the macOS default output, reusing the E9 gate (`ActiveSpeakerFailsafe`, `DefaultOutputMonitor`); otherwise the control is refused with the reason and the launch banner covers it. A DAC or amplifier volume control is preferred when one exists. Normal Quit warns when software attenuation is in use. E22 bench: force-quit at -30 dB on a real DAC
-- [ ] Device rate picker (failure and rate review, owner approved 15 Nov 2026); needs-owner (Core Audio control): choose the DAC's sample rate from its supported rates in the app (Dashboard and output settings), using the existing live rate-change path. The app does not know the source rate through the process tap, so automatic rate following is V2-1
+- [ ] Device rate picker (failure and rate review, owner approved 15 Nov 2026); needs-owner (Core Audio control): choose the DAC's sample rate from its supported rates in the app (the menu bar remote and output settings; the Dashboard shows the rate, owner 16 Nov 2026), using the existing live rate-change path. The app does not know the source rate through the process tap, so automatic rate following is V2-1
 - [ ] Correction freshness note (failure and rate review, owner approved 15 Nov 2026): show the age of the applied correction and prompt a re-measure when the output device, its routing or the speaker setup has changed since it was measured, or after a set time. Detecting change from the sound itself stays in V2-16 and V2-17
 - [ ] Per-app automatic low-latency mode: chosen apps (games, calls, video) switch the minimum-phase low-latency mode on while they play
 - [ ] Preference tuning by ear: a short series of level-matched A/B choices that adjusts tilt and bass level, using the Blind Listening machinery (last slice before the ship slice)
