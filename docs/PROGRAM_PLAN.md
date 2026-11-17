@@ -103,6 +103,7 @@ reviewers compare with Dirac and REW), then engine depth, then breadth.
     - then E8 S12–S16 active-speaker commissioning, in written order, before E12 S8 and before item 12 (owner approved the slices 16 Nov 2026; this position is proposed, the owner may move it; `docs/epics/E8.md`)
     - E12 S9, then S12–S14 Dashboard and menu bar, run before E30 in this item so the E30 controls land in the remote (owner approved the slices 16 Nov 2026; this position is proposed, the owner may move it; `docs/epics/E12.md`)
     - E12 S15–S17 System pages run after E12 S12–S14 and E8 S12–S16, and S16 before item 12; E12 S18 runs after item 13 (E29) (owner approved the slices 16 Nov 2026; this position is proposed, the owner may move it; `docs/epics/E12.md`)
+    - E12 S19–S22 Active Acoustics page run after E12 S15–S17, in written order (owner approved the slices 16 Nov 2026; this position is proposed, the owner may move it; `docs/epics/E12.md`)
 12. E23 Legacy engine removal
 13. E29 Shared room position model (owner, 9 Nov 2026: unparked, in v1; plan `docs/epics/E29.md`; flag `e29.room-model`, graduated in S9, removed in FC)
 14. E3 Hardware acceptance, then E22 Hardware validation, then FC flag cleanup, then E18 Launch readiness (owner-led, last) (owner, 11 Nov 2026; FC added 11 Nov 2026, flag graduation: epics graduate their flag instead of removing it; FC1, the flags-off nightly, lands before the first graduation)
@@ -189,6 +190,7 @@ Dirac now sells ART on the Mac, so this needs the same path to authorisation as 
 - [x] S10b `e19/routed-way-capture`: per-way seat capture (G36, Room Treatment "Measure drivers"), support overrides (G38), matrix-only outputs (G39), routed permit baseline (G42); G43-G45 scoped
 - [ ] Authorise live treatment only through the PR75 verification path, then re-qualify on the unified graph
 - [x] S11 graduate `e19.mimo-treatment` (available, never armed; arm and permit unchanged; the bench no longer gates it; removal is the FC phase)
+- [ ] S12 `e19/self-qualification` (owner, 16 Nov 2026; needs-owner: MIMO authorisation; owns E19 G47): a self-qualification pass so a user's own setup can earn a permit without a product class qualification. First the criteria are written in `docs/epics/E19.md` for owner approval; no code before that. The arm, the permit and the PR75 verification criteria are not weakened
 
 ## Phase 2 — Unified engine
 
@@ -358,6 +360,10 @@ minimum-phase in blind ABX at three or more seats, and measurement results match
 - [ ] S16 `e12/speakers-page` (needs-owner: removes a user-visible control; owns G16–G18): one owner of bass management shown at a time; the older Crossover Design and Sub Phase Alignment cards retired after a same-sound migration (owner approved 16 Nov 2026); arrangement editor on the Speakers tab; distances and levels table
 - [ ] S17 `e12/calibration-summary` (owns G20 summary part): a readable calibration summary with before and after per seat, print and PDF
 - [ ] S18 `e12/one-measure-surface` (after E29; owns G19): the Measure tab is the one place to capture, Alignment and Bass and correction use its measurements, plain wording, one Export menu; graduates `e12.system-pages`
+- [ ] S19 `e12/quiet-zone-card` (owner, 16 Nov 2026; needs-owner: ANC screens; owns G21, G29, G31): one Quiet Zone card with a setup list, the main Arm and feed-forward as its dependent toggle, one "where to quiet" choice, plain readiness, the reason the arm is off; arm rules unchanged
+- [ ] S20 `e12/acoustics-results` (needs-owner; owns G24, G30): a plain result line and a hold-to-compare button on each Active Acoustics tab; arm and guard events go to the E33 S16 event history
+- [ ] S21 `e12/plain-wording` (owns G22): no internal PR numbers or lab terms in user-visible text, app-wide, with a glossary
+- [ ] S22 `e12/acoustics-status` (needs-owner; owns G23, G25, G32): microphone live and lost states, a read-only Dashboard status line per feature (no menu bar control), Room Treatment says what arming needs; graduates `e12.active-acoustics-page`
 - Surface rule (owner, 16 Nov 2026): no control appears on both the menu bar and the Dashboard; master volume is menu bar only (`docs/epics/E12.md`)
 
 ### E24 Room correction completion (owner, 1 Nov 2026)
@@ -543,6 +549,7 @@ receives the result through the normal snapshot path.
 - [ ] Quick controls in the menu bar remote only (owner, 16 Nov 2026, E12 surface rule; the Dashboard shows their state, not the controls): bass, treble, tilt, balance, loudness compensation and night mode
 - [ ] Night mode defined (owner, 16 Nov 2026; E33 G26; after E33 S15): the switch applies the E33 S15 Late night Dynamics recipe as an overlay at publish time, on top of whatever content preset is loaded. The stored preset and its working copy are never changed or marked modified, so switching it off restores the sound exactly. While it is on, the Dynamics page shows a banner and marks the processors it drives; edits made meanwhile go to the preset underneath. E15 S7 schedules switch the same overlay. Only Swift decides; no new engine work
 - [ ] Loudness matching as one switch in the quick controls, using the existing LUFS Loudness Match in Dynamics (no new engine work)
+- [ ] Playback Adaptation moves here (owner, 16 Nov 2026; E12 G26–G28): E30 owns the level adaptation (Off, Music Focus, Conversation Focus, Strength, Maximum lift) with acceptance tests at the standard rates; the control moves to the Playback group, with the mode in the menu bar remote and its state on the Dashboard (E12 surface rule), and Active Acoustics keeps a link; the quiet baseline becomes guided (playback paused, room steady for a few seconds, saved against that microphone, kept across a relaunch). Conversation unmasking (E4 S30) is unchanged
 - [ ] Estimated level at the seat (owner, 16 Nov 2026; E33 G32; built with the calibrated-level item below): Meters > Levels shows "about N dB SPL (estimated)" from the programme loudness and the setup calibration. Shown only when a calibration exists for the current output and the app knows the volume (system volume or the app's software volume); hidden when an amplifier or DAC volume the app cannot read is in the path. No dose or exposure tracking (V2-11)
 - [ ] Loudness contour anchored to real playback level (strategic review, owner approved 15 Nov 2026): a third level source, "calibrated level", that maps system volume to SPL at the main seat using the level measured once in setup (no microphone during playback). The existing sources, system volume and integrated LUFS, stay as user choices and system volume stays the default; calibrated level is offered only when a setup calibration exists for the current output, and falls back to system volume when it does not
 - [ ] Volume: a maximum-level limit, volume remembered per profile, and a software volume control for DACs with none of their own (needs the E17 dither stage)
