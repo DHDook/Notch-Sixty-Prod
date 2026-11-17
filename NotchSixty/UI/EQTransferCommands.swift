@@ -214,8 +214,16 @@ struct EQClipboardCommandsModifier: ViewModifier {
                 .onCopyCommand {
                     guard commands.canCopyBand, let band = commands.current().editableBands.first(where: { $0.id == commands.selectedBandID() }),
                           let encoded = EQBandClipboard.encode([band]) else { return [] }
+                    let bandProvider = NSItemProvider()
+                    let bandData = encoded.data
+                    bandProvider.registerDataRepresentation(
+                        forTypeIdentifier: EQBandClipboard.privateTypeIdentifier, visibility: .all
+                    ) { completion in
+                        completion(bandData, nil)
+                        return nil
+                    }
                     return [
-                        NSItemProvider(item: encoded.data as NSData, typeIdentifier: EQBandClipboard.privateTypeIdentifier),
+                        bandProvider,
                         NSItemProvider(object: encoded.text as NSString),
                     ]
                 }
