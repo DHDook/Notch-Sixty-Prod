@@ -105,6 +105,7 @@ reviewers compare with Dirac and REW), then engine depth, then breadth.
     - E13 S9–S11 Headphones page after E15 in this item, and E13 S12 after E12 S13 (owner approved the slices 17 Nov 2026; this position is proposed, the owner may move it; `docs/epics/E13.md`)
     - E12 S15–S17 System pages run after E12 S12–S14 and E8 S12–S16, and S16 before item 12; E12 S18 runs after item 13 (E29) (owner approved the slices 16 Nov 2026; this position is proposed, the owner may move it; `docs/epics/E12.md`)
     - E12 S19–S22 Active Acoustics page run after E12 S15–S17, in written order (owner approved the slices 16 Nov 2026; this position is proposed, the owner may move it; `docs/epics/E12.md`)
+    - E12 S23–S25 Settings window run after E12 S19–S22; S23 lands before E15, E16 or E18 add a setting where the order allows (owner approved the slices 17 Nov 2026; this position is proposed, the owner may move it; `docs/epics/E12.md`)
 12. E23 Legacy engine removal
 13. E29 Shared room position model (owner, 9 Nov 2026: unparked, in v1; plan `docs/epics/E29.md`; flag `e29.room-model`, graduated in S9, removed in FC)
 14. E3 Hardware acceptance, then E22 Hardware validation, then FC flag cleanup, then E18 Launch readiness (owner-led, last) (owner, 11 Nov 2026; FC added 11 Nov 2026, flag graduation: epics graduate their flag instead of removing it; FC1, the flags-off nightly, lands before the first graduation)
@@ -365,6 +366,9 @@ minimum-phase in blind ABX at three or more seats, and measurement results match
 - [ ] S20 `e12/acoustics-results` (needs-owner; owns G24, G30): a plain result line and a hold-to-compare button on each Active Acoustics tab; arm and guard events go to the E33 S16 event history
 - [ ] S21 `e12/plain-wording` (owns G22): no internal PR numbers or lab terms in user-visible text, app-wide, with a glossary
 - [ ] S22 `e12/acoustics-status` (needs-owner; owns G23, G25, G32): microphone live and lost states, a read-only Dashboard status line per feature (no menu bar control), Room Treatment says what arming needs; graduates `e12.active-acoustics-page`
+- [ ] S23 `e12/settings-tabs` (owner, 17 Nov 2026; needs-owner; owns G33, G39–G42): Settings in five tabs (General, Volume, Privacy, Data, About), a fuller About, the developer tools switch hidden in release builds, one "Reset page displays" button; adds flag `e12.settings-page`
+- [ ] S24 `e12/resume-and-permissions` (needs-owner; owns G34, G35): optional resume of processing on open (off by default, same device, never arms), permission status with a button to System Settings
+- [ ] S25 `e12/backup-and-reset` (needs-owner; owns G36, G37): settings in the backup, automatic backup (last five), restore default settings, erase all data with a typed confirmation; graduates `e12.settings-page`
 - Surface rule (owner, 16 Nov 2026): no control appears on both the menu bar and the Dashboard; master volume is menu bar only (`docs/epics/E12.md`)
 
 ### E24 Room correction completion (owner, 1 Nov 2026)
@@ -654,6 +658,7 @@ Owner decision, 18 Oct 2026: there is no bench access for now, so every bench ch
 - [ ] E4 S26a: ear-microphone check of the virtual-microphone design with a real head at the eight rates (E4 S26a wiring), including the adaptive worker holding the ear reduction as the noise drifts and the other-seat limit (G18)
 - [ ] Run the remaining bench checks at every rate from 44.1 to 384 kHz
 - [ ] E12 S16 and S18 bench (owner, 16 Nov 2026): a 2.1 profile migrated from the older crossover cards sounds the same and one trim is nudged by ear (S16); measure once on the reference room, then align and correct from that one measurement (S18)
+- [ ] E12 Settings bench (S24, S25; owner, 17 Nov 2026): log out and in with resume on and the DAC connected, then with it unplugged; deny and re-grant each permission and watch the Privacy tab; erase all data and restore the automatic backup on the owner's Mac
 - [ ] E12 S10 usability (setup and competitor review, owner approved 15 Nov 2026): someone who has never seen the app reaches a verified single-seat result through the quick path in ten minutes or less, unaided; and E12 S11: the verdict on a deliberately bad measurement (noisy room, moved microphone) and on a built-in microphone with no calibration file
 - [ ] Failure review (failure and rate review, owner approved 15 Nov 2026): force-quit with software volume at -30 dB on a real DAC (E30), a forced overload showing the step-down order and message (E23 S7), and an exclusive-mode player taking the DAC (E23 S8)
 - [ ] E1 G7 idle energy: take the first reading of the idle-energy method in `docs/PERFORMANCE.md` (Energy Impact and wakeups per second of the running app with audio idle and a stopped engine, M-series Mac) and record it there
