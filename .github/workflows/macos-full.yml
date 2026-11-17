@@ -142,13 +142,13 @@ jobs:
   # Tests that need POSIX threads or sched affinity are not built there (gap G3 in docs/epics/E21.md).
   core-windows:
     if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-ci')
-    runs-on: windows-latest
+    runs-on: windows-2022
     timeout-minutes: 60
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
 
-      # The Visual Studio generator with the ClangCL toolset needs no vcvars step and no third-party action (Ninja would).
+      # windows-latest moved to a Visual Studio 2026 image (16 Nov 2026), where "Visual Studio 17 2022" is not found; the job is pinned to windows-2022 (VS 2022). Moving to "Visual Studio 18 2026" is a later bump.
       - name: Configure libn60core (clang-cl via Visual Studio generator)
         shell: cmd
         run: cmake -S core -B "%RUNNER_TEMP%\n60core_win" -G "Visual Studio 17 2022" -A x64 -T ClangCL
