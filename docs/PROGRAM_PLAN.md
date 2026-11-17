@@ -108,6 +108,7 @@ reviewers compare with Dirac and REW), then engine depth, then breadth.
     - E12 S15–S17 System pages run after E12 S12–S14 and E8 S12–S16, and S16 before item 12; E12 S18 runs after item 13 (E29) (owner approved the slices 16 Nov 2026; this position is proposed, the owner may move it; `docs/epics/E12.md`)
     - E12 S19–S22 Active Acoustics page run after E12 S15–S17, in written order (owner approved the slices 16 Nov 2026; this position is proposed, the owner may move it; `docs/epics/E12.md`)
     - E12 S23–S25 Settings window run after E12 S19–S22; S23 lands before E15, E16 or E18 add a setting where the order allows (owner approved the slices 17 Nov 2026; this position is proposed, the owner may move it; `docs/epics/E12.md`)
+    - E12 S26 `e12/compare-service` runs before E12 S13; E12 S27–S28 run after E12 S13 and E33 S24 (owner approved the slices 17 Nov 2026; this position is proposed, the owner may move it; `docs/epics/E12.md`)
     - E34 S2–S7 run after the page slices above (E12 S12–S25, E13 S9–S12) and E33 S11, in written order, before item 14 (owner, 17 Nov 2026; `docs/epics/E34.md`)
 12. E23 Legacy engine removal
 13. E29 Shared room position model (owner, 9 Nov 2026: unparked, in v1; plan `docs/epics/E29.md`; flag `e29.room-model`, graduated in S9, removed in FC)
@@ -372,6 +373,9 @@ minimum-phase in blind ABX at three or more seats, and measurement results match
 - [ ] S23 `e12/settings-tabs` (owner, 17 Nov 2026; needs-owner; owns G33, G39–G42): Settings in five tabs (General, Volume, Privacy, Data, About), a fuller About, the developer tools switch hidden in release builds, one "Reset page displays" button; adds flag `e12.settings-page`
 - [ ] S24 `e12/resume-and-permissions` (needs-owner; owns G34, G35): optional resume of processing on open (off by default, same device, never arms), permission status with a button to System Settings
 - [ ] S25 `e12/backup-and-reset` (needs-owner; owns G36, G37): settings in the backup, automatic backup (last five), restore default settings, erase all data with a typed confirmation; graduates `e12.settings-page`
+- [ ] S26 `e12/compare-service` (owner, 17 Nov 2026; needs-owner; owns G45, G46, G55; before S13): one comparison service for any two configurations, computed level matching, fixed-time fade switch; the room-correction blind test moves onto it; behind `e12.blind-listening`
+- [ ] S27 `e12/blind-live` (low-risk; owns G43, G46, G47, G54): Blind Listening compares current settings, processing off and saved profiles live on the user's music; ABX and a blind preference test; keyboard shortcuts; "needed correct" guidance
+- [ ] S28 `e12/blind-files-history` (low-risk; owns G44, G48–G53): two-files mode on the selected output with loudness matching, loop and position keeping; level slider; history in the backup; plain wording; graduates `e12.blind-listening`
 - Surface rule (owner, 16 Nov 2026): no control appears on both the menu bar and the Dashboard; master volume is menu bar only (`docs/epics/E12.md`)
 
 ### E24 Room correction completion (owner, 1 Nov 2026)
@@ -572,7 +576,7 @@ receives the result through the normal snapshot path.
 - [ ] Device rate picker (failure and rate review, owner approved 15 Nov 2026); needs-owner (Core Audio control): choose the DAC's sample rate from its supported rates in the app (the menu bar remote and output settings; the Dashboard shows the rate, owner 16 Nov 2026), using the existing live rate-change path. The app does not know the source rate through the process tap, so automatic rate following is V2-1
 - [ ] Correction freshness note (failure and rate review, owner approved 15 Nov 2026): show the age of the applied correction and prompt a re-measure when the output device, its routing or the speaker setup has changed since it was measured, or after a set time. Detecting change from the sound itself stays in V2-16 and V2-17
 - [ ] Per-app automatic low-latency mode: chosen apps (games, calls, video) switch the minimum-phase low-latency mode on while they play
-- [ ] Preference tuning by ear: a short series of level-matched A/B choices that adjusts tilt and bass level, using the Blind Listening machinery (last slice before the ship slice)
+- [ ] Preference tuning by ear: a short series of level-matched A/B choices that adjusts tilt and bass level, using the E12 S26 comparison service (last slice before the ship slice)
 - [ ] Ship slice graduates `e30.everyday` (default on; removal is the FC phase)
 
 ### E31 Signal path and history (owner, 11 Nov 2026)
@@ -586,7 +590,7 @@ it adds no work to the audio callback.
 - [ ] A clear bit-exact indication: shown only when no stage changes the samples (uses the E17 output-integrity checks; includes the bypass bit-transparent indication on the meters, E33 decision 7)
 - [ ] Undo and redo on every page
 - [ ] Named snapshots of the whole configuration, with restore
-- [ ] Level-matched A/B comparison between two snapshots, using the Blind Listening level matching
+- [ ] Level-matched A/B comparison between two snapshots, using the E12 S26 comparison service; snapshots join the Blind Listening candidate list (E12 S27)
 - [ ] Tests: the view matches the running graph at the eight rates; undo and redo restore the exact configuration; snapshot restore goes through the normal rebuild-with-fade path
 - [ ] Ship slice graduates `e31.signal-path` (default on; removal is the FC phase)
 
@@ -678,6 +682,7 @@ Owner decision, 18 Oct 2026: there is no bench access for now, so every bench ch
 - [ ] Run the remaining bench checks at every rate from 44.1 to 384 kHz
 - [ ] E12 S16 and S18 bench (owner, 16 Nov 2026): a 2.1 profile migrated from the older crossover cards sounds the same and one trim is nudged by ear (S16); measure once on the reference room, then align and correct from that one measurement (S18)
 - [ ] E12 Settings bench (S24, S25; owner, 17 Nov 2026): log out and in with resume on and the DAC connected, then with it unplugged; deny and re-grant each permission and watch the Privacy tab; erase all data and restore the automatic backup on the owner's Mac
+- [ ] E12 Blind Listening bench (S26–S28; owner, 17 Nov 2026): a live blind test of correction on against off and of two presets by ear, checking that the switch gives no audible clue and the matched levels sound equal; a preference test; a two-files test on the selected DAC with a looped passage; history after relaunch
 - [ ] E12 S10 usability (setup and competitor review, owner approved 15 Nov 2026): someone who has never seen the app reaches a verified single-seat result through the quick path in ten minutes or less, unaided; and E12 S11: the verdict on a deliberately bad measurement (noisy room, moved microphone) and on a built-in microphone with no calibration file
 - [ ] Failure review (failure and rate review, owner approved 15 Nov 2026): force-quit with software volume at -30 dB on a real DAC (E30), a forced overload showing the step-down order and message (E23 S7), and an exclusive-mode player taking the DAC (E23 S8)
 - [ ] E1 G7 idle energy: take the first reading of the idle-energy method in `docs/PERFORMANCE.md` (Energy Impact and wakeups per second of the running app with audio idle and a stopped engine, M-series Mac) and record it there
@@ -725,7 +730,7 @@ Runs after the FC flag cleanup (owner, 11 Nov 2026).
 - [ ] Developer ID and App Store signing, notarisation and App Review
 - [ ] Legal and provenance review against `docs/PROVENANCE.md` and the SBOM
 - [ ] Localisation for the launch markets (the VoiceOver and keyboard accessibility pass moved to E34 S5 and S6, owner 17 Nov 2026)
-- [ ] Competitive blind comparison against Dirac Live Processor and Clearroom on the same system
+- [ ] Competitive blind comparison against Dirac Live Processor and Clearroom on the same system, run in the Blind Listening two-files mode on recordings made at the seat (E12 S28)
 - [ ] Pricing against the $549–$899 Dirac bundle range, trial length, website, screenshots and launch reviews
 
 Named slices (owner, 11 Nov 2026). No epic file yet: epic-planner writes `docs/epics/E18.md`.
