@@ -25,7 +25,7 @@ The remaining epics (V2-9 to V2-13, V2-15, V2-16) are features that were deferre
 
 | ID | Epic | Size | Depends on | Owner decision needed before planning |
 | --- | --- | --- | --- | --- |
-| V2-1 | Direct-download edition with a virtual audio device | Large | v1 | Yes: changes `AGENTS.md` sections 2 and 6 (drivers, sandbox) |
+| V2-1 | Optional virtual audio driver add-on | Large | v1 | Yes: changes `AGENTS.md` sections 2 and 6 (drivers), and the App Store question |
 | V2-2 | Input and preamp mode | Medium | v1 | No |
 | V2-3 | Network endpoint | Medium to large | V2-2 | Yes for anything needing certification |
 | V2-4 | iPhone and iPad companion | Large | E16 local API | No (already agreed as post-v1) |
@@ -63,19 +63,44 @@ Each epic lists scope and the questions epic-planner must settle. The standing r
 unchanged: realtime rules, every device rate up to 384 kHz, no GPL, clean-room, feature flag per
 epic, live ANC and MIMO only through `LiveTreatmentArm` and written authorisation.
 
-### V2-1 Direct-download edition with a virtual audio device
+### V2-1 Optional virtual audio driver add-on (rescoped, owner 16 Nov 2026)
 
-Notch Sixty appears as an output device. Apps play into it directly, so the source rate is known,
-unprocessed audio cannot reach an active speaker when the app is the chosen device, and per-app
-routing becomes simple. This is the largest single unlock.
+Notch Sixty's own virtual output device, as an optional add-on. The app installs and runs without
+it and the process tap stays the default input path. With the driver, apps play into a device
+named for the app: the source rate is known, surround programme can reach a stereo DAC, and a
+crash gives silence instead of unprocessed audio. Sound quality with matching rates is the same
+on both paths; the driver adds convenience and the cases below, not fidelity.
 
-- [ ] Owner decision first: `AGENTS.md` section 2 lists installing audio drivers as out of scope and section 6 requires the sandbox. The App Store edition stays as it is; the virtual device is an optional component of a separate direct-download build
-- [ ] Automatic rate following (failure and rate review, owner approved 15 Nov 2026): with the source rate known, set the DAC to the source's rate (or its nearest supported multiple) as the source changes; off by default, with the v1 rate picker as the manual choice
-- [ ] User-space audio driver (no kernel extension), signed and notarised, with install, update and removal paths
-- [ ] Transport: the virtual device as a second input path beside the process tap, behind the same realtime bridge
-- [ ] Source-rate following, building on the E15 S5 finding
-- [ ] Active-speaker safety, building on the E9 S9 finding
-- [ ] Direct-download licensing and updates (the App Store build keeps no self-updater)
+Owner decisions of 16 Nov 2026: write our own driver (no BlackHole or other GPL code, and not as a
+coding reference); it lives in its own repository and is downloaded from there; Settings has a
+sheet to enable and install it and a clean switch between tap and driver; features that need the
+driver say so in the app. The App Store listing is wanted but is not a hard requirement.
+
+**Settle before planning**
+
+- [ ] `AGENTS.md` edit (needs-owner): section 2 lists installing audio drivers as out of scope and section 6 forbids architecture that depends on a HAL driver or on restarting `coreaudiod`. Proposed wording: the app never depends on the driver; the driver is a separate optional product; the sandboxed app never installs it
+- [ ] App Store question (open): App Review rules say a Mac App Store app may not download or install additional code that adds functionality. So the App Store build cannot download or run the installer. Proposed shape, to confirm with App Review before building: the App Store build only detects an installed driver and uses it; its Settings sheet explains the add-on and opens the download page in the browser; the user runs the installer themself. Fallback if App Review refuses even the link: the sheet shows status only and the website carries the instructions. A direct-download build (Developer ID) that installs from inside the app is a later option, not required
+- [ ] Licence review for the starting point: Apple's sample audio driver or libASPL (MIT), recorded in `docs/PROVENANCE.md` and `THIRD_PARTY_NOTICES.md`; otherwise written from Apple's AudioServerPlugIn documentation
+
+**Slices (epic-planner refines them)**
+
+- [ ] D1 Input-source seam in the app: one interface with two backends (process tap, virtual device) behind the same realtime bridge. The control-plane state machine gains named states for "driver selected but missing" and "switching input"; no silent fallback. Tap stays the default. Needs-owner (Core Audio transport)
+- [ ] D2 The driver (own repository, C++, user-space AudioServerPlugIn, no kernel code):
+  - Loopback device, every rate the DAC offers up to 384 kHz, layouts from stereo to 7.1.4
+  - Its clock follows the selected DAC, so the app needs no drift correction (the tap's one-clock advantage is kept). If that cannot be made exact, an explicit, measured asynchronous resampler is an owner decision, not a default
+  - The device exists only while the app holds a heartbeat. If the app quits, crashes or is force-quit, the device disappears and macOS returns to a real output: system audio is never left silent or wedged (AGENTS.md section 5)
+  - Control and handshake through versioned custom device properties only (works from the sandbox); the app refuses a driver version it does not know
+  - Realtime rules apply to the driver's IO path; it documents allocation, locking, latency, rate and channel assumptions
+- [ ] D3 Installer and removal: signed, notarised package published as releases of the driver repository; an uninstaller; version check and "driver update available" notice in the app; the installer is the only thing that touches the system audio folder
+- [ ] D4 Settings: an "Audio input path" section with the status (not installed, installed, needs update, in use), the enable sheet, and one switch between tap and driver. Switching fades out, changes path and fades in; on switching to the driver the app makes it the system output and remembers the previous one, and puts it back on switching away or quitting
+- [ ] D5 "Needs the driver" notes: each feature that depends on the driver shows a short note with a link to the Settings section, and stays visible but unavailable without it. One source of truth lists these features
+- [ ] D6 What the driver unlocks:
+  - Automatic rate following (failure and rate review, owner approved 15 Nov 2026): the player sets the virtual device's rate and the app sets the DAC to match (or its nearest supported multiple); off by default, with the v1 rate picker as the manual choice. Builds on the E15 S5 finding
+  - Surround programme on a stereo DAC, for binaural, virtual-speaker and our own downmix
+  - A multichannel DAC used for an active stereo system no longer has to be set to stereo in Audio MIDI Setup
+  - Silence, not unprocessed audio, when the app stops. Builds on the E9 S9 finding
+  - Players that take exclusive control can target the virtual device (E23 S8 finding)
+- [ ] Tests: driver unit tests for the ring and clock; app tests with a fake device for both backends, the switch, a missing driver and an unknown driver version, at the eight rates. Bench: install, update and removal; rate changes; sleep and wake; DAC unplug; force-quit; a macOS update; the tap path unchanged with the driver installed but off
 
 ### V2-2 Input and preamp mode
 
