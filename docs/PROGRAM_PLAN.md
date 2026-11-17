@@ -29,7 +29,7 @@ Owner decisions from 17 Oct 2026 (and later, where dated) fix the plan's shape. 
 | Red nightly rule (11 Nov 2026) | A failing nightly `macos-full` on `main` is fixed before the next slice starts (`CLAUDE.md`, `/next` step 0) |
 | Engine code home (11 Nov 2026) | New engine C or C++ goes in `core/`, never in `NotchSixty/Audio/Realtime` (`CLAUDE.md`; checked by realtime-reviewer) |
 | After v1 (11 Nov 2026) | Post-v1 work is scoped in `docs/V2_ROADMAP.md`. It is not started, and `/next` does not read it, until the owner initiates it |
-| Whole-app review (17 Nov 2026) | Approved: E35 3D sound from two speakers in v1, with virtual surround from 5.1 and 7.1 sources; E22 pass-or-fail rule, owner-set ANC targets, ANC and MIMO checks first; E16 Control Centre control and widget; 384 kHz stays the v1 ceiling (705.6 and 768 kHz are V2-19); second zone is V2-20; speaker remapping and reflection control is V2-21; DSD output, MIDI and OSC control are not planned; dither stays automatic |
+| Whole-app review (17 Nov 2026) | Approved: E35 3D sound from two speakers in v1, with virtual surround from 5.1 and 7.1 sources; E22 pass-or-fail rule, owner-set ANC targets, ANC and MIMO checks first; E16 Control Centre control and widget; 384 kHz stays the v1 ceiling (705.6 and 768 kHz are V2-19); second zone is V2-20; speaker remapping and reflection control is V2-21; DSD output, MIDI and OSC control are not planned; dither stays automatic; after reading the patents the same day, E35 uses constant or fixed-curve regularisation, a free-space model mode, and a patent attorney's review before S1 code |
 
 ## Epics at a glance
 
@@ -115,7 +115,7 @@ reviewers compare with Dirac and REW), then engine depth, then breadth.
     - E34 S2–S7 run after the page slices above (E12 S12–S25, E13 S9–S12) and E33 S11, in written order, before item 14 (owner, 17 Nov 2026; `docs/epics/E34.md`)
 12. E23 Legacy engine removal
 13. E29 Shared room position model (owner, 9 Nov 2026: unparked, in v1; plan `docs/epics/E29.md`; flag `e29.room-model`, graduated in S9, removed in FC)
-    - then E35 3D sound from two speakers, S1–S4 in written order, after E29 and E13 S12, before item 14 (owner approved the epic 17 Nov 2026; this position is proposed, the owner may move it; S1 waits for the patent check, E35 G1; `docs/epics/E35.md`)
+    - then E35 3D sound from two speakers, S1–S4 in written order, after E29 and E13 S12, before item 14 (owner approved the epic 17 Nov 2026; this position is proposed, the owner may move it; S1's code waits for the patent attorney's review, E35 G1 and G4; `docs/epics/E35.md`)
 14. E3 Hardware acceptance, then E22 Hardware validation, then FC flag cleanup, then E18 Launch readiness (owner-led, last) (owner, 11 Nov 2026; FC added 11 Nov 2026, flag graduation: epics graduate their flag instead of removing it; FC1, the flags-off nightly, lands before the first graduation)
 
 ## Phase 1 — Consolidate and qualify
@@ -657,9 +657,11 @@ does something the planned v1 could not do at all. Crosstalk cancellation for on
 angle or from the listener's own in-ear measurement, with surround from two speakers for 5.1 and 7.1 sources and
 camera head follow. It reuses the E13 in-ear capture and virtual-speaker renderer, the E4 S26b head position and the
 E29 positions. No microphone is in the loop while playing, so nothing here is live ANC or MIMO treatment and nothing
-is armed. One flag `e35.speaker-3d`, graduated in S4.
+is armed. One flag `e35.speaker-3d`, graduated in S4. After reading the patents (17 Nov 2026; US 9,167,344, Princeton, and
+US 11,589,162, Google, both shown as active): the filter uses constant or fixed-curve regularisation only, model mode
+uses no head model, and a patent attorney reviews the S1 design note before any code is added.
 
-- [ ] S1 `e35/xtc-design` (needs-owner: engine core; waits for G1, the patent check): written design note with public sources, C++ design maths in `core/` (regularised two-by-two inverse from a model or from measured speaker-to-ear responses, with a boost cap), flag added
+- [ ] S1 `e35/xtc-design` (needs-owner: engine core; G1 and G4: a patent attorney reviews the design note before any code is added): written design note with checked public sources and a comparison with the claims of US 9,167,344 and US 11,589,162, then C++ design maths in `core/` (two-by-two inverse with constant or fixed-curve regularisation, from a free-space model or from measured speaker-to-ear responses; no regularisation calculated per frequency and no clamping to a flat level), flag added
 - [ ] S2 `e35/xtc-stage` (needs-owner: realtime engine; owns G2): the graph's crosstalk stage becomes a two-in two-out FIR; the one-knob model and its engineering toggle go; the E13 virtual-speaker renderer may feed it for 5.1 and 7.1 sources
 - [ ] S3 `e35/page-and-setup` (low-risk): production page with on/off, strength, speaker angle from E29 or typed in, measured mode through the E13 in-ear capture, "Surround from two speakers", and "Compare blind…" through E12 S26
 - [ ] S4 `e35/head-follow-ship` (needs-owner: camera use and engine): filters follow the head from the E4 S26b position; graduates `e35.speaker-3d`
