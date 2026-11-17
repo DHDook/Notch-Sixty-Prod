@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 /// Text for the E33 S8 cards; plain functions so the tests can check them.
@@ -212,5 +213,53 @@ struct ProductionRTABarsView: View {
         let name = RTABandMap.nominal[top]
         let hz = name >= 1_000 ? String(format: "%g kHz", name / 1_000) : String(format: "%g Hz", name)
         return String(format: "Loudest band %@ at %.0f dBFS", hz, levelsDB[top])
+    }
+}
+
+/// E33 S16: the session event list, newest first (time, what, where, how much), for this session and the previous one.
+struct ProductionEventHistoryCard: View {
+    @ObservedObject var history: SessionEventHistory
+    @State private var showPrevious = false
+
+    private var shown: [SessionEvent] {
+        showPrevious ? history.previous.reversed() : history.log.newestFirst
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("History").font(.title3.bold())
+                Spacer()
+                Picker("Session", selection: $showPrevious) {
+                    Text("This session").tag(false)
+                    Text("Previous session").tag(true)
+                }
+                .pickerStyle(.segmented).labelsHidden().frame(maxWidth: 260)
+                .accessibilityIdentifier("meters.history.session")
+                Button("Copy as text") {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(history.exportText(), forType: .string)
+                }.accessibilityIdentifier("meters.history.copy")
+                Button("Clear") { history.clear() }.accessibilityIdentifier("meters.history.clear")
+            }
+            if shown.isEmpty {
+                Text(showPrevious ? "No events were kept from the previous session." : "No events this session.")
+                    .foregroundStyle(.secondary)
+            } else {
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(shown) { event in
+                        let text = event.summary(timeText: SessionEventText.time(event.time))
+                        Text(text).font(.callout.monospacedDigit())
+                            .accessibilityElement(children: .ignore)
+                            .accessibilityLabel(text)
+                    }
+                }
+                .accessibilityIdentifier("meters.history.list")
+            }
+            Text("Events are noted while the meters are polling, kept for this session and the previous one, and never store audio.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+        .padding(16)
+        .background(.quaternary.opacity(0.14), in: .rect(cornerRadius: 18))
     }
 }
