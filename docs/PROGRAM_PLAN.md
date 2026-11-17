@@ -67,6 +67,7 @@ platforms; E6 (the unified graph) is the critical path, because eleven later epi
 | E30 | Everyday listening controls | 4 | E15, E17 (dither, for software volume) | Claude Code (Mac) | House curves, quick controls, volume features and per-app rules reachable from the menu bar remote, with their state shown on the Dashboard |
 | E31 | Signal path and history | 4 | E6, E12, E17 (output integrity), E30 | Claude Code (Mac) | One view shows every stage with rate, bit depth, latency, gain and headroom and says when the path is bit-exact; undo, redo and named snapshots with level-matched comparison on every page |
 | E33 | Equalizer, Dynamics and Meters enhancements (owner, 15 Nov 2026) | 3–4 | E32, E27, E28 (bench parts: E22) | Claude Code (Mac) | The 15 Nov 2026 review's approved features are reachable from the three pages: two-column band editor, subsonic bands, APO import and export, band clipboard, one preamp model; numbered dynamics chain, expander lookahead, 2–5 multiband bands; meter zones, shared hold and resets, loudness history; PLR, spectrogram, bit activity, input overs, dropout counter, balance, per-band correlation, headroom strip and RTA |
+| E34 | Design language and UI consistency (owner, 17 Nov 2026) | 4 | E12 (page slices), E13, E33 for S2–S7; none for S0, S1 (screen checks: E22) | Claude Code (Mac) | One written design language in the macOS 27 Liquid Glass style; every page built from shared values and components; one rule each for states, dialogs, menus, keyboard, accessibility settings and window sizes |
 | E23 | Legacy engine removal | 4 | E6 (incl. S12a–S12h), E4 S11, E7–E17 | Claude Code (Mac) | `N60RenderKernel`, the old N-channel path and the `e6.*` flags are gone; full suite green |
 | E22 | Hardware validation | 4 | all software epics | Bench | Every deferred bench check and owner acceptance check (including those that no longer gate a flag graduation) passes on `main` at every rate |
 | FC | Flag cleanup (owner, 11 Nov 2026) | 4 | E22 | Claude Code (Mac) | Every graduated flag and its dead branch removed in small per-epic PRs; nightly flags-off CI ran while flags existed |
@@ -99,6 +100,7 @@ reviewers compare with Dirac and REW), then engine depth, then breadth.
    - then E32 Equalizer, Dynamics and Meters defect fixes, S1–S6 in written order, before item 10 (owner, 15 Nov 2026, `docs/epics/E32.md` decision 1; S3 starts after the owner's `ProductionGainReductionViews.swift` change is on `main`)
 10. E21 Portable C++ core, remaining items
     - first E33 Equalizer, Dynamics and Meters enhancements, S1–S10, then S12–S15, then S16–S17 (S16 event history first), then S18–S21, then S22–S25 (Plugins page), then S11 (the ship slice; S12–S25 added by the owner 16–17 Nov 2026), after E32 and before these E21 items (owner, 15 Nov 2026, `docs/epics/E33.md` decision 1)
+    - E34 S0 `e34/macos27-glass`, then S1 `e34/design-language`, run before the next page slice of any epic (owner, 17 Nov 2026, `docs/epics/E34.md` decisions 2 and 9); S2 waits for the owner's screen check
 11. E14 Upmixer, E15 Device-aware profiles, E17 Output integrity and interchange, E16 Automation and remote, then E30 Everyday listening controls and E31 Signal path and history (owner, 11 Nov 2026; E30 needs E15 and the E17 dither stage; E31 follows E30)
     - then E8 S12–S16 active-speaker commissioning, in written order, before E12 S8 and before item 12 (owner approved the slices 16 Nov 2026; this position is proposed, the owner may move it; `docs/epics/E8.md`)
     - E12 S9, then S12–S14 Dashboard and menu bar, run before E30 in this item so the E30 controls land in the remote (owner approved the slices 16 Nov 2026; this position is proposed, the owner may move it; `docs/epics/E12.md`)
@@ -106,6 +108,7 @@ reviewers compare with Dirac and REW), then engine depth, then breadth.
     - E12 S15–S17 System pages run after E12 S12–S14 and E8 S12–S16, and S16 before item 12; E12 S18 runs after item 13 (E29) (owner approved the slices 16 Nov 2026; this position is proposed, the owner may move it; `docs/epics/E12.md`)
     - E12 S19–S22 Active Acoustics page run after E12 S15–S17, in written order (owner approved the slices 16 Nov 2026; this position is proposed, the owner may move it; `docs/epics/E12.md`)
     - E12 S23–S25 Settings window run after E12 S19–S22; S23 lands before E15, E16 or E18 add a setting where the order allows (owner approved the slices 17 Nov 2026; this position is proposed, the owner may move it; `docs/epics/E12.md`)
+    - E34 S2–S7 run after the page slices above (E12 S12–S25, E13 S9–S12) and E33 S11, in written order, before item 14 (owner, 17 Nov 2026; `docs/epics/E34.md`)
 12. E23 Legacy engine removal
 13. E29 Shared room position model (owner, 9 Nov 2026: unparked, in v1; plan `docs/epics/E29.md`; flag `e29.room-model`, graduated in S9, removed in FC)
 14. E3 Hardware acceptance, then E22 Hardware validation, then FC flag cleanup, then E18 Launch readiness (owner-led, last) (owner, 11 Nov 2026; FC added 11 Nov 2026, flag graduation: epics graduate their flag instead of removing it; FC1, the flags-off nightly, lands before the first graduation)
@@ -619,6 +622,21 @@ it follows). One flag `e33.page-enhancements`, graduated in S11. K-System scales
 - [ ] S25 `e33/plugin-surround-channels` (needs-owner, realtime; owns G48): a stereo plug-in on a surround session runs on the front pair or on every pair, other channels delayed to match
 - [ ] S11 `e33/ship`: end-to-end tests, gaps closed, flag graduated (needs-owner); last slice, after S12–S21
 
+### E34 Design language and UI consistency (owner, 17 Nov 2026)
+
+Plan: `docs/epics/E34.md`. One design language in the macOS 27 Liquid Glass style, shared values and components,
+and one rule each for states, dialogs, menus, keyboard, accessibility and window sizes. No feature changes.
+One flag `e34.design-language`, graduated in S7. Open owner decision: G13 (minimum macOS 26 or 27).
+
+- [ ] S0 `e34/macos27-glass`: macOS 27 glass rules read from Apple's documentation, glass and material audit, flag added (low-risk)
+- [ ] S1 `e34/design-language`: `docs/DESIGN_LANGUAGE.md`, values file, components, formatters, status levels, gallery; ends with the owner's screen check (low-risk)
+- [ ] S2 `e34/adopt-playback-pages`: Dashboard, Equalizer, Dynamics, Meters, Headphones, Plugins on the shared parts (low-risk)
+- [ ] S3 `e34/adopt-system-pages`: System, tools, Active Acoustics, Settings, Help on the shared parts (needs-owner: ANC and MIMO screens, appearance only)
+- [ ] S4 `e34/states-and-dialogs`: one state component, one confirmation rule (low-risk)
+- [ ] S5 `e34/menus-and-keyboard`: View and Playback menus, full keyboard reach (low-risk)
+- [ ] S6 `e34/accessibility`: Reduce Motion, Increase Contrast, Reduce Transparency, VoiceOver values (low-risk)
+- [ ] S7 `e34/sizes-and-ship`: minimum window size, 40% longer text, graduate `e34.design-language` (low-risk)
+
 ### E23 Legacy engine removal
 
 Owner decision, 20 Oct 2026: the kernel stays behind `e6.legacy-kernel` until late in the roadmap,
@@ -678,6 +696,7 @@ Owner decision, 18 Oct 2026: there is no bench access for now, so every bench ch
 - [ ] E19 bench (docs/epics/E19.md Bench checks): re-prove on measured IRs the T30 acceptance (G3), the arrival onset from raw E24 plants (G6), the strict 0.25 dB realisation gate (G10) and the -100 dB armed-output reference (G15); worst-callback CPU of the stage tail at 8 sources and 384 kHz (G16); the routed way pass on a bi-amp or tri-amp rig (G43); moved-microphone way capture and the arrival-plus-50-ms way IR compaction (G45); file hardware acceptance or class qualifications into `MIMOTreatmentQualificationRegistry.production` (G31). No permit exists before this item
 - [ ] E28 bench (docs/epics/E28.md Bench checks): spectrum readability on music (G16), VoiceOver and keyboard use of Dynamics rows and loudness editors (G18), route meters on 2.1 and 5.1 devices (G25), routed-session loudness (G27), binaural capture (G30), wide loudness against an offline meter (G31), band-pass multiband listen and summed-band phase against dry (G43), compressor lookahead edit while playing for an audible dip from the cold-started ring (G46), and every dynamics extra by ear (compressor mix, link, RMS, lookahead; expander hold, knee, sidechain high-pass and listen; multiband bypass, solo, listen) on stereo and N-channel at the eight rates
 - [ ] E33 bench (`docs/epics/E33.md` slices): Equalizer layout at three window sizes, VoiceOver on the graph and a real AutoEQ import (S1, S2); 10 Hz cut on a sub at 48 and 384 kHz and preamp terms during A/B (S3); VoiceOver and keyboard on the Dynamics navigator (S4); expander lookahead on drums and speech (S5a); 2 and 5 multiband bands by ear, a live 12x crossover jump by ear (G16) and CPU at 384 kHz (S5b); meters by eye on music (S6); sub-integration correlation on 2.1, RTA against a reference analyser and a provoked dropout on the counter (S8); spectrogram CPU at 384 kHz (S9); input overs on a hot master at 44.1 and 384 kHz (S10); a film scene with loud effects under dialogue on 5.1 and headphones (S13); limiter pumping on dense music with Auto Release (S14); each starting point and the refreshed Cinema, Cinema Night and Streaming presets by ear (S15); a provoked clip, limiter episode and dropout read back from History with correct times (S16); spectrum of the centre and the sub alone on 5.1 and the ear-pair view on headphones (S17)
+- [ ] E34 screen checks (`docs/epics/E34.md`; no hardware): every page by eye on macOS 27 with the system glass setting at clear and at tinted, in light and dark; Increase Contrast, Reduce Transparency and Reduce Motion; VoiceOver and keyboard-only use of every page; the minimum window size
 - [ ] E33 S5a reference lab: an acoustic reference-lab case for expander lookahead at the eight rates, beyond the core harness `e33_exp_lookahead` (E33 G14)
 - [ ] E33 Plugins bench (S22–S25): separate-process loading with real commercial Audio Units, including one not marked sandbox-safe, at 48 and 384 kHz; live editing by ear and Revert in a real plug-in window; a stereo plug-in on a 5.1 session in both Channels modes
 - [ ] E13 bench (docs/epics/E13.md Bench checks): capture with in-ear microphones and real reseats, head-yaw sign against the renderer, same-rate compensation (G2 to G4), headphone EQ drag at 384 kHz and Apply-while-playing restore (G5, G6), 7.1.4 tail CPU at 384 kHz (G11), elevation capture with in-ear microphones (G16)
@@ -704,7 +723,7 @@ Runs after the FC flag cleanup (owner, 11 Nov 2026).
 
 - [ ] Developer ID and App Store signing, notarisation and App Review
 - [ ] Legal and provenance review against `docs/PROVENANCE.md` and the SBOM
-- [ ] VoiceOver and keyboard accessibility pass; localisation for the launch markets
+- [ ] Localisation for the launch markets (the VoiceOver and keyboard accessibility pass moved to E34 S5 and S6, owner 17 Nov 2026)
 - [ ] Competitive blind comparison against Dirac Live Processor and Clearroom on the same system
 - [ ] Pricing against the $549–$899 Dirac bundle range, trial length, website, screenshots and launch reviews
 
