@@ -100,6 +100,7 @@ reviewers compare with Dirac and REW), then engine depth, then breadth.
 10. E21 Portable C++ core, remaining items
     - first E33 Equalizer, Dynamics and Meters enhancements, S1–S11 in written order, after E32 and before these E21 items (owner, 15 Nov 2026, `docs/epics/E33.md` decision 1)
 11. E14 Upmixer, E15 Device-aware profiles, E17 Output integrity and interchange, E16 Automation and remote, then E30 Everyday listening controls and E31 Signal path and history (owner, 11 Nov 2026; E30 needs E15 and the E17 dither stage; E31 follows E30)
+    - then E8 S12–S16 active-speaker commissioning, in written order, before E12 S8 and before item 12 (owner approved the slices 16 Nov 2026; this position is proposed, the owner may move it; `docs/epics/E8.md`)
 12. E23 Legacy engine removal
 13. E29 Shared room position model (owner, 9 Nov 2026: unparked, in v1; plan `docs/epics/E29.md`; flag `e29.room-model`, graduated in S9, removed in FC)
 14. E3 Hardware acceptance, then E22 Hardware validation, then FC flag cleanup, then E18 Launch readiness (owner-led, last) (owner, 11 Nov 2026; FC added 11 Nov 2026, flag graduation: epics graduate their flag instead of removing it; FC1, the flags-off nightly, lands before the first graduation)
@@ -244,7 +245,12 @@ Gate G2 passed on 2026-10-25 (commit 07e82c6)
 - [x] Raise the subwoofer limit from 4 to 8 (core bass management already supports 8 sub lanes since E6 S7b, ABI v7)
 - [x] Advanced pipeline view for power users, plus CamillaDSP YAML import alongside the existing export
 - [x] Migrate existing bi/tri-amp profiles automatically
-- [~] Stereo crossover with subwoofer lanes (E8 S11 merged #431; S11b `e8/crossover-subs-nchannel` wires it into the N-channel session, PR #464; G2, G3, E6 G32 closed there; G4 bench wiring checks open in E22)
+- [x] Stereo crossover with subwoofer lanes (E8 S11 merged #431; S11b `e8/crossover-subs-nchannel` wires it into the N-channel session, PR #464; G2, G3, E6 G32 closed there; G4 bench wiring checks open in E22)
+- [ ] S12 `e8/driver-roles` (owner, 16 Nov 2026; owns G5): driver role per way; a tweeter or midrange way without a safe high-pass is an error, live edits included
+- [ ] S13 `e8/per-driver-protection` (owns G6): per-way limiter on by default with controls, cumulative boost guard, optional long-term power limit
+- [ ] S14 `e8/commissioning-aids` (owns G7): mute, solo and identify per way; safe first start confirms each driver before programme audio
+- [ ] S15 `e8/measured-alignment` (owns G8): delay, polarity and level from driver measurements, predicted and verified acoustic sum, one accept step
+- [ ] S16 `e8/way-filters-and-clock-check` (owns G9–G11): Linkwitz transform and FIR import per way, two-device clock warning, low-latency fallback notice, 4-way template; graduates `e8.active-commissioning`
 
 ### E9 Multichannel protection and FIR parity
 
@@ -339,7 +345,7 @@ minimum-phase in blind ABX at three or more seats, and measurement results match
 - [x] Surface the room geometry and treatment advisor inside the flow
 - [ ] Usability test with someone who has never seen the app
 - [ ] S8 `e12/simple-expert-modes` (owner, 11 Nov 2026): a simple mode (Dashboard, guided setup, the E30 everyday controls once built, before/after comparison) and an expert mode with everything else; Acoustic Research and Hardware Acceptance sit behind a developer switch in release builds; the headphones flow states that a personal SOFA HRTF can be loaded
-- [ ] S8 also walks the path from driver measurement to an installed crossover with delay and polarity set; if it does not end in a single accept step, record a gap in the E8 ledger with an owning slice (owner, 11 Nov 2026)
+- [ ] S8 also walks the path from driver measurement to an installed crossover with delay and polarity set; if it does not end in a single accept step, record a gap in the E8 ledger with an owning slice (owner, 11 Nov 2026) The accept step is E8 S15 (E8 G8, 16 Nov 2026).
 - [ ] S9 `e12/app-shell-split` (owner, 11 Nov 2026): split `NotchSixtyApp.swift` (3,121 lines) into scene, commands, composition root and window files, with no behaviour change
 - [ ] S10 `e12/quick-setup` (setup and competitor review, owner approved 15 Nov 2026): a quick path through guided setup: one seat, defaults at every step, aimed at a verified result in ten minutes, with the full flow offered afterwards and nothing the quick path sets hidden from it. Reuses the existing steps and services; no second flow
 - [ ] S11 `e12/measurement-verdict` (setup and competitor review, owner approved 15 Nov 2026); needs-owner if it changes what correction may be applied: (a) one plain verdict per measurement and per seat (for example Good, Usable, Limited, Measure again) from the existing coherence, repeat-rejection, noise and level checks, and no correction is designed from a "Measure again" result; (b) with no microphone calibration file, correction is limited to the bass range (default up to 300 Hz, shown and adjustable in expert mode) and the app says so; a calibration file lifts the limit
