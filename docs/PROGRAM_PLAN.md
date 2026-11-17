@@ -102,6 +102,7 @@ reviewers compare with Dirac and REW), then engine depth, then breadth.
 11. E14 Upmixer, E15 Device-aware profiles, E17 Output integrity and interchange, E16 Automation and remote, then E30 Everyday listening controls and E31 Signal path and history (owner, 11 Nov 2026; E30 needs E15 and the E17 dither stage; E31 follows E30)
     - then E8 S12–S16 active-speaker commissioning, in written order, before E12 S8 and before item 12 (owner approved the slices 16 Nov 2026; this position is proposed, the owner may move it; `docs/epics/E8.md`)
     - E12 S9, then S12–S14 Dashboard and menu bar, run before E30 in this item so the E30 controls land in the remote (owner approved the slices 16 Nov 2026; this position is proposed, the owner may move it; `docs/epics/E12.md`)
+    - E12 S15–S17 System pages run after E12 S12–S14 and E8 S12–S16, and S16 before item 12; E12 S18 runs after item 13 (E29) (owner approved the slices 16 Nov 2026; this position is proposed, the owner may move it; `docs/epics/E12.md`)
 12. E23 Legacy engine removal
 13. E29 Shared room position model (owner, 9 Nov 2026: unparked, in v1; plan `docs/epics/E29.md`; flag `e29.room-model`, graduated in S9, removed in FC)
 14. E3 Hardware acceptance, then E22 Hardware validation, then FC flag cleanup, then E18 Launch readiness (owner-led, last) (owner, 11 Nov 2026; FC added 11 Nov 2026, flag graduation: epics graduate their flag instead of removing it; FC1, the flags-off nightly, lands before the first graduation)
@@ -353,6 +354,10 @@ minimum-phase in blind ABX at three or more seats, and measurement results match
 - [ ] S12 `e12/dashboard-status-page` (owner, 16 Nov 2026; owns G4–G8, G11, G13): the Dashboard becomes the status page: linked summary cards, correct summaries, health strip, attention area (including the E33 S16 "events since" line), profile and output shown read-only; everyday controls leave it
 - [ ] S13 `e12/menu-bar-remote` (owns G9, G12): the menu bar panel becomes the remote: volume, mute, balance, output, profile, slots for the E30 controls, level-matched before/after; a toolbar popover hosts the same panel when the menu bar item is off
 - [ ] S14 `e12/live-output-switch` (needs-owner: Core Audio control; owns G10): change output while audio runs through a fade and restart; graduates `e12.dashboard-remote`
+- [ ] S15 `e12/system-overview` (owner, 16 Nov 2026; owns G14, G15, G20): the Overview shows "verified" correctly (defect) and becomes the system checklist with states, dates, next step and an out-of-date notice
+- [ ] S16 `e12/speakers-page` (needs-owner: removes a user-visible control; owns G16–G18): one owner of bass management shown at a time; the older Crossover Design and Sub Phase Alignment cards retired after a same-sound migration (owner approved 16 Nov 2026); arrangement editor on the Speakers tab; distances and levels table
+- [ ] S17 `e12/calibration-summary` (owns G20 summary part): a readable calibration summary with before and after per seat, print and PDF
+- [ ] S18 `e12/one-measure-surface` (after E29; owns G19): the Measure tab is the one place to capture, Alignment and Bass and correction use its measurements, plain wording, one Export menu; graduates `e12.system-pages`
 - Surface rule (owner, 16 Nov 2026): no control appears on both the menu bar and the Dashboard; master volume is menu bar only (`docs/epics/E12.md`)
 
 ### E24 Room correction completion (owner, 1 Nov 2026)
@@ -627,6 +632,7 @@ Owner decision, 18 Oct 2026: there is no bench access for now, so every bench ch
 - [ ] Run E4 S11 (owner, 1 Nov 2026: moved here from the E4 execution order): repeat S8 on the unified E6 graph, then fill the placeholder reduction table in `docs/ANC_QUALIFICATION.md` §4.1 from the S31 reviewer-kit noise files
 - [ ] E4 S26a: ear-microphone check of the virtual-microphone design with a real head at the eight rates (E4 S26a wiring), including the adaptive worker holding the ear reduction as the noise drifts and the other-seat limit (G18)
 - [ ] Run the remaining bench checks at every rate from 44.1 to 384 kHz
+- [ ] E12 S16 and S18 bench (owner, 16 Nov 2026): a 2.1 profile migrated from the older crossover cards sounds the same and one trim is nudged by ear (S16); measure once on the reference room, then align and correct from that one measurement (S18)
 - [ ] E12 S10 usability (setup and competitor review, owner approved 15 Nov 2026): someone who has never seen the app reaches a verified single-seat result through the quick path in ten minutes or less, unaided; and E12 S11: the verdict on a deliberately bad measurement (noisy room, moved microphone) and on a built-in microphone with no calibration file
 - [ ] Failure review (failure and rate review, owner approved 15 Nov 2026): force-quit with software volume at -30 dB on a real DAC (E30), a forced overload showing the step-down order and message (E23 S7), and an exclusive-mode player taking the DAC (E23 S8)
 - [ ] E1 G7 idle energy: take the first reading of the idle-energy method in `docs/PERFORMANCE.md` (Energy Impact and wakeups per second of the running app with audio idle and a stopped engine, M-series Mac) and record it there
