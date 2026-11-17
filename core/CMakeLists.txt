@@ -39,7 +39,7 @@ if(N60_X86_FMA AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
 endif()
 # E21 S1: the tests' scalar references must round like the engine. The engine is built with FMA (above); a reference compiled
 # without it differs in the last bit on x86 (test_stereo_bass "bit for bit"), so every test target gets the same flags.
-if(N60_X86_FMA AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64" AND NOT MSVC)
+if(N60_X86_FMA AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
   add_compile_options(-mfma -mavx2)
 endif()
 
