@@ -31,7 +31,7 @@ Owner decisions from 17 Oct 2026 (and later, where dated) fix the plan's shape. 
 | After v1 (11 Nov 2026) | Post-v1 work is scoped in `docs/V2_ROADMAP.md`. It is not started, and `/next` does not read it, until the owner initiates it |
 | Whole-app review (17 Nov 2026) | Approved: E35 3D sound from two speakers in v1, with virtual surround from 5.1 and 7.1 sources; E22 pass-or-fail rule, owner-set ANC targets, ANC and MIMO checks first; E16 Control Centre control and widget; 384 kHz stays the v1 ceiling (705.6 and 768 kHz are V2-19); second zone is V2-20; speaker remapping and reflection control is V2-21; DSD output, MIDI and OSC control are not planned; dither stays automatic; after reading the patents the same day, E35 uses constant or fixed-curve regularisation, a free-space model mode, and a patent attorney's review before S1 code |
 | End-state review (17 Nov 2026) | Approved: E33 S26 matched EQ filters (new bands use them; imports and saved EQs keep cookbook filters, with an offer to switch) and S27 linear-phase EQ lengths of 21, 85, 170 and 340 ms, with the EQ half of E23 G11 moved to S27; E31 shows the total added delay for lip sync; an E22 check of macOS's AirPlay Receiver; v1 ships in English only; V2-22 dialogue separation, V2-23 per-band EQ placement and linear-phase multiband, V2-24 languages; every V2 epic placed in a wave, V2-21's dependency corrected (v1 already plays multichannel layouts), and a second look at E35's filter method after US 9,167,344 ends in 2032 |
-| Price and distribution (17 Nov 2026) | $150, $120 at launch, round prices. Mac App Store (Small Business Program, 15%) as a free download with a one-time in-app unlock and a free trial; a lean website for docs, support, the privacy policy and proof, and later the V2-1 driver download. Direct sales (for example Paddle) stay a later option for paid v2 upgrades; choose how v2 is sold before v1 ships (E18) |
+| Price and distribution (17 Nov 2026) | $150, $120 at launch, round prices. Mac App Store (Small Business Program, 15%) as a free download with a one-time in-app unlock and a 14-day free trial (owner, 17 Nov 2026); a lean website for docs, support, the privacy policy and proof, and later the V2-1 driver download. Direct sales (for example Paddle) stay a later option for paid v2 upgrades; choose how v2 is sold before v1 ships (E18) |
 
 ## Epics at a glance
 
@@ -772,7 +772,7 @@ Runs after the FC flag cleanup (owner, 11 Nov 2026).
 
 Named slices (owner, 11 Nov 2026). No epic file yet: epic-planner writes `docs/epics/E18.md`.
 
-- [ ] Licensing and trial through the App Store: a free download, one non-consumable in-app purchase that unlocks the app ($150, $120 at launch), and a free trial whose length is still open; restore purchases; the app stays usable for reading saved data when the trial ends
+- [ ] Licensing and trial through the App Store: a free download, one non-consumable in-app purchase that unlocks the app ($150, $120 at launch), and a 14-day free trial counted from first launch (owner, 17 Nov 2026; long enough to receive a measurement microphone and listen for a week); restore purchases; the app stays usable for reading saved data when the trial ends
 - String catalogues: moved to V2-24 with the translations (owner, 17 Nov 2026; end-state review)
 - [ ] Diagnostics: crash and performance reports, and an opt-in support bundle that never contains audio
 - [ ] Update safety, saved data (update review, owner approved 15 Nov 2026; before the first build shared outside the owner's Mac). Found by code reading on 15 Nov 2026, not run: `ProductProfileController.loadArchive` drops any preset or system profile whose nested schema version is not the current one, and a failed load (unknown archive version, or a decode error after a field is added without a default) leaves the app empty; the next `persist()` then overwrites `profiles-v1.json`, so the data is lost. Most other stores accept only `schemaVersion == current` (measurement library, room geometry, backup, recovery, speaker-optimiser sets), and `EarnedCapStore` and `QuietZoneSurveyStore` read a failed decode as "no data"
@@ -861,7 +861,7 @@ Open questions:
 
 - [x] If speaker ANC cannot be qualified in time, does v1 wait, or ship with ANC as a labelled preview? v1 waits (owner, 11 Nov 2026)
 - [x] Target price: $150, $120 at launch, sold through the Mac App Store with an in-app unlock (owner, 17 Nov 2026)
-- [ ] Trial length
+- [x] Trial length: 14 days (owner, 17 Nov 2026)
 - [ ] How v2 is sold (the App Store has no paid upgrades): a separate app with a discount for owners, in-app purchases for v2 features, or a free update. Decide before v1 ships
 - [x] Is a private beta acceptable before the launch splash? No; the owner does the beta testing (owner, 11 Nov 2026)
 - [x] Signal-path and history view: in v1 as E31 (owner, 11 Nov 2026)
