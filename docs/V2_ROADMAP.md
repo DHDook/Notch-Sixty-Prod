@@ -107,10 +107,17 @@ driver say so in the app. The App Store listing is wanted but is not a hard requ
 Process a physical input: a turntable through an ADC, a TV through an HDMI or optical interface.
 This lets the Mac replace a hardware DSP box in a living-room system.
 
-- [ ] Choose a physical input device and channels as the program source instead of, or mixed with, system audio
-- [ ] Clock handling between input and output devices (aggregate drift correction or explicit SRC, an explicit product decision under `AGENTS.md` section 3)
-- [ ] Input level, clip indication and source switching on the Dashboard and menu bar
-- [ ] Low-latency path for TV use, with A/V sync
+Staged (owner, 16 Nov 2026):
+
+- [ ] Stage 1, input on the same interface as the output: choose that device's input channels as the program source instead of, or mixed with, system audio. One clock, so no drift correction or SRC. Covers most phono setups (an interface with line in and line out)
+- [ ] Input level, clip indication and source switching on the Dashboard and menu bar (with stage 1)
+- [ ] Stage 2, separate input and output devices: clock handling (aggregate drift correction or explicit SRC, an explicit product decision under `AGENTS.md` section 3)
+- [ ] Stage 3, low-latency path for TV use, with A/V sync
+
+Not planned (owner, 16 Nov 2026):
+
+- No file player in the app. Local files play through any player and system audio. What hi-res local playback misses (automatic rate following, players that take exclusive control) is V2-1 D6
+- No DAW tracking or live-monitoring path through the tap (latency). A DAW's playback is processed like any other app; DAW use is served by the virtual device (V2-1) and the Audio Unit (V2-12)
 - [ ] Tests at the eight rates; bench: lip sync and long-run drift
 
 ### V2-3 Network endpoint
