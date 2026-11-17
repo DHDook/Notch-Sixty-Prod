@@ -100,7 +100,7 @@ reviewers compare with Dirac and REW), then engine depth, then breadth.
    - then E32 Equalizer, Dynamics and Meters defect fixes, S1–S6 in written order, before item 10 (owner, 15 Nov 2026, `docs/epics/E32.md` decision 1; S3 starts after the owner's `ProductionGainReductionViews.swift` change is on `main`)
 10. E21 Portable C++ core, remaining items
     - first E33 Equalizer, Dynamics and Meters enhancements, S1–S10, then S12–S15, then S16–S17 (S16 event history first), then S18–S21, then S22–S25 (Plugins page), then S11 (the ship slice; S12–S25 added by the owner 16–17 Nov 2026), after E32 and before these E21 items (owner, 15 Nov 2026, `docs/epics/E33.md` decision 1)
-    - E34 S0 `e34/macos27-glass`, then S1 `e34/design-language`, run before the next page slice of any epic (owner, 17 Nov 2026, `docs/epics/E34.md` decisions 2 and 9); S2 waits for the owner's screen check
+    - E34 S0 `e34/macos27-glass`, then S1 `e34/design-language`, run before the next page slice of any epic (owner, 17 Nov 2026, `docs/epics/E34.md` decisions 2, 9 and 10); then S8 `e34/sidebar-groups` after the owner's screen check; S2 waits for both
 11. E14 Upmixer, E15 Device-aware profiles, E17 Output integrity and interchange, E16 Automation and remote, then E30 Everyday listening controls and E31 Signal path and history (owner, 11 Nov 2026; E30 needs E15 and the E17 dither stage; E31 follows E30)
     - then E8 S12–S16 active-speaker commissioning, in written order, before E12 S8 and before item 12 (owner approved the slices 16 Nov 2026; this position is proposed, the owner may move it; `docs/epics/E8.md`)
     - E12 S9, then S12–S14 Dashboard and menu bar, run before E30 in this item so the E30 controls land in the remote (owner approved the slices 16 Nov 2026; this position is proposed, the owner may move it; `docs/epics/E12.md`)
@@ -626,9 +626,9 @@ it follows). One flag `e33.page-enhancements`, graduated in S11. K-System scales
 
 Plan: `docs/epics/E34.md`. One design language in the macOS 27 Liquid Glass style, shared values and components,
 and one rule each for states, dialogs, menus, keyboard, accessibility and window sizes. No feature changes.
-One flag `e34.design-language`, graduated in S7. Open owner decision: G13 (minimum macOS 26 or 27).
+One flag `e34.design-language`, graduated in S7. The minimum macOS rises to 27 in S0 (owner, 17 Nov 2026).
 
-- [ ] S0 `e34/macos27-glass`: macOS 27 glass rules read from Apple's documentation, glass and material audit, flag added (low-risk)
+- [ ] S0 `e34/macos27-glass`: minimum macOS raised to 27, macOS 27 glass rules read from Apple's documentation, glass and material audit, flag added (needs-owner: minimum OS, `AGENTS.md`)
 - [ ] S1 `e34/design-language`: `docs/DESIGN_LANGUAGE.md`, values file, components, formatters, status levels, gallery; ends with the owner's screen check (low-risk)
 - [ ] S2 `e34/adopt-playback-pages`: Dashboard, Equalizer, Dynamics, Meters, Headphones, Plugins on the shared parts (low-risk)
 - [ ] S3 `e34/adopt-system-pages`: System, tools, Active Acoustics, Settings, Help on the shared parts (needs-owner: ANC and MIMO screens, appearance only)
@@ -636,6 +636,7 @@ One flag `e34.design-language`, graduated in S7. Open owner decision: G13 (minim
 - [ ] S5 `e34/menus-and-keyboard`: View and Playback menus, full keyboard reach (low-risk)
 - [ ] S6 `e34/accessibility`: Reduce Motion, Increase Contrast, Reduce Transparency, VoiceOver values (low-risk)
 - [ ] S7 `e34/sizes-and-ship`: minimum window size, 40% longer text, graduate `e34.design-language` (low-risk)
+- [ ] S8 `e34/sidebar-groups` (runs after S1, before S2): sidebar groups Playback (Equalizer, Dynamics, Meters), Setup (Speakers & Room, Headphones, Active Acoustics), Tools (Plug-ins, Blind Listening); two levels only; Upmixer and Signal Path join Playback (low-risk)
 
 ### E23 Legacy engine removal
 
