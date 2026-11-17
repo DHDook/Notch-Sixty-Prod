@@ -277,9 +277,9 @@ static uint64_t renderHash(double rate, uint32_t layoutId, int binaural, double 
     double busy = 0;
     for (int blk = 0; blk < NBLOCKS; blk++) {
         for (uint32_t c = 0; c < lay.channelCount; c++) corpusBlock(rate, blk, c, io.in[c], BLOCK, c == 0 ? &sweep : &(uint32_t){sweep});
-        clock_gettime(CLOCK_MONOTONIC, &t0);
+        timespec_get(&t0, TIME_UTC);
         run(g, &io, BLOCK);
-        clock_gettime(CLOCK_MONOTONIC, &t1);
+        timespec_get(&t1, TIME_UTC);
         busy += (double)(t1.tv_sec - t0.tv_sec) + 1e-9 * (double)(t1.tv_nsec - t0.tv_nsec);
         for (uint32_t c = 0; c < lay.channelCount; c++) {
             double e = 0;

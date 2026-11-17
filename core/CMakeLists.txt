@@ -402,11 +402,14 @@ target_link_libraries(n60core_mimo_safety_test PRIVATE n60core)
 add_test(NAME n60core_mimo_safety COMMAND n60core_mimo_safety_test)
 
 # E21 S0: the E4 ANC harnesses that exercise the moved sources (they live in ci/ with their shared plant helpers).
+# The harness uses C99 _Complex (double complex), which MSVC-style C does not provide: not built on clang-cl (E21 gap G3).
+if(NOT MSVC)
 add_executable(n60core_e4_fxlms_test ../ci/harness_e4_fxlms.c)
 set_target_properties(n60core_e4_fxlms_test PROPERTIES C_STANDARD 11 LINKER_LANGUAGE CXX)
 target_include_directories(n60core_e4_fxlms_test PRIVATE ../ci)
 target_link_libraries(n60core_e4_fxlms_test PRIVATE n60core ${N60_M})
 add_test(NAME n60core_e4_fxlms COMMAND n60core_e4_fxlms_test)
+endif()
 
 add_executable(n60core_e4_remote_tonal_test ../ci/harness_e4_remote_tonal.cpp)
 target_include_directories(n60core_e4_remote_tonal_test PRIVATE ../ci)

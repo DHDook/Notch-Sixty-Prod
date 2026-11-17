@@ -702,7 +702,7 @@ static void testAncRebuild(double rate) {
 
 static double nowSeconds(void) {
     struct timespec t;
-    clock_gettime(CLOCK_MONOTONIC, &t);
+    timespec_get(&t, TIME_UTC);
     return (double)t.tv_sec + 1e-9 * (double)t.tv_nsec;
 }
 
