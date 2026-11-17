@@ -29,6 +29,7 @@ Owner decisions from 17 Oct 2026 (and later, where dated) fix the plan's shape. 
 | Red nightly rule (11 Nov 2026) | A failing nightly `macos-full` on `main` is fixed before the next slice starts (`CLAUDE.md`, `/next` step 0) |
 | Engine code home (11 Nov 2026) | New engine C or C++ goes in `core/`, never in `NotchSixty/Audio/Realtime` (`CLAUDE.md`; checked by realtime-reviewer) |
 | After v1 (11 Nov 2026) | Post-v1 work is scoped in `docs/V2_ROADMAP.md`. It is not started, and `/next` does not read it, until the owner initiates it |
+| Whole-app review (17 Nov 2026) | Approved: E35 3D sound from two speakers in v1, with virtual surround from 5.1 and 7.1 sources; E22 pass-or-fail rule, owner-set ANC targets, ANC and MIMO checks first; E16 Control Centre control and widget; 384 kHz stays the v1 ceiling (705.6 and 768 kHz are V2-19); second zone is V2-20; speaker remapping and reflection control is V2-21; DSD output, MIDI and OSC control are not planned; dither stays automatic |
 
 ## Epics at a glance
 
@@ -68,6 +69,7 @@ platforms; E6 (the unified graph) is the critical path, because eleven later epi
 | E31 | Signal path and history | 4 | E6, E12, E17 (output integrity), E30 | Claude Code (Mac) | One view shows every stage with rate, bit depth, latency, gain and headroom and says when the path is bit-exact; undo, redo and named snapshots with level-matched comparison on every page |
 | E33 | Equalizer, Dynamics and Meters enhancements (owner, 15 Nov 2026) | 3–4 | E32, E27, E28 (bench parts: E22) | Claude Code (Mac) | The 15 Nov 2026 review's approved features are reachable from the three pages: two-column band editor, subsonic bands, APO import and export, band clipboard, one preamp model; numbered dynamics chain, expander lookahead, 2–5 multiband bands; meter zones, shared hold and resets, loudness history; PLR, spectrogram, bit activity, input overs, dropout counter, balance, per-band correlation, headroom strip and RTA |
 | E34 | Design language and UI consistency (owner, 17 Nov 2026) | 4 | E12 (page slices), E13, E33 for S2–S7; none for S0, S1 (screen checks: E22) | Claude Code (Mac) | One written design language in the macOS 27 Liquid Glass style; every page built from shared values and components; one rule each for states, dialogs, menus, keyboard, accessibility settings and window sizes |
+| E35 | 3D sound from two speakers (owner, 17 Nov 2026) | 4 | E13, E29, E4 S26b (head position), E12 S26 (blind compare) (bench parts: E22) | Claude Code (Mac) | Crosstalk cancellation designed from the speaker angle or from the listener's in-ear measurement, surround from two speakers for 5.1 and 7.1 sources, and camera head follow, reachable from its own page |
 | E23 | Legacy engine removal | 4 | E6 (incl. S12a–S12h), E4 S11, E7–E17 | Claude Code (Mac) | `N60RenderKernel`, the old N-channel path and the `e6.*` flags are gone; full suite green |
 | E22 | Hardware validation | 4 | all software epics | Bench | Every deferred bench check and owner acceptance check (including those that no longer gate a flag graduation) passes on `main` at every rate |
 | FC | Flag cleanup (owner, 11 Nov 2026) | 4 | E22 | Claude Code (Mac) | Every graduated flag and its dead branch removed in small per-epic PRs; nightly flags-off CI ran while flags existed |
@@ -113,6 +115,7 @@ reviewers compare with Dirac and REW), then engine depth, then breadth.
     - E34 S2–S7 run after the page slices above (E12 S12–S25, E13 S9–S12) and E33 S11, in written order, before item 14 (owner, 17 Nov 2026; `docs/epics/E34.md`)
 12. E23 Legacy engine removal
 13. E29 Shared room position model (owner, 9 Nov 2026: unparked, in v1; plan `docs/epics/E29.md`; flag `e29.room-model`, graduated in S9, removed in FC)
+    - then E35 3D sound from two speakers, S1–S4 in written order, after E29 and E13 S12, before item 14 (owner approved the epic 17 Nov 2026; this position is proposed, the owner may move it; S1 waits for the patent check, E35 G1; `docs/epics/E35.md`)
 14. E3 Hardware acceptance, then E22 Hardware validation, then FC flag cleanup, then E18 Launch readiness (owner-led, last) (owner, 11 Nov 2026; FC added 11 Nov 2026, flag graduation: epics graduate their flag instead of removing it; FC1, the flags-off nightly, lands before the first graduation)
 
 ## Phase 1 — Consolidate and qualify
@@ -540,6 +543,7 @@ No epic file yet: epic-planner writes `docs/epics/E16.md` when `/next` reaches i
 - [ ] Tier 1, App Intents and Shortcuts for profile, volume, mute, bypass and correction on/off, and starting a Quiet Zone session (always subject to the arm; an intent never arms anything by itself)
 - [ ] Tier 1, global hotkeys, media-key volume for DACs without hardware volume, and richer menu-bar quick controls
 - [ ] Tier 2, local authenticated REST/websocket API, off by default
+- [ ] Tier 1, `e16/control-centre-widget` (owner, 17 Nov 2026; needs-owner: new widget extension target and shared-state entitlement): a Control Centre control and a desktop widget for profile, volume, mute and correction on/off, built on the App Intents above; never arms anything and offers no Quiet Zone or MIMO start. MIDI and OSC control are not planned (the local API covers integrations)
 
 Owner decision, 11 Nov 2026: the iPhone remote moved to the post-v1 "iPhone companion app" entry
 under "Platform reach after v1". The local API must stay usable by that future iPhone client
@@ -550,7 +554,7 @@ under "Platform reach after v1". The local API must stay usable by that future i
 Plan: `docs/epics/E17.md` (awaiting owner approval; flags `e17.export`, `e17.dither`).
 
 - [ ] Filter export to MiniDSP, Equalizer APO and WAV convolution sets
-- [ ] Automatic TPDF dither only when the device's physical format is 16-bit integer
+- [ ] Automatic TPDF dither only when the device's physical format is 16-bit integer (owner, 17 Nov 2026: the S4 design note also settles whether to dither at 24 bits; dither stays automatic with no user control)
 - [ ] S6 `e17/device-format` (owner, 11 Nov 2026): read and show the device's physical format (bit depth, rate, integer or float) and let the user pick one where the device offers a choice. Dither stays automatic and limited to integer formats of 16 bits or fewer (E17 owner decisions Q5 and Q6); noise shaping, if S4's design note supports it, is chosen automatically too
 - [ ] S7 `e17/measurement-interchange` (owner, 11 Nov 2026; moved from E11): import and export REW text, FRD and ZMA
 - [ ] S8 `e17/correction-interchange` (owner, 11 Nov 2026): export a correction as FIR impulse files, biquad lists and a CamillaDSP configuration; import REW filter text and Equalizer APO configurations (extend the existing exporters and `EqualizerAPOPresetImporter`, do not duplicate them)
@@ -577,7 +581,7 @@ receives the result through the normal snapshot path.
 - [ ] Correction strength (setup and competitor review, owner approved 15 Nov 2026): one control, in the quick controls and the guided-setup Correction step, that scales how much room correction is applied from none to full; Swift designs the scaled correction and publishes it through the normal snapshot path (no new engine work expected); bass alignment, crossovers and protection are never scaled
 - [ ] Per-app rules: exclude an app from processing, or give it its own profile
 - [ ] Software-volume crash safety (failure and rate review, owner approved 15 Nov 2026); needs-owner (protection), built with the software volume control, never after it: when the app quits, crashes or is force-quit, macOS plays unprocessed full-level audio to the default output (E9 S9 finding), so a DAC held at -30 dB in software would jump to full scale. Software volume and the maximum-level limit are offered only when the DAC is not the macOS default output, reusing the E9 gate (`ActiveSpeakerFailsafe`, `DefaultOutputMonitor`); otherwise the control is refused with the reason and the launch banner covers it. A DAC or amplifier volume control is preferred when one exists. Normal Quit warns when software attenuation is in use. E22 bench: force-quit at -30 dB on a real DAC
-- [ ] Device rate picker (failure and rate review, owner approved 15 Nov 2026); needs-owner (Core Audio control): choose the DAC's sample rate from its supported rates in the app (the menu bar remote and output settings; the Dashboard shows the rate, owner 16 Nov 2026), using the existing live rate-change path. The app does not know the source rate through the process tap, so automatic rate following is V2-1
+- [ ] Device rate picker (failure and rate review, owner approved 15 Nov 2026); needs-owner (Core Audio control): choose the DAC's sample rate from its supported rates in the app (the menu bar remote and output settings; the Dashboard shows the rate, owner 16 Nov 2026), using the existing live rate-change path. The app does not know the source rate through the process tap, so automatic rate following is V2-1. Rates above 384 kHz are listed as unsupported with the reason, and a device already set to one gets an offer to switch to 352.8 or 384 kHz (owner, 17 Nov 2026; 705.6 and 768 kHz are V2-19; what the app shows today on such a device was not checked)
 - [ ] Correction freshness note (failure and rate review, owner approved 15 Nov 2026): show the age of the applied correction and prompt a re-measure when the output device, its routing or the speaker setup has changed since it was measured, or after a set time. Detecting change from the sound itself stays in V2-16 and V2-17
 - [ ] Per-app automatic low-latency mode: chosen apps (games, calls, video) switch the minimum-phase low-latency mode on while they play
 - [ ] Preference tuning by ear: a short series of level-matched A/B choices that adjusts tilt and bass level, using the E12 S26 comparison service (last slice before the ship slice)
@@ -646,6 +650,20 @@ One flag `e34.design-language`, graduated in S7. The minimum macOS rises to 27 i
 - [ ] S7 `e34/sizes-and-ship`: minimum window size, 40% longer text, graduate `e34.design-language` (low-risk)
 - [ ] S8 `e34/sidebar-groups` (runs after S1, before S2): sidebar groups Playback (Equalizer, Dynamics, Meters), Setup (Speakers & Room, Headphones, Active Acoustics), Tools (Plug-ins, Blind Listening); two levels only; Upmixer and Signal Path join Playback (low-risk)
 
+### E35 3D sound from two speakers (owner, 17 Nov 2026)
+
+Plan: `docs/epics/E35.md`. From the whole-app review of 17 Nov 2026: the one area where a Mac competitor (BACCH4Mac)
+does something the planned v1 could not do at all. Crosstalk cancellation for one listener, designed from the speaker
+angle or from the listener's own in-ear measurement, with surround from two speakers for 5.1 and 7.1 sources and
+camera head follow. It reuses the E13 in-ear capture and virtual-speaker renderer, the E4 S26b head position and the
+E29 positions. No microphone is in the loop while playing, so nothing here is live ANC or MIMO treatment and nothing
+is armed. One flag `e35.speaker-3d`, graduated in S4.
+
+- [ ] S1 `e35/xtc-design` (needs-owner: engine core; waits for G1, the patent check): written design note with public sources, C++ design maths in `core/` (regularised two-by-two inverse from a model or from measured speaker-to-ear responses, with a boost cap), flag added
+- [ ] S2 `e35/xtc-stage` (needs-owner: realtime engine; owns G2): the graph's crosstalk stage becomes a two-in two-out FIR; the one-knob model and its engineering toggle go; the E13 virtual-speaker renderer may feed it for 5.1 and 7.1 sources
+- [ ] S3 `e35/page-and-setup` (low-risk): production page with on/off, strength, speaker angle from E29 or typed in, measured mode through the E13 in-ear capture, "Surround from two speakers", and "Compare blind…" through E12 S26
+- [ ] S4 `e35/head-follow-ship` (needs-owner: camera use and engine): filters follow the head from the E4 S26b position; graduates `e35.speaker-3d`
+
 ### E23 Legacy engine removal
 
 Owner decision, 20 Oct 2026: the kernel stays behind `e6.legacy-kernel` until late in the roadmap,
@@ -676,7 +694,10 @@ Owner decision, 11 Nov 2026 (flag graduation): bench-dependent "is it good" acce
 
 Owner decision, 18 Oct 2026: there is no bench access for now, so every bench check is deferred to this epic, which runs once the software work is built. Software slices keep listing their checks under "Bench checks" in `docs/epics/E<n>.md`; this epic collects and runs them.
 
+Owner decision, 17 Nov 2026 (pass-or-fail rule; whole-app review): every check has a written pass limit before the campaign starts. A failed check becomes a gap in its owning epic with a fix slice, and E22 runs that check again after the fix. v1 ships when every check passes. The owner alone may waive a check, in writing, and the feature's published claim is then reduced to what was measured. The E4 and E19 lists run first, so the slowest findings come out earliest.
+
 - [ ] Collect every epic's "Bench checks" list and the E3 cases H01–H08 into one campaign
+- [ ] When epic-planner writes `docs/epics/E22.md` (owner, 17 Nov 2026): a pass limit beside every collected check; the owner sets the final ANC targets in `docs/ANC_QUALIFICATION.md` section 2, which are still marked "proposed"; the E4 and E19 lists are scheduled first
 - [ ] Run every E4 bench list in `docs/epics/E4.md` "Bench checks" (S4, S6, S7, S18b, S22a, S22b1 to S22b3, S25 arming, S26b, S30) after the graduation of the E4 flags (11 Nov 2026), including the 384 kHz feed-forward bridge shadow timing
 - [ ] E4 S26b head follow: with the Mac camera (built-in and external) the head-pose estimate lands within tolerance of measured seat positions, the camera light is on only while head follow is on and stops on disable, sleep and background, and with a person moving the zone follows the head while the other-seat limit holds (`docs/epics/E4.md` Bench checks, S26b)
 - [ ] E4 G21 other-seat prediction: with a real microphone at a protected seat, the measured change with Quiet Zone on stays within 1 dB of the prediction and no louder than the limit (E4 G16 persistence PR).
@@ -714,6 +735,7 @@ Owner decision, 18 Oct 2026: there is no bench access for now, so every bench ch
 - [ ] E13 page bench (S9–S12): generic HRTF placement by ear on two headphones (S11); switching between two list entries while playing and a linked device selecting its entry (S10); Auto headroom against a clipping test signal (S9)
 - [ ] E13 G13: cost per frame of the 16-tap Kaiser sinc delay-path FIR at 384 kHz, with an R3 cost row (E13 S5; E20 budgets)
 - [ ] E13 G15: head tracking with AirPods on a 7.1.4 layout, yaw and pitch blend without comb filtering or ITD jumps through a 360° sweep (E13 S5 bench item)
+- [ ] E35 bench (`docs/epics/E35.md` Bench checks; owner, 17 Nov 2026): sound placed beyond the speakers by ear in model and measured modes; channel separation at the ears measured with in-ear microphones against the prediction; tonal change at the seat; sweet-spot width with head follow off and on; surround from two speakers on a 5.1 source; how much weaker the effect is in a lively room
 - [ ] Carried in by flag graduation (11 Nov 2026): E4 S30 checks, E19 modal-decay campaign, E20 no-overload-with-workers (gates FC removal of `e20.*`), E26 sub bench gaps (G10, G11, G19, G23, G24, G28, G30), E28 owner listen to S7a to S7d, E13 G8 (96 kHz tail versus 384 kHz benchmark), E9 bench lines (G18, G25, G26)
 - [ ] E7 G10 and bench: insert a real Audio Unit that stops at 192 kHz and change the device rate 48 to 384 to 48 kHz while playing (per-rate bypass, row note, return at 48 kHz); listen to a 20 ms headphone delay, a resampled speaker IR and the precision-changed stages at 352.8 and 384 kHz (`docs/epics/E7.md` Bench checks)
 - [ ] E32 bench (`docs/epics/E32.md` slices): Equalizer page CPU with the analyser on and the Nyquist note on a real rate change, add and remove band error banners (S1); dynamic low shelf on music and band drags without level dips at 44.1, 96 and 384 kHz (S2); meters and gain-reduction CPU with audio stopped and while playing, a 25 h loudness run (S3); multiband crossover drag on a DAC (S4); limiter with attack above lookahead, expander on speech and drums, loopback inter-sample peak at 176.4, 192 and 384 kHz (S5)
