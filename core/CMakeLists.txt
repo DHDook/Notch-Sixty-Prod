@@ -20,7 +20,9 @@ target_include_directories(n60core PRIVATE src)
 # Windows, where /W4 is -Wall -Wextra, /WX is -Werror, /EHs-c- turns exceptions off and /GR- turns RTTI off.
 if(MSVC)
   target_compile_options(n60core PRIVATE /W4 /WX /EHs-c- /GR- -Wno-unknown-warning-option -Werror=function-effects)
-  target_compile_definitions(n60core PRIVATE _CRT_SECURE_NO_WARNINGS NOMINMAX)
+  target_compile_definitions(n60core PRIVATE _CRT_SECURE_NO_WARNINGS NOMINMAX _USE_MATH_DEFINES)
+  # M_PI and friends come from <math.h> only with _USE_MATH_DEFINES on MSVC; the tests use them too.
+  add_compile_definitions(_USE_MATH_DEFINES)
   set(N60_M "")
 else()
   target_compile_options(n60core PRIVATE -Wall -Wextra -Werror -Wno-unknown-warning-option -Werror=function-effects -fno-exceptions -fno-rtti)
