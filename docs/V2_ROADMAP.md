@@ -78,7 +78,7 @@ driver say so in the app. The App Store listing is wanted but is not a hard requ
 
 **Settle before planning**
 
-- [ ] `AGENTS.md` edit (needs-owner): section 2 lists installing audio drivers as out of scope and section 6 forbids architecture that depends on a HAL driver or on restarting `coreaudiod`. Proposed wording: the app never depends on the driver; the driver is a separate optional product; the sandboxed app never installs it
+- [x] `AGENTS.md` edit (owner approved 16 Nov 2026): sections 2, 3 and 6 now allow the optional add-on. The app never depends on the driver; the driver is a separate product; the sandboxed app never installs it
 - [ ] App Store question (open): App Review rules say a Mac App Store app may not download or install additional code that adds functionality. So the App Store build cannot download or run the installer. Proposed shape, to confirm with App Review before building: the App Store build only detects an installed driver and uses it; its Settings sheet explains the add-on and opens the download page in the browser; the user runs the installer themself. Fallback if App Review refuses even the link: the sheet shows status only and the website carries the instructions. A direct-download build (Developer ID) that installs from inside the app is a later option, not required
 - [ ] Licence review for the starting point: Apple's sample audio driver or libASPL (MIT), recorded in `docs/PROVENANCE.md` and `THIRD_PARTY_NOTICES.md`; otherwise written from Apple's AudioServerPlugIn documentation
 
@@ -86,7 +86,7 @@ driver say so in the app. The App Store listing is wanted but is not a hard requ
 
 - [ ] D1 Input-source seam in the app: one interface with two backends (process tap, virtual device) behind the same realtime bridge. The control-plane state machine gains named states for "driver selected but missing" and "switching input"; no silent fallback. Tap stays the default. Needs-owner (Core Audio transport)
 - [ ] D2 The driver (own repository, C++, user-space AudioServerPlugIn, no kernel code):
-  - Loopback device, every rate the DAC offers up to 384 kHz, layouts from stereo to 7.1.4
+  - Loopback device, every rate the DAC offers up to 384 kHz, layouts from stereo to 7.1.4 (the tested maximum). The channel count is a build constant sized for 16 channels, so 9.1.6 can be added later without a redesign
   - Its clock follows the selected DAC, so the app needs no drift correction (the tap's one-clock advantage is kept). If that cannot be made exact, an explicit, measured asynchronous resampler is an owner decision, not a default
   - The device exists only while the app holds a heartbeat. If the app quits, crashes or is force-quit, the device disappears and macOS returns to a real output: system audio is never left silent or wedged (AGENTS.md section 5)
   - Control and handshake through versioned custom device properties only (works from the sandbox); the app refuses a driver version it does not know

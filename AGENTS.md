@@ -40,16 +40,26 @@ The project owner has explicitly approved a staged post-v1 architecture expansio
 This approval does not permit unsafe partial activation: each PR must preserve shipping stereo behavior until the relevant N-channel transport/DSP path is complete and validated.
 
 Still out of scope unless explicitly approved:
-- installing audio drivers
+- installing audio drivers from the app, or any audio driver other than the optional add-on below
 - privileged helpers
 - kernel/system extensions
 - proprietary object/bitstream decoders (for example a Dolby Atmos decoder) without the required licensing/product decision
 
 Multi-seat room correction and multichannel program audio remain distinct concepts.
 
+### Optional virtual audio driver add-on (owner decision, 16 Nov 2026; post-v1, V2-1)
+
+The owner has approved Notch Sixty's own user-space virtual audio driver as an optional add-on, planned in `docs/V2_ROADMAP.md` (V2-1). It is not v1 work and does not start until the owner says so.
+
+- The app never depends on the driver. It installs, runs and ships every v1 feature without it, and the process tap stays the default input path.
+- The driver is a separate product in its own repository with its own signed, notarised installer and uninstaller. Only that installer touches `/Library/Audio/Plug-Ins/HAL` or restarts `coreaudiod`. The sandboxed app never downloads, installs, updates or removes it; it only detects an installed driver and uses it as an audio device.
+- User-space AudioServerPlugIn only. No kernel or system extension, no privileged helper.
+- The clean-room rule (section 1) and the licence rule (section 7) apply: no GPL driver code (for example BlackHole or Background Music), and not as a coding reference.
+- If the app stops for any reason, the virtual device must go away so macOS returns to a real output (section 5).
+
 ## 3. Transport architecture
 
-Use public Core Audio APIs and the driverless process-tap architecture.
+Use public Core Audio APIs and the driverless process-tap architecture. The optional virtual audio driver (section 2) is a second input path beside the tap, never a replacement: the flow below stays the default and must work with no driver installed.
 
 Expected flow:
 
@@ -142,6 +152,8 @@ App Sandbox is required from the beginning. Do not introduce architecture that d
 - restarting `coreaudiod`
 - self-updaters in the App Store build
 - writing outside permitted sandbox/user-selected locations
+
+The optional virtual audio driver add-on (section 2) is the one exception to the HAL-driver and `coreaudiod` lines, and only for its own separate installer. The app itself still follows every line above and must work with no driver installed.
 
 See `docs/APP_STORE_REQUIREMENTS.md`.
 
