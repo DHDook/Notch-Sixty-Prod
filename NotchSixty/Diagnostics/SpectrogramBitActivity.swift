@@ -276,19 +276,31 @@ struct BitActivityChannel: Equatable, Sendable {
 struct BitActivityMeter {
     static let latticeWindow = 8_192
 
-    private var seenOne: [UInt32] = [0, 0]
-    private var seenZero: [UInt32] = [0, 0]
-    private var counts = [0, 0]
+    let channelCount: Int
+    private var seenOne: [UInt32]
+    private var seenZero: [UInt32]
+    private var counts: [Int]
     private var recent: [[Int32]]
-    private var recentWrite = [0, 0]
-    private var recentCount = [0, 0]
+    private var recentWrite: [Int]
+    private var recentCount: [Int]
 
-    init() {
-        recent = [[Int32](repeating: 0, count: Self.latticeWindow), [Int32](repeating: 0, count: Self.latticeWindow)]
+    /// E33 S17: `channelCount` is 2 for a stereo bridge and the programme channel count on a wide session.
+    init(channelCount: Int = 2) {
+        let n = max(channelCount, 1)
+        self.channelCount = n
+        seenOne = [UInt32](repeating: 0, count: n)
+        seenZero = [UInt32](repeating: 0, count: n)
+        counts = [Int](repeating: 0, count: n)
+        recentWrite = [Int](repeating: 0, count: n)
+        recentCount = [Int](repeating: 0, count: n)
+        recent = [[Int32]](repeating: [Int32](repeating: 0, count: Self.latticeWindow), count: n)
     }
 
     mutating func reset() {
-        seenOne = [0, 0]; seenZero = [0, 0]; counts = [0, 0]; recentWrite = [0, 0]; recentCount = [0, 0]
+        let n = channelCount
+        seenOne = [UInt32](repeating: 0, count: n); seenZero = [UInt32](repeating: 0, count: n)
+        counts = [Int](repeating: 0, count: n); recentWrite = [Int](repeating: 0, count: n)
+        recentCount = [Int](repeating: 0, count: n)
     }
 
     static func fixedPoint(_ x: Float) -> Int32 {
@@ -301,11 +313,13 @@ struct BitActivityMeter {
     }
 
     mutating func process(left: [Float], right: [Float]) {
+        guard channelCount >= 2 else { return }
         left.withUnsafeBufferPointer { process(channel: 0, samples: $0) }
         right.withUnsafeBufferPointer { process(channel: 1, samples: $0) }
     }
 
     mutating func process(_ frames: UnsafeBufferPointer<N60AnalysisFrame>) {
+        guard channelCount >= 2 else { return }
         for frame in frames {
             push(channel: 0, Self.fixedPoint(frame.inputLeft))
             push(channel: 1, Self.fixedPoint(frame.inputRight))
@@ -324,7 +338,7 @@ struct BitActivityMeter {
     }
 
     func readout() -> [BitActivityChannel] {
-        (0..<2).map { c in
+        (0..<channelCount).map { c in
             var channel = BitActivityChannel()
             channel.samples = counts[c]
             channel.toggledMask = seenOne[c] & seenZero[c]
@@ -396,6 +410,8 @@ final class ProductionSpectrogramFeed {
     private var window = SpectrogramWindow.tenSeconds
     private var cached: SpectrogramSnapshot?
     private var cachedColumns = -1
+    private var viewScratchL: [Float] = []
+    private var viewScratchR: [Float] = []
 
     var isSpectrogramActive: Bool { ring != nil }
     var isBitActivityActive: Bool { bits != nil }
@@ -424,9 +440,59 @@ final class ProductionSpectrogramFeed {
 
     func resetBitActivity() { bits?.reset() }
 
+    /// E33 S17: the view changed, so the image starts again.
+    func resetSpectrogram() { ring?.reset(); cached = nil; cachedColumns = -1 }
+
+    /// E33 S17: wide sessions. `bitChannels` is the programme channel count; `ringLeft`/`ringRight` are the selected
+    /// view for the spectrogram image (the same samples on both sides for a one-channel view).
+    func setActiveWide(
+        spectrogram: Bool, window newWindow: SpectrogramWindow, bitActivity: Bool, bitChannels: Int, sampleRate: Double
+    ) {
+        setActive(spectrogram: spectrogram, window: newWindow, bitActivity: false, sampleRate: sampleRate)
+        if bitActivity {
+            if bits == nil || bits?.channelCount != bitChannels { bits = BitActivityMeter(channelCount: bitChannels) }
+        } else {
+            bits = nil
+        }
+    }
+
+    func ingestWide(viewLeft: UnsafeBufferPointer<Float>, viewRight: UnsafeBufferPointer<Float>) {
+        ring?.ingest(left: viewLeft, right: viewRight)
+    }
+
+    func ingestBits(channel: Int, samples: UnsafeBufferPointer<Float>) {
+        guard bits != nil, channel < (bits?.channelCount ?? 0) else { return }
+        bits?.process(channel: channel, samples: samples)
+    }
+
     func ingest(_ frames: UnsafeBufferPointer<N60AnalysisFrame>) {
+        ingest(frames, view: .standard)
+    }
+
+    /// E33 S17: the image follows the chosen Left, Right, Mid or Side view; bit activity always reads the program input.
+    func ingest(_ frames: UnsafeBufferPointer<N60AnalysisFrame>, view: AnalysisView) {
         guard !frames.isEmpty else { return }
-        ring?.ingest(frames)
+        if let ring {
+            if view == .standard {
+                ring.ingest(frames)
+            } else {
+                if viewScratchL.count < frames.count {
+                    viewScratchL = [Float](repeating: 0, count: frames.count)
+                    viewScratchR = viewScratchL
+                }
+                for i in 0..<frames.count {
+                    let v = StereoViewTransform.apply(view, left: frames[i].outputLeft, right: frames[i].outputRight)
+                    viewScratchL[i] = v.0
+                    viewScratchR[i] = v.1
+                }
+                viewScratchL.withUnsafeBufferPointer { l in
+                    viewScratchR.withUnsafeBufferPointer { r in
+                        ring.ingest(left: UnsafeBufferPointer(rebasing: l[0..<frames.count]),
+                                    right: UnsafeBufferPointer(rebasing: r[0..<frames.count]))
+                    }
+                }
+            }
+        }
         bits?.process(frames)
     }
 

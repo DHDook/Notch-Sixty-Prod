@@ -172,6 +172,9 @@ struct ProductionMetersView: View {
     @AppStorage(PreferenceKeys.Meters.peakHold) private var holdRaw = MeterHoldChoice.default.rawValue
     @AppStorage(PreferenceKeys.Meters.scaleFloorDB) private var scaleRaw = MeterScaleChoice.default.rawValue
     @State private var spectrogramWindow = SpectrogramWindow.tenSeconds
+    /// E33 S17: the View of Spectrum, RTA and Spectrogram, and the pair of the Stereo page (codes of `AnalysisView`, `AnalysisPair`).
+    @State private var analysisViewCode: UInt8 = 0
+    @State private var analysisPairCode: UInt8 = 0
 
 
     private var snapshot: ProductionMetersSnapshot { get { tick.snapshot } nonmutating set { tick.snapshot = newValue } }
@@ -188,6 +191,10 @@ struct ProductionMetersView: View {
     private var loudnessHistory: LoudnessShortTermHistory { get { tick.loudnessHistory } nonmutating set { tick.loudnessHistory = newValue } }
     @AppStorage(PreferenceKeys.Meters.loudnessTarget) private var loudnessTargetRaw = LoudnessHistoryTarget.default.rawValue
     private var inputOvers: InputOversReading { get { tick.inputOvers } nonmutating set { tick.inputOvers = newValue } }
+
+    private var viewOptions: AnalysisViewOptions { AnalysisViewOptions(transport: transportMeterSnapshot) }
+    private var analysisView: AnalysisView { viewOptions.resolved(AnalysisView(code: analysisViewCode)) }
+    private var analysisPair: AnalysisPair { viewOptions.resolved(AnalysisPair(rawValue: analysisPairCode) ?? .standard) }
 
     var body: some View {
         ScrollView {
@@ -211,6 +218,11 @@ struct ProductionMetersView: View {
                         .frame(maxWidth: 360)
                         .accessibilityIdentifier("meters.spectrum.mode")
                     }
+                    if enhanced {
+                        ProductionAnalysisViewPicker(
+                            options: viewOptions.views, selection: Binding(
+                                get: { analysisView }, set: { analysisViewCode = $0.code }))
+                    }
                     if enhanced && spectrumMode == .spectrogram {
                         ProductionSpectrogramView(
                             snapshot: analysisSnapshot.spectrogram,
@@ -230,6 +242,11 @@ struct ProductionMetersView: View {
                         )
                     }
                 case .stereo:
+                    if enhanced, viewOptions.pairs.count > 1 {
+                        ProductionAnalysisPairPicker(
+                            options: viewOptions.pairs, selection: Binding(
+                                get: { analysisPair }, set: { analysisPairCode = $0.rawValue }))
+                    }
                     ProductionStereoAnalysisView(
                         snapshot: analysisSnapshot,
                         isRunning: engine.lifecycleState == .running
@@ -244,7 +261,7 @@ struct ProductionMetersView: View {
             .padding(DesignSpacing.xl.pt)
             .frame(maxWidth: 1180, alignment: .topLeading)
         }
-        .task(id: "\(engine.lifecycleState.rawValue)|\(page.rawValue)|\(spectrumMode.rawValue)|\(spectrogramWindow.rawValue)") {
+        .task(id: "\(engine.lifecycleState.rawValue)|\(page.rawValue)|\(spectrumMode.rawValue)|\(spectrogramWindow.rawValue)|\(analysisViewCode)|\(analysisPairCode)|\(transportMeterSnapshot?.kind.rawValue ?? "stereo")") {
             await runVisiblePageLoop()
         }
         .alert(
@@ -325,12 +342,12 @@ struct ProductionMetersView: View {
                 )
                 ProductionHeadroomStripCard(
                     strip: headroomStrip,
-                    isAvailable: transportMeterSnapshot == nil,
                     isRunning: engine.lifecycleState == .running,
                     onReset: { headroomStrip.reset() }
                 )
                 ProductionBitActivityCard(
                     channels: analysisSnapshot.bitActivity,
+                    names: transportMeterSnapshot.map { $0.programChannels.map(\.label) } ?? SpectrogramText.channelNames,
                     isRunning: engine.lifecycleState == .running,
                     onReset: resetBitActivity
                 )
@@ -1148,13 +1165,14 @@ struct ProductionMetersView: View {
 
     /// Demand for Spectrum while an E33 mode is selected.
     private var enhancedSpectrumDemand: UInt32 {
+        let selection = ProductionAnalysisSelection.encode(view: analysisView)
         switch spectrumMode {
         case .spectrum:
-            return UInt32(N60_ANALYSIS_DEMAND_SPECTRUM)
+            return UInt32(N60_ANALYSIS_DEMAND_SPECTRUM) | selection
         case .rta:
-            return UInt32(N60_ANALYSIS_DEMAND_STEREO) | ProductionAnalysisDemand.rta
+            return UInt32(N60_ANALYSIS_DEMAND_STEREO) | ProductionAnalysisDemand.rta | selection
         case .spectrogram:
-            return UInt32(N60_ANALYSIS_DEMAND_STEREO) | ProductionAnalysisDemand.spectrogram
+            return UInt32(N60_ANALYSIS_DEMAND_STEREO) | ProductionAnalysisDemand.spectrogram | selection
                 | (spectrogramWindow == .sixtySeconds ? ProductionAnalysisDemand.spectrogramLong : 0)
         }
     }
@@ -1177,16 +1195,21 @@ struct ProductionMetersView: View {
             demandToken = ProductionDetailedMeterDemand.acquire(engine: engine)
         }
 
-        let analysisDemand: UInt32
+        var analysisDemand: UInt32
         switch activePage {
         case .spectrum:
             analysisDemand = enhanced ? enhancedSpectrumDemand : UInt32(N60_ANALYSIS_DEMAND_SPECTRUM)
         case .stereo:
             analysisDemand = UInt32(N60_ANALYSIS_DEMAND_STEREO)
+                | (enhanced ? ProductionAnalysisSelection.encode(view: .standard, pair: analysisPair) : 0)
         case .levels:
             analysisDemand = levelsDemand
         case .dynamics, .transport:
             analysisDemand = UInt32(N60_ANALYSIS_DEMAND_NONE)
+        }
+        // Wide sessions gain the spectrum and stereo views only with the flag on.
+        if !enhanced, transportMeterSnapshot != nil {
+            analysisDemand &= ~(UInt32(N60_ANALYSIS_DEMAND_SPECTRUM) | UInt32(N60_ANALYSIS_DEMAND_STEREO))
         }
         var analysisToken: UUID?
         if analysisDemand != 0, engine.lifecycleState == .running {
@@ -1292,7 +1315,12 @@ struct ProductionMetersView: View {
             snapshot = ProductionMetersSnapshot()
             return
         }
-        if transportMeterSnapshot != nil {
+        if let wide = transportMeterSnapshot {
+            if enhanced {
+                headroomStrip.updateWide(
+                    program: wide.programChannels,
+                    output: wide.physicalOutputs)
+            }
             snapshot = ProductionMetersSnapshot()
             return
         }

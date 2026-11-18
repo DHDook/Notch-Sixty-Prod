@@ -382,32 +382,63 @@ struct HeadroomPoint: Equatable, Sendable {
     let title: String
     var peakDBFS: Double
     var holdDBFS: Double
+    /// E33 S17: on a wide session, the channel that holds the peak.
+    var worstChannel: String?
     /// Distance below full scale, dB (never negative).
     var headroomDB: Double { max(-holdDBFS, 0) }
 }
 
 /// Peak hold at the input, post-EQ and output meter points, from the hub's own readings (no second reader).
+/// On a wide session it has two points (programme and output), each naming its worst channel (E33 S17).
 /// The post-dynamics point joins when the analyser tap feeds it (`docs/epics/E33.md` Gaps).
 struct HeadroomStripModel: Equatable, Sendable {
     static let floorDB = -120.0
-    private(set) var points: [HeadroomPoint] = [
-        HeadroomPoint(id: "input", title: "Input", peakDBFS: floorDB, holdDBFS: floorDB),
-        HeadroomPoint(id: "postEQ", title: "Post-EQ", peakDBFS: floorDB, holdDBFS: floorDB),
-        HeadroomPoint(id: "output", title: "Output", peakDBFS: floorDB, holdDBFS: floorDB),
-    ]
+    private(set) var points: [HeadroomPoint] = HeadroomStripModel.stereoPoints
+
+    private static var stereoPoints: [HeadroomPoint] {
+        [
+            HeadroomPoint(id: "input", title: "Input", peakDBFS: floorDB, holdDBFS: floorDB),
+            HeadroomPoint(id: "postEQ", title: "Post-EQ", peakDBFS: floorDB, holdDBFS: floorDB),
+            HeadroomPoint(id: "output", title: "Output", peakDBFS: floorDB, holdDBFS: floorDB),
+        ]
+    }
+
+    private static var widePoints: [HeadroomPoint] {
+        [
+            HeadroomPoint(id: "input", title: "Programme", peakDBFS: floorDB, holdDBFS: floorDB),
+            HeadroomPoint(id: "output", title: "Output", peakDBFS: floorDB, holdDBFS: floorDB),
+        ]
+    }
+
+    private static func decibels(_ linear: Float) -> Double {
+        linear > 1e-6 ? max(20 * Double(log10(linear)), floorDB) : floorDB
+    }
 
     /// `peaks` are linear maxima since the last call (the hub's read-and-reset values), keyed by point id.
     mutating func update(peaks: [String: Float]) {
+        if points.count != 3 { self = HeadroomStripModel() }
         for i in points.indices {
             guard let linear = peaks[points[i].id] else { continue }
-            let db = linear > 1e-6 ? max(20 * Double(log10(linear)), Self.floorDB) : Self.floorDB
+            let db = Self.decibels(linear)
             points[i].peakDBFS = db
             points[i].holdDBFS = max(points[i].holdDBFS, db)
         }
     }
 
+    /// Wide session: the worst channel of the programme and of the physical outputs since the last call.
+    mutating func updateWide(program: [ProductionTransportChannelMeter], output: [ProductionTransportChannelMeter]) {
+        if points.count != 2 { points = Self.widePoints }
+        for (i, channels) in [program, output].enumerated() {
+            guard let worst = WideHeadroom.worst(channels) else { continue }
+            let db = Self.decibels(worst.peakLinear)
+            points[i].peakDBFS = db
+            if db >= points[i].holdDBFS { points[i].worstChannel = worst.label }
+            points[i].holdDBFS = max(points[i].holdDBFS, db)
+        }
+    }
+
     mutating func reset() {
-        for i in points.indices { points[i].holdDBFS = Self.floorDB; points[i].peakDBFS = Self.floorDB }
+        for i in points.indices { points[i].holdDBFS = Self.floorDB; points[i].peakDBFS = Self.floorDB; points[i].worstChannel = nil }
     }
 }
 
@@ -703,6 +734,8 @@ final class ProductionAnalysisMeterFeed {
     private var rate = 0.0
     private var left: [Float] = []
     private var right: [Float] = []
+    private var viewLeft: [Float] = []
+    private var viewRight: [Float] = []
 
     var isMeterActive: Bool { metersActive }
     var isRTAActive: Bool { rtaActive }
@@ -736,6 +769,12 @@ final class ProductionAnalysisMeterFeed {
     }
 
     func ingest(_ frames: UnsafeBufferPointer<N60AnalysisFrame>) {
+        ingest(frames, rtaView: nil)
+    }
+
+    /// E33 S17: the meters read the output pair as it is; the RTA reads `rtaView` (the chosen Left, Right, Mid or Side
+    /// view, the same samples on both sides) when given.
+    func ingest(_ frames: UnsafeBufferPointer<N60AnalysisFrame>, rtaView: AnalysisView?) {
         guard (metersActive || rtaActive), !frames.isEmpty else { return }
         let count = frames.count
         if left.count < count {
@@ -746,6 +785,18 @@ final class ProductionAnalysisMeterFeed {
             left[i] = frames[i].outputLeft
             right[i] = frames[i].outputRight
         }
+        let viewed = rtaActive && rtaView != nil && rtaView != .standard
+        if viewed, let rtaView {
+            if viewLeft.count < count {
+                viewLeft = [Float](repeating: 0, count: count)
+                viewRight = [Float](repeating: 0, count: count)
+            }
+            for i in 0..<count {
+                let v = StereoViewTransform.apply(rtaView, left: left[i], right: right[i])
+                viewLeft[i] = v.0
+                viewRight[i] = v.1
+            }
+        }
         left.withUnsafeBufferPointer { l in
             right.withUnsafeBufferPointer { r in
                 let lv = UnsafeBufferPointer(rebasing: l[0..<count])
@@ -755,7 +806,15 @@ final class ProductionAnalysisMeterFeed {
                     balance?.process(left: lv, right: rv)
                     correlation?.process(left: lv, right: rv)
                 }
-                if rtaActive { rta?.ingest(left: lv, right: rv) }
+                if rtaActive, !viewed { rta?.ingest(left: lv, right: rv) }
+            }
+        }
+        if viewed {
+            viewLeft.withUnsafeBufferPointer { l in
+                viewRight.withUnsafeBufferPointer { r in
+                    rta?.ingest(left: UnsafeBufferPointer(rebasing: l[0..<count]),
+                                right: UnsafeBufferPointer(rebasing: r[0..<count]))
+                }
             }
         }
     }
@@ -775,6 +834,9 @@ final class ProductionAnalysisMeterFeed {
         out.correlation = correlation.correlations()
         return out
     }
+
+    /// E33 S17: the view changed, so the band windows start again.
+    func resetRTA() { rta?.reset() }
 
     func rtaLevels() -> [Float] {
         guard rtaActive, let levels = rta?.bandLevelsDB() else { return [] }

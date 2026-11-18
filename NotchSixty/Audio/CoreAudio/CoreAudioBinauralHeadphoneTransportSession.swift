@@ -397,7 +397,8 @@ final class CoreAudioBinauralHeadphoneTransportSession {
         wideLoudnessWorker = ProductionWideLoudnessWorker(
             capture: bridge.pointee.loudnessCapture, sampleRate: sampleRate,
             inputPositions: LoudnessChannelPosition.positions(for: programLayout.roles),
-            outputPositions: LoudnessChannelPosition.stereo)
+            outputPositions: LoudnessChannelPosition.stereo,
+            roles: programLayout.roles, isBinaural: true)
     }
 
     func setAnalysisDemand(_ demandMask: UInt32) {
@@ -406,6 +407,10 @@ final class CoreAudioBinauralHeadphoneTransportSession {
 
     func productionAnalysisSnapshot() -> ProductionAnalysisSnapshot {
         wideLoudnessWorker?.snapshot() ?? .empty
+    }
+
+    func resetSpectrumPeakHold() {
+        wideLoudnessWorker?.resetSpectrumPeakHold()
     }
 
     func bridgeSnapshot() -> N60BinauralHeadphoneBridgeSnapshot? {

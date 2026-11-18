@@ -98,7 +98,6 @@ struct ProductionAnalysisMetersCard: View {
 /// Peak hold at input, post-EQ and output in one strip (D7).
 struct ProductionHeadroomStripCard: View {
     let strip: HeadroomStripModel
-    let isAvailable: Bool
     let isRunning: Bool
     let onReset: () -> Void
 
@@ -109,9 +108,7 @@ struct ProductionHeadroomStripCard: View {
                 Spacer()
                 Button("Reset Hold", action: onReset).accessibilityIdentifier("meters.headroom.reset")
             }
-            if !isAvailable {
-                Text("The headroom strip is shown for stereo sessions.").font(DesignType.caption.font).foregroundStyle(.secondary)
-            } else if !isRunning {
+            if !isRunning {
                 Text("Start processing to measure.").font(DesignType.caption.font).foregroundStyle(.secondary)
             } else {
                 HStack(alignment: .top, spacing: DesignSpacing.m.pt) {
@@ -126,13 +123,16 @@ struct ProductionHeadroomStripCard: View {
                             Text(point.holdDBFS <= HeadroomStripModel.floorDB
                                  ? "" : String(format: "%.1f dB headroom", point.headroomDB))
                                 .font(DesignType.caption.font).foregroundStyle(.tertiary)
+                            if let worst = point.worstChannel, point.holdDBFS > HeadroomStripModel.floorDB {
+                                Text("Worst: \(worst)").font(DesignType.caption.font).foregroundStyle(.secondary)
+                            }
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .accessibilityElement(children: .combine)
                         .accessibilityIdentifier("meters.headroom.\(point.id)")
                     }
                 }
-                Text("Peak hold of the stereo meter points since the last reset. The post-dynamics point is not measured yet.")
+                Text("Peak hold of the meter points since the last reset; on a speaker or headphone programme session the worst channel is named. The post-dynamics point is not measured yet.")
                     .font(DesignType.caption.font).foregroundStyle(.secondary)
             }
         }

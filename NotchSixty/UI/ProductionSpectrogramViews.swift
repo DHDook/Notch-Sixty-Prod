@@ -85,8 +85,12 @@ struct ProductionSpectrogramView: View {
 /// Bit activity (D3): 24 cells per channel, most significant bit on the left.
 struct ProductionBitActivityCard: View {
     let channels: [BitActivityChannel]
+    /// E33 S17: one name per channel (the speakers on a wide session); a missing name reads Channel n.
+    var names: [String] = SpectrogramText.channelNames
     let isRunning: Bool
     let onReset: () -> Void
+
+    private func name(_ index: Int) -> String { index < names.count ? names[index] : "Channel \(index + 1)" }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -100,7 +104,7 @@ struct ProductionBitActivityCard: View {
             } else {
                 ForEach(Array(channels.enumerated()), id: \.offset) { index, channel in
                     HStack(spacing: 10) {
-                        Text(SpectrogramText.channelNames[min(index, 1)]).frame(width: 44, alignment: .leading)
+                        Text(name(index)).frame(minWidth: 44, alignment: .leading)
                         HStack(spacing: 2) {
                             ForEach((0..<BitActivityChannel.bits).reversed(), id: \.self) { bit in
                                 RoundedRectangle(cornerRadius: 2)
@@ -114,7 +118,7 @@ struct ProductionBitActivityCard: View {
                             .accessibilityIdentifier("meters.bits.verdict.\(index)")
                     }
                     .accessibilityElement(children: .ignore)
-                    .accessibilityLabel("\(SpectrogramText.channelNames[min(index, 1)]) channel bit activity")
+                    .accessibilityLabel("\(name(index)) channel bit activity")
                     .accessibilityValue("\(channel.toggledCount) of 24 bits active. \(channel.text)")
                 }
             }
