@@ -34,7 +34,7 @@ extern "C" {
 #endif
 
 /* Bumped on any incompatible change to a struct or function below. */
-#define N60_GRAPH_ABI_VERSION 45u
+#define N60_GRAPH_ABI_VERSION 46u
 
 typedef struct n60_graph n60_graph; /* opaque */
 
@@ -529,7 +529,12 @@ typedef int (*n60_external_process_fn)(void *context, const float *const *in, fl
  *  true-peak factor by rate when the limiter and guard are both on (the smallest of 1, 2, 4 with rate x factor >= 176.4 kHz:
  *  4x at 44.1 and 48 kHz, 2x at 88.2 and 96 kHz, 1x from 176.4 kHz) instead of the fixed 4, and the latency follows. W = 0
  *  and the 7 and 18-value blocks are bit-identical to ABI v42. n60_dynamics_readback.reserved carries the number of
- *  safety-clamp events since the previous read (a limited sample that still exceeded the ceiling), reset by the read. The
+ *  safety-clamp events since the previous read (a limited sample that still exceeded the ceiling), reset by the read.
+ *  ABI v46 (E33 S14): the word is 0..7; bit 2 (value 4) is auto release: the fixed Release [3] is ignored and the release rate
+ *  blends a 30 ms and a 400 ms time constant by a sustain follower (1 when the look-ahead window peak has been over the ceiling,
+ *  150 ms rise, 1 s fall; 0 after a single peak), so a single peak recovers fast and sustained limiting slowly. Bit 2 clear is
+ *  bit-identical to v45. n60_dynamics_readback.effectiveReleaseMs reports the current effective time. The sustain state is
+ *  not carried across a rebuild (it restarts at 0). The
  *  clipper acts per oversampled sample before the
  *  limiter; the rider (active only with the limiter on) scales each frame by the sustained limiter reduction
  *  before oversampling. Its state is carried across a rebuild.
@@ -851,6 +856,7 @@ typedef struct n60_dynamics_readback {
     float outTruePeak;        /* PROTECTION: the same after the limiter (factor 1 = sample peak) */
     uint32_t guardActive;     /* PROTECTION: 1 when the limiter runs with oversampling (the true-peak guard) */
     uint32_t reserved;        /* PROTECTION (ABI v43): safety-clamp events since the previous read, reset by the read; 0 for the other kinds */
+    float effectiveReleaseMs; /* PROTECTION (ABI v46): the limiter's effective release time (ms) at the end of the last block while auto release is on; 0 otherwise and for the other kinds (not reset by the read) */
 } n60_dynamics_readback;
 
 /* Reads a COMPRESSOR, CORE_DYNAMICS, EXPANDER or PROTECTION stage for one output lane. A linked group

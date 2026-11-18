@@ -55,6 +55,8 @@ typedef struct {
     uint32_t limiterAttackHighSamples;
     float limiterReleaseCoefficientHigh;
     bool truePeakGuardEnabled;
+    /* E33 S14: programme-dependent release (graph ABI 46). Read by the unified graph's translator only; the frozen kernel keeps its fixed release. */
+    bool limiterAutoRelease;
 
     bool gainRiderEnabled;
     float gainRiderTargetGRDB;
@@ -122,6 +124,9 @@ bool N60ProtectionSnapshotSetLimiterAdvanced(
     float lookAheadMs,
     bool truePeakGuardEnabled
 );
+
+/* E33 S14: switch the limiter's programme-dependent release (graph ABI 46). The fixed release value stays in the snapshot. */
+bool N60ProtectionSnapshotSetLimiterAutoRelease(N60ProtectionSnapshot *snapshot, bool enabled);
 
 bool N60ProtectionSnapshotSetGainRider(
     N60ProtectionSnapshot *snapshot,

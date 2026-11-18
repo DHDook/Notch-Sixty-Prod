@@ -279,6 +279,43 @@ int main() {
         n60_graph_retire(g);
     }
 
+    // E33 S14 (ABI v46): the limiter with auto release (word 7: attack cap, rate-based factor, auto release), live edits
+    // between blocks and the readback of the effective release: the realtime call allocates and frees nothing.
+    for (double rate : rates) {
+        constexpr uint32_t N = 512;
+        const float pr[8] = {1, -12, 1, 100, 2, 1, 1, 7};
+        n60_stage_desc st[1] = {stage(N60_STAGE_PROTECTION, 1, N60_LANE_ALL, pr, 8)};
+        n60_graph_desc d{};
+        d.structSize = sizeof d;
+        d.abiVersion = N60_GRAPH_ABI_VERSION;
+        d.sampleRate = rate;
+        d.maxBlockFrames = N;
+        d.inputChannels = d.outputChannels = 2;
+        d.stages = st;
+        d.stageCount = 1;
+        n60_graph *g = nullptr;
+        CHECK(n60_graph_build(&d, &g) == N60_STATUS_OK, "build auto release limiter");
+        static float buf[2][N], obuf[2][N];
+        const float *in[2] = {buf[0], buf[1]};
+        float *out[2] = {obuf[0], obuf[1]};
+        for (int c = 0; c < 2; c++) {
+            for (uint32_t i = 0; i < N; i++) buf[c][i] = 0.8f * std::sin(0.02f * (c + 1) * i);
+        }
+        for (int round = 0; round < 20; round++) {
+            n60_param_record rec[1] = {{1, 1, -12.0f + 0.1f * round, 0}};
+            CHECK(n60_graph_post_params(g, rec, 1) == N60_STATUS_OK, "post auto release limiter");
+            allocs = 0;
+            frees = 0;
+            armed = true;
+            n60_status s2 = n60_graph_process(g, in, out, N);
+            for (int k = 0; k < 3; k++) s2 = static_cast<n60_status>(s2 | n60_graph_process(g, in, out, 1 + 97 * k));
+            armed = false;
+            CHECK(s2 == N60_STATUS_OK, "process auto release limiter");
+            CHECK(allocs == 0 && frees == 0, "auto release rate %.0f round %d: allocated %ld / freed %ld", rate, round, allocs.load(), frees.load());
+        }
+        n60_graph_retire(g);
+    }
+
     // E6 S12d: MULTIBAND with live edits that redesign the crossover, sidechain filters and poles between blocks, plus
     // enable edges (park and wake): the realtime call allocates and frees nothing.
     for (double rate : rates) {

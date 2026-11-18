@@ -645,6 +645,7 @@ final class UnifiedGraphHost: @unchecked Sendable {
             diagnostics.inputTruePeakLinear = prot.inTruePeak
             diagnostics.outputTruePeakLinear = prot.outTruePeak
             diagnostics.truePeakGuardActive = prot.guardActive != 0
+            diagnostics.limiterEffectiveReleaseMs = prot.effectiveReleaseMs
         }
     }
 

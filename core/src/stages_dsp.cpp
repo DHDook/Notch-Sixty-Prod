@@ -1574,6 +1574,7 @@ bool readDspDynamics(SnapHeader *h, const StageRec &r, uint32_t lane, n60_dynami
     out->outTruePeak = 0.0f;
     out->guardActive = 0;
     out->reserved = 0;
+    out->effectiveReleaseMs = 0.0f;
     return true;
 }
 

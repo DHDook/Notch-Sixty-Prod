@@ -1232,6 +1232,11 @@ struct LimiterConfiguration: Equatable, Codable, Sendable {
     var lookAheadMs = 2.0
     // True preserves the accepted PR27 behavior: limiter reconstruction is 4x.
     var truePeakGuardEnabled = true
+    /// E33 S14 (behind `e33.page-enhancements`): programme-dependent release. nil (absent in an older profile) and false are
+    /// off, which keeps the fixed `releaseMs`. On, the core ignores `releaseMs` and follows how long gain reduction has been held.
+    var autoRelease: Bool?
+
+    var isAutoRelease: Bool { autoRelease == true }
 
     func validate() throws {
         guard ceilingDB.isFinite, Self.ceilingRange.contains(ceilingDB),
@@ -1573,6 +1578,10 @@ struct DynamicsConfiguration: Equatable, Codable, Sendable {
             Float(limiter.releaseMs),
             Float(limiter.lookAheadMs),
             limiter.truePeakGuardEnabled
+        ) else { throw DynamicsConfigurationError.invalidLimiter }
+        // E33 S14: the switch only takes effect with `e33.page-enhancements`; a stored value is otherwise ignored.
+        guard N60ProtectionSnapshotSetLimiterAutoRelease(
+            &snapshot, limiter.isAutoRelease && LimiterAutoRelease.isAvailable
         ) else { throw DynamicsConfigurationError.invalidLimiter }
         guard N60ProtectionSnapshotSetGainRider(
             &snapshot,

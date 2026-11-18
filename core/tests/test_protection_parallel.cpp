@@ -85,11 +85,13 @@ struct Result {
     bool ok = false;
 };
 
+static bool gAutoRelease = false;  // E33 S14: the trailing word carries auto release
+
 static Result render(const Case &c, double rate, uint32_t workers, bool absent) {
     Result res;
-    float p[18] = {c.limiter ? 1.0f : 0.0f, -1.0f, 1.0f, 50.0f, 5.0f, c.truePeak ? 1.0f : 0.0f, c.factor,
+    float p[19] = {c.limiter ? 1.0f : 0.0f, -1.0f, 1.0f, 50.0f, 5.0f, c.truePeak ? 1.0f : 0.0f, c.factor,
                    c.clipper ? 1.0f : 0.0f, 3.0f, -3.0f, 0.8f, 1.0f, 1.0f, 0.0f,
-                   c.rider ? 1.0f : 0.0f, 3.0f, 6.0f, 0.0f};
+                   c.rider ? 1.0f : 0.0f, 3.0f, 6.0f, 0.0f, gAutoRelease ? 4.0f : 0.0f};
     n60_stage_desc st;
     std::memset(&st, 0, sizeof st);
     st.structSize = sizeof st;
@@ -97,7 +99,7 @@ static Result render(const Case &c, double rate, uint32_t workers, bool absent) 
     st.stageId = 1;
     st.laneA = N60_LANE_ALL;
     st.params = p;
-    st.paramCount = 18;
+    st.paramCount = gAutoRelease ? 19 : 18;
     n60_graph_desc d{};
     d.structSize = sizeof d;
     d.abiVersion = N60_GRAPH_ABI_VERSION;
@@ -147,6 +149,7 @@ static Result render(const Case &c, double rate, uint32_t workers, bool absent) 
         res.read.push_back(rb.grNowDb);
         res.read.push_back(rb.inTruePeak);
         res.read.push_back(rb.outTruePeak);
+        res.read.push_back(rb.effectiveReleaseMs);
     }
     n60_graph_parallel_stats ps{};
     ps.structSize = sizeof ps;
@@ -190,11 +193,27 @@ int main() {
         const Result ref = render(c, 48000, 0, false), absent = render(c, 48000, 2, true);
         CHECK(absent.ok && same(absent.out, ref.out), "%s: output differs with workers set but absent", c.name);
     }
+    // E33 S14: auto release (word 4) is bit-identical between the serial and the lane-parallel stage, readback included.
+    gAutoRelease = true;
+    for (const Case &c : cases) {
+        if (c.rider || !c.limiter) continue;
+        for (double rate : {44100.0, 96000.0, 384000.0}) {
+            const Result ref = render(c, rate, 0, false);
+            CHECK(ref.ok, "auto %s %.0f Hz: serial render failed", c.name, rate);
+            if (!ref.ok) continue;
+            for (uint32_t w = 1; w <= 3; w++) {
+                const Result r = render(c, rate, w, false);
+                CHECK(r.ok && same(r.out, ref.out), "auto %s %.0f Hz: output differs at %u workers", c.name, rate, w);
+                CHECK(r.ok && same(r.read, ref.read), "auto %s %.0f Hz: readbacks differ at %u workers", c.name, rate, w);
+            }
+        }
+    }
+    gAutoRelease = false;
     // sanity: the limiter really limited (the comparison above would pass trivially on silence)
     const Result loud = render(cases[0], 48000, 0, false);
     float peak = 0.0f, grMax = 0.0f;
     for (float v : loud.out) peak = std::fmax(peak, std::fabs(v));
-    for (size_t k = 0; k + 3 < loud.read.size(); k += 4) grMax = std::fmax(grMax, loud.read[k]);
+    for (size_t k = 0; k + 4 < loud.read.size(); k += 5) grMax = std::fmax(grMax, loud.read[k]);
     CHECK(peak > 0.5f && peak < 1.0f && grMax > 1.0f, "limiter case not exercising the limiter (peak %f, grMax %f dB)", peak, grMax);
     if (failures == 0) std::puts("protection parallel: ok");
     return failures == 0 ? 0 : 1;
