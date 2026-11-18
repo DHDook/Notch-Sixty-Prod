@@ -236,6 +236,49 @@ int main() {
         n60_graph_retire(g);
     }
 
+    // E33 S13 (ABI v45): a 5.1 graph with the LFE excluded from the compressor and expander detectors and the centre-aware
+    // leveler, with live edits between blocks: the realtime call allocates and frees nothing.
+    for (double rate : rates) {
+        constexpr uint32_t N = 512;
+        const float ld[33] = {0, 0, -20, 10, 1, 3, 0, 0.5f, 0, 0, 80, 12, 3, 1,
+                              1, 0, 300, 3500, 6, 3, 9, 200, 80, 600, -60, 3, 7, 12, 800, 0.1f, 0.5f, 0.3f, 3};
+        const float cp[17] = {-30, 4, 0, 1, 50, 0, 0, 0, 0, 1, 100, 100, 0, 50, 0, 0, 4};
+        const float ex[16] = {-30, 3, -24, 1, 50, 1, 0, 0, 0, 50, 0, 100, 0, 0, 0, 4};
+        n60_stage_desc st[3] = {stage(N60_STAGE_LOUDNESS, 1, 0, ld, 33, 0, 1), stage(N60_STAGE_COMPRESSOR, 2, N60_LANE_ALL, cp, 17),
+                                stage(N60_STAGE_EXPANDER, 3, N60_LANE_ALL, ex, 16)};
+        n60_graph_desc d{};
+        d.structSize = sizeof d;
+        d.abiVersion = N60_GRAPH_ABI_VERSION;
+        d.sampleRate = rate;
+        d.maxBlockFrames = N;
+        d.inputChannels = d.outputChannels = 6;
+        d.stages = st;
+        d.stageCount = 3;
+        n60_graph *g = nullptr;
+        CHECK(n60_graph_build(&d, &g) == N60_STATUS_OK, "build surround detector");
+        static float buf[6][N], obuf[6][N];
+        const float *in[6];
+        float *out[6];
+        for (int c = 0; c < 6; c++) {
+            for (uint32_t i = 0; i < N; i++) buf[c][i] = 0.2f * std::sin(0.03f * (c + 1) * i);
+            in[c] = buf[c];
+            out[c] = obuf[c];
+        }
+        for (int round = 0; round < 20; round++) {
+            n60_param_record rec[3] = {{1, 24, -70.0f + 2.0f * round, 0}, {2, 0, -40.0f + round, 0}, {3, 0, -40.0f + round, 0}};
+            CHECK(n60_graph_post_params(g, rec, 3) == N60_STATUS_OK, "post surround detector");
+            allocs = 0;
+            frees = 0;
+            armed = true;
+            n60_status s2 = n60_graph_process(g, in, out, N);
+            for (int k = 0; k < 3; k++) s2 = static_cast<n60_status>(s2 | n60_graph_process(g, in, out, 1 + 97 * k));
+            armed = false;
+            CHECK(s2 == N60_STATUS_OK, "process surround detector");
+            CHECK(allocs == 0 && frees == 0, "surround detector rate %.0f round %d: allocated %ld / freed %ld", rate, round, allocs.load(), frees.load());
+        }
+        n60_graph_retire(g);
+    }
+
     // E6 S12d: MULTIBAND with live edits that redesign the crossover, sidechain filters and poles between blocks, plus
     // enable edges (park and wake): the realtime call allocates and frees nothing.
     for (double rate : rates) {

@@ -38,7 +38,8 @@ enum DynamicsSessionMapping {
         for module: ProductionDynamicsModule,
         shape: UnifiedGraphLayoutShape,
         virtualSpeakers: Bool,
-        eqMode: UnifiedGraphProgramDSP.EQMode = .linked
+        eqMode: UnifiedGraphProgramDSP.EQMode = .linked,
+        surroundDetector: Bool = SurroundDetectorParams.isOn()
     ) -> Mapping {
         let all = Array(0..<shape.laneCount)
         let lfe = shape.lfeLane
@@ -64,9 +65,14 @@ enum DynamicsSessionMapping {
              .multiband:
             var mapping = front()
             if !module.hasDetector { mapping.detectorLanes = [] }
+            // E33 S13: the leveller detects on a centre lane that carries signal (the stage lifts only the centre then).
+            if module == .dialogueLeveler, surroundDetector, let centre = shape.centerLane, !mapping.lanes.contains(centre) {
+                mapping.detectorLanes += [centre]
+            }
             return mapping
         case .compressor, .expander:
-            return Mapping(scope: .everyLane, lanes: all, linked: true, detectorLanes: all, refusal: nil)
+            // E33 S13: the LFE keeps the group's gain but leaves the detector.
+            return Mapping(scope: .everyLane, lanes: all, linked: true, detectorLanes: surroundDetector ? nonLFE : all, refusal: nil)
         case .pauseGate:
             if virtualSpeakers { return Mapping(scope: .ears, lanes: [0, 1], linked: true, detectorLanes: [0, 1], refusal: nil) }
             return Mapping(scope: .everyLane, lanes: all, linked: true, detectorLanes: all, refusal: nil)
@@ -82,9 +88,11 @@ enum DynamicsSessionMapping {
         for module: ProductionDynamicsModule,
         shape: UnifiedGraphLayoutShape,
         virtualSpeakers: Bool,
-        eqMode: UnifiedGraphProgramDSP.EQMode = .linked
+        eqMode: UnifiedGraphProgramDSP.EQMode = .linked,
+        surroundDetector: Bool = SurroundDetectorParams.isOn()
     ) -> String {
-        let mapping = mapping(for: module, shape: shape, virtualSpeakers: virtualSpeakers, eqMode: eqMode)
+        let mapping = mapping(for: module, shape: shape, virtualSpeakers: virtualSpeakers, eqMode: eqMode,
+                              surroundDetector: surroundDetector)
         if mapping.refusal != nil {
             return "Unavailable: this layout has no front left and right pair"
         }
@@ -94,6 +102,9 @@ enum DynamicsSessionMapping {
         }
         switch mapping.scope {
         case .everyLane:
+            if surroundDetector, shape.lfeLane != nil, module == .compressor || module == .expander {
+                return "All speakers" + linkedSuffix + " (LFE follows the gain, not the detector)"
+            }
             let lfeNote = shape.lfeLane != nil ? " (LFE included)" : ""
             return "All speakers" + linkedSuffix + lfeNote
         case .nonLFE:
@@ -101,6 +112,9 @@ enum DynamicsSessionMapping {
         case .pairedLanes:
             return "Left and right pairs only; centre and LFE pass through"
         case .frontPair:
+            if module == .dialogueLeveler, surroundDetector, let centre = shape.centerLane, mapping.detectorLanes.contains(centre) {
+                return "Front pair; follows the centre when it carries speech"
+            }
             return virtualSpeakers
                 ? "Front pair of the virtual speakers; the others pass through"
                 : "Front pair only; the other speakers pass through"

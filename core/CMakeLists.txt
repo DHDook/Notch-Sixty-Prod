@@ -335,6 +335,11 @@ add_executable(n60core_input_overs_test tests/test_input_overs.cpp)
 target_link_libraries(n60core_input_overs_test PRIVATE n60core)
 add_test(NAME n60core_input_overs COMMAND n60core_input_overs_test)
 
+# E33 S13: LFE out of the compressor and expander detector, centre-aware dialogue leveler (ABI v45).
+add_executable(n60core_surround_detector_test tests/test_surround_detector.cpp)
+target_link_libraries(n60core_surround_detector_test PRIVATE n60core)
+add_test(NAME n60core_surround_detector COMMAND n60core_surround_detector_test)
+
 # E6 S12c: loudness (match, contour, dialogue leveler) stage (ABI v24).
 add_executable(n60core_loudness_test tests/test_loudness.cpp)
 target_link_libraries(n60core_loudness_test PRIVATE n60core)
