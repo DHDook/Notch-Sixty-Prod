@@ -30,8 +30,11 @@ struct ProductionDynamicsTelemetryView: View {
                     Text(statusText).font(DesignType.caption.font).foregroundStyle(.secondary)
                 }
                 if items.isEmpty {
-                    Text(emptyText)
-                        .font(DesignType.caption.font).foregroundStyle(.tertiary)
+                    // With the panel bar as the only readout, a stage whose chips were dropped is not "empty".
+                    if !panelIsTheReadout {
+                        Text(emptyText)
+                            .font(DesignType.caption.font).foregroundStyle(.tertiary)
+                    }
                 } else {
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: DesignSpacing.m.pt)], alignment: .leading, spacing: DesignSpacing.s.pt) {
                         ForEach(items) { item in
@@ -60,6 +63,12 @@ struct ProductionDynamicsTelemetryView: View {
             if let attachment { GainReductionMonitor.shared(for: engine).detach(attachment) }
             attachment = nil
         }
+    }
+
+    /// E33 S7: running, the processor on, and its gain reduction drawn by the panel bar above.
+    private var panelIsTheReadout: Bool {
+        FeatureFlags().isEnabled(.eqPageEnhancements) && !panels.isEmpty && engine.lifecycleState == .running
+            && kind.module.isActive(in: engine.dynamicsConfiguration)
     }
 
     /// Why there is nothing to show. E33 S4 (flag on) says whether audio is stopped, the processor is off, or no frames have arrived.
@@ -105,6 +114,8 @@ struct ProductionDynamicsTelemetryView: View {
             return
         }
 
+        // E33 S7 (B9): the panel bar is the one gain-reduction readout, so the chips drop their number.
+        let grOnPanel = FeatureFlags().isEnabled(.eqPageEnhancements)
         func db(_ value: Float) -> String { DesignFormat.db(Double(value)) }
         func percent(_ value: Float) -> String { DesignFormat.percent(Double(value)) }
         func item(_ id: String, _ label: String, _ value: String) -> ProductionDynamicsTelemetryItem {
@@ -114,7 +125,7 @@ struct ProductionDynamicsTelemetryView: View {
         switch kind {
         case .compressor:
             statusText = nil
-            items = [item("gr", "Gain Reduction", db(diagnostics.compressorGainReductionDB))]
+            items = grOnPanel ? [] : [item("gr", "Gain Reduction", db(diagnostics.compressorGainReductionDB))]
         case .multiband:
             statusText = nil
             // E33 S5b: one chip per existing band (the kernel path reports no band count and keeps three).
@@ -123,14 +134,14 @@ struct ProductionDynamicsTelemetryView: View {
                               diagnostics.multibandHighGainReductionDB, diagnostics.multibandBand4GainReductionDB,
                               diagnostics.multibandBand5GainReductionDB]
             let ids = ["low", "mid", "high", "band4", "band5"]
-            items = (0..<min(count, 5)).map { band in
+            items = grOnPanel ? [] : (0..<min(count, 5)).map { band in
                 item(count == 3 ? ids[band] : "band\(band + 1)",
                      "\(ProductionDynamicsView.multibandBandTitle(band, of: count).replacingOccurrences(of: " Band", with: "")) GR",
                      db(reductions[band]))
             }
         case .expander:
             statusText = nil
-            items = [item("attenuation", "Attenuation", db(diagnostics.expanderAttenuationDB))]
+            items = grOnPanel ? [] : [item("attenuation", "Attenuation", db(diagnostics.expanderAttenuationDB))]
         case .pauseGate:
             statusText = diagnostics.pauseGateOpen ? "Gate open" : "Gate closed"
             items = [item("gain", "Gate Gain", percent(diagnostics.pauseGateGain))]
@@ -157,7 +168,7 @@ struct ProductionDynamicsTelemetryView: View {
             ]
         case .deEsser:
             statusText = nil
-            items = [item("gr", "Gain Reduction", db(diagnostics.deEsserGainReductionDB))]
+            items = grOnPanel ? [] : [item("gr", "Gain Reduction", db(diagnostics.deEsserGainReductionDB))]
         case .mainsHum:
             statusText = diagnostics.mainsDetectionConfidence >= 0.55 ? "Stable mains estimate" : "Listening for a stable mains tone"
             items = [
@@ -170,7 +181,7 @@ struct ProductionDynamicsTelemetryView: View {
                 maxCorrectionDB: engine.dynamicsConfiguration.loudnessMatch.maxCorrectionDB)
             statusText = FeatureFlags().isEnabled(.dynamicsExtras) ? readout.status : nil
             items = [
-                item("lufs", "Short-Term Loudness", String(format: "%.1f LUFS", Double(diagnostics.loudnessShortTermLUFS))),
+                item("lufs", grOnPanel ? LoudnessHistoryText.matchDetectorLabel : "Short-Term Loudness", String(format: "%.1f LUFS", Double(diagnostics.loudnessShortTermLUFS))),
                 item("gain", "Match Gain", db(diagnostics.loudnessMatchGainDB)),
             ]
         case .loudnessContour:
@@ -178,7 +189,7 @@ struct ProductionDynamicsTelemetryView: View {
             statusText = readout.status
             items = [
                 item("amount", "Contour Applied", percent(readout.scale)),
-                item("lufs", "Short-Term Loudness", String(format: "%.1f LUFS", Double(diagnostics.loudnessShortTermLUFS))),
+                item("lufs", grOnPanel ? LoudnessHistoryText.matchDetectorLabel : "Short-Term Loudness", String(format: "%.1f LUFS", Double(diagnostics.loudnessShortTermLUFS))),
             ]
         case .dialogue:
             statusText = nil
@@ -189,7 +200,7 @@ struct ProductionDynamicsTelemetryView: View {
             ]
         case .limiter:
             statusText = diagnostics.truePeakGuardActive ? "True-peak guard active" : nil
-            items = [item("gr", "Gain Reduction", db(diagnostics.limiterGainReductionDB))]
+            items = grOnPanel ? [] : [item("gr", "Gain Reduction", db(diagnostics.limiterGainReductionDB))]
         }
     }
 }

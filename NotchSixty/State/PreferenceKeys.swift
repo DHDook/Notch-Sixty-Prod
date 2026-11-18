@@ -37,6 +37,8 @@ enum PreferenceKeys {
     enum Meters {
         static let peakHold = "meters.peakHold"
         static let scaleFloorDB = "meters.scaleFloorDB"
+        /// E33 S7: the loudness history target when Loudness Match is off (-14, -16 or -23 LUFS).
+        static let loudnessTarget = "meters.loudnessTarget"
     }
 
     enum Equalizer {

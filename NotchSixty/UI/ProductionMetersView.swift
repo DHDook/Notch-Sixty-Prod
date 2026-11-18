@@ -135,6 +135,7 @@ private final class MeterTickModel: ObservableObject {
     var outputTruePeakHold = TruePeakMaxHold() { didSet { objectWillChange.send() } }
     var headroomStrip = HeadroomStripModel() { didSet { objectWillChange.send() } }
     var inputOvers = InputOversReading() { didSet { objectWillChange.send() } }
+    var loudnessHistory = LoudnessShortTermHistory() { didSet { objectWillChange.send() } }
     let bank = MeterBankDisplay()
 }
 
@@ -184,6 +185,8 @@ struct ProductionMetersView: View {
     private var inputTruePeakHold: TruePeakMaxHold { get { tick.inputTruePeakHold } nonmutating set { tick.inputTruePeakHold = newValue } }
     private var outputTruePeakHold: TruePeakMaxHold { get { tick.outputTruePeakHold } nonmutating set { tick.outputTruePeakHold = newValue } }
     private var headroomStrip: HeadroomStripModel { get { tick.headroomStrip } nonmutating set { tick.headroomStrip = newValue } }
+    private var loudnessHistory: LoudnessShortTermHistory { get { tick.loudnessHistory } nonmutating set { tick.loudnessHistory = newValue } }
+    @AppStorage(PreferenceKeys.Meters.loudnessTarget) private var loudnessTargetRaw = LoudnessHistoryTarget.default.rawValue
     private var inputOvers: InputOversReading { get { tick.inputOvers } nonmutating set { tick.inputOvers = newValue } }
 
     var body: some View {
@@ -310,7 +313,8 @@ struct ProductionMetersView: View {
                 unavailableReason: nil,
                 isWide: transportMeterSnapshot != nil,
                 rateLimitedSpeech: enhanced,
-                onSource: { loudnessSourceRaw = $0.rawValue },
+                extras: enhanced ? loudnessExtras : nil,
+                onSource: { loudnessSourceRaw = $0.rawValue; loudnessHistory.reset() },
                 onReset: resetLoudness
             )
             if enhanced {
@@ -549,6 +553,8 @@ struct ProductionMetersView: View {
                     grAttachment = nil
                 }
 
+            if enhanced { TotalGainReductionRow(engine: engine, monitor: GainReductionMonitor.shared(for: engine)) }
+
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 180), spacing: DesignSpacing.m.pt)], spacing: DesignSpacing.m.pt) {
                 grMetric("Compressor GR", .compressor, snapshot.compressorGainReductionDB)
                 grMetric("De-Esser GR", .deEsser, snapshot.deEsserGainReductionDB)
@@ -567,7 +573,7 @@ struct ProductionMetersView: View {
                 dynamicsMetric("Denoiser Suppression", snapshot.denoiserMeanSuppressionDB)
 
                 metricCard(
-                    title: "Loudness Match Detector (short-term)",
+                    title: enhanced ? LoudnessHistoryText.matchDetectorLabel : "Loudness Match Detector (short-term)",
                     value: String(format: "%.1f LUFS", Double(snapshot.loudnessShortTermLUFS)),
                     detail: String(format: "Loudness Match %.1f dB", Double(snapshot.loudnessMatchGainDB))
                 )
@@ -609,6 +615,7 @@ struct ProductionMetersView: View {
             if target == .peakHold { GainReductionMonitor.shared(for: engine).resetHolds() }
             meterRevision &+= 1
         case .loudness:
+            loudnessHistory.reset()
             if engine.lifecycleState == .running {
                 engine.setAnalysisDemand(levelsDemand | ProductionAnalysisDemand.resetLoudness)
             }
@@ -1020,7 +1027,11 @@ struct ProductionMetersView: View {
     private func grMetric(_ title: String, _ source: GainReductionSource, _ value: Float) -> some View {
         VStack(alignment: .leading, spacing: DesignSpacing.s.pt) {
             Text(title).font(DesignType.caption.font).foregroundStyle(.secondary)
-            Text(ProductionMeterMath.formattedGain(value))
+            // E33 S7 (C7): with the flag on the number comes from the same monitor as the bar and the Dynamics page,
+            // and a stopped page reads no stale value.
+            Text(enhanced
+                 ? (engine.lifecycleState == .running ? ProductionMeterMath.formattedGain(GainReductionMonitor.shared(for: engine).latest(source)) : "—")
+                 : ProductionMeterMath.formattedGain(value))
                 .font(.system(.title3, design: .monospaced).weight(.semibold))
                 .monospacedDigit()
             GainReductionBar(monitor: GainReductionMonitor.shared(for: engine), source: source)
@@ -1085,7 +1096,19 @@ struct ProductionMetersView: View {
     /// own loudness bit; the reset bit is a one-shot command.
     private static let loudnessDemand = UInt32(N60_ANALYSIS_DEMAND_STEREO) | ProductionAnalysisDemand.loudness
 
+    /// E33 S7: the card's history and target; the target follows Loudness Match when that stage is on.
+    private var loudnessExtras: LoudnessCardExtras {
+        let chosen = LoudnessHistoryTarget(rawValue: loudnessTargetRaw) ?? .default
+        let match = engine.dynamicsConfiguration.loudnessMatch
+        return LoudnessCardExtras(
+            history: loudnessHistory,
+            target: LoudnessHistoryTarget.lufs(matchEnabled: match.enabled, matchTarget: match.targetLUFS, chosen: chosen),
+            chosenTarget: chosen,
+            onChooseTarget: { loudnessTargetRaw = $0.rawValue })
+    }
+
     private func resetLoudness() {
+        loudnessHistory.reset()
         inputTruePeakHold.reset()
         outputTruePeakHold.reset()
         if engine.lifecycleState == .running {
@@ -1199,6 +1222,10 @@ struct ProductionMetersView: View {
             if enhanced, activePage == .levels { pollInputOvers(now: Date()) }
             if analysisDemand != 0, engine.lifecycleState == .running {
                 analysisSnapshot = engine.productionAnalysisSnapshot()
+                if enhanced, activePage == .levels {
+                    let readout = loudnessSource == .output ? analysisSnapshot.loudnessOutput : analysisSnapshot.loudnessInput
+                    loudnessHistory.ingest(readout?.shortTerm, at: now)
+                }
             } else {
                 analysisSnapshot = .empty
             }

@@ -33,6 +33,9 @@ struct ProductionDynamicsView: View {
             header
             ProductionActionErrorBanner(message: $actionError)
             listeningBanner
+            if FeatureFlags().isEnabled(.eqPageEnhancements) {
+                TotalGainReductionRow(engine: engine, monitor: GainReductionMonitor.shared(for: engine))
+            }
 
             HStack(alignment: .top, spacing: DesignSpacing.m.pt) {
                 moduleNavigator
