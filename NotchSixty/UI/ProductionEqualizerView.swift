@@ -147,6 +147,10 @@ struct ProductionEqualizerView: View {
         }
         .task(id: analysisKey) { await refreshSeries(analysisKey) }
         .onAppear {
+            // E33 S4: the Dynamics page's link row asks for a band; honour it once.
+            if let requested = EQBandFocusRequest.shared.take(), bands.contains(where: { $0.id == requested }) {
+                selectedBandID = requested
+            }
             ensureSelection()
             configureHistory()
         }

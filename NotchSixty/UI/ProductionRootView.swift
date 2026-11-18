@@ -480,7 +480,7 @@ struct ProductionRootView: View {
                 programAnalyser: product.profiles.eqProgramAnalyser
             )
         case .dynamics:
-            ProductionDynamicsView(engine: engine, reference: product.reference)
+            ProductionDynamicsView(engine: engine, reference: product.reference, openEqualizer: { navigation.navigate(to: .equalizer) })
         case .meters:
             ProductionMetersView(
                 engine: engine,

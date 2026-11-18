@@ -13,6 +13,7 @@ struct DynamicsParameterRow: View {
     let commit: (Double, Bool) -> Bool
     let beginGesture: () -> Void
     let endGesture: () -> Void
+    private let enhanced = FeatureFlags().isEnabled(.eqPageEnhancements)
 
     var body: some View {
         LabeledContent {
@@ -27,6 +28,18 @@ struct DynamicsParameterRow: View {
                 )
                 .frame(minWidth: 220)
                 .accessibilityIdentifier("dynamics.\(spec.id).slider")
+                .overlay(alignment: .bottomLeading) {
+                    // E33 S4 (design 13): the field accepts more than the slider spans; say so.
+                    if enhanced, let note = spec.fieldLimitNote {
+                        Text(note)
+                            .font(DesignType.caption.font)
+                            .foregroundStyle(.tertiary)
+                            .fixedSize()
+                            .offset(y: 12)
+                            .accessibilityIdentifier("dynamics.\(spec.id).fieldLimit")
+                    }
+                }
+                .padding(.bottom, enhanced && spec.fieldLimitNote != nil ? 12 : 0)
 
                 ParameterNumberField(spec: spec, title: title, value: value, commit: commit)
                     .accessibilityIdentifier("dynamics.\(spec.id)")
@@ -109,6 +122,9 @@ private struct ParameterSlider: View {
     @State private var dragStartPosition: Double?
     @State private var lastX: CGFloat?
     @State private var position = 0.0
+    /// E33 S4: relative grab with 30 Hz commits (flag on). Nil outside a drag.
+    @State private var relativeDrag: DynamicsSliderDrag?
+    private let enhanced = FeatureFlags().isEnabled(.eqPageEnhancements)
 
     var body: some View {
         GeometryReader { proxy in
@@ -127,6 +143,20 @@ private struct ParameterSlider: View {
             .gesture(
                 DragGesture(minimumDistance: 0)
                     .onChanged { drag in
+                        if enhanced {
+                            if relativeDrag == nil {
+                                dragStartPosition = spec.position(of: value)
+                                relativeDrag = DynamicsSliderDrag(
+                                    startPosition: dragStartPosition ?? 0, startX: drag.startLocation.x, trackWidth: width)
+                                beginGesture()
+                            }
+                            let commitPosition = relativeDrag?.update(
+                                x: drag.location.x, fine: NSEvent.modifierFlags.contains(.option),
+                                time: drag.time.timeIntervalSinceReferenceDate)
+                            position = relativeDrag?.position ?? position
+                            if let commitPosition { _ = commit(spec.value(atPosition: commitPosition), false) }
+                            return
+                        }
                         if dragStartPosition == nil {
                             dragStartPosition = spec.position(of: value)
                             position = dragStartPosition ?? 0
@@ -148,6 +178,13 @@ private struct ParameterSlider: View {
                         _ = commit(spec.value(atPosition: position), false)
                     }
                     .onEnded { _ in
+                        if let drag = relativeDrag {
+                            if let final = drag.finish() { _ = commit(spec.value(atPosition: final), false) }
+                            relativeDrag = nil
+                            dragStartPosition = nil
+                            endGesture()
+                            return
+                        }
                         dragStartPosition = nil
                         lastX = nil
                         endGesture()
