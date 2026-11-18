@@ -401,6 +401,32 @@ final class ProductionInformationArchitectureTests: XCTestCase {
         )
     }
 
+    func testDesignLanguageSidebarGroups() {
+        let groups = ProductionSection.sidebarGroups(designLanguage: true)
+        XCTAssertEqual(groups.map(\.title), ["Playback", "Setup", "Tools"])
+        XCTAssertEqual(groups[0].sections, [.equalizer, .dynamics, .meters])
+        XCTAssertEqual(groups[1].sections, [.system, .headphones, .activeAcoustics])
+        XCTAssertEqual(groups[2].sections, [.plugins, .blindListening])
+        for group in groups { XCTAssertGreaterThanOrEqual(group.sections.count, 2) }
+        XCTAssertEqual(ProductionSection.system.sidebarTitle(designLanguage: true), "Speakers & Room")
+        XCTAssertEqual(ProductionSection.system.sidebarTitle(designLanguage: false), "System")
+        let developer = ProductionSection.sidebarGroups(selection: .acousticResearch, designLanguage: true)
+        XCTAssertEqual(developer.last?.title, "Developer")
+    }
+
+    func testEverySectionIsReachableUnderBothSidebarLayouts() {
+        for flag in [false, true] {
+            let rows = Set(ProductionSection.sidebarGroups(designLanguage: flag).flatMap(\.sections))
+            for section in ProductionSection.allCases where section != .dashboard {
+                let destination = section.systemAreaDestination.section
+                XCTAssertTrue(
+                    rows.contains(destination) || ProductionSection.developerTools.contains(destination),
+                    "\(section) resolves to \(destination), which has no sidebar row (flag \(flag))"
+                )
+            }
+        }
+    }
+
     func testSidebarKeepsASelectedDeveloperToolVisible() {
         for tool in ProductionSection.developerTools {
             let groups = ProductionSection.sidebarGroups(selection: tool)
