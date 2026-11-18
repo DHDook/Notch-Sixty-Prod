@@ -99,6 +99,9 @@ struct UnifiedGraphProgramDSP: Equatable, Sendable {
     /// Binaural: the layout lanes are virtual speakers, so only pre-binaural stages, balance on the ears and the
     /// pause gate apply.
     var virtualSpeakers: Bool
+    /// E33 S13 (`e33.page-enhancements`, read when the program is built): the LFE leaves the compressor and expander detector and
+    /// the dialogue leveller follows a centre lane that carries signal. Off, and on a stereo or LFE-less session, nothing changes.
+    var surroundDetector = SurroundDetectorParams.isOn()
     /// E10 S4: per-lane room correction synthesised for this rate (one ROOM_FIR stage per distinct tap set,
     /// sub lanes included). Mutually exclusive with `stages.roomFIR`.
     var roomLanes: RoomCorrectionLanePlan?
@@ -330,7 +333,8 @@ struct UnifiedGraphProgramDSP: Equatable, Sendable {
         }
         // E33 S12 (G22): the lane sets below come from `DynamicsSessionMapping`, the table the Dynamics page also prints.
         func mapped(_ module: ProductionDynamicsModule) -> DynamicsSessionMapping.Mapping {
-            DynamicsSessionMapping.mapping(for: module, shape: shape, virtualSpeakers: virtualSpeakers, eqMode: eqMode)
+            DynamicsSessionMapping.mapping(for: module, shape: shape, virtualSpeakers: virtualSpeakers, eqMode: eqMode,
+                                           surroundDetector: surroundDetector)
         }
         let pairStages: [(n60_stage_kind, UInt32, [Float]?, Int, ProductionDynamicsModule)] = [
             (N60_STAGE_IMAGE, UnifiedGraphConfiguration.imageStageId, st.image, 8, .stereoMode),
@@ -343,13 +347,20 @@ struct UnifiedGraphProgramDSP: Equatable, Sendable {
             guard params.count == size || (kind == N60_STAGE_MULTIBAND && (params.count == 43 || params.count == 44)) else { throw UnifiedGraphFallbackReason.specRejected }
             let target = mapped(module)
             if let refusal = target.refusal { throw refusal }
-            add(kind, id, lane: UInt32(target.lanes[0]), laneB: UInt32(target.lanes[1]), params: params)
+            // E33 S13: with the flag on, the leveller follows a centre lane (the table's detector lanes name it).
+            let stageParams = kind == N60_STAGE_LOUDNESS && surroundDetector
+                ? SurroundDetectorParams.loudness(params, centre: shape.centerLane, pair: target.lanes) : params
+            add(kind, id, lane: UInt32(target.lanes[0]), laneB: UInt32(target.lanes[1]), params: stageParams)
         }
+        // E33 S13: with the flag on, the LFE takes the linked group's gain without entering its detector (the mapping table).
+        let excludedLFE = surroundDetector ? shape.lfeLane : nil
         if let params = st.compressor {
-            add(N60_STAGE_COMPRESSOR, UnifiedGraphConfiguration.compressorStageId, mask: mapped(.compressor).laneMask, params: params)
+            add(N60_STAGE_COMPRESSOR, UnifiedGraphConfiguration.compressorStageId, mask: mapped(.compressor).laneMask,
+                params: SurroundDetectorParams.compressor(params, excluding: excludedLFE))
         }
         if let params = st.expander {
-            add(N60_STAGE_EXPANDER, UnifiedGraphConfiguration.expanderStageId, mask: mapped(.expander).laneMask, params: params)
+            add(N60_STAGE_EXPANDER, UnifiedGraphConfiguration.expanderStageId, mask: mapped(.expander).laneMask,
+                params: SurroundDetectorParams.expander(params, excluding: excludedLFE))
         }
         var postLatency: UInt32 = 0
         var lanePlanCovered: UInt64 = 0

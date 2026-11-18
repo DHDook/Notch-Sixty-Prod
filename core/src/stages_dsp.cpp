@@ -159,15 +159,17 @@ struct Range {
 // ABI v35 (E28 S7b): [15] listen (0 off, 1 sidechain, 2 delta); expander [6] hold ms, [7] knee dB, [8] detector, [9] RMS
 // window ms, [10] sidechain high-pass Hz, [11] link %, [12] listen.
 constexpr uint32_t kMaxCompLookahead = 8192;  // 10 ms at 768 kHz is 7,680 frames
-constexpr Range kComp[16] = {{-96, 0, false}, {1, 100, false}, {0, 24, false}, {0.05f, 1000, false}, {1, 5000, false},
+constexpr Range kComp[17] = {{-96, 0, false}, {1, 100, false}, {0, 24, false}, {0.05f, 1000, false}, {1, 5000, false},
                              {-24, 24, false}, {0, 1, true},   {0, 1, true},   {0, 300, false},      {0, 1, true},
                              {0, 100, false},  {0, 100, false}, {0, 1, true},   {5, 200, false},
-                             {0, static_cast<float>(kMaxCompLookahead), true}, {0, 2, true}};
-constexpr Range kExp[15] = {{-120, 0, false}, {1, 20, false}, {-96, 0, false}, {0.05f, 1000, false}, {1, 5000, false},
+                             {0, static_cast<float>(kMaxCompLookahead), true}, {0, 2, true},
+                             {0, 64, true}};  // ABI v45 (E33 S13): [16] detector-excluded lane + 1 (0 none)
+constexpr Range kExp[16] = {{-120, 0, false}, {1, 20, false}, {-96, 0, false}, {0.05f, 1000, false}, {1, 5000, false},
                             {0, 1, true},     {0, 500, false}, {0, 24, false},  {0, 1, true},         {5, 200, false},
                             {0, 300, false},  {0, 100, false}, {0, 2, true},
                             {0, static_cast<float>(kMaxCompLookahead), true},  // ABI v41 (E33 S5a): [13] lookahead frames
-                            {0, 1, true}};                                       // ABI v43 (E32 S5): [14] timing swap
+                            {0, 1, true},                                        // ABI v43 (E32 S5): [14] timing swap
+                            {0, 64, true}};                                      // ABI v45 (E33 S13): [15] detector-excluded lane + 1 (0 none)
 constexpr Range kBand[N60_DYN_EQ_BAND_PARAMS] = {
     {0, 5, true},       {20, 20000, false}, {0.4f, 8, false}, {-18, 6, false}, {-60, 0, false},
     {1, 10, false},     {-24, 0, false},    {1, 100, false},  {10, 1000, false}, {0, 2, true},
@@ -183,8 +185,8 @@ uint32_t bandCountOf(uint32_t paramCount) { return paramCount >= 1 ? (paramCount
 
 bool paramOk(uint32_t kind, uint32_t idx, float v, double rate) {
     switch (kind) {
-        case N60_STAGE_COMPRESSOR: return idx < 16 && inRange(kComp[idx], v);
-        case N60_STAGE_EXPANDER: return idx < 15 && inRange(kExp[idx], v);
+        case N60_STAGE_COMPRESSOR: return idx < 17 && inRange(kComp[idx], v);
+        case N60_STAGE_EXPANDER: return idx < 16 && inRange(kExp[idx], v);
         case N60_STAGE_DYN_EQ: {
             if (idx == 0) return v == 0.0f || v == 1.0f;
             const uint32_t f = (idx - 1) % N60_DYN_EQ_BAND_PARAMS;
@@ -202,7 +204,7 @@ bool paramOk(uint32_t kind, uint32_t idx, float v, double rate) {
 // Which parameters may change on a published snapshot (the rest need a new topology).
 bool paramLive(uint32_t kind, uint32_t idx) {
     switch (kind) {
-        case N60_STAGE_COMPRESSOR: return idx <= 8 || (idx >= 10 && idx <= 13) || idx == 15;
+        case N60_STAGE_COMPRESSOR: return idx <= 8 || (idx >= 10 && idx <= 13) || idx == 15;  // [16] excluded lane is topology
         case N60_STAGE_EXPANDER: return idx <= 4 || (idx >= 6 && idx <= 12) || idx == 14;  // [13] lookahead sizes the ring at build
         case N60_STAGE_DYN_EQ: {
             if (idx == 0) return false;
@@ -319,6 +321,17 @@ uint32_t ringExchange(float *ring, uint32_t len, uint32_t pos, const float *in, 
 // the shared gain exactly and link 0 leaves each lane independent. Lookahead delays the audio by a ring of
 // params[14] frames while the detector reads the undelayed signal. Mix blends the delayed dry with the processed
 // signal; make-up belongs to the wet path.
+// ABI v45 (E33 S13): the index, within the stage's lanes, of the lane whose parameter value is `slot` (lane + 1; 0 means none).
+// Returns the stage's lane count when there is none. A short loop over at most 64 lanes, once per block.
+uint32_t excludedIndex(const StageRec &r, float slot) N60_RT_NONBLOCKING {
+    const uint32_t want = static_cast<uint32_t>(slot);
+    if (want == 0) return r.laneCount;
+    for (uint32_t l = 0; l < r.laneCount; ++l) {
+        if (laneOf(r, l) == want - 1) return l;
+    }
+    return r.laneCount;
+}
+
 void runCompressorX(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) {
     const float *p = paramsOf(h, r);
     const double rate = h->sampleRate;
@@ -352,6 +365,7 @@ void runCompressorX(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t fr
         sideRing[l] = ring[l] + ringLen;
     }
     const uint32_t per = linked ? n : 1, groups = linked ? 1 : n;
+    const uint32_t exLane = linked ? excludedIndex(r, r.paramCount >= 17 ? p[16] : 0.0f) : n;  // ABI v45: n = none
     double grMax[kMaxLanes] = {};
     float level[kMaxLanes];
     // E28 S7d, G35: the gain follower is sequential, so it runs per frame over a short chunk and records each frame's gain,
@@ -401,12 +415,13 @@ void runCompressorX(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t fr
                 }
                 level[l] = d;
                 sideA[l][c] = y;
-                loudest = std::max(loudest, d);
+                if (l != exLane) loudest = std::max(loudest, d);
             }
             for (uint32_t k = 0; k < per; ++k) {
                 const uint32_t l = g * per + k;
                 CompLane &gs = *st[l];
-                const float det = std::min(link * loudest + (1.0f - link) * level[l], 1e6f);
+                // ABI v45: the excluded lane (the LFE) is detected as the group's loudest, so it takes the group's gain.
+                const float det = std::min(l == exLane ? loudest : link * loudest + (1.0f - link) * level[l], 1e6f);
                 const float target = compTargetDb(lin2db(det, 1e-12f), thr, slope, knee, makeup);
                 double cf;
                 if (target < gs.gainDB) {
@@ -642,6 +657,7 @@ void runExpanderX(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t fram
         ring[l] = reinterpret_cast<float *>(reinterpret_cast<uint8_t *>(st[l]) + up(sizeof(ExpLane)));
     }
     const uint32_t per = linked ? n : 1, groups = linked ? 1 : n;
+    const uint32_t exLane = linked ? excludedIndex(r, r.paramCount >= 16 ? p[15] : 0.0f) : n;  // ABI v45: n = none
     double grMax[kMaxLanes] = {};
     float level[kMaxLanes];
     // E33 S5a (ABI v41): the follower records each frame's gain, sidechain and listen weights; the lookahead ring and the
@@ -677,12 +693,12 @@ void runExpanderX(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t fram
                 }
                 level[l] = d;
                 sideA[l][c] = y;
-                loudest = std::max(loudest, d);
+                if (l != exLane) loudest = std::max(loudest, d);
             }
             for (uint32_t k = 0; k < per; ++k) {
                 const uint32_t l = g * per + k;
                 ExpLane &gs = *st[l];
-                const float det = std::min(link * loudest + (1.0f - link) * level[l], 1e6f);
+                const float det = std::min(l == exLane ? loudest : link * loudest + (1.0f - link) * level[l], 1e6f);
                 const float detDb = lin2db(det, 1e-12f);
                 float target = expTargetDb(detDb, thr, ratio, knee, range);
                 // Hold: while the detector sits fully above the knee the counter is refilled; after it falls the gain
@@ -1601,11 +1617,11 @@ n60_status validateDspStage(const n60_stage_desc &s, double rate, uint32_t outCh
     uint32_t expected = 0;
     switch (s.kind) {
         case N60_STAGE_COMPRESSOR:
-            if (s.paramCount != 10 && s.paramCount != 15 && s.paramCount != 16) return N60_STATUS_BAD_ARGUMENT;
+            if (s.paramCount != 10 && s.paramCount != 15 && s.paramCount != 16 && s.paramCount != 17) return N60_STATUS_BAD_ARGUMENT;
             expected = s.paramCount;
             break;
         case N60_STAGE_EXPANDER:
-            if (s.paramCount != 6 && s.paramCount != 13 && s.paramCount != 14 && s.paramCount != 15) return N60_STATUS_BAD_ARGUMENT;
+            if (s.paramCount != 6 && s.paramCount != 13 && s.paramCount != 14 && s.paramCount != 15 && s.paramCount != 16) return N60_STATUS_BAD_ARGUMENT;
             expected = s.paramCount;
             break;
         case N60_STAGE_DENOISER: expected = 9; break;
@@ -1624,6 +1640,15 @@ n60_status validateDspStage(const n60_stage_desc &s, double rate, uint32_t outCh
         if (!paramOk(s.kind, i, s.params[i], rate)) return N60_STATUS_BAD_ARGUMENT;
     }
     if (s.kind == N60_STAGE_DENOISER && s.params[5] > s.params[6]) return N60_STATUS_BAD_ARGUMENT;
+    // ABI v45 (E33 S13): the excluded lane must be a lane of this linked group, and the group needs another lane to listen to.
+    const uint32_t exSlot = s.kind == N60_STAGE_COMPRESSOR && s.paramCount >= 17 ? 16u : s.kind == N60_STAGE_EXPANDER && s.paramCount >= 16 ? 15u : 0u;
+    if (exSlot != 0 && s.params[exSlot] != 0.0f) {
+        const uint32_t ex = static_cast<uint32_t>(s.params[exSlot]) - 1;
+        const bool linkedFlag = s.params[s.kind == N60_STAGE_COMPRESSOR ? 9 : 5] >= 0.5f;
+        const bool inGroup = s.laneMask != 0 ? (ex < 64 && ((s.laneMask >> ex) & 1u) != 0 && std::popcount(s.laneMask) >= 2)
+                                              : (s.laneA == N60_LANE_ALL && ex < outCh && outCh >= 2);
+        if (!linkedFlag || !inGroup) return N60_STATUS_BAD_ARGUMENT;
+    }
     if (s.kind == N60_STAGE_DYN_EQ) {
         for (uint32_t b = 0; b < bandCountOf(s.paramCount); ++b) {
             const float *prm = s.params + 1 + N60_DYN_EQ_BAND_PARAMS * b;

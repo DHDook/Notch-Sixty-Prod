@@ -96,8 +96,14 @@ enum Param : uint32_t {
     kConfFloor = 29,    // 0..1
     kConfCeil = 30,     // > floor, <= 1
     kMinConf = 31,      // 0..1
-    kParams = 32
+    kParams = 32,
+    kCentre = 32,       // ABI v45 (E33 S13): centre lane + 1 (0 none); topology, only in the 33-value block
+    kParamsCentre = 33
 };
+// ABI v45: the leveler follows the centre when it carries speech. It becomes active above the programme gate and falls
+// inactive 6 dB below it (hysteresis); the pair and centre paths crossfade over 50 ms, so the switch never clicks.
+constexpr float kCentreHystDb = 6.0f;
+constexpr float kCentreRampMs = 50.0f;
 
 size_t up(size_t v) { return (v + (kAlign - 1)) & ~(kAlign - 1); }
 bool inR(double v, double lo, double hi) { return std::isfinite(v) && v >= lo && v <= hi; }
@@ -209,6 +215,11 @@ struct LdShared {
     double detectorPole, levAttackPole, levReleasePole, measPole;
     float envPole, modHpPole, modLpPole;
     BqState hpL, hpR, lpL, lpR;
+    BqState hpC, lpC;       // ABI v45: the centre's dialogue band
+    double centreMs;        // ABI v45: smoothed centre power, the presence detector
+    double centreMix;  // double so the ramp reaches its target at 384 kHz
+    double centreRamp;  // ABI v45: 0 pair path .. 1 centre path, and its 50 ms pole
+    uint32_t centreActive;  // ABI v45: the hysteretic presence flag
     double progMs, bandMs, modMs, boostDb;
     float voiceEnv, modPrev, modHpOut, modLpOut;
     float progDbfs, bandDbfs, gapDb, confidence;
@@ -230,7 +241,7 @@ void clearContourBands(LdShared &S) {
     S.lowBandL = S.lowBandR = S.highBandL = S.highBandR = BqState{0.0, 0.0};
 }
 void clearLevelerFilters(LdShared &S) {
-    S.hpL = S.hpR = S.lpL = S.lpR = BqState{0.0, 0.0};
+    S.hpL = S.hpR = S.lpL = S.lpR = S.hpC = S.lpC = BqState{0.0, 0.0};
 }
 
 // ---- derived coefficients (control thread at init, realtime thread at a block start when a parameter moved) ----------
@@ -318,9 +329,11 @@ void unparkContour(LdShared &S) {
 }
 void unparkLeveler(LdShared &S) {
     clearLevelerFilters(S);
-    S.progMs = S.bandMs = S.modMs = 0.0;
+    S.progMs = S.bandMs = S.modMs = S.centreMs = 0.0;
     S.voiceEnv = S.modPrev = S.modHpOut = S.modLpOut = 0.0f;
     S.boostDb = 0.0f;
+    S.centreMix = 0.0f;
+    S.centreActive = 0;
     S.levParked = 0;
 }
 
@@ -526,6 +539,82 @@ void levelerSample(LdShared &S, const float *p, float *left, float *right, const
     *right = dryR + dialR * (bandGain - 1.0f);
 }
 
+// ABI v45 (E33 S13): the leveler with a centre lane. The detector hears the pair's programme and dialogue band blended
+// toward the centre's by `centreMix`, and the lift goes to the pair scaled by (1 - mix) and to the centre scaled by mix, so a
+// centre that carries speech is detected and lifted on its own and a silent centre leaves today's pair behaviour.
+void levelerSampleCentre(LdShared &S, const float *p, float *left, float *right, float *centre, const float *dialLs,
+                         const float *dialRs, uint32_t j) {
+    const bool enabled = p[kLevOn] > 0.5f;
+    if (!enabled && S.levParked != 0) return;
+    if (enabled && S.levParked != 0) unparkLeveler(S);
+    const float dryL = *left, dryR = *right, dryC = *centre;
+    float dialL, dialR;
+    if (dialLs != nullptr) {
+        dialL = dialLs[j];
+        dialR = dialRs[j];
+    } else {
+        dialL = runBq(S.bandHp, S.hpL, dryL);
+        dialL = runBq(S.bandLp, S.lpL, dialL);
+        dialR = runBq(S.bandHp, S.hpR, dryR);
+        dialR = runBq(S.bandLp, S.lpR, dialR);
+    }
+    float dialC = runBq(S.bandHp, S.hpC, dryC);
+    dialC = runBq(S.bandLp, S.lpC, dialC);
+    S.centreMs = smoothTowardD(S.centreMs, static_cast<double>(dryC) * dryC, S.detectorPole);
+    const float centreDb = 10.0f * std::log10(std::fmax(static_cast<float>(S.centreMs), kEpsilon));
+    if (S.centreActive == 0 && centreDb >= p[kProgramGate]) S.centreActive = 1;
+    else if (S.centreActive != 0 && centreDb < p[kProgramGate] - kCentreHystDb) S.centreActive = 0;
+    const float target = S.centreActive != 0 ? 1.0f : 0.0f;
+    S.centreMix = smoothTowardD(S.centreMix, target, S.centreRamp);
+    if (std::fabs(S.centreMix - target) < 1.0e-9) S.centreMix = target;
+    const float w = static_cast<float>(S.centreMix);
+    const float pairProgram = 0.5f * (dryL * dryL + dryR * dryR);
+    const float pairBand = 0.5f * (dialL * dialL + dialR * dialR);
+    const float programPower = pairProgram + w * (dryC * dryC - pairProgram);
+    const float dialoguePower = pairBand + w * (dialC * dialC - pairBand);
+    S.progMs = smoothTowardD(S.progMs, programPower, S.detectorPole);
+    S.bandMs = smoothTowardD(S.bandMs, dialoguePower, S.detectorPole);
+    S.progDbfs = 10.0f * std::log10(std::fmax(S.progMs, kEpsilon));
+    S.bandDbfs = 10.0f * std::log10(std::fmax(S.bandMs, kEpsilon));
+    S.gapDb = S.progDbfs - S.bandDbfs;
+    const float envInput = std::sqrt(std::fmax(dialoguePower, 0.0f));
+    S.voiceEnv = smoothToward(S.voiceEnv, envInput, S.envPole);
+    const float modHp = S.voiceEnv - S.modPrev + S.modHpPole * S.modHpOut;
+    S.modPrev = S.voiceEnv;
+    S.modHpOut = modHp;
+    const float modLp = (1.0f - S.modLpPole) * modHp + S.modLpPole * S.modLpOut;
+    S.modLpOut = modLp;
+    const float modPower = modLp * modLp;
+    S.modMs = smoothTowardD(S.modMs, modPower, S.measPole);
+    const float modIndex = std::sqrt(std::fmax(S.modMs, 0.0f)) / std::fmax(S.voiceEnv, 1.0e-6f);
+    float mapped = (modIndex - p[kConfFloor]) / std::fmax(p[kConfCeil] - p[kConfFloor], 1.0e-6f);
+    mapped = clampf(mapped, 0.0f, 1.0f);
+    S.confidence = p[kVoiceGate] > 0.5f ? p[kMinConf] + (1.0f - p[kMinConf]) * mapped : 1.0f;
+    float targetBoost = 0.0f;
+    if (enabled && S.progDbfs >= p[kProgramGate]) {
+        const float excess = std::fmax(0.0f, S.gapDb - p[kTargetGap]);
+        const float fraction = p[kBoostRatio] > 1.0f ? (1.0f - 1.0f / p[kBoostRatio]) : 0.0f;
+        targetBoost = std::fmin(p[kLevMaxBoost], excess * fraction) * S.confidence;
+    }
+    const double coef = !enabled ? double(S.bypassCoef) : (targetBoost > S.boostDb ? S.levAttackPole : S.levReleasePole);
+    S.boostDb = smoothTowardD(S.boostDb, targetBoost, coef);
+    if (!enabled && nearZero(S.boostDb)) {
+        S.boostDb = 0.0f;
+        S.progMs = S.bandMs = S.modMs = S.centreMs = 0.0;
+        S.voiceEnv = S.modPrev = S.modHpOut = S.modLpOut = 0.0f;
+        S.progDbfs = S.bandDbfs = S.gapDb = S.confidence = 0.0f;
+        S.centreMix = 0.0f;
+        S.centreActive = 0;
+        clearLevelerFilters(S);
+        S.levParked = 1;
+        return;
+    }
+    const float lift = dbToLinear(S.boostDb) - 1.0f;
+    *left = dryL + dialL * (lift * (1.0f - w));
+    *right = dryR + dialR * (lift * (1.0f - w));
+    *centre = dryC + dialC * (lift * w);
+}
+
 float getParam(const float *params, uint32_t idx, uint32_t changed, float value) { return idx == changed ? value : params[idx]; }
 
 void store(LdShared &S, Tel slot, float v) { S.tel[slot].store(floatToBits(v), std::memory_order_relaxed); }
@@ -564,6 +653,7 @@ bool loudnessParamOk(const float *params, uint32_t idx, float v, double rate) {
         case kConfFloor: return inR(v, 0.0, 1.0) && v < g(kConfCeil);
         case kConfCeil: return inR(v, 0.0, 1.0) && v > g(kConfFloor);
         case kMinConf: return inR(v, 0.0, 1.0);
+        case kCentre: return inR(v, 0.0, 64.0) && v == std::floor(v);
         default: return false;
     }
 }
@@ -572,8 +662,12 @@ n60_status validateLoudnessStage(const n60_stage_desc &s, double rate, uint32_t 
     // 8 kHz shelf and the K-weighting shelf must sit below 0.45 fs, as the kernel's setters require.
     if (!(rate >= 20000.0 && rate <= 768000.0) || !isLoudnessKind(s.kind) || s.capacityFrames != 0) return N60_STATUS_BAD_ARGUMENT;
     if (s.laneMask != 0 || s.laneA >= outCh || s.laneB >= outCh || s.laneA == s.laneB) return N60_STATUS_BAD_ARGUMENT;
-    if (s.params == nullptr || s.paramCount != kParams) return N60_STATUS_BAD_ARGUMENT;
-    for (uint32_t i = 0; i < kParams; ++i) {
+    if (s.params == nullptr || (s.paramCount != kParams && s.paramCount != kParamsCentre)) return N60_STATUS_BAD_ARGUMENT;
+    if (s.paramCount == kParamsCentre && s.params[kCentre] != 0.0f) {
+        const uint32_t c = static_cast<uint32_t>(s.params[kCentre]) - 1;  // ABI v45: a lane of its own, inside the layout
+        if (c >= outCh || c == s.laneA || c == s.laneB) return N60_STATUS_BAD_ARGUMENT;
+    }
+    for (uint32_t i = 0; i < s.paramCount; ++i) {
         if (!loudnessParamOk(s.params, i, s.params[i], rate)) return N60_STATUS_BAD_ARGUMENT;
     }
     return N60_STATUS_OK;
@@ -598,6 +692,7 @@ void loudnessInit(SnapHeader *h, const StageRec &r) {
     if (!designBq(Kind::HighPass, rate, kHighShelfHz, 0.0, kQ, S.highBand)) S.highBand = identityBq();
     S.responsePole = poleForMs(rate, kGainResponseMs);
     designLeveler(S, rate, p);
+    S.centreRamp = poleForMsD(rate, kCentreRampMs);
     S.matchParked = 1;
     S.contourParked = 1;
     S.levParked = 1;
@@ -615,6 +710,7 @@ void runLoudness(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frame
     const double rate = h->sampleRate;
     float *L = lanes[r.laneA];
     float *R = lanes[r.laneB];
+    float *C = r.paramCount >= kParamsCentre && p[kCentre] != 0.0f ? lanes[static_cast<uint32_t>(p[kCentre]) - 1] : nullptr;
     if (p[kMatchAttack] != S.seen[kMatchAttack] || p[kMatchRelease] != S.seen[kMatchRelease]) designMatch(S, rate, p);
     if (p[kStrength] != S.seen[kStrength]) designContour(S, rate, p);
     if (levelerMoved(S, p)) designLeveler(S, rate, p);
@@ -680,7 +776,12 @@ void runLoudness(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frame
             roundToFloat(xv, n);
             storePair(cw[0], cw[1], xv, n);
         }
-        for (uint32_t i = 0; i < n; ++i) levelerSample(S, p, &l[i], &rr[i], levOn ? cw[0] : nullptr, levOn ? cw[1] : nullptr, i);
+        if (C != nullptr) {
+            float *cc = C + done;
+            for (uint32_t i = 0; i < n; ++i) levelerSampleCentre(S, p, &l[i], &rr[i], &cc[i], levOn ? cw[0] : nullptr, levOn ? cw[1] : nullptr, i);
+        } else {
+            for (uint32_t i = 0; i < n; ++i) levelerSample(S, p, &l[i], &rr[i], levOn ? cw[0] : nullptr, levOn ? cw[1] : nullptr, i);
+        }
         done += n;
     }
     store(S, kTLufs, meanSquareLufs(S.meanSquare));
@@ -697,7 +798,7 @@ void runLoudness(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frame
 }
 
 n60_status validateLoudnessParam(const SnapHeader *h, const StageRec &r, uint32_t idx, float value) N60_RT_NONBLOCKING {
-    if (idx >= r.paramCount) return N60_STATUS_BAD_ARGUMENT;
+    if (idx >= r.paramCount || idx == kCentre) return N60_STATUS_BAD_ARGUMENT;  // the centre lane is topology
     return loudnessParamOk(paramsOf(h, r), idx, value, h->sampleRate) ? N60_STATUS_OK : N60_STATUS_BAD_ARGUMENT;
 }
 
@@ -723,7 +824,8 @@ uint64_t loudnessCarry(SnapHeader *from, SnapHeader *to) N60_RT_NONBLOCKING {
             b.mix = a.mix; b.lowGainDb = a.lowGainDb; b.highGainDb = a.highGainDb; b.phons = a.phons;
             b.contourParked = a.contourParked;
             // leveler
-            b.hpL = a.hpL; b.hpR = a.hpR; b.lpL = a.lpL; b.lpR = a.lpR;
+            b.hpL = a.hpL; b.hpR = a.hpR; b.lpL = a.lpL; b.lpR = a.lpR; b.hpC = a.hpC; b.lpC = a.lpC;
+            b.centreMs = a.centreMs; b.centreMix = a.centreMix; b.centreActive = a.centreActive;
             b.progMs = a.progMs; b.bandMs = a.bandMs; b.voiceEnv = a.voiceEnv; b.modPrev = a.modPrev;
             b.modHpOut = a.modHpOut; b.modLpOut = a.modLpOut; b.modMs = a.modMs; b.boostDb = a.boostDb;
             b.progDbfs = a.progDbfs; b.bandDbfs = a.bandDbfs; b.gapDb = a.gapDb; b.confidence = a.confidence;
@@ -750,7 +852,7 @@ bool readLoudness(const SnapHeader *h, uint32_t stageId, n60_loudness_readback *
     out->dialogueGapDb = ld(kTGap);
     out->dialogueVoiceConfidence = ld(kTConf);
     out->dialogueBoostDb = ld(kTBoost);
-    out->reserved = 0;
+    out->reserved = S.centreActive;  // ABI v45: 1 while the leveler follows the centre
     return true;
 }
 

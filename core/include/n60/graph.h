@@ -34,7 +34,7 @@ extern "C" {
 #endif
 
 /* Bumped on any incompatible change to a struct or function below. */
-#define N60_GRAPH_ABI_VERSION 44u
+#define N60_GRAPH_ABI_VERSION 45u
 
 typedef struct n60_graph n60_graph; /* opaque */
 
@@ -239,7 +239,12 @@ typedef enum n60_stage_kind {
  *   (0.5..10)  [26] modulation high Hz (3..14, above low, below 0.45 fs)  [27] envelope ms (5..30)  [28] measurement ms
  *   (300..1500)  [29] confidence floor (0..1)  [30] confidence ceiling (above floor, <= 1)  [31] minimum confidence (0..1).
  * Telemetry is read with n60_graph_read_loudness. The stage has no latency. Running state is not carried across a
- * rebuild. Stereo only. */
+ * rebuild. Stereo only.
+ * ABI v45 (E33 S13): paramCount 33 adds [32] centre lane + 1 (0 none; an integer; topology; a lane that is neither laneA nor
+ * laneB). With a centre lane the leveler detects on the centre and lifts the centre only while the centre carries signal
+ * (its smoothed power reaches the programme gate [24]; it lets go 6 dB below the gate), and behaves as the pair leveler
+ * otherwise. The two paths crossfade over 50 ms, so the switch never clicks. Match and contour stay on the pair. n60_loudness_readback.reserved is 1 while the leveler follows the centre. 0 and the
+ * 32-value block are bit-identical to ABI v44. */
 
 /* Generator (ABI v14). A source that replaces program audio on its lanes, ahead of every correction stage and
  * therefore ahead of PROTECTION, so it reaches the speakers through the same path as music. Lanes: laneMask,
@@ -393,6 +398,11 @@ typedef int (*n60_external_process_fn)(void *context, const float *const *in, fl
  *  ring of the lookahead length so latency never changes, and crossfade in and out over 5 ms. Memory: twice the ring.
  *  Delta ignores mix. With the feedback detector the sidechain is the fed-back signal (it carries the stage's gain).
  *  Listen 0 is bit-identical to the 15-value block.
+ *  ABI v45 (E33 S13): paramCount 17 adds [16] detector-excluded lane + 1 (0 none; an integer, 0..64; topology, so not live).
+ *  Needs linked = 1 and the lane in the group, and the group needs a second lane. The excluded lane (the LFE) does not enter
+ *  the group's loudest level; it is detected as that loudest level, so it takes the group's gain and the balance between it
+ *  and the other lanes does not shift. Its own level never moves the group. 0 and the 10, 15 and 16-value blocks are
+ *  bit-identical to ABI v44.
  *
  * Expander / gate. params: [0] threshold dB (-120..0), [1] ratio (1..20), [2] range dB
  *  (-96..0), [3] attack ms, [4] release ms (as above), [5] linked (0/1). paramCount 6.
@@ -410,6 +420,8 @@ typedef int (*n60_external_process_fn)(void *context, const float *const *in, fl
  *  ABI v43 (E32 S5): paramCount 15 adds [14] timing swap (0/1, live). 1 makes Attack the opening speed and Release the closing
  *  speed (the gate convention); 0 keeps Attack as closing and Release as opening. The 6, 13 and 14-value blocks are
  *  bit-identical to ABI v42.
+ *  ABI v45 (E33 S13): paramCount 16 adds [15] detector-excluded lane + 1 (0 none; topology), as the compressor's [16]: the
+ *  lane takes the linked group's gain without entering its detector. 0 and the shorter blocks are bit-identical to ABI v44.
  *
  * Dynamic EQ. params: [0] linked (0/1), then per band 15 values: shape (0 peak, 1 low
  *  shelf, 2 high shelf, 3 notch, 4 band pass, 5 tilt), Hz (20..20000, below Nyquist),

@@ -18,7 +18,7 @@ void check(bool ok, double rate, const char *what, double a = 0, double b = 0) {
 
 // thr, ratio, range, attack, release, linked, hold, knee, detector, window, hpf, link, listen, lookahead frames
 struct Exp {
-    float p[16] = {-30, 3, -24, 1, 50, 1, 0, 0, 0, 50, 0, 100, 0, 0, 0, 0};  // two spare values for the over-long block check
+    float p[17] = {-30, 3, -24, 1, 50, 1, 0, 0, 0, 50, 0, 100, 0, 0, 0, 0, 0};  // two spare values for the over-long block check
 };
 using Lanes = std::vector<std::vector<float>>;
 
@@ -238,7 +238,7 @@ void validation(double rate) {
     bad.p[13] = -1;
     check(build(rate, bad.p, 14, 2, &st) == nullptr && st == N60_STATUS_BAD_ARGUMENT, rate, "a negative lookahead refused");
     bad.p[13] = 0;
-    check(build(rate, bad.p, 16, 2, &st) == nullptr && st == N60_STATUS_BAD_ARGUMENT, rate, "a 16-value block is refused (15 is the E32 S5 timing swap)");
+    check(build(rate, bad.p, 17, 2, &st) == nullptr && st == N60_STATUS_BAD_ARGUMENT, rate, "a 17-value block is refused (16 is the E33 S13 excluded lane)");
 }
 }  // namespace
 
