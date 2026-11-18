@@ -86,10 +86,10 @@ final class GainReductionMonitor: ObservableObject {
     func spokenValue(_ source: GainReductionSource) -> String { spoken[source] ?? GainReductionHistory.spoken(0) }
 
     /// Rate a view asks for (E32 S3, design 7): the Dynamics page bars and Meters > Dynamics 30 Hz, navigator rows 10 Hz.
-    static let pageHertz = 30.0
-    static let rowHertz = 10.0
+    nonisolated static let pageHertz = 30.0
+    nonisolated static let rowHertz = 10.0
     /// How long the loop waits between looks while the hub is not polling (hidden window or audio stopped).
-    static let idleSleepNanoseconds: UInt64 = 250_000_000
+    nonisolated static let idleSleepNanoseconds: UInt64 = 250_000_000
 
     /// True while nothing moves: every bar and hold is at rest and the 10 s history is empty, so the views may
     /// pause their timelines. It flips immediately in `ingest`, which also bumps `textRevision`.
