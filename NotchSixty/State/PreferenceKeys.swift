@@ -32,6 +32,13 @@ enum PreferenceKeys {
         static func showTransferCurve(_ source: String) -> String { "dynamics.showTransferCurve.\(source)" }
     }
 
+    /// E33 S6: the Meters display choices (`e33.page-enhancements`). One hold time drives the level and
+    /// gain-reduction peak holds.
+    enum Meters {
+        static let peakHold = "meters.peakHold"
+        static let scaleFloorDB = "meters.scaleFloorDB"
+    }
+
     enum Equalizer {
         static let graphYRange = "equalizer.graphYRange"
         static let graphXZoom = "equalizer.graphXZoom"

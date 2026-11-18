@@ -31,9 +31,11 @@ enum MeterBallistics: String, CaseIterable, Identifiable, Sendable {
 struct MeterBallisticsState: Equatable, Sendable {
     static let floorDB = -60.0
 
+    /// E33 S6: the lowest level the meter shows (-60 by default; the Scale preference picks -96 or -120).
+    var floorDB = MeterBallisticsState.floorDB
     private(set) var displayedDB = MeterBallisticsState.floorDB
 
-    mutating func reset() { displayedDB = Self.floorDB }
+    mutating func reset() { displayedDB = floorDB }
 
     /// `peakDB` and `rmsDB` are the maximum readings since the last advance.
     mutating func advance(
@@ -46,13 +48,13 @@ struct MeterBallisticsState: Equatable, Sendable {
         switch mode {
         case .peak:
             let fallen = displayedDB - MeterBallistics.peakFallDBPerSecond * dt
-            displayedDB = max(peakDB, fallen, Self.floorDB)
+            displayedDB = max(peakDB, fallen, floorDB)
         case .vu, .rms:
             let target = Self.linear(rmsDB)
             let current = Self.linear(displayedDB)
             let alpha = 1.0 - exp(-dt / MeterBallistics.integrationTimeConstant)
             let next = current + (target - current) * alpha
-            displayedDB = max(Self.decibels(next), Self.floorDB)
+            displayedDB = max(Self.decibels(next), floorDB)
         }
     }
 
@@ -66,11 +68,14 @@ struct MeterBallisticsState: Equatable, Sendable {
 struct MeterPeakHold: Equatable, Sendable {
     static let holdSeconds = 2.0
 
+    /// E33 S6: the hold time; `.infinity` holds until `reset()` (the Peak hold preference).
+    var holdSeconds = MeterPeakHold.holdSeconds
+    var floorDB = MeterBallisticsState.floorDB
     private(set) var heldDB = MeterBallisticsState.floorDB
     private var ageSeconds = 0.0
 
     mutating func reset() {
-        heldDB = MeterBallisticsState.floorDB
+        heldDB = floorDB
         ageSeconds = 0
     }
 
@@ -79,7 +84,7 @@ struct MeterPeakHold: Equatable, Sendable {
         if displayedDB >= heldDB {
             heldDB = displayedDB
             ageSeconds = 0
-        } else if ageSeconds >= Self.holdSeconds {
+        } else if ageSeconds >= holdSeconds {
             heldDB = displayedDB
             ageSeconds = 0
         }

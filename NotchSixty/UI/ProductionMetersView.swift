@@ -73,6 +73,8 @@ private struct ProductionMetersSnapshot: Equatable {
     var multibandLowGainReductionDB: Float = 0
     var multibandMidGainReductionDB: Float = 0
     var multibandHighGainReductionDB: Float = 0
+    var multibandBand4GainReductionDB: Float = 0
+    var multibandBand5GainReductionDB: Float = 0
     var expanderAttenuationDB: Float = 0
     var limiterGainReductionDB: Float = 0
     var gainRiderAttenuationDB: Float = 0
@@ -165,6 +167,9 @@ struct ProductionMetersView: View {
     private let enhanced = FeatureFlags().isEnabled(.eqPageEnhancements)
     @ObservedObject private var history = ProductionMeterHub.eventHistory
     @State private var spectrumMode = SpectrumPageMode.spectrum
+    /// E33 S6 (behind `e33.page-enhancements`): the one Peak hold and the Scale of the level bars.
+    @AppStorage(PreferenceKeys.Meters.peakHold) private var holdRaw = MeterHoldChoice.default.rawValue
+    @AppStorage(PreferenceKeys.Meters.scaleFloorDB) private var scaleRaw = MeterScaleChoice.default.rawValue
     @State private var spectrogramWindow = SpectrogramWindow.tenSeconds
 
 
@@ -186,6 +191,9 @@ struct ProductionMetersView: View {
             VStack(alignment: .leading, spacing: DesignSpacing.xl.pt) {
                 header
                 pagePicker
+                if enhanced, MeterStoppedPolicy.showsStoppedState(isRunning: engine.lifecycleState == .running, page: page) {
+                    MeterStoppedState(onStart: startProcessing)
+                }
 
                 MeterTickScope(model: tick) {
                 switch page {
@@ -283,12 +291,16 @@ struct ProductionMetersView: View {
                 .pickerStyle(.segmented)
                 .frame(maxWidth: 260)
                 .accessibilityIdentifier("meters.ballistics")
-                Button("Reset Clip Latches") {
-                    bank.resetAllLatches()
-                    meterRevision &+= 1
+                if enhanced {
+                    displayControls(showsScale: true)
+                } else {
+                    Button("Reset Clip Latches") {
+                        bank.resetAllLatches()
+                        meterRevision &+= 1
+                    }
+                    .accessibilityIdentifier("meters.resetLatches")
+                    Spacer()
                 }
-                .accessibilityIdentifier("meters.resetLatches")
-                Spacer()
             }
             ProductionLoudnessCard(
                 snapshot: analysisSnapshot,
@@ -297,6 +309,7 @@ struct ProductionMetersView: View {
                 isRunning: engine.lifecycleState == .running,
                 unavailableReason: nil,
                 isWide: transportMeterSnapshot != nil,
+                rateLimitedSpeech: enhanced,
                 onSource: { loudnessSourceRaw = $0.rawValue },
                 onReset: resetLoudness
             )
@@ -331,7 +344,7 @@ struct ProductionMetersView: View {
     private var legacyLevelsPage: some View {
         VStack(alignment: .leading, spacing: DesignSpacing.l.pt) {
             if engine.lifecycleState != .running {
-                statusBanner("Start processing to view live detailed meters. The detailed meter pipeline remains parked while processing is stopped.")
+                if !enhanced { statusBanner("Start processing to view live detailed meters. The detailed meter pipeline remains parked while processing is stopped.") }
             } else if !snapshot.meteringEnabled {
                 statusBanner("Detailed metering is activating…")
             }
@@ -378,7 +391,7 @@ struct ProductionMetersView: View {
     private func semanticLevelsPage(_ transport: ProductionTransportMeterSnapshot) -> some View {
         VStack(alignment: .leading, spacing: DesignSpacing.l.pt) {
             if engine.lifecycleState != .running {
-                statusBanner("Start processing to view live semantic meters.")
+                if !enhanced { statusBanner("Start processing to view live semantic meters.") }
             } else if !transport.meteringEnabled {
                 statusBanner("Detailed semantic metering is activating…")
             }
@@ -527,6 +540,8 @@ struct ProductionMetersView: View {
             Text("Existing processor telemetry is summarized here without enabling the detailed Input / Post-EQ / Output meter accumulator.")
                 .foregroundStyle(.secondary)
 
+            if enhanced { displayControls(showsScale: false) }
+
             headroomAssistantCard
                 .onAppear { grAttachment = GainReductionMonitor.shared(for: engine).attach(hertz: GainReductionMonitor.pageHertz) }
                 .onDisappear {
@@ -540,6 +555,12 @@ struct ProductionMetersView: View {
                 grMetric("Multiband Low GR", .multibandLow, snapshot.multibandLowGainReductionDB)
                 grMetric("Multiband Mid GR", .multibandMid, snapshot.multibandMidGainReductionDB)
                 grMetric("Multiband High GR", .multibandHigh, snapshot.multibandHighGainReductionDB)
+                if enhanced {
+                    // E33 S6 (G19): bands 4 and 5 of a 4 or 5 band split.
+                    let bands = engine.dynamicsConfiguration.multibandCompressor.bandCountValue
+                    if bands >= 4 { grMetric("\(Self.bandTitle(3, of: bands)) GR", .multibandBand4, snapshot.multibandBand4GainReductionDB) }
+                    if bands >= 5 { grMetric("\(Self.bandTitle(4, of: bands)) GR", .multibandBand5, snapshot.multibandBand5GainReductionDB) }
+                }
                 grMetric("Expander Attenuation", .expander, snapshot.expanderAttenuationDB)
                 grMetric("Limiter GR", .limiter, snapshot.limiterGainReductionDB)
                 dynamicsMetric("Gain Rider", snapshot.gainRiderAttenuationDB)
@@ -561,6 +582,44 @@ struct ProductionMetersView: View {
                 .font(DesignType.caption.font)
                 .foregroundStyle(.secondary)
         }
+    }
+
+    static func bandTitle(_ band: Int, of count: Int) -> String {
+        "Multiband " + ProductionDynamicsView.multibandBandTitle(band, of: count).replacingOccurrences(of: " Band", with: "")
+    }
+
+    /// E33 S6: the shared hold, scale and Reset menu. Hold and scale are preferences; the Reset menu names its target.
+    private func displayControls(showsScale: Bool) -> some View {
+        MeterDisplayControls(
+            hold: Binding(
+                get: { MeterHoldChoice(rawValue: holdRaw) ?? .default },
+                set: { holdRaw = $0.rawValue; GainReductionMonitor.shared(for: engine).setHold(seconds: $0.seconds) }),
+            scale: Binding(
+                get: { MeterScaleChoice(rawValue: scaleRaw) ?? .default },
+                set: { scaleRaw = $0.rawValue }),
+            showsScale: showsScale,
+            onReset: reset)
+    }
+
+    /// Each named reset clears its own target and nothing else.
+    private func reset(_ target: MeterResetTarget) {
+        switch target {
+        case .clipLatches, .peakHold:
+            bank.reset(target)
+            if target == .peakHold { GainReductionMonitor.shared(for: engine).resetHolds() }
+            meterRevision &+= 1
+        case .loudness:
+            if engine.lifecycleState == .running {
+                engine.setAnalysisDemand(levelsDemand | ProductionAnalysisDemand.resetLoudness)
+            }
+        case .truePeakMax:
+            inputTruePeakHold.reset()
+            outputTruePeakHold.reset()
+        }
+    }
+
+    private func startProcessing() {
+        do { try engine.start() } catch { assistantCommandError = error.localizedDescription }
     }
 
     private var headroomAssistantCard: some View {
@@ -1132,6 +1191,9 @@ struct ProductionMetersView: View {
         var lastRevisionBump = 0.0
         var drewOnce = false
         func work(now: Double) {
+            if enhanced {
+                bank.configure(floorDB: MeterScaleChoice.stored().floorDB, holdSeconds: MeterHoldChoice.stored().seconds, zones: true)
+            }
             bank.ingest(hub.take(token), mode: ballistics, now: now)
             refreshSnapshot(hub: hub)
             if enhanced, activePage == .levels { pollInputOvers(now: Date()) }
@@ -1269,6 +1331,8 @@ struct ProductionMetersView: View {
             multibandLowGainReductionDB: diagnostics.multibandLowGainReductionDB,
             multibandMidGainReductionDB: diagnostics.multibandMidGainReductionDB,
             multibandHighGainReductionDB: diagnostics.multibandHighGainReductionDB,
+            multibandBand4GainReductionDB: diagnostics.multibandBand4GainReductionDB,
+            multibandBand5GainReductionDB: diagnostics.multibandBand5GainReductionDB,
             expanderAttenuationDB: diagnostics.expanderAttenuationDB,
             limiterGainReductionDB: diagnostics.limiterGainReductionDB,
             gainRiderAttenuationDB: diagnostics.gainRiderAttenuationDB,
