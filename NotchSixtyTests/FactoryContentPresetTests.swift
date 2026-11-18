@@ -46,7 +46,7 @@ final class FactoryContentPresetTests: XCTestCase {
         try XCTUnwrap(presets.first { $0.name == name }, "missing factory preset \(name)")
     }
 
-    func testEightFactoryPresetsWithStableIdentifiers() {
+    func testNineFactoryPresetsWithStableIdentifiers() {
         let expected: [String: String] = [
             "Reference": "000000000001",
             "Rock Arena": "000000000010",
@@ -56,8 +56,9 @@ final class FactoryContentPresetTests: XCTestCase {
             "Streaming": "000000000014",
             "Classic Pop/Rock": "000000000015",
             "Vocal Standards": "000000000016",
+            "Cinema Night": "000000000017",
         ]
-        XCTAssertEqual(presets.count, 8)
+        XCTAssertEqual(presets.count, 9)
         XCTAssertEqual(Set(presets.map(\.name)).count, presets.count, "names are unique")
         for preset in presets {
             let suffix = try? XCTUnwrap(expected[preset.name], "unexpected factory preset \(preset.name)")
@@ -74,7 +75,9 @@ final class FactoryContentPresetTests: XCTestCase {
         for preset in presets {
             let dynamics = preset.state.dynamics
             XCTAssertTrue(dynamics.limiter.enabled, preset.name)
-            XCTAssertEqual(dynamics.limiter.ceilingDB, -0.5, preset.name)
+            // E33 S15: Cinema Night carries the Late night recipe, whose ceiling is lower.
+            XCTAssertLessThanOrEqual(dynamics.limiter.ceilingDB, -0.5, preset.name)
+            if preset.name != "Cinema Night" { XCTAssertEqual(dynamics.limiter.ceilingDB, -0.5, preset.name) }
             XCTAssertTrue(dynamics.limiter.truePeakGuardEnabled, preset.name)
             XCTAssertTrue(dynamics.dcOffsetFilter.enabled, preset.name)
             XCTAssertTrue(dynamics.infrasonicFilter.enabled, preset.name)

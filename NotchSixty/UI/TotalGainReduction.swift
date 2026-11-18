@@ -73,6 +73,10 @@ struct TotalGainReductionRow: View {
                     .font(.system(.title3, design: .monospaced).weight(.semibold))
                     .monospacedDigit()
             }
+            if let hint = DynamicsLevelStacking.hint(in: engine.dynamicsConfiguration) {
+                Text(hint).font(DesignType.caption.font).foregroundStyle(StatusLevel.attention.color)
+                    .accessibilityIdentifier("gain-reduction-stacking-hint")
+            }
             if let result, let note = TotalGainReduction.note(result) {
                 Text(note).font(DesignType.caption.font).foregroundStyle(.tertiary)
             } else if !running {
