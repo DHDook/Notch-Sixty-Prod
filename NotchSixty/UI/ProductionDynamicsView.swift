@@ -12,6 +12,10 @@ struct ProductionDynamicsView: View {
     @State private var actionError: String?
     @Environment(\.undoManager) private var undoManager
     @State private var history = EditHistory<DynamicsConfiguration>()
+    /// E33 S4: numbered groups, the dynamic EQ link row and navigator accessibility. Off keeps today's page.
+    private let enhanced = FeatureFlags().isEnabled(.eqPageEnhancements)
+    /// E33 S4: switches to the Equalizer page; the band is passed through `EQBandFocusRequest`.
+    var openEqualizer: (() -> Void)? = nil
 
     private func perform(_ action: () throws -> Void) {
         do {
@@ -73,7 +77,11 @@ struct ProductionDynamicsView: View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
                 ForEach(ProductionDynamicsLayout.groups) { group in
-                    Text(group.title.uppercased())
+                    if enhanced, ProductionDynamicsLayout.eqRowIndex() < ProductionDynamicsLayout.groups.count,
+                       group.id == ProductionDynamicsLayout.groups[ProductionDynamicsLayout.eqRowIndex()].id {
+                        dynamicEQRow
+                    }
+                    Text((enhanced ? ProductionDynamicsLayout.numberedTitle(of: group) : group.title).uppercased())
                         .font(DesignType.caption.font.bold())
                         .tracking(0.6)
                         .foregroundStyle(.tertiary)
@@ -96,6 +104,9 @@ struct ProductionDynamicsView: View {
                     if !group.more.isEmpty {
                         moreRow(for: group)
                     }
+                }
+                if ProductionDynamicsLayout.eqRowIndex() >= ProductionDynamicsLayout.groups.count, enhanced {
+                    dynamicEQRow
                 }
             }
             .padding(DesignSpacing.s.pt)
@@ -184,6 +195,34 @@ struct ProductionDynamicsView: View {
             }
         }
         .buttonStyle(.plain)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(enhanced ? DynamicsNavigatorAccessibility.label(title: module.title, subtitle: module.subtitle) : module.title)
+        .accessibilityValue(enhanced ? DynamicsNavigatorAccessibility.value(isOn: moduleIsActive(module)) : "")
+        .accessibilityAddTraits(enhanced && selectedModule == module ? .isSelected : [])
+    }
+
+    /// E33 S4 (design 10): not a processor, so it has no number. Lists the dynamic EQ bands that are on; each opens the band.
+    private var dynamicEQRow: some View {
+        let entries = DynamicsEQLink.activeBands(engine.stereoEQConfiguration.editableBands)
+        return VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
+            HStack(spacing: DesignSpacing.s.pt) {
+                Image(systemName: "slider.horizontal.3").frame(width: 18).foregroundStyle(.secondary)
+                Text(DynamicsEQLink.summary(count: entries.count)).font(.callout).foregroundStyle(.secondary)
+            }
+            ForEach(entries) { entry in
+                Button(entry.title) {
+                    EQBandFocusRequest.shared.request(entry.id)
+                    openEqualizer?()
+                }
+                .buttonStyle(.link)
+                .font(DesignType.caption.font)
+                .accessibilityLabel("Open \(entry.title) in the Equalizer")
+                .padding(.leading, 18 + DesignSpacing.s.pt)
+            }
+        }
+        .padding(.horizontal, DesignSpacing.s.pt)
+        .padding(.vertical, DesignSpacing.xs.pt)
+        .accessibilityIdentifier("dynamics.eqLinkRow")
     }
 
     @ViewBuilder
@@ -1064,29 +1103,7 @@ struct ProductionDynamicsView: View {
     }
 
     private func moduleIsActive(_ module: ProductionDynamicsModule) -> Bool {
-        let d = configuration
-        switch module {
-        case .compressor: return d.compressor.enabled
-        case .multiband: return d.multibandCompressor.enabled
-        case .expander: return d.expander.enabled
-        case .pauseGate: return d.pauseGate.enabled
-        case .gainRider: return d.gainRider.enabled
-        case .denoiser: return d.spectralDenoiser.enabled
-        case .deEsser: return d.deEsser.enabled
-        case .mainsHum: return d.mainsNotch.enabled || d.mainsNotch.continuousTracking
-        case .infrasonic: return d.infrasonicFilter.enabled
-        case .loudnessMatch: return d.loudnessMatch.enabled
-        case .loudnessContour: return d.loudnessContour.enabled
-        case .dialogueLeveler: return d.dialogueRelativeLeveler.enabled
-        case .limiter: return d.limiter.enabled
-        case .softClipper: return d.softClipper.enabled
-        case .automaticHeadroom: return d.automaticHeadroom.enabled
-        case .oversampling: return d.oversampling != .one
-        case .deHarsh: return d.deHarsh.enabled
-        case .stereoWidener: return d.stereoWidener.enabled
-        case .stereoMode: return d.stereoMode != .stereo
-        case .dcOffset: return d.dcOffsetFilter.enabled
-        }
+        module.isActive(in: configuration)
     }
 }
 
@@ -1166,7 +1183,7 @@ enum ProductionDynamicsModule: String, CaseIterable, Identifiable, Hashable {
         case .loudnessMatch: return "Program loudness normalization"
         case .loudnessContour: return "Low-level listening compensation"
         case .dialogueLeveler: return "Masking-aware dialogue lift"
-        case .limiter: return "Look-ahead peak protection"
+        case .limiter: return "Lookahead peak protection"
         case .softClipper: return "Pre-limiter peak shaping"
         case .automaticHeadroom: return "Predictive filter headroom"
         case .oversampling: return "Protection-stage sample rate"
@@ -1191,7 +1208,7 @@ enum ProductionDynamicsModule: String, CaseIterable, Identifiable, Hashable {
         case .loudnessMatch: return "Program-level LUFS matching with bounded correction and asymmetric timing."
         case .loudnessContour: return "Equal-loudness compensation for lower playback levels with bounded bass/treble correction."
         case .dialogueLeveler: return "Compares dialogue-band energy against the full program and lifts speech only when masking warrants it."
-        case .limiter: return "Final look-ahead limiter with optional true-peak reconstruction guard."
+        case .limiter: return "Final lookahead limiter with optional true-peak reconstruction guard."
         case .softClipper: return "Nonlinear peak shaping before limiting, including selectable curve and asymmetric character."
         case .automaticHeadroom: return "Predictive attenuation budget that reserves headroom for known filter/EQ boosts."
         case .oversampling: return "Controls nonlinear protection oversampling independently from ordinary linear DSP."
@@ -1240,19 +1257,23 @@ enum ProductionDynamicsLayout {
         let modules: [ProductionDynamicsModule]
         /// The niche processors folded under "More" until it is expanded.
         let folded: Set<ProductionDynamicsModule>
+        /// E33 S4: the group runs after the EQ stage, so the dynamic EQ link row sits before it.
+        let runsAfterEQ: Bool
 
         init(
             id: String,
             title: String,
             note: String? = nil,
             modules: [ProductionDynamicsModule],
-            folded: Set<ProductionDynamicsModule> = []
+            folded: Set<ProductionDynamicsModule> = [],
+            runsAfterEQ: Bool = false
         ) {
             self.id = id
             self.title = title
             self.note = note
             self.modules = modules
             self.folded = folded
+            self.runsAfterEQ = runsAfterEQ
         }
 
         var shown: [ProductionDynamicsModule] { modules.filter { !folded.contains($0) } }
@@ -1277,7 +1298,8 @@ enum ProductionDynamicsLayout {
             id: "stereo",
             title: "Stereo",
             note: "Runs after EQ and room correction.",
-            modules: [.stereoMode, .stereoWidener]
+            modules: [.stereoMode, .stereoWidener],
+            runsAfterEQ: true
         ),
         Group(
             id: "level",

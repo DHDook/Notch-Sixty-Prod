@@ -30,7 +30,7 @@ struct ProductionDynamicsTelemetryView: View {
                     Text(statusText).font(DesignType.caption.font).foregroundStyle(.secondary)
                 }
                 if items.isEmpty {
-                    Text(engine.lifecycleState == .running ? "Waiting for processor telemetry…" : "Start processing to view live status.")
+                    Text(emptyText)
                         .font(DesignType.caption.font).foregroundStyle(.tertiary)
                 } else {
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: DesignSpacing.m.pt)], alignment: .leading, spacing: DesignSpacing.s.pt) {
@@ -60,6 +60,17 @@ struct ProductionDynamicsTelemetryView: View {
             if let attachment { GainReductionMonitor.shared(for: engine).detach(attachment) }
             attachment = nil
         }
+    }
+
+    /// Why there is nothing to show. E33 S4 (flag on) says whether audio is stopped, the processor is off, or no frames have arrived.
+    private var emptyText: String {
+        guard FeatureFlags().isEnabled(.eqPageEnhancements) else {
+            return engine.lifecycleState == .running ? "Waiting for processor telemetry…" : "Start processing to view live status."
+        }
+        let module = kind.module
+        return DynamicsTelemetryEmptyReason.text(
+            isRunning: engine.lifecycleState == .running, processorTitle: module.title,
+            processorOn: module.isActive(in: engine.dynamicsConfiguration))
     }
 
     /// E28 S5: the gain-reduction panels for this stage (bar, 10 s history and, where a static law exists, the curve).
