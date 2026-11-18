@@ -66,4 +66,36 @@ final class DesignLanguageTests: XCTestCase {
         let expected: DesignStyle = FeatureFlags.isEnabledProcessWide(.designLanguage) ? .redesigned : .current
         XCTAssertEqual(DesignStyle.active, expected)
     }
+
+    func testNearestSpacingAndRadiusMapping() {
+        XCTAssertNil(DesignSpacing.nearest(0))
+        XCTAssertEqual(DesignSpacing.nearest(3), .xs)
+        XCTAssertEqual(DesignSpacing.nearest(6), .s)
+        XCTAssertEqual(DesignSpacing.nearest(10), .m)
+        XCTAssertEqual(DesignSpacing.nearest(14), .l)
+        XCTAssertEqual(DesignSpacing.nearest(18), .l)
+        XCTAssertEqual(DesignSpacing.nearest(22), .xl)
+        XCTAssertEqual(DesignRadius.nearest(8), .small)
+        XCTAssertEqual(DesignRadius.nearest(12), .medium)
+        XCTAssertEqual(DesignRadius.nearest(16), .medium)
+        XCTAssertEqual(DesignRadius.nearest(18), .large)
+        XCTAssertEqual(DesignRadius.nearest(22), .large)
+    }
+
+    func testSurfaceOpacityAndLevelFormat() {
+        XCTAssertEqual(DesignSurface.opacity(.current), 0.22, accuracy: 1e-9)
+        XCTAssertGreaterThan(DesignSurface.opacity(.redesigned), DesignSurface.opacity(.current))
+        XCTAssertEqual(DesignFormat.level(-23.04, unit: "LUFS"), "\u{2212}23.0 LUFS")
+        XCTAssertEqual(DesignFormat.level(-1, unit: "dBTP"), "\u{2212}1.0 dBTP")
+        XCTAssertEqual(DesignFormat.hz(44100), "44.1 kHz")
+        XCTAssertEqual(DesignFormat.hz(352800), "352.8 kHz")
+    }
+
+    func testModifiersBuildWithFlagOnAndOff() {
+        for style in [DesignStyle.current, .redesigned] {
+            let view = Text("x").designSurface(.large).designPanel().designTint(.green).designGlass()
+            XCTAssertNotNil(view)
+            XCTAssertGreaterThan(DesignSpacing.xl.value(style), DesignSpacing.l.value(style) - 1)
+        }
+    }
 }

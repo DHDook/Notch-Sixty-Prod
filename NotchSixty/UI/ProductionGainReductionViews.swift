@@ -69,18 +69,18 @@ struct GainReductionHistoryView: View {
                     gc.stroke(path, with: .color(.orange), lineWidth: 1.5)
                 }
                 .id(context.date)
-                Text("0 dB").font(.system(size: 9)).foregroundStyle(.tertiary).padding(.leading, 4).padding(.top, 2)
+                Text("0 dB").font(DesignType.caption.font).foregroundStyle(.tertiary).padding(.leading, DesignSpacing.xs.pt).padding(.top, DesignSpacing.xs.pt)
                 VStack {
                     Spacer()
                     HStack {
-                        Text("-\(Int(rangeDB)) dB").font(.system(size: 9)).foregroundStyle(.tertiary)
+                        Text("-\(Int(rangeDB)) dB").font(DesignType.caption.font).foregroundStyle(.tertiary)
                         Spacer()
-                        Text("10 s").font(.system(size: 9)).foregroundStyle(.tertiary)
+                        Text("10 s").font(DesignType.caption.font).foregroundStyle(.tertiary)
                     }
-                    .padding(.horizontal, 4).padding(.bottom, 2)
+                    .padding(.horizontal, DesignSpacing.xs.pt).padding(.bottom, DesignSpacing.xs.pt)
                 }
                 if history.maximum <= 0.05 {
-                    Text("No reduction").font(.caption2).foregroundStyle(.secondary)
+                    Text("No reduction").font(DesignType.caption.font).foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             }
@@ -118,7 +118,7 @@ struct DynamicsTransferCurveView: View {
                     gc.stroke(v, with: gridColor, lineWidth: 0.5)
                     gc.stroke(h, with: gridColor, lineWidth: 0.5)
                     if level > range.lowerBound {
-                        let label = gc.resolve(Text("\(Int(level))").font(.system(size: 8)).foregroundColor(.secondary))
+                        let label = gc.resolve(Text("\(Int(level))").font(DesignType.caption.font).foregroundColor(.secondary))
                         gc.draw(label, at: CGPoint(x: map(level, range.lowerBound).x - 2, y: size.height - 1), anchor: .bottomTrailing)
                     }
                     level += 12
@@ -143,7 +143,7 @@ struct DynamicsTransferCurveView: View {
                     let pt = map(live.input, live.output)
                     gc.fill(Path(ellipseIn: CGRect(x: pt.x - 4, y: pt.y - 4, width: 8, height: 8)), with: .color(.orange))
                 }
-                let outLabel = gc.resolve(Text("Out dBFS").font(.system(size: 9)).foregroundColor(.secondary))
+                let outLabel = gc.resolve(Text("Out dBFS").font(DesignType.caption.font).foregroundColor(.secondary))
                 gc.draw(outLabel, at: CGPoint(x: 3, y: 2), anchor: .topLeading)
             }
             .id(context.date)
@@ -151,9 +151,9 @@ struct DynamicsTransferCurveView: View {
         .aspectRatio(1, contentMode: .fit)
         .frame(maxWidth: 150)
         .overlay(alignment: .bottomTrailing) {
-            Text("In dBFS").font(.system(size: 9)).foregroundStyle(.secondary).offset(y: 12)
+            Text("In dBFS").font(DesignType.caption.font).foregroundStyle(.secondary).offset(y: 12)
         }
-        .padding(.bottom, 12)
+        .padding(.bottom, DesignSpacing.m.pt)
         .accessibilityElement()
         .accessibilityLabel("\(source.title) transfer curve")
         .accessibilityValue(curve.accessibilityDescription)
@@ -180,13 +180,13 @@ struct GainReductionPanel: View {
 
     var body: some View {
         let monitor = GainReductionMonitor.shared(for: engine)
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: DesignSpacing.s.pt) {
             GainReductionBar(monitor: monitor, source: source)
             GainReductionHistoryView(monitor: monitor, source: source)
             if let curve {
                 Toggle("Show transfer curve", isOn: $showCurve)
                     .toggleStyle(.checkbox)
-                    .font(.caption)
+                    .font(DesignType.caption.font)
                     .accessibilityIdentifier("transfer-curve-toggle-\(source.rawValue)")
                 if showCurve {
                     DynamicsTransferCurveView(monitor: monitor, source: source, curve: curve,

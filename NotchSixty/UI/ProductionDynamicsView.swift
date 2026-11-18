@@ -24,23 +24,23 @@ struct ProductionDynamicsView: View {
     private var configuration: DynamicsConfiguration { engine.dynamicsConfiguration }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: DesignSpacing.l.pt) {
             header
             ProductionActionErrorBanner(message: $actionError)
             listeningBanner
 
-            HStack(alignment: .top, spacing: 12) {
+            HStack(alignment: .top, spacing: DesignSpacing.m.pt) {
                 moduleNavigator
                     .frame(minWidth: 250, idealWidth: 285, maxWidth: 330)
 
                 ScrollView {
                     moduleEditor
-                        .padding(.horizontal, 4)
+                        .padding(.horizontal, DesignSpacing.xs.pt)
                 }
                 .frame(minWidth: 560)
             }
         }
-        .padding(24)
+        .padding(DesignSpacing.xl.pt)
         .onAppear {
             configureHistory()
             GainReductionMonitor.shared(for: engine).attach()
@@ -55,13 +55,13 @@ struct ProductionDynamicsView: View {
 
     private var header: some View {
         HStack(alignment: .firstTextBaseline) {
-            VStack(alignment: .leading, spacing: 5) {
+            VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
                 Text("Level control, restoration, protection, and program-aware processing. Select a processor to expose its complete configuration.")
                     .foregroundStyle(.secondary)
             }
             Spacer()
             Text("\(activeModuleCount) ACTIVE")
-                .font(.caption.bold())
+                .font(DesignType.caption.font.bold())
                 .tracking(1.1)
                 .foregroundStyle(.secondary)
         }
@@ -69,22 +69,22 @@ struct ProductionDynamicsView: View {
 
     private var moduleNavigator: some View {
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: 4) {
+            LazyVStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
                 ForEach(ProductionDynamicsLayout.groups) { group in
                     Text(group.title.uppercased())
-                        .font(.caption2.bold())
+                        .font(DesignType.caption.font.bold())
                         .tracking(0.6)
                         .foregroundStyle(.tertiary)
-                        .padding(.horizontal, 8)
-                        .padding(.top, 8)
+                        .padding(.horizontal, DesignSpacing.s.pt)
+                        .padding(.top, DesignSpacing.s.pt)
                         .padding(.bottom, group.note == nil ? 2 : 0)
 
                     if let note = group.note {
                         Text(note)
-                            .font(.caption2)
+                            .font(DesignType.caption.font)
                             .foregroundStyle(.secondary)
-                            .padding(.horizontal, 8)
-                            .padding(.bottom, 2)
+                            .padding(.horizontal, DesignSpacing.s.pt)
+                            .padding(.bottom, DesignSpacing.xs.pt)
                     }
 
                     ForEach(moreIsExpanded(group) ? group.modules : group.shown) { module in
@@ -96,11 +96,11 @@ struct ProductionDynamicsView: View {
                     }
                 }
             }
-            .padding(8)
+            .padding(DesignSpacing.s.pt)
         }
         .scrollIndicators(.visible)
         .background(.clear)
-        .glassEffect(.regular, in: .rect(cornerRadius: 18))
+        .designGlass(.large)
     }
 
     /// "More" stays open while one of its processors is selected, so the
@@ -118,7 +118,7 @@ struct ProductionDynamicsView: View {
                 expandedMoreGroups.insert(group.id)
             }
         } label: {
-            HStack(spacing: 9) {
+            HStack(spacing: DesignSpacing.s.pt) {
                 Image(systemName: expanded ? "chevron.down" : "chevron.right")
                     .frame(width: 18)
                     .foregroundStyle(.secondary)
@@ -128,14 +128,14 @@ struct ProductionDynamicsView: View {
                 Spacer(minLength: 4)
                 if !expanded, group.moreHasActiveModule(isActive: moduleIsActive) {
                     Text("ON")
-                        .font(.caption2.bold())
-                        .foregroundStyle(.green)
+                        .font(DesignType.caption.font.bold())
+                        .foregroundStyle(StatusLevel.good.color)
                         .accessibilityLabel("A processor under More is on")
                 }
             }
             .contentShape(.rect)
-            .padding(.horizontal, 9)
-            .padding(.vertical, 4)
+            .padding(.horizontal, DesignSpacing.s.pt)
+            .padding(.vertical, DesignSpacing.xs.pt)
         }
         .buttonStyle(.plain)
     }
@@ -144,20 +144,20 @@ struct ProductionDynamicsView: View {
         Button {
             selectedModule = module
         } label: {
-            HStack(spacing: 9) {
+            HStack(spacing: DesignSpacing.s.pt) {
                 Image(systemName: module.systemImage)
                     .frame(width: 18)
                     .foregroundStyle(selectedModule == module ? .primary : .secondary)
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
                     Text(module.title)
                         .foregroundStyle(.primary)
                     Text(module.subtitle)
-                        .font(.caption2)
+                        .font(DesignType.caption.font)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                     if FeatureFlags().isEnabled(.eqPageEnhancements), let actsOn = engine.dynamicsActsOnText(for: module) {
                         Text("Acts on: \(actsOn)")
-                            .font(.caption2)
+                            .font(DesignType.caption.font)
                             .foregroundStyle(.tertiary)
                             .lineLimit(2)
                     }
@@ -168,15 +168,15 @@ struct ProductionDynamicsView: View {
                         .frame(width: 36)
                 }
                 Circle()
-                    .fill(moduleIsActive(module) ? Color.green : Color.secondary.opacity(0.28))
+                    .fill(moduleIsActive(module) ? StatusLevel.good.color : Color.secondary.opacity(0.28))
                     .frame(width: 7, height: 7)
             }
             .contentShape(.rect)
-            .padding(.horizontal, 9)
-            .padding(.vertical, 5)
+            .padding(.horizontal, DesignSpacing.s.pt)
+            .padding(.vertical, DesignSpacing.xs.pt)
             .background {
                 if selectedModule == module {
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    RoundedRectangle(cornerRadius: DesignRadius.small.pt, style: .continuous)
                         .fill(.primary.opacity(0.09))
                 }
             }
@@ -233,7 +233,7 @@ struct ProductionDynamicsView: View {
             .accessibilityIdentifier("dynamics.compressor.autoMakeup")
 
             Divider()
-            HStack(spacing: 12) {
+            HStack(spacing: DesignSpacing.m.pt) {
                 Text("Topology")
                 Picker("Topology", selection: binding({ $0.compressor.topology }, { $0.compressor.topology = $1 })) {
                     ForEach(CompressorTopology.allCases) { topology in
@@ -266,7 +266,7 @@ struct ProductionDynamicsView: View {
     private func reasonNote(_ reason: String?) -> some View {
         Group {
             if let reason {
-                Text(reason).font(.caption).foregroundStyle(.secondary)
+                Text(reason).font(DesignType.caption.font).foregroundStyle(.secondary)
                     .accessibilityLabel("Unavailable: \(reason)")
             }
         }
@@ -297,7 +297,7 @@ struct ProductionDynamicsView: View {
             .accessibilityIdentifier("\(id).\(mode == .sidechain ? "listen" : "delta")")
             .accessibilityValue(isOn(mode) ? "Listening" : "Off")
         }
-        return HStack(spacing: 8) {
+        return HStack(spacing: DesignSpacing.s.pt) {
             toggle(.sidechain, "Listen", "Plays the detector input after the sidechain filter and before any gain. Session only; one listener at a time.")
             toggle(.delta, "Delta", "Plays what this stage removes (dry minus processed, before make-up). Session only; one listener at a time.")
         }
@@ -312,8 +312,8 @@ struct ProductionDynamicsView: View {
                 Button("Stop Listening") { perform { try engine.setDynamicsListener(nil) } }
                     .accessibilityIdentifier("dynamics.listen.stop")
             }
-            .padding(8)
-            .background(.yellow.opacity(0.18), in: RoundedRectangle(cornerRadius: 8))
+            .padding(DesignSpacing.s.pt)
+            .designTint(StatusLevel.attention.color, opacity: 0.18)
             .accessibilityElement(children: .combine)
             .accessibilityIdentifier("dynamics.listen.banner")
         }
@@ -325,8 +325,8 @@ struct ProductionDynamicsView: View {
                 Button("Clear Solo") { perform { try engine.setDynamicsSoloBands([]) } }
                     .accessibilityIdentifier("dynamics.solo.clear")
             }
-            .padding(8)
-            .background(.yellow.opacity(0.18), in: RoundedRectangle(cornerRadius: 8))
+            .padding(DesignSpacing.s.pt)
+            .designTint(StatusLevel.attention.color, opacity: 0.18)
             .accessibilityElement(children: .combine)
             .accessibilityIdentifier("dynamics.solo.banner")
         }
@@ -338,7 +338,7 @@ struct ProductionDynamicsView: View {
             let av = extrasAvailability
             let c = configuration.compressor
             Divider()
-            Text("Extras").font(.headline)
+            Text("Extras").font(DesignType.sectionTitle.font)
             reasonNote(av.extrasDisabledReason)
             row(.compressorMixPercent, enabled: av.extrasEnabled)
             row(.compressorLinkPercent, enabled: av.extrasEnabled)
@@ -352,7 +352,7 @@ struct ProductionDynamicsView: View {
             row(.compressorLookaheadMs, enabled: av.extrasEnabled && c.lookaheadOn)
             if c.lookaheadOn {
                 Text(DynamicsExtrasAvailability.addsText(ms: c.lookaheadTimeMs, sampleRate: engine.liveTreatmentSampleRate))
-                    .font(.caption).foregroundStyle(.secondary)
+                    .font(DesignType.caption.font).foregroundStyle(.secondary)
                     .accessibilityIdentifier("dynamics.compressor.lookahead.adds")
             }
             reasonNote(av.listenDisabledReason)
@@ -365,7 +365,7 @@ struct ProductionDynamicsView: View {
         if extrasAvailability.flagOn {
             let av = extrasAvailability
             Divider()
-            Text("Extras").font(.headline)
+            Text("Extras").font(DesignType.sectionTitle.font)
             reasonNote(av.extrasDisabledReason)
             row(.expanderHoldMs, enabled: av.extrasEnabled)
             row(.expanderKneeDB, enabled: av.extrasEnabled)
@@ -384,7 +384,7 @@ struct ProductionDynamicsView: View {
                 row(.expanderLookaheadMs, enabled: av.extrasEnabled && configuration.expander.lookaheadOn)
                 if configuration.expander.lookaheadOn {
                     Text(DynamicsExtrasAvailability.addsText(ms: configuration.expander.lookaheadTimeMs, sampleRate: engine.liveTreatmentSampleRate))
-                        .font(.caption).foregroundStyle(.secondary)
+                        .font(DesignType.caption.font).foregroundStyle(.secondary)
                         .accessibilityIdentifier("dynamics.expander.lookahead.adds")
                 }
             }
@@ -399,7 +399,7 @@ struct ProductionDynamicsView: View {
             let av = extrasAvailability
             let m = configuration.multibandCompressor
             GroupBox("Extras") {
-                VStack(alignment: .leading, spacing: 10) {
+                VStack(alignment: .leading, spacing: DesignSpacing.m.pt) {
                     reasonNote(av.extrasDisabledReason)
                     row(.multibandRMSWindowMs, enabled: av.extrasEnabled)
                     extraToggle("Lookahead (all bands)", id: "dynamics.multiband.lookahead", enabled: av.extrasEnabled,
@@ -408,11 +408,11 @@ struct ProductionDynamicsView: View {
                     row(.multibandLookaheadMs, enabled: av.extrasEnabled && m.lookaheadOn)
                     if m.lookaheadOn {
                         Text(DynamicsExtrasAvailability.addsText(ms: m.lookaheadTimeMs, sampleRate: engine.liveTreatmentSampleRate))
-                            .font(.caption).foregroundStyle(.secondary)
+                            .font(DesignType.caption.font).foregroundStyle(.secondary)
                             .accessibilityIdentifier("dynamics.multiband.lookahead.adds")
                     }
                 }
-                .padding(.vertical, 6)
+                .padding(.vertical, DesignSpacing.s.pt)
             }
         }
     }
@@ -436,7 +436,7 @@ struct ProductionDynamicsView: View {
                         get: { MultibandCompressorConfiguration.contains($0.multibandCompressor.autoReleaseBands, band) },
                         set: { $0.multibandCompressor.autoReleaseBands = MultibandCompressorConfiguration.toggled($0.multibandCompressor.autoReleaseBands, band: band, on: $1) })
             reasonNote(av.listenDisabledReason)
-            HStack(spacing: 8) {
+            HStack(spacing: DesignSpacing.s.pt) {
                 Toggle("Solo", isOn: Binding(
                     get: { engine.dynamicsSoloBands.contains(band) },
                     set: { on in
@@ -462,7 +462,7 @@ struct ProductionDynamicsView: View {
         ) {
             ProductionDynamicsTelemetryView(engine: engine, kind: .multiband)
             GroupBox("Crossovers") {
-                VStack(spacing: 10) {
+                VStack(spacing: DesignSpacing.m.pt) {
                     // E33 S5b: 2 to 5 bands behind `e33.page-enhancements`; the three-band page is unchanged with the flag off.
                     let count = bandsEnabled ? configuration.multibandCompressor.bandCountValue : 3
                     if bandsEnabled {
@@ -472,7 +472,7 @@ struct ProductionDynamicsView: View {
                         .pickerStyle(.segmented)
                         .accessibilityIdentifier("dynamics.multiband.bandCount")
                         Text("Changing the band count rebuilds the stage and resets its filters; the crossovers move to a sensible spread.")
-                            .font(.caption).foregroundStyle(.secondary)
+                            .font(DesignType.caption.font).foregroundStyle(.secondary)
                     }
                     row(.multibandCompressorLowMidFrequencyHz, title: count == 3 || !bandsEnabled ? nil : "Crossover 1")
                     Picker("Crossover 1 Slope", selection: binding({ $0.multibandCompressor.lowMidSlope }, { $0.multibandCompressor.lowMidSlope = $1 })) {
@@ -499,11 +499,11 @@ struct ProductionDynamicsView: View {
                     if bandsEnabled, !configuration.multibandCompressor.corners.isEmpty,
                        zip(configuration.multibandCompressor.corners, configuration.multibandCompressor.corners.dropFirst()).contains(where: { $0 >= $1 }) {
                         Text("Crossovers must rise in order; the engine keeps the last valid setting until they do.")
-                            .font(.caption).foregroundStyle(.red)
+                            .font(DesignType.caption.font).foregroundStyle(StatusLevel.problem.color)
                             .accessibilityIdentifier("dynamics.multiband.cornerOrder")
                     }
                 }
-                .padding(.vertical, 6)
+                .padding(.vertical, DesignSpacing.s.pt)
             }
 
             multibandExtras
@@ -534,7 +534,7 @@ struct ProductionDynamicsView: View {
             row(.expanderReleaseMs)
             if DynamicsSoundFixes.isEnabled {  // E32 S5: the core swaps the timing behind `e32.dynamics-sound`
                 Text("Attack sets how fast the expander opens; Release sets how fast it closes.")
-                    .font(.caption).foregroundStyle(.secondary)
+                    .font(DesignType.caption.font).foregroundStyle(.secondary)
                     .accessibilityIdentifier("dynamics.expander.timing.help")
             }
             expanderExtras
@@ -558,7 +558,7 @@ struct ProductionDynamicsView: View {
             row(.pauseGateHysteresisDB)
 
             Label("Product convention: Attack = fade-out, Release = fade-in.", systemImage: "info.circle")
-                .font(.caption)
+                .font(DesignType.caption.font)
                 .foregroundStyle(.secondary)
         }
     }
@@ -573,7 +573,7 @@ struct ProductionDynamicsView: View {
             }
             .pickerStyle(.segmented)
             Text("The live readout above is derived from existing Gain Rider runtime state and does not activate unrelated metering or analysis.")
-                .font(.caption)
+                .font(DesignType.caption.font)
                 .foregroundStyle(.secondary)
         }
     }
@@ -606,7 +606,7 @@ struct ProductionDynamicsView: View {
             }
 
             DisclosureGroup("Advanced Suppression") {
-                VStack(spacing: 10) {
+                VStack(spacing: DesignSpacing.m.pt) {
                     Toggle("Override Preset Smoothing", isOn: denoiserBinding({ $0.advancedTuningEnabled }, { $0.advancedTuningEnabled = $1; $0.markCustom() }))
                     row(.spectralDenoiserMinimumGain)
                         .disabled(!configuration.spectralDenoiser.advancedTuningEnabled)
@@ -615,10 +615,10 @@ struct ProductionDynamicsView: View {
                     row(.spectralDenoiserReleaseMs)
                         .disabled(!configuration.spectralDenoiser.advancedTuningEnabled)
                     Text("Named presets retain their accepted internal suppression behavior. These values take effect only when the explicit override is enabled.")
-                        .font(.caption)
+                        .font(DesignType.caption.font)
                         .foregroundStyle(.secondary)
                 }
-                .padding(.top, 8)
+                .padding(.top, DesignSpacing.s.pt)
             }
 
             Divider()
@@ -644,7 +644,7 @@ struct ProductionDynamicsView: View {
             row(.deEsserReleaseMs)
             DisclosureGroup("Advanced") {
                 Toggle("Dynamic-EQ Processing Mode", isOn: boolBinding({ $0.deEsser.dynamicEQMode }, { $0.deEsser.dynamicEQMode = $1 }))
-                    .padding(.top, 8)
+                    .padding(.top, DesignSpacing.s.pt)
             }
         }
     }
@@ -678,17 +678,17 @@ struct ProductionDynamicsView: View {
                 .disabled(mainsDetectInFlight || engine.lifecycleState != .running)
             }
             if let mainsDetectionMessage {
-                Text(mainsDetectionMessage).font(.caption).foregroundStyle(.secondary)
+                Text(mainsDetectionMessage).font(DesignType.caption.font).foregroundStyle(.secondary)
             }
             Text("Current fundamental: \(configuration.mainsNotch.fundamentalHz, specifier: "%.2f") Hz")
-                .font(.caption.monospacedDigit())
+                .font(DesignType.caption.font.monospacedDigit())
                 .foregroundStyle(.secondary)
 
             Stepper("Harmonics: \(configuration.mainsNotch.harmonicCount)", value: binding({ $0.mainsNotch.harmonicCount }, { $0.mainsNotch.harmonicCount = $1 }), in: MainsNotchConfiguration.harmonicCountRange)
             row(.mainsNotchQ)
 
             DisclosureGroup("Harmonic Depths") {
-                VStack(spacing: 8) {
+                VStack(spacing: DesignSpacing.s.pt) {
                     ForEach(0..<configuration.mainsNotch.harmonicCount, id: \.self) { index in
                         row(
                             DynamicsParameterSpec.harmonicDepth(index),
@@ -696,7 +696,7 @@ struct ProductionDynamicsView: View {
                         )
                     }
                 }
-                .padding(.top, 8)
+                .padding(.top, DesignSpacing.s.pt)
             }
         }
     }
@@ -709,7 +709,7 @@ struct ProductionDynamicsView: View {
             }
             .pickerStyle(.segmented)
             Label("Legacy application-target routing is tracked as a parity gap. Main/sub target selection will live with crossover/output routing rather than be duplicated here.", systemImage: "arrow.triangle.branch")
-                .font(.caption)
+                .font(DesignType.caption.font)
                 .foregroundStyle(.secondary)
         }
     }
@@ -763,7 +763,7 @@ struct ProductionDynamicsView: View {
             }
 
             DisclosureGroup("Advanced Detection") {
-                VStack(spacing: 10) {
+                VStack(spacing: DesignSpacing.m.pt) {
                     row(.dialogueRelativeLevelerDetectorWindowMs)
                     row(.dialogueRelativeLevelerVoiceGateModulationCenterHz)
                     row(.dialogueRelativeLevelerVoiceGateModulationBandwidthHz)
@@ -772,7 +772,7 @@ struct ProductionDynamicsView: View {
                     row(.dialogueRelativeLevelerVoiceGateConfidenceFloorIndex)
                     row(.dialogueRelativeLevelerVoiceGateConfidenceCeilingIndex)
                 }
-                .padding(.top, 8)
+                .padding(.top, DesignSpacing.s.pt)
             }
         }
     }
@@ -790,7 +790,7 @@ struct ProductionDynamicsView: View {
             if DynamicsSoundFixes.isEnabled, configuration.limiter.enabled,
                DynamicsSoundFixes.attackIsLimited(attackMs: configuration.limiter.attackMs, lookAheadMs: configuration.limiter.lookAheadMs) {
                 Text("Attack limited to the lookahead")
-                    .font(.caption).foregroundStyle(.secondary)
+                    .font(DesignType.caption.font).foregroundStyle(.secondary)
                     .accessibilityIdentifier("dynamics.limiter.attack.limited")
             }
             Toggle("True-Peak Guard", isOn: boolBinding({ $0.limiter.truePeakGuardEnabled }, { $0.limiter.truePeakGuardEnabled = $1 }))
@@ -820,7 +820,7 @@ struct ProductionDynamicsView: View {
         moduleCard(module: .automaticHeadroom, enabled: boolBinding({ $0.automaticHeadroom.enabled }, { $0.automaticHeadroom.enabled = $1 }), reset: { preserveEnabledReset(\.automaticHeadroom, defaultValue: AutomaticHeadroomConfiguration()) }) {
             row(.automaticHeadroomMaxAttenuationDB)
             Text("Predictive headroom is distinct from the Dynamic Gain Rider: it reserves known filter/EQ headroom before clipping can occur, rather than reacting to limiter activity.")
-                .font(.caption)
+                .font(DesignType.caption.font)
                 .foregroundStyle(.secondary)
         }
     }
@@ -832,7 +832,7 @@ struct ProductionDynamicsView: View {
             }
             .pickerStyle(.segmented)
             Text("Use higher factors when nonlinear protection stages need additional anti-aliasing margin. CPU cost rises with factor.")
-                .font(.caption)
+                .font(DesignType.caption.font)
                 .foregroundStyle(.secondary)
         }
     }
@@ -882,13 +882,13 @@ struct ProductionDynamicsView: View {
         @ViewBuilder content: () -> Content
     ) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack(alignment: .top, spacing: 14) {
+            HStack(alignment: .top, spacing: DesignSpacing.l.pt) {
                 Image(systemName: module.systemImage)
                     .font(.title2)
                     .frame(width: 32, height: 32)
                     .glassEffect(.regular, in: .circle)
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(module.title).font(.title2.bold())
+                VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
+                    Text(module.title).font(DesignType.sectionTitle.font)
                     Text(module.longDescription).foregroundStyle(.secondary)
                 }
                 Spacer()
@@ -904,30 +904,26 @@ struct ProductionDynamicsView: View {
                     .accessibilityLabel("Reset \(module.title)")
                     .accessibilityIdentifier("dynamics.\(module.rawValue).reset")
             }
-            .padding(.horizontal, 20)
-            .padding(.vertical, 18)
+            .padding(.horizontal, DesignSpacing.xl.pt)
+            .padding(.vertical, DesignSpacing.l.pt)
 
             Divider()
 
-            VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: DesignSpacing.l.pt) {
                 content()
             }
-            .padding(20)
+            .padding(DesignSpacing.xl.pt)
         }
         .frame(maxWidth: 920, alignment: .topLeading)
-        .background(.regularMaterial, in: .rect(cornerRadius: 22))
-        .overlay {
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .stroke(.quaternary, lineWidth: 0.5)
-        }
-        .padding(.bottom, 24)
+        .designPanel()
+        .padding(.bottom, DesignSpacing.xl.pt)
     }
 
     private func multibandBandEditor(band: Int, title: String) -> some View {
         let rows = DynamicsParameterSpec.multibandBand(band)
         let auto = configuration.multibandCompressor.autoMakeupBands?.contains(band) == true
         return DisclosureGroup(title) {
-            VStack(spacing: 10) {
+            VStack(spacing: DesignSpacing.m.pt) {
                 ForEach(rows) { spec in
                     row(spec, enabled: !(auto && spec.title == "Makeup Gain"))
                     if spec.title == "Makeup Gain" {
@@ -945,7 +941,7 @@ struct ProductionDynamicsView: View {
                 }
                 multibandBandExtras(band: band)
             }
-            .padding(.top, 8)
+            .padding(.top, DesignSpacing.s.pt)
         }
     }
 
@@ -1327,9 +1323,9 @@ struct ProductionOutputProtectionSection: View {
             EmptyView()
         } else {
             GroupBox("Outputs") {
-                VStack(alignment: .leading, spacing: 10) {
+                VStack(alignment: .leading, spacing: DesignSpacing.m.pt) {
                     Text("Every output also has an always-on hard limit at \(Int(UnifiedGraphOutputProtection.hardLimitCeilingDB)) dBFS that these settings cannot lower. Turning an output off parks its own ceiling at the hard limit.")
-                        .font(.caption)
+                        .font(DesignType.caption.font)
                         .foregroundStyle(.secondary)
                     DisclosureGroup("Advanced") {
                         Toggle("Independent per output", isOn: Binding(
@@ -1337,18 +1333,18 @@ struct ProductionOutputProtectionSection: View {
                             set: { value in var next = settings; next.independent = value; apply(next) }
                         ))
                         Text("Off keeps the program outputs as one linked group so the stereo image is preserved. On gives every program output its own limiter. Switching rebuilds the graph with a short fade.")
-                            .font(.caption)
+                            .font(DesignType.caption.font)
                             .foregroundStyle(.secondary)
                     }
                     headroomControls
                     if !programLimiterOn {
                         Text("The program Limiter is off, so these ceilings have no effect. The \(Int(UnifiedGraphOutputProtection.hardLimitCeilingDB)) dBFS hard limit still holds every output.")
-                            .font(.caption)
-                            .foregroundStyle(.orange)
+                            .font(DesignType.caption.font)
+                            .foregroundStyle(StatusLevel.attention.color)
                     }
                     ForEach(lanes) { lane in row(lane) }
                 }
-                .padding(.vertical, 5)
+                .padding(.vertical, DesignSpacing.xs.pt)
             }
             .task { await poll() }
             .task(id: HeadroomKey(settings: settings, running: engine.lifecycleState == .running)) { await refreshHeadroom() }
@@ -1361,7 +1357,7 @@ struct ProductionOutputProtectionSection: View {
     }
 
     private var headroomControls: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
             HStack {
                 Text("Headroom").font(.subheadline.weight(.medium))
                 Spacer()
@@ -1381,9 +1377,9 @@ struct ProductionOutputProtectionSection: View {
                 get: { settings.headroomStrict },
                 set: { value in var next = settings; next.headroomStrict = value; apply(next) }
             ))
-            .font(.caption)
+            .font(DesignType.caption.font)
             Text("Apply trims each output just enough that a full-scale input stays under its ceiling, using the EQ, room correction, crossover and bass management in the graph. A trim never boosts. Outputs the estimate cannot cover are skipped.")
-                .font(.caption)
+                .font(DesignType.caption.font)
                 .foregroundStyle(.secondary)
         }
     }
@@ -1413,7 +1409,7 @@ struct ProductionOutputProtectionSection: View {
     private func row(_ lane: AudioIOEngine.OutputProtectionLane) -> some View {
         let own = lane.isSub || settings.independent
         let setting = settings.lane(lane.index)
-        return VStack(alignment: .leading, spacing: 4) {
+        return VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
             HStack {
                 Text(lane.label).font(.subheadline.weight(.medium))
                 Spacer()
@@ -1432,7 +1428,7 @@ struct ProductionOutputProtectionSection: View {
                     .labelsHidden()
                     .accessibilityLabel("\(lane.label) protection")
                 } else {
-                    Text("Linked").font(.caption).foregroundStyle(.secondary)
+                    Text("Linked").font(DesignType.caption.font).foregroundStyle(.secondary)
                 }
             }
             if own {
@@ -1446,12 +1442,12 @@ struct ProductionOutputProtectionSection: View {
             }
             if let result = headroom[lane.index] {
                 Text(Self.headroomText(result))
-                    .font(.caption.monospaced())
-                    .foregroundStyle(result.limiterPredicted || !result.isComplete ? Color.orange : Color.secondary)
+                    .font(DesignType.caption.font.monospaced())
+                    .foregroundStyle(result.limiterPredicted || !result.isComplete ? StatusLevel.attention.color : Color.secondary)
             }
             if let reading = readings[lane.index] {
                 Text(readoutText(reading, own: own))
-                    .font(.caption.monospaced())
+                    .font(DesignType.caption.font.monospaced())
                     .foregroundStyle(.secondary)
             }
         }
@@ -1522,7 +1518,7 @@ private struct OutputCeilingSlider: View {
     var body: some View {
         let _ = holder.commit = { [commit] value in commit(value) }
         HStack {
-            Text("Ceiling").font(.caption).foregroundStyle(.secondary)
+            Text("Ceiling").font(DesignType.caption.font).foregroundStyle(.secondary)
             Slider(value: Binding(
                 get: { draft ?? value },
                 set: { next in
@@ -1548,8 +1544,8 @@ private struct OutputCeilingSlider: View {
                 holder.debouncer.flush()
                 draft = nil
             }
-            Text(String(format: "%.1f dB", draft ?? value))
-                .font(.caption.monospacedDigit())
+            Text(DesignFormat.db(Double(draft ?? value)))
+                .font(DesignType.caption.font.monospacedDigit())
                 .frame(width: 64, alignment: .trailing)
         }
     }

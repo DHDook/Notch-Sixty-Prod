@@ -56,8 +56,8 @@ struct ProductionLoudnessCard: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .firstTextBaseline, spacing: 12) {
+        VStack(alignment: .leading, spacing: DesignSpacing.m.pt) {
+            HStack(alignment: .firstTextBaseline, spacing: DesignSpacing.m.pt) {
                 Text("Loudness").font(.title3.bold())
                 Picker("Source", selection: Binding(get: { source }, set: onSource)) {
                     ForEach(LoudnessSource.allCases) { Text($0.title).tag($0) }
@@ -71,11 +71,11 @@ struct ProductionLoudnessCard: View {
             }
 
             if let unavailableReason {
-                Text(unavailableReason).font(.caption).foregroundStyle(.secondary)
+                Text(unavailableReason).font(DesignType.caption.font).foregroundStyle(.secondary)
             } else if !isRunning {
-                Text("Start processing to measure loudness.").font(.caption).foregroundStyle(.secondary)
+                Text("Start processing to measure loudness.").font(DesignType.caption.font).foregroundStyle(.secondary)
             } else {
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 12)], spacing: 12) {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: DesignSpacing.m.pt)], spacing: DesignSpacing.m.pt) {
                     value("Momentary", LoudnessCardText.lufs(readout?.momentary), "momentary")
                     value("Short-term", LoudnessCardText.lufs(readout?.shortTerm), "shortTerm")
                     value("Integrated", LoudnessCardText.lufs(readout?.integrated), "integrated")
@@ -89,26 +89,26 @@ struct ProductionLoudnessCard: View {
                 if readout?.isGapped == true {
                     Label("Gapped: capture frames were lost, so integrated loudness may read low. Reset to start again.",
                           systemImage: "exclamationmark.triangle")
-                        .font(.caption)
+                        .font(DesignType.caption.font)
                         .accessibilityIdentifier("meters.loudness.gapped")
                 }
                 Text(isWide ? LoudnessCardText.wideNote : LoudnessCardText.foldNote)
-                    .font(.caption2).foregroundStyle(.tertiary)
+                    .font(DesignType.caption.font).foregroundStyle(.tertiary)
                 if isWide, source == .output, snapshot.loudnessInput != nil, snapshot.loudnessOutput == nil {
-                    Text(LoudnessCardText.wideOutputUnavailableNote).font(.caption2).foregroundStyle(.secondary)
+                    Text(LoudnessCardText.wideOutputUnavailableNote).font(DesignType.caption.font).foregroundStyle(.secondary)
                 }
             }
         }
-        .padding(14)
+        .padding(DesignSpacing.l.pt)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.quaternary.opacity(0.22), in: .rect(cornerRadius: 16))
+        .designSurface(.medium)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("meters.loudness")
     }
 
     private func value(_ title: String, _ text: String, _ id: String) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(title).font(.caption).foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
+            Text(title).font(DesignType.caption.font).foregroundStyle(.secondary)
             Text(text)
                 .font(.system(.title3, design: .monospaced).weight(.semibold))
                 .monospacedDigit()

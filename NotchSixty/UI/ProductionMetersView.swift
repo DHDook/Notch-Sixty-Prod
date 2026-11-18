@@ -41,11 +41,11 @@ enum ProductionMeterMath {
 
     static func formattedDB(_ value: Double, suffix: String = "dBFS") -> String {
         guard value.isFinite else { return "−∞ \(suffix)" }
-        return String(format: "%.1f %@", value, suffix)
+        return DesignFormat.level(value, unit: suffix)
     }
 
     static func formattedGain(_ value: Float) -> String {
-        String(format: "%.1f dB", Double(value))
+        DesignFormat.db(Double(value))
     }
 }
 
@@ -148,7 +148,7 @@ struct ProductionMetersView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 22) {
+            VStack(alignment: .leading, spacing: DesignSpacing.xl.pt) {
                 header
                 pagePicker
 
@@ -193,7 +193,7 @@ struct ProductionMetersView: View {
                     transportPage
                 }
             }
-            .padding(28)
+            .padding(DesignSpacing.xl.pt)
             .frame(maxWidth: 1180, alignment: .topLeading)
         }
         .task(id: "\(engine.lifecycleState.rawValue)|\(page.rawValue)|\(spectrumMode.rawValue)|\(spectrogramWindow.rawValue)") {
@@ -214,17 +214,14 @@ struct ProductionMetersView: View {
 
     private var header: some View {
         HStack(alignment: .firstTextBaseline) {
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: DesignSpacing.s.pt) {
                 Text("Signal levels, spectrum, stereo field, and gain structure — with hidden analysis parked.")
                     .foregroundStyle(.secondary)
             }
             Spacer()
-            Text(engine.lifecycleState == .running ? "LIVE" : "IDLE")
-                .font(.caption.bold())
-                .tracking(1.2)
-                .padding(.horizontal, 13)
-                .padding(.vertical, 8)
-                .glassEffect(.regular, in: .capsule)
+            DesignStatusBadge(
+                level: engine.lifecycleState == .running ? .good : .off,
+                text: engine.lifecycleState == .running ? "LIVE" : "IDLE")
         }
     }
 
@@ -241,8 +238,8 @@ struct ProductionMetersView: View {
 
     @ViewBuilder
     private var levelsPage: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 12) {
+        VStack(alignment: .leading, spacing: DesignSpacing.m.pt) {
+            HStack(spacing: DesignSpacing.m.pt) {
                 Picker("Ballistics", selection: $ballisticsRaw) {
                     ForEach(MeterBallistics.allCases) { Text($0.title).tag($0.rawValue) }
                 }
@@ -295,27 +292,27 @@ struct ProductionMetersView: View {
     }
 
     private var legacyLevelsPage: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: DesignSpacing.l.pt) {
             if engine.lifecycleState != .running {
                 statusBanner("Start processing to view live detailed meters. The detailed meter pipeline remains parked while processing is stopped.")
             } else if !snapshot.meteringEnabled {
                 statusBanner("Detailed metering is activating…")
             }
 
-            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 14) {
+            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: DesignSpacing.l.pt) {
                 stereoLevelCard(title: "Input", subtitle: "Render input", stage: "input", levels: snapshot.input)
                 stereoLevelCard(title: "Post-EQ", subtitle: "After the main EQ stage", stage: "postEQ", levels: snapshot.postEQ)
                 stereoLevelCard(title: "Output", subtitle: "Final DSP output", stage: "output", levels: snapshot.output)
             }
 
             if !routeMeters.isEmpty {
-                Text("Speaker Outputs").font(.title2.bold())
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 220), spacing: 12)], spacing: 12) {
+                Text("Speaker Outputs").font(DesignType.sectionTitle.font)
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 220), spacing: DesignSpacing.m.pt)], spacing: DesignSpacing.m.pt) {
                     ForEach(routeMeters) { route in routeCard(route) }
                 }
             }
 
-            HStack(alignment: .top, spacing: 14) {
+            HStack(alignment: .top, spacing: DesignSpacing.l.pt) {
                 metricCard(
                     title: "Input True Peak",
                     value: ProductionMeterMath.formattedDB(snapshot.inputTruePeakDBTP, suffix: "dBTP"),
@@ -328,7 +325,7 @@ struct ProductionMetersView: View {
                 )
                 metricCard(
                     title: "Processing",
-                    value: snapshot.sampleRate > 0 ? String(format: "%.1f kHz", snapshot.sampleRate / 1_000.0) : "—",
+                    value: snapshot.sampleRate > 0 ? DesignFormat.hz(snapshot.sampleRate) : "—",
                     detail: snapshot.sampleRate > 0
                         ? "Float32 stereo · \(snapshot.latencyFrames) frame published latency"
                         : "No active render format"
@@ -336,24 +333,24 @@ struct ProductionMetersView: View {
             }
 
             Text("Peak and RMS are shown in dBFS. True Peak is sourced from the existing protection telemetry rather than a second meter implementation. Detailed level accumulation is enabled only while this Levels page is visible.")
-                .font(.caption)
+                .font(DesignType.caption.font)
                 .foregroundStyle(.secondary)
         }
     }
 
     private func semanticLevelsPage(_ transport: ProductionTransportMeterSnapshot) -> some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: DesignSpacing.l.pt) {
             if engine.lifecycleState != .running {
                 statusBanner("Start processing to view live semantic meters.")
             } else if !transport.meteringEnabled {
                 statusBanner("Detailed semantic metering is activating…")
             }
 
-            HStack(alignment: .top, spacing: 14) {
+            HStack(alignment: .top, spacing: DesignSpacing.l.pt) {
                 metricCard(title: "Mode", value: transport.kind.displayName, detail: transport.displayName)
                 metricCard(
                     title: "Processing",
-                    value: String(format: "%.1f kHz", transport.sampleRate / 1_000.0),
+                    value: DesignFormat.hz(transport.sampleRate),
                     detail: "\(transport.latencyFrames) frame maximum configured path latency"
                 )
                 metricCard(
@@ -364,20 +361,20 @@ struct ProductionMetersView: View {
             }
 
             if !transport.programChannels.isEmpty {
-                Text("Semantic Program Channels").font(.title2.bold())
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 220), spacing: 12)], spacing: 12) {
+                Text("Semantic Program Channels").font(DesignType.sectionTitle.font)
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 220), spacing: DesignSpacing.m.pt)], spacing: DesignSpacing.m.pt) {
                     ForEach(transport.programChannels) { channel in transportChannelCard(channel) }
                 }
             }
 
             Text(transport.kind == .virtualSpeakers ? "Headphone Output" : "Physical Outputs")
-                .font(.title2.bold())
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 220), spacing: 12)], spacing: 12) {
+                .font(DesignType.sectionTitle.font)
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 220), spacing: DesignSpacing.m.pt)], spacing: DesignSpacing.m.pt) {
                 ForEach(transport.physicalOutputs) { channel in transportChannelCard(channel) }
             }
 
             if let input = transport.inputTruePeakLinear, let output = transport.outputTruePeakLinear {
-                HStack(alignment: .top, spacing: 14) {
+                HStack(alignment: .top, spacing: DesignSpacing.l.pt) {
                     truePeakBarCard(
                         title: "Spatial Input True Peak", id: "input.truePeak", linear: input,
                         detail: "Downstream protection detector")
@@ -388,20 +385,20 @@ struct ProductionMetersView: View {
             }
 
             Text("Semantic program meters are measured after per-channel lane processing. Physical meters are measured after bass management, optional hardware-gated room treatment, Sub N routing, startup fade, and master output gain. Meter work is demand-driven and parked when this Levels page is hidden.")
-                .font(.caption)
+                .font(DesignType.caption.font)
                 .foregroundStyle(.secondary)
         }
     }
 
     private var transportPage: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: DesignSpacing.l.pt) {
             let diagnostics = transportDiagnostics
             let current = transportMeterSnapshot
-            Text("Transport & Recovery").font(.title2.bold())
+            Text("Transport & Recovery").font(DesignType.sectionTitle.font)
             Text("Live transport state, published latency, buffer health, and selected-device recovery policy.")
                 .foregroundStyle(.secondary)
 
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 210), spacing: 12)], spacing: 12) {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 210), spacing: DesignSpacing.m.pt)], spacing: DesignSpacing.m.pt) {
                 metricCard(
                     title: "Active Path",
                     value: current?.kind.displayName ?? "Stereo",
@@ -474,22 +471,22 @@ struct ProductionMetersView: View {
 
             if let error = diagnostics?.lastErrorDescription {
                 Label(error, systemImage: "exclamationmark.triangle.fill")
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(StatusLevel.attention.color)
                     .textSelection(.enabled)
             }
 
             if enhanced { ProductionEventHistoryCard(history: history) }
 
             Text("Recovery remains pinned to the selected stable device UID. Notch Sixty does not silently follow the macOS default output or substitute a different device after disconnect.")
-                .font(.caption)
+                .font(DesignType.caption.font)
                 .foregroundStyle(.secondary)
         }
     }
 
     private var dynamicsPage: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: DesignSpacing.l.pt) {
             Text("Gain Structure")
-                .font(.title2.bold())
+                .font(DesignType.sectionTitle.font)
             Text("Existing processor telemetry is summarized here without enabling the detailed Input / Post-EQ / Output meter accumulator.")
                 .foregroundStyle(.secondary)
 
@@ -497,7 +494,7 @@ struct ProductionMetersView: View {
                 .onAppear { GainReductionMonitor.shared(for: engine).attach() }
                 .onDisappear { GainReductionMonitor.shared(for: engine).detach() }
 
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 180), spacing: 12)], spacing: 12) {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 180), spacing: DesignSpacing.m.pt)], spacing: DesignSpacing.m.pt) {
                 grMetric("Compressor GR", .compressor, snapshot.compressorGainReductionDB)
                 grMetric("De-Esser GR", .deEsser, snapshot.deEsserGainReductionDB)
                 grMetric("Multiband Low GR", .multibandLow, snapshot.multibandLowGainReductionDB)
@@ -515,58 +512,58 @@ struct ProductionMetersView: View {
                 )
                 metricCard(
                     title: "Dialogue",
-                    value: String(format: "%+.1f dB", Double(snapshot.dialogueBoostDB)),
+                    value: DesignFormat.db(Double(snapshot.dialogueBoostDB), signed: true),
                     detail: String(format: "Voice confidence %.0f%%", Double(snapshot.dialogueVoiceConfidence * 100))
                 )
             }
 
             Text("This page intentionally avoids the historical misleading ISP, fake bit-stream, and pseudo-standard DR-factor displays. Those are not part of the commercial meter contract.")
-                .font(.caption)
+                .font(DesignType.caption.font)
                 .foregroundStyle(.secondary)
         }
     }
 
     private var headroomAssistantCard: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: DesignSpacing.l.pt) {
             HStack(alignment: .firstTextBaseline) {
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
                     Label(
                         "Headroom Assistant",
                         systemImage: "gauge.with.dots.needle.50percent"
                     )
-                    .font(.headline)
+                    .font(DesignType.sectionTitle.font)
                     Text(
                         "Observe a representative loud passage and estimate whether the existing Headroom Attenuation needs more reserve."
                     )
-                    .font(.caption)
+                    .font(DesignType.caption.font)
                     .foregroundStyle(.secondary)
                 }
                 Spacer()
                 Text(headroomAssistantPhaseLabel)
-                    .font(.caption.bold())
+                    .font(DesignType.caption.font.bold())
                     .tracking(0.8)
                     .foregroundStyle(.secondary)
             }
 
             if assistant.isObserving {
-                VStack(alignment: .leading, spacing: 6) {
+                VStack(alignment: .leading, spacing: DesignSpacing.s.pt) {
                     ProgressView(
                         value: assistant.observationProgress
                     )
                     Text(
                         "Observed \(assistant.evidence.observationSeconds, specifier: "%.1f") s · 10 s minimum · 30 s recommended"
                     )
-                    .font(.caption.monospacedDigit())
+                    .font(DesignType.caption.font.monospacedDigit())
                     .foregroundStyle(.secondary)
                 }
             }
 
-            HStack(alignment: .top, spacing: 12) {
-                VStack(alignment: .leading, spacing: 5) {
+            HStack(alignment: .top, spacing: DesignSpacing.m.pt) {
+                VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
                     Text("Target True Peak")
-                        .font(.caption)
+                        .font(DesignType.caption.font)
                         .foregroundStyle(.secondary)
-                    HStack(spacing: 10) {
+                    HStack(spacing: DesignSpacing.m.pt) {
                         Slider(
                             value: $assistant.targetPeakDBTP,
                             in: HeadroomAssistantRecommendation
@@ -576,22 +573,22 @@ struct ProductionMetersView: View {
                         Text(
                             "\(assistant.targetPeakDBTP, specifier: "%.1f") dBTP"
                         )
-                        .font(.caption.monospacedDigit())
+                        .font(DesignType.caption.font.monospacedDigit())
                         .frame(width: 76, alignment: .trailing)
                     }
                 }
 
                 if let recommendation = assistant.recommendation {
-                    VStack(alignment: .leading, spacing: 5) {
+                    VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
                         Text("Headroom Attenuation")
-                            .font(.caption)
+                            .font(DesignType.caption.font)
                             .foregroundStyle(.secondary)
                         Text(
                             "\(recommendation.currentHeadroomAttenuationDB, specifier: "%+.1f") → \(recommendation.recommendedHeadroomAttenuationDB, specifier: "%+.1f") dB"
                         )
                         .font(.headline.monospacedDigit())
                         Text(headroomRecommendationSummary(recommendation))
-                            .font(.caption)
+                            .font(DesignType.caption.font)
                             .foregroundStyle(.secondary)
                     }
                     .frame(minWidth: 225, alignment: .leading)
@@ -601,9 +598,9 @@ struct ProductionMetersView: View {
             if assistant.phase != .idle {
                 LazyVGrid(
                     columns: [
-                        GridItem(.adaptive(minimum: 170), spacing: 10)
+                        GridItem(.adaptive(minimum: 170), spacing: DesignSpacing.m.pt)
                     ],
-                    spacing: 10
+                    spacing: DesignSpacing.m.pt
                 ) {
                     assistantMetric(
                         "Pre-Rider True Peak",
@@ -637,8 +634,8 @@ struct ProductionMetersView: View {
 
             if let error = assistant.lastErrorDescription {
                 Label(error, systemImage: "exclamationmark.triangle.fill")
-                    .font(.caption)
-                    .foregroundStyle(.orange)
+                    .font(DesignType.caption.font)
+                    .foregroundStyle(StatusLevel.attention.color)
                     .textSelection(.enabled)
             }
 
@@ -647,16 +644,16 @@ struct ProductionMetersView: View {
                     "Applied to live content state · saved Content Preset unchanged",
                     systemImage: "checkmark.circle.fill"
                 )
-                .font(.caption)
+                .font(DesignType.caption.font)
                 .foregroundStyle(.secondary)
             }
 
-            HStack(spacing: 10) {
+            HStack(spacing: DesignSpacing.m.pt) {
                 if assistant.isObserving {
                     Button("Stop & Review") {
                         assistant.stopObservation()
                     }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(.glassProminent)
                     Button("Cancel") {
                         assistant.cancelObservation()
                     }
@@ -674,7 +671,7 @@ struct ProductionMetersView: View {
                                     error.localizedDescription
                             }
                         }
-                        .buttonStyle(.borderedProminent)
+                        .buttonStyle(.glassProminent)
                         .disabled(
                             engine.lifecycleState != .running
                         )
@@ -692,7 +689,7 @@ struct ProductionMetersView: View {
                                     error.localizedDescription
                             }
                         }
-                        .buttonStyle(.borderedProminent)
+                        .buttonStyle(.glassProminent)
                     }
 
                     if assistant.phase == .applied,
@@ -720,14 +717,11 @@ struct ProductionMetersView: View {
             Text(
                 "Advisory only: the assistant never removes existing headroom and never auto-adjusts in the background. Apply changes the live content state only; save or update the Content Preset separately if you want to keep it. Use a representative loud passage—short observations cannot prove worst-case program headroom."
             )
-            .font(.caption)
+            .font(DesignType.caption.font)
             .foregroundStyle(.secondary)
         }
-        .padding(16)
-        .background(
-            .quaternary.opacity(0.22),
-            in: .rect(cornerRadius: 18)
-        )
+        .padding(DesignSpacing.l.pt)
+        .designSurface(.large)
         .accessibilityElement(children: .contain)
     }
 
@@ -763,19 +757,16 @@ struct ProductionMetersView: View {
         _ title: String,
         _ value: String
     ) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
             Text(title)
-                .font(.caption2)
+                .font(DesignType.caption.font)
                 .foregroundStyle(.secondary)
             Text(value)
-                .font(.caption.monospacedDigit().bold())
+                .font(DesignType.caption.font.monospacedDigit().bold())
         }
-        .padding(10)
+        .padding(DesignSpacing.m.pt)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            .quaternary.opacity(0.18),
-            in: .rect(cornerRadius: 12)
-        )
+        .designSurface(.medium)
     }
 
     private func formatOptionalDBTP(_ value: Double?) -> String {
@@ -785,12 +776,12 @@ struct ProductionMetersView: View {
 
     /// E28 S6: one routed DAC channel of a stereo same-device speaker map, drawn with the shared bar.
     private func routeCard(_ route: ProductionRouteMeter) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: DesignSpacing.s.pt) {
             HStack {
-                Text(route.label).font(.headline)
+                Text(route.label).font(DesignType.sectionTitle.font)
                 Spacer()
                 Text("CH \(route.physicalChannel + 1)")
-                    .font(.caption.monospacedDigit())
+                    .font(DesignType.caption.font.monospacedDigit())
                     .foregroundStyle(.secondary)
             }
             channelLevelRow(
@@ -798,20 +789,20 @@ struct ProductionMetersView: View {
                 peak: ProductionMeterMath.decibels(route.peakLinear),
                 rms: ProductionMeterMath.decibels(route.rmsLinear))
             HStack {
-                Text("Over-range").font(.caption).foregroundStyle(.secondary)
+                Text("Over-range").font(DesignType.caption.font).foregroundStyle(.secondary)
                 Spacer()
-                Text("\(route.overRangeSamples)").font(.caption.monospacedDigit())
+                Text("\(route.overRangeSamples)").font(DesignType.caption.font.monospacedDigit())
             }
         }
-        .padding(14)
-        .background(.quaternary.opacity(0.22), in: .rect(cornerRadius: 16))
+        .padding(DesignSpacing.l.pt)
+        .designSurface(.medium)
         .accessibilityElement(children: .contain)
     }
 
     /// E28 S6 (G13): true-peak detectors drawn with the shared bar instead of a text-only card.
     private func truePeakBarCard(title: String, id: String, linear: Float, detail: String) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(title).font(.caption).foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: DesignSpacing.s.pt) {
+            Text(title).font(DesignType.caption.font).foregroundStyle(.secondary)
             Text(ProductionMeterMath.formattedDB(ProductionMeterMath.decibels(linear), suffix: "dBTP"))
                 .font(.system(.title3, design: .monospaced).weight(.semibold))
                 .monospacedDigit()
@@ -821,11 +812,11 @@ struct ProductionMetersView: View {
                 onReset: { bank.channel(id: id, label: "TP").resetLatch(); meterRevision &+= 1 }
             )
             .id("\(id)-\(meterRevision)")
-            Text(detail).font(.caption).foregroundStyle(.secondary)
+            Text(detail).font(DesignType.caption.font).foregroundStyle(.secondary)
         }
-        .padding(10)
+        .padding(DesignSpacing.m.pt)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.quaternary.opacity(0.18), in: .rect(cornerRadius: 12))
+        .designSurface(.medium)
     }
 
     /// E28 S6: the E9 protection readout for the physical output card whose label matches a protection lane.
@@ -840,12 +831,12 @@ struct ProductionMetersView: View {
     }
 
     private func transportChannelCard(_ channel: ProductionTransportChannelMeter) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: DesignSpacing.s.pt) {
             HStack {
-                Text(channel.label).font(.headline)
+                Text(channel.label).font(DesignType.sectionTitle.font)
                 Spacer()
                 Text("CH \(channel.channelIndex + 1)")
-                    .font(.caption.monospacedDigit())
+                    .font(DesignType.caption.font.monospacedDigit())
                     .foregroundStyle(.secondary)
             }
             channelLevelRow(
@@ -854,16 +845,16 @@ struct ProductionMetersView: View {
                 rms: ProductionMeterMath.decibels(channel.rmsLinear)
             )
             HStack {
-                Text("Over-range").font(.caption).foregroundStyle(.secondary)
+                Text("Over-range").font(DesignType.caption.font).foregroundStyle(.secondary)
                 Spacer()
-                Text("\(channel.overRangeSamples)").font(.caption.monospacedDigit())
+                Text("\(channel.overRangeSamples)").font(DesignType.caption.font.monospacedDigit())
             }
             if let text = protectionText(for: channel) {
-                Text(text).font(.caption.monospaced()).foregroundStyle(.secondary)
+                Text(text).font(DesignType.caption.font.monospaced()).foregroundStyle(.secondary)
             }
         }
-        .padding(14)
-        .background(.quaternary.opacity(0.22), in: .rect(cornerRadius: 16))
+        .padding(DesignSpacing.l.pt)
+        .designSurface(.medium)
     }
 
     private func stereoLevelCard(
@@ -872,10 +863,10 @@ struct ProductionMetersView: View {
         stage: String,
         levels: ProductionStereoLevelSnapshot
     ) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(.headline)
-                Text(subtitle).font(.caption).foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: DesignSpacing.m.pt) {
+            VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
+                Text(title).font(DesignType.sectionTitle.font)
+                Text(subtitle).font(DesignType.caption.font).foregroundStyle(.secondary)
             }
 
             channelLevelRow(id: "\(stage).L", label: "L", peak: levels.peakLeft, rms: levels.rmsLeft)
@@ -884,26 +875,26 @@ struct ProductionMetersView: View {
             Divider()
             HStack {
                 Text("Over-range")
-                    .font(.caption)
+                    .font(DesignType.caption.font)
                     .foregroundStyle(.secondary)
                 Spacer()
                 Text("\(levels.overRangeSamples)")
-                    .font(.caption.monospacedDigit())
+                    .font(DesignType.caption.font.monospacedDigit())
             }
         }
-        .padding(16)
+        .padding(DesignSpacing.l.pt)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.quaternary.opacity(0.24), in: .rect(cornerRadius: 18))
+        .designSurface(.large)
     }
 
     private func channelLevelRow(id: String, label: String, peak: Double, rms: Double) -> some View {
-        VStack(alignment: .leading, spacing: 5) {
+        VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
             HStack {
                 Text("Peak \(ProductionMeterMath.formattedDB(peak))")
-                    .font(.caption.monospacedDigit())
+                    .font(DesignType.caption.font.monospacedDigit())
                 Spacer()
                 Text("RMS \(ProductionMeterMath.formattedDB(rms))")
-                    .font(.caption.monospacedDigit())
+                    .font(DesignType.caption.font.monospacedDigit())
                     .foregroundStyle(.secondary)
             }
             MeterBarView(
@@ -921,16 +912,16 @@ struct ProductionMetersView: View {
 
     /// E28 S5: a gain-reduction card with the shared bar (the hub is the only reader, so the figures match the Dynamics page).
     private func grMetric(_ title: String, _ source: GainReductionSource, _ value: Float) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(title).font(.caption).foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: DesignSpacing.s.pt) {
+            Text(title).font(DesignType.caption.font).foregroundStyle(.secondary)
             Text(ProductionMeterMath.formattedGain(value))
                 .font(.system(.title3, design: .monospaced).weight(.semibold))
                 .monospacedDigit()
             GainReductionBar(monitor: GainReductionMonitor.shared(for: engine), source: source)
         }
-        .padding(14)
+        .padding(DesignSpacing.l.pt)
         .frame(maxWidth: .infinity, minHeight: 88, alignment: .topLeading)
-        .background(.quaternary.opacity(0.22), in: .rect(cornerRadius: 16))
+        .designSurface(.medium)
     }
 
     private func dynamicsMetric(_ title: String, _ value: Float) -> some View {
@@ -938,46 +929,46 @@ struct ProductionMetersView: View {
     }
 
     private func metricCard(title: String, value: String, detail: String?) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(title).font(.caption).foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: DesignSpacing.s.pt) {
+            Text(title).font(DesignType.caption.font).foregroundStyle(.secondary)
             Text(value)
                 .font(.system(.title3, design: .monospaced).weight(.semibold))
                 .monospacedDigit()
             if let detail {
-                Text(detail).font(.caption2).foregroundStyle(.tertiary)
+                Text(detail).font(DesignType.caption.font).foregroundStyle(.tertiary)
             }
         }
-        .padding(14)
+        .padding(DesignSpacing.l.pt)
         .frame(maxWidth: .infinity, minHeight: 88, alignment: .topLeading)
-        .background(.quaternary.opacity(0.22), in: .rect(cornerRadius: 16))
+        .designSurface(.medium)
     }
 
     private func pendingAnalysisPage(title: String, systemImage: String, detail: String) -> some View {
-        VStack(spacing: 18) {
+        VStack(spacing: DesignSpacing.l.pt) {
             Image(systemName: systemImage)
                 .font(.system(size: 46, weight: .medium))
                 .foregroundStyle(.secondary)
-            Text(title).font(.title2.bold())
+            Text(title).font(DesignType.sectionTitle.font)
             Text(detail)
                 .multilineTextAlignment(.center)
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: 620)
             Label("Analyzer pipeline parked", systemImage: "pause.circle.fill")
-                .font(.caption.bold())
+                .font(DesignType.caption.font.bold())
                 .foregroundStyle(.secondary)
         }
         .padding(36)
         .frame(maxWidth: .infinity, minHeight: 340)
-        .background(.quaternary.opacity(0.18), in: .rect(cornerRadius: 22))
+        .designSurface(.large)
     }
 
     private func statusBanner(_ text: String) -> some View {
         Label(text, systemImage: "info.circle")
             .font(.callout)
             .foregroundStyle(.secondary)
-            .padding(12)
+            .padding(DesignSpacing.m.pt)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(.quaternary.opacity(0.18), in: .rect(cornerRadius: 12))
+            .designSurface(.medium)
     }
 
     private var loudnessSource: LoudnessSource {

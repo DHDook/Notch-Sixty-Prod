@@ -21,21 +21,21 @@ struct ProductionDynamicsTelemetryView: View {
 
     var body: some View {
         GroupBox("Live Status") {
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: DesignSpacing.s.pt) {
                 ForEach(panels, id: \.0) { source, curve in
                     GainReductionPanel(engine: engine, source: source, curve: curve)
                 }
                 if let statusText {
-                    Text(statusText).font(.caption).foregroundStyle(.secondary)
+                    Text(statusText).font(DesignType.caption.font).foregroundStyle(.secondary)
                 }
                 if items.isEmpty {
                     Text(engine.lifecycleState == .running ? "Waiting for processor telemetry…" : "Start processing to view live status.")
-                        .font(.caption).foregroundStyle(.tertiary)
+                        .font(DesignType.caption.font).foregroundStyle(.tertiary)
                 } else {
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 12)], alignment: .leading, spacing: 8) {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: DesignSpacing.m.pt)], alignment: .leading, spacing: DesignSpacing.s.pt) {
                         ForEach(items) { item in
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(item.label).font(.caption2).foregroundStyle(.secondary)
+                            VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
+                                Text(item.label).font(DesignType.caption.font).foregroundStyle(.secondary)
                                 Text(item.value)
                                     .font(.system(.body, design: .monospaced).weight(.medium))
                                     .monospacedDigit()
@@ -45,7 +45,7 @@ struct ProductionDynamicsTelemetryView: View {
                     }
                 }
             }
-            .padding(.vertical, 5)
+            .padding(.vertical, DesignSpacing.xs.pt)
         }
         .task(id: kind) { await pollSelectedProcessor() }
         .onAppear { GainReductionMonitor.shared(for: engine).attach() }
@@ -89,8 +89,8 @@ struct ProductionDynamicsTelemetryView: View {
             return
         }
 
-        func db(_ value: Float) -> String { String(format: "%.1f dB", Double(value)) }
-        func percent(_ value: Float) -> String { String(format: "%.0f%%", Double(value * 100)) }
+        func db(_ value: Float) -> String { DesignFormat.db(Double(value)) }
+        func percent(_ value: Float) -> String { DesignFormat.percent(Double(value)) }
         func item(_ id: String, _ label: String, _ value: String) -> ProductionDynamicsTelemetryItem {
             .init(id: id, label: label, value: value)
         }

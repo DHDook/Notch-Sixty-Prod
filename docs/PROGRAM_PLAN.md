@@ -647,7 +647,7 @@ One flag `e34.design-language`, graduated in S7. The minimum macOS rises to 27 i
 
 - [x] S0 `e34/macos27-glass` (#600): minimum macOS raised to 27, macOS 27 glass rules read from Apple's documentation, glass and material audit, flag added (needs-owner: minimum OS, `AGENTS.md`); merged; flag read in S1, graduated in S7
 - [~] S1 `e34/design-language`: `docs/DESIGN_LANGUAGE.md`, values file, components, formatters, status levels, gallery; ends with the owner's screen check (low-risk); built dark behind `e34.design-language`, S2/S3 wire the pages; owner screen check done 17 Nov 2026 (#601 merged)
-- [ ] S2 `e34/adopt-playback-pages`: Dashboard, Equalizer, Dynamics, Meters, Headphones, Plugins on the shared parts (low-risk)
+- [~] S2 `e34/adopt-playback-pages`: Dashboard, Equalizer, Dynamics, Meters, Headphones, Plugins on the shared parts (low-risk); Equalizer, Dynamics, Meters, Headphones, Plugins done; Dashboard is S2b after #603 (G19)
 - [ ] S3 `e34/adopt-system-pages`: System, tools, Active Acoustics, Settings, Help on the shared parts (needs-owner: ANC and MIMO screens, appearance only)
 - [ ] S4 `e34/states-and-dialogs`: one state component, one confirmation rule (low-risk)
 - [ ] S5 `e34/menus-and-keyboard`: View and Playback menus, full keyboard reach (low-risk)

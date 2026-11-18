@@ -12,7 +12,7 @@ struct DesignCard<Content: View>: View {
             .padding(DesignSpacing.m.value(style))
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
-                .quaternary.opacity(style == .redesigned ? 0.6 : 0.4),
+                .quaternary.opacity(DesignSurface.opacity(style)),
                 in: RoundedRectangle(cornerRadius: DesignRadius.medium.value(style), style: .continuous))
     }
 }

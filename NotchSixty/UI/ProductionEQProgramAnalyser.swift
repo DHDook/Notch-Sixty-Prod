@@ -84,7 +84,7 @@ enum EQProgramSpectrumDrawing {
         let legend: [(String, Color)] = [("Input", .gray), (spectrum.outputLabel, .cyan)]
         for (index, entry) in legend.enumerated() {
             context.draw(
-                Text(entry.0).font(.caption2).foregroundStyle(entry.1),
+                Text(entry.0).font(DesignType.caption.font).foregroundStyle(entry.1),
                 at: CGPoint(x: size.width - 8, y: 10 + CGFloat(index) * 13), anchor: .trailing)
         }
     }

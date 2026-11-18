@@ -48,7 +48,7 @@ struct ProductionHeadphoneWorkspace: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
+            VStack(alignment: .leading, spacing: DesignSpacing.xl.pt) {
                 header
                 SystemCapabilityNoteCard(
                     title: "With your speaker arrangement", features: SystemCapabilityText.headphoneFeatures, profiles: profiles)
@@ -65,21 +65,21 @@ struct ProductionHeadphoneWorkspace: View {
                 if let error = actionError {
                     Label(error, systemImage: "exclamationmark.triangle.fill")
                         .font(.callout)
-                        .foregroundStyle(.red)
+                        .foregroundStyle(StatusLevel.problem.color)
                         .textSelection(.enabled)
-                        .padding(14)
+                        .padding(DesignSpacing.l.pt)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(.red.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+                        .designTint(StatusLevel.problem.color, opacity: 0.08, radius: .medium)
                 } else if let statusMessage {
                     Label(statusMessage, systemImage: "checkmark.circle.fill")
                         .font(.callout)
                         .foregroundStyle(.secondary)
-                        .padding(14)
+                        .padding(DesignSpacing.l.pt)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 12))
+                        .designTint(StatusLevel.off.color, opacity: 0.06, radius: .medium)
                 }
             }
-            .padding(28)
+            .padding(DesignSpacing.xl.pt)
             .frame(maxWidth: 980, alignment: .topLeading)
         }
         .task {
@@ -141,16 +141,16 @@ struct ProductionHeadphoneWorkspace: View {
     }
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: DesignSpacing.s.pt) {
             Text("Keep headphone hardware correction separate from Content Presets. Stereo mode preserves the normal content DSP chain; Virtual Speakers renders semantic program channels through a prepared HRTF or BRIR before headphone correction and true-peak protection.")
                 .foregroundStyle(.secondary)
         }
     }
 
     private var modeCard: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: DesignSpacing.l.pt) {
             HStack {
-                Text("Headphone Device Profile").font(.headline)
+                Text("Headphone Device Profile").font(DesignType.sectionTitle.font)
                 Spacer()
                 Toggle("Headphone Device Profile", isOn: $draft.enabled)
                     .labelsHidden()
@@ -163,10 +163,10 @@ struct ProductionHeadphoneWorkspace: View {
             }
             LabeledContent("Headphone Output") {
                 Text(engine.selectedOutputDevice?.name ?? "No output selected")
-                    .foregroundStyle(engine.selectedOutputDevice == nil ? .red : .secondary)
+                    .foregroundStyle(engine.selectedOutputDevice == nil ? StatusLevel.problem.color : .secondary)
             }
 
-            HStack(spacing: 16) {
+            HStack(spacing: DesignSpacing.l.pt) {
                 TextField("Profile Name", text: $draft.name)
                     .textFieldStyle(.roundedBorder)
                 Picker("Listening Mode", selection: $draft.spatialMode) {
@@ -180,19 +180,19 @@ struct ProductionHeadphoneWorkspace: View {
             Text(draft.spatialMode == .stereo
                  ? "Stereo: the existing EQ, dynamics and convolution chain remains available; headphone correction is applied immediately before final protection."
                  : "Virtual Speakers: multichannel decoded PCM is rendered to two ears first. Stereo-only creative DSP must be neutral because it cannot be applied honestly to an arbitrary semantic multichannel source.")
-                .font(.caption)
+                .font(DesignType.caption.font)
                 .foregroundStyle(.secondary)
         }
-        .productionCard()
+        .designPanel()
     }
 
     private var correctionCard: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("Device Correction").font(.headline)
+        VStack(alignment: .leading, spacing: DesignSpacing.l.pt) {
+            Text("Device Correction").font(DesignType.sectionTitle.font)
 
-            HStack(spacing: 20) {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Target").font(.caption.bold()).foregroundStyle(.secondary)
+            HStack(spacing: DesignSpacing.xl.pt) {
+                VStack(alignment: .leading, spacing: DesignSpacing.s.pt) {
+                    Text("Target").font(DesignType.caption.font.bold()).foregroundStyle(.secondary)
                     Picker("Target", selection: $draft.targetCurve) {
                         ForEach(HeadphoneTargetCurve.allCases) { target in
                             Text(target.displayName).tag(target)
@@ -200,8 +200,8 @@ struct ProductionHeadphoneWorkspace: View {
                     }
                     .labelsHidden()
                 }
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Correction Headroom").font(.caption.bold()).foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: DesignSpacing.s.pt) {
+                    Text("Correction Headroom").font(DesignType.caption.font.bold()).foregroundStyle(.secondary)
                     HStack {
                         Slider(value: $draft.headroomAttenuationDB, in: 0...30, step: 0.5)
                         Text("\(draft.headroomAttenuationDB, specifier: "%.1f") dB")
@@ -212,7 +212,7 @@ struct ProductionHeadphoneWorkspace: View {
             }
 
             Divider()
-            HStack(alignment: .top, spacing: 22) {
+            HStack(alignment: .top, spacing: DesignSpacing.xl.pt) {
                 channelControls(title: "Left", correction: binding(\.left))
                 channelControls(title: "Right", correction: binding(\.right))
             }
@@ -220,7 +220,7 @@ struct ProductionHeadphoneWorkspace: View {
             Text(
                 "Device correction is separate from Content Presets. The editor below exposes all 16 independently enabled parametric EQ bands per ear, with a preview of the electrical DSP response."
             )
-            .font(.caption)
+            .font(DesignType.caption.font)
             .foregroundStyle(.secondary)
 
             let required = draft.conservativeRequiredHeadroomDB
@@ -229,7 +229,7 @@ struct ProductionHeadphoneWorkspace: View {
                     String(format: "Conservative positive-gain allowance: %.1f dB", required),
                     systemImage: "waveform.path"
                 )
-                .font(.caption)
+                .font(DesignType.caption.font)
                 Spacer()
                 Text(
                     draft.headroomAttenuationDB + 0.000001 >= required
@@ -237,24 +237,24 @@ struct ProductionHeadphoneWorkspace: View {
                 )
                 .foregroundStyle(
                     draft.headroomAttenuationDB + 0.000001 >= required
-                        ? Color.secondary : Color.orange
+                        ? Color.secondary : StatusLevel.attention.color
                 )
-                .font(.caption.bold())
+                .font(DesignType.caption.font.bold())
             }
         }
-        .productionCard()
+        .designPanel()
     }
 
     // MARK: - Batch 3 headphone PEQ completion
 
     private var perEarEQCard: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: DesignSpacing.l.pt) {
             HStack {
                 Text("Per-Ear Parametric Equalizer")
-                    .font(.headline)
+                    .font(DesignType.sectionTitle.font)
                 Spacer()
                 Text("16 bands per ear")
-                    .font(.caption.monospacedDigit())
+                    .font(DesignType.caption.font.monospacedDigit())
                     .foregroundStyle(.secondary)
             }
 
@@ -265,12 +265,12 @@ struct ProductionHeadphoneWorkspace: View {
                    ? " (illustration only: choose an output to validate)." : ".")
                 + " Includes per-ear trim and common attenuation. It is not an acoustic headphone measurement."
             )
-            .font(.caption)
+            .font(DesignType.caption.font)
             .foregroundStyle(.secondary)
             headphoneResponseGraph
                 .frame(height: 210)
 
-            HStack(alignment: .top, spacing: 16) {
+            HStack(alignment: .top, spacing: DesignSpacing.l.pt) {
                 channelEQEditor(
                     "Left ear", correction: binding(\.left),
                     accent: .orange
@@ -283,23 +283,23 @@ struct ProductionHeadphoneWorkspace: View {
 
             Divider()
             HStack {
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
                     Text("Optional local correction proposal").font(.subheadline.bold())
                     Text(
                         "Import a user-supplied, explicitly attributed JSON PEQ proposal. It is reviewed as a draft and never downloads, automatically selects, or distributes a model correction database."
                     )
-                    .font(.caption)
+                    .font(DesignType.caption.font)
                     .foregroundStyle(.secondary)
                 }
                 Spacer(minLength: 8)
                 Button("Import EQ Proposal…") {
                     importingEQProposal = true
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(.glass)
             }
             modelCorrectionLibraryCard
             if let proposal = pendingEQProposal {
-                VStack(alignment: .leading, spacing: 6) {
+                VStack(alignment: .leading, spacing: DesignSpacing.s.pt) {
                     Text(proposal.headphoneModel)
                         .font(.subheadline.bold())
                     Text(
@@ -307,32 +307,32 @@ struct ProductionHeadphoneWorkspace: View {
                         + " · Attribution: " + proposal.sourceAttribution
                         + " · Stated license: " + proposal.sourceLicense
                     )
-                    .font(.caption)
+                    .font(DesignType.caption.font)
                     .foregroundStyle(.secondary)
                     .textSelection(.enabled)
                     Text(
                         "This metadata does not establish redistribution rights or verify the measurements. Review before using; no automatic deployment."
                     )
-                    .font(.caption)
+                    .font(DesignType.caption.font)
                     .foregroundStyle(.secondary)
                     HStack {
                         Button("Stage Bands in Draft") {
                             stageEQProposal(proposal)
                         }
-                        .buttonStyle(.borderedProminent)
+                        .buttonStyle(.glassProminent)
                         Button("Discard") {
                             pendingEQProposal = nil
                         }
-                        .buttonStyle(.bordered)
+                        .buttonStyle(.glass)
                     }
                 }
             }
         }
-        .productionCard()
+        .designPanel()
     }
 
     private var modelCorrectionLibraryCard: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: DesignSpacing.m.pt) {
             Divider()
             HStack {
                 Text("Local Headphone Model Measurement Library")
@@ -341,16 +341,16 @@ struct ProductionHeadphoneWorkspace: View {
                 Button("Import Response JSON…") {
                     importingModelResponse = true
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(.glass)
                 Button("Refresh") {
                     loadSavedModelMeasurements()
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(.glass)
             }
             Text(
                 "Import your own attributed left/right headphone frequency-response measurement and explicit target points. The app fits bounded PEQ proposals using its production biquad coefficients; there is no bundled third-party correction database, network retrieval or individual-ear calibration claim."
             )
-            .font(.caption)
+            .font(DesignType.caption.font)
             .foregroundStyle(.secondary)
             Picker("Stored measurement", selection: $selectedModelID) {
                 Text("Choose local measurement…").tag(UUID?.none)
@@ -365,13 +365,13 @@ struct ProductionHeadphoneWorkspace: View {
                     + " · Stated license: " + model.sourceLicense
                     + " · " + String(model.points.count) + " frequencies"
                 )
-                .font(.caption)
+                .font(DesignType.caption.font)
                 .foregroundStyle(.secondary)
                 .textSelection(.enabled)
                 Button("Fit Editable PEQ Proposal") {
                     fitLocalModel(model)
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(.glassProminent)
             }
             if let fit = modeledCorrection {
                 Text(
@@ -382,25 +382,25 @@ struct ProductionHeadphoneWorkspace: View {
                         fit.recommendedHeadroomDB
                     )
                 )
-                .font(.caption.monospacedDigit())
+                .font(DesignType.caption.font.monospacedDigit())
                 Text(
                     String(
                         format: "Maximum frequency-by-frequency error regression: %.2f dB",
                         fit.worstFrequencyRegressionDB
                     )
                 )
-                .font(.caption.monospacedDigit())
+                .font(DesignType.caption.font.monospacedDigit())
                 ForEach(fit.warnings, id: \.self) { warning in
                     Label(warning, systemImage: "info.circle")
-                        .font(.caption)
+                        .font(DesignType.caption.font)
                         .foregroundStyle(.secondary)
                 }
                 Button("Review Fitted Bands Below") {
                     pendingEQProposal = fit.proposal
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(.glass)
                 Text("No model fitting automatically changes EQ, saved profiles, or playing audio.")
-                    .font(.caption)
+                    .font(DesignType.caption.font)
                     .foregroundStyle(.secondary)
             }
         }
@@ -409,10 +409,10 @@ struct ProductionHeadphoneWorkspace: View {
     // MARK: One-click fit (E13 S2)
 
     private var oneClickFitCard: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Fit and apply").font(.headline)
+        VStack(alignment: .leading, spacing: DesignSpacing.m.pt) {
+            Text("Fit and apply").font(DesignType.sectionTitle.font)
             Text("Import your own headphone response (AutoEq CSV, REW or squig.link text; pick left and right files together, or one file for both ears), choose a target, and fit a parametric EQ in one step. Nothing is bundled or downloaded.")
-                .font(.caption).foregroundStyle(.secondary)
+                .font(DesignType.caption.font).foregroundStyle(.secondary)
             HStack {
                 Button("Import response...") { importingResponses = true }
                 Button("Import Equalizer APO preset...") { importingAPOPreset = true }
@@ -426,17 +426,17 @@ struct ProductionHeadphoneWorkspace: View {
                 ForEach(headphoneTargets) { Text($0.name).tag(UUID?.some($0.id)) }
             }
             Button(fitting ? "Fitting..." : "Fit and apply", action: fitAndApply)
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(.glassProminent)
                 .disabled(fitting || selectedResponseID == nil || selectedSampleRate == nil)
             if let fit = oneClickFit {
                 Text(String(format: "Error L %.2f to %.2f dB, R %.2f to %.2f dB; headroom %.1f dB",
                             fit.leftRMSEBeforeDB, fit.leftRMSEAfterDB, fit.rightRMSEBeforeDB, fit.rightRMSEAfterDB,
                             fit.recommendedHeadroomDB))
-                    .font(.caption.monospacedDigit())
-                ForEach(fit.warnings, id: \.self) { Label($0, systemImage: "info.circle").font(.caption).foregroundStyle(.secondary) }
+                    .font(DesignType.caption.font.monospacedDigit())
+                ForEach(fit.warnings, id: \.self) { Label($0, systemImage: "info.circle").font(DesignType.caption.font).foregroundStyle(.secondary) }
             }
         }
-        .productionCard()
+        .designPanel()
     }
 
     private func loadResponsesAndTargets() {
@@ -601,16 +601,16 @@ struct ProductionHeadphoneWorkspace: View {
             draft.right, sampleRate: previewSampleRate,
             headroomAttenuationDB: draft.headroomAttenuationDB
         )
-        return VStack(alignment: .leading, spacing: 6) {
+        return VStack(alignment: .leading, spacing: DesignSpacing.s.pt) {
             HStack {
                 Label("Left", systemImage: "waveform").foregroundStyle(.orange)
                 Label("Right", systemImage: "waveform").foregroundStyle(.cyan)
                 Spacer()
                 Text("20 Hz – 20 kHz · modeled dB")
-                    .font(.caption.monospacedDigit())
+                    .font(DesignType.caption.font.monospacedDigit())
                     .foregroundStyle(.secondary)
             }
-            .font(.caption)
+            .font(DesignType.caption.font)
             Canvas { context, size in
                 let height = max(size.height, 1)
                 let width = max(size.width, 1)
@@ -643,8 +643,7 @@ struct ProductionHeadphoneWorkspace: View {
                 }
             }
             .accessibilityLabel("Estimated left and right electrical headphone EQ response")
-            .background(.secondary.opacity(0.055),
-                        in: RoundedRectangle(cornerRadius: 10))
+            .designTint(StatusLevel.off.color, opacity: 0.055)
         }
     }
 
@@ -653,13 +652,13 @@ struct ProductionHeadphoneWorkspace: View {
         correction: Binding<HeadphoneChannelCorrection>,
         accent: Color
     ) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: DesignSpacing.m.pt) {
             HStack {
                 Circle().fill(accent).frame(width: 9, height: 9)
                 Text(title).font(.subheadline.bold())
                 Spacer()
                 Text("\(correction.wrappedValue.eqBands.count)/16")
-                    .font(.caption.monospacedDigit())
+                    .font(DesignType.caption.font.monospacedDigit())
                     .foregroundStyle(.secondary)
                 Button {
                     guard correction.wrappedValue.eqBands.count
@@ -674,7 +673,7 @@ struct ProductionHeadphoneWorkspace: View {
                     correction.wrappedValue.eqBands.count
                         >= Int(N60_HEADPHONE_MAX_EQ_SECTIONS)
                 )
-                .buttonStyle(.bordered)
+                .buttonStyle(.glass)
             }
             ForEach(
                 correction.wrappedValue.eqBands.indices,
@@ -684,7 +683,7 @@ struct ProductionHeadphoneWorkspace: View {
             }
             if correction.wrappedValue.eqBands.isEmpty {
                 Text("No filters. Use Add to create a band.")
-                    .font(.caption)
+                    .font(DesignType.caption.font)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, minHeight: 65)
             }
@@ -711,7 +710,7 @@ struct ProductionHeadphoneWorkspace: View {
             }
         )
         let upper = min(20_000.0, previewSampleRate * 0.45)
-        return VStack(alignment: .leading, spacing: 8) {
+        return VStack(alignment: .leading, spacing: DesignSpacing.s.pt) {
             HStack {
                 Toggle("Band \(index + 1)", isOn: band.enabled)
                     .toggleStyle(.switch)
@@ -764,11 +763,10 @@ struct ProductionHeadphoneWorkspace: View {
                 Text(String(format: "%.2f", band.wrappedValue.q))
                     .frame(width: 52, alignment: .trailing)
             }
-            .font(.caption.monospacedDigit())
+            .font(DesignType.caption.font.monospacedDigit())
         }
-        .padding(10)
-        .background(.secondary.opacity(0.05),
-                    in: RoundedRectangle(cornerRadius: 12))
+        .padding(DesignSpacing.m.pt)
+        .designTint(StatusLevel.off.color, opacity: 0.05, radius: .medium)
     }
 
     private func importEQProposal(_ result: Result<[URL], Error>) {
@@ -804,9 +802,9 @@ struct ProductionHeadphoneWorkspace: View {
     }
 
     private var crossfeedCard: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: DesignSpacing.l.pt) {
             HStack {
-                Text("Acoustic Crossfeed").font(.headline)
+                Text("Acoustic Crossfeed").font(DesignType.sectionTitle.font)
                 Spacer()
                 Picker("Preset", selection: Binding(
                     get: { draft.crossfeed.preset },
@@ -831,15 +829,15 @@ struct ProductionHeadphoneWorkspace: View {
             Text(draft.spatialMode == .virtualSpeakers
                  ? "Crossfeed is automatically bypassed in Virtual Speakers mode because the HRTF/BRIR already supplies interaural timing and level cues."
                  : "Crossfeed affects only the low-frequency contralateral path and preserves direct high-frequency energy; it is not an HRTF renderer.")
-                .font(.caption)
+                .font(DesignType.caption.font)
                 .foregroundStyle(.secondary)
         }
-        .productionCard()
+        .designPanel()
     }
 
     private var spatialCard: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("Virtual Speakers").font(.headline)
+        VStack(alignment: .leading, spacing: DesignSpacing.l.pt) {
+            Text("Virtual Speakers").font(DesignType.sectionTitle.font)
 
             Picker("Program Layout", selection: $draft.programLayout) {
                 ForEach(OutputProgramLayout.allCases) { layout in
@@ -861,7 +859,7 @@ struct ProductionHeadphoneWorkspace: View {
             }
 
             HStack {
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
                     Text("HRTF / BRIR Profile").font(.subheadline.bold())
                     if let profile = draft.binauralProfile {
                         Text("\(profile.displayName) · \(profile.tapCount) taps · \(profile.sampleRate / 1_000, specifier: "%.1f") kHz")
@@ -905,7 +903,7 @@ struct ProductionHeadphoneWorkspace: View {
                 Text(
                     "User-rated HRTF preferences can be reviewed in Developer → Acoustic Research (turn on Show developer tools in Settings). Selection changes this draft only; Apply still requires a matching device rate and stopped playback."
                 )
-                .font(.caption)
+                .font(DesignType.caption.font)
                 .foregroundStyle(.secondary)
             }
             Divider()
@@ -914,7 +912,7 @@ struct ProductionHeadphoneWorkspace: View {
             Text(
                 "Import native AES69 .sofa files or the normalized JSON profile. SOFA/HDF5 decoding, coordinate conversion and receiver-delay baking occur only while importing, never on the audio callback."
             )
-            .font(.caption)
+            .font(DesignType.caption.font)
             .foregroundStyle(.secondary)
             if let profile = draft.binauralProfile {
                 let matching = selectedSampleRate.map {
@@ -926,26 +924,26 @@ struct ProductionHeadphoneWorkspace: View {
                         : "HRTF measured at \(Int(profile.sampleRate)) Hz. It will be converted to the output rate when processing starts; importing an HRTF at the output's native rate avoids the conversion.",
                     systemImage: matching ? "checkmark.shield" : "arrow.triangle.2.circlepath"
                 )
-                .font(.caption)
+                .font(DesignType.caption.font)
                 .foregroundStyle(Color.secondary)
             }
 
             if draft.programSourceDeviceUID == nil {
                 Text("Using the headphone endpoint as the program source. If it exposes only stereo, Virtual Speakers will render a stereo virtual pair. Select a multichannel decoded endpoint to preserve 5.1/7.1.4 channels.")
-                    .font(.caption)
-                    .foregroundStyle(.orange)
+                    .font(DesignType.caption.font)
+                    .foregroundStyle(StatusLevel.attention.color)
             }
         }
-        .productionCard()
+        .designPanel()
     }
 
     private var headTrackingControls: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: DesignSpacing.m.pt) {
             HStack {
-                VStack(alignment: .leading, spacing: 3) {
+                VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
                     Text("Head Tracking").font(.subheadline.bold())
                     Text("Keeps virtual speakers fixed in space using supported Apple headphone motion sensors. If motion is unavailable, static Virtual Speakers remains active by default.")
-                        .font(.caption)
+                        .font(DesignType.caption.font)
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
@@ -975,12 +973,12 @@ struct ProductionHeadphoneWorkspace: View {
                        channels: draft.programLayout.roles.count, sampleRate: reference.sampleRate,
                        tapCount: reference.tapCount, elevationData: reference.hasElevationSets ?? true) {
                     Text(note)
-                        .font(.caption)
-                        .foregroundStyle(.orange)
+                        .font(DesignType.caption.font)
+                        .foregroundStyle(StatusLevel.attention.color)
                 }
                 if let detail = engine.headTrackingRuntimeStatus.detail {
                     Text(detail)
-                        .font(.caption)
+                        .font(DesignType.caption.font)
                         .foregroundStyle(.secondary)
                         .textSelection(.enabled)
                 }
@@ -998,12 +996,12 @@ struct ProductionHeadphoneWorkspace: View {
     }
 
     private var deploymentCard: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: DesignSpacing.m.pt) {
             HStack {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("Deploy to Playback System").font(.headline)
+                VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
+                    Text("Deploy to Playback System").font(DesignType.sectionTitle.font)
                     Text("Changes require processing to be stopped because headphone and spatial runtimes are prepared before Core Audio callbacks start.")
-                        .font(.caption)
+                        .font(DesignType.caption.font)
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
@@ -1014,14 +1012,14 @@ struct ProductionHeadphoneWorkspace: View {
                     .disabled(!canApply)
             }
         }
-        .productionCard()
+        .designPanel()
     }
 
     private func channelControls(
         title: String,
         correction: Binding<HeadphoneChannelCorrection>
     ) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: DesignSpacing.m.pt) {
             Text(title).font(.subheadline.bold())
             HStack {
                 Text("Trim")
@@ -1146,13 +1144,3 @@ struct ProductionHeadphoneWorkspace: View {
     }
 }
 
-private extension View {
-    func productionCard() -> some View {
-        padding(20)
-            .background(.regularMaterial, in: .rect(cornerRadius: 22))
-            .overlay {
-                RoundedRectangle(cornerRadius: 22, style: .continuous)
-                    .stroke(.quaternary, lineWidth: 0.5)
-            }
-    }
-}

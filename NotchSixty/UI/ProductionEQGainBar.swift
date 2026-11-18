@@ -28,7 +28,7 @@ struct ProductionEQGainBar: View {
     }
 
     var body: some View {
-        HStack(alignment: .center, spacing: 12) {
+        HStack(alignment: .center, spacing: DesignSpacing.m.pt) {
             badgeView
 
             Spacer(minLength: 8)
@@ -42,8 +42,8 @@ struct ProductionEQGainBar: View {
                 )
                 .frame(maxWidth: 200)
                 .help("Your own input level. Auto preamp lowers the input by the EQ's predicted boost on top of it.")
-                Text(String(format: "Preamp %+.1f dB", engine.gainConfiguration.inputPreampDB))
-                    .font(.caption.monospacedDigit())
+                Text("Preamp " + DesignFormat.db(Double(engine.gainConfiguration.inputPreampDB), signed: true))
+                    .font(DesignType.caption.font.monospacedDigit())
                     .foregroundStyle(.secondary)
             } else {
                 ProductionGainStepper(
@@ -75,9 +75,9 @@ struct ProductionEQGainBar: View {
             .frame(maxWidth: 200)
             .help("Gain after all processing, before the output device.")
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(.quaternary.opacity(0.24), in: .rect(cornerRadius: 14))
+        .padding(.horizontal, DesignSpacing.m.pt)
+        .padding(.vertical, DesignSpacing.s.pt)
+        .designSurface(.medium)
         .task { await pollMeter() }
         .onAppear { autoPreamp.reconcile() }
     }
@@ -86,7 +86,7 @@ struct ProductionEQGainBar: View {
     private var termsView: some View {
         let text = Self.termsText(autoPreamp.preamp)
         return Text(text)
-            .font(.caption.monospacedDigit())
+            .font(DesignType.caption.font.monospacedDigit())
             .foregroundStyle(.secondary)
             .fixedSize()
             .help("The input preamp is the sum of your own level, the auto-preamp attenuation and the A/B loudness-match trim.")
@@ -101,19 +101,19 @@ struct ProductionEQGainBar: View {
 
     private var badgeView: some View {
         let appearance = Self.appearance(of: badge)
-        return VStack(alignment: .leading, spacing: 2) {
+        return VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
             Label(appearance.title, systemImage: appearance.symbol)
                 .font(.callout.bold())
                 .foregroundStyle(appearance.color)
             Text(appearance.detail + (autoPreamp.prediction.omitsFIRBands ? " Imported FIR bands are not included." : ""))
-                .font(.caption)
+                .font(DesignType.caption.font)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
+        .padding(.horizontal, DesignSpacing.m.pt)
+        .padding(.vertical, DesignSpacing.s.pt)
         .frame(maxWidth: 280, alignment: .leading)
-        .background(appearance.color.opacity(0.14), in: .rect(cornerRadius: 10))
+        .designTint(appearance.color)
         .help("A prediction from the filter math for a steady sine at full scale, not a bound on inter-sample peaks. The red state comes from the post-EQ meter.")
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Headroom: \(appearance.title). \(appearance.detail)")
@@ -135,14 +135,14 @@ struct ProductionEQGainBar: View {
                     ? String(format: "EQ boosts up to %+.1f dB; %.1f dB spare.", boost, margin)
                     : "The EQ does not boost.",
                 symbol: "checkmark.circle.fill",
-                color: .green
+                color: StatusLevel.good.color
             )
         case .uncovered(let boost, let shortfall):
             return Appearance(
                 title: "May clip",
                 detail: String(format: "EQ boosts up to %+.1f dB; lower the preamp by %.1f dB.", boost, shortfall),
                 symbol: "exclamationmark.triangle.fill",
-                color: .orange
+                color: StatusLevel.attention.color
             )
         case .uncoveredProtected(let boost, let shortfall, let protection):
             let hard = protection.hasLimiter
@@ -155,14 +155,14 @@ struct ProductionEQGainBar: View {
                     : String(format: "EQ boosts up to %+.1f dB; the %@ will reduce overs but cannot guarantee none. Lower the preamp by %.1f dB.",
                              boost, protection.primaryName, shortfall),
                 symbol: "exclamationmark.triangle.fill",
-                color: .orange
+                color: StatusLevel.attention.color
             )
         case .clipped:
             return Appearance(
                 title: "Clipping",
                 detail: "The post-EQ meter reached full scale in the last 2 seconds.",
                 symbol: "xmark.octagon.fill",
-                color: .red
+                color: StatusLevel.problem.color
             )
         }
     }
