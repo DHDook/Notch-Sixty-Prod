@@ -3131,6 +3131,11 @@ struct NotchSixtyApp: App {
                 .task { product.prepareForUse() }
         }
         .defaultSize(width: 1000, height: 760)
+
+        Window("Design Gallery", id: "design-gallery") {
+            DesignGalleryView()
+        }
+        .defaultSize(width: 1000, height: 780)
         #endif
     }
 }

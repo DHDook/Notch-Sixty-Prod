@@ -68,3 +68,25 @@ Counts from `git grep` over `NotchSixty/`:
 S0 changes no page: converting a card is the card component's job, and doing it site by site here would add a second
 set of hand-set values that S1 then replaces. The sites move when each page adopts the S1 components (S2, S3), with
 the flag choosing the new look.
+
+## Shared values and components (E34 S1)
+
+Code is in `NotchSixty/UI/Design/`. Every value exists twice: `DesignStyle.current` (today's most common value) and
+`DesignStyle.redesigned` (the new value). `DesignStyle.active` reads `e34.design-language`, so the flag switches the
+whole app at once; pages that adopt the parts change by a few points at most without the flag (decision 7).
+
+- **Shapes.** Three radii: small 8 (chips, fields), medium 12 / 14 (cards), large 18 / 22 (panels, sheets).
+- **Spacing.** One scale: 4, 8, 12, 16, 20 / 24. No other padding or spacing value is written by hand.
+- **Type.** Page title 22, section title 15, body 12 / 13 (text meant to be read), label 11 / 12, caption 11 (secondary
+  notes only). The minimum is 11 points; nothing smaller is used.
+- **Colour and status.** The accent is the user's macOS accent (no brand colour). Four status levels, each with a
+  colour, an icon and a word: good (green, checkmark), attention (orange, triangle), problem (red, octagon), off
+  (secondary, minus). Colour is never the only signal.
+- **Buttons.** `DesignButton` with three roles: primary (`.glassProminent`, one per page), secondary (`.glass`),
+  destructive (`.glass` tinted red, destructive role).
+- **Components.** `DesignCard` (content, plain background, no glass), `DesignPageHeader` (title, subtitle, status, main
+  action trailing), `DesignStatusBadge`, `DesignStateView` (empty, busy, stopped, failed), all taking a style.
+- **Value formats (`DesignFormat`).** A space before the unit; true minus sign (U+2212); no negative zero; `signed`
+  adds "+" for gains and offsets. dB one decimal ("-6.0 dB"); Hz whole below 1 kHz, then kHz with up to two decimals,
+  trailing zeros trimmed ("63 Hz", "1.25 kHz", "20 kHz"); ms one decimal; percent from a fraction, whole ("50 %").
+- **Gallery.** Debug builds only: Window > Design Gallery shows every component in every state at both styles.
