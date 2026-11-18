@@ -155,6 +155,12 @@ struct ProductionDynamicsView: View {
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
+                    if FeatureFlags().isEnabled(.eqPageEnhancements), let actsOn = engine.dynamicsActsOnText(for: module) {
+                        Text("Acts on: \(actsOn)")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                            .lineLimit(2)
+                    }
                 }
                 Spacer(minLength: 4)
                 if let source = module.gainReductionSource {

@@ -1069,7 +1069,7 @@ final class AudioIOEngine {
     var appliedStereoAlignment: StereoBassAlignment? { stereoAlignment }
     var appliedProgramFoldPlan: ProgramFoldDownPlan? { programFoldPlan }
     var nChannelTransportSession: CoreAudioNChannelTransportSession?
-    private var binauralHeadphoneTransportSession: CoreAudioBinauralHeadphoneTransportSession?
+    private(set) var binauralHeadphoneTransportSession: CoreAudioBinauralHeadphoneTransportSession?
     private var headTrackingController: SpatialHeadTrackingController?
     private var lifetimeArchivedCounters = AudioTransportCounters()
     private var processingSessionArchivedCounters = AudioTransportCounters()
