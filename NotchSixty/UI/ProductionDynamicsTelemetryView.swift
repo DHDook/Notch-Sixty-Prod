@@ -18,6 +18,7 @@ struct ProductionDynamicsTelemetryView: View {
 
     @State private var items: [ProductionDynamicsTelemetryItem] = []
     @State private var statusText: String?
+    @State private var attachment: UUID?
 
     var body: some View {
         GroupBox("Live Status") {
@@ -47,9 +48,18 @@ struct ProductionDynamicsTelemetryView: View {
             }
             .padding(.vertical, DesignSpacing.xs.pt)
         }
-        .task(id: kind) { await pollSelectedProcessor() }
-        .onAppear { GainReductionMonitor.shared(for: engine).attach() }
-        .onDisappear { GainReductionMonitor.shared(for: engine).detach() }
+        // E32 S3 (design 7): the text follows the monitor's frames (about 8 Hz while something moves, and on every
+        // rest or polling change); there is no third poll.
+        .onReceive(GainReductionMonitor.shared(for: engine).$textRevision) { _ in refresh() }
+        .onChange(of: kind) { _, _ in refresh() }
+        .onAppear {
+            refresh()
+            attachment = GainReductionMonitor.shared(for: engine).attach(hertz: GainReductionMonitor.rowHertz)
+        }
+        .onDisappear {
+            if let attachment { GainReductionMonitor.shared(for: engine).detach(attachment) }
+            attachment = nil
+        }
     }
 
     /// E28 S5: the gain-reduction panels for this stage (bar, 10 s history and, where a static law exists, the curve).
@@ -68,14 +78,6 @@ struct ProductionDynamicsTelemetryView: View {
                 (.multibandHigh, DynamicsTransferCurve(d.multibandCompressor, band: 2))]
             return FeatureFlags().isEnabled(.eqPageEnhancements) ? Array(all.prefix(d.multibandCompressor.bandCountValue)) : all
         default: return []
-        }
-    }
-
-    @MainActor
-    private func pollSelectedProcessor() async {
-        while !Task.isCancelled {
-            refresh()
-            try? await Task.sleep(nanoseconds: 125_000_000) // 8 Hz
         }
     }
 

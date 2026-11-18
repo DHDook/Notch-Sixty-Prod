@@ -85,33 +85,82 @@ final class GainReductionMonitor: ObservableObject {
 
     func spokenValue(_ source: GainReductionSource) -> String { spoken[source] ?? GainReductionHistory.spoken(0) }
 
-    /// Starts reading while at least one view needs it (the Dynamics page, a navigator row, the Meters page).
-    func attach() {
-        clients += 1
-        guard task == nil, let hub = provideHub() else { return }
-        token = hub.subscribe(hertz: 60)
-        task = Task { @MainActor [weak self] in
-            while !Task.isCancelled {
-                self?.step()
-                try? await Task.sleep(nanoseconds: 16_666_667)
+    /// Rate a view asks for (E32 S3, design 7): the Dynamics page bars and Meters > Dynamics 30 Hz, navigator rows 10 Hz.
+    static let pageHertz = 30.0
+    static let rowHertz = 10.0
+    /// How long the loop waits between looks while the hub is not polling (hidden window or audio stopped).
+    static let idleSleepNanoseconds: UInt64 = 250_000_000
+
+    /// True while nothing moves: every bar and hold is at rest and the 10 s history is empty, so the views may
+    /// pause their timelines. It flips immediately in `ingest`, which also bumps `textRevision`.
+    private(set) var isAtRest = true
+    private var clientRates: [UUID: Double] = [:]
+
+    var clientCount: Int { clientRates.count }
+
+    /// Starts reading while at least one view needs it (the Dynamics page, a navigator row, the Meters page). The
+    /// hub is subscribed at the fastest client's rate. Returns this client's token; `detach` releases only it.
+    @discardableResult
+    func attach(hertz: Double = GainReductionMonitor.pageHertz) -> UUID {
+        let id = UUID()
+        clientRates[id] = hertz
+        updateSubscription()
+        if task == nil, token != nil {
+            task = Task { @MainActor [weak self] in
+                while !Task.isCancelled {
+                    guard let self else { return }
+                    let worked = self.tick()
+                    let nanoseconds = worked
+                        ? UInt64(1_000_000_000.0 / max(self.requestedHertz, 1))
+                        : Self.idleSleepNanoseconds
+                    try? await Task.sleep(nanoseconds: nanoseconds)
+                }
             }
+        }
+        return id
+    }
+
+    func detach(_ id: UUID) {
+        guard clientRates.removeValue(forKey: id) != nil else { return }
+        if clientRates.isEmpty {
+            task?.cancel()
+            task = nil
+            if let token, let hub = provideHub() { hub.unsubscribe(token) }
+            token = nil
+        } else {
+            updateSubscription()
         }
     }
 
-    func detach() {
-        clients = max(0, clients - 1)
-        guard clients == 0 else { return }
-        task?.cancel()
-        task = nil
-        if let token, let hub = provideHub() { hub.unsubscribe(token) }
-        token = nil
+    private var requestedHertz: Double { clientRates.values.max() ?? Self.pageHertz }
+
+    private func updateSubscription() {
+        guard let hub = provideHub() else { return }
+        if let token {
+            hub.setHertz(token, requestedHertz)
+        } else if !clientRates.isEmpty {
+            token = hub.subscribe(hertz: requestedHertz)
+        }
     }
 
-    private func step() {
-        guard let hub = provideHub(), let token else { return }
-        guard hub.shouldPoll else { return }
+    /// One loop pass. Does no work (and returns false) while the hub is not polling.
+    @discardableResult
+    func tick() -> Bool {
+        let polling = provideHub().map { token != nil && $0.shouldPoll } ?? false
+        if polling != isPolling {
+            isPolling = polling
+            textRevision &+= 1
+        }
+        guard polling, let hub = provideHub(), let token else { return false }
         ingest(hub.take(token), now: clock())
+        return true
     }
+
+    /// Whether the last loop pass found the hub polling; false while the window is hidden or audio is stopped.
+    private(set) var isPolling = false
+
+    /// The views pause their timelines while nothing moves or nothing is being read.
+    var timelinesPaused: Bool { isAtRest || !isPolling }
 
     /// One tick: folds the hub's maxima since the last take into the histories.
     func ingest(_ readings: [String: MeterChannelReading], now: Double) {
@@ -123,7 +172,15 @@ final class GainReductionMonitor: ObservableObject {
             spoken[source] = throttle.offer(GainReductionHistory.spoken(history.maximum), latched: false, now: now)
             throttles[source] = throttle
         }
-        if now - lastTextBump >= 0.125 {
+        let atRest = GainReductionSource.allCases.allSatisfy { source in
+            let history = histories[source] ?? GainReductionHistory()
+            return history.maximum <= 0.05 && history.held(at: now) <= 0.05
+        }
+        let restChanged = atRest != isAtRest
+        isAtRest = atRest
+        // Text (and the telemetry chips that follow it) refresh at about 8 Hz while the hub polls; a rest change
+        // is published at once so paused timelines wake without waiting for the next text tick.
+        if restChanged || now - lastTextBump >= 0.125 {
             lastTextBump = now
             textRevision &+= 1
         }
@@ -133,5 +190,6 @@ final class GainReductionMonitor: ObservableObject {
         histories = [:]
         throttles = [:]
         spoken = [:]
+        isAtRest = true
     }
 }

@@ -1,13 +1,13 @@
 import Foundation
 
 /// E28 S5 (design 11): what the gain-reduction display remembers. A bar with a peak hold (1 s), and a ring of
-/// the last 10 s at 60 points a second (600 points). Plain Swift; time is passed in, so tests are deterministic.
+/// the last 10 s at 30 points a second (300 points; E32 S3 lowered the view rate from 60 to 30 Hz). Plain Swift; time is passed in, so tests are deterministic.
 ///
 /// Values are reduction in dB, 0 or more. The readback is a maximum since the previous read (the hub keeps
 /// the maximum per subscriber), so a short transient is never lost between frames.
 struct GainReductionHistory: Equatable, Sendable {
-    static let capacity = 600
-    static let pointsPerSecond = 60.0
+    static let pointsPerSecond = 30.0
+    static let capacity = 300
     static let holdSeconds = 1.0
 
     private(set) var points: [Float] = []
@@ -16,7 +16,7 @@ struct GainReductionHistory: Equatable, Sendable {
     private var holdSetAt: Double = -.infinity
     private var lastPointTime: Double = -.infinity
 
-    /// Records a reading taken at `time` (seconds, monotonic). Points are added at most 60 times a second, each the
+    /// Records a reading taken at `time` (seconds, monotonic). Points are added at most 30 times a second, each the
     /// largest reduction seen since the last point.
     mutating func ingest(_ reduction: Float, at time: Double) {
         let value = reduction.isFinite ? max(0, reduction) : 0

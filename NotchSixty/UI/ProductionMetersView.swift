@@ -1,7 +1,7 @@
 import Foundation
 import SwiftUI
 
-private enum ProductionMetersPage: String, CaseIterable, Identifiable {
+enum ProductionMetersPage: String, CaseIterable, Identifiable {
     case levels
     case spectrum
     case stereo
@@ -118,33 +118,68 @@ enum SpectrumPageMode: String, CaseIterable {
     }
 }
 
+/// E32 S3 (R19): the per-tick values of the Meters page. Every stored change tells observers once; only
+/// `MeterTickScope` observes it, so the page body is not re-evaluated per tick.
+@MainActor
+private final class MeterTickModel: ObservableObject {
+    var snapshot = ProductionMetersSnapshot() { didSet { objectWillChange.send() } }
+    var analysisSnapshot = ProductionAnalysisSnapshot.empty { didSet { objectWillChange.send() } }
+    var transportMeterSnapshot: ProductionTransportMeterSnapshot? { didSet { objectWillChange.send() } }
+    var routeMeters: [ProductionRouteMeter] = [] { didSet { objectWillChange.send() } }
+    var protectionReadings: [Int: UnifiedGraphOutputProtectionReading] = [:] { didSet { objectWillChange.send() } }
+    var transportDiagnostics: AudioDiagnosticsSnapshot? { didSet { objectWillChange.send() } }
+    var windowVisible = true { didSet { if windowVisible != oldValue { objectWillChange.send() } } }
+    var inputTruePeakHold = TruePeakMaxHold() { didSet { objectWillChange.send() } }
+    var outputTruePeakHold = TruePeakMaxHold() { didSet { objectWillChange.send() } }
+    var headroomStrip = HeadroomStripModel() { didSet { objectWillChange.send() } }
+    var inputOvers = InputOversReading() { didSet { objectWillChange.send() } }
+    let bank = MeterBankDisplay()
+}
+
+/// Re-evaluates its content when the tick model changes, and nothing else does.
+private struct MeterTickScope<Content: View>: View {
+    @ObservedObject var model: MeterTickModel
+    let content: () -> Content
+
+    init(model: MeterTickModel, @ViewBuilder content: @escaping () -> Content) {
+        self.model = model
+        self.content = content
+    }
+
+    var body: some View { content() }
+}
+
 struct ProductionMetersView: View {
     var engine: AudioIOEngine
     @ObservedObject var assistant: HeadroomAssistantController
     @State private var page: ProductionMetersPage = .levels
     @State private var assistantCommandError: String?
-    @State private var snapshot = ProductionMetersSnapshot()
-    @State private var analysisSnapshot = ProductionAnalysisSnapshot.empty
-    @State private var transportMeterSnapshot: ProductionTransportMeterSnapshot?
-    /// E28 S6: same-device speaker routes and E9 per-output protection from the hub's latest context.
-    @State private var routeMeters: [ProductionRouteMeter] = []
-    @State private var protectionReadings: [Int: UnifiedGraphOutputProtectionReading] = [:]
-    @State private var transportDiagnostics: AudioDiagnosticsSnapshot?
+    /// E32 S3 (R19, design 7): everything that changes per tick lives in `tick`, which only `MeterTickScope`
+    /// observes, so the page body (header, picker, cards that do not move) does not re-run at the poll rate.
+    @State private var tick = MeterTickModel()
     @AppStorage("meters.ballistics") private var ballisticsRaw = MeterBallistics.peak.rawValue
-    @State private var bank = MeterBankDisplay()
     @State private var meterRevision = 0
-    @State private var windowVisible = true
+    @State private var grAttachment: UUID?
     @AppStorage("meters.loudnessSource") private var loudnessSourceRaw = LoudnessSource.output.rawValue
-    @State private var inputTruePeakHold = TruePeakMaxHold()
-    @State private var outputTruePeakHold = TruePeakMaxHold()
     /// E33 S8 (behind `e33.page-enhancements`): analysis cards, headroom strip, dropout counter and RTA mode.
     private let enhanced = FeatureFlags().isEnabled(.eqPageEnhancements)
-    @State private var headroomStrip = HeadroomStripModel()
-    /// E33 S10: input overs from the core's detector, polled only while this page is visible (detect is published then).
-    @State private var inputOvers = InputOversReading()
     @ObservedObject private var history = ProductionMeterHub.eventHistory
     @State private var spectrumMode = SpectrumPageMode.spectrum
     @State private var spectrogramWindow = SpectrogramWindow.tenSeconds
+
+
+    private var snapshot: ProductionMetersSnapshot { get { tick.snapshot } nonmutating set { tick.snapshot = newValue } }
+    private var analysisSnapshot: ProductionAnalysisSnapshot { get { tick.analysisSnapshot } nonmutating set { tick.analysisSnapshot = newValue } }
+    private var transportMeterSnapshot: ProductionTransportMeterSnapshot? { get { tick.transportMeterSnapshot } nonmutating set { tick.transportMeterSnapshot = newValue } }
+    private var routeMeters: [ProductionRouteMeter] { get { tick.routeMeters } nonmutating set { tick.routeMeters = newValue } }
+    private var protectionReadings: [Int: UnifiedGraphOutputProtectionReading] { get { tick.protectionReadings } nonmutating set { tick.protectionReadings = newValue } }
+    private var transportDiagnostics: AudioDiagnosticsSnapshot? { get { tick.transportDiagnostics } nonmutating set { tick.transportDiagnostics = newValue } }
+    private var bank: MeterBankDisplay { tick.bank }
+    private var windowVisible: Bool { get { tick.windowVisible } nonmutating set { tick.windowVisible = newValue } }
+    private var inputTruePeakHold: TruePeakMaxHold { get { tick.inputTruePeakHold } nonmutating set { tick.inputTruePeakHold = newValue } }
+    private var outputTruePeakHold: TruePeakMaxHold { get { tick.outputTruePeakHold } nonmutating set { tick.outputTruePeakHold = newValue } }
+    private var headroomStrip: HeadroomStripModel { get { tick.headroomStrip } nonmutating set { tick.headroomStrip = newValue } }
+    private var inputOvers: InputOversReading { get { tick.inputOvers } nonmutating set { tick.inputOvers = newValue } }
 
     var body: some View {
         ScrollView {
@@ -152,6 +187,7 @@ struct ProductionMetersView: View {
                 header
                 pagePicker
 
+                MeterTickScope(model: tick) {
                 switch page {
                 case .levels:
                     levelsPage
@@ -191,6 +227,7 @@ struct ProductionMetersView: View {
                     dynamicsPage
                 case .transport:
                     transportPage
+                }
                 }
             }
             .padding(DesignSpacing.xl.pt)
@@ -315,12 +352,12 @@ struct ProductionMetersView: View {
             HStack(alignment: .top, spacing: DesignSpacing.l.pt) {
                 metricCard(
                     title: "Input True Peak",
-                    value: ProductionMeterMath.formattedDB(snapshot.inputTruePeakDBTP, suffix: "dBTP"),
+                    value: ProductionMeterMath.formattedDB(snapshot.inputTruePeakDBTP, suffix: peakSuffix),
                     detail: "Authoritative protection detector"
                 )
                 metricCard(
                     title: "Output True Peak",
-                    value: ProductionMeterMath.formattedDB(snapshot.outputTruePeakDBTP, suffix: "dBTP"),
+                    value: ProductionMeterMath.formattedDB(snapshot.outputTruePeakDBTP, suffix: peakSuffix),
                     detail: "Authoritative protection detector"
                 )
                 metricCard(
@@ -491,8 +528,11 @@ struct ProductionMetersView: View {
                 .foregroundStyle(.secondary)
 
             headroomAssistantCard
-                .onAppear { GainReductionMonitor.shared(for: engine).attach() }
-                .onDisappear { GainReductionMonitor.shared(for: engine).detach() }
+                .onAppear { grAttachment = GainReductionMonitor.shared(for: engine).attach(hertz: GainReductionMonitor.pageHertz) }
+                .onDisappear {
+                    if let grAttachment { GainReductionMonitor.shared(for: engine).detach(grAttachment) }
+                    grAttachment = nil
+                }
 
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 180), spacing: DesignSpacing.m.pt)], spacing: DesignSpacing.m.pt) {
                 grMetric("Compressor GR", .compressor, snapshot.compressorGainReductionDB)
@@ -769,9 +809,16 @@ struct ProductionMetersView: View {
         .designSurface(.medium)
     }
 
+    /// E32 R20 (design 9): "dBTP" only while the detector's rate times factor reaches 176.4 kHz; the label stays
+    /// "dBTP" when no render diagnostics exist (the detector's factor is then unknown).
+    private var peakSuffix: String {
+        guard let kernel = transportDiagnostics?.renderKernelDiagnostics else { return "dBTP" }
+        return PeakLabel.suffix(sampleRate: kernel.sampleRate, detectionFactor: Int(kernel.effectiveOversamplingFactor.rawValue))
+    }
+
     private func formatOptionalDBTP(_ value: Double?) -> String {
         guard let value, value.isFinite else { return "—" }
-        return String(format: "%.1f dBTP", value)
+        return String(format: "%.1f ", value) + peakSuffix
     }
 
     /// E28 S6: one routed DAC channel of a stereo same-device speaker map, drawn with the shared bar.
@@ -803,7 +850,7 @@ struct ProductionMetersView: View {
     private func truePeakBarCard(title: String, id: String, linear: Float, detail: String) -> some View {
         VStack(alignment: .leading, spacing: DesignSpacing.s.pt) {
             Text(title).font(DesignType.caption.font).foregroundStyle(.secondary)
-            Text(ProductionMeterMath.formattedDB(ProductionMeterMath.decibels(linear), suffix: "dBTP"))
+            Text(ProductionMeterMath.formattedDB(ProductionMeterMath.decibels(linear), suffix: peakSuffix))
                 .font(.system(.title3, design: .monospaced).weight(.semibold))
                 .monospacedDigit()
             MeterBarView(
@@ -1059,19 +1106,13 @@ struct ProductionMetersView: View {
         case .dynamics, .transport:
             analysisDemand = UInt32(N60_ANALYSIS_DEMAND_NONE)
         }
+        var analysisToken: UUID?
         if analysisDemand != 0, engine.lifecycleState == .running {
-            engine.setAnalysisDemand(analysisDemand)
+            analysisToken = Self.analysisDemandLedger(for: engine).acquire(analysisDemand)
         }
 
         let hub = ProductionMeterHub.shared(for: engine)
-        let hertz: Double
-        switch activePage {
-        case .levels, .stereo: hertz = 60
-        case .spectrum: hertz = 20
-        case .dynamics: hertz = 8
-        case .transport: hertz = 4
-        }
-        let token = hub.subscribe(hertz: hertz)
+        let token = hub.subscribe(hertz: MeterPollPolicy.hertz(for: activePage))
         bank.clearTick()
 
         defer {
@@ -1083,43 +1124,63 @@ struct ProductionMetersView: View {
             if let demandToken {
                 ProductionDetailedMeterDemand.release(demandToken, engine: engine)
             }
-            if analysisDemand != 0 {
-                engine.setAnalysisDemand(UInt32(N60_ANALYSIS_DEMAND_NONE))
+            if let analysisToken {
+                Self.analysisDemandLedger(for: engine).release(analysisToken)
             }
         }
 
         var lastRevisionBump = 0.0
+        var drewOnce = false
+        func work(now: Double) {
+            bank.ingest(hub.take(token), mode: ballistics, now: now)
+            refreshSnapshot(hub: hub)
+            if enhanced, activePage == .levels { pollInputOvers(now: Date()) }
+            if analysisDemand != 0, engine.lifecycleState == .running {
+                analysisSnapshot = engine.productionAnalysisSnapshot()
+            } else {
+                analysisSnapshot = .empty
+            }
+            if now - lastRevisionBump >= 0.5 {
+                lastRevisionBump = now
+                meterRevision &+= 1
+            }
+        }
+
         while !Task.isCancelled {
             let now = ProcessInfo.processInfo.systemUptime
-            windowVisible = hub.shouldPoll || engine.lifecycleState != .running
-            if windowVisible {
-                bank.ingest(hub.take(token), mode: ballistics, now: now)
-                refreshSnapshot(hub: hub)
-                if enhanced, activePage == .levels { pollInputOvers(now: Date()) }
-                if analysisDemand != 0, engine.lifecycleState == .running {
-                    analysisSnapshot = engine.productionAnalysisSnapshot()
-                } else {
-                    analysisSnapshot = .empty
-                }
-                if now - lastRevisionBump >= 0.5 {
-                    lastRevisionBump = now
-                    meterRevision &+= 1
-                }
-            }
-
+            let visible = hub.isWindowVisible
+            windowVisible = visible
+            let schedule = MeterPollPolicy.schedule(
+                windowVisible: visible, isRunning: engine.lifecycleState == .running, page: activePage)
             let interval: UInt64
-            switch activePage {
-            case .levels, .stereo:
-                interval = windowVisible ? 16_666_667 : 250_000_000
-            case .spectrum:
-                interval = 50_000_000
-            case .dynamics:
-                interval = 125_000_000
-            case .transport:
+            switch schedule {
+            case .idle:
+                drewOnce = false
                 interval = 250_000_000
+            case .once:
+                // Stopped and visible: one draw, then wait for a lifecycle change (the task id restarts the loop).
+                if !drewOnce {
+                    drewOnce = true
+                    work(now: now)
+                }
+                interval = 250_000_000
+            case .every(let hertz):
+                drewOnce = false
+                work(now: now)
+                interval = UInt64(1_000_000_000.0 / hertz)
             }
             try? await Task.sleep(nanoseconds: interval)
         }
+    }
+
+    private static var ledgers: [ObjectIdentifier: AnalysisDemandLedger] = [:]
+
+    private static func analysisDemandLedger(for engine: AudioIOEngine) -> AnalysisDemandLedger {
+        let key = ObjectIdentifier(engine)
+        if let ledger = ledgers[key] { return ledger }
+        let ledger = AnalysisDemandLedger { [weak engine] mask in engine?.setAnalysisDemand(mask) }
+        ledgers[key] = ledger
+        return ledger
     }
 
     @MainActor

@@ -100,7 +100,15 @@ struct MeterClipLatch: Equatable, Sendable {
 
     mutating func update(overRangeCount: UInt64?, truePeakDBTP: Double?) {
         if let overRangeCount {
-            if let last = lastOverRangeCount, overRangeCount > last { isLatched = true }
+            if let last = lastOverRangeCount {
+                if overRangeCount > last {
+                    isLatched = true
+                } else if overRangeCount < last, overRangeCount > 0 {
+                    // E32 R22 (design 10): a lower count is a counter reset (Stop/Start); re-baseline, and
+                    // clips counted since the reset still latch.
+                    isLatched = true
+                }
+            }
             lastOverRangeCount = overRangeCount
         }
         if let truePeakDBTP, truePeakDBTP > Self.truePeakThresholdDBTP { isLatched = true }
@@ -192,6 +200,12 @@ final class MeterReadbackHub<Context> {
 
     var subscriberCount: Int { subscribers.count }
 
+    /// The poll rate: the fastest subscriber (0 with none).
+    var currentHertz: Double { subscribers.values.map(\.hertz).max() ?? 0 }
+
+    /// Whether the meters window is on screen (not hidden or occluded), whatever the audio state.
+    var isWindowVisible: Bool { visibility?.metersAreVisible ?? false }
+
     var shouldPoll: Bool {
         !subscribers.isEmpty && (visibility?.metersAreVisible ?? false) && isProcessing()
     }
@@ -201,6 +215,11 @@ final class MeterReadbackHub<Context> {
         subscribers[token] = Subscriber(hertz: hertz)
         startPollingIfNeeded()
         return token
+    }
+
+    /// Changes one subscriber's rate (a monitor whose fastest client left).
+    func setHertz(_ token: Token, _ hertz: Double) {
+        subscribers[token]?.hertz = hertz
     }
 
     func unsubscribe(_ token: Token) {
@@ -238,7 +257,7 @@ final class MeterReadbackHub<Context> {
     }
 
     private var pollInterval: UInt64 {
-        let hertz = subscribers.values.map(\.hertz).max() ?? 8
+        let hertz = currentHertz > 0 ? currentHertz : 8
         return UInt64(1_000_000_000.0 / max(hertz, 1))
     }
 
@@ -256,5 +275,68 @@ final class MeterReadbackHub<Context> {
     private func stopPolling() {
         pollTask?.cancel()
         pollTask = nil
+    }
+}
+
+/// E32 S3 (R15, design 7): the one rule for how often a meter loop works. Hidden or occluded means idle whatever
+/// the audio state; visible with processing stopped draws once and waits for a lifecycle change (the page's task is
+/// keyed on it); visible and running polls at the page's rate.
+enum MeterPollPolicy {
+    enum Schedule: Equatable {
+        case idle
+        case once
+        case every(hertz: Double)
+    }
+
+    static func hertz(for page: ProductionMetersPage) -> Double {
+        switch page {
+        case .levels, .stereo: return 60
+        case .spectrum: return 20
+        case .dynamics: return 8
+        case .transport: return 4
+        }
+    }
+
+    static func schedule(windowVisible: Bool, isRunning: Bool, page: ProductionMetersPage) -> Schedule {
+        guard windowVisible else { return .idle }
+        guard isRunning else { return .once }
+        return .every(hertz: hertz(for: page))
+    }
+}
+
+/// E32 S3 (R20, design 9): "dBTP" only when the detector runs at 4x at 44.1 kHz or better, that is device rate
+/// times detection factor of at least 176.4 kHz (the usual BS.1770-4 practice); otherwise it is a sample-domain peak.
+enum PeakLabel {
+    static let minimumTruePeakRate = 176_400.0
+
+    static func suffix(sampleRate: Double, detectionFactor: Int) -> String {
+        sampleRate * Double(max(detectionFactor, 1)) >= minimumTruePeakRate - 1 ? "dBTP" : "dBFS peak"
+    }
+}
+
+/// E32 S3 (R21, design 7): the analysis demand mask held as one entry per page task. A page's teardown releases
+/// only its own entry, so an old task finishing after the next page's task started cannot clear the new demand.
+@MainActor
+final class AnalysisDemandLedger {
+    private var holders: [UUID: UInt32] = [:]
+    private let apply: (UInt32) -> Void
+
+    init(apply: @escaping (UInt32) -> Void) { self.apply = apply }
+
+    /// The union of every held mask (0 when none).
+    var effective: UInt32 { holders.values.reduce(0, |) }
+
+    /// Holds `mask` and publishes the union. Returns the token that releases it.
+    func acquire(_ mask: UInt32) -> UUID {
+        let token = UUID()
+        holders[token] = mask
+        apply(effective)
+        return token
+    }
+
+    /// Drops this token's mask and publishes what is left; an unknown token changes nothing.
+    func release(_ token: UUID) {
+        guard holders.removeValue(forKey: token) != nil else { return }
+        apply(effective)
     }
 }
