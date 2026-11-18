@@ -225,20 +225,20 @@ private struct AudioUnitEditorSheet: View {
     let onApply: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: DesignSpacing.l.pt) {
             HStack {
-                VStack(alignment: .leading, spacing: 3) {
+                VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
                     Text(session.descriptor.name)
-                        .font(.title2.bold())
+                        .font(DesignType.sectionTitle.font)
                     Text(
                         "\(session.descriptor.manufacturerName) · detached transactional editor"
                     )
-                    .font(.caption)
+                    .font(DesignType.caption.font)
                     .foregroundStyle(.secondary)
                 }
                 Spacer()
                 Text("Slot \(session.slotIndex + 1)")
-                    .font(.caption.monospacedDigit().bold())
+                    .font(DesignType.caption.font.monospacedDigit().bold())
                     .foregroundStyle(.secondary)
             }
 
@@ -261,7 +261,7 @@ private struct AudioUnitEditorSheet: View {
                     "Changes are isolated until Apply. Apply re-runs offline preparation before the live rack can change.",
                     systemImage: "shield.lefthalf.filled"
                 )
-                .font(.caption)
+                .font(DesignType.caption.font)
                 .foregroundStyle(.secondary)
 
                 Spacer()
@@ -276,7 +276,7 @@ private struct AudioUnitEditorSheet: View {
                     )
             }
         }
-        .padding(18)
+        .padding(DesignSpacing.l.pt)
         .task { await session.load() }
     }
 
@@ -284,7 +284,7 @@ private struct AudioUnitEditorSheet: View {
     private var editorContent: some View {
         switch session.loadState {
         case .loading:
-            VStack(spacing: 12) {
+            VStack(spacing: DesignSpacing.m.pt) {
                 ProgressView()
                 Text("Opening detached Audio Unit editor…")
                     .foregroundStyle(.secondary)
@@ -319,12 +319,12 @@ private struct AudioUnitEditorSheet: View {
 
     private var genericParameterEditor: some View {
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: 14) {
+            LazyVStack(alignment: .leading, spacing: DesignSpacing.l.pt) {
                 ForEach(
                     session.parameters,
                     id: \.address
                 ) { parameter in
-                    VStack(alignment: .leading, spacing: 6) {
+                    VStack(alignment: .leading, spacing: DesignSpacing.s.pt) {
                         HStack {
                             Text(parameter.displayName)
                                 .font(.subheadline.weight(.semibold))
@@ -335,7 +335,7 @@ private struct AudioUnitEditorSheet: View {
                                     Double(parameter.value)
                                 )
                             )
-                            .font(.caption.monospacedDigit())
+                            .font(DesignType.caption.font.monospacedDigit())
                             .foregroundStyle(.secondary)
                         }
 
@@ -358,10 +358,10 @@ private struct AudioUnitEditorSheet: View {
                             )
                         }
                     }
-                    .padding(.vertical, 4)
+                    .padding(.vertical, DesignSpacing.xs.pt)
                 }
             }
-            .padding(.horizontal, 4)
+            .padding(.horizontal, DesignSpacing.xs.pt)
         }
     }
 }
@@ -427,9 +427,9 @@ private struct PluginRackSlotRow: View {
     }
 
     var body: some View {
-        HStack(alignment: .center, spacing: 12) {
+        HStack(alignment: .center, spacing: DesignSpacing.m.pt) {
             Text("\(index + 1)")
-                .font(.caption.monospacedDigit().bold())
+                .font(DesignType.caption.font.monospacedDigit().bold())
                 .foregroundStyle(.secondary)
                 .frame(width: 22)
 
@@ -453,8 +453,8 @@ private struct PluginRackSlotRow: View {
                     .foregroundStyle(.secondary)
                     .frame(width: 22)
 
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack(spacing: 7) {
+                VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
+                    HStack(spacing: DesignSpacing.s.pt) {
                         Text(slot.displayName ?? "Audio Unit")
                             .font(.subheadline.weight(.semibold))
 
@@ -477,19 +477,19 @@ private struct PluginRackSlotRow: View {
 
                     if let manufacturer = slot.manufacturerName {
                         Text(manufacturer)
-                            .font(.caption)
+                            .font(DesignType.caption.font)
                             .foregroundStyle(.secondary)
                     }
 
                     if let quarantineEntry {
                         Text(quarantineEntry.lastFailureDescription)
-                            .font(.caption2)
-                            .foregroundStyle(.orange)
+                            .font(DesignType.caption.font)
+                            .foregroundStyle(StatusLevel.attention.color)
                             .lineLimit(2)
                     } else if let rateNote {
                         Text(rateNote)
-                            .font(.caption2)
-                            .foregroundStyle(.orange)
+                            .font(DesignType.caption.font)
+                            .foregroundStyle(StatusLevel.attention.color)
                             .lineLimit(2)
                     }
                 }
@@ -497,10 +497,10 @@ private struct PluginRackSlotRow: View {
 
                 Spacer(minLength: 10)
 
-                VStack(alignment: .trailing, spacing: 6) {
-                    HStack(spacing: 7) {
+                VStack(alignment: .trailing, spacing: DesignSpacing.s.pt) {
+                    HStack(spacing: DesignSpacing.s.pt) {
                         Text("Mix")
-                            .font(.caption)
+                            .font(DesignType.caption.font)
                             .foregroundStyle(.secondary)
 
                         Slider(
@@ -518,11 +518,11 @@ private struct PluginRackSlotRow: View {
                         Text(
                             "\(Int((wetDryMix * 100).rounded()))%"
                         )
-                        .font(.caption.monospacedDigit())
+                        .font(DesignType.caption.font.monospacedDigit())
                         .frame(width: 38, alignment: .trailing)
                     }
 
-                    HStack(spacing: 6) {
+                    HStack(spacing: DesignSpacing.s.pt) {
                         Toggle(
                             "Bypass",
                             isOn: Binding(
@@ -573,20 +573,17 @@ private struct PluginRackSlotRow: View {
                             Image(systemName: "trash")
                         }
                         .buttonStyle(.glass)
-                        .foregroundStyle(.red)
+                        .foregroundStyle(StatusLevel.problem.color)
                         .help("Remove plug-in")
                         .disabled(isBusy)
                     }
                 }
             }
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
+        .padding(.horizontal, DesignSpacing.l.pt)
+        .padding(.vertical, DesignSpacing.m.pt)
         .frame(minHeight: 64)
-        .background(
-            .quaternary.opacity(0.14),
-            in: .rect(cornerRadius: 12)
-        )
+        .designSurface(.medium)
         .onChange(of: slot.wetDryMix) { _, newValue in
             wetDryMix = newValue
         }
@@ -596,30 +593,30 @@ private struct PluginRackSlotRow: View {
     private var statusBadge: some View {
         if quarantineEntry != nil {
             Text("QUARANTINED")
-                .font(.caption2.bold())
-                .foregroundStyle(.orange)
-                .padding(.horizontal, 7)
-                .padding(.vertical, 3)
+                .font(DesignType.caption.font.bold())
+                .foregroundStyle(StatusLevel.attention.color)
+                .padding(.horizontal, DesignSpacing.s.pt)
+                .padding(.vertical, DesignSpacing.xs.pt)
                 .background(
-                    Color.orange.opacity(0.12),
+                    StatusLevel.attention.color.opacity(0.12),
                     in: .capsule
                 )
         } else if report != nil {
             Text(slot.bypassed ? "PREPARED · BYPASSED" : "PREPARED")
-                .font(.caption2.bold())
+                .font(DesignType.caption.font.bold())
                 .foregroundStyle(.secondary)
-                .padding(.horizontal, 7)
-                .padding(.vertical, 3)
+                .padding(.horizontal, DesignSpacing.s.pt)
+                .padding(.vertical, DesignSpacing.xs.pt)
                 .background(
                     Color.primary.opacity(0.07),
                     in: .capsule
                 )
         } else {
             Text(slot.bypassed ? "BYPASSED" : "NEEDS PREP")
-                .font(.caption2.bold())
+                .font(DesignType.caption.font.bold())
                 .foregroundStyle(.secondary)
-                .padding(.horizontal, 7)
-                .padding(.vertical, 3)
+                .padding(.horizontal, DesignSpacing.s.pt)
+                .padding(.vertical, DesignSpacing.xs.pt)
                 .background(
                     Color.primary.opacity(0.07),
                     in: .capsule
@@ -632,10 +629,10 @@ private struct PluginRackSlotRow: View {
         systemImage: String
     ) -> some View {
         Label(text, systemImage: systemImage)
-            .font(.caption2.monospacedDigit())
+            .font(DesignType.caption.font.monospacedDigit())
             .foregroundStyle(.secondary)
-            .padding(.horizontal, 7)
-            .padding(.vertical, 3)
+            .padding(.horizontal, DesignSpacing.s.pt)
+            .padding(.vertical, DesignSpacing.xs.pt)
             .background(
                 Color.primary.opacity(0.06),
                 in: .capsule
@@ -814,7 +811,7 @@ struct ProductionPluginWorkspace: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 22) {
+            VStack(alignment: .leading, spacing: DesignSpacing.xl.pt) {
                 header
                 signalChainCard
                 scanCard
@@ -822,7 +819,7 @@ struct ProductionPluginWorkspace: View {
                 catalogCard
                 safetyCard
             }
-            .padding(28)
+            .padding(DesignSpacing.xl.pt)
             .frame(
                 maxWidth: 1_100,
                 alignment: .topLeading
@@ -889,7 +886,7 @@ struct ProductionPluginWorkspace: View {
 
     private var header: some View {
         HStack(alignment: .firstTextBaseline) {
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: DesignSpacing.s.pt) {
                 Text(
                     "Transactional Audio Unit hosting, live rack controls, and Content Preset state."
                 )
@@ -897,24 +894,21 @@ struct ProductionPluginWorkspace: View {
             }
             Spacer()
             Text("LIVE RACK")
-                .font(.caption.bold())
+                .font(DesignType.caption.font.bold())
                 .tracking(1.3)
                 .foregroundStyle(.secondary)
-                .padding(.horizontal, 11)
-                .padding(.vertical, 7)
-                .glassEffect(
-                    .regular,
-                    in: .capsule
-                )
+                .padding(.horizontal, DesignSpacing.m.pt)
+                .padding(.vertical, DesignSpacing.s.pt)
+                .designSurface(.small)
         }
     }
 
     private var signalChainCard: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: DesignSpacing.m.pt) {
             Text("Signal-chain position")
-                .font(.headline)
+                .font(DesignType.sectionTitle.font)
 
-            HStack(spacing: 10) {
+            HStack(spacing: DesignSpacing.m.pt) {
                 chainNode("Playback DSP")
                 Image(systemName: "arrow.right")
                     .foregroundStyle(.tertiary)
@@ -930,26 +924,23 @@ struct ProductionPluginWorkspace: View {
             Text(
                 "The rack is Playback/content state. Every edit is prepared off realtime and crosses PR82's commit barrier before saved or live rack state changes."
             )
-            .font(.caption)
+            .font(DesignType.caption.font)
             .foregroundStyle(.secondary)
         }
-        .padding(18)
-        .glassEffect(
-            .regular,
-            in: .rect(cornerRadius: 18)
-        )
+        .padding(DesignSpacing.l.pt)
+        .designSurface(.large)
     }
 
     private var scanCard: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: DesignSpacing.l.pt) {
             HStack {
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
                     Text("Installed Audio Units")
-                        .font(.headline)
+                        .font(DesignType.sectionTitle.font)
                     Text(
                         "\(processingFormat.channelCount)-channel symmetric rack · \(processingFormat.sampleRate / 1_000, specifier: "%.1f") kHz"
                     )
-                    .font(.caption.monospacedDigit())
+                    .font(DesignType.caption.font.monospacedDigit())
                     .foregroundStyle(.secondary)
                 }
 
@@ -972,7 +963,7 @@ struct ProductionPluginWorkspace: View {
                 .disabled(mutationInFlight || host.scanInFlight)
             }
 
-            HStack(spacing: 24) {
+            HStack(spacing: DesignSpacing.xl.pt) {
                 scanMetric(
                     "Discovered",
                     "\(host.discoveredComponents.count)"
@@ -1002,7 +993,7 @@ struct ProductionPluginWorkspace: View {
                 Text(
                     "Last scan: \(date.formatted(date: .omitted, time: .standard))"
                 )
-                .font(.caption)
+                .font(DesignType.caption.font)
                 .foregroundStyle(.tertiary)
             }
 
@@ -1011,7 +1002,7 @@ struct ProductionPluginWorkspace: View {
                     lastMutationSummary,
                     systemImage: "checkmark.circle"
                 )
-                .font(.caption)
+                .font(DesignType.caption.font)
                 .foregroundStyle(.secondary)
             }
 
@@ -1020,28 +1011,25 @@ struct ProductionPluginWorkspace: View {
                     error,
                     systemImage: "exclamationmark.triangle.fill"
                 )
-                .font(.caption)
-                .foregroundStyle(.orange)
+                .font(DesignType.caption.font)
+                .foregroundStyle(StatusLevel.attention.color)
                 .textSelection(.enabled)
             }
         }
-        .padding(18)
-        .glassEffect(
-            .regular,
-            in: .rect(cornerRadius: 18)
-        )
+        .padding(DesignSpacing.l.pt)
+        .designSurface(.large)
     }
 
     private var rackCard: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: DesignSpacing.l.pt) {
             HStack {
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
                     Text("Playback Plug-in Rack")
-                        .font(.headline)
+                        .font(DesignType.sectionTitle.font)
                     Text(
                         "Order, bypass, wet/dry, opaque state, and plug-in identity follow the selected Content Preset."
                     )
-                    .font(.caption)
+                    .font(DesignType.caption.font)
                     .foregroundStyle(.secondary)
                 }
 
@@ -1050,7 +1038,7 @@ struct ProductionPluginWorkspace: View {
                 Text(
                     "\(host.rackConfiguration.occupiedSlotCount)/\(host.rackConfiguration.slots.count) occupied"
                 )
-                .font(.caption.monospacedDigit())
+                .font(DesignType.caption.font.monospacedDigit())
                 .foregroundStyle(.secondary)
             }
 
@@ -1162,15 +1150,12 @@ struct ProductionPluginWorkspace: View {
                 Text(
                     "Up to \(AudioUnitRackConfiguration.maximumSlotCount) slots · edits are transactional"
                 )
-                .font(.caption)
+                .font(DesignType.caption.font)
                 .foregroundStyle(.tertiary)
             }
         }
-        .padding(18)
-        .glassEffect(
-            .regular,
-            in: .rect(cornerRadius: 18)
-        )
+        .padding(DesignSpacing.l.pt)
+        .designSurface(.large)
     }
 
     @ViewBuilder
@@ -1187,21 +1172,18 @@ struct ProductionPluginWorkspace: View {
                 maxWidth: .infinity,
                 minHeight: 220
             )
-            .padding(12)
-            .glassEffect(
-                .regular,
-                in: .rect(cornerRadius: 18)
-            )
+            .padding(DesignSpacing.m.pt)
+            .designSurface(.large)
         } else {
-            VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: DesignSpacing.m.pt) {
                 HStack {
                     Text("Compatibility Catalog")
-                        .font(.headline)
+                        .font(DesignType.sectionTitle.font)
                     Spacer()
                     Text(
                         "\(compatibleCount) compatible with the current rack format"
                     )
-                    .font(.caption)
+                    .font(DesignType.caption.font)
                     .foregroundStyle(.secondary)
                 }
 
@@ -1222,22 +1204,19 @@ struct ProductionPluginWorkspace: View {
                         Text(
                             "Use Add Plug-in to search and filter the complete catalog."
                         )
-                        .font(.caption)
+                        .font(DesignType.caption.font)
                         .foregroundStyle(.tertiary)
                     }
                 }
             }
-            .padding(18)
-            .glassEffect(
-                .regular,
-                in: .rect(cornerRadius: 18)
-            )
+            .padding(DesignSpacing.l.pt)
+            .designSurface(.large)
         }
     }
 
     private var safetyCard: some View {
         Label {
-            VStack(alignment: .leading, spacing: 5) {
+            VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
                 Text(
                     "Detached editors, bounded transitions, deterministic protection"
                 )
@@ -1245,35 +1224,32 @@ struct ProductionPluginWorkspace: View {
                 Text(
                     "Vendor UI edits happen on a detached Audio Unit copy. Apply serializes its state, re-runs offline preparation, and only then publishes a new live generation. Removal and bypass use the bounded PR82 transition rather than additive full-tail mixing, so correlated or nonlinear tails cannot consume unbounded headroom before the final protection stage."
                 )
-                .font(.caption)
+                .font(DesignType.caption.font)
                 .foregroundStyle(.secondary)
             }
         } icon: {
             Image(systemName: "lock.shield")
         }
-        .padding(16)
+        .padding(DesignSpacing.l.pt)
         .frame(
             maxWidth: .infinity,
             alignment: .leading
         )
-        .background(
-            .quaternary.opacity(0.16),
-            in: .rect(cornerRadius: 14)
-        )
+        .designSurface(.medium)
     }
 
     private func addPluginSheet(
         _ target: PluginAddTarget
     ) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: DesignSpacing.l.pt) {
             HStack {
-                VStack(alignment: .leading, spacing: 3) {
+                VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
                     Text(target.title)
-                        .font(.title2.bold())
+                        .font(DesignType.sectionTitle.font)
                     Text(
                         "\(processingFormat.channelCount)-channel · \(processingFormat.sampleRate / 1_000, specifier: "%.1f") kHz"
                     )
-                    .font(.caption.monospacedDigit())
+                    .font(DesignType.caption.font.monospacedDigit())
                     .foregroundStyle(.secondary)
                 }
                 Spacer()
@@ -1283,7 +1259,7 @@ struct ProductionPluginWorkspace: View {
                 .disabled(mutationInFlight)
             }
 
-            HStack(spacing: 10) {
+            HStack(spacing: DesignSpacing.m.pt) {
                 TextField(
                     "Search plug-ins or manufacturers",
                     text: $catalogSearch
@@ -1344,7 +1320,7 @@ struct ProductionPluginWorkspace: View {
                 .frame(minHeight: 360)
             }
         }
-        .padding(18)
+        .padding(DesignSpacing.l.pt)
         .frame(
             minWidth: 760,
             idealWidth: 860,
@@ -1365,7 +1341,7 @@ struct ProductionPluginWorkspace: View {
         let quarantineEntry =
             host.quarantine.entry(for: component.identity)
 
-        return HStack(alignment: .top, spacing: 12) {
+        return HStack(alignment: .top, spacing: DesignSpacing.m.pt) {
             Image(
                 systemName:
                     compatibility.compatible
@@ -1375,22 +1351,22 @@ struct ProductionPluginWorkspace: View {
             .foregroundStyle(
                 compatibility.compatible
                     ? Color.primary.opacity(0.62)
-                    : Color.orange
+                    : StatusLevel.attention.color
             )
             .frame(width: 22)
 
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: 8) {
+            VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
+                HStack(spacing: DesignSpacing.s.pt) {
                     Text(component.name)
                         .font(.subheadline.weight(.semibold))
                     Text(component.versionString)
-                        .font(.caption.monospacedDigit())
+                        .font(DesignType.caption.font.monospacedDigit())
                         .foregroundStyle(.tertiary)
                 }
                 Text(
                     "\(component.manufacturerName) · \(component.typeName)"
                 )
-                .font(.caption)
+                .font(DesignType.caption.font)
                 .foregroundStyle(.secondary)
 
                 if !compatibility.compatible {
@@ -1399,7 +1375,7 @@ struct ProductionPluginWorkspace: View {
                             separator: " "
                         )
                     )
-                    .font(.caption)
+                    .font(DesignType.caption.font)
                     .foregroundStyle(.secondary)
                 }
 
@@ -1407,17 +1383,17 @@ struct ProductionPluginWorkspace: View {
                     Text(
                         quarantineEntry.lastFailureDescription
                     )
-                    .font(.caption2)
-                    .foregroundStyle(.orange)
+                    .font(DesignType.caption.font)
+                    .foregroundStyle(StatusLevel.attention.color)
                 }
             }
 
             Spacer()
 
-            VStack(alignment: .trailing, spacing: 7) {
-                HStack(spacing: 6) {
+            VStack(alignment: .trailing, spacing: DesignSpacing.s.pt) {
+                HStack(spacing: DesignSpacing.s.pt) {
                     Text(lifecycleLabel(lifecycle))
-                        .font(.caption.bold())
+                        .font(DesignType.caption.font.bold())
                         .foregroundStyle(.secondary)
 
                     if component.hasCustomView {
@@ -1425,12 +1401,12 @@ struct ProductionPluginWorkspace: View {
                             "Vendor UI",
                             systemImage: "macwindow"
                         )
-                        .font(.caption2)
+                        .font(DesignType.caption.font)
                         .foregroundStyle(.tertiary)
                     }
                 }
 
-                HStack(spacing: 7) {
+                HStack(spacing: DesignSpacing.s.pt) {
                     if quarantineEntry != nil {
                         Button("Clear Quarantine") {
                             host.clearQuarantine(
@@ -1458,7 +1434,7 @@ struct ProductionPluginWorkspace: View {
                 }
             }
         }
-        .padding(.vertical, 10)
+        .padding(.vertical, DesignSpacing.m.pt)
     }
 
     private func componentRow(
@@ -1473,7 +1449,7 @@ struct ProductionPluginWorkspace: View {
 
         return HStack(
             alignment: .top,
-            spacing: 12
+            spacing: DesignSpacing.m.pt
         ) {
             Image(
                 systemName:
@@ -1484,25 +1460,25 @@ struct ProductionPluginWorkspace: View {
             .foregroundStyle(
                 compatibility.compatible
                     ? Color.primary.opacity(0.62)
-                    : Color.orange
+                    : StatusLevel.attention.color
             )
             .frame(width: 22)
 
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: 8) {
+            VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
+                HStack(spacing: DesignSpacing.s.pt) {
                     Text(component.name)
                         .font(.subheadline.weight(.semibold))
                     Text(component.versionString)
-                        .font(.caption.monospacedDigit())
+                        .font(DesignType.caption.font.monospacedDigit())
                         .foregroundStyle(.tertiary)
                 }
                 Text(
                     "\(component.manufacturerName) · \(component.typeName)"
                 )
-                .font(.caption)
+                .font(DesignType.caption.font)
                 .foregroundStyle(.secondary)
                 Text(component.identity.fourCCSummary)
-                    .font(.caption2.monospaced())
+                    .font(DesignType.caption.font.monospaced())
                     .foregroundStyle(.tertiary)
 
                 if !compatibility.compatible {
@@ -1511,28 +1487,28 @@ struct ProductionPluginWorkspace: View {
                             separator: " "
                         )
                     )
-                    .font(.caption)
+                    .font(DesignType.caption.font)
                     .foregroundStyle(.secondary)
                 }
             }
 
             Spacer()
 
-            VStack(alignment: .trailing, spacing: 4) {
+            VStack(alignment: .trailing, spacing: DesignSpacing.xs.pt) {
                 Text(lifecycleLabel(lifecycle))
-                    .font(.caption.bold())
+                    .font(DesignType.caption.font.bold())
                     .foregroundStyle(.secondary)
                 if component.hasCustomView {
                     Label(
                         "Vendor UI",
                         systemImage: "macwindow"
                     )
-                    .font(.caption2)
+                    .font(DesignType.caption.font)
                     .foregroundStyle(.tertiary)
                 }
             }
         }
-        .padding(.vertical, 7)
+        .padding(.vertical, DesignSpacing.s.pt)
     }
 
     private var removalTitle: String {
@@ -1685,12 +1661,12 @@ struct ProductionPluginWorkspace: View {
         _ title: String,
         _ value: String
     ) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
+        VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
             Text(title)
-                .font(.caption)
+                .font(DesignType.caption.font)
                 .foregroundStyle(.secondary)
             Text(value)
-                .font(.title3.weight(.semibold))
+                .font(DesignType.sectionTitle.font)
                 .monospacedDigit()
         }
     }
@@ -1716,10 +1692,10 @@ struct ProductionPluginWorkspace: View {
         _ title: String
     ) -> some View {
         Text(title)
-            .font(.caption.weight(.semibold))
+            .font(DesignType.caption.font.weight(.semibold))
             .foregroundStyle(.primary)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 8)
+            .padding(.horizontal, DesignSpacing.m.pt)
+            .padding(.vertical, DesignSpacing.s.pt)
             .background(
                 Color.primary.opacity(0.10),
                 in: .capsule

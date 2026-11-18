@@ -118,9 +118,9 @@ struct MeterBarView: View {
     ]
 
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: DesignSpacing.s.pt) {
             Text(channel.label)
-                .font(.caption.bold())
+                .font(DesignType.caption.font.bold())
                 .frame(width: 34, alignment: .leading)
             TimelineView(.animation(paused: paused)) { _ in
                 Canvas { context, size in draw(context: &context, size: size) }
@@ -130,11 +130,11 @@ struct MeterBarView: View {
                 onReset()
             } label: {
                 Text(channel.isClipped ? "CLIP" : "OK")
-                    .font(.caption2.bold().monospaced())
-                    .padding(.horizontal, 5)
-                    .padding(.vertical, 2)
+                    .font(DesignType.caption.font.bold().monospaced())
+                    .padding(.horizontal, DesignSpacing.xs.pt)
+                    .padding(.vertical, DesignSpacing.xs.pt)
                     .overlay(
-                        RoundedRectangle(cornerRadius: 4)
+                        RoundedRectangle(cornerRadius: DesignRadius.small.pt)
                             .stroke(.primary, lineWidth: channel.isClipped ? 2 : 0.5)
                     )
             }

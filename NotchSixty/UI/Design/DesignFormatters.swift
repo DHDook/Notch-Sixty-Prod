@@ -33,6 +33,11 @@ enum DesignFormat {
         return text + " kHz"
     }
 
+    /// A level with any unit, one decimal: "-6.0 dBFS", "-1.0 dBTP", "-23.0 LUFS".
+    static func level(_ value: Double, unit: String, signed: Bool = false) -> String {
+        number(value, decimals: 1, signed: signed) + " " + unit
+    }
+
     /// Milliseconds, one decimal: "12.5 ms".
     static func ms(_ value: Double, signed: Bool = false) -> String {
         number(value, decimals: 1, signed: signed) + " ms"

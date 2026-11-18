@@ -5,7 +5,7 @@ import SwiftUI
 enum AnalysisMeterText {
     static func decibels(_ value: Double?, suffix: String = "dB") -> String {
         guard let value, value.isFinite else { return "—" }
-        return String(format: "%.1f %@", value, suffix)
+        return DesignFormat.level(value, unit: suffix)
     }
 
     static func balance(_ value: Double?) -> String {
@@ -40,16 +40,16 @@ enum AnalysisMeterText {
 }
 
 private func meterTile(_ title: String, _ value: String, id: String) -> some View {
-    VStack(alignment: .leading, spacing: 4) {
-        Text(title).font(.caption).foregroundStyle(.secondary)
+    VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
+        Text(title).font(DesignType.caption.font).foregroundStyle(.secondary)
         Text(value)
             .font(.system(.title3, design: .monospaced).weight(.semibold))
             .monospacedDigit()
             .accessibilityIdentifier(id)
     }
-    .padding(12)
+    .padding(DesignSpacing.m.pt)
     .frame(maxWidth: .infinity, alignment: .topLeading)
-    .background(.quaternary.opacity(0.22), in: .rect(cornerRadius: 14))
+    .designSurface(.medium)
     .accessibilityElement(children: .combine)
 }
 
@@ -60,17 +60,17 @@ struct ProductionAnalysisMetersCard: View {
     let onReset: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: DesignSpacing.m.pt) {
             HStack(alignment: .firstTextBaseline) {
-                Text("Dynamics and Balance").font(.title3.bold())
+                Text("Dynamics and Balance").font(DesignType.sectionTitle.font)
                 Spacer()
                 Button("Reset", action: onReset)
                     .accessibilityIdentifier("meters.analysis.reset")
             }
             if !isRunning {
-                Text("Start processing to measure.").font(.caption).foregroundStyle(.secondary)
+                Text("Start processing to measure.").font(DesignType.caption.font).foregroundStyle(.secondary)
             } else {
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 12)], spacing: 12) {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: DesignSpacing.m.pt)], spacing: DesignSpacing.m.pt) {
                     meterTile("PLR", AnalysisMeterText.decibels(readout?.plr), id: "meters.analysis.plr")
                     meterTile("PSR", AnalysisMeterText.decibels(readout?.psr), id: "meters.analysis.psr")
                     meterTile("Crest (300 ms)", AnalysisMeterText.decibels(readout?.crestDB), id: "meters.analysis.crest")
@@ -78,7 +78,7 @@ struct ProductionAnalysisMetersCard: View {
                               id: "meters.analysis.truePeak")
                     meterTile("Balance", AnalysisMeterText.balance(readout?.balanceDB), id: "meters.analysis.balance")
                 }
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 12)], spacing: 12) {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: DesignSpacing.m.pt)], spacing: DesignSpacing.m.pt) {
                     ForEach(0..<3, id: \.self) { band in
                         meterTile(
                             "Correlation, \(AnalysisMeterText.bandTitles[band])",
@@ -86,12 +86,12 @@ struct ProductionAnalysisMetersCard: View {
                             id: "meters.analysis.correlation.\(band)")
                     }
                 }
-                Text(AnalysisMeterText.plrNote).font(.caption).foregroundStyle(.secondary)
-                Text(AnalysisMeterText.correlationNote).font(.caption).foregroundStyle(.secondary)
+                Text(AnalysisMeterText.plrNote).font(DesignType.caption.font).foregroundStyle(.secondary)
+                Text(AnalysisMeterText.correlationNote).font(DesignType.caption.font).foregroundStyle(.secondary)
             }
         }
-        .padding(16)
-        .background(.quaternary.opacity(0.14), in: .rect(cornerRadius: 18))
+        .padding(DesignSpacing.l.pt)
+        .designSurface(.large)
     }
 }
 
@@ -103,29 +103,29 @@ struct ProductionHeadroomStripCard: View {
     let onReset: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: DesignSpacing.m.pt) {
             HStack(alignment: .firstTextBaseline) {
-                Text("Headroom").font(.title3.bold())
+                Text("Headroom").font(DesignType.sectionTitle.font)
                 Spacer()
                 Button("Reset Hold", action: onReset).accessibilityIdentifier("meters.headroom.reset")
             }
             if !isAvailable {
-                Text("The headroom strip is shown for stereo sessions.").font(.caption).foregroundStyle(.secondary)
+                Text("The headroom strip is shown for stereo sessions.").font(DesignType.caption.font).foregroundStyle(.secondary)
             } else if !isRunning {
-                Text("Start processing to measure.").font(.caption).foregroundStyle(.secondary)
+                Text("Start processing to measure.").font(DesignType.caption.font).foregroundStyle(.secondary)
             } else {
-                HStack(alignment: .top, spacing: 12) {
+                HStack(alignment: .top, spacing: DesignSpacing.m.pt) {
                     ForEach(strip.points, id: \.id) { point in
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text(point.title).font(.caption).foregroundStyle(.secondary)
+                        VStack(alignment: .leading, spacing: DesignSpacing.s.pt) {
+                            Text(point.title).font(DesignType.caption.font).foregroundStyle(.secondary)
                             ProgressView(value: min(max((point.holdDBFS + 60) / 60, 0), 1))
-                                .tint(point.holdDBFS > -3 ? .red : (point.holdDBFS > -6 ? .orange : .blue))
+                                .tint(point.holdDBFS > -3 ? StatusLevel.problem.color : (point.holdDBFS > -6 ? StatusLevel.attention.color : .blue))
                             Text(point.holdDBFS <= HeadroomStripModel.floorDB
                                  ? "—" : String(format: "%.1f dBFS", point.holdDBFS))
                                 .font(.system(.body, design: .monospaced)).monospacedDigit()
                             Text(point.holdDBFS <= HeadroomStripModel.floorDB
                                  ? "" : String(format: "%.1f dB headroom", point.headroomDB))
-                                .font(.caption2).foregroundStyle(.tertiary)
+                                .font(DesignType.caption.font).foregroundStyle(.tertiary)
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .accessibilityElement(children: .combine)
@@ -133,11 +133,11 @@ struct ProductionHeadroomStripCard: View {
                     }
                 }
                 Text("Peak hold of the stereo meter points since the last reset. The post-dynamics point is not measured yet.")
-                    .font(.caption).foregroundStyle(.secondary)
+                    .font(DesignType.caption.font).foregroundStyle(.secondary)
             }
         }
-        .padding(16)
-        .background(.quaternary.opacity(0.14), in: .rect(cornerRadius: 18))
+        .padding(DesignSpacing.l.pt)
+        .designSurface(.large)
     }
 }
 
@@ -147,21 +147,21 @@ struct ProductionDropoutCard: View {
     let onReset: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: DesignSpacing.m.pt) {
             HStack(alignment: .firstTextBaseline) {
-                Text("Dropouts").font(.title3.bold())
+                Text("Dropouts").font(DesignType.sectionTitle.font)
                 Spacer()
                 Button("Reset", action: onReset).accessibilityIdentifier("meters.dropouts.reset")
             }
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 12)], spacing: 12) {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: DesignSpacing.m.pt)], spacing: DesignSpacing.m.pt) {
                 meterTile("Events", "\(counter.events)", id: "meters.dropouts.events")
                 meterTile("Frames", "\(counter.frames)", id: "meters.dropouts.frames")
                 meterTile("Last", AnalysisMeterText.lastEvent(counter.lastEvent, now: Date()), id: "meters.dropouts.last")
             }
-            Text(AnalysisMeterText.dropoutNote).font(.caption).foregroundStyle(.secondary)
+            Text(AnalysisMeterText.dropoutNote).font(DesignType.caption.font).foregroundStyle(.secondary)
         }
-        .padding(16)
-        .background(.quaternary.opacity(0.14), in: .rect(cornerRadius: 18))
+        .padding(DesignSpacing.l.pt)
+        .designSurface(.large)
     }
 }
 
@@ -172,14 +172,14 @@ struct ProductionInputOversCard: View {
     let onReset: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: DesignSpacing.m.pt) {
             HStack(alignment: .firstTextBaseline) {
-                Text(reading.title).font(.title3.bold())
+                Text(reading.title).font(DesignType.sectionTitle.font)
                 Spacer()
                 Button("Reset", action: onReset).accessibilityIdentifier("meters.inputOvers.reset")
             }
             if isRunning, !reading.counts.isEmpty {
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 120), spacing: 12)], spacing: 12) {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 120), spacing: DesignSpacing.m.pt)], spacing: DesignSpacing.m.pt) {
                     meterTile("Total", "\(reading.total)", id: "meters.inputOvers.total")
                     ForEach(Array(reading.perLane.prefix(8).enumerated()), id: \.offset) { lane, count in
                         meterTile("Lane \(lane + 1)", "\(count)", id: "meters.inputOvers.lane\(lane + 1)")
@@ -188,10 +188,10 @@ struct ProductionInputOversCard: View {
             } else {
                 Text("Start processing to count input overs.").font(.callout).foregroundStyle(.secondary)
             }
-            Text(reading.note).font(.caption).foregroundStyle(.secondary)
+            Text(reading.note).font(DesignType.caption.font).foregroundStyle(.secondary)
         }
-        .padding(16)
-        .background(.quaternary.opacity(0.14), in: .rect(cornerRadius: 18))
+        .padding(DesignSpacing.l.pt)
+        .designSurface(.large)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("meters.inputOvers")
     }
@@ -205,8 +205,8 @@ struct ProductionRTABarsView: View {
     private let marks = [20, 100, 1_000, 10_000]
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Third-octave RTA").font(.title2.bold())
+        VStack(alignment: .leading, spacing: DesignSpacing.m.pt) {
+            Text("Third-octave RTA").font(DesignType.sectionTitle.font)
             if !isRunning {
                 Text("Start processing to view the RTA.").foregroundStyle(.secondary)
             } else if levelsDB.count != RTABandMap.bandCount {
@@ -224,8 +224,8 @@ struct ProductionRTABarsView: View {
                 }
             }
             .frame(minHeight: 280)
-            .padding(14)
-            .background(.quaternary.opacity(0.20), in: .rect(cornerRadius: 20))
+            .padding(DesignSpacing.l.pt)
+            .designSurface(.large)
             .accessibilityElement()
             .accessibilityLabel("Third-octave analyser")
             .accessibilityValue(accessibilitySummary)
@@ -233,8 +233,8 @@ struct ProductionRTABarsView: View {
             HStack {
                 ForEach(marks, id: \.self) { Text($0 >= 1_000 ? "\($0 / 1_000) kHz" : "\($0) Hz") ; Spacer() }
             }
-            .font(.caption2).foregroundStyle(.secondary)
-            Text(AnalysisMeterText.rtaNote).font(.caption).foregroundStyle(.secondary)
+            .font(DesignType.caption.font).foregroundStyle(.secondary)
+            Text(AnalysisMeterText.rtaNote).font(DesignType.caption.font).foregroundStyle(.secondary)
         }
     }
 
@@ -258,9 +258,9 @@ struct ProductionEventHistoryCard: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: DesignSpacing.m.pt) {
             HStack(alignment: .firstTextBaseline) {
-                Text("History").font(.title3.bold())
+                Text("History").font(DesignType.sectionTitle.font)
                 Spacer()
                 Picker("Session", selection: $showPrevious) {
                     Text("This session").tag(false)
@@ -278,7 +278,7 @@ struct ProductionEventHistoryCard: View {
                 Text(showPrevious ? "No events were kept from the previous session." : "No events this session.")
                     .foregroundStyle(.secondary)
             } else {
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
                     ForEach(shown) { event in
                         let text = event.summary(timeText: SessionEventText.time(event.time))
                         Text(text).font(.callout.monospacedDigit())
@@ -289,9 +289,9 @@ struct ProductionEventHistoryCard: View {
                 .accessibilityIdentifier("meters.history.list")
             }
             Text("Events are noted while the meters are polling, kept for this session and the previous one, and never store audio.")
-                .font(.caption).foregroundStyle(.secondary)
+                .font(DesignType.caption.font).foregroundStyle(.secondary)
         }
-        .padding(16)
-        .background(.quaternary.opacity(0.14), in: .rect(cornerRadius: 18))
+        .padding(DesignSpacing.l.pt)
+        .designSurface(.large)
     }
 }

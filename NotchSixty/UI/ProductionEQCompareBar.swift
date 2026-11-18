@@ -9,8 +9,8 @@ struct ProductionEQCompareBar: View {
     let perform: (() throws -> Void) -> Void
 
     var body: some View {
-        HStack(spacing: 12) {
-            Text("COMPARE").font(.caption2.bold()).tracking(1.2).foregroundStyle(.secondary)
+        HStack(spacing: DesignSpacing.m.pt) {
+            Text("COMPARE").font(DesignType.caption.font.bold()).tracking(1.2).foregroundStyle(.secondary)
 
             Picker("EQ slot", selection: Binding(
                 get: { comparison.activeSlot },
@@ -49,8 +49,8 @@ struct ProductionEQCompareBar: View {
             .help("Trims the louder slot by the K-weighted pink-noise power difference")
 
             if comparison.matchTrimDB < -0.05 {
-                Text(String(format: "%.1f dB", comparison.matchTrimDB))
-                    .font(.caption.monospacedDigit())
+                Text(DesignFormat.db(comparison.matchTrimDB))
+                    .font(DesignType.caption.font.monospacedDigit())
                     .foregroundStyle(.secondary)
             }
 
@@ -58,17 +58,17 @@ struct ProductionEQCompareBar: View {
 
             listenButton
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .glassEffect(.regular, in: .rect(cornerRadius: 14))
+        .padding(.horizontal, DesignSpacing.m.pt)
+        .padding(.vertical, DesignSpacing.s.pt)
+        .designSurface(.medium)
     }
 
     /// Press and hold to hear only the selected band's region; release ends it.
     private var listenButton: some View {
         Label(audition.active == nil ? "Listen" : "Listening", systemImage: "ear")
             .font(.body)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 5)
+            .padding(.horizontal, DesignSpacing.m.pt)
+            .padding(.vertical, DesignSpacing.xs.pt)
             .background(audition.active == nil ? Color.secondary.opacity(0.15) : Color.accentColor.opacity(0.35), in: Capsule())
             .opacity(selectedBand == nil ? 0.4 : 1)
             .gesture(

@@ -168,7 +168,7 @@ struct ProductionEqualizerView: View {
     }
 
     private var pageContent: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: DesignSpacing.s.pt) {
             header
             ProductionActionErrorBanner(message: $actionError)
             if inactiveBandCount > 0 {
@@ -176,8 +176,8 @@ struct ProductionEqualizerView: View {
                     "\(inactiveBandCount) band\(inactiveBandCount == 1 ? "" : "s") sit above Nyquist (\(sampleRate / 2_000, specifier: "%.1f") kHz) at this device rate and are skipped. They are kept and play again at a higher rate.",
                     systemImage: "exclamationmark.triangle"
                 )
-                .font(.caption)
-                .foregroundStyle(.orange)
+                .font(DesignType.caption.font)
+                .foregroundStyle(StatusLevel.attention.color)
                 .accessibilityIdentifier("eq.nyquist.note")
             }
             modeBar
@@ -196,7 +196,7 @@ struct ProductionEqualizerView: View {
             if enhanced {
                 enhancedBandArea
             } else {
-                HStack(alignment: .top, spacing: 12) {
+                HStack(alignment: .top, spacing: DesignSpacing.m.pt) {
                     bandsPanel
                         .frame(minWidth: 260, maxWidth: .infinity)
                     bandEditorPane
@@ -205,8 +205,8 @@ struct ProductionEqualizerView: View {
                 .frame(height: 250)
             }
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 8)
+        .padding(.horizontal, DesignSpacing.l.pt)
+        .padding(.vertical, DesignSpacing.s.pt)
         .onGeometryChange(for: Double.self) { $0.size.width } action: { pageWidth = $0 }
         .modifier(EQClipboardCommandsModifier(enabled: enhanced, commands: transferCommands))
     }
@@ -216,7 +216,7 @@ struct ProductionEqualizerView: View {
     @ViewBuilder
     private var enhancedBandArea: some View {
         let columns = EQEditorLayout.columns(pageWidth: pageWidth)
-        HStack(alignment: .top, spacing: 12) {
+        HStack(alignment: .top, spacing: DesignSpacing.m.pt) {
             bandsPanel
                 .frame(width: EQEditorLayout.listWidth(pageWidth: pageWidth))
                 .frame(height: EQEditorLayout.listHeight(bandCount: bands.count))
@@ -234,7 +234,7 @@ struct ProductionEqualizerView: View {
             }
             Spacer()
             Text("\(activeBandCount) ACTIVE")
-                .font(.caption.bold())
+                .font(DesignType.caption.font.bold())
                 .tracking(1.1)
                 .foregroundStyle(.secondary)
         }
@@ -244,15 +244,15 @@ struct ProductionEqualizerView: View {
     private var inactiveBandCount: Int { configuration.aboveNyquistBandCount(sampleRate: sampleRate) }
 
     private var modeBar: some View {
-        GlassEffectContainer(spacing: 10) {
-            HStack(alignment: .bottom, spacing: 16) {
-                VStack(alignment: .leading, spacing: 6) {
+        GlassEffectContainer(spacing: DesignSpacing.m.pt) {
+            HStack(alignment: .bottom, spacing: DesignSpacing.l.pt) {
+                VStack(alignment: .leading, spacing: DesignSpacing.s.pt) {
                     Text("CHANNELS")
-                        .font(.caption2.bold())
+                        .font(DesignType.caption.font.bold())
                         .tracking(1.2)
                         .foregroundStyle(.secondary)
 
-                    HStack(spacing: 8) {
+                    HStack(spacing: DesignSpacing.s.pt) {
                         Picker("Channels", selection: Binding(
                             get: { configuration.channelMode },
                             set: { mode in recorded { try engine.setEQChannelMode(mode) } }
@@ -278,15 +278,15 @@ struct ProductionEqualizerView: View {
 
                     if let note = engine.unpairedEQLaneNote {
                         Text(note)
-                            .font(.caption)
+                            .font(DesignType.caption.font)
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
 
-                VStack(alignment: .leading, spacing: 6) {
+                VStack(alignment: .leading, spacing: DesignSpacing.s.pt) {
                     Text("PHASE")
-                        .font(.caption2.bold())
+                        .font(DesignType.caption.font.bold())
                         .tracking(1.2)
                         .foregroundStyle(.secondary)
 
@@ -317,19 +317,19 @@ struct ProductionEqualizerView: View {
                 .fixedSize(horizontal: true, vertical: false)
                 .layoutPriority(1)
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .glassEffect(.regular, in: .rect(cornerRadius: 16))
+            .padding(.horizontal, DesignSpacing.m.pt)
+            .padding(.vertical, DesignSpacing.s.pt)
+            .designSurface(.medium)
         }
     }
 
     private var responseGraph: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: DesignSpacing.s.pt) {
             HStack {
-                Text("RESPONSE").font(.caption.bold()).tracking(1.5).foregroundStyle(.secondary)
+                Text("RESPONSE").font(DesignType.caption.font.bold()).tracking(1.5).foregroundStyle(.secondary)
                 Spacer()
                 Text("\(configuration.phaseMode.displayName) · \(activeLaneLabel) · \(sampleRate / 1_000, specifier: "%.1f") kHz")
-                    .font(.caption.monospacedDigit())
+                    .font(DesignType.caption.font.monospacedDigit())
                     .foregroundStyle(.secondary)
             }
 
@@ -387,26 +387,26 @@ struct ProductionEqualizerView: View {
             .frame(minHeight: 200, idealHeight: 280, maxHeight: 340)
 
             if enhanced && gestureHintVisible && graphView == .magnitude {
-                HStack(spacing: 6) {
+                HStack(spacing: DesignSpacing.s.pt) {
                     Image(systemName: "hand.point.up.left")
                     Text(EQHandleAccessibility.hintText)
                     Button("Got it") { dismissGestureHint() }
                         .buttonStyle(.link)
                         .accessibilityIdentifier("eq.graph.hint.dismiss")
                 }
-                .font(.caption)
+                .font(DesignType.caption.font)
                 .foregroundStyle(.secondary)
                 .accessibilityIdentifier("eq.graph.hint")
             }
 
             if let note = graphView == .magnitude ? nil : series?.note {
                 Label(note, systemImage: "info.circle")
-                    .font(.caption)
+                    .font(DesignType.caption.font)
                     .foregroundStyle(.secondary)
             }
             if graphView != .magnitude {
                 Text("Bands are edited on the Magnitude view or in the Bands list.")
-                    .font(.caption)
+                    .font(DesignType.caption.font)
                     .foregroundStyle(.secondary)
             }
 
@@ -415,16 +415,16 @@ struct ProductionEqualizerView: View {
                     "Per-band FIR processing remains active, but imported FIR magnitude is intentionally omitted from this first live curve rather than approximated inaccurately.",
                     systemImage: "info.circle"
                 )
-                .font(.caption)
+                .font(DesignType.caption.font)
                 .foregroundStyle(.secondary)
             }
         }
-        .padding(12)
-        .background(.quaternary.opacity(0.24), in: .rect(cornerRadius: 16))
+        .padding(DesignSpacing.m.pt)
+        .designSurface(.medium)
     }
 
     private var graphControls: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: DesignSpacing.m.pt) {
             Picker("View", selection: $graphView) {
                 ForEach(EQGraphView.allCases) { view in Text(view.displayName).tag(view) }
             }
@@ -482,9 +482,9 @@ struct ProductionEqualizerView: View {
     // MARK: Bands panel
 
     private var bandsPanel: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: DesignSpacing.m.pt) {
             bandsPanelHeader
-                .padding(.horizontal, 6)
+                .padding(.horizontal, DesignSpacing.s.pt)
 
             if bands.isEmpty {
                 ContentUnavailableView {
@@ -500,14 +500,14 @@ struct ProductionEqualizerView: View {
             } else {
                 ScrollViewReader { proxy in
                     ScrollView {
-                        LazyVStack(spacing: 4) {
+                        LazyVStack(spacing: DesignSpacing.xs.pt) {
                             ForEach(Array(bands.enumerated()), id: \.element.id) { index, band in
                                 bandRow(index: index, band: band)
                                     .id(band.id)
                             }
                         }
-                        .padding(.horizontal, 2)
-                        .padding(.bottom, 6)
+                        .padding(.horizontal, DesignSpacing.xs.pt)
+                        .padding(.bottom, DesignSpacing.s.pt)
                     }
                     .onChange(of: selectedBandID) { _, id in
                         guard let id else { return }
@@ -519,16 +519,16 @@ struct ProductionEqualizerView: View {
                 }
             }
         }
-        .padding(12)
+        .padding(DesignSpacing.m.pt)
         .frame(maxHeight: .infinity, alignment: .top)
-        .background(.quaternary.opacity(0.20), in: .rect(cornerRadius: 20))
+        .designSurface(.large)
     }
 
     private var bandsPanelHeader: some View {
-        HStack(spacing: 6) {
-            Text("Bands").font(.headline)
+        HStack(spacing: DesignSpacing.s.pt) {
+            Text("Bands").font(DesignType.sectionTitle.font)
             Text(EQBandPanelModel.countText(count: bands.count, maximum: EQConfiguration.maximumBandCount))
-                .font(.caption.monospacedDigit())
+                .font(DesignType.caption.font.monospacedDigit())
                 .foregroundStyle(.secondary)
             Spacer(minLength: 4)
             if enhanced {
@@ -577,9 +577,9 @@ struct ProductionEqualizerView: View {
             Button {
                 selectedBandID = band.id
             } label: {
-                HStack(spacing: 8) {
+                HStack(spacing: DesignSpacing.s.pt) {
                     Text("\(index + 1)")
-                        .font(.caption.bold().monospacedDigit())
+                        .font(DesignType.caption.font.bold().monospacedDigit())
                         .foregroundStyle(isSelected ? Color.white : Color.primary)
                         .frame(width: 22, height: 22)
                         .background(
@@ -587,27 +587,27 @@ struct ProductionEqualizerView: View {
                             in: .circle
                         )
                     Text(band.type.displayName)
-                        .font(.caption.bold())
+                        .font(DesignType.caption.font.bold())
                         .lineLimit(1)
                     if band.dynamic.enabled {
                         Text("DYN")
-                            .font(.system(size: 8, weight: .bold))
-                            .padding(.horizontal, 4).padding(.vertical, 2)
-                            .background(Color.orange.opacity(0.28), in: .capsule)
+                            .font(DesignType.caption.font)
+                            .padding(.horizontal, DesignSpacing.xs.pt).padding(.vertical, DesignSpacing.xs.pt)
+                            .background(StatusLevel.attention.color.opacity(0.28), in: .capsule)
                     }
                     Spacer(minLength: 4)
                     Text(EQBandPanelModel.frequencyText(band.frequencyHz))
-                        .font(.caption.monospacedDigit())
+                        .font(DesignType.caption.font.monospacedDigit())
                     Text(EQBandPanelModel.gainText(band.gainDB))
-                        .font(.caption.monospacedDigit())
+                        .font(DesignType.caption.font.monospacedDigit())
                         .foregroundStyle(.secondary)
                         .frame(minWidth: 52, alignment: .trailing)
                     Circle()
-                        .fill(!band.enabled ? Color.secondary.opacity(0.35) : (nyquistLimit == nil ? Color.green : Color.orange))
+                        .fill(!band.enabled ? Color.secondary.opacity(0.35) : (nyquistLimit == nil ? StatusLevel.good.color : StatusLevel.attention.color))
                         .frame(width: 7, height: 7)
                 }
                 .frame(minHeight: 34)
-                .padding(.horizontal, 8)
+                .padding(.horizontal, DesignSpacing.s.pt)
                 .contentShape(Rectangle())
                 .opacity(band.enabled ? 1 : 0.55)
             }
@@ -617,24 +617,24 @@ struct ProductionEqualizerView: View {
             .accessibilityIdentifier("eq.bands.row.\(index + 1)")
             if let nyquistLimit {
                 Text(EQBandRules.nyquistText(limitHz: nyquistLimit))
-                    .font(.caption2)
-                    .foregroundStyle(.orange)
+                    .font(DesignType.caption.font)
+                    .foregroundStyle(StatusLevel.attention.color)
                     .padding(.horizontal, 38)
-                    .padding(.bottom, 4)
+                    .padding(.bottom, DesignSpacing.xs.pt)
                     .accessibilityIdentifier("eq.bands.row.\(index + 1).nyquist")
             }
             if enhanced, let note = EQSubsonicNote.note(for: band) {
                 Text(note)
-                    .font(.caption2)
+                    .font(DesignType.caption.font)
                     .foregroundStyle(.secondary)
                     .padding(.horizontal, 38)
-                    .padding(.bottom, 4)
+                    .padding(.bottom, DesignSpacing.xs.pt)
                     .accessibilityIdentifier("eq.bands.row.\(index + 1).subsonic")
             }
         }
         .background(
             isSelected ? Color.accentColor.opacity(0.14) : Color.clear,
-            in: .rect(cornerRadius: 12)
+            in: .rect(cornerRadius: DesignRadius.medium.pt)
         )
     }
 
@@ -653,9 +653,9 @@ struct ProductionEqualizerView: View {
                let binding = selectedBandBinding(for: id) {
                 let band = binding.wrappedValue
                 if enhanced && columns == .two {
-                    VStack(alignment: .leading, spacing: 12) {
+                    VStack(alignment: .leading, spacing: DesignSpacing.m.pt) {
                         editorHeader(number: index + 1, band: band, binding: binding)
-                        HStack(alignment: .top, spacing: 18) {
+                        HStack(alignment: .top, spacing: DesignSpacing.l.pt) {
                             staticControls(band: band, binding: binding)
                                 .frame(maxWidth: .infinity, alignment: .topLeading)
                             Divider()
@@ -663,17 +663,17 @@ struct ProductionEqualizerView: View {
                                 .frame(maxWidth: .infinity, alignment: .topLeading)
                         }
                     }
-                    .padding(14)
+                    .padding(DesignSpacing.l.pt)
                     .accessibilityIdentifier("eq.bands.editor.twoColumn")
                 } else {
                     ScrollView {
-                        VStack(alignment: .leading, spacing: 16) {
+                        VStack(alignment: .leading, spacing: DesignSpacing.l.pt) {
                             editorHeader(number: index + 1, band: band, binding: binding)
                             staticControls(band: band, binding: binding)
                             Divider()
                             dynamicColumn(band: band, binding: binding)
                         }
-                        .padding(14)
+                        .padding(DesignSpacing.l.pt)
                     }
                 }
             } else {
@@ -681,12 +681,12 @@ struct ProductionEqualizerView: View {
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
-                    .padding(16)
+                    .padding(DesignSpacing.l.pt)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
         .frame(maxHeight: enhanced && columns == .two ? nil : .infinity)
-        .background(.quaternary.opacity(0.20), in: .rect(cornerRadius: 20))
+        .designSurface(.large)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("eq.bands.editor")
     }
@@ -697,7 +697,7 @@ struct ProductionEqualizerView: View {
             dynamicControls(band: band, binding: binding)
         } else {
             Label("Dynamic EQ is unavailable for this filter type.", systemImage: "bolt.slash")
-                .font(.caption)
+                .font(DesignType.caption.font)
                 .foregroundStyle(.secondary)
         }
     }
@@ -706,8 +706,8 @@ struct ProductionEqualizerView: View {
         // The switch sits beside the section title it controls, as in
         // System Settings, so its position alone reads as on or off.
         HStack {
-            Text("Band \(number)").font(.headline)
-            Text(band.type.displayName).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            Text("Band \(number)").font(DesignType.sectionTitle.font)
+            Text(band.type.displayName).font(DesignType.caption.font).foregroundStyle(.secondary).lineLimit(1)
             Spacer(minLength: 4)
             Toggle("Band", isOn: binding.enabled)
                 .labelsHidden()
@@ -726,7 +726,7 @@ struct ProductionEqualizerView: View {
 
     @ViewBuilder
     private func staticControls(band: EQBand, binding: Binding<EQBand>) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: DesignSpacing.l.pt) {
             LabeledContent("Filter") {
                 Picker("Filter", selection: binding.type) {
                     if enhanced {
@@ -744,7 +744,7 @@ struct ProductionEqualizerView: View {
             }
 
             LabeledContent("Frequency") {
-                HStack(spacing: 6) {
+                HStack(spacing: DesignSpacing.s.pt) {
                     EQNumberField(
                         title: "Frequency",
                         field: .frequency,
@@ -762,7 +762,7 @@ struct ProductionEqualizerView: View {
             }
 
             LabeledContent("Gain") {
-                HStack(spacing: 6) {
+                HStack(spacing: DesignSpacing.s.pt) {
                     EQNumberField(
                         title: "Gain",
                         field: .gain,
@@ -791,7 +791,7 @@ struct ProductionEqualizerView: View {
                 }
                 .disabled(!band.type.productionHasQControl)
             } label: {
-                HStack(spacing: 5) {
+                HStack(spacing: DesignSpacing.xs.pt) {
                     Text("Q")
                     if let reference {
                         ProductionReferenceHelpButton(
@@ -822,7 +822,7 @@ struct ProductionEqualizerView: View {
 
             if band.type == .linkwitzTransform {
                 LabeledContent("Target Frequency") {
-                    HStack(spacing: 6) {
+                    HStack(spacing: DesignSpacing.s.pt) {
                         EQNumberField(
                             title: "Target Frequency",
                             field: .linkwitzTargetFrequency,
@@ -852,15 +852,15 @@ struct ProductionEqualizerView: View {
             }
 
             if band.type == .fir {
-                VStack(alignment: .leading, spacing: 5) {
+                VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
                     Text(band.firKernel?.name ?? "No FIR kernel loaded")
                         .font(.subheadline.bold())
                     if let taps = band.firKernel?.taps.count {
-                        Text("\(taps) taps").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                        Text("\(taps) taps").font(DesignType.caption.font.monospacedDigit()).foregroundStyle(.secondary)
                     }
                     if !enhanced {
                         Text("FIR asset import remains in Engineering Validation until the production import/persistence milestone.")
-                            .font(.caption).foregroundStyle(.secondary)
+                            .font(DesignType.caption.font).foregroundStyle(.secondary)
                     }
                 }
             }
@@ -878,22 +878,22 @@ struct ProductionEqualizerView: View {
 
     @ViewBuilder
     private func dynamicControls(band: EQBand, binding: Binding<EQBand>) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: DesignSpacing.l.pt) {
             HStack {
-                Text("Dynamic EQ").font(.headline)
+                Text("Dynamic EQ").font(DesignType.sectionTitle.font)
                 Spacer()
                 Toggle("Dynamic", isOn: binding.dynamic.enabled).toggleStyle(.switch)
             }
             if enhanced {
                 Text(EQDynamicHint.rangeText)
-                    .font(.caption2)
+                    .font(DesignType.caption.font)
                     .foregroundStyle(.secondary)
                     .accessibilityIdentifier("eq.bands.editor.dynamicHint")
             }
             if enhanced, let movedNote, movedNote.id == band.id {
                 Text(movedNote.text)
-                    .font(.caption)
-                    .foregroundStyle(.orange)
+                    .font(DesignType.caption.font)
+                    .foregroundStyle(StatusLevel.attention.color)
                     .accessibilityIdentifier("eq.bands.editor.movedNote")
             }
 
@@ -924,14 +924,14 @@ struct ProductionEqualizerView: View {
                 }
 
                 if band.dynamic.direction != .cutOnly {
-                    Text("Boost").font(.subheadline.bold()).padding(.top, 3)
+                    Text("Boost").font(.subheadline.bold()).padding(.top, DesignSpacing.xs.pt)
                     metricField("Boost Threshold", .boostThreshold, value: binding.dynamic.boostThresholdDB, suffix: "dB")
                     metricField("Boost Ratio", .boostRatio, value: binding.dynamic.boostRatio, suffix: ":1")
                     metricField("Max Boost", .maxBoost, value: binding.dynamic.maxBoostDB, suffix: "dB")
                 }
             } else {
                 Text("Enable Dynamic to add level-dependent correction to this ordinary EQ band. Static gain remains owned by the band itself.")
-                    .font(.caption)
+                    .font(DesignType.caption.font)
                     .foregroundStyle(.secondary)
             }
         }
@@ -939,7 +939,7 @@ struct ProductionEqualizerView: View {
 
     private func metricField(_ label: String, _ metric: EQDynamicMetric, value: Binding<Double>, suffix: String) -> some View {
         LabeledContent(label) {
-            HStack(spacing: 6) {
+            HStack(spacing: DesignSpacing.s.pt) {
                 EQDynamicMetricField(title: label, metric: metric, value: value)
                 Text(suffix).foregroundStyle(.secondary).frame(width: 28, alignment: .leading)
             }
@@ -1249,7 +1249,7 @@ private struct ProductionEQResponseGraph: View {
                 ? Array(displayBands.enumerated()).filter { $0.element.type != .fir }
                 : []
             ZStack {
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                RoundedRectangle(cornerRadius: DesignRadius.medium.pt, style: .continuous)
                     .fill(.black.opacity(0.17))
 
                 Canvas { context, _ in
@@ -1317,7 +1317,7 @@ private struct ProductionEQResponseGraph: View {
                                 .padding(-6)
                         }
                         Text("\(index + 1)")
-                            .font(.system(size: index >= 99 ? 8 : 10, weight: .bold).monospacedDigit())
+                            .font(DesignType.caption.font.weight(.bold).monospacedDigit())
                             .foregroundStyle(isSelected ? Color.white : Color.primary)
                     }
                     .frame(width: diameter, height: diameter)
@@ -1359,8 +1359,8 @@ private struct ProductionEQResponseGraph: View {
                 }
                 if bypassed {
                     Text("EQ BYPASSED")
-                        .font(.caption.bold()).tracking(1.7)
-                        .padding(.horizontal, 12).padding(.vertical, 7)
+                        .font(DesignType.caption.font.bold()).tracking(1.7)
+                        .padding(.horizontal, DesignSpacing.m.pt).padding(.vertical, DesignSpacing.s.pt)
                         .background(.ultraThinMaterial, in: .capsule)
                         .allowsHitTesting(false)
                 }
@@ -1471,7 +1471,7 @@ private struct ProductionEQResponseGraph: View {
             path.addLine(to: CGPoint(x: x, y: size.height))
             context.stroke(path, with: .color(.secondary.opacity(0.18)), lineWidth: 1)
             context.draw(
-                Text(axisFrequency(frequency)).font(.system(size: 9, weight: .medium)).foregroundStyle(.secondary),
+                Text(axisFrequency(frequency)).font(DesignType.caption.font).foregroundStyle(.secondary),
                 at: CGPoint(x: min(max(x, 24), size.width - 24), y: size.height - 11)
             )
         }
@@ -1490,7 +1490,7 @@ private struct ProductionEQResponseGraph: View {
             // the top label is drawn below its gridline instead of above the plot.
             if !isZero && y < size.height - 24 {
                 context.draw(
-                    Text(String(format: "%g", db)).font(.system(size: 9, weight: .medium)).foregroundStyle(.secondary),
+                    Text(String(format: "%g", db)).font(DesignType.caption.font).foregroundStyle(.secondary),
                     at: CGPoint(x: 16, y: abs(db - half) < 1.0e-9 ? y + 8 : y - 7)
                 )
             }
@@ -1582,7 +1582,7 @@ private struct ProductionEQResponseGraph: View {
         }
         context.stroke(curve.path, with: .color(.secondary.opacity(0.65)), style: StrokeStyle(lineWidth: 1.5, dash: [5, 4]))
         context.draw(
-            Text("\(otherLane.label) (not editing)").font(.system(size: 9, weight: .medium)).foregroundStyle(.secondary),
+            Text("\(otherLane.label) (not editing)").font(DesignType.caption.font).foregroundStyle(.secondary),
             at: CGPoint(x: size.width - 60, y: 12)
         )
     }

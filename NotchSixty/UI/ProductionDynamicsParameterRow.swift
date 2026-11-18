@@ -16,7 +16,7 @@ struct DynamicsParameterRow: View {
 
     var body: some View {
         LabeledContent {
-            HStack(spacing: 10) {
+            HStack(spacing: DesignSpacing.m.pt) {
                 ParameterSlider(
                     spec: spec,
                     title: title,
@@ -33,14 +33,14 @@ struct DynamicsParameterRow: View {
 
                 if !spec.unit.suffix.isEmpty {
                     Text(spec.unit.suffix)
-                        .font(.caption)
+                        .font(DesignType.caption.font)
                         .foregroundStyle(.secondary)
                         .frame(minWidth: 38, alignment: .leading)
                 }
             }
             .disabled(!isEnabled)
         } label: {
-            HStack(spacing: 5) {
+            HStack(spacing: DesignSpacing.xs.pt) {
                 Text(title)
                 if let reference, let formula = spec.formula {
                     ProductionReferenceHelpButton(
