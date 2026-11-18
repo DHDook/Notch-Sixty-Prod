@@ -30,6 +30,14 @@ enum LoudnessCardText {
         + "carries a program channel or a subwoofer feed (matrix-only outputs are not measured). Choose Input."
 }
 
+/// E33 S7 (`e33.page-enhancements`): what the card adds, the 10 minute history with its target and the maxima.
+struct LoudnessCardExtras {
+    var history: LoudnessShortTermHistory
+    var target: (lufs: Double, fromMatch: Bool)
+    var chosenTarget: LoudnessHistoryTarget
+    var onChooseTarget: (LoudnessHistoryTarget) -> Void
+}
+
 enum LoudnessSource: String, CaseIterable, Identifiable {
     case output
     case input
@@ -50,6 +58,8 @@ struct ProductionLoudnessCard: View {
     var isWide = false
     /// E33 S6: spoken values change at most every 2 s or on a 1 LU move (`e33.page-enhancements`).
     var rateLimitedSpeech = false
+    /// E33 S7: nil leaves the card as it was.
+    var extras: LoudnessCardExtras?
     @State var spoken = SpokenValueBook()
     let onSource: (LoudnessSource) -> Void
     let onReset: () -> Void
@@ -81,6 +91,10 @@ struct ProductionLoudnessCard: View {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: DesignSpacing.m.pt)], spacing: DesignSpacing.m.pt) {
                     value("Momentary", LoudnessCardText.lufs(readout?.momentary), "momentary", number: readout?.momentary)
                     value("Short-term", LoudnessCardText.lufs(readout?.shortTerm), "shortTerm", number: readout?.shortTerm)
+                    if extras != nil {
+                        value("Momentary max", LoudnessCardText.lufs(readout?.momentaryMax), "momentaryMax")
+                        value("Short-term max", LoudnessCardText.lufs(readout?.shortTermMax), "shortTermMax")
+                    }
                     value("Integrated", LoudnessCardText.lufs(readout?.integrated), "integrated", number: readout?.integrated)
                     value("Loudness range", LoudnessCardText.lu(readout?.range), "range")
                     value(
@@ -88,6 +102,22 @@ struct ProductionLoudnessCard: View {
                         LoudnessCardText.truePeak(truePeak.maxDBTP),
                         "truePeakMax"
                     )
+                }
+                if let extras {
+                    HStack {
+                        Text(LoudnessHistoryText.target(extras.target)).font(DesignType.caption.font).foregroundStyle(.secondary)
+                        if !extras.target.fromMatch {
+                            Picker("Target", selection: Binding(get: { extras.chosenTarget }, set: extras.onChooseTarget)) {
+                                ForEach(LoudnessHistoryTarget.allCases) { Text($0.title).tag($0) }
+                            }
+                            .pickerStyle(.segmented)
+                            .frame(maxWidth: 260)
+                            .accessibilityIdentifier("meters.loudness.target")
+                        }
+                    }
+                    LoudnessHistoryView(history: extras.history, targetLUFS: extras.target.lufs)
+                    Text(LoudnessHistoryText.integratedNote + ". Maxima and history clear with Reset.")
+                        .font(DesignType.caption.font).foregroundStyle(.tertiary)
                 }
                 if readout?.isGapped == true {
                     Label("Gapped: capture frames were lost, so integrated loudness may read low. Reset to start again.",
