@@ -143,7 +143,7 @@ Normal Quit must stop/fade audio before teardown. A true force-quit cannot rely 
 
 ## 6. App Store constraints
 
-The minimum supported macOS is 26. Raising it again needs the project owner's explicit approval.
+The minimum supported macOS is 27 (owner decision, 17 Nov 2026, E34 S0). Raising it again needs the project owner's explicit approval.
 
 App Sandbox is required from the beginning. Do not introduce architecture that depends on:
 - root privileges

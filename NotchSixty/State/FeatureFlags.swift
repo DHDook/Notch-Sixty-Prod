@@ -35,7 +35,7 @@ extension FeatureFlag {
         .noiseSurvey, .conversationUnmasking, .virtualMicrophone, .zones, .headPositionCamera, .overnight,
         .subAwareAnc, .longFIR, .outputProtection, .headphones, .mimoTreatment, .dynamicsExtras, .roomModel,
         .parallelRender, .multirate, .rateAdapt, .coreDesigners,
-        .eqPageEnhancements, .dynamicsSound
+        .eqPageEnhancements, .dynamicsSound, .designLanguage
     ]
 
     /// E6 S11: the unified graph is the default renderer. Turning this on selects the frozen
@@ -277,6 +277,15 @@ extension FeatureFlag {
         id: "e32.dynamics-sound",
         title: "Dynamics sound fixes",
         epic: "E32"
+    )
+    /// E34: the app-wide design language (macOS 27 Liquid Glass rules in `docs/DESIGN_LANGUAGE.md`, shared values and
+    /// components from S1). Visible changes sit behind it; pages move onto the shared parts first with almost no visible
+    /// change. Swift UI only: the engine never reads it. Off: today's look. Graduated in E34 S7; removed in the
+    /// flag-cleanup phase.
+    static let designLanguage = FeatureFlag(
+        id: "e34.design-language",
+        title: "Design language",
+        epic: "E34"
     )
 }
 

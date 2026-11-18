@@ -3,13 +3,13 @@ import AVFAudio
 import XCTest
 @testable import NotchSixty
 
-/// E2: Notch Sixty's minimum macOS is 26.0. The app's Info.plist takes
+/// E2: Notch Sixty's minimum macOS is 27.0 (E34 S0). The app's Info.plist takes
 /// `LSMinimumSystemVersion` from `MACOSX_DEPLOYMENT_TARGET`, so checking the built
 /// host app covers both settings.
 final class DeploymentTargetTests: XCTestCase {
-    func testHostAppDeclaresMacOS26Minimum() {
+    func testHostAppDeclaresMacOS27Minimum() {
         let minimum = Bundle.main.object(forInfoDictionaryKey: "LSMinimumSystemVersion") as? String
-        XCTAssertEqual(minimum, "26.0")
+        XCTAssertEqual(minimum, "27.0")
     }
 
     func testNodeAUAudioUnitAccessReachesTheNodesAudioUnit() {

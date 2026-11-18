@@ -14,7 +14,7 @@ Owner decisions from 17 Oct 2026 (and later, where dated) fix the plan's shape. 
 | Decision | Choice |
 | --- | --- |
 | Branch model | `main` is the trunk; all 77 stacked drafts are resolved and `main` was at `17dad33` when this plan was written |
-| macOS floor | Lower to macOS 26 |
+| macOS floor | macOS 27 (owner, 17 Nov 2026, E34 S0; lowered to 26 in E2, raised again for the macOS 27 Liquid Glass design) |
 | Speaker ANC (Quiet Zone) | Keep as the flagship differentiator; qualify it on hardware for v1 |
 | Headphone database | No licensed database for now; make bring-your-own measurement files first-class |
 | Sample rates | Every feature works at every device rate up to 384 kHz; HRIRs are resampled on activation (PR #131 behaviour kept) |
@@ -645,7 +645,7 @@ Plan: `docs/epics/E34.md`. One design language in the macOS 27 Liquid Glass styl
 and one rule each for states, dialogs, menus, keyboard, accessibility and window sizes. No feature changes.
 One flag `e34.design-language`, graduated in S7. The minimum macOS rises to 27 in S0 (owner, 17 Nov 2026).
 
-- [ ] S0 `e34/macos27-glass`: minimum macOS raised to 27, macOS 27 glass rules read from Apple's documentation, glass and material audit, flag added (needs-owner: minimum OS, `AGENTS.md`)
+- [~] S0 `e34/macos27-glass`: minimum macOS raised to 27, macOS 27 glass rules read from Apple's documentation, glass and material audit, flag added (needs-owner: minimum OS, `AGENTS.md`); built, PR pending; flag has no reader yet, wired in S1 (reader) and S7 (graduation)
 - [ ] S1 `e34/design-language`: `docs/DESIGN_LANGUAGE.md`, values file, components, formatters, status levels, gallery; ends with the owner's screen check (low-risk)
 - [ ] S2 `e34/adopt-playback-pages`: Dashboard, Equalizer, Dynamics, Meters, Headphones, Plugins on the shared parts (low-risk)
 - [ ] S3 `e34/adopt-system-pages`: System, tools, Active Acoustics, Settings, Help on the shared parts (needs-owner: ANC and MIMO screens, appearance only)
