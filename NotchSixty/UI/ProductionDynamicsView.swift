@@ -5,6 +5,7 @@ struct ProductionDynamicsView: View {
     var engine: AudioIOEngine
     var reference: ProductionReferenceNavigator? = nil
     @State private var selectedModule: ProductionDynamicsModule = .compressor
+    @State private var grAttachment: UUID?
     @State private var expandedMoreGroups: Set<String> = []
     @State private var mainsDetectInFlight = false
     @State private var mainsDetectionMessage: String?
@@ -43,13 +44,14 @@ struct ProductionDynamicsView: View {
         .padding(DesignSpacing.xl.pt)
         .onAppear {
             configureHistory()
-            GainReductionMonitor.shared(for: engine).attach()
+            grAttachment = GainReductionMonitor.shared(for: engine).attach(hertz: GainReductionMonitor.rowHertz)
         }
         .onChange(of: undoManager.map(ObjectIdentifier.init)) { _, _ in configureHistory() }
         .onChange(of: engine.dynamicsConfiguration) { _, _ in history.observeLiveChange() }
         .onDisappear {
             history.clear()
-            GainReductionMonitor.shared(for: engine).detach()
+            if let grAttachment { GainReductionMonitor.shared(for: engine).detach(grAttachment) }
+            grAttachment = nil
         }
     }
 

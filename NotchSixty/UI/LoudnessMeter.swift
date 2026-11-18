@@ -159,6 +159,96 @@ struct LoudnessReadout: Equatable, Sendable {
     )
 }
 
+// MARK: - Gating histogram
+
+/// E32 S3 (R18, design 8): the absolute-gated block loudness values in fixed 0.01 dB bins, so integrated loudness and
+/// loudness range cost O(bins) per readout instead of a sort over up to 864,000 entries. Each bin keeps its count, the
+/// sum of its powers (for the gated mean) and the sum of its loudness values (a percentile reads the bin mean, so it
+/// is within one bin width of the exact sort). Values enter and leave (the 24 h trim) symmetrically.
+struct LoudnessHistogram {
+    static let binWidthDB = 0.01
+    static let lowestLUFS = LoudnessMeter.absoluteGateLUFS
+    static let highestLUFS = 30.0
+    static let binCount = Int(((highestLUFS - lowestLUFS) / binWidthDB).rounded())
+
+    private var counts = [Int](repeating: 0, count: LoudnessHistogram.binCount)
+    private var powerSums = [Double](repeating: 0, count: LoudnessHistogram.binCount)
+    private var loudnessSums = [Double](repeating: 0, count: LoudnessHistogram.binCount)
+    private(set) var total = 0
+    private var totalPower = 0.0
+    private static let absoluteGatePower = LoudnessMeter.power(loudness: LoudnessMeter.absoluteGateLUFS)
+
+    private static func bin(ofLoudness l: Double) -> Int {
+        min(max(Int(((l - lowestLUFS) / binWidthDB).rounded(.down)), 0), binCount - 1)
+    }
+
+    mutating func add(power: Double) { update(power, by: 1) }
+    mutating func remove(power: Double) { update(power, by: -1) }
+
+    private mutating func update(_ power: Double, by sign: Int) {
+        guard power >= Self.absoluteGatePower else { return }
+        let l = LoudnessMeter.loudness(power: power)
+        let b = Self.bin(ofLoudness: l)
+        counts[b] += sign
+        powerSums[b] += Double(sign) * power
+        loudnessSums[b] += Double(sign) * l
+        total += sign
+        totalPower += Double(sign) * power
+        if counts[b] <= 0 { counts[b] = 0; powerSums[b] = 0; loudnessSums[b] = 0 }
+        if total <= 0 { total = 0; totalPower = 0 }
+    }
+
+    mutating func removeAll() { self = LoudnessHistogram() }
+
+    /// First bin that counts as above a gate at `gateLUFS`: the gate's own bin counts when its mean is above the gate.
+    private func firstKeptBin(aboveLUFS gate: Double) -> Int {
+        let g = Self.bin(ofLoudness: gate)
+        if counts[g] > 0, loudnessSums[g] / Double(counts[g]) > gate { return g }
+        return g + 1
+    }
+
+    /// Tech 3341 two-stage gate (absolute gate is applied on entry).
+    func integratedLoudness() -> Double? {
+        guard total > 0 else { return nil }
+        let gate = LoudnessMeter.loudness(power: totalPower / Double(total)) + LoudnessMeter.integratedRelativeGateLU
+        var count = 0
+        var power = 0.0
+        for b in firstKeptBin(aboveLUFS: gate)..<Self.binCount {
+            count += counts[b]
+            power += powerSums[b]
+        }
+        guard count > 0 else { return nil }
+        return LoudnessMeter.loudness(power: power / Double(count))
+    }
+
+    /// Tech 3342 range: 10th to 95th percentile of the windows above the -20 LU relative gate.
+    func loudnessRange() -> Double? {
+        guard total > 0 else { return nil }
+        let gate = LoudnessMeter.loudness(power: totalPower / Double(total)) + LoudnessMeter.rangeRelativeGateLU
+        let first = firstKeptBin(aboveLUFS: gate)
+        var kept = 0
+        for b in first..<Self.binCount { kept += counts[b] }
+        guard kept >= 2 else { return kept == 0 ? nil : 0 }
+        // Ranks 0...kept-1 in ascending loudness; the value at a rank is its bin's mean.
+        func value(atRank rank: Int) -> Double {
+            var seen = 0
+            for b in first..<Self.binCount where counts[b] > 0 {
+                seen += counts[b]
+                if rank < seen { return loudnessSums[b] / Double(counts[b]) }
+            }
+            return Self.lowestLUFS
+        }
+        func percentile(_ p: Double) -> Double {
+            let position = p * Double(kept - 1)
+            let lower = Int(position.rounded(.down))
+            let upper = min(lower + 1, kept - 1)
+            let low = value(atRank: lower)
+            return low + (value(atRank: upper) - low) * (position - Double(lower))
+        }
+        return percentile(0.95) - percentile(0.10)
+    }
+}
+
 // MARK: - Meter
 
 /// Multichannel BS.1770-4 loudness meter. Audio is cut into 100 ms sub-blocks;
@@ -187,6 +277,8 @@ struct LoudnessMeter {
     private var ringCount = 0
     private var blockPowers: [Double] = []
     private var shortTermPowers: [Double] = []
+    private var blockHistogram = LoudnessHistogram()
+    private var shortTermHistogram = LoudnessHistogram()
     private var momentaryMaxPower = 0.0
     private var shortTermMaxPower = 0.0
     private var gapped = false
@@ -270,14 +362,14 @@ struct LoudnessMeter {
             let power = meanOfLatest(Self.momentarySubBlocks)
             currentMomentaryPower = power
             momentaryMaxPower = max(momentaryMaxPower, power)
-            append(&blockPowers, power)
+            append(&blockPowers, power, into: &blockHistogram)
             blocksAppended += 1
         }
         if ringCount >= Self.shortTermSubBlocks {
             let power = meanOfLatest(Self.shortTermSubBlocks)
             currentShortTermPower = power
             shortTermMaxPower = max(shortTermMaxPower, power)
-            append(&shortTermPowers, power)
+            append(&shortTermPowers, power, into: &shortTermHistogram)
         }
     }
 
@@ -289,11 +381,20 @@ struct LoudnessMeter {
         return total / Double(count)
     }
 
-    private func append(_ array: inout [Double], _ value: Double) {
+    private func append(_ array: inout [Double], _ value: Double, into histogram: inout LoudnessHistogram) {
         array.append(value)
+        histogram.add(power: value)
         if array.count > historyLimit + 1_000 {
+            for old in array[0..<1_000] { histogram.remove(power: old) }
             array.removeFirst(1_000)
         }
+    }
+
+    /// Adds one block and one short-term window without audio (tests reach the 24 h trim this way).
+    mutating func appendSyntheticForTesting(blockPower: Double, shortTermPower: Double) {
+        append(&blockPowers, blockPower, into: &blockHistogram)
+        append(&shortTermPowers, shortTermPower, into: &shortTermHistogram)
+        blocksAppended += 1
     }
 
     /// The input stopped being contiguous (the window was hidden, or capture
@@ -316,6 +417,8 @@ struct LoudnessMeter {
         markDiscontinuity(gapped: false)
         blockPowers.removeAll(keepingCapacity: true)
         shortTermPowers.removeAll(keepingCapacity: true)
+        blockHistogram.removeAll()
+        shortTermHistogram.removeAll()
         momentaryMaxPower = 0
         shortTermMaxPower = 0
         gapped = false
@@ -329,7 +432,9 @@ struct LoudnessMeter {
     /// at most once per second of new blocks; use `exactReadout()` in tests.
     mutating func readout() -> LoudnessReadout {
         if cachedAtCount < 0 || blocksAppended - cachedAtCount >= 10 {
-            refreshGatedValues()
+            cachedIntegrated = blockHistogram.integratedLoudness()
+            cachedRange = shortTermHistogram.loudnessRange()
+            cachedAtCount = blocksAppended
         }
         return makeReadout()
     }

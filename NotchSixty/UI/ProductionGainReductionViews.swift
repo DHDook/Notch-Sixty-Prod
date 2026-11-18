@@ -4,13 +4,13 @@ import SwiftUI
 /// and the Meters page. It draws in a Canvas inside a paused-when-idle TimelineView so nothing re-renders the body at
 /// 60 Hz, and exposes one accessibility value that refreshes at most every 2 s.
 struct GainReductionBar: View {
-    let monitor: GainReductionMonitor
+    @ObservedObject var monitor: GainReductionMonitor
     let source: GainReductionSource
     var rangeDB: Double = 24
     var compact = false
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 60.0)) { context in
+        TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: monitor.timelinesPaused)) { _ in
             let now = ProcessInfo.processInfo.systemUptime
             let history = monitor.history(source)
             let current = Double(history.latest)
@@ -28,7 +28,6 @@ struct GainReductionBar: View {
                     gc.fill(Path(CGRect(x: max(0, x - 1), y: 0, width: 2, height: size.height)), with: .color(.primary))
                 }
             }
-            .id(context.date)
         }
         .frame(height: compact ? 4 : 10)
         .accessibilityElement()
@@ -40,12 +39,12 @@ struct GainReductionBar: View {
 
 /// The last 10 s of reduction, newest at the right. Top edge is 0 dB (no reduction), bottom is `rangeDB`.
 struct GainReductionHistoryView: View {
-    let monitor: GainReductionMonitor
+    @ObservedObject var monitor: GainReductionMonitor
     let source: GainReductionSource
     var rangeDB: Double = 24
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { context in
+        TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: monitor.timelinesPaused)) { _ in
             let history = monitor.history(source)
             let points = history.points
             ZStack(alignment: .topLeading) {
@@ -68,8 +67,7 @@ struct GainReductionHistoryView: View {
                     }
                     gc.stroke(path, with: .color(.orange), lineWidth: 1.5)
                 }
-                .id(context.date)
-                Text("0 dB").font(DesignType.caption.font).foregroundStyle(.tertiary).padding(.leading, DesignSpacing.xs.pt).padding(.top, DesignSpacing.xs.pt)
+                    Text("0 dB").font(DesignType.caption.font).foregroundStyle(.tertiary).padding(.leading, DesignSpacing.xs.pt).padding(.top, DesignSpacing.xs.pt)
                 VStack {
                     Spacer()
                     HStack {
@@ -95,13 +93,13 @@ struct GainReductionHistoryView: View {
 /// The static curve with the live operating point: input level (x) against output level (y), both in dBFS,
 /// with a 12 dB grid, labelled axes and a marker at the threshold (the ceiling for a limiter).
 struct DynamicsTransferCurveView: View {
-    let monitor: GainReductionMonitor
+    @ObservedObject var monitor: GainReductionMonitor
     let source: GainReductionSource
     let curve: DynamicsTransferCurve
     var range: ClosedRange<Double> = -60...0
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { context in
+        TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: monitor.timelinesPaused)) { _ in
             let live = curve.livePoint(reductionDB: Double(monitor.latest(source)))
             Canvas { gc, size in
                 let span = range.upperBound - range.lowerBound
@@ -146,7 +144,6 @@ struct DynamicsTransferCurveView: View {
                 let outLabel = gc.resolve(Text("Out dBFS").font(DesignType.caption.font).foregroundColor(.secondary))
                 gc.draw(outLabel, at: CGPoint(x: 3, y: 2), anchor: .topLeading)
             }
-            .id(context.date)
         }
         .aspectRatio(1, contentMode: .fit)
         .frame(maxWidth: 150)
@@ -169,6 +166,7 @@ struct GainReductionPanel: View {
     let curve: DynamicsTransferCurve?
 
     @AppStorage private var showCurve: Bool
+    @State private var attachment: UUID?
 
     init(engine: AudioIOEngine, source: GainReductionSource, curve: DynamicsTransferCurve?) {
         self.engine = engine
@@ -195,7 +193,10 @@ struct GainReductionPanel: View {
                 }
             }
         }
-        .onAppear { monitor.attach() }
-        .onDisappear { monitor.detach() }
+        .onAppear { attachment = monitor.attach(hertz: GainReductionMonitor.pageHertz) }
+        .onDisappear {
+            if let attachment { monitor.detach(attachment) }
+            attachment = nil
+        }
     }
 }
