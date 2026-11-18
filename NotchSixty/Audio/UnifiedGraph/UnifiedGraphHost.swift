@@ -178,7 +178,8 @@ final class UnifiedGraphHost: @unchecked Sendable {
     /// `linearFade`: a rebuild crossfades with the linear law (old * (1 - t) + new * t) instead of
     /// equal-power. Use it when old and new graphs carry the same signal, as an EQ bypass, A/B or
     /// audition switch does (E27 S3b): an equal-power fade of two copies of one signal at different
-    /// gains swells past both by up to 3 percent in the middle.
+    /// gains swells past both by up to 3 percent in the middle. A PEQ filter-type change with `linearFade` is
+    /// always a faded rebuild, never a live coefficient post (E27 G22).
     @discardableResult
     func apply(_ newSpec: UnifiedGraphSpec, linearFade: Bool = false) throws -> UnifiedGraphApplyResult {
         lock.lock(); defer { lock.unlock() }
@@ -483,7 +484,7 @@ final class UnifiedGraphHost: @unchecked Sendable {
             newSpec.stages[index].params = [inputOverDetect ? 1 : 0, inputOverGeneration]
         }
         if newSpec == spec { return .unchanged }
-        if newSpec.hasSameTopology(as: spec) {
+        if newSpec.hasSameTopology(as: spec), !(linearFade && newSpec.changesPeqBandType(since: spec)) {
             let records = newSpec.changedParameters(since: spec)
             if records.isEmpty {
                 spec = newSpec
