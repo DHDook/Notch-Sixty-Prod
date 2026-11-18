@@ -41,9 +41,10 @@ enum ProductionSection: String, CaseIterable, Identifiable, Hashable {
     /// above them. A selected developer tool stays visible in a Developer
     /// group until the user moves to another section.
     static func sidebarGroups(
-        selection: ProductionSection? = nil
+        selection: ProductionSection? = nil,
+        designLanguage: Bool = false
     ) -> [ProductionSidebarGroup] {
-        var groups = [
+        var groups = designLanguage ? designLanguageGroups : [
             ProductionSidebarGroup(title: "Playback", sections: playback),
             ProductionSidebarGroup(title: "System", sections: systemAreaSections),
             ProductionSidebarGroup(title: "Tools", sections: systemAreaTools),
@@ -53,6 +54,21 @@ enum ProductionSection: String, CaseIterable, Identifiable, Hashable {
             groups.append(ProductionSidebarGroup(title: "Developer", sections: [selection]))
         }
         return groups
+    }
+
+    /// E34 S8 (behind `e34.design-language`): Playback changes or shows the
+    /// sound now, Setup is done once per system, Tools is optional. The
+    /// Extensions group is gone; Plug-ins moved to Tools.
+    static let designLanguageGroups: [ProductionSidebarGroup] = [
+        ProductionSidebarGroup(title: "Playback", sections: playback),
+        ProductionSidebarGroup(title: "Setup", sections: [.system, .headphones, .activeAcoustics]),
+        ProductionSidebarGroup(title: "Tools", sections: [.plugins, .blindListening]),
+    ]
+
+    /// The row title in the sidebar. The System row is "Speakers & Room"
+    /// under the new groups; the page keeps its own title.
+    func sidebarTitle(designLanguage: Bool) -> String {
+        designLanguage && self == .system ? "Speakers & Room" : title
     }
 
     var id: String { rawValue }
@@ -333,10 +349,13 @@ struct ProductionRootView: View {
                 )
                 .tag(ProductionSection.dashboard)
 
-                ForEach(ProductionSection.sidebarGroups(selection: selection)) { group in
+                ForEach(ProductionSection.sidebarGroups(
+                    selection: selection,
+                    designLanguage: FeatureFlags().isEnabled(.designLanguage)
+                )) { group in
                     Section(group.title) {
                         ForEach(group.sections) { section in
-                            Label(section.title, systemImage: section.systemImage)
+                            Label(section.sidebarTitle(designLanguage: FeatureFlags().isEnabled(.designLanguage)), systemImage: section.systemImage)
                                 .tag(section)
                         }
                     }
