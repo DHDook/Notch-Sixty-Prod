@@ -180,6 +180,7 @@ enum UnifiedGraphTranslator {
                 truePeakGuard: p.truePeakGuardEnabled,
                 oversampling: Int(p.effectiveFactor.rawValue)
             )
+            protection.autoRelease = p.limiterEnabled && p.limiterAutoRelease
             if p.softClipperEnabled || p.gainRiderEnabled {
                 protection.clipper = UnifiedGraphSoftClipper(
                     enabled: p.softClipperEnabled,

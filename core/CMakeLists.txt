@@ -330,6 +330,10 @@ add_executable(n60core_e32_dynamics_sound_test tests/test_e32_dynamics_sound.cpp
 target_link_libraries(n60core_e32_dynamics_sound_test PRIVATE n60core)
 add_test(NAME n60core_e32_dynamics_sound COMMAND n60core_e32_dynamics_sound_test)
 
+add_executable(n60core_limiter_auto_release_test tests/test_limiter_auto_release.cpp)
+target_link_libraries(n60core_limiter_auto_release_test PRIVATE n60core)
+add_test(NAME n60core_limiter_auto_release COMMAND n60core_limiter_auto_release_test)
+
 # E33 S10: input overs at METER_IN (ABI v44).
 add_executable(n60core_input_overs_test tests/test_input_overs.cpp)
 target_link_libraries(n60core_input_overs_test PRIVATE n60core)

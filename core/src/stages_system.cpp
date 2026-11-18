@@ -146,7 +146,13 @@ constexpr double kAmbMinDb = -8.0, kAmbMaxDb = 0.0;    // trailer sections cut o
 constexpr double kAmbMinQ = 0.3, kAmbMaxQ = 20.0;
 constexpr uint32_t kProtParamsV12 = 18;
 constexpr uint32_t kProtWordParams7 = 8, kProtWordParams18 = 19;  // ABI v43 (E32 S5): the sound-fixes word is the last value
-constexpr uint32_t kProtCapAttack = 1u, kProtRateFactor = 2u;
+constexpr uint32_t kProtCapAttack = 1u, kProtRateFactor = 2u, kProtAutoRelease = 4u;
+// ABI v46 (E33 S14): programme-dependent release. Release rate (1 / time constant) is blended between a fast and a slow time
+// constant by `sustain`, a one-pole average of "the limiter is holding gain reduction" (the look-ahead window peak is over
+// the ceiling) that rises with kAutoSusRiseMs and falls with kAutoSusFallMs. The two-time-constant (dual-release) form is the
+// standard programme-dependent release of dynamic range processors: Giannoulis, Massberg and Reiss, "Digital Dynamic Range
+// Compressor Design - A Tutorial and Analysis", JAES 60(6), 2012, section on release; Zolzer (ed.), DAFX, 2nd ed., chapter 4.
+constexpr double kAutoFastMs = 30.0, kAutoSlowMs = 400.0, kAutoSusRiseMs = 150.0, kAutoSusFallMs = 1000.0;
 constexpr uint32_t kGuardParams = 12 + N60_ANC_GUARD_BANDS;
 constexpr uint32_t kHpRing = 512;
 
@@ -245,6 +251,9 @@ struct ProtCfg {
     uint32_t laHigh;
     uint32_t atkHigh;
     double relCoef;
+    bool autoRel;                          // ABI v46: programme-dependent release (the fixed relCoef is unused)
+    double relRateFast, relRateSlow;       // 1 / (time constant in oversampled samples)
+    double susRise, susFall;               // sustain follower coefficients per oversampled sample
     uint32_t latency;
     // ABI v12: soft clipper (per oversampled sample, before the limiter) and gain rider (per frame).
     bool clipper;
@@ -255,6 +264,11 @@ struct ProtCfg {
     float riderTarget, riderMax;
     double riderMeasCoef, riderRespCoef;  // double: float cannot hold 1 - 9e-8 (30 s at 384 kHz)
 };
+
+// The trailing sound-fixes word (ABI v43), 0 when the stage carries none.
+inline float protWordValue(const float *p, uint32_t n) {
+    return (n == kProtWordParams7 || n == kProtWordParams18) ? p[n - 1u] : 0.0f;
+}
 
 uint32_t osLatency(uint32_t factor) { return factor == 2 ? 32u : (factor == 4 ? 48u : 0u); }
 
@@ -282,6 +296,13 @@ ProtCfg protCfg(const float *p, double rate, uint32_t n) {
     // ABI v43 (flag e32.dynamics-sound): the attack ramp cannot be longer than the look-ahead, or the gain is still moving when
     // the peak arrives and the safety clamp does the limiting. Zero look-ahead is an instant attack.
     if (c.limiter && (word & kProtCapAttack) != 0u) c.atkHigh = std::min(c.atkHigh, std::max(1u, c.laHigh));
+    if (c.limiter && (word & kProtAutoRelease) != 0u) {
+        c.autoRel = true;
+        c.relRateFast = 1.0 / (kAutoFastMs * 0.001 * highRate);
+        c.relRateSlow = 1.0 / (kAutoSlowMs * 0.001 * highRate);
+        c.susRise = 1.0 - std::exp(-1.0 / (kAutoSusRiseMs * 0.001 * highRate));
+        c.susFall = 1.0 - std::exp(-1.0 / (kAutoSusFallMs * 0.001 * highRate));
+    }
     const uint32_t laFrames = c.laHigh == 0 ? 0u : (c.laHigh + c.factor - 1u) / c.factor;
     c.latency = osLatency(c.factor) + laFrames;
     if (c.clipper) {
@@ -459,8 +480,10 @@ struct ProtShared {
     uint64_t seq;
     double gain;
     uint32_t ph2, ph1, head, count, cap, cfgValid;
+    double sustain;                          // ABI v46: auto-release sustain, 0 (a single peak) .. 1 (held limiting)
+    std::atomic<uint32_t> effRelBits;        // ABI v46: effective release time (ms, float bits) at the end of the last block; 0 when off
     double riderSustained, riderAtten;       // ABI v12: sustained limiter reduction and rider attenuation (dB)
-    float seenCeil, seenAtk, seenRel, pad2;  // protCfg inputs the cached cfg was derived from
+    float seenCeil, seenAtk, seenRel, seenWord;  // protCfg inputs the cached cfg was derived from
     std::atomic<uint32_t> guardActive;       // ABI v8: 1 when the limiter runs with oversampling
     std::atomic<uint32_t> clamps;            // ABI v43: safety-clamp events since the last read (relaxed; read and reset by the control thread)
     ProtCfg cfg;                              // cached: pow/exp are not redone every block
@@ -640,7 +663,7 @@ bool paramOk(uint32_t kind, uint32_t i, float v, const float *p, double rate, ui
                 case 4: return inR(v, 0.0, 20.0);
                 case 6: return v == 1.0f || v == 2.0f || v == 4.0f;
                 case 7:
-                    if (n == kProtWordParams7) return isInt(v) && v >= 0.0f && v <= 3.0f;
+                    if (n == kProtWordParams7) return isInt(v) && v >= 0.0f && v <= 7.0f;
                     return v == 0.0f || v == 1.0f;
                 case 12:
                 case 14: return v == 0.0f || v == 1.0f;
@@ -651,7 +674,7 @@ bool paramOk(uint32_t kind, uint32_t i, float v, const float *p, double rate, ui
                 case 13: return inR(v, -3.0, 3.0);
                 case 15: return inR(v, 0.5, 6.0);
                 case 16: return inR(v, 3.0, 12.0);
-                case 18: return isInt(v) && v >= 0.0f && v <= 3.0f;  // ABI v43: the sound-fixes word
+                case 18: return isInt(v) && v >= 0.0f && v <= 7.0f;  // ABI v43: the sound-fixes word (v46: bit 2 is auto release)
                 default: return v == 0.0f || v == 1.0f || v == 2.0f;  // 17: rider speed
             }
         case N60_STAGE_STEREO_CROSSOVER:
@@ -2088,6 +2111,21 @@ inline float softClip(const ProtCfg &c, float input) {
     return sign * std::fmin(mixed, 1.0f) * c.comp;
 }
 
+// ABI v46: the release coefficient for the next high-rate sample. `limiting` is whether the look-ahead window peak is over the
+// ceiling; the sustain follower moves toward it first, then the release rate is the sustain-weighted blend of the fast and
+// slow rates (1 - rate is the one-pole coefficient: exact enough for time constants of tens of ms, no exp per sample).
+inline double protAutoRelease(const ProtCfg &c, double &sustain, bool limiting) {
+    sustain += (limiting ? c.susRise : c.susFall) * ((limiting ? 1.0 : 0.0) - sustain);
+    return 1.0 - (c.relRateFast + sustain * (c.relRateSlow - c.relRateFast));
+}
+
+// The effective release time in ms for the readback; 0 when auto release is off.
+inline float protEffectiveReleaseMs(const ProtCfg &c, double sustain, double rate) {
+    if (!c.autoRel) return 0.0f;
+    const double perSample = c.relRateFast + sustain * (c.relRateSlow - c.relRateFast);
+    return static_cast<float>(1000.0 / (perSample * rate * static_cast<double>(c.factor)));
+}
+
 // One high-rate limiter sample across all lanes (the kernel's limiter step). `hp[l][off]` is lane l's sample, replaced by the
 // limited one. Shared by the serial stage and the lane-parallel one (E20 S10b), so the two cannot drift apart.
 inline void protLimitSample(ProtShared &sh, const ProtCfg &c, double attackStep, uint32_t n, float *const *hp, uint32_t off,
@@ -2116,10 +2154,11 @@ inline void protLimitSample(ProtShared &sh, const ProtCfg &c, double attackStep,
     }
     const float window = sh.count > 0 ? val[sh.head] : 0.0f;
     const double target = window > c.ceilLin ? static_cast<double>(c.ceilLin) / std::fmax(window, kEps) : 1.0;
+    const double rel = c.autoRel ? protAutoRelease(c, sh.sustain, window > c.ceilLin) : c.relCoef;
     if (target < sh.gain) {
         sh.gain = std::fmax(target, sh.gain - attackStep);
     } else {
-        sh.gain = target + c.relCoef * (sh.gain - target);
+        sh.gain = target + rel * (sh.gain - target);
     }
     minGain = std::fmin(minGain, sh.gain);
     float safety = 0.0f;
@@ -2163,6 +2202,7 @@ void protGainPass(ProtShared &sh, const ProtCfg &c, double attackStep, uint32_t 
     // `perFrame` reads sh.gain, so the gain is written back before each call (the calls are rare and cheap).
     uint32_t head = sh.head, cnt = sh.count;
     double gain = sh.gain;
+    double sustain = sh.sustain;
     double minG = minGain;
     const double ceilD = static_cast<double>(c.ceilLin);
     const bool hasPerFrame = !std::is_same<std::remove_reference_t<PerFrame>, NoPerFrame>::value;
@@ -2191,10 +2231,11 @@ void protGainPass(ProtShared &sh, const ProtCfg &c, double attackStep, uint32_t 
         }
         const float window = cnt > 0 ? val[head] : 0.0f;
         const double target = window > c.ceilLin ? ceilD / std::fmax(window, kEps) : 1.0;
+        const double rel = c.autoRel ? protAutoRelease(c, sustain, window > c.ceilLin) : c.relCoef;
         if (target < gain) {
             gain = std::fmax(target, gain - attackStep);
         } else {
-            gain = target + c.relCoef * (gain - target);
+            gain = target + rel * (gain - target);
         }
         minG = std::fmin(minG, gain);
         gainA[s] = gain;
@@ -2202,6 +2243,7 @@ void protGainPass(ProtShared &sh, const ProtCfg &c, double attackStep, uint32_t 
     sh.head = head;
     sh.count = cnt;
     sh.gain = gain;
+    sh.sustain = sustain;
     minGain = minG;
     sh.seq = seq0 + count;
 }
@@ -2249,8 +2291,10 @@ void protClampPass(ProtShared &sh, const ProtCfg &c, uint32_t n, float *const *h
 void runProtection(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) {
     const float *p = paramsOf(h, r);
     ProtShared &sh = *reinterpret_cast<ProtShared *>(sharedState(h, r));
-    if (sh.cfgValid == 0 || p[1] != sh.seenCeil || p[2] != sh.seenAtk || p[3] != sh.seenRel) {
+    const float wordNow = protWordValue(p, r.paramCount);
+    if (sh.cfgValid == 0 || p[1] != sh.seenCeil || p[2] != sh.seenAtk || p[3] != sh.seenRel || wordNow != sh.seenWord) {
         sh.cfg = protCfg(p, h->sampleRate, r.paramCount);  // only the live parameters 1..3 can differ from the snapshot's
+        sh.seenWord = wordNow;
         sh.seenCeil = p[1];
         sh.seenAtk = p[2];
         sh.seenRel = p[3];
@@ -2264,6 +2308,7 @@ void runProtection(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t fra
         sh.riderSustained = 0.0;
         sh.riderAtten = 0.0;
         sh.guardActive.store(0u, std::memory_order_relaxed);
+        sh.effRelBits.store(0u, std::memory_order_relaxed);
         for (uint32_t l = 0; l < r.laneCount; ++l) {
             reinterpret_cast<ProtLane *>(laneState(h, r, l))->grNowBits.store(0u, std::memory_order_relaxed);
         }
@@ -2396,6 +2441,7 @@ void runProtection(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t fra
     const float grMax = minGain < 1.0 ? static_cast<float>(-20.0 * std::log10(std::fmax(minGain, 1e-12))) : 0.0f;
     const float grNow = sh.gain < 1.0 ? static_cast<float>(-20.0 * std::log10(std::fmax(sh.gain, 1e-12))) : 0.0f;
     sh.guardActive.store(c.limiter && c.factor > 1 ? 1u : 0u, std::memory_order_relaxed);
+    sh.effRelBits.store(floatToBits(protEffectiveReleaseMs(c, sh.sustain, h->sampleRate)), std::memory_order_relaxed);
     for (uint32_t l = 0; l < n; ++l) {
         atomicMaxFloat(pl[l]->inTpBits, inPeak[l]);
         atomicMaxFloat(pl[l]->outTpBits, outPeak[l]);
@@ -2529,7 +2575,7 @@ bool systemProtectionParallel(SnapHeader *h, StageRec &r, float *const *lanes, u
     if (r.kind != N60_STAGE_PROTECTION || r.laneCount < 2 || r.laneCount > kMaxLanes || jobs.protHi == nullptr) return false;
     const float *p = paramsOf(h, r);
     ProtShared &sh = *reinterpret_cast<ProtShared *>(sharedState(h, r));
-    if (sh.cfgValid == 0 || p[1] != sh.seenCeil || p[2] != sh.seenAtk || p[3] != sh.seenRel) return false;  // serial refreshes it
+    if (sh.cfgValid == 0 || p[1] != sh.seenCeil || p[2] != sh.seenAtk || p[3] != sh.seenRel || protWordValue(p, r.paramCount) != sh.seenWord) return false;  // serial refreshes it
     const ProtCfg c = sh.cfg;
     // The rider multiplies the input by a gain that follows the limiter: engaged, or able to engage, it stays serial.
     if ((c.factor != 2 && c.factor != 4) || (!c.limiter && !c.clipper) || (c.rider && c.limiter) || sh.riderAtten != 0.0) return false;
@@ -2604,6 +2650,7 @@ bool systemProtectionParallel(SnapHeader *h, StageRec &r, float *const *lanes, u
     const float grMax = minGain < 1.0 ? static_cast<float>(-20.0 * std::log10(std::fmax(minGain, 1e-12))) : 0.0f;
     const float grNow = sh.gain < 1.0 ? static_cast<float>(-20.0 * std::log10(std::fmax(sh.gain, 1e-12))) : 0.0f;
     sh.guardActive.store(c.limiter && c.factor > 1 ? 1u : 0u, std::memory_order_relaxed);
+    sh.effRelBits.store(floatToBits(protEffectiveReleaseMs(c, sh.sustain, h->sampleRate)), std::memory_order_relaxed);
     for (uint32_t l = 0; l < x.n; ++l) {
         atomicMaxFloat(x.pl[l]->inTpBits, inPeak[l]);
         atomicMaxFloat(x.pl[l]->outTpBits, outPeak[l]);
@@ -2850,6 +2897,7 @@ bool readProtectionDynamics(SnapHeader *h, const StageRec &r, uint32_t lane, n60
     out->outTruePeak = bitsToFloat(pl.outTpBits.exchange(0, std::memory_order_relaxed));
     out->guardActive = sh.guardActive.load(std::memory_order_relaxed);
     out->reserved = sh.clamps.exchange(0u, std::memory_order_relaxed);
+    out->effectiveReleaseMs = bitsToFloat(sh.effRelBits.load(std::memory_order_relaxed));
     return true;
 }
 

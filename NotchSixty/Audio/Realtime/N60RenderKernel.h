@@ -239,6 +239,8 @@ typedef struct {
     float multibandBand4GainReductionDB;
     float multibandBand5GainReductionDB;
     uint32_t multibandBandCount;
+    /* E33 S14 (graph ABI 46): the limiter's effective release time in ms while auto release is on; the frozen kernel leaves it 0. */
+    float limiterEffectiveReleaseMs;
     float loudnessShortTermLUFS;
     float loudnessMatchGainDB;
     float loudnessContourScale;

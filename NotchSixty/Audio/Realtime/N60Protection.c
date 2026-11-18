@@ -237,6 +237,14 @@ bool N60ProtectionSnapshotSetLimiterAdvanced(
     return N60ProtectionSnapshotIsValid(snapshot);
 }
 
+bool N60ProtectionSnapshotSetLimiterAutoRelease(N60ProtectionSnapshot *snapshot, bool enabled) {
+    if (snapshot == NULL) {
+        return false;
+    }
+    snapshot->limiterAutoRelease = enabled;
+    return true;
+}
+
 bool N60ProtectionSnapshotSetGainRider(
     N60ProtectionSnapshot *snapshot,
     bool enabled,

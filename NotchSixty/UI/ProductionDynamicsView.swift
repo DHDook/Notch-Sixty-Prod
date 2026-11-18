@@ -828,8 +828,18 @@ struct ProductionDynamicsView: View {
             ProductionDynamicsTelemetryView(engine: engine, kind: .limiter)
             row(.limiterCeilingDB)
             row(.limiterAttackMs)
-            row(.limiterReleaseMs)
+            if LimiterAutoRelease.isAvailable, configuration.limiter.isAutoRelease {
+                // E33 S14: the fixed value is kept (and shown when Auto is switched off) but not used while Auto is on.
+                ProductionLimiterReleaseReadout(engine: engine)
+            } else {
+                row(.limiterReleaseMs)
+            }
             row(.limiterLookAheadMs)
+            if LimiterAutoRelease.isAvailable {
+                Toggle("Auto Release", isOn: boolBinding({ $0.limiter.isAutoRelease }, { $0.limiter.autoRelease = $1 ? true : nil }))
+                    .help("Release follows how long the limiter has been holding gain reduction: fast after a single peak, slower under sustained limiting. Off keeps the fixed Release time.")
+                    .accessibilityIdentifier("dynamics.limiter.autoRelease")
+            }
             // E32 S5 (`e32.dynamics-sound`): the core caps the attack at the look-ahead; the stored value is kept.
             if DynamicsSoundFixes.isEnabled, configuration.limiter.enabled,
                DynamicsSoundFixes.attackIsLimited(attackMs: configuration.limiter.attackMs, lookAheadMs: configuration.limiter.lookAheadMs) {

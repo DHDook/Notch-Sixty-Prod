@@ -146,6 +146,8 @@ struct UnifiedGraphProtection: Equatable, Sendable {
     /// ABI v12 extension: the soft clipper and the gain rider (nil leaves the stage at its seven-parameter form).
     var clipper: UnifiedGraphSoftClipper?
     var rider: UnifiedGraphGainRider?
+    /// E33 S14 (graph ABI v46): programme-dependent release; the fixed release value is ignored while it is on.
+    var autoRelease = false
 }
 
 struct UnifiedGraphSoftClipper: Equatable, Sendable {
@@ -687,7 +689,10 @@ struct UnifiedGraphConfiguration: Equatable, Sendable {
             ]
         }
         // E32 S5 (graph ABI v43): the sound-fixes word, the last value, only with `e32.dynamics-sound` on.
-        if soundFixes { params.append(DynamicsSoundFixes.protectionWord) }
+        // E33 S14 (graph ABI v46): the same word carries auto release (bit 2), so it is published whenever either is on.
+        if soundFixes || protection.autoRelease {
+            params.append((soundFixes ? DynamicsSoundFixes.protectionWord : 0) + (protection.autoRelease ? LimiterAutoRelease.wordBit : 0))
+        }
         return params
     }
 
