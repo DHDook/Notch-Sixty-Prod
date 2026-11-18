@@ -10,6 +10,8 @@ struct GainReductionHistory: Equatable, Sendable {
     static let capacity = 300
     static let holdSeconds = 1.0
 
+    /// E33 S6: the hold time from the one Peak hold preference (`.infinity` holds until reset). 1 s by default.
+    var holdSeconds = GainReductionHistory.holdSeconds
     private(set) var points: [Float] = []
     private(set) var current: Float = 0
     private var holdValue: Float = 0
@@ -21,7 +23,7 @@ struct GainReductionHistory: Equatable, Sendable {
     mutating func ingest(_ reduction: Float, at time: Double) {
         let value = reduction.isFinite ? max(0, reduction) : 0
         current = max(current, value)
-        if value >= holdValue || time - holdSetAt >= Self.holdSeconds {
+        if value >= holdValue || time - holdSetAt >= holdSeconds {
             holdValue = value
             holdSetAt = time
         }
@@ -37,13 +39,23 @@ struct GainReductionHistory: Equatable, Sendable {
 
     /// The held maximum (falls after one second without a higher value).
     func held(at time: Double) -> Float {
-        time - holdSetAt < Self.holdSeconds ? holdValue : latest
+        time - holdSetAt < holdSeconds ? holdValue : latest
     }
 
     /// The largest reduction in the window.
     var maximum: Float { points.max() ?? 0 }
 
-    mutating func reset() { self = GainReductionHistory() }
+    mutating func reset() {
+        var fresh = GainReductionHistory()
+        fresh.holdSeconds = holdSeconds
+        self = fresh
+    }
+
+    /// Clears the held tick only (the Reset menu's "Peak hold"); the bar and the 10 s history stay.
+    mutating func resetHold() {
+        holdValue = 0
+        holdSetAt = -.infinity
+    }
 
     /// Spoken value for the bar: refreshed by the caller at most every 2 s.
     static func spoken(_ reduction: Float) -> String {

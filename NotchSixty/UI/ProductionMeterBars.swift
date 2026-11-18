@@ -31,48 +31,76 @@ final class MeterChannelDisplay {
         hold.reset()
     }
 
+    /// E33 S6: the Reset menu's named targets clear one thing each.
+    func resetClipLatch() { latch.reset() }
+    func resetPeakHold() { hold.reset() }
+
+    /// E33 S6: the Scale and Peak hold preferences. Defaults keep the shipped behaviour (-60 floor, 2 s hold, no zones).
+    private(set) var floorDB = MeterBallisticsState.floorDB
+    private(set) var zonesEnabled = false
+
+    func configure(floorDB: Double, holdSeconds: Double, zones: Bool) {
+        let floorChanged = floorDB != self.floorDB
+        self.floorDB = floorDB
+        zonesEnabled = zones
+        ballistics.floorDB = floorDB
+        truePeakBallistics.floorDB = floorDB
+        hold.floorDB = floorDB
+        hold.holdSeconds = holdSeconds
+        if floorChanged {
+            // The resting level moves with the scale, so a quiet signal shows at once on a lower floor.
+            ballistics.reset()
+            truePeakBallistics.reset()
+            hold.reset()
+        }
+    }
+
+    var zone: MeterZone { MeterZone.zone(forDB: ballistics.displayedDB) }
+
     func ingest(
         _ reading: MeterChannelReading?,
         mode: MeterBallistics,
         elapsed: Double,
         now: Double
     ) {
-        let peakDB = Self.db(reading?.peakLinear)
-        let rmsDB = Self.db(reading?.rmsLinear)
+        let peakDB = Self.db(reading?.peakLinear, floorDB: floorDB)
+        let rmsDB = Self.db(reading?.rmsLinear, floorDB: floorDB)
         ballistics.advance(mode: mode, peakDB: peakDB, rmsDB: rmsDB, elapsed: elapsed)
         hold.advance(displayedDB: ballistics.displayedDB, elapsed: elapsed)
 
         var truePeak: Double?
         if let linear = reading?.truePeakLinear {
             hasTruePeak = true
-            truePeak = Self.db(linear)
+            truePeak = Self.db(linear, floorDB: floorDB)
         }
         if hasTruePeak {
             truePeakBallistics.advance(
-                mode: .peak, peakDB: truePeak ?? MeterBallisticsState.floorDB,
-                rmsDB: MeterBallisticsState.floorDB, elapsed: elapsed)
+                mode: .peak, peakDB: truePeak ?? floorDB,
+                rmsDB: floorDB, elapsed: elapsed)
         }
         latch.update(overRangeCount: reading?.overRangeSamples, truePeakDBTP: truePeak)
 
         let text = Self.describe(
             mode: mode, displayedDB: ballistics.displayedDB, heldDB: hold.heldDB,
             truePeakDB: hasTruePeak ? truePeakBallistics.displayedDB : nil,
-            clipped: latch.isLatched)
+            clipped: latch.isLatched, floorDB: floorDB, zone: zonesEnabled ? zone : nil)
         accessibilityValue = throttle.offer(text, latched: latch.isLatched, now: now)
     }
 
-    static func db(_ linear: Float?) -> Double {
-        guard let linear, linear.isFinite, linear > 0 else { return MeterBallisticsState.floorDB }
-        return max(20.0 * log10(Double(linear)), MeterBallisticsState.floorDB)
+    static func db(_ linear: Float?, floorDB: Double = MeterBallisticsState.floorDB) -> Double {
+        guard let linear, linear.isFinite, linear > 0 else { return floorDB }
+        return max(20.0 * log10(Double(linear)), floorDB)
     }
 
     static func describe(
-        mode: MeterBallistics, displayedDB: Double, heldDB: Double, truePeakDB: Double?, clipped: Bool
+        mode: MeterBallistics, displayedDB: Double, heldDB: Double, truePeakDB: Double?, clipped: Bool,
+        floorDB: Double = MeterBallisticsState.floorDB, zone: MeterZone? = nil
     ) -> String {
         func fmt(_ value: Double) -> String {
-            value <= MeterBallisticsState.floorDB + 0.05 ? "below minus 60" : String(format: "%.0f", value)
+            value <= floorDB + 0.05 ? "below minus \(Int(-floorDB))" : String(format: "%.0f", value)
         }
         var parts = ["\(mode.title) \(fmt(displayedDB)) dBFS", "hold \(fmt(heldDB))"]
+        if let zone { parts.append("\(zone.spokenName) zone") }
         if let truePeakDB { parts.append("true peak \(fmt(truePeakDB)) dBTP") }
         if clipped { parts.append("clipped") }
         return parts.joined(separator: ", ")
@@ -88,6 +116,9 @@ final class MeterBankDisplay {
     func channel(id: String, label: String) -> MeterChannelDisplay {
         if let existing = channels[id] { return existing }
         let created = MeterChannelDisplay(id: id, label: label)
+        if zonesEnabled || floorDB != MeterBallisticsState.floorDB || holdSeconds != MeterPeakHold.holdSeconds {
+            created.configure(floorDB: floorDB, holdSeconds: holdSeconds, zones: zonesEnabled)
+        }
         channels[id] = created
         return created
     }
@@ -104,6 +135,27 @@ final class MeterBankDisplay {
         for channel in channels.values { channel.resetLatch() }
     }
 
+    /// E33 S6: the Scale and Peak hold preferences, applied to every channel now and to channels made later.
+    private(set) var floorDB = MeterBallisticsState.floorDB
+    private(set) var holdSeconds = MeterPeakHold.holdSeconds
+    private(set) var zonesEnabled = false
+
+    func configure(floorDB: Double, holdSeconds: Double, zones: Bool) {
+        self.floorDB = floorDB
+        self.holdSeconds = holdSeconds
+        zonesEnabled = zones
+        for channel in channels.values { channel.configure(floorDB: floorDB, holdSeconds: holdSeconds, zones: zones) }
+    }
+
+    /// The Reset menu's level targets; loudness and true-peak max reset their own state in the page.
+    func reset(_ target: MeterResetTarget) {
+        switch target {
+        case .clipLatches: for channel in channels.values { channel.resetClipLatch() }
+        case .peakHold: for channel in channels.values { channel.resetPeakHold() }
+        case .loudness, .truePeakMax: break
+        }
+    }
+
     func clearTick() { lastTick = nil }
 }
 
@@ -117,6 +169,14 @@ struct MeterBarView: View {
         (-48, "-48"), (-36, "-36"), (-24, "-24"), (-12, "-12"), (-6, "-6"), (-3, "-3"), (0, "0"),
     ]
 
+    /// Scale ticks for a given floor: every 12 dB from 0 down, with the zone boundaries.
+    static func zoneTicks(floorDB: Double) -> [Double] {
+        var out = Set(MeterZone.boundariesDB)
+        var db = 0.0
+        while db >= floorDB { out.insert(db); db -= db > -60 ? 12 : 24 }
+        return out.sorted()
+    }
+
     var body: some View {
         HStack(spacing: DesignSpacing.s.pt) {
             Text(channel.label)
@@ -126,6 +186,14 @@ struct MeterBarView: View {
                 Canvas { context, size in draw(context: &context, size: size) }
             }
             .frame(height: channel.hasTruePeak ? 22 : 16)
+            if channel.zonesEnabled {
+                Text(MeterReadout.peakText(channel.heldDB, floorDB: channel.floorDB))
+                    .font(DesignType.caption.font.monospacedDigit())
+                    .frame(width: 44, alignment: .trailing)
+                    .accessibilityHidden(true)
+                    .accessibilityIdentifier("meter.peak.\(channel.id)")
+                clipTag
+            } else {
             Button {
                 onReset()
             } label: {
@@ -142,6 +210,7 @@ struct MeterBarView: View {
             .help("Clip latch. Click to reset.")
             .accessibilityLabel("Reset clip latch for \(channel.label)")
             .accessibilityIdentifier("meter.reset.\(channel.id)")
+            }
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("\(channel.label) level")
@@ -149,9 +218,60 @@ struct MeterBarView: View {
         .accessibilityIdentifier("meter.\(channel.id)")
     }
 
+    /// E33 S6: a filled red "CLIP" tag with its own reset; nothing at all while the latch is clear (no "OK" text).
+    private var clipTag: some View {
+        ZStack {
+            Text("CLIP").font(DesignType.caption.font.bold().monospaced()).padding(.horizontal, DesignSpacing.xs.pt)
+                .hidden()
+            if channel.isClipped {
+                Button(action: onReset) {
+                    Text("CLIP")
+                        .font(DesignType.caption.font.bold().monospaced())
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, DesignSpacing.xs.pt)
+                        .padding(.vertical, DesignSpacing.xs.pt)
+                        .background(
+                            RoundedRectangle(cornerRadius: DesignRadius.small.pt)
+                                .fill(MeterPalette.swiftUIColor(.over)))
+                }
+                .buttonStyle(.plain)
+                .help("Clip latch. Click to reset.")
+                .accessibilityLabel("Clipped. Reset clip latch for \(channel.label)")
+                .accessibilityIdentifier("meter.reset.\(channel.id)")
+            }
+        }
+    }
+
     private func x(_ db: Double, width: Double) -> Double {
-        let span = -MeterBallisticsState.floorDB
-        return min(max((db - MeterBallisticsState.floorDB) / span, 0), 1) * width
+        let floor = channel.floorDB
+        return min(max((db - floor) / -floor, 0), 1) * width
+    }
+
+    /// Fills the part of the bar between two levels with the zone tint and its hatching.
+    private func drawZones(context: inout GraphicsContext, width: Double, barHeight: Double, level: Double) {
+        let filled = x(level, width: width)
+        for zone in MeterZone.allCases {
+            let lower = zone.lowerBoundDB.map { x($0, width: width) } ?? 0
+            let upperDB = MeterZone(rawValue: zone.rawValue + 1)?.lowerBoundDB
+            let upper = upperDB.map { x($0, width: width) } ?? width
+            let end = min(upper, filled)
+            guard end > lower else { continue }
+            let rect = CGRect(x: lower, y: 0, width: end - lower, height: barHeight)
+            context.fill(Path(rect), with: .color(MeterPalette.swiftUIColor(zone)))
+            guard zone.hatchDirections > 0 else { continue }
+            var clipped = context
+            clipped.clip(to: Path(rect))
+            var hatch = Path()
+            var hx = rect.minX - barHeight
+            while hx < rect.maxX {
+                hatch.move(to: CGPoint(x: hx, y: barHeight)); hatch.addLine(to: CGPoint(x: hx + barHeight, y: 0))
+                if zone.hatchDirections > 1 {
+                    hatch.move(to: CGPoint(x: hx, y: 0)); hatch.addLine(to: CGPoint(x: hx + barHeight, y: barHeight))
+                }
+                hx += 4
+            }
+            clipped.stroke(hatch, with: .color(.black.opacity(0.55)), lineWidth: 0.75)
+        }
     }
 
     private func draw(context: inout GraphicsContext, size: CGSize) {
@@ -159,28 +279,35 @@ struct MeterBarView: View {
         let track = CGRect(x: 0, y: 0, width: size.width, height: barHeight)
         context.fill(Path(roundedRect: track, cornerRadius: 3), with: .color(.primary.opacity(0.12)))
 
-        let fill = CGRect(x: 0, y: 0, width: x(channel.displayedDB, width: size.width), height: barHeight)
-        context.fill(Path(fill), with: .color(.primary.opacity(0.6)))
+        if channel.zonesEnabled {
+            drawZones(context: &context, width: size.width, barHeight: barHeight, level: channel.displayedDB)
+        } else {
+            let fill = CGRect(x: 0, y: 0, width: x(channel.displayedDB, width: size.width), height: barHeight)
+            context.fill(Path(fill), with: .color(.primary.opacity(0.6)))
 
-        // OVER zone (above -3 dBFS): diagonal hatching, so the zone reads without colour.
-        let overStart = x(-3, width: size.width)
-        let over = CGRect(x: overStart, y: 0, width: size.width - overStart, height: barHeight)
-        var hatchContext = context
-        hatchContext.clip(to: Path(over))
-        var hatch = Path()
-        var hx = over.minX - barHeight
-        while hx < over.maxX {
-            hatch.move(to: CGPoint(x: hx, y: barHeight))
-            hatch.addLine(to: CGPoint(x: hx + barHeight, y: 0))
-            hx += 4
+            // OVER zone (above -3 dBFS): diagonal hatching, so the zone reads without colour.
+            let overStart = x(-3, width: size.width)
+            let over = CGRect(x: overStart, y: 0, width: size.width - overStart, height: barHeight)
+            var hatchContext = context
+            hatchContext.clip(to: Path(over))
+            var hatch = Path()
+            var hx = over.minX - barHeight
+            while hx < over.maxX {
+                hatch.move(to: CGPoint(x: hx, y: barHeight))
+                hatch.addLine(to: CGPoint(x: hx + barHeight, y: 0))
+                hx += 4
+            }
+            hatchContext.stroke(hatch, with: .color(.primary.opacity(0.35)), lineWidth: 0.75)
         }
-        hatchContext.stroke(hatch, with: .color(.primary.opacity(0.35)), lineWidth: 0.75)
 
-        // Scale ticks.
-        for tick in Self.ticks {
+        // Scale ticks (the zone boundaries -18, -6 and -3 are longer when zones are on).
+        let ticks = channel.zonesEnabled ? Self.zoneTicks(floorDB: channel.floorDB) : Self.ticks.map(\.db)
+        for db in ticks {
+            let tick = (db: db, label: "")
             let tx = x(tick.db, width: size.width)
             var line = Path()
-            line.move(to: CGPoint(x: tx, y: barHeight - 4))
+            let long = channel.zonesEnabled && MeterZone.boundariesDB.contains(tick.db)
+            line.move(to: CGPoint(x: tx, y: barHeight - (long ? barHeight : 4)))
             line.addLine(to: CGPoint(x: tx, y: barHeight))
             context.stroke(line, with: .color(.primary.opacity(0.7)), lineWidth: 1)
         }

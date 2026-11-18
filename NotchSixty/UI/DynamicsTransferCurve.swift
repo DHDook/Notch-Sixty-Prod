@@ -58,7 +58,7 @@ struct DynamicsTransferCurve: Equatable, Sendable {
                   kneeDB: Self.deEsserKneeDB, floorDB: deEsser.rangeDB)
     }
 
-    /// One band of the multiband compressor: 0 low, 1 mid, 2 high.
+    /// One band of the multiband compressor: 0 low, 1 mid, 2 high, then 3 and 4 of a 4 or 5 band split (E33 S6, G19).
     init(_ multiband: MultibandCompressorConfiguration, band: Int) {
         switch band {
         case 0:
@@ -67,6 +67,10 @@ struct DynamicsTransferCurve: Equatable, Sendable {
         case 1:
             self.init(kind: .compressor, thresholdDB: multiband.midThresholdDB, ratio: multiband.midRatio,
                       kneeDB: multiband.midKneeDB, makeupDB: multiband.midMakeupGainDB)
+        case 3, 4:
+            let extra = multiband[extraBand: band]
+            self.init(kind: .compressor, thresholdDB: extra.thresholdDB, ratio: extra.ratio,
+                      kneeDB: extra.kneeDB, makeupDB: extra.makeupGainDB)
         default:
             self.init(kind: .compressor, thresholdDB: multiband.highThresholdDB, ratio: multiband.highRatio,
                       kneeDB: multiband.highKneeDB, makeupDB: multiband.highMakeupGainDB)

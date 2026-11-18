@@ -82,12 +82,15 @@ struct ProductionDynamicsTelemetryView: View {
         case .limiter: return [(.limiter, DynamicsTransferCurve(d.limiter))]
         case .deEsser: return [(.deEsser, DynamicsTransferCurve(d.deEsser))]
         case .multiband:
-            // E33 S5b: panels for the first three bands; bands 4 and 5 have chips only (the bar views take S6's list, G17).
-            let all: [(GainReductionSource, DynamicsTransferCurve?)] = [
+            // E33 S5b and S6 (G19): one panel per band, up to five, with the flag on; three without it.
+            var all: [(GainReductionSource, DynamicsTransferCurve?)] = [
                 (.multibandLow, DynamicsTransferCurve(d.multibandCompressor, band: 0)),
                 (.multibandMid, DynamicsTransferCurve(d.multibandCompressor, band: 1)),
                 (.multibandHigh, DynamicsTransferCurve(d.multibandCompressor, band: 2))]
-            return FeatureFlags().isEnabled(.eqPageEnhancements) ? Array(all.prefix(d.multibandCompressor.bandCountValue)) : all
+            guard FeatureFlags().isEnabled(.eqPageEnhancements) else { return all }
+            all.append((.multibandBand4, DynamicsTransferCurve(d.multibandCompressor, band: 3)))
+            all.append((.multibandBand5, DynamicsTransferCurve(d.multibandCompressor, band: 4)))
+            return Array(all.prefix(d.multibandCompressor.bandCountValue))
         default: return []
         }
     }

@@ -48,6 +48,9 @@ struct ProductionLoudnessCard: View {
     let unavailableReason: String?
     /// True for N-channel and binaural sessions (E28 S6b).
     var isWide = false
+    /// E33 S6: spoken values change at most every 2 s or on a 1 LU move (`e33.page-enhancements`).
+    var rateLimitedSpeech = false
+    @State var spoken = SpokenValueBook()
     let onSource: (LoudnessSource) -> Void
     let onReset: () -> Void
 
@@ -76,9 +79,9 @@ struct ProductionLoudnessCard: View {
                 Text("Start processing to measure loudness.").font(DesignType.caption.font).foregroundStyle(.secondary)
             } else {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: DesignSpacing.m.pt)], spacing: DesignSpacing.m.pt) {
-                    value("Momentary", LoudnessCardText.lufs(readout?.momentary), "momentary")
-                    value("Short-term", LoudnessCardText.lufs(readout?.shortTerm), "shortTerm")
-                    value("Integrated", LoudnessCardText.lufs(readout?.integrated), "integrated")
+                    value("Momentary", LoudnessCardText.lufs(readout?.momentary), "momentary", number: readout?.momentary)
+                    value("Short-term", LoudnessCardText.lufs(readout?.shortTerm), "shortTerm", number: readout?.shortTerm)
+                    value("Integrated", LoudnessCardText.lufs(readout?.integrated), "integrated", number: readout?.integrated)
                     value("Loudness range", LoudnessCardText.lu(readout?.range), "range")
                     value(
                         "True peak max",
@@ -106,8 +109,10 @@ struct ProductionLoudnessCard: View {
         .accessibilityIdentifier("meters.loudness")
     }
 
-    private func value(_ title: String, _ text: String, _ id: String) -> some View {
-        VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
+    private func value(_ title: String, _ text: String, _ id: String, number: Double? = nil) -> some View {
+        let spokenText = rateLimitedSpeech
+            ? spoken.value(id: id, text: text, number: number, now: ProcessInfo.processInfo.systemUptime) : text
+        return VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
             Text(title).font(DesignType.caption.font).foregroundStyle(.secondary)
             Text(text)
                 .font(.system(.title3, design: .monospaced).weight(.semibold))
@@ -115,7 +120,7 @@ struct ProductionLoudnessCard: View {
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(title), \(source.title)")
-        .accessibilityValue(text)
+        .accessibilityValue(spokenText)
         .accessibilityIdentifier("meters.loudness.\(id)")
     }
 }

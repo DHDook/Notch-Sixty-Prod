@@ -6,6 +6,8 @@ import Foundation
 /// rows and the Meters page all see the same peaks.
 enum GainReductionSource: String, CaseIterable, Identifiable, Sendable {
     case compressor, deEsser, multibandLow, multibandMid, multibandHigh, expander, limiter
+    /// E33 S6 (G19): the fourth and fifth multiband bands of a 4 or 5 band split.
+    case multibandBand4, multibandBand5
 
     var id: String { rawValue }
 
@@ -18,6 +20,8 @@ enum GainReductionSource: String, CaseIterable, Identifiable, Sendable {
         case .multibandHigh: return "Multiband High"
         case .expander: return "Expander"
         case .limiter: return "Limiter"
+        case .multibandBand4: return "Multiband Band 4"
+        case .multibandBand5: return "Multiband Band 5"
         }
     }
 
@@ -35,6 +39,8 @@ enum GainReductionSource: String, CaseIterable, Identifiable, Sendable {
         case .multibandHigh: return diagnostics.multibandHighGainReductionDB
         case .expander: return diagnostics.expanderAttenuationDB
         case .limiter: return diagnostics.limiterGainReductionDB
+        case .multibandBand4: return diagnostics.multibandBand4GainReductionDB
+        case .multibandBand5: return diagnostics.multibandBand5GainReductionDB
         }
     }
 
@@ -95,6 +101,8 @@ final class GainReductionMonitor: ObservableObject {
     /// pause their timelines. It flips immediately in `ingest`, which also bumps `textRevision`.
     private(set) var isAtRest = true
     private var clientRates: [UUID: Double] = [:]
+    /// E33 S6: the one Peak hold preference, applied to every history. 1 s until `e33.page-enhancements` is on.
+    private(set) var holdSeconds = GainReductionHistory.holdSeconds
 
     var clientCount: Int { clientRates.count }
 
@@ -104,6 +112,7 @@ final class GainReductionMonitor: ObservableObject {
     func attach(hertz: Double = GainReductionMonitor.pageHertz) -> UUID {
         let id = UUID()
         clientRates[id] = hertz
+        if FeatureFlags().isEnabled(.eqPageEnhancements) { setHold(seconds: MeterHoldChoice.stored().seconds) }
         updateSubscription()
         if task == nil, token != nil {
             task = Task { @MainActor [weak self] in
@@ -166,6 +175,7 @@ final class GainReductionMonitor: ObservableObject {
     func ingest(_ readings: [String: MeterChannelReading], now: Double) {
         for source in GainReductionSource.allCases {
             var history = histories[source] ?? GainReductionHistory()
+            history.holdSeconds = holdSeconds
             history.ingest(readings[source.channelID]?.peakLinear ?? 0, at: now)
             histories[source] = history
             var throttle = throttles[source] ?? MeterValueThrottle()
@@ -184,6 +194,20 @@ final class GainReductionMonitor: ObservableObject {
             lastTextBump = now
             textRevision &+= 1
         }
+    }
+
+    /// Changes the hold time of every history (the Peak hold preference).
+    func setHold(seconds: Double) {
+        guard seconds != holdSeconds else { return }
+        holdSeconds = seconds
+        for source in histories.keys { histories[source]?.holdSeconds = seconds }
+        textRevision &+= 1
+    }
+
+    /// The Reset menu's "Peak hold": clears every held tick and nothing else.
+    func resetHolds() {
+        for source in histories.keys { histories[source]?.resetHold() }
+        textRevision &+= 1
     }
 
     func reset() {

@@ -616,7 +616,7 @@ it follows). One flag `e33.page-enhancements`, graduated in S11. K-System scales
 - [~] S4 `e33/dynamics-page`: numbered chain, relative-grab sliders, shown field limits, dynamic EQ row, navigator accessibility, display polish (low-risk); built dark behind `e33.page-enhancements` (off); wiring: S11
 - [~] S5a `e33/expander-lookahead`: optional expander lookahead; shared compressor and de-esser internals closed with evidence (no extraction); built dark behind `e33.page-enhancements` (off); wiring: S11
 - [~] S5b `e33/multiband-bands`: multiband 2–5 bands, ranges aligned with the wideband compressor (needs-owner, realtime); built dark behind `e33.page-enhancements` (off); wiring: S11
-- [ ] S6 `e33/meter-bars`: level zones, numeric peaks, scale option, one peak hold, one reset menu, one stopped state, VoiceOver pacing (low-risk)
+- [~] S6 `e33/meter-bars`: level zones, numeric peaks, scale option, one peak hold, one reset menu, one stopped state, VoiceOver pacing (low-risk); built dark behind `e33.page-enhancements` (off), wiring: S11; includes G19 (bands 4 and 5 gain reduction)
 - [ ] S7 `e33/loudness-and-gain-reduction`: loudness maxima, history and target, one short-term label, one GR reader, total GR (low-risk)
 - [~] S8 `e33/analysis-meters`: PLR and crest, balance, per-band correlation, headroom strip, third-octave RTA, dropout counter (low-risk); built dark behind `e33.page-enhancements` (off); wiring: S11
 - [~] S9 `e33/spectrogram-bit-activity`: live spectrogram and input bit activity (low-risk); built dark behind `e33.page-enhancements` (off); wiring: S11
