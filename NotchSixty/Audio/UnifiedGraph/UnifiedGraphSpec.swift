@@ -196,6 +196,16 @@ struct UnifiedGraphSpec: Equatable {
         return true
     }
 
+    /// True when a parametric-EQ section changes filter type (E27 G22). A live post would swap the coefficients
+    /// over the short ramp with the old filter's state carried into the new type, which overshoots the step
+    /// criterion on a bypass or audition switch; a faded rebuild warms the new filter first.
+    func changesPeqBandType(since old: UnifiedGraphSpec) -> Bool {
+        for (new, previous) in zip(stages, old.stages) where new.kind == N60_STAGE_PEQ.rawValue && new.params.count == previous.params.count {
+            for index in stride(from: 0, to: new.params.count, by: 4) where new.params[index] != previous.params[index] { return true }
+        }
+        return false
+    }
+
     /// Parameter records that differ from `old` (same topology required).
     func changedParameters(since old: UnifiedGraphSpec) -> [n60_param_record] {
         var records: [n60_param_record] = []
