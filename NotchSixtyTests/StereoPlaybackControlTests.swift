@@ -948,7 +948,7 @@ final class StereoPlaybackControlTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: directory) }
 
         let controller = ProductProfileController(engine: AudioIOEngine(), storageURL: archiveURL)
-        XCTAssertEqual(controller.contentPresets.count, 8)
+        XCTAssertEqual(controller.contentPresets.count, 9)
         XCTAssertEqual(controller.selectedContentPresetName, "Reference")
         XCTAssertTrue(controller.canOverwriteSelectedContentPreset)
 

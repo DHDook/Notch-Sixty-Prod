@@ -4,6 +4,8 @@ import SwiftUI
 struct ProductionDynamicsView: View {
     var engine: AudioIOEngine
     var reference: ProductionReferenceNavigator? = nil
+    /// E33 S15: read for the "Start from" unsaved-edits check; nil hides nothing, it only skips the ask.
+    var profiles: ProductProfileController? = nil
     @State private var selectedModule: ProductionDynamicsModule = .compressor
     @State private var grAttachment: UUID?
     @State private var expandedMoreGroups: Set<String> = []
@@ -69,6 +71,14 @@ struct ProductionDynamicsView: View {
                     .foregroundStyle(.secondary)
             }
             Spacer()
+            if enhanced {
+                DynamicsStartFromMenu(
+                    hasUnsavedDynamicsEdits: {
+                        guard let preset = profiles?.selectedContentPreset else { return false }
+                        return preset.state.dynamics != engine.dynamicsConfiguration
+                    },
+                    apply: { point in update(name: "Start from \(point.title)") { $0 = point.applying(to: $0) } })
+            }
             Text("\(activeModuleCount) ACTIVE")
                 .font(DesignType.caption.font.bold())
                 .tracking(1.1)
@@ -826,6 +836,10 @@ struct ProductionDynamicsView: View {
     private var limiterEditor: some View {
         moduleCard(module: .limiter, enabled: boolBinding({ $0.limiter.enabled }, { $0.limiter.enabled = $1 }), reset: { preserveEnabledReset(\.limiter, defaultValue: LimiterConfiguration()) }) {
             ProductionDynamicsTelemetryView(engine: engine, kind: .limiter)
+            if enhanced {
+                LimiterProtectionLineView(
+                    engine: engine, limiterOn: configuration.limiter.enabled, monitor: GainReductionMonitor.shared(for: engine))
+            }
             row(.limiterCeilingDB)
             row(.limiterAttackMs)
             if LimiterAutoRelease.isAvailable, configuration.limiter.isAutoRelease {

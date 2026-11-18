@@ -833,7 +833,12 @@ final class ProductProfileController: ObservableObject {
         var selectedSystemProfileID: UUID?
         var hardwareMappingRequirements:
             [PlaybackSystemHardwareMappingRequirement]?
+        /// E33 S15: the factory-preset refresh already applied to this archive (nil before it). Optional, so older archives decode.
+        var factoryRefreshRevision: Int?
     }
+
+    /// Bump when a factory preset changes and `refreshFactoryContentPresets` handles the change.
+    private static let factoryRefreshRevision = 1
 
     /// Unsaved content edits on top of `presetID`, kept in a small sidecar file
     /// next to the archive so frequent working-state saves never rewrite the
@@ -852,6 +857,7 @@ final class ProductProfileController: ObservableObject {
     private static let streamingPresetID = UUID(uuidString: "6A782AB6-492B-46C9-A0A0-000000000014")!
     private static let classicPopRockPresetID = UUID(uuidString: "6A782AB6-492B-46C9-A0A0-000000000015")!
     private static let vocalStandardsPresetID = UUID(uuidString: "6A782AB6-492B-46C9-A0A0-000000000016")!
+    private static let cinemaNightPresetID = UUID(uuidString: "6A782AB6-492B-46C9-A0A0-000000000017")!
 
     private static func factoryBand(
         _ type: EQFilterType,
@@ -894,6 +900,35 @@ final class ProductProfileController: ObservableObject {
         dynamics.limiter.lookAheadMs = limiterLookAheadMs
         dynamics.limiter.releaseMs = limiterReleaseMs
         dynamics.limiter.truePeakGuardEnabled = true
+        return dynamics
+    }
+
+    /// E33 S15 (decision 14): Cinema keeps the base protection and gains the dialogue leveller and loudness settings. A two
+    /// level-control preset, so the stacking hint stays quiet. The limiter is unchanged, and Auto Release stays off here so a
+    /// flags-off build publishes what it always did.
+    static func cinemaDynamics() -> DynamicsConfiguration {
+        var dynamics = factoryBaseDynamics()
+        dynamics.dialogueRelativeLeveler.enabled = true
+        dynamics.dialogueRelativeLeveler.targetGapDB = 8.0
+        dynamics.dialogueRelativeLeveler.boostRatio = 1.8
+        dynamics.dialogueRelativeLeveler.maxBoostDB = 6.0
+        dynamics.loudnessMatch.enabled = true
+        dynamics.loudnessMatch.dialogueGateEnabled = true
+        dynamics.loudnessMatch.targetLUFS = -23.0
+        dynamics.loudnessMatch.maxCorrectionDB = 6.0
+        dynamics.loudnessMatch.attackSeconds = 2.0
+        dynamics.loudnessMatch.releaseSeconds = 5.0
+        return dynamics
+    }
+
+    /// Cinema's Dynamics before E33 S15. A stored Cinema whose Dynamics equal this was never edited, so load replaces it with
+    /// the new one; an edited or copied Cinema is left exactly as it is.
+    static func legacyCinemaDynamics() -> DynamicsConfiguration { factoryBaseDynamics() }
+
+    /// E33 S15: Cinema EQ with the Late night recipe. The limiter's Auto Release is not set (flag-off identity).
+    static func cinemaNightDynamics() -> DynamicsConfiguration {
+        var dynamics = DynamicsStartingPoint.lateNight.applying(to: factoryBaseDynamics())
+        dynamics.limiter.autoRelease = nil
         return dynamics
     }
 
@@ -967,6 +1002,16 @@ final class ProductProfileController: ObservableObject {
             dynamics: dynamics
         )
     }
+
+    private static let cinemaBands: [EQBand] = [
+        factoryBand(.lowShelf, 45, 0.4, 0.70),
+        factoryBand(.peaking, 120, -0.6, 1.00),
+        factoryBand(.peaking, 300, -0.7, 1.10),
+        factoryBand(.peaking, 2_000, 1.1, 0.90),
+        factoryBand(.peaking, 3_500, 0.4, 1.10),
+        factoryBand(.peaking, 7_000, -0.3, 1.00),
+        factoryBand(.highShelf, 12_000, 0.5, 0.70),
+    ]
 
     private static let factoryContentPresets: [ContentPreset] = [
         ContentPreset(
@@ -1090,18 +1135,21 @@ final class ProductProfileController: ObservableObject {
             name: "Cinema",
             origin: .factory,
             state: factoryState(
-                bands: [
-                    factoryBand(.lowShelf, 45, 0.4, 0.70),
-                    factoryBand(.peaking, 120, -0.6, 1.00),
-                    factoryBand(.peaking, 300, -0.7, 1.10),
-                    factoryBand(.peaking, 2_000, 1.1, 0.90),
-                    factoryBand(.peaking, 3_500, 0.4, 1.10),
-                    factoryBand(.peaking, 7_000, -0.3, 1.00),
-                    factoryBand(.highShelf, 12_000, 0.5, 0.70),
-                ],
+                bands: cinemaBands,
                 inputPreampDB: -1.5,
                 headroomAttenuationDB: -0.7,
-                dynamics: factoryBaseDynamics()
+                dynamics: cinemaDynamics()
+            )
+        ),
+        ContentPreset(
+            id: cinemaNightPresetID,
+            name: "Cinema Night",
+            origin: .factory,
+            state: factoryState(
+                bands: cinemaBands,
+                inputPreampDB: -1.5,
+                headroomAttenuationDB: -0.7,
+                dynamics: cinemaNightDynamics()
             )
         ),
         ContentPreset(
@@ -1983,6 +2031,22 @@ final class ProductProfileController: ObservableObject {
         try engine.applyProgramFoldDown(plan)
     }
 
+    /// E33 S15 (decision 14, v1 not shipped): a stored Cinema whose Dynamics are still the old factory ones gets the new ones, and
+    /// Cinema Night is added once. A Cinema the user edited, a user copy of Cinema and every other preset are never rewritten.
+    /// Runs once per archive (`factoryRefreshRevision`), so deleting Cinema Night keeps it deleted.
+    func refreshFactoryContentPresets() {
+        if let index = userContentPresets.firstIndex(where: {
+            $0.id == Self.cinemaPresetID && $0.origin == .factory && $0.state.dynamics == Self.legacyCinemaDynamics()
+        }) {
+            userContentPresets[index].state.dynamics = Self.cinemaDynamics()
+        }
+        if !userContentPresets.contains(where: { $0.id == Self.cinemaNightPresetID }),
+           let night = Self.factoryContentPresets.first(where: { $0.id == Self.cinemaNightPresetID }) {
+            let at = userContentPresets.firstIndex { $0.id == Self.cinemaPresetID }.map { $0 + 1 } ?? userContentPresets.count
+            userContentPresets.insert(night, at: at)
+        }
+    }
+
     private func ensureContentPresetsSeeded() {
         guard !didLoadArchive, userContentPresets.isEmpty else { return }
         userContentPresets = Self.factoryContentPresets
@@ -2259,6 +2323,9 @@ final class ProductProfileController: ObservableObject {
                             == RoomCorrectionCalibrationSummary.currentSchemaVersion)
                     && Self.storedSystemTopologyIsValid($0.state)
             }
+            if (archive.factoryRefreshRevision ?? 0) < Self.factoryRefreshRevision, archive.schemaVersion >= 2 {
+                refreshFactoryContentPresets()
+            }
             selectedContentPresetID = archive.selectedContentPresetID
             selectedSystemProfileID = archive.selectedSystemProfileID
             hardwareMappingRequirements =
@@ -2303,7 +2370,8 @@ final class ProductProfileController: ObservableObject {
             selectedContentPresetID: selectedContentPresetID,
             selectedSystemProfileID: selectedSystemProfileID,
             hardwareMappingRequirements:
-                hardwareMappingRequirements
+                hardwareMappingRequirements,
+            factoryRefreshRevision: Self.factoryRefreshRevision
         )
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
