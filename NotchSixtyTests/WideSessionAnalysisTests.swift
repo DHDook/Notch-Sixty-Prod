@@ -299,7 +299,7 @@ final class WideSessionAnalysisTests: XCTestCase {
         XCTAssertNil(feed.stereoReadout().correlation)
     }
 
-    func testCostOfAllViewsAtThe384kHzWith32Channels() {
+    func testAllViewsRunTogetherAt384kHzWith32Channels() {
         let rate = 384_000.0
         let roles = Array(OutputProgramRole.allCases) + Array(OutputProgramRole.allCases)
         let p = WideAnalysisPlan(roles: roles, inputChannels: 32, outputChannels: 32, isBinaural: false)
@@ -309,14 +309,12 @@ final class WideSessionAnalysisTests: XCTestCase {
         let n = Int(rate / 10)
         var block = [Float](repeating: 0, count: n * 32)
         for f in 0..<n { for c in 0..<32 { block[f * 32 + c] = 0.05 * tone(200 + Double(c) * 31, rate: rate, f) } }
-        let started = Date()
-        for _ in 0..<10 {
+        // Behaviour only: wall-clock cost is not asserted in a Debug XCTest (CI runners vary); the Release figure is G71.
+        for _ in 0..<2 {
             block.withUnsafeBufferPointer { feed.ingest(input: $0.baseAddress!, output: $0.baseAddress!, frames: n) }
         }
-        let wall = Date().timeIntervalSince(started)
-        // Recorded for the PR: seconds of CPU per second of 32-channel 384 kHz audio with every view held at once.
-        print("E33 S17 cost: \(String(format: "%.2f", wall)) s per second of audio, 32 channels at 384 kHz, all views on")
-        XCTAssertLessThan(wall, 60, "a loose ceiling in a Debug build; the figure is for the record")
+        XCTAssertEqual(feed.bitActivity().count, 32)
+        XCTAssertNotNil(feed.meterReadout(loudness: nil))
     }
 
     // MARK: Headroom
