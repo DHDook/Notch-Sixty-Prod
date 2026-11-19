@@ -63,14 +63,15 @@ final class EQEditorLayoutTests: XCTestCase {
     }
 
     func testEveryFilterTypeIsInExactlyOnePickerSection() {
-        for type in EQFilterType.allCases {
+        for type in EQFilterType.allCases where type != .fir {
             let hits = EQFilterPickerModel.sections.filter { $0.types.contains(type) }
             XCTAssertEqual(hits.count, 1, "\(type)")
         }
         XCTAssertEqual(EQFilterPickerModel.sections.map(\.title), ["Basic", "Special"])
+        XCTAssertNil(EQFilterPickerModel.sectionTitle(of: .fir))  // E33 S18 (G34)
         XCTAssertEqual(EQFilterPickerModel.sectionTitle(of: .peaking), "Basic")
         XCTAssertEqual(EQFilterPickerModel.sectionTitle(of: .notch), "Basic")
-        for type in [EQFilterType.linkwitzTransform, .tilt, .allPass, .fir] {
+        for type in [EQFilterType.linkwitzTransform, .tilt, .allPass] {
             XCTAssertEqual(EQFilterPickerModel.sectionTitle(of: type), "Special", "\(type)")
         }
     }

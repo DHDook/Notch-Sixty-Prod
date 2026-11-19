@@ -207,27 +207,17 @@ struct UnifiedGraphProgramDSP: Equatable, Sendable {
             }
         }
 
-        let lfe = shape.lfeLane
-        let nonLFE = (0..<count).filter { $0 != lfe }
         let leftMembers = shape.leftMembers
         let rightMembers = shape.rightMembers
         let pairedLanes = (leftMembers + rightMembers).sorted()
         let programMask = Self.mask(Array(0..<count))
 
         // D2: which lanes carry the EQ-like stages, and which curve each gets.
-        var covered: [Int]
-        var curves: [(lane: Int, sections: [UnifiedGraphPEQSection])] = []
-        switch eqMode {
-        case .linked:
-            covered = nonLFE
-            curves = nonLFE.map { ($0, left.eq) }
-        case .independent:
-            covered = pairedLanes
-            curves = leftMembers.map { ($0, left.eq) } + rightMembers.map { ($0, right.eq) }
-        case .midSide:
-            covered = nonLFE
-            curves = nonLFE.map { lane in (lane, rightMembers.contains(lane) ? right.eq : left.eq) }
-        }
+        let reach = EQSessionReach.reach(shape: shape, mode: eqMode)
+        let covered = reach.covered
+        // First curve (left, mid, or the one linked curve) and second curve (right, side) per the reach table.
+        var curves: [(lane: Int, sections: [UnifiedGraphPEQSection])] =
+            reach.firstCurveLanes.map { ($0, left.eq) } + reach.secondCurveLanes.map { ($0, right.eq) }
         curves = curves.filter { !$0.sections.isEmpty }.sorted { $0.lane < $1.lane }
         let midSideActive = eqMode == .midSide && !curves.isEmpty
         if midSideActive {
