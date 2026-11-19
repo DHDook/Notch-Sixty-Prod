@@ -186,6 +186,13 @@ struct ProductionEqualizerView: View {
             }
             modeBar
 
+            if enhanced, let reach = engine.eqReachText {
+                Text(reach)
+                    .font(DesignType.caption.font)
+                    .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("eq.reach.line")
+            }
+
             if showCompare, let comparison, let audition {
                 ProductionEQCompareBar(
                     comparison: comparison, audition: audition, history: history,
@@ -861,10 +868,6 @@ struct ProductionEqualizerView: View {
                         .font(.subheadline.bold())
                     if let taps = band.firKernel?.taps.count {
                         Text("\(taps) taps").font(DesignType.caption.font.monospacedDigit()).foregroundStyle(.secondary)
-                    }
-                    if !enhanced {
-                        Text("FIR asset import remains in Engineering Validation until the production import/persistence milestone.")
-                            .font(DesignType.caption.font).foregroundStyle(.secondary)
                     }
                 }
             }

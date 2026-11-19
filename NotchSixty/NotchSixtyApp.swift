@@ -551,12 +551,15 @@ final class ProductController: ObservableObject {
         return activation
     }
 
-    func selectContentPreset(_ id: UUID) async throws {
+    /// `keeping`: E33 S18 (G38), the EQ slot to keep when slot B differs from A; without it that case throws
+    /// `EQSlotChoiceError.choiceRequired` and nothing changes.
+    func selectContentPreset(_ id: UUID, keeping slot: EQComparisonSlot? = nil) async throws {
         guard let preset = profiles.contentPresets.first(where: {
             $0.id == id
         }) else {
             return
         }
+        try profiles.resolveEQSlotsBeforePresetSwitch(keeping: slot)
 
         let previous = profiles.captureContentState()
         let targetRack = preset.state.audioUnitRack

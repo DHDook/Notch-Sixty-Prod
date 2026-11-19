@@ -280,6 +280,15 @@ struct ContentABLoudnessMatchPlan: Equatable, Sendable {
     }
 }
 
+/// E33 S18 (G38): a preset switch while EQ slot B differs from A needs a choice first.
+enum EQSlotChoiceError: Error, LocalizedError, Equatable {
+    case choiceRequired
+
+    var errorDescription: String? {
+        "Choose Keep A or Keep B in the Equalizer compare bar before switching presets."
+    }
+}
+
 enum ContentABComparisonError: Error, LocalizedError, Equatable {
     case eqComparisonActive
     case emptySlot(ContentABSlot)
@@ -1220,6 +1229,8 @@ final class ProductProfileController: ObservableObject {
         loadArchive()
         migrateLoadedSpeakerRouting()
         loadWorkingContentState()
+        loadEQComparisonState()
+        eqComparison.onStateChange = { [weak self] in self?.persistEQComparisonState() }
         ensureContentPresetsSeeded()
         ensureDefaultSystemProfile()
         reconcileSelections()
@@ -1294,6 +1305,62 @@ final class ProductProfileController: ObservableObject {
         }
     }
 
+    // E33 S18 (G38, behind `e33.page-enhancements`): EQ slot B is kept with the working state across a relaunch. It is
+    // still not stored in the profile: this sidecar is dropped when the comparison ends or the preset changes.
+    private struct EQComparisonFile: Codable {
+        var presetID: UUID?
+        var state: EQComparisonController.PersistedState
+    }
+
+    private var pendingEQComparison: EQComparisonFile?
+    /// Reads `e33.page-enhancements`; tests replace it.
+    var eqEnhancementsEnabled: () -> Bool = { FeatureFlags().isEnabled(.eqPageEnhancements) }
+
+    private var eqComparisonURL: URL {
+        storageURL.deletingLastPathComponent().appendingPathComponent(
+            storageURL.deletingPathExtension().lastPathComponent + "-eqcompare.json"
+        )
+    }
+
+    private func loadEQComparisonState() {
+        guard let data = try? Data(contentsOf: eqComparisonURL),
+              let file = try? JSONDecoder().decode(EQComparisonFile.self, from: data) else { return }
+        pendingEQComparison = file
+    }
+
+    private func persistEQComparisonState() {
+        guard didRestoreSelection, eqEnhancementsEnabled() else { return }
+        if let state = eqComparison.persistedState {
+            let file = EQComparisonFile(presetID: selectedContentPresetID, state: state)
+            guard let data = try? JSONEncoder().encode(file) else { return }
+            try? FileManager.default.createDirectory(
+                at: eqComparisonURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try? data.write(to: eqComparisonURL, options: .atomic)
+        } else if FileManager.default.fileExists(atPath: eqComparisonURL.path) {
+            try? FileManager.default.removeItem(at: eqComparisonURL)
+        }
+    }
+
+    /// Re-enters the saved comparison once the launch restore has put the working EQ back (the same preset only).
+    private func restoreEQComparison() {
+        defer { pendingEQComparison = nil }
+        guard let file = pendingEQComparison else { return }
+        guard eqEnhancementsEnabled(), file.presetID == selectedContentPresetID else {
+            persistEQComparisonState()
+            return
+        }
+        eqComparison.restore(file.state)
+        persistEQComparisonState()
+    }
+
+    /// Called before a content preset is applied. Throws when slot B differs from A and no slot was chosen; with a
+    /// choice it keeps that slot (so the preset switch discards nothing the user did not pick).
+    func resolveEQSlotsBeforePresetSwitch(keeping slot: EQComparisonSlot?) throws {
+        guard eqEnhancementsEnabled(), eqComparison.needsSlotChoice else { return }
+        guard let slot else { throw EQSlotChoiceError.choiceRequired }
+        try eqComparison.keep(slot, history: nil)
+    }
+
     private func clearWorkingContentState() {
         guard workingContentState != nil || workingContentPresetID != nil else { return }
         workingContentState = nil
@@ -1364,17 +1431,20 @@ final class ProductProfileController: ObservableObject {
             try applySelectedLayersNow()
         } catch {
             lastErrorDescription = error.localizedDescription
+            pendingEQComparison = nil
             return
         }
-        guard let working = workingContentState,
-              workingContentPresetID == selectedContentPresetID else { return }
-        do {
-            try applyContentState(working)
-        } catch {
-            // A stale working state must never block launch; the saved preset
-            // is already applied.
-            clearWorkingContentState()
+        if let working = workingContentState, workingContentPresetID == selectedContentPresetID {
+            do {
+                try applyContentState(working)
+            } catch {
+                // A stale working state must never block launch; the saved preset
+                // is already applied.
+                clearWorkingContentState()
+                pendingEQComparison = nil
+            }
         }
+        restoreEQComparison()
     }
 
     /// Explicitly applies the currently selected saved layers even after the
