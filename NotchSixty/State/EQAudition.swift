@@ -46,6 +46,13 @@ extension StereoEQConfiguration {
         copy.phaseMode = .minimumPhase
         copy.bypassed = false
         let lane = [override.band]
+        // E33 S20 part 2: listening to a group band plays it on that group's lanes only, with no other EQ.
+        if let key = editGroupKey {
+            copy.linkedBands = []; copy.leftBands = []; copy.rightBands = []; copy.midBands = []; copy.sideBands = []
+            copy.groupBandLists = [key: lane]
+            return copy
+        }
+        copy.groupBandLists = [:]
         switch channelMode {
         case .linked: copy.linkedBands = lane
         case .independent:

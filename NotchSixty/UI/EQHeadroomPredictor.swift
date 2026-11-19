@@ -43,6 +43,7 @@ enum EQHeadroomPredictor {
     static func predict(
         configuration: StereoEQConfiguration,
         sampleRate: Double,
+        roleCodes: [UInt32] = [],
         programFor: (([EQBand], Double) -> [N60BiquadCoefficients])? = nil
     ) -> EQHeadroomPrediction {
         guard sampleRate.isFinite, sampleRate > 0, !configuration.bypassed else { return .none }
@@ -55,7 +56,13 @@ enum EQHeadroomPredictor {
         }
         let omitsFIR = lanes.contains { $0.contains { $0.enabled && $0.type == .fir } }
         let compiled = lanes.map { sections(for: $0, sampleRate: sampleRate, programFor: programFor) }
+        // E33 S20 (G76): a group's list adds to the session curve on its own lanes, so its worst case is the session's
+        // worst case at each frequency times the group's. The session term is the largest over every lane (a bound:
+        // the group lanes may sit on a lighter lane), and the preamp is one number for the whole session.
+        let groupLists = EQChannelGroup.available(roleCodes: roleCodes).map { configuration.groupBands($0, roleCodes: roleCodes).filter(\.enabled) }.filter { !$0.isEmpty }
+        let groupSections = groupLists.map { sections(for: $0, sampleRate: sampleRate, programFor: programFor) }
         let centres = lanes.flatMap { $0.filter { $0.enabled && $0.type != .fir }.map(\.frequencyHz) }
+            + groupLists.flatMap { $0.map(\.frequencyHz) }
 
         var best = -Double.infinity
         var bestFrequency = 0.0
@@ -74,8 +81,12 @@ enum EQHeadroomPredictor {
                 let side = response(compiled[1], sampleRate: sampleRate, frequency: frequency)
                 gain = ((mid + side).magnitude + (mid - side).magnitude) / 2
             }
-            if gain > best {
-                best = gain
+            var total = gain
+            for group in groupSections {
+                total = max(total, gain * response(group, sampleRate: sampleRate, frequency: frequency).magnitude)
+            }
+            if total > best {
+                best = total
                 bestFrequency = frequency
             }
         }

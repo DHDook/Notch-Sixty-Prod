@@ -27,6 +27,8 @@ struct EQFIRProgramKey: Equatable, Sendable {
     init(_ configuration: StereoEQConfiguration, sampleRate: Double) {
         var normalised = configuration
         normalised.bypassed = false
+        // E33 S20: the session FIR is designed from the session lists; group lists have their own designs.
+        normalised.groupBandLists = [:]
         switch normalised.channelMode {
         case .linked: normalised.editChannel = .linked
         case .independent: normalised.editChannel = .left
