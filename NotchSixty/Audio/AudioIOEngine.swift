@@ -3271,16 +3271,10 @@ final class AudioIOEngine {
     }
 
     func setAnalysisDemand(_ demandMask: UInt32) {
-        // E28 S6b: wide sessions carry loudness only (the spectrum and stereo views are stereo-bridge views).
-        if let session = nChannelTransportSession {
-            session.setAnalysisDemand(demandMask)
-            return
-        }
-        if let session = binauralHeadphoneTransportSession {
-            session.setAnalysisDemand(demandMask)
-            return
-        }
-        transportSession?.setAnalysisDemand(demandMask)
+        // E28 S6b, E33 S17: wide sessions run the same analysis on the capture ring they own.
+        if let session = nChannelTransportSession { session.setAnalysisDemand(demandMask) }
+        else if let session = binauralHeadphoneTransportSession { session.setAnalysisDemand(demandMask) }
+        else { transportSession?.setAnalysisDemand(demandMask) }
     }
 
     /// E27 S2c (design note 16). Whether stereo graphs carry the Equalizer analyser taps. The analyser controller sets it;
@@ -3504,6 +3498,8 @@ final class AudioIOEngine {
     }
 
     func resetSpectrumPeakHold() {
+        nChannelTransportSession?.resetSpectrumPeakHold()
+        binauralHeadphoneTransportSession?.resetSpectrumPeakHold()
         transportSession?.resetSpectrumPeakHold()
     }
 

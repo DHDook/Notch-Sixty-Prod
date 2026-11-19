@@ -64,6 +64,9 @@ enum ProductionAnalysisDemand {
     static let resetBitActivity: UInt32 = 1 << 10
     static let workerBits: UInt32 = loudness | resetLoudness | analysisMeters | rta | resetAnalysisMeters
         | spectrogram | spectrogramLong | bitActivity | resetBitActivity
+    /// Bits that ask for a worker feature (as opposed to one-shot commands or the selection): they replace the bridge's
+    /// STEREO bit as the ring enabler.
+    static let featureBits: UInt32 = loudness | analysisMeters | rta | spectrogram | bitActivity
 }
 
 enum ProductionAnalysisMath {
@@ -439,6 +442,7 @@ final class ProductionAnalysisWorker: @unchecked Sendable {
     private var demandMask: UInt32 = 0
     private var sampleRate: Double = 0
     private var stopped = false
+    private var analysisView = AnalysisView.standard
 
     private var drainBuffer = [N60AnalysisFrame](
         repeating: N60AnalysisFrame(inputLeft: 0, inputRight: 0, outputLeft: 0, outputRight: 0),
@@ -469,7 +473,14 @@ final class ProductionAnalysisWorker: @unchecked Sendable {
     }
 
     func setDemand(_ requestedMask: UInt32, sampleRate: Double) {
-        var sanitized = requestedMask & (UInt32(N60_ANALYSIS_DEMAND_ALL) | ProductionAnalysisDemand.workerBits)
+        var sanitized = requestedMask & (UInt32(N60_ANALYSIS_DEMAND_ALL) | ProductionAnalysisDemand.workerBits | ProductionAnalysisSelection.allBits)
+        // E33 S17: a stereo bridge has Stereo, Left, Right, Mid and Side; the wide views mean nothing here.
+        var requestedView = ProductionAnalysisSelection.decode(sanitized).view
+        switch requestedView {
+        case .left, .right, .mid, .side: break
+        default: requestedView = .standard
+        }
+        sanitized &= ~ProductionAnalysisSelection.allBits
         let resetLoudness = (sanitized & ProductionAnalysisDemand.resetLoudness) != 0
         sanitized &= ~ProductionAnalysisDemand.resetLoudness
         let resetMeters = (sanitized & ProductionAnalysisDemand.resetAnalysisMeters) != 0
@@ -486,7 +497,9 @@ final class ProductionAnalysisWorker: @unchecked Sendable {
         if wantsLoudness || wantsMeters || wantsRTA || wantsSpectrogram || wantsBits { sanitized &= ~UInt32(N60_ANALYSIS_DEMAND_STEREO) }
         queue.async { [weak self] in
             guard let self, !self.stopped else { return }
-            let changed = self.demandMask != sanitized || self.sampleRate != sampleRate
+            let viewChanged = self.analysisView != requestedView
+            let changed = self.demandMask != sanitized || self.sampleRate != sampleRate || viewChanged
+            self.analysisView = requestedView
             self.demandMask = sanitized
             self.sampleRate = sampleRate
             // Loudness pauses (keeps its measurement) when the demand drops.
@@ -499,6 +512,10 @@ final class ProductionAnalysisWorker: @unchecked Sendable {
                 spectrogram: wantsSpectrogram, window: spectrogramWindow, bitActivity: wantsBits, sampleRate: sampleRate
             )
             if resetBits { self.spectrogramFeed.resetBitActivity() }
+            if viewChanged {
+                self.meterFeed.resetRTA()
+                self.spectrogramFeed.resetSpectrogram()
+            }
             if changed {
                 N60RealtimeAudioBridgeDiscardAnalysisFrames(self.bridge)
                 self.clearHistory()
@@ -631,8 +648,8 @@ final class ProductionAnalysisWorker: @unchecked Sendable {
 
             drainBuffer.withUnsafeBufferPointer { buffer in
                 loudnessFeed.ingest(UnsafeBufferPointer(rebasing: buffer[0..<readCount]))
-                meterFeed.ingest(UnsafeBufferPointer(rebasing: buffer[0..<readCount]))
-                spectrogramFeed.ingest(UnsafeBufferPointer(rebasing: buffer[0..<readCount]))
+                meterFeed.ingest(UnsafeBufferPointer(rebasing: buffer[0..<readCount]), rtaView: analysisView)
+                spectrogramFeed.ingest(UnsafeBufferPointer(rebasing: buffer[0..<readCount]), view: analysisView)
             }
 
             for index in 0..<readCount {
@@ -660,10 +677,14 @@ final class ProductionAnalysisWorker: @unchecked Sendable {
         let start = (historyWriteIndex - usable + Self.historyCapacity) % Self.historyCapacity
         for index in 0..<usable {
             let sourceIndex = (start + index) % Self.historyCapacity
-            latestInputLeft[index] = inputLeftHistory[sourceIndex]
-            latestInputRight[index] = inputRightHistory[sourceIndex]
-            latestOutputLeft[index] = outputLeftHistory[sourceIndex]
-            latestOutputRight[index] = outputRightHistory[sourceIndex]
+            let input = StereoViewTransform.apply(
+                analysisView, left: inputLeftHistory[sourceIndex], right: inputRightHistory[sourceIndex])
+            let output = StereoViewTransform.apply(
+                analysisView, left: outputLeftHistory[sourceIndex], right: outputRightHistory[sourceIndex])
+            latestInputLeft[index] = input.0
+            latestInputRight[index] = input.1
+            latestOutputLeft[index] = output.0
+            latestOutputRight[index] = output.1
         }
     }
 
@@ -705,11 +726,11 @@ final class ProductionAnalysisWorker: @unchecked Sendable {
     }
 }
 
-// MARK: - Wide-session loudness (E28 S6b)
+// MARK: - Wide-session analysis (E28 S6b loudness, E33 S17 the rest)
 
-/// Drains the loudness capture ring of an N-channel or binaural bridge every 50 ms and publishes BS.1770-4 readouts.
-/// It owns no other analysis (the spectrum and stereo views stay stereo-only). The owning session stops it before it
-/// destroys the bridge, because the worker reads the ring that the bridge owns.
+/// Drains the capture ring of an N-channel or binaural bridge every 50 ms and publishes BS.1770-4 readouts and, with
+/// E33 S17, the spectrum, RTA, spectrogram, analysis meters, bit activity and stereo views of the chosen View and pair.
+/// The owning session stops it before it destroys the bridge, because the worker reads the ring that the bridge owns.
 final class ProductionWideLoudnessWorker {
     private static let drainFrames = 8_192
     private static let maxLapsPerTick = 32
@@ -717,46 +738,81 @@ final class ProductionWideLoudnessWorker {
     private let capture: UnsafeMutablePointer<N60LoudnessCapture>
     private let sampleRate: Double
     private let feed: WideLoudnessFeed
+    private let analysis: WideAnalysisFeed
     private let queue = DispatchQueue(label: "com.dhdook.NotchSixty.wide-loudness", qos: .userInitiated)
     private let snapshotLock = NSLock()
     private var published = ProductionAnalysisSnapshot.empty
     private var timer: DispatchSourceTimer?
     private var stopped = false
+    private var demand: UInt32 = 0
     private var inputBuffer: [Float]
     private var outputBuffer: [Float]
 
-    /// `outputPositions` is nil when the capture ring carries no output channels.
+    /// `outputPositions` is nil when the capture ring carries no output channels. `roles` names the programme channels
+    /// for the View groups and pairs; without them every view is the whole programme.
     init?(capture: UnsafeMutablePointer<N60LoudnessCapture>?, sampleRate: Double, inputPositions: [LoudnessChannelPosition],
-          outputPositions: [LoudnessChannelPosition]?) {
+          outputPositions: [LoudnessChannelPosition]?, roles: [OutputProgramRole] = [], isBinaural: Bool = false) {
         guard let capture, sampleRate > 0,
               Int(capture.pointee.inputChannels) == inputPositions.count,
               Int(capture.pointee.outputChannels) == (outputPositions?.count ?? 0) else { return nil }
         self.capture = capture
         self.sampleRate = sampleRate
         feed = WideLoudnessFeed(sampleRate: sampleRate, inputPositions: inputPositions, outputPositions: outputPositions)
+        analysis = WideAnalysisFeed(
+            plan: WideAnalysisPlan(
+                roles: roles, inputChannels: inputPositions.count, outputChannels: outputPositions?.count ?? 0,
+                isBinaural: isBinaural),
+            sampleRate: sampleRate)
         inputBuffer = [Float](repeating: 0, count: Self.drainFrames * inputPositions.count)
         outputBuffer = [Float](repeating: 0, count: Self.drainFrames * (outputPositions?.count ?? 0))
     }
 
-    /// Only the loudness and reset bits mean anything here; the bridge-level bits belong to the stereo bridge.
+    var plan: WideAnalysisPlan { analysis.plan }
+
+    /// The loudness bit, the analysis bits, the one-shot resets and the View and pair selection mean something here; the
+    /// bridge-level bits only say which stereo view a page wants (spectrum or stereo).
     func setDemand(_ mask: UInt32) {
-        let wants = (mask & ProductionAnalysisDemand.loudness) != 0
-        let reset = (mask & ProductionAnalysisDemand.resetLoudness) != 0
+        let selection = ProductionAnalysisSelection.decode(mask)
+        let wantsLoudness = (mask & ProductionAnalysisDemand.loudness) != 0
+        let resetLoudness = (mask & ProductionAnalysisDemand.resetLoudness) != 0
+        let wantsMeters = (mask & ProductionAnalysisDemand.analysisMeters) != 0
+        let resetMeters = (mask & ProductionAnalysisDemand.resetAnalysisMeters) != 0
+        let wantsRTA = (mask & ProductionAnalysisDemand.rta) != 0
+        let wantsSpectrogram = (mask & ProductionAnalysisDemand.spectrogram) != 0
+        let window: SpectrogramWindow = (mask & ProductionAnalysisDemand.spectrogramLong) != 0 ? .sixtySeconds : .tenSeconds
+        let wantsBits = (mask & ProductionAnalysisDemand.bitActivity) != 0
+        let resetBits = (mask & ProductionAnalysisDemand.resetBitActivity) != 0
+        let hasFeature = (mask & ProductionAnalysisDemand.featureBits) != 0
+        let wantsSpectrum = (mask & UInt32(N60_ANALYSIS_DEMAND_SPECTRUM)) != 0
+        let wantsStereo = (mask & UInt32(N60_ANALYSIS_DEMAND_STEREO)) != 0 && !hasFeature
+        let wanted = mask & (UInt32(N60_ANALYSIS_DEMAND_ALL) | ProductionAnalysisDemand.featureBits)
         queue.async { [weak self] in
             guard let self, !self.stopped else { return }
-            if wants, !self.feed.isActive {
+            let any = wantsLoudness || wantsMeters || wantsRTA || wantsSpectrogram || wantsBits || wantsSpectrum || wantsStereo
+            if any, self.demand == 0 {
                 N60LoudnessCaptureDiscard(self.capture)
             }
-            self.feed.setActive(wants)
-            if reset { self.feed.reset() }
-            N60LoudnessCaptureSetDemand(self.capture, wants)
-            if wants {
+            self.demand = wanted
+            self.feed.setActive(wantsLoudness)
+            if resetLoudness { self.feed.reset() }
+            self.analysis.setDemand(
+                spectrum: wantsSpectrum, stereo: wantsStereo, meters: wantsMeters, rta: wantsRTA,
+                spectrogram: wantsSpectrogram, spectrogramWindow: window, bits: wantsBits,
+                view: selection.view, pair: selection.pair)
+            if resetMeters { self.analysis.resetMeters() }
+            if resetBits { self.analysis.resetBitActivity() }
+            N60LoudnessCaptureSetDemand(self.capture, any)
+            if any {
                 self.startTimerIfNeeded()
             } else {
                 self.cancelTimer()
                 self.publish(.empty)
             }
         }
+    }
+
+    func resetSpectrumPeakHold() {
+        queue.async { [weak self] in self?.analysis.requestPeakHoldReset() }
     }
 
     func snapshot() -> ProductionAnalysisSnapshot {
@@ -789,7 +845,7 @@ final class ProductionWideLoudnessWorker {
     }
 
     private func tick() {
-        guard !stopped, feed.isActive else { return }
+        guard !stopped, feed.isActive || analysis.isActive else { return }
         let hasOutput = feed.outputPositions != nil
         for _ in 0..<Self.maxLapsPerTick {
             let count = inputBuffer.withUnsafeMutableBufferPointer { input in
@@ -802,6 +858,7 @@ final class ProductionWideLoudnessWorker {
             inputBuffer.withUnsafeBufferPointer { input in
                 outputBuffer.withUnsafeBufferPointer { output in
                     feed.ingest(input: input.baseAddress!, output: hasOutput ? output.baseAddress : nil, frames: count)
+                    analysis.ingest(input: input.baseAddress!, output: hasOutput ? output.baseAddress : nil, frames: count)
                 }
             }
             if count < Self.drainFrames { break }
@@ -809,7 +866,7 @@ final class ProductionWideLoudnessWorker {
         let counters = N60LoudnessCaptureGetSnapshot(capture)
         feed.noteDroppedFrames(counters.droppedFrames)
         var next = ProductionAnalysisSnapshot()
-        next.demandMask = ProductionAnalysisDemand.loudness
+        next.demandMask = demand
         next.sampleRate = sampleRate
         next.availableFrames = counters.availableFrames
         next.capturedFrames = counters.capturedFrames
@@ -818,6 +875,17 @@ final class ProductionWideLoudnessWorker {
             next.loudnessInput = readouts.input
             next.loudnessOutput = readouts.output
         }
+        next.analysisMeters = analysis.meterReadout(loudness: next.loudnessOutput)
+        next.rtaBandsDB = analysis.rtaLevels()
+        next.spectrogram = analysis.spectrogramSnapshot()
+        next.bitActivity = analysis.bitActivity()
+        next.spectrum = analysis.spectrum()
+        let stereo = analysis.stereoReadout()
+        if let correlation = stereo.correlation {
+            next.phaseCorrelation = correlation
+            next.phaseCorrelationValid = true
+        }
+        next.goniometer = stereo.points
         publish(next)
     }
 

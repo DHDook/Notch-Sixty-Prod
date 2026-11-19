@@ -1005,7 +1005,8 @@ final class CoreAudioNChannelTransportSession {
         wideLoudnessWorker = ProductionWideLoudnessWorker(
             capture: capture, sampleRate: sampleRate, inputPositions: positions,
             outputPositions: hasOutput ? positions + LoudnessChannelPosition.subwooferFeeds(
-                outputChannels: Int(capture?.pointee.outputChannels ?? 0), programChannels: positions.count) : nil)
+                outputChannels: Int(capture?.pointee.outputChannels ?? 0), programChannels: positions.count) : nil,
+            roles: routePlan.programLayout.roles)
     }
 
     func setAnalysisDemand(_ demandMask: UInt32) {
@@ -1014,6 +1015,10 @@ final class CoreAudioNChannelTransportSession {
 
     func productionAnalysisSnapshot() -> ProductionAnalysisSnapshot {
         wideLoudnessWorker?.snapshot() ?? .empty
+    }
+
+    func resetSpectrumPeakHold() {
+        wideLoudnessWorker?.resetSpectrumPeakHold()
     }
 
     /// Bridge counters and meters. With the graph attached, the program lane levels come from
