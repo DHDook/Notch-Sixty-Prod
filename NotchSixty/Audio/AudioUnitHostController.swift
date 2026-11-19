@@ -969,6 +969,62 @@ final class AudioUnitHostController: ObservableObject {
         )
     }
 
+    /// E33 S24: each rendered plug-in's load since the last call, by slot id. Empty when nothing is rendering.
+    func takeLoadReadings() -> [UUID: AudioUnitLoadReading] {
+        guard let runtime = liveRackRuntime else { return [:] }
+        let byIndex = runtime.takeLoadReadings()
+        var result: [UUID: AudioUnitLoadReading] = [:]
+        for (index, reading) in byIndex where rackConfiguration.slots.indices.contains(index) {
+            let slot = rackConfiguration.slots[index]
+            if let stage = runtime.processStage(forSlot: index), stage.component == slot.component {
+                result[slot.id] = reading
+            }
+        }
+        return result
+    }
+
+    private var registrationObserver: NSObjectProtocol?
+    private var rescanPending = false
+    private(set) var registrationRescanCount = 0
+
+    /// E33 S24: scan again when macOS reports that installed Audio Units changed. The Scan button stays. A change that
+    /// arrives during a scan runs one more scan after it, so the catalog never misses the last change.
+    func startWatchingRegistrations(
+        center: NotificationCenter = .default,
+        name: Notification.Name = AVAudioUnitComponentManager.registrationsChangedNotification,
+        format: @escaping @MainActor () -> AudioUnitRackProcessingFormat?
+    ) {
+        stopWatchingRegistrations(center: center)
+        registrationObserver = center.addObserver(
+            forName: name,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                await self?.rescanAfterRegistrationChange(format: format())
+            }
+        }
+    }
+
+    func stopWatchingRegistrations(center: NotificationCenter = .default) {
+        if let registrationObserver { center.removeObserver(registrationObserver) }
+        registrationObserver = nil
+    }
+
+    func rescanAfterRegistrationChange(format: AudioUnitRackProcessingFormat?) async {
+        if scanInFlight {
+            rescanPending = true
+            return
+        }
+        registrationRescanCount += 1
+        await refresh(format: format)
+        while rescanPending {
+            rescanPending = false
+            registrationRescanCount += 1
+            await refresh(format: format)
+        }
+    }
+
     private func attachFaultMonitoring(
         to runtime: AudioUnitLiveRackRuntime?,
         includeExistingFaults: Bool

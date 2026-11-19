@@ -508,6 +508,33 @@ private struct AudioUnitEditorSheet: View {
 }
 
 /// E33 S23: what the slot menu offers.
+/// E33 S24: what a rack row shows besides its name.
+private struct PluginSlotReadings {
+    let load: AudioUnitLoadDisplay
+    let latencyText: String
+}
+
+/// E33 S24: drag a rack row onto another to reorder. The Move buttons stay for the keyboard and VoiceOver.
+private struct PluginRowDrag: ViewModifier {
+    let enabled: Bool
+    let slotID: UUID
+    let onDrop: (UUID) -> Void
+
+    func body(content: Content) -> some View {
+        if enabled {
+            content
+                .draggable(slotID.uuidString)
+                .dropDestination(for: String.self) { items, _ in
+                    guard let text = items.first, let dragged = UUID(uuidString: text) else { return false }
+                    onDrop(dragged)
+                    return true
+                }
+        } else {
+            content
+        }
+    }
+}
+
 private struct PluginSlotMenu {
     let presets: [AudioUnitPresetEntry]
     let canPaste: Bool
@@ -536,6 +563,8 @@ private struct PluginRackSlotRow: View {
     let onClearQuarantine: (() -> Void)?
     /// E33 S23: nil with `e33.page-enhancements` off. The slot menu: the plug-in's own presets, Copy and Paste settings.
     let slotMenu: PluginSlotMenu?
+    /// E33 S24: nil with `e33.page-enhancements` off. Load and latency in milliseconds for this slot.
+    let readings: PluginSlotReadings?
 
     @State private var wetDryMix: Double
 
@@ -557,9 +586,11 @@ private struct PluginRackSlotRow: View {
         onEdit: @escaping () -> Void,
         onRemove: @escaping () -> Void,
         onClearQuarantine: (() -> Void)?,
-        slotMenu: PluginSlotMenu? = nil
+        slotMenu: PluginSlotMenu? = nil,
+        readings: PluginSlotReadings? = nil
     ) {
         self.slotMenu = slotMenu
+        self.readings = readings
         self.index = index
         self.slot = slot
         self.sampleRate = sampleRate
@@ -614,7 +645,17 @@ private struct PluginRackSlotRow: View {
 
                         statusBadge
 
-                        if let latencyFrames {
+                        if let readings {
+                            metricBadge(
+                                "Latency \(readings.latencyText)",
+                                systemImage: "clock"
+                            )
+                            metricBadge(
+                                readings.load.text,
+                                systemImage: readings.load.level == .nearCutOut
+                                    ? "exclamationmark.triangle.fill" : "gauge.with.dots.needle.33percent"
+                            )
+                        } else if let latencyFrames {
                             metricBadge(
                                 latencyText(latencyFrames),
                                 systemImage: "clock"
@@ -637,6 +678,11 @@ private struct PluginRackSlotRow: View {
 
                     if let quarantineEntry {
                         Text(quarantineEntry.lastFailureDescription)
+                            .font(DesignType.caption.font)
+                            .foregroundStyle(StatusLevel.attention.color)
+                            .lineLimit(2)
+                    } else if let warning = readings?.load.warning {
+                        Label(warning, systemImage: "exclamationmark.triangle")
                             .font(DesignType.caption.font)
                             .foregroundStyle(StatusLevel.attention.color)
                             .lineLimit(2)
@@ -859,6 +905,11 @@ struct ProductionPluginWorkspace: View {
     @State private var mutationInFlight = false
     @State private var commandError: String?
     @State private var lastMutationSummary: String?
+    /// E33 S24: latest load reading per slot, refreshed by the poll below while the page is shown.
+    @State private var loadReadings: [UUID: AudioUnitLoadReading] = [:]
+    @State private var showIncompatible = false
+    /// Each slot's bypass flag before "Bypass rack" was switched on, so switching it off puts them back.
+    @State private var rackBypassSaved: [UUID: Bool] = [:]
 
     init(product: ProductController) {
         self.product = product
@@ -920,6 +971,7 @@ struct ProductionPluginWorkspace: View {
 
     private var filteredComponents: [AudioUnitComponentDescriptor] {
         host.discoveredComponents.filter { component in
+            guard catalogVisible(component) else { return false }
             let compatibility = host.compatibility(
                 of: component,
                 for: processingFormat
@@ -989,11 +1041,17 @@ struct ProductionPluginWorkspace: View {
         ScrollView {
             VStack(alignment: .leading, spacing: DesignSpacing.xl.pt) {
                 header
-                signalChainCard
+                if enhanced {
+                    signalChainLine
+                } else {
+                    signalChainCard
+                }
                 scanCard
                 rackCard
                 catalogCard
-                safetyCard
+                if !enhanced {
+                    safetyCard
+                }
             }
             .padding(DesignSpacing.xl.pt)
             .frame(
@@ -1005,6 +1063,14 @@ struct ProductionPluginWorkspace: View {
             if host.lastScanDate == nil {
                 await host.refresh(format: processingFormat)
             }
+        }
+        .task {
+            guard enhanced else { return }
+            host.startWatchingRegistrations { processingFormat }
+            await pollLoadReadings()
+        }
+        .onDisappear {
+            host.stopWatchingRegistrations()
         }
         .sheet(item: $addTarget) { target in
             addPluginSheet(target)
@@ -1081,6 +1147,13 @@ struct ProductionPluginWorkspace: View {
                 .padding(.vertical, DesignSpacing.s.pt)
                 .designSurface(.small)
         }
+    }
+
+    /// E33 S24 (decision 30): the signal-chain card shrinks to one line.
+    private var signalChainLine: some View {
+        Text("Signal chain: Playback DSP, Plug-in Rack, System Correction, Protection.")
+            .font(DesignType.caption.font)
+            .foregroundStyle(.secondary)
     }
 
     private var signalChainCard: some View {
@@ -1215,6 +1288,20 @@ struct ProductionPluginWorkspace: View {
 
                 Spacer()
 
+                if enhanced, host.rackConfiguration.occupiedSlotCount > 0 {
+                    Toggle(
+                        "Bypass rack",
+                        isOn: Binding(
+                            get: { AudioUnitRackBypass.isBypassed(host.rackConfiguration) },
+                            set: { setRackBypassed($0) }
+                        )
+                    )
+                    .toggleStyle(.switch)
+                    .controlSize(.small)
+                    .disabled(mutationInFlight)
+                    .help("Bypass every plug-in. The rack keeps its delay, so level and timing do not jump.")
+                }
+
                 Text(
                     "\(host.rackConfiguration.occupiedSlotCount)/\(host.rackConfiguration.slots.count) occupied"
                 )
@@ -1316,8 +1403,30 @@ struct ProductionPluginWorkspace: View {
                             onCopy: { copySettings(slot) },
                             onPaste: { pasteSettings(onto: slot, index: index) }
                         )
+                        : nil,
+                    readings: enhanced && slot.component != nil
+                        ? PluginSlotReadings(
+                            load: AudioUnitLoadDisplay(loadReadings[slot.id]),
+                            latencyText: AudioUnitLatencyDisplay.milliseconds(
+                                frames: report?.probe.latencyFrames ?? slot.lastKnownLatencyFrames ?? 0,
+                                sampleRate: processingFormat.sampleRate
+                            )
+                        )
                         : nil
                 )
+                .modifier(PluginRowDrag(
+                    enabled: enhanced && !mutationInFlight,
+                    slotID: slot.id,
+                    onDrop: { dragged in
+                        if let move = AudioUnitRackDrag.mutation(
+                            draggedID: dragged,
+                            onto: slot.id,
+                            in: host.rackConfiguration
+                        ) {
+                            runMutation(move)
+                        }
+                    }
+                ))
             }
 
             HStack {
@@ -1375,6 +1484,16 @@ struct ProductionPluginWorkspace: View {
                     )
                     .font(DesignType.caption.font)
                     .foregroundStyle(.secondary)
+                    if enhanced {
+                        Toggle("Show incompatible", isOn: $showIncompatible)
+                            .toggleStyle(.switch)
+                            .controlSize(.small)
+                    }
+                }
+                if incompatibleHiddenCount > 0 {
+                    Text("\(incompatibleHiddenCount) incompatible plug-ins are hidden. Turn on Show incompatible to see why.")
+                        .font(DesignType.caption.font)
+                        .foregroundStyle(.tertiary)
                 }
 
                 if host.discoveredComponents.isEmpty {
@@ -1385,12 +1504,12 @@ struct ProductionPluginWorkspace: View {
                     .foregroundStyle(.secondary)
                 } else {
                     ForEach(
-                        host.discoveredComponents.prefix(12)
+                        host.discoveredComponents.filter(catalogVisible).prefix(12)
                     ) { component in
                         componentRow(component)
                     }
 
-                    if host.discoveredComponents.count > 12 {
+                    if host.discoveredComponents.filter(catalogVisible).count > 12 {
                         Text(
                             "Use Add Plug-in to search and filter the complete catalog."
                         )
@@ -1475,6 +1594,12 @@ struct ProductionPluginWorkspace: View {
                     }
                 }
                 .frame(width: 180)
+
+                if enhanced {
+                    Toggle("Show incompatible", isOn: $showIncompatible)
+                        .toggleStyle(.switch)
+                        .controlSize(.small)
+                }
             }
 
             Divider()
@@ -1559,19 +1684,21 @@ struct ProductionPluginWorkspace: View {
                 .font(DesignType.caption.font)
                 .foregroundStyle(.secondary)
 
-                if !compatibility.compatible {
-                    Text(
-                        compatibility.reasons.joined(
-                            separator: " "
-                        )
-                    )
-                    .font(DesignType.caption.font)
-                    .foregroundStyle(.secondary)
+                if let reasonText = catalogReasonText(
+                    component,
+                    compatibility: compatibility,
+                    quarantine: nil
+                ) {
+                    Text(reasonText)
+                        .font(DesignType.caption.font)
+                        .foregroundStyle(.secondary)
                 }
 
                 if let quarantineEntry {
                     Text(
-                        quarantineEntry.lastFailureDescription
+                        enhanced
+                            ? AudioUnitCatalogReasons.quarantineReason(for: component, entry: quarantineEntry).text
+                            : quarantineEntry.lastFailureDescription
                     )
                     .font(DesignType.caption.font)
                     .foregroundStyle(StatusLevel.attention.color)
@@ -1671,14 +1798,14 @@ struct ProductionPluginWorkspace: View {
                     .font(DesignType.caption.font.monospaced())
                     .foregroundStyle(.tertiary)
 
-                if !compatibility.compatible {
-                    Text(
-                        compatibility.reasons.joined(
-                            separator: " "
-                        )
-                    )
-                    .font(DesignType.caption.font)
-                    .foregroundStyle(.secondary)
+                if let reasonText = catalogReasonText(
+                    component,
+                    compatibility: compatibility,
+                    quarantine: host.quarantine.entry(for: component.identity)
+                ) {
+                    Text(reasonText)
+                        .font(DesignType.caption.font)
+                        .foregroundStyle(.secondary)
                 }
             }
 
@@ -1739,6 +1866,58 @@ struct ProductionPluginWorkspace: View {
 
     private var liveEditEnabled: Bool {
         FeatureFlags.isEnabledProcessWide(.eqPageEnhancements)
+    }
+
+    /// E33 S24 readings and rack controls share the page-enhancements flag.
+    private var enhanced: Bool { liveEditEnabled }
+
+    private func pollLoadReadings() async {
+        while !Task.isCancelled {
+            loadReadings = host.takeLoadReadings()
+            try? await Task.sleep(for: .milliseconds(500))
+        }
+    }
+
+    private func setRackBypassed(_ bypassed: Bool) {
+        let configuration: AudioUnitRackConfiguration
+        if bypassed {
+            let result = AudioUnitRackBypass.bypassing(host.rackConfiguration)
+            rackBypassSaved = result.saved
+            configuration = result.configuration
+        } else {
+            configuration = AudioUnitRackBypass.restoring(host.rackConfiguration, saved: rackBypassSaved)
+        }
+        runMutation(.replaceConfiguration(configuration))
+    }
+
+    /// Plain reason and advice with the flag on; the engineering text with it off.
+    private func catalogReasonText(
+        _ component: AudioUnitComponentDescriptor,
+        compatibility: AudioUnitComponentCompatibility,
+        quarantine: AudioUnitQuarantineEntry?
+    ) -> String? {
+        if enhanced {
+            let reasons = AudioUnitCatalogReasons.reasons(
+                for: component,
+                format: processingFormat,
+                quarantine: quarantine
+            )
+            return reasons.isEmpty ? nil : reasons.map(\.text).joined(separator: "\n")
+        }
+        return compatibility.compatible ? nil : compatibility.reasons.joined(separator: " ")
+    }
+
+    /// Hidden by default with the flag on (a quarantined plug-in stays listed so it can be cleared).
+    private func catalogVisible(_ component: AudioUnitComponentDescriptor) -> Bool {
+        guard enhanced, !showIncompatible else { return true }
+        return host.compatibility(of: component, for: processingFormat).compatible
+            || host.quarantine.entry(for: component.identity) != nil
+    }
+
+    private var incompatibleHiddenCount: Int {
+        enhanced && !showIncompatible
+            ? host.discoveredComponents.filter { !catalogVisible($0) }.count
+            : 0
     }
 
     private func openEditor(

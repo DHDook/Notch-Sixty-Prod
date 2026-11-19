@@ -33,6 +33,22 @@ bool N60AudioUnitStageFaultGateIsTripped(
     const N60AudioUnitStageFaultGate * _Nonnull gate
 );
 
+// E33 S24: per-stage load reading. The render thread records the largest
+// render time seen as a fraction of the buffer time and of the watchdog
+// budget, both in 1/10000 units (one lock-free store, no allocation). The
+// control plane takes and clears the peaks.
+void N60AudioUnitStageFaultGateRecordLoad(
+    N60AudioUnitStageFaultGate * _Nonnull gate,
+    uint32_t bufferLoad,
+    uint32_t watchdogLoad
+);
+
+void N60AudioUnitStageFaultGateTakeLoad(
+    N60AudioUnitStageFaultGate * _Nonnull gate,
+    uint32_t * _Nonnull bufferLoad,
+    uint32_t * _Nonnull watchdogLoad
+);
+
 
 typedef struct {
     uint64_t publishedGeneration;
