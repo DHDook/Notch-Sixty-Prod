@@ -53,6 +53,18 @@ struct StereoEQConfiguration: Equatable, Codable, Sendable {
     /// E33 S20 (G39): one extra band list per speaker group on a wide session, keyed by layout and group
     /// (`EQChannelGroups.swift`). Absent in older profiles and not written while empty; a stereo session ignores it.
     var groupBandLists: [String: [EQBand]] = [:]
+    /// E33 S20 part 2: the group list the page is editing ("<layout>/<group>", `EQChannelGroups.swift`), or nil for the
+    /// session's own lists ("All"). Page state, never stored and ignored by `==`, so choosing a group republishes nothing.
+    var editGroupKey: String?
+
+    /// Everything but `editGroupKey`. A new stored property must be added here (`EQChannelGroupTests` checks the rule).
+    static func == (l: StereoEQConfiguration, r: StereoEQConfiguration) -> Bool {
+        l.channelMode == r.channelMode && l.editChannel == r.editChannel && l.phaseMode == r.phaseMode
+            && l.bypassed == r.bypassed && l.linkedBands == r.linkedBands && l.leftBands == r.leftBands
+            && l.rightBands == r.rightBands && l.midBands == r.midBands && l.sideBands == r.sideBands
+            && l.independentSeeded == r.independentSeeded && l.midSideSeeded == r.midSideSeeded
+            && l.groupBandLists == r.groupBandLists
+    }
 
     private enum CodingKeys: String, CodingKey {
         case channelMode, editChannel, phaseMode, bypassed, linkedBands, leftBands, rightBands, midBands, sideBands
@@ -124,7 +136,14 @@ struct StereoEQConfiguration: Equatable, Codable, Sendable {
         self.midSideSeeded = midSideSeeded
     }
 
+    /// The list the page edits: the chosen group's, or the session's own.
     var editableBands: [EQBand] {
+        if let editGroupKey { return groupBandLists[editGroupKey] ?? [] }
+        return sessionEditableBands
+    }
+
+    /// The session's list for the lane being edited, whatever group is chosen.
+    var sessionEditableBands: [EQBand] {
         switch channelMode {
         case .linked:
             return linkedBands
@@ -178,6 +197,10 @@ struct StereoEQConfiguration: Equatable, Codable, Sendable {
     }
 
     mutating func replaceEditableBands(_ bands: [EQBand]) {
+        if let editGroupKey {
+            if bands.isEmpty { groupBandLists.removeValue(forKey: editGroupKey) } else { groupBandLists[editGroupKey] = bands }
+            return
+        }
         switch channelMode {
         case .linked:
             linkedBands = bands

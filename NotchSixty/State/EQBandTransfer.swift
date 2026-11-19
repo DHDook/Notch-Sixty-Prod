@@ -115,10 +115,13 @@ enum EQBandTransfer {
     /// The lanes "Copy lane to..." offers from the lane being edited: the partner lane, then the linked bank
     /// (or, from the linked bank, every other bank).
     static func copyTargets(for configuration: StereoEQConfiguration) -> [EQLane] {
+        // E33 S20 part 2: a speaker group's list is not a stereo lane, so there is nothing to copy it to.
+        guard configuration.editGroupKey == nil else { return [] }
+        let lane = configuration.editLane
         switch configuration.channelMode {
-        case .linked: [.left, .right, .mid, .side]
-        case .independent: [configuration.editLane == .left ? .right : .left, .linked]
-        case .midSide: [configuration.editLane == .mid ? .side : .mid, .linked]
+        case .linked: return [EQLane.left, EQLane.right, EQLane.mid, EQLane.side]
+        case .independent: return [lane == EQLane.left ? EQLane.right : EQLane.left, EQLane.linked]
+        case .midSide: return [lane == EQLane.mid ? EQLane.side : EQLane.mid, EQLane.linked]
         }
     }
 

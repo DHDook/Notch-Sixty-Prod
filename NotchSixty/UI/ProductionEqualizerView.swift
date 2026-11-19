@@ -159,6 +159,7 @@ struct ProductionEqualizerView: View {
             if let requested = EQBandFocusRequest.shared.take(), bands.contains(where: { $0.id == requested }) {
                 selectedBandID = requested
             }
+            dropStaleGroup()
             ensureSelection()
             configureHistory()
         }
@@ -172,6 +173,7 @@ struct ProductionEqualizerView: View {
         .onReceive(comparisonErrors) { actionError = $0 }
         .onChange(of: configuration.channelMode) { _, _ in resetSelectionForBank() }
         .onChange(of: configuration.editChannel) { _, _ in resetSelectionForBank() }
+        .onChange(of: engine.eqGroupRoleCodes) { _, _ in dropStaleGroup() }
         .onChange(of: bands.map(\.id)) { _, _ in ensureSelection() }
         .onDisappear {
             pendingPublishTask?.cancel()
@@ -197,6 +199,11 @@ struct ProductionEqualizerView: View {
                 .accessibilityIdentifier("eq.nyquist.note")
             }
             modeBar
+
+            // E33 S20 part 2 (G39): the speaker group the lists below edit; hidden on a stereo session.
+            if enhanced {
+                EQGroupSelector(model: groupModel, choose: chooseGroup)
+            }
 
             if enhanced, let reach = engine.eqReachText {
                 Text(reach)
@@ -263,6 +270,26 @@ struct ProductionEqualizerView: View {
         }
     }
 
+    /// E33 S20 part 2: the chips for the running layout (empty on a stereo session) and the group being edited.
+    private var groupModel: EQGroupSelectorModel {
+        EQGroupSelectorModel.make(
+            configuration: configuration, shape: engine.dynamicsSessionDescription?.shape, sampleRate: sampleRate)
+    }
+    private var editingGroup: Bool { enhanced && configuration.editGroupKey != nil }
+
+    private func chooseGroup(_ group: EQChannelGroup?) {
+        audition?.stop()
+        perform { try engine.setEQEditGroup(group) }
+        resetSelectionForBank()
+    }
+
+    /// A group chosen under another layout means nothing now: back to All.
+    private func dropStaleGroup() {
+        guard configuration.editGroupKey != nil,
+              configuration.editGroup(roleCodes: engine.eqGroupRoleCodes) == nil else { return }
+        chooseGroup(nil)
+    }
+
     private var activeBandCount: Int { configuration.activeBandCount(sampleRate: sampleRate) }
     private var inactiveBandCount: Int { configuration.aboveNyquistBandCount(sampleRate: sampleRate) }
 
@@ -285,8 +312,9 @@ struct ProductionEqualizerView: View {
                         .labelsHidden()
                         .pickerStyle(.segmented)
                         .fixedSize()
+                        .disabled(editingGroup)
 
-                        if configuration.channelMode != .linked {
+                        if configuration.channelMode != .linked, !editingGroup {
                             Picker("Edit Channel", selection: Binding(
                                 get: { configuration.editChannel },
                                 set: { engine.setEQEditChannel($0) }
@@ -737,7 +765,11 @@ struct ProductionEqualizerView: View {
 
     @ViewBuilder
     private func dynamicColumn(band: EQBand, binding: Binding<EQBand>) -> some View {
-        if band.type.supportsDynamicEQ {
+        if editingGroup {
+            Label("Speaker group bands are ordinary filters. Dynamic EQ is available under All.", systemImage: "bolt.slash")
+                .font(DesignType.caption.font)
+                .foregroundStyle(.secondary)
+        } else if band.type.supportsDynamicEQ {
             dynamicControls(band: band, binding: binding)
         } else {
             Label("Dynamic EQ is unavailable for this filter type.", systemImage: "bolt.slash")
@@ -911,7 +943,8 @@ struct ProductionEqualizerView: View {
         Text(type.displayName)
             .tag(type)
             .disabled(
-                (type == .fir && band.firKernel == nil)
+                (editingGroup && (type == .fir || type == .linkwitzTransform))
+                    || (type == .fir && band.firKernel == nil)
                     || (type == .allPass && configuration.phaseMode != .minimumPhase)
             )
     }

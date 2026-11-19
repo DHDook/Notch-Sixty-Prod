@@ -36,7 +36,7 @@ final class EQAutoPreampController: ObservableObject {
     }
     private var preampSink: AnyCancellable?
     private var observation: ObservationSubscription?
-    private var cacheKey: (configuration: StereoEQConfiguration, sampleRate: Double)?
+    private var cacheKey: (configuration: StereoEQConfiguration, sampleRate: Double, roleCodes: [UInt32])?
 
     init(engine: AudioIOEngine) {
         self.engine = engine
@@ -135,9 +135,10 @@ final class EQAutoPreampController: ObservableObject {
     private func refreshPrediction() {
         let configuration = engine.stereoEQConfiguration
         let rate = sampleRate
-        if let cacheKey, cacheKey.sampleRate == rate, cacheKey.configuration == configuration { return }
-        cacheKey = (configuration, rate)
-        prediction = EQHeadroomPredictor.predict(configuration: configuration, sampleRate: rate) { bands, rate in
+        let roleCodes = engine.eqGroupRoleCodes
+        if let cacheKey, cacheKey.sampleRate == rate, cacheKey.configuration == configuration, cacheKey.roleCodes == roleCodes { return }
+        cacheKey = (configuration, rate, roleCodes)
+        prediction = EQHeadroomPredictor.predict(configuration: configuration, sampleRate: rate, roleCodes: roleCodes) { bands, rate in
             self.responseCache.program(bands: bands, sampleRate: rate)
         }
     }
