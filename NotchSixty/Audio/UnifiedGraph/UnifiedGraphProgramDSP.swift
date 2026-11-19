@@ -207,8 +207,6 @@ struct UnifiedGraphProgramDSP: Equatable, Sendable {
             }
         }
 
-        let lfe = shape.lfeLane
-        let nonLFE = (0..<count).filter { $0 != lfe }
         let leftMembers = shape.leftMembers
         let rightMembers = shape.rightMembers
         let pairedLanes = (leftMembers + rightMembers).sorted()
