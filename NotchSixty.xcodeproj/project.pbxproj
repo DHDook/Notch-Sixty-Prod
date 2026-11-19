@@ -33,6 +33,7 @@
 		E8A600000000000000000002 /* multisub_search.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E8A600000000000000000001 /* multisub_search.cpp */; };
 		E8A000000000000000000021 /* xover.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E8A000000000000000000011 /* xover.cpp */; };
 		E9B600000000000000000001 /* headroom.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E9B600000000000000000002 /* headroom.cpp */; };
+		E33A21000000000000000001 /* eqfit.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E33A21000000000000000002 /* eqfit.cpp */; };
 		E19A00000000000000000021 /* design.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E19A00000000000000000011 /* design.cpp */; };
 		E6C000000000000000000033 /* stages_dsp.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E6C000000000000000000013 /* stages_dsp.cpp */; };
 		E9A100000000000000000002 /* nufir.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E9A100000000000000000001 /* nufir.cpp */; };
@@ -91,6 +92,7 @@
 		E19A00000000000000000011 /* design.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = mimo/design.cpp; sourceTree = "<group>"; };
 		E8A000000000000000000011 /* xover.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = xover/xover.cpp; sourceTree = "<group>"; };
 		E9B600000000000000000002 /* headroom.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = headroom/headroom.cpp; sourceTree = "<group>"; };
+		E33A21000000000000000002 /* eqfit.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = eqfit/eqfit.cpp; sourceTree = "<group>"; };
 		E6C000000000000000000013 /* stages_dsp.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = stages_dsp.cpp; sourceTree = "<group>"; };
 		E9A100000000000000000001 /* nufir.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = conv/nufir.cpp; sourceTree = "<group>"; };
 		E6C000000000000000000014 /* stages_system.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = stages_system.cpp; sourceTree = "<group>"; };
@@ -197,6 +199,7 @@
 				E8A600000000000000000001 /* multisub_search.cpp */,
 				E8A000000000000000000011 /* xover.cpp */,
 				E9B600000000000000000002 /* headroom.cpp */,
+				E33A21000000000000000002 /* eqfit.cpp */,
 				E21A00000000000000002001 /* remote_tonal.cpp */,
 				E21A00000000000000001001 /* fxlms.cpp */,
 				E19A00000000000000000011 /* design.cpp */,
@@ -343,6 +346,7 @@
 				E8A600000000000000000002 /* multisub_search.cpp in Sources */,
 				E8A000000000000000000021 /* xover.cpp in Sources */,
 				E9B600000000000000000001 /* headroom.cpp in Sources */,
+				E33A21000000000000000001 /* eqfit.cpp in Sources */,
 				E21A00000000000000002002 /* remote_tonal.cpp in Sources */,
 				E21A00000000000000001002 /* fxlms.cpp in Sources */,
 				E19A00000000000000000021 /* design.cpp in Sources */,
