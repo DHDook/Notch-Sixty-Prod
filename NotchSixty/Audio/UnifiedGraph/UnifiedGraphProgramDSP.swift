@@ -24,6 +24,8 @@ struct UnifiedGraphLayoutShape: Equatable, Sendable {
     var lfeLane: Int?
     var frontLeft: Int?
     var frontRight: Int?
+    /// E33 S20: the core role code (`n60_channel_role`) of every lane, which decides the lane's speaker group.
+    var roleCodes: [UInt32] = []
 
     init?(layout: n60_layout) {
         var layout = layout
@@ -48,6 +50,8 @@ struct UnifiedGraphLayoutShape: Equatable, Sendable {
         lfeLane = info.lfeLane >= 0 ? Int(info.lfeLane) : nil
         frontLeft = info.frontLeftLane >= 0 ? Int(info.frontLeftLane) : nil
         frontRight = info.frontRightLane >= 0 ? Int(info.frontRightLane) : nil
+        var roles = layout.roles
+        roleCodes = withUnsafeBytes(of: &roles) { Array($0.bindMemory(to: UInt32.self).prefix(laneCount)) }
     }
 
     init?(roles: [OutputProgramRole]) {
@@ -120,13 +124,17 @@ struct UnifiedGraphProgramDSP: Equatable, Sendable {
     /// `UnifiedGraphTranslator.nChannelEligibility` takes the crossover, filter spec, sub gain, polarity and
     /// phase-alignment all-pass from it in place of rebuilding them. Not program DSP: `isNeutral` ignores it.
     var foldedBass: UnifiedGraphFoldedBass?
+    /// E33 S20 (G39): per-group EQ curves, one entry per group lane (`StereoEQConfiguration.groupCurves`). Empty on stereo.
+    var groupEQ: [UnifiedGraphGroupEQ] = []
 
     init(
         stereo: UnifiedGraphConfiguration,
         shape: UnifiedGraphLayoutShape,
         eqMode: EQMode,
-        virtualSpeakers: Bool = false
+        virtualSpeakers: Bool = false,
+        groupEQ: [UnifiedGraphGroupEQ] = []
     ) {
+        self.groupEQ = groupEQ
         self.shape = shape
         self.eqMode = eqMode
         left = stereo.lanes[0]
@@ -147,7 +155,7 @@ struct UnifiedGraphProgramDSP: Equatable, Sendable {
             guard lane.delayMilliseconds == 0, lane.delayFrames == 0 else { return false }
             return lane.fractionalDelayFrames == nil
         }
-        guard rest.isEmpty, !deltaAudition, roomLanes == nil, laneDelayFrames.isEmpty, plain(left), plain(right), inputGain == 1 else { return false }
+        guard rest.isEmpty, groupEQ.isEmpty, !deltaAudition, roomLanes == nil, laneDelayFrames.isEmpty, plain(left), plain(right), inputGain == 1 else { return false }
         return protection == nil
     }
 
@@ -163,6 +171,8 @@ struct UnifiedGraphProgramDSP: Equatable, Sendable {
     static let deltaFIRStageId: UInt32 = 899
     static let alignmentDelayBase: UInt32 = 900
     static let programPEQBase: UInt32 = 800
+    /// E33 S20: group EQ stages, one per group lane, `+ 32 * chunk` when a lane's list needs more than 16 sections.
+    static let groupPEQBase: UInt32 = 1_300
     static let interChannelDelayBase: UInt32 = 1_000
     static let laneDelayBase: UInt32 = 1_100
     /// E7 S1: the DELAY half of a fractional inter-channel delay longer than the FRAC_DELAY ring.
@@ -276,6 +286,21 @@ struct UnifiedGraphProgramDSP: Equatable, Sendable {
             for curve in curves {
                 add(N60_STAGE_PEQ, Self.programPEQBase + UInt32(curve.lane), lane: UInt32(curve.lane),
                     params: try UnifiedGraphConfiguration.peqParameters(curve.sections))
+            }
+            // E33 S20 (G39): each group's list runs on its lanes only, after the session's own curves and ahead of the
+            // dynamic EQ. A paired lane inside Mid/Side would see the encoded signal, so that is refused by name.
+            for entry in groupEQ {
+                if eqMode == .midSide, shape.pairs.contains(where: { $0.a == entry.lane || $0.b == entry.lane }) {
+                    throw UnifiedGraphFallbackReason.midSideGroupEQ
+                }
+                guard entry.lane < count, entry.sections.reduce(0, { $0 + $1.slotCount }) <= 3 * Int(N60_PEQ_MAX_SECTIONS) else {
+                    throw UnifiedGraphFallbackReason.stageBudget
+                }
+                for (chunk, start) in stride(from: 0, to: entry.sections.count, by: Int(N60_PEQ_MAX_SECTIONS)).enumerated() {
+                    let part = Array(entry.sections[start..<min(start + Int(N60_PEQ_MAX_SECTIONS), entry.sections.count)])
+                    add(N60_STAGE_PEQ, Self.groupPEQBase + UInt32(entry.lane) + 32 * UInt32(chunk), lane: UInt32(entry.lane),
+                        params: try UnifiedGraphConfiguration.groupPEQParameters(part))
+                }
             }
             if let params = st.dynamicEQ {
                 add(N60_STAGE_DYN_EQ, UnifiedGraphConfiguration.dynamicEQStageId, mask: coveredMask, params: params)

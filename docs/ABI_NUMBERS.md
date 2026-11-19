@@ -19,3 +19,4 @@ If two claims collide, the one that merges second renumbers its own claim only.
 | graph v44 | E33 S10 `e33/input-overs` | open; METER_IN paramCount 2 (detect, generation) and `n60_graph_read_input_overs`; no struct layout change |
 | graph v45 | E33 S13 `e33/surround-detector-and-dialogue` | open; compressor paramCount 17 ([16]) and expander paramCount 16 ([15]) detector-excluded lane; LOUDNESS paramCount 33 ([32]) centre lane; `n60_loudness_readback.reserved` carries the centre-active flag; no struct size change |
 | graph v46 | E33 S14 `e33/limiter-auto-release` | open; PROTECTION sound-fixes word bit 2 (value 4) is auto release (word range 0..7); `n60_dynamics_readback.effectiveReleaseMs` (struct size grows by 4 bytes); sustain state is not carried across a rebuild |
+| none (no bump) | E33 S20 `e33/eq-channel-groups` | claims no number; group EQ rides existing per-lane PEQ stages |
