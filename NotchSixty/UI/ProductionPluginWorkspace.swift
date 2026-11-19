@@ -60,7 +60,16 @@ private final class AudioUnitPluginEditorSession: ObservableObject, Identifiable
     let slotID: UUID
     let descriptor: AudioUnitComponentDescriptor
     let initialState: Data?
+    /// E33 S23 (`e33.page-enhancements`): edit the running plug-in; false with the flag off (detached copy, Apply).
+    let liveEditEnabled: Bool
+    private let liveAttachment: (target: AUAudioUnitEditTarget, renderedLatencyFrames: Int)?
+    private let pendingPreset: AudioUnitPresetEntry?
+    private let sampleRate: Double
 
+    @Published private(set) var liveSession: AudioUnitLiveEditSession?
+    @Published private(set) var latencyNotice: String?
+    @Published private(set) var isEditingRunningUnit = false
+    @Published private(set) var presets: [AudioUnitPresetEntry] = []
     @Published private(set) var loadState: LoadState = .loading
     @Published private(set) var customViewController: NSViewController?
     @Published private(set) var parameters: [AUParameter] = []
@@ -70,8 +79,16 @@ private final class AudioUnitPluginEditorSession: ObservableObject, Identifiable
     init(
         slotIndex: Int,
         slot: AudioUnitRackSlotState,
-        descriptor: AudioUnitComponentDescriptor
+        descriptor: AudioUnitComponentDescriptor,
+        liveEditEnabled: Bool = false,
+        liveAttachment: (target: AUAudioUnitEditTarget, renderedLatencyFrames: Int)? = nil,
+        pendingPreset: AudioUnitPresetEntry? = nil,
+        sampleRate: Double = 48_000
     ) {
+        self.liveEditEnabled = liveEditEnabled
+        self.liveAttachment = liveAttachment
+        self.pendingPreset = pendingPreset
+        self.sampleRate = sampleRate
         self.slotIndex = slotIndex
         self.slotID = slot.id
         self.descriptor = descriptor
@@ -80,6 +97,10 @@ private final class AudioUnitPluginEditorSession: ObservableObject, Identifiable
 
     func load() async {
         guard loadState == .loading, unit == nil else { return }
+        if liveEditEnabled, let liveAttachment {
+            await attachToRunningUnit(liveAttachment)
+            return
+        }
         do {
             let unit = try await Self.instantiate(descriptor.identity)
             if let initialState {
@@ -96,10 +117,72 @@ private final class AudioUnitPluginEditorSession: ObservableObject, Identifiable
                 customViewController =
                     await Self.requestViewController(for: au)
             }
+            if liveEditEnabled {
+                let au = unit.withNodeAUAudioUnit { au in au }
+                let target = AUAudioUnitEditTarget(audioUnit: au, sampleRate: sampleRate)
+                try startLiveSession(target: target, renderedLatencyFrames: target.reportedLatencyFrames ?? 0)
+            }
             loadState = .ready
         } catch {
             loadState = .failed(error.localizedDescription)
         }
+    }
+
+    /// E33 S23: the editor shows the unit the rack renders, so every change is heard at once.
+    private func attachToRunningUnit(
+        _ attachment: (target: AUAudioUnitEditTarget, renderedLatencyFrames: Int)
+    ) async {
+        do {
+            let au = attachment.target.audioUnit
+            parameters = au.parameterTree?.allParameters ?? []
+            if descriptor.hasCustomView {
+                customViewController = await Self.requestViewController(for: au)
+            }
+            isEditingRunningUnit = true
+            try startLiveSession(
+                target: attachment.target,
+                renderedLatencyFrames: attachment.renderedLatencyFrames
+            )
+            loadState = .ready
+        } catch {
+            loadState = .failed(error.localizedDescription)
+        }
+    }
+
+    private func startLiveSession(
+        target: AUAudioUnitEditTarget,
+        renderedLatencyFrames: Int
+    ) throws {
+        let session = try AudioUnitLiveEditSession(target: target, renderedLatencyFrames: renderedLatencyFrames)
+        liveSession = session
+        presets = session.presets
+        if let pendingPreset {
+            try session.applyPreset(pendingPreset)
+            refreshAfterEdit()
+        }
+    }
+
+    /// Re-reads the readouts and the latency notice; called after each edit and on a short poll while the sheet is open.
+    func refreshAfterEdit() {
+        guard let liveSession else { return }
+        latencyNotice = liveSession.latencyChanged
+            ? AudioUnitLiveEditSession.latencyNotice(
+                rendered: liveSession.renderedLatencyFrames,
+                now: liveSession.reportedLatencyFrames,
+                sampleRate: sampleRate
+            )
+            : nil
+        objectWillChange.send()
+    }
+
+    func applyPreset(_ entry: AudioUnitPresetEntry) throws {
+        try liveSession?.applyPreset(entry)
+        refreshAfterEdit()
+    }
+
+    func revertEdits() throws {
+        try liveSession?.revert()
+        refreshAfterEdit()
     }
 
     func setParameter(
@@ -111,6 +194,7 @@ private final class AudioUnitPluginEditorSession: ObservableObject, Identifiable
             Double(parameter.maxValue)
         )
         parameter.value = AUValue(clamped)
+        refreshAfterEdit()
         objectWillChange.send()
     }
 
@@ -223,6 +307,9 @@ private struct AudioUnitEditorSheet: View {
     let isApplying: Bool
     let onCancel: () -> Void
     let onApply: () -> Void
+    /// Live editing: Done saves (or just closes when nothing changed). Apply and Cancel are not shown.
+    let onDone: () -> Void
+    let onError: (Error) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: DesignSpacing.l.pt) {
@@ -256,28 +343,82 @@ private struct AudioUnitEditorSheet: View {
 
             Divider()
 
+            if session.liveEditEnabled {
+                liveFooter
+            } else {
+                HStack {
+                    Label(
+                        "Changes are isolated until Apply. Apply re-runs offline preparation before the live rack can change.",
+                        systemImage: "shield.lefthalf.filled"
+                    )
+                    .font(DesignType.caption.font)
+                    .foregroundStyle(.secondary)
+
+                    Spacer()
+
+                    Button("Cancel", role: .cancel, action: onCancel)
+                        .disabled(isApplying)
+                    Button("Apply", action: onApply)
+                        .buttonStyle(.glassProminent)
+                        .disabled(
+                            isApplying
+                                || session.loadState != .ready
+                        )
+                }
+            }
+        }
+        .padding(DesignSpacing.l.pt)
+        .interactiveDismissDisabled(session.liveEditEnabled)
+        .task { await session.load() }
+        .task {
+            // A custom plug-in view changes the unit without telling us, so the delay notice polls.
+            while session.liveEditEnabled, !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 300_000_000)
+                session.refreshAfterEdit()
+            }
+        }
+    }
+
+    private var liveFooter: some View {
+        VStack(alignment: .leading, spacing: DesignSpacing.s.pt) {
+            if let notice = session.latencyNotice {
+                Label(notice, systemImage: "clock.badge.exclamationmark")
+                    .font(DesignType.caption.font)
+                    .foregroundStyle(.orange)
+            }
             HStack {
                 Label(
-                    "Changes are isolated until Apply. Apply re-runs offline preparation before the live rack can change.",
-                    systemImage: "shield.lefthalf.filled"
+                    session.isEditingRunningUnit
+                        ? "Changes are heard as you make them. Revert returns to how the plug-in was when this window opened."
+                        : "Audio is not running through this plug-in, so changes are heard when it starts. Revert returns to how the plug-in was when this window opened.",
+                    systemImage: "ear"
                 )
                 .font(DesignType.caption.font)
                 .foregroundStyle(.secondary)
 
                 Spacer()
 
-                Button("Cancel", role: .cancel, action: onCancel)
-                    .disabled(isApplying)
-                Button("Apply", action: onApply)
+                Menu("Presets") {
+                    if session.presets.isEmpty {
+                        Text("This plug-in lists no presets")
+                    }
+                    ForEach(session.presets) { preset in
+                        Button(preset.name) {
+                            do { try session.applyPreset(preset) } catch { onError(error) }
+                        }
+                    }
+                }
+                .disabled(session.presets.isEmpty || session.loadState != .ready)
+
+                Button("Revert") {
+                    do { try session.revertEdits() } catch { onError(error) }
+                }
+                .disabled(isApplying || session.loadState != .ready)
+                Button("Done", action: onDone)
                     .buttonStyle(.glassProminent)
-                    .disabled(
-                        isApplying
-                            || session.loadState != .ready
-                    )
+                    .disabled(isApplying)
             }
         }
-        .padding(DesignSpacing.l.pt)
-        .task { await session.load() }
     }
 
     @ViewBuilder
@@ -366,6 +507,15 @@ private struct AudioUnitEditorSheet: View {
     }
 }
 
+/// E33 S23: what the slot menu offers.
+private struct PluginSlotMenu {
+    let presets: [AudioUnitPresetEntry]
+    let canPaste: Bool
+    let onChoosePreset: (AudioUnitPresetEntry) -> Void
+    let onCopy: () -> Void
+    let onPaste: () -> Void
+}
+
 private struct PluginRackSlotRow: View {
     let index: Int
     let slot: AudioUnitRackSlotState
@@ -384,6 +534,8 @@ private struct PluginRackSlotRow: View {
     let onEdit: () -> Void
     let onRemove: () -> Void
     let onClearQuarantine: (() -> Void)?
+    /// E33 S23: nil with `e33.page-enhancements` off. The slot menu: the plug-in's own presets, Copy and Paste settings.
+    let slotMenu: PluginSlotMenu?
 
     @State private var wetDryMix: Double
 
@@ -404,8 +556,10 @@ private struct PluginRackSlotRow: View {
         onMoveDown: @escaping () -> Void,
         onEdit: @escaping () -> Void,
         onRemove: @escaping () -> Void,
-        onClearQuarantine: (() -> Void)?
+        onClearQuarantine: (() -> Void)?,
+        slotMenu: PluginSlotMenu? = nil
     ) {
+        self.slotMenu = slotMenu
         self.index = index
         self.slot = slot
         self.sampleRate = sampleRate
@@ -540,6 +694,28 @@ private struct PluginRackSlotRow: View {
                         .buttonStyle(.glass)
                         .help("Open detached plug-in editor")
                         .disabled(isBusy)
+
+                        if let slotMenu {
+                            Menu {
+                                Menu("Presets") {
+                                    if slotMenu.presets.isEmpty {
+                                        Text("Presets are listed while audio runs through this plug-in. Open the editor to choose one.")
+                                    }
+                                    ForEach(slotMenu.presets) { preset in
+                                        Button(preset.name) { slotMenu.onChoosePreset(preset) }
+                                    }
+                                }
+                                Button("Copy settings", action: slotMenu.onCopy)
+                                Button("Paste settings", action: slotMenu.onPaste)
+                                    .disabled(!slotMenu.canPaste)
+                            } label: {
+                                Image(systemName: "ellipsis.circle")
+                            }
+                            .menuStyle(.button)
+                            .buttonStyle(.glass)
+                            .help("Plug-in presets, copy and paste settings")
+                            .disabled(isBusy)
+                        }
 
                         Button(action: onMoveUp) {
                             Image(systemName: "chevron.up")
@@ -842,7 +1018,11 @@ struct ProductionPluginWorkspace: View {
                 },
                 onApply: {
                     applyEditor(session)
-                }
+                },
+                onDone: {
+                    closeLiveEditor(session)
+                },
+                onError: { commandError = $0.localizedDescription }
             )
         }
         .confirmationDialog(
@@ -1126,7 +1306,17 @@ struct ProductionPluginWorkspace: View {
                                         component
                                     )
                                 }
-                            }
+                            },
+                    slotMenu: liveEditEnabled && slot.component != nil
+                        ? PluginSlotMenu(
+                            presets: host.liveEditTarget(slotIndex: index, sampleRate: processingFormat.sampleRate)?
+                                .target.presets() ?? [],
+                            canPaste: host.settingsClipboard?.canPaste(onto: slot) ?? false,
+                            onChoosePreset: { openEditor(slot: slot, index: index, preset: $0) },
+                            onCopy: { copySettings(slot) },
+                            onPaste: { pasteSettings(onto: slot, index: index) }
+                        )
+                        : nil
                 )
             }
 
@@ -1547,9 +1737,14 @@ struct ProductionPluginWorkspace: View {
         }
     }
 
+    private var liveEditEnabled: Bool {
+        FeatureFlags.isEnabledProcessWide(.eqPageEnhancements)
+    }
+
     private func openEditor(
         slot: AudioUnitRackSlotState,
-        index: Int
+        index: Int,
+        preset: AudioUnitPresetEntry? = nil
     ) {
         guard let component = slot.component,
               let descriptor =
@@ -1562,8 +1757,50 @@ struct ProductionPluginWorkspace: View {
             AudioUnitPluginEditorSession(
                 slotIndex: index,
                 slot: slot,
-                descriptor: descriptor
+                descriptor: descriptor,
+                liveEditEnabled: liveEditEnabled,
+                liveAttachment: liveEditEnabled
+                    ? host.liveEditTarget(slotIndex: index, sampleRate: processingFormat.sampleRate)
+                    : nil,
+                pendingPreset: preset,
+                sampleRate: processingFormat.sampleRate
             )
+    }
+
+    /// E33 S23: closing keeps the changes and saves them through the existing rack transaction; a change in the
+    /// plug-in's delay takes the existing controlled restart. A failed save leaves the editor open (Revert undoes).
+    private func closeLiveEditor(_ session: AudioUnitPluginEditorSession) {
+        guard let live = session.liveSession else {
+            editorSession = nil
+            return
+        }
+        do {
+            switch try live.finish() {
+            case .unchanged:
+                live.end()
+                editorSession = nil
+            case .commit(let state, _):
+                runMutation(.setOpaqueFullState(slot: session.slotIndex, state: state), onSuccess: {
+                    live.end()
+                    editorSession = nil
+                })
+            }
+        } catch {
+            commandError = error.localizedDescription
+        }
+    }
+
+    private func copySettings(_ slot: AudioUnitRackSlotState) {
+        host.settingsClipboard = AudioUnitSettingsClipboard(copying: slot)
+    }
+
+    private func pasteSettings(onto slot: AudioUnitRackSlotState, index: Int) {
+        guard let clipboard = host.settingsClipboard else { return }
+        do {
+            runMutation(try clipboard.pasteMutation(onto: slot, index: index))
+        } catch {
+            commandError = error.localizedDescription
+        }
     }
 
     private func applyEditor(

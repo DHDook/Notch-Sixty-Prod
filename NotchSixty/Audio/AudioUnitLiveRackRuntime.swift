@@ -2,6 +2,7 @@ import AudioToolbox
 import AVFAudio
 import Darwin
 import Foundation
+import os
 
 enum AudioUnitLiveRackBuildError: Error, Equatable, LocalizedError {
     case invalidExecutionPlan
@@ -399,6 +400,10 @@ final class AudioUnitLiveProcessStage: AudioUnitLiveRackStageProcessing {
     private let dryScratch: UnsafeMutablePointer<Float>
     private let faultGate: OpaquePointer
 
+    /// E33 S23: set on the main actor while the plug-in's editor is open, read by the control-plane health check.
+    /// Never read on the render path.
+    private let liveEditing = OSAllocatedUnfairLock(initialState: false)
+
     private var currentInput: UnsafePointer<Float>?
     private var currentFrameCount = 0
     private var renderWatchdog = AudioUnitLiveRenderWatchdog()
@@ -667,6 +672,16 @@ final class AudioUnitLiveProcessStage: AudioUnitLiveRackStageProcessing {
         )
     }
 
+    /// The unit the rack renders. Control plane only; the editor attaches to it so edits are heard at once.
+    var liveAudioUnit: AUAudioUnit {
+        unit.withNodeAUAudioUnit { $0 }
+    }
+
+    /// While true a latency or tail change is not a fault: the editor is open and the controlled restart runs on close.
+    func setLiveEditing(_ editing: Bool) {
+        liveEditing.withLock { $0 = editing }
+    }
+
     func controlPlaneHealthIssue()
         -> AudioUnitLiveRackControlPlaneIssue? {
         guard let component else { return nil }
@@ -721,6 +736,14 @@ final class AudioUnitLiveProcessStage: AudioUnitLiveRackStageProcessing {
                 return nil
             }
 
+        // E33 S23: while the editor is open a moved latency or tail is expected (the controlled restart runs on close);
+        // an invalid value is still a fault. The stage keeps its old delay compensation until then.
+        if liveEditing.withLock({ $0 }) {
+            switch issue {
+            case .latencyChanged?, .tailChanged?: return nil
+            default: break
+            }
+        }
         if issue != nil {
             N60AudioUnitStageFaultGateTrip(faultGate)
         }
@@ -1054,6 +1077,11 @@ final class AudioUnitLiveRackRuntime: @unchecked Sendable {
             stages: stages,
             componentsBySlot: componentsBySlot
         )
+    }
+
+    /// E33 S23: the process stage of `slotIndex`, for the live editor. nil when that slot is bypassed or empty.
+    func processStage(forSlot slotIndex: Int) -> AudioUnitLiveProcessStage? {
+        stages.lazy.compactMap { $0 as? AudioUnitLiveProcessStage }.first { $0.slotIndex == slotIndex }
     }
 
     var processor: N60AudioUnitLiveRackProcessor {

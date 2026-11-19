@@ -950,10 +950,30 @@ final class AudioUnitHostController: ObservableObject {
         }
     }
 
+    /// E33 S23: the clipboard for Copy settings and Paste settings. Held here so it survives a Content Preset switch.
+    @Published var settingsClipboard: AudioUnitSettingsClipboard?
+    /// The rack the transport is rendering, for the live editor. Weak: the engine owns it.
+    private weak var liveRackRuntime: AudioUnitLiveRackRuntime?
+
+    /// E33 S23: the live edit target for `slotIndex`, or nil when that slot is not being rendered.
+    func liveEditTarget(
+        slotIndex: Int,
+        sampleRate: Double
+    ) -> (target: AUAudioUnitEditTarget, renderedLatencyFrames: Int)? {
+        guard let stage = liveRackRuntime?.processStage(forSlot: slotIndex),
+              rackConfiguration.slots.indices.contains(slotIndex),
+              stage.component == rackConfiguration.slots[slotIndex].component else { return nil }
+        return (
+            AUAudioUnitEditTarget(audioUnit: stage.liveAudioUnit, sampleRate: sampleRate, stage: stage),
+            stage.latencyFrames
+        )
+    }
+
     private func attachFaultMonitoring(
         to runtime: AudioUnitLiveRackRuntime?,
         includeExistingFaults: Bool
     ) {
+        liveRackRuntime = runtime
         runtime?.startFaultMonitoring(
             includeExistingFaults: includeExistingFaults
         ) { [weak self] fault in
