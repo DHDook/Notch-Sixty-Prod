@@ -50,6 +50,46 @@ struct StereoEQConfiguration: Equatable, Codable, Sendable {
     var sideBands: [EQBand]
     var independentSeeded: Bool
     var midSideSeeded: Bool
+    /// E33 S20 (G39): one extra band list per speaker group on a wide session, keyed by layout and group
+    /// (`EQChannelGroups.swift`). Absent in older profiles and not written while empty; a stereo session ignores it.
+    var groupBandLists: [String: [EQBand]] = [:]
+
+    private enum CodingKeys: String, CodingKey {
+        case channelMode, editChannel, phaseMode, bypassed, linkedBands, leftBands, rightBands, midBands, sideBands
+        case independentSeeded, midSideSeeded, groupBandLists
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        channelMode = try c.decode(EQChannelMode.self, forKey: .channelMode)
+        editChannel = try c.decode(EQEditChannel.self, forKey: .editChannel)
+        phaseMode = try c.decode(EQPhaseMode.self, forKey: .phaseMode)
+        bypassed = try c.decode(Bool.self, forKey: .bypassed)
+        linkedBands = try c.decode([EQBand].self, forKey: .linkedBands)
+        leftBands = try c.decode([EQBand].self, forKey: .leftBands)
+        rightBands = try c.decode([EQBand].self, forKey: .rightBands)
+        midBands = try c.decode([EQBand].self, forKey: .midBands)
+        sideBands = try c.decode([EQBand].self, forKey: .sideBands)
+        independentSeeded = try c.decode(Bool.self, forKey: .independentSeeded)
+        midSideSeeded = try c.decode(Bool.self, forKey: .midSideSeeded)
+        groupBandLists = try c.decodeIfPresent([String: [EQBand]].self, forKey: .groupBandLists) ?? [:]
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(channelMode, forKey: .channelMode)
+        try c.encode(editChannel, forKey: .editChannel)
+        try c.encode(phaseMode, forKey: .phaseMode)
+        try c.encode(bypassed, forKey: .bypassed)
+        try c.encode(linkedBands, forKey: .linkedBands)
+        try c.encode(leftBands, forKey: .leftBands)
+        try c.encode(rightBands, forKey: .rightBands)
+        try c.encode(midBands, forKey: .midBands)
+        try c.encode(sideBands, forKey: .sideBands)
+        try c.encode(independentSeeded, forKey: .independentSeeded)
+        try c.encode(midSideSeeded, forKey: .midSideSeeded)
+        if !groupBandLists.isEmpty { try c.encode(groupBandLists, forKey: .groupBandLists) }
+    }
 
     init(
         channelMode: EQChannelMode = .linked,

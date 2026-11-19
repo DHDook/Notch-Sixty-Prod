@@ -1226,6 +1226,8 @@ enum UnifiedGraphFallbackReason: String, Error, Equatable, Sendable, CaseIterabl
     case midSideWithPairCalibration
     /// Mid/Side EQ together with a program FIR.
     case midSideProgramFIR
+    /// E33 S20: a speaker-group EQ list on a lane that Mid/Side pairs (the list would see the encoded signal).
+    case midSideGroupEQ
     /// The latency to align across lanes is larger than a delta FIR or a delay can carry.
     case latencyAlignment
     /// The graph would have more than 256 stages.
@@ -1297,6 +1299,7 @@ enum UnifiedGraphFallbackReason: String, Error, Equatable, Sendable, CaseIterabl
         case .binauralBudget: "HRTF set over the graph budget"
         case .midSideWithPairCalibration: "Mid/Side EQ with calibration EQ on a paired lane"
         case .midSideProgramFIR: "Mid/Side EQ with a program FIR"
+        case .midSideGroupEQ: "Speaker-group EQ on a left/right pair in Mid/Side mode"
         case .latencyAlignment: "latency alignment over the graph limit"
         case .stageBudget: "more than 256 graph stages"
         case .noFrontPair: "layout has no front left/right pair"
