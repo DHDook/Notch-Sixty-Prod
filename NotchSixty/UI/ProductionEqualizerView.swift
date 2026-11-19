@@ -12,6 +12,10 @@ struct ProductionEqualizerView: View {
     var audition: EQAuditionController? = nil
     /// E27 S2b: program spectrum overlay; nil or unavailable hides the switch.
     var programAnalyser: EQProgramAnalyserController? = nil
+    /// E33 S19: the saved Room Correction project behind the reference curves; nil shows none.
+    var referenceProjects: RoomCorrectionProjectController? = nil
+    @State private var referenceCurves: [EQReferenceCurve] = []
+    @AppStorage(EQReferenceSelection.preferenceKey) private var referenceRaw = ""
     /// E32 S1: one compiled response per (bands, rate), shared by the graph and its band curves.
     @State private var responseCache = EQResponseCache.shared
     @ObservedObject private var liveOverlay = MeasurementLiveOverlayStore.shared
@@ -141,6 +145,10 @@ struct ProductionEqualizerView: View {
         series = result
     }
 
+    private var referenceProjectPublisher: AnyPublisher<RoomCorrectionProject?, Never> {
+        referenceProjects?.$project.eraseToAnyPublisher() ?? Just(nil).eraseToAnyPublisher()
+    }
+
     var body: some View {
         ScrollView {
             pageContent
@@ -157,6 +165,10 @@ struct ProductionEqualizerView: View {
         .onChange(of: undoManager.map(ObjectIdentifier.init)) { _, _ in configureHistory() }
         .onChange(of: engine.stereoEQConfiguration) { _, _ in history.observeLiveChange() }
         .onReceive(autoPreamp.$lastError.compactMap { $0 }) { actionError = $0 }
+        .onReceive(referenceProjectPublisher) { project in
+            referenceCurves = enhanced
+                ? RoomCorrectionReferenceCurveSource(project: project).referenceCurves(now: Date()) : []
+        }
         .onReceive(comparisonErrors) { actionError = $0 }
         .onChange(of: configuration.channelMode) { _, _ in resetSelectionForBank() }
         .onChange(of: configuration.editChannel) { _, _ in resetSelectionForBank() }
@@ -354,6 +366,8 @@ struct ProductionEqualizerView: View {
                 graphView: graphView,
                 series: series,
                 curvesMode: bandCurvesMode,
+                referenceCurves: EQReferenceSelection.visible(
+                    referenceCurves, chosen: EQReferenceSelection.kinds(from: referenceRaw)),
                 otherLane: EQBandCurves.otherLane(in: configuration),
                 bands: bands,
                 selectedBandID: selectedBandID,
@@ -448,6 +462,11 @@ struct ProductionEqualizerView: View {
 
             if let programAnalyser {
                 EQProgramAnalyserSwitch(analyser: programAnalyser)
+            }
+
+            if enhanced, !referenceCurves.isEmpty {
+                EQReferenceCurveMenu(curves: referenceCurves, raw: $referenceRaw)
+                    .disabled(graphView != .magnitude)
             }
 
             Picker("Band curves", selection: $bandCurvesRaw) {
@@ -1197,6 +1216,8 @@ private struct ProductionEQResponseGraph: View {
     let graphView: EQGraphView
     let series: EQAnalysisSeries?
     let curvesMode: EQBandCurvesMode
+    /// E33 S19: read-only measurement and target curves; never an input to the EQ.
+    let referenceCurves: [EQReferenceCurve]
     let otherLane: (label: String, bands: [EQBand])?
     let bands: [EQBand]
     let selectedBandID: UUID?
@@ -1277,6 +1298,7 @@ private struct ProductionEQResponseGraph: View {
 
                 Canvas { context, _ in
                     if graphView == .magnitude {
+                        drawReferenceCurves(context: &context, size: size)
                         drawRTAOverlay(context: &context, size: size)
                         drawGhostLane(context: &context, size: size)
                         drawBandCurves(context: &context, size: size)
@@ -1502,6 +1524,24 @@ private struct ProductionEQResponseGraph: View {
                 )
             }
             db += step
+        }
+    }
+
+    /// E33 S19: stored points only, joined by straight lines on the log axis.
+    private func drawReferenceCurves(context: inout GraphicsContext, size: CGSize) {
+        for curve in referenceCurves {
+            var path = Path()
+            var started = false
+            for (frequency, db) in zip(curve.frequenciesHz, curve.gainDB)
+            where frequency >= minimumFrequency && frequency <= graphMaximumFrequency {
+                let point = CGPoint(x: xPosition(frequency, width: size.width), y: yPosition(db, height: size.height))
+                if started { path.addLine(to: point) } else { path.move(to: point); started = true }
+            }
+            guard started else { continue }
+            let color = EQReferenceCurveStyle.color(for: curve.kind)
+            let opacity = curve.isOutOfDate ? 0.4 : 0.85
+            let style = StrokeStyle(lineWidth: 1.5, dash: curve.kind == .target || curve.isOutOfDate ? [5, 4] : [])
+            context.stroke(path, with: .color(color.opacity(opacity)), style: style)
         }
     }
 
