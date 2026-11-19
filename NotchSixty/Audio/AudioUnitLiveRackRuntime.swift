@@ -439,7 +439,8 @@ final class AudioUnitLiveProcessStage: AudioUnitLiveRackStageProcessing {
         return noErr
     }
 
-    private init(
+    /// Internal as a test seam: tests inject a render block that fails or runs slow.
+    init(
         slotIndex: Int,
         component: AudioUnitComponentIdentity,
         unit: AVAudioUnit,
@@ -879,7 +880,7 @@ final class AudioUnitLiveProcessStage: AudioUnitLiveRackStageProcessing {
             continuation in
             AVAudioUnit.instantiate(
                 with: description,
-                options: []
+                options: AudioUnitLoadingPolicy.instantiationOptions()
             ) { unit, error in
                 if let error {
                     continuation.resume(throwing: error)

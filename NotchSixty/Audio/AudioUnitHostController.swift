@@ -958,12 +958,16 @@ final class AudioUnitHostController: ObservableObject {
             includeExistingFaults: includeExistingFaults
         ) { [weak self] fault in
             guard let component = fault.component else { return }
+            let processStopped = fault.reason == N60AudioUnitLiveRackFaultRenderStatus
+                && AudioUnitLoadingPolicy.separateProcessEnabled
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 self.quarantineComponent(
                     component,
-                    reason: .runtimeFailure,
-                    description: fault.description
+                    reason: processStopped ? .processStopped : .runtimeFailure,
+                    description: processStopped
+                        ? AudioUnitLoadingPolicy.processStoppedDescription
+                        : fault.description
                 )
             }
         }
