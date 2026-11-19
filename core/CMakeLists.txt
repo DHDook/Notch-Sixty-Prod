@@ -334,6 +334,11 @@ add_executable(n60core_limiter_auto_release_test tests/test_limiter_auto_release
 target_link_libraries(n60core_limiter_auto_release_test PRIVATE n60core)
 add_test(NAME n60core_limiter_auto_release COMMAND n60core_limiter_auto_release_test)
 
+# E33 S21: fit EQ bands to a curve (n60/eqfit.h).
+add_executable(n60core_eqfit_test tests/test_eqfit.cpp)
+target_link_libraries(n60core_eqfit_test PRIVATE n60core)
+add_test(NAME n60core_eqfit COMMAND n60core_eqfit_test)
+
 # E33 S10: input overs at METER_IN (ABI v44).
 add_executable(n60core_input_overs_test tests/test_input_overs.cpp)
 target_link_libraries(n60core_input_overs_test PRIVATE n60core)

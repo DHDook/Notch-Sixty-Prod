@@ -469,6 +469,20 @@ struct ProductionEqualizerView: View {
                     .disabled(graphView != .magnitude)
             }
 
+            // E33 S21: fit bands to a saved measurement. The proposal changes nothing until the user keeps it.
+            if enhanced, referenceCurves.contains(where: { $0.kind != .target }) {
+                EQFitBandsButton(
+                    curves: referenceCurves, sampleRate: sampleRate, existingBandCount: bands.count,
+                    keep: { fitted in
+                        recorded {
+                            var next = engine.stereoEQConfiguration
+                            next.replaceEditableBands(fitted)
+                            try engine.replaceStereoEQConfiguration(next)
+                        }
+                        selectedBandID = bands.first?.id
+                    })
+            }
+
             Picker("Band curves", selection: $bandCurvesRaw) {
                 ForEach(EQBandCurvesMode.allCases) { mode in Text(mode.displayName).tag(mode.rawValue) }
             }

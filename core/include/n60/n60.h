@@ -11,6 +11,7 @@
 #include <stdint.h>
 
 #include "n60/correct.h"
+#include "n60/eqfit.h"
 #include "n60/fold.h"
 #include "n60/graph.h"
 #include "n60/headroom.h"
@@ -48,6 +49,8 @@ typedef struct n60_core_abi_info {
     uint32_t headroomPathSize;  /* sizeof(n60_headroom_path) */
     uint32_t mimoProblemSize;   /* sizeof(n60_mimo_problem) */
     uint32_t foldMatrixSize;    /* sizeof(n60_fold_matrix) */
+    uint32_t eqfitVersion;      /* E33 S21, appended so earlier offsets keep their place */
+    uint32_t eqfitProblemSize;  /* sizeof(n60_eqfit_problem) */
 } n60_core_abi_info;
 
 /* Returns 1 and fills info, or 0 for a null pointer or a structSize smaller than the first two fields. */

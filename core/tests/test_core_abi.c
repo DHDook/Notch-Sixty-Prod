@@ -29,6 +29,8 @@ int main(void) {
     CHECK(info.headroomPathSize == sizeof(n60_headroom_path), "headroom size");
     CHECK(info.mimoProblemSize == sizeof(n60_mimo_problem), "mimo size");
     CHECK(info.foldMatrixSize == sizeof(n60_fold_matrix), "fold size");
+    CHECK(info.eqfitVersion == N60_EQFIT_ABI_VERSION, "eqfit");
+    CHECK(info.eqfitProblemSize == sizeof(n60_eqfit_problem), "eqfit size");
     CHECK(n60_core_abi(NULL, sizeof info) == 0, "null");
     CHECK(n60_core_abi(&info, 4) == 0, "truncated");
     memset(&info, 0xAB, sizeof info);
