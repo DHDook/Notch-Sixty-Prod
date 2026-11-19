@@ -8,6 +8,6 @@ set(N60_CORE_SOURCES
     src/measure/timing.cpp src/measure/distortion.cpp src/measure/decay.cpp src/measure/waterfall.cpp
     src/measure/monitor_ring.cpp src/measure/spl.cpp src/measure/rta.cpp src/measure/predict.cpp src/measure/room_analysis.cpp src/mimo/design.cpp
     src/correct/minphase.cpp src/correct/design.cpp src/correct/synth.cpp src/correct/bass.cpp
-    src/correct/multisub_search.cpp src/abi.cpp src/xover/xover.cpp src/headroom/headroom.cpp)
+    src/correct/multisub_search.cpp src/abi.cpp src/xover/xover.cpp src/headroom/headroom.cpp src/eqfit/eqfit.cpp)
 # Built with exceptions on until E21 S4 (gap G1); ci/core_sources.sh leaves them out of CORE_SOURCES.
 set(N60_CORE_ANC_SOURCES src/anc/fxlms.cpp src/anc/remote_tonal.cpp)
