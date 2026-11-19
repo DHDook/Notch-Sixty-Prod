@@ -3705,7 +3705,7 @@ final class AudioIOEngine {
         EQConfiguration(
             phaseMode: configuration.phaseMode,
             bypassed: configuration.bypassed,
-            bands: configuration.editableBands
+            bands: configuration.sessionEditableBands
         )
     }
 
@@ -3714,14 +3714,7 @@ final class AudioIOEngine {
     }
 
     private func validateStereoEQStorage(_ configuration: StereoEQConfiguration) throws {
-        for bands in [configuration.linkedBands, configuration.leftBands, configuration.rightBands, configuration.midBands, configuration.sideBands] {
-            guard bands.count <= EQConfiguration.maximumBandCount else {
-                throw EQConfigurationError.tooManyBands(bands.count)
-            }
-            for (index, band) in bands.enumerated() where band.enabled {
-                _ = try EQBandRules.validate(band, index: index, sampleRate: transportSession?.outputFormat.sampleRate)
-            }
-        }
+        try configuration.validateStorage(sampleRate: transportSession?.outputFormat.sampleRate)
     }
 
     private func applyStereoEQConfiguration(

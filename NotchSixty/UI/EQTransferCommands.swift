@@ -19,6 +19,8 @@ struct EQTransferCommands {
     static let pasteboardType = NSPasteboard.PasteboardType(EQBandClipboard.privateTypeIdentifier)
 
     private var lane: EQLane { current().editLane }
+    /// What the dialogs call the list being edited: the chosen speaker group, or the lane (E33 S20 part 2).
+    private var listName: String { current().editGroupName ?? lane.displayName }
 
     // MARK: Import and export
 
@@ -54,8 +56,8 @@ struct EQTransferCommands {
         let existing = current().editableBands.count
         if existing > 0 {
             let alert = NSAlert()
-            alert.messageText = "Import \(parsed.bands.count) filters into \(lane.displayName)?"
-            alert.informativeText = "The \(lane.displayName) lane has \(existing) bands. Replace them, or add the new filters after them."
+            alert.messageText = "Import \(parsed.bands.count) filters into \(listName)?"
+            alert.informativeText = "The \(listName) list has \(existing) bands. Replace them, or add the new filters after them."
             alert.addButton(withTitle: "Replace")
             alert.addButton(withTitle: "Add")
             alert.addButton(withTitle: "Cancel")
@@ -187,10 +189,12 @@ struct EQTransferMenu: View {
             Button("Copy All Bands") { commands.copyAllBands() }
             Button("Paste Bands") { commands.paste() }
                 .disabled(!commands.canPaste || !canAddBands)
-            Divider()
-            Menu("Copy Lane To") {
-                ForEach(commands.laneTargets) { target in
-                    Button(target.displayName) { commands.copyLane(to: target) }
+            if !commands.laneTargets.isEmpty {
+                Divider()
+                Menu("Copy Lane To") {
+                    ForEach(commands.laneTargets) { target in
+                        Button(target.displayName) { commands.copyLane(to: target) }
+                    }
                 }
             }
         } label: {
