@@ -477,7 +477,8 @@ struct ProductionRootView: View {
             ProductionEqualizerView(
                 engine: engine, autoPreamp: product.profiles.autoPreamp, reference: product.reference,
                 comparison: product.profiles.eqComparison, audition: product.profiles.eqAudition,
-                programAnalyser: product.profiles.eqProgramAnalyser
+                programAnalyser: product.profiles.eqProgramAnalyser,
+                referenceProjects: product.roomCorrectionProjects
             )
         case .dynamics:
             ProductionDynamicsView(engine: engine, reference: product.reference, profiles: product.profiles, openEqualizer: { navigation.navigate(to: .equalizer) })
