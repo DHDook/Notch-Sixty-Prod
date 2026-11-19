@@ -384,7 +384,7 @@ struct SystemAudioUnitOfflinePreparationBackend: AudioUnitOfflinePreparing {
             continuation in
             AVAudioUnit.instantiate(
                 with: description,
-                options: []
+                options: AudioUnitLoadingPolicy.instantiationOptions()
             ) { unit, error in
                 if let error {
                     continuation.resume(

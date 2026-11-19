@@ -59,7 +59,8 @@ struct AudioUnitComponentDescriptor: Codable, Equatable, Hashable, Sendable, Ide
     }
 
     func compatibility(
-        for format: AudioUnitRackProcessingFormat
+        for format: AudioUnitRackProcessingFormat,
+        separateProcess: Bool = AudioUnitLoadingPolicy.separateProcessEnabled
     ) -> AudioUnitComponentCompatibility {
         var reasons: [String] = []
         if kind == .unsupported {
@@ -68,7 +69,7 @@ struct AudioUnitComponentDescriptor: Codable, Equatable, Hashable, Sendable, Ide
         if !passesAUVal {
             reasons.append("The component does not report a passing AU validation result.")
         }
-        if !sandboxSafe {
+        if !sandboxSafe, !separateProcess {
             reasons.append("The component is not reported as safe in the current sandboxed process.")
         }
         if !supports(channelCount: format.channelCount) {
@@ -263,6 +264,8 @@ enum AudioUnitQuarantineReason: String, Codable, Sendable {
     case invalidTail
     case stateRestoreFailure
     case runtimeFailure
+    /// E33 S22: the plug-in's separate process stopped (the render call failed).
+    case processStopped
     case manual
 }
 
