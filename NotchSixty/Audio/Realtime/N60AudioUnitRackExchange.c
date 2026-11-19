@@ -13,6 +13,8 @@ typedef struct {
 
 struct N60AudioUnitStageFaultGate {
     _Atomic bool tripped;
+    _Atomic uint32_t peakBufferLoad;
+    _Atomic uint32_t peakWatchdogLoad;
 };
 
 N60AudioUnitStageFaultGate *
@@ -21,7 +23,11 @@ N60AudioUnitStageFaultGateCreate(void) {
         (N60AudioUnitStageFaultGate *)calloc(1u, sizeof(*gate));
     if (gate == NULL) return NULL;
     atomic_init(&gate->tripped, false);
-    if (!atomic_is_lock_free(&gate->tripped)) {
+    atomic_init(&gate->peakBufferLoad, 0u);
+    atomic_init(&gate->peakWatchdogLoad, 0u);
+    if (!atomic_is_lock_free(&gate->tripped)
+        || !atomic_is_lock_free(&gate->peakBufferLoad)
+        || !atomic_is_lock_free(&gate->peakWatchdogLoad)) {
         free(gate);
         return NULL;
     }
@@ -53,6 +59,40 @@ bool N60AudioUnitStageFaultGateIsTripped(
         &gate->tripped,
         memory_order_acquire
     );
+}
+
+// Single writer (the render thread), so a relaxed load-compare-store keeps the
+// maximum without a compare-exchange loop.
+void N60AudioUnitStageFaultGateRecordLoad(
+    N60AudioUnitStageFaultGate *gate,
+    uint32_t bufferLoad,
+    uint32_t watchdogLoad
+) {
+    if (gate == NULL) return;
+    if (bufferLoad > atomic_load_explicit(
+            &gate->peakBufferLoad, memory_order_relaxed)) {
+        atomic_store_explicit(
+            &gate->peakBufferLoad, bufferLoad, memory_order_relaxed);
+    }
+    if (watchdogLoad > atomic_load_explicit(
+            &gate->peakWatchdogLoad, memory_order_relaxed)) {
+        atomic_store_explicit(
+            &gate->peakWatchdogLoad, watchdogLoad, memory_order_relaxed);
+    }
+}
+
+void N60AudioUnitStageFaultGateTakeLoad(
+    N60AudioUnitStageFaultGate *gate,
+    uint32_t *bufferLoad,
+    uint32_t *watchdogLoad
+) {
+    *bufferLoad = 0u;
+    *watchdogLoad = 0u;
+    if (gate == NULL) return;
+    *bufferLoad = atomic_exchange_explicit(
+        &gate->peakBufferLoad, 0u, memory_order_relaxed);
+    *watchdogLoad = atomic_exchange_explicit(
+        &gate->peakWatchdogLoad, 0u, memory_order_relaxed);
 }
 
 struct N60AudioUnitRackExchange {

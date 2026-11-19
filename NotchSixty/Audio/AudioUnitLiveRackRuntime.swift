@@ -677,6 +677,18 @@ final class AudioUnitLiveProcessStage: AudioUnitLiveRackStageProcessing {
         unit.withNodeAUAudioUnit { $0 }
     }
 
+    /// E33 S24: the largest render time since the last call, as fractions of the buffer time and of the
+    /// watchdog budget. Control plane only; clears the peaks.
+    func takeLoadReading() -> AudioUnitLoadReading {
+        var buffer: UInt32 = 0
+        var watchdog: UInt32 = 0
+        N60AudioUnitStageFaultGateTakeLoad(faultGate, &buffer, &watchdog)
+        return AudioUnitLoadReading(
+            bufferLoad: Double(buffer) / AudioUnitLoadReading.unitsPerOne,
+            watchdogLoad: Double(watchdog) / AudioUnitLoadReading.unitsPerOne
+        )
+    }
+
     /// While true a latency or tail change is not a fault: the editor is open and the controlled restart runs on close.
     func setLiveEditing(_ editing: Bool) {
         liveEditing.withLock { $0 = editing }
@@ -828,6 +840,16 @@ final class AudioUnitLiveProcessStage: AudioUnitLiveRackStageProcessing {
                 sampleRate: sampleRate,
                 ticksPerSecond: ticksPerSecond
             )
+            // E33 S24: publish the load reading (two stores, no allocation).
+            let bufferTicks = Double(frameCount) / sampleRate * ticksPerSecond
+            if bufferTicks > 0 {
+                let elapsed = Double(renderElapsed)
+                N60AudioUnitStageFaultGateRecordLoad(
+                    faultGate,
+                    AudioUnitLoadReading.units(elapsed / bufferTicks),
+                    AudioUnitLoadReading.units(elapsed / Double(budgetTicks))
+                )
+            }
             if renderWatchdog.observe(
                 elapsedTicks: renderElapsed,
                 budgetTicks: budgetTicks
@@ -1077,6 +1099,15 @@ final class AudioUnitLiveRackRuntime: @unchecked Sendable {
             stages: stages,
             componentsBySlot: componentsBySlot
         )
+    }
+
+    /// E33 S24: the peaks since the last call, by slot index (process stages only). Control plane only.
+    func takeLoadReadings() -> [Int: AudioUnitLoadReading] {
+        var result: [Int: AudioUnitLoadReading] = [:]
+        for case let stage as AudioUnitLiveProcessStage in stages {
+            result[stage.slotIndex] = stage.takeLoadReading()
+        }
+        return result
     }
 
     /// E33 S23: the process stage of `slotIndex`, for the live editor. nil when that slot is bypassed or empty.
