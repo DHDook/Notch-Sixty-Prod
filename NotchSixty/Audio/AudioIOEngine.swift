@@ -4602,7 +4602,7 @@ final class AudioIOEngine {
         case .midSide: mode = .midSide
         }
         var program = UnifiedGraphProgramDSP(
-            stereo: stereo, shape: shape, eqMode: mode, virtualSpeakers: virtualSpeakers)
+            stereo: stereo, shape: shape, eqMode: mode, virtualSpeakers: virtualSpeakers, groupEQ: try inputs.stereoEQ.groupCurves(shape: shape, sampleRate: sampleRate))
         program.deltaAudition = deltaAudition
         if let installedLanes {
             program.inputGain *= abxGain

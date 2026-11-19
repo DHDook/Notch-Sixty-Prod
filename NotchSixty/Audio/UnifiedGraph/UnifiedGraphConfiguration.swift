@@ -756,6 +756,15 @@ struct UnifiedGraphConfiguration: Equatable, Sendable {
         return try sections.flatMap(peqSlots)
     }
 
+    /// E33 S20: one PEQ stage's parameters for a group list, which also allows the constant-Q peaking type (8) that the
+    /// program curves never carry. At most 16 sections.
+    static func groupPEQParameters(_ sections: [UnifiedGraphPEQSection]) throws -> [Float] {
+        guard sections.count <= Int(N60_PEQ_MAX_SECTIONS), sections.allSatisfy({ (0...8).contains($0.type) }) else {
+            throw UnifiedGraphError.unsupportedConfiguration("more than 16 EQ sections")
+        }
+        return try sections.flatMap(peqSlots)
+    }
+
     private static func bassParameters(
         _ bass: UnifiedGraphBassManagement,
         firstSubLane: Int

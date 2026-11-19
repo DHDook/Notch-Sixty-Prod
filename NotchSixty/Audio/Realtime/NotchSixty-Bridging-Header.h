@@ -7,6 +7,7 @@
 #import "n60/correct.h"
 #import "n60/xover.h"
 #import "n60/headroom.h"
+#import "n60/eqfit.h"
 #import "n60/mimo.h"
 #import "n60/fold.h"
 #import "n60/n60.h"

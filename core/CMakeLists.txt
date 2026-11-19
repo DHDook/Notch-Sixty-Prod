@@ -334,6 +334,11 @@ add_executable(n60core_limiter_auto_release_test tests/test_limiter_auto_release
 target_link_libraries(n60core_limiter_auto_release_test PRIVATE n60core)
 add_test(NAME n60core_limiter_auto_release COMMAND n60core_limiter_auto_release_test)
 
+# E33 S21: fit EQ bands to a curve (n60/eqfit.h).
+add_executable(n60core_eqfit_test tests/test_eqfit.cpp)
+target_link_libraries(n60core_eqfit_test PRIVATE n60core)
+add_test(NAME n60core_eqfit COMMAND n60core_eqfit_test)
+
 # E33 S10: input overs at METER_IN (ABI v44).
 add_executable(n60core_input_overs_test tests/test_input_overs.cpp)
 target_link_libraries(n60core_input_overs_test PRIVATE n60core)
@@ -353,6 +358,11 @@ add_test(NAME n60core_loudness COMMAND n60core_loudness_test)
 add_executable(n60core_peq_wide_test tests/test_peq_wide.cpp)
 target_link_libraries(n60core_peq_wide_test PRIVATE n60core)
 add_test(NAME n60core_peq_wide COMMAND n60core_peq_wide_test)
+
+# E33 S20: per-speaker-group EQ lists as per-lane PEQ stages.
+add_executable(n60core_eq_groups_test tests/test_eq_groups.cpp)
+target_link_libraries(n60core_eq_groups_test PRIVATE n60core)
+add_test(NAME n60core_eq_groups COMMAND n60core_eq_groups_test)
 
 # E6 S12g2: lane delay ahead of bass management (ABI v28).
 add_executable(n60core_lane_delay_test tests/test_lane_delay.cpp)
