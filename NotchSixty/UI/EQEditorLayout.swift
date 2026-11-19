@@ -81,9 +81,10 @@ enum EQFilterPickerModel {
         var types: [EQFilterType]
     }
 
+    /// E33 S18 (G34, owner 16 Nov 2026): FIR is not offered; no stored or built-in profile holds a FIR band.
     static let sections: [Section] = [
         Section(title: "Basic", types: [.peaking, .lowShelf, .highShelf, .lowPass, .highPass, .bandPass, .notch]),
-        Section(title: "Special", types: [.linkwitzTransform, .tilt, .allPass, .fir])
+        Section(title: "Special", types: [.linkwitzTransform, .tilt, .allPass])
     ]
 
     static func sectionTitle(of type: EQFilterType) -> String? {

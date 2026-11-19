@@ -38,3 +38,18 @@ extension AudioIOEngine {
             for: module, shape: description.shape, virtualSpeakers: description.virtualSpeakers, eqMode: description.eqMode)
     }
 }
+
+extension AudioIOEngine {
+    /// E33 S18 (G35): the Equalizer page's "Applies to" line for the current session, from `EQSessionReach`.
+    var eqReachText: String? {
+        guard let description = dynamicsSessionDescription else { return nil }
+        let mode: UnifiedGraphProgramDSP.EQMode
+        switch stereoEQConfiguration.channelMode {
+        case .linked: mode = .linked
+        case .independent: mode = .independent
+        case .midSide: mode = .midSide
+        }
+        return EQSessionReach.pageText(
+            shape: description.shape, mode: mode, virtualSpeakers: description.virtualSpeakers)
+    }
+}

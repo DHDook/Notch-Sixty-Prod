@@ -26,6 +26,13 @@ struct EQComparisonSlots: Equatable, Sendable {
         b = live
     }
 
+    /// E33 S18 (G38): a comparison restored after a relaunch. `live` is the active slot, `other` the held one.
+    init(live: StereoEQConfiguration, active: EQComparisonSlot, other: StereoEQConfiguration) {
+        self.active = active
+        a = active == .a ? live : other
+        b = active == .b ? live : other
+    }
+
     func configuration(_ slot: EQComparisonSlot) -> StereoEQConfiguration { slot == .a ? a : b }
 
     mutating func store(_ configuration: StereoEQConfiguration, in slot: EQComparisonSlot) {
@@ -140,9 +147,11 @@ enum EQLoudnessMatch {
 /// Keeps the A/B state for the Equalizer page. Created by the profile controller.
 @MainActor
 final class EQComparisonController: ObservableObject {
-    @Published private(set) var slots: EQComparisonSlots
+    @Published private(set) var slots: EQComparisonSlots { didSet { onStateChange?() } }
     /// True from the first toggle until Keep or a reset.
-    @Published private(set) var isComparing = false
+    @Published private(set) var isComparing = false { didSet { onStateChange?() } }
+    /// E33 S18 (G38): told when the slots or the comparing state change, so the profile controller can keep B across a relaunch.
+    var onStateChange: (() -> Void)?
     @Published private(set) var loudnessMatchEnabled = false
     /// The trim, in dB (zero or negative), currently taken off the louder slot.
     @Published private(set) var matchTrimDB = 0.0
@@ -201,6 +210,31 @@ final class EQComparisonController: ObservableObject {
         a.bypassed = false; b.bypassed = false
         a.editChannel = .linked; b.editChannel = .linked
         return a == b
+    }
+
+    /// E33 S18 (G38): what survives a relaunch: which slot is active and the held (inactive) slot. Nil when not comparing.
+    struct PersistedState: Codable, Equatable, Sendable {
+        var active: String
+        var other: StereoEQConfiguration
+    }
+
+    var persistedState: PersistedState? {
+        guard isComparing else { return nil }
+        return PersistedState(active: slots.active.rawValue, other: slots.configuration(slots.active.other))
+    }
+
+    /// True when leaving the page's EQ now would discard a slot that differs from the active one.
+    var needsSlotChoice: Bool {
+        isComparing && !Self.sameIgnoringBypass(slots.configuration(.a), slots.configuration(.b))
+    }
+
+    /// Re-enters a saved comparison at launch. The live EQ is the active slot; refuses nothing and does nothing if already comparing.
+    func restore(_ state: PersistedState) {
+        guard !isComparing, let active = EQComparisonSlot(rawValue: state.active) else { return }
+        slots = EQComparisonSlots(live: engine.stereoEQConfiguration, active: active, other: state.other)
+        isComparing = true
+        syncPartnerDesign()
+        reconcileMatch()
     }
 
     /// Switches to the other slot.

@@ -42,6 +42,7 @@ struct ProductionProfileToolbar: View {
     @State private var draftName = ""
     @State private var interchangeMessage: String?
     @State private var presetSelectionError: String?
+    @State private var pendingEQSlotChoicePreset: UUID?
     @AppStorage(ProductionProfileToolbarPolicy.abComparisonEnabledKey)
     private var abComparisonEnabled = false
 
@@ -153,6 +154,32 @@ struct ProductionProfileToolbar: View {
         } message: {
             Text(comparison.lastErrorDescription ?? "")
         }
+        .confirmationDialog(
+            "Equalizer slots A and B differ",
+            isPresented: Binding(
+                get: { pendingEQSlotChoicePreset != nil },
+                set: { if !$0 { pendingEQSlotChoicePreset = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            ForEach(EQComparisonSlot.allCases) { slot in
+                Button("Keep \(slot.displayName)") {
+                    guard let id = pendingEQSlotChoicePreset else { return }
+                    pendingEQSlotChoicePreset = nil
+                    Task { @MainActor in
+                        do {
+                            try await product.selectContentPreset(id, keeping: slot)
+                            presetSelectionError = nil
+                        } catch {
+                            presetSelectionError = error.localizedDescription
+                        }
+                    }
+                }
+            }
+            Button("Cancel", role: .cancel) { pendingEQSlotChoicePreset = nil }
+        } message: {
+            Text("Switching presets ends the comparison. Choose the slot to keep as the Equalizer setting.")
+        }
         .alert(
             "Preset Change Failed",
             isPresented: Binding(
@@ -177,6 +204,8 @@ struct ProductionProfileToolbar: View {
                                     preset.id
                                 )
                                 presetSelectionError = nil
+                            } catch EQSlotChoiceError.choiceRequired {
+                                pendingEQSlotChoicePreset = preset.id
                             } catch {
                                 presetSelectionError =
                                     error.localizedDescription
