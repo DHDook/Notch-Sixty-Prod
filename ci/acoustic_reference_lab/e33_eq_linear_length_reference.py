@@ -13,6 +13,7 @@ independent RBJ-cookbook peaking model of a narrow bass cut (40 Hz, -9 dB, Q 3):
 import math
 from pathlib import Path
 import shutil
+import struct
 import subprocess
 import sys
 import tempfile
@@ -30,6 +31,10 @@ def require(ok, detail):
         raise AssertionError("E33 EQ linear length reference failed: " + detail)
 
 
+def f32(x):
+    return struct.unpack('f', struct.pack('f', x))[0]
+
+
 def peaking_db(rate, band, f):
     centre, gain, q = band
     a = 10 ** (gain / 40)
@@ -38,6 +43,11 @@ def peaking_db(rate, band, f):
     cw = math.cos(w0)
     b = (1 + alpha * a, -2 * cw, 1 - alpha * a)
     den = (1 + alpha / a, -2 * cw, 1 - alpha / a)
+    # The engine runs float32 coefficients (a0 = 1). At 384 kHz a 40 Hz pole pair sits at radius 1 - 3e-4, so float32 rounding
+    # of a1 and a2 alone moves the 40 Hz gain by about 1.9 dB; the FIR matches what the engine's biquad does, so the model uses
+    # the same rounded coefficients.
+    b = tuple(f32(x / den[0]) for x in b)
+    den = (1.0, f32(den[1] / den[0]), f32(den[2] / den[0]))
     w = 2 * math.pi * f / rate
     z = [complex(math.cos(-k * w), math.sin(-k * w)) for k in range(3)]
     return 20 * math.log10(abs(sum(b[k] * z[k] for k in range(3)) / sum(den[k] * z[k] for k in range(3))))
