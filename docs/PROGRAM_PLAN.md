@@ -635,7 +635,7 @@ it follows). One flag `e33.page-enhancements`, graduated in S11. K-System scales
 - [~] S23 `e33/plugin-live-edit-presets` (owns G42, G43; built dark, wired and graduated in S11): the plug-in window edits the running plug-in with Revert, the plug-in's own presets in the slot menu, copy and paste of settings
 - [ ] S24 `e33/plugin-rack-readings` (owns G44–G47, G49): load and latency per slot, whole-rack bypass, before/after compare (E12 S13), drag to reorder, automatic rescan, plain catalog reasons, safety card removed
 - [~] S25 `e33/plugin-surround-channels` (needs-owner, realtime; owns G48): a stereo plug-in on a surround session runs on the front pair or on every pair, other channels delayed to match
-- [ ] S26 `e33/eq-matched-filters` (owner, 17 Nov 2026; end-state review; needs-owner: engine core, graph ABI; owns G51): bells, shelves and pass filters keep their analogue shape up to 20 kHz at every rate, and the linear-phase design and the drawn curve use the same design; new bands use them, imports and saved EQs keep cookbook filters with an offer to switch
+- [~] S26 `e33/eq-matched-filters` (owner, 17 Nov 2026; end-state review; needs-owner: engine core, graph ABI; owns G51): bells, shelves and pass filters keep their analogue shape up to 20 kHz at every rate, and the linear-phase design and the drawn curve use the same design; new bands use them, imports and saved EQs keep cookbook filters with an offer to switch. Built dark behind `e33.page-enhancements` (off); wiring: S11
 - [ ] S27 `e33/eq-linear-phase-resolution` (owner, 17 Nov 2026; end-state review; needs-owner: engine core; owns G52 and the EQ half of E23 G11): linear-phase EQ designed in `core/` off the main actor, four lengths (about 21 ms default, 85, 170 and 340 ms), an accuracy readout and a suggested length
 - [ ] S11 `e33/ship`: end-to-end tests, gaps closed, flag graduated (needs-owner); last slice, after S12–S27
 
@@ -747,6 +747,7 @@ Owner decision, 17 Nov 2026 (pass-or-fail rule; whole-app review): every check h
 - [ ] E7 G10 and bench: insert a real Audio Unit that stops at 192 kHz and change the device rate 48 to 384 to 48 kHz while playing (per-rate bypass, row note, return at 48 kHz); listen to a 20 ms headphone delay, a resampled speaker IR and the precision-changed stages at 352.8 and 384 kHz (`docs/epics/E7.md` Bench checks)
 - [ ] E32 bench (`docs/epics/E32.md` slices): Equalizer page CPU with the analyser on and the Nyquist note on a real rate change, add and remove band error banners (S1); dynamic low shelf on music and band drags without level dips at 44.1, 96 and 384 kHz (S2); meters and gain-reduction CPU with audio stopped and while playing, a 25 h loudness run (S3); multiband crossover drag on a DAC (S4); limiter with attack above lookahead, expander on speech and drums, loopback inter-sample peak at 176.4, 192 and 384 kHz (S5)
 - [ ] macOS AirPlay Receiver (owner, 17 Nov 2026; end-state review): with an iPhone playing to the Mac through macOS's built-in AirPlay Receiver, check that Notch Sixty processes that audio like any other app's. If it does, add a help line saying so; if not, record what is missing for V2-3
+- [ ] E33 S26 bench: a high-shelf boost by ear, matched filters against cookbook, at 44.1 and 96 kHz (E33 G93 also rides on this listening check)
 
 ### FC Flag cleanup (owner, 11 Nov 2026)
 

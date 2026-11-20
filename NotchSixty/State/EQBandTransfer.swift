@@ -97,12 +97,7 @@ enum EQBandTransfer {
     private static func adding(_ incoming: [EQBand], to configuration: StereoEQConfiguration,
                                replacing: Bool, notes: [String]) throws -> Outcome {
         let fresh = incoming.map { band -> EQBand in
-            let copy = band
-            return EQBand(
-                id: UUID(), enabled: copy.enabled, type: copy.type, frequencyHz: copy.frequencyHz,
-                gainDB: copy.gainDB, q: copy.q, slope: copy.slope, constantQ: copy.constantQ,
-                linkwitzTargetHz: copy.linkwitzTargetHz, linkwitzTargetQ: copy.linkwitzTargetQ,
-                firKernel: copy.firKernel, dynamic: copy.dynamic)
+            band.withID(UUID())
         }
         let existing = replacing ? [] : configuration.editableBands
         let total = existing.count + fresh.count
@@ -131,11 +126,7 @@ enum EQBandTransfer {
         guard source != target else { return configuration }
         var result = configuration
         let copied = configuration.bands(in: source).map { band in
-            EQBand(
-                id: UUID(), enabled: band.enabled, type: band.type, frequencyHz: band.frequencyHz,
-                gainDB: band.gainDB, q: band.q, slope: band.slope, constantQ: band.constantQ,
-                linkwitzTargetHz: band.linkwitzTargetHz, linkwitzTargetQ: band.linkwitzTargetQ,
-                firKernel: band.firKernel, dynamic: band.dynamic)
+            band.withID(UUID())
         }
         result.setBands(copied, in: target)
         switch target {

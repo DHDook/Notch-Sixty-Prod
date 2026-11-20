@@ -34,7 +34,7 @@ extern "C" {
 #endif
 
 /* Bumped on any incompatible change to a struct or function below. */
-#define N60_GRAPH_ABI_VERSION 46u
+#define N60_GRAPH_ABI_VERSION 47u
 
 typedef struct n60_graph n60_graph; /* opaque */
 
@@ -632,6 +632,13 @@ typedef int (*n60_external_process_fn)(void *context, const float *const *in, fl
  * Types 8 to 10 add no latency, reset like the other types and, for 9 and 10, ignore the sample rate: the prepared
  * coefficients belong to the rate they were designed at, so the caller re-prepares them on a rate change. A caller needing more than N60_PEQ_MAX_SECTIONS sections chains several PEQ stages. */
 #define N60_PEQ_MAX_SECTIONS 16u
+/* ABI v47 (E33 S26, G51): matched filters. Types 16..24 are the matched design of types 0..8 (16 peaking, 17 low shelf,
+ * 18 high shelf, 19 low pass, 20 high pass, 23 band pass, 24 constant-Q peaking; 21, 22 are unused because a notch and an
+ * all-pass have no gain to match). Same parameters and limits as the base type. The poles are the analogue poles mapped
+ * by z = e^(sT) and the numerator matches the analogue magnitude at DC, at Hz and at Nyquist, so a boost near the top of
+ * the band keeps its shape (docs/MATCHED_EQ_FILTERS.md). Where the matched design is not defined the stage uses the
+ * cookbook design of the base type. Types 0..8 are bit-identical to ABI v46. Allocation-free; design on any thread. */
+#define N60_PEQ_SECTION_MATCHED_BASE 16u
 #define N60_GRAPH_MAX_STAGES 256u
 #define N60_GRAPH_MAX_DELAY_FRAMES (1u << 22)
 #define N60_LANE_ALL 0xFFFFFFFFu /* stage runs on every output lane, each with its own state */
@@ -708,6 +715,14 @@ typedef struct n60_denoiser_state {
 
 /* ABI version of the loaded library; compare with N60_GRAPH_ABI_VERSION. */
 uint32_t n60_graph_abi_version(void);
+
+/* ABI v47 (E33 S26): the PEQ stage's own section design, for the control plane (the drawn curve, the linear-phase and
+ * mixed-phase designs), so every consumer reads the coefficients the stage runs. Types 0..8 and the matched types 16..24
+ * (see N60_PEQ_SECTION_MATCHED_BASE). Writes b0, b1, b2, a1, a2 (a0 = 1). Returns 1, or 0 for an argument the stage
+ * refuses. Pure, allocation-free, deterministic. */
+int32_t n60_eq_design_section(uint32_t type, double sampleRate, double hz, double gainDb, double q, double *coefficients5);
+/* |H(e^jw)| of one prepared section at `hz`. */
+double n60_eq_section_magnitude(const double *coefficients5, double sampleRate, double hz);
 
 /* Control thread. Validates desc and allocates everything the graph will ever need.
  * On success *outGraph owns it; on failure *outGraph is NULL (when outGraph itself

@@ -727,7 +727,10 @@ static inline N60UnifiedGraphUnsupportedReason N60UnifiedGraphSnapshotUnsupporte
         const int type = (int)b->type;
         // The core PEQ implements types 0..8 (constant-Q) and the prepared Linkwitz transform (9) as two slots,
         // +-24 dB (the kernel's own range), chained over several stages beyond 16 slots (E6 S12e, ABI v26).
-        if (type < 0 || type > 9 || (type != 9 && !(b->gainDB >= -24.0 && b->gainDB <= 24.0))) {
+        // E33 S26: and the matched variants 16..20, 23, 24 (graph ABI v47), whose Q must be in the core's live range.
+        const bool matchedType = (type >= 16 && type <= 20) || type == 23 || type == 24;
+        if (matchedType && !(b->q >= 0.01f && b->q <= 1000.0f)) return N60UnifiedGraphUnsupportedEQSection;
+        if ((!matchedType && (type < 0 || type > 9)) || (type != 9 && !(b->gainDB >= -24.0 && b->gainDB <= 24.0))) {
             return N60UnifiedGraphUnsupportedEQSection;
         }
         if (type == 8 && !(b->q > 0.0f)) return N60UnifiedGraphUnsupportedEQSection;

@@ -359,6 +359,11 @@ add_executable(n60core_peq_wide_test tests/test_peq_wide.cpp)
 target_link_libraries(n60core_peq_wide_test PRIVATE n60core)
 add_test(NAME n60core_peq_wide COMMAND n60core_peq_wide_test)
 
+# E33 S26: matched EQ filters (graph ABI v47).
+add_executable(n60core_eq_matched_test tests/test_eq_matched.cpp)
+target_link_libraries(n60core_eq_matched_test PRIVATE n60core)
+add_test(NAME n60core_eq_matched COMMAND n60core_eq_matched_test)
+
 # E33 S20: per-speaker-group EQ lists as per-lane PEQ stages.
 add_executable(n60core_eq_groups_test tests/test_eq_groups.cpp)
 target_link_libraries(n60core_eq_groups_test PRIVATE n60core)

@@ -557,6 +557,7 @@ struct ProductionEqualizerView: View {
         VStack(alignment: .leading, spacing: DesignSpacing.m.pt) {
             bandsPanelHeader
                 .padding(.horizontal, DesignSpacing.s.pt)
+            if enhanced { EQMatchedFiltersOffer(bands: bands, onUse: useMatchedFilters) }
 
             if bands.isEmpty {
                 ContentUnavailableView {
@@ -1082,7 +1083,7 @@ struct ProductionEqualizerView: View {
     }
 
     private func addBand() {
-        let band = EQBand(frequencyHz: suggestedFrequency(), q: 1.0)
+        let band = EQMatchedFiltersPolicy.newBand(EQBand(frequencyHz: suggestedFrequency(), q: 1.0), enhanced: enhanced)
         let before = engine.stereoEQConfiguration
         do {
             try engine.addEQBand(band)
@@ -1090,6 +1091,19 @@ struct ProductionEqualizerView: View {
             history.record(before: before, after: engine.stereoEQConfiguration)
         } catch {
             actionError = "Could not add the band: \(error.localizedDescription)"
+        }
+    }
+
+
+    /// E33 S26: switch every eligible cookbook band to the matched design as one undoable edit (an unsaved change).
+    private func useMatchedFilters() {
+        let targets = EQMatchedFiltersPolicy.eligible(bands)
+        guard !targets.isEmpty else { return }
+        recorded {
+            for var band in targets {
+                band.filterMethod = .matched
+                try engine.updateEQBand(band)
+            }
         }
     }
 
@@ -1172,12 +1186,12 @@ struct ProductionEqualizerView: View {
             actionError = "The EQ is at its limit of \(EQConfiguration.maximumBandCount) bands. Remove a band to add another."
             return
         }
-        let band = sanitize(EQBand(
+        let band = sanitize(EQMatchedFiltersPolicy.newBand(EQBand(
             type: .peaking,
             frequencyHz: min(max(frequency, EQBandRules.editFloor(for: .peaking)), maximumFrequency),
             gainDB: gain,
             q: EQNudge.addedBandQ
-        ))
+        ), enhanced: enhanced))
         recorded { try engine.addEQBand(band) }
         if bands.contains(where: { $0.id == band.id }) { selectedBandID = band.id }
     }

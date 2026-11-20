@@ -1,0 +1,1 @@
+/usr/bin/c++ -O3 -DNDEBUG -arch arm64 -Wl,-search_paths_first -Wl,-headerpad_max_install_names CMakeFiles/n60core_stages_test.dir/tests/test_stages.c.o -o n60core_stages_test  libn60core.a -lm

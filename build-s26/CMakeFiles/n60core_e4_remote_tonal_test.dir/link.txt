@@ -1,0 +1,1 @@
+/usr/bin/c++ -O3 -DNDEBUG -arch arm64 -Wl,-search_paths_first -Wl,-headerpad_max_install_names "CMakeFiles/n60core_e4_remote_tonal_test.dir/Users/dimitrihasandras/DookDev/N60-e33-s26/ci/harness_e4_remote_tonal.cpp.o" -o n60core_e4_remote_tonal_test  libn60core.a

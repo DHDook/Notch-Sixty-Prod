@@ -238,6 +238,7 @@ struct EQBand: Identifiable, Equatable, Codable, Sendable {
     var linkwitzTargetQ: Double
     var firKernel: EQFIRKernel?
     var dynamic: EQBandDynamicConfiguration
+    var filterMethod: EQFilterMethod?
 
     init(
         id: UUID = UUID(),
@@ -305,9 +306,8 @@ struct EQBand: Identifiable, Equatable, Codable, Sendable {
             return result
         }
 
-        if type == .fir {
-            return []
-        }
+        if type == .fir { return [] }
+        if let matched = try matchedSections(sampleRate: sampleRate) { return matched }
 
         if type == .linkwitzTransform {
             guard let coefficients = linkwitzCoefficients(sampleRate: sampleRate) else {

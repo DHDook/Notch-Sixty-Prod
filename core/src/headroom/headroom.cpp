@@ -36,7 +36,7 @@ Cx biquadAt(const Biquad &q, double w) {
 
 bool addPeq(std::vector<Biquad> &out, uint32_t type, double rate, double hz, double db, double q) {
     double c[5];
-    if (!n60::designBiquad(type, rate, hz, db, q, c)) return false;
+    if (!n60::designEqSection(type, rate, hz, db, q, c)) return false;
     out.push_back({c[0], c[1], c[2], c[3], c[4]});
     return true;
 }
@@ -66,7 +66,7 @@ bool prepare(const n60_headroom_stage &s, double rate, Prepared &out) {
         case N60_HEADROOM_STAGE_PEQ:
             if (s.param_count < 4 || s.param_count % 4 != 0) return false;
             for (uint32_t i = 0; i < s.param_count; i += 4) {
-                if (p[i] < 0.0f || p[i] > 7.0f) return false;
+                if (p[i] < 0.0f || p[i] != std::floor(p[i]) || (p[i] > 8.0f && (p[i] < 16.0f || p[i] > 24.0f))) return false;
                 if (!addPeq(out.sections, static_cast<uint32_t>(p[i]), rate, p[i + 1], p[i + 2], p[i + 3])) return false;
             }
             return true;

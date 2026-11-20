@@ -29,6 +29,15 @@ typedef enum {
     N60BiquadFilterTypePeakingConstantQ = 8,
     N60BiquadFilterTypeLinkwitzTransform = 9,
     N60BiquadFilterTypeTilt = 10,
+    /* E33 S26: matched-z designs (core n60_eq_design_section, graph.h N60_PEQ_SECTION_MATCHED_BASE + base type). Their
+       coefficients are designed in core, never by N60BiquadDesign (which returns false for them). */
+    N60BiquadFilterTypeMatchedPeaking = 16,
+    N60BiquadFilterTypeMatchedLowShelf = 17,
+    N60BiquadFilterTypeMatchedHighShelf = 18,
+    N60BiquadFilterTypeMatchedLowPass = 19,
+    N60BiquadFilterTypeMatchedHighPass = 20,
+    N60BiquadFilterTypeMatchedBandPass = 23,
+    N60BiquadFilterTypeMatchedPeakingConstantQ = 24,
 } N60BiquadFilterType;
 
 typedef struct {
