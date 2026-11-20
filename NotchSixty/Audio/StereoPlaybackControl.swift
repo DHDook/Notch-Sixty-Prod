@@ -257,7 +257,8 @@ struct StereoEQConfiguration: Equatable, Codable, Sendable {
     }
 
     private func conservativeAutomaticHeadroomDB(
-        dynamics: DynamicsConfiguration
+        dynamics: DynamicsConfiguration,
+        groupRoleCodes: [UInt32] = []
     ) -> Double {
         guard dynamics.automaticHeadroom.enabled else { return 0 }
 
@@ -293,7 +294,8 @@ struct StereoEQConfiguration: Equatable, Codable, Sendable {
                 dynamicBoost = max(dynamicBoostDB(in: midBands), dynamicBoostDB(in: sideBands))
             }
         }
-        return min(dynamics.automaticHeadroom.maxAttenuationDB, staticBoost + dynamicBoost)
+        // E33 S20 (G85): a speaker group's boost rides on top of the session curve on that group's lanes.
+        return min(dynamics.automaticHeadroom.maxAttenuationDB, staticBoost + dynamicBoost + groupStaticBoostDB(roleCodes: groupRoleCodes))
     }
 
     private func makeDomainDynamicEQSnapshot(sampleRate: Double) throws -> N60DynamicEQSnapshot {
@@ -470,7 +472,8 @@ struct StereoEQConfiguration: Equatable, Codable, Sendable {
         dynamicsConfiguration: DynamicsConfiguration = DynamicsConfiguration(),
         playbackConfiguration: PlaybackControlConfiguration,
         masterGainLinear: Float = 1.0,
-        dynamicsExtrasEnabled: Bool = FeatureFlags.isEnabledProcessWide(.dynamicsExtras)
+        dynamicsExtrasEnabled: Bool = FeatureFlags.isEnabledProcessWide(.dynamicsExtras),
+        groupRoleCodes: [UInt32] = []
     ) throws -> N60DSPGraphSnapshot {
         guard bassManagementConfiguration.frequencyHz.isFinite,
               BassManagementConfiguration.frequencyRange.contains(bassManagementConfiguration.frequencyHz) else {
@@ -502,7 +505,7 @@ struct StereoEQConfiguration: Equatable, Codable, Sendable {
         var graph = N60DSPGraphSnapshotMakeUnity(sampleRate)
         graph.inputGainLinear = DSPGainConfiguration.linearGain(forDB: gainConfiguration.inputPreampDB)
         let automaticHeadroomDB = playbackConfiguration.globalBypassed
-            ? 0.0 : conservativeAutomaticHeadroomDB(dynamics: dynamicsConfiguration)
+            ? 0.0 : conservativeAutomaticHeadroomDB(dynamics: dynamicsConfiguration, groupRoleCodes: groupRoleCodes)
         graph.headroomGainLinear = DSPGainConfiguration.linearGain(
             forDB: gainConfiguration.headroomAttenuationDB - automaticHeadroomDB)
         graph.outputGainLinear = DSPGainConfiguration.linearGain(forDB: gainConfiguration.outputGainDB)

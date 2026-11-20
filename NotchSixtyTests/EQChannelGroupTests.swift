@@ -123,4 +123,83 @@ final class EQChannelGroupTests: XCTestCase {
         }
         XCTAssertEqual(stages.map { $0.params.count }, [64, 16])
     }
+
+    // MARK: part 3 (G75, G85)
+
+    private func linearSpec(_ eq: StereoEQConfiguration, rate: Double, program: UnifiedGraphFIRProgram?) throws -> (UnifiedGraphSpec, [UnifiedGraphGroupEQ]) {
+        let five = try shape(.fiveOne)
+        let groups = try eq.groupCurves(shape: five, sampleRate: rate)
+        var stereo = UnifiedGraphConfiguration(sampleRate: rate, lanes: [UnifiedGraphLane(), UnifiedGraphLane()])
+        stereo.stereoStages.programFIR = program
+        var configuration = UnifiedGraphTranslator.multichannelConfiguration(
+            sampleRate: rate, programChannels: five.laneCount, subwoofers: [])
+        configuration.orderPolicy = .canonical
+        configuration.programDSP = UnifiedGraphProgramDSP(stereo: stereo, shape: five, eqMode: .linked, groupEQ: groups)
+        return (try configuration.makeSpec(), groups)
+    }
+
+    func testLinearPhaseGroupLaneGetsItsOwnAlignedFIR() throws {
+        let five = try shape(.fiveOne)
+        var eq = StereoEQConfiguration(linkedBands: [EQBand(type: .peaking, frequencyHz: 250, gainDB: 3, q: 1)])
+        eq.phaseMode = .linearPhase
+        eq.setGroupBands([EQBand(type: .peaking, frequencyHz: 800, gainDB: -6, q: 1.4)], for: .centre, roleCodes: five.roleCodes)
+        for rate in [48_000.0, 192_000.0, 384_000.0] {
+            let session = try EQFIRDesigner.design(StereoEQConfiguration(linkedBands: eq.linkedBands).withPhase(.linearPhase), sampleRate: rate)
+            let program = UnifiedGraphFIRProgram(generation: 1, left: session.left, right: nil, declaredLatencyFrames: session.declaredLatencyFrames)
+            let (spec, groups) = try linearSpec(eq, rate: rate, program: program)
+            let entry = try XCTUnwrap(groups.first)
+            XCTAssertEqual(entry.taps?.count, session.left.count)
+            XCTAssertEqual(entry.declaredLatencyFrames, session.declaredLatencyFrames)
+            let fir = spec.stages.filter { $0.kind == N60_STAGE_FIR.rawValue }
+            let own = try XCTUnwrap(fir.first { $0.stageId == UnifiedGraphProgramDSP.groupFIRBase + UInt32(five.centerLane!) })
+            XCTAssertEqual(own.capacityFrames, session.declaredLatencyFrames)
+            let shared = try XCTUnwrap(fir.first { $0.stageId == UnifiedGraphProgramDSP.firStageBase })
+            XCTAssertEqual(shared.laneMask & (UInt64(1) << UInt64(five.centerLane!)), 0)
+            // The group's biquads are replaced, not stacked on top of the FIR.
+            XCTAssertTrue(spec.stages.filter {
+                $0.kind == N60_STAGE_PEQ.rawValue && $0.stageId >= UnifiedGraphProgramDSP.groupPEQBase && $0.stageId < 1_400
+            }.isEmpty)
+        }
+    }
+
+    func testGroupBiquadsStayWithoutAProgramFIRAndInMixedPhase() throws {
+        let five = try shape(.fiveOne)
+        var eq = StereoEQConfiguration(linkedBands: [EQBand(gainDB: 1)])
+        eq.setGroupBands([EQBand(type: .peaking, frequencyHz: 800, gainDB: -6, q: 1.4)], for: .centre, roleCodes: five.roleCodes)
+        eq.phaseMode = .linearPhase
+        // Linear phase but no program FIR published: the group keeps its biquads.
+        let (spec, _) = try linearSpec(eq, rate: 48_000, program: nil)
+        XCTAssertFalse(spec.stages.contains { $0.stageId == UnifiedGraphProgramDSP.groupFIRBase + UInt32(five.centerLane!) })
+        XCTAssertTrue(spec.stages.contains { $0.kind == N60_STAGE_PEQ.rawValue && $0.stageId >= UnifiedGraphProgramDSP.groupPEQBase && $0.stageId < 1_400 })
+        eq.phaseMode = .mixedPhase
+        XCTAssertNil(try eq.groupCurves(shape: five, sampleRate: 48_000).first?.taps)
+    }
+
+    func testAutomaticHeadroomCountsTheLargestGroupBoost() throws {
+        let five = try shape(.fiveOne)
+        var eq = StereoEQConfiguration(linkedBands: [EQBand(gainDB: 2)])
+        XCTAssertEqual(eq.groupStaticBoostDB(roleCodes: five.roleCodes), 0)
+        eq.setGroupBands([EQBand(gainDB: 3), EQBand(gainDB: -4), EQBand(gainDB: 1)], for: .centre, roleCodes: five.roleCodes)
+        eq.setGroupBands([EQBand(gainDB: 2)], for: .surrounds, roleCodes: five.roleCodes)
+        XCTAssertEqual(eq.groupStaticBoostDB(roleCodes: five.roleCodes), 4, accuracy: 1e-9)
+        XCTAssertEqual(eq.groupStaticBoostDB(roleCodes: try shape(.stereo).roleCodes), 0)
+        eq.bypassed = true
+        XCTAssertEqual(eq.groupStaticBoostDB(roleCodes: five.roleCodes), 0)
+        // The attenuation reaches the graph: the headroom gain falls by the group boost.
+        var dynamics = DynamicsConfiguration()
+        dynamics.automaticHeadroom.enabled = true
+        dynamics.automaticHeadroom.maxAttenuationDB = 24
+        eq.bypassed = false
+        let withGroups = try eq.makeGraphSnapshot(
+            sampleRate: 48_000, gainConfiguration: DSPGainConfiguration(), bassManagementConfiguration: BassManagementConfiguration(),
+            dynamicsConfiguration: dynamics, playbackConfiguration: PlaybackControlConfiguration(), groupRoleCodes: five.roleCodes)
+        let stereoLike = try eq.makeGraphSnapshot(
+            sampleRate: 48_000, gainConfiguration: DSPGainConfiguration(), bassManagementConfiguration: BassManagementConfiguration(),
+            dynamicsConfiguration: dynamics, playbackConfiguration: PlaybackControlConfiguration())
+        XCTAssertEqual(20 * log10(Double(stereoLike.headroomGainLinear / withGroups.headroomGainLinear)), 4, accuracy: 0.01)
+    }
+}
+
+private extension StereoEQConfiguration {
+    func withPhase(_ mode: EQPhaseMode) -> StereoEQConfiguration { var copy = self; copy.phaseMode = mode; return copy }
 }
