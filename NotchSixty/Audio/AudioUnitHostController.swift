@@ -378,15 +378,16 @@ final class AudioUnitHostController: ObservableObject {
         }
 
         lifecycleByComponent[identity] = .probing
+        let slotFormat = format.slotFormat(for: descriptor)
         do {
             let result = try await backend.probe(
                 component: descriptor,
-                format: format
+                format: slotFormat
             )
             guard result.component == identity else {
                 throw AudioUnitRackError.probeFormatMismatch(identity)
             }
-            try result.validate(for: format)
+            try result.validate(for: slotFormat)
             probesByComponent[identity] = result
 
             var updated = rackConfiguration
@@ -500,7 +501,7 @@ final class AudioUnitHostController: ObservableObject {
         do {
             let report = try await backend.prepare(
                 component: descriptor,
-                format: format,
+                format: format.slotFormat(for: descriptor),
                 restoringState: slot.opaqueFullState
             )
             try report.validate()
@@ -634,7 +635,7 @@ final class AudioUnitHostController: ObservableObject {
             }
 
             if let existing = offlineReportsBySlotID[slot.id],
-               existing.format == format,
+               existing.format == format.slotFormat(for: descriptor(for: component)),
                existing.component == component,
                existing.capturedFullState == slot.opaqueFullState {
                 reports[slot.id] = existing
@@ -655,7 +656,7 @@ final class AudioUnitHostController: ObservableObject {
             do {
                 let report = try await backend.prepare(
                     component: descriptor,
-                    format: format,
+                    format: format.slotFormat(for: descriptor),
                     restoringState: slot.opaqueFullState
                 )
                 try report.validate()
@@ -855,6 +856,11 @@ final class AudioUnitHostController: ObservableObject {
         case .setOpaqueFullState(let slot, let state):
             try requireSlot(slot)
             updated.slots[slot].opaqueFullState = state
+
+        case .setChannelMode(let slot, let mode):
+            try requireSlot(slot)
+            updated.slots[slot].channelMode =
+                mode == .frontLeftRight ? nil : mode
         }
 
         try updated.validate()
@@ -880,7 +886,7 @@ final class AudioUnitHostController: ObservableObject {
             }
 
             if let report = offlineReportsBySlotID[slot.id],
-               report.format == format,
+               report.format == format.slotFormat(for: descriptor(for: component)),
                report.component == component,
                report.capturedFullState == slot.opaqueFullState {
                 continue

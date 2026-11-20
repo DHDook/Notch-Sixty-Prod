@@ -16,6 +16,7 @@ enum AudioUnitRackMutation: Equatable, Sendable {
     case setBypassed(slot: Int, bypassed: Bool)
     case setWetDryMix(slot: Int, mix: Double)
     case setOpaqueFullState(slot: Int, state: Data?)
+    case setChannelMode(slot: Int, mode: AudioUnitSlotChannelMode)
 }
 
 struct AudioUnitRackMutationCandidate {

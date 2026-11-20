@@ -1877,28 +1877,13 @@ final class AudioIOEngine {
             )
         }
 
-        let channelCount = audioUnitRackChannelCount()
-
-        let format = AudioUnitRackProcessingFormat(
-            sampleRate: output.nominalSampleRate,
-            channelCount: channelCount,
-            maximumFramesPerSlice: AudioUnitRackProcessingFormat
-                .recommendedMaximumFramesPerSlice(sampleRate: output.nominalSampleRate)
-        )
+        let format = makeAudioUnitRackFormat(sampleRate: output.nominalSampleRate)
         try format.validate()
         return format
     }
 
-    private func audioUnitRackChannelCount() -> Int {
-        if let headphone = headphoneDeviceProfileConfiguration,
-           headphone.enabled,
-           headphone.spatialMode == .virtualSpeakers {
-            return headphone.programLayout.roles.count
-        }
-        if let profile = outputDeviceProfileConfiguration, profile.enabled {
-            return profile.programLayout.roles.count
-        }
-        return 2
+    func audioUnitRackChannelCount() -> Int {
+        audioUnitRackRoles()?.count ?? 2
     }
 
     /// A staged rack is bound to the sample rate and channel count it was
@@ -1968,13 +1953,7 @@ final class AudioIOEngine {
                         ?? "No output selected"
                 )
             }
-            let channelCount = audioUnitRackChannelCount()
-            let format = AudioUnitRackProcessingFormat(
-                sampleRate: output.nominalSampleRate,
-                channelCount: channelCount,
-                maximumFramesPerSlice: AudioUnitRackProcessingFormat
-                    .recommendedMaximumFramesPerSlice(sampleRate: output.nominalSampleRate)
-            )
+            let format = makeAudioUnitRackFormat(sampleRate: output.nominalSampleRate)
             try format.validate()
             return format
         default:
