@@ -108,6 +108,9 @@ inline uint32_t laneOf(const StageRec &r, uint32_t k) {
 
 // RBJ Audio EQ Cookbook biquad, normalised by a0 (b0 b1 b2 a1 a2), double precision.
 bool designBiquad(uint32_t type, double rate, double f, double gainDb, double q, double out[5]) N60_RT_NONBLOCKING;
+// E33 S26: a PEQ section type of 0..8 (cookbook) or 16..24 (matched, eqmatched.cpp; 21 and 22 are unused), double precision.
+bool designEqSection(uint32_t type, double rate, double f, double gainDb, double q, double out[5]) N60_RT_NONBLOCKING;
+double eqSectionMagnitude(const double c[5], double rate, double f) N60_RT_NONBLOCKING;
 
 // Control thread. Validates the description (everything in n60_graph_desc) and builds
 // the snapshot. Never touches live state.

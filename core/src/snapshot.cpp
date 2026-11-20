@@ -203,11 +203,7 @@ namespace {
 // `next` is the section after p (the type 10 half of a type 9), or null at the end of the stage.
 bool designPeqSection(const float *p, const float *next, double rate, double out[5]) {
     const uint32_t type = static_cast<uint32_t>(p[0]);
-    if (type <= 7) return designBiquad(type, rate, p[1], p[2], p[3], out);
-    if (type == 8) {
-        if (!std::isfinite(p[2]) || p[2] < -24.0f || p[2] > 24.0f || !(p[3] > 0.0f)) return false;
-        return designBiquad(0, rate, p[1], p[2], static_cast<double>(p[3]) / std::pow(10.0, static_cast<double>(p[2]) / 40.0), out);
-    }
+    if (type <= 8 || (type >= 16 && type <= 24)) return designEqSection(type, rate, p[1], p[2], p[3], out);
     if (!std::isfinite(p[1]) || !std::isfinite(p[2]) || !std::isfinite(p[3])) return false;
     if (type == 9) {
         if (next != nullptr && next[3] == 1.0f) {
@@ -514,7 +510,7 @@ n60_status validateDesc(const n60_graph_desc &d) {
                 for (uint32_t k = 0; k < s.paramCount / 4; ++k) {
                     const float *p = s.params + 4 * k;
                     double c[5];
-                    if (!(p[0] >= 0.0f && p[0] <= 10.0f) || p[0] != std::floor(p[0]) ||
+                    if (!((p[0] >= 0.0f && p[0] <= 10.0f) || (p[0] >= 16.0f && p[0] <= 24.0f)) || p[0] != std::floor(p[0]) ||
                         !designPeqSection(p, k + 1 < s.paramCount / 4 ? p + 4 : nullptr, d.sampleRate, c)) {
                         return N60_STATUS_BAD_ARGUMENT;
                     }
@@ -770,7 +766,9 @@ n60_status validateParam(const SnapHeader *snap, const StageRec &r, uint32_t par
             if (paramIndex >= r.paramCount) return N60_STATUS_BAD_ARGUMENT;
             const double v = value;
             switch (paramIndex % 4) {
-                case 0: return (v >= 0.0 && v <= 7.0 && v == std::floor(v)) ? N60_STATUS_OK : N60_STATUS_BAD_ARGUMENT;
+                case 0: // E33 S26: 0..7 as before, plus the matched types 16..20, 23 and 24 (21 and 22 are unused)
+                    return (v == std::floor(v) && ((v >= 0.0 && v <= 7.0) || (v >= 16.0 && v <= 24.0 && v != 21.0 && v != 22.0)))
+                               ? N60_STATUS_OK : N60_STATUS_BAD_ARGUMENT;
                 case 1: return (v > 0.0 && v < snap->sampleRate * 0.5) ? N60_STATUS_OK : N60_STATUS_BAD_ARGUMENT;
                 case 2: return (v >= -24.0 && v <= 24.0) ? N60_STATUS_OK : N60_STATUS_BAD_ARGUMENT;
                 default: return (v >= 0.01 && v <= 1000.0) ? N60_STATUS_OK : N60_STATUS_BAD_ARGUMENT;

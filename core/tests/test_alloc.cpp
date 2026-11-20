@@ -1201,8 +1201,10 @@ int main() {
         float p0[64], p1[64], p2[16];
         for (int k = 0; k < 16; k++) {
             const float row[4] = {static_cast<float>(k % 2 == 0 ? 0 : 8), 200.0f + 100.0f * k, 1.5f, 1.0f};
+            // E33 S26: the second stage runs matched types (16 to 24), whose design also runs on the live-edit path.
+            const float matched[4] = {static_cast<float>(k % 4 == 0 ? 16 : k % 4 == 1 ? 17 : k % 4 == 2 ? 18 : 24), 200.0f + 100.0f * k, 1.5f, 1.0f};
             std::memcpy(p0 + 4 * k, row, sizeof row);
-            std::memcpy(p1 + 4 * k, row, sizeof row);
+            std::memcpy(p1 + 4 * k, matched, sizeof matched);
         }
         const float lt[8] = {9, 1.0f, -1.9f, 0.9f, 10, -1.8f, 0.81f, 0};
         std::memcpy(p2, lt, sizeof lt);
@@ -1224,9 +1226,9 @@ int main() {
         const float *in[1] = {l};
         float *out[1] = {ol};
         for (int round = 0; round < 20; round++) {
-            n60_param_record rec[3] = {{1, 2, static_cast<float>(round % 5), 0}, {2, 6, 0.5f + 0.1f * round, 0},
-                                       {3, 10, -0.5f - 0.05f * round, 0}};
-            CHECK(n60_graph_post_params(g, rec, 3) == N60_STATUS_OK, "post wide peq");
+            n60_param_record rec[4] = {{1, 2, static_cast<float>(round % 5), 0}, {2, 6, 0.5f + 0.1f * round, 0},
+                                       {3, 10, -0.5f - 0.05f * round, 0}, {2, 8, static_cast<float>(round % 2 == 0 ? 19 : 16), 0}};
+            CHECK(n60_graph_post_params(g, rec, 4) == N60_STATUS_OK, "post wide peq");
             allocs = 0;
             frees = 0;
             armed = true;

@@ -728,6 +728,9 @@ struct UnifiedGraphConfiguration: Equatable, Sendable {
         return chunks
     }
 
+    /// E33 S26: the matched EQ section types (graph.h N60_PEQ_SECTION_MATCHED_BASE): 16 to 20, 23 and 24.
+    static func isMatchedPEQType(_ type: Int) -> Bool { (16...20).contains(type) || type == 23 || type == 24 }
+
     private static func peqSlots(_ section: UnifiedGraphPEQSection) throws -> [Float] {
         if section.type == 9, let v = section.linkwitzDeviation {
             guard v.count == 5, v.allSatisfy(\.isFinite) else {
@@ -742,7 +745,7 @@ struct UnifiedGraphConfiguration: Equatable, Sendable {
             }
             return [9, c[0], c[1], c[2], 10, c[3], c[4], 0]
         }
-        guard (0...8).contains(section.type), (-24.0...24.0).contains(section.gainDB) else {
+        guard (0...8).contains(section.type) || Self.isMatchedPEQType(section.type), (-24.0...24.0).contains(section.gainDB) else {
             throw UnifiedGraphError.unsupportedConfiguration("EQ section type or gain")
         }
         return [Float(section.type), Float(section.frequencyHz), Float(section.gainDB), Float(section.q)]
@@ -759,7 +762,7 @@ struct UnifiedGraphConfiguration: Equatable, Sendable {
     /// E33 S20: one PEQ stage's parameters for a group list, which also allows the constant-Q peaking type (8) that the
     /// program curves never carry. At most 16 sections.
     static func groupPEQParameters(_ sections: [UnifiedGraphPEQSection]) throws -> [Float] {
-        guard sections.count <= Int(N60_PEQ_MAX_SECTIONS), sections.allSatisfy({ (0...8).contains($0.type) }) else {
+        guard sections.count <= Int(N60_PEQ_MAX_SECTIONS), sections.allSatisfy({ (0...8).contains($0.type) || Self.isMatchedPEQType($0.type) }) else {
             throw UnifiedGraphError.unsupportedConfiguration("more than 16 EQ sections")
         }
         return try sections.flatMap(peqSlots)
