@@ -347,7 +347,7 @@ struct ProductionMetersView: View {
                 )
                 ProductionBitActivityCard(
                     channels: analysisSnapshot.bitActivity,
-                    names: transportMeterSnapshot.map { $0.programChannels.map(\.label) } ?? SpectrogramText.channelNames,
+                    names: BitActivityNames.resolve(roleNames: analysisSnapshot.bitChannelNames, transport: transportMeterSnapshot),
                     isRunning: engine.lifecycleState == .running,
                     onReset: resetBitActivity
                 )
