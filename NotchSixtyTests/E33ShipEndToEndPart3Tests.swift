@@ -56,8 +56,14 @@ extension E33ShipEndToEndTests {
                 var configuration = StereoEQConfiguration(linkedBands: [EQBand(type: .peaking, frequencyHz: 1_000, gainDB: 6, q: 1)])
                 configuration.phaseMode = .linearPhase
                 configuration.linearPhaseLength = length
-                if length.refusal(sampleRate: rate, laneCount: 2) != nil {
-                    XCTAssertTrue(length == .ms340 || length == .ms170, "\(length) at \(rate) is refused only at the long lengths")
+                // The expectation comes from the FIR scheme in force (the long-FIR flag raises the tap limit), not from a fixed list.
+                let taps = length.tapCount(sampleRate: rate)
+                let expectRefused = taps > UnifiedGraphFIRScheme.maxTaps(UnifiedGraphFIRScheme.current())
+                    || taps * 2 > EQLinearPhaseLength.tapLaneBudget
+                let refusal = length.refusal(sampleRate: rate, laneCount: 2)
+                XCTAssertEqual(refusal != nil, expectRefused, "\(length) at \(rate) is refused exactly when it exceeds the FIR scheme or the lane budget")
+                if let refusal {
+                    XCTAssertTrue(refusal.contains(length.displayName), "the refusal names the length: \(refusal)")
                     continue
                 }
                 let design = try EQFIRDesigner.design(configuration, sampleRate: rate)

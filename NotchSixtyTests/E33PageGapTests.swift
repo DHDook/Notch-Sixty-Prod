@@ -75,6 +75,14 @@ final class E33PageGapTests: XCTestCase {
 
     /// G13: the expander Lookahead row is there with the flag on, follows the engine's switch, and commits a typed time.
     func testExpanderLookaheadRowFollowsTheFlagAndTheEngine() throws {
+        // The Lookahead row is one of the dynamics extras (it needs the extras engine path). With the graduated flags forced off
+        // (NOTCHSIXTY_GRADUATED_FLAGS_OFF, off wins over setEnabled) the whole Extras section is absent by design (G13b).
+        guard flags.isEnabled(.dynamicsExtras), flags.isEnabled(.eqPageEnhancements) else {
+            let flagsOff = AudioIOEngine()
+            flagsOff.unifiedGraphEnabled = true
+            XCTAssertNil(dynamics(.expander, flagsOff).field("Lookahead"), "with the graduated flags off the expander has no Lookahead row")
+            return
+        }
         let engine = AudioIOEngine()
         engine.unifiedGraphEnabled = true
         let on = dynamics(.expander, engine)
