@@ -364,6 +364,11 @@ add_executable(n60core_eq_matched_test tests/test_eq_matched.cpp)
 target_link_libraries(n60core_eq_matched_test PRIVATE n60core)
 add_test(NAME n60core_eq_matched COMMAND n60core_eq_matched_test)
 
+# E33 S27: linear-phase EQ design in the core, four lengths at the eight rates.
+add_executable(n60core_eq_linear_phase_test tests/test_eq_linear_phase.cpp)
+target_link_libraries(n60core_eq_linear_phase_test PRIVATE n60core)
+add_test(NAME n60core_eq_linear_phase COMMAND n60core_eq_linear_phase_test)
+
 # E33 S20: per-speaker-group EQ lists as per-lane PEQ stages.
 add_executable(n60core_eq_groups_test tests/test_eq_groups.cpp)
 target_link_libraries(n60core_eq_groups_test PRIVATE n60core)

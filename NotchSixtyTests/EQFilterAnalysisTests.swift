@@ -183,7 +183,7 @@ final class EQFilterAnalysisTests: XCTestCase {
             XCTAssertEqual(analysis.realisation, .linear, "\(rate)")
             let taps = analysis.linearTaps.count
             XCTAssertEqual(taps % 2, 1)
-            XCTAssertEqual(Int(N60LinearPhaseEQRecommendedTapCount(rate)), taps)
+            XCTAssertEqual(EQLinearPhaseLength.default.tapCount(sampleRate: rate), taps)
             let expectedDelay = Double(taps - 1) / 2
             XCTAssertEqual(analysis.linearDelaySamples, expectedDelay)
 

@@ -6,7 +6,7 @@ import Foundation
 /// - Minimum phase: the cascade of `EQBand.compiledSections` (the graph's own source).
 /// - Mixed phase: the same cascade plus the all-pass correction `N60MixedPhaseDesign` returns,
 ///   exactly as `StereoEQConfiguration.makeGraphSnapshot` appends it.
-/// - Linear phase: the taps `N60LinearPhaseEQDesign` produces from `linearPhaseBands`; the phase
+/// - Linear phase: the taps `EQLinearPhaseDesigner` (the core) produces from `linearPhaseBands`; the phase
 ///   view shows the residual after the constant (N - 1) / 2 sample delay.
 ///
 /// Phase and group delay follow the standard definitions for a rational H(e^jw): phase is the
@@ -124,7 +124,7 @@ struct EQFilterAnalysis: Sendable {
     /// Why the requested phase mode could not be shown exactly (the cascade is shown instead).
     let fallbackNote: String?
 
-    init(bands: [EQBand], phaseMode: EQPhaseMode, sampleRate: Double) {
+    init(bands: [EQBand], phaseMode: EQPhaseMode, sampleRate: Double, linearPhaseLength: EQLinearPhaseLength = .default) {
         self.sampleRate = sampleRate
         let eligible = bands.filter { $0.type != .fir }
         let cascade = ProductionEQResponseMath.compile(bands: eligible, sampleRate: sampleRate)
@@ -162,19 +162,9 @@ struct EQFilterAnalysis: Sendable {
                 channelMode: .linked, editChannel: .linked, phaseMode: .linearPhase, linkedBands: eligible
             )
             if let cBands = try? configuration.linearPhaseBands(for: .linked, sampleRate: sampleRate) {
-                let tapCount = Int(N60LinearPhaseEQRecommendedTapCount(sampleRate))
-                var taps = [Float](repeating: 0, count: tapCount)
-                var info = N60LinearPhaseEQDesignInfo()
-                let designed = tapCount > 0 && taps.withUnsafeMutableBufferPointer { out in
-                    cBands.withUnsafeBufferPointer { input in
-                        N60LinearPhaseEQDesign(
-                            sampleRate, input.baseAddress, UInt32(input.count),
-                            out.baseAddress, UInt32(out.count), &info
-                        )
-                    }
-                }
-                if designed {
-                    chosenTaps = taps
+                // The curve is drawn from the length the EQ uses (this runs off the main actor, see the page).
+                if let design = try? EQLinearPhaseDesigner.design(bands: cBands, sampleRate: sampleRate, length: linearPhaseLength) {
+                    chosenTaps = design.taps
                     chosenRealisation = .linear
                 } else {
                     note = "The linear-phase filter could not be designed; showing minimum phase."

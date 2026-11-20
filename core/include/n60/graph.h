@@ -724,6 +724,26 @@ int32_t n60_eq_design_section(uint32_t type, double sampleRate, double hz, doubl
 /* |H(e^jw)| of one prepared section at `hz`. */
 double n60_eq_section_magnitude(const double *coefficients5, double sampleRate, double hz);
 
+/* E33 S27 (G52): the EQ's linear-phase FIR, designed in the core (no graph ABI bump: functions only, no layout change).
+ * `sections` is sectionCount x 5 floats (b0, b1, b2, a1, a2 with a0 = 1: the coefficients the stage would run, from
+ * n60_eq_design_section or the cookbook), their product being the zero-phase magnitude. The result is one single-band
+ * FIR of 2 L + 1 taps (L = groupDelayFrames, 1 .. (N60_EQ_LINEAR_PHASE_MAX_TAPS - 1) / 2), delayed by exactly L frames,
+ * Blackman-windowed; it fits the long FIR scheme (N60_FIR_MAX_TAPS_LONG), so a design above N60_FIR_MAX_TAPS needs
+ * firScheme 1. The longest EQ length, 340 ms, is 261,121 taps at 384 kHz. report (optional) gets the tap count and the
+ * largest difference in dB between the FIR and the drawn curve over 20 Hz to min(20 kHz, 0.45 fs). Returns 1, or 0 for an
+ * argument it refuses or a capacity too small. Control plane: allocates, throws nothing, single-threaded, deterministic
+ * (the same input gives the same taps). Never call it from the render thread. */
+#define N60_EQ_LINEAR_PHASE_MAX_TAPS 262144u
+typedef struct n60_eq_linear_phase_report {
+    uint32_t structSize;
+    uint32_t tapCount;
+    uint32_t groupDelayFrames;
+    uint32_t reserved;
+    double maxErrorDb;
+} n60_eq_linear_phase_report;
+int32_t n60_eq_linear_phase_design(double sampleRate, uint32_t groupDelayFrames, const float *sections, uint32_t sectionCount,
+                                   float *taps, uint64_t tapCapacity, n60_eq_linear_phase_report *report);
+
 /* Control thread. Validates desc and allocates everything the graph will ever need.
  * On success *outGraph owns it; on failure *outGraph is NULL (when outGraph itself
  * is valid). The rate and channel counts are fixed for the life of the handle. */

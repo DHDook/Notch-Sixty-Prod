@@ -956,39 +956,12 @@ struct EQConfiguration: Equatable, Sendable {
         }
         return graph
     }
-
-    func linearPhaseBands(sampleRate: Double) throws -> [N60LinearPhaseEQBand] {
-        guard bands.count <= Self.maximumBandCount else {
-            throw EQConfigurationError.tooManyBands(bands.count)
-        }
-        var result: [N60LinearPhaseEQBand] = []
-        result.reserveCapacity(enabledBandCount)
-        for (index, band) in bands.enumerated() where band.enabled {
-            guard try EQBandRules.validate(band, index: index, sampleRate: sampleRate) else { continue }
-            guard band.type != .allPass else {
-                throw EQConfigurationError.allPassRequiresMinimumPhase
-            }
-            if band.type == .fir { continue }
-            for section in try band.compiledSections(sampleRate: sampleRate) {
-                var cBand = N60LinearPhaseEQBand()
-                cBand.enabled = true
-                cBand.type = section.type
-                cBand.frequencyHz = section.frequencyHz
-                cBand.gainDB = section.gainDB
-                cBand.q = section.q
-                cBand.usesPreparedCoefficients = true
-                cBand.preparedCoefficients = section.coefficients
-                result.append(cBand)
-            }
-        }
-        return result
-    }
 }
 
 private struct PreparedEQFIRProgram {
     let slot: UInt32
     let programInfo: N60ConvolutionProgramInfo
-    let designInfo: N60LinearPhaseEQDesignInfo?
+    let designInfo: EQLinearPhaseDesignInfo?
 }
 
 private struct PreparedRoomCorrectionProgram {
@@ -1162,7 +1135,7 @@ final class AudioIOEngine {
         AmbientCompensationTarget.unity
     private(set) var activeQuietZoneRuntimeTarget =
         ActiveQuietZoneRuntimeTarget.bypassed
-    private(set) var linearPhaseDesignInfo: N60LinearPhaseEQDesignInfo?
+    private(set) var linearPhaseDesignInfo: EQLinearPhaseDesignInfo?
     private(set) var headTrackingRuntimeStatus = HeadTrackingRuntimeStatus.disabled
     private(set) var lastErrorDescription: String?
     private(set) var lifecycleState: AudioLifecycleState
@@ -4255,7 +4228,7 @@ final class AudioIOEngine {
     private func eqFIRTaps(
         _ configuration: StereoEQConfiguration,
         sampleRate: Double
-    ) throws -> (left: [Float], right: [Float]?, declaredLatencyFrames: UInt32, designInfo: N60LinearPhaseEQDesignInfo?) {
+    ) throws -> (left: [Float], right: [Float]?, declaredLatencyFrames: UInt32, designInfo: EQLinearPhaseDesignInfo?) {
         let design = try eqFIRCache.design(for: EQFIRProgramKey(configuration, sampleRate: sampleRate)) {
             let taps = try EQFIRDesigner.design(configuration, sampleRate: sampleRate)
             return EQFIRDesign(

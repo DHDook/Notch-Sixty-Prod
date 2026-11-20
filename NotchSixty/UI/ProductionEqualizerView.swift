@@ -112,13 +112,16 @@ struct ProductionEqualizerView: View {
     private struct AnalysisKey: Equatable {
         let bands: [EQBand]
         let phaseMode: EQPhaseMode
+        let linearPhaseLength: EQLinearPhaseLength
         let sampleRate: Double
         let view: EQGraphView
         let zoom: EQGraphXZoom
     }
 
     private var analysisKey: AnalysisKey {
-        AnalysisKey(bands: shownBands, phaseMode: configuration.phaseMode, sampleRate: sampleRate, view: graphView, zoom: xZoom)
+        AnalysisKey(
+            bands: shownBands, phaseMode: configuration.phaseMode, linearPhaseLength: configuration.effectiveLinearPhaseLength,
+            sampleRate: sampleRate, view: graphView, zoom: xZoom)
     }
 
     /// Phase, group delay, impulse and step are computed off the main thread on value types and
@@ -135,7 +138,8 @@ struct ProductionEqualizerView: View {
         // large linear-phase designs (FFT buffers at high rates).
         let work = Task.detached(priority: .userInitiated) { () -> EQAnalysisSeries? in
             if Task.isCancelled { return nil }
-            let analysis = EQFilterAnalysis(bands: key.bands, phaseMode: key.phaseMode, sampleRate: key.sampleRate)
+            let analysis = EQFilterAnalysis(
+                bands: key.bands, phaseMode: key.phaseMode, sampleRate: key.sampleRate, linearPhaseLength: key.linearPhaseLength)
             let grid = EQFilterAnalysis.frequencyGrid(lower: key.zoom.minimumFrequency, upper: upper, count: 360)
             return analysis.series(for: key.view, frequencies: grid)
         }
@@ -350,6 +354,12 @@ struct ProductionEqualizerView: View {
                     .labelsHidden()
                     .pickerStyle(.segmented)
                     .fixedSize()
+
+                    if enhanced, configuration.phaseMode == .linearPhase {
+                        EQLinearPhaseLengthControl(
+                            engine: engine, configuration: configuration, sampleRate: sampleRate
+                        ) { length in recordedOffMain { try await engine.setEQLinearPhaseLengthOffMain(length) } }
+                    }
                 }
 
                 Spacer(minLength: 8)
