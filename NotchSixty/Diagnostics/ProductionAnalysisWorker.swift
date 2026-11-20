@@ -38,6 +38,9 @@ struct ProductionAnalysisSnapshot: Equatable, Sendable {
     var spectrogram: SpectrogramSnapshot?
     /// E33 S9: per-channel bit activity of the program input; empty unless that demand is held.
     var bitActivity: [BitActivityChannel] = []
+    /// E33 S11 (G72): the role name of each bit-activity channel on a wide or binaural session; empty on a stereo bridge or
+    /// when the session has no roles, so the card falls back to the transport's labels.
+    var bitChannelNames: [String] = []
 
     static let empty = ProductionAnalysisSnapshot()
 }
@@ -879,6 +882,7 @@ final class ProductionWideLoudnessWorker {
         next.rtaBandsDB = analysis.rtaLevels()
         next.spectrogram = analysis.spectrogramSnapshot()
         next.bitActivity = analysis.bitActivity()
+        next.bitChannelNames = analysis.plan.bitChannelNames(bitCount: next.bitActivity.count)
         next.spectrum = analysis.spectrum()
         let stereo = analysis.stereoReadout()
         if let correlation = stereo.correlation {

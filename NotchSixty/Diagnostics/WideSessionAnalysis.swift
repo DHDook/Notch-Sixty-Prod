@@ -192,6 +192,12 @@ struct WideAnalysisPlan: Equatable, Sendable {
     }
 
     /// The channel pairs the Stereo page offers on this session, always starting with the standard one.
+    /// E33 S11 (G72): one role name per bit-activity channel (input channels are programme roles, binaural included); empty
+    /// when the roles do not line up with the channels, so the card falls back to the transport's labels.
+    func bitChannelNames(bitCount: Int) -> [String] {
+        roles.count == bitCount ? roles.map(\.displayName) : []
+    }
+
     var availablePairs: [AnalysisPair] {
         if isBinaural { return pair(.programme) != nil ? [.standard, .programme] : [.standard] }
         return AnalysisPair.allCases.filter { $0 != .programme && (pair($0) != nil || $0 == .standard) }
@@ -571,9 +577,7 @@ struct AnalysisViewOptions: Equatable, Sendable {
             return
         }
         kind = .wide
-        let roles: [OutputProgramRole] = transport.programChannels.compactMap { channel in
-            channel.id.hasPrefix("program-") ? OutputProgramRole(rawValue: String(channel.id.dropFirst("program-".count))) : nil
-        }
+        let roles = Self.programRoles(of: transport.programChannels)
         let hasSubFeed = transport.physicalOutputs.contains { $0.id.hasPrefix("physical-sub-") }
         var entries = [Entry(view: .standard, title: "All")]
         for group in WideGroup.allCases {
@@ -586,6 +590,13 @@ struct AnalysisViewOptions: Equatable, Sendable {
         views = entries
         let plan = WideAnalysisPlan(roles: roles, inputChannels: roles.count, outputChannels: roles.count, isBinaural: false)
         pairs = plan.availablePairs.map { PairEntry(pair: $0, title: $0.title) }
+    }
+
+    /// The programme roles named by the transport's `program-<role>` channel ids; any other id is skipped.
+    static func programRoles(of channels: [ProductionTransportChannelMeter]) -> [OutputProgramRole] {
+        channels.compactMap { channel in
+            channel.id.hasPrefix("program-") ? OutputProgramRole(rawValue: String(channel.id.dropFirst("program-".count))) : nil
+        }
     }
 
     /// A stored choice that this session does not offer reads as the standard one.

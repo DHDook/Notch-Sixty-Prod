@@ -404,6 +404,59 @@ void stereoBlocksAreUnchanged(double rate) {
     for (size_t i = n / 2; i < n; ++i) worst = std::fmax(worst, std::fabs((double)cx[0][i] - cy[0][i]));
     check(worst < 1e-4, rate, "the extended compressor matches the 10-value block", worst);
 }
+
+// E33 S11 (G62): the same two behaviours on a 7.1.4 lane set (L R C LFE Ls Rs Lrs Rrs TFL TFR TRL TRR = lanes 0..11).
+void sevenOneFour(double rate) {
+    constexpr size_t kLanes = 12;
+    const size_t sec = (size_t)rate;
+    const size_t n = (size_t)(0.6 * rate);
+    Lanes quiet(kLanes, std::vector<float>(n));
+    for (auto &l : quiet) for (auto &x : l) x = 0.01f * noise();
+    Lanes lfeBurst = quiet, frontBurst = quiet;
+    lfeBurst[kLfe] = sine(rate, 60, 0.7, n);
+    frontBurst[0] = sine(rate, 60, 0.7, n);
+    Comp withEx, noEx;
+    withEx.p[16] = (float)(kLfe + 1);
+    n60_stage_desc a[1] = {stage(N60_STAGE_COMPRESSOR, 1, withEx.p, 17, N60_LANE_ALL)};
+    n60_stage_desc b[1] = {stage(N60_STAGE_COMPRESSOR, 1, noEx.p, 17, N60_LANE_ALL)};
+    const size_t from = n / 2;
+    const Lanes lfeOut = render(rate, a, 1, lfeBurst), frontOut = render(rate, a, 1, frontBurst), incOut = render(rate, b, 1, lfeBurst);
+    for (uint32_t l = 0; l < kLanes; ++l) {
+        if (l == kLfe) continue;
+        check(std::fabs(db(rms(lfeOut[l], from, n)) - db(rms(lfeBurst[l], from, n))) < 0.05, rate, "7.1.4: an LFE burst leaves every other lane alone", l);
+        check(db(rms(incOut[l], from, n)) - db(rms(lfeBurst[l], from, n)) < -3.0, rate, "7.1.4: with the LFE in the detector every lane ducks", l);
+        if (l != 0) check(db(rms(frontOut[l], from, n)) - db(rms(frontBurst[l], from, n)) < -3.0, rate, "7.1.4: a front burst reduces the whole group", l);
+    }
+    // Centre-only speech: lifted on the centre, every other lane (including the four height lanes) unchanged.
+    const size_t m = 4 * sec;
+    Lev lev;
+    lev.p[32] = (float)(kCentre + 1);
+    Lanes in(kLanes, std::vector<float>(m, 0.0f));
+    in[kCentre] = sine(rate, 8000, 0.3, m);
+    const auto speech = sine(rate, 1000, 0.02, m);
+    for (size_t i = 0; i < m; ++i) in[kCentre][i] += speech[i];
+    in[0] = sine(rate, 8000, 0.05, m);
+    in[1] = sine(rate, 8000, 0.04, m);
+    in[kLfe] = sine(rate, 50, 0.1, m);
+    for (uint32_t l = 4; l < kLanes; ++l) in[l] = sine(rate, 1500.0 + 300.0 * l, 0.05, m);
+    n60_stage_desc st[1] = {stage(N60_STAGE_LOUDNESS, 5, lev.p, 33, 0, 1)};
+    n60_graph *g = build(rate, st, 1, kLanes);
+    if (!g) { check(false, rate, "7.1.4 leveler builds"); return; }
+    Lanes out;
+    runRange(g, in, out, 0, m);
+    const n60_loudness_readback rb = readback(g);
+    n60_graph_retire(g);
+    check(rb.reserved == 1, rate, "7.1.4: the leveler follows the centre", rb.reserved);
+    check(rb.dialogueBoostDb > 4.0f, rate, "7.1.4: the centre speech is boosted", rb.dialogueBoostDb);
+    const double lift = db(toneAmp(out[kCentre], rate, 1000, m - sec, m)) - db(0.02);
+    check(std::fabs(lift - rb.dialogueBoostDb) < 0.3, rate, "7.1.4: the centre gains the boost", lift, rb.dialogueBoostDb);
+    for (uint32_t l = 0; l < kLanes; ++l) {
+        if (l == kCentre) continue;
+        double w = 0;
+        for (size_t i = m - sec; i < m; ++i) w = std::fmax(w, std::fabs((double)out[l][i] - in[l][i]));
+        check(w < 2e-6, rate, "7.1.4: the other lanes are unchanged", l, w);
+    }
+}
 }  // namespace
 
 int main() {
@@ -418,6 +471,7 @@ int main() {
         centreStateCarries(rate);
         validation(rate);
         stereoBlocksAreUnchanged(rate);
+        sevenOneFour(rate);
     }
     centreLeveler(768000);   // the 50 ms crossfade pole must still move at the validated maximum rate
     centreHysteresis(768000);

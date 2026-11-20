@@ -429,4 +429,46 @@ final class WideSessionAnalysisTests: XCTestCase {
         Thread.sleep(forTimeInterval: 0.12)
         return worker.snapshot()
     }
+
+    // MARK: E33 S11 (G72): role names for bit activity
+
+    private func channel(_ id: String, _ label: String, _ index: UInt32) -> ProductionTransportChannelMeter {
+        ProductionTransportChannelMeter(id: id, label: label, channelIndex: index, peakLinear: 0, rmsLinear: 0, overRangeSamples: 0)
+    }
+
+    func testProgramRolesParseTheProgramChannelIdsAndSkipOthers() {
+        let channels = [
+            channel("program-frontLeft", "Front left", 0), channel("physical-frontLeft", "x", 1),
+            channel("program-notARole", "y", 2), channel("program-lowFrequencyEffects", "LFE", 3),
+        ]
+        XCTAssertEqual(AnalysisViewOptions.programRoles(of: channels), [.frontLeft, .lowFrequencyEffects])
+        for role in OutputProgramRole.allCases {
+            XCTAssertEqual(AnalysisViewOptions.programRoles(of: [channel("program-\(role.rawValue)", "", 0)]), [role])
+        }
+    }
+
+    func testBinauralBitActivityNamesAreRolesAtEveryRate() {
+        for rate in Self.rates {
+            let roles = Self.fiveOne
+            let feed = WideAnalysisFeed(plan: plan(roles, binaural: true), sampleRate: rate)
+            feed.setDemand(
+                spectrum: false, stereo: false, meters: false, rta: false, spectrogram: false, spectrogramWindow: .tenSeconds,
+                bits: true, view: .standard, pair: .standard)
+            run(feed, rate: rate, seconds: 0.3, input: { c, n in self.tone(500 + 100 * Double(c), rate: rate, n) })
+            let bits = feed.bitActivity()
+            XCTAssertEqual(bits.count, roles.count, "\(rate)")
+            XCTAssertEqual(feed.plan.bitChannelNames(bitCount: bits.count), roles.map(\.displayName), "\(rate)")
+            XCTAssertEqual(feed.plan.bitChannelNames(bitCount: roles.count + 1), [], "a mismatch falls back")
+        }
+    }
+
+    func testBitActivityNamesPreferRolesThenTransportLabelsThenStereo() {
+        XCTAssertEqual(BitActivityNames.resolve(roleNames: ["A", "B"], transport: nil), ["A", "B"])
+        XCTAssertEqual(BitActivityNames.resolve(roleNames: [], transport: nil), SpectrogramText.channelNames)
+        let transport = ProductionTransportMeterSnapshot(
+            kind: .semanticSpeakers, displayName: "", programLayoutName: "", sampleRate: 48_000, latencyFrames: 0,
+            meteringEnabled: true, programChannels: [channel("program-frontLeft", "Front left", 0)], physicalOutputs: [],
+            inputTruePeakLinear: nil, outputTruePeakLinear: nil, roomTreatment: nil, renderFailures: 0, outputWriteFailures: 0)
+        XCTAssertEqual(BitActivityNames.resolve(roleNames: [], transport: transport), ["Front left"])
+    }
 }

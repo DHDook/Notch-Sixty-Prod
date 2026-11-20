@@ -82,6 +82,16 @@ struct ProductionSpectrogramView: View {
     }
 }
 
+/// E33 S11 (G72): which names the Bit Activity card shows. Role names from the analysis plan win (binaural bridges carry
+/// no programme channel meters), then the transport's programme labels, then Left and Right on a stereo bridge.
+enum BitActivityNames {
+    static func resolve(roleNames: [String], transport: ProductionTransportMeterSnapshot?) -> [String] {
+        if !roleNames.isEmpty { return roleNames }
+        guard let transport else { return SpectrogramText.channelNames }
+        return transport.programChannels.map(\.label)
+    }
+}
+
 /// Bit activity (D3): 24 cells per channel, most significant bit on the left.
 struct ProductionBitActivityCard: View {
     let channels: [BitActivityChannel]
