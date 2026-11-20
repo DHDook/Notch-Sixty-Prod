@@ -64,6 +64,11 @@ struct UnifiedGraphGroupEQ: Equatable, Sendable {
     var group: EQChannelGroup
     var lane: Int
     var sections: [UnifiedGraphPEQSection]
+    /// Linear-phase EQ (G75): the lane's whole EQ (its session bands plus the group's) as one FIR, designed with the
+    /// session's tap count so its latency equals the program FIR's. nil keeps the minimum-phase `sections`. The graph
+    /// uses the FIR only when it also runs a program FIR of the same latency; otherwise it falls back to `sections`.
+    var taps: [Float]?
+    var declaredLatencyFrames: UInt32 = 0
 }
 
 extension StereoEQConfiguration {
@@ -111,6 +116,54 @@ extension StereoEQConfiguration {
                 result.append(UnifiedGraphGroupEQ(group: group, lane: lane, sections: sections))
             }
         }
+        if phaseMode == .linearPhase, channelMode != .midSide {
+            try attachGroupFIR(&result, shape: shape, sampleRate: sampleRate)
+        }
         return result.sorted { $0.lane < $1.lane }
+    }
+
+    /// E33 S20 part 3 (G75): linear phase keeps every lane aligned by giving each group lane one FIR of its session
+    /// curve times its group curve. Lanes with equal band lists share one design. Mixed phase keeps the group's
+    /// minimum-phase biquads (latency 0 on every lane, so alignment holds; the group lanes do not get the all-pass
+    /// phase correction, a stated limit).
+    private func attachGroupFIR(
+        _ entries: inout [UnifiedGraphGroupEQ], shape: UnifiedGraphLayoutShape, sampleRate: Double
+    ) throws {
+        let reach = EQSessionReach.reach(shape: shape, mode: channelMode == .independent ? .independent : .linked)
+        var designs: [(bands: [EQBand], taps: [Float], latency: UInt32)] = []
+        for index in entries.indices {
+            let lane = entries[index].lane
+            let session: [EQBand]
+            if reach.firstCurveLanes.contains(lane) {
+                session = channelMode == .independent ? leftBands : linkedBands
+            } else if reach.secondCurveLanes.contains(lane) {
+                session = rightBands
+            } else {
+                session = []
+            }
+            let bands = (session + groupBands(entries[index].group, roleCodes: shape.roleCodes)).filter(\.enabled)
+            if let hit = designs.first(where: { $0.bands == bands }) {
+                entries[index].taps = hit.taps
+                entries[index].declaredLatencyFrames = hit.latency
+                continue
+            }
+            var configuration = StereoEQConfiguration()
+            configuration.channelMode = .linked
+            configuration.phaseMode = .linearPhase
+            configuration.linkedBands = bands
+            let design = try EQFIRDesigner.design(configuration, sampleRate: sampleRate)
+            designs.append((bands, design.left, design.declaredLatencyFrames))
+            entries[index].taps = design.left
+            entries[index].declaredLatencyFrames = design.declaredLatencyFrames
+        }
+    }
+
+    /// G85: the most boost, in dB, any one group adds on top of the session curve (sum of positive static gains, the
+    /// same conservative rule as the session's own). Zero on a stereo session, when bypassed or with no group lists.
+    func groupStaticBoostDB(roleCodes: [UInt32]) -> Double {
+        guard !bypassed, roleCodes.count > 2, !groupBandLists.isEmpty else { return 0 }
+        return EQChannelGroup.allCases.map { group in
+            groupBands(group, roleCodes: roleCodes).lazy.filter(\.enabled).reduce(0.0) { $0 + max(0.0, $1.gainDB) }
+        }.max() ?? 0
     }
 }

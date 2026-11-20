@@ -62,3 +62,14 @@ if selected e4_reviewer_noise; then
     fi
     echo "::endgroup::"
 fi
+
+# E33 S20 part 3 (G77): per-speaker-group EQ on a 5.1 session in linear phase, against an RBJ model at the eight rates.
+if selected e33_eq_groups_reference; then
+    echo "::group::e33_eq_groups_reference"
+    if python3 ci/acoustic_reference_lab/e33_eq_groups_reference.py; then
+        passed+=(e33_eq_groups_reference)
+    else
+        failed+=(e33_eq_groups_reference)
+    fi
+    echo "::endgroup::"
+fi
