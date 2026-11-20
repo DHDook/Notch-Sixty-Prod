@@ -7,8 +7,8 @@ import XCTest
 /// in the real core through `UnifiedGraphHost`.
 @MainActor
 final class E33ShipEndToEndTests: XCTestCase {
-    private let rates: [Double] = [44_100, 48_000, 88_200, 96_000, 176_400, 192_000, 352_800, 384_000]
-    private let flags = FeatureFlags()
+    let rates: [Double] = [44_100, 48_000, 88_200, 96_000, 176_400, 192_000, 352_800, 384_000]
+    let flags = FeatureFlags()
 
     override func setUp() {
         super.setUp()
@@ -23,7 +23,7 @@ final class E33ShipEndToEndTests: XCTestCase {
 
     // MARK: Harness
 
-    private func engine(rate: Double) throws -> AudioIOEngine {
+    func engine(rate: Double) throws -> AudioIOEngine {
         let output = AudioOutputDevice(
             deviceID: 9_433, uid: "e33ship-out", name: "Out", nominalSampleRate: rate,
             availableSampleRateRanges: [AudioSampleRateRange(minimum: 44_100, maximum: 384_000)], outputChannelCount: 2)
@@ -34,7 +34,7 @@ final class E33ShipEndToEndTests: XCTestCase {
     }
 
     /// The stereo configuration the engine publishes for what the page set, with the extras it passes (flag on).
-    private func published(_ engine: AudioIOEngine, rate: Double, flagOn: Bool = true) throws -> UnifiedGraphConfiguration {
+    func published(_ engine: AudioIOEngine, rate: Double, flagOn: Bool = true) throws -> UnifiedGraphConfiguration {
         var snapshot = try engine.stereoTransportStartGraph(sampleRate: rate)
         let extras = DynamicsGraphExtras.make(engine.dynamicsConfiguration, sampleRate: rate, flagOn: flagOn)
         return try UnifiedGraphTranslator.stereoEligibility(
@@ -43,7 +43,7 @@ final class E33ShipEndToEndTests: XCTestCase {
         ).get()
     }
 
-    private func run(_ host: UnifiedGraphHost, input: [Float], block: Int = 512) throws -> [Float] {
+    func run(_ host: UnifiedGraphHost, input: [Float], block: Int = 512) throws -> [Float] {
         var out: [Float] = []
         var position = 0
         while position < input.count {
@@ -55,11 +55,11 @@ final class E33ShipEndToEndTests: XCTestCase {
         return out
     }
 
-    private func tone(_ hz: Double, amplitude: Double, rate: Double, frames: Int) -> [Float] {
+    func tone(_ hz: Double, amplitude: Double, rate: Double, frames: Int) -> [Float] {
         (0..<frames).map { Float(amplitude * sin(2 * Double.pi * hz * Double($0) / rate)) }
     }
 
-    private func rms(_ x: ArraySlice<Float>) -> Double {
+    func rms(_ x: ArraySlice<Float>) -> Double {
         (x.reduce(0.0) { $0 + Double($1) * Double($1) } / Double(max(x.count, 1))).squareRoot()
     }
 
