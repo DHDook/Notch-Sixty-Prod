@@ -747,6 +747,7 @@ Owner decision, 17 Nov 2026 (pass-or-fail rule; whole-app review): every check h
 - [ ] E7 G10 and bench: insert a real Audio Unit that stops at 192 kHz and change the device rate 48 to 384 to 48 kHz while playing (per-rate bypass, row note, return at 48 kHz); listen to a 20 ms headphone delay, a resampled speaker IR and the precision-changed stages at 352.8 and 384 kHz (`docs/epics/E7.md` Bench checks)
 - [ ] E32 bench (`docs/epics/E32.md` slices): Equalizer page CPU with the analyser on and the Nyquist note on a real rate change, add and remove band error banners (S1); dynamic low shelf on music and band drags without level dips at 44.1, 96 and 384 kHz (S2); meters and gain-reduction CPU with audio stopped and while playing, a 25 h loudness run (S3); multiband crossover drag on a DAC (S4); limiter with attack above lookahead, expander on speech and drums, loopback inter-sample peak at 176.4, 192 and 384 kHz (S5)
 - [ ] macOS AirPlay Receiver (owner, 17 Nov 2026; end-state review): with an iPhone playing to the Mac through macOS's built-in AirPlay Receiver, check that Notch Sixty processes that audio like any other app's. If it does, add a help line saying so; if not, record what is missing for V2-3
+- [ ] E33 S26 bench: a high-shelf boost by ear, matched filters against cookbook, at 44.1 and 96 kHz (E33 G93 also rides on this listening check)
 
 ### FC Flag cleanup (owner, 11 Nov 2026)
 
