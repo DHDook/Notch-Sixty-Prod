@@ -43,24 +43,17 @@ final class E33PageViewTests: XCTestCase {
         ]
     }
 
-    func testEveryPageBuildsAndDrawsWithTheFlagOffAndOn() throws {
-        for state in [false, true] {
-            flags.setEnabled(state, for: .eqPageEnhancements)
-            for (name, view) in pages(AudioIOEngine()) {
-                let shot = try snapshot(view)
-                XCTAssertGreaterThan(shot.bytes.count, 2_000, "\(name) draws something with the flag \(state)")
-                XCTAssertGreaterThan(shot.fitting.width, 0, name)
-                XCTAssertGreaterThan(shot.fitting.height, 0, name)
-            }
-        }
-    }
-
     func testTheFlagChangesEachPageAndFlagOffIsStable() throws {
         for name in ["Dynamics", "Equalizer", "Meters"] {
+            // G107: also the "builds and draws in both states" check (one pass, not a second test).
             func shot(_ on: Bool) throws -> Data {
                 flags.setEnabled(on, for: .eqPageEnhancements)
                 let page = try XCTUnwrap(pages(AudioIOEngine()).first { $0.0 == name }).1
-                return try snapshot(page).bytes
+                let result = try snapshot(page)
+                XCTAssertGreaterThan(result.bytes.count, 2_000, "\(name) draws something with the flag \(on)")
+                XCTAssertGreaterThan(result.fitting.width, 0, name)
+                XCTAssertGreaterThan(result.fitting.height, 0, name)
+                return result.bytes
             }
             let off1 = try shot(false), off2 = try shot(false), on = try shot(true)
             XCTAssertEqual(off1, off2, "\(name): the flag-off page is the same page every time (G1)")
