@@ -4467,7 +4467,7 @@ final class AudioIOEngine {
             bassManagementConfiguration: foldedBassSettings,
             dynamicsConfiguration: inputs.dynamics,
             playbackConfiguration: playback,
-            masterGainLinear: 1
+            masterGainLinear: 1, groupRoleCodes: shape.roleCodes
         )
         // The ambient live target rides in the snapshot like the stereo path (E6 S9b); the stereo engine only
         // runs it on speakers, so Virtual Speakers keeps it off.

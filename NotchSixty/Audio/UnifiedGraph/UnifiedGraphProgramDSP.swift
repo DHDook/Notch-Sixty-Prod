@@ -173,6 +173,8 @@ struct UnifiedGraphProgramDSP: Equatable, Sendable {
     static let programPEQBase: UInt32 = 800
     /// E33 S20: group EQ stages, one per group lane, `+ 32 * chunk` when a lane's list needs more than 16 sections.
     static let groupPEQBase: UInt32 = 1_300
+    /// E33 S20 part 3: a group lane's linear-phase FIR (session curve times group curve), `+ lane`.
+    static let groupFIRBase: UInt32 = 3_600
     static let interChannelDelayBase: UInt32 = 1_000
     static let laneDelayBase: UInt32 = 1_100
     /// E7 S1: the DELAY half of a fractional inter-channel delay longer than the FRAC_DELAY ring.
@@ -271,6 +273,8 @@ struct UnifiedGraphProgramDSP: Equatable, Sendable {
         }
         // Latency of what the covered lanes run through before bass management.
         var coveredLatency: UInt32 = 0
+        var groupFIRLanes = Set<Int>()
+        var groupFIRs: [UnifiedGraphGroupEQ] = []
         if !covered.isEmpty {
             if let params = st.denoiser {
                 guard st.denoiserLatencyFrames > 0 else { throw UnifiedGraphFallbackReason.specRejected }
@@ -289,7 +293,14 @@ struct UnifiedGraphProgramDSP: Equatable, Sendable {
             }
             // E33 S20 (G39): each group's list runs on its lanes only, after the session's own curves and ahead of the
             // dynamic EQ. A paired lane inside Mid/Side would see the encoded signal, so that is refused by name.
-            for entry in groupEQ {
+            // Linear phase (G75): a group lane runs one FIR of session times group, aligned with the program FIR, in
+            // place of the program FIR and the group biquads. Only when the program FIR exists with the same latency.
+            groupFIRs = groupEQ.filter { entry in
+                guard let taps = entry.taps, let program = st.programFIR, eqMode != .midSide else { return false }
+                return entry.lane < count && taps.count <= maxFIRTaps && entry.declaredLatencyFrames == program.declaredLatencyFrames
+            }
+            groupFIRLanes = Set(groupFIRs.map(\.lane))
+            for entry in groupEQ where !groupFIRLanes.contains(entry.lane) {
                 if eqMode == .midSide, shape.pairs.contains(where: { $0.a == entry.lane || $0.b == entry.lane }) {
                     throw UnifiedGraphFallbackReason.midSideGroupEQ
                 }
@@ -312,14 +323,22 @@ struct UnifiedGraphProgramDSP: Equatable, Sendable {
                 }
             }
             if let program = st.programFIR {
-                try addFIR(N60_STAGE_FIR, program, base: Self.firStageBase, sharedMask: coveredMask,
-                           leftLanes: leftMembers, rightLanes: rightMembers)
+                let sharedMask = coveredMask & ~Self.mask(Array(groupFIRLanes))
+                if program.right != nil || sharedMask != 0 {
+                    try addFIR(N60_STAGE_FIR, program, base: Self.firStageBase, sharedMask: sharedMask,
+                               leftLanes: leftMembers.filter { !groupFIRLanes.contains($0) },
+                               rightLanes: rightMembers.filter { !groupFIRLanes.contains($0) })
+                }
+                for entry in groupFIRs {
+                    add(N60_STAGE_FIR, Self.groupFIRBase + UInt32(entry.lane), lane: UInt32(entry.lane),
+                        capacity: program.declaredLatencyFrames, params: entry.taps ?? [])
+                }
                 coveredLatency += Self.firPartitionFrames + program.declaredLatencyFrames
             }
         }
         // The core does not align latency across lanes: lanes the FIR / denoiser do not cover get a delta FIR so
         // every program lane reaches bass management with the same delay.
-        let uncovered = (0..<count).filter { !covered.contains($0) }
+        let uncovered = (0..<count).filter { !covered.contains($0) && !groupFIRLanes.contains($0) }
         if coveredLatency > 0, !uncovered.isEmpty {
             let delta = Int(coveredLatency) - Int(Self.firPartitionFrames)
             guard delta >= 0, delta + 1 <= maxFIRTaps else { throw UnifiedGraphFallbackReason.latencyAlignment }
