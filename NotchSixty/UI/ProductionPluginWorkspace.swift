@@ -514,6 +514,12 @@ private struct PluginSlotReadings {
     let latencyText: String
 }
 
+/// E33 S25: the Channels choice for a stereo-only plug-in on a session wider than stereo (decision 29).
+private struct PluginSlotChannels {
+    let mode: AudioUnitSlotChannelMode
+    let onChange: (AudioUnitSlotChannelMode) -> Void
+}
+
 /// E33 S24: drag a rack row onto another to reorder. The Move buttons stay for the keyboard and VoiceOver.
 private struct PluginRowDrag: ViewModifier {
     let enabled: Bool
@@ -565,6 +571,8 @@ private struct PluginRackSlotRow: View {
     let slotMenu: PluginSlotMenu?
     /// E33 S24: nil with `e33.page-enhancements` off. Load and latency in milliseconds for this slot.
     let readings: PluginSlotReadings?
+    /// E33 S25: nil unless the plug-in is stereo-only on a wider session (flag on).
+    let channels: PluginSlotChannels?
 
     @State private var wetDryMix: Double
 
@@ -587,8 +595,10 @@ private struct PluginRackSlotRow: View {
         onRemove: @escaping () -> Void,
         onClearQuarantine: (() -> Void)?,
         slotMenu: PluginSlotMenu? = nil,
-        readings: PluginSlotReadings? = nil
+        readings: PluginSlotReadings? = nil,
+        channels: PluginSlotChannels? = nil
     ) {
+        self.channels = channels
         self.slotMenu = slotMenu
         self.readings = readings
         self.index = index
@@ -674,6 +684,20 @@ private struct PluginRackSlotRow: View {
                         Text(manufacturer)
                             .font(DesignType.caption.font)
                             .foregroundStyle(.secondary)
+                    }
+
+                    if let channels {
+                        Picker("Channels", selection: Binding(
+                            get: { channels.mode },
+                            set: { channels.onChange($0) }
+                        )) {
+                            ForEach(AudioUnitSlotChannelMode.allCases, id: \.self) {
+                                Text($0.displayName).tag($0)
+                            }
+                        }
+                        .pickerStyle(.menu)
+                        .disabled(isBusy)
+                        .accessibilityHint("This plug-in is stereo only. Choose which speakers it runs on.")
                     }
 
                     if let quarantineEntry {
@@ -919,14 +943,23 @@ struct ProductionPluginWorkspace: View {
         )
     }
 
+    /// E33 S25: true for an occupied slot whose plug-in is stereo only on a session wider than stereo.
+    private func slotRunsAsPairs(_ slot: AudioUnitRackSlotState) -> Bool {
+        guard let component = slot.component, let descriptor = host.descriptor(for: component) else { return false }
+        return processingFormat.runsAsStereoPairs(on: descriptor)
+    }
+
     private var processingFormat: AudioUnitRackProcessingFormat {
         let channelCount: Int
+        var roles: [OutputProgramRole]?
         if let profile = engine.outputDeviceProfileConfiguration,
            profile.enabled {
+            roles = profile.programLayout.roles
             channelCount = profile.programLayout.roles.count
         } else if let profile =
                     engine.headphoneDeviceProfileConfiguration,
                   profile.enabled {
+            roles = profile.programLayout.roles
             channelCount = profile.programLayout.roles.count
         } else {
             channelCount = 2
@@ -945,7 +978,9 @@ struct ProductionPluginWorkspace: View {
             maximumFramesPerSlice: AudioUnitRackProcessingFormat
                 .recommendedMaximumFramesPerSlice(
                     sampleRate: engine.selectedOutputDevice?.nominalSampleRate ?? 48_000
-                )
+                ),
+            channelRoles: roles,
+            allowsStereoPairs: FeatureFlags().isEnabled(.eqPageEnhancements)
         )
     }
 
@@ -1411,6 +1446,12 @@ struct ProductionPluginWorkspace: View {
                                 frames: report?.probe.latencyFrames ?? slot.lastKnownLatencyFrames ?? 0,
                                 sampleRate: processingFormat.sampleRate
                             )
+                        )
+                        : nil,
+                    channels: enhanced && slotRunsAsPairs(slot)
+                        ? PluginSlotChannels(
+                            mode: slot.channels,
+                            onChange: { runMutation(.setChannelMode(slot: index, mode: $0)) }
                         )
                         : nil
                 )

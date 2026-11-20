@@ -955,6 +955,124 @@ final class AudioUnitLiveProcessStage: AudioUnitLiveRackStageProcessing {
     }
 }
 
+/// E33 S25 (G48, decision 29): runs a stereo-only plug-in on a wide session, one instance per left/right lane pair.
+/// Lanes no instance processes pass untouched, delayed by the slot's latency so every lane stays aligned.
+///
+/// Allocation: all scratch and delay memory is made at init (control plane), none in `process`. Synchronisation:
+/// none beyond the instances' own (each has its own fault gate). Latency: the plug-in's reported latency, the same on
+/// every lane. Sample rate: the instances' rate. Channel count: `channelCount` lanes in and out, 2 per instance.
+/// Reset: a rebuilt stage starts silent; a tripped instance passes its own pair dry and delayed.
+final class AudioUnitLivePairStage: AudioUnitLiveRackStageProcessing {
+    let slotIndex: Int
+    let component: AudioUnitComponentIdentity?
+    let latencyFrames: Int
+    let instances: [AudioUnitLiveProcessStage]
+    let pairs: [(left: Int, right: Int)]
+
+    private let channelCount: Int
+    private let maximumFramesPerSlice: Int
+    private let passThrough: AudioUnitLiveDelayLine
+    private let pairInput: UnsafeMutablePointer<Float>
+    private let pairOutput: UnsafeMutablePointer<Float>
+
+    init(
+        slotIndex: Int,
+        component: AudioUnitComponentIdentity?,
+        instances: [AudioUnitLiveProcessStage],
+        pairs: [(left: Int, right: Int)],
+        channelCount: Int,
+        maximumFramesPerSlice: Int,
+        latencyFrames: Int
+    ) {
+        precondition(instances.count == pairs.count)
+        self.slotIndex = slotIndex
+        self.component = component
+        self.instances = instances
+        self.pairs = pairs
+        self.channelCount = channelCount
+        self.maximumFramesPerSlice = maximumFramesPerSlice
+        self.latencyFrames = latencyFrames
+        passThrough = AudioUnitLiveDelayLine(channelCount: channelCount, latencyFrames: latencyFrames)
+        let samples = maximumFramesPerSlice * 2
+        pairInput = .allocate(capacity: samples)
+        pairOutput = .allocate(capacity: samples)
+        pairInput.initialize(repeating: 0, count: samples)
+        pairOutput.initialize(repeating: 0, count: samples)
+    }
+
+    deinit {
+        pairInput.deallocate()
+        pairOutput.deallocate()
+    }
+
+    func takeLoadReading() -> AudioUnitLoadReading {
+        var buffer = 0.0
+        var watchdog = 0.0
+        for instance in instances {
+            let reading = instance.takeLoadReading()
+            buffer += reading.bufferLoad
+            watchdog = max(watchdog, reading.watchdogLoad)
+        }
+        return AudioUnitLoadReading(bufferLoad: buffer, watchdogLoad: watchdog)
+    }
+
+    func controlPlaneHealthIssue() -> AudioUnitLiveRackControlPlaneIssue? {
+        for instance in instances {
+            if let issue = instance.controlPlaneHealthIssue() { return issue }
+        }
+        return nil
+    }
+
+    func process(
+        inputInterleaved: UnsafePointer<Float>,
+        outputInterleaved: UnsafeMutablePointer<Float>,
+        frameCount: Int,
+        channelCount: Int,
+        sampleTime: Double
+    ) -> AudioUnitLiveRackStageResult {
+        guard channelCount == self.channelCount, frameCount >= 0, frameCount <= maximumFramesPerSlice else {
+            memset(outputInterleaved, 0, max(frameCount, 0) * max(channelCount, 0) * MemoryLayout<Float>.size)
+            return AudioUnitLiveRackStageResult(
+                faultReason: N60AudioUnitLiveRackFaultRuntimeInvariant,
+                renderStatus: kAudio_ParamError
+            )
+        }
+        passThrough.process(
+            inputInterleaved: inputInterleaved,
+            outputInterleaved: outputInterleaved,
+            frameCount: frameCount
+        )
+        var firstFault = AudioUnitLiveRackStageResult.success
+        for (index, instance) in instances.enumerated() {
+            let pair = pairs[index]
+            var frame = 0
+            while frame < frameCount {
+                pairInput[frame * 2] = inputInterleaved[frame * channelCount + pair.left]
+                pairInput[frame * 2 + 1] = inputInterleaved[frame * channelCount + pair.right]
+                frame += 1
+            }
+            let result = instance.process(
+                inputInterleaved: UnsafePointer(pairInput),
+                outputInterleaved: pairOutput,
+                frameCount: frameCount,
+                channelCount: 2,
+                sampleTime: sampleTime
+            )
+            if result.faultReason != N60AudioUnitLiveRackFaultNone,
+               firstFault.faultReason == N60AudioUnitLiveRackFaultNone {
+                firstFault = result
+            }
+            frame = 0
+            while frame < frameCount {
+                outputInterleaved[frame * channelCount + pair.left] = pairOutput[frame * 2]
+                outputInterleaved[frame * channelCount + pair.right] = pairOutput[frame * 2 + 1]
+                frame += 1
+            }
+        }
+        return firstFault
+    }
+}
+
 final class AudioUnitLiveRackRuntime: @unchecked Sendable {
     static let maximumDelayMemoryBytes = 128 * 1_024 * 1_024
 
@@ -1041,8 +1159,8 @@ final class AudioUnitLiveRackRuntime: @unchecked Sendable {
         }
 
         let delaySamples = active.reduce(0) {
-            $0 + max(0, $1.execution.latencyFrames)
-                * format.channelCount
+            let lanes = Self.delayLaneCount(for: $1, format: format)
+            return $0 + max(0, $1.execution.latencyFrames) * lanes
         }
         let delayBytes = delaySamples * MemoryLayout<Float>.size
         guard delayBytes <= maximumDelayMemoryBytes else {
@@ -1082,14 +1200,41 @@ final class AudioUnitLiveRackRuntime: @unchecked Sendable {
                     throw AudioUnitLiveRackBuildError
                         .missingPreparedSlot(buildSlot.slotIndex)
                 }
-                let stage = try await AudioUnitLiveProcessStage.build(
-                    slotIndex: buildSlot.slotIndex,
-                    slot: buildSlot.slot,
-                    descriptor: descriptor,
-                    report: report,
-                    format: format
+                let slotFormat = format.slotFormat(for: descriptor)
+                guard slotFormat.channelCount != format.channelCount else {
+                    stages.append(try await AudioUnitLiveProcessStage.build(
+                        slotIndex: buildSlot.slotIndex,
+                        slot: buildSlot.slot,
+                        descriptor: descriptor,
+                        report: report,
+                        format: format
+                    ))
+                    continue
+                }
+                // E33 S25: a stereo plug-in on a wide session, one instance per lane pair.
+                let pairs = buildSlot.slot.channels.lanePairs(
+                    channelCount: format.channelCount,
+                    roles: format.channelRoles
                 )
-                stages.append(stage)
+                var instances: [AudioUnitLiveProcessStage] = []
+                for _ in pairs {
+                    instances.append(try await AudioUnitLiveProcessStage.build(
+                        slotIndex: buildSlot.slotIndex,
+                        slot: buildSlot.slot,
+                        descriptor: descriptor,
+                        report: report,
+                        format: slotFormat
+                    ))
+                }
+                stages.append(AudioUnitLivePairStage(
+                    slotIndex: buildSlot.slotIndex,
+                    component: descriptor.identity,
+                    instances: instances,
+                    pairs: pairs,
+                    channelCount: format.channelCount,
+                    maximumFramesPerSlice: format.maximumFramesPerSlice,
+                    latencyFrames: buildSlot.execution.latencyFrames
+                ))
             }
         }
 
@@ -1101,18 +1246,44 @@ final class AudioUnitLiveRackRuntime: @unchecked Sendable {
         )
     }
 
+    /// Delay-line lanes a slot needs: a pair slot keeps one stereo line per instance plus the full-width line.
+    private static func delayLaneCount(
+        for slot: AudioUnitLiveRackBuildSlot,
+        format: AudioUnitRackProcessingFormat
+    ) -> Int {
+        guard slot.execution.mode == .process,
+              let descriptor = slot.descriptor,
+              format.runsAsStereoPairs(on: descriptor) else {
+            return format.channelCount
+        }
+        let pairs = slot.slot.channels.lanePairs(
+            channelCount: format.channelCount,
+            roles: format.channelRoles
+        ).count
+        return format.channelCount + 2 * pairs
+    }
+
     /// E33 S24: the peaks since the last call, by slot index (process stages only). Control plane only.
+    /// E33 S25: a pair slot adds the instances' buffer loads and reports the largest watchdog load.
     func takeLoadReadings() -> [Int: AudioUnitLoadReading] {
         var result: [Int: AudioUnitLoadReading] = [:]
         for case let stage as AudioUnitLiveProcessStage in stages {
+            result[stage.slotIndex] = stage.takeLoadReading()
+        }
+        for case let stage as AudioUnitLivePairStage in stages {
             result[stage.slotIndex] = stage.takeLoadReading()
         }
         return result
     }
 
     /// E33 S23: the process stage of `slotIndex`, for the live editor. nil when that slot is bypassed or empty.
+    /// E33 S25: for a pair slot this is the first instance (see the gap on live edits of the other pairs).
     func processStage(forSlot slotIndex: Int) -> AudioUnitLiveProcessStage? {
-        stages.lazy.compactMap { $0 as? AudioUnitLiveProcessStage }.first { $0.slotIndex == slotIndex }
+        for stage in stages where stage.slotIndex == slotIndex {
+            if let single = stage as? AudioUnitLiveProcessStage { return single }
+            if let pair = stage as? AudioUnitLivePairStage { return pair.instances.first }
+        }
+        return nil
     }
 
     var processor: N60AudioUnitLiveRackProcessor {

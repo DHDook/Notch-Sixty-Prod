@@ -72,7 +72,8 @@ struct AudioUnitComponentDescriptor: Codable, Equatable, Hashable, Sendable, Ide
         if !sandboxSafe, !separateProcess {
             reasons.append("The component is not reported as safe in the current sandboxed process.")
         }
-        if !supports(channelCount: format.channelCount) {
+        if !supports(channelCount: format.channelCount),
+           !format.runsAsStereoPairs(on: self) {
             reasons.append(
                 "The component does not report symmetric \(format.channelCount)-in / \(format.channelCount)-out support."
             )
@@ -96,15 +97,42 @@ struct AudioUnitRackProcessingFormat: Codable, Equatable, Sendable {
     let sampleRate: Double
     let channelCount: Int
     let maximumFramesPerSlice: Int
+    /// E33 S25: the program role of each lane, when known (wide sessions). nil pairs lanes 0 and 1 only.
+    let channelRoles: [OutputProgramRole]?
+    /// E33 S25: Swift sets this from `e33.page-enhancements`; off, a stereo-only plug-in stays incompatible on a wide session.
+    let allowsStereoPairs: Bool
 
     init(
         sampleRate: Double,
         channelCount: Int,
-        maximumFramesPerSlice: Int = 4_096
+        maximumFramesPerSlice: Int = 4_096,
+        channelRoles: [OutputProgramRole]? = nil,
+        allowsStereoPairs: Bool = false
     ) {
         self.sampleRate = sampleRate
         self.channelCount = channelCount
         self.maximumFramesPerSlice = maximumFramesPerSlice
+        self.channelRoles = channelRoles
+        self.allowsStereoPairs = allowsStereoPairs
+    }
+
+    /// E33 S25: true when `descriptor` cannot run on every lane but does run as a stereo plug-in, so the rack runs
+    /// it on left/right pairs of lanes (decision 29).
+    func runsAsStereoPairs(on descriptor: AudioUnitComponentDescriptor) -> Bool {
+        allowsStereoPairs
+            && channelCount > 2
+            && !descriptor.supports(channelCount: channelCount)
+            && descriptor.supports(channelCount: 2)
+    }
+
+    /// The format one instance of the plug-in runs at: this format, or its stereo pair form (two lanes, no roles).
+    func slotFormat(for descriptor: AudioUnitComponentDescriptor?) -> AudioUnitRackProcessingFormat {
+        guard let descriptor, runsAsStereoPairs(on: descriptor) else { return self }
+        return AudioUnitRackProcessingFormat(
+            sampleRate: sampleRate,
+            channelCount: 2,
+            maximumFramesPerSlice: maximumFramesPerSlice
+        )
     }
 
     /// Slice budget scaled with sample rate so high-rate devices, whose HAL
@@ -137,6 +165,41 @@ struct AudioUnitRackProcessingFormat: Codable, Equatable, Sendable {
     }
 }
 
+/// E33 S25 (G48, decision 29): which lanes a stereo-only plug-in runs on in a session wider than stereo.
+enum AudioUnitSlotChannelMode: String, Codable, CaseIterable, Sendable {
+    case frontLeftRight
+    case everyPair
+
+    var displayName: String {
+        switch self {
+        case .frontLeftRight: return "Front left and right"
+        case .everyPair: return "Every pair"
+        }
+    }
+
+    /// The lane pairs (left, right) one instance each runs on. Roles pair by side (front, side, rear, wide, top
+    /// front, top middle, top rear); the centre and LFE belong to no pair. Without roles only lanes 0 and 1 pair.
+    func lanePairs(
+        channelCount: Int,
+        roles: [OutputProgramRole]?
+    ) -> [(left: Int, right: Int)] {
+        guard channelCount >= 2 else { return [] }
+        guard let roles, roles.count == channelCount else { return [(0, 1)] }
+        let sides: [(OutputProgramRole, OutputProgramRole)] = [
+            (.frontLeft, .frontRight), (.sideLeft, .sideRight), (.rearLeft, .rearRight),
+            (.wideLeft, .wideRight), (.topFrontLeft, .topFrontRight),
+            (.topMiddleLeft, .topMiddleRight), (.topRearLeft, .topRearRight),
+        ]
+        var pairs: [(left: Int, right: Int)] = []
+        for (left, right) in sides {
+            guard let l = roles.firstIndex(of: left), let r = roles.firstIndex(of: right) else { continue }
+            pairs.append((l, r))
+            if self == .frontLeftRight { break }
+        }
+        return pairs.isEmpty ? [(0, 1)] : pairs
+    }
+}
+
 struct AudioUnitRackSlotState: Codable, Equatable, Sendable, Identifiable {
     static let maximumOpaqueStateBytes = 8 * 1_024 * 1_024
 
@@ -149,6 +212,10 @@ struct AudioUnitRackSlotState: Codable, Equatable, Sendable, Identifiable {
     var opaqueFullState: Data?
     var lastKnownLatencyFrames: Int?
     var lastKnownTailFrames: Int?
+    /// E33 S25: nil in presets saved before the Channels choice existed; reads as `.frontLeftRight`.
+    var channelMode: AudioUnitSlotChannelMode?
+
+    var channels: AudioUnitSlotChannelMode { channelMode ?? .frontLeftRight }
 
     init(
         id: UUID = UUID(),
@@ -159,7 +226,8 @@ struct AudioUnitRackSlotState: Codable, Equatable, Sendable, Identifiable {
         wetDryMix: Double = 1.0,
         opaqueFullState: Data? = nil,
         lastKnownLatencyFrames: Int? = nil,
-        lastKnownTailFrames: Int? = nil
+        lastKnownTailFrames: Int? = nil,
+        channelMode: AudioUnitSlotChannelMode? = nil
     ) {
         self.id = id
         self.component = component
@@ -170,6 +238,7 @@ struct AudioUnitRackSlotState: Codable, Equatable, Sendable, Identifiable {
         self.opaqueFullState = opaqueFullState
         self.lastKnownLatencyFrames = lastKnownLatencyFrames
         self.lastKnownTailFrames = lastKnownTailFrames
+        self.channelMode = channelMode
     }
 
     var isEmpty: Bool { component == nil }
@@ -504,12 +573,13 @@ struct AudioUnitRackPreparationPlanner: Sendable {
 
             let probe = slotProbes[slot.id] ?? probesByID[component]
             let descriptor = descriptorsByID[component]
+            let slotFormat = format.slotFormat(for: descriptor)
 
             if let quarantineEntry = quarantine.entry(for: component) {
                 let latency = try bypassLatency(
                     slot: slot,
                     probe: probe,
-                    format: format,
+                    format: slotFormat,
                     reason: "Component is quarantined: \(quarantineEntry.lastFailureDescription)"
                 )
                 plans.append(bypassPlan(
@@ -531,7 +601,7 @@ struct AudioUnitRackPreparationPlanner: Sendable {
                 let latency = try bypassLatency(
                     slot: slot,
                     probe: probe,
-                    format: format,
+                    format: slotFormat,
                     reason: "Component is no longer installed."
                 )
                 plans.append(bypassPlan(
@@ -554,7 +624,7 @@ struct AudioUnitRackPreparationPlanner: Sendable {
                 let latency = try bypassLatency(
                     slot: slot,
                     probe: probe,
-                    format: format,
+                    format: slotFormat,
                     reason: compatibility.reasons.joined(separator: " ")
                 )
                 plans.append(bypassPlan(
@@ -605,7 +675,7 @@ struct AudioUnitRackPreparationPlanner: Sendable {
             if slot.bypassed {
                 let latency: Int
                 if let probe {
-                    try probe.validate(for: format)
+                    try probe.validate(for: slotFormat)
                     latency = probe.latencyFrames
                 } else {
                     latency = slot.lastKnownLatencyFrames ?? 0
@@ -631,7 +701,7 @@ struct AudioUnitRackPreparationPlanner: Sendable {
                     component: component
                 )
             }
-            try probe.validate(for: format)
+            try probe.validate(for: slotFormat)
             let latency = probe.latencyFrames
             let tail = probe.tailFrames
             totalLatency = try addFrames(
