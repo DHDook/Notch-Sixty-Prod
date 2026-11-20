@@ -38,7 +38,7 @@ final class EQLinearPhaseHardeningTests: XCTestCase {
     func testOffMainDesignMatchesTheSynchronousDesign() throws {
         for rate in Self.rates {
             let design = try EQFIRDesigner.design(linear(), sampleRate: rate)
-            XCTAssertEqual(design.left.count, Int(N60LinearPhaseEQRecommendedTapCount(rate)), "\(rate)")
+            XCTAssertEqual(design.left.count, EQLinearPhaseLength.default.tapCount(sampleRate: rate), "\(rate)")
             XCTAssertTrue(design.left.allSatisfy(\.isFinite))
             XCTAssertGreaterThan(design.declaredLatencyFrames, 0)
             XCTAssertNil(design.right)

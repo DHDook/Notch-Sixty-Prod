@@ -3,7 +3,6 @@
 #include <stdlib.h>
 
 #include "../NotchSixty/Audio/Realtime/N60Biquad.h"
-#include "../NotchSixty/Audio/Realtime/N60LinearPhaseEQ.h"
 
 static void require_true(int condition, const char *message) {
     if (!condition) {
@@ -57,24 +56,6 @@ int main(void) {
     require_true(N60BiquadDesignLinkwitzTransform(48000.0, 50.0, 0.9, 25.0, 0.5, &changed) && coefficients_differ(base, changed), "Q0 does not affect coefficients");
     require_true(N60BiquadDesignLinkwitzTransform(48000.0, 50.0, 0.7, 32.0, 0.5, &changed) && coefficients_differ(base, changed), "fp does not affect coefficients");
     require_true(N60BiquadDesignLinkwitzTransform(48000.0, 50.0, 0.7, 25.0, 0.8, &changed) && coefficients_differ(base, changed), "Qp does not affect coefficients");
-
-    N60LinearPhaseEQBand band = {0};
-    band.enabled = true;
-    band.type = N60BiquadFilterTypeLinkwitzTransform;
-    band.frequencyHz = 50.0;
-    band.gainDB = 0.0;
-    band.q = 0.7;
-    band.usesPreparedCoefficients = true;
-    band.preparedCoefficients = base;
-
-    uint32_t tapCount = N60LinearPhaseEQRecommendedTapCount(48000.0);
-    float *taps = calloc(tapCount, sizeof(float));
-    require_true(taps != NULL, "tap allocation failed");
-    N60LinearPhaseEQDesignInfo info = {0};
-    require_true(N60LinearPhaseEQDesign(48000.0, &band, 1, taps, tapCount, &info), "Linear-Phase projection rejected prepared Linkwitz coefficients");
-    require_true(info.tapCount == tapCount, "unexpected Linear-Phase tap count");
-    for (uint32_t i = 0; i < tapCount; ++i) require_true(isfinite(taps[i]), "non-finite Linear-Phase tap");
-    free(taps);
 
     puts("PR34 Linkwitz Transform validation passed.");
     return 0;

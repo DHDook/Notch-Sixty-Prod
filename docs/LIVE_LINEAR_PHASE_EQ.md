@@ -7,7 +7,7 @@ PR #19 turns the linear-phase designer from PR #18 into a live EQ mode while pre
 Notch Sixty keeps one 64-band EQ configuration. The phase mode controls how those bands are compiled:
 
 - **Minimum phase**: enabled bands become realtime biquad sections.
-- **Linear phase**: enabled bands are combined by `N60LinearPhaseEQ` into one symmetric FIR and the realtime IIR band list is empty.
+- **Linear phase**: enabled bands are combined by the core's `n60_eq_linear_phase_design` (E33 S27; `NotchSixty/Audio/EQLinearPhaseLength.swift`) into one symmetric FIR and the realtime IIR band list is empty.
 
 Presets and the future production UI therefore do not need separate sets of bands for the two modes.
 
@@ -75,3 +75,7 @@ Validate both 96 kHz and 384 kHz:
 - verify FIR program misses, snapshot misses, underruns, overruns, and non-finite samples remain zero;
 - verify approximate linear-mode latency is ~24 ms at 96 kHz and ~22 ms at 384 kHz;
 - change native rate while linear mode is active and confirm the FIR is redesigned and playback recovers automatically.
+
+## Lengths (E33 S27)
+
+The FIR's delay is chosen per EQ: about 21 ms (default; every older profile), 85, 170 or 340 ms (261,121 taps at 384 kHz). A band about B Hz wide is followed to about half a dB when delay times B is at least four. The design runs in `core/` on a background task for length and phase changes; a length the FIR engine or the stage budget cannot carry is refused by name. Band edits at linear phase still design synchronously on a cache miss (E33 gap G97).

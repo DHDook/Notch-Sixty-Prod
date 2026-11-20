@@ -287,19 +287,13 @@ final class ConvolutionTests: XCTestCase {
             (384_000, 16_385),
         ]
         for (rate, taps) in expected {
-            XCTAssertEqual(N60LinearPhaseEQRecommendedTapCount(rate), taps, "Unexpected tap count at \(rate) Hz")
+            XCTAssertEqual(UInt32(EQLinearPhaseLength.default.tapCount(sampleRate: rate)), taps, "Unexpected tap count at \(rate) Hz")
         }
     }
 
-    func testLinearPhaseUnityDesignIsCenteredAndSymmetric() {
+    func testLinearPhaseUnityDesignIsCenteredAndSymmetric() throws {
         let sampleRate = 48_000.0
-        var taps = [Float](repeating: 0, count: Int(N60_LINEAR_PHASE_MAX_TAPS))
-        var info = N60LinearPhaseEQDesignInfo()
-        XCTAssertTrue(
-            taps.withUnsafeMutableBufferPointer { buffer in
-                N60LinearPhaseEQDesign(sampleRate, nil, 0, buffer.baseAddress!, UInt32(buffer.count), &info)
-            }
-        )
+        let (taps, info) = try EQLinearPhaseDesigner.design(bands: [], sampleRate: sampleRate, length: .default)
 
         XCTAssertEqual(info.tapCount, 2_049)
         XCTAssertEqual(info.groupDelayFrames, 1_024)
@@ -317,32 +311,11 @@ final class ConvolutionTests: XCTestCase {
         }
     }
 
-    func testLinearPhasePeakingBandMatchesRequestedMagnitudeAndRemainsSymmetric() {
+    func testLinearPhasePeakingBandMatchesRequestedMagnitudeAndRemainsSymmetric() throws {
         let sampleRate = 96_000.0
-        var band = N60LinearPhaseEQBand()
-        band.enabled = true
-        band.type = N60BiquadFilterTypePeaking
-        band.frequencyHz = 1_000
-        band.gainDB = 6
-        band.q = 1.0
-        let bands = [band]
-        var taps = [Float](repeating: 0, count: Int(N60_LINEAR_PHASE_MAX_TAPS))
-        var info = N60LinearPhaseEQDesignInfo()
-
-        XCTAssertTrue(
-            bands.withUnsafeBufferPointer { bandBuffer in
-                taps.withUnsafeMutableBufferPointer { tapBuffer in
-                    N60LinearPhaseEQDesign(
-                        sampleRate,
-                        bandBuffer.baseAddress!,
-                        UInt32(bandBuffer.count),
-                        tapBuffer.baseAddress!,
-                        UInt32(tapBuffer.count),
-                        &info
-                    )
-                }
-            }
-        )
+        let band = EQBand(type: .peaking, frequencyHz: 1_000, gainDB: 6, q: 1.0)
+        let bands = try EQConfiguration(bands: [band]).linearPhaseBands(sampleRate: sampleRate)
+        let (taps, info) = try EQLinearPhaseDesigner.design(bands: bands, sampleRate: sampleRate, length: .default)
 
         let count = Int(info.tapCount)
         for index in 0..<(count / 2) {
@@ -352,15 +325,9 @@ final class ConvolutionTests: XCTestCase {
         XCTAssertEqual(firMagnitudeDB(taps, count: count, sampleRate: sampleRate, frequency: 10_000), 0.0, accuracy: 0.35)
     }
 
-    func testLinearPhaseUnityDesignRunsThroughProductionConvolverAtDeclaredLatency() {
+    func testLinearPhaseUnityDesignRunsThroughProductionConvolverAtDeclaredLatency() throws {
         let sampleRate = 48_000.0
-        var taps = [Float](repeating: 0, count: Int(N60_LINEAR_PHASE_MAX_TAPS))
-        var design = N60LinearPhaseEQDesignInfo()
-        XCTAssertTrue(
-            taps.withUnsafeMutableBufferPointer { buffer in
-                N60LinearPhaseEQDesign(sampleRate, nil, 0, buffer.baseAddress!, UInt32(buffer.count), &design)
-            }
-        )
+        let (taps, design) = try EQLinearPhaseDesigner.design(bands: [], sampleRate: sampleRate, length: .default)
 
         guard let convolver = N60PartitionedConvolverCreate() else {
             return XCTFail("Unable to allocate convolver")

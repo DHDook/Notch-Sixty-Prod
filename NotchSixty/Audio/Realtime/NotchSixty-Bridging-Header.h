@@ -26,7 +26,6 @@
 #import "n60/remote_tonal.h"
 #import "N60TargetedRoomMeasurementBridge.h"
 #import "N60Convolution.h"
-#import "N60LinearPhaseEQ.h"
 #import "N60ProgramLayout.h"
 #import "N60ChannelRouter.h"
 #import "N60CoreAudioChannelMapping.h"

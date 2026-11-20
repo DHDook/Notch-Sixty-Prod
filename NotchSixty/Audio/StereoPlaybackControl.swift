@@ -53,6 +53,9 @@ struct StereoEQConfiguration: Equatable, Codable, Sendable {
     /// E33 S20 (G39): one extra band list per speaker group on a wide session, keyed by layout and group
     /// (`EQChannelGroups.swift`). Absent in older profiles and not written while empty; a stereo session ignores it.
     var groupBandLists: [String: [EQBand]] = [:]
+    /// E33 S27 (G52): the linear-phase FIR's length (`EQLinearPhaseLength.swift`). Only the Linear phase mode reads it.
+    /// Absent in older profiles (they load at 21 ms) and not written while it is the default.
+    var linearPhaseLength: EQLinearPhaseLength = .default
     /// E33 S20 part 2: the group list the page is editing ("<layout>/<group>", `EQChannelGroups.swift`), or nil for the
     /// session's own lists ("All"). Page state, never stored and ignored by `==`, so choosing a group republishes nothing.
     var editGroupKey: String?
@@ -63,12 +66,12 @@ struct StereoEQConfiguration: Equatable, Codable, Sendable {
             && l.bypassed == r.bypassed && l.linkedBands == r.linkedBands && l.leftBands == r.leftBands
             && l.rightBands == r.rightBands && l.midBands == r.midBands && l.sideBands == r.sideBands
             && l.independentSeeded == r.independentSeeded && l.midSideSeeded == r.midSideSeeded
-            && l.groupBandLists == r.groupBandLists
+            && l.groupBandLists == r.groupBandLists && l.linearPhaseLength == r.linearPhaseLength
     }
 
     private enum CodingKeys: String, CodingKey {
         case channelMode, editChannel, phaseMode, bypassed, linkedBands, leftBands, rightBands, midBands, sideBands
-        case independentSeeded, midSideSeeded, groupBandLists
+        case independentSeeded, midSideSeeded, groupBandLists, linearPhaseLength
     }
 
     init(from decoder: Decoder) throws {
@@ -85,6 +88,7 @@ struct StereoEQConfiguration: Equatable, Codable, Sendable {
         independentSeeded = try c.decode(Bool.self, forKey: .independentSeeded)
         midSideSeeded = try c.decode(Bool.self, forKey: .midSideSeeded)
         groupBandLists = try c.decodeIfPresent([String: [EQBand]].self, forKey: .groupBandLists) ?? [:]
+        linearPhaseLength = try c.decodeIfPresent(EQLinearPhaseLength.self, forKey: .linearPhaseLength) ?? .default
     }
 
     func encode(to encoder: Encoder) throws {
@@ -101,6 +105,7 @@ struct StereoEQConfiguration: Equatable, Codable, Sendable {
         try c.encode(independentSeeded, forKey: .independentSeeded)
         try c.encode(midSideSeeded, forKey: .midSideSeeded)
         if !groupBandLists.isEmpty { try c.encode(groupBandLists, forKey: .groupBandLists) }
+        if linearPhaseLength != .default { try c.encode(linearPhaseLength, forKey: .linearPhaseLength) }
     }
 
     init(
@@ -686,7 +691,7 @@ struct StereoEQConfiguration: Equatable, Codable, Sendable {
         return graph
     }
 
-    func linearPhaseBands(for channel: EQEditChannel, sampleRate: Double) throws -> [N60LinearPhaseEQBand] {
+    func linearPhaseBands(for channel: EQEditChannel, sampleRate: Double) throws -> [EQLinearPhaseBand] {
         let source: [EQBand]
         switch channelMode {
         case .linked:
@@ -700,20 +705,14 @@ struct StereoEQConfiguration: Equatable, Codable, Sendable {
         guard !bands.contains(where: { $0.type == .allPass }) else {
             throw EQConfigurationError.allPassRequiresMinimumPhase
         }
-        var result: [N60LinearPhaseEQBand] = []
+        var result: [EQLinearPhaseBand] = []
         result.reserveCapacity(bands.count * 2)
         for (index, band) in bands.enumerated() {
             do {
                 for section in try band.compiledSections(sampleRate: sampleRate) {
-                    var cBand = N60LinearPhaseEQBand()
-                    cBand.enabled = true
-                    cBand.type = section.type
-                    cBand.frequencyHz = section.frequencyHz
-                    cBand.gainDB = section.gainDB
-                    cBand.q = section.q
-                    cBand.usesPreparedCoefficients = true
-                    cBand.preparedCoefficients = section.coefficients
-                    result.append(cBand)
+                    result.append(EQLinearPhaseBand(
+                        type: section.type, frequencyHz: section.frequencyHz, gainDB: section.gainDB, q: section.q,
+                        preparedCoefficients: section.coefficients))
                 }
             } catch {
                 throw EQConfigurationError.invalidBand(index: index)

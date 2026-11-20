@@ -6,7 +6,7 @@
 #include <stdlib.h>
 
 #include "../NotchSixty/Audio/Realtime/N60Biquad.h"
-#include "../NotchSixty/Audio/Realtime/N60LinearPhaseEQ.h"
+#include "../NotchSixty/Audio/Realtime/N60Biquad.h"
 
 static void require_condition(bool condition, const char *message) {
     if (!condition) {
@@ -127,33 +127,7 @@ static void validate_at_rate(double sampleRate) {
     );
 }
 
-static void validate_linear_phase(double sampleRate) {
-    uint32_t capacity = N60LinearPhaseEQRecommendedTapCount(sampleRate);
-    require_condition(capacity > 0, "invalid linear-phase tap recommendation");
-    float *taps = calloc(capacity, sizeof(float));
-    require_condition(taps != NULL, "unable to allocate FIR validation buffer");
-
-    N60LinearPhaseEQBand band = {
-        .enabled = true,
-        .type = N60BiquadFilterTypePeakingConstantQ,
-        .frequencyHz = 1000.0,
-        .gainDB = 6.0,
-        .q = 2.0,
-    };
-    N60LinearPhaseEQDesignInfo info = {0};
-    require_condition(
-        N60LinearPhaseEQDesign(sampleRate, &band, 1, taps, capacity, &info),
-        "linear-phase designer rejected constant-Q peaking"
-    );
-
-    double energy = 0.0;
-    for (uint32_t index = 0; index < info.tapCount; ++index) {
-        require_condition(isfinite(taps[index]), "non-finite linear-phase tap");
-        energy += (double)taps[index] * (double)taps[index];
-    }
-    require_condition(isfinite(energy) && energy > 1.0e-12, "constant-Q linear-phase FIR is empty");
-    free(taps);
-}
+/* The linear-phase design moved to the core (E33 S27); core/tests/test_eq_linear_phase.cpp covers it at the eight rates. */
 
 int main(void) {
     const double sampleRates[] = {
@@ -170,8 +144,6 @@ int main(void) {
     for (size_t index = 0; index < sizeof(sampleRates) / sizeof(sampleRates[0]); ++index) {
         validate_at_rate(sampleRates[index]);
     }
-    validate_linear_phase(48000.0);
-    validate_linear_phase(384000.0);
 
     puts("PR34 Constant-Q validation passed.");
     return 0;

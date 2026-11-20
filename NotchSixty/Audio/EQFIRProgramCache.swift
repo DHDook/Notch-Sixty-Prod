@@ -44,7 +44,7 @@ struct EQFIRDesign {
     var left: [Float]
     var right: [Float]?
     var declaredLatencyFrames: UInt32
-    var designInfo: N60LinearPhaseEQDesignInfo?
+    var designInfo: EQLinearPhaseDesignInfo?
 }
 
 struct EQFIRProgramCache {

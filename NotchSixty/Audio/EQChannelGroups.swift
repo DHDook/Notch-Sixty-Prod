@@ -151,7 +151,9 @@ extension StereoEQConfiguration {
             configuration.channelMode = .linked
             configuration.phaseMode = .linearPhase
             configuration.linkedBands = bands
-            let design = try EQFIRDesigner.design(configuration, sampleRate: sampleRate)
+            // Every lane uses the session's length, so lanes stay aligned.
+            configuration.linearPhaseLength = linearPhaseLength
+            let design = try EQGroupFIRCache.shared.design(configuration, sampleRate: sampleRate)
             designs.append((bands, design.left, design.declaredLatencyFrames))
             entries[index].taps = design.left
             entries[index].declaredLatencyFrames = design.declaredLatencyFrames
