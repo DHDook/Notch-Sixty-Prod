@@ -6,7 +6,7 @@ struct ProductionDynamicsView: View {
     var reference: ProductionReferenceNavigator? = nil
     /// E33 S15: read for the "Start from" unsaved-edits check; nil hides nothing, it only skips the ask.
     var profiles: ProductProfileController? = nil
-    @State private var selectedModule: ProductionDynamicsModule = .compressor
+    @State private var selectedModule: ProductionDynamicsModule
     @State private var grAttachment: UUID?
     @State private var expandedMoreGroups: Set<String> = []
     @State private var mainsDetectInFlight = false
@@ -18,6 +18,16 @@ struct ProductionDynamicsView: View {
     private let enhanced = FeatureFlags().isEnabled(.eqPageEnhancements)
     /// E33 S4: switches to the Equalizer page; the band is passed through `EQBandFocusRequest`.
     var openEqualizer: (() -> Void)? = nil
+
+    /// `initialModule` is the processor the page opens on (the compressor by default); the page harness opens the others.
+    init(engine: AudioIOEngine, reference: ProductionReferenceNavigator? = nil, profiles: ProductProfileController? = nil,
+         openEqualizer: (() -> Void)? = nil, initialModule: ProductionDynamicsModule = .compressor) {
+        self.engine = engine
+        self.reference = reference
+        self.profiles = profiles
+        self.openEqualizer = openEqualizer
+        _selectedModule = State(initialValue: initialModule)
+    }
 
     private func perform(_ action: () throws -> Void) {
         do {
