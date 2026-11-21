@@ -91,6 +91,8 @@ named for the app: the source rate is known, surround programme can reach a ster
 crash gives silence instead of unprocessed audio. Sound quality with matching rates is the same
 on both paths; the driver adds convenience and the cases below, not fidelity.
 
+The process tap shows macOS's purple system-audio-capture indicator (even over full-screen video), which apps cannot hide. Reading from a virtual output device should avoid it; this is untested. Verify on the bench when V2-1 starts (V2-1 bench item below).
+
 Owner decisions of 16 Nov 2026: write our own driver (no BlackHole or other GPL code, and not as a
 coding reference); it lives in its own repository and is downloaded from there; Settings has a
 sheet to enable and install it and a clean switch between tap and driver; features that need the
@@ -121,7 +123,7 @@ driver say so in the app. The App Store listing is wanted but is not a hard requ
   - Silence, not unprocessed audio, when the app stops. Builds on the E9 S9 finding
   - Players that take exclusive control can target the virtual device (E23 S8 finding)
   - Lip sync: the device reports the app's total added delay to macOS as its latency and keeps it current, so video players stay in sync by themselves (owner, 17 Nov 2026; end-state review). v1 shows the delay in the E31 signal-path view
-- [ ] Tests: driver unit tests for the ring and clock; app tests with a fake device for both backends, the switch, a missing driver and an unknown driver version, at the eight rates. Bench: install, update and removal; rate changes; sleep and wake; DAC unplug; force-quit; a macOS update; the tap path unchanged with the driver installed but off
+- [ ] Tests: driver unit tests for the ring and clock; app tests with a fake device for both backends, the switch, a missing driver and an unknown driver version, at the eight rates. Bench: whether the purple capture indicator is absent when the app reads from the virtual device (and still shown on the tap path); install, update and removal; rate changes; sleep and wake; DAC unplug; force-quit; a macOS update; the tap path unchanged with the driver installed but off
 
 ### V2-2 Input and preamp mode
 

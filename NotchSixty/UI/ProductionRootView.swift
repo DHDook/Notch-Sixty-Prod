@@ -366,7 +366,7 @@ struct ProductionRootView: View {
         } detail: {
             detail(for: selection ?? .dashboard)
                 .safeAreaInset(edge: .top, spacing: 0) { failsafeBanner }
-                .navigationTitle((selection ?? .dashboard).title)
+                .navigationTitle((selection ?? .dashboard).sidebarTitle(designLanguage: FeatureFlags().isEnabled(.designLanguage)))
                 .navigationSubtitle(outputSubtitle)
                 .toolbar { toolbar }
         }
@@ -678,7 +678,7 @@ struct ProductionRootView: View {
             ProductionReferenceHelpButton(
                 navigator: product.reference,
                 articleID: ProductionUserGuideCatalog.articleID(for: selection ?? .dashboard),
-                label: "Open \((selection ?? .dashboard).title) in the User Guide"
+                label: "Open \((selection ?? .dashboard).sidebarTitle(designLanguage: FeatureFlags().isEnabled(.designLanguage))) in the User Guide"
             )
 
             SettingsLink {
@@ -707,7 +707,7 @@ private struct ProductionProcessingStatusReadout: View {
     var body: some View {
         Label(status.title, systemImage: status.systemImage)
             .labelStyle(.titleAndIcon)
-            .font(.subheadline.weight(.semibold))
+            .font(DesignType.label.font.weight(.semibold))
             .foregroundStyle(color)
             .fixedSize()
             .padding(.horizontal, 4)
@@ -891,7 +891,7 @@ private struct ProductionDashboardView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 24) {
+            VStack(alignment: .leading, spacing: DesignSpacing.xl.pt) {
                 // Processing state lives in the toolbar's status readout and
                 // its Bypass and Start/Stop buttons, so the dashboard spends
                 // no line on it.
@@ -908,10 +908,10 @@ private struct ProductionDashboardView: View {
 
                 // Output and volume share one row; equal heights keep the
                 // two glass panels aligned.
-                HStack(alignment: .top, spacing: 16) {
+                HStack(alignment: .top, spacing: DesignSpacing.l.pt) {
                     audioControls
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                        .glassEffect(.regular, in: .rect(cornerRadius: 18))
+                        .designSurface(.large)
                     masterControls
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
@@ -919,7 +919,7 @@ private struct ProductionDashboardView: View {
 
                 levelControls
 
-                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 16) {
+                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: DesignSpacing.l.pt) {
                     summaryCard(
                         title: "Playback Path",
                         text: playbackPathSummary,
@@ -952,7 +952,7 @@ private struct ProductionDashboardView: View {
                     )
                 }
             }
-            .padding(28)
+            .padding(DesignSpacing.xl.pt)
             .frame(maxWidth: 1180, alignment: .topLeading)
         }
     }
@@ -1084,15 +1084,15 @@ private struct ProductionDashboardView: View {
     }
 
     private var audioControls: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: DesignSpacing.s.pt) {
             HStack {
-                Text("Output Device").font(.subheadline.bold())
+                Text("Output Device").font(DesignType.sectionTitle.font)
                 Spacer()
                 Text(engine.lifecycleState.rawValue.capitalized)
-                    .font(.caption.bold())
+                    .font(DesignType.caption.font.weight(.semibold))
                     .foregroundStyle(.secondary)
             }
-            HStack(spacing: 10) {
+            HStack(spacing: DesignSpacing.m.pt) {
                 Picker("Output Device", selection: Binding(
                     get: { engine.routeConfiguration.selectedOutputUID },
                     set: { uid in perform { try engine.selectOutput(uid: uid) } }
@@ -1122,12 +1122,12 @@ private struct ProductionDashboardView: View {
                     .textSelection(.enabled)
             }
         }
-        .padding(14)
+        .padding(DesignSpacing.m.pt)
     }
 
     private var masterControls: some View {
-        GlassEffectContainer(spacing: 12) {
-            HStack(spacing: 16) {
+        GlassEffectContainer(spacing: DesignSpacing.m.pt) {
+            HStack(spacing: DesignSpacing.l.pt) {
                 Button {
                     perform { try engine.setMasterMuted(!engine.masterVolumeConfiguration.muted) }
                 } label: {
@@ -1136,9 +1136,9 @@ private struct ProductionDashboardView: View {
                 }
                 .buttonStyle(.glass)
 
-                VStack(alignment: .leading, spacing: 5) {
+                VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
                     HStack {
-                        Text("Master Volume").font(.subheadline.bold())
+                        Text("Master Volume").font(DesignType.sectionTitle.font)
                         Spacer()
                         Text(masterVolumeReadout)
                             .monospacedDigit().foregroundStyle(.secondary)
@@ -1151,9 +1151,9 @@ private struct ProductionDashboardView: View {
                 }
 
             }
-            .padding(14)
+            .padding(DesignSpacing.m.pt)
             .frame(maxHeight: .infinity)
-            .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 18))
+            .glassEffect(.regular.interactive(), in: .rect(cornerRadius: DesignRadius.large.pt))
         }
     }
 
@@ -1161,21 +1161,21 @@ private struct ProductionDashboardView: View {
     /// L/R balance in its own. Gain steps in 0.5 dB or takes a typed value;
     /// balance is a centre-detent bar. Double-clicking balance recentres it.
     private var levelControls: some View {
-        HStack(alignment: .top, spacing: 16) {
+        HStack(alignment: .top, spacing: DesignSpacing.l.pt) {
             gainControls
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                .glassEffect(.regular, in: .rect(cornerRadius: 18))
+                .designSurface(.large)
             balanceControls
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                .glassEffect(.regular, in: .rect(cornerRadius: 18))
+                .designSurface(.large)
         }
         .fixedSize(horizontal: false, vertical: true)
     }
 
     private var gainControls: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Gain").font(.subheadline.bold())
-            HStack(spacing: 20) {
+        VStack(alignment: .leading, spacing: DesignSpacing.m.pt) {
+            Text("Gain").font(DesignType.sectionTitle.font)
+            HStack(spacing: DesignSpacing.xl.pt) {
                 ProductionGainStepper(
                     title: "Input",
                     value: engine.gainConfiguration.inputPreampDB,
@@ -1192,29 +1192,29 @@ private struct ProductionDashboardView: View {
                 .help("Gain after all processing, before the output device.")
             }
         }
-        .padding(14)
+        .padding(DesignSpacing.m.pt)
     }
 
     private var balanceControls: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: DesignSpacing.m.pt) {
             HStack {
-                Text("Balance").font(.subheadline.bold())
+                Text("Balance").font(DesignType.sectionTitle.font)
                 Spacer()
                 Text(Self.balanceReadout(engine.playbackControlConfiguration.balance))
                     .monospacedDigit().foregroundStyle(.secondary)
             }
             HStack(spacing: 10) {
-                Text("L").font(.caption.bold()).foregroundStyle(.secondary)
+                Text("L").font(DesignType.caption.font.weight(.semibold)).foregroundStyle(.secondary)
                 ProductionBalanceBar(
                     balance: Binding(
                         get: { engine.playbackControlConfiguration.balance },
                         set: { value in perform { try engine.setChannelBalance(value) } }
                     )
                 )
-                Text("R").font(.caption.bold()).foregroundStyle(.secondary)
+                Text("R").font(DesignType.caption.font.weight(.semibold)).foregroundStyle(.secondary)
             }
         }
-        .padding(14)
+        .padding(DesignSpacing.m.pt)
         .help("Left/right balance. Centre is unity on both channels. Double-click to recentre.")
     }
 
@@ -1235,14 +1235,14 @@ private struct ProductionDashboardView: View {
         text: String,
         systemImage: String
     ) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Label(title, systemImage: systemImage).font(.headline)
-            Text(text).font(.subheadline).foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: DesignSpacing.m.pt) {
+            Label(title, systemImage: systemImage).font(DesignType.sectionTitle.font)
+            Text(text).font(DesignType.body.font).foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, minHeight: 40, alignment: .topLeading)
         }
-        .padding(18)
+        .padding(DesignSpacing.l.pt)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .glassEffect(.regular, in: .rect(cornerRadius: 18))
+        .designSurface(.large)
     }
 }
 
@@ -1261,7 +1261,7 @@ private struct StereoSignatureVUMeterPanel: View {
             .frame(minHeight: 250)
             .overlay(alignment: .bottomLeading) {
                 Text("OUTPUT  ·  0 VU = −18 dBFS")
-                    .font(.caption2.weight(.semibold).monospacedDigit())
+                    .font(DesignType.caption.font.weight(.semibold).monospacedDigit())
                     .tracking(1.2)
                     .foregroundStyle(palette.branding.opacity(0.75))
                     .padding(.leading, 28)
@@ -1269,9 +1269,9 @@ private struct StereoSignatureVUMeterPanel: View {
                     .accessibilityLabel("Output meters, 0 VU equals −18 dBFS")
             }
             .overlay(alignment: .bottomTrailing) {
-                HStack(spacing: 8) {
+                HStack(spacing: DesignSpacing.s.pt) {
                     Text("METERS")
-                        .font(.caption2.weight(.semibold))
+                        .font(DesignType.caption.font.weight(.semibold))
                         .tracking(1.2)
                         .foregroundStyle(palette.branding.opacity(0.75))
                     Toggle("VU Meters", isOn: $vuMetersEnabled)
@@ -2091,7 +2091,7 @@ struct MasterVolumeFaderScale: View {
             ForEach(marks, id: \.label) { mark in
                 VStack(spacing: 1) {
                     Rectangle().frame(width: 1, height: 4)
-                    Text(mark.label).font(.caption2).monospacedDigit()
+                    Text(mark.label).font(DesignType.caption.font).monospacedDigit()
                 }
                 .foregroundStyle(.secondary)
                 .fixedSize()
