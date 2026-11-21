@@ -38,30 +38,25 @@ enum DesignSurface {
 }
 
 extension View {
-    /// A content card background: plain fill, no glass (`docs/DESIGN_LANGUAGE.md` rule 1), shared radius.
+    /// A content card background: plain fill, no glass (`docs/DESIGN_LANGUAGE.md` rule 1), shared radius. Honours
+    /// Reduce Transparency and Increase Contrast (E34 S6).
     func designSurface(_ radius: DesignRadius = .medium) -> some View {
-        background(
-            .quaternary.opacity(DesignSurface.opacity(DesignStyle.active)),
-            in: RoundedRectangle(cornerRadius: radius.pt, style: .continuous))
+        modifier(DesignSurfaceModifier(radius: radius, style: DesignStyle.active))
     }
 
     /// A tinted status chip or note background, with the shared small radius.
     func designTint(_ color: Color, opacity: Double = 0.14, radius: DesignRadius = .small) -> some View {
-        background(color.opacity(opacity), in: RoundedRectangle(cornerRadius: radius.pt, style: .continuous))
+        modifier(DesignTintModifier(color: color, opacity: opacity, radius: radius, style: DesignStyle.active))
     }
 
     /// A panel (large card with a hairline border), for the module and headphone panels.
     func designPanel() -> some View {
-        background(.quaternary.opacity(DesignSurface.opacity(DesignStyle.active)),
-                   in: RoundedRectangle(cornerRadius: DesignRadius.large.pt, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: DesignRadius.large.pt, style: .continuous)
-                    .stroke(.quaternary, lineWidth: 0.5)
-            }
+        modifier(DesignSurfaceModifier(radius: .large, style: DesignStyle.active, bordered: true))
     }
 
-    /// Floating-control glass in a shared radius (navigation lists and controls only, never content).
+    /// Floating-control glass in a shared radius (navigation lists and controls only, never content). Solid under
+    /// Reduce Transparency.
     func designGlass(_ radius: DesignRadius = .medium) -> some View {
-        glassEffect(.regular, in: .rect(cornerRadius: radius.pt))
+        modifier(DesignGlassModifier(radius: radius, style: DesignStyle.active))
     }
 }

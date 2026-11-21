@@ -757,6 +757,7 @@ struct ProductionActiveAcousticsWorkspace: View {
                     in: 0...1,
                     step: 0.05
                 )
+                .designSlider("Ambient strength", value: ambient.configuration.strength, unit: .percent)
                 Text(
                     "\(Int((ambient.configuration.strength * 100).rounded()))%"
                 )
@@ -803,6 +804,7 @@ struct ProductionActiveAcousticsWorkspace: View {
                     in: 0...6,
                     step: 0.5
                 )
+                .designSlider("Maximum lift", value: ambient.configuration.maximumLevelCompensationDB, unit: .db)
                 Text(
                     "\(ambient.configuration.maximumLevelCompensationDB, specifier: "%.1f") dB"
                 )
@@ -1545,6 +1547,7 @@ struct ProductionActiveAcousticsWorkspace: View {
                         in: 25...150,
                         step: 1
                     )
+                    .designSlider("Survey frequency", value: quietZone.requestedSpatialSurveyFrequencyHz, unit: .hz)
                     .frame(maxWidth: 250)
                     .disabled(quietZone.spatialSurveyActive)
 

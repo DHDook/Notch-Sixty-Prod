@@ -204,6 +204,7 @@ struct ProductionHeadphoneWorkspace: View {
                     Text("Correction Headroom").font(DesignType.caption.font.bold()).foregroundStyle(.secondary)
                     HStack {
                         Slider(value: $draft.headroomAttenuationDB, in: 0...30, step: 0.5)
+                        .designSlider("Correction headroom", value: draft.headroomAttenuationDB, unit: .db)
                         Text("\(draft.headroomAttenuationDB, specifier: "%.1f") dB")
                             .monospacedDigit()
                             .frame(width: 68, alignment: .trailing)
@@ -746,6 +747,7 @@ struct ProductionHeadphoneWorkspace: View {
                     in: log10(20.0)...log10(upper),
                     step: 0.01
                 )
+                .designSlider("Frequency", value: band.wrappedValue.frequencyHz, unit: .hz)
                 Text(
                     String(format: "%.0f", band.wrappedValue.frequencyHz)
                 )
@@ -754,12 +756,14 @@ struct ProductionHeadphoneWorkspace: View {
             HStack {
                 Text("dB").frame(width: 37, alignment: .leading)
                 Slider(value: band.gainDB, in: -18...18, step: 0.25)
+                .designSlider("Gain", value: band.wrappedValue.gainDB, unit: .db)
                 Text(String(format: "%+.2f", band.wrappedValue.gainDB))
                     .frame(width: 57, alignment: .trailing)
             }
             HStack {
                 Text("Q").frame(width: 37, alignment: .leading)
                 Slider(value: band.q, in: 0.2...12, step: 0.05)
+                .designSlider("Q", value: band.wrappedValue.q, unit: .number)
                 Text(String(format: "%.2f", band.wrappedValue.q))
                     .frame(width: 52, alignment: .trailing)
             }
@@ -820,6 +824,7 @@ struct ProductionHeadphoneWorkspace: View {
 
             HStack {
                 Slider(value: $draft.crossfeed.amount, in: 0...1, step: 0.05)
+                .designSlider("Crossfeed amount", value: draft.crossfeed.amount, unit: .percent)
                     .disabled(draft.crossfeed.preset == .off || draft.spatialMode == .virtualSpeakers)
                 Text("\(draft.crossfeed.amount * 100, specifier: "%.0f")%")
                     .monospacedDigit()
@@ -1024,12 +1029,14 @@ struct ProductionHeadphoneWorkspace: View {
             HStack {
                 Text("Trim")
                 Slider(value: correction.gainDB, in: -12...6, step: 0.25)
+                .designSlider("Trim", value: correction.wrappedValue.gainDB, unit: .db)
                 Text("\(correction.wrappedValue.gainDB, specifier: "%.2f") dB")
                     .monospacedDigit().frame(width: 76, alignment: .trailing)
             }
             HStack {
                 Text("Delay")
                 Slider(value: correction.delayMilliseconds, in: 0...20, step: 0.01)
+                .designSlider("Delay", value: correction.wrappedValue.delayMilliseconds, unit: .ms)
                 Text("\(correction.wrappedValue.delayMilliseconds, specifier: "%.2f") ms")
                     .monospacedDigit().frame(width: 76, alignment: .trailing)
             }

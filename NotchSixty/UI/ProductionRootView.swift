@@ -1837,6 +1837,7 @@ private struct ProductionSpeakersView: View {
                         get: { engine.bassManagementConfiguration.frequencyHz },
                         set: { value in updateCrossover { $0.frequencyHz = value } }
                     ), in: lowerFrequencyRange, step: 1)
+                    .designSlider("Crossover frequency", value: engine.bassManagementConfiguration.frequencyHz, unit: .hz)
                     .frame(width: 330)
                     Text("\(engine.bassManagementConfiguration.frequencyHz, specifier: "%.0f") Hz")
                         .monospacedDigit()
@@ -1867,6 +1868,7 @@ private struct ProductionSpeakersView: View {
                             get: { engine.bassManagementConfiguration.subGainDB },
                             set: { value in updateCrossover { $0.subGainDB = value } }
                         ), in: BassManagementConfiguration.subGainRange, step: 0.5)
+                        .designSlider("Subwoofer gain", value: engine.bassManagementConfiguration.subGainDB, unit: .db)
                         .frame(width: 260)
                         Text("\(engine.bassManagementConfiguration.subGainDB, specifier: "%.1f") dB")
                             .monospacedDigit()
@@ -1919,6 +1921,7 @@ private struct ProductionSpeakersView: View {
                         get: { engine.bassManagementConfiguration.subPhaseAlignmentFrequencyHz },
                         set: { value in updateCrossover { $0.subPhaseAlignmentFrequencyHz = value } }
                     ), in: BassManagementConfiguration.frequencyRange, step: 1)
+                    .designSlider("Alignment frequency", value: engine.bassManagementConfiguration.subPhaseAlignmentFrequencyHz, unit: .hz)
                     .frame(width: 260)
                     Text("\(engine.bassManagementConfiguration.subPhaseAlignmentFrequencyHz, specifier: "%.0f") Hz")
                         .monospacedDigit()
@@ -1933,6 +1936,7 @@ private struct ProductionSpeakersView: View {
                         get: { engine.bassManagementConfiguration.subPhaseAlignmentQ },
                         set: { value in updateCrossover { $0.subPhaseAlignmentQ = value } }
                     ), in: BassManagementConfiguration.subPhaseAlignmentQRange, step: 0.05)
+                    .designSlider("Alignment Q", value: engine.bassManagementConfiguration.subPhaseAlignmentQ, unit: .number)
                     .frame(width: 260)
                     Text("\(engine.bassManagementConfiguration.subPhaseAlignmentQ, specifier: "%.2f")")
                         .monospacedDigit()
