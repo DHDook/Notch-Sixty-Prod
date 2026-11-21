@@ -2,7 +2,20 @@ import Foundation
 import XCTest
 @testable import NotchSixty
 
+@MainActor
 final class EQValueParserTests: XCTestCase {
+
+    // E33 S11d: these cases pin today's (flag off) rules: 20 Hz floor, three-band multiband, no detector change. The
+    // graduated default is covered by `E33GraduationTests` and the E33 end-to-end classes.
+    private let e33Flags = FeatureFlags()
+    override func setUp() {
+        super.setUp()
+        e33Flags.setEnabled(false, for: .eqPageEnhancements)
+    }
+    override func tearDown() {
+        e33Flags.resetOverrides()
+        super.tearDown()
+    }
     private let us = Locale(identifier: "en_US")
     private let de = Locale(identifier: "de_DE")
 

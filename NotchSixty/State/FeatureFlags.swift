@@ -263,11 +263,14 @@ extension FeatureFlag {
         epic: "E21"
     )
     /// E33 S1: Equalizer page layout (band list and two-column editor), range hint and moved-to-fit note, and the
-    /// sectioned filter picker; later slices add the Dynamics and Meters changes. Off: today's pages and parameters.
+    /// sectioned filter picker; later slices add the Dynamics and Meters changes. Graduated in E33 S11d (21 Nov 2026):
+    /// available by default, never armed (live ANC and MIMO keep their arm). `-NotchSixtyFeatures -e33.page-enhancements`
+    /// restores today's pages and parameters. No new code may depend on it; removed in the flag-cleanup phase.
     static let eqPageEnhancements = FeatureFlag(
         id: "e33.page-enhancements",
         title: "Equalizer, Dynamics and Meters enhancements",
-        epic: "E33"
+        epic: "E33",
+        graduated: true
     )
     /// E32 S5: three sound changes in the graph's dynamics (the limiter's attack never exceeds its look-ahead, the expander's
     /// Attack opens and Release closes, the true-peak factor follows the device rate). Swift decides and publishes them in the

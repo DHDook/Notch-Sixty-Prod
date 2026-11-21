@@ -95,8 +95,8 @@ final class EQEditorLayoutTests: XCTestCase {
         }
     }
 
-    func testFlagIsRegisteredAndOffByDefault() {
+    func testFlagIsRegisteredAndGraduated() {
         XCTAssertTrue(FeatureFlag.all.contains(.eqPageEnhancements))
-        XCTAssertFalse(FeatureFlag.eqPageEnhancements.resolvedDefault)
+        XCTAssertTrue(FeatureFlag.eqPageEnhancements.resolvedDefault, "graduated in E33 S11d")
     }
 }

@@ -10,6 +10,15 @@ import XCTest
 /// S22 to S25 (a plug-in through the rack planner, live edit, rack bypass and the front pair of a 5.1 session).
 @MainActor
 final class E33ShipEndToEndPart5Tests: XCTestCase {
+    /// E33 S11d: the page enhancements are graduated, so the nightly flags-off matrix (which forces every graduated
+    /// flag off, and off wins over a test override) cannot run these flag-on cases; the flags-off path is covered by
+    /// the rest of the suite under the matrix and by the flag-off cases here in the normal run.
+    override func setUpWithError() throws {
+        try super.setUpWithError()
+        try XCTSkipIf(ProcessInfo.processInfo.environment[FeatureFlags.graduatedOffEnvironmentKey] == "1",
+                      "the flags-off matrix forces e33.page-enhancements off")
+    }
+
     private let rates: [Double] = [44_100, 48_000, 88_200, 96_000, 176_400, 192_000, 352_800, 384_000]
     private let flags = FeatureFlags()
     private let fiveOneRoles = OutputProgramLayout.fiveOne.roles

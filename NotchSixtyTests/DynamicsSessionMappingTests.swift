@@ -5,6 +5,18 @@ import XCTest
 /// `DynamicsSessionMapping` table says, and the page's "Acts on" text follows the same table. Real specs, eight rates.
 @MainActor
 final class DynamicsSessionMappingTests: XCTestCase {
+
+    // E33 S11d: these cases pin today's (flag off) rules: 20 Hz floor, three-band multiband, no detector change. The
+    // graduated default is covered by `E33GraduationTests` and the E33 end-to-end classes.
+    private let e33Flags = FeatureFlags()
+    override func setUp() {
+        super.setUp()
+        e33Flags.setEnabled(false, for: .eqPageEnhancements)
+    }
+    override func tearDown() {
+        e33Flags.resetOverrides()
+        super.tearDown()
+    }
     private func everythingOn() -> DynamicsConfiguration {
         var d = DynamicsConfiguration()
         d.stereoMode = .trueMono

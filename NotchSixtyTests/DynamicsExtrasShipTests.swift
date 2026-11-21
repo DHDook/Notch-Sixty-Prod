@@ -6,6 +6,18 @@ import XCTest
 /// (`DynamicsGraphExtras`) to the parameter blocks the production translator publishes to the core, at the eight rates.
 @MainActor
 final class DynamicsExtrasShipTests: XCTestCase {
+
+    // E33 S11d: these cases pin today's (flag off) rules: 20 Hz floor, three-band multiband, no detector change. The
+    // graduated default is covered by `E33GraduationTests` and the E33 end-to-end classes.
+    private let e33Flags = FeatureFlags()
+    override func setUp() {
+        super.setUp()
+        e33Flags.setEnabled(false, for: .eqPageEnhancements)
+    }
+    override func tearDown() {
+        e33Flags.resetOverrides()
+        super.tearDown()
+    }
     private let rates: [Double] = [44_100, 48_000, 88_200, 96_000, 176_400, 192_000, 352_800, 384_000]
 
     // MARK: Flag
