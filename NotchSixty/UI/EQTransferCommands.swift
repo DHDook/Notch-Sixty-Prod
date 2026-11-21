@@ -55,15 +55,13 @@ struct EQTransferCommands {
         var mode = EQBandTransfer.ImportMode.replace
         let existing = current().editableBands.count
         if existing > 0 {
-            let alert = NSAlert()
-            alert.messageText = "Import \(parsed.bands.count) filters into \(listName)?"
-            alert.informativeText = "The \(listName) list has \(existing) bands. Replace them, or add the new filters after them."
-            alert.addButton(withTitle: "Replace")
-            alert.addButton(withTitle: "Add")
-            alert.addButton(withTitle: "Cancel")
-            switch alert.runModal() {
-            case .alertFirstButtonReturn: mode = .replace
-            case .alertSecondButtonReturn: mode = .append
+            let choice = DesignDialogs.confirm(
+                title: "Import \(parsed.bands.count) filters into \(listName)?",
+                message: "The \(listName) list has \(existing) bands. Replace them, or add the new filters after them.",
+                buttons: ["Replace", "Add", "Cancel"], warning: false)
+            switch choice {
+            case 0: mode = .replace
+            case 1: mode = .append
             default: return
             }
         }
@@ -152,23 +150,19 @@ struct EQTransferCommands {
         let source = lane
         let replaced = current().bands(in: target).count
         if replaced > 0 {
-            let alert = NSAlert()
-            alert.messageText = "Replace the \(target.displayName) lane?"
-            alert.informativeText = "The \(target.displayName) lane has \(replaced) bands. They are replaced by a copy of the \(source.displayName) lane. You can undo this."
-            alert.addButton(withTitle: "Replace")
-            alert.addButton(withTitle: "Cancel")
-            guard alert.runModal() == .alertFirstButtonReturn else { return }
+            guard DesignDialogs.confirm(
+                title: "Replace the \(target.displayName) lane?",
+                message: "The \(target.displayName) lane has \(replaced) bands. They are replaced by a copy of the \(source.displayName) lane. You can undo this.",
+                buttons: ["Replace", "Cancel"]) != nil else { return }
         }
         apply(EQBandTransfer.copyLane(source, to: target, in: current()))
     }
 
     private func showNotes(title: String, notes: [String]) {
-        let alert = NSAlert()
-        alert.messageText = title
-        alert.informativeText = notes.prefix(12).map { "• \($0)" }.joined(separator: "\n")
-            + (notes.count > 12 ? "\n… and \(notes.count - 12) more." : "")
-        alert.addButton(withTitle: "OK")
-        alert.runModal()
+        // A note, not a failure: shown inline on the page (rule: errors and notes are never alerts).
+        reportError(
+            title + "\n" + notes.prefix(12).map { "• \($0)" }.joined(separator: "\n")
+                + (notes.count > 12 ? "\n… and \(notes.count - 12) more." : ""))
     }
 }
 

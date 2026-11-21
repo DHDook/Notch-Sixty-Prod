@@ -433,11 +433,7 @@ private struct AudioUnitEditorSheet: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
 
         case .failed(let reason):
-            ContentUnavailableView(
-                "Unable to Open Plug-in Editor",
-                systemImage: "exclamationmark.triangle",
-                description: Text(reason)
-            )
+            DesignStateView(kind: .failed, title: "Unable to Open Plug-in Editor", detail: reason)
 
         case .ready:
             if let controller = session.customViewController {
@@ -445,13 +441,10 @@ private struct AudioUnitEditorSheet: View {
                     viewController: controller
                 )
             } else if session.parameters.isEmpty {
-                ContentUnavailableView(
-                    "No Editor Surface",
-                    systemImage: "slider.horizontal.3",
-                    description: Text(
-                        "This Audio Unit exposes neither a custom view nor host-visible parameters."
-                    )
-                )
+                DesignStateView(
+                    kind: .empty, title: "No Editor Surface",
+                    detail: "This Audio Unit exposes neither a custom view nor host-visible parameters.",
+                    systemImage: "slider.horizontal.3")
             } else {
                 genericParameterEditor
             }
@@ -1148,19 +1141,7 @@ struct ProductionPluginWorkspace: View {
                 "Removal uses a bounded click-safe transition. Long wet tails are not mixed additively after removal, keeping downstream headroom and protection deterministic."
             )
         }
-        .alert(
-            "Plug-in Rack Error",
-            isPresented: Binding(
-                get: { commandError != nil },
-                set: {
-                    if !$0 { commandError = nil }
-                }
-            )
-        ) {
-            Button("OK") { commandError = nil }
-        } message: {
-            Text(commandError ?? "")
-        }
+        .designMessage("Plug-in Rack Error", message: $commandError)
     }
 
     private var header: some View {
@@ -1499,13 +1480,10 @@ struct ProductionPluginWorkspace: View {
     @ViewBuilder
     private var catalogCard: some View {
         if host.lastScanDate == nil {
-            ContentUnavailableView(
-                "Audio Unit catalog not scanned",
-                systemImage: "puzzlepiece.extension",
-                description: Text(
-                    "Scan to inspect installed Audio Unit effects."
-                )
-            )
+            DesignStateView(
+                kind: .empty, title: "Audio Unit catalog not scanned",
+                detail: "Scan to inspect installed Audio Unit effects.",
+                systemImage: "puzzlepiece.extension")
             .frame(
                 maxWidth: .infinity,
                 minHeight: 220
@@ -1644,13 +1622,10 @@ struct ProductionPluginWorkspace: View {
             Divider()
 
             if filteredComponents.isEmpty {
-                ContentUnavailableView(
-                    "No Matching Audio Units",
-                    systemImage: "magnifyingglass",
-                    description: Text(
-                        "Adjust the search or compatibility filters."
-                    )
-                )
+                DesignStateView(
+                    kind: .empty, title: "No Matching Audio Units",
+                    detail: "Adjust the search or compatibility filters.",
+                    systemImage: "magnifyingglass")
                 .frame(
                     maxWidth: .infinity,
                     minHeight: 280

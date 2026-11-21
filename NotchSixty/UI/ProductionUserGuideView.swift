@@ -1120,15 +1120,11 @@ struct ProductionHelpView: View {
                     )
                 }
             } else {
-                ContentUnavailableView(
-                    navigator.mode == .userGuide
-                        ? "No Guide Results" : "No DSP Reference Results",
-                    systemImage: navigator.mode == .userGuide
-                        ? "magnifyingglass" : "function",
-                    description: Text(
-                        "Try a feature name, control, measurement term or equation."
-                    )
-                )
+                DesignStateView(
+                    kind: .empty,
+                    title: navigator.mode == .userGuide ? "No Guide Results" : "No DSP Reference Results",
+                    detail: "Try a feature name, control, measurement term or equation.",
+                    systemImage: navigator.mode == .userGuide ? "magnifyingglass" : "function")
             }
         }
         .toolbar {

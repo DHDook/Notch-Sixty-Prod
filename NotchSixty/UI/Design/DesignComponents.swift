@@ -135,13 +135,19 @@ struct DesignStateView: View {
     var title: String
     var detail: String?
     var style: DesignStyle = .active
+    /// Replaces the kind's icon (for example a magnifier for "no results").
+    var systemImage: String?
+    /// One optional action ("Add Band", "Start"), shown as the primary button.
+    var actionTitle: String?
+    var actionIdentifier: String?
+    var action: (() -> Void)?
 
     var body: some View {
         VStack(spacing: DesignSpacing.s.value(style)) {
             if kind == .busy {
                 ProgressView()
             } else {
-                Image(systemName: kind.iconName)
+                Image(systemName: systemImage ?? kind.iconName)
                     .font(.system(size: 28))
                     .foregroundStyle(kind.level.color)
                     .accessibilityHidden(true)
@@ -152,6 +158,11 @@ struct DesignStateView: View {
                     .font(DesignType.body.font(style))
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
+            }
+            if let actionTitle, let action {
+                Button(actionTitle, action: action)
+                    .buttonStyle(.borderedProminent)
+                    .accessibilityIdentifier(actionIdentifier ?? "state.action")
             }
         }
         .frame(maxWidth: .infinity)
