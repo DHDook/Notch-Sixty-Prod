@@ -257,6 +257,11 @@ add_executable(n60core_correct_multisub_test tests/test_correct_multisub.cpp)
 target_link_libraries(n60core_correct_multisub_test PRIVATE n60core)
 add_test(NAME n60core_correct_multisub COMMAND n60core_correct_multisub_test)
 
+# E21 S6: room-correction FIR design maths (n60/correct.h section 7).
+add_executable(n60core_room_design_test tests/test_room_design.cpp)
+target_link_libraries(n60core_room_design_test PRIVATE n60core)
+add_test(NAME n60core_room_design COMMAND n60core_room_design_test)
+
 add_executable(n60core_anc_actuators_test tests/test_anc_actuators.cpp)
 target_link_libraries(n60core_anc_actuators_test PRIVATE n60core)
 add_test(NAME n60core_anc_actuators COMMAND n60core_anc_actuators_test)

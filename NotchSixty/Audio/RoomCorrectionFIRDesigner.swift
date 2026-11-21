@@ -55,7 +55,18 @@ struct RoomCorrectionFIRDesigner: Sendable {
     /// oversampling is relaxed (never below 2x) to keep design interactive.
     static let maximumTransformSize = max(1 << 20, Int(N60_CONVOLUTION_MAX_TAPS) * 2)
 
-    private let previewDesigner = RoomCorrectionCorrectionPreviewDesigner()
+    /// `e21.core-designers` when the designer is made; parity tests set it explicitly. On: the preview, the FIR spectrum
+    /// and the headroom come from the core (`n60/correct.h` section 7); off: the Swift maths below, unchanged.
+    var useCoreMaths = FeatureFlags.isEnabledProcessWide(.coreDesigners)
+
+    /// Read once per process for `deploymentFilter()`, which has no designer instance.
+    fileprivate static let useCoreScaling = FeatureFlags.isEnabledProcessWide(.coreDesigners)
+
+    private var previewDesigner: RoomCorrectionCorrectionPreviewDesigner {
+        var designer = RoomCorrectionCorrectionPreviewDesigner()
+        designer.useCoreMaths = useCoreMaths
+        return designer
+    }
 
     func design(
         aggregate: RoomCorrectionAggregateResponse,
@@ -92,6 +103,11 @@ struct RoomCorrectionFIRDesigner: Sendable {
             usableLowHz: usableLowHz,
             usableHighHz: usableHighHz
         )
+        if useCoreMaths {
+            return try designWithCore(
+                aggregate: aggregate, target: target, parameters: parameters, preview: preview, sampleRate: sampleRate,
+                sourcePositions: sourcePositions, name: proposedName, createdAt: createdAt, id: id)
+        }
         let transformSize = try Self.transformSize(forTapCount: parameters.requestedTapCount)
         let transform = try RoomCorrectionFIRDFT(size: transformSize)
 
@@ -172,6 +188,67 @@ struct RoomCorrectionFIRDesigner: Sendable {
             rightFilterResponse: rightFilterResponse,
             maximumPositiveFilterGainDB: maximumPositive
         )
+    }
+
+    /// The `e21.core-designers` path: same steps, with the FIR spectrum, the sampled responses and the headroom in core.
+    private func designWithCore(
+        aggregate: RoomCorrectionAggregateResponse,
+        target: RoomCorrectionTargetCurve,
+        parameters: RoomCorrectionDesignParameters,
+        preview: RoomCorrectionCorrectionPreview,
+        sampleRate: Double,
+        sourcePositions: [RoomCorrectionDesignSourcePosition]?,
+        name proposedName: String,
+        createdAt: Date,
+        id: UUID
+    ) throws -> RoomCorrectionFIRDesignResult {
+        let transformSize = try RoomCorrectionCore.firTransformSize(tapCount: parameters.requestedTapCount)
+        func side(
+            desired: RoomCorrectionFrequencyResponse, measured: RoomCorrectionFrequencyResponse
+        ) throws -> (taps: [Float], filter: RoomCorrectionFrequencyResponse, predicted: RoomCorrectionFrequencyResponse, maximumPositive: Double) {
+            let taps: [Float]
+            do {
+                taps = try RoomCorrectionCore.minimumPhaseTaps(
+                    sampleRate: sampleRate, tapCount: parameters.requestedTapCount,
+                    frequenciesHz: desired.frequenciesHz, gainDB: desired.magnitudeDB,
+                    lowHz: preview.effectiveCorrectionLowHz, highHz: preview.effectiveCorrectionHighHz)
+            } catch {
+                throw RoomCorrectionFIRDesignError.nonFiniteFilter
+            }
+            guard taps.count == parameters.requestedTapCount, taps.allSatisfy(\.isFinite) else {
+                throw RoomCorrectionFIRDesignError.nonFiniteFilter
+            }
+            let analysis = try RoomCorrectionCore.firResponse(
+                taps: taps, sampleRate: sampleRate, transformSize: transformSize, frequenciesHz: measured.frequenciesHz)
+            let filter = RoomCorrectionFrequencyResponse(
+                frequenciesHz: measured.frequenciesHz, magnitudeDB: analysis.magnitudeDB, phaseRadians: nil)
+            return (taps, filter, try predictedResponse(measured: measured, filter: filter), analysis.maximumPositiveDB)
+        }
+        let left = try side(desired: preview.leftCorrectionResponse, measured: aggregate.leftResponse)
+        let right = try side(desired: preview.rightCorrectionResponse, measured: aggregate.rightResponse)
+        let maximumPositive = max(left.maximumPositive, right.maximumPositive)
+        guard maximumPositive.isFinite else { throw RoomCorrectionFIRDesignError.nonFiniteResponse }
+        let trimmedName = proposedName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let name = trimmedName.isEmpty ? "Room Correction" : trimmedName
+        let design = RoomCorrectionDesign(
+            id: id,
+            name: name,
+            createdAt: createdAt,
+            sampleRate: sampleRate,
+            parameters: parameters,
+            target: target,
+            sourcePositions: sourcePositions,
+            effectiveCorrectionLowHz: preview.effectiveCorrectionLowHz,
+            effectiveCorrectionHighHz: preview.effectiveCorrectionHighHz,
+            filter: RoomCorrectionFilter(
+                name: name, sampleRate: sampleRate, leftTaps: left.taps, rightTaps: right.taps, declaredLatencyFrames: 0),
+            predictedLeftResponse: left.predicted,
+            predictedRightResponse: right.predicted,
+            recommendedHeadroomDB: RoomCorrectionCore.recommendedHeadroomDB(maximumPositiveDB: maximumPositive),
+            algorithmVersion: Self.algorithmVersion)
+        return RoomCorrectionFIRDesignResult(
+            design: design, leftFilterResponse: left.filter, rightFilterResponse: right.filter,
+            maximumPositiveFilterGainDB: maximumPositive)
     }
 
     /// Minimum-phase taps from the C++ correction core, plus their spectrum on the analysis transform.
@@ -302,6 +379,15 @@ extension RoomCorrectionDesign {
     func deploymentFilter() throws -> RoomCorrectionFilter {
         guard recommendedHeadroomDB.isFinite, recommendedHeadroomDB >= 0 else {
             throw RoomCorrectionFIRDesignError.invalidDeploymentHeadroom(recommendedHeadroomDB)
+        }
+        if RoomCorrectionFIRDesigner.useCoreScaling {
+            return RoomCorrectionFilter(
+                name: filter.name,
+                sampleRate: filter.sampleRate,
+                leftTaps: try RoomCorrectionCore.scaledTaps(filter.leftTaps, headroomDB: recommendedHeadroomDB),
+                rightTaps: try filter.rightTaps.map { try RoomCorrectionCore.scaledTaps($0, headroomDB: recommendedHeadroomDB) },
+                declaredLatencyFrames: filter.declaredLatencyFrames
+            )
         }
         let scale = pow(10.0, -recommendedHeadroomDB / 20.0)
         guard scale.isFinite, scale > 0, scale <= 1 else {
