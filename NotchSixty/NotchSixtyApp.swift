@@ -3078,6 +3078,7 @@ struct NotchSixtyApp: App {
         .windowToolbarStyle(.unified)
         .commands {
             ProductionDeveloperCommands(navigation: navigation)
+            ProductionMenuCommands(navigation: navigation, product: product)
         }
 
         MenuBarExtra(isInserted: trayInserted) {
