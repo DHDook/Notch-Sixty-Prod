@@ -95,6 +95,35 @@ extension E33ShipEndToEndTests {
         }
     }
 
+    /// G69, Even volume window (S11d): the loudness match in the Even volume recipe pulls a loud and a quiet programme
+    /// toward the -16 LUFS target through the published graph, at the eight rates. A 1 kHz tone's loudness is its RMS level
+    /// plus 0.7 dB (K-weighting at 1 kHz, ITU-R BS.1770-4, rounded), so the check reads the settled output RMS against the
+    /// same quantity at the input. The loud programme (-14 LUFS) is brought down, the quiet one (-34 LUFS) is brought up
+    /// by at most the recipe's 12 dB correction limit plus the compressor's make-up, and the gap shrinks.
+    func testEvenVolumeWindowLabCaseAtEveryRate() throws {
+        for rate in rates {
+            var outLUFS: [Double] = [], inLUFS: [Double] = []
+            for amplitude in [0.3, 0.03] {
+                let e = try engine(rate: rate)
+                try e.replaceDynamicsConfiguration(DynamicsStartingPoint.evenVolume.applying(to: e.dynamicsConfiguration))
+                let host = try UnifiedGraphHost(spec: try published(e, rate: rate).makeSpec())
+                defer { host.release() }
+                let n = Int(rate * 12)
+                let input = tone(1_000, amplitude: amplitude, rate: rate, frames: n)
+                let out = try run(host, input: input, block: 4096)
+                let tail = (n - Int(rate * 1))..<n
+                inLUFS.append(20 * log10(rms(input[tail])) + 0.7)
+                outLUFS.append(20 * log10(rms(out[tail])) + 0.7)
+            }
+            let inGap = inLUFS[0] - inLUFS[1], outGap = outLUFS[0] - outLUFS[1]
+            XCTAssertLessThan(outGap, inGap - 6, "Even volume shrinks the gap between programmes at \(rate): \(inGap) to \(outGap) LU")
+            XCTAssertGreaterThan(outGap, 0, "and does not invert them at \(rate)")
+            XCTAssertGreaterThan(outLUFS[1] - inLUFS[1], 3, "the quiet programme is brought up at \(rate)")
+            XCTAssertEqual(outLUFS[0], -16, accuracy: 2.5, "the loud programme settles near the -16 LUFS target at \(rate)")
+            XCTAssertLessThan(outGap, 5, "both programmes sit within a 5 LU window at \(rate)")
+        }
+    }
+
     /// G69: the four starting points rendered through the published graph. Late night holds a loud passage down against a
     /// quiet one (the loudness range shrinks); every recipe keeps a full-scale tone under its ceiling; Protect speakers
     /// holds the lower ceiling.
