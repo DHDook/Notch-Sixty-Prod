@@ -244,19 +244,7 @@ struct MeterStoppedState: View {
     static let message = "Audio is stopped. Start processing to see live meters."
 
     var body: some View {
-        HStack(spacing: DesignSpacing.m.pt) {
-            Image(systemName: "pause.circle").font(.title2).foregroundStyle(.secondary)
-            Text(Self.message).foregroundStyle(.secondary)
-            Spacer()
-            Button("Start", action: onStart)
-                .buttonStyle(.borderedProminent)
-                .accessibilityIdentifier("meters.stopped.start")
-        }
-        .padding(DesignSpacing.m.pt)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .designSurface(.medium)
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("meters.stopped")
+        DesignStoppedBanner(message: Self.message, onStart: onStart, identifier: "meters.stopped")
     }
 }
 

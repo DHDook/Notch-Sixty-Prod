@@ -651,7 +651,7 @@ One flag `e34.design-language`, graduated in S7. The minimum macOS rises to 27 i
 - [~] S1 `e34/design-language`: `docs/DESIGN_LANGUAGE.md`, values file, components, formatters, status levels, gallery; ends with the owner's screen check (low-risk); built dark behind `e34.design-language`, S2/S3 wire the pages; owner screen check done 17 Nov 2026 (#601 merged)
 - [x] S2 `e34/adopt-playback-pages`: Dashboard, Equalizer, Dynamics, Meters, Headphones, Plugins on the shared parts (low-risk); all six pages done (#604, S2b Dashboard)
 - [ ] S3 `e34/adopt-system-pages`: System, tools, Active Acoustics, Settings, Help on the shared parts (needs-owner: ANC and MIMO screens, appearance only)
-- [ ] S4 `e34/states-and-dialogs`: one state component, one confirmation rule (low-risk)
+- [x] S4 `e34/states-and-dialogs`: one state component, one confirmation rule (low-risk; dark behind `e34.design-language`; leftovers in E34 G23, owner S7)
 - [ ] S5 `e34/menus-and-keyboard`: View and Playback menus, full keyboard reach (low-risk)
 - [ ] S6 `e34/accessibility`: Reduce Motion, Increase Contrast, Reduce Transparency, VoiceOver values (low-risk)
 - [ ] S7 `e34/sizes-and-ship`: minimum window size, 40% longer text, graduate `e34.design-language` (low-risk)

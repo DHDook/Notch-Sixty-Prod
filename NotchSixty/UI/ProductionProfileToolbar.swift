@@ -132,28 +132,13 @@ struct ProductionProfileToolbar: View {
                 }
             }
         }
-        .alert(
-            "Preset Interchange",
-            isPresented: Binding(
-                get: { interchangeMessage != nil },
-                set: { if !$0 { interchangeMessage = nil } }
-            )
-        ) {
-            Button("OK") { interchangeMessage = nil }
-        } message: {
-            Text(interchangeMessage ?? "")
-        }
-        .alert(
+        .designMessage("Preset Interchange", message: $interchangeMessage)
+        .designMessage(
             "A/B Comparison",
-            isPresented: Binding(
-                get: { comparison.lastErrorDescription != nil },
-                set: { if !$0 { comparison.clearError() } }
-            )
-        ) {
-            Button("OK") { comparison.clearError() }
-        } message: {
-            Text(comparison.lastErrorDescription ?? "")
-        }
+            message: Binding(
+                get: { comparison.lastErrorDescription },
+                set: { if $0 == nil { comparison.clearError() } }
+            ))
         .confirmationDialog(
             "Equalizer slots A and B differ",
             isPresented: Binding(
@@ -180,17 +165,7 @@ struct ProductionProfileToolbar: View {
         } message: {
             Text("Switching presets ends the comparison. Choose the slot to keep as the Equalizer setting.")
         }
-        .alert(
-            "Preset Change Failed",
-            isPresented: Binding(
-                get: { presetSelectionError != nil },
-                set: { if !$0 { presetSelectionError = nil } }
-            )
-        ) {
-            Button("OK") { presetSelectionError = nil }
-        } message: {
-            Text(presetSelectionError ?? "")
-        }
+        .designMessage("Preset Change Failed", message: $presetSelectionError)
     }
 
     private var contentPresetMenu: some View {

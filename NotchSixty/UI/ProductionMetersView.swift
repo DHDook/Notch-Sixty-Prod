@@ -264,17 +264,7 @@ struct ProductionMetersView: View {
         .task(id: "\(engine.lifecycleState.rawValue)|\(page.rawValue)|\(spectrumMode.rawValue)|\(spectrogramWindow.rawValue)|\(analysisViewCode)|\(analysisPairCode)|\(transportMeterSnapshot?.kind.rawValue ?? "stereo")") {
             await runVisiblePageLoop()
         }
-        .alert(
-            "Headroom Assistant",
-            isPresented: Binding(
-                get: { assistantCommandError != nil },
-                set: { if !$0 { assistantCommandError = nil } }
-            )
-        ) {
-            Button("OK") { assistantCommandError = nil }
-        } message: {
-            Text(assistantCommandError ?? "")
-        }
+        .designMessage("Headroom Assistant", message: $assistantCommandError)
     }
 
     private var header: some View {

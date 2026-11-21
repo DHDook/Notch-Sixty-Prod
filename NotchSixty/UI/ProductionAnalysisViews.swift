@@ -37,9 +37,7 @@ struct ProductionSpectrumView: View {
             spectrumHoverLine
 
             if !isRunning {
-                analysisStatusBanner(
-                    "Start processing to view the spectrum. Capture, FFT, and display updates are parked while processing is stopped."
-                )
+                DesignStoppedBanner(message: DesignLivePage.metersSpectrum.stoppedMessage, identifier: "spectrum.stopped")
             } else if snapshot.spectrum.isEmpty && model.bands.isEmpty {
                 analysisStatusBanner("Spectrum capture is filling the analysis window…")
             }
@@ -355,9 +353,7 @@ struct ProductionStereoAnalysisView: View {
             }
 
             if !isRunning {
-                analysisStatusBanner(
-                    "Start processing to view stereo analysis. Output capture and stereo analysis are parked while processing is stopped."
-                )
+                DesignStoppedBanner(message: DesignLivePage.metersStereo.stoppedMessage, identifier: "stereo.stopped")
             } else if snapshot.goniometer.isEmpty {
                 analysisStatusBanner("Stereo capture is filling the analysis window…")
             }

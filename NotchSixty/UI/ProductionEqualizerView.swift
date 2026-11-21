@@ -590,15 +590,12 @@ struct ProductionEqualizerView: View {
             if enhanced { EQMatchedFiltersOffer(bands: bands, onUse: useMatchedFilters) }
 
             if bands.isEmpty {
-                ContentUnavailableView {
-                    Label("No EQ Bands", systemImage: "slider.horizontal.3")
-                } description: {
-                    Text("Add a band to begin shaping the response.")
-                } actions: {
-                    Button { addBand() } label: { Label("Add Band", systemImage: "plus") }
-                        .buttonStyle(.glassProminent)
-                        .accessibilityIdentifier("eq.bands.empty.add")
-                }
+                DesignStateView(
+                    kind: .empty, title: "No EQ Bands",
+                    detail: "Add a band to begin shaping the response.",
+                    systemImage: "slider.horizontal.3",
+                    actionTitle: "Add Band", actionIdentifier: "eq.bands.empty.add",
+                    action: { addBand() })
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 ScrollViewReader { proxy in

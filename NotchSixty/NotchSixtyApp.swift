@@ -2503,17 +2503,7 @@ private struct ProductionMenuBarView: View {
         }
         .padding(14)
         .frame(width: 300)
-        .alert(
-            "Processing Error",
-            isPresented: Binding(
-                get: { commandError != nil },
-                set: { if !$0 { commandError = nil } }
-            )
-        ) {
-            Button("OK") { commandError = nil }
-        } message: {
-            Text(commandError ?? "")
-        }
+        .designMessage("Processing Error", message: $commandError)
     }
 }
 
@@ -2611,19 +2601,15 @@ private struct ProductionSettingsView: View {
             let data = try Data(contentsOf: url)
             let bundle = try product.backup.inspect(data)
 
-            let alert = NSAlert()
-            alert.alertStyle = .warning
-            alert.messageText = "Restore this Notch Sixty backup?"
-            alert.informativeText =
-                "This will replace saved Content Presets and Playback Systems "
-                + "and restore \(bundle.roomCorrectionProjects.count) Room Correction "
-                + "projects, \(bundle.measurementLabSessions.count) Measurement Lab "
-                + "sessions, and \(bundle.binauralAssets.count) binaural profiles. "
-                + "Hardware bindings that are not available on this Mac will be "
-                + "marked Needs Mapping and cannot activate until reviewed."
-            alert.addButton(withTitle: "Restore")
-            alert.addButton(withTitle: "Cancel")
-            guard alert.runModal() == .alertFirstButtonReturn else {
+            guard DesignDialogs.confirm(
+                title: "Restore this Notch Sixty backup?",
+                message: "This will replace saved Content Presets and Playback Systems "
+                    + "and restore \(bundle.roomCorrectionProjects.count) Room Correction "
+                    + "projects, \(bundle.measurementLabSessions.count) Measurement Lab "
+                    + "sessions, and \(bundle.binauralAssets.count) binaural profiles. "
+                    + "Hardware bindings that are not available on this Mac will be "
+                    + "marked Needs Mapping and cannot activate until reviewed.",
+                buttons: ["Restore", "Cancel"]) != nil else {
                 return
             }
 
