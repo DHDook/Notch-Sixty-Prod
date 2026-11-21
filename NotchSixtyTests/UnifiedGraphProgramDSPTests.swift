@@ -4,6 +4,22 @@ import XCTest
 /// E6 S9a: stereo-class program DSP mapped onto the lane sets of an N-channel layout (decision D2).
 /// Behavioural: real graphs, real blocks, every standard rate.
 final class UnifiedGraphProgramDSPTests: XCTestCase {
+    // G60: the hosted app sets the process-wide output-protection policy at launch (the flag is graduated, so it is on), which adds
+    // per-lane hard limits and a user-protection stage to every graph these tests compare against the plain layout. The tests
+    // describe the policy-free build, so each runs with the policy off and the launch state is restored afterwards.
+    @MainActor override func setUp() async throws {
+        try await super.setUp()
+        let off = FeatureFlags(
+            defaults: try XCTUnwrap(UserDefaults(suiteName: "UGPDSP-\(UUID().uuidString)")), policy: .launchArgumentOnly,
+            arguments: ["App", "-NotchSixtyFeatures", "-e9.output-protection"], environment: [:])
+        UnifiedGraphOutputProtection.refresh(off)
+    }
+
+    @MainActor override func tearDown() async throws {
+        UnifiedGraphOutputProtection.refresh()
+        try await super.tearDown()
+    }
+
     private static let rates: [Double] = [44_100, 48_000, 88_200, 96_000, 176_400, 192_000, 352_800, 384_000]
     private let block = 512
 
