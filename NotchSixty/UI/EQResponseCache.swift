@@ -9,7 +9,7 @@ final class EQResponseCache {
     private struct Entry {
         let bands: [EQBand]
         let sampleRate: Double
-        let program: [N60BiquadCoefficients]
+        let program: [EQResponseSection]
     }
 
     /// Most recent last. `EQBand` is Equatable, not Hashable, so lookups scan (a few dozen entries).
@@ -25,7 +25,7 @@ final class EQResponseCache {
         self.capacity = max(1, capacity)
     }
 
-    func program(bands: [EQBand], sampleRate: Double) -> [N60BiquadCoefficients] {
+    func program(bands: [EQBand], sampleRate: Double) -> [EQResponseSection] {
         if let hit = entries.last(where: { $0.sampleRate == sampleRate && $0.bands == bands }) {
             return hit.program
         }

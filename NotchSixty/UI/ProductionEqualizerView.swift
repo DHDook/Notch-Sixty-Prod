@@ -550,7 +550,7 @@ struct ProductionEqualizerView: View {
 
     /// The graph's coordinate maps for the chosen zoom and gain range. Auto widens during a
     /// drag but only narrows once the drag ends.
-    private func graphGeometry(program: [N60BiquadCoefficients]) -> EQGraphGeometry {
+    private func graphGeometry(program: [EQResponseSection]) -> EQGraphGeometry {
         var half = yRange.fixedHalfRange ?? 24
         if graphView == .magnitude, yRange == .auto {
             let upper = xZoom.maximumFrequency(sampleRate: sampleRate)
@@ -1318,9 +1318,9 @@ private struct ProductionEQResponseGraph: View {
     /// that layer and not this graph or the page.
     var programAnalyser: EQProgramAnalyserController?
     /// The compiled response of `displayBands`, from the page's cache.
-    let program: [N60BiquadCoefficients]
+    let program: [EQResponseSection]
     /// Cached compile of any band set (band curves, dynamic envelopes, ghost lane).
-    let programFor: ([EQBand]) -> [N60BiquadCoefficients]
+    let programFor: ([EQBand]) -> [EQResponseSection]
 
     @State private var hover = EQGraphHoverModel()
     @State private var dragSession: EQGraphGeometry.DragSession?
@@ -1644,7 +1644,7 @@ private struct ProductionEQResponseGraph: View {
         return (path, points)
     }
 
-    private func drawResponse(context: inout GraphicsContext, size: CGSize, program: [N60BiquadCoefficients]) {
+    private func drawResponse(context: inout GraphicsContext, size: CGSize, program: [EQResponseSection]) {
         guard !program.isEmpty else { return }
         let curve = curvePath(size: size) {
             ProductionEQResponseMath.responseDB(program: program, sampleRate: sampleRate, frequencyHz: $0)
@@ -1726,18 +1726,49 @@ private struct ProductionEQResponseGraph: View {
     }
 }
 
+/// One biquad of a drawn response, in double precision. The engine designs its sections in double, so the curve
+/// evaluates the double design too (E33 G16: float coefficients drift from the engine below about 10 Hz).
+struct EQResponseSection: Equatable, Sendable {
+    var b0: Double, b1: Double, b2: Double, a1: Double, a2: Double
+
+    init(b0: Double, b1: Double, b2: Double, a1: Double, a2: Double) {
+        (self.b0, self.b1, self.b2, self.a1, self.a2) = (b0, b1, b2, a1, a2)
+    }
+
+    init(_ c: N60BiquadCoefficients) {
+        self.init(b0: Double(c.b0), b1: Double(c.b1), b2: Double(c.b2), a1: Double(c.a1), a2: Double(c.a2))
+    }
+
+    /// The double design of a compiled section when it is the cookbook design behind the float coefficients (checked by
+    /// rounding it to float and comparing); otherwise the float coefficients (matched, Linkwitz, first-order, tilt).
+    init(_ section: N60BiquadBandSnapshot, sampleRate: Double) {
+        var d = [Double](repeating: 0, count: 5)
+        let c = section.coefficients
+        // Matched designs (types 16 and up) come from the core entry point that also feeds the engine.
+        if section.type.rawValue >= 16,
+           n60_eq_design_section(UInt32(section.type.rawValue), sampleRate, section.frequencyHz, section.gainDB, section.q, &d) == 1 {
+            self.init(b0: d[0], b1: d[1], b2: d[2], a1: d[3], a2: d[4])
+        } else if N60BiquadDesignDouble(section.type, sampleRate, section.frequencyHz, section.gainDB, section.q, &d),
+           Float(d[0]) == c.b0, Float(d[1]) == c.b1, Float(d[2]) == c.b2, Float(d[3]) == c.a1, Float(d[4]) == c.a2 {
+            self.init(b0: d[0], b1: d[1], b2: d[2], a1: d[3], a2: d[4])
+        } else {
+            self.init(c)
+        }
+    }
+}
+
 enum ProductionEQResponseMath {
-    static func compile(bands: [EQBand], sampleRate: Double) -> [N60BiquadCoefficients] {
-        var program: [N60BiquadCoefficients] = []
+    static func compile(bands: [EQBand], sampleRate: Double) -> [EQResponseSection] {
+        var program: [EQResponseSection] = []
         for band in bands where band.enabled && band.type != .fir {
             guard let sections = try? band.compiledSections(sampleRate: sampleRate) else { continue }
-            program.append(contentsOf: sections.map(\.coefficients))
+            program.append(contentsOf: sections.map { EQResponseSection($0, sampleRate: sampleRate) })
         }
         return program
     }
 
     static func responseDB(
-        program: [N60BiquadCoefficients],
+        program: [EQResponseSection],
         sampleRate: Double,
         frequencyHz: Double
     ) -> Double {
@@ -1749,7 +1780,7 @@ enum ProductionEQResponseMath {
     }
 
     private static func sectionResponseDB(
-        _ coefficients: N60BiquadCoefficients,
+        _ coefficients: EQResponseSection,
         sampleRate: Double,
         frequencyHz: Double
     ) -> Double {
@@ -1759,11 +1790,11 @@ enum ProductionEQResponseMath {
         let cos2 = cos(2 * omega)
         let sin2 = sin(2 * omega)
 
-        let b0 = Double(coefficients.b0)
-        let b1 = Double(coefficients.b1)
-        let b2 = Double(coefficients.b2)
-        let a1 = Double(coefficients.a1)
-        let a2 = Double(coefficients.a2)
+        let b0 = coefficients.b0
+        let b1 = coefficients.b1
+        let b2 = coefficients.b2
+        let a1 = coefficients.a1
+        let a2 = coefficients.a2
 
         let nr = b0 + b1 * cos1 + b2 * cos2
         let ni = -b1 * sin1 - b2 * sin2

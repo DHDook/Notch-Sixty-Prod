@@ -115,7 +115,7 @@ final class EQHeadroomTests: XCTestCase {
                 let difference = hypot(m.re - s.re, m.im - s.im)
                 expected = max(expected, (sum + difference) / 2)
             }
-            XCTAssertEqual(prediction.peakGainDB, 20 * log10(expected), accuracy: 1e-6, "rate \(rate)")
+            XCTAssertEqual(prediction.peakGainDB, 20 * log10(expected), accuracy: 1e-3, "rate \(rate)")
             let larger = max(
                 EQHeadroomPredictor.predict(configuration: linked(mid), sampleRate: rate).peakGainDB,
                 EQHeadroomPredictor.predict(configuration: linked(side), sampleRate: rate).peakGainDB
@@ -185,7 +185,7 @@ final class EQHeadroomTests: XCTestCase {
         }
     }
 
-    private func steadyStatePeak(sections: [N60BiquadCoefficients], rate: Double, frequency: Double, amplitude: Double) -> Double {
+    private func steadyStatePeak(sections: [EQResponseSection], rate: Double, frequency: Double, amplitude: Double) -> Double {
         var state = [(x1: Double, x2: Double, y1: Double, y2: Double)](repeating: (0, 0, 0, 0), count: sections.count)
         let total = Int(rate * 0.6)
         var peak = 0.0

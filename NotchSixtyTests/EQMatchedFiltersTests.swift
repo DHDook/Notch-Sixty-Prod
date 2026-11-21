@@ -52,7 +52,7 @@ final class EQMatchedFiltersTests: XCTestCase {
             // The page draws ProductionEQResponseMath over the same coefficients the engine is given.
             let program = ProductionEQResponseMath.compile(bands: [band], sampleRate: rate)
             XCTAssertEqual(program.count, 1)
-            XCTAssertEqual(program[0].b1, sections[0].coefficients.b1)
+            XCTAssertEqual(Float(program[0].b1), sections[0].coefficients.b1)
             let analysis = EQFilterAnalysis(bands: [band], phaseMode: .minimumPhase, sampleRate: rate)
             XCTAssertEqual(analysis.magnitudeDB(at: 15_000), 6, accuracy: 0.05)
         }

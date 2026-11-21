@@ -113,10 +113,10 @@ enum EQLoudnessMatch {
         guard rate.isFinite, rate > 0 else { return 0 }
         let upper = min(20_000, rate * 0.49)
         guard upper > 20 else { return 0 }
-        func lane(_ bands: [EQBand]) -> [N60BiquadCoefficients] {
+        func lane(_ bands: [EQBand]) -> [EQResponseSection] {
             configuration.bypassed ? [] : ProductionEQResponseMath.compile(bands: bands, sampleRate: rate)
         }
-        let lanes: [[N60BiquadCoefficients]]
+        let lanes: [[EQResponseSection]]
         switch configuration.channelMode {
         case .linked: lanes = [lane(configuration.linkedBands)]
         case .independent: lanes = [lane(configuration.leftBands), lane(configuration.rightBands)]

@@ -390,7 +390,8 @@ struct HeadroomPoint: Equatable, Sendable {
 
 /// Peak hold at the input, post-EQ and output meter points, from the hub's own readings (no second reader).
 /// On a wide session it has two points (programme and output), each naming its worst channel (E33 S17).
-/// The post-dynamics point joins when the analyser tap feeds it (`docs/epics/E33.md` Gaps).
+/// A post-dynamics point (between post-EQ and output) joins on a stereo session while the after-dynamics analyser tap
+/// (graph stage 621) is readable, and leaves when it is not (E33 G5).
 struct HeadroomStripModel: Equatable, Sendable {
     static let floorDB = -120.0
     private(set) var points: [HeadroomPoint] = HeadroomStripModel.stereoPoints
@@ -401,6 +402,21 @@ struct HeadroomStripModel: Equatable, Sendable {
             HeadroomPoint(id: "postEQ", title: "Post-EQ", peakDBFS: floorDB, holdDBFS: floorDB),
             HeadroomPoint(id: "output", title: "Output", peakDBFS: floorDB, holdDBFS: floorDB),
         ]
+    }
+
+    private static var stereoPointsWithDynamics: [HeadroomPoint] {
+        var all = stereoPoints
+        all.insert(HeadroomPoint(id: "postDynamics", title: "Post-dynamics", peakDBFS: floorDB, holdDBFS: floorDB), at: 2)
+        return all
+    }
+
+    /// Linear peak of the newest tap window (both lanes), or nil when the window is empty.
+    static func peak(of window: (left: [Float], right: [Float])) -> Float? {
+        guard !window.left.isEmpty || !window.right.isEmpty else { return nil }
+        var peak: Float = 0
+        for v in window.left { peak = max(peak, abs(v)) }
+        for v in window.right { peak = max(peak, abs(v)) }
+        return peak
     }
 
     private static var widePoints: [HeadroomPoint] {
@@ -416,7 +432,15 @@ struct HeadroomStripModel: Equatable, Sendable {
 
     /// `peaks` are linear maxima since the last call (the hub's read-and-reset values), keyed by point id.
     mutating func update(peaks: [String: Float]) {
-        if points.count != 3 { self = HeadroomStripModel() }
+        let wantsDynamics = peaks["postDynamics"] != nil
+        if points.count != (wantsDynamics ? 4 : 3) {
+            // Keep the holds of the points both layouts share.
+            let old = points
+            points = wantsDynamics ? Self.stereoPointsWithDynamics : Self.stereoPoints
+            for i in points.indices {
+                if let kept = old.first(where: { $0.id == points[i].id }) { points[i] = kept }
+            }
+        }
         for i in points.indices {
             guard let linear = peaks[points[i].id] else { continue }
             let db = Self.decibels(linear)

@@ -1187,9 +1187,21 @@ struct ProductionMetersView: View {
         MeterBallistics(rawValue: ballisticsRaw) ?? .peak
     }
 
+    /// Frames of the after-dynamics tap read each tick: 1.5 poll intervals, so no peak falls between two reads.
+    private var postDynamicsWindowFrames: Int {
+        let rate = engine.selectedOutputDevice?.nominalSampleRate ?? 48_000
+        let frames = Int((rate / MeterPollPolicy.hertz(for: .levels) * 1.5).rounded(.up))
+        return min(max(frames, 256), Int(UnifiedGraphAnalyserTaps.capacityFrames) / 2)
+    }
+
     @MainActor
     private func runVisiblePageLoop() async {
         let activePage = page
+        // G5: the headroom strip's post-dynamics point records tap 621 only while the Levels page shows it.
+        if enhanced, activePage == .levels, engine.lifecycleState == .running {
+            engine.setAnalyserTapsInstalled(true)
+            engine.setAnalyserTapDemand(2)
+        }
         var demandToken: UUID?
         if activePage == .levels, engine.lifecycleState == .running {
             demandToken = ProductionDetailedMeterDemand.acquire(engine: engine)
@@ -1223,6 +1235,7 @@ struct ProductionMetersView: View {
         defer {
             hub.unsubscribe(token)
             if enhanced, activePage == .levels {
+                engine.setAnalyserTapDemand(0)
                 engine.dynamicsListenHost?.setInputOverDetect(false)
                 inputOvers.hide()
             }
@@ -1346,11 +1359,18 @@ struct ProductionMetersView: View {
         }
 
         if enhanced {
-            headroomStrip.update(peaks: [
+            var peaks: [String: Float] = [
                 "input": max(diagnostics.inputMeter.peakLeft, diagnostics.inputMeter.peakRight),
                 "postEQ": max(diagnostics.postEQMeter.peakLeft, diagnostics.postEQMeter.peakRight),
                 "output": max(diagnostics.outputMeter.peakLeft, diagnostics.outputMeter.peakRight),
-            ])
+            ]
+            // G5: the post-dynamics point reads the after-dynamics analyser tap (stage 621) while this page holds its demand.
+            if page == .levels, engine.analyserTapsAvailable,
+               let window = engine.analyserTapWindow(afterDynamics: true, frames: postDynamicsWindowFrames),
+               let peak = HeadroomStripModel.peak(of: (window.left, window.right)) {
+                peaks["postDynamics"] = peak
+            }
+            headroomStrip.update(peaks: peaks)
         }
         inputTruePeakHold.update(dbtp: ProductionMeterMath.decibels(diagnostics.inputTruePeakLinear))
         outputTruePeakHold.update(dbtp: ProductionMeterMath.decibels(diagnostics.outputTruePeakLinear))
