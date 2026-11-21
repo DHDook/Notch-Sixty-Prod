@@ -95,32 +95,66 @@ extension E33ShipEndToEndTests {
         }
     }
 
-    /// G69, Even volume window (S11d): the loudness match in the Even volume recipe pulls a loud and a quiet programme
-    /// toward the -16 LUFS target through the published graph, at the eight rates. A 1 kHz tone's loudness is its RMS level
-    /// plus 0.7 dB (K-weighting at 1 kHz, ITU-R BS.1770-4, rounded), so the check reads the settled output RMS against the
-    /// same quantity at the input. The loud programme (-14 LUFS) is brought down, the quiet one (-34 LUFS) is brought up
-    /// by at most the recipe's 12 dB correction limit plus the compressor's make-up, and the gap shrinks.
+    /// Seeded, band-limited noise (white noise through a one-pole low-pass at about 4 kHz), uniform level `amplitude`, as a
+    /// stand-in for programme material: the K-weighting sees a real spectrum, not one tone. Same samples at every rate.
+    func programmeNoise(amplitude: Double, rate: Double, seconds: Double, seed: UInt64) -> [Float] {
+        var state = seed, lp = 0.0
+        let k = 1 - exp(-2 * Double.pi * 4_000 / rate)
+        return (0..<Int(rate * seconds)).map { _ in
+            state = state &* 6_364_136_223_846_793_005 &+ 1_442_695_040_888_963_407
+            let white = Double(Int64(bitPattern: state) >> 11) / Double(1 << 52)   // uniform in [-1, 1)
+            lp += k * (white - lp)
+            return Float(amplitude * lp / (k / 2).squareRoot())   // unit-variance-ratio scaling: the same level at every rate
+        }
+    }
+
+    /// Renders `input` (same on both channels) through a starting point's published graph and returns the left output.
+    func renderStartingPoint(_ point: DynamicsStartingPoint?, input: [Float], rate: Double) throws -> [Float] {
+        let e = try engine(rate: rate)
+        if let point { try e.replaceDynamicsConfiguration(point.applying(to: e.dynamicsConfiguration)) }
+        let host = try UnifiedGraphHost(spec: try published(e, rate: rate).makeSpec())
+        defer { host.release() }
+        return try run(host, input: input, block: 4096)
+    }
+
+    /// G69, Even volume window (S11d): a loud and a quiet programme (the same band-limited noise 26 dB apart) through the
+    /// Even volume recipe, measured with the BS.1770-4 reference meter (`BS1770ReferenceMeter`, integrated loudness over the
+    /// last 6 s, after the 1 s attack and 3 s release have settled), at the eight rates.
     func testEvenVolumeWindowLabCaseAtEveryRate() throws {
         for rate in rates {
-            var outLUFS: [Double] = [], inLUFS: [Double] = []
-            for amplitude in [0.3, 0.03] {
-                let e = try engine(rate: rate)
-                try e.replaceDynamicsConfiguration(DynamicsStartingPoint.evenVolume.applying(to: e.dynamicsConfiguration))
-                let host = try UnifiedGraphHost(spec: try published(e, rate: rate).makeSpec())
-                defer { host.release() }
-                let n = Int(rate * 12)
-                let input = tone(1_000, amplitude: amplitude, rate: rate, frames: n)
-                let out = try run(host, input: input, block: 4096)
-                let tail = (n - Int(rate * 1))..<n
-                inLUFS.append(20 * log10(rms(input[tail])) + 0.7)
-                outLUFS.append(20 * log10(rms(out[tail])) + 0.7)
+            var inLUFS: [Double] = [], outLUFS: [Double] = []
+            for amplitude in [0.2, 0.01] {
+                let input = programmeNoise(amplitude: amplitude, rate: rate, seconds: 14, seed: 7)
+                let out = try renderStartingPoint(.evenVolume, input: input, rate: rate)
+                let tail = (input.count - Int(rate * 6))..<input.count
+                inLUFS.append(BS1770ReferenceMeter.integratedLoudness([Array(input[tail])], rate: rate) + 3.0103)
+                outLUFS.append(BS1770ReferenceMeter.integratedLoudness([Array(out[tail])], rate: rate) + 3.0103)
             }
             let inGap = inLUFS[0] - inLUFS[1], outGap = outLUFS[0] - outLUFS[1]
-            XCTAssertLessThan(outGap, inGap - 6, "Even volume shrinks the gap between programmes at \(rate): \(inGap) to \(outGap) LU")
-            XCTAssertGreaterThan(outGap, 0, "and does not invert them at \(rate)")
-            XCTAssertGreaterThan(outLUFS[1] - inLUFS[1], 3, "the quiet programme is brought up at \(rate)")
-            XCTAssertEqual(outLUFS[0], -16, accuracy: 2.5, "the loud programme settles near the -16 LUFS target at \(rate)")
-            XCTAssertLessThan(outGap, 5, "both programmes sit within a 5 LU window at \(rate)")
+            // Measured at every rate: loud -14.6 to -15.0 LUFS, quiet -25.6 to -26.5 LUFS (the quiet one is held by the
+            // recipe's 12 dB correction limit), so a 26 LU gap becomes about 11 LU.
+            XCTAssertEqual(inGap, 26, accuracy: 0.1, "the programmes are 26 LU apart at \(rate)")
+            XCTAssertEqual(outLUFS[0], -16, accuracy: 2, "the loud programme settles near the -16 LUFS target at \(rate): \(outLUFS[0])")
+            XCTAssertGreaterThan(outLUFS[1] - inLUFS[1], 11, "the quiet programme is lifted by about the 12 dB limit at \(rate)")
+            XCTAssertLessThan(outGap, 13, "the window is under 13 LU at \(rate): \(outGap)")
+            XCTAssertGreaterThan(outGap, 0, "and the programmes are not inverted at \(rate)")
+        }
+    }
+
+    /// G69, Late night loudness range (S11d): programme with a real range (6 s sections of the same noise alternating
+    /// between loud and 15 dB lower, inside the 20 LU relative gate of Tech 3342), with and without the recipe. The BS.1770-4 / Tech 3342 loudness range of the output
+    /// is measured against the unprocessed programme at the eight rates.
+    func testLateNightLoudnessRangeLabCaseAtEveryRate() throws {
+        for rate in rates {
+            let sections = (0..<4).map { programmeNoise(amplitude: $0 % 2 == 0 ? 0.2 : 0.035, rate: rate, seconds: 6, seed: UInt64(11 + $0)) }
+            let input = sections.flatMap { $0 }
+            let out = try renderStartingPoint(.lateNight, input: input, rate: rate)
+            let before = BS1770ReferenceMeter.loudnessRange([input, input], rate: rate)
+            let after = BS1770ReferenceMeter.loudnessRange([out, out], rate: rate)
+            // Measured: 15.15 LU in, 6.4 to 6.8 LU out (a drop of 8.4 to 8.8 LU) at every rate.
+            XCTAssertEqual(before, 15.15, accuracy: 0.3, "the programme has a real range at \(rate): \(before)")
+            XCTAssertLessThan(after, before - 8, "Late night cuts the loudness range by more than 8 LU at \(rate): \(before) to \(after)")
+            XCTAssertGreaterThan(after, 3, "and keeps a range at \(rate): \(after)")
         }
     }
 
