@@ -44,8 +44,9 @@ final class E33ShipC3Tests: XCTestCase {
         let a = EQBand(type: .peaking, frequencyHz: 500, gainDB: 1, q: 1)
         let b = EQBand(type: .peaking, frequencyHz: 4_000, gainDB: 1, q: 1)
         try engine.replaceStereoEQConfiguration(linear(bands: [a, b]))
-        var a2 = a; a2.gainDB = -4
-        var b2 = b; b2.gainDB = 5
+        var editedA = a; editedA.gainDB = -4
+        var editedB = b; editedB.gainDB = 5
+        let a2 = editedA, b2 = editedB
         async let first: Void = engine.updateEQBandOffMain(a2)
         async let second: Void = engine.updateEQBandOffMain(b2)
         _ = try await (first, second)
