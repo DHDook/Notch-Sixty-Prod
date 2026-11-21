@@ -306,6 +306,7 @@ behind its own platform backend and UI shell.
 
 ## Conditional and undecided items
 
+- Possible extra item (owner, 21 Nov 2026; E33 G114): a wide post-dynamics tap, so wide sessions get the four-point headroom strip (v1 keeps two points, programme and output).
 - Plug-in edition of room correction (was V2-12; parked, owner 17 Nov 2026): an Audio Unit (and
   possibly VST3 or AAX) of the correction stage for players and DAWs. Parked because it serves the
   studio market rather than listeners, carries only plain room correction (Quiet Zone, MIMO, bass
