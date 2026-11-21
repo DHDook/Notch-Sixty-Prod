@@ -37,7 +37,7 @@
 extern "C" {
 #endif
 
-#define N60_CORRECT_ABI_VERSION 4
+#define N60_CORRECT_ABI_VERSION 5
 
 #define N60_CORRECT_OK 0
 #define N60_CORRECT_ERR_ARGUMENT (-1)
@@ -585,6 +585,101 @@ typedef struct n60_correct_multisub_eq_result {
 } n60_correct_multisub_eq_result;
 
 int32_t n60_correct_multisub_eq_search(const n60_correct_multisub_eq_problem *problem, n60_correct_multisub_eq_result *result);
+
+/* ---- 7. Room-correction FIR design maths (E21 S6a, S6b; ABI v5) ----------------------------------------------------------
+ * The numbers-to-numbers part of RoomCorrectionFIRDesigner and the target designer: target curves (parse, built-ins,
+ * interpolation), magnitude smoothing, the correction preview (target minus smoothed response with limits, null protection
+ * and edge taper), the spectrum of a finished FIR on the response grid, the recommended headroom and the deployment scale.
+ * Control thread only; allocates freely, never from an audio callback. Double precision throughout; fixed summation order.
+ * Each failure returns one of the codes below and writes nothing past the arguments it names. */
+#define N60_CORRECT_ERR_TARGET_POINTS (-9)   /* fewer than two unique target points */
+#define N60_CORRECT_ERR_TARGET_CURVE (-10)   /* not finite and strictly increasing */
+#define N60_CORRECT_ERR_RESPONSE (-11)       /* empty, mismatched, non-finite or non-increasing response */
+#define N60_CORRECT_ERR_GRID (-12)           /* left and right responses use different frequency grids */
+#define N60_CORRECT_ERR_SMOOTHING (-13)
+#define N60_CORRECT_ERR_RANGE (-14)          /* correction range invalid */
+#define N60_CORRECT_ERR_BOOST (-15)
+#define N60_CORRECT_ERR_CUT (-16)
+#define N60_CORRECT_ERR_TAP_COUNT (-17)
+#define N60_CORRECT_ERR_USABLE (-18)         /* measured usable range invalid */
+#define N60_CORRECT_ERR_NO_RANGE (-19)       /* the correction range does not overlap the usable range */
+#define N60_CORRECT_ERR_PARSE_EMPTY (-20)    /* no data line in the target text */
+#define N60_CORRECT_ERR_PARSE_LINE (-21)     /* malformed line; *error_line holds its 1-based number */
+#define N60_CORRECT_ERR_PARSE_FREQUENCY (-22)
+#define N60_CORRECT_ERR_PARSE_GAIN (-23)
+#define N60_CORRECT_ERR_HEADROOM (-24)
+#define N60_CORRECT_ERR_TRANSFORM (-25)      /* the FIR design transform would be larger than allowed */
+
+#define N60_CORRECT_BUILTIN_TARGETS 3u       /* 0 flat, 1 gentle downward tilt, 2 bass shelf and tilt */
+#define N60_CORRECT_BUILTIN_TARGET_MAX_POINTS 5u
+#define N60_CORRECT_NARROW_NULL_START_DB 6.0
+#define N60_CORRECT_EDGE_TAPER_OCTAVES (1.0 / 6.0)
+#define N60_CORRECT_FIR_MIN_TRANSFORM 16384u
+#define N60_CORRECT_FIR_OVERSAMPLING 8u
+
+/* Points of a built-in target (ascending Hz and dB). capacity >= N60_CORRECT_BUILTIN_TARGET_MAX_POINTS. */
+int32_t n60_correct_builtin_target(uint32_t index, double *frequency_hz, double *gain_db, uint32_t capacity,
+                                   uint32_t *count);
+
+/* Parses "frequency gain" text (comma or whitespace separated, one pair per line; lines starting with #, ;, * or // are
+ * comments; duplicate frequencies are averaged; the result is sorted). Lines break at LF and CR separately (a CRLF pair
+ * counts two line numbers). ASCII whitespace only. text is not NUL terminated; length is in bytes. */
+int32_t n60_correct_target_parse(const char *text, uint64_t length, double *frequency_hz, double *gain_db,
+                                 uint32_t capacity, uint32_t *count, uint32_t *error_line);
+
+/* Piecewise-linear in log frequency, held outside the curve. Validates the curve and every query. */
+int32_t n60_correct_target_interpolate(const double *frequency_hz, const double *gain_db, uint32_t count,
+                                       const double *query_hz, uint32_t query_count, double *out_db);
+
+/* Raised-cosine smoothing over `octaves` (0 copies). */
+int32_t n60_correct_magnitude_smooth(const double *frequency_hz, const double *magnitude_db, uint32_t count,
+                                     double octaves, double *out_db);
+
+typedef struct n60_correct_preview_params {
+    uint32_t struct_size;
+    uint32_t has_usable_low;
+    uint32_t has_usable_high;
+    uint32_t tap_count;
+    uint32_t tap_limit;         /* the largest tap count the caller's convolver accepts */
+    double usable_low_hz;
+    double usable_high_hz;
+    double correction_low_hz;
+    double correction_high_hz;
+    double smoothing_octaves;
+    double maximum_boost_db;
+    double maximum_cut_db;
+} n60_correct_preview_params;
+
+/* Caller-provided arrays of `count` doubles each. The right grid must match the left within max(1e-6, 1e-9 f) Hz. */
+typedef struct n60_correct_preview_out {
+    double *target_db;
+    double *smoothed_left_db;
+    double *smoothed_right_db;
+    double *left_correction_db;
+    double *right_correction_db;
+    double effective_low_hz;
+    double effective_high_hz;
+    double maximum_positive_db;     /* at least 0 */
+    double estimated_headroom_db;
+} n60_correct_preview_out;
+
+int32_t n60_correct_preview(const n60_correct_preview_params *params, const double *frequency_hz, uint32_t count,
+                            const double *left_db, const double *right_frequency_hz, const double *right_db, const double *target_frequency_hz,
+                            const double *target_gain_db, uint32_t target_count, n60_correct_preview_out *out);
+
+/* Rounds a positive peak up to the next half dB with 0.25 dB margin; 0 when not positive. */
+double n60_correct_recommended_headroom_db(double maximum_positive_db);
+
+/* Analysis transform size for a tap count (power of two). N60_CORRECT_ERR_TAP_COUNT or N60_CORRECT_ERR_TRANSFORM. */
+int32_t n60_correct_fir_transform_size(uint32_t tap_count, uint32_t tap_limit, uint32_t *size);
+
+/* Magnitude of the FIR zero padded to transform_size, sampled at frequency_hz (linear interpolation of bin magnitudes),
+ * and the largest positive gain over bins 0 .. size/2 in dB (0 when none). transform_size is a power of two >= tap_count. */
+int32_t n60_correct_fir_response(const float *taps, uint32_t tap_count, double sample_rate, uint32_t transform_size,
+                                 const double *frequency_hz, uint32_t count, double *out_db, double *maximum_positive_db);
+
+/* taps * 10^(-headroom_db / 20), headroom_db finite and >= 0. */
+int32_t n60_correct_scale_taps(const float *taps, uint32_t count, double headroom_db, float *out);
 
 #ifdef __cplusplus
 }

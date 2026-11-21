@@ -60,7 +60,20 @@ enum RoomCorrectionBuiltInTarget: String, CaseIterable, Identifiable, Sendable {
 
     var id: String { rawValue }
 
+    /// Read once per process: `e21.core-designers` takes the built-in points from the core (`n60/correct.h` section 7).
+    private static let useCoreMaths = FeatureFlags.isEnabledProcessWide(.coreDesigners)
+
     var curve: RoomCorrectionTargetCurve {
+        if Self.useCoreMaths {
+            var curve = swiftCurve
+            let index = Self.allCases.firstIndex(of: self).map { $0 } ?? 0
+            curve.points = RoomCorrectionCore.builtInTargetPoints(index: index)
+            return curve
+        }
+        return swiftCurve
+    }
+
+    private var swiftCurve: RoomCorrectionTargetCurve {
         switch self {
         case .flat:
             return RoomCorrectionTargetCurve(
@@ -98,11 +111,20 @@ enum RoomCorrectionBuiltInTarget: String, CaseIterable, Identifiable, Sendable {
 }
 
 struct RoomCorrectionTargetCurveParser: Sendable {
+    /// `e21.core-designers` when the parser is made; parity tests set it explicitly.
+    var useCoreMaths = FeatureFlags.isEnabledProcessWide(.coreDesigners)
+
     func parse(
         _ text: String,
         name proposedName: String = "Imported Target",
         id: UUID = UUID()
     ) throws -> RoomCorrectionTargetCurve {
+        if useCoreMaths {
+            let points = try RoomCorrectionCore.parseTarget(text)
+            let trimmedName = proposedName.trimmingCharacters(in: .whitespacesAndNewlines)
+            return RoomCorrectionTargetCurve(
+                id: id, name: trimmedName.isEmpty ? "Imported Target" : trimmedName, points: points)
+        }
         var pointsByFrequency: [Double: (sum: Double, count: Int)] = [:]
         var sawDataLine = false
 
@@ -945,6 +967,9 @@ struct RoomCorrectionCorrectionPreviewDesigner: Sendable {
     static let narrowNullProtectionStartDB = 6.0
     static let edgeTaperOctaves = 1.0 / 6.0
 
+    /// `e21.core-designers` when the designer is made; parity tests set it explicitly. On: the core computes the preview.
+    var useCoreMaths = FeatureFlags.isEnabledProcessWide(.coreDesigners)
+
     private let smoother = RoomCorrectionMagnitudeSmoother()
 
     func preview(
@@ -954,6 +979,11 @@ struct RoomCorrectionCorrectionPreviewDesigner: Sendable {
         usableLowHz: Double? = nil,
         usableHighHz: Double? = nil
     ) throws -> RoomCorrectionCorrectionPreview {
+        if useCoreMaths {
+            return try RoomCorrectionCore.correctionPreview(
+                aggregate: aggregate, target: target, parameters: parameters,
+                usableLowHz: usableLowHz, usableHighHz: usableHighHz)
+        }
         try RoomCorrectionTargetMath.validateResponse(aggregate.leftResponse)
         try RoomCorrectionTargetMath.validateResponse(aggregate.rightResponse)
         guard RoomCorrectionTargetMath.frequencyGridsMatch(
