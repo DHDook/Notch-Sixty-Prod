@@ -172,6 +172,24 @@ void truePeakFactor(double rate) {
     const double ref = referencePeak(out, (size_t)(0.15 * rate), (size_t)(0.35 * rate));
     const double ceiling = 0.5 * std::pow(10.0, 0.6 / 20.0);
     check(ref <= ceiling, "true-peak guard holds the 4x reference peak within 0.6 dB", rate, ref, ceiling);
+    // G10: the guard readback means "the true-peak guard is on", also at factor 1 (176.4 kHz and above); without the guard
+    // (word on, guard off, user factor 1) it reads 0.
+    {
+        n60_dynamics_readback rb;
+        std::memset(&rb, 0, sizeof rb);
+        rb.structSize = sizeof rb;
+        check(n60_graph_read_dynamics(g, 5, 0, &rb) == N60_STATUS_OK && rb.guardActive == 1u,
+              "guard reads active at every rate with the sound fixes on", rate, rb.guardActive, expectedFactor(rate));
+        const float noGuard[8] = {1, -6, 1, 100, 2, 0, 1, 3};
+        n60_graph *ng = build(rate, N60_STAGE_PROTECTION, noGuard, 8);
+        std::memset(&rb, 0, sizeof rb);
+        rb.structSize = sizeof rb;
+        Vec x(4096, 0.1f), y(4096, 0.0f);
+        run(ng, x, y, 0, x.size());
+        check(n60_graph_read_dynamics(ng, 5, 0, &rb) == N60_STATUS_OK && rb.guardActive == 0u,
+              "guard reads idle with the guard off", rate, rb.guardActive, 0);
+        n60_graph_retire(ng);
+    }
     n60_graph_retire(g);
     n60_graph_retire(o);
 }

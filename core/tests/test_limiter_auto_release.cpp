@@ -217,7 +217,7 @@ void ceilingAndGuard(double rate) {
     n60_graph_retire(g);
     const double tp = referencePeak(out, (size_t)(0.3 * rate), (size_t)(0.3 * rate) + 2000);
     check(tp <= 0.501188 * 1.0715, "true peak holds within 0.6 dB with auto release", rate, tp, 0.501188 * 1.0715);
-    check(rb.guardActive == 1u || rate >= 176399, "guard reported", rate, rb.guardActive);
+    check(rb.guardActive == 1u, "guard reported", rate, rb.guardActive);
 }
 
 void blocks(double rate) {

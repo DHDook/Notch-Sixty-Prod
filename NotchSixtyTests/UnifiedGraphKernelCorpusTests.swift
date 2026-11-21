@@ -262,7 +262,12 @@ final class UnifiedGraphKernelCorpusTests: XCTestCase {
                 // The report is one frame short of the measured delay at 44.1 and 88.2 kHz (gap G2 in
                 // docs/epics/E23.md); the tolerance is one frame until that is fixed.
                 XCTAssertEqual(graphDelay, Double(host.latencyFrames), accuracy: 1.0, "graph report vs measured, \(label)")
-                XCTAssertEqual(graphDelay, kernelDelay, accuracy: 0.5, "graph vs kernel measured, \(label)")
+                // Parity exception (E32 S6, for the E23 S1 corpus): with `e32.dynamics-sound` the graph's true-peak factor follows
+                // the rate (1x from 176.4 kHz, 2x at 88.2 and 96 kHz) while the frozen kernel keeps a fixed 4x, so the delays
+                // differ by design wherever the rate's factor is not 4.
+                if !DynamicsSoundFixes.isEnabled || DynamicsSoundFixes.truePeakFactor(sampleRate: rate) == 4 {
+                    XCTAssertEqual(graphDelay, kernelDelay, accuracy: 0.5, "graph vs kernel measured, \(label)")
+                }
             }
         }
     }

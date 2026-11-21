@@ -5,10 +5,11 @@ import XCTest
 final class DynamicsSoundFixesTests: XCTestCase {
     private let rates: [Double] = [44_100, 48_000, 88_200, 96_000, 176_400, 192_000, 352_800, 384_000]
 
-    func testFlagIsRegisteredAndDefaultsOff() {
+    func testFlagIsRegisteredAndGraduated() {
         let flag = FeatureFlag.dynamicsSound
         XCTAssertTrue(FeatureFlag.all.contains(flag))
-        XCTAssertFalse(flag.defaultEnabled)
+        XCTAssertTrue(flag.graduated)
+        XCTAssertTrue(flag.resolvedDefault)
         XCTAssertEqual(flag.id, "e32.dynamics-sound")
     }
 

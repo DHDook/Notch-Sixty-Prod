@@ -274,12 +274,14 @@ extension FeatureFlag {
     )
     /// E32 S5: three sound changes in the graph's dynamics (the limiter's attack never exceeds its look-ahead, the expander's
     /// Attack opens and Release closes, the true-peak factor follows the device rate). Swift decides and publishes them in the
-    /// stage parameters; the core never reads the flag. Off: every stage renders exactly as before. Removed in the
-    /// flag-cleanup phase.
+    /// stage parameters; the core never reads the flag. Graduated in E32 S6 (21 Nov 2026): available by default, never armed.
+    /// `-NotchSixtyFeatures -e32.dynamics-sound` restores the old attack, expander timing and fixed 4x factor. No new code may
+    /// depend on it; removed in the flag-cleanup phase.
     static let dynamicsSound = FeatureFlag(
         id: "e32.dynamics-sound",
         title: "Dynamics sound fixes",
-        epic: "E32"
+        epic: "E32",
+        graduated: true
     )
     /// E34: the app-wide design language (macOS 27 Liquid Glass rules in `docs/DESIGN_LANGUAGE.md`, shared values and
     /// components from S1). Visible changes sit behind it; pages move onto the shared parts first with almost no visible

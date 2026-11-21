@@ -889,7 +889,7 @@ typedef struct n60_dynamics_readback {
     float grNowDb;            /* reduction at the end of the most recently rendered block (not reset) */
     float inTruePeak;         /* PROTECTION: largest |x| at the oversampled input of the limiter (factor 1 = sample peak), linear, since the previous read */
     float outTruePeak;        /* PROTECTION: the same after the limiter (factor 1 = sample peak) */
-    uint32_t guardActive;     /* PROTECTION: 1 when the limiter runs with oversampling (the true-peak guard) */
+    uint32_t guardActive;     /* PROTECTION: 1 when the limiter runs with oversampling or the true-peak guard is on (E32 G10: with the sound fixes the guard runs at 1x from 176.4 kHz, and still reads 1) */
     uint32_t reserved;        /* PROTECTION (ABI v43): safety-clamp events since the previous read, reset by the read; 0 for the other kinds */
     float effectiveReleaseMs; /* PROTECTION (ABI v46): the limiter's effective release time (ms) at the end of the last block while auto release is on; 0 otherwise and for the other kinds (not reset by the read) */
 } n60_dynamics_readback;

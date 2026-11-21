@@ -138,7 +138,7 @@ final class DynamicsExtrasShipTests: XCTestCase {
             XCTAssertEqual(comp.count, 16)
             XCTAssertEqual(comp[12], 1, "compressor RMS detector")
             XCTAssertEqual(comp[15], 0, "listen starts off")
-            XCTAssertEqual(exp.count, 13)
+            XCTAssertEqual(exp.count, FeatureFlags.isEnabledProcessWide(.dynamicsSound) ? 15 : 13, "E32: the swap word is appended with the sound fixes")
             XCTAssertEqual(exp[8], 1, "expander RMS detector")
             XCTAssertEqual(exp[12], 0, "listen starts off")
             XCTAssertEqual(mb.count, 44)
