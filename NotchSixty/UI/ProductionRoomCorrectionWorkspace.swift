@@ -258,6 +258,7 @@ struct ProductionRoomCorrectionWorkspace: View {
             LabeledContent("Sweep Level") {
                 HStack(spacing: 12) {
                     Slider(value: $calibration.sweepLevelDBFS, in: -36 ... -6, step: 1)
+                    .designSlider("Sweep level", value: calibration.sweepLevelDBFS, unit: .dbfs)
                         .frame(width: 280)
                     Text("\(calibration.sweepLevelDBFS, specifier: "%.0f") dBFS")
                         .monospacedDigit()
@@ -765,6 +766,7 @@ struct ProductionRoomCorrectionWorkspace: View {
                     Text("Maximum boost").foregroundStyle(.secondary)
                     HStack(spacing: 12) {
                         Slider(value: $maximumBoostDB, in: 0...12, step: 0.5)
+                        .designSlider("Maximum boost", value: maximumBoostDB, unit: .db)
                             .frame(width: 260)
                         Text("\(maximumBoostDB, specifier: "%.1f") dB")
                             .monospacedDigit()
@@ -775,6 +777,7 @@ struct ProductionRoomCorrectionWorkspace: View {
                     Text("Maximum cut").foregroundStyle(.secondary)
                     HStack(spacing: 12) {
                         Slider(value: $maximumCutDB, in: 0...24, step: 0.5)
+                        .designSlider("Maximum cut", value: maximumCutDB, unit: .db)
                             .frame(width: 260)
                         Text("\(maximumCutDB, specifier: "%.1f") dB")
                             .monospacedDigit()

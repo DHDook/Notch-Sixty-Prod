@@ -490,6 +490,7 @@ private struct AudioUnitEditorSheet: View {
                                 in: Double(parameter.minValue)
                                     ... Double(parameter.maxValue)
                             )
+                            .designSlider(parameter.displayName, value: Double(parameter.value), unit: .plain(""))
                         }
                     }
                     .padding(.vertical, DesignSpacing.xs.pt)
@@ -729,6 +730,7 @@ private struct PluginRackSlotRow: View {
                                 }
                             }
                         )
+                        .designSlider("Wet and dry mix", value: wetDryMix, unit: .percent)
                         .frame(width: 120)
                         .disabled(isBusy)
 

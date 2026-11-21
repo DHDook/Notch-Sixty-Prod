@@ -11,9 +11,7 @@ struct DesignCard<Content: View>: View {
         content()
             .padding(DesignSpacing.m.value(style))
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                .quaternary.opacity(DesignSurface.opacity(style)),
-                in: RoundedRectangle(cornerRadius: DesignRadius.medium.value(style), style: .continuous))
+            .modifier(DesignSurfaceModifier(radius: .medium, style: style))
     }
 }
 
@@ -68,9 +66,7 @@ struct DesignStatusBadge: View {
             .foregroundStyle(level.color)
             .padding(.horizontal, DesignSpacing.s.value(style))
             .padding(.vertical, DesignSpacing.xs.value(style))
-            .background(
-                level.color.opacity(0.14),
-                in: RoundedRectangle(cornerRadius: DesignRadius.small.value(style), style: .continuous))
+            .modifier(DesignTintModifier(color: level.color, opacity: 0.14, radius: .small, style: style))
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(text ?? level.label)
             .accessibilityValue(level.label)

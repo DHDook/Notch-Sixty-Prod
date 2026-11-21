@@ -94,12 +94,14 @@ struct ProductionOptionalAudioResearchWorkspace: View {
                 HStack {
                     Text("Azimuth")
                     Slider(value: $previewAzimuth, in: -180...180, step: 5)
+                    .designSlider("Azimuth", value: previewAzimuth, unit: .degrees)
                     Text("\(previewAzimuth, specifier: "%.0f")°")
                         .frame(width: 52)
                 }
                 HStack {
                     Text("Elevation")
                     Slider(value: $previewElevation, in: -80...80, step: 5)
+                    .designSlider("Elevation", value: previewElevation, unit: .degrees)
                     Text("\(previewElevation, specifier: "%.0f")°")
                         .frame(width: 52)
                 }

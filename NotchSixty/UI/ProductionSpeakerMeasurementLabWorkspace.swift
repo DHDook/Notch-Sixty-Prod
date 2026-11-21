@@ -574,6 +574,7 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
                                     in: 20...80,
                                     step: 1
                                 )
+                                .designSlider("Minimum reference SNR", value: referenceMinimumSNRDB, unit: .db)
                                 .frame(width: 150)
                                 Text(
                                     "\(referenceMinimumSNRDB, specifier: "%.0f") dB"
@@ -718,6 +719,7 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
                         in: -48...(-12),
                         step: 1
                     )
+                    .designSlider("Excitation level", value: draft.excitationLevelDBFS, unit: .dbfs)
                     .frame(width: 190)
                     Text(
                         "\(draft.excitationLevelDBFS, specifier: "%.0f") dBFS"

@@ -683,6 +683,7 @@ struct ProductionMetersView: View {
                                 .targetPeakRange,
                             step: 0.1
                         )
+                        .designSlider("Target true peak", value: assistant.targetPeakDBTP, unit: .dbtp)
                         Text(
                             "\(assistant.targetPeakDBTP, specifier: "%.1f") dBTP"
                         )

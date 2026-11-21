@@ -120,3 +120,79 @@ final class DesignLanguageTests: XCTestCase {
         }
     }
 }
+
+/// E34 S6: each accessibility setting changes the resolved style of the shared parts.
+final class DesignAccessibilityTests: XCTestCase {
+    func testStandardSettingsLeaveStylesUnchanged() {
+        let s = DesignAccessibilitySettings.standard
+        for style in [DesignStyle.current, .redesigned] {
+            XCTAssertEqual(s.surfaceOpacity(style), DesignSurface.opacity(style), accuracy: 1e-12)
+        }
+        XCTAssertEqual(s.tintOpacity(0.14), 0.14, accuracy: 1e-12)
+        XCTAssertEqual(s.borderWidth, 0.5)
+        XCTAssertFalse(s.drawsOutline)
+        XCTAssertTrue(s.usesGlass)
+        XCTAssertNotNil(s.animation(.easeInOut))
+    }
+
+    func testReduceTransparencyMakesSurfacesNearlyOpaqueAndDropsGlass() {
+        var s = DesignAccessibilitySettings.standard
+        s.reduceTransparency = true
+        for style in [DesignStyle.current, .redesigned] {
+            XCTAssertGreaterThan(s.surfaceOpacity(style), DesignSurface.opacity(style))
+            XCTAssertGreaterThanOrEqual(s.surfaceOpacity(style), 0.9)
+        }
+        XCTAssertFalse(s.usesGlass)
+    }
+
+    func testIncreaseContrastStrengthensFillTintAndBorder() {
+        var s = DesignAccessibilitySettings.standard
+        s.increaseContrast = true
+        XCTAssertGreaterThan(s.surfaceOpacity(.current), DesignSurface.opacity(.current))
+        XCTAssertGreaterThan(s.tintOpacity(0.14), 0.14)
+        XCTAssertGreaterThan(s.borderWidth, DesignAccessibilitySettings.standard.borderWidth)
+        XCTAssertTrue(s.drawsOutline)
+    }
+
+    func testDifferentiateWithoutColorAddsOutline() {
+        var s = DesignAccessibilitySettings.standard
+        s.differentiateWithoutColor = true
+        XCTAssertTrue(s.drawsOutline)
+        XCTAssertGreaterThan(s.tintOpacity(0.14), 0.14)
+    }
+
+    func testReduceMotionRemovesAnimation() {
+        var s = DesignAccessibilitySettings.standard
+        s.reduceMotion = true
+        XCTAssertNil(s.animation(.easeInOut))
+    }
+
+    func testEveryStatusLevelNamesItselfWithoutColor() {
+        for level in StatusLevel.allCases {
+            XCTAssertFalse(level.label.isEmpty)
+            XCTAssertFalse(level.iconName.isEmpty)
+        }
+        XCTAssertEqual(Set(StatusLevel.allCases.map(\.iconName)).count, StatusLevel.allCases.count)
+    }
+
+    func testSliderValuesAreSpokenInPageUnits() {
+        XCTAssertEqual(DesignSliderUnit.db.spoken(-6), "\u{2212}6.0 dB")
+        XCTAssertEqual(DesignSliderUnit.db.spoken(3.5), "+3.5 dB")
+        XCTAssertEqual(DesignSliderUnit.dbfs.spoken(-18), "\u{2212}18.0 dBFS")
+        XCTAssertEqual(DesignSliderUnit.dbtp.spoken(-1), "\u{2212}1.0 dBTP")
+        XCTAssertEqual(DesignSliderUnit.hz.spoken(80), "80 Hz")
+        XCTAssertEqual(DesignSliderUnit.hz.spoken(352_800), "352.8 kHz")
+        XCTAssertEqual(DesignSliderUnit.ms.spoken(12.5), "12.5 ms")
+        XCTAssertEqual(DesignSliderUnit.percent.spoken(0.5), "50 %")
+        XCTAssertEqual(DesignSliderUnit.degrees.spoken(-45), "\u{2212}45.0 degrees")
+        XCTAssertEqual(DesignSliderUnit.number.spoken(0.707), "0.71")
+        XCTAssertEqual(DesignSliderUnit.plain("").spoken(0.25), "0.25")
+        XCTAssertEqual(DesignSliderUnit.plain("seconds").spoken(2), "2.0 seconds")
+    }
+
+    func testModifiersBuildUnderAllSettings() {
+        let view = Text("x").designSurface().designPanel().designTint(.green).designGlass()
+            .designSlider("Gain", value: 1, unit: .db).designAnimation(.easeInOut, value: 1)
+        XCTAssertNotNil(view)
+    }
+}
