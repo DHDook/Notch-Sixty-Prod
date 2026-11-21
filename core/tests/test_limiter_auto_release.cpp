@@ -243,6 +243,49 @@ void blocks(double rate) {
 }
 }  // namespace
 
+
+// G67: the auto-release sustain survives an unrelated rebuild. After held limiting, publish a rebuilt graph (same limiter plus a
+// gain stage, an unrelated topology change), render briefly, and the effective release still reads slow, not the 30 ms fast time.
+void survivesRebuild(double rate) {
+    const float p[8] = {1, -12, 0.5f, 100.0f, 2, 0, 1, 7};
+    n60_graph *g = build(rate, p, 8);
+    check(g != nullptr, "build for rebuild", rate);
+    if (g == nullptr) return;
+    Vec in((size_t)(3.5 * rate), 0.5f), out;
+    run(g, in, out);
+    const float before = readback(g).effectiveReleaseMs;
+    check(before > 250.0f, "held limiting reads slow before the rebuild", rate, before);
+    n60_rebuild_options ro;
+    std::memset(&ro, 0, sizeof ro);
+    ro.structSize = sizeof ro;
+    ro.fadeMs = 0.0f;
+    n60_graph_set_rebuild_options(g, &ro);
+    n60_stage_desc s;
+    std::memset(&s, 0, sizeof s);
+    s.structSize = sizeof s;
+    s.kind = N60_STAGE_PROTECTION;
+    s.stageId = 5;
+    s.laneA = N60_LANE_ALL;
+    s.params = p;
+    s.paramCount = 8;
+    n60_graph_desc d;
+    std::memset(&d, 0, sizeof d);
+    d.structSize = sizeof d;
+    d.abiVersion = N60_GRAPH_ABI_VERSION;
+    d.sampleRate = rate;
+    d.maxBlockFrames = 512;
+    d.inputChannels = d.outputChannels = 2;
+    d.stages = &s;
+    d.stageCount = 1;
+    check(n60_graph_publish(g, &d) == N60_STATUS_OK, "publish", rate);
+    // Settle the rebuild with a loud block each time so the follower is not pulled down by quiet input.
+    Vec more((size_t)(0.1 * rate), 0.5f);
+    run(g, more, out);
+    const float after = readback(g).effectiveReleaseMs;
+    check(after > 250.0f, "the sustain carries across a rebuild", rate, after, before);
+    n60_graph_retire(g);
+}
+
 int main() {
     const double rates[] = {44100, 48000, 88200, 96000, 176400, 192000, 352800, 384000};
     for (double rate : rates) {
@@ -252,6 +295,7 @@ int main() {
         lowFrequencyDistortion(rate);
         ceilingAndGuard(rate);
         blocks(rate);
+        survivesRebuild(rate);
     }
     if (failures) {
         std::fprintf(stderr, "n60core limiter auto release: %d failures\n", failures);

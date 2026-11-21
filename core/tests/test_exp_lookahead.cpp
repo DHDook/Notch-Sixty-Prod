@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <vector>
 
@@ -242,6 +243,28 @@ void validation(double rate) {
 }
 }  // namespace
 
+
+// G103: an expander with the page defaults (threshold -60, ratio 1.5, range -12, Attack 5, Release 200) leaves a -20 dBFS 1 kHz
+// tone alone once the E32 S5 timing swap is on (Attack opens, Release closes). The legacy mapping (swap off) closes with the
+// 5 ms Attack on the unsmoothed per-sample peak, so the instantaneous dip at each zero crossing pulls the gain down by an amount
+// that depends on how the rate lands on the tone's zero crossings (about 1 dB at 44.1 kHz, about 7 dB at 48 kHz); that mapping is
+// the frozen kernel's and stays for flag-off sessions.
+void defaultsLeaveALoudToneAlone(double rate) {
+    const size_t n = (size_t)(0.4 * rate);
+    Lanes in(2, std::vector<float>(n));
+    for (size_t i = 0; i < n; ++i) in[0][i] = in[1][i] = 0.1f * (float)std::sin(2.0 * 3.14159265358979323846 * 1000.0 * (double)i / rate);
+    double gain[2] = {0, 0};
+    for (int swap = 0; swap < 2; ++swap) {
+        const float p[15] = {-60, 1.5f, -12, 5, 200, 1, 0, 0, 0, 50, 0, 100, 0, 0, (float)swap};
+        const Lanes out = renderOnce(rate, p, 15, in, 512);
+        double a = 0, b = 0;
+        for (size_t i = n - (size_t)(0.1 * rate); i < n; ++i) { a += (double)out[0][i] * out[0][i]; b += (double)in[0][i] * in[0][i]; }
+        gain[swap] = 10.0 * std::log10(a / b);
+    }
+    check(std::fabs(gain[1]) < 0.3, rate, "the swapped timing leaves a loud tone alone", gain[1], 0.3);
+    if (std::getenv("N60_VERBOSE")) std::fprintf(stderr, "rate %.0f legacy %.2f swapped %.2f\n", rate, gain[0], gain[1]);
+}
+
 int main() {
     const double rates[] = {44100, 48000, 88200, 96000, 176400, 192000, 352800, 384000};
     for (double rate : rates) {
@@ -251,6 +274,7 @@ int main() {
         blockSizesWithListen(rate);
         ringCarry(rate);
         validation(rate);
+        defaultsLeaveALoudToneAlone(rate);
     }
     if (failures == 0) std::printf("exp lookahead OK\n");
     return failures == 0 ? 0 : 1;

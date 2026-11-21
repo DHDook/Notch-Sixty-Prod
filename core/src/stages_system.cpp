@@ -2853,7 +2853,8 @@ uint64_t systemRiderCarry(SnapHeader *from, SnapHeader *to) N60_RT_NONBLOCKING {
             ProtShared &b = *reinterpret_cast<ProtShared *>(sharedState(to, dst[i]));
             b.riderSustained = a.riderSustained;
             b.riderAtten = a.riderAtten;
-            bytes += 2 * sizeof(float);
+            b.sustain = a.sustain;  // G67: the auto-release sustain survives an unrelated rebuild
+            bytes += 2 * sizeof(float) + sizeof(double);
             break;
         }
     }
