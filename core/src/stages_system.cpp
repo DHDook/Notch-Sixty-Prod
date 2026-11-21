@@ -2854,7 +2854,7 @@ uint64_t systemRiderCarry(SnapHeader *from, SnapHeader *to) N60_RT_NONBLOCKING {
             b.riderSustained = a.riderSustained;
             b.riderAtten = a.riderAtten;
             b.sustain = a.sustain;  // G67: the auto-release sustain survives an unrelated rebuild
-            bytes += 2 * sizeof(float) + sizeof(double);
+            bytes += 3 * sizeof(double);
             break;
         }
     }
