@@ -1918,7 +1918,7 @@ final class ProductProfileController: ObservableObject {
             ),
             headroomAttenuationDB: gain.headroomAttenuationDB,
             dynamics: dynamics,
-            audioUnitRack: audioUnitHost.rackConfiguration,
+            audioUnitRack: audioUnitHost.presetRackConfiguration,
             autoPreampEnabled: autoPreamp.isOn,
             preampTrimDB: autoPreamp.trimDB
         )

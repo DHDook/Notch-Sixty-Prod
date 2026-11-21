@@ -62,7 +62,7 @@ struct ProductionEqualizerView: View {
 
     /// `recorded` for an edit that finishes off the main actor (E6 G55: the Linear phase FIR design
     /// runs off main, so the Phase picker returns at once). One undo step when the edit lands.
-    private func recordedOffMain(_ action: @escaping () async throws -> Void) {
+    private func recordedOffMain(coalesceKey: String? = nil, _ action: @escaping () async throws -> Void) {
         let before = engine.stereoEQConfiguration
         Task { @MainActor in
             do {
@@ -71,7 +71,17 @@ struct ProductionEqualizerView: View {
             } catch {
                 actionError = error.localizedDescription
             }
-            history.record(before: before, after: engine.stereoEQConfiguration, coalesceKey: nil)
+            history.record(before: before, after: engine.stereoEQConfiguration, coalesceKey: coalesceKey)
+        }
+    }
+
+    /// One band edit as one undo step. At linear phase the design runs off the main actor (E33 S11c, G97, G98); otherwise it
+    /// is the plain synchronous edit.
+    private func recordedBandEdit(coalesceKey: String? = nil, _ band: EQBand) {
+        if engine.eqEditDesignsOffMain {
+            recordedOffMain(coalesceKey: coalesceKey) { try await engine.updateEQBandOffMain(band) }
+        } else {
+            recorded(coalesceKey: coalesceKey) { try engine.updateEQBand(band) }
         }
     }
 
@@ -431,8 +441,18 @@ struct ProductionEqualizerView: View {
                     pendingDragBand = nil
                     let sanitized = sanitize(band)
                     dragPreview = nil
-                    perform { try engine.updateEQBand(sanitized) }
-                    history.endGesture(after: engine.stereoEQConfiguration)
+                    if engine.eqEditDesignsOffMain {
+                        // The design runs off the main actor; the gesture ends when the edit lands (G97).
+                        Task { @MainActor in
+                            do { try await engine.updateEQBandOffMain(sanitized); actionError = nil } catch {
+                                actionError = error.localizedDescription
+                            }
+                            history.endGesture(after: engine.stereoEQConfiguration)
+                        }
+                    } else {
+                        perform { try engine.updateEQBand(sanitized) }
+                        history.endGesture(after: engine.stereoEQConfiguration)
+                    }
                 },
                 onNudge: { axis, direction, step in nudgeSelectedBand(axis, direction, step) },
                 onDeleteSelected: { if let id = selectedBandID { removeBand(id) } },
@@ -1055,7 +1075,7 @@ struct ProductionEqualizerView: View {
                 pendingPublishTask = nil
                 pendingDragBand = nil
                 dragPreview = nil
-                recorded { try engine.updateEQBand(fitted(updated)) }
+                recordedBandEdit(fitted(updated))
             }
         )
     }
@@ -1068,7 +1088,7 @@ struct ProductionEqualizerView: View {
         pendingPublishTask = nil
         pendingDragBand = nil
         dragPreview = nil
-        recorded(coalesceKey: key.map { "\($0).\(band.id)" }) { try engine.updateEQBand(fitted(updated)) }
+        recordedBandEdit(coalesceKey: key.map { "\($0).\(band.id)" }, fitted(updated))
     }
 
     /// E33 S2: Import, Export, copy, paste and "Copy lane to...". Each change is one undo step.
@@ -1109,11 +1129,15 @@ struct ProductionEqualizerView: View {
     private func useMatchedFilters() {
         let targets = EQMatchedFiltersPolicy.eligible(bands)
         guard !targets.isEmpty else { return }
-        recorded {
-            for var band in targets {
-                band.filterMethod = .matched
-                try engine.updateEQBand(band)
-            }
+        var next = engine.stereoEQConfiguration
+        for var band in targets {
+            band.filterMethod = .matched
+            next.updateEditableBand(band)
+        }
+        if engine.eqEditDesignsOffMain {
+            recordedOffMain { try await engine.applyEQConfigurationOffMain(next) }
+        } else {
+            recorded { try engine.replaceStereoEQConfiguration(next) }
         }
     }
 
@@ -1246,7 +1270,13 @@ struct ProductionEqualizerView: View {
             while !Task.isCancelled {
                 guard let next = pendingDragBand else { break }
                 pendingDragBand = nil
-                perform { try engine.updateEQBand(next) }
+                if engine.eqEditDesignsOffMain {
+                    do { try await engine.updateEQBandOffMain(next); actionError = nil } catch {
+                        actionError = error.localizedDescription
+                    }
+                } else {
+                    perform { try engine.updateEQBand(next) }
+                }
                 try? await Task.sleep(nanoseconds: 33_000_000)
                 guard !Task.isCancelled else { break }
             }
