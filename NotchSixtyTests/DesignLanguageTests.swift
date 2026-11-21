@@ -98,4 +98,25 @@ final class DesignLanguageTests: XCTestCase {
             XCTAssertGreaterThan(DesignSpacing.xl.value(style), DesignSpacing.l.value(style) - 1)
         }
     }
+
+    /// E34 S2b: the page title (window title and Help link) follows the sidebar row's name, so
+    /// the System page is "Speakers & Room" with the flag on and "System" with it off.
+    func testPageTitlesFollowSidebarNamesWithFlagOnAndOff() {
+        for section in ProductionSection.allCases {
+            XCTAssertEqual(section.sidebarTitle(designLanguage: false), section.title)
+            let on = section.sidebarTitle(designLanguage: true)
+            XCTAssertEqual(on, section == .system ? "Speakers & Room" : section.title)
+            XCTAssertFalse(on.isEmpty)
+        }
+    }
+
+    /// E34 S2b: the Dashboard's shared steps resolve to distinct, ordered values in both styles.
+    func testDashboardSpacingStepsAreOrderedInBothStyles() {
+        for style in [DesignStyle.current, .redesigned] {
+            let steps = [DesignSpacing.xs, .s, .m, .l, .xl].map { $0.value(style) }
+            XCTAssertEqual(steps, steps.sorted())
+            XCTAssertEqual(Set(steps).count, steps.count)
+            XCTAssertGreaterThanOrEqual(DesignType.caption.size(style), DesignType.minimumSize)
+        }
+    }
 }
