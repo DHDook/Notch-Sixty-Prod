@@ -537,6 +537,13 @@ struct ProductionDynamicsView: View {
                         .accessibilityIdentifier("dynamics.multiband.bandCount")
                         Text("Changing the band count rebuilds the stage and resets its filters; the crossovers move to a sensible spread.")
                             .font(DesignType.caption.font).foregroundStyle(.secondary)
+                        if let note = MultibandKernelNote.note(
+                            bandCount: count,
+                            graphRendering: engine.unifiedGraphEnabled && engine.diagnosticsSnapshot().unifiedGraph?.fallbackReason == nil
+                        ) {
+                            Text(note).font(DesignType.caption.font).foregroundStyle(.orange)
+                                .accessibilityIdentifier("dynamics.multiband.kernelNote")
+                        }
                     }
                     row(.multibandCompressorLowMidFrequencyHz, title: count == 3 || !bandsEnabled ? nil : "Crossover 1")
                     Picker("Crossover 1 Slope", selection: binding({ $0.multibandCompressor.lowMidSlope }, { $0.multibandCompressor.lowMidSlope = $1 })) {

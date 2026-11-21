@@ -108,16 +108,18 @@ static inline N60BiquadCoefficients N60BiquadNormalize(
     return coefficients;
 }
 
-// Control-plane coefficient design. Never call from the realtime render path.
-static inline bool N60BiquadDesign(
+// Control-plane coefficient design in double precision: out = { b0, b1, b2, a1, a2 } normalised by a0, before the float
+// rounding `N60BiquadDesign` applies. The drawn EQ curve uses these so it matches the engine near DC (E33 G16).
+// Never call from the realtime render path.
+static inline bool N60BiquadDesignDouble(
     N60BiquadFilterType type,
     double sampleRate,
     double frequencyHz,
     double gainDB,
     double q,
-    N60BiquadCoefficients * _Nonnull coefficients
+    double * _Nonnull out
 ) {
-    if (coefficients == NULL
+    if (out == NULL
         || !isfinite(sampleRate) || sampleRate <= 0.0
         || !isfinite(frequencyHz) || frequencyHz <= 0.0
         || frequencyHz >= sampleRate * 0.5
@@ -237,7 +239,25 @@ static inline bool N60BiquadDesign(
         return false;
     }
 
-    N60BiquadCoefficients normalized = N60BiquadNormalize(b0, b1, b2, a0, a1, a2);
+    // a0 is 1 + alpha (or 1 + A*alpha) with alpha > 0 for every type, so this guard is unreachable for valid input;
+    // the old float path would have returned identity here, this one fails the design instead.
+    if (!isfinite(a0) || fabs(a0) < 1.0e-20) return false;
+    out[0] = b0 / a0; out[1] = b1 / a0; out[2] = b2 / a0; out[3] = a1 / a0; out[4] = a2 / a0;
+    return isfinite(out[0]) && isfinite(out[1]) && isfinite(out[2]) && isfinite(out[3]) && isfinite(out[4]);
+}
+
+// Control-plane coefficient design. Never call from the realtime render path.
+static inline bool N60BiquadDesign(
+    N60BiquadFilterType type,
+    double sampleRate,
+    double frequencyHz,
+    double gainDB,
+    double q,
+    N60BiquadCoefficients * _Nonnull coefficients
+) {
+    double d[5];
+    if (coefficients == NULL || !N60BiquadDesignDouble(type, sampleRate, frequencyHz, gainDB, q, d)) return false;
+    N60BiquadCoefficients normalized = { .b0 = (float)d[0], .b1 = (float)d[1], .b2 = (float)d[2], .a1 = (float)d[3], .a2 = (float)d[4] };
     if (!N60BiquadCoefficientsAreFinite(normalized)) {
         return false;
     }

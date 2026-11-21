@@ -6,7 +6,7 @@ enum MeasurementOverlays {
     /// This is a prediction from the filter coefficients, not a post-DSP transfer measurement.
     static func predicted(
         measurement: RoomCorrectionFrequencyResponse,
-        program: [N60BiquadCoefficients],
+        program: [EQResponseSection],
         sampleRate: Double
     ) -> RoomCorrectionFrequencyResponse {
         let magnitude = zip(measurement.frequenciesHz, measurement.magnitudeDB).map { frequency, db in

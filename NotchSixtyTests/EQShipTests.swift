@@ -334,4 +334,79 @@ final class EQShipTests: XCTestCase {
         XCTAssertEqual(history.undoStepCount, 0, "no undo step outlives the page")
         XCTAssertEqual(engine.stereoEQConfiguration, after, "the stored EQ is untouched")
     }
+
+    // MARK: E33 G5: the headroom strip's post-dynamics point
+
+    /// The Meters page reads the after-dynamics tap (stage 621) for the strip's fourth point: with the compressor biting, its
+    /// peak sits below post-EQ and above the floor, and the strip gains the point; with no tap it keeps three points.
+    func testHeadroomStripGainsThePostDynamicsPointFromTheTap() throws {
+        for rate in rates {
+            let engine = try engine(rate: rate)
+            _ = profiles(engine)
+            var dynamics = DynamicsConfiguration()
+            dynamics.compressor.enabled = true
+            dynamics.compressor.thresholdDB = -30
+            try engine.replaceDynamicsConfiguration(dynamics)
+            let host = try host(engine, rate: rate, taps: UnifiedGraphAnalyserTaps(eqDemand: false, dynDemand: true))
+            let input = tone(1_000, amplitude: 0.5, rate: rate, seconds: 0.6)
+            _ = try render(host, rate: rate, input: input)
+            let frames = 4_096
+            let window = try XCTUnwrap(
+                host.readAnalyserTap(stageId: UnifiedGraphConfiguration.analyserTapDynStageId, frames: frames), "tap 621 at \(rate)")
+            let tapPeak = try XCTUnwrap(HeadroomStripModel.peak(of: window))
+            var strip = HeadroomStripModel()
+            strip.update(peaks: ["input": 0.5, "postEQ": 0.5, "postDynamics": tapPeak, "output": tapPeak])
+            XCTAssertEqual(strip.points.map(\.id), ["input", "postEQ", "postDynamics", "output"])
+            let points = Dictionary(uniqueKeysWithValues: strip.points.map { ($0.id, $0) })
+            XCTAssertLessThan(try XCTUnwrap(points["postDynamics"]).holdDBFS, try XCTUnwrap(points["postEQ"]).holdDBFS - 3,
+                              "the compressor's reduction shows at \(rate)")
+            XCTAssertGreaterThan(try XCTUnwrap(points["postDynamics"]).holdDBFS, HeadroomStripModel.floorDB)
+            // The tap going away drops the point and keeps the shared holds.
+            let hold = try XCTUnwrap(points["input"]).holdDBFS
+            strip.update(peaks: ["input": 0.01, "postEQ": 0.01, "output": 0.01])
+            XCTAssertEqual(strip.points.map(\.id), ["input", "postEQ", "output"])
+            XCTAssertEqual(strip.points[0].holdDBFS, hold, accuracy: 1e-9)
+            strip.reset()
+            XCTAssertTrue(strip.points.allSatisfy { $0.holdDBFS == HeadroomStripModel.floorDB })
+        }
+    }
+
+    func testMultibandKernelNoteAppearsOnlyForExtraBandsOnTheKernel() {
+        XCTAssertNil(MultibandKernelNote.note(bandCount: 5, graphRendering: true))
+        XCTAssertNil(MultibandKernelNote.note(bandCount: 3, graphRendering: false))
+        XCTAssertEqual(MultibandKernelNote.note(bandCount: 4, graphRendering: false), MultibandKernelNote.text)
+    }
+
+    /// E33 G16: the drawn curve is the engine's ideal response at 2 to 10 Hz (a 5 Hz peaking band, both signs, eight rates).
+    func testDrawnCurveMatchesTheIdealResponseAtFiveHertzAtEveryRate() {
+        for rate in rates {
+            for gain in [12.0, -12.0] {
+                let band = EQBand(type: .peaking, frequencyHz: 5, gainDB: gain, q: 1)
+                let analysis = EQFilterAnalysis(bands: [band], phaseMode: .minimumPhase, sampleRate: rate)
+                for frequency in [2.0, 3, 5, 7, 10, 20, 100] {
+                    let a = pow(10, gain / 40), w0 = 2 * Double.pi * 5 / rate, alpha = sin(w0) / 2
+                    let b = [1 + alpha * a, -2 * cos(w0), 1 - alpha * a], d = [1 + alpha / a, -2 * cos(w0), 1 - alpha / a]
+                    let w = 2 * Double.pi * frequency / rate
+                    func mag(_ c: [Double]) -> Double { hypot(c[0] + c[1] * cos(w) + c[2] * cos(2 * w), c[1] * sin(w) + c[2] * sin(2 * w)) }
+                    XCTAssertEqual(analysis.magnitudeDB(at: frequency), 20 * log10(mag(b) / mag(d)), accuracy: 0.02,
+                                   "\(frequency) Hz, \(gain) dB at \(rate)")
+                }
+            }
+        }
+    }
+
+    /// E33 G96: the headroom model reads a constant-Q peaking section (type 8) as a peak of the same gain, and the bands the
+    /// EQ fit makes are cookbook (no matched flag).
+    func testConstantQPeakingPeaksAtTheBandGainAndFitBandsStayCookbook() {
+        for rate in rates {
+            for gain in [-12.0, 6.0, 12.0] {
+                var d = [Double](repeating: 0, count: 5)
+                XCTAssertTrue(N60BiquadDesignDouble(N60BiquadFilterTypePeakingConstantQ, rate, 1_000, gain, 2, &d))
+                let section = EQResponseSection(b0: d[0], b1: d[1], b2: d[2], a1: d[3], a2: d[4])
+                XCTAssertEqual(ProductionEQResponseMath.responseDB(program: [section], sampleRate: rate, frequencyHz: 1_000), gain,
+                               accuracy: 0.01, "\(gain) dB at \(rate)")
+            }
+        }
+        XCTAssertFalse(EQBandRules.sanitized(EQBand(type: .peaking, frequencyHz: 1_000, gainDB: 3, q: 1), sampleRate: 48_000).usesMatchedFilters)
+    }
 }

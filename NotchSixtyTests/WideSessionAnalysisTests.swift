@@ -471,4 +471,106 @@ final class WideSessionAnalysisTests: XCTestCase {
             inputTruePeakLinear: nil, outputTruePeakLinear: nil, roomTreatment: nil, renderFailures: 0, outputWriteFailures: 0)
         XCTAssertEqual(BitActivityNames.resolve(roleNames: [], transport: transport), ["Front left"])
     }
+
+    // MARK: Cost and block helpers (E33 G71)
+
+    func testRingAppendAndCopyWrapLikeTheSampleLoopForAnyBlockSize() {
+        var ring = [Float](repeating: 0, count: 10)
+        var reference = ring
+        var write = 0, refWrite = 0
+        var counter: Float = 1
+        for block in [3, 4, 5, 10, 1, 7, 25, 2] {
+            let source = (0..<block).map { _ in defer { counter += 1 }; return counter }
+            write = WideAnalysisFeed.ringAppend(&ring, write: write, source: source, frames: block)
+            for v in source { reference[refWrite] = v; refWrite = (refWrite + 1) % 10 }
+            XCTAssertEqual(ring, reference, "block \(block)")
+            XCTAssertEqual(write, refWrite)
+        }
+        var out = [Float](repeating: -1, count: 8)
+        WideAnalysisFeed.ringCopy(ring, start: 7, count: 6, into: &out)
+        XCTAssertEqual(Array(out[0..<6]), (0..<6).map { ring[(7 + $0) % 10] })
+        XCTAssertEqual(out[6], -1, "the copy writes only `count` samples")
+    }
+
+    func testMixKeepsPowerAndIgnoresMissingChannelsWithLongerPlanes() {
+        let planes: [[Float]] = [[1, 2, 3, 99], [3, 2, 1, 99], [5, 5, 5, 99]]
+        var out: [Float] = []
+        WideAnalysisFeed.mix(planes, indices: [0, 1, 7], frames: 3, into: &out)
+        let scale = 1 / Float(2).squareRoot()
+        XCTAssertEqual(Array(out[0..<3]), [4 * scale, 4 * scale, 4 * scale])
+        WideAnalysisFeed.mix(planes, indices: [], frames: 3, into: &out)
+        XCTAssertEqual(Array(out[0..<3]), [0, 0, 0])
+    }
+
+    /// Blocks of changing size (a device that varies its buffer) give the same spectrum as steady blocks.
+    func testVariableBlockSizesGiveTheSameSpectrum() {
+        let rate = 48_000.0
+        let size = ProductionAnalysisMath.fftSize(sampleRate: rate)
+        func spectrum(blocks: [Int]) -> [Float] {
+            let feed = WideAnalysisFeed(plan: plan(Self.fiveOne), sampleRate: rate)
+            demand(feed, spectrum: true)
+            let channels = 6
+            var position = 0, index = 0
+            while position < size + 4_800 {
+                let n = blocks[index % blocks.count]
+                index += 1
+                var data = [Float](repeating: 0, count: n * channels)
+                for f in 0..<n { for c in 0..<channels { data[f * channels + c] = c == 2 ? tone(1_000, rate: rate, position + f) : 0 } }
+                data.withUnsafeBufferPointer { feed.ingest(input: $0.baseAddress!, output: $0.baseAddress!, frames: n) }
+                position += n
+            }
+            return feed.spectrum().map(\.outputDB)
+        }
+        let a = spectrum(blocks: [512]), b = spectrum(blocks: [512])
+        XCTAssertEqual(a, b)
+        let varied = spectrum(blocks: [128, 512, 64, 512, 256, 512])
+        XCTAssertEqual(varied.count, a.count)
+        XCTAssertEqual(varied.max() ?? 0, a.max() ?? 0, accuracy: 0.5)
+    }
+
+    /// Cost of the wide feed with every view held at 384 kHz and 32 channels, per second of audio. Prints the figure for the
+    /// Release run (`xcodebuild test -configuration Release`); the bound is loose enough for a Debug build on a shared runner
+    /// and still fails an accidental per-sample or per-tick allocation (the measured Debug figure was 51 s before G71).
+    func testWideFeedCostAt384kHzWith32ChannelsStaysWellUnderRealtime() {
+        let all = (spectrum: true, stereo: true, meters: true, rta: true, bits: true)
+        let total = wideFeedCost(all)
+        print("G71 wide feed cost at 384 kHz, 32 channels: \(total) s of CPU per second of audio")
+        XCTAssertLessThan(total, Self.costBudgetSeconds, "cost per audio second")
+    }
+
+    func testWideFeedCostByView() {
+        for (name, d) in [("spectrum", (true, false, false, false, false)), ("stereo", (false, true, false, false, false)),
+                          ("meters", (false, false, true, false, false)), ("rta", (false, false, false, true, false)),
+                          ("bits", (false, false, false, false, true))] {
+            print("G71 \(name) only: \(wideFeedCost((d.0, d.1, d.2, d.3, d.4))) s")
+        }
+    }
+
+    /// Debug is about 25 times slower than Release on the true-peak meters (the Debug figure is 52 s, Release is the figure
+    /// recorded in the epic's G71 entry); the bound only catches a per-sample or per-tick allocation or an O(n^2).
+    #if DEBUG
+    static let costBudgetSeconds = 120.0
+    #else
+    static let costBudgetSeconds = 3.0
+    #endif
+
+    private func wideFeedCost(_ d: (spectrum: Bool, stereo: Bool, meters: Bool, rta: Bool, bits: Bool)) -> Double {
+        let rate = 384_000.0, channels = 32, block = 1_024
+        let wide = WideAnalysisPlan(roles: Array((Self.sevenOneFour + Self.sevenOneFour + Self.sevenOneFour).prefix(channels)),
+                                    inputChannels: channels, outputChannels: channels, isBinaural: false)
+        let feed = WideAnalysisFeed(plan: wide, sampleRate: rate)
+        feed.setDemand(spectrum: d.spectrum, stereo: d.stereo, meters: d.meters, rta: d.rta, spectrogram: false, spectrogramWindow: .tenSeconds,
+                       bits: d.bits, view: .standard, pair: .standard)
+        var data = [Float](repeating: 0, count: block * channels)
+        for f in 0..<block { for c in 0..<channels { data[f * channels + c] = Float(0.3 * sin(Double(f * (c + 1)) * 0.01)) } }
+        let blocks = Int(rate) / block
+        let pollEvery = Int(rate / 20) / block
+        let elapsed = ContinuousClock().measure {
+            for i in 0..<blocks {
+                data.withUnsafeBufferPointer { feed.ingest(input: $0.baseAddress!, output: $0.baseAddress!, frames: block) }
+                if i % pollEvery == 0 { _ = feed.spectrum(); _ = feed.stereoReadout(); _ = feed.rtaLevels() }
+            }
+        }
+        return Double(elapsed.components.seconds) + Double(elapsed.components.attoseconds) * 1e-18
+    }
 }

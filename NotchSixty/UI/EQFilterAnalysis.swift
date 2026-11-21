@@ -119,6 +119,8 @@ struct EQFilterAnalysis: Sendable {
     let realisation: Realisation
     /// The minimum-phase cascade; for mixed phase it includes the all-pass correction.
     let sections: [N60BiquadCoefficients]
+    /// The same cascade in double precision, for the drawn magnitude (E33 G16).
+    let responseSections: [EQResponseSection]
     /// The linear-phase FIR taps; empty unless `realisation == .linear`.
     let linearTaps: [Float]
     /// Why the requested phase mode could not be shown exactly (the cascade is shown instead).
@@ -128,7 +130,8 @@ struct EQFilterAnalysis: Sendable {
         self.sampleRate = sampleRate
         let eligible = bands.filter { $0.type != .fir }
         let cascade = ProductionEQResponseMath.compile(bands: eligible, sampleRate: sampleRate)
-        var chosenSections = cascade
+        var chosenSections = cascade.map { N60BiquadCoefficients(b0: Float($0.b0), b1: Float($0.b1), b2: Float($0.b2), a1: Float($0.a1), a2: Float($0.a2)) }
+        var responseSections = cascade
         var chosenTaps: [Float] = []
         var chosenRealisation = Realisation.minimum
         var note: String?
@@ -151,7 +154,9 @@ struct EQFilterAnalysis: Sendable {
             }
             if designed {
                 for index in 0..<design.sectionCount {
-                    chosenSections.append(N60MixedPhaseDesignSectionAt(&design, index).coefficients)
+                    let added = N60MixedPhaseDesignSectionAt(&design, index).coefficients
+                    chosenSections.append(added)
+                    responseSections.append(EQResponseSection(added))
                 }
                 chosenRealisation = .mixed
             } else {
@@ -176,6 +181,7 @@ struct EQFilterAnalysis: Sendable {
             break
         }
         sections = chosenSections
+        self.responseSections = responseSections
         linearTaps = chosenTaps
         realisation = chosenRealisation
         fallbackNote = note
@@ -190,7 +196,7 @@ struct EQFilterAnalysis: Sendable {
 
     /// The same math the graph draws today (`ProductionEQResponseMath`).
     func magnitudeDB(at frequencyHz: Double) -> Double {
-        ProductionEQResponseMath.responseDB(program: sections, sampleRate: sampleRate, frequencyHz: frequencyHz)
+        ProductionEQResponseMath.responseDB(program: responseSections, sampleRate: sampleRate, frequencyHz: frequencyHz)
     }
 
     /// Gain at DC as a linear factor.

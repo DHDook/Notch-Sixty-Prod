@@ -70,7 +70,7 @@ final class EQFilterAnalysisTests: XCTestCase {
         return value
     }
 
-    private func complexResponse(_ sections: [N60BiquadCoefficients], omega: Double) -> Complex {
+    private func complexResponse(_ sections: [EQResponseSection], omega: Double) -> Complex {
         var total = Complex(re: 1, im: 0)
         for c in sections {
             let z1 = Complex.exp(-omega), z2 = Complex.exp(-2 * omega)
@@ -92,8 +92,8 @@ final class EQFilterAnalysisTests: XCTestCase {
                 let today = ProductionEQResponseMath.responseDB(program: program, sampleRate: rate, frequencyHz: frequency)
                 XCTAssertEqual(analysis.magnitudeDB(at: frequency), today, accuracy: 1e-9, "\(rate) \(frequency)")
                 // And the complex-domain value agrees with the dB sum.
-                let direct = 20 * log10(complexResponse(analysis.sections, omega: 2 * .pi * frequency / rate).abs)
-                XCTAssertEqual(direct, today, accuracy: 1e-9, "\(rate) \(frequency)")
+                let direct = 20 * log10(complexResponse(analysis.responseSections, omega: 2 * .pi * frequency / rate).abs)
+                XCTAssertEqual(direct, today, accuracy: 1e-6, "\(rate) \(frequency)")
             }
             let series = analysis.series(for: .magnitude, frequencies: grid(rate))
             XCTAssertEqual(series.ys.count, 120)

@@ -44,7 +44,7 @@ enum EQHeadroomPredictor {
         configuration: StereoEQConfiguration,
         sampleRate: Double,
         roleCodes: [UInt32] = [],
-        programFor: (([EQBand], Double) -> [N60BiquadCoefficients])? = nil
+        programFor: (([EQBand], Double) -> [EQResponseSection])? = nil
     ) -> EQHeadroomPrediction {
         guard sampleRate.isFinite, sampleRate > 0, !configuration.bypassed else { return .none }
 
@@ -138,13 +138,13 @@ enum EQHeadroomPredictor {
 
     static func sections(
         for bands: [EQBand], sampleRate: Double,
-        programFor: (([EQBand], Double) -> [N60BiquadCoefficients])? = nil
-    ) -> [N60BiquadCoefficients] {
+        programFor: (([EQBand], Double) -> [EQResponseSection])? = nil
+    ) -> [EQResponseSection] {
         let limited = bands.map(upwardLimit(of:))
         return programFor?(limited, sampleRate) ?? ProductionEQResponseMath.compile(bands: limited, sampleRate: sampleRate)
     }
 
-    static func response(_ sections: [N60BiquadCoefficients], sampleRate: Double, frequency: Double) -> Complex {
+    static func response(_ sections: [EQResponseSection], sampleRate: Double, frequency: Double) -> Complex {
         let omega = 2 * Double.pi * frequency / sampleRate
         let z1 = Complex(re: cos(omega), im: -sin(omega))
         let z2 = z1 * z1

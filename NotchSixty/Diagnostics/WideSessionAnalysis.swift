@@ -1,3 +1,4 @@
+import Accelerate
 import Foundation
 
 // E33 S17: analysis on every session type. The View selector, the pair picker and the wide-session feed.
@@ -288,6 +289,11 @@ final class WideAnalysisFeed {
     private var pairRightRing: [Float] = []
     private var pairWrite = 0
     private var pairCount = 0
+    /// Scratch reused by `spectrum()` and `stereoReadout()` (G71: no allocation per tick beyond the result).
+    private var spectrumInScratch: [Float] = []
+    private var spectrumOutScratch: [Float] = []
+    private var pairLeftScratch: [Float] = []
+    private var pairRightScratch: [Float] = []
 
     init(plan: WideAnalysisPlan, sampleRate: Double) {
         self.plan = plan
@@ -347,6 +353,7 @@ final class WideAnalysisFeed {
         for i in inputPlanar.indices { inputPlanar[i] = [] }
         for i in outputPlanar.indices { outputPlanar[i] = [] }
         viewInput = []; viewOutput = []
+        spectrumInScratch = []; spectrumOutScratch = []; pairLeftScratch = []; pairRightScratch = []
     }
 
     func resetMeters() {
@@ -366,7 +373,9 @@ final class WideAnalysisFeed {
 
         if wantsBits {
             for c in 0..<plan.inputChannels {
-                inputPlanar[c].withUnsafeBufferPointer { spectrogramFeed.ingestBits(channel: c, samples: $0) }
+                inputPlanar[c].withUnsafeBufferPointer {
+                    spectrogramFeed.ingestBits(channel: c, samples: UnsafeBufferPointer(rebasing: $0[0..<frames]))
+                }
             }
         }
         if wantsMeters { ingestMeters(heard: heard, frames: frames) }
@@ -381,24 +390,16 @@ final class WideAnalysisFeed {
                 if wantsSpectrogram { spectrogramFeed.ingestWide(viewLeft: v, viewRight: v) }
             }
             if wantsSpectrum {
-                for n in 0..<frames {
-                    specInputRing[specWrite] = viewInput[n]
-                    specOutputRing[specWrite] = viewOutput[n]
-                    specWrite += 1
-                    if specWrite == Self.spectrumCapacity { specWrite = 0 }
-                }
+                Self.ringAppend(&specInputRing, write: specWrite, source: viewInput, frames: frames)
+                specWrite = Self.ringAppend(&specOutputRing, write: specWrite, source: viewOutput, frames: frames)
                 specCount = min(specCount + frames, Self.spectrumCapacity)
             }
         }
         if wantsStereo, let chosen = plan.resolvedPair(pair) {
             let planes = (chosen.fromInput || !outputPresent) ? inputPlanar : heard
             if chosen.left < planes.count, chosen.right < planes.count {
-                for n in 0..<frames {
-                    pairLeftRing[pairWrite] = planes[chosen.left][n]
-                    pairRightRing[pairWrite] = planes[chosen.right][n]
-                    pairWrite += 1
-                    if pairWrite == Self.correlationCapacity { pairWrite = 0 }
-                }
+                Self.ringAppend(&pairLeftRing, write: pairWrite, source: planes[chosen.left], frames: frames)
+                pairWrite = Self.ringAppend(&pairRightRing, write: pairWrite, source: planes[chosen.right], frames: frames)
                 pairCount = min(pairCount + frames, Self.correlationCapacity)
             }
         }
@@ -466,15 +467,15 @@ final class WideAnalysisFeed {
         let size = ProductionAnalysisMath.fftSize(sampleRate: sampleRate)
         guard specCount >= size else { return [] }
         let start = (specWrite - size + Self.spectrumCapacity) % Self.spectrumCapacity
-        var inp = [Float](repeating: 0, count: size)
-        var out = [Float](repeating: 0, count: size)
-        for i in 0..<size {
-            let s = (start + i) % Self.spectrumCapacity
-            inp[i] = specInputRing[s]
-            out[i] = specOutputRing[s]
+        if spectrumInScratch.count != size {
+            spectrumInScratch = [Float](repeating: 0, count: size)
+            spectrumOutScratch = spectrumInScratch
         }
+        Self.ringCopy(specInputRing, start: start, count: size, into: &spectrumInScratch)
+        Self.ringCopy(specOutputRing, start: start, count: size, into: &spectrumOutScratch)
         return spectrumAnalyzer.analyze(
-            inputLeft: inp, inputRight: inp, outputLeft: out, outputRight: out, count: size, sampleRate: sampleRate)
+            inputLeft: spectrumInScratch, inputRight: spectrumInScratch,
+            outputLeft: spectrumOutScratch, outputRight: spectrumOutScratch, count: size, sampleRate: sampleRate)
     }
 
     /// Correlation over about 100 ms and the goniometer history of the chosen pair.
@@ -483,14 +484,13 @@ final class WideAnalysisFeed {
         let want = Int(min(max(sampleRate * 0.1, 1_024), Double(Self.correlationCapacity)))
         let frames = min(pairCount, want)
         let start = (pairWrite - frames + Self.correlationCapacity) % Self.correlationCapacity
-        var l = [Float](repeating: 0, count: frames)
-        var r = [Float](repeating: 0, count: frames)
-        for i in 0..<frames {
-            let s = (start + i) % Self.correlationCapacity
-            l[i] = pairLeftRing[s]
-            r[i] = pairRightRing[s]
+        if pairLeftScratch.count < frames {
+            pairLeftScratch = [Float](repeating: 0, count: frames)
+            pairRightScratch = pairLeftScratch
         }
-        let correlation = ProductionAnalysisMath.phaseCorrelation(left: l, right: r, count: frames)
+        Self.ringCopy(pairLeftRing, start: start, count: frames, into: &pairLeftScratch)
+        Self.ringCopy(pairRightRing, start: start, count: frames, into: &pairRightScratch)
+        let correlation = ProductionAnalysisMath.phaseCorrelation(left: pairLeftScratch, right: pairRightScratch, count: frames)
 
         let usable = min(pairCount, Self.goniometerHistoryFrames)
         let pointCount = min(usable, Self.goniometerPointLimit)
@@ -512,7 +512,8 @@ final class WideAnalysisFeed {
     private static func deinterleave(_ source: UnsafePointer<Float>, frames: Int, into planar: inout [[Float]]) {
         let stride = planar.count
         for c in 0..<stride {
-            if planar[c].count != frames { planar[c] = [Float](repeating: 0, count: frames) }
+            // Grow only: a plane may be longer than `frames`; every reader takes the first `frames` samples.
+            if planar[c].count < frames { planar[c] = [Float](repeating: 0, count: frames) }
             planar[c].withUnsafeMutableBufferPointer { buffer in
                 for n in 0..<frames { buffer[n] = source[n * stride + c] }
             }
@@ -522,17 +523,50 @@ final class WideAnalysisFeed {
     /// Sum of the chosen channels, scaled by 1/sqrt(n) so uncorrelated channels keep their power and one channel is
     /// unchanged. Indices outside the planes are skipped.
     static func mix(_ planes: [[Float]], indices: [Int], frames: Int, into out: inout [Float]) {
-        if out.count != frames { out = [Float](repeating: 0, count: frames) }
-        let valid = indices.filter { $0 >= 0 && $0 < planes.count && planes[$0].count >= frames }
-        guard !valid.isEmpty else {
-            for n in 0..<frames { out[n] = 0 }
-            return
+        if out.count < frames { out = [Float](repeating: 0, count: frames) }
+        var validCount = 0
+        for c in indices where c >= 0 && c < planes.count && planes[c].count >= frames { validCount += 1 }
+        out.withUnsafeMutableBufferPointer { o in
+            for n in 0..<frames { o[n] = 0 }
+            guard validCount > 0 else { return }
+            // Channel by channel in index order, so each sample's sum has the same order as before.
+            for c in indices where c >= 0 && c < planes.count && planes[c].count >= frames {
+                planes[c].withUnsafeBufferPointer { p in
+                    vDSP_vadd(o.baseAddress!, 1, p.baseAddress!, 1, o.baseAddress!, 1, vDSP_Length(frames))
+                }
+            }
+            var scale = 1 / Float(validCount).squareRoot()
+            vDSP_vsmul(o.baseAddress!, 1, &scale, o.baseAddress!, 1, vDSP_Length(frames))
         }
-        let scale = 1 / Float(valid.count).squareRoot()
-        for n in 0..<frames {
-            var sum: Float = 0
-            for c in valid { sum += planes[c][n] }
-            out[n] = sum * scale
+    }
+
+    /// Appends `frames` samples of `source` to a ring at `write` in at most two block copies; returns the new write index.
+    @discardableResult
+    static func ringAppend(_ ring: inout [Float], write: Int, source: [Float], frames: Int) -> Int {
+        let capacity = ring.count
+        // A block longer than the ring keeps only its newest `capacity` samples.
+        let kept = min(frames, capacity)
+        let skip = frames - kept
+        let begin = (write + skip) % capacity
+        let first = min(kept, capacity - begin)
+        ring.withUnsafeMutableBufferPointer { r in
+            source.withUnsafeBufferPointer { s in
+                (r.baseAddress! + begin).update(from: s.baseAddress! + skip, count: first)
+                if first < kept { r.baseAddress!.update(from: s.baseAddress! + skip + first, count: kept - first) }
+            }
+        }
+        return (write + frames) % capacity
+    }
+
+    /// Copies `count` samples starting at ring index `start` (wrapping) into the front of `out`.
+    static func ringCopy(_ ring: [Float], start: Int, count: Int, into out: inout [Float]) {
+        let capacity = ring.count
+        let first = min(count, capacity - start)
+        ring.withUnsafeBufferPointer { r in
+            out.withUnsafeMutableBufferPointer { o in
+                o.baseAddress!.update(from: r.baseAddress! + start, count: first)
+                if first < count { (o.baseAddress! + first).update(from: r.baseAddress!, count: count - first) }
+            }
         }
     }
 }
