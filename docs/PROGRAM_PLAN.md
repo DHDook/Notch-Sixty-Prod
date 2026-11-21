@@ -652,7 +652,7 @@ One flag `e34.design-language`, graduated in S7. The minimum macOS rises to 27 i
 - [x] S2 `e34/adopt-playback-pages`: Dashboard, Equalizer, Dynamics, Meters, Headphones, Plugins on the shared parts (low-risk); all six pages done (#604, S2b Dashboard)
 - [ ] S3 `e34/adopt-system-pages`: System, tools, Active Acoustics, Settings, Help on the shared parts (needs-owner: ANC and MIMO screens, appearance only)
 - [x] S4 `e34/states-and-dialogs`: one state component, one confirmation rule (low-risk; dark behind `e34.design-language`; leftovers in E34 G23, owner S7)
-- [ ] S5 `e34/menus-and-keyboard`: View and Playback menus, full keyboard reach (low-risk)
+- [~] S5 `e34/menus-and-keyboard`: View and Playback menus built dark; full keyboard reach check moves to the E22 "E34 screen checks" item (low-risk)
 - [ ] S6 `e34/accessibility`: Reduce Motion, Increase Contrast, Reduce Transparency, VoiceOver values (low-risk)
 - [ ] S7 `e34/sizes-and-ship`: minimum window size, 40% longer text, graduate `e34.design-language` (low-risk)
 - [x] S8 `e34/sidebar-groups` (runs after S1, before S2): sidebar groups Playback (Equalizer, Dynamics, Meters), Setup (Speakers & Room, Headphones, Active Acoustics), Tools (Plug-ins, Blind Listening); two levels only; Upmixer and Signal Path join Playback (low-risk)
