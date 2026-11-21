@@ -10,6 +10,22 @@ final class UnifiedGraphKernelCorpusTests: XCTestCase {
     private static let rates: [Double] = [44_100, 48_000, 88_200, 96_000, 176_400, 192_000, 352_800, 384_000]
     private static let block = 512
 
+    /// G115 (E33 S11c): the kernel has no per-output hard limit, and `e9.output-protection` graduated (default on), so the
+    /// graph added one at -1 dBFS and the clipping lane read half the kernel's level. The corpus compares the stages, not
+    /// the output protection (`OutputProtectionTests` covers that), so it is switched off here and put back after.
+    @MainActor override func setUpWithError() throws {
+        let suite = "G115-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        addTeardownBlock { defaults.removePersistentDomain(forName: suite) }
+        UnifiedGraphOutputProtection.refresh(FeatureFlags(
+            known: FeatureFlag.all, defaults: defaults, policy: .launchArgumentOnly,
+            arguments: ["-NotchSixtyFeatures", "-e9.output-protection"]))
+    }
+
+    @MainActor override func tearDownWithError() throws {
+        UnifiedGraphOutputProtection.refresh()
+    }
+
     // MARK: Signal corpus
 
     private enum Signal: String, CaseIterable { case noise, sweep, impulses, clipping }

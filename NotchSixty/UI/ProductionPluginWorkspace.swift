@@ -932,8 +932,6 @@ struct ProductionPluginWorkspace: View {
     /// E33 S24: latest load reading per slot, refreshed by the poll below while the page is shown.
     @State private var loadReadings: [UUID: AudioUnitLoadReading] = [:]
     @State private var showIncompatible = false
-    /// Each slot's bypass flag before "Bypass rack" was switched on, so switching it off puts them back.
-    @State private var rackBypassSaved: [UUID: Bool] = [:]
 
     init(product: ProductController) {
         self.product = product
@@ -1922,12 +1920,13 @@ struct ProductionPluginWorkspace: View {
     private func setRackBypassed(_ bypassed: Bool) {
         let configuration: AudioUnitRackConfiguration
         if bypassed {
+            // Session-only (G84): the host keeps the earlier flags and the Content Preset saves the rack with them.
             let result = AudioUnitRackBypass.bypassing(host.rackConfiguration)
-            rackBypassSaved = result.saved
             configuration = result.configuration
-        } else {
-            configuration = AudioUnitRackBypass.restoring(host.rackConfiguration, saved: rackBypassSaved)
+            runMutation(.replaceConfiguration(configuration)) { host.rememberRackBypass(saved: result.saved) }
+            return
         }
+        configuration = AudioUnitRackBypass.restoring(host.rackConfiguration, saved: host.rackBypassSaved)
         runMutation(.replaceConfiguration(configuration))
     }
 

@@ -113,7 +113,13 @@ protocol AudioUnitHostProbeBackend {
 /// PR must consume only a validated AudioUnitRackExecutionPlan.
 @MainActor
 final class AudioUnitHostController: ObservableObject {
-    @Published private(set) var rackConfiguration: AudioUnitRackConfiguration
+    @Published private(set) var rackConfiguration: AudioUnitRackConfiguration {
+        didSet { if !AudioUnitRackBypass.isBypassed(rackConfiguration) { rackBypassSaved = [:] } }
+    }
+    /// E33 S11c (G84, owner decision 20 Nov 2026): "Bypass rack" is session-only. The slots' bypass flags from before it was
+    /// switched on, by slot id; the Content Preset saves the rack with these restored (`presetRackConfiguration`).
+    /// Cleared when the rack is no longer wholly bypassed, and never persisted.
+    private(set) var rackBypassSaved: [UUID: Bool] = [:]
     @Published private(set) var discoveredComponents: [AudioUnitComponentDescriptor] = []
     @Published private(set) var lifecycleByComponent: [
         AudioUnitComponentIdentity: AudioUnitComponentLifecycleState
@@ -248,6 +254,18 @@ final class AudioUnitHostController: ObservableObject {
         try configuration.validate()
         rackConfiguration = configuration
         lastErrorDescription = nil
+    }
+
+    /// Records the flags from before a whole-rack bypass (call after the bypassed rack is applied).
+    func rememberRackBypass(saved: [UUID: Bool]) {
+        rackBypassSaved = AudioUnitRackBypass.isBypassed(rackConfiguration) ? saved : [:]
+    }
+
+    /// The rack as a Content Preset stores it: a whole-rack bypass is session-only, so each slot is saved with its flag
+    /// from before "Bypass rack". A rack bypassed by hand, slot by slot, is saved as it is.
+    var presetRackConfiguration: AudioUnitRackConfiguration {
+        guard !rackBypassSaved.isEmpty, AudioUnitRackBypass.isBypassed(rackConfiguration) else { return rackConfiguration }
+        return AudioUnitRackBypass.restoring(rackConfiguration, saved: rackBypassSaved)
     }
 
     func installComponent(

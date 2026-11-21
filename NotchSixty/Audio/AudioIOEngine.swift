@@ -1056,7 +1056,7 @@ final class AudioIOEngine {
     private var nextEQFIRProgramSlot: UInt32 = 0
     /// E27 S3c: designed taps of the recent EQ configurations, so an A/B toggle redesigns nothing.
     var eqFIRCache = EQFIRProgramCache()
-    var eqPhaseModeRequestToken = 0
+    var eqOffMain = EQOffMainState()
     /// Linear-phase designs run so far (a cache hit runs none). Tests read it.
     var eqFIRDesignCount: Int { eqFIRCache.designCount }
     private var activeRoomCorrectionProgram: PreparedRoomCorrectionProgram?

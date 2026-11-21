@@ -9,6 +9,12 @@ import Foundation
 // background task, stores the result in `EQFIRProgramCache`, and the unchanged synchronous publish path then hits
 // the cache. Realtime impact: none; the render path only sees the immutable snapshot built from the taps.
 // Allocation: the tap arrays, on the calling (background) thread. Synchronisation: none; main-actor cache insert.
+/// E33 S11c: the request counter and newest pending configuration of the off-main EQ edits (main actor only).
+struct EQOffMainState {
+    var token = 0
+    var pending: StereoEQConfiguration?
+}
+
 enum EQFIRDesigner {
     typealias Result = (left: [Float], right: [Float]?, declaredLatencyFrames: UInt32, designInfo: EQLinearPhaseDesignInfo?)
 
@@ -88,6 +94,9 @@ enum EQFIRDesigner {
 }
 
 extension AudioIOEngine {
+    /// The configuration an off-main edit builds on: the newest edit still being designed, else the stored one.
+    var eqEditBase: StereoEQConfiguration { eqOffMain.pending ?? stereoEQConfiguration }
+
     /// Designs `configuration`'s EQ FIR on a background task and caches it, so the synchronous publish that follows
     /// designs nothing on the main actor. A no-op when the configuration needs no FIR or the design is already cached.
     /// Cancelling the caller discards the result (the C design itself cannot be interrupted).
@@ -108,9 +117,13 @@ extension AudioIOEngine {
     /// E33 S27: changes the linear-phase length with the design off the main actor. Refused by name when the length does not
     /// fit the FIR engine or the stage budget on this layout and rate; the stored length is then unchanged.
     func setEQLinearPhaseLengthOffMain(_ length: EQLinearPhaseLength) async throws {
-        guard length != stereoEQConfiguration.linearPhaseLength else { return }
-        var updated = stereoEQConfiguration
+        guard length != eqEditBase.linearPhaseLength else { return }
+        var updated = eqEditBase
         updated.linearPhaseLength = length
+        eqOffMain.token &+= 1
+        let token = eqOffMain.token
+        eqOffMain.pending = updated
+        defer { if token == eqOffMain.token { eqOffMain.pending = nil } }
         if updated.phaseMode == .linearPhase, !updated.bypassed {
             let rate = transportSession?.outputFormat.sampleRate ?? nChannelTransportSession?.outputFormat.sampleRate
             if let rate {
@@ -119,32 +132,93 @@ extension AudioIOEngine {
                     throw EQLinearPhaseLengthError.refused(reason)
                 }
                 let rendered = eqAudition.map { updated.auditioned($0) } ?? updated
-                eqPhaseModeRequestToken &+= 1
-                let token = eqPhaseModeRequestToken
                 try await prepareEQFIRDesignOffMain(rendered, sampleRate: rate)
-                guard token == eqPhaseModeRequestToken else { return }
+                try await prepareEQGroupFIRsOffMain(rendered)
+                guard token == eqOffMain.token else { return }
             }
         }
+        guard token == eqOffMain.token else { return }
         try replaceStereoEQConfiguration(updated)
+    }
+
+    /// E33 S11c (G97, G98): true when applying an EQ edit would design a linear-phase FIR (the session lane, and on a wide
+    /// session the group lists) on the thread that applies it, so the caller should use the off-main path.
+    var eqEditDesignsOffMain: Bool {
+        stereoEQConfiguration.phaseMode == .linearPhase && !stereoEQConfiguration.bypassed
+    }
+
+    /// Designs the group lane FIRs of a wide session off the main actor (G98), so the graph rebuild that follows hits
+    /// `EQGroupFIRCache`. A no-op on a stereo or binaural session, a mixed-phase or bypassed EQ, or with no group lists.
+    func prepareEQGroupFIRsOffMain(_ configuration: StereoEQConfiguration) async throws {
+        guard configuration.phaseMode == .linearPhase, !configuration.bypassed,
+              let session = nChannelTransportSession,
+              let shape = UnifiedGraphLayoutShape(roles: session.routePlan.programLayout.roles),
+              shape.laneCount > 2 else { return }
+        let rate = session.outputFormat.sampleRate
+        try await Task.detached(priority: .userInitiated) {
+            _ = try configuration.groupCurves(shape: shape, sampleRate: rate)
+        }.value
+        try Task.checkCancellation()
+    }
+
+    /// E33 S11c (G97, G98): applies `updated` with every linear-phase design run off the main actor first. A newer request
+    /// (a later edit, a Phase or length change) supersedes this one, so results never apply out of order; a superseded
+    /// request returns without applying. The stored configuration changes only at the final synchronous publish, which
+    /// then hits the design caches. With no linear phase it is the plain synchronous apply.
+    func applyEQConfigurationOffMain(_ updated: StereoEQConfiguration) async throws {
+        eqOffMain.token &+= 1
+        let token = eqOffMain.token
+        eqOffMain.pending = updated
+        defer { if token == eqOffMain.token { eqOffMain.pending = nil } }
+        let rendered = eqAudition.map { updated.auditioned($0) } ?? updated
+        if rendered.phaseMode == .linearPhase, !rendered.bypassed {
+            let rate = transportSession?.outputFormat.sampleRate ?? nChannelTransportSession?.outputFormat.sampleRate
+            if let rate {
+                try await prepareEQFIRDesignOffMain(rendered, sampleRate: rate)
+                try await prepareEQGroupFIRsOffMain(rendered)
+            }
+        }
+        guard token == eqOffMain.token else { return }
+        try replaceStereoEQConfiguration(updated)
+    }
+
+    /// `updateEQBand` with the design off the main actor (G97). The edit builds on the newest pending configuration, so
+    /// two quick edits to different bands both land (the later request applies both).
+    func updateEQBandOffMain(_ band: EQBand) async throws {
+        var updated = eqEditBase
+        guard updated.editableBands.contains(where: { $0.id == band.id }) else { return }
+        updated.updateEditableBand(band)
+        try await applyEQConfigurationOffMain(updated)
     }
 
     /// `setEQPhaseMode` with the FIR design off the main actor: the Phase picker stays responsive while a
     /// linear-phase design runs at high rates. Falls back to the plain synchronous path when no session is running.
     func setEQPhaseModeOffMain(_ mode: EQPhaseMode) async throws {
-        eqPhaseModeRequestToken &+= 1
-        let token = eqPhaseModeRequestToken
-        guard mode != stereoEQConfiguration.phaseMode else { return }
-        var updated = stereoEQConfiguration
+        eqOffMain.token &+= 1
+        let token = eqOffMain.token
+        guard mode != eqEditBase.phaseMode else {
+            // Already what an in-flight edit will leave; that edit was superseded by the bump, so land it here (its design is cached or runs now).
+            if let pending = eqOffMain.pending {
+                try await applyEQConfigurationOffMain(pending)
+            }
+            return
+        }
+        var updated = eqEditBase
         updated.phaseMode = mode
+        eqOffMain.pending = updated
+        defer { if token == eqOffMain.token { eqOffMain.pending = nil } }
         let rendered = eqAudition.map { updated.auditioned($0) } ?? updated
         if rendered.requiresEQFIRProgram {
             let rate = transportSession?.outputFormat.sampleRate
                 ?? nChannelTransportSession?.outputFormat.sampleRate
-            if let rate { try await prepareEQFIRDesignOffMain(rendered, sampleRate: rate) }
+            if let rate {
+                try await prepareEQFIRDesignOffMain(rendered, sampleRate: rate)
+                try await prepareEQGroupFIRsOffMain(rendered)
+            }
         }
         // A newer Phase request (rapid toggles) supersedes this one, so results never apply out of order.
-        guard token == eqPhaseModeRequestToken else { return }
-        try setEQPhaseMode(mode)
+        guard token == eqOffMain.token else { return }
+        try replaceStereoEQConfiguration(updated)
     }
 }
 
