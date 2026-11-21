@@ -101,7 +101,7 @@ FC phase's per-epic PR (`docs/epics/FC.md`) unless stated.
 | `e21.core-designers` | E21 | dark; S5: room-response analysis and program spectrum read it | S14 | FC (E21) |
 | `e21.core-designers` | E21 | planned | none | FC (E21) |
 | `e33.page-enhancements` | E33 | graduated (S11d, 21 Nov 2026): every E33 page, engine-publish and Swift reader | S11d | FC (E33) |
-| `e32.dynamics-sound` | E32 | dark; S5: limiter attack cap, expander timing swap and rate-based true-peak factor read it (published as stage parameters) | S6 | FC (E32) |
+| `e32.dynamics-sound` | E32 | graduated | 21 Nov 2026 (S6) | FC (E32) |
 | `e34.design-language` | E34 | dark; S0: registered, no reader yet (S1 shared parts read it) | S7 | FC (E34) |
 | `e8.routing-matrix`, `e8.lab-routed-ways`, `e10.mixed-phase-correction`, `e11.measurement-suite`, `e12.guided-setup`, `e13.byo-import`, `e25.outputs-and-speakers`, `e27.eq-safety` | E8, E10, E11, E12, E13, E25, E27 | removed (before this policy, at epic ship) | n/a | done |
 
@@ -161,6 +161,6 @@ E22; the software part graduates.
 | `e20.parallel-render` | E20 | On by default (graduated, E20 ship). Up to three extra realtime worker threads in the output device's Audio Workgroup render the non-uniform FIR lanes in parallel (needs `e9.long-fir`); Swift picks the worker count from the graph's estimated load. Read once at launch. `-NotchSixtyFeatures -e20.parallel-render` turns it off: no worker thread exists, the audio thread renders alone |
 | `e20.multirate` | E20 | On by default (graduated, E20 ship), no reader: the multirate low-frequency slices (S7, S8) were skipped on the measured entry rule, so the flag changes nothing. Removed in FC (E20) |
 | `e33.page-enhancements` | E33 | Graduated: on by default, off with `-NotchSixtyFeatures -e33.page-enhancements`. Equalizer page: band list and two-column editor, dynamic range hint, moved-to-fit note, sectioned filter picker; later slices add Dynamics, Meters, Plugins and engine changes. Off: today's pages. Removed in FC (E33) |
-| `e32.dynamics-sound` | E32 | Off by default. Dynamics: the limiter's attack never exceeds its look-ahead (a note shows when it applies), the expander's Attack opens and Release closes, and the true-peak factor follows the device rate (4x at 44.1 and 48 kHz, 2x at 88.2 and 96, 1x from 176.4 kHz) with the reported latency. Off: stages render as before. Removed in FC (E32) |
+| `e32.dynamics-sound` | E32 | On by default (graduated, E32 S6). Dynamics: the limiter's attack never exceeds its look-ahead (a note shows when it applies), the expander's Attack opens and Release closes, and the true-peak factor follows the device rate (4x at 44.1 and 48 kHz, 2x at 88.2 and 96, 1x from 176.4 kHz) with the reported latency. Off (`-NotchSixtyFeatures -e32.dynamics-sound`): stages render as before. Removed in FC (E32) |
 | `e34.design-language` | E34 | Off by default. The app-wide design language: macOS 27 Liquid Glass rules (`docs/DESIGN_LANGUAGE.md`) and, from S1, the shared values and components. Off: today's look. Removed in FC (E34) |
 | `e21.core-designers` | E21 | Off by default. Room-measurement analysis (direct arrival, window, response grid) and the EQ program analyser's spectrum bands run in the portable core instead of Swift and vDSP; later E21 slices add the designers. Off: the Swift path. Removed in FC (E21) |

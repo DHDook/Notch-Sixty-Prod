@@ -248,6 +248,7 @@ struct ProtCfg {
     bool limiter;
     float ceilLin;
     uint32_t factor;
+    bool guard;                            // the true-peak guard is on with the limiter (the factor may be 1 at high rates, E32 G10)
     uint32_t laHigh;
     uint32_t atkHigh;
     double relCoef;
@@ -288,6 +289,7 @@ ProtCfg protCfg(const float *p, double rate, uint32_t n) {
     const bool hasWord = n == kProtWordParams7 || n == kProtWordParams18;
     const uint32_t word = hasWord ? static_cast<uint32_t>(p[n - 1u]) : 0u;
     c.factor = (c.limiter && tp) ? ((word & kProtRateFactor) != 0u ? tpFactorForRate(rate) : 4u) : static_cast<uint32_t>(p[6]);
+    c.guard = c.limiter && tp;
     const double highRate = rate * static_cast<double>(c.factor);
     c.ceilLin = std::pow(10.0f, p[1] / 20.0f);
     c.laHigh = c.limiter ? n60::framesFor(static_cast<double>(p[4]) * 0.001, highRate) : 0u;
@@ -484,7 +486,7 @@ struct ProtShared {
     std::atomic<uint32_t> effRelBits;        // ABI v46: effective release time (ms, float bits) at the end of the last block; 0 when off
     double riderSustained, riderAtten;       // ABI v12: sustained limiter reduction and rider attenuation (dB)
     float seenCeil, seenAtk, seenRel, seenWord;  // protCfg inputs the cached cfg was derived from
-    std::atomic<uint32_t> guardActive;       // ABI v8: 1 when the limiter runs with oversampling
+    std::atomic<uint32_t> guardActive;       // ABI v8: 1 when the limiter runs with oversampling or the true-peak guard is on (E32 G10: also at factor 1)
     std::atomic<uint32_t> clamps;            // ABI v43: safety-clamp events since the last read (relaxed; read and reset by the control thread)
     ProtCfg cfg;                              // cached: pow/exp are not redone every block
     // followed by float val[cap]; uint64_t idx[cap]
@@ -2440,7 +2442,7 @@ void runProtection(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t fra
     // Readbacks for the control thread (relaxed atomics; peaks reset by the reader).
     const float grMax = minGain < 1.0 ? static_cast<float>(-20.0 * std::log10(std::fmax(minGain, 1e-12))) : 0.0f;
     const float grNow = sh.gain < 1.0 ? static_cast<float>(-20.0 * std::log10(std::fmax(sh.gain, 1e-12))) : 0.0f;
-    sh.guardActive.store(c.limiter && c.factor > 1 ? 1u : 0u, std::memory_order_relaxed);
+    sh.guardActive.store(c.limiter && (c.factor > 1 || c.guard) ? 1u : 0u, std::memory_order_relaxed);
     sh.effRelBits.store(floatToBits(protEffectiveReleaseMs(c, sh.sustain, h->sampleRate)), std::memory_order_relaxed);
     for (uint32_t l = 0; l < n; ++l) {
         atomicMaxFloat(pl[l]->inTpBits, inPeak[l]);
@@ -2649,7 +2651,7 @@ bool systemProtectionParallel(SnapHeader *h, StageRec &r, float *const *lanes, u
     }
     const float grMax = minGain < 1.0 ? static_cast<float>(-20.0 * std::log10(std::fmax(minGain, 1e-12))) : 0.0f;
     const float grNow = sh.gain < 1.0 ? static_cast<float>(-20.0 * std::log10(std::fmax(sh.gain, 1e-12))) : 0.0f;
-    sh.guardActive.store(c.limiter && c.factor > 1 ? 1u : 0u, std::memory_order_relaxed);
+    sh.guardActive.store(c.limiter && (c.factor > 1 || c.guard) ? 1u : 0u, std::memory_order_relaxed);
     sh.effRelBits.store(floatToBits(protEffectiveReleaseMs(c, sh.sustain, h->sampleRate)), std::memory_order_relaxed);
     for (uint32_t l = 0; l < x.n; ++l) {
         atomicMaxFloat(x.pl[l]->inTpBits, inPeak[l]);

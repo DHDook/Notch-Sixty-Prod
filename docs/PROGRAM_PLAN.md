@@ -499,7 +499,7 @@ three sound-changing fixes in S5 behind `e32.dynamics-sound`, graduated in S6. O
 - [x] S3 `e32/meter-cadence`: idle meter loops, gain-reduction rates and paused timelines, per-tick models, demand tokens, loudness history, dBTP label, clip latch after reset (low-risk)
 - [x] S4 `e32/dynamics-core-fixes`: makeup-free gain reduction, multiband crossover crossfade, limiter ring masks, R11 and R13 confirmed or closed (needs-owner, realtime)
 - [x] S5 `e32/dynamics-sound-fixes`: limiter attack capped at the lookahead, expander Attack as opening speed, true-peak factor by rate (4x/2x/1x), behind `e32.dynamics-sound` (needs-owner, realtime, ABI)
-- [ ] S6 `e32/ship`: end-to-end test, parity exceptions for the E23 corpus, flag graduated (needs-owner)
+- [x] S6 `e32/ship`: end-to-end test, parity exceptions for the E23 corpus, `e32.dynamics-sound` graduated (21 Nov 2026), G10 fixed, G12 decided, G11 and G13 moved to E22, G14 closed (needs-owner)
 
 ## Phase 4 — Complete scope and launch
 

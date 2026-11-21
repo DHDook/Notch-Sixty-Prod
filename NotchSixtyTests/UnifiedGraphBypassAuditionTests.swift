@@ -56,7 +56,7 @@ final class UnifiedGraphBypassAuditionTests: XCTestCase {
 
     private func padded(_ configuration: UnifiedGraphConfiguration, _ snapshot: N60DSPGraphSnapshot) -> UnifiedGraphConfiguration {
         var result = configuration
-        let pad = Double(Int(snapshot.latencyFrames) - Int(snapshot.protection.latencyFrames))
+        let pad = Double(Int(snapshot.latencyFrames) - Int(DynamicsSoundFixes.protectionLatencyFrames(snapshot.protection, sampleRate: configuration.sampleRate)))
         for index in result.lanes.indices { result.lanes[index].calibrationDelayFrames += pad }
         return result
     }
