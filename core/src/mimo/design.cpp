@@ -16,6 +16,7 @@
 
 #include "n60/mimo.h"
 #include "kernel.hpp"
+#include "../linalg/linalg.hpp"
 
 namespace {
 
@@ -88,35 +89,9 @@ uint64_t argmaxAbs(const float *x, uint64_t n) {
     return best;
 }
 
-// In-place Cholesky of a Hermitian positive-definite n x n matrix (row-major lower), then solves.
-bool cholesky(std::vector<Cx> &a, int n) {
-    for (int j = 0; j < n; ++j) {
-        double d = a[j * n + j].real();
-        for (int k = 0; k < j; ++k) d -= std::norm(a[j * n + k]);
-        if (!(d > 0.0)) return false;
-        const double ljj = std::sqrt(d);
-        a[j * n + j] = Cx(ljj, 0);
-        for (int i = j + 1; i < n; ++i) {
-            Cx s = a[i * n + j];
-            for (int k = 0; k < j; ++k) s -= a[i * n + k] * std::conj(a[j * n + k]);
-            a[i * n + j] = s / ljj;
-        }
-    }
-    return true;
-}
-
-void choleskySolve(const std::vector<Cx> &l, int n, std::vector<Cx> &b) {
-    for (int i = 0; i < n; ++i) {
-        Cx s = b[i];
-        for (int k = 0; k < i; ++k) s -= l[i * n + k] * b[k];
-        b[i] = s / l[i * n + i].real();
-    }
-    for (int i = n - 1; i >= 0; --i) {
-        Cx s = b[i];
-        for (int k = i + 1; k < n; ++k) s -= std::conj(l[k * n + i]) * b[k];
-        b[i] = s / l[i * n + i].real();
-    }
-}
+// Cholesky of the Hermitian positive-definite per-bin matrix and its solves: the shared in-house solver (E21 S8).
+bool cholesky(std::vector<Cx> &a, int n) { return n60::linalg::cholesky(a.data(), n); }
+void choleskySolve(const std::vector<Cx> &l, int n, std::vector<Cx> &b) { n60::linalg::choleskySolve(l.data(), n, b.data()); }
 
 }  // namespace
 

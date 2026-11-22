@@ -499,6 +499,15 @@ add_executable(n60core_mimo_safety_test tests/test_mimo_safety.cpp)
 target_link_libraries(n60core_mimo_safety_test PRIVATE n60core)
 add_test(NAME n60core_mimo_safety COMMAND n60core_mimo_safety_test)
 
+# E21 S8: in-house dense solvers (src/linalg/linalg.hpp, header only) and the designer at 32 sources.
+add_executable(n60core_linalg_test tests/test_linalg.cpp)
+target_include_directories(n60core_linalg_test PRIVATE src)
+add_test(NAME n60core_linalg COMMAND n60core_linalg_test)
+
+add_executable(n60core_mimo_n32_test tests/test_mimo_n32.cpp)
+target_link_libraries(n60core_mimo_n32_test PRIVATE n60core)
+add_test(NAME n60core_mimo_n32 COMMAND n60core_mimo_n32_test)
+
 # E21 S0: the E4 ANC harnesses that exercise the moved sources (they live in ci/ with their shared plant helpers).
 # The harness uses C99 _Complex (double complex), which MSVC-style C does not provide: not built on clang-cl (E21 gap G3).
 if(NOT MSVC)
