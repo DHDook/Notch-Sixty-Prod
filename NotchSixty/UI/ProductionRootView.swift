@@ -912,7 +912,7 @@ struct StereoSignatureVUMeterPanel: View {
         // corners, either side of the branding, like a faceplate's legends.
         let palette = StereoSignatureVUPalette(darkAppearance: colorScheme == .dark)
         StereoSignatureVUMeter(leftVU: leftVU, rightVU: rightVU)
-            .frame(minHeight: 250)
+            .frame(minHeight: 250, maxHeight: 340)
             .overlay(alignment: .bottomLeading) {
                 Text("OUTPUT  ·  0 VU = −18 dBFS")
                     .font(DesignType.caption.font.weight(.semibold).monospacedDigit())

@@ -21,7 +21,7 @@ struct ProductionDashboardView: View {
     }
 
     var body: some View {
-        ScrollView {
+        ProductionPageContainer {
             VStack(alignment: .leading, spacing: DesignSpacing.xl.pt) {
                 // Processing state lives in the toolbar's status readout and
                 // its Bypass and Start/Stop buttons, so the dashboard spends
@@ -39,18 +39,27 @@ struct ProductionDashboardView: View {
 
                 // Output and volume share one row; equal heights keep the
                 // two glass panels aligned.
-                HStack(alignment: .top, spacing: DesignSpacing.l.pt) {
-                    audioControls
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                        .designSurface(.large)
-                    masterControls
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                ViewThatFits(in: .horizontal) {
+                    HStack(alignment: .top, spacing: DesignSpacing.l.pt) {
+                        audioControls
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                            .designSurface(.large)
+                        masterControls
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    }
+                    .fixedSize(horizontal: false, vertical: true)
+                    VStack(alignment: .leading, spacing: DesignSpacing.l.pt) {
+                        audioControls
+                            .frame(maxWidth: .infinity, alignment: .topLeading)
+                            .designSurface(.large)
+                        masterControls
+                            .frame(maxWidth: .infinity)
+                    }
                 }
-                .fixedSize(horizontal: false, vertical: true)
 
                 levelControls
 
-                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: DesignSpacing.l.pt) {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 340), spacing: DesignSpacing.l.pt)], spacing: DesignSpacing.l.pt) {
                     summaryCard(
                         title: "Playback Path",
                         text: playbackPathSummary,
@@ -83,8 +92,6 @@ struct ProductionDashboardView: View {
                     )
                 }
             }
-            .padding(DesignSpacing.xl.pt)
-            .frame(maxWidth: 1180, alignment: .topLeading)
         }
     }
 

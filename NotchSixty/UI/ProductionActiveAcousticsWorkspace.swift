@@ -259,7 +259,7 @@ struct ProductionActiveAcousticsWorkspace: View {
     @State private var quietZoneActionError: String?
 
     var body: some View {
-        ScrollView {
+        ProductionPageContainer {
             VStack(alignment: .leading, spacing: 22) {
                 header
 
@@ -280,8 +280,6 @@ struct ProductionActiveAcousticsWorkspace: View {
                     roomTreatment
                 }
             }
-            .padding(28)
-            .frame(maxWidth: 1_080, alignment: .topLeading)
         }
         .task(id: engine.lifecycleState.rawValue) {
             await refreshTransportLoop()

@@ -46,7 +46,7 @@ struct ProductionBlindListeningWorkspace: View {
     }
 
     var body: some View {
-        ScrollView {
+        ProductionPageContainer {
             VStack(alignment: .leading, spacing: 20) {
                 header
                 sources
@@ -58,8 +58,6 @@ struct ProductionBlindListeningWorkspace: View {
                         .textSelection(.enabled)
                 }
             }
-            .padding(28)
-            .frame(maxWidth: 980, alignment: .topLeading)
         }
         .fileImporter(
             isPresented: $importingA, allowedContentTypes: [.audio],

@@ -200,7 +200,7 @@ struct ProductionMetersView: View {
     private var analysisPair: AnalysisPair { viewOptions.resolved(AnalysisPair(rawValue: analysisPairCode) ?? .standard) }
 
     var body: some View {
-        ScrollView {
+        ProductionPageContainer {
             VStack(alignment: .leading, spacing: DesignSpacing.xl.pt) {
                 header
                 pagePicker
@@ -261,8 +261,6 @@ struct ProductionMetersView: View {
                 }
                 }
             }
-            .padding(DesignSpacing.xl.pt)
-            .frame(maxWidth: 1180, alignment: .topLeading)
         }
         .onAppear {
             if let requested = requestedPage {
@@ -334,6 +332,8 @@ struct ProductionMetersView: View {
                 onReset: resetLoudness
             )
             if enhanced {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 440), spacing: DesignSpacing.l.pt, alignment: .top)],
+                          alignment: .leading, spacing: DesignSpacing.l.pt) {
                 ProductionAnalysisMetersCard(
                     readout: analysisSnapshot.analysisMeters,
                     isRunning: engine.lifecycleState == .running,
@@ -352,6 +352,7 @@ struct ProductionMetersView: View {
                 )
                 ProductionDropoutCard(counter: history.dropouts, onReset: { history.resetDropouts() })
                 ProductionInputOversCard(reading: inputOvers, isRunning: engine.lifecycleState == .running, onReset: resetInputOvers)
+                }
             }
             if let transportMeterSnapshot {
                 semanticLevelsPage(transportMeterSnapshot)

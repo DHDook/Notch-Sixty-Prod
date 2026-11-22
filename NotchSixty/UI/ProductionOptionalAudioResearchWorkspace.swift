@@ -21,7 +21,7 @@ struct ProductionOptionalAudioResearchWorkspace: View {
     }
 
     var body: some View {
-        ScrollView {
+        ProductionPageContainer {
             VStack(alignment: .leading, spacing: 18) {
                 Text(
                     "Optional experimental HRTF comparison tools. They never apply a DSP filter, change audio routing or declare measured improvement. Use Room Correction or Headphones for the separate, validated deployment workflows."
@@ -37,8 +37,6 @@ struct ProductionOptionalAudioResearchWorkspace: View {
                         .textSelection(.enabled)
                 }
             }
-            .padding(28)
-            .frame(maxWidth: 980, alignment: .topLeading)
         }
         .task { loadHRTFs() }
     }

@@ -131,7 +131,7 @@ struct ProductionStatusDashboardView: View {
 
     var body: some View {
         let state = self.state
-        ScrollView {
+        ProductionPageContainer {
             VStack(alignment: .leading, spacing: DesignSpacing.xl.pt) {
                 if state.needsOutput {
                     Text("Choose an output in the menu bar panel to begin.").foregroundStyle(.secondary)
@@ -146,8 +146,6 @@ struct ProductionStatusDashboardView: View {
                     ForEach(state.cards) { card in cardView(card) }
                 }
             }
-            .padding(DesignSpacing.xl.pt)
-            .frame(maxWidth: 1180, alignment: .topLeading)
         }
         .task(id: engine.lifecycleState) { await runTelemetryLoop() }
     }

@@ -88,7 +88,7 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
     }
 
     var body: some View {
-        ScrollView {
+        ProductionPageContainer {
             VStack(alignment: .leading, spacing: 20) {
                 header
                 tabPicker
@@ -132,8 +132,6 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
                     )
                 }
             }
-            .padding(28)
-            .frame(maxWidth: 1_100, alignment: .topLeading)
         }
         .task {
             microphone.prepareForUse()

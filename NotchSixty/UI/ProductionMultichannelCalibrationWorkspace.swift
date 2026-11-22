@@ -80,7 +80,7 @@ struct ProductionMultichannelCalibrationWorkspace: View {
     }
 
     var body: some View {
-        ScrollView {
+        ProductionPageContainer {
             VStack(alignment: .leading, spacing: 20) {
                 header
                 systemCard
@@ -116,8 +116,6 @@ struct ProductionMultichannelCalibrationWorkspace: View {
                         .background(.red.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
                 }
             }
-            .padding(28)
-            .frame(maxWidth: 1_020, alignment: .topLeading)
         }
         .task {
             microphone.prepareForUse()

@@ -5,7 +5,7 @@ struct ProductionRoomTreatmentAdvisorWorkspace: View {
     @ObservedObject var profiles: ProductProfileController
 
     var body: some View {
-        ScrollView {
+        ProductionPageContainer {
             VStack(alignment: .leading, spacing: 20) {
                 header
                 SystemCapabilityNoteCard(
@@ -55,11 +55,6 @@ struct ProductionRoomTreatmentAdvisorWorkspace: View {
 
                 readOnlyNote
             }
-            .padding(28)
-            .frame(
-                maxWidth: 1_080,
-                alignment: .topLeading
-            )
         }
         .task {
             advisor.prepareForUse()

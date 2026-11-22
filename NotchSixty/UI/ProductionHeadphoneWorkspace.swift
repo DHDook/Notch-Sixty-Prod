@@ -47,7 +47,7 @@ struct ProductionHeadphoneWorkspace: View {
     @State private var statusMessage: String?
 
     var body: some View {
-        ScrollView {
+        ProductionPageContainer {
             VStack(alignment: .leading, spacing: DesignSpacing.xl.pt) {
                 header
                 SystemCapabilityNoteCard(
@@ -79,8 +79,6 @@ struct ProductionHeadphoneWorkspace: View {
                         .designTint(StatusLevel.off.color, opacity: 0.06, radius: .medium)
                 }
             }
-            .padding(DesignSpacing.xl.pt)
-            .frame(maxWidth: 980, alignment: .topLeading)
         }
         .task {
             syncFromSelectedSystem()
