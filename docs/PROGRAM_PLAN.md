@@ -313,7 +313,7 @@ Audio types in four bridges. The bigger gap is the DSP maths inside the Swift de
 - [x] Write the realtime subset rules: no allocation, locks, exceptions or RTTI on the audio path, enforced by RealtimeSanitizer and review
 - [ ] Split into `libn60core` (realtime graph plus design maths), per-platform audio backends, and per-platform app shells
 - [x] FFT abstraction: vDSP on Apple, the in-house radix-2 elsewhere (Q1, 22 Nov 2026: no PFFFT); no FFTW, which is GPL (E21 S3 `e21/fft-backends`)
-- [~] Choose a linear-algebra library after licence review (Q2, 22 Nov 2026: in-house, no Eigen; built in S8)
+- [x] Choose a linear-algebra library after licence review (Q2, 22 Nov 2026: in-house, no Eigen; built in S8 `e21/mimo-design`)
 - [ ] Replace `AudioBufferList` in the bridges with plain non-interleaved float buffers; keep Core Audio in the macOS backend
 - [ ] Move the DSP maths out of Swift into the core in order of value: measurement analysis, room-correction FIR and target design, multi-sub and MIMO design, speaker optimiser, ANC design
 - [ ] S14 graduates `e21.core-designers` (default on); deletion of the Swift implementations and the flag is the FC phase

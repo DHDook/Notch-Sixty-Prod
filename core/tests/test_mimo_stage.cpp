@@ -571,6 +571,60 @@ static void testNoAllocations() {
     n60_graph_retire(g);
 }
 
+// E21 S8 (ledger G4): the stage at the source-count limit. Armed output at 32 sources matches the offline
+// reference, the full 4,096-tap matrix builds (about 34 MB of partition data at prepare time, no cap needed: the
+// build is control-thread only) and renders without allocating.
+static void testThirtyTwoSources() {
+    const double rate = 48000;
+    const uint32_t S = N60_MIMO_MAX_SOURCES;
+    Cfg c;
+    c.S = S; c.T = 128; c.tau = uint32_t(0.015 * rate);
+    c.gains.assign(S, 20.0f);
+    c.taps.assign(size_t(S) * S * c.T, 0.0f);
+    uint32_t seed = 21;
+    for (size_t i = 0; i < c.taps.size(); ++i) {
+        seed = seed * 1664525u + 1013904223u;
+        c.taps[i] = 0.004f * (float(seed >> 8) / 8388608.0f - 1.0f) * float(std::exp(-double(i % c.T) / 30.0));
+    }
+    c.arm = 1.0f;
+    std::vector<float> keep;
+    n60_graph *g = buildMimo(rate, c, keep);
+    CHECK(g != nullptr, "32-source stage builds");
+    if (g == nullptr) return;
+    uint32_t D = 0;
+    double lr = 0;
+    n60_mimo_low_rate(rate, &D, &lr);
+    const uint32_t L = latencyOf(rate, c.tau), N = uint32_t(4.0 * rate);
+    Lanes in = noise(S, N, 5, 0.2f);
+    for (auto &ch : in) { float z = 0; for (auto &v : ch) { z += 0.05f * (v - z); v = z * 4.0f; } }
+    Lanes out = run(g, in, 480);
+    const Lanes ref = referenceDelta(rate, in, c);
+    const uint32_t from = uint32_t(3.2 * rate);
+    for (uint32_t s = 0; s < S; s += 7) {
+        std::vector<float> got, want;
+        for (uint32_t i = from; i < N; ++i) { got.push_back(out[s][i] - in[s][i - L]); want.push_back(ref[s][i - 10 * D]); }
+        const double e = dbRel(got, want, 0);
+        CHECK(e < -80.0, "32 sources: armed delta vs reference %.1f dB (source %u)", e, s);
+    }
+    n60_graph_retire(g);
+
+    // The largest matrix: 32 x 32 x 4,096 taps builds and renders without allocating in the callback.
+    Cfg big;
+    big.S = S; big.T = N60_MIMO_MAX_TAPS; big.tau = uint32_t(0.015 * rate);
+    big.gains.assign(S, 1.0f);
+    big.taps.assign(size_t(S) * S * big.T, 0.0f);
+    big.arm = 1.0f;
+    std::vector<float> keepBig;
+    n60_graph *gb = buildMimo(rate, big, keepBig);
+    CHECK(gb != nullptr, "32 x 4096 stage builds");
+    if (gb != nullptr) {
+        Lanes x = noise(S, 4000, 6, 0.1f);
+        run(gb, x, 256, {}, true);
+        CHECK(allocs.load() == 0, "allocations in the 32-source callback: %ld", allocs.load());
+        n60_graph_retire(gb);
+    }
+}
+
 static void testBadDescs() {
     Cfg c{2, 4, 100, {1.0f, 1.0f}, std::vector<float>(16, 0.0f)};
     std::vector<float> p = c.params(48000);
@@ -772,6 +826,7 @@ int main() {
     testRebuildKeepsTheDirectPath();
     testBlockSizeIndependence();
     testNoAllocations();
+    testThirtyTwoSources();
     testRoutedUnarmedAndArmed();
     testRoutedLease();
     testRoutedBadDescs();
