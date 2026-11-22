@@ -199,6 +199,13 @@ final class DashboardStatusPageTests: XCTestCase {
         XCTAssertEqual(item("load").state, .warning)
         XCTAssertEqual(item("dropouts").value, "2")
         XCTAssertEqual(item("latency").value, "12.3 ms")
+        XCTAssertEqual(item("latency").title, "Processing latency")
+        // G71: with the device's own latency and buffer reported, the figure is a total.
+        i.deviceLatencyMilliseconds = 3.0
+        i.bufferMilliseconds = 2.7
+        h = DashboardModel.health(i)
+        XCTAssertEqual(item("latency").title, "Total latency")
+        XCTAssertEqual(item("latency").value, "18.0 ms")
     }
 
     func testSessionHealthTotalsAccumulateAndReset() {
@@ -256,13 +263,16 @@ final class DashboardStatusPageTests: XCTestCase {
 
     // MARK: Flag and hosting
 
-    func testFlagIsRegisteredDarkAndReleaseIgnoresStoredOverrides() {
+    func testFlagIsGraduatedAndReleaseIgnoresStoredOverrides() {
         XCTAssertTrue(FeatureFlag.all.contains(.dashboardRemote))
         XCTAssertEqual(FeatureFlag.dashboardRemote.id, "e12.dashboard-remote")
-        XCTAssertFalse(FeatureFlag.dashboardRemote.resolvedDefault)
+        XCTAssertTrue(FeatureFlag.dashboardRemote.graduated)
+        XCTAssertTrue(FeatureFlag.dashboardRemote.resolvedDefault)
         let defaults = UserDefaults(suiteName: "e12.dashboard.\(UUID().uuidString)")!
         let release = FeatureFlags(known: FeatureFlag.all, defaults: defaults, policy: .launchArgumentOnly, arguments: [], environment: [:])
-        XCTAssertFalse(release.isEnabled(.dashboardRemote))
+        XCTAssertTrue(release.isEnabled(.dashboardRemote), "graduated: available in release by default")
+        let off = FeatureFlags(known: FeatureFlag.all, defaults: defaults, policy: .launchArgumentOnly, arguments: ["-NotchSixtyFeatures", "-e12.dashboard-remote"], environment: [:])
+        XCTAssertFalse(off.isEnabled(.dashboardRemote), "the escape hatch still switches it off")
         let on = FeatureFlags(known: FeatureFlag.all, defaults: defaults, policy: .launchArgumentOnly, arguments: ["-NotchSixtyFeatures", "e12.dashboard-remote"], environment: [:])
         XCTAssertTrue(on.isEnabled(.dashboardRemote))
     }
