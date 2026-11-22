@@ -292,6 +292,8 @@ struct ProductionRootView: View {
     @State private var showingGuidedSetup = false
     @State private var failsafeVerdict: ActiveSpeakerFailsafe.Verdict = .safe
     @ObservedObject private var defaultOutput = DefaultOutputMonitor.shared
+    /// E12 S27: "Compare blind..." in the remote panel opens the Blind Listening page.
+    @ObservedObject private var blindRequest = BlindListeningRequest.shared
 
     private var engine: AudioIOEngine { product.audioEngine }
 
@@ -393,6 +395,9 @@ struct ProductionRootView: View {
         }
         .onChange(of: engine.outputDevices) { _, _ in refreshFailsafe() }
         .onChange(of: engine.speakerRoutingConfiguration) { _, _ in refreshFailsafe() }
+        .onChange(of: blindRequest.pending, initial: true) { _, pending in
+            if pending { navigation.navigate(to: .blindListening) }
+        }
         .onChange(of: navigation.selection) { _, new in
             // Programmatic selections of an old section land on its System tab.
             if let new, new.systemAreaDestination.section == .system, new != .system {
@@ -552,7 +557,7 @@ struct ProductionRootView: View {
                 profiles: product.profiles
             )
         case .blindListening:
-            ProductionBlindListeningWorkspace(engine: engine)
+            ProductionBlindListeningWorkspace(engine: engine, profiles: product.profiles)
         case .acousticResearch:
             ProductionOptionalAudioResearchWorkspace(engine: engine)
         case .hardwareAcceptance:

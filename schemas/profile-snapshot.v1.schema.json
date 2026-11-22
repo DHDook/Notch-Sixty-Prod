@@ -1,0 +1,92 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://notchsixty.app/schemas/profile-snapshot.v1.schema.json",
+  "title": "Product profile backup snapshot (schema version 1)",
+  "description": "Mirrors ProductProfileBackupSnapshot. Preset and system state sub-configurations are open objects: they version independently and evolve often; only their top-level keys and types are pinned here.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "contentPresets", "systemProfiles", "hardwareMappingRequirements"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "contentPresets": { "type": "array", "items": { "$ref": "#/$defs/contentPreset" } },
+    "systemProfiles": { "type": "array", "items": { "$ref": "#/$defs/systemProfile" } },
+    "selectedContentPresetID": { "$ref": "#/$defs/uuid" },
+    "selectedSystemProfileID": { "$ref": "#/$defs/uuid" },
+    "hardwareMappingRequirements": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["systemProfileID", "importedDeviceUIDs", "createdAt"],
+        "properties": {
+          "systemProfileID": { "$ref": "#/$defs/uuid" },
+          "importedDeviceUIDs": { "type": "array", "items": { "type": "string" } },
+          "createdAt": { "type": "number" }
+        }
+      }
+    },
+    "outputBindings": { "type": "object" }
+  },
+  "$defs": {
+    "uuid": { "type": "string", "pattern": "^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$" },
+    "contentPreset": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "id", "name", "origin", "state"],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "id": { "$ref": "#/$defs/uuid" },
+        "name": { "type": "string" },
+        "origin": { "enum": ["factory", "user"] },
+        "state": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["schemaVersion", "stereoEQ", "inputPreampDB", "headroomAttenuationDB", "dynamics", "audioUnitRack"],
+          "properties": {
+            "schemaVersion": { "const": 1 },
+            "stereoEQ": { "type": "object" },
+            "inputPreampDB": { "type": "number" },
+            "headroomAttenuationDB": { "type": "number" },
+            "dynamics": { "type": "object" },
+            "audioUnitRack": { "type": "object" },
+            "autoPreampEnabled": { "type": "boolean" },
+            "preampTrimDB": { "type": "number" }
+          }
+        }
+      }
+    },
+    "systemProfile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "id", "name", "state"],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "id": { "$ref": "#/$defs/uuid" },
+        "name": { "type": "string" },
+        "state": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["schemaVersion", "outputGainDB", "playback", "bassManagement", "roomCorrection", "speakerIR"],
+          "properties": {
+            "schemaVersion": { "const": 1 },
+            "associatedOutputUID": { "type": "string" },
+            "outputGainDB": { "type": "number" },
+            "playback": { "type": "object" },
+            "bassManagement": { "type": "object" },
+            "roomCorrection": { "type": "object" },
+            "roomCorrectionCalibration": { "type": "object" },
+            "outputRouting": { "type": "object" },
+            "outputDeviceProfile": { "type": "object" },
+            "headphoneDeviceProfile": { "type": "object" },
+            "speakerDriverProcessing": { "type": "object" },
+            "speakerIR": { "type": "object" },
+            "ambientCompensation": { "type": "object" },
+            "activeQuietZone": { "type": "object" },
+            "speakerRouting": { "type": "object" },
+            "systemArrangement": { "type": "object" }
+          }
+        }
+      }
+    }
+  }
+}
