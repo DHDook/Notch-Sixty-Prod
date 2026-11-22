@@ -9,6 +9,15 @@ final class E32ShipEndToEndTests: XCTestCase {
     let rates: [Double] = [44_100, 48_000, 88_200, 96_000, 176_400, 192_000, 352_800, 384_000]
     let flags = FeatureFlags()
 
+    /// E32 S6: `e32.dynamics-sound` is graduated, so the nightly flags-off matrix (`NOTCHSIXTY_GRADUATED_FLAGS_OFF`) forces
+    /// it off and off wins over a test override; the flag-on halves cannot run there. The flags-off path is covered by the
+    /// rest of the suite under the matrix.
+    override func setUpWithError() throws {
+        try super.setUpWithError()
+        try XCTSkipIf(ProcessInfo.processInfo.environment[FeatureFlags.graduatedOffEnvironmentKey] == "1",
+                      "the flags-off matrix forces e32.dynamics-sound off")
+    }
+
     override func tearDown() {
         flags.resetOverrides()
         super.tearDown()
