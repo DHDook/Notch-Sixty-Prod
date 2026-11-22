@@ -912,7 +912,8 @@ struct StereoSignatureVUMeterPanel: View {
         // corners, either side of the branding, like a faceplate's legends.
         let palette = StereoSignatureVUPalette(darkAppearance: colorScheme == .dark)
         StereoSignatureVUMeter(leftVU: leftVU, rightVU: rightVU)
-            .frame(minHeight: 250, maxHeight: 340)
+            .frame(minHeight: 220, maxHeight: 280)
+            .frame(maxWidth: 1_000)
             .overlay(alignment: .bottomLeading) {
                 Text("OUTPUT  ·  0 VU = −18 dBFS")
                     .font(DesignType.caption.font.weight(.semibold).monospacedDigit())
@@ -937,6 +938,7 @@ struct StereoSignatureVUMeterPanel: View {
                 .padding(.bottom, 20)
                 .help("Turn the output VU meters on or off")
             }
+            .frame(maxWidth: .infinity)
             .task(id: "\(engine.lifecycleState.rawValue)|\(vuMetersEnabled)") { await runMeterLoop() }
     }
 

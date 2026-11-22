@@ -21,8 +21,12 @@ struct ProductionDashboardView: View {
     }
 
     var body: some View {
-        ProductionPageContainer {
-            VStack(alignment: .leading, spacing: DesignSpacing.xl.pt) {
+        ProductionPageContainer { pageContent }
+    }
+
+    /// The page without its scroll view, so a test can measure the content height against the viewport.
+    var pageContent: some View {
+            VStack(alignment: .leading, spacing: DesignSpacing.l.pt) {
                 // Processing state lives in the toolbar's status readout and
                 // its Bypass and Start/Stop buttons, so the dashboard spends
                 // no line on it.
@@ -37,59 +41,51 @@ struct ProductionDashboardView: View {
 
                 ProductionActionErrorBanner(message: $actionError)
 
-                // Output and volume share one row; equal heights keep the
-                // two glass panels aligned.
+                // One grid for every card: equal-width columns share their edges and each row has one height.
                 ViewThatFits(in: .horizontal) {
-                    HStack(alignment: .top, spacing: DesignSpacing.l.pt) {
-                        audioControls
-                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                            .designSurface(.large)
-                        masterControls
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    }
-                    .fixedSize(horizontal: false, vertical: true)
-                    VStack(alignment: .leading, spacing: DesignSpacing.l.pt) {
-                        audioControls
-                            .frame(maxWidth: .infinity, alignment: .topLeading)
-                            .designSurface(.large)
-                        masterControls
-                            .frame(maxWidth: .infinity)
-                    }
+                    cardLayout(summaryColumns: 3).frame(minWidth: 1_180)
+                    cardLayout(summaryColumns: 2).frame(minWidth: 820)
+                    cardLayout(summaryColumns: 1, controlColumns: 1)
                 }
+            }
+    }
 
-                levelControls
+    private var dashboardCards: [AnyView] {
+        func fill<V: View>(_ v: V) -> AnyView { AnyView(v) }
+        func surface<V: View>(_ v: V) -> AnyView {
+            AnyView(v.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading).designSurface(.large))
+        }
+        return [
+            surface(audioControls),
+            fill(masterControls),
+            surface(gainControls),
+            surface(balanceControls),
+            fill(summaryCard(title: "Playback Path", text: playbackPathSummary, systemImage: "point.3.connected.trianglepath.dotted")),
+            fill(summaryCard(title: "Equalizer",
+                             text: "\(engine.stereoEQConfiguration.enabledBandCount) bands · \(engine.stereoEQConfiguration.phaseMode.displayName)",
+                             systemImage: "slider.horizontal.3")),
+            fill(summaryCard(title: "Dynamics", text: dynamicsSummary, systemImage: "waveform.path.ecg")),
+            fill(summaryCard(title: "Speakers", text: speakerSummary, systemImage: "hifispeaker.2.fill")),
+            fill(summaryCard(title: "Room Correction", text: roomCorrectionSummary, systemImage: "waveform.badge.magnifyingglass")),
+            fill(summaryCard(title: "Active Acoustics", text: activeAcousticsSummary, systemImage: "waveform.and.mic")),
+        ]
+    }
 
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 340), spacing: DesignSpacing.l.pt)], spacing: DesignSpacing.l.pt) {
-                    summaryCard(
-                        title: "Playback Path",
-                        text: playbackPathSummary,
-                        systemImage: "point.3.connected.trianglepath.dotted"
-                    )
-                    summaryCard(
-                        title: "Equalizer",
-                        text: "\(engine.stereoEQConfiguration.enabledBandCount) bands · \(engine.stereoEQConfiguration.phaseMode.displayName)",
-                        systemImage: "slider.horizontal.3"
-                    )
-                    summaryCard(
-                        title: "Dynamics",
-                        text: dynamicsSummary,
-                        systemImage: "waveform.path.ecg"
-                    )
-                    summaryCard(
-                        title: "Speakers",
-                        text: speakerSummary,
-                        systemImage: "hifispeaker.2.fill"
-                    )
-                    summaryCard(
-                        title: "Room Correction",
-                        text: roomCorrectionSummary,
-                        systemImage: "waveform.badge.magnifyingglass"
-                    )
-                    summaryCard(
-                        title: "Active Acoustics",
-                        text: activeAcousticsSummary,
-                        systemImage: "waveform.and.mic"
-                    )
+    /// The controls in a two-by-two block and the summaries in a denser grid; both use equal-width columns and one height per row.
+    private func cardLayout(summaryColumns: Int, controlColumns: Int = 2) -> some View {
+        let cards = dashboardCards
+        return VStack(alignment: .leading, spacing: DesignSpacing.l.pt) {
+            cardGrid(Array(cards[0..<4]), columns: controlColumns)
+            cardGrid(Array(cards[4...]), columns: summaryColumns)
+        }
+    }
+
+    private func cardGrid(_ cards: [AnyView], columns: Int) -> some View {
+        let rows = stride(from: 0, to: cards.count, by: columns).map { Array(cards[$0..<min($0 + columns, cards.count)]) }
+        return Grid(alignment: .topLeading, horizontalSpacing: DesignSpacing.l.pt, verticalSpacing: DesignSpacing.l.pt) {
+            ForEach(rows.indices, id: \.self) { r in
+                GridRow {
+                    ForEach(rows[r].indices, id: \.self) { c in rows[r][c] }
                 }
             }
         }
@@ -241,7 +237,7 @@ struct ProductionDashboardView: View {
                     }
                 }
                 .labelsHidden()
-                .frame(maxWidth: .infinity)
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .disabled(engine.lifecycleState != .idle)
 
                 Button {
@@ -295,21 +291,8 @@ struct ProductionDashboardView: View {
         }
     }
 
-    /// Everyday trims beside volume: input and output gain in one card,
-    /// L/R balance in its own. Gain steps in 0.5 dB or takes a typed value;
-    /// balance is a centre-detent bar. Double-clicking balance recentres it.
-    private var levelControls: some View {
-        HStack(alignment: .top, spacing: DesignSpacing.l.pt) {
-            gainControls
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                .designSurface(.large)
-            balanceControls
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                .designSurface(.large)
-        }
-        .fixedSize(horizontal: false, vertical: true)
-    }
-
+    /// Everyday trims beside volume: input and output gain in one card, L/R balance in its own. Gain steps in 0.5 dB or
+    /// takes a typed value; balance is a centre-detent bar. Double-clicking balance recentres it.
     private var gainControls: some View {
         VStack(alignment: .leading, spacing: DesignSpacing.m.pt) {
             Text("Gain").font(DesignType.sectionTitle.font)
@@ -378,8 +361,8 @@ struct ProductionDashboardView: View {
             Text(text).font(DesignType.body.font).foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, minHeight: 40, alignment: .topLeading)
         }
-        .padding(DesignSpacing.l.pt)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(DesignSpacing.m.pt)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .designSurface(.large)
     }
 }
