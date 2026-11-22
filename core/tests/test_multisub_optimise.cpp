@@ -3,6 +3,7 @@
 // settings with an independent double-precision evaluator, never from the implementation.
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <vector>
 
 #include "n60/correct.h"
