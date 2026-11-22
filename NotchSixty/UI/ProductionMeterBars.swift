@@ -413,7 +413,9 @@ enum ProductionMeterHub {
 
     static func shared(for engine: AudioIOEngine) -> MeterReadbackHub<ProductionMeterContext> {
         if let hub { return hub }
-        let eventsEnabled = FeatureFlags().isEnabled(.eqPageEnhancements)
+        let flags = FeatureFlags()
+        // E12 S12: the Dashboard health strip reads the same samples, so it also switches the feed on.
+        let eventsEnabled = flags.isEnabled(.eqPageEnhancements) || flags.isEnabled(.dashboardRemote)
         let created = MeterReadbackHub<ProductionMeterContext>(
             visibility: visibility,
             isProcessing: { [weak engine] in engine?.lifecycleState == .running },

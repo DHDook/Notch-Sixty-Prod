@@ -35,7 +35,7 @@ extension FeatureFlag {
         .noiseSurvey, .conversationUnmasking, .virtualMicrophone, .zones, .headPositionCamera, .overnight,
         .subAwareAnc, .longFIR, .outputProtection, .headphones, .mimoTreatment, .dynamicsExtras, .roomModel,
         .parallelRender, .multirate, .rateAdapt, .coreDesigners,
-        .eqPageEnhancements, .dynamicsSound, .designLanguage, .followOutput
+        .eqPageEnhancements, .dynamicsSound, .designLanguage, .followOutput, .dashboardRemote
     ]
 
     /// E6 S11: the unified graph is the default renderer. Turning this on selects the frozen
@@ -301,6 +301,15 @@ extension FeatureFlag {
         id: "e15.follow-output",
         title: "Follow macOS output",
         epic: "E15"
+    )
+
+    /// E12 S12-S14: the Dashboard becomes the status page (cards link, health strip, attention area, now playing) and the
+    /// menu bar panel becomes the remote control. Swift UI only; the engine never reads it. Off: today's Dashboard and
+    /// panel. Graduates in E12 S14; removed in the flag-cleanup phase.
+    static let dashboardRemote = FeatureFlag(
+        id: "e12.dashboard-remote",
+        title: "Dashboard and menu bar remote",
+        epic: "E12"
     )
 }
 
