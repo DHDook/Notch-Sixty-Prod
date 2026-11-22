@@ -247,3 +247,12 @@ Do not add per-PR or per-branch workflows. Extend one of these three instead.
 - Production code has no `Unconnected*` (always-unavailable) defaults on injectable services; tests inject fakes explicitly.
 - Every PR body states "Reachable from UI: yes/no", with the path from the user action to the engine.
 - Every epic file has a `## Gaps` ledger (`docs/epics/README.md`). A slice with an `open-question` gap is not ticked. A `scoped` gap needs an unchecked plan item in its owning slice. A flag-graduation or "ship" slice needs every gap in its epic `closed`.
+
+## 13. Screen fit (owner decision, 21 Nov 2026)
+
+Every app window and page must fit comfortably on a 1920 x 1080 display without taking up the whole screen, at the default window size.
+
+- No page needs horizontal scrolling at the default or minimum window width. Control rows reflow (wrap to a second line or collapse into a menu) instead of scrolling sideways.
+- Controls never force the window wider than its content area; fixed-size controls sit in a `ViewThatFits` or similar reflow, not a bare `HStack`.
+- Vertical scrolling is fine for long pages, but a page's default state has no large empty bands of dead space.
+- A UI slice checks this by hosting the page at 1,280 x 800 and at 1,920 x 1,080 minus the menu bar and Dock (about 1,920 x 1,000), reading the laid-out control frames and asserting that none extends past the page width. Any slice that adds controls to a row re-checks it.

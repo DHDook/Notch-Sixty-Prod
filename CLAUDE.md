@@ -111,4 +111,6 @@ owner made in this session. Drop: file contents, diffs, build and test logs, and
 - Red nightly (owner, 11 Nov 2026): if the latest nightly `macos-full` on `main` failed, fix it
   before starting another slice.
 - No slice makes `AudioIOEngine.swift` longer (owner, 11 Nov 2026); E23 S4 splits it.
+- Screen fit (owner, 21 Nov 2026; AGENTS.md section 13): every page fits comfortably at 1920x1080 without taking the whole
+  screen; no horizontal scrolling; reflow control rows instead.
 - Work after v1 is in `docs/V2_ROADMAP.md`; do not start it until the owner says so.

@@ -101,18 +101,21 @@ struct ProductionEQGainBar: View {
 
     private var badgeView: some View {
         let appearance = Self.appearance(of: badge)
-        return VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
+        let detail = appearance.detail + (autoPreamp.prediction.omitsFIRBands ? " Imported FIR bands are not included." : "")
+        return HStack(spacing: DesignSpacing.s.pt) {
             Label(appearance.title, systemImage: appearance.symbol)
                 .font(.callout.bold())
                 .foregroundStyle(appearance.color)
-            Text(appearance.detail + (autoPreamp.prediction.omitsFIRBands ? " Imported FIR bands are not included." : ""))
+                .fixedSize()
+            Text(detail)
                 .font(DesignType.caption.font)
                 .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+                .lineLimit(1)
+                .truncationMode(.tail)
         }
         .padding(.horizontal, DesignSpacing.m.pt)
         .padding(.vertical, DesignSpacing.s.pt)
-        .frame(maxWidth: 280, alignment: .leading)
+        .frame(alignment: .leading)
         .designTint(appearance.color)
         .help("A prediction from the filter math for a steady sine at full scale, not a bound on inter-sample peaks. The red state comes from the post-EQ meter.")
         .accessibilityElement(children: .combine)

@@ -69,7 +69,7 @@ enum EQEditorLayout {
 
     /// Height of the list panel: sized to its rows, capped so a long list scrolls instead of growing the page.
     static func listHeight(bandCount: Int) -> Double {
-        let rows = Double(max(1, min(bandCount, 9)))
+        let rows = Double(max(1, min(bandCount, 7)))
         return 56 + rows * 38
     }
 }
