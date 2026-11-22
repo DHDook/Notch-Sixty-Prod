@@ -155,6 +155,9 @@ private struct MeterTickScope<Content: View>: View {
 struct ProductionMetersView: View {
     var engine: AudioIOEngine
     @ObservedObject var assistant: HeadroomAssistantController
+    /// E12 S12: a page the Dashboard asked for; taken once on appear, then `onPageRequestTaken` clears it.
+    var requestedPage: ProductionMetersPage?
+    var onPageRequestTaken: () -> Void = {}
     @State private var page: ProductionMetersPage = .levels
     @State private var assistantCommandError: String?
     /// E32 S3 (R19, design 7): everything that changes per tick lives in `tick`, which only `MeterTickScope`
@@ -260,6 +263,12 @@ struct ProductionMetersView: View {
             }
             .padding(DesignSpacing.xl.pt)
             .frame(maxWidth: 1180, alignment: .topLeading)
+        }
+        .onAppear {
+            if let requested = requestedPage {
+                page = requested
+                onPageRequestTaken()
+            }
         }
         .task(id: "\(engine.lifecycleState.rawValue)|\(page.rawValue)|\(spectrumMode.rawValue)|\(spectrogramWindow.rawValue)|\(analysisViewCode)|\(analysisPairCode)|\(transportMeterSnapshot?.kind.rawValue ?? "stereo")") {
             await runVisiblePageLoop()
@@ -1291,7 +1300,7 @@ struct ProductionMetersView: View {
 
     private static var ledgers: [ObjectIdentifier: AnalysisDemandLedger] = [:]
 
-    private static func analysisDemandLedger(for engine: AudioIOEngine) -> AnalysisDemandLedger {
+    static func analysisDemandLedger(for engine: AudioIOEngine) -> AnalysisDemandLedger {
         let key = ObjectIdentifier(engine)
         if let ledger = ledgers[key] { return ledger }
         let ledger = AnalysisDemandLedger { [weak engine] mask in engine?.setAnalysisDemand(mask) }

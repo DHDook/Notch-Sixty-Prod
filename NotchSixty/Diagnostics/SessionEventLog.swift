@@ -78,6 +78,8 @@ struct SessionEventSample: Sendable {
     var recoveryAttempts: UInt64 = 0
     var recoverySuccesses: UInt64 = 0
     var sampleRate: Double?
+    /// E12 S12: largest output sample or true-peak magnitude (linear) since the last poll; 0 when not read.
+    var outputPeakLinear: Float = 0
 }
 
 struct SessionEventLog: Equatable, Sendable {
@@ -286,6 +288,8 @@ final class SessionEventHistory: ObservableObject {
     @Published private(set) var previous: [SessionEvent]
     /// Counts from session start (closes E33 G8): it lives here, not in a page's view state.
     @Published private(set) var dropouts = DropoutCounter()
+    /// E12 S12: clip, limiter and headroom totals from session start, for the Dashboard health strip.
+    @Published private(set) var health = SessionHealthTotals()
     private let store: SessionEventStore?
     private var lastSave: Date?
     private var dirty = false
@@ -315,6 +319,7 @@ final class SessionEventHistory: ObservableObject {
         log.observe(sample)
         if log.events.count != before || log.events.last != beforeLast { dirty = true }
         dropouts.observe(underrunFrames: sample.underrunFrames, overrunFrames: sample.overrunFrames, now: sample.now)
+        health.observe(sample)
         saveIfDue(now: sample.now)
     }
 
@@ -325,6 +330,7 @@ final class SessionEventHistory: ObservableObject {
         sessionActive = false
         log.rebaseline()
         dropouts.reset()
+        health.reset()
         saveIfDue(now: Date(), force: true)
     }
 
@@ -377,6 +383,11 @@ extension SessionEventSample {
         sample.recoveryAttempts = diagnostics.recoveryAttempts
         sample.recoverySuccesses = diagnostics.recoverySuccesses
         sample.sampleRate = diagnostics.outputSampleRate
+        var outputPeak: Float = 0
+        for (id, reading) in channels where id.hasPrefix("output.") {
+            outputPeak = max(outputPeak, reading.peakLinear, reading.truePeakLinear ?? 0)
+        }
+        sample.outputPeakLinear = outputPeak
         return sample
     }
 

@@ -103,6 +103,7 @@ FC phase's per-epic PR (`docs/epics/FC.md`) unless stated.
 | `e33.page-enhancements` | E33 | graduated (S11d, 21 Nov 2026): every E33 page, engine-publish and Swift reader | S11d | FC (E33) |
 | `e32.dynamics-sound` | E32 | graduated | 21 Nov 2026 (S6) | FC (E32) |
 | `e15.follow-output` | E15 | dark; S1: registered, binding table and decision policy only, no reader in the app yet | S4 | FC (E15) |
+| `e12.dashboard-remote` | E12 | dark; S12: status-page Dashboard (cards, health strip, attention, now playing) | S14 | FC (E12) |
 | `e34.design-language` | E34 | dark; S0: registered, no reader yet (S1 shared parts read it) | S7 | FC (E34) |
 | `e8.routing-matrix`, `e8.lab-routed-ways`, `e10.mixed-phase-correction`, `e11.measurement-suite`, `e12.guided-setup`, `e13.byo-import`, `e25.outputs-and-speakers`, `e27.eq-safety` | E8, E10, E11, E12, E13, E25, E27 | removed (before this policy, at epic ship) | n/a | done |
 
@@ -165,5 +166,6 @@ E22; the software part graduates.
 | `e33.page-enhancements` | E33 | Graduated: on by default, off with `-NotchSixtyFeatures -e33.page-enhancements`. Equalizer page: band list and two-column editor, dynamic range hint, moved-to-fit note, sectioned filter picker; later slices add Dynamics, Meters, Plugins and engine changes. Off: today's pages. Removed in FC (E33) |
 | `e32.dynamics-sound` | E32 | On by default (graduated, E32 S6). Dynamics: the limiter's attack never exceeds its look-ahead (a note shows when it applies), the expander's Attack opens and Release closes, and the true-peak factor follows the device rate (4x at 44.1 and 48 kHz, 2x at 88.2 and 96, 1x from 176.4 kHz) with the reported latency. Off (`-NotchSixtyFeatures -e32.dynamics-sound`): stages render as before. Removed in FC (E32) |
 | `e15.follow-output` | E15 | Off by default. Opt-in Follow macOS output: the mode is forced to fixed while off, no default-output listener is installed, and the selected output stays authoritative. Removed in FC (E15) |
+| `e12.dashboard-remote` | E12 | Off by default. The Dashboard becomes the status page: link cards, health strip, attention area, now-playing line; everyday controls leave it (the menu bar panel gets them in S13). Off: today's Dashboard. Removed in FC (E12) |
 | `e34.design-language` | E34 | Off by default. The app-wide design language: macOS 27 Liquid Glass rules (`docs/DESIGN_LANGUAGE.md`) and, from S1, the shared values and components. Off: today's look. Removed in FC (E34) |
 | `e21.core-designers` | E21 | Off by default. Room-measurement analysis (direct arrival, window, response grid) and the EQ program analyser's spectrum bands run in the portable core instead of Swift and vDSP; later E21 slices add the designers. Off: the Swift path. Removed in FC (E21) |
