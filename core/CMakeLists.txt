@@ -267,6 +267,11 @@ add_executable(n60core_calibration_align_test tests/test_calibration_align.cpp)
 target_link_libraries(n60core_calibration_align_test PRIVATE n60core)
 add_test(NAME n60core_calibration_align COMMAND n60core_calibration_align_test)
 
+# E21 S7b: multi-sub optimiser (n60/correct.h section 9).
+add_executable(n60core_multisub_optimise_test tests/test_multisub_optimise.cpp)
+target_link_libraries(n60core_multisub_optimise_test PRIVATE n60core)
+add_test(NAME n60core_multisub_optimise COMMAND n60core_multisub_optimise_test)
+
 add_executable(n60core_anc_actuators_test tests/test_anc_actuators.cpp)
 target_link_libraries(n60core_anc_actuators_test PRIVATE n60core)
 add_test(NAME n60core_anc_actuators COMMAND n60core_anc_actuators_test)

@@ -116,4 +116,153 @@ enum MultichannelCalibrationCore {
         guard status == 0 else { return [] }
         return (0..<Int(produced)).map { OutputCalibrationEQBand(frequencyHz: f[$0], gainDB: g[$0], q: q[$0]) }
     }
+
+    /// The multi-sub optimiser (`n60_correct_multisub_optimise`, E21 S7b) over the sub sources of `matrix`, in the legacy
+    /// `N60MultiSubOptimize` result shape so the designer's materialisation is unchanged. Nil on any failure.
+    /// Standalone: not merged with the bass optimiser (E21 Q5 unanswered).
+    static func optimiseSubs(
+        matrix: inout N60MultichannelCalibrationMatrix, subCount: Int, targetDB: [Float], settings: N60MultiSubOptimizationSettings
+    ) -> N60MultiSubOptimizationResult? {
+        let bins = Int(matrix.frequencyCount)
+        let seats = Int(matrix.seatCount)
+        guard subCount > 0, subCount <= Int(N60_CALIBRATION_MAX_SUBWOOFERS), targetDB.count >= bins else { return nil }
+        var sources: [Int] = []
+        for sub in 0..<subCount {
+            let index = N60MultichannelCalibrationSourceIndexForSubwoofer(&matrix, UInt32(sub))
+            guard index >= 0 else { return nil }
+            sources.append(Int(index))
+        }
+        let weights = (0..<seats).map { Float(max(0, MultichannelCalibrationDesigner.seatWeight(matrix: &matrix, index: $0))) }
+        var magnitude: [Float] = []
+        var phase: [Float] = []
+        var arrival: [UInt32] = []
+        var valid: [UInt8] = []
+        for source in sources {
+            for seat in 0..<seats {
+                var response = MultichannelCalibrationDesigner.measuredResponse(matrix: &matrix, sourceIndex: source, seatIndex: seat)
+                arrival.append(response.directArrivalFrame)
+                valid.append(response.valid ? 1 : 0)
+                withUnsafePointer(to: &response.magnitudeDB) { tuple in
+                    tuple.withMemoryRebound(to: Float.self, capacity: Int(N60_CALIBRATION_MAX_FREQUENCY_BINS)) {
+                        magnitude.append(contentsOf: UnsafeBufferPointer(start: $0, count: bins))
+                    }
+                }
+                withUnsafePointer(to: &response.phaseRadians) { tuple in
+                    tuple.withMemoryRebound(to: Float.self, capacity: Int(N60_CALIBRATION_MAX_FREQUENCY_BINS)) {
+                        phase.append(contentsOf: UnsafeBufferPointer(start: $0, count: bins))
+                    }
+                }
+            }
+        }
+        let frequencies: [Float] = withUnsafePointer(to: &matrix.frequenciesHz) { tuple in
+            tuple.withMemoryRebound(to: Float.self, capacity: Int(N60_CALIBRATION_MAX_FREQUENCY_BINS)) {
+                Array(UnsafeBufferPointer(start: $0, count: bins))
+            }
+        }
+        var core = n60_correct_multisub_opt_settings()
+        core.minimum_gain_db = settings.minimumGainDB
+        core.maximum_gain_db = settings.maximumGainDB
+        core.gain_step_db = settings.gainStepDB
+        core.maximum_additional_delay_ms = settings.maximumAdditionalDelayMs
+        core.delay_step_ms = settings.delayStepMs
+        core.coordinate_passes = settings.coordinatePasses
+        core.target_error_weight = settings.targetErrorWeight
+        core.seat_variance_weight = settings.seatVarianceWeight
+        core.boost_regularisation = settings.boostRegularization
+        core.minimum_eq_db = settings.minimumEQDB
+        core.maximum_eq_db = settings.maximumEQDB
+        core.eq_step_db = settings.eqStepDB
+        core.eq_passes = settings.eqPasses
+        core.eq_regularisation = settings.eqRegularization
+        core.eq_smoothness = settings.eqSmoothness
+        core.search_starts = settings.searchStarts
+        core.search_rounds = settings.searchRounds
+        core.search_evaluation_budget = settings.searchEvaluationBudget
+        core.maximum_eq_slope_db_per_octave = settings.maximumEQSlopeDBPerOctave
+        core.eq_search_rounds = settings.eqSearchRounds
+        core.eq_search_evaluation_budget = settings.eqSearchEvaluationBudget
+
+        var out = n60_correct_multisub_opt_result()
+        let status: Int32 = frequencies.withUnsafeBufferPointer { f in
+            targetDB.withUnsafeBufferPointer { t in
+                weights.withUnsafeBufferPointer { w in
+                    magnitude.withUnsafeBufferPointer { m in
+                        phase.withUnsafeBufferPointer { ph in
+                            arrival.withUnsafeBufferPointer { a in
+                                valid.withUnsafeBufferPointer { v in
+                                    var problem = n60_correct_multisub_opt_problem()
+                                    problem.struct_size = UInt32(MemoryLayout<n60_correct_multisub_opt_problem>.size)
+                                    problem.sub_count = UInt32(subCount)
+                                    problem.seat_count = UInt32(seats)
+                                    problem.bin_count = UInt32(bins)
+                                    problem.sample_rate = matrix.sampleRate
+                                    problem.frequency_hz = f.baseAddress
+                                    problem.target_db = t.baseAddress
+                                    problem.seat_weight = w.baseAddress
+                                    problem.magnitude_db = m.baseAddress
+                                    problem.phase_rad = ph.baseAddress
+                                    problem.arrival_frame = a.baseAddress
+                                    problem.valid = v.baseAddress
+                                    problem.settings = core
+                                    out.struct_size = UInt32(MemoryLayout<n60_correct_multisub_opt_result>.size)
+                                    return n60_correct_multisub_optimise(&problem, &out)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        guard status == 0 else { return nil }
+
+        var result = N60MultiSubOptimizationResult()
+        result.subwooferCount = UInt32(subCount)
+        result.frequencyCount = UInt32(bins)
+        withUnsafeMutablePointer(to: &result.gainDB) { tuple in
+            tuple.withMemoryRebound(to: Float.self, capacity: Int(N60_CALIBRATION_MAX_SUBWOOFERS)) { dst in
+                withUnsafePointer(to: &out.gain_db) {
+                    $0.withMemoryRebound(to: Float.self, capacity: Int(N60_CALIBRATION_MAX_SUBWOOFERS)) { src in
+                        for i in 0..<subCount { dst[i] = src[i] }
+                    }
+                }
+            }
+        }
+        withUnsafeMutablePointer(to: &result.additionalDelayMs) { tuple in
+            tuple.withMemoryRebound(to: Float.self, capacity: Int(N60_CALIBRATION_MAX_SUBWOOFERS)) { dst in
+                withUnsafePointer(to: &out.additional_delay_ms) {
+                    $0.withMemoryRebound(to: Float.self, capacity: Int(N60_CALIBRATION_MAX_SUBWOOFERS)) { src in
+                        for i in 0..<subCount { dst[i] = src[i] }
+                    }
+                }
+            }
+        }
+        withUnsafeMutablePointer(to: &result.polarityInverted) { tuple in
+            tuple.withMemoryRebound(to: Bool.self, capacity: Int(N60_CALIBRATION_MAX_SUBWOOFERS)) { dst in
+                withUnsafePointer(to: &out.polarity_inverted) {
+                    $0.withMemoryRebound(to: UInt8.self, capacity: Int(N60_CALIBRATION_MAX_SUBWOOFERS)) { src in
+                        for i in 0..<subCount { dst[i] = src[i] != 0 }
+                    }
+                }
+            }
+        }
+        withUnsafeMutablePointer(to: &result.perSubEQTargetDB) { tuple in
+            tuple.withMemoryRebound(to: Float.self, capacity: Int(N60_CALIBRATION_MAX_SUBWOOFERS * N60_CALIBRATION_MAX_FREQUENCY_BINS)) { dst in
+                withUnsafePointer(to: &out.eq_target_db) {
+                    $0.withMemoryRebound(to: Float.self, capacity: Int(N60_CALIBRATION_MAX_SUBWOOFERS * N60_CALIBRATION_MAX_FREQUENCY_BINS)) { src in
+                        let stride = Int(N60_CALIBRATION_MAX_FREQUENCY_BINS)
+                        for sub in 0..<subCount { for bin in 0..<bins { dst[sub * stride + bin] = src[sub * stride + bin] } }
+                    }
+                }
+            }
+        }
+        result.objective = out.objective
+        result.weightedTargetErrorDBSquared = out.weighted_target_error_db2
+        result.seatVarianceDBSquared = out.seat_variance_db2
+        result.searchEvaluations = out.search_evaluations
+        result.searchStartsRun = out.search_starts_run
+        result.searchBudgetExhausted = out.search_budget_exhausted != 0
+        result.eqSearchEvaluations = out.eq_search_evaluations
+        result.eqSearchBudgetExhausted = out.eq_search_budget_exhausted != 0
+        return result
+    }
 }

@@ -37,7 +37,7 @@
 extern "C" {
 #endif
 
-#define N60_CORRECT_ABI_VERSION 6
+#define N60_CORRECT_ABI_VERSION 7
 
 #define N60_CORRECT_OK 0
 #define N60_CORRECT_ERR_ARGUMENT (-1)
@@ -757,6 +757,70 @@ int32_t n60_correct_calib_timing_offsets(const n60_correct_calib_timing_problem 
 int32_t n60_correct_calib_sub_eq_fit(const float *frequency_hz, const float *target_db, uint32_t count, float min_hz,
                                      float max_hz, uint32_t max_bands, double *out_frequency_hz, double *out_gain_db,
                                      double *out_q, uint32_t *out_count);
+
+/* ---- 9. Multi-subwoofer optimiser (E21 S7b, ABI v7) ----
+ * The port of N60MultiSubOptimize (legacy N60MultiSubOptimizer.h): builds the unit-gain table from measured magnitude,
+ * phase and arrival, runs the section 6 delay, gain and polarity search, then the EQ search, and evaluates the final
+ * objective. Standalone: it is not merged with `n60_correct_bass_optimise` (E21 Q5 unanswered). Settings, defaults and
+ * rounding follow the legacy struct so results match it. Offline only; allocates at entry.
+ * Seats with weight 0 are excluded (the caller folds "included" into the weight).
+ */
+#define N60_CORRECT_MULTISUB_OPT_MAX_BINS 128u
+
+typedef struct n60_correct_multisub_opt_settings {
+    float minimum_gain_db, maximum_gain_db, gain_step_db;
+    float maximum_additional_delay_ms, delay_step_ms;
+    uint32_t coordinate_passes;      /* 1 .. 8 */
+    float target_error_weight, seat_variance_weight, boost_regularisation;
+    float minimum_eq_db, maximum_eq_db, eq_step_db;   /* eq range within -12 .. 3 dB */
+    uint32_t eq_passes;              /* 0 .. 8; 0 skips the EQ stage */
+    float eq_regularisation, eq_smoothness;
+    uint32_t search_starts, search_rounds, search_evaluation_budget;
+    float maximum_eq_slope_db_per_octave;
+    uint32_t eq_search_rounds, eq_search_evaluation_budget;
+} n60_correct_multisub_opt_settings;
+
+/* The legacy defaults (N60MultiSubOptimizationSettingsMakeDefault). */
+void n60_correct_multisub_opt_defaults(n60_correct_multisub_opt_settings *settings);
+/* 1 when every field is finite, in range and the grids fit the section 6 capacities. */
+int32_t n60_correct_multisub_opt_settings_valid(const n60_correct_multisub_opt_settings *settings);
+
+typedef struct n60_correct_multisub_opt_problem {
+    uint32_t struct_size;
+    uint32_t sub_count;       /* 1 .. N60_CORRECT_MULTISUB_MAX_SUBS */
+    uint32_t seat_count;
+    uint32_t bin_count;       /* 1 .. N60_CORRECT_MULTISUB_OPT_MAX_BINS */
+    double sample_rate;
+    const float *frequency_hz;   /* bin_count, ascending, below Nyquist */
+    const float *target_db;      /* bin_count */
+    const float *seat_weight;    /* seat_count; 0 excludes; at least one positive */
+    const float *magnitude_db;   /* [sub][seat][bin] */
+    const float *phase_rad;      /* [sub][seat][bin] */
+    const uint32_t *arrival_frame; /* [sub][seat] direct arrival */
+    const uint8_t *valid;        /* [sub][seat]; non-zero required for every used seat */
+    n60_correct_multisub_opt_settings settings;
+} n60_correct_multisub_opt_problem;
+
+typedef struct n60_correct_multisub_opt_result {
+    uint32_t struct_size;
+    uint32_t sub_count, bin_count;
+    float gain_db[N60_CORRECT_MULTISUB_MAX_SUBS];
+    float additional_delay_ms[N60_CORRECT_MULTISUB_MAX_SUBS];
+    uint8_t polarity_inverted[N60_CORRECT_MULTISUB_MAX_SUBS];
+    float eq_target_db[N60_CORRECT_MULTISUB_MAX_SUBS][N60_CORRECT_MULTISUB_OPT_MAX_BINS];
+    float objective, weighted_target_error_db2, seat_variance_db2;
+    uint64_t search_evaluations;
+    uint32_t search_starts_run;
+    uint32_t search_budget_exhausted;
+    uint64_t eq_search_evaluations;
+    uint32_t eq_search_budget_exhausted;
+} n60_correct_multisub_opt_result;
+
+/* N60_CORRECT_ERR_ARGUMENT for a null pointer, bad counts, invalid settings, a non-ascending or non-finite grid, a
+ * non-finite input or an invalid used response; N60_CORRECT_ERR_NONFINITE when the final objective is not finite;
+ * N60_CORRECT_ERR_ALLOC; or any error of the section 6 searches. */
+int32_t n60_correct_multisub_optimise(const n60_correct_multisub_opt_problem *problem,
+                                      n60_correct_multisub_opt_result *result);
 
 #ifdef __cplusplus
 }
