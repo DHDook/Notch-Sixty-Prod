@@ -472,3 +472,8 @@ add_test(NAME n60core_e4_remote_tonal COMMAND n60core_e4_remote_tonal_test)
 add_executable(n60core_speaker_test tests/test_speaker.cpp)
 target_link_libraries(n60core_speaker_test PRIVATE n60core)
 add_test(NAME n60core_speaker COMMAND n60core_speaker_test)
+
+# E21 S9b: crossover feasibility, classifier, early window and preview scoring (n60/speaker.h v2).
+add_executable(n60core_speaker_s9b_test tests/test_speaker_s9b.cpp)
+target_link_libraries(n60core_speaker_s9b_test PRIVATE n60core)
+add_test(NAME n60core_speaker_s9b COMMAND n60core_speaker_s9b_test)

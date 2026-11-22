@@ -252,4 +252,60 @@ final class SpeakerOptimizerEarlyWindowCharacterizationTests: XCTestCase {
             )
         )
     }
+
+    // E21 S9b: the core gated DFT reproduces the Swift reference magnitude, band and retained windows.
+    func testCoreMathsMatchesSwiftReference() throws {
+        let calibration = RoomCorrectionMicrophoneCalibration(
+            sourceName: "Synthetic tilt",
+            points: [.init(frequencyHz: 20, gainDB: 2), .init(frequencyHz: 1_000, gainDB: 3), .init(frequencyHz: 20_000, gainDB: -1)])
+        let calibrated = SpeakerOptimizerMicrophoneIdentity(
+            deviceUID: "pr105-mic", inputChannelIndex: 0, calibrationFingerprint: "Synthetic tilt")
+        var shortGate = SpeakerOptimizerEarlyWindowSettings()
+        shortGate.postArrivalMilliseconds = 4
+        shortGate.fadeOutMilliseconds = 1
+        let cases: [(Float, SpeakerOptimizerEarlyWindowSettings, Bool)] = [
+            (0.8, .init(), false), (0, .init(), true), (0.5, shortGate, false),
+        ]
+        for (late, settings, withCalibration) in cases {
+            var reference = SpeakerOptimizerEarlyWindowAnalyzer()
+            reference.useCoreMaths = false
+            var core = SpeakerOptimizerEarlyWindowAnalyzer()
+            core.useCoreMaths = true
+            let channel = makeChannel(lateReflectionGain: late)
+            let id = UUID()
+            let a = try reference.derive(
+                channel: channel, captureID: id, target: makeTarget(), sampleRate: 48_000,
+                microphone: withCalibration ? calibrated : makeMicrophone(),
+                microphoneCalibration: withCalibration ? calibration : nil, settings: settings)
+            let b = try core.derive(
+                channel: channel, captureID: id, target: makeTarget(), sampleRate: 48_000,
+                microphone: withCalibration ? calibrated : makeMicrophone(),
+                microphoneCalibration: withCalibration ? calibration : nil, settings: settings)
+            XCTAssertEqual(a.response.frequenciesHz, b.response.frequenciesHz)
+            XCTAssertEqual(a.retainedPreArrivalMilliseconds, b.retainedPreArrivalMilliseconds, accuracy: 1e-9)
+            XCTAssertEqual(a.retainedPostArrivalMilliseconds, b.retainedPostArrivalMilliseconds, accuracy: 1e-9)
+            XCTAssertEqual(a.minimumReliableFrequencyHz, b.minimumReliableFrequencyHz)
+            XCTAssertEqual(a.maximumReliableFrequencyHz, b.maximumReliableFrequencyHz)
+            for (x, y) in zip(a.response.magnitudeDB, b.response.magnitudeDB) { XCTAssertEqual(x, y, accuracy: 1e-9) }
+        }
+    }
+
+    func testCoreMathsFailsClosedLikeSwift() throws {
+        var core = SpeakerOptimizerEarlyWindowAnalyzer()
+        core.useCoreMaths = true
+        var channel = makeChannel(lateReflectionGain: 0)
+        channel.impulseResponse = Array(channel.impulseResponse.prefix(220))
+        XCTAssertThrowsError(try core.derive(
+            channel: channel, captureID: UUID(), target: makeTarget(), sampleRate: 48_000,
+            microphone: makeMicrophone(), microphoneCalibration: nil)) {
+            XCTAssertEqual($0 as? SpeakerOptimizerEarlyWindowError, .insufficientPostArrivalImpulse)
+        }
+        var bad = SpeakerOptimizerEarlyWindowSettings()
+        bad.postArrivalMilliseconds = 1
+        XCTAssertThrowsError(try core.derive(
+            channel: makeChannel(lateReflectionGain: 0), captureID: UUID(), target: makeTarget(), sampleRate: 48_000,
+            microphone: makeMicrophone(), microphoneCalibration: nil, settings: bad)) {
+            XCTAssertEqual($0 as? SpeakerOptimizerEarlyWindowError, .invalidSettings)
+        }
+    }
 }

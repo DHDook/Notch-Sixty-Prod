@@ -142,6 +142,10 @@ struct SpeakerOptimizerPhaseReferenceSensitivityReport: Equatable, Sendable {
 /// The saved schema does not authenticate clock/reference alignment across
 /// separately isolated sweeps; this is a hypothesis and is NOT apply approval.
 struct SpeakerOptimizerCrossoverFeasibilityDesigner: Sendable {
+    /// E21 S9b (`e21.core-designers`): on, the response reconstruction, the delay and polarity search and the clock-offset
+    /// sensitivity run in `libn60core`; off, the Swift path below is the unchanged parity reference (deleted in S14).
+    var useCoreMaths = FeatureFlags.isEnabledProcessWide(.coreDesigners)
+
     func analyze(
         baseline: SpeakerOptimizerMeasurementSet,
         speaker: MultichannelCalibrationSource,
@@ -182,9 +186,10 @@ struct SpeakerOptimizerCrossoverFeasibilityDesigner: Sendable {
             }
         }
 
-        let freqs = (0..<options.frequencyPointCount).map { i in
+        let swiftGrid = (0..<options.frequencyPointCount).map { i in
             low * pow(high / low, Double(i) / Double(options.frequencyPointCount - 1))
         }
+        let freqs = (useCoreMaths ? SpeakerMathsCore.crossoverFrequencies(options) : nil) ?? swiftGrid
         let pairs = try baseline.positions.map { position in
             let main = try response(baseline, at: position.id, source: speaker,
                                     frequencies: freqs)
@@ -195,48 +200,12 @@ struct SpeakerOptimizerCrossoverFeasibilityDesigner: Sendable {
             }
             return (main: main, sub: sub)
         }
-        let baselineEvaluations = pairs.map {
-            evaluate($0.main, $0.sub, frequencies: freqs, sampleRate: baseline.sampleRate,
-                     relativeDelayMs: 0, invertSub: false)
-        }
-        let baselineLevels = baselineEvaluations.map(\.summedDB)
-        let baselineAggregate = weightedLevel(baselineLevels, weights)
-        var best: (delay: Double, inverted: Bool, improvement: Double,
-                   values: [BandEvaluation])?
-        let steps = Int((options.maximumAdditionalDelayMs / options.delayStepMs).rounded(.down))
-        for i in -steps...steps {
-            let offset = Double(i) * options.delayStepMs
-            for invert in [false, true] {
-                if offset == 0 && !invert { continue }
-                let evaluations = pairs.map {
-                    evaluate($0.main, $0.sub, frequencies: freqs, sampleRate: baseline.sampleRate,
-                             relativeDelayMs: offset, invertSub: invert)
-                }
-                let candidateLevels = evaluations.map(\.summedDB)
-                let improvement = weightedLevel(candidateLevels, weights) - baselineAggregate
-                let regressions = zip(candidateLevels, baselineLevels).map { pair in pair.0 - pair.1 }
-                guard improvement.isFinite,
-                      regressions.allSatisfy({ $0 >= -options.maximumSeatRegressionDB }),
-                      evaluations.allSatisfy({
-                          $0.peakAboveStrongestSourceDB.isFinite
-                            && $0.peakAboveStrongestSourceDB
-                                <= options.maximumModeledSumAboveStrongestSourceDB
-                      }) else { continue }
-                let superior = best.map {
-                    improvement > $0.improvement + 1e-7
-                        || (abs(improvement - $0.improvement) <= 1e-7
-                            && abs(offset) < abs($0.delay))
-                } ?? true
-                if superior {
-                    best = (offset, invert, improvement, evaluations)
-                }
-            }
-        }
-
-        let accepted = best.map { $0.improvement >= options.minimumAggregateImprovementDB } ?? false
-        let chosen = accepted ? best : nil
-        let selected = chosen?.values ?? baselineEvaluations
-        let aggregateImprovement = chosen?.improvement ?? 0
+        let outcome = try search(pairs: pairs, weights: weights, frequencies: freqs,
+                                 sampleRate: baseline.sampleRate, options: options)
+        let baselineLevels = outcome.baselineLevels
+        let accepted = outcome.accepted
+        let selected = outcome.selected
+        let aggregateImprovement = outcome.improvement
         let seatReports = baseline.positions.indices.map { i in
             SpeakerOptimizerCrossoverSeatPrediction(
                 positionID: baseline.positions[i].id,
@@ -263,8 +232,8 @@ struct SpeakerOptimizerCrossoverFeasibilityDesigner: Sendable {
             maximumSummedAboveStrongestSourceDB:
                 selected.map(\.peakAboveStrongestSourceDB).max() ?? 0,
             seatPredictions: seatReports,
-            previewRelativeDelayMs: chosen?.delay ?? 0,
-            previewInvertSubPolarity: chosen?.inverted ?? false,
+            previewRelativeDelayMs: outcome.delay,
+            previewInvertSubPolarity: outcome.inverted,
             acceptedForPreview: accepted,
             blockingReasons: accepted ? [] : [
                 "No relative timing/polarity hypothesis cleared the improvement, per-seat and sum-headroom guards."
@@ -318,42 +287,55 @@ struct SpeakerOptimizerCrossoverFeasibilityDesigner: Sendable {
                                        frequencies: frequencies)
                 return (main: main, sub: sub)
             }
-            worstGain = .infinity
-            for index in 0..<sensitivity.sampleCount {
-                let clockShiftMs = sensitivity.maximumUnknownClockOffsetMs
-                    * (2 * Double(index) / Double(sensitivity.sampleCount - 1) - 1)
-                let base = pairs.map {
-                    evaluate($0.main, $0.sub, frequencies: frequencies,
-                             sampleRate: baseline.sampleRate, relativeDelayMs: 0,
-                             invertSub: false, unknownSubClockOffsetMs: clockShiftMs)
+            if useCoreMaths {
+                guard let core = SpeakerMathsCore.crossoverSensitivity(
+                    evidence: crossoverEvidence(pairs: pairs, weights: weights, frequencies: frequencies,
+                                                sampleRate: baseline.sampleRate),
+                    options: crossoverOptions, delayMs: hypothesis.previewRelativeDelayMs,
+                    invert: hypothesis.previewInvertSubPolarity, sensitivity: sensitivity
+                ) else { throw SpeakerOptimizerCrossoverError.unreliablePhaseOrArrival }
+                samples = core.samples
+                worstGain = core.worstImprovementDB
+                worstSeatLoss = core.worstSeatRegressionDB
+                worstSumPeak = core.worstSumAboveStrongestDB
+            } else {
+                worstGain = .infinity
+                for index in 0..<sensitivity.sampleCount {
+                    let clockShiftMs = sensitivity.maximumUnknownClockOffsetMs
+                        * (2 * Double(index) / Double(sensitivity.sampleCount - 1) - 1)
+                    let base = pairs.map {
+                        evaluate($0.main, $0.sub, frequencies: frequencies,
+                                 sampleRate: baseline.sampleRate, relativeDelayMs: 0,
+                                 invertSub: false, unknownSubClockOffsetMs: clockShiftMs)
+                    }
+                    let test = pairs.map {
+                        evaluate($0.main, $0.sub, frequencies: frequencies,
+                                 sampleRate: baseline.sampleRate,
+                                 relativeDelayMs: hypothesis.previewRelativeDelayMs,
+                                 invertSub: hypothesis.previewInvertSubPolarity,
+                                 unknownSubClockOffsetMs: clockShiftMs)
+                    }
+                    let baseLevels = base.map(\.summedDB)
+                    let testLevels = test.map(\.summedDB)
+                    let gain = weightedLevel(testLevels, weights)
+                        - weightedLevel(baseLevels, weights)
+                    let seatLoss = zip(baseLevels, testLevels).map { pair in
+                        pair.0 - pair.1
+                    }.max() ?? .infinity
+                    let relativePeak = test.map(\.peakAboveStrongestSourceDB).max() ?? .infinity
+                    guard gain.isFinite, seatLoss.isFinite, relativePeak.isFinite else {
+                        throw SpeakerOptimizerCrossoverError.unreliablePhaseOrArrival
+                    }
+                    worstGain = min(worstGain, gain)
+                    worstSeatLoss = max(worstSeatLoss, seatLoss)
+                    worstSumPeak = max(worstSumPeak, relativePeak)
+                    samples.append(SpeakerOptimizerPhaseReferenceSensitivitySample(
+                        assumedSubClockOffsetMs: clockShiftMs,
+                        aggregateModeledImprovementDB: gain,
+                        worstSeatRegressionDB: seatLoss,
+                        maximumSummedAboveStrongestSourceDB: relativePeak
+                    ))
                 }
-                let test = pairs.map {
-                    evaluate($0.main, $0.sub, frequencies: frequencies,
-                             sampleRate: baseline.sampleRate,
-                             relativeDelayMs: hypothesis.previewRelativeDelayMs,
-                             invertSub: hypothesis.previewInvertSubPolarity,
-                             unknownSubClockOffsetMs: clockShiftMs)
-                }
-                let baseLevels = base.map(\.summedDB)
-                let testLevels = test.map(\.summedDB)
-                let gain = weightedLevel(testLevels, weights)
-                    - weightedLevel(baseLevels, weights)
-                let seatLoss = zip(baseLevels, testLevels).map { pair in
-                    pair.0 - pair.1
-                }.max() ?? .infinity
-                let relativePeak = test.map(\.peakAboveStrongestSourceDB).max() ?? .infinity
-                guard gain.isFinite, seatLoss.isFinite, relativePeak.isFinite else {
-                    throw SpeakerOptimizerCrossoverError.unreliablePhaseOrArrival
-                }
-                worstGain = min(worstGain, gain)
-                worstSeatLoss = max(worstSeatLoss, seatLoss)
-                worstSumPeak = max(worstSumPeak, relativePeak)
-                samples.append(SpeakerOptimizerPhaseReferenceSensitivitySample(
-                    assumedSubClockOffsetMs: clockShiftMs,
-                    aggregateModeledImprovementDB: gain,
-                    worstSeatRegressionDB: seatLoss,
-                    maximumSummedAboveStrongestSourceDB: relativePeak
-                ))
             }
             if worstGain < sensitivity.minimumWorstCaseImprovementDB {
                 reasons.append("Timing-reference uncertainty erases the hypothetical modeled improvement.")
@@ -393,6 +375,89 @@ struct SpeakerOptimizerCrossoverFeasibilityDesigner: Sendable {
                 "No signal-chain delay, sub polarity, active crossover or driver limiter was changed; PR105 must require synchronized physical captures and independent electrical/driver safeguards."
             ]
         )
+    }
+
+    private struct SearchOutcome {
+        var baselineLevels: [Double]
+        var accepted: Bool
+        var delay: Double
+        var inverted: Bool
+        var improvement: Double
+        var selected: [BandEvaluation]
+    }
+
+    private func crossoverEvidence(
+        pairs: [(main: PositionSourceResponse, sub: PositionSourceResponse)],
+        weights: [Double], frequencies: [Double], sampleRate: Double
+    ) -> SpeakerMathsCore.CrossoverEvidence {
+        SpeakerMathsCore.CrossoverEvidence(
+            sampleRate: sampleRate, frequenciesHz: frequencies, weights: weights,
+            mainReal: pairs.flatMap { $0.main.values.map(\.real) }, mainImag: pairs.flatMap { $0.main.values.map(\.imaginary) },
+            subReal: pairs.flatMap { $0.sub.values.map(\.real) }, subImag: pairs.flatMap { $0.sub.values.map(\.imaginary) })
+    }
+
+    private func search(
+        pairs: [(main: PositionSourceResponse, sub: PositionSourceResponse)],
+        weights: [Double], frequencies freqs: [Double], sampleRate: Double,
+        options: SpeakerOptimizerCrossoverOptions
+    ) throws -> SearchOutcome {
+        if useCoreMaths {
+            guard let core = SpeakerMathsCore.crossoverSearch(
+                evidence: crossoverEvidence(pairs: pairs, weights: weights, frequencies: freqs, sampleRate: sampleRate),
+                options: options) else {
+                throw SpeakerOptimizerCrossoverError.unreliablePhaseOrArrival
+            }
+            return SearchOutcome(
+                baselineLevels: core.baselineLevelsDB, accepted: core.accepted, delay: core.delayMs,
+                inverted: core.invertSubPolarity, improvement: core.improvementDB,
+                selected: zip(core.selectedLevelsDB, core.selectedPeakAboveDB).map {
+                    BandEvaluation(summedDB: $0.0, peakAboveStrongestSourceDB: $0.1)
+                })
+        }
+        let baselineEvaluations = pairs.map {
+            evaluate($0.main, $0.sub, frequencies: freqs, sampleRate: sampleRate,
+                     relativeDelayMs: 0, invertSub: false)
+        }
+        let baselineLevels = baselineEvaluations.map(\.summedDB)
+        let baselineAggregate = weightedLevel(baselineLevels, weights)
+        var best: (delay: Double, inverted: Bool, improvement: Double,
+                   values: [BandEvaluation])?
+        let steps = Int((options.maximumAdditionalDelayMs / options.delayStepMs).rounded(.down))
+        for i in -steps...steps {
+            let offset = Double(i) * options.delayStepMs
+            for invert in [false, true] {
+                if offset == 0 && !invert { continue }
+                let evaluations = pairs.map {
+                    evaluate($0.main, $0.sub, frequencies: freqs, sampleRate: sampleRate,
+                             relativeDelayMs: offset, invertSub: invert)
+                }
+                let candidateLevels = evaluations.map(\.summedDB)
+                let improvement = weightedLevel(candidateLevels, weights) - baselineAggregate
+                let regressions = zip(candidateLevels, baselineLevels).map { pair in pair.0 - pair.1 }
+                guard improvement.isFinite,
+                      regressions.allSatisfy({ $0 >= -options.maximumSeatRegressionDB }),
+                      evaluations.allSatisfy({
+                          $0.peakAboveStrongestSourceDB.isFinite
+                            && $0.peakAboveStrongestSourceDB
+                                <= options.maximumModeledSumAboveStrongestSourceDB
+                      }) else { continue }
+                let superior = best.map {
+                    improvement > $0.improvement + 1e-7
+                        || (abs(improvement - $0.improvement) <= 1e-7
+                            && abs(offset) < abs($0.delay))
+                } ?? true
+                if superior {
+                    best = (offset, invert, improvement, evaluations)
+                }
+            }
+        }
+
+        let accepted = best.map { $0.improvement >= options.minimumAggregateImprovementDB } ?? false
+        let chosen = accepted ? best : nil
+        return SearchOutcome(
+            baselineLevels: baselineLevels, accepted: accepted, delay: chosen?.delay ?? 0,
+            inverted: chosen?.inverted ?? false, improvement: chosen?.improvement ?? 0,
+            selected: chosen?.values ?? baselineEvaluations)
     }
 
     private struct ComplexSample {
@@ -435,6 +500,22 @@ struct SpeakerOptimizerCrossoverFeasibilityDesigner: Sendable {
         let averageArrival = arrivals.reduce(0, +) / Double(arrivals.count)
         guard averageArrival.isFinite else {
             throw SpeakerOptimizerCrossoverError.unreliablePhaseOrArrival
+        }
+        if useCoreMaths {
+            // Every capture shares the first capture's grid (the Swift path checks this per point).
+            guard captures.allSatisfy({
+                guard let phase = $0.response.phaseRadians else { return false }
+                return phase.count == grid.count && $0.response.magnitudeDB.count == grid.count
+                    && zip(grid, $0.response.frequenciesHz).allSatisfy({ pair in
+                        abs(pair.0 - pair.1) <= max(1e-6, pair.0 * 1e-9)
+                    }) && $0.response.frequenciesHz.count == grid.count
+            }), let core = SpeakerMathsCore.crossoverResponse(
+                grid: grid, magnitudes: captures.map(\.response.magnitudeDB),
+                phases: captures.compactMap(\.response.phaseRadians), arrival: averageArrival, frequencies: frequencies
+            ) else { throw SpeakerOptimizerCrossoverError.unreliablePhaseOrArrival }
+            return PositionSourceResponse(
+                arrival: averageArrival,
+                values: zip(core.real, core.imag).map { ComplexSample(real: $0.0, imaginary: $0.1) })
         }
         var output: [ComplexSample] = []
         for f in frequencies {

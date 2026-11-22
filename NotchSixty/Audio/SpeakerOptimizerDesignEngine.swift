@@ -60,6 +60,10 @@ struct SpeakerOptimizerPreviewPlan: Equatable, Sendable {
 /// preserves each source's COMMON usable frequency band, and rejects invalid
 /// measurement identity, unqualified data, or unsupported design options.
 struct SpeakerOptimizerDesignEngine: Sendable {
+    /// E21 S9b (`e21.core-designers`): on, the target, correction and RMSE scoring run in `libn60core`; off, the Swift path
+    /// below is the unchanged parity reference (deleted in S14). Evidence selection stays here.
+    var useCoreMaths = FeatureFlags.isEnabledProcessWide(.coreDesigners)
+
     func design(
         baseline: SpeakerOptimizerMeasurementSet,
         seatWeights: [UUID: Double]? = nil,
@@ -114,49 +118,67 @@ struct SpeakerOptimizerDesignEngine: Sendable {
             }
 
             let frequencies = indices.map { grid[$0] }
-            let combined = frequencies.indices.map { index in
-                perSeat.indices.reduce(0.0) { total, seat in
-                    total + weights[seat] * perSeat[seat][index]
-                }
-            }
-            // A spectral reference derived from the captured response removes
-            // the arbitrary playback/microphone gain offset: never equate
-            // absolute capture dB with desired playback loudness.
-            let sorted = combined.sorted()
-            let median = sorted[sorted.count / 2]
-            let targets = frequencies.map { frequency in
-                median + options.targetTiltDBPerOctave * log2(frequency / 1_000)
-            }
-            let smoothed = logFrequencySmooth(
-                frequencies: frequencies,
-                magnitudes: combined,
-                smoothingOctaves: options.smoothingOctaves
-            )
-            var correction = frequencies.indices.map { index in
-                min(options.maximumBoostDB, max(-options.maximumCutDB, targets[index] - smoothed[index]))
-            }
-
-            let before = weightedRMSE(
-                perSeat: perSeat, weights: weights, target: targets,
-                correction: Array(repeating: 0, count: correction.count)
-            )
-            var predicted = weightedRMSE(
-                perSeat: perSeat, weights: weights, target: targets,
-                correction: correction
-            )
+            var targets: [Double]
+            var correction: [Double]
+            var before: Double
+            var predicted: Double
             var warnings: [String] = []
+            if useCoreMaths {
+                guard let score = SpeakerMathsCore.designPreview(
+                    frequencies: frequencies, perSeat: perSeat, weights: weights, options: options) else {
+                    throw SpeakerOptimizerDesignError.invalidOptions
+                }
+                targets = score.targets
+                correction = score.correction
+                before = score.rmseBefore
+                predicted = score.rmseAfter
+                if score.reverted {
+                    warnings.append("Preview reverted to unity: modeled improvement would worsen the aggregate or an included position.")
+                }
+            } else {
+                let combined = frequencies.indices.map { index in
+                    perSeat.indices.reduce(0.0) { total, seat in
+                        total + weights[seat] * perSeat[seat][index]
+                    }
+                }
+                // A spectral reference derived from the captured response removes
+                // the arbitrary playback/microphone gain offset: never equate
+                // absolute capture dB with desired playback loudness.
+                let sorted = combined.sorted()
+                let median = sorted[sorted.count / 2]
+                targets = frequencies.map { frequency in
+                    median + options.targetTiltDBPerOctave * log2(frequency / 1_000)
+                }
+                let smoothed = logFrequencySmooth(
+                    frequencies: frequencies,
+                    magnitudes: combined,
+                    smoothingOctaves: options.smoothingOctaves
+                )
+                correction = frequencies.indices.map { index in
+                    min(options.maximumBoostDB, max(-options.maximumCutDB, targets[index] - smoothed[index]))
+                }
 
-            // Never preview an aggregate-worsening candidate or a candidate
-            // that materially degrades an individually included seat.
-            let degradesSeat = perSeat.contains { seat in
-                let original = rmse(seat, targets, correction: Array(repeating: 0, count: correction.count))
-                let changed = rmse(seat, targets, correction: correction)
-                return changed > original + options.maximumSeatDegradationDB
-            }
-            if !predicted.isFinite || predicted > before + 1.0e-9 || degradesSeat {
-                correction = Array(repeating: 0, count: correction.count)
-                predicted = before
-                warnings.append("Preview reverted to unity: modeled improvement would worsen the aggregate or an included position.")
+                before = weightedRMSE(
+                    perSeat: perSeat, weights: weights, target: targets,
+                    correction: Array(repeating: 0, count: correction.count)
+                )
+                predicted = weightedRMSE(
+                    perSeat: perSeat, weights: weights, target: targets,
+                    correction: correction
+                )
+
+                // Never preview an aggregate-worsening candidate or a candidate
+                // that materially degrades an individually included seat.
+                let degradesSeat = perSeat.contains { seat in
+                    let original = rmse(seat, targets, correction: Array(repeating: 0, count: correction.count))
+                    let changed = rmse(seat, targets, correction: correction)
+                    return changed > original + options.maximumSeatDegradationDB
+                }
+                if !predicted.isFinite || predicted > before + 1.0e-9 || degradesSeat {
+                    correction = Array(repeating: 0, count: correction.count)
+                    predicted = before
+                    warnings.append("Preview reverted to unity: modeled improvement would worsen the aggregate or an included position.")
+                }
             }
             previews.append(SpeakerOptimizerSourcePreview(
                 source: source,

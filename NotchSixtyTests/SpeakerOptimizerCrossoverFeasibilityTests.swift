@@ -240,4 +240,56 @@ final class SpeakerOptimizerCrossoverFeasibilityTests: XCTestCase {
             positions: seats, plannedSources: [main, sub], captures: captures
         )
     }
+
+    // E21 S9b: the core search and sensitivity reproduce the Swift reference.
+    func testCoreMathsMatchesSwiftReference() throws {
+        for arrival in [0.013, 0.010, 0.016, 0.0145] {
+            let baseline = makeBaseline(subArrival: arrival)
+            var reference = SpeakerOptimizerCrossoverFeasibilityDesigner()
+            reference.useCoreMaths = false
+            var core = SpeakerOptimizerCrossoverFeasibilityDesigner()
+            core.useCoreMaths = true
+            let a = try reference.analyze(baseline: baseline, speaker: main, subwoofer: sub)
+            let b = try core.analyze(baseline: baseline, speaker: main, subwoofer: sub)
+            XCTAssertEqual(a.acceptedForPreview, b.acceptedForPreview)
+            XCTAssertEqual(a.previewRelativeDelayMs, b.previewRelativeDelayMs, accuracy: 1e-12)
+            XCTAssertEqual(a.previewInvertSubPolarity, b.previewInvertSubPolarity)
+            XCTAssertEqual(a.aggregatePredictedImprovementDB, b.aggregatePredictedImprovementDB, accuracy: 1e-9)
+            XCTAssertEqual(a.maximumSummedAboveStrongestSourceDB, b.maximumSummedAboveStrongestSourceDB, accuracy: 1e-9)
+            XCTAssertEqual(a.frequencyLowHz, b.frequencyLowHz, accuracy: 1e-12)
+            for (p, q) in zip(a.seatPredictions, b.seatPredictions) {
+                XCTAssertEqual(p.baselineSummedLevelDB, q.baselineSummedLevelDB, accuracy: 1e-9)
+                XCTAssertEqual(p.candidateSummedLevelDB, q.candidateSummedLevelDB, accuracy: 1e-9)
+            }
+            var sensitivity = SpeakerOptimizerPhaseReferenceSensitivityOptions()
+            sensitivity.maximumUnknownClockOffsetMs = 0.5
+            let c = try reference.auditUnknownClockOffsetSensitivity(
+                baseline: baseline, speaker: main, subwoofer: sub, sensitivity: sensitivity)
+            let d = try core.auditUnknownClockOffsetSensitivity(
+                baseline: baseline, speaker: main, subwoofer: sub, sensitivity: sensitivity)
+            XCTAssertEqual(c.survivesAssumedTimingUncertaintyForVisualPreview, d.survivesAssumedTimingUncertaintyForVisualPreview)
+            XCTAssertEqual(c.blockingReasons, d.blockingReasons)
+            XCTAssertEqual(c.testedOffsets.count, d.testedOffsets.count)
+            XCTAssertEqual(c.worstCaseAggregateImprovementDB, d.worstCaseAggregateImprovementDB, accuracy: 1e-9)
+            XCTAssertEqual(c.worstCaseSeatRegressionDB, d.worstCaseSeatRegressionDB, accuracy: 1e-9)
+            XCTAssertEqual(c.worstCaseSummedAboveStrongestDB, d.worstCaseSummedAboveStrongestDB, accuracy: 1e-9)
+            for (p, q) in zip(c.testedOffsets, d.testedOffsets) {
+                XCTAssertEqual(p.assumedSubClockOffsetMs, q.assumedSubClockOffsetMs, accuracy: 1e-12)
+                XCTAssertEqual(p.aggregateModeledImprovementDB, q.aggregateModeledImprovementDB, accuracy: 1e-9)
+            }
+        }
+    }
+
+    func testCoreMathsKeepsTheGuards() throws {
+        var core = SpeakerOptimizerCrossoverFeasibilityDesigner()
+        core.useCoreMaths = true
+        var bad = SpeakerOptimizerCrossoverOptions()
+        bad.centerHz = 10
+        XCTAssertThrowsError(try core.analyze(baseline: makeBaseline(), speaker: main, subwoofer: sub, options: bad)) {
+            XCTAssertEqual($0 as? SpeakerOptimizerCrossoverError, .invalidOptions)
+        }
+        var gap = SpeakerOptimizerCrossoverOptions()
+        gap.maximumArrivalGapMs = 1
+        XCTAssertThrowsError(try core.analyze(baseline: makeBaseline(subArrival: 0.030), speaker: main, subwoofer: sub, options: gap))
+    }
 }

@@ -134,6 +134,10 @@ enum SpeakerOptimizerCrossDomainError: Error, Equatable, LocalizedError {
 /// first reduced to a local residual around a log-frequency-smoothed trend.
 /// Only those residuals are compared.
 struct SpeakerOptimizerCrossDomainClassifier: Sendable {
+    /// E21 S9b (`e21.core-designers`): on, the interpolated means, residuals and labels run in `libn60core`; off, the Swift
+    /// path below is the unchanged parity reference (deleted in S14).
+    var useCoreMaths = FeatureFlags.isEnabledProcessWide(.coreDesigners)
+
     func classify(
         characterization: SpeakerOptimizerCharacterizationMeasurementSet,
         listeningBaseline: SpeakerOptimizerMeasurementSet,
@@ -206,57 +210,82 @@ struct SpeakerOptimizerCrossDomainClassifier: Sendable {
                 throw SpeakerOptimizerCrossDomainError.insufficientCommonBandwidth(source)
             }
 
-            let earlyMean = try validFrequencies.map { frequency in
-                try sourceEarly.reduce(0.0) { sum, evidence in
-                    sum + (try interpolate(
-                        response: evidence.response,
-                        frequencyHz: frequency
-                    ))
-                } / Double(sourceEarly.count)
-            }
-            let characterizationResidual = localResidual(
-                frequencies: validFrequencies,
-                magnitudes: earlyMean,
-                smoothingOctaves: options.smoothingOctaves
-            )
-
-            var seatResiduals: [[Double]] = []
-            for captures in listeningGroups {
-                let seatMean = try validFrequencies.map { frequency in
-                    try captures.reduce(0.0) { sum, capture in
+            let points: [SpeakerOptimizerCrossDomainPoint]
+            if useCoreMaths {
+                guard let earlyMean = SpeakerMathsCore.meanInterpolated(
+                        grid: referenceGrid, magnitudes: sourceEarly.map(\.response.magnitudeDB), at: validFrequencies),
+                      let seatMeans = try? listeningGroups.map({ captures -> [Double] in
+                        // Each listening capture has its own grid; interpolate per capture, then average per seat.
+                        var sums = [Double](repeating: 0, count: validFrequencies.count)
+                        for capture in captures {
+                            guard let one = SpeakerMathsCore.meanInterpolated(
+                                grid: capture.response.frequenciesHz, magnitudes: [capture.response.magnitudeDB],
+                                at: validFrequencies) else {
+                                throw SpeakerOptimizerCrossDomainError.invalidListeningResponse
+                            }
+                            for i in sums.indices { sums[i] += one[i] }
+                        }
+                        return sums.map { $0 / Double(captures.count) }
+                      }),
+                      let classified = SpeakerMathsCore.classifyCrossDomain(
+                        frequencies: validFrequencies, characterization: earlyMean, seats: seatMeans, options: options)
+                else { throw SpeakerOptimizerCrossDomainError.invalidListeningResponse }
+                points = classified
+            } else {
+                let earlyMean = try validFrequencies.map { frequency in
+                    try sourceEarly.reduce(0.0) { sum, evidence in
                         sum + (try interpolate(
-                            response: capture.response,
+                            response: evidence.response,
                             frequencyHz: frequency
                         ))
-                    } / Double(captures.count)
+                    } / Double(sourceEarly.count)
                 }
-                seatResiduals.append(localResidual(
+                let characterizationResidual = localResidual(
                     frequencies: validFrequencies,
-                    magnitudes: seatMean,
+                    magnitudes: earlyMean,
                     smoothingOctaves: options.smoothingOctaves
-                ))
-            }
-
-            var points: [SpeakerOptimizerCrossDomainPoint] = []
-            points.reserveCapacity(validFrequencies.count)
-            for index in validFrequencies.indices {
-                let seatValues = seatResiduals.map { $0[index] }
-                let seatMean = seatValues.reduce(0, +) / Double(seatValues.count)
-                let spread = standardDeviation(seatValues, mean: seatMean)
-                let near = characterizationResidual[index]
-                let classification = classifyPoint(
-                    characterizationResidualDB: near,
-                    listeningMeanResidualDB: seatMean,
-                    listeningSeatSpreadDB: spread,
-                    options: options
                 )
-                points.append(SpeakerOptimizerCrossDomainPoint(
-                    frequencyHz: validFrequencies[index],
-                    characterizationResidualDB: near,
-                    listeningMeanResidualDB: seatMean,
-                    listeningSeatSpreadDB: spread,
-                    classification: classification
-                ))
+
+                var seatResiduals: [[Double]] = []
+                for captures in listeningGroups {
+                    let seatMean = try validFrequencies.map { frequency in
+                        try captures.reduce(0.0) { sum, capture in
+                            sum + (try interpolate(
+                                response: capture.response,
+                                frequencyHz: frequency
+                            ))
+                        } / Double(captures.count)
+                    }
+                    seatResiduals.append(localResidual(
+                        frequencies: validFrequencies,
+                        magnitudes: seatMean,
+                        smoothingOctaves: options.smoothingOctaves
+                    ))
+                }
+
+                var swiftPoints: [SpeakerOptimizerCrossDomainPoint] = []
+                swiftPoints.reserveCapacity(validFrequencies.count)
+                for index in validFrequencies.indices {
+                    let seatValues = seatResiduals.map { $0[index] }
+                    let seatMean = seatValues.reduce(0, +) / Double(seatValues.count)
+                    let spread = standardDeviation(seatValues, mean: seatMean)
+                    let near = characterizationResidual[index]
+                    let classification = classifyPoint(
+                        characterizationResidualDB: near,
+                        listeningMeanResidualDB: seatMean,
+                        listeningSeatSpreadDB: spread,
+                        options: options
+                    )
+                    swiftPoints.append(SpeakerOptimizerCrossDomainPoint(
+                        frequencyHz: validFrequencies[index],
+                        characterizationResidualDB: near,
+                        listeningMeanResidualDB: seatMean,
+                        listeningSeatSpreadDB: spread,
+                        classification: classification
+                    ))
+                }
+
+                points = swiftPoints
             }
 
             reports.append(SpeakerOptimizerCrossDomainSourceReport(

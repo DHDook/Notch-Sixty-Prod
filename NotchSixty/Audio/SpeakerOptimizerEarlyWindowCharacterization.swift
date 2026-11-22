@@ -127,6 +127,10 @@ enum SpeakerOptimizerEarlyWindowError: Error, Equatable, LocalizedError {
 /// gate is an explicit analysis assumption. Its lower trust boundary follows
 /// directly from gate duration, and the result remains tagged non-anechoic.
 struct SpeakerOptimizerEarlyWindowAnalyzer: Sendable {
+    /// E21 S9b (`e21.core-designers`): on, the gated DFT magnitude runs in `libn60core`; off, the Swift path below is the
+    /// unchanged parity reference (deleted in S14). Calibration, identity checks and evidence assembly stay here.
+    var useCoreMaths = FeatureFlags.isEnabledProcessWide(.coreDesigners)
+
     func derive(
         channel: RoomCorrectionChannelMeasurement,
         captureID: UUID,
@@ -166,6 +170,40 @@ struct SpeakerOptimizerEarlyWindowAnalyzer: Sendable {
             microphone: microphone,
             calibration: microphoneCalibration
         )
+
+        if useCoreMaths {
+            let gated = SpeakerMathsCore.earlyWindow(
+                impulse: channel.impulseResponse, sampleRate: sampleRate, arrivalSeconds: arrivalSeconds,
+                usableLowHz: channel.quality.usableLowHz ?? (full.frequenciesHz.first ?? 0),
+                usableHighHz: channel.quality.usableHighHz ?? (full.frequenciesHz.last ?? 0),
+                transferFrequenciesHz: full.frequenciesHz, settings: settings)
+            switch gated {
+            case .failure(.settings): throw SpeakerOptimizerEarlyWindowError.invalidSettings
+            case .failure(.arrival): throw SpeakerOptimizerEarlyWindowError.invalidDirectArrival
+            case .failure(.short): throw SpeakerOptimizerEarlyWindowError.insufficientPostArrivalImpulse
+            case .failure(.band): throw SpeakerOptimizerEarlyWindowError.noReliableFrequencyBand
+            case .failure(.invalid): throw SpeakerOptimizerEarlyWindowError.missingImpulseResponse
+            case .success(let window):
+                var magnitudes = window.magnitudesDB
+                if let microphoneCalibration {
+                    for index in magnitudes.indices {
+                        do {
+                            magnitudes[index] += try microphoneCalibration.gainDB(at: window.frequencies[index])
+                        } catch {
+                            throw SpeakerOptimizerEarlyWindowError.invalidMicrophoneCalibration
+                        }
+                    }
+                }
+                guard magnitudes.allSatisfy(\.isFinite) else {
+                    throw SpeakerOptimizerEarlyWindowError.invalidTransferFunction
+                }
+                return try evidence(
+                    captureID: captureID, target: target, sampleRate: sampleRate, microphone: microphone,
+                    microphoneCalibration: microphoneCalibration, settings: settings, arrivalSeconds: arrivalSeconds,
+                    frequencies: window.frequencies, magnitudes: magnitudes,
+                    preSeconds: window.preMs / 1_000, postSeconds: window.postMs / 1_000)
+            }
+        }
 
         let preFrames = Int(
             (settings.preArrivalMilliseconds * sampleRate / 1_000).rounded()
@@ -257,6 +295,21 @@ struct SpeakerOptimizerEarlyWindowAnalyzer: Sendable {
             magnitudes.append(magnitudeDB)
         }
 
+        return try evidence(
+            captureID: captureID, target: target, sampleRate: sampleRate, microphone: microphone,
+            microphoneCalibration: microphoneCalibration, settings: settings, arrivalSeconds: arrivalSeconds,
+            frequencies: frequencies, magnitudes: magnitudes, preSeconds: actualPreSeconds, postSeconds: actualPostSeconds)
+    }
+
+    private func evidence(
+        captureID: UUID, target: SpeakerOptimizerCharacterizationTarget, sampleRate: Double,
+        microphone: SpeakerOptimizerMicrophoneIdentity, microphoneCalibration: RoomCorrectionMicrophoneCalibration?,
+        settings: SpeakerOptimizerEarlyWindowSettings, arrivalSeconds: Double, frequencies: [Double], magnitudes: [Double],
+        preSeconds actualPreSeconds: Double, postSeconds actualPostSeconds: Double
+    ) throws -> SpeakerOptimizerEarlyWindowEvidence {
+        guard let first = frequencies.first, let last = frequencies.last else {
+            throw SpeakerOptimizerEarlyWindowError.noReliableFrequencyBand
+        }
         let response = RoomCorrectionFrequencyResponse(
             frequenciesHz: frequencies,
             magnitudeDB: magnitudes,
