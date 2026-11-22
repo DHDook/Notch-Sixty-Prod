@@ -26,7 +26,7 @@ struct ProductionDashboardView: View {
 
     /// The page without its scroll view, so a test can measure the content height against the viewport.
     var pageContent: some View {
-            VStack(alignment: .leading, spacing: DesignSpacing.l.pt) {
+            VStack(alignment: .leading, spacing: DesignSpacing.m.pt) {
                 // Processing state lives in the toolbar's status readout and
                 // its Bypass and Start/Stop buttons, so the dashboard spends
                 // no line on it.
@@ -74,7 +74,7 @@ struct ProductionDashboardView: View {
     /// The controls in a two-by-two block and the summaries in a denser grid; both use equal-width columns and one height per row.
     private func cardLayout(summaryColumns: Int, controlColumns: Int = 2) -> some View {
         let cards = dashboardCards
-        return VStack(alignment: .leading, spacing: DesignSpacing.l.pt) {
+        return VStack(alignment: .leading, spacing: DesignSpacing.m.pt) {
             cardGrid(Array(cards[0..<4]), columns: controlColumns)
             cardGrid(Array(cards[4...]), columns: summaryColumns)
         }
@@ -82,7 +82,7 @@ struct ProductionDashboardView: View {
 
     private func cardGrid(_ cards: [AnyView], columns: Int) -> some View {
         let rows = stride(from: 0, to: cards.count, by: columns).map { Array(cards[$0..<min($0 + columns, cards.count)]) }
-        return Grid(alignment: .topLeading, horizontalSpacing: DesignSpacing.l.pt, verticalSpacing: DesignSpacing.l.pt) {
+        return Grid(alignment: .topLeading, horizontalSpacing: DesignSpacing.m.pt, verticalSpacing: DesignSpacing.m.pt) {
             ForEach(rows.indices, id: \.self) { r in
                 GridRow {
                     ForEach(rows[r].indices, id: \.self) { c in rows[r][c] }
@@ -356,10 +356,10 @@ struct ProductionDashboardView: View {
         text: String,
         systemImage: String
     ) -> some View {
-        VStack(alignment: .leading, spacing: DesignSpacing.m.pt) {
+        VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
             Label(title, systemImage: systemImage).font(DesignType.sectionTitle.font)
             Text(text).font(DesignType.body.font).foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, minHeight: 40, alignment: .topLeading)
+                .frame(maxWidth: .infinity, alignment: .topLeading)
         }
         .padding(DesignSpacing.m.pt)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)

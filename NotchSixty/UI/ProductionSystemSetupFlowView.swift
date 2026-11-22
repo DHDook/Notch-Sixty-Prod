@@ -1903,6 +1903,18 @@ struct SystemSetupEntryCard: View {
     let start: () -> Void
     let openHeadphones: () -> Void
 
+    private func offerRow(showsExplanation: Bool) -> some View {
+        HStack(spacing: DesignSpacing.m.pt) {
+            Label("Set up my system", systemImage: "wand.and.stars").font(.headline).fixedSize()
+            if showsExplanation {
+                Text("Choose your speakers, set levels and measure your room in one guided flow.")
+                    .font(.callout).foregroundStyle(.secondary).lineLimit(1)
+            }
+            Spacer(minLength: DesignSpacing.m.pt)
+            Button("Start", action: start)
+        }
+    }
+
     var body: some View {
         switch availability {
         case .hidden:
@@ -1917,17 +1929,15 @@ struct SystemSetupEntryCard: View {
                 }.padding(4)
             }
         case .offer:
-            GroupBox {
-                HStack {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Label("Set up my system", systemImage: "wand.and.stars").font(.headline)
-                        Text("Choose your speakers, set levels and measure your room in one guided flow.")
-                            .font(.callout).foregroundStyle(.secondary)
-                    }
-                    Spacer()
-                    Button("Start", action: start)
-                }.padding(4)
+            // One line when there is room (the explanation drops first), so the card costs about 40 pt of page height.
+            ViewThatFits(in: .horizontal) {
+                offerRow(showsExplanation: true)
+                offerRow(showsExplanation: false)
             }
+            .padding(.horizontal, DesignSpacing.m.pt)
+            .padding(.vertical, DesignSpacing.s.pt)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .designSurface(.large)
         }
     }
 }

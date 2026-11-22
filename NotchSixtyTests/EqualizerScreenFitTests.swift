@@ -39,6 +39,10 @@ final class EqualizerScreenFitTests: XCTestCase {
         }
     }
 
+    /// A page width of about 1,100 pt (the narrow end of the other pages) and 1,280 pt: nothing runs past the edge, and the
+    /// gain row and mode bar reflow rather than truncate.
+    func testEveryControlFitsAt1100x800() { assertFits(width: 1_100, height: 800) }
+
     func testEveryControlFitsAt1280x800() { assertFits(width: 1_280, height: 800) }
 
     func testEveryControlFitsAt1920x1000() { assertFits(width: 1_920, height: 1_000) }

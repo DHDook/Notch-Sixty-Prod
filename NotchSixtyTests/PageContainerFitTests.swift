@@ -84,7 +84,8 @@ final class PageContainerFitTests: XCTestCase {
     /// The Dashboard content height at a detail width, and (when `png` is set) a picture of it.
     private func dashboardHeight(detailWidth: CGFloat, png: String? = nil) throws -> CGFloat {
         let engine = AudioIOEngine(deviceCatalog: OfflineOutputCatalog(devices: []))
-        let page = ProductionDashboardView(engine: engine).pageContent
+        let banner = AnyView(SystemSetupEntryCard(availability: .offer, start: {}, openHeadphones: {}))
+        let page = ProductionDashboardView(engine: engine, entryCard: banner).pageContent
             .padding(DesignSpacing.xl.pt)
             .frame(width: min(detailWidth, ProductionPageContainer<EmptyView>.maxContentWidth), alignment: .topLeading)
             .fixedSize(horizontal: false, vertical: true)
@@ -101,10 +102,10 @@ final class PageContainerFitTests: XCTestCase {
     }
 
     func testDashboardFitsWithoutScrollingAtTheOwnerSizes() throws {
-        for window in [CGSize(width: 1_700, height: 900), CGSize(width: 1_920, height: 1_000)] {
+        for window in [CGSize(width: 1_700, height: 760), CGSize(width: 1_700, height: 900), CGSize(width: 1_920, height: 1_000)] {
             let viewport = detail(window)
             let height = try dashboardHeight(detailWidth: viewport.width,
-                                             png: NSTemporaryDirectory() + "dash-\(Int(window.width)).png")
+                                             png: NSTemporaryDirectory() + "dash-\(Int(window.width))-\(Int(window.height)).png")
             XCTAssertLessThanOrEqual(height, viewport.height, "the Dashboard needs no vertical scrolling in a \(window.width) x \(window.height) window")
         }
     }

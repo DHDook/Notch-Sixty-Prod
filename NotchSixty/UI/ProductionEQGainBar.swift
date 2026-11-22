@@ -28,11 +28,37 @@ struct ProductionEQGainBar: View {
     }
 
     var body: some View {
+        // Narrower pages drop the badge sentence and the preamp terms (both stay in the help text), then wrap the
+        // controls under the badge, so nothing truncates and nothing runs past the page.
+        ViewThatFits(in: .horizontal) {
+            gainRow(showsDetail: true, showsTerms: true)
+            gainRow(showsDetail: false, showsTerms: true)
+            gainRow(showsDetail: false, showsTerms: false)
+            VStack(alignment: .leading, spacing: DesignSpacing.s.pt) {
+                badgeView(showsDetail: false)
+                HStack(alignment: .center, spacing: DesignSpacing.m.pt) { controlsGroup }
+            }
+        }
+        .padding(.horizontal, DesignSpacing.m.pt)
+        .padding(.vertical, DesignSpacing.s.pt)
+        .designSurface(.medium)
+        .task { await pollMeter() }
+        .onAppear { autoPreamp.reconcile() }
+    }
+
+    private func gainRow(showsDetail: Bool, showsTerms: Bool) -> some View {
         HStack(alignment: .center, spacing: DesignSpacing.m.pt) {
-            badgeView
-
+            badgeView(showsDetail: showsDetail)
             Spacer(minLength: 8)
+            controlsGroup(showsTerms: showsTerms)
+        }
+    }
 
+    @ViewBuilder
+    private var controlsGroup: some View { controlsGroup(showsTerms: false) }
+
+    @ViewBuilder
+    private func controlsGroup(showsTerms: Bool) -> some View {
             if autoPreamp.isActive {
                 ProductionGainStepper(
                     title: "Trim",
@@ -56,7 +82,7 @@ struct ProductionEQGainBar: View {
                 .help("Gain before all processing. Lower it to leave headroom for EQ boosts.")
             }
 
-            if enhanced { termsView }
+            if enhanced, showsTerms { termsView }
 
             Toggle("Auto preamp", isOn: Binding(
                 get: { autoPreamp.isOn },
@@ -74,13 +100,8 @@ struct ProductionEQGainBar: View {
             )
             .frame(maxWidth: 200)
             .help("Gain after all processing, before the output device.")
-        }
-        .padding(.horizontal, DesignSpacing.m.pt)
-        .padding(.vertical, DesignSpacing.s.pt)
-        .designSurface(.medium)
-        .task { await pollMeter() }
-        .onAppear { autoPreamp.reconcile() }
     }
+
 
     /// E33 S3 (design 6): each term of the one preamp model and the total the engine gets.
     private var termsView: some View {
@@ -99,7 +120,7 @@ struct ProductionEQGainBar: View {
                model.manualDB, model.autoTrimDB, model.matchDB, model.totalDB)
     }
 
-    private var badgeView: some View {
+    private func badgeView(showsDetail: Bool) -> some View {
         let appearance = Self.appearance(of: badge)
         let detail = appearance.detail + (autoPreamp.prediction.omitsFIRBands ? " Imported FIR bands are not included." : "")
         return HStack(spacing: DesignSpacing.s.pt) {
@@ -107,11 +128,13 @@ struct ProductionEQGainBar: View {
                 .font(.callout.bold())
                 .foregroundStyle(appearance.color)
                 .fixedSize()
-            Text(detail)
-                .font(DesignType.caption.font)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .truncationMode(.tail)
+            if showsDetail {
+                Text(detail)
+                    .font(DesignType.caption.font)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
+            }
         }
         .padding(.horizontal, DesignSpacing.m.pt)
         .padding(.vertical, DesignSpacing.s.pt)
