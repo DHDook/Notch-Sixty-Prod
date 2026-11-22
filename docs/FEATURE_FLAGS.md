@@ -102,6 +102,7 @@ FC phase's per-epic PR (`docs/epics/FC.md`) unless stated.
 | `e21.core-designers` | E21 | planned | none | FC (E21) |
 | `e33.page-enhancements` | E33 | graduated (S11d, 21 Nov 2026): every E33 page, engine-publish and Swift reader | S11d | FC (E33) |
 | `e32.dynamics-sound` | E32 | graduated | 21 Nov 2026 (S6) | FC (E32) |
+| `e15.follow-output` | E15 | dark; S1: registered, binding table and decision policy only, no reader in the app yet | S4 | FC (E15) |
 | `e34.design-language` | E34 | dark; S0: registered, no reader yet (S1 shared parts read it) | S7 | FC (E34) |
 | `e8.routing-matrix`, `e8.lab-routed-ways`, `e10.mixed-phase-correction`, `e11.measurement-suite`, `e12.guided-setup`, `e13.byo-import`, `e25.outputs-and-speakers`, `e27.eq-safety` | E8, E10, E11, E12, E13, E25, E27 | removed (before this policy, at epic ship) | n/a | done |
 
@@ -124,7 +125,8 @@ gap may then be closed as "moved to E22" once E22 holds a matching unchecked ite
 | E7 | `e7.rate-adapt` | Graduated in S5 (15 Nov 2026): S1 and S4 ship without a flag; S2 asset resampling and S3 per-rate plug-in bypass read it; bench lines move to E22 | none; flag removal is FC (E7) |
 | E9 | `e9.long-fir`, `e9.output-protection` | Graduated in S8 (13 Nov 2026); Outputs UI, headroom assistant, active-speaker failsafe and the 262,144-tap program FIR reachable | Bench gaps G18, G25, G26, G27 and the S1 to S10b bench lines move to E22; flag removal is FC (E9) |
 | E13 | `e13.headphones` | S3, S4, S7 reachable behind the flag; S5 not built | S5; software gaps G7, G9, G10, G12; bench gaps G2 to G6, G8, G11 move to E22; S8 reworded |
-| E15, E17, E21 | planned flags | Nothing built | Whole epics; ship slices reworded |
+| E15 | `e15.follow-output` | S1 binding model and policy only; no UI yet | S2 to S7 |
+| E17, E21 | planned flags | Nothing built | Whole epics; ship slices reworded |
 | E19 | `e19.mimo-treatment` | Graduated in S11 (14 Nov 2026): designer, unrouted and routed stages, safety layer, verifier, permit path and Room Treatment screen reachable; available, never armed | Bench gaps G3, G6, G10, G15, G16, G43, G45 and the G32 treated repeat move to E22; no permit exists before E22 |
 | E20 | `e20.parallel-render`, `e20.multirate` (graduated, E20 ship; multirate has no reader) | S6: flag in code, worker pool and policy wired in all three transports (dark); core parallel API from S5 | S6 to S10; S10 and G1 reworded (graduate before the bench, remove in FC) |
 | E26 | `e26.sub-aware-anc` | On by default, 36 `[~]` items | G13, G14, G33, G35, G39, G40 software gaps; bench gaps G10, G11, G19, G23, G24, G28, G30 move to E22; G18 is post-v1 |
@@ -162,5 +164,6 @@ E22; the software part graduates.
 | `e20.multirate` | E20 | On by default (graduated, E20 ship), no reader: the multirate low-frequency slices (S7, S8) were skipped on the measured entry rule, so the flag changes nothing. Removed in FC (E20) |
 | `e33.page-enhancements` | E33 | Graduated: on by default, off with `-NotchSixtyFeatures -e33.page-enhancements`. Equalizer page: band list and two-column editor, dynamic range hint, moved-to-fit note, sectioned filter picker; later slices add Dynamics, Meters, Plugins and engine changes. Off: today's pages. Removed in FC (E33) |
 | `e32.dynamics-sound` | E32 | On by default (graduated, E32 S6). Dynamics: the limiter's attack never exceeds its look-ahead (a note shows when it applies), the expander's Attack opens and Release closes, and the true-peak factor follows the device rate (4x at 44.1 and 48 kHz, 2x at 88.2 and 96, 1x from 176.4 kHz) with the reported latency. Off (`-NotchSixtyFeatures -e32.dynamics-sound`): stages render as before. Removed in FC (E32) |
+| `e15.follow-output` | E15 | Off by default. Opt-in Follow macOS output: the mode is forced to fixed while off, no default-output listener is installed, and the selected output stays authoritative. Removed in FC (E15) |
 | `e34.design-language` | E34 | Off by default. The app-wide design language: macOS 27 Liquid Glass rules (`docs/DESIGN_LANGUAGE.md`) and, from S1, the shared values and components. Off: today's look. Removed in FC (E34) |
 | `e21.core-designers` | E21 | Off by default. Room-measurement analysis (direct arrival, window, response grid) and the EQ program analyser's spectrum bands run in the portable core instead of Swift and vDSP; later E21 slices add the designers. Off: the Swift path. Removed in FC (E21) |

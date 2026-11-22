@@ -705,6 +705,8 @@ struct ProductProfileBackupSnapshot: Codable, Equatable, Sendable {
     var selectedSystemProfileID: UUID?
     var hardwareMappingRequirements:
         [PlaybackSystemHardwareMappingRequirement] = []
+    /// E15 S1: output-to-system bindings. Optional so older backups decode.
+    var outputBindings: OutputProfileBindings?
 
     func validate() throws {
         guard schemaVersion == Self.currentSchemaVersion else {
@@ -844,6 +846,8 @@ final class ProductProfileController: ObservableObject {
             [PlaybackSystemHardwareMappingRequirement]?
         /// E33 S15: the factory-preset refresh already applied to this archive (nil before it). Optional, so older archives decode.
         var factoryRefreshRevision: Int?
+        /// E15 S1: output-to-system bindings for Follow macOS output (nil before it, so older archives decode).
+        var outputBindings: OutputProfileBindings?
     }
 
     /// Bump when a factory preset changes and `refreshFactoryContentPresets` handles the change.
@@ -1206,6 +1210,8 @@ final class ProductProfileController: ObservableObject {
     @Published private(set) var selectedSystemProfileID: UUID?
     @Published private(set) var hardwareMappingRequirements:
         [PlaybackSystemHardwareMappingRequirement] = []
+    /// E15 S1: which Playback System each output endpoint recalls. Inert until Follow macOS output is on (S3).
+    @Published private(set) var outputBindings = OutputProfileBindings()
     @Published private(set) var lastErrorDescription: String?
 
     init(
@@ -1629,6 +1635,31 @@ final class ProductProfileController: ObservableObject {
         persist()
     }
 
+    /// E15 "Use for <device>": binds the selected system to `key` and records the device as its associated output.
+    func useSelectedSystem(for key: OutputKey) {
+        guard let selectedSystemProfileID,
+              let index = systemProfiles.firstIndex(where: { $0.id == selectedSystemProfileID }) else { return }
+        systemProfiles[index].state.associatedOutputUID = key.deviceUID
+        outputBindings.bind(key, to: selectedSystemProfileID)
+        lastErrorDescription = nil
+        persist()
+    }
+
+    func unbindOutput(_ key: OutputKey) {
+        outputBindings.unbind(key)
+        persist()
+    }
+
+    /// One-time seed on first enable of Follow macOS output (`OutputProfileBindings.seed`). Returns the device UIDs that
+    /// more than one profile names, which stay unbound for the user to resolve.
+    @discardableResult
+    func seedOutputBindingsFromAssociations() -> [String] {
+        let associations = systemProfiles.map { (profileID: $0.id, outputUID: $0.state.associatedOutputUID) }
+        outputBindings.seed(from: associations)
+        persist()
+        return OutputProfileBindings.ambiguousUIDs(associations: associations, bindings: outputBindings)
+    }
+
     func replaceSelectedSystemOutputRouting(
         _ configuration: MultiOutputRoutingConfiguration?
     ) throws {
@@ -1892,6 +1923,7 @@ final class ProductProfileController: ObservableObject {
         hardwareMappingRequirements.removeAll {
             $0.systemProfileID == selectedSystemProfileID
         }
+        outputBindings.removeProfile(selectedSystemProfileID)
         self.selectedSystemProfileID = systemProfiles.first?.id
         ensureDefaultSystemProfile()
         persist()
@@ -2143,7 +2175,8 @@ final class ProductProfileController: ObservableObject {
             systemProfiles: systemProfiles,
             selectedContentPresetID: selectedContentPresetID,
             selectedSystemProfileID: selectedSystemProfileID,
-            hardwareMappingRequirements: hardwareMappingRequirements
+            hardwareMappingRequirements: hardwareMappingRequirements,
+            outputBindings: outputBindings.isEmpty && !outputBindings.seeded ? nil : outputBindings
         )
     }
 
@@ -2172,8 +2205,11 @@ final class ProductProfileController: ObservableObject {
         let previousContentID = selectedContentPresetID
         let previousSystemID = selectedSystemProfileID
         let previousRequirements = hardwareMappingRequirements
+        let previousBindings = outputBindings
 
         do {
+            outputBindings = (snapshot.outputBindings ?? OutputProfileBindings())
+                .pruned(validProfileIDs: Set(snapshot.systemProfiles.map(\.id)))
             userContentPresets = snapshot.contentPresets
             systemProfiles = snapshot.systemProfiles
 
@@ -2240,6 +2276,7 @@ final class ProductProfileController: ObservableObject {
             selectedContentPresetID = previousContentID
             selectedSystemProfileID = previousSystemID
             hardwareMappingRequirements = previousRequirements
+            outputBindings = previousBindings
             try? persistThrowing()
             throw error
         }
@@ -2411,6 +2448,8 @@ final class ProductProfileController: ObservableObject {
                ) != nil {
                 self.selectedSystemProfileID = nil
             }
+            outputBindings = (archive.outputBindings ?? OutputProfileBindings())
+                .pruned(validProfileIDs: Set(systemProfiles.map(\.id)))
             didLoadArchive = true
             if archive.schemaVersion < Archive.currentSchemaVersion {
                 persist()
@@ -2441,7 +2480,8 @@ final class ProductProfileController: ObservableObject {
             selectedSystemProfileID: selectedSystemProfileID,
             hardwareMappingRequirements:
                 hardwareMappingRequirements,
-            factoryRefreshRevision: Self.factoryRefreshRevision
+            factoryRefreshRevision: Self.factoryRefreshRevision,
+            outputBindings: outputBindings.isEmpty && !outputBindings.seeded ? nil : outputBindings
         )
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
