@@ -311,14 +311,28 @@ struct MultichannelCalibrationDesigner: Sendable {
             settings.maximumEQDB = 0
             settings.minimumEQDB = -8
             var result = N60MultiSubOptimizationResult()
-            let optimized = subTargetMagnitude.withUnsafeBufferPointer { targetBuffer in
-                N60MultiSubOptimize(
-                    &subMatrix,
-                    UInt32(profile.subwooferAssignments.count),
-                    targetBuffer.baseAddress!,
-                    settings,
-                    &result
-                )
+            var optimized: Bool
+            if useCoreMaths {
+                // E21 S7b: the core optimiser (`n60_correct_multisub_optimise`); the legacy C below stays the flag-off path.
+                if let core = MultichannelCalibrationCore.optimiseSubs(
+                    matrix: &subMatrix, subCount: profile.subwooferAssignments.count,
+                    targetDB: subTargetMagnitude, settings: settings
+                ) {
+                    result = core
+                    optimized = true
+                } else {
+                    optimized = false
+                }
+            } else {
+                optimized = subTargetMagnitude.withUnsafeBufferPointer { targetBuffer in
+                    N60MultiSubOptimize(
+                        &subMatrix,
+                        UInt32(profile.subwooferAssignments.count),
+                        targetBuffer.baseAddress!,
+                        settings,
+                        &result
+                    )
+                }
             }
             guard optimized else {
                 throw OutputDeviceCalibrationError.designFailed("multi-sub optimization failed")
@@ -757,7 +771,7 @@ struct MultichannelCalibrationDesigner: Sendable {
         return selected.sorted { $0.frequencyHz < $1.frequencyHz }
     }
 
-    private static func measuredResponse(
+    static func measuredResponse(
         matrix: inout N60MultichannelCalibrationMatrix,
         sourceIndex: Int,
         seatIndex: Int
@@ -772,7 +786,7 @@ struct MultichannelCalibrationDesigner: Sendable {
         }
     }
 
-    private static func seatWeight(
+    static func seatWeight(
         matrix: inout N60MultichannelCalibrationMatrix,
         index: Int
     ) -> Double {

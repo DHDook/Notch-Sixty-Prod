@@ -176,4 +176,87 @@ final class MultichannelCalibrationCoreParityTests: XCTestCase {
             }
         }
     }
+
+    /// The optimiser against the legacy C `N60MultiSubOptimize` on the same matrix: same discrete choices (delay, gain and
+    /// polarity per sub), the same objective within 0.05 dB-squared relative, EQ targets within one EQ step.
+    func testSubOptimiserMatchesLegacyAtEveryRateForOneToEightSubs() throws {
+        for rate in rates {
+            for subs in 1...8 {
+                let freqs = MultichannelCalibrationCore.grid(minimumHz: 20, maximumHz: min(200, rate * 0.48), count: 48)
+                var matrix = freqs.withUnsafeBufferPointer {
+                    N60MultichannelCalibrationMatrixMake(rate, profile(subs: subs).programLayout.realtimeLayout, UInt32(subs), 3, $0.baseAddress, 48)
+                }
+                XCTAssertGreaterThan(matrix.sourceCount, 0)
+                for (seat, weight) in [Float(1), 0.5, 0.75].enumerated() {
+                    XCTAssertTrue(N60MultichannelCalibrationSetSeat(&matrix, UInt32(seat), true, weight))
+                    for source in 0..<Int(matrix.sourceCount) {
+                        let magnitude = freqs.enumerated().map { index, _ -> Float in
+                            -4 + 0.7 * Float(source) + 6 * exp(-pow((Float(index) - 14 - 3 * Float(seat)) / 5, 2))
+                        }
+                        let phase = freqs.indices.map { Float(0.2 * Double(source)) - 0.01 * Float($0) + 0.1 * Float(seat) }
+                        XCTAssertTrue(N60MultichannelCalibrationSetResponse(
+                            &matrix, UInt32(source), UInt32(seat), UInt32(rate * (0.005 + 0.0006 * Double(source) + 0.0003 * Double(seat))),
+                            1, -20, magnitude, phase))
+                    }
+                }
+                XCTAssertTrue(N60MultichannelCalibrationMatrixIsValid(&matrix, UInt32(subs)))
+                var settings = N60MultiSubOptimizationSettingsMakeDefault()
+                settings.maximumGainDB = 0
+                settings.maximumEQDB = 0
+                let target = [Float](repeating: -2, count: freqs.count)
+                var legacy = N60MultiSubOptimizationResult()
+                XCTAssertTrue(target.withUnsafeBufferPointer { N60MultiSubOptimize(&matrix, UInt32(subs), $0.baseAddress!, settings, &legacy) })
+                let core = try XCTUnwrap(MultichannelCalibrationCore.optimiseSubs(
+                    matrix: &matrix, subCount: subs, targetDB: target, settings: settings))
+                let label = "\(rate) Hz, \(subs) subs"
+                func values<T>(_ tuple: inout some Any, _ type: T.Type, _ count: Int) -> [T] {
+                    withUnsafePointer(to: &tuple) { $0.withMemoryRebound(to: T.self, capacity: count) { Array(UnsafeBufferPointer(start: $0, count: count)) } }
+                }
+                var lg = legacy.gainDB, cg = core.gainDB, ld = legacy.additionalDelayMs, cd = core.additionalDelayMs
+                var lp = legacy.polarityInverted, cp = core.polarityInverted
+                XCTAssertEqual(values(&cg, Float.self, subs), values(&lg, Float.self, subs), label)
+                XCTAssertEqual(values(&cd, Float.self, subs), values(&ld, Float.self, subs), label)
+                XCTAssertEqual(values(&cp, Bool.self, subs), values(&lp, Bool.self, subs), label)
+                XCTAssertEqual(core.objective, legacy.objective, accuracy: max(1e-4, 0.0005 * abs(legacy.objective)), label)
+                XCTAssertEqual(core.weightedTargetErrorDBSquared, legacy.weightedTargetErrorDBSquared, accuracy: 0.05, label)
+                XCTAssertEqual(core.seatVarianceDBSquared, legacy.seatVarianceDBSquared, accuracy: 0.05, label)
+                XCTAssertEqual(core.searchStartsRun, legacy.searchStartsRun, label)
+                XCTAssertEqual(core.searchBudgetExhausted, legacy.searchBudgetExhausted, label)
+                var le = legacy.perSubEQTargetDB, ce = core.perSubEQTargetDB
+                let flatLegacy = values(&le, Float.self, Int(N60_CALIBRATION_MAX_SUBWOOFERS * N60_CALIBRATION_MAX_FREQUENCY_BINS))
+                let flatCore = values(&ce, Float.self, Int(N60_CALIBRATION_MAX_SUBWOOFERS * N60_CALIBRATION_MAX_FREQUENCY_BINS))
+                XCTAssertEqual(flatCore, flatLegacy, label)
+            }
+        }
+    }
+
+    /// The evaluation budget stops the core search the same way it stops the legacy one.
+    func testSubOptimiserHonoursTheIterationCap() throws {
+        let freqs = MultichannelCalibrationCore.grid(minimumHz: 20, maximumHz: 200, count: 32)
+        var matrix = freqs.withUnsafeBufferPointer {
+            N60MultichannelCalibrationMatrixMake(96_000, profile(subs: 4).programLayout.realtimeLayout, 4, 2, $0.baseAddress, 32)
+        }
+        for seat in 0..<2 {
+            XCTAssertTrue(N60MultichannelCalibrationSetSeat(&matrix, UInt32(seat), true, 1))
+            for source in 0..<Int(matrix.sourceCount) {
+                let magnitude = freqs.indices.map { Float(-3 + 4 * sin(0.3 * Double($0) + Double(source))) }
+                let phase = freqs.indices.map { -0.05 * Float($0) + 0.3 * Float(source + seat) }
+                XCTAssertTrue(N60MultichannelCalibrationSetResponse(&matrix, UInt32(source), UInt32(seat), 480 + UInt32(40 * source), 1, -20, magnitude, phase))
+            }
+        }
+        var settings = N60MultiSubOptimizationSettingsMakeDefault()
+        settings.searchStarts = 64
+        settings.searchRounds = 64
+        settings.searchEvaluationBudget = 2_000
+        settings.eqSearchEvaluationBudget = 2_000
+        let target = [Float](repeating: 0, count: freqs.count)
+        let capped = try XCTUnwrap(MultichannelCalibrationCore.optimiseSubs(matrix: &matrix, subCount: 4, targetDB: target, settings: settings))
+        XCTAssertTrue(capped.searchBudgetExhausted)
+        XCTAssertLessThan(capped.searchStartsRun, 64)
+        XCTAssertTrue(capped.eqSearchBudgetExhausted)
+        var legacy = N60MultiSubOptimizationResult()
+        XCTAssertTrue(target.withUnsafeBufferPointer { N60MultiSubOptimize(&matrix, 4, $0.baseAddress!, settings, &legacy) })
+        XCTAssertEqual(capped.searchStartsRun, legacy.searchStartsRun)
+        XCTAssertEqual(capped.searchEvaluations, legacy.searchEvaluations)
+    }
 }
