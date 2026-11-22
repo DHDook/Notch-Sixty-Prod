@@ -14,6 +14,7 @@
 #include <vector>
 
 #include "fft.hpp"
+#include "fft_backend.hpp"
 #include "simd/simd.hpp"
 #include "n60/graph.h"
 
@@ -148,16 +149,17 @@ void refRadix2(std::vector<Complex> &x, bool inverse) {
     if (inverse) for (auto &c : x) { c.re *= 1.0f / static_cast<float>(n); c.im *= 1.0f / static_cast<float>(n); }
 }
 
+// E21 S3: the fused-pass check is about the in-house transform, so it calls the portable backend directly whatever the build picks.
 void checkFusedStages() {
     for (uint32_t n = 2; n <= n60::fft::kMaxSize; n <<= 1) {  // even and odd stage counts
-        Aligned plan(n60::fft::planBytes(n));
-        n60::fft::planInit(plan.p, n);
+        Aligned plan(n60::fft::portable::planBytes(n));
+        n60::fft::portable::planInit(plan.p, n);
         Rng rng{0x777ull + n};
         std::vector<Complex> x(n);
         for (auto &c : x) c = {rng.next(), rng.next()};
         for (int inv = 0; inv < 2; ++inv) {
             std::vector<Complex> a = x, b = x;
-            if (inv) n60::fft::inverse(plan.p, a.data()); else n60::fft::forward(plan.p, a.data());
+            if (inv) n60::fft::portable::inverse(plan.p, a.data()); else n60::fft::portable::forward(plan.p, a.data());
             refRadix2(b, inv != 0);
             CHECK(std::memcmp(a.data(), b.data(), sizeof(Complex) * n) == 0, "fused passes differ from radix-2 stages n=%u inv=%d", n, inv);
         }

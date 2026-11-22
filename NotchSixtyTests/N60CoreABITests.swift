@@ -62,4 +62,14 @@ final class N60CoreABITests: XCTestCase {
             XCTAssertNotNil(dlsym(handle, name), "\(name) is not linked into the app")
         }
     }
+
+    /// E21 S3: the app links the vDSP FFT backend (core/platform/apple/fft_vdsp.cpp, selected by N60_FFT_VDSP in the Xcode
+    /// target) and both realtime and offline transforms run through it. The mangled names are n60::fft::vdsp::planBytes and
+    /// n60::fft::offline::vdsp::realForward; a missing file in the Xcode group or a lost define fails here.
+    func testAppLinksVDSPFFTBackend() {
+        let handle = dlopen(nil, RTLD_NOW)
+        XCTAssertNotNil(dlsym(handle, "_ZN3n603fft4vdsp9planBytesEj"), "vDSP FFT backend is not linked into the app")
+        XCTAssertNotNil(dlsym(handle, "_ZN3n603fft7offline4vdsp11realForwardEPKdyRNSt3__16vectorINS1_4CplxENS5_9allocatorIS7_EEEE"),
+                        "offline vDSP FFT backend is not linked into the app")
+    }
 }

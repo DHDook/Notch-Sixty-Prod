@@ -10,6 +10,10 @@ enum AudioLifecycleState: String, CaseIterable, Equatable, Sendable {
     case running
     case reconfiguring
     case recoveringOutput
+    /// E36: fade out, change the input source, fade in. Only entered behind `e36.virtual-driver`.
+    case switchingInput
+    /// E36: the chosen input (the virtual device) is absent or refused; waits for it, never falls back to the tap.
+    case waitingForInputDevice
     case stopping
     case failed
 }
@@ -48,6 +52,7 @@ struct AudioLifecycleStateMachine: Equatable, Sendable {
             return nextState == .requestingPermission
                 || nextState == .creatingTap
                 || nextState == .recoveringOutput
+                || nextState == .waitingForInputDevice
         case .requestingPermission:
             return nextState == .creatingTap || nextState == .idle || nextState == .failed
         case .creatingTap:
@@ -59,11 +64,18 @@ struct AudioLifecycleStateMachine: Equatable, Sendable {
         case .starting:
             return nextState == .running || nextState == .stopping || nextState == .failed
         case .running:
-            return nextState == .reconfiguring || nextState == .recoveringOutput || nextState == .stopping || nextState == .failed
+            return nextState == .reconfiguring || nextState == .recoveringOutput || nextState == .switchingInput
+                || nextState == .waitingForInputDevice || nextState == .stopping || nextState == .failed
         case .reconfiguring:
             return nextState == .running || nextState == .recoveringOutput || nextState == .stopping || nextState == .failed
         case .recoveringOutput:
             return nextState == .running || nextState == .reconfiguring || nextState == .stopping || nextState == .failed
+        case .switchingInput:
+            return nextState == .running || nextState == .waitingForInputDevice || nextState == .stopping
+                || nextState == .failed
+        case .waitingForInputDevice:
+            return nextState == .running || nextState == .switchingInput || nextState == .stopping
+                || nextState == .failed
         case .stopping:
             return nextState == .idle || nextState == .failed
         case .failed:

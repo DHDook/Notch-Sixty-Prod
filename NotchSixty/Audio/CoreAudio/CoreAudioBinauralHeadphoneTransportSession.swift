@@ -84,8 +84,9 @@ final class CoreAudioBinauralHeadphoneTransportSession {
     /// rebuilding the response set.
     private(set) var unifiedGraphBaseSpec: UnifiedGraphSpec?
     private var audioUnitRack: AudioUnitLiveRackSwitchboard?
-    private var tapID = AudioObjectID(kAudioObjectUnknown)
-    private var aggregateDeviceID = AudioDeviceID(kAudioObjectUnknown)
+    private let captureSource = ProcessTapCaptureSource()
+    private var tapID: AudioObjectID { captureSource.tapID }
+    private var aggregateDeviceID: AudioDeviceID { captureSource.aggregateDeviceID }
     private var captureIOProcID: AudioDeviceIOProcID?
     private var outputIOProcID: AudioDeviceIOProcID?
     private var isCaptureStarted = false
@@ -115,19 +116,15 @@ final class CoreAudioBinauralHeadphoneTransportSession {
             let processObject = try CoreAudioSemanticTransportSupport.currentProcessObjectID(
                 operationPrefix: "Virtual Speakers"
             )
-            let description = CATapDescription(
-                excludingProcesses: [processObject],
+            let description = ProcessTapSpec(
+                excludedProcess: processObject,
                 deviceUID: programSource.uid,
-                stream: 0
-            )
-            description.name = "Notch Sixty Virtual Speakers Program"
-            description.isPrivate = true
-            description.muteBehavior = .mutedWhenTapped
-            description.isMixdown = false
-            description.isMono = false
+                name: "Notch Sixty Virtual Speakers Program",
+                keepsAllChannels: true
+            ).makeDescription()
 
             try CoreAudioSemanticTransportSupport.check(
-                AudioHardwareCreateProcessTap(description, &tapID),
+                captureSource.createTap(description),
                 operation: "create Virtual Speakers program tap"
             )
 
@@ -298,22 +295,14 @@ final class CoreAudioBinauralHeadphoneTransportSession {
             installLoudnessWorker(newBridge, sampleRate: outputFormat.sampleRate)
             N60BinauralHeadphoneBridgeSetOutputGain(newBridge, outputGain)
 
-            let tapEntry: [String: Any] = [
-                kAudioSubTapUIDKey: description.uuid.uuidString,
-                kAudioSubTapDriftCompensationKey: false,
-            ]
-            let aggregateDescription: [String: Any] = [
-                kAudioAggregateDeviceNameKey: "Notch Sixty Virtual Speakers Tap",
-                kAudioAggregateDeviceUIDKey: "com.dhdook.NotchSixty.binaural.\(UUID().uuidString)",
-                kAudioAggregateDeviceTapListKey: [tapEntry],
-                kAudioAggregateDeviceTapAutoStartKey: false,
-                kAudioAggregateDeviceIsPrivateKey: true,
-            ]
+            let aggregateSpec = TapAggregateSpec(
+                name: "Notch Sixty Virtual Speakers Tap",
+                uidPrefix: "com.dhdook.NotchSixty.binaural",
+                tapUID: description.uuid.uuidString,
+                tapDriftCompensation: false
+            )
             try CoreAudioSemanticTransportSupport.check(
-                AudioHardwareCreateAggregateDevice(
-                    aggregateDescription as CFDictionary,
-                    &aggregateDeviceID
-                ),
+                captureSource.createAggregate(aggregateSpec),
                 operation: "create Virtual Speakers tap aggregate"
             )
             try CoreAudioSemanticTransportSupport.waitForDeviceAlive(
@@ -598,14 +587,7 @@ final class CoreAudioBinauralHeadphoneTransportSession {
             AudioDeviceDestroyIOProcID(aggregateDeviceID, captureIOProcID)
             self.captureIOProcID = nil
         }
-        if aggregateDeviceID != AudioDeviceID(kAudioObjectUnknown) {
-            AudioHardwareDestroyAggregateDevice(aggregateDeviceID)
-            aggregateDeviceID = AudioDeviceID(kAudioObjectUnknown)
-        }
-        if tapID != AudioObjectID(kAudioObjectUnknown) {
-            AudioHardwareDestroyProcessTap(tapID)
-            tapID = AudioObjectID(kAudioObjectUnknown)
-        }
+        captureSource.close()
         wideLoudnessWorker?.stop()
         wideLoudnessWorker = nil
         if let bridge {

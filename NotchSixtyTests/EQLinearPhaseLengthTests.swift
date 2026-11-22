@@ -92,6 +92,8 @@ final class EQLinearPhaseLengthTests: XCTestCase {
     }
 
     func testDesignUsesTheStoredLengthWithTheFlagOnAndTheDefaultWithItOff() throws {
+        try XCTSkipIf(ProcessInfo.processInfo.environment[FeatureFlags.graduatedOffEnvironmentKey] == "1",
+                      "the flags-off matrix forces the EQ page flag off, so the flag-on half cannot run")
         let long = linear(.ms85)
         let design = try EQFIRDesigner.design(long, sampleRate: 48_000)
         XCTAssertEqual(design.left.count, EQLinearPhaseLength.ms85.tapCount(sampleRate: 48_000))

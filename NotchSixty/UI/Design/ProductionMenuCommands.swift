@@ -63,7 +63,7 @@ struct PlaybackMenuActions {
 
     private var isActive: Bool {
         switch engine.lifecycleState {
-        case .starting, .running, .reconfiguring, .recoveringOutput: return true
+        case .starting, .running, .reconfiguring, .recoveringOutput, .switchingInput, .waitingForInputDevice: return true
         default: return false
         }
     }

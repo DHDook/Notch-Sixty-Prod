@@ -517,8 +517,9 @@ final class CoreAudioTransportSession {
     private var audioUnitRack: AudioUnitLiveRackSwitchboard?
     /// The graph whose EXTERNAL stage this transport's rack was bound to (E6 S8e).
     private var rackBoundGraph: UnsafeMutableRawPointer?
-    private var tapID = AudioObjectID(kAudioObjectUnknown)
-    private var aggregateDeviceID = AudioDeviceID(kAudioObjectUnknown)
+    private let captureSource = ProcessTapCaptureSource()
+    private var tapID: AudioObjectID { captureSource.tapID }
+    private var aggregateDeviceID: AudioDeviceID { captureSource.aggregateDeviceID }
     private var captureIOProcID: AudioDeviceIOProcID?
     private var outputIOProcID: AudioDeviceIOProcID?
     private var outputDeviceID = AudioDeviceID(kAudioObjectUnknown)
@@ -557,21 +558,15 @@ final class CoreAudioTransportSession {
 
         do {
             let processObject = try Self.currentProcessObjectID()
-            let description = CATapDescription(
-                excludingProcesses: [processObject],
+            let description = ProcessTapSpec(
+                excludedProcess: processObject,
                 deviceUID: (programSource ?? selectedOutput).uid,
-                stream: 0
-            )
-            description.name = "Notch Sixty System Audio"
-            description.isPrivate = true
-            description.muteBehavior = .mutedWhenTapped
-            if programSource != nil {
+                name: "Notch Sixty System Audio",
                 // Keep every source channel: the fold happens in the capture callback.
-                description.isMixdown = false
-                description.isMono = false
-            }
+                keepsAllChannels: programSource != nil
+            ).makeDescription()
 
-            try Self.check(AudioHardwareCreateProcessTap(description, &tapID), operation: "create process tap")
+            try Self.check(captureSource.createTap(description), operation: "create process tap")
 
             tapFormat = AudioStreamFormatDescription(
                 try Self.readStreamFormat(
@@ -777,40 +772,27 @@ final class CoreAudioTransportSession {
                     throw CoreAudioTransportError.programFoldFailed(.sourceChannelLayoutUnresolved)
                 }
             }
-            let tapEntry: [String: Any] = [
-                kAudioSubTapUIDKey: description.uuid.uuidString,
-                // A tap on another device runs on that device's clock; the aggregate follows the DAC.
-                kAudioSubTapDriftCompensationKey: programSource != nil,
-            ]
-            var aggregateDescription: [String: Any] = [
-                kAudioAggregateDeviceNameKey: aggregateDeviceOutputPlan == nil
+            var aggregateSpec = TapAggregateSpec(
+                name: aggregateDeviceOutputPlan == nil
                     ? "Notch Sixty Private Tap"
                     : "Notch Sixty Private Multi-Output",
-                kAudioAggregateDeviceUIDKey: "com.dhdook.NotchSixty.aggregate.\(UUID().uuidString)",
-                kAudioAggregateDeviceTapListKey: [tapEntry],
-                // The session owns capture lifecycle explicitly through its IOProc.
-                // Do not let the aggregate run the tap independently.
-                kAudioAggregateDeviceTapAutoStartKey: false,
-                kAudioAggregateDeviceIsPrivateKey: true,
-            ]
+                uidPrefix: "com.dhdook.NotchSixty.aggregate",
+                tapUID: description.uuid.uuidString,
+                // A tap on another device runs on that device's clock; the aggregate follows the DAC.
+                tapDriftCompensation: programSource != nil
+            )
             if let aggregateDeviceOutputPlan {
-                let subdevices: [[String: Any]] = aggregateDeviceOutputPlan.orderedDeviceUIDs.map { uid in
-                    [
-                        kAudioSubDeviceUIDKey: uid,
-                        kAudioSubDeviceDriftCompensationKey: uid != aggregateDeviceOutputPlan.referenceDeviceUID,
-                    ]
+                aggregateSpec.subDevices = aggregateDeviceOutputPlan.orderedDeviceUIDs.map { uid in
+                    .init(uid: uid, driftCompensation: uid != aggregateDeviceOutputPlan.referenceDeviceUID)
                 }
-                aggregateDescription[kAudioAggregateDeviceSubDeviceListKey] = subdevices
-                aggregateDescription[kAudioAggregateDeviceMainSubDeviceKey] = aggregateDeviceOutputPlan.referenceDeviceUID
+                aggregateSpec.mainSubDeviceUID = aggregateDeviceOutputPlan.referenceDeviceUID
             }
             if programSource != nil {
-                aggregateDescription[kAudioAggregateDeviceSubDeviceListKey] = [
-                    [kAudioSubDeviceUIDKey: selectedOutput.uid, kAudioSubDeviceDriftCompensationKey: false] as [String: Any]
-                ]
-                aggregateDescription[kAudioAggregateDeviceMainSubDeviceKey] = selectedOutput.uid
+                aggregateSpec.subDevices = [.init(uid: selectedOutput.uid, driftCompensation: false)]
+                aggregateSpec.mainSubDeviceUID = selectedOutput.uid
             }
             try Self.check(
-                AudioHardwareCreateAggregateDevice(aggregateDescription as CFDictionary, &aggregateDeviceID),
+                captureSource.createAggregate(aggregateSpec),
                 operation: aggregateDeviceOutputPlan == nil
                     ? "create private tap aggregate device"
                     : "create private multi-output aggregate device"
@@ -1916,14 +1898,7 @@ final class CoreAudioTransportSession {
             AudioDeviceDestroyIOProcID(aggregateDeviceID, captureIOProcID)
             self.captureIOProcID = nil
         }
-        if aggregateDeviceID != AudioDeviceID(kAudioObjectUnknown) {
-            AudioHardwareDestroyAggregateDevice(aggregateDeviceID)
-            aggregateDeviceID = AudioDeviceID(kAudioObjectUnknown)
-        }
-        if tapID != AudioObjectID(kAudioObjectUnknown) {
-            AudioHardwareDestroyProcessTap(tapID)
-            tapID = AudioObjectID(kAudioObjectUnknown)
-        }
+        captureSource.close()
         // Under the refresh lock so a worker's refresh or trip cannot use the bridge while it is destroyed.
         graphRefreshLock.lock()
         if let bridge {

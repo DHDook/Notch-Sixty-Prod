@@ -408,8 +408,9 @@ final class CoreAudioNChannelTransportSession {
     /// the graph renders it or was not requested.
     private(set) var unifiedGraphFallbackReason: UnifiedGraphFallbackReason?
     private var audioUnitRack: AudioUnitLiveRackSwitchboard?
-    private var tapID = AudioObjectID(kAudioObjectUnknown)
-    private var aggregateDeviceID = AudioDeviceID(kAudioObjectUnknown)
+    private let captureSource = ProcessTapCaptureSource()
+    private var tapID: AudioObjectID { captureSource.tapID }
+    private var aggregateDeviceID: AudioDeviceID { captureSource.aggregateDeviceID }
     private var captureIOProcID: AudioDeviceIOProcID?
     private var outputIOProcID: AudioDeviceIOProcID?
     private var outputDeviceID = AudioDeviceID(kAudioObjectUnknown)
@@ -461,19 +462,15 @@ final class CoreAudioNChannelTransportSession {
 
         do {
             let processObject = try Self.currentProcessObjectID()
-            let description = CATapDescription(
-                excludingProcesses: [processObject],
+            let description = ProcessTapSpec(
+                excludedProcess: processObject,
                 deviceUID: selectedOutput.uid,
-                stream: 0
-            )
-            description.name = "Notch Sixty Semantic Program"
-            description.isPrivate = true
-            description.muteBehavior = .mutedWhenTapped
-            description.isMixdown = false
-            description.isMono = false
+                name: "Notch Sixty Semantic Program",
+                keepsAllChannels: true
+            ).makeDescription()
 
             try Self.check(
-                AudioHardwareCreateProcessTap(description, &tapID),
+                captureSource.createTap(description),
                 operation: "create semantic process tap"
             )
 
@@ -736,31 +733,22 @@ final class CoreAudioNChannelTransportSession {
             // the bridge gain stays at unity and only carries the start and stop fades.
             N60LiveNChannelBridgeSetOutputGain(newBridge, hostedAnc == nil ? outputGain : 1)
 
-            let tapEntry: [String: Any] = [
-                kAudioSubTapUIDKey: description.uuid.uuidString,
-                kAudioSubTapDriftCompensationKey: false,
-            ]
-            var aggregateDescription: [String: Any] = [
-                kAudioAggregateDeviceNameKey: routePlan.usesMultiplePhysicalDevices
+            var aggregateSpec = TapAggregateSpec(
+                name: routePlan.usesMultiplePhysicalDevices
                     ? "Notch Sixty Semantic Multi-Output"
                     : "Notch Sixty Semantic Tap",
-                kAudioAggregateDeviceUIDKey: "com.dhdook.NotchSixty.semantic.\(UUID().uuidString)",
-                kAudioAggregateDeviceTapListKey: [tapEntry],
-                kAudioAggregateDeviceTapAutoStartKey: false,
-                kAudioAggregateDeviceIsPrivateKey: true,
-            ]
+                uidPrefix: "com.dhdook.NotchSixty.semantic",
+                tapUID: description.uuid.uuidString,
+                tapDriftCompensation: false
+            )
             if routePlan.usesMultiplePhysicalDevices {
-                let subdevices: [[String: Any]] = routePlan.orderedDeviceUIDs.map { uid in
-                    [
-                        kAudioSubDeviceUIDKey: uid,
-                        kAudioSubDeviceDriftCompensationKey: uid != routePlan.referenceDeviceUID,
-                    ]
+                aggregateSpec.subDevices = routePlan.orderedDeviceUIDs.map { uid in
+                    .init(uid: uid, driftCompensation: uid != routePlan.referenceDeviceUID)
                 }
-                aggregateDescription[kAudioAggregateDeviceSubDeviceListKey] = subdevices
-                aggregateDescription[kAudioAggregateDeviceMainSubDeviceKey] = routePlan.referenceDeviceUID
+                aggregateSpec.mainSubDeviceUID = routePlan.referenceDeviceUID
             }
             try Self.check(
-                AudioHardwareCreateAggregateDevice(aggregateDescription as CFDictionary, &aggregateDeviceID),
+                captureSource.createAggregate(aggregateSpec),
                 operation: routePlan.usesMultiplePhysicalDevices
                     ? "create semantic multi-output aggregate device"
                     : "create semantic tap aggregate device"
@@ -1261,14 +1249,7 @@ final class CoreAudioNChannelTransportSession {
             AudioDeviceDestroyIOProcID(aggregateDeviceID, captureIOProcID)
             self.captureIOProcID = nil
         }
-        if aggregateDeviceID != AudioDeviceID(kAudioObjectUnknown) {
-            AudioHardwareDestroyAggregateDevice(aggregateDeviceID)
-            aggregateDeviceID = AudioDeviceID(kAudioObjectUnknown)
-        }
-        if tapID != AudioObjectID(kAudioObjectUnknown) {
-            AudioHardwareDestroyProcessTap(tapID)
-            tapID = AudioObjectID(kAudioObjectUnknown)
-        }
+        captureSource.close()
         // The worker reads the bridge's loudness ring; it must be quiet before the bridge goes.
         wideLoudnessWorker?.stop()
         wideLoudnessWorker = nil

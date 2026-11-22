@@ -1,12 +1,14 @@
 // libn60core portable FFT (E6 S4). See fft.hpp for the contracts and realtime notes.
 #include "fft.hpp"
 
+#include "fft_backend.hpp"
+
 #include <cmath>
 #include <cstring>
 
 #include "simd/simd.hpp"
 
-namespace n60::fft {
+namespace n60::fft::portable {
 namespace {
 
 struct PlanHeader {
@@ -218,4 +220,22 @@ void inverseReal(const void *plan, float *x) N60_RT_NONBLOCKING {
 void forward(const void *plan, Complex *x) N60_RT_NONBLOCKING { transform<false>(plan, x); }
 void inverse(const void *plan, Complex *x) N60_RT_NONBLOCKING { transform<true>(plan, x); }
 
+}  // namespace n60::fft::portable
+
+// The public contract: one backend per build (fft_backend.hpp).
+#ifdef N60_FFT_VDSP
+#define N60_FFT_IMPL vdsp
+#else
+#define N60_FFT_IMPL portable
+#endif
+namespace n60::fft {
+size_t planBytes(uint32_t n) N60_RT_NONBLOCKING { return N60_FFT_IMPL::planBytes(n); }
+bool planInit(void *mem, uint32_t n) { return N60_FFT_IMPL::planInit(mem, n); }
+void forward(const void *plan, Complex *x) N60_RT_NONBLOCKING { N60_FFT_IMPL::forward(plan, x); }
+void inverse(const void *plan, Complex *x) N60_RT_NONBLOCKING { N60_FFT_IMPL::inverse(plan, x); }
+size_t realPlanBytes(uint32_t n) N60_RT_NONBLOCKING { return N60_FFT_IMPL::realPlanBytes(n); }
+bool realPlanInit(void *mem, uint32_t n) { return N60_FFT_IMPL::realPlanInit(mem, n); }
+void forwardReal(const void *realPlan, float *x) N60_RT_NONBLOCKING { N60_FFT_IMPL::forwardReal(realPlan, x); }
+void inverseReal(const void *realPlan, float *x) N60_RT_NONBLOCKING { N60_FFT_IMPL::inverseReal(realPlan, x); }
 }  // namespace n60::fft
+#undef N60_FFT_IMPL
