@@ -80,6 +80,10 @@ struct MultichannelCalibrationDesigner: Sendable {
     static let nominalMaximumFrequencyHz = 20_000.0
     static let subwooferMaximumFrequencyHz = 300.0
 
+    /// E21 S7a: with `e21.core-designers` on, the alignment, timing, grid, polarity, level and sub EQ fit maths runs in
+    /// `libn60core` (`MultichannelCalibrationCore`); off, the Swift and legacy C maths below runs unchanged.
+    var useCoreMaths = FeatureFlags.isEnabledProcessWide(.coreDesigners)
+
     func design(
         profile: OutputDeviceProfileConfiguration,
         bassManagementEnabled: Bool,
@@ -104,7 +108,7 @@ struct MultichannelCalibrationDesigner: Sendable {
             throw OutputDeviceCalibrationError.designFailed("seat weights must be finite and positive")
         }
 
-        let frequencies = Self.logFrequencyGrid(
+        let frequencies = gridFrequencies(
             minimumHz: Self.minimumFrequencyHz,
             maximumHz: min(Self.nominalMaximumFrequencyHz, sampleRate * 0.48),
             count: Self.frequencyBinCount
@@ -186,7 +190,7 @@ struct MultichannelCalibrationDesigner: Sendable {
         }
 
         var alignment = N60SpeakerAlignmentPlan()
-        guard N60MultichannelCalibrationMakeSpeakerAlignmentPlan(&matrix, &alignment) else {
+        guard makeAlignmentPlan(&matrix, &alignment) else {
             throw OutputDeviceCalibrationError.designFailed("speaker time/level alignment failed")
         }
 
@@ -217,7 +221,7 @@ struct MultichannelCalibrationDesigner: Sendable {
         var subResult: N60MultiSubOptimizationResult?
         var subOptimizationFrequencies = frequencies
         if bassManagementEnabled, !profile.subwooferAssignments.isEmpty {
-            let subFrequencies = Self.logFrequencyGrid(
+            let subFrequencies = gridFrequencies(
                 minimumHz: Self.minimumFrequencyHz,
                 maximumHz: min(
                     Self.subwooferMaximumFrequencyHz,
@@ -406,7 +410,7 @@ struct MultichannelCalibrationDesigner: Sendable {
             throw OutputDeviceCalibrationError.designFailed("direct-arrival timing is invalid")
         }
         let directArrivalFrame = UInt32(directArrivalFrameDouble.rounded())
-        let directPolarity = Self.directPolarity(
+        let directPolarity = polarity(
             impulse: measurement.channel.impulseResponse,
             arrivalFrame: Int(directArrivalFrame)
         )
@@ -419,7 +423,7 @@ struct MultichannelCalibrationDesigner: Sendable {
             }
             return Float(try Self.interpolate(phases, response: response, at: Double(frequency)))
         }
-        let broadband = Self.broadbandLevelDB(
+        let broadband = broadbandLevel(
             frequencies: frequencies,
             magnitudes: magnitude,
             source: measurement.source
@@ -545,7 +549,7 @@ struct MultichannelCalibrationDesigner: Sendable {
         var designs: [MultichannelSubwooferDesign] = []
         for sub in 0..<count {
             let eqTarget = Self.subwooferEQTarget(result: &result, subwooferIndex: sub)
-            let eqBands = Self.fitAttenuationOnlySubwooferEQ(
+            let eqBands = fitSubwooferEQ(
                 frequencies: frequencies,
                 targetDB: eqTarget
             )
@@ -569,6 +573,11 @@ struct MultichannelCalibrationDesigner: Sendable {
         sampleRate: Double
     ) throws -> (speakerCommonDelayMilliseconds: Double, subwooferCommonDelayMilliseconds: Double) {
         guard subwooferCount > 0, var subResult else { return (0, 0) }
+        if useCoreMaths {
+            return try coreTimingOffsets(
+                matrix: &matrix, alignment: alignment, subResult: &subResult,
+                subwooferCount: subwooferCount, sampleRate: sampleRate)
+        }
         var additionalDelays = [Float](repeating: 0, count: subwooferCount)
         withUnsafePointer(to: &subResult.additionalDelayMs) { tuple in
             tuple.withMemoryRebound(to: Float.self, capacity: Int(N60_CALIBRATION_MAX_SUBWOOFERS)) {
@@ -604,6 +613,104 @@ struct MultichannelCalibrationDesigner: Sendable {
             return ((latestSubArrival - speakerReference) / sampleRate * 1_000.0, 0)
         }
         return (0, (speakerReference - latestSubArrival) / sampleRate * 1_000.0)
+    }
+
+    // MARK: E21 S7a flag dispatch
+
+    private func gridFrequencies(minimumHz: Double, maximumHz: Double, count: Int) -> [Float] {
+        useCoreMaths
+            ? MultichannelCalibrationCore.grid(minimumHz: minimumHz, maximumHz: maximumHz, count: count)
+            : Self.logFrequencyGrid(minimumHz: minimumHz, maximumHz: maximumHz, count: count)
+    }
+
+    private func polarity(impulse: [Float], arrivalFrame: Int) -> Int8 {
+        useCoreMaths
+            ? MultichannelCalibrationCore.directPolarity(impulse: impulse, arrivalFrame: arrivalFrame)
+            : Self.directPolarity(impulse: impulse, arrivalFrame: arrivalFrame)
+    }
+
+    private func broadbandLevel(frequencies: [Float], magnitudes: [Float], source: MultichannelCalibrationSource) -> Float {
+        useCoreMaths
+            ? MultichannelCalibrationCore.broadbandLevelDB(frequencies: frequencies, magnitudes: magnitudes, source: source)
+            : Self.broadbandLevelDB(frequencies: frequencies, magnitudes: magnitudes, source: source)
+    }
+
+    private func fitSubwooferEQ(frequencies: [Float], targetDB: [Float]) -> [OutputCalibrationEQBand] {
+        useCoreMaths
+            ? MultichannelCalibrationCore.subEQFit(
+                frequencies: frequencies, targetDB: targetDB,
+                maximumBands: PhysicalSubwooferCalibration.maximumEQBandCount)
+            : Self.fitAttenuationOnlySubwooferEQ(frequencies: frequencies, targetDB: targetDB)
+    }
+
+    /// The matrix's measured data as flat `[source][seat]` arrays for the core. Excluded seats have weight 0.
+    static func flatten(_ matrix: inout N60MultichannelCalibrationMatrix, sources: [Int]) -> (
+        weights: [Float], arrival: [UInt32], polarity: [Int8], level: [Float]
+    ) {
+        let seatCount = Int(matrix.seatCount)
+        let weights = (0..<seatCount).map { Float(max(0, seatWeight(matrix: &matrix, index: $0))) }
+        var arrival: [UInt32] = []
+        var polarity: [Int8] = []
+        var level: [Float] = []
+        for source in sources {
+            for seat in 0..<seatCount {
+                let response = measuredResponse(matrix: &matrix, sourceIndex: source, seatIndex: seat)
+                arrival.append(response.directArrivalFrame)
+                polarity.append(response.directPolarity)
+                level.append(response.broadbandLevelDB)
+            }
+        }
+        return (weights, arrival, polarity, level)
+    }
+
+    private func makeAlignmentPlan(_ matrix: inout N60MultichannelCalibrationMatrix, _ plan: inout N60SpeakerAlignmentPlan) -> Bool {
+        guard useCoreMaths else { return N60MultichannelCalibrationMakeSpeakerAlignmentPlan(&matrix, &plan) }
+        let count = Int(matrix.sourceCount)
+        let kinds: [Bool] = withUnsafePointer(to: &matrix.sources) { tuple in
+            tuple.withMemoryRebound(to: N60CalibrationSourceDescriptor.self, capacity: Int(N60_CALIBRATION_MAX_SOURCES)) { flat in
+                (0..<count).map { flat[$0].kind == N60CalibrationSourceKindProgramSpeaker }
+            }
+        }
+        let flat = Self.flatten(&matrix, sources: Array(0..<count))
+        guard let result = MultichannelCalibrationCore.align(
+            weights: flat.weights, isSpeaker: kinds, arrival: flat.arrival, polarity: flat.polarity, level: flat.level)
+        else { return false }
+        // The designer reads only the reference arrival and common level from the plan; per-source alignment is done
+        // again by the speaker correction designer, which still uses the legacy C (gap G11, owner E21 S7b).
+        plan = N60SpeakerAlignmentPlan()
+        plan.sourceCount = matrix.sourceCount
+        plan.referenceArrivalFrame = result.referenceArrivalFrame
+        plan.commonLevelDB = result.commonLevelDB
+        return true
+    }
+
+    private func coreTimingOffsets(
+        matrix: inout N60MultichannelCalibrationMatrix,
+        alignment: N60SpeakerAlignmentPlan,
+        subResult: inout N60MultiSubOptimizationResult,
+        subwooferCount: Int,
+        sampleRate: Double
+    ) throws -> (speakerCommonDelayMilliseconds: Double, subwooferCommonDelayMilliseconds: Double) {
+        var additionalDelays = [Float](repeating: 0, count: subwooferCount)
+        withUnsafePointer(to: &subResult.additionalDelayMs) { tuple in
+            tuple.withMemoryRebound(to: Float.self, capacity: Int(N60_CALIBRATION_MAX_SUBWOOFERS)) {
+                for index in 0..<subwooferCount { additionalDelays[index] = $0[index] }
+            }
+        }
+        var indices: [Int] = []
+        for sub in 0..<subwooferCount {
+            let sourceIndex = N60MultichannelCalibrationSourceIndexForSubwoofer(&matrix, UInt32(sub))
+            guard sourceIndex >= 0 else {
+                throw OutputDeviceCalibrationError.designFailed("subwoofer timing source is missing")
+            }
+            indices.append(Int(sourceIndex))
+        }
+        let flat = Self.flatten(&matrix, sources: indices)
+        guard let offsets = MultichannelCalibrationCore.timingOffsets(
+            weights: flat.weights, arrival: flat.arrival, additionalDelayMS: additionalDelays,
+            speakerReferenceFrame: alignment.referenceArrivalFrame, sampleRate: sampleRate)
+        else { throw OutputDeviceCalibrationError.designFailed("subwoofer timing weights are invalid") }
+        return (offsets.speakerMS, offsets.subMS)
     }
 
     private static func subwooferEQTarget(

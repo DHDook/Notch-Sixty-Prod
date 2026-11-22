@@ -37,7 +37,7 @@
 extern "C" {
 #endif
 
-#define N60_CORRECT_ABI_VERSION 5
+#define N60_CORRECT_ABI_VERSION 6
 
 #define N60_CORRECT_OK 0
 #define N60_CORRECT_ERR_ARGUMENT (-1)
@@ -680,6 +680,83 @@ int32_t n60_correct_fir_response(const float *taps, uint32_t tap_count, double s
 
 /* taps * 10^(-headroom_db / 20), headroom_db finite and >= 0. */
 int32_t n60_correct_scale_taps(const float *taps, uint32_t count, double headroom_db, float *out);
+
+/* ---- 8. Multichannel calibration alignment (E21 S7a, ABI v6) ----
+ * The numbers-to-numbers part of MultichannelCalibrationDesigner.swift: speaker time and level alignment across
+ * weighted seats, the sub-versus-speaker timing offsets, the attenuation-only sub EQ fit and the grid and level
+ * helpers. Single-precision arithmetic in the same order as the legacy N60MultichannelCalibration.h so results match
+ * it; offline only (control or worker thread), no allocation except the sub EQ fit's temporary index list.
+ * Per-seat weights: a seat that is excluded or has weight <= 0 is passed as weight 0 and skipped.
+ */
+#define N60_CORRECT_CALIB_MAX_TRIM_ATTENUATION_DB 24.0f
+
+/* Log grid of count points from min_hz to max_hz, each Float(min * pow(max/min, i / (count - 1))).
+ * N60_CORRECT_ERR_ARGUMENT unless count > 1 and max_hz > min_hz > 0. */
+int32_t n60_correct_calib_grid(double min_hz, double max_hz, uint32_t count, float *out);
+
+/* +1 or -1: the sign of the largest-magnitude sample in the 16 samples from arrival_frame (clamped into the impulse);
+ * +1 for an empty impulse. */
+int32_t n60_correct_calib_direct_polarity(const float *impulse, uint64_t count, uint64_t arrival_frame);
+
+/* Mean magnitude over 100..10000 Hz (speaker) or 25..200 Hz (sub, is_sub != 0); over all bins when none falls inside;
+ * 0 when empty. */
+float n60_correct_calib_broadband_level_db(const float *frequency_hz, const float *magnitude_db, uint32_t count,
+                                           int32_t is_sub);
+
+typedef struct n60_correct_calib_align_problem {
+    uint32_t struct_size;
+    uint32_t seat_count;
+    uint32_t source_count;
+    const float *seat_weight;           /* seat_count */
+    const uint8_t *source_is_speaker;   /* source_count; non-zero for a program speaker, 0 for a subwoofer */
+    const uint32_t *arrival_frame;      /* source_count * seat_count, [source][seat] */
+    const int8_t *polarity;             /* [source][seat], +1 or -1 */
+    const float *level_db;              /* [source][seat] broadband level */
+} n60_correct_calib_align_problem;
+
+typedef struct n60_correct_calib_align_source {
+    uint32_t valid;                     /* 1 for a speaker source */
+    uint32_t polarity_inverted;
+    uint32_t delay_frames;
+    float trim_db;                      /* <= 0, at least -N60_CORRECT_CALIB_MAX_TRIM_ATTENUATION_DB */
+    float weighted_arrival_frame;
+    float weighted_level_db;
+    float seat_variance_db2;
+} n60_correct_calib_align_source;
+
+typedef struct n60_correct_calib_align_result {
+    uint32_t reference_arrival_frame;   /* ceil of the latest weighted speaker arrival */
+    float common_level_db;              /* the quietest weighted speaker level */
+    n60_correct_calib_align_source *sources; /* caller-owned, source_count entries (zeroed first) */
+} n60_correct_calib_align_result;
+
+/* Delay-only time alignment to the latest speaker and trim-only (attenuation) level alignment to the quietest.
+ * N60_CORRECT_ERR_ARGUMENT for a null pointer, a zero count, no positive weight or no speaker source;
+ * N60_CORRECT_ERR_NONFINITE for a non-finite weight or level. */
+int32_t n60_correct_calib_align(const n60_correct_calib_align_problem *problem, n60_correct_calib_align_result *result);
+
+typedef struct n60_correct_calib_timing_problem {
+    uint32_t struct_size;
+    uint32_t seat_count;
+    uint32_t sub_count;
+    double sample_rate;
+    uint32_t speaker_reference_arrival_frame;
+    const float *seat_weight;           /* seat_count, 0 excludes */
+    const uint32_t *arrival_frame;      /* sub_count * seat_count, [sub][seat] */
+    const float *additional_delay_ms;   /* sub_count, the optimiser's per-sub delay */
+} n60_correct_calib_timing_problem;
+
+/* Common delay (ms) to add to the speakers when the latest sub arrives after the speaker reference, else to add to the
+ * subs. Both 0 for sub_count == 0. N60_CORRECT_ERR_ARGUMENT for no positive weight or a bad rate. */
+int32_t n60_correct_calib_timing_offsets(const n60_correct_calib_timing_problem *problem, double *speaker_common_delay_ms,
+                                         double *sub_common_delay_ms);
+
+/* Attenuation-only parametric fit of one sub's EQ target: bins in [min_hz, max_hz] with a finite target <= -0.75 dB,
+ * deepest first, at least 0.33 octave apart, gain max(-8, min(0, 0.72 * target)), Q 1.15, at most max_bands, returned
+ * in ascending frequency. out_* hold max_bands entries. N60_CORRECT_ERR_ARGUMENT for a null pointer. */
+int32_t n60_correct_calib_sub_eq_fit(const float *frequency_hz, const float *target_db, uint32_t count, float min_hz,
+                                     float max_hz, uint32_t max_bands, double *out_frequency_hz, double *out_gain_db,
+                                     double *out_q, uint32_t *out_count);
 
 #ifdef __cplusplus
 }

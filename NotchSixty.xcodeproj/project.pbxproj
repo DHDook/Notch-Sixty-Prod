@@ -31,6 +31,7 @@
 		E10A00000000000000000023 /* synth.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E10A00000000000000000013 /* synth.cpp */; };
 		E10A00000000000000000024 /* bass.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E10A00000000000000000014 /* bass.cpp */; };
 		E21A00000000000000000026 /* room_design.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E21A00000000000000000016 /* room_design.cpp */; };
+		E21A00000000000000000027 /* calibration_align.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E21A00000000000000000017 /* calibration_align.cpp */; };
 		E8A600000000000000000002 /* multisub_search.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E8A600000000000000000001 /* multisub_search.cpp */; };
 		E8A000000000000000000021 /* xover.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E8A000000000000000000011 /* xover.cpp */; };
 		E9B600000000000000000001 /* headroom.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E9B600000000000000000002 /* headroom.cpp */; };
@@ -92,6 +93,7 @@
 		E10A00000000000000000013 /* synth.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = correct/synth.cpp; sourceTree = "<group>"; };
 		E10A00000000000000000014 /* bass.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = correct/bass.cpp; sourceTree = "<group>"; };
 		E21A00000000000000000016 /* room_design.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = correct/room_design.cpp; sourceTree = "<group>"; };
+		E21A00000000000000000017 /* calibration_align.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = correct/calibration_align.cpp; sourceTree = "<group>"; };
 		E8A600000000000000000001 /* multisub_search.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = correct/multisub_search.cpp; sourceTree = "<group>"; };
 		E19A00000000000000000011 /* design.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = mimo/design.cpp; sourceTree = "<group>"; };
 		E8A000000000000000000011 /* xover.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = xover/xover.cpp; sourceTree = "<group>"; };
@@ -203,6 +205,7 @@
 				E10A00000000000000000013 /* synth.cpp */,
 				E10A00000000000000000014 /* bass.cpp */,
 				E21A00000000000000000016 /* room_design.cpp */,
+				E21A00000000000000000017 /* calibration_align.cpp */,
 				E8A600000000000000000001 /* multisub_search.cpp */,
 				E8A000000000000000000011 /* xover.cpp */,
 				E9B600000000000000000002 /* headroom.cpp */,
@@ -353,6 +356,7 @@
 				E10A00000000000000000023 /* synth.cpp in Sources */,
 				E10A00000000000000000024 /* bass.cpp in Sources */,
 				E21A00000000000000000026 /* room_design.cpp in Sources */,
+				E21A00000000000000000027 /* calibration_align.cpp in Sources */,
 				E8A600000000000000000002 /* multisub_search.cpp in Sources */,
 				E8A000000000000000000021 /* xover.cpp in Sources */,
 				E9B600000000000000000001 /* headroom.cpp in Sources */,
