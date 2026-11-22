@@ -9,6 +9,12 @@ struct ProductionSettingsView: View {
     @ObservedObject var product: ProductController
     @ObservedObject var featureFlags: FeatureFlags
     @State private var backupMessage: String?
+    /// E36 S4: read-only driver probe; the switch is a no-op on the engine until S5. No download page is published yet (G2).
+    @StateObject private var inputPath = AudioInputPathModel(
+        probe: { DriverDiscovery(access: SystemHALPropertyStore()).probe(leaseHeld: false).status },
+        downloadURL: nil,
+        openURL: { NSWorkspace.shared.open($0) }
+    )
 
     private var version: String {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—"
@@ -377,6 +383,10 @@ struct ProductionSettingsView: View {
                     #if DEBUG
                     developerSettings
                     #endif
+
+                    if featureFlags.isEnabled(.virtualDriver) {
+                        AudioInputPathSettingsSection(model: inputPath)
+                    }
 
                     settingsCard(title: "Support", systemImage: "wrench.and.screwdriver") {
                         Button {
