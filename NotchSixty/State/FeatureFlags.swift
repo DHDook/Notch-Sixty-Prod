@@ -35,7 +35,7 @@ extension FeatureFlag {
         .noiseSurvey, .conversationUnmasking, .virtualMicrophone, .zones, .headPositionCamera, .overnight,
         .subAwareAnc, .longFIR, .outputProtection, .headphones, .mimoTreatment, .dynamicsExtras, .roomModel,
         .parallelRender, .multirate, .rateAdapt, .coreDesigners,
-        .eqPageEnhancements, .dynamicsSound, .designLanguage
+        .eqPageEnhancements, .dynamicsSound, .designLanguage, .followOutput
     ]
 
     /// E6 S11: the unified graph is the default renderer. Turning this on selects the frozen
@@ -291,6 +291,16 @@ extension FeatureFlag {
         id: "e34.design-language",
         title: "Design language",
         epic: "E34"
+    )
+
+    /// E15: opt-in "Follow macOS output". With the flag off the mode is forced to fixed, the default-output listener is
+    /// never installed and the selected output stays authoritative (`AGENTS.md` section 3). On: the Follow toggle and
+    /// binding UI appear; the mode itself still defaults to fixed. Swift only; the engine never reads it. S1 is the
+    /// binding table and decision policy (no UI yet). Graduates in E15 S4; removed in the flag-cleanup phase.
+    static let followOutput = FeatureFlag(
+        id: "e15.follow-output",
+        title: "Follow macOS output",
+        epic: "E15"
     )
 }
 
