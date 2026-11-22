@@ -93,6 +93,8 @@ struct ProductionRemotePanel: View {
         case .requestingPermission: return "Requesting Permission"
         case .creatingTap, .creatingAggregate, .openingOutput, .starting: return "Starting"
         case .reconfiguring: return "Reconfiguring"
+        case .switchingInput: return "Switching Input"
+        case .waitingForInputDevice: return "Waiting for Input"
         case .recoveringOutput: return "Recovering Output"
         case .stopping: return "Stopping"
         case .switchingInput: return "Switching Input"
