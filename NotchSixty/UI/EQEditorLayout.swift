@@ -1,3 +1,4 @@
+import SwiftUI
 import Foundation
 
 /// E33 S1: pure layout, picker and note rules for the Equalizer page's band list and band editor, kept out of
@@ -120,5 +121,39 @@ enum EQDynamicHint {
         }
         guard !parts.isEmpty else { return nil }
         return "Moved to fit: " + parts.joined(separator: ", ") + "."
+    }
+}
+
+/// Left-to-right flow: each control keeps its natural size and wraps to a new line only when the next one
+/// would pass the proposed width.
+struct EQControlFlowLayout: Layout {
+    var spacing: CGFloat
+    var lineSpacing: CGFloat
+
+    private func place(_ subviews: Subviews, width: CGFloat) -> (frames: [CGRect], size: CGSize) {
+        var frames: [CGRect] = []
+        var x: CGFloat = 0, y: CGFloat = 0, lineHeight: CGFloat = 0, maxX: CGFloat = 0
+        for view in subviews {
+            let size = view.sizeThatFits(.unspecified)
+            if x > 0, x + size.width > width {
+                x = 0; y += lineHeight + lineSpacing; lineHeight = 0
+            }
+            frames.append(CGRect(x: x, y: y, width: size.width, height: size.height))
+            x += size.width + spacing
+            maxX = max(maxX, x - spacing)
+            lineHeight = max(lineHeight, size.height)
+        }
+        return (frames, CGSize(width: maxX, height: y + lineHeight))
+    }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        place(subviews, width: proposal.width ?? .infinity).size
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let result = place(subviews, width: bounds.width)
+        for (view, frame) in zip(subviews, result.frames) {
+            view.place(at: CGPoint(x: bounds.minX + frame.minX, y: bounds.minY + frame.minY), proposal: .unspecified)
+        }
     }
 }
