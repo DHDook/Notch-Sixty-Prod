@@ -18,7 +18,7 @@ ENTITLEMENTS = ROOT / "NotchSixty" / "NotchSixty.entitlements"
 BASELINE = ROOT / "release" / "pr114-release-baseline.json"
 DEPENDENCIES = ROOT / "release" / "production-dependencies.json"
 DOC = ROOT / "docs" / "archive" / "PR114_APP_STORE_PRIVACY_SECURITY.md"
-APP = ROOT / "NotchSixty" / "NotchSixtyApp.swift"
+APP = ROOT / "NotchSixty" / "App" / "NotchSixtyApp.swift"
 GUIDE = ROOT / "NotchSixty" / "UI" / "ProductionUserGuideView.swift"
 
 SOURCE_SUFFIXES = {".swift", ".c", ".h", ".m", ".mm", ".cpp", ".hpp"}
@@ -99,7 +99,7 @@ with ENTITLEMENTS.open("rb") as handle:
 baseline = json.loads(BASELINE.read_text(encoding="utf-8"))
 dependencies = json.loads(DEPENDENCIES.read_text(encoding="utf-8"))
 project = PROJECT.read_text(encoding="utf-8")
-app = APP.read_text(encoding="utf-8")
+app = "".join(p.read_text(encoding="utf-8") for p in sorted(APP.parent.glob("*.swift")))
 guide = GUIDE.read_text(encoding="utf-8")
 doc = DOC.read_text(encoding="utf-8")
 
