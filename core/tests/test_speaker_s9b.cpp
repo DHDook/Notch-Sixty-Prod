@@ -79,9 +79,9 @@ static void testCrossover() {
     }
 }
 
-static void testSensitivity() {
+static void testSensitivity(double rate) {
     Xover x;
-    x.build(48000, 2, 0.003, 1.0);
+    x.build(rate, 2, 0.003, 1.0);
     n60_speaker_sensitivity_options so;
     n60_speaker_sensitivity_defaults(&so);
     CHECK(n60_speaker_sensitivity_options_valid(&so) == 1, "defaults valid");
@@ -124,22 +124,23 @@ static std::vector<double> logGrid(double lo, double hi, int n) {
     return g;
 }
 
-static void testClassifier() {
+static void testClassifier(double rate) {
+    const double sc = rate / 48000.0;
     const int n = 120;
-    std::vector<double> f = logGrid(100, 4000, n);
+    std::vector<double> f = logGrid(100 * sc, 4000 * sc, n);
     auto bump = [&](double centre, double gain) {
         std::vector<double> v(n);
         for (int i = 0; i < n; ++i) { const double d = std::log2(f[i] / centre) / 0.08; v[i] = gain * std::exp(-0.5 * d * d); }
         return v;
     };
     // Mean of interpolated captures: exact on a magnitude that is linear in log frequency.
-    std::vector<double> g = logGrid(20, 20000, 50), m(100);
+    std::vector<double> g = logGrid(20 * sc, 20000 * sc, 50), m(100);
     for (int i = 0; i < 50; ++i) { m[i] = 3.0 * std::log2(g[i]); m[50 + i] = 3.0 * std::log2(g[i]) + 2.0; }
     double got[2];
-    const double at[2] = {333.0, 5000.0};
+    const double at[2] = {333.0 * sc, 5000.0 * sc};
     CHECK(n60_speaker_mean_interpolated(g.data(), 50, m.data(), 2, at, 2, got) == 0, "mean interpolated");
     for (int k = 0; k < 2; ++k) CHECK(std::fabs(got[k] - (3.0 * std::log2(at[k]) + 1.0)) < 1e-9, "linear-in-log value %g", got[k]);
-    const double outside[1] = {10.0};
+    const double outside[1] = {10.0 * sc};
     CHECK(n60_speaker_mean_interpolated(g.data(), 50, m.data(), 2, outside, 1, got) == N60_SPEAKER_ERR_ARGUMENT, "outside");
 
     // Constant and log-linear magnitudes have no local shape residual away from the ends.
@@ -218,11 +219,12 @@ static void testEarlyWindow() {
     }
 }
 
-static void testPreview() {
+static void testPreview(double rate) {
+    const double sc = rate / 48000.0;
     const int n = 150;
-    std::vector<double> f = logGrid(50, 10000, n);
+    std::vector<double> f = logGrid(50 * sc, 10000 * sc, n);
     std::vector<double> flat(n, -10.0), bump(n);
-    for (int i = 0; i < n; ++i) { const double d = std::log2(f[i] / 1000.0) / 0.1; bump[i] = -10.0 + 5.0 * std::exp(-0.5 * d * d); }
+    for (int i = 0; i < n; ++i) { const double d = std::log2(f[i] / (1000.0 * sc)) / 0.1; bump[i] = -10.0 + 5.0 * std::exp(-0.5 * d * d); }
     std::vector<double> target(n), corr(n);
     n60_speaker_preview_problem p{};
     p.struct_size = sizeof p; p.bin_count = n; p.seat_count = 1; p.frequency_hz = f.data();
@@ -270,11 +272,10 @@ static void testPreview() {
 int main() {
     CHECK(n60_speaker_abi_version() == N60_SPEAKER_ABI_VERSION && N60_SPEAKER_ABI_VERSION >= 2u, "abi");
     testCrossover();
-    testSensitivity();
     testResponse();
-    testClassifier();
+    // Classifier, sensitivity and preview scoring: frequency grids scale with the rate so each rate exercises its own band.
+    for (double rate : kRates) { testSensitivity(rate); testClassifier(rate); testPreview(rate); }
     testEarlyWindow();
-    testPreview();
     if (failures == 0) std::printf("speaker s9b ok\n");
     return failures == 0 ? 0 : 1;
 }
