@@ -39,12 +39,13 @@ enum RemoteSlot: String, CaseIterable, Sendable {
         case .quickControls, .ratePicker: return "E30"
         case .correctionStrength: return "E30"
         case .seatPresets: return "E10 S11"
-        case .beforeAfter: return "E12 S26"
+        case .beforeAfter: return "E12 S27"
         }
     }
 
-    /// No slot is filled yet; each owner slice sets its slot true when it wires its control. An empty slot draws nothing.
-    var isFilled: Bool { false }
+    /// Each owner slice sets its slot true when it wires its control. An empty slot draws nothing. The before/after
+    /// button (E12 S27) is drawn when `e12.blind-listening` is on.
+    var isFilled: Bool { self == .beforeAfter }
 }
 
 enum MenuBarRemoteModel {

@@ -116,6 +116,9 @@ struct ComparisonSide {
 final class BlindComparisonService: ObservableObject {
     enum Selection: Equatable { case a, b, x }
 
+    /// E12 S27: "Can I hear a difference?" (ABX) or "Which do I prefer?" (the two candidates behind random labels).
+    enum Kind: Equatable, Sendable { case abx, preference }
+
     enum Phase: Equatable {
         case trials
         /// All trials are in; the preference question comes before the names are shown.
@@ -132,6 +135,8 @@ final class BlindComparisonService: ObservableObject {
     private let clock: () -> Date
     private let switchHold: TimeInterval
     private var holdUntil: Date?
+    let kind: Kind
+    private var heardLabels: Set<Selection> = []
     private(set) var session: BlindABXSession
 
     let match: ComparisonLevelMatch
@@ -144,11 +149,12 @@ final class BlindComparisonService: ObservableObject {
 
     init(
         engine: ComparisonEngine, a: ComparisonSide, b: ComparisonSide, match: ComparisonLevelMatch,
-        trialCount: Int = 16, initialAssignment: Bool = Bool.random(),
+        kind: Kind = .abx, trialCount: Int = 16, initialAssignment: Bool = Bool.random(),
         nextAssignment: @escaping () -> Bool = { Bool.random() },
         switchHold: TimeInterval = ComparisonSwitchTiming.fixedSeconds, clock: @escaping () -> Date = { Date() }
     ) throws {
         self.engine = engine
+        self.kind = kind
         sideA = a
         sideB = b
         self.match = match
@@ -170,16 +176,26 @@ final class BlindComparisonService: ObservableObject {
         refreshSwitching()
         guard !isSwitching else { message = "Wait for the switch to finish."; return }
         let target: ComparisonSide
-        switch choice {
-        case .a: target = sideA
-        case .b: target = sideB
-        case .x: target = session.currentHiddenXWasB ? sideB : sideA
+        switch (kind, choice) {
+        case (.abx, .a): target = sideA
+        case (.abx, .b): target = sideB
+        case (.abx, .x): target = session.currentHiddenXWasB ? sideB : sideA
+        // Preference: the labels A and B are shuffled per trial; the shuffle lives only in the session.
+        case (.preference, .a): target = session.currentHiddenXWasB ? sideB : sideA
+        case (.preference, .b): target = session.currentHiddenXWasB ? sideA : sideB
+        case (.preference, .x): return
         }
         do {
             try target.activate()
-            if choice == .x {
+            if kind == .abx, choice == .x {
                 try session.recordXPlayback()
                 heardX = true
+            } else if kind == .preference {
+                heardLabels.insert(choice)
+                if heardLabels.count == 2 {
+                    try session.recordXPlayback()
+                    heardX = true
+                }
             }
             selection = choice
             message = nil
@@ -190,20 +206,22 @@ final class BlindComparisonService: ObservableObject {
         }
     }
 
-    /// "X is A" or "X is B". Refused until X has played.
+    /// ABX: "X is A" or "X is B". Preference: "I prefer label B" (`xIsB` true) or "label A". Refused until X (or both
+    /// labels) have played.
     func answer(xIsB: Bool) {
         guard phase == .trials else { return }
         guard session.maySubmitChoice else {
-            message = "Listen to X before answering."
+            message = kind == .abx ? "Listen to X before answering." : "Listen to both A and B before answering."
             return
         }
         do {
             try session.submit(xIsB, nextAssignment: nextAssignment())
             completedTrials = session.completedTrials.count
             heardX = false
+            heardLabels = []
             selection = nil
             message = nil
-            if session.isComplete { phase = .askingPreference }
+            if session.isComplete { phase = kind == .abx ? .askingPreference : .finished }
         } catch {
             message = error.localizedDescription
         }
@@ -214,6 +232,30 @@ final class BlindComparisonService: ObservableObject {
         guard phase == .askingPreference else { return }
         phase = .finished
         message = nil
+    }
+
+    /// Preference result, once finished: how often each candidate was chosen and the exact two-sided sign test.
+    var preferenceResult: PreferenceResult? {
+        guard kind == .preference, phase == .finished else { return nil }
+        let preferredB = session.completedTrials.filter { $0.selectedB != $0.hiddenXWasB }.count
+        let total = session.completedTrials.count
+        return PreferenceResult(
+            preferredA: total - preferredB, preferredB: preferredB, trials: total,
+            pValue: BlindComparisonStatistics.signTestPValue(preferred: max(preferredB, total - preferredB), trials: total))
+    }
+
+    struct PreferenceResult: Equatable, Sendable {
+        var preferredA: Int
+        var preferredB: Int
+        var trials: Int
+        var pValue: Double
+    }
+
+    /// ABX result, once the trials are in.
+    var abxResult: (correct: Int, trials: Int, pValue: Double)? {
+        guard kind == .abx, session.isComplete else { return nil }
+        return (session.correctCount, session.totalTrials,
+                BlindABXSession.exactOneSidedPValue(correct: session.correctCount, total: session.totalTrials) ?? 1)
     }
 
     func setMessage(_ text: String?) { message = text }
@@ -244,5 +286,33 @@ final class BlindComparisonService: ObservableObject {
             if clock() < until { hold = true } else { holdUntil = nil }
         }
         isSwitching = engine.isSwitching || hold
+    }
+}
+
+/// How many right answers count as a real result (E12 S27, G54). Exact binomial under the fair-guess null.
+enum BlindComparisonStatistics {
+    static let alpha = 0.05
+
+    /// Exact two-sided sign test: the chance of a split at least this lopsided from fair guessing.
+    static func signTestPValue(preferred: Int, trials: Int) -> Double {
+        let k = max(preferred, trials - preferred)
+        guard let one = BlindABXSession.exactOneSidedPValue(correct: k, total: trials) else { return 1 }
+        return min(1, 2 * one)
+    }
+
+    /// Fewest correct answers out of `trials` with one-sided p below 0.05 (ABX).
+    static func neededCorrect(trials: Int) -> Int? {
+        (0...trials).first { (BlindABXSession.exactOneSidedPValue(correct: $0, total: trials) ?? 1) < alpha }
+    }
+
+    /// Fewest votes for one candidate out of `trials` with two-sided p below 0.05 (preference).
+    static func neededPreferences(trials: Int) -> Int? {
+        (0...trials).first { signTestPValue(preferred: $0, trials: trials) < alpha && $0 * 2 > trials }
+    }
+
+    static func guidance(kind: BlindComparisonService.Kind, trials: Int) -> String {
+        let needed = (kind == .abx ? neededCorrect(trials: trials) : neededPreferences(trials: trials)).map(String.init) ?? "all"
+        let what = kind == .abx ? "correct answers" : "votes for the same side"
+        return "In \(trials) trials you need at least \(needed) \(what) for a real result. Repeating a test until it passes does not count: judge each run on its own."
     }
 }

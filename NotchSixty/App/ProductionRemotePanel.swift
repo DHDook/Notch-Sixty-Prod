@@ -12,9 +12,11 @@ struct ProductionRemotePanel: View {
     @AppStorage(PreferenceKeys.Application.volumeStepResolution)
     private var storedVolumeStepResolution = ApplicationVolumeStepResolution.standard.rawValue
     @State private var commandError: String?
+    @StateObject private var beforeAfter: BeforeAfterModel
 
     init(product: ProductController) {
         self.product = product
+        _beforeAfter = StateObject(wrappedValue: BeforeAfterModel(player: ProfileContentAuditionPlayer(profiles: product.profiles)))
         _profiles = ObservedObject(wrappedValue: product.profiles)
         engine = product.audioEngine
     }
@@ -148,6 +150,9 @@ struct ProductionRemotePanel: View {
             balanceRow
             outputRow
             presetRow
+            if RemoteSlot.beforeAfter.isFilled, FeatureFlags().isEnabled(.blindListening) {
+                BeforeAfterRow(model: beforeAfter, openBlind: openBlindListening)
+            }
 
             Divider()
 
@@ -231,6 +236,13 @@ struct ProductionRemotePanel: View {
         }
     }
 
+    private func openBlindListening() {
+        beforeAfter.done()
+        BlindListeningRequest.shared.request()
+        openWindow(id: "main")
+        NSApplication.shared.activate(ignoringOtherApps: true)
+    }
+
     private var presetRow: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text("Preset").font(.subheadline.weight(.semibold))
@@ -266,5 +278,37 @@ struct ProductionRemoteToolbarButton: View {
         .popover(isPresented: $shown, arrowEdge: .bottom) {
             ProductionRemotePanel(product: product).productionToggleStyle()
         }
+    }
+}
+
+/// E12 S27 (G9): level-matched before/after. "Before" is processing off, "After" is the current settings.
+private struct BeforeAfterRow: View {
+    @ObservedObject var model: BeforeAfterModel
+    let openBlind: () -> Void
+    private let tick = Timer.publish(every: 0.25, on: .main, in: .common).autoconnect()
+
+    @ViewBuilder private func sideButton(_ title: String, _ side: BeforeAfterModel.Side, key: KeyEquivalent) -> some View {
+        if model.side == side {
+            Button(title) { model.show(side) }.buttonStyle(.glassProminent).keyboardShortcut(key, modifiers: [.command, .option])
+        } else {
+            Button(title) { model.show(side) }.buttonStyle(.glass).keyboardShortcut(key, modifiers: [.command, .option])
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Before and after").font(.subheadline.weight(.semibold))
+            HStack(spacing: 8) {
+                sideButton("Before", .before, key: "b")
+                sideButton("After", .after, key: "a")
+                if model.isComparing { Button("Done") { model.done() }.buttonStyle(.glass) }
+            }
+            .disabled(model.isSwitching)
+            if let summary = model.levelSummary { Text(summary).font(.caption).foregroundStyle(.secondary) }
+            if let message = model.message { Text(message).font(.caption).foregroundStyle(.orange) }
+            Button("Compare blind…", action: openBlind).buttonStyle(.link).font(.caption)
+        }
+        .onReceive(tick) { _ in model.refresh() }
+        .onDisappear { model.done() }
     }
 }

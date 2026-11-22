@@ -42,10 +42,10 @@ final class MenuBarRemoteTests: XCTestCase {
     func testSlotsAreNamedAndEmptyWithOwners() {
         XCTAssertEqual(Set(RemoteSlot.allCases.map(\.rawValue)).count, 5)
         for slot in RemoteSlot.allCases {
-            XCTAssertFalse(slot.isFilled)
+            XCTAssertEqual(slot.isFilled, slot == .beforeAfter)
             XCTAssertFalse(slot.owner.isEmpty)
         }
-        XCTAssertEqual(RemoteSlot.beforeAfter.owner, "E12 S26")
+        XCTAssertEqual(RemoteSlot.beforeAfter.owner, "E12 S27")
     }
 
     func testOutputPickerOnlyWhileIdleAndBalanceReadout() {
