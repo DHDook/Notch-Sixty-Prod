@@ -84,7 +84,7 @@ struct RoomCorrectionABXSheet: View {
                 }
                 if controller.isSwitching { ProgressView().controlSize(.small) }
             }
-            Text("Play A, B and X as often as you like, then say which one X is.")
+            Text("Play A, B and X as often as you like, but hear X at least once before you say which one it is.")
                 .font(.caption).foregroundStyle(.secondary)
             HStack {
                 Button("X is A") { controller.answer(xIsB: false) }.disabled(!controller.canAnswer)

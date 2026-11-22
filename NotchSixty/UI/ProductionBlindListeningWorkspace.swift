@@ -20,6 +20,10 @@ private struct BlindABXExportFile: FileDocument {
 
 struct ProductionBlindListeningWorkspace: View {
     var engine: AudioIOEngine
+    /// E12 S27: with `e12.blind-listening` on the page can also test what the app does (needs the profiles).
+    var profiles: ProductProfileController?
+    @State private var liveMode = true
+    @ObservedObject private var request = BlindListeningRequest.shared
     @State private var importingA = false
     @State private var importingB = false
     @State private var fileA: URL?
@@ -45,21 +49,40 @@ struct ProductionBlindListeningWorkspace: View {
             && engine.lifecycleState == .idle
     }
 
+    private var liveAvailable: Bool { profiles != nil && FeatureFlags().isEnabled(.blindListening) }
+
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
-                header
-                sources
-                sessionCard
-                if let errorMessage {
-                    Label(errorMessage, systemImage: "exclamationmark.triangle")
-                        .foregroundStyle(.orange)
-                        .font(.caption)
-                        .textSelection(.enabled)
+        if let profiles, liveAvailable {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    Picker("Compare", selection: $liveMode) {
+                        Text("What Notch Sixty does").tag(true)
+                        Text("Two audio files").tag(false)
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(maxWidth: 420)
+                    if liveMode { ProductionBlindLiveView(profiles: profiles) } else { fileBody }
                 }
+                .padding(28)
+                .frame(maxWidth: 980, alignment: .topLeading)
             }
-            .padding(28)
-            .frame(maxWidth: 980, alignment: .topLeading)
+            .onChange(of: request.pending) { _, pending in if pending { liveMode = true } }
+        } else {
+            ScrollView { fileBody.padding(28).frame(maxWidth: 980, alignment: .topLeading) }
+        }
+    }
+
+    private var fileBody: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            header
+            sources
+            sessionCard
+            if let errorMessage {
+                Label(errorMessage, systemImage: "exclamationmark.triangle")
+                    .foregroundStyle(.orange)
+                    .font(.caption)
+                    .textSelection(.enabled)
+            }
         }
         .fileImporter(
             isPresented: $importingA, allowedContentTypes: [.audio],
