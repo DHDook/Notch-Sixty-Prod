@@ -100,6 +100,7 @@ FC phase's per-epic PR (`docs/epics/FC.md`) unless stated.
 | `e20.multirate` | E20 | graduated, no reader (S7 and S8 skipped) | 13 Nov 2026 (ship) | FC (E20) |
 | `e21.core-designers` | E21 | dark; S5: room-response analysis and program spectrum read it | S14 | FC (E21) |
 | `e21.core-designers` | E21 | planned | none | FC (E21) |
+| `e36.virtual-driver` | E36 | dark; S1: input-source seam and two lifecycle states, no reader of the flag yet | S7 | FC (E36) |
 | `e33.page-enhancements` | E33 | graduated (S11d, 21 Nov 2026): every E33 page, engine-publish and Swift reader | S11d | FC (E33) |
 | `e32.dynamics-sound` | E32 | graduated | 21 Nov 2026 (S6) | FC (E32) |
 | `e15.follow-output` | E15 | dark; S1: registered, binding table and decision policy only, no reader in the app yet | S4 | FC (E15) |
@@ -169,3 +170,4 @@ E22; the software part graduates.
 | `e12.dashboard-remote` | E12 | Off by default. The Dashboard becomes the status page: link cards, health strip, attention area, now-playing line; everyday controls leave it (the menu bar panel gets them in S13). Off: today's Dashboard. Removed in FC (E12) |
 | `e34.design-language` | E34 | Off by default. The app-wide design language: macOS 27 Liquid Glass rules (`docs/DESIGN_LANGUAGE.md`) and, from S1, the shared values and components. Off: today's look. Removed in FC (E34) |
 | `e21.core-designers` | E21 | Off by default. Room-measurement analysis (direct arrival, window, response grid) and the EQ program analyser's spectrum bands run in the portable core instead of Swift and vDSP; later E21 slices add the designers. Off: the Swift path. Removed in FC (E21) |
+| `e36.virtual-driver` | E36 | Off by default. The optional virtual audio driver as a second input path beside the process tap. S1 adds only the input-source seam (`CaptureSource`, `HALPropertyStore`) and the `switchingInput` and `waitingForInputDevice` lifecycle states; no user-visible change yet. The process tap stays the default and the app works without the driver. Off: today's sessions. Removed in FC (E36) |
