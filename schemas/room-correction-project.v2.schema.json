@@ -1,0 +1,215 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://notchsixty.app/schemas/room-correction-project.v2.schema.json",
+  "title": "Room correction project (schema version 2)",
+  "description": "Mirrors RoomCorrectionProject. Dates are numbers: seconds since 2001-01-01 in project-v3.json (default JSONEncoder), milliseconds since 1970 inside a backup bundle. Optional Swift properties are omitted when nil.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "id", "playbackSystemID", "name", "createdAt", "modifiedAt", "measurements", "designs"],
+  "properties": {
+    "schemaVersion": { "const": 2 },
+    "id": { "$ref": "#/$defs/uuid" },
+    "playbackSystemID": { "$ref": "#/$defs/uuid" },
+    "name": { "type": "string" },
+    "createdAt": { "type": "number" },
+    "modifiedAt": { "type": "number" },
+    "microphone": { "$ref": "#/$defs/microphone" },
+    "sweep": { "$ref": "#/$defs/sweep" },
+    "measurements": { "type": "array", "items": { "$ref": "#/$defs/position" } },
+    "aggregate": { "$ref": "#/$defs/aggregate" },
+    "target": { "$ref": "#/$defs/target" },
+    "targetShaping": { "type": "object" },
+    "designs": { "type": "array", "items": { "$ref": "#/$defs/design" } },
+    "selectedDesignID": { "$ref": "#/$defs/uuid" }
+  },
+  "$defs": {
+    "uuid": { "type": "string", "pattern": "^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$" },
+    "numbers": { "type": "array", "items": { "type": "number" } },
+    "response": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["frequenciesHz", "magnitudeDB"],
+      "properties": {
+        "frequenciesHz": { "$ref": "#/$defs/numbers" },
+        "magnitudeDB": { "$ref": "#/$defs/numbers" },
+        "phaseRadians": { "$ref": "#/$defs/numbers" }
+      }
+    },
+    "microphone": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["displayName", "inputChannelIndex"],
+      "properties": {
+        "stableID": { "type": "string" },
+        "displayName": { "type": "string" },
+        "manufacturer": { "type": "string" },
+        "inputChannelIndex": { "type": "integer", "minimum": 0 },
+        "calibration": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["schemaVersion", "points"],
+          "properties": {
+            "schemaVersion": { "const": 1 },
+            "sourceName": { "type": "string" },
+            "points": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["frequencyHz", "gainDB"],
+                "properties": { "frequencyHz": { "type": "number" }, "gainDB": { "type": "number" } }
+              }
+            }
+          }
+        }
+      }
+    },
+    "sweep": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "sampleRate", "startFrequencyHz", "endFrequencyHz", "durationSeconds", "levelDBFS", "leadInSeconds", "tailSeconds", "fadeSeconds", "repeatCount"],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "sampleRate": { "type": "number", "exclusiveMinimum": 0 },
+        "startFrequencyHz": { "type": "number" },
+        "endFrequencyHz": { "type": "number" },
+        "durationSeconds": { "type": "number" },
+        "levelDBFS": { "type": "number" },
+        "leadInSeconds": { "type": "number" },
+        "tailSeconds": { "type": "number" },
+        "fadeSeconds": { "type": "number" },
+        "repeatCount": { "enum": [1, 2, 3, 4, 6, 8] }
+      }
+    },
+    "quality": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["clipped", "sweepComplete", "warnings"],
+      "properties": {
+        "clipped": { "type": "boolean" },
+        "playbackPeakDBFS": { "type": "number" },
+        "capturePeakDBFS": { "type": "number" },
+        "estimatedNoiseFloorDBFS": { "type": "number" },
+        "estimatedSNRDB": { "type": "number" },
+        "sweepComplete": { "type": "boolean" },
+        "directArrivalSeconds": { "type": "number" },
+        "usableLowHz": { "type": "number" },
+        "usableHighHz": { "type": "number" },
+        "warnings": { "type": "array", "items": { "type": "string" } },
+        "repeatCount": { "type": "integer" },
+        "rejectedRepeats": { "type": "array", "items": { "type": "integer" } },
+        "rejectedRepeatReasons": { "type": "array", "items": { "type": "string" } },
+        "driftPPM": { "type": "number" }
+      }
+    },
+    "channel": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["capturedAt", "rawCapture", "impulseResponse", "quality"],
+      "properties": {
+        "capturedAt": { "type": "number" },
+        "rawCapture": { "$ref": "#/$defs/numbers" },
+        "impulseResponse": { "$ref": "#/$defs/numbers" },
+        "transferFunction": { "$ref": "#/$defs/response" },
+        "quality": { "$ref": "#/$defs/quality" }
+      }
+    },
+    "position": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "included", "weight", "sampleRate", "left", "right"],
+      "properties": {
+        "id": { "$ref": "#/$defs/uuid" },
+        "name": { "type": "string" },
+        "included": { "type": "boolean" },
+        "weight": { "type": "number" },
+        "sampleRate": { "type": "number", "exclusiveMinimum": 0 },
+        "left": { "$ref": "#/$defs/channel" },
+        "right": { "$ref": "#/$defs/channel" },
+        "ancBassFingerprint": { "type": "object" },
+        "outputGainDBAtMeasurement": { "type": "number" }
+      }
+    },
+    "aggregate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["generatedAt", "includedPositionIDs", "leftResponse", "rightResponse"],
+      "properties": {
+        "generatedAt": { "type": "number" },
+        "includedPositionIDs": { "type": "array", "items": { "$ref": "#/$defs/uuid" } },
+        "leftResponse": { "$ref": "#/$defs/response" },
+        "rightResponse": { "$ref": "#/$defs/response" }
+      }
+    },
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "points"],
+      "properties": {
+        "id": { "$ref": "#/$defs/uuid" },
+        "name": { "type": "string" },
+        "points": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["frequencyHz", "gainDB"],
+            "properties": { "frequencyHz": { "type": "number" }, "gainDB": { "type": "number" } }
+          }
+        }
+      }
+    },
+    "design": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "createdAt", "sampleRate", "parameters", "filter", "recommendedHeadroomDB", "algorithmVersion"],
+      "properties": {
+        "id": { "$ref": "#/$defs/uuid" },
+        "name": { "type": "string" },
+        "createdAt": { "type": "number" },
+        "sampleRate": { "type": "number", "exclusiveMinimum": 0 },
+        "parameters": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["correctionLowHz", "correctionHighHz", "smoothingOctaves", "maximumBoostDB", "maximumCutDB", "requestedTapCount"],
+          "properties": {
+            "correctionLowHz": { "type": "number" },
+            "correctionHighHz": { "type": "number" },
+            "smoothingOctaves": { "type": "number" },
+            "maximumBoostDB": { "type": "number" },
+            "maximumCutDB": { "type": "number" },
+            "requestedTapCount": { "type": "integer", "minimum": 1 }
+          }
+        },
+        "target": { "$ref": "#/$defs/target" },
+        "sourcePositions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "weight"],
+            "properties": { "id": { "$ref": "#/$defs/uuid" }, "weight": { "type": "number" } }
+          }
+        },
+        "effectiveCorrectionLowHz": { "type": "number" },
+        "effectiveCorrectionHighHz": { "type": "number" },
+        "filter": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["name", "leftTaps", "declaredLatencyFrames"],
+          "properties": {
+            "name": { "type": "string" },
+            "sampleRate": { "type": "number" },
+            "leftTaps": { "$ref": "#/$defs/numbers" },
+            "rightTaps": { "$ref": "#/$defs/numbers" },
+            "declaredLatencyFrames": { "type": "integer", "minimum": 0 }
+          }
+        },
+        "predictedLeftResponse": { "$ref": "#/$defs/response" },
+        "predictedRightResponse": { "$ref": "#/$defs/response" },
+        "recommendedHeadroomDB": { "type": "number" },
+        "algorithmVersion": { "type": "string" }
+      }
+    }
+  }
+}

@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://notchsixty.app/schemas/backup-bundle.v1.schema.json",
+  "title": "Notch Sixty backup bundle (schema version 1)",
+  "description": "Mirrors NotchSixtyBackupBundle. createdAt is milliseconds since 1970. Lab sessions and binaural assets are arrays of open objects (their own stores version them).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "createdAt", "appVersion", "appBuild", "profiles", "roomCorrectionProjects", "measurementLabSessions", "binauralAssets", "preferences", "manifest"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "createdAt": { "type": "number" },
+    "appVersion": { "type": "string" },
+    "appBuild": { "type": "string" },
+    "profiles": { "$ref": "profile-snapshot.v1.schema.json" },
+    "roomCorrectionProjects": { "type": "array", "items": { "$ref": "room-correction-project.v2.schema.json" } },
+    "measurementLabSessions": { "type": "array", "items": { "type": "object" } },
+    "binauralAssets": { "type": "array", "items": { "type": "object" } },
+    "preferences": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "appearance", "presence", "volumeStepResolution"],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "appearance": { "enum": ["system", "light", "dark"] },
+        "presence": { "enum": ["dock", "tray", "both"] },
+        "volumeStepResolution": { "enum": [16, 32, 64] },
+        "showVolumeInMenuBar": { "type": "boolean" },
+        "showVolumePopup": { "type": "boolean" },
+        "volumePopupPosition": { "type": "string" },
+        "coverSystemVolumePopup": { "type": "boolean" }
+      }
+    },
+    "manifest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "entries"],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "entries": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["domain", "sha256", "byteCount"],
+            "properties": {
+              "domain": { "type": "string" },
+              "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+              "byteCount": { "type": "integer", "minimum": 0 }
+            }
+          }
+        }
+      }
+    }
+  }
+}

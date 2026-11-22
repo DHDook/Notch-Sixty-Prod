@@ -1,0 +1,539 @@
+{
+ "contentPresets": [
+  {
+   "id": "6A782AB6-492B-46C9-A0A0-000000000001",
+   "name": "Reference",
+   "origin": "factory",
+   "schemaVersion": 1,
+   "state": {
+    "audioUnitRack": {
+     "slots": [
+      {
+       "bypassed": true,
+       "id": "701DB83D-48FE-4B09-B377-267110CA9A94",
+       "wetDryMix": 1
+      },
+      {
+       "bypassed": true,
+       "id": "10AB1C86-0617-42AF-A111-A124B0878987",
+       "wetDryMix": 1
+      },
+      {
+       "bypassed": true,
+       "id": "63FFA708-FF71-4701-A1FD-CB0D2E09A4E9",
+       "wetDryMix": 1
+      },
+      {
+       "bypassed": true,
+       "id": "AD252F67-B1F9-475B-B239-6AF76F7AF599",
+       "wetDryMix": 1
+      }
+     ]
+    },
+    "autoPreampEnabled": false,
+    "dynamics": {
+     "automaticHeadroom": {
+      "enabled": false,
+      "maxAttenuationDB": 12
+     },
+     "compressor": {
+      "attackMs": 25,
+      "enabled": false,
+      "kneeWidthDB": 6,
+      "makeupGainDB": 0,
+      "programDependentRelease": false,
+      "ratio": 3.5,
+      "releaseMs": 150,
+      "sidechainHighPassHz": 0,
+      "thresholdDB": -16,
+      "topology": "feedForward"
+     },
+     "dcOffsetFilter": {
+      "enabled": true
+     },
+     "deEsser": {
+      "attackMs": 1,
+      "detectionQ": 2,
+      "dynamicEQMode": true,
+      "enabled": false,
+      "frequencyHz": 6500,
+      "rangeDB": -24,
+      "ratio": 4,
+      "releaseMs": 50,
+      "thresholdDB": -24
+     },
+     "deHarsh": {
+      "amountDB": -1.5,
+      "enabled": false,
+      "frequencyHz": 3500
+     },
+     "dialogueRelativeLeveler": {
+      "attackMs": 150,
+      "bandHighHz": 3500,
+      "bandLowHz": 300,
+      "boostRatio": 2,
+      "detectorWindowMs": 300,
+      "enabled": false,
+      "maxBoostDB": 8,
+      "programGateThresholdDB": -50,
+      "releaseMs": 900,
+      "targetGapDB": 10,
+      "voiceGate": {
+       "confidenceCeilingIndex": 0.45,
+       "confidenceFloorIndex": 0.15,
+       "enabled": false,
+       "envelopeWindowMs": 15,
+       "measurementWindowMs": 700,
+       "minConfidence": 0.2,
+       "modulationBandwidthHz": 5,
+       "modulationCenterHz": 5
+      }
+     },
+     "dynamicEQ": {
+      "bands": [],
+      "enabled": false
+     },
+     "expander": {
+      "attackMs": 5,
+      "enabled": false,
+      "rangeDB": -12,
+      "ratio": 1.5,
+      "releaseMs": 200,
+      "thresholdDB": -35
+     },
+     "gainRider": {
+      "enabled": false,
+      "maxReductionDB": 6,
+      "speed": "medium",
+      "targetGainReductionDB": 3
+     },
+     "infrasonicFilter": {
+      "cutoffHz": 18,
+      "enabled": true,
+      "slope": "db48"
+     },
+     "limiter": {
+      "attackMs": 0.1,
+      "ceilingDB": -0.5,
+      "enabled": true,
+      "lookAheadMs": 1.5,
+      "releaseMs": 80,
+      "truePeakGuardEnabled": true
+     },
+     "loudnessContour": {
+      "enabled": false,
+      "levelSource": "systemVolume",
+      "maxBoostDB": 12,
+      "maxCutDB": 6,
+      "referencePhons": 85,
+      "strength": 1
+     },
+     "loudnessMatch": {
+      "attackSeconds": 1,
+      "dialogueGateEnabled": false,
+      "enabled": false,
+      "maxCorrectionDB": 12,
+      "releaseSeconds": 3,
+      "targetLUFS": -16
+     },
+     "mainsNotch": {
+      "continuousTracking": false,
+      "enabled": false,
+      "harmonicCount": 8,
+      "harmonicDepthsDB": [
+       -24,
+       -18,
+       -15,
+       -12,
+       -10,
+       -8,
+       -6,
+       -6,
+       0,
+       0,
+       0,
+       0,
+       0,
+       0,
+       0,
+       0
+      ],
+      "q": 30,
+      "region": 60
+     },
+     "multibandCompressor": {
+      "enabled": false,
+      "highAttackMs": 10,
+      "highKneeDB": 6,
+      "highMakeupGainDB": 0,
+      "highRatio": 3,
+      "highReleaseMs": 150,
+      "highSidechainHighPassHz": 0,
+      "highThresholdDB": -18,
+      "lowAttackMs": 10,
+      "lowKneeDB": 6,
+      "lowMakeupGainDB": 0,
+      "lowMidFrequencyHz": 120,
+      "lowMidSlope": "gentle",
+      "lowRatio": 3,
+      "lowReleaseMs": 150,
+      "lowSidechainHighPassHz": 0,
+      "lowThresholdDB": -18,
+      "midAttackMs": 10,
+      "midHighFrequencyHz": 3500,
+      "midHighSlope": "gentle",
+      "midKneeDB": 6,
+      "midMakeupGainDB": 0,
+      "midRatio": 3,
+      "midReleaseMs": 150,
+      "midSidechainHighPassHz": 0,
+      "midThresholdDB": -18
+     },
+     "oversampling": 1,
+     "pauseGate": {
+      "attackMs": 10,
+      "enabled": false,
+      "holdMs": 500,
+      "hysteresisDB": 3,
+      "preset": "amplifierHiss",
+      "releaseMs": 200,
+      "thresholdDBFS": -60
+     },
+     "softClipper": {
+      "asymmetryTrimDB": 0,
+      "autoCompensateGain": true,
+      "curve": "quadratic",
+      "driveDB": 0,
+      "enabled": false,
+      "kneeSmooth": 0.5,
+      "thresholdDB": -1.5
+     },
+     "spectralDenoiser": {
+      "advancedTuningEnabled": false,
+      "attackMs": 11,
+      "customBasePreset": "natural",
+      "enabled": false,
+      "minimumGain": 0.01,
+      "preset": "natural",
+      "profileCommand": {
+       "none": {}
+      },
+      "profileRevision": 0,
+      "protectedHighHz": 150,
+      "protectedLowHz": 0,
+      "protectedRangeEnabled": false,
+      "quality": "high",
+      "reductionAmount": 0.5,
+      "releaseMs": 21,
+      "thresholdDBFS": -72
+     },
+     "stereoMode": "stereo",
+     "stereoWidener": {
+      "enabled": false,
+      "highWidth": 1,
+      "lowMidFrequencyHz": 200,
+      "lowWidth": 0,
+      "midHighFrequencyHz": 4000,
+      "midWidth": 1,
+      "monoLowBand": true
+     }
+    },
+    "headroomAttenuationDB": -0.7,
+    "inputPreampDB": -1.5,
+    "preampTrimDB": 0,
+    "schemaVersion": 1,
+    "stereoEQ": {
+     "bypassed": false,
+     "channelMode": "linked",
+     "editChannel": "linked",
+     "independentSeeded": false,
+     "leftBands": [],
+     "linkedBands": [
+      {
+       "constantQ": false,
+       "dynamic": {
+        "attackMs": 10,
+        "boostRatio": 2,
+        "boostThresholdDB": -40,
+        "detectorMode": "peak",
+        "direction": "cutOnly",
+        "enabled": false,
+        "maxBoostDB": 6,
+        "rangeDB": -24,
+        "ratio": 2,
+        "releaseMs": 100,
+        "rmsWindowMs": 50,
+        "thresholdDB": -24
+       },
+       "enabled": true,
+       "frequencyHz": 42,
+       "gainDB": 0.4,
+       "id": "D88D7912-B5E6-47D1-AEF7-9EA17E4FA507",
+       "linkwitzTargetHz": 40,
+       "linkwitzTargetQ": 0.707,
+       "q": 0.65,
+       "slope": 12,
+       "type": "lowShelf"
+      },
+      {
+       "constantQ": false,
+       "dynamic": {
+        "attackMs": 10,
+        "boostRatio": 2,
+        "boostThresholdDB": -40,
+        "detectorMode": "peak",
+        "direction": "cutOnly",
+        "enabled": false,
+        "maxBoostDB": 6,
+        "rangeDB": -24,
+        "ratio": 2,
+        "releaseMs": 100,
+        "rmsWindowMs": 50,
+        "thresholdDB": -24
+       },
+       "enabled": true,
+       "frequencyHz": 78,
+       "gainDB": 0.5,
+       "id": "E356903E-D5C3-4CBB-832C-53D15F504FA1",
+       "linkwitzTargetHz": 40,
+       "linkwitzTargetQ": 0.707,
+       "q": 0.9,
+       "slope": 12,
+       "type": "peaking"
+      },
+      {
+       "constantQ": false,
+       "dynamic": {
+        "attackMs": 10,
+        "boostRatio": 2,
+        "boostThresholdDB": -40,
+        "detectorMode": "peak",
+        "direction": "cutOnly",
+        "enabled": false,
+        "maxBoostDB": 6,
+        "rangeDB": -24,
+        "ratio": 2,
+        "releaseMs": 100,
+        "rmsWindowMs": 50,
+        "thresholdDB": -24
+       },
+       "enabled": true,
+       "frequencyHz": 165,
+       "gainDB": -0.5,
+       "id": "2ACEFF98-7C31-4329-B41D-3197664EF98E",
+       "linkwitzTargetHz": 40,
+       "linkwitzTargetQ": 0.707,
+       "q": 1,
+       "slope": 12,
+       "type": "peaking"
+      },
+      {
+       "constantQ": false,
+       "dynamic": {
+        "attackMs": 10,
+        "boostRatio": 2,
+        "boostThresholdDB": -40,
+        "detectorMode": "peak",
+        "direction": "cutOnly",
+        "enabled": false,
+        "maxBoostDB": 6,
+        "rangeDB": -24,
+        "ratio": 2,
+        "releaseMs": 100,
+        "rmsWindowMs": 50,
+        "thresholdDB": -24
+       },
+       "enabled": true,
+       "frequencyHz": 320,
+       "gainDB": -0.4,
+       "id": "09373D84-81D8-428A-ABAC-C59341EE08C7",
+       "linkwitzTargetHz": 40,
+       "linkwitzTargetQ": 0.707,
+       "q": 1.2,
+       "slope": 12,
+       "type": "peaking"
+      },
+      {
+       "constantQ": false,
+       "dynamic": {
+        "attackMs": 10,
+        "boostRatio": 2,
+        "boostThresholdDB": -40,
+        "detectorMode": "peak",
+        "direction": "cutOnly",
+        "enabled": false,
+        "maxBoostDB": 6,
+        "rangeDB": -24,
+        "ratio": 2,
+        "releaseMs": 100,
+        "rmsWindowMs": 50,
+        "thresholdDB": -24
+       },
+       "enabled": true,
+       "frequencyHz": 680,
+       "gainDB": 0.2,
+       "id": "3663EFE0-88A2-47A1-B87D-9668B5DD7482",
+       "linkwitzTargetHz": 40,
+       "linkwitzTargetQ": 0.707,
+       "q": 1,
+       "slope": 12,
+       "type": "peaking"
+      },
+      {
+       "constantQ": false,
+       "dynamic": {
+        "attackMs": 10,
+        "boostRatio": 2,
+        "boostThresholdDB": -40,
+        "detectorMode": "peak",
+        "direction": "cutOnly",
+        "enabled": false,
+        "maxBoostDB": 6,
+        "rangeDB": -24,
+        "ratio": 2,
+        "releaseMs": 100,
+        "rmsWindowMs": 50,
+        "thresholdDB": -24
+       },
+       "enabled": true,
+       "frequencyHz": 2100,
+       "gainDB": 0.4,
+       "id": "06A6203F-089B-4B94-AB5D-5595BC78C570",
+       "linkwitzTargetHz": 40,
+       "linkwitzTargetQ": 0.707,
+       "q": 0.9,
+       "slope": 12,
+       "type": "peaking"
+      },
+      {
+       "constantQ": false,
+       "dynamic": {
+        "attackMs": 10,
+        "boostRatio": 2,
+        "boostThresholdDB": -40,
+        "detectorMode": "peak",
+        "direction": "cutOnly",
+        "enabled": false,
+        "maxBoostDB": 6,
+        "rangeDB": -24,
+        "ratio": 2,
+        "releaseMs": 100,
+        "rmsWindowMs": 50,
+        "thresholdDB": -24
+       },
+       "enabled": true,
+       "frequencyHz": 3600,
+       "gainDB": -0.7,
+       "id": "2D519E12-E6D8-4E78-828A-9287AFC459CD",
+       "linkwitzTargetHz": 40,
+       "linkwitzTargetQ": 0.707,
+       "q": 1.2,
+       "slope": 12,
+       "type": "peaking"
+      },
+      {
+       "constantQ": false,
+       "dynamic": {
+        "attackMs": 10,
+        "boostRatio": 2,
+        "boostThresholdDB": -40,
+        "detectorMode": "peak",
+        "direction": "cutOnly",
+        "enabled": false,
+        "maxBoostDB": 6,
+        "rangeDB": -24,
+        "ratio": 2,
+        "releaseMs": 100,
+        "rmsWindowMs": 50,
+        "thresholdDB": -24
+       },
+       "enabled": true,
+       "frequencyHz": 6800,
+       "gainDB": -0.2,
+       "id": "7245E378-1D64-4E9A-A91F-549062C49A3D",
+       "linkwitzTargetHz": 40,
+       "linkwitzTargetQ": 0.707,
+       "q": 1.1,
+       "slope": 12,
+       "type": "peaking"
+      },
+      {
+       "constantQ": false,
+       "dynamic": {
+        "attackMs": 10,
+        "boostRatio": 2,
+        "boostThresholdDB": -40,
+        "detectorMode": "peak",
+        "direction": "cutOnly",
+        "enabled": false,
+        "maxBoostDB": 6,
+        "rangeDB": -24,
+        "ratio": 2,
+        "releaseMs": 100,
+        "rmsWindowMs": 50,
+        "thresholdDB": -24
+       },
+       "enabled": true,
+       "frequencyHz": 11500,
+       "gainDB": 0.8,
+       "id": "700087FE-2258-4112-95A3-A59F6AF2CCF2",
+       "linkwitzTargetHz": 40,
+       "linkwitzTargetQ": 0.707,
+       "q": 0.7,
+       "slope": 12,
+       "type": "highShelf"
+      }
+     ],
+     "midBands": [],
+     "midSideSeeded": false,
+     "phaseMode": "minimumPhase",
+     "rightBands": [],
+     "sideBands": []
+    }
+   }
+  }
+ ],
+ "hardwareMappingRequirements": [],
+ "schemaVersion": 1,
+ "selectedContentPresetID": "6A782AB6-492B-46C9-A0A0-000000000001",
+ "selectedSystemProfileID": "6A782AB6-492B-46C9-A0A0-000000000002",
+ "systemProfiles": [
+  {
+   "id": "6A782AB6-492B-46C9-A0A0-000000000002",
+   "name": "Default System",
+   "schemaVersion": 1,
+   "state": {
+    "bassManagement": {
+     "enabled": false,
+     "frequencyHz": 80,
+     "monitorMode": "recombined",
+     "subGainDB": 0,
+     "subPhaseAlignmentEnabled": false,
+     "subPhaseAlignmentFrequencyHz": 80,
+     "subPhaseAlignmentQ": 0.7,
+     "subPolarityInverted": false,
+     "topology": "linkwitzRiley24"
+    },
+    "outputGainDB": 0,
+    "playback": {
+     "balance": 0,
+     "crosstalkCancellationAmount": 0.5,
+     "crosstalkCancellationEnabled": false,
+     "crosstalkHeadShadowFrequencyHz": 700,
+     "interChannelDelayMs": 0,
+     "speakerCrossfeedAmount": 0,
+     "speakerCrossfeedEnabled": false,
+     "symmetryBalanceEnabled": false,
+     "symmetryBalancePosition": 0
+    },
+    "roomCorrection": {
+     "enabled": false
+    },
+    "schemaVersion": 1,
+    "speakerIR": {
+     "enabled": false
+    }
+   }
+  }
+ ]
+}

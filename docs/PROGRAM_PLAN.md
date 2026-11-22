@@ -317,7 +317,7 @@ Audio types in four bridges. The bigger gap is the DSP maths inside the Swift de
 - [ ] Replace `AudioBufferList` in the bridges with plain non-interleaved float buffers; keep Core Audio in the macOS backend
 - [ ] Move the DSP maths out of Swift into the core in order of value: measurement analysis, room-correction FIR and target design, multi-sub and MIMO design, speaker optimiser, ANC design
 - [ ] S14 graduates `e21.core-designers` (default on); deletion of the Swift implementations and the flag is the FC phase
-- [ ] Shared JSON schemas for profiles and projects
+- [x] Shared JSON schemas for profiles and projects (S13 `e21/json-schemas`: `schemas/` plus fixtures and tests; documents only, no runtime path)
 - [ ] CMake build, with Linux and Windows CI running the core tests and the acoustic reference lab
 - [x] Update `AGENTS.md`: the core may not depend on Apple frameworks, plus the C++ realtime rules
 - [ ] Keep Swift for the macOS shell, Core Audio control and UI
