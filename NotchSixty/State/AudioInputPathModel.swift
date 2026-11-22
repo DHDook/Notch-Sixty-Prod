@@ -1,0 +1,109 @@
+import Combine
+import Foundation
+
+/// E36 S4: which capture path the user wants. The tap is the default and never changes unless the user chooses the driver.
+enum AudioInputPath: String, Equatable, Sendable {
+    case processTap
+    case virtualDriver
+}
+
+/// What one driver status shows in Settings: pure text and the actions on offer, so every status is testable without a view.
+struct AudioInputPathPresentation: Equatable {
+    enum Action: Equatable {
+        case openDownloadPage
+        case recheck
+    }
+
+    let headline: String
+    let detail: String
+    let actions: [Action]
+    /// The driver switch is available only when the app can take the driver path.
+    let canSwitchToDriver: Bool
+
+    init(status: DriverStatus) {
+        canSwitchToDriver = status.isUsable
+        switch status {
+        case .notInstalled:
+            headline = "Driver not installed"
+            detail = "The optional Notch Sixty virtual audio driver is not on this Mac. Audio keeps using the default capture path."
+            actions = [.openDownloadPage, .recheck]
+        case .installed(let version):
+            headline = "Driver installed (protocol \(version))"
+            detail = "Ready. Switch below to send other apps' audio through the driver instead of the default capture path."
+            actions = [.recheck]
+        case .needsUpdate(let version):
+            headline = "Driver needs an update (protocol \(version))"
+            detail = "The installed driver is older than this app accepts. Download the current installer and run it; Notch Sixty never installs or updates the driver itself."
+            actions = [.openDownloadPage, .recheck]
+        case .unknownVersion(let version):
+            headline = "Unknown driver version (\(version))"
+            detail = "This app does not speak that driver version. Update Notch Sixty, or reinstall the matching driver. The driver path stays off."
+            actions = [.openDownloadPage, .recheck]
+        case .inUse(let version):
+            headline = "Driver in use (protocol \(version))"
+            detail = "Audio is flowing through the driver."
+            actions = [.recheck]
+        case .leaseRefused(let code):
+            headline = "Driver refused the connection (error \(code))"
+            detail = "The driver is installed and the right version, but it did not accept this app. Check again, or reinstall the driver."
+            actions = [.openDownloadPage, .recheck]
+        }
+    }
+
+    static let crashWarning =
+        "If Notch Sixty stops unexpectedly while the driver path is on, macOS goes back to a real output within a few seconds and plays it unprocessed. With active speakers (no passive crossover) that can be very loud or unbalanced, so turn the volume down before using the driver path."
+
+    static let sheetTitle = "Set up the virtual audio driver"
+    static let sheetBody =
+        "The driver is an optional add-on that gives Notch Sixty its own audio input without the capture indicator. Notch Sixty works fully without it. It is a separate download with its own installer: you run the installer yourself, and Notch Sixty only detects it. The app never downloads, installs, updates or removes the driver."
+    static let downloadUnavailable = "The download page is not published yet."
+}
+
+/// Drives the "Audio input path" Settings section. The status comes from an injected closure (the read-only driver probe in
+/// production, a fake in tests); the switch is a no-op on the engine until E36 S5 wires it.
+@MainActor
+final class AudioInputPathModel: ObservableObject {
+    @Published private(set) var status: DriverStatus
+    @Published private(set) var selectedPath: AudioInputPath = .processTap
+    @Published var isShowingSetupSheet = false
+
+    let downloadURL: URL?
+    private let probe: () -> DriverStatus
+    private let openURL: (URL) -> Void
+    private let onSwitch: (AudioInputPath) -> Void
+
+    init(
+        probe: @escaping () -> DriverStatus,
+        downloadURL: URL?,
+        openURL: @escaping (URL) -> Void,
+        onSwitch: @escaping (AudioInputPath) -> Void = { _ in }
+    ) {
+        self.probe = probe
+        self.downloadURL = downloadURL
+        self.openURL = openURL
+        self.onSwitch = onSwitch
+        status = probe()
+    }
+
+    var presentation: AudioInputPathPresentation { AudioInputPathPresentation(status: status) }
+    var canOpenDownloadPage: Bool { downloadURL != nil }
+
+    func refresh() {
+        status = probe()
+        // A driver that went away or became unusable cannot stay selected in the UI.
+        if selectedPath == .virtualDriver, !status.isUsable { selectedPath = .processTap }
+    }
+
+    func openDownloadPage() {
+        guard let url = downloadURL else { return }
+        openURL(url)
+    }
+
+    /// The switch. Refuses the driver path when the status does not allow it.
+    func select(_ path: AudioInputPath) {
+        if path == .virtualDriver, !status.isUsable { return }
+        guard path != selectedPath else { return }
+        selectedPath = path
+        onSwitch(path)
+    }
+}
