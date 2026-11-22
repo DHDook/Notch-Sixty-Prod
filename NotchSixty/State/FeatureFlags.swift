@@ -35,7 +35,7 @@ extension FeatureFlag {
         .noiseSurvey, .conversationUnmasking, .virtualMicrophone, .zones, .headPositionCamera, .overnight,
         .subAwareAnc, .longFIR, .outputProtection, .headphones, .mimoTreatment, .dynamicsExtras, .roomModel,
         .parallelRender, .multirate, .rateAdapt, .coreDesigners,
-        .eqPageEnhancements, .dynamicsSound, .designLanguage, .followOutput, .dashboardRemote
+        .eqPageEnhancements, .dynamicsSound, .designLanguage, .followOutput, .dashboardRemote, .virtualDriver
     ]
 
     /// E6 S11: the unified graph is the default renderer. Turning this on selects the frozen
@@ -261,6 +261,15 @@ extension FeatureFlag {
         id: "e21.core-designers",
         title: "Portable core designers and analysis",
         epic: "E21"
+    )
+    /// E36: the optional Notch Sixty virtual audio driver as a second input path beside the process tap (S1 adds the input-source
+    /// seam and the two input lifecycle states; the Settings section, protocol and switch follow). The process tap stays the
+    /// default input path and every v1 feature works without the driver. Swift only: the engine never reads it. Off: today's
+    /// session, unchanged. Graduated in E36 S7 (available, never armed); removed in the flag-cleanup phase.
+    static let virtualDriver = FeatureFlag(
+        id: "e36.virtual-driver",
+        title: "Virtual audio driver input path",
+        epic: "E36"
     )
     /// E33 S1: Equalizer page layout (band list and two-column editor), range hint and moved-to-fit note, and the
     /// sectioned filter picker; later slices add the Dynamics and Meters changes. Graduated in E33 S11d (21 Nov 2026):

@@ -36,7 +36,7 @@ struct ProductionMenuBarView: View {
 
     private var processingActive: Bool {
         switch engine.lifecycleState {
-        case .starting, .running, .reconfiguring, .recoveringOutput:
+        case .starting, .running, .reconfiguring, .recoveringOutput, .switchingInput, .waitingForInputDevice:
             return true
         default:
             return false
@@ -91,6 +91,8 @@ struct ProductionMenuBarView: View {
         case .creatingTap, .creatingAggregate, .openingOutput, .starting: return "Starting"
         case .reconfiguring: return "Reconfiguring"
         case .recoveringOutput: return "Recovering Output"
+        case .switchingInput: return "Switching Input"
+        case .waitingForInputDevice: return "Waiting for Input"
         case .stopping: return "Stopping"
         }
     }

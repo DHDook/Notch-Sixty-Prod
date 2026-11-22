@@ -209,6 +209,10 @@ struct ProductionProcessingStatus: Equatable {
             (title, systemImage, tone) = ("Reconfiguring…", "hourglass", .transitioning)
         case .recoveringOutput:
             (title, systemImage, tone) = ("Waiting for Output", "hourglass", .transitioning)
+        case .switchingInput:
+            (title, systemImage, tone) = ("Switching Input…", "hourglass", .transitioning)
+        case .waitingForInputDevice:
+            (title, systemImage, tone) = ("Waiting for Input", "hourglass", .transitioning)
         case .stopping:
             (title, systemImage, tone) = ("Stopping…", "hourglass", .transitioning)
         case .failed:
