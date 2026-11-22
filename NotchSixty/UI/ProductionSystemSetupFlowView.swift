@@ -60,6 +60,7 @@ final class SystemSetupFlowModel: ObservableObject {
     private var verificationTask: Task<Void, Never>?
     private let abxPlayer: RoomCorrectionABXPlaying
     private let abxDirectory: URL
+    private let abxSwitchHold: TimeInterval
     /// The two room-only designs the open ABX compares (minimum and mixed phase); Keep applies one of them.
     private var abxRooms: (minimum: RoomCorrectionLaneInstall, mixed: RoomCorrectionLaneInstall)?
     /// The running measure task, so Stop can cancel the seat measurer's pass.
@@ -72,7 +73,8 @@ final class SystemSetupFlowModel: ObservableObject {
          sessions: SystemSetupSessionStore = SystemSetupSessionStore(directory: SystemSetupSessionStore.defaultDirectory()),
          roomProjectsDirectory: URL = SystemSetupSessionStore.defaultDirectory()
              .appendingPathComponent("RoomCorrection", isDirectory: true),
-         abxDirectory: URL? = nil) {
+         abxDirectory: URL? = nil, abxSwitchHold: TimeInterval = ComparisonSwitchTiming.fixedSeconds) {
+        self.abxSwitchHold = abxSwitchHold
         let services = services ?? ProductionSystemSetupServices.production(
             engine: engine, profiles: profiles, microphone: microphone, calibration: calibration)
         self.seats = services.seats
@@ -1083,7 +1085,7 @@ final class SystemSetupFlowModel: ObservableObject {
             abxRooms = (minimum, mixed)
             abx = try RoomCorrectionABXController(
                 player: abxPlayer, a: installA, b: installB, match: match, seatCount: listening.count,
-                seatNames: listening.map(\.name), logDirectory: abxDirectory)
+                seatNames: listening.map(\.name), logDirectory: abxDirectory, switchHold: abxSwitchHold)
             message = nil
         } catch {
             message = error.localizedDescription

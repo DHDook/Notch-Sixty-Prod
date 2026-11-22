@@ -1,3 +1,4 @@
+import Combine
 import Foundation
 
 // E24 S9: drives a blind ABX of two room-correction designs from the setup flow's Save step.
@@ -9,16 +10,10 @@ import Foundation
 
 @MainActor
 final class RoomCorrectionABXController: ObservableObject {
-    enum Selection: Equatable { case a, b, x }
-
-    enum Phase: Equatable {
-        case trials
-        /// All trials are in; the preference question comes before the names are shown.
-        case askingPreference
-        case finished
-        /// Playback stopped, the output changed or the player failed: the applied design is back (or being restored).
-        case ended(String)
-    }
+    // E12 S26: trials, switching, level matching and restore are the comparison service's; this class keeps the
+    // room-correction specifics (the two design names, the preference question, the log and gate G3).
+    typealias Selection = BlindComparisonService.Selection
+    typealias Phase = BlindComparisonService.Phase
 
     enum Preference: Equatable { case a, b, none }
 
@@ -34,31 +29,28 @@ final class RoomCorrectionABXController: ObservableObject {
     private let nameA = RoomCorrectionABXLog.minimumPhaseName
     private let nameB = RoomCorrectionABXLog.mixedPhaseName
 
-    private let player: RoomCorrectionABXPlaying
-    private let overrideA: RoomCorrectionABXOverride
-    private let overrideB: RoomCorrectionABXOverride
+    private let service: BlindComparisonService
     private let match: RoomCorrectionABXMatch
     private let seatCount: Int
     private let logDirectory: URL
     private let now: () -> Date
-    private let nextAssignment: () -> Bool
-    private var session: BlindABXSession
+    private var forwarding: AnyCancellable?
 
     /// Listening seats the run can be heard at (names of the measured seats, 1-based by position).
     let seatNames: [String]
     @Published var listeningSeatIndex = 0
-    @Published private(set) var selection: Selection?
-    @Published private(set) var phase: Phase = .trials
-    @Published private(set) var completedTrials = 0
-    @Published private(set) var heardX = false
-    @Published private(set) var message: String?
     @Published private(set) var result: Result?
-    @Published private(set) var isSwitching = false
     @Published private(set) var g3Passed = false
     @Published private(set) var seatsWithPassingLog = 0
 
-    var totalTrials: Int { session.totalTrials }
-    var currentTrialNumber: Int { session.currentTrialNumber }
+    var selection: Selection? { service.selection }
+    var phase: Phase { service.phase }
+    var completedTrials: Int { service.completedTrials }
+    var heardX: Bool { service.heardX }
+    var message: String? { service.message }
+    var isSwitching: Bool { service.isSwitching }
+    var totalTrials: Int { service.totalTrials }
+    var currentTrialNumber: Int { service.currentTrialNumber }
     var matchSummary: String {
         let trim = abs(20 * log10(min(match.gainA, match.gainB)))
         return String(format: "Level matched within %.2f dB (trim %.1f dB); latency matched at %d frames.",
@@ -69,75 +61,45 @@ final class RoomCorrectionABXController: ObservableObject {
         return String(format: "One speaker differs by %.1f dB between the designs after matching, so the comparison is not exactly level.",
                       match.maxLaneResidualDB)
     }
-    var revealedNames: (a: String, b: String)? { phase == .finished ? (nameA, nameB) : nil }
+    var revealedNames: (a: String, b: String)? { service.revealedNames }
 
     init(
         player: RoomCorrectionABXPlaying, a: RoomCorrectionLaneInstall, b: RoomCorrectionLaneInstall,
         match: RoomCorrectionABXMatch, seatCount: Int, seatNames: [String], logDirectory: URL,
         trialCount: Int = 16, initialAssignment: Bool = Bool.random(),
-        nextAssignment: @escaping () -> Bool = { Bool.random() }, now: @escaping () -> Date = { Date() }
+        nextAssignment: @escaping () -> Bool = { Bool.random() }, now: @escaping () -> Date = { Date() },
+        switchHold: TimeInterval = ComparisonSwitchTiming.fixedSeconds
     ) throws {
-        self.player = player
-        overrideA = match.override(for: a, isA: true)
-        overrideB = match.override(for: b, isA: false)
+        let overrideA = match.override(for: a, isA: true)
+        let overrideB = match.override(for: b, isA: false)
         self.match = match
         self.seatCount = seatCount
         self.seatNames = seatNames.isEmpty ? ["Main seat"] : seatNames
         self.logDirectory = logDirectory
-        self.nextAssignment = nextAssignment
         self.now = now
-        session = try BlindABXSession(trialCount: trialCount, initialAssignment: initialAssignment)
+        let level = ComparisonLevelMatch(
+            levelADB: match.levelADB, levelBDB: match.levelBDB, gainA: match.gainA, gainB: match.gainB,
+            remainingDifferenceDB: match.maxLaneResidualDB, isApproximate: false)
+        service = try BlindComparisonService(
+            engine: player,
+            a: ComparisonSide(name: RoomCorrectionABXLog.minimumPhaseName) { try player.play(overrideA) },
+            b: ComparisonSide(name: RoomCorrectionABXLog.mixedPhaseName) { try player.play(overrideB) },
+            match: level, trialCount: trialCount, initialAssignment: initialAssignment,
+            nextAssignment: nextAssignment, switchHold: switchHold)
+        forwarding = service.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }
         refreshG3()
     }
 
     // MARK: Trials
 
-    var canAnswer: Bool { phase == .trials && session.maySubmitChoice && !isSwitching }
-    var canSwitch: Bool { phase == .trials && !isSwitching }
+    var canAnswer: Bool { service.canAnswer }
+    var canSwitch: Bool { service.canSwitch }
 
     /// A, B or X. X plays the hidden design and counts as heard; the published selection is `.x`.
-    func select(_ choice: Selection) {
-        guard phase == .trials else { return }
-        refreshSwitching()
-        guard !isSwitching else { message = "Wait for the switch to finish."; return }
-        let target: RoomCorrectionABXOverride
-        switch choice {
-        case .a: target = overrideA
-        case .b: target = overrideB
-        case .x: target = session.currentHiddenXWasB ? overrideB : overrideA
-        }
-        do {
-            try player.play(target)
-            if choice == .x {
-                try session.recordXPlayback()
-                heardX = true
-            }
-            selection = choice
-            message = nil
-            refreshSwitching()
-        } catch {
-            message = error.localizedDescription
-        }
-    }
+    func select(_ choice: Selection) { service.select(choice) }
 
     /// "X is A" or "X is B". Refused until X has played.
-    func answer(xIsB: Bool) {
-        guard phase == .trials else { return }
-        guard session.maySubmitChoice else {
-            message = "Listen to X before answering."
-            return
-        }
-        do {
-            try session.submit(xIsB, nextAssignment: nextAssignment())
-            completedTrials = session.completedTrials.count
-            heardX = false
-            selection = nil
-            message = nil
-            if session.isComplete { phase = .askingPreference }
-        } catch {
-            message = error.localizedDescription
-        }
-    }
+    func answer(xIsB: Bool) { service.answer(xIsB: xIsB) }
 
     /// The preference question after the trials, then the log is written and the names are shown.
     func submitPreference(_ preference: Preference) {
@@ -151,43 +113,27 @@ final class RoomCorrectionABXController: ObservableObject {
         do {
             let seat = min(max(listeningSeatIndex, 0), seatNames.count - 1) + 1
             let log = try RoomCorrectionABXLog(
-                session: session, match: match, designAName: nameA, designBName: nameB, seatCount: seatCount,
+                session: service.session, match: match, designAName: nameA, designBName: nameB, seatCount: seatCount,
                 listeningSeat: seat, preferredDesignName: preferred, date: now())
             let url = try log.write(to: logDirectory)
             result = Result(
                 correctCount: log.correctCount, trialCount: log.trialCount, pValue: log.oneSidedExactPValue,
                 preferredDesignName: preferred, logURL: url)
-            phase = .finished
-            message = nil
+            service.finish()
             refreshG3()
         } catch {
-            message = "The result could not be saved: \(error.localizedDescription)"
+            service.setMessage("The result could not be saved: \(error.localizedDescription)")
         }
     }
 
     // MARK: Lifecycle
 
     /// Back to the applied design; the sheet's Close and Keep call this.
-    func close() {
-        if case .ended = phase { return }
-        do { try player.restoreApplied() } catch { message = error.localizedDescription }
-    }
+    func close() { service.close() }
 
-    /// Called by the sheet on a timer: ends the run when playback stopped or the output changed (the engine has already
-    /// dropped the override), and tracks the core's switching state.
-    func refreshReadiness() {
-        refreshSwitching()
-        guard phase != .finished, !isEnded else { return }
-        if let reason = player.unavailableReason {
-            phase = .ended(reason)
-            selection = nil
-            try? player.restoreApplied()
-        }
-    }
-
-    private var isEnded: Bool { if case .ended = phase { return true } else { return false } }
-
-    private func refreshSwitching() { isSwitching = player.isSwitching }
+    /// Called by the sheet on a timer: ends the run when playback stopped or the output changed, and tracks the
+    /// core's switching state.
+    func refreshReadiness() { service.refreshReadiness() }
 
     private func refreshG3() {
         let logs = RoomCorrectionABXLog.readAll(in: logDirectory)

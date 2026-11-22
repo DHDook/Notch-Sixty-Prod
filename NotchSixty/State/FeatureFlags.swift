@@ -35,7 +35,8 @@ extension FeatureFlag {
         .noiseSurvey, .conversationUnmasking, .virtualMicrophone, .zones, .headPositionCamera, .overnight,
         .subAwareAnc, .longFIR, .outputProtection, .headphones, .mimoTreatment, .dynamicsExtras, .roomModel,
         .parallelRender, .multirate, .rateAdapt, .coreDesigners,
-        .eqPageEnhancements, .dynamicsSound, .designLanguage, .followOutput, .dashboardRemote, .virtualDriver
+        .eqPageEnhancements, .dynamicsSound, .designLanguage, .followOutput, .dashboardRemote, .virtualDriver,
+        .blindListening
     ]
 
     /// E6 S11: the unified graph is the default renderer. Turning this on selects the frozen
@@ -318,6 +319,16 @@ extension FeatureFlag {
     static let dashboardRemote = FeatureFlag(
         id: "e12.dashboard-remote",
         title: "Dashboard and menu bar remote",
+        epic: "E12"
+    )
+
+    /// E12 S26-S28: Blind Listening. S26 adds the shared comparison service (`BlindComparisonService`) that the setup
+    /// sheet's room-correction test already runs on; S27 and S28 add the page that tests what the app does. Swift only;
+    /// the engine never reads it. Off: the page and the setup sheet are as they are today. Graduates in E12 S28;
+    /// removed in the flag-cleanup phase.
+    static let blindListening = FeatureFlag(
+        id: "e12.blind-listening",
+        title: "Blind Listening",
         epic: "E12"
     )
 }
