@@ -81,6 +81,8 @@ epic, live ANC and MIMO only through `LiveTreatmentArm` and written authorisatio
 
 ### V2-1 Optional virtual audio driver add-on (rescoped, owner 16 Nov 2026)
 
+Proposed for v1 as optional epic E36 (21 Nov 2026, awaiting owner approval): `docs/epics/E36.md`.
+
 Part of v2 and free to Mac owners (owner, 17 Nov 2026): not a separately sold product. It is still
 downloaded from the website with its own signed installer, because the App Store cannot carry an
 audio driver (`AGENTS.md` section 2).

@@ -72,6 +72,7 @@ platforms; E6 (the unified graph) is the critical path, because eleven later epi
 | E33 | Equalizer, Dynamics and Meters enhancements (owner, 15 Nov 2026) | 3–4 | E32, E27, E28 (bench parts: E22) | Claude Code (Mac) | The 15 Nov 2026 review's approved features are reachable from the three pages: two-column band editor, subsonic bands, APO import and export, band clipboard, one preamp model; numbered dynamics chain, expander lookahead, 2–5 multiband bands; meter zones, shared hold and resets, loudness history; PLR, spectrogram, bit activity, input overs, dropout counter, balance, per-band correlation, headroom strip and RTA |
 | E34 | Design language and UI consistency (owner, 17 Nov 2026) | 4 | E12 (page slices), E13, E33 for S2–S7; none for S0, S1 (screen checks: E22) | Claude Code (Mac) | One written design language in the macOS 27 Liquid Glass style; every page built from shared values and components; one rule each for states, dialogs, menus, keyboard, accessibility settings and window sizes |
 | E35 | 3D sound from two speakers (owner, 17 Nov 2026) | 4 | E13, E29, E4 S26b (head position), E12 S26 (blind compare) (bench parts: E22) | Claude Code (Mac) | Crosstalk cancellation designed from the speaker angle or from the listener's in-ear measurement, surround from two speakers for 5.1 and 7.1 sources, and camera head follow, reachable from its own page |
+| E36 | Optional virtual audio driver add-on (proposed 21 Nov 2026; was V2-1; does not gate v1) | 4 (optional) | E25 S8a, E31, E12 S23; E18 website for the download | Claude Code (Mac) + driver repository + bench | The app reads its own virtual device as a second input path beside the tap, switches cleanly, reports its delay to macOS, and the device goes away when the app stops; tap stays the default |
 | E23 | Legacy engine removal | 4 | E6 (incl. S12a–S12h), E4 S11, E7–E17 | Claude Code (Mac) | `N60RenderKernel`, the old N-channel path and the `e6.*` flags are gone; full suite green |
 | E22 | Hardware validation | 4 | all software epics | Bench | Every deferred bench check and owner acceptance check (including those that no longer gate a flag graduation) passes on `main` at every rate |
 | FC | Flag cleanup (owner, 11 Nov 2026) | 4 | E22 | Claude Code (Mac) | Every graduated flag and its dead branch removed in small per-epic PRs; nightly flags-off CI ran while flags existed |
@@ -672,6 +673,14 @@ uses no head model, and a patent attorney reviews the S1 design note before any 
 - [ ] S2 `e35/xtc-stage` (needs-owner: realtime engine; owns G2): the graph's crosstalk stage becomes a two-in two-out FIR; the one-knob model and its engineering toggle go; the E13 virtual-speaker renderer may feed it for 5.1 and 7.1 sources
 - [ ] S3 `e35/page-and-setup` (low-risk): production page with on/off, strength, speaker angle from E29 or typed in, measured mode through the E13 in-ear capture, "Surround from two speakers", and "Compare blind…" through E12 S26
 - [ ] S4 `e35/head-follow-ship` (needs-owner: camera use and engine): filters follow the head from the E4 S26b position; graduates `e35.speaker-3d`
+
+### E36 Optional virtual audio driver add-on (proposed 21 Nov 2026; was V2-1)
+
+Plan: `docs/epics/E36.md`, awaiting owner approval. V2-1 pulled into v1 as an optional epic: it does not gate the v1
+release and may finish in a point update (E36 Q1; not yet in the execution order). Notch Sixty's own user-space
+virtual output device as a second input path beside the process tap, which stays the default. The driver and its
+signed installer live in a separate repository; the App Store build only detects it. One flag `e36.virtual-driver`,
+graduated in S7. Slices S1–S7 (app) and X1–X3 (driver repository) are listed in the epic file.
 
 ### E23 Legacy engine removal
 
