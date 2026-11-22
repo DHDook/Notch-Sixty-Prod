@@ -108,6 +108,14 @@ struct ProductionMenuBarView: View {
     }
 
     var body: some View {
+        if FeatureFlags().isEnabled(.dashboardRemote) {
+            ProductionRemotePanel(product: product)
+        } else {
+            legacyBody
+        }
+    }
+
+    private var legacyBody: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 10) {
                 VStack(alignment: .leading, spacing: 2) {

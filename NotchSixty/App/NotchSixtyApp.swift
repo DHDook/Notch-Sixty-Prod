@@ -125,7 +125,8 @@ struct NotchSixtyApp: App {
 
     var body: some Scene {
         Window("Notch Sixty", id: "main") {
-            ProductionRootView(product: product, navigation: navigation)
+            ProductionRootView(
+                product: product, navigation: navigation, trayInserted: preferences.isTrayInserted)
                 .environmentObject(featureFlags)
                 .productionToggleStyle()
                 .task {

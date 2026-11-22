@@ -279,6 +279,8 @@ final class ProductionNavigation: ObservableObject {
 struct ProductionRootView: View {
     @ObservedObject var product: ProductController
     @ObservedObject var navigation: ProductionNavigation
+    /// E12 S13: whether the menu bar item is on; with `e12.dashboard-remote` on and this false, a toolbar button hosts the remote.
+    var trayInserted = true
     #if DEBUG
     @Environment(\.openWindow) private var openWindow
     #endif
@@ -680,6 +682,14 @@ struct ProductionRootView: View {
                                 && engine.lifecycleState != .failed
                         )
                 )
+            }
+        }
+
+        if MenuBarRemoteModel.showsToolbarButton(
+            flagOn: FeatureFlags().isEnabled(.dashboardRemote), trayInserted: trayInserted)
+        {
+            ToolbarItem(placement: .primaryAction) {
+                ProductionRemoteToolbarButton(product: product)
             }
         }
 
