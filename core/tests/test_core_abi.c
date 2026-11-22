@@ -31,6 +31,8 @@ int main(void) {
     CHECK(info.foldMatrixSize == sizeof(n60_fold_matrix), "fold size");
     CHECK(info.eqfitVersion == N60_EQFIT_ABI_VERSION, "eqfit");
     CHECK(info.eqfitProblemSize == sizeof(n60_eqfit_problem), "eqfit size");
+    CHECK(info.speakerVersion == N60_SPEAKER_ABI_VERSION, "speaker");
+    CHECK(info.speakerProblemSize == sizeof(n60_speaker_candidate_problem), "speaker size");
     CHECK(n60_core_abi(NULL, sizeof info) == 0, "null");
     CHECK(n60_core_abi(&info, 4) == 0, "truncated");
     memset(&info, 0xAB, sizeof info);

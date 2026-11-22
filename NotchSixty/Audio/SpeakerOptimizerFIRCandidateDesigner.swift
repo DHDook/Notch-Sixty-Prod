@@ -86,6 +86,10 @@ struct SpeakerOptimizerFIRCandidatePlan: Equatable, Sendable {
 /// forward DFT of ACTUAL Float taps for prediction and headroom auditing.
 /// This never installs FIR taps in the real-time audio graph.
 struct SpeakerOptimizerFIRCandidateDesigner: Sendable {
+    /// E21 S9a (`e21.core-designers`): on, synthesis, audit and acceptance run in `libn60core`; off, the Swift path below is
+    /// the unchanged parity reference (deleted in S14).
+    var useCoreMaths = FeatureFlags.isEnabledProcessWide(.coreDesigners)
+
     func design(
         baseline: SpeakerOptimizerMeasurementSet,
         seatWeights: [UUID: Double]? = nil,
@@ -162,6 +166,51 @@ struct SpeakerOptimizerFIRCandidateDesigner: Sendable {
                     blockingReasons: ["No speaker-persistent classified frequency points authorize FIR correction."]
                 ))
                 continue
+            }
+            if useCoreMaths {
+                let evidence = SpeakerMathsCore.CandidateEvidence(
+                    sampleRate: rate, frequenciesHz: freqs, targetDB: target, desiredDB: desired,
+                    authorized: authorization, positions: positions, weights: seatWeights,
+                    maximumBoostDB: options.maximumBoostDB, maximumCutDB: options.maximumCutDB,
+                    maximumSeatDegradationDB: constraints.maximumSeatDegradationDB,
+                    protectedLeakageDB: evidenceMask?.maximumProtectedLeakageDB)
+                let singleBandCap = UnifiedGraphFIRScheme.designerSingleBandCap(firScheme)
+                switch SpeakerMathsCore.designFIR(
+                    evidence: evidence, constraints: constraints, maximumTaps: maximumTaps, singleBandCap: singleBandCap) {
+                case .failure(.tooLong):
+                    throw SpeakerOptimizerFIRCandidateError.filterTooLong(requested: constraints.tapCount, maximum: Int(singleBandCap))
+                case .failure(.grid):
+                    throw SpeakerOptimizerFIRCandidateError.invalidFrequencyGrid
+                case .failure(.nonFinite):
+                    throw SpeakerOptimizerFIRCandidateError.nonFiniteSynthesis
+                case .failure(.invalid):
+                    throw SpeakerOptimizerFIRCandidateError.invalidConstraints
+                case .success(let designed):
+                    let reasons: [(UInt32, String)] = [
+                        (1, "Non-finite FIR spectrum."),
+                        (2, "Truncated FIR exceeds the aggregate cut/boost limits."),
+                        (4, "FIR has excessive gain deviation outside the qualified measurement band."),
+                        (8, "FIR headroom requirement exceeds the allowed budget."),
+                        (16, "Synthesized FIR leaks material correction into a classification-protected frequency region."),
+                        (32, "No meaningful modeled correction improvement from the synthesized taps."),
+                        (64, "Synthesized FIR degrades an included microphone position beyond its limit."),
+                    ]
+                    let blockers = reasons.filter { designed.blockers & $0.0 != 0 }.map(\.1)
+                    let accepted = blockers.isEmpty
+                    candidates.append(SpeakerOptimizerFIRSourceCandidate(
+                        source: sourcePreview.source,
+                        taps: accepted ? designed.taps : [],
+                        frequenciesHz: freqs,
+                        modeledFilterMagnitudeDB: accepted ? designed.responseDB : Array(repeating: 0, count: freqs.count),
+                        weightedRMSEBeforeDB: designed.rmseBeforeDB,
+                        predictedWeightedRMSEAfterDB: accepted ? designed.rmseAfterDB : designed.rmseBeforeDB,
+                        worstSeatRegressionDB: accepted ? designed.worstSeatRegressionDB : 0,
+                        maximumPositiveGainDB: accepted ? designed.maximumPositiveGainDB : 0,
+                        recommendedHeadroomDB: accepted ? designed.recommendedHeadroomDB : 0,
+                        acceptedForPreview: accepted,
+                        blockingReasons: blockers))
+                    continue
+                }
             }
             let impulse = try synthesize(
                 correctionDB: desired, frequencies: freqs,

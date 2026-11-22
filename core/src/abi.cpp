@@ -25,6 +25,8 @@ extern "C" int n60_core_abi(n60_core_abi_info *info, size_t info_size) {
     out.foldMatrixSize = static_cast<uint32_t>(sizeof(n60_fold_matrix));
     out.eqfitVersion = n60_eqfit_abi_version();
     out.eqfitProblemSize = static_cast<uint32_t>(sizeof(n60_eqfit_problem));
+    out.speakerVersion = n60_speaker_abi_version();
+    out.speakerProblemSize = static_cast<uint32_t>(sizeof(n60_speaker_candidate_problem));
     const size_t n = info_size < sizeof out ? info_size : sizeof out;
     out.structSize = static_cast<uint32_t>(n);
     memcpy(info, &out, n);

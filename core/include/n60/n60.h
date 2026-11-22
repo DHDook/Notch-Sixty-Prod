@@ -18,6 +18,7 @@
 #include "n60/measure.h"
 #include "n60/mimo.h"
 #include "n60/resample.h"
+#include "n60/speaker.h"
 #include "n60/xover.h"
 
 #ifdef __cplusplus
@@ -51,6 +52,8 @@ typedef struct n60_core_abi_info {
     uint32_t foldMatrixSize;    /* sizeof(n60_fold_matrix) */
     uint32_t eqfitVersion;      /* E33 S21, appended so earlier offsets keep their place */
     uint32_t eqfitProblemSize;  /* sizeof(n60_eqfit_problem) */
+    uint32_t speakerVersion;    /* E21 S9a, appended */
+    uint32_t speakerProblemSize;/* sizeof(n60_speaker_candidate_problem) */
 } n60_core_abi_info;
 
 /* Returns 1 and fills info, or 0 for a null pointer or a structSize smaller than the first two fields. */

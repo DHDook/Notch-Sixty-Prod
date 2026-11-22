@@ -113,6 +113,10 @@ struct SpeakerOptimizerPEQCandidatePlan: Equatable, Sendable {
 /// PR103 magnitude data, but their results are still MODEL predictions.
 /// This code never applies a filter to output routing or DSP state.
 struct SpeakerOptimizerPEQCandidateDesigner: Sendable {
+    /// E21 S9a (`e21.core-designers`): on, the candidate search and audits run in `libn60core`; off, the Swift path below
+    /// is the unchanged parity reference (deleted in S14).
+    var useCoreMaths = FeatureFlags.isEnabledProcessWide(.coreDesigners)
+
     func design(
         baseline: SpeakerOptimizerMeasurementSet,
         seatWeights: [UUID: Double]? = nil,
@@ -191,6 +195,41 @@ struct SpeakerOptimizerPEQCandidateDesigner: Sendable {
                 ) ?? Array(repeating: true, count: freqs.count)
             } catch {
                 throw SpeakerOptimizerPEQError.invalidEvidenceMask
+            }
+            if useCoreMaths {
+                let desiredCore = zip(sourcePreview.correctionDB, authorization).map { $0.1 ? $0.0 : 0 }
+                let evidence = SpeakerMathsCore.CandidateEvidence(
+                    sampleRate: rate, frequenciesHz: freqs, targetDB: target, desiredDB: desiredCore,
+                    authorized: authorization, positions: positions, weights: weights,
+                    maximumBoostDB: options.maximumBoostDB, maximumCutDB: options.maximumCutDB,
+                    maximumSeatDegradationDB: options.maximumSeatDegradationDB,
+                    protectedLeakageDB: evidenceMask?.maximumProtectedLeakageDB)
+                guard case .success(let designed) = SpeakerMathsCore.designPEQ(evidence: evidence, constraints: constraints) else {
+                    throw SpeakerOptimizerPEQError.invalidResponse
+                }
+                var coreBands: [SpeakerOptimizerPEQBand] = []
+                for band in designed.bands {
+                    guard let made = SpeakerOptimizerPEQBand.peak(
+                        centerHz: band.centerHz, q: band.q, gainDB: band.gainDB, sampleRate: rate)
+                    else { throw SpeakerOptimizerPEQError.invalidResponse }
+                    coreBands.append(made)
+                }
+                var coreWarnings: [String] = Array(repeating: "PEQ candidate removed after high-resolution headroom/band-edge safety audit.", count: designed.auditRemovals)
+                if evidenceMask != nil {
+                    coreWarnings.append("PR105 classification mask: only speaker-persistent points may drive PEQ; protected regions are leakage-audited.")
+                }
+                if coreBands.isEmpty {
+                    coreWarnings.append("No safe PEQ candidate clears the modeled improvement, classification, and position-guard thresholds; unity preview retained.")
+                }
+                if options.maximumBoostDB > 0 {
+                    coreWarnings.append("Optional positive PEQ gains require explicit headroom and later independent physical verification.")
+                }
+                candidates.append(SpeakerOptimizerPEQSourceCandidate(
+                    source: source, bands: coreBands, frequenciesHz: freqs, modeledFilterMagnitudeDB: designed.correctionDB,
+                    weightedRMSEBeforeDB: designed.rmseBeforeDB, predictedWeightedRMSEAfterDB: designed.rmseAfterDB,
+                    worstSeatRegressionDB: designed.worstSeatRegressionDB, maximumPositiveGainDB: designed.maximumPositiveGainDB,
+                    recommendedHeadroomDB: designed.recommendedHeadroomDB, warnings: coreWarnings))
+                continue
             }
             let before = weightedRMSE(positions, weights, target, Array(repeating: 0, count: commonCount))
             var corrections = Array(repeating: 0.0, count: commonCount)
