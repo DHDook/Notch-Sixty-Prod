@@ -6,11 +6,11 @@
 
 #include "N60RealtimeAttributes.h"
 
-#include "N60Biquad.h"
+#include "n60/biquad.h"
 #include "n60/active_quiet_zone.h"
-#include "N60FeedForwardLive.h"
+#include "n60/ff_live.h"
 #include "N60Convolution.h"
-#include "N60Crossover.h"
+#include "n60/crossover.h"
 #include "N60Dynamics.h"
 #include "N60FractionalDelay.h"
 #include "N60MixedPhase.h"
@@ -579,7 +579,7 @@ uint32_t N60RenderKernelHowlGuardLastTrip(const N60RenderKernel * _Nonnull kerne
 /// Attach at the same rate keeps the filter (peakLimit is ignored; call Reset to clear state).
 /// Stereo only; the reference is already resampled to the output clock. If processing is inactive
 /// the filter still runs but its output is dropped (drive frames read zero).
-/* E6 S12g3: N60RenderKernelFeedForwardLiveStatus lives in N60FeedForwardLive.h so the status type outlives the kernel. */
+/* E6 S12g3: N60RenderKernelFeedForwardLiveStatus lives in n60/ff_live.h so the status type outlives the kernel. */
 
 bool N60RenderKernelAttachFeedForwardLive(N60RenderKernel * _Nonnull kernel, double sampleRate, double peakLimit);
 /// As Attach, with an explicit fade-in after Arm (0 = the 3 s default; production uses the default, the

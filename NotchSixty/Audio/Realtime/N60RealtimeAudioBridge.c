@@ -1,6 +1,6 @@
 #include "N60RealtimeAudioBridge.h"
-#include "N60SpeakerBusSplitter.h"
-#include "N60AncLaneFeed.h"
+#include "n60/speaker_bus_splitter.h"
+#include "n60/anc_lane_feed.h"
 #include "N60FloatEnv.h"
 #include "N60RealtimeAttributes.h"
 
@@ -69,7 +69,7 @@ typedef struct {
     uint64_t appliedCommandSequence;
 } N60StartupFadeRuntime;
 
-// E26 S7b: the splitter moved to N60SpeakerBusSplitter.h so the Quiet Zone lane feed shares it.
+// E26 S7b: the splitter moved to n60/speaker_bus_splitter.h so the Quiet Zone lane feed shares it.
 _Static_assert((int)N60_SPLITTER_BUS_COUNT == (int)N60SpeakerOutputBusCount, "splitter bus count");
 _Static_assert((int)N60_SPLITTER_BUS_LEFT_FULL == (int)N60SpeakerOutputBusLeftFullRange, "splitter left full bus");
 _Static_assert((int)N60_SPLITTER_BUS_RIGHT_FULL == (int)N60SpeakerOutputBusRightFullRange, "splitter right full bus");

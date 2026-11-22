@@ -42,7 +42,7 @@
 #include "n60/profile.h"
 
 #ifdef N60_BENCH_ANC
-#include "N60AncLaneFeed.h"
+#include "n60/anc_lane_feed.h"
 #endif
 
 // -DN60_BENCH_PROFILE links the per-stage hooks of a libn60core built with -DN60_GRAPH_PROFILE; without it the

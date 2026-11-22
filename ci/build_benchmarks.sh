@@ -7,16 +7,18 @@ cd "$(dirname "$0")/.."
 RT=NotchSixty/Audio/Realtime
 OUT="${1:-${RUNNER_TEMP:-/tmp}/benchmarks}"
 mkdir -p "$OUT"
+# E21 S4: the tonal runtime (core/src/anc/active_quiet_zone.c) is a core object; the kernel and the lane feed link it.
+clang -std=c11 -O3 -Wall -Wextra -include stddef.h -Icore/include -c core/src/anc/active_quiet_zone.c -o "$OUT/n60_aqz.o"
 # E4 S15: the render kernel links the C++20 howl guard.
-clang++ -std=c++20 -O3 -Wall -Wextra -I"$RT" -Icore/include -c "$RT/n60_anc_guard.cpp" -o "$OUT/n60_anc_guard.o"
+clang++ -std=c++20 -O3 -Wall -Wextra -I"$RT" -Icore/include -c core/src/anc/anc_guard.cpp -o "$OUT/n60_anc_guard.o"
 # E4 S25b: and the live feed-forward filter.
-clang++ -std=c++20 -O3 -Wall -Wextra -I"$RT" -Icore/include -c "$RT/n60_ff_live.cpp" -o "$OUT/n60_ff_live.o"
-clang++ -std=c++20 -O3 -Wall -Wextra -I"$RT" -Icore/include -c "$RT/n60_ff_echo.cpp" -o "$OUT/n60_ff_echo.o"
+clang++ -std=c++20 -O3 -Wall -Wextra -I"$RT" -Icore/include -c core/src/anc/ff_live.cpp -o "$OUT/n60_ff_live.o"
+clang++ -std=c++20 -O3 -Wall -Wextra -I"$RT" -Icore/include -c core/src/anc/ff_echo.cpp -o "$OUT/n60_ff_echo.o"
 clang++ -std=c++20 -O3 -Wall -Wextra -I"$RT" -Icore/include -c core/src/anc/fxlms.cpp -o "$OUT/n60_fxlms.o"
 # E26: the bridge feeds the ANC lane (N60AncLaneFeed).
-clang++ -std=c++20 -O3 -Wall -Wextra -I"$RT" -Icore/include -c "$RT/n60_anc_lane_feed.cpp" -o "$OUT/n60_anc_lane_feed.o"
-NO_BRIDGE="$(find "$RT" -name '*.c' ! -name 'N60RealtimeAudioBridge.c' ! -name 'N60MeasurementMonitorProc.c' -print) $OUT/n60_anc_guard.o $OUT/n60_ff_live.o $OUT/n60_ff_echo.o $OUT/n60_fxlms.o $OUT/n60_anc_lane_feed.o"
-ALL="$(find "$RT" -name '*.c' -print) $OUT/n60_anc_guard.o $OUT/n60_ff_live.o $OUT/n60_ff_echo.o $OUT/n60_fxlms.o $OUT/n60_anc_lane_feed.o"
+clang++ -std=c++20 -O3 -Wall -Wextra -I"$RT" -Icore/include -c core/src/anc/anc_lane_feed.cpp -o "$OUT/n60_anc_lane_feed.o"
+NO_BRIDGE="$(find "$RT" -name '*.c' ! -name 'N60RealtimeAudioBridge.c' ! -name 'N60MeasurementMonitorProc.c' -print) $OUT/n60_anc_guard.o $OUT/n60_ff_live.o $OUT/n60_ff_echo.o $OUT/n60_fxlms.o $OUT/n60_anc_lane_feed.o $OUT/n60_aqz.o"
+ALL="$(find "$RT" -name '*.c' -print) $OUT/n60_anc_guard.o $OUT/n60_ff_live.o $OUT/n60_ff_echo.o $OUT/n60_fxlms.o $OUT/n60_anc_lane_feed.o $OUT/n60_aqz.o"
 # libn60core objects, from the shared list (ci/core_sources.sh). The render kernel and
 # the realtime bridge both link them (N60LevelSessionProc, n60_graph_*).
 source ci/core_sources.sh
@@ -44,7 +46,6 @@ clang -std=c11 -O2 -Wall -Wextra -I"$RT" -Icore/include "$RT/N60Convolution.c" c
 # E20 S1: graph render benchmark (core/bench/n60_bench.cpp). The timing binary links product objects (no profile
 # hooks) and the ANC lane feed (R7); a second binary links a -DN60_GRAPH_PROFILE snapshot object for the
 # per-stage ns/sample rows.
-clang -std=c11 -O3 -Wall -Wextra -include stddef.h -I"$RT" -Icore/include -c "$RT/N60ActiveQuietZone.c" -o "$OUT/n60_aqz.o"
 clang++ -std=c++20 -O3 -Wall -Wextra -fno-exceptions -fno-rtti -DN60_GRAPH_PROFILE -Icore/include -Icore/src \
   -c core/src/snapshot.cpp -o "$OUT/n60core_snapshot_profile.o"
 PROFILE_OBJS=()

@@ -169,7 +169,7 @@ final class LiveNChannelUnifiedGraphTests: XCTestCase {
                 if !unused {
                     XCTAssertGreaterThan(energy, 0, "\(label) \(sampleRate) Hz channel \(channel) is silent")
                 }
-                // The legacy path runs calibration EQ in float32 biquads (N60Biquad.h: float
+                // The legacy path runs calibration EQ in float32 biquads (n60/biquad.h: float
                 // coefficients and state); libn60core runs double. A 60 Hz peaking band at
                 // 176.4 kHz and above has poles within ~1e-3 of z=1, so float32 coefficient
                 // rounding in the legacy path shifts its response (about 0.15 dB at 384 kHz,

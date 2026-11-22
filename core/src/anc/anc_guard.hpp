@@ -1,9 +1,9 @@
 #pragma once
 
 // E4 S4: C++20 core of the speaker-ANC howl guard. The C interface and the
-// realtime contract are documented in N60AncGuard.h.
+// realtime contract are documented in n60/anc_guard.h.
 
-#include "N60AncGuard.h"
+#include "n60/anc_guard.h"
 
 #include <array>
 #include <atomic>

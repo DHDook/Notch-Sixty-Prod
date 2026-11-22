@@ -5,10 +5,11 @@
 // Control Systems (Wiley, 1996), ch. 5; band filters, RBJ Audio EQ Cookbook
 // (R. Bristow-Johnson).
 
-#include "n60_ff_shadow.hpp"
+#include "ff_shadow.hpp"
 
 #include <algorithm>
 #include <cmath>
+#include <new>
 
 #if !(__cplusplus >= 202002L || (defined(_MSVC_LANG) && _MSVC_LANG >= 202002L))
 #error "n60_ff_shadow.cpp requires C++20"
@@ -574,11 +575,7 @@ bool N60FeedForwardShadowConfigIsValid(const N60FeedForwardShadowConfig *config)
 
 N60FeedForwardShadow *N60FeedForwardShadowCreate(const N60FeedForwardShadowConfig *config) {
     if (!N60FeedForwardShadowConfigIsValid(config)) return nullptr;
-    try {
-        return new N60FeedForwardShadow{n60::anc::FeedForwardShadow(*config)};
-    } catch (...) {
-        return nullptr;
-    }
+    return new (std::nothrow) N60FeedForwardShadow{n60::anc::FeedForwardShadow(*config)};
 }
 
 void N60FeedForwardShadowDestroy(N60FeedForwardShadow *shadow) { delete shadow; }

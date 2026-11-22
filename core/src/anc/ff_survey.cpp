@@ -5,10 +5,11 @@
 // 15(2), 1967; H1 transfer and coherence, J. S. Bendat and A. G. Piersol,
 // Random Data (Wiley, 2010), ch. 9.
 
-#include "n60_ff_survey.hpp"
+#include "ff_survey.hpp"
 
 #include <algorithm>
 #include <cmath>
+#include <new>
 
 #if !(__cplusplus >= 202002L || (defined(_MSVC_LANG) && _MSVC_LANG >= 202002L))
 #error "n60_ff_survey.cpp requires C++20"
@@ -193,11 +194,7 @@ bool N60FeedForwardSurveyConfigIsValid(const N60FeedForwardSurveyConfig *config)
 
 N60FeedForwardSurvey *N60FeedForwardSurveyCreate(const N60FeedForwardSurveyConfig *config) {
     if (!N60FeedForwardSurveyConfigIsValid(config)) return nullptr;
-    try {
-        return new N60FeedForwardSurvey{n60::anc::FeedForwardSurvey(*config)};
-    } catch (...) {
-        return nullptr;
-    }
+    return new (std::nothrow) N60FeedForwardSurvey{n60::anc::FeedForwardSurvey(*config)};
 }
 
 void N60FeedForwardSurveyDestroy(N60FeedForwardSurvey *survey) { delete survey; }

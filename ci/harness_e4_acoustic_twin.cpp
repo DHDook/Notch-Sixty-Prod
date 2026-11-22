@@ -1,7 +1,7 @@
 /*
  * E4 S13: behavioural harness for the acoustic twin (ci/e4_acoustic_twin.hpp)
  * and the first closed-loop cases that run the real engine cores in it: the
- * adaptive tonal canceller (N60Fxlms.h) and the howl guard (N60AncGuard.h).
+ * adaptive tonal canceller (N60Fxlms.h) and the howl guard (n60/anc_guard.h).
  *
  * Usage: harness_e4_acoustic_twin [--soak]
  * Default: short cases at the eight standard rates (pr.yml). --soak runs the
@@ -15,7 +15,7 @@
 #include <cstring>
 #include <vector>
 
-#include "N60AncGuard.h"
+#include "n60/anc_guard.h"
 #include "n60/fxlms.h"
 #include "e4_acoustic_twin.hpp"
 

@@ -1,5 +1,5 @@
 /* E6 S8d group 4: the core STEREO_CROSSOVER stage and the PROTECTION soft clipper and gain rider against the
- * shipping kernel (N60Crossover.h, N60Protection.c) on the same stereo signal, at the eight standard rates.
+ * shipping kernel (n60/crossover.h, N60Protection.c) on the same stereo signal, at the eight standard rates.
  * Apple-only (the kernel sources use nullability qualifiers). Compares output sample by sample and the latency. */
 #include <math.h>
 #include <stdio.h>
@@ -7,7 +7,7 @@
 #include <string.h>
 
 #include "n60/graph.h"
-#include "../../NotchSixty/Audio/Realtime/N60Crossover.h"
+#include "n60/crossover.h"
 #include "../../NotchSixty/Audio/Realtime/N60Protection.h"
 
 #define N 9600

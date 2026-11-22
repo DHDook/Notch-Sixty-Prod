@@ -8,7 +8,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "N60Biquad.h"
+#include "n60/biquad.h"
 #include "N60ProgramLayout.h"
 
 #ifdef __cplusplus

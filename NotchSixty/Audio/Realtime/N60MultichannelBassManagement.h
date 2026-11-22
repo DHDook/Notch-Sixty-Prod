@@ -8,7 +8,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "N60Crossover.h"
+#include "n60/crossover.h"
 #include "N60ProgramLayout.h"
 
 #ifdef __cplusplus

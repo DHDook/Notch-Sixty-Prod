@@ -1,6 +1,6 @@
 /*
  * E4 S22b3: behavioural harness for the echo stage of the live feed-forward filter (the speaker-to-
- * reference leakage neutralisation in N60FeedForwardLive.h) at the eight standard rates.
+ * reference leakage neutralisation in n60/ff_live.h) at the eight standard rates.
  *
  * Plant: two speakers driven by independent programme noise. Each leaks to the reference microphone
  * through a bulk delay plus a decaying impulse response of four resonant modes between 38 and 120 Hz
@@ -36,7 +36,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "N60FeedForwardLive.h"
+#include "n60/ff_live.h"
 
 static const double kRates[] = {44100, 48000, 88200, 96000, 176400, 192000, 352800, 384000};
 #define RATE_COUNT (sizeof kRates / sizeof kRates[0])

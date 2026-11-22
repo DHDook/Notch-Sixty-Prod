@@ -1,9 +1,9 @@
-// E4 S4: speaker-ANC howl guard. See N60AncGuard.h for the contract.
+// E4 S4: speaker-ANC howl guard. See n60/anc_guard.h for the contract.
 //
 // Band-pass sections: RBJ Audio EQ Cookbook band-pass (constant 0 dB peak
 // gain), R. Bristow-Johnson. Detection rules: docs/ANC_QUALIFICATION.md s3.
 
-#include "n60_anc_guard.hpp"
+#include "anc_guard.hpp"
 
 #include <algorithm>
 #include <cmath>

@@ -118,7 +118,7 @@ bool peqParallelWorthIt(const StageRec &r, uint32_t frames) N60_RT_NONBLOCKING; 
 }
 
 // RBJ Audio EQ Cookbook biquads, normalised by a0, in double precision.
-// Same forms and limits as the kernel's control-plane design (N60Biquad.h).
+// Same forms and limits as the kernel's control-plane design (n60/biquad.h).
 bool designBiquad(uint32_t type, double rate, double f, double gainDb, double q, double out[5]) N60_RT_NONBLOCKING {
     if (!std::isfinite(f) || f <= 0.0 || f >= rate * 0.5 || !std::isfinite(gainDb) || gainDb < -24.0 ||
         gainDb > 24.0 || !std::isfinite(q) || q <= 0.0) {

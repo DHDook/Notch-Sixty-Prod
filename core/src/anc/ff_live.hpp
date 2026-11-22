@@ -1,10 +1,10 @@
 #pragma once
 
 // E4 S25a: live broadband feed-forward filter (head FIR at the native rate plus a decimated
-// tail). The C interface, the design and the realtime contract are in N60FeedForwardLive.h.
+// tail). The C interface, the design and the realtime contract are in n60/ff_live.h.
 
-#include "N60FeedForwardLive.h"
-#include "n60_ff_echo.hpp"
+#include "n60/ff_live.h"
+#include "ff_echo.hpp"
 #include "n60/fxlms.hpp"
 
 #include <array>

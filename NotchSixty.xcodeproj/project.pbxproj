@@ -7,6 +7,14 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		E21A00000000000000003002 /* anc_guard.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E21A00000000000000003001 /* anc_guard.cpp */; };
+		E21A00000000000000003012 /* ff_live.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E21A00000000000000003011 /* ff_live.cpp */; };
+		E21A00000000000000003022 /* ff_echo.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E21A00000000000000003021 /* ff_echo.cpp */; };
+		E21A00000000000000003032 /* ff_shadow.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E21A00000000000000003031 /* ff_shadow.cpp */; };
+		E21A00000000000000003042 /* ff_survey.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E21A00000000000000003041 /* ff_survey.cpp */; };
+		E21A00000000000000003052 /* anc_lane_feed.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E21A00000000000000003051 /* anc_lane_feed.cpp */; };
+		E21A00000000000000003062 /* abi.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E21A00000000000000003061 /* abi.cpp */; };
+		E21A00000000000000004002 /* active_quiet_zone.c in Sources */ = {isa = PBXBuildFile; fileRef = E21A00000000000000004001 /* active_quiet_zone.c */; };
 		E21A00000000000000002002 /* remote_tonal.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E21A00000000000000002001 /* remote_tonal.cpp */; };
 		E21A00000000000000001002 /* fxlms.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E21A00000000000000001001 /* fxlms.cpp */; };
 
@@ -74,6 +82,14 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		E21A00000000000000003001 /* anc_guard.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = anc/anc_guard.cpp; sourceTree = "<group>"; };
+		E21A00000000000000003011 /* ff_live.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = anc/ff_live.cpp; sourceTree = "<group>"; };
+		E21A00000000000000003021 /* ff_echo.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = anc/ff_echo.cpp; sourceTree = "<group>"; };
+		E21A00000000000000003031 /* ff_shadow.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = anc/ff_shadow.cpp; sourceTree = "<group>"; };
+		E21A00000000000000003041 /* ff_survey.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = anc/ff_survey.cpp; sourceTree = "<group>"; };
+		E21A00000000000000003051 /* anc_lane_feed.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = anc/anc_lane_feed.cpp; sourceTree = "<group>"; };
+		E21A00000000000000003061 /* abi.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = anc/abi.cpp; sourceTree = "<group>"; };
+		E21A00000000000000004001 /* active_quiet_zone.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = anc/active_quiet_zone.c; sourceTree = "<group>"; };
 		E21A00000000000000002001 /* remote_tonal.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = anc/remote_tonal.cpp; sourceTree = "<group>"; };
 		E21A00000000000000001001 /* fxlms.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = anc/fxlms.cpp; sourceTree = "<group>"; };
 
@@ -232,6 +248,14 @@
 				E33A21000000000000000002 /* eqfit.cpp */,
 				E33A26000000000000000002 /* eqmatched.cpp */,
 				E33A27000000000000000002 /* eq_linear_phase.cpp */,
+				E21A00000000000000003001 /* anc_guard.cpp */,
+				E21A00000000000000003011 /* ff_live.cpp */,
+				E21A00000000000000003021 /* ff_echo.cpp */,
+				E21A00000000000000003031 /* ff_shadow.cpp */,
+				E21A00000000000000003041 /* ff_survey.cpp */,
+				E21A00000000000000003051 /* anc_lane_feed.cpp */,
+				E21A00000000000000003061 /* abi.cpp */,
+				E21A00000000000000004001 /* active_quiet_zone.c */,
 				E21A00000000000000002001 /* remote_tonal.cpp */,
 				E21A00000000000000001001 /* fxlms.cpp */,
 				E19A00000000000000000011 /* design.cpp */,
@@ -389,6 +413,14 @@
 				E33A21000000000000000001 /* eqfit.cpp in Sources */,
 				E33A26000000000000000001 /* eqmatched.cpp in Sources */,
 				E33A27000000000000000001 /* eq_linear_phase.cpp in Sources */,
+				E21A00000000000000003002 /* anc_guard.cpp in Sources */,
+				E21A00000000000000003012 /* ff_live.cpp in Sources */,
+				E21A00000000000000003022 /* ff_echo.cpp in Sources */,
+				E21A00000000000000003032 /* ff_shadow.cpp in Sources */,
+				E21A00000000000000003042 /* ff_survey.cpp in Sources */,
+				E21A00000000000000003052 /* anc_lane_feed.cpp in Sources */,
+				E21A00000000000000003062 /* abi.cpp in Sources */,
+				E21A00000000000000004002 /* active_quiet_zone.c in Sources */,
 				E21A00000000000000002002 /* remote_tonal.cpp in Sources */,
 				E21A00000000000000001002 /* fxlms.cpp in Sources */,
 				E19A00000000000000000021 /* design.cpp in Sources */,

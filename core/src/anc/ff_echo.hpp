@@ -2,7 +2,7 @@
 
 // E4 S22b3: the echo stage of the live feed-forward filter. It takes the speaker drive (programme plus
 // anti-noise) out of the reference before the filter sees it: feedback neutralisation. C++20, no Apple
-// framework. Owned by FeedForwardLive; the C interface is in N60FeedForwardLive.h.
+// framework. Owned by FeedForwardLive; the C interface is in n60/ff_live.h.
 //
 // Method: the drive is decimated to fd = fs / D with the filter's own kernel, run through the leakage
 // model's mean taps at fd, interpolated back to the native rate with the filter's polyphase
@@ -18,7 +18,7 @@
 // holds 2048 fd samples, 512 ms at any rate, so the 100 ms timing cap fits.
 // Reset: Reset() clears audio state; a model or timing change (applied only while idle) restarts the search.
 
-#include "N60FeedForwardLive.h"
+#include "n60/ff_live.h"
 #include "n60/fxlms.hpp"
 
 #include <array>

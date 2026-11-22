@@ -1,7 +1,7 @@
 // E4 S18a: remote adaptive tonal canceller. See N60RemoteTonal.h for the design and maths.
 // Worker side only: one thread for every call, no realtime use.
 #include "n60/remote_tonal.h"
-#include "../optional_try.hpp"
+#include "../nothrow_array.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -73,9 +73,9 @@ struct N60RemoteTonal {
     double ticksPerSecond = 1e9;
     double micRate = 48000;
 
-    std::vector<Rec> history;
+    n60::NothrowArray<Rec> history;
     uint64_t historyCount = 0;  // total pushed
-    std::vector<double> scratch;
+    n60::NothrowArray<double> scratch;
 
     cd weight[N60_FXLMS_MAX_TONES];
     cd shareL[N60_FXLMS_MAX_TONES], shareR[N60_FXLMS_MAX_TONES];
@@ -531,14 +531,12 @@ N60RemoteTonal *N60RemoteTonalCreate(const N60RemoteTonalConfig *config) {
     if (!N60RemoteTonalConfigIsValid(config)) return nullptr;
     N60RemoteTonal *c = new (std::nothrow) N60RemoteTonal();
     if (c == nullptr) return nullptr;
-    N60_TRY {
-        c->cfg = *config;
-        c->tones = config->toneCount;
-        c->ticksPerSecond = config->hostTicksPerSecond;
-        c->micRate = config->micSampleRate;
-        c->history.resize(N60_REMOTE_TONAL_HISTORY);
-        c->scratch.resize(static_cast<size_t>(2.0 * config->micSampleRate) + 16);
-    } N60_CATCH_ALL {
+    c->cfg = *config;
+    c->tones = config->toneCount;
+    c->ticksPerSecond = config->hostTicksPerSecond;
+    c->micRate = config->micSampleRate;
+    if (!c->history.allocate(N60_REMOTE_TONAL_HISTORY)
+        || !c->scratch.allocate(static_cast<size_t>(2.0 * config->micSampleRate) + 16)) {
         delete c;
         return nullptr;
     }
