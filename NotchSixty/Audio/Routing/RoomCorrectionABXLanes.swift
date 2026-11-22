@@ -33,14 +33,9 @@ enum RoomCorrectionABXError: Error, Equatable, LocalizedError {
 
 /// The engine boundary the ABX controller plays through (tests inject a fake; production is the engine).
 @MainActor
-protocol RoomCorrectionABXPlaying: AnyObject {
-    /// Why the ABX cannot play right now, or nil.
-    var unavailableReason: String? { get }
-    /// True while a previous switch is still warming or fading.
-    var isSwitching: Bool { get }
+protocol RoomCorrectionABXPlaying: ComparisonEngine {
+    /// `unavailableReason`, `isSwitching` and `restoreApplied` come from `ComparisonEngine` (E12 S26).
     func play(_ override: RoomCorrectionABXOverride) throws
-    /// Back to the applied correction.
-    func restoreApplied() throws
 }
 
 extension AudioIOEngine: RoomCorrectionABXPlaying {
@@ -82,24 +77,14 @@ extension RoomCorrectionABXMatch {
             powersA.append(try lanePower(plan: a, lane: lane))
             powersB.append(try lanePower(plan: b, lane: lane))
         }
-        guard powersA.allSatisfy({ $0 > 0 && $0.isFinite }), powersB.allSatisfy({ $0 > 0 && $0.isFinite }) else {
-            throw BlindABXError.invalidTrial
-        }
-        func db(_ x: Double) -> Double { 10 * log10(x) }
-        let levelA = db(powersA.reduce(0, +) / Double(powersA.count))
-        let levelB = db(powersB.reduce(0, +) / Double(powersB.count))
-        let target = min(levelA, levelB)
-        let trimA = target - levelA, trimB = target - levelB
-        var residual = 0.0
-        for index in programLanes.indices {
-            residual = max(residual, abs((db(powersA[index]) + trimA) - (db(powersB[index]) + trimB)))
-        }
+        // E12 S26: the level maths is the shared comparison service's.
+        let level = try ComparisonLevelMatch.make(lanePowersA: powersA, lanePowersB: powersB)
         let latency = max(a.declaredLatencyFrames, b.declaredLatencyFrames)
         var match = RoomCorrectionABXMatch(
-            sampleRate: a.sampleRate, levelADB: levelA, levelBDB: levelB,
-            gainA: pow(10, trimA / 20), gainB: pow(10, trimB / 20),
+            sampleRate: a.sampleRate, levelADB: level.levelADB, levelBDB: level.levelBDB,
+            gainA: level.gainA, gainB: level.gainB,
             delayA: Int(latency - a.declaredLatencyFrames), delayB: Int(latency - b.declaredLatencyFrames))
-        match.maxLaneResidualDB = residual
+        match.maxLaneResidualDB = level.remainingDifferenceDB
         return match
     }
 

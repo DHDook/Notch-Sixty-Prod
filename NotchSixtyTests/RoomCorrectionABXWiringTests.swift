@@ -190,7 +190,7 @@ final class RoomCorrectionABXWiringTests: XCTestCase {
         let dir = directory ?? FileManager.default.temporaryDirectory.appendingPathComponent("abx-wiring-\(UUID().uuidString)")
         let controller = try RoomCorrectionABXController(
             player: player, a: a, b: b, match: match, seatCount: seatNames.count, seatNames: seatNames, logDirectory: dir,
-            trialCount: 16, initialAssignment: true, nextAssignment: { Bool.random() })
+            trialCount: 16, initialAssignment: true, nextAssignment: { Bool.random() }, switchHold: 0)
         return Run(controller: controller, player: player, overrideB: match.override(for: b, isA: false), directory: dir)
     }
 

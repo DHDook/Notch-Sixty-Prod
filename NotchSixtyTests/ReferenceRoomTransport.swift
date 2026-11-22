@@ -352,7 +352,7 @@ struct OfflineSetupRig {
                 levelTransport: levelTransports.factory, trialPlayback: trialPlayer, abx: abxPlayer),
             sessions: SystemSetupSessionStore(directory: root.appendingPathComponent("sessions")),
             roomProjectsDirectory: root.appendingPathComponent("RoomCorrection"),
-            abxDirectory: root.appendingPathComponent("ABX"))
+            abxDirectory: root.appendingPathComponent("ABX"), abxSwitchHold: 0)
     }
 
     /// A stereo pair plus one subwoofer on the reference interface (2.1), reached through the wizard's Output and
