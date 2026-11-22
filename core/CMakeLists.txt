@@ -5,7 +5,33 @@ project(n60core LANGUAGES C CXX)
 # E21 S1: core/sources.cmake is the one source list (ci/core_sources.sh reads it; the Xcode libn60core group is checked
 # against it by the app-target XCTest N60CoreABITests, which calls one entry point per translation unit).
 include(sources.cmake)
+# E21 S3: N60_FFT_BACKEND picks the FFT implementation behind the one contract (src/fft.hpp, src/fft_backend.hpp):
+# "vdsp" (core/platform/apple/fft_vdsp.cpp, Apple only, the default there) or "portable" (the in-house radix-2, the only
+# choice elsewhere). Engine code never reads a flag; the choice is this build option.
+if(APPLE)
+  set(N60_FFT_BACKEND_DEFAULT vdsp)
+else()
+  set(N60_FFT_BACKEND_DEFAULT portable)
+endif()
+set(N60_FFT_BACKEND ${N60_FFT_BACKEND_DEFAULT} CACHE STRING "FFT backend: vdsp (Apple) or portable")
+set_property(CACHE N60_FFT_BACKEND PROPERTY STRINGS vdsp portable)
+if(NOT N60_FFT_BACKEND STREQUAL "vdsp" AND NOT N60_FFT_BACKEND STREQUAL "portable")
+  message(FATAL_ERROR "N60_FFT_BACKEND must be vdsp or portable")
+endif()
+if(N60_FFT_BACKEND STREQUAL "vdsp" AND NOT APPLE)
+  message(FATAL_ERROR "N60_FFT_BACKEND=vdsp needs an Apple platform")
+endif()
+set(N60_FFT_VDSP OFF)
+if(N60_FFT_BACKEND STREQUAL "vdsp")
+  set(N60_FFT_VDSP ON)
+endif()
 add_library(n60core STATIC ${N60_CORE_SOURCES} ${N60_CORE_ANC_SOURCES})
+if(N60_FFT_VDSP)
+  target_sources(n60core PRIVATE platform/apple/fft_vdsp.cpp)
+  # PUBLIC so a test that includes src/fft_backend.hpp sees the vdsp declarations the library defines.
+  target_compile_definitions(n60core PUBLIC N60_FFT_VDSP=1)
+  target_link_libraries(n60core PUBLIC "-framework Accelerate")
+endif()
 target_compile_features(n60core PUBLIC cxx_std_20)
 # E21 S0: the two ANC sources moved from the app unchanged. Their Create paths catch std::bad_alloc, so they keep
 # exceptions on until E21 S4 rewrites them with nothrow allocation (gap G1 in docs/epics/E21.md).
@@ -44,6 +70,26 @@ if(N60_X86_FMA AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
 endif()
 
 enable_testing()
+# E21 S3: with the vdsp backend as the default, a second copy of the library (n60core_portable) keeps the in-house FFT
+# tested on macOS: the FFT contract, test_conv, test_measure_fft and the graph parity suite also run against it, and
+# test_fft_backend compares the two backends in one process.
+if(N60_FFT_VDSP)
+  add_library(n60core_portable STATIC ${N60_CORE_SOURCES} ${N60_CORE_ANC_SOURCES})
+  target_compile_features(n60core_portable PUBLIC cxx_std_20)
+  target_include_directories(n60core_portable PUBLIC include)
+  target_include_directories(n60core_portable PRIVATE src)
+  get_target_property(N60_CORE_OPTS n60core COMPILE_OPTIONS)
+  get_target_property(N60_CORE_DEFS n60core COMPILE_DEFINITIONS)
+  if(N60_CORE_OPTS)
+    target_compile_options(n60core_portable PRIVATE ${N60_CORE_OPTS})
+  endif()
+  if(N60_CORE_DEFS)
+    list(REMOVE_ITEM N60_CORE_DEFS N60_FFT_VDSP=1)
+    if(N60_CORE_DEFS)
+      target_compile_definitions(n60core_portable PRIVATE ${N60_CORE_DEFS})
+    endif()
+  endif()
+endif()
 # E21 S1: n60/n60.h as C and n60_core_abi.
 add_executable(n60core_core_abi_test tests/test_core_abi.c)
 set_target_properties(n60core_core_abi_test PROPERTIES C_STANDARD 11 LINKER_LANGUAGE CXX)
@@ -477,3 +523,47 @@ add_test(NAME n60core_speaker COMMAND n60core_speaker_test)
 add_executable(n60core_speaker_s9b_test tests/test_speaker_s9b.cpp)
 target_link_libraries(n60core_speaker_s9b_test PRIVATE n60core)
 add_test(NAME n60core_speaker_s9b COMMAND n60core_speaker_s9b_test)
+
+# E21 S3: FFT backends. test_fft_backend compares vDSP with the in-house transforms and checks vDSP allocates nothing in
+# forward and inverse; the portable-library copies keep the old FFT paths under test on Apple.
+add_executable(n60core_parity_suite_test tests/test_parity_suite.c)
+set_target_properties(n60core_parity_suite_test PROPERTIES C_STANDARD 11 LINKER_LANGUAGE CXX)
+target_link_libraries(n60core_parity_suite_test PRIVATE n60core ${N60_M})
+if(N60_FFT_VDSP)
+  # Goldens are pinned to the in-house FFT; the vdsp build still runs the equivalence and acoustic cases.
+  add_test(NAME n60core_parity_suite COMMAND n60core_parity_suite_test)
+  set_tests_properties(n60core_parity_suite PROPERTIES ENVIRONMENT "N60_PARITY_NO_GOLDENS=1")
+  add_executable(n60core_parity_suite_portable_test tests/test_parity_suite.c)
+  set_target_properties(n60core_parity_suite_portable_test PROPERTIES C_STANDARD 11 LINKER_LANGUAGE CXX)
+  target_link_libraries(n60core_parity_suite_portable_test PRIVATE n60core_portable ${N60_M})
+  add_test(NAME n60core_parity_suite_portable COMMAND n60core_parity_suite_portable_test)
+
+  add_executable(n60core_fft_backend_test tests/test_fft_backend.cpp)
+  target_link_libraries(n60core_fft_backend_test PRIVATE n60core)
+  target_include_directories(n60core_fft_backend_test PRIVATE src)
+  add_test(NAME n60core_fft_backend COMMAND n60core_fft_backend_test)
+
+  # Engine outputs (program FIR, binaural, measurement) from both libraries agree within -120 dBFS peak at the eight rates.
+  add_executable(n60core_fft_outputs_vdsp_test tests/test_fft_outputs.cpp)
+  target_link_libraries(n60core_fft_outputs_vdsp_test PRIVATE n60core)
+  add_executable(n60core_fft_outputs_portable_test tests/test_fft_outputs.cpp)
+  target_link_libraries(n60core_fft_outputs_portable_test PRIVATE n60core_portable)
+  add_test(NAME n60core_fft_outputs_write_vdsp COMMAND n60core_fft_outputs_vdsp_test write ${CMAKE_BINARY_DIR}/fft_outputs_vdsp.bin)
+  add_test(NAME n60core_fft_outputs_write_portable COMMAND n60core_fft_outputs_portable_test write ${CMAKE_BINARY_DIR}/fft_outputs_portable.bin)
+  add_test(NAME n60core_fft_outputs_compare COMMAND n60core_fft_outputs_vdsp_test compare
+           ${CMAKE_BINARY_DIR}/fft_outputs_vdsp.bin ${CMAKE_BINARY_DIR}/fft_outputs_portable.bin)
+  set_tests_properties(n60core_fft_outputs_write_vdsp n60core_fft_outputs_write_portable PROPERTIES FIXTURES_SETUP n60_fft_outputs)
+  set_tests_properties(n60core_fft_outputs_compare PROPERTIES FIXTURES_REQUIRED n60_fft_outputs)
+
+  foreach(t fft_conv measure_fft conv)
+    set(src tests/test_${t}.cpp)
+    add_executable(n60core_${t}_portable_test ${src})
+    target_link_libraries(n60core_${t}_portable_test PRIVATE n60core_portable)
+    target_include_directories(n60core_${t}_portable_test PRIVATE src)
+  endforeach()
+  add_test(NAME n60core_fft_conv_portable COMMAND n60core_fft_conv_portable_test check)
+  add_test(NAME n60core_measure_fft_portable COMMAND n60core_measure_fft_portable_test)
+  add_test(NAME n60core_conv_portable COMMAND n60core_conv_portable_test)
+else()
+  add_test(NAME n60core_parity_suite COMMAND n60core_parity_suite_test)
+endif()

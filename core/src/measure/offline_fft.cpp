@@ -1,9 +1,11 @@
 #include "offline_fft.hpp"
 
+#include "../fft_backend.hpp"
+
 #include <cmath>
 #include <new>
 
-namespace n60::fft::offline {
+namespace n60::fft::offline::portable {
 
 namespace {
 
@@ -56,8 +58,6 @@ bool makeTwiddles(uint64_t n, std::vector<Cplx> &tw) {
 }
 
 }  // namespace
-
-bool validSize(uint64_t n) { return n >= 2 && n <= kMaxSize && (n & (n - 1)) == 0; }
 
 bool realForward(const double *x, uint64_t n, std::vector<Cplx> &spectrum) {
     if (!validSize(n) || x == nullptr) return false;
@@ -140,4 +140,17 @@ bool realInverse(const std::vector<Cplx> &spectrum, uint64_t n, std::vector<doub
     return true;
 }
 
+}  // namespace n60::fft::offline::portable
+
+// The public contract: one backend per build (fft_backend.hpp).
+#ifdef N60_FFT_VDSP
+#define N60_FFT_IMPL vdsp
+#else
+#define N60_FFT_IMPL portable
+#endif
+namespace n60::fft::offline {
+bool validSize(uint64_t n) { return n >= 2 && n <= kMaxSize && (n & (n - 1)) == 0; }
+bool realForward(const double *x, uint64_t n, std::vector<Cplx> &spectrum) { return N60_FFT_IMPL::realForward(x, n, spectrum); }
+bool realInverse(const std::vector<Cplx> &spectrum, uint64_t n, std::vector<double> &x) { return N60_FFT_IMPL::realInverse(spectrum, n, x); }
 }  // namespace n60::fft::offline
+#undef N60_FFT_IMPL
