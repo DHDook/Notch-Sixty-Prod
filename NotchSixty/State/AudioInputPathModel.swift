@@ -60,12 +60,16 @@ struct AudioInputPathPresentation: Equatable {
 }
 
 /// Drives the "Audio input path" Settings section. The status comes from an injected closure (the read-only driver probe in
-/// production, a fake in tests); the switch is a no-op on the engine until E36 S5 wires it.
+/// production, a fake in tests). With a `coordinator` (E36 S5) the switch goes through `switchingInput`, the default-output
+/// takeover and the lease; without one (S4 tests) it only calls `onSwitch`.
 @MainActor
 final class AudioInputPathModel: ObservableObject {
     @Published private(set) var status: DriverStatus
     @Published private(set) var selectedPath: AudioInputPath = .processTap
     @Published var isShowingSetupSheet = false
+    /// Set while the driver path is chosen but the driver is missing, stale or refused; never a silent tap fallback.
+    @Published private(set) var waitingMessage: String?
+    let coordinator: DriverInputCoordinator?
 
     let downloadURL: URL?
     private let probe: () -> DriverStatus
@@ -76,8 +80,10 @@ final class AudioInputPathModel: ObservableObject {
         probe: @escaping () -> DriverStatus,
         downloadURL: URL?,
         openURL: @escaping (URL) -> Void,
-        onSwitch: @escaping (AudioInputPath) -> Void = { _ in }
+        onSwitch: @escaping (AudioInputPath) -> Void = { _ in },
+        coordinator: DriverInputCoordinator? = nil
     ) {
+        self.coordinator = coordinator
         self.probe = probe
         self.downloadURL = downloadURL
         self.openURL = openURL
@@ -90,6 +96,13 @@ final class AudioInputPathModel: ObservableObject {
 
     func refresh() {
         status = probe()
+        if let coordinator {
+            coordinator.reconcile()
+            waitingMessage = coordinator.statusMessage
+            // The choice stands while waiting: the driver path is not abandoned for the tap.
+            selectedPath = coordinator.path
+            return
+        }
         // A driver that went away or became unusable cannot stay selected in the UI.
         if selectedPath == .virtualDriver, !status.isUsable { selectedPath = .processTap }
     }
@@ -103,7 +116,43 @@ final class AudioInputPathModel: ObservableObject {
     func select(_ path: AudioInputPath) {
         if path == .virtualDriver, !status.isUsable { return }
         guard path != selectedPath else { return }
+        if let coordinator {
+            selectedPath = coordinator.switchTo(path)
+            waitingMessage = coordinator.statusMessage
+            status = probe()
+            return
+        }
         selectedPath = path
         onSwitch(path)
+    }
+
+    private var monitorTask: Task<Void, Never>?
+
+    /// Re-checks the driver every two seconds, so a driver that vanishes or returns is noticed without opening Settings.
+    func startMonitoring(everySeconds interval: Double = 2) {
+        guard monitorTask == nil else { return }
+        monitorTask = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(interval))
+                self?.refresh()
+            }
+        }
+    }
+
+    func stopMonitoring() {
+        monitorTask?.cancel()
+        monitorTask = nil
+    }
+
+    /// Production wiring (E36 S5): real Core Audio status, system output and persisted previous-output record.
+    static func production(openURL: @escaping (URL) -> Void) -> AudioInputPathModel {
+        let access = SystemHALPropertyStore()
+        let driver = DriverStatusModel(
+            discovery: DriverDiscovery(access: access),
+            lease: DriverLeaseWriter(access: access))
+        let coordinator = DriverInputCoordinator(
+            driver: driver, output: CoreAudioSystemOutputController(), store: UserDefaultsPreviousOutputStore())
+        return AudioInputPathModel(
+            probe: { driver.refresh() }, downloadURL: nil, openURL: openURL, coordinator: coordinator)
     }
 }

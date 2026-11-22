@@ -51,3 +51,12 @@ output is restored (S5). If the first write fails the app starts no timer and re
 
 `not installed`, `installed (version)`, `needs update`, `unknown version`, `in use` (this run holds the lease) and
 `lease refused`. S4 renders them; S5 acts on them.
+
+## System output (S5)
+
+The virtual output device's UID is `N60_VD_DEVICE_UID`. When the user switches to the driver path the app stores the
+current default output's UID (persisted, key `e36.previousOutputUID`), makes the virtual device the macOS default
+output, then holds the lease. Switching back, or a normal Quit, restores the stored UID first and releases the lease
+after. After a crash the next launch restores the stored UID if the default output is still the virtual device (or
+unreadable) and always clears the record; if macOS already moved the default to a real output, that choice stands. The selected DAC stays authoritative; the app never selects the
+virtual device as its own output (S3).

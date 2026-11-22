@@ -16,11 +16,15 @@ struct AudioInputPathSettingsSection: View {
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
+            if let waiting = model.waitingMessage {
+                Text(waiting).font(.caption.weight(.semibold)).fixedSize(horizontal: false, vertical: true)
+            }
+
             Toggle("Use the virtual audio driver", isOn: Binding(
                 get: { model.selectedPath == .virtualDriver },
                 set: { model.select($0 ? .virtualDriver : .processTap) }
             ))
-            .disabled(!presentation.canSwitchToDriver)
+            .disabled(!presentation.canSwitchToDriver && model.selectedPath != .virtualDriver)
 
             // Wraps onto a second line instead of forcing the window wider (AGENTS.md section 13).
             ViewThatFits(in: .horizontal) {
