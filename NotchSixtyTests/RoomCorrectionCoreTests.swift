@@ -5,7 +5,7 @@ import XCTest
 /// the grid and ABI are what the design note fixes.
 final class RoomCorrectionCoreTests: XCTestCase {
     func testAbiAndGrid() throws {
-        XCTAssertEqual(RoomCorrectionCore.abiVersion, 5)
+        XCTAssertEqual(RoomCorrectionCore.abiVersion, UInt32(N60_CORRECT_ABI_VERSION))
         let grid = try RoomCorrectionCore.gridFrequencies()
         XCTAssertEqual(grid.count, 479)
         XCTAssertEqual(grid[0], 20, accuracy: 1e-9)

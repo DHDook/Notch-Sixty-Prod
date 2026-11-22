@@ -262,6 +262,11 @@ add_executable(n60core_room_design_test tests/test_room_design.cpp)
 target_link_libraries(n60core_room_design_test PRIVATE n60core)
 add_test(NAME n60core_room_design COMMAND n60core_room_design_test)
 
+# E21 S7a: multichannel calibration alignment maths (n60/correct.h section 8).
+add_executable(n60core_calibration_align_test tests/test_calibration_align.cpp)
+target_link_libraries(n60core_calibration_align_test PRIVATE n60core)
+add_test(NAME n60core_calibration_align COMMAND n60core_calibration_align_test)
+
 add_executable(n60core_anc_actuators_test tests/test_anc_actuators.cpp)
 target_link_libraries(n60core_anc_actuators_test PRIVATE n60core)
 add_test(NAME n60core_anc_actuators COMMAND n60core_anc_actuators_test)
