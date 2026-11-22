@@ -206,13 +206,24 @@ struct MultichannelCalibrationDesigner: Sendable {
         )
 
         var speakerPlan = N60SpeakerCorrectionPlan()
-        let speakerDesigned = targetMagnitude.withUnsafeBufferPointer { targetBuffer in
+        let speakerDesigned: Bool
+        if useCoreMaths {
+            if let corePlan = SpeakerMathsCore.designCorrectionPlan(
+                matrix: &matrix, alignment: alignment, targetDB: targetMagnitude, settings: correctionSettings) {
+                speakerPlan = corePlan
+                speakerDesigned = true
+            } else {
+                speakerDesigned = false
+            }
+        } else {
+            speakerDesigned = targetMagnitude.withUnsafeBufferPointer { targetBuffer in
             N60SpeakerCorrectionDesignPlan(
                 &matrix,
                 targetBuffer.baseAddress!,
                 correctionSettings,
                 &speakerPlan
             )
+            }
         }
         guard speakerDesigned else {
             throw OutputDeviceCalibrationError.designFailed("bounded speaker PEQ design failed")
@@ -689,12 +700,21 @@ struct MultichannelCalibrationDesigner: Sendable {
         guard let result = MultichannelCalibrationCore.align(
             weights: flat.weights, isSpeaker: kinds, arrival: flat.arrival, polarity: flat.polarity, level: flat.level)
         else { return false }
-        // The designer reads only the reference arrival and common level from the plan; per-source alignment is done
-        // again by the speaker correction designer, which still uses the legacy C (gap G11, owner E21 S7b).
         plan = N60SpeakerAlignmentPlan()
         plan.sourceCount = matrix.sourceCount
         plan.referenceArrivalFrame = result.referenceArrivalFrame
         plan.commonLevelDB = result.commonLevelDB
+        // Per-source trim, delay and polarity feed the core speaker correction designer (E21 S9a).
+        withUnsafeMutablePointer(to: &plan.sources) { tuple in
+            tuple.withMemoryRebound(to: N60SpeakerAlignmentResult.self, capacity: Int(N60_CALIBRATION_MAX_SOURCES)) { flat in
+                for (index, item) in result.sources.enumerated() where index < count {
+                    flat[index] = N60SpeakerAlignmentResult(
+                        valid: item.valid, trimDB: item.trimDB, delayFrames: item.delayFrames,
+                        polarityInverted: item.polarityInverted, weightedArrivalFrame: item.weightedArrivalFrame,
+                        weightedLevelDB: item.weightedLevelDB, seatVarianceDBSquared: item.seatVarianceDBSquared)
+                }
+            }
+        }
         return true
     }
 
@@ -837,6 +857,7 @@ struct MultichannelCalibrationDesigner: Sendable {
 
     private static func targetGainDB(_ target: RoomCorrectionTargetCurve?, at frequency: Double) -> Double {
         guard let target, target.points.count >= 2 else { return 0 }
+        if FeatureFlags.isEnabledProcessWide(.coreDesigners) { return SpeakerMathsCore.targetGainDB(target, at: frequency) }
         let points = target.points
         if frequency <= points[0].frequencyHz { return points[0].gainDB }
         if frequency >= points[points.count - 1].frequencyHz { return points[points.count - 1].gainDB }
@@ -862,6 +883,10 @@ struct MultichannelCalibrationDesigner: Sendable {
               frequency.isFinite,
               frequency > 0 else {
             throw OutputDeviceCalibrationError.designFailed("frequency response arrays are invalid")
+        }
+        if FeatureFlags.isEnabledProcessWide(.coreDesigners),
+           let value = SpeakerMathsCore.interpolate(frequencies: frequencies, values: values, at: frequency) {
+            return value
         }
         if frequency <= frequencies[0] { return values[0] }
         if frequency >= frequencies[frequencies.count - 1] { return values[values.count - 1] }
@@ -1726,6 +1751,7 @@ struct MultichannelCalibrationPredictionVerifier: Sendable {
         at frequency: Double
     ) -> Double {
         guard let target, target.points.count >= 2 else { return 0 }
+        if FeatureFlags.isEnabledProcessWide(.coreDesigners) { return SpeakerMathsCore.targetGainDB(target, at: frequency) }
         let points = target.points
         if frequency <= points[0].frequencyHz {
             return points[0].gainDB
@@ -1762,6 +1788,10 @@ struct MultichannelCalibrationPredictionVerifier: Sendable {
             throw OutputDeviceCalibrationError.designFailed(
                 "prediction frequency response arrays are invalid"
             )
+        }
+        if FeatureFlags.isEnabledProcessWide(.coreDesigners),
+           let value = SpeakerMathsCore.interpolate(frequencies: frequencies, values: values, at: frequency) {
+            return value
         }
         if frequency <= frequencies[0] { return values[0] }
         if frequency >= frequencies[frequencies.count - 1] {

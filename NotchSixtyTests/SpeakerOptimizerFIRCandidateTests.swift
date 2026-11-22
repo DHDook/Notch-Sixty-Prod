@@ -207,4 +207,27 @@ final class SpeakerOptimizerFIRCandidateTests: XCTestCase {
             plannedSources: [source], captures: captures
         )
     }
+
+    /// E21 S9a parity (design note 9): the core FIR design matches the Swift reference at every standard rate.
+    func testCoreMathsMatchesSwiftReferenceAtStandardRates() throws {
+        for rate in [44_100.0, 48_000, 88_200, 96_000, 176_400, 192_000, 352_800, 384_000] {
+            let set = stableBaseline(sampleRate: rate)
+            var reference = SpeakerOptimizerFIRCandidateDesigner()
+            reference.useCoreMaths = false
+            var core = SpeakerOptimizerFIRCandidateDesigner()
+            core.useCoreMaths = true
+            let a = try XCTUnwrap(reference.design(baseline: set).sources.first, "\(rate)")
+            let b = try XCTUnwrap(core.design(baseline: set).sources.first, "\(rate)")
+            XCTAssertEqual(a.acceptedForPreview, b.acceptedForPreview, "\(rate)")
+            XCTAssertEqual(a.blockingReasons, b.blockingReasons, "\(rate)")
+            XCTAssertEqual(a.taps.count, b.taps.count, "\(rate)")
+            for (x, y) in zip(a.taps, b.taps) { XCTAssertEqual(x, y, accuracy: 1e-6, "\(rate)") }
+            XCTAssertEqual(a.weightedRMSEBeforeDB, b.weightedRMSEBeforeDB, accuracy: 0.05, "\(rate)")
+            XCTAssertEqual(a.predictedWeightedRMSEAfterDB, b.predictedWeightedRMSEAfterDB, accuracy: 0.05, "\(rate)")
+            XCTAssertEqual(a.maximumPositiveGainDB, b.maximumPositiveGainDB, accuracy: 0.05, "\(rate)")
+            for (x, y) in zip(a.modeledFilterMagnitudeDB, b.modeledFilterMagnitudeDB) {
+                XCTAssertEqual(x, y, accuracy: 0.05, "\(rate)")
+            }
+        }
+    }
 }

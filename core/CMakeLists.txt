@@ -467,3 +467,8 @@ add_executable(n60core_e4_remote_tonal_test ../ci/harness_e4_remote_tonal.cpp)
 target_include_directories(n60core_e4_remote_tonal_test PRIVATE ../ci)
 target_link_libraries(n60core_e4_remote_tonal_test PRIVATE n60core)
 add_test(NAME n60core_e4_remote_tonal COMMAND n60core_e4_remote_tonal_test)
+
+# E21 S9a: speaker maths (n60/speaker.h).
+add_executable(n60core_speaker_test tests/test_speaker.cpp)
+target_link_libraries(n60core_speaker_test PRIVATE n60core)
+add_test(NAME n60core_speaker COMMAND n60core_speaker_test)

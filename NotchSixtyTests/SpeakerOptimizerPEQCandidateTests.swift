@@ -86,7 +86,7 @@ final class SpeakerOptimizerPEQCandidateTests: XCTestCase {
         ))
     }
 
-    private func baseline() -> SpeakerOptimizerMeasurementSet {
+    private func baseline(sampleRate: Double = 48_000) -> SpeakerOptimizerMeasurementSet {
         let source: MultichannelCalibrationSource = .speaker(.frontLeft)
         let frequencies = (0..<64).map { i in
             20 * pow(1_000.0, Double(i) / 63)
@@ -104,7 +104,7 @@ final class SpeakerOptimizerPEQCandidateTests: XCTestCase {
                 microphone: microphone,
                 positionID: seatID,
                 source: source,
-                sampleRate: 48_000,
+                sampleRate: sampleRate,
                 response: RoomCorrectionFrequencyResponse(
                     frequenciesHz: frequencies,
                     magnitudeDB: mags,
@@ -127,9 +127,38 @@ final class SpeakerOptimizerPEQCandidateTests: XCTestCase {
         return SpeakerOptimizerMeasurementSet(
             role: .baseline, playbackSystemID: playbackID,
             routingSignature: "peq-stable-routing",
-            microphone: microphone, sampleRate: 48_000,
+            microphone: microphone, sampleRate: sampleRate,
             positions: [SpeakerOptimizerMeasurementPosition(id: seatID, name: "Center")],
             plannedSources: [source], captures: captures
         )
+    }
+
+    /// E21 S9a parity (design note 9): the core candidate search matches the Swift reference at every standard rate.
+    func testCoreMathsMatchesSwiftReferenceAtStandardRates() throws {
+        for rate in [44_100.0, 48_000, 88_200, 96_000, 176_400, 192_000, 352_800, 384_000] {
+            let set = baseline(sampleRate: rate)
+            var reference = SpeakerOptimizerPEQCandidateDesigner()
+            reference.useCoreMaths = false
+            var core = SpeakerOptimizerPEQCandidateDesigner()
+            core.useCoreMaths = true
+            let a = try XCTUnwrap(reference.design(baseline: set).sources.first, "\(rate)")
+            let b = try XCTUnwrap(core.design(baseline: set).sources.first, "\(rate)")
+            XCTAssertEqual(a.bands.count, b.bands.count, "\(rate)")
+            for (x, y) in zip(a.bands, b.bands) {
+                XCTAssertEqual(x.centerHz, y.centerHz, accuracy: x.centerHz * 1e-9, "\(rate)")
+                XCTAssertEqual(x.q, y.q, "\(rate)")
+                XCTAssertEqual(x.gainDB, y.gainDB, accuracy: 1e-9, "\(rate)")
+                XCTAssertEqual(x.b0, y.b0, accuracy: 1e-12, "\(rate)")
+                XCTAssertEqual(x.a2, y.a2, accuracy: 1e-12, "\(rate)")
+            }
+            XCTAssertEqual(a.weightedRMSEBeforeDB, b.weightedRMSEBeforeDB, accuracy: 0.05, "\(rate)")
+            XCTAssertEqual(a.predictedWeightedRMSEAfterDB, b.predictedWeightedRMSEAfterDB, accuracy: 0.05, "\(rate)")
+            XCTAssertEqual(a.maximumPositiveGainDB, b.maximumPositiveGainDB, accuracy: 0.05, "\(rate)")
+            XCTAssertEqual(a.recommendedHeadroomDB, b.recommendedHeadroomDB, accuracy: 0.5, "\(rate)")
+            XCTAssertEqual(a.warnings, b.warnings, "\(rate)")
+            for (x, y) in zip(a.modeledFilterMagnitudeDB, b.modeledFilterMagnitudeDB) {
+                XCTAssertEqual(x, y, accuracy: 1e-6, "\(rate)")
+            }
+        }
     }
 }
