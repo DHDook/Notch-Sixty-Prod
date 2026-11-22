@@ -1,0 +1,223 @@
+{
+ "aggregate": {
+  "generatedAt": -978306640,
+  "includedPositionIDs": [
+   "AAAAAAAA-BBBB-4CCC-8DDD-EEEEEEEEEEEE"
+  ],
+  "leftResponse": {
+   "frequenciesHz": [
+    100,
+    1000
+   ],
+   "magnitudeDB": [
+    0,
+    1
+   ],
+   "phaseRadians": [
+    0,
+    0.1
+   ]
+  },
+  "rightResponse": {
+   "frequenciesHz": [
+    100,
+    1000
+   ],
+   "magnitudeDB": [
+    0,
+    1
+   ],
+   "phaseRadians": [
+    0,
+    0.1
+   ]
+  }
+ },
+ "createdAt": -978306700,
+ "designs": [
+  {
+   "algorithmVersion": "test",
+   "createdAt": -978306630,
+   "filter": {
+    "declaredLatencyFrames": 0,
+    "leftTaps": [
+     1,
+     0
+    ],
+    "name": "Design 1",
+    "rightTaps": [
+     1,
+     0
+    ],
+    "sampleRate": 48000
+   },
+   "id": "12121212-BBBB-4CCC-8DDD-EEEEEEEEEEEE",
+   "name": "Design 1",
+   "parameters": {
+    "correctionHighHz": 500,
+    "correctionLowHz": 20,
+    "maximumBoostDB": 6,
+    "maximumCutDB": 12,
+    "requestedTapCount": 4096,
+    "smoothingOctaves": 0.33
+   },
+   "predictedLeftResponse": {
+    "frequenciesHz": [
+     100,
+     1000
+    ],
+    "magnitudeDB": [
+     0,
+     1
+    ],
+    "phaseRadians": [
+     0,
+     0.1
+    ]
+   },
+   "predictedRightResponse": {
+    "frequenciesHz": [
+     100,
+     1000
+    ],
+    "magnitudeDB": [
+     0,
+     1
+    ],
+    "phaseRadians": [
+     0,
+     0.1
+    ]
+   },
+   "recommendedHeadroomDB": 3,
+   "sampleRate": 48000
+  }
+ ],
+ "id": "11111111-2222-4333-8444-555555555555",
+ "measurements": [
+  {
+   "id": "AAAAAAAA-BBBB-4CCC-8DDD-EEEEEEEEEEEE",
+   "included": true,
+   "left": {
+    "capturedAt": -978306650,
+    "impulseResponse": [
+     1,
+     0,
+     0
+    ],
+    "quality": {
+     "capturePeakDBFS": -20,
+     "clipped": false,
+     "directArrivalSeconds": 0.01,
+     "estimatedNoiseFloorDBFS": -70,
+     "estimatedSNRDB": 50,
+     "playbackPeakDBFS": -18,
+     "sweepComplete": true,
+     "usableHighHz": 20000,
+     "usableLowHz": 20,
+     "warnings": []
+    },
+    "rawCapture": [
+     0,
+     0.5,
+     -0.5
+    ],
+    "transferFunction": {
+     "frequenciesHz": [
+      100,
+      1000
+     ],
+     "magnitudeDB": [
+      0,
+      1
+     ]
+    }
+   },
+   "name": "Seat 1",
+   "right": {
+    "capturedAt": -978306650,
+    "impulseResponse": [
+     1,
+     0,
+     0
+    ],
+    "quality": {
+     "capturePeakDBFS": -20,
+     "clipped": false,
+     "directArrivalSeconds": 0.01,
+     "estimatedNoiseFloorDBFS": -70,
+     "estimatedSNRDB": 50,
+     "playbackPeakDBFS": -18,
+     "sweepComplete": true,
+     "usableHighHz": 20000,
+     "usableLowHz": 20,
+     "warnings": []
+    },
+    "rawCapture": [
+     0,
+     0.5,
+     -0.5
+    ],
+    "transferFunction": {
+     "frequenciesHz": [
+      100,
+      1000
+     ],
+     "magnitudeDB": [
+      0,
+      1
+     ]
+    }
+   },
+   "sampleRate": 48000,
+   "weight": 1
+  }
+ ],
+ "microphone": {
+  "calibration": {
+   "points": [
+    {
+     "frequencyHz": 100,
+     "gainDB": 0.5
+    }
+   ],
+   "schemaVersion": 1,
+   "sourceName": "cal.txt"
+  },
+  "displayName": "Reference mic",
+  "inputChannelIndex": 0,
+  "manufacturer": "Acme",
+  "stableID": "mic-1"
+ },
+ "modifiedAt": -978306600,
+ "name": "Living room",
+ "playbackSystemID": "66666666-7777-4888-8999-AAAAAAAAAAAA",
+ "schemaVersion": 2,
+ "selectedDesignID": "12121212-BBBB-4CCC-8DDD-EEEEEEEEEEEE",
+ "sweep": {
+  "durationSeconds": 5,
+  "endFrequencyHz": 20000,
+  "fadeSeconds": 0.02,
+  "leadInSeconds": 0.5,
+  "levelDBFS": -18,
+  "repeatCount": 1,
+  "sampleRate": 48000,
+  "schemaVersion": 1,
+  "startFrequencyHz": 20,
+  "tailSeconds": 1
+ },
+ "target": {
+  "id": "99999999-BBBB-4CCC-8DDD-EEEEEEEEEEEE",
+  "name": "Flat",
+  "points": [
+   {
+    "frequencyHz": 20,
+    "gainDB": 0
+   },
+   {
+    "frequencyHz": 20000,
+    "gainDB": 0
+   }
+  ]
+ }
+}
