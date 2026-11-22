@@ -82,6 +82,7 @@ struct EQDynamicMetricField: View {
     let title: String
     let metric: EQDynamicMetric
     @Binding var value: Double
+    var width: CGFloat = 92
 
     @State private var text = ""
     @FocusState private var focused: Bool
@@ -90,7 +91,7 @@ struct EQDynamicMetricField: View {
         TextField(title, text: $text)
             .textFieldStyle(.roundedBorder)
             .multilineTextAlignment(.trailing)
-            .frame(width: 92)
+            .frame(width: width)
             .focused($focused)
             .accessibilityLabel(title)
             .accessibilityIdentifier("eq.dynamic.\(title)")

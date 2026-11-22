@@ -18,6 +18,7 @@ struct EQFitBandsButton: View {
             Label("Fit bands", systemImage: "wand.and.stars")
         }
         .buttonStyle(.borderless)
+        .fixedSize()
         .help("Propose EQ bands that bring a saved measurement to a target. Nothing changes until you keep them.")
         .accessibilityLabel("Fit bands to a curve")
         .popover(isPresented: $shown, arrowEdge: .bottom) {

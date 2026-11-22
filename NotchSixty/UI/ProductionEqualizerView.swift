@@ -235,11 +235,10 @@ struct ProductionEqualizerView: View {
 
             ProductionEQGainBar(engine: engine, autoPreamp: autoPreamp, perform: { perform($0) })
 
-            responseGraph
-
             if enhanced {
-                enhancedBandArea
+                enhancedMainArea
             } else {
+                responseGraph(tall: false)
                 HStack(alignment: .top, spacing: DesignSpacing.m.pt) {
                     bandsPanel
                         .frame(minWidth: 260, maxWidth: .infinity)
@@ -255,17 +254,30 @@ struct ProductionEqualizerView: View {
         .modifier(EQClipboardCommandsModifier(enabled: enhanced, commands: transferCommands))
     }
 
-    /// E33 S1 (design 7): band list about one third of the width, editor beside it in two columns (static left,
-    /// dynamic right), or one scrolling column below the breakpoint. Panels size to content.
+    /// Owner layout of 21 Nov 2026: the response graph takes the left column at full height; the band list sits
+    /// above a one-column band editor on the right. Below the breakpoint the three stack: graph, list, editor.
     @ViewBuilder
-    private var enhancedBandArea: some View {
-        let columns = EQEditorLayout.columns(pageWidth: pageWidth)
-        HStack(alignment: .top, spacing: DesignSpacing.m.pt) {
+    private var enhancedMainArea: some View {
+        let wide = EQEditorLayout.columns(pageWidth: pageWidth) == .two
+        if wide {
+            HStack(alignment: .top, spacing: DesignSpacing.m.pt) {
+                responseGraph(tall: true)
+                enhancedSidePanels
+                    .frame(width: EQEditorLayout.listWidth(pageWidth: pageWidth))
+            }
+        } else {
+            VStack(spacing: DesignSpacing.m.pt) {
+                responseGraph(tall: false)
+                enhancedSidePanels
+            }
+        }
+    }
+
+    private var enhancedSidePanels: some View {
+        VStack(spacing: DesignSpacing.m.pt) {
             bandsPanel
-                .frame(width: EQEditorLayout.listWidth(pageWidth: pageWidth))
                 .frame(height: EQEditorLayout.listHeight(bandCount: bands.count))
-            bandEditorPane(columns: columns)
-                .frame(maxWidth: .infinity)
+            bandEditorPane(columns: .one)
         }
     }
 
@@ -309,84 +321,23 @@ struct ProductionEqualizerView: View {
 
     private var modeBar: some View {
         GlassEffectContainer(spacing: DesignSpacing.m.pt) {
-            HStack(alignment: .bottom, spacing: DesignSpacing.l.pt) {
-                VStack(alignment: .leading, spacing: DesignSpacing.s.pt) {
-                    Text("CHANNELS")
-                        .font(DesignType.caption.font.bold())
-                        .tracking(1.2)
+            VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
+                // One row: Channels, Phase (with its status caption and the reach line when they fit), then
+                // Compare over Bypass. Narrower windows drop the captions, then wrap the groups.
+                ViewThatFits(in: .horizontal) {
+                    modeRow(captions: true)
+                    modeRow(captions: false)
+                    VStack(alignment: .leading, spacing: DesignSpacing.s.pt) {
+                        HStack(alignment: .center, spacing: DesignSpacing.l.pt) { channelsGroup; Spacer(minLength: 8); switchesGroup }
+                        phaseGroup(caption: false)
+                    }
+                }
+                if let note = engine.unpairedEQLaneNote {
+                    Text(note)
+                        .font(DesignType.caption.font)
                         .foregroundStyle(.secondary)
-
-                    HStack(spacing: DesignSpacing.s.pt) {
-                        Picker("Channels", selection: Binding(
-                            get: { configuration.channelMode },
-                            set: { mode in recorded { try engine.setEQChannelMode(mode) } }
-                        )) {
-                            ForEach(EQChannelMode.allCases) { mode in Text(mode.displayName).tag(mode) }
-                        }
-                        .labelsHidden()
-                        .pickerStyle(.segmented)
-                        .fixedSize()
-                        .disabled(editingGroup)
-
-                        if configuration.channelMode != .linked, !editingGroup {
-                            Picker("Edit Channel", selection: Binding(
-                                get: { configuration.editChannel },
-                                set: { engine.setEQEditChannel($0) }
-                            )) {
-                                ForEach(editChannels) { channel in Text(channel.displayName).tag(channel) }
-                            }
-                            .labelsHidden()
-                            .pickerStyle(.segmented)
-                            .fixedSize()
-                        }
-                    }
-
-                    if let note = engine.unpairedEQLaneNote {
-                        Text(note)
-                            .font(DesignType.caption.font)
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-
-                VStack(alignment: .leading, spacing: DesignSpacing.s.pt) {
-                    Text("PHASE")
-                        .font(DesignType.caption.font.bold())
-                        .tracking(1.2)
-                        .foregroundStyle(.secondary)
-
-                    Picker("Phase", selection: Binding(
-                        get: { configuration.phaseMode },
-                        set: { mode in recordedOffMain { try await engine.setEQPhaseModeOffMain(mode) } }
-                    )) {
-                        ForEach(EQPhaseMode.allCases) { mode in Text(mode.displayName).tag(mode) }
-                    }
-                    .labelsHidden()
-                    .pickerStyle(.segmented)
-                    .fixedSize()
-
-                    if enhanced, configuration.phaseMode == .linearPhase {
-                        EQLinearPhaseLengthControl(
-                            engine: engine, configuration: configuration, sampleRate: sampleRate
-                        ) { length in recordedOffMain { try await engine.setEQLinearPhaseLengthOffMain(length) } }
-                    }
-                }
-
-                Spacer(minLength: 8)
-
-                if comparison != nil, audition != nil {
-                    Toggle("Compare", isOn: $showCompare)
-                        .toggleStyle(.switch)
-                        .fixedSize(horizontal: true, vertical: false)
-                }
-
-                Toggle("Bypass", isOn: Binding(
-                    get: { configuration.bypassed },
-                    set: { bypassed in perform { try engine.setEQBypassed(bypassed) } }
-                ))
-                .toggleStyle(.switch)
-                .fixedSize(horizontal: true, vertical: false)
-                .layoutPriority(1)
             }
             .padding(.horizontal, DesignSpacing.m.pt)
             .padding(.vertical, DesignSpacing.s.pt)
@@ -394,16 +345,106 @@ struct ProductionEqualizerView: View {
         }
     }
 
-    private var responseGraph: some View {
-        VStack(alignment: .leading, spacing: DesignSpacing.s.pt) {
-            HStack {
-                Text("RESPONSE").font(DesignType.caption.font.bold()).tracking(1.5).foregroundStyle(.secondary)
-                Spacer()
-                Text("\(configuration.phaseMode.displayName) · \(activeLaneLabel) · \(sampleRate / 1_000, specifier: "%.1f") kHz")
-                    .font(DesignType.caption.font.monospacedDigit())
-                    .foregroundStyle(.secondary)
+    private func modeRow(captions: Bool) -> some View {
+        HStack(alignment: .center, spacing: DesignSpacing.l.pt) {
+            channelsGroup
+            phaseGroup(caption: captions)
+            Spacer(minLength: 8)
+            switchesGroup
+        }
+    }
+
+    private func inlineLabel(_ text: String) -> some View {
+        Text(text)
+            .font(DesignType.caption.font.bold())
+            .tracking(1.2)
+            .foregroundStyle(.secondary)
+            .fixedSize()
+    }
+
+    private var channelsGroup: some View {
+        HStack(spacing: DesignSpacing.s.pt) {
+            inlineLabel("CHANNELS")
+            Picker("Channels", selection: Binding(
+                get: { configuration.channelMode },
+                set: { mode in recorded { try engine.setEQChannelMode(mode) } }
+            )) {
+                ForEach(EQChannelMode.allCases) { mode in Text(mode.displayName).tag(mode) }
+            }
+            .labelsHidden()
+            .pickerStyle(.segmented)
+            .fixedSize()
+            .disabled(editingGroup)
+
+            if configuration.channelMode != .linked, !editingGroup {
+                Picker("Edit Channel", selection: Binding(
+                    get: { configuration.editChannel },
+                    set: { engine.setEQEditChannel($0) }
+                )) {
+                    ForEach(editChannels) { channel in Text(channel.displayName).tag(channel) }
+                }
+                .labelsHidden()
+                .pickerStyle(.segmented)
+                .fixedSize()
+            }
+        }
+    }
+
+    private func phaseGroup(caption: Bool) -> some View {
+        HStack(spacing: DesignSpacing.s.pt) {
+            inlineLabel("PHASE")
+            phasePicker
+            if enhanced, configuration.phaseMode == .linearPhase {
+                EQLinearPhaseLengthControl(
+                    engine: engine, configuration: configuration, sampleRate: sampleRate
+                ) { length in recordedOffMain { try await engine.setEQLinearPhaseLengthOffMain(length) } }
+            }
+            if caption {
+                responseCaption
+            }
+        }
+    }
+
+    private var switchesGroup: some View {
+        HStack(spacing: DesignSpacing.m.pt) {
+            if comparison != nil, audition != nil {
+                Toggle("Compare", isOn: $showCompare)
+                    .toggleStyle(.switch)
+                    .fixedSize(horizontal: true, vertical: false)
             }
 
+            Toggle("Bypass", isOn: Binding(
+                get: { configuration.bypassed },
+                set: { bypassed in perform { try engine.setEQBypassed(bypassed) } }
+            ))
+            .toggleStyle(.switch)
+            .fixedSize(horizontal: true, vertical: false)
+        }
+        .layoutPriority(1)
+    }
+
+    private var phasePicker: some View {
+        Picker("Phase", selection: Binding(
+            get: { configuration.phaseMode },
+            set: { mode in recordedOffMain { try await engine.setEQPhaseModeOffMain(mode) } }
+        )) {
+            ForEach(EQPhaseMode.allCases) { mode in Text(mode.displayName).tag(mode) }
+        }
+        .labelsHidden()
+        .pickerStyle(.segmented)
+        .fixedSize()
+    }
+
+    private var responseCaption: some View {
+        Text("\(configuration.phaseMode.displayName) · \(activeLaneLabel) · \(sampleRate / 1_000, specifier: "%.1f") kHz")
+            .font(DesignType.caption.font.monospacedDigit())
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+            .fixedSize()
+    }
+
+    private func responseGraph(tall: Bool) -> some View {
+        VStack(alignment: .leading, spacing: DesignSpacing.s.pt) {
             graphControls
 
             let shown = shownBands
@@ -467,20 +508,11 @@ struct ProductionEqualizerView: View {
                 program: program,
                 programFor: { [responseCache, sampleRate] bands in responseCache.program(bands: bands, sampleRate: sampleRate) }
             )
-            .frame(minHeight: 200, idealHeight: 280, maxHeight: 340)
+            .frame(
+                minHeight: tall ? 320 : 200, idealHeight: tall ? 420 : 280,
+                maxHeight: tall ? 460 : 340)
 
-            if enhanced && gestureHintVisible && graphView == .magnitude {
-                HStack(spacing: DesignSpacing.s.pt) {
-                    Image(systemName: "hand.point.up.left")
-                    Text(EQHandleAccessibility.hintText)
-                    Button("Got it") { dismissGestureHint() }
-                        .buttonStyle(.link)
-                        .accessibilityIdentifier("eq.graph.hint.dismiss")
-                }
-                .font(DesignType.caption.font)
-                .foregroundStyle(.secondary)
-                .accessibilityIdentifier("eq.graph.hint")
-            }
+            graphFooter
 
             if let note = graphView == .magnitude ? nil : series?.note {
                 Label(note, systemImage: "info.circle")
@@ -506,18 +538,68 @@ struct ProductionEqualizerView: View {
         .designSurface(.medium)
     }
 
+    /// One row: view picker on the left, option controls on the right. When they do not fit, the options wrap to a
+    /// second line, so nothing scrolls sideways. The frequency range sits under the graph (`graphFooter`).
     private var graphControls: some View {
-        HStack(spacing: DesignSpacing.m.pt) {
-            Picker("View", selection: $graphView) {
-                ForEach(EQGraphView.allCases) { view in Text(view.displayName).tag(view) }
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: DesignSpacing.m.pt) {
+                graphViewPicker
+                Spacer(minLength: 8)
+                graphOptionControls
             }
-            .labelsHidden()
-            .pickerStyle(.segmented)
-            .fixedSize()
-            .accessibilityLabel("Graph view")
+            VStack(alignment: .leading, spacing: DesignSpacing.s.pt) {
+                graphViewPicker
+                HStack(spacing: DesignSpacing.m.pt) {
+                    Spacer(minLength: 0)
+                    graphOptionControls
+                }
+            }
+        }
+    }
 
+    /// The gesture hint (until dismissed) with the frequency range at the right of the same line.
+    private var graphFooter: some View {
+        HStack(spacing: DesignSpacing.m.pt) {
+            if enhanced && gestureHintVisible && graphView == .magnitude {
+                HStack(spacing: DesignSpacing.s.pt) {
+                    Image(systemName: "hand.point.up.left")
+                    Text(EQHandleAccessibility.hintText)
+                    Button("Got it") { dismissGestureHint() }
+                        .buttonStyle(.link)
+                        .accessibilityIdentifier("eq.graph.hint.dismiss")
+                }
+                .font(DesignType.caption.font)
+                .foregroundStyle(.secondary)
+                .accessibilityIdentifier("eq.graph.hint")
+            }
             Spacer(minLength: 8)
+            graphZoomPicker
+        }
+    }
 
+    private var graphViewPicker: some View {
+        Picker("View", selection: $graphView) {
+            ForEach(EQGraphView.allCases) { view in Text(view.displayName).tag(view) }
+        }
+        .labelsHidden()
+        .pickerStyle(.segmented)
+        .fixedSize()
+        .accessibilityLabel("Graph view")
+    }
+
+    private var graphZoomPicker: some View {
+        Picker("Frequencies", selection: $xZoomRaw) {
+            ForEach(EQGraphXZoom.allCases.filter { enhanced || $0 != .subsonic }) { zoom in Text(zoom.displayName).tag(zoom.rawValue) }
+        }
+        .labelsHidden()
+        .pickerStyle(.segmented)
+        .fixedSize()
+        .disabled(!graphView.isFrequencyDomain)
+        .accessibilityLabel("Frequency range")
+    }
+
+    private var graphOptionControls: some View {
+        HStack(spacing: DesignSpacing.m.pt) {
             if let programAnalyser {
                 EQProgramAnalyserSwitch(analyser: programAnalyser)
             }
@@ -556,15 +638,6 @@ struct ProductionEqualizerView: View {
             .fixedSize()
             .disabled(graphView != .magnitude)
             .help("Visible gain range; Auto fits the largest response plus 3 dB")
-
-            Picker("Frequencies", selection: $xZoomRaw) {
-                ForEach(EQGraphXZoom.allCases.filter { enhanced || $0 != .subsonic }) { zoom in Text(zoom.displayName).tag(zoom.rawValue) }
-            }
-            .labelsHidden()
-            .pickerStyle(.segmented)
-            .fixedSize()
-            .disabled(!graphView.isFrequencyDomain)
-            .accessibilityLabel("Frequency range")
         }
     }
 
@@ -752,19 +825,17 @@ struct ProductionEqualizerView: View {
                let index = bands.firstIndex(where: { $0.id == id }),
                let binding = selectedBandBinding(for: id) {
                 let band = binding.wrappedValue
-                if enhanced && columns == .two {
-                    VStack(alignment: .leading, spacing: DesignSpacing.m.pt) {
+                if enhanced {
+                    // Owner layout of 21 Nov 2026: one column, sized to its content, below the band list.
+                    VStack(alignment: .leading, spacing: DesignSpacing.s.pt) {
                         editorHeader(number: index + 1, band: band, binding: binding)
-                        HStack(alignment: .top, spacing: DesignSpacing.l.pt) {
-                            staticControls(band: band, binding: binding)
-                                .frame(maxWidth: .infinity, alignment: .topLeading)
-                            Divider()
-                            dynamicColumn(band: band, binding: binding)
-                                .frame(maxWidth: .infinity, alignment: .topLeading)
-                        }
+                        staticControls(band: band, binding: binding)
+                        Divider()
+                        dynamicColumn(band: band, binding: binding)
                     }
-                    .padding(DesignSpacing.l.pt)
-                    .accessibilityIdentifier("eq.bands.editor.twoColumn")
+                    .padding(DesignSpacing.m.pt)
+                    .frame(maxWidth: .infinity, alignment: .topLeading)
+                    .accessibilityIdentifier("eq.bands.editor.oneColumn")
                 } else {
                     ScrollView {
                         VStack(alignment: .leading, spacing: DesignSpacing.l.pt) {
@@ -785,7 +856,7 @@ struct ProductionEqualizerView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        .frame(maxHeight: enhanced && columns == .two ? nil : .infinity)
+        .frame(maxHeight: enhanced ? nil : .infinity)
         .designSurface(.large)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("eq.bands.editor")
@@ -828,129 +899,176 @@ struct ProductionEqualizerView: View {
         }
     }
 
+    /// One labelled control. Enhanced pages use a compact inline label so two related items can share a row;
+    /// the legacy page keeps the full-width `LabeledContent`.
+    @ViewBuilder
+    private func item<C: View>(_ title: String, @ViewBuilder content: () -> C) -> some View {
+        if enhanced {
+            HStack(spacing: DesignSpacing.s.pt) { Text(title); content() }
+        } else {
+            LabeledContent(title) { content() }
+        }
+    }
+
+    @ViewBuilder
+    private func item<L: View, C: View>(@ViewBuilder label: () -> L, @ViewBuilder content: () -> C) -> some View {
+        if enhanced {
+            HStack(spacing: DesignSpacing.s.pt) { label(); content() }
+        } else {
+            LabeledContent { content() } label: { label() }
+        }
+    }
+
+    /// Related controls on one row when they fit, stacked otherwise (screen-fit rule: no sideways scroll).
+    @ViewBuilder
+    private func pair<A: View, B: View, C: View>(
+        @ViewBuilder _ first: () -> A, @ViewBuilder second: () -> B, @ViewBuilder third: () -> C = { EmptyView() }
+    ) -> some View {
+        if enhanced {
+            let a = first()
+            let b = second()
+            let c = third()
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: DesignSpacing.m.pt) { a; b; c; Spacer(minLength: 0) }
+                VStack(alignment: .leading, spacing: DesignSpacing.s.pt) { a; b; c }
+            }
+        } else {
+            first()
+            second()
+            third()
+        }
+    }
+
     @ViewBuilder
     private func staticControls(band: EQBand, binding: Binding<EQBand>) -> some View {
-        VStack(alignment: .leading, spacing: DesignSpacing.l.pt) {
-            LabeledContent("Filter") {
-                Picker("Filter", selection: binding.type) {
-                    if enhanced {
-                        ForEach(EQFilterPickerModel.sections, id: \.title) { section in
-                            Section(section.title) {
-                                ForEach(section.types) { type in filterOption(type, band: band) }
+        VStack(alignment: .leading, spacing: enhanced ? DesignSpacing.s.pt : DesignSpacing.l.pt) {
+            pair {
+                item("Filter") {
+                    Picker("Filter", selection: binding.type) {
+                        if enhanced {
+                            ForEach(EQFilterPickerModel.sections, id: \.title) { section in
+                                Section(section.title) {
+                                    ForEach(section.types) { type in filterOption(type, band: band) }
+                                }
                             }
+                        } else {
+                            ForEach(EQFilterType.allCases) { type in filterOption(type, band: band) }
                         }
-                    } else {
-                        ForEach(EQFilterType.allCases) { type in filterOption(type, band: band) }
-                    }
-                }
-                .labelsHidden()
-                .frame(width: 180)
-            }
-
-            LabeledContent("Frequency") {
-                HStack(spacing: DesignSpacing.s.pt) {
-                    EQNumberField(
-                        title: "Frequency",
-                        field: .frequency,
-                        value: band.frequencyHz,
-                        band: band,
-                        maximumFrequency: maximumFrequency,
-                        width: 110,
-                        identifier: "eq.bands.editor.frequency"
-                    ) { newValue, isStep in
-                        commitField(band, key: isStep ? "field.frequency" : nil) { $0.frequencyHz = newValue }
-                    }
-                    .disabled(band.type == .fir)
-                    Text("Hz").foregroundStyle(.secondary)
-                }
-            }
-
-            LabeledContent("Gain") {
-                HStack(spacing: DesignSpacing.s.pt) {
-                    EQNumberField(
-                        title: "Gain",
-                        field: .gain,
-                        value: band.gainDB,
-                        band: band,
-                        maximumFrequency: maximumFrequency,
-                        identifier: "eq.bands.editor.gain"
-                    ) { newValue, isStep in
-                        commitField(band, key: isStep ? "field.gain" : nil) { $0.gainDB = newValue }
-                    }
-                    .disabled(!band.type.productionHasGainControl)
-                    Text("dB").foregroundStyle(.secondary)
-                }
-            }
-
-            LabeledContent {
-                EQNumberField(
-                    title: "Q",
-                    field: .q,
-                    value: band.q,
-                    band: band,
-                    maximumFrequency: maximumFrequency,
-                    identifier: "eq.bands.editor.q"
-                ) { newValue, isStep in
-                    commitField(band, key: isStep ? "field.q" : nil) { $0.q = newValue }
-                }
-                .disabled(!band.type.productionHasQControl)
-            } label: {
-                HStack(spacing: DesignSpacing.xs.pt) {
-                    Text("Q")
-                    if let reference {
-                        ProductionReferenceHelpButton(
-                            navigator: reference,
-                            articleID: "equalizer",
-                            formulaID: "biquad",
-                            destination: .dspReference,
-                            label: "Open EQ filter math in DSP Reference"
-                        )
-                        .buttonStyle(.borderless)
-                    }
-                }
-            }
-
-            if band.type.supportsSlope {
-                LabeledContent("Slope") {
-                    Picker("Slope", selection: binding.slope) {
-                        ForEach(EQFilterSlope.allCases) { slope in Text(slope.displayName).tag(slope) }
                     }
                     .labelsHidden()
-                    .frame(minWidth: 150)
+                    .frame(width: 180)
+                }
+            } second: {
+                if band.type == .peaking {
+                    Toggle("Constant-Q peak", isOn: binding.constantQ).toggleStyle(.switch)
+                } else if band.type.supportsSlope {
+                    item("Slope") {
+                        Picker("Slope", selection: binding.slope) {
+                            ForEach(EQFilterSlope.allCases) { slope in Text(slope.displayName).tag(slope) }
+                        }
+                        .labelsHidden()
+                        .frame(minWidth: enhanced ? 110 : 150)
+                    }
                 }
             }
 
-            if band.type == .peaking {
-                Toggle("Constant-Q peak", isOn: binding.constantQ).toggleStyle(.switch)
+            pair {
+                item("Frequency") {
+                    HStack(spacing: DesignSpacing.s.pt) {
+                        EQNumberField(
+                            title: "Frequency",
+                            field: .frequency,
+                            value: band.frequencyHz,
+                            band: band,
+                            maximumFrequency: maximumFrequency,
+                            width: enhanced ? 72 : 110,
+                            identifier: "eq.bands.editor.frequency"
+                        ) { newValue, isStep in
+                            commitField(band, key: isStep ? "field.frequency" : nil) { $0.frequencyHz = newValue }
+                        }
+                        .disabled(band.type == .fir)
+                        Text("Hz").foregroundStyle(.secondary).fixedSize()
+                    }
+                }
+            } second: {
+                item("Gain") {
+                    HStack(spacing: DesignSpacing.s.pt) {
+                        EQNumberField(
+                            title: "Gain",
+                            field: .gain,
+                            value: band.gainDB,
+                            band: band,
+                            maximumFrequency: maximumFrequency,
+                            width: enhanced ? 56 : 90,
+                            identifier: "eq.bands.editor.gain"
+                        ) { newValue, isStep in
+                            commitField(band, key: isStep ? "field.gain" : nil) { $0.gainDB = newValue }
+                        }
+                        .disabled(!band.type.productionHasGainControl)
+                        Text("dB").foregroundStyle(.secondary).fixedSize()
+                    }
+                }
+            } third: {
+                item(label: {
+                    HStack(spacing: DesignSpacing.xs.pt) {
+                        Text("Q")
+                        if let reference {
+                            ProductionReferenceHelpButton(
+                                navigator: reference,
+                                articleID: "equalizer",
+                                formulaID: "biquad",
+                                destination: .dspReference,
+                                label: "Open EQ filter math in DSP Reference"
+                            )
+                            .buttonStyle(.borderless)
+                        }
+                    }
+                }) {
+                    EQNumberField(
+                        title: "Q",
+                        field: .q,
+                        value: band.q,
+                        band: band,
+                        maximumFrequency: maximumFrequency,
+                        width: enhanced ? 56 : 90,
+                        identifier: "eq.bands.editor.q"
+                    ) { newValue, isStep in
+                        commitField(band, key: isStep ? "field.q" : nil) { $0.q = newValue }
+                    }
+                    .disabled(!band.type.productionHasQControl)
+                }
             }
 
             if band.type == .linkwitzTransform {
-                LabeledContent("Target Frequency") {
-                    HStack(spacing: DesignSpacing.s.pt) {
+                pair {
+                    item("Target Frequency") {
+                        HStack(spacing: DesignSpacing.s.pt) {
+                            EQNumberField(
+                                title: "Target Frequency",
+                                field: .linkwitzTargetFrequency,
+                                value: band.linkwitzTargetHz,
+                                band: band,
+                                maximumFrequency: maximumFrequency,
+                                width: 110,
+                                identifier: "eq.bands.editor.linkwitzTargetFrequency"
+                            ) { newValue, isStep in
+                                commitField(band, key: isStep ? "field.linkwitzTargetHz" : nil) { $0.linkwitzTargetHz = newValue }
+                            }
+                            Text("Hz").foregroundStyle(.secondary).fixedSize()
+                        }
+                    }
+                } second: {
+                    item("Target Q") {
                         EQNumberField(
-                            title: "Target Frequency",
-                            field: .linkwitzTargetFrequency,
-                            value: band.linkwitzTargetHz,
+                            title: "Target Q",
+                            field: .linkwitzTargetQ,
+                            value: band.linkwitzTargetQ,
                             band: band,
                             maximumFrequency: maximumFrequency,
-                            width: 110,
-                            identifier: "eq.bands.editor.linkwitzTargetFrequency"
+                            identifier: "eq.bands.editor.linkwitzTargetQ"
                         ) { newValue, isStep in
-                            commitField(band, key: isStep ? "field.linkwitzTargetHz" : nil) { $0.linkwitzTargetHz = newValue }
+                            commitField(band, key: isStep ? "field.linkwitzTargetQ" : nil) { $0.linkwitzTargetQ = newValue }
                         }
-                        Text("Hz").foregroundStyle(.secondary)
-                    }
-                }
-                LabeledContent("Target Q") {
-                    EQNumberField(
-                        title: "Target Q",
-                        field: .linkwitzTargetQ,
-                        value: band.linkwitzTargetQ,
-                        band: band,
-                        maximumFrequency: maximumFrequency,
-                        identifier: "eq.bands.editor.linkwitzTargetQ"
-                    ) { newValue, isStep in
-                        commitField(band, key: isStep ? "field.linkwitzTargetQ" : nil) { $0.linkwitzTargetQ = newValue }
                     }
                 }
             }
@@ -979,7 +1097,7 @@ struct ProductionEqualizerView: View {
 
     @ViewBuilder
     private func dynamicControls(band: EQBand, binding: Binding<EQBand>) -> some View {
-        VStack(alignment: .leading, spacing: DesignSpacing.l.pt) {
+        VStack(alignment: .leading, spacing: enhanced ? DesignSpacing.s.pt : DesignSpacing.l.pt) {
             HStack {
                 Text("Dynamic EQ").font(DesignType.sectionTitle.font)
                 Spacer()
@@ -999,36 +1117,49 @@ struct ProductionEqualizerView: View {
             }
 
             if band.dynamic.enabled {
-                LabeledContent("Direction") {
-                    Picker("Direction", selection: binding.dynamic.direction) {
-                        ForEach(DynamicEQDirection.allCases) { direction in Text(direction.displayName).tag(direction) }
+                pair {
+                    item("Direction") {
+                        Picker("Direction", selection: binding.dynamic.direction) {
+                            ForEach(DynamicEQDirection.allCases) { direction in Text(direction.displayName).tag(direction) }
+                        }
+                        .labelsHidden().frame(minWidth: enhanced ? 110 : 150)
+                        .disabled(band.type == .notch)
                     }
-                    .labelsHidden().frame(minWidth: 150)
-                    .disabled(band.type == .notch)
+                } second: {
+                    item("Detector") {
+                        Picker("Detector", selection: binding.dynamic.detectorMode) {
+                            ForEach(DynamicEQDetectorMode.allCases) { mode in Text(mode.displayName).tag(mode) }
+                        }
+                        .labelsHidden().frame(minWidth: enhanced ? 90 : 120)
+                    }
                 }
 
-                metricField("Threshold", .threshold, value: binding.dynamic.thresholdDB, suffix: "dB")
-                metricField("Ratio", .ratio, value: binding.dynamic.ratio, suffix: ":1")
-                metricField("Max Cut", .maxCut, value: binding.dynamic.rangeDB, suffix: "dB")
-                metricField("Attack", .attack, value: binding.dynamic.attackMs, suffix: "ms")
-                metricField("Release", .release, value: binding.dynamic.releaseMs, suffix: "ms")
-
-                LabeledContent("Detector") {
-                    Picker("Detector", selection: binding.dynamic.detectorMode) {
-                        ForEach(DynamicEQDetectorMode.allCases) { mode in Text(mode.displayName).tag(mode) }
-                    }
-                    .labelsHidden().frame(minWidth: 120)
+                pair {
+                    metricField("Threshold", .threshold, value: binding.dynamic.thresholdDB, suffix: "dB")
+                } second: {
+                    metricField("Ratio", .ratio, value: binding.dynamic.ratio, suffix: ":1")
+                } third: {
+                    metricField("Max Cut", .maxCut, value: binding.dynamic.rangeDB, suffix: "dB")
                 }
-
-                if band.dynamic.detectorMode == .rms {
-                    metricField("RMS Window", .rmsWindow, value: binding.dynamic.rmsWindowMs, suffix: "ms")
+                pair {
+                    metricField("Attack", .attack, value: binding.dynamic.attackMs, suffix: "ms")
+                } second: {
+                    metricField("Release", .release, value: binding.dynamic.releaseMs, suffix: "ms")
+                } third: {
+                    if band.dynamic.detectorMode == .rms {
+                        metricField("RMS Window", .rmsWindow, value: binding.dynamic.rmsWindowMs, suffix: "ms")
+                    }
                 }
 
                 if band.dynamic.direction != .cutOnly {
                     Text("Boost").font(.subheadline.bold()).padding(.top, DesignSpacing.xs.pt)
-                    metricField("Boost Threshold", .boostThreshold, value: binding.dynamic.boostThresholdDB, suffix: "dB")
-                    metricField("Boost Ratio", .boostRatio, value: binding.dynamic.boostRatio, suffix: ":1")
-                    metricField("Max Boost", .maxBoost, value: binding.dynamic.maxBoostDB, suffix: "dB")
+                    pair {
+                        metricField("Boost Threshold", .boostThreshold, value: binding.dynamic.boostThresholdDB, suffix: "dB")
+                    } second: {
+                        metricField("Boost Ratio", .boostRatio, value: binding.dynamic.boostRatio, suffix: ":1")
+                    } third: {
+                        metricField("Max Boost", .maxBoost, value: binding.dynamic.maxBoostDB, suffix: "dB")
+                    }
                 }
             } else {
                 Text("Enable Dynamic to add level-dependent correction to this ordinary EQ band. Static gain remains owned by the band itself.")
@@ -1039,10 +1170,10 @@ struct ProductionEqualizerView: View {
     }
 
     private func metricField(_ label: String, _ metric: EQDynamicMetric, value: Binding<Double>, suffix: String) -> some View {
-        LabeledContent(label) {
+        item(label) {
             HStack(spacing: DesignSpacing.s.pt) {
-                EQDynamicMetricField(title: label, metric: metric, value: value)
-                Text(suffix).foregroundStyle(.secondary).frame(width: 28, alignment: .leading)
+                EQDynamicMetricField(title: label, metric: metric, value: value, width: enhanced ? 64 : 92)
+                Text(suffix).foregroundStyle(.secondary).fixedSize()
             }
         }
     }
