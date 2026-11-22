@@ -316,4 +316,44 @@ final class SpeakerOptimizerCrossDomainClassifierTests: XCTestCase {
             )
         )
     }
+
+    // E21 S9b: the core classifier gives the Swift reference's labels on every fixture, and the same residuals.
+    func testCoreMathsMatchesSwiftReference() throws {
+        let fixtures: [(Double, [Double])] = [
+            (5, [5, 4.8, 5.2]), (0, [-7, 0, 5]), (5, [0, 0, 0]), (0, [0, 0, 0]), (-3, [-3.2, -2.9, -3.1]), (4, [-4, 4, 0]),
+        ]
+        var labels = Set<SpeakerOptimizerDeviationClassification>()
+        for (near, seats) in fixtures {
+            let pair = makePair(characterizationFeatureDB: near, seatFeaturesDB: seats)
+            var reference = SpeakerOptimizerCrossDomainClassifier()
+            reference.useCoreMaths = false
+            var core = SpeakerOptimizerCrossDomainClassifier()
+            core.useCoreMaths = true
+            let a = try reference.classify(characterization: pair.characterization, listeningBaseline: pair.listening)
+            let b = try core.classify(characterization: pair.characterization, listeningBaseline: pair.listening)
+            XCTAssertEqual(a.sources.count, b.sources.count)
+            for (left, right) in zip(a.sources, b.sources) {
+                XCTAssertEqual(left.frequenciesHz, right.frequenciesHz)
+                XCTAssertEqual(left.points.map(\.classification), right.points.map(\.classification))
+                for (p, q) in zip(left.points, right.points) {
+                    XCTAssertEqual(p.characterizationResidualDB, q.characterizationResidualDB, accuracy: 1e-9)
+                    XCTAssertEqual(p.listeningMeanResidualDB, q.listeningMeanResidualDB, accuracy: 1e-9)
+                    XCTAssertEqual(p.listeningSeatSpreadDB, q.listeningSeatSpreadDB, accuracy: 1e-9)
+                    labels.insert(q.classification)
+                }
+            }
+        }
+        XCTAssertTrue(labels.isSuperset(of: [.speakerPersistent, .roomSeatDependent, .noMaterialDeviation]), "fixtures cover the labels")
+    }
+
+    func testCoreMathsRejectsInvalidOptionsLikeSwift() throws {
+        let pair = makePair(characterizationFeatureDB: 5, seatFeaturesDB: [5, 5, 5])
+        var options = SpeakerOptimizerCrossDomainOptions()
+        options.smoothingOctaves = 5
+        var core = SpeakerOptimizerCrossDomainClassifier()
+        core.useCoreMaths = true
+        XCTAssertThrowsError(try core.classify(characterization: pair.characterization, listeningBaseline: pair.listening, options: options)) {
+            XCTAssertEqual($0 as? SpeakerOptimizerCrossDomainError, .invalidOptions)
+        }
+    }
 }

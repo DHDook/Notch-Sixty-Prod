@@ -35,6 +35,8 @@
 		E8A600000000000000000002 /* multisub_search.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E8A600000000000000000001 /* multisub_search.cpp */; };
 		E21B00000000000000000002 /* multisub_optimize.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E21B00000000000000000001 /* multisub_optimize.cpp */; };
 		E21C00000000000000000004 /* candidates.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E21C00000000000000000003 /* candidates.cpp */; };
+		E21C00000000000000000006 /* crossover.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E21C00000000000000000005 /* crossover.cpp */; };
+		E21C00000000000000000008 /* characterise.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E21C00000000000000000007 /* characterise.cpp */; };
 		E21C00000000000000000002 /* correction.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E21C00000000000000000001 /* correction.cpp */; };
 		E8A000000000000000000021 /* xover.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E8A000000000000000000011 /* xover.cpp */; };
 		E9B600000000000000000001 /* headroom.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E9B600000000000000000002 /* headroom.cpp */; };
@@ -100,6 +102,8 @@
 		E8A600000000000000000001 /* multisub_search.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = correct/multisub_search.cpp; sourceTree = "<group>"; };
 		E21B00000000000000000001 /* multisub_optimize.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = correct/multisub_optimize.cpp; sourceTree = "<group>"; };
 		E21C00000000000000000003 /* candidates.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = speaker/candidates.cpp; sourceTree = "<group>"; };
+		E21C00000000000000000005 /* crossover.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = speaker/crossover.cpp; sourceTree = "<group>"; };
+		E21C00000000000000000007 /* characterise.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = speaker/characterise.cpp; sourceTree = "<group>"; };
 		E21C00000000000000000001 /* correction.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = speaker/correction.cpp; sourceTree = "<group>"; };
 		E19A00000000000000000011 /* design.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = mimo/design.cpp; sourceTree = "<group>"; };
 		E8A000000000000000000011 /* xover.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = xover/xover.cpp; sourceTree = "<group>"; };
@@ -215,6 +219,8 @@
 				E8A600000000000000000001 /* multisub_search.cpp */,
 				E21B00000000000000000001 /* multisub_optimize.cpp */,
 				E21C00000000000000000003 /* candidates.cpp */,
+				E21C00000000000000000005 /* crossover.cpp */,
+				E21C00000000000000000007 /* characterise.cpp */,
 				E21C00000000000000000001 /* correction.cpp */,
 				E8A000000000000000000011 /* xover.cpp */,
 				E9B600000000000000000002 /* headroom.cpp */,
@@ -369,6 +375,8 @@
 				E8A600000000000000000002 /* multisub_search.cpp in Sources */,
 				E21B00000000000000000002 /* multisub_optimize.cpp in Sources */,
 				E21C00000000000000000004 /* candidates.cpp in Sources */,
+				E21C00000000000000000006 /* crossover.cpp in Sources */,
+				E21C00000000000000000008 /* characterise.cpp in Sources */,
 				E21C00000000000000000002 /* correction.cpp in Sources */,
 				E8A000000000000000000021 /* xover.cpp in Sources */,
 				E9B600000000000000000001 /* headroom.cpp in Sources */,

@@ -149,4 +149,38 @@ final class SpeakerOptimizerDesignEngineTests: XCTestCase {
             captures: captures
         )
     }
+
+    // E21 S9b: the core scoring reproduces the Swift reference preview.
+    func testCoreMathsMatchesSwiftReference() throws {
+        var variants: [SpeakerOptimizerDesignOptions] = [.init()]
+        var boosted = SpeakerOptimizerDesignOptions()
+        boosted.maximumBoostDB = 3
+        boosted.targetTiltDBPerOctave = -1.5
+        variants.append(boosted)
+        var strict = SpeakerOptimizerDesignOptions()
+        strict.maximumSeatDegradationDB = 0
+        strict.maximumCutDB = 12
+        variants.append(strict)
+        var narrow = SpeakerOptimizerDesignOptions()
+        narrow.smoothingOctaves = 0.2
+        variants.append(narrow)
+        for options in variants {
+            var reference = SpeakerOptimizerDesignEngine()
+            reference.useCoreMaths = false
+            var core = SpeakerOptimizerDesignEngine()
+            core.useCoreMaths = true
+            let weights = [seatA: 0.7, seatB: 0.3]
+            let a = try reference.design(baseline: makeBaseline(), seatWeights: weights, options: options)
+            let b = try core.design(baseline: makeBaseline(), seatWeights: weights, options: options)
+            XCTAssertEqual(a.sources.count, b.sources.count)
+            for (p, q) in zip(a.sources, b.sources) {
+                XCTAssertEqual(p.frequenciesHz, q.frequenciesHz)
+                XCTAssertEqual(p.warnings, q.warnings)
+                XCTAssertEqual(p.weightedRMSEBeforeDB, q.weightedRMSEBeforeDB, accuracy: 1e-9)
+                XCTAssertEqual(p.predictedWeightedRMSEAfterDB, q.predictedWeightedRMSEAfterDB, accuracy: 1e-9)
+                for (x, y) in zip(p.correctionDB, q.correctionDB) { XCTAssertEqual(x, y, accuracy: 1e-9) }
+                for (x, y) in zip(p.targetMagnitudeDB, q.targetMagnitudeDB) { XCTAssertEqual(x, y, accuracy: 1e-9) }
+            }
+        }
+    }
 }
