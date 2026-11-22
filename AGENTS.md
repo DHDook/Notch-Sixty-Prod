@@ -47,9 +47,9 @@ Still out of scope unless explicitly approved:
 
 Multi-seat room correction and multichannel program audio remain distinct concepts.
 
-### Optional virtual audio driver add-on (owner decision, 16 Nov 2026; post-v1, V2-1)
+### Optional virtual audio driver add-on (owner decision, 16 Nov 2026; optional v1 add-on, E36; does not gate the v1 release)
 
-The owner has approved Notch Sixty's own user-space virtual audio driver as an optional add-on, planned in `docs/V2_ROADMAP.md` (V2-1). It is not v1 work and does not start until the owner says so.
+The owner has approved Notch Sixty's own user-space virtual audio driver as an optional add-on, planned as E36 (`docs/epics/E36.md`). It may ship after v1 in a point update.
 
 - The app never depends on the driver. It installs, runs and ships every v1 feature without it, and the process tap stays the default input path.
 - The driver is a separate product in its own repository with its own signed, notarised installer and uninstaller. Only that installer touches `/Library/Audio/Plug-Ins/HAL` or restarts `coreaudiod`. The sandboxed app never downloads, installs, updates or removes it; it only detects an installed driver and uses it as an audio device.
@@ -59,7 +59,7 @@ The owner has approved Notch Sixty's own user-space virtual audio driver as an o
 
 ## 3. Transport architecture
 
-Use public Core Audio APIs and the driverless process-tap architecture. The optional virtual audio driver (section 2) is a second input path beside the tap, never a replacement: the flow below stays the default and must work with no driver installed.
+Use public Core Audio APIs and the driverless process-tap architecture. The optional virtual audio driver (section 2) is a second input path beside the tap, never a replacement: the flow below stays the default and must work with no driver installed. The App Store build only detects an installed driver and may open its download page; it never downloads, runs or removes the installer.
 
 Expected flow:
 
@@ -135,6 +135,8 @@ Starting
 Running
 Reconfiguring
 RecoveringOutput
+WaitingForInputDevice
+SwitchingInput
 Stopping
 Failed
 ```

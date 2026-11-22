@@ -32,6 +32,7 @@ Owner decisions from 17 Oct 2026 (and later, where dated) fix the plan's shape. 
 | Whole-app review (17 Nov 2026) | Approved: E35 3D sound from two speakers in v1, with virtual surround from 5.1 and 7.1 sources; E22 pass-or-fail rule, owner-set ANC targets, ANC and MIMO checks first; E16 Control Centre control and widget; 384 kHz stays the v1 ceiling (705.6 and 768 kHz are V2-19); second zone is V2-20; speaker remapping and reflection control is V2-21; DSD output, MIDI and OSC control are not planned; dither stays automatic; after reading the patents the same day, E35 uses constant or fixed-curve regularisation, a free-space model mode, and a patent attorney's review before S1 code |
 | End-state review (17 Nov 2026) | Approved: E33 S26 matched EQ filters (new bands use them; imports and saved EQs keep cookbook filters, with an offer to switch) and S27 linear-phase EQ lengths of 21, 85, 170 and 340 ms, with the EQ half of E23 G11 moved to S27; E31 shows the total added delay for lip sync; an E22 check of macOS's AirPlay Receiver; v1 ships in English only; V2-22 dialogue separation, V2-23 per-band EQ placement and linear-phase multiband, V2-24 languages; every V2 epic placed in a wave, V2-21's dependency corrected (v1 already plays multichannel layouts), and a second look at E35's filter method after US 9,167,344 ends in 2032 |
 | Price and distribution (17 Nov 2026) | $150, $120 at launch, round prices. Mac App Store (Small Business Program, 15%) as a free download with a one-time in-app unlock and a 14-day free trial (owner, 17 Nov 2026); a lean website for docs, support, the privacy policy and proof, and later the V2-1 driver download. v2 is a free update; only v3 platform editions are sold separately (owner, 17 Nov 2026). Direct sales (for example Paddle) stay an option for editions sold outside the App Store (E18) |
+| Virtual audio driver in v1 (21 Nov 2026) | V2-1 becomes optional epic E36. It does not gate the v1 release: v1 may ship with `e36.virtual-driver` off and E36 finishes in a point update (the one exception to "ship only when every scoped epic is complete"). Driver in the private repository `Notch-Sixty-Prod-Driver`, written from Apple's documentation, downloads as GitHub releases; no capture indicator of any kind on the driver path; E36 keeps its own bench checks (`docs/epics/E36.md` Q1–Q10) |
 
 ## Epics at a glance
 
@@ -72,6 +73,7 @@ platforms; E6 (the unified graph) is the critical path, because eleven later epi
 | E33 | Equalizer, Dynamics and Meters enhancements (owner, 15 Nov 2026) | 3–4 | E32, E27, E28 (bench parts: E22) | Claude Code (Mac) | The 15 Nov 2026 review's approved features are reachable from the three pages: two-column band editor, subsonic bands, APO import and export, band clipboard, one preamp model; numbered dynamics chain, expander lookahead, 2–5 multiband bands; meter zones, shared hold and resets, loudness history; PLR, spectrogram, bit activity, input overs, dropout counter, balance, per-band correlation, headroom strip and RTA |
 | E34 | Design language and UI consistency (owner, 17 Nov 2026) | 4 | E12 (page slices), E13, E33 for S2–S7; none for S0, S1 (screen checks: E22) | Claude Code (Mac) | One written design language in the macOS 27 Liquid Glass style; every page built from shared values and components; one rule each for states, dialogs, menus, keyboard, accessibility settings and window sizes |
 | E35 | 3D sound from two speakers (owner, 17 Nov 2026) | 4 | E13, E29, E4 S26b (head position), E12 S26 (blind compare) (bench parts: E22) | Claude Code (Mac) | Crosstalk cancellation designed from the speaker angle or from the listener's in-ear measurement, surround from two speakers for 5.1 and 7.1 sources, and camera head follow, reachable from its own page |
+| E36 | Optional virtual audio driver add-on (owner, 21 Nov 2026; was V2-1; does not gate v1) | 4 (optional) | E25 S8a, E31, E12 S23; E18 website for the download | Claude Code (Mac) + driver repository + bench | The app reads its own virtual device as a second input path beside the tap, switches cleanly, reports its delay to macOS, and the device goes away when the app stops; tap stays the default |
 | E23 | Legacy engine removal | 4 | E6 (incl. S12a–S12h), E4 S11, E7–E17 | Claude Code (Mac) | `N60RenderKernel`, the old N-channel path and the `e6.*` flags are gone; full suite green |
 | E22 | Hardware validation | 4 | all software epics | Bench | Every deferred bench check and owner acceptance check (including those that no longer gate a flag graduation) passes on `main` at every rate |
 | FC | Flag cleanup (owner, 11 Nov 2026) | 4 | E22 | Claude Code (Mac) | Every graduated flag and its dead branch removed in small per-epic PRs; nightly flags-off CI ran while flags existed |
@@ -115,6 +117,7 @@ reviewers compare with Dirac and REW), then engine depth, then breadth.
     - E12 S26 `e12/compare-service` runs before E12 S13; E12 S27–S28 run after E12 S13 and E33 S24 (owner approved the slices 17 Nov 2026; this position is proposed, the owner may move it; `docs/epics/E12.md`)
     - E12 S29–S31 guided setup run after E12 S10, S11 and E34 S1; S30 after E12 S18; S31 last (owner approved the slices 17 Nov 2026; this position is proposed, the owner may move it; `docs/epics/E12.md`)
     - E34 S2–S7 run after the page slices above (E12 S12–S25, E13 S9–S12) and E33 S11, in written order, before item 14 (owner, 17 Nov 2026; `docs/epics/E34.md`)
+    - then E36 Optional virtual audio driver add-on, S1–S7 in written order (X1–X3 in the driver repository alongside), after E31 and before item 12 (owner, 21 Nov 2026; optional, never blocks item 14; `docs/epics/E36.md`)
 12. E23 Legacy engine removal
 13. E29 Shared room position model (owner, 9 Nov 2026: unparked, in v1; plan `docs/epics/E29.md`; flag `e29.room-model`, graduated in S9, removed in FC)
     - then E35 3D sound from two speakers, S1–S4 in written order, after E29 and E13 S12, before item 14 (owner approved the epic 17 Nov 2026; this position is proposed, the owner may move it; S1's code waits for the patent attorney's review, E35 G1 and G4; `docs/epics/E35.md`)
@@ -672,6 +675,14 @@ uses no head model, and a patent attorney reviews the S1 design note before any 
 - [ ] S2 `e35/xtc-stage` (needs-owner: realtime engine; owns G2): the graph's crosstalk stage becomes a two-in two-out FIR; the one-knob model and its engineering toggle go; the E13 virtual-speaker renderer may feed it for 5.1 and 7.1 sources
 - [ ] S3 `e35/page-and-setup` (low-risk): production page with on/off, strength, speaker angle from E29 or typed in, measured mode through the E13 in-ear capture, "Surround from two speakers", and "Compare blind…" through E12 S26
 - [ ] S4 `e35/head-follow-ship` (needs-owner: camera use and engine): filters follow the head from the E4 S26b position; graduates `e35.speaker-3d`
+
+### E36 Optional virtual audio driver add-on (owner, 21 Nov 2026; was V2-1)
+
+Plan: `docs/epics/E36.md` (owner answers of 21 Nov 2026 recorded). V2-1 pulled into v1 as an optional epic: it does not
+gate the v1 release and may finish in a point update. Placed after E31 and before E23 in item 11. Notch Sixty's own user-space
+virtual output device as a second input path beside the process tap, which stays the default. The driver and its
+signed installer live in a separate repository; the App Store build only detects it. One flag `e36.virtual-driver`,
+graduated in S7. Slices S1–S7 (app) and X1–X3 (driver repository) are listed in the epic file.
 
 ### E23 Legacy engine removal
 
