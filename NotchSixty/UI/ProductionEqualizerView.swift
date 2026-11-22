@@ -939,10 +939,22 @@ struct ProductionEqualizerView: View {
         }
     }
 
+    /// Controls flow left to right and wrap only when the next one truly does not fit (enhanced pages);
+    /// the legacy page keeps one control per row.
+    @ViewBuilder
+    private func flow<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+        if enhanced {
+            EQControlFlowLayout(spacing: DesignSpacing.m.pt, lineSpacing: DesignSpacing.s.pt) { content() }
+                .frame(maxWidth: .infinity, alignment: .leading)
+        } else {
+            content()
+        }
+    }
+
     @ViewBuilder
     private func staticControls(band: EQBand, binding: Binding<EQBand>) -> some View {
         VStack(alignment: .leading, spacing: enhanced ? DesignSpacing.s.pt : DesignSpacing.l.pt) {
-            pair {
+            flow {
                 item("Filter") {
                     Picker("Filter", selection: binding.type) {
                         if enhanced {
@@ -958,7 +970,6 @@ struct ProductionEqualizerView: View {
                     .labelsHidden()
                     .frame(width: 180)
                 }
-            } second: {
                 if band.type == .peaking {
                     Toggle("Constant-Q peak", isOn: binding.constantQ).toggleStyle(.switch)
                 } else if band.type.supportsSlope {
@@ -970,9 +981,6 @@ struct ProductionEqualizerView: View {
                         .frame(minWidth: enhanced ? 110 : 150)
                     }
                 }
-            }
-
-            pair {
                 item("Frequency") {
                     HStack(spacing: DesignSpacing.s.pt) {
                         EQNumberField(
@@ -990,7 +998,6 @@ struct ProductionEqualizerView: View {
                         Text("Hz").foregroundStyle(.secondary).fixedSize()
                     }
                 }
-            } second: {
                 item("Gain") {
                     HStack(spacing: DesignSpacing.s.pt) {
                         EQNumberField(
@@ -1008,7 +1015,6 @@ struct ProductionEqualizerView: View {
                         Text("dB").foregroundStyle(.secondary).fixedSize()
                     }
                 }
-            } third: {
                 item(label: {
                     HStack(spacing: DesignSpacing.xs.pt) {
                         Text("Q")
@@ -1117,7 +1123,7 @@ struct ProductionEqualizerView: View {
             }
 
             if band.dynamic.enabled {
-                pair {
+                flow {
                     item("Direction") {
                         Picker("Direction", selection: binding.dynamic.direction) {
                             ForEach(DynamicEQDirection.allCases) { direction in Text(direction.displayName).tag(direction) }
@@ -1125,27 +1131,17 @@ struct ProductionEqualizerView: View {
                         .labelsHidden().frame(minWidth: enhanced ? 110 : 150)
                         .disabled(band.type == .notch)
                     }
-                } second: {
                     item("Detector") {
                         Picker("Detector", selection: binding.dynamic.detectorMode) {
                             ForEach(DynamicEQDetectorMode.allCases) { mode in Text(mode.displayName).tag(mode) }
                         }
                         .labelsHidden().frame(minWidth: enhanced ? 90 : 120)
                     }
-                }
-
-                pair {
                     metricField("Threshold", .threshold, value: binding.dynamic.thresholdDB, suffix: "dB")
-                } second: {
                     metricField("Ratio", .ratio, value: binding.dynamic.ratio, suffix: ":1")
-                } third: {
                     metricField("Max Cut", .maxCut, value: binding.dynamic.rangeDB, suffix: "dB")
-                }
-                pair {
                     metricField("Attack", .attack, value: binding.dynamic.attackMs, suffix: "ms")
-                } second: {
                     metricField("Release", .release, value: binding.dynamic.releaseMs, suffix: "ms")
-                } third: {
                     if band.dynamic.detectorMode == .rms {
                         metricField("RMS Window", .rmsWindow, value: binding.dynamic.rmsWindowMs, suffix: "ms")
                     }
@@ -1153,11 +1149,9 @@ struct ProductionEqualizerView: View {
 
                 if band.dynamic.direction != .cutOnly {
                     Text("Boost").font(.subheadline.bold()).padding(.top, DesignSpacing.xs.pt)
-                    pair {
+                    flow {
                         metricField("Boost Threshold", .boostThreshold, value: binding.dynamic.boostThresholdDB, suffix: "dB")
-                    } second: {
                         metricField("Boost Ratio", .boostRatio, value: binding.dynamic.boostRatio, suffix: ":1")
-                    } third: {
                         metricField("Max Boost", .maxBoost, value: binding.dynamic.maxBoostDB, suffix: "dB")
                     }
                 }

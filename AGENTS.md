@@ -258,3 +258,4 @@ Every app window and page must fit comfortably on a 1920 x 1080 display without 
 - Controls never force the window wider than its content area; fixed-size controls sit in a `ViewThatFits` or similar reflow, not a bare `HStack`.
 - Vertical scrolling is fine for long pages, but a page's default state has no large empty bands of dead space.
 - A UI slice checks this by hosting the page at 1,280 x 800 and at 1,920 x 1,080 minus the menu bar and Dock (about 1,920 x 1,000), reading the laid-out control frames and asserting that none extends past the page width. Any slice that adds controls to a row re-checks it.
+- Pages use the shared `ProductionPageContainer` (one 1,500 pt content width, same padding, leading aligned) and set no page-level maximum width; control-level widths are fine.

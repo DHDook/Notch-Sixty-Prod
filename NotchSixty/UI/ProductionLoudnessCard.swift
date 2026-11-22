@@ -68,6 +68,24 @@ struct ProductionLoudnessCard: View {
         source == .output ? snapshot.loudnessOutput : snapshot.loudnessInput
     }
 
+    /// The target readout and its preset picker. The readout never wraps letter by letter: it keeps its line and the row
+    /// reflows to a stack when the width runs out.
+    @ViewBuilder
+    private func targetRow(_ extras: LoudnessCardExtras) -> some View {
+        Text(LoudnessHistoryText.target(extras.target))
+            .font(DesignType.caption.font).foregroundStyle(.secondary)
+            .fixedSize(horizontal: true, vertical: false)
+        if !extras.target.fromMatch {
+            Picker("Target", selection: Binding(get: { extras.chosenTarget }, set: extras.onChooseTarget)) {
+                ForEach(LoudnessHistoryTarget.allCases) { Text($0.title).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .frame(maxWidth: 260)
+            .accessibilityIdentifier("meters.loudness.target")
+        }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: DesignSpacing.m.pt) {
             HStack(alignment: .firstTextBaseline, spacing: DesignSpacing.m.pt) {
@@ -104,16 +122,9 @@ struct ProductionLoudnessCard: View {
                     )
                 }
                 if let extras {
-                    HStack {
-                        Text(LoudnessHistoryText.target(extras.target)).font(DesignType.caption.font).foregroundStyle(.secondary)
-                        if !extras.target.fromMatch {
-                            Picker("Target", selection: Binding(get: { extras.chosenTarget }, set: extras.onChooseTarget)) {
-                                ForEach(LoudnessHistoryTarget.allCases) { Text($0.title).tag($0) }
-                            }
-                            .pickerStyle(.segmented)
-                            .frame(maxWidth: 260)
-                            .accessibilityIdentifier("meters.loudness.target")
-                        }
+                    ViewThatFits(in: .horizontal) {
+                        HStack(spacing: DesignSpacing.m.pt) { targetRow(extras) }
+                        VStack(alignment: .leading, spacing: DesignSpacing.s.pt) { targetRow(extras) }
                     }
                     LoudnessHistoryView(history: extras.history, targetLUFS: extras.target.lufs)
                     Text(LoudnessHistoryText.integratedNote + ". Maxima and history clear with Reset.")

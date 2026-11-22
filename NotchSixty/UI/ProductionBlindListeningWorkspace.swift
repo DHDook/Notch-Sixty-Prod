@@ -53,7 +53,7 @@ struct ProductionBlindListeningWorkspace: View {
 
     var body: some View {
         if let profiles, liveAvailable {
-            ScrollView {
+            ProductionPageContainer {
                 VStack(alignment: .leading, spacing: 16) {
                     Picker("Compare", selection: $liveMode) {
                         Text("What Notch Sixty does").tag(true)
@@ -63,12 +63,10 @@ struct ProductionBlindListeningWorkspace: View {
                     .frame(maxWidth: 420)
                     if liveMode { ProductionBlindLiveView(profiles: profiles) } else { fileBody }
                 }
-                .padding(28)
-                .frame(maxWidth: 980, alignment: .topLeading)
             }
             .onChange(of: request.pending) { _, pending in if pending { liveMode = true } }
         } else {
-            ScrollView { fileBody.padding(28).frame(maxWidth: 980, alignment: .topLeading) }
+            ProductionPageContainer { fileBody }
         }
     }
 

@@ -112,7 +112,7 @@ struct ProductionHardwareAcceptanceWorkspace: View {
     }
 
     var body: some View {
-        ScrollView {
+        ProductionPageContainer {
             VStack(alignment: .leading, spacing: 20) {
                 header
                 authorityBoundaryCard
@@ -139,8 +139,6 @@ struct ProductionHardwareAcceptanceWorkspace: View {
                     messageCard(error, isError: true)
                 }
             }
-            .padding(28)
-            .frame(maxWidth: 1_120, alignment: .topLeading)
         }
         .fileExporter(
             isPresented: $showingExporter,

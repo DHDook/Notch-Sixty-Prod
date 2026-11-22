@@ -41,6 +41,7 @@ struct ProductionDynamicsView: View {
     private var configuration: DynamicsConfiguration { engine.dynamicsConfiguration }
 
     var body: some View {
+        ProductionPageContainer(scrolls: false) {
         VStack(alignment: .leading, spacing: DesignSpacing.l.pt) {
             header
             ProductionActionErrorBanner(message: $actionError)
@@ -51,16 +52,18 @@ struct ProductionDynamicsView: View {
 
             HStack(alignment: .top, spacing: DesignSpacing.m.pt) {
                 moduleNavigator
-                    .frame(minWidth: 250, idealWidth: 285, maxWidth: 330)
+                    .frame(width: 300)
+                    .frame(maxHeight: .infinity)
 
                 ScrollView {
                     moduleEditor
                         .padding(.horizontal, DesignSpacing.xs.pt)
                 }
-                .frame(minWidth: 560)
+                .frame(minWidth: 560, maxWidth: .infinity, maxHeight: .infinity)
             }
+            .frame(maxHeight: .infinity)
         }
-        .padding(DesignSpacing.xl.pt)
+        }
         .onAppear {
             configureHistory()
             grAttachment = GainReductionMonitor.shared(for: engine).attach(hertz: GainReductionMonitor.rowHertz)
@@ -994,12 +997,12 @@ struct ProductionDynamicsView: View {
 
             Divider()
 
-            VStack(alignment: .leading, spacing: DesignSpacing.l.pt) {
+            AdaptiveColumnsLayout(minColumnWidth: 400, spacing: DesignSpacing.l.pt) {
                 content()
             }
             .padding(DesignSpacing.xl.pt)
         }
-        .frame(maxWidth: 920, alignment: .topLeading)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
         .designPanel()
         .padding(.bottom, DesignSpacing.xl.pt)
     }

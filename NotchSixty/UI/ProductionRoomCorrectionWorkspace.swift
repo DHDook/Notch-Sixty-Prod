@@ -39,7 +39,7 @@ struct ProductionRoomCorrectionWorkspace: View {
     }
 
     var body: some View {
-        ScrollView {
+        ProductionPageContainer {
             VStack(alignment: .leading, spacing: 20) {
                 header
                 dailyPlaybackCard
@@ -76,8 +76,6 @@ struct ProductionRoomCorrectionWorkspace: View {
                         .background(.red.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
                 }
             }
-            .padding(28)
-            .frame(maxWidth: 940, alignment: .topLeading)
         }
         .task { calibration.prepareForUse() }
         .task(id: profiles.selectedSystemProfileID) {
