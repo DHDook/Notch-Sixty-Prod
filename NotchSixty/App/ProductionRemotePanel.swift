@@ -97,8 +97,6 @@ struct ProductionRemotePanel: View {
         case .waitingForInputDevice: return "Waiting for Input"
         case .recoveringOutput: return "Recovering Output"
         case .stopping: return "Stopping"
-        case .switchingInput: return "Switching Input"
-        case .waitingForInputDevice: return "Waiting for Input"
         }
     }
 
