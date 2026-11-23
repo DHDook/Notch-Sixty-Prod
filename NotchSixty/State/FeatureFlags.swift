@@ -315,11 +315,12 @@ extension FeatureFlag {
 
     /// E12 S12-S14: the Dashboard becomes the status page (cards link, health strip, attention area, now playing) and the
     /// menu bar panel becomes the remote control. Swift UI only; the engine never reads it. Off: today's Dashboard and
-    /// panel. Graduates in E12 S14; removed in the flag-cleanup phase.
+    /// panel. Graduated in E12 S14 (default on, never arms anything); removed in the flag-cleanup phase.
     static let dashboardRemote = FeatureFlag(
         id: "e12.dashboard-remote",
         title: "Dashboard and menu bar remote",
-        epic: "E12"
+        epic: "E12",
+        graduated: true
     )
 
     /// E12 S26-S28: Blind Listening. S26 adds the shared comparison service (`BlindComparisonService`) that the setup

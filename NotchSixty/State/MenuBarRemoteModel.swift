@@ -62,9 +62,6 @@ enum MenuBarRemoteModel {
         RemoteHost.resolve(flagOn: flagOn, trayInserted: trayInserted) == .toolbarPopover
     }
 
-    /// Output changes only while stopped until E12 S14 adds the live switch.
-    static func outputPickerEnabled(idle: Bool) -> Bool { idle }
-
     static func balanceReadout(_ balance: Double) -> String {
         let percent = Int((abs(balance) * 100).rounded())
         if percent == 0 { return "Centre" }

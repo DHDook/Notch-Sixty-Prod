@@ -76,6 +76,9 @@ struct DashboardInputs: Equatable {
     var peakLoad: Float?
     var dropoutEvents = 0
     var latencyMilliseconds: Double?
+    /// Output device latency and I/O buffer in milliseconds (G71); nil when Core Audio does not report them.
+    var deviceLatencyMilliseconds: Double?
+    var bufferMilliseconds: Double?
     var integratedLUFS: Double?
     var truePeakDBTP: Double?
 }
@@ -214,9 +217,15 @@ enum DashboardModel {
             id: "dropouts", title: "Dropouts", value: i.dropoutEvents == 0 ? "None" : "\(i.dropoutEvents)",
             state: i.dropoutEvents == 0 ? .good : .warning))
         if let ms = i.latencyMilliseconds {
-            items.append(.init(id: "latency", title: "Processing latency", value: String(format: "%.1f ms", ms), state: .good))
+            if let device = i.deviceLatencyMilliseconds, let buffer = i.bufferMilliseconds {
+                // G71: processing plus the output device's own latency and its I/O buffer.
+                items.append(.init(
+                    id: "latency", title: "Total latency", value: String(format: "%.1f ms", ms + device + buffer), state: .good))
+            } else {
+                items.append(.init(id: "latency", title: "Processing latency", value: String(format: "%.1f ms", ms), state: .good))
+            }
         } else {
-            items.append(.init(id: "latency", title: "Processing latency", value: "—", state: .unreported))
+            items.append(.init(id: "latency", title: "Total latency", value: "—", state: .unreported))
         }
         return items
     }

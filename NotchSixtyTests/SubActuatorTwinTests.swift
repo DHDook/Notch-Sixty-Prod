@@ -5,6 +5,23 @@ import XCTest
 /// per filter family, and the software-mode volume invariance. Deterministic, all eight rates. Nothing here arms a
 /// real device: the feed is driven offline through `UnifiedGraphHost.processOffline`.
 final class SubActuatorTwinTests: XCTestCase {
+
+    /// E1: these tests compare stage lists and BASS_MGMT against the bus splitter, not output protection (covered by
+    /// `OutputProtectionTests`). `e9.output-protection` graduated (default on) and any test that builds a
+    /// `ProductController` refreshes the process-wide protection state on, which adds sub-lane gain stages and a hard
+    /// limit and moved these results. Pin it off here and restore after.
+    @MainActor override func setUpWithError() throws {
+        let suite = "SubActuator-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        addTeardownBlock { defaults.removePersistentDomain(forName: suite) }
+        UnifiedGraphOutputProtection.refresh(FeatureFlags(
+            known: FeatureFlag.all, defaults: defaults, policy: .launchArgumentOnly,
+            arguments: ["-NotchSixtyFeatures", "-e9.output-protection"]))
+    }
+
+    @MainActor override func tearDownWithError() throws {
+        UnifiedGraphOutputProtection.refresh()
+    }
     private let rates: [Double] = [44_100, 48_000, 88_200, 96_000, 176_400, 192_000, 352_800, 384_000]
     private let block = 480
     // Long enough that the guard's growth detector (energy x6 for 3 blocks) sees a ramp, as with the 3 s production fade.
