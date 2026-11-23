@@ -601,7 +601,7 @@ signal-path view reads what the engine already reports through the snapshot and 
 it adds no work to the audio callback.
 
 - [ ] Signal-path view: every stage in order with its sample rate, bit depth, latency, gain and remaining headroom (owns per-stage headroom beyond E33's four-point meter strip; E33 decision 7)
-- [ ] Lip sync (owner, 17 Nov 2026; end-state review): the view shows the total delay the app adds, with a hint to set the video player's audio offset to match; the total equals the measured delay at the eight rates. In v2 the virtual device reports it to macOS (V2-1 D6)
+- [ ] Lip sync (owner, 17 Nov 2026; end-state review): the view shows the total delay the app adds, with a hint to set the video player's audio offset to match; the total equals the measured delay at the eight rates; it also feeds the virtual driver's reported latency (`AudioInputPathModel.production` `latencySource`, E36 G13). In v2 the virtual device reports it to macOS (V2-1 D6)
 - [ ] Show the EQ linear-phase delay in the signal-path view (E33 G100)
 - [ ] A clear bit-exact indication: shown only when no stage changes the samples (uses the E17 output-integrity checks; includes the bypass bit-transparent indication on the meters, E33 decision 7)
 - [ ] Undo and redo on every page

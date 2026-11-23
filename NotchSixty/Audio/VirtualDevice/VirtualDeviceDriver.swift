@@ -212,6 +212,8 @@ final class DriverStatusModel {
     private let discovery: DriverDiscovery
     private let lease: DriverLeaseWriter
     private(set) var status: DriverStatus = .notInstalled
+    /// The plug-in object seen by the last probe (E36 S6: where the latency writer sends its value).
+    private(set) var plugIn: AudioObjectID?
 
     init(discovery: DriverDiscovery, lease: DriverLeaseWriter) {
         self.discovery = discovery
@@ -220,7 +222,9 @@ final class DriverStatusModel {
 
     @discardableResult
     func refresh() -> DriverStatus {
-        status = discovery.probe(leaseHeld: lease.isActive).status
+        let probed = discovery.probe(leaseHeld: lease.isActive)
+        plugIn = probed.plugIn
+        status = probed.status
         return status
     }
 
