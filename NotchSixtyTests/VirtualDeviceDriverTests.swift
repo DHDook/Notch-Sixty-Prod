@@ -171,6 +171,7 @@ final class VirtualDeviceDriverTests: XCTestCase {
         XCTAssertEqual(plugIn.otherWrites, 0)
         // The real timer runs on its own utility queue, never the main thread or an audio thread.
         let fired = expectation(description: "dispatch timer fires off the main thread")
+        fired.assertForOverFulfill = false  // the 10 ms timer can fire again before cancel()
         let scheduler = DispatchLeaseScheduler()
         let timer = scheduler.schedule(everyMs: 10) {
             if !Thread.isMainThread { fired.fulfill() }
