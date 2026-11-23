@@ -486,9 +486,33 @@ final class SystemSetupFlowModel: ObservableObject {
         syncMeasurementChoices()
     }
 
+    /// E12 S11: set from `e12.setup-flow`; tests switch it on directly. Off leaves verdicts and the limit out.
+    var verdictsEnabled = FeatureFlags().isEnabled(.setupFlow)
+
+    /// One verdict per included seat that has any measurement, worst source wins.
+    var seatVerdicts: [SeatMeasurementVerdict] {
+        guard verdictsEnabled else { return [] }
+        return calibration.seats.filter { $0.included && $0.weight > 0 }.compactMap { seat in
+            let entries = calibration.sources.compactMap { source in
+                calibration.measurements.last { $0.seatID == seat.id && $0.source == source }
+                    .map { (source: source.displayName, quality: $0.channel.quality) }
+            }
+            return MeasurementVerdictRules.verdict(forSeat: entries).map { SeatMeasurementVerdict(seatName: seat.name, verdict: $0) }
+        }
+    }
+
+    /// The correction's upper edge while the microphone has no calibration file; nil when a file lifts it or the flag is off.
+    var correctionLimitHz: Double? {
+        guard verdictsEnabled else { return nil }
+        return SystemSetupCorrectionLimit.limitHz(
+            calibrationFile: microphone.microphoneCalibration?.sourceName,
+            overrideHz: flow.choices.correctionLimitOverrideHz)
+    }
+
     private func syncMeasurementChoices() {
         var choices = flow.choices
         measureProgress.apply(to: &choices)
+        choices.seatVerdicts = verdictsEnabled ? seatVerdicts : nil
         flow.choices = choices
     }
 
@@ -788,6 +812,10 @@ final class SystemSetupFlowModel: ObservableObject {
     /// in music mode when the plan's latency fits the budget at every rate; verification still gates saving). Otherwise
     /// (legacy kernel, no profile) it falls back to the stereo minimum-phase filter through the project controller.
     func applyCorrection() async {
+        if let reason = MeasurementVerdictRules.blockingReason(flow.choices.seatVerdicts) {
+            message = reason
+            return
+        }
         do {
             if !correctionIsPrepared { prepareCorrection() }
             guard correctionIsPrepared else { return }
@@ -818,7 +846,7 @@ final class SystemSetupFlowModel: ObservableObject {
                 seatPredictions = []
             } else {
                 let design = try roomProjects.generateDesign(
-                    parameters: SystemSetupCorrectionPlan.defaultParameters, name: "Guided Setup \(correctionTarget.title)")
+                    parameters: SystemSetupCorrectionPlan.parameters(limitHz: correctionLimitHz), name: "Guided Setup \(correctionTarget.title)")
                 let report = try roomProjects.verification(for: design)
                 try roomProjects.deploySelectedDesign()
                 seatPredictions = SystemSetupSeatPrediction.make(from: report)
@@ -843,6 +871,8 @@ final class SystemSetupFlowModel: ObservableObject {
         let included = calibration.seats.filter { $0.included && $0.weight > 0 }
         guard !included.isEmpty else { return nil }
         let mode = forceMode ?? correctionMode.latencyMode
+        let limitHz = correctionLimitHz
+        let gridFrequencies = limitHz == nil ? [] : try RoomCorrectionCore.gridFrequencies()
         var lanes: [RoomCorrectionLaneDesign] = []
         for (source, lane) in [(MultichannelCalibrationSource.speaker(.frontLeft), shape.frontLeft),
                                (.speaker(.frontRight), shape.frontRight)] {
@@ -856,9 +886,10 @@ final class SystemSetupFlowModel: ObservableObject {
                 }
                 return .init(samples: measurement.channel.impulseResponse, arrivalFrames: arrival * rate, weight: seat.weight)
             }
-            let grid = try await Task.detached(priority: .userInitiated) {
+            var grid = try await Task.detached(priority: .userInitiated) {
                 try RoomCorrectionCore.designGrid(seats: seats, sampleRate: rate, mainSeat: 0, mode: mode)
             }.value
+            if let limitHz { SystemSetupCorrectionLimit.apply(to: &grid, frequenciesHz: gridFrequencies, limitHz: limitHz) }
             lanes.append(RoomCorrectionLaneDesign(lane: lane, grid: grid))
         }
         guard !lanes.isEmpty else { return nil }
@@ -1543,7 +1574,9 @@ private struct SystemSetupMicrophoneStep: View {
                 microphone: microphone, locked: model.noiseIsPlaying,
                 onSelect: { model.selectMicrophone(uid: $0) })
             if microphone.permissionStatus == .authorized, microphone.microphoneCalibration == nil {
-                Text("No calibration file. Import one in the Calibrate tab for the most accurate results.")
+                Text(model.verdictsEnabled
+                     ? SystemSetupCorrectionLimit.note(limitHz: model.correctionLimitHz)
+                     : "No calibration file. Import one in the Calibrate tab for the most accurate results.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Divider()
@@ -1661,6 +1694,10 @@ private struct SystemSetupMeasureStep: View {
                         Image(systemName: progress.isComplete(seat) ? "checkmark.circle.fill" : "circle")
                         if let latest = calibration.measurements.last(where: { $0.seatID == seat.id }) {
                             RepeatSummaryNote(quality: latest.channel.quality)
+                        }
+                        if let verdict = model.choices.seatVerdicts?.first(where: { $0.seatName == seat.name })?.verdict {
+                            Text("\(verdict.level.title): \(verdict.reason)")
+                                .font(.caption).foregroundStyle(verdict.level >= .limited ? .orange : .secondary)
                         }
                         if progress.isComplete(seat) {
                             Button("Re-measure") { model.startRemeasure(seatID: seat.id) }.disabled(model.isMeasuring)
@@ -1850,6 +1887,9 @@ private struct SystemSetupCorrectionStep: View {
             Text("Notch Sixty flattens the bumps and dips your seats share, using the measurements you already made. Nothing is measured again.")
                 .font(.callout).foregroundStyle(.secondary)
             if let note = model.correctionNote { Label(note, systemImage: "info.circle").font(.callout) }
+            if let limit = model.correctionLimitHz {
+                Label(SystemSetupCorrectionLimit.note(limitHz: limit), systemImage: "exclamationmark.triangle").font(.callout)
+            }
             if let advice = model.receiverAdvice { Text(advice).font(.callout).foregroundStyle(.secondary) }
             Picker("Listening", selection: $model.correctionMode) {
                 ForEach(SystemSetupCorrectionMode.allCases) { Text($0.title).tag($0) }

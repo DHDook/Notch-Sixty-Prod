@@ -77,6 +77,10 @@ struct SystemSetupChoices: Codable, Equatable, Sendable {
     var designKind: SystemSetupDesignKind = .minimumPhase
     var verificationPassed: Bool?
     var profileName: String = ""
+    /// E12 S11: one verdict per measured seat (nil with `e12.setup-flow` off, and in sessions saved before it).
+    var seatVerdicts: [SeatMeasurementVerdict]?
+    /// E12 S11: the expert setting for the no-calibration-file correction limit (nil means the default).
+    var correctionLimitOverrideHz: Double?
 }
 
 // MARK: - Refusals
@@ -150,6 +154,7 @@ struct SystemSetupFlow: Codable, Equatable, Sendable {
                 return "The quick setup measures one seat. Open the full setup for more."
             }
             if c.measurementIDs.count != c.seatNames.count { return "Measure every seat." }
+            if let reason = MeasurementVerdictRules.blockingReason(c.seatVerdicts) { return reason }
         case .alignment:
             if !c.alignmentApplied { return "Apply the alignment first." }
         case .bass:
