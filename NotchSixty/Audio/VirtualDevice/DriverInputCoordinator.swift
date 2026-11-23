@@ -30,9 +30,16 @@ final class DriverInputCoordinator {
     private let store: any PreviousOutputStoring
     private let hooks: InputSwitchHooks
     private let virtualDeviceUID: String
+    private let latency: DriverLatencyReporter?
+    private let latencySource: () -> DriverLatencyInputs?
 
+    /// `latency` and `latencySource` (E36 S6): the delay macOS is told about while the driver path is on. A source that
+    /// returns nil (nothing known yet) writes nothing.
     init(driver: DriverStatusModel, output: any SystemOutputControlling, store: any PreviousOutputStoring,
-         hooks: InputSwitchHooks = InputSwitchHooks(), virtualDeviceUID: String = N60_VD_DEVICE_UID) {
+         hooks: InputSwitchHooks = InputSwitchHooks(), virtualDeviceUID: String = N60_VD_DEVICE_UID,
+         latency: DriverLatencyReporter? = nil, latencySource: @escaping () -> DriverLatencyInputs? = { nil }) {
+        self.latency = latency
+        self.latencySource = latencySource
         self.driver = driver
         self.output = output
         self.store = store
@@ -61,7 +68,7 @@ final class DriverInputCoordinator {
         guard path == .virtualDriver else { return }
         switch lifecycle.state {
         case .running:
-            if !driver.refresh().isUsable { enterWaiting(for: driver.status) }
+            if !driver.refresh().isUsable { enterWaiting(for: driver.status) } else { publishLatency() }
         case .waitingForInputDevice:
             move(to: .switchingInput)
             engageDriver()
@@ -69,10 +76,17 @@ final class DriverInputCoordinator {
         }
     }
 
+    /// Writes the current total delay to the driver when it changed. Control plane only; called by the poll and on engage.
+    func publishLatency() {
+        guard path == .virtualDriver, let latency, let plugIn = driver.plugIn, let inputs = latencySource() else { return }
+        latency.report(plugIn: plugIn, inputs: inputs)
+    }
+
     /// Normal Quit: restore the output first, then release the lease at once.
     func shutdownForTermination() {
         restoreOutput()
         driver.releaseLease()
+        latency?.reset()
     }
 
     /// First launch after a crash: gives the output back if the crashed run left the virtual device as the default.
@@ -98,6 +112,7 @@ final class DriverInputCoordinator {
         }
         hooks.applySource(.virtualDriver)
         hooks.fadeIn()
+        publishLatency()
         statusMessage = nil
         move(to: .running)
     }
@@ -105,6 +120,7 @@ final class DriverInputCoordinator {
     private func releaseDriver() {
         restoreOutput()
         driver.releaseLease()
+        latency?.reset()
         path = .processTap
         statusMessage = nil
         hooks.applySource(.processTap)

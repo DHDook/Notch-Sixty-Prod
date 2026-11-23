@@ -93,6 +93,8 @@ final class AudioInputPathModel: ObservableObject {
 
     var presentation: AudioInputPathPresentation { AudioInputPathPresentation(status: status) }
     var canOpenDownloadPage: Bool { downloadURL != nil }
+    /// Every driver-only feature with its availability and "Needs the driver" note (E36 S6a; one registry).
+    var unlocks: [DriverUnlockPresentation] { DriverUnlockRegistry.presentation(path: selectedPath, status: status) }
 
     func refresh() {
         status = probe()
@@ -145,13 +147,17 @@ final class AudioInputPathModel: ObservableObject {
     }
 
     /// Production wiring (E36 S5): real Core Audio status, system output and persisted previous-output record.
-    static func production(openURL: @escaping (URL) -> Void) -> AudioInputPathModel {
+    /// `latencySource` supplies the total added delay plus the DAC latency; E31 provides the production value (gap G13).
+    static func production(
+        openURL: @escaping (URL) -> Void, latencySource: @escaping () -> DriverLatencyInputs? = { nil }
+    ) -> AudioInputPathModel {
         let access = SystemHALPropertyStore()
         let driver = DriverStatusModel(
             discovery: DriverDiscovery(access: access),
             lease: DriverLeaseWriter(access: access))
         let coordinator = DriverInputCoordinator(
-            driver: driver, output: CoreAudioSystemOutputController(), store: UserDefaultsPreviousOutputStore())
+            driver: driver, output: CoreAudioSystemOutputController(), store: UserDefaultsPreviousOutputStore(),
+            latency: DriverLatencyReporter(access: access), latencySource: latencySource)
         return AudioInputPathModel(
             probe: { driver.refresh() }, downloadURL: nil, openURL: openURL, coordinator: coordinator)
     }

@@ -32,6 +32,19 @@ struct AudioInputPathSettingsSection: View {
                 VStack(alignment: .leading) { actionButtons(presentation) }
             }
 
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Needs the driver").font(.subheadline.weight(.semibold))
+                ForEach(model.unlocks, id: \.unlock) { row in
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(row.unlock.title).font(.caption.weight(.semibold))
+                        Text(row.unlock.summary).font(.caption).foregroundStyle(.secondary)
+                        if let note = row.note { Text(note).font(.caption2).foregroundStyle(.secondary) }
+                    }
+                    .opacity(row.available ? 1 : 0.6)
+                    .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+
             Text(AudioInputPathPresentation.crashWarning)
                 .font(.caption)
                 .foregroundStyle(.secondary)
