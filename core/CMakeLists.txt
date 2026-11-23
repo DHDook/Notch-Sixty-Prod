@@ -531,6 +531,11 @@ add_executable(n60core_anc_design_test tests/test_anc_design.cpp)
 target_link_libraries(n60core_anc_design_test PRIVATE n60core)
 add_test(NAME n60core_anc_design COMMAND n60core_anc_design_test)
 
+# E36 S3: virtual driver programme ring and clock steering (n60/vd_ring.h).
+add_executable(n60core_vd_ring_test tests/test_vd_ring.cpp)
+target_link_libraries(n60core_vd_ring_test PRIVATE n60core)
+add_test(NAME n60core_vd_ring COMMAND n60core_vd_ring_test)
+
 # E21 S3: FFT backends. test_fft_backend compares vDSP with the in-house transforms and checks vDSP allocates nothing in
 # forward and inverse; the portable-library copies keep the old FFT paths under test on Apple.
 add_executable(n60core_parity_suite_test tests/test_parity_suite.c)

@@ -7,9 +7,9 @@ documentation; no third-party code.
 
 ## Scope
 
-Control only. The protocol says nothing about how programme audio moves from the driver to the app: that transport
-is E36 G1 and is not chosen yet. Nothing here runs on an audio thread; the sandboxed app uses only public property
-calls (no mach-lookup or group entitlement).
+The properties below are control only. Programme audio moves through a shared-memory ring (transport A, E36 G1 closed
+23 Nov 2026): see "Programme ring". Nothing in the property protocol runs on an audio thread; the sandboxed app uses only
+public property calls (no mach-lookup exception).
 
 ## Discovery
 
@@ -30,7 +30,33 @@ All are custom properties on the plug-in object, scope global, element main. Sel
 | `N60_VD_PROP_LAYOUT` | `n6ly` | write | uint32 layout code (stereo to 7.1.4) | S3 |
 | `N60_VD_PROP_LATENCY` | `n6lt` | write | uint32 frames of added delay | S6 |
 
-S3 and S6 fix the value encodings when they build them; the selectors are reserved now so a driver can publish them.
+### Value encodings (S3)
+
+Native-endian, one property call per value; `N60VirtualDeviceProtocol.h` has the macros.
+
+- `n6cs` clock scalar: float64, the factor the driver multiplies its clock by. 1.0 nominal, always within 1 +- 0.001
+  (`N60_VD_CLOCK_SCALAR_MAX_PPM`). The app writes it every 250 ms with the lease while the driver path is on.
+- `n6dr` DAC rates: float64 array, 1 to 32 entries, ascending, Hz. The rates the driver offers; the app writes the DAC's
+  rates up to 384 kHz, and a one-entry list pins the device to one rate.
+- `n6ly` layout: uint32 code, `N60_VD_LAYOUT_STEREO` (1, 2 channels), `_5_1` (2, 6), `_7_1` (3, 8), `_5_1_4` (4, 10),
+  `_7_1_4` (5, 12).
+- `n6lt` latency (S6a): uint32 frames of added delay.
+
+## Programme ring (S3)
+
+Header `core/include/n60/vd_ring.h` (copied into the driver repository). The driver creates a POSIX shared-memory object
+and writes interleaved float32 frames; the app maps it read-only and reads it from the DAC's callback. There is no input
+stream, so macOS shows neither the orange nor the purple capture indicator and asks for no microphone permission.
+
+- Name: `<app group id>/n60vd`, at most 31 characters in all (macOS shared-memory limit). The app group id is
+  `<TeamID>.group.n60vd` (22 characters). The app needs only the app-group entitlement; no mach-lookup exception (the
+  Mach handshake, A1, needs one and is not used).
+- Size is fixed at 8 MiB (`N60_VD_RING_BYTES`): 384 kHz with 12 channels holds 0.45 s.
+- Header, 4096 bytes, then the frames. The writer is the only writer of `writeFrames` (release); a restart bumps `epoch`.
+  The reader primes to 1024 frames, drops back to that level if the ring runs half full, and re-primes after running dry.
+- The driver must not advertise an input stream and must not become the default input device: the stub probe's input
+  stream made macOS choose it as the default input. The device is output only.
+- The app steers the driver's clock with the scalar above so the fill stays at the target; no resampling.
 
 ## Version gate
 
