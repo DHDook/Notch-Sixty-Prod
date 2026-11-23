@@ -64,6 +64,10 @@ struct QuietZoneHALClockAnalyzer: Sendable {
     static let maximumNominalRateErrorPPM = 200.0
     static let maximumWorstResidualSeconds = 0.0005
 
+    /// E21 S10a: the analysis runs in `libn60core` (`n60/anc_design.h`). Defaults to `e21.core-designers` when the analyzer
+    /// is made; parity tests set it explicitly. Off: the Swift maths below, unchanged (the parity reference, deleted in S14).
+    var useCoreMaths = FeatureFlags.isEnabledProcessWide(.coreDesigners)
+
     func analyze(_ trace: QuietZoneHALClockTrace) throws
         -> QuietZoneHALClockHealth {
         guard !trace.inputDeviceID.isEmpty,
@@ -71,6 +75,7 @@ struct QuietZoneHALClockAnalyzer: Sendable {
               trace.nominalSampleRate.isFinite,
               (8_000...768_000).contains(trace.nominalSampleRate)
         else { throw QuietZoneHALClockError.invalidTimebase }
+        if useCoreMaths { return try QuietZoneDesignCore.analyzeClock(trace) }
 
         let input = try evaluate(trace.inputObservations)
         let output = try evaluate(trace.outputObservations)

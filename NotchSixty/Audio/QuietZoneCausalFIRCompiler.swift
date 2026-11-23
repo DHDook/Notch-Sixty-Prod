@@ -43,6 +43,9 @@ struct QuietZoneCausalFIRCompiler: Sendable {
     /// compiled pair is one common-mode filter there and cannot fight through a shared sub. Off, the compile is
     /// bit-identical to before.
     var bassConditioning = false
+    /// E21 S10a: the compile runs in `libn60core` (`n60/anc_design.h`). Defaults to `e21.core-designers` when the compiler is
+    /// made; parity tests set it explicitly. Off: the Swift maths below, unchanged (the parity reference, deleted in S14).
+    var useCoreMaths = FeatureFlags.isEnabledProcessWide(.coreDesigners)
     /// Weight of the L = R tie rows against the unit-weight fit rows, and the largest relative L/R difference the
     /// compiled pair may keep in a tied band.
     static let commonModeTieWeight = 10.0
@@ -73,6 +76,13 @@ struct QuietZoneCausalFIRCompiler: Sendable {
               let reserve = budget.conservativeReserveSeconds,
               reserve.isFinite, reserve >= 0.002 else {
             throw QuietZoneCausalFIRError.invalidReferenceClock
+        }
+        if useCoreMaths {
+            guard design.safePreviewOnly, !measurements.isEmpty, measurements.count == design.bands.count,
+                  measurements.count <= 64 else { throw QuietZoneCausalFIRError.invalidModel }
+            return try QuietZoneDesignCore.compile(
+                design: design, measurements: measurements, budget: budget, sampleRate: sampleRate, tapCount: tapCount,
+                bassConditioning: bassConditioning)
         }
         let model = measurements.sorted { $0.frequencyHz < $1.frequencyHz }
         let target = design.bands.sorted { $0.frequencyHz < $1.frequencyHz }
