@@ -48,9 +48,12 @@ final class MenuBarRemoteTests: XCTestCase {
         XCTAssertEqual(RemoteSlot.beforeAfter.owner, "E12 S27")
     }
 
-    func testOutputPickerOnlyWhileIdleAndBalanceReadout() {
-        XCTAssertTrue(MenuBarRemoteModel.outputPickerEnabled(idle: true))
-        XCTAssertFalse(MenuBarRemoteModel.outputPickerEnabled(idle: false))
+    func testOutputPickerWorksWhileRunningAndBalanceReadout() {
+        XCTAssertTrue(MenuBarRemoteModel.outputPickerEnabled(lifecycle: .idle, switching: false))
+        XCTAssertTrue(MenuBarRemoteModel.outputPickerEnabled(lifecycle: .running, switching: false))
+        XCTAssertTrue(MenuBarRemoteModel.outputPickerEnabled(lifecycle: .recoveringOutput, switching: false))
+        XCTAssertFalse(MenuBarRemoteModel.outputPickerEnabled(lifecycle: .starting, switching: false))
+        XCTAssertFalse(MenuBarRemoteModel.outputPickerEnabled(lifecycle: .running, switching: true))
         XCTAssertEqual(MenuBarRemoteModel.balanceReadout(0), "Centre")
         XCTAssertEqual(MenuBarRemoteModel.balanceReadout(-0.25), "L 25")
         XCTAssertEqual(MenuBarRemoteModel.balanceReadout(0.5), "R 50")

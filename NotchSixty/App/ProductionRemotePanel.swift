@@ -12,6 +12,7 @@ struct ProductionRemotePanel: View {
     @AppStorage(PreferenceKeys.Application.volumeStepResolution)
     private var storedVolumeStepResolution = ApplicationVolumeStepResolution.standard.rawValue
     @State private var commandError: String?
+    @State private var switchingOutput = false
     @StateObject private var beforeAfter: BeforeAfterModel
 
     init(product: ProductController) {
@@ -19,6 +20,19 @@ struct ProductionRemotePanel: View {
         _beforeAfter = StateObject(wrappedValue: BeforeAfterModel(player: ProfileContentAuditionPlayer(profiles: product.profiles)))
         _profiles = ObservedObject(wrappedValue: product.profiles)
         engine = product.audioEngine
+    }
+
+    /// E12 S14 (G10): fade out, stop, select and start again; a failed switch returns to the previous device.
+    private func switchOutput(to uid: String?) {
+        guard !switchingOutput else { return }
+        switchingOutput = true
+        let switcher = LiveOutputSwitch(transport: OutputSwitchEngineTransport(
+            engine: engine, start: { try await product.startProcessing() }))
+        Task { @MainActor in
+            let outcome = await switcher.switchOutput(to: uid)
+            commandError = outcome.errorMessage
+            switchingOutput = false
+        }
     }
 
     private func perform(_ action: () throws -> Void) {
@@ -217,7 +231,7 @@ struct ProductionRemotePanel: View {
             Text("Output").font(.subheadline.weight(.semibold))
             Picker("Output device", selection: Binding(
                 get: { engine.routeConfiguration.selectedOutputUID },
-                set: { uid in perform { try engine.selectOutput(uid: uid) } }
+                set: { uid in switchOutput(to: uid) }
             )) {
                 Text("No Output").tag(String?.none)
                 ForEach(engine.outputDevices) { device in
@@ -227,11 +241,10 @@ struct ProductionRemotePanel: View {
             .labelsHidden()
             .pickerStyle(.menu)
             .frame(maxWidth: .infinity)
-            .disabled(!MenuBarRemoteModel.outputPickerEnabled(idle: engine.lifecycleState == .idle))
+            .disabled(!MenuBarRemoteModel.outputPickerEnabled(lifecycle: engine.lifecycleState, switching: switchingOutput))
             .accessibilityLabel("Output device")
-            if engine.lifecycleState != .idle {
-                Text("Switch processing off to change the output.")
-                    .font(.caption).foregroundStyle(.secondary)
+            if switchingOutput {
+                Text("Switching output…").font(.caption).foregroundStyle(.secondary)
             }
         }
     }
