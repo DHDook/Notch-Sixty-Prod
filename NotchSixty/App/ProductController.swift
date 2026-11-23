@@ -88,6 +88,8 @@ final class ProductController: ObservableObject {
     let recovery: ProductRecoveryController
     let headroomAssistant: HeadroomAssistantController
     let reference: ProductionReferenceNavigator
+    /// E36 S5: the Settings audio input path (tap or virtual driver), owned here so Quit can restore the system output.
+    let audioInputPath = AudioInputPathModel.production(openURL: { NSWorkspace.shared.open($0) })
     private var calibrationObservation: AnyCancellable?
     private var multichannelCalibrationObservation: AnyCancellable?
     private var ambientCompensationObservation: AnyCancellable?
@@ -382,6 +384,10 @@ final class ProductController: ObservableObject {
         ambientCompensation.prepareForUse()
         activeQuietZone.prepareForUse()
         hardwareAcceptance.prepareForUse()
+        if FeatureFlags().isEnabled(.virtualDriver) {
+            audioInputPath.coordinator?.recoverAfterCrash()
+            audioInputPath.startMonitoring()
+        }
     }
 
     func openNormallyFromSafeLaunch() throws {
@@ -607,6 +613,8 @@ final class ProductController: ObservableObject {
         multichannelCalibration.cancelMeasurement()
         calibration.cancelMeasurement()
         audioEngine.shutdownForTermination()
+        audioInputPath.coordinator?.shutdownForTermination()
+        audioInputPath.stopMonitoring()
         recovery.markCleanTermination()
     }
 

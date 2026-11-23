@@ -18,6 +18,10 @@ extern "C" {
 /// Bundle identifier of the driver's plug-in, looked up with kAudioHardwarePropertyTranslateBundleIDToPlugIn.
 #define N60_VD_PLUGIN_BUNDLE_ID "com.dhdook.NotchSixty.VirtualDriver"
 
+/// Device UID of the virtual output device the plug-in publishes while a lease is valid (E36 S5: the app takes over
+/// and restores the macOS default output by this UID). The driver (X2) must publish exactly this UID.
+#define N60_VD_DEVICE_UID "com.dhdook.NotchSixty.VirtualDriver.Device"
+
 /// Custom property selectors on the plug-in object (scope global, element main). Four-character codes.
 #define N60_VD_PROP_PROTOCOL_VERSION 0x6e367076u /* 'n6pv' read: uint32 protocol version the driver speaks */
 #define N60_VD_PROP_LEASE            0x6e366c73u /* 'n6ls' write: N60VDLease */
