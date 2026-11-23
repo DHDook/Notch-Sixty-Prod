@@ -246,6 +246,13 @@ enum SystemSetupCorrectionPlan {
     static let defaultParameters = RoomCorrectionDesignParameters(
         correctionLowHz: 30, correctionHighHz: 20_000, smoothingOctaves: 1.0 / 6.0,
         maximumBoostDB: 4, maximumCutDB: 8, requestedTapCount: 4_096)
+
+    /// `defaultParameters` with the upper edge lowered to `limitHz` (E12 S11); nil leaves the full range.
+    static func parameters(limitHz: Double?) -> RoomCorrectionDesignParameters {
+        var parameters = defaultParameters
+        if let limitHz { parameters.correctionHighHz = min(parameters.correctionHighHz, limitHz) }
+        return parameters
+    }
 }
 
 /// What the Correction step shows for each seat: predicted error against the target before and after.
