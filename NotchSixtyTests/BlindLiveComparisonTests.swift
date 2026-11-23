@@ -54,7 +54,7 @@ final class BlindLiveComparisonTests: XCTestCase {
     func testCandidateListHasCurrentOffAndEveryPreset() {
         let preset = ContentPreset(name: "Bright", origin: .user, state: ContentPresetState(stereoEQ: state(gain: 4).stereoEQ))
         let list = candidates(state(), presets: [preset])
-        XCTAssertEqual(list.map(\.name), ["Current settings", "Processing off", "Bright"])
+        XCTAssertEqual(list.map(\.name), ["Current settings", "Processing off (equaliser, preamp, dynamics)", "Bright"])
         XCTAssertEqual(Set(list.map(\.id)).count, 3)
         XCTAssertEqual(list[0].state, state())
     }

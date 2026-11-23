@@ -15,6 +15,29 @@
     "roomCorrectionProjects": { "type": "array", "items": { "$ref": "room-correction-project.v2.schema.json" } },
     "measurementLabSessions": { "type": "array", "items": { "type": "object" } },
     "binauralAssets": { "type": "array", "items": { "type": "object" } },
+    "blindListeningHistory": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["schemaVersion", "id", "date", "kind", "sideA", "sideB", "trialCount", "pValue", "outcome"],
+        "properties": {
+          "schemaVersion": { "const": 2 },
+          "id": { "type": "string" },
+          "date": { "type": "number" },
+          "kind": { "enum": ["canIHearIt", "preference", "twoFiles"] },
+          "sideA": { "type": "string" },
+          "sideB": { "type": "string" },
+          "trialCount": { "type": "integer", "minimum": 1 },
+          "correctCount": { "type": "integer", "minimum": 0 },
+          "preferredA": { "type": "integer", "minimum": 0 },
+          "preferredB": { "type": "integer", "minimum": 0 },
+          "pValue": { "type": "number" },
+          "outcome": { "type": "string" },
+          "trialsCorrect": { "type": "array", "items": { "type": "boolean" } }
+        }
+      }
+    },
     "preferences": {
       "type": "object",
       "additionalProperties": false,

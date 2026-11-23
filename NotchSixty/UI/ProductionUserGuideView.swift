@@ -643,7 +643,7 @@ enum ProductionUserGuideCatalog {
             id: "blind-listening",
             category: .advanced,
             title: "Blind Listening",
-            summary: "Explore differences between two local, carefully matched audio excerpts with randomized A/B/X trials.",
+            summary: "Test what Notch Sixty does, or two recordings, with blind trials. Loudness is matched for you.",
             systemImage: "ear.badge.waveform",
             keywords: ["blind", "ABX", "listening", "trial", "statistical", "p-value", "audio test"],
             sections: [
@@ -651,8 +651,8 @@ enum ProductionUserGuideCatalog {
                     "abx-start",
                     "Prepare a fair, safe offline comparison",
                     [
-                        "Stop Notch Sixty live processing before using Blind Listening. This tool plays user-provided audio files through macOS default audio playback at reduced software volume; it does not switch processing presets or verify the selected device. Start with your system hardware volume low.",
-                        "Import two stereo PCM excerpts of the same passage and length, with identical sample rate, arrangement and mastering except for the deliberately compared difference. The app refuses file RMS mismatch greater than 0.10 dB and unsafe sample peaks; this is not a perceptual loudness-match or an alignment proof."
+                        "For two recordings, stop Notch Sixty playback first. The files play on the output device you selected, at a level you set with a slider that starts low. Start with your hardware volume low.",
+                        "Choose two stereo recordings of the same passage. The page turns the louder one down to match and cuts both to the shorter length. You can loop a passage, and switching keeps your place."
                     ]
                 ),
                 section(
@@ -660,7 +660,7 @@ enum ProductionUserGuideCatalog {
                     "Listen to A, B and the hidden X source",
                     [
                         "Choose 12, 16 or 24 trials. During each trial, audition the known A and B references and hidden X, then guess whether X matches A or B. The hidden assignment changes independently on every trial, without a predictable fixed balance. X must be played before making a choice.",
-                        "After all trials, the app reveals the count correct and an exact one-sided binomial fair-guess probability. Even a low p-value does not establish universal audibility, physical acoustic improvement, headphone SPL safety, or release approval. You can export the evidence as JSON, or leave it on-device."
+                        "After all trials, the app reveals the count correct and an exact one-sided binomial fair-guess probability. Even a low p-value does not establish universal audibility, physical acoustic improvement, headphone SPL safety, or release approval. Each finished test is kept in a list on this Mac and in your backup; saving a copy is optional."
                     ]
                 )
             ]

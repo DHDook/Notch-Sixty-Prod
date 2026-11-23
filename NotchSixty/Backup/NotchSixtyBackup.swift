@@ -49,6 +49,9 @@ struct NotchSixtyBackupBundle: Codable, Sendable {
     var measurementLabSessions: [SpeakerMeasurementLabSession]
     var binauralAssets: [BinauralProfileAsset]
     var preferences: NotchSixtyBackupPreferences
+    /// E12 S28: finished Blind Listening tests. Optional so older backups still decode; the manifest lists the domain
+    /// only when the list is present and not empty.
+    var blindListeningHistory: [BlindTestRecord]? = nil
     var manifest: NotchSixtyBackupManifest
 }
 
@@ -105,6 +108,7 @@ final class NotchSixtyBackupService {
     private let roomStore: RoomCorrectionProjectStore
     private let labStore: SpeakerMeasurementLabSessionStore
     private let binauralStore: BinauralProfileAssetStore
+    private let blindHistory: BlindTestHistoryStore?
 
     private enum RollbackValue<T> {
         case absent
@@ -117,8 +121,10 @@ final class NotchSixtyBackupService {
         labStore: SpeakerMeasurementLabSessionStore =
             SpeakerMeasurementLabSessionStore(),
         binauralStore: BinauralProfileAssetStore =
-            BinauralProfileAssetStore()
+            BinauralProfileAssetStore(),
+        blindHistory: BlindTestHistoryStore? = nil
     ) {
+        self.blindHistory = blindHistory
         self.profiles = profiles
         self.roomStore = roomStore
         self.labStore = labStore
@@ -152,12 +158,14 @@ final class NotchSixtyBackupService {
         for session in sessions { try session.validateStructure() }
         for asset in assets { try asset.validate() }
 
+        let history = blindHistory.map(\.records).flatMap { $0.isEmpty ? nil : $0 }
         let manifest = try makeManifest(
             profiles: profileSnapshot,
             projects: projects,
             sessions: sessions,
             assets: assets,
-            preferences: preferences
+            preferences: preferences,
+            blindHistory: history
         )
 
         let bundle = NotchSixtyBackupBundle(
@@ -169,6 +177,7 @@ final class NotchSixtyBackupService {
             measurementLabSessions: sessions,
             binauralAssets: assets,
             preferences: preferences,
+            blindListeningHistory: history,
             manifest: manifest
         )
         return try Self.encoder().encode(bundle)
@@ -243,6 +252,7 @@ final class NotchSixtyBackupService {
 
             let profileReport =
                 try profiles.restoreBackupSnapshot(bundle.profiles)
+            if let records = bundle.blindListeningHistory { blindHistory?.merge(records) }
 
             return (
                 NotchSixtyBackupRestoreReport(
@@ -340,7 +350,8 @@ final class NotchSixtyBackupService {
             projects: bundle.roomCorrectionProjects,
             sessions: bundle.measurementLabSessions,
             assets: bundle.binauralAssets,
-            preferences: bundle.preferences
+            preferences: bundle.preferences,
+            blindHistory: bundle.blindListeningHistory.flatMap { $0.isEmpty ? nil : $0 }
         )
         guard expected == bundle.manifest else {
             let actualByDomain = Dictionary(
@@ -359,9 +370,10 @@ final class NotchSixtyBackupService {
         projects: [RoomCorrectionProject],
         sessions: [SpeakerMeasurementLabSession],
         assets: [BinauralProfileAsset],
-        preferences: NotchSixtyBackupPreferences
+        preferences: NotchSixtyBackupPreferences,
+        blindHistory: [BlindTestRecord]? = nil
     ) throws -> NotchSixtyBackupManifest {
-        let domains: [(String, Data)] = [
+        var domains: [(String, Data)] = [
             ("profiles", try Self.encoder().encode(profiles)),
             (
                 "room-correction-projects",
@@ -374,6 +386,9 @@ final class NotchSixtyBackupService {
             ("binaural-assets", try Self.encoder().encode(assets)),
             ("preferences", try Self.encoder().encode(preferences)),
         ]
+        if let blindHistory {
+            domains.append(("blind-listening-history", try Self.encoder().encode(blindHistory)))
+        }
         let entries = domains.map { domain, data in
             NotchSixtyBackupManifestEntry(
                 domain: domain,

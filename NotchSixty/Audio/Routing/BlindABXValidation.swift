@@ -135,9 +135,10 @@ struct BlindABXFileMetrics: Equatable, Sendable {
 }
 
 struct BlindABXPreflight: Sendable {
+    /// E12 S28 (G49): the page matches loudness and trims to the shorter file itself, so differing loudness, length,
+    /// rate or peaks are no longer refusals. Only a file that cannot be played at all is refused.
     static func reasons(a: BlindABXFileMetrics,
                         b: BlindABXFileMetrics) -> [String] {
-        var reasons: [String] = []
         for item in [a, b] {
             if !item.sampleRate.isFinite
                 || !(8_000...384_000).contains(item.sampleRate)
@@ -146,20 +147,9 @@ struct BlindABXPreflight: Sendable {
                 || item.frameCount > Int64(item.sampleRate * 90)
                 || !item.rmsDBFS.isFinite
                 || !item.samplePeakDBFS.isFinite {
-                reasons.append("Both sources must be valid stereo PCM, at a supported rate and no longer than 90 seconds.")
-                return reasons
-            }
-            if item.samplePeakDBFS > -1 {
-                reasons.append("Source sample peak must stay below -1 dBFS; reduce gain and re-export both excerpts.")
+                return ["Both files must be valid stereo recordings, at a supported rate and no longer than 90 seconds."]
             }
         }
-        if abs(a.sampleRate - b.sampleRate) >= 0.5
-            || a.frameCount != b.frameCount {
-            reasons.append("Both sources need identical sample rate and sample count; align and re-export the excerpts.")
-        }
-        if abs(a.rmsDBFS - b.rmsDBFS) > 0.10 {
-            reasons.append("Measured file RMS differs by more than 0.10 dB; loudness-match and re-export before testing.")
-        }
-        return reasons
+        return []
     }
 }

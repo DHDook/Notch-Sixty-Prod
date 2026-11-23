@@ -1,5 +1,6 @@
 import Combine
 import SwiftUI
+import UniformTypeIdentifiers
 
 // E12 S27 (behind `e12.blind-listening`): "Test what Notch Sixty does". Pick two sides, pick a test, listen to your own
 // music on the selected output. Control plane only; every switch goes through `BlindComparisonService`.
@@ -15,7 +16,10 @@ final class BlindLiveModel: ObservableObject {
 
     private let profiles: ProductProfileController
     private let player: ContentAuditionPlaying
+    private let history: BlindTestHistoryStore
     private var forwarding: AnyCancellable?
+    private var names: (a: String, b: String) = ("", "")
+    private var recorded = false
 
     @Published private(set) var candidates: [ComparisonCandidate] = []
     @Published var sideAID = "current"
@@ -24,9 +28,14 @@ final class BlindLiveModel: ObservableObject {
     @Published var trialCount = 16
     @Published private(set) var service: BlindComparisonService?
     @Published private(set) var error: String?
+    /// The record of the test that just finished; nil until the trials are in.
+    @Published private(set) var finishedRecord: BlindTestRecord?
+    /// The fixed switch time; tests shorten it.
+    var switchHold = ComparisonSwitchTiming.fixedSeconds
 
-    init(profiles: ProductProfileController, player: ContentAuditionPlaying? = nil) {
+    init(profiles: ProductProfileController, history: BlindTestHistoryStore, player: ContentAuditionPlaying? = nil) {
         self.profiles = profiles
+        self.history = history
         self.player = player ?? ProfileContentAuditionPlayer(profiles: profiles)
         reload()
     }
@@ -55,13 +64,37 @@ final class BlindLiveModel: ObservableObject {
             return
         }
         do {
-            let made = try BlindLiveComparison.makeService(player: player, a: a, b: b, kind: mode.kind, trialCount: trialCount)
-            forwarding = made.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }
+            let made = try BlindLiveComparison.makeService(player: player, a: a, b: b, kind: mode.kind, trialCount: trialCount, switchHold: switchHold)
+            names = (a.name, b.name)
+            recorded = false
+            finishedRecord = nil
+            forwarding = made.objectWillChange.sink { [weak self] _ in
+                self?.objectWillChange.send()
+                // The published change fires before the new value lands, so read it on the next turn.
+                Task { @MainActor [weak self] in self?.recordIfFinished() }
+            }
             service = made
             error = nil
         } catch {
             self.error = error.localizedDescription
         }
+    }
+
+    /// Keeps the result in History once, as soon as the trials are in (can-I-hear-it: at the reveal question).
+    func recordIfFinished() {
+        guard !recorded, let service else { return }
+        let record: BlindTestRecord?
+        if let result = service.preferenceResult {
+            record = BlindTestRecords.preference(sideA: names.a, sideB: names.b, result: result)
+        } else if service.abxResult != nil {
+            record = BlindTestRecords.abx(sideA: names.a, sideB: names.b, session: service.session)
+        } else {
+            record = nil
+        }
+        guard let record else { return }
+        recorded = true
+        finishedRecord = record
+        history.append(record)
     }
 
     /// Ends the test and puts the applied settings back.
@@ -77,16 +110,23 @@ struct ProductionBlindLiveView: View {
     @ObservedObject private var request = BlindListeningRequest.shared
     private let tick = Timer.publish(every: 0.25, on: .main, in: .common).autoconnect()
 
-    init(profiles: ProductProfileController) {
-        _model = StateObject(wrappedValue: BlindLiveModel(profiles: profiles))
+    @State private var exportDocument: BlindTestExportFile?
+    @State private var exporting = false
+
+    init(profiles: ProductProfileController, history: BlindTestHistoryStore) {
+        _model = StateObject(wrappedValue: BlindLiveModel(profiles: profiles, history: history))
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Play your own music through the app, then try to tell two settings apart, or say which you prefer. Level is matched first: the louder side is turned down, never the quieter one turned up.")
+            Text("Play your own music through the app, then try to tell two settings apart, or say which you prefer. Level is matched first: the louder side is turned down, never the quieter one turned up. The equaliser, preamp and dynamics are what change between sides; room correction, bass management and output protection stay on for both.")
                 .foregroundStyle(.secondary)
             if let service = model.service {
-                BlindLiveRunView(service: service, kind: model.mode.kind) { model.stop() }
+                BlindLiveRunView(service: service, kind: model.mode.kind, record: model.finishedRecord, onExport: {
+                    guard let record = model.finishedRecord, let data = try? BlindTestRecords.exportData(record) else { return }
+                    exportDocument = BlindTestExportFile(data: data)
+                    exporting = true
+                }) { model.stop() }
             } else {
                 setup
             }
@@ -95,6 +135,8 @@ struct ProductionBlindLiveView: View {
             }
         }
         .onReceive(tick) { _ in model.service?.refreshReadiness() }
+        .fileExporter(isPresented: $exporting, document: exportDocument, contentType: .json,
+                      defaultFilename: "notch-sixty-blind-test") { _ in }
         .onAppear { consumeRequest() }
         .onChange(of: request.pending) { _, _ in consumeRequest() }
         .onDisappear { model.stop() }
@@ -151,6 +193,8 @@ struct ProductionBlindLiveView: View {
 struct BlindLiveRunView: View {
     @ObservedObject var service: BlindComparisonService
     let kind: BlindComparisonService.Kind
+    var record: BlindTestRecord?
+    var onExport: () -> Void = {}
     let onClose: () -> Void
 
     var body: some View {
@@ -237,9 +281,21 @@ struct BlindLiveRunView: View {
             if let names = service.revealedNames {
                 Text("A was \(names.a). B was \(names.b).")
             }
-            Text("Running the test again until it passes does not count; judge each run on its own.")
+            Text("Running the test again until it passes does not count; judge each run on its own. The result is kept in the list of finished tests.")
                 .font(.caption).foregroundStyle(.secondary)
-            Button("Close and restore my settings", action: onClose).buttonStyle(.bordered)
+            HStack {
+                if record != nil { Button("Save a copy of the result…", action: onExport).buttonStyle(.bordered) }
+                Button("Close and restore my settings", action: onClose).buttonStyle(.bordered)
+            }
         }
     }
+}
+
+/// A finished test saved as a JSON copy.
+struct BlindTestExportFile: FileDocument {
+    static var readableContentTypes: [UTType] { [.json] }
+    var data: Data
+    init(data: Data) { self.data = data }
+    init(configuration: ReadConfiguration) throws { data = configuration.file.regularFileContents ?? Data() }
+    func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper { FileWrapper(regularFileWithContents: data) }
 }
