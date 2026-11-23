@@ -33,6 +33,26 @@ enum SystemSetupDesignStage: String, Codable, Sendable {
     case alignment, bass, correction
 }
 
+/// E12 S10: a step preset. `quick` is the ten-minute path (Output, Microphone and level, one seat, alignment, bass,
+/// correction, Verify, Save); it is the same flow with Speakers and Room skipped, not a second flow. Everything it sets
+/// is in `choices` and the profile, so the full preset opened afterwards shows the same state.
+enum SystemSetupPreset: String, Codable, CaseIterable, Sendable {
+    case full, quick
+
+    /// Steps that the preset passes over without asking.
+    var passedOver: Set<SystemSetupStep> {
+        switch self {
+        case .full: return []
+        case .quick: return [.topology, .room]
+        }
+    }
+
+    var steps: [SystemSetupStep] { SystemSetupStep.allCases.filter { !passedOver.contains($0) } }
+
+    /// Seats the Measure step measures; nil is unlimited. The quick path measures the main seat only.
+    var seatLimit: Int? { self == .quick ? 1 : nil }
+}
+
 struct SystemSetupChoices: Codable, Equatable, Sendable {
     /// True when the setup has a DSP-fed subwoofer to align and design bass for.
     var hasDspSubwoofer: Bool {
@@ -102,6 +122,9 @@ struct SystemSetupFlow: Codable, Equatable, Sendable {
     private(set) var snapshot: PlaybackSystemState?
     /// Set when a device or rate change reset the measurement steps.
     private(set) var invalidationReason: String?
+    /// E12 S10: nil (and absent in sessions saved before S10) means the full preset.
+    private var presetStorage: SystemSetupPreset?
+    var preset: SystemSetupPreset { presetStorage ?? .full }
 
     init() {}
 
@@ -123,6 +146,9 @@ struct SystemSetupFlow: Codable, Equatable, Sendable {
             break
         case .measure:
             if c.seatNames.isEmpty { return "Add at least one seat." }
+            if let limit = preset.seatLimit, c.seatNames.count > limit {
+                return "The quick setup measures one seat. Open the full setup for more."
+            }
             if c.measurementIDs.count != c.seatNames.count { return "Measure every seat." }
         case .alignment:
             if !c.alignmentApplied { return "Apply the alignment first." }
@@ -151,9 +177,13 @@ struct SystemSetupFlow: Codable, Equatable, Sendable {
 
     // MARK: Actions
 
-    mutating func start(snapshot: PlaybackSystemState, choices initial: SystemSetupChoices = .init()) throws {
+    mutating func start(
+        snapshot: PlaybackSystemState, choices initial: SystemSetupChoices = .init(), preset: SystemSetupPreset = .full
+    ) throws {
         guard phase != .running else { throw SystemSetupRefusal.alreadyRunning }
         self = SystemSetupFlow()
+        presetStorage = preset == .full ? nil : preset
+        skipped = preset.passedOver
         self.snapshot = snapshot
         self.choices = initial
         phase = .running
@@ -164,7 +194,7 @@ struct SystemSetupFlow: Codable, Equatable, Sendable {
         if let why = unmetPrecondition(for: step) {
             throw SystemSetupRefusal.preconditionNotMet(step, why)
         }
-        guard let following = Self.after(step) else {
+        guard let following = following(step) else {
             throw SystemSetupRefusal.atLastStep
         }
         completed.insert(step)
@@ -174,14 +204,14 @@ struct SystemSetupFlow: Codable, Equatable, Sendable {
 
     mutating func back() throws {
         try requireRunning()
-        guard let previous = Self.before(step) else { throw SystemSetupRefusal.atFirstStep }
+        guard let previous = previous(step) else { throw SystemSetupRefusal.atFirstStep }
         step = previous
     }
 
     mutating func skip() throws {
         try requireRunning()
         guard canSkip(step) else { throw SystemSetupRefusal.cannotSkip(step) }
-        guard let following = Self.after(step) else { throw SystemSetupRefusal.atLastStep }
+        guard let following = following(step) else { throw SystemSetupRefusal.atLastStep }
         skipped.insert(step)
         step = following
     }
@@ -291,7 +321,29 @@ struct SystemSetupFlow: Codable, Equatable, Sendable {
         invalidationReason = note
     }
 
+    /// E12 S10: the quick path becomes the full flow in place. Speakers and Room are no longer passed over, so Back
+    /// reaches them; nothing already chosen or measured changes.
+    mutating func openFullSetup() throws {
+        try requireRunning()
+        presetStorage = nil
+        skipped.subtract([.topology, .room])
+    }
+
     // MARK: Helpers
+
+    /// The step after `step` in this flow's preset.
+    func following(_ step: SystemSetupStep) -> SystemSetupStep? {
+        var candidate = Self.after(step)
+        while let c = candidate, preset.passedOver.contains(c) { candidate = Self.after(c) }
+        return candidate
+    }
+
+    /// The step before `step` in this flow's preset.
+    func previous(_ step: SystemSetupStep) -> SystemSetupStep? {
+        var candidate = Self.before(step)
+        while let c = candidate, preset.passedOver.contains(c) { candidate = Self.before(c) }
+        return candidate
+    }
 
     private func requireRunning() throws {
         guard phase == .running else { throw SystemSetupRefusal.notRunning }

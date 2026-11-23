@@ -36,7 +36,8 @@ extension FeatureFlag {
         .subAwareAnc, .longFIR, .outputProtection, .headphones, .mimoTreatment, .dynamicsExtras, .roomModel,
         .parallelRender, .multirate, .rateAdapt, .coreDesigners,
         .eqPageEnhancements, .dynamicsSound, .designLanguage, .followOutput, .dashboardRemote, .virtualDriver,
-        .blindListening
+        .blindListening,
+        .setupFlow
     ]
 
     /// E6 S11: the unified graph is the default renderer. Turning this on selects the frozen
@@ -330,6 +331,15 @@ extension FeatureFlag {
     static let blindListening = FeatureFlag(
         id: "e12.blind-listening",
         title: "Blind Listening",
+        epic: "E12"
+    )
+
+    /// E12 S10, S11, S29-S31: guided setup improvements. S10 adds the quick path (a step preset of the same flow);
+    /// S11 and S29-S31 add the verdict, shell, graphs and level runs. Swift only; the engine never reads it. Off:
+    /// guided setup is as it is today. Graduates in E12 S31; removed in the flag-cleanup phase.
+    static let setupFlow = FeatureFlag(
+        id: "e12.setup-flow",
+        title: "Guided setup improvements",
         epic: "E12"
     )
 }
