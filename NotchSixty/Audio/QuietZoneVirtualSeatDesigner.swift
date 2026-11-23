@@ -84,6 +84,9 @@ struct QuietZoneVirtualSeatDesigner: Sendable {
     /// reference microphone, L and R) as `ActiveQuietZonePlanner.solveStereo` does. Off, the design is bit-identical
     /// to before.
     var bassConditioning = false
+    /// E21 S10a: the design runs in `libn60core` (`n60/anc_design.h`). Defaults to `e21.core-designers` when the designer is
+    /// made; parity tests set it explicitly. Off: the Swift maths below, unchanged (the parity reference, deleted in S14).
+    var useCoreMaths = FeatureFlags.isEnabledProcessWide(.coreDesigners)
 
     func design(
         measurements: [QuietZoneVirtualSeatBand],
@@ -92,6 +95,10 @@ struct QuietZoneVirtualSeatDesigner: Sendable {
             .init()
     ) throws -> QuietZoneVirtualSeatDesign {
         let configuration = try rawConfiguration.validated()
+        if useCoreMaths {
+            return try QuietZoneDesignCore.design(
+                measurements: measurements, budget: budget, configuration: configuration, bassConditioning: bassConditioning)
+        }
         guard budget.readiness == .physicallyPlausible,
               let reserve = budget.conservativeReserveSeconds,
               reserve.isFinite, reserve >= 0.002 else {

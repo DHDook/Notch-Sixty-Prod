@@ -526,6 +526,11 @@ add_executable(n60core_speaker_s9b_test tests/test_speaker_s9b.cpp)
 target_link_libraries(n60core_speaker_s9b_test PRIVATE n60core)
 add_test(NAME n60core_speaker_s9b COMMAND n60core_speaker_s9b_test)
 
+# E21 S10a: ANC design maths (n60/anc_design.h): virtual seat designer, causal FIR compiler, HAL clock, upstream survey.
+add_executable(n60core_anc_design_test tests/test_anc_design.cpp)
+target_link_libraries(n60core_anc_design_test PRIVATE n60core)
+add_test(NAME n60core_anc_design COMMAND n60core_anc_design_test)
+
 # E21 S3: FFT backends. test_fft_backend compares vDSP with the in-house transforms and checks vDSP allocates nothing in
 # forward and inverse; the portable-library copies keep the old FFT paths under test on Apple.
 add_executable(n60core_parity_suite_test tests/test_parity_suite.c)

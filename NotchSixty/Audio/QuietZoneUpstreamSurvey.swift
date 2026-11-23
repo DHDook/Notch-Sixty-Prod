@@ -36,11 +36,17 @@ final class QuietZoneUpstreamLeadEstimator {
     private var errorRing: [Float]
     private var ringPosition = 0
     private var sinceOutput = 0
-    private(set) var reference: [Float] = []
-    private(set) var error: [Float] = []
+    private var swiftReference: [Float] = []
+    private var swiftError: [Float] = []
+    /// E21 S10a: the filter, decimation and correlation run in `libn60core` (`n60/anc_design.h`) when `e21.core-designers` is
+    /// on (nil: the Swift maths below, unchanged; also nil for a rate the core refuses).
+    private let core: QuietZoneDesignCore.LeadHandle?
+    var reference: [Float] { core?.decimated().reference ?? swiftReference }
+    var error: [Float] { core?.decimated().error ?? swiftError }
 
-    init(sampleRate: Double) {
+    init(sampleRate: Double, useCoreMaths: Bool = FeatureFlags.isEnabledProcessWide(.coreDesigners)) {
         self.sampleRate = sampleRate
+        core = useCoreMaths ? QuietZoneDesignCore.LeadHandle(sampleRate: sampleRate) : nil
         decimation = max(1, Int((sampleRate / Self.targetRate).rounded()))
         // Hann-windowed sinc, eight output periods long, unity DC gain.
         let length = 8 * decimation + 1
@@ -59,11 +65,12 @@ final class QuietZoneUpstreamLeadEstimator {
         errorRing = [Float](repeating: 0, count: length)
     }
 
-    var decimatedCount: Int { reference.count }
-    var decimatedSeconds: Double { Double(reference.count) / decimatedRate }
+    var decimatedCount: Int { core?.decimatedCount ?? swiftReference.count }
+    var decimatedSeconds: Double { Double(decimatedCount) / decimatedRate }
 
     /// A lost callback: forget the filter history so no output spans the gap.
     func markDiscontinuity() {
+        if let core { core.markDiscontinuity(); return }
         for k in referenceRing.indices { referenceRing[k] = 0; errorRing[k] = 0 }
         ringPosition = 0
         sinceOutput = 0
@@ -71,6 +78,7 @@ final class QuietZoneUpstreamLeadEstimator {
 
     func ingest(reference samples: [Float], error seat: [Float]) {
         precondition(samples.count == seat.count)
+        if let core { core.ingest(reference: samples, error: seat); return }
         let length = taps.count
         for i in 0..<samples.count {
             referenceRing[ringPosition] = samples[i]
@@ -89,8 +97,8 @@ final class QuietZoneUpstreamLeadEstimator {
                     p += 1
                     if p == length { p = 0 }
                 }
-                reference.append(r)
-                error.append(e)
+                swiftReference.append(r)
+                swiftError.append(e)
             }
         }
     }
@@ -106,12 +114,13 @@ final class QuietZoneUpstreamLeadEstimator {
 
     /// nil when there is too little signal (under 2 s) or no energy.
     func estimate() -> Estimate? {
-        let n = reference.count
+        if let core { return core.estimate() }
+        let n = swiftReference.count
         let fs = decimatedRate
         guard n >= Int(2 * fs) else { return nil }
         let maxLag = min(Int(Self.maximumLagSeconds * fs), n / 4)
-        var x = reference
-        var d = error
+        var x = swiftReference
+        var d = swiftError
         var mean: Float = 0
         vDSP_meanv(x, 1, &mean, vDSP_Length(n)); var negative = -mean
         vDSP_vsadd(x, 1, &negative, &x, 1, vDSP_Length(n))
@@ -215,8 +224,14 @@ struct QuietZoneUpstreamAssessment: Equatable, Sendable {
         latencySeconds: Double,
         flightSeconds: Double,
         clockOffsetErrorSeconds: Double = 0,
-        referenceKind: QuietZoneReferenceInputKind = .microphone
+        referenceKind: QuietZoneReferenceInputKind = .microphone,
+        useCoreMaths: Bool = FeatureFlags.isEnabledProcessWide(.coreDesigners)
     ) -> QuietZoneUpstreamAssessment {
+        if useCoreMaths {
+            return QuietZoneDesignCore.assess(
+                estimate: estimate, bands: survey, latencySeconds: latencySeconds, flightSeconds: flightSeconds,
+                clockOffsetErrorSeconds: clockOffsetErrorSeconds, referenceKind: referenceKind)
+        }
         let inBand = survey.filter { $0.frequencyHz >= lowestBandHz && $0.frequencyHz <= highestBandHz }
         let rows = inBand.map {
             Band(frequencyHz: $0.frequencyHz, coherence: $0.coherence,

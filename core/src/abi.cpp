@@ -32,6 +32,8 @@ extern "C" int n60_core_abi(n60_core_abi_info *info, size_t info_size) {
     out.speakerProblemSize = static_cast<uint32_t>(sizeof(n60_speaker_candidate_problem));
     out.ancVersion = n60_anc_abi_version();
     out.ancLaneFeedConfigSize = static_cast<uint32_t>(sizeof(N60AncLaneFeedConfig));
+    out.ancDesignVersion = n60_anc_design_abi_version();
+    out.ancDesignOptionsSize = static_cast<uint32_t>(sizeof(n60_anc_seat_options));
     const size_t n = info_size < sizeof out ? info_size : sizeof out;
     out.structSize = static_cast<uint32_t>(n);
     memcpy(info, &out, n);
