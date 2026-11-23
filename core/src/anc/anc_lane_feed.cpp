@@ -1,6 +1,6 @@
-// E26 S7b: host feed for the anti-noise lanes. See N60AncLaneFeed.h for the contract.
+// E26 S7b: host feed for the anti-noise lanes. See n60/anc_lane_feed.h for the contract.
 
-#include "N60AncLaneFeed.h"
+#include "n60/anc_lane_feed.h"
 
 #include <algorithm>
 #include <atomic>

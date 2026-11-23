@@ -5,10 +5,11 @@
 // 15(2), 1967; H1 transfer and coherence, J. S. Bendat and A. G. Piersol,
 // Random Data (Wiley, 2010), ch. 9.
 
-#include "n60_ff_survey.hpp"
+#include "ff_survey.hpp"
 
 #include <algorithm>
 #include <cmath>
+#include <new>
 
 #if !(__cplusplus >= 202002L || (defined(_MSVC_LANG) && _MSVC_LANG >= 202002L))
 #error "n60_ff_survey.cpp requires C++20"
@@ -18,7 +19,7 @@ namespace {
 
 constexpr double kPi = 3.14159265358979323846;
 
-bool finite(double v) { return std::isfinite(v); }
+bool is_finite_value(double v) { return std::isfinite(v); }
 
 double decimatedRateFor(double sampleRate) {
     const auto factor = n60::anc::Decimator::factorFor(sampleRate);
@@ -185,19 +186,15 @@ bool N60FeedForwardSurveyConfigIsValid(const N60FeedForwardSurveyConfig *config)
     if (config->bandCount < 1 || config->bandCount > N60_FF_SURVEY_MAX_BANDS) return false;
     for (uint32_t k = 0; k < config->bandCount; ++k) {
         const double hz = config->bandHz[k];
-        if (!finite(hz) || hz < 10 || hz > 0.15 * fd) return false;
+        if (!is_finite_value(hz) || hz < 10 || hz > 0.15 * fd) return false;
     }
-    return finite(config->segmentSeconds) && config->segmentSeconds >= 0.25
+    return is_finite_value(config->segmentSeconds) && config->segmentSeconds >= 0.25
            && config->segmentSeconds <= 4;
 }
 
 N60FeedForwardSurvey *N60FeedForwardSurveyCreate(const N60FeedForwardSurveyConfig *config) {
     if (!N60FeedForwardSurveyConfigIsValid(config)) return nullptr;
-    try {
-        return new N60FeedForwardSurvey{n60::anc::FeedForwardSurvey(*config)};
-    } catch (...) {
-        return nullptr;
-    }
+    return new (std::nothrow) N60FeedForwardSurvey{n60::anc::FeedForwardSurvey(*config)};
 }
 
 void N60FeedForwardSurveyDestroy(N60FeedForwardSurvey *survey) { delete survey; }

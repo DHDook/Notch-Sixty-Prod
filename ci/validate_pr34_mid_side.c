@@ -3,7 +3,7 @@
 #include <stdbool.h>
 #include <stdio.h>
 
-#include "../NotchSixty/Audio/Realtime/N60Biquad.h"
+#include "n60/biquad.h"
 
 static void encode_mid_side(float left, float right, float *mid, float *side) {
     *mid = 0.5f * (left + right);

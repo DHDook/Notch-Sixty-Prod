@@ -31,11 +31,11 @@ fi
 
 # E26 S7b1 (G1): the host feed for the anti-noise lanes (lanes equal the offline splitter render, lease and fade, no allocation).
 if selected e26_anc_lane_feed; then
-    if clang -std=c11 -O2 -Wall -Wextra -Werror -include stddef.h -I"$RT" -Icore/include -c "$RT/N60ActiveQuietZone.c" -o "$OUT/e26_alf_aqz.o" \
+    if clang -std=c11 -O2 -Wall -Wextra -Werror -include stddef.h -I"$RT" -Icore/include -c core/src/anc/active_quiet_zone.c -o "$OUT/e26_alf_aqz.o" \
         && clang++ -std=c++20 -O2 -Wall -Wextra -Werror -I"$RT" -Icore/include -c core/src/anc/fxlms.cpp -o "$OUT/e26_alf_fxlms.o" \
-        && clang++ -std=c++20 -O2 -Wall -Wextra -Werror -I"$RT" -Icore/include -c "$RT/n60_ff_live.cpp" -o "$OUT/e26_alf_ff_live.o" \
-        && clang++ -std=c++20 -O2 -Wall -Wextra -Werror -I"$RT" -Icore/include -c "$RT/n60_ff_echo.cpp" -o "$OUT/e26_alf_ff_echo.o" \
-        && clang++ -std=c++20 -O2 -Wall -Wextra -Werror -I"$RT" -Icore/include -c "$RT/n60_anc_lane_feed.cpp" -o "$OUT/e26_alf_feed.o" \
+        && clang++ -std=c++20 -O2 -Wall -Wextra -Werror -I"$RT" -Icore/include -c core/src/anc/ff_live.cpp -o "$OUT/e26_alf_ff_live.o" \
+        && clang++ -std=c++20 -O2 -Wall -Wextra -Werror -I"$RT" -Icore/include -c core/src/anc/ff_echo.cpp -o "$OUT/e26_alf_ff_echo.o" \
+        && clang++ -std=c++20 -O2 -Wall -Wextra -Werror -I"$RT" -Icore/include -c core/src/anc/anc_lane_feed.cpp -o "$OUT/e26_alf_feed.o" \
         && clang++ -std=c++20 -O2 -Wall -Wextra -Werror -I"$RT" -Icore/include core/tests/test_anc_lane_feed.cpp \
             "$OUT/e26_alf_feed.o" "$OUT/e26_alf_aqz.o" "$OUT/e26_alf_ff_live.o" "$OUT/e26_alf_ff_echo.o" \
             "$OUT/e26_alf_fxlms.o" -o "$OUT/e26_anc_lane_feed" && run_timed "$OUT/e26_anc_lane_feed"; then

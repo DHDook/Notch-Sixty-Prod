@@ -9,6 +9,9 @@ set(N60_CORE_SOURCES
     src/measure/monitor_ring.cpp src/measure/spl.cpp src/measure/rta.cpp src/measure/predict.cpp src/measure/room_analysis.cpp src/mimo/design.cpp
     src/correct/minphase.cpp src/correct/design.cpp src/correct/synth.cpp src/correct/bass.cpp src/correct/room_design.cpp src/correct/calibration_align.cpp
     src/correct/multisub_search.cpp src/correct/multisub_optimize.cpp src/abi.cpp src/xover/xover.cpp src/headroom/headroom.cpp src/eqfit/eqfit.cpp src/eqmatched.cpp src/eq_linear_phase.cpp
-    src/speaker/correction.cpp src/speaker/candidates.cpp src/speaker/crossover.cpp src/speaker/characterise.cpp)
-# Built with exceptions on until E21 S4 (gap G1); ci/core_sources.sh leaves them out of CORE_SOURCES.
-set(N60_CORE_ANC_SOURCES src/anc/fxlms.cpp src/anc/remote_tonal.cpp)
+    src/speaker/correction.cpp src/speaker/candidates.cpp src/speaker/crossover.cpp src/speaker/characterise.cpp
+    src/anc/fxlms.cpp src/anc/remote_tonal.cpp src/anc/anc_guard.cpp src/anc/ff_live.cpp src/anc/ff_echo.cpp
+    src/anc/ff_shadow.cpp src/anc/ff_survey.cpp src/anc/anc_lane_feed.cpp)
+# C translation units of the core (existing C moved in, not rewritten): the Quiet Zone tonal runtime. Not read by ci/core_sources.sh,
+# which lists C++ only; the CI scripts compile it by name.
+set(N60_CORE_C_SOURCES src/anc/active_quiet_zone.c)

@@ -15,7 +15,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#include "N60Crossover.h"
+#include "n60/crossover.h"
 
 #ifdef __cplusplus
 extern "C" {

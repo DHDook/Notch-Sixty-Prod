@@ -18,7 +18,7 @@
 #include <new>
 #include <vector>
 
-#include "N60AncLaneFeed.h"
+#include "n60/anc_lane_feed.h"
 
 static std::atomic<bool> armedCount{false};
 static std::atomic<long> allocs{0};

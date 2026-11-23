@@ -25,7 +25,7 @@ set(N60_FFT_VDSP OFF)
 if(N60_FFT_BACKEND STREQUAL "vdsp")
   set(N60_FFT_VDSP ON)
 endif()
-add_library(n60core STATIC ${N60_CORE_SOURCES} ${N60_CORE_ANC_SOURCES})
+add_library(n60core STATIC ${N60_CORE_SOURCES} ${N60_CORE_C_SOURCES})
 if(N60_FFT_VDSP)
   target_sources(n60core PRIVATE platform/apple/fft_vdsp.cpp)
   # PUBLIC so a test that includes src/fft_backend.hpp sees the vdsp declarations the library defines.
@@ -33,13 +33,6 @@ if(N60_FFT_VDSP)
   target_link_libraries(n60core PUBLIC "-framework Accelerate")
 endif()
 target_compile_features(n60core PUBLIC cxx_std_20)
-# E21 S0: the two ANC sources moved from the app unchanged. Their Create paths catch std::bad_alloc, so they keep
-# exceptions on until E21 S4 rewrites them with nothrow allocation (gap G1 in docs/epics/E21.md).
-if(MSVC)
-  set_source_files_properties(src/anc/fxlms.cpp src/anc/remote_tonal.cpp PROPERTIES COMPILE_OPTIONS "/EHsc")
-else()
-  set_source_files_properties(src/anc/fxlms.cpp src/anc/remote_tonal.cpp PROPERTIES COMPILE_OPTIONS "-fexceptions")
-endif()
 target_include_directories(n60core PUBLIC include)
 target_include_directories(n60core PRIVATE src)
 # E21 S1: one flag set per toolchain family. clang and gcc style on Linux and macOS; clang-cl (MSVC command line) on
@@ -74,7 +67,7 @@ enable_testing()
 # tested on macOS: the FFT contract, test_conv, test_measure_fft and the graph parity suite also run against it, and
 # test_fft_backend compares the two backends in one process.
 if(N60_FFT_VDSP)
-  add_library(n60core_portable STATIC ${N60_CORE_SOURCES} ${N60_CORE_ANC_SOURCES})
+  add_library(n60core_portable STATIC ${N60_CORE_SOURCES} ${N60_CORE_C_SOURCES})
   target_compile_features(n60core_portable PUBLIC cxx_std_20)
   target_include_directories(n60core_portable PUBLIC include)
   target_include_directories(n60core_portable PRIVATE src)
@@ -575,4 +568,39 @@ if(N60_FFT_VDSP)
   add_test(NAME n60core_conv_portable COMMAND n60core_conv_portable_test)
 else()
   add_test(NAME n60core_parity_suite COMMAND n60core_parity_suite_test)
+endif()
+
+# E21 S4: the realtime ANC sources (src/anc) and the E4 harnesses and reference-lab probes that exercise them, built against
+# libn60core so they run wherever the core builds (Linux CI, macOS; the C99 _Complex users are skipped on clang-cl, gap G3).
+add_executable(n60core_anc_lane_feed_test tests/test_anc_lane_feed.cpp)
+target_link_libraries(n60core_anc_lane_feed_test PRIVATE n60core)
+add_test(NAME n60core_anc_lane_feed COMMAND n60core_anc_lane_feed_test)
+
+add_executable(n60core_e4_acoustic_twin_test ../ci/harness_e4_acoustic_twin.cpp)
+target_include_directories(n60core_e4_acoustic_twin_test PRIVATE ../ci)
+target_link_libraries(n60core_e4_acoustic_twin_test PRIVATE n60core)
+add_test(NAME n60core_e4_acoustic_twin COMMAND n60core_e4_acoustic_twin_test)
+
+if(NOT MSVC)
+  foreach(h anc_guard ff_shadow ff_echo ff_live ff_live_echo ff_survey)
+    add_executable(n60core_e4_${h}_test ../ci/harness_e4_${h}.c)
+    set_target_properties(n60core_e4_${h}_test PROPERTIES C_STANDARD 11 LINKER_LANGUAGE CXX)
+    target_include_directories(n60core_e4_${h}_test PRIVATE ../ci)
+    target_link_libraries(n60core_e4_${h}_test PRIVATE n60core ${N60_M})
+    add_test(NAME n60core_e4_${h} COMMAND n60core_e4_${h}_test)
+  endforeach()
+
+  # The reference-lab cases: the C probe is built here, the Python reference (stdlib only) checks its numbers.
+  find_package(Python3 COMPONENTS Interpreter)
+  if(Python3_Interpreter_FOUND)
+    foreach(p anc_guard ff_shadow ff_survey fxlms remote_tonal)
+      add_executable(n60core_e4_${p}_probe ../ci/acoustic_reference_lab/e4_${p}_probe.c)
+      set_target_properties(n60core_e4_${p}_probe PROPERTIES C_STANDARD 11 LINKER_LANGUAGE CXX)
+      target_include_directories(n60core_e4_${p}_probe PRIVATE ../ci)
+      target_link_libraries(n60core_e4_${p}_probe PRIVATE n60core ${N60_M})
+      add_test(NAME n60core_e4_${p}_reference
+               COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/../ci/acoustic_reference_lab/e4_${p}_reference.py)
+      set_tests_properties(n60core_e4_${p}_reference PROPERTIES ENVIRONMENT "N60_E4_PROBE=$<TARGET_FILE:n60core_e4_${p}_probe>")
+    endforeach()
+  endif()
 endif()

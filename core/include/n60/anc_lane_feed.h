@@ -5,13 +5,13 @@
 #include <stdint.h>
 
 #include "n60/active_quiet_zone.h"
-#include "N60FeedForwardLive.h"
+#include "n60/ff_live.h"
 // The crossover headers are C first; their zero initialisers are fine in C++ too.
 #if defined(__clang__)
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wmissing-field-initializers"
 #endif
-#include "N60SpeakerBusSplitter.h"
+#include "n60/speaker_bus_splitter.h"
 #if defined(__clang__)
 #pragma clang diagnostic pop
 #endif
@@ -37,7 +37,7 @@ extern "C" {
  *
  * Per frame, in the stereo kernel's order (docs/epics/E26.md, S7b design b): programme accumulation for the tonal
  * telemetry, tonal synthesis (N60ActiveQuietZone), the live feed-forward sample (N60FeedForwardLive), their sum,
- * the lease/fade gain, then the production speaker bus splitter (N60SpeakerBusSplitter.h, the splitter
+ * the lease/fade gain, then the production speaker bus splitter (n60/speaker_bus_splitter.h, the splitter
  * N60SpeakerBusRenderFeed renders sweeps through). Left lane = LeftLow + LeftMid + LeftHigh, right likewise, sub lane =
  * SubMono: the sums the measured path uses, so the path the sweeps measured is the path the anti-noise plays.
  *
@@ -184,7 +184,7 @@ void N60AncLaneFeedDisarm(N60AncLaneFeed * N60_ALF_NONNULL feed);
 void N60AncLaneFeedRenewLease(N60AncLaneFeed * N60_ALF_NONNULL feed, uint64_t durationFrames);
 void N60AncLaneFeedReleaseLease(N60AncLaneFeed * N60_ALF_NONNULL feed);
 
-/* Feed-forward (feedForward = true; otherwise these refuse). Same contracts as N60FeedForwardLive.h; the ring and
+/* Feed-forward (feedForward = true; otherwise these refuse). Same contracts as n60/ff_live.h; the ring and
    output index follow N60RenderKernelFeedForwardLive*. */
 bool N60AncLaneFeedSetFeedForwardWeights(N60AncLaneFeed * N60_ALF_NONNULL feed, const float * N60_ALF_NONNULL left,
                                          const float * N60_ALF_NONNULL right, uint32_t count);

@@ -13,7 +13,7 @@ namespace {
 
 constexpr double kPi = 3.14159265358979323846;
 
-bool finite(float v) { return std::isfinite(v); }
+bool is_finite_value(float v) { return std::isfinite(v); }
 
 float biquadMagnitudeDb(const n60_speaker_band &b, double sample_rate, double frequency_hz) {
     const double omega = 2.0 * kPi * frequency_hz / sample_rate;
@@ -54,7 +54,7 @@ bool makePeaking(double sample_rate, float frequency_hz, float gain_db, float q,
     band.b2 = static_cast<float>(d[2]);
     band.a1 = static_cast<float>(d[3]);
     band.a2 = static_cast<float>(d[4]);
-    if (!finite(band.b0) || !finite(band.b1) || !finite(band.b2) || !finite(band.a1) || !finite(band.a2)) return false;
+    if (!is_finite_value(band.b0) || !is_finite_value(band.b1) || !is_finite_value(band.b2) || !is_finite_value(band.a1) || !is_finite_value(band.a2)) return false;
     *out = band;
     return true;
 }
@@ -206,7 +206,7 @@ int32_t n60_speaker_correction_design(const n60_speaker_correction_problem *p, n
     const n60_speaker_correction_settings &settings = p->settings;
     if (!n60_speaker_correction_settings_valid(&settings, p->sample_rate)) return N60_SPEAKER_ERR_ARGUMENT;
     for (uint32_t i = 0; i < p->bin_count; ++i)
-        if (!finite(p->target_db[i])) return N60_SPEAKER_ERR_NONFINITE;
+        if (!is_finite_value(p->target_db[i])) return N60_SPEAKER_ERR_NONFINITE;
     std::vector<n60_speaker_correction_source> out(p->source_count);
     std::vector<float> measured;
     {

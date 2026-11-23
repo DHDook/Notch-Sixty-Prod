@@ -5,10 +5,11 @@
 // Control Systems (Wiley, 1996), ch. 5; band filters, RBJ Audio EQ Cookbook
 // (R. Bristow-Johnson).
 
-#include "n60_ff_shadow.hpp"
+#include "ff_shadow.hpp"
 
 #include <algorithm>
 #include <cmath>
+#include <new>
 
 #if !(__cplusplus >= 202002L || (defined(_MSVC_LANG) && _MSVC_LANG >= 202002L))
 #error "n60_ff_shadow.cpp requires C++20"
@@ -23,7 +24,7 @@ constexpr double kMeterSeconds = 0.5;
 constexpr double kFlush = 1e-30;
 constexpr double kDefaultPeakGain = 0.06309573444801933;  // -24 dB
 
-bool finite(double v) { return std::isfinite(v); }
+bool is_finite_value(double v) { return std::isfinite(v); }
 
 N60BlockFxlmsConfig coreConfig(const N60FeedForwardShadowConfig &config, double decimatedRate) {
     N60BlockFxlmsConfig c = N60BlockFxlmsConfigDefault(decimatedRate);
@@ -134,7 +135,7 @@ bool FeedForwardShadow::setPath(std::uint32_t channel, std::uint32_t bulkDelay,
         || count > N60_FXLMS_MAX_PATH_TAPS || bulkDelay > N60_FF_SHADOW_MAX_BULK_DELAY)
         return false;
     for (std::uint32_t k = 0; k < count; ++k) {
-        if (!finite(taps[k])) return false;
+        if (!is_finite_value(taps[k])) return false;
     }
     if (!cores_[channel].setPath(taps, count)) return false;
     path_[channel].assign(taps, taps + count);
@@ -148,7 +149,7 @@ bool FeedForwardShadow::setSeed(const float *left, const float *right,
     if (left == nullptr || right == nullptr) return false;
     const auto n = std::min(count, taps_);
     for (std::uint32_t k = 0; k < n; ++k) {
-        if (!finite(left[k]) || !finite(right[k])) return false;
+        if (!is_finite_value(left[k]) || !is_finite_value(right[k])) return false;
     }
     for (std::uint32_t k = 0; k < taps_; ++k) {
         seed_[0][k] = k < n ? left[k] : 0.0f;
@@ -229,7 +230,7 @@ void FeedForwardShadow::adapt(double reference, double error) noexcept {
     double x = xRaw;
     for (auto &f : referenceBand_) x = f.run(x);
     for (auto &f : errorBand_) e = f.run(e);
-    if (!finite(x) || !finite(e)) {  // unreachable with clamped input; never adapt on it
+    if (!is_finite_value(x) || !is_finite_value(e)) {  // unreachable with clamped input; never adapt on it
         restartFilters();
         ++gaps_;
         return;
@@ -292,7 +293,7 @@ void FeedForwardShadow::limitWeights() noexcept {
         const double *w = cores_[c].weights();
         double gain = 0;
         for (std::uint32_t k = 0; k < taps_; ++k) gain += std::fabs(w[k]);
-        if (!finite(gain)) {
+        if (!is_finite_value(gain)) {
             restoreSeed();
             restartFilters();
             ++modelResets_;
@@ -336,7 +337,7 @@ bool FeedForwardShadow::setEcho(std::uint32_t channel, std::uint32_t bulkDelay, 
         || count > N60_FF_SHADOW_MAX_BULK_DELAY || bulkDelay > N60_FF_SHADOW_MAX_BULK_DELAY)
         return false;
     for (std::uint32_t k = 0; k < count; ++k) {
-        if (!finite(taps[k])) return false;
+        if (!is_finite_value(taps[k])) return false;
     }
     echo_[channel].assign(taps, taps + count);  // within the reserved capacity
     echoDelay_[channel] = bulkDelay;
@@ -368,7 +369,7 @@ void FeedForwardShadow::pushDrive(const float *left, const float *right,
 
 bool FeedForwardShadow::setDriveTiming(std::uint64_t micFrame, double driveFrame,
                                        double ratio) noexcept {
-    if (driveRate_ <= 0 || !finite(driveFrame) || !finite(ratio) || ratio < 0.05 || ratio > 20.0)
+    if (driveRate_ <= 0 || !is_finite_value(driveFrame) || !is_finite_value(ratio) || ratio < 0.05 || ratio > 20.0)
         return false;
     timingMicFrame_ = micFrame;
     timingDriveFrame_ = driveFrame;
@@ -422,7 +423,7 @@ bool FeedForwardShadow::prepareDrive() noexcept {
     const double index = (frame - static_cast<double>(driveBaseFrame_) - (factor - 1.0)
                           + static_cast<double>(driveDecimator_[0].delayFrames())) / factor;
     const double base = std::floor(index);
-    if (!finite(index) || base < 1.0) { ++driveStarved_; return false; }
+    if (!is_finite_value(index) || base < 1.0) { ++driveStarved_; return false; }
     const auto i0 = static_cast<std::int64_t>(base);
     const auto produced = static_cast<std::int64_t>(driveDecimated_);
     if (i0 + 2 >= produced || i0 - 1 < produced - static_cast<std::int64_t>(kDriveHistory)) {
@@ -553,10 +554,10 @@ bool N60FeedForwardShadowConfigIsValid(const N60FeedForwardShadowConfig *config)
     if (config == nullptr) return false;
     const double fd = decimatedRateFor(config->sampleRate);
     if (fd == 0) return false;
-    const auto in = [](double v, double lo, double hi) { return finite(v) && v >= lo && v <= hi; };
+    const auto in = [](double v, double lo, double hi) { return is_finite_value(v) && v >= lo && v <= hi; };
     if (config->taps < 1 || config->taps > N60_FXLMS_MAX_BLOCK_TAPS) return false;
     if (config->blockFrames < 1 || config->blockFrames > 1024) return false;
-    if (!finite(config->step) || config->step <= 0 || config->step > N60_FF_SHADOW_MAX_STEP)
+    if (!is_finite_value(config->step) || config->step <= 0 || config->step > N60_FF_SHADOW_MAX_STEP)
         return false;
     if (!in(config->leakagePerSecond, 0, 10)) return false;
     if (!in(config->bandLowHz, 10, 100)) return false;
@@ -568,17 +569,13 @@ bool N60FeedForwardShadowConfigIsValid(const N60FeedForwardShadowConfig *config)
         && !(in(config->driveSampleRate, 8000, 768000)
              && decimatedRateFor(config->driveSampleRate) != 0))
         return false;
-    return finite(config->peakGainLimit) && config->peakGainLimit > 0
+    return is_finite_value(config->peakGainLimit) && config->peakGainLimit > 0
            && config->peakGainLimit <= 16;
 }
 
 N60FeedForwardShadow *N60FeedForwardShadowCreate(const N60FeedForwardShadowConfig *config) {
     if (!N60FeedForwardShadowConfigIsValid(config)) return nullptr;
-    try {
-        return new N60FeedForwardShadow{n60::anc::FeedForwardShadow(*config)};
-    } catch (...) {
-        return nullptr;
-    }
+    return new (std::nothrow) N60FeedForwardShadow{n60::anc::FeedForwardShadow(*config)};
 }
 
 void N60FeedForwardShadowDestroy(N60FeedForwardShadow *shadow) { delete shadow; }

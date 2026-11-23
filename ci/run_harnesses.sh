@@ -16,14 +16,21 @@ RT=NotchSixty/Audio/Realtime
 # gets its object (and libc++, added in harness()).
 mkdir -p "$OUT"
 GUARD_OBJ="$OUT/n60_anc_guard_rt.o"
-if ! clang++ -std=c++20 -O2 -Wall -Wextra -Werror -I"NotchSixty/Audio/Realtime" -c "NotchSixty/Audio/Realtime/n60_anc_guard.cpp" -o "$GUARD_OBJ"; then
+if ! clang++ -std=c++20 -O2 -Wall -Wextra -Werror -I"NotchSixty/Audio/Realtime" -Icore/include -c core/src/anc/anc_guard.cpp -o "$GUARD_OBJ"; then
     echo "failed to compile the howl guard" >&2
     exit 1
 fi
 # E6 S12h part 2b: the bridge binds the AU rack to the ANC lane feed, so every bridge harness links the feed object.
 # E4 S25b: the render kernel also links the live feed-forward filter (and the FxLMS primitives it uses).
-for src in n60_ff_live n60_ff_echo core/src/anc/fxlms n60_anc_lane_feed; do
-    case "$src" in core/*) srcpath="$src.cpp" ;; *) srcpath="NotchSixty/Audio/Realtime/$src.cpp" ;; esac
+# E21 S4: the tonal runtime is a core C object (core/src/anc/active_quiet_zone.c); the kernel and the lane feed link it.
+if ! clang -std=c11 -O2 -Wall -Wextra -Werror -include stddef.h -Icore/include -c core/src/anc/active_quiet_zone.c -o "$OUT/n60_aqz_rt.o"; then
+    echo "failed to compile the tonal runtime" >&2
+    exit 1
+fi
+GUARD_OBJ="$GUARD_OBJ
+$OUT/n60_aqz_rt.o"
+for src in core/src/anc/ff_live core/src/anc/ff_echo core/src/anc/fxlms core/src/anc/anc_lane_feed; do
+    srcpath="$src.cpp"
     src="$(basename "$src" | sed 's/^fxlms$/n60_fxlms/')"
     if ! clang++ -std=c++20 -O2 -Wall -Wextra -Werror -I"NotchSixty/Audio/Realtime" -Icore/include -c "$srcpath" -o "$OUT/${src}_rt.o"; then
         echo "failed to compile $src" >&2

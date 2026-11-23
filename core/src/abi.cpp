@@ -3,6 +3,9 @@
 
 #include <string.h>
 
+// E21 S4: the realtime ANC domain version (n60/anc.h).
+extern "C" uint32_t n60_anc_abi_version(void) { return N60_ANC_ABI_VERSION; }
+
 extern "C" int n60_core_abi(n60_core_abi_info *info, size_t info_size) {
     if (info == nullptr || info_size < 2 * sizeof(uint32_t)) return 0;
     n60_core_abi_info out;
@@ -27,6 +30,8 @@ extern "C" int n60_core_abi(n60_core_abi_info *info, size_t info_size) {
     out.eqfitProblemSize = static_cast<uint32_t>(sizeof(n60_eqfit_problem));
     out.speakerVersion = n60_speaker_abi_version();
     out.speakerProblemSize = static_cast<uint32_t>(sizeof(n60_speaker_candidate_problem));
+    out.ancVersion = n60_anc_abi_version();
+    out.ancLaneFeedConfigSize = static_cast<uint32_t>(sizeof(N60AncLaneFeedConfig));
     const size_t n = info_size < sizeof out ? info_size : sizeof out;
     out.structSize = static_cast<uint32_t>(n);
     memcpy(info, &out, n);

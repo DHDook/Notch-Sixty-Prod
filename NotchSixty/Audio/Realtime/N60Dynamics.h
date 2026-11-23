@@ -4,8 +4,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#include "N60Biquad.h"
-#include "N60Crossover.h"
+#include "n60/biquad.h"
+#include "n60/crossover.h"
 #include "N60DynamicEQ.h"
 #include "N60SpectralDenoiser.h"
 

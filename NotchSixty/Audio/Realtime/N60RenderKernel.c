@@ -1,6 +1,6 @@
 #include "N60RenderKernel.h"
-#include "N60AncGuard.h"
-#include "N60FeedForwardLive.h"
+#include "n60/anc_guard.h"
+#include "n60/ff_live.h"
 
 #include <limits.h>
 #include <math.h>

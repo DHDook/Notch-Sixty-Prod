@@ -19,7 +19,7 @@ enum LiveTreatmentSafeguards {
 
     /// Ramp-in after arming and ramp-out after a user disarm or an environment auto-disarm.
     /// Both far exceed the howl detector's contract that anti-noise fades in no faster than
-    /// half its growth threshold (`N60AncGuard.h`).
+    /// half its growth threshold (`n60/anc_guard.h`).
     static let startRampMilliseconds = 3_000.0
     static let stopRampMilliseconds = 1_000.0
 

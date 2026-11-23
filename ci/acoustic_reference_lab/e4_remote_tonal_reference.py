@@ -15,6 +15,7 @@ which is -D / S without leakage. dt is the 250 ms block and tau is 0.5 s.
 """
 import cmath
 import math
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -35,6 +36,12 @@ def require(ok, detail):
 
 
 def build_and_run():
+    # E21 S4: ctest builds the probe against libn60core (all platforms) and passes it here; otherwise build it from source.
+    prebuilt = os.environ.get("N60_E4_PROBE")
+    if prebuilt:
+        run = subprocess.run([prebuilt], capture_output=True, text=True, timeout=300)
+        require(run.returncode == 0 and not run.stderr, "probe:\n" + run.stderr)
+        return run.stdout.splitlines()
     cxx, cc = shutil.which("clang++"), shutil.which("clang")
     require(cxx is not None and cc is not None, "clang not installed")
     with tempfile.TemporaryDirectory(prefix="n60-e4-remote-tonal-") as work:

@@ -5,7 +5,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#include "N60Biquad.h"
+#include "n60/biquad.h"
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846

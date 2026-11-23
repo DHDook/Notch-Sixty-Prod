@@ -3,7 +3,7 @@
 
 Builds the production guard (C++20) with e4_anc_guard_probe.c, runs it at the
 eight standard rates, and checks every printed number against an independent
-model of the written rules (N60AncGuard.h, docs/ANC_QUALIFICATION.md s3):
+model of the written rules (n60/anc_guard.h, docs/ANC_QUALIFICATION.md s3):
 
 - GROWTH: block mean squares of the same synthetic tone, the 6 dB / 20 ms
   rule over three blocks, and the 50 ms trip target.
@@ -13,6 +13,7 @@ model of the written rules (N60AncGuard.h, docs/ANC_QUALIFICATION.md s3):
 """
 from array import array
 import math
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -32,13 +33,19 @@ def require(ok, detail):
 
 
 def build_and_run():
+    # E21 S4: ctest builds the probe against libn60core (all platforms) and passes it here; otherwise build it from source.
+    prebuilt = os.environ.get("N60_E4_PROBE")
+    if prebuilt:
+        run = subprocess.run([prebuilt], capture_output=True, text=True, timeout=300)
+        require(run.returncode == 0 and not run.stderr, "probe:\n" + run.stderr)
+        return run.stdout.splitlines()
     cxx, cc = shutil.which("clang++"), shutil.which("clang")
     require(cxx is not None and cc is not None, "clang not installed")
     with tempfile.TemporaryDirectory(prefix="n60-e4-guard-") as work:
         obj, binary = Path(work) / "guard.o", Path(work) / "probe"
         steps = [
             [cxx, "-std=c++20", "-O2", "-Wall", "-Wextra", "-Werror",
-             "-I" + str(RT), "-I" + str(ROOT / "core/include"), "-c", str(RT / "n60_anc_guard.cpp"), "-o", str(obj)],
+             "-I" + str(RT), "-I" + str(ROOT / "core/include"), "-c", str(ROOT / "core/src/anc/anc_guard.cpp"), "-o", str(obj)],
             [cc, "-std=c11", "-O2", "-Wall", "-Wextra", "-Werror",
              "-I" + str(RT), "-I" + str(ROOT / "core/include"), str(PROBE), str(obj), "-lc++", "-lm", "-o", str(binary)],
         ]

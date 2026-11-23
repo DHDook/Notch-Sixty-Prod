@@ -1,5 +1,5 @@
 /*
- * E4 S4: behavioural harness for the speaker-ANC howl guard (N60AncGuard.h).
+ * E4 S4: behavioural harness for the speaker-ANC howl guard (n60/anc_guard.h).
  * Runs every scenario at the eight standard rates, feeding audio in
  * 511-frame buffers so detector blocks straddle buffer boundaries.
  */
@@ -9,7 +9,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#include "N60AncGuard.h"
+#include "n60/anc_guard.h"
 
 #define CHUNK 511u
 static const double kRates[] = {

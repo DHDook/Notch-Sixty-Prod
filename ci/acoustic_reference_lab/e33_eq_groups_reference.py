@@ -74,7 +74,8 @@ def core_sources():
     text = (ROOT / "core/sources.cmake").read_text()
     block = text[text.index("set(N60_CORE_SOURCES"):]
     block = block[:block.index(")")]
-    return re.findall(r"src/([A-Za-z0-9_/]+)\.cpp", block)
+    # The ANC sources (src/anc) are not part of the EQ probes and need the C tonal runtime.
+    return [n for n in re.findall(r"src/([A-Za-z0-9_/]+)\.cpp", block) if not n.startswith("anc/")]
 
 
 def main():

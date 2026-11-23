@@ -1,7 +1,7 @@
-// E4 S25a: live broadband feed-forward filter. See N60FeedForwardLive.h for the design and the
+// E4 S25a: live broadband feed-forward filter. See n60/ff_live.h for the design and the
 // realtime contract.
 
-#include "n60_ff_live.hpp"
+#include "ff_live.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -133,11 +133,7 @@ bool FeedForwardLive::setWeights(const float *left, const float *right,
     if (!left || !right || count == 0 || count > kMaxTaps) return false;
     for (std::uint32_t i = 0; i < count; ++i)
         if (!std::isfinite(left[i]) || !std::isfinite(right[i])) return false;
-    try {
-        makeSet(mailbox_.back(), left, right, count);
-    } catch (...) {
-        return false;
-    }
+    makeSet(mailbox_.back(), left, right, count);
     publishedTail_.store(mailbox_.back().tailTaps, std::memory_order_relaxed);
     mailbox_.publish();
     hasWeights_.store(true, std::memory_order_release);
@@ -389,11 +385,7 @@ bool N60FeedForwardLiveConfigIsValid(const N60FeedForwardLiveConfig *config) {
 
 N60FeedForwardLive *N60FeedForwardLiveCreate(const N60FeedForwardLiveConfig *config) {
     if (!N60FeedForwardLiveConfigIsValid(config)) return nullptr;
-    try {
-        return new N60FeedForwardLive{n60::anc::FeedForwardLive(*config)};
-    } catch (...) {
-        return nullptr;
-    }
+    return new (std::nothrow) N60FeedForwardLive{n60::anc::FeedForwardLive(*config)};
 }
 
 void N60FeedForwardLiveDestroy(N60FeedForwardLive *live) { delete live; }

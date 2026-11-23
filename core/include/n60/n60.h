@@ -10,6 +10,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "n60/anc.h"
 #include "n60/correct.h"
 #include "n60/eqfit.h"
 #include "n60/fold.h"
@@ -54,6 +55,8 @@ typedef struct n60_core_abi_info {
     uint32_t eqfitProblemSize;  /* sizeof(n60_eqfit_problem) */
     uint32_t speakerVersion;    /* E21 S9a, appended */
     uint32_t speakerProblemSize;/* sizeof(n60_speaker_candidate_problem) */
+    uint32_t ancVersion;        /* E21 S4, appended */
+    uint32_t ancLaneFeedConfigSize; /* sizeof(N60AncLaneFeedConfig) */
 } n60_core_abi_info;
 
 /* Returns 1 and fills info, or 0 for a null pointer or a structSize smaller than the first two fields. */

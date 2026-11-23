@@ -5,8 +5,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#include "../NotchSixty/Audio/Realtime/N60Biquad.h"
-#include "../NotchSixty/Audio/Realtime/N60Biquad.h"
+#include "n60/biquad.h"
 
 static double magnitude_at(
     N60BiquadCoefficients c,

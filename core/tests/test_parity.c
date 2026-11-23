@@ -1,5 +1,5 @@
 /* E6 S3: parity harness skeleton. Compares the libn60core PEQ stage with the shipping
- * kernel biquad (N60Biquad.h, float state) on the same designs and signal, at the eight
+ * kernel biquad (n60/biquad.h, float state) on the same designs and signal, at the eight
  * standard rates. Apple-only (the kernel header uses nullability qualifiers); the Linux
  * job runs the other core tests. The core filters in double precision, so the kernel
  * float result is the one expected to deviate; the tolerance records how far. */
@@ -9,7 +9,7 @@
 #include <string.h>
 
 #include "n60/graph.h"
-#include "../../NotchSixty/Audio/Realtime/N60Biquad.h"
+#include "n60/biquad.h"
 
 #define N 4096
 #define TOL 5e-4 /* absolute, signal peak 0.5 */

@@ -4,7 +4,7 @@
 # E4 S4: speaker-ANC howl guard, the first C++20 engine core. Compiled once,
 # then linked into its C harness.
 if selected e4_anc_guard; then
-    if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -I"$RT" -Icore/include -c "$RT/n60_anc_guard.cpp" -o "$OUT/n60_anc_guard.o"; then
+    if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -I"$RT" -Icore/include -c core/src/anc/anc_guard.cpp -o "$OUT/n60_anc_guard.o"; then
         harness e4_anc_guard "${STRICT[@]}" -O2 -I"$RT" -Icore/include ci/harness_e4_anc_guard.c "$OUT/n60_anc_guard.o" -lc++ -lm
     else
         failed+=(e4_anc_guard)
@@ -19,16 +19,16 @@ harness e4_howl_guard_live "${STRICT[@]}" -O2 -include stddef.h -I"$RT" -Icore/i
 # E4 S18a: adaptive gain mailbox, phase-anchor telemetry ring and ambient host-time anchors.
 # shellcheck disable=SC2086
 harness e4_gain_mailbox "${STRICT[@]}" -O2 -include stddef.h -I"$RT" -Icore/include ci/harness_e4_gain_mailbox.c \
-    "$RT/N60ActiveQuietZone.c" "$RT/N60AmbientMonitorBridge.c" -framework CoreAudio -framework AudioToolbox
+    core/src/anc/active_quiet_zone.c "$RT/N60AmbientMonitorBridge.c" -framework CoreAudio -framework AudioToolbox
 # E4 S20: earned-cap ceiling and the attempt-cap fix in the Quiet Zone runtime.
-harness e4_earned_cap "${STRICT[@]}" -O2 -include stddef.h -I"$RT" -Icore/include ci/harness_e4_earned_cap.c "$RT/N60ActiveQuietZone.c"
+harness e4_earned_cap "${STRICT[@]}" -O2 -include stddef.h -I"$RT" -Icore/include ci/harness_e4_earned_cap.c core/src/anc/active_quiet_zone.c
 
 # E4 S21: per-tone excursion caps in the Quiet Zone runtime.
-harness e4_excursion_cap "${STRICT[@]}" -O2 -include stddef.h -I"$RT" -Icore/include ci/harness_e4_excursion_cap.c "$RT/N60ActiveQuietZone.c"
+harness e4_excursion_cap "${STRICT[@]}" -O2 -include stddef.h -I"$RT" -Icore/include ci/harness_e4_excursion_cap.c core/src/anc/active_quiet_zone.c
 # E4 S13: acoustic twin (closed-loop room simulator) with the tonal canceller and
 # howl guard in the loop. SOAK=1 adds the long drift and fault soak and the 8-hour overnight run (E4 S29).
 if selected e4_acoustic_twin; then
-    if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -I"$RT" -Icore/include -c "$RT/n60_anc_guard.cpp" -o "$OUT/n60_anc_guard_twin.o" \
+    if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -I"$RT" -Icore/include -c core/src/anc/anc_guard.cpp -o "$OUT/n60_anc_guard_twin.o" \
         && clang++ -std=c++20 -O2 -Wall -Wextra -Werror -I"$RT" -Icore/include -c core/src/anc/fxlms.cpp -o "$OUT/n60_fxlms_twin.o" \
         && clang++ -std=c++20 -O2 -Wall -Wextra -Werror -I"$RT" -Icore/include -Ici ci/harness_e4_acoustic_twin.cpp \
             "$OUT/n60_anc_guard_twin.o" "$OUT/n60_fxlms_twin.o" -o "$OUT/e4_acoustic_twin"; then
@@ -63,7 +63,7 @@ fi
 # E4 S22: programme removal (kernel demodulation of the music at each tone, and the remote tonal
 # core taking it out of the error signal) at the eight standard rates.
 if selected e4_programme_removal; then
-    if clang -std=c11 -O2 -Wall -Wextra -Werror -include stddef.h -I"$RT" -Icore/include -c "$RT/N60ActiveQuietZone.c" -o "$OUT/n60_aqz_programme.o" \
+    if clang -std=c11 -O2 -Wall -Wextra -Werror -include stddef.h -I"$RT" -Icore/include -c core/src/anc/active_quiet_zone.c -o "$OUT/n60_aqz_programme.o" \
         && clang++ -std=c++20 -O2 -Wall -Wextra -Werror -include stddef.h -I"$RT" -Icore/include ci/harness_e4_programme_removal.cpp \
             core/src/anc/remote_tonal.cpp "$OUT/n60_aqz_programme.o" -o "$OUT/e4_programme_removal"; then
         echo "::group::e4_programme_removal"
@@ -88,7 +88,7 @@ fi
 # E4 S9a: feed-forward shadow canceller (1 x 2 x 1 block FxLMS) on a simulated plant.
 if selected e4_ff_shadow; then
     if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -I"$RT" -Icore/include -c core/src/anc/fxlms.cpp -o "$OUT/n60_fxlms_ff.o" \
-        && clang++ -std=c++20 -O2 -Wall -Wextra -Werror -I"$RT" -Icore/include -c "$RT/n60_ff_shadow.cpp" -o "$OUT/n60_ff_shadow.o"; then
+        && clang++ -std=c++20 -O2 -Wall -Wextra -Werror -I"$RT" -Icore/include -c core/src/anc/ff_shadow.cpp -o "$OUT/n60_ff_shadow.o"; then
         harness e4_ff_shadow "${STRICT[@]}" -O2 -I"$RT" -Icore/include ci/harness_e4_ff_shadow.c \
             "$OUT/n60_ff_shadow.o" "$OUT/n60_fxlms_ff.o" -lc++ -lm
     else
@@ -98,7 +98,7 @@ fi
 # E4 S22b1: feed-forward echo stage (leakage removal, offset search, gap, drift) on a simulated plant.
 if selected e4_ff_echo; then
     if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -I"$RT" -Icore/include -c core/src/anc/fxlms.cpp -o "$OUT/n60_fxlms_echo.o" \
-        && clang++ -std=c++20 -O2 -Wall -Wextra -Werror -I"$RT" -Icore/include -c "$RT/n60_ff_shadow.cpp" -o "$OUT/n60_ff_shadow_echo.o"; then
+        && clang++ -std=c++20 -O2 -Wall -Wextra -Werror -I"$RT" -Icore/include -c core/src/anc/ff_shadow.cpp -o "$OUT/n60_ff_shadow_echo.o"; then
         harness e4_ff_echo "${STRICT[@]}" -O2 -I"$RT" -Icore/include ci/harness_e4_ff_echo.c \
             "$OUT/n60_ff_shadow_echo.o" "$OUT/n60_fxlms_echo.o" -lc++ -lm
     else
@@ -108,8 +108,8 @@ fi
 # E4 S25a: live feed-forward filter (native head plus decimated tail) on a simulated plant.
 if selected e4_ff_live; then
     if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -I"$RT" -Icore/include -c core/src/anc/fxlms.cpp -o "$OUT/n60_fxlms_live.o" \
-        && clang++ -std=c++20 -O2 -Wall -Wextra -Werror -I"$RT" -Icore/include -c "$RT/n60_ff_live.cpp" -o "$OUT/n60_ff_live.o" \
-        && clang++ -std=c++20 -O2 -Wall -Wextra -Werror -I"$RT" -Icore/include -c "$RT/n60_ff_echo.cpp" -o "$OUT/n60_ff_echo.o"; then
+        && clang++ -std=c++20 -O2 -Wall -Wextra -Werror -I"$RT" -Icore/include -c core/src/anc/ff_live.cpp -o "$OUT/n60_ff_live.o" \
+        && clang++ -std=c++20 -O2 -Wall -Wextra -Werror -I"$RT" -Icore/include -c core/src/anc/ff_echo.cpp -o "$OUT/n60_ff_echo.o"; then
         harness e4_ff_live "${STRICT[@]}" -O2 -I"$RT" -Icore/include ci/harness_e4_ff_live.c \
             "$OUT/n60_ff_live.o" "$OUT/n60_ff_echo.o" "$OUT/n60_fxlms_live.o" -lc++ -lm
         # E4 S22b3: the echo stage on a simulated 128 ms leakage at the eight rates.
@@ -125,7 +125,7 @@ harness e4_ff_live_wiring "${STRICT[@]}" -O2 -include stddef.h -I"$RT" -Icore/in
 # E4 S9b1: feed-forward survey (Welch H1 transfer and coherence) on a simulated plant.
 if selected e4_ff_survey; then
     if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -I"$RT" -Icore/include -c core/src/anc/fxlms.cpp -o "$OUT/n60_fxlms_survey.o" \
-        && clang++ -std=c++20 -O2 -Wall -Wextra -Werror -I"$RT" -Icore/include -c "$RT/n60_ff_survey.cpp" -o "$OUT/n60_ff_survey.o"; then
+        && clang++ -std=c++20 -O2 -Wall -Wextra -Werror -I"$RT" -Icore/include -c core/src/anc/ff_survey.cpp -o "$OUT/n60_ff_survey.o"; then
         harness e4_ff_survey "${STRICT[@]}" -O2 -I"$RT" -Icore/include ci/harness_e4_ff_survey.c \
             "$OUT/n60_ff_survey.o" "$OUT/n60_fxlms_survey.o" -lc++ -lm
     else

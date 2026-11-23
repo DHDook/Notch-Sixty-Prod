@@ -17,6 +17,7 @@ predictions from the written rules (N60Fxlms.h):
 """
 import cmath
 import math
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -34,6 +35,12 @@ def require(ok, detail):
 
 
 def build_and_run():
+    # E21 S4: ctest builds the probe against libn60core (all platforms) and passes it here; otherwise build it from source.
+    prebuilt = os.environ.get("N60_E4_PROBE")
+    if prebuilt:
+        run = subprocess.run([prebuilt], capture_output=True, text=True, timeout=300)
+        require(run.returncode == 0 and not run.stderr, "probe:\n" + run.stderr)
+        return run.stdout.splitlines()
     cxx, cc = shutil.which("clang++"), shutil.which("clang")
     require(cxx is not None and cc is not None, "clang not installed")
     with tempfile.TemporaryDirectory(prefix="n60-e4-ff-shadow-") as work:
@@ -43,7 +50,7 @@ def build_and_run():
             [cxx, "-std=c++20", "-O2", "-Wall", "-Wextra", "-Werror",
              "-I" + str(RT), "-I" + str(ROOT / "core/include"), "-c", str(ROOT / "core/src/anc/fxlms.cpp"), "-o", str(objects[0])],
             [cxx, "-std=c++20", "-O2", "-Wall", "-Wextra", "-Werror",
-             "-I" + str(RT), "-I" + str(ROOT / "core/include"), "-c", str(RT / "n60_ff_shadow.cpp"), "-o", str(objects[1])],
+             "-I" + str(RT), "-I" + str(ROOT / "core/include"), "-c", str(ROOT / "core/src/anc/ff_shadow.cpp"), "-o", str(objects[1])],
             [cc, "-std=c11", "-O2", "-Wall", "-Wextra", "-Werror",
              "-I" + str(RT), "-I" + str(ROOT / "core/include"), str(PROBE), *map(str, objects),
              "-lc++", "-lm", "-o", str(binary)],

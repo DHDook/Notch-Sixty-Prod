@@ -1,7 +1,7 @@
-// E4 S22b3: echo stage of the live feed-forward filter. See n60_ff_echo.hpp for the method and the
+// E4 S22b3: echo stage of the live feed-forward filter. See ff_echo.hpp for the method and the
 // realtime contract.
 
-#include "n60_ff_echo.hpp"
+#include "ff_echo.hpp"
 
 #include <algorithm>
 #include <cmath>

@@ -1,9 +1,9 @@
-// E4 S4: speaker-ANC howl guard. See N60AncGuard.h for the contract.
+// E4 S4: speaker-ANC howl guard. See n60/anc_guard.h for the contract.
 //
 // Band-pass sections: RBJ Audio EQ Cookbook band-pass (constant 0 dB peak
 // gain), R. Bristow-Johnson. Detection rules: docs/ANC_QUALIFICATION.md s3.
 
-#include "n60_anc_guard.hpp"
+#include "anc_guard.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -232,26 +232,26 @@ N60AncGuardConfig N60AncGuardConfigDefault(double sampleRate) {
 
 bool N60AncGuardConfigIsValid(const N60AncGuardConfig *config) {
     if (config == nullptr) return false;
-    const auto finite = [](double v) { return std::isfinite(v); };
-    if (!finite(config->sampleRate) || config->sampleRate < kMinimumRate
+    const auto is_finite_value = [](double v) { return std::isfinite(v); };
+    if (!is_finite_value(config->sampleRate) || config->sampleRate < kMinimumRate
         || config->sampleRate > kMaximumRate) return false;
     const auto inDB = [&](double v, double lo, double hi) {
-        return finite(v) && v >= lo && v <= hi;
+        return is_finite_value(v) && v >= lo && v <= hi;
     };
     if (!inDB(config->growthDBPer20ms, 0.5, 40)
         || config->growthBlocks < 1 || config->growthBlocks > 10) return false;
     if (!inDB(config->referenceAllowanceDB, 0, 20)) return false;
     if (!inDB(config->errorRiseDB, 0.5, 40)
         || config->errorRiseBlocks < 1 || config->errorRiseBlocks > 10) return false;
-    if (!finite(config->outputCeiling) || config->outputCeiling <= 0
+    if (!is_finite_value(config->outputCeiling) || config->outputCeiling <= 0
         || config->outputCeiling > 1) return false;
-    if (!finite(config->activityFloorDB) || config->activityFloorDB > 0
+    if (!is_finite_value(config->activityFloorDB) || config->activityFloorDB > 0
         || config->activityFloorDB < -160) return false;
-    if (!finite(config->muteRampSeconds) || config->muteRampSeconds < 0.001
+    if (!is_finite_value(config->muteRampSeconds) || config->muteRampSeconds < 0.001
         || config->muteRampSeconds > 0.1) return false;
     if (config->hasErrorBaseline) {
         for (const float db : config->errorBaselineDB) {
-            if (!finite(db) || db > 0 || db < -200) return false;
+            if (!is_finite_value(db) || db > 0 || db < -200) return false;
         }
     }
     return true;

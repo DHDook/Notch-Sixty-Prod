@@ -5,7 +5,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#include "N60Biquad.h"
+#include "n60/biquad.h"
 
 #ifdef __cplusplus
 extern "C" {

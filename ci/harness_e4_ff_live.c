@@ -1,5 +1,5 @@
 /*
- * E4 S25a: behavioural harness for the live feed-forward filter (N60FeedForwardLive.h) at the
+ * E4 S25a: behavioural harness for the live feed-forward filter (n60/ff_live.h) at the
  * eight standard rates. This is also the S25r prototype: it measures the head/tail seam accuracy
  * (the live response against the ideal response of the fd weights), the added delay and the
  * cancellation on a simulated plant, so the design note's figures come from here.
@@ -16,7 +16,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "N60FeedForwardLive.h"
+#include "n60/ff_live.h"
 
 static const double kRates[] = {44100, 48000, 88200, 96000, 176400, 192000, 352800, 384000};
 #define RATE_COUNT (sizeof kRates / sizeof kRates[0])
