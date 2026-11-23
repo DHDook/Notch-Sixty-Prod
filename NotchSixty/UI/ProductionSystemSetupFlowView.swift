@@ -102,6 +102,11 @@ final class SystemSetupFlowModel: ObservableObject {
 
     var choices: SystemSetupChoices { flow.choices }
     var step: SystemSetupStep { flow.step }
+    var preset: SystemSetupPreset { flow.preset }
+    /// E12 S10: the steps this run shows (the quick preset leaves out Speakers and Room).
+    var visibleSteps: [SystemSetupStep] { flow.preset.steps }
+    /// Set when a quick run has saved: the window offers the full setup instead of closing.
+    @Published private(set) var quickFinished = false
     var isRunning: Bool { flow.phase == .running }
     /// Steps built so far; later ones show a placeholder.
     static let builtSteps: Set<SystemSetupStep> = Set(SystemSetupStep.allCases)
@@ -130,7 +135,9 @@ final class SystemSetupFlowModel: ObservableObject {
         return true
     }
 
-    func begin() {
+    func begin(preset: SystemSetupPreset = .full) {
+        quickFinished = false
+        savedProfileName = nil
         if resumeSession() { return }
         let snapshot = profiles.captureSystemState()
         var initial = SystemSetupChoices()
@@ -148,7 +155,7 @@ final class SystemSetupFlowModel: ObservableObject {
         initial.arrangement = migrated
         speakerChoices = SystemSetupArrangementPlanner.choices(from: migrated)
         do {
-            try flow.start(snapshot: snapshot, choices: initial)
+            try flow.start(snapshot: snapshot, choices: initial, preset: preset)
             message = nil
         } catch let refusal as SystemSetupRefusal {
             message = refusal.reason
@@ -351,6 +358,10 @@ final class SystemSetupFlowModel: ObservableObject {
     }
 
     func addSeat() {
+        if let limit = flow.preset.seatLimit, flow.choices.seatNames.count >= limit {
+            message = "The quick setup measures one seat. Open the full setup for more."
+            return
+        }
         do { try calibration.addSeat(); syncMeasurementChoices() } catch { message = error.localizedDescription }
     }
 
@@ -1139,6 +1150,7 @@ final class SystemSetupFlowModel: ObservableObject {
             let name = SystemSetupSaveNaming.profileName(flow.choices.profileName, notVerified: flow.savesAsNotVerified)
             let id = profiles.saveCurrentSystemProfile(named: name)
             savedProfileName = profiles.systemProfiles.first(where: { $0.id == id })?.name ?? name
+            quickFinished = flow.preset == .quick
             sessions.delete(key: sessionKey)
             message = nil
         } catch let refusal as SystemSetupRefusal {
@@ -1156,7 +1168,8 @@ final class SystemSetupFlowModel: ObservableObject {
 
     func next() {
         do {
-            if flow.step == .topology { try applyArrangement() }
+            // The quick preset has no Speakers step: the arrangement derived at the start is applied when Output is left.
+            if flow.step == .topology || (flow.step == .output && flow.preset == .quick) { try applyArrangement() }
             try flow.next()
             message = nil
             if flow.step == .verify { prepareVerify() }
@@ -1172,6 +1185,18 @@ final class SystemSetupFlowModel: ObservableObject {
     }
 
     func back() { try? flow.back(); persistSession() }
+
+    /// E12 S10: turns a quick run into the full flow in place (same choices, same measurements).
+    func openFullSetup() {
+        do { try flow.openFullSetup(); message = nil; persistSession() } catch { message = error.localizedDescription }
+    }
+
+    /// E12 S10: after a quick run saved, starts the full flow over the state the quick run left.
+    func beginFullAfterQuick() {
+        quickFinished = false
+        savedProfileName = nil
+        begin(preset: .full)
+    }
 
     func skip() {
         do { try flow.skip(); persistSession() } catch let refusal as SystemSetupRefusal { message = refusal.reason } catch {}
@@ -1208,9 +1233,12 @@ struct ProductionSystemSetupFlowView: View {
     @StateObject private var model: SystemSetupFlowModel
     @Environment(\.dismiss) private var dismiss
 
+    private let preset: SystemSetupPreset
+
     init(engine: AudioIOEngine, profiles: ProductProfileController,
          microphone: RoomCorrectionCalibrationController, calibration: MultichannelCalibrationController,
-         advisor: RoomTreatmentAdvisorController) {
+         advisor: RoomTreatmentAdvisorController, preset: SystemSetupPreset = .full) {
+        self.preset = preset
         _model = StateObject(wrappedValue: SystemSetupFlowModel(
             engine: engine, profiles: profiles, microphone: microphone, calibration: calibration,
             services: ProductionSystemSetupServices.production(
@@ -1219,7 +1247,8 @@ struct ProductionSystemSetupFlowView: View {
     }
 
     private let advisor: RoomTreatmentAdvisorController
-    private let visibleSteps: [SystemSetupStep] = SystemSetupStep.allCases
+    private var visibleSteps: [SystemSetupStep] { model.visibleSteps }
+    private var stepPosition: Int { (visibleSteps.firstIndex(of: model.step) ?? 0) + 1 }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -1239,14 +1268,14 @@ struct ProductionSystemSetupFlowView: View {
             footer
         }
         .frame(minWidth: 640, minHeight: 520)
-        .onAppear { if !model.isRunning { model.begin() } }
+        .onAppear { if !model.isRunning { model.begin(preset: preset) } }
     }
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("Set up my system").font(.title3.weight(.semibold))
-            ProgressView(value: Double(model.step.index + 1), total: Double(visibleSteps.count))
-            Text("Step \(model.step.index + 1) of \(visibleSteps.count): \(Self.title(model.step))")
+            Text(model.preset == .quick ? "Quick setup" : "Set up my system").font(.title3.weight(.semibold))
+            ProgressView(value: Double(stepPosition), total: Double(visibleSteps.count))
+            Text("Step \(stepPosition) of \(visibleSteps.count): \(Self.title(model.step))")
                 .font(.caption).foregroundStyle(.secondary)
         }
         .padding(20)
@@ -1254,14 +1283,33 @@ struct ProductionSystemSetupFlowView: View {
 
     private var footer: some View {
         HStack {
-            Button("Cancel", role: .cancel) { model.cancel(); dismiss() }
-            Spacer()
-            Button("Back") { model.back() }.disabled(model.step == .output)
+            if model.quickFinished {
+                Button("Done") { dismiss() }
+                Spacer()
+                Button("Open the full setup") { model.beginFullAfterQuick() }.keyboardShortcut(.defaultAction)
+            } else { setupButtons }
+        }
+        .padding(16)
+    }
+
+    @ViewBuilder
+    private var setupButtons: some View {
+        Button("Cancel", role: .cancel) { model.cancel(); dismiss() }
+        if model.preset == .quick {
+            Button("Switch to full setup") { model.openFullSetup() }
+                .help("Adds the Speakers and Room steps and more seats. Nothing you have chosen changes.")
+        }
+        Spacer()
+        Group {
+            Button("Back") { model.back() }.disabled(model.step == model.visibleSteps.first)
             if model.flow.canSkip(model.step) {
                 Button("Skip") { model.skip() }
             }
             if model.step == .save {
-                Button("Save") { model.save(); if model.savedProfileName != nil { dismiss() } }
+                Button("Save") {
+                    model.save()
+                    if model.savedProfileName != nil, !model.quickFinished { dismiss() }
+                }
                     .keyboardShortcut(.defaultAction)
                     .disabled(model.isVerifying)
             } else {
@@ -1270,11 +1318,23 @@ struct ProductionSystemSetupFlowView: View {
                     .disabled(!SystemSetupFlowModel.builtSteps.contains(model.step) || model.isVerifying)
             }
         }
-        .padding(16)
     }
 
     @ViewBuilder
     private var stepContent: some View {
+        if model.quickFinished {
+            VStack(alignment: .leading, spacing: 8) {
+                Label("Saved \(model.savedProfileName ?? "your profile")", systemImage: "checkmark.circle.fill").font(.headline)
+                Text("The quick setup measured one seat and used default bass and correction settings. Open the full setup to see every choice, add seats or describe the room; nothing you have set changes.")
+                    .foregroundStyle(.secondary)
+            }
+        } else {
+            stepBody
+        }
+    }
+
+    @ViewBuilder
+    private var stepBody: some View {
         switch model.step {
         case .output: SystemSetupOutputStep(model: model)
         case .topology: SystemSetupSpeakersStep(model: model)
@@ -1901,6 +1961,8 @@ private struct SystemSetupSaveStep: View {
 struct SystemSetupEntryCard: View {
     let availability: SystemSetupEntryPolicy.Availability
     let start: () -> Void
+    /// E12 S10: set when `e12.setup-flow` is on; adds the quick path beside the full flow.
+    var startQuick: (() -> Void)?
     let openHeadphones: () -> Void
 
     private func offerRow(showsExplanation: Bool) -> some View {
@@ -1911,7 +1973,13 @@ struct SystemSetupEntryCard: View {
                     .font(.callout).foregroundStyle(.secondary).lineLimit(1)
             }
             Spacer(minLength: DesignSpacing.m.pt)
-            Button("Start", action: start)
+            if let startQuick {
+                Button("Quick setup", action: startQuick)
+                    .help("About ten minutes: one seat, default bass and correction. The full setup is offered at the end.")
+                Button("Full setup", action: start)
+            } else {
+                Button("Start", action: start)
+            }
         }
     }
 

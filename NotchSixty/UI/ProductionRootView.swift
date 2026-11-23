@@ -290,6 +290,7 @@ struct ProductionRootView: View {
     #endif
     @State private var commandError: String?
     @State private var showingGuidedSetup = false
+    @State private var guidedSetupPreset = SystemSetupPreset.full
     @State private var failsafeVerdict: ActiveSpeakerFailsafe.Verdict = .safe
     @ObservedObject private var defaultOutput = DefaultOutputMonitor.shared
     /// E12 S27: "Compare blind..." in the remote panel opens the Blind Listening page.
@@ -436,7 +437,8 @@ struct ProductionRootView: View {
                 profiles: product.profiles,
                 microphone: product.calibration,
                 calibration: product.multichannelCalibration,
-                advisor: product.roomTreatmentAdvisor
+                advisor: product.roomTreatmentAdvisor,
+                preset: guidedSetupPreset
             )
         }
     }
@@ -453,7 +455,8 @@ struct ProductionRootView: View {
             calibration: status)
         return AnyView(SystemSetupEntryCard(
             availability: availability,
-            start: { showingGuidedSetup = true },
+            start: { guidedSetupPreset = .full; showingGuidedSetup = true },
+            startQuick: FeatureFlags().isEnabled(.setupFlow) ? { guidedSetupPreset = .quick; showingGuidedSetup = true } : nil,
             openHeadphones: { navigation.navigate(to: .headphones) }))
     }
 
