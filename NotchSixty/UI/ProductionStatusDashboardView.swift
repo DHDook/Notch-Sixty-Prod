@@ -10,6 +10,9 @@ struct DashboardTelemetry: Equatable {
     var meanLoad: Float?
     var peakLoad: Float?
     var latencyMilliseconds: Double?
+    /// Output device latency and I/O buffer (G71), read from Core Audio on the control plane.
+    var deviceLatencyMilliseconds: Double?
+    var bufferMilliseconds: Double?
     var integratedLUFS: Double?
     var roomTreatment: ProductionRoomTreatmentDiagnostics?
 }
@@ -104,6 +107,8 @@ extension DashboardInputs {
         i.meanLoad = telemetry.meanLoad
         i.peakLoad = telemetry.peakLoad
         i.latencyMilliseconds = telemetry.latencyMilliseconds
+        i.deviceLatencyMilliseconds = telemetry.deviceLatencyMilliseconds
+        i.bufferMilliseconds = telemetry.bufferMilliseconds
         i.integratedLUFS = telemetry.integratedLUFS
         let peak = history.health.peakOutputLinear
         i.truePeakDBTP = peak > 0 ? 20 * log10(Double(peak)) : nil
@@ -291,6 +296,13 @@ struct ProductionStatusDashboardView: View {
                     next.latencyMilliseconds = Double(frames) / rate * 1_000
                 }
                 next.roomTreatment = context.transport?.roomTreatment
+                if let rate = context.diagnostics.outputSampleRate, rate > 0,
+                   let uid = engine.routeConfiguration.selectedOutputUID,
+                   let output = engine.outputDevices.first(where: { $0.uid == uid }) {
+                    let reading = AudioDeviceLatencyReader.read(deviceID: output.deviceID, input: false, fallbackRate: rate)
+                    next.deviceLatencyMilliseconds = reading.latencySeconds * 1_000
+                    next.bufferMilliseconds = reading.bufferSeconds * 1_000
+                }
             }
             next.integratedLUFS = engine.productionAnalysisSnapshot().loudnessOutput?.integrated
             if next != telemetry { telemetry = next }
