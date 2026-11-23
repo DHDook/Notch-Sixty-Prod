@@ -36,7 +36,7 @@ enum ComparisonCandidates {
         off.dynamics.outputProtection = current.dynamics.outputProtection
         var out = [
             ComparisonCandidate(kind: .current, name: "Current settings", state: current),
-            ComparisonCandidate(kind: .processingOff, name: "Processing off", state: off),
+            ComparisonCandidate(kind: .processingOff, name: "Processing off (equaliser, preamp, dynamics)", state: off),
         ]
         out += presets.map {
             ComparisonCandidate(kind: .preset($0.id), name: $0.name, state: ContentABAuditionState(contentState: $0.state))

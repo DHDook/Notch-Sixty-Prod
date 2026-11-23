@@ -210,7 +210,8 @@ final class ProductController: ObservableObject {
         self.hardwareAcceptance = HardwareAcceptanceController()
         self.backup = NotchSixtyBackupService(
             profiles: profiles,
-            roomStore: roomProjects.store
+            roomStore: roomProjects.store,
+            blindHistory: .shared
         )
         self.recovery = ProductRecoveryController(
             store: .forCurrentProcess()
@@ -338,7 +339,8 @@ final class ProductController: ObservableObject {
         self.hardwareAcceptance = HardwareAcceptanceController()
         self.backup = NotchSixtyBackupService(
             profiles: profiles,
-            roomStore: roomProjects.store
+            roomStore: roomProjects.store,
+            blindHistory: .shared
         )
         self.recovery = ProductRecoveryController(
             store: recoveryStore

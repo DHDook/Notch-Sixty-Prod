@@ -65,35 +65,26 @@ final class BlindABXValidationTests: XCTestCase {
         XCTAssertEqual(try trial.exportEvidence().correctCount, 12)
     }
 
-    func testABXPreflightProtectsRateLevelsLengthAndAlignment() {
+    func testPreflightOnlyRefusesFilesThatCannotPlay() {
         let a = BlindABXFileMetrics(
             sampleRate: 384_000, channels: 2, frameCount: 384_000,
             rmsDBFS: -20.0, samplePeakDBFS: -4.0
         )
+        // E12 S28: loudness, length, rate and peak differences are matched by the page, not refused.
         var b = a
-        b.rmsDBFS = -20.09
-        XCTAssertTrue(BlindABXPreflight.reasons(a: a, b: b).isEmpty)
-
-        b.rmsDBFS = -19.88
-        XCTAssertTrue(BlindABXPreflight.reasons(a: a, b: b).contains {
-            $0.contains("0.10 dB")
-        })
-        b = a
+        b.rmsDBFS = -14
         b.sampleRate = 48_000
-        XCTAssertTrue(BlindABXPreflight.reasons(a: a, b: b).contains {
-            $0.contains("identical sample rate")
-        })
-        b = a
-        b.frameCount -= 1
-        XCTAssertFalse(BlindABXPreflight.reasons(a: a, b: b).isEmpty)
-        b = a
-        b.samplePeakDBFS = 0.0
-        XCTAssertFalse(BlindABXPreflight.reasons(a: a, b: b).isEmpty)
+        b.frameCount = 96_000
+        b.samplePeakDBFS = -0.1
+        XCTAssertTrue(BlindABXPreflight.reasons(a: a, b: b).isEmpty)
         b = a
         b.channels = 1
         XCTAssertFalse(BlindABXPreflight.reasons(a: a, b: b).isEmpty)
         b = a
         b.rmsDBFS = .nan
+        XCTAssertFalse(BlindABXPreflight.reasons(a: a, b: b).isEmpty)
+        b = a
+        b.frameCount = 0
         XCTAssertFalse(BlindABXPreflight.reasons(a: a, b: b).isEmpty)
     }
 
