@@ -542,6 +542,11 @@ add_executable(n60core_hrtf_test tests/test_hrtf.cpp)
 target_link_libraries(n60core_hrtf_test PRIVATE n60core)
 add_test(NAME n60core_hrtf COMMAND n60core_hrtf_test)
 
+# E29 S3: room-model interpolation (n60/roommodel.h).
+add_executable(n60core_roommodel_test tests/test_roommodel.cpp)
+target_link_libraries(n60core_roommodel_test PRIVATE n60core)
+add_test(NAME n60core_roommodel COMMAND n60core_roommodel_test)
+
 # E21 S10b: passive ambient field analysis (n60/anc_design.h v2).
 add_executable(n60core_ambient_field_test tests/test_ambient_field.cpp)
 target_link_libraries(n60core_ambient_field_test PRIVATE n60core)
