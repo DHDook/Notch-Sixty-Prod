@@ -29,6 +29,10 @@ uint64_t cleanupCarry(SnapHeader *from, SnapHeader *to) N60_RT_NONBLOCKING;
 // Realtime thread. Runs the stage in place over `frames` frames of the pair.
 void runCleanup(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) N60_RT_NONBLOCKING;
 
+// Test hook (E23 S1c, G5): false makes `runCleanup` take the per-sample loop even for a settled block, so a test can
+// compare the whole-buffer pass against it on the same input. Default true. A relaxed atomic read per block.
+void setCleanupBulkPassEnabledForTesting(bool enabled);
+
 // Pure range check for one parameter (see validateParam).
 n60_status validateCleanupParam(const SnapHeader *h, const StageRec &r, uint32_t idx, float value) N60_RT_NONBLOCKING;
 

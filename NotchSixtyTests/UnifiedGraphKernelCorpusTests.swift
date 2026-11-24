@@ -239,6 +239,54 @@ final class UnifiedGraphKernelCorpusTests: XCTestCase {
         }
     }
 
+    // MARK: Linkwitz deviation form (E6 G31, E23 S1c G7)
+
+    /// The output of `N60BiquadDesignLinkwitzTransformDeviation` (what `AudioIOEngine` publishes) goes through the translator
+    /// into the core and tracks a double-precision biquad built from the same corner and target at every rate, including the
+    /// low corner at 384 kHz where float coefficients lose the poles near z = 1.
+    func testLinkwitzDeviationDesignOutputReachesTheCoreAndTracksADoubleReference() throws {
+        let f0 = 25.0, q0 = 0.7, fp = 15.0, qp = 0.6
+        for rate in Self.rates {
+            var s = N60DSPGraphSnapshotMakeUnity(rate)
+            XCTAssertTrue(N60DSPGraphSnapshotSetEQBandForChannels(
+                &s, 0, UInt8(N60_EQ_CHANNEL_STEREO), N60BiquadFilterTypePeaking, f0, 0, q0, true))
+            var coefficients = N60BiquadCoefficientsMakeIdentity()
+            XCTAssertTrue(N60BiquadDesignLinkwitzTransform(rate, f0, q0, fp, qp, &coefficients))
+            var deviation = [Double](repeating: 0, count: 5)
+            XCTAssertTrue(N60BiquadDesignLinkwitzTransformDeviation(rate, f0, q0, fp, qp, &deviation))
+            withUnsafeMutablePointer(to: &s.eqBands) { tuple in
+                tuple.withMemoryRebound(to: N60BiquadBandSnapshot.self, capacity: 1) { band in
+                    band.pointee.type = N60BiquadFilterTypeLinkwitzTransform
+                    band.pointee.coefficients = coefficients
+                    band.pointee.linkwitzDeviationValid = true
+                    withUnsafeMutableBytes(of: &band.pointee.linkwitzDeviation) { raw in
+                        for (i, v) in deviation.enumerated() { raw.storeBytes(of: v, toByteOffset: i * MemoryLayout<Double>.stride, as: Double.self) }
+                    }
+                }
+            }
+            // Double reference from the deviation form's own definition: y = 1 - 1/z.
+            let n0 = deviation[0], n1 = deviation[1], n2 = deviation[2], d0 = deviation[3], d1 = deviation[4]
+            let b0 = n0 + n1 + n2, b1 = -n1 - 2 * n2, b2 = n2, a1 = d1 + 2 * d0 - 2, a2 = 1 - d0 - d1
+            let frames = Int(rate * 0.4) / Self.block * Self.block
+            var tone = [Float](repeating: 0, count: frames)
+            for i in 0..<frames { tone[i] = 0.5 * Float(sin(2 * Double.pi * 20 * Double(i) / rate)) }
+            var z1 = 0.0, z2 = 0.0
+            var reference = [Double](repeating: 0, count: frames)
+            for i in 0..<frames {
+                let x = Double(tone[i])
+                let y = b0 * x + z1
+                z1 = b1 * x - a1 * y + z2
+                z2 = b2 * x - a2 * y
+                reference[i] = y
+            }
+            let out = try graphRender(try graphHost(s, rate: rate), [tone, tone])
+            var worst = 0.0
+            for i in (frames / 2)..<frames { worst = max(worst, abs(Double(out[0][i]) - reference[i])) }
+            XCTAssertLessThan(worst, 1e-3, "Linkwitz deviation form through the graph, rate \(rate)")
+            XCTAssertGreaterThan(rms(out[0][(frames / 2)...]), 0.05, "signal present, rate \(rate)")
+        }
+    }
+
     // MARK: Latency
 
     /// The latency the graph reports equals the delay of an impulse measured at the output, and both
@@ -259,8 +307,9 @@ final class UnifiedGraphKernelCorpusTests: XCTestCase {
                 let label = "oversampling \(oversampling.rawValue) rate \(rate)"
                 let graphDelay = try XCTUnwrap(centroidDelay(graph[0], impulseAt: 100), label)
                 let kernelDelay = try XCTUnwrap(centroidDelay(kernel[0], impulseAt: 100), label)
-                // The report is one frame short of the measured delay at 44.1 and 88.2 kHz (gap G2 in
-                // docs/epics/E23.md); the tolerance is one frame until that is fixed.
+                // E23 S1c (G2, refined): with the sub-sample peak position the report is not a rounding artefact. At 44.1 kHz it
+                // reads 137 frames against a measured 136.07 (the kernel measures the same), so the report is about one frame
+                // long; the tolerance stays one frame and G2 stays open in docs/epics/E23.md.
                 XCTAssertEqual(graphDelay, Double(host.latencyFrames), accuracy: 1.0, "graph report vs measured, \(label)")
                 // Parity exception (E32 S6, for the E23 S1 corpus): with `e32.dynamics-sound` the graph's true-peak factor follows
                 // the rate (1x from 176.4 kHz, 2x at 88.2 and 96 kHz) while the frozen kernel keeps a fixed 4x, so the delays
@@ -275,7 +324,12 @@ final class UnifiedGraphKernelCorpusTests: XCTestCase {
     /// Index of the largest-magnitude sample, minus the input position (the oversampling filters are
     /// linear phase, so the peak sits at the group delay).
     private func centroidDelay(_ x: [Float], impulseAt: Int) -> Double? {
-        guard let peak = x.enumerated().max(by: { abs($0.element) < abs($1.element) }), abs(peak.element) > 1e-6 else { return nil }
-        return Double(peak.offset - impulseAt)
+        guard let peak = x.enumerated().max(by: { abs($0.element) < abs($1.element) }), abs(peak.element) > 1e-6,
+              peak.offset > 0, peak.offset < x.count - 1 else { return nil }
+        // Parabolic interpolation through the peak and its neighbours gives the sub-sample position.
+        let a = Double(abs(x[peak.offset - 1])), b = Double(abs(peak.element)), c = Double(abs(x[peak.offset + 1]))
+        let denominator = a - 2 * b + c
+        let shift = abs(denominator) > 1e-12 ? 0.5 * (a - c) / denominator : 0
+        return Double(peak.offset - impulseAt) + shift
     }
 }

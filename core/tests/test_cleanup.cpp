@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "n60/graph.h"
+#include "stages_cleanup.hpp"
 
 namespace {
 int failures = 0;
@@ -204,6 +205,29 @@ int main() {
             check(out[0].size() == m && out[1].size() == m && std::memcmp(out[0].data(), out[1].data(), pre * sizeof(float)) == 0 &&
                       std::memcmp(outR[0].data(), outR[1].data(), pre * sizeof(float)) == 0,
                   "whole-buffer pass is bit-identical across block sizes, both channels", rate);
+        }
+        // E23 S1c (G5): the whole-buffer pass against the per-sample loop itself (the hook forces the loop), same blocks,
+        // every section on, both channels, bit for bit.
+        {
+            Params pp; pp.p[0] = 1; pp.p[1] = 1; pp.p[2] = 20; pp.p[3] = 2; pp.p[4] = 1; pp.p[8] = 1;
+            const size_t m = (size_t)(rate * 0.5);
+            std::vector<float> outL[2], outR[2];
+            for (int v = 0; v < 2; ++v) {
+                n60::setCleanupBulkPassEnabledForTesting(v == 0);
+                std::vector<float> l = sine(rate, 50.0, 0.3, 0.1, m), r = sine(rate, 60.0, 0.2, -0.05, m);
+                for (size_t i = 0; i < m; ++i) l[i] += 0.1f * (float)std::sin(2.0 * M_PI * 1000.0 * (double)i / rate);
+                n60_graph *g = build(rate, pp);
+                check(g != nullptr, "build bulk vs per-sample", rate);
+                if (!g) break;
+                run(g, l, r);
+                n60_graph_retire(g);
+                outL[v] = l;
+                outR[v] = r;
+            }
+            n60::setCleanupBulkPassEnabledForTesting(true);
+            check(outL[0].size() == m && outL[1].size() == m && std::memcmp(outL[0].data(), outL[1].data(), m * sizeof(float)) == 0 &&
+                      std::memcmp(outR[0].data(), outR[1].data(), m * sizeof(float)) == 0,
+                  "whole-buffer pass is bit-identical to the per-sample loop", rate);
         }
         // Validation.
         {
