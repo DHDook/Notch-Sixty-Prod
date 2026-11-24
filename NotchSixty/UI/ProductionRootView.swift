@@ -491,7 +491,7 @@ struct ProductionRootView: View {
             overview: AnyView(
                 ProductionSystemOverviewView(
                     engine: engine, profiles: product.profiles, navigation: navigation,
-                    entryCard: setupEntryCard)),
+                    entryCard: setupEntryCard, projects: product.roomCorrectionProjects)),
             speakers: AnyView(sectionDetail(for: .speakers)),
             room: AnyView(sectionDetail(for: .roomAdvisor)),
             measure: AnyView(sectionDetail(for: .measurementLab)),
