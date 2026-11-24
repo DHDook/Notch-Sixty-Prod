@@ -30,6 +30,13 @@ struct ProductionHeadphoneWorkspace: View {
     @State private var oneClickFit: HeadphoneAutoFitResult?
     @State private var fitting = false
     @State private var brirFlow: BRIRCaptureFlow?
+    // E13 S9 (`e13.headphones-page`).
+    @State private var shaping = HeadphoneTargetShaping()
+    @State private var autoHeadroom = false
+    @State private var recordTargets: [UUID: RoomCorrectionTargetCurve] = [:]
+    @State private var fitPreview: HeadphoneFitPreview?
+    /// The page clean-up is on only behind its flag; off, the page is as shipped by S8.
+    private var cleanPage: Bool { FeatureFlags().isEnabled(.headphonesPage) }
     private static let sofaFileType: UTType =
         UTType(filenameExtension: "sofa")
             ?? UTType(importedAs: "org.aes69.sofa", conformingTo: .data)
@@ -87,7 +94,13 @@ struct ProductionHeadphoneWorkspace: View {
             loadResponsesAndTargets()
         }
         .task(id: profiles.selectedSystemProfileID) { syncFromSelectedSystem() }
-        .onChange(of: draft) { _, newDraft in previewLive(newDraft) }
+        .onChange(of: draft) { _, newDraft in
+            keepAutoHeadroom(newDraft)
+            previewLive(newDraft)
+        }
+        .onChange(of: selectedResponseID) { _, _ in adoptRecordTarget(); refreshFitPreview() }
+        .onChange(of: selectedTargetID) { _, _ in refreshFitPreview() }
+        .onChange(of: shaping) { _, _ in refreshFitPreview() }
         .onChange(of: engine.lifecycleState) { _, _ in restoreLivePreview() }
         .onDisappear { restoreLivePreview() }
         .sheet(isPresented: Binding(
@@ -117,7 +130,7 @@ struct ProductionHeadphoneWorkspace: View {
         }
         .fileImporter(
             isPresented: $importingResponses,
-            allowedContentTypes: [.plainText, .text, .commaSeparatedText],
+            allowedContentTypes: cleanPage ? [.plainText, .text, .commaSeparatedText, .json] : [.plainText, .text, .commaSeparatedText],
             allowsMultipleSelection: true
         ) { result in
             importHeadphoneResponses(result)
@@ -140,7 +153,9 @@ struct ProductionHeadphoneWorkspace: View {
 
     private var header: some View {
         VStack(alignment: .leading, spacing: DesignSpacing.s.pt) {
-            Text("Keep headphone hardware correction separate from Content Presets. Stereo mode preserves the normal content DSP chain; Virtual Speakers renders semantic program channels through a prepared HRTF or BRIR before headphone correction and true-peak protection.")
+            Text(cleanPage
+                 ? "Headphone correction is separate from your Content Presets. Stereo keeps your normal sound settings; Virtual Speakers plays surround sound through a head model (an HRTF or BRIR) before correction and the final safety limiter."
+                 : "Keep headphone hardware correction separate from Content Presets. Stereo mode preserves the normal content DSP chain; Virtual Speakers renders semantic program channels through a prepared HRTF or BRIR before headphone correction and true-peak protection.")
                 .foregroundStyle(.secondary)
         }
     }
@@ -177,6 +192,8 @@ struct ProductionHeadphoneWorkspace: View {
 
             Text(draft.spatialMode == .stereo
                  ? "Stereo: the existing EQ, dynamics and convolution chain remains available; headphone correction is applied immediately before final protection."
+                 : cleanPage
+                 ? "Virtual Speakers: surround sound is mixed down to two ears first. Stereo-only effects stay neutral because they cannot be applied fairly to a surround source."
                  : "Virtual Speakers: multichannel decoded PCM is rendered to two ears first. Stereo-only creative DSP must be neutral because it cannot be applied honestly to an arbitrary semantic multichannel source.")
                 .font(DesignType.caption.font)
                 .foregroundStyle(.secondary)
@@ -189,23 +206,32 @@ struct ProductionHeadphoneWorkspace: View {
             Text("Device Correction").font(DesignType.sectionTitle.font)
 
             HStack(spacing: DesignSpacing.xl.pt) {
-                VStack(alignment: .leading, spacing: DesignSpacing.s.pt) {
-                    Text("Target").font(DesignType.caption.font.bold()).foregroundStyle(.secondary)
-                    Picker("Target", selection: $draft.targetCurve) {
-                        ForEach(HeadphoneTargetCurve.allCases) { target in
-                            Text(target.displayName).tag(target)
+                if !cleanPage {
+                    VStack(alignment: .leading, spacing: DesignSpacing.s.pt) {
+                        Text("Target").font(DesignType.caption.font.bold()).foregroundStyle(.secondary)
+                        Picker("Target", selection: $draft.targetCurve) {
+                            ForEach(HeadphoneTargetCurve.allCases) { target in
+                                Text(target.displayName).tag(target)
+                            }
                         }
+                        .labelsHidden()
                     }
-                    .labelsHidden()
                 }
                 VStack(alignment: .leading, spacing: DesignSpacing.s.pt) {
                     Text("Correction Headroom").font(DesignType.caption.font.bold()).foregroundStyle(.secondary)
                     HStack {
                         Slider(value: $draft.headroomAttenuationDB, in: 0...30, step: 0.5)
                         .designSlider("Correction headroom", value: draft.headroomAttenuationDB, unit: .db)
+                        .disabled(cleanPage && autoHeadroom)
                         Text("\(draft.headroomAttenuationDB, specifier: "%.1f") dB")
                             .monospacedDigit()
                             .frame(width: 68, alignment: .trailing)
+                    }
+                    if cleanPage {
+                        Toggle("Auto", isOn: $autoHeadroom)
+                            .toggleStyle(.switch)
+                            .help("Sets the headroom from the EQ boosts and keeps it in step as you edit. Turning it off keeps the last value.")
+                            .onChange(of: autoHeadroom) { _, on in if on { keepAutoHeadroom(draft) } }
                     }
                 }
             }
@@ -216,9 +242,9 @@ struct ProductionHeadphoneWorkspace: View {
                 channelControls(title: "Right", correction: binding(\.right))
             }
 
-            Text(
-                "Device correction is separate from Content Presets. The editor below exposes all 16 independently enabled parametric EQ bands per ear, with a preview of the electrical DSP response."
-            )
+            Text(cleanPage
+                 ? "Each ear has 16 EQ bands that you can switch on separately. The graph below shows what the filters do to the signal."
+                 : "Device correction is separate from Content Presets. The editor below exposes all 16 independently enabled parametric EQ bands per ear, with a preview of the electrical DSP response.")
             .font(DesignType.caption.font)
             .foregroundStyle(.secondary)
 
@@ -280,6 +306,17 @@ struct ProductionHeadphoneWorkspace: View {
                 )
             }
 
+            if !cleanPage { legacyImportCards }
+            if let proposal = pendingEQProposal {
+                pendingProposalCard(proposal)
+            }
+        }
+        .designPanel()
+    }
+
+    /// The two cards `e13.headphones-page` removes: "Import EQ Proposal" and the local model measurement library.
+    private var legacyImportCards: some View {
+        VStack(alignment: .leading, spacing: DesignSpacing.l.pt) {
             Divider()
             HStack {
                 VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
@@ -297,7 +334,12 @@ struct ProductionHeadphoneWorkspace: View {
                 .buttonStyle(.glass)
             }
             modelCorrectionLibraryCard
-            if let proposal = pendingEQProposal {
+        }
+    }
+
+    private func pendingProposalCard(_ proposal: HeadphoneCorrectionProposal) -> some View {
+        VStack(alignment: .leading, spacing: DesignSpacing.l.pt) {
+            Divider()
                 VStack(alignment: .leading, spacing: DesignSpacing.s.pt) {
                     Text(proposal.headphoneModel)
                         .font(.subheadline.bold())
@@ -325,9 +367,7 @@ struct ProductionHeadphoneWorkspace: View {
                         .buttonStyle(.glass)
                     }
                 }
-            }
         }
-        .designPanel()
     }
 
     private var modelCorrectionLibraryCard: some View {
@@ -410,7 +450,9 @@ struct ProductionHeadphoneWorkspace: View {
     private var oneClickFitCard: some View {
         VStack(alignment: .leading, spacing: DesignSpacing.m.pt) {
             Text("Fit and apply").font(DesignType.sectionTitle.font)
-            Text("Import your own headphone response (AutoEq CSV, REW or squig.link text; pick left and right files together, or one file for both ears), choose a target, and fit a parametric EQ in one step. Nothing is bundled or downloaded.")
+            Text(cleanPage
+                 ? "Import your own headphone measurement: AutoEq CSV, REW or squig.link text, a response JSON or a ready-made EQ JSON. Pick the left and right files together, or one file for both ears. Then choose a target and fit an EQ in one step. Nothing is bundled or downloaded."
+                 : "Import your own headphone response (AutoEq CSV, REW or squig.link text; pick left and right files together, or one file for both ears), choose a target, and fit a parametric EQ in one step. Nothing is bundled or downloaded.")
                 .font(DesignType.caption.font).foregroundStyle(.secondary)
             HStack {
                 Button("Import response...") { importingResponses = true }
@@ -424,6 +466,7 @@ struct ProductionHeadphoneWorkspace: View {
             Picker("Target", selection: $selectedTargetID) {
                 ForEach(headphoneTargets) { Text($0.name).tag(UUID?.some($0.id)) }
             }
+            if cleanPage { targetShapingControls }
             Button(fitting ? "Fitting..." : "Fit and apply", action: fitAndApply)
                 .buttonStyle(.glassProminent)
                 .disabled(fitting || selectedResponseID == nil || selectedSampleRate == nil)
@@ -434,12 +477,102 @@ struct ProductionHeadphoneWorkspace: View {
                     .font(DesignType.caption.font.monospacedDigit())
                 ForEach(fit.warnings, id: \.self) { Label($0, systemImage: "info.circle").font(DesignType.caption.font).foregroundStyle(.secondary) }
             }
+            if cleanPage, let preview = fitPreview { fitGraph(preview) }
         }
         .designPanel()
     }
 
+    private var targetShapingControls: some View {
+        VStack(alignment: .leading, spacing: DesignSpacing.s.pt) {
+            Text("Shape the target").font(DesignType.caption.font.bold()).foregroundStyle(.secondary)
+            HStack {
+                Text("Bass").frame(width: 70, alignment: .leading)
+                Slider(value: $shaping.bassShelfDB, in: HeadphoneTargetShaping.shelfRangeDB, step: 0.5)
+                    .designSlider("Target bass shelf", value: shaping.bassShelfDB, unit: .db)
+                Text(String(format: "%+.1f dB", shaping.bassShelfDB)).monospacedDigit()
+                    .frame(width: 68, alignment: .trailing)
+            }
+            HStack {
+                Text("Treble").frame(width: 70, alignment: .leading)
+                Slider(value: $shaping.trebleTiltDB, in: HeadphoneTargetShaping.tiltRangeDB, step: 0.5)
+                    .designSlider("Target treble tilt", value: shaping.trebleTiltDB, unit: .db)
+                Text(String(format: "%+.1f dB", shaping.trebleTiltDB)).monospacedDigit()
+                    .frame(width: 68, alignment: .trailing)
+            }
+            .font(DesignType.caption.font)
+            Text("Bass lifts or lowers everything below about 100 Hz. Treble tilts the sound from 1 kHz up to 10 kHz. Works on top of the chosen target, so Flat can be shaped without a file.")
+                .font(DesignType.caption.font).foregroundStyle(.secondary)
+        }
+    }
+
+    private func fitGraph(_ preview: HeadphoneFitPreview) -> some View {
+        VStack(alignment: .leading, spacing: DesignSpacing.s.pt) {
+            HStack {
+                Label("Imported", systemImage: "waveform").foregroundStyle(.secondary)
+                Label("Target", systemImage: "scope").foregroundStyle(.green)
+                Label("After EQ (left)", systemImage: "waveform").foregroundStyle(.orange)
+                Label("After EQ (right)", systemImage: "waveform").foregroundStyle(.cyan)
+            }
+            .font(DesignType.caption.font)
+            Canvas { context, size in
+                let width = max(size.width, 1), height = max(size.height, 1)
+                let minDB = -20.0, maxDB = 20.0
+                let curves: [([Double], Color)] = [
+                    (preview.responseLeftDB, Color.secondary.opacity(0.6)), (preview.responseRightDB, Color.secondary.opacity(0.6)),
+                    (preview.targetDB, Color.green),
+                    (preview.predictedLeftDB, Color.orange), (preview.predictedRightDB, Color.cyan)
+                ]
+                for (values, color) in curves where values.count > 1 {
+                    var path = Path()
+                    for (i, db) in values.enumerated() {
+                        let x = CGFloat(i) / CGFloat(values.count - 1) * width
+                        let y = CGFloat(min(1, max(0, (maxDB - db) / (maxDB - minDB)))) * height
+                        if i == 0 { path.move(to: CGPoint(x: x, y: y)) } else { path.addLine(to: CGPoint(x: x, y: y)) }
+                    }
+                    context.stroke(path, with: .color(color), lineWidth: 1.5)
+                }
+            }
+            .frame(height: 180)
+            Text("20 Hz to 20 kHz, level-matched at 250 Hz to 2.5 kHz; vertical range 40 dB.")
+                .font(DesignType.caption.font).foregroundStyle(.secondary)
+        }
+    }
+
+    /// The target the fit uses: the picked target with the bass and treble shaping on top (page flag on).
+    private var effectiveTarget: RoomCorrectionTargetCurve? {
+        let base = headphoneTargets.first { $0.id == selectedTargetID }
+        return cleanPage ? HeadphoneTargetShaping.shaped(base: base, shaping: shaping) : base
+    }
+
+    private func keepAutoHeadroom(_ newDraft: HeadphoneDeviceProfileConfiguration) {
+        guard cleanPage, autoHeadroom else { return }
+        let value = HeadphoneAutoHeadroom.headroomDB(for: newDraft)
+        if draft.headroomAttenuationDB != value { draft.headroomAttenuationDB = value }
+    }
+
+    private func adoptRecordTarget() {
+        guard cleanPage, let id = selectedResponseID, let target = recordTargets[id] else { return }
+        if !headphoneTargets.contains(where: { $0.id == target.id }) { headphoneTargets.append(target) }
+        selectedTargetID = target.id
+    }
+
+    private func refreshFitPreview() {
+        guard cleanPage, let rate = selectedSampleRate,
+              let record = storedResponses.first(where: { $0.id == selectedResponseID }) else { fitPreview = nil; return }
+        fitPreview = try? HeadphoneFitPreview.make(record: record, target: effectiveTarget, draft: draft, sampleRate: rate)
+    }
+
     private func loadResponsesAndTargets() {
         storedResponses = HeadphoneResponseStore().loadAll().records
+        if cleanPage {
+            // Stored library records stay readable from the Response picker (their card is gone).
+            let stored = (try? HeadphoneModelMeasurementLibrary().list(sampleRate: previewSampleRate)) ?? []
+            for model in stored where !storedResponses.contains(where: { $0.id == model.id }) {
+                let (record, target) = HeadphoneResponseRecord.make(from: model)
+                storedResponses.append(record)
+                if let target { recordTargets[record.id] = target }
+            }
+        }
         let user = TargetLibrary().loadAll().records.filter {
             !TargetLibrary.isBuiltIn($0.id) && ($0.category == .headphone || $0.category == .general)
         }
@@ -454,6 +587,10 @@ struct ProductionHeadphoneWorkspace: View {
         do {
             let urls = try result.get()
             guard !urls.isEmpty, urls.count <= 2 else { throw HeadphoneResponseError.pairingFailed }
+            if cleanPage, urls.count == 1, urls[0].pathExtension.lowercased() == "json" {
+                try importJSON(urls[0])
+                return
+            }
             var curves: [ImportedCurve] = []
             for url in urls {
                 let scoped = url.startAccessingSecurityScopedResource()
@@ -471,11 +608,37 @@ struct ProductionHeadphoneWorkspace: View {
         }
     }
 
+    /// Fit and apply accepts both JSON formats: a response (with its target) is stored and selected; a ready-made
+    /// EQ proposal is staged for review.
+    private func importJSON(_ url: URL) throws {
+        let scoped = url.startAccessingSecurityScopedResource()
+        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+        let outcome = try HeadphoneImportRouter.importData(
+            Data(contentsOf: url), name: url.deletingPathExtension().lastPathComponent, sampleRate: previewSampleRate)
+        switch outcome {
+        case .response(var record, let target):
+            record.id = UUID() // Never let an untrusted file's ID overwrite storage.
+            try HeadphoneResponseStore().save(record)
+            if let target {
+                var targetRecord = TargetRecord(curve: target)
+                targetRecord.category = .headphone
+                try TargetLibrary().save(targetRecord)
+                recordTargets[record.id] = target
+            }
+            loadResponsesAndTargets()
+            selectedResponseID = record.id
+            statusMessage = "Imported \(record.name). Choose a target and press Fit and apply."
+        case .proposal(let proposal):
+            pendingEQProposal = proposal
+            statusMessage = "EQ file loaded for review below. No bands have been applied."
+        }
+    }
+
     private func fitAndApply() {
         actionError = nil
         guard let rate = selectedSampleRate,
               let record = storedResponses.first(where: { $0.id == selectedResponseID }) else { return }
-        let target = headphoneTargets.first { $0.id == selectedTargetID }
+        let target = effectiveTarget
         fitting = true
         Task {
             do {
@@ -490,6 +653,7 @@ struct ProductionHeadphoneWorkspace: View {
                 applyDraft()
                 if actionError != nil { draft = before } else {
                     oneClick = session
+                    refreshFitPreview()
                     statusMessage = "Applied a fitted EQ for \(record.name) and enabled the headphone profile. Undo restores the previous profile."
                 }
             } catch {
@@ -797,7 +961,9 @@ struct ProductionHeadphoneWorkspace: View {
             }
             try draft.stageLocalProposal(proposal, sampleRate: rate)
             pendingEQProposal = nil
-            statusMessage = "EQ bands staged in the editable draft. Headroom adjusted conservatively. Apply while playback is stopped to save."
+            statusMessage = cleanPage
+                ? "EQ bands staged in the draft and headroom raised to cover them. Press Apply to use them."
+                : "EQ bands staged in the editable draft. Headroom adjusted conservatively. Apply while playback is stopped to save."
         } catch {
             actionError = error.localizedDescription
         }
@@ -820,6 +986,10 @@ struct ProductionHeadphoneWorkspace: View {
                 .disabled(draft.spatialMode == .virtualSpeakers)
             }
 
+            if cleanPage {
+                Text(draft.crossfeed.preset.summary)
+                    .font(DesignType.caption.font).foregroundStyle(.secondary)
+            }
             HStack {
                 Slider(value: $draft.crossfeed.amount, in: 0...1, step: 0.05)
                 .designSlider("Crossfeed amount", value: draft.crossfeed.amount, unit: .percent)
@@ -827,6 +997,9 @@ struct ProductionHeadphoneWorkspace: View {
                 Text("\(draft.crossfeed.amount * 100, specifier: "%.0f")%")
                     .monospacedDigit()
                     .frame(width: 54, alignment: .trailing)
+            }
+            if cleanPage, draft.crossfeed.preset == .custom, draft.spatialMode != .virtualSpeakers {
+                customCrossfeedControls
             }
 
             Text(draft.spatialMode == .virtualSpeakers
@@ -836,6 +1009,34 @@ struct ProductionHeadphoneWorkspace: View {
                 .foregroundStyle(.secondary)
         }
         .designPanel()
+    }
+
+    /// The Custom preset's own controls: speaker angle, head radius and head-shadow frequency (level is the slider above).
+    private var customCrossfeedControls: some View {
+        VStack(alignment: .leading, spacing: DesignSpacing.s.pt) {
+            HStack {
+                Text("Speaker angle").frame(width: 130, alignment: .leading)
+                Slider(value: $draft.crossfeed.virtualSpeakerAngleDegrees, in: 15...90, step: 1)
+                    .designSlider("Crossfeed speaker angle", value: draft.crossfeed.virtualSpeakerAngleDegrees, unit: .degrees)
+                Text("\(draft.crossfeed.virtualSpeakerAngleDegrees, specifier: "%.0f") deg")
+                    .monospacedDigit().frame(width: 68, alignment: .trailing)
+            }
+            HStack {
+                Text("Head radius").frame(width: 130, alignment: .leading)
+                Slider(value: $draft.crossfeed.headRadiusMeters, in: 0.06...0.12, step: 0.0025)
+                    .designSlider("Crossfeed head radius", value: draft.crossfeed.headRadiusMeters, unit: .plain("metres"))
+                Text("\(draft.crossfeed.headRadiusMeters * 100, specifier: "%.2f") cm")
+                    .monospacedDigit().frame(width: 68, alignment: .trailing)
+            }
+            HStack {
+                Text("Cutoff").frame(width: 130, alignment: .leading)
+                Slider(value: $draft.crossfeed.headShadowFrequencyHz, in: 200...2_000, step: 10)
+                    .designSlider("Crossfeed cutoff", value: draft.crossfeed.headShadowFrequencyHz, unit: .hz)
+                Text("\(draft.crossfeed.headShadowFrequencyHz, specifier: "%.0f") Hz")
+                    .monospacedDigit().frame(width: 68, alignment: .trailing)
+            }
+        }
+        .font(DesignType.caption.font)
     }
 
     private var spatialCard: some View {
@@ -848,7 +1049,7 @@ struct ProductionHeadphoneWorkspace: View {
                 }
             }
 
-            Picker("Decoded Program Source", selection: Binding(
+            Picker(cleanPage ? "Surround source device" : "Decoded Program Source", selection: Binding(
                 get: { draft.programSourceDeviceUID ?? engine.selectedOutputDevice?.uid },
                 set: { uid in
                     if uid == engine.selectedOutputDevice?.uid { draft.programSourceDeviceUID = nil }
@@ -868,7 +1069,7 @@ struct ProductionHeadphoneWorkspace: View {
                         Text("\(profile.displayName) · \(profile.tapCount) taps · \(profile.sampleRate / 1_000, specifier: "%.1f") kHz")
                             .foregroundStyle(.secondary)
                     } else {
-                        Text("No normalized profile selected")
+                        Text(cleanPage ? "No listening profile selected" : "No normalized profile selected")
                             .foregroundStyle(.secondary)
                     }
                 }
@@ -1003,7 +1204,9 @@ struct ProductionHeadphoneWorkspace: View {
             HStack {
                 VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
                     Text("Deploy to Playback System").font(DesignType.sectionTitle.font)
-                    Text("Changes require processing to be stopped because headphone and spatial runtimes are prepared before Core Audio callbacks start.")
+                    Text(cleanPage
+                         ? "EQ, trim, headroom and crossfeed changes apply while music plays. Changing the listening mode, speaker layout, listening profile, polarity or the program source needs playback stopped first."
+                         : "Changes require processing to be stopped because headphone and spatial runtimes are prepared before Core Audio callbacks start.")
                         .font(DesignType.caption.font)
                         .foregroundStyle(.secondary)
                 }
