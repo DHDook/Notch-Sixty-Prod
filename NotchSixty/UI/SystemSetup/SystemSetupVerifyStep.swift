@@ -32,6 +32,10 @@ struct SystemSetupVerifyStep: View {
                     }
                 }
             }
+            if model.verificationReport != nil {
+                SystemSetupGraphPanel(model: model, graph: model.verifyGraph,
+                                      emptyNote: "This check did not report a response to draw.")
+            }
             roomInsightsCard
         }
     }

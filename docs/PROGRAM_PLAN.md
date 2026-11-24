@@ -363,6 +363,7 @@ minimum-phase in blind ABX at three or more seats, and measurement results match
 - [x] Merge Speakers, Speaker Calibration, Measurement Lab and Room Correction into a clear System area
 - [x] Surface the room geometry and treatment advisor inside the flow
 - [ ] Usability test with someone who has never seen the app
+- [ ] S8 hookup (G88): the setup graphs' Simple / Per seat switch follows the global mode
 - [ ] S8 `e12/simple-expert-modes` (owner, 11 Nov 2026): a simple mode (Dashboard status page, the menu bar remote with the E30 everyday controls and before/after, guided setup) and an expert mode with everything else; Acoustic Research and Hardware Acceptance sit behind a developer switch in release builds; the headphones flow states that a personal SOFA HRTF can be loaded
 - [ ] S8 also walks the path from driver measurement to an installed crossover with delay and polarity set; if it does not end in a single accept step, record a gap in the E8 ledger with an owning slice (owner, 11 Nov 2026) The accept step is E8 S15 (E8 G8, 16 Nov 2026).
 - [x] S9 `e12/app-shell-split` (owner, 11 Nov 2026): split `NotchSixtyApp.swift` (3,121 lines) into scene, commands, composition root and window files, with no behaviour change
@@ -375,6 +376,7 @@ minimum-phase in blind ABX at three or more seats, and measurement results match
 - [ ] S16 `e12/speakers-page` (needs-owner: removes a user-visible control; owns G16–G18): one owner of bass management shown at a time; the older Crossover Design and Sub Phase Alignment cards retired after a same-sound migration (owner approved 16 Nov 2026); arrangement editor on the Speakers tab; distances and levels table
 - [ ] S17 `e12/calibration-summary` (owns G20 summary part): a readable calibration summary with before and after per seat, print and PDF
 - [ ] S18 `e12/one-measure-surface` (after E29; owns G19): the Measure tab is the one place to capture, Alignment and Bass and correction use its measurements, plain wording, one Export menu; graduates `e12.system-pages`
+    - [ ] G89: reuse S30's `SystemSetupGraphView` and `SystemSetupGraphBuilder` for the Measure page graphs instead of a second graph
 - [ ] S19 `e12/quiet-zone-card` (owner, 16 Nov 2026; needs-owner: ANC screens; owns G21, G29, G31): one Quiet Zone card with a setup list, the main Arm and feed-forward as its dependent toggle, one "where to quiet" choice, plain readiness, the reason the arm is off; arm rules unchanged
 - [ ] S20 `e12/acoustics-results` (needs-owner; owns G24, G30): a plain result line and a hold-to-compare button on each Active Acoustics tab; arm and guard events go to the E33 S16 event history
 - [ ] S21 `e12/plain-wording` (owns G22): no internal PR numbers or lab terms in user-visible text, app-wide, with a glossary
@@ -389,7 +391,7 @@ minimum-phase in blind ABX at three or more seats, and measurement results match
 - [ ] E33 G80 compare entry (owner ruling 22 Nov 2026): the Plug-ins rack "Compare blind…" opens Blind Listening through `BlindListeningRequest` with the rack on against bypassed; may be built with the E33 G46 rack compare item
 - [ ] E33 G46 rack compare (owner ruling 21 Nov 2026; after E12 S26 and E33 S24): before/after compare for the Plug-ins rack (rack on against whole rack bypassed) on the E12 S26 comparison service, level matched
 - [~] S29 `e12/setup-shell` (owner, 17 Nov 2026; low-risk; owns G56–G58, G60, G63–G65, G68): guided setup split into per-step files, step list, close and continue later, visible refusals, calibration import in the step, summary page, menu command; behind `e12.setup-flow` (added in S10); built, dark until S31 graduates the flag
-- [ ] S30 `e12/setup-graphs-guidance` (low-risk; owns G59, G61, G66): graphs on Measure, Bass, Correction and Verify, placement diagrams, plain terms
+- [x] S30 `e12/setup-graphs-guidance` (low-risk; owns G59, G61, G66): graphs on Measure, Bass, Correction and Verify, placement diagrams, plain terms; behind `e12.setup-flow`, dark until S31 graduates it
 - [ ] S31 `e12/setup-auto-level-rerun` (needs-owner: test-noise level; owns G62, G67): automatic level setting with the same ceiling, second-run shortcuts; graduates `e12.setup-flow`
     - [ ] G85 layout check (scoped, found in S10): hosted 1,280x800 and 1,920x1,000 layout test of the setup sheet footer and entry card rows (AGENTS.md 13)
 - Surface rule (owner, 16 Nov 2026): no control appears on both the menu bar and the Dashboard; master volume is menu bar only (`docs/epics/E12.md`)

@@ -8,7 +8,7 @@ struct SystemSetupAlignmentStep: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Align levels, polarity and distances").font(.headline)
+            Text("Align levels, polarity (push or pull) and distances").font(.headline)
             Text("Notch Sixty matches the loudness and arrival time of your speakers at the seats you measured. Apply it to hear the result; you can revert at any time and Cancel restores everything.")
                 .font(.callout).foregroundStyle(.secondary)
             if let note = model.alignmentSubNote {
@@ -18,7 +18,7 @@ struct SystemSetupAlignmentStep: View {
                 Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 6) {
                     GridRow {
                         Text("Speaker").bold(); Text("Level").bold(); Text("Delay").bold()
-                        Text("Polarity").bold(); Text("Distance").bold()
+                        Text(SystemSetupTerm.polarity.plainLabel).bold(); Text("Distance").bold()
                     }
                     ForEach(alignment.rows) { row in
                         GridRow {
@@ -30,6 +30,7 @@ struct SystemSetupAlignmentStep: View {
                         }
                     }
                 }
+                SystemSetupTermNotes(step: .alignment)
                 if !alignment.invertedSources.isEmpty {
                     Label("A speaker looks wired out of polarity. Alignment flips it for you; check the wiring too.",
                           systemImage: "exclamationmark.triangle").font(.callout)
