@@ -689,6 +689,11 @@ final class RoomCorrectionProjectControllerTests: XCTestCase {
         var expectedSystem = beforeSystem
         expectedSystem.roomCorrection = configuration
         expectedSystem.roomCorrectionCalibration = summary
+        // E12 S15: deploying a new design also stamps the room-owned calibration record (no verification yet).
+        let record = try XCTUnwrap(profiles.selectedSystemProfile?.state.calibrationRecord)
+        XCTAssertNil(record.verifiedDesignID)
+        XCTAssertNil(record.movedDate)
+        expectedSystem.calibrationRecord = record
         XCTAssertEqual(profiles.selectedSystemProfile?.state, expectedSystem)
         XCTAssertEqual(profiles.captureContentState(), beforeContent)
 
