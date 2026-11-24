@@ -37,7 +37,7 @@ extension FeatureFlag {
         .parallelRender, .multirate, .rateAdapt, .coreDesigners,
         .eqPageEnhancements, .dynamicsSound, .designLanguage, .followOutput, .dashboardRemote, .virtualDriver,
         .blindListening,
-        .setupFlow, .systemPages, .selfQualification
+        .setupFlow, .systemPages, .selfQualification, .headphonesPage
     ]
 
     /// E6 S11: the unified graph is the default renderer. Turning this on selects the frozen
@@ -508,4 +508,16 @@ final class FeatureFlags: ObservableObject {
         }
         return (on.subtracting(off), off)
     }
+}
+
+extension FeatureFlag {
+    /// E13 S9-S12: the Headphones page clean-up (one target, one import, shaping sliders, drawn fit, Auto headroom,
+    /// crossfeed Custom controls, plain wording), then the headphone list, the generated generic HRTF and compare.
+    /// Swift only; the engine never reads it. Off: the page as E13 S8 shipped it. Graduates in E13 S12; removed in
+    /// the flag-cleanup phase.
+    static let headphonesPage = FeatureFlag(
+        id: "e13.headphones-page",
+        title: "Headphones page clean-up",
+        epic: "E13"
+    )
 }
