@@ -4,7 +4,10 @@
 //   Allocation: none in Process or the IOProc; the scratch is allocated in Create.
 //   Synchronisation: none. The reader is owned by the DAC callback; the control plane reads counters relaxed.
 //   Latency: the ring's prime level (default 1024 frames) plus whatever the bridge's startup gate adds.
-//   Rates: any; the pump moves frames. Channels: the ring may carry 1 to 16; the bridge takes the first two.
+//   Rates: any; the pump moves frames. Channels: the ring may carry 1 to 16; the pump reads `channels` of them (2 for the stereo bridge, the program layout's count for
+//   the N-channel and binaural bridges), through the capture proc the session passes in.
+//   Scratch is maxFrames*channels floats (the DAC buffer size); larger callbacks are chunked, so 384 kHz needs no more.
+//   captureProc and outputProc are the bridges' own nonblocking IOProcs (contract, not checked by the compiler).
 //   Reset: the reader re-primes on attach, epoch change and underrun; Destroy frees the scratch.
 #include "N60VirtualRingPump.h"
 
@@ -38,27 +41,42 @@ void N60VirtualRingUnmap(const void *base, size_t bytes) {
 }
 
 struct N60VirtualRingPump {
-    N60RealtimeAudioBridge *bridge;
+    void *clientData;
+    AudioDeviceIOProc captureProc;
+    AudioDeviceIOProc outputProc;
     n60_vd_ring_reader reader;
     float *scratch;
     uint32_t maxFrames;
+    uint32_t channels;
 };
 
-N60VirtualRingPump *N60VirtualRingPumpCreate(
-    N60RealtimeAudioBridge *bridge, const void *ringBase, size_t ringBytes, uint32_t primeFrames, uint32_t maxFrames
+N60VirtualRingPump *N60VirtualRingPumpCreateWithProcs(
+    void *clientData, AudioDeviceIOProc captureProc, AudioDeviceIOProc outputProc, uint32_t channels,
+    const void *ringBase, size_t ringBytes, uint32_t primeFrames, uint32_t maxFrames
 ) {
-    if (bridge == NULL || ringBase == NULL || maxFrames == 0) return NULL;
+    if (clientData == NULL || captureProc == NULL || outputProc == NULL || ringBase == NULL || maxFrames == 0
+        || channels == 0 || channels > N60_VD_RING_MAX_CHANNELS) return NULL;
     N60VirtualRingPump *pump = (N60VirtualRingPump *)calloc(1, sizeof *pump);
     if (pump == NULL) return NULL;
-    pump->scratch = (float *)calloc((size_t)maxFrames * 2u, sizeof(float));
+    pump->scratch = (float *)calloc((size_t)maxFrames * channels, sizeof(float));
     if (pump->scratch == NULL || n60_vd_ring_reader_attach(&pump->reader, ringBase, ringBytes, primeFrames) != N60_VD_OK) {
         free(pump->scratch);
         free(pump);
         return NULL;
     }
-    pump->bridge = bridge;
+    pump->clientData = clientData;
+    pump->captureProc = captureProc;
+    pump->outputProc = outputProc;
     pump->maxFrames = maxFrames;
+    pump->channels = channels;
     return pump;
+}
+
+N60VirtualRingPump *N60VirtualRingPumpCreate(
+    N60RealtimeAudioBridge *bridge, const void *ringBase, size_t ringBytes, uint32_t primeFrames, uint32_t maxFrames
+) {
+    return N60VirtualRingPumpCreateWithProcs(
+        bridge, N60CaptureIOProc, N60OutputIOProc, 2u, ringBase, ringBytes, primeFrames, maxFrames);
 }
 
 void N60VirtualRingPumpDestroy(N60VirtualRingPump *pump) {
@@ -71,18 +89,18 @@ N60_RT_NONBLOCKING_C void N60VirtualRingPumpProcess(N60VirtualRingPump *pump, ui
     if (pump == NULL) return;
     while (frames > 0) {
         const uint32_t chunk = frames < pump->maxFrames ? frames : pump->maxFrames;
-        n60_vd_ring_read(&pump->reader, pump->scratch, chunk, 2u);
+        n60_vd_ring_read(&pump->reader, pump->scratch, chunk, pump->channels);
         AudioBufferList list;
         list.mNumberBuffers = 1;
-        list.mBuffers[0].mNumberChannels = 2;
-        list.mBuffers[0].mDataByteSize = chunk * 2u * (uint32_t)sizeof(float);
+        list.mBuffers[0].mNumberChannels = pump->channels;
+        list.mBuffers[0].mDataByteSize = chunk * pump->channels * (uint32_t)sizeof(float);
         list.mBuffers[0].mData = pump->scratch;
         // The capture proc reads only the input list; the other arguments are unused by it.
         AudioTimeStamp unused;
         memset(&unused, 0, sizeof unused);
         AudioBufferList none;
         memset(&none, 0, sizeof none);
-        N60CaptureIOProc(0, &unused, &list, &unused, &none, &unused, pump->bridge);
+        pump->captureProc(0, &unused, &list, &unused, &none, &unused, pump->clientData);
         frames -= chunk;
     }
 }
@@ -98,7 +116,7 @@ N60_RT_NONBLOCKING_C OSStatus N60VirtualRingOutputIOProc(
         const AudioBuffer *first = &outOutputData->mBuffers[0];
         N60VirtualRingPumpProcess(pump, first->mDataByteSize / (first->mNumberChannels * (uint32_t)sizeof(float)));
     }
-    return N60OutputIOProc(inDevice, inNow, inInputData, inInputTime, outOutputData, inOutputTime, pump->bridge);
+    return pump->outputProc(inDevice, inNow, inInputData, inInputTime, outOutputData, inOutputTime, pump->clientData);
 }
 
 const n60_vd_ring_reader *N60VirtualRingPumpReader(const N60VirtualRingPump *pump) {

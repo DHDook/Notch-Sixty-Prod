@@ -70,6 +70,8 @@ final class AudioInputPathModel: ObservableObject {
     /// Set while the driver path is chosen but the driver is missing, stale or refused; never a silent tap fallback.
     @Published private(set) var waitingMessage: String?
     let coordinator: DriverInputCoordinator?
+    /// E36 S3b: the engine half of the switch; the product controller attaches the engine once it exists.
+    var engineSwitcher: DriverEngineSwitcher?
 
     let downloadURL: URL?
     private let probe: () -> DriverStatus
@@ -155,10 +157,16 @@ final class AudioInputPathModel: ObservableObject {
         let driver = DriverStatusModel(
             discovery: DriverDiscovery(access: access),
             lease: DriverLeaseWriter(access: access))
+        let switcher = DriverEngineSwitcher(request: {
+            guard let plugIn = driver.plugIn, let group = DriverCaptureAttachment.appGroupID() else { return nil }
+            return DriverCaptureSelection.Request(plugIn: plugIn, appGroupID: group, access: access)
+        })
         let coordinator = DriverInputCoordinator(
             driver: driver, output: CoreAudioSystemOutputController(), store: UserDefaultsPreviousOutputStore(),
-            latency: DriverLatencyReporter(access: access), latencySource: latencySource)
-        return AudioInputPathModel(
+            hooks: switcher.hooks, latency: DriverLatencyReporter(access: access), latencySource: latencySource)
+        let model = AudioInputPathModel(
             probe: { driver.refresh() }, downloadURL: nil, openURL: openURL, coordinator: coordinator)
+        model.engineSwitcher = switcher
+        return model
     }
 }

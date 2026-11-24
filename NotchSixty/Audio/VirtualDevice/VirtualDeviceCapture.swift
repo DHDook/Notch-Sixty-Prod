@@ -157,6 +157,14 @@ final class VirtualDeviceCaptureSource: CaptureSource {
     /// Maps the ring, pins the driver to the DAC's rate and layout, and attaches the reader to the bridge. The IOProc to
     /// register on the DAC is `N60VirtualRingOutputIOProc` with `pump` as its client data.
     func open(_ configuration: Configuration, bridge: OpaquePointer) throws {
+        try open(configuration, clientData: UnsafeMutableRawPointer(bridge), captureProc: N60CaptureIOProc, outputProc: N60OutputIOProc,
+                 pumpChannels: 2)
+    }
+
+    /// The general form (E36 S3b): the N-channel and binaural sessions pass their own IOProcs and bridge. The pump reads
+    /// `pumpChannels` (default: the layout's) ring channels and hands them to `captureProc` interleaved.
+    func open(_ configuration: Configuration, clientData: UnsafeMutableRawPointer, captureProc: AudioDeviceIOProc,
+              outputProc: AudioDeviceIOProc, pumpChannels: Int? = nil) throws {
         lock.lock(); defer { lock.unlock() }
         guard pump == nil else { throw OpenError.alreadyOpen }
         guard !VirtualDeviceOutputGuard.refuses(outputUID: configuration.outputUID) else { throw OpenError.outputIsVirtualDevice }
@@ -175,7 +183,9 @@ final class VirtualDeviceCaptureSource: CaptureSource {
         case .failure(.unavailable(let code)): throw OpenError.ringUnavailable(code)
         }
         let prime = Swift.max(UInt32(1024), configuration.maxCallbackFrames * 2)
-        guard let created = N60VirtualRingPumpCreate(bridge, mapped.base, mapped.bytes, prime, configuration.maxCallbackFrames) else {
+        guard let created = N60VirtualRingPumpCreateWithProcs(
+            clientData, captureProc, outputProc, UInt32(pumpChannels ?? configuration.layout.channelCount), mapped.base, mapped.bytes, prime,
+            configuration.maxCallbackFrames) else {
             throw OpenError.ringInvalid(N60_VD_ERR_MAGIC)
         }
         mapping = mapped
