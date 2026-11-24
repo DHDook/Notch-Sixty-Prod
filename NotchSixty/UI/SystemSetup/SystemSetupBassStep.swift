@@ -55,7 +55,7 @@ struct SystemSetupBassStep: View {
 
     @ViewBuilder
     private func content(_ bass: SystemSetupBassDesign) -> some View {
-        Text("Notch Sixty sets the subwoofer's level, delay and polarity so bass is as even as possible across every seat you measured. Apply it to hear the result; Revert or Cancel restores your earlier settings.")
+        Text("Notch Sixty sets the subwoofer's level, delay and polarity (push or pull) so bass is as even as possible across every seat you measured. Apply it to hear the result; Revert or Cancel restores your earlier settings.")
             .font(.callout).foregroundStyle(.secondary)
         if bass.mode == .subAlignmentOnly {
             Label("The subwoofer keeps the alignment you applied in the previous step.", systemImage: "checkmark.circle")
@@ -63,6 +63,7 @@ struct SystemSetupBassStep: View {
             if let before = bass.seatSpreadBeforeDB, let after = bass.seatSpreadAfterDB {
                 Text("Seat-to-seat bass difference (20 to 120 Hz): \(before, specifier: "%.1f") dB now, \(after, specifier: "%.1f") dB predicted.")
             }
+            SystemSetupGraphPanel(model: model, graph: model.bassGraph, emptyNote: "No bass graph for this design.")
             Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 6) {
                 GridRow { Text("Seat").bold(); Text("Average level now").bold(); Text("Predicted").bold() }
                 ForEach(Array(bass.seatNames.enumerated()), id: \.offset) { index, name in
@@ -74,7 +75,7 @@ struct SystemSetupBassStep: View {
                 }
             }
             Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 6) {
-                GridRow { Text("Speaker").bold(); Text("Level").bold(); Text("Delay").bold(); Text("Polarity").bold() }
+                GridRow { Text("Speaker").bold(); Text("Level").bold(); Text("Delay").bold(); Text(SystemSetupTerm.polarity.plainLabel).bold() }
                 ForEach(bass.rows) { row in
                     GridRow {
                         Text(row.title)
@@ -84,6 +85,7 @@ struct SystemSetupBassStep: View {
                     }
                 }
             }
+            SystemSetupTermNotes(step: .bass)
         }
         HStack {
             Button("Apply") { Task { await model.applyBass() } }.disabled(model.choices.bassApplied)

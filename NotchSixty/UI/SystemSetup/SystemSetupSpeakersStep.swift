@@ -86,8 +86,8 @@ struct SystemSetupReceiverBassPicker: View {
                     }
                 })) {
                 Text("Not set").tag(Kind.undeclared)
-                Text("Open sub pre-out (no receiver crossover)").tag(Kind.openPreout)
-                Text("Calibrated LFE out").tag(Kind.calibratedLFE)
+                Text("\(SystemSetupTerm.openSubPreout.plainLabel) (open sub pre-out)").tag(Kind.openPreout)
+                Text("\(SystemSetupTerm.calibratedLFEOut.plainLabel) (calibrated LFE out)").tag(Kind.calibratedLFE)
             }
             if case .calibratedLFE(let hz) = receiverBass {
                 Stepper(
@@ -99,6 +99,7 @@ struct SystemSetupReceiverBassPicker: View {
                 Text(TwoChannelAncArming.undeclaredReceiverRefusal).font(.caption).foregroundStyle(.orange)
             }
             Text(ReceiverBass.setupNote).font(.caption).foregroundStyle(.secondary)
+            SystemSetupTermNotes(step: .topology)
         }
     }
 }

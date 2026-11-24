@@ -27,7 +27,7 @@ struct SystemSetupMicrophoneStep: View {
             calibrationFile
             Divider()
             Text("Set the level").font(.headline)
-            Text("Set each channel on its own, then use All channels as a combined check (the LFE is left out unless you choose the including-LFE mode). Pink noise starts very quietly at \(Int(SystemSetupLevelPlan.startLevelDB)) dBFS. Raise it a step at a time until the meter reads about \(Int(SystemSetupLevelPlan.targetSPLdBC)) dB(C) at your main seat. It never goes above \(Int(SystemSetupLevelPlan.ceilingDB)) dBFS.")
+            Text("Set each channel on its own, then use All channels as a combined check (the bass-only channel is left out unless you choose the including mode). The test noise starts very quietly at \(Int(SystemSetupLevelPlan.startLevelDB)) \(SystemSetupTerm.dBFS.technicalName). Raise it a step at a time until the meter reads about \(Int(SystemSetupLevelPlan.targetSPLdBC)) \(SystemSetupTerm.dBC.technicalName) at your main seat. It never goes above \(Int(SystemSetupLevelPlan.ceilingDB)) \(SystemSetupTerm.dBFS.technicalName).")
                 .font(.callout).foregroundStyle(.secondary)
             let channels = model.noiseChannels
             Picker("Channel", selection: Binding<Int>(
@@ -39,14 +39,15 @@ struct SystemSetupMicrophoneStep: View {
                 },
                 set: { model.selectNoiseTarget(lane: $0 < 0 ? nil : $0, includeLFE: $0 == -2) }
             )) {
-                Text("All channels except the LFE (combined check)").tag(-1)
-                if channels.contains(where: \.isLFE) { Text("All channels including the LFE").tag(-2) }
+                Text("All channels except the bass-only channel (LFE, combined check)").tag(-1)
+                if channels.contains(where: \.isLFE) { Text("All channels including the bass-only channel (LFE)").tag(-2) }
                 ForEach(channels, id: \.index) { Text($0.name + ($0.isLFE ? " (starts at \(Int(SystemSetupLevelPlan.lfeStartLevelDB)) dBFS, bass only)" : "")).tag($0.index) }
             }
             if model.level.showsFullBandLFEWarning {
                 Text("Warning: this mode sends full-band noise to the subwoofer as well. It starts at \(Int(SystemSetupLevelPlan.lfeStartLevelDB)) dBFS. Raise the level slowly and stop if the sub strains.")
                     .font(.callout).foregroundStyle(.orange)
             }
+            SystemSetupTermNotes(step: .microphone)
             HStack {
                 Button("Lower") { model.lowerLevel() }
                 Text("\(Int(model.level.levelDB)) dBFS").monospacedDigit()

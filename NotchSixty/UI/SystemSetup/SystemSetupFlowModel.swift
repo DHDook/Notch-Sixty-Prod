@@ -25,6 +25,9 @@ final class SystemSetupFlowModel: ObservableObject {
     /// Built-in sounds plus the target library's saved and imported room targets (E13 S1).
     @Published private(set) var correctionTargetChoices = SystemSetupCorrectionTarget.all
     @Published private(set) var seatPredictions: [SystemSetupSeatPrediction] = []
+    /// E12 S30: what Apply predicted, for the Correction graph, and the graphs' detail (simple: one curve per line of the story).
+    @Published private(set) var correctionPrediction: SystemSetupGraphBuilder.CorrectionPrediction?
+    @Published var graphDetail = SystemSetupGraphDetail.simple
     @Published private(set) var correctionIsPrepared = false
     @Published private(set) var verificationReport: SystemSetupVerificationReport?
     @Published private(set) var verificationSummary: SystemSetupVerificationSummary?
@@ -657,6 +660,7 @@ final class SystemSetupFlowModel: ObservableObject {
         monoBass = nil
         correctionIsPrepared = false
         seatPredictions = []
+        correctionPrediction = nil
     }
 
     // MARK: Alignment
@@ -975,12 +979,20 @@ final class SystemSetupFlowModel: ObservableObject {
                     RoomCorrectionConfiguration(enabled: true, lanes: finalInstall), calibrationSummary: nil)
                 flow.choices.designKind = mixed ? .mixedPhase : .minimumPhase
                 seatPredictions = []
+                if let frequencies = try? RoomCorrectionCore.gridFrequencies() {
+                    correctionPrediction = .grids(frequenciesHz: frequencies, correctionDB: finalRoom.design.lanes.map(\.grid.correctionDB))
+                }
             } else {
                 let design = try roomProjects.generateDesign(
                     parameters: SystemSetupCorrectionPlan.parameters(limitHz: correctionLimitHz), name: "Guided Setup \(correctionTarget.title)")
                 let report = try roomProjects.verification(for: design)
                 try roomProjects.deploySelectedDesign()
                 seatPredictions = SystemSetupSeatPrediction.make(from: report)
+                if let predicted = design.predictedLeftResponse, let measured = roomProjects.project?.aggregate?.leftResponse {
+                    correctionPrediction = .responses(predicted: predicted, measured: measured)
+                } else {
+                    correctionPrediction = nil
+                }
                 flow.choices.designKind = correctionMode.designKind(mixedPhaseAllowed: false)
             }
             flow.choices.correctionApplied = true
@@ -1046,6 +1058,7 @@ final class SystemSetupFlowModel: ObservableObject {
             abxRooms = nil
             flow.choices.correctionApplied = false
             seatPredictions = []
+            correctionPrediction = nil
         } catch {
             message = "Restoring the previous correction failed: \(error.localizedDescription)"
         }

@@ -21,6 +21,7 @@ struct SystemSetupMeasureStep: View {
             Text("Measure your listening seats").font(.headline)
             Text("Each speaker plays a sweep and the microphone records it at each seat. Measure the main seat first; add seats for a wider sweet spot. Playback is stopped while measuring.")
                 .font(.callout).foregroundStyle(.secondary)
+            SystemSetupPlacementGuide(seatCount: max(1, calibration.seats.filter(\.included).count))
             if let note = model.correctionNote {
                 ForEach(calibration.sources, id: \.self) { source in
                     Text(model.sourceLabel(source)).font(.caption)
@@ -88,6 +89,10 @@ struct SystemSetupMeasureStep: View {
             ProgressView(value: model.isMeasuring ? calibration.activeMeasurementProgress : progress.fraction)
             if let next = progress.next, model.isMeasuring {
                 Text("Measuring \(next.seat.name), \(next.source.displayName)").font(.caption)
+            }
+            if !model.isMeasuring, !calibration.measurements.isEmpty {
+                SystemSetupGraphPanel(model: model, graph: model.measureGraph,
+                                      emptyNote: "No graph yet: the measurements carry no frequency response to draw.")
             }
         }
         .onAppear { model.prepareMeasure() }

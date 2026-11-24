@@ -72,7 +72,8 @@ extension SystemSetupVerificationReport {
     init(postApply: RoomCorrectionPostApplyReport, predictedErrorDB: Double) {
         self.init(
             passed: postApply.passed, predictedErrorDB: predictedErrorDB,
-            measuredErrorDB: postApply.maxMagnitudeErrorDB, sampleRate: postApply.sampleRate)
+            measuredErrorDB: postApply.maxMagnitudeErrorDB, sampleRate: postApply.sampleRate,
+            centresHz: postApply.centres, predictedDB: postApply.predictedDB, measuredDB: postApply.measuredDB)
     }
 }
 

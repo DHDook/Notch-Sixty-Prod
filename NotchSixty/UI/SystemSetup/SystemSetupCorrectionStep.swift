@@ -28,7 +28,7 @@ struct SystemSetupCorrectionStep: View {
             Text(model.correctionTarget.detail).font(.callout).foregroundStyle(.secondary)
             if !model.seatPredictions.isEmpty {
                 Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 6) {
-                    GridRow { Text("Seat").bold(); Text("Error now").bold(); Text("Predicted").bold() }
+                    GridRow { Text("Seat").bold(); Text(SystemSetupTerm.errorNow.plainLabel).bold(); Text("Predicted").bold() }
                     ForEach(model.seatPredictions) { seat in
                         GridRow {
                             Text(seat.name)
@@ -38,6 +38,9 @@ struct SystemSetupCorrectionStep: View {
                     }
                 }
             }
+            SystemSetupGraphPanel(model: model, graph: model.correctionGraph,
+                                  emptyNote: "The graph appears once your seats are measured.")
+            SystemSetupTermNotes(step: .correction)
             HStack {
                 Button("Apply") { Task { await model.applyCorrection() } }.disabled(model.choices.correctionApplied)
                 Button("Revert") { model.revertCorrection() }.disabled(!model.choices.correctionApplied)

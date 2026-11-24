@@ -430,6 +430,10 @@ struct SystemSetupVerificationReport: Codable, Equatable, Sendable {
     var predictedErrorDB: Double
     var measuredErrorDB: Double
     var sampleRate: Double
+    /// E12 S30: the banded response behind the two errors, for the Verify graph. Optional, so stored sessions still decode.
+    var centresHz: [Double]? = nil
+    var predictedDB: [Double]? = nil
+    var measuredDB: [Double]? = nil
 }
 
 /// The work behind each step. The real implementation wraps the calibration and room-correction
