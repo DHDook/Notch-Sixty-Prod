@@ -2,7 +2,7 @@
  * ANC design maths (E21 S10a, domain version N60_ANC_DESIGN_ABI_VERSION). Numbers-to-numbers only: the Quiet Zone virtual
  * seat designer (per-band regularised stereo least squares with the rank-one bass conditioning), the causal FIR compiler
  * (Tikhonov real-tap fit with the common-mode tie), the HAL sample-clock analysis and the upstream survey (lead
- * estimator and assessment). Controllers, evidence capture, readiness and value types stay in Swift.
+ * estimator and assessment) and, from version 2, the passive ambient field analysis. Controllers, evidence capture, readiness and value types stay in Swift.
  *
  * Offline only: control or worker thread, allocates (never throws across this boundary), deterministic (fixed order, no
  * threads). Never called from an audio callback. Nothing here arms, enables or changes a live ANC path: every output is a
@@ -18,7 +18,7 @@
 extern "C" {
 #endif
 
-#define N60_ANC_DESIGN_ABI_VERSION 1u
+#define N60_ANC_DESIGN_ABI_VERSION 2u /* 2: ambient field analysis (E21 S10b) */
 
 #define N60_ANC_DESIGN_MAX_BANDS 64u
 #define N60_ANC_DESIGN_MAX_TAPS 64u
@@ -224,6 +224,113 @@ double n60_anc_upstream_reduction_bound_db(double coherence);
 void n60_anc_upstream_assess(const n60_anc_upstream_estimate *estimate, const n60_anc_upstream_survey_band *survey,
                              uint32_t surveyCount, double latencySeconds, double flightSeconds, double clockOffsetErrorSeconds,
                              n60_anc_upstream_survey_band *bandsOut, double *boundsOut, n60_anc_upstream_assessment *out);
+
+/* ---- Ambient field analysis (E21 S10b, version 2) ----------------------------------------------------------------
+ * Passive, offline estimator: removes the modelled playback from a microphone window (bounded alignment search, bounded
+ * least-squares gain, segment-stability confidence) and reports the residual's level, band spectrum, tones, stationarity,
+ * periodicity and character. It never generates cancellation audio and runs on a worker thread only. Maths is the former
+ * Swift `AmbientFieldAnalyzer`, in double precision on the offline FFT (n60::fft::offline), so results agree with the Swift
+ * float vDSP path to within float rounding. Allocates, never throws, deterministic. */
+
+#define N60_AMBIENT_MAX_BANDS 256u
+
+#define N60_AMBIENT_ERR_SAMPLE_RATE (-40)
+#define N60_AMBIENT_ERR_INSUFFICIENT (-41)
+#define N60_AMBIENT_ERR_LENGTH_MISMATCH (-42)
+#define N60_AMBIENT_ERR_NONFINITE_MICROPHONE (-43)
+#define N60_AMBIENT_ERR_NONFINITE_PLAYBACK (-44)
+#define N60_AMBIENT_ERR_ACOUSTIC_MODEL (-45)
+#define N60_AMBIENT_ERR_CONFIGURATION (-46)
+#define N60_AMBIENT_ERR_TRANSFORM_TOO_LARGE (-47)
+
+#define N60_AMBIENT_MODE_MICROPHONE_ONLY 0
+#define N60_AMBIENT_MODE_MODELED_SUBTRACTION 1
+#define N60_AMBIENT_MODE_MODEL_UNAVAILABLE 2
+
+#define N60_AMBIENT_CHARACTER_QUIET 0
+#define N60_AMBIENT_CHARACTER_BROADBAND 1
+#define N60_AMBIENT_CHARACTER_TONAL 2
+#define N60_AMBIENT_CHARACTER_TONAL_PERIODIC 3
+#define N60_AMBIENT_CHARACTER_NONSTATIONARY 4
+#define N60_AMBIENT_CHARACTER_MIXED 5
+
+typedef struct n60_ambient_config {
+    uint32_t structSize; /* sizeof(n60_ambient_config) */
+    int32_t minimumAnalysisFrames;
+    int32_t maximumAnalysisFrames;
+    int32_t maximumImpulseTaps;
+    int32_t spectrumBandCount;
+    int32_t segmentCount;
+    double minimumFrequencyHz;
+    double maximumFrequencyHz;
+    double lowFrequencyUpperHz;
+    double tonalSearchUpperHz;
+    double minimumTonalProminenceDB;
+    int32_t maximumTonalComponents;
+    double negligiblePlaybackDBFS;
+    double maximumPlaybackAlignmentSeconds;
+    double alignmentSearchRateHz;
+} n60_ambient_config;
+
+/* The production configuration (the Swift `AmbientAnalysisConfiguration.production` values). */
+void n60_ambient_config_default(n60_ambient_config *out);
+
+typedef struct n60_ambient_source {
+    const float *samples;         /* same length as the microphone */
+    const float *impulse;         /* NULL when the acoustic path is unknown */
+    uint32_t impulseCount;
+} n60_ambient_source;
+
+typedef struct n60_ambient_band {
+    double lowerFrequencyHz;
+    double centerFrequencyHz;
+    double upperFrequencyHz;
+    double levelDBFS;
+} n60_ambient_band;
+
+typedef struct n60_ambient_tone {
+    double frequencyHz;
+    double levelDBFS;
+    double prominenceDB;
+    double phaseRadians;
+} n60_ambient_tone;
+
+typedef struct n60_ambient_result {
+    uint32_t analyzedFrames;
+    int32_t separationMode;      /* N60_AMBIENT_MODE_* */
+    double separationConfidence;
+    int32_t hasPredictionGain;
+    double predictionGain;
+    double microphoneLevelDBFS;
+    int32_t hasPredictedLevel;
+    double predictedPlaybackLevelDBFS;
+    double ambientLevelDBFS;
+    double stationarityScore;
+    double periodicityScore;
+    int32_t hasPeriodicFrequency;
+    double periodicFrequencyHz;
+    double lowFrequencyEnergyFraction;
+    double cancellationCandidateScore;
+    int32_t character;           /* N60_AMBIENT_CHARACTER_* */
+    uint32_t spectrumCount;      /* rows written to spectrumOut */
+    uint32_t tonalCount;         /* rows written to tonesOut */
+    int32_t hasAlignment;
+    int32_t alignmentLagFrames;
+    double alignmentConfidence;
+    int32_t hasModeledSpectrum;  /* modeledSpectrumOut written (spectrumCount rows) */
+} n60_ambient_result;
+
+/* Frames the analysis will use for `microphoneCount` samples: min(count, maximumAnalysisFrames). */
+uint32_t n60_ambient_window_frames(const n60_ambient_config *config, uint32_t microphoneCount);
+
+/* Analyses the last window_frames samples of `microphone` and of each source. Capacities: `residualOut` and
+ * `spectrumOut`/`modeledSpectrumOut` at least n60_ambient_window_frames and config.spectrumBandCount rows; `tonesOut` at
+ * `toneCapacity` rows (the tone count is min(config.maximumTonalComponents, toneCapacity)). Returns N60_ANC_DESIGN_OK or
+ * an N60_AMBIENT_ERR_* / N60_ANC_DESIGN_ERR_* code, and leaves `result` untouched on error. */
+int32_t n60_ambient_analyze(const n60_ambient_config *config, const float *microphone, uint32_t microphoneCount,
+                            const n60_ambient_source *sources, uint32_t sourceCount, double sampleRate,
+                            n60_ambient_result *result, n60_ambient_band *spectrumOut, n60_ambient_band *modeledSpectrumOut,
+                            n60_ambient_tone *tonesOut, uint32_t toneCapacity, float *residualOut);
 
 #ifdef __cplusplus
 }

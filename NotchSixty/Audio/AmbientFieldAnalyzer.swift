@@ -180,6 +180,10 @@ enum AmbientAnalysisError: Error, Equatable, LocalizedError {
 /// playback-history rings. No Core Audio callback calls this analyzer.
 struct AmbientFieldAnalyzer: Sendable {
     let configuration: AmbientAnalysisConfiguration
+    /// E21 S10b: the analysis runs in `libn60core` (`n60/anc_design.h` version 2). Defaults to `e21.core-designers` when the
+    /// analyzer is made; parity tests set it explicitly. Off: the Swift maths below, unchanged (the parity reference,
+    /// deleted in S14).
+    var useCoreMaths = FeatureFlags.isEnabledProcessWide(.coreDesigners)
 
     init(configuration: AmbientAnalysisConfiguration = .production) {
         self.configuration = configuration
@@ -260,6 +264,11 @@ struct AmbientFieldAnalyzer: Sendable {
         playbackSources: [AmbientPlaybackSourceReference],
         sampleRate: Double
     ) throws -> AmbientAnalysisDetailedResult {
+        if useCoreMaths {
+            return try AmbientFieldCore.analyze(
+                configuration: configuration, microphone: microphone, playbackSources: playbackSources,
+                sampleRate: sampleRate)
+        }
         try validateConfiguration()
         guard sampleRate.isFinite, sampleRate > 0 else {
             throw AmbientAnalysisError.invalidSampleRate(sampleRate)
