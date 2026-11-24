@@ -293,6 +293,7 @@ struct ProductionRootView: View {
     @State private var commandError: String?
     @State private var showingGuidedSetup = false
     @State private var guidedSetupPreset = SystemSetupPreset.full
+    @State private var guidedSetupEntry = SystemSetupEntry.fresh
     @State private var failsafeVerdict: ActiveSpeakerFailsafe.Verdict = .safe
     @ObservedObject private var defaultOutput = DefaultOutputMonitor.shared
     /// E12 S27: "Compare blind..." in the remote panel opens the Blind Listening page.
@@ -413,6 +414,7 @@ struct ProductionRootView: View {
             navigation.requestedGuidedSetup = nil
             guard FeatureFlags().isEnabled(.setupFlow), !showingGuidedSetup else { return }
             guidedSetupPreset = request
+            guidedSetupEntry = .fresh
             showingGuidedSetup = true
         }
         .task {
@@ -448,6 +450,7 @@ struct ProductionRootView: View {
                 calibration: product.multichannelCalibration,
                 advisor: product.roomTreatmentAdvisor,
                 preset: guidedSetupPreset,
+                entry: guidedSetupEntry,
                 onExit: { exit in
                     switch exit {
                     case .listen: navigation.navigate(to: .dashboard)
@@ -468,12 +471,14 @@ struct ProductionRootView: View {
             outputName: engine.selectedOutputDevice?.name,
             outputUID: engine.selectedOutputDevice?.uid,
             state: product.profiles.selectedSystemProfile?.state,
-            calibration: status)
+            calibration: status,
+            offersShortcuts: FeatureFlags().isEnabled(.setupFlow))
         return AnyView(SystemSetupEntryCard(
             availability: availability,
-            start: { guidedSetupPreset = .full; showingGuidedSetup = true },
-            startQuick: FeatureFlags().isEnabled(.setupFlow) ? { guidedSetupPreset = .quick; showingGuidedSetup = true } : nil,
-            openHeadphones: { navigation.navigate(to: .headphones) }))
+            start: { guidedSetupPreset = .full; guidedSetupEntry = .fresh; showingGuidedSetup = true },
+            startQuick: FeatureFlags().isEnabled(.setupFlow) ? { guidedSetupPreset = .quick; guidedSetupEntry = .fresh; showingGuidedSetup = true } : nil,
+            openHeadphones: { navigation.navigate(to: .headphones) },
+            startEntry: { guidedSetupPreset = .full; guidedSetupEntry = $0; showingGuidedSetup = true }))
     }
 
     @ViewBuilder

@@ -266,7 +266,7 @@ final class SystemSetupFlowModel: ObservableObject {
         persistSession()
     }
 
-    func begin(preset: SystemSetupPreset = .full) {
+    func begin(preset: SystemSetupPreset = .full, entry: SystemSetupEntry = .fresh) {
         quickFinished = false
         savedProfileName = nil
         summary = nil
@@ -289,13 +289,46 @@ final class SystemSetupFlowModel: ObservableObject {
         initial.arrangement = migrated
         speakerChoices = SystemSetupArrangementPlanner.choices(from: migrated)
         do {
-            try flow.start(snapshot: snapshot, choices: initial, preset: preset)
+            try flow.start(snapshot: snapshot, choices: initial, preset: entry == .fresh ? preset : .full)
             message = nil
+            if entry != .fresh { try openAtShortcut(entry) }
         } catch let refusal as SystemSetupRefusal {
             message = refusal.reason
         } catch {
             message = error.localizedDescription
         }
+    }
+
+    // MARK: Second runs (E12 S31, decision 36)
+
+    /// Opens the run at a shortcut's step with the rest kept: the output, the speakers and the microphone come from
+    /// the system as it is now. "Change the sound" measures nothing: it needs the measurements already taken and says
+    /// so, and stays at the start, when they are no longer there.
+    private func openAtShortcut(_ entry: SystemSetupEntry) throws {
+        calibration.prepareForUse()
+        if entry.dropsMeasurements {
+            try calibration.resetMeasurements()
+        }
+        if entry == .changeSound {
+            guard !calibration.measurements.isEmpty else {
+                message = "The measurements from the last run are not kept. Use Measure again instead."
+                return
+            }
+            // The arrangement the measurements were taken with is the one the system has now.
+            try applyArrangement()
+        }
+        syncMeasurementChoices()
+        if entry == .changeSound {
+            let wanted = flow.choices.seatNames.count
+            guard wanted > 0, flow.choices.measurementIDs.count == wanted else {
+                message = "The measurements from the last run are incomplete. Use Measure again instead."
+                return
+            }
+            // The sweep level is not needed again: no sweep runs.
+            if flow.choices.sweepLevelDBFS == nil { flow.choices.sweepLevelDBFS = level.levelDB }
+        }
+        try flow.startAt(entry.startStep)
+        persistSession()
     }
 
     // MARK: Outputs and Speakers (E25 S3)
@@ -444,6 +477,68 @@ final class SystemSetupFlowModel: ObservableObject {
     }
 
     func raiseLevel() { level.raise(); republishNoise() }
+
+    // MARK: Automatic level (E12 S31, decision 33)
+
+    @Published private(set) var autoLevelRunning = false
+    /// Why the automatic level stopped, or that it finished.
+    @Published private(set) var autoLevelStatus: String?
+    private var autoLevelTask: Task<Void, Never>?
+    /// Pause between a step and the next look at the meter (the slow reading needs about a second to settle).
+    var autoLevelSettle: Duration = .milliseconds(1_500)
+    /// Test seam: the C-weighted reading; nil reads the Level step's meter.
+    var autoLevelReading: (@MainActor () -> Double?)?
+
+    /// Starts the meter with the noise, so nobody has to press them in a particular order.
+    func startLevelMeter() {
+        guard !levelMonitor.isRunning, let device = microphone.selectedInputDevice else { return }
+        levelMonitor.weighting = .c
+        levelMonitor.start(microphone: device, channel: microphone.selectedInputChannelIndex)
+    }
+
+    func stopLevelMeter() { levelMonitor.stop() }
+
+    /// Plays the noise and raises it in small steps until the meter reads the target. It never passes the plan's
+    /// ceiling, stops when the reading does not rise, and stops on `stopAutoLevel`.
+    func startAutoLevel() {
+        guard !autoLevelRunning else { return }
+        autoLevelStatus = nil
+        if !noiseIsPlaying { toggleNoise() }
+        guard noiseIsPlaying else { return }
+        startLevelMeter()
+        autoLevelRunning = true
+        autoLevelTask = Task { [weak self] in
+            var auto = SystemSetupAutoLevel()
+            while !Task.isCancelled {
+                guard let settle = self?.autoLevelSettle else { return }
+                try? await Task.sleep(for: settle)
+                guard let self, !Task.isCancelled, self.autoLevelRunning else { return }
+                guard self.noiseIsPlaying else { self.endAutoLevel("The noise stopped, so the automatic level stopped."); return }
+                let reading = self.autoLevelReading?() ?? self.levelMonitor.reading?.slowDB
+                switch auto.decide(reading: reading, atCeiling: self.level.atCeiling) {
+                case .wait: continue
+                case .raise(let step):
+                    self.level.raise(byDB: step)
+                    self.republishNoise()
+                case .finished(let text), .stopped(let text):
+                    self.endAutoLevel(text)
+                    return
+                }
+            }
+        }
+    }
+
+    func stopAutoLevel() {
+        guard autoLevelRunning else { return }
+        autoLevelTask?.cancel()
+        endAutoLevel("Stopped. The noise is still playing at the level it reached.")
+    }
+
+    private func endAutoLevel(_ text: String) {
+        autoLevelTask = nil
+        autoLevelRunning = false
+        autoLevelStatus = text
+    }
     func lowerLevel() { level.lower(); republishNoise() }
 
     /// Plays the Level step's noise through the E11 generator, or says why it cannot.
@@ -453,6 +548,7 @@ final class SystemSetupFlowModel: ObservableObject {
             try noise.start(level.validatedGeneratorSettings(sampleRate: engine.selectedOutputDevice?.nominalSampleRate ?? 48_000), selection: level.target)
             noiseIsPlaying = noise.isPlaying
             message = nil
+            if noiseIsPlaying { startLevelMeter() }
         } catch {
             noiseIsPlaying = false
             message = error.localizedDescription
@@ -466,6 +562,10 @@ final class SystemSetupFlowModel: ObservableObject {
     }
 
     func stopNoise() {
+        if autoLevelRunning {
+            autoLevelTask?.cancel()
+            endAutoLevel("The noise was stopped, so the automatic level stopped.")
+        }
         noise.stop()
         noiseIsPlaying = noise.isPlaying
         if noiseIsPlaying { message = "The noise could not be stopped. Stop playback from the main window." }

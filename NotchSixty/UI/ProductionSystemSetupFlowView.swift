@@ -16,13 +16,15 @@ struct ProductionSystemSetupFlowView: View {
     @State private var confirmingCancel = false
 
     private let preset: SystemSetupPreset
+    private let entry: SystemSetupEntry
     private let onExit: (SystemSetupExit) -> Void
 
     init(engine: AudioIOEngine, profiles: ProductProfileController,
          microphone: RoomCorrectionCalibrationController, calibration: MultichannelCalibrationController,
-         advisor: RoomTreatmentAdvisorController, preset: SystemSetupPreset = .full,
+         advisor: RoomTreatmentAdvisorController, preset: SystemSetupPreset = .full, entry: SystemSetupEntry = .fresh,
          onExit: @escaping (SystemSetupExit) -> Void = { _ in }) {
         self.preset = preset
+        self.entry = entry
         self.onExit = onExit
         _model = StateObject(wrappedValue: SystemSetupFlowModel(
             engine: engine, profiles: profiles, microphone: microphone, calibration: calibration,
@@ -60,7 +62,7 @@ struct ProductionSystemSetupFlowView: View {
             .frame(maxWidth: .infinity)
         }
         .frame(minWidth: 820, minHeight: 540)
-        .onAppear { if !model.isRunning { model.begin(preset: preset) } }
+        .onAppear { if !model.isRunning { model.begin(preset: preset, entry: entry) } }
         .onDisappear { model.endComparison() }
         .confirmationDialog(
             "Cancel the setup?", isPresented: $confirmingCancel, titleVisibility: .visible) {

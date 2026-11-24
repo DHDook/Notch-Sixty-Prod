@@ -13,6 +13,8 @@ struct SystemSetupEntryCard: View {
     /// E12 S10: set when `e12.setup-flow` is on; adds the quick path beside the full flow.
     var startQuick: (() -> Void)?
     let openHeadphones: () -> Void
+    /// E12 S31: the shortcuts a set-up system gets (Measure again, Change the sound, Change speakers).
+    var startEntry: ((SystemSetupEntry) -> Void)?
 
     private func offerRow(showsExplanation: Bool) -> some View {
         HStack(spacing: DesignSpacing.m.pt) {
@@ -32,6 +34,20 @@ struct SystemSetupEntryCard: View {
         }
     }
 
+    private func setUpRow(_ start: @escaping (SystemSetupEntry) -> Void, showsExplanation: Bool) -> some View {
+        HStack(spacing: DesignSpacing.m.pt) {
+            Label("Your system is set up", systemImage: "checkmark.seal").font(.headline).fixedSize()
+            if showsExplanation {
+                Text("Change one thing without starting over.")
+                    .font(.callout).foregroundStyle(.secondary).lineLimit(1)
+            }
+            Spacer(minLength: DesignSpacing.m.pt)
+            ForEach([SystemSetupEntry.measureAgain, .changeSound, .changeSpeakers], id: \.self) { entry in
+                Button(entry.title) { start(entry) }.help(entry.explanation).fixedSize()
+            }
+        }
+    }
+
     var body: some View {
         switch availability {
         case .hidden:
@@ -44,6 +60,17 @@ struct SystemSetupEntryCard: View {
                     Spacer()
                     Button("Open Headphones", action: openHeadphones)
                 }.padding(4)
+            }
+        case .setUp:
+            if let startEntry {
+                ViewThatFits(in: .horizontal) {
+                    setUpRow(startEntry, showsExplanation: true)
+                    setUpRow(startEntry, showsExplanation: false)
+                }
+                .padding(.horizontal, DesignSpacing.m.pt)
+                .padding(.vertical, DesignSpacing.s.pt)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .designSurface(.large)
             }
         case .offer:
             // One line when there is room (the explanation drops first), so the card costs about 40 pt of page height.
