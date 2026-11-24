@@ -395,6 +395,31 @@ final class MultichannelCalibrationController: ObservableObject {
 
     var canMeasure: Bool { readiness.isReady }
 
+    /// E12 S29: the campaign as it is now, for the guided setup to keep aside while it is closed to continue later
+    /// (restoring the earlier settings changes the routing, and a routing change drops the campaign). Nil with no campaign.
+    func campaignArchiveForKeeping() -> MultichannelCalibrationCampaignArchive? {
+        guard let systemID = campaignSystemID, campaignSampleRate.isFinite, campaignSampleRate > 0,
+              !measurements.isEmpty else { return nil }
+        return MultichannelCalibrationCampaignArchive(
+            playbackSystemID: systemID, routingSignature: campaignSignature, sampleRate: campaignSampleRate,
+            seats: seats, measurements: measurements, modifiedAt: Date(),
+            seatMicrophoneMode: seatMicrophoneMode, wayCaptures: wayCaptures)
+    }
+
+    /// E12 S29: puts a kept campaign back once the routing it was measured with is in place again. A campaign for a
+    /// different system, routing or rate is refused (false) and nothing changes.
+    @discardableResult
+    func restoreKeptCampaign(_ archive: MultichannelCalibrationCampaignArchive) throws -> Bool {
+        guard activeTransport == nil, let systemID = profiles.selectedSystemProfileID, archive.playbackSystemID == systemID,
+              let profile, let output = engine.selectedOutputDevice,
+              archive.routingSignature == profile.multichannelCalibrationRoutingSignature,
+              abs(archive.sampleRate - output.nominalSampleRate) < 0.5 else { return false }
+        try store.save(archive)
+        campaignSystemID = nil
+        try synchronizeCampaign()
+        return true
+    }
+
     func prepareForUse() {
         do {
             try synchronizeCampaign()

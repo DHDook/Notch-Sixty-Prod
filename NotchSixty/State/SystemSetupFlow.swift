@@ -81,6 +81,17 @@ struct SystemSetupChoices: Codable, Equatable, Sendable {
     var seatVerdicts: [SeatMeasurementVerdict]?
     /// E12 S11: the expert setting for the no-calibration-file correction limit (nil means the default).
     var correctionLimitOverrideHz: Double?
+    /// E12 S29: the trial stages that were applied when the setup was closed to continue later. They are taken off
+    /// when it closes and applied again, in order, when it resumes (nil when nothing was applied or on a normal run).
+    var trialToReapply: [SystemSetupDesignStage]?
+    /// E12 S29: the Correction step's mode and sound at close, so the re-applied correction is the one that was tried.
+    var correctionModeID: String?
+    var correctionTargetID: String?
+    /// E12 S29: the Speakers step's crossover, so a resumed session applies the same arrangement.
+    /// E12 S29: the measurements were kept aside when the setup was closed, and are put back on resume.
+    var keptMeasurements: Bool?
+    var crossoverHz: Double?
+    var crossoverSlope: CrossoverTopology?
 }
 
 // MARK: - Refusals
@@ -307,6 +318,46 @@ struct SystemSetupFlow: Codable, Equatable, Sendable {
         skipped.subtract(SystemSetupStep.allCases.filter(\.dependsOnMeasurement))
         step = .measure
         invalidationReason = "The measurements were not kept, so the setup resumed at Measure seats."
+    }
+
+    /// E12 S29: a finished step can be reopened. Nothing it set is undone; later steps stay finished.
+    mutating func reopen(_ target: SystemSetupStep) throws {
+        try requireRunning()
+        guard completed.contains(target), !preset.passedOver.contains(target) else {
+            throw SystemSetupRefusal.preconditionNotMet(target, "Finish the steps before this one first.")
+        }
+        step = target
+    }
+
+    /// E12 S29: "Close and continue later" took the trial settings off. What applying them set is earned again when
+    /// the session resumes; Save and Verify wait for that.
+    mutating func trialSuspended() {
+        guard phase == .running else { return }
+        choices.alignmentApplied = false
+        choices.bassApplied = false
+        choices.correctionApplied = false
+        choices.verificationPassed = nil
+        completed.subtract([.verify])
+        if step == .save { step = .verify }
+    }
+
+    /// E12 S29: a trial stage could not be applied again on resume; the flow goes back to that stage and says why.
+    mutating func trialReapplyFailed(_ stage: SystemSetupDesignStage, reason: String) {
+        guard phase == .running else { return }
+        let target: SystemSetupStep
+        switch stage {
+        case .alignment: target = .alignment
+        case .bass: target = .bass
+        case .correction: target = .correction
+        }
+        let later = SystemSetupStep.allCases.filter { $0.index >= target.index && $0 != .save }
+        completed.subtract(later)
+        choices.alignmentApplied = choices.alignmentApplied && target.index > SystemSetupStep.alignment.index
+        choices.bassApplied = choices.bassApplied && target.index > SystemSetupStep.bass.index
+        choices.correctionApplied = false
+        choices.verificationPassed = nil
+        if step.index > target.index { step = target }
+        invalidationReason = reason
     }
 
     /// E25 S3: a schema-1 session whose subwoofer cannot keep its output resumes at Speakers, and says why.
