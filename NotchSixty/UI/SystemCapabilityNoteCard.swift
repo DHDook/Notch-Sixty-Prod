@@ -19,32 +19,32 @@ struct SystemCapabilityNoteCard: View {
     var body: some View {
         let rows = rows
         if !rows.isEmpty {
-            VStack(alignment: .leading, spacing: 6) {
-                Text(title).font(.headline)
+            VStack(alignment: .leading, spacing: DesignSpacing.s.pt) {
+                Text(title).font(DesignType.sectionTitle.font)
                 if includeArrangement,
                    let a = SystemCapabilityText.arrangement(for: profiles.selectedSystemProfile, deviceChannelCount: deviceChannelCount) {
-                    Text(SystemCapabilityText.arrangementSentence(a)).font(.caption).foregroundStyle(.secondary)
+                    Text(SystemCapabilityText.arrangementSentence(a)).font(DesignType.caption.font).foregroundStyle(.secondary)
                     if a.bass.isDownstream {
-                        Text(SystemCapabilityMatrix.receiverAdvice).font(.caption).foregroundStyle(.secondary)
+                        Text(SystemCapabilityMatrix.receiverAdvice).font(DesignType.caption.font).foregroundStyle(.secondary)
                     }
                 }
                 ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
-                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    HStack(alignment: .firstTextBaseline, spacing: DesignSpacing.s.pt) {
                         Image(systemName: row.availability.isUsable ? "checkmark.circle" : "xmark.circle")
                             .foregroundStyle(row.availability.isUsable ? Color.green : Color.secondary)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(row.feature.displayName).font(.callout)
-                            Text(row.availability.text).font(.caption).foregroundStyle(.secondary)
+                        VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
+                            Text(row.feature.displayName).font(DesignType.label.font)
+                            Text(row.availability.text).font(DesignType.caption.font).foregroundStyle(.secondary)
                             if case .unavailable(_, let fix?) = row.availability {
-                                Text(fix).font(.caption).foregroundStyle(.secondary)
+                                Text(fix).font(DesignType.caption.font).foregroundStyle(.secondary)
                             }
                         }
                     }
                 }
             }
-            .padding(14)
+            .padding(DesignSpacing.l.pt)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 12))
+            .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: DesignRadius.medium.pt))
         }
     }
 }

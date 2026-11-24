@@ -14,7 +14,7 @@ struct MeasurementRTASPLCard: View {
 
     var body: some View {
         GroupBox("RTA and SPL meter") {
-            VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: DesignSpacing.m.pt) {
                 controls
                 meterRow
                 RTABandsPlot(spectrum: monitor.spectrum, calibrated: monitor.isCalibrated)
@@ -23,13 +23,13 @@ struct MeasurementRTASPLCard: View {
                 loggingRow
                 if monitor.overrunFrames > 0 {
                     Text("The analyser fell behind and dropped \(monitor.overrunFrames) frames.")
-                        .font(.caption).foregroundStyle(.orange)
+                        .font(DesignType.caption.font).foregroundStyle(StatusLevel.attention.color)
                 }
                 if let error = monitor.lastError ?? logMessage {
-                    Text(error).font(.caption).foregroundStyle(.red).textSelection(.enabled)
+                    Text(error).font(DesignType.caption.font).foregroundStyle(StatusLevel.problem.color).textSelection(.enabled)
                 }
             }
-            .padding(4)
+            .padding(DesignSpacing.xs.pt)
         }
         .onChange(of: monitor.spectrum) { _, spectrum in
             MeasurementLiveOverlayStore.shared.rtaCurve = MeasurementOverlays.rtaCurve(
@@ -42,7 +42,7 @@ struct MeasurementRTASPLCard: View {
     }
 
     private var controls: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: DesignSpacing.m.pt) {
             Button(monitor.isRunning ? "Stop" : "Start") { toggle() }
                 .disabled(!monitor.isRunning && microphone.selectedInputDevice == nil)
             Picker("Weighting", selection: $weighting) {
@@ -66,7 +66,7 @@ struct MeasurementRTASPLCard: View {
     private var unit: String { monitor.isCalibrated ? "dB SPL" : "dB (relative)" }
 
     private var meterRow: some View {
-        HStack(spacing: 18) {
+        HStack(spacing: DesignSpacing.l.pt) {
             value("Fast", monitor.reading?.fastDB)
             value("Slow", monitor.reading?.slowDB)
             value("Leq", monitor.reading?.leqDB)
@@ -77,21 +77,21 @@ struct MeasurementRTASPLCard: View {
     }
 
     private func value(_ title: String, _ db: Double?) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(title).font(.caption).foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
+            Text(title).font(DesignType.caption.font).foregroundStyle(.secondary)
             Text(db.map { $0 > Double(N60_SPL_FLOOR_DB) + 1 ? String(format: "%.1f", $0) : "--" } ?? "--")
                 .font(.system(.title3, design: .monospaced))
-            Text(unit).font(.caption2).foregroundStyle(.secondary)
+            Text(unit).font(DesignType.caption.font).foregroundStyle(.secondary)
         }
     }
 
     private var calibrationRow: some View {
         HStack {
-            Text("Calibrator").font(.caption).foregroundStyle(.secondary)
+            Text("Calibrator").font(DesignType.caption.font).foregroundStyle(.secondary)
             Button("94 dB") { monitor.calibrate(toReferenceSPL: 94) }
             Button("114 dB") { monitor.calibrate(toReferenceSPL: 114) }
             Text("Play the 1 kHz calibrator on the microphone, wait for Leq to settle, then press its level.")
-                .font(.caption).foregroundStyle(.secondary)
+                .font(DesignType.caption.font).foregroundStyle(.secondary)
         }
         .disabled(!monitor.isRunning)
     }
@@ -146,11 +146,11 @@ struct RTABandsPlot: View {
                 context.fill(Path(rect), with: .color(.accentColor))
             }
         }
-        .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
+        .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: DesignRadius.small.pt))
         .overlay(alignment: .topLeading) {
             if let top = spectrum?.levelsDB.max(), top > Double(N60_SPL_FLOOR_DB) + 1 {
                 Text(String(format: "top %.0f %@", top, calibrated ? "dB SPL" : "dB (relative)"))
-                    .font(.caption2).foregroundStyle(.secondary).padding(4)
+                    .font(DesignType.caption.font).foregroundStyle(.secondary).padding(DesignSpacing.xs.pt)
             }
         }
         .accessibilityLabel("Real-time analyser bands")

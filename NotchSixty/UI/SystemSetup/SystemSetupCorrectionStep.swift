@@ -7,25 +7,25 @@ struct SystemSetupCorrectionStep: View {
     @ObservedObject var model: SystemSetupFlowModel
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Correct the room").font(.headline)
+        VStack(alignment: .leading, spacing: DesignSpacing.m.pt) {
+            Text("Correct the room").font(DesignType.sectionTitle.font)
             Text("Notch Sixty flattens the bumps and dips your seats share, using the measurements you already made. Nothing is measured again.")
-                .font(.callout).foregroundStyle(.secondary)
-            if let note = model.correctionNote { Label(note, systemImage: "info.circle").font(.callout) }
+                .font(DesignType.label.font).foregroundStyle(.secondary)
+            if let note = model.correctionNote { Label(note, systemImage: "info.circle").font(DesignType.label.font) }
             if let limit = model.correctionLimitHz {
-                Label(SystemSetupCorrectionLimit.note(limitHz: limit), systemImage: "exclamationmark.triangle").font(.callout)
+                Label(SystemSetupCorrectionLimit.note(limitHz: limit), systemImage: "exclamationmark.triangle").font(DesignType.label.font)
             }
-            if let advice = model.receiverAdvice { Text(advice).font(.callout).foregroundStyle(.secondary) }
+            if let advice = model.receiverAdvice { Text(advice).font(DesignType.label.font).foregroundStyle(.secondary) }
             Picker("Listening", selection: $model.correctionMode) {
                 ForEach(SystemSetupCorrectionMode.allCases) { Text($0.title).tag($0) }
             }
             .pickerStyle(.segmented)
-            Text(model.correctionMode.detail).font(.callout).foregroundStyle(.secondary)
+            Text(model.correctionMode.detail).font(DesignType.label.font).foregroundStyle(.secondary)
             Picker("Sound", selection: $model.correctionTarget) {
                 ForEach(model.correctionTargetChoices) { Text($0.title).tag($0) }
             }
             .onAppear { model.refreshCorrectionTargets() }
-            Text(model.correctionTarget.detail).font(.callout).foregroundStyle(.secondary)
+            Text(model.correctionTarget.detail).font(DesignType.label.font).foregroundStyle(.secondary)
             if !model.seatPredictions.isEmpty {
                 Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 6) {
                     GridRow { Text("Seat").bold(); Text(SystemSetupTerm.errorNow.plainLabel).bold(); Text("Predicted").bold() }

@@ -42,7 +42,7 @@ struct SystemOverviewChecklistView: View {
 
     var body: some View {
         GroupBox("Calibration checklist") {
-            VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: DesignSpacing.m.pt) {
                 ForEach(rows) { row in
                     SystemChecklistRowView(row: row) { open(row.rowID) }
                     if row.id != rows.last?.id { Divider() }
@@ -53,16 +53,16 @@ struct SystemOverviewChecklistView: View {
                     HStack {
                         Button("I moved something", action: moved)
                         Text("Say so when you move a speaker or the seat. The calibration shows as out of date; nothing is switched off.")
-                            .font(.caption).foregroundStyle(.secondary)
+                            .font(DesignType.caption.font).foregroundStyle(.secondary)
                     }
-                    VStack(alignment: .leading, spacing: 4) {
+                    VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
                         Button("I moved something", action: moved)
                         Text("Say so when you move a speaker or the seat. The calibration shows as out of date; nothing is switched off.")
-                            .font(.caption).foregroundStyle(.secondary)
+                            .font(DesignType.caption.font).foregroundStyle(.secondary)
                     }
                 }
             }
-            .padding(4)
+            .padding(DesignSpacing.xs.pt)
         }
     }
 }
@@ -98,11 +98,11 @@ struct SystemChecklistRowView: View {
 
     var body: some View {
         ViewThatFits(in: .horizontal) {
-            HStack(alignment: .top, spacing: 10) { content; Spacer(minLength: 8); button }
-            VStack(alignment: .leading, spacing: 6) { HStack(alignment: .top, spacing: 10) { content }; button }
+            HStack(alignment: .top, spacing: DesignSpacing.m.pt) { content; Spacer(minLength: 8); button }
+            VStack(alignment: .leading, spacing: DesignSpacing.s.pt) { HStack(alignment: .top, spacing: DesignSpacing.m.pt) { content }; button }
         }
-        .padding(6)
-        .background(row.isNextStep ? Color.accentColor.opacity(0.10) : Color.clear, in: RoundedRectangle(cornerRadius: 6))
+        .padding(DesignSpacing.s.pt)
+        .background(row.isNextStep ? Color.accentColor.opacity(0.10) : Color.clear, in: RoundedRectangle(cornerRadius: DesignRadius.small.pt))
         .accessibilityElement(children: .contain)
         .accessibilityLabel(accessibilityText)
     }
@@ -112,16 +112,16 @@ struct SystemChecklistRowView: View {
             Image(systemName: symbol)
                 .foregroundStyle(row.state == .done ? Color.green : row.state == .outOfDate ? Color.orange : Color.secondary)
                 .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 6) {
-                    Text(row.rowID.title).font(.headline)
-                    if row.isNextStep { Text("Next").font(.caption.bold()).foregroundStyle(Color.accentColor) }
+            VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
+                HStack(spacing: DesignSpacing.s.pt) {
+                    Text(row.rowID.title).font(DesignType.sectionTitle.font)
+                    if row.isNextStep { Text("Next").font(DesignType.caption.font.bold()).foregroundStyle(Color.accentColor) }
                 }
-                Text(row.summary).font(.callout).foregroundStyle(.secondary)
+                Text(row.summary).font(DesignType.label.font).foregroundStyle(.secondary)
                 if let date = row.date {
-                    Text(date.formatted(date: .abbreviated, time: .omitted)).font(.caption).foregroundStyle(.secondary)
+                    Text(date.formatted(date: .abbreviated, time: .omitted)).font(DesignType.caption.font).foregroundStyle(.secondary)
                 }
-                if let reason = row.reason { Text(reason).font(.caption).foregroundStyle(.orange) }
+                if let reason = row.reason { Text(reason).font(DesignType.caption.font).foregroundStyle(StatusLevel.attention.color) }
             }
         }
     }

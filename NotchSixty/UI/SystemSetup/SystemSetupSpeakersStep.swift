@@ -9,12 +9,12 @@ struct SystemSetupSpeakersStep: View {
     var body: some View {
         let inUse = model.arrangement?.outputs.channelsInUse ?? 2
         let choices = model.speakerChoices
-        VStack(alignment: .leading, spacing: 10) {
-            Text("What speakers do you have?").font(.headline)
+        VStack(alignment: .leading, spacing: DesignSpacing.m.pt) {
+            Text("What speakers do you have?").font(DesignType.sectionTitle.font)
             Picker("Speaker layout", selection: Binding(get: { choices.layout }, set: { model.chooseLayout($0) })) {
                 ForEach(OutputProgramLayout.allCases) { Text($0.displayName).tag($0) }
             }
-            Text("How is bass handled?").font(.headline)
+            Text("How is bass handled?").font(DesignType.sectionTitle.font)
             ForEach(SystemSetupArrangementPlanner.bassChoices(channelsInUse: inUse, layout: choices.layout), id: \.self) { bass in
                 Button { model.chooseBass(bass) } label: {
                     Label(SystemSetupArrangementPlanner.title(bass),
@@ -34,22 +34,22 @@ struct SystemSetupSpeakersStep: View {
                     in: SystemSetupTopologyPreset.crossoverRangeHz, step: 5)
             }
             if choices.bass == .downstreamReceiver {
-                Text(SystemCapabilityMatrix.receiverAdvice).font(.caption).foregroundStyle(.secondary)
+                Text(SystemCapabilityMatrix.receiverAdvice).font(DesignType.caption.font).foregroundStyle(.secondary)
             }
             if choices.bass.isDownstream {
                 SystemSetupReceiverBassPicker(receiverBass: choices.receiverBass) { model.chooseReceiverBass($0) }
             }
             Divider()
-            Text("What this arrangement can do").font(.headline)
+            Text("What this arrangement can do").font(DesignType.sectionTitle.font)
             ForEach(Array(model.capabilityRows.enumerated()), id: \.offset) { _, row in
-                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                HStack(alignment: .firstTextBaseline, spacing: DesignSpacing.s.pt) {
                     Image(systemName: row.availability.isUsable ? "checkmark.circle" : "xmark.circle")
                         .foregroundStyle(row.availability.isUsable ? Color.green : Color.secondary)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(row.feature.displayName).font(.callout)
-                        Text(row.availability.text).font(.caption).foregroundStyle(.secondary)
+                    VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
+                        Text(row.feature.displayName).font(DesignType.label.font)
+                        Text(row.availability.text).font(DesignType.caption.font).foregroundStyle(.secondary)
                         if case .unavailable(_, let fix?) = row.availability {
-                            Text(fix).font(.caption).foregroundStyle(.secondary)
+                            Text(fix).font(DesignType.caption.font).foregroundStyle(.secondary)
                         }
                     }
                 }
@@ -74,8 +74,8 @@ struct SystemSetupReceiverBassPicker: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("How does it handle bass?").font(.subheadline.bold())
+        VStack(alignment: .leading, spacing: DesignSpacing.s.pt) {
+            Text("How does it handle bass?").font(DesignType.label.font.bold())
             Picker("Receiver bass", selection: Binding(
                 get: { kind },
                 set: { newKind in
@@ -96,9 +96,9 @@ struct SystemSetupReceiverBassPicker: View {
                     in: ReceiverBass.crossoverRangeHz, step: 5)
             }
             if !receiverBass.isDeclared {
-                Text(TwoChannelAncArming.undeclaredReceiverRefusal).font(.caption).foregroundStyle(.orange)
+                Text(TwoChannelAncArming.undeclaredReceiverRefusal).font(DesignType.caption.font).foregroundStyle(StatusLevel.attention.color)
             }
-            Text(ReceiverBass.setupNote).font(.caption).foregroundStyle(.secondary)
+            Text(ReceiverBass.setupNote).font(DesignType.caption.font).foregroundStyle(.secondary)
             SystemSetupTermNotes(step: .topology)
         }
     }

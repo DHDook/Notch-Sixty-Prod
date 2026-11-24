@@ -11,10 +11,10 @@ struct ProductionProgramSourceCard: View {
 
     var body: some View {
         if controller.isVisible {
-            VStack(alignment: .leading, spacing: 12) {
-                Text("Program source").font(.headline)
+            VStack(alignment: .leading, spacing: DesignSpacing.m.pt) {
+                Text("Program source").font(DesignType.sectionTitle.font)
                 Text("A 5.1 or 7.1 program is folded to your two speaker feeds before any other processing.")
-                    .font(.caption).foregroundStyle(.secondary)
+                    .font(DesignType.caption.font).foregroundStyle(.secondary)
 
                 Picker("Source device", selection: Binding(
                     get: { controller.foldDown.programSourceDeviceUID },
@@ -44,23 +44,23 @@ struct ProductionProgramSourceCard: View {
                 }
                 .disabled(!controller.foldApplies || !controller.foldDown.isActive)
 
-                Text(controller.resolutionText).font(.callout)
+                Text(controller.resolutionText).font(DesignType.label.font)
                 if controller.foldDown.usesDriverSource {
-                    Text(ProgramSourceController.driverSourceNote).font(.caption).foregroundStyle(.secondary)
+                    Text(ProgramSourceController.driverSourceNote).font(DesignType.caption.font).foregroundStyle(.secondary)
                 }
                 if controller.foldApplies, controller.foldDown.isActive {
-                    Text(controller.lfeNote).font(.caption).foregroundStyle(.secondary)
-                    Text(ProgramSourceController.rebuildNote).font(.caption).foregroundStyle(.secondary)
+                    Text(controller.lfeNote).font(DesignType.caption.font).foregroundStyle(.secondary)
+                    Text(ProgramSourceController.rebuildNote).font(DesignType.caption.font).foregroundStyle(.secondary)
                 }
                 if let error = controller.lastError {
                     Label(error, systemImage: "exclamationmark.triangle.fill")
-                        .font(.callout).foregroundStyle(.red)
+                        .font(DesignType.label.font).foregroundStyle(StatusLevel.problem.color)
                 }
             }
-            .padding(16)
+            .padding(DesignSpacing.l.pt)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(.regularMaterial, in: .rect(cornerRadius: 22))
-            .overlay { RoundedRectangle(cornerRadius: 22, style: .continuous).stroke(.quaternary, lineWidth: 0.5) }
+            .background(.regularMaterial, in: .rect(cornerRadius: DesignRadius.large.pt))
+            .overlay { RoundedRectangle(cornerRadius: DesignRadius.large.pt, style: .continuous).stroke(.quaternary, lineWidth: 0.5) }
         }
     }
 }

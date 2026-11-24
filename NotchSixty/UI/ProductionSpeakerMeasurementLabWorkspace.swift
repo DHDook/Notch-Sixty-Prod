@@ -89,7 +89,7 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
 
     var body: some View {
         ProductionPageContainer {
-            VStack(alignment: .leading, spacing: 20) {
+            VStack(alignment: .leading, spacing: DesignSpacing.xl.pt) {
                 header
                 tabPicker
                 if tab == .analysis {
@@ -121,14 +121,14 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
                         error,
                         systemImage: "exclamationmark.triangle.fill"
                     )
-                    .font(.callout)
-                    .foregroundStyle(.red)
+                    .font(DesignType.label.font)
+                    .foregroundStyle(StatusLevel.problem.color)
                     .textSelection(.enabled)
-                    .padding(14)
+                    .padding(DesignSpacing.l.pt)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(
                         .red.opacity(0.08),
-                        in: RoundedRectangle(cornerRadius: 12)
+                        in: RoundedRectangle(cornerRadius: DesignRadius.medium.pt)
                     )
                 }
             }
@@ -174,9 +174,9 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
     }
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: DesignSpacing.s.pt) {
             HStack {
-                VStack(alignment: .leading, spacing: 6) {
+                VStack(alignment: .leading, spacing: DesignSpacing.s.pt) {
                     Text(
                         "Source-specific acoustic diagnostics, protected-driver measurement, and authenticated mains/sub timing evidence."
                     )
@@ -187,26 +187,26 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
                     "MEASURE → REVIEW → VERIFY",
                     systemImage: "checkmark.shield"
                 )
-                    .font(.caption.bold())
+                    .font(DesignType.caption.font.bold())
                     .tracking(1.0)
                     .foregroundStyle(.secondary)
-                    .padding(.horizontal, 11)
-                    .padding(.vertical, 7)
+                    .padding(.horizontal, DesignSpacing.m.pt)
+                    .padding(.vertical, DesignSpacing.s.pt)
                     .background(.quaternary, in: Capsule())
             }
 
             Text(
                 "Lab analyses never mutate DSP on their own. Coherent Sub Alignment below can turn authenticated Main/Sub timing evidence into an explicit reviewed transaction, followed by mandatory fresh measured verification."
             )
-            .font(.caption)
+            .font(DesignType.caption.font)
             .foregroundStyle(.secondary)
         }
     }
 
     private var environmentCard: some View {
         GroupBox("Measurement Environment") {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack(spacing: 24) {
+            VStack(alignment: .leading, spacing: DesignSpacing.m.pt) {
+                HStack(spacing: DesignSpacing.xl.pt) {
                     status("System", profiles.selectedSystemProfileName)
                     status(
                         "Output",
@@ -226,7 +226,7 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
                         engine.lifecycleState.rawValue.capitalized
                     )
                 }
-                HStack(spacing: 24) {
+                HStack(spacing: DesignSpacing.xl.pt) {
                     status(
                         "Microphone",
                         microphone.selectedInputDevice?.name
@@ -245,10 +245,10 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
                 Text(
                     "Normal DSP playback must be stopped for every sweep. The Lab revalidates routing, crossover/limiter protection and reference-clock requirements immediately before acquisition."
                 )
-                .font(.caption)
+                .font(DesignType.caption.font)
                 .foregroundStyle(.secondary)
             }
-            .padding(6)
+            .padding(DesignSpacing.s.pt)
         }
     }
 
@@ -270,10 +270,10 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
 
     /// E24 S4b: the level-setting tools every measurement uses (design note 9, Q6).
     private var levelAndNoiseSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Level and noise").font(.title3.bold())
+        VStack(alignment: .leading, spacing: DesignSpacing.m.pt) {
+            Text("Level and noise").font(DesignType.sectionTitle.font.bold())
             Text("Check the room noise and set the microphone and playback level before a sweep. The Generator plays through the live correction when one is active.")
-                .font(.callout).foregroundStyle(.secondary)
+                .font(DesignType.label.font).foregroundStyle(.secondary)
             MeasurementRTASPLCard(microphone: microphone)
             MeasurementGeneratorCard(engine: engine, profiles: profiles, microphone: microphone)
         }
@@ -320,19 +320,19 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
         Text(
             "Off-axis directivity and per-driver near-field captures. To compare toe-in angles from on- and off-axis captures, use Room Advisor → Measurement-Informed Toe-In, which needs the saved room geometry."
         )
-        .font(.callout)
+        .font(DesignType.label.font)
         .foregroundStyle(.secondary)
     }
 
     private var protocolComposerCard: some View {
         GroupBox("Protocol Composer") {
-            VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: DesignSpacing.l.pt) {
                 HStack(alignment: .firstTextBaseline) {
                     Text("Queue measurement protocols")
-                        .font(.headline)
+                        .font(DesignType.sectionTitle.font)
                     Spacer()
                     Text("\(queuedProtocols.count) queued")
-                        .font(.caption.bold())
+                        .font(DesignType.caption.font.bold())
                         .foregroundStyle(.secondary)
                 }
 
@@ -479,7 +479,7 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
                     }
                 }
 
-                HStack(spacing: 10) {
+                HStack(spacing: DesignSpacing.m.pt) {
                     Button("Add Protocol") {
                         actionError = nil
                         do {
@@ -490,7 +490,7 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
                             actionError = error.localizedDescription
                         }
                     }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(.glassProminent)
                     .disabled(!canAddDraft)
 
                     Button("Clear Queue", role: .destructive) {
@@ -505,16 +505,16 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
                             "Adds linked Main + Sub legs",
                             systemImage: "link"
                         )
-                        .font(.caption)
+                        .font(DesignType.caption.font)
                         .foregroundStyle(.secondary)
                     }
                 }
 
                 if !queuedProtocols.isEmpty {
                     Divider()
-                    VStack(spacing: 7) {
+                    VStack(spacing: DesignSpacing.s.pt) {
                         ForEach(queuedProtocols) { item in
-                            HStack(spacing: 10) {
+                            HStack(spacing: DesignSpacing.m.pt) {
                                 Image(
                                     systemName:
                                         modeIcon(item.request.mode)
@@ -524,16 +524,16 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
                                     spacing: 2
                                 ) {
                                     Text(item.name)
-                                        .font(.callout.bold())
+                                        .font(DesignType.label.font.bold())
                                     Text(protocolSummary(item))
-                                        .font(.caption)
+                                        .font(DesignType.caption.font)
                                         .foregroundStyle(.secondary)
                                 }
                                 Spacer()
                                 Text(
                                     "\(item.request.repeatCount)×"
                                 )
-                                .font(.caption.monospacedDigit())
+                                .font(DesignType.caption.font.monospacedDigit())
                                 Button {
                                     queuedProtocols.removeAll {
                                         $0.id == item.id
@@ -543,7 +543,7 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
                                 }
                                 .buttonStyle(.plain)
                             }
-                            .padding(.vertical, 3)
+                            .padding(.vertical, DesignSpacing.xs.pt)
                         }
                     }
                 }
@@ -557,7 +557,7 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
                 .toggleStyle(.switch)
 
                 if sharedReferenceEnabled {
-                    HStack(spacing: 16) {
+                    HStack(spacing: DesignSpacing.l.pt) {
                         LabeledContent("Reference Input Channel") {
                             Stepper(
                                 "\(referenceInputChannel)",
@@ -584,14 +584,14 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
                     Text(
                         "The reference must be a different input channel on the same physical ADC as the microphone. Coherent Main/Sub protocols require this option."
                     )
-                    .font(.caption)
+                    .font(DesignType.caption.font)
                     .foregroundStyle(.secondary)
                 }
 
                 Button("Start New Lab Session") {
                     startNewSession()
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(.glassProminent)
                 .disabled(
                     queuedProtocols.isEmpty
                         || lab.state == .measuring
@@ -601,7 +601,7 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
                         } && !sharedReferenceEnabled)
                 )
             }
-            .padding(6)
+            .padding(DesignSpacing.s.pt)
         }
     }
 
@@ -709,7 +709,7 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
                         "Explicit required",
                         systemImage: "lock.shield"
                     )
-                    .font(.caption)
+                    .font(DesignType.caption.font)
                 }
                 if forced || draft.usesExplicitExcitationLevel {
                     Slider(
@@ -725,7 +725,7 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
                     .monospacedDigit()
                 } else {
                     Text("Use measurement default")
-                        .font(.caption)
+                        .font(DesignType.caption.font)
                         .foregroundStyle(.secondary)
                 }
             }
@@ -735,8 +735,8 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
     private var sessionCard: some View {
         GroupBox("Lab Session") {
             if let session = lab.session {
-                VStack(alignment: .leading, spacing: 12) {
-                    HStack(spacing: 22) {
+                VStack(alignment: .leading, spacing: DesignSpacing.m.pt) {
+                    HStack(spacing: DesignSpacing.xl.pt) {
                         status(
                             "Session",
                             String(session.id.uuidString.prefix(8))
@@ -764,15 +764,15 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
                     }
 
                     if let step = lab.activeOrNextStep {
-                        VStack(alignment: .leading, spacing: 5) {
+                        VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
                             Text(
                                 lab.state == .measuring
                                     ? "Measuring \(step.labProtocol.name)"
                                     : "Next: \(step.labProtocol.name)"
                             )
-                            .font(.callout.bold())
+                            .font(DesignType.label.font.bold())
                             Text(step.instruction)
-                                .font(.caption)
+                                .font(DesignType.caption.font)
                                 .foregroundStyle(.secondary)
                         }
                     } else if lab.progress?.complete == true {
@@ -780,7 +780,7 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
                             "All queued Lab protocols are complete.",
                             systemImage: "checkmark.circle.fill"
                         )
-                        .foregroundStyle(.green)
+                        .foregroundStyle(StatusLevel.good.color)
                     }
 
                     if lab.state == .measuring {
@@ -789,7 +789,7 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
                         }
                     }
 
-                    HStack(spacing: 10) {
+                    HStack(spacing: DesignSpacing.m.pt) {
                         Button("Measure Next Repeat") {
                             actionError = nil
                             do {
@@ -798,7 +798,7 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
                                 actionError = error.localizedDescription
                             }
                         }
-                        .buttonStyle(.borderedProminent)
+                        .buttonStyle(.glassProminent)
                         .disabled(!lab.canBeginMeasurement)
 
                         if lab.state == .measuring
@@ -817,18 +817,18 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
                             $0.protocolID == item.id
                         }.count
                         HStack {
-                            VStack(alignment: .leading, spacing: 2) {
+                            VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
                                 Text(item.name)
-                                    .font(.callout.bold())
+                                    .font(DesignType.label.font.bold())
                                 Text(protocolSummary(item))
-                                    .font(.caption)
+                                    .font(DesignType.caption.font)
                                     .foregroundStyle(.secondary)
                             }
                             Spacer()
                             Text(
                                 "\(captured) / \(item.request.repeatCount)"
                             )
-                            .font(.caption.monospacedDigit())
+                            .font(DesignType.caption.font.monospacedDigit())
                             if captured > 0
                                 && lab.state != .measuring
                                 && lab.state != .analyzing {
@@ -843,10 +843,10 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
                                             error.localizedDescription
                                     }
                                 }
-                                .font(.caption)
+                                .font(DesignType.caption.font)
                             }
                         }
-                        .padding(.vertical, 2)
+                        .padding(.vertical, DesignSpacing.xs.pt)
                     }
 
                     if let blocked =
@@ -855,17 +855,17 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
                             blocked.message,
                             systemImage: "lock.shield"
                         )
-                        .font(.caption)
-                        .foregroundStyle(.orange)
+                        .font(DesignType.caption.font)
+                        .foregroundStyle(StatusLevel.attention.color)
                     }
                 }
-                .padding(6)
+                .padding(DesignSpacing.s.pt)
             } else {
                 Text(
                     "No active Lab session. Compose one above or resume a recent session."
                 )
                 .foregroundStyle(.secondary)
-                .padding(6)
+                .padding(DesignSpacing.s.pt)
             }
         }
     }
@@ -873,8 +873,8 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
     private var reportCard: some View {
         GroupBox("Analysis & Export") {
             if let report = currentReport {
-                VStack(alignment: .leading, spacing: 12) {
-                    HStack(spacing: 22) {
+                VStack(alignment: .leading, spacing: DesignSpacing.m.pt) {
+                    HStack(spacing: DesignSpacing.xl.pt) {
                         status(
                             "Protocols",
                             "\(report.protocolSummaries.count)"
@@ -897,7 +897,7 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
                         Array(report.analysisSummaries.enumerated()),
                         id: \.offset
                     ) { _, analysis in
-                        VStack(alignment: .leading, spacing: 6) {
+                        VStack(alignment: .leading, spacing: DesignSpacing.s.pt) {
                             HStack {
                                 Label(
                                     analysis.title,
@@ -905,7 +905,7 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
                                         ? "checkmark.circle.fill"
                                         : "exclamationmark.circle"
                                 )
-                                .font(.callout.bold())
+                                .font(DesignType.label.font.bold())
                                 .foregroundStyle(
                                     analysis.available
                                         ? .green : .secondary
@@ -920,12 +920,12 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
                                         ? (analysis.available ? "REVIEW ONLY" : "UNQUALIFIED")
                                         : (analysis.available ? "AVAILABLE" : "UNAVAILABLE")
                                 )
-                                .font(.caption.bold())
+                                .font(DesignType.caption.font.bold())
                                 .foregroundStyle(.secondary)
                             }
                             if !analysis.metrics.isEmpty {
                                 LazyVGrid(
-                                    columns: [GridItem(.adaptive(minimum: 180), spacing: 12)],
+                                    columns: [GridItem(.adaptive(minimum: 180), spacing: DesignSpacing.m.pt)],
                                     alignment: .leading,
                                     spacing: 10
                                 ) {
@@ -939,23 +939,23 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
                             }
                             ForEach(analysis.warnings, id: \.self) { warning in
                                 Text(warning)
-                                    .font(.caption)
+                                    .font(DesignType.caption.font)
                                     .foregroundStyle(.secondary)
                             }
                         }
-                        .padding(10)
+                        .padding(DesignSpacing.m.pt)
                         .background(
                             .quaternary.opacity(0.45),
-                            in: RoundedRectangle(cornerRadius: 10)
+                            in: RoundedRectangle(cornerRadius: DesignRadius.small.pt)
                         )
                     }
 
                     Divider()
 
                     Text("Compact Report")
-                        .font(.callout.bold())
+                        .font(DesignType.label.font.bold())
 
-                    HStack(spacing: 10) {
+                    HStack(spacing: DesignSpacing.m.pt) {
                         Button("Export Compact JSON") {
                             prepareExport(json: true)
                         }
@@ -967,15 +967,15 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
                     Text(
                         "Compact exports intentionally exclude raw impulse arrays and full transfer grids."
                     )
-                    .font(.caption)
+                    .font(DesignType.caption.font)
                     .foregroundStyle(.secondary)
 
                     Divider()
 
                     Text("Full-Fidelity Data")
-                        .font(.callout.bold())
+                        .font(DesignType.label.font.bold())
 
-                    HStack(spacing: 10) {
+                    HStack(spacing: DesignSpacing.m.pt) {
                         Button("Export Full JSON") {
                             prepareFullJSONExport()
                         }
@@ -1012,7 +1012,7 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
                         .pickerStyle(.menu)
                         .frame(maxWidth: 430)
 
-                        HStack(spacing: 10) {
+                        HStack(spacing: DesignSpacing.m.pt) {
                             Button("Export Capture FRD") {
                                 prepareCaptureFRDExport()
                             }
@@ -1025,31 +1025,31 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
                     Text(
                         "Full-fidelity export preserves every captured impulse sample and transfer-function bin plus the session's routing, microphone-calibration, protected-path and shared-clock provenance. Exports remain measurement-only and cannot Deploy or establish physical acceptance."
                     )
-                    .font(.caption)
+                    .font(DesignType.caption.font)
                     .foregroundStyle(.secondary)
                 }
-                .padding(6)
+                .padding(DesignSpacing.s.pt)
             } else {
                 Text(
                     "Analysis summaries appear after a valid Lab session exists."
                 )
                 .foregroundStyle(.secondary)
-                .padding(6)
+                .padding(DesignSpacing.s.pt)
             }
         }
     }
 
     private var protectedDriverCommissioningCard: some View {
         GroupBox("Per-Driver Commissioning Preview") {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack(alignment: .top, spacing: 16) {
-                    VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: DesignSpacing.m.pt) {
+                HStack(alignment: .top, spacing: DesignSpacing.l.pt) {
+                    VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
                         Text("PR111 · Protected driver optimizer")
-                            .font(.headline)
+                            .font(DesignType.sectionTitle.font)
                         Text(
                             "Build an exact state-bound preview from qualified protected Low/Mid/High measurements. This remote draft snapshots rollback state but cannot Apply until a real combined-driver verification and PR112 hardware acceptance exist."
                         )
-                        .font(.caption)
+                        .font(DesignType.caption.font)
                         .foregroundStyle(.secondary)
                     }
                     Spacer()
@@ -1057,14 +1057,14 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
                         driverCommissioningDraft == nil
                             ? "NO DRAFT" : "HARDWARE BLOCKED"
                     )
-                    .font(.caption.bold())
+                    .font(DesignType.caption.font.bold())
                     .tracking(0.8)
-                    .padding(.horizontal, 9)
-                    .padding(.vertical, 5)
+                    .padding(.horizontal, DesignSpacing.s.pt)
+                    .padding(.vertical, DesignSpacing.xs.pt)
                     .background(.quaternary, in: Capsule())
                 }
 
-                HStack(spacing: 10) {
+                HStack(spacing: DesignSpacing.m.pt) {
                     Button("Prepare Commissioning Draft") {
                         actionError = nil
                         driverCommissioningMessage = nil
@@ -1091,7 +1091,7 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
                                 error.localizedDescription
                         }
                     }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(.glassProminent)
                     .disabled(
                         lab.progress?.complete != true
                             || profiles.selectedSystemProfile == nil
@@ -1119,7 +1119,7 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
                                     error.localizedDescription
                             }
                         }
-                        .buttonStyle(.bordered)
+                        .buttonStyle(.glass)
                     }
                 }
 
@@ -1174,11 +1174,11 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
                         Array(draft.timingReviews.enumerated()),
                         id: \.offset
                     ) { _, review in
-                        VStack(alignment: .leading, spacing: 3) {
+                        VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
                             Text(
                                 timingReviewTitle(review, in: draft.previewRouting)
                             )
-                            .font(.caption.bold())
+                            .font(DesignType.caption.font.bold())
                             Text(
                                 String(
                                     format:
@@ -1188,21 +1188,21 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
                                     review.bestHypothesis.rawValue
                                 )
                             )
-                            .font(.caption.monospacedDigit())
+                            .font(DesignType.caption.font.monospacedDigit())
                             Text(
                                 "Combined-driver capture: NOT VERIFIED"
                             )
-                            .font(.caption2.bold())
+                            .font(DesignType.caption.font.bold())
                             .foregroundStyle(.secondary)
                         }
-                        .padding(8)
+                        .padding(DesignSpacing.s.pt)
                         .frame(
                             maxWidth: .infinity,
                             alignment: .leading
                         )
                         .background(
                             .secondary.opacity(0.04),
-                            in: RoundedRectangle(cornerRadius: 8)
+                            in: RoundedRectangle(cornerRadius: DesignRadius.small.pt)
                         )
                     }
 
@@ -1210,23 +1210,23 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
                         "No Apply control exists in PR111 remote closeout. The draft cannot change PEQ, delay, polarity, crossover, limiter, routing, or live output.",
                         systemImage: "hand.raised.fill"
                     )
-                    .font(.caption.bold())
+                    .font(DesignType.caption.font.bold())
                     .foregroundStyle(.secondary)
                 } else {
                     Text(
                         "Complete a protected-driver Lab session to build a review-only state snapshot."
                     )
-                    .font(.caption)
+                    .font(DesignType.caption.font)
                     .foregroundStyle(.secondary)
                 }
 
                 if let message = driverCommissioningMessage {
                     Text(message)
-                        .font(.caption)
+                        .font(DesignType.caption.font)
                         .foregroundStyle(.secondary)
                 }
             }
-            .padding(6)
+            .padding(DesignSpacing.s.pt)
         }
     }
 
@@ -1275,15 +1275,15 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
 
     private var coherentAlignmentCard: some View {
         GroupBox("Coherent Sub Alignment") {
-            VStack(alignment: .leading, spacing: 14) {
-                HStack(alignment: .top, spacing: 16) {
-                    VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: DesignSpacing.l.pt) {
+                HStack(alignment: .top, spacing: DesignSpacing.l.pt) {
+                    VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
                         Text("PR108 · Crossover timing & polarity")
-                            .font(.headline)
+                            .font(DesignType.sectionTitle.font)
                         Text(
                             "Use a completed shared-reference Main/Sub Lab session to review a bounded timing/polarity proposal. Apply is explicit, provisional, and accepted only after a new measured session passes."
                         )
-                        .font(.caption)
+                        .font(DesignType.caption.font)
                         .foregroundStyle(.secondary)
                     }
                     Spacer()
@@ -1296,14 +1296,14 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
                             )
                             .uppercased()
                     )
-                    .font(.caption.bold())
+                    .font(DesignType.caption.font.bold())
                     .tracking(0.8)
-                    .padding(.horizontal, 9)
-                    .padding(.vertical, 5)
+                    .padding(.horizontal, DesignSpacing.s.pt)
+                    .padding(.vertical, DesignSpacing.xs.pt)
                     .background(.quaternary, in: Capsule())
                 }
 
-                HStack(spacing: 10) {
+                HStack(spacing: DesignSpacing.m.pt) {
                     Button("Generate Alignment Proposal") {
                         actionError = nil
                         do {
@@ -1321,7 +1321,7 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
                             actionError = error.localizedDescription
                         }
                     }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(.glass)
                     .disabled(!canGenerateAlignmentProposal)
 
                     if alignment.canRollback {
@@ -1346,7 +1346,7 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
                 if let mode = alignment.mode {
                     Divider()
 
-                    HStack(spacing: 22) {
+                    HStack(spacing: DesignSpacing.xl.pt) {
                         status("Mode", mode.displayName)
                         status(
                             "Subs",
@@ -1381,7 +1381,7 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
                             "Preview only. The raw candidate cannot deploy; Apply requires this exact commissioned proposal plus an explicit user action.",
                             systemImage: "hand.raised.fill"
                         )
-                        .font(.caption)
+                        .font(DesignType.caption.font)
                         .foregroundStyle(.secondary)
 
                         Button("Approve & Apply Provisionally") {
@@ -1395,7 +1395,7 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
                                     error.localizedDescription
                             }
                         }
-                        .buttonStyle(.borderedProminent)
+                        .buttonStyle(.glassProminent)
                         .disabled(!alignment.canApproveAndApply)
                     }
 
@@ -1408,14 +1408,14 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
                             systemImage:
                                 "exclamationmark.shield.fill"
                         )
-                        .font(.callout.bold())
-                        .foregroundStyle(.orange)
+                        .font(DesignType.label.font.bold())
+                        .foregroundStyle(StatusLevel.attention.color)
 
-                        HStack(spacing: 10) {
+                        HStack(spacing: DesignSpacing.m.pt) {
                             Button("Start Fresh Verification Session") {
                                 startFreshAlignmentVerificationSession()
                             }
-                            .buttonStyle(.borderedProminent)
+                            .buttonStyle(.glassProminent)
                             .disabled(
                                 !canStartAlignmentVerificationSession
                             )
@@ -1443,7 +1443,7 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
                         Text(
                             "The verification session clones the approved coherent geometry, repeat count, excitation level and shared electrical-reference configuration, but receives new session and pair identities."
                         )
-                        .font(.caption)
+                        .font(DesignType.caption.font)
                         .foregroundStyle(.secondary)
                     }
 
@@ -1453,15 +1453,15 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
                             "Fresh measured verification accepted. PR108 timing/polarity provenance is persisted as VERIFIED.",
                             systemImage: "checkmark.shield.fill"
                         )
-                        .font(.callout.bold())
-                        .foregroundStyle(.green)
+                        .font(DesignType.label.font.bold())
+                        .foregroundStyle(StatusLevel.good.color)
 
                         if let improvement =
                                 alignmentMeasuredImprovementDB {
                             Text(
                                 "Measured aggregate crossover-coherence improvement: \(String(format: "%+.2f dB", improvement))."
                             )
-                            .font(.caption)
+                            .font(DesignType.caption.font)
                             .foregroundStyle(.secondary)
                         }
                     }
@@ -1473,11 +1473,11 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
                             systemImage:
                                 "arrow.uturn.backward.circle.fill"
                         )
-                        .font(.callout.bold())
+                        .font(DesignType.label.font.bold())
                         .foregroundStyle(.secondary)
                     }
                 } else if let persisted = persistedAlignmentStatus {
-                    VStack(alignment: .leading, spacing: 6) {
+                    VStack(alignment: .leading, spacing: DesignSpacing.s.pt) {
                         Label(
                             persisted.verified
                                 ? "Persisted PR108 alignment · VERIFIED"
@@ -1486,37 +1486,37 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
                                 ? "checkmark.shield.fill"
                                 : "clock.badge.checkmark"
                         )
-                        .font(.callout.bold())
+                        .font(DesignType.label.font.bold())
                         .foregroundStyle(
                             persisted.verified ? .green : .orange
                         )
 
                         Text(persisted.detail)
-                            .font(.caption)
+                            .font(DesignType.caption.font)
                             .foregroundStyle(.secondary)
 
                         Text(
                             "This deployment provenance survived profile reload. A new alignment proposal is blocked while it owns the live timing/polarity calibration. The guided controller does not reconstruct an old Apply receipt after relaunch."
                         )
-                        .font(.caption)
+                        .font(DesignType.caption.font)
                         .foregroundStyle(.secondary)
                     }
                 } else {
                     Text(
                         "Complete a coherent Main/Sub Lab session with simultaneous shared-time electrical reference, then generate a proposal here. One Sub uses the single-Sub path; two or more Subs are solved and applied atomically."
                     )
-                    .font(.caption)
+                    .font(DesignType.caption.font)
                     .foregroundStyle(.secondary)
                 }
             }
-            .padding(6)
+            .padding(DesignSpacing.s.pt)
         }
     }
 
     @ViewBuilder
     private var alignmentCandidateDetails: some View {
         if let candidate = alignment.singleCandidate {
-            HStack(spacing: 22) {
+            HStack(spacing: DesignSpacing.xl.pt) {
                 status(
                     "Relative Adjustment",
                     String(
@@ -1548,14 +1548,14 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
                 )
             }
         } else if let candidate = alignment.multiCandidate {
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: DesignSpacing.s.pt) {
                 ForEach(
                     candidate.subwoofers,
                     id: \.subwooferIndex
                 ) { sub in
-                    HStack(spacing: 18) {
+                    HStack(spacing: DesignSpacing.l.pt) {
                         Text("Sub \(sub.subwooferIndex + 1)")
-                            .font(.callout.bold())
+                            .font(DesignType.label.font.bold())
                             .frame(width: 70, alignment: .leading)
                         status(
                             "Measured Optimum",
@@ -1586,7 +1586,7 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
                             )
                         )
                     }
-                    .padding(.vertical, 3)
+                    .padding(.vertical, DesignSpacing.xs.pt)
                 }
             }
         }
@@ -1728,22 +1728,22 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
 
     private var historyCard: some View {
         GroupBox("Recent Lab Sessions") {
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: DesignSpacing.s.pt) {
                 if recentSessions.isEmpty {
                     Text("No saved Lab sessions yet.")
                         .foregroundStyle(.secondary)
                 } else {
                     ForEach(recentSessions) { session in
                         HStack {
-                            VStack(alignment: .leading, spacing: 2) {
+                            VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
                                 Text(
                                     "\(session.protocols.count) protocols · \(session.captures.count) captures"
                                 )
-                                .font(.callout.bold())
+                                .font(DesignType.label.font.bold())
                                 Text(
                                     "\(session.modifiedAt.formatted(date: .abbreviated, time: .shortened)) · \(String(session.id.uuidString.prefix(8)))"
                                 )
-                                .font(.caption)
+                                .font(DesignType.caption.font)
                                 .foregroundStyle(.secondary)
                             }
                             Spacer()
@@ -1761,11 +1761,11 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
                                     || lab.state == .analyzing
                             )
                         }
-                        .padding(.vertical, 3)
+                        .padding(.vertical, DesignSpacing.xs.pt)
                     }
                 }
             }
-            .padding(6)
+            .padding(DesignSpacing.s.pt)
         }
     }
 
@@ -2059,12 +2059,12 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
         _ label: String,
         _ value: String
     ) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
+        VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
             Text(label)
-                .font(.caption)
+                .font(DesignType.caption.font)
                 .foregroundStyle(.secondary)
             Text(value)
-                .font(.callout.bold())
+                .font(DesignType.label.font.bold())
         }
     }
 

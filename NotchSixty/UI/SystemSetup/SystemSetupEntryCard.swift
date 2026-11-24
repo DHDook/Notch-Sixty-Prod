@@ -18,10 +18,10 @@ struct SystemSetupEntryCard: View {
 
     private func offerRow(showsExplanation: Bool) -> some View {
         HStack(spacing: DesignSpacing.m.pt) {
-            Label("Set up my system", systemImage: "wand.and.stars").font(.headline).fixedSize()
+            Label("Set up my system", systemImage: "wand.and.stars").font(DesignType.sectionTitle.font).fixedSize()
             if showsExplanation {
                 Text("Choose your speakers, set levels and measure your room in one guided flow.")
-                    .font(.callout).foregroundStyle(.secondary).lineLimit(1)
+                    .font(DesignType.label.font).foregroundStyle(.secondary).lineLimit(1)
             }
             Spacer(minLength: DesignSpacing.m.pt)
             if let startQuick {
@@ -36,10 +36,10 @@ struct SystemSetupEntryCard: View {
 
     private func setUpRow(_ start: @escaping (SystemSetupEntry) -> Void, showsExplanation: Bool) -> some View {
         HStack(spacing: DesignSpacing.m.pt) {
-            Label("Your system is set up", systemImage: "checkmark.seal").font(.headline).fixedSize()
+            Label("Your system is set up", systemImage: "checkmark.seal").font(DesignType.sectionTitle.font).fixedSize()
             if showsExplanation {
                 Text("Change one thing without starting over.")
-                    .font(.callout).foregroundStyle(.secondary).lineLimit(1)
+                    .font(DesignType.label.font).foregroundStyle(.secondary).lineLimit(1)
             }
             Spacer(minLength: DesignSpacing.m.pt)
             ForEach([SystemSetupEntry.measureAgain, .changeSound, .changeSpeakers], id: \.self) { entry in
@@ -59,7 +59,7 @@ struct SystemSetupEntryCard: View {
                           systemImage: "headphones")
                     Spacer()
                     Button("Open Headphones", action: openHeadphones)
-                }.padding(4)
+                }.padding(DesignSpacing.xs.pt)
             }
         case .setUp:
             if let startEntry {

@@ -140,45 +140,45 @@ struct SystemCalibrationSummaryView: View {
     @State private var errorText: String?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: DesignSpacing.m.pt) {
             ViewThatFits(in: .horizontal) {
                 HStack { header; Spacer(minLength: 8); actions }
-                VStack(alignment: .leading, spacing: 8) { header; actions }
+                VStack(alignment: .leading, spacing: DesignSpacing.s.pt) { header; actions }
             }
             Divider()
             ScrollView {
-                VStack(alignment: .leading, spacing: 14) {
+                VStack(alignment: .leading, spacing: DesignSpacing.l.pt) {
                     ForEach(summary.notices, id: \.self) { notice in
                         Label(notice, systemImage: "exclamationmark.triangle.fill")
-                            .foregroundStyle(.orange).font(.callout)
+                            .foregroundStyle(StatusLevel.attention.color).font(DesignType.label.font)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                     ForEach(summary.sections) { section in
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(section.title).font(.headline)
+                        VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
+                            Text(section.title).font(DesignType.sectionTitle.font)
                             ForEach(Array(section.lines.enumerated()), id: \.offset) { _, line in
                                 VStack(alignment: .leading, spacing: 0) {
-                                    Text(line.label).font(.caption).foregroundStyle(.secondary)
-                                    Text(line.value).font(.callout).fixedSize(horizontal: false, vertical: true)
+                                    Text(line.label).font(DesignType.caption.font).foregroundStyle(.secondary)
+                                    Text(line.value).font(DesignType.label.font).fixedSize(horizontal: false, vertical: true)
                                 }
                                 .accessibilityElement(children: .combine)
                             }
                         }
                     }
-                    Text(summary.footer).font(.caption).foregroundStyle(.secondary)
+                    Text(summary.footer).font(DesignType.caption.font).foregroundStyle(.secondary)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
-            if let errorText { Text(errorText).font(.caption).foregroundStyle(.red) }
+            if let errorText { Text(errorText).font(DesignType.caption.font).foregroundStyle(StatusLevel.problem.color) }
         }
-        .padding(16)
+        .padding(DesignSpacing.l.pt)
         .frame(minWidth: 420, idealWidth: 560, minHeight: 360, idealHeight: 620)
     }
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(summary.title).font(.title2.bold())
-            Text(summary.status).font(.callout).foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
+            Text(summary.title).font(DesignType.sectionTitle.font.bold())
+            Text(summary.status).font(DesignType.label.font).foregroundStyle(.secondary)
         }
     }
 
@@ -190,6 +190,6 @@ struct SystemCalibrationSummaryView: View {
             }
             Button("Done", action: close).keyboardShortcut(.defaultAction)
         }
-        .buttonStyle(.bordered)
+        .buttonStyle(.glass)
     }
 }

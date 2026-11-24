@@ -6,12 +6,12 @@ struct ProductionRoomTreatmentDesignSection: View {
     @State private var manualSurface: RoomGeometrySurface = .frontWall
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            VStack(alignment: .leading, spacing: 5) {
+        VStack(alignment: .leading, spacing: DesignSpacing.l.pt) {
+            VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
                 Text("Treatment Design & Verification")
-                    .font(.headline)
+                    .font(DesignType.sectionTitle.font)
                 Text("Design occasional physical improvements; nothing here changes live playback or any preset.")
-                    .font(.caption)
+                    .font(DesignType.caption.font)
                     .foregroundStyle(.secondary)
             }
             if advisor.savedGeometry == nil || advisor.geometryHasUnsavedChanges {
@@ -19,28 +19,28 @@ struct ProductionRoomTreatmentDesignSection: View {
                     "Save a valid, accurate room model above before designing treatments. Unsaved placement experiments cannot become treatment plans.",
                     systemImage: "ruler"
                 )
-                .font(.callout)
+                .font(DesignType.label.font)
                 .foregroundStyle(.secondary)
             } else {
                 designContent
             }
             verificationCard
         }
-        .padding(18)
-        .glassEffect(.regular, in: .rect(cornerRadius: 18))
+        .padding(DesignSpacing.l.pt)
+        .glassEffect(.regular, in: .rect(cornerRadius: DesignRadius.large.pt))
     }
 
     @ViewBuilder
     private var designContent: some View {
         if advisor.treatmentDraft == nil {
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: DesignSpacing.s.pt) {
                 Text("No physical treatment plan for this room")
-                    .font(.subheadline.bold())
+                    .font(DesignType.label.font.bold())
                 Text("Create an optional Advisor-only treatment plan based on the measured room and its modeled surfaces.")
-                    .font(.caption)
+                    .font(DesignType.caption.font)
                     .foregroundStyle(.secondary)
                 Button("Create Treatment Plan") { advisor.createTreatmentPlan() }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(.glassProminent)
             }
         } else if let plan = advisor.treatmentDraft {
             if let analysis = advisor.treatmentAnalysis {
@@ -52,35 +52,35 @@ struct ProductionRoomTreatmentDesignSection: View {
                 .frame(height: 230)
                 HStack {
                     Text("Plan · \(plan.placements.count) placements")
-                        .font(.subheadline.bold())
+                        .font(DesignType.label.font.bold())
                     Spacer()
                     Text(String(format: "%.2f m² covered", analysis.treatmentAreaSquareMeters))
-                        .font(.caption)
+                        .font(DesignType.caption.font)
                         .foregroundStyle(.secondary)
                 }
                 ForEach(plan.placements) { placement in
                     placementEditor(placement)
                 }
                 if !analysis.warnings.isEmpty {
-                    VStack(alignment: .leading, spacing: 6) {
+                    VStack(alignment: .leading, spacing: DesignSpacing.s.pt) {
                         ForEach(analysis.warnings, id: \.self) { warning in
                             Label(warning, systemImage: "info.circle")
-                                .font(.caption)
+                                .font(DesignType.caption.font)
                                 .foregroundStyle(.secondary)
                         }
                     }
-                    .padding(12)
-                    .background(.secondary.opacity(0.05), in: RoundedRectangle(cornerRadius: 12))
+                    .padding(DesignSpacing.m.pt)
+                    .background(.secondary.opacity(0.05), in: RoundedRectangle(cornerRadius: DesignRadius.medium.pt))
                 }
             } else {
                 Text("Treatment geometry is invalid. Adjust or revert its placement coordinates.")
-                    .font(.caption)
+                    .font(DesignType.caption.font)
                     .foregroundStyle(.secondary)
                 ForEach(plan.placements) { placement in
                     placementEditor(placement)
                 }
             }
-            HStack(spacing: 8) {
+            HStack(spacing: DesignSpacing.s.pt) {
                 Picker("Type", selection: $manualKind) {
                     ForEach(RoomPassiveTreatmentKind.allCases) { kind in
                         Text(kind.label).tag(kind)
@@ -98,7 +98,7 @@ struct ProductionRoomTreatmentDesignSection: View {
                 } label: {
                     Label("Add Placement", systemImage: "plus")
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(.glass)
             }
 
             HStack {
@@ -107,70 +107,70 @@ struct ProductionRoomTreatmentDesignSection: View {
                 } label: {
                     Label("Save Treatment Plan", systemImage: "square.and.arrow.down")
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(.glassProminent)
                 .disabled(advisor.treatmentAnalysis == nil || !advisor.canEditTreatment)
                 Button("Revert") { advisor.revertTreatmentPlan() }
                     .disabled(!advisor.treatmentHasUnsavedChanges)
                 Spacer()
                 if advisor.treatmentHasUnsavedChanges {
                     Text("UNSAVED DRAFT")
-                        .font(.caption.bold())
+                        .font(DesignType.caption.font.bold())
                         .foregroundStyle(.secondary)
                 } else {
                     Text("SAVED")
-                        .font(.caption.bold())
+                        .font(DesignType.caption.font.bold())
                         .foregroundStyle(.secondary)
                 }
             }
         }
         if let message = advisor.treatmentMessage {
             Label(message, systemImage: "exclamationmark.triangle")
-                .font(.caption)
-                .foregroundStyle(.orange)
+                .font(DesignType.caption.font)
+                .foregroundStyle(StatusLevel.attention.color)
         }
     }
 
     private func recommendedZones(
         _ analysis: RoomPassiveTreatmentDesignSummary
     ) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: DesignSpacing.m.pt) {
             Text("Evidence-Based Placement Candidates")
-                .font(.subheadline.bold())
+                .font(DesignType.label.font.bold())
             if analysis.suggestions.isEmpty {
                 Text("No sufficiently supported treatment zone is identified. Avoid blanket absorption; improve measurements or placement first.")
-                    .font(.caption)
+                    .font(DesignType.caption.font)
                     .foregroundStyle(.secondary)
             }
             ForEach(analysis.suggestions) { suggestion in
-                HStack(alignment: .top, spacing: 10) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(suggestion.title).font(.callout.bold())
+                HStack(alignment: .top, spacing: DesignSpacing.m.pt) {
+                    VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
+                        Text(suggestion.title).font(DesignType.label.font.bold())
                         Text(suggestion.evidence)
-                            .font(.caption)
+                            .font(DesignType.caption.font)
                         Text(suggestion.rationale)
-                            .font(.caption)
+                            .font(DesignType.caption.font)
                             .foregroundStyle(.secondary)
                         Text("\(Int(suggestion.confidence * 100))% advisory confidence · \(suggestion.placement.surface.displayName)")
-                            .font(.caption2)
+                            .font(DesignType.caption.font)
                             .foregroundStyle(.secondary)
                     }
                     Spacer(minLength: 8)
                     Button("Add to Plan") {
                         advisor.addTreatmentSuggestion(suggestion)
                     }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(.glass)
                 }
                 Divider()
             }
         }
-        .padding(12)
-        .background(.secondary.opacity(0.045), in: RoundedRectangle(cornerRadius: 12))
+        .padding(DesignSpacing.m.pt)
+        .background(.secondary.opacity(0.045), in: RoundedRectangle(cornerRadius: DesignRadius.medium.pt))
     }
 
     private func placementEditor(
         _ item: RoomPassiveTreatmentPlacement
     ) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: DesignSpacing.m.pt) {
             HStack {
                 Picker("Treatment", selection: treatmentKind(item)) {
                     ForEach(RoomPassiveTreatmentKind.allCases) { kind in
@@ -190,10 +190,10 @@ struct ProductionRoomTreatmentDesignSection: View {
                 } label: {
                     Image(systemName: "trash")
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(.glass)
                 .help("Remove this treatment from the draft")
             }
-            HStack(spacing: 12) {
+            HStack(spacing: DesignSpacing.m.pt) {
                 numericField("U (0–1)", item: item, keyPath: \.u)
                 numericField("V (0–1)", item: item, keyPath: \.v)
                 numericField("Width m", item: item, keyPath: \.widthMeters)
@@ -204,11 +204,11 @@ struct ProductionRoomTreatmentDesignSection: View {
             Text(String(format:
                 "Total depth %.0f cm · quarter-wave context %.0f Hz (not an absorption prediction). Validate manufacturer data and real measurements.",
                 item.totalDepthMeters * 100, item.quarterWavelengthContextHz))
-                .font(.caption2)
+                .font(DesignType.caption.font)
                 .foregroundStyle(.secondary)
         }
-        .padding(12)
-        .background(.secondary.opacity(0.055), in: RoundedRectangle(cornerRadius: 12))
+        .padding(DesignSpacing.m.pt)
+        .background(.secondary.opacity(0.055), in: RoundedRectangle(cornerRadius: DesignRadius.medium.pt))
     }
 
     private func numericField(
@@ -216,8 +216,8 @@ struct ProductionRoomTreatmentDesignSection: View {
         item: RoomPassiveTreatmentPlacement,
         keyPath: WritableKeyPath<RoomPassiveTreatmentPlacement, Double>
     ) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
-            Text(name).font(.caption2).foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
+            Text(name).font(DesignType.caption.font).foregroundStyle(.secondary)
             TextField(
                 name,
                 value: numberBinding(item, keyPath),
@@ -266,11 +266,11 @@ struct ProductionRoomTreatmentDesignSection: View {
     }
 
     private var verificationCard: some View {
-        VStack(alignment: .leading, spacing: 11) {
+        VStack(alignment: .leading, spacing: DesignSpacing.m.pt) {
             Text("Before / After Measurements")
-                .font(.subheadline.bold())
+                .font(DesignType.label.font.bold())
             Text("The selected Room Advisor project is the baseline. Measure after installing treatment using the same microphone, sweep, speaker routing, level and named positions; save as a separate Room Correction project.")
-                .font(.caption)
+                .font(DesignType.caption.font)
                 .foregroundStyle(.secondary)
             Picker(
                 "Follow-up project",
@@ -288,47 +288,47 @@ struct ProductionRoomTreatmentDesignSection: View {
 
             if let result = advisor.verificationReport {
                 if result.comparable {
-                    HStack(spacing: 12) {
+                    HStack(spacing: DesignSpacing.m.pt) {
                         Text("\(result.matchedPositionCount) matched positions")
                         Text("\(result.improvements) improvements")
                         Text("\(result.regressions) regressions")
                     }
-                    .font(.caption.bold())
+                    .font(DesignType.caption.font.bold())
                     ForEach(result.metrics) { metric in
-                        HStack(alignment: .top, spacing: 10) {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(metric.title).font(.callout.bold())
+                        HStack(alignment: .top, spacing: DesignSpacing.m.pt) {
+                            VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
+                                Text(metric.title).font(DesignType.label.font.bold())
                                 Text(metric.explanation)
-                                    .font(.caption)
+                                    .font(DesignType.caption.font)
                                     .foregroundStyle(.secondary)
                             }
                             Spacer()
-                            VStack(alignment: .trailing, spacing: 3) {
+                            VStack(alignment: .trailing, spacing: DesignSpacing.xs.pt) {
                                 Text(String(format: "%.2f → %.2f %@", metric.baseline, metric.followUp, metric.unit))
-                                    .font(.callout.monospacedDigit())
+                                    .font(DesignType.label.font.monospacedDigit())
                                 Text(metric.change.title)
-                                    .font(.caption.bold())
+                                    .font(DesignType.caption.font.bold())
                             }
                         }
                         Divider()
                     }
                 } else {
                     Label("Measurements not comparable", systemImage: "xmark.shield")
-                        .font(.callout.bold())
+                        .font(DesignType.label.font.bold())
                 }
                 ForEach(result.warnings, id: \.self) { warning in
                     Label(warning, systemImage: "info.circle")
-                        .font(.caption)
+                        .font(DesignType.caption.font)
                         .foregroundStyle(.secondary)
                 }
             } else {
                 Text("No verification run selected. A treatment plan alone cannot demonstrate acoustic improvement.")
-                    .font(.caption)
+                    .font(DesignType.caption.font)
                     .foregroundStyle(.secondary)
             }
         }
-        .padding(13)
-        .background(.secondary.opacity(0.05), in: RoundedRectangle(cornerRadius: 12))
+        .padding(DesignSpacing.m.pt)
+        .background(.secondary.opacity(0.05), in: RoundedRectangle(cornerRadius: DesignRadius.medium.pt))
     }
 }
 
@@ -337,9 +337,9 @@ private struct TreatmentPlanRoomSketch: View {
     let placements: [RoomPassiveTreatmentPlacement]
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 5) {
+        VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
             Text("Top-Down Treatment Layout · schematic")
-                .font(.subheadline.bold())
+                .font(DesignType.label.font.bold())
             GeometryReader { proxy in
                 let space = CGSize(
                     width: max(1, proxy.size.width - 30),
@@ -356,26 +356,26 @@ private struct TreatmentPlanRoomSketch: View {
                         .position(x: offset.x + roomWidth / 2, y: offset.y + roomHeight / 2)
                     ForEach(placements) { item in
                         Text(item.kind == .bassTrap ? "B" : item.kind == .broadbandAbsorber ? "A" : "D")
-                            .font(.caption2.bold())
+                            .font(DesignType.caption.font.bold())
                             .frame(width: 23, height: 23)
                             .background(.regularMaterial, in: Circle())
                             .position(markerPosition(item, origin: offset, width: roomWidth, height: roomHeight))
                     }
                 }
             }
-            HStack(spacing: 12) {
+            HStack(spacing: DesignSpacing.m.pt) {
                 Text("B Bass trap")
                 Text("A Absorber")
                 Text("D Diffuser candidate")
             }
-            .font(.caption2)
+            .font(DesignType.caption.font)
             .foregroundStyle(.secondary)
             Text("Wall markers are projected onto the floor plan; the editor controls actual mounting height and area.")
-                .font(.caption2)
+                .font(DesignType.caption.font)
                 .foregroundStyle(.secondary)
         }
-        .padding(12)
-        .background(.secondary.opacity(0.05), in: RoundedRectangle(cornerRadius: 12))
+        .padding(DesignSpacing.m.pt)
+        .background(.secondary.opacity(0.05), in: RoundedRectangle(cornerRadius: DesignRadius.medium.pt))
     }
 
     private func markerPosition(

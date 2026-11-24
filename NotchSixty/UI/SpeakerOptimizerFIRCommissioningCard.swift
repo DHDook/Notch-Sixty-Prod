@@ -49,16 +49,16 @@ struct SpeakerOptimizerFIRCommissioningCard: View {
 
     var body: some View {
         GroupBox("Speaker Optimizer · FIR (linear phase)") {
-            VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: DesignSpacing.m.pt) {
                 HStack {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Step 4b · Review and apply FIR").font(.headline)
+                    VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
+                        Text("Step 4b · Review and apply FIR").font(DesignType.sectionTitle.font)
                         Text("FIR adds audio-path latency. Review the headroom and the A/V-sync verdict before Apply; Apply is provisional until measured verification passes.")
-                            .font(.caption).foregroundStyle(.secondary)
+                            .font(DesignType.caption.font).foregroundStyle(.secondary)
                     }
                     Spacer()
-                    Text(guided.state.rawValue).font(.caption.bold())
-                        .padding(.horizontal, 9).padding(.vertical, 5)
+                    Text(guided.state.rawValue).font(DesignType.caption.font.bold())
+                        .padding(.horizontal, DesignSpacing.s.pt).padding(.vertical, DesignSpacing.xs.pt)
                         .background(.quaternary, in: Capsule())
                 }
 
@@ -69,7 +69,7 @@ struct SpeakerOptimizerFIRCommissioningCard: View {
                         .textFieldStyle(.roundedBorder).frame(maxWidth: 320)
                         .onSubmit { refreshContext() }
                     Text("Notch Sixty does not delay video. Declare the delay your player, AVR or display can add.")
-                        .font(.caption).foregroundStyle(.secondary)
+                        .font(DesignType.caption.font).foregroundStyle(.secondary)
                 }
 
                 Button("Generate FIR Proposal") {
@@ -81,12 +81,12 @@ struct SpeakerOptimizerFIRCommissioningCard: View {
                             baseline: baseline, characterization: characterization, avSyncContext: context)
                     }
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(.glass)
                 .disabled(!inputsReady || otherDeploymentActive || (guided.applyReceipt != nil && guided.state != .rolledBack))
 
                 if let proposal = guided.proposal {
                     Divider()
-                    HStack(spacing: 22) {
+                    HStack(spacing: DesignSpacing.xl.pt) {
                         item("Taps", "\(guided.candidateTapCount)")
                         item("Headroom", String(format: "%.1f dB", guided.requiredHeadroomDB))
                         item("Added FIR latency", String(format: "%.2f ms", guided.addedFIRLatencyMilliseconds))
@@ -95,24 +95,24 @@ struct SpeakerOptimizerFIRCommissioningCard: View {
                     if let decision = guided.avSyncDecision {
                         let verdict = SpeakerOptimizerFIRAVSyncVerdict(decision)
                         Label(verdict.title, systemImage: verdict.allowed ? "checkmark.seal.fill" : "exclamationmark.triangle.fill")
-                            .font(.callout.bold()).foregroundStyle(verdict.allowed ? .green : .orange)
-                        HStack(spacing: 22) {
+                            .font(DesignType.label.font.bold()).foregroundStyle(verdict.allowed ? .green : .orange)
+                        HStack(spacing: DesignSpacing.xl.pt) {
                             item("Program-path latency", verdict.programPathLatencyText)
                             item("Required video delay", verdict.requiredVideoDelayText)
                         }
-                        Text(verdict.detail).font(.caption).foregroundStyle(.secondary)
+                        Text(verdict.detail).font(DesignType.caption.font).foregroundStyle(.secondary)
                     }
                     if guided.applyReceipt == nil {
-                        HStack(spacing: 10) {
+                        HStack(spacing: DesignSpacing.m.pt) {
                             Button("Approve & Apply FIR") {
                                 perform { try guided.approveAndApply(userInitiated: true) }
                             }
-                            .buttonStyle(.borderedProminent)
+                            .buttonStyle(.glassProminent)
                             .disabled(!guided.canApproveAndApply)
                             Text(engine.lifecycleState == .idle
                                  ? "DSP is stopped; Apply is available after review."
                                  : "Stop DSP playback before Apply.")
-                                .font(.caption).foregroundStyle(.secondary)
+                                .font(DesignType.caption.font).foregroundStyle(.secondary)
                         }
                     }
                 }
@@ -126,17 +126,17 @@ struct SpeakerOptimizerFIRCommissioningCard: View {
                             : guided.state == .measuredRejected
                                 ? "Measured verification failed: rollback blocked"
                                 : "FIR applied provisionally: measured verification required")
-                        .font(.callout.bold())
-                    HStack(spacing: 10) {
+                        .font(DesignType.label.font.bold())
+                    HStack(spacing: DesignSpacing.m.pt) {
                         Button(verification.measurementSet == nil ? "Start Verification" : "Refresh / Resume Verification") {
                             perform { try verification.startOrResume(baseline: baseline, plan: plan, receipt: receipt) }
                         }
-                        .buttonStyle(.bordered)
+                        .buttonStyle(.glass)
                         .disabled(guided.state != .appliedPendingVerification)
                         Button("Measure Next Verification Repeat") {
                             perform { try verification.beginNextMeasurement() }
                         }
-                        .buttonStyle(.borderedProminent)
+                        .buttonStyle(.glassProminent)
                         .disabled(!verification.canBeginMeasurement || guided.state != .appliedPendingVerification)
                         Button("Rollback FIR", role: .destructive) {
                             perform {
@@ -155,10 +155,10 @@ struct SpeakerOptimizerFIRCommissioningCard: View {
 
                 if let error = actionError ?? guided.lastErrorDescription ?? verification.lastErrorDescription {
                     Label(error, systemImage: "exclamationmark.triangle.fill")
-                        .font(.callout).foregroundStyle(.red).textSelection(.enabled)
+                        .font(DesignType.label.font).foregroundStyle(StatusLevel.problem.color).textSelection(.enabled)
                 }
             }
-            .padding(6)
+            .padding(DesignSpacing.s.pt)
         }
         .task(id: verification.state) {
             guard verification.state == .measuring else { return }
@@ -181,9 +181,9 @@ struct SpeakerOptimizerFIRCommissioningCard: View {
     }
 
     private func item(_ label: String, _ value: String) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(label).font(.caption).foregroundStyle(.secondary)
-            Text(value).font(.callout).lineLimit(1)
+        VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
+            Text(label).font(DesignType.caption.font).foregroundStyle(.secondary)
+            Text(value).font(DesignType.label.font).lineLimit(1)
         }
     }
 

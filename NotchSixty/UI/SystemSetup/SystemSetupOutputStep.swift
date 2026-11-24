@@ -13,8 +13,8 @@ struct SystemSetupOutputStep: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Which output plays your speakers?").font(.headline)
+        VStack(alignment: .leading, spacing: DesignSpacing.m.pt) {
+            Text("Which output plays your speakers?").font(DesignType.sectionTitle.font)
             Picker("Output", selection: Binding(
                 get: { engine.selectedOutputDevice?.uid ?? "" },
                 set: { if !$0.isEmpty { model.chooseOutput(uid: $0) } }
@@ -26,12 +26,12 @@ struct SystemSetupOutputStep: View {
             }
             if let device = engine.selectedOutputDevice {
                 Text("Runs at \(device.nominalSampleRate, specifier: "%g") Hz, the device's own rate.")
-                    .font(.caption).foregroundStyle(.secondary)
+                    .font(DesignType.caption.font).foregroundStyle(.secondary)
                 if SystemSetupEntryPolicy.isHeadphoneOutput(
                     name: device.name, uid: device.uid, state: model.profiles.selectedSystemProfile?.state) {
                     Label("This looks like headphones. Use the Headphones workspace for headphone correction.",
                           systemImage: "headphones")
-                        .font(.callout)
+                        .font(DesignType.label.font)
                 }
                 if let arrangement = model.arrangement {
                     let detected = model.detectedChannelCount
@@ -45,10 +45,10 @@ struct SystemSetupOutputStep: View {
                     Text(detected > 0
                          ? "This device reports \(detected) output channels. Lower the number if you wire fewer."
                          : "This device did not report its channel count, so two channels are assumed.")
-                        .font(.caption).foregroundStyle(.secondary)
+                        .font(DesignType.caption.font).foregroundStyle(.secondary)
                     if arrangement.outputs.channelsInUse == 2 {
                         Text("Two channels can still feed a receiver or a powered subwoofer. Describe that on the next step.")
-                            .font(.caption).foregroundStyle(.secondary)
+                            .font(DesignType.caption.font).foregroundStyle(.secondary)
                     }
                 }
             }

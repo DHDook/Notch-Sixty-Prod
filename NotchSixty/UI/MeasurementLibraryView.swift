@@ -168,7 +168,7 @@ struct MeasurementLibraryView: View {
 
     var body: some View {
         GroupBox("Measurement library") {
-            VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: DesignSpacing.m.pt) {
                 saveRow
                 Button("Import REW, FRD, ZMA or WAV...") { model.importFiles() }
                 Toggle("Show predicted response with current EQ", isOn: $showsPredicted)
@@ -184,8 +184,8 @@ struct MeasurementLibraryView: View {
                 ForEach(model.records) { record in row(record) }
                 if model.records.isEmpty { Text("No saved measurements yet.").foregroundStyle(.secondary) }
                 if projects != nil { roomCorrectionRow }
-                ForEach(model.loadErrors, id: \.self) { Text("Skipped: \($0)").font(.caption).foregroundStyle(.orange) }
-                if let message = model.message { Text(message).font(.caption).foregroundStyle(.secondary) }
+                ForEach(model.loadErrors, id: \.self) { Text("Skipped: \($0)").font(DesignType.caption.font).foregroundStyle(StatusLevel.attention.color) }
+                if let message = model.message { Text(message).font(DesignType.caption.font).foregroundStyle(.secondary) }
             }
         }
         .onAppear { model.reload() }
@@ -226,7 +226,7 @@ struct MeasurementLibraryView: View {
 
     private func plot(title: String, curves: [(id: UUID, curve: RoomCorrectionFrequencyResponse)], minDB: Double, maxDB: Double, relative: Bool) -> some View {
         VStack(alignment: .leading) {
-            Text(title).font(.headline)
+            Text(title).font(DesignType.sectionTitle.font)
             Canvas { context, size in
                 var shift = 0.0
                 for entry in curves {
@@ -244,14 +244,14 @@ struct MeasurementLibraryView: View {
                 }
             }
             .frame(height: 160)
-            .background(Color.black.opacity(0.06), in: RoundedRectangle(cornerRadius: 6))
+            .background(Color.black.opacity(0.06), in: RoundedRectangle(cornerRadius: DesignRadius.small.pt))
             .accessibilityLabel("\(title), \(curves.count) curves")
         }
     }
 
     private func row(_ record: MeasurementRecord) -> some View {
         let isOverlay = model.overlays.overlayIDs.contains(record.id)
-        return VStack(alignment: .leading, spacing: 4) {
+        return VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
             HStack {
                 Toggle(isOn: Binding(get: { isOverlay }, set: { _ in model.toggleOverlay(record.id) })) {
                     Text(record.name).bold()
@@ -259,8 +259,8 @@ struct MeasurementLibraryView: View {
                 .disabled(record.response == nil)
                 if isOverlay { Circle().fill(colour(record.id)).frame(width: 10, height: 10) }
                 Spacer()
-                Text(record.group.isEmpty ? "Ungrouped" : record.group).font(.caption).foregroundStyle(.secondary)
-                Text(String(format: "%.1f kHz", record.sampleRate / 1000)).font(.caption).foregroundStyle(.secondary)
+                Text(record.group.isEmpty ? "Ungrouped" : record.group).font(DesignType.caption.font).foregroundStyle(.secondary)
+                Text(String(format: "%.1f kHz", record.sampleRate / 1000)).font(DesignType.caption.font).foregroundStyle(.secondary)
                 Button(model.overlays.referenceID == record.id ? "Clear reference" : "Use as reference") {
                     model.overlays.setReference(model.overlays.referenceID == record.id ? nil : record.id)
                     if model.overlays.referenceID == record.id { try? model.overlays.add(record.id) }
@@ -276,7 +276,7 @@ struct MeasurementLibraryView: View {
                 Button("Delete", role: .destructive) { model.delete(record.id) }
             }
             TextField("Notes", text: Binding(get: { record.notes }, set: { model.setNotes(record.id, $0) }))
-                .textFieldStyle(.roundedBorder).font(.caption)
+                .textFieldStyle(.roundedBorder).font(DesignType.caption.font)
         }
     }
 
