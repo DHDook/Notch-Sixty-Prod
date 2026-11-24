@@ -20,7 +20,7 @@ final class MIMOGraphTreatment: ObservableObject {
     /// verification, repeat measurement and acceptance or class qualification. It refuses until S8 wires the video latency input
     /// and E22 fills the qualification table, so nothing arms in production before then.
     struct Permit: Equatable, Sendable {
-        enum Basis: Equatable, Sendable { case unspecified, hardwareAcceptance, classQualification }
+        enum Basis: Equatable, Sendable { case unspecified, hardwareAcceptance, classQualification, selfQualification }
         var fingerprint: String
         var issuedAt: Date? = nil
         var basis: Basis = .unspecified
@@ -70,6 +70,9 @@ final class MIMOGraphTreatment: ObservableObject {
         var laneCount: Int
         /// E19 S9: digest of the routing's ROUTE entries and way parameters (`MIMORoutedTreatmentPlanner.digest`); empty when unrouted.
         var routedDigest = ""
+        /// E19 S12a (SQ7): the engine-held part of a self-qualified permit's binding (`MIMOTreatmentSelfQualification.engineBinding`).
+        /// Empty (and unused) for the other permit bases.
+        var selfQualificationBinding = ""
     }
 
     let arm = LiveTreatmentArm(feature: .mimoRoomTreatment)
@@ -82,7 +85,10 @@ final class MIMOGraphTreatment: ObservableObject {
     private(set) var latchMayBeHeld = false
     private var armedFingerprint: String?
 
-    private let flags: FeatureFlags
+    let flags: FeatureFlags
+    /// E19 S12a (SQ7): digest of the evidence a self-qualified permit was issued on (seat set, capture digests, microphone).
+    /// `updateSelfQualificationEvidence` moves it when the evidence changes, which voids the permit.
+    var selfQualificationEvidenceDigest = ""
     /// Hands the stage to the engine, which posts the live words (or republishes a changed design).
     /// Throws when the post failed; the controller keeps the last stage and retries it from `observe`.
     var publish: ((UnifiedGraphMIMOStage) throws -> Void)?
@@ -160,13 +166,24 @@ final class MIMOGraphTreatment: ObservableObject {
         pendingPublish = nil
         tapDigest = next.map(Self.tapDigest)
         permit = nil
+        selfQualificationEvidenceDigest = ""
         latchMayBeHeld = true
     }
 
-    func currentFingerprint(_ stage: UnifiedGraphMIMOStage, _ context: Context) -> String {
-        Self.fingerprint(
+    /// E19 S12a (SQ7): the evidence behind a self-qualified permit changed (a seat, weight, capture or the microphone).
+    /// The digest moves, so the permit no longer matches and an armed treatment disarms on the next `observe`.
+    func updateSelfQualificationEvidence(_ evidence: MIMOTreatmentSelfQualificationEvidence?) {
+        selfQualificationEvidenceDigest = evidence?.bindingDigest ?? ""
+    }
+
+    /// `selfQualified` defaults to the held permit's basis, so every gate and the armed-time check compare the binding the
+    /// permit was issued with; the other bases compute exactly the fingerprint they always did.
+    func currentFingerprint(_ stage: UnifiedGraphMIMOStage, _ context: Context, selfQualified: Bool? = nil) -> String {
+        let base = Self.fingerprint(
             stage: stage, outputUID: context.outputDeviceUID, trimsDB: context.outputTrimsDB, laneCount: context.laneCount,
             tapDigest: tapDigest, chainDigest: chainDigest, routedDigest: context.routedDigest)
+        guard selfQualified ?? (permit?.basis == .selfQualification) else { return base }
+        return base + "|sq=" + selfQualificationEvidenceDigest + "|" + context.selfQualificationBinding
     }
 
     private func post(_ next: UnifiedGraphMIMOStage) {
@@ -189,6 +206,7 @@ final class MIMOGraphTreatment: ObservableObject {
         guard context.hardLimitPresent else { return .hardLimitMissing }
         guard context.engineLeaseHeld else { return .engineLeaseMissing }
         guard let permit else { return .noPermit }
+        if permit.basis == .selfQualification, !flags.isEnabled(.selfQualification) { return .noPermit }
         guard permit.fingerprint == currentFingerprint(stage, context) else { return .fingerprintMismatch }
         return nil
     }

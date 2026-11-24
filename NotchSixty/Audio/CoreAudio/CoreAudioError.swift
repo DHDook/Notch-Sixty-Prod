@@ -518,6 +518,8 @@ final class CoreAudioTransportSession {
     /// The graph whose EXTERNAL stage this transport's rack was bound to (E6 S8e).
     private var rackBoundGraph: UnsafeMutableRawPointer?
     private let captureSource = ProcessTapCaptureSource()
+    /// E36 S3b: set when the driver path is chosen; then there is no tap, no aggregate and no capture IOProc.
+    private var driverAttachment: DriverCaptureAttachment?
     private var tapID: AudioObjectID { captureSource.tapID }
     private var aggregateDeviceID: AudioDeviceID { captureSource.aggregateDeviceID }
     private var captureIOProcID: AudioDeviceIOProcID?
@@ -556,7 +558,11 @@ final class CoreAudioTransportSession {
         graphPublicationCoordinator = DSPGraphPublicationCoordinator(bridge: newBridge)
         analysisWorker = ProductionAnalysisWorker(bridge: newBridge)
 
+        let driverRequest = DriverCaptureSelection.shared.current
         do {
+            if driverRequest != nil, programSource != nil || aggregateDeviceOutputPlan != nil {
+                throw DriverCaptureError.unsupportedSession(programSource != nil ? "a programme taken from another device" : "a multi-device output")
+            }
             let processObject = try Self.currentProcessObjectID()
             let description = ProcessTapSpec(
                 excludedProcess: processObject,
@@ -566,16 +572,6 @@ final class CoreAudioTransportSession {
                 keepsAllChannels: programSource != nil
             ).makeDescription()
 
-            try Self.check(captureSource.createTap(description), operation: "create process tap")
-
-            tapFormat = AudioStreamFormatDescription(
-                try Self.readStreamFormat(
-                    objectID: tapID,
-                    selector: kAudioTapPropertyFormat,
-                    scope: kAudioObjectPropertyScopeGlobal,
-                    operation: "read tap format"
-                )
-            )
             outputFormat = AudioStreamFormatDescription(
                 try Self.readStreamFormat(
                     objectID: selectedOutput.deviceID,
@@ -584,6 +580,20 @@ final class CoreAudioTransportSession {
                     operation: "read output stream format"
                 )
             )
+            if driverRequest == nil {
+                try Self.check(captureSource.createTap(description), operation: "create process tap")
+                tapFormat = AudioStreamFormatDescription(
+                    try Self.readStreamFormat(
+                        objectID: tapID,
+                        selector: kAudioTapPropertyFormat,
+                        scope: kAudioObjectPropertyScopeGlobal,
+                        operation: "read tap format"
+                    )
+                )
+            } else {
+                // The ring is read in the DAC's callback at the DAC's rate: no tap, so the format is the ring's.
+                tapFormat = VirtualDeviceLayout.stereo.streamFormat(sampleRate: outputFormat.sampleRate)
+            }
 
             var foldGains: (left: [Float], right: [Float])?
             if let programFoldPlan {
@@ -772,78 +782,92 @@ final class CoreAudioTransportSession {
                     throw CoreAudioTransportError.programFoldFailed(.sourceChannelLayoutUnresolved)
                 }
             }
-            var aggregateSpec = TapAggregateSpec(
-                name: aggregateDeviceOutputPlan == nil
-                    ? "Notch Sixty Private Tap"
-                    : "Notch Sixty Private Multi-Output",
-                uidPrefix: "com.dhdook.NotchSixty.aggregate",
-                tapUID: description.uuid.uuidString,
-                // A tap on another device runs on that device's clock; the aggregate follows the DAC.
-                tapDriftCompensation: programSource != nil
-            )
-            if let aggregateDeviceOutputPlan {
-                aggregateSpec.subDevices = aggregateDeviceOutputPlan.orderedDeviceUIDs.map { uid in
-                    .init(uid: uid, driftCompensation: uid != aggregateDeviceOutputPlan.referenceDeviceUID)
-                }
-                aggregateSpec.mainSubDeviceUID = aggregateDeviceOutputPlan.referenceDeviceUID
-            }
-            if programSource != nil {
-                aggregateSpec.subDevices = [.init(uid: selectedOutput.uid, driftCompensation: false)]
-                aggregateSpec.mainSubDeviceUID = selectedOutput.uid
-            }
-            try Self.check(
-                captureSource.createAggregate(aggregateSpec),
-                operation: aggregateDeviceOutputPlan == nil
-                    ? "create private tap aggregate device"
-                    : "create private multi-output aggregate device"
-            )
-            if aggregateDeviceOutputPlan != nil || programSource != nil {
-                try Self.waitForDeviceAlive(aggregateDeviceID)
-            }
-
-            // Matched-rate sessions retain the original output-rate pinning.
-            // For PR70 ASRC sessions the tap aggregate remains in the tap's native
-            // clock domain so capture/output clocks are genuinely independent;
-            // the adaptive bridge owns rate conversion and drift correction.
-            try Self.writeFloat64Property(
-                objectID: aggregateDeviceID,
-                selector: kAudioDevicePropertyNominalSampleRate,
-                scope: kAudioObjectPropertyScopeGlobal,
-                value: adaptiveSampleRateRequired ? tapFormat.sampleRate : outputFormat.sampleRate,
-                operation: "set tap aggregate sample rate"
-            )
-            try Self.writeUInt32Property(
-                objectID: aggregateDeviceID,
-                selector: kAudioDevicePropertyBufferFrameSize,
-                scope: kAudioObjectPropertyScopeGlobal,
-                value: outputBufferFrames,
-                operation: "set tap aggregate buffer size"
-            )
-            let captureBufferFrames = try Self.readUInt32Property(
-                objectID: aggregateDeviceID,
-                selector: kAudioDevicePropertyBufferFrameSize,
-                scope: kAudioObjectPropertyScopeGlobal,
-                operation: "read tap aggregate buffer size"
-            )
-            guard captureBufferFrames == outputBufferFrames else {
-                throw CoreAudioTransportError.captureBufferSizeMismatch(
-                    capture: captureBufferFrames,
-                    output: outputBufferFrames
+            if driverRequest == nil {
+                var aggregateSpec = TapAggregateSpec(
+                    name: aggregateDeviceOutputPlan == nil
+                        ? "Notch Sixty Private Tap"
+                        : "Notch Sixty Private Multi-Output",
+                    uidPrefix: "com.dhdook.NotchSixty.aggregate",
+                    tapUID: description.uuid.uuidString,
+                    // A tap on another device runs on that device's clock; the aggregate follows the DAC.
+                    tapDriftCompensation: programSource != nil
                 )
+                if let aggregateDeviceOutputPlan {
+                    aggregateSpec.subDevices = aggregateDeviceOutputPlan.orderedDeviceUIDs.map { uid in
+                        .init(uid: uid, driftCompensation: uid != aggregateDeviceOutputPlan.referenceDeviceUID)
+                    }
+                    aggregateSpec.mainSubDeviceUID = aggregateDeviceOutputPlan.referenceDeviceUID
+                }
+                if programSource != nil {
+                    aggregateSpec.subDevices = [.init(uid: selectedOutput.uid, driftCompensation: false)]
+                    aggregateSpec.mainSubDeviceUID = selectedOutput.uid
+                }
+                try Self.check(
+                    captureSource.createAggregate(aggregateSpec),
+                    operation: aggregateDeviceOutputPlan == nil
+                        ? "create private tap aggregate device"
+                        : "create private multi-output aggregate device"
+                )
+                if aggregateDeviceOutputPlan != nil || programSource != nil {
+                    try Self.waitForDeviceAlive(aggregateDeviceID)
+                }
+
+                // Matched-rate sessions retain the original output-rate pinning.
+                // For PR70 ASRC sessions the tap aggregate remains in the tap's native
+                // clock domain so capture/output clocks are genuinely independent;
+                // the adaptive bridge owns rate conversion and drift correction.
+                try Self.writeFloat64Property(
+                    objectID: aggregateDeviceID,
+                    selector: kAudioDevicePropertyNominalSampleRate,
+                    scope: kAudioObjectPropertyScopeGlobal,
+                    value: adaptiveSampleRateRequired ? tapFormat.sampleRate : outputFormat.sampleRate,
+                    operation: "set tap aggregate sample rate"
+                )
+                try Self.writeUInt32Property(
+                    objectID: aggregateDeviceID,
+                    selector: kAudioDevicePropertyBufferFrameSize,
+                    scope: kAudioObjectPropertyScopeGlobal,
+                    value: outputBufferFrames,
+                    operation: "set tap aggregate buffer size"
+                )
+                let captureBufferFrames = try Self.readUInt32Property(
+                    objectID: aggregateDeviceID,
+                    selector: kAudioDevicePropertyBufferFrameSize,
+                    scope: kAudioObjectPropertyScopeGlobal,
+                    operation: "read tap aggregate buffer size"
+                )
+                guard captureBufferFrames == outputBufferFrames else {
+                    throw CoreAudioTransportError.captureBufferSizeMismatch(
+                        capture: captureBufferFrames,
+                        output: outputBufferFrames
+                    )
+                }
             }
 
             outputDeviceID = aggregateDeviceOutputPlan == nil ? selectedOutput.deviceID : aggregateDeviceID
             let clientData = UnsafeMutableRawPointer(newBridge)
-            try Self.check(
-                AudioDeviceCreateIOProcID(aggregateDeviceID, N60CaptureIOProc, clientData, &captureIOProcID),
-                operation: "create capture IOProc"
-            )
-            try Self.check(
-                AudioDeviceCreateIOProcID(outputDeviceID, N60OutputIOProc, clientData, &outputIOProcID),
-                operation: "create output IOProc"
-            )
+            if let driverRequest {
+                let attachment = try DriverCaptureAttachment.open(
+                    driverRequest, outputUID: selectedOutput.uid, outputDeviceID: selectedOutput.deviceID,
+                    dacRate: outputFormat.sampleRate, maxCallbackFrames: outputBufferFrames, channelCount: 2,
+                    clientData: clientData, captureProc: N60CaptureIOProc, outputProc: N60OutputIOProc)
+                driverAttachment = attachment
+                try Self.check(
+                    AudioDeviceCreateIOProcID(outputDeviceID, N60VirtualRingOutputIOProc, attachment.outputClientData, &outputIOProcID),
+                    operation: "create virtual driver output IOProc"
+                )
+            } else {
+                try Self.check(
+                    AudioDeviceCreateIOProcID(aggregateDeviceID, N60CaptureIOProc, clientData, &captureIOProcID),
+                    operation: "create capture IOProc"
+                )
+                try Self.check(
+                    AudioDeviceCreateIOProcID(outputDeviceID, N60OutputIOProc, clientData, &outputIOProcID),
+                    operation: "create output IOProc"
+                )
+            }
 
-            guard captureIOProcID != nil else {
+            guard captureIOProcID != nil || driverAttachment != nil else {
                 throw CoreAudioTransportError.ioProcUnavailable(role: "capture")
             }
             guard outputIOProcID != nil else {
@@ -1898,6 +1922,8 @@ final class CoreAudioTransportSession {
             AudioDeviceDestroyIOProcID(aggregateDeviceID, captureIOProcID)
             self.captureIOProcID = nil
         }
+        driverAttachment?.close()
+        driverAttachment = nil
         captureSource.close()
         // Under the refresh lock so a worker's refresh or trip cannot use the bridge while it is destroyed.
         graphRefreshLock.lock()
@@ -1927,15 +1953,15 @@ final class CoreAudioTransportSession {
         guard let outputIOProcID else {
             throw CoreAudioTransportError.ioProcUnavailable(role: "output")
         }
-        guard let captureIOProcID else {
-            throw CoreAudioTransportError.ioProcUnavailable(role: "capture")
-        }
-        guard aggregateDeviceID != AudioDeviceID(kAudioObjectUnknown) else {
-            throw CoreAudioTransportError.ioProcUnavailable(role: "capture")
+        let captureIOProcID = self.captureIOProcID
+        if driverAttachment == nil {
+            guard captureIOProcID != nil, aggregateDeviceID != AudioDeviceID(kAudioObjectUnknown) else {
+                throw CoreAudioTransportError.ioProcUnavailable(role: "capture")
+            }
         }
 
         if isCaptureStarted {
-            AudioDeviceStop(aggregateDeviceID, captureIOProcID)
+            if let captureIOProcID { AudioDeviceStop(aggregateDeviceID, captureIOProcID) }
             isCaptureStarted = false
         }
         if isOutputStarted {
@@ -1957,10 +1983,13 @@ final class CoreAudioTransportSession {
         isOutputStarted = true
 
         do {
-            try Self.check(
-                AudioDeviceStart(aggregateDeviceID, captureIOProcID),
-                operation: "start tap capture"
-            )
+            if let captureIOProcID {
+                try Self.check(
+                    AudioDeviceStart(aggregateDeviceID, captureIOProcID),
+                    operation: "start tap capture"
+                )
+            }
+            // Driver path: the ring is read inside the output callback, so there is nothing more to start.
             isCaptureStarted = true
         } catch {
             AudioDeviceStop(outputDeviceID, outputIOProcID)

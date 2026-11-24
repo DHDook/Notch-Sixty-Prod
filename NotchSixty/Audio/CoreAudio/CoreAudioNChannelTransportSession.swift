@@ -409,6 +409,8 @@ final class CoreAudioNChannelTransportSession {
     private(set) var unifiedGraphFallbackReason: UnifiedGraphFallbackReason?
     private var audioUnitRack: AudioUnitLiveRackSwitchboard?
     private let captureSource = ProcessTapCaptureSource()
+    /// E36 S3b: set when the driver path is chosen; then there is no tap, no aggregate and no capture IOProc.
+    private var driverAttachment: DriverCaptureAttachment?
     private var tapID: AudioObjectID { captureSource.tapID }
     private var aggregateDeviceID: AudioDeviceID { captureSource.aggregateDeviceID }
     private var captureIOProcID: AudioDeviceIOProcID?
@@ -460,7 +462,11 @@ final class CoreAudioNChannelTransportSession {
         self.routePlan = routePlan
         self.audioUnitRack = audioUnitRack
 
+        let driverRequest = DriverCaptureSelection.shared.current
         do {
+            if driverRequest != nil, routePlan.usesMultiplePhysicalDevices {
+                throw DriverCaptureError.unsupportedSession("a multi-device output")
+            }
             let processObject = try Self.currentProcessObjectID()
             let description = ProcessTapSpec(
                 excludedProcess: processObject,
@@ -469,25 +475,39 @@ final class CoreAudioNChannelTransportSession {
                 keepsAllChannels: true
             ).makeDescription()
 
-            try Self.check(
-                captureSource.createTap(description),
-                operation: "create semantic process tap"
-            )
-
-            let tapASBD = try Self.readStreamFormat(
-                objectID: tapID,
-                selector: kAudioTapPropertyFormat,
-                scope: kAudioObjectPropertyScopeGlobal,
-                operation: "read semantic tap format"
-            )
+            // The driver layout the ring carries for this program; nil on the tap path.
+            let driverLayout: VirtualDeviceLayout?
+            if driverRequest != nil {
+                guard let layout = VirtualDeviceLayout.layout(channelCount: Int(renderGraph.programLayout.channelCount)) else {
+                    throw DriverCaptureError.unsupportedChannelCount(Int(renderGraph.programLayout.channelCount))
+                }
+                driverLayout = layout
+            } else {
+                driverLayout = nil
+            }
+            let tapASBD: AudioStreamBasicDescription
+            if driverLayout == nil {
+                try Self.check(
+                    captureSource.createTap(description),
+                    operation: "create semantic process tap"
+                )
+                tapASBD = try Self.readStreamFormat(
+                    objectID: tapID,
+                    selector: kAudioTapPropertyFormat,
+                    scope: kAudioObjectPropertyScopeGlobal,
+                    operation: "read semantic tap format"
+                )
+            } else {
+                tapASBD = AudioStreamBasicDescription()
+            }
             let outputASBD = try Self.readStreamFormat(
                 objectID: selectedOutput.deviceID,
                 selector: kAudioDevicePropertyStreamFormat,
                 scope: kAudioDevicePropertyScopeOutput,
                 operation: "read N-channel output stream format"
             )
-            tapFormat = AudioStreamFormatDescription(tapASBD)
             outputFormat = AudioStreamFormatDescription(outputASBD)
+            tapFormat = driverLayout?.streamFormat(sampleRate: outputFormat.sampleRate) ?? AudioStreamFormatDescription(tapASBD)
 
             guard tapFormat.isSupportedFloat32TransportFormat else {
                 throw CoreAudioTransportError.unsupportedFormat(role: "semantic tap", format: tapFormat)
@@ -515,7 +535,7 @@ final class CoreAudioNChannelTransportSession {
                 )
             }
 
-            let descriptions = try Self.resolveInputChannelDescriptions(
+            let descriptions = try driverLayout?.channelDescriptions ?? Self.resolveInputChannelDescriptions(
                 deviceID: selectedOutput.deviceID,
                 channelCount: tapFormat.channelCount
             )
@@ -733,80 +753,95 @@ final class CoreAudioNChannelTransportSession {
             // the bridge gain stays at unity and only carries the start and stop fades.
             N60LiveNChannelBridgeSetOutputGain(newBridge, hostedAnc == nil ? outputGain : 1)
 
-            var aggregateSpec = TapAggregateSpec(
-                name: routePlan.usesMultiplePhysicalDevices
-                    ? "Notch Sixty Semantic Multi-Output"
-                    : "Notch Sixty Semantic Tap",
-                uidPrefix: "com.dhdook.NotchSixty.semantic",
-                tapUID: description.uuid.uuidString,
-                tapDriftCompensation: false
-            )
-            if routePlan.usesMultiplePhysicalDevices {
-                aggregateSpec.subDevices = routePlan.orderedDeviceUIDs.map { uid in
-                    .init(uid: uid, driftCompensation: uid != routePlan.referenceDeviceUID)
-                }
-                aggregateSpec.mainSubDeviceUID = routePlan.referenceDeviceUID
-            }
-            try Self.check(
-                captureSource.createAggregate(aggregateSpec),
-                operation: routePlan.usesMultiplePhysicalDevices
-                    ? "create semantic multi-output aggregate device"
-                    : "create semantic tap aggregate device"
-            )
-            if routePlan.usesMultiplePhysicalDevices {
-                try Self.waitForDeviceAlive(aggregateDeviceID)
-            }
-
-            try Self.writeFloat64Property(
-                objectID: aggregateDeviceID,
-                selector: kAudioDevicePropertyNominalSampleRate,
-                scope: kAudioObjectPropertyScopeGlobal,
-                value: adaptiveSampleRateRequired ? tapFormat.sampleRate : outputFormat.sampleRate,
-                operation: "set semantic aggregate sample rate"
-            )
-            try Self.writeUInt32Property(
-                objectID: aggregateDeviceID,
-                selector: kAudioDevicePropertyBufferFrameSize,
-                scope: kAudioObjectPropertyScopeGlobal,
-                value: outputBufferFrames,
-                operation: "set semantic aggregate buffer size"
-            )
-            let captureBufferFrames = try Self.readUInt32Property(
-                objectID: aggregateDeviceID,
-                selector: kAudioDevicePropertyBufferFrameSize,
-                scope: kAudioObjectPropertyScopeGlobal,
-                operation: "read semantic aggregate buffer size"
-            )
-            guard captureBufferFrames == outputBufferFrames else {
-                throw LiveNChannelTransportError.captureBufferSizeMismatch(
-                    capture: captureBufferFrames,
-                    output: outputBufferFrames
+            if driverLayout == nil {
+                var aggregateSpec = TapAggregateSpec(
+                    name: routePlan.usesMultiplePhysicalDevices
+                        ? "Notch Sixty Semantic Multi-Output"
+                        : "Notch Sixty Semantic Tap",
+                    uidPrefix: "com.dhdook.NotchSixty.semantic",
+                    tapUID: description.uuid.uuidString,
+                    tapDriftCompensation: false
                 )
+                if routePlan.usesMultiplePhysicalDevices {
+                    aggregateSpec.subDevices = routePlan.orderedDeviceUIDs.map { uid in
+                        .init(uid: uid, driftCompensation: uid != routePlan.referenceDeviceUID)
+                    }
+                    aggregateSpec.mainSubDeviceUID = routePlan.referenceDeviceUID
+                }
+                try Self.check(
+                    captureSource.createAggregate(aggregateSpec),
+                    operation: routePlan.usesMultiplePhysicalDevices
+                        ? "create semantic multi-output aggregate device"
+                        : "create semantic tap aggregate device"
+                )
+                if routePlan.usesMultiplePhysicalDevices {
+                    try Self.waitForDeviceAlive(aggregateDeviceID)
+                }
+
+                try Self.writeFloat64Property(
+                    objectID: aggregateDeviceID,
+                    selector: kAudioDevicePropertyNominalSampleRate,
+                    scope: kAudioObjectPropertyScopeGlobal,
+                    value: adaptiveSampleRateRequired ? tapFormat.sampleRate : outputFormat.sampleRate,
+                    operation: "set semantic aggregate sample rate"
+                )
+                try Self.writeUInt32Property(
+                    objectID: aggregateDeviceID,
+                    selector: kAudioDevicePropertyBufferFrameSize,
+                    scope: kAudioObjectPropertyScopeGlobal,
+                    value: outputBufferFrames,
+                    operation: "set semantic aggregate buffer size"
+                )
+                let captureBufferFrames = try Self.readUInt32Property(
+                    objectID: aggregateDeviceID,
+                    selector: kAudioDevicePropertyBufferFrameSize,
+                    scope: kAudioObjectPropertyScopeGlobal,
+                    operation: "read semantic aggregate buffer size"
+                )
+                guard captureBufferFrames == outputBufferFrames else {
+                    throw LiveNChannelTransportError.captureBufferSizeMismatch(
+                        capture: captureBufferFrames,
+                        output: outputBufferFrames
+                    )
+                }
             }
 
             outputDeviceID = routePlan.usesMultiplePhysicalDevices
                 ? aggregateDeviceID
                 : selectedOutput.deviceID
             let clientData = UnsafeMutableRawPointer(newBridge)
-            try Self.check(
-                AudioDeviceCreateIOProcID(
-                    aggregateDeviceID,
-                    N60LiveNChannelCaptureIOProc,
-                    clientData,
-                    &captureIOProcID
-                ),
-                operation: "create semantic capture IOProc"
-            )
-            try Self.check(
-                AudioDeviceCreateIOProcID(
-                    outputDeviceID,
-                    N60LiveNChannelOutputIOProc,
-                    clientData,
-                    &outputIOProcID
-                ),
-                operation: "create semantic output IOProc"
-            )
-            guard captureIOProcID != nil else {
+            if let driverRequest, let driverLayout {
+                let attachment = try DriverCaptureAttachment.open(
+                    driverRequest, outputUID: selectedOutput.uid, outputDeviceID: selectedOutput.deviceID,
+                    dacRate: outputFormat.sampleRate, maxCallbackFrames: outputBufferFrames,
+                    channelCount: driverLayout.channelCount, clientData: clientData,
+                    captureProc: N60LiveNChannelCaptureIOProc, outputProc: N60LiveNChannelOutputIOProc)
+                driverAttachment = attachment
+                try Self.check(
+                    AudioDeviceCreateIOProcID(outputDeviceID, N60VirtualRingOutputIOProc, attachment.outputClientData, &outputIOProcID),
+                    operation: "create virtual driver semantic output IOProc"
+                )
+            } else {
+                try Self.check(
+                    AudioDeviceCreateIOProcID(
+                        aggregateDeviceID,
+                        N60LiveNChannelCaptureIOProc,
+                        clientData,
+                        &captureIOProcID
+                    ),
+                    operation: "create semantic capture IOProc"
+                )
+                try Self.check(
+                    AudioDeviceCreateIOProcID(
+                        outputDeviceID,
+                        N60LiveNChannelOutputIOProc,
+                        clientData,
+                        &outputIOProcID
+                    ),
+                    operation: "create semantic output IOProc"
+                )
+            }
+            guard captureIOProcID != nil || driverAttachment != nil else {
                 throw LiveNChannelTransportError.ioProcUnavailable(role: "capture")
             }
             guard outputIOProcID != nil else {
@@ -1249,6 +1284,8 @@ final class CoreAudioNChannelTransportSession {
             AudioDeviceDestroyIOProcID(aggregateDeviceID, captureIOProcID)
             self.captureIOProcID = nil
         }
+        driverAttachment?.close()
+        driverAttachment = nil
         captureSource.close()
         // The worker reads the bridge's loudness ring; it must be quiet before the bridge goes.
         wideLoudnessWorker?.stop()
@@ -1274,11 +1311,11 @@ final class CoreAudioNChannelTransportSession {
         guard let outputIOProcID else {
             throw LiveNChannelTransportError.ioProcUnavailable(role: "output")
         }
-        guard let captureIOProcID else {
-            throw LiveNChannelTransportError.ioProcUnavailable(role: "capture")
-        }
-        guard aggregateDeviceID != AudioDeviceID(kAudioObjectUnknown) else {
-            throw LiveNChannelTransportError.ioProcUnavailable(role: "capture")
+        let captureIOProcID = self.captureIOProcID
+        if driverAttachment == nil {
+            guard captureIOProcID != nil, aggregateDeviceID != AudioDeviceID(kAudioObjectUnknown) else {
+                throw LiveNChannelTransportError.ioProcUnavailable(role: "capture")
+            }
         }
 
         // E20 S6: the render workers join the output device's IO workgroup before its first callback.
@@ -1294,10 +1331,13 @@ final class CoreAudioNChannelTransportSession {
         }
         isOutputStarted = true
         do {
-            try Self.check(
-                AudioDeviceStart(aggregateDeviceID, captureIOProcID),
-                operation: "start semantic tap capture"
-            )
+            if let captureIOProcID {
+                try Self.check(
+                    AudioDeviceStart(aggregateDeviceID, captureIOProcID),
+                    operation: "start semantic tap capture"
+                )
+            }
+            // Driver path: the ring is read inside the output callback.
             isCaptureStarted = true
         } catch {
             AudioDeviceStop(outputDeviceID, outputIOProcID)

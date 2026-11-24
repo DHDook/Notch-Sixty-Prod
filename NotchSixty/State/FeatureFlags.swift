@@ -37,7 +37,7 @@ extension FeatureFlag {
         .parallelRender, .multirate, .rateAdapt, .coreDesigners,
         .eqPageEnhancements, .dynamicsSound, .designLanguage, .followOutput, .dashboardRemote, .virtualDriver,
         .blindListening,
-        .setupFlow, .systemPages
+        .setupFlow, .systemPages, .selfQualification
     ]
 
     /// E6 S11: the unified graph is the default renderer. Turning this on selects the frozen
@@ -341,6 +341,15 @@ extension FeatureFlag {
         id: "e12.setup-flow",
         title: "Guided setup improvements",
         epic: "E12"
+    )
+
+    /// E19 S12a to S12c: MIMO room treatment self-qualification (evidence check and the self-qualified permit basis, then
+    /// the probe arm and the guided steps). Swift only. Off: today's permit path exactly. Available is never armed: the
+    /// permit never arms, and the arm switch and written authorisation path are unchanged. Graduated by S12c.
+    static let selfQualification = FeatureFlag(
+        id: "e19.self-qualification",
+        title: "MIMO room treatment self-qualification",
+        epic: "E19"
     )
 }
 
