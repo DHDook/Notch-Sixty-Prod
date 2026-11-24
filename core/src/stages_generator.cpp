@@ -304,6 +304,9 @@ void runGenerator(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t fram
             S.seenCue = cue;
             S.cuePending = 1;
         }
+        // A cue posted while the stage is inactive is dropped, never replayed on the next activation. Two cues posted during
+        // one sweep keep only the later cue's solo (the capturer waits out the sweep and its tail between cues).
+        if (!wantActive) S.cuePending = 0;
         if (S.cuePending != 0 && wantActive) {
             bool playing = false;
             for (uint32_t l = 0; l < r.laneCount && !playing; ++l) {

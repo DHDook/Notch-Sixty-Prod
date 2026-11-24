@@ -74,12 +74,27 @@ struct SignalGeneratorSettings: Equatable, Sendable {
     }
 }
 
+extension SignalGeneratorSettings {
+    /// E19 S12c (graph ABI v48): the 13-value cued sweep block, or nil for any other kind or an unusable block. `solo` is 0
+    /// (every mask lane) or the 1-based position of the one mask lane that plays; `cue` is an integer 0...16_777_216 and each
+    /// change starts the sweep. With `active` set and no cue change the mask lanes play exact silence (programme replaced).
+    func cuedStageParams(active: Bool, sampleRate: Double, solo: Int, cue: Int) -> [Float]? {
+        guard kind == .sweep, solo >= 0, solo <= 64, cue >= 0, cue <= 16_777_216,
+              var params = stageParams(active: active, sampleRate: sampleRate) else { return nil }
+        params.append(Float(solo))
+        params.append(Float(cue))
+        return params
+    }
+}
+
 /// E12 S4a: which program lanes a live generator plays on.
 enum SignalGeneratorLaneSelection: Equatable, Sendable {
     /// One program lane (an index into the running layout).
     case lane(Int)
     /// Every program lane; the LFE lane only when `includeLFE` is true (never by default).
     case allProgram(includeLFE: Bool)
+    /// E19 S12c: an explicit set of program lanes (the probe's source lanes).
+    case lanes([Int])
 
     /// The lane bit mask for a layout of `laneCount` lanes with the LFE at `lfeLane`, or nil when it selects nothing.
     func mask(laneCount: Int, lfeLane: Int?) -> UInt64? {
@@ -88,6 +103,9 @@ enum SignalGeneratorLaneSelection: Equatable, Sendable {
         case .lane(let index):
             guard index >= 0, index < laneCount else { return nil }
             return UInt64(1) << UInt64(index)
+        case .lanes(let indices):
+            guard !indices.isEmpty, indices.allSatisfy({ $0 >= 0 && $0 < laneCount }) else { return nil }
+            return indices.reduce(UInt64(0)) { $0 | (UInt64(1) << UInt64($1)) }
         case .allProgram(let includeLFE):
             var mask = laneCount == 64 ? UInt64.max : (UInt64(1) << UInt64(laneCount)) - 1
             if !includeLFE, let lfeLane, lfeLane >= 0, lfeLane < laneCount { mask &= ~(UInt64(1) << UInt64(lfeLane)) }

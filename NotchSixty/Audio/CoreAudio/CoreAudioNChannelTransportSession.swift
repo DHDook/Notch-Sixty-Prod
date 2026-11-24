@@ -1053,11 +1053,12 @@ final class CoreAudioNChannelTransportSession {
         return snapshot
     }
 
-    /// E6 S9b: moves the running graph to `configuration` (posted parameters, or a faded rebuild). The channel
+    /// E6 S9b: moves the running graph to `configuration` (posted parameters, or a faded rebuild; `postOnly` posts or throws
+    /// `UnifiedGraphError.requiresRebuild` wrapped as `graphRepublishRefused`, E19 S12c). The channel
     /// counts must match the running graph; a CPU-budget or core refusal throws and the running graph keeps
     /// rendering.
     @discardableResult
-    func republishGraph(_ configuration: UnifiedGraphConfiguration) throws -> UnifiedGraphApplyResult {
+    func republishGraph(_ configuration: UnifiedGraphConfiguration, postOnly: Bool = false) throws -> UnifiedGraphApplyResult {
 #if DEBUG
         if let failure = testingRepublishFailure {
             testingRepublishFailure = nil
@@ -1088,7 +1089,8 @@ final class CoreAudioNChannelTransportSession {
             throw LiveNChannelTransportError.unifiedGraphRejected(.laneCountMismatch)
         }
         do {
-            let result = try host.apply(spec, linearFade: linearFadeForEQRepublish)
+            // E19 S12c: post-only edits (the probe feed while a stage is armed) never rebuild; a rebuild request throws.
+            let result = postOnly ? try host.applyPostOnly(spec) : try host.apply(spec, linearFade: linearFadeForEQRepublish)
             ancLock.lock()
             if hostedAnc != nil { hostedConfiguration = configuration }
             lastGraphConfiguration = configuration
@@ -1097,6 +1099,13 @@ final class CoreAudioNChannelTransportSession {
         } catch {
             throw LiveNChannelTransportError.graphRepublishRefused(String(describing: error))
         }
+    }
+
+    /// E19 S12c: the configuration last published to the graph (with the stored MIMO stage and Quiet Zone actuators), the base
+    /// of a post-only edit. Nil before the first publish.
+    var currentGraphConfiguration: UnifiedGraphConfiguration? {
+        ancLock.lock(); defer { ancLock.unlock() }
+        return lastGraphConfiguration
     }
 
     /// E19 S6: posts a new MIMO stage (the live arm and trip words change as parameters; a changed design republishes).
