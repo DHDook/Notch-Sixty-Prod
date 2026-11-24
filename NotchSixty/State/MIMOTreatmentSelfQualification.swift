@@ -59,6 +59,9 @@ struct MIMOTreatmentSelfQualificationEvidence: Equatable, Sendable {
     var predictedDecay: MIMOTreatmentVerificationResult?
     /// The PR75 spatial report of the predicted treated response.
     var predictedSpatial: MIMORoomTreatmentVerificationReport?
+    /// E19 S12b (SQ5): the outcome of the probe arm's treated measurement. Not part of `bindingDigest`: it is the last thing
+    /// taken, and `issuePermit` checks it against the fingerprint it was taken on.
+    var probeResult: MIMOTreatmentProbeResult?
 
     var includedSeats: [Seat] { seats.filter(\.included) }
 
@@ -119,6 +122,9 @@ enum MIMOTreatmentSelfQualificationFailure: Equatable, Sendable {
     case excursionLimitMissing(source: Int)
     case excursionSlopeTooShallow(source: Int, slope: Double)
     case thermalBudgetExceeded(deltaDB: Double?)
+    /// E19 S12b (SQ5): no treated probe result, or one taken on a different design, output or chain.
+    case treatedProbeMissing
+    case treatedProbeFailed([MIMOTreatmentProbeFailure])
 
     var reason: String {
         switch self {
@@ -141,6 +147,8 @@ enum MIMOTreatmentSelfQualificationFailure: Equatable, Sendable {
         case .excursionLimitMissing(let s): return "Source \(s + 1) has no measured excursion limit."
         case .excursionSlopeTooShallow(let s, let slope): return String(format: "Source %d: the design falls only %.0f dB per octave below its excursion limit; 12 is needed.", s + 1, slope)
         case .thermalBudgetExceeded: return "The designed bass effort exceeds the thermal budget of -6 dB re programme."
+        case .treatedProbeMissing: return "The treated measurement has not been taken for this design."
+        case .treatedProbeFailed(let failures): return failures.map(\.reason).joined(separator: " ")
         }
     }
 }

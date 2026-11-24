@@ -74,6 +74,7 @@ final class ProductController: ObservableObject {
     let multichannelCalibration: MultichannelCalibrationController
     /// E19 S8: the Room Treatment screen's model (shown behind `e19.mimo-treatment`).
     let mimoTreatment: MIMOTreatmentController
+    let mimoTreatmentProbe: MIMOTreatmentProbeRunner
     let roomCorrectionProjects: RoomCorrectionProjectController
     let roomTreatmentAdvisor: RoomTreatmentAdvisorController
     let ambientCompensation: AmbientCompensationController
@@ -138,10 +139,15 @@ final class ProductController: ObservableObject {
             microphone: calibration
         )
         self.multichannelCalibration = multichannelCalibration
+        // E19 S12b: the treated repeat measurement's captures. No capturer yet (S12c wires the stimulus path), so none are taken.
+        let mimoProbe = MIMOTreatmentProbeRunner(
+            treatment: audioEngine.treatment, capturer: nil, armProbe: { [audioEngine] in try await audioEngine.requestMIMOProbeArm() })
+        self.mimoTreatmentProbe = mimoProbe
         self.mimoTreatment = MIMOTreatmentController(
             host: audioEngine, flags: FeatureFlags(),
             seats: { multichannelCalibration.seats },
             baseline: { multichannelCalibration.measurements },
+            treated: { mimoProbe.treatedMeasurements },
             wayMeasurer: CalibrationTreatmentWayMeasurer(calibration: multichannelCalibration))
         let roomProjects =
             RoomCorrectionProjectController(profiles: profiles)
@@ -266,10 +272,15 @@ final class ProductController: ObservableObject {
             microphone: calibration
         )
         self.multichannelCalibration = multichannelCalibration
+        // E19 S12b: the treated repeat measurement's captures. No capturer yet (S12c wires the stimulus path), so none are taken.
+        let mimoProbe = MIMOTreatmentProbeRunner(
+            treatment: audioEngine.treatment, capturer: nil, armProbe: { [audioEngine] in try await audioEngine.requestMIMOProbeArm() })
+        self.mimoTreatmentProbe = mimoProbe
         self.mimoTreatment = MIMOTreatmentController(
             host: audioEngine, flags: FeatureFlags(),
             seats: { multichannelCalibration.seats },
             baseline: { multichannelCalibration.measurements },
+            treated: { mimoProbe.treatedMeasurements },
             wayMeasurer: CalibrationTreatmentWayMeasurer(calibration: multichannelCalibration))
         let roomProjects =
             RoomCorrectionProjectController(profiles: profiles)

@@ -38,6 +38,10 @@ final class MIMOGraphTreatment: ObservableObject {
         case engineNotRunning
         case outputUnknown
         case alreadyArmed
+        /// E19 S12b: a probe arm needs a live probe ticket (issued after SQ1 to SQ4) in place of a permit.
+        case noProbeTicket
+        /// E19 S12b: the probe plays only the measurement stimulus; programme playback must be stopped first.
+        case programmeNotStopped
 
         var errorDescription: String? {
             switch self {
@@ -52,6 +56,8 @@ final class MIMOGraphTreatment: ObservableObject {
             case .engineNotRunning: return "Start audio processing before arming."
             case .outputUnknown: return "Select an output device before arming."
             case .alreadyArmed: return "Room treatment is already armed."
+            case .noProbeTicket: return "No treated measurement is approved for this design."
+            case .programmeNotStopped: return "Stop programme playback before the treated measurement."
             }
         }
     }
@@ -84,6 +90,14 @@ final class MIMOGraphTreatment: ObservableObject {
     /// (the graph must show arm = 0 and trip = 0 first).
     private(set) var latchMayBeHeld = false
     private var armedFingerprint: String?
+    /// E19 S12b: the probe in progress or last ended (`MIMOGraphTreatment+Probe.swift`). In memory only; never a permit.
+    @Published var probeSession: MIMOTreatmentProbeSession?
+    /// True while the current arm is a probe arm: its fingerprint carries the self-qualification binding.
+    var armedAsProbe = false
+    /// Set by whoever stops programme playback for the measurement (E24 stimulus owner). Nothing sets it in production before S12c.
+    var probeProgrammeMuted = false
+    /// Time source for the per-seat limit; injectable so tests do not wait.
+    var clock: () -> Date = { Date() }
 
     let flags: FeatureFlags
     /// E19 S12a (SQ7): digest of the evidence a self-qualified permit was issued on (seat set, capture digests, microphone).
@@ -168,6 +182,7 @@ final class MIMOGraphTreatment: ObservableObject {
         permit = nil
         selfQualificationEvidenceDigest = ""
         latchMayBeHeld = true
+        probeEnd(.fingerprintChanged)
     }
 
     /// E19 S12a (SQ7): the evidence behind a self-qualified permit changed (a seat, weight, capture or the microphone).
@@ -197,17 +212,25 @@ final class MIMOGraphTreatment: ObservableObject {
     // MARK: Gates
 
     func gateFailure(_ context: Context) -> ArmRefusal? {
-        guard flags.isEnabled(.mimoTreatment) else { return .featureOff }
+        if let common = commonGateFailure(context) { return common }
         guard let stage else { return .noStagedDesign }
+        guard let permit else { return .noPermit }
+        if permit.basis == .selfQualification, !flags.isEnabled(.selfQualification) { return .noPermit }
+        guard permit.fingerprint == currentFingerprint(stage, context) else { return .fingerprintMismatch }
+        return nil
+    }
+
+    /// The gates every arm shares, permit or probe: flag, staged design, running engine, output, latency mode, attached stage,
+    /// hard limit and lease.
+    func commonGateFailure(_ context: Context) -> ArmRefusal? {
+        guard flags.isEnabled(.mimoTreatment) else { return .featureOff }
+        guard stage != nil else { return .noStagedDesign }
         guard context.engineRunning, context.sampleRate != nil else { return .engineNotRunning }
         guard context.outputDeviceUID != nil else { return .outputUnknown }
         guard !context.videoLatencyMode else { return .videoLatencyMode }
         guard context.stageAttached else { return .stageNotAttached }
         guard context.hardLimitPresent else { return .hardLimitMissing }
         guard context.engineLeaseHeld else { return .engineLeaseMissing }
-        guard let permit else { return .noPermit }
-        if permit.basis == .selfQualification, !flags.isEnabled(.selfQualification) { return .noPermit }
-        guard permit.fingerprint == currentFingerprint(stage, context) else { return .fingerprintMismatch }
         return nil
     }
 
@@ -217,9 +240,16 @@ final class MIMOGraphTreatment: ObservableObject {
     /// again and only then starts the fade-in (the core ramps 0 to 1 over 3 s).
     /// `refresh` re-reads the engine's context after the settle wait, so the arm decision uses the facts at that moment.
     func requestArm(context initial: Context, refresh: (() -> Context)? = nil) async throws {
+        try await armStage(context: initial, refresh: refresh, probe: false)
+    }
+
+    /// Shared by the permit arm and the probe arm (E19 S12b): the same gates, the same settle wait, the same fade-in. Only the
+    /// authority differs (`gateFailure` needs a permit, `probeGateFailure` a live ticket).
+    func armStage(context initial: Context, refresh: (() -> Context)?, probe: Bool) async throws {
         var context = initial
+        func gates(_ context: Context) -> ArmRefusal? { probe ? probeGateFailure(context) : gateFailure(context) }
         guard !arm.isArmed else { throw ArmRefusal.alreadyArmed }
-        if let failure = gateFailure(context) { lastRefusal = failure; throw failure }
+        if let failure = gates(context) { lastRefusal = failure; throw failure }
         if latchMayBeHeld, var idle = stage {
             idle.armed = false
             idle.trip = false
@@ -229,11 +259,13 @@ final class MIMOGraphTreatment: ObservableObject {
             guard !arm.isArmed else { throw ArmRefusal.alreadyArmed }
             if let refresh { context = refresh() }
             latchMayBeHeld = false
-            if let failure = gateFailure(context) { lastRefusal = failure; throw failure }
+            if let failure = gates(context) { lastRefusal = failure; throw failure }
         }
         guard var live = stage else { throw ArmRefusal.noStagedDesign }
         try arm.arm(environment: environment(context))
-        armedFingerprint = currentFingerprint(live, context)
+        armedAsProbe = probe
+        armedFingerprint = currentFingerprint(live, context, selfQualified: probe ? true : nil)
+        if probe { probeArmed() }
         lastRefusal = nil
         live.armed = true
         live.trip = false
@@ -252,9 +284,10 @@ final class MIMOGraphTreatment: ObservableObject {
     }
 
     /// Periodic control-plane check. `readback` is the stage's telemetry (nil when unavailable).
-    func observe(context: Context, readback: n60_mimo_readback?) {
+    func observe(context: Context, readback: n60_mimo_readback?, hardLimitGainReductionDB: Double? = nil) {
         // A disarm word that did not reach the core is re-posted until it does.
         if let pending = pendingPublish { post(pending) }
+        probeObserveUnarmed(context: context)
         guard arm.isArmed else { return }
         if !flags.isEnabled(.mimoTreatment) { arm.disarm(.featureSwitchedOff); return }
         arm.observe(environment(context))
@@ -265,10 +298,12 @@ final class MIMOGraphTreatment: ObservableObject {
             return
         }
         if context.videoLatencyMode { arm.disarm(.transportReconfigured); return }
-        if let stage, let armedFingerprint, currentFingerprint(stage, context) != armedFingerprint {
+        if let stage, let armedFingerprint,
+           currentFingerprint(stage, context, selfQualified: armedAsProbe ? true : nil) != armedFingerprint {
             arm.disarm(.downstreamChainChanged)
             return
         }
+        if armedAsProbe, probeObserveArmed(readback: readback, hardLimitGainReductionDB: hardLimitGainReductionDB) { return }
         if let readback, readback.faultLatched != 0 { arm.disarm(.treatmentFault); return }
         // Dead-man lease (E19 G22): every poll tick while armed changes word [6]; a silent host latches the core's fault.
         if var beating = stage {
@@ -286,6 +321,8 @@ final class MIMOGraphTreatment: ObservableObject {
     }
 
     private func didDisarm(_ reason: LiveTreatmentDisarmReason) {
+        probeDidDisarm(reason)
+        armedAsProbe = false
         armedFingerprint = nil
         latchMayBeHeld = true
         guard var next = stage else { return }
