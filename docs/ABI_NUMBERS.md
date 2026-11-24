@@ -26,3 +26,4 @@ If two claims collide, the one that merges second renumbers its own claim only.
 | correct v6 (domain, no graph bump) | E21 S7a `e21/multisub-goldens` | open; `n60/correct.h` section 8 (calibration alignment, timing, sub EQ fit); append-only functions |
 | correct v7 (domain, no graph bump) | E21 S7b `e21/multisub-designer` | open; `n60/correct.h` section 9 (`n60_correct_multisub_optimise`, defaults, settings check); append-only functions |
 | speaker v1 (domain, no graph bump) | E21 S9a `e21/speaker-maths` | open; new `n60/speaker.h`; `n60_core_abi_info` gains `speakerVersion` and `speakerProblemSize` appended after `eqfitProblemSize` (append-only) |
+| hrtf v1 (domain, no graph bump) | E13 S11 `e13/generic-hrtf` | open; new `n60/hrtf.h`; `n60_core_abi_info` gains `hrtfVersion` and `hrtfModelSize` appended after `vdRingHeaderSize` (append-only) |

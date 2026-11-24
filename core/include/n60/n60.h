@@ -18,6 +18,7 @@
 #include "n60/fold.h"
 #include "n60/graph.h"
 #include "n60/headroom.h"
+#include "n60/hrtf.h"
 #include "n60/measure.h"
 #include "n60/mimo.h"
 #include "n60/resample.h"
@@ -63,6 +64,8 @@ typedef struct n60_core_abi_info {
     uint32_t ancDesignOptionsSize;  /* sizeof(n60_anc_seat_options) */
     uint32_t vdRingVersion;         /* E36 S3, appended */
     uint32_t vdRingHeaderSize;      /* sizeof(n60_vd_ring_header) */
+    uint32_t hrtfVersion;           /* E13 S11, appended */
+    uint32_t hrtfModelSize;         /* sizeof(n60_hrtf_generic_model) */
 } n60_core_abi_info;
 
 /* Returns 1 and fills info, or 0 for a null pointer or a structSize smaller than the first two fields. */
