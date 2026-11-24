@@ -64,15 +64,15 @@ enum MIMOTreatmentProbeCapturerError: Error, Equatable, LocalizedError {
 @MainActor
 final class MIMOTreatmentProbeCapturer: TreatmentProbeCapturing {
     /// Per seat: sweeps plus tails must fit this (inside the 120 s per-seat limit, D13).
-    static let budgetSeconds = 100.0
-    static let tailSeconds = 1.0
-    static let preRollSeconds = 0.3
-    static let minSweepSeconds = 2.0
-    static let maxSweepSeconds = 5.0
+    nonisolated static let budgetSeconds = 100.0
+    nonisolated static let tailSeconds = 1.0
+    nonisolated static let preRollSeconds = 0.3
+    nonisolated static let minSweepSeconds = 2.0
+    nonisolated static let maxSweepSeconds = 5.0
     /// Kept before the direct arrival so the onset is whole, and after it for the room's decay.
-    static let irLeadSeconds = 0.005
-    static let irLengthSeconds = 0.5
-    static let regularisation = 1.0e-10
+    nonisolated static let irLeadSeconds = 0.005
+    nonisolated static let irLengthSeconds = 0.5
+    nonisolated static let regularisation = 1.0e-10
 
     private let treatment: MIMOGraphTreatment
     private let feed: MIMOProbeStimulusFeeding
@@ -104,7 +104,7 @@ final class MIMOTreatmentProbeCapturer: TreatmentProbeCapturing {
     }
 
     /// Seconds of one sweep for `count` sources: as long as the budget allows, between 2 and 5 s; nil when none fits.
-    static func sweepSeconds(sourceCount count: Int, budget: Double = budgetSeconds) -> Double? {
+    nonisolated static func sweepSeconds(sourceCount count: Int, budget: Double = budgetSeconds) -> Double? {
         guard count > 0 else { return nil }
         let fit = budget / Double(count) - tailSeconds
         guard fit >= minSweepSeconds else { return nil }
