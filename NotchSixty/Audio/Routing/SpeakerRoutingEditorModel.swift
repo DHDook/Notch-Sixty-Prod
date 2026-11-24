@@ -27,6 +27,18 @@ final class SpeakerRoutingEditorModel: ObservableObject {
         return !verdict.isSafe
     }
 
+    /// E8 S12: why the last edit was refused by the driver-role rule, nil when it was not. Nothing was published.
+    @Published private(set) var roleRefusal: String?
+
+    /// True when the edit would leave a way with a role breaking its high-pass rule that was not already broken.
+    private func roleBlocks(_ next: SpeakerRoutingConfiguration) -> Bool {
+        guard context.enforceDriverRoles else { roleRefusal = nil; return false }
+        let existing = configuration.driverRoleErrors
+        let added = next.driverRoleErrors.filter { !existing.contains($0) }
+        roleRefusal = added.first.map { "Not applied. " + Self.describe($0) }
+        return !added.isEmpty
+    }
+
     /// Called after every edit with the new configuration. The view wires this to the engine.
     var onCommit: ((SpeakerRoutingConfiguration) -> Void)?
 
@@ -77,7 +89,7 @@ final class SpeakerRoutingEditorModel: ObservableObject {
     // MARK: Whole-configuration edits
 
     func replace(_ configuration: SpeakerRoutingConfiguration) {
-        if failsafeBlocks(configuration) { return }
+        if failsafeBlocks(configuration) || roleBlocks(configuration) { return }
         self.configuration = configuration
         refreshSubwoofers()
         onCommit?(configuration)
@@ -105,7 +117,7 @@ final class SpeakerRoutingEditorModel: ObservableObject {
     ) -> Bool {
         guard var built = template.build(mains: mains, subs: subs, crossoverHz: crossoverHz) else { return false }
         built.enabled = configuration.enabled
-        if failsafeBlocks(built) { return false }
+        if failsafeBlocks(built) || roleBlocks(built) { return false }
         replace(built)
         return true
     }
@@ -376,6 +388,12 @@ final class SpeakerRoutingEditorModel: ObservableObject {
         case .tooManyEntries(let endpoint):
             return "Output channel \(endpoint.channelIndex + 1) has more than \(N60_ROUTE_MAX_ENTRIES) feeds."
         case .invalidSampleRate: return "The device sample rate is not valid."
+        case .driverHighPassMissing(let way, let role, let safe):
+            return "\(way): a \(role.displayName.lowercased()) needs a high-pass; it is not safe below \(Int(safe)) Hz."
+        case .driverHighPassBelowSafe(let way, let corner, let safe):
+            return "\(way): the high-pass at \(Int(corner)) Hz is below the driver's lowest safe frequency of \(Int(safe)) Hz."
+        case .driverHighPassTooGentle(let way, let corner, let safe):
+            return "\(way): a first-order high-pass at \(Int(corner)) Hz is too gentle; use at least \(Int(2 * safe)) Hz or a steeper slope."
         }
     }
 
@@ -453,7 +471,7 @@ final class SpeakerRoutingEditorModel: ObservableObject {
         var next = configuration
         change(&next)
         guard next != configuration else { return }
-        if failsafeBlocks(next) { return }
+        if failsafeBlocks(next) || roleBlocks(next) { return }
         configuration = next
         refreshSubwoofers()
         onCommit?(next)
@@ -698,5 +716,72 @@ extension SpeakerRoutingEditorModel {
                 highPass: $0.highPass, lowPass: $0.lowPass, sampleRate: rate, groupDelayFrames: delay))?.twoBand == true
         }
         return (delay, twoBand)
+    }
+}
+
+
+// MARK: - E8 S12: driver roles
+
+enum RoleEditOutcome: Equatable {
+    case applied
+    /// Lowering the limit is allowed only after the user confirms the message.
+    case needsConfirmation(String)
+    case refused(String)
+}
+
+extension SpeakerRoutingEditorModel {
+    /// Fills a role on every way that has none, marked as inferred so the editor asks the user to confirm. Commits
+    /// nothing (the role rules have no effect on the render path); the next edit persists it.
+    func inferMissingRoles() {
+        let roles = configuration.inferredRoles()
+        var next = configuration
+        for s in next.speakers.indices {
+            for w in next.speakers[s].ways.indices where next.speakers[s].ways[w].role == nil {
+                next.speakers[s].ways[w].role = roles[next.speakers[s].ways[w].id]
+                next.speakers[s].ways[w].roleInferred = true
+            }
+        }
+        if next != configuration { configuration = next }
+    }
+
+    /// Ways whose role was inferred and not yet confirmed.
+    var unconfirmedRoleWays: [UUID] {
+        configuration.speakers.flatMap(\.ways).filter { $0.roleInferred == true }.map(\.id)
+    }
+
+    func confirmRole(way: UUID, speaker: UUID) {
+        editWay(way, speaker: speaker) { $0.roleInferred = nil }
+    }
+
+    /// Sets the role (confirming it). Refused with a reason when the way's high-pass would break the role's rule.
+    func setRole(_ role: DriverRole, way: UUID, speaker: UUID) {
+        editWay(way, speaker: speaker) {
+            if $0.role != role { $0.lowestSafeHz = nil }
+            $0.role = role
+            $0.roleInferred = nil
+        }
+    }
+
+    /// Changes the lowest safe frequency (nil returns to the role's default). Lowering it below the current limit asks
+    /// for confirmation first, naming the risk.
+    @discardableResult
+    func setLowestSafeHz(_ hz: Double?, way: UUID, speaker: UUID, confirmed: Bool = false) -> RoleEditOutcome {
+        guard let current = configuration.speakers.first(where: { $0.id == speaker })?.ways.first(where: { $0.id == way }),
+              current.role != nil else { return .refused("Set the driver's role first.") }
+        roleRefusal = nil
+        if let hz, !(hz.isFinite && hz > 0 && hz <= 20_000) { return .refused("The frequency is not valid.") }
+        let target = hz ?? current.role?.defaultLowestSafeHz
+        if let target, let limit = current.effectiveLowestSafeHz, target < limit, !confirmed {
+            return .needsConfirmation(
+                "Lowering the safe frequency to \(Int(target)) Hz lets deep bass reach this driver. "
+                + "A tweeter or midrange can be destroyed by it. Only do this if the driver's data sheet allows it.")
+        }
+        if target == nil && current.effectiveLowestSafeHz != nil && !confirmed {
+            return .needsConfirmation(
+                "Removing the limit lets any bass reach this driver, and a tweeter or midrange can be destroyed by it.")
+        }
+        editWay(way, speaker: speaker) { $0.lowestSafeHz = hz }
+        if let refusal = roleRefusal { return .refused(refusal) }
+        return .applied
     }
 }

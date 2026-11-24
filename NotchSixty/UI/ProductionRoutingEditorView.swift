@@ -10,6 +10,15 @@ struct ProductionRoutingEditorView: View {
     @StateObject private var model: SpeakerRoutingEditorModel
     @State private var actionError: String?
     @State private var interchangeNotes: [String] = []
+    @State private var pendingSafe: PendingSafeChange?
+
+    private struct PendingSafeChange: Identifiable {
+        var id = UUID()
+        var speaker: UUID
+        var way: UUID
+        var hz: Double?
+        var message: String
+    }
 
     init(engine: AudioIOEngine) {
         self.engine = engine
@@ -46,6 +55,10 @@ struct ProductionRoutingEditorView: View {
             pipelineCard
             camillaCard
             if !model.messages.isEmpty { messagesCard }
+            if let refusal = model.roleRefusal {
+                Label(refusal, systemImage: "exclamationmark.shield.fill")
+                    .font(.callout).foregroundStyle(.orange).textSelection(.enabled)
+            }
             if let refusal = model.failsafeRefusal {
                 Label(refusal, systemImage: "exclamationmark.shield.fill")
                     .font(.callout).foregroundStyle(.orange).textSelection(.enabled)
@@ -66,7 +79,22 @@ struct ProductionRoutingEditorView: View {
             } else {
                 model.failsafe = nil
             }
+            let commissioning = FeatureFlags().isEnabled(.activeCommissioning)
+            if model.context.enforceDriverRoles != commissioning { model.context.enforceDriverRoles = commissioning }
+            if commissioning { model.inferMissingRoles() }
             Self.syncContext(model, engine: engine)
+        }
+        .confirmationDialog(
+            "Lower the safe frequency?", isPresented: Binding(
+                get: { pendingSafe != nil }, set: { if !$0 { pendingSafe = nil } }),
+            presenting: pendingSafe
+        ) { change in
+            Button("Lower it", role: .destructive) {
+                model.setLowestSafeHz(change.hz, way: change.way, speaker: change.speaker, confirmed: true)
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: { change in
+            Text(change.message)
         }
         .onChange(of: engine.outputDeviceProfileConfiguration) { _, _ in Self.syncContext(model, engine: engine) }
         .onChange(of: engine.selectedOutputDevice) { _, _ in Self.syncContext(model, engine: engine) }
@@ -283,6 +311,7 @@ struct ProductionRoutingEditorView: View {
                 }
                 .disabled(way.eq.count >= Int(N60_PEQ_MAX_SECTIONS))
             }
+            if model.context.enforceDriverRoles { roleRow(speaker: speaker, way: way) }
             linearisationRow(way: way)
             ForEach(Array(way.eq.enumerated()), id: \.offset) { index, section in
                 HStack(spacing: 12) {
@@ -298,6 +327,39 @@ struct ProductionRoutingEditorView: View {
                     }
                     Button("Remove") { model.removeEQ(at: index, way: way.id, speaker: speaker.id) }
                 }
+            }
+        }
+    }
+
+    /// E8 S12: driver role, lowest safe frequency and the one-time confirmation of an inferred role.
+    private func roleRow(speaker: RoutedSpeaker, way: RoutedWay) -> some View {
+        ViewThatFits(in: .horizontal) {
+            roleControls(speaker: speaker, way: way)
+            VStack(alignment: .leading, spacing: 6) { roleControls(speaker: speaker, way: way) }
+        }
+    }
+
+    @ViewBuilder
+    private func roleControls(speaker: RoutedSpeaker, way: RoutedWay) -> some View {
+        HStack(spacing: 12) {
+            Picker("Driver", selection: Binding(
+                get: { way.role ?? .fullRange },
+                set: { model.setRole($0, way: way.id, speaker: speaker.id) })) {
+                ForEach(DriverRole.allCases, id: \.self) { Text($0.displayName).tag($0) }
+            }
+            .frame(width: 220)
+            if way.role != nil {
+                numberField("Lowest safe Hz", value: way.effectiveLowestSafeHz ?? 0) { v in
+                    let hz: Double? = v > 0 ? v : nil
+                    if case .needsConfirmation(let message) = model.setLowestSafeHz(
+                        hz, way: way.id, speaker: speaker.id) {
+                        pendingSafe = PendingSafeChange(speaker: speaker.id, way: way.id, hz: hz, message: message)
+                    }
+                }
+            }
+            if way.roleInferred == true {
+                Text("Suggested from this way's position.").font(.caption).foregroundStyle(.secondary)
+                Button("Confirm") { model.confirmRole(way: way.id, speaker: speaker.id) }
             }
         }
     }
