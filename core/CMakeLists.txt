@@ -531,6 +531,11 @@ add_executable(n60core_anc_design_test tests/test_anc_design.cpp)
 target_link_libraries(n60core_anc_design_test PRIVATE n60core)
 add_test(NAME n60core_anc_design COMMAND n60core_anc_design_test)
 
+# E21 S10b: passive ambient field analysis (n60/anc_design.h v2).
+add_executable(n60core_ambient_field_test tests/test_ambient_field.cpp)
+target_link_libraries(n60core_ambient_field_test PRIVATE n60core)
+add_test(NAME n60core_ambient_field COMMAND n60core_ambient_field_test)
+
 # E21 S3: FFT backends. test_fft_backend compares vDSP with the in-house transforms and checks vDSP allocates nothing in
 # forward and inverse; the portable-library copies keep the old FFT paths under test on Apple.
 add_executable(n60core_parity_suite_test tests/test_parity_suite.c)
@@ -575,7 +580,7 @@ else()
   add_test(NAME n60core_parity_suite COMMAND n60core_parity_suite_test)
   if(WIN32)
     # clang-cl (MSVC UCRT libm) rounds one binaural golden (layout 2, 48 kHz) across a 0.05 dB hash step that Linux and
-    # macOS agree on (nightly 23 Nov 2026). The equivalence, live-edit and acoustic cases still run; goldens on Windows are E21 G30.
+    # macOS agree on (nightly 23 Nov 2026). The equivalence, live-edit and acoustic cases still run; goldens on Windows are E21 G32.
     set_tests_properties(n60core_parity_suite PROPERTIES ENVIRONMENT "N60_PARITY_NO_GOLDENS=1")
   endif()
 endif()
