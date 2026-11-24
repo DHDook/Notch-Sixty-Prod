@@ -35,6 +35,7 @@
 #include "simd/simd.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstring>
 #include <new>
@@ -470,7 +471,11 @@ bool runCleanupSettled(CleanShared &S, bool dcOn, bool infraOn, bool mainsOn, bo
     return true;
 }
 
+std::atomic<bool> gBulkPassEnabled{true};
+
 }  // namespace
+
+void setCleanupBulkPassEnabledForTesting(bool enabled) { gBulkPassEnabled.store(enabled, std::memory_order_relaxed); }
 
 bool isCleanupKind(uint32_t kind) N60_RT_NONBLOCKING { return kind == N60_STAGE_CLEANUP; }
 
@@ -594,7 +599,7 @@ void runCleanup(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames
     float *L = lanes[r.laneA];
     float *R = lanes[r.laneB];
     const float bypass = S.bypassCoef;
-    if (runCleanupSettled(S, dcOn, infraOn, mainsOn, detOn, L, R, frames)) return;
+    if (gBulkPassEnabled.load(std::memory_order_relaxed) && runCleanupSettled(S, dcOn, infraOn, mainsOn, detOn, L, R, frames)) return;
     for (uint32_t i = 0; i < frames; ++i) {
         float left = L[i];
         float right = R[i];

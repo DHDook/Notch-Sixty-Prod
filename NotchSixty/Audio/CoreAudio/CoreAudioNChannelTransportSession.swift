@@ -1702,20 +1702,13 @@ extension CoreAudioNChannelTransportSession: QuietZoneRuntimeHost {
 
     @discardableResult
     func publishActiveQuietZoneGainRecord(_ record: N60ActiveQuietZoneGainRecord) -> UInt64 {
-        guard let feed = ancFeed else { return 0 }
-        var copy = record
-        return N60ActiveQuietZoneGainMailboxPublish(N60AncLaneFeedMailbox(feed.pointer), &copy)
+        ancFeed?.publishGainRecord(record) ?? 0
     }
 
-    func popActiveQuietZoneTelemetry() -> N60ActiveQuietZoneTelemetryRecord? {
-        guard let feed = ancFeed else { return nil }
-        var record = N60ActiveQuietZoneTelemetryRecord()
-        return N60ActiveQuietZoneTelemetryPop(N60AncLaneFeedTelemetry(feed.pointer), &record) ? record : nil
-    }
+    func popActiveQuietZoneTelemetry() -> N60ActiveQuietZoneTelemetryRecord? { ancFeed?.popTelemetry() }
 
     var activeQuietZoneMailboxStats: N60ActiveQuietZoneMailboxStats {
-        guard let feed = ancFeed else { return N60ActiveQuietZoneMailboxStats() }
-        return N60ActiveQuietZoneGainMailboxStats(N60AncLaneFeedMailbox(feed.pointer))
+        ancFeed?.mailboxStats ?? N60ActiveQuietZoneMailboxStats()
     }
 
     /// Latches the 20 ms fade (any thread). The graph's own guards also trip on their own; `howlGuardTripCount`
@@ -1758,159 +1751,64 @@ extension CoreAudioNChannelTransportSession: QuietZoneRuntimeHost {
     }
 
     func renewActiveQuietZoneLease(seconds: Double) {
-        guard let feed = ancFeed, seconds > 0 else { return }
-        N60AncLaneFeedRenewLease(feed.pointer, UInt64((outputFormat.sampleRate * seconds).rounded(.up)))
+        ancFeed?.renewLease(seconds: seconds, sampleRate: outputFormat.sampleRate)
     }
 
-    func releaseActiveQuietZoneLease() {
-        guard let feed = ancFeed else { return }
-        N60AncLaneFeedReleaseLease(feed.pointer)
-    }
+    func releaseActiveQuietZoneLease() { ancFeed?.releaseLease() }
 
     func setFeedForwardLiveWeights(left: [Float], right: [Float]) -> Bool {
-        guard let feed = ancFeed, !left.isEmpty, left.count == right.count else { return false }
-        return N60AncLaneFeedSetFeedForwardWeights(feed.pointer, left, right, UInt32(left.count))
+        ancFeed?.setFeedForwardWeights(left: left, right: right) ?? false
     }
 
-    func armFeedForwardLive(gate: FeedForwardLiveArmGate.Inputs) -> UInt32? {
-        guard let feed = ancFeed, FeedForwardLiveArmGate.decide(gate).isAllowed else { return nil }
-        return N60AncLaneFeedFeedForwardArm(feed.pointer, gate.leadSeconds, gate.requiredLeadSeconds)
-    }
+    func armFeedForwardLive(gate: FeedForwardLiveArmGate.Inputs) -> UInt32? { ancFeed?.armFeedForward(gate: gate) }
 
     func setFeedForwardLiveEcho(_ payload: FeedForwardLiveEchoPayload?, timingFrames: UInt32) -> Bool {
-        guard let feed = ancFeed else { return false }
-        guard let payload else { return N60AncLaneFeedSetFeedForwardEcho(feed.pointer, nil) }
-        guard payload.isValid else { return false }
-        let bulk = payload.bulk
-        let ok = payload.left.withUnsafeBufferPointer { left in
-            payload.right.withUnsafeBufferPointer { right in
-                var echo = N60FeedForwardLiveEcho(
-                    bulkDelay: (bulk[0], bulk[1]),
-                    tapCount: (UInt32(left.count), UInt32(right.count)),
-                    taps: (left.baseAddress, right.baseAddress))
-                return N60AncLaneFeedSetFeedForwardEcho(feed.pointer, &echo)
-            }
-        }
-        return ok && N60AncLaneFeedSetFeedForwardEchoTiming(feed.pointer, timingFrames)
+        ancFeed?.setFeedForwardEcho(payload, timingFrames: timingFrames) ?? false
     }
 
-    func disarmFeedForwardLive() {
-        guard let feed = ancFeed else { return }
-        N60AncLaneFeedFeedForwardDisarm(feed.pointer)
-    }
+    func disarmFeedForwardLive() { ancFeed?.disarmFeedForward() }
 
     /// The feed has no separate reference-lost latch: losing the reference disarms the feed-forward filter.
     func markFeedForwardLiveReferenceLost() { disarmFeedForwardLive() }
 
-    func feedForwardLiveStatus() -> N60RenderKernelFeedForwardLiveStatus? {
-        guard let feed = ancFeed else { return nil }
-        var status = N60RenderKernelFeedForwardLiveStatus()
-        status.attached = true
-        status.filter = N60AncLaneFeedFeedForwardStatus(feed.pointer)
-        status.outputIndex = N60AncLaneFeedReferenceOutputIndex(feed.pointer)
-        status.referenceUnderruns = N60AncLaneFeedGetStatus(feed.pointer).referenceUnderruns
-        return status
-    }
+    func feedForwardLiveStatus() -> N60RenderKernelFeedForwardLiveStatus? { ancFeed?.feedForwardStatus() }
 
     func pushFeedForwardLiveReference(startIndex: UInt64, samples: [Float]) -> UInt64? {
-        guard let feed = ancFeed, !samples.isEmpty else { return nil }
-        return N60AncLaneFeedPushReference(feed.pointer, startIndex, samples, UInt32(samples.count))
+        ancFeed?.pushFeedForwardReference(startIndex: startIndex, samples: samples)
     }
 
     var ambientReferenceSampleRate: Double { outputFormat.sampleRate }
 
     // MARK: Reference taps (E26 S7b2c, G26)
 
-    private func tapSnapshot(_ tap: N60AncLaneFeedTap) -> N60AncLaneFeedTapSnapshot? {
-        guard let feed = ancFeed else { return nil }
-        return N60AncLaneFeedTapGetSnapshot(feed.pointer, tap)
-    }
-
-    private func readTap(_ tap: N60AncLaneFeedTap, maximumFrames: Int) -> [N60AncLaneFeedFramePair] {
-        guard let feed = ancFeed, maximumFrames > 0,
-              let snapshot = tapSnapshot(tap) else { return [] }
-        let capacity = min(maximumFrames, Int(snapshot.availableFrames))
-        guard capacity > 0 else { return [] }
-        var result = [N60AncLaneFeedFramePair](repeating: N60AncLaneFeedFramePair(), count: capacity)
-        let count = result.withUnsafeMutableBufferPointer {
-            N60AncLaneFeedTapRead(feed.pointer, tap, $0.baseAddress!, UInt32($0.count))
-        }
-        if Int(count) < result.count { result.removeLast(result.count - Int(count)) }
-        return result
-    }
-
-    func setAmbientReferenceDemand(_ enabled: Bool) {
-        guard let feed = ancFeed else { return }
-        N60AncLaneFeedSetTapDemand(feed.pointer, N60AncLaneFeedTapAmbient, enabled)
-    }
-
-    func ambientReferenceSnapshot() -> N60AmbientPlaybackReferenceSnapshot? {
-        guard let s = tapSnapshot(N60AncLaneFeedTapAmbient) else { return nil }
-        return N60AmbientPlaybackReferenceSnapshot(
-            enabled: s.enabled, availableFrames: s.availableFrames,
-            capturedFrames: s.capturedFrames, droppedFrames: s.droppedFrames)
-    }
-
-    func discardAmbientReferenceFrames() {
-        guard let feed = ancFeed else { return }
-        N60AncLaneFeedTapDiscard(feed.pointer, N60AncLaneFeedTapAmbient)
-    }
+    func setAmbientReferenceDemand(_ enabled: Bool) { ancFeed?.setTapDemand(N60AncLaneFeedTapAmbient, enabled) }
+    func ambientReferenceSnapshot() -> N60AmbientPlaybackReferenceSnapshot? { ancFeed?.ambientSnapshot() }
+    func discardAmbientReferenceFrames() { ancFeed?.discardTap(N60AncLaneFeedTapAmbient) }
 
     func readAmbientReferenceFrames(maximumFrames: Int) -> [N60AmbientPlaybackReferenceFrame] {
-        readTap(N60AncLaneFeedTapAmbient, maximumFrames: maximumFrames)
-            .map { N60AmbientPlaybackReferenceFrame(left: $0.left, right: $0.right) }
+        ancFeed?.readAmbientFrames(maximumFrames: maximumFrames) ?? []
     }
 
-    func setActiveQuietZoneReferenceDemand(_ enabled: Bool) {
-        guard let feed = ancFeed else { return }
-        N60AncLaneFeedSetTapDemand(feed.pointer, N60AncLaneFeedTapQuietZone, enabled)
-    }
+    func setActiveQuietZoneReferenceDemand(_ enabled: Bool) { ancFeed?.setTapDemand(N60AncLaneFeedTapQuietZone, enabled) }
 
-    func activeQuietZoneReferenceSnapshot() -> N60ActiveQuietZoneReferenceSnapshot? {
-        guard let s = tapSnapshot(N60AncLaneFeedTapQuietZone) else { return nil }
-        return N60ActiveQuietZoneReferenceSnapshot(
-            enabled: s.enabled, availableFrames: s.availableFrames,
-            capturedFrames: s.capturedFrames, droppedFrames: s.droppedFrames)
-    }
+    func activeQuietZoneReferenceSnapshot() -> N60ActiveQuietZoneReferenceSnapshot? { ancFeed?.quietZoneReferenceSnapshot() }
 
-    func discardActiveQuietZoneReferenceFrames() {
-        guard let feed = ancFeed else { return }
-        N60AncLaneFeedTapDiscard(feed.pointer, N60AncLaneFeedTapQuietZone)
-    }
+    func discardActiveQuietZoneReferenceFrames() { ancFeed?.discardTap(N60AncLaneFeedTapQuietZone) }
 
     func readActiveQuietZoneReferenceFrames(maximumFrames: Int) -> [N60ActiveQuietZoneReferenceFrame] {
-        readTap(N60AncLaneFeedTapQuietZone, maximumFrames: maximumFrames)
-            .map { N60ActiveQuietZoneReferenceFrame(left: $0.left, right: $0.right) }
+        ancFeed?.readQuietZoneReferenceFrames(maximumFrames: maximumFrames) ?? []
     }
 
     var activeQuietZoneReferenceSampleRate: Double { outputFormat.sampleRate }
 
-    func setSpeakerDriveDemand(_ enabled: Bool) {
-        guard let feed = ancFeed else { return }
-        N60AncLaneFeedSetTapDemand(feed.pointer, N60AncLaneFeedTapSpeakerDrive, enabled)
-    }
-
-    func speakerDriveSnapshot() -> N60SpeakerDriveSnapshot? {
-        guard let s = tapSnapshot(N60AncLaneFeedTapSpeakerDrive) else { return nil }
-        return N60SpeakerDriveSnapshot(
-            enabled: s.enabled, availableFrames: s.availableFrames, availableAnchors: s.availableAnchors,
-            capturedFrames: s.capturedFrames, droppedFrames: s.droppedFrames, droppedAnchors: s.droppedAnchors)
-    }
+    func setSpeakerDriveDemand(_ enabled: Bool) { ancFeed?.setTapDemand(N60AncLaneFeedTapSpeakerDrive, enabled) }
+    func speakerDriveSnapshot() -> N60SpeakerDriveSnapshot? { ancFeed?.speakerDriveSnapshot() }
 
     func readSpeakerDriveAnchors(maximum: Int) -> [N60SpeakerDriveAnchor] {
-        guard let feed = ancFeed, maximum > 0 else { return [] }
-        var raw = [N60AncLaneFeedAnchor](repeating: N60AncLaneFeedAnchor(), count: maximum)
-        let count = raw.withUnsafeMutableBufferPointer {
-            N60AncLaneFeedAnchorsRead(feed.pointer, $0.baseAddress!, UInt32($0.count))
-        }
-        return raw.prefix(Int(count)).map {
-            N60SpeakerDriveAnchor(outputHostTime: $0.outputHostTime, firstFrameIndex: $0.firstFrameIndex,
-                                  frames: $0.frames, reserved: $0.reserved)
-        }
+        ancFeed?.readSpeakerDriveAnchors(maximum: maximum) ?? []
     }
 
     func readSpeakerDriveFrames(maximumFrames: Int) -> [N60AmbientPlaybackReferenceFrame] {
-        readTap(N60AncLaneFeedTapSpeakerDrive, maximumFrames: maximumFrames)
-            .map { N60AmbientPlaybackReferenceFrame(left: $0.left, right: $0.right) }
+        ancFeed?.readSpeakerDriveFrames(maximumFrames: maximumFrames) ?? []
     }
 }

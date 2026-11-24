@@ -120,7 +120,7 @@ struct BqState {
 
 float smoothToward(float current, float target, float coef) { return target + coef * (current - target); }
 double smoothTowardD(double current, double target, double coef) { return target + coef * (current - target); }
-bool nearZero(float v) { return std::fabs(v) <= kParkEps; }
+bool nearZero(double v) { return std::fabs(v) <= kParkEps; }
 Bq identityBq() { return Bq{1.0, 0.0, 0.0, 0.0, 0.0}; }
 
 double runBqD(const Bq &c, BqState &s, double in) {
@@ -193,7 +193,7 @@ float linearToDb(float x) { return 20.0f * std::log10(std::fmax(x, kEpsilon)); }
 float clampf(float v, float lo, float hi) { return std::fmin(std::fmax(v, lo), hi); }
 
 struct LdShared {
-    float bypassCoef;
+    double bypassCoef;  // E23 S1c (G6): the 5 ms bypass and 50 ms response poles are double
     float seen[kParams];  // parameter values the derived coefficients were last built from
     // match
     Bq kHp, kShelf;
@@ -206,9 +206,10 @@ struct LdShared {
     uint32_t matchParked;
     // contour
     Bq lowShelf, highShelf, lowBand, highBand;
-    float responsePole;
+    double responsePole;
     BqState lowShL, lowShR, highShL, highShR, lowBandL, lowBandR, highBandL, highBandR;
-    float mix, lowGainDb, highGainDb, phons;
+    double mix, lowGainDb, highGainDb;
+    float phons;
     uint32_t contourParked;
     // leveler
     Bq bandHp, bandLp;
@@ -359,7 +360,7 @@ void matchSample(LdShared &S, const float *p, float *left, float *right, double 
     }
     if (!enabled) {
         if (!nearZero(S.matchGainDb)) {
-            S.matchGainDb = smoothTowardD(S.matchGainDb, 0.0f, S.bypassCoef);
+            S.matchGainDb = smoothTowardD(S.matchGainDb, 0.0, S.bypassCoef);
             if (!nearZero(S.matchGainDb)) {
                 const float gain = dbToLinear(S.matchGainDb);
                 *left *= gain;
@@ -420,22 +421,22 @@ void contourSample(LdShared &S, const float *p, float *left, float *right, doubl
             volumeScale = (kFlatContourDb - masterDb) / (kFlatContourDb - kFullContourDb);
             volumeScale = clampf(volumeScale, 0.0f, 1.0f);
         }
-        const float target = enabled ? volumeScale : 0.0f;
-        S.mix = smoothToward(S.mix, target, S.bypassCoef);
-        S.lowGainDb = kMaxBassDb * strength * S.mix;
-        S.highGainDb = kMaxTrebleDb * strength * S.mix;
+        const double target = enabled ? double(volumeScale) : 0.0;
+        S.mix = smoothTowardD(S.mix, target, S.bypassCoef);
+        S.lowGainDb = double(kMaxBassDb) * strength * S.mix;
+        S.highGainDb = double(kMaxTrebleDb) * strength * S.mix;
         S.phons = 0.0f;  // the kernel's simple contour has no reference phons (telemetry 0)
         if (!enabled && nearZero(S.mix)) {
-            S.mix = 0.0f;
-            S.lowGainDb = 0.0f;
-            S.highGainDb = 0.0f;
+            S.mix = 0.0;
+            S.lowGainDb = 0.0;
+            S.highGainDb = 0.0;
             S.phons = 0.0f;
             clearContourSimple(S);
             S.contourParked = 1;
             return;
         }
-        *left = dryL + (wetL - dryL) * S.mix;
-        *right = dryR + (wetR - dryR) * S.mix;
+        *left = dryL + (wetL - dryL) * static_cast<float>(S.mix);
+        *right = dryR + (wetR - dryR) * static_cast<float>(S.mix);
         return;
     }
     const float lowL = pre != nullptr ? pre->a0[j] : runBq(S.lowBand, S.lowBandL, dryL);
@@ -461,24 +462,24 @@ void contourSample(LdShared &S, const float *p, float *left, float *right, doubl
         lowTarget = -std::fmin(p[kMaxCut], surplus * kLowCutDbPerPhon) * strength;
         highTarget = -std::fmin(p[kMaxCut], surplus * kHighCutDbPerPhon) * strength;
     }
-    const float coef = enabled ? S.responsePole : S.bypassCoef;
-    S.lowGainDb = smoothToward(S.lowGainDb, lowTarget, coef);
-    S.highGainDb = smoothToward(S.highGainDb, highTarget, coef);
+    const double coef = enabled ? S.responsePole : S.bypassCoef;
+    S.lowGainDb = smoothTowardD(S.lowGainDb, lowTarget, coef);
+    S.highGainDb = smoothTowardD(S.highGainDb, highTarget, coef);
     if (!enabled && nearZero(S.lowGainDb) && nearZero(S.highGainDb)) {
-        S.lowGainDb = 0.0f;
-        S.highGainDb = 0.0f;
-        S.mix = 0.0f;
+        S.lowGainDb = 0.0;
+        S.highGainDb = 0.0;
+        S.mix = 0.0;
         S.phons = 0.0f;
         clearContourBands(S);
         S.contourParked = 1;
         return;
     }
-    const float lowGain = dbToLinear(S.lowGainDb);
-    const float highGain = dbToLinear(S.highGainDb);
+    const float lowGain = dbToLinear(static_cast<float>(S.lowGainDb));
+    const float highGain = dbToLinear(static_cast<float>(S.highGainDb));
     *left = dryL + lowL * (lowGain - 1.0f) + highL * (highGain - 1.0f);
     *right = dryR + lowR * (lowGain - 1.0f) + highR * (highGain - 1.0f);
     const float normalization = std::fmax(p[kMaxBoost], std::fmax(p[kMaxCut], 1.0f));
-    S.mix = clampf(std::fmax(std::fabs(S.lowGainDb), std::fabs(S.highGainDb)) / normalization, 0.0f, 1.0f);
+    S.mix = std::fmin(std::fmax(std::fmax(std::fabs(S.lowGainDb), std::fabs(S.highGainDb)) / double(normalization), 0.0), 1.0);
 }
 
 // `dialL`/`dialR` are the band-pass outputs of the chunk pre-pass for frame j (null arrays on the scalar fade-out path).
@@ -523,7 +524,7 @@ void levelerSample(LdShared &S, const float *p, float *left, float *right, const
         const float fraction = p[kBoostRatio] > 1.0f ? (1.0f - 1.0f / p[kBoostRatio]) : 0.0f;
         targetBoost = std::fmin(p[kLevMaxBoost], excess * fraction) * S.confidence;
     }
-    const double coef = !enabled ? double(S.bypassCoef) : (targetBoost > S.boostDb ? S.levAttackPole : S.levReleasePole);
+    const double coef = !enabled ? S.bypassCoef : (targetBoost > S.boostDb ? S.levAttackPole : S.levReleasePole);
     S.boostDb = smoothTowardD(S.boostDb, targetBoost, coef);
     if (!enabled && nearZero(S.boostDb)) {
         S.boostDb = 0.0f;
@@ -596,7 +597,7 @@ void levelerSampleCentre(LdShared &S, const float *p, float *left, float *right,
         const float fraction = p[kBoostRatio] > 1.0f ? (1.0f - 1.0f / p[kBoostRatio]) : 0.0f;
         targetBoost = std::fmin(p[kLevMaxBoost], excess * fraction) * S.confidence;
     }
-    const double coef = !enabled ? double(S.bypassCoef) : (targetBoost > S.boostDb ? S.levAttackPole : S.levReleasePole);
+    const double coef = !enabled ? S.bypassCoef : (targetBoost > S.boostDb ? S.levAttackPole : S.levReleasePole);
     S.boostDb = smoothTowardD(S.boostDb, targetBoost, coef);
     if (!enabled && nearZero(S.boostDb)) {
         S.boostDb = 0.0f;
@@ -682,7 +683,7 @@ void loudnessInit(SnapHeader *h, const StageRec &r) {
     const float *p = paramsOf(h, r);
     const double rate = h->sampleRate;
     LdShared &S = *new (sharedState(h, r)) LdShared{};
-    S.bypassCoef = static_cast<float>(std::exp(-1.0 / (rate * (5.0 / 1000.0))));
+    S.bypassCoef = std::exp(-1.0 / (rate * (5.0 / 1000.0)));
     std::memcpy(S.seen, p, sizeof S.seen);
     designMatch(S, rate, p);
     if (!designBq(Kind::HighPass, rate, kKHighPassHz, 0.0, kKHighPassQ, S.kHp)) S.kHp = identityBq();
@@ -690,7 +691,7 @@ void loudnessInit(SnapHeader *h, const StageRec &r) {
     designContour(S, rate, p);
     if (!designBq(Kind::LowPass, rate, kLowShelfHz, 0.0, kQ, S.lowBand)) S.lowBand = identityBq();
     if (!designBq(Kind::HighPass, rate, kHighShelfHz, 0.0, kQ, S.highBand)) S.highBand = identityBq();
-    S.responsePole = poleForMs(rate, kGainResponseMs);
+    S.responsePole = poleForMsD(rate, kGainResponseMs);
     designLeveler(S, rate, p);
     S.centreRamp = poleForMsD(rate, kCentreRampMs);
     S.matchParked = 1;
@@ -786,9 +787,9 @@ void runLoudness(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frame
     }
     store(S, kTLufs, meanSquareLufs(S.meanSquare));
     store(S, kTMatch, S.matchGainDb);
-    store(S, kTScale, S.mix);
-    store(S, kTLowComp, S.lowGainDb);
-    store(S, kTHighComp, S.highGainDb);
+    store(S, kTScale, static_cast<float>(S.mix));
+    store(S, kTLowComp, static_cast<float>(S.lowGainDb));
+    store(S, kTHighComp, static_cast<float>(S.highGainDb));
     store(S, kTPhons, S.phons);
     store(S, kTProg, S.progDbfs);
     store(S, kTBand, S.bandDbfs);

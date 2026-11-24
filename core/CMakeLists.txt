@@ -323,6 +323,7 @@ add_test(NAME n60core_analyser_tap COMMAND n60core_analyser_tap_test)
 # E6 S12a: cleanup stage (DC, infrasonic, mains notch, hum detector).
 add_executable(n60core_cleanup_test tests/test_cleanup.cpp)
 target_link_libraries(n60core_cleanup_test PRIVATE n60core)
+target_include_directories(n60core_cleanup_test PRIVATE src)
 add_test(NAME n60core_cleanup COMMAND n60core_cleanup_test)
 
 # E6 S12b: image (stereo mode, widener) and de-ess (de-harsh, de-esser) stages (ABI v23).
