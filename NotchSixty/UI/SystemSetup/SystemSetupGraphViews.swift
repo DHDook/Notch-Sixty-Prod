@@ -115,7 +115,7 @@ struct SystemSetupTermNotes: View {
             GroupBox("In plain words") {
                 VStack(alignment: .leading, spacing: 4) {
                     ForEach(terms) { term in
-                        (Text(term.labelWithName).bold() + Text(": \(term.explanation)"))
+                        Text("\(Text(term.labelWithName).bold()): \(term.explanation)")
                             .font(.caption).foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
