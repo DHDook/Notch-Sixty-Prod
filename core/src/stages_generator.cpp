@@ -40,6 +40,7 @@ namespace {
 constexpr double kPi = 3.14159265358979323846264338327950288;
 constexpr size_t kAlign = 16;
 constexpr uint32_t kParams = 11;
+constexpr uint32_t kParamsCued = 13;  // ABI v48: adds [11] solo and [12] cue (sweep only)
 constexpr double kCeilingMaxDb = -6.0;
 constexpr float kMaxAutoStopSeconds = 600.0f;
 constexpr double kRampSeconds = 0.1;
@@ -59,7 +60,9 @@ enum Param : uint32_t {
     kSeed = 7,       // 0..16777216
     kMuteOthers = 8, // 0/1
     kActive = 9,     // 0/1, live
-    kAutoStop = 10   // seconds, (0, 600]
+    kAutoStop = 10,  // seconds, (0, 600]
+    kSolo = 11,      // ABI v48, live: 0 every mask lane, k plays only the k-th mask lane
+    kCue = 12        // ABI v48, live: integer 0..16777216, each change starts the sweep
 };
 
 size_t up(size_t v) { return (v + (kAlign - 1)) & ~(kAlign - 1); }
@@ -79,6 +82,8 @@ struct GenShared {
     uint32_t tableLen;  // 0 when the type has no table
     uint32_t wasActive;
     uint32_t expired;
+    uint32_t seenCue;   // last cue value seen (ABI v48)
+    uint32_t cuePending;
     uint32_t pad;
 };
 
@@ -145,11 +150,12 @@ double targetAmp(const float *p) {
 void startStreams(SnapHeader *h, const StageRec &r, GenShared &S) {
     const float *p = paramsOf(h, r);
     const bool sweep = static_cast<uint32_t>(p[kType]) == N60_GENERATOR_SWEEP;
+    const bool cued = r.paramCount >= kParamsCued;  // a cued sweep starts silent; only a cue plays it
     for (uint32_t l = 0; l < r.laneCount; ++l) {
         GenLane &g = *reinterpret_cast<GenLane *>(laneState(h, r, l));
         pcgSeed(g, static_cast<uint64_t>(p[kSeed]), l);
         g.phase = 0.0;
-        g.pos = S.tableLen != 0 && sweep ?  0u : S.tableLen != 0 ? static_cast<uint32_t>((uint64_t(l) * 0x9E3779B1u) & (S.tableLen - 1)) : 0u;
+        g.pos = cued ? S.tableLen : S.tableLen != 0 && sweep ?  0u : S.tableLen != 0 ? static_cast<uint32_t>((uint64_t(l) * 0x9E3779B1u) & (S.tableLen - 1)) : 0u;
     }
     S.elapsed = 0;
     S.expired = 0;
@@ -168,7 +174,7 @@ n60_status validateGeneratorStage(const n60_stage_desc &s, double rate, uint32_t
     } else if (s.laneA != N60_LANE_ALL && s.laneA >= outCh) {
         return N60_STATUS_BAD_ARGUMENT;
     }
-    if (s.params == nullptr || s.paramCount != kParams) return N60_STATUS_BAD_ARGUMENT;
+    if (s.params == nullptr || (s.paramCount != kParams && s.paramCount != kParamsCued)) return N60_STATUS_BAD_ARGUMENT;
     const float *p = s.params;
     if (!isInt(p[kType]) || p[kType] < 0.0f || p[kType] > static_cast<float>(N60_GENERATOR_SWEEP)) {
         return N60_STATUS_BAD_ARGUMENT;
@@ -196,6 +202,15 @@ n60_status validateGeneratorStage(const n60_stage_desc &s, double rate, uint32_t
     if (p[kMuteOthers] != 0.0f && p[kMuteOthers] != 1.0f) return N60_STATUS_BAD_ARGUMENT;
     if (p[kActive] != 0.0f && p[kActive] != 1.0f) return N60_STATUS_BAD_ARGUMENT;
     if (!inR(p[kAutoStop], 0.001, kMaxAutoStopSeconds)) return N60_STATUS_BAD_ARGUMENT;
+    if (s.paramCount == kParamsCued) {
+        uint32_t lanes = 1;
+        if (s.laneMask != 0) lanes = static_cast<uint32_t>(std::popcount(s.laneMask));
+        else if (s.laneA == N60_LANE_ALL) lanes = outCh;
+        if (type != N60_GENERATOR_SWEEP || !isInt(p[kSolo]) || !inR(p[kSolo], 0.0, double(lanes)) ||
+            !isInt(p[kCue]) || !inR(p[kCue], 0.0, 16777216.0)) {
+            return N60_STATUS_BAD_ARGUMENT;
+        }
+    }
     return N60_STATUS_OK;
 }
 
@@ -214,6 +229,8 @@ void generatorInit(SnapHeader *h, const StageRec &r) {
     S.gainCur = S.gainTarget = targetAmp(p);
     S.mix = 0.0;
     S.wasActive = 0;
+    S.cuePending = 0;
+    S.seenCue = r.paramCount >= kParamsCued ? static_cast<uint32_t>(p[kCue]) : 0u;  // a rebuild never replays an old cue
     S.tableLen = tableLengthFor(type, p, h->sampleRate);
 
     if (type == N60_GENERATOR_SWEEP) {
@@ -277,6 +294,33 @@ void runGenerator(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t fram
         }
     }
     S.wasActive = wantActive ? 1u : 0u;
+
+    if (r.paramCount >= kParamsCued) {
+        // ABI v48 cue: a changed cue is remembered, and starts the sweep from its first sample once no selected lane is
+        // still playing one (a sweep is never cut). Solo 0 plays every mask lane, k plays only the k-th. A cue restarts the
+        // auto-stop timer. Block granularity: the sweep starts at the first sample of a block.
+        const uint32_t cue = static_cast<uint32_t>(p[kCue]);
+        if (cue != S.seenCue) {
+            S.seenCue = cue;
+            S.cuePending = 1;
+        }
+        if (S.cuePending != 0 && wantActive) {
+            bool playing = false;
+            for (uint32_t l = 0; l < r.laneCount && !playing; ++l) {
+                playing = reinterpret_cast<const GenLane *>(laneState(h, r, l))->pos < S.tableLen;
+            }
+            if (!playing) {
+                const uint32_t solo = static_cast<uint32_t>(p[kSolo]);
+                for (uint32_t l = 0; l < r.laneCount; ++l) {
+                    GenLane &g = *reinterpret_cast<GenLane *>(laneState(h, r, l));
+                    g.pos = (solo == 0 || solo == l + 1) ? 0u : S.tableLen;
+                }
+                S.cuePending = 0;
+                S.elapsed = 0;
+                S.expired = 0;
+            }
+        }
+    }
 
     const double tgt = targetAmp(p);
     if (tgt != S.gainTarget) {
@@ -358,6 +402,8 @@ n60_status validateGeneratorParam(const SnapHeader *h, const StageRec &r, uint32
     switch (idx) {
         case kLevel: return inR(value, -120.0, 0.0) ? N60_STATUS_OK : N60_STATUS_BAD_ARGUMENT;
         case kActive: return (value == 0.0f || value == 1.0f) ? N60_STATUS_OK : N60_STATUS_BAD_ARGUMENT;
+        case kSolo: return (isInt(value) && inR(value, 0.0, double(r.laneCount))) ? N60_STATUS_OK : N60_STATUS_BAD_ARGUMENT;
+        case kCue: return (isInt(value) && inR(value, 0.0, 16777216.0)) ? N60_STATUS_OK : N60_STATUS_BAD_ARGUMENT;
         default: return N60_STATUS_UNSUPPORTED;
     }
 }
