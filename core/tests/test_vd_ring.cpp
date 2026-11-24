@@ -187,32 +187,34 @@ static void testThreads() {
     auto mem = makeRing(2, 48000);
     n60_vd_ring_reader reader;
     n60_vd_ring_reader_attach(&reader, mem.data(), mem.size(), 1024);
-    std::atomic<bool> stop{false};
+    std::atomic<bool> done{false};
+    std::atomic<uint64_t> published{0};
     std::thread writer([&] {
         uint64_t n = 0;
         std::vector<float> block(480 * 2);
-        while (!stop.load()) {
+        for (int burst = 0; burst < 4000; ++burst) {  // a fixed amount of audio, then done: no wall-clock dependence
             for (uint32_t i = 0; i < 480; ++i) { block[i * 2] = sampleAt(n + i, 0); block[i * 2 + 1] = sampleAt(n + i, 1); }
             n60_vd_ring_write(mem.data(), block.data(), 480, 1);
             n += 480;
+            published.store(n);
             std::this_thread::yield();
         }
+        done.store(true);
     });
+    while (published.load() < 4096) std::this_thread::yield();  // the writer has started; bounded by its fixed work
     std::vector<float> out(300 * 2);
     uint64_t bad = 0, real = 0;
-    double lastFrame = -1;
-    for (int i = 0; i < 20000; ++i) {
+    // Read while the writer runs, then drain what is left: after `done` the ring holds far more than the prime level,
+    // so audio is guaranteed to arrive however the threads were scheduled.
+    bool finished = false;
+    while (!finished) {
+        finished = done.load();
         const uint32_t got = n60_vd_ring_read(&reader, out.data(), 300, 2);
         for (uint32_t k = 0; k < got; ++k) {
-            const float v = out[k * 2];
-            const double f = std::floor(v);  // frame % 100003; channel offset adds 0.000
-            if (std::fabs(out[k * 2 + 1] - (v + 0.001f)) > 1e-3f) ++bad;
-            if (lastFrame >= 0 && f != lastFrame + 1 && !(lastFrame == 100002 && f == 0)) { /* a gap after a drop is allowed */ }
-            lastFrame = f;
+            if (std::fabs(out[k * 2 + 1] - (out[k * 2] + 0.001f)) > 1e-3f) ++bad;
             ++real;
         }
     }
-    stop = true;
     writer.join();
     CHECK(bad == 0, "no torn frames across threads");
     CHECK(real > 0, "audio arrived");
