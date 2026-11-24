@@ -74,6 +74,23 @@ extension AudioIOEngine {
 
     func disarmMIMOTreatment() { mimoGraphTreatment.userDisarm() }
 
+    /// E19 S12b (D11): the ticket for the treated measurement (SQ1 to SQ4 must pass on the evidence). Never arms; with the
+    /// production registry (no engine baseline until E22) no ticket is issued.
+    @discardableResult
+    func issueMIMOProbeTicket(
+        evidence: MIMOTreatmentSelfQualificationEvidence, registry: MIMOTreatmentQualificationRegistry = .production
+    ) -> Result<MIMOTreatmentProbeTicket, MIMOTreatmentProbeRefusal> {
+        mimoGraphTreatment.issueProbeTicket(
+            context: mimoTreatmentContext(), videoLatency: mimoVideoLatencyInput, evidence: evidence, registry: registry)
+    }
+
+    /// E19 S12b: the single user action that arms the staged design for the treated measurement only (same gates, ticket in
+    /// place of a permit, 3 s fade-in, 120 s per seat).
+    func requestMIMOProbeArm() async throws {
+        try await mimoGraphTreatment.requestProbeArm(
+            context: mimoTreatmentContext(), refresh: { [unowned self] in self.mimoTreatmentContext() })
+    }
+
     /// Called while a new session's configuration is built: attaches the staged stage (disarmed, held) when the flag is on
     /// and the graph accepts it. A graph that refuses it (a stage that does not match the routing, Quiet Zone actuators, no hard limit) runs without the
     /// stage, so audio is never lost to the treatment, and the arm gate "stage attached" stays closed.
@@ -125,6 +142,10 @@ extension AudioIOEngine {
         let context = mimoTreatmentContext()
         // The lease ends with the session: a stopped or failed start leaves no stale keeper behind.
         if lifecycle.state == .idle { stopMIMOPoll() }
-        mimoGraphTreatment.observe(context: context, readback: nChannelTransportSession?.mimoReadback())
+        // The hard limit is read (and reset) only while a probe is armed, so no other reader loses its values.
+        let hardLimit: Double? = mimoGraphTreatment.probeSession.flatMap { $0.isLive && $0.armed } == true
+            ? outputProtectionReadings().map { Double($0.hardLimitGainReductionDB) }.max() : nil
+        mimoGraphTreatment.observe(
+            context: context, readback: nChannelTransportSession?.mimoReadback(), hardLimitGainReductionDB: hardLimit)
     }
 }

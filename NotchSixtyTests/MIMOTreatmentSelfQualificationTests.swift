@@ -91,9 +91,17 @@ final class MIMOTreatmentSelfQualificationTests: XCTestCase {
         _ t: MIMOGraphTreatment, _ design: UnifiedGraphMIMOStage, _ e: MIMOTreatmentSelfQualificationEvidence?, rate: Double,
         verification: MIMOTreatmentVerificationResult? = nil, registry reg: MIMOTreatmentQualificationRegistry? = nil
     ) -> Result<MIMOGraphTreatment.Permit, MIMOTreatmentPermitRefusal> {
-        t.issuePermit(
+        // E19 S12b: SQ5 needs the probe's passing result taken on this exact design; the probe itself is in MIMOTreatmentProbeTests.
+        var withProbe = e
+        if var ev = withProbe {
+            t.updateSelfQualificationEvidence(ev)
+            ev.probeResult = MIMOTreatmentProbeResult(
+                fingerprint: t.currentFingerprint(design, context(rate: rate), selfQualified: true), failures: [])
+            withProbe = ev
+        }
+        return t.issuePermit(
             context: context(rate: rate), videoLatency: .known(videoLatencyMode: false), verification: verification ?? decay(),
-            acceptance: nil, registry: reg ?? registry(for: design), selfQualification: e)
+            acceptance: nil, registry: reg ?? registry(for: design), selfQualification: withProbe)
     }
 
     private func failures(_ r: Result<MIMOGraphTreatment.Permit, MIMOTreatmentPermitRefusal>) -> [MIMOTreatmentSelfQualificationFailure] {

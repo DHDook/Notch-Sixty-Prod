@@ -131,6 +131,18 @@ extension MIMOGraphTreatment {
             let failures = MIMOTreatmentSelfQualification.evaluate(
                 selfQualification, decimation: stage.filters.decimation, registry: registry)
             guard failures.isEmpty else { return refuse(.selfQualificationRefused(failures)) }
+            // SQ5 (E19 S12b): the probe's own result, taken on this exact design, output and chain.
+            let previousDigest = selfQualificationEvidenceDigest
+            selfQualificationEvidenceDigest = selfQualification.bindingDigest
+            let boundFingerprint = currentFingerprint(stage, context, selfQualified: true)
+            guard let probe = selfQualification.probeResult, probe.fingerprint == boundFingerprint else {
+                selfQualificationEvidenceDigest = previousDigest
+                return refuse(.selfQualificationRefused([.treatedProbeMissing]))
+            }
+            guard probe.passed else {
+                selfQualificationEvidenceDigest = previousDigest
+                return refuse(.selfQualificationRefused([.treatedProbeFailed(probe.failures)]))
+            }
             basis = .selfQualification
             evidenceDigest = selfQualification.bindingDigest
         }
