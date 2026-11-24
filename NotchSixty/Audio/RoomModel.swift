@@ -69,7 +69,7 @@ struct RoomPathStamps: Codable, Equatable, Sendable {
 }
 
 /// A measured path from a source point to a receiver point. Derived paths do not exist in S1.
-struct RoomPath: Identifiable, Equatable, Sendable {
+struct RoomPath: Identifiable, Codable, Equatable, Sendable {
     var id: UUID
     var source: UUID
     var receiver: UUID
