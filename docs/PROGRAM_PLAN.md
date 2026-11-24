@@ -392,8 +392,10 @@ minimum-phase in blind ABX at three or more seats, and measurement results match
 - [ ] E33 G46 rack compare (owner ruling 21 Nov 2026; after E12 S26 and E33 S24): before/after compare for the Plug-ins rack (rack on against whole rack bypassed) on the E12 S26 comparison service, level matched
 - [~] S29 `e12/setup-shell` (owner, 17 Nov 2026; low-risk; owns G56–G58, G60, G63–G65, G68): guided setup split into per-step files, step list, close and continue later, visible refusals, calibration import in the step, summary page, menu command; behind `e12.setup-flow` (added in S10); built, dark until S31 graduates the flag
 - [x] S30 `e12/setup-graphs-guidance` (low-risk; owns G59, G61, G66): graphs on Measure, Bass, Correction and Verify, placement diagrams, plain terms; behind `e12.setup-flow`, dark until S31 graduates it
-- [ ] S31 `e12/setup-auto-level-rerun` (needs-owner: test-noise level; owns G62, G67): automatic level setting with the same ceiling, second-run shortcuts; graduates `e12.setup-flow`
-    - [ ] G85 layout check (scoped, found in S10): hosted 1,280x800 and 1,920x1,000 layout test of the setup sheet footer and entry card rows (AGENTS.md 13)
+- [~] S31 `e12/setup-auto-level-rerun` (needs-owner: test-noise level; owns G62, G67): automatic level setting with the same ceiling, second-run shortcuts; graduates `e12.setup-flow`. Built dark behind `e12.setup-flow` (PR pending, not graduated); wiring slice S31b (graduation after S8 and S18)
+    - [x] G85 layout check (scoped, found in S10): hosted 1,280x800 and 1,920x1,000 layout test of the setup sheet footer and entry card rows (AGENTS.md 13)
+    - [x] G87 layout check (scoped, found in S11): hosted 1,280x800 and 1,920x1,000 layout test of the Measure step seat rows with the verdict line (AGENTS.md 13); built in S31
+- [ ] S31b `e12/setup-graduate` (needs-owner: graduates a flag; owns G95): graduate `e12.setup-flow` after S8 and S18 close G86, G88, G89; end-to-end test from the menu command to a saved, verified profile; G2 and G56–G68 closed
 - Surface rule (owner, 16 Nov 2026): no control appears on both the menu bar and the Dashboard; master volume is menu bar only (`docs/epics/E12.md`)
 
 ### E24 Room correction completion (owner, 1 Nov 2026)

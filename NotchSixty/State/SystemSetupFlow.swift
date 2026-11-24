@@ -724,3 +724,18 @@ struct SystemSetupSessionStore: Sendable {
         try? FileManager.default.removeItem(at: url(for: key))
     }
 }
+
+// E12 S31: shortcut entry (see `SystemSetupEntry`).
+extension SystemSetupFlow {
+    /// Opens the flow at `target`, marking every earlier step of this run finished. The caller has already put the
+    /// choices those steps would have made in `choices`.
+    mutating func startAt(_ target: SystemSetupStep) throws {
+        guard phase == .running else { throw SystemSetupRefusal.notRunning }
+        var cursor: SystemSetupStep? = .output
+        while let step = cursor, step != target {
+            if !preset.passedOver.contains(step) { completed.insert(step) }
+            cursor = following(step)
+        }
+        step = target
+    }
+}

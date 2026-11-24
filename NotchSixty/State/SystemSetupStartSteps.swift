@@ -109,6 +109,11 @@ struct SystemSetupLevelPlan: Equatable, Sendable {
         levelDB = min(levelDB + Self.rampStepDB, Self.ceilingDB)
     }
 
+    /// E12 S31: one automatic step of `step` dB (never more than the manual step); stops at the ceiling.
+    mutating func raise(byDB step: Double) {
+        levelDB = min(levelDB + min(max(step, 0), Self.rampStepDB), Self.ceilingDB)
+    }
+
     mutating func lower() {
         levelDB = max(levelDB - Self.rampStepDB, Self.minimumSweepLevelDB)
     }
@@ -144,6 +149,8 @@ enum SystemSetupEntryPolicy {
         /// Headphone outputs are pointed at the Headphones workspace instead.
         case headphonesPointer
         case offer
+        /// E12 S31: the system is already set up and verified; the card offers the three shortcuts.
+        case setUp
     }
 
     static func isHeadphoneOutput(name: String?, uid: String?, state: PlaybackSystemState?) -> Bool {
@@ -160,11 +167,12 @@ enum SystemSetupEntryPolicy {
         outputName: String?,
         outputUID: String?,
         state: PlaybackSystemState?,
-        calibration: SystemCalibrationStatus
+        calibration: SystemCalibrationStatus,
+        offersShortcuts: Bool = false
     ) -> Availability {
         guard outputUID != nil else { return .hidden }
         if isHeadphoneOutput(name: outputName, uid: outputUID, state: state) { return .headphonesPointer }
-        if case .verified = calibration { return .hidden }
+        if case .verified = calibration { return offersShortcuts ? .setUp : .hidden }
         return .offer
     }
 }

@@ -27,7 +27,7 @@ struct SystemSetupMicrophoneStep: View {
             calibrationFile
             Divider()
             Text("Set the level").font(.headline)
-            Text("Set each channel on its own, then use All channels as a combined check (the bass-only channel is left out unless you choose the including mode). The test noise starts very quietly at \(Int(SystemSetupLevelPlan.startLevelDB)) \(SystemSetupTerm.dBFS.technicalName). Raise it a step at a time until the meter reads about \(Int(SystemSetupLevelPlan.targetSPLdBC)) \(SystemSetupTerm.dBC.technicalName) at your main seat. It never goes above \(Int(SystemSetupLevelPlan.ceilingDB)) \(SystemSetupTerm.dBFS.technicalName).")
+            Text("Set each channel on its own, then use All channels as a combined check (the bass-only channel is left out unless you choose the including mode). The test noise starts very quietly at \(Int(SystemSetupLevelPlan.startLevelDB)) \(SystemSetupTerm.dBFS.technicalName). Press Set the level for me, or raise it a step at a time yourself, until the meter reads about \(Int(SystemSetupLevelPlan.targetSPLdBC)) \(SystemSetupTerm.dBC.technicalName) at your main seat. It never goes above \(Int(SystemSetupLevelPlan.ceilingDB)) \(SystemSetupTerm.dBFS.technicalName).")
                 .font(.callout).foregroundStyle(.secondary)
             let channels = model.noiseChannels
             Picker("Channel", selection: Binding<Int>(
@@ -47,20 +47,32 @@ struct SystemSetupMicrophoneStep: View {
                 Text("Warning: this mode sends full-band noise to the subwoofer as well. It starts at \(Int(SystemSetupLevelPlan.lfeStartLevelDB)) dBFS. Raise the level slowly and stop if the sub strains.")
                     .font(.callout).foregroundStyle(.orange)
             }
+            if let status = model.autoLevelStatus {
+                Text(status).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
             SystemSetupTermNotes(step: .microphone)
             HStack {
-                Button("Lower") { model.lowerLevel() }
+                Button("Lower") { model.lowerLevel() }.disabled(model.autoLevelRunning)
                 Text("\(Int(model.level.levelDB)) dBFS").monospacedDigit()
-                Button("Raise") { model.raiseLevel() }.disabled(model.level.atCeiling)
+                Button("Raise") { model.raiseLevel() }.disabled(model.level.atCeiling || model.autoLevelRunning)
                 Spacer()
                 if let reading = monitor.reading {
                     Text("\(reading.slowDB, specifier: "%.1f") dB(C)").monospacedDigit()
                 }
             }
             HStack {
+                if model.autoLevelRunning {
+                    Button("Stop automatic level") { model.stopAutoLevel() }
+                } else {
+                    Button("Set the level for me") { model.startAutoLevel() }
+                        .disabled(microphone.selectedInputDevice == nil)
+                        .help("Plays the noise and raises it a step at a time until the meter reads about \(Int(SystemSetupLevelPlan.targetSPLdBC)) dB(C). It never goes above the top level.")
+                }
+            }
+            HStack {
                 Button(model.noiseIsPlaying ? "Stop noise" : "Play noise") { model.toggleNoise() }
                 Button(monitor.isRunning ? "Stop meter" : "Start meter") { toggleMeter() }
-                    .disabled(microphone.selectedInputDevice == nil || model.noiseIsPlaying)
+                    .disabled(microphone.selectedInputDevice == nil)
                 Button("Use this level for the sweep") {
                     if let reading = monitor.reading { model.acceptSweepLevel(measuredSPLdBC: reading.slowDB) }
                 }
@@ -113,9 +125,6 @@ struct SystemSetupMicrophoneStep: View {
     }
 
     private func toggleMeter() {
-        if monitor.isRunning { monitor.stop(); return }
-        guard let device = microphone.selectedInputDevice else { return }
-        monitor.weighting = .c
-        monitor.start(microphone: device, channel: microphone.selectedInputChannelIndex)
+        if monitor.isRunning { model.stopLevelMeter() } else { model.startLevelMeter() }
     }
 }
