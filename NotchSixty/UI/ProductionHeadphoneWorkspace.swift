@@ -35,6 +35,10 @@ struct ProductionHeadphoneWorkspace: View {
     @State private var autoHeadroom = false
     @State private var recordTargets: [UUID: RoomCorrectionTargetCurve] = [:]
     @State private var fitPreview: HeadphoneFitPreview?
+    // E13 S10: the headphone list.
+    @State private var renamingHeadphones = false
+    @State private var deletingHeadphones = false
+    @State private var renameText = ""
     /// The page clean-up is on only behind its flag; off, the page is as shipped by S8.
     private var cleanPage: Bool { FeatureFlags().isEnabled(.headphonesPage) }
     private static let sofaFileType: UTType =
@@ -59,6 +63,7 @@ struct ProductionHeadphoneWorkspace: View {
                 header
                 SystemCapabilityNoteCard(
                     title: "With your speaker arrangement", features: SystemCapabilityText.headphoneFeatures, profiles: profiles)
+                if cleanPage { headphonePickerCard }
                 modeCard
                 correctionCard
                 perEarEQCard
@@ -160,6 +165,128 @@ struct ProductionHeadphoneWorkspace: View {
         }
     }
 
+    private var listeningModePicker: some View {
+        Picker("Listening Mode", selection: $draft.spatialMode) {
+            ForEach(HeadphoneSpatialMode.allCases) { mode in
+                Text(mode.displayName).tag(mode)
+            }
+        }
+        .frame(maxWidth: 260)
+    }
+
+    // E13 S10 (`e13.headphones-page`): the list of headphones in this Playback System.
+    private var headphoneList: HeadphoneList { profiles.selectedSystemHeadphoneList ?? HeadphoneList() }
+
+    private var headphonePickerCard: some View {
+        let list = headphoneList
+        let current = list.selected
+        let output = engine.selectedOutputDevice
+        return VStack(alignment: .leading, spacing: DesignSpacing.m.pt) {
+            Text("Headphones").font(DesignType.sectionTitle.font)
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: DesignSpacing.m.pt) {
+                    headphonePicker(list)
+                    headphoneButtons(current)
+                }
+                VStack(alignment: .leading, spacing: DesignSpacing.s.pt) {
+                    headphonePicker(list)
+                    headphoneButtons(current)
+                }
+            }
+            if let current {
+                Toggle(isOn: Binding(
+                    get: { current.linkedOutputUID != nil && current.linkedOutputUID == output?.uid },
+                    set: { linkHeadphones(current.id, on: $0) }
+                )) {
+                    Text(output.map { "Use these for \($0.name)" } ?? "Use these for the current output")
+                }
+                .disabled(output == nil)
+                Text(current.linkedOutputUID == nil
+                     ? "Not linked to an output: pick them by hand (for example a wired pair on a DAC)."
+                     : "Linked to an output device. Switching to a linked device picks these automatically once output following is available.")
+                    .font(DesignType.caption.font)
+                    .foregroundStyle(.secondary)
+            } else {
+                Text("No headphones saved yet. Apply the settings below, or add a pair to start a list.")
+                    .font(DesignType.caption.font)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(DesignSpacing.l.pt)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .designTint(StatusLevel.off.color, opacity: 0.06, radius: .medium)
+        .alert("Rename Headphones", isPresented: $renamingHeadphones) {
+            TextField("Name", text: $renameText)
+            Button("Rename") { renameCurrentHeadphones() }
+            Button("Cancel", role: .cancel) {}
+        }
+        .confirmationDialog("Delete these headphones?", isPresented: $deletingHeadphones, titleVisibility: .visible) {
+            Button("Delete", role: .destructive) { deleteCurrentHeadphones() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Their correction is removed. Your other headphones are not changed.")
+        }
+    }
+
+    private func headphonePicker(_ list: HeadphoneList) -> some View {
+        Picker("Current headphones", selection: Binding<UUID?>(
+            get: { list.selectedID },
+            set: { id in if let id { selectHeadphones(id) } }
+        )) {
+            if list.entries.isEmpty { Text("None saved").tag(UUID?.none) }
+            ForEach(list.entries) { entry in Text(entry.name).tag(UUID?.some(entry.id)) }
+        }
+        .frame(maxWidth: 320)
+        .disabled(list.entries.isEmpty)
+    }
+
+    private func headphoneButtons(_ current: HeadphoneListEntry?) -> some View {
+        HStack(spacing: DesignSpacing.s.pt) {
+            Button("Add") { editHeadphoneList { list in
+                let id = try list.add(
+                    name: "Headphones", enabled: draft.enabled, outputDeviceUID: engine.selectedOutputDevice?.uid)
+                try list.select(id)
+            } }
+            Button("Duplicate") { editHeadphoneList { list in
+                if let current { try list.select(try list.duplicate(current.id)) }
+            } }.disabled(current == nil)
+            Button("Rename") { renameText = current?.name ?? ""; renamingHeadphones = true }.disabled(current == nil)
+            Button("Delete", role: .destructive) { deletingHeadphones = true }.disabled(current == nil)
+        }
+    }
+
+    private func editHeadphoneList(_ change: (inout HeadphoneList) throws -> Void) {
+        actionError = nil
+        statusMessage = nil
+        restoreLivePreview()
+        do {
+            try profiles.editSelectedSystemHeadphoneList(change)
+            syncFromSelectedSystem()
+        } catch {
+            actionError = error.localizedDescription
+        }
+    }
+
+    private func selectHeadphones(_ id: UUID) {
+        editHeadphoneList { try $0.select(id) }
+    }
+
+    private func linkHeadphones(_ id: UUID, on: Bool) {
+        let uid = on ? engine.selectedOutputDevice?.uid : nil
+        editHeadphoneList { try $0.link(id, toOutputUID: uid) }
+    }
+
+    private func renameCurrentHeadphones() {
+        guard let id = headphoneList.selectedID else { return }
+        let name = renameText
+        editHeadphoneList { try $0.rename(id, to: name) }
+    }
+
+    private func deleteCurrentHeadphones() {
+        guard let id = headphoneList.selectedID else { return }
+        editHeadphoneList { try $0.delete(id) }
+    }
+
     private var modeCard: some View {
         VStack(alignment: .leading, spacing: DesignSpacing.l.pt) {
             HStack {
@@ -179,15 +306,15 @@ struct ProductionHeadphoneWorkspace: View {
                     .foregroundStyle(engine.selectedOutputDevice == nil ? StatusLevel.problem.color : .secondary)
             }
 
-            HStack(spacing: DesignSpacing.l.pt) {
-                TextField("Profile Name", text: $draft.name)
-                    .textFieldStyle(.roundedBorder)
-                Picker("Listening Mode", selection: $draft.spatialMode) {
-                    ForEach(HeadphoneSpatialMode.allCases) { mode in
-                        Text(mode.displayName).tag(mode)
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: DesignSpacing.l.pt) {
+                    if !cleanPage {
+                        TextField("Profile Name", text: $draft.name)
+                            .textFieldStyle(.roundedBorder)
                     }
+                    listeningModePicker
                 }
-                .frame(maxWidth: 260)
+                listeningModePicker
             }
 
             Text(draft.spatialMode == .stereo
@@ -1288,12 +1415,17 @@ struct ProductionHeadphoneWorkspace: View {
 
     private func syncFromSelectedSystem() {
         restoreLivePreview()
+        if cleanPage { profiles.ensureSelectedSystemHeadphoneList() }
         if let saved = profiles.selectedSystemHeadphoneDeviceProfile {
             draft = saved
         } else {
             var fresh = HeadphoneDeviceProfileConfiguration()
             fresh.outputDeviceUID = engine.selectedOutputDevice?.uid
             draft = fresh
+        }
+        if cleanPage, let id = profiles.selectedSystemHeadphoneList?.selected?.fittedResponseID,
+           id != selectedResponseID, storedResponses.contains(where: { $0.id == id }) {
+            selectedResponseID = id
         }
         actionError = nil
         statusMessage = nil
@@ -1313,7 +1445,8 @@ struct ProductionHeadphoneWorkspace: View {
             }
             try draft.validateStructure(sampleRate: rate)
             tuner = nil  // the engine is about to take the draft as the saved profile
-            try profiles.replaceSelectedSystemHeadphoneDeviceProfile(draft)
+            try profiles.replaceSelectedSystemHeadphoneDeviceProfile(
+                draft, fittedResponseID: cleanPage && oneClickFit != nil ? selectedResponseID : nil)
             statusMessage = draft.enabled
                 ? "Headphone Device Profile deployed. Start processing to use \(draft.spatialMode.displayName)."
                 : "Headphone Device Profile saved disabled."

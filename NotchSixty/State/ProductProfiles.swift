@@ -600,6 +600,9 @@ struct PlaybackSystemState: Codable, Equatable, Sendable {
     var outputRouting: MultiOutputRoutingConfiguration?
     var outputDeviceProfile: OutputDeviceProfileConfiguration?
     var headphoneDeviceProfile: HeadphoneDeviceProfileConfiguration?
+    /// E13 S10: the list of headphones; `headphoneDeviceProfile` mirrors the selected entry. nil (the default)
+    /// leaves the stored profile byte-identical; it is made on first use behind `e13.headphones-page`.
+    var headphoneList: HeadphoneList?
     var speakerDriverProcessing: SpeakerDriverProcessingConfiguration?
     var speakerIR: SpeakerIRConfiguration
     var ambientCompensation: AmbientCompensationConfiguration?
@@ -624,6 +627,7 @@ struct PlaybackSystemState: Codable, Equatable, Sendable {
         outputRouting: MultiOutputRoutingConfiguration? = nil,
         outputDeviceProfile: OutputDeviceProfileConfiguration? = nil,
         headphoneDeviceProfile: HeadphoneDeviceProfileConfiguration? = nil,
+        headphoneList: HeadphoneList? = nil,
         speakerDriverProcessing: SpeakerDriverProcessingConfiguration? = nil,
         speakerIR: SpeakerIRConfiguration = SpeakerIRConfiguration(),
         ambientCompensation: AmbientCompensationConfiguration? = nil,
@@ -642,6 +646,7 @@ struct PlaybackSystemState: Codable, Equatable, Sendable {
         self.outputRouting = outputRouting
         self.outputDeviceProfile = outputDeviceProfile
         self.headphoneDeviceProfile = headphoneDeviceProfile
+        self.headphoneList = headphoneList
         self.speakerDriverProcessing = speakerDriverProcessing
         self.speakerIR = speakerIR
         self.ambientCompensation = ambientCompensation
@@ -1402,6 +1407,7 @@ final class ProductProfileController: ObservableObject {
     var selectedSystemHeadphoneDeviceProfile: HeadphoneDeviceProfileConfiguration? {
         selectedSystemProfile?.state.headphoneDeviceProfile
     }
+    var selectedSystemHeadphoneList: HeadphoneList? { selectedSystemProfile?.state.headphoneList }
     var canOverwriteSelectedContentPreset: Bool { selectedContentPreset != nil }
 
     var selectedSystemHardwareMappingRequirement:
@@ -1732,7 +1738,8 @@ final class ProductProfileController: ObservableObject {
     }
 
     func replaceSelectedSystemHeadphoneDeviceProfile(
-        _ configuration: HeadphoneDeviceProfileConfiguration?
+        _ configuration: HeadphoneDeviceProfileConfiguration?,
+        fittedResponseID: UUID? = nil
     ) throws {
         guard let selectedSystemProfileID,
               let index = systemProfiles.firstIndex(where: { $0.id == selectedSystemProfileID }) else {
@@ -1751,6 +1758,67 @@ final class ProductProfileController: ObservableObject {
         do {
             try engine.replaceHeadphoneDeviceProfileConfiguration(configuration)
             systemProfiles[index].state.headphoneDeviceProfile = configuration
+            if let configuration, FeatureFlags().isEnabled(.headphonesPage) {
+                var list = systemProfiles[index].state.headphoneList ?? HeadphoneList()
+                list.updateSelected(profile: configuration, fittedResponseID: fittedResponseID)
+                systemProfiles[index].state.headphoneList = list
+            }
+            try persistThrowing()
+            lastErrorDescription = nil
+        } catch {
+            systemProfiles[index].state = previousState
+            try? engine.replaceHeadphoneDeviceProfileConfiguration(previousEngineConfiguration)
+            lastErrorDescription = error.localizedDescription
+            throw error
+        }
+    }
+
+    /// E13 S10: today's single saved headphone profile becomes the first entry of the list. Idempotent; a system
+    /// with no saved headphones gets no list until one is added or applied.
+    func ensureSelectedSystemHeadphoneList() {
+        guard FeatureFlags().isEnabled(.headphonesPage),
+              let selectedSystemProfileID,
+              let index = systemProfiles.firstIndex(where: { $0.id == selectedSystemProfileID }),
+              systemProfiles[index].state.headphoneList == nil,
+              let migrated = HeadphoneList.migrating(systemProfiles[index].state.headphoneDeviceProfile) else { return }
+        systemProfiles[index].state.headphoneList = migrated
+        try? persistThrowing()
+    }
+
+    /// Edits the list of the selected Playback System and, when the selection (or the selected entry's correction)
+    /// changed, plays the new selected entry through the same engine path as Apply: a live edit where the planner
+    /// allows it, a faded reconfigure otherwise. The engine and the stored state roll back together on failure.
+    func editSelectedSystemHeadphoneList(
+        _ change: (inout HeadphoneList) throws -> Void
+    ) throws {
+        guard let selectedSystemProfileID,
+              let index = systemProfiles.firstIndex(where: { $0.id == selectedSystemProfileID }) else {
+            throw ProductProfileError.selectedSystemProfileRequired
+        }
+        let previousState = systemProfiles[index].state
+        var list = previousState.headphoneList
+            ?? HeadphoneList.migrating(previousState.headphoneDeviceProfile) ?? HeadphoneList()
+        try change(&list)
+        var active = list.selected?.profile
+        if var next = active {
+            // The mode (headphone correction on or off) belongs to the listener, not the pair.
+            next.enabled = previousState.headphoneDeviceProfile?.enabled ?? next.enabled
+            active = next
+            if let id = list.selectedID, let i = list.entries.firstIndex(where: { $0.id == id }) {
+                list.entries[i].profile = next
+            }
+        }
+        if active?.enabled == true {
+            if previousState.outputDeviceProfile?.enabled == true { throw HeadphoneDeviceProfileError.speakerProfileConflict }
+            if previousState.outputRouting?.enabled == true { throw HeadphoneDeviceProfileError.legacyPhysicalRoutingConflict }
+        }
+        let previousEngineConfiguration = engine.headphoneDeviceProfileConfiguration
+        do {
+            if active != previousState.headphoneDeviceProfile {
+                try engine.replaceHeadphoneDeviceProfileConfiguration(active)
+            }
+            systemProfiles[index].state.headphoneList = list
+            systemProfiles[index].state.headphoneDeviceProfile = active
             try persistThrowing()
             lastErrorDescription = nil
         } catch {

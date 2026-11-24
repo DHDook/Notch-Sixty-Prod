@@ -524,7 +524,7 @@ complete, speaker ANC qualified, and a full hardware regression passing at every
 - [x] S8 `e13/ship` graduated `e13.headphones` (default on, 14 Nov 2026); software gaps closed (G14, G16 built in S8); bench gaps move to E22; removal is the FC phase
 - [x] In-ear-microphone BRIR capture for personal virtual speakers (S6 core merged; S7 guided flow built behind `e13.headphones`; bench in E22)
 - [x] S9 `e13/headphones-page-cleanup` (owner, 17 Nov 2026; needs-owner: removes user-visible controls; owns G18–G20, G22, G24, G25; new flag `e13.headphones-page`): one target with shaping sliders, one import, optional Auto headroom (manual stays the default), drawn fit, crossfeed Custom controls, plain wording
-- [ ] S10 `e13/headphone-list` (owns G23): a list of headphones per Playback System, each with its own correction and an optional linked device
+- [x] S10 `e13/headphone-list` (owns G23; built behind `e13.headphones-page`): a list of headphones per Playback System, each with its own correction and an optional linked device; picker with add, duplicate, rename, delete; today's profile migrates to the first entry. Auto-selection by linked device waits for E15 S6 (E13 G27)
 - [ ] S11 `e13/generic-hrtf` (owns G17): a generic HRTF generated in `core/` from a head model, native at the eight rates, the default for Virtual Speakers
 - [ ] S12 `e13/headphones-compare-and-ship` (needs-owner; owns G21; after E12 S13): bypass per card, the E12 S13 before/after on headphone sessions, graduate `e13.headphones-page`
 
@@ -794,6 +794,7 @@ section 11); this phase removes the flags after the E22 bench, as small per-epic
 Runs after the FC flag cleanup (owner, 11 Nov 2026).
 
 - [ ] Developer ID and App Store signing, notarisation and App Review
+- [ ] E36 driver identity (owner decision, 24 Nov 2026: moved here from E36): supply the team id, the Developer ID certificate, the notary profile and the public download location for the driver installer (E36 G2), then recheck the app group `<TeamID>.group.n60vd` (E36 G16, bench B8)
 - [ ] Legal and provenance review against `docs/PROVENANCE.md` and the SBOM
 - Owner decision, 17 Nov 2026 (end-state review): v1 ships in English only. The string-catalogue pass and translations are after v1 (`docs/V2_ROADMAP.md`, V2-24). The VoiceOver and keyboard accessibility pass moved to E34 S5 and S6 (owner, 17 Nov 2026)
 - [ ] Competitive blind comparison against Dirac Live Processor and Clearroom on the same system, run in the Blind Listening two-files mode on recordings made at the seat (E12 S28)
