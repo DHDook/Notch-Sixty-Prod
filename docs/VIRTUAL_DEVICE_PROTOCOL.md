@@ -40,6 +40,8 @@ Native-endian, one property call per value; `N60VirtualDeviceProtocol.h` has the
   rates up to 384 kHz, and a one-entry list pins the device to one rate.
 - `n6ly` layout: uint32 code, `N60_VD_LAYOUT_STEREO` (1, 2 channels), `_5_1` (2, 6), `_7_1` (3, 8), `_5_1_4` (4, 10),
   `_7_1_4` (5, 12).
+- Ring channel order (S3b, the driver must write it): L, R, C, LFE, Ls, Rs, then 7.1 adds Lrs, Rrs; 5.1.4 adds Ltf, Rtf, Ltr, Rtr after Rs; 7.1.4 is 7.1 then Ltf, Rtf, Ltr, Rtr. The app labels the ring's channels in this order (`VirtualDeviceLayout.channelLabels`).
+- Shared memory: POSIX shm name `<TeamID>.group.n60vd/n60vd` (app-group entitlement `$(TeamIdentifierPrefix)group.n60vd`; the app reads its own entitlement for the id).
 - `n6lt` latency (S6a): uint32 frames of added delay.
 
 ## Programme ring (S3)

@@ -11,12 +11,14 @@ import Foundation
 // vanished device. A missing, refused or unknown-version driver enters `waitingForInputDevice`; it never quietly goes
 // back to the tap.
 
-/// What the engine side does around a source change. Production closures are the hooks the engine will honour when S3
-/// lands the virtual capture source (gap G10); tests record the order.
+/// What the engine side does around a source change. Production closures are `DriverEngineSwitcher`'s (E36 S3b);
+/// tests record the order.
 struct InputSwitchHooks {
     var fadeOut: () -> Void = {}
     var applySource: (AudioInputPath) -> Void = { _ in }
     var fadeIn: () -> Void = {}
+    /// E36 S3b: after `applySource`, a message when the engine could not start on the new source (nil: it did).
+    var applyFailure: () -> String? = { nil }
 }
 
 @MainActor
@@ -111,6 +113,11 @@ final class DriverInputCoordinator {
             }
         }
         hooks.applySource(.virtualDriver)
+        if let failure = hooks.applyFailure() {
+            // No silent fallback to the tap: wait, and `reconcile` retries.
+            enterWaiting(message: "The virtual audio driver could not start: \(failure). Waiting; audio does not fall back to the default capture path.")
+            return
+        }
         hooks.fadeIn()
         publishLatency()
         statusMessage = nil

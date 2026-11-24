@@ -85,6 +85,8 @@ final class CoreAudioBinauralHeadphoneTransportSession {
     private(set) var unifiedGraphBaseSpec: UnifiedGraphSpec?
     private var audioUnitRack: AudioUnitLiveRackSwitchboard?
     private let captureSource = ProcessTapCaptureSource()
+    /// E36 S3b: set when the driver path is chosen; then there is no tap, no aggregate and no capture IOProc.
+    private var driverAttachment: DriverCaptureAttachment?
     private var tapID: AudioObjectID { captureSource.tapID }
     private var aggregateDeviceID: AudioDeviceID { captureSource.aggregateDeviceID }
     private var captureIOProcID: AudioDeviceIOProcID?
@@ -112,6 +114,7 @@ final class CoreAudioBinauralHeadphoneTransportSession {
         self.programLayout = programLayout
         self.audioUnitRack = audioUnitRack
 
+        let driverRequest = DriverCaptureSelection.shared.current
         do {
             let processObject = try CoreAudioSemanticTransportSupport.currentProcessObjectID(
                 operationPrefix: "Virtual Speakers"
@@ -123,25 +126,39 @@ final class CoreAudioBinauralHeadphoneTransportSession {
                 keepsAllChannels: true
             ).makeDescription()
 
-            try CoreAudioSemanticTransportSupport.check(
-                captureSource.createTap(description),
-                operation: "create Virtual Speakers program tap"
-            )
-
-            let tapASBD = try CoreAudioSemanticTransportSupport.readStreamFormat(
-                objectID: tapID,
-                selector: kAudioTapPropertyFormat,
-                scope: kAudioObjectPropertyScopeGlobal,
-                operation: "read Virtual Speakers tap format"
-            )
+            // The driver layout the ring carries for this program; nil on the tap path.
+            let driverLayout: VirtualDeviceLayout?
+            if driverRequest != nil {
+                guard let layout = VirtualDeviceLayout.layout(channelCount: programLayout.roles.count) else {
+                    throw DriverCaptureError.unsupportedChannelCount(programLayout.roles.count)
+                }
+                driverLayout = layout
+            } else {
+                driverLayout = nil
+            }
+            let tapASBD: AudioStreamBasicDescription
+            if driverLayout == nil {
+                try CoreAudioSemanticTransportSupport.check(
+                    captureSource.createTap(description),
+                    operation: "create Virtual Speakers program tap"
+                )
+                tapASBD = try CoreAudioSemanticTransportSupport.readStreamFormat(
+                    objectID: tapID,
+                    selector: kAudioTapPropertyFormat,
+                    scope: kAudioObjectPropertyScopeGlobal,
+                    operation: "read Virtual Speakers tap format"
+                )
+            } else {
+                tapASBD = AudioStreamBasicDescription()
+            }
             let outputASBD = try CoreAudioSemanticTransportSupport.readStreamFormat(
                 objectID: selectedOutput.deviceID,
                 selector: kAudioDevicePropertyStreamFormat,
                 scope: kAudioDevicePropertyScopeOutput,
                 operation: "read headphone output format"
             )
-            tapFormat = AudioStreamFormatDescription(tapASBD)
             outputFormat = AudioStreamFormatDescription(outputASBD)
+            tapFormat = driverLayout?.streamFormat(sampleRate: outputFormat.sampleRate) ?? AudioStreamFormatDescription(tapASBD)
 
             guard tapFormat.isSupportedFloat32TransportFormat else {
                 throw CoreAudioTransportError.unsupportedFormat(
@@ -172,7 +189,7 @@ final class CoreAudioBinauralHeadphoneTransportSession {
                 throw BinauralHeadphoneTransportError.programLayoutMismatch
             }
 
-            let descriptions = try CoreAudioSemanticTransportSupport.resolveInputChannelDescriptions(
+            let descriptions = try driverLayout?.channelDescriptions ?? CoreAudioSemanticTransportSupport.resolveInputChannelDescriptions(
                 deviceID: programSource.deviceID,
                 channelCount: tapFormat.channelCount
             )
@@ -295,67 +312,83 @@ final class CoreAudioBinauralHeadphoneTransportSession {
             installLoudnessWorker(newBridge, sampleRate: outputFormat.sampleRate)
             N60BinauralHeadphoneBridgeSetOutputGain(newBridge, outputGain)
 
-            let aggregateSpec = TapAggregateSpec(
-                name: "Notch Sixty Virtual Speakers Tap",
-                uidPrefix: "com.dhdook.NotchSixty.binaural",
-                tapUID: description.uuid.uuidString,
-                tapDriftCompensation: false
-            )
-            try CoreAudioSemanticTransportSupport.check(
-                captureSource.createAggregate(aggregateSpec),
-                operation: "create Virtual Speakers tap aggregate"
-            )
-            try CoreAudioSemanticTransportSupport.waitForDeviceAlive(
-                aggregateDeviceID,
-                operationPrefix: "Virtual Speakers"
-            )
-            try CoreAudioSemanticTransportSupport.writeFloat64Property(
-                objectID: aggregateDeviceID,
-                selector: kAudioDevicePropertyNominalSampleRate,
-                scope: kAudioObjectPropertyScopeGlobal,
-                value: outputFormat.sampleRate,
-                operation: "set Virtual Speakers aggregate sample rate"
-            )
-            try CoreAudioSemanticTransportSupport.writeUInt32Property(
-                objectID: aggregateDeviceID,
-                selector: kAudioDevicePropertyBufferFrameSize,
-                scope: kAudioObjectPropertyScopeGlobal,
-                value: outputBufferFrames,
-                operation: "set Virtual Speakers aggregate buffer size"
-            )
-            let captureBufferFrames = try CoreAudioSemanticTransportSupport.readUInt32Property(
-                objectID: aggregateDeviceID,
-                selector: kAudioDevicePropertyBufferFrameSize,
-                scope: kAudioObjectPropertyScopeGlobal,
-                operation: "read Virtual Speakers aggregate buffer size"
-            )
-            guard captureBufferFrames == outputBufferFrames else {
-                throw BinauralHeadphoneTransportError.captureBufferSizeMismatch(
-                    capture: captureBufferFrames,
-                    output: outputBufferFrames
+            if driverLayout == nil {
+                let aggregateSpec = TapAggregateSpec(
+                    name: "Notch Sixty Virtual Speakers Tap",
+                    uidPrefix: "com.dhdook.NotchSixty.binaural",
+                    tapUID: description.uuid.uuidString,
+                    tapDriftCompensation: false
                 )
+                try CoreAudioSemanticTransportSupport.check(
+                    captureSource.createAggregate(aggregateSpec),
+                    operation: "create Virtual Speakers tap aggregate"
+                )
+                try CoreAudioSemanticTransportSupport.waitForDeviceAlive(
+                    aggregateDeviceID,
+                    operationPrefix: "Virtual Speakers"
+                )
+                try CoreAudioSemanticTransportSupport.writeFloat64Property(
+                    objectID: aggregateDeviceID,
+                    selector: kAudioDevicePropertyNominalSampleRate,
+                    scope: kAudioObjectPropertyScopeGlobal,
+                    value: outputFormat.sampleRate,
+                    operation: "set Virtual Speakers aggregate sample rate"
+                )
+                try CoreAudioSemanticTransportSupport.writeUInt32Property(
+                    objectID: aggregateDeviceID,
+                    selector: kAudioDevicePropertyBufferFrameSize,
+                    scope: kAudioObjectPropertyScopeGlobal,
+                    value: outputBufferFrames,
+                    operation: "set Virtual Speakers aggregate buffer size"
+                )
+                let captureBufferFrames = try CoreAudioSemanticTransportSupport.readUInt32Property(
+                    objectID: aggregateDeviceID,
+                    selector: kAudioDevicePropertyBufferFrameSize,
+                    scope: kAudioObjectPropertyScopeGlobal,
+                    operation: "read Virtual Speakers aggregate buffer size"
+                )
+                guard captureBufferFrames == outputBufferFrames else {
+                    throw BinauralHeadphoneTransportError.captureBufferSizeMismatch(
+                        capture: captureBufferFrames,
+                        output: outputBufferFrames
+                    )
+                }
             }
 
             let clientData = UnsafeMutableRawPointer(newBridge)
-            try CoreAudioSemanticTransportSupport.check(
-                AudioDeviceCreateIOProcID(
-                    aggregateDeviceID,
-                    N60BinauralHeadphoneCaptureIOProc,
-                    clientData,
-                    &captureIOProcID
-                ),
-                operation: "create Virtual Speakers capture IOProc"
-            )
-            try CoreAudioSemanticTransportSupport.check(
-                AudioDeviceCreateIOProcID(
-                    selectedOutput.deviceID,
-                    N60BinauralHeadphoneOutputIOProc,
-                    clientData,
-                    &outputIOProcID
-                ),
-                operation: "create Virtual Speakers headphone IOProc"
-            )
-            guard captureIOProcID != nil else {
+            if let driverRequest, let driverLayout {
+                let attachment = try DriverCaptureAttachment.open(
+                    driverRequest, outputUID: selectedOutput.uid, outputDeviceID: selectedOutput.deviceID,
+                    dacRate: outputFormat.sampleRate, maxCallbackFrames: outputBufferFrames,
+                    channelCount: driverLayout.channelCount, clientData: clientData,
+                    captureProc: N60BinauralHeadphoneCaptureIOProc, outputProc: N60BinauralHeadphoneOutputIOProc)
+                driverAttachment = attachment
+                try CoreAudioSemanticTransportSupport.check(
+                    AudioDeviceCreateIOProcID(
+                        selectedOutput.deviceID, N60VirtualRingOutputIOProc, attachment.outputClientData, &outputIOProcID),
+                    operation: "create virtual driver headphone IOProc"
+                )
+            } else {
+                try CoreAudioSemanticTransportSupport.check(
+                    AudioDeviceCreateIOProcID(
+                        aggregateDeviceID,
+                        N60BinauralHeadphoneCaptureIOProc,
+                        clientData,
+                        &captureIOProcID
+                    ),
+                    operation: "create Virtual Speakers capture IOProc"
+                )
+                try CoreAudioSemanticTransportSupport.check(
+                    AudioDeviceCreateIOProcID(
+                        selectedOutput.deviceID,
+                        N60BinauralHeadphoneOutputIOProc,
+                        clientData,
+                        &outputIOProcID
+                    ),
+                    operation: "create Virtual Speakers headphone IOProc"
+                )
+            }
+            guard captureIOProcID != nil || driverAttachment != nil else {
                 throw BinauralHeadphoneTransportError.ioProcUnavailable(role: "capture")
             }
             guard outputIOProcID != nil else {
@@ -587,6 +620,8 @@ final class CoreAudioBinauralHeadphoneTransportSession {
             AudioDeviceDestroyIOProcID(aggregateDeviceID, captureIOProcID)
             self.captureIOProcID = nil
         }
+        driverAttachment?.close()
+        driverAttachment = nil
         captureSource.close()
         wideLoudnessWorker?.stop()
         wideLoudnessWorker = nil
@@ -604,10 +639,11 @@ final class CoreAudioBinauralHeadphoneTransportSession {
     }
 
     private func startIO() throws {
+        let captureIOProcID = self.captureIOProcID
         guard !stopped,
               let outputIOProcID,
-              let captureIOProcID,
-              aggregateDeviceID != AudioDeviceID(kAudioObjectUnknown) else {
+              driverAttachment != nil
+                || (captureIOProcID != nil && aggregateDeviceID != AudioDeviceID(kAudioObjectUnknown)) else {
             throw BinauralHeadphoneTransportError.ioProcUnavailable(role: "startup")
         }
         // E20 S6: the render workers join the output device's IO workgroup before its first callback.
@@ -623,10 +659,13 @@ final class CoreAudioBinauralHeadphoneTransportSession {
         }
         isOutputStarted = true
         do {
-            try CoreAudioSemanticTransportSupport.check(
-                AudioDeviceStart(aggregateDeviceID, captureIOProcID),
-                operation: "start Virtual Speakers program capture"
-            )
+            if let captureIOProcID {
+                try CoreAudioSemanticTransportSupport.check(
+                    AudioDeviceStart(aggregateDeviceID, captureIOProcID),
+                    operation: "start Virtual Speakers program capture"
+                )
+            }
+            // Driver path: the ring is read inside the output callback.
             isCaptureStarted = true
         } catch {
             AudioDeviceStop(selectedOutput.deviceID, outputIOProcID)

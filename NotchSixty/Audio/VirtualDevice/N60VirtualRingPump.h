@@ -26,6 +26,12 @@ void N60VirtualRingUnmap(const void * _Nullable base, size_t bytes);
 N60VirtualRingPump * _Nullable N60VirtualRingPumpCreate(
     N60RealtimeAudioBridge * _Nonnull bridge, const void * _Nonnull ringBase, size_t ringBytes,
     uint32_t primeFrames, uint32_t maxFrames);
+/// Control plane. The general form: `captureProc` and `outputProc` are the session's own IOProcs (stereo, N-channel or
+/// binaural bridge) and `clientData` is what they expect (their bridge). The pump hands them `channels` interleaved
+/// channels read from the ring. Scratch is `maxFrames * channels` floats, allocated here.
+N60VirtualRingPump * _Nullable N60VirtualRingPumpCreateWithProcs(
+    void * _Nonnull clientData, AudioDeviceIOProc _Nonnull captureProc, AudioDeviceIOProc _Nonnull outputProc,
+    uint32_t channels, const void * _Nonnull ringBase, size_t ringBytes, uint32_t primeFrames, uint32_t maxFrames);
 void N60VirtualRingPumpDestroy(N60VirtualRingPump * _Nullable pump);
 
 /// Realtime. Reads `frames` from the ring and hands them to N60CaptureIOProc exactly as the tap's capture IOProc would.

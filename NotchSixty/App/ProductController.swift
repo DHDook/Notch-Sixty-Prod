@@ -374,6 +374,7 @@ final class ProductController: ObservableObject {
     }
 
     func prepareForUse() {
+        audioInputPath.engineSwitcher?.attach(audioEngine)
         recovery.prepareForLaunch()
         audioEngine.prepareForUse()
         if !recovery.safeLaunchActive {
