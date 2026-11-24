@@ -270,6 +270,8 @@ final class ProductionNavigation: ObservableObject {
     @Published var calibrateSection: ProductionCalibrateSection = .alignment
     /// E12 S12: a Dashboard link to a Meters page; the Meters view takes it once and clears it.
     @Published var requestedMetersPage: ProductionMetersPage?
+    /// E12 S29: the "Set Up My System…" menu command asks for the guided setup; the root view takes it once and clears it.
+    @Published var requestedGuidedSetup: SystemSetupPreset?
 
     /// Selects a section. The old workspace sections resolve to a System tab.
     func navigate(to section: ProductionSection) {
@@ -406,6 +408,13 @@ struct ProductionRootView: View {
             }
         }
         .task { product.prepareForUse() }
+        .onChange(of: navigation.requestedGuidedSetup, initial: true) { _, request in
+            guard let request else { return }
+            navigation.requestedGuidedSetup = nil
+            guard FeatureFlags().isEnabled(.setupFlow), !showingGuidedSetup else { return }
+            guidedSetupPreset = request
+            showingGuidedSetup = true
+        }
         .task {
             // E4: shadow-mode adaptive Quiet Zone paths are always on; they never play.
             product.adaptiveQuietZone.setActive(true)
@@ -438,7 +447,14 @@ struct ProductionRootView: View {
                 microphone: product.calibration,
                 calibration: product.multichannelCalibration,
                 advisor: product.roomTreatmentAdvisor,
-                preset: guidedSetupPreset
+                preset: guidedSetupPreset,
+                onExit: { exit in
+                    switch exit {
+                    case .listen: navigation.navigate(to: .dashboard)
+                    case .fullSettings: navigation.navigate(to: .system)
+                    case .roomAdvisor: navigation.navigate(to: .roomAdvisor)
+                    }
+                }
             )
         }
     }

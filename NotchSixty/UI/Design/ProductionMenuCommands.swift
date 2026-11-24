@@ -129,6 +129,11 @@ struct ProductionMenuCommands: Commands {
     let product: ProductController
 
     var body: some Commands {
+        if FeatureFlags.isEnabledProcessWide(.setupFlow) {
+            CommandGroup(after: .newItem) {
+                SetupMenuItem(navigation: navigation)
+            }
+        }
         if FeatureFlags.isEnabledProcessWide(.designLanguage) {
             CommandMenu("Playback") {
                 PlaybackMenuItems(product: product)
@@ -136,6 +141,29 @@ struct ProductionMenuCommands: Commands {
             CommandGroup(after: .sidebar) {
                 ViewMenuItems(navigation: navigation)
             }
+        }
+    }
+}
+
+/// E12 S29 (decision 34): "Set Up My System…" opens the guided setup from the File menu (flag `e12.setup-flow`).
+enum SystemSetupMenuCommand {
+    static let title = "Set Up My System…"
+
+    @MainActor
+    static func perform(navigation: ProductionNavigation) {
+        navigation.navigate(to: .system)
+        navigation.requestedGuidedSetup = .full
+    }
+}
+
+private struct SetupMenuItem: View {
+    @ObservedObject var navigation: ProductionNavigation
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some View {
+        Button(SystemSetupMenuCommand.title) {
+            openWindow(id: "main")
+            SystemSetupMenuCommand.perform(navigation: navigation)
         }
     }
 }
