@@ -8,6 +8,8 @@ struct ProductionZoneChooserCard: View {
     @ObservedObject var first: QuietZoneVirtualMicSurveyController
     @ObservedObject var second: QuietZoneVirtualMicSurveyController
     var quietZoneRunning: Bool
+    /// E12 S19: false hides the zone picker; the one Quiet Zone card's "where to quiet" choice replaces it.
+    var showsModePicker = true
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -17,17 +19,19 @@ struct ProductionZoneChooserCard: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
-            Picker("Zone", selection: Binding(
-                get: { zones.mode },
-                set: { zones.setMode($0) }
-            )) {
-                Text("One seat").tag(QuietZoneZoneMode.fixedSeat)
-                Text("Follow my head").tag(QuietZoneZoneMode.follow)
-                Text("Two zones").tag(QuietZoneZoneMode.twoZones)
+            if showsModePicker {
+                Picker("Zone", selection: Binding(
+                    get: { zones.mode },
+                    set: { zones.setMode($0) }
+                )) {
+                    Text("One seat").tag(QuietZoneZoneMode.fixedSeat)
+                    Text("Follow my head").tag(QuietZoneZoneMode.follow)
+                    Text("Two zones").tag(QuietZoneZoneMode.twoZones)
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .frame(maxWidth: 420)
             }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .frame(maxWidth: 420)
 
             Text(zones.message)
                 .font(.callout)

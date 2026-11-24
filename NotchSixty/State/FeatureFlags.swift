@@ -37,7 +37,7 @@ extension FeatureFlag {
         .parallelRender, .multirate, .rateAdapt, .coreDesigners,
         .eqPageEnhancements, .dynamicsSound, .designLanguage, .followOutput, .dashboardRemote, .virtualDriver,
         .blindListening,
-        .setupFlow, .systemPages, .selfQualification, .headphonesPage
+        .setupFlow, .systemPages, .selfQualification, .headphonesPage, .activeAcousticsPage
     ]
 
     /// E6 S11: the unified graph is the default renderer. Turning this on selects the frozen
@@ -361,6 +361,16 @@ extension FeatureFlag {
     static let systemPages = FeatureFlag(
         id: "e12.system-pages",
         title: "System pages",
+        epic: "E12"
+    )
+}
+
+extension FeatureFlag {
+    /// E12 S19-S22: the Active Acoustics page. S19 adds the one Quiet Zone card. Swift only; the engine never reads
+    /// it. Off: the page is as it is today. Never arms anything. Graduates in E12 S22; removed in the flag-cleanup phase.
+    static let activeAcousticsPage = FeatureFlag(
+        id: "e12.active-acoustics-page",
+        title: "Active Acoustics page",
         epic: "E12"
     )
 }
