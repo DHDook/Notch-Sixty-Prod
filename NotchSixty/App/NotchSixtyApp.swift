@@ -23,7 +23,12 @@ struct ProductionDeveloperCommands: Commands {
     private var showDeveloperTools = false
 
     var body: some Commands {
-        if showDeveloperTools {
+        if DeveloperToolsPolicy.isShown(
+            stored: showDeveloperTools,
+            settingsPageEnabled: FeatureFlags.isEnabledProcessWide(.settingsPage),
+            policy: FeatureFlags.buildPolicy,
+            arguments: ProcessInfo.processInfo.arguments
+        ) {
             CommandMenu("Developer") {
                 ProductionDeveloperMenuItems(navigation: navigation)
             }

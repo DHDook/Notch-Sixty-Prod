@@ -108,6 +108,7 @@ FC phase's per-epic PR (`docs/epics/FC.md`) unless stated.
 | `e12.blind-listening` | E12 | dark; S26: registered; the comparison service and its tests, no user-visible reader yet | S28 | FC (E12) |
 | `e19.self-qualification` | E19 | dark; S12a: evidence check and self-qualified permit basis; S12b: treatment probe arm, SQ5 evaluator and runner (built dark, no production capturer); S12c-engine: probe stimulus feed and capturer | S12c-ui | FC (E19) |
 | `e12.setup-flow` | E12 | dark; S10: quick setup path (a step preset of the guided setup flow) | S31 | FC (E12) |
+| `e12.settings-page` | E12 | dark; S23: five Settings tabs, About, hidden developer switch in release, page-display reset | S25 | FC (E12) |
 | `e12.system-pages` | E12 | dark; S15: Overview checklist and out-of-date notice | S18 | FC (E12) |
 | `e13.headphones-page` | E13 | dark; S9: page clean-up | S12 | FC (E13) |
 | `e34.design-language` | E34 | dark; S0: registered, no reader yet (S1 shared parts read it) | S7 | FC (E34) |
@@ -177,7 +178,15 @@ E22; the software part graduates.
 | `e12.blind-listening` | E12 | Off by default. Blind Listening: one comparison service (level-matched, fixed switch time, restore on every exit) behind the setup sheet's test and the Blind Listening page (S27, S28). Off: the page and the setup sheet are as they are today. Removed in FC (E12) |
 | `e19.self-qualification` | E19 | Off by default. MIMO room treatment self-qualification: S12a is the evidence record and evaluator (SQ1 to SQ4, SQ7) and the self-qualified permit basis; the probe arm (S12b, `MIMOGraphTreatment+Probe.swift`: probe ticket and arm, SQ5 evaluator, runner; built dark, no production stimulus capturer until S12c-engine) and the guided steps (S12c-ui) join it. Graduated by S12c-ui (available, never armed). Off: today's permit path exactly. Removed in FC (E19) |
 | `e12.setup-flow` | E12 | Off by default. Guided setup improvements: S10 quick path (Output, Microphone and level, one seat, alignment, bass, correction, Verify, Save), then S11 verdicts and S29-S31 shell, graphs and level runs. Off: guided setup is as it is today. Removed in FC (E12) |
+| `e12.settings-page` | E12 | Off by default. Settings window: S23 five tabs (General, Volume, Privacy, Data, About), About with licences, privacy statement and help, page-display reset, and the developer switch hidden in release builds; S24-S25 resume, permissions, backup, reset. Off: the Settings window is as it is today. Removed in FC (E12) |
 | `e12.system-pages` | E12 | Off by default. System pages: S15 Overview checklist and out-of-date notice (the verified-status fix is not gated), then S16-S18. Off: the System tabs are as they are today. Removed in FC (E12) |
 | `e34.design-language` | E34 | Off by default. The app-wide design language: macOS 27 Liquid Glass rules (`docs/DESIGN_LANGUAGE.md`) and, from S1, the shared values and components. Off: today's look. Removed in FC (E34) |
 | `e21.core-designers` | E21 | Off by default. Room-measurement analysis (direct arrival, window, response grid) and the EQ program analyser's spectrum bands run in the portable core instead of Swift and vDSP; later E21 slices add the designers. Off: the Swift path. Removed in FC (E21) |
 | `e36.virtual-driver` | E36 | Off by default. The optional virtual audio driver as a second input path beside the process tap. S1 adds only the input-source seam (`CaptureSource`, `HALPropertyStore`) and the `switchingInput` and `waitingForInputDevice` lifecycle states; no user-visible change yet. The process tap stays the default and the app works without the driver. Off: today's sessions. Removed in FC (E36) |
+
+## Developer menu in release builds (E12 S23)
+
+With `e12.settings-page` on, release builds do not offer "Show developer tools" in Settings and ignore a stored "on"
+value from an older build. The Developer menu (Hardware Acceptance, Acoustic Research) appears only when the app is
+launched with `-NotchSixtyDeveloperTools`. Debug builds keep the switch. With the flag off, the stored switch decides
+in every build, as before.
