@@ -690,6 +690,8 @@ signed installer live in a separate repository; the App Store build only detects
 graduated in S7. Slices S1–S7 (app) and X1–X3 (driver repository) are listed in the epic file.
 
 - [~] S3 `e36/virtual-capture` built dark (PR pending; `e36.virtual-driver` stays off): ring reader and clock steering in the core, ring pump, `VirtualDeviceCaptureSource`, protocol encodings; not on the shipped UI until wiring slice S3b
+- [x] S6b `e36/driver-layouts` (needs-owner: Core Audio transport; fold from the driver's ring for a stereo DAC, active stereo on a multichannel DAC, rate following off by default; G14 closed, G22-G23 scoped)
+- [x] X1 `driver/core` in the driver repository: built, driver PR #2 https://github.com/DHDook/Notch-Sixty-Prod-Driver/pull/2 (open, not merged); gaps G24-G26 scoped to X2
 - [x] S3b `e36/virtual-session` (needs-owner: Core Audio transport; session constructors on hardware are bench B3/B8, G19): the three sessions choose the ring source when the driver path is on, real shared-memory mapping under the app group, production steering timer; end-to-end test through the switch (G4, G10, G15, G16)
 
 ### E23 Legacy engine removal

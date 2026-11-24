@@ -2709,7 +2709,7 @@ final class AudioIOEngine {
     /// What `buildStereoTransport` does for this output given the configured fold and the devices present now.
     private func programFoldBuildDecision(for output: AudioOutputDevice) -> ProgramFoldDownPlan.BuildDecision {
         ProgramFoldDownPlan.buildDecision(
-            plan: programFoldPlan, availableDevices: outputDevices, sampleRate: output.nominalSampleRate)
+            plan: programFoldPlan, availableDevices: outputDevices, sampleRate: output.nominalSampleRate, driverPathActive: DriverCaptureSelection.shared.current != nil)
     }
 
     /// E6 S9d: a headphone profile edit inside one graph-rendered stereo session. The session rebuilds the HEADPHONE
@@ -5885,7 +5885,7 @@ final class AudioIOEngine {
         let spatialSourceUID = headphoneDeviceProfileConfiguration?.spatialMode == .virtualSpeakers
             ? (headphoneDeviceProfileConfiguration?.programSourceDeviceUID ?? selectedUID)
             : selectedUID
-        let foldSourceIsPresent = programFoldPlan.map { plan in outputDevices.contains { $0.uid == plan.sourceUID } } ?? true
+        let foldSourceIsPresent = programFoldPlan.map { plan in plan.foldDown.usesDriverSource || outputDevices.contains { $0.uid == plan.sourceUID } } ?? true
         let spatialSourceIsPresent = foldSourceIsPresent && outputDevices.contains { $0.uid == spatialSourceUID }
 
         if !selectedIsPresent {

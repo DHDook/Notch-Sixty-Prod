@@ -560,9 +560,10 @@ final class CoreAudioTransportSession {
 
         let driverRequest = DriverCaptureSelection.shared.current
         do {
-            if driverRequest != nil, programSource != nil || aggregateDeviceOutputPlan != nil {
-                throw DriverCaptureError.unsupportedSession(programSource != nil ? "a programme taken from another device" : "a multi-device output")
-            }
+            // The ring layout this session reads on the driver path (stereo, or the fold's wider programme); nil on the tap path.
+            let driverLayout = try driverRequest == nil ? nil : DriverStereoSessionShape.resolve(
+                programSourceUID: programSource?.uid, foldLayout: programFoldPlan?.layout,
+                hasAggregatePlan: aggregateDeviceOutputPlan != nil)
             let processObject = try Self.currentProcessObjectID()
             let description = ProcessTapSpec(
                 excludedProcess: processObject,
@@ -592,7 +593,7 @@ final class CoreAudioTransportSession {
                 )
             } else {
                 // The ring is read in the DAC's callback at the DAC's rate: no tap, so the format is the ring's.
-                tapFormat = VirtualDeviceLayout.stereo.streamFormat(sampleRate: outputFormat.sampleRate)
+                tapFormat = (driverLayout ?? .stereo).streamFormat(sampleRate: outputFormat.sampleRate)
             }
 
             var foldGains: (left: [Float], right: [Float])?
@@ -608,7 +609,7 @@ final class CoreAudioTransportSession {
                 guard abs(tapFormat.sampleRate - outputFormat.sampleRate) < 0.5 else {
                     throw CoreAudioTransportError.programFoldFailed(.sampleRateUnsupported(outputFormat.sampleRate))
                 }
-                let descriptions = try CoreAudioSemanticTransportSupport.resolveInputChannelDescriptions(
+                let descriptions = try driverLayout?.channelDescriptions ?? CoreAudioSemanticTransportSupport.resolveInputChannelDescriptions(
                     deviceID: (programSource ?? selectedOutput).deviceID, channelCount: tapFormat.channelCount)
                 let streamRoles = descriptions.map {
                     OutputProgramRole(realtime: N60ProgramChannelRoleFromAudioChannelLabel($0.mChannelLabel))
@@ -849,7 +850,7 @@ final class CoreAudioTransportSession {
             if let driverRequest {
                 let attachment = try DriverCaptureAttachment.open(
                     driverRequest, outputUID: selectedOutput.uid, outputDeviceID: selectedOutput.deviceID,
-                    dacRate: outputFormat.sampleRate, maxCallbackFrames: outputBufferFrames, channelCount: 2,
+                    dacRate: outputFormat.sampleRate, maxCallbackFrames: outputBufferFrames, channelCount: (driverLayout ?? .stereo).channelCount,
                     clientData: clientData, captureProc: N60CaptureIOProc, outputProc: N60OutputIOProc)
                 driverAttachment = attachment
                 try Self.check(

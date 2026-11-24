@@ -38,6 +38,13 @@ struct ProgramFoldDown: Codable, Equatable, Sendable {
     static let limiterCeilingDB = -1.0
 
     var isActive: Bool { programSourceDeviceUID != nil }
+
+    /// E36 S6b: choosing this as the program source means "the Notch Sixty virtual driver's ring" (the fold runs in the DAC
+    /// callback on the driver path). It needs no device in the list: the driver publishes its device only while a lease is
+    /// held, and the channel count and rate are the app's own (it writes the layout and the DAC's rates to the driver).
+    static let driverSourceUID = N60_VD_DEVICE_UID
+
+    var usesDriverSource: Bool { programSourceDeviceUID == Self.driverSourceUID }
 }
 
 /// One row (a feed) of the fold-down matrix: gains by program channel index.
@@ -138,6 +145,7 @@ extension ProgramFoldDown {
         layout: OutputProgramLayout, availableDevices: [AudioOutputDevice], sampleRate: Double
     ) -> ProgramSourceResolution {
         guard let uid = programSourceDeviceUID, layout != .stereo else { return .upstreamFold }
+        if usesDriverSource { return .source(uid: uid) }
         guard let device = availableDevices.first(where: { $0.uid == uid }) else { return .waitForDevice(uid: uid) }
         let expected = layout.roles.count
         guard Int(device.outputChannelCount) == expected else {
@@ -192,6 +200,13 @@ struct ProgramFoldDownPlan: Equatable, Sendable {
 
     var sourceUID: String { foldDown.programSourceDeviceUID ?? "" }
 
+    /// The stand-in the session recognises by UID: it opens the ring in the layout's channel count, not a tap on a device.
+    static func driverSourceDevice(layout: OutputProgramLayout, sampleRate: Double) -> AudioOutputDevice {
+        AudioOutputDevice(
+            deviceID: 0, uid: ProgramFoldDown.driverSourceUID, name: "Notch Sixty virtual audio driver",
+            nominalSampleRate: sampleRate, availableSampleRateRanges: [], outputChannelCount: UInt32(layout.roles.count))
+    }
+
     /// A fold runs on the stereo session only. These are the setups that cannot host it.
     static func incompatibility(sameDeviceOrAggregateOutput: Bool, headphoneProfileEnabled: Bool) -> ProgramFoldDownError? {
         if sameDeviceOrAggregateOutput { return .incompatibleOutput("a same-device or multi-device output plan") }
@@ -208,9 +223,15 @@ struct ProgramFoldDownPlan: Equatable, Sendable {
     }
 
     static func buildDecision(
-        plan: ProgramFoldDownPlan?, availableDevices: [AudioOutputDevice], sampleRate: Double
+        plan: ProgramFoldDownPlan?, availableDevices: [AudioOutputDevice], sampleRate: Double, driverPathActive: Bool = false
     ) -> BuildDecision {
         guard let plan else { return .standard }
+        if plan.foldDown.usesDriverSource {
+            // E36 S6b: the driver's ring carries the wider programme. With the driver path off there is nothing to fold,
+            // so the tap runs as usual (the Speakers card says the fold waits for the driver path).
+            guard driverPathActive else { return .standard }
+            return .tapSource(driverSourceDevice(layout: plan.layout, sampleRate: sampleRate))
+        }
         switch plan.foldDown.resolveSource(layout: plan.layout, availableDevices: availableDevices, sampleRate: sampleRate) {
         case .upstreamFold: return .standard
         case .source(let uid):
