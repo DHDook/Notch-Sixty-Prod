@@ -191,6 +191,9 @@ struct ProductionSystemOverviewView: View {
     @ObservedObject var profiles: ProductProfileController
     @ObservedObject var navigation: ProductionNavigation
     var entryCard = AnyView(EmptyView())
+    /// E12 S17: the stored measurement project, read by the calibration summary.
+    var projects: RoomCorrectionProjectController?
+    @State private var showingSummary = false
 
     private var status: SystemCalibrationStatus {
         SystemCalibrationStatus.resolve(
@@ -234,7 +237,8 @@ struct ProductionSystemOverviewView: View {
                             navigation.systemTab = id.tab
                             if let section = id.calibrateSection { navigation.calibrateSection = section }
                         },
-                        moved: { profiles.markSystemMoved() })
+                        moved: { profiles.markSystemMoved() },
+                        showSummary: { showingSummary = true })
                 }
 
                 ForEach(ProductionSystemTab.allCases.filter { $0 != .overview }) { tab in
@@ -246,6 +250,11 @@ struct ProductionSystemOverviewView: View {
                     .buttonStyle(.link)
                 }
             }
+        }
+        .sheet(isPresented: $showingSummary) {
+            SystemCalibrationSummaryView(
+                summary: .make(.make(engine: engine, profiles: profiles, projects: projects)),
+                close: { showingSummary = false })
         }
     }
 

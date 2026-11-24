@@ -38,6 +38,7 @@ struct SystemOverviewChecklistView: View {
     let rows: [SystemChecklistRow]
     var open: (SystemChecklistRowID) -> Void
     var moved: () -> Void
+    var showSummary: () -> Void = {}
 
     var body: some View {
         GroupBox("Calibration checklist") {
@@ -47,6 +48,7 @@ struct SystemOverviewChecklistView: View {
                     if row.id != rows.last?.id { Divider() }
                 }
                 Divider()
+                Button("Calibration summary…", action: showSummary)
                 ViewThatFits(in: .horizontal) {
                     HStack {
                         Button("I moved something", action: moved)
