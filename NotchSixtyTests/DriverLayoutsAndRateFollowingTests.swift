@@ -7,7 +7,7 @@ import XCTest
 /// they call: the shape decision, the channel order the fold reads, the compiled gains and the follower.
 @MainActor
 final class DriverLayoutsAndRateFollowingTests: XCTestCase {
-    static let rates: [Double] = [44_100, 48_000, 88_200, 96_000, 176_400, 192_000, 352_800, 384_000]
+    nonisolated static let rates: [Double] = [44_100, 48_000, 88_200, 96_000, 176_400, 192_000, 352_800, 384_000]
 
     // MARK: Session shape
 
@@ -122,6 +122,7 @@ final class DriverLayoutsAndRateFollowingTests: XCTestCase {
 
     final class MemoryStore: RateFollowingStore { var isEnabled = false }
 
+    @MainActor
     final class World {
         var player: Double? = 48_000
         var dac: Double? = 48_000
