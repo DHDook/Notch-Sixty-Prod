@@ -706,7 +706,7 @@ unified graph only.
 - [~] S1b `e23/precision-and-cleanup` (PR pending, needs-owner, engine): double state for E6 G18, G25 and the Linkwitz form for G31 built; cleanup whole-buffer pass (E6 G37) partly built, per-section hoisting open as E23 G5; wiring slice: graph path, not yet on the shipped UI as a separate check
 - [ ] S1c `e23/parity-and-host-fold` (needs-owner, engine): G2 latency report at 44.1 and 88.2 kHz, G3 clipped-input level difference, E6 G48 Quiet Zone host fold
 - [ ] Confirm nothing falls back to the kernel, the old N-channel path or the legacy binaural pipeline (E6 S12a–S12h)
-- [ ] S2 `e23/kernel-reference-inventory` (owner, 11 Nov 2026): list the 17 files that still reference `N60RenderKernel` in `docs/epics/E23.md`, each with the slice that removes the reference
+- [x] S2 `e23/kernel-reference-inventory` (owner, 11 Nov 2026): list the 43 files (not 17) that still reference `N60RenderKernel` in `docs/epics/E23.md`, each with the slice that removes the reference
 - [ ] S3 `e23/content-view-removal` (owner, 11 Nov 2026; needs-owner if any user-visible control goes): remove `ContentView.swift` (1,607 lines, still instantiated from `NotchSixtyApp.swift`) once every control it holds is reachable elsewhere
 - [ ] S4 `e23/audio-io-engine-split` (owner, 11 Nov 2026; needs-owner: `AudioIOEngine.swift`): split `AudioIOEngine.swift` (6,382 lines) along its legacy-path seams as the kernel paths go. From now on no slice in any epic may make the file longer
 - [ ] S5 `e23/idle-render-path` (performance review, owner approved 15 Nov 2026); needs-owner, engine; after the kernel is deleted: skip or cut rendering when the input is silent and every tail has decayed, never while ANC, MIMO treatment or the generator is active; idle bench row
