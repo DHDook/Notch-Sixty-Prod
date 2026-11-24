@@ -34,6 +34,9 @@ final class DriverEngineSwitcher {
 
     func attach(_ engine: any InputSwitchEngine) { self.engine = engine }
 
+    /// The same engine as the rate-following port (E36 S6b), when it offers one.
+    var rateFollowingEngine: (any RateFollowingEngine)? { engine as? any RateFollowingEngine }
+
     var hooks: InputSwitchHooks {
         InputSwitchHooks(
             fadeOut: { [weak self] in self?.fadeOut() },

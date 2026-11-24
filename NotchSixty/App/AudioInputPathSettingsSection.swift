@@ -45,6 +45,13 @@ struct AudioInputPathSettingsSection: View {
                 }
             }
 
+            Toggle("Follow the player's sample rate", isOn: Binding(
+                get: { model.rateFollowingEnabled },
+                set: { model.setRateFollowing($0) }
+            ))
+            .disabled(!model.rateFollowingAvailable)
+            .help("Sets the DAC to the rate the player picks, or the nearest supported multiple of it. Off by default.")
+
             Text(AudioInputPathPresentation.crashWarning)
                 .font(.caption)
                 .foregroundStyle(.secondary)

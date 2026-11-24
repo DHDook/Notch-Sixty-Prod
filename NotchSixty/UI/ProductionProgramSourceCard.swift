@@ -21,6 +21,7 @@ struct ProductionProgramSourceCard: View {
                     set: { controller.setSource(uid: $0) }
                 )) {
                     Text("None (player or macOS folds)").tag(String?.none)
+                    Text("Notch Sixty virtual driver (needs the driver)").tag(Optional(ProgramFoldDown.driverSourceUID))
                     ForEach(controller.candidates) { device in
                         Text("\(device.name) · \(device.outputChannelCount) ch").tag(Optional(device.uid))
                     }
@@ -44,6 +45,9 @@ struct ProductionProgramSourceCard: View {
                 .disabled(!controller.foldApplies || !controller.foldDown.isActive)
 
                 Text(controller.resolutionText).font(.callout)
+                if controller.foldDown.usesDriverSource {
+                    Text(ProgramSourceController.driverSourceNote).font(.caption).foregroundStyle(.secondary)
+                }
                 if controller.foldApplies, controller.foldDown.isActive {
                     Text(controller.lfeNote).font(.caption).foregroundStyle(.secondary)
                     Text(ProgramSourceController.rebuildNote).font(.caption).foregroundStyle(.secondary)

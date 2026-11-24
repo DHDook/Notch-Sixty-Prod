@@ -72,6 +72,9 @@ final class AudioInputPathModel: ObservableObject {
     let coordinator: DriverInputCoordinator?
     /// E36 S3b: the engine half of the switch; the product controller attaches the engine once it exists.
     var engineSwitcher: DriverEngineSwitcher?
+    /// E36 S6b: automatic sample-rate following (off by default); nil in tests that do not need it.
+    var rateFollower: DriverRateFollower?
+    @Published private(set) var rateFollowingEnabled = false
 
     let downloadURL: URL?
     private let probe: () -> DriverStatus
@@ -98,7 +101,23 @@ final class AudioInputPathModel: ObservableObject {
     /// Every driver-only feature with its availability and "Needs the driver" note (E36 S6a; one registry).
     var unlocks: [DriverUnlockPresentation] { DriverUnlockRegistry.presentation(path: selectedPath, status: status) }
 
+    /// Whether rate following can act now: the driver path is on and the driver is in use.
+    var rateFollowingAvailable: Bool {
+        DriverUnlockRegistry.isAvailable(.automaticRateFollowing, path: selectedPath, status: status)
+    }
+
+    func setRateFollowing(_ enabled: Bool) {
+        rateFollower?.isEnabled = enabled
+        rateFollowingEnabled = rateFollower?.isEnabled ?? false
+    }
+
     func refresh() {
+        refreshStatusAndPath()
+        // After the status and path are current, so a driver that just went away stops following at once.
+        rateFollower?.tick(driverInUse: rateFollowingAvailable)
+    }
+
+    private func refreshStatusAndPath() {
         status = probe()
         if let coordinator {
             coordinator.reconcile()
@@ -167,6 +186,11 @@ final class AudioInputPathModel: ObservableObject {
         let model = AudioInputPathModel(
             probe: { driver.refresh() }, downloadURL: nil, openURL: openURL, coordinator: coordinator)
         model.engineSwitcher = switcher
+        let follower = DriverRateFollower(
+            store: UserDefaultsRateFollowingStore(),
+            ports: DriverRateFollowingSystem.ports(engine: { [weak switcher] in switcher?.rateFollowingEngine }))
+        model.rateFollower = follower
+        model.rateFollowingEnabled = follower.isEnabled
         return model
     }
 }

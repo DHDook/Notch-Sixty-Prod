@@ -64,6 +64,11 @@ final class ProgramSourceController: ObservableObject {
         switch resolution {
         case .upstreamFold:
             return "No wider source is set, so your player or macOS folds the program to two channels before it reaches Notch Sixty."
+        case .source(let uid) where uid == ProgramFoldDown.driverSourceUID:
+            guard arrangement?.layout.driverLayout != nil else {
+                return "The virtual audio driver has no \(arrangement?.layout.displayName ?? "") layout. It carries 5.1, 7.1, 5.1.4 and 7.1.4."
+            }
+            return "Folding the virtual audio driver's \(arrangement?.layout.displayName ?? "") programme onto your two speaker feeds."
         case .source(let uid):
             let name = engine.programSourceCandidates.first { $0.uid == uid }?.name ?? uid
             return "Folding \(name) onto your two speaker feeds. Set the macOS output to \(name) so the player sends the full program there."
@@ -75,6 +80,8 @@ final class ProgramSourceController: ObservableObject {
             return "The program source does not offer \(Int(rate)) Hz, the speaker output's rate. The fold never resamples."
         }
     }
+
+    static let driverSourceNote = "Needs the driver: the fold runs only while the virtual driver is the audio input path (Settings). With the driver path off, the player or macOS folds as before."
 
     static let rebuildNote = "Changing the source, LFE or headroom restarts audio briefly and turns Quiet Zone off."
 
@@ -96,6 +103,11 @@ final class ProgramSourceController: ObservableObject {
         let previous = arrangement
         var fold = arrangement.foldDown ?? ProgramFoldDown()
         change(&fold)
+        if fold.usesDriverSource, arrangement.layout.driverLayout == nil {
+            lastError = "The virtual audio driver has no \(arrangement.layout.displayName) layout. It carries 5.1, 7.1, 5.1.4 and 7.1.4."
+            objectWillChange.send()
+            return
+        }
         arrangement.foldDown = fold == ProgramFoldDown() ? nil : fold
         guard arrangement != previous else { return }
         do {
