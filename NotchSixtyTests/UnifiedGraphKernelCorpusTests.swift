@@ -179,7 +179,7 @@ final class UnifiedGraphKernelCorpusTests: XCTestCase {
 
     // The clipping-edge signal is not in the two dynamics-on corpora: with the compressor, expander and protection
     // all on, the graph and kernel output levels differ by up to about 35 percent on a hard-clipped square wave,
-    // varying with rate (gap G3 in docs/epics/E23.md). The linear chain below still runs it.
+    // varying with rate. Root cause (E23 S1c, G3): two ordering differences, pinned below; the clipped signal runs with them removed.
     func testEveryStageOnMatchesTheKernelOverTheCorpusAtEveryRate() throws {
         try assertCorpus("every stage (mid/side)", tolerance: 0.15, signals: [.noise, .sweep, .impulses]) { self.everythingOn(rate: $0, dynamicEQ: false) }
     }
@@ -203,6 +203,41 @@ final class UnifiedGraphKernelCorpusTests: XCTestCase {
                 rate, 90, N60CrossoverTopologyLinkwitzRiley24, N60CrossoverMonitorModeRecombined, 0.8, true, true, &s.crossover))
             s.outputGainLinear = 0.8
             return s
+        }
+    }
+
+    // MARK: Order exceptions behind G3 (E23 S1c root cause)
+
+    /// Root cause of the clipping-with-dynamics difference (G3), found by bisecting one stage at a time: every stage matches the
+    /// kernel alone and in pairs, and two ordering differences remain. (1) The graph runs the compressor and expander before
+    /// the stereo crossover, the kernel after it. (2) The graph folds the master gain into the lane output gain ahead of the
+    /// protection, the kernel applies it after the protection. A clipped lane exposes both; unclipped signals do not.
+    /// This test pins the master-gain exception so a change to it is a decision, not an accident.
+    func testMasterGainSitsBeforeTheProtectionInTheGraphAndAfterItInTheKernel() throws {
+        for rate in [44_100.0, 176_400] {
+            var s = N60DSPGraphSnapshotMakeUnity(rate)
+            XCTAssertTrue(N60ProtectionSnapshotSetSoftClipperAdvanced(&s.protection, true, 6, -2, 0.5, N60ClipperCurveCubic, true, 1.0))
+            s.masterGainLinear = 0.9
+            let frames = Int(rate * 0.3) / Self.block * Self.block
+            let input = signal(.clipping, rate: rate, frames: frames)
+            let kernel = try kernelRender(s, input)
+            let graph = try graphRender(try graphHost(s, rate: rate), input)
+            let start = frames / 2
+            let kernelRMS = rms(kernel[0][start...]), graphRMS = rms(graph[0][start...])
+            XCTAssertEqual(kernelRMS, 0.9 * graphRMS, accuracy: 0.002 * graphRMS, "kernel scales after the clipper, rate \(rate)")
+        }
+    }
+
+    /// With the two ordering exceptions removed (no crossover, master gain 1) the full configuration matches the kernel on
+    /// hard-clipped input too, at every rate. This closes the "clipping is not in the corpora" half of G3.
+    func testEveryStageMatchesTheKernelOnClippedInputWhenTheOrderExceptionsAreRemoved() throws {
+        for dynamicEQ in [false, true] {
+            try assertCorpus("every stage, order exceptions removed (dynamicEQ \(dynamicEQ))", tolerance: 0.15, signals: [.clipping]) { rate in
+                var s = self.everythingOn(rate: rate, dynamicEQ: dynamicEQ)
+                s.crossover = N60CrossoverSnapshotMakeBypassed()
+                s.masterGainLinear = 1
+                return s
+            }
         }
     }
 
@@ -307,10 +342,11 @@ final class UnifiedGraphKernelCorpusTests: XCTestCase {
                 let label = "oversampling \(oversampling.rawValue) rate \(rate)"
                 let graphDelay = try XCTUnwrap(centroidDelay(graph[0], impulseAt: 100), label)
                 let kernelDelay = try XCTUnwrap(centroidDelay(kernel[0], impulseAt: 100), label)
-                // E23 S1c (G2, refined): with the sub-sample peak position the report is not a rounding artefact. At 44.1 kHz it
-                // reads 137 frames against a measured 136.07 (the kernel measures the same), so the report is about one frame
-                // long; the tolerance stays one frame and G2 stays open in docs/epics/E23.md.
-                XCTAssertEqual(graphDelay, Double(host.latencyFrames), accuracy: 1.0, "graph report vs measured, \(label)")
+                // E23 S1c G2 root cause: the look-ahead is a whole number of oversampled samples, so its delay in frames is
+                // fractional (353 / 4 = 88.25 at 44.1 kHz), and the report rounds it up to whole frames. The report is therefore
+                // never short and at most one frame long; the energy centroid of the linear-phase response measures it exactly.
+                XCTAssertGreaterThanOrEqual(Double(host.latencyFrames) - graphDelay, -0.05, "report never short, \(label)")
+                XCTAssertLessThan(Double(host.latencyFrames) - graphDelay, 1.0, "report within one frame (ceil of a fraction), \(label)")
                 // Parity exception (E32 S6, for the E23 S1 corpus): with `e32.dynamics-sound` the graph's true-peak factor follows
                 // the rate (1x from 176.4 kHz, 2x at 88.2 and 96 kHz) while the frozen kernel keeps a fixed 4x, so the delays
                 // differ by design wherever the rate's factor is not 4.
@@ -321,15 +357,12 @@ final class UnifiedGraphKernelCorpusTests: XCTestCase {
         }
     }
 
-    /// Index of the largest-magnitude sample, minus the input position (the oversampling filters are
-    /// linear phase, so the peak sits at the group delay).
+    /// Energy centroid of the response minus the input position: the oversampling filters are linear phase, so the centroid
+    /// is the exact (fractional) group delay.
     private func centroidDelay(_ x: [Float], impulseAt: Int) -> Double? {
-        guard let peak = x.enumerated().max(by: { abs($0.element) < abs($1.element) }), abs(peak.element) > 1e-6,
-              peak.offset > 0, peak.offset < x.count - 1 else { return nil }
-        // Parabolic interpolation through the peak and its neighbours gives the sub-sample position.
-        let a = Double(abs(x[peak.offset - 1])), b = Double(abs(peak.element)), c = Double(abs(x[peak.offset + 1]))
-        let denominator = a - 2 * b + c
-        let shift = abs(denominator) > 1e-12 ? 0.5 * (a - c) / denominator : 0
-        return Double(peak.offset - impulseAt) + shift
+        var weighted = 0.0, total = 0.0
+        for (i, v) in x.enumerated() { let e = Double(v) * Double(v); weighted += Double(i) * e; total += e }
+        guard total > 1e-12 else { return nil }
+        return weighted / total - Double(impulseAt)
     }
 }
