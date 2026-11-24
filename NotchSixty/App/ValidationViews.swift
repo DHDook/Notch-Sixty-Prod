@@ -811,9 +811,6 @@ struct EngineeringValidationView: View {
 
     var body: some View {
         TabView {
-            ContentView(engine: engine)
-                .tabItem { Label("Main Validation", systemImage: "slider.horizontal.3") }
-
             PR27ProtectionValidationView(engine: engine)
                 .tabItem { Label("PR27 Protection", systemImage: "waveform.path.ecg") }
 
