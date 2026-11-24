@@ -99,6 +99,12 @@ struct ProductionHeadphoneWorkspace: View {
             loadResponsesAndTargets()
         }
         .task(id: profiles.selectedSystemProfileID) { syncFromSelectedSystem() }
+        .onChange(of: draft.spatialMode) { _, mode in
+            // E13 S11: Virtual Speakers works at once with the built-in generic head model.
+            if cleanPage, mode == .virtualSpeakers, draft.binauralProfile == nil {
+                draft.binauralProfile = GenericHRTF.reference
+            }
+        }
         .onChange(of: draft) { _, newDraft in
             keepAutoHeadroom(newDraft)
             previewLive(newDraft)
@@ -1192,7 +1198,10 @@ struct ProductionHeadphoneWorkspace: View {
             HStack {
                 VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
                     Text("HRTF / BRIR Profile").font(.subheadline.bold())
-                    if let profile = draft.binauralProfile {
+                    if let profile = draft.binauralProfile, GenericHRTF.isGeneric(profile) {
+                        Text("\(profile.displayName) · generated at the output rate")
+                            .foregroundStyle(.secondary)
+                    } else if let profile = draft.binauralProfile {
                         Text("\(profile.displayName) · \(profile.tapCount) taps · \(profile.sampleRate / 1_000, specifier: "%.1f") kHz")
                             .foregroundStyle(.secondary)
                     } else {
@@ -1205,6 +1214,16 @@ struct ProductionHeadphoneWorkspace: View {
                     importingSpatialProfile = true
                 }
                 .buttonStyle(.glass)
+            }
+
+            if cleanPage {
+                if draft.binauralProfile.map(GenericHRTF.isGeneric) != true {
+                    Button("Use the built-in generic head model") { draft.binauralProfile = GenericHRTF.reference }
+                        .buttonStyle(.glass)
+                }
+                Text("The generic head model is a calculated average head, so placement is approximate. Import a SOFA file or capture your own BRIR for a closer match.")
+                    .font(DesignType.caption.font)
+                    .foregroundStyle(.secondary)
             }
 
             if FeatureFlags().isEnabled(.headphones), let calibration {
@@ -1245,7 +1264,7 @@ struct ProductionHeadphoneWorkspace: View {
             )
             .font(DesignType.caption.font)
             .foregroundStyle(.secondary)
-            if let profile = draft.binauralProfile {
+            if let profile = draft.binauralProfile, !GenericHRTF.isGeneric(profile) {
                 let matching = selectedSampleRate.map {
                     abs($0 - profile.sampleRate) < 0.5
                 } ?? false

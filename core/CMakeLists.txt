@@ -537,6 +537,11 @@ add_executable(n60core_vd_ring_test tests/test_vd_ring.cpp)
 target_link_libraries(n60core_vd_ring_test PRIVATE n60core)
 add_test(NAME n60core_vd_ring COMMAND n60core_vd_ring_test)
 
+# E13 S11: generic HRTF generator (n60/hrtf.h).
+add_executable(n60core_hrtf_test tests/test_hrtf.cpp)
+target_link_libraries(n60core_hrtf_test PRIVATE n60core)
+add_test(NAME n60core_hrtf COMMAND n60core_hrtf_test)
+
 # E21 S10b: passive ambient field analysis (n60/anc_design.h v2).
 add_executable(n60core_ambient_field_test tests/test_ambient_field.cpp)
 target_link_libraries(n60core_ambient_field_test PRIVATE n60core)

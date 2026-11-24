@@ -36,6 +36,8 @@ extern "C" int n60_core_abi(n60_core_abi_info *info, size_t info_size) {
     out.ancDesignOptionsSize = static_cast<uint32_t>(sizeof(n60_anc_seat_options));
     out.vdRingVersion = n60_vd_ring_abi_version();
     out.vdRingHeaderSize = static_cast<uint32_t>(sizeof(n60_vd_ring_header));
+    out.hrtfVersion = n60_hrtf_abi_version();
+    out.hrtfModelSize = static_cast<uint32_t>(sizeof(n60_hrtf_generic_model));
     const size_t n = info_size < sizeof out ? info_size : sizeof out;
     out.structSize = static_cast<uint32_t>(n);
     memcpy(info, &out, n);

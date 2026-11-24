@@ -42,6 +42,18 @@ final class BinauralResampledAssetCache: @unchecked Sendable {
         }
         lock.unlock()
 
+        if GenericHRTF.isGeneric(reference) {
+            // E13 S11: the built-in generic HRTF is generated natively at the output rate, never resampled.
+            guard let generated = GenericHRTF.asset(sampleRate: sampleRate) else {
+                throw HeadphoneDeviceProfileError.invalidBinauralProfileReference
+            }
+            lock.lock(); defer { lock.unlock() }
+            entries[key] = generated
+            recency.removeAll { $0 == key }
+            recency.append(key)
+            while recency.count > capacity { entries[recency.removeFirst()] = nil }
+            return generated
+        }
         let stored = try store.load(id: reference.assetID)
         guard stored.id == reference.assetID,
               abs(stored.sampleRate - reference.sampleRate) < 0.5,

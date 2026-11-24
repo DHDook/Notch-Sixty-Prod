@@ -443,6 +443,9 @@ final class BinauralProfileAssetStore {
     }
 
     func load(id: UUID) throws -> BinauralProfileAsset {
+        if id == GenericHRTF.assetID, let generic = GenericHRTF.asset(sampleRate: GenericHRTF.referenceSampleRate) {
+            return generic
+        }
         let url = url(for: id)
         guard FileManager.default.fileExists(atPath: url.path) else {
             throw BinauralProfileAssetError.assetNotFound(id)
