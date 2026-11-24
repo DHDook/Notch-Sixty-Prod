@@ -58,3 +58,4 @@
 #import "N60DynamicsLegacyAdvanced.h"
 #import "N60WorkerWake.h"
 #import "../VirtualDevice/N60VirtualDeviceProtocol.h"
+#import "../VirtualDevice/N60VirtualRingPump.h"

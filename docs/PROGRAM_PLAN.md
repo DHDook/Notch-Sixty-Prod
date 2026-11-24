@@ -687,6 +687,9 @@ virtual output device as a second input path beside the process tap, which stays
 signed installer live in a separate repository; the App Store build only detects it. One flag `e36.virtual-driver`,
 graduated in S7. Slices S1–S7 (app) and X1–X3 (driver repository) are listed in the epic file.
 
+- [~] S3 `e36/virtual-capture` built dark (PR pending; `e36.virtual-driver` stays off): ring reader and clock steering in the core, ring pump, `VirtualDeviceCaptureSource`, protocol encodings; not on the shipped UI until wiring slice S3b
+- [ ] S3b `e36/virtual-session` (needs-owner: Core Audio transport): the three sessions choose the ring source when the driver path is on, real shared-memory mapping under the app group, production steering timer; end-to-end test through the switch (G4, G10, G15, G16)
+
 ### E23 Legacy engine removal
 
 Owner decision, 20 Oct 2026: the kernel stays behind `e6.legacy-kernel` until late in the roadmap,

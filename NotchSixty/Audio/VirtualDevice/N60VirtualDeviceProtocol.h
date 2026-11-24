@@ -1,7 +1,7 @@
 // N60VirtualDeviceProtocol.h
 // E36 S2: the one artefact shared by the app and the Notch Sixty virtual audio driver (a separate repository).
 // The driver repository copies this file; keep it free of platform headers so both sides can include it.
-// Spec: docs/VIRTUAL_DEVICE_PROTOCOL.md. Transport-agnostic: nothing here names how programme audio moves (E36 G1).
+// Spec: docs/VIRTUAL_DEVICE_PROTOCOL.md. Programme audio moves through the shared-memory ring in n60/vd_ring.h (E36 G1, transport A).
 #ifndef N60_VIRTUAL_DEVICE_PROTOCOL_H
 #define N60_VIRTUAL_DEVICE_PROTOCOL_H
 
@@ -29,6 +29,22 @@ extern "C" {
 #define N60_VD_PROP_DAC_RATES        0x6e366472u /* 'n6dr' write: float64[] rates the DAC offers (S3) */
 #define N60_VD_PROP_LAYOUT           0x6e366c79u /* 'n6ly' write: uint32 channel layout code (S3) */
 #define N60_VD_PROP_LATENCY          0x6e366c74u /* 'n6lt' write: uint32 frames of added delay (S6) */
+
+/// Value encodings (E36 S3, G6). All values are native-endian, written whole in one property call.
+///  CLOCK_SCALAR  float64, the factor the driver multiplies its clock by: 1.0 nominal, always within 1 +- 0.001.
+///  DAC_RATES     float64[1 ... N60_VD_MAX_DAC_RATES], ascending, in Hz: the rates the driver offers. While the driver path
+///                is on the app writes the DAC's rates up to 384 kHz; pinning to one rate is a one-entry list.
+///  LAYOUT        uint32, one of the N60_VD_LAYOUT_* codes below.
+#define N60_VD_MAX_DAC_RATES 32u
+#define N60_VD_CLOCK_SCALAR_MAX_PPM 1000u
+
+/// Layout codes. The driver offers `N60_VD_LAYOUT_CHANNELS(code)` channels in the ring; its ring channel count is the
+/// build constant N60_VD_RING_MAX_CHANNELS (16) in n60/vd_ring.h, so codes only say how many are in use.
+#define N60_VD_LAYOUT_STEREO  1u /* 2 channels */
+#define N60_VD_LAYOUT_5_1     2u /* 6 */
+#define N60_VD_LAYOUT_7_1     3u /* 8 */
+#define N60_VD_LAYOUT_5_1_4   4u /* 10 */
+#define N60_VD_LAYOUT_7_1_4   5u /* 12 */
 
 /// The app renews the lease this often (control-plane timer, never the audio callback) and the driver removes
 /// the device this long after the last renewal.

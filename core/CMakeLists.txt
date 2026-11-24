@@ -531,6 +531,11 @@ add_executable(n60core_anc_design_test tests/test_anc_design.cpp)
 target_link_libraries(n60core_anc_design_test PRIVATE n60core)
 add_test(NAME n60core_anc_design COMMAND n60core_anc_design_test)
 
+# E36 S3: virtual driver programme ring and clock steering (n60/vd_ring.h).
+add_executable(n60core_vd_ring_test tests/test_vd_ring.cpp)
+target_link_libraries(n60core_vd_ring_test PRIVATE n60core)
+add_test(NAME n60core_vd_ring COMMAND n60core_vd_ring_test)
+
 # E21 S10b: passive ambient field analysis (n60/anc_design.h v2).
 add_executable(n60core_ambient_field_test tests/test_ambient_field.cpp)
 target_link_libraries(n60core_ambient_field_test PRIVATE n60core)

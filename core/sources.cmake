@@ -11,6 +11,7 @@ set(N60_CORE_SOURCES
     src/correct/multisub_search.cpp src/correct/multisub_optimize.cpp src/abi.cpp src/xover/xover.cpp src/headroom/headroom.cpp src/eqfit/eqfit.cpp src/eqmatched.cpp src/eq_linear_phase.cpp
     src/speaker/correction.cpp src/speaker/candidates.cpp src/speaker/crossover.cpp src/speaker/characterise.cpp
     src/anc_design/seat_design.cpp src/anc_design/fir_compile.cpp src/anc_design/clock_upstream.cpp src/anc_design/ambient.cpp
+    src/vd_ring.cpp
     src/anc/fxlms.cpp src/anc/remote_tonal.cpp src/anc/anc_guard.cpp src/anc/ff_live.cpp src/anc/ff_echo.cpp
     src/anc/ff_shadow.cpp src/anc/ff_survey.cpp src/anc/anc_lane_feed.cpp)
 # C translation units of the core (existing C moved in, not rewritten): the Quiet Zone tonal runtime. Not read by ci/core_sources.sh,
