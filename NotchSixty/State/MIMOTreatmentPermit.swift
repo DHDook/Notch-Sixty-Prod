@@ -48,6 +48,8 @@ struct MIMOTreatmentClassQualification: Equatable, Sendable {
 /// there, so a product build cannot issue a permit before then.
 struct MIMOTreatmentQualificationRegistry: Equatable, Sendable {
     var records: [MIMOTreatmentClassQualification]
+    /// E19 S12a (D10): the engine baselines per rate family that a self-qualified permit needs. Empty in production until E22.
+    var engineBaselines: [MIMOTreatmentEngineBaseline] = []
 
     static let production = MIMOTreatmentQualificationRegistry(records: [])
 
@@ -62,6 +64,8 @@ enum MIMOTreatmentPermitRefusal: Error, Equatable, Sendable {
     case noStagedDesign
     case verificationFailed([MIMOTreatmentVerificationFailure])
     case hardwareAcceptanceRequired
+    /// E19 S12a: self-qualification was tried (`e19.self-qualification` on) and failed; every failing criterion by name.
+    case selfQualificationRefused([MIMOTreatmentSelfQualificationFailure])
 
     var reason: String {
         switch self {
@@ -71,6 +75,7 @@ enum MIMOTreatmentPermitRefusal: Error, Equatable, Sendable {
         case .verificationFailed(let failures): return failures.map(\.reason).joined(separator: " ")
         case .hardwareAcceptanceRequired:
             return "This configuration has no hardware acceptance record and no bench qualification; room treatment cannot be approved."
+        case .selfQualificationRefused(let failures): return failures.map(\.reason).joined(separator: " ")
         }
     }
 }
@@ -91,6 +96,7 @@ extension MIMOGraphTreatment {
         verification: MIMOTreatmentVerificationResult?,
         acceptance: MIMORoomTreatmentHardwareAcceptance?,
         registry: MIMOTreatmentQualificationRegistry = .production,
+        selfQualification: MIMOTreatmentSelfQualificationEvidence? = nil,
         routed: Bool = false,
         inBandWays: Int = 1,
         issuedAt: Date = Date()
@@ -116,9 +122,23 @@ extension MIMOGraphTreatment {
             $0.isComplete && $0.sourceCount == stage.filters.sourceCount && abs($0.sampleRate - stage.filters.sampleRate) < 0.5
         } ?? false
         let qualified = registry.qualification(for: key) != nil
-        guard accepted || qualified else { return refuse(.hardwareAcceptanceRequired) }
+        var basis: Permit.Basis = accepted ? .hardwareAcceptance : .classQualification
+        var evidenceDigest = ""
+        if !accepted, !qualified {
+            // E19 S12a: the third basis, only with the flag on. Flag off: exactly the refusal below, as before.
+            guard flags.isEnabled(.selfQualification) else { return refuse(.hardwareAcceptanceRequired) }
+            guard let selfQualification else { return refuse(.selfQualificationRefused([.evidenceMissing])) }
+            let failures = MIMOTreatmentSelfQualification.evaluate(
+                selfQualification, decimation: stage.filters.decimation, registry: registry)
+            guard failures.isEmpty else { return refuse(.selfQualificationRefused(failures)) }
+            basis = .selfQualification
+            evidenceDigest = selfQualification.bindingDigest
+        }
 
-        let permit = Permit(fingerprint: currentFingerprint(stage, context), issuedAt: issuedAt, basis: accepted ? .hardwareAcceptance : .classQualification)
+        selfQualificationEvidenceDigest = evidenceDigest
+        let permit = Permit(
+            fingerprint: currentFingerprint(stage, context, selfQualified: basis == .selfQualification), issuedAt: issuedAt,
+            basis: basis)
         setPermit(permit)
         return .success(permit)
     }
