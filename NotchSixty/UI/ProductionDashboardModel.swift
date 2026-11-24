@@ -57,6 +57,9 @@ struct DashboardInputs: Equatable {
     var crossoverHz = 80
     var crossoverName = ""
 
+    /// E12 S15 (G20): why the calibration is out of date, in plain words; nil when it is current or none exists.
+    var calibrationOutOfDate: String?
+
     var eqBandCount = 0
     var eqPhaseName = ""
     var dynamicsNames: [String] = []
@@ -102,7 +105,7 @@ struct DashboardHealthItem: Identifiable, Equatable {
 }
 
 enum DashboardAttentionKind: String, Equatable {
-    case engineError, waitingForDevice, activeSpeakerFailsafe, sessionEvents
+    case engineError, waitingForDevice, activeSpeakerFailsafe, calibrationOutOfDate, sessionEvents
 }
 
 struct DashboardAttentionItem: Identifiable, Equatable {
@@ -176,6 +179,11 @@ enum DashboardModel {
             items.append(.init(
                 kind: .engineError, text: error, buttonTitle: "See Transport",
                 destination: .init(.meters, metersPage: .transport), isWarning: true))
+        }
+        if let reason = i.calibrationOutOfDate {
+            items.append(.init(
+                kind: .calibrationOutOfDate, text: "The calibration may be out of date: \(reason).",
+                buttonTitle: "Open System", destination: .init(.system), isWarning: false))
         }
         if i.eventsInLastDay > 0 {
             let n = i.eventsInLastDay

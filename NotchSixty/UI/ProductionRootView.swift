@@ -463,7 +463,7 @@ struct ProductionRootView: View {
     private var setupEntryCard: AnyView {
         let status = SystemCalibrationStatus.resolve(
             summary: product.profiles.selectedSystemProfile?.state.roomCorrectionCalibration,
-            verifiedDesignID: nil)
+            verifiedDesignID: product.profiles.selectedSystemProfile?.state.calibrationRecord?.verifiedDesignID)
         let availability = SystemSetupEntryPolicy.availability(
             outputName: engine.selectedOutputDevice?.name,
             outputUID: engine.selectedOutputDevice?.uid,

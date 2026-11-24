@@ -96,6 +96,10 @@ extension DashboardInputs {
             i.acoustics = .staged
         }
 
+        if FeatureFlags().isEnabled(.systemPages) {
+            let reasons = SystemChecklistModel.outOfDateReasons(.make(engine: engine, profiles: profiles))
+            if !reasons.isEmpty { i.calibrationOutOfDate = reasons.map(\.reason).joined(separator: ", ") }
+        }
         i.lastError = engine.lastErrorDescription
         i.failsafeMessage = failsafeMessage
         i.eventsInLastDay = history.eventsSince(now.addingTimeInterval(-86_400)).count

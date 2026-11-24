@@ -195,8 +195,12 @@ struct ProductionSystemOverviewView: View {
     private var status: SystemCalibrationStatus {
         SystemCalibrationStatus.resolve(
             summary: profiles.selectedSystemProfile?.state.roomCorrectionCalibration,
-            verifiedDesignID: nil
+            verifiedDesignID: profiles.selectedSystemProfile?.state.calibrationRecord?.verifiedDesignID
         )
+    }
+
+    private var checklistRows: [SystemChecklistRow] {
+        SystemChecklistModel.rows(.make(engine: engine, profiles: profiles))
     }
 
     var body: some View {
@@ -222,6 +226,16 @@ struct ProductionSystemOverviewView: View {
                 }
 
                 entryCard
+
+                if FeatureFlags().isEnabled(.systemPages) {
+                    SystemOverviewChecklistView(
+                        rows: checklistRows,
+                        open: { id in
+                            navigation.systemTab = id.tab
+                            if let section = id.calibrateSection { navigation.calibrateSection = section }
+                        },
+                        moved: { profiles.markSystemMoved() })
+                }
 
                 ForEach(ProductionSystemTab.allCases.filter { $0 != .overview }) { tab in
                     Button {

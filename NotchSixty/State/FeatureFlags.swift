@@ -37,7 +37,7 @@ extension FeatureFlag {
         .parallelRender, .multirate, .rateAdapt, .coreDesigners,
         .eqPageEnhancements, .dynamicsSound, .designLanguage, .followOutput, .dashboardRemote, .virtualDriver,
         .blindListening,
-        .setupFlow, .selfQualification
+        .setupFlow, .systemPages, .selfQualification
     ]
 
     /// E6 S11: the unified graph is the default renderer. Turning this on selects the frozen
@@ -350,6 +350,18 @@ extension FeatureFlag {
         id: "e19.self-qualification",
         title: "MIMO room treatment self-qualification",
         epic: "E19"
+    )
+}
+
+extension FeatureFlag {
+    /// E12 S15-S18: System pages. S15 adds the Overview checklist and the out-of-date notice (the verification
+    /// defect fix is not gated); S16 the Speakers page, S17 the calibration summary, S18 the one measure surface.
+    /// Swift only; the engine never reads it. Off: the System tabs are as they are today. Graduates in E12 S18;
+    /// removed in the flag-cleanup phase.
+    static let systemPages = FeatureFlag(
+        id: "e12.system-pages",
+        title: "System pages",
+        epic: "E12"
     )
 }
 
