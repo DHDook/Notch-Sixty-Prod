@@ -33,7 +33,29 @@ final class PageContainerFitTests: XCTestCase {
             ("Acoustic research", AnyView(ProductionOptionalAudioResearchWorkspace(engine: engine))),
             ("Hardware acceptance", AnyView(ProductionHardwareAcceptanceWorkspace(
                 engine: engine, profiles: product.profiles, acceptance: product.hardwareAcceptance))),
+            ("Plug-ins", AnyView(ProductionPluginWorkspace(product: product))),
+            ("Speakers", AnyView(ProductionSpeakersView(engine: engine, profiles: product.profiles))),
+            ("System overview", AnyView(ProductionSystemOverviewView(
+                engine: engine, profiles: product.profiles, navigation: ProductionNavigation()))),
         ]
+    }
+
+    /// G117: on every container page the content starts at the shared leading padding and, at a window wider than the
+    /// 1,500 pt limit, no control passes the container's trailing padding. Reaching the trailing edge is asserted on the container itself
+    /// (`testContainerAlignsLeadingAndFillsUpToTheLimit`): the harness reads only AppKit controls, and many pages have none near the edge.
+    func testEveryContainerPageStartsAtTheLeadingPaddingAndStaysInside() {
+        let padding = DesignSpacing.xl.pt
+        let limit = ProductionPageContainer<EmptyView>.maxContentWidth
+        for (name, view) in pages() {
+            for size in Self.sizes {
+                let page = HostedPage(view, size: size)
+                let frames = page.controls.map { $0.view.convert($0.view.bounds, to: page.hosting) }
+                guard !frames.isEmpty else { continue }
+                let lead = frames.map(\.minX).min() ?? 0, trail = frames.map(\.maxX).max() ?? 0
+                XCTAssertGreaterThanOrEqual(lead, padding - 0.5, "\(name): content starts inside the leading padding at \(size.width)")
+                XCTAssertLessThanOrEqual(trail, min(size.width, limit) + 0.5, "\(name): content stays inside the container at \(size.width)")
+            }
+        }
     }
 
     func testEveryContainerPageFitsAtThreeSizes() {

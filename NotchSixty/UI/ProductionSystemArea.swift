@@ -200,7 +200,7 @@ struct ProductionSystemOverviewView: View {
     }
 
     var body: some View {
-        ScrollView {
+        ProductionPageContainer {
             VStack(alignment: .leading, spacing: 16) {
                 GroupBox {
                     HStack(alignment: .top, spacing: 12) {
@@ -232,8 +232,6 @@ struct ProductionSystemOverviewView: View {
                     .buttonStyle(.link)
                 }
             }
-            .padding(20)
-            .frame(maxWidth: 720, alignment: .leading)
         }
     }
 

@@ -1066,7 +1066,7 @@ struct ProductionPluginWorkspace: View {
     }
 
     var body: some View {
-        ScrollView {
+        ProductionPageContainer {
             VStack(alignment: .leading, spacing: DesignSpacing.xl.pt) {
                 header
                 if enhanced {
@@ -1081,11 +1081,6 @@ struct ProductionPluginWorkspace: View {
                     safetyCard
                 }
             }
-            .padding(DesignSpacing.xl.pt)
-            .frame(
-                maxWidth: 1_100,
-                alignment: .topLeading
-            )
         }
         .task {
             if host.lastScanDate == nil {

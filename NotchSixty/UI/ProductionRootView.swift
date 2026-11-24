@@ -1394,7 +1394,7 @@ private struct StereoSignatureVUScaleFace: View, Equatable {
     }
 }
 
-private struct ProductionSpeakersView: View {
+struct ProductionSpeakersView: View {
     var engine: AudioIOEngine
     @ObservedObject var profiles: ProductProfileController
     @State private var actionError: String?
@@ -1408,7 +1408,7 @@ private struct ProductionSpeakersView: View {
     }
 
     var body: some View {
-        ScrollView {
+        ProductionPageContainer {
             VStack(alignment: .leading, spacing: 20) {
                 Text("Speaker topology, bass management, crossover design, physical routing, and driver-level processing.")
                     .foregroundStyle(.secondary)
@@ -1444,8 +1444,6 @@ private struct ProductionSpeakersView: View {
                         .background(.red.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
                 }
             }
-            .padding(28)
-            .frame(maxWidth: 1_050, alignment: .topLeading)
         }
     }
 
