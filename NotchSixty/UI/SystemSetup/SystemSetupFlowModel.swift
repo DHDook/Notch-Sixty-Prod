@@ -1324,6 +1324,11 @@ final class SystemSetupFlowModel: ObservableObject {
             try flow.finish()
             let name = SystemSetupSaveNaming.profileName(flow.choices.profileName, notVerified: flow.savesAsNotVerified)
             let id = profiles.saveCurrentSystemProfile(named: name)
+            // E12 S15 (G14): a passing verification is stored with the saved profile, so the Overview reads "verified".
+            if flow.choices.verificationPassed == true,
+               let design = profiles.selectedSystemProfile?.state.roomCorrectionCalibration?.activeDesignID {
+                profiles.recordSystemVerification(designID: design)
+            }
             savedProfileName = profiles.systemProfiles.first(where: { $0.id == id })?.name ?? name
             quickFinished = flow.preset == .quick
             summary = makeSummary()

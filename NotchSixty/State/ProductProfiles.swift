@@ -609,6 +609,9 @@ struct PlaybackSystemState: Codable, Equatable, Sendable {
     var speakerRouting: SpeakerRoutingConfiguration?
     /// E25 S1: outputs and speaker arrangement. nil (the default) leaves the stored profile byte-identical.
     var systemArrangement: SystemArrangement?
+    /// E12 S15: the passing verification, the "I moved something" mark and the stamp that decides when the
+    /// calibration is out of date. nil (the default) leaves the stored profile byte-identical.
+    var calibrationRecord: SystemCalibrationRecord?
 
     init(
         schemaVersion: Int = PlaybackSystemState.currentSchemaVersion,
@@ -626,7 +629,8 @@ struct PlaybackSystemState: Codable, Equatable, Sendable {
         ambientCompensation: AmbientCompensationConfiguration? = nil,
         activeQuietZone: ActiveQuietZoneConfiguration? = nil,
         speakerRouting: SpeakerRoutingConfiguration? = nil,
-        systemArrangement: SystemArrangement? = nil
+        systemArrangement: SystemArrangement? = nil,
+        calibrationRecord: SystemCalibrationRecord? = nil
     ) {
         self.schemaVersion = schemaVersion
         self.associatedOutputUID = associatedOutputUID
@@ -644,6 +648,7 @@ struct PlaybackSystemState: Codable, Equatable, Sendable {
         self.activeQuietZone = activeQuietZone
         self.speakerRouting = speakerRouting
         self.systemArrangement = systemArrangement
+        self.calibrationRecord = calibrationRecord
     }
 
     func composingGain(over base: DSPGainConfiguration) -> DSPGainConfiguration {
@@ -1880,6 +1885,7 @@ final class ProductProfileController: ObservableObject {
             try engine.replaceRoomCorrectionConfiguration(configuration)
             systemProfiles[index].state.roomCorrection = configuration
             systemProfiles[index].state.roomCorrectionCalibration = summary
+            if previousState.roomCorrectionCalibration != summary { restampCalibration(at: index, summary: summary) }
             try persistThrowing()
             lastErrorDescription = nil
         } catch {
@@ -1976,8 +1982,63 @@ final class ProductProfileController: ObservableObject {
                 selectedSystemProfile?.state.ambientCompensation,
             activeQuietZone:
                 selectedSystemProfile?.state.activeQuietZone,
-            systemArrangement: selectedSystemProfile?.state.systemArrangement
+            systemArrangement: selectedSystemProfile?.state.systemArrangement,
+            calibrationRecord: selectedSystemProfile?.state.calibrationRecord
         )
+    }
+
+    // MARK: Calibration record (E12 S15)
+
+    /// The stamp of the live system: engine routing, bass and trims, with the selected profile's arrangement.
+    func currentCalibrationStamp() -> SystemCalibrationStamp {
+        SystemCalibrationStamp(
+            outputUID: engine.routeConfiguration.selectedOutputUID,
+            arrangement: selectedSystemProfile?.state.systemArrangement,
+            outputRouting: engine.multiOutputRoutingConfiguration,
+            speakerRouting: engine.speakerRoutingConfiguration,
+            bass: engine.bassManagementConfiguration)
+    }
+
+    /// Stores a passing verification of `designID` on the selected system, stamped with the live system. A new
+    /// verification clears the "I moved something" mark.
+    func recordSystemVerification(designID: UUID, date: Date = Date()) {
+        guard let index = selectedSystemProfileIndex else { return }
+        var record = systemProfiles[index].state.calibrationRecord ?? SystemCalibrationRecord()
+        record.verifiedDesignID = designID
+        record.verifiedDate = date
+        record.stamp = currentCalibrationStamp()
+        record.stampDate = date
+        record.movedDate = nil
+        systemProfiles[index].state.calibrationRecord = record
+        persist()
+    }
+
+    /// "I moved something": the speakers or the seat moved, so the calibration is out of date until it is redone.
+    func markSystemMoved(date: Date = Date()) {
+        guard let index = selectedSystemProfileIndex else { return }
+        var record = systemProfiles[index].state.calibrationRecord ?? SystemCalibrationRecord()
+        record.movedDate = date
+        systemProfiles[index].state.calibrationRecord = record
+        persist()
+    }
+
+    private var selectedSystemProfileIndex: Int? {
+        guard let selectedSystemProfileID else { return nil }
+        return systemProfiles.firstIndex { $0.id == selectedSystemProfileID }
+    }
+
+    /// Re-stamps after a correction is deployed: the verification stays only when it names the new design.
+    private func restampCalibration(at index: Int, summary: RoomCorrectionCalibrationSummary?) {
+        guard let summary else { return }
+        var record = systemProfiles[index].state.calibrationRecord ?? SystemCalibrationRecord()
+        if record.verifiedDesignID != summary.activeDesignID {
+            record.verifiedDesignID = nil
+            record.verifiedDate = nil
+        }
+        record.stamp = currentCalibrationStamp()
+        record.stampDate = Date()
+        record.movedDate = nil
+        systemProfiles[index].state.calibrationRecord = record
     }
 
     /// E25 S3: stores the outputs and speaker arrangement on the selected system. Stored state only; the wizard
