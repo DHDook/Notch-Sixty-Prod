@@ -670,17 +670,21 @@ struct PlaybackSystemProfile: Identifiable, Codable, Equatable, Sendable {
     var id: UUID
     var name: String
     var state: PlaybackSystemState
+    /// E29 S2: the profile keeps only the ID of its room model; the model and its IRs live in `RoomModelStore`.
+    var roomModelID: UUID?
 
     init(
         schemaVersion: Int = PlaybackSystemProfile.currentSchemaVersion,
         id: UUID = UUID(),
         name: String,
-        state: PlaybackSystemState
+        state: PlaybackSystemState,
+        roomModelID: UUID? = nil
     ) {
         self.schemaVersion = schemaVersion
         self.id = id
         self.name = name
         self.state = state
+        self.roomModelID = roomModelID
     }
 }
 
