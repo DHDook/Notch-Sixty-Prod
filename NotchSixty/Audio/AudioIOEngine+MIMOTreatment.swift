@@ -40,7 +40,8 @@ extension AudioIOEngine {
             videoLatencyMode: mimoVideoLatencyMode,
             outputTrimsDB: (0..<laneCount).map { settings.lane($0).trimDB },
             laneCount: laneCount,
-            routedDigest: speakerRoutingConfiguration.map(MIMORoutedTreatmentPlanner.digest(of:)) ?? "")
+            routedDigest: speakerRoutingConfiguration.map(MIMORoutedTreatmentPlanner.digest(of:)) ?? "",
+            selfQualificationBinding: MIMOTreatmentSelfQualification.engineBinding(protection: settings))
     }
 
     /// Stages a designed stage for the next start (idle only, like the legacy staging). Never arms.
@@ -60,11 +61,12 @@ extension AudioIOEngine {
     @discardableResult
     func issueMIMOTreatmentPermit(
         verification: MIMOTreatmentVerificationResult?, acceptance: MIMORoomTreatmentHardwareAcceptance?,
-        registry: MIMOTreatmentQualificationRegistry = .production
+        registry: MIMOTreatmentQualificationRegistry = .production,
+        selfQualification: MIMOTreatmentSelfQualificationEvidence? = nil
     ) -> Result<MIMOGraphTreatment.Permit, MIMOTreatmentPermitRefusal> {
         mimoGraphTreatment.issuePermit(
             context: mimoTreatmentContext(), videoLatency: mimoVideoLatencyInput, verification: verification,
-            acceptance: acceptance, registry: registry, routed: speakerRoutingConfiguration != nil,
+            acceptance: acceptance, registry: registry, selfQualification: selfQualification, routed: speakerRoutingConfiguration != nil,
             inBandWays: speakerRoutingConfiguration.map {
                 MIMORoutedTreatmentPlanner.inBandWayCount(of: $0, overrides: mimoGraphTreatment.routedSupportOverrides)
             } ?? 1)
