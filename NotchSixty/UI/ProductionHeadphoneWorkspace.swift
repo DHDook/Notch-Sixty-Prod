@@ -336,7 +336,11 @@ struct ProductionHeadphoneWorkspace: View {
 
     private var correctionCard: some View {
         VStack(alignment: .leading, spacing: DesignSpacing.l.pt) {
-            Text("Device Correction").font(DesignType.sectionTitle.font)
+            HStack {
+                Text("Device Correction").font(DesignType.sectionTitle.font)
+                Spacer()
+                bypassSwitch(.correction, label: "Bypass correction")
+            }
 
             HStack(spacing: DesignSpacing.xl.pt) {
                 if !cleanPage {
@@ -1107,6 +1111,7 @@ struct ProductionHeadphoneWorkspace: View {
             HStack {
                 Text("Acoustic Crossfeed").font(DesignType.sectionTitle.font)
                 Spacer()
+                bypassSwitch(.crossfeed, label: "Bypass crossfeed")
                 Picker("Preset", selection: Binding(
                     get: { draft.crossfeed.preset },
                     set: { preset in draft.crossfeed.applyPreset(preset) }
@@ -1174,7 +1179,11 @@ struct ProductionHeadphoneWorkspace: View {
 
     private var spatialCard: some View {
         VStack(alignment: .leading, spacing: DesignSpacing.l.pt) {
-            Text("Virtual Speakers").font(DesignType.sectionTitle.font)
+            HStack {
+                Text("Virtual Speakers").font(DesignType.sectionTitle.font)
+                Spacer()
+                bypassSwitch(.virtualSpeakers, label: "Bypass Virtual Speakers")
+            }
 
             Picker("Program Layout", selection: $draft.programLayout) {
                 ForEach(OutputProgramLayout.allCases) { layout in
@@ -1393,6 +1402,15 @@ struct ProductionHeadphoneWorkspace: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
+    /// E13 S12: a listening switch on a card (page flag on). Live while playing, never saved.
+    @ViewBuilder private func bypassSwitch(_ part: HeadphoneBypassSet, label: String) -> some View {
+        if cleanPage {
+            HeadphoneBypassSwitch(
+                state: profiles.headphoneBypass, part: part, label: label, enabled: bypassAvailable,
+                changed: { previewLive(draft) })
+        }
+    }
+
     private func binding<T>(_ keyPath: WritableKeyPath<HeadphoneDeviceProfileConfiguration, T>) -> Binding<T> {
         Binding(get: { draft[keyPath: keyPath] }, set: { draft[keyPath: keyPath] = $0 })
     }
@@ -1409,8 +1427,16 @@ struct ProductionHeadphoneWorkspace: View {
         return HeadphoneLiveTuner.isLiveEditable(saved: profiles.selectedSystemHeadphoneDeviceProfile, draft: draft)
     }
 
+    /// E13 S12: a bypass switch needs only a running, enabled saved profile; it plays the saved profile (or the draft when
+    /// that is a live edit of it) with the bypassed parts switched off, and saves nothing.
+    private var bypassAvailable: Bool {
+        engine.lifecycleState == .running && profiles.selectedSystemHeadphoneDeviceProfile?.enabled == true
+    }
+
     private func previewLive(_ newDraft: HeadphoneDeviceProfileConfiguration) {
-        guard liveTuningAvailable, let saved = profiles.selectedSystemHeadphoneDeviceProfile else {
+        let bypass = profiles.headphoneBypass
+        let bypassing = cleanPage && !bypass.bypassed.isEmpty && bypassAvailable
+        guard liveTuningAvailable || bypassing, let saved = profiles.selectedSystemHeadphoneDeviceProfile else {
             restoreLivePreview()
             return
         }
@@ -1419,14 +1445,16 @@ struct ProductionHeadphoneWorkspace: View {
             tuner = HeadphoneLiveTuner(apply: { try engine.replaceHeadphoneDeviceProfileConfiguration($0) })
             tuner?.begin(from: engine.headphoneDeviceProfileConfiguration ?? saved)
         }
-        var candidate = newDraft
+        var candidate = liveTuningAvailable ? newDraft : saved
         candidate.outputDeviceUID = saved.outputDeviceUID
+        if cleanPage { candidate = bypass.effective(candidate) }
         tuner?.submit(candidate)
         if let error = tuner?.lastError { actionError = error }
     }
 
     /// Puts the saved profile back on the engine (Revert, leaving, a lifecycle change) and drops the preview.
     private func restoreLivePreview() {
+        profiles.headphoneBypass.clear()
         guard let tuner else { return }
         if let saved = profiles.selectedSystemHeadphoneDeviceProfile { tuner.restore(saved) }
         self.tuner = nil
@@ -1441,6 +1469,11 @@ struct ProductionHeadphoneWorkspace: View {
             var fresh = HeadphoneDeviceProfileConfiguration()
             fresh.outputDeviceUID = engine.selectedOutputDevice?.uid
             draft = fresh
+        }
+        if cleanPage {
+            let entry = profiles.selectedSystemHeadphoneList?.selected
+            shaping = entry?.targetShaping ?? HeadphoneTargetShaping()
+            autoHeadroom = entry?.autoHeadroom ?? false
         }
         if cleanPage, let id = profiles.selectedSystemHeadphoneList?.selected?.fittedResponseID,
            id != selectedResponseID, storedResponses.contains(where: { $0.id == id }) {
@@ -1464,8 +1497,10 @@ struct ProductionHeadphoneWorkspace: View {
             }
             try draft.validateStructure(sampleRate: rate)
             tuner = nil  // the engine is about to take the draft as the saved profile
+            profiles.headphoneBypass.clear()
             try profiles.replaceSelectedSystemHeadphoneDeviceProfile(
-                draft, fittedResponseID: cleanPage && oneClickFit != nil ? selectedResponseID : nil)
+                draft, fittedResponseID: cleanPage && oneClickFit != nil ? selectedResponseID : nil,
+                targetShaping: cleanPage ? shaping : nil, autoHeadroom: cleanPage ? autoHeadroom : nil)
             statusMessage = draft.enabled
                 ? "Headphone Device Profile deployed. Start processing to use \(draft.spatialMode.displayName)."
                 : "Headphone Device Profile saved disabled."
@@ -1504,3 +1539,21 @@ struct ProductionHeadphoneWorkspace: View {
     }
 }
 
+
+/// One bypass switch. Switching it off hears the card's processing again; nothing is saved either way.
+private struct HeadphoneBypassSwitch: View {
+    @ObservedObject var state: HeadphoneBypassState
+    let part: HeadphoneBypassSet
+    let label: String
+    let enabled: Bool
+    let changed: () -> Void
+
+    var body: some View {
+        Toggle(label, isOn: Binding(
+            get: { state.isBypassed(part) },
+            set: { state.set(part, on: $0); changed() }))
+            .toggleStyle(.switch)
+            .disabled(!enabled)
+            .help(enabled ? "Listen with this part switched off. Not saved; it ends when you leave the page." : "Start playback with headphones on to compare.")
+    }
+}

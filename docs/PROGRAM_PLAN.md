@@ -528,7 +528,7 @@ complete, speaker ANC qualified, and a full hardware regression passing at every
 - [x] S9 `e13/headphones-page-cleanup` (owner, 17 Nov 2026; needs-owner: removes user-visible controls; owns G18–G20, G22, G24, G25; new flag `e13.headphones-page`): one target with shaping sliders, one import, optional Auto headroom (manual stays the default), drawn fit, crossfeed Custom controls, plain wording
 - [x] S10 `e13/headphone-list` (owns G23; built behind `e13.headphones-page`): a list of headphones per Playback System, each with its own correction and an optional linked device; picker with add, duplicate, rename, delete; today's profile migrates to the first entry. Auto-selection by linked device waits for E15 S6 (E13 G27)
 - [ ] S11 `e13/generic-hrtf` (owns G17): a generic HRTF generated in `core/` from a head model, native at the eight rates, the default for Virtual Speakers
-- [ ] S12 `e13/headphones-compare-and-ship` (needs-owner; owns G21; after E12 S13): bypass per card, the E12 S13 before/after on headphone sessions, graduate `e13.headphones-page`
+- [~] S12 `e13/headphones-compare-and-ship` (needs-owner; owns G21; after E12 S13): bypass per card, the E12 S13 before/after on headphone sessions, graduate `e13.headphones-page` (built behind `e13.headphones-page`, PR pending; wiring: S13 `e13/graduate` after E15 S6, G27)
 
 ### E14 Upmixer
 
