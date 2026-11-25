@@ -73,7 +73,7 @@ final class RoomModelStoreTests: XCTestCase {
     func testUnknownSchemaRefusedByName() throws {
         try RoomModelStore.save(try document(rate: 48_000, ir: [1]), to: dir)
         let url = dir.appendingPathComponent(RoomModelStore.jsonFileName)
-        let text = try String(contentsOf: url).replacingOccurrences(of: "\"version\" : 1", with: "\"version\" : 9")
+        let text = try String(contentsOf: url, encoding: .utf8).replacingOccurrences(of: "\"version\" : 1", with: "\"version\" : 9")
         try text.write(to: url, atomically: true, encoding: .utf8)
         XCTAssertThrowsError(try RoomModelStore.load(from: dir)) {
             XCTAssertEqual($0 as? RoomModelStoreError, .unsupportedSchema(name: "n60.roommodel", version: 9))
