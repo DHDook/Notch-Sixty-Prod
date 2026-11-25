@@ -430,6 +430,10 @@ struct ProductionSettingsView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
+            if featureFlags.isEnabled(.followOutput), let notifications = product.outputFollow.notifications {
+                OutputFollowNotificationsRow(follow: product.outputFollow, notifications: notifications)
+            }
+
             Text("If processing starts but you hear nothing after saying no to this permission, allow Notch Sixty in System Settings under Privacy & Security → Screen & System Audio Recording, then reopen the app.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
