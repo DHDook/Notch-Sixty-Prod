@@ -38,6 +38,8 @@ struct ProductionSettingsView: View {
 
     @AppStorage(PreferenceKeys.Application.showDeveloperTools)
     private var showDeveloperTools = false
+    @AppStorage(PreferenceKeys.Application.interfaceMode)
+    private var storedInterfaceMode = InterfaceMode.simple.rawValue
 
     private var diagnosticsReport: String {
         product.diagnosticsReport(
@@ -227,6 +229,7 @@ struct ProductionSettingsView: View {
                 VStack(alignment: .leading, spacing: DesignSpacing.l.pt) {
                     switch tab {
                     case .general:
+                        if featureFlags.isEnabled(.simpleExpertModes) { interfaceModeCard }
                         appearanceCard
                         presenceCard
                         startupCard
@@ -298,6 +301,21 @@ struct ProductionSettingsView: View {
             LabeledContent("Build") {
                 Text(build).monospacedDigit()
             }
+        }
+    }
+
+    /// E12 S8: simple or expert (`e12.simple-expert-modes`).
+    private var interfaceModeCard: some View {
+        settingsCard(title: "Interface", systemImage: "slider.horizontal.3") {
+            let mode = InterfaceMode.effective(stored: storedInterfaceMode, flagEnabled: true)
+            Picker("Mode", selection: Binding(get: { mode }, set: { storedInterfaceMode = $0.rawValue })) {
+                ForEach(InterfaceMode.allCases) { Text($0.title).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            .frame(maxWidth: 260)
+            Text(mode.detail)
+                .font(DesignType.caption.font)
+                .foregroundStyle(.secondary)
         }
     }
 
