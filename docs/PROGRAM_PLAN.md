@@ -551,15 +551,16 @@ Plan: `docs/epics/E15.md` (awaiting owner approval; flag `e15.follow-output`).
 
 ### E16 Automation and remote
 
-No epic file yet: epic-planner writes `docs/epics/E16.md` when `/next` reaches it. Two tiers (owner, 11 Nov 2026):
+Plan: `docs/epics/E16.md` (slices S1–S6, flags `e16.automation` and `e16.local-api`; plan PR `e16/plan` awaits the owner). Two tiers (owner, 11 Nov 2026):
 
 - [ ] Tier 1, App Intents and Shortcuts for profile, volume, mute, bypass and correction on/off, and starting a Quiet Zone session (always subject to the arm; an intent never arms anything by itself)
 - [ ] Tier 1, global hotkeys, media-key volume for DACs without hardware volume, and richer menu-bar quick controls
 - [ ] Tier 2, local authenticated REST/websocket API, off by default
 - [ ] Tier 1, `e16/control-centre-widget` (owner, 17 Nov 2026; needs-owner: new widget extension target and shared-state entitlement): a Control Centre control and a desktop widget for profile, volume, mute and correction on/off, built on the App Intents above; never arms anything and offers no Quiet Zone or MIMO start. MIDI and OSC control are not planned (the local API covers integrations)
 
-Owner decision, 11 Nov 2026: the iPhone remote moved to the post-v1 "iPhone companion app" entry
-under "Platform reach after v1". The local API must stay usable by that future iPhone client
+Owner decision, 11 Nov 2026: the iPhone parts leave E16. The iPhone remote and iPhone as a
+measurement microphone moved to the post-v1 "iPhone companion app" entry under "Platform reach
+after v1" (V2-4 in `docs/V2_ROADMAP.md`); E16 keeps only the Mac-side items above. The local API must stay usable by that future iPhone client
 (documented, versioned, authenticated pairing that a phone can complete).
 
 ### E17 Output integrity and interchange (was Export and dither; owner, 11 Nov 2026)
