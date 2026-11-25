@@ -77,10 +77,14 @@ enum BlindLiveComparison {
         return 10 * log10(power) + state.inputPreampDB + state.headroomAttenuationDB
     }
 
-    static func match(a: ContentABAuditionState, b: ContentABAuditionState, sampleRate: Double) throws -> ComparisonLevelMatch {
-        guard let levelA = levelDB(of: a, sampleRate: sampleRate), let levelB = levelDB(of: b, sampleRate: sampleRate) else {
+    /// `extraADB` and `extraBDB` add a side's level outside the content settings (E13 S12: the headphone correction).
+    static func match(
+        a: ContentABAuditionState, b: ContentABAuditionState, sampleRate: Double, extraADB: Double = 0, extraBDB: Double = 0
+    ) throws -> ComparisonLevelMatch {
+        guard let contentA = levelDB(of: a, sampleRate: sampleRate), let contentB = levelDB(of: b, sampleRate: sampleRate) else {
             throw BlindABXError.invalidTrial
         }
+        let levelA = contentA + extraADB, levelB = contentB + extraBDB
         return try ComparisonLevelMatch.make(
             lanePowersA: [pow(10, levelA / 10)], lanePowersB: [pow(10, levelB / 10)],
             hasActiveDynamicsA: a.dynamics.hasActiveProcessing, hasActiveDynamicsB: b.dynamics.hasActiveProcessing)

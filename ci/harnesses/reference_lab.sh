@@ -63,6 +63,17 @@ if selected e4_reviewer_noise; then
     echo "::endgroup::"
 fi
 
+# E13 S12 (G29): the generic HRTF (delay and head-shadow level per direction) against the published rigid-sphere model at the eight rates.
+if selected e13_generic_hrtf_reference; then
+    echo "::group::e13_generic_hrtf_reference"
+    if python3 -I ci/acoustic_reference_lab/e13_generic_hrtf_reference.py; then
+        passed+=(e13_generic_hrtf_reference)
+    else
+        failed+=(e13_generic_hrtf_reference)
+    fi
+    echo "::endgroup::"
+fi
+
 # E33 S27 (G52): linear-phase EQ lengths (21, 85, 170, 340 ms) against an RBJ model at the eight rates.
 if selected e33_eq_linear_length_reference; then
     echo "::group::e33_eq_linear_length_reference"
