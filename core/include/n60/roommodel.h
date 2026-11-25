@@ -53,7 +53,7 @@
 extern "C" {
 #endif
 
-#define N60_ROOMMODEL_ABI_VERSION 2u
+#define N60_ROOMMODEL_ABI_VERSION 3u
 
 #define N60_ROOMMODEL_OK 0
 #define N60_ROOMMODEL_ERR_ARGUMENT (-1) /* null pointer, bad rate/size, non-finite value, ir longer than the FFT */
@@ -62,6 +62,10 @@ extern "C" {
 #define N60_ROOMMODEL_REASON_NONE 0
 #define N60_ROOMMODEL_REASON_OUTSIDE_TRUST 1 /* no neighbour within the trust radius */
 #define N60_ROOMMODEL_REASON_NO_NEIGHBOURS 2 /* the neighbour list was empty */
+#define N60_ROOMMODEL_REASON_NO_LOOPBACK_TIMING 3 /* locate: a full-range speaker's path has no loopback or reference timing */
+#define N60_ROOMMODEL_REASON_TOO_FEW_SPEAKERS 4   /* locate: fewer than two full-range speakers (subs are excluded) */
+#define N60_ROOMMODEL_REASON_NO_ARRIVAL 5         /* locate: fewer than two usable high-frequency arrivals */
+#define N60_ROOMMODEL_REASON_DEGENERATE 6         /* locate: the speakers share one position, or the fit failed */
 
 #define N60_ROOMMODEL_BAND_OK 0
 #define N60_ROOMMODEL_BAND_SPREAD 1      /* used neighbours disagree by more than the limit */
@@ -132,6 +136,66 @@ double n60_roommodel_band_centre_hz(uint32_t index);
  */
 int32_t n60_roommodel_interpolate(const n60_roommodel_query *query, const n60_roommodel_neighbour *neighbours,
                                   n60_roommodel_result *result, double *lowRe, double *lowIm);
+
+/*
+ * Acoustic locate (domain version 3, E29 S5, design note 8). Where was the microphone, given the impulse response
+ * from each full-range speaker (positions known) with loopback or reference timing, so index 0 of each IR is the
+ * instant the speaker was driven? Each IR is high-passed above highPassHz (default 2 kHz; zero phase, raised-cosine
+ * edge from 0.8 x to 1 x), so only the tweeter's arrival counts; the arrival is the first local maximum of the
+ * Hilbert envelope above half its global maximum, refined by a parabola. Distance d_i = (arrival - latencySeconds) c.
+ * The seat height is assumed (seatHeightM): the horizontal radius is r_i = sqrt(d_i^2 - (z_i - h)^2). The fix is a
+ * Gauss-Newton least squares of |p - s_i| = d_i over (x, y); the front-back mirror of two speakers is resolved by
+ * "the seat is in front of the speakers" (larger y, into the room). Two speakers give an exact fix; three or more give
+ * the least squares fit and a residual. Subs are excluded (low-pass group delay). Any non-sub speaker without
+ * trusted timing refuses the whole call (reason NO_LOOPBACK_TIMING): locate is never offered without it.
+ * The residual also cross-checks the entered speaker positions and SpeakerFeedCalibration.delayMs: distanceM and
+ * fitDistanceM are returned per speaker so the caller can compare the measured and the geometric flight time.
+ * uncertaintyM = sqrt(residualRmsM^2 + (c / sampleRate)^2). Offline: allocates, control thread only, deterministic.
+ */
+#define N60_ROOMMODEL_LOCATE_MAX_SPEAKERS 16u
+#define N60_ROOMMODEL_LOCATE_HIGHPASS_HZ 2000.0
+
+#define N60_ROOMMODEL_LOCATE_SPEAKER_USED 0
+#define N60_ROOMMODEL_LOCATE_SPEAKER_SUB 1        /* excluded: a sub */
+#define N60_ROOMMODEL_LOCATE_SPEAKER_NO_TIMING 2  /* timing not trusted (the call is refused) */
+#define N60_ROOMMODEL_LOCATE_SPEAKER_NO_ARRIVAL 3 /* no high-frequency arrival found */
+
+typedef struct n60_roommodel_locate_speaker {
+    double position[3];       /* metres, room frame */
+    const float *ir;          /* index 0 is the drive instant (timing tier loopback or reference) */
+    uint32_t irFrames;        /* at least 16 */
+    uint32_t timingTrusted;   /* 1 for loopback or reference timing */
+    uint32_t isSub;           /* 1 for a subwoofer: excluded */
+    uint32_t reserved;
+    double latencySeconds;    /* extra latency still to subtract (0 when the IR is already aligned) */
+} n60_roommodel_locate_speaker;
+
+typedef struct n60_roommodel_locate_query {
+    uint32_t structSize;      /* sizeof(n60_roommodel_locate_query) */
+    uint32_t speakerCount;    /* 1..N60_ROOMMODEL_LOCATE_MAX_SPEAKERS */
+    double sampleRate;        /* 8 kHz..768 kHz */
+    double soundSpeed;        /* m/s; 0 for the default 343 */
+    double seatHeightM;       /* assumed microphone height, metres */
+    double highPassHz;        /* 0 for the default 2 kHz; below 0.45 x sampleRate */
+} n60_roommodel_locate_query;
+
+typedef struct n60_roommodel_locate_result {
+    uint32_t structSize;      /* sizeof(n60_roommodel_locate_result) */
+    int32_t reason;           /* N60_ROOMMODEL_REASON_*; none when OK */
+    uint32_t speakersUsed;
+    uint32_t mirrorResolved;  /* 1 when the front-back choice was made by the "in front" rule */
+    double position[3];       /* x, y, seatHeightM */
+    double residualRmsM;      /* root mean square of (fitted - measured) distance over the used speakers */
+    double uncertaintyM;
+    double distanceM[N60_ROOMMODEL_LOCATE_MAX_SPEAKERS];     /* measured flight distance, by input index; 0 unused */
+    double fitDistanceM[N60_ROOMMODEL_LOCATE_MAX_SPEAKERS];  /* distance from the fitted position; 0 unused */
+    int32_t speakerStatus[N60_ROOMMODEL_LOCATE_MAX_SPEAKERS]; /* N60_ROOMMODEL_LOCATE_SPEAKER_* */
+} n60_roommodel_locate_result;
+
+/* OK (a fix), NOT_MEASURED (result.reason set) or a negative error (null pointer, bad struct size, rate, height,
+ * count, an IR shorter than 16 frames, a non-finite value). */
+int32_t n60_roommodel_locate(const n60_roommodel_locate_query *query, const n60_roommodel_locate_speaker *speakers,
+                             n60_roommodel_locate_result *result);
 
 #ifdef __cplusplus
 }
