@@ -6,6 +6,8 @@ import Foundation
 
 enum SessionEventKind: String, Codable, CaseIterable, Sendable {
     case clip, truePeakOver, limiter, protection, dropout, deviceLoss, deviceRecovered, rateChange, inputOver
+    /// E12 S20: an Active Acoustics arm, disarm, guard trip or bypass. `place` holds the sentence in plain words.
+    case treatment
 
     var title: String {
         switch self {
@@ -18,6 +20,7 @@ enum SessionEventKind: String, Codable, CaseIterable, Sendable {
         case .deviceRecovered: return "Output recovered"
         case .rateChange: return "Rate change"
         case .inputOver: return "Input overs"
+        case .treatment: return "Active acoustics"
         }
     }
 }
@@ -47,11 +50,13 @@ struct SessionEvent: Codable, Equatable, Identifiable, Sendable {
         case .deviceLoss, .deviceRecovered: return ""
         case .rateChange: return String(format: "%.1f kHz", amount / 1_000)
         case .inputOver: return "\(Int(amount)) overs"
+        case .treatment: return ""
         }
     }
 
     /// One line for the History card, VoiceOver and the text export (time added by the caller).
     func summary(timeText: String) -> String {
+        if kind == .treatment { return "\(timeText) · \(place)" }
         var parts = [timeText, kind.title]
         if !place.isEmpty { parts.append(place) }
         let d = detail
@@ -166,6 +171,11 @@ struct SessionEventLog: Equatable, Sendable {
         for (lane, count) in counts.enumerated() where count > last[lane] {
             record(.inputOver, place: "Input \(lane + 1)", amount: Double(count - last[lane]), at: now, sum: true)
         }
+    }
+
+    /// E12 S20: one plain-words sentence (an arm, a disarm, a guard trip or a bypass). Never merged: each is its own event.
+    mutating func note(_ sentence: String, at now: Date) {
+        append(SessionEvent(id: UUID(), time: now, lastTime: now, kind: .treatment, place: sentence, amount: 0, count: 1))
     }
 
     // MARK: Recording
@@ -335,6 +345,13 @@ final class SessionEventHistory: ObservableObject {
     }
 
     func resetDropouts() { dropouts.reset() }
+
+    /// E12 S20: Active Acoustics arm, disarm, guard trip and bypass, in plain words.
+    func noteTreatment(_ sentence: String, now: Date = Date()) {
+        log.note(sentence, at: now)
+        dirty = true
+        saveIfDue(now: now)
+    }
 
     func clear() {
         log.clear()
