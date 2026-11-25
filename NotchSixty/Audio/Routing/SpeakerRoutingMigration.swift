@@ -77,6 +77,8 @@ enum SpeakerRoutingMigration {
                     to: &way, configuration: driverProcessing?.configuration(for: bus), bus: bus) {
                     return Result(routing: nil, refusal: refusal)
                 }
+                way.role = Self.role(of: bus)
+                way.roleInferred = true
                 if bus == .subMono {
                     matrix.append(RoutingMatrixEntry(source: .program(1), output: route.destination, gain: 1))
                 }
@@ -94,6 +96,17 @@ enum SpeakerRoutingMigration {
             return Result(routing: nil, refusal: .unsupported("routing model rejects it: \(validation.errors)"))
         }
         return Result(routing: migrated, refusal: nil)
+    }
+
+    /// E8 S12: the role a legacy bus implies. Shown once for the user to confirm.
+    private static func role(of bus: SpeakerOutputBus) -> DriverRole {
+        switch bus {
+        case .leftLow, .rightLow: return .woofer
+        case .leftMid, .rightMid: return .midrange
+        case .leftHigh, .rightHigh: return .tweeter
+        case .leftFullRange, .rightFullRange: return .fullRange
+        case .subMono: return .subwoofer
+        }
     }
 
     // MARK: Bands

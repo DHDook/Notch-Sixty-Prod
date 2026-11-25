@@ -20,6 +20,7 @@ If two claims collide, the one that merges second renumbers its own claim only.
 | graph v45 | E33 S13 `e33/surround-detector-and-dialogue` | open; compressor paramCount 17 ([16]) and expander paramCount 16 ([15]) detector-excluded lane; LOUDNESS paramCount 33 ([32]) centre lane; `n60_loudness_readback.reserved` carries the centre-active flag; no struct size change |
 | graph v46 | E33 S14 `e33/limiter-auto-release` | open; PROTECTION sound-fixes word bit 2 (value 4) is auto release (word range 0..7); `n60_dynamics_readback.effectiveReleaseMs` (struct size grows by 4 bytes); sustain state is not carried across a rebuild |
 | graph v47 | E33 S26 `e33/eq-matched-filters` | open; PEQ section types 16..20, 23, 24 are matched designs (live-settable too, plus type 8); C functions `n60_eq_design_section` and `n60_eq_section_magnitude`; no struct layout change |
+| graph v48 | E19 S12c-engine `e19/probe-stimulus-feed` | open; generator (sweep type only) paramCount 13 adds live [11] solo and [12] cue; 11-value block bit-identical to v47; no struct layout change |
 | none (no bump) | E33 S20 `e33/eq-channel-groups` | claims no number; group EQ rides existing per-lane PEQ stages |
 | eqfit v1 (domain, no graph bump) | E33 S21 `e33/eq-fit-to-curve` #618 | open; new `n60/eqfit.h`; `n60_core_abi_info` gains `eqfitVersion` and `eqfitProblemSize` appended after `foldMatrixSize` (append-only; earlier offsets unchanged) |
 | none (no bump) | E33 S27 `e33/eq-linear-phase-resolution` | claims no number; new C function `n60_eq_linear_phase_design` and `n60_eq_linear_phase_report` in `n60/graph.h`, append-only, no struct layout change |
@@ -27,3 +28,4 @@ If two claims collide, the one that merges second renumbers its own claim only.
 | correct v7 (domain, no graph bump) | E21 S7b `e21/multisub-designer` | open; `n60/correct.h` section 9 (`n60_correct_multisub_optimise`, defaults, settings check); append-only functions |
 | speaker v1 (domain, no graph bump) | E21 S9a `e21/speaker-maths` | open; new `n60/speaker.h`; `n60_core_abi_info` gains `speakerVersion` and `speakerProblemSize` appended after `eqfitProblemSize` (append-only) |
 | hrtf v1 (domain, no graph bump) | E13 S11 `e13/generic-hrtf` | open; new `n60/hrtf.h`; `n60_core_abi_info` gains `hrtfVersion` and `hrtfModelSize` appended after `vdRingHeaderSize` (append-only) |
+| roommodel v1 (domain, no graph bump) | E29 S3 `e29/interpolation-core` | open; new `n60/roommodel.h`; `n60_core_abi_info` gains `roomModelVersion` and `roomModelQuerySize` appended after `hrtfModelSize` (append-only) |

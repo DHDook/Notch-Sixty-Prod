@@ -387,8 +387,12 @@ final class MIMOTreatmentProbeTests: XCTestCase {
         var rate: Double
         var failOnTreated = false
         var stopped: [Bool] = []
+        var treatment: MIMOGraphTreatment?
         init(rate: Double) { self.rate = rate }
-        func setProgrammeStopped(_ stopped: Bool) throws { self.stopped.append(stopped) }
+        func setProgrammeStopped(_ stopped: Bool) throws {
+            self.stopped.append(stopped)
+            treatment?.probeProgrammeMuted = stopped
+        }
         func capture(seatID: UUID, treated: Bool) async throws -> [MultichannelCalibrationMeasurement] {
             if treated, failOnTreated { throw MIMOTreatmentProbeRunnerError.notReady("stimulus failed") }
             let channel = RoomCorrectionChannelMeasurement(
@@ -402,6 +406,7 @@ final class MIMOTreatmentProbeTests: XCTestCase {
         let r = try rig(rate: 48_000)
         guard case .success = ticket(r) else { return XCTFail() }
         let capturer = FakeCapturer(rate: 48_000)
+        capturer.treatment = r.treatment
         let runner = MIMOTreatmentProbeRunner(
             treatment: r.treatment, capturer: capturer,
             armProbe: { [self] in try await r.treatment.requestProbeArm(context: self.context(rate: 48_000)) })
@@ -424,6 +429,7 @@ final class MIMOTreatmentProbeTests: XCTestCase {
         let r = try rig(rate: 48_000)
         guard case .success = ticket(r) else { return XCTFail() }
         let capturer = FakeCapturer(rate: 48_000)
+        capturer.treatment = r.treatment
         capturer.failOnTreated = true
         let runner = MIMOTreatmentProbeRunner(
             treatment: r.treatment, capturer: capturer,

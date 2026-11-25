@@ -38,7 +38,7 @@ extension FeatureFlag {
         .eqPageEnhancements, .dynamicsSound, .designLanguage, .followOutput, .dashboardRemote, .virtualDriver,
         .blindListening,
         .setupFlow, .systemPages, .selfQualification, .headphonesPage,
-        .settingsPage
+        .activeCommissioning, .settingsPage
     ]
 
     /// E6 S11: the unified graph is the default renderer. Turning this on selects the frozen
@@ -520,5 +520,17 @@ extension FeatureFlag {
         id: "e13.headphones-page",
         title: "Headphones page clean-up",
         epic: "E13"
+    )
+}
+
+extension FeatureFlag {
+    /// E8 S12-S16: active-speaker commissioning. S12: a driver role per way and a hard high-pass rule (a tweeter or
+    /// midrange way with no high-pass, or one below its lowest safe frequency, is an error and live edits that break it
+    /// are refused). Swift only; the engine never reads it. Off: routing behaves exactly as before. Graduates in S16;
+    /// removed in the flag-cleanup phase.
+    static let activeCommissioning = FeatureFlag(
+        id: "e8.active-commissioning",
+        title: "Active-speaker commissioning",
+        epic: "E8"
     )
 }

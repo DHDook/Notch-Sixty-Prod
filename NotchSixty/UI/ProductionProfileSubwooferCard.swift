@@ -13,15 +13,15 @@ struct ProductionProfileSubwooferCard: View {
 
     var body: some View {
         if let profile = engine.outputDeviceProfileConfiguration, profile.enabled {
-            VStack(alignment: .leading, spacing: 10) {
-                Text("Profile subwoofers").font(.headline)
+            VStack(alignment: .leading, spacing: DesignSpacing.m.pt) {
+                Text("Profile subwoofers").font(DesignType.sectionTitle.font)
                 if engine.speakerRoutingConfiguration?.enabled == true {
                     Label("The routing matrix owns the outputs while it is on; these assignments apply when it is off.",
-                          systemImage: "info.circle").font(.caption).foregroundStyle(.secondary)
+                          systemImage: "info.circle").font(DesignType.caption.font).foregroundStyle(.secondary)
                 }
                 if profile.subwooferAssignments.count > SubwooferLimit.legacyKernel, !engine.unifiedGraphEnabled {
                     Label("More than \(SubwooferLimit.legacyKernel) subwoofers need the unified graph; the legacy kernel drives at most \(SubwooferLimit.legacyKernel).",
-                          systemImage: "exclamationmark.triangle").font(.caption).foregroundStyle(.orange)
+                          systemImage: "exclamationmark.triangle").font(DesignType.caption.font).foregroundStyle(StatusLevel.attention.color)
                 }
                 if profile.subwooferAssignments.isEmpty {
                     Text("No subwoofers assigned.").foregroundStyle(.secondary)
@@ -43,16 +43,16 @@ struct ProductionProfileSubwooferCard: View {
                     Button("Add subwoofer") { addSubwoofer(profile) }
                         .disabled(profile.subwooferAssignments.count >= SubwooferLimit.graph)
                     Text("Changing outputs or subwoofers restarts the output with a short fade.")
-                        .font(.caption).foregroundStyle(.secondary)
+                        .font(DesignType.caption.font).foregroundStyle(.secondary)
                 }
                 if let errorText {
                     Label(errorText, systemImage: "exclamationmark.triangle.fill")
-                        .font(.callout).foregroundStyle(.red).textSelection(.enabled)
+                        .font(DesignType.label.font).foregroundStyle(StatusLevel.problem.color).textSelection(.enabled)
                 }
             }
-            .padding(16)
+            .padding(DesignSpacing.l.pt)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(.regularMaterial, in: .rect(cornerRadius: 22))
+            .background(.regularMaterial, in: .rect(cornerRadius: DesignRadius.large.pt))
             .confirmationDialog(
                 "Clear stored records?", isPresented: Binding(get: { pending != nil }, set: { if !$0 { pending = nil } }),
                 presenting: pending

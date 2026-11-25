@@ -1166,20 +1166,20 @@ private struct ProductionUserGuideArticleView: View {
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                VStack(alignment: .leading, spacing: 22) {
-                    VStack(alignment: .leading, spacing: 8) {
+                VStack(alignment: .leading, spacing: DesignSpacing.xl.pt) {
+                    VStack(alignment: .leading, spacing: DesignSpacing.s.pt) {
                         Label(article.title, systemImage: article.systemImage)
-                            .font(.largeTitle.bold())
+                            .font(DesignType.pageTitle.font.bold())
                         Text(article.summary)
-                            .font(.title3)
+                            .font(DesignType.sectionTitle.font)
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
 
                     ForEach(article.sections) { section in
-                        VStack(alignment: .leading, spacing: 10) {
+                        VStack(alignment: .leading, spacing: DesignSpacing.m.pt) {
                             Text(section.title)
-                                .font(.title2.bold())
+                                .font(DesignType.sectionTitle.font.bold())
                             ForEach(
                                 Array(section.paragraphs.enumerated()),
                                 id: \.offset
@@ -1194,20 +1194,20 @@ private struct ProductionUserGuideArticleView: View {
 
                     if !article.formulas.isEmpty {
                         Divider()
-                        VStack(alignment: .leading, spacing: 12) {
+                        VStack(alignment: .leading, spacing: DesignSpacing.m.pt) {
                             HStack {
                                 Label("Math & DSP Details", systemImage: "function")
-                                    .font(.title2.bold())
+                                    .font(DesignType.sectionTitle.font.bold())
                                 Spacer()
                                 Text("Expandable")
-                                    .font(.caption.bold())
+                                    .font(DesignType.caption.font.bold())
                                     .foregroundStyle(.secondary)
                             }
 
                             Text(
                                 "These equations describe the real signal-processing relationship or diagnostic metric used by the feature. Implementation notes call out where qualification, smoothing, bounds, buffering or safety logic adds constraints beyond the compact equation."
                             )
-                            .font(.subheadline)
+                            .font(DesignType.label.font)
                             .foregroundStyle(.secondary)
 
                             ForEach(article.formulas) { formula in
@@ -1220,7 +1220,7 @@ private struct ProductionUserGuideArticleView: View {
                         }
                     }
                 }
-                .padding(26)
+                .padding(DesignSpacing.xl.pt)
                 .frame(maxWidth: 780, alignment: .topLeading)
             }
             .navigationTitle(article.title)
@@ -1251,12 +1251,12 @@ private struct ProductionDSPReferenceArticleView: View {
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
-                    VStack(alignment: .leading, spacing: 8) {
+                VStack(alignment: .leading, spacing: DesignSpacing.l.pt) {
+                    VStack(alignment: .leading, spacing: DesignSpacing.s.pt) {
                         Label(article.title, systemImage: "function")
-                            .font(.largeTitle.bold())
+                            .font(DesignType.pageTitle.font.bold())
                         Text(article.summary)
-                            .font(.title3)
+                            .font(DesignType.sectionTitle.font)
                             .foregroundStyle(.secondary)
                     }
 
@@ -1275,7 +1275,7 @@ private struct ProductionDSPReferenceArticleView: View {
                         .id(formula.id)
                     }
                 }
-                .padding(26)
+                .padding(DesignSpacing.xl.pt)
                 .frame(maxWidth: 780, alignment: .topLeading)
             }
             .navigationTitle("\(article.title) · DSP Reference")
@@ -1318,34 +1318,34 @@ private struct ProductionUserGuideFormulaView: View {
 
     var body: some View {
         DisclosureGroup(isExpanded: $expanded) {
-            VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: DesignSpacing.m.pt) {
                 Text(formula.expression)
                     .font(.system(.body, design: .monospaced))
                     .textSelection(.enabled)
-                    .padding(12)
+                    .padding(DesignSpacing.m.pt)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .glassEffect(.regular, in: .rect(cornerRadius: 12))
+                    .glassEffect(.regular, in: .rect(cornerRadius: DesignRadius.medium.pt))
 
                 Text(formula.explanation)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            .padding(.top, 8)
+            .padding(.top, DesignSpacing.s.pt)
         } label: {
-            HStack(alignment: .firstTextBaseline, spacing: 10) {
+            HStack(alignment: .firstTextBaseline, spacing: DesignSpacing.m.pt) {
                 Text(formula.title)
-                    .font(.headline)
+                    .font(DesignType.sectionTitle.font)
                 Spacer()
                 Label(formula.scope.title, systemImage: formula.scope.systemImage)
-                    .font(.caption.bold())
+                    .font(DesignType.caption.font.bold())
                     .foregroundStyle(.secondary)
             }
         }
-        .padding(14)
-        .glassEffect(.regular, in: .rect(cornerRadius: 16))
+        .padding(DesignSpacing.l.pt)
+        .glassEffect(.regular, in: .rect(cornerRadius: DesignRadius.medium.pt))
         .overlay {
             if targeted {
-                RoundedRectangle(cornerRadius: 16)
+                RoundedRectangle(cornerRadius: DesignRadius.medium.pt)
                     .stroke(.tint, lineWidth: 1.5)
             }
         }

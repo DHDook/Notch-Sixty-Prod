@@ -84,6 +84,8 @@ enum TransportTeardownCause: Equatable, Sendable {
     case reconfiguration
     /// The app's own low-latency profile switch. Does not disarm: arming itself causes it.
     case plannedProfileChange
+    /// E15 S2: Follow macOS output stopped the transport to move to another output.
+    case followOutput
     case other
 
     var disarmReason: LiveTreatmentDisarmReason? {
@@ -92,6 +94,7 @@ enum TransportTeardownCause: Equatable, Sendable {
         case .quit: return .quit
         case .sleep: return .sleep
         case .outputLost: return .outputDeviceLost
+        case .followOutput: return .outputDeviceChanged
         case .reconfiguration: return .transportReconfigured
         case .plannedProfileChange: return nil
         }

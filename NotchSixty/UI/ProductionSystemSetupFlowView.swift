@@ -45,15 +45,15 @@ struct ProductionSystemSetupFlowView: View {
                 header
                 Divider()
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 16) { stepContent }
-                        .padding(20)
+                    VStack(alignment: .leading, spacing: DesignSpacing.l.pt) { stepContent }
+                        .padding(DesignSpacing.xl.pt)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 if let message = model.message {
                     Divider()
-                    Text(message).font(.callout).foregroundStyle(.orange)
+                    Text(message).font(DesignType.label.font).foregroundStyle(StatusLevel.attention.color)
                         .fixedSize(horizontal: false, vertical: true)
-                        .padding(.horizontal, 20).padding(.vertical, 8)
+                        .padding(.horizontal, DesignSpacing.xl.pt).padding(.vertical, DesignSpacing.s.pt)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 Divider()
@@ -90,9 +90,9 @@ struct ProductionSystemSetupFlowView: View {
     }
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: DesignSpacing.s.pt) {
             Text(model.summary != nil ? "Your system is set up" : (model.preset == .quick ? "Quick setup" : "Set up my system"))
-                .font(.title3.weight(.semibold))
+                .font(DesignType.sectionTitle.font.weight(.semibold))
             if model.summary == nil {
                 let position = model.stepPosition
                 ProgressView(value: Double(position.position), total: Double(position.total))
@@ -101,10 +101,10 @@ struct ProductionSystemSetupFlowView: View {
                     Spacer()
                     Text(model.timeRemainingText)
                 }
-                .font(.caption).foregroundStyle(.secondary)
+                .font(DesignType.caption.font).foregroundStyle(.secondary)
             }
         }
-        .padding(20)
+        .padding(DesignSpacing.xl.pt)
     }
 
     private var footer: some View {
@@ -119,15 +119,15 @@ struct ProductionSystemSetupFlowView: View {
                 }
             } else {
                 ViewThatFits(in: .horizontal) {
-                    HStack(spacing: 8) { leaveButtons; primaryButtons }
-                    VStack(alignment: .leading, spacing: 8) {
-                        HStack(spacing: 8) { leaveButtons }
-                        HStack(spacing: 8) { primaryButtons }
+                    HStack(spacing: DesignSpacing.s.pt) { leaveButtons; primaryButtons }
+                    VStack(alignment: .leading, spacing: DesignSpacing.s.pt) {
+                        HStack(spacing: DesignSpacing.s.pt) { leaveButtons }
+                        HStack(spacing: DesignSpacing.s.pt) { primaryButtons }
                     }
                 }
             }
         }
-        .padding(16)
+        .padding(DesignSpacing.l.pt)
     }
 
     @ViewBuilder
@@ -147,7 +147,7 @@ struct ProductionSystemSetupFlowView: View {
     private var primaryButtons: some View {
         Spacer(minLength: 8)
         if let reason = model.nextBlockedReason {
-            Text(reason).font(.caption).foregroundStyle(.secondary)
+            Text(reason).font(DesignType.caption.font).foregroundStyle(.secondary)
                 .multilineTextAlignment(.trailing)
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: 320, alignment: .trailing)

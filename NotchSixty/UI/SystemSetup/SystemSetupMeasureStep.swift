@@ -17,21 +17,21 @@ struct SystemSetupMeasureStep: View {
 
     var body: some View {
         let progress = model.measureProgress
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Measure your listening seats").font(.headline)
+        VStack(alignment: .leading, spacing: DesignSpacing.m.pt) {
+            Text("Measure your listening seats").font(DesignType.sectionTitle.font)
             Text("Each speaker plays a sweep and the microphone records it at each seat. Measure the main seat first; add seats for a wider sweet spot. Playback is stopped while measuring.")
-                .font(.callout).foregroundStyle(.secondary)
+                .font(DesignType.label.font).foregroundStyle(.secondary)
             SystemSetupPlacementGuide(seatCount: max(1, calibration.seats.filter(\.included).count))
             if let note = model.correctionNote {
                 ForEach(calibration.sources, id: \.self) { source in
-                    Text(model.sourceLabel(source)).font(.caption)
+                    Text(model.sourceLabel(source)).font(DesignType.caption.font)
                 }
-                Label(note, systemImage: "info.circle").font(.callout)
+                Label(note, systemImage: "info.circle").font(DesignType.label.font)
             }
             if calibration.sources.isEmpty {
                 Label("Choose your outputs and speakers first so the setup knows which speakers to measure.",
                       systemImage: "exclamationmark.triangle")
-                    .font(.callout)
+                    .font(DesignType.label.font)
             }
             Picker("Microphones", selection: Binding(
                 get: { calibration.seatMicrophoneMode }, set: { model.setSeatMicrophoneMode($0) }
@@ -41,14 +41,14 @@ struct SystemSetupMeasureStep: View {
             }
             .disabled(model.isMeasuring)
             HStack {
-                Text("Repeats per sweep").font(.callout)
+                Text("Repeats per sweep").font(DesignType.label.font)
                 SweepRepeatPicker(repeatCount: $microphone.sweepRepeatCount, disabled: model.isMeasuring)
             }
             if let clock = calibration.seatClockMode {
-                Text(clock.label).font(.caption).foregroundStyle(clock.isLessPrecise ? .orange : .secondary)
+                Text(clock.label).font(DesignType.caption.font).foregroundStyle(clock.isLessPrecise ? .orange : .secondary)
                 if clock.isLessPrecise {
                     Text("Each device has its own clock, so timing between seats comes from a chirp the front-left speaker plays before every sweep. It is less precise than channels of one interface; keep the microphones' devices running for the whole measurement.")
-                        .font(.caption).foregroundStyle(.secondary)
+                        .font(DesignType.caption.font).foregroundStyle(.secondary)
                 }
             }
             MeasurementSeatsCard(
@@ -67,7 +67,7 @@ struct SystemSetupMeasureStep: View {
                         }
                         if let verdict = model.choices.seatVerdicts?.first(where: { $0.seatName == seat.name })?.verdict {
                             Text("\(verdict.level.title): \(verdict.reason)")
-                                .font(.caption).foregroundStyle(verdict.level >= .limited ? .orange : .secondary)
+                                .font(DesignType.caption.font).foregroundStyle(verdict.level >= .limited ? .orange : .secondary)
                         }
                         if progress.isComplete(seat) {
                             Button("Re-measure") { model.startRemeasure(seatID: seat.id) }.disabled(model.isMeasuring)
@@ -88,7 +88,7 @@ struct SystemSetupMeasureStep: View {
             MeasurementReadinessNote(readiness: calibration.readiness, playbackNotice: model.measurePlaybackNotice)
             ProgressView(value: model.isMeasuring ? calibration.activeMeasurementProgress : progress.fraction)
             if let next = progress.next, model.isMeasuring {
-                Text("Measuring \(next.seat.name), \(next.source.displayName)").font(.caption)
+                Text("Measuring \(next.seat.name), \(next.source.displayName)").font(DesignType.caption.font)
             }
             if !model.isMeasuring, !calibration.measurements.isEmpty {
                 SystemSetupGraphPanel(model: model, graph: model.measureGraph,

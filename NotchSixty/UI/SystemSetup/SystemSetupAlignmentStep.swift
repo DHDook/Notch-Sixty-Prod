@@ -7,12 +7,12 @@ struct SystemSetupAlignmentStep: View {
     @ObservedObject var model: SystemSetupFlowModel
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Align levels, polarity (push or pull) and distances").font(.headline)
+        VStack(alignment: .leading, spacing: DesignSpacing.m.pt) {
+            Text("Align levels, polarity (push or pull) and distances").font(DesignType.sectionTitle.font)
             Text("Notch Sixty matches the loudness and arrival time of your speakers at the seats you measured. Apply it to hear the result; you can revert at any time and Cancel restores everything.")
-                .font(.callout).foregroundStyle(.secondary)
+                .font(DesignType.label.font).foregroundStyle(.secondary)
             if let note = model.alignmentSubNote {
-                Label(note, systemImage: "info.circle").font(.callout)
+                Label(note, systemImage: "info.circle").font(DesignType.label.font)
             }
             if let alignment = model.alignment {
                 Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 6) {
@@ -33,7 +33,7 @@ struct SystemSetupAlignmentStep: View {
                 SystemSetupTermNotes(step: .alignment)
                 if !alignment.invertedSources.isEmpty {
                     Label("A speaker looks wired out of polarity. Alignment flips it for you; check the wiring too.",
-                          systemImage: "exclamationmark.triangle").font(.callout)
+                          systemImage: "exclamationmark.triangle").font(DesignType.label.font)
                 }
                 HStack {
                     Button("Apply") { model.applyAlignment() }.disabled(model.choices.alignmentApplied)

@@ -51,7 +51,7 @@ struct ProductionBlindListeningWorkspace: View {
     var body: some View {
         if let profiles, liveAvailable {
             ProductionPageContainer {
-                VStack(alignment: .leading, spacing: 16) {
+                VStack(alignment: .leading, spacing: DesignSpacing.l.pt) {
                     Picker("Compare", selection: $liveMode) {
                         Text("What Notch Sixty does").tag(true)
                         Text("Two audio files").tag(false)
@@ -69,14 +69,14 @@ struct ProductionBlindListeningWorkspace: View {
     }
 
     private var fileBody: some View {
-        VStack(alignment: .leading, spacing: 20) {
+        VStack(alignment: .leading, spacing: DesignSpacing.xl.pt) {
             header
             sources
             sessionCard
             if let errorMessage {
                 Label(errorMessage, systemImage: "exclamationmark.triangle")
-                    .foregroundStyle(.orange)
-                    .font(.caption)
+                    .foregroundStyle(StatusLevel.attention.color)
+                    .font(DesignType.caption.font)
                     .textSelection(.enabled)
             }
         }
@@ -112,7 +112,7 @@ struct ProductionBlindListeningWorkspace: View {
     }
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 9) {
+        VStack(alignment: .leading, spacing: DesignSpacing.s.pt) {
             Text(
                 "Compare two recordings of the same passage, for example one made at your listening seat through another product and one through Notch Sixty. You know which is A and which is B; which one is X stays hidden until all trials are done. This is a listening exercise, not a room measurement."
             )
@@ -121,18 +121,18 @@ struct ProductionBlindListeningWorkspace: View {
                 "Stop Notch Sixty playback first. The files play on the output device you selected, not through the live processing. Start with your hardware volume low and use the level slider below.",
                 systemImage: "headphones"
             )
-            .font(.caption)
-            .foregroundStyle(.orange)
+            .font(DesignType.caption.font)
+            .foregroundStyle(StatusLevel.attention.color)
         }
     }
 
     private var sources: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("1. Choose two recordings").font(.headline)
+        VStack(alignment: .leading, spacing: DesignSpacing.l.pt) {
+            Text("1. Choose two recordings").font(DesignType.sectionTitle.font)
             Text(
                 "Use the same passage in both. The page matches the loudness itself (the louder one is turned down) and cuts both to the shorter length, so you do not need to prepare them. Recordings made at different places or times can still differ in ways the page cannot remove."
             )
-            .font(.caption)
+            .font(DesignType.caption.font)
             .foregroundStyle(.secondary)
             ViewThatFits(in: .horizontal) {
                 HStack { chooseButtons }
@@ -145,87 +145,87 @@ struct ProductionBlindListeningWorkspace: View {
                         a.sampleRate, a.rmsDBFS, b.sampleRate, b.rmsDBFS
                     )
                 )
-                .font(.caption.monospacedDigit())
+                .font(DesignType.caption.font.monospacedDigit())
             }
             if let match {
-                Label(match.summary, systemImage: "slider.horizontal.3").font(.caption)
+                Label(match.summary, systemImage: "slider.horizontal.3").font(DesignType.caption.font)
             }
             ForEach(preflightReasons, id: \.self) { reason in
                 Label(reason, systemImage: "exclamationmark.shield")
-                    .font(.caption)
-                    .foregroundStyle(.orange)
+                    .font(DesignType.caption.font)
+                    .foregroundStyle(StatusLevel.attention.color)
             }
         }
-        .padding(20)
-        .background(.regularMaterial, in: .rect(cornerRadius: 18))
+        .padding(DesignSpacing.xl.pt)
+        .background(.regularMaterial, in: .rect(cornerRadius: DesignRadius.large.pt))
     }
 
     @ViewBuilder private var chooseButtons: some View {
         Button("Choose file A…") { importingA = true }.disabled(session != nil)
-        Text(fileA == nil ? "No A chosen" : "A: \(nameA)").font(.caption).foregroundStyle(.secondary)
+        Text(fileA == nil ? "No A chosen" : "A: \(nameA)").font(DesignType.caption.font).foregroundStyle(.secondary)
         Button("Choose file B…") { importingB = true }.disabled(session != nil)
-        Text(fileB == nil ? "No B chosen" : "B: \(nameB)").font(.caption).foregroundStyle(.secondary)
+        Text(fileB == nil ? "No B chosen" : "B: \(nameB)").font(DesignType.caption.font).foregroundStyle(.secondary)
     }
 
     private var sessionCard: some View {
-        VStack(alignment: .leading, spacing: 15) {
-            Text("2. Run the test").font(.headline)
+        VStack(alignment: .leading, spacing: DesignSpacing.l.pt) {
+            Text("2. Run the test").font(DesignType.sectionTitle.font)
             ViewThatFits(in: .horizontal) {
                 HStack { startControls }
                 VStack(alignment: .leading) { startControls }
             }
             if engine.lifecycleState != .idle {
                 Text("Stop playback before using the two-file test.")
-                    .font(.caption)
-                    .foregroundStyle(.orange)
+                    .font(DesignType.caption.font)
+                    .foregroundStyle(StatusLevel.attention.color)
             }
             if let session, let player = filePlayer {
                 Divider()
                 Text("Trial \(session.currentTrialNumber) of \(session.totalTrials)")
-                    .font(.subheadline.bold().monospacedDigit())
+                    .font(DesignType.label.font.bold().monospacedDigit())
                 BlindFileListenControls(player: player)
                 ViewThatFits(in: .horizontal) {
                     HStack { listenButtons(session) }
                     VStack(alignment: .leading) { listenButtons(session) }
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(.glass)
                 .disabled(session.isComplete || engine.lifecycleState != .idle)
                 if !session.isComplete {
                     Text("Which recording is X? Play X at least once before you answer.")
-                        .font(.caption)
+                        .font(DesignType.caption.font)
                         .foregroundStyle(.secondary)
                     HStack {
                         Button("X is A") { choose(whichB: false) }
                         Button("X is B") { choose(whichB: true) }
                     }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(.glassProminent)
                     .disabled(!session.maySubmitChoice || engine.lifecycleState != .idle)
                 } else if let record = finishedRecord {
                     Divider()
                     Text("\(record.correctCount ?? 0) of \(record.trialCount) correct (p = \(record.pValue, specifier: "%.4f"))")
-                        .font(.headline.monospacedDigit())
-                    Text(record.outcome).font(.caption).foregroundStyle(.secondary)
+                        .font(DesignType.sectionTitle.font.monospacedDigit())
+                    Text(record.outcome).font(DesignType.caption.font).foregroundStyle(.secondary)
                     HStack {
                         Button("Save a copy of the result…") { exportRecord(record) }
-                            .buttonStyle(.bordered)
+                            .buttonStyle(.glass)
                         Button("New test") {
                             filePlayer?.stop()
                             filePlayer = nil
                             self.session = nil
                             finishedRecord = nil
                         }
-                        .buttonStyle(.bordered)
+                        .buttonStyle(.glass)
                     }
                 }
             }
             Text(
                 "Each trial picks X at random, so there is no pattern to work out. The result is kept in the list below on this Mac; saving a copy is optional."
             )
-            .font(.caption)
+            .font(DesignType.caption.font)
             .foregroundStyle(.secondary)
         }
-        .padding(20)
-        .background(.regularMaterial, in: .rect(cornerRadius: 18))
+        .padding(DesignSpacing.xl.pt)
+        .background(.regularMaterial, in: .rect(cornerRadius: DesignRadius.large.pt))
     }
 
     @ViewBuilder private var startControls: some View {
@@ -237,7 +237,7 @@ struct ProductionBlindListeningWorkspace: View {
         .frame(maxWidth: 230)
         .disabled(session != nil)
         Button("Start blind test") { startSession() }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(.glassProminent)
             .disabled(!canStart)
     }
 
@@ -422,27 +422,27 @@ struct BlindFileListenControls: View {
     @ObservedObject var player: BlindFilePlayer
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: DesignSpacing.s.pt) {
             HStack {
-                Text("Level").font(.caption)
+                Text("Level").font(DesignType.caption.font)
                 Slider(value: $player.level, in: 0...1).frame(maxWidth: 260)
-                Text("\(Int((player.level * 100).rounded()))%").font(.caption.monospacedDigit())
+                Text("\(Int((player.level * 100).rounded()))%").font(DesignType.caption.font.monospacedDigit())
             }
-            Text("The slider starts low and is remembered. Raise it slowly.").font(.caption).foregroundStyle(.secondary)
-            Toggle("Loop a passage", isOn: $player.loopEnabled).font(.caption)
+            Text("The slider starts low and is remembered. Raise it slowly.").font(DesignType.caption.font).foregroundStyle(.secondary)
+            Toggle("Loop a passage", isOn: $player.loopEnabled).font(DesignType.caption.font)
             if player.loopEnabled {
                 HStack {
-                    Text("From").font(.caption)
+                    Text("From").font(DesignType.caption.font)
                     Slider(value: Binding(get: { player.loopStart }, set: { player.setPassage(start: $0, end: player.loopEnd) }),
                            in: 0...max(0.5, player.match.durationSeconds)).frame(maxWidth: 220)
-                    Text("to").font(.caption)
+                    Text("to").font(DesignType.caption.font)
                     Slider(value: Binding(get: { player.loopEnd }, set: { player.setPassage(start: player.loopStart, end: $0) }),
                            in: 0...max(0.5, player.match.durationSeconds)).frame(maxWidth: 220)
                 }
                 Text(String(format: "%.1f s to %.1f s. Switching between A, B and X keeps the position.", player.loopStart, player.loopEnd))
-                    .font(.caption).foregroundStyle(.secondary)
+                    .font(DesignType.caption.font).foregroundStyle(.secondary)
             } else {
-                Text("Switching between A, B and X keeps the position in the recording.").font(.caption).foregroundStyle(.secondary)
+                Text("Switching between A, B and X keeps the position in the recording.").font(DesignType.caption.font).foregroundStyle(.secondary)
             }
         }
     }
@@ -453,26 +453,26 @@ struct BlindHistoryView: View {
     @ObservedObject var history: BlindTestHistoryStore
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: DesignSpacing.s.pt) {
             HStack {
-                Text("Finished tests").font(.headline)
+                Text("Finished tests").font(DesignType.sectionTitle.font)
                 Spacer()
                 if !history.records.isEmpty {
-                    Button("Clear list") { history.clear() }.buttonStyle(.borderless).font(.caption)
+                    Button("Clear list") { history.clear() }.buttonStyle(.borderless).font(DesignType.caption.font)
                 }
             }
             if history.records.isEmpty {
                 Text("Nothing yet. Each finished test is kept here, with the date, what was compared and the result.")
-                    .font(.caption).foregroundStyle(.secondary)
+                    .font(DesignType.caption.font).foregroundStyle(.secondary)
             }
             ForEach(history.records.prefix(20)) { record in
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("\(record.date.formatted(date: .abbreviated, time: .shortened)): \(record.title)").font(.callout)
-                    Text(record.outcome).font(.caption).foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
+                    Text("\(record.date.formatted(date: .abbreviated, time: .shortened)): \(record.title)").font(DesignType.label.font)
+                    Text(record.outcome).font(DesignType.caption.font).foregroundStyle(.secondary)
                 }
             }
         }
-        .padding(20)
-        .background(.regularMaterial, in: .rect(cornerRadius: 18))
+        .padding(DesignSpacing.xl.pt)
+        .background(.regularMaterial, in: .rect(cornerRadius: DesignRadius.large.pt))
     }
 }

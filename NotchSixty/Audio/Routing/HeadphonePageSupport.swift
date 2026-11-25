@@ -5,7 +5,7 @@ import Foundation
 
 /// A bass shelf and a treble tilt applied on top of the chosen target, so a flat target can be shaped without a
 /// target file. The shaped curve is what the fit uses and what the graph draws.
-struct HeadphoneTargetShaping: Equatable, Sendable {
+struct HeadphoneTargetShaping: Equatable, Codable, Sendable {
     static let shelfRangeDB = -6.0 ... 6.0
     static let tiltRangeDB = -6.0 ... 6.0
     /// The shelf corner and the tilt's pivot and end (the tilt is linear in log frequency between them).

@@ -34,7 +34,7 @@ extern "C" {
 #endif
 
 /* Bumped on any incompatible change to a struct or function below. */
-#define N60_GRAPH_ABI_VERSION 47u
+#define N60_GRAPH_ABI_VERSION 48u
 
 typedef struct n60_graph n60_graph; /* opaque */
 
@@ -269,6 +269,13 @@ typedef enum n60_stage_kind {
  * level is RMS-referenced as for the sine (peak = RMS x sqrt 2), so the sweep peak is 3 dB above the stated level.
  * Every selected lane plays the same sweep. A rising edge of [9] from silence restarts it from its first sample. */
 #define N60_GENERATOR_SWEEP 5u
+/* ABI v48 (E19 S12c): a sweep generator may have paramCount 13, adding two live words: [11] solo (integer 0..mask lane
+ * count; 0 = every mask lane, k = only the k-th mask lane in ascending order plays, the others play silence) and [12]
+ * cue (integer 0..16777216). With 13 values a rising edge of [9] replaces program audio on the mask lanes (the mix ramps
+ * to 1 as before) but plays exact silence; every change of [12] starts the sweep from its first sample on the current solo
+ * selection and restarts the auto-stop timer. A cue written while a selected lane is still playing a sweep is held to
+ * its end, so a sweep is never cut; it starts at the first sample of a block. A rebuilt stage never replays the cue
+ * it was built with. Only the sweep type takes 13 values. The 11-value block is bit-identical to ABI v47. */
 
 /* Speaker routing (ABI v17, E8 S2). Two stages turn a program (or bass-managed) lane set into per-driver output
  * lanes. A graph with routing has outputChannels = program lanes + sub lanes + way lanes (at most

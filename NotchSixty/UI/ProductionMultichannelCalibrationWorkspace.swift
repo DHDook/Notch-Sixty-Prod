@@ -81,7 +81,7 @@ struct ProductionMultichannelCalibrationWorkspace: View {
 
     var body: some View {
         ProductionPageContainer {
-            VStack(alignment: .leading, spacing: 20) {
+            VStack(alignment: .leading, spacing: DesignSpacing.xl.pt) {
                 header
                 systemCard
                 microphoneCard
@@ -108,12 +108,12 @@ struct ProductionMultichannelCalibrationWorkspace: View {
                     ?? calibration.lastErrorDescription
                     ?? microphone.lastErrorDescription {
                     Label(error, systemImage: "exclamationmark.triangle.fill")
-                        .font(.callout)
-                        .foregroundStyle(.red)
+                        .font(DesignType.label.font)
+                        .foregroundStyle(StatusLevel.problem.color)
                         .textSelection(.enabled)
-                        .padding(14)
+                        .padding(DesignSpacing.l.pt)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(.red.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+                        .background(.red.opacity(0.08), in: RoundedRectangle(cornerRadius: DesignRadius.medium.pt))
                 }
             }
         }
@@ -206,7 +206,7 @@ struct ProductionMultichannelCalibrationWorkspace: View {
     }
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: DesignSpacing.s.pt) {
             Text("Measure every physical speaker and subwoofer at each listening seat, then generate level, polarity, timing and bounded attenuation-only EQ for the selected Playback System.")
                 .foregroundStyle(.secondary)
         }
@@ -214,15 +214,15 @@ struct ProductionMultichannelCalibrationWorkspace: View {
 
     private var systemCard: some View {
         GroupBox("Playback System") {
-            VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: DesignSpacing.m.pt) {
                 if let profile = calibration.profile {
-                    HStack(spacing: 24) {
+                    HStack(spacing: DesignSpacing.xl.pt) {
                         status("System", profiles.selectedSystemProfileName)
                         status("Physical Layout", profile.systemDisplayName)
                         status("Program Layout", profile.programLayout.displayName)
                         status("Sources", "\(calibration.sources.count)")
                     }
-                    HStack(spacing: 24) {
+                    HStack(spacing: DesignSpacing.xl.pt) {
                         status("Output", engine.selectedOutputDevice?.name ?? "Not selected")
                         status(
                             "Native Rate",
@@ -233,7 +233,7 @@ struct ProductionMultichannelCalibrationWorkspace: View {
                         status("DSP", engine.lifecycleState.rawValue.capitalized)
                     }
                     Text("Native LFE is program content, not a physical calibration source. Speaker Calibration measures each non-LFE semantic speaker and each explicit Sub N output independently.")
-                        .font(.caption)
+                        .font(DesignType.caption.font)
                         .foregroundStyle(.secondary)
                 } else {
                     Label(
@@ -243,23 +243,23 @@ struct ProductionMultichannelCalibrationWorkspace: View {
                     .foregroundStyle(.secondary)
                 }
             }
-            .padding(6)
+            .padding(DesignSpacing.s.pt)
         }
     }
 
     private var microphoneCard: some View {
         GroupBox("Measurement Microphone") {
-            VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: DesignSpacing.m.pt) {
                 MeasurementMicrophoneCard(
                     microphone: microphone,
                     locked: calibration.state == .measuring || calibration.state == .analyzing,
                     onError: { actionError = $0 })
 
                 Text("Normal DSP playback must be stopped during acoustic measurement. The measurement transport owns the output hardware temporarily and zeros every non-target output lane before each sweep.")
-                    .font(.caption)
+                    .font(DesignType.caption.font)
                     .foregroundStyle(.secondary)
             }
-            .padding(6)
+            .padding(DesignSpacing.s.pt)
         }
     }
 
@@ -275,17 +275,17 @@ struct ProductionMultichannelCalibrationWorkspace: View {
                     perform { try calibration.updateSeat(id, name: name, included: included, weight: weight) }
                 },
                 accessory: { _ in EmptyView() })
-                .padding(6)
+                .padding(DesignSpacing.s.pt)
         }
     }
 
     private var campaignCard: some View {
         GroupBox("Measurement Campaign") {
-            VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: DesignSpacing.l.pt) {
                 HStack {
-                    VStack(alignment: .leading, spacing: 3) {
+                    VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
                         Text("\(calibration.completedMeasurementCount) of \(calibration.totalMeasurementCount) measurements")
-                            .font(.headline)
+                            .font(DesignType.sectionTitle.font)
                         if let target = calibration.currentTarget {
                             Text(
                                 calibration.state == .measuring
@@ -310,11 +310,11 @@ struct ProductionMultichannelCalibrationWorkspace: View {
                     }
                 }
 
-                HStack(spacing: 10) {
+                HStack(spacing: DesignSpacing.m.pt) {
                     Button(calibration.campaignComplete ? "Campaign Complete" : "Measure Next") {
                         perform { try calibration.beginNextMeasurement() }
                     }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(.glassProminent)
                     .disabled(!calibration.canMeasure)
 
                     if calibration.state == .measuring || calibration.state == .analyzing {
@@ -333,9 +333,9 @@ struct ProductionMultichannelCalibrationWorkspace: View {
                     Divider()
                     Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 7) {
                         GridRow {
-                            Text("Seat").font(.caption.bold())
-                            Text("Source").font(.caption.bold())
-                            Text("Status").font(.caption.bold())
+                            Text("Seat").font(DesignType.caption.font.bold())
+                            Text("Source").font(DesignType.caption.font.bold())
+                            Text("Status").font(DesignType.caption.font.bold())
                         }
                         ForEach(calibration.seats.filter(\.included)) { seat in
                             ForEach(Array(calibration.sources.enumerated()), id: \.offset) { _, source in
@@ -344,43 +344,43 @@ struct ProductionMultichannelCalibrationWorkspace: View {
                                     Text(source.displayName)
                                     if hasMeasurement(seat: seat, source: source) {
                                         Label("Measured", systemImage: "checkmark.circle.fill")
-                                            .foregroundStyle(.green)
+                                            .foregroundStyle(StatusLevel.good.color)
                                     } else {
                                         Text("Pending").foregroundStyle(.secondary)
                                     }
                                 }
-                                .font(.caption)
+                                .font(DesignType.caption.font)
                             }
                         }
                     }
                 }
             }
-            .padding(6)
+            .padding(DesignSpacing.s.pt)
         }
     }
 
     private var speakerOptimizerCard: some View {
         GroupBox("Speaker Optimizer Measurements") {
-            VStack(alignment: .leading, spacing: 14) {
-                HStack(alignment: .top, spacing: 16) {
-                    VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: DesignSpacing.l.pt) {
+                HStack(alignment: .top, spacing: DesignSpacing.l.pt) {
+                    VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
                         Text("Repeated acoustic evidence")
-                            .font(.headline)
+                            .font(DesignType.sectionTitle.font)
                         Text(
                             "Build a baseline from repeated isolated speaker/sub sweeps. This stage measures only; it does not generate or deploy optimizer filters."
                         )
-                        .font(.caption)
+                        .font(DesignType.caption.font)
                         .foregroundStyle(.secondary)
                     }
                     Spacer()
                     Text(optimizer.state.rawValue.capitalized)
-                        .font(.caption.bold())
-                        .padding(.horizontal, 9)
-                        .padding(.vertical, 5)
+                        .font(DesignType.caption.font.bold())
+                        .padding(.horizontal, DesignSpacing.s.pt)
+                        .padding(.vertical, DesignSpacing.xs.pt)
                         .background(.quaternary, in: Capsule())
                 }
 
-                HStack(spacing: 10) {
+                HStack(spacing: DesignSpacing.m.pt) {
                     Button(
                         optimizer.measurementSet == nil
                             ? "Start Baseline Session"
@@ -395,7 +395,7 @@ struct ProductionMultichannelCalibrationWorkspace: View {
                             actionError = error.localizedDescription
                         }
                     }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(.glass)
 
                     if optimizer.measurementSet != nil {
                         Button("Reset Baseline…", role: .destructive) {
@@ -419,7 +419,7 @@ struct ProductionMultichannelCalibrationWorkspace: View {
                    let progress = optimizer.progress {
                     Divider()
 
-                    HStack(spacing: 24) {
+                    HStack(spacing: DesignSpacing.xl.pt) {
                         status("Role", set.role.rawValue.capitalized)
                         status(
                             "Repeats",
@@ -440,17 +440,17 @@ struct ProductionMultichannelCalibrationWorkspace: View {
                     ProgressView(value: progress.fractionComplete)
 
                     if let step = optimizer.activeOrNextStep {
-                        VStack(alignment: .leading, spacing: 4) {
+                        VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
                             Text(
                                 optimizer.state == .measuring
                                     ? "Measuring \(step.displayName)"
                                     : "Next: \(step.displayName)"
                             )
-                            .font(.callout.bold())
+                            .font(DesignType.label.font.bold())
                             Text(
                                 "Move the selected microphone to \(step.position.name) and keep its position fixed for all repeats at that position."
                             )
-                            .font(.caption)
+                            .font(DesignType.caption.font)
                             .foregroundStyle(.secondary)
                         }
                     } else if progress.complete {
@@ -458,7 +458,7 @@ struct ProductionMultichannelCalibrationWorkspace: View {
                             "All planned repeated sweeps are captured.",
                             systemImage: "checkmark.circle.fill"
                         )
-                        .foregroundStyle(.green)
+                        .foregroundStyle(StatusLevel.good.color)
                     }
 
                     if optimizer.state == .measuring {
@@ -469,7 +469,7 @@ struct ProductionMultichannelCalibrationWorkspace: View {
                         }
                     }
 
-                    HStack(spacing: 10) {
+                    HStack(spacing: DesignSpacing.m.pt) {
                         Button("Measure Next Repeat") {
                             actionError = nil
                             do {
@@ -478,7 +478,7 @@ struct ProductionMultichannelCalibrationWorkspace: View {
                                 actionError = error.localizedDescription
                             }
                         }
-                        .buttonStyle(.borderedProminent)
+                        .buttonStyle(.glassProminent)
                         .disabled(!optimizer.canBeginMeasurement)
 
                         if optimizer.state == .measuring
@@ -491,7 +491,7 @@ struct ProductionMultichannelCalibrationWorkspace: View {
 
                     if let report = optimizer.evidenceReport {
                         Divider()
-                        HStack(spacing: 10) {
+                        HStack(spacing: DesignSpacing.m.pt) {
                             Label(
                                 report.optimizerReady
                                     ? "Optimizer-ready evidence"
@@ -500,7 +500,7 @@ struct ProductionMultichannelCalibrationWorkspace: View {
                                     ? "checkmark.shield.fill"
                                     : "exclamationmark.shield.fill"
                             )
-                            .font(.callout.bold())
+                            .font(DesignType.label.font.bold())
                             .foregroundStyle(
                                 report.optimizerReady ? .green : .secondary
                             )
@@ -508,7 +508,7 @@ struct ProductionMultichannelCalibrationWorkspace: View {
                             Text(
                                 "Confidence \(Int((report.confidence * 100).rounded()))%"
                             )
-                            .font(.caption.monospacedDigit())
+                            .font(DesignType.caption.font.monospacedDigit())
                             .foregroundStyle(.secondary)
                         }
 
@@ -518,14 +518,14 @@ struct ProductionMultichannelCalibrationWorkspace: View {
                             verticalSpacing: 6
                         ) {
                             GridRow {
-                                Text("Position").font(.caption.bold())
-                                Text("Source").font(.caption.bold())
-                                Text("Repeats").font(.caption.bold())
-                                Text("SNR").font(.caption.bold())
-                                Text("Repeatability").font(.caption.bold())
-                                Text("Timing").font(.caption.bold())
-                                Text("Phase").font(.caption.bold())
-                                Text("Status").font(.caption.bold())
+                                Text("Position").font(DesignType.caption.font.bold())
+                                Text("Source").font(DesignType.caption.font.bold())
+                                Text("Repeats").font(DesignType.caption.font.bold())
+                                Text("SNR").font(DesignType.caption.font.bold())
+                                Text("Repeatability").font(DesignType.caption.font.bold())
+                                Text("Timing").font(DesignType.caption.font.bold())
+                                Text("Phase").font(DesignType.caption.font.bold())
+                                Text("Status").font(DesignType.caption.font.bold())
                             }
                             ForEach(
                                 Array(report.groupReports.enumerated()),
@@ -572,12 +572,12 @@ struct ProductionMultichannelCalibrationWorkspace: View {
                                             : .secondary
                                     )
                                 }
-                                .font(.caption)
+                                .font(DesignType.caption.font)
                             }
                         }
 
                         if !report.blockingReasons.isEmpty {
-                            VStack(alignment: .leading, spacing: 5) {
+                            VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
                                 ForEach(
                                     Array(
                                         report.blockingReasons
@@ -591,7 +591,7 @@ struct ProductionMultichannelCalibrationWorkspace: View {
                                         systemImage:
                                             "exclamationmark.triangle"
                                     )
-                                    .font(.caption)
+                                    .font(DesignType.caption.font)
                                     .foregroundStyle(.secondary)
                                 }
                             }
@@ -604,39 +604,39 @@ struct ProductionMultichannelCalibrationWorkspace: View {
                         blocked.message,
                         systemImage: "lock.shield"
                     )
-                    .font(.caption)
-                    .foregroundStyle(.orange)
+                    .font(DesignType.caption.font)
+                    .foregroundStyle(StatusLevel.attention.color)
                 }
 
                 Text(
                     "Protected Low/Mid/High driver-bus measurements remain fail-closed in PR103. They will not be excited through a raw physical-output bypass; a crossover-preserving protected measurement path is required first."
                 )
-                .font(.caption)
+                .font(DesignType.caption.font)
                 .foregroundStyle(.secondary)
             }
-            .padding(6)
+            .padding(DesignSpacing.s.pt)
         }
     }
 
 
     private var speakerCharacterizationCard: some View {
         GroupBox("Speaker Optimizer · Speaker Characterization") {
-            VStack(alignment: .leading, spacing: 14) {
-                HStack(alignment: .top, spacing: 16) {
-                    VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: DesignSpacing.l.pt) {
+                HStack(alignment: .top, spacing: DesignSpacing.l.pt) {
+                    VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
                         Text("Step 2 · Characterize each whole speaker")
-                            .font(.headline)
+                            .font(DesignType.sectionTitle.font)
                         Text(
                             "After the listening-position baseline qualifies, move the same microphone to the guided ~1 m position for each whole speaker. Three stationary repeats are taken before moving to the next speaker."
                         )
-                        .font(.caption)
+                        .font(DesignType.caption.font)
                         .foregroundStyle(.secondary)
                     }
                     Spacer()
                     Text(characterization.state.rawValue.capitalized)
-                        .font(.caption.bold())
-                        .padding(.horizontal, 9)
-                        .padding(.vertical, 5)
+                        .font(DesignType.caption.font.bold())
+                        .padding(.horizontal, DesignSpacing.s.pt)
+                        .padding(.vertical, DesignSpacing.xs.pt)
                         .background(.quaternary, in: Capsule())
                 }
 
@@ -645,11 +645,11 @@ struct ProductionMultichannelCalibrationWorkspace: View {
                         "Complete an optimizer-ready listening-position baseline above before starting characterization.",
                         systemImage: "1.circle"
                     )
-                    .font(.callout)
+                    .font(DesignType.label.font)
                     .foregroundStyle(.secondary)
                 }
 
-                HStack(spacing: 10) {
+                HStack(spacing: DesignSpacing.m.pt) {
                     Button(
                         characterization.measurementSet == nil
                             ? "Start Speaker Characterization"
@@ -668,7 +668,7 @@ struct ProductionMultichannelCalibrationWorkspace: View {
                             actionError = error.localizedDescription
                         }
                     }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(.glass)
                     .disabled(optimizer.evidenceReport?.optimizerReady != true)
 
                     if characterization.measurementSet != nil,
@@ -694,7 +694,7 @@ struct ProductionMultichannelCalibrationWorkspace: View {
                    let progress = characterization.progress {
                     Divider()
 
-                    HStack(spacing: 24) {
+                    HStack(spacing: DesignSpacing.xl.pt) {
                         status(
                             "Speakers",
                             "\(progress.completedTargetCount) / \(progress.requiredTargetCount)"
@@ -719,20 +719,20 @@ struct ProductionMultichannelCalibrationWorkspace: View {
                     ProgressView(value: progress.fractionComplete)
 
                     if let step = characterization.activeOrNextStep {
-                        VStack(alignment: .leading, spacing: 5) {
+                        VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
                             Text(
                                 characterization.state == .measuring
                                     ? "Measuring \(step.target.source.displayName)"
                                     : "Next: \(step.target.source.displayName)"
                             )
-                            .font(.callout.bold())
+                            .font(DesignType.label.font.bold())
                             Text(step.instruction)
-                                .font(.caption)
+                                .font(DesignType.caption.font)
                                 .foregroundStyle(.secondary)
                             Text(
                                 "Do not move the loudspeaker. This installed-room measurement is source-weighted evidence, not an anechoic claim."
                             )
-                            .font(.caption)
+                            .font(DesignType.caption.font)
                             .foregroundStyle(.secondary)
                         }
                     } else if progress.complete {
@@ -740,7 +740,7 @@ struct ProductionMultichannelCalibrationWorkspace: View {
                             "All whole-speaker characterization repeats are captured.",
                             systemImage: "checkmark.circle.fill"
                         )
-                        .foregroundStyle(.green)
+                        .foregroundStyle(StatusLevel.good.color)
                     }
 
                     if characterization.state == .measuring {
@@ -751,7 +751,7 @@ struct ProductionMultichannelCalibrationWorkspace: View {
                         }
                     }
 
-                    HStack(spacing: 10) {
+                    HStack(spacing: DesignSpacing.m.pt) {
                         Button("Measure Next Characterization Repeat") {
                             actionError = nil
                             do {
@@ -760,7 +760,7 @@ struct ProductionMultichannelCalibrationWorkspace: View {
                                 actionError = error.localizedDescription
                             }
                         }
-                        .buttonStyle(.borderedProminent)
+                        .buttonStyle(.glassProminent)
                         .disabled(!characterization.canBeginMeasurement)
 
                         if characterization.state == .measuring
@@ -772,7 +772,7 @@ struct ProductionMultichannelCalibrationWorkspace: View {
                     }
 
                     if let evidence = characterization.evidenceReport {
-                        HStack(spacing: 10) {
+                        HStack(spacing: DesignSpacing.m.pt) {
                             Label(
                                 characterization.characterizationReady
                                     ? "Characterization evidence ready"
@@ -781,7 +781,7 @@ struct ProductionMultichannelCalibrationWorkspace: View {
                                     ? "checkmark.shield.fill"
                                     : "exclamationmark.shield.fill"
                             )
-                            .font(.callout.bold())
+                            .font(DesignType.label.font.bold())
                             .foregroundStyle(
                                 characterization.characterizationReady
                                     ? .green : .secondary
@@ -790,7 +790,7 @@ struct ProductionMultichannelCalibrationWorkspace: View {
                             Text(
                                 "Confidence \(Int((evidence.confidence * 100).rounded()))%"
                             )
-                            .font(.caption.monospacedDigit())
+                            .font(DesignType.caption.font.monospacedDigit())
                             .foregroundStyle(.secondary)
                         }
                     }
@@ -799,10 +799,10 @@ struct ProductionMultichannelCalibrationWorkspace: View {
                         Divider()
                         let summary =
                             SpeakerOptimizerCrossDomainSummary(report: report)
-                        VStack(alignment: .leading, spacing: 8) {
+                        VStack(alignment: .leading, spacing: DesignSpacing.s.pt) {
                             Text("Step 3 · Compare speaker vs room evidence")
-                                .font(.headline)
-                            HStack(spacing: 22) {
+                                .font(DesignType.sectionTitle.font)
+                            HStack(spacing: DesignSpacing.xl.pt) {
                                 status(
                                     "Speaker-persistent",
                                     "\(summary.speakerPersistentPointCount)"
@@ -827,12 +827,12 @@ struct ProductionMultichannelCalibrationWorkspace: View {
                                 verticalSpacing: 6
                             ) {
                                 GridRow {
-                                    Text("Source").font(.caption.bold())
+                                    Text("Source").font(DesignType.caption.font.bold())
                                     Text("Speaker-persistent")
-                                        .font(.caption.bold())
+                                        .font(DesignType.caption.font.bold())
                                     Text("Room / seat")
-                                        .font(.caption.bold())
-                                    Text("Ambiguous").font(.caption.bold())
+                                        .font(DesignType.caption.font.bold())
+                                    Text("Ambiguous").font(DesignType.caption.font.bold())
                                 }
                                 ForEach(
                                     Array(report.sources.enumerated()),
@@ -850,14 +850,14 @@ struct ProductionMultichannelCalibrationWorkspace: View {
                                             "\(sourceReport.points.filter { $0.classification == .ambiguous }.count)"
                                         )
                                     }
-                                    .font(.caption)
+                                    .font(DesignType.caption.font)
                                 }
                             }
 
                             Text(
                                 "Only speaker-persistent regions may drive the guided PEQ/FIR speaker-correction path. Room/seat-dependent, ambiguous, flat, below-window and unclassified regions remain protected."
                             )
-                            .font(.caption)
+                            .font(DesignType.caption.font)
                             .foregroundStyle(.secondary)
                         }
                     }
@@ -866,10 +866,10 @@ struct ProductionMultichannelCalibrationWorkspace: View {
                 Text(
                     "Subwoofers remain in the listening-position integration campaign. Protected Low/Mid/High driver buses still require a crossover-preserving measurement path and are not directly swept."
                 )
-                .font(.caption)
+                .font(DesignType.caption.font)
                 .foregroundStyle(.secondary)
             }
-            .padding(6)
+            .padding(DesignSpacing.s.pt)
         }
     }
 
@@ -890,22 +890,22 @@ struct ProductionMultichannelCalibrationWorkspace: View {
 
     private var speakerOptimizerCommissioningCard: some View {
         GroupBox("Speaker Optimizer · Commission & Verify") {
-            VStack(alignment: .leading, spacing: 14) {
-                HStack(alignment: .top, spacing: 16) {
-                    VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: DesignSpacing.l.pt) {
+                HStack(alignment: .top, spacing: DesignSpacing.l.pt) {
+                    VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
                         Text("Step 4 · Review and apply bounded PEQ")
-                            .font(.headline)
+                            .font(DesignType.sectionTitle.font)
                         Text(
                             "Generate a cut-only PEQ proposal from the qualified listening baseline plus speaker characterization. Apply is an explicit user action and is provisional until new microphone verification passes."
                         )
-                        .font(.caption)
+                        .font(DesignType.caption.font)
                         .foregroundStyle(.secondary)
                     }
                     Spacer()
                     Text(guidedOptimizer.state.rawValue)
-                        .font(.caption.bold())
-                        .padding(.horizontal, 9)
-                        .padding(.vertical, 5)
+                        .font(DesignType.caption.font.bold())
+                        .padding(.horizontal, DesignSpacing.s.pt)
+                        .padding(.vertical, DesignSpacing.xs.pt)
                         .background(.quaternary, in: Capsule())
                 }
 
@@ -926,7 +926,7 @@ struct ProductionMultichannelCalibrationWorkspace: View {
                         actionError = error.localizedDescription
                     }
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(.glass)
                 .disabled(
                     optimizer.evidenceReport?.optimizerReady != true
                         || !characterization.characterizationReady
@@ -940,7 +940,7 @@ struct ProductionMultichannelCalibrationWorkspace: View {
                 if let proposal = guidedOptimizer.proposal,
                    let plan = guidedOptimizer.plan {
                     Divider()
-                    HStack(spacing: 22) {
+                    HStack(spacing: DesignSpacing.xl.pt) {
                         status("Sources", "\(proposal.sources.count)")
                         status(
                             "PEQ Bands",
@@ -962,10 +962,10 @@ struct ProductionMultichannelCalibrationWorkspace: View {
                         verticalSpacing: 6
                     ) {
                         GridRow {
-                            Text("Source").font(.caption.bold())
-                            Text("Bands").font(.caption.bold())
-                            Text("Max Cut").font(.caption.bold())
-                            Text("Status").font(.caption.bold())
+                            Text("Source").font(DesignType.caption.font.bold())
+                            Text("Bands").font(DesignType.caption.font.bold())
+                            Text("Max Cut").font(DesignType.caption.font.bold())
+                            Text("Status").font(DesignType.caption.font.bold())
                         }
                         ForEach(
                             Array(plan.candidate.sources.enumerated()),
@@ -985,12 +985,12 @@ struct ProductionMultichannelCalibrationWorkspace: View {
                                         : "Speaker-persistent only"
                                 )
                             }
-                            .font(.caption)
+                            .font(DesignType.caption.font)
                         }
                     }
 
                     if guidedOptimizer.applyReceipt == nil {
-                        HStack(spacing: 10) {
+                        HStack(spacing: DesignSpacing.m.pt) {
                             Button("Approve & Apply PEQ") {
                                 actionError = nil
                                 do {
@@ -1002,7 +1002,7 @@ struct ProductionMultichannelCalibrationWorkspace: View {
                                         error.localizedDescription
                                 }
                             }
-                            .buttonStyle(.borderedProminent)
+                            .buttonStyle(.glassProminent)
                             .disabled(
                                 !guidedOptimizer.canApproveAndApply
                             )
@@ -1012,7 +1012,7 @@ struct ProductionMultichannelCalibrationWorkspace: View {
                                     ? "DSP is stopped; Apply is available after review."
                                     : "Stop DSP playback before Apply."
                             )
-                            .font(.caption)
+                            .font(DesignType.caption.font)
                             .foregroundStyle(.secondary)
                         }
                     }
@@ -1040,7 +1040,7 @@ struct ProductionMultichannelCalibrationWorkspace: View {
                                     ? "exclamationmark.shield.fill"
                                     : "waveform.badge.magnifyingglass"
                     )
-                    .font(.callout.bold())
+                    .font(DesignType.label.font.bold())
                     .foregroundStyle(
                         guidedOptimizer.state == .measuredAccepted
                             ? .green
@@ -1052,9 +1052,9 @@ struct ProductionMultichannelCalibrationWorkspace: View {
                     )
 
                     Text("Step 5 · Re-measure the original listening positions")
-                        .font(.headline)
+                        .font(DesignType.sectionTitle.font)
 
-                    HStack(spacing: 10) {
+                    HStack(spacing: DesignSpacing.m.pt) {
                         Button(
                             verification.measurementSet == nil
                                 ? "Start Verification"
@@ -1072,7 +1072,7 @@ struct ProductionMultichannelCalibrationWorkspace: View {
                                     error.localizedDescription
                             }
                         }
-                        .buttonStyle(.bordered)
+                        .buttonStyle(.glass)
                         .disabled(
                             guidedOptimizer.state == .measuredAccepted
                                 || guidedOptimizer.state == .measuredRejected
@@ -1095,7 +1095,7 @@ struct ProductionMultichannelCalibrationWorkspace: View {
                     if let verificationSet =
                             verification.measurementSet,
                        let progress = verification.progress {
-                        HStack(spacing: 22) {
+                        HStack(spacing: DesignSpacing.xl.pt) {
                             status(
                                 "Verification Repeats",
                                 "\(progress.completedSweepCount) / \(progress.requiredSweepCount)"
@@ -1121,18 +1121,18 @@ struct ProductionMultichannelCalibrationWorkspace: View {
                                     ? "Measuring \(step.displayName)"
                                     : "Next: \(step.displayName)"
                             )
-                            .font(.callout.bold())
+                            .font(DesignType.label.font.bold())
                             Text(
                                 "Return the same calibrated microphone to \(step.position.name) and keep it fixed for the repeated sweeps."
                             )
-                            .font(.caption)
+                            .font(DesignType.caption.font)
                             .foregroundStyle(.secondary)
                         } else if progress.complete {
                             Label(
                                 "Fresh verification capture campaign complete.",
                                 systemImage: "checkmark.circle.fill"
                             )
-                            .foregroundStyle(.green)
+                            .foregroundStyle(StatusLevel.good.color)
                         }
 
                         if verification.state == .measuring {
@@ -1144,7 +1144,7 @@ struct ProductionMultichannelCalibrationWorkspace: View {
                             }
                         }
 
-                        HStack(spacing: 10) {
+                        HStack(spacing: DesignSpacing.m.pt) {
                             Button("Measure Next Verification Repeat") {
                                 actionError = nil
                                 do {
@@ -1154,7 +1154,7 @@ struct ProductionMultichannelCalibrationWorkspace: View {
                                         error.localizedDescription
                                 }
                             }
-                            .buttonStyle(.borderedProminent)
+                            .buttonStyle(.glassProminent)
                             .disabled(
                                 !verification.canBeginMeasurement
                                     || guidedOptimizer.state
@@ -1195,7 +1195,7 @@ struct ProductionMultichannelCalibrationWorkspace: View {
 
                     if let report = verification.verificationReport {
                         Divider()
-                        HStack(spacing: 10) {
+                        HStack(spacing: DesignSpacing.m.pt) {
                             Label(
                                 report.accepted
                                     ? "Measured acceptance passed"
@@ -1204,7 +1204,7 @@ struct ProductionMultichannelCalibrationWorkspace: View {
                                     ? "checkmark.shield.fill"
                                     : "exclamationmark.shield.fill"
                             )
-                            .font(.callout.bold())
+                            .font(DesignType.label.font.bold())
                             .foregroundStyle(
                                 report.accepted ? .green : .red
                             )
@@ -1218,7 +1218,7 @@ struct ProductionMultichannelCalibrationWorkspace: View {
                                         ? "Verified & persisted"
                                         : "Verification finalization pending")
                             )
-                            .font(.caption.bold())
+                            .font(DesignType.caption.font.bold())
                         }
 
                         Grid(
@@ -1227,14 +1227,14 @@ struct ProductionMultichannelCalibrationWorkspace: View {
                             verticalSpacing: 6
                         ) {
                             GridRow {
-                                Text("Source").font(.caption.bold())
+                                Text("Source").font(DesignType.caption.font.bold())
                                 Text("Filter tracking")
-                                    .font(.caption.bold())
+                                    .font(DesignType.caption.font.bold())
                                 Text("Persistent improvement")
-                                    .font(.caption.bold())
+                                    .font(DesignType.caption.font.bold())
                                 Text("Protected regression")
-                                    .font(.caption.bold())
-                                Text("Result").font(.caption.bold())
+                                    .font(DesignType.caption.font.bold())
+                                Text("Result").font(DesignType.caption.font.bold())
                             }
                             ForEach(
                                 Array(report.sources.enumerated()),
@@ -1270,7 +1270,7 @@ struct ProductionMultichannelCalibrationWorkspace: View {
                                             ? .green : .red
                                     )
                                 }
-                                .font(.caption)
+                                .font(DesignType.caption.font)
                             }
                         }
                     }
@@ -1279,23 +1279,23 @@ struct ProductionMultichannelCalibrationWorkspace: View {
                 Text(
                     "FIR deployment and crossover timing/polarity remain blocked. PEQ acceptance here verifies measured magnitude behavior only."
                 )
-                .font(.caption)
+                .font(DesignType.caption.font)
                 .foregroundStyle(.secondary)
             }
-            .padding(6)
+            .padding(DesignSpacing.s.pt)
         }
     }
 
     private var designCard: some View {
         GroupBox("Calibration Design") {
-            VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: DesignSpacing.l.pt) {
                 Text("The product deployment is intentionally headroom-safe: speaker trims, speaker EQ, sub gain and sub EQ are attenuation-only. Timing and polarity remain fully available, and multi-sub relative relationships are preserved without positive digital gain.")
-                    .font(.caption)
+                    .font(DesignType.caption.font)
                     .foregroundStyle(.secondary)
 
                 GroupBox("Adaptive Target") {
-                    VStack(alignment: .leading, spacing: 10) {
-                        HStack(spacing: 10) {
+                    VStack(alignment: .leading, spacing: DesignSpacing.m.pt) {
+                        HStack(spacing: DesignSpacing.m.pt) {
                             Picker(
                                 "Voicing",
                                 selection: $intelligentTargetPreference
@@ -1328,26 +1328,26 @@ struct ProductionMultichannelCalibrationWorkspace: View {
                                         "waveform.badge.magnifyingglass"
                                 )
                             }
-                            .buttonStyle(.bordered)
+                            .buttonStyle(.glass)
                             .disabled(!calibration.campaignComplete)
 
                             if calibration.intelligentTargetReport != nil {
                                 Button("Use Flat") {
                                     calibration.clearIntelligentTarget()
                                 }
-                                .buttonStyle(.bordered)
+                                .buttonStyle(.glass)
                             }
                         }
 
                         Text(
                             "Uses the completed full-range speaker measurements across all included seats. Subwoofer measurements do not shape the broadband target. The resulting curve is still independently checked by PR86 when the calibration design is generated."
                         )
-                        .font(.caption)
+                        .font(DesignType.caption.font)
                         .foregroundStyle(.secondary)
 
                         if let report =
                             calibration.intelligentTargetReport {
-                            HStack(spacing: 22) {
+                            HStack(spacing: DesignSpacing.xl.pt) {
                                 status(
                                     "Target",
                                     report.target.name
@@ -1371,7 +1371,7 @@ struct ProductionMultichannelCalibrationWorkspace: View {
                                     )
                                 )
                             }
-                            HStack(spacing: 22) {
+                            HStack(spacing: DesignSpacing.xl.pt) {
                                 status(
                                     "Bass Extension",
                                     String(
@@ -1401,7 +1401,7 @@ struct ProductionMultichannelCalibrationWorkspace: View {
                                     systemImage:
                                         "shield.lefthalf.filled"
                                 )
-                                .font(.caption)
+                                .font(DesignType.caption.font)
                                 .foregroundStyle(.secondary)
                             }
                             ForEach(
@@ -1413,22 +1413,22 @@ struct ProductionMultichannelCalibrationWorkspace: View {
                                     systemImage:
                                         "exclamationmark.triangle"
                                 )
-                                .font(.caption)
+                                .font(DesignType.caption.font)
                                 .foregroundStyle(.secondary)
                             }
                         }
                     }
-                    .padding(4)
+                    .padding(DesignSpacing.xs.pt)
                 }
 
                 if let design = calibration.latestDesign {
-                    HStack(spacing: 24) {
+                    HStack(spacing: DesignSpacing.xl.pt) {
                         status("Speakers", "\(design.summary.speakerCount)")
                         status("Subs", "\(design.summary.subwooferCount)")
                         status("Seats", "\(design.summary.seatCount)")
                         status("Target", design.summary.targetName)
                     }
-                    HStack(spacing: 24) {
+                    HStack(spacing: DesignSpacing.xl.pt) {
                         status(
                             "Designer Worst RMS Before",
                             design.summary.maximumSpeakerErrorBeforeDB.map { String(format: "%.2f dB", $0) } ?? "—"
@@ -1446,7 +1446,7 @@ struct ProductionMultichannelCalibrationWorkspace: View {
 
                 if let prediction = calibration.latestPrediction {
                     Divider()
-                    HStack(spacing: 10) {
+                    HStack(spacing: DesignSpacing.m.pt) {
                         Label(
                             prediction.accepted
                                 ? "Prediction Verified"
@@ -1455,7 +1455,7 @@ struct ProductionMultichannelCalibrationWorkspace: View {
                                 ? "checkmark.shield.fill"
                                 : "exclamationmark.shield.fill"
                         )
-                        .font(.callout.bold())
+                        .font(DesignType.label.font.bold())
                         .foregroundStyle(
                             prediction.accepted ? .green : .red
                         )
@@ -1463,11 +1463,11 @@ struct ProductionMultichannelCalibrationWorkspace: View {
                         Text(
                             "Confidence \(Int((prediction.confidence * 100).rounded()))%"
                         )
-                        .font(.caption.monospacedDigit())
+                        .font(DesignType.caption.font.monospacedDigit())
                         .foregroundStyle(.secondary)
                     }
 
-                    HStack(spacing: 24) {
+                    HStack(spacing: DesignSpacing.xl.pt) {
                         status(
                             "Independent RMS Before",
                             String(
@@ -1498,7 +1498,7 @@ struct ProductionMultichannelCalibrationWorkspace: View {
                         )
                     }
 
-                    HStack(spacing: 24) {
+                    HStack(spacing: DesignSpacing.xl.pt) {
                         status(
                             "Worst Level Spread",
                             String(
@@ -1529,7 +1529,7 @@ struct ProductionMultichannelCalibrationWorkspace: View {
                     }
 
                     if !prediction.blockingReasons.isEmpty {
-                        VStack(alignment: .leading, spacing: 5) {
+                        VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
                             ForEach(
                                 Array(
                                     prediction.blockingReasons.enumerated()
@@ -1541,13 +1541,13 @@ struct ProductionMultichannelCalibrationWorkspace: View {
                                     systemImage:
                                         "xmark.octagon.fill"
                                 )
-                                .font(.caption)
-                                .foregroundStyle(.red)
+                                .font(DesignType.caption.font)
+                                .foregroundStyle(StatusLevel.problem.color)
                             }
                         }
                     }
                     if !prediction.warnings.isEmpty {
-                        VStack(alignment: .leading, spacing: 5) {
+                        VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
                             ForEach(
                                 Array(prediction.warnings.enumerated()),
                                 id: \.offset
@@ -1557,14 +1557,14 @@ struct ProductionMultichannelCalibrationWorkspace: View {
                                     systemImage:
                                         "exclamationmark.triangle"
                                 )
-                                .font(.caption)
+                                .font(DesignType.caption.font)
                                 .foregroundStyle(.secondary)
                             }
                         }
                     }
                 }
 
-                HStack(spacing: 10) {
+                HStack(spacing: DesignSpacing.m.pt) {
                     Button("Generate Design") {
                         actionError = nil
                         Task {
@@ -1572,13 +1572,13 @@ struct ProductionMultichannelCalibrationWorkspace: View {
                             catch { actionError = error.localizedDescription }
                         }
                     }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(.glass)
                     .disabled(!calibration.campaignComplete || calibration.state == .measuring || calibration.state == .analyzing)
 
                     Button("Deploy to Playback System") {
                         perform { try calibration.deployLatestDesign() }
                     }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(.glassProminent)
                     .disabled(
                         calibration.latestDesign == nil
                             || calibration.latestPrediction?.accepted != true
@@ -1586,7 +1586,7 @@ struct ProductionMultichannelCalibrationWorkspace: View {
                     )
                 }
             }
-            .padding(6)
+            .padding(DesignSpacing.s.pt)
         }
     }
 
@@ -1607,9 +1607,9 @@ struct ProductionMultichannelCalibrationWorkspace: View {
 
     private var stateBadge: some View {
         Text(calibration.state.rawValue.capitalized)
-            .font(.caption.bold())
-            .padding(.horizontal, 9)
-            .padding(.vertical, 5)
+            .font(DesignType.caption.font.bold())
+            .padding(.horizontal, DesignSpacing.s.pt)
+            .padding(.vertical, DesignSpacing.xs.pt)
             .background(.quaternary, in: Capsule())
     }
 
@@ -1623,9 +1623,9 @@ struct ProductionMultichannelCalibrationWorkspace: View {
     }
 
     private func status(_ label: String, _ value: String) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(label).font(.caption).foregroundStyle(.secondary)
-            Text(value).font(.callout).lineLimit(1)
+        VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
+            Text(label).font(DesignType.caption.font).foregroundStyle(.secondary)
+            Text(value).font(DesignType.label.font).lineLimit(1)
         }
     }
 

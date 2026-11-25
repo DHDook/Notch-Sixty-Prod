@@ -5,6 +5,9 @@ struct SpeakerRoutingContext: Equatable, Sendable {
     var programLanes: Int
     var subwoofers: Int
     var sampleRate: Double
+    /// E8 S12: hold ways that have a role to their lowest safe frequency. Swift sets it from `e8.active-commissioning`;
+    /// off, the role rules do not run and validation is exactly as before.
+    var enforceDriverRoles = false
 }
 
 enum SpeakerRoutingError: Equatable, Sendable {
@@ -25,6 +28,12 @@ enum SpeakerRoutingError: Equatable, Sendable {
     /// A destination would need more than the 8 entries a ROUTE destination holds.
     case tooManyEntries(PhysicalOutputEndpoint)
     case invalidSampleRate
+    /// E8 S12: a way with a lowest safe frequency has no high-pass.
+    case driverHighPassMissing(way: String, role: DriverRole, safeHz: Double)
+    /// E8 S12: the high-pass corner sits below the way's lowest safe frequency.
+    case driverHighPassBelowSafe(way: String, cornerHz: Double, safeHz: Double)
+    /// E8 S12: a first-order high-pass is too gentle unless its corner is at least twice the lowest safe frequency.
+    case driverHighPassTooGentle(way: String, cornerHz: Double, safeHz: Double)
 }
 
 enum SpeakerRoutingWarning: Equatable, Sendable {
@@ -116,6 +125,7 @@ extension SpeakerRoutingConfiguration {
                 }
             }
             v.warnings += Self.bandWarnings(speaker: label(speaker), ways: speaker.ways)
+            if context.enforceDriverRoles { v.errors += Self.driverRoleErrors(speaker.ways, label: label) }
         }
         var entriesPerOutput: [PhysicalOutputEndpoint: Int] = [:]
         for speaker in speakers { for way in speaker.ways { entriesPerOutput[way.endpoint, default: 0] += 1 } }
@@ -135,6 +145,56 @@ extension SpeakerRoutingConfiguration {
             v.warnings.append(.unroutedSource(.sub(index)))
         }
         return v
+    }
+
+    /// E8 S12: the role rules for one speaker's ways. A way with no role, or a role with no lowest safe frequency, is exempt.
+    static func driverRoleErrors(_ ways: [RoutedWay], label: (RoutedWay) -> String) -> [SpeakerRoutingError] {
+        var errors: [SpeakerRoutingError] = []
+        for way in ways {
+            guard let role = way.role, let safe = way.effectiveLowestSafeHz else { continue }
+            guard let hp = way.highPass else {
+                errors.append(.driverHighPassMissing(way: label(way), role: role, safeHz: safe))
+                continue
+            }
+            // A driver EQ high-pass section (type 4) also cuts: a migrated tri-amp tweeter gets its upper corner that way.
+            let eqCorner = way.eq.filter { $0.type == 4 }.map(\.frequencyHz).max()
+            let corner = max(hp.cornerHz, eqCorner ?? 0)
+            if corner < safe {
+                errors.append(.driverHighPassBelowSafe(way: label(way), cornerHz: corner, safeHz: safe))
+            } else if hp.order == 1 && eqCorner == nil && corner < 2 * safe {
+                errors.append(.driverHighPassTooGentle(way: label(way), cornerHz: corner, safeHz: safe))
+            }
+        }
+        return errors
+    }
+
+    /// E8 S12: the role errors of the whole configuration, used to tell whether an edit introduces a new one.
+    var driverRoleErrors: [SpeakerRoutingError] {
+        speakers.flatMap { speaker in
+            Self.driverRoleErrors(speaker.ways) { $0.name.isEmpty ? $0.id.uuidString : $0.name }
+        }
+    }
+
+    /// E8 S12: a role for each way from its position and corners, for stored profiles that have none. A speaker with one
+    /// way is a subwoofer (sub source) or full range; with several, the way without a high-pass is the woofer, the one
+    /// without a low-pass the tweeter and those between midranges. Ways with no filters stay full range.
+    func inferredRoles() -> [UUID: DriverRole] {
+        var result: [UUID: DriverRole] = [:]
+        for speaker in speakers {
+            if speaker.ways.count == 1 {
+                result[speaker.ways[0].id] = speaker.source.kind == .sub ? .subwoofer : .fullRange
+                continue
+            }
+            for way in speaker.ways {
+                switch (way.highPass, way.lowPass) {
+                case (nil, nil): result[way.id] = .fullRange
+                case (nil, _): result[way.id] = .woofer
+                case (_, nil): result[way.id] = .tweeter
+                default: result[way.id] = .midrange
+                }
+            }
+        }
+        return result
     }
 
     private static func captureOK(_ c: CrossoverCore.ResponseCapture) -> Bool {

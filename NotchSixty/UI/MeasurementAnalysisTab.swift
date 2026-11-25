@@ -26,9 +26,9 @@ struct MeasurementAnalysisTab: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
+        VStack(alignment: .leading, spacing: DesignSpacing.xl.pt) {
             GroupBox("Source") {
-                VStack(alignment: .leading, spacing: 10) {
+                VStack(alignment: .leading, spacing: DesignSpacing.m.pt) {
                     Picker("Analyse", selection: Binding(get: { selectedSource?.id ?? "" }, set: { select($0) })) {
                         if liveSources.isEmpty && libraryModel.records.isEmpty { Text("Nothing measured yet").tag("") }
                         ForEach(liveSources) { Text("Latest \($0.displayTitle)").tag($0.id) }
@@ -39,11 +39,11 @@ struct MeasurementAnalysisTab: View {
                             }
                         }
                     }
-                    if let libraryError { Text(libraryError).font(.caption).foregroundStyle(.orange) }
+                    if let libraryError { Text(libraryError).font(DesignType.caption.font).foregroundStyle(StatusLevel.attention.color) }
                     if let source = selectedSource, source.kind != .library { saveRow(source) }
                     if selectedSource == nil {
                         Text("Measure a speaker, run Room Correction or open a saved measurement to analyse it here.")
-                            .font(.callout).foregroundStyle(.secondary)
+                            .font(DesignType.label.font).foregroundStyle(.secondary)
                     }
                 }
             }
@@ -95,23 +95,23 @@ struct MeasurementAnalysisTab: View {
 
     private var distortionCard: some View {
         GroupBox("Harmonic distortion (H2 to H5)") {
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: DesignSpacing.s.pt) {
                 switch result?.distortion {
                 case nil:
                     Text(selectedSource == nil ? "No source selected." : "Analysing...").foregroundStyle(.secondary)
                 case .unavailable(let reason):
-                    Text(reason).font(.callout).foregroundStyle(.secondary)
+                    Text(reason).font(DesignType.label.font).foregroundStyle(.secondary)
                 case .result(let distortion):
                     DistortionPlot(result: distortion)
                     if let thd = distortion.thdDB.filter({ $0 > MeasurementCore.DistortionResult.noDataDB }).sorted().last {
                         Text(String(format: "Worst total harmonic distortion %.1f dB re the fundamental.", thd))
-                            .font(.caption).foregroundStyle(.secondary)
+                            .font(DesignType.caption.font).foregroundStyle(.secondary)
                     }
                     if !distortion.cleanSeparation {
                         Text(String(
                             format: "The sweep is too short to separate the harmonics from the room response; use a sweep of at least %.1f s.",
                             distortion.minSweepSeconds))
-                            .font(.caption).foregroundStyle(.orange)
+                            .font(DesignType.caption.font).foregroundStyle(StatusLevel.attention.color)
                     }
                 }
             }
@@ -122,12 +122,12 @@ struct MeasurementAnalysisTab: View {
 
     private var decayCard: some View {
         GroupBox("Decay: EDT, T20, T30 and RT60") {
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: DesignSpacing.s.pt) {
                 switch result?.decay {
                 case nil:
                     Text(selectedSource == nil ? "No source selected." : "Analysing...").foregroundStyle(.secondary)
                 case .unavailable(let reason):
-                    Text(reason).font(.callout).foregroundStyle(.secondary)
+                    Text(reason).font(DesignType.label.font).foregroundStyle(.secondary)
                 case .result(let octave, let third):
                     Picker("Bands", selection: $thirdOctave) {
                         Text("Third-octave").tag(true)
@@ -146,11 +146,11 @@ struct MeasurementAnalysisTab: View {
                                 Text(Self.seconds(band.t30Seconds)); Text(Self.seconds(band.rt60Seconds))
                                 Text(String(format: "%.0f dB", band.decayRangeDB)).foregroundStyle(band.flags == 0 ? Color.secondary : Color.orange)
                             }
-                            .font(.callout.monospacedDigit())
+                            .font(DesignType.label.font.monospacedDigit())
                         }
                     }
                     Text("A band in orange had too little decay range above the noise for a full T30; read it as indicative.")
-                        .font(.caption).foregroundStyle(.secondary)
+                        .font(DesignType.caption.font).foregroundStyle(.secondary)
                 }
             }
         }
@@ -170,7 +170,7 @@ private struct DistortionPlot: View {
 
     var body: some View {
         let floorDB = -120.0, topDB = 0.0
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
             Canvas { context, size in
                 func path(_ values: [Double]) -> Path {
                     var path = Path()
@@ -192,15 +192,15 @@ private struct DistortionPlot: View {
                                style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
             }
             .frame(height: 180)
-            .background(Color.black.opacity(0.06), in: RoundedRectangle(cornerRadius: 6))
+            .background(Color.black.opacity(0.06), in: RoundedRectangle(cornerRadius: DesignRadius.small.pt))
             .accessibilityLabel("Harmonic distortion H2 to H5 in dB relative to the fundamental, 20 Hz to 20 kHz")
-            HStack(spacing: 12) {
+            HStack(spacing: DesignSpacing.m.pt) {
                 ForEach(0..<4, id: \.self) { k in
-                    Label("H\(k + 2)", systemImage: "circle.fill").foregroundStyle(Self.colours[k]).font(.caption)
+                    Label("H\(k + 2)", systemImage: "circle.fill").foregroundStyle(Self.colours[k]).font(DesignType.caption.font)
                 }
-                Label("THD", systemImage: "circle.dashed").font(.caption)
+                Label("THD", systemImage: "circle.dashed").font(DesignType.caption.font)
                 Spacer()
-                Text("0 dB top, -120 dB bottom, relative to the fundamental").font(.caption).foregroundStyle(.secondary)
+                Text("0 dB top, -120 dB bottom, relative to the fundamental").font(DesignType.caption.font).foregroundStyle(.secondary)
             }
         }
     }

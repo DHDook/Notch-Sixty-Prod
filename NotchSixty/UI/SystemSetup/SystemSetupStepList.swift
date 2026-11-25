@@ -6,12 +6,12 @@ struct SystemSetupStepList: View {
     @ObservedObject var model: SystemSetupFlowModel
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("Steps").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-                .padding(.bottom, 4)
+        VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
+            Text("Steps").font(DesignType.caption.font.weight(.semibold)).foregroundStyle(.secondary)
+                .padding(.bottom, DesignSpacing.xs.pt)
             ForEach(model.stepRows) { row in
                 Button { model.open(row.step) } label: {
-                    HStack(spacing: 8) {
+                    HStack(spacing: DesignSpacing.s.pt) {
                         Image(systemName: icon(row.state))
                             .foregroundStyle(row.state == .upcoming ? Color.secondary : Color.accentColor)
                             .frame(width: 16)
@@ -28,7 +28,7 @@ struct SystemSetupStepList: View {
             }
             Spacer(minLength: 0)
         }
-        .padding(16)
+        .padding(DesignSpacing.l.pt)
         .frame(width: 190, alignment: .topLeading)
         .frame(maxHeight: .infinity, alignment: .topLeading)
     }

@@ -200,7 +200,7 @@ struct UnifiedGraphConfiguration: Equatable, Sendable {
     var deltaAudition = false
     var lanes: [UnifiedGraphLane]
     var inputGain: Float = 1
-    /// E11 S7: measurement source stage params (11 floats from `SignalGeneratorSettings.stageParams`), placed after the
+    /// E11 S7: measurement source stage params (11 floats, or 13 for the cued sweep of ABI v48, from `SignalGeneratorSettings.stageParams`), placed after the
     /// input gain so protection still guards it. nil for normal playback.
     var generatorParams: [Float]?
     /// E12 S4a: program lanes the generator plays on (bit n = lane n); nil means every program lane. The core mutes the
@@ -330,7 +330,7 @@ struct UnifiedGraphConfiguration: Equatable, Sendable {
         }
         // The core ranks the generator after every GAIN stage (rank 3.5), so it follows the lane pre-gains.
         if let generatorParams {
-            guard generatorParams.count == 11 else { throw UnifiedGraphError.invalidConfiguration("generator") }
+            guard generatorParams.count == 11 || generatorParams.count == 13 else { throw UnifiedGraphError.invalidConfiguration("generator") }
             let mask = generatorLaneMask ?? programMask
             guard mask != 0, mask & ~programMask == 0 else { throw UnifiedGraphError.invalidConfiguration("generator lanes") }
             add(N60_STAGE_GENERATOR, Self.generatorStageId, mask: mask, params: generatorParams)

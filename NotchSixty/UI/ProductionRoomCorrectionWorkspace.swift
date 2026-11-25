@@ -40,7 +40,7 @@ struct ProductionRoomCorrectionWorkspace: View {
 
     var body: some View {
         ProductionPageContainer {
-            VStack(alignment: .leading, spacing: 20) {
+            VStack(alignment: .leading, spacing: DesignSpacing.xl.pt) {
                 header
                 dailyPlaybackCard
                 setupCard
@@ -68,12 +68,12 @@ struct ProductionRoomCorrectionWorkspace: View {
 
                 if let error = actionError ?? calibration.lastErrorDescription ?? projects.lastErrorDescription {
                     Label(error, systemImage: "exclamationmark.triangle.fill")
-                        .font(.callout)
-                        .foregroundStyle(.red)
+                        .font(DesignType.label.font)
+                        .foregroundStyle(StatusLevel.problem.color)
                         .textSelection(.enabled)
-                        .padding(14)
+                        .padding(DesignSpacing.l.pt)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(.red.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+                        .background(.red.opacity(0.08), in: RoundedRectangle(cornerRadius: DesignRadius.medium.pt))
                 }
             }
         }
@@ -133,7 +133,7 @@ struct ProductionRoomCorrectionWorkspace: View {
     }
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: DesignSpacing.s.pt) {
             Text("Measure the physical stereo playback system independently from daily content DSP, then analyze and design a reproducible correction filter.")
                 .foregroundStyle(.secondary)
         }
@@ -142,14 +142,14 @@ struct ProductionRoomCorrectionWorkspace: View {
     private var dailyPlaybackCard: some View {
         let deployed = deployedRoomCorrection
         let summary = deployedCalibrationSummary
-        return VStack(alignment: .leading, spacing: 14) {
+        return VStack(alignment: .leading, spacing: DesignSpacing.l.pt) {
             HStack(alignment: .center) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("Daily Playback").font(.headline)
+                VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
+                    Text("Daily Playback").font(DesignType.sectionTitle.font)
                     Text(deployed.lanes?.name ?? deployed.filter?.name ?? "No correction filter deployed")
                         .foregroundStyle(.secondary)
                     if deployed.enabled, let reason = engine.roomCorrectionInactiveReason {
-                        Text(reason.message).font(.caption).foregroundStyle(.orange)
+                        Text(reason.message).font(DesignType.caption.font).foregroundStyle(StatusLevel.attention.color)
                     }
                 }
                 Spacer()
@@ -164,7 +164,7 @@ struct ProductionRoomCorrectionWorkspace: View {
                 .disabled(deployed.filter == nil && deployed.lanes == nil)
             }
 
-            HStack(spacing: 22) {
+            HStack(spacing: DesignSpacing.xl.pt) {
                 statusValue("Playback System", profiles.selectedSystemProfileName)
                 statusValue(
                     "Playback System Output",
@@ -181,7 +181,7 @@ struct ProductionRoomCorrectionWorkspace: View {
 
             if let summary {
                 Divider()
-                HStack(spacing: 22) {
+                HStack(spacing: DesignSpacing.xl.pt) {
                     statusValue("Target", summary.targetName)
                     statusValue(
                         "Positions",
@@ -196,32 +196,32 @@ struct ProductionRoomCorrectionWorkspace: View {
                         String(format: "%.1f dB", summary.recommendedHeadroomDB)
                     )
                 }
-                HStack(spacing: 22) {
+                HStack(spacing: DesignSpacing.xl.pt) {
                     statusValue("Measured", formattedDate(summary.measurementDate))
                     statusValue("Designed", formattedDate(summary.designDate))
                     statusValue("Algorithm", summary.algorithmVersion)
                 }
                 Text("This summary comes from the deployed Playback System profile. Project edits, design selection, and Content Preset changes do not alter daily room correction until you explicitly deploy again.")
-                    .font(.caption)
+                    .font(DesignType.caption.font)
                     .foregroundStyle(.secondary)
             } else {
                 Text("No room-correction design is deployed to this Playback System. Generated project candidates remain offline until you deploy one explicitly.")
-                    .font(.caption)
+                    .font(DesignType.caption.font)
                     .foregroundStyle(.secondary)
             }
         }
-        .padding(20)
-        .background(.regularMaterial, in: .rect(cornerRadius: 22))
+        .padding(DesignSpacing.xl.pt)
+        .background(.regularMaterial, in: .rect(cornerRadius: DesignRadius.large.pt))
         .overlay {
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
+            RoundedRectangle(cornerRadius: DesignRadius.large.pt, style: .continuous)
                 .stroke(.quaternary, lineWidth: 0.5)
         }
     }
 
     private var setupCard: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: DesignSpacing.l.pt) {
             HStack {
-                Text("1. Setup").font(.headline)
+                Text("1. Setup").font(DesignType.sectionTitle.font)
                 Spacer()
                 calibrationStateBadge
             }
@@ -254,7 +254,7 @@ struct ProductionRoomCorrectionWorkspace: View {
             }
 
             LabeledContent("Sweep Level") {
-                HStack(spacing: 12) {
+                HStack(spacing: DesignSpacing.m.pt) {
                     Slider(value: $calibration.sweepLevelDBFS, in: -36 ... -6, step: 1)
                     .designSlider("Sweep level", value: calibration.sweepLevelDBFS, unit: .dbfs)
                         .frame(width: 280)
@@ -265,27 +265,27 @@ struct ProductionRoomCorrectionWorkspace: View {
             }
 
             Text("Measurement uses two sequential sweeps at the current native output rate: Left speaker first, then Right. Captured microphone audio is never routed into playback. Start conservatively and raise the level only if measurement quality requires it.")
-                .font(.caption)
+                .font(DesignType.caption.font)
                 .foregroundStyle(.secondary)
         }
-        .padding(20)
-        .background(.regularMaterial, in: .rect(cornerRadius: 22))
+        .padding(DesignSpacing.xl.pt)
+        .background(.regularMaterial, in: .rect(cornerRadius: DesignRadius.large.pt))
         .overlay {
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
+            RoundedRectangle(cornerRadius: DesignRadius.large.pt, style: .continuous)
                 .stroke(.quaternary, lineWidth: 0.5)
         }
     }
 
     private var measurementCard: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("2. Measure").font(.headline)
+        VStack(alignment: .leading, spacing: DesignSpacing.l.pt) {
+            Text("2. Measure").font(DesignType.sectionTitle.font)
 
             if engine.lifecycleState != .idle {
                 Label(
                     "Stop normal DSP playback before calibration can take exclusive ownership of the physical output.",
                     systemImage: "stop.circle"
                 )
-                .foregroundStyle(.orange)
+                .foregroundStyle(StatusLevel.attention.color)
             } else {
                 Label(
                     "Normal DSP is idle. Calibration may claim the selected output without changing your Playback System settings.",
@@ -306,7 +306,7 @@ struct ProductionRoomCorrectionWorkspace: View {
                         .monospacedDigit()
                 }
                 Text("Keep the microphone stationary until both sweeps and the decay tail finish.")
-                    .font(.caption)
+                    .font(DesignType.caption.font)
                     .foregroundStyle(.secondary)
                 Button("Cancel Measurement", role: .cancel) {
                     calibration.cancelMeasurement()
@@ -319,14 +319,14 @@ struct ProductionRoomCorrectionWorkspace: View {
                         .font(.system(.body, design: .monospaced))
                 }
                 Text("Analysis runs off the realtime audio path. The captured sweeps are being deconvolved and checked for clipping, noise, usable bandwidth, and direct-arrival timing.")
-                    .font(.caption)
+                    .font(DesignType.caption.font)
                     .foregroundStyle(.secondary)
 
             case .reviewing:
                 Label("Measurement and analysis complete", systemImage: "checkmark.circle.fill")
-                    .foregroundStyle(.green)
+                    .foregroundStyle(StatusLevel.good.color)
                 Text("Review the measured Left / Right quality below before keeping this position or measuring again.")
-                    .font(.caption)
+                    .font(DesignType.caption.font)
                     .foregroundStyle(.secondary)
                 Button {
                     actionError = nil
@@ -335,7 +335,7 @@ struct ProductionRoomCorrectionWorkspace: View {
                 } label: {
                     Label("Measure Current Position Again", systemImage: "arrow.clockwise")
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(.glass)
                 .disabled(!calibration.canBeginMeasurement)
                 MeasurementReadinessNote(readiness: calibration.readiness, playbackNotice: calibration.playbackNotice)
 
@@ -359,26 +359,26 @@ struct ProductionRoomCorrectionWorkspace: View {
                 MeasurementReadinessNote(readiness: calibration.readiness, playbackNotice: calibration.playbackNotice)
 
                 Text("This capture measures one listening position. After analysis, keep it as a named position below, then repeat for additional seats.")
-                    .font(.caption)
+                    .font(DesignType.caption.font)
                     .foregroundStyle(.secondary)
             }
         }
-        .padding(20)
-        .background(.regularMaterial, in: .rect(cornerRadius: 22))
+        .padding(DesignSpacing.xl.pt)
+        .background(.regularMaterial, in: .rect(cornerRadius: DesignRadius.large.pt))
         .overlay {
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
+            RoundedRectangle(cornerRadius: DesignRadius.large.pt, style: .continuous)
                 .stroke(.quaternary, lineWidth: 0.5)
         }
     }
 
     private func reviewCard(_ analysis: RoomCorrectionMeasurementAnalysis) -> some View {
         let warnings = analysisWarnings(analysis)
-        return VStack(alignment: .leading, spacing: 16) {
+        return VStack(alignment: .leading, spacing: DesignSpacing.l.pt) {
             HStack {
-                Text("3. Review").font(.headline)
+                Text("3. Review").font(DesignType.sectionTitle.font)
                 Spacer()
                 Text(formattedRate(analysis.sampleRate))
-                    .font(.caption.monospacedDigit())
+                    .font(DesignType.caption.font.monospacedDigit())
                     .foregroundStyle(.secondary)
             }
 
@@ -390,12 +390,12 @@ struct ProductionRoomCorrectionWorkspace: View {
 
             if !warnings.isEmpty {
                 Divider()
-                VStack(alignment: .leading, spacing: 8) {
+                VStack(alignment: .leading, spacing: DesignSpacing.s.pt) {
                     Label("Measurement notes", systemImage: "exclamationmark.triangle")
-                        .font(.callout.weight(.semibold))
+                        .font(DesignType.label.font.weight(.semibold))
                     ForEach(warnings, id: \.self) { warning in
                         Text("• \(warning)")
-                            .font(.caption)
+                            .font(DesignType.caption.font)
                             .foregroundStyle(.secondary)
                     }
                 }
@@ -405,10 +405,10 @@ struct ProductionRoomCorrectionWorkspace: View {
 
             if projects.contains(analysis) {
                 Label("Current measurement retained in the Playback System project", systemImage: "tray.and.arrow.down.fill")
-                    .font(.callout.weight(.semibold))
+                    .font(DesignType.label.font.weight(.semibold))
                     .foregroundStyle(.secondary)
             } else {
-                HStack(spacing: 12) {
+                HStack(spacing: DesignSpacing.m.pt) {
                     TextField(projects.suggestedPositionName, text: $positionName)
                         .frame(maxWidth: 280)
                     Button {
@@ -419,18 +419,18 @@ struct ProductionRoomCorrectionWorkspace: View {
                     .buttonStyle(.glassProminent)
                 }
                 Text("Leave the name blank to use \(projects.suggestedPositionName). Raw capture, impulse response, transfer function, and quality metadata are retained together.")
-                    .font(.caption)
+                    .font(DesignType.caption.font)
                     .foregroundStyle(.secondary)
             }
 
             Text("This review is the measured response for the current position only. Retain the position, then use Target & Design below to shape and generate correction explicitly.")
-                .font(.caption)
+                .font(DesignType.caption.font)
                 .foregroundStyle(.secondary)
         }
-        .padding(20)
-        .background(.regularMaterial, in: .rect(cornerRadius: 22))
+        .padding(DesignSpacing.xl.pt)
+        .background(.regularMaterial, in: .rect(cornerRadius: DesignRadius.large.pt))
         .overlay {
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
+            RoundedRectangle(cornerRadius: DesignRadius.large.pt, style: .continuous)
                 .stroke(.quaternary, lineWidth: 0.5)
         }
     }
@@ -440,24 +440,24 @@ struct ProductionRoomCorrectionWorkspace: View {
         _ name: String,
         measurement: RoomCorrectionChannelMeasurement
     ) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: DesignSpacing.m.pt) {
             HStack {
-                Text(name).font(.callout.weight(.semibold))
+                Text(name).font(DesignType.label.font.weight(.semibold))
                 Spacer()
                 if measurement.quality.clipped {
                     Label("Clipped", systemImage: "waveform.path.badge.exclamationmark")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.red)
+                        .font(DesignType.caption.font.weight(.semibold))
+                        .foregroundStyle(StatusLevel.problem.color)
                 } else {
                     Label("No clipping", systemImage: "checkmark.circle")
-                        .font(.caption)
+                        .font(DesignType.caption.font)
                         .foregroundStyle(.secondary)
                 }
             }
 
             RepeatSummaryNote(quality: measurement.quality)
 
-            HStack(spacing: 24) {
+            HStack(spacing: DesignSpacing.xl.pt) {
                 statusValue("SNR", formattedDB(measurement.quality.estimatedSNRDB))
                 statusValue("Capture Peak", formattedDB(measurement.quality.capturePeakDBFS))
                 statusValue(
@@ -480,12 +480,12 @@ struct ProductionRoomCorrectionWorkspace: View {
     }
 
     private var positionsCard: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: DesignSpacing.l.pt) {
             HStack {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("4. Positions").font(.headline)
+                VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
+                    Text("4. Positions").font(DesignType.sectionTitle.font)
                     Text(projects.project?.name ?? "No room-correction project")
-                        .font(.caption)
+                        .font(DesignType.caption.font)
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
@@ -498,7 +498,7 @@ struct ProductionRoomCorrectionWorkspace: View {
                         actionError = error.localizedDescription
                     }
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(.glass)
             }
 
             ForEach(projects.positions) { position in
@@ -515,31 +515,31 @@ struct ProductionRoomCorrectionWorkspace: View {
                     "Weighted magnitude aggregate ready from \(aggregate.includedPositionIDs.count) included position\(aggregate.includedPositionIDs.count == 1 ? "" : "s")",
                     systemImage: "sum"
                 )
-                .font(.callout.weight(.semibold))
+                .font(DesignType.label.font.weight(.semibold))
                 Text("Weights are normalized before averaging magnitude in dB. Seat phase and timing remain attached to each individual measurement.")
-                    .font(.caption)
+                    .font(DesignType.caption.font)
                     .foregroundStyle(.secondary)
             } else {
                 Text("No aggregate is active. Include at least one retained position with weight greater than zero.")
-                    .font(.caption)
+                    .font(DesignType.caption.font)
                     .foregroundStyle(.secondary)
             }
         }
-        .padding(20)
-        .background(.regularMaterial, in: .rect(cornerRadius: 22))
+        .padding(DesignSpacing.xl.pt)
+        .background(.regularMaterial, in: .rect(cornerRadius: DesignRadius.large.pt))
         .overlay {
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
+            RoundedRectangle(cornerRadius: DesignRadius.large.pt, style: .continuous)
                 .stroke(.quaternary, lineWidth: 0.5)
         }
     }
 
     private var targetDesignCard: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: DesignSpacing.l.pt) {
             HStack {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("5. Target & Design").font(.headline)
+                VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
+                    Text("5. Target & Design").font(DesignType.sectionTitle.font)
                     Text("Shape the retained aggregate, preview safety limits, then generate a bounded minimum-phase FIR candidate.")
-                        .font(.caption)
+                        .font(DesignType.caption.font)
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
@@ -557,12 +557,12 @@ struct ProductionRoomCorrectionWorkspace: View {
                 } label: {
                     Label(projects.target?.name ?? "Choose Target", systemImage: "scope")
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(.glass)
             }
 
             GroupBox("Adaptive Target") {
-                VStack(alignment: .leading, spacing: 12) {
-                    HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: DesignSpacing.m.pt) {
+                    HStack(spacing: DesignSpacing.m.pt) {
                         Picker(
                             "Voicing",
                             selection: $intelligentTargetPreference
@@ -584,19 +584,19 @@ struct ProductionRoomCorrectionWorkspace: View {
                                 systemImage: "waveform.badge.magnifyingglass"
                             )
                         }
-                        .buttonStyle(.borderedProminent)
+                        .buttonStyle(.glassProminent)
                         .disabled(projects.aggregate == nil)
                     }
 
                     Text(
                         "Analyzes the measured system's broad tonal trend, usable bandwidth and listening-position variance. It does not trace narrow room modes, and the resulting target remains editable."
                     )
-                    .font(.caption)
+                    .font(DesignType.caption.font)
                     .foregroundStyle(.secondary)
 
                     if let report = projects.lastGeneratedTargetReport {
                         Divider()
-                        HStack(spacing: 22) {
+                        HStack(spacing: DesignSpacing.xl.pt) {
                             statusValue(
                                 "Confidence",
                                 "\(Int((report.confidence * 100).rounded()))%"
@@ -622,7 +622,7 @@ struct ProductionRoomCorrectionWorkspace: View {
                                 )
                             )
                         }
-                        HStack(spacing: 22) {
+                        HStack(spacing: DesignSpacing.xl.pt) {
                             statusValue(
                                 "Target Band",
                                 "\(formattedFrequency(report.effectiveLowHz)) – \(formattedFrequency(report.effectiveHighHz))"
@@ -655,12 +655,12 @@ struct ProductionRoomCorrectionWorkspace: View {
                                 "Conservative fallback shaping is active because measurement confidence is limited.",
                                 systemImage: "shield.lefthalf.filled"
                             )
-                            .font(.caption)
+                            .font(DesignType.caption.font)
                             .foregroundStyle(.secondary)
                         }
 
                         if !report.clampDecisions.isEmpty {
-                            VStack(alignment: .leading, spacing: 5) {
+                            VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
                                 ForEach(
                                     Array(
                                         report.clampDecisions.enumerated()
@@ -671,14 +671,14 @@ struct ProductionRoomCorrectionWorkspace: View {
                                         decision,
                                         systemImage: "arrow.left.and.right"
                                     )
-                                    .font(.caption)
+                                    .font(DesignType.caption.font)
                                     .foregroundStyle(.secondary)
                                 }
                             }
                         }
 
                         if !report.warnings.isEmpty {
-                            VStack(alignment: .leading, spacing: 5) {
+                            VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
                                 ForEach(
                                     Array(report.warnings.enumerated()),
                                     id: \.offset
@@ -688,18 +688,18 @@ struct ProductionRoomCorrectionWorkspace: View {
                                         systemImage:
                                             "exclamationmark.triangle"
                                     )
-                                    .font(.caption)
-                                    .foregroundStyle(.orange)
+                                    .font(DesignType.caption.font)
+                                    .foregroundStyle(StatusLevel.attention.color)
                                 }
                             }
                         }
                     }
                 }
-                .padding(4)
+                .padding(DesignSpacing.xs.pt)
             }
 
             if let target = projects.target {
-                HStack(spacing: 20) {
+                HStack(spacing: DesignSpacing.xl.pt) {
                     statusValue("Target", target.name)
                     statusValue("Points", String(target.points.count))
                     if let aggregate = projects.aggregate {
@@ -711,26 +711,26 @@ struct ProductionRoomCorrectionWorkspace: View {
                 }
 
                 DisclosureGroup("Edit target points") {
-                    VStack(alignment: .leading, spacing: 10) {
+                    VStack(alignment: .leading, spacing: DesignSpacing.m.pt) {
                         Text("One frequency/gain pair per line. Frequencies are interpolated in log space; duplicate frequencies are averaged when applied.")
-                            .font(.caption)
+                            .font(DesignType.caption.font)
                             .foregroundStyle(.secondary)
                         TextEditor(text: $targetEditorText)
                             .font(.system(.caption, design: .monospaced))
                             .frame(minHeight: 110, maxHeight: 170)
-                            .padding(6)
-                            .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 8))
+                            .padding(DesignSpacing.s.pt)
+                            .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: DesignRadius.small.pt))
                         HStack {
                             Button("Apply Edited Points") { applyEditedTarget() }
                                 .disabled(targetEditorText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                             Button("Revert Editor") { syncTargetEditorFromProject() }
                         }
                     }
-                    .padding(.top, 8)
+                    .padding(.top, DesignSpacing.s.pt)
                 }
             } else {
                 Text("Choose a built-in target or import a UTF-8 two-column frequency/gain target before previewing correction.")
-                    .font(.caption)
+                    .font(DesignType.caption.font)
                     .foregroundStyle(.secondary)
             }
 
@@ -739,7 +739,7 @@ struct ProductionRoomCorrectionWorkspace: View {
             Grid(alignment: .leading, horizontalSpacing: 18, verticalSpacing: 12) {
                 GridRow {
                     Text("Correction range").foregroundStyle(.secondary)
-                    HStack(spacing: 8) {
+                    HStack(spacing: DesignSpacing.s.pt) {
                         TextField("Low", value: $correctionLowHz, format: .number)
                             .frame(width: 90)
                         Text("Hz –")
@@ -762,7 +762,7 @@ struct ProductionRoomCorrectionWorkspace: View {
                 }
                 GridRow {
                     Text("Maximum boost").foregroundStyle(.secondary)
-                    HStack(spacing: 12) {
+                    HStack(spacing: DesignSpacing.m.pt) {
                         Slider(value: $maximumBoostDB, in: 0...12, step: 0.5)
                         .designSlider("Maximum boost", value: maximumBoostDB, unit: .db)
                             .frame(width: 260)
@@ -773,7 +773,7 @@ struct ProductionRoomCorrectionWorkspace: View {
                 }
                 GridRow {
                     Text("Maximum cut").foregroundStyle(.secondary)
-                    HStack(spacing: 12) {
+                    HStack(spacing: DesignSpacing.m.pt) {
                         Slider(value: $maximumCutDB, in: 0...24, step: 0.5)
                         .designSlider("Maximum cut", value: maximumCutDB, unit: .db)
                             .frame(width: 260)
@@ -794,13 +794,13 @@ struct ProductionRoomCorrectionWorkspace: View {
                 }
             }
 
-            HStack(spacing: 12) {
+            HStack(spacing: DesignSpacing.m.pt) {
                 Button {
                     previewCurrentDesign()
                 } label: {
                     Label("Preview Correction", systemImage: "waveform.path.ecg")
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(.glass)
                 .disabled(projects.target == nil || projects.aggregate == nil)
 
                 TextField("Design name", text: $designName)
@@ -817,7 +817,7 @@ struct ProductionRoomCorrectionWorkspace: View {
 
             if let preview = designPreview {
                 Divider()
-                HStack(spacing: 24) {
+                HStack(spacing: DesignSpacing.xl.pt) {
                     statusValue(
                         "Effective Range",
                         "\(formattedFrequency(preview.effectiveCorrectionLowHz)) – \(formattedFrequency(preview.effectiveCorrectionHighHz))"
@@ -832,27 +832,27 @@ struct ProductionRoomCorrectionWorkspace: View {
                     )
                 }
                 Text("Preview headroom is advisory only. Content Preset headroom is not changed by Room Correction.")
-                    .font(.caption)
+                    .font(DesignType.caption.font)
                     .foregroundStyle(.secondary)
             }
 
             if !projects.designs.isEmpty {
                 Divider()
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("Generated Designs").font(.callout.weight(.semibold))
+                VStack(alignment: .leading, spacing: DesignSpacing.m.pt) {
+                    Text("Generated Designs").font(DesignType.label.font.weight(.semibold))
                     ForEach(Array(projects.designs.reversed())) { design in
-                        HStack(spacing: 12) {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(design.name).font(.callout.weight(.medium))
+                        HStack(spacing: DesignSpacing.m.pt) {
+                            VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
+                                Text(design.name).font(DesignType.label.font.weight(.medium))
                                 Text("\(design.parameters.requestedTapCount.formatted()) taps · \(formattedRate(design.sampleRate)) · headroom \(design.recommendedHeadroomDB, specifier: "%.1f") dB")
-                                    .font(.caption)
+                                    .font(DesignType.caption.font)
                                     .foregroundStyle(.secondary)
                             }
                             Spacer()
                             if projects.selectedDesign?.id == design.id {
                                 Label("Selected", systemImage: "checkmark.circle.fill")
-                                    .font(.caption.weight(.semibold))
-                                    .foregroundStyle(.green)
+                                    .font(DesignType.caption.font.weight(.semibold))
+                                    .foregroundStyle(StatusLevel.good.color)
                             } else {
                                 Button("Select") {
                                     actionError = nil
@@ -869,7 +869,7 @@ struct ProductionRoomCorrectionWorkspace: View {
                             }
                             .buttonStyle(.borderless)
                         }
-                        .padding(.vertical, 2)
+                        .padding(.vertical, DesignSpacing.xs.pt)
                     }
                 }
             }
@@ -877,7 +877,7 @@ struct ProductionRoomCorrectionWorkspace: View {
             if let selected = projects.selectedDesign {
                 Divider()
                 if let verification = projects.selectedDesignVerification {
-                    HStack(spacing: 12) {
+                    HStack(spacing: DesignSpacing.m.pt) {
                         Label(
                             verification.accepted
                                 ? "Prediction Verified"
@@ -886,7 +886,7 @@ struct ProductionRoomCorrectionWorkspace: View {
                                 ? "checkmark.shield.fill"
                                 : "exclamationmark.shield.fill"
                         )
-                        .font(.callout.bold())
+                        .font(DesignType.label.font.bold())
                         .foregroundStyle(
                             verification.accepted ? .green : .red
                         )
@@ -894,10 +894,10 @@ struct ProductionRoomCorrectionWorkspace: View {
                         Text(
                             "Confidence \(Int((verification.confidence * 100).rounded()))%"
                         )
-                        .font(.caption.monospacedDigit())
+                        .font(DesignType.caption.font.monospacedDigit())
                         .foregroundStyle(.secondary)
                     }
-                    HStack(spacing: 22) {
+                    HStack(spacing: DesignSpacing.xl.pt) {
                         statusValue(
                             "Independent RMS",
                             String(
@@ -929,7 +929,7 @@ struct ProductionRoomCorrectionWorkspace: View {
                             )
                         )
                     }
-                    HStack(spacing: 22) {
+                    HStack(spacing: DesignSpacing.xl.pt) {
                         statusValue(
                             "FIR Peak",
                             String(
@@ -953,7 +953,7 @@ struct ProductionRoomCorrectionWorkspace: View {
                         )
                     }
                     if !verification.blockingReasons.isEmpty {
-                        VStack(alignment: .leading, spacing: 5) {
+                        VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
                             ForEach(
                                 Array(
                                     verification.blockingReasons.enumerated()
@@ -964,13 +964,13 @@ struct ProductionRoomCorrectionWorkspace: View {
                                     reason,
                                     systemImage: "xmark.octagon.fill"
                                 )
-                                .font(.caption)
-                                .foregroundStyle(.red)
+                                .font(DesignType.caption.font)
+                                .foregroundStyle(StatusLevel.problem.color)
                             }
                         }
                     }
                     if !verification.warnings.isEmpty {
-                        VStack(alignment: .leading, spacing: 5) {
+                        VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
                             ForEach(
                                 Array(
                                     verification.warnings.enumerated()
@@ -982,28 +982,28 @@ struct ProductionRoomCorrectionWorkspace: View {
                                     systemImage:
                                         "exclamationmark.triangle"
                                 )
-                                .font(.caption)
+                                .font(DesignType.caption.font)
                                 .foregroundStyle(.secondary)
                             }
                         }
                     }
                 }
 
-                HStack(alignment: .center, spacing: 14) {
-                    VStack(alignment: .leading, spacing: 4) {
+                HStack(alignment: .center, spacing: DesignSpacing.l.pt) {
+                    VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
                         Text("Selected candidate: \(selected.name)")
-                            .font(.callout.weight(.semibold))
+                            .font(DesignType.label.font.weight(.semibold))
                         if selectedDesignIsDeployed {
                             Label("This exact design is deployed to \(profiles.selectedSystemProfileName).", systemImage: "checkmark.seal.fill")
-                                .font(.caption)
-                                .foregroundStyle(.green)
+                                .font(DesignType.caption.font)
+                                .foregroundStyle(StatusLevel.good.color)
                         } else if let deployedName = deployedRoomCorrection.filter?.name {
                             Text("Daily playback is still using \(deployedName) until you deploy this candidate.")
-                                .font(.caption)
+                                .font(DesignType.caption.font)
                                 .foregroundStyle(.secondary)
                         } else {
                             Text("Daily playback is unchanged until you deploy this candidate.")
-                                .font(.caption)
+                                .font(DesignType.caption.font)
                                 .foregroundStyle(.secondary)
                         }
                     }
@@ -1024,14 +1024,14 @@ struct ProductionRoomCorrectionWorkspace: View {
                     )
                 }
                 Text("Deployment embeds the design's recommended safety attenuation in the room-owned FIR. Content Preset preamp/headroom remain unchanged, and the deployed filter remains available even if the room-project sidecar is later unavailable.")
-                    .font(.caption)
+                    .font(DesignType.caption.font)
                     .foregroundStyle(.secondary)
             }
         }
-        .padding(20)
-        .background(.regularMaterial, in: .rect(cornerRadius: 22))
+        .padding(DesignSpacing.xl.pt)
+        .background(.regularMaterial, in: .rect(cornerRadius: DesignRadius.large.pt))
         .overlay {
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
+            RoundedRectangle(cornerRadius: DesignRadius.large.pt, style: .continuous)
                 .stroke(.quaternary, lineWidth: 0.5)
         }
     }
@@ -1272,9 +1272,9 @@ struct ProductionRoomCorrectionWorkspace: View {
 
     private var calibrationStateBadge: some View {
         Text(calibration.state.rawValue.capitalized)
-            .font(.caption.weight(.semibold))
-            .padding(.horizontal, 10)
-            .padding(.vertical, 5)
+            .font(DesignType.caption.font.weight(.semibold))
+            .padding(.horizontal, DesignSpacing.m.pt)
+            .padding(.vertical, DesignSpacing.xs.pt)
             .background(.quaternary, in: Capsule())
     }
 
@@ -1289,12 +1289,12 @@ struct ProductionRoomCorrectionWorkspace: View {
 
     @ViewBuilder
     private func statusValue(_ label: String, _ value: String) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
+        VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
             Text(label)
-                .font(.caption)
+                .font(DesignType.caption.font)
                 .foregroundStyle(.secondary)
             Text(value)
-                .font(.callout.weight(.medium))
+                .font(DesignType.label.font.weight(.medium))
                 .lineLimit(1)
         }
     }
@@ -1374,8 +1374,8 @@ private struct RoomCorrectionPositionRow: View {
 
     var body: some View {
         if let position {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: DesignSpacing.m.pt) {
+                HStack(spacing: DesignSpacing.m.pt) {
                     Toggle("Included", isOn: includedBinding)
                         .toggleStyle(.switch)
                         .controlSize(.small)
@@ -1386,7 +1386,7 @@ private struct RoomCorrectionPositionRow: View {
                         .onSubmit { commitName() }
 
                     Button("Rename") { commitName() }
-                        .buttonStyle(.bordered)
+                        .buttonStyle(.glass)
                         .disabled(nameDraft.trimmingCharacters(in: .whitespacesAndNewlines) == position.name)
 
                     Spacer()
@@ -1398,18 +1398,18 @@ private struct RoomCorrectionPositionRow: View {
                     .frame(width: 170)
                 }
 
-                HStack(spacing: 18) {
+                HStack(spacing: DesignSpacing.l.pt) {
                     Text("L SNR \(formattedDB(position.left.quality.estimatedSNRDB))")
                     Text("R SNR \(formattedDB(position.right.quality.estimatedSNRDB))")
                     Text("\(position.sampleRate / 1_000, specifier: "%.1f") kHz")
                     Text(position.included ? "Included in aggregate" : "Retained · excluded")
                 }
-                .font(.caption)
+                .font(DesignType.caption.font)
                 .foregroundStyle(.secondary)
                 RepeatSummaryNote(quality: position.left.quality)
             }
-            .padding(12)
-            .background(.quaternary.opacity(0.18), in: .rect(cornerRadius: 12))
+            .padding(DesignSpacing.m.pt)
+            .background(.quaternary.opacity(0.18), in: .rect(cornerRadius: DesignRadius.medium.pt))
             .onChange(of: position.name) { _, newName in
                 if nameDraft != newName { nameDraft = newName }
             }
@@ -1497,8 +1497,8 @@ private struct RoomCorrectionAcousticDiagnosticsPanel: View {
     var body: some View {
         DisclosureGroup(isExpanded: $expanded) {
             if expanded {
-                VStack(alignment: .leading, spacing: 12) {
-                    HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: DesignSpacing.m.pt) {
+                    HStack(spacing: DesignSpacing.m.pt) {
                         Picker("Channel", selection: $selectedChannel) {
                             ForEach(Channel.allCases) { channel in
                                 Text(channel.rawValue).tag(channel)
@@ -1517,20 +1517,20 @@ private struct RoomCorrectionAcousticDiagnosticsPanel: View {
                     }
 
                     Text(selectedMetric.description)
-                        .font(.caption)
+                        .font(DesignType.caption.font)
                         .foregroundStyle(.secondary)
 
                     if let diagnostics {
                         diagnosticChart(diagnostics)
                     } else if let analysisError {
                         Label(analysisError, systemImage: "exclamationmark.triangle.fill")
-                            .font(.caption)
-                            .foregroundStyle(.red)
+                            .font(DesignType.caption.font)
+                            .foregroundStyle(StatusLevel.problem.color)
                     } else {
                         ProgressView("Deriving acoustic diagnostics…")
                     }
                 }
-                .padding(.top, 10)
+                .padding(.top, DesignSpacing.m.pt)
                 .task(id: analysis.left.capturedAt) {
                     guard diagnostics == nil, analysisError == nil else { return }
                     let snapshot = analysis
@@ -1548,7 +1548,7 @@ private struct RoomCorrectionAcousticDiagnosticsPanel: View {
             }
         } label: {
             Label("Advanced Acoustic Diagnostics", systemImage: "waveform.path.ecg.rectangle")
-                .font(.callout.weight(.semibold))
+                .font(DesignType.label.font.weight(.semibold))
         }
     }
 
@@ -1601,7 +1601,7 @@ private struct RoomCorrectionAcousticDiagnosticsPanel: View {
                 )
             } else {
                 Text("Group delay is unavailable because this measurement does not contain phase data.")
-                    .font(.caption)
+                    .font(DesignType.caption.font)
                     .foregroundStyle(.secondary)
             }
         }
@@ -1635,7 +1635,7 @@ private struct RoomCorrectionDiagnosticLineChart: View {
     var body: some View {
         let points = displayPoints
         let resolvedY = resolvedYRange(points)
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: DesignSpacing.s.pt) {
             Canvas { context, size in
                 guard points.count >= 2 else { return }
                 let xValues = points.map { transformedX($0.x) }
@@ -1658,14 +1658,14 @@ private struct RoomCorrectionDiagnosticLineChart: View {
                 context.stroke(path, with: .color(.accentColor), lineWidth: 1.5)
             }
             .frame(height: 230)
-            .background(.quaternary.opacity(0.14), in: .rect(cornerRadius: 12))
+            .background(.quaternary.opacity(0.14), in: .rect(cornerRadius: DesignRadius.medium.pt))
 
             HStack {
                 Text(xAxis == .time ? "Time · ms" : "Frequency · Hz (log)")
                 Spacer()
                 Text(yLabel)
             }
-            .font(.caption2)
+            .font(DesignType.caption.font)
             .foregroundStyle(.secondary)
         }
     }

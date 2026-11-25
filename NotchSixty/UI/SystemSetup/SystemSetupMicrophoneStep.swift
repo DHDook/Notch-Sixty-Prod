@@ -17,24 +17,25 @@ struct SystemSetupMicrophoneStep: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Measurement microphone").font(.headline)
+        VStack(alignment: .leading, spacing: DesignSpacing.m.pt) {
+            Text("Measurement microphone").font(DesignType.sectionTitle.font)
             Text("Notch Sixty listens through this microphone to measure your speakers. Macs ask for microphone permission the first time; audio is analysed on this Mac and never leaves it.")
-                .font(.callout).foregroundStyle(.secondary)
+                .font(DesignType.label.font).foregroundStyle(.secondary)
             MeasurementMicrophoneCard(
                 microphone: microphone, locked: model.noiseIsPlaying,
                 onSelect: { model.selectMicrophone(uid: $0) })
             calibrationFile
             Divider()
-            Text("Set the level").font(.headline)
+            Text("Set the level").font(DesignType.sectionTitle.font)
             Text("Set each channel on its own, then use All channels as a combined check (the bass-only channel is left out unless you choose the including mode). The test noise starts very quietly at \(Int(SystemSetupLevelPlan.startLevelDB)) \(SystemSetupTerm.dBFS.technicalName). Press Set the level for me, or raise it a step at a time yourself, until the meter reads about \(Int(SystemSetupLevelPlan.targetSPLdBC)) \(SystemSetupTerm.dBC.technicalName) at your main seat. It never goes above \(Int(SystemSetupLevelPlan.ceilingDB)) \(SystemSetupTerm.dBFS.technicalName).")
-                .font(.callout).foregroundStyle(.secondary)
+                .font(DesignType.label.font).foregroundStyle(.secondary)
             let channels = model.noiseChannels
             Picker("Channel", selection: Binding<Int>(
                 get: {
                     switch model.level.target {
                     case .lane(let lane): return lane
                     case .allProgram(let includeLFE): return includeLFE ? -2 : -1
+                    case .lanes: return -1
                     }
                 },
                 set: { model.selectNoiseTarget(lane: $0 < 0 ? nil : $0, includeLFE: $0 == -2) }
@@ -45,10 +46,10 @@ struct SystemSetupMicrophoneStep: View {
             }
             if model.level.showsFullBandLFEWarning {
                 Text("Warning: this mode sends full-band noise to the subwoofer as well. It starts at \(Int(SystemSetupLevelPlan.lfeStartLevelDB)) dBFS. Raise the level slowly and stop if the sub strains.")
-                    .font(.callout).foregroundStyle(.orange)
+                    .font(DesignType.label.font).foregroundStyle(StatusLevel.attention.color)
             }
             if let status = model.autoLevelStatus {
-                Text(status).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                Text(status).font(DesignType.label.font).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
             SystemSetupTermNotes(step: .microphone)
             HStack {
@@ -78,7 +79,7 @@ struct SystemSetupMicrophoneStep: View {
                 }
                 .disabled(monitor.reading == nil)
                 if let sweep = model.choices.sweepLevelDBFS {
-                    Text("Sweep level \(sweep, specifier: "%.0f") dBFS").font(.caption)
+                    Text("Sweep level \(sweep, specifier: "%.0f") dBFS").font(DesignType.caption.font)
                 }
             }
         }
@@ -87,18 +88,18 @@ struct SystemSetupMicrophoneStep: View {
 
     /// E12 S29: the microphone's calibration file is imported here, not in a tab the sheet blocks.
     private var calibrationFile: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: DesignSpacing.s.pt) {
             if let file = microphone.microphoneCalibration {
                 HStack {
                     Label("Calibration file: \(file.sourceName ?? "imported")", systemImage: "checkmark.circle")
-                        .font(.callout)
+                        .font(DesignType.label.font)
                     Button("Remove") { model.clearMicrophoneCalibration() }
                 }
             } else if microphone.permissionStatus == .authorized {
                 Text(model.verdictsEnabled
                      ? SystemSetupCorrectionLimit.note(limitHz: model.correctionLimitHz)
                      : "No calibration file. Import the file that came with your microphone for the most accurate results.")
-                    .font(.caption).foregroundStyle(.secondary)
+                    .font(DesignType.caption.font).foregroundStyle(.secondary)
             }
             Button(microphone.microphoneCalibration == nil ? "Import calibration file…" : "Replace calibration file…") {
                 importing = true
