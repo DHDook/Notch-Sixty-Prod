@@ -6,6 +6,8 @@ import SwiftUI
 struct ProductionVirtualMicrophoneCard: View {
     @ObservedObject var survey: QuietZoneVirtualMicSurveyController
     var quietZoneRunning: Bool
+    /// E12 S19: false hides the "Quiet the ear position" switch; the one card's Ear position choice sets it instead.
+    var showsEarSwitch = true
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -75,8 +77,10 @@ struct ProductionVirtualMicrophoneCard: View {
                         .font(.callout.monospacedDigit())
                     }
                 }
-                Toggle("Quiet the ear position", isOn: $survey.useAtEar)
-                    .disabled(survey.isCapturing)
+                if showsEarSwitch {
+                    Toggle("Quiet the ear position", isOn: $survey.useAtEar)
+                        .disabled(survey.isCapturing)
+                }
                 Text("Tones not in this survey keep the monitor-microphone design. Redo the survey after the noise or the speakers change.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
