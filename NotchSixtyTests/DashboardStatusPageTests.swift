@@ -285,7 +285,7 @@ final class DashboardStatusPageTests: XCTestCase {
         for size in [CGSize(width: 1_280, height: 800), CGSize(width: 1_920, height: 1_000)] {
             let page = HostedPage(
                 ProductionStatusDashboardView(
-                    engine: engine, profiles: profiles, navigation: ProductionNavigation(), failsafeMessage: "Check the default output."),
+                    engine: engine, profiles: profiles, navigation: ProductionNavigation(), failsafeMessage: "Check the default output.", resume: ResumeProcessingCoordinator()),
                 size: size)
             XCTAssertLessThanOrEqual(page.hosting.fittingSize.width, size.width, "page wider than \(size.width)")
             for control in page.controls {
