@@ -6,18 +6,18 @@ struct AudioInputPathSettingsSection: View {
 
     var body: some View {
         let presentation = model.presentation
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: DesignSpacing.m.pt) {
             Label("Audio input path", systemImage: "arrow.triangle.branch")
-                .font(.headline)
+                .font(DesignType.sectionTitle.font)
 
-            Text(presentation.headline).font(.subheadline.weight(.semibold))
+            Text(presentation.headline).font(DesignType.label.font.weight(.semibold))
             Text(presentation.detail)
-                .font(.caption)
+                .font(DesignType.caption.font)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
             if let waiting = model.waitingMessage {
-                Text(waiting).font(.caption.weight(.semibold)).fixedSize(horizontal: false, vertical: true)
+                Text(waiting).font(DesignType.caption.font.weight(.semibold)).fixedSize(horizontal: false, vertical: true)
             }
 
             Toggle("Use the virtual audio driver", isOn: Binding(
@@ -32,13 +32,13 @@ struct AudioInputPathSettingsSection: View {
                 VStack(alignment: .leading) { actionButtons(presentation) }
             }
 
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Needs the driver").font(.subheadline.weight(.semibold))
+            VStack(alignment: .leading, spacing: DesignSpacing.s.pt) {
+                Text("Needs the driver").font(DesignType.label.font.weight(.semibold))
                 ForEach(model.unlocks, id: \.unlock) { row in
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(row.unlock.title).font(.caption.weight(.semibold))
-                        Text(row.unlock.summary).font(.caption).foregroundStyle(.secondary)
-                        if let note = row.note { Text(note).font(.caption2).foregroundStyle(.secondary) }
+                    VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
+                        Text(row.unlock.title).font(DesignType.caption.font.weight(.semibold))
+                        Text(row.unlock.summary).font(DesignType.caption.font).foregroundStyle(.secondary)
+                        if let note = row.note { Text(note).font(DesignType.caption.font).foregroundStyle(.secondary) }
                     }
                     .opacity(row.available ? 1 : 0.6)
                     .fixedSize(horizontal: false, vertical: true)
@@ -53,13 +53,13 @@ struct AudioInputPathSettingsSection: View {
             .help("Sets the DAC to the rate the player picks, or the nearest supported multiple of it. Off by default.")
 
             Text(AudioInputPathPresentation.crashWarning)
-                .font(.caption)
+                .font(DesignType.caption.font)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
-        .padding(16)
+        .padding(DesignSpacing.l.pt)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .glassEffect(.regular, in: .rect(cornerRadius: 18))
+        .glassEffect(.regular, in: .rect(cornerRadius: DesignRadius.large.pt))
         .sheet(isPresented: $model.isShowingSetupSheet) { setupSheet }
     }
 
@@ -76,13 +76,13 @@ struct AudioInputPathSettingsSection: View {
     }
 
     private var setupSheet: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text(AudioInputPathPresentation.sheetTitle).font(.headline)
+        VStack(alignment: .leading, spacing: DesignSpacing.m.pt) {
+            Text(AudioInputPathPresentation.sheetTitle).font(DesignType.sectionTitle.font)
             Text(AudioInputPathPresentation.sheetBody)
                 .fixedSize(horizontal: false, vertical: true)
             if !model.canOpenDownloadPage {
                 Text(AudioInputPathPresentation.downloadUnavailable)
-                    .font(.caption)
+                    .font(DesignType.caption.font)
                     .foregroundStyle(.secondary)
             }
             HStack {
@@ -93,7 +93,7 @@ struct AudioInputPathSettingsSection: View {
                     .keyboardShortcut(.cancelAction)
             }
         }
-        .padding(20)
+        .padding(DesignSpacing.xl.pt)
         .frame(width: 420)
     }
 }

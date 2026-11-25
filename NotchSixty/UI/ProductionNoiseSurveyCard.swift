@@ -6,36 +6,36 @@ struct ProductionNoiseSurveyCard: View {
     @ObservedObject var survey: QuietZoneNoiseSurveyController
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: DesignSpacing.m.pt) {
             Text("Noise Survey")
-                .font(.headline)
+                .font(DesignType.sectionTitle.font)
             if let report = survey.report {
                 ForEach(Array(report.statements.enumerated()), id: \.offset) { _, line in
-                    Text(line).font(.callout)
+                    Text(line).font(DesignType.label.font)
                 }
                 let unit = survey.isCalibratedToSPL ? "dB" : "dB (relative, microphone not calibrated)"
                 Text(String(
                     format: "Estimated loudness %.1f sone, %.0f dBA, %.0f dBC; with predicted reductions %.1f sone (%@).",
                     report.before.loudnessSone, report.before.dBA, report.before.dBC,
                     report.predictedAfter.loudnessSone, unit))
-                    .font(.caption)
+                    .font(DesignType.caption.font)
                     .foregroundStyle(.secondary)
                 if !survey.isCalibratedToSPL {
                     Text("Set the microphone's SPL calibration for absolute dBA and dBC figures.")
-                        .font(.caption)
+                        .font(DesignType.caption.font)
                         .foregroundStyle(.secondary)
                 }
                 ForEach(QuietZoneNoiseSurvey.nearFieldGuidance, id: \.self) { line in
-                    Text(line).font(.caption).foregroundStyle(.secondary)
+                    Text(line).font(DesignType.caption.font).foregroundStyle(.secondary)
                 }
             } else {
                 Text("Listening to the room (\(survey.snapshotCount) of \(QuietZoneNoiseSurveyAccumulator.minimumCount) readings). Start ambient monitoring with the error microphone.")
-                    .font(.callout)
+                    .font(DesignType.label.font)
                     .foregroundStyle(.secondary)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(18)
-        .glassEffect(.regular, in: .rect(cornerRadius: 18))
+        .padding(DesignSpacing.l.pt)
+        .glassEffect(.regular, in: .rect(cornerRadius: DesignRadius.large.pt))
     }
 }

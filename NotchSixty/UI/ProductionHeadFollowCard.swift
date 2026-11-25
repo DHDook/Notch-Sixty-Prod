@@ -8,15 +8,15 @@ struct ProductionHeadFollowCard: View {
     @ObservedObject var survey: QuietZoneVirtualMicSurveyController
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: DesignSpacing.m.pt) {
             HStack {
                 Text("Follow My Head")
-                    .font(.headline)
+                    .font(DesignType.sectionTitle.font)
                 Spacer()
                 cameraIndicator
             }
             Text("Uses the Mac camera to find where your head is, so the quiet zone can move with you between the seats you have surveyed. Pictures are processed on this Mac only, are never stored or sent, and the camera stops when you switch this off, when the Mac sleeps, and when Notch Sixty is in the background.")
-                .font(.caption)
+                .font(DesignType.caption.font)
                 .foregroundStyle(.secondary)
 
             Toggle("Follow my head with the camera", isOn: Binding(
@@ -26,12 +26,12 @@ struct ProductionHeadFollowCard: View {
             .disabled(!survey.isActive && !follow.isEnabled)
             if !survey.isActive {
                 Text("Survey an ear position and switch on “Quiet the ear position” first.")
-                    .font(.caption)
-                    .foregroundStyle(.orange)
+                    .font(DesignType.caption.font)
+                    .foregroundStyle(StatusLevel.attention.color)
             }
 
             Text(follow.message)
-                .font(.callout)
+                .font(DesignType.label.font)
                 .foregroundStyle(.secondary)
 
             placementSection
@@ -45,55 +45,55 @@ struct ProductionHeadFollowCard: View {
             }
 
             if follow.isCameraOn {
-                HStack(spacing: 16) {
+                HStack(spacing: DesignSpacing.l.pt) {
                     if let pose = follow.pose {
                         Text(String(format: "Head at %.0f, %.0f, %.0f cm", pose.x * 100, pose.y * 100, pose.z * 100))
-                            .font(.callout.monospacedDigit())
+                            .font(DesignType.label.font.monospacedDigit())
                     } else {
-                        Text("Looking for your head…").font(.callout)
+                        Text("Looking for your head…").font(DesignType.label.font)
                     }
                     Text(readoutText)
-                        .font(.callout)
+                        .font(DesignType.label.font)
                         .foregroundStyle(.secondary)
                 }
-                HStack(spacing: 12) {
+                HStack(spacing: DesignSpacing.m.pt) {
                     Button("Save this seat") { follow.savePosition(tones: survey.tones, earPositionID: survey.ear?.id, monitorID: survey.monitorID?()) }
                         .disabled(survey.tones.isEmpty || follow.pose == nil)
                     if !follow.positions.isEmpty {
                         Button("Clear seats") { follow.clearPositions() }
                     }
                     Text("Sit where the ear microphone was, survey it, then save.")
-                        .font(.caption)
+                        .font(DesignType.caption.font)
                         .foregroundStyle(.secondary)
                 }
             }
 
             if !follow.positions.isEmpty {
                 Text("Saved seats: " + follow.positions.map(\.name).joined(separator: ", "))
-                    .font(.caption)
+                    .font(DesignType.caption.font)
                     .foregroundStyle(.secondary)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(18)
-        .glassEffect(.regular, in: .rect(cornerRadius: 18))
+        .padding(DesignSpacing.l.pt)
+        .glassEffect(.regular, in: .rect(cornerRadius: DesignRadius.large.pt))
     }
 
     /// E4 G20: where the camera is, measured from the middle of the screen. Changing it clears the saved seats.
     private var placementSection: some View {
         DisclosureGroup("Camera position") {
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: DesignSpacing.s.pt) {
                 Text("Where the camera is, in centimetres in the room frame you use for the listening seats (x and y along the floor, height up) and the direction it faces, in degrees from the x axis. Changing it clears the saved seats and switches head follow off.")
-                    .font(.caption)
+                    .font(DesignType.caption.font)
                     .foregroundStyle(.secondary)
                 placementField("Room x (cm)", \.x, scale: 100)
                 placementField("Room y (cm)", \.y, scale: 100)
                 placementField("Height (cm)", \.z, scale: 100)
                 placementField("Facing (degrees)", \.yawRadians, scale: 180 / .pi)
             }
-            .padding(.top, 4)
+            .padding(.top, DesignSpacing.xs.pt)
         }
-        .font(.callout)
+        .font(DesignType.label.font)
     }
 
     private func placementField(_ title: String, _ key: WritableKeyPath<QuietZoneCameraPlacement, Double>, scale: Double) -> some View {
@@ -127,19 +127,19 @@ struct ProductionHeadFollowCard: View {
         switch follow.cameraState {
         case .on:
             Label("Camera on", systemImage: "camera.fill")
-                .font(.caption.bold())
-                .foregroundStyle(.red)
+                .font(DesignType.caption.font.bold())
+                .foregroundStyle(StatusLevel.problem.color)
         case .starting:
             Label("Starting camera", systemImage: "camera")
-                .font(.caption)
-                .foregroundStyle(.orange)
+                .font(DesignType.caption.font)
+                .foregroundStyle(StatusLevel.attention.color)
         case .paused:
             Label("Camera paused", systemImage: "camera")
-                .font(.caption)
+                .font(DesignType.caption.font)
                 .foregroundStyle(.secondary)
         default:
             Label("Camera off", systemImage: "camera")
-                .font(.caption)
+                .font(DesignType.caption.font)
                 .foregroundStyle(.secondary)
         }
     }

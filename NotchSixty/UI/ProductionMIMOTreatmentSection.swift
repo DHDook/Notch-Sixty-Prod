@@ -8,7 +8,7 @@ struct ProductionMIMOTreatmentSection: View {
     @ObservedObject var controller: MIMOTreatmentController
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: DesignSpacing.l.pt) {
             sourcesCard
             targetsCard
             designCard
@@ -26,15 +26,15 @@ struct ProductionMIMOTreatmentSection: View {
     }
 
     private var sourcesCard: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Speakers").font(.headline)
+        VStack(alignment: .leading, spacing: DesignSpacing.m.pt) {
+            Text("Speakers").font(DesignType.sectionTitle.font)
             if controller.rows.isEmpty {
                 Text("No measured speakers yet. Measure the seats in the Speaker Measurement Lab; each speaker and subwoofer with a measurement at every included seat appears here.")
-                    .font(.subheadline).foregroundStyle(.secondary)
+                    .font(DesignType.label.font).foregroundStyle(.secondary)
             }
             ForEach(controller.rows) { row in
-                VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 14) {
+                VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
+                HStack(spacing: DesignSpacing.l.pt) {
                     Toggle(row.name, isOn: Binding(get: { row.included }, set: { controller.setIncluded($0, lane: row.lane) }))
                         .accessibilityLabel("Include \(row.name) in room treatment")
                     Spacer()
@@ -48,30 +48,30 @@ struct ProductionMIMOTreatmentSection: View {
                 }
                 if !row.inBandWays.isEmpty {
                     Text("Treated ways: \(row.inBandWays.joined(separator: ", ")). Other ways play their program only.")
-                        .font(.caption).foregroundStyle(.secondary)
+                        .font(DesignType.caption.font).foregroundStyle(.secondary)
                         .accessibilityLabel("\(row.name) treated ways: \(row.inBandWays.joined(separator: ", "))")
                 }
                 }
             }
             ForEach(controller.matrixOnlyOutputs, id: \.self) { note in
-                Text(note).font(.caption).foregroundStyle(.secondary)
+                Text(note).font(DesignType.caption.font).foregroundStyle(.secondary)
                     .accessibilityLabel(note)
             }
             if !controller.missingWayNotes.isEmpty {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Driver measurements needed").font(.subheadline.weight(.semibold))
-                    ForEach(controller.missingWayNotes, id: \.self) { Text($0).font(.caption).foregroundStyle(.secondary) }
+                VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
+                    Text("Driver measurements needed").font(DesignType.label.font.weight(.semibold))
+                    ForEach(controller.missingWayNotes, id: \.self) { Text($0).font(DesignType.caption.font).foregroundStyle(.secondary) }
                     Button("Measure drivers") { Task { await controller.measureWays() } }
                         .disabled(controller.isMeasuringWays)
                         .accessibilityLabel("Measure the listed drivers at the included seats")
                 }
             }
             if let status = controller.wayMeasureStatus {
-                Text(status).font(.caption).foregroundStyle(.secondary)
+                Text(status).font(DesignType.caption.font).foregroundStyle(.secondary)
             }
         }
-        .padding(18)
-        .glassEffect(.regular, in: .rect(cornerRadius: 18))
+        .padding(DesignSpacing.l.pt)
+        .glassEffect(.regular, in: .rect(cornerRadius: DesignRadius.large.pt))
     }
 
     private func rangeField(_ title: String, value: Double, name: String, set: @escaping (Double) -> Void) -> some View {
@@ -82,8 +82,8 @@ struct ProductionMIMOTreatmentSection: View {
     }
 
     private var targetsCard: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Targets").font(.headline)
+        VStack(alignment: .leading, spacing: DesignSpacing.m.pt) {
+            Text("Targets").font(DesignType.sectionTitle.font)
             HStack {
                 Text("Bass time target")
                 Slider(
@@ -94,7 +94,7 @@ struct ProductionMIMOTreatmentSection: View {
                 Text(String(format: "%.1f ms", controller.tauMilliseconds)).monospacedDigit().frame(width: 70, alignment: .trailing)
             }
             if let note = controller.shortTauNote {
-                Text(note).font(.caption).foregroundStyle(.orange)
+                Text(note).font(DesignType.caption.font).foregroundStyle(StatusLevel.attention.color)
             }
             HStack {
                 Text("Decay target")
@@ -106,12 +106,12 @@ struct ProductionMIMOTreatmentSection: View {
                 .frame(width: 180)
                 .accessibilityLabel("Decay target")
                 if let used = controller.designedDecaySeconds {
-                    Text(String(format: "Designed for %.2f s", used)).font(.caption).foregroundStyle(.secondary)
+                    Text(String(format: "Designed for %.2f s", used)).font(DesignType.caption.font).foregroundStyle(.secondary)
                 }
             }
         }
-        .padding(18)
-        .glassEffect(.regular, in: .rect(cornerRadius: 18))
+        .padding(DesignSpacing.l.pt)
+        .glassEffect(.regular, in: .rect(cornerRadius: DesignRadius.large.pt))
     }
 
     private var decayChoice: Binding<Double> {
@@ -121,7 +121,7 @@ struct ProductionMIMOTreatmentSection: View {
     }
 
     private var designCard: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: DesignSpacing.m.pt) {
             HStack {
                 Button("Design") { Task { await controller.design() } }
                     .disabled(!controller.canDesign)
@@ -131,20 +131,20 @@ struct ProductionMIMOTreatmentSection: View {
             }
             switch controller.phase {
             case .failed(let text):
-                Label(text, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.red).font(.subheadline)
+                Label(text, systemImage: "exclamationmark.triangle.fill").foregroundStyle(StatusLevel.problem.color).font(DesignType.label.font)
             case .designed:
-                Label("Design staged. It is off until you arm it.", systemImage: "checkmark.circle").font(.subheadline)
+                Label("Design staged. It is off until you arm it.", systemImage: "checkmark.circle").font(DesignType.label.font)
             default: EmptyView()
             }
-            ForEach(controller.designAdvice, id: \.self) { Text($0).font(.caption).foregroundStyle(.secondary) }
+            ForEach(controller.designAdvice, id: \.self) { Text($0).font(DesignType.caption.font).foregroundStyle(.secondary) }
         }
-        .padding(18)
-        .glassEffect(.regular, in: .rect(cornerRadius: 18))
+        .padding(DesignSpacing.l.pt)
+        .glassEffect(.regular, in: .rect(cornerRadius: DesignRadius.large.pt))
     }
 
     private var decayCard: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Predicted bass decay (T30, 25-160 Hz)").font(.headline)
+        VStack(alignment: .leading, spacing: DesignSpacing.s.pt) {
+            Text("Predicted bass decay (T30, 25-160 Hz)").font(DesignType.sectionTitle.font)
             ForEach(controller.seatDecays) { seat in
                 LabeledContent(seat.name) {
                     Text("\(format(seat.beforeSeconds)) before, \(format(seat.afterSeconds)) after").monospacedDigit()
@@ -152,25 +152,25 @@ struct ProductionMIMOTreatmentSection: View {
                 .accessibilityElement(children: .combine)
             }
         }
-        .padding(18)
-        .glassEffect(.regular, in: .rect(cornerRadius: 18))
+        .padding(DesignSpacing.l.pt)
+        .glassEffect(.regular, in: .rect(cornerRadius: DesignRadius.large.pt))
     }
 
     private func format(_ seconds: Double?) -> String { seconds.map { String(format: "%.2f s", $0) } ?? "n/a" }
 
     private var readoutCard: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Per-speaker headroom, excursion and thermal").font(.headline)
+        VStack(alignment: .leading, spacing: DesignSpacing.s.pt) {
+            Text("Per-speaker headroom, excursion and thermal").font(DesignType.sectionTitle.font)
             ForEach(controller.readout) { item in
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(item.name + (item.included ? "" : " (not treated)")).font(.subheadline.bold())
-                    Text(readoutLine(item)).font(.caption).foregroundStyle(.secondary).monospacedDigit()
+                VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
+                    Text(item.name + (item.included ? "" : " (not treated)")).font(DesignType.label.font.bold())
+                    Text(readoutLine(item)).font(DesignType.caption.font).foregroundStyle(.secondary).monospacedDigit()
                 }
                 .accessibilityElement(children: .combine)
             }
         }
-        .padding(18)
-        .glassEffect(.regular, in: .rect(cornerRadius: 18))
+        .padding(DesignSpacing.l.pt)
+        .glassEffect(.regular, in: .rect(cornerRadius: DesignRadius.large.pt))
     }
 
     private func readoutLine(_ item: MIMOTreatmentController.SourceReadout) -> String {
@@ -179,11 +179,11 @@ struct ProductionMIMOTreatmentSection: View {
     }
 
     private var armCard: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: DesignSpacing.m.pt) {
             HStack {
-                Text("Treatment").font(.headline)
-                Text(controller.armStateLabel.uppercased()).font(.caption.bold())
-                    .padding(.horizontal, 10).padding(.vertical, 6).glassEffect(.regular, in: .capsule)
+                Text("Treatment").font(DesignType.sectionTitle.font)
+                Text(controller.armStateLabel.uppercased()).font(DesignType.caption.font.bold())
+                    .padding(.horizontal, DesignSpacing.m.pt).padding(.vertical, DesignSpacing.s.pt).glassEffect(.regular, in: .capsule)
                 Spacer()
                 Button("Check design") { controller.requestPermit() }
                     .disabled(!controller.isAvailable || controller.phase != .designed)
@@ -197,19 +197,19 @@ struct ProductionMIMOTreatmentSection: View {
             }
             ForEach(controller.gates) { gate in
                 Label(gate.name, systemImage: gate.passed ? "checkmark.circle.fill" : "circle.dashed")
-                    .font(.caption).foregroundStyle(gate.passed ? .primary : .secondary)
+                    .font(DesignType.caption.font).foregroundStyle(gate.passed ? .primary : .secondary)
                     .accessibilityLabel("\(gate.name): \(gate.passed ? "met" : "not met")")
             }
             ForEach(controller.permitRefusals, id: \.self) { reason in
-                Label(reason, systemImage: "lock.shield").font(.caption).foregroundStyle(.orange)
+                Label(reason, systemImage: "lock.shield").font(DesignType.caption.font).foregroundStyle(StatusLevel.attention.color)
             }
             if let message = controller.armMessage {
-                Label(message, systemImage: "exclamationmark.triangle").font(.caption).foregroundStyle(.red)
+                Label(message, systemImage: "exclamationmark.triangle").font(DesignType.caption.font).foregroundStyle(StatusLevel.problem.color)
             }
             Text("Arm needs a permit: a verified design, a treated repeat measurement and a hardware acceptance or class qualification. Arming starts a three second fade in; Bypass fades out at once.")
-                .font(.caption).foregroundStyle(.secondary)
+                .font(DesignType.caption.font).foregroundStyle(.secondary)
         }
-        .padding(18)
-        .glassEffect(.regular, in: .rect(cornerRadius: 18))
+        .padding(DesignSpacing.l.pt)
+        .glassEffect(.regular, in: .rect(cornerRadius: DesignRadius.large.pt))
     }
 }

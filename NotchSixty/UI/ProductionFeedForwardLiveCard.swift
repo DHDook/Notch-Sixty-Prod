@@ -9,22 +9,22 @@ struct ProductionFeedForwardLiveCard: View {
     @ObservedObject var arming: FeedForwardLiveArmingController
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: DesignSpacing.m.pt) {
             HStack {
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
                     Text("Feed-Forward Output")
-                        .font(.headline)
+                        .font(DesignType.sectionTitle.font)
                     Text("Plays the upstream-reference anti-noise through the speakers. It starts only when you turn it on, after the seat baseline, timing and safety lease checks pass, and fades in over 3 seconds. Any fault turns it off again.")
-                        .font(.caption)
+                        .font(DesignType.caption.font)
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
                 Text(stateName.uppercased())
-                    .font(.caption.bold())
+                    .font(DesignType.caption.font.bold())
                     .tracking(1)
                     .foregroundStyle(.secondary)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
+                    .padding(.horizontal, DesignSpacing.m.pt)
+                    .padding(.vertical, DesignSpacing.s.pt)
                     .glassEffect(.regular, in: .capsule)
             }
 
@@ -33,12 +33,12 @@ struct ProductionFeedForwardLiveCard: View {
             }
             if case .waiting(let why) = arming.phase {
                 Text("Waiting: \(why).")
-                    .font(.callout)
+                    .font(DesignType.label.font)
                     .foregroundStyle(.secondary)
             }
             if let message = arming.statusMessage {
                 Text(message)
-                    .font(.callout)
+                    .font(DesignType.label.font)
                     .foregroundStyle(.secondary)
                     .textSelection(.enabled)
             }
@@ -46,20 +46,20 @@ struct ProductionFeedForwardLiveCard: View {
             HStack {
                 if arming.isRequested {
                     Button("Turn Off") { arming.cancel() }
-                        .buttonStyle(.borderedProminent)
+                        .buttonStyle(.glassProminent)
                 } else {
                     Button("Turn On") { _ = quietZone.requestFeedForwardLive() }
                         .disabled(!quietZone.feedForwardLiveFacts().armed)
                 }
                 if !arming.isRequested, !quietZone.feedForwardLiveFacts().armed {
                     Text("Arm Quiet Zone first.")
-                        .font(.caption)
+                        .font(DesignType.caption.font)
                         .foregroundStyle(.secondary)
                 }
             }
         }
-        .padding(18)
-        .glassEffect(.regular, in: .rect(cornerRadius: 18))
+        .padding(DesignSpacing.l.pt)
+        .glassEffect(.regular, in: .rect(cornerRadius: DesignRadius.large.pt))
     }
 
     private var stateName: String {
