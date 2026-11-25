@@ -160,7 +160,7 @@ enum ProductionUserGuideCatalog {
                     "output-system",
                     "2. Choose the real output and Playback System",
                     [
-                        "Select the physical output device you actually intend to use. Unless Follow macOS output is on, Notch Sixty deliberately follows stable device identity rather than silently substituting the current macOS default output. With Follow macOS output on (Playback System menu), it processes whichever output macOS is set to, using the Playback System bound to that output, and never changes the macOS default itself.",
+                        "Select the physical output device you actually intend to use. Unless Follow macOS output is on, Notch Sixty deliberately follows stable device identity rather than silently substituting the current macOS default output. With Follow macOS output on (Settings → General, or the Playback System menu; it starts off), it processes whichever output macOS is set to, using the Playback System bound to that output, and never changes the macOS default itself. If an output has no bound Playback System, processing pauses and asks you to choose one; Quiet Zone and Room Treatment are switched off when the output changes and are never re-armed for you.",
                         "Choose the Playback System that describes the connected loudspeakers, subwoofers or headphones. A restored system marked Needs Mapping must be reviewed before activation; do not use a Content Preset to hide a hardware mismatch.",
                         "Before first sound, set the amplifier or downstream system to a conservative listening level and verify that the expected output, crossover and routing are selected."
                     ]

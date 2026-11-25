@@ -309,11 +309,13 @@ extension FeatureFlag {
     /// E15: opt-in "Follow macOS output". With the flag off the mode is forced to fixed, the default-output listener is
     /// never installed and the selected output stays authoritative (`AGENTS.md` section 3). On: the Follow toggle and
     /// binding UI appear; the mode itself still defaults to fixed. Swift only; the engine never reads it. S1 is the
-    /// binding table and decision policy (no UI yet). Graduates in E15 S4; removed in the flag-cleanup phase.
+    /// binding table and decision policy (no UI yet). Graduated in E15 S4 (default on; the mode itself still defaults to
+    /// fixed until the user opts in, and nothing is armed); removed in the flag-cleanup phase.
     static let followOutput = FeatureFlag(
         id: "e15.follow-output",
         title: "Follow macOS output",
-        epic: "E15"
+        epic: "E15",
+        graduated: true
     )
 
     /// E12 S12-S14: the Dashboard becomes the status page (cards link, health strip, attention area, now playing) and the

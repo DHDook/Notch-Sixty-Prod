@@ -1,3 +1,4 @@
+import Combine
 import Foundation
 
 /// E15 S6 (closes E13 G27): when an output device becomes the selected output, by a followed switch, a manual pick, the
@@ -11,12 +12,16 @@ import Foundation
 /// What the selector needs from the Playback System store.
 @MainActor
 protocol LinkedHeadphoneProfiles: AnyObject {
+    /// E15 S4 (G18): the selected Playback System; a change re-checks the linked entry.
+    var selectedSystemProfileIDPublisher: AnyPublisher<UUID?, Never> { get }
     /// The selected system's headphone list; nil when it has none.
     var selectedSystemHeadphoneList: HeadphoneList? { get }
     func editSelectedSystemHeadphoneList(_ change: (inout HeadphoneList) throws -> Void) throws
 }
 
-extension ProductProfileController: LinkedHeadphoneProfiles {}
+extension ProductProfileController: LinkedHeadphoneProfiles {
+    var selectedSystemProfileIDPublisher: AnyPublisher<UUID?, Never> { $selectedSystemProfileID.eraseToAnyPublisher() }
+}
 
 @MainActor
 final class LinkedHeadphoneSelector {
@@ -55,6 +60,17 @@ final class LinkedHeadphoneSelector {
         ObservationSubscription(
             value: { engine.routeConfiguration.selectedOutputUID },
             onChange: { [weak self] uid in self?.outputBecameSelected(uid) })
+    }
+
+    /// E15 S4 (G18): the user switched Playback System with the output unchanged; the new system's list may link the
+    /// current output. One hop later, after the system has been applied. Keep the result alive.
+    func observeSystemChange(of engine: AudioIOEngine) -> AnyCancellable {
+        profiles.selectedSystemProfileIDPublisher.dropFirst().removeDuplicates()
+            .sink { [weak self, weak engine] _ in
+                DispatchQueue.main.async {
+                    _ = MainActor.assumeIsolated { self?.outputBecameSelected(engine?.routeConfiguration.selectedOutputUID) }
+                }
+            }
     }
 
     private func decide(_ uid: String?) -> Outcome {

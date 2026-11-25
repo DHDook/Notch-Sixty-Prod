@@ -1683,6 +1683,15 @@ final class ProductProfileController: ObservableObject {
         schedule = schedule.pruned(validPresetIDs: presetIDs, validSystemIDs: systemIDs)
     }
 
+    /// E15 S4 (G7): binds a chosen Playback System (not necessarily the selected one) to `key`.
+    func useSystem(_ id: UUID, for key: OutputKey) {
+        guard let index = systemProfiles.firstIndex(where: { $0.id == id }) else { return }
+        systemProfiles[index].state.associatedOutputUID = key.deviceUID
+        outputBindings.bind(key, to: id)
+        lastErrorDescription = nil
+        persist()
+    }
+
     func unbindOutput(_ key: OutputKey) {
         outputBindings.unbind(key)
         persist()

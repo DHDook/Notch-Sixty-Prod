@@ -75,6 +75,7 @@ extension AudioIOEngine {
     }
 
     func disarmMIMOTreatment() { mimoGraphTreatment.userDisarm() }
+    func disarmMIMOTreatment(reason: LiveTreatmentDisarmReason) { mimoGraphTreatment.arm.disarm(reason) }
 
     /// E19 S12b (D11): the ticket for the treated measurement (SQ1 to SQ4 must pass on the evidence). Never arms; with the
     /// production registry (no engine baseline until E22) no ticket is issued.

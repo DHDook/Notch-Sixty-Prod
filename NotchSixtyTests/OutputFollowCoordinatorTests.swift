@@ -32,6 +32,7 @@ final class OutputFollowCoordinatorTests: XCTestCase {
         var failApply = false
         let log: Log
         init(log: Log) { self.log = log }
+        func start() throws { log.lines.append("start-only") }
         func switchFollowedOutput(to uid: String, resume: Bool, prepare: () throws -> Void) throws {
             log.lines.append("stop")
             selectedOutputUID = uid
@@ -63,6 +64,8 @@ final class OutputFollowCoordinatorTests: XCTestCase {
         func seedOutputBindingsFromAssociations() -> [String] { log.lines.append("seed"); return ["dup"] }
         func useSelectedSystem(for key: OutputKey) { outputBindings.bind(key, to: systemProfileIDs.first!) }
         func unbindOutput(_ key: OutputKey) { outputBindings.unbind(key) }
+        var systemProfileChoices: [OutputFollowSystemChoice] { names.map { OutputFollowSystemChoice(id: $0.key, name: $0.value) } }
+        func useSystem(_ id: UUID, for key: OutputKey) { outputBindings.bind(key, to: id) }
     }
 
     @MainActor private final class FakeDisarmer: OutputFollowTreatmentDisarming {
@@ -323,5 +326,102 @@ final class OutputFollowCoordinatorTests: XCTestCase {
         XCTAssertEqual(note.title, "No Playback System for DAC")
         XCTAssertTrue(note.detail?.contains("Quiet Zone disarmed: output changed") == true)
         XCTAssertEqual(OutputFollowAnnouncement(device: "DAC", kind: .failed("x"), disarmed: []).title, "Could not move to DAC")
+    }
+
+    // MARK: E15 S4 ship scenarios (flag graduation): the coordinator, driver and real arm switch with fake hardware
+
+    func testUnplugAndReplugFollowsToBuiltInAndBackWithEachBoundSystem() {
+        let r = rig()
+        r.engine.rates = ["b": 96_000, "c": 48_000]
+        r.coordinator.setFollowing(true)
+        r.log.lines.removeAll()
+        change(r, to: "b")
+        change(r, to: "c")
+        change(r, to: "b")
+        XCTAssertEqual(r.log.lines.filter { $0.hasPrefix("apply") }, ["apply Desk", "apply Headphones", "apply Desk"])
+        XCTAssertEqual(r.engine.selectedOutputUID, "b")
+        XCTAssertEqual(r.engine.runningRate, 96_000)
+    }
+
+    func testSleepAndWakeWithThePreSleepDevicePresentStillFollowsTheDefault() {
+        let r = rig()
+        r.engine.rates = ["b": 48_000]
+        r.coordinator.setFollowing(true)
+        r.source.onWillSleep?()
+        r.source.onDidWake?()
+        r.source.onDefaultOutputChanged?(OutputFollowTarget(key: OutputKey(deviceUID: "b"), displayName: "Device b"))
+        r.clock.advance(1)
+        XCTAssertEqual(r.engine.selectedOutputUID, "b", "the pre-sleep output is present, so no wake hold applies")
+        XCTAssertEqual(r.profiles.applied, [r.idB])
+    }
+
+    func testHardwareAcceptanceRunHoldsTheSwitchUntilItEnds() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let acceptance = HardwareAcceptanceController(store: HardwareAcceptanceCampaignStore(rootDirectory: root))
+        XCTAssertFalse(acceptance.isRunInProgress, "no campaign, no run")
+        let r = rig(blocks: { acceptance.isRunInProgress ? [.hardwareAcceptance] : [] })
+        r.coordinator.setFollowing(true)
+        acceptance.setPageOpen(true)
+        XCTAssertFalse(acceptance.isRunInProgress, "the page open without a campaign is not a run")
+        try acceptance.createCampaign(
+            identity: HardwareAcceptanceCampaignIdentity(
+                commitSHA: "f8ef81a80d1aac262ec21da23abef5ed29825506", branch: "main", appVersion: "1.0",
+                appBuild: "1", playbackSystemID: UUID()),
+            scopeDecisions: [
+                .protectedSplitDriverMeasurement: .excluded(reason: "No split-driver topology in this campaign."),
+                .coherentIndependentSubAlignment: .excluded(reason: "No independently addressable Sub route."),
+                .liveFeedForwardANC: .excluded(reason: "Live feed-forward ANC is disabled in this scope."),
+            ])
+        XCTAssertTrue(acceptance.isRunInProgress)
+        r.log.lines.removeAll()
+        change(r, to: "b")
+        XCTAssertTrue(r.log.lines.isEmpty, "the run holds the switch")
+        acceptance.setPageOpen(false)
+        r.coordinator.exclusionEnded()
+        XCTAssertEqual(r.engine.selectedOutputUID, "b")
+    }
+
+    func testModeToggledWhileRunningStopsFollowingAndKeepsTheOutput() {
+        let r = rig()
+        r.engine.rates = ["b": 96_000]
+        r.coordinator.setFollowing(true)
+        change(r, to: "b")
+        r.coordinator.setFollowing(false)
+        r.log.lines.removeAll()
+        change(r, to: "c")
+        XCTAssertTrue(r.log.lines.isEmpty, "fixed mode never follows a later default change")
+        XCTAssertEqual(r.engine.selectedOutputUID, "b")
+        r.coordinator.setFollowing(true)
+        XCTAssertTrue(r.coordinator.isFollowing)
+    }
+
+    func testChoosingASystemOnThePauseSheetBindsAppliesAndStartsProcessing() {
+        let r = rig()
+        r.coordinator.setFollowing(true)
+        change(r, to: "unbound")
+        XCTAssertEqual(Set(r.coordinator.systemChoices.map(\.name)), ["Desk", "Headphones"])
+        r.log.lines.removeAll()
+        r.coordinator.chooseSystemForCurrentOutput(r.idC)
+        XCTAssertEqual(r.profiles.outputBindings.profileID(for: OutputKey(deviceUID: "unbound")), r.idC)
+        XCTAssertEqual(r.log.lines, ["apply Headphones", "start-only"])
+        XCTAssertNil(r.coordinator.announcement)
+    }
+
+    func testUseCurrentForThisDeviceStartsProcessingAfterAPause() {
+        let r = rig()
+        r.coordinator.setFollowing(true)
+        change(r, to: "unbound")
+        r.log.lines.removeAll()
+        r.coordinator.useSelectedSystemForCurrentOutput()
+        XCTAssertEqual(r.log.lines, ["start-only"])
+    }
+
+    func testUseForDeviceWithoutAPauseDoesNotStartAnything() {
+        let r = rig()
+        r.coordinator.setFollowing(true)
+        r.log.lines.removeAll()
+        r.coordinator.useSelectedSystemForCurrentOutput()
+        XCTAssertTrue(r.log.lines.isEmpty)
     }
 }

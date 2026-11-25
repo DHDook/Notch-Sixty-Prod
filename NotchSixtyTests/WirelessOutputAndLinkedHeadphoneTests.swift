@@ -1,3 +1,4 @@
+import Combine
 import CoreAudio
 import XCTest
 @testable import NotchSixty
@@ -53,6 +54,8 @@ final class WirelessOutputAndLinkedHeadphoneTests: XCTestCase {
         var edits = 0
         var failEdit = false
         var selectedSystemHeadphoneList: HeadphoneList? { list }
+        let systemID = CurrentValueSubject<UUID?, Never>(nil)
+        var selectedSystemProfileIDPublisher: AnyPublisher<UUID?, Never> { systemID.eraseToAnyPublisher() }
         func editSelectedSystemHeadphoneList(_ change: (inout HeadphoneList) throws -> Void) throws {
             if failEdit { throw HeadphoneListError.unknownEntry }
             var copy = list ?? HeadphoneList()
@@ -135,6 +138,35 @@ final class WirelessOutputAndLinkedHeadphoneTests: XCTestCase {
         XCTAssertEqual(profiles.list?.selectedID, b)
         XCTAssertEqual(profiles.edits, 1)
         subscription.cancel()
+    }
+
+    /// E15 S4 (G18): switching Playback System with the output unchanged re-checks the linked headphone entry.
+    func testSystemChangeWithUnchangedOutputSelectsTheLinkedEntry() async throws {
+        let catalog = Catalog(devices: [device("usb-dac")])
+        let engine = AudioIOEngine(deviceCatalog: catalog)
+        try engine.refreshOutputDevices()
+        try engine.selectOutput(uid: "usb-dac")
+        let profiles = FakeProfiles()
+        let (list, _, b) = try twoHeadphones(linking: "usb-dac")
+        profiles.list = list
+        let selector = LinkedHeadphoneSelector(profiles: profiles, flagEnabled: { true })
+        let subscription = selector.observeSystemChange(of: engine)
+        profiles.systemID.send(UUID())
+        for _ in 0..<50 where profiles.list?.selectedID != b { try await Task.sleep(for: .milliseconds(20)) }
+        XCTAssertEqual(profiles.list?.selectedID, b)
+        subscription.cancel()
+    }
+
+    /// E15 S4 (G8): an output switch disarms Room Treatment with its own reason, not as a user bypass.
+    func testMIMODisarmForOutputFollowRecordsTheOutputFollowedReason() throws {
+        let engine = AudioIOEngine()
+        let treatment = engine.mimoGraphTreatment
+        try treatment.arm.arm(environment: LiveTreatmentEnvironment(
+            outputDeviceUID: "a", sampleRate: 48_000, engineRunning: true, inputAvailable: true))
+        XCTAssertTrue(treatment.arm.isArmed)
+        engine.disarmTreatment(reason: .outputFollowed)
+        XCTAssertFalse(treatment.arm.isArmed)
+        XCTAssertEqual(treatment.arm.lastDisarmReason, .outputFollowed)
     }
 
     // MARK: Wireless policy

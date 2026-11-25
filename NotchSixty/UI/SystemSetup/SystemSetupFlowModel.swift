@@ -113,6 +113,11 @@ final class SystemSetupFlowModel: ObservableObject {
             transport: engine.selectedOutputDevice?.transport, flagOn: FeatureFlags().isEnabled(.followOutput))
     }
 
+    /// E15 S4 (G17): the selected output is Bluetooth or AirPlay, so measuring is refused and the correction step says so.
+    var outputIsWireless: Bool {
+        WirelessOutputPolicy.applies(engine.selectedOutputDevice?.transport, flagOn: FeatureFlags().isEnabled(.followOutput))
+    }
+
     var choices: SystemSetupChoices { flow.choices }
     var step: SystemSetupStep { flow.step }
     var preset: SystemSetupPreset { flow.preset }

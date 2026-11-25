@@ -79,11 +79,17 @@ struct OutputFollowUnboundSheet: View {
         VStack(alignment: .leading, spacing: 12) {
             Text(note.title).font(.title3.weight(.semibold))
             if let detail = note.detail { Text(detail).foregroundStyle(.secondary) }
-            Text("Choose a Playback System from the System menu in the toolbar, or use the current one for this device, then press Start.")
+            Text("Choose a Playback System for this device, or use the current one. Processing starts right away.")
                 .font(.callout)
             HStack {
                 Spacer()
-                Button("Choose…") { follow.dismissAnnouncement() }
+                Menu("Choose…") {
+                    ForEach(follow.systemChoices) { choice in
+                        Button(choice.name) { follow.chooseSystemForCurrentOutput(choice.id) }
+                    }
+                }
+                .disabled(follow.systemChoices.isEmpty)
+                Button("Not now") { follow.dismissAnnouncement() }
                 Button("Use current for this device") { follow.useSelectedSystemForCurrentOutput() }
                     .keyboardShortcut(.defaultAction)
             }

@@ -12,6 +12,9 @@ struct SystemSetupCorrectionStep: View {
             Text("Correct the room").font(DesignType.sectionTitle.font)
             Text("Notch Sixty flattens the bumps and dips your seats share, using the measurements you already made. Nothing is measured again.")
                 .font(DesignType.label.font).foregroundStyle(.secondary)
+            if model.outputIsWireless {
+                Label(WirelessOutputPolicy.measurementRefusal, systemImage: "wave.3.right").font(DesignType.label.font)
+            }
             if let note = model.correctionNote { Label(note, systemImage: "info.circle").font(DesignType.label.font) }
             if let limit = model.correctionLimitHz {
                 Label(SystemSetupCorrectionLimit.note(limitHz: limit), systemImage: "exclamationmark.triangle").font(DesignType.label.font)

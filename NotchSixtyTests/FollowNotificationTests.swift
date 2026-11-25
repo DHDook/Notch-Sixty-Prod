@@ -216,6 +216,7 @@ final class FollowNotificationTests: XCTestCase {
         var selectedOutputUID: String? = "a"
         var isFailed = false
         func switchFollowedOutput(to uid: String, resume: Bool, prepare: () throws -> Void) throws {}
+        func start() throws {}
     }
 
     @MainActor private final class StubProfiles: OutputFollowProfiles {
@@ -227,6 +228,8 @@ final class FollowNotificationTests: XCTestCase {
         func seedOutputBindingsFromAssociations() -> [String] { [] }
         func useSelectedSystem(for key: OutputKey) {}
         func unbindOutput(_ key: OutputKey) {}
+        var systemProfileChoices: [OutputFollowSystemChoice] { [] }
+        func useSystem(_ id: UUID, for key: OutputKey) {}
     }
 
     @MainActor private final class StubDisarmer: OutputFollowTreatmentDisarming {

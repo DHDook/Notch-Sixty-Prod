@@ -36,6 +36,15 @@ final class HardwareAcceptanceController: ObservableObject {
     @Published private(set)
     var errorDescription: String?
 
+    /// E15 S4 (G6, G15): true while the Hardware Acceptance page is open. A run is in progress while it is open on a
+    /// campaign; follow mode and schedules defer an output switch until it closes (design note 11).
+    @Published private(set)
+    var pageOpen = false
+
+    var isRunInProgress: Bool { pageOpen && campaign != nil }
+
+    func setPageOpen(_ open: Bool) { pageOpen = open }
+
     init(store: HardwareAcceptanceCampaignStore =
         HardwareAcceptanceCampaignStore()) {
         self.store = store

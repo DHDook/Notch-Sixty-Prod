@@ -253,7 +253,7 @@ final class ProductController: ObservableObject {
         self.reference = ProductionReferenceNavigator()
         let follow = OutputFollowWiring.make(
             engine: audioEngine, profiles: profiles, recovery: recovery, calibration: calibration,
-            multichannel: multichannelCalibration, quietZone: activeQuietZone, feedForward: feedForwardArming,
+            multichannel: multichannelCalibration, hardwareAcceptance: hardwareAcceptance, quietZone: activeQuietZone, feedForward: feedForwardArming,
             mimo: mimoTreatment)
         self.outputFollow = follow.coordinator
         outputFollowObservers = follow.observers
@@ -396,7 +396,7 @@ final class ProductController: ObservableObject {
         self.reference = ProductionReferenceNavigator()
         let follow = OutputFollowWiring.make(
             engine: audioEngine, profiles: profiles, recovery: recovery, calibration: calibration,
-            multichannel: multichannelCalibration, quietZone: activeQuietZone, feedForward: feedForwardArming,
+            multichannel: multichannelCalibration, hardwareAcceptance: hardwareAcceptance, quietZone: activeQuietZone, feedForward: feedForwardArming,
             mimo: mimoTreatment)
         self.outputFollow = follow.coordinator
         outputFollowObservers = follow.observers
@@ -440,7 +440,8 @@ final class ProductController: ObservableObject {
         host.select = { [weak self] id in try await self?.selectContentPreset(id) }
         guard let built = ProfileSchedulerWiring.make(
             flagEnabled: FeatureFlags().isEnabled(.followOutput), engine: audioEngine, profiles: profiles,
-            recovery: recovery, calibration: calibration, multichannel: multichannelCalibration, host: host)
+            recovery: recovery, calibration: calibration, multichannel: multichannelCalibration,
+            hardwareAcceptance: hardwareAcceptance, host: host)
         else { return }
         scheduler = built.scheduler
         schedulerObservers = built.observers + [host]

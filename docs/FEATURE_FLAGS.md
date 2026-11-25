@@ -94,7 +94,7 @@ FC phase's per-epic PR (`docs/epics/FC.md`) unless stated.
 | `e28.dynamics-extras` | E28 | graduated | 11 Nov 2026 (S8) | FC (E28) |
 | `e29.room-model` | E29 | dark, no production reader | none | FC (E29) |
 | `e7.rate-adapt` | E7 | graduated (E7 S5, 15 Nov 2026): speaker IR and SOFA resampling and the per-rate plug-in bypass read it | none | FC (E7) |
-| `e15.follow-output` | E15 | planned | none | FC (E15) |
+| `e15.follow-output` | E15 | graduated (S4, 25 Nov 2026): Follow macOS output, binding UI, connection and wireless defaults, source-rate probe, schedules | 25 Nov 2026 (S4) | FC (E15) |
 | `e17.export`, `e17.dither` | E17 | planned | none | FC (E17) |
 | `e20.parallel-render` | E20 | graduated | 13 Nov 2026 (ship) | FC (E20) |
 | `e20.multirate` | E20 | graduated, no reader (S7 and S8 skipped) | 13 Nov 2026 (ship) | FC (E20) |
@@ -103,7 +103,6 @@ FC phase's per-epic PR (`docs/epics/FC.md`) unless stated.
 | `e36.virtual-driver` | E36 | dark; S1: input-source seam and two lifecycle states, no reader of the flag yet | S7 | FC (E36) |
 | `e33.page-enhancements` | E33 | graduated (S11d, 21 Nov 2026): every E33 page, engine-publish and Swift reader | S11d | FC (E33) |
 | `e32.dynamics-sound` | E32 | graduated | 21 Nov 2026 (S6) | FC (E32) |
-| `e15.follow-output` | E15 | dark; S1: registered, binding table and decision policy only, no reader in the app yet | S4 | FC (E15) |
 | `e12.dashboard-remote` | E12 | dark; S12: status-page Dashboard (cards, health strip, attention, now playing) | S14 | FC (E12) |
 | `e16.automation` | E16 | dark; S1: `ControlService`, App Intents (refuse while off) and remote panel additions | S6 | FC (E16) |
 | `e16.local-api` | E16 | dark; S1: registered, no reader yet | S6 | FC (E16) |
@@ -138,7 +137,7 @@ gap may then be closed as "moved to E22" once E22 holds a matching unchecked ite
 | E7 | `e7.rate-adapt` | Graduated in S5 (15 Nov 2026): S1 and S4 ship without a flag; S2 asset resampling and S3 per-rate plug-in bypass read it; bench lines move to E22 | none; flag removal is FC (E7) |
 | E9 | `e9.long-fir`, `e9.output-protection` | Graduated in S8 (13 Nov 2026); Outputs UI, headroom assistant, active-speaker failsafe and the 262,144-tap program FIR reachable | Bench gaps G18, G25, G26, G27 and the S1 to S10b bench lines move to E22; flag removal is FC (E9) |
 | E13 | `e13.headphones` | S3, S4, S7 reachable behind the flag; S5 not built | S5; software gaps G7, G9, G10, G12; bench gaps G2 to G6, G8, G11 move to E22; S8 reworded |
-| E15 | `e15.follow-output` | S1 binding model and policy only; no UI yet | S2 to S7 |
+| E15 | `e15.follow-output` | Graduated in S4 (25 Nov 2026): Follow macOS output (mode still defaults to fixed), bindings, notifications, schedules, wireless defaults; available, never arms anything | Bench gaps G1, G5, G11, G12, G19, G20 move to E22; G13 is E30; flag removal is FC (E15) |
 | E17, E21 | planned flags | Nothing built | Whole epics; ship slices reworded |
 | E19 | `e19.mimo-treatment` | Graduated in S11 (14 Nov 2026): designer, unrouted and routed stages, safety layer, verifier, permit path and Room Treatment screen reachable; available, never armed | Bench gaps G3, G6, G10, G15, G16, G43, G45 and the G32 treated repeat move to E22; no permit exists before E22 |
 | E20 | `e20.parallel-render`, `e20.multirate` (graduated, E20 ship; multirate has no reader) | S6: flag in code, worker pool and policy wired in all three transports (dark); core parallel API from S5 | S6 to S10; S10 and G1 reworded (graduate before the bench, remove in FC) |
@@ -179,7 +178,7 @@ E22; the software part graduates.
 | `e20.multirate` | E20 | On by default (graduated, E20 ship), no reader: the multirate low-frequency slices (S7, S8) were skipped on the measured entry rule, so the flag changes nothing. Removed in FC (E20) |
 | `e33.page-enhancements` | E33 | Graduated: on by default, off with `-NotchSixtyFeatures -e33.page-enhancements`. Equalizer page: band list and two-column editor, dynamic range hint, moved-to-fit note, sectioned filter picker; later slices add Dynamics, Meters, Plugins and engine changes. Off: today's pages. Removed in FC (E33) |
 | `e32.dynamics-sound` | E32 | On by default (graduated, E32 S6). Dynamics: the limiter's attack never exceeds its look-ahead (a note shows when it applies), the expander's Attack opens and Release closes, and the true-peak factor follows the device rate (4x at 44.1 and 48 kHz, 2x at 88.2 and 96, 1x from 176.4 kHz) with the reported latency. Off (`-NotchSixtyFeatures -e32.dynamics-sound`): stages render as before. Removed in FC (E32) |
-| `e15.follow-output` | E15 | Off by default. Opt-in Follow macOS output: the mode is forced to fixed while off, no default-output listener is installed, and the selected output stays authoritative. Removed in FC (E15) |
+| `e15.follow-output` | E15 | On by default (graduated, E15 S4). Opt-in Follow macOS output, switched in Settings or the Playback System menu: the mode itself still defaults to fixed, so the selected output stays authoritative until the user turns it on. Also the Schedules card, linked headphone entries, wireless defaults and refusals, and the source-rate probe. Off (`-NotchSixtyFeatures -e15.follow-output`): the mode is forced to fixed, no default-output listener is installed, none of those appear. Removed in FC (E15) |
 | `e12.dashboard-remote` | E12 | Off by default. The Dashboard becomes the status page: link cards, health strip, attention area, now-playing line; everyday controls leave it (the menu bar panel gets them in S13). Off: today's Dashboard. Removed in FC (E12) |
 | `e12.blind-listening` | E12 | Off by default. Blind Listening: one comparison service (level-matched, fixed switch time, restore on every exit) behind the setup sheet's test and the Blind Listening page (S27, S28). Off: the page and the setup sheet are as they are today. Removed in FC (E12) |
 | `e19.self-qualification` | E19 | Off by default. MIMO room treatment self-qualification: S12a is the evidence record and evaluator (SQ1 to SQ4, SQ7) and the self-qualified permit basis; the probe arm (S12b, `MIMOGraphTreatment+Probe.swift`: probe ticket and arm, SQ5 evaluator, runner; built dark, no production stimulus capturer until S12c-engine) and the guided steps (S12c-ui) join it. Graduated by S12c-ui (available, never armed). Off: today's permit path exactly. Removed in FC (E19) |
