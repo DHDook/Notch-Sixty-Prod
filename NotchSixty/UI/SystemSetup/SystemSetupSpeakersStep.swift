@@ -3,8 +3,8 @@ import UniformTypeIdentifiers
 
 // E12 S29: split out of ProductionSystemSetupFlowView.swift with no change in behaviour.
 
-struct SystemSetupSpeakersStep: View {
-    @ObservedObject var model: SystemSetupFlowModel
+struct SystemSetupSpeakersStep<Model: SpeakerArrangementEditing>: View {
+    @ObservedObject var model: Model
 
     var body: some View {
         let inUse = model.arrangement?.outputs.channelsInUse ?? 2

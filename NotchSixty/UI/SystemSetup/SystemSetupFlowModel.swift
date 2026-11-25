@@ -6,7 +6,7 @@ import UniformTypeIdentifiers
 /// Drives the reducer from the UI. Topology is written through the profile API when the user
 /// leaves that step; Cancel restores the bass-management snapshot exactly.
 @MainActor
-final class SystemSetupFlowModel: ObservableObject {
+final class SystemSetupFlowModel: ObservableObject, SpeakerArrangementEditing {
     @Published private(set) var flow = SystemSetupFlow()
     @Published var topologyPreset = SystemSetupTopologyPreset(topology: .stereo)
     /// E25 S3: the Speakers step's choices (layout, subs, bass handling); the arrangement is rebuilt from them.
@@ -408,27 +408,8 @@ final class SystemSetupFlowModel: ObservableObject {
     /// session's mono-bass and feed calibration. Throws a user-readable reason when the arrangement cannot be used.
     private func applyArrangement() throws {
         guard let arrangement = flow.choices.arrangement, let base = flow.snapshot else { return }
-        let compiled: CompiledArrangement
-        switch SystemArrangementCompiler.compile(arrangement, preserving: base.outputDeviceProfile) {
-        case .success(let value): compiled = value
-        case .failure(let issue): throw SystemSetupApplyError(issue.errorDescription ?? "This arrangement cannot be used.")
-        }
-        var target = base
-        if compiled.bassManagementEnabled {
-            target.bassManagement.frequencyHz = min(
-                max(topologyPreset.crossoverHz, SystemSetupTopologyPreset.crossoverRangeHz.lowerBound),
-                SystemSetupTopologyPreset.crossoverRangeHz.upperBound)
-            target.bassManagement.topology = topologyPreset.slope
-        }
-        target = compiled.apply(to: target)
-        // Clearing the profile first keeps each validation true whichever way the bass switch moves.
-        try profiles.replaceSelectedSystemOutputDeviceProfile(nil)
-        try profiles.replaceSelectedSystemBassManagement(target.bassManagement)
-        if let profile = compiled.outputDeviceProfile {
-            try profiles.replaceSelectedSystemOutputDeviceProfile(profile)
-        }
-        try profiles.replaceSelectedSystemArrangement(arrangement)
-        try engine.applyStereoAlignment(compiled.stereoAlignment)
+        try SystemArrangementApplier.apply(
+            arrangement, base: base, topologyPreset: topologyPreset, profiles: profiles, engine: engine)
     }
 
     func chooseOutput(uid: String) {
@@ -804,22 +785,9 @@ final class SystemSetupFlowModel: ObservableObject {
     /// The arrangement with `edit` applied to its stereo alignment, validated by the compiler, stored and sent to the
     /// engine. Rolls the stored arrangement back when the compiler or the engine refuses.
     private func editStereoAlignment(_ edit: (inout StereoBassAlignment) -> Void) throws {
-        guard var updated = flow.choices.arrangement else { return }
-        let previous = updated
-        var alignment = updated.stereoAlignment ?? StereoBassAlignment()
-        edit(&alignment)
-        updated.stereoAlignment = alignment
-        let compiled: CompiledArrangement
-        switch SystemArrangementCompiler.compile(updated, preserving: nil) {
-        case .success(let value): compiled = value
-        case .failure(let issue): throw SystemSetupApplyError(issue.errorDescription ?? "This arrangement cannot be used.")
-        }
-        try profiles.replaceSelectedSystemArrangement(updated)
-        do { try engine.applyStereoAlignment(compiled.stereoAlignment) } catch {
-            try? profiles.replaceSelectedSystemArrangement(previous)
-            throw error
-        }
-        flow.choices.arrangement = updated
+        guard let current = flow.choices.arrangement else { return }
+        flow.choices.arrangement = try SystemArrangementApplier.editStereoAlignment(
+            of: current, edit, profiles: profiles, engine: engine)
     }
 
     func computeAlignment() async {
@@ -843,6 +811,7 @@ final class SystemSetupFlowModel: ObservableObject {
             }
             do {
                 try editStereoAlignment { $0.left = feeds.left; $0.right = feeds.right }
+                profiles.recordMeasuredFeeds(left: feeds.left, right: feeds.right)
                 flow.choices.alignmentApplied = true
                 message = nil
             } catch { message = error.localizedDescription }
