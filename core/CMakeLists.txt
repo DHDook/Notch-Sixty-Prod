@@ -646,3 +646,7 @@ if(NOT MSVC)
     endforeach()
   endif()
 endif()
+# E29 S5: room-model acoustic locate (n60/roommodel.h).
+add_executable(n60core_roommodel_locate_test tests/test_roommodel_locate.cpp)
+target_link_libraries(n60core_roommodel_locate_test PRIVATE n60core)
+add_test(NAME n60core_roommodel_locate COMMAND n60core_roommodel_locate_test)

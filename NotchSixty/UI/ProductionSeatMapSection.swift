@@ -6,9 +6,12 @@ import SwiftUI
 struct ProductionSeatMapSection: View {
     @Bindable var advisor: RoomTreatmentAdvisorController
     @State private var map: RoomSeatMapController
+    /// The two-channel feed calibration, for the locate delay cross-check (display only).
+    var stereoAlignment: StereoBassAlignment?
 
-    init(advisor: RoomTreatmentAdvisorController) {
+    init(advisor: RoomTreatmentAdvisorController, stereoAlignment: StereoBassAlignment? = nil) {
         self.advisor = advisor
+        self.stereoAlignment = stereoAlignment
         _map = State(initialValue: RoomSeatMapController(projectStore: advisor.store))
     }
 
@@ -59,7 +62,9 @@ struct ProductionSeatMapSection: View {
         guard let project = advisor.selectedProject else { return }
         var context = RoomModelContext()
         context.calibrationName = project.microphone?.calibration?.sourceName
-        map.load(project: project, geometry: advisor.geometryDraft, context: context)
+        map.stereoAlignment = stereoAlignment
+        let library = (try? MeasurementLibrary(root: MeasurementLibrary.defaultRoot()).load().records) ?? []
+        map.load(project: project, geometry: advisor.geometryDraft, context: context, library: library)
     }
 
     private var header: some View {
@@ -201,11 +206,35 @@ struct ProductionSeatMapSection: View {
                 coordinateField("Into room", value: (pos?.y ?? 0) * k) { commit(point, x: nil, y: $0 / k, z: nil) }
                 coordinateField("Height", value: (pos?.z ?? 0) * k) { commit(point, x: nil, y: nil, z: $0 / k) }
             }
+            locateRow(point)
             HStack {
                 Button("Remove position") { map.clearPosition(point.id) }
                     .disabled(pos == nil || map.linkedPointIDs.contains(point.id))
                 if map.linkedPointIDs.contains(point.id) {
                     Text("Follows the room geometry.").font(DesignType.caption.font).foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
+    /// "Locate from measurement" (E29 S5): offered only with loopback timing and two full-range speaker measurements.
+    @ViewBuilder
+    private func locateRow(_ point: RoomPoint) -> some View {
+        if point.kind == .seat || point.kind == .ear {
+            let reason = map.locateUnavailableReason(for: point.id)
+            VStack(alignment: .leading, spacing: 2) {
+                Button("Locate from measurement") { apply(map.locate(point.id)) }
+                    .disabled(reason != nil)
+                    .accessibilityHint(reason ?? "Fills the position from the speakers' time of flight.")
+                if let reason {
+                    Text(reason).font(DesignType.caption.font).foregroundStyle(.secondary)
+                }
+                if let source = point.position, source.source == .acousticLocate, let u = source.uncertaintyMetres {
+                    Text(String(format: "Located from measurement, about %.0f cm.", u * 100))
+                        .font(DesignType.caption.font).foregroundStyle(.secondary)
+                }
+                if let text = map.locateMessage {
+                    Text(text).font(DesignType.caption.font).foregroundStyle(.secondary)
                 }
             }
         }

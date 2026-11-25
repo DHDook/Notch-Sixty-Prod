@@ -70,6 +70,7 @@
 		E21A1000000000000000A002 /* abi.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E21A1000000000000000A001 /* abi.cpp */; };
 		E13B1100000000000000A002 /* hrtf.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E13B1100000000000000A001 /* hrtf.cpp */; };
 		E29A3000000000000000A002 /* interpolate.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E29A3000000000000000A001 /* interpolate.cpp */; };
+		E29A3000000000000000A004 /* locate.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E29A3000000000000000A003 /* locate.cpp */; };
 		E14A1000000000000000A002 /* upmix.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E14A1000000000000000A001 /* upmix.cpp */; };
 		E36A3000000000000000A002 /* vd_ring.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E36A3000000000000000A001 /* vd_ring.cpp */; };
 		E25F0000000000000000F002 /* fold.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E25F0000000000000000F001 /* fold.cpp */; };
@@ -165,6 +166,7 @@
 		E21A1000000000000000A001 /* abi.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = abi.cpp; sourceTree = "<group>"; };
 		E13B1100000000000000A001 /* hrtf.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = hrtf.cpp; sourceTree = "<group>"; };
 		E29A3000000000000000A001 /* interpolate.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = roommodel/interpolate.cpp; sourceTree = "<group>"; };
+		E29A3000000000000000A003 /* locate.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = roommodel/locate.cpp; sourceTree = "<group>"; };
 		E14A1000000000000000A001 /* upmix.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = upmix/upmix.cpp; sourceTree = "<group>"; };
 		E36A3000000000000000A001 /* vd_ring.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = vd_ring.cpp; sourceTree = "<group>"; };
 		E25F0000000000000000F001 /* fold.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = fold.cpp; sourceTree = "<group>"; };
@@ -235,6 +237,7 @@
 				E36A3000000000000000A001 /* vd_ring.cpp */,
 				E13B1100000000000000A001 /* hrtf.cpp */,
 				E29A3000000000000000A001 /* interpolate.cpp */,
+				E29A3000000000000000A003 /* locate.cpp */,
 				E14A1000000000000000A001 /* upmix.cpp */,
 				E7A20000000000000000A001 /* resample.cpp */,
 				E6C000000000000000000016 /* layout.cpp */,
@@ -407,6 +410,7 @@
 				E36A3000000000000000A002 /* vd_ring.cpp in Sources */,
 				E13B1100000000000000A002 /* hrtf.cpp in Sources */,
 				E29A3000000000000000A002 /* interpolate.cpp in Sources */,
+				E29A3000000000000000A004 /* locate.cpp in Sources */,
 				E14A1000000000000000A002 /* upmix.cpp in Sources */,
 				E7A20000000000000000A002 /* resample.cpp in Sources */,
 				E6C000000000000000000036 /* layout.cpp in Sources */,
