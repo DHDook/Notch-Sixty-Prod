@@ -670,17 +670,21 @@ struct PlaybackSystemProfile: Identifiable, Codable, Equatable, Sendable {
     var id: UUID
     var name: String
     var state: PlaybackSystemState
+    /// E29 S2: the profile keeps only the ID of its room model; the model and its IRs live in `RoomModelStore`.
+    var roomModelID: UUID?
 
     init(
         schemaVersion: Int = PlaybackSystemProfile.currentSchemaVersion,
         id: UUID = UUID(),
         name: String,
-        state: PlaybackSystemState
+        state: PlaybackSystemState,
+        roomModelID: UUID? = nil
     ) {
         self.schemaVersion = schemaVersion
         self.id = id
         self.name = name
         self.state = state
+        self.roomModelID = roomModelID
     }
 }
 
@@ -1196,6 +1200,8 @@ final class ProductProfileController: ObservableObject {
     ]
 
     let engine: AudioIOEngine
+    /// E13 S12: the Headphones page's bypass switches; session-only, never saved.
+    let headphoneBypass = HeadphoneBypassState()
     let audioUnitHost: AudioUnitHostController
     /// E27 S3a: auto preamp for the Equalizer page.
     let autoPreamp: EQAutoPreampController
@@ -1739,7 +1745,9 @@ final class ProductProfileController: ObservableObject {
 
     func replaceSelectedSystemHeadphoneDeviceProfile(
         _ configuration: HeadphoneDeviceProfileConfiguration?,
-        fittedResponseID: UUID? = nil
+        fittedResponseID: UUID? = nil,
+        targetShaping: HeadphoneTargetShaping? = nil,
+        autoHeadroom: Bool? = nil
     ) throws {
         guard let selectedSystemProfileID,
               let index = systemProfiles.firstIndex(where: { $0.id == selectedSystemProfileID }) else {
@@ -1760,7 +1768,8 @@ final class ProductProfileController: ObservableObject {
             systemProfiles[index].state.headphoneDeviceProfile = configuration
             if let configuration, FeatureFlags().isEnabled(.headphonesPage) {
                 var list = systemProfiles[index].state.headphoneList ?? HeadphoneList()
-                list.updateSelected(profile: configuration, fittedResponseID: fittedResponseID)
+                list.updateSelected(
+                    profile: configuration, fittedResponseID: fittedResponseID, targetShaping: targetShaping, autoHeadroom: autoHeadroom)
                 systemProfiles[index].state.headphoneList = list
             }
             try persistThrowing()

@@ -12,6 +12,9 @@ final class BeforeAfterModel: ObservableObject {
     enum Side: Equatable { case before, after }
 
     private let player: ContentAuditionPlaying
+    /// E13 S12: the headphone session's processing, switched with the content settings ("before" is everything off).
+    private let headphone: HeadphoneCompareSupporting?
+    private var headphoneInUse = false
     private var baseline: ContentABAuditionState?
     private var before: ContentABAuditionState?
     private var trims: (before: Double, after: Double) = (0, 0)
@@ -22,8 +25,9 @@ final class BeforeAfterModel: ObservableObject {
     @Published private(set) var message: String?
     @Published private(set) var levelSummary: String?
 
-    init(player: ContentAuditionPlaying, clock: @escaping () -> Date = { Date() }) {
+    init(player: ContentAuditionPlaying, headphone: HeadphoneCompareSupporting? = nil, clock: @escaping () -> Date = { Date() }) {
         self.player = player
+        self.headphone = headphone
         self.clock = clock
     }
 
@@ -36,7 +40,7 @@ final class BeforeAfterModel: ObservableObject {
 
     func show(_ target: Side) {
         guard !isSwitching else { return }
-        if let reason = player.unavailableReason {
+        if let reason = player.unavailableReason ?? (baseline == nil ? headphone?.unavailableReason : nil) {
             message = reason
             return
         }
@@ -47,6 +51,7 @@ final class BeforeAfterModel: ObservableObject {
             case .before: try player.apply(before, attenuationDB: trims.before)
             case .after: try player.apply(baseline, attenuationDB: trims.after)
             }
+            if headphoneInUse { try headphone?.apply(bypassed: target == .before) }
             side = target
             message = nil
             holdUntil = clock().addingTimeInterval(ComparisonSwitchTiming.fixedSeconds)
@@ -59,7 +64,12 @@ final class BeforeAfterModel: ObservableObject {
     /// Back to the applied settings.
     func done() {
         guard let baseline else { return }
-        do { try player.apply(baseline, attenuationDB: 0); message = nil } catch { message = error.localizedDescription }
+        do {
+            try player.apply(baseline, attenuationDB: 0)
+            if headphoneInUse { try headphone?.apply(bypassed: false) }
+            message = nil
+        } catch { message = error.localizedDescription }
+        headphoneInUse = false
         self.baseline = nil
         side = nil
         levelSummary = nil
@@ -76,8 +86,11 @@ final class BeforeAfterModel: ObservableObject {
         let current = player.currentContentState()
         let candidates = ComparisonCandidates.list(current: current, presets: [])
         let off = candidates[1].state
-        guard off != current else { throw BlindLiveComparisonError.identicalSides }
-        let level = try BlindLiveComparison.match(a: off, b: current, sampleRate: player.outputSampleRate)
+        let hp = headphone?.hasEffect == true ? headphone : nil
+        guard off != current || hp != nil else { throw BlindLiveComparisonError.identicalSides }
+        let level = try BlindLiveComparison.match(
+            a: off, b: current, sampleRate: player.outputSampleRate,
+            extraADB: hp?.levelDB(bypassed: true) ?? 0, extraBDB: hp?.levelDB(bypassed: false) ?? 0)
         let floor = DSPGainConfiguration.inputPreampRange.lowerBound
         guard level.trimADB >= -24, level.trimBDB >= -24,
               off.inputPreampDB + level.trimADB >= floor, current.inputPreampDB + level.trimBDB >= floor else {
@@ -86,7 +99,9 @@ final class BeforeAfterModel: ObservableObject {
         baseline = current
         before = off
         trims = (level.trimADB, level.trimBDB)
-        levelSummary = level.summary
+        headphoneInUse = hp != nil
+        levelSummary = hp?.levelIsApproximate == true
+            ? level.summary + " Virtual Speakers level is not matched." : level.summary
     }
 }
 
