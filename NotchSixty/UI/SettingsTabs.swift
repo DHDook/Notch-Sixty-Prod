@@ -84,12 +84,12 @@ struct SettingsAboutView: View {
         }
         card("Licences", "doc.text") {
             Text("Notch Sixty includes open-source software. Its licence and acknowledgements are listed here.")
-                .font(.caption)
+                .font(DesignType.caption.font)
                 .foregroundStyle(.secondary)
             DisclosureGroup("Show licences and acknowledgements", isExpanded: $showsLicences) {
                 ScrollView {
                     Text(licenceText ?? "The licence text could not be found in this build.")
-                        .font(.caption.monospaced())
+                        .font(DesignType.caption.font.monospaced())
                         .textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
@@ -105,11 +105,11 @@ struct SettingsAboutView: View {
         }
         card("Help & Support", "questionmark.circle") {
             ViewThatFits(in: .horizontal) {
-                HStack(spacing: 10) { buttons }
-                VStack(alignment: .leading, spacing: 10) { buttons }
+                HStack(spacing: DesignSpacing.m.pt) { buttons }
+                VStack(alignment: .leading, spacing: DesignSpacing.m.pt) { buttons }
             }
             Text("Copy Diagnostics copies the app version, macOS version, audio device and sample rate, active preset and system, bypass state and processing delay. It does not include audio or measurement recordings.")
-                .font(.caption)
+                .font(DesignType.caption.font)
                 .foregroundStyle(.secondary)
         }
     }
@@ -134,12 +134,12 @@ struct SettingsAboutView: View {
     private func card<Content: View>(
         _ title: String, _ systemImage: String, @ViewBuilder content: () -> Content
     ) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Label(title, systemImage: systemImage).font(.headline)
+        VStack(alignment: .leading, spacing: DesignSpacing.m.pt) {
+            Label(title, systemImage: systemImage).font(DesignType.sectionTitle.font)
             content()
         }
-        .padding(16)
+        .padding(DesignSpacing.l.pt)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .glassEffect(.regular, in: .rect(cornerRadius: 18))
+        .glassEffect(.regular, in: .rect(cornerRadius: DesignRadius.large.pt))
     }
 }

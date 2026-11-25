@@ -9,26 +9,26 @@ struct ProductionFeedForwardDesignSurveyCard: View {
     private static let channels = Array(0..<32)
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: DesignSpacing.m.pt) {
             HStack {
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
                     Text("Feed-Forward Design Measurement")
-                        .font(.headline)
+                        .font(DesignType.sectionTitle.font)
                     Text("The reference microphone is a second channel of the seat microphone's interface, so both share one clock.")
-                        .font(.caption)
+                        .font(DesignType.caption.font)
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
                 Text(activityLabel)
-                    .font(.caption.bold())
+                    .font(DesignType.caption.font.bold())
                     .tracking(1)
                     .foregroundStyle(.secondary)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
+                    .padding(.horizontal, DesignSpacing.m.pt)
+                    .padding(.vertical, DesignSpacing.s.pt)
                     .glassEffect(.regular, in: .capsule)
             }
 
-            HStack(spacing: 12) {
+            HStack(spacing: DesignSpacing.m.pt) {
                 Picker("Reference channel", selection: Binding(
                     get: { survey.referenceChannel ?? -1 },
                     set: { survey.setReferenceChannel($0 < 0 ? nil : $0) }
@@ -41,12 +41,12 @@ struct ProductionFeedForwardDesignSurveyCard: View {
                 .frame(maxWidth: 260)
                 if let seat = survey.errorChannel {
                     Text("Seat microphone: input \(seat + 1)")
-                        .font(.caption)
+                        .font(DesignType.caption.font)
                         .foregroundStyle(.secondary)
                 }
             }
 
-            HStack(spacing: 10) {
+            HStack(spacing: DesignSpacing.m.pt) {
                 Button("Measure reference to seat (60 s)") { survey.startNoiseSurvey() }
                     .disabled(survey.activity != .idle)
                 Button("Measure speaker leakage") { survey.measureLeakage() }
@@ -61,7 +61,7 @@ struct ProductionFeedForwardDesignSurveyCard: View {
             }
 
             Text(survey.message)
-                .font(.callout)
+                .font(DesignType.label.font)
                 .foregroundStyle(.secondary)
                 .textSelection(.enabled)
 
@@ -69,7 +69,7 @@ struct ProductionFeedForwardDesignSurveyCard: View {
                 Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 4) {
                     GridRow {
                         ForEach(["Band", "|H| ref → seat", "Coherence", "Leakage L / R"], id: \.self) {
-                            Text($0).font(.caption.bold()).foregroundStyle(.secondary)
+                            Text($0).font(DesignType.caption.font.bold()).foregroundStyle(.secondary)
                         }
                     }
                     ForEach(measured.bands, id: \.frequencyHz) { band in
@@ -81,13 +81,13 @@ struct ProductionFeedForwardDesignSurveyCard: View {
                                                  ? Color.primary : Color.orange)
                             Text(leakageText(band.frequencyHz))
                         }
-                        .font(.caption.monospacedDigit())
+                        .font(DesignType.caption.font.monospacedDigit())
                     }
                 }
             }
         }
-        .padding(18)
-        .glassEffect(.regular, in: .rect(cornerRadius: 18))
+        .padding(DesignSpacing.l.pt)
+        .glassEffect(.regular, in: .rect(cornerRadius: DesignRadius.large.pt))
         .onAppear { survey.refresh() }
     }
 

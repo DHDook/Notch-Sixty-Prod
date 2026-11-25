@@ -14,15 +14,15 @@ struct SettingsAutomaticBackupCard: View {
                 Text(manager.lastBackupDate.map { $0.formatted(date: .abbreviated, time: .shortened) } ?? "None yet")
             }
             ViewThatFits(in: .horizontal) {
-                HStack(spacing: 10) { buttons }
-                VStack(alignment: .leading, spacing: 10) { buttons }
+                HStack(spacing: DesignSpacing.m.pt) { buttons }
+                VStack(alignment: .leading, spacing: DesignSpacing.m.pt) { buttons }
             }
             Text("Notch Sixty keeps a backup of your presets, systems and settings in its own folder: at most one a day, on days when something changed, and the last five. Use Save Backup to keep one somewhere else.")
-                .font(.caption)
+                .font(DesignType.caption.font)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             if let message {
-                Text(message).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+                Text(message).font(DesignType.caption.font).foregroundStyle(.secondary).textSelection(.enabled)
             }
         }
     }
@@ -61,15 +61,15 @@ struct SettingsResetEraseCard: View {
     var body: some View {
         SettingsDataCardFrame(title: "Reset & Erase", systemImage: "arrow.counterclockwise.circle") {
             ViewThatFits(in: .horizontal) {
-                HStack(spacing: 10) { buttons }
-                VStack(alignment: .leading, spacing: 10) { buttons }
+                HStack(spacing: DesignSpacing.m.pt) { buttons }
+                VStack(alignment: .leading, spacing: DesignSpacing.m.pt) { buttons }
             }
             Text("Restore Default Settings puts the app settings back to how they first looked. Your presets, systems and measurements are not changed. Erase All Data removes all of those too, after a backup is made first; stop processing before you erase.")
-                .font(.caption)
+                .font(DesignType.caption.font)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             if let message {
-                Text(message).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+                Text(message).font(DesignType.caption.font).foregroundStyle(.secondary).textSelection(.enabled)
             }
         }
         .sheet(isPresented: $showsEraseSheet) { eraseSheet }
@@ -99,18 +99,18 @@ struct SettingsResetEraseCard: View {
     }
 
     private var eraseSheet: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("Erase all data?").font(.headline)
+        VStack(alignment: .leading, spacing: DesignSpacing.l.pt) {
+            Text("Erase all data?").font(DesignType.sectionTitle.font)
             Text("This removes your presets, speaker systems, room correction projects, measurement sessions, headphone profiles, listening history and settings. A backup is saved first in the Notch Sixty backup folder, and erasing never deletes it. Type \(SettingsDataManager.eraseConfirmationWord) to continue.")
                 .fixedSize(horizontal: false, vertical: true)
             TextField("Type \(SettingsDataManager.eraseConfirmationWord)", text: $typed)
                 .textFieldStyle(.roundedBorder)
             ViewThatFits(in: .horizontal) {
-                HStack(spacing: 10) { sheetButtons }
-                VStack(alignment: .leading, spacing: 10) { sheetButtons }
+                HStack(spacing: DesignSpacing.m.pt) { sheetButtons }
+                VStack(alignment: .leading, spacing: DesignSpacing.m.pt) { sheetButtons }
             }
         }
-        .padding(20)
+        .padding(DesignSpacing.xl.pt)
         .frame(minWidth: 320, idealWidth: 420)
     }
 
@@ -136,12 +136,12 @@ private struct SettingsDataCardFrame<Content: View>: View {
     @ViewBuilder let content: Content
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Label(title, systemImage: systemImage).font(.headline)
+        VStack(alignment: .leading, spacing: DesignSpacing.m.pt) {
+            Label(title, systemImage: systemImage).font(DesignType.sectionTitle.font)
             content
         }
-        .padding(16)
+        .padding(DesignSpacing.l.pt)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .glassEffect(.regular, in: .rect(cornerRadius: 18))
+        .glassEffect(.regular, in: .rect(cornerRadius: DesignRadius.large.pt))
     }
 }

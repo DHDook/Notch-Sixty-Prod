@@ -173,8 +173,8 @@ struct ProductionSettingsView: View {
     /// The single scrolling list used while `e12.settings-page` is off (today's layout).
     private var generalSettings: some View {
         ScrollView {
-            GlassEffectContainer(spacing: 14) {
-                VStack(alignment: .leading, spacing: 14) {
+            GlassEffectContainer(spacing: DesignSpacing.l.pt) {
+                VStack(alignment: .leading, spacing: DesignSpacing.l.pt) {
                     aboutCard
                     appearanceCard
                     volumeCard
@@ -197,7 +197,7 @@ struct ProductionSettingsView: View {
                     supportCard
                 }
             }
-            .padding(18)
+            .padding(DesignSpacing.l.pt)
         }
     }
 
@@ -214,17 +214,17 @@ struct ProductionSettingsView: View {
 
     private func tabPage(_ tab: SettingsTab) -> some View {
         ScrollView {
-            GlassEffectContainer(spacing: 14) {
+            GlassEffectContainer(spacing: DesignSpacing.l.pt) {
                 tabCards(tab)
             }
-            .padding(18)
+            .padding(DesignSpacing.l.pt)
         }
     }
 
     /// The cards of one tab. Internal so the layout test can host a tab at a given width (E12 S25, G99).
     @ViewBuilder
     func tabCards(_ tab: SettingsTab) -> some View {
-                VStack(alignment: .leading, spacing: 14) {
+                VStack(alignment: .leading, spacing: DesignSpacing.l.pt) {
                     switch tab {
                     case .general:
                         appearanceCard
@@ -272,12 +272,12 @@ struct ProductionSettingsView: View {
             .buttonStyle(.glass)
 
             Text("Puts the meter scale, the Equalizer graph range and analyser, and the Dynamics curve panels back to how they first looked. Your presets and sound settings are not changed.")
-                .font(.caption)
+                .font(DesignType.caption.font)
                 .foregroundStyle(.secondary)
 
             if let displayResetMessage {
                 Text(displayResetMessage)
-                    .font(.caption)
+                    .font(DesignType.caption.font)
                     .foregroundStyle(.secondary)
             }
         }
@@ -303,7 +303,7 @@ struct ProductionSettingsView: View {
 
     private var appearanceCard: some View {
         settingsCard(title: "Appearance", systemImage: "circle.lefthalf.filled") {
-            HStack(spacing: 10) {
+            HStack(spacing: DesignSpacing.m.pt) {
                 Text("Appearance")
                 Picker("", selection: $preferences.appearance) {
                     ForEach(ApplicationAppearanceMode.allCases) { mode in
@@ -319,7 +319,7 @@ struct ProductionSettingsView: View {
 
     private var volumeCard: some View {
         settingsCard(title: "Volume & Feedback", systemImage: "speaker.wave.2") {
-            HStack(spacing: 10) {
+            HStack(spacing: DesignSpacing.m.pt) {
                 Text("Step size")
                 Spacer()
                 Picker("Volume key step size", selection: $preferences.volumeStepResolution) {
@@ -340,7 +340,7 @@ struct ProductionSettingsView: View {
             }
 
             Text("How far Notch Sixty's volume moves each time you press a volume key. A fraction moves the slider by that part of its range. A dB step changes the level by a fixed amount, down to −80 dB and then silence, and shows the volume in dB (0 dB is full volume). This changes Notch Sixty's volume, not your speakers' own volume.")
-                .font(.caption)
+                .font(DesignType.caption.font)
                 .foregroundStyle(.secondary)
 
             Divider()
@@ -348,11 +348,11 @@ struct ProductionSettingsView: View {
             Toggle("Show volume in menu bar", isOn: $preferences.showVolumeInMenuBar)
                 .disabled(preferences.presence == .dock)
             Text("Shows the volume beside the menu bar icon. Needs “Menu Bar” or “Both” under Show Notch Sixty in.")
-                .font(.caption)
+                .font(DesignType.caption.font)
                 .foregroundStyle(.secondary)
 
             Toggle("Show volume popup", isOn: $preferences.showVolumePopup)
-            HStack(spacing: 10) {
+            HStack(spacing: DesignSpacing.m.pt) {
                 Text("Popup position")
                 Spacer()
                 Picker("Volume popup position", selection: $preferences.volumePopupPosition) {
@@ -366,7 +366,7 @@ struct ProductionSettingsView: View {
             }
             .disabled(!preferences.showVolumePopup)
             Text("Briefly shows the volume when it changes. “Follow macOS Popup” puts it beside the macOS volume indicator, at the top right or, while another app is full screen, at the top centre. macOS does not let apps hide its own indicator.")
-                .font(.caption)
+                .font(DesignType.caption.font)
                 .foregroundStyle(.secondary)
 
             Toggle("Cover the macOS volume popup", isOn: $preferences.coverSystemVolumePopup)
@@ -375,14 +375,14 @@ struct ProductionSettingsView: View {
                         || preferences.volumePopupPosition != .topRight
                 )
             Text("Only with “Follow macOS Popup”. Draws Notch Sixty's popup over the macOS one so it does not show through. The macOS popup still appears underneath and may flash briefly.")
-                .font(.caption)
+                .font(DesignType.caption.font)
                 .foregroundStyle(.secondary)
         }
     }
 
     private var presenceCard: some View {
         settingsCard(title: "App Presence", systemImage: "macwindow.on.rectangle") {
-            HStack(spacing: 10) {
+            HStack(spacing: DesignSpacing.m.pt) {
                 Text("Show Notch Sixty in")
                 Picker("", selection: $preferences.presence) {
                     ForEach(ApplicationPresenceMode.allCases) { mode in
@@ -395,7 +395,7 @@ struct ProductionSettingsView: View {
             }
 
             Text("“Menu Bar” keeps the controls available without a Dock icon. “Both” shows the app in the Dock and the menu bar.")
-                .font(.caption)
+                .font(DesignType.caption.font)
                 .foregroundStyle(.secondary)
         }
     }
@@ -404,7 +404,7 @@ struct ProductionSettingsView: View {
         settingsCard(title: "Presets", systemImage: "music.note.list") {
             Toggle("Show A/B comparison in the toolbar", isOn: $abComparisonEnabled)
             Text("Adds A/B buttons beside the preset menu so you can store two sounds and switch between them. While a comparison is running the buttons stay visible until you finish it.")
-                .font(.caption)
+                .font(DesignType.caption.font)
                 .foregroundStyle(.secondary)
         }
     }
@@ -434,7 +434,7 @@ struct ProductionSettingsView: View {
 
             if let error = preferences.launchAtLoginError {
                 Label(error, systemImage: "exclamationmark.triangle.fill")
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(StatusLevel.attention.color)
                     .textSelection(.enabled)
             }
 
@@ -442,11 +442,11 @@ struct ProductionSettingsView: View {
                 Divider()
                 Toggle("Resume processing when Notch Sixty opens", isOn: $resumeProcessingOnOpen)
                 Text("If processing was running when you last quit Notch Sixty, start it again when the app opens, with the normal fade-in. It starts only if the same output device is connected, and not after a crash or force-quit. It never turns on Quiet Zone or room treatment; you arm those yourself.")
-                    .font(.caption)
+                    .font(DesignType.caption.font)
                     .foregroundStyle(.secondary)
             } else {
                 Text("Opening Notch Sixty at login does not start audio. You press Start yourself.")
-                    .font(.caption)
+                    .font(DesignType.caption.font)
                     .foregroundStyle(.secondary)
             }
         }
@@ -462,19 +462,19 @@ struct ProductionSettingsView: View {
         settingsCard(title: "Permissions", systemImage: "lock.shield") {
             ForEach(PermissionKind.allCases) { kind in
                 ViewThatFits(in: .horizontal) {
-                    HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    HStack(alignment: .firstTextBaseline, spacing: DesignSpacing.m.pt) {
                         permissionText(kind)
                         Spacer(minLength: 8)
                         permissionControls(kind)
                     }
-                    VStack(alignment: .leading, spacing: 6) {
+                    VStack(alignment: .leading, spacing: DesignSpacing.s.pt) {
                         permissionText(kind)
-                        HStack(spacing: 10) { permissionControls(kind) }
+                        HStack(spacing: DesignSpacing.m.pt) { permissionControls(kind) }
                     }
                 }
             }
             Text("If processing starts but you hear nothing after saying no to the System Audio permission, allow Notch Sixty in System Settings under Privacy & Security, then reopen the app.")
-                .font(.caption)
+                .font(DesignType.caption.font)
                 .foregroundStyle(.secondary)
         }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
@@ -487,9 +487,9 @@ struct ProductionSettingsView: View {
     }
 
     private func permissionText(_ kind: PermissionKind) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(kind.title).font(.subheadline.weight(.medium))
-            Text(kind.explanation).font(.caption).foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
+            Text(kind.title).font(DesignType.label.font.weight(.medium))
+            Text(kind.explanation).font(DesignType.caption.font).foregroundStyle(.secondary)
         }
     }
 
@@ -504,17 +504,17 @@ struct ProductionSettingsView: View {
 
     private var legacyPermissionsCard: some View {
         settingsCard(title: "Permissions", systemImage: "lock.shield") {
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
                 Text("System Audio")
-                    .font(.subheadline.weight(.medium))
+                    .font(DesignType.label.font.weight(.medium))
                 Text("macOS asks for this when Notch Sixty first needs to hear your Mac's audio.")
                     .foregroundStyle(.secondary)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
                 Text("Measurement Microphone")
-                    .font(.subheadline.weight(.medium))
+                    .font(DesignType.label.font.weight(.medium))
                 Text("macOS asks for this only when you start a measurement that uses a microphone.")
                     .foregroundStyle(.secondary)
             }
@@ -525,7 +525,7 @@ struct ProductionSettingsView: View {
             }
 
             Text("If processing starts but you hear nothing after saying no to this permission, allow Notch Sixty in System Settings under Privacy & Security → Screen & System Audio Recording, then reopen the app.")
-                .font(.caption)
+                .font(DesignType.caption.font)
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
@@ -536,7 +536,7 @@ struct ProductionSettingsView: View {
             title: "Backup & Restore",
             systemImage: "externaldrive.badge.timemachine"
         ) {
-            HStack(spacing: 10) {
+            HStack(spacing: DesignSpacing.m.pt) {
                 Button {
                     saveBackup()
                 } label: {
@@ -567,7 +567,7 @@ struct ProductionSettingsView: View {
                 + "headphone profiles and app settings. Restoring never "
                 + "changes Launch at Login or your macOS permissions."
             )
-            .font(.caption)
+            .font(DesignType.caption.font)
             .foregroundStyle(.secondary)
 
             Text(
@@ -575,12 +575,12 @@ struct ProductionSettingsView: View {
                 + "If its device is not connected, it is marked Needs Mapping "
                 + "and stays off until you choose a device."
             )
-            .font(.caption)
+            .font(DesignType.caption.font)
             .foregroundStyle(.secondary)
 
             if let backupMessage {
                 Text(backupMessage)
-                    .font(.caption)
+                    .font(DesignType.caption.font)
                     .foregroundStyle(.secondary)
                     .textSelection(.enabled)
             }
@@ -591,7 +591,7 @@ struct ProductionSettingsView: View {
         settingsCard(title: "Developer Tools", systemImage: "wrench.adjustable") {
             Toggle("Show developer tools", isOn: $showDeveloperTools)
             Text("Adds a Developer menu with Hardware Acceptance and Acoustic Research, the bench and research workspaces used to qualify a system.")
-                .font(.caption)
+                .font(DesignType.caption.font)
                 .foregroundStyle(.secondary)
         }
     }
@@ -606,7 +606,7 @@ struct ProductionSettingsView: View {
             .buttonStyle(.glass)
 
             Text("Copies the app version, macOS version, audio device and sample rate, active preset and system, bypass state and processing delay. It does not include audio or measurement recordings.")
-                .font(.caption)
+                .font(DesignType.caption.font)
                 .foregroundStyle(.secondary)
         }
     }
@@ -634,7 +634,7 @@ struct ProductionSettingsView: View {
                     .buttonStyle(.glass)
             }
             Text("Unfinished epics merge behind these flags, off by default. Release builds ignore these switches; testers can enable flags with the launch argument \(FeatureFlags.launchArgument) id1,id2.")
-                .font(.caption)
+                .font(DesignType.caption.font)
                 .foregroundStyle(.secondary)
         }
     }
@@ -645,14 +645,14 @@ struct ProductionSettingsView: View {
         systemImage: String,
         @ViewBuilder content: () -> Content
     ) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: DesignSpacing.m.pt) {
             Label(title, systemImage: systemImage)
-                .font(.headline)
+                .font(DesignType.sectionTitle.font)
             content()
         }
-        .padding(16)
+        .padding(DesignSpacing.l.pt)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .glassEffect(.regular, in: .rect(cornerRadius: 18))
+        .glassEffect(.regular, in: .rect(cornerRadius: DesignRadius.large.pt))
     }
 
 }

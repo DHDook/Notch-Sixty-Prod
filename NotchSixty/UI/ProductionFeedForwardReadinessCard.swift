@@ -557,7 +557,7 @@ private struct ActiveAcousticsEvidenceReductionCurveView: View {
                     )
                     context.draw(
                         Text("\(Int(frequency))")
-                            .font(.caption2)
+                            .font(DesignType.caption.font)
                             .foregroundStyle(.secondary),
                         at: CGPoint(x: position, y: plot.maxY + 11),
                         anchor: .center
@@ -633,25 +633,25 @@ struct ProductionFeedForwardReadinessCard: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: DesignSpacing.l.pt) {
             HStack(alignment: .firstTextBaseline) {
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
                     Text("Virtual-Position Feed-Forward ANC")
-                        .font(.headline)
+                        .font(DesignType.sectionTitle.font)
                     Text(
                         "One microphone, two locations: virtual listening-seat error point and upstream doorway reference."
                     )
-                    .font(.caption)
+                    .font(DesignType.caption.font)
                     .foregroundStyle(.secondary)
                 }
                 Spacer()
                 Text("HARDWARE SETUP")
-                    .font(.caption.bold())
+                    .font(DesignType.caption.font.bold())
                     .tracking(0.5)
                     .foregroundStyle(.secondary)
             }
 
-            HStack(spacing: 10) {
+            HStack(spacing: DesignSpacing.m.pt) {
                 Button {
                     do {
                         try quietZone.prepareFeedForwardPlan()
@@ -665,7 +665,7 @@ struct ProductionFeedForwardReadinessCard: View {
                         systemImage: "mic"
                     )
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(.glass)
                 .disabled(
                     quietZone.feedForwardCalibration != nil
                 )
@@ -678,14 +678,14 @@ struct ProductionFeedForwardReadinessCard: View {
                         systemImage: "arrow.clockwise"
                     )
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(.glass)
                 Spacer()
                 Text(
                     quietZone.feedForwardCalibration == nil
                         ? "NO CALIBRATION"
                         : "CALIBRATION PLANNED"
                 )
-                .font(.caption2.bold())
+                .font(DesignType.caption.font.bold())
                 .foregroundStyle(.secondary)
             }
 
@@ -697,7 +697,7 @@ struct ProductionFeedForwardReadinessCard: View {
             physicalEvidenceVisualization
             evidenceProvenance
 
-            VStack(alignment: .leading, spacing: 7) {
+            VStack(alignment: .leading, spacing: DesignSpacing.s.pt) {
                 stage(
                     1,
                     "Listener: establish speaker → virtual-seat path and synchronized controlled-source arrival."
@@ -716,8 +716,8 @@ struct ProductionFeedForwardReadinessCard: View {
                 )
             }
 
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Instrumented calibration stages").font(.caption.bold())
+            VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
+                Text("Instrumented calibration stages").font(DesignType.caption.font.bold())
                 Text("1. Qualify concurrent input and output audio clocks")
                 Text("2. Repeat at least three wired electrical loopbacks")
                 Text("3. Capture listener → upstream doorway → listener return")
@@ -725,15 +725,15 @@ struct ProductionFeedForwardReadinessCard: View {
                 Text("The automated hardware capture driver is not connected; no live anti-noise output is permitted.")
                     .foregroundStyle(.secondary)
             }
-            .font(.caption)
-            .padding(10)
+            .font(DesignType.caption.font)
+            .padding(DesignSpacing.m.pt)
             .frame(maxWidth: .infinity, alignment: .leading)
 
             let commissioning = QuietZoneHardwareCommissioningEvaluator()
                 .preview(calibration: quietZone.feedForwardCalibration)
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: DesignSpacing.s.pt) {
                 Text("Hardware commissioning checklist")
-                    .font(.caption.bold())
+                    .font(DesignType.caption.font.bold())
                 ForEach(commissioning.items) { item in
                     HStack(alignment: .firstTextBaseline) {
                         Text(item.gate.title)
@@ -742,13 +742,13 @@ struct ProductionFeedForwardReadinessCard: View {
                             .foregroundStyle(.secondary)
                             .multilineTextAlignment(.trailing)
                     }
-                    .font(.caption2)
+                    .font(DesignType.caption.font)
                 }
                 Text("Saved calibration data cannot certify physical source clocks, independent endpoint instrumentation, or measured attenuation. Live feed-forward ANC is disconnected.")
-                    .font(.caption2)
+                    .font(DesignType.caption.font)
                     .foregroundStyle(.secondary)
             }
-            .padding(10)
+            .padding(DesignSpacing.m.pt)
             .frame(maxWidth: .infinity, alignment: .leading)
 
             if let calibration = quietZone.feedForwardCalibration {
@@ -758,7 +758,7 @@ struct ProductionFeedForwardReadinessCard: View {
                     Spacer()
                     Text(calibration.upstreamLabel)
                 }
-                .font(.caption)
+                .font(DesignType.caption.font)
 
                 HStack {
                     Text("Timed captures")
@@ -769,17 +769,17 @@ struct ProductionFeedForwardReadinessCard: View {
                     )
                     .monospacedDigit()
                 }
-                .font(.caption)
+                .font(DesignType.caption.font)
             }
 
             if let trace = quietZone.feedForwardCalibration?.halClockTrace {
                 if let clock = try? QuietZoneHALClockAnalyzer().analyze(trace) {
-                    VStack(alignment: .leading, spacing: 4) {
+                    VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
                         Label(
                             "audio clock stability: qualified for loopback bench only",
                             systemImage: "clock"
                         )
-                        .font(.caption.bold())
+                        .font(DesignType.caption.font.bold())
                         Text(
                             String(
                                 format:
@@ -793,12 +793,12 @@ struct ProductionFeedForwardReadinessCard: View {
                                 )
                             )
                         )
-                        .font(.caption)
+                        .font(DesignType.caption.font)
                         .foregroundStyle(.secondary)
                         Text(
                             "Clock stability is not ADC/DAC latency or proof of live cancellation."
                         )
-                        .font(.caption2)
+                        .font(DesignType.caption.font)
                         .foregroundStyle(.secondary)
                     }
                 } else {
@@ -806,7 +806,7 @@ struct ProductionFeedForwardReadinessCard: View {
                         "audio clock observations failed qualification. Re-capture timing evidence.",
                         systemImage: "exclamationmark.triangle"
                     )
-                    .font(.caption)
+                    .font(DesignType.caption.font)
                     .foregroundStyle(.secondary)
                 }
             }
@@ -817,7 +817,7 @@ struct ProductionFeedForwardReadinessCard: View {
                         GridItem(.flexible()),
                         GridItem(.flexible()),
                     ],
-                    spacing: 10
+                    spacing: DesignSpacing.m.pt
                 ) {
                     valueCard(
                         "Measured preview",
@@ -851,9 +851,9 @@ struct ProductionFeedForwardReadinessCard: View {
             }
 
             if let timing = quietZone.feedForwardCalibration?.timingPath {
-                VStack(alignment: .leading, spacing: 5) {
+                VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
                     Text("Timing path breakdown · diagnostic only")
-                        .font(.caption.bold())
+                        .font(DesignType.caption.font.bold())
                     HStack {
                         Text("Reference ADC / acquisition")
                         Spacer()
@@ -883,8 +883,8 @@ struct ProductionFeedForwardReadinessCard: View {
                     Text("Component bounds require separately instrumented hardware evidence. Cable loopback cannot determine acoustic propagation. Positive timing reserve does not establish any frequency-specific attenuation or permit live ANC.")
                         .foregroundStyle(.secondary)
                 }
-                .font(.caption)
-                .padding(10)
+                .font(DesignType.caption.font)
+                .padding(DesignSpacing.m.pt)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
 
@@ -892,30 +892,30 @@ struct ProductionFeedForwardReadinessCard: View {
                 readinessTitle,
                 systemImage: "waveform.path.ecg.rectangle"
             )
-            .font(.callout.bold())
+            .font(DesignType.label.font.bold())
             .foregroundStyle(.secondary)
 
             Text(quietZone.feedForwardMessage)
-                .font(.caption)
+                .font(DesignType.caption.font)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
             Text(
                 "Feed-forward remains unarmed: the 250 ms polling/window analysis is not causal for unpredictable noise. A trigger-synchronized physical calibration, low-latency reference-to-speaker transport and re-measurement at the virtual seat are required. No estimated cancellation dB or broadband frequency range is claimed."
             )
-            .font(.caption)
+            .font(DesignType.caption.font)
             .foregroundStyle(.secondary)
-            .padding(12)
+            .padding(DesignSpacing.m.pt)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
                 .secondary.opacity(0.06),
-                in: RoundedRectangle(cornerRadius: 10)
+                in: RoundedRectangle(cornerRadius: DesignRadius.small.pt)
             )
         }
-        .padding(18)
+        .padding(DesignSpacing.l.pt)
         .glassEffect(
             .regular,
-            in: .rect(cornerRadius: 18)
+            in: .rect(cornerRadius: DesignRadius.large.pt)
         )
     }
 
@@ -929,19 +929,19 @@ struct ProductionFeedForwardReadinessCard: View {
             reviewPacket: independentReview
         )
 
-        return VStack(alignment: .leading, spacing: 11) {
+        return VStack(alignment: .leading, spacing: DesignSpacing.m.pt) {
             HStack(alignment: .firstTextBaseline) {
-                VStack(alignment: .leading, spacing: 3) {
+                VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
                     Text("Evidence Provenance & Review")
-                        .font(.subheadline.bold())
+                        .font(DesignType.label.font.bold())
                     Text(provenance.statusCaption)
-                        .font(.caption)
+                        .font(DesignType.caption.font)
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
                 if let digest = provenance.digestPrefix {
                     Text(digest + "…")
-                        .font(.caption2.monospaced())
+                        .font(DesignType.caption.font.monospaced())
                         .foregroundStyle(.secondary)
                         .textSelection(.enabled)
                 }
@@ -951,7 +951,7 @@ struct ProductionFeedForwardReadinessCard: View {
                 Text(
                     "No digest-valid verification evidence record is available, so rig identity and review metadata are intentionally not displayed."
                 )
-                .font(.caption)
+                .font(DesignType.caption.font)
                 .foregroundStyle(.secondary)
             } else {
                 Grid(
@@ -993,26 +993,26 @@ struct ProductionFeedForwardReadinessCard: View {
                         String(provenance.faultWitnessCount)
                     )
                 }
-                .font(.caption)
+                .font(DesignType.caption.font)
 
                 Divider()
 
-                HStack(alignment: .top, spacing: 12) {
-                    VStack(alignment: .leading, spacing: 3) {
+                HStack(alignment: .top, spacing: DesignSpacing.m.pt) {
+                    VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
                         Text("Acknowledged review roles")
-                            .font(.caption.bold())
+                            .font(DesignType.caption.font.bold())
                         Text(
                             provenance.acknowledgedReviewRoles.isEmpty
                                 ? "None established"
                                 : provenance.acknowledgedReviewRoles
                                     .joined(separator: " · ")
                         )
-                        .font(.caption2)
+                        .font(DesignType.caption.font)
                         .foregroundStyle(.secondary)
                     }
                     Spacer()
                     Text("IDENTITY UNVERIFIED")
-                        .font(.caption2.bold())
+                        .font(DesignType.caption.font.bold())
                         .foregroundStyle(.secondary)
                 }
             }
@@ -1020,14 +1020,14 @@ struct ProductionFeedForwardReadinessCard: View {
             Text(
                 "The provenance fields above are values contained in the digest-valid record. They do not prove that the named microphone, DAC, clock, source fixture, reviewer, or physical geometry actually produced the measurement."
             )
-            .font(.caption2)
+            .font(DesignType.caption.font)
             .foregroundStyle(.secondary)
         }
-        .padding(12)
+        .padding(DesignSpacing.m.pt)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             .secondary.opacity(0.05),
-            in: RoundedRectangle(cornerRadius: 12)
+            in: RoundedRectangle(cornerRadius: DesignRadius.medium.pt)
         )
     }
 
@@ -1050,13 +1050,13 @@ struct ProductionFeedForwardReadinessCard: View {
             reviewPacket: independentReview
         )
 
-        return VStack(alignment: .leading, spacing: 12) {
+        return VStack(alignment: .leading, spacing: DesignSpacing.m.pt) {
             HStack(alignment: .firstTextBaseline) {
-                VStack(alignment: .leading, spacing: 3) {
+                VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
                     Text("Physical Evidence")
-                        .font(.subheadline.bold())
+                        .font(DesignType.label.font.bold())
                     Text(snapshot.state.caption)
-                        .font(.caption)
+                        .font(DesignType.caption.font)
                         .foregroundStyle(
                             snapshot.state == .invalidPackage
                                 ? .red
@@ -1066,7 +1066,7 @@ struct ProductionFeedForwardReadinessCard: View {
                 Spacer()
                 if let digest = snapshot.digestPrefix {
                     Text("SHA-256 " + digest + "…")
-                        .font(.caption2.monospaced())
+                        .font(DesignType.caption.font.monospaced())
                         .foregroundStyle(.secondary)
                         .textSelection(.enabled)
                 }
@@ -1076,7 +1076,7 @@ struct ProductionFeedForwardReadinessCard: View {
                 Text(
                     "No physical verification evidence package is attached. This view will remain empty until the real A → B → A campaign is captured and compiled."
                 )
-                .font(.caption)
+                .font(DesignType.caption.font)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             } else {
@@ -1086,7 +1086,7 @@ struct ProductionFeedForwardReadinessCard: View {
                         GridItem(.flexible()),
                         GridItem(.flexible()),
                     ],
-                    spacing: 8
+                    spacing: DesignSpacing.s.pt
                 ) {
                     evidenceMetric(
                         "Primary A",
@@ -1130,12 +1130,12 @@ struct ProductionFeedForwardReadinessCard: View {
                     )
                 }
 
-                VStack(alignment: .leading, spacing: 8) {
+                VStack(alignment: .leading, spacing: DesignSpacing.s.pt) {
                     HStack {
                         Text("Frequency-resolved reduction")
-                            .font(.caption.bold())
+                            .font(DesignType.caption.font.bold())
                         Spacer()
-                        HStack(spacing: 10) {
+                        HStack(spacing: DesignSpacing.m.pt) {
                             legend("A", Color.accentColor)
                             legend("B", Color.secondary)
                             legend("A return", Color.green)
@@ -1148,7 +1148,7 @@ struct ProductionFeedForwardReadinessCard: View {
                     Text(
                         "Positive values indicate lower measured coherent-band level during the experimental condition. This graph is numerical evidence only; it does not authenticate the measurement instrument."
                     )
-                    .font(.caption2)
+                    .font(DesignType.caption.font)
                     .foregroundStyle(.secondary)
                 }
             }
@@ -1158,7 +1158,7 @@ struct ProductionFeedForwardReadinessCard: View {
                     GridItem(.flexible()),
                     GridItem(.flexible()),
                 ],
-                spacing: 8
+                spacing: DesignSpacing.s.pt
             ) {
                 verificationCell(
                     "Record digest",
@@ -1198,11 +1198,11 @@ struct ProductionFeedForwardReadinessCard: View {
                 )
             }
         }
-        .padding(12)
+        .padding(DesignSpacing.m.pt)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             .secondary.opacity(0.05),
-            in: RoundedRectangle(cornerRadius: 12)
+            in: RoundedRectangle(cornerRadius: DesignRadius.medium.pt)
         )
     }
 
@@ -1211,32 +1211,32 @@ struct ProductionFeedForwardReadinessCard: View {
         _ value: String,
         _ detail: String
     ) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
+        VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
             Text(title)
-                .font(.caption2)
+                .font(DesignType.caption.font)
                 .foregroundStyle(.secondary)
             Text(value)
-                .font(.headline.monospacedDigit())
+                .font(DesignType.sectionTitle.font.monospacedDigit())
             Text(detail)
-                .font(.caption2)
+                .font(DesignType.caption.font)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
-        .padding(9)
+        .padding(DesignSpacing.s.pt)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             .secondary.opacity(0.04),
-            in: RoundedRectangle(cornerRadius: 9)
+            in: RoundedRectangle(cornerRadius: DesignRadius.small.pt)
         )
     }
 
     private func legend(_ label: String, _ color: Color) -> some View {
-        HStack(spacing: 4) {
+        HStack(spacing: DesignSpacing.xs.pt) {
             Circle()
                 .fill(color)
                 .frame(width: 6, height: 6)
             Text(label)
-                .font(.caption2)
+                .font(DesignType.caption.font)
                 .foregroundStyle(.secondary)
         }
     }
@@ -1254,36 +1254,36 @@ struct ProductionFeedForwardReadinessCard: View {
     private var physicalCampaignPlan: some View {
         let campaign = ActiveAcousticsPhysicalCampaignUXSnapshot()
 
-        return VStack(alignment: .leading, spacing: 11) {
+        return VStack(alignment: .leading, spacing: DesignSpacing.m.pt) {
             HStack(alignment: .firstTextBaseline) {
-                VStack(alignment: .leading, spacing: 3) {
+                VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
                     Text("Physical Verification Campaign")
-                        .font(.subheadline.bold())
+                        .font(DesignType.label.font.bold())
                     Text("One microphone · A → B → A")
-                        .font(.caption)
+                        .font(DesignType.caption.font)
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
                 Text("NOT YET PERFORMED")
-                    .font(.caption2.bold())
+                    .font(DesignType.caption.font.bold())
                     .foregroundStyle(.secondary)
             }
 
             ForEach(campaign.visits) { visit in
-                HStack(alignment: .top, spacing: 10) {
+                HStack(alignment: .top, spacing: DesignSpacing.m.pt) {
                     Text(visit.positionLabel)
-                        .font(.caption.bold())
+                        .font(DesignType.caption.font.bold())
                         .frame(width: 24, height: 24)
                         .background(
                             Color.accentColor.opacity(0.10),
                             in: Circle()
                         )
 
-                    VStack(alignment: .leading, spacing: 2) {
+                    VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
                         Text("\(visit.id). \(visit.role)")
-                            .font(.caption.bold())
+                            .font(DesignType.caption.font.bold())
                         Text(visit.instruction)
-                            .font(.caption2)
+                            .font(DesignType.caption.font)
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
@@ -1291,7 +1291,7 @@ struct ProductionFeedForwardReadinessCard: View {
                     Text(
                         "\(visit.sourceCaptureCount) captures · \(visit.faultWitnessCount) faults"
                     )
-                    .font(.caption2.monospacedDigit())
+                    .font(DesignType.caption.font.monospacedDigit())
                     .foregroundStyle(.secondary)
                 }
             }
@@ -1301,7 +1301,7 @@ struct ProductionFeedForwardReadinessCard: View {
                     GridItem(.flexible()),
                     GridItem(.flexible()),
                 ],
-                spacing: 8
+                spacing: DesignSpacing.s.pt
             ) {
                 verificationCell(
                     "Source captures",
@@ -1328,14 +1328,14 @@ struct ProductionFeedForwardReadinessCard: View {
             Text(
                 "This is a commissioning guide, not evidence. The captures must come from the real fixed rig with independently calibrated instrumentation; This view does not synthesize, sign, or authenticate them."
             )
-            .font(.caption2)
+            .font(DesignType.caption.font)
             .foregroundStyle(.secondary)
         }
-        .padding(12)
+        .padding(DesignSpacing.m.pt)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             .secondary.opacity(0.05),
-            in: RoundedRectangle(cornerRadius: 12)
+            in: RoundedRectangle(cornerRadius: DesignRadius.medium.pt)
         )
     }
 
@@ -1345,34 +1345,34 @@ struct ProductionFeedForwardReadinessCard: View {
             budget: quietZone.feedForwardBudget
         )
 
-        return VStack(alignment: .leading, spacing: 10) {
+        return VStack(alignment: .leading, spacing: DesignSpacing.m.pt) {
             HStack(alignment: .firstTextBaseline) {
-                VStack(alignment: .leading, spacing: 3) {
+                VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
                     Text("Diagnostics & Blockers")
-                        .font(.subheadline.bold())
+                        .font(DesignType.label.font.bold())
                     Text(snapshot.headline)
-                        .font(.caption)
+                        .font(DesignType.caption.font)
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
                 Text("\(snapshot.unresolvedCount) OPEN")
-                    .font(.caption2.bold().monospacedDigit())
+                    .font(DesignType.caption.font.bold().monospacedDigit())
                     .foregroundStyle(.secondary)
             }
 
             ForEach(snapshot.items) { item in
-                HStack(alignment: .top, spacing: 10) {
-                    VStack(alignment: .leading, spacing: 2) {
+                HStack(alignment: .top, spacing: DesignSpacing.m.pt) {
+                    VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
                         Text(item.title)
-                            .font(.caption.bold())
+                            .font(DesignType.caption.font.bold())
                         Text(item.detail)
-                            .font(.caption2)
+                            .font(DesignType.caption.font)
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                     Spacer(minLength: 12)
                     Text(item.disposition.rawValue)
-                        .font(.caption2.bold())
+                        .font(DesignType.caption.font.bold())
                         .multilineTextAlignment(.trailing)
                         .foregroundStyle(
                             item.disposition == .blocked
@@ -1382,20 +1382,20 @@ struct ProductionFeedForwardReadinessCard: View {
                                     : .secondary
                         )
                 }
-                .padding(.vertical, 3)
+                .padding(.vertical, DesignSpacing.xs.pt)
             }
 
             Text(
                 "A diagnostic pass means only that the corresponding software check succeeded. Physical acoustic benefit, instrument provenance, real emergency shutdown, and live output authorization remain separate hardware gates."
             )
-            .font(.caption2)
+            .font(DesignType.caption.font)
             .foregroundStyle(.secondary)
         }
-        .padding(12)
+        .padding(DesignSpacing.m.pt)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             .secondary.opacity(0.05),
-            in: RoundedRectangle(cornerRadius: 12)
+            in: RoundedRectangle(cornerRadius: DesignRadius.medium.pt)
         )
     }
 
@@ -1441,25 +1441,25 @@ struct ProductionFeedForwardReadinessCard: View {
         ]
         let completed = rows.filter { $0.1 }.count
 
-        return VStack(alignment: .leading, spacing: 10) {
+        return VStack(alignment: .leading, spacing: DesignSpacing.m.pt) {
             HStack {
-                VStack(alignment: .leading, spacing: 3) {
+                VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
                     Text("Guided One-Microphone Setup")
-                        .font(.subheadline.bold())
+                        .font(DesignType.label.font.bold())
                     Text(
                         "Move the same microphone from the listener to the upstream reference position and back."
                     )
-                    .font(.caption)
+                    .font(DesignType.caption.font)
                     .foregroundStyle(.secondary)
                 }
                 Spacer()
                 Text("\(completed) / \(rows.count)")
-                    .font(.caption.bold().monospacedDigit())
+                    .font(DesignType.caption.font.bold().monospacedDigit())
                     .foregroundStyle(.secondary)
             }
 
             ForEach(Array(rows.enumerated()), id: \.offset) { index, row in
-                HStack(alignment: .top, spacing: 10) {
+                HStack(alignment: .top, spacing: DesignSpacing.m.pt) {
                     Image(
                         systemName:
                             row.1
@@ -1471,17 +1471,17 @@ struct ProductionFeedForwardReadinessCard: View {
                     )
                     .frame(width: 18)
 
-                    VStack(alignment: .leading, spacing: 2) {
+                    VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
                         Text("\(index + 1). \(row.0)")
-                            .font(.caption.bold())
+                            .font(DesignType.caption.font.bold())
                         Text(row.2)
-                            .font(.caption2)
+                            .font(DesignType.caption.font)
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                     Spacer()
                     Text(row.1 ? "RECORDED" : "PENDING")
-                        .font(.caption2.bold())
+                        .font(DesignType.caption.font.bold())
                         .foregroundStyle(.secondary)
                 }
             }
@@ -1489,14 +1489,14 @@ struct ProductionFeedForwardReadinessCard: View {
             Text(
                 "Recorded means only that a software record exists. This view does not authenticate the microphone, trigger clock, instrument, geometry, or acoustic result."
             )
-            .font(.caption2)
+            .font(DesignType.caption.font)
             .foregroundStyle(.secondary)
         }
-        .padding(12)
+        .padding(DesignSpacing.m.pt)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             .secondary.opacity(0.05),
-            in: RoundedRectangle(cornerRadius: 12)
+            in: RoundedRectangle(cornerRadius: DesignRadius.medium.pt)
         )
     }
 
@@ -1506,17 +1506,17 @@ struct ProductionFeedForwardReadinessCard: View {
     private var arrangementNote: some View {
         if let reason = quietZone.arrangementRefusal {
             Label(reason, systemImage: "speaker.slash")
-                .font(.caption)
+                .font(DesignType.caption.font)
                 .foregroundStyle(.secondary)
         } else if quietZone.arrangement != nil {
             Label("Your speaker arrangement can take part in Quiet Zone.", systemImage: "speaker.wave.2")
-                .font(.caption)
+                .font(DesignType.caption.font)
                 .foregroundStyle(.secondary)
         }
         // E26 S3b: where the measured plant is rank one and the two speakers share the sub.
         if let readout = quietZone.bassConditioningReadout {
             Label(readout, systemImage: "waveform.path")
-                .font(.caption)
+                .font(DesignType.caption.font)
                 .foregroundStyle(.secondary)
         }
     }
@@ -1527,18 +1527,18 @@ struct ProductionFeedForwardReadinessCard: View {
             timingReadiness: quietZone.feedForwardBudget.readiness
         )
 
-        return VStack(alignment: .leading, spacing: 12) {
+        return VStack(alignment: .leading, spacing: DesignSpacing.m.pt) {
             HStack(alignment: .firstTextBaseline) {
-                VStack(alignment: .leading, spacing: 3) {
+                VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
                     Text("Commissioning & Verification")
-                        .font(.subheadline.bold())
+                        .font(DesignType.label.font.bold())
                     Text(snapshot.state.title)
-                        .font(.caption)
+                        .font(DesignType.caption.font)
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
                 Text("READ ONLY")
-                    .font(.caption2.bold())
+                    .font(DesignType.caption.font.bold())
                     .tracking(0.7)
                     .foregroundStyle(.secondary)
             }
@@ -1548,7 +1548,7 @@ struct ProductionFeedForwardReadinessCard: View {
                     GridItem(.flexible()),
                     GridItem(.flexible()),
                 ],
-                spacing: 10
+                spacing: DesignSpacing.m.pt
             ) {
                 verificationCell(
                     "One-mic calibration",
@@ -1575,15 +1575,15 @@ struct ProductionFeedForwardReadinessCard: View {
             }
 
             Label(snapshot.nextAction, systemImage: "arrow.right.circle")
-                .font(.caption)
+                .font(DesignType.caption.font)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
-        .padding(12)
+        .padding(DesignSpacing.m.pt)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             .secondary.opacity(0.05),
-            in: RoundedRectangle(cornerRadius: 12)
+            in: RoundedRectangle(cornerRadius: DesignRadius.medium.pt)
         )
     }
 
@@ -1592,23 +1592,23 @@ struct ProductionFeedForwardReadinessCard: View {
         _ value: String,
         _ detail: String
     ) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
             Text(title)
-                .font(.caption2)
+                .font(DesignType.caption.font)
                 .foregroundStyle(.secondary)
             Text(value)
-                .font(.caption.bold())
+                .font(DesignType.caption.font.bold())
                 .tracking(0.4)
             Text(detail)
-                .font(.caption2)
+                .font(DesignType.caption.font)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
-        .padding(10)
+        .padding(DesignSpacing.m.pt)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             .secondary.opacity(0.04),
-            in: RoundedRectangle(cornerRadius: 9)
+            in: RoundedRectangle(cornerRadius: DesignRadius.small.pt)
         )
     }
 
@@ -1633,16 +1633,16 @@ struct ProductionFeedForwardReadinessCard: View {
         _ number: Int,
         _ explanation: String
     ) -> some View {
-        HStack(alignment: .top, spacing: 9) {
+        HStack(alignment: .top, spacing: DesignSpacing.s.pt) {
             Text("\(number)")
-                .font(.caption.bold())
+                .font(DesignType.caption.font.bold())
                 .frame(width: 22, height: 22)
                 .background(
                     Color.accentColor.opacity(0.10),
                     in: Circle()
                 )
             Text(explanation)
-                .font(.caption)
+                .font(DesignType.caption.font)
                 .fixedSize(
                     horizontal: false,
                     vertical: true
@@ -1665,24 +1665,24 @@ struct ProductionFeedForwardReadinessCard: View {
         _ value: String,
         _ detail: String
     ) -> some View {
-        VStack(alignment: .leading, spacing: 5) {
+        VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
             Text(title)
-                .font(.caption.bold())
+                .font(DesignType.caption.font.bold())
             Text(value)
-                .font(.title3.monospacedDigit().bold())
+                .font(DesignType.sectionTitle.font.monospacedDigit().bold())
             Text(detail)
-                .font(.caption2)
+                .font(DesignType.caption.font)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
-        .padding(12)
+        .padding(DesignSpacing.m.pt)
         .frame(
             maxWidth: .infinity,
             alignment: .leading
         )
         .background(
             .secondary.opacity(0.05),
-            in: RoundedRectangle(cornerRadius: 10)
+            in: RoundedRectangle(cornerRadius: DesignRadius.small.pt)
         )
     }
 }

@@ -11,9 +11,9 @@ struct ProductionSubAwareQuietZoneCard: View {
     var body: some View {
         if quietZone.subAwareAncEnabled, quietZone.bassConditioningActive {
             let readiness = quietZone.subAwareReadiness(mode: .feedForward)
-            VStack(alignment: .leading, spacing: 10) {
-                Text(SubAwareQuietZoneText.question).font(.headline)
-                Text(SubAwareQuietZoneText.pathSummary(quietZone.ancBassPathState.path)).font(.callout)
+            VStack(alignment: .leading, spacing: DesignSpacing.m.pt) {
+                Text(SubAwareQuietZoneText.question).font(DesignType.sectionTitle.font)
+                Text(SubAwareQuietZoneText.pathSummary(quietZone.ancBassPathState.path)).font(DesignType.label.font)
                 if let arrangement = quietZone.arrangement, arrangement.hasDownstreamSubwoofer {
                     SystemSetupReceiverBassPicker(receiverBass: arrangement.receiverBass) { declared in
                         do { try quietZone.declareReceiverBass(declared); errorText = nil } catch {
@@ -24,26 +24,26 @@ struct ProductionSubAwareQuietZoneCard: View {
                 HStack {
                     Button("Measure with your subwoofer") { survey.measureSubPath(thenLeakage: true) }
                         .disabled(survey.activity != .idle)
-                    Text(survey.message).font(.caption).foregroundStyle(.secondary)
+                    Text(survey.message).font(DesignType.caption.font).foregroundStyle(.secondary)
                 }
                 if quietZone.ancBassPathState.path == .subOutput {
-                    Text("\(SubPathMeasurement.timeNote) Stop playback first.").font(.caption).foregroundStyle(.secondary)
+                    Text("\(SubPathMeasurement.timeNote) Stop playback first.").font(DesignType.caption.font).foregroundStyle(.secondary)
                 }
-                Text(SubAwareQuietZoneText.advice).font(.caption).foregroundStyle(.secondary)
+                Text(SubAwareQuietZoneText.advice).font(DesignType.caption.font).foregroundStyle(.secondary)
                 if let readout = quietZone.bassConditioningReadout {
-                    Label(readout, systemImage: "waveform.path").font(.caption).foregroundStyle(.secondary)
+                    Label(readout, systemImage: "waveform.path").font(DesignType.caption.font).foregroundStyle(.secondary)
                 }
                 if let message = readiness.message {
-                    Label(message, systemImage: "exclamationmark.triangle").font(.caption).foregroundStyle(.orange)
+                    Label(message, systemImage: "exclamationmark.triangle").font(DesignType.caption.font).foregroundStyle(StatusLevel.attention.color)
                 } else {
                     Label("Your subwoofer setup is measured. Turn On is still your choice.", systemImage: "checkmark.circle")
-                        .font(.caption).foregroundStyle(.secondary)
+                        .font(DesignType.caption.font).foregroundStyle(.secondary)
                 }
-                if let errorText { Text(errorText).font(.caption).foregroundStyle(.red) }
+                if let errorText { Text(errorText).font(DesignType.caption.font).foregroundStyle(StatusLevel.problem.color) }
             }
-            .padding(14)
+            .padding(DesignSpacing.l.pt)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(.secondary.opacity(0.05), in: RoundedRectangle(cornerRadius: 12))
+            .background(.secondary.opacity(0.05), in: RoundedRectangle(cornerRadius: DesignRadius.medium.pt))
         }
     }
 }

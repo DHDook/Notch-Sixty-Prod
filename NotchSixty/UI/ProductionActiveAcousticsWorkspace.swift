@@ -91,7 +91,7 @@ private struct AmbientCompensationResponseCurveView: View {
             }
             context.draw(
                 Text(label)
-                    .font(.caption2)
+                    .font(DesignType.caption.font)
                     .foregroundStyle(.secondary),
                 at: CGPoint(x: x, y: plot.maxY + 13),
                 anchor: .center
@@ -122,7 +122,7 @@ private struct AmbientCompensationResponseCurveView: View {
             )
             context.draw(
                 Text(String(format: "%+.1f", gain))
-                    .font(.caption2)
+                    .font(DesignType.caption.font)
                     .foregroundStyle(.secondary),
                 at: CGPoint(x: plot.minX - 7, y: y),
                 anchor: .trailing
@@ -292,7 +292,7 @@ struct ProductionActiveAcousticsWorkspace: View {
 
     var body: some View {
         ProductionPageContainer {
-            VStack(alignment: .leading, spacing: 22) {
+            VStack(alignment: .leading, spacing: DesignSpacing.xl.pt) {
                 header
 
                 Picker("Active Acoustics", selection: $selection) {
@@ -398,7 +398,7 @@ struct ProductionActiveAcousticsWorkspace: View {
 
     private var header: some View {
         HStack(alignment: .firstTextBaseline) {
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: DesignSpacing.s.pt) {
                 Text("Adapt playback to the room, preserve conversation, and optionally suppress stable low-frequency noise.")
                     .foregroundStyle(.secondary)
             }
@@ -407,19 +407,19 @@ struct ProductionActiveAcousticsWorkspace: View {
     }
 
     private var ambientAnalysis: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            VStack(alignment: .leading, spacing: 14) {
-                HStack(alignment: .center, spacing: 14) {
-                    VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: DesignSpacing.l.pt) {
+            VStack(alignment: .leading, spacing: DesignSpacing.l.pt) {
+                HStack(alignment: .center, spacing: DesignSpacing.l.pt) {
+                    VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
                         Text("Playback Adaptation")
-                            .font(.headline)
+                            .font(DesignType.sectionTitle.font)
                         Text(playbackAdaptationDescription)
-                            .font(.caption)
+                            .font(DesignType.caption.font)
                             .foregroundStyle(.secondary)
                     }
                     Spacer()
                     Text(ambient.monitorStatus.displayName.uppercased())
-                        .font(.caption.bold())
+                        .font(DesignType.caption.font.bold())
                         .tracking(1.0)
                         .foregroundStyle(
                             ambient.monitorStatus == .failed
@@ -428,8 +428,8 @@ struct ProductionActiveAcousticsWorkspace: View {
                                     ? .green
                                     : .secondary
                         )
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 6)
+                        .padding(.horizontal, DesignSpacing.m.pt)
+                        .padding(.vertical, DesignSpacing.s.pt)
                         .glassEffect(.regular, in: .capsule)
                 }
 
@@ -456,19 +456,19 @@ struct ProductionActiveAcousticsWorkspace: View {
 
                 Divider()
 
-                HStack(spacing: 12) {
-                    VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: DesignSpacing.m.pt) {
+                    VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
                         Text("Active Quiet Zone")
-                            .font(.subheadline.bold())
+                            .font(DesignType.label.font.bold())
                         Text(
                             "Independently suppress eligible stable 25–150 Hz environmental tones."
                         )
-                        .font(.caption)
+                        .font(DesignType.caption.font)
                         .foregroundStyle(.secondary)
                     }
                     Spacer()
                     Text(quietZone.status.displayName.uppercased())
-                        .font(.caption.bold())
+                        .font(DesignType.caption.font.bold())
                         .foregroundStyle(
                             quietZone.status == .fault
                                 ? .red
@@ -478,13 +478,13 @@ struct ProductionActiveAcousticsWorkspace: View {
                         )
                     if onePageFlag {
                         Button("Open Quiet Zone") { selection = .quietZone }
-                            .buttonStyle(.bordered)
+                            .buttonStyle(.glass)
                     } else {
                         if quietZone.arm.isArmed {
                             Button("Disarm", role: .destructive) {
                                 quietZone.arm.disarm(.user)
                             }
-                            .buttonStyle(.borderedProminent)
+                            .buttonStyle(.glassProminent)
                             .tint(.red)
                             .accessibilityLabel("Disarm Active Quiet Zone")
                         }
@@ -504,8 +504,8 @@ struct ProductionActiveAcousticsWorkspace: View {
                     }
                 }
             }
-            .padding(18)
-            .glassEffect(.regular, in: .rect(cornerRadius: 18))
+            .padding(DesignSpacing.l.pt)
+            .glassEffect(.regular, in: .rect(cornerRadius: DesignRadius.large.pt))
 
             if microphone.permissionStatus != .authorized {
                 statusBanner(
@@ -521,7 +521,7 @@ struct ProductionActiveAcousticsWorkspace: View {
                         }
                     }
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(.glassProminent)
             } else {
                 ambientSetupCard
             }
@@ -531,7 +531,7 @@ struct ProductionActiveAcousticsWorkspace: View {
                     GridItem(.flexible()),
                     GridItem(.flexible()),
                 ],
-                spacing: 14
+                spacing: DesignSpacing.l.pt
             ) {
                 metricCard(
                     title: "Ambient Level",
@@ -592,7 +592,7 @@ struct ProductionActiveAcousticsWorkspace: View {
                         GridItem(.flexible()),
                         GridItem(.flexible()),
                     ],
-                    spacing: 12
+                    spacing: DesignSpacing.m.pt
                 ) {
                     metricCard(
                         title:
@@ -640,7 +640,7 @@ struct ProductionActiveAcousticsWorkspace: View {
 
                 adaptationDetailCard
 
-                HStack(spacing: 20) {
+                HStack(spacing: DesignSpacing.xl.pt) {
                     LabeledContent("Character") {
                         Text(analysis.character.rawValue)
                     }
@@ -657,9 +657,9 @@ struct ProductionActiveAcousticsWorkspace: View {
                         .monospacedDigit()
                     }
                 }
-                .font(.subheadline)
-                .padding(14)
-                .glassEffect(.regular, in: .rect(cornerRadius: 14))
+                .font(DesignType.label.font)
+                .padding(DesignSpacing.l.pt)
+                .glassEffect(.regular, in: .rect(cornerRadius: DesignRadius.medium.pt))
             }
 
             if let reason = ambient.appliedTarget.holdReason {
@@ -667,13 +667,13 @@ struct ProductionActiveAcousticsWorkspace: View {
                     holdReasonText(reason),
                     systemImage: "pause.circle.fill"
                 )
-                .font(.callout)
+                .font(DesignType.label.font)
                 .foregroundStyle(.secondary)
-                .padding(14)
+                .padding(DesignSpacing.l.pt)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(
                     .secondary.opacity(0.08),
-                    in: RoundedRectangle(cornerRadius: 12)
+                    in: RoundedRectangle(cornerRadius: DesignRadius.medium.pt)
                 )
             }
 
@@ -683,14 +683,14 @@ struct ProductionActiveAcousticsWorkspace: View {
                     error,
                     systemImage: "exclamationmark.triangle.fill"
                 )
-                .font(.callout)
-                .foregroundStyle(.red)
+                .font(DesignType.label.font)
+                .foregroundStyle(StatusLevel.problem.color)
                 .textSelection(.enabled)
-                .padding(14)
+                .padding(DesignSpacing.l.pt)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(
                     .red.opacity(0.08),
-                    in: RoundedRectangle(cornerRadius: 12)
+                    in: RoundedRectangle(cornerRadius: DesignRadius.medium.pt)
                 )
             }
 
@@ -699,9 +699,9 @@ struct ProductionActiveAcousticsWorkspace: View {
     }
 
     private var ambientSetupCard: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: DesignSpacing.l.pt) {
             Text("Monitoring & Adaptation")
-                .font(.headline)
+                .font(DesignType.sectionTitle.font)
 
             Grid(
                 alignment: .leading,
@@ -811,19 +811,19 @@ struct ProductionActiveAcousticsWorkspace: View {
                     "The current Room Correction project was measured with a different microphone/channel. Choose the matching microphone or re-measure before enabling modeled playback subtraction.",
                     systemImage: "waveform.badge.exclamationmark"
                 )
-                .font(.caption)
+                .font(DesignType.caption.font)
                 .foregroundStyle(.secondary)
             }
 
             Divider()
 
-            HStack(spacing: 18) {
+            HStack(spacing: DesignSpacing.l.pt) {
                 Button("Set Current Room as Quiet Baseline") {
                     performAmbient {
                         try ambient.captureQuietBaseline()
                     }
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(.glass)
                 .disabled(ambient.latestAnalysis == nil)
 
                 if let baseline =
@@ -835,7 +835,7 @@ struct ProductionActiveAcousticsWorkspace: View {
                             baseline
                         )
                     )
-                    .font(.caption.monospacedDigit())
+                    .font(DesignType.caption.font.monospacedDigit())
                     .foregroundStyle(.secondary)
 
                     Button("Clear") {
@@ -846,14 +846,14 @@ struct ProductionActiveAcousticsWorkspace: View {
                     .buttonStyle(.borderless)
                 } else {
                     Text("Baseline required before automatic adaptation.")
-                        .font(.caption)
+                        .font(DesignType.caption.font)
                         .foregroundStyle(.secondary)
                 }
             }
 
             Divider()
 
-            HStack(spacing: 12) {
+            HStack(spacing: DesignSpacing.m.pt) {
                 Text("Strength")
                     .frame(width: 100, alignment: .leading)
                 Slider(
@@ -896,7 +896,7 @@ struct ProductionActiveAcousticsWorkspace: View {
             )
             .toggleStyle(.switch)
 
-            HStack(spacing: 12) {
+            HStack(spacing: DesignSpacing.m.pt) {
                 Text("Maximum lift")
                     .frame(width: 100, alignment: .leading)
                 Slider(
@@ -928,13 +928,13 @@ struct ProductionActiveAcousticsWorkspace: View {
                 Text(
                     "Available Content Preset headroom: \(engine.ambientCompensationAvailableHeadroomDB, specifier: "%.1f") dB. Music Focus level lift is clamped to the smaller of this reserve and the maximum above."
                 )
-                .font(.caption)
+                .font(DesignType.caption.font)
                 .foregroundStyle(.secondary)
             } else if ambient.playbackAdaptationMode == .conversationFocus {
                 let social =
                     ambient.configuration
                         .effectiveConversationPreservation
-                VStack(alignment: .leading, spacing: 6) {
+                VStack(alignment: .leading, spacing: DesignSpacing.s.pt) {
                     LabeledContent("Maximum music reduction") {
                         Text(
                             "\(social.maximumOverallAttenuationDB, specifier: "%.1f") dB"
@@ -950,13 +950,13 @@ struct ProductionActiveAcousticsWorkspace: View {
                     Text(
                         "Conversation Focus never applies net positive playback gain. Bass and air are only restored relative to the bounded full-band reduction."
                     )
-                    .font(.caption)
+                    .font(DesignType.caption.font)
                     .foregroundStyle(.secondary)
                 }
             }
         }
-        .padding(18)
-        .glassEffect(.regular, in: .rect(cornerRadius: 18))
+        .padding(DesignSpacing.l.pt)
+        .glassEffect(.regular, in: .rect(cornerRadius: DesignRadius.large.pt))
     }
 
     private var ambientResponseSampleRate: Double {
@@ -986,15 +986,15 @@ struct ProductionActiveAcousticsWorkspace: View {
     }
 
     private var adaptationDetailCard: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: DesignSpacing.l.pt) {
             HStack(alignment: .firstTextBaseline) {
-                VStack(alignment: .leading, spacing: 3) {
+                VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
                     Text("Adaptation Detail")
-                        .font(.headline)
+                        .font(DesignType.sectionTitle.font)
                     Text(
                         adaptationDetailDescription
                     )
-                    .font(.caption)
+                    .font(DesignType.caption.font)
                     .foregroundStyle(.secondary)
                 }
                 Spacer()
@@ -1005,9 +1005,9 @@ struct ProductionActiveAcousticsWorkspace: View {
                         maximumAmbientAppliedGainDB
                     )
                 )
-                .font(.caption.bold().monospacedDigit())
-                .padding(.horizontal, 9)
-                .padding(.vertical, 5)
+                .font(DesignType.caption.font.bold().monospacedDigit())
+                .padding(.horizontal, DesignSpacing.s.pt)
+                .padding(.vertical, DesignSpacing.xs.pt)
                 .glassEffect(.regular, in: .capsule)
             }
 
@@ -1025,13 +1025,13 @@ struct ProductionActiveAcousticsWorkspace: View {
             ) {
                 GridRow {
                     Text("Stage")
-                        .font(.caption.bold())
+                        .font(DesignType.caption.font.bold())
                         .foregroundStyle(.secondary)
                     Text("Shape")
-                        .font(.caption.bold())
+                        .font(DesignType.caption.font.bold())
                         .foregroundStyle(.secondary)
                     Text("Applied")
-                        .font(.caption.bold())
+                        .font(DesignType.caption.font.bold())
                         .foregroundStyle(.secondary)
                 }
 
@@ -1081,7 +1081,7 @@ struct ProductionActiveAcousticsWorkspace: View {
                 )
             }
 
-            HStack(spacing: 8) {
+            HStack(spacing: DesignSpacing.s.pt) {
                 Image(
                     systemName:
                         ambient.playbackAdaptationMode == .conversationFocus
@@ -1090,17 +1090,17 @@ struct ProductionActiveAcousticsWorkspace: View {
                 )
                 Text(adaptationPolicyNote)
             }
-            .font(.caption)
+            .font(DesignType.caption.font)
             .foregroundStyle(.secondary)
 
             Text(
                 "The curve is the exact combined live transfer function of the shared Active Acoustics overlay. It excludes the user's normal EQ, Room Correction and other DSP."
             )
-            .font(.caption)
+            .font(DesignType.caption.font)
             .foregroundStyle(.secondary)
         }
-        .padding(18)
-        .glassEffect(.regular, in: .rect(cornerRadius: 18))
+        .padding(DesignSpacing.l.pt)
+        .glassEffect(.regular, in: .rect(cornerRadius: DesignRadius.large.pt))
     }
 
     @ViewBuilder
@@ -1116,7 +1116,7 @@ struct ProductionActiveAcousticsWorkspace: View {
             Text(String(format: "%+.2f dB", gainDB))
                 .monospacedDigit()
         }
-        .font(.subheadline)
+        .font(DesignType.label.font)
     }
 
     private var playbackAdaptationDescription: String {
@@ -1230,20 +1230,20 @@ struct ProductionActiveAcousticsWorkspace: View {
     }
 
     private var quietZoneView: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            HStack(alignment: .center, spacing: 14) {
-                VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: DesignSpacing.l.pt) {
+            HStack(alignment: .center, spacing: DesignSpacing.l.pt) {
+                VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
                     Text("Active Quiet Zone")
-                        .font(.headline)
+                        .font(DesignType.sectionTitle.font)
                     Text(
                         "Closed-loop low-frequency anti-noise for stable 25–150 Hz environmental tones."
                     )
-                    .font(.caption)
+                    .font(DesignType.caption.font)
                     .foregroundStyle(.secondary)
                 }
                 Spacer()
                 Text(quietZone.status.displayName.uppercased())
-                    .font(.caption.bold())
+                    .font(DesignType.caption.font.bold())
                     .tracking(1)
                     .foregroundStyle(
                         quietZone.status == .fault
@@ -1252,18 +1252,18 @@ struct ProductionActiveAcousticsWorkspace: View {
                                 ? .green
                                 : .secondary
                     )
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
+                    .padding(.horizontal, DesignSpacing.m.pt)
+                    .padding(.vertical, DesignSpacing.s.pt)
                     .glassEffect(.regular, in: .capsule)
 
                 if let message = quietZone.arm.statusMessage {
-                    Text(message).font(.caption).foregroundStyle(.orange)
+                    Text(message).font(DesignType.caption.font).foregroundStyle(StatusLevel.attention.color)
                 }
                 if quietZone.arm.isArmed {
                     Button("Disarm", role: .destructive) {
                         quietZone.arm.disarm(.user)
                     }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(.glassProminent)
                     .tint(.red)
                 }
                 Toggle(
@@ -1280,8 +1280,8 @@ struct ProductionActiveAcousticsWorkspace: View {
                 .toggleStyle(.switch)
                 .labelsHidden()
             }
-            .padding(18)
-            .glassEffect(.regular, in: .rect(cornerRadius: 18))
+            .padding(DesignSpacing.l.pt)
+            .glassEffect(.regular, in: .rect(cornerRadius: DesignRadius.large.pt))
 
             if engine.lifecycleState != .running {
                 statusBanner(
@@ -1299,11 +1299,11 @@ struct ProductionActiveAcousticsWorkspace: View {
                 )
             }
 
-            VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: DesignSpacing.m.pt) {
                 Text("Error Microphone & Acoustic Model")
-                    .font(.headline)
+                    .font(DesignType.sectionTitle.font)
 
-                HStack(spacing: 12) {
+                HStack(spacing: DesignSpacing.m.pt) {
                     Text("Playback model")
                         .foregroundStyle(.secondary)
                         .frame(width: 120, alignment: .leading)
@@ -1337,7 +1337,7 @@ struct ProductionActiveAcousticsWorkspace: View {
                         Text(
                             "\(model.name) · \(model.sampleRate / 1_000, specifier: "%.1f") kHz"
                         )
-                        .font(.caption.monospacedDigit())
+                        .font(DesignType.caption.font.monospacedDigit())
                         .foregroundStyle(.secondary)
                     }
                 }
@@ -1345,11 +1345,11 @@ struct ProductionActiveAcousticsWorkspace: View {
                 Text(
                     "Quiet Zone reuses the playback separation and the retained Room Correction impulse responses. The live error microphone—not the acoustic prediction—is the commit authority."
                 )
-                .font(.caption)
+                .font(DesignType.caption.font)
                 .foregroundStyle(.secondary)
             }
-            .padding(18)
-            .glassEffect(.regular, in: .rect(cornerRadius: 18))
+            .padding(DesignSpacing.l.pt)
+            .glassEffect(.regular, in: .rect(cornerRadius: DesignRadius.large.pt))
 
             if let noiseSurvey = quietZone.noiseSurvey {
                 ProductionNoiseSurveyCard(survey: noiseSurvey)
@@ -1392,7 +1392,7 @@ struct ProductionActiveAcousticsWorkspace: View {
     /// E12 S19: the one-card Quiet Zone page. One card (setup list, where to quiet, the two switches), then the
     /// measured result, then everything else under "Advanced".
     private var quietZonePageView: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: DesignSpacing.l.pt) {
             if engine.lifecycleState != .running {
                 statusBanner(
                     title: "Playback engine must be running",
@@ -1414,19 +1414,19 @@ struct ProductionActiveAcousticsWorkspace: View {
                     quietZoneHoldReasonText(reason),
                     systemImage: quietZone.status == .fault ? "exclamationmark.octagon.fill" : "pause.circle.fill"
                 )
-                .font(.callout)
+                .font(DesignType.label.font)
                 .foregroundStyle(quietZone.status == .fault ? Color.red : Color.secondary)
-                .padding(14)
+                .padding(DesignSpacing.l.pt)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(
                     (quietZone.status == .fault ? Color.red : Color.secondary).opacity(0.08),
-                    in: RoundedRectangle(cornerRadius: 12)
+                    in: RoundedRectangle(cornerRadius: DesignRadius.medium.pt)
                 )
             }
             if let error = quietZoneActionError ?? quietZone.lastErrorDescription {
                 Label(error, systemImage: "exclamationmark.triangle.fill")
-                    .font(.callout)
-                    .foregroundStyle(.red)
+                    .font(DesignType.label.font)
+                    .foregroundStyle(StatusLevel.problem.color)
                     .textSelection(.enabled)
             }
 
@@ -1448,7 +1448,7 @@ struct ProductionActiveAcousticsWorkspace: View {
             quietZoneResultSections
 
             DisclosureGroup("Advanced", isExpanded: $advancedExpanded) {
-                VStack(alignment: .leading, spacing: 16) {
+                VStack(alignment: .leading, spacing: DesignSpacing.l.pt) {
                     if let noiseSurvey = quietZone.noiseSurvey {
                         ProductionNoiseSurveyCard(survey: noiseSurvey)
                     }
@@ -1461,9 +1461,9 @@ struct ProductionActiveAcousticsWorkspace: View {
                     ProductionFeedForwardShadowCard(shadow: feedForwardShadow)
                     ProductionAdaptiveQuietZoneCard(shadow: adaptiveQuietZone, latencyText: ancLatencyText)
                 }
-                .padding(.top, 12)
+                .padding(.top, DesignSpacing.m.pt)
             }
-            .font(.headline)
+            .font(DesignType.sectionTitle.font)
 
             safetyNote(
                 "Active Quiet Zone is deliberately limited to stable low-frequency components. It does not cancel speech, claps or broadband room sound and makes no claim of whole-room silence. A low-level probe must measurably improve the physical error microphone before full cancellation is allowed."
@@ -1478,7 +1478,7 @@ struct ProductionActiveAcousticsWorkspace: View {
                     GridItem(.flexible()),
                     GridItem(.flexible()),
                 ],
-                spacing: 14
+                spacing: DesignSpacing.l.pt
             ) {
                 metricCard(
                     title: "Controlled Frequencies",
@@ -1510,13 +1510,13 @@ struct ProductionActiveAcousticsWorkspace: View {
             }
 
             if !quietZone.toneTelemetry.isEmpty {
-                VStack(alignment: .leading, spacing: 10) {
+                VStack(alignment: .leading, spacing: DesignSpacing.m.pt) {
                     HStack {
                         Text("Live Cancellation Detail")
-                            .font(.headline)
+                            .font(DesignType.sectionTitle.font)
                         Spacer()
                         Text("ERROR MIC VERIFIED")
-                            .font(.caption.bold())
+                            .font(DesignType.caption.font.bold())
                             .tracking(0.8)
                             .foregroundStyle(.secondary)
                     }
@@ -1535,7 +1535,7 @@ struct ProductionActiveAcousticsWorkspace: View {
                             Text("L source").foregroundStyle(.secondary)
                             Text("R source").foregroundStyle(.secondary)
                         }
-                        .font(.caption.bold())
+                        .font(DesignType.caption.font.bold())
 
                         ForEach(quietZone.toneTelemetry) { tone in
                             GridRow {
@@ -1568,12 +1568,12 @@ struct ProductionActiveAcousticsWorkspace: View {
                                     "\(tone.rightSourceLevelDBFS, specifier: "%.1f") dBFS"
                                 )
                             }
-                            .font(.caption.monospacedDigit())
+                            .font(DesignType.caption.font.monospacedDigit())
                         }
                     }
                 }
-                .padding(18)
-                .glassEffect(.regular, in: .rect(cornerRadius: 18))
+                .padding(DesignSpacing.l.pt)
+                .glassEffect(.regular, in: .rect(cornerRadius: DesignRadius.large.pt))
             }
 
             if let reason = quietZone.holdReason {
@@ -1584,20 +1584,20 @@ struct ProductionActiveAcousticsWorkspace: View {
                             ? "exclamationmark.octagon.fill"
                             : "pause.circle.fill"
                 )
-                .font(.callout)
+                .font(DesignType.label.font)
                 .foregroundStyle(
                     quietZone.status == .fault
                         ? .red
                         : .secondary
                 )
-                .padding(14)
+                .padding(DesignSpacing.l.pt)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(
                     (quietZone.status == .fault
                         ? Color.red
                         : Color.secondary)
                         .opacity(0.08),
-                    in: RoundedRectangle(cornerRadius: 12)
+                    in: RoundedRectangle(cornerRadius: DesignRadius.medium.pt)
                 )
             }
 
@@ -1608,8 +1608,8 @@ struct ProductionActiveAcousticsWorkspace: View {
                     error,
                     systemImage: "exclamationmark.triangle.fill"
                 )
-                .font(.callout)
-                .foregroundStyle(.red)
+                .font(DesignType.label.font)
+                .foregroundStyle(StatusLevel.problem.color)
                 .textSelection(.enabled)
             }
     }
@@ -1658,24 +1658,24 @@ struct ProductionActiveAcousticsWorkspace: View {
     }
 
     private var spatialQuietZoneCard: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: DesignSpacing.m.pt) {
             HStack {
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
                     Text("Multi-Position Quiet Zone")
-                        .font(.headline)
+                        .font(DesignType.sectionTitle.font)
                     Text(
                         "Move one microphone between 2–5 positions. Spatial noise cancellation requires a shared phase reference—not just multiple room sweeps."
                     )
-                    .font(.caption)
+                    .font(DesignType.caption.font)
                     .foregroundStyle(.secondary)
                 }
                 Spacer()
                 Text("Preview")
-                    .font(.caption.bold())
+                    .font(DesignType.caption.font.bold())
                     .foregroundStyle(.secondary)
             }
 
-            HStack(spacing: 12) {
+            HStack(spacing: DesignSpacing.m.pt) {
                 Button {
                     performQuietZone {
                         try quietZone.prepareSpatialPositions()
@@ -1683,7 +1683,7 @@ struct ProductionActiveAcousticsWorkspace: View {
                 } label: {
                     Label("Save Spatial Positions", systemImage: "point.3.connected.trianglepath.dotted")
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(.glass)
                 .disabled(
                     ambient.selectedModelPosition == nil
                         || !ambient.roomProjectMatchesSelectedMicrophone
@@ -1694,7 +1694,7 @@ struct ProductionActiveAcousticsWorkspace: View {
                 } label: {
                     Label("Refresh", systemImage: "arrow.clockwise")
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(.glass)
                 Spacer()
 
                 if onePageFlag {
@@ -1705,7 +1705,7 @@ struct ProductionActiveAcousticsWorkspace: View {
             }
 
             if let calibration = quietZone.spatialCalibration {
-                HStack(spacing: 16) {
+                HStack(spacing: DesignSpacing.l.pt) {
                     Label(
                         "\(calibration.positions.count) measured positions",
                         systemImage: "mappin.and.ellipse"
@@ -1715,7 +1715,7 @@ struct ProductionActiveAcousticsWorkspace: View {
                         systemImage: "waveform.path"
                     )
                 }
-                .font(.caption.monospacedDigit())
+                .font(DesignType.caption.font.monospacedDigit())
                 .foregroundStyle(.secondary)
                 if let anchor = ambient.selectedModelPosition,
                    calibration.anchorPositionID != anchor.id {
@@ -1723,32 +1723,32 @@ struct ProductionActiveAcousticsWorkspace: View {
                         "Live microphone is not at the calibrated anchor; spatial control cannot operate.",
                         systemImage: "exclamationmark.triangle"
                     )
-                    .font(.caption)
-                    .foregroundStyle(.orange)
+                    .font(DesignType.caption.font)
+                    .foregroundStyle(StatusLevel.attention.color)
                 }
             }
 
             Text(quietZone.spatialReadinessMessage)
-                .font(.caption)
+                .font(DesignType.caption.font)
                 .foregroundStyle(.secondary)
 
-            VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: DesignSpacing.m.pt) {
                 Text("One-Microphone Coherent Tone Survey")
-                    .font(.subheadline.bold())
+                    .font(DesignType.label.font.bold())
                 Text(
                     "Stop playback and Quiet Zone. Leave a stable external 25–150 Hz tone running. Capture twice at the anchor, twice at each other measured position, then twice again at the anchor without interrupting the Mac microphone stream."
                 )
-                .font(.caption)
+                .font(DesignType.caption.font)
                 .foregroundStyle(.secondary)
 
-                HStack(spacing: 10) {
+                HStack(spacing: DesignSpacing.m.pt) {
                     Text(
                         String(
                             format: "Survey tone %.0f Hz",
                             quietZone.requestedSpatialSurveyFrequencyHz
                         )
                     )
-                    .font(.caption.monospacedDigit())
+                    .font(DesignType.caption.font.monospacedDigit())
                     Slider(
                         value: $quietZone.requestedSpatialSurveyFrequencyHz,
                         in: 25...150,
@@ -1769,12 +1769,12 @@ struct ProductionActiveAcousticsWorkspace: View {
                                 systemImage: "mic.fill"
                             )
                         }
-                        .buttonStyle(.borderedProminent)
+                        .buttonStyle(.glassProminent)
 
                         Button("Cancel") {
                             quietZone.cancelSpatialSurvey()
                         }
-                        .buttonStyle(.bordered)
+                        .buttonStyle(.glass)
                     } else {
                         Button {
                             performQuietZone {
@@ -1786,7 +1786,7 @@ struct ProductionActiveAcousticsWorkspace: View {
                                 systemImage: "waveform.badge.mic"
                             )
                         }
-                        .buttonStyle(.bordered)
+                        .buttonStyle(.glass)
                         .disabled(
                             quietZone.spatialCalibration == nil
                                 || quietZone.configuration.enabled
@@ -1800,25 +1800,25 @@ struct ProductionActiveAcousticsWorkspace: View {
                         quietZone.nextSpatialSurveyPositionName
                             ?? "Return microphone to the anchor"
                     )
-                    .font(.callout.bold())
+                    .font(DesignType.label.font.bold())
                     Text(
                         "Capture \(quietZone.spatialSurveyProgress) of \(((quietZone.spatialCalibration?.positions.count ?? 0) + 1) * 2)"
                     )
-                    .font(.caption.monospacedDigit())
+                    .font(DesignType.caption.font.monospacedDigit())
                 }
                 Text(quietZone.spatialSurveyMessage)
-                    .font(.caption)
+                    .font(DesignType.caption.font)
                     .foregroundStyle(.secondary)
             }
-            .padding(12)
+            .padding(DesignSpacing.m.pt)
             .background(
                 .secondary.opacity(0.05),
-                in: RoundedRectangle(cornerRadius: 12)
+                in: RoundedRectangle(cornerRadius: DesignRadius.medium.pt)
             )
 
             if !quietZone.spatialPredictions.isEmpty {
                 Text("Modeled spatial effect — not simultaneous physical verification")
-                    .font(.caption.bold())
+                    .font(DesignType.caption.font.bold())
                 ForEach(quietZone.spatialPredictions) { seat in
                     HStack {
                         Text(
@@ -1840,18 +1840,18 @@ struct ProductionActiveAcousticsWorkspace: View {
                         )
                         .monospacedDigit()
                     }
-                    .font(.caption)
+                    .font(DesignType.caption.font)
                 }
             }
 
             Text(
                 "Ordinary Room Correction sweeps do not establish external-noise phase. The one-mic tone survey attempts to preserve a shared clock and validates stationarity with an anchor-return capture; if it cannot, spatial ANC stays off. One physical mic verifies only its current seat, so re-measure all seats before claiming area-wide improvement."
             )
-            .font(.caption)
+            .font(DesignType.caption.font)
             .foregroundStyle(.secondary)
         }
-        .padding(18)
-        .glassEffect(.regular, in: .rect(cornerRadius: 18))
+        .padding(DesignSpacing.l.pt)
+        .glassEffect(.regular, in: .rect(cornerRadius: DesignRadius.large.pt))
     }
 
     private var quietZoneFrequencyValue: String {
@@ -1930,7 +1930,7 @@ struct ProductionActiveAcousticsWorkspace: View {
     }
 
     private var roomTreatment: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: DesignSpacing.l.pt) {
             if let mimoTreatment, mimoTreatment.isAvailable {
                 ProductionMIMOTreatmentSection(controller: mimoTreatment)
             }
@@ -1943,7 +1943,7 @@ struct ProductionActiveAcousticsWorkspace: View {
 
             LazyVGrid(
                 columns: [GridItem(.flexible()), GridItem(.flexible())],
-                spacing: 14
+                spacing: DesignSpacing.l.pt
             ) {
                 metricCard(
                     title: "Treatment Band",
@@ -1967,9 +1967,9 @@ struct ProductionActiveAcousticsWorkspace: View {
                 )
             }
 
-            VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: DesignSpacing.m.pt) {
                 Text("Acceptance Path")
-                    .font(.headline)
+                    .font(DesignType.sectionTitle.font)
 
                 readinessRow(
                     title: "MIMO design",
@@ -2000,8 +2000,8 @@ struct ProductionActiveAcousticsWorkspace: View {
                         : "lock.shield"
                 )
             }
-            .padding(18)
-            .glassEffect(.regular, in: .rect(cornerRadius: 18))
+            .padding(DesignSpacing.l.pt)
+            .glassEffect(.regular, in: .rect(cornerRadius: DesignRadius.large.pt))
 
             safetyNote(
                 mimoTreatment?.isAvailable == true
@@ -2014,22 +2014,22 @@ struct ProductionActiveAcousticsWorkspace: View {
     private var roomTreatmentStatusCard: some View {
         let treatment = transportSnapshot?.roomTreatment
 
-        return VStack(alignment: .leading, spacing: 12) {
+        return VStack(alignment: .leading, spacing: DesignSpacing.m.pt) {
             HStack {
                 Label("MIMO Room Treatment", systemImage: "waveform.path.ecg.rectangle")
-                    .font(.headline)
+                    .font(DesignType.sectionTitle.font)
                 Spacer()
                 Text(treatmentStatus)
-                    .font(.caption.bold())
+                    .font(DesignType.caption.font.bold())
                     .tracking(1.0)
                     .foregroundStyle(treatment?.faulted == true ? .red : .secondary)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
+                    .padding(.horizontal, DesignSpacing.m.pt)
+                    .padding(.vertical, DesignSpacing.s.pt)
                     .glassEffect(.regular, in: .capsule)
             }
 
             if let treatment {
-                HStack(spacing: 18) {
+                HStack(spacing: DesignSpacing.l.pt) {
                     LabeledContent("Mix") {
                         Text("\(Double(treatment.treatmentMix * 100), specifier: "%.0f")%")
                             .monospacedDigit()
@@ -2043,27 +2043,27 @@ struct ProductionActiveAcousticsWorkspace: View {
                             .monospacedDigit()
                     }
                 }
-                .font(.subheadline)
+                .font(DesignType.label.font)
 
                 Text(
                     treatment.faulted
                         ? "A runtime/protection fault is latched. The transition substrate returns toward latency-matched identity rather than leaving a partial treatment topology."
                         : "The live transport is reporting the hardware-gated treatment substrate. Authorization and arming remain separate states."
                 )
-                .font(.caption)
+                .font(DesignType.caption.font)
                 .foregroundStyle(.secondary)
             } else if engine.roomTreatmentStagedForNextStart {
                 Text("A hardware-accepted treatment is staged for the next speaker start. It remains default-bypassed until the internal control plane explicitly arms it.")
-                    .font(.subheadline)
+                    .font(DesignType.label.font)
                     .foregroundStyle(.secondary)
             } else {
                 Text("No treatment is staged. The normal speaker path runs without the additional treatment latency.")
-                    .font(.subheadline)
+                    .font(DesignType.label.font)
                     .foregroundStyle(.secondary)
             }
         }
-        .padding(18)
-        .glassEffect(.regular, in: .rect(cornerRadius: 18))
+        .padding(DesignSpacing.l.pt)
+        .glassEffect(.regular, in: .rect(cornerRadius: DesignRadius.large.pt))
     }
 
     private var treatmentStatus: String {
@@ -2127,30 +2127,30 @@ struct ProductionActiveAcousticsWorkspace: View {
         detail: String,
         systemImage: String
     ) -> some View {
-        HStack(alignment: .top, spacing: 14) {
+        HStack(alignment: .top, spacing: DesignSpacing.l.pt) {
             Image(systemName: systemImage)
-                .font(.title2)
+                .font(DesignType.sectionTitle.font)
                 .frame(width: 32)
-            VStack(alignment: .leading, spacing: 5) {
+            VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
                 Text(title)
-                    .font(.headline)
+                    .font(DesignType.sectionTitle.font)
                 Text(detail)
-                    .font(.subheadline)
+                    .font(DesignType.label.font)
                     .foregroundStyle(.secondary)
             }
         }
-        .padding(18)
+        .padding(DesignSpacing.l.pt)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .glassEffect(.regular, in: .rect(cornerRadius: 18))
+        .glassEffect(.regular, in: .rect(cornerRadius: DesignRadius.large.pt))
     }
 
     /// E4 S30c: the Conversation Focus card (`e4.conversation-unmasking`): speech detected, the realised cut curve,
     /// estimated intelligibility before and after, and why per-band unmasking fell back.
     private func unmaskingCardView(_ card: ConversationUnmaskingCardModel) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: DesignSpacing.m.pt) {
             Text("Conversation unmasking")
-                .font(.headline)
-            HStack(spacing: 20) {
+                .font(DesignType.sectionTitle.font)
+            HStack(spacing: DesignSpacing.xl.pt) {
                 LabeledContent("Speech") {
                     Text(card.speechDetected ? "Detected (\(card.speechConfidencePercent)%)" : "Not detected")
                 }
@@ -2163,7 +2163,7 @@ struct ProductionActiveAcousticsWorkspace: View {
                     Text(String(format: "%.1f dB in %d bands", card.maximumCutDB, card.cutBandCount)).monospacedDigit()
                 }
             }
-            .font(.subheadline)
+            .font(DesignType.label.font)
             if !card.curve.isEmpty {
                 AmbientCompensationResponseCurveView(
                     points: card.curve,
@@ -2174,16 +2174,16 @@ struct ProductionActiveAcousticsWorkspace: View {
             }
             if let reason = card.fallbackReason {
                 Label(reason, systemImage: "info.circle")
-                    .font(.callout)
+                    .font(DesignType.label.font)
                     .foregroundStyle(.secondary)
             }
             Text(ConversationUnmaskingCardModel.estimateNote + " " + ConversationUnmaskingCardModel.microphoneNote)
-                .font(.caption)
+                .font(DesignType.caption.font)
                 .foregroundStyle(.secondary)
         }
-        .padding(14)
+        .padding(DesignSpacing.l.pt)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .glassEffect(.regular, in: .rect(cornerRadius: 14))
+        .glassEffect(.regular, in: .rect(cornerRadius: DesignRadius.medium.pt))
     }
 
     private func metricCard(
@@ -2191,44 +2191,44 @@ struct ProductionActiveAcousticsWorkspace: View {
         value: String,
         detail: String
     ) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: DesignSpacing.s.pt) {
             Text(title)
-                .font(.caption.bold())
+                .font(DesignType.caption.font.bold())
                 .foregroundStyle(.secondary)
             Text(value)
-                .font(.title3.weight(.semibold))
+                .font(DesignType.sectionTitle.font.weight(.semibold))
                 .monospacedDigit()
             Text(detail)
-                .font(.caption)
+                .font(DesignType.caption.font)
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, minHeight: 34, alignment: .topLeading)
         }
-        .padding(16)
+        .padding(DesignSpacing.l.pt)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .glassEffect(.regular, in: .rect(cornerRadius: 16))
+        .glassEffect(.regular, in: .rect(cornerRadius: DesignRadius.medium.pt))
     }
 
     private func informationCard(
         title: String,
         items: [String]
     ) -> some View {
-        VStack(alignment: .leading, spacing: 11) {
+        VStack(alignment: .leading, spacing: DesignSpacing.m.pt) {
             Text(title)
-                .font(.headline)
+                .font(DesignType.sectionTitle.font)
             ForEach(items, id: \.self) { item in
-                HStack(alignment: .top, spacing: 9) {
+                HStack(alignment: .top, spacing: DesignSpacing.s.pt) {
                     Image(systemName: "circle.fill")
                         .font(.system(size: 5))
-                        .padding(.top, 6)
+                        .padding(.top, DesignSpacing.s.pt)
                     Text(item)
-                        .font(.subheadline)
+                        .font(DesignType.label.font)
                         .foregroundStyle(.secondary)
                 }
             }
         }
-        .padding(18)
+        .padding(DesignSpacing.l.pt)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .glassEffect(.regular, in: .rect(cornerRadius: 18))
+        .glassEffect(.regular, in: .rect(cornerRadius: DesignRadius.large.pt))
     }
 
     private func readinessRow(
@@ -2237,36 +2237,36 @@ struct ProductionActiveAcousticsWorkspace: View {
         state: String,
         systemImage: String
     ) -> some View {
-        HStack(spacing: 12) {
+        HStack(spacing: DesignSpacing.m.pt) {
             Image(systemName: systemImage)
                 .frame(width: 24)
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
                 Text(title)
-                    .font(.subheadline.weight(.semibold))
+                    .font(DesignType.label.font.weight(.semibold))
                 Text(detail)
-                    .font(.caption)
+                    .font(DesignType.caption.font)
                     .foregroundStyle(.secondary)
             }
             Spacer()
             Text(state)
-                .font(.caption.bold())
+                .font(DesignType.caption.font.bold())
                 .foregroundStyle(.secondary)
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, DesignSpacing.xs.pt)
     }
 
     private func safetyNote(_ text: String) -> some View {
         Label {
             Text(text)
-                .font(.caption)
+                .font(DesignType.caption.font)
                 .foregroundStyle(.secondary)
         } icon: {
             Image(systemName: "lock.shield")
                 .foregroundStyle(.secondary)
         }
-        .padding(14)
+        .padding(DesignSpacing.l.pt)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.quaternary.opacity(0.16), in: .rect(cornerRadius: 14))
+        .background(.quaternary.opacity(0.16), in: .rect(cornerRadius: DesignRadius.medium.pt))
     }
 
     @MainActor

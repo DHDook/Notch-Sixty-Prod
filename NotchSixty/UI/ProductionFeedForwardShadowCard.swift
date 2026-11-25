@@ -8,22 +8,22 @@ struct ProductionFeedForwardShadowCard: View {
 
     var body: some View {
         let status = shadow.status
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: DesignSpacing.m.pt) {
             HStack {
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
                     Text("Feed-Forward Shadow")
-                        .font(.headline)
+                        .font(DesignType.sectionTitle.font)
                     Text("Adapts on both microphones without playing anything. Reductions are predictions at the seat, with the speakers' leakage into the reference left out.")
-                        .font(.caption)
+                        .font(DesignType.caption.font)
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
                 Text(status.state.displayName.uppercased())
-                    .font(.caption.bold())
+                    .font(DesignType.caption.font.bold())
                     .tracking(1)
                     .foregroundStyle(.secondary)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
+                    .padding(.horizontal, DesignSpacing.m.pt)
+                    .padding(.vertical, DesignSpacing.s.pt)
                     .glassEffect(.regular, in: .capsule)
             }
 
@@ -32,20 +32,20 @@ struct ProductionFeedForwardShadowCard: View {
                 EmptyView()
             case .waiting(let reason), .fault(let reason):
                 Text(reason)
-                    .font(.callout)
+                    .font(DesignType.label.font)
                     .foregroundStyle(.secondary)
                     .textSelection(.enabled)
             case .adapting:
                 adapting(status)
             }
         }
-        .padding(18)
-        .glassEffect(.regular, in: .rect(cornerRadius: 18))
+        .padding(DesignSpacing.l.pt)
+        .glassEffect(.regular, in: .rect(cornerRadius: DesignRadius.large.pt))
     }
 
     @ViewBuilder
     private func adapting(_ status: QuietZoneFeedForwardShadowStatus) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: DesignSpacing.s.pt) {
             Text(seedText(status.seedSource))
             Text(String(
                 format: "%.0f Hz native, %.0f Hz adaptive rate; %.0f s since the last restart.",
@@ -56,7 +56,7 @@ struct ProductionFeedForwardShadowCard: View {
             }
             Text("Guard: \(guardText(status.guardState)). Gaps \(status.gaps), model resets \(status.modelResets), gain limited \(status.gainLimited).")
         }
-        .font(.callout)
+        .font(DesignType.label.font)
         .foregroundStyle(.secondary)
 
         echo(status.echo)
@@ -65,7 +65,7 @@ struct ProductionFeedForwardShadowCard: View {
             Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 4) {
                 GridRow {
                     ForEach(["Band", "Shadow", "Offline design", "Target"], id: \.self) {
-                        Text($0).font(.caption.bold()).foregroundStyle(.secondary)
+                        Text($0).font(DesignType.caption.font.bold()).foregroundStyle(.secondary)
                     }
                 }
                 ForEach(status.comparison.bands) { band in
@@ -80,7 +80,7 @@ struct ProductionFeedForwardShadowCard: View {
                         Text(String(format: "≥ %.0f dB", QuietZoneFeedForwardShadowComparison.targetReductionDB))
                             .foregroundStyle(.secondary)
                     }
-                    .font(.caption.monospacedDigit())
+                    .font(DesignType.caption.font.monospacedDigit())
                 }
             }
         }
@@ -88,7 +88,7 @@ struct ProductionFeedForwardShadowCard: View {
 
     @ViewBuilder
     private func echo(_ echo: QuietZoneFeedForwardEchoReadout) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
             switch echo.alignment {
             case .off(let reason):
                 Text(reason)
@@ -112,13 +112,13 @@ struct ProductionFeedForwardShadowCard: View {
             case .notChecked(let why):
                 Text("Leakage stability: \(why).")
             case .refused(let why):
-                Text("Would be refused: \(why).").foregroundStyle(.orange)
+                Text("Would be refused: \(why).").foregroundStyle(StatusLevel.attention.color)
             }
             if echo.measureAgain {
-                Text("Removal stayed under 10 dB; measure leakage again.").foregroundStyle(.orange)
+                Text("Removal stayed under 10 dB; measure leakage again.").foregroundStyle(StatusLevel.attention.color)
             }
         }
-        .font(.callout)
+        .font(DesignType.label.font)
         .foregroundStyle(.secondary)
     }
 
