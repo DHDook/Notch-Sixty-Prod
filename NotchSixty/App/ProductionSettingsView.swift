@@ -15,6 +15,16 @@ struct ProductionSettingsView: View {
     @AppStorage(PreferenceKeys.Application.resumeProcessingOnOpen)
     private var resumeProcessingOnOpen = false
 
+    init(
+        preferences: ApplicationPreferences, product: ProductController, featureFlags: FeatureFlags,
+        initialTab: SettingsTab = .general
+    ) {
+        self.preferences = preferences
+        self.product = product
+        self.featureFlags = featureFlags
+        _selectedTab = State(initialValue: initialTab)
+    }
+
     private var version: String {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—"
     }
@@ -202,10 +212,18 @@ struct ProductionSettingsView: View {
         }
     }
 
-    @ViewBuilder
     private func tabPage(_ tab: SettingsTab) -> some View {
         ScrollView {
             GlassEffectContainer(spacing: 14) {
+                tabCards(tab)
+            }
+            .padding(18)
+        }
+    }
+
+    /// The cards of one tab. Internal so the layout test can host a tab at a given width (E12 S25, G99).
+    @ViewBuilder
+    func tabCards(_ tab: SettingsTab) -> some View {
                 VStack(alignment: .leading, spacing: 14) {
                     switch tab {
                     case .general:
@@ -230,6 +248,10 @@ struct ProductionSettingsView: View {
                         permissionsCard
                     case .data:
                         backupCard
+                        SettingsAutomaticBackupCard(manager: product.settingsData, preferences: preferences)
+                        SettingsResetEraseCard(
+                            manager: product.settingsData, preferences: preferences,
+                            isIdle: product.audioEngine.lifecycleState == .idle)
                     case .about:
                         SettingsAboutView(
                             version: version,
@@ -238,9 +260,6 @@ struct ProductionSettingsView: View {
                         )
                     }
                 }
-            }
-            .padding(18)
-        }
     }
 
     private var displaysCard: some View {

@@ -137,6 +137,9 @@ struct NotchSixtyApp: App {
                 .task {
                     product.prepareForUse()
                     preferences.apply(to: product.audioEngine)
+                    if featureFlags.isEnabled(.settingsPage) {
+                        product.settingsData.backUpAutomaticallyIfDue(preferences: preferences)
+                    }
                     await product.resumeProcessingIfNeeded()
                 }
         }

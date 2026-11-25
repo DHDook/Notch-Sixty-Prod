@@ -69,6 +69,16 @@ final class ProductController: ObservableObject {
     let audioEngine: AudioIOEngine
     /// E12 S24: resume processing on open (Swift only; behind `e12.settings-page`).
     let resume = ResumeProcessingCoordinator()
+    /// E12 S25: automatic backups, restore default settings and erase all data (Settings > Data).
+    private(set) lazy var settingsData = SettingsDataManager(
+        backup: backup,
+        isIdle: { [unowned self] in audioEngine.lifecycleState == .idle },
+        afterDataChange: { [unowned self] in
+            abComparison.clearAll()
+            roomCorrectionProjects.prepareForUse()
+            profiles.eqProgramAnalyser.setOn(false)
+            profiles.eqProgramAnalyser.setMode(.default)
+        })
     let audioUnitHost: AudioUnitHostController
     let profiles: ProductProfileController
     let abComparison: ContentABComparisonController

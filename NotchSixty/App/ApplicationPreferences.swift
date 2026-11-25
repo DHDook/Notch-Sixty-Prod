@@ -711,8 +711,24 @@ final class ApplicationPreferences: ObservableObject {
             showVolumeInMenuBar: showVolumeInMenuBar,
             showVolumePopup: showVolumePopup,
             volumePopupPosition: volumePopupPosition.rawValue,
-            coverSystemVolumePopup: coverSystemVolumePopup
+            coverSystemVolumePopup: coverSystemVolumePopup,
+            resumeProcessingOnOpen: defaults.bool(forKey: Key.resumeProcessingOnOpen),
+            abComparisonEnabled: defaults.bool(forKey: PreferenceKeys.abComparisonEnabled),
+            vuMetersEnabled: defaults.object(forKey: PreferenceKeys.vuMetersEnabled) as? Bool ?? true
         )
+    }
+
+    /// E12 S25: every setting back to its first-launch value. Presets, systems and measurements are not touched;
+    /// Launch at Login and macOS permissions are not touched either.
+    func restoreDefaultSettings() {
+        appearance = .system
+        presence = .both
+        volumeStepResolution = .standard
+        showVolumeInMenuBar = true
+        showVolumePopup = false
+        volumePopupPosition = .bottomCenter
+        coverSystemVolumePopup = false
+        for key in SettingsPreferenceKeys.keys { defaults.removeObject(forKey: key) }
     }
 
     /// Restores only portable app-owned preferences. macOS permission grants
@@ -743,6 +759,9 @@ final class ApplicationPreferences: ObservableObject {
             volumePopupPosition = position
         }
         if let cover = snapshot.coverSystemVolumePopup { coverSystemVolumePopup = cover }
+        if let resume = snapshot.resumeProcessingOnOpen { defaults.set(resume, forKey: Key.resumeProcessingOnOpen) }
+        if let ab = snapshot.abComparisonEnabled { defaults.set(ab, forKey: PreferenceKeys.abComparisonEnabled) }
+        if let vu = snapshot.vuMetersEnabled { defaults.set(vu, forKey: PreferenceKeys.vuMetersEnabled) }
     }
 
     private func applyAppearance() {
