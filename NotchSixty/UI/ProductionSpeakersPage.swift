@@ -23,7 +23,18 @@ struct ProductionSpeakersView: View {
         SpeakersPageModel.make(
             matrixEnabled: engine.speakerRoutingConfiguration?.enabled == true,
             bass: engine.bassManagementConfiguration,
-            legacyRoutingReason: profiles.selectedSystemProfile?.state.unmigratedLegacyRoutingReason)
+            legacyRoutingReason: profiles.selectedSystemProfile?.state.unmigratedLegacyRoutingReason,
+            carry: profiles.selectedSystemProfile.map {
+                SpeakersBassMigration.outcome(for: $0.state, detectedChannelCount: detectedChannelCount)
+            } ?? .nothingToCarry)
+    }
+
+    private var detectedChannelCount: Int { Int(engine.selectedOutputDevice?.outputChannelCount ?? 0) }
+
+    /// S16b: carries what the retired Crossover Design and Sub Phase Alignment cards stored to the arrangement.
+    private func carryOlderBassSettings() {
+        do { try SpeakersBassMigration.carry(profiles: profiles, detectedChannelCount: detectedChannelCount) }
+        catch { actionError = error.localizedDescription }
     }
 
     @ViewBuilder
@@ -55,9 +66,12 @@ struct ProductionSpeakersView: View {
                     }
                 } else {
                     ProductionProfileSubwooferCard(engine: engine, profiles: profiles)
-                    crossoverCard
-                    if engine.bassManagementConfiguration.physicalOutputMode == .mainsSub {
-                        subAlignmentCard
+                    if engine.bassManagementConfiguration.enabled { subLevelCard }
+                    if let summary = page.legacyBassSummary {
+                        Label(summary, systemImage: "info.circle")
+                            .font(DesignType.caption.font)
+                            .foregroundStyle(.secondary)
+                            .accessibilityIdentifier("speakers-legacy-bass-summary")
                     }
                     DisclosureGroup("Routing matrix (per-driver control)") {
                         ProductionRoutingEditorView(engine: engine).padding(.top, 10)
@@ -69,6 +83,7 @@ struct ProductionSpeakersView: View {
                 errorLabel
             }
         }
+        .task { carryOlderBassSettings() }
     }
 
     @ViewBuilder
@@ -286,6 +301,39 @@ struct ProductionSpeakersView: View {
             .disabled(!engine.bassManagementConfiguration.subPhaseAlignmentEnabled)
         }
         .padding(20)
+        .background(.regularMaterial, in: .rect(cornerRadius: 22))
+        .overlay {
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .stroke(.quaternary, lineWidth: 0.5)
+        }
+    }
+
+    /// E12 S16b: the sub level and polarity the retired Crossover Design card carried. Frequency and slope are in the
+    /// arrangement editor above; the sub phase all-pass is a matrix setting.
+    private var subLevelCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Subwoofer level and polarity").font(.headline)
+            LabeledContent("Sub Gain") {
+                HStack(spacing: 12) {
+                    Slider(value: Binding(
+                        get: { engine.bassManagementConfiguration.subGainDB },
+                        set: { value in updateCrossover { $0.subGainDB = value } }
+                    ), in: BassManagementConfiguration.subGainRange, step: 0.5)
+                    .designSlider("Subwoofer gain", value: engine.bassManagementConfiguration.subGainDB, unit: .db)
+                    .frame(minWidth: 160, maxWidth: 260)
+                    Text("\(engine.bassManagementConfiguration.subGainDB, specifier: "%.1f") dB")
+                        .monospacedDigit()
+                        .frame(width: 68, alignment: .trailing)
+                }
+            }
+            Toggle("Invert Sub Polarity", isOn: Binding(
+                get: { engine.bassManagementConfiguration.subPolarityInverted },
+                set: { value in updateCrossover { $0.subPolarityInverted = value } }
+            ))
+            .toggleStyle(.switch)
+        }
+        .padding(20)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .background(.regularMaterial, in: .rect(cornerRadius: 22))
         .overlay {
             RoundedRectangle(cornerRadius: 22, style: .continuous)

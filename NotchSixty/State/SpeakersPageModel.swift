@@ -15,15 +15,19 @@ struct SpeakersPageModel: Equatable, Sendable {
     var owner: SpeakersBassOwner
     /// The line at the top of the page.
     var ownerLine: String
-    /// The older crossover and sub phase cards are shown (the arrangement owns bass).
+    /// The arrangement's bass cards are shown (the arrangement owns bass). The older Crossover Design and Sub Phase
+    /// Alignment cards are retired (S16b); their settings are carried by `SpeakersBassMigration`.
     var showsArrangementBassCards: Bool
     /// The routing editor is open by default (the matrix owns routing).
     var routingEditorExpanded: Bool
     /// The older logical crossover is still playing while the matrix is in charge: shown read-only, with its reason.
     var legacyBassNote: String?
+    /// Older bass settings that could not be carried keep playing and are shown read-only with their reason (S16b).
+    var legacyBassSummary: String?
 
     static func make(
-        matrixEnabled: Bool, bass: BassManagementConfiguration, legacyRoutingReason: String?
+        matrixEnabled: Bool, bass: BassManagementConfiguration, legacyRoutingReason: String?,
+        carry: SpeakersBassMigration.Outcome = .nothingToCarry
     ) -> SpeakersPageModel {
         if matrixEnabled {
             var note: String?
@@ -36,7 +40,8 @@ struct SpeakersPageModel: Equatable, Sendable {
             return SpeakersPageModel(
                 owner: .routingMatrix,
                 ownerLine: "Bass and routing are handled by the routing matrix below. The arrangement's own bass settings are not used.",
-                showsArrangementBassCards: false, routingEditorExpanded: true, legacyBassNote: note)
+                showsArrangementBassCards: false, routingEditorExpanded: true, legacyBassNote: note,
+                legacyBassSummary: nil)
         }
         var line = "Bass is handled by your speaker arrangement"
         line += bass.enabled ? " (crossover \(Int(bass.frequencyHz.rounded())) Hz)." : " (no crossover is on)."
@@ -45,9 +50,11 @@ struct SpeakersPageModel: Equatable, Sendable {
             line = "Bass and routing use an older physical crossover that the routing matrix cannot represent "
                 + "(\(legacyRoutingReason)). It keeps playing as stored."
         }
+        var summary: String?
+        if case .keepsPlaying(let reason) = carry { summary = SpeakersBassMigration.summary(of: bass, reason: reason) }
         return SpeakersPageModel(
             owner: .arrangement, ownerLine: line, showsArrangementBassCards: true,
-            routingEditorExpanded: false, legacyBassNote: nil)
+            routingEditorExpanded: false, legacyBassNote: nil, legacyBassSummary: summary)
     }
 }
 

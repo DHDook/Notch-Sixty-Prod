@@ -32,6 +32,11 @@ struct SystemSetupSpeakersStep<Model: SpeakerArrangementEditing>: View {
                     "Crossover \(Int(model.topologyPreset.crossoverHz)) Hz",
                     value: $model.topologyPreset.crossoverHz,
                     in: SystemSetupTopologyPreset.crossoverRangeHz, step: 5)
+                // E12 S16b: the slope the retired Crossover Design card used to set.
+                Picker("Crossover slope", selection: $model.topologyPreset.slope) {
+                    ForEach(CrossoverTopology.allCases) { Text($0.displayName).tag($0) }
+                }
+                .accessibilityIdentifier("speakers-crossover-slope")
             }
             if choices.bass == .downstreamReceiver {
                 Text(SystemCapabilityMatrix.receiverAdvice).font(DesignType.caption.font).foregroundStyle(.secondary)
