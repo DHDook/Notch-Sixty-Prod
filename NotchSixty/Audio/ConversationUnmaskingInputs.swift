@@ -59,12 +59,15 @@ enum ConversationUnmaskingInputBuilder {
     ///   already applied; `appliedCutsDB` (positive dB per SII band) is added back so the planner works from
     ///   the uncut music and does not chase its own output.
     /// - baseline: the stored quiet-room spectrum, which is the noise masker.
+    /// - seatMusic: E29 S6, the music predicted at the seat from the room model. When present it replaces the
+    ///   analysis-microphone band levels as the music masker; nil keeps today's prediction.
     static func build(
         residual: [AmbientSpectrumBand],
         playback: [AmbientSpectrumBand]?,
         baseline: [AmbientSpectrumBand]?,
         appliedCutsDB: [Double],
-        speechConfidence: Double
+        speechConfidence: Double,
+        seatMusic: MusicAtSeatPrediction? = nil
     ) -> Swift.Result<ConversationUnmaskingInput, Unavailable> {
         guard let playback else { return .failure(.noPlaybackModel) }
         guard let baseline else { return .failure(.noBaseline) }
@@ -86,7 +89,7 @@ enum ConversationUnmaskingInputBuilder {
         }
         return .success(ConversationUnmaskingInput(
             speechBandLevelsDB: speech,
-            musicBandLevelsDB: zip(music.bandLevelsDB, appliedCutsDB).map { $0 + $1 },
+            musicBandLevelsDB: zip(seatMusic?.bandLevelsDB ?? music.bandLevelsDB, appliedCutsDB).map { $0 + $1 },
             lowMusicLevelDB: music.outsideLevelDB,
             speechConfidence: speechConfidence,
             noiseBandLevelsDB: noise.bandLevelsDB
@@ -117,6 +120,8 @@ struct ConversationUnmaskingEvaluation: Equatable, Sendable {
     var speechConfidence: Double
     /// The planner's input for this poll when it was complete (nil on fallback).
     var input: ConversationUnmaskingInput?
+    /// E29 S6: the music masker came from the seat model rather than the analysis microphone.
+    var usedSeatModel: Bool = false
 }
 
 enum ConversationUnmaskingEvaluator {
@@ -133,6 +138,7 @@ enum ConversationUnmaskingEvaluator {
         speechConfidence: Double,
         appliedCutsDB: [Double],
         minimumSeparationConfidence: Double,
+        seatMusic: MusicAtSeatPrediction? = nil,
         planner: ConversationUnmaskingPlanner = ConversationUnmaskingPlanner()
     ) -> ConversationUnmaskingEvaluation {
         func fallback(_ reason: ConversationUnmaskingFallback) -> ConversationUnmaskingEvaluation {
@@ -152,7 +158,8 @@ enum ConversationUnmaskingEvaluator {
             playback: detailed.modeledPlaybackSpectrum,
             baseline: quietBaseline,
             appliedCutsDB: appliedCutsDB,
-            speechConfidence: speechConfidence
+            speechConfidence: speechConfidence,
+            seatMusic: seatMusic
         ) {
         case .failure(let reason):
             switch reason {
@@ -164,7 +171,8 @@ enum ConversationUnmaskingEvaluator {
         case .success(let input):
             guard let plan = planner.plan(input) else { return fallback(.incompleteSpectrum) }
             return ConversationUnmaskingEvaluation(
-                status: .planned(plan), speechConfidence: speechConfidence, input: input
+                status: .planned(plan), speechConfidence: speechConfidence, input: input,
+                usedSeatModel: seatMusic != nil
             )
         }
     }

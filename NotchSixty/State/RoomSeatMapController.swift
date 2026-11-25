@@ -5,7 +5,8 @@ import Observation
 // records (room-correction positions today; the other adapters join in S7), links the geometry advisor's listener and
 // speaker points to model points instead of keeping a second copy, and persists entered positions through
 // `RoomModelStore` in the project's folder. Control plane only: nothing here touches the engine, arms anything or
-// changes a snapshot. Interpolated (derived) paths are not shown here; S6 reads them.
+// changes a snapshot. E29 S6: a seat the user adds without measuring it gets an estimated response from the nearest
+// measured seats (`n60_roommodel_interpolate`), shown with its confidence and never stored.
 
 /// Pure layout helpers for the top-down map, kept out of the view so they can be tested.
 struct RoomSeatMapLayout: Equatable, Sendable {
@@ -45,6 +46,17 @@ enum RoomSeatMapUnit: String, CaseIterable, Identifiable, Sendable {
     }
 }
 
+/// One estimated (derived) response into a seat nobody measured. Never persisted; confidence is shown with it.
+struct RoomSeatMapDerivedRow: Identifiable, Equatable, Sendable {
+    var id: UUID
+    var seatName: String
+    /// "Estimated from 3 nearby seats, confidence 72%" or the reason there is no estimate.
+    var text: String
+    /// Nil when the position could not be estimated.
+    var meanConfidence: Double?
+    var usedBy: String
+}
+
 struct RoomSeatMapPathRow: Identifiable, Equatable, Sendable {
     var id: UUID
     var sourceName: String
@@ -72,6 +84,11 @@ final class RoomSeatMapController {
     /// Positions the user entered, by point ID. Linked points (see `linkedPointIDs`) live in the geometry instead.
     private var entered: [UUID: RoomPosition] = [:]
     private var project: RoomCorrectionProject?
+    /// Seats the user added without measuring them (E29 S6); stored with the entered positions.
+    private var extraSeats: [RoomPoint] = []
+    private(set) var derivedRows: [RoomSeatMapDerivedRow] = []
+    /// Estimated response into each unmeasured, positioned seat (left and right feed power-summed).
+    private(set) var derivedResponses: [UUID: RoomBandResponse] = [:]
 
     init(projectStore: RoomCorrectionProjectStore, unit: RoomSeatMapUnit = .forLocale()) {
         self.projectStore = projectStore
@@ -86,9 +103,11 @@ final class RoomSeatMapController {
         self.geometry = geometry
         self.context = context
         entered = [:]
+        extraSeats = []
         message = nil
         if let doc = try? RoomModelStore.load(from: directory(for: project.id)) {
             for p in doc.model.points { if let pos = p.position { entered[p.id] = pos } }
+            extraSeats = doc.model.points.filter { $0.kind == .seat }
         }
         rebuild()
     }
@@ -115,6 +134,7 @@ final class RoomSeatMapController {
         let linked = linkedPointIDs
         let main = listenerID
         var base = built.points
+        for seat in extraSeats where !base.contains(where: { $0.id == seat.id }) { base.append(seat) }
         if geometry != nil {
             // The advisor's geometry always has a listener and two speakers; make sure they are points.
             func add(_ id: UUID, _ kind: RoomPointKind, _ name: String) {
@@ -139,6 +159,7 @@ final class RoomSeatMapController {
         }
         model = RoomModel(points: points, paths: built.paths)
         updateSizeWarning()
+        refreshDerived()
     }
 
     private func updateSizeWarning() {
@@ -188,6 +209,99 @@ final class RoomSeatMapController {
     var summaryText: String {
         let c = model.completeness(in: context)
         return "\(c.pointCount) points, \(c.pathCount) measured paths, \(c.unpositionedPointIDs.count) without a position, \(c.stalePathIDs.count) stale."
+    }
+
+    // MARK: Unmeasured seats and derived paths (E29 S6)
+
+    /// Seats the user added to ask "what would it be like here?"; they have no measured path.
+    var unmeasuredSeatIDs: [UUID] { extraSeats.map(\.id).filter { model.point($0) != nil } }
+
+    @discardableResult
+    func addUnmeasuredSeat(name: String, x: Double, y: Double, z: Double = 1.1) -> UUID? {
+        let trimmed = name.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty, x.isFinite, y.isFinite, z.isFinite else { return nil }
+        let id = UUID()
+        extraSeats.append(RoomPoint(id: id, kind: .seat, name: trimmed, position: nil))
+        entered[id] = RoomPosition(x: max(0, x), y: max(0, y), z: max(0, z), source: .typed, uncertaintyMetres: nil)
+        persist()
+        rebuild()
+        return id
+    }
+
+    func removeUnmeasuredSeat(_ id: UUID) {
+        guard extraSeats.contains(where: { $0.id == id }) else { return }
+        extraSeats.removeAll { $0.id == id }
+        entered[id] = nil
+        if selectedPointID == id { selectedPointID = nil }
+        persist()
+        rebuild()
+    }
+
+    /// Estimates each positioned, unmeasured seat from the nearest measured seats (measured, in date and with an
+    /// impulse response; stale and flagged paths are left out). Synchronous: a few short FFTs. Nothing is stored.
+    private func refreshDerived() {
+        derivedRows = []
+        derivedResponses = [:]
+        guard let project else { return }
+        let feeds = model.points.filter { $0.kind == .speakerFeed }
+        for seat in model.points where seat.kind == .seat && model.paths(to: seat.id).isEmpty {
+            guard let seatPosition = seat.position else { continue }
+            var perFeed: [RoomBandResponse] = []
+            var refusal: String?
+            let usable = feeds.filter { !model.paths(from: $0.id).isEmpty }
+            for feed in usable {
+                guard let feedPosition = feed.position else {
+                    refusal = "Place the speakers on the map to estimate this seat."
+                    break
+                }
+                let neighbours = neighbourPaths(from: feed.id, project: project)
+                guard let rate = Self.dominantRate(neighbours.map(\.rate)) else { continue }
+                let same = neighbours.filter { $0.rate == rate }.map(\.path)
+                switch RoomModelInterpolator.derive(
+                    source: feedPosition, query: seatPosition, sampleRate: rate, neighbours: same) {
+                case .success(let r): perFeed.append(r)
+                case .failure(let why): refusal = why.message
+                }
+            }
+            if refusal == nil, perFeed.isEmpty { refusal = RoomDerivedRefusal.noNeighbours.message }
+            if let refusal {
+                derivedRows.append(RoomSeatMapDerivedRow(
+                    id: seat.id, seatName: seat.name, text: "No estimate. \(refusal)", meanConfidence: nil,
+                    usedBy: "Nothing"))
+            } else if let both = RoomBandResponse.powerSum(perFeed) {
+                derivedResponses[seat.id] = both
+                var count = 0
+                if case .derived(let k) = both.origin { count = k / max(perFeed.count, 1) }
+                let pct = Int((both.meanConfidence * 100).rounded())
+                derivedRows.append(RoomSeatMapDerivedRow(
+                    id: seat.id, seatName: seat.name,
+                    text: "Estimated from \(count) nearby \(count == 1 ? "seat" : "seats"), confidence \(pct)%. "
+                        + "Shown only; not used for room correction.",
+                    meanConfidence: both.meanConfidence,
+                    usedBy: "Conversation Focus music estimate (with a fallback when confidence is low)"))
+            }
+        }
+    }
+
+    private func neighbourPaths(from feed: UUID, project: RoomCorrectionProject) -> [(rate: Double, path: RoomNeighbourPath)] {
+        var out: [(Double, RoomNeighbourPath)] = []
+        for path in model.paths(from: feed) {
+            guard path.qualityOK, RoomModelRule.state(of: path, in: context) == .measured,
+                  case .roomCorrectionPosition(let id, let channel) = path.origin,
+                  let position = model.point(path.receiver)?.position,
+                  let measured = project.measurements.first(where: { $0.id == id }) else { continue }
+            let ir = channel == "left" ? measured.left.impulseResponse : measured.right.impulseResponse
+            guard !ir.isEmpty else { continue }
+            out.append((path.sampleRate, RoomNeighbourPath(
+                position: position, impulseResponse: ir, phaseTrusted: path.timingTier.carriesPhase)))
+        }
+        return out
+    }
+
+    /// The rate most neighbours share (ties go to the higher rate), so one query never mixes rates.
+    static func dominantRate(_ rates: [Double]) -> Double? {
+        let counts = Dictionary(grouping: rates, by: { $0 }).mapValues(\.count)
+        return counts.max { a, b in a.value != b.value ? a.value < b.value : a.key < b.key }?.key
     }
 
     // MARK: Editing
@@ -248,7 +362,9 @@ final class RoomSeatMapController {
     private func persist() {
         guard let projectID else { return }
         // Only entered points are stored (positions are an index; measured data stays where it is).
-        let pts = model.points.filter { entered[$0.id] != nil }.map { p -> RoomPoint in
+        // Extra seats may not be in `model` yet (persist runs before rebuild).
+        let all = model.points + extraSeats.filter { seat in !model.points.contains { $0.id == seat.id } }
+        let pts = all.filter { entered[$0.id] != nil }.map { p -> RoomPoint in
             var q = p
             q.position = entered[p.id]
             return q
