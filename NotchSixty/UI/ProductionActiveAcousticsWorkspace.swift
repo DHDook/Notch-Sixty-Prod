@@ -284,6 +284,8 @@ struct ProductionActiveAcousticsWorkspace: View {
     @State private var ambientActionError: String?
     @State private var quietZoneActionError: String?
     @State private var advancedExpanded = false
+    /// E12 S8 (G98): the Advanced disclosure shows in expert mode only.
+    @Environment(\.interfaceMode) private var interfaceMode
     /// E12 S20: results kept for the "Earlier results" list.
     @StateObject private var results = AcousticsResultsStore()
 
@@ -1447,6 +1449,7 @@ struct ProductionActiveAcousticsWorkspace: View {
 
             quietZoneResultSections
 
+            if interfaceMode.isExpert {
             DisclosureGroup("Advanced", isExpanded: $advancedExpanded) {
                 VStack(alignment: .leading, spacing: DesignSpacing.l.pt) {
                     if let noiseSurvey = quietZone.noiseSurvey {
@@ -1464,6 +1467,7 @@ struct ProductionActiveAcousticsWorkspace: View {
                 .padding(.top, DesignSpacing.m.pt)
             }
             .font(DesignType.sectionTitle.font)
+            }
 
             safetyNote(
                 "Active Quiet Zone is deliberately limited to stable low-frequency components. It does not cancel speech, claps or broadband room sound and makes no claim of whole-room silence. A low-level probe must measurably improve the physical error microphone before full cancellation is allowed."

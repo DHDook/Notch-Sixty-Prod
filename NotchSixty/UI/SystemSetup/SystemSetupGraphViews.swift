@@ -86,11 +86,14 @@ struct SystemSetupGraphPanel: View {
     @ObservedObject var model: SystemSetupFlowModel
     let graph: SystemSetupGraph?
     let emptyNote: String
+    /// E12 S8 (G88): the mode decides the detail; with `e12.simple-expert-modes` off the switch stays as it was.
+    @Environment(\.interfaceMode) private var interfaceMode
+    private var modesEnabled: Bool { FeatureFlags().isEnabled(.simpleExpertModes) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: DesignSpacing.s.pt) {
             if let graph {
-                if graph.hasSeatDetail || model.graphDetail == .expert {
+                if !(modesEnabled && interfaceMode == .simple), graph.hasSeatDetail || model.graphDetail == .expert {
                     Picker("Detail", selection: $model.graphDetail) {
                         ForEach(SystemSetupGraphDetail.allCases) { Text($0.title).tag($0) }
                     }
@@ -102,6 +105,8 @@ struct SystemSetupGraphPanel: View {
                 Text(emptyNote).font(DesignType.caption.font).foregroundStyle(.secondary)
             }
         }
+        .onAppear { model.applyInterfaceMode(interfaceMode, modesEnabled: modesEnabled) }
+        .onChange(of: interfaceMode) { _, mode in model.applyInterfaceMode(mode, modesEnabled: modesEnabled) }
     }
 }
 

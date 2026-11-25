@@ -5,6 +5,7 @@ import UniformTypeIdentifiers
 
 struct SystemSetupCorrectionStep: View {
     @ObservedObject var model: SystemSetupFlowModel
+    @Environment(\.interfaceMode) private var interfaceMode
 
     var body: some View {
         VStack(alignment: .leading, spacing: DesignSpacing.m.pt) {
@@ -14,6 +15,9 @@ struct SystemSetupCorrectionStep: View {
             if let note = model.correctionNote { Label(note, systemImage: "info.circle").font(DesignType.label.font) }
             if let limit = model.correctionLimitHz {
                 Label(SystemSetupCorrectionLimit.note(limitHz: limit), systemImage: "exclamationmark.triangle").font(DesignType.label.font)
+            }
+            if let limit = model.correctionLimitHz, interfaceMode.isExpert, FeatureFlags().isEnabled(.simpleExpertModes) {
+                SystemSetupCorrectionLimitControl(model: model, limitHz: limit)
             }
             if let advice = model.receiverAdvice { Text(advice).font(DesignType.label.font).foregroundStyle(.secondary) }
             Picker("Listening", selection: $model.correctionMode) {
@@ -46,6 +50,36 @@ struct SystemSetupCorrectionStep: View {
                 Button("Revert") { model.revertCorrection() }.disabled(!model.choices.correctionApplied)
                 if model.choices.correctionApplied { Label("Applied", systemImage: "checkmark.circle.fill") }
             }
+        }
+    }
+}
+
+/// E12 S8 (G86): expert mode only. Moves the upper edge of correction while the microphone has no calibration file.
+struct SystemSetupCorrectionLimitControl: View {
+    @ObservedObject var model: SystemSetupFlowModel
+    let limitHz: Double
+
+    @ViewBuilder private var controls: some View {
+        let range = SystemSetupCorrectionLimit.overrideRangeHz
+        Text("Correction limit").font(DesignType.label.font)
+        Slider(
+            value: Binding(get: { log2(limitHz) }, set: { model.setCorrectionLimitOverride(pow(2, $0)) }),
+            in: log2(range.lowerBound)...log2(range.upperBound))
+            .frame(width: 220)
+            .disabled(model.choices.correctionApplied)
+        Text("\(Int(limitHz.rounded())) Hz").monospacedDigit().font(DesignType.label.font)
+        Button("Default") { model.setCorrectionLimitOverride(nil) }
+            .disabled(model.choices.correctionApplied || limitHz == SystemSetupCorrectionLimit.defaultHz)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
+            ViewThatFits(in: .horizontal) {
+                HStack { controls }
+                VStack(alignment: .leading) { controls }
+            }
+            Text("Above 300 Hz an uncalibrated microphone can mislead the correction. Revert the correction to change this.")
+                .font(DesignType.caption.font).foregroundStyle(.secondary)
         }
     }
 }
