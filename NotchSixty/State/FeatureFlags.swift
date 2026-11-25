@@ -38,7 +38,7 @@ extension FeatureFlag {
         .eqPageEnhancements, .dynamicsSound, .designLanguage, .followOutput, .dashboardRemote, .virtualDriver,
         .blindListening,
         .setupFlow, .systemPages, .selfQualification, .headphonesPage,
-        .activeCommissioning
+        .activeCommissioning, .settingsPage
     ]
 
     /// E6 S11: the unified graph is the default renderer. Turning this on selects the frozen
