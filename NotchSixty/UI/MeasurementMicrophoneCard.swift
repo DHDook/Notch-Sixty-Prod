@@ -14,9 +14,9 @@ struct MeasurementMicrophoneCard: View {
     var onError: (String?) -> Void = { _ in }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: DesignSpacing.m.pt) {
             LabeledContent("Permission") {
-                HStack(spacing: 10) {
+                HStack(spacing: DesignSpacing.m.pt) {
                     Text(permissionLabel)
                         .foregroundStyle(microphone.permissionStatus == .authorized ? .primary : .secondary)
                     if microphone.permissionStatus != .authorized {
@@ -33,7 +33,7 @@ struct MeasurementMicrophoneCard: View {
             }
             if microphone.permissionStatus == .authorized {
                 LabeledContent("Input") {
-                    HStack(spacing: 10) {
+                    HStack(spacing: DesignSpacing.m.pt) {
                         Picker("Measurement Input", selection: Binding<String?>(
                             get: { microphone.selectedInputUID },
                             set: { uid in
@@ -67,7 +67,7 @@ struct MeasurementMicrophoneCard: View {
                     .disabled(locked || microphone.selectedInputDevice == nil)
                 }
                 LabeledContent("Calibration") {
-                    HStack(spacing: 10) {
+                    HStack(spacing: DesignSpacing.m.pt) {
                         Text(microphone.microphoneCalibration.map { $0.sourceName ?? "Loaded calibration curve" } ?? "No calibration curve")
                             .foregroundStyle(microphone.microphoneCalibration == nil ? .secondary : .primary)
                             .lineLimit(1)
@@ -80,7 +80,7 @@ struct MeasurementMicrophoneCard: View {
                 }
                 if let curve = microphone.microphoneCalibration {
                     Text("\(curve.points.count) calibration points. The curve is applied to offline measurement analysis only; it is never inserted into daily playback DSP.")
-                        .font(.caption).foregroundStyle(.secondary)
+                        .font(DesignType.caption.font).foregroundStyle(.secondary)
                 }
             }
         }

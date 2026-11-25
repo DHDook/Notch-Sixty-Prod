@@ -115,7 +115,7 @@ struct ProductionHardwareAcceptanceWorkspace: View {
 
     var body: some View {
         ProductionPageContainer {
-            VStack(alignment: .leading, spacing: 20) {
+            VStack(alignment: .leading, spacing: DesignSpacing.xl.pt) {
                 header
                 authorityBoundaryCard
 
@@ -184,8 +184,8 @@ struct ProductionHardwareAcceptanceWorkspace: View {
     }
 
     private var header: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 18) {
-            VStack(alignment: .leading, spacing: 6) {
+        HStack(alignment: .firstTextBaseline, spacing: DesignSpacing.l.pt) {
+            VStack(alignment: .leading, spacing: DesignSpacing.s.pt) {
                 Text(
                     "Guided H01–H08 evidence collection for the later physical PR112 campaign."
                 )
@@ -193,11 +193,11 @@ struct ProductionHardwareAcceptanceWorkspace: View {
             }
             Spacer()
             Text("EVIDENCE ONLY")
-                .font(.caption.bold())
+                .font(DesignType.caption.font.bold())
                 .tracking(1.1)
                 .foregroundStyle(.secondary)
-                .padding(.horizontal, 11)
-                .padding(.vertical, 7)
+                .padding(.horizontal, DesignSpacing.m.pt)
+                .padding(.vertical, DesignSpacing.s.pt)
                 .glassEffect(.regular, in: .capsule)
         }
     }
@@ -207,21 +207,21 @@ struct ProductionHardwareAcceptanceWorkspace: View {
     ) -> some View {
         let evaluation = acceptance.evaluation
         return GroupBox("Acceptance Packet & Physical Runbook") {
-            VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: DesignSpacing.m.pt) {
                 Text(
                     "Export the immutable campaign identity, H01-H08 status matrix, unresolved gates, evidence log, artifact manifest, and safety-bounded physical runbook. Export never changes acceptance state."
                 )
-                .font(.caption)
+                .font(DesignType.caption.font)
                 .foregroundStyle(.secondary)
 
-                HStack(spacing: 10) {
+                HStack(spacing: DesignSpacing.m.pt) {
                     Button("Export JSON Packet") {
                         prepareAcceptanceExport(
                             campaign: campaign,
                             json: true
                         )
                     }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(.glassProminent)
 
                     Button("Export Markdown Runbook") {
                         prepareAcceptanceExport(
@@ -229,10 +229,10 @@ struct ProductionHardwareAcceptanceWorkspace: View {
                             json: false
                         )
                     }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(.glass)
                 }
 
-                HStack(spacing: 18) {
+                HStack(spacing: DesignSpacing.l.pt) {
                     summaryMetric(
                         "Unresolved gates",
                         "\(evaluation?.unresolvedGateIDs.count ?? HardwareAcceptanceGateID.allCases.count)"
@@ -250,41 +250,41 @@ struct ProductionHardwareAcceptanceWorkspace: View {
                 Text(
                     "Hard boundary: packet export cannot create physical evidence, release acceptance, ANC authorization, DSP authority, or merge permission."
                 )
-                .font(.caption2.bold())
+                .font(DesignType.caption.font.bold())
                 .foregroundStyle(.secondary)
             }
-            .padding(6)
+            .padding(DesignSpacing.s.pt)
         }
     }
 
     private var authorityBoundaryCard: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: DesignSpacing.m.pt) {
             Label(
                 "Remote CI cannot pass physical gates",
                 systemImage: "lock.shield.fill"
             )
-            .font(.headline)
+            .font(DesignType.sectionTitle.font)
             Text(
                 "Software tests can validate this workflow, but H01–H08 require the evidence authority shown on each gate. A remote “pass” remains insufficient authority. No control here changes DSP, routing, speaker output, or PR111 commissioning state."
             )
-            .font(.callout)
+            .font(DesignType.label.font)
             .foregroundStyle(.secondary)
         }
-        .padding(18)
-        .glassEffect(.regular, in: .rect(cornerRadius: 18))
+        .padding(DesignSpacing.l.pt)
+        .glassEffect(.regular, in: .rect(cornerRadius: DesignRadius.large.pt))
     }
 
     private func campaignSummary(
         _ campaign: HardwareAcceptanceCampaign
     ) -> some View {
         let evaluation = acceptance.evaluation
-        return VStack(alignment: .leading, spacing: 14) {
+        return VStack(alignment: .leading, spacing: DesignSpacing.l.pt) {
             HStack {
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
                     Text("Current campaign")
-                        .font(.headline)
+                        .font(DesignType.sectionTitle.font)
                     Text(campaign.identity.id.uuidString)
-                        .font(.caption.monospaced())
+                        .font(DesignType.caption.font.monospaced())
                         .foregroundStyle(.secondary)
                         .textSelection(.enabled)
                 }
@@ -294,10 +294,10 @@ struct ProductionHardwareAcceptanceWorkspace: View {
                         ? "PHYSICALLY ACCEPTED"
                         : "PHYSICAL ACCEPTANCE INCOMPLETE"
                 )
-                .font(.caption.bold())
+                .font(DesignType.caption.font.bold())
                 .tracking(0.7)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 6)
+                .padding(.horizontal, DesignSpacing.m.pt)
+                .padding(.vertical, DesignSpacing.s.pt)
                 .background(
                     .secondary.opacity(0.10),
                     in: Capsule()
@@ -306,7 +306,7 @@ struct ProductionHardwareAcceptanceWorkspace: View {
 
             LazyVGrid(
                 columns: [
-                    GridItem(.adaptive(minimum: 220), spacing: 12)
+                    GridItem(.adaptive(minimum: 220), spacing: DesignSpacing.m.pt)
                 ],
                 alignment: .leading,
                 spacing: 10
@@ -339,33 +339,33 @@ struct ProductionHardwareAcceptanceWorkspace: View {
                 )
             }
 
-            HStack(spacing: 10) {
+            HStack(spacing: DesignSpacing.m.pt) {
                 Button("Reload Latest Campaign") {
                     acceptance.prepareForUse()
                     actionMessage = "Reloaded the newest append-only campaign."
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(.glass)
 
                 Button("Start New Campaign") {
                     showingCampaignForm = true
                     actionMessage =
                         "Existing evidence remains preserved. A new campaign receives a new immutable identity."
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(.glass)
             }
         }
-        .padding(18)
-        .glassEffect(.regular, in: .rect(cornerRadius: 18))
+        .padding(DesignSpacing.l.pt)
+        .glassEffect(.regular, in: .rect(cornerRadius: DesignRadius.large.pt))
     }
 
     private var gateMatrix: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: DesignSpacing.m.pt) {
             Text("Acceptance gates")
-                .font(.headline)
+                .font(DesignType.sectionTitle.font)
             Text(
                 "Select a gate to prepare a new append-only observation. Conditional exclusions are campaign-scope decisions, not synthetic passes."
             )
-            .font(.caption)
+            .font(DesignType.caption.font)
             .foregroundStyle(.secondary)
 
             ForEach(HardwareAcceptanceCatalog.gates, id: \.id) {
@@ -373,8 +373,8 @@ struct ProductionHardwareAcceptanceWorkspace: View {
                 gateRow(definition)
             }
         }
-        .padding(18)
-        .glassEffect(.regular, in: .rect(cornerRadius: 18))
+        .padding(DesignSpacing.l.pt)
+        .glassEffect(.regular, in: .rect(cornerRadius: DesignRadius.large.pt))
     }
 
     private func gateRow(
@@ -385,58 +385,58 @@ struct ProductionHardwareAcceptanceWorkspace: View {
         return Button {
             selectedGate = definition.id
         } label: {
-            HStack(alignment: .top, spacing: 12) {
+            HStack(alignment: .top, spacing: DesignSpacing.m.pt) {
                 Text(definition.id.rawValue)
-                    .font(.caption.bold().monospaced())
+                    .font(DesignType.caption.font.bold().monospaced())
                     .frame(width: 34, alignment: .leading)
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack(spacing: 8) {
+                VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
+                    HStack(spacing: DesignSpacing.s.pt) {
                         Text(definition.title)
-                            .font(.callout.bold())
+                            .font(DesignType.label.font.bold())
                         if !included {
                             Text("EXCLUDED")
-                                .font(.caption2.bold())
+                                .font(DesignType.caption.font.bold())
                                 .foregroundStyle(.secondary)
                         }
                     }
                     Text(definition.evidenceSummary)
-                        .font(.caption)
+                        .font(DesignType.caption.font)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.leading)
                     Text(
                         "Minimum authority: \(authorityName(definition.minimumAuthority))"
                     )
-                    .font(.caption2)
+                    .font(DesignType.caption.font)
                     .foregroundStyle(.secondary)
                 }
                 Spacer()
                 Text(statusName(status))
-                    .font(.caption.bold())
+                    .font(DesignType.caption.font.bold())
                     .multilineTextAlignment(.trailing)
                     .frame(maxWidth: 190, alignment: .trailing)
             }
-            .padding(11)
+            .padding(DesignSpacing.m.pt)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
                 selectedGate == definition.id
                     ? Color.accentColor.opacity(0.10)
                     : Color.secondary.opacity(0.04),
-                in: RoundedRectangle(cornerRadius: 10)
+                in: RoundedRectangle(cornerRadius: DesignRadius.small.pt)
             )
         }
         .buttonStyle(.plain)
     }
 
     private var preflightCard: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: DesignSpacing.l.pt) {
             HStack {
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
                     Text("Physical test preflight")
-                        .font(.headline)
+                        .font(DesignType.sectionTitle.font)
                     Text(
                         "Read-only readiness check for \(selectedGate.rawValue). It does not start audio, apply DSP, or create acceptance evidence."
                     )
-                    .font(.caption)
+                    .font(DesignType.caption.font)
                     .foregroundStyle(.secondary)
                 }
                 Spacer()
@@ -446,10 +446,10 @@ struct ProductionHardwareAcceptanceWorkspace: View {
                             ? "READY TO BEGIN"
                             : "BLOCKED"
                     )
-                    .font(.caption.bold())
+                    .font(DesignType.caption.font.bold())
                     .tracking(0.7)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
+                    .padding(.horizontal, DesignSpacing.m.pt)
+                    .padding(.vertical, DesignSpacing.s.pt)
                     .background(
                         .secondary.opacity(0.10),
                         in: Capsule()
@@ -465,7 +465,7 @@ struct ProductionHardwareAcceptanceWorkspace: View {
                     "I verified the independently amplified Low/Mid/High wiring, mandatory crossover, and limiter topology before exposed-driver testing",
                     isOn: $protectedDriverWiringPreflightConfirmed
                 )
-                .font(.caption)
+                .font(DesignType.caption.font)
             }
 
             if selectedGate == .h07CoherentMainSubAlignment {
@@ -473,23 +473,23 @@ struct ProductionHardwareAcceptanceWorkspace: View {
                     "Microphone and safe electrical reference use separate channels of the same physical ADC",
                     isOn: $sameADCPreflightConfirmed
                 )
-                .font(.caption)
+                .font(DesignType.caption.font)
                 Toggle(
                     "Main and independently routed Sub share the required output clock domain",
                     isOn: $commonClockPreflightConfirmed
                 )
-                .font(.caption)
+                .font(DesignType.caption.font)
                 Toggle(
                     "Electrical reference is safe line-level — never powered speaker/amplifier output",
                     isOn: $safeLineReferencePreflightConfirmed
                 )
-                .font(.caption)
+                .font(DesignType.caption.font)
             }
 
             Button("Run Read-Only Preflight") {
                 runPreflight()
             }
-            .buttonStyle(.bordered)
+            .buttonStyle(.glass)
             .disabled(acceptance.campaign == nil)
 
             if let result = preflightResult {
@@ -498,54 +498,54 @@ struct ProductionHardwareAcceptanceWorkspace: View {
                         "Software prerequisites are consistent enough to begin the recorded physical procedure. This is NOT a gate pass.",
                         systemImage: "checkmark.shield"
                     )
-                    .font(.caption.bold())
+                    .font(DesignType.caption.font.bold())
                 } else {
                     ForEach(result.blockers) { blocker in
                         Label(
                             blocker.message,
                             systemImage: "exclamationmark.triangle"
                         )
-                        .font(.caption)
+                        .font(DesignType.caption.font)
                     }
                 }
                 ForEach(result.warnings, id: \.self) { warning in
                     Text(warning)
-                        .font(.caption2)
+                        .font(DesignType.caption.font)
                         .foregroundStyle(.secondary)
                 }
                 if let draftID = result.commissioningDraftID {
                     Text(
                         "PR111 rollback-bound draft: \(draftID.uuidString)"
                     )
-                    .font(.caption2.monospaced())
+                    .font(DesignType.caption.font.monospaced())
                     .foregroundStyle(.secondary)
                     .textSelection(.enabled)
                 }
                 Text(
                     "Hard boundary: physicalAcceptanceEstablished = false · canApplyDSP = false · canDeploy = false · mayMergeIntoMain = false"
                 )
-                .font(.caption2.bold())
+                .font(DesignType.caption.font.bold())
                 .foregroundStyle(.secondary)
             }
         }
-        .padding(18)
-        .glassEffect(.regular, in: .rect(cornerRadius: 18))
+        .padding(DesignSpacing.l.pt)
+        .glassEffect(.regular, in: .rect(cornerRadius: DesignRadius.large.pt))
     }
 
     private var evidenceEntry: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: DesignSpacing.l.pt) {
             HStack {
                 Text(
                     "\(selectedGate.rawValue) · \(selectedGateDefinition.title)"
                 )
-                .font(.headline)
+                .font(DesignType.sectionTitle.font)
                 Spacer()
                 Text(
                     selectedGateIncluded
                         ? "IN CAMPAIGN SCOPE"
                         : "EXCLUDED FROM SCOPE"
                 )
-                .font(.caption.bold())
+                .font(DesignType.caption.font.bold())
                 .foregroundStyle(.secondary)
             }
 
@@ -553,7 +553,7 @@ struct ProductionHardwareAcceptanceWorkspace: View {
                 Text(
                     "This gate was explicitly excluded when the campaign was created. Evidence cannot be appended to it. Start a new campaign if release scope changes."
                 )
-                .font(.callout)
+                .font(DesignType.label.font)
                 .foregroundStyle(.secondary)
             } else {
                 evidenceAuthorityControls
@@ -568,7 +568,7 @@ struct ProductionHardwareAcceptanceWorkspace: View {
                         "This H05 observation also covered protected independently routed Low/Mid/High driver testing",
                         isOn: $splitDriverCovered
                     )
-                    .font(.callout)
+                    .font(DesignType.label.font)
                 }
 
                 Divider()
@@ -578,25 +578,25 @@ struct ProductionHardwareAcceptanceWorkspace: View {
                 Button("Append Evidence Observation") {
                     recordObservation()
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(.glassProminent)
                 .disabled(!canRecordObservation)
 
                 Text(
                     "Appending is irreversible in this campaign. A later observation may supersede the gate status, but prior evidence remains in history."
                 )
-                .font(.caption2)
+                .font(DesignType.caption.font)
                 .foregroundStyle(.secondary)
             }
         }
-        .padding(18)
-        .glassEffect(.regular, in: .rect(cornerRadius: 18))
+        .padding(DesignSpacing.l.pt)
+        .glassEffect(.regular, in: .rect(cornerRadius: DesignRadius.large.pt))
     }
 
     private var evidenceAuthorityControls: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: DesignSpacing.m.pt) {
             Text("Observation")
-                .font(.subheadline.bold())
-            HStack(spacing: 14) {
+                .font(DesignType.label.font.bold())
+            HStack(spacing: DesignSpacing.l.pt) {
                 Picker("Authority", selection: $authority) {
                     ForEach(
                         HardwareAcceptanceEvidenceAuthority.allCases,
@@ -623,22 +623,22 @@ struct ProductionHardwareAcceptanceWorkspace: View {
                     "Remote software evidence cannot satisfy this physical gate.",
                     systemImage: "info.circle"
                 )
-                .font(.caption)
+                .font(DesignType.caption.font)
                 .foregroundStyle(.secondary)
             }
         }
     }
 
     private var physicalEnvironmentFields: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: DesignSpacing.m.pt) {
             Text("Physical environment snapshot")
-                .font(.subheadline.bold())
+                .font(DesignType.label.font.bold())
 
-            HStack(spacing: 10) {
+            HStack(spacing: DesignSpacing.m.pt) {
                 TextField("Mac model", text: $macModel)
                 TextField("macOS", text: $macOSVersion)
             }
-            HStack(spacing: 10) {
+            HStack(spacing: DesignSpacing.m.pt) {
                 TextField(
                     "Sample rate",
                     value: $sampleRate,
@@ -650,7 +650,7 @@ struct ProductionHardwareAcceptanceWorkspace: View {
                     format: .number
                 )
             }
-            HStack(spacing: 10) {
+            HStack(spacing: DesignSpacing.m.pt) {
                 TextField(
                     "Output device",
                     text: $outputDeviceName
@@ -660,7 +660,7 @@ struct ProductionHardwareAcceptanceWorkspace: View {
                     text: $outputDeviceUID
                 )
             }
-            HStack(spacing: 10) {
+            HStack(spacing: DesignSpacing.m.pt) {
                 TextField(
                     "Input device (optional)",
                     text: $inputDeviceName
@@ -687,9 +687,9 @@ struct ProductionHardwareAcceptanceWorkspace: View {
     }
 
     private var evidenceNotesAndArtifacts: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: DesignSpacing.m.pt) {
             Text("Reviewer & evidence")
-                .font(.subheadline.bold())
+                .font(DesignType.label.font.bold())
             TextField("Reviewer", text: $reviewer)
                 .textFieldStyle(.roundedBorder)
             TextField(
@@ -699,7 +699,7 @@ struct ProductionHardwareAcceptanceWorkspace: View {
             )
             .lineLimit(3...7)
             .textFieldStyle(.roundedBorder)
-            HStack(spacing: 10) {
+            HStack(spacing: DesignSpacing.m.pt) {
                 TextField(
                     "Artifact label",
                     text: $artifactLabel
@@ -714,7 +714,7 @@ struct ProductionHardwareAcceptanceWorkspace: View {
     }
 
     private var attestationControls: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: DesignSpacing.s.pt) {
             if authority >= .physicalHardware {
                 Toggle(
                     "I confirm this observation was performed on the physical hardware recorded above",
@@ -728,40 +728,40 @@ struct ProductionHardwareAcceptanceWorkspace: View {
                 )
             }
         }
-        .font(.callout)
+        .font(DesignType.label.font)
     }
 
     private var noCampaignCard: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: DesignSpacing.s.pt) {
             Text("No hardware acceptance campaign")
-                .font(.headline)
+                .font(DesignType.sectionTitle.font)
             Text(
                 "Create a campaign with an exact commit/build, Playback System, and explicit capability scope before recording evidence."
             )
             .foregroundStyle(.secondary)
         }
-        .padding(18)
-        .glassEffect(.regular, in: .rect(cornerRadius: 18))
+        .padding(DesignSpacing.l.pt)
+        .glassEffect(.regular, in: .rect(cornerRadius: DesignRadius.large.pt))
     }
 
     private var campaignCreationCard: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: DesignSpacing.l.pt) {
             HStack {
                 Text("New acceptance campaign")
-                    .font(.headline)
+                    .font(DesignType.sectionTitle.font)
                 Spacer()
                 if acceptance.campaign != nil {
                     Button("Cancel") {
                         showingCampaignForm = false
                     }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(.glass)
                 }
             }
 
             Text(
                 "Campaign identity and scope are immutable after creation. Existing campaigns are never overwritten."
             )
-            .font(.caption)
+            .font(DesignType.caption.font)
             .foregroundStyle(.secondary)
 
             TextField("Exact commit SHA", text: $commitSHA)
@@ -804,11 +804,11 @@ struct ProductionHardwareAcceptanceWorkspace: View {
             Button("Create Immutable Campaign") {
                 createCampaign()
             }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(.glassProminent)
             .disabled(!canCreateCampaign)
         }
-        .padding(18)
-        .glassEffect(.regular, in: .rect(cornerRadius: 18))
+        .padding(DesignSpacing.l.pt)
+        .glassEffect(.regular, in: .rect(cornerRadius: DesignRadius.large.pt))
     }
 
     private func scopeToggle(
@@ -817,10 +817,10 @@ struct ProductionHardwareAcceptanceWorkspace: View {
         exclusionReason: Binding<String>,
         detail: String
     ) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: DesignSpacing.s.pt) {
             Toggle(title, isOn: included)
             Text(detail)
-                .font(.caption)
+                .font(DesignType.caption.font)
                 .foregroundStyle(.secondary)
             if !included.wrappedValue {
                 TextField(
@@ -830,10 +830,10 @@ struct ProductionHardwareAcceptanceWorkspace: View {
                 .textFieldStyle(.roundedBorder)
             }
         }
-        .padding(10)
+        .padding(DesignSpacing.m.pt)
         .background(
             .secondary.opacity(0.04),
-            in: RoundedRectangle(cornerRadius: 10)
+            in: RoundedRectangle(cornerRadius: DesignRadius.small.pt)
         )
     }
 
@@ -841,12 +841,12 @@ struct ProductionHardwareAcceptanceWorkspace: View {
         _ title: String,
         _ value: String
     ) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
+        VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
             Text(title)
-                .font(.caption)
+                .font(DesignType.caption.font)
                 .foregroundStyle(.secondary)
             Text(value)
-                .font(.callout.monospaced())
+                .font(DesignType.label.font.monospaced())
                 .lineLimit(2)
                 .textSelection(.enabled)
         }
@@ -863,16 +863,16 @@ struct ProductionHardwareAcceptanceWorkspace: View {
                 ? "exclamationmark.triangle.fill"
                 : "info.circle"
         )
-        .font(.callout)
+        .font(DesignType.label.font)
         .foregroundStyle(isError ? .red : .secondary)
         .textSelection(.enabled)
-        .padding(14)
+        .padding(DesignSpacing.l.pt)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             isError
                 ? Color.red.opacity(0.08)
                 : Color.secondary.opacity(0.05),
-            in: RoundedRectangle(cornerRadius: 12)
+            in: RoundedRectangle(cornerRadius: DesignRadius.medium.pt)
         )
     }
 

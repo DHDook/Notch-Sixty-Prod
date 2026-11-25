@@ -17,7 +17,9 @@ struct ProductionRemotePanel: View {
 
     init(product: ProductController) {
         self.product = product
-        _beforeAfter = StateObject(wrappedValue: BeforeAfterModel(player: ProfileContentAuditionPlayer(profiles: product.profiles)))
+        _beforeAfter = StateObject(wrappedValue: BeforeAfterModel(
+            player: ProfileContentAuditionPlayer(profiles: product.profiles),
+            headphone: ProfileHeadphoneCompare(profiles: product.profiles)))
         _profiles = ObservedObject(wrappedValue: product.profiles)
         engine = product.audioEngine
     }

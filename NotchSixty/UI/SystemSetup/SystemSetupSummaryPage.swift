@@ -8,30 +8,30 @@ struct SystemSetupSummaryPage: View {
     let exit: (SystemSetupExit) -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Label("Saved \(summary.profileName)", systemImage: "checkmark.circle.fill").font(.headline)
+        VStack(alignment: .leading, spacing: DesignSpacing.m.pt) {
+            Label("Saved \(summary.profileName)", systemImage: "checkmark.circle.fill").font(DesignType.sectionTitle.font)
             if summary.notVerified {
                 Label("This profile is labelled Not verified: the result was not checked by a second measurement.",
                       systemImage: "exclamationmark.triangle")
-                    .font(.callout).foregroundStyle(.orange)
+                    .font(DesignType.label.font).foregroundStyle(StatusLevel.attention.color)
             } else if let headline = summary.verificationHeadline {
-                Label(headline, systemImage: "checkmark.seal.fill").font(.callout)
+                Label(headline, systemImage: "checkmark.seal.fill").font(DesignType.label.font)
             }
             GroupBox("What was set") {
-                VStack(alignment: .leading, spacing: 4) {
-                    ForEach(summary.lines, id: \.self) { Text($0).font(.callout) }
-                    if summary.lines.isEmpty { Text("Your choices were saved.").font(.callout) }
+                VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
+                    ForEach(summary.lines, id: \.self) { Text($0).font(DesignType.label.font) }
+                    if summary.lines.isEmpty { Text("Your choices were saved.").font(DesignType.label.font) }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(4)
+                .padding(DesignSpacing.xs.pt)
             }
             if model.quickFinished {
                 Text("The quick setup measured one seat and used default bass and correction settings. Open the full setup to see every choice, add seats or describe the room; nothing you have set changes.")
-                    .font(.callout).foregroundStyle(.secondary)
+                    .font(DesignType.label.font).foregroundStyle(.secondary)
             }
             ViewThatFits(in: .horizontal) {
-                HStack(spacing: 8) { actions }
-                VStack(alignment: .leading, spacing: 8) { actions }
+                HStack(spacing: DesignSpacing.s.pt) { actions }
+                VStack(alignment: .leading, spacing: DesignSpacing.s.pt) { actions }
             }
             Button("Look at the room with the Room advisor") { exit(.roomAdvisor) }
                 .buttonStyle(.link)

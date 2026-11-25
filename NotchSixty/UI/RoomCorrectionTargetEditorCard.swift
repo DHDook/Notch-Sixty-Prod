@@ -17,7 +17,7 @@ struct RoomCorrectionTargetEditorCard: View {
 
     var body: some View {
         GroupBox("Target editor") {
-            VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: DesignSpacing.m.pt) {
                 libraryRow
                 ForEach(Array(channelNames.enumerated()), id: \.offset) { index, name in
                     channelRow(index, name)
@@ -25,10 +25,10 @@ struct RoomCorrectionTargetEditorCard: View {
                 if !report.skipped.isEmpty {
                     ForEach(report.skipped.indices, id: \.self) { i in
                         Text("Skipped \(report.skipped[i].file): \(report.skipped[i].reason)")
-                            .font(.caption).foregroundStyle(.orange)
+                            .font(DesignType.caption.font).foregroundStyle(StatusLevel.attention.color)
                     }
                 }
-                if let message { Text(message).font(.caption).foregroundStyle(.secondary) }
+                if let message { Text(message).font(DesignType.caption.font).foregroundStyle(.secondary) }
             }
         }
         .onAppear { report = library.loadAll() }
@@ -95,7 +95,7 @@ struct RoomCorrectionTargetEditorCard: View {
 
     private func channelRow(_ index: Int, _ name: String) -> some View {
         let binding = Binding(get: { shaping[index] }, set: { shaping[index] = $0 })
-        return VStack(alignment: .leading, spacing: 4) {
+        return VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
             HStack {
                 Text(name).bold()
                 Spacer()
@@ -112,7 +112,7 @@ struct RoomCorrectionTargetEditorCard: View {
                         value: binding.tiltDBPerOctave, in: -3 ... 3, step: 0.1)
             }
             if !binding.wrappedValue.isValid {
-                Text("The low curtain must be below the high curtain.").font(.caption).foregroundStyle(.red)
+                Text("The low curtain must be below the high curtain.").font(DesignType.caption.font).foregroundStyle(StatusLevel.problem.color)
             }
         }
     }

@@ -48,6 +48,31 @@ struct RoutedWayLinearisation: Codable, Equatable, Sendable {
     var mergeHz: Double = 0
 }
 
+/// E8 S12: what a way drives. The role sets the default lowest safe frequency that validation holds the high-pass to
+/// (behind `e8.active-commissioning`).
+enum DriverRole: String, Codable, CaseIterable, Sendable {
+    case subwoofer, woofer, midrange, tweeter, fullRange
+
+    /// The lowest frequency the driver may be asked to play, from the role alone. nil means no limit.
+    var defaultLowestSafeHz: Double? {
+        switch self {
+        case .tweeter: return 1_500
+        case .midrange: return 200
+        case .subwoofer, .woofer, .fullRange: return nil
+        }
+    }
+
+    var displayName: String {
+        switch self {
+        case .subwoofer: return "Subwoofer"
+        case .woofer: return "Woofer"
+        case .midrange: return "Midrange"
+        case .tweeter: return "Tweeter"
+        case .fullRange: return "Full range"
+        }
+    }
+}
+
 /// One driver: its physical output, its band-limiting filters and its per-driver processing.
 struct RoutedWay: Identifiable, Codable, Equatable, Sendable {
     var id: UUID = UUID()
@@ -65,6 +90,15 @@ struct RoutedWay: Identifiable, Codable, Equatable, Sendable {
     var limiter: RoutingLimiter?
     /// nil means the driver is not linearised.
     var linearisation: RoutedWayLinearisation?
+    /// E8 S12: additive, no schema bump. nil means no role is set and the role rules do not apply.
+    var role: DriverRole?
+    /// The lowest safe frequency the user chose over the role's default. nil means use the role's default.
+    var lowestSafeHz: Double?
+    /// True while the role was inferred (migration or load) and the user has not confirmed it yet.
+    var roleInferred: Bool?
+
+    /// The limit validation holds the high-pass to, nil when there is none.
+    var effectiveLowestSafeHz: Double? { role == nil ? nil : (lowestSafeHz ?? role?.defaultLowestSafeHz) }
 }
 
 /// One speaker: a source and 1 to 8 ways.
@@ -166,14 +200,15 @@ enum SpeakerRoutingTemplate: CaseIterable, Identifiable, Sendable {
                     name: waysPerMain == 1 ? main.name : "\(main.name) \(Self.wayNames(waysPerMain)[index])",
                     endpoint: endpoint,
                     highPass: index == 0 ? nil : spec(crossoverHz[index - 1]),
-                    lowPass: index == waysPerMain - 1 ? nil : spec(crossoverHz[index]))
+                    lowPass: index == waysPerMain - 1 ? nil : spec(crossoverHz[index]),
+                    role: Self.roles(waysPerMain)[index])
             }
             speakers.append(RoutedSpeaker(name: main.name, source: .program(main.lane), ways: ways))
         }
         for (index, endpoint) in subs.enumerated() {
             speakers.append(RoutedSpeaker(
                 name: "Sub \(index + 1)", source: .sub(index),
-                ways: [RoutedWay(name: "Sub \(index + 1)", endpoint: endpoint)]))
+                ways: [RoutedWay(name: "Sub \(index + 1)", endpoint: endpoint, role: .subwoofer)]))
         }
         return SpeakerRoutingConfiguration(speakers: speakers)
     }
@@ -215,6 +250,15 @@ enum SpeakerRoutingTemplate: CaseIterable, Identifiable, Sendable {
         case 1: return .mainsPlusSub
         case 2: return .twoWay
         default: return .threeWay
+        }
+    }
+
+    /// E8 S12: the roles a template gives its ways, low to high.
+    private static func roles(_ count: Int) -> [DriverRole] {
+        switch count {
+        case 1: return [.fullRange]
+        case 2: return [.woofer, .tweeter]
+        default: return [.woofer, .midrange, .tweeter]
         }
     }
 

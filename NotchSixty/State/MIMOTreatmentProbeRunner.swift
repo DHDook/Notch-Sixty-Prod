@@ -82,12 +82,14 @@ final class MIMOTreatmentProbeRunner: ObservableObject {
             throw MIMOTreatmentProbeRunnerError.notReady("Take the untreated check at every seat first.")
         }
         treatedMeasurements = []
+        var cleanupFailure: String?
         do {
             try capturer.setProgrammeStopped(true)
-            treatment.probeProgrammeMuted = true
+            // The capturer owns `probeProgrammeMuted`: set once the stimulus is installed, cleared before it is removed.
             defer {
-                treatment.probeProgrammeMuted = false
-                try? capturer.setProgrammeStopped(false)
+                do { try capturer.setProgrammeStopped(false) } catch {
+                    cleanupFailure = "The measurement signal could not be removed (\(error.localizedDescription)); restart the audio engine to restore programme audio."
+                }
             }
             try await armProbe()
             for seat in seats {
@@ -102,10 +104,10 @@ final class MIMOTreatmentProbeRunner: ObservableObject {
             }
         } catch {
             treatment.stopProbe()
-            message = error.localizedDescription
+            message = [error.localizedDescription, cleanupFailure].compactMap { $0 }.joined(separator: " ")
             throw error
         }
-        message = nil
+        message = cleanupFailure
     }
 
     /// Step 3: judges SQ5 on the ended probe. `baseline` and `predicted` are the design's per-seat responses (summed over the

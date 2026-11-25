@@ -1013,7 +1013,7 @@ final class AudioIOEngine {
     private(set) var speakerRoutingConfiguration: SpeakerRoutingConfiguration?
 
     private let deviceCatalog: any OutputDeviceCataloging
-    private let eventMonitor: AudioHardwareEventMonitor
+    private let eventMonitor: any AudioHardwareEvents
     private let masterVolumeController: any MasterVolumeDeviceControlling
     private let globalVolumeKeyMonitor: any GlobalVolumeKeyMonitoring
     private let binauralProfileAssetStore: BinauralProfileAssetStore
@@ -1151,7 +1151,7 @@ final class AudioIOEngine {
     init(
         deviceCatalog: any OutputDeviceCataloging = CoreAudioOutputDeviceCatalog(),
         initialRouteConfiguration: AudioRouteConfiguration = AudioRouteConfiguration(),
-        eventMonitor: AudioHardwareEventMonitor = AudioHardwareEventMonitor(),
+        eventMonitor: any AudioHardwareEvents = AudioHardwareEventMonitor(),
         masterVolumeController: any MasterVolumeDeviceControlling = CoreAudioMasterVolumeController(),
         globalVolumeKeyMonitor: any GlobalVolumeKeyMonitoring = CoreGraphicsGlobalVolumeKeyMonitor(),
         binauralProfileAssetStore: BinauralProfileAssetStore = BinauralProfileAssetStore(),
@@ -3167,7 +3167,7 @@ final class AudioIOEngine {
         try start(resetProcessingSessionCounters: true)
     }
 
-    func stop() {
+    func stop(cause: TransportTeardownCause) {
         guard lifecycle.state != .idle else { return }
         recoveryGeneration &+= 1
         reconfigurationWorkItem?.cancel()
@@ -3176,7 +3176,7 @@ final class AudioIOEngine {
         recoveryWorkItem = nil
         eventMonitor.removeSelectedOutputSampleRateMonitor()
         if lifecycle.state != .stopping { try? setLifecycle(.stopping) }
-        tearDownTransport(fadeOut: true, cause: .stop)
+        tearDownTransport(fadeOut: true, cause: cause)
         try? setLifecycle(.idle)
         clearStagedAudioUnitRack()
         audioUnitRackRebuildPending = false
@@ -4577,15 +4577,9 @@ final class AudioIOEngine {
         var generator: LiveGenerator?
     }
 
-    /// A generator the engine keeps playing across live graph edits.
-    struct LiveGenerator: Equatable {
-        var settings: SignalGeneratorSettings
-        var selection: SignalGeneratorLaneSelection
-    }
-
     /// E12 S4a: the generator currently published to the live graph, or nil when none is playing. Never persisted:
     /// a session restart, stop or output change clears it.
-    private(set) var liveGenerator: LiveGenerator?
+    var liveGenerator: LiveGenerator?  // set by the E19 S12c probe feed extension
 
     /// E24 S9: the design the blind ABX is playing in place of the profile's applied lanes, level-trimmed and
     /// latency-matched. Never persisted; Stop, an output change and a session teardown clear it.
@@ -4637,6 +4631,7 @@ final class AudioIOEngine {
     /// leaves the playing state as it was when the running session cannot take the edit (kernel render, binaural,
     /// flag off), the selection matches no lane, or the settings cannot form a stage at the output rate.
     func setLiveGenerator(_ settings: SignalGeneratorSettings?, selection: SignalGeneratorLaneSelection = .allProgram(includeLFE: false)) throws {
+        if probeStimulusInstalled { throw MIMOProbeFeedError.generatorBusy }  // E19 S12c: the probe owns the stage
         if let session = nChannelTransportSession, liveGraphEditsAvailable {
             var wanted: LiveGenerator?
             if let settings {
@@ -4722,7 +4717,7 @@ final class AudioIOEngine {
 
     /// Builds the graph for `inputs` and moves the running graph to it. Throws (a named reason) and leaves the
     /// running graph untouched when the graph cannot take the edit; call it as the last step before committing state.
-    private func republishLiveGraph(
+    func republishLiveGraph(
         _ inputs: LiveGraphInputs, headphoneBase: UnifiedGraphSpec? = nil, routing: SpeakerRoutingConfiguration? = nil
     ) throws {
         if let session = nChannelTransportSession {
@@ -4758,7 +4753,7 @@ final class AudioIOEngine {
             }
             if let generator = inputs.generator {
                 guard let mask = generator.selection.mask(laneCount: shape.laneCount, lfeLane: shape.lfeLane),
-                      let params = generator.settings.stageParams(active: true, sampleRate: rate) else {
+                      let params = generator.stageParams(sampleRate: rate) else {
                     throw LiveNChannelTransportError.unifiedGraphRejected(.specRejected)
                 }
                 configuration.generatorParams = params

@@ -119,7 +119,7 @@ struct MeasurementGatedPlotView: View {
     let plot: MeasurementGatedPlot
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: DesignSpacing.s.pt) {
             Canvas { context, size in
                 var line = Path()
                 let n = plot.envelope.count
@@ -142,8 +142,8 @@ struct MeasurementGatedPlotView: View {
                 marker(plot.gateEndSeconds, .red)
             }
             .frame(height: 140)
-            .background(Color.black.opacity(0.06), in: RoundedRectangle(cornerRadius: 6))
-            Text(summary).font(.caption).foregroundStyle(.secondary)
+            .background(Color.black.opacity(0.06), in: RoundedRectangle(cornerRadius: DesignRadius.small.pt))
+            Text(summary).font(DesignType.caption.font).foregroundStyle(.secondary)
         }
     }
 
@@ -166,12 +166,12 @@ struct MeasurementAnalysisCard: View {
         GroupBox("Gated response, waterfall and spectrogram") {
             if source == nil {
                 Text("Pick a source to see its gated impulse response, waterfall and spectrogram.")
-                    .font(.callout).foregroundStyle(.secondary)
+                    .font(DesignType.label.font).foregroundStyle(.secondary)
             } else {
-                VStack(alignment: .leading, spacing: 14) {
-                    if let gated { Text("Impulse response and gate").font(.headline); MeasurementGatedPlotView(plot: gated) }
-                    if let waterfall { Text("Waterfall").font(.headline); MeasurementWaterfallView(waterfall: waterfall) }
-                    if let spectrogram { Text("Spectrogram").font(.headline); MeasurementSpectrogramView(spectrogram: spectrogram) }
+                VStack(alignment: .leading, spacing: DesignSpacing.l.pt) {
+                    if let gated { Text("Impulse response and gate").font(DesignType.sectionTitle.font); MeasurementGatedPlotView(plot: gated) }
+                    if let waterfall { Text("Waterfall").font(DesignType.sectionTitle.font); MeasurementWaterfallView(waterfall: waterfall) }
+                    if let spectrogram { Text("Spectrogram").font(DesignType.sectionTitle.font); MeasurementSpectrogramView(spectrogram: spectrogram) }
                 }
             }
         }

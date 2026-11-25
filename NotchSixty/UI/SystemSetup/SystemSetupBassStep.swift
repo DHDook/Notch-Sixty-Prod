@@ -7,12 +7,12 @@ struct SystemSetupBassStep: View {
     @ObservedObject var model: SystemSetupFlowModel
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text(model.bassStepMode == .monoBass ? "Share the bass between the speakers" : "Blend the subwoofer").font(.headline)
+        VStack(alignment: .leading, spacing: DesignSpacing.m.pt) {
+            Text(model.bassStepMode == .monoBass ? "Share the bass between the speakers" : "Blend the subwoofer").font(DesignType.sectionTitle.font)
             if case .skipped(let reason)? = model.bassStepMode {
                 Label(reason, systemImage: "info.circle")
                 if let advice = model.receiverAdvice {
-                    GroupBox("Before you continue") { Text(advice).font(.callout).frame(maxWidth: .infinity, alignment: .leading) }
+                    GroupBox("Before you continue") { Text(advice).font(DesignType.label.font).frame(maxWidth: .infinity, alignment: .leading) }
                 }
                 Text("Continue to the next step.").foregroundStyle(.secondary)
             } else if model.bassStepMode == .monoBass {
@@ -35,7 +35,7 @@ struct SystemSetupBassStep: View {
     @ViewBuilder
     private var monoBassContent: some View {
         Text("Both speakers share the low frequencies. Notch Sixty picks where the sharing starts from how low your speakers play at the seats you measured. Apply it to hear the result; you can skip this to keep the standard 80 Hz setting.")
-            .font(.callout).foregroundStyle(.secondary)
+            .font(DesignType.label.font).foregroundStyle(.secondary)
         if let design = model.monoBass {
             Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 6) {
                 GridRow { Text("Left speaker plays down to").bold(); Text("\(design.leftExtensionHz, specifier: "%.0f") Hz").monospacedDigit() }
@@ -56,7 +56,7 @@ struct SystemSetupBassStep: View {
     @ViewBuilder
     private func content(_ bass: SystemSetupBassDesign) -> some View {
         Text("Notch Sixty sets the subwoofer's level, delay and polarity (push or pull) so bass is as even as possible across every seat you measured. Apply it to hear the result; Revert or Cancel restores your earlier settings.")
-            .font(.callout).foregroundStyle(.secondary)
+            .font(DesignType.label.font).foregroundStyle(.secondary)
         if bass.mode == .subAlignmentOnly {
             Label("The subwoofer keeps the alignment you applied in the previous step.", systemImage: "checkmark.circle")
         } else {

@@ -238,7 +238,7 @@ final class MeasurementLevelSession {
                 throw MeasurementLevelSessionError.laneUnavailable
             }
             translated = .lane(graphLane)
-        case .allProgram:
+        case .allProgram, .lanes:
             translated = selection
         }
         guard let mask = translated.mask(

@@ -497,9 +497,127 @@ static void testRejects() {
     n60_graph_retire(g);
 }
 
+
+// E19 S12c (ABI v48): the cued sweep. 13 values: active with no cue is exact silence on the mask lanes with programme
+// replaced; a cue plays the sweep on the solo lane only; a cue during a sweep is held to its end; a cue restarts the
+// auto-stop; out-of-range solo or cue is refused.
+static void testCuedSweep(double rate) {
+    constexpr uint32_t SOLO = 11, CUE = 12;
+    float p[13] = {5, -20, -6, 1000, 20, 18000, float(uint32_t(rate)), 1, 0, 1, 30, 0, 0};
+    // Mask = lanes 0 and 2 of four; lanes 1 and 3 carry programme.
+    n60_stage_desc st[1] = {stg(N60_STAGE_GENERATOR, 1, 0, p, 13, 0x5)};
+    n60_graph *g = build(rate, 4, st, 1);
+    n60_measure_ess_params e{};
+    e.sample_rate = rate; e.start_hz = 20; e.end_hz = 18000; e.duration_seconds = 1.0; e.level_dbfs = 0;
+    e.fade_seconds = 0.05; e.synchronised = 1;
+    n60_measure_ess_info info{};
+    CHECK(n60_measure_ess_describe(&e, &info) == N60_MEASURE_OK, "describe");
+    std::vector<float> ref(info.frame_count);
+    n60_measure_ess_generate(&e, ref.data(), ref.size(), &info);
+    const float gain = float(std::pow(10.0, -20.0 / 20.0) * std::sqrt(2.0));
+    auto want = [&](uint32_t i) { return std::clamp(ref[i] * gain, -1.0f, 1.0f); };
+    const float prog[4] = {0.3f, 0.3f, 0.3f, 0.3f};
+    const uint32_t warm = (rampOf(rate) / kBlock + 2) * kBlock;
+    auto o = render(g, 4, warm, prog);
+    uint32_t bad = 0;
+    for (uint32_t i = rampOf(rate); i < warm; ++i) bad += (o[0][i] != 0.0f) + (o[2][i] != 0.0f) + (o[1][i] != 0.3f) + (o[3][i] != 0.3f);
+    CHECK(bad == 0, "%.0f cued stage not silent on the mask lanes / programme replaced (%u)", rate, bad);
+
+    // Cue 1 with solo 2 (the second mask lane, lane 2): lane 2 plays the sweep sample-identical, lane 0 stays 0.
+    n60_param_record rec[2] = {{1, SOLO, 2.0f, 0}, {1, CUE, 1.0f, 0}};
+    CHECK(n60_graph_post_params(g, rec, 2) == N60_STATUS_OK, "post solo and cue");
+    const uint32_t len = uint32_t(info.frame_count);
+    const uint32_t total = ((len + kBlock - 1) / kBlock + 1) * kBlock;
+    o = render(g, 4, total, prog);
+    uint32_t diff = 0, other = 0;
+    for (uint32_t i = 0; i < len; ++i) {
+        diff += o[2][i] != want(i);
+        other += o[0][i] != 0.0f;
+    }
+    CHECK(diff == 0, "%.0f cued sweep differs from the ESS in %u samples", rate, diff);
+    CHECK(other == 0, "%.0f solo leaked to the other mask lane (%u)", rate, other);
+    float tail = 0;
+    for (uint32_t i = len + kBlock; i < total; ++i) tail = std::fmax(tail, std::fabs(o[2][i]));
+    CHECK(tail == 0.0f, "%.0f not silent after the sweep", rate);
+
+    // A cue during a sweep is held to its end and starts the next sweep at the next block start.
+    n60_param_record solo0{1, SOLO, 0.0f, 0}, cue2{1, CUE, 2.0f, 0}, cue3{1, CUE, 3.0f, 0};
+    n60_graph_post_params(g, &solo0, 1);
+    n60_graph_post_params(g, &cue2, 1);
+    auto a = render(g, 4, kBlock, prog);
+    n60_graph_post_params(g, &cue3, 1);
+    auto b = render(g, 4, len + 4 * kBlock, prog);
+    std::vector<float> c0(a[0]), c3(a[3]);
+    c0.insert(c0.end(), b[0].begin(), b[0].end());
+    const uint32_t boundary = ((len + kBlock - 1) / kBlock) * kBlock;
+    uint32_t cut = 0, gap = 0, second = 0;
+    for (uint32_t i = 0; i < len; ++i) cut += c0[i] != want(i);
+    for (uint32_t i = len; i < boundary; ++i) gap += c0[i] != 0.0f;
+    for (uint32_t i = 0; i < 2 * kBlock; ++i) second += c0[boundary + i] != want(i);
+    CHECK(cut == 0, "%.0f first sweep cut by the held cue (%u)", rate, cut);
+    CHECK(gap == 0, "%.0f gap before the held cue is not silent (%u)", rate, gap);
+    CHECK(second == 0, "%.0f held cue did not start the second sweep at the block start (%u)", rate, second);
+    n60_graph_retire(g);
+
+    // A cue restarts the auto-stop: auto-stop 2 s, a cue at 1.5 s keeps the stage replacing programme past 2 s.
+    float q[13] = {5, -20, -6, 1000, 20, 18000, float(uint32_t(rate)), 1, 1, 1, 2, 0, 0};
+    n60_stage_desc sq[1] = {stg(N60_STAGE_GENERATOR, 1, N60_LANE_ALL, q, 13)};
+    n60_graph *h = build(rate, 2, sq, 1);
+    const float dc[2] = {0.25f, 0.25f};
+    render(h, 2, uint32_t(rate * 1.5) / kBlock * kBlock, dc);
+    n60_param_record cue{1, CUE, 1.0f, 0};
+    n60_graph_post_params(h, &cue, 1);
+    render(h, 2, uint32_t(rate * 1.2) / kBlock * kBlock, dc);
+    auto late = render(h, 2, kBlock, dc);  // about 2.7 s: past the original auto-stop
+    CHECK(late[0][kBlock - 1] == 0.0f, "%.0f cue did not restart the auto-stop (%g)", rate, late[0][kBlock - 1]);
+    auto later = render(h, 2, uint32_t(rate * 2.0) / kBlock * kBlock + kBlock, dc);
+    CHECK(later[0].back() == 0.25f, "%.0f cued stage did not auto-stop after the restart (%g)", rate, later[0].back());
+    n60_graph_retire(h);
+}
+
+static void testCuedRejects() {
+    float p[13] = {5, -20, -6, 1000, 20, 18000, 48000, 1, 1, 1, 30, 0, 0};
+    n60_stage_desc st[1] = {stg(N60_STAGE_GENERATOR, 1, 0, p, 13, 0x3)};
+    n60_graph *g = build(48000, 2, st, 1);
+    n60_param_record solo{1, 11, 3.0f, 0};
+    CHECK(n60_graph_post_params(g, &solo, 1) == N60_STATUS_BAD_ARGUMENT, "solo above the lane count");
+    solo.value = 1.5f;
+    CHECK(n60_graph_post_params(g, &solo, 1) == N60_STATUS_BAD_ARGUMENT, "solo not an integer");
+    n60_param_record cue{1, 12, 16777218.0f, 0};
+    CHECK(n60_graph_post_params(g, &cue, 1) == N60_STATUS_BAD_ARGUMENT, "cue above range");
+    cue.value = -1.0f;
+    CHECK(n60_graph_post_params(g, &cue, 1) == N60_STATUS_BAD_ARGUMENT, "negative cue");
+    solo.value = 2.0f;
+    cue.value = 5.0f;
+    CHECK(n60_graph_post_params(g, &solo, 1) == N60_STATUS_OK && n60_graph_post_params(g, &cue, 1) == N60_STATUS_OK, "valid solo and cue");
+    n60_graph_retire(g);
+    float bad[13] = {1, -20, -6, 1000, 20, 18000, 4096, 1, 1, 1, 30, 0, 0};
+    n60_stage_desc sb[1] = {stg(N60_STAGE_GENERATOR, 1, 0, bad, 13, 0x3)};
+    const n60_graph_desc d = descOf(48000, 2, sb, 1);
+    n60_graph *x = nullptr;
+    CHECK(n60_graph_build(&d, &x) == N60_STATUS_BAD_ARGUMENT, "pink with 13 values");
+    p[11] = 3.0f;
+    n60_stage_desc sc[1] = {stg(N60_STAGE_GENERATOR, 1, 0, p, 13, 0x3)};
+    const n60_graph_desc d2 = descOf(48000, 2, sc, 1);
+    CHECK(n60_graph_build(&d2, &x) == N60_STATUS_BAD_ARGUMENT, "solo above lanes at build");
+}
+
+static void testCuedNoAllocation(double rate) {
+    float p[13] = {5, -20, -6, 1000, 20, 18000, float(uint32_t(rate)), 1, 1, 1, 30, 0, 0};
+    n60_stage_desc st[1] = {stg(N60_STAGE_GENERATOR, 1, N60_LANE_ALL, p, 13)};
+    n60_graph *g = build(rate, 2, st, 1);
+    n60_param_record cue{1, 12, 1.0f, 0};
+    n60_graph_post_params(g, &cue, 1);
+    allocs = 0;
+    render(g, 2, 16 * kBlock, nullptr, true);
+    CHECK(allocs.load() == 0, "%.0f cued process allocated %ld", rate, allocs.load());
+    n60_graph_retire(g);
+}
+
 int main() {
     CHECK(n60_graph_abi_version() == N60_GRAPH_ABI_VERSION, "graph ABI");
     testRejects();
+    testCuedRejects();
     for (double rate : kRates) {
         testPinkSlope(rate);
         testBand(rate);
@@ -512,6 +630,8 @@ int main() {
         testAutoStop(rate);
         testProtectionDownstream(rate);
         testNoAllocation(rate);
+        testCuedSweep(rate);
+        testCuedNoAllocation(rate);
     }
     if (failures == 0) std::printf("generator harness: all checks passed\n");
     return failures == 0 ? 0 : 1;

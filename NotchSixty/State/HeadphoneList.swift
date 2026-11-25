@@ -27,6 +27,10 @@ struct HeadphoneListEntry: Identifiable, Codable, Equatable, Sendable {
     /// When this output device becomes the output, this entry is the one to use. nil: picked by hand (a wired pair
     /// on a DAC).
     var linkedOutputUID: String?
+    /// E13 S12 (G26): the target shaping sliders and the Auto headroom switch, saved with the pair. nil in lists saved
+    /// before this field existed (read as neutral and off).
+    var targetShaping: HeadphoneTargetShaping?
+    var autoHeadroom: Bool?
 
     init(
         id: UUID = UUID(), name: String, profile: HeadphoneDeviceProfileConfiguration? = nil,
@@ -141,16 +145,23 @@ struct HeadphoneList: Codable, Equatable, Sendable {
 
     /// Stores the edited correction of the selected entry. Without a list entry (nothing saved before) one is made
     /// from the profile's own name.
-    mutating func updateSelected(profile: HeadphoneDeviceProfileConfiguration, fittedResponseID: UUID?) {
+    mutating func updateSelected(
+        profile: HeadphoneDeviceProfileConfiguration, fittedResponseID: UUID?,
+        targetShaping: HeadphoneTargetShaping? = nil, autoHeadroom: Bool? = nil
+    ) {
         if let index = entries.firstIndex(where: { $0.id == selectedID }) {
             var p = profile
             p.name = entries[index].name
             entries[index].profile = p
             if let fittedResponseID { entries[index].fittedResponseID = fittedResponseID }
+            if let targetShaping { entries[index].targetShaping = targetShaping }
+            if let autoHeadroom { entries[index].autoHeadroom = autoHeadroom }
         } else {
             let name = profile.name.trimmingCharacters(in: .whitespacesAndNewlines)
             var entry = HeadphoneListEntry(name: uniqueName(name.isEmpty ? "Headphones" : name), profile: profile)
             entry.fittedResponseID = fittedResponseID
+            entry.targetShaping = targetShaping
+            entry.autoHeadroom = autoHeadroom
             entries.append(entry)
             selectedID = entry.id
         }

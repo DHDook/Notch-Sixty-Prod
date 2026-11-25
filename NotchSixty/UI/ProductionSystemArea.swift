@@ -154,8 +154,8 @@ struct ProductionSystemAreaView: View {
             }
             .pickerStyle(.segmented)
             .labelsHidden()
-            .padding(.horizontal, 20)
-            .padding(.vertical, 10)
+            .padding(.horizontal, DesignSpacing.xl.pt)
+            .padding(.vertical, DesignSpacing.m.pt)
 
             Divider()
 
@@ -173,8 +173,8 @@ struct ProductionSystemAreaView: View {
                     }
                     .pickerStyle(.segmented)
                     .labelsHidden()
-                    .padding(.horizontal, 20)
-                    .padding(.vertical, 8)
+                    .padding(.horizontal, DesignSpacing.xl.pt)
+                    .padding(.vertical, DesignSpacing.s.pt)
                     Divider()
                     switch navigation.calibrateSection {
                     case .alignment: alignment
@@ -208,24 +208,24 @@ struct ProductionSystemOverviewView: View {
 
     var body: some View {
         ProductionPageContainer {
-            VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: DesignSpacing.l.pt) {
                 GroupBox {
-                    HStack(alignment: .top, spacing: 12) {
+                    HStack(alignment: .top, spacing: DesignSpacing.m.pt) {
                         Image(systemName: status.systemImage)
-                            .font(.title2)
+                            .font(DesignType.sectionTitle.font)
                             .foregroundStyle(.secondary)
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(status.headline).font(.headline)
+                        VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
+                            Text(status.headline).font(DesignType.sectionTitle.font)
                             Text(status.detail)
-                                .font(.callout)
+                                .font(DesignType.label.font)
                                 .foregroundStyle(.secondary)
                             Text(outputLine)
-                                .font(.caption)
+                                .font(DesignType.caption.font)
                                 .foregroundStyle(.secondary)
                         }
                         Spacer(minLength: 0)
                     }
-                    .padding(4)
+                    .padding(DesignSpacing.xs.pt)
                 }
 
                 entryCard

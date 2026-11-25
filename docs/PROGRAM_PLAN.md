@@ -528,7 +528,7 @@ complete, speaker ANC qualified, and a full hardware regression passing at every
 - [x] S9 `e13/headphones-page-cleanup` (owner, 17 Nov 2026; needs-owner: removes user-visible controls; owns G18–G20, G22, G24, G25; new flag `e13.headphones-page`): one target with shaping sliders, one import, optional Auto headroom (manual stays the default), drawn fit, crossfeed Custom controls, plain wording
 - [x] S10 `e13/headphone-list` (owns G23; built behind `e13.headphones-page`): a list of headphones per Playback System, each with its own correction and an optional linked device; picker with add, duplicate, rename, delete; today's profile migrates to the first entry. Auto-selection by linked device waits for E15 S6 (E13 G27)
 - [ ] S11 `e13/generic-hrtf` (owns G17): a generic HRTF generated in `core/` from a head model, native at the eight rates, the default for Virtual Speakers
-- [ ] S12 `e13/headphones-compare-and-ship` (needs-owner; owns G21; after E12 S13): bypass per card, the E12 S13 before/after on headphone sessions, graduate `e13.headphones-page`
+- [~] S12 `e13/headphones-compare-and-ship` (needs-owner; owns G21; after E12 S13): bypass per card, the E12 S13 before/after on headphone sessions, graduate `e13.headphones-page` (built behind `e13.headphones-page`, PR pending; wiring: S13 `e13/graduate` after E15 S6, G27)
 
 ### E14 Upmixer
 
@@ -660,7 +660,8 @@ One flag `e34.design-language`, graduated in S7. The minimum macOS rises to 27 i
 - [x] S0 `e34/macos27-glass` (#600): minimum macOS raised to 27, macOS 27 glass rules read from Apple's documentation, glass and material audit, flag added (needs-owner: minimum OS, `AGENTS.md`); merged; flag read in S1, graduated in S7
 - [~] S1 `e34/design-language`: `docs/DESIGN_LANGUAGE.md`, values file, components, formatters, status levels, gallery; ends with the owner's screen check (low-risk); built dark behind `e34.design-language`, S2/S3 wire the pages; owner screen check done 17 Nov 2026 (#601 merged)
 - [x] S2 `e34/adopt-playback-pages`: Dashboard, Equalizer, Dynamics, Meters, Headphones, Plugins on the shared parts (low-risk); all six pages done (#604, S2b Dashboard)
-- [ ] S3 `e34/adopt-system-pages`: System, tools, Active Acoustics, Settings, Help on the shared parts (needs-owner: ANC and MIMO screens, appearance only)
+- [~] S3 `e34/adopt-system-pages`: System, tools and Help on the shared parts (44 files, low-risk; dark behind `e34.design-language`); Active Acoustics and Settings move in S3b
+- [ ] S3b `e34/adopt-active-acoustics-settings`: Active Acoustics (after E12 S19) and Settings (after E12 S23) on the shared parts (needs-owner: ANC and MIMO screens, appearance only)
 - [x] S4 `e34/states-and-dialogs`: one state component, one confirmation rule (low-risk; dark behind `e34.design-language`; leftovers in E34 G23, owner S7)
 - [~] S5 `e34/menus-and-keyboard`: View and Playback menus built dark; full keyboard reach check moves to the E22 "E34 screen checks" item (low-risk)
 - [~] S6 `e34/accessibility`: Reduce Motion, Increase Contrast, Reduce Transparency, VoiceOver values (low-risk); built dark behind `e34.design-language`; Dashboard master slider and by-ear VoiceOver pass remain (G25, G24)

@@ -22,7 +22,7 @@ struct ProductionOptionalAudioResearchWorkspace: View {
 
     var body: some View {
         ProductionPageContainer {
-            VStack(alignment: .leading, spacing: 18) {
+            VStack(alignment: .leading, spacing: DesignSpacing.l.pt) {
                 Text(
                     "Optional experimental HRTF comparison tools. They never apply a DSP filter, change audio routing or declare measured improvement. Use Room Correction or Headphones for the separate, validated deployment workflows."
                 )
@@ -32,8 +32,8 @@ struct ProductionOptionalAudioResearchWorkspace: View {
 
                 if let errorMessage {
                     Label(errorMessage, systemImage: "exclamationmark.shield")
-                        .font(.caption)
-                        .foregroundStyle(.orange)
+                        .font(DesignType.caption.font)
+                        .foregroundStyle(StatusLevel.attention.color)
                         .textSelection(.enabled)
                 }
             }
@@ -42,18 +42,18 @@ struct ProductionOptionalAudioResearchWorkspace: View {
     }
 
     private var hrtfCard: some View {
-        VStack(alignment: .leading, spacing: 13) {
+        VStack(alignment: .leading, spacing: DesignSpacing.m.pt) {
             HStack {
                 Text("HRTF Coverage & Listener Preference")
-                    .font(.headline)
+                    .font(DesignType.sectionTitle.font)
                 Spacer()
                 Button("Refresh imported HRTFs") { loadHRTFs() }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(.glass)
             }
             Text(
                 "Explore interpolation among directions actually captured in a local SOFA/HRTF profile. Record your own subjective preference for imported profiles; this does not measure your ears or personalize transfer functions physiologically. Audition using the normal Headphones profile, starting at low volume."
             )
-            .font(.caption)
+            .font(DesignType.caption.font)
             .foregroundStyle(.secondary)
 
             Picker("Imported HRTF", selection: $selectedHRTFID) {
@@ -86,7 +86,7 @@ struct ProductionOptionalAudioResearchWorkspace: View {
                             : "Output rate mismatch or no output selected; no implicit SOFA resampling or deployment.",
                     systemImage: matched ? "checkmark.shield" : (adapts ? "arrow.triangle.2.circlepath" : "exclamationmark.shield")
                 )
-                .font(.caption)
+                .font(DesignType.caption.font)
                 .foregroundStyle(matched || adapts ? Color.secondary : Color.orange)
 
                 HStack {
@@ -106,7 +106,7 @@ struct ProductionOptionalAudioResearchWorkspace: View {
                 Button("Analyze recorded directional coverage") {
                     analyzeHRTF(profile)
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(.glassProminent)
                 if let spatial {
                     LabeledContent("Nearest recorded direction") {
                         Text(
@@ -120,11 +120,11 @@ struct ProductionOptionalAudioResearchWorkspace: View {
                         Text(String(format: "%.3f", spatial.maximumAbsoluteTap))
                     }
                     ForEach(spatial.notes, id: \.self) { note in
-                        Text(note).font(.caption).foregroundStyle(.secondary)
+                        Text(note).font(DesignType.caption.font).foregroundStyle(.secondary)
                     }
                 }
                 Divider()
-                Text("User-guided profile audition").font(.subheadline.bold())
+                Text("User-guided profile audition").font(DesignType.label.font.bold())
                 Picker("Listening preference", selection: $listenerRating) {
                     ForEach(1...5, id: \.self) { rating in
                         Text("\(rating) / 5").tag(rating)
@@ -137,21 +137,21 @@ struct ProductionOptionalAudioResearchWorkspace: View {
                     Button("Save local listening preference") {
                         saveAudition(profile)
                     }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(.glass)
                     Text(savedAudition == nil
                          ? "No saved rating"
                          : "Local rating saved; choose the profile in Headphones to audition or stage it.")
-                        .font(.caption)
+                        .font(DesignType.caption.font)
                         .foregroundStyle(.secondary)
                 }
             } else {
                 Text("Import an HRTF/SOFA file in Headphones before exploring.")
-                    .font(.caption)
+                    .font(DesignType.caption.font)
                     .foregroundStyle(.secondary)
             }
         }
-        .padding(20)
-        .background(.regularMaterial, in: .rect(cornerRadius: 18))
+        .padding(DesignSpacing.xl.pt)
+        .background(.regularMaterial, in: .rect(cornerRadius: DesignRadius.large.pt))
     }
 
     private func loadHRTFs() {
