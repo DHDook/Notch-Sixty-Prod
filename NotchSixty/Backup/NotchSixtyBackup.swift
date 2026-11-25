@@ -13,6 +13,11 @@ struct NotchSixtyBackupPreferences: Codable, Equatable, Sendable {
     var showVolumePopup: Bool? = nil
     var volumePopupPosition: String? = nil
     var coverSystemVolumePopup: Bool? = nil
+    /// E12 S25: the remaining app settings. Optional so backups made before S25 still decode and restore; a missing
+    /// value leaves the current setting alone.
+    var resumeProcessingOnOpen: Bool? = nil
+    var abComparisonEnabled: Bool? = nil
+    var vuMetersEnabled: Bool? = nil
 
     func validate() throws {
         guard schemaVersion == Self.currentSchemaVersion,
@@ -312,6 +317,19 @@ final class NotchSixtyBackupService {
                 rollbackFailures.joined(separator: "; ")
             )
         }
+    }
+
+    /// E12 S25: removes every saved preset, system, measurement, binaural profile and the Blind Listening history.
+    /// The profile store is cleared first: it refuses unless the engine is idle, so a refusal erases nothing.
+    func eraseAllSavedData() throws {
+        _ = try profiles.restoreBackupSnapshot(
+            ProductProfileBackupSnapshot(
+                contentPresets: [], systemProfiles: [], selectedContentPresetID: nil, selectedSystemProfileID: nil),
+            recomputeHardwareRequirements: false)
+        for id in try roomStore.existingProjectIDs() { try roomStore.delete(id) }
+        for id in try labStore.existingSessionIDs() { try labStore.delete(id) }
+        for id in try binauralStore.existingAssetIDs() { try binauralStore.delete(id: id) }
+        blindHistory?.clear()
     }
 
     private func validate(_ bundle: NotchSixtyBackupBundle) throws {

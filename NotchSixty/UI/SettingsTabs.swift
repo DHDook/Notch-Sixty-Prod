@@ -42,7 +42,7 @@ enum SettingsTab: String, CaseIterable, Identifiable, Sendable {
             return titles
         case .volume: return ["Volume & Feedback"]
         case .privacy: return ["Permissions"]
-        case .data: return ["Backup & Restore"]
+        case .data: return ["Backup & Restore", "Automatic Backups", "Reset & Erase"]
         case .about: return ["About", "Licences", "Privacy Statement", "Help & Support"]
         }
     }
