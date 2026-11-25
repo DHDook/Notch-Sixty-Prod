@@ -165,6 +165,8 @@ struct ProductionHardwareAcceptanceWorkspace: View {
                 showingCampaignForm = true
             }
         }
+        .onAppear { acceptance.setPageOpen(true) }
+        .onDisappear { acceptance.setPageOpen(false) }
         .onChange(of: selectedGate) { _, _ in
             resetObservationAttestations()
             resetPreflight()

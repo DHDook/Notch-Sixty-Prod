@@ -162,6 +162,7 @@ final class OutputFollowPolicyTests: XCTestCase {
     func testFlagIsRegisteredAndOffByDefault() {
         XCTAssertTrue(FeatureFlag.all.contains(.followOutput))
         XCTAssertEqual(FeatureFlag.followOutput.id, "e15.follow-output")
-        XCTAssertFalse(FeatureFlag.followOutput.resolvedDefault)
+        XCTAssertTrue(FeatureFlag.followOutput.graduated)
+        XCTAssertTrue(FeatureFlag.followOutput.resolvedDefault)
     }
 }

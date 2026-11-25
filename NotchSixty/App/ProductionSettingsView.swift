@@ -182,6 +182,7 @@ struct ProductionSettingsView: View {
                     volumeCard
                     presenceCard
                     presetsCard
+                    followOutputCard
                     schedulesCard
                     startupCard
                     permissionsCard
@@ -234,7 +235,8 @@ struct ProductionSettingsView: View {
                         presenceCard
                         startupCard
                         presetsCard
-                        schedulesCard
+                        followOutputCard
+                    schedulesCard
                         displaysCard
                         if featureFlags.isEnabled(.virtualDriver) {
                             AudioInputPathSettingsSection(model: product.audioInputPath)
@@ -424,6 +426,17 @@ struct ProductionSettingsView: View {
             Text("Adds A/B buttons beside the preset menu so you can store two sounds and switch between them. While a comparison is running the buttons stay visible until you finish it.")
                 .font(DesignType.caption.font)
                 .foregroundStyle(.secondary)
+        }
+    }
+
+    /// E15 S4 (G9): the Follow macOS output switch in Settings (the Playback System menu offers the same toggle). Off by
+    /// default: the selected output stays authoritative until the user turns this on.
+    @ViewBuilder
+    private var followOutputCard: some View {
+        if featureFlags.isEnabled(.followOutput) {
+            settingsCard(title: "Follow macOS Output", systemImage: "arrow.triangle.swap") {
+                OutputFollowSettingsToggle(follow: product.outputFollow)
+            }
         }
     }
 

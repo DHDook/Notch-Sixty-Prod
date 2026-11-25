@@ -28,6 +28,8 @@ protocol MIMOTreatmentHost: AnyObject {
     ) -> Result<MIMOGraphTreatment.Permit, MIMOTreatmentPermitRefusal>
     func requestTreatmentArm() async throws
     func disarmTreatment()
+    /// E15 S4 (G8): disarms with a named reason so the record does not read as a user bypass (default: a user disarm).
+    func disarmTreatment(reason: LiveTreatmentDisarmReason)
     /// The held stage readback; reading it resets nothing (E19 G27).
     func treatmentReadback() -> n60_mimo_readback?
     func hardwareAcceptance() -> MIMORoomTreatmentHardwareAcceptance?
@@ -37,6 +39,10 @@ protocol MIMOTreatmentHost: AnyObject {
     func treatmentWayCaptures() -> [MIMORoutedWayCapture]
     /// E19 S10b (G38): the user's support overrides by speaker, for the speaker list and the permit's class key.
     func setTreatmentSupportOverrides(_ overrides: [UUID: ClosedRange<Double>])
+}
+
+extension MIMOTreatmentHost {
+    func disarmTreatment(reason: LiveTreatmentDisarmReason) { disarmTreatment() }
 }
 
 /// E19 S10b (G36): the production source and driver of per-way captures (the E24 seat flow). The controller asks it what is
@@ -693,6 +699,12 @@ final class MIMOTreatmentController: ObservableObject {
     func arm() async {
         armMessage = nil
         do { try await host.requestTreatmentArm() } catch { armMessage = Self.describe(error) }
+        refreshReadout()
+    }
+
+    /// E15 S4 (G8): an output switch disarms Room Treatment with `.outputFollowed`, not as a user bypass.
+    func disarmForOutputFollow() {
+        host.disarmTreatment(reason: .outputFollowed)
         refreshReadout()
     }
 

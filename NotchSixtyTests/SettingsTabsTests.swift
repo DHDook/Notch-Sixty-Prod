@@ -37,6 +37,13 @@ final class SettingsTabsTests: XCTestCase {
             ["About", "Licences", "Privacy Statement", "Help & Support"])
     }
 
+    /// E15 S4 (G9, G14): the Follow macOS Output and Schedules cards belong to the General tab while the flag is on.
+    func testGeneralTabListsFollowOutputAndSchedulesWhenOffered() {
+        let general = SettingsTab.general.cardTitles(offersDeveloperSwitch: false, offersFollowOutput: true)
+        XCTAssertEqual(
+            general, ["Appearance", "App Presence", "Startup", "Presets", "Follow macOS Output", "Schedules", "Page Displays"])
+    }
+
     func testReleaseBuildOffersNoDeveloperSwitchAndIgnoresStoredValue() {
         XCTAssertFalse(DeveloperToolsPolicy.offersSwitch(policy: .launchArgumentOnly))
         XCTAssertTrue(DeveloperToolsPolicy.offersSwitch(policy: .storedOverrides))

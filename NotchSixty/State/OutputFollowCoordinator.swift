@@ -17,6 +17,8 @@ protocol OutputFollowSwitching: AnyObject {
     var selectedOutputUID: String? { get }
     var isFailed: Bool { get }
     func switchFollowedOutput(to uid: String, resume: Bool, prepare: () throws -> Void) throws
+    /// E15 S4 (G7): starts processing on the already selected output (after a paused output got a binding).
+    func start() throws
 }
 
 extension AudioIOEngine: OutputFollowSwitching {
@@ -33,10 +35,22 @@ protocol OutputFollowProfiles: AnyObject {
     func applyBoundSystem(_ id: UUID) throws
     func seedOutputBindingsFromAssociations() -> [String]
     func useSelectedSystem(for key: OutputKey)
+    /// E15 S4 (G7): the Playback Systems the unbound sheet offers under "Choose…".
+    var systemProfileChoices: [OutputFollowSystemChoice] { get }
+    func useSystem(_ id: UUID, for key: OutputKey)
     func unbindOutput(_ key: OutputKey)
 }
 
-extension ProductProfileController: OutputFollowProfiles {}
+struct OutputFollowSystemChoice: Equatable, Identifiable, Sendable {
+    let id: UUID
+    let name: String
+}
+
+extension ProductProfileController: OutputFollowProfiles {
+    var systemProfileChoices: [OutputFollowSystemChoice] {
+        systemProfiles.map { OutputFollowSystemChoice(id: $0.id, name: $0.name) }
+    }
+}
 
 /// Disarms every live treatment that is armed. Returns the names of those it disarmed, for the banner.
 @MainActor
@@ -190,8 +204,35 @@ final class OutputFollowCoordinator: ObservableObject, OutputFollowEngineControl
     /// "Use for <device>": binds the selected system to the current output (and data source) and clears a pause.
     func useSelectedSystemForCurrentOutput() {
         guard let key = currentKey() else { return }
+        let wasPaused = pausedKey?.key.deviceUID == key.deviceUID
         profiles.useSelectedSystem(for: key)
-        if pausedKey?.key.deviceUID == key.deviceUID { dismissAnnouncement() }
+        if wasPaused {
+            dismissAnnouncement()
+            startPausedOutput(key: key, profileID: nil)
+        }
+    }
+
+    /// E15 S4 (G7): "Choose…" on the unbound sheet binds the picked Playback System to the paused output, applies it and
+    /// starts processing, so the user does not need the toolbar menu or a separate Start.
+    func chooseSystemForCurrentOutput(_ id: UUID) {
+        guard let key = currentKey() else { return }
+        let wasPaused = pausedKey?.key.deviceUID == key.deviceUID
+        profiles.useSystem(id, for: key)
+        guard wasPaused else { return }
+        dismissAnnouncement()
+        startPausedOutput(key: key, profileID: id)
+    }
+
+    var systemChoices: [OutputFollowSystemChoice] { profiles.systemProfileChoices }
+
+    private func startPausedOutput(key: OutputKey, profileID: UUID?) {
+        do {
+            if let profileID { try profiles.applyBoundSystem(profileID) }
+            try engine.start()
+        } catch {
+            announcement = OutputFollowAnnouncement(
+                device: displayName(key.deviceUID), kind: .failed(error.localizedDescription), disarmed: [])
+        }
     }
 
     func removeBindingForCurrentOutput() {

@@ -20,3 +20,19 @@ struct OutputFollowNotificationsRow: View {
         }
     }
 }
+
+/// E15 S4 (G9): the Settings switch for Follow macOS output. Same coordinator call as the Playback System menu.
+struct OutputFollowSettingsToggle: View {
+    @ObservedObject var follow: OutputFollowCoordinator
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Toggle("Follow macOS output", isOn: Binding(get: { follow.isFollowing }, set: { follow.setFollowing($0) }))
+            Text(OutputFollowCopy.recoveryPolicy(following: follow.isFollowing))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}

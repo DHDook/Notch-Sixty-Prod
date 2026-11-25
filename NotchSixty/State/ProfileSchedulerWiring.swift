@@ -39,11 +39,12 @@ enum ProfileSchedulerWiring {
         recovery: ProductRecoveryController,
         calibration: RoomCorrectionCalibrationController,
         multichannel: MultichannelCalibrationController,
+        hardwareAcceptance: HardwareAcceptanceController? = nil,
         host: ProductScheduleHost
     ) -> (scheduler: ProfileScheduler, observers: [AnyObject])? {
         guard flagEnabled else { return nil }
         let external = OutputFollowWiring.externalBlocks(
-            recovery: recovery, calibration: calibration, multichannel: multichannel)
+            recovery: recovery, calibration: calibration, multichannel: multichannel, hardwareAcceptance: hardwareAcceptance)
         let scheduler = ProfileScheduler(
             profiles: profiles, host: host,
             blocks: { [weak engine] in
@@ -73,6 +74,7 @@ enum ProfileSchedulerWiring {
         let ended: (AnyCancellable) -> Void = { observers.append($0) }
         ended(calibration.$state.dropFirst().sink { _ in send(.blockEnded) })
         ended(multichannel.$state.dropFirst().sink { _ in send(.blockEnded) })
+        if let hardwareAcceptance { ended(hardwareAcceptance.$pageOpen.dropFirst().sink { _ in send(.blockEnded) }) }
         ended(recovery.objectWillChange.sink { _ in send(.blockEnded) })
         return (scheduler, observers)
     }

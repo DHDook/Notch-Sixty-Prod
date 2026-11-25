@@ -86,6 +86,7 @@ extension AudioIOEngine: MIMOTreatmentHost {
     }
 
     func disarmTreatment() { disarmMIMOTreatment() }
+    func disarmTreatment(reason: LiveTreatmentDisarmReason) { disarmMIMOTreatment(reason: reason) }
 
     func treatmentReadback() -> n60_mimo_readback? { nChannelTransportSession?.peekMIMOReadback() }
 

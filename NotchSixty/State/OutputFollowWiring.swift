@@ -32,7 +32,7 @@ final class ProductTreatmentDisarmer: OutputFollowTreatmentDisarming {
         mimo.refreshReadout()
         if mimo.isArmed {
             names.append("Room Treatment")
-            mimo.bypass()
+            mimo.disarmForOutputFollow()
         }
         return names
     }
@@ -44,11 +44,12 @@ enum OutputFollowWiring {
     /// the same signals.
     static func externalBlocks(
         recovery: ProductRecoveryController, calibration: RoomCorrectionCalibrationController,
-        multichannel: MultichannelCalibrationController
+        multichannel: MultichannelCalibrationController, hardwareAcceptance: HardwareAcceptanceController? = nil
     ) -> () -> Set<OutputFollowBlock> {
-        { [weak recovery, weak calibration, weak multichannel] in
+        { [weak recovery, weak calibration, weak multichannel, weak hardwareAcceptance] in
             var blocks: Set<OutputFollowBlock> = []
             if recovery?.safeLaunchActive == true { blocks.insert(.safeLaunch) }
+            if hardwareAcceptance?.isRunInProgress == true { blocks.insert(.hardwareAcceptance) }
             if let state = calibration?.state, [.arming, .measuring, .analyzing].contains(state) {
                 blocks.insert(.measurementCapture)
             }
@@ -67,6 +68,7 @@ enum OutputFollowWiring {
         recovery: ProductRecoveryController,
         calibration: RoomCorrectionCalibrationController,
         multichannel: MultichannelCalibrationController,
+        hardwareAcceptance: HardwareAcceptanceController? = nil,
         quietZone: ActiveQuietZoneController,
         feedForward: FeedForwardLiveArmingController?,
         mimo: MIMOTreatmentController
@@ -76,7 +78,8 @@ enum OutputFollowWiring {
             profiles: profiles,
             treatments: ProductTreatmentDisarmer(quietZone: quietZone, feedForward: feedForward, mimo: mimo),
             source: CoreAudioFollowOutputEventSource(),
-            externalBlocks: Self.externalBlocks(recovery: recovery, calibration: calibration, multichannel: multichannel),
+            externalBlocks: Self.externalBlocks(
+                recovery: recovery, calibration: calibration, multichannel: multichannel, hardwareAcceptance: hardwareAcceptance),
             displayName: { [weak engine] uid in engine?.outputDevices.first { $0.uid == uid }?.name ?? uid })
 
         // E15 S3b: macOS notifications. The notification center is touched only outside a test host.
@@ -100,12 +103,18 @@ enum OutputFollowWiring {
         observers.append(linked)
         observers.append(linked.observeOutput(of: engine))
         let ended: (AnyCancellable) -> Void = { observers.append($0) }
+        ended(linked.observeSystemChange(of: engine))
         ended(calibration.$state.dropFirst().sink { [weak coordinator] _ in
             DispatchQueue.main.async { MainActor.assumeIsolated { coordinator?.exclusionEnded() } }
         })
         ended(multichannel.$state.dropFirst().sink { [weak coordinator] _ in
             DispatchQueue.main.async { MainActor.assumeIsolated { coordinator?.exclusionEnded() } }
         })
+        if let hardwareAcceptance {
+            ended(hardwareAcceptance.$pageOpen.dropFirst().sink { [weak coordinator] _ in
+                DispatchQueue.main.async { MainActor.assumeIsolated { coordinator?.exclusionEnded() } }
+            })
+        }
         ended(recovery.objectWillChange.sink { [weak coordinator] _ in
             DispatchQueue.main.async { MainActor.assumeIsolated { coordinator?.exclusionEnded() } }
         })
