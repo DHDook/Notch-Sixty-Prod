@@ -68,7 +68,7 @@ final class LinkedHeadphoneSelector {
         profiles.selectedSystemProfileIDPublisher.dropFirst().removeDuplicates()
             .sink { [weak self, weak engine] _ in
                 DispatchQueue.main.async {
-                    MainActor.assumeIsolated { self?.outputBecameSelected(engine?.routeConfiguration.selectedOutputUID) }
+                    _ = MainActor.assumeIsolated { self?.outputBecameSelected(engine?.routeConfiguration.selectedOutputUID) }
                 }
             }
     }
