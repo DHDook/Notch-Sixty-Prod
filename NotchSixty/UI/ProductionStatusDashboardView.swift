@@ -49,6 +49,7 @@ extension DashboardInputs {
         history: SessionEventHistory,
         telemetry: DashboardTelemetry,
         failsafeMessage: String?,
+        resumeNote: String? = nil,
         usesDecibels: Bool,
         now: Date = Date()
     ) -> DashboardInputs {
@@ -102,6 +103,7 @@ extension DashboardInputs {
         }
         i.lastError = engine.lastErrorDescription
         i.failsafeMessage = failsafeMessage
+        i.resumeNote = resumeNote
         i.eventsInLastDay = history.eventsSince(now.addingTimeInterval(-86_400)).count
 
         i.clippedSamples = history.health.clippedSamples
@@ -125,6 +127,7 @@ struct ProductionStatusDashboardView: View {
     @ObservedObject var profiles: ProductProfileController
     @ObservedObject var navigation: ProductionNavigation
     var failsafeMessage: String?
+    @ObservedObject var resume: ResumeProcessingCoordinator
     var entryCard = AnyView(EmptyView())
     @ObservedObject private var history = ProductionMeterHub.eventHistory
     @AppStorage(PreferenceKeys.Application.volumeStepResolution)
@@ -135,6 +138,7 @@ struct ProductionStatusDashboardView: View {
         DashboardModel.make(DashboardInputs.make(
             engine: engine, profiles: profiles, history: history, telemetry: telemetry,
             failsafeMessage: failsafeMessage,
+            resumeNote: resume.skippedReason?.message,
             usesDecibels: ApplicationVolumeStepResolution(storedValue: storedVolumeStepResolution)?.usesDecibels == true))
     }
 

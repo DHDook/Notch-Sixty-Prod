@@ -49,6 +49,9 @@ struct DashboardInputs: Equatable {
     /// E15 fills this in for an automatic switch (for example "Switched because AirPods connected").
     var switchReason: String?
 
+    /// E12 S24: why processing was not resumed at launch; nil when nothing needs saying.
+    var resumeNote: String?
+
     var path: DashboardPath = .stereoSpeakers
     /// Speaker count and way count when speaker routing is on; nil otherwise.
     var routing: DashboardRouting?
@@ -105,7 +108,7 @@ struct DashboardHealthItem: Identifiable, Equatable {
 }
 
 enum DashboardAttentionKind: String, Equatable {
-    case engineError, waitingForDevice, activeSpeakerFailsafe, calibrationOutOfDate, sessionEvents
+    case engineError, waitingForDevice, activeSpeakerFailsafe, calibrationOutOfDate, sessionEvents, resumeSkipped
 }
 
 struct DashboardAttentionItem: Identifiable, Equatable {
@@ -174,6 +177,11 @@ enum DashboardModel {
             items.append(.init(
                 kind: .waitingForDevice, text: "Waiting for \(name) to come back.",
                 buttonTitle: "Open Speakers", destination: .init(.speakers), isWarning: true))
+        }
+        if let note = i.resumeNote, i.lifecycle != .running {
+            items.append(.init(
+                kind: .resumeSkipped, text: note, buttonTitle: "Open Speakers",
+                destination: .init(.speakers), isWarning: false))
         }
         if let error = i.lastError, !error.isEmpty {
             items.append(.init(
