@@ -532,7 +532,7 @@ complete, speaker ANC qualified, and a full hardware regression passing at every
 
 ### E14 Upmixer
 
-No epic file yet: epic-planner writes `docs/epics/E14.md` when `/next` reaches it.
+Plan: `docs/epics/E14.md` (awaiting owner approval; flag `e14.upmixer`).
 
 - [ ] One stereo-to-layout upmix for 5.1, 7.1 and 7.1.4: centre extraction, ambience to surrounds and heights
 - [ ] A single strength control, and a bypass for content that is already multichannel
