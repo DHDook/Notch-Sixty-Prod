@@ -40,6 +40,6 @@ final class AudioIOEngineFollowOutputTests: XCTestCase {
     }
 
     func testFollowTeardownDisarmsAsOutputChange() {
-        XCTAssertEqual(TransportTeardownCause.followOutput.disarmReason, .outputDeviceChanged)
+        XCTAssertEqual(TransportTeardownCause.followOutput.disarmReason, .outputFollowed)
     }
 }

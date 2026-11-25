@@ -15,11 +15,19 @@ extension AudioIOEngine {
     ///   unprocessed while the UI still shows the truthful selection.
     /// If the engine was idle the selection simply updates and nothing starts. A failed start surfaces through the
     /// normal lifecycle (`failed`) and is rethrown.
+    /// - Parameter prepare: runs on the control plane after the new output is selected and before `start()` (the S3
+    ///   coordinator applies the bound Playback System here, design note 5 step d). A throw leaves the engine stopped
+    ///   on the new output and is rethrown.
     func switchFollowedOutput(to uid: String, resume: Bool = true) throws {
+        try switchFollowedOutput(to: uid, resume: resume, prepare: {})
+    }
+
+    func switchFollowedOutput(to uid: String, resume: Bool, prepare: () throws -> Void) throws {
         let wasActive = lifecycleState != .idle
         if wasActive { stop(cause: .followOutput) }
         try refreshOutputDevices()
         try selectOutput(uid: uid)
+        try prepare()
         if wasActive && resume { try start() }
     }
 }

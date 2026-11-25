@@ -93,6 +93,7 @@ struct SafetyFlightRecorder: Sendable {
         switch reason {
         case .user: return "You turned Quiet Zone off."
         case .outputDeviceChanged: return "The output device changed, so the cancellation no longer matched your speakers."
+        case .outputFollowed: return "Follow macOS output moved processing to another output, so the cancellation was switched off first."
         case .outputDeviceLost: return "The output device disappeared."
         case .sleep: return "The Mac went to sleep."
         case .sampleRateChanged: return "The audio sample rate changed, so the cancellation had to be rebuilt."

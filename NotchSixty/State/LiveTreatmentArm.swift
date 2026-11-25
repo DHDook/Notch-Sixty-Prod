@@ -12,6 +12,8 @@ enum LiveTreatmentFeature: String, CaseIterable, Sendable {
 enum LiveTreatmentDisarmReason: String, Equatable, Sendable {
     case user
     case outputDeviceChanged
+    /// E15 S3: Follow macOS output is about to move processing to another output.
+    case outputFollowed
     case outputDeviceLost
     case sleep
     case sampleRateChanged
@@ -50,6 +52,7 @@ enum LiveTreatmentDisarmReason: String, Equatable, Sendable {
         switch self {
         case .user: return nil
         case .outputDeviceChanged: return "Disarmed: the output device changed. Re-arm to continue."
+        case .outputFollowed: return "Disarmed: output changed. Re-arm to continue."
         case .outputDeviceLost: return "Disarmed: the output device was lost. Re-arm to continue."
         case .sleep: return "Disarmed: the Mac went to sleep. Re-arm to continue."
         case .sampleRateChanged: return "Disarmed: the sample rate changed. Re-arm to continue."
@@ -94,7 +97,7 @@ enum TransportTeardownCause: Equatable, Sendable {
         case .quit: return .quit
         case .sleep: return .sleep
         case .outputLost: return .outputDeviceLost
-        case .followOutput: return .outputDeviceChanged
+        case .followOutput: return .outputFollowed
         case .reconfiguration: return .transportReconfigured
         case .plannedProfileChange: return nil
         }

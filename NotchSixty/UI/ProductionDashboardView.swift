@@ -10,6 +10,13 @@ struct ProductionDashboardView: View {
     @AppStorage(PreferenceKeys.Application.volumeStepResolution)
     private var storedVolumeStepResolution = ApplicationVolumeStepResolution.standard.rawValue
     @State private var actionError: String?
+    /// E15: while Follow macOS output is on the picker is read-only (the flag forces the mode to fixed when off).
+    @AppStorage(OutputSelectionMode.defaultsKey) private var storedOutputMode = OutputSelectionMode.fixed.rawValue
+    private var followingMacOS: Bool {
+        OutputSelectionMode.effective(
+            stored: OutputSelectionMode(rawValue: storedOutputMode) ?? .fixed,
+            flagEnabled: FeatureFlags().isEnabled(.followOutput)) == .followSystem
+    }
 
     private func perform(_ action: () throws -> Void) {
         do {
@@ -220,7 +227,8 @@ struct ProductionDashboardView: View {
     private var audioControls: some View {
         VStack(alignment: .leading, spacing: DesignSpacing.s.pt) {
             HStack {
-                Text("Output Device").font(DesignType.sectionTitle.font)
+                Text(followingMacOS ? "Following macOS: \(engine.selectedOutputDevice?.name ?? "no output")" : "Output Device")
+                    .font(DesignType.sectionTitle.font)
                 Spacer()
                 Text(engine.lifecycleState.rawValue.capitalized)
                     .font(DesignType.caption.font.weight(.semibold))
@@ -238,7 +246,7 @@ struct ProductionDashboardView: View {
                 }
                 .labelsHidden()
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .disabled(engine.lifecycleState != .idle)
+                .disabled(engine.lifecycleState != .idle || followingMacOS)
 
                 Button {
                     perform { try engine.refreshOutputDevices() }
