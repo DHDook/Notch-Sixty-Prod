@@ -21,7 +21,9 @@ struct ProductionRoomTreatmentAdvisorWorkspace: View {
                         advisor: advisor
                     )
                     if FeatureFlags().isEnabled(.roomModel) {
-                        ProductionSeatMapSection(advisor: advisor)
+                        ProductionSeatMapSection(
+                            advisor: advisor,
+                            stereoAlignment: profiles.selectedSystemProfile?.state.systemArrangement?.stereoAlignment)
                     }
                     ProductionRoomTreatmentDesignSection(
                         advisor: advisor
