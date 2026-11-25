@@ -41,7 +41,9 @@ extension AudioIOEngine {
             outputTrimsDB: (0..<laneCount).map { settings.lane($0).trimDB },
             laneCount: laneCount,
             routedDigest: speakerRoutingConfiguration.map(MIMORoutedTreatmentPlanner.digest(of:)) ?? "",
-            selfQualificationBinding: MIMOTreatmentSelfQualification.engineBinding(protection: settings))
+            selfQualificationBinding: MIMOTreatmentSelfQualification.engineBinding(protection: settings),
+            outputIsWireless: WirelessOutputPolicy.applies(
+                selectedOutputDevice?.transport, flagOn: FeatureFlags().isEnabled(.followOutput)))
     }
 
     /// Stages a designed stage for the next start (idle only, like the legacy staging). Never arms.

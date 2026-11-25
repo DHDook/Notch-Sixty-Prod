@@ -79,6 +79,8 @@ final class MIMOGraphTreatment: ObservableObject {
         /// E19 S12a (SQ7): the engine-held part of a self-qualified permit's binding (`MIMOTreatmentSelfQualification.engineBinding`).
         /// Empty (and unused) for the other permit bases.
         var selfQualificationBinding = ""
+        /// E15 S6: the output is wireless and `e15.follow-output` is on; arming is refused with `.wirelessOutput`.
+        var outputIsWireless = false
     }
 
     let arm = LiveTreatmentArm(feature: .mimoRoomTreatment)
@@ -317,7 +319,7 @@ final class MIMOGraphTreatment: ObservableObject {
         // The master volume is common to every lane and never disarms, so the gain the switch compares is pinned.
         LiveTreatmentEnvironment(
             outputDeviceUID: context.outputDeviceUID, sampleRate: context.sampleRate, engineRunning: context.engineRunning,
-            inputAvailable: true, outputGainDB: 0)
+            inputAvailable: true, outputGainDB: 0, outputIsWireless: context.outputIsWireless)
     }
 
     private func didDisarm(_ reason: LiveTreatmentDisarmReason) {

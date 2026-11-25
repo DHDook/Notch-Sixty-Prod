@@ -35,6 +35,8 @@ struct FeedForwardLiveQuietZoneFacts: Equatable, Sendable {
     var arrangementRefusal: String? = nil
     /// E26 S5 (`e26.sub-aware-anc`): `SubAwareAncReadiness` says why a sub in the path is not ready. nil: ready, or no sub.
     var subAwareRefusal: String? = nil
+    /// E15 S6: the output is wireless with `e15.follow-output` on; feed-forward is refused (`.wirelessOutput`).
+    var outputIsWireless = false
 }
 
 /// What the feed-forward shadow and reference driver know.
@@ -165,7 +167,7 @@ struct FeedForwardLiveArmingPolicy: Equatable, Sendable {
     /// The user's request. False (and why) unless Quiet Zone is armed and the filter is off.
     mutating func request(quietZone: FeedForwardLiveQuietZoneFacts, now: Double) -> Bool {
         guard phase == .off, quietZone.armed, quietZone.sampleRate != nil, quietZone.outputDeviceUID != nil,
-              !quietZone.subwooferActive, !quietZone.receiverBassUndeclared
+              !quietZone.subwooferActive, !quietZone.receiverBassUndeclared, !quietZone.outputIsWireless
         else {
             return false
         }
@@ -355,7 +357,9 @@ final class FeedForwardLiveArmingController: ObservableObject {
     func request(quietZone: FeedForwardLiveQuietZoneFacts) -> Bool {
         let accepted = policy.request(quietZone: quietZone, now: clock())
         if !accepted {
-            statusMessage = quietZone.receiverBassUndeclared
+            statusMessage = quietZone.outputIsWireless
+                ? WirelessOutputPolicy.liveTreatmentRefusal
+                : quietZone.receiverBassUndeclared
                 ? TwoChannelAncArming.undeclaredReceiverRefusal
                 : quietZone.subwooferActive
                 ? "Feed-forward is not available with a subwoofer yet."

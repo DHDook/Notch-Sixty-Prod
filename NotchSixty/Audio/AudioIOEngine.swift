@@ -2663,7 +2663,7 @@ final class AudioIOEngine {
             selectedOutputUID: routeConfiguration.selectedOutputUID,
             selectedOutputName: selectedDevice?.name,
             selectedOutputPresent: selectedDevice != nil,
-            selectedOutputNominalSampleRate: selectedDevice?.nominalSampleRate,
+            selectedOutputNominalSampleRate: selectedDevice?.nominalSampleRate, selectedOutputTransport: selectedDevice?.transport,
             discoveredOutputCount: outputDevices.count,
             tapSampleRate: activeTapSampleRate,
             outputSampleRate: activeOutputSampleRate,

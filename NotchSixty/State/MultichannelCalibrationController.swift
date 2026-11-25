@@ -377,6 +377,7 @@ final class MultichannelCalibrationController: ObservableObject {
             inputChannelIndex: microphone.selectedInputChannelIndex,
             inputChannelCount: perSeat ? nil : microphone.selectedInputDevice?.inputChannelCount,
             hasOutputDevice: engine.selectedOutputDevice != nil,
+            outputIsWireless: WirelessOutputPolicy.applies(engine.selectedOutputDevice?.transport, flagOn: FeatureFlags().isEnabled(.followOutput)),
             requiresProfile: true,
             hasProfile: profile != nil,
             profileReason: SystemCapabilityText.profileRequiredReason(

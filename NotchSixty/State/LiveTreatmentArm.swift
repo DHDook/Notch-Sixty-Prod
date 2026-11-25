@@ -125,14 +125,19 @@ struct LiveTreatmentEnvironment: Equatable, Sendable {
     var howlGuardTripCount: UInt64 = 0
     /// E26 S4: fingerprint of the bass path (under the flag with a sub in the path); nil is not compared.
     var bassPathFingerprint: String? = nil
+    /// E15 S6: the output is wireless and `e15.follow-output` is on (`WirelessOutputPolicy.applies`); arming is refused.
+    var outputIsWireless: Bool = false
 }
 
 enum LiveTreatmentArmError: Error, Equatable, LocalizedError {
     case engineNotRunning
     case outputUnknown
+    /// E15 S6: a wireless output's delay varies, so live treatment cannot be time-aligned.
+    case wirelessOutput
 
     var errorDescription: String? {
         switch self {
+        case .wirelessOutput: return WirelessOutputPolicy.liveTreatmentRefusal
         case .engineNotRunning: return "Start audio processing before arming."
         case .outputUnknown: return "Select an output device before arming."
         }
@@ -187,6 +192,7 @@ final class LiveTreatmentArm: ObservableObject {
         guard environment.outputDeviceUID != nil else {
             throw LiveTreatmentArmError.outputUnknown
         }
+        guard !environment.outputIsWireless else { throw LiveTreatmentArmError.wirelessOutput }
         baseline = environment
         silentSince = nil
         lastAnalysisAt = now

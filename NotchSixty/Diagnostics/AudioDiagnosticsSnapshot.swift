@@ -262,6 +262,8 @@ struct AudioDiagnosticsSnapshot: Equatable, Sendable {
     let selectedOutputName: String?
     let selectedOutputPresent: Bool
     let selectedOutputNominalSampleRate: Double?
+    /// E15 S6: how the selected output is connected; nil with no selection.
+    var selectedOutputTransport: OutputTransportKind? = nil
     let discoveredOutputCount: Int
     let tapSampleRate: Double?
     let outputSampleRate: Double?

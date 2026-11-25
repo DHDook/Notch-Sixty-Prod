@@ -94,6 +94,11 @@ enum OutputFollowWiring {
         observers.append(ObservationSubscription(
             value: { engine.lifecycleState },
             onChange: { [weak coordinator] state in if state != .failed { coordinator?.exclusionEnded() } }))
+        // E15 S6 (E13 G27): any change of the selected output (followed, manual, remote, setup) selects the headphone entry
+        // linked to the new device, one hop later so a followed switch has applied its bound system first.
+        let linked = LinkedHeadphoneSelector(profiles: profiles)
+        observers.append(linked)
+        observers.append(linked.observeOutput(of: engine))
         let ended: (AnyCancellable) -> Void = { observers.append($0) }
         ended(calibration.$state.dropFirst().sink { [weak coordinator] _ in
             DispatchQueue.main.async { MainActor.assumeIsolated { coordinator?.exclusionEnded() } }

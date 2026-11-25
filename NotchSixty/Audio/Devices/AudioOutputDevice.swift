@@ -23,6 +23,8 @@ struct AudioOutputDevice: Identifiable, Equatable, Sendable {
     let nominalSampleRate: Double
     let availableSampleRateRanges: [AudioSampleRateRange]
     let outputChannelCount: UInt32
+    /// E15 S6: how the device is connected (`kAudioDevicePropertyTransportType`); `.unknown` where it cannot be read.
+    let transport: OutputTransportKind
 
     init(
         deviceID: AudioDeviceID,
@@ -30,8 +32,10 @@ struct AudioOutputDevice: Identifiable, Equatable, Sendable {
         name: String,
         nominalSampleRate: Double,
         availableSampleRateRanges: [AudioSampleRateRange],
-        outputChannelCount: UInt32 = 2
+        outputChannelCount: UInt32 = 2,
+        transport: OutputTransportKind = .unknown
     ) {
+        self.transport = transport
         self.deviceID = deviceID
         self.uid = uid
         self.name = name
