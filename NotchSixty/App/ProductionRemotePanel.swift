@@ -14,9 +14,14 @@ struct ProductionRemotePanel: View {
     @State private var commandError: String?
     @State private var switchingOutput = false
     @StateObject private var beforeAfter: BeforeAfterModel
+    private let flags: FeatureFlags
+    private let control: ControlService
 
-    init(product: ProductController) {
+    @MainActor init(product: ProductController, flags: FeatureFlags? = nil) {
+        let flags = flags ?? FeatureFlags()
         self.product = product
+        self.flags = flags
+        control = product.makeControlService(flags: { flags })
         _beforeAfter = StateObject(wrappedValue: BeforeAfterModel(
             player: ProfileContentAuditionPlayer(profiles: product.profiles),
             headphone: ProfileHeadphoneCompare(profiles: product.profiles)))
@@ -166,6 +171,9 @@ struct ProductionRemotePanel: View {
             balanceRow
             outputRow
             presetRow
+            if !MenuBarRemoteModel.automationControls(automationOn: flags.isEnabled(.automation)).isEmpty {
+                automationRows
+            }
             if RemoteSlot.beforeAfter.isFilled, FeatureFlags().isEnabled(.blindListening) {
                 BeforeAfterRow(model: beforeAfter, openBlind: openBlindListening)
             }
@@ -248,6 +256,42 @@ struct ProductionRemotePanel: View {
             if switchingOutput {
                 Text("Switching output…").font(.caption).foregroundStyle(.secondary)
             }
+        }
+    }
+
+    /// E16 S1: Playback System, Bypass and room correction, all through `ControlService` so the same rules apply as for
+    /// an intent. A refusal shows in the panel's message.
+    private func runControl(_ command: ControlCommand) {
+        Task { @MainActor in
+            commandError = await control.perform(command).refusalReason
+        }
+    }
+
+    private var automationRows: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Playback System").font(.subheadline.weight(.semibold))
+                Picker("Playback System", selection: Binding(
+                    get: { profiles.selectedSystemProfileID },
+                    set: { id in if let id { runControl(.selectSystem(id)) } }
+                )) {
+                    ForEach(profiles.systemProfiles) { system in
+                        Text(system.name).tag(Optional(system.id))
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.menu)
+                .frame(maxWidth: .infinity)
+                .accessibilityLabel("Playback System")
+            }
+            Toggle("Bypass", isOn: Binding(
+                get: { engine.playbackControlConfiguration.globalBypassed },
+                set: { runControl(.setBypass($0)) }))
+                .toggleStyle(.switch)
+            Toggle("Room correction", isOn: Binding(
+                get: { engine.roomCorrectionConfiguration.enabled },
+                set: { runControl(.setRoomCorrection($0)) }))
+                .toggleStyle(.switch)
         }
     }
 

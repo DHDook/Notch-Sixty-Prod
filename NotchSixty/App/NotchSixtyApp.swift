@@ -84,14 +84,19 @@ struct NotchSixtyApp: App {
     @StateObject private var product: ProductController
     @StateObject private var preferences: ApplicationPreferences
     @StateObject private var featureFlags: FeatureFlags
-    @StateObject private var navigation = ProductionNavigation()
+    @StateObject private var navigation: ProductionNavigation
 
     /// Held until the process exits; see `ProductInstanceLock`.
     private static var instanceLock: ProductInstanceLock?
 
     init() {
         Self.claimSingleInstance()
-        _product = StateObject(wrappedValue: ProductController())
+        let controller = ProductController()
+        let navigation = ProductionNavigation()
+        _product = StateObject(wrappedValue: controller)
+        _navigation = StateObject(wrappedValue: navigation)
+        // E16 S1: App Intents reach the app through this holder. The service reads `e16.automation` on every command.
+        AutomationRuntime.shared.install(service: controller.makeControlService(), navigation: navigation)
         _preferences = StateObject(wrappedValue: ApplicationPreferences())
         _featureFlags = StateObject(wrappedValue: FeatureFlags())
     }

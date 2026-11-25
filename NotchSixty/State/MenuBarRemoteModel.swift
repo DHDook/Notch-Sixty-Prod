@@ -26,6 +26,11 @@ enum RemoteControl: String, CaseIterable, Sendable {
     case processing, volume, mute, balance, output, preset, openApp
 }
 
+/// E16 S1 (behind `e16.automation`): controls the remote gains, each going through `ControlService`.
+enum RemoteAutomationControl: String, CaseIterable, Sendable {
+    case bypass, roomCorrection, playbackSystem
+}
+
 /// Named slots later slices fill, so they do not redesign the panel.
 enum RemoteSlot: String, CaseIterable, Sendable {
     case quickControls
@@ -55,6 +60,11 @@ enum MenuBarRemoteModel {
         case .legacyMenuBar: return [.processing, .preset, .openApp]
         case .menuBar, .toolbarPopover: return RemoteControl.allCases
         }
+    }
+
+    /// The extra controls, empty while `e16.automation` is off (today's remote).
+    static func automationControls(automationOn: Bool) -> [RemoteAutomationControl] {
+        automationOn ? RemoteAutomationControl.allCases : []
     }
 
     /// The toolbar button is shown only when the flag is on and the menu bar item is off.
