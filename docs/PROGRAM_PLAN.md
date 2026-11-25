@@ -532,7 +532,7 @@ complete, speaker ANC qualified, and a full hardware regression passing at every
 
 ### E14 Upmixer
 
-Plan: `docs/epics/E14.md` (awaiting owner approval; flag `e14.upmixer`).
+Plan: `docs/epics/E14.md` (owner answered Q1–Q6, 25 Nov 2026; flag `e14.upmixer`).
 
 - [ ] One stereo-to-layout upmix for 5.1, 7.1 and 7.1.4: centre extraction, ambience to surrounds and heights
 - [ ] A single strength control, and a bypass for content that is already multichannel
