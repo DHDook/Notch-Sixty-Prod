@@ -41,6 +41,9 @@ enum InterfaceMode: String, CaseIterable, Identifiable, Sendable {
 
     var isExpert: Bool { self == .expert }
 
+    /// G86: the correction-limit control is an expert control and exists only with the flag on.
+    func showsCorrectionLimitControl(flagEnabled: Bool) -> Bool { flagEnabled && self == .expert }
+
     /// Pages the sidebar lists in simple mode (the Dashboard is its own row). Expert mode lists them all.
     static let simpleSections: Set<ProductionSection> = [.dashboard, .system, .headphones]
 

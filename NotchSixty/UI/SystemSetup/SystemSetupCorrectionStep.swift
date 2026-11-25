@@ -16,7 +16,7 @@ struct SystemSetupCorrectionStep: View {
             if let limit = model.correctionLimitHz {
                 Label(SystemSetupCorrectionLimit.note(limitHz: limit), systemImage: "exclamationmark.triangle").font(DesignType.label.font)
             }
-            if let limit = model.correctionLimitHz, interfaceMode.isExpert, FeatureFlags().isEnabled(.simpleExpertModes) {
+            if let limit = model.correctionLimitHz, interfaceMode.showsCorrectionLimitControl(flagEnabled: FeatureFlags().isEnabled(.simpleExpertModes)) {
                 SystemSetupCorrectionLimitControl(model: model, limitHz: limit)
             }
             if let advice = model.receiverAdvice { Text(advice).font(DesignType.label.font).foregroundStyle(.secondary) }
