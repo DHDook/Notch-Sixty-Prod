@@ -20,6 +20,9 @@ struct ProductionRoomTreatmentAdvisorWorkspace: View {
                     ProductionRoomGeometrySection(
                         advisor: advisor
                     )
+                    if FeatureFlags().isEnabled(.roomModel) {
+                        ProductionSeatMapSection(advisor: advisor)
+                    }
                     ProductionRoomTreatmentDesignSection(
                         advisor: advisor
                     )
