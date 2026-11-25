@@ -73,7 +73,7 @@ struct QuietZoneReferenceLeakageStabilityReport: Sendable {
 
     var reviewText: String {
         [
-            "PR98 — reference microphone feedback stability preflight",
+            "Reference microphone feedback stability preflight",
             String(format: "Left path conservative L1: %.6f", leftPathUpperL1Gain),
             String(format: "Right path conservative L1: %.6f", rightPathUpperL1Gain),
             String(format: "Worst-case coupled loop L1: %.6f", conservativeFeedbackLoopL1),

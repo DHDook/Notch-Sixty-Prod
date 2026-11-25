@@ -55,11 +55,11 @@ enum CoherentMultiSubwooferAlignmentError:
     var errorDescription: String? {
         switch self {
         case .multiSubProfileRequired:
-            return "Coordinated PR108 alignment requires at least two assigned physical subwoofers."
+            return "Coordinated alignment requires at least two assigned physical subwoofers."
         case .evidenceSetIncomplete:
-            return "Coordinated PR108 alignment requires one coherent evidence group for every assigned physical subwoofer."
+            return "Coordinated alignment requires one coherent evidence group for every assigned physical subwoofer."
         case .duplicateSubwoofer(let index):
-            return "Coordinated PR108 evidence contains duplicate Sub \(index + 1)."
+            return "Coordinated alignment evidence contains duplicate Sub \(index + 1)."
         case .mainRoleSetMismatch:
             return "Every physical Sub must be measured against the same set of Main speaker roles before coordinated alignment."
         case .crossSubIdentityMismatch:

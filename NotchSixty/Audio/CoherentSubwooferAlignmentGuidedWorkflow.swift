@@ -684,7 +684,7 @@ final class CoherentSubwooferAlignmentGuidedController:
     ) -> OutputProgramRole {
         guard case .speaker(let role) = report.main else {
             preconditionFailure(
-                "Coherent PR108 evidence must use a whole-speaker Main."
+                "Coherent alignment evidence must use a whole-speaker Main."
             )
         }
         return role

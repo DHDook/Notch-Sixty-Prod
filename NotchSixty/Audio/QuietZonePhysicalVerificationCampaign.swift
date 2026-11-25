@@ -41,7 +41,7 @@ enum QuietZonePhysicalVerificationFault: Error, Equatable, LocalizedError {
         case .movedReturnMicrophone: return "The returned microphone position differs from the first seat."
         case .changedNoiseBaseline: return "The four independent OFF readings at the primary seat drifted too much."
         case .unstableAttenuation: return "The primary-seat cancellation result was not repeatable."
-        case .failedNumericalPreflight: return "At least one complete external measurement set failed PR98 acceptance."
+        case .failedNumericalPreflight: return "At least one complete external measurement set failed safety acceptance."
         }
     }
 }
@@ -69,7 +69,7 @@ struct QuietZonePhysicalVerificationReview: Sendable {
 
     var reviewText: String {
         [
-            "PR99 — three-visit physical ANC verification: PROVISIONAL ONLY",
+            "Three-visit physical ANC verification: PROVISIONAL ONLY",
             String(format: "Initial listener reduction: %.2f dB", firstPrimaryReductionDB),
             String(format: "Neighboring seat reduction: %.2f dB", neighboringSeatReductionDB),
             String(format: "Returned listener reduction: %.2f dB", returningPrimaryReductionDB),

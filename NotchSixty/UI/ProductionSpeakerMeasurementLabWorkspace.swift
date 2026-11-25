@@ -1044,10 +1044,10 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
             VStack(alignment: .leading, spacing: DesignSpacing.m.pt) {
                 HStack(alignment: .top, spacing: DesignSpacing.l.pt) {
                     VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
-                        Text("PR111 · Protected driver optimizer")
+                        Text("Protected driver optimizer")
                             .font(DesignType.sectionTitle.font)
                         Text(
-                            "Build an exact state-bound preview from qualified protected Low/Mid/High measurements. This remote draft snapshots rollback state but cannot Apply until a real combined-driver verification and PR112 hardware acceptance exist."
+                            "Build an exact state-bound preview from qualified protected Low/Mid/High measurements. This remote draft snapshots rollback state but cannot Apply until a real combined-driver verification and hardware acceptance exist."
                         )
                         .font(DesignType.caption.font)
                         .foregroundStyle(.secondary)
@@ -1207,7 +1207,7 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
                     }
 
                     Label(
-                        "No Apply control exists in PR111 remote closeout. The draft cannot change PEQ, delay, polarity, crossover, limiter, routing, or live output.",
+                        "No Apply control exists in this remote preview. The draft cannot change PEQ, delay, polarity, crossover, limiter, routing, or live output.",
                         systemImage: "hand.raised.fill"
                     )
                     .font(DesignType.caption.font.bold())
@@ -1278,7 +1278,7 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
             VStack(alignment: .leading, spacing: DesignSpacing.l.pt) {
                 HStack(alignment: .top, spacing: DesignSpacing.l.pt) {
                     VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
-                        Text("PR108 · Crossover timing & polarity")
+                        Text("Crossover timing & polarity")
                             .font(DesignType.sectionTitle.font)
                         Text(
                             "Use a completed shared-reference Main/Sub Lab session to review a bounded timing/polarity proposal. Apply is explicit, provisional, and accepted only after a new measured session passes."
@@ -1450,7 +1450,7 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
                     if alignment.state == .measuredAccepted {
                         Divider()
                         Label(
-                            "Fresh measured verification accepted. PR108 timing/polarity provenance is persisted as VERIFIED.",
+                            "Fresh measured verification accepted. Timing/polarity provenance is persisted as VERIFIED.",
                             systemImage: "checkmark.shield.fill"
                         )
                         .font(DesignType.label.font.bold())
@@ -1469,7 +1469,7 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
                     if alignment.state == .rolledBack {
                         Divider()
                         Label(
-                            "The provisional PR108 alignment was rolled back to the exact pre-Apply Playback System snapshot.",
+                            "The provisional crossover alignment was rolled back to the exact pre-Apply Playback System snapshot.",
                             systemImage:
                                 "arrow.uturn.backward.circle.fill"
                         )
@@ -1480,8 +1480,8 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
                     VStack(alignment: .leading, spacing: DesignSpacing.s.pt) {
                         Label(
                             persisted.verified
-                                ? "Persisted PR108 alignment · VERIFIED"
-                                : "Persisted PR108 alignment · PROVISIONAL",
+                                ? "Persisted crossover alignment · VERIFIED"
+                                : "Persisted crossover alignment · PROVISIONAL",
                             systemImage: persisted.verified
                                 ? "checkmark.shield.fill"
                                 : "clock.badge.checkmark"

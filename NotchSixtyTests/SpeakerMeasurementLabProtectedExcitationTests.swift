@@ -1069,7 +1069,7 @@ final class ProtectedDriverPEQRecommendationTests: XCTestCase {
         XCTAssertTrue(draft.timingReviews.allSatisfy {
             !$0.combinedDriverCaptureVerified
         })
-        XCTAssertTrue(draft.evidenceSummary.contains("PR112 hardware acceptance"))
+        XCTAssertTrue(draft.evidenceSummary.contains("hardware acceptance"))
     }
 
     func testCommissioningDriftAndIdentityFailClosed() throws {

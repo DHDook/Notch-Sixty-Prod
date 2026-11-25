@@ -311,7 +311,7 @@ struct RoomTreatmentAdvisorAnalyzer: Sendable {
                         interpretation:
                             "This is measured time-domain evidence of an early reflection, but a single microphone cannot uniquely identify which wall or surface caused it.",
                         recommendation:
-                            "Investigate speaker/listener placement and likely first-reflection surfaces. Broadband treatment may help after the reflection path is confirmed; PR93 room geometry will make that localization more specific.",
+                            "Investigate speaker/listener placement and likely first-reflection surfaces. Broadband treatment may help after the reflection path is confirmed; Room Geometry will make that localization more specific.",
                         primaryRemedy: .passiveTreatment,
                         secondaryRemedies: [.placement],
                         confidence: 0.78,
@@ -412,7 +412,7 @@ struct RoomTreatmentAdvisorAnalyzer: Sendable {
                         interpretation:
                             "A deep response null without matching excess decay is more consistent with destructive path interference than with stored resonant energy. Without room geometry this remains an SBIR/boundary-interference candidate, not a unique diagnosis.",
                         recommendation:
-                            "Prioritize speaker and listening-position movement and re-measure. Avoid large EQ boost into the null. PR93 room geometry can test likely boundary path lengths.",
+                            "Prioritize speaker and listening-position movement and re-measure. Avoid large EQ boost into the null. Room Geometry can test likely boundary path lengths.",
                         primaryRemedy: .placement,
                         secondaryRemedies: [.measureMore],
                         confidence:
@@ -440,11 +440,11 @@ struct RoomTreatmentAdvisorAnalyzer: Sendable {
                     severity: .information,
                     title: "No major issue in the initial checks",
                     measuredEvidence:
-                        "The current PR92 checks did not cross the spatial-bass, deep-null, early-reflection, or excess-decay thresholds.",
+                        "The current checks did not cross the spatial-bass, deep-null, early-reflection, or excess-decay thresholds.",
                     interpretation:
                         "This is not a claim that the room needs no treatment. The current measurements simply do not show a strong problem in the validated checks.",
                     recommendation:
-                        "Keep the current measurements as a baseline. PR93 room geometry can add placement and reflection-path specificity without changing this measurement record.",
+                        "Keep the current measurements as a baseline. Room Geometry can add placement and reflection-path specificity without changing this measurement record.",
                     primaryRemedy: .noAction,
                     confidence: 0.75
                 )

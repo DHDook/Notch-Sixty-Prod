@@ -19,7 +19,7 @@ enum QuietZoneFeedForwardAcceptanceGate: String, CaseIterable, Sendable {
         switch self {
         case .perSpeakerGain: return "Causal FIR per-speaker gain"
         case .combinedStereoHeadroom: return "Combined stereo output headroom"
-        case .synchronizedClock: return "HAL clock continuity"
+        case .synchronizedClock: return "Audio clock continuity"
         case .realTimeDeadline: return "Unconnected output-deadline diagnostics"
         case .referenceFeedbackBound: return "Speaker-reference loop bound"
         case .echoContaminationModel: return "Offline echo contamination model"
@@ -167,7 +167,7 @@ struct QuietZoneFeedForwardSafetyAcceptanceEvaluator: Sendable {
                  "Both channels share a 0.10 peak-sum cap, checked again for each shadow FIR frame."),
             item(.synchronizedClock, clock == nil ? .missing
                  : (clockGood ? .diagnosticPassed : .blocked),
-                 "Monotonic HAL clock traces remain a diagnostic, not ADC/DAC acoustic timing."),
+                 "Monotonic audio clock traces remain a diagnostic, not ADC/DAC acoustic timing."),
             item(.realTimeDeadline, shadow == nil ? .missing
                  : (diagnosticDeadlineGood ? .diagnosticPassed : .blocked),
                  "A valid shadow-frame deadline cannot establish real-time callback scheduling."),
@@ -187,7 +187,7 @@ struct QuietZoneFeedForwardSafetyAcceptanceEvaluator: Sendable {
                  badAcoustic ? .blocked : .independentPhysicalReviewRequired,
                  "Requires independent seat SPL, coherence, headroom and stability acceptance."),
             item(.liveOutputAuthorization, .independentPhysicalReviewRequired,
-                 "No live ANC speaker injection or authorization is implemented in PR98.")
+                 "No live ANC speaker injection or authorization is implemented.")
         ]
         let ready = rows.filter { $0.status == .diagnosticPassed }.count
         let blocked = rows.filter {

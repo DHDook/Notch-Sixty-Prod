@@ -57,7 +57,7 @@ struct CoherentSubwooferAlignmentVerificationRecord:
     }
 }
 
-/// Separately owned provenance for PR108 timing/polarity calibration.
+/// Separately owned provenance for Timing/polarity calibration.
 ///
 /// The actual live values remain in ordinary speaker/Sub calibration because
 /// those are the production realtime owners of delay/polarity. This record does

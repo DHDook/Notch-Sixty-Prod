@@ -572,7 +572,7 @@ final class ProductionInformationArchitectureTests: XCTestCase {
 
         XCTAssertEqual(snapshot.state, .timingPlausibleHardwareRequired)
         XCTAssertEqual(snapshot.timingCaption, "DIAGNOSTIC PASS")
-        XCTAssertTrue(snapshot.nextAction.contains("PR99 A/B/A"))
+        XCTAssertTrue(snapshot.nextAction.contains("A/B/A"))
         XCTAssertFalse(snapshot.liveANCOutputAuthorized)
     }
 

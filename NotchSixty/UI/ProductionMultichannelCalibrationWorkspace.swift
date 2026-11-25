@@ -609,7 +609,7 @@ struct ProductionMultichannelCalibrationWorkspace: View {
                 }
 
                 Text(
-                    "Protected Low/Mid/High driver-bus measurements remain fail-closed in PR103. They will not be excited through a raw physical-output bypass; a crossover-preserving protected measurement path is required first."
+                    "Protected Low/Mid/High driver-bus measurements remain blocked in this version. They will not be excited through a raw physical-output bypass; a crossover-preserving protected measurement path is required first."
                 )
                 .font(DesignType.caption.font)
                 .foregroundStyle(.secondary)
@@ -1340,7 +1340,7 @@ struct ProductionMultichannelCalibrationWorkspace: View {
                         }
 
                         Text(
-                            "Uses the completed full-range speaker measurements across all included seats. Subwoofer measurements do not shape the broadband target. The resulting curve is still independently checked by PR86 when the calibration design is generated."
+                            "Uses the completed full-range speaker measurements across all included seats. Subwoofer measurements do not shape the broadband target. The resulting curve is still independently checked when the calibration design is generated."
                         )
                         .font(DesignType.caption.font)
                         .foregroundStyle(.secondary)

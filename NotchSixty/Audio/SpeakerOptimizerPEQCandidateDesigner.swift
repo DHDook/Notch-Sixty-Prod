@@ -216,7 +216,7 @@ struct SpeakerOptimizerPEQCandidateDesigner: Sendable {
                 }
                 var coreWarnings: [String] = Array(repeating: "PEQ candidate removed after high-resolution headroom/band-edge safety audit.", count: designed.auditRemovals)
                 if evidenceMask != nil {
-                    coreWarnings.append("PR105 classification mask: only speaker-persistent points may drive PEQ; protected regions are leakage-audited.")
+                    coreWarnings.append("Classification mask: only speaker-persistent points may drive PEQ; protected regions are leakage-audited.")
                 }
                 if coreBands.isEmpty {
                     coreWarnings.append("No safe PEQ candidate clears the modeled improvement, classification, and position-guard thresholds; unity preview retained.")
@@ -308,7 +308,7 @@ struct SpeakerOptimizerPEQCandidateDesigner: Sendable {
             }
             current = weightedRMSE(positions, weights, target, corrections)
             if evidenceMask != nil {
-                warnings.append("PR105 classification mask: only speaker-persistent points may drive PEQ; protected regions are leakage-audited.")
+                warnings.append("Classification mask: only speaker-persistent points may drive PEQ; protected regions are leakage-audited.")
             }
             if bands.isEmpty {
                 warnings.append("No safe PEQ candidate clears the modeled improvement, classification, and position-guard thresholds; unity preview retained.")

@@ -1186,7 +1186,7 @@ struct ProductionPluginWorkspace: View {
             }
 
             Text(
-                "The rack is Playback/content state. Every edit is prepared off realtime and crosses PR82's commit barrier before saved or live rack state changes."
+                "The rack is Playback/content state. Every edit is prepared off realtime and crosses the commit barrier before saved or live rack state changes."
             )
             .font(DesignType.caption.font)
             .foregroundStyle(.secondary)
@@ -1545,7 +1545,7 @@ struct ProductionPluginWorkspace: View {
                 )
                 .font(.subheadline.weight(.semibold))
                 Text(
-                    "Vendor UI edits happen on a detached Audio Unit copy. Apply serializes its state, re-runs offline preparation, and only then publishes a new live generation. Removal and bypass use the bounded PR82 transition rather than additive full-tail mixing, so correlated or nonlinear tails cannot consume unbounded headroom before the final protection stage."
+                    "Vendor UI edits happen on a detached Audio Unit copy. Apply serializes its state, re-runs offline preparation, and only then publishes a new live generation. Removal and bypass use the bounded transition rather than additive full-tail mixing, so correlated or nonlinear tails cannot consume unbounded headroom before the final protection stage."
                 )
                 .font(DesignType.caption.font)
                 .foregroundStyle(.secondary)

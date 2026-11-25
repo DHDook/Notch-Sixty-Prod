@@ -187,7 +187,7 @@ enum ProductionUserGuideCatalog {
                     "5. Add measurement and calibration only when useful",
                     [
                         "The quickest route is Set up my system on the Dashboard: it walks through the output, speakers, microphone, levels, seats, measurement, bass, correction and a verified, saved profile. Speaker Calibration, Measurement Lab and Room Correction, now tabs of the System area, are optional next steps after ordinary playback works correctly. Use the measurement microphone and its calibration data when accuracy matters, and keep the documented microphone placement, routing and provenance with the evidence.",
-                        "Preview measurement-derived changes before Apply, verify after Apply, and retain rollback where the workflow provides it. Software plausibility, confidence and CI results do not replace an acoustic verification or the separate PR112 physical hardware-acceptance process."
+                        "Preview measurement-derived changes before Apply, verify after Apply, and retain rollback where the workflow provides it. Software plausibility, confidence and CI results do not replace an acoustic verification or the separate physical hardware-acceptance process."
                     ]
                 ),
                 section(
@@ -1261,7 +1261,7 @@ private struct ProductionDSPReferenceArticleView: View {
                     }
 
                     Text(
-                        "Reference equations are implementation-audited during PR113. Core equations describe the mathematical operation itself; implementation relationships include product-specific constraints; diagnostic/model definitions describe a metric and do not by themselves establish physical acceptance."
+                        "Reference equations are implementation-audited during review. Core equations describe the mathematical operation itself; implementation relationships include product-specific constraints; diagnostic/model definitions describe a metric and do not by themselves establish physical acceptance."
                     )
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)

@@ -63,7 +63,7 @@ struct ActiveAcousticsCommissioningUXSnapshot: Equatable {
         case .timingUnqualified:
             return "Complete or correct the hardware timing survey until causality and reserve diagnostics are trustworthy."
         case .timingPlausibleHardwareRequired:
-            return "Run the PR99 A/B/A acoustic campaign, independent instrument review, and real emergency-shutdown verification before any live ANC authorization."
+            return "Run the A/B/A acoustic campaign, independent instrument review, and real emergency-shutdown verification before any live ANC authorization."
         }
     }
 }
@@ -149,7 +149,7 @@ struct ActiveAcousticsDiagnosticsUXSnapshot: Equatable {
             ),
             .init(
                 id: "clock",
-                title: "Concurrent HAL clock evidence",
+                title: "Concurrent audio clock evidence",
                 disposition: clockPresent ? .recorded : .blocked,
                 detail: clockPresent
                     ? "A clock trace is present for analysis; presence alone is not instrument attestation."
@@ -171,7 +171,7 @@ struct ActiveAcousticsDiagnosticsUXSnapshot: Equatable {
             ),
             .init(
                 id: "acoustic",
-                title: "PR99 A/B/A acoustic verification",
+                title: "A/B/A acoustic verification",
                 disposition: .hardwareRequired,
                 detail: "Requires real calibrated seat measurements, repeatability and independently reviewed evidence."
             ),
@@ -185,7 +185,7 @@ struct ActiveAcousticsDiagnosticsUXSnapshot: Equatable {
                 id: "output",
                 title: "Live feed-forward speaker output",
                 disposition: .disconnected,
-                detail: "PR100 exposes no arm, authorization or speaker-output connection."
+                detail: "This view exposes no arm, authorization or speaker-output connection."
             ),
         ]
     }
@@ -645,7 +645,7 @@ struct ProductionFeedForwardReadinessCard: View {
                     .foregroundStyle(.secondary)
                 }
                 Spacer()
-                Text("PR97 · HARDWARE SETUP")
+                Text("HARDWARE SETUP")
                     .font(.caption.bold())
                     .tracking(0.5)
                     .foregroundStyle(.secondary)
@@ -718,7 +718,7 @@ struct ProductionFeedForwardReadinessCard: View {
 
             VStack(alignment: .leading, spacing: 4) {
                 Text("Instrumented calibration stages").font(.caption.bold())
-                Text("1. Qualify concurrent input and output HAL clocks")
+                Text("1. Qualify concurrent input and output audio clocks")
                 Text("2. Repeat at least three wired electrical loopbacks")
                 Text("3. Capture listener → upstream doorway → listener return")
                 Text("4. Measure physical speaker-to-seat latency before considering ANC")
@@ -776,7 +776,7 @@ struct ProductionFeedForwardReadinessCard: View {
                 if let clock = try? QuietZoneHALClockAnalyzer().analyze(trace) {
                     VStack(alignment: .leading, spacing: 4) {
                         Label(
-                            "HAL clock stability: qualified for loopback bench only",
+                            "audio clock stability: qualified for loopback bench only",
                             systemImage: "clock"
                         )
                         .font(.caption.bold())
@@ -803,7 +803,7 @@ struct ProductionFeedForwardReadinessCard: View {
                     }
                 } else {
                     Label(
-                        "HAL clock observations failed qualification. Re-capture timing evidence.",
+                        "audio clock observations failed qualification. Re-capture timing evidence.",
                         systemImage: "exclamationmark.triangle"
                     )
                     .font(.caption)
@@ -901,7 +901,7 @@ struct ProductionFeedForwardReadinessCard: View {
                 .fixedSize(horizontal: false, vertical: true)
 
             Text(
-                "Feed-forward remains unarmed: the PR90 250 ms polling/window analysis is not causal for unpredictable noise. A trigger-synchronized physical calibration, low-latency reference-to-speaker transport and re-measurement at the virtual seat are required. No estimated cancellation dB or broadband frequency range is claimed."
+                "Feed-forward remains unarmed: the 250 ms polling/window analysis is not causal for unpredictable noise. A trigger-synchronized physical calibration, low-latency reference-to-speaker transport and re-measurement at the virtual seat are required. No estimated cancellation dB or broadband frequency range is claimed."
             )
             .font(.caption)
             .foregroundStyle(.secondary)
@@ -949,7 +949,7 @@ struct ProductionFeedForwardReadinessCard: View {
 
             if provenance.projectID == nil {
                 Text(
-                    "No digest-valid PR99 evidence record is available, so rig identity and review metadata are intentionally not displayed."
+                    "No digest-valid verification evidence record is available, so rig identity and review metadata are intentionally not displayed."
                 )
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -1074,7 +1074,7 @@ struct ProductionFeedForwardReadinessCard: View {
 
             if snapshot.curvePoints.isEmpty {
                 Text(
-                    "No PR99 physical evidence package is attached. This view will remain empty until the real A → B → A campaign is captured and compiled."
+                    "No physical verification evidence package is attached. This view will remain empty until the real A → B → A campaign is captured and compiled."
                 )
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -1194,7 +1194,7 @@ struct ProductionFeedForwardReadinessCard: View {
                 verificationCell(
                     "Live ANC output",
                     "DISCONNECTED",
-                    "PR100 has no speaker-output authorization or feed-forward arm path."
+                    "This view has no speaker-output authorization or feed-forward arm path."
                 )
             }
         }
@@ -1326,7 +1326,7 @@ struct ProductionFeedForwardReadinessCard: View {
             }
 
             Text(
-                "This is a commissioning guide, not evidence. The captures must come from the real fixed rig with independently calibrated instrumentation; PR100 does not synthesize, sign, or authenticate them."
+                "This is a commissioning guide, not evidence. The captures must come from the real fixed rig with independently calibrated instrumentation; This view does not synthesize, sign, or authenticate them."
             )
             .font(.caption2)
             .foregroundStyle(.secondary)
@@ -1434,7 +1434,7 @@ struct ProductionFeedForwardReadinessCard: View {
                 "Reference ADC, processing, DAC and speaker-to-seat latency evidence supplied."
             ),
             (
-                "HAL clock trace",
+                "audio clock trace",
                 calibration?.halClockTrace != nil,
                 "Concurrent input/output clock observations supplied for qualification."
             ),
@@ -1487,7 +1487,7 @@ struct ProductionFeedForwardReadinessCard: View {
             }
 
             Text(
-                "Recorded means only that a software record exists. PR100 does not authenticate the microphone, trigger clock, instrument, geometry, or acoustic result."
+                "Recorded means only that a software record exists. This view does not authenticate the microphone, trigger clock, instrument, geometry, or acoustic result."
             )
             .font(.caption2)
             .foregroundStyle(.secondary)
@@ -1537,7 +1537,7 @@ struct ProductionFeedForwardReadinessCard: View {
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
-                Text("PR100 · READ ONLY")
+                Text("READ ONLY")
                     .font(.caption2.bold())
                     .tracking(0.7)
                     .foregroundStyle(.secondary)
@@ -1570,7 +1570,7 @@ struct ProductionFeedForwardReadinessCard: View {
                 verificationCell(
                     "Live ANC output",
                     "DISCONNECTED",
-                    "No PR98/PR99 result can authorize speaker-connected feed-forward ANC."
+                    "No acceptance result can authorize speaker-connected feed-forward ANC."
                 )
             }
 

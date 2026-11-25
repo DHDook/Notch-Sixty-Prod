@@ -2,7 +2,7 @@ import Foundation
 
 /// Offline exploratory A/B/X trial record. A and B are explicitly selected
 /// comparable audio files; the X assignment is hidden until test completion.
-/// No relationship to live DSP correctness or PR112 hardware acceptance.
+/// No relationship to live DSP correctness or hardware acceptance.
 struct BlindABXTrial: Codable, Equatable, Sendable {
     var number: Int
     var hiddenXWasB: Bool

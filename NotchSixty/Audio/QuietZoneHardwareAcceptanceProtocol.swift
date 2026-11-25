@@ -127,7 +127,7 @@ struct QuietZoneHardwareAcceptanceReview: Sendable {
 
     var reviewText: String {
         [
-            "PR98 physical ANC commissioning: UNVERIFIED numerical preflight",
+            "Physical ANC commissioning: UNVERIFIED numerical preflight",
             String(format: "Average coherent-band reduction: %.2f dB",
                    integratedReductionDB),
             String(format: "Worst-band reduction: %.2f dB",
@@ -343,13 +343,13 @@ struct QuietZonePhysicalCommissioningRunbook: Sendable {
             ("Lock route and instrument identity",
              "Record exact microphone channel, DAC UID, sample rate, route lease and independently calibrated instrument ID; establish stop/mute independently before any energised experiment."),
             ("Qualify simultaneous input/output host clocks",
-             "Use PR97's running HAL clock trace and independent clock conversion; abort on drift, route changes, discontinuities and stale observations."),
+             "Use the running audio clock trace and independent clock conversion; abort on drift, route changes, discontinuities and stale observations."),
             ("Electrical loopback and movable-mic A/B/A survey",
              "Record three independent cable loopbacks, then listener → doorway → listener controlled source arrivals using one moved mic; no uncontrolled speech."),
             ("Instrument four physical latency endpoints",
              "Witness separately reference ADC, processing, DAC analog output and speaker-to-seat flight; apply calibrated endpoint corrections; do not substitute a cable total."),
             ("Run disconnected DSP, echo and leakage checks",
-             "Verify exact-head PR98 shadow scheduler, conservative lead, FIR bounds, six distinct L/R leakage launches, and offline held-out echo model."),
+             "Verify exact-head shadow scheduler, conservative lead, FIR bounds, six distinct L/R leakage launches, and offline held-out echo model."),
             ("Prepare isolated low-level external acoustic trial",
              "Only with qualified external interlocks and an independent test harness: controlled coherent low-frequency source; cap seat test level at 85 dB SPL and combined anti-noise sample sum at 0.10."),
             ("Capture listener OFF–TEST–OFF",

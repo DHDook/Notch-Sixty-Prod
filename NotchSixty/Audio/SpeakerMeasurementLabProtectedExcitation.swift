@@ -1092,7 +1092,7 @@ struct ProtectedDriverCommissioningDraft:
         !timingReviews.isEmpty
             && timingReviews.allSatisfy(\.combinedDriverCaptureVerified)
     }
-    /// PR111 remote closeout intentionally has no Apply transaction. PR112
+    /// this remote preview intentionally has no Apply transaction. PR112
     /// must replace this hard false only after physical combined-driver
     /// verification and exposed-driver safety acceptance exist.
     var readyForApproval: Bool { false }
@@ -1354,7 +1354,7 @@ struct ProtectedDriverCommissioningPlanner: Sendable {
             timingReviews: timingReviews,
             evidenceSummary:
                 "Remote commissioning draft only: cut-only PEQ preview plus model-only adjacent-driver timing reviews. " +
-                "Exact Playback System rollback snapshot retained. No Apply until fresh physical combined-driver verification and PR112 hardware acceptance."
+                "Exact Playback System rollback snapshot retained. No Apply until fresh physical combined-driver verification and hardware acceptance."
         )
         return try draft.validated()
     }
@@ -1492,7 +1492,7 @@ struct ProtectedDriverCommissioningDraftStore: Sendable {
             ?? SpeakerMeasurementLabSessionStore()
                 .rootDirectory
                 .appendingPathComponent(
-                    "PR111 Commissioning Drafts",
+                    "Commissioning Drafts",
                     isDirectory: true
                 )
     }

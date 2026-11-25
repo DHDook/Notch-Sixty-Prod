@@ -187,7 +187,7 @@ struct ProductionHardwareAcceptanceWorkspace: View {
         HStack(alignment: .firstTextBaseline, spacing: DesignSpacing.l.pt) {
             VStack(alignment: .leading, spacing: DesignSpacing.s.pt) {
                 Text(
-                    "Guided H01–H08 evidence collection for the later physical PR112 campaign."
+                    "Guided H01–H08 evidence collection for the later physical acceptance campaign."
                 )
                 .foregroundStyle(.secondary)
             }
@@ -265,7 +265,7 @@ struct ProductionHardwareAcceptanceWorkspace: View {
             )
             .font(DesignType.sectionTitle.font)
             Text(
-                "Software tests can validate this workflow, but H01–H08 require the evidence authority shown on each gate. A remote “pass” remains insufficient authority. No control here changes DSP, routing, speaker output, or PR111 commissioning state."
+                "Software tests can validate this workflow, but H01–H08 require the evidence authority shown on each gate. A remote “pass” remains insufficient authority. No control here changes DSP, routing, speaker output, or driver commissioning state."
             )
             .font(DesignType.label.font)
             .foregroundStyle(.secondary)
@@ -515,7 +515,7 @@ struct ProductionHardwareAcceptanceWorkspace: View {
                 }
                 if let draftID = result.commissioningDraftID {
                     Text(
-                        "PR111 rollback-bound draft: \(draftID.uuidString)"
+                        "Rollback-bound draft: \(draftID.uuidString)"
                     )
                     .font(DesignType.caption.font.monospaced())
                     .foregroundStyle(.secondary)

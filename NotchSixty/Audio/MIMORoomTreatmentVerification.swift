@@ -470,7 +470,7 @@ struct MIMORoomTreatmentDeploymentGate: Sendable {
               abs(verification.sampleRate - firProgram.sampleRate) < 0.5 else {
             return MIMORoomTreatmentDeploymentGateResult(
                 status: .repeatMeasurementFailed,
-                blockingReasons: ["Repeat measurement did not satisfy the PR75 verification gate."]
+                blockingReasons: ["Repeat measurement did not satisfy the verification gate."]
             )
         }
 

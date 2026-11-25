@@ -370,9 +370,9 @@ struct SpeakerOptimizerCrossoverFeasibilityDesigner: Sendable {
             survivesAssumedTimingUncertaintyForVisualPreview: reasons.isEmpty,
             blockingReasons: reasons,
             warnings: [
-                "PR103 v1 has NO authenticated common capture-clock provenance; a synthetic sensitivity sweep cannot supply it.",
+                "This version has NO authenticated common capture-clock provenance; a synthetic sensitivity sweep cannot supply it.",
                 "The assumed clock-offset interval is NOT a measured bound or a probability distribution. A larger unknown shift may reverse the result.",
-                "No signal-chain delay, sub polarity, active crossover or driver limiter was changed; PR105 must require synchronized physical captures and independent electrical/driver safeguards."
+                "No signal-chain delay, sub polarity, active crossover or driver limiter was changed; the next step must require synchronized physical captures and independent electrical/driver safeguards."
             ]
         )
     }
