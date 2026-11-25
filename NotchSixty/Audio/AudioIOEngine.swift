@@ -38,7 +38,7 @@ final class AudioIOEngine {
     }
 
     /// Starts or stops lease renewal to match whether anti-noise is live on the current session.
-    private func syncActiveQuietZoneLease(active: Bool) {
+    func syncActiveQuietZoneLease(active: Bool) {
         guard activeQuietZoneLeaseEnabled, active, let session = quietZoneHost else {
             activeQuietZoneLeaseKeeper?.stop()
             activeQuietZoneLeaseKeeper = nil
@@ -55,60 +55,60 @@ final class AudioIOEngine {
     }
 
     /// E8 S4: the speaker routing a session renders, or nil. See `replaceSpeakerRoutingConfiguration`.
-    private(set) var speakerRoutingConfiguration: SpeakerRoutingConfiguration?
+    var speakerRoutingConfiguration: SpeakerRoutingConfiguration?
 
     private let deviceCatalog: any OutputDeviceCataloging
-    private let eventMonitor: any AudioHardwareEvents
-    private let masterVolumeController: any MasterVolumeDeviceControlling
+    let eventMonitor: any AudioHardwareEvents
+    let masterVolumeController: any MasterVolumeDeviceControlling
     private let globalVolumeKeyMonitor: any GlobalVolumeKeyMonitoring
-    private let binauralProfileAssetStore: BinauralProfileAssetStore
+    let binauralProfileAssetStore: BinauralProfileAssetStore
     /// E6 S9c: converted HRTF assets per (asset, rate), shared by session start and live asset swaps.
-    private let binauralAssetCache = BinauralResampledAssetCache()
+    let binauralAssetCache = BinauralResampledAssetCache()
     /// Newest live HRTF asset swap request; an older prepare that finishes later is dropped.
     private var headphoneAssetGeneration: UInt64 = 0
     /// The HRTF asset the running binaural graph renders (a requested swap is pending while it differs from the
     /// configuration's).
-    private var renderedBinauralProfile: BinauralProfileReference?
+    var renderedBinauralProfile: BinauralProfileReference?
     private let masterVolumeStore: (any MasterVolumePersisting)?
     /// Output whose stored software volume has already been restored. A sync
     /// for the same output (external change, device-list refresh) never
     /// overwrites the user's current level.
     private var masterVolumeSynchronizedOutputUID: String?
     var lifecycle: AudioLifecycleStateMachine
-    private(set) var transportSession: CoreAudioTransportSession?
+    var transportSession: CoreAudioTransportSession?
     /// E25 S2: applied to each new stereo session.
-    private var stereoAlignment: StereoBassAlignment?
+    var stereoAlignment: StereoBassAlignment?
     /// E25 S8a: the wider-source fold the user configured (nil: none), and the matrix of the session that is running or
     /// being built with it. The protection merge keys on the second, so a fold that resolves to the standard path
     /// (no source tapped) adds no limiter.
-    private var programFoldPlan: ProgramFoldDownPlan?
-    private var foldMatrixInUse: FoldDownMatrix?
+    var programFoldPlan: ProgramFoldDownPlan?
+    var foldMatrixInUse: FoldDownMatrix?
     /// E25 S8c: read-only views of the applied arrangement state, so profile load and the wizard are comparable.
     var appliedStereoAlignment: StereoBassAlignment? { stereoAlignment }
     var appliedProgramFoldPlan: ProgramFoldDownPlan? { programFoldPlan }
     var nChannelTransportSession: CoreAudioNChannelTransportSession?
-    private(set) var binauralHeadphoneTransportSession: CoreAudioBinauralHeadphoneTransportSession?
-    private var headTrackingController: SpatialHeadTrackingController?
-    private var lifetimeArchivedCounters = AudioTransportCounters()
-    private var processingSessionArchivedCounters = AudioTransportCounters()
-    private var reconfigurationWorkItem: DispatchWorkItem?
-    private var recoveryWorkItem: DispatchWorkItem?
-    private var recoveryGeneration: UInt64 = 0
-    private var recoveryConsecutiveBuildFailures = 0
-    private var resumeAfterWake = false
+    var binauralHeadphoneTransportSession: CoreAudioBinauralHeadphoneTransportSession?
+    var headTrackingController: SpatialHeadTrackingController?
+    var lifetimeArchivedCounters = AudioTransportCounters()
+    var processingSessionArchivedCounters = AudioTransportCounters()
+    var reconfigurationWorkItem: DispatchWorkItem?
+    var recoveryWorkItem: DispatchWorkItem?
+    var recoveryGeneration: UInt64 = 0
+    var recoveryConsecutiveBuildFailures = 0
+    var resumeAfterWake = false
     private var prepared = false
-    private var activeEQFIRProgram: PreparedEQFIRProgram?
-    private var nextEQFIRProgramSlot: UInt32 = 0
+    var activeEQFIRProgram: PreparedEQFIRProgram?
+    var nextEQFIRProgramSlot: UInt32 = 0
     /// E27 S3c: designed taps of the recent EQ configurations, so an A/B toggle redesigns nothing.
     var eqFIRCache = EQFIRProgramCache()
     var eqOffMain = EQOffMainState()
     /// Linear-phase designs run so far (a cache hit runs none). Tests read it.
     var eqFIRDesignCount: Int { eqFIRCache.designCount }
-    private var activeRoomCorrectionProgram: PreparedRoomCorrectionProgram?
-    private var nextRoomCorrectionProgramSlot: UInt32 = 0
-    private var activeSpeakerIRProgram: PreparedSpeakerIRProgram?
-    private var nextSpeakerIRProgramSlot: UInt32 = 0
-    private var stagedRoomTreatment: LiveMIMORoomTreatmentPreparation?
+    var activeRoomCorrectionProgram: PreparedRoomCorrectionProgram?
+    var nextRoomCorrectionProgramSlot: UInt32 = 0
+    var activeSpeakerIRProgram: PreparedSpeakerIRProgram?
+    var nextSpeakerIRProgramSlot: UInt32 = 0
+    var stagedRoomTreatment: LiveMIMORoomTreatmentPreparation?
     /// E19 S6: the graph MIMO treatment controller (stage, permit, arm switch); see `AudioIOEngine+MIMOTreatment.swift`.
     @ObservationIgnored lazy var mimoGraphTreatment: MIMOGraphTreatment = makeMIMOGraphTreatment()
     var mimoPollTask: Task<Void, Never>?
@@ -119,7 +119,7 @@ final class AudioIOEngine {
         if case .known(let video) = mimoVideoLatencyInput { return video }
         return false
     }
-    private var stagedAudioUnitRack: AudioUnitLiveRackSwitchboard?
+    var stagedAudioUnitRack: AudioUnitLiveRackSwitchboard?
     /// Set when a rate change or output recovery dropped a rack built for the
     /// previous format; cleared once the rebuild request has been issued.
     private var audioUnitRackRebuildPending = false
@@ -134,10 +134,10 @@ final class AudioIOEngine {
     private var adaptedRoomCorrectionFilter:
         (source: RoomCorrectionFilter, sampleRate: Double, filter: RoomCorrectionFilter)?
 
-    private(set) var sampleRateChangesHandled: UInt64 = 0
-    private(set) var recoveryAttempts: UInt64 = 0
-    private(set) var recoverySuccesses: UInt64 = 0
-    private(set) var recoveryFailures: UInt64 = 0
+    var sampleRateChangesHandled: UInt64 = 0
+    var recoveryAttempts: UInt64 = 0
+    var recoverySuccesses: UInt64 = 0
+    var recoveryFailures: UInt64 = 0
 
     private(set) var outputDevices: [AudioOutputDevice] = []
     private(set) var routeConfiguration: AudioRouteConfiguration
@@ -145,14 +145,14 @@ final class AudioIOEngine {
     private(set) var stereoEQConfiguration = StereoEQConfiguration()
     /// E27 S3b: the band-pass "Listen" audition, if one is held. Never stored in
     /// `stereoEQConfiguration`, the profile or undo; it only changes what is rendered.
-    private(set) var eqAudition: EQAuditionOverride?
+    var eqAudition: EQAuditionOverride?
     /// The EQ as rendered: the stored EQ, or the audition band-pass while one is held.
     var renderStereoEQConfiguration: StereoEQConfiguration {
         eqAudition.map { stereoEQConfiguration.auditioned($0) } ?? stereoEQConfiguration
     }
     private(set) var playbackControlConfiguration = PlaybackControlConfiguration()
     private(set) var masterVolumeConfiguration = MasterVolumeConfiguration()
-    private(set) var masterVolumeCapabilities = MasterVolumeDeviceCapabilities.softwareOnly
+    var masterVolumeCapabilities = MasterVolumeDeviceCapabilities.softwareOnly
     private(set) var globalVolumeKeyMonitoringState: GlobalVolumeKeyMonitoringState = .stopped
     private(set) var softwareVolumeKeyStep = MasterVolumeKeyStep.fraction(denominator: 16)
     private(set) var gainConfiguration = DSPGainConfiguration()
@@ -168,30 +168,30 @@ final class AudioIOEngine {
     /// E28 S7d: session state of dynamics listening and multiband solo (never encoded, never persisted). The graph host holds
     /// the same state; these mirror it for the Dynamics page and the banner. Cleared on a profile switch, Stop, an output
     /// change and Quit.
-    private(set) var dynamicsListener: DynamicsListener?
-    private(set) var dynamicsSoloBands: Set<Int> = []
+    var dynamicsListener: DynamicsListener?
+    var dynamicsSoloBands: Set<Int> = []
     private(set) var roomCorrectionConfiguration = RoomCorrectionConfiguration()
     /// E24 S3b: why an enabled lane-plan correction is not shaping playback right now, for Room Correction to show.
-    private(set) var roomCorrectionInactiveReason: RoomCorrectionInactiveReason?
+    var roomCorrectionInactiveReason: RoomCorrectionInactiveReason?
     /// E24 S3b: the engine's per-rate cache of lane-plan synthesis (design note 8).
     let roomCorrectionRateCache = RoomCorrectionRateCache()
     private(set) var speakerIRConfiguration = SpeakerIRConfiguration()
-    private(set) var ambientCompensationRuntimeTarget =
+    var ambientCompensationRuntimeTarget =
         AmbientCompensationTarget.unity
     private(set) var activeQuietZoneRuntimeTarget =
         ActiveQuietZoneRuntimeTarget.bypassed
-    private(set) var linearPhaseDesignInfo: EQLinearPhaseDesignInfo?
-    private(set) var headTrackingRuntimeStatus = HeadTrackingRuntimeStatus.disabled
-    private(set) var lastErrorDescription: String?
-    private(set) var lifecycleState: AudioLifecycleState
+    var linearPhaseDesignInfo: EQLinearPhaseDesignInfo?
+    var headTrackingRuntimeStatus = HeadTrackingRuntimeStatus.disabled
+    var lastErrorDescription: String?
+    var lifecycleState: AudioLifecycleState
     /// E4 S7: the low-latency output profile Quiet Zone requests, and the
     /// buffer size it set on the current output (nil when off or not applied).
-    private(set) var lowLatencyOutputProfileActive = false
-    private(set) var lowLatencyOutputBufferFrames: UInt32?
-    private let lowLatencyBufferProfile: LowLatencyOutputBufferProfile
+    var lowLatencyOutputProfileActive = false
+    var lowLatencyOutputBufferFrames: UInt32?
+    let lowLatencyBufferProfile: LowLatencyOutputBufferProfile
     /// Restore deferred to the rebuild, so the physical output never changes
     /// size under a live tap aggregate.
-    private var lowLatencyRestorePending = false
+    var lowLatencyRestorePending = false
 
     init(
         deviceCatalog: any OutputDeviceCataloging = CoreAudioOutputDeviceCatalog(),
@@ -523,7 +523,7 @@ final class AudioIOEngine {
     /// Arm token for live treatment targets. It advances on every transport teardown and every
     /// disarm; `replaceActiveQuietZoneRuntimeTarget` rejects an active target stamped with any
     /// other value. Control plane only.
-    private(set) var liveTreatmentGeneration: UInt64 = 0
+    var liveTreatmentGeneration: UInt64 = 0
 
     /// Called by the arm owner on disarm: targets built under the old arm can no longer play.
     func revokeLiveTreatmentArm() {
@@ -716,7 +716,7 @@ final class AudioIOEngine {
         nChannelTransportSession != nil || binauralHeadphoneTransportSession != nil
     }
 
-    private func renderBassManagementConfiguration(
+    func renderBassManagementConfiguration(
         _ source: BassManagementConfiguration? = nil
     ) -> BassManagementConfiguration {
         var render = source ?? bassManagementConfiguration
@@ -908,7 +908,7 @@ final class AudioIOEngine {
     /// instantiated for. After a nominal-rate change or output recovery the
     /// transport would reject it and fail; instead continue dry and ask the
     /// product layer to rebuild the rack at the new format once running.
-    private func detachAudioUnitRackIfIncompatible(with output: AudioOutputDevice) {
+    func detachAudioUnitRackIfIncompatible(with output: AudioOutputDevice) {
         guard let rack = stagedAudioUnitRack else { return }
         let compatible = abs(rack.format.sampleRate - output.nominalSampleRate) < 0.5
             && rack.format.channelCount == audioUnitRackChannelCount()
@@ -917,7 +917,7 @@ final class AudioIOEngine {
         audioUnitRackRebuildPending = true
     }
 
-    private func requestAudioUnitRackRebuildIfPending() {
+    func requestAudioUnitRackRebuildIfPending() {
         guard audioUnitRackRebuildPending, lifecycle.state == .running else { return }
         audioUnitRackRebuildPending = false
         onAudioUnitRackRequiresRebuild?()
@@ -1728,7 +1728,7 @@ final class AudioIOEngine {
 
     /// The stored dynamics with the fold's output limiter merged in while a wider source is folded (stricter of each
     /// setting; see `DynamicsConfiguration.mergingFoldProtection`).
-    private func renderDynamicsConfiguration() -> DynamicsConfiguration {
+    func renderDynamicsConfiguration() -> DynamicsConfiguration {
         dynamicsConfiguration.mergingFoldProtection(foldMatrixInUse)
     }
 
@@ -1752,7 +1752,7 @@ final class AudioIOEngine {
     }
 
     /// What `buildStereoTransport` does for this output given the configured fold and the devices present now.
-    private func programFoldBuildDecision(for output: AudioOutputDevice) -> ProgramFoldDownPlan.BuildDecision {
+    func programFoldBuildDecision(for output: AudioOutputDevice) -> ProgramFoldDownPlan.BuildDecision {
         ProgramFoldDownPlan.buildDecision(
             plan: programFoldPlan, availableDevices: outputDevices, sampleRate: output.nominalSampleRate, driverPathActive: DriverCaptureSelection.shared.current != nil)
     }
@@ -2348,7 +2348,7 @@ final class AudioIOEngine {
     /// Set from `e4.feedforward-live`; while false nothing ever sets the demand.
     var speakerDriveFeatureEnabled = false
     private var speakerDriveDemandMux = SpeakerDriveDemandMux()
-    private var speakerDriveAnchorFanout = SpeakerDriveAnchorFanout()
+    var speakerDriveAnchorFanout = SpeakerDriveAnchorFanout()
     /// E4 S25 follow-up: runs the live reference pump; idle unless the shadow asks and the flag is on.
     @ObservationIgnored private(set) lazy var feedForwardLiveDriver = FeedForwardLiveDriver(host: self)
 
@@ -2363,7 +2363,7 @@ final class AudioIOEngine {
         applySpeakerDriveDemand()
     }
 
-    private func applySpeakerDriveDemand() {
+    func applySpeakerDriveDemand() {
         let allowed = SpeakerDriveDemandPolicy.demand(
             requested: speakerDriveDemandMux.requested,
             featureEnabled: speakerDriveFeatureEnabled,
@@ -2875,7 +2875,7 @@ final class AudioIOEngine {
         lastErrorDescription = nil
     }
 
-    private var currentMasterSoftwareGain: Float {
+    var currentMasterSoftwareGain: Float {
         masterVolumeConfiguration.softwareGain(for: masterVolumeCapabilities)
     }
 
@@ -2933,7 +2933,7 @@ final class AudioIOEngine {
         masterVolumeStore?.storeSoftwareVolume(masterVolumeConfiguration, forOutputUID: uid)
     }
 
-    private func syncMasterVolumeMonitorToSelectedOutput() throws {
+    func syncMasterVolumeMonitorToSelectedOutput() throws {
         guard let output = selectedOutputDevice else {
             masterVolumeController.stopMonitoring()
             globalVolumeKeyMonitor.stop()
@@ -3283,7 +3283,7 @@ final class AudioIOEngine {
         return (design.left, design.right, design.declaredLatencyFrames, design.designInfo)
     }
 
-    private func prepareEQFIRProgram(
+    func prepareEQFIRProgram(
         _ configuration: StereoEQConfiguration,
         for session: CoreAudioTransportSession
     ) throws -> PreparedEQFIRProgram {
@@ -3347,7 +3347,7 @@ final class AudioIOEngine {
         return adapted
     }
 
-    private func validateRoomCorrectionFilter(
+    func validateRoomCorrectionFilter(
         _ deployedFilter: RoomCorrectionFilter,
         outputSampleRate: Double
     ) throws {
@@ -3369,7 +3369,7 @@ final class AudioIOEngine {
         }
     }
 
-    private func prepareRoomCorrectionProgram(
+    func prepareRoomCorrectionProgram(
         _ deployedFilter: RoomCorrectionFilter,
         for session: CoreAudioTransportSession
     ) throws -> PreparedRoomCorrectionProgram {
@@ -3398,12 +3398,12 @@ final class AudioIOEngine {
     /// Validates `filter` for `outputSampleRate` and returns what plays: with `e7.rate-adapt` a filter that carries
     /// another rate is resampled (cached, control plane; E7 S2), otherwise a rate mismatch refuses as before.
     @discardableResult
-    private func validateSpeakerIRFilter(_ filter: SpeakerIRFilter, outputSampleRate: Double) throws -> SpeakerIRFilter {
+    func validateSpeakerIRFilter(_ filter: SpeakerIRFilter, outputSampleRate: Double) throws -> SpeakerIRFilter {
         try SpeakerIRRateAdapter.shared.validated(
             filter, outputSampleRate: outputSampleRate, enabled: FeatureFlags().isEnabled(.rateAdapt))
     }
 
-    private func prepareSpeakerIRProgram(
+    func prepareSpeakerIRProgram(
         _ filter: SpeakerIRFilter,
         for session: CoreAudioTransportSession
     ) throws -> PreparedSpeakerIRProgram {
@@ -3829,7 +3829,7 @@ final class AudioIOEngine {
         }
     }
 
-    private func attachEQFIRProgram(
+    func attachEQFIRProgram(
         _ program: PreparedEQFIRProgram,
         to graph: inout N60DSPGraphSnapshot
     ) throws {
@@ -3857,7 +3857,7 @@ final class AudioIOEngine {
         try attachEQFIRProgram(activeEQFIRProgram, to: &graph)
     }
 
-    private func attachRoomCorrectionProgram(
+    func attachRoomCorrectionProgram(
         _ program: PreparedRoomCorrectionProgram,
         to graph: inout N60DSPGraphSnapshot
     ) throws {
@@ -4064,7 +4064,7 @@ final class AudioIOEngine {
         return target
     }
 
-    private func applyAudioUnitRackLatency(
+    func applyAudioUnitRackLatency(
         to graph: inout N60DSPGraphSnapshot
     ) throws {
         try attachAmbientCompensation(to: &graph)
@@ -4083,7 +4083,7 @@ final class AudioIOEngine {
         graph.latencyFrames = UInt32(combinedLatency)
     }
 
-    private func attachSpeakerIRProgram(
+    func attachSpeakerIRProgram(
         _ program: PreparedSpeakerIRProgram,
         to graph: inout N60DSPGraphSnapshot
     ) throws {
@@ -4107,1072 +4107,5 @@ final class AudioIOEngine {
             throw SpeakerIRConfigurationError.convolutionProgramUnavailable
         }
         try attachSpeakerIRProgram(activeSpeakerIRProgram, to: &graph)
-    }
-
-    private func start(resetProcessingSessionCounters: Bool) throws {
-        guard lifecycle.state == .idle else { return }
-        try refreshOutputDevices()
-        guard let output = selectedOutputDevice else {
-            let error = AudioRouteSelectionError.outputDeviceUnavailable(uid: routeConfiguration.selectedOutputUID ?? "No output selected")
-            lastErrorDescription = error.localizedDescription
-            throw error
-        }
-
-        if resetProcessingSessionCounters {
-            processingSessionArchivedCounters = AudioTransportCounters()
-        }
-
-        do {
-            try setLifecycle(.requestingPermission)
-            try setLifecycle(.creatingTap)
-            try buildTransport(output: output)
-            try setLifecycle(.creatingAggregate)
-            try setLifecycle(.openingOutput)
-            try setLifecycle(.starting)
-            try setLifecycle(.running)
-            try eventMonitor.monitorSampleRate(of: output.deviceID)
-            try syncMasterVolumeMonitorToSelectedOutput()
-            lastErrorDescription = nil
-        } catch {
-            tearDownTransport(fadeOut: false)
-            forceFailedState(error)
-            throw error
-        }
-    }
-
-    private func setLifecycle(_ nextState: AudioLifecycleState) throws {
-        try lifecycle.transition(to: nextState)
-        lifecycleState = lifecycle.state
-    }
-
-    private func buildTransport(output: AudioOutputDevice) throws {
-        guard output.nominalSampleRate <= RateCapacity.supportedMaximumSampleRate else {
-            throw CoreAudioTransportError.sampleRateAboveSupportedMaximum(
-                rate: output.nominalSampleRate, maximum: RateCapacity.supportedMaximumSampleRate)
-        }
-        applyLowLatencyOutputProfile(to: output)
-        if let headphone = headphoneDeviceProfileConfiguration, headphone.enabled {
-            if outputDeviceProfileConfiguration?.enabled == true {
-                throw HeadphoneDeviceProfileError.speakerProfileConflict
-            }
-            if headphone.spatialMode == .virtualSpeakers {
-                try buildBinauralHeadphoneTransport(output: output, profile: headphone)
-            } else {
-                try buildStereoTransport(output: output)
-            }
-            return
-        }
-        if let routing = speakerRoutingConfiguration, routing.enabled {
-            try buildRoutedTransport(output: output, routing: routing)
-            return
-        }
-        if outputDeviceProfileConfiguration?.enabled == true {
-            try buildNChannelTransport(output: output)
-            return
-        }
-        try buildStereoTransport(output: output)
-    }
-
-    /// E8 S4: the graph configuration of a routed session: the program lanes and sub lanes the N-channel path
-    /// builds, with the routing compiled onto them (ROUTE, XOVER, delay alignment, per-output protection).
-    func makeRoutedGraphConfiguration(
-        routing: SpeakerRoutingConfiguration,
-        routePlan: LiveNChannelOutputRoutePlan,
-        sampleRate: Double,
-        inputs: LiveGraphInputs
-    ) throws -> UnifiedGraphConfiguration {
-        guard let shape = UnifiedGraphLayoutShape(roles: routePlan.programLayout.roles) else {
-            throw LiveNChannelTransportError.unifiedGraphRejected(.laneCountMismatch)
-        }
-        // E6 S12h part 3 (G51 decision): a delta cannot be compared across a routing (each output has its own
-        // crossover, delay and protection), so a routed session refuses it and the picker offers it only unrouted.
-        if inputs.playback.auditionMode == .delta {
-            throw LiveNChannelTransportError.routingRefused("the delta audition is not available with speaker routing; switch to Processed or Reference.")
-        }
-        let program = try makeUnifiedProgramDSP(
-            sampleRate: sampleRate, shape: shape, virtualSpeakers: false,
-            subwooferCount: Int(routePlan.subwooferCount), inputs: inputs)
-        // The routing's sub sources decide the sub lanes; bass management supplies their crossover and trims.
-        var bass = renderBassManagementConfiguration(inputs.bass)
-        bass.enabled = routePlan.subwooferCount > 0
-        switch UnifiedGraphTranslator.nChannelEligibility(
-            routePlan: routePlan, sampleRate: sampleRate, gainConfiguration: inputs.gain,
-            bassManagementConfiguration: bass, programDSP: program
-        ) {
-        case .success(var base):
-            // The user's protection moves from the program lanes to every output lane (the compiler gives each
-            // output its own PROTECTION stage, aligned in latency); a program-lane limiter would run on cleared lanes.
-            if base.protection == nil, let moved = base.programDSP?.protection { base.protection = moved }
-            base.programDSP?.protection = nil
-            // The bridge reads the output lanes as the last `routedOutputPhysicalChannels.count` graph lanes, so the
-            // compiled routing must have exactly that many (it does by construction; this keeps it so).
-            guard routing.outputEndpoints.count == routePlan.routedOutputPhysicalChannels.count else {
-                throw LiveNChannelTransportError.routingRefused("the routing outputs do not match the output plan.")
-            }
-            return try compileRoutedAttachingTreatment(routing, onto: base)
-        case .failure(let reason): throw LiveNChannelTransportError.unifiedGraphRejected(reason)
-        }
-    }
-
-    /// Checks that apply to any enabled routing, whether it is being set or started.
-    private func validateSpeakerRoutingActivation(_ routing: SpeakerRoutingConfiguration) throws {
-        guard unifiedGraphEnabled else {
-            throw LiveNChannelTransportError.routingRefused("it needs the unified graph, and the legacy render kernel is selected.")
-        }
-        if headphoneDeviceProfileConfiguration?.enabled == true {
-            throw HeadphoneDeviceProfileError.speakerProfileConflict
-        }
-        if multiOutputRoutingConfiguration?.enabled == true {
-            throw OutputDeviceProfileError.legacyPhysicalRoutingConflict
-        }
-        let subs = routing.subwooferSourceCount
-        if subs > UnifiedGraphConfiguration.maxSubwoofers {
-            throw LiveNChannelTransportError.routingRefused("it reads \(subs) subwoofer sources and the limit is \(UnifiedGraphConfiguration.maxSubwoofers).")
-        }
-        if subs > 0, !bassManagementConfiguration.enabled {
-            throw LiveNChannelTransportError.routingRefused("it reads subwoofer sources, so bass management must be on.")
-        }
-        if subs == 0, bassManagementConfiguration.enabled {
-            throw LiveNChannelTransportError.routingRefused("bass management is on but no speaker reads a subwoofer source.")
-        }
-    }
-
-    /// E8 S4: sets (or, with nil, clears) the speaker routing. Idle, it just stores it. Running, an edit that keeps
-    /// the same outputs and subwoofer sources (crossover corners, gains, trims, delays, EQ) is republished to the
-    /// graph, which posts gain changes over 5 ms and fades a family or order change; any other change is a
-    /// session-kind change and reconfigures with the shutdown fade. Throws, leaving the routing and the running
-    /// session as they were, when the routing cannot run.
-    func replaceSpeakerRoutingConfiguration(_ configuration: SpeakerRoutingConfiguration?) throws {
-        let active = configuration?.enabled == true
-        if let configuration, active { try validateSpeakerRoutingActivation(configuration) }
-        guard configuration != speakerRoutingConfiguration else { return }
-        let wasActive = speakerRoutingConfiguration?.enabled == true
-        guard lifecycle.state != .idle, active || wasActive else {
-            speakerRoutingConfiguration = configuration
-            lastErrorDescription = nil
-            return
-        }
-        if let configuration, active, let current = speakerRoutingConfiguration, wasActive,
-           let session = nChannelTransportSession, session.routePlan.isRouted, liveGraphEditsAvailable,
-           current.outputEndpoints == configuration.outputEndpoints,
-           current.subwooferSourceCount == configuration.subwooferSourceCount {
-            try republishLiveGraph(currentLiveGraphInputs, routing: configuration)
-            speakerRoutingConfiguration = configuration
-            lastErrorDescription = nil
-            return
-        }
-        speakerRoutingConfiguration = configuration
-        lastErrorDescription = nil
-        scheduleSampleRateReconfiguration(countsAsSampleRateChange: false, fadeOut: true, settleDelay: 0.03)
-    }
-
-    private func buildRoutedTransport(output: AudioOutputDevice, routing: SpeakerRoutingConfiguration) throws {
-        try validateSpeakerRoutingActivation(routing)
-        try validateLiveNChannelActivation()
-        try requireNoCrossoverAudition(bassManagementConfiguration)
-        if stagedRoomTreatment != nil {
-            throw LiveNChannelTransportError.routingRefused("room treatment cannot run with the routing matrix.")
-        }
-        // The program layout comes from an enabled Output Device Profile (5.1 and so on), else stereo. The routing
-        // owns every physical output, so the profile's speaker and subwoofer assignments are not used.
-        let layout = outputDeviceProfileConfiguration?.enabled == true
-            ? (outputDeviceProfileConfiguration?.programLayout ?? .stereo) : .stereo
-        let routePlan = try routing.makeLivePlan(
-            programLayout: layout,
-            availableDevices: outputDevices,
-            sampleRate: output.nominalSampleRate,
-            selectedOutputUID: output.uid,
-            bassManagementEnabled: routing.subwooferSourceCount > 0
-        )
-        let renderGraph = try LiveNChannelRenderGraphCompiler.makeGraph(
-            routePlan: routePlan,
-            sampleRate: output.nominalSampleRate,
-            gainConfiguration: gainConfiguration,
-            bassManagementConfiguration: bassManagementConfiguration
-        )
-        let configuration = try makeRoutedGraphConfiguration(
-            routing: routing, routePlan: routePlan, sampleRate: output.nominalSampleRate,
-            inputs: currentLiveGraphInputs)
-        let session = try CoreAudioNChannelTransportSession(
-            selectedOutput: output,
-            routePlan: routePlan,
-            renderGraph: renderGraph,
-            outputGain: currentMasterSoftwareGain,
-            roomTreatment: nil,
-            audioUnitRack: stagedAudioUnitRack,
-            unifiedGraphConfiguration: configuration,
-            unifiedGraphIneligibility: nil,
-            unifiedGraphRequired: true
-        )
-        activeEQFIRProgram = nil
-        activeRoomCorrectionProgram = nil
-        activeSpeakerIRProgram = nil
-        linearPhaseDesignInfo = nil
-        nChannelTransportSession = session
-    }
-
-    private func validateLiveNChannelActivation() throws {
-        if multiOutputRoutingConfiguration?.enabled == true {
-            throw OutputDeviceProfileError.legacyPhysicalRoutingConflict
-        }
-        if !speakerDriverProcessingConfiguration.isNeutral {
-            throw LiveNChannelTransportError.unsupportedActiveDSP("legacy per-driver speaker processing")
-        }
-        // E6 S9a: with the unified graph the stereo-class DSP is mapped onto the program lanes (or the activation
-        // throws the graph's reason); without it every restriction below stays.
-        if !unifiedGraphEnabled {
-            if !stereoEQConfiguration.bypassed {
-                if stereoEQConfiguration.channelMode != .linked
-                    || stereoEQConfiguration.phaseMode != .minimumPhase
-                    || stereoEQConfiguration.enabledBandCount != 0 {
-                    throw LiveNChannelTransportError.unsupportedActiveDSP("stereo EQ")
-                }
-            }
-            // Gate on what would actually process audio. Disabled processors keep
-            // their edited parameters and must not block activation.
-            if playbackControlConfiguration.globalBypassed {
-                throw LiveNChannelTransportError.globalBypassUnsupported
-            }
-            if playbackControlConfiguration.hasActiveImageProcessing {
-                throw LiveNChannelTransportError.unsupportedActiveDSP("stereo playback/image controls")
-            }
-            if dynamicsConfiguration.hasActiveProcessing {
-                throw LiveNChannelTransportError.unsupportedActiveDSP("stereo dynamics/protection")
-            }
-            if roomCorrectionConfiguration.enabled {
-                throw LiveNChannelTransportError.unsupportedActiveDSP("legacy stereo room correction")
-            }
-            if speakerIRConfiguration.enabled {
-                throw LiveNChannelTransportError.unsupportedActiveDSP("legacy stereo Speaker IR")
-            }
-        }
-        if bassManagementConfiguration.physicalOutputMode != nil {
-            throw LiveNChannelTransportError.unsupportedActiveDSP("legacy physical crossover routing")
-        }
-    }
-
-    /// E8 S11b: true when the session is stereo plus 1 to 8 subs on the unified graph, unrouted, so the stereo
-    /// crossover's monitor mode, phase-alignment all-pass and filter family fold into its bass management.
-    private func foldsStereoCrossover(
-        routePlan: LiveNChannelOutputRoutePlan, bass: BassManagementConfiguration, requiresRackFree: Bool = false
-    ) -> Bool {
-        guard unifiedGraphEnabled, bass.enabled, !routePlan.isRouted, routePlan.subwooferCount >= 1,
-              !(requiresRackFree && stagedAudioUnitRack != nil),
-              let shape = UnifiedGraphLayoutShape(roles: routePlan.programLayout.roles),
-              shape.laneCount == 2, shape.lfeLane == nil else { return false }
-        return true
-    }
-
-    /// Where the crossover does not fold, its monitor audition and single-sub phase alignment have no stage to run in.
-    private func requireNoCrossoverAudition(_ bass: BassManagementConfiguration) throws {
-        if bass.subPhaseAlignmentEnabled {
-            throw LiveNChannelTransportError.unsupportedActiveDSP("legacy single-sub phase alignment")
-        }
-        if bass.monitorMode != .recombined {
-            throw LiveNChannelTransportError.unsupportedActiveDSP("stereo crossover monitor audition")
-        }
-    }
-
-    private func buildNChannelTransport(output: AudioOutputDevice) throws {
-        guard let profile = outputDeviceProfileConfiguration, profile.enabled else {
-            throw OutputDeviceProfileError.profileDisabled
-        }
-        try validateLiveNChannelActivation()
-        let routePlan = try profile.makeLivePlan(
-            availableDevices: outputDevices,
-            sampleRate: output.nominalSampleRate,
-            selectedOutputUID: output.uid,
-            bassManagementEnabled: bassManagementConfiguration.enabled
-        )
-        let foldsCrossover = foldsStereoCrossover(
-            routePlan: routePlan, bass: renderBassManagementConfiguration(), requiresRackFree: true)
-        if !foldsCrossover { try requireNoCrossoverAudition(bassManagementConfiguration) }
-        if let stagedRoomTreatment {
-            guard stagedRoomTreatment.acceptedProfile == profile,
-                  stagedRoomTreatment.acceptedSelectedOutputUID == output.uid else {
-                throw LiveNChannelTransportError.roomTreatmentPermitMismatch
-            }
-        }
-        // E8 A3: the legacy kernel drives at most 4 subs; refuse by name rather than truncate. The graph path below
-        // takes 5 to 8 and must then be required (checked after eligibility).
-        if bassManagementConfiguration.enabled,
-           Int(routePlan.subwooferCount) > SubwooferLimit.legacyKernel,
-           !unifiedGraphEnabled {
-            throw LiveNChannelTransportError.tooManySubwoofersForLegacyKernel(Int(routePlan.subwooferCount))
-        }
-        let graph = try LiveNChannelRenderGraphCompiler.makeGraph(
-            routePlan: routePlan,
-            sampleRate: output.nominalSampleRate,
-            gainConfiguration: gainConfiguration,
-            bassManagementConfiguration: bassManagementConfiguration
-        )
-        var graphConfiguration: UnifiedGraphConfiguration?
-        var graphIneligibility: UnifiedGraphFallbackReason?
-        var programDSP: UnifiedGraphProgramDSP?
-        let ancSplitter = unifiedGraphEnabled
-            ? hostedQuietZoneSplitter(routePlan: routePlan, sampleRate: output.nominalSampleRate) : nil
-        if unifiedGraphEnabled {
-            // E6 S9a: stereo-class DSP runs on the graph or activation throws; it is never dropped.
-            guard let shape = UnifiedGraphLayoutShape(roles: routePlan.programLayout.roles) else {
-                throw LiveNChannelTransportError.unifiedGraphRejected(.laneCountMismatch)
-            }
-            programDSP = try makeUnifiedProgramDSP(
-                sampleRate: output.nominalSampleRate, shape: shape, virtualSpeakers: false,
-                subwooferCount: Int(routePlan.subwooferCount), foldStereoCrossover: foldsCrossover)
-            switch UnifiedGraphTranslator.nChannelEligibility(
-                routePlan: routePlan,
-                sampleRate: output.nominalSampleRate,
-                gainConfiguration: gainConfiguration,
-                bassManagementConfiguration: bassManagementConfiguration,
-                programDSP: programDSP,
-                ancHostFeed: ancSplitter != nil,
-                userOutputGain: currentMasterSoftwareGain
-            ) {
-            case .success(var configuration):
-                attachStagedMIMOTreatment(to: &configuration)
-                graphConfiguration = configuration
-            case .failure(let reason): graphIneligibility = reason
-            }
-        }
-        // E8 A3: a graph that cannot take the setup would fall back to the legacy kernel; with 5 to 8 subs that is
-        // a refusal, not a truncation.
-        let needsGraphForSubs = bassManagementConfiguration.enabled
-            && Int(routePlan.subwooferCount) > SubwooferLimit.legacyKernel
-        if needsGraphForSubs, graphConfiguration == nil {
-            throw LiveNChannelTransportError.tooManySubwoofersForLegacyKernel(Int(routePlan.subwooferCount))
-        }
-        let session = try CoreAudioNChannelTransportSession(
-            selectedOutput: output,
-            routePlan: routePlan,
-            renderGraph: graph,
-            outputGain: currentMasterSoftwareGain,
-            roomTreatment: stagedRoomTreatment,
-            audioUnitRack: stagedAudioUnitRack,
-            unifiedGraphConfiguration: graphConfiguration,
-            unifiedGraphIneligibility: graphIneligibility,
-            // E6 S12g4: with the graph on, every N-channel session runs on it or activation throws the named reason; only an
-            // Audio Unit rack (not a graph stage) keeps the legacy pipeline.
-            unifiedGraphRequired: unifiedGraphEnabled && stagedAudioUnitRack == nil || needsGraphForSubs,
-            ancFeedSplitter: ancSplitter
-        )
-        activeEQFIRProgram = nil
-        activeRoomCorrectionProgram = nil
-        activeSpeakerIRProgram = nil
-        linearPhaseDesignInfo = nil
-        nChannelTransportSession = session
-        adoptQuietZoneReferenceHost()
-    }
-
-    /// E26 S7b2c: a new profile session starts with fresh reference rings, so the anchor fan-out restarts and the
-    /// speaker-drive demand is re-applied to the new feed (a no-op unless the profile session hosts Quiet Zone).
-    private func adoptQuietZoneReferenceHost() {
-        speakerDriveAnchorFanout.reset()
-        applySpeakerDriveDemand()
-    }
-
-    /// E26 S7b2: the bus splitter the Quiet Zone feed renders through, for a profile session that is class A (two mains
-    /// plus one sub output) with `e26.sub-aware-anc` on; nil otherwise, which leaves the graph exactly as before. The
-    /// splitter is the app's own mains-plus-sub design from the active bass management.
-    private func hostedQuietZoneSplitter(
-        routePlan: LiveNChannelOutputRoutePlan, sampleRate: Double
-    ) -> N60SpeakerBusSplitterSnapshot? {
-        // A routed session (the ROUTE stage owns every physical output) never hosts Quiet Zone in v1 (gap G18).
-        guard FeatureFlags().isEnabled(.subAwareAnc), bassManagementConfiguration.enabled, !routePlan.isRouted,
-              routePlan.subwooferCount == 1, routePlan.programLayout.roles.count == 2 else { return nil }
-        var bass = bassManagementConfiguration
-        bass.physicalOutputMode = .mainsSub
-        return try? bass.makeSpeakerBusSplitterSnapshot(sampleRate: sampleRate)
-    }
-
-    private func validateBinauralHeadphoneActivation() throws {
-        if multiOutputRoutingConfiguration?.enabled == true {
-            throw HeadphoneDeviceProfileError.legacyPhysicalRoutingConflict
-        }
-        if outputDeviceProfileConfiguration?.enabled == true {
-            throw HeadphoneDeviceProfileError.speakerProfileConflict
-        }
-        if !speakerDriverProcessingConfiguration.isNeutral {
-            throw LiveNChannelTransportError.unsupportedActiveDSP("per-driver speaker processing")
-        }
-        if !unifiedGraphEnabled {
-            if !stereoEQConfiguration.bypassed {
-                if stereoEQConfiguration.channelMode != .linked
-                    || stereoEQConfiguration.phaseMode != .minimumPhase
-                    || stereoEQConfiguration.enabledBandCount != 0 {
-                    throw LiveNChannelTransportError.unsupportedActiveDSP("stereo EQ in Virtual Speakers mode")
-                }
-            }
-            if playbackControlConfiguration.globalBypassed {
-                throw LiveNChannelTransportError.globalBypassUnsupported
-            }
-            if playbackControlConfiguration.hasActiveImageProcessing {
-                throw LiveNChannelTransportError.unsupportedActiveDSP("stereo playback/image controls in Virtual Speakers mode")
-            }
-            if dynamicsConfiguration.hasActiveProcessing {
-                throw LiveNChannelTransportError.unsupportedActiveDSP("stereo dynamics in Virtual Speakers mode")
-            }
-        }
-        if bassManagementConfiguration.enabled
-            || bassManagementConfiguration.physicalOutputMode != nil
-            || bassManagementConfiguration.subPhaseAlignmentEnabled
-            || bassManagementConfiguration.monitorMode != .recombined {
-            throw LiveNChannelTransportError.unsupportedActiveDSP("speaker bass management in Virtual Speakers mode")
-        }
-        if roomCorrectionConfiguration.enabled {
-            throw LiveNChannelTransportError.unsupportedActiveDSP("speaker room correction in Virtual Speakers mode")
-        }
-        if speakerIRConfiguration.enabled {
-            throw LiveNChannelTransportError.unsupportedActiveDSP("Speaker IR in Virtual Speakers mode")
-        }
-    }
-
-    private func buildBinauralHeadphoneTransport(
-        output: AudioOutputDevice,
-        profile: HeadphoneDeviceProfileConfiguration
-    ) throws {
-        try validateBinauralHeadphoneActivation()
-        let selected = try profile.validateForActivation(
-            availableDevices: outputDevices,
-            selectedOutputUID: output.uid,
-            sampleRate: output.nominalSampleRate
-        )
-        let source = try profile.resolveProgramSource(
-            availableDevices: outputDevices,
-            selectedOutput: selected
-        )
-        guard source.supports(sampleRate: output.nominalSampleRate) else {
-            throw BinauralHeadphoneTransportError.sampleRateMismatch(
-                source: source.nominalSampleRate, output: output.nominalSampleRate
-            )
-        }
-        guard let reference = profile.binauralProfile else {
-            throw HeadphoneDeviceProfileError.binauralProfileRequired
-        }
-        // HRIRs measured at another rate are converted off the realtime path
-        // rather than refusing to start after a nominal-rate change.
-        let asset = try binauralAssetCache.asset(
-            for: reference, sampleRate: output.nominalSampleRate, store: binauralProfileAssetStore)
-        renderedBinauralProfile = reference
-        let prepared = try asset.prepare(for: profile.programLayout)
-        let headphoneSnapshot = try profile.makeRealtimeSnapshot(
-            sampleRate: output.nominalSampleRate
-        )
-        let combinedGainDB = gainConfiguration.inputPreampDB
-            + gainConfiguration.headroomAttenuationDB
-            + gainConfiguration.outputGainDB
-        let programGain = DSPGainConfiguration.linearGain(forDB: combinedGainDB)
-        guard programGain.isFinite, programGain > 0, programGain <= 16 else {
-            throw BinauralHeadphoneTransportError.bridgeAllocationFailed
-        }
-        // E6 S8b2d: with the flag on, the core renders binaural, headphone DSP and protection when
-        // the setup is one it reproduces; otherwise the legacy pipeline stays and the reason shows
-        // in diagnostics.
-        var graphSpec: UnifiedGraphSpec?
-        var graphBaseSpec: UnifiedGraphSpec?
-        var graphIneligibility: UnifiedGraphFallbackReason?
-        var programDSP: UnifiedGraphProgramDSP?
-        if unifiedGraphEnabled {
-            guard let shape = UnifiedGraphLayoutShape(roles: profile.programLayout.roles) else {
-                throw LiveNChannelTransportError.unifiedGraphRejected(.laneCountMismatch)
-            }
-            programDSP = try makeUnifiedProgramDSP(
-                sampleRate: output.nominalSampleRate, shape: shape, virtualSpeakers: true)
-            switch UnifiedGraphTranslator.binauralBaseSpec(
-                asset: asset,
-                layout: profile.programLayout,
-                profile: profile,
-                outputChannels: UInt32(output.outputChannelCount),
-                sampleRate: output.nominalSampleRate,
-                headTracking: profile.headTracking?.enabled == true,
-                programGain: Float(programGain)
-            ) {
-            case .success(let base):
-                switch UnifiedGraphTranslator.binauralApplyProgram(
-                    base: base, programDSP: programDSP, programGain: Float(programGain)
-                ) {
-                case .success(let spec):
-                    graphBaseSpec = base
-                    graphSpec = spec
-                case .failure(let reason): graphIneligibility = reason
-                }
-            case .failure(let reason): graphIneligibility = reason
-            }
-        }
-        // E13 S4: a response longer than the legacy renderer's taps renders only through the unified graph's
-        // early/tail split; the dormant legacy bridge gets the truncation, and without a graph the setup is refused.
-        let longResponse = asset.tapCount > Int(N60_BINAURAL_MAX_TAPS)
-        if longResponse, graphSpec == nil {
-            throw BinauralHeadphoneTransportError.longResponseNeedsUnifiedGraph
-        }
-        let session = try CoreAudioBinauralHeadphoneTransportSession(
-            selectedOutput: output,
-            programSource: source,
-            programLayout: profile.programLayout,
-            preparedProfile: prepared.truncated(toTaps: Int(N60_BINAURAL_MAX_TAPS)),
-            headphoneSnapshot: headphoneSnapshot,
-            programGain: programGain,
-            outputGain: currentMasterSoftwareGain,
-            audioUnitRack: stagedAudioUnitRack,
-            unifiedGraphSpec: graphSpec,
-            unifiedGraphBaseSpec: graphBaseSpec,
-            unifiedGraphIneligibility: graphIneligibility,
-            unifiedGraphRequired: (unifiedGraphEnabled && stagedAudioUnitRack == nil) || longResponse
-        )
-        activeEQFIRProgram = nil
-        activeRoomCorrectionProgram = nil
-        activeSpeakerIRProgram = nil
-        linearPhaseDesignInfo = nil
-        binauralHeadphoneTransportSession = session
-
-        if let tracking = profile.headTracking, tracking.enabled {
-            let controller = SpatialHeadTrackingController(
-                configuration: tracking,
-                asset: asset,
-                layout: profile.programLayout,
-                session: session
-            ) { [weak self] status in
-                Task { @MainActor [weak self] in
-                    self?.headTrackingRuntimeStatus = status
-                }
-            }
-            headTrackingController = controller
-            try controller.start()
-        } else {
-            headTrackingController = nil
-            headTrackingRuntimeStatus = .disabled
-        }
-    }
-
-    private func buildStereoTransport(output: AudioOutputDevice) throws {
-        var headphoneSnapshot: N60HeadphoneDSPSnapshot?
-        if let headphone = headphoneDeviceProfileConfiguration, headphone.enabled {
-            _ = try headphone.validateForActivation(
-                availableDevices: outputDevices,
-                selectedOutputUID: output.uid,
-                sampleRate: output.nominalSampleRate
-            )
-            guard headphone.spatialMode == .stereo else {
-                throw HeadphoneDeviceProfileError.binauralRuntimeUnavailable
-            }
-            guard multiOutputRoutingConfiguration?.enabled != true else {
-                throw HeadphoneDeviceProfileError.legacyPhysicalRoutingConflict
-            }
-            guard outputDeviceProfileConfiguration?.enabled != true else {
-                throw HeadphoneDeviceProfileError.speakerProfileConflict
-            }
-            guard speakerDriverProcessingConfiguration.isNeutral else {
-                throw HeadphoneDeviceProfileError.speakerProcessingConflict("per-driver speaker processing")
-            }
-            guard !bassManagementConfiguration.enabled else {
-                throw HeadphoneDeviceProfileError.speakerProcessingConflict("speaker bass management")
-            }
-            guard !roomCorrectionConfiguration.enabled else {
-                throw HeadphoneDeviceProfileError.speakerProcessingConflict("speaker room correction")
-            }
-            guard !speakerIRConfiguration.enabled else {
-                throw HeadphoneDeviceProfileError.speakerProcessingConflict("Speaker IR")
-            }
-            headphoneSnapshot = try headphone.makeRealtimeSnapshot(sampleRate: output.nominalSampleRate)
-        }
-
-        let sameDeviceOutputPlan: SameDeviceOutputRoutePlan?
-        let aggregateDeviceOutputPlan: AggregateDeviceOutputRoutePlan?
-        if let routing = multiOutputRoutingConfiguration, routing.enabled {
-            if routing.usesMultiplePhysicalDevices {
-                let plan = try routing.makeAggregateDevicePlan(
-                    availableDevices: outputDevices,
-                    sampleRate: output.nominalSampleRate
-                )
-                try plan.validateForC3LiveTransport(selectedOutputUID: output.uid)
-                aggregateDeviceOutputPlan = plan
-                sameDeviceOutputPlan = nil
-            } else {
-                let plan = try routing.makeSameDevicePlan(
-                    availableDevices: outputDevices,
-                    sampleRate: output.nominalSampleRate
-                )
-                try plan.validateForC2bLiveTransport(selectedOutputUID: output.uid)
-                sameDeviceOutputPlan = plan
-                aggregateDeviceOutputPlan = nil
-            }
-        } else {
-            sameDeviceOutputPlan = nil
-            aggregateDeviceOutputPlan = nil
-        }
-        let speakerCrossoverMode: SpeakerCrossoverMode?
-        let speakerBusSplitterSnapshot: N60SpeakerBusSplitterSnapshot?
-        if physicalSpeakerBusRoutingActive {
-            speakerCrossoverMode = bassManagementConfiguration.physicalOutputMode
-            speakerBusSplitterSnapshot = try bassManagementConfiguration.makeSpeakerBusSplitterSnapshot(
-                sampleRate: output.nominalSampleRate
-            )
-        } else {
-            speakerCrossoverMode = nil
-            speakerBusSplitterSnapshot = nil
-        }
-        if let plan = sameDeviceOutputPlan {
-            try plan.validateForC4LiveTransport(
-                selectedOutputUID: output.uid,
-                crossoverMode: speakerCrossoverMode
-            )
-        }
-        if let plan = aggregateDeviceOutputPlan {
-            try plan.validateForC4LiveTransport(
-                selectedOutputUID: output.uid,
-                crossoverMode: speakerCrossoverMode
-            )
-        }
-        let speakerDriverProcessingSnapshot = try speakerDriverProcessingConfiguration
-            .makeRealtimeSnapshot(sampleRate: output.nominalSampleRate)
-        var foldSource: AudioOutputDevice?
-        var foldPlan: ProgramFoldDownPlan?
-        foldMatrixInUse = nil
-        switch programFoldBuildDecision(for: output) {
-        case .standard: break
-        case .tapSource(let device):
-            if let reason = ProgramFoldDownPlan.incompatibility(
-                sameDeviceOrAggregateOutput: sameDeviceOutputPlan != nil || aggregateDeviceOutputPlan != nil,
-                headphoneProfileEnabled: headphoneSnapshot != nil) {
-                throw CoreAudioTransportError.programFoldFailed(reason)
-            }
-            foldSource = device
-            foldPlan = programFoldPlan
-            foldMatrixInUse = programFoldPlan?.matrix
-        case .waitForSource(let uid): throw CoreAudioTransportError.programFoldFailed(.sourceUnavailable(uid: uid))
-        case .refuse(let reason): throw CoreAudioTransportError.programFoldFailed(reason)
-        }
-        let session = try CoreAudioTransportSession(
-            selectedOutput: output,
-            sameDeviceOutputPlan: sameDeviceOutputPlan,
-            aggregateDeviceOutputPlan: aggregateDeviceOutputPlan,
-            speakerCrossoverMode: speakerCrossoverMode,
-            speakerBusSplitterSnapshot: speakerBusSplitterSnapshot,
-            speakerDriverProcessingSnapshot: speakerDriverProcessingSnapshot,
-            audioUnitRack: stagedAudioUnitRack,
-            programSource: foldSource,
-            programFoldPlan: foldPlan
-        )
-        session.unifiedGraphEnabled = unifiedGraphEnabled
-        // E6 S12h part 2b: a plain stereo speaker session renders the Quiet Zone on the unified graph (the ANC lane feed
-        // as its EXTERNAL stage). Decided here, before the first graph is built, and never changed for the session.
-        // Authorisation is unchanged: only a snapshot carrying `activeQuietZone.enabled` (an armed target) arms the feed.
-        session.hostsQuietZoneFeedRequested = unifiedGraphEnabled && FeatureFlags().isEnabled(.subAwareAnc)
-            && headphoneSnapshot == nil && foldSource == nil
-            && headphoneDeviceProfileConfiguration?.enabled != true
-            && outputDeviceProfileConfiguration?.enabled != true
-            && multiOutputRoutingConfiguration?.enabled != true
-        session.setInitialStereoAlignment(stereoAlignment)
-        session.setDynamicsExtras(DynamicsGraphExtras.make(
-            dynamicsConfiguration, sampleRate: session.outputFormat.sampleRate, flagOn: FeatureFlags().isEnabled(.dynamicsExtras)))
-        session.setInitialAnalyserTaps(installed: analyserTapsInstalled)
-        try session.configureHeadphoneDSP(
-            headphoneSnapshot, profile: headphoneSnapshot == nil ? nil : headphoneDeviceProfileConfiguration)
-        activeEQFIRProgram = nil
-        nextEQFIRProgramSlot = 0
-        eqFIRCache.removeAll()
-        activeRoomCorrectionProgram = nil
-        nextRoomCorrectionProgramSlot = 0
-        activeSpeakerIRProgram = nil
-        nextSpeakerIRProgramSlot = 0
-        var graph = try stereoTransportStartGraph(sampleRate: session.outputFormat.sampleRate)
-
-        if FIRUpdatePolicy.shouldPrepareEQFIR(
-            stereoEQ: renderStereoEQConfiguration,
-            playback: playbackControlConfiguration
-        ) {
-            let preparedProgram = try prepareEQFIRProgram(renderStereoEQConfiguration, for: session)
-            activeEQFIRProgram = preparedProgram
-            linearPhaseDesignInfo = preparedProgram.designInfo
-            try attachEQFIRProgram(preparedProgram, to: &graph)
-        } else {
-            linearPhaseDesignInfo = nil
-        }
-
-        roomCorrectionInactiveReason = roomCorrectionConfiguration.enabled && roomCorrectionConfiguration.lanes != nil
-            ? .needsSpeakerProfile : nil
-        if roomCorrectionConfiguration.isActiveOnStereoKernel {
-            guard let filter = roomCorrectionConfiguration.filter else {
-                throw RoomCorrectionConfigurationError.filterRequired
-            }
-            try validateRoomCorrectionFilter(filter, outputSampleRate: session.outputFormat.sampleRate)
-            if FIRUpdatePolicy.shouldPrepareRoomCorrection(
-                roomCorrection: roomCorrectionConfiguration,
-                playback: playbackControlConfiguration
-            ) {
-                let preparedProgram = try prepareRoomCorrectionProgram(filter, for: session)
-                activeRoomCorrectionProgram = preparedProgram
-                try attachRoomCorrectionProgram(preparedProgram, to: &graph)
-            }
-        }
-
-        if speakerIRConfiguration.enabled {
-            guard let filter = speakerIRConfiguration.filter else {
-                throw SpeakerIRConfigurationError.filterRequired
-            }
-            try validateSpeakerIRFilter(filter, outputSampleRate: session.outputFormat.sampleRate)
-            if FIRUpdatePolicy.shouldPrepareSpeakerIR(
-                speakerIR: speakerIRConfiguration,
-                playback: playbackControlConfiguration
-            ) {
-                let preparedProgram = try prepareSpeakerIRProgram(filter, for: session)
-                activeSpeakerIRProgram = preparedProgram
-                try attachSpeakerIRProgram(preparedProgram, to: &graph)
-            }
-        }
-
-        try applyAudioUnitRackLatency(to: &graph)
-        session.feedForwardLiveFeatureEnabled = speakerDriveFeatureEnabled
-        try session.publishDSPGraph(graph)
-        transportSession = session
-        speakerDriveAnchorFanout.reset()
-        applySpeakerDriveDemand()
-    }
-
-    /// Base graph for a newly built stereo transport (start, rate change,
-    /// recovery, wake). It must carry the current software master gain and
-    /// mute; the realtime kernel otherwise starts at unity until the next
-    /// volume change republishes the graph.
-    func stereoTransportStartGraph(sampleRate: Double) throws -> N60DSPGraphSnapshot {
-        try renderStereoEQConfiguration.makeGraphSnapshot(
-            sampleRate: sampleRate,
-            gainConfiguration: gainConfiguration,
-            bassManagementConfiguration: renderBassManagementConfiguration(),
-            dynamicsConfiguration: renderDynamicsConfiguration(),
-            playbackConfiguration: playbackControlConfiguration,
-            masterGainLinear: currentMasterSoftwareGain
-        )
-    }
-
-    private func tearDownTransport(fadeOut: Bool, cause: TransportTeardownCause = .other) {
-        liveGenerator = nil
-        foldMatrixInUse = nil
-        roomCorrectionABXOverride = nil
-        // E27 S3b: an audition never outlives the transport. The stored EQ is untouched.
-        if eqAudition != nil { eqAudition = nil }
-        // E28 S7d (G36): the graph dies with the transport, and so does listening and solo (Stop, output change, Quit).
-        dynamicsListener = nil
-        dynamicsSoloBands = []
-        if let controller = headTrackingController {
-            controller.stop()
-            headTrackingController = nil
-        }
-        if headphoneDeviceProfileConfiguration?.enabled == true,
-           headphoneDeviceProfileConfiguration?.spatialMode == .virtualSpeakers,
-           headphoneDeviceProfileConfiguration?.headTracking?.enabled == true {
-            headTrackingRuntimeStatus = .configuredStopped
-        } else {
-            headTrackingRuntimeStatus = .disabled
-        }
-
-        if let session = transportSession {
-            let counters = session.counters()
-            lifetimeArchivedCounters = lifetimeArchivedCounters + counters
-            lifetimeArchivedCounters.bufferedFrames = 0
-            processingSessionArchivedCounters = processingSessionArchivedCounters + counters
-            processingSessionArchivedCounters.bufferedFrames = 0
-            // E4 S25 follow-up: the reference ring dies with the session; the pump must not outlive it.
-            feedForwardLiveDriver.stop()
-            speakerDriveAnchorFanout.reset()
-            session.stop(fadeOut: fadeOut)
-            transportSession = nil
-        }
-        if let session = nChannelTransportSession {
-            let counters = session.counters()
-            lifetimeArchivedCounters = lifetimeArchivedCounters + counters
-            lifetimeArchivedCounters.bufferedFrames = 0
-            processingSessionArchivedCounters = processingSessionArchivedCounters + counters
-            processingSessionArchivedCounters.bufferedFrames = 0
-            // The reference ring dies with the session; the live pump must not outlive it.
-            if session.hostsQuietZone {
-                feedForwardLiveDriver.stop()
-                speakerDriveAnchorFanout.reset()
-            }
-            session.stop(fadeOut: fadeOut)
-            nChannelTransportSession = nil
-        }
-        if let session = binauralHeadphoneTransportSession {
-            let counters = session.counters()
-            lifetimeArchivedCounters = lifetimeArchivedCounters + counters
-            lifetimeArchivedCounters.bufferedFrames = 0
-            processingSessionArchivedCounters = processingSessionArchivedCounters + counters
-            processingSessionArchivedCounters.bufferedFrames = 0
-            session.stop(fadeOut: fadeOut)
-            binauralHeadphoneTransportSession = nil
-        }
-        activeEQFIRProgram = nil
-        activeRoomCorrectionProgram = nil
-        activeSpeakerIRProgram = nil
-        // E4 S30c: a transport rebuild clears the unmasking cuts (the session that held them is gone).
-        ambientCompensationRuntimeTarget.unmaskingCutsDB = nil
-        syncActiveQuietZoneLease(active: false)
-        // The app's own profile switch happens while arming and keeps the arm (see `disarmReason`).
-        if cause != .plannedProfileChange { liveTreatmentGeneration &+= 1 }
-        notifyTransportTeardown(cause)
-    }
-
-    private func forceFailedState(_ error: Error) {
-        lastErrorDescription = error.localizedDescription
-        if AudioLifecycleStateMachine.canTransition(from: lifecycle.state, to: .failed) {
-            try? lifecycle.transition(to: .failed)
-            lifecycleState = lifecycle.state
-        }
-    }
-
-    private func handleDeviceListChanged() {
-        do { try refreshOutputDevices() } catch { return }
-        guard let selectedUID = routeConfiguration.selectedOutputUID else { return }
-        let selectedIsPresent = outputDevices.contains { $0.uid == selectedUID }
-        let spatialSourceUID = headphoneDeviceProfileConfiguration?.spatialMode == .virtualSpeakers
-            ? (headphoneDeviceProfileConfiguration?.programSourceDeviceUID ?? selectedUID)
-            : selectedUID
-        let foldSourceIsPresent = programFoldPlan.map { plan in plan.foldDown.usesDriverSource || outputDevices.contains { $0.uid == plan.sourceUID } } ?? true
-        let spatialSourceIsPresent = foldSourceIsPresent && outputDevices.contains { $0.uid == spatialSourceUID }
-
-        if !selectedIsPresent {
-            masterVolumeController.stopMonitoring()
-            masterVolumeCapabilities = .softwareOnly
-        } else {
-            try? syncMasterVolumeMonitorToSelectedOutput()
-        }
-
-        if (!selectedIsPresent || !spatialSourceIsPresent)
-            && (lifecycle.state == .running || lifecycle.state == .reconfiguring) {
-            beginOutputRecovery()
-            return
-        }
-
-        // Fast-path only while waiting for an absent output. After a failed build
-        // the backoff schedule owns retries; our own tap/aggregate teardown also
-        // posts device-list changes and must not turn backoff into a tight loop.
-        if selectedIsPresent,
-           lifecycle.state == .recoveringOutput,
-           recoveryConsecutiveBuildFailures == 0 {
-            scheduleRecoveryAttempt(generation: recoveryGeneration, delay: 0)
-        }
-    }
-
-    /// E4 S7: switches the lowest-latency output buffer on or off. The buffer
-    /// size is read when a transport is built, so a running transport is
-    /// rebuilt through the reconfigure path (one short dropout). Off restores
-    /// the size each device had before.
-    func setLowLatencyOutputProfile(_ enabled: Bool) {
-        guard enabled != lowLatencyOutputProfileActive else { return }
-        lowLatencyOutputProfileActive = enabled
-        if enabled {
-            lowLatencyRestorePending = false
-            lowLatencyBufferProfile.activate()
-        } else {
-            lowLatencyOutputBufferFrames = nil
-            if lifecycle.state == .running {
-                lowLatencyRestorePending = true
-            } else {
-                restoreLowLatencyBuffers()
-            }
-        }
-        scheduleSampleRateReconfiguration(
-            countsAsSampleRateChange: false,
-            cause: .plannedProfileChange
-        )
-    }
-
-    /// Puts back the buffer sizes the profile replaced. Only while no
-    /// transport is open.
-    private func restoreLowLatencyBuffers() {
-        lowLatencyRestorePending = false
-        let devices = outputDevices
-        let result = lowLatencyBufferProfile.deactivate { uid in
-            devices.first { $0.uid == uid }?.deviceID
-        }
-        if let failure = result.failures.first {
-            lastErrorDescription = failure.localizedDescription
-        }
-    }
-
-    private func applyLowLatencyOutputProfile(to output: AudioOutputDevice) {
-        guard lowLatencyOutputProfileActive else { return }
-        do {
-            lowLatencyOutputBufferFrames = try lowLatencyBufferProfile.apply(
-                to: output.deviceID,
-                uid: output.uid,
-                sampleRate: output.nominalSampleRate
-            )
-        } catch {
-            // Best effort: the transport opens at the device's current size.
-            lowLatencyOutputBufferFrames = nil
-            lastErrorDescription = error.localizedDescription
-        }
-    }
-
-    /// `fadeOut` ramps the live session to silence before teardown (about 20 ms, bridge-owned) so a
-    /// user-initiated session rebuild never steps the output; device-driven rebuilds cannot fade
-    /// because the device is already changing. `settleDelay` is the wait before the rebuild.
-    private func scheduleSampleRateReconfiguration(
-        countsAsSampleRateChange: Bool = true,
-        fadeOut: Bool = false,
-        settleDelay: TimeInterval = 0.15,
-        cause: TransportTeardownCause = .reconfiguration
-    ) {
-        guard lifecycle.state == .running else { return }
-
-        reconfigurationWorkItem?.cancel()
-        do {
-            try setLifecycle(.reconfiguring)
-            eventMonitor.removeSelectedOutputSampleRateMonitor()
-            tearDownTransport(fadeOut: fadeOut, cause: cause)
-        } catch {
-            tearDownTransport(fadeOut: false)
-            forceFailedState(error)
-            return
-        }
-
-        let workItem = DispatchWorkItem { [weak self] in
-            self?.performSampleRateReconfiguration(countsAsSampleRateChange: countsAsSampleRateChange)
-        }
-        reconfigurationWorkItem = workItem
-        DispatchQueue.main.asyncAfter(deadline: .now() + settleDelay, execute: workItem)
-    }
-
-    private func performSampleRateReconfiguration(countsAsSampleRateChange: Bool) {
-        guard lifecycle.state == .reconfiguring else { return }
-        do {
-            try refreshOutputDevices()
-            guard let output = selectedOutputDevice else {
-                beginOutputRecovery()
-                return
-            }
-            detachAudioUnitRackIfIncompatible(with: output)
-            if lowLatencyRestorePending { restoreLowLatencyBuffers() }
-            try buildTransport(output: output)
-            try eventMonitor.monitorSampleRate(of: output.deviceID)
-            try syncMasterVolumeMonitorToSelectedOutput()
-            if countsAsSampleRateChange { sampleRateChangesHandled &+= 1 }
-            reconfigurationWorkItem = nil
-            try setLifecycle(.running)
-            lastErrorDescription = nil
-            requestAudioUnitRackRebuildIfPending()
-        } catch {
-            tearDownTransport(fadeOut: false)
-            forceFailedState(error)
-        }
-    }
-
-    private func beginOutputRecovery() {
-        guard lifecycle.state == .running || lifecycle.state == .reconfiguring else { return }
-        recoveryGeneration &+= 1
-        recoveryConsecutiveBuildFailures = 0
-        let generation = recoveryGeneration
-        try? setLifecycle(.recoveringOutput)
-        eventMonitor.removeSelectedOutputSampleRateMonitor()
-        tearDownTransport(fadeOut: false, cause: .outputLost)
-        scheduleRecoveryAttempt(
-            generation: generation,
-            delay: OutputRecoveryRetryPolicy.absentOutputPollInterval
-        )
-    }
-
-    private func scheduleRecoveryAttempt(generation: UInt64, delay: TimeInterval) {
-        guard generation == recoveryGeneration, lifecycle.state == .recoveringOutput else { return }
-        recoveryWorkItem?.cancel()
-        let workItem = DispatchWorkItem { [weak self] in self?.performRecoveryAttempt(generation: generation) }
-        recoveryWorkItem = workItem
-        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: workItem)
-    }
-
-    private func performRecoveryAttempt(generation: UInt64) {
-        guard generation == recoveryGeneration, lifecycle.state == .recoveringOutput else { return }
-        recoveryAttempts &+= 1
-
-        do {
-            try refreshOutputDevices()
-            guard let output = selectedOutputDevice else {
-                lastErrorDescription = "Waiting for selected output to return."
-                scheduleRecoveryAttempt(
-                    generation: generation,
-                    delay: OutputRecoveryRetryPolicy.absentOutputPollInterval
-                )
-                return
-            }
-
-            if case .waitForSource(let uid) = programFoldBuildDecision(for: output) {
-                // The wider source is absent: wait for the same UID, never tap the DAC or another 6-channel device.
-                // Not a build failure, so it never counts toward the retry limit.
-                lastErrorDescription = ProgramFoldDownError.sourceUnavailable(uid: uid).errorDescription
-                scheduleRecoveryAttempt(
-                    generation: generation,
-                    delay: OutputRecoveryRetryPolicy.absentOutputPollInterval
-                )
-                return
-            }
-            do {
-                detachAudioUnitRackIfIncompatible(with: output)
-                try buildTransport(output: output)
-                try eventMonitor.monitorSampleRate(of: output.deviceID)
-                try syncMasterVolumeMonitorToSelectedOutput()
-                recoverySuccesses &+= 1
-                recoveryConsecutiveBuildFailures = 0
-                try setLifecycle(.running)
-                lastErrorDescription = nil
-                recoveryWorkItem = nil
-                requestAudioUnitRackRebuildIfPending()
-                return
-            } catch {
-                recoveryFailures &+= 1
-                recoveryConsecutiveBuildFailures += 1
-                tearDownTransport(fadeOut: false)
-                if OutputRecoveryRetryPolicy.shouldFail(
-                    afterConsecutiveFailures: recoveryConsecutiveBuildFailures
-                ) {
-                    recoveryWorkItem = nil
-                    forceFailedState(error)
-                    return
-                }
-                lastErrorDescription = "Selected output is present but not ready yet: \(error.localizedDescription)"
-                scheduleRecoveryAttempt(
-                    generation: generation,
-                    delay: OutputRecoveryRetryPolicy.buildRetryDelay(
-                        afterConsecutiveFailures: recoveryConsecutiveBuildFailures
-                    )
-                )
-                return
-            }
-        } catch {
-            lastErrorDescription = error.localizedDescription
-        }
-
-        scheduleRecoveryAttempt(
-            generation: generation,
-            delay: OutputRecoveryRetryPolicy.absentOutputPollInterval
-        )
-    }
-
-    private func handleWillSleep() {
-        guard lifecycle.state == .running else {
-            resumeAfterWake = false
-            return
-        }
-        resumeAfterWake = true
-        eventMonitor.removeSelectedOutputSampleRateMonitor()
-        masterVolumeController.stopMonitoring()
-        try? setLifecycle(.stopping)
-        tearDownTransport(fadeOut: true, cause: .sleep)
-        try? setLifecycle(.idle)
-    }
-
-    private func handleDidWake() {
-        guard resumeAfterWake else { return }
-        resumeAfterWake = false
-        guard lifecycle.state == .idle else { return }
-        // USB and Thunderbolt outputs often re-enumerate after didWake. Wait for
-        // the same output UID through the recovery loop instead of making one
-        // start attempt that leaves processing stopped if the device is late.
-        recoveryGeneration &+= 1
-        recoveryConsecutiveBuildFailures = 0
-        do {
-            try setLifecycle(.recoveringOutput)
-        } catch {
-            lastErrorDescription = error.localizedDescription
-            return
-        }
-        scheduleRecoveryAttempt(generation: recoveryGeneration, delay: 0)
     }
 }
