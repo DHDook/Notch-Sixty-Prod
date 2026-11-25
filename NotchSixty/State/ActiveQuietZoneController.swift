@@ -660,6 +660,8 @@ final class ActiveQuietZoneController: ObservableObject {
         self.profiles = profiles
         self.ambient = ambient
         arm.onDisarm = { [weak self] reason in self?.applyDisarm(reason) }
+        // E12 S22 (G25): a lost microphone disarms; arming again is the user's own action.
+        ambient.onMicrophoneLost = { [weak self] in self?.arm.disarm(.inputLost) }
         armChange = arm.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }
         // Observers hold self weakly, so a released controller leaves only a no-op closure.
         _ = engine.addTransportTeardownObserver { [weak self] cause in

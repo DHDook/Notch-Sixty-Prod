@@ -396,9 +396,12 @@ final class ClassAEndToEndTests: XCTestCase {
         var engine: AudioIOEngine
         var session: CoreAudioNChannelTransportSession
         var calibration: RoomCorrectionCalibrationController
+        var ambient: AmbientCompensationController
     }
 
-    private func makeRigParts(rate: Double, cannedReport: Bool, install: Bool = true) throws -> RigParts {
+    private func makeRigParts(
+        rate: Double, cannedReport: Bool, install: Bool = true, catalog: (any InputDeviceCataloging)? = nil
+    ) throws -> RigParts {
         let (engine, session) = try ProfileQuietZoneFixture.make(rate: rate, hosted: true, lowLatency: true, install: install)
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         addTeardownBlock {
@@ -428,7 +431,7 @@ final class ClassAEndToEndTests: XCTestCase {
             deviceID: 22, uid: "mic", name: "Mic", nominalSampleRate: rate,
             availableSampleRateRanges: [AudioSampleRateRange(minimum: rate, maximum: rate)])
         let calibration = RoomCorrectionCalibrationController(
-            engine: engine, inputCatalog: InputCatalog(devices: [input]), permissionClient: Permission())
+            engine: engine, inputCatalog: catalog ?? InputCatalog(devices: [input]), permissionClient: Permission())
         calibration.prepareForUse()
         calibration.selectInput(uid: "mic")
         let projects = RoomCorrectionProjectController(
@@ -448,7 +451,7 @@ final class ClassAEndToEndTests: XCTestCase {
         if cannedReport {
             quietZone.setSubSweepReport(SubAwareArmingTests.report(fingerprint: quietZone.ancBassPathState.fingerprint))
         }
-        return RigParts(quietZone: quietZone, engine: engine, session: session, calibration: calibration)
+        return RigParts(quietZone: quietZone, engine: engine, session: session, calibration: calibration, ambient: ambient)
     }
 
     private final class FakeMultibusTransport: MultichannelCalibrationTransporting {
@@ -574,5 +577,41 @@ final class ClassAEndToEndTests: XCTestCase {
             XCTAssertFalse(second.arm.isArmed, "\(rate)")
             XCTAssertFalse(secondSession.quietZoneInjectAuthorised, "\(rate): Turn Off revokes the graph")
         }
+    }
+
+    /// E12 S22 (G25), through production wiring: the Quiet Zone card's Turn On arms with a fake microphone; losing the
+    /// microphone disarms and revokes the graph; the same microphone coming back does not arm it again.
+    func testALostMicrophoneDisarmsQuietZoneAndItStaysOffWhenTheMicrophoneReturns() throws {
+        let rate = 48_000.0
+        let mic = AudioInputDevice(
+            deviceID: 22, uid: "mic", name: "Mic", nominalSampleRate: rate,
+            availableSampleRateRanges: [AudioSampleRateRange(minimum: rate, maximum: rate)])
+        let catalog = MutableInputCatalog([mic])
+        let parts = try makeRigParts(rate: rate, cannedReport: true, catalog: catalog)
+        let quietZone = parts.quietZone
+        func card() -> QuietZoneCardInputs {
+            quietZone.cardInputs(engineRunning: true, microphonePermissionGranted: true, microphoneName: "Mic", measuredModelName: "Seat")
+        }
+
+        try quietZone.setEnabled(true)
+        XCTAssertTrue(card().armed)
+        try parts.engine.replaceActiveQuietZoneRuntimeTarget(ActiveQuietZoneRuntimeTarget(
+            tones: [ActiveQuietZoneRuntimeTone(frequencyHz: 60, leftOutput: z(0.001), rightOutput: .zero)],
+            transitionMilliseconds: 3_000, armGeneration: parts.engine.liveTreatmentGeneration))
+        XCTAssertTrue(parts.session.quietZoneInjectAuthorised)
+
+        catalog.devices = []
+        parts.ambient.checkMicrophonePresence()
+        XCTAssertFalse(quietZone.arm.isArmed, "a lost microphone disarms")
+        XCTAssertFalse(parts.session.quietZoneInjectAuthorised, "and revokes the graph")
+        XCTAssertEqual(card().lastAutoDisarmMessage, LiveTreatmentDisarmReason.inputLost.message)
+        XCTAssertEqual(parts.calibration.lostInput?.uid, "mic")
+
+        catalog.devices = [mic]
+        parts.ambient.checkMicrophonePresence()
+        XCTAssertNil(parts.calibration.lostInput)
+        XCTAssertEqual(parts.calibration.selectedInputUID, "mic", "the same microphone is back")
+        XCTAssertFalse(quietZone.arm.isArmed, "Quiet Zone stays off until the user arms it again")
+        quietZone.stop()
     }
 }

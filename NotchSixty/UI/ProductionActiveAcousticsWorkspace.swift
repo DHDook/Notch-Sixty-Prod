@@ -303,6 +303,8 @@ struct ProductionActiveAcousticsWorkspace: View {
                 .pickerStyle(.segmented)
                 .frame(maxWidth: 520)
 
+                ProductionAcousticsMicrophoneCard(ambient: ambient, microphone: microphone)
+
                 if onePageFlag { resultCard(for: selection) }
 
                 switch selection {
@@ -1931,6 +1933,11 @@ struct ProductionActiveAcousticsWorkspace: View {
         VStack(alignment: .leading, spacing: 16) {
             if let mimoTreatment, mimoTreatment.isAvailable {
                 ProductionMIMOTreatmentSection(controller: mimoTreatment)
+            }
+            if let mimoTreatment, mimoTreatment.isAvailable {
+                ProductionRoomTreatmentHonestyLive(controller: mimoTreatment)
+            } else {
+                ProductionRoomTreatmentHonesty(missing: ["Room Treatment is not available in this build."])
             }
             roomTreatmentStatusCard
 

@@ -511,6 +511,37 @@ final class AmbientCompensationController: ObservableObject {
         }
     }
 
+    /// E12 S22 (G25): called when the chosen microphone goes away, before monitoring stops, so Quiet Zone can disarm.
+    var onMicrophoneLost: (() -> Void)?
+    private var presenceTask: Task<Void, Never>?
+
+    /// One check of the chosen microphone. Lost: Quiet Zone disarms (it stays off until the user arms it again) and
+    /// monitoring stops, which fades Playback Adaptation back to unity. Returned (same UID): monitoring restarts, so
+    /// Playback Adaptation resumes by itself. Never arms anything.
+    func checkMicrophonePresence() {
+        switch microphone.checkInputPresence() {
+        case .lost:
+            onMicrophoneLost?()
+            stopMonitoring()
+        case .returned:
+            try? startMonitoring()
+        case nil:
+            break
+        }
+    }
+
+    /// Starts the once-a-second microphone check. Safe to call again.
+    func watchMicrophonePresence(intervalNanoseconds: UInt64 = 1_000_000_000) {
+        guard presenceTask == nil else { return }
+        presenceTask = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: intervalNanoseconds)
+                guard !Task.isCancelled else { break }
+                self?.checkMicrophonePresence()
+            }
+        }
+    }
+
     func stopMonitoring() {
         compareHeld = false
         pollTask?.cancel()

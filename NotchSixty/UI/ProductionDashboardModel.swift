@@ -69,6 +69,8 @@ struct DashboardInputs: Equatable {
     var correctionEnabled = false
     var correctionFilterName: String?
     var acoustics: DashboardAcoustics = .notSetUp
+    /// E12 S22: one read-only line per Active Acoustics feature. Empty means the card shows the Room Treatment line only.
+    var acousticsStatus: [AcousticsStatusLine] = []
 
     var lastError: String?
     var failsafeMessage: String?
@@ -270,8 +272,13 @@ enum DashboardModel {
                 isOn: i.correctionEnabled, line: correctionLine(i), destination: .init(.roomCorrection)),
             DashboardCard(
                 id: "acoustics", title: "Active Acoustics", systemImage: "waveform.and.mic",
-                isOn: { if case .active = i.acoustics { return true } else { return false } }(),
-                line: acousticsLine(i.acoustics), destination: .init(.activeAcoustics)),
+                isOn: i.acousticsStatus.isEmpty
+                    ? { if case .active = i.acoustics { return true } else { return false } }()
+                    : i.acousticsStatus.contains { $0.isOn },
+                line: i.acousticsStatus.isEmpty
+                    ? acousticsLine(i.acoustics)
+                    : i.acousticsStatus.map { "\($0.title): \($0.text)" }.joined(separator: "\n"),
+                destination: .init(.activeAcoustics)),
         ]
     }
 

@@ -114,7 +114,7 @@ struct QuietZoneCardModel: Equatable, Sendable {
                     : "Microphone access is not allowed yet."),
             nextAction: micReady ? nil
                 : (inputs.microphonePermissionGranted
-                    ? "Choose your measurement microphone in Room Correction."
+                    ? "Choose your measurement microphone in the microphone box above."
                     : "Allow microphone access in Settings, then choose your measurement microphone.")))
         steps.append(QuietZoneSetupStep(
             id: "measure",

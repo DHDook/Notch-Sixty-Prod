@@ -50,6 +50,7 @@ extension DashboardInputs {
         telemetry: DashboardTelemetry,
         failsafeMessage: String?,
         resumeNote: String? = nil,
+        acousticsStatus: [AcousticsStatusLine] = [],
         usesDecibels: Bool,
         now: Date = Date()
     ) -> DashboardInputs {
@@ -101,6 +102,7 @@ extension DashboardInputs {
             let reasons = SystemChecklistModel.outOfDateReasons(.make(engine: engine, profiles: profiles))
             if !reasons.isEmpty { i.calibrationOutOfDate = reasons.map(\.reason).joined(separator: ", ") }
         }
+        i.acousticsStatus = acousticsStatus
         i.lastError = engine.lastErrorDescription
         i.failsafeMessage = failsafeMessage
         i.resumeNote = resumeNote
@@ -128,6 +130,8 @@ struct ProductionStatusDashboardView: View {
     @ObservedObject var navigation: ProductionNavigation
     var failsafeMessage: String?
     @ObservedObject var resume: ResumeProcessingCoordinator
+    /// E12 S22: read-only status for Playback Adaptation and Quiet Zone. Nil in tests that do not need it.
+    @ObservedObject var acoustics = AcousticsStatusSource()
     var entryCard = AnyView(EmptyView())
     @ObservedObject private var history = ProductionMeterHub.eventHistory
     @AppStorage(PreferenceKeys.Application.volumeStepResolution)
@@ -139,7 +143,21 @@ struct ProductionStatusDashboardView: View {
             engine: engine, profiles: profiles, history: history, telemetry: telemetry,
             failsafeMessage: failsafeMessage,
             resumeNote: resume.skippedReason?.message,
+            acousticsStatus: acoustics.lines(roomTreatment: telemetryRoomTreatment()),
             usesDecibels: ApplicationVolumeStepResolution(storedValue: storedVolumeStepResolution)?.usesDecibels == true))
+    }
+
+    private func telemetryRoomTreatment() -> DashboardAcoustics {
+        var probe = DashboardInputs()
+        if let treatment = telemetry.roomTreatment {
+            if treatment.faulted { probe.acoustics = .faulted }
+            else if treatment.active { probe.acoustics = .active(sources: Int(treatment.treatmentSourceCount)) }
+            else if treatment.transitioning { probe.acoustics = .transitioning(percent: Int((treatment.treatmentMix * 100).rounded())) }
+            else { probe.acoustics = .ready }
+        } else if engine.roomTreatmentStagedForNextStart {
+            probe.acoustics = .staged
+        }
+        return probe.acoustics
     }
 
     var body: some View {
