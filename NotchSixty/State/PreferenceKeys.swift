@@ -12,6 +12,8 @@ enum PreferenceKeys {
         static let volumePopupPosition = "application.volumePopupPosition"
         static let coverSystemVolumePopup = "application.coverSystemVolumePopup"
         static let showDeveloperTools = "application.showDeveloperTools"
+        /// E12 S8: "simple" or "expert" (`InterfaceMode`).
+        static let interfaceMode = "application.interfaceMode"
     }
 
     static let abComparisonEnabled = "toolbar.abComparisonEnabled"

@@ -364,7 +364,7 @@ minimum-phase in blind ABX at three or more seats, and measurement results match
 - [x] Surface the room geometry and treatment advisor inside the flow
 - [ ] Usability test with someone who has never seen the app
 - [ ] S8 hookup (G88): the setup graphs' Simple / Per seat switch follows the global mode
-- [ ] S8 `e12/simple-expert-modes` (owner, 11 Nov 2026): a simple mode (Dashboard status page, the menu bar remote with the E30 everyday controls and before/after, guided setup) and an expert mode with everything else; Acoustic Research and Hardware Acceptance sit behind a developer switch in release builds; the headphones flow states that a personal SOFA HRTF can be loaded
+- [~] S8 `e12/simple-expert-modes` (owner, 11 Nov 2026): a simple mode (Dashboard status page, the menu bar remote with the E30 everyday controls and before/after, guided setup) and an expert mode with everything else; Acoustic Research and Hardware Acceptance sit behind a developer switch in release builds; the headphones flow states that a personal SOFA HRTF can be loaded
 - [ ] S8 also walks the path from driver measurement to an installed crossover with delay and polarity set; if it does not end in a single accept step, record a gap in the E8 ledger with an owning slice (owner, 11 Nov 2026) The accept step is E8 S15 (E8 G8, 16 Nov 2026).
 - [x] S9 `e12/app-shell-split` (owner, 11 Nov 2026): split `NotchSixtyApp.swift` (3,121 lines) into scene, commands, composition root and window files, with no behaviour change
 - [~] S10 `e12/quick-setup` (setup and competitor review, owner approved 15 Nov 2026): a quick path through guided setup: one seat, defaults at every step, aimed at a verified result in ten minutes, with the full flow offered afterwards and nothing the quick path sets hidden from it. Reuses the existing steps and services; no second flow. Built dark behind `e12.setup-flow`; wiring slice S31 (graduates the flag)
@@ -544,7 +544,7 @@ Plan: `docs/epics/E15.md` (awaiting owner approval; flag `e15.follow-output`).
 
 - [ ] Opt-in "follow system output" mode that recalls the profile bound to each output UID
 - [ ] Keep today's fixed-output policy as the default
-- [ ] S5 `e15/source-rate-investigation` (owner, 11 Nov 2026): one investigation slice on following the source sample rate through the process tap; record the finding either way, and build it only if the finding supports it
+- [~] S5 `e15/source-rate-investigation` (owner, 11 Nov 2026): one investigation slice on following the source sample rate through the process tap; record the finding either way, and build it only if the finding supports it (built to the Q7 recommendation, PR pending, needs-owner; provisional finding: tap carries no source rate; bench: B-S5 in E22, G11, G19, G20)
 - [x] S6 `e15/connection-and-wireless-defaults` (owner, 11 Nov 2026; built behind `e15.follow-output`, needs-owner; Q6 built to the recommendation, owner not yet answered): the bound profile switches when headphones or another DAC connect (confirm what S1–S3b already cover and add the rest); Bluetooth and AirPlay outputs get sensible defaults (latency, rate, no long FIR). Closes E13 G27 and E15 G10
 - [x] S7 `e15/schedules` (owner, 11 Nov 2026): switch profile or night mode by time of day (content presets built; the night-mode action waits for E30, G13)
 - [ ] S4 `e15/ship` (runs after S5–S7) graduates `e15.follow-output` (default on; the mode still defaults to fixed; removal is the FC phase)

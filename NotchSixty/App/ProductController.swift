@@ -118,6 +118,9 @@ final class ProductController: ObservableObject {
     private var terminationObservation: AnyCancellable?
     private var didShutdownForTermination = false
     private var selectedOutputObservation: ObservationSubscription?
+    /// E15 S5: read-only developer probe of the tap and device rates (nil unless the flag and developer tools are on).
+    private var sourceRateProbe: SourceRateProbe?
+    private var sourceRateProbeSubscription: ObservationSubscription?
     static let selectedOutputDefaultsKey = "audio.selectedOutputUID"
 
     init() {
@@ -255,6 +258,7 @@ final class ProductController: ObservableObject {
         self.outputFollow = follow.coordinator
         outputFollowObservers = follow.observers
         installScheduler()
+        installSourceRateProbe()
         ActiveAcousticsEventWiring.attach(quietZone: activeQuietZone, treatment: mimoTreatment, flags: FeatureFlags())
         observeAudioEngine()
         observeTermination()
@@ -416,6 +420,18 @@ final class ProductController: ObservableObject {
                 speakerIR: audioEngine.speakerIRConfiguration
             )
         )
+    }
+
+    /// E15 S5: the source-rate probe (design note 14). Flag off or developer tools hidden builds nothing.
+    private func installSourceRateProbe() {
+        let shown = DeveloperToolsPolicy.isShown(
+            stored: UserDefaults.standard.bool(forKey: PreferenceKeys.Application.showDeveloperTools),
+            settingsPageEnabled: true, policy: FeatureFlags.buildPolicy, arguments: ProcessInfo.processInfo.arguments)
+        guard let built = SourceRateProbeWiring.make(
+            engine: audioEngine, flagEnabled: FeatureFlags().isEnabled(.followOutput), developerToolsShown: shown)
+        else { return }
+        sourceRateProbe = built.probe
+        sourceRateProbeSubscription = built.subscription
     }
 
     /// E15 S7: builds the schedule (flag off builds nothing). Content presets only, through `selectContentPreset`.
@@ -738,7 +754,7 @@ final class ProductController: ObservableObject {
             "Room Correction: \(audioEngine.roomCorrectionConfiguration.enabled ? "On" : "Off")",
             "DSP Latency: \(latency)",
             "Quarantined Plug-ins: \(audioUnitHost.quarantinedComponentCount)",
-        ] + recovery.diagnosticsLines() + activeQuietZone.flightRecorder.diagnosticsLines()
+        ] + recovery.diagnosticsLines() + (sourceRateProbe?.diagnosticsLines() ?? []) + activeQuietZone.flightRecorder.diagnosticsLines()
             + measurementReport(version: version, build: build).diagnosticsLines)
             .joined(separator: "\n")
     }

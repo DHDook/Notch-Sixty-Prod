@@ -34,10 +34,10 @@ enum SettingsTab: String, CaseIterable, Identifiable, Sendable {
     }
 
     /// The cards each tab holds, by title. Tests read this; the view builds the same cards.
-    func cardTitles(offersDeveloperSwitch: Bool) -> [String] {
+    func cardTitles(offersDeveloperSwitch: Bool, offersInterfaceMode: Bool = false) -> [String] {
         switch self {
         case .general:
-            var titles = ["Appearance", "App Presence", "Startup", "Presets", "Page Displays"]
+            var titles = (offersInterfaceMode ? ["Interface"] : []) + ["Appearance", "App Presence", "Startup", "Presets", "Page Displays"]
             if offersDeveloperSwitch { titles.append("Developer Tools") }
             return titles
         case .volume: return ["Volume & Feedback"]

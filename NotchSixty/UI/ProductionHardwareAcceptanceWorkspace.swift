@@ -29,6 +29,8 @@ struct ProductionHardwareAcceptanceWorkspace: View {
     @ObservedObject var acceptance: HardwareAcceptanceController
     /// E12 S19: with `e12.active-acoustics-page` on, the feed-forward evidence rows live here, not on Active Acoustics.
     var quietZone: ActiveQuietZoneController?
+    /// E12 S8 (G98): the feed-forward evidence rows show in expert mode only.
+    @Environment(\.interfaceMode) private var interfaceMode
 
     @State private var showingCampaignForm = false
 
@@ -119,7 +121,7 @@ struct ProductionHardwareAcceptanceWorkspace: View {
                 header
                 authorityBoundaryCard
 
-                if let quietZone, FeatureFlags().isEnabled(.activeAcousticsPage) {
+                if let quietZone, FeatureFlags().isEnabled(.activeAcousticsPage), interfaceMode.isExpert {
                     ProductionFeedForwardReadinessCard(quietZone: quietZone)
                 }
 
