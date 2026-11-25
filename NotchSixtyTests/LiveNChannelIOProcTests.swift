@@ -102,6 +102,30 @@ final class LiveNChannelIOProcTests: XCTestCase {
 
     // MARK: Fixtures
 
+    /// E14 S1: a stereo app on a wider device-scoped tap. The tap delivers one channel per device channel, so the app's
+    /// stereo arrives on the front pair (stream 0 and 1, labelled Left and Right) and the other channels are silent. The
+    /// bridge carries those onto the FL and FR graph lanes and nothing onto the other lanes, which is what the upmixer
+    /// (E14 S2) relies on to detect a stereo source. That the HAL really delivers a stereo app on the device's front pair is
+    /// a bench check (E22).
+    func testStereoSourceOnWideTapReachesOnlyTheFrontPairLanes() throws {
+        for sampleRate in Self.standardSampleRates {
+            let bridge = try makeBridge(sampleRate: sampleRate, gateFrames: 512)
+            defer { N60LiveNChannelBridgeDestroy(bridge) }
+            let stereo: (Int) -> Float = { stream in stream == 0 ? 0.1 : (stream == 1 ? 0.2 : 0) }
+            capture(bridge, frames: 512, streamValue: stereo)
+            var output: [[Float]] = []
+            for _ in 0..<40 {
+                output = render(bridge, frames: Self.block)
+                capture(bridge, frames: Self.block, streamValue: stereo)
+            }
+            // Program role k (FL FR C LFE SL SR) is on physical channel 5 - k.
+            var expected = [Float](repeating: 0, count: 6)
+            expected[5] = 0.1
+            expected[4] = 0.2
+            assertFrame(output[Self.block - 1], matches: expected, "\(sampleRate) Hz")
+        }
+    }
+
     private func makeBridge(
         sampleRate: Double,
         gateFrames: UInt32
@@ -141,11 +165,15 @@ final class LiveNChannelIOProcTests: XCTestCase {
         )
     }
 
-    private func capture(_ bridge: UnsafeMutablePointer<N60LiveNChannelBridge>, frames: Int) {
+    private func capture(
+        _ bridge: UnsafeMutablePointer<N60LiveNChannelBridge>,
+        frames: Int,
+        streamValue: ((Int) -> Float)? = nil
+    ) {
         var samples = [Float](repeating: 0, count: frames * 6)
         for frame in 0..<frames {
             for stream in 0..<6 {
-                samples[frame * 6 + stream] = programValue(Self.streamToCanonical[stream])
+                samples[frame * 6 + stream] = streamValue?(stream) ?? programValue(Self.streamToCanonical[stream])
             }
         }
         var timestamp = AudioTimeStamp()

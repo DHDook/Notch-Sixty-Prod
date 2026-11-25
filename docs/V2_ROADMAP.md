@@ -188,6 +188,7 @@ v1 (E14) ships one upmix with a single strength control.
 - [ ] Several upmix modes (for example music, film, wide)
 - [ ] Per-layout presets
 - [ ] Tuning controls: centre width, surround level, height level, decorrelation
+- [ ] Stereo upmix before the Virtual Speakers renderer on headphones (E14 Q5: v1 upmixes speakers only; owner, 25 Nov 2026)
 
 ### V2-10 Quiet Zone on any output count
 

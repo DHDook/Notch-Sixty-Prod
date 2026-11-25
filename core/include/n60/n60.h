@@ -24,6 +24,7 @@
 #include "n60/resample.h"
 #include "n60/roommodel.h"
 #include "n60/speaker.h"
+#include "n60/upmix.h"
 #include "n60/xover.h"
 
 #ifdef __cplusplus
@@ -69,6 +70,8 @@ typedef struct n60_core_abi_info {
     uint32_t hrtfModelSize;         /* sizeof(n60_hrtf_generic_model) */
     uint32_t roomModelVersion;      /* E29 S3, appended */
     uint32_t roomModelQuerySize;    /* sizeof(n60_roommodel_query) */
+    uint32_t upmixVersion;          /* E14 S1, appended */
+    uint32_t upmixConfigSize;       /* sizeof(n60_upmix_config) */
 } n60_core_abi_info;
 
 /* Returns 1 and fills info, or 0 for a null pointer or a structSize smaller than the first two fields. */

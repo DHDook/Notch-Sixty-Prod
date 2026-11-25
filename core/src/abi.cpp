@@ -40,6 +40,8 @@ extern "C" int n60_core_abi(n60_core_abi_info *info, size_t info_size) {
     out.hrtfModelSize = static_cast<uint32_t>(sizeof(n60_hrtf_generic_model));
     out.roomModelVersion = n60_roommodel_abi_version();
     out.roomModelQuerySize = static_cast<uint32_t>(sizeof(n60_roommodel_query));
+    out.upmixVersion = n60_upmix_abi_version();
+    out.upmixConfigSize = static_cast<uint32_t>(sizeof(n60_upmix_config));
     const size_t n = info_size < sizeof out ? info_size : sizeof out;
     out.structSize = static_cast<uint32_t>(n);
     memcpy(info, &out, n);

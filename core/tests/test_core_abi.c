@@ -41,6 +41,8 @@ int main(void) {
     CHECK(info.hrtfModelSize == sizeof(n60_hrtf_generic_model), "hrtf model size");
     CHECK(info.roomModelVersion == N60_ROOMMODEL_ABI_VERSION, "roommodel");
     CHECK(info.roomModelQuerySize == sizeof(n60_roommodel_query), "roommodel query size");
+    CHECK(info.upmixVersion == N60_UPMIX_ABI_VERSION, "upmix");
+    CHECK(info.upmixConfigSize == sizeof(n60_upmix_config), "upmix config size");
     CHECK(n60_core_abi(NULL, sizeof info) == 0, "null");
     CHECK(n60_core_abi(&info, 4) == 0, "truncated");
     memset(&info, 0xAB, sizeof info);

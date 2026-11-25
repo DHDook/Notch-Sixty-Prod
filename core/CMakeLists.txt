@@ -104,6 +104,7 @@ add_test(NAME n60core_stages COMMAND n60core_stages_test)
 endif()
 
 add_executable(n60core_alloc_test tests/test_alloc.cpp)
+target_include_directories(n60core_alloc_test PRIVATE src)
 target_link_libraries(n60core_alloc_test PRIVATE n60core)
 add_test(NAME n60core_alloc COMMAND n60core_alloc_test)
 
@@ -551,6 +552,11 @@ add_test(NAME n60core_hrtf COMMAND n60core_hrtf_test)
 add_executable(n60core_roommodel_test tests/test_roommodel.cpp)
 target_link_libraries(n60core_roommodel_test PRIVATE n60core)
 add_test(NAME n60core_roommodel COMMAND n60core_roommodel_test)
+
+# E14 S1: stereo upmixer (n60/upmix.h).
+add_executable(n60core_upmix_test tests/test_upmix.cpp)
+target_link_libraries(n60core_upmix_test PRIVATE n60core)
+add_test(NAME n60core_upmix COMMAND n60core_upmix_test)
 
 # E21 S10b: passive ambient field analysis (n60/anc_design.h v2).
 add_executable(n60core_ambient_field_test tests/test_ambient_field.cpp)

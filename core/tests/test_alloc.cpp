@@ -13,6 +13,7 @@
 #include <new>
 
 #include "n60/graph.h"
+#include "upmix/upmix.hpp"
 
 static std::atomic<bool> armed{false};
 static std::atomic<long> allocs{0};
@@ -1293,6 +1294,38 @@ int main() {
             CHECK(allocs == 0 && frees == 0, "9.1.6 rate %.0f round %d: allocated %ld / freed %ld", rate, round, allocs.load(), frees.load());
         }
         n60_graph_retire(g);
+    }
+    // E14 S1: the upmix engine allocates only in init; process, setStrength and reset allocate nothing.
+    for (double rate : rates) {
+        n60_layout layout;
+        std::memset(&layout, 0, sizeof layout);
+        n60_layout_standard(N60_LAYOUT_7_1_4, &layout);
+        n60_upmix_config cfg;
+        std::memset(&cfg, 0, sizeof cfg);
+        cfg.structSize = sizeof cfg;
+        cfg.channelCount = layout.channelCount;
+        for (uint32_t c = 0; c < layout.channelCount; ++c) cfg.roles[c] = layout.roles[c];
+        cfg.sampleRate = rate;
+        cfg.strength = 0.5f;
+        cfg.seed = 1;
+        n60::upmix::Engine engine;
+        CHECK(engine.init(cfg), "upmix init at %.0f", rate);
+        const uint32_t blk = 777;
+        std::vector<float> l(blk), r(blk);
+        std::vector<std::vector<float>> lanes(cfg.channelCount, std::vector<float>(blk));
+        float *ptrs[N60_LAYOUT_MAX_CHANNELS];
+        for (uint32_t c = 0; c < cfg.channelCount; ++c) ptrs[c] = lanes[c].data();
+        for (uint32_t i = 0; i < blk; ++i) { l[i] = 0.1f * std::sin(0.02f * static_cast<float>(i)); r[i] = 0.05f * std::cos(0.03f * static_cast<float>(i)); }
+        allocs = 0;
+        frees = 0;
+        armed = true;
+        for (int round = 0; round < 40; ++round) {
+            engine.setStrength(static_cast<float>(round % 5) * 0.25f);
+            if (round == 20) engine.reset();
+            engine.process(l.data(), r.data(), ptrs, blk);
+        }
+        armed = false;
+        CHECK(allocs == 0 && frees == 0, "upmix rate %.0f: allocated %ld / freed %ld", rate, allocs.load(), frees.load());
     }
     if (failures) {
         std::fprintf(stderr, "%d failure(s)\n", failures);

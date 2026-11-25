@@ -203,7 +203,7 @@ if selected e6_core_graph; then
         # E6 S10: whole-graph parity suite (short corpus; N60_PARITY_FULL=1 runs the full corpus and timings).
         harness e6_core_parity_suite "${STRICT[@]}" -O2 -Icore/include core/tests/test_parity_suite.c \
             "${CORE_OBJS[@]}" -lc++ -lm -framework Accelerate
-        if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -Icore/include core/tests/test_alloc.cpp \
+        if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -Icore/include -Icore/src core/tests/test_alloc.cpp \
             "${CORE_OBJS[@]}" -o "$OUT/e6_core_alloc" \
             && run_timed "$OUT/e6_core_alloc"; then :; else failed+=(e6_core_alloc); fi
         # E20 S2: the realtime annotations only check anything where the compiler supports clang function effects.
