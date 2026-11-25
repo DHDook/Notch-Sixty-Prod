@@ -446,7 +446,7 @@ struct CoherentSubwooferAlignmentPostApplyVerifier: Sendable {
             blockingReasons: globalBlockers,
             warnings: [
                 "This is fresh reference-authenticated post-Apply acoustic evidence; the modeled proposal alone cannot satisfy verification.",
-                "Phase tracking verifies the exact applied relative delay/polarity signature; magnitude is expected to remain stable because PR108 does not change gain or EQ.",
+                "Phase tracking verifies the exact applied relative delay/polarity signature; magnitude is expected to remain stable because this alignment does not change gain or EQ.",
                 "A rejected report recommends guarded rollback to the immutable pre-Apply Playback System snapshot."
             ]
         )

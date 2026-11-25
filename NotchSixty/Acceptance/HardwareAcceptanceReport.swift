@@ -390,7 +390,7 @@ struct HardwareAcceptanceReportBuilder: Sendable {
         case .h07CoherentMainSubAlignment:
             return "Use microphone and safe line-level reference channels on the same ADC and a common output clock. Never feed speaker-level output directly into an ADC."
         case .h08LiveFeedForwardANC:
-            return "Remain disabled unless deliberately in scope and independently physically reviewed; PR112A provides no live ANC authorization."
+            return "Remain disabled unless deliberately in scope and independently physically reviewed; this report provides no live ANC authorization."
         }
     }
 
@@ -454,7 +454,7 @@ struct HardwareAcceptanceReportExporter: Sendable {
         lines.append("May merge into main: NO")
         lines.append("")
         lines.append(
-            "PR112A reports evidence only. Remote CI cannot create physical evidence or release/merge authority."
+            "This report evidence only. Remote CI cannot create physical evidence or release/merge authority."
         )
         lines.append("")
         lines.append("## Gate status")

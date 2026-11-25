@@ -38,7 +38,7 @@ struct QuietZoneExternalReviewPacket: Sendable {
     let outputConnected: Bool = false
 
     var reviewText: String {
-        "PR99 review packet: two distinct claimed reviewers / digest " +
+        "Review packet: two distinct claimed reviewers / digest " +
         evidenceSHA256Hex + " — numerical review ONLY; physical ANC unverified"
     }
 }

@@ -227,7 +227,7 @@ struct HardwareAcceptancePreflightAnalyzer: Sendable {
                 .init(
                     code: .liveFeedForwardANCNotAuthorized,
                     message:
-                        "PR112A never authorizes speaker-connected feed-forward ANC. H08 requires its separate physical safety protocol and independent review."
+                        "This report never authorizes speaker-connected feed-forward ANC. H08 requires its separate physical safety protocol and independent review."
                 )
             )
         }
@@ -302,7 +302,7 @@ struct HardwareAcceptancePreflightAnalyzer: Sendable {
                 .init(
                     code: .commissioningDraftRequired,
                     message:
-                        "No matching PR111 commissioning draft is available for rollback/state-drift review."
+                        "No matching commissioning draft is available for rollback/state-drift review."
                 )
             )
             return
@@ -316,7 +316,7 @@ struct HardwareAcceptancePreflightAnalyzer: Sendable {
                 .init(
                     code: .commissioningDraftStateDrift,
                     message:
-                        "Playback System changed since the PR111 commissioning draft; regenerate the draft before physical driver work."
+                        "Playback System changed since the commissioning draft; regenerate the draft before physical driver work."
                 )
             )
             return
@@ -325,7 +325,7 @@ struct HardwareAcceptancePreflightAnalyzer: Sendable {
                 .init(
                     code: .commissioningDraftInvalid,
                     message:
-                        "PR111 commissioning provenance is invalid for the current system."
+                        "Commissioning provenance is invalid for the current system."
                 )
             )
             return
@@ -341,7 +341,7 @@ struct HardwareAcceptancePreflightAnalyzer: Sendable {
                 .init(
                     code: .commissioningDraftInvalid,
                     message:
-                        "Commissioning draft no longer preserves the PR111 hardware-blocked rollback contract."
+                        "Commissioning draft no longer preserves the hardware-blocked rollback contract."
                 )
             )
             return
@@ -367,7 +367,7 @@ struct HardwareAcceptancePreflightAnalyzer: Sendable {
         }
 
         warnings.append(
-            "PR111 timing/polarity/PEQ remain unapplied. This preflight only permits the later protected combined-driver verification procedure to begin."
+            "Timing/polarity/PEQ remain unapplied. This preflight only permits the later protected combined-driver verification procedure to begin."
         )
     }
 

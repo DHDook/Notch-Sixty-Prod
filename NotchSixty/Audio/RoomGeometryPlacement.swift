@@ -578,7 +578,7 @@ struct RoomGeometryPlacementAnalyzer: Sendable {
                         ),
                         measurement: String(
                             format:
-                                "PR92 measured excess decay near %.1f Hz",
+                                "Measured excess decay near %.1f Hz",
                             measured
                         ),
                         rationale:
@@ -638,7 +638,7 @@ struct RoomGeometryPlacementAnalyzer: Sendable {
                         ),
                         measurement: String(
                             format:
-                                "PR92 measured a cancellation candidate near %.1f Hz",
+                                "Measured a cancellation candidate near %.1f Hz",
                             measured
                         ),
                         rationale:
@@ -693,7 +693,7 @@ struct RoomGeometryPlacementAnalyzer: Sendable {
                         ),
                         measurement: String(
                             format:
-                                "PR92 measured an early reflection at %.1f ms",
+                                "Measured an early reflection at %.1f ms",
                             measured
                         ),
                         rationale:
@@ -742,7 +742,7 @@ struct RoomGeometryPlacementAnalyzer: Sendable {
                     ),
                     measurement: nil,
                     rationale:
-                        "Geometry predicts this mode, but PR92 has not supplied matching excess-decay evidence."
+                        "Geometry predicts this mode, but measurements have not supplied matching excess-decay evidence."
                 )
             )
         }

@@ -34,10 +34,10 @@ struct PR27ProtectionValidationView: View {
 
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                Text("PR27 Protection / Oversampling Validation")
+                Text("Protection / Oversampling Validation")
                     .font(.title2.bold())
 
-                Text("Hardware validation surface for the oversampling, soft-clipper, true-peak detector, and limiter paths. Use this tab for the PR27 acceptance pass.")
+                Text("Hardware validation surface for the oversampling, soft-clipper, true-peak detector, and limiter paths. Use this tab for the acceptance pass.")
                     .foregroundStyle(.secondary)
 
                 GroupBox("Oversampling") {
@@ -221,7 +221,7 @@ struct PR28AdvancedDynamicsValidationView: View {
 
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                Text("PR28 Advanced Dynamics Validation")
+                Text("Advanced Dynamics Validation")
                     .font(.title2.bold())
                 Text("Clean-room validation surface for De-Esser and three-band Multiband Compressor parity.")
                     .foregroundStyle(.secondary)
@@ -395,7 +395,7 @@ struct PR30PhaseTimeValidationView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                Text("PR30 Phase / Time Alignment Validation")
+                Text("Phase / Time Alignment Validation")
                     .font(.title2.bold())
 
                 Text("Focused hardware validation for the new phase-only All-Pass EQ and signed fractional inter-channel timing alignment.")
@@ -430,7 +430,7 @@ struct PR30PhaseTimeValidationView: View {
                             .foregroundStyle(.secondary)
 
                         if allPassBands.isEmpty {
-                            Text("No All-Pass bands yet. Add one above for the PR30 listening test.")
+                            Text("No All-Pass bands yet. Add one above for the listening test.")
                                 .foregroundStyle(.secondary)
                         }
 
@@ -625,9 +625,9 @@ struct PR31NoiseHumValidationView: View {
 
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                Text("PR31 Noise / Hum Validation")
+                Text("Noise / Hum Validation")
                     .font(.title2.bold())
-                Text("PR31 now includes mains-frequency detection/tracking plus the new clean-room spectral denoiser. The denoiser is deliberately conservative: linked-stereo WOLA processing, threshold-gated adaptive learning, explicit noise Capture, protected bands, and measurable latency.")
+                Text("This now includes mains-frequency detection/tracking plus the new clean-room spectral denoiser. The denoiser is deliberately conservative: linked-stereo WOLA processing, threshold-gated adaptive learning, explicit noise Capture, protected bands, and measurable latency.")
                     .foregroundStyle(.secondary)
 
                 GroupBox("Mains Hum Notch") {
@@ -812,16 +812,16 @@ struct EngineeringValidationView: View {
     var body: some View {
         TabView {
             PR27ProtectionValidationView(engine: engine)
-                .tabItem { Label("PR27 Protection", systemImage: "waveform.path.ecg") }
+                .tabItem { Label("Protection", systemImage: "waveform.path.ecg") }
 
             PR28AdvancedDynamicsValidationView(engine: engine)
-                .tabItem { Label("PR28 Advanced Dynamics", systemImage: "waveform.badge.plus") }
+                .tabItem { Label("Advanced Dynamics", systemImage: "waveform.badge.plus") }
 
             PR30PhaseTimeValidationView(engine: engine)
-                .tabItem { Label("PR30 Phase / Time", systemImage: "timeline.selection") }
+                .tabItem { Label("Phase / Time", systemImage: "timeline.selection") }
 
             PR31NoiseHumValidationView(engine: engine)
-                .tabItem { Label("PR31 Noise / Hum", systemImage: "waveform.slash") }
+                .tabItem { Label("Noise / Hum", systemImage: "waveform.slash") }
         }
         .frame(minWidth: 900, minHeight: 720)
     }

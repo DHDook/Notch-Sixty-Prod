@@ -78,7 +78,7 @@ enum MIMORoomTreatmentFIRCompileError: Error, Equatable, LocalizedError {
         case .invalidTapCount(let count):
             return "MIMO FIR compiler tap count \(count) is unsupported."
         case .invalidFrequencyGrid:
-            return "MIMO FIR compiler received an invalid PR73 frequency grid."
+            return "MIMO FIR compiler received an invalid frequency grid."
         case .invalidConfiguration:
             return "MIMO FIR compiler configuration is invalid."
         case .transformSetupFailed(let size):

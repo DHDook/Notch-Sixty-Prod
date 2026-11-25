@@ -924,7 +924,7 @@ struct ProductionRoomGeometrySection: View {
 
             if analysis.placementCandidates.isEmpty {
                 Text(
-                    "No nearby candidate materially improves the current geometry-risk score. This does not prove the current placement is optimal; it only means the bounded PR93 search did not find a useful simple move."
+                    "No nearby candidate materially improves the current geometry-risk score. This does not prove the current placement is optimal; it only means the bounded search did not find a useful simple move."
                 )
                 .font(DesignType.caption.font)
                 .foregroundStyle(.secondary)
@@ -1052,7 +1052,7 @@ struct ProductionRoomGeometrySection: View {
             )
             verificationStep(
                 4,
-                "Keep the move only if the new measurement improves the original PR92 problem—not merely the geometry score."
+                "Keep the move only if the new measurement improves the original problem—not merely the geometry score."
             )
 
             Label(

@@ -26,7 +26,7 @@ struct QuietZoneCommissioningHandoffReport: Sendable {
     /// Do not include raw microphone samples or private signing material.
     var reviewText: String {
         var lines = [
-            "PR97 — Physical timing commissioning (diagnostic only)",
+            "Physical timing commissioning (diagnostic only)",
             "Instrument: \(instrumentID)",
             "Key: \(signerKeyID) · calibration record: \(calibrationRecordID)",
             "Signature: matches separately configured key; hardware not attested",

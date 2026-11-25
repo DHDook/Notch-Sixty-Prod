@@ -1133,7 +1133,7 @@ struct ProductionActiveAcousticsWorkspace: View {
         case .conversationFocus:
             return "Exact subtractive response used to create conversational clearance while preserving musical weight and air."
         case .musicFocus:
-            return "Exact PR89 response, including bounded full-band recovery and the three masking-compensation filters."
+            return "Exact response, including bounded full-band recovery and the three masking-compensation filters."
         case .off:
             return "The shared adaptation overlay is at unity while Playback Adaptation is off."
         }
@@ -1341,7 +1341,7 @@ struct ProductionActiveAcousticsWorkspace: View {
                 }
 
                 Text(
-                    "Quiet Zone reuses PR89's playback separation and the retained Room Correction impulse responses. The live error microphone—not the acoustic prediction—is the commit authority."
+                    "Quiet Zone reuses the playback separation and the retained Room Correction impulse responses. The live error microphone—not the acoustic prediction—is the commit authority."
                 )
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -1495,7 +1495,7 @@ struct ProductionActiveAcousticsWorkspace: View {
                 metricCard(
                     title: "Injection Reserve",
                     value: quietZoneInjectionValue,
-                    detail: "Remaining anti-noise source peak after Content Preset headroom and PR89 level recovery."
+                    detail: "Remaining anti-noise source peak after Content Preset headroom and level recovery."
                 )
                 metricCard(
                     title: "Target Reduction",
@@ -1668,7 +1668,7 @@ struct ProductionActiveAcousticsWorkspace: View {
                     .foregroundStyle(.secondary)
                 }
                 Spacer()
-                Text("PR95")
+                Text("Preview")
                     .font(.caption.bold())
                     .foregroundStyle(.secondary)
             }
@@ -1999,7 +1999,7 @@ struct ProductionActiveAcousticsWorkspace: View {
             safetyNote(
                 mimoTreatment?.isAvailable == true
                     ? "Room Treatment is off until you arm it, and arming needs a permit. Without a hardware acceptance or bench qualification no permit is issued."
-                    : "PR78 intentionally exposes status only. Room Treatment has no Arm, Bypass, or Stage control in the production UI until the real-hardware acceptance workflow is completed."
+                    : "Room Treatment intentionally exposes status only. Room Treatment has no Arm, Bypass, or Stage control in the production UI until the real-hardware acceptance workflow is completed."
             )
         }
     }
@@ -2046,11 +2046,11 @@ struct ProductionActiveAcousticsWorkspace: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
             } else if engine.roomTreatmentStagedForNextStart {
-                Text("A hardware-accepted treatment is staged for the next semantic-speaker start. It remains default-bypassed until the internal control plane explicitly arms it.")
+                Text("A hardware-accepted treatment is staged for the next speaker start. It remains default-bypassed until the internal control plane explicitly arms it.")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             } else {
-                Text("No treatment is staged. The normal speaker path runs without PR77's additional treatment latency.")
+                Text("No treatment is staged. The normal speaker path runs without the additional treatment latency.")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             }

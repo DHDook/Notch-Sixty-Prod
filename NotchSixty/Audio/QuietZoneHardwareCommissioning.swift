@@ -10,7 +10,7 @@ enum QuietZoneCommissioningGate: String, CaseIterable, Sendable {
     var title: String {
         switch self {
         case .selectedOutput: return "Physical stereo output and session lease"
-        case .halClocks: return "Simultaneous input/output HAL clocks"
+        case .halClocks: return "Simultaneous input/output audio clocks"
         case .wiredLoopback: return "Three independent electrical loopbacks"
         case .movableMicrophoneSurvey: return "Listener → doorway → listener"
         case .referenceADC: return "Reference microphone acquisition"
@@ -101,7 +101,7 @@ struct QuietZoneHardwareCommissioningEvaluator: Sendable {
             switch gate {
             case .halClocks:
                 return entry(gate, clock,
-                    "Saved HAL clock evidence still needs active-route verification.")
+                    "Saved audio clock evidence still needs active-route verification.")
             case .movableMicrophoneSurvey:
                 return entry(gate, survey,
                     "Each source launch and clock sync needs physical verification.")

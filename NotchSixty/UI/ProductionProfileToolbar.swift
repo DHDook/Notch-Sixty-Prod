@@ -1229,7 +1229,7 @@ enum PresetInterchange {
             rightNames.forEach { lines.append("      - \($0)") }
         }
         warnings.append("CamillaDSP capture device is exported as CHANGE_ME_CAPTURE because Notch Sixty’s macOS system-audio capture route is not a portable CamillaDSP input-device identity.")
-        warnings.append("This first commercial exporter covers the audited EQ/FIR subset. PR42 separately classifies physical speaker-matrix/crossover export before closure.")
+        warnings.append("This first commercial exporter covers the audited EQ/FIR subset. Physical speaker-matrix/crossover export is handled separately.")
         guard let data = (lines.joined(separator: "\n") + "\n").data(using: .utf8) else { throw PresetInterchangeError.encodingFailed }
         return PresetInterchangeExport(data: data, warnings: unique(warnings))
     }

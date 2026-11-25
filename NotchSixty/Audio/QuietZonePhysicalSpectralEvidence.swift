@@ -11,7 +11,7 @@ enum QuietZonePhysicalSpectralFault: Error, Equatable, LocalizedError {
     var errorDescription: String? {
         switch self {
         case .failedCampaign:
-            return "A complete A–B–A raw acoustic campaign must pass PR99 first."
+            return "A complete A–B–A raw acoustic campaign must pass verification first."
         case .inconsistentFrequencyReduction:
             return "The return-to-listener improvement differs in an individual frequency band."
         case .invalidEvidence:
@@ -54,7 +54,7 @@ struct QuietZonePhysicalEvidencePackage: Sendable {
 
     var reviewText: String {
         var lines = [
-            "PR99 spectral evidence — PROVISIONAL / instrument UNVERIFIED",
+            "Spectral evidence — PROVISIONAL / instrument UNVERIFIED",
             "SHA-256 (integrity only): \(sha256Hex)",
             "Measured bins: \(frequencyResults.count)",
             String(format: "Worst-band benefit: %.2f dB",
