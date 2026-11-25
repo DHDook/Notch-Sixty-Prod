@@ -17,6 +17,7 @@ using n60::fft::offline::Cplx;
 constexpr double kPi = 3.14159265358979323846264338327950288;
 constexpr int kFirstBandK = -15;
 constexpr double kMaxBandHz = 20000.0;
+constexpr size_t kSearchNodes = 16;  // nearest in-trust nodes searched for the enclosing triangle
 
 double dist3(const double *a, const double *b) {
     const double dx = a[0] - b[0];
@@ -52,6 +53,84 @@ double meanPower(const std::vector<double> &power, double binHz, double loHz, do
     return s / static_cast<double>(b - a + 1);
 }
 
+// Weights for the enclosing triangle (E29 S3 follow-up, gap G6). Among every triple of candidates whose triangle holds the
+// query (coplanar within 2 cm, barycentric coordinates >= 0) the one with the smallest longest edge wins, so a point on a
+// shared edge never picks a wedge spanning two cells; a cell's two diagonals tie, and the tie goes to the lexicographically
+// position rank triple (x, then y, then z: one fixed diagonal per cell, so the choice does not depend on where the query is). On success cand is
+// replaced by the three nodes (nearest first) and w by their barycentric weights; false when no triangle holds the query
+// or the nodes are collinear.
+bool pickTriangle(const n60_roommodel_neighbour *nb, const double *qp, std::vector<Used> &cand, std::vector<double> &w) {
+    const size_t n = cand.size();
+    if (n < 3) return false;
+    // Nodes ranked by position (x, then y, then z): in a cell A < B < C < D this keeps the one diagonal B-C.
+    std::vector<size_t> order(n), rank(n);
+    for (size_t i = 0; i < n; ++i) order[i] = i;
+    std::stable_sort(order.begin(), order.end(), [&](size_t a, size_t b) {
+        const double *pa = nb[cand[a].index].position, *pb = nb[cand[b].index].position;
+        for (int d = 0; d < 3; ++d)
+            if (pa[d] != pb[d]) return pa[d] < pb[d];
+        return false;
+    });
+    for (size_t r2 = 0; r2 < n; ++r2) rank[order[r2]] = r2;
+    auto dot = [](const double *a, const double *b) { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; };
+    bool found = false;
+    size_t best[3] = {0, 0, 0};
+    double bw[3] = {0, 0, 0};
+    double bestEdge = 0;
+    size_t bestKey[3] = {0, 0, 0};
+    for (size_t i = 0; i < n; ++i)
+        for (size_t j = i + 1; j < n; ++j)
+            for (size_t l = j + 1; l < n; ++l) {
+                const double *A = nb[cand[i].index].position, *B = nb[cand[j].index].position,
+                             *C = nb[cand[l].index].position;
+                double e0[3], e1[3], p[3];
+                for (int d = 0; d < 3; ++d) {
+                    e0[d] = B[d] - A[d];
+                    e1[d] = C[d] - A[d];
+                    p[d] = qp[d] - A[d];
+                }
+                const double d00 = dot(e0, e0), d01 = dot(e0, e1), d11 = dot(e1, e1), d20 = dot(p, e0), d21 = dot(p, e1);
+                const double den = d00 * d11 - d01 * d01;
+                if (!(d00 > 0) || !(d11 > 0) || !(den > 1e-9 * d00 * d11)) continue;  // collinear
+                const double v = (d11 * d20 - d01 * d21) / den, u2 = (d00 * d21 - d01 * d20) / den, u0 = 1.0 - v - u2;
+                if (u0 < -1e-9 || v < -1e-9 || u2 < -1e-9) continue;
+                double res[3];
+                for (int d = 0; d < 3; ++d) res[d] = p[d] - v * e0[d] - u2 * e1[d];
+                if (std::sqrt(dot(res, res)) > 0.02) continue;  // the query is not in this triangle's plane
+                const double edge = std::sqrt(std::max(d00, std::max(d11, d00 + d11 - 2.0 * d01)));
+                size_t key[3] = {rank[i], rank[j], rank[l]};
+                std::sort(key, key + 3);
+                if (found) {
+                    if (edge > bestEdge * (1.0 + 1e-6)) continue;
+                    if (edge >= bestEdge * (1.0 - 1e-6)) {  // equal longest edge: fixed-diagonal rule
+                        const bool better = key[2] != bestKey[2] ? key[2] < bestKey[2]
+                                            : key[1] != bestKey[1] ? key[1] > bestKey[1]
+                                                                   : key[0] > bestKey[0];
+                        if (!better) continue;
+                    }
+                }
+                for (int d = 0; d < 3; ++d) bestKey[d] = key[d];
+                found = true;
+                bestEdge = edge;
+                best[0] = i; best[1] = j; best[2] = l;
+                bw[0] = u0; bw[1] = v; bw[2] = u2;
+            }
+    if (!found) return false;
+    size_t idx[3] = {0, 1, 2};
+    std::stable_sort(idx, idx + 3, [&](size_t a, size_t b) { return cand[best[a]].dist < cand[best[b]].dist; });
+    std::vector<Used> out;
+    w.assign(3, 0.0);
+    double sum = 0;
+    for (int t = 0; t < 3; ++t) {
+        out.push_back(cand[best[idx[t]]]);
+        w[static_cast<size_t>(t)] = std::max(0.0, bw[idx[t]]);
+        sum += w[static_cast<size_t>(t)];
+    }
+    for (double &x : w) x /= sum;
+    cand = out;
+    return true;
+}
+
 void markRefused(n60_roommodel_result *r, int32_t reason) {
     r->reason = reason;
     for (uint32_t b = 0; b < N60_ROOMMODEL_BAND_COUNT; ++b) {
@@ -70,7 +149,21 @@ int32_t run(const n60_roommodel_query *q, const n60_roommodel_neighbour *nb, n60
     if (lowIm != nullptr) std::fill(lowIm, lowIm + bins, 0.0);
 
     const double c = q->soundSpeed > 0 ? q->soundSpeed : N60_ROOMMODEL_DEFAULT_SOUND_SPEED;
-    const double trust = q->trustRadiusM > 0 ? q->trustRadiusM : N60_ROOMMODEL_DEFAULT_TRUST_M;
+    double trust = q->trustRadiusM > 0 ? q->trustRadiusM : N60_ROOMMODEL_DEFAULT_TRUST_M;
+    if (!(q->trustRadiusM > 0)) {
+        // Spacing-aware default: the node nearest the query and its nearest other node give the grid spacing, and the radius
+        // is at least the cell diagonal (1.42 x spacing) so a whole cell is always in range.
+        size_t near = 0;
+        double nd = 1e300;
+        for (uint32_t i = 0; i < q->neighbourCount; ++i) {
+            const double d = dist3(nb[i].position, q->query);
+            if (d < nd) { nd = d; near = i; }
+        }
+        double gridSpacing = 1e300;
+        for (uint32_t i = 0; i < q->neighbourCount; ++i)
+            if (i != near) gridSpacing = std::min(gridSpacing, dist3(nb[i].position, nb[near].position));
+        if (gridSpacing < 1e300) trust = std::max(trust, N60_ROOMMODEL_CELL_DIAGONAL * gridSpacing);
+    }
     const double limit = q->spreadLimitDb > 0 ? q->spreadLimitDb : N60_ROOMMODEL_DEFAULT_SPREAD_DB;
     const double binHz = q->sampleRate / static_cast<double>(n);
     r->binHz = binHz;
@@ -96,10 +189,21 @@ int32_t run(const n60_roommodel_query *q, const n60_roommodel_neighbour *nb, n60
         markRefused(r, N60_ROOMMODEL_REASON_OUTSIDE_TRUST);
         return N60_ROOMMODEL_NOT_MEASURED;
     }
-    if (cand.size() > N60_ROOMMODEL_MAX_NEIGHBOURS) cand.resize(N60_ROOMMODEL_MAX_NEIGHBOURS);
-    const size_t k = cand.size();
-    r->neighboursUsed = static_cast<uint32_t>(k);
     r->nearestDistanceM = cand[0].dist;
+    if (cand.size() > kSearchNodes) cand.resize(kSearchNodes);
+    // Barycentric weights on the enclosing triangle; otherwise the inverse-distance blend of the nearest three.
+    std::vector<double> w;
+    if (!pickTriangle(nb, q->query, cand, w)) {
+        if (cand.size() > N60_ROOMMODEL_MAX_NEIGHBOURS) cand.resize(N60_ROOMMODEL_MAX_NEIGHBOURS);
+        w.assign(cand.size(), 0.0);
+        double wsum = 0;
+        for (size_t i = 0; i < cand.size(); ++i) {
+            w[i] = 1.0 / std::max(cand[i].dist, 1e-3);
+            wsum += w[i];
+        }
+        for (double &x : w) x /= wsum;
+    }
+    size_t k = cand.size();
 
     // Nearest-neighbour spacing sets the crossover.
     double spacing = 2.0 * std::max(cand[0].dist, 0.01);
@@ -113,14 +217,20 @@ int32_t run(const n60_roommodel_query *q, const n60_roommodel_neighbour *nb, n60
     r->spacingM = spacing;
     r->crossoverHz = n60_roommodel_crossover_hz(spacing, c);
 
-    // Inverse-distance weights.
-    std::vector<double> w(k);
-    double wsum = 0;
-    for (size_t i = 0; i < k; ++i) {
-        w[i] = 1.0 / std::max(cand[i].dist, 1e-3);
-        wsum += w[i];
+    // A zero-weight node (the third corner of a point on a cell edge) takes no part: it neither blends nor counts towards
+    // the band spread. The spacing above still came from the whole triangle, so f_c does not jump at the edge.
+    {
+        size_t m = 0;
+        for (size_t i = 0; i < k; ++i)
+            if (w[i] > 1e-12) { cand[m] = cand[i]; w[m] = w[i]; ++m; }
+        cand.resize(m);
+        w.resize(m);
+        double s2 = 0;
+        for (double x : w) s2 += x;
+        for (double &x : w) x /= s2;
+        k = m;
     }
-    for (size_t i = 0; i < k; ++i) w[i] /= wsum;
+    r->neighboursUsed = static_cast<uint32_t>(k);
 
     bool phase = true;
     for (size_t i = 0; i < k; ++i)
@@ -196,13 +306,9 @@ int32_t run(const n60_roommodel_query *q, const n60_roommodel_neighbour *nb, n60
         if (spread > limit) {
             r->bandStatus[bnd] = N60_ROOMMODEL_BAND_SPREAD;
             r->confidence[bnd] = 0;
-            // Zero the complex bins of a refused band.
-            const size_t a = std::max<size_t>(1, static_cast<size_t>(std::ceil(lo / binHz)));
-            const size_t b2 = std::min(bins - 1, static_cast<size_t>(std::floor(hi / binHz)));
-            for (size_t j = a; j <= b2 && j < lowBins; ++j) {
-                blendRe[j] = 0;
-                blendIm[j] = 0;
-            }
+            // The complex bins stay: below f_c the delay-compensated blend is still the best estimate of a refused band
+            // (on the 44.1 kHz grid a three-bin mode band reads 10 dB of node spread yet blends to -17 dB error), and the
+            // SPREAD status with zero confidence tells the consumer not to trust it.
         } else {
             r->bandStatus[bnd] = N60_ROOMMODEL_BAND_OK;
             r->confidence[bnd] = std::max(0.0, 1.0 - std::sqrt(spread * spread + scatter * scatter) / limit);

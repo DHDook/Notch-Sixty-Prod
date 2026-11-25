@@ -117,11 +117,14 @@ static void testHeldOutPoints() {
     for (double rate : kRates) {
         Grid g;
         buildGrid(rate, g);
-        // Mid-edge points (0.25 m from two grid nodes; the other nodes lie outside the 0.5 m trust radius) meet the plan's
-        // -15 dB. Points inside a cell use three of four near-equidistant nodes and measure -10 to -15 dB (gap G6),         // they are held to a regression bound of -9 dB only.
+        // Mid-edge and in-cell points all meet the plan's -15 dB low-band complex error (gap G6 closed: barycentric weights on the
+        // enclosing triangle and a trust radius of at least the cell diagonal). The third-octave magnitude inside a cell can be
+        // about 3 dB off, an interpolation floor between points 0.5 m apart that confidence reports.
         struct Held { double p[3]; uint32_t used; double limitDb; double magDb; };
-        const Held heldOut[4] = {{{2.75, 2.0, 1.2}, 2, -15.0, 2.0}, {{2.25, 2.0, 1.2}, 2, -15.0, 2.0},
-                                 {{2.75, 2.25, 1.2}, 3, -9.0, 2.0}, {{2.7, 2.2, 1.2}, 3, -9.0, 3.0}};
+        const Held heldOut[7] = {{{2.75, 2.0, 1.2}, 2, -15.0, 2.0}, {{2.25, 2.0, 1.2}, 2, -15.0, 2.0},
+                                 {{2.75, 2.25, 1.2}, 2, -15.0, 3.2}, {{2.7, 2.2, 1.2}, 3, -15.0, 3.2},
+                                 {{2.65, 2.15, 1.2}, 3, -15.0, 3.2}, {{2.55, 2.05, 1.2}, 3, -15.0, 3.2},
+                                 {{2.9, 2.4, 1.2}, 3, -15.0, 3.2}};
         for (const Held &h : heldOut) {
             const double *at = h.p;
             const std::vector<float> truth = roomIr(at, rate);
@@ -137,7 +140,7 @@ static void testHeldOutPoints() {
             std::vector<double> re(bins), im(bins), tre(bins), tim(bins);
             n60_roommodel_result res = makeResult();
             CHECK(n60_roommodel_interpolate(&q, g.nb.data(), &res, re.data(), im.data()) == N60_ROOMMODEL_OK, "interpolate");
-            CHECK(res.neighboursUsed == h.used, "neighbours used");
+            CHECK(res.neighboursUsed == h.used, "neighbours used (zero-weight nodes dropped)");
             CHECK(res.complexValid == 1, "complex valid");
             CHECK(std::fabs(res.spacingM - 0.5) < 1e-9, "spacing 0.5");
             CHECK(std::fabs(res.crossoverHz - kC / 2.0) < 1e-9, "f_c = c/(4d)");
@@ -171,7 +174,7 @@ static void testHeldOutPoints() {
                 CHECK(res.bandStatus[b] == N60_ROOMMODEL_BAND_OK, "band ok");
                 const double e = res.levelDb[b] - tres.levelDb[b];
                 if (std::fabs(e) > h.magDb) std::printf("  (%.2f,%.2f) rate %.0f band %.0f Hz error %.2f dB\n", at[0], at[1], rate, fc, e);
-                CHECK(std::fabs(e) <= h.magDb, "third-octave level within the bound (2 dB; 3 dB at the G6 point)");
+                CHECK(std::fabs(e) <= h.magDb, "third-octave level within the bound (2 dB on an edge; 3.2 dB inside a cell)");
                 CHECK(res.confidence[b] > 0.0 && res.confidence[b] <= 1.0, "confidence in range");
             }
         }
@@ -182,8 +185,8 @@ static void testRefusedOutsideTrust() {
     const double rate = 48000;
     Grid g;
     buildGrid(rate, g);
-    // Nearest grid node (3.0, 2.5) is 0.6 m from (3.6, 2.5).
-    const double at[3] = {3.6, 2.5, 1.2};
+    // Nearest grid node (3.0, 2.5) is 0.8 m from (3.8, 2.5); the spacing-aware radius is 1.42 x 0.5 = 0.71 m.
+    const double at[3] = {3.8, 2.5, 1.2};
     n60_roommodel_query q = makeQuery(rate, at);
     q.neighbourCount = static_cast<uint32_t>(g.nb.size());
     n60_roommodel_result res = makeResult();
@@ -191,17 +194,108 @@ static void testRefusedOutsideTrust() {
     CHECK(n60_roommodel_interpolate(&q, g.nb.data(), &res, re.data(), im.data()) == N60_ROOMMODEL_NOT_MEASURED, "refused");
     CHECK(res.reason == N60_ROOMMODEL_REASON_OUTSIDE_TRUST, "reason outside trust");
     CHECK(res.neighboursUsed == 0, "none used");
-    CHECK(std::fabs(res.nearestDistanceM - 0.6) < 1e-9, "nearest 0.6");
+    CHECK(std::fabs(res.nearestDistanceM - 0.8) < 1e-9, "nearest 0.8");
     for (uint32_t b = 0; b < N60_ROOMMODEL_BAND_COUNT; ++b) CHECK(res.bandStatus[b] == N60_ROOMMODEL_BAND_REFUSED, "refused band");
     CHECK(re[100] == 0.0 && im[100] == 0.0, "output zeroed");
 
     // A custom larger radius accepts the same query.
-    q.trustRadiusM = 0.7;
+    q.trustRadiusM = 0.9;
     CHECK(n60_roommodel_interpolate(&q, g.nb.data(), &res, nullptr, nullptr) == N60_ROOMMODEL_OK, "wider radius accepted");
+
+    // The default radius is the cell diagonal: 0.70 m from a node is in range, 0.72 m is not.
+    q.trustRadiusM = 0;
+    const double inside[3] = {3.7, 2.5, 1.2}, beyond[3] = {3.72, 2.5, 1.2};
+    for (int i = 0; i < 3; ++i) q.query[i] = inside[i];
+    CHECK(n60_roommodel_interpolate(&q, g.nb.data(), &res, nullptr, nullptr) == N60_ROOMMODEL_OK, "0.70 m accepted");
+    for (int i = 0; i < 3; ++i) q.query[i] = beyond[i];
+    CHECK(n60_roommodel_interpolate(&q, g.nb.data(), &res, nullptr, nullptr) == N60_ROOMMODEL_NOT_MEASURED, "0.72 m refused");
+    // An explicit 0.5 m radius is honoured as given.
+    q.trustRadiusM = 0.5;
+    for (int i = 0; i < 3; ++i) q.query[i] = inside[i];
+    CHECK(n60_roommodel_interpolate(&q, g.nb.data(), &res, nullptr, nullptr) == N60_ROOMMODEL_NOT_MEASURED, "explicit 0.5 m refuses 0.70 m");
+    q.trustRadiusM = 0;
+    for (int i = 0; i < 3; ++i) q.query[i] = at[i];
 
     q.neighbourCount = 0;
     CHECK(n60_roommodel_interpolate(&q, g.nb.data(), &res, nullptr, nullptr) == N60_ROOMMODEL_NOT_MEASURED, "empty list");
     CHECK(res.reason == N60_ROOMMODEL_REASON_NO_NEIGHBOURS, "reason no neighbours");
+}
+
+// A sweep across the cell (and over its diagonal) moves the low-band response smoothly: no step between neighbouring
+// samples 0.025 m apart exceeds -19 dB relative to the response energy (measured -21.4 dB; the true response steps by about
+// -30 dB over the same distance and the old inverse-distance blend by about -5 dB).
+static void testContinuity() {
+    for (double rate : kRates) {
+        Grid g;
+        buildGrid(rate, g);
+        std::vector<double> prevRe, prevIm;
+        double worst = -300.0;
+        for (int step = 0; step <= 24; ++step) {
+            const double at[3] = {2.55 + 0.02 * step, 2.05 + 0.015 * step, 1.2};  // crosses the diagonal at the cell middle
+            n60_roommodel_query q = makeQuery(rate, at);
+            q.neighbourCount = static_cast<uint32_t>(g.nb.size());
+            const uint32_t bins = q.fftSize / 2 + 1;
+            std::vector<double> re(bins), im(bins);
+            n60_roommodel_result res = makeResult();
+            CHECK(n60_roommodel_interpolate(&q, g.nb.data(), &res, re.data(), im.data()) == N60_ROOMMODEL_OK, "sweep ok");
+            if (step > 0) {
+                double num = 0, den = 0;
+                for (uint32_t b = 1; b < bins; ++b) {
+                    const double f = rate * b / q.fftSize;
+                    if (f < 20.0 || f > 171.0) continue;
+                    num += (re[b] - prevRe[b]) * (re[b] - prevRe[b]) + (im[b] - prevIm[b]) * (im[b] - prevIm[b]);
+                    den += re[b] * re[b] + im[b] * im[b];
+                }
+                worst = std::max(worst, 10.0 * std::log10(num / den));
+            }
+            prevRe = re;
+            prevIm = im;
+        }
+        std::printf("rate %.0f: worst sweep step %.1f dB\n", rate, worst);
+        CHECK(worst <= -19.0, "no step jump above -19 dB across the cell");
+    }
+}
+
+// A zero-weight node must not refuse a band: a query on the edge between two nodes of one right triangle gives the third
+// node weight zero, and the third node's response is 20 dB lower. Inside the triangle the same node refuses the bands.
+static void testZeroWeightNodeDoesNotRefuse() {
+    std::vector<float> a(256, 0.0f), b(256, 0.0f), c(256, 0.0f);
+    a[10] = 1.0f;
+    b[10] = 1.0f;
+    c[10] = 0.1f;
+    n60_roommodel_neighbour nb[3] = {};
+    const float *irs[3] = {a.data(), b.data(), c.data()};
+    const double pos[3][3] = {{0, 0, 0}, {0.4, 0, 0}, {0, 0.4, 0}};
+    for (int i = 0; i < 3; ++i) {
+        for (int d = 0; d < 3; ++d) nb[i].position[d] = pos[i][d];
+        nb[i].ir = irs[i];
+        nb[i].irFrames = 256;
+        nb[i].phaseTrusted = 1;
+    }
+    n60_roommodel_query q{};
+    q.structSize = sizeof q;
+    q.fftSize = 4096;
+    q.sampleRate = 48000;
+    q.source[0] = -2.0;
+    q.neighbourCount = 3;
+    n60_roommodel_result res = makeResult();
+    q.query[0] = 0.2;  // mid-edge between nodes 0 and 1
+    CHECK(n60_roommodel_interpolate(&q, nb, &res, nullptr, nullptr) == N60_ROOMMODEL_OK, "edge query ok");
+    CHECK(res.neighboursUsed == 2, "zero-weight node dropped");
+    for (uint32_t k = 0; k < N60_ROOMMODEL_BAND_COUNT; ++k)
+        if (res.bandStatus[k] != N60_ROOMMODEL_BAND_UNAVAILABLE) CHECK(res.bandStatus[k] == N60_ROOMMODEL_BAND_OK, "no band refused by a zero-weight node");
+    q.query[0] = 0.1;
+    q.query[1] = 0.1;  // inside the triangle: the 20 dB node now counts
+    CHECK(n60_roommodel_interpolate(&q, nb, &res, nullptr, nullptr) == N60_ROOMMODEL_OK, "interior query ok");
+    CHECK(res.neighboursUsed == 3, "three nodes used inside");
+    CHECK(res.bandStatus[20] == N60_ROOMMODEL_BAND_SPREAD, "a node with weight does refuse");
+    // A refused band keeps its complex bins below f_c (status and zero confidence carry the refusal).
+    std::vector<double> re(q.fftSize / 2 + 1), im(q.fftSize / 2 + 1);
+    CHECK(n60_roommodel_interpolate(&q, nb, &res, re.data(), im.data()) == N60_ROOMMODEL_OK, "interior with arrays");
+    double mag = 0;
+    const size_t bin100 = static_cast<size_t>(100.0 / (48000.0 / q.fftSize));
+    mag = std::fabs(re[bin100]) + std::fabs(im[bin100]);
+    CHECK(res.bandStatus[18] == N60_ROOMMODEL_BAND_SPREAD && res.confidence[18] == 0.0 && mag > 0.0, "refused band keeps complex bins");
 }
 
 static void testDeterministic() {
@@ -226,7 +320,7 @@ static void testPhaseUntrustedIsMagnitudeOnly() {
     Grid g;
     buildGrid(rate, g);
     g.nb[4].phaseTrusted = 0;  // the centre node, always among the nearest
-    const double at[3] = {2.75, 2.25, 1.2};
+    const double at[3] = {2.6, 2.1, 1.2};  // inside the cell with the centre node (2.5, 2.0) at weight 0.6
     n60_roommodel_query q = makeQuery(rate, at);
     q.neighbourCount = static_cast<uint32_t>(g.nb.size());
     std::vector<double> re(q.fftSize / 2 + 1, 1.0), im(q.fftSize / 2 + 1, 1.0);
@@ -317,6 +411,8 @@ int main() {
     testArgumentsAndAbi();
     testRefusedOutsideTrust();
     testDeterministic();
+    testZeroWeightNodeDoesNotRefuse();
+    testContinuity();
     testPhaseUntrustedIsMagnitudeOnly();
     testSpreadRefusesBand();
     testHeldOutPoints();
