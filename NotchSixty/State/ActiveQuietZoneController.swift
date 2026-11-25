@@ -114,6 +114,30 @@ final class ActiveQuietZoneController: ObservableObject {
     private var doNoHarm = DoNoHarmVerifier()
     /// E4 S17: the last 60 s of safety events, in plain language. Text only, no audio.
     private(set) var flightRecorder = SafetyFlightRecorder()
+
+    /// E12 S20: arm and disarm in plain words, for the session event history. Control plane only.
+    var onSessionEvent: (@MainActor (String) -> Void)?
+
+    /// E12 S20: hold-to-compare. While true the canceller's output is faded out through the same runtime-target
+    /// clear the disarm uses, and the arm, the safeguards and the arm token are untouched. Never persisted.
+    @Published private(set) var compareHeld = false
+    private var comparePaused = false
+
+    /// True when a compare can start: armed, running and not in a fault. The reason is shown when it cannot.
+    var compareUnavailableReason: String? {
+        if !arm.isArmed { return "Turn Quiet Zone on to compare." }
+        if faultLatched { return "Quiet Zone is stopped by a safety check." }
+        return nil
+    }
+
+    func setCompareHeld(_ held: Bool) {
+        if held {
+            guard compareUnavailableReason == nil else { return }
+            compareHeld = true
+        } else {
+            compareHeld = false
+        }
+    }
     /// E4 S18b (`e4.adaptive-tonal-live`): the adaptive tonal canceller's control plane. Nil with
     /// the flag off, in which case nothing below runs and the controller behaves as before.
     private(set) var adaptiveLive: AdaptiveTonalLiveCoordinator?
@@ -990,6 +1014,7 @@ final class ActiveQuietZoneController: ObservableObject {
             engine.rearmHowlGuard()
             try arm.arm(environment: liveTreatmentEnvironment())
             flightRecorder.recordArm()
+            onSessionEvent?("Quiet Zone armed.")
             armedGeneration = engine.liveTreatmentGeneration
             adaptiveLive?.reset()
             beginSubSafety()
@@ -1108,6 +1133,11 @@ final class ActiveQuietZoneController: ObservableObject {
     private func applyDisarm(_ reason: LiveTreatmentDisarmReason) {
         overnightPower?.release()
         flightRecorder.recordDisarm(reason)
+        onSessionEvent?(reason == .instabilityTrip || reason == .seatRegression || reason == .treatmentFault
+            ? "Quiet Zone safety check tripped: \(SafetyFlightRecorder.explanation(for: reason))"
+            : "Quiet Zone turned off: \(SafetyFlightRecorder.explanation(for: reason))")
+        compareHeld = false
+        comparePaused = false
         adaptiveLive?.reset()
         earnedCap?.noteDisarm(reason)
         engine.earnedCapInitialLinear = 0
@@ -1188,6 +1218,8 @@ final class ActiveQuietZoneController: ObservableObject {
     }
 
     func stop(fadeMilliseconds: Double? = nil) {
+        compareHeld = false
+        comparePaused = false
         overnightPower?.release()
         // E4 S25: feed-forward live output never outlives the Quiet Zone session.
         feedForwardArming?.quietZoneStopped()
@@ -1221,6 +1253,20 @@ final class ActiveQuietZoneController: ObservableObject {
             guard arm.isArmed, configuration.enabled else { return }
             feedForwardArming?.poll(quietZone: feedForwardLiveFacts())
             guard !faultLatched else { return }
+
+            // E12 S20: while a compare is held the output is faded out and nothing else runs; on release the
+            // canceller restarts its observation, which ramps back in exactly as after a fresh arm.
+            if compareHeld {
+                if !comparePaused {
+                    try? engine.clearActiveQuietZoneRuntimeTarget(fadeMilliseconds: configuration.faultFadeMilliseconds)
+                    comparePaused = true
+                }
+                return
+            }
+            if comparePaused {
+                comparePaused = false
+                resetRuntimeState()
+            }
 
             guard engine.lifecycleState == .running,
                   engine.activeQuietZoneRuntimeAvailable else {

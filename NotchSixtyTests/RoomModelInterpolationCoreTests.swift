@@ -69,6 +69,25 @@ final class RoomModelInterpolationCoreTests: XCTestCase {
         }
     }
 
+    /// The default trust radius is at least 1.42 x the node spacing (the cell diagonal) and the edge midpoint of a pair
+    /// drops the zero-weight third node (domain version 2).
+    func testDefaultTrustRadiusFollowsNodeSpacing() {
+        let h = ir(rate: 48_000, position: [0, 0, 0], gain: 0)
+        h.withUnsafeBufferPointer { buf in
+            var nb = [
+                n60_roommodel_neighbour(position: (0.5, 1.0, 1.2), ir: buf.baseAddress, irFrames: UInt32(buf.count),
+                                        phaseTrusted: 1, repeatScatterDb: 0),
+                n60_roommodel_neighbour(position: (1.0, 1.0, 1.2), ir: buf.baseAddress, irFrames: UInt32(buf.count),
+                                        phaseTrusted: 1, repeatScatterDb: 0),
+            ]
+            var r = result()
+            var q = query(rate: 48_000, at: [1.69, 1.0, 1.2], count: 2)  // 0.69 m from the nearer node, spacing 0.5 m
+            XCTAssertEqual(n60_roommodel_interpolate(&q, &nb, &r, nil, nil), Int32(N60_ROOMMODEL_OK))
+            q = query(rate: 48_000, at: [1.72, 1.0, 1.2], count: 2)  // 0.72 m: beyond 1.42 x 0.5
+            XCTAssertEqual(n60_roommodel_interpolate(&q, &nb, &r, nil, nil), Int32(N60_ROOMMODEL_NOT_MEASURED))
+        }
+    }
+
     func testBadArgumentsAreRefusedNotCrashed() {
         var q = query(rate: 48_000, at: [0, 0, 0], count: 0)
         var r = result()
