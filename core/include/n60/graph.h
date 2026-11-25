@@ -34,7 +34,7 @@ extern "C" {
 #endif
 
 /* Bumped on any incompatible change to a struct or function below. */
-#define N60_GRAPH_ABI_VERSION 48u
+#define N60_GRAPH_ABI_VERSION 49u
 
 typedef struct n60_graph n60_graph; /* opaque */
 
@@ -131,8 +131,19 @@ typedef enum n60_stage_kind {
     /* ABI v33 (E19 S4). MIMO room treatment: see "MIMO treatment" below. */
     N60_STAGE_MIMO = 52,             /* position 13.5: after BASS_MGMT and STEREO_CROSSOVER, before ROOM_FIR. Lane mask of 1..8 source lanes. */
     /* ABI v40 (E19 S10). MIMO treatment on a routed graph: position 23.55, after ROUTE, before XOVER. See "MIMO treatment, routed". */
-    N60_STAGE_MIMO_ROUTED = 53
+    N60_STAGE_MIMO_ROUTED = 53,
+    /* ABI v49 (E8 S13). Long-term power limit: a slow RMS limiter per lane, the thermal guard of one driver. See "Thermal limit" below. */
+    N60_STAGE_THERMAL_LIMIT = 54     /* position 26.5: after ANC_INJECT, before PROTECTION. laneA or laneMask (each lane keeps its own state). */
 } n60_stage_kind;
+
+/* Thermal limit (ABI v49, E8 S13). A slow RMS limiter for one lane: the guard against a driver's voice coil heating up
+ * over seconds, as opposed to PROTECTION's peak limiter. params: [0] level dBFS (-60..0, live): the RMS the lane may
+ * sustain, [1] time constant ms (100..30000, live): the one-pole mean-square window. paramCount 2. Feed-forward: the gain is
+ * min(1, level / rms) with rms read from the lane's own input mean square, so below the level the stage is exactly
+ * transparent (gain 1.0) and a sustained tone or noise above it settles at the level. The window is the thermal mass, so a
+ * burst shorter than the time constant passes. State (two doubles, 16 bytes per lane: the mean square and the smoothed level) starts at the level squared, so a new
+ * snapshot never opens a window of unlimited level; it is zeroed at build and not carried across a rebuild. No latency, no
+ * allocation; any sample rate; lanes 0..7 (a lane mask names up to 8); each lane of a mask has its own state. A non-finite input sample counts as the level and is passed unchanged. The mean square ripples at twice the signal frequency, so a very low tone (20 Hz) with the shortest time constant gets a gain ripple of a few tenths of a dB; use seconds for a woofer. A lane with no stage is unlimited. */
 
 /* Delta audition (ABI v30, E6 S12h part 2b; lane masks and fractional alignment in ABI v31, part 3). The stereo kernel's
  * delta mode: what the chain changed, output minus the input aligned to the output's latency. N60_STAGE_DELTA_CAPTURE

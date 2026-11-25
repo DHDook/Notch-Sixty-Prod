@@ -434,6 +434,11 @@ add_executable(n60core_lane_delay_test tests/test_lane_delay.cpp)
 target_link_libraries(n60core_lane_delay_test PRIVATE n60core)
 add_test(NAME n60core_lane_delay COMMAND n60core_lane_delay_test)
 
+# E8 S13: the long-term power limit (ABI v49).
+add_executable(n60core_thermal_limit_test tests/test_thermal_limit.cpp)
+target_link_libraries(n60core_thermal_limit_test PRIVATE n60core)
+add_test(NAME n60core_thermal_limit COMMAND n60core_thermal_limit_test)
+
 # E7 S1: capacities in time (20 ms delay, 500 ms split fractional delay, 20 ms look-ahead at 4x) at the eight rates.
 add_executable(n60core_rate_capacity_test tests/test_rate_capacity.cpp)
 target_link_libraries(n60core_rate_capacity_test PRIVATE n60core)

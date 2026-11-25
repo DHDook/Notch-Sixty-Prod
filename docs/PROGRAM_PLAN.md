@@ -266,7 +266,7 @@ Gate G2 passed on 2026-10-25 (commit 07e82c6)
 - [x] Migrate existing bi/tri-amp profiles automatically
 - [x] Stereo crossover with subwoofer lanes (E8 S11 merged #431; S11b `e8/crossover-subs-nchannel` wires it into the N-channel session, PR #464; G2, G3, E6 G32 closed there; G4 bench wiring checks open in E22)
 - [ ] S12 `e8/driver-roles` (owner, 16 Nov 2026; owns G5): driver role per way; a tweeter or midrange way without a safe high-pass is an error, live edits included
-- [ ] S13 `e8/per-driver-protection` (owns G6): per-way limiter on by default with controls, cumulative boost guard, optional long-term power limit
+- [~] S13 `e8/per-driver-protection` (owns G6): per-way limiter on by default with controls, cumulative boost guard, optional long-term power limit. Built behind `e8.active-commissioning` (PR pending); wiring to the shipped UI and the compiler is S16 (G13–G17), which graduates the flag
 - [ ] S14 `e8/commissioning-aids` (owns G7): mute, solo and identify per way; safe first start confirms each driver before programme audio
 - [ ] S15 `e8/measured-alignment` (owns G8): delay, polarity and level from driver measurements, predicted and verified acoustic sum, one accept step
 - [ ] S16 `e8/way-filters-and-clock-check` (owns G9–G11): Linkwitz transform and FIR import per way, two-device clock warning, low-latency fallback notice, 4-way template; graduates `e8.active-commissioning`

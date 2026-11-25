@@ -41,6 +41,21 @@ if selected e8_xover_core; then
     fi
 fi
 
+# E8 S13: the long-term power limit (THERMAL_LIMIT, ABI v49) at the eight standard rates.
+if selected e8_thermal_limit; then
+    build_core_objs
+    if [ "$CORE_OK" = 1 ]; then
+        if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -Icore/include -Icore/src core/tests/test_thermal_limit.cpp \
+            "${CORE_OBJS[@]}" -o "$OUT/e8_core_thermal_limit" && run_timed "$OUT/e8_core_thermal_limit"; then
+            passed+=(e8_core_thermal_limit)
+        else
+            failed+=(e8_core_thermal_limit)
+        fi
+    else
+        failed+=(e8_thermal_limit)
+    fi
+fi
+
 # E8 S7: linear-phase FIR crossovers and the DRIVER_FIR stages (ABI v18), at the eight standard rates.
 if selected e8_xover_fir_core; then
     build_core_objs

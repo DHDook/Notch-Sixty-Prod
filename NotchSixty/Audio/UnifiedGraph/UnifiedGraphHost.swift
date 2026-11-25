@@ -734,6 +734,21 @@ final class UnifiedGraphHost: @unchecked Sendable {
         return out
     }
 
+    /// E8 S13: the gain reduction (dB, read and reset in the core) of each routed way's limiter, by graph output lane. Empty
+    /// when the graph is not routed or no way has a limiter. Control plane.
+    func routedWayGainReductions() -> [Int: Float] {
+        lock.lock(); defer { lock.unlock() }
+        guard let graph else { return [:] }
+        var out: [Int: Float] = [:]
+        let base = UnifiedGraphConfiguration.outputProtectionStageBase
+        for stage in spec.stages where stage.kind == N60_STAGE_PROTECTION.rawValue
+            && stage.stageId >= base && stage.stageId < UnifiedGraphConfiguration.driverFIRStageBase {
+            let lane = Int(stage.stageId - base)
+            if let reading = dynamicsReading(graph, stageId: stage.stageId, lane: UInt32(lane)) { out[lane] = reading.grMaxDb }
+        }
+        return out
+    }
+
     var latencyFrames: UInt32 {
         lock.lock(); defer { lock.unlock() }
         guard let graph else { return 0 }
