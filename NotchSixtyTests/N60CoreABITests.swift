@@ -21,6 +21,8 @@ final class N60CoreABITests: XCTestCase {
         XCTAssertEqual(info.ancVersion, UInt32(N60_ANC_ABI_VERSION))
         XCTAssertEqual(info.roomModelVersion, UInt32(N60_ROOMMODEL_ABI_VERSION))
         XCTAssertEqual(Int(info.roomModelQuerySize), MemoryLayout<n60_roommodel_query>.size)
+        XCTAssertEqual(info.upmixVersion, UInt32(N60_UPMIX_ABI_VERSION))
+        XCTAssertEqual(Int(info.upmixConfigSize), MemoryLayout<n60_upmix_config>.size)
         // The library's compiled struct sizes match what Swift imported from the same headers.
         XCTAssertEqual(Int(info.graphDescSize), MemoryLayout<n60_graph_desc>.size)
         XCTAssertEqual(Int(info.stageDescSize), MemoryLayout<n60_stage_desc>.size)
