@@ -242,6 +242,21 @@ final class MIMOTreatmentControllerTests: XCTestCase {
         XCTAssertEqual(controller.armStateLabel, "Off")
     }
 
+    /// E12 S20: arm and bypass are written to the event history in plain words.
+    func testArmAndBypassAreReportedAsPlainSentences() async throws {
+        let (controller, host) = try rig()
+        var sentences: [String] = []
+        controller.onSessionEvent = { sentences.append($0) }
+        await controller.design()
+        let stage = try XCTUnwrap(host.treatment.stage)
+        host.treatment.setPermit(.init(fingerprint: host.treatment.currentFingerprint(stage, host.context)))
+        controller.refreshReadout()
+        XCTAssertTrue(sentences.isEmpty, "a permit alone is not an event")
+        await controller.arm()
+        controller.bypass()
+        XCTAssertEqual(sentences, ["Room Treatment armed.", "You bypassed Room Treatment."])
+    }
+
     func testArmRefusalFromAGateIsShownByName() async throws {
         let (controller, host) = try rig()
         await controller.design()

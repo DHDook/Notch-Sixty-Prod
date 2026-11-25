@@ -241,6 +241,7 @@ final class ProductController: ObservableObject {
             mimo: mimoTreatment)
         self.outputFollow = follow.coordinator
         outputFollowObservers = follow.observers
+        ActiveAcousticsEventWiring.attach(quietZone: activeQuietZone, treatment: mimoTreatment, flags: FeatureFlags())
         observeAudioEngine()
         observeTermination()
         // The explicitly selected output is authoritative across launches,
@@ -381,6 +382,7 @@ final class ProductController: ObservableObject {
             mimo: mimoTreatment)
         self.outputFollow = follow.coordinator
         outputFollowObservers = follow.observers
+        ActiveAcousticsEventWiring.attach(quietZone: activeQuietZone, treatment: mimoTreatment, flags: FeatureFlags())
         observeAudioEngine()
     }
 
