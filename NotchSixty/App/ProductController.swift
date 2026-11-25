@@ -94,6 +94,9 @@ final class ProductController: ObservableObject {
     /// E15 S3: Follow macOS output (dark behind `e15.follow-output`; the listener is installed only in follow mode).
     let outputFollow: OutputFollowCoordinator
     private var outputFollowObservers: [AnyObject] = []
+    /// E15 S7: time-of-day schedule; nil unless `e15.follow-output` is on at launch.
+    private(set) var scheduler: ProfileScheduler?
+    private var schedulerObservers: [AnyObject] = []
     /// E36 S5: the Settings audio input path (tap or virtual driver), owned here so Quit can restore the system output.
     let audioInputPath = AudioInputPathModel.production(openURL: { NSWorkspace.shared.open($0) })
     private var calibrationObservation: AnyCancellable?
@@ -241,6 +244,7 @@ final class ProductController: ObservableObject {
             mimo: mimoTreatment)
         self.outputFollow = follow.coordinator
         outputFollowObservers = follow.observers
+        installScheduler()
         observeAudioEngine()
         observeTermination()
         // The explicitly selected output is authoritative across launches,
@@ -381,6 +385,7 @@ final class ProductController: ObservableObject {
             mimo: mimoTreatment)
         self.outputFollow = follow.coordinator
         outputFollowObservers = follow.observers
+        installScheduler()
         observeAudioEngine()
     }
 
@@ -401,6 +406,18 @@ final class ProductController: ObservableObject {
         )
     }
 
+    /// E15 S7: builds the schedule (flag off builds nothing). Content presets only, through `selectContentPreset`.
+    private func installScheduler() {
+        let host = ProductScheduleHost(profiles: profiles)
+        host.select = { [weak self] id in try await self?.selectContentPreset(id) }
+        guard let built = ProfileSchedulerWiring.make(
+            flagEnabled: FeatureFlags().isEnabled(.followOutput), engine: audioEngine, profiles: profiles,
+            recovery: recovery, calibration: calibration, multichannel: multichannelCalibration, host: host)
+        else { return }
+        scheduler = built.scheduler
+        schedulerObservers = built.observers + [host]
+    }
+
     func prepareForUse() {
         audioInputPath.engineSwitcher?.attach(audioEngine)
         recovery.prepareForLaunch()
@@ -416,6 +433,7 @@ final class ProductController: ObservableObject {
         activeQuietZone.prepareForUse()
         hardwareAcceptance.prepareForUse()
         outputFollow.reconcile()
+        if let scheduler { Task { @MainActor in await scheduler.handle(.launch) } }
         if FeatureFlags().isEnabled(.virtualDriver) {
             audioInputPath.coordinator?.recoverAfterCrash()
             audioInputPath.startMonitoring()

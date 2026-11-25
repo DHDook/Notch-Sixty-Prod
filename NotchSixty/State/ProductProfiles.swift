@@ -721,6 +721,8 @@ struct ProductProfileBackupSnapshot: Codable, Equatable, Sendable {
         [PlaybackSystemHardwareMappingRequirement] = []
     /// E15 S1: output-to-system bindings. Optional so older backups decode.
     var outputBindings: OutputProfileBindings?
+    /// E15 S7: the time-of-day schedule (nil before it, so older backups decode).
+    var schedule: ProfileSchedule?
 
     func validate() throws {
         guard schemaVersion == Self.currentSchemaVersion else {
@@ -862,6 +864,8 @@ final class ProductProfileController: ObservableObject {
         var factoryRefreshRevision: Int?
         /// E15 S1: output-to-system bindings for Follow macOS output (nil before it, so older archives decode).
         var outputBindings: OutputProfileBindings?
+        /// E15 S7: the time-of-day schedule (nil before it, so older archives decode).
+        var schedule: ProfileSchedule?
     }
 
     /// Bump when a factory preset changes and `refreshFactoryContentPresets` handles the change.
@@ -1228,6 +1232,8 @@ final class ProductProfileController: ObservableObject {
         [PlaybackSystemHardwareMappingRequirement] = []
     /// E15 S1: which Playback System each output endpoint recalls. Inert until Follow macOS output is on (S3).
     @Published private(set) var outputBindings = OutputProfileBindings()
+    /// E15 S7: content presets by time of day. Inert unless `ProfileScheduler` exists (behind `e15.follow-output`).
+    @Published private(set) var schedule = ProfileSchedule()
     /// E15 S3: true while Follow macOS output is on, so picking a Playback System never moves the output (the output
     /// follows macOS; the profile is applied to whatever is selected).
     var ignoresAssociatedOutput: () -> Bool = { false }
@@ -1567,6 +1573,7 @@ final class ProductProfileController: ObservableObject {
         guard let selectedContentPresetID,
               selectedContentPreset != nil else { return }
         userContentPresets.removeAll { $0.id == selectedContentPresetID }
+        schedule.removeReferences(presetID: selectedContentPresetID)
         if let fallback = userContentPresets.first {
             self.selectedContentPresetID = fallback.id
             try? applyContentState(fallback.state)
@@ -1663,6 +1670,17 @@ final class ProductProfileController: ObservableObject {
         outputBindings.bind(key, to: selectedSystemProfileID)
         lastErrorDescription = nil
         persist()
+    }
+
+    /// E15 S7: replaces the schedule. `ProfileScheduler` is the only caller; it applies the Q5 rule first.
+    func setSchedule(_ newValue: ProfileSchedule) {
+        guard newValue != schedule else { return }
+        schedule = newValue
+        persist()
+    }
+
+    private func pruneSchedule(presetIDs: Set<UUID>, systemIDs: Set<UUID>) {
+        schedule = schedule.pruned(validPresetIDs: presetIDs, validSystemIDs: systemIDs)
     }
 
     func unbindOutput(_ key: OutputKey) {
@@ -2035,6 +2053,7 @@ final class ProductProfileController: ObservableObject {
             $0.systemProfileID == selectedSystemProfileID
         }
         outputBindings.removeProfile(selectedSystemProfileID)
+        schedule.removeReferences(systemID: selectedSystemProfileID)
         self.selectedSystemProfileID = systemProfiles.first?.id
         ensureDefaultSystemProfile()
         persist()
@@ -2342,7 +2361,8 @@ final class ProductProfileController: ObservableObject {
             selectedContentPresetID: selectedContentPresetID,
             selectedSystemProfileID: selectedSystemProfileID,
             hardwareMappingRequirements: hardwareMappingRequirements,
-            outputBindings: outputBindings.isEmpty && !outputBindings.seeded ? nil : outputBindings
+            outputBindings: outputBindings.isEmpty && !outputBindings.seeded ? nil : outputBindings,
+            schedule: schedule.isDefault ? nil : schedule
         )
     }
 
@@ -2372,12 +2392,16 @@ final class ProductProfileController: ObservableObject {
         let previousSystemID = selectedSystemProfileID
         let previousRequirements = hardwareMappingRequirements
         let previousBindings = outputBindings
+        let previousSchedule = schedule
 
         do {
             outputBindings = (snapshot.outputBindings ?? OutputProfileBindings())
                 .pruned(validProfileIDs: Set(snapshot.systemProfiles.map(\.id)))
             userContentPresets = snapshot.contentPresets
             systemProfiles = snapshot.systemProfiles
+            schedule = (snapshot.schedule ?? ProfileSchedule()).pruned(
+                validPresetIDs: Set(snapshot.contentPresets.map(\.id)),
+                validSystemIDs: Set(snapshot.systemProfiles.map(\.id)))
 
             if recomputeHardwareRequirements {
                 let available = availableOutputUIDs
@@ -2443,6 +2467,7 @@ final class ProductProfileController: ObservableObject {
             selectedSystemProfileID = previousSystemID
             hardwareMappingRequirements = previousRequirements
             outputBindings = previousBindings
+            schedule = previousSchedule
             try? persistThrowing()
             throw error
         }
@@ -2616,6 +2641,10 @@ final class ProductProfileController: ObservableObject {
             }
             outputBindings = (archive.outputBindings ?? OutputProfileBindings())
                 .pruned(validProfileIDs: Set(systemProfiles.map(\.id)))
+            schedule = archive.schedule ?? ProfileSchedule()
+            pruneSchedule(
+                presetIDs: Set(userContentPresets.map(\.id)),
+                systemIDs: Set(systemProfiles.map(\.id)))
             didLoadArchive = true
             if archive.schemaVersion < Archive.currentSchemaVersion {
                 persist()
@@ -2647,7 +2676,8 @@ final class ProductProfileController: ObservableObject {
             hardwareMappingRequirements:
                 hardwareMappingRequirements,
             factoryRefreshRevision: Self.factoryRefreshRevision,
-            outputBindings: outputBindings.isEmpty && !outputBindings.seeded ? nil : outputBindings
+            outputBindings: outputBindings.isEmpty && !outputBindings.seeded ? nil : outputBindings,
+            schedule: schedule.isDefault ? nil : schedule
         )
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
