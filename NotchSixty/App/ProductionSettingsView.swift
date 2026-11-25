@@ -170,6 +170,7 @@ struct ProductionSettingsView: View {
                     volumeCard
                     presenceCard
                     presetsCard
+                    schedulesCard
                     startupCard
                     permissionsCard
                     backupCard
@@ -212,6 +213,7 @@ struct ProductionSettingsView: View {
                         presenceCard
                         startupCard
                         presetsCard
+                        schedulesCard
                         displaysCard
                         if featureFlags.isEnabled(.virtualDriver) {
                             AudioInputPathSettingsSection(model: product.audioInputPath)
@@ -385,6 +387,14 @@ struct ProductionSettingsView: View {
             Text("Adds A/B buttons beside the preset menu so you can store two sounds and switch between them. While a comparison is running the buttons stay visible until you finish it.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+        }
+    }
+
+    /// E15 S7: only while `e15.follow-output` is on, and only when the scheduler was built.
+    @ViewBuilder
+    private var schedulesCard: some View {
+        if featureFlags.isEnabled(.followOutput), let scheduler = product.scheduler {
+            ProfileScheduleCard(scheduler: scheduler, profiles: product.profiles)
         }
     }
 

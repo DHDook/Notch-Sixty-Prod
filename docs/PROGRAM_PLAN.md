@@ -546,7 +546,7 @@ Plan: `docs/epics/E15.md` (awaiting owner approval; flag `e15.follow-output`).
 - [ ] Keep today's fixed-output policy as the default
 - [ ] S5 `e15/source-rate-investigation` (owner, 11 Nov 2026): one investigation slice on following the source sample rate through the process tap; record the finding either way, and build it only if the finding supports it
 - [ ] S6 `e15/connection-and-wireless-defaults` (owner, 11 Nov 2026): the bound profile switches when headphones or another DAC connect (confirm what S1–S3b already cover and add the rest); Bluetooth and AirPlay outputs get sensible defaults (latency, rate, no long FIR)
-- [ ] S7 `e15/schedules` (owner, 11 Nov 2026): switch profile or night mode by time of day
+- [x] S7 `e15/schedules` (owner, 11 Nov 2026): switch profile or night mode by time of day (content presets built; the night-mode action waits for E30, G13)
 - [ ] S4 `e15/ship` (runs after S5–S7) graduates `e15.follow-output` (default on; the mode still defaults to fixed; removal is the FC phase)
 
 ### E16 Automation and remote

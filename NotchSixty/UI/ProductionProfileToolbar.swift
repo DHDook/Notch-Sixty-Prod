@@ -107,6 +107,7 @@ struct ProductionProfileToolbar: View {
         }
         .fixedSize(horizontal: true, vertical: false)
         .modifier(OutputFollowPresentation(follow: product.outputFollow))
+        .modifier(ScheduleNoticePresentation(scheduler: product.scheduler))
         .alert(
             editorPrompt?.title ?? "Edit",
             isPresented: Binding(
