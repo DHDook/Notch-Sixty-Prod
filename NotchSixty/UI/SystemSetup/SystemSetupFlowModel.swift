@@ -746,6 +746,26 @@ final class SystemSetupFlowModel: ObservableObject {
             overrideHz: flow.choices.correctionLimitOverrideHz)
     }
 
+    /// E12 S8 (G88): with the modes flag on, the graphs' detail follows the mode (simple: one curve per line of the
+    /// story; expert: per seat). With it off the setup flow's own switch is untouched.
+    func applyInterfaceMode(_ mode: InterfaceMode, modesEnabled: Bool) {
+        guard modesEnabled else { return }
+        graphDetail = mode.graphDetail
+    }
+
+    /// E12 S8 (G86): the expert control for the no-calibration-file limit. Values outside 60 to 1,000 Hz are clamped;
+    /// nil goes back to the 300 Hz default.
+    func setCorrectionLimitOverride(_ hz: Double?) {
+        if let hz, hz.isFinite {
+            let range = SystemSetupCorrectionLimit.overrideRangeHz
+            flow.choices.correctionLimitOverrideHz = min(range.upperBound, max(range.lowerBound, hz))
+        } else {
+            flow.choices.correctionLimitOverrideHz = nil
+        }
+        correctionIsPrepared = false
+        persistSession()
+    }
+
     private func syncMeasurementChoices() {
         var choices = flow.choices
         measureProgress.apply(to: &choices)

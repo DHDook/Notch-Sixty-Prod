@@ -290,6 +290,8 @@ struct ProductionRootView: View {
     #if DEBUG
     @Environment(\.openWindow) private var openWindow
     #endif
+    /// E12 S8: simple or expert; always expert while `e12.simple-expert-modes` is off.
+    @AppStorage(PreferenceKeys.Application.interfaceMode) private var storedInterfaceMode = InterfaceMode.simple.rawValue
     @State private var commandError: String?
     @State private var showingGuidedSetup = false
     @State private var guidedSetupPreset = SystemSetupPreset.full
@@ -302,6 +304,10 @@ struct ProductionRootView: View {
     private var engine: AudioIOEngine { product.audioEngine }
 
     private var selection: ProductionSection? { navigation.selection }
+
+    private var interfaceMode: InterfaceMode {
+        InterfaceMode.effective(stored: storedInterfaceMode, flagEnabled: FeatureFlags().isEnabled(.simpleExpertModes))
+    }
 
     private var sidebarSelection: Binding<ProductionSection?> {
         Binding(
@@ -365,10 +371,10 @@ struct ProductionRootView: View {
                 )
                 .tag(ProductionSection.dashboard)
 
-                ForEach(ProductionSection.sidebarGroups(
+                ForEach(interfaceMode.filtered(ProductionSection.sidebarGroups(
                     selection: selection,
                     designLanguage: FeatureFlags().isEnabled(.designLanguage)
-                )) { group in
+                ))) { group in
                     Section(group.title) {
                         ForEach(group.sections) { section in
                             Label(section.sidebarTitle(designLanguage: FeatureFlags().isEnabled(.designLanguage)), systemImage: section.systemImage)
@@ -387,6 +393,14 @@ struct ProductionRootView: View {
                 .toolbar { toolbar }
         }
         .frame(minWidth: minimumWindowWidth, minHeight: 680)
+        .environment(\.interfaceMode, interfaceMode)
+        .onChange(of: interfaceMode, initial: true) { _, mode in
+            // A page the new mode hides gives way to the Dashboard. Developer tools are opened on purpose and stay.
+            if let current = navigation.selection, !ProductionSection.developerTools.contains(current),
+               let landing = mode.landing(for: current), landing != current {
+                navigation.navigate(to: landing)
+            }
+        }
         .task {
             // E9 S8 (G28): a Core Audio listener keeps the default output current; the read runs off the main thread.
             defaultOutput.start()
