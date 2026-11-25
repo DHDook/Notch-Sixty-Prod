@@ -11,6 +11,9 @@ struct ProductionSettingsView: View {
     @State private var backupMessage: String?
     @State private var selectedTab: SettingsTab = .general
     @State private var displayResetMessage: String?
+    @StateObject private var permissionStatus = PermissionStatusModel()
+    @AppStorage(PreferenceKeys.Application.resumeProcessingOnOpen)
+    private var resumeProcessingOnOpen = false
 
     private var version: String {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—"
@@ -406,13 +409,71 @@ struct ProductionSettingsView: View {
                     .textSelection(.enabled)
             }
 
-            Text("Opening Notch Sixty at login does not start audio. You press Start yourself.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            if featureFlags.isEnabled(.settingsPage) {
+                Divider()
+                Toggle("Resume processing when Notch Sixty opens", isOn: $resumeProcessingOnOpen)
+                Text("If processing was running when you last quit Notch Sixty, start it again when the app opens, with the normal fade-in. It starts only if the same output device is connected, and not after a crash or force-quit. It never turns on Quiet Zone or room treatment; you arm those yourself.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                Text("Opening Notch Sixty at login does not start audio. You press Start yourself.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
     }
 
     private var permissionsCard: some View {
+        if featureFlags.isEnabled(.settingsPage) { return AnyView(permissionStatusCard) }
+        return AnyView(legacyPermissionsCard)
+    }
+
+    /// E12 S24 (G35): each permission with its status and a button to the right System Settings pane.
+    private var permissionStatusCard: some View {
+        settingsCard(title: "Permissions", systemImage: "lock.shield") {
+            ForEach(PermissionKind.allCases) { kind in
+                ViewThatFits(in: .horizontal) {
+                    HStack(alignment: .firstTextBaseline, spacing: 10) {
+                        permissionText(kind)
+                        Spacer(minLength: 8)
+                        permissionControls(kind)
+                    }
+                    VStack(alignment: .leading, spacing: 6) {
+                        permissionText(kind)
+                        HStack(spacing: 10) { permissionControls(kind) }
+                    }
+                }
+            }
+            Text("If processing starts but you hear nothing after saying no to the System Audio permission, allow Notch Sixty in System Settings under Privacy & Security, then reopen the app.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            permissionStatus.refresh()
+        }
+        .onAppear {
+            product.resume.noteProcessingRan(target: product)
+            permissionStatus.refresh()
+        }
+    }
+
+    private func permissionText(_ kind: PermissionKind) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(kind.title).font(.subheadline.weight(.medium))
+            Text(kind.explanation).font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
+    @ViewBuilder
+    private func permissionControls(_ kind: PermissionKind) -> some View {
+        Text(permissionStatus.state(kind).label)
+            .foregroundStyle(.secondary)
+            .accessibilityIdentifier("settings.permission.\(kind.rawValue).status")
+        Button("Open System Settings") { permissionStatus.openSystemSettings(for: kind) }
+            .buttonStyle(.glass)
+    }
+
+    private var legacyPermissionsCard: some View {
         settingsCard(title: "Permissions", systemImage: "lock.shield") {
             VStack(alignment: .leading, spacing: 4) {
                 Text("System Audio")

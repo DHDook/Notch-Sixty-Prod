@@ -17,7 +17,7 @@ final class PageContainerFitTests: XCTestCase {
         return [
             ("Dashboard", AnyView(ProductionDashboardView(engine: engine))),
             ("Status dashboard", AnyView(ProductionStatusDashboardView(
-                engine: engine, profiles: product.profiles, navigation: ProductionNavigation(), failsafeMessage: nil))),
+                engine: engine, profiles: product.profiles, navigation: ProductionNavigation(), failsafeMessage: nil, resume: product.resume))),
             ("Meters", AnyView(ProductionMetersView(engine: engine, assistant: product.headroomAssistant))),
             ("Headphones", AnyView(ProductionHeadphoneWorkspace(
                 engine: engine, profiles: product.profiles, calibration: product.multichannelCalibration))),

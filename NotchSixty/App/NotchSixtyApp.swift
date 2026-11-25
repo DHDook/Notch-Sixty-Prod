@@ -137,6 +137,7 @@ struct NotchSixtyApp: App {
                 .task {
                     product.prepareForUse()
                     preferences.apply(to: product.audioEngine)
+                    await product.resumeProcessingIfNeeded()
                 }
         }
         .defaultSize(width: 1180, height: 780)

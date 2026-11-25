@@ -67,6 +67,8 @@ final class ProductController: ObservableObject {
     nonisolated let objectWillChange = ObservableObjectPublisher()
 
     let audioEngine: AudioIOEngine
+    /// E12 S24: resume processing on open (Swift only; behind `e12.settings-page`).
+    let resume = ResumeProcessingCoordinator()
     let audioUnitHost: AudioUnitHostController
     let profiles: ProductProfileController
     let abComparison: ContentABComparisonController
@@ -626,6 +628,8 @@ final class ProductController: ObservableObject {
         ambientCompensation.stopMonitoring()
         multichannelCalibration.cancelMeasurement()
         calibration.cancelMeasurement()
+        resume.noteProcessingRan(target: self)
+        resume.recordCleanQuit(target: self)
         audioEngine.shutdownForTermination()
         audioInputPath.coordinator?.shutdownForTermination()
         audioInputPath.stopMonitoring()

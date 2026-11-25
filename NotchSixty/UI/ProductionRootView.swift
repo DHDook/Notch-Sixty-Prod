@@ -515,6 +515,7 @@ struct ProductionRootView: View {
                 ProductionStatusDashboardView(
                     engine: engine, profiles: product.profiles, navigation: navigation,
                     failsafeMessage: ActiveSpeakerFailsafe.message(failsafeVerdict, launch: true),
+                    resume: product.resume,
                     entryCard: setupEntryCard)
             } else {
                 ProductionDashboardView(engine: engine, entryCard: setupEntryCard)
