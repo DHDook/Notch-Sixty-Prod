@@ -81,7 +81,7 @@ struct ProductionRoutingEditorView: View {
             }
             let commissioning = FeatureFlags().isEnabled(.activeCommissioning)
             if model.context.enforceDriverRoles != commissioning { model.context.enforceDriverRoles = commissioning }
-            if commissioning { model.inferMissingRoles() }
+            if commissioning { model.inferMissingRoles(); model.applyProtectionDefaults() }
             Self.syncContext(model, engine: engine)
         }
         .confirmationDialog(
@@ -311,7 +311,10 @@ struct ProductionRoutingEditorView: View {
                 }
                 .disabled(way.eq.count >= Int(N60_PEQ_MAX_SECTIONS))
             }
-            if model.context.enforceDriverRoles { roleRow(speaker: speaker, way: way) }
+            if model.context.enforceDriverRoles {
+                roleRow(speaker: speaker, way: way)
+                protectionRow(speaker: speaker, way: way)
+            }
             linearisationRow(way: way)
             ForEach(Array(way.eq.enumerated()), id: \.offset) { index, section in
                 HStack(spacing: DesignSpacing.m.pt) {
@@ -360,6 +363,46 @@ struct ProductionRoutingEditorView: View {
             if way.roleInferred == true {
                 Text("Suggested from this way's position.").font(.caption).foregroundStyle(.secondary)
                 Button("Confirm") { model.confirmRole(way: way.id, speaker: speaker.id) }
+            }
+        }
+    }
+
+    /// E8 S13: the way's limiter (on by default, with live gain reduction) and its optional long-term power limit.
+    private func protectionRow(speaker: RoutedSpeaker, way: RoutedWay) -> some View {
+        ViewThatFits(in: .horizontal) {
+            protectionControls(speaker: speaker, way: way)
+            VStack(alignment: .leading, spacing: 6) { protectionControls(speaker: speaker, way: way) }
+        }
+    }
+
+    @ViewBuilder
+    private func protectionControls(speaker: RoutedSpeaker, way: RoutedWay) -> some View {
+        HStack(spacing: 12) {
+            Toggle("Limiter", isOn: Binding(
+                get: { way.limiter != nil },
+                set: { model.setLimiterEnabled($0, way: way.id, speaker: speaker.id) }))
+            if let limiter = way.limiter {
+                numberField("Ceiling dB", value: limiter.ceilingDB) { v in
+                    model.setLimiterCeiling(v, way: way.id, speaker: speaker.id)
+                }
+                TimelineView(.periodic(from: .now, by: 0.25)) { _ in
+                    let reduction = engine.routedWayGainReductions()[way.endpoint]
+                    Text(reduction.map { String(format: "GR %.1f dB", $0) } ?? "GR --")
+                        .font(DesignType.caption.font).monospacedDigit().foregroundStyle(.secondary)
+                }
+            }
+            Toggle("Power limit", isOn: Binding(
+                get: { way.powerLimit != nil },
+                set: { model.setPowerLimitEnabled($0, way: way.id, speaker: speaker.id) }))
+            if let power = way.powerLimit {
+                numberField("Level dBFS", value: power.levelDB) { v in
+                    model.setPowerLimit(levelDB: v, way: way.id, speaker: speaker.id)
+                }
+                numberField("Time ms", value: power.timeConstantMilliseconds) { v in
+                    model.setPowerLimit(timeConstantMilliseconds: v, way: way.id, speaker: speaker.id)
+                }
+            } else if way.role == .tweeter {
+                Text("Suggested for a tweeter.").font(.caption).foregroundStyle(.secondary)
             }
         }
     }

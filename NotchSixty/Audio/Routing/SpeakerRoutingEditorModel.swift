@@ -33,8 +33,9 @@ final class SpeakerRoutingEditorModel: ObservableObject {
     /// True when the edit would leave a way with a role breaking its high-pass rule that was not already broken.
     private func roleBlocks(_ next: SpeakerRoutingConfiguration) -> Bool {
         guard context.enforceDriverRoles else { roleRefusal = nil; return false }
-        let existing = configuration.driverRoleErrors
-        let added = next.driverRoleErrors.filter { !existing.contains($0) }
+        let rate = context.sampleRate
+        let existing = configuration.driverRoleErrors + configuration.boostErrors(sampleRate: rate)
+        let added = (next.driverRoleErrors + next.boostErrors(sampleRate: rate)).filter { !existing.contains($0) }
         roleRefusal = added.first.map { "Not applied. " + Self.describe($0) }
         return !added.isEmpty
     }
@@ -88,7 +89,8 @@ final class SpeakerRoutingEditorModel: ObservableObject {
 
     // MARK: Whole-configuration edits
 
-    func replace(_ configuration: SpeakerRoutingConfiguration) {
+    func replace(_ incoming: SpeakerRoutingConfiguration) {
+        let configuration = context.enforceDriverRoles ? incoming.applyingProtectionDefaults() : incoming
         if failsafeBlocks(configuration) || roleBlocks(configuration) { return }
         self.configuration = configuration
         refreshSubwoofers()
@@ -394,6 +396,11 @@ final class SpeakerRoutingEditorModel: ObservableObject {
             return "\(way): the high-pass at \(Int(corner)) Hz is below the driver's lowest safe frequency of \(Int(safe)) Hz."
         case .driverHighPassTooGentle(let way, let corner, let safe):
             return "\(way): a first-order high-pass at \(Int(corner)) Hz is too gentle; use at least \(Int(2 * safe)) Hz or a steeper slope."
+        case .boostTooHigh(let way, let db, let hz):
+            return "\(way): trim and EQ add \(Int(db.rounded())) dB at \(Int(hz)) Hz; the limit is +\(Int(RoutingBoostGuard.errorDB)) dB."
+        case .boostBelowSafe(let way, let db, let hz, let safe):
+            return "\(way): the EQ boosts \(String(format: "%.1f", db)) dB at \(Int(hz)) Hz, below the driver's lowest safe frequency of \(Int(safe)) Hz."
+        case .invalidPowerLimit(let way): return "\(way): the long-term power limit is out of range."
         }
     }
 
@@ -414,6 +421,8 @@ final class SpeakerRoutingEditorModel: ObservableObject {
                 return "\(way): driver linearisation skipped; it would add \(Int(ms)) ms of latency to every output."
             case .designFailed: return "\(way): driver linearisation could not be designed from this measurement."
             }
+        case .boostHigh(let way, let db, let hz):
+            return "\(way): trim and EQ add \(Int(db.rounded())) dB at \(Int(hz)) Hz; above +\(Int(RoutingBoostGuard.errorDB)) dB is refused."
         }
     }
 
@@ -470,6 +479,7 @@ final class SpeakerRoutingEditorModel: ObservableObject {
     private func mutate(_ change: (inout SpeakerRoutingConfiguration) -> Void) {
         var next = configuration
         change(&next)
+        if context.enforceDriverRoles { next = next.applyingProtectionDefaults() }
         guard next != configuration else { return }
         if failsafeBlocks(next) || roleBlocks(next) { return }
         configuration = next
@@ -742,6 +752,61 @@ extension SpeakerRoutingEditorModel {
             }
         }
         if next != configuration { configuration = next }
+    }
+
+    /// E8 S13: puts the role's default limiter on every way that has none (new ways, migrated profiles) and hands the
+    /// result to the engine. Does nothing with the commissioning flag off or when every way already has its choice.
+    func applyProtectionDefaults() {
+        guard context.enforceDriverRoles else { return }
+        let next = configuration.applyingProtectionDefaults()
+        guard next != configuration else { return }
+        configuration = next
+        onCommit?(next)
+    }
+
+    /// E8 S13: switches a way's limiter on (at the role's default ceiling when it has none) or off (and stays off).
+    func setLimiterEnabled(_ enabled: Bool, way: UUID, speaker: UUID) {
+        editWay(way, speaker: speaker) {
+            if enabled {
+                $0.limiterDeclined = nil
+                if $0.limiter == nil { $0.limiter = RoutedWay.defaultLimiter(role: $0.role ?? .fullRange) }
+            } else {
+                $0.limiter = nil
+                $0.limiterDeclined = true
+            }
+        }
+    }
+
+    /// E8 S13: the way limiter's ceiling, kept inside the range validation accepts.
+    func setLimiterCeiling(_ db: Double, way: UUID, speaker: UUID) {
+        editWay(way, speaker: speaker) {
+            guard var l = $0.limiter else { return }
+            l.ceilingDB = min(0, max(-20, db))
+            $0.limiter = l
+        }
+    }
+
+    /// E8 S13: switches the long-term power limit on (at its defaults, or lower for a tweeter) or off.
+    func setPowerLimitEnabled(_ enabled: Bool, way: UUID, speaker: UUID) {
+        editWay(way, speaker: speaker) {
+            if !enabled { $0.powerLimit = nil; return }
+            guard $0.powerLimit == nil else { return }
+            var limit = RoutingPowerLimit()
+            if $0.role == .tweeter { limit.levelDB = -18 }
+            $0.powerLimit = limit
+        }
+    }
+
+    func setPowerLimit(levelDB: Double? = nil, timeConstantMilliseconds: Double? = nil, way: UUID, speaker: UUID) {
+        editWay(way, speaker: speaker) {
+            guard var p = $0.powerLimit else { return }
+            if let levelDB { p.levelDB = min(max(levelDB, RoutingPowerLimit.levelRangeDB.lowerBound), RoutingPowerLimit.levelRangeDB.upperBound) }
+            if let t = timeConstantMilliseconds {
+                p.timeConstantMilliseconds = min(max(t, RoutingPowerLimit.timeConstantRangeMilliseconds.lowerBound),
+                                                 RoutingPowerLimit.timeConstantRangeMilliseconds.upperBound)
+            }
+            $0.powerLimit = p
+        }
     }
 
     /// Ways whose role was inferred and not yet confirmed.

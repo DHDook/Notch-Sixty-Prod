@@ -581,7 +581,7 @@ struct UnifiedGraphProgramDSP: Equatable, Sendable {
         N60_STAGE_CROSSTALK.rawValue: 20, N60_STAGE_OUTPUT_GAIN.rawValue: 21, N60_STAGE_HEADPHONE.rawValue: 22,
         N60_STAGE_PAUSE_GATE.rawValue: 23, N60_STAGE_DELAY.rawValue: 24, N60_STAGE_FRAC_DELAY.rawValue: 24,
         N60_STAGE_ANC_GUARD.rawValue: 25, N60_STAGE_ANC_INJECT.rawValue: 26, N60_STAGE_PROTECTION.rawValue: 27,
-        N60_STAGE_MUTE.rawValue: 28, N60_STAGE_ANC_CAPTURE.rawValue: 29, N60_STAGE_FINAL_SANITISE.rawValue: 30,
+        N60_STAGE_THERMAL_LIMIT.rawValue: 26.5, N60_STAGE_MUTE.rawValue: 28, N60_STAGE_ANC_CAPTURE.rawValue: 29, N60_STAGE_FINAL_SANITISE.rawValue: 30,
         N60_STAGE_FINAL_METER.rawValue: 31,
         N60_STAGE_CLEANUP.rawValue: 3.7, N60_STAGE_IMAGE.rawValue: 9.6, N60_STAGE_LOUDNESS.rawValue: 9.7,
         N60_STAGE_DEESS.rawValue: 9.8, N60_STAGE_MULTIBAND.rawValue: 9.9,
