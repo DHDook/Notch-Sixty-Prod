@@ -34,6 +34,7 @@ struct ProductionSeatMapSection: View {
                     }
                 }
                 pathList
+                derivedList
             }
             if let warning = map.sizeWarning {
                 Label(warning, systemImage: "externaldrive.badge.exclamationmark")
@@ -253,6 +254,47 @@ struct ProductionSeatMapSection: View {
     private func commit(_ point: RoomPoint, x: Double?, y: Double?, z: Double?) {
         let p = point.position
         apply(map.setPosition(point.id, x: x ?? p?.x ?? 0, y: y ?? p?.y ?? 0, z: z ?? p?.z))
+    }
+
+    // MARK: Estimated seats (E29 S6)
+
+    @State private var newSeatName = ""
+
+    private var derivedList: some View {
+        VStack(alignment: .leading, spacing: DesignSpacing.xs.pt) {
+            Text("Seats you have not measured").font(DesignType.label.font)
+            Text("Add a seat to see an estimate from the nearest measured seats. Estimates are shown with their confidence, never saved, and never used to design room correction or noise cancelling.")
+                .font(DesignType.caption.font)
+                .foregroundStyle(.secondary)
+            ViewThatFits(in: .horizontal) {
+                HStack { seatEntry }
+                VStack(alignment: .leading) { seatEntry }
+            }
+            ForEach(map.derivedRows) { row in
+                VStack(alignment: .leading, spacing: 0) {
+                    Text("\(row.seatName): \(row.text)").font(DesignType.caption.font)
+                    Text("Used by: \(row.usedBy)").font(DesignType.caption.font).foregroundStyle(.secondary)
+                }
+                .accessibilityElement(children: .combine)
+            }
+        }
+    }
+
+    @ViewBuilder private var seatEntry: some View {
+        TextField("Seat name", text: $newSeatName)
+            .textFieldStyle(.roundedBorder)
+            .frame(maxWidth: 220)
+            .accessibilityLabel("Name of an unmeasured seat")
+        Button("Add seat next to the main seat") {
+            let base = map.positionedPoints.first { $0.kind == .seat }?.position
+            _ = map.addUnmeasuredSeat(
+                name: newSeatName, x: (base?.x ?? 1) + 0.5, y: base?.y ?? 2, z: base?.z ?? 1.1)
+            newSeatName = ""
+        }
+        .disabled(newSeatName.trimmingCharacters(in: .whitespaces).isEmpty)
+        ForEach(map.unmeasuredSeatIDs, id: \.self) { id in
+            Button("Remove \(map.name(of: id))") { map.removeUnmeasuredSeat(id) }
+        }
     }
 
     // MARK: Paths
