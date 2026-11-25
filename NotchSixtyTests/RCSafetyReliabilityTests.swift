@@ -684,7 +684,6 @@ final class RCSafetyReliabilityTests: XCTestCase {
         let engine = AudioIOEngine(
             deviceCatalog: FixedOutputCatalog(),
             masterVolumeController: volume,
-            globalVolumeKeyMonitor: IdleVolumeKeyMonitor(),
             masterVolumeStore: store
         )
         _ = try? engine.refreshOutputDevices()
@@ -742,15 +741,6 @@ private final class SoftwareOnlyVolumeController: MasterVolumeDeviceControlling 
     func setMuted(_ muted: Bool, deviceID: AudioDeviceID) throws {}
     func monitor(deviceID: AudioDeviceID?) throws {}
     func stopMonitoring() {}
-}
-
-private final class IdleVolumeKeyMonitor: GlobalVolumeKeyMonitoring {
-    var onVolumeIncrement: (() -> Void)?
-    var onVolumeDecrement: (() -> Void)?
-    var state: GlobalVolumeKeyMonitoringState = .stopped
-
-    func start() throws {}
-    func stop() {}
 }
 
 private struct FixedOutputCatalog: OutputDeviceCataloging {

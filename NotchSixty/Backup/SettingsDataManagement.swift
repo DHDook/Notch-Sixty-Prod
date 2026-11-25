@@ -115,7 +115,7 @@ enum SettingsPreferenceKeys {
         typealias A = PreferenceKeys.Application
         return [
             A.appearance, A.presence, A.volumeStepResolution, A.showVolumeInMenuBar, A.showVolumePopup,
-            A.volumePopupPosition, A.coverSystemVolumePopup, A.resumeProcessingOnOpen,
+            A.volumePopupPosition, A.coverSystemVolumePopup, A.showMediaKeyIndicator, A.resumeProcessingOnOpen,
             PreferenceKeys.abComparisonEnabled, PreferenceKeys.vuMetersEnabled,
         ] + PageDisplayPreferences.keys
     }

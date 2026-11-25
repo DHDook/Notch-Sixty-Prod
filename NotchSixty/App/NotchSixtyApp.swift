@@ -96,8 +96,17 @@ struct NotchSixtyApp: App {
         _product = StateObject(wrappedValue: controller)
         _navigation = StateObject(wrappedValue: navigation)
         // E16 S1: App Intents reach the app through this holder. The service reads `e16.automation` on every command.
-        AutomationRuntime.shared.install(service: controller.makeControlService(), navigation: navigation)
-        _preferences = StateObject(wrappedValue: ApplicationPreferences())
+        let service = controller.makeControlService()
+        AutomationRuntime.shared.install(service: service, navigation: navigation)
+        let preferences = ApplicationPreferences()
+        _preferences = StateObject(wrappedValue: preferences)
+        // E16 S2: the media-key monitor and hotkeys; the monitor moved out of the engine. Skipped while hosting tests.
+        if !ProductProcessEnvironment.isHostingTests {
+            controller.installAutomationInputs(service: service) { [weak preferences, weak controller] in
+                guard let preferences, let controller else { return }
+                preferences.showMediaKeyLevel(of: controller.audioEngine)
+            }
+        }
         _featureFlags = StateObject(wrappedValue: FeatureFlags())
     }
 

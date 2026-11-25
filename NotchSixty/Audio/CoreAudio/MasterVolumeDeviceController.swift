@@ -323,8 +323,8 @@ enum GlobalVolumeKeyMonitorError: Error, LocalizedError, Equatable {
 }
 
 protocol GlobalVolumeKeyMonitoring: AnyObject {
-    var onVolumeIncrement: (() -> Void)? { get set }
-    var onVolumeDecrement: (() -> Void)? { get set }
+    /// One call per key-down. `fine` is true while Option and Shift are both held (E16 S2 quarter steps).
+    var onKey: ((GlobalVolumeKeyAction, _ fine: Bool) -> Void)? { get set }
     var state: GlobalVolumeKeyMonitoringState { get }
 
     func start() throws
@@ -334,6 +334,8 @@ protocol GlobalVolumeKeyMonitoring: AnyObject {
 enum GlobalVolumeKeyAction: Equatable, Sendable {
     case increment
     case decrement
+    /// E16 S2: the mute key (acted on only behind `e16.automation`).
+    case mute
 }
 
 /// Listen-only public Core Graphics event tap for fixed-volume outputs. macOS
@@ -341,13 +343,13 @@ enum GlobalVolumeKeyAction: Equatable, Sendable {
 /// tap observes their system-defined auxiliary-control events without seizing,
 /// suppressing, synthesizing, or reposting input.
 final class CoreGraphicsGlobalVolumeKeyMonitor: GlobalVolumeKeyMonitoring {
-    var onVolumeIncrement: (() -> Void)?
-    var onVolumeDecrement: (() -> Void)?
+    var onKey: ((GlobalVolumeKeyAction, Bool) -> Void)?
     private(set) var state: GlobalVolumeKeyMonitoringState = .stopped
 
     private static let auxiliaryControlButtonSubtype: Int16 = 8
     private static let soundUpKeyCode = 0
     private static let soundDownKeyCode = 1
+    private static let muteKeyCode = 7
     private static let keyDownState = 0xA
 
     private var eventTap: CFMachPort?
@@ -364,9 +366,17 @@ final class CoreGraphicsGlobalVolumeKeyMonitor: GlobalVolumeKeyMonitoring {
             return .increment
         case soundDownKeyCode:
             return .decrement
+        case muteKeyCode:
+            return .mute
         default:
             return nil
         }
+    }
+
+    /// Option and Shift together (and no Command or Control) ask for a quarter step.
+    static func isFineStep(_ flags: NSEvent.ModifierFlags) -> Bool {
+        let relevant = flags.intersection([.option, .shift, .command, .control])
+        return relevant == [.option, .shift]
     }
 
     func start() throws {
@@ -414,12 +424,7 @@ final class CoreGraphicsGlobalVolumeKeyMonitor: GlobalVolumeKeyMonitoring {
                     return Unmanaged.passUnretained(event)
                 }
 
-                switch action {
-                case .increment:
-                    monitor.onVolumeIncrement?()
-                case .decrement:
-                    monitor.onVolumeDecrement?()
-                }
+                monitor.onKey?(action, CoreGraphicsGlobalVolumeKeyMonitor.isFineStep(nsEvent.modifierFlags))
                 return Unmanaged.passUnretained(event)
             },
             userInfo: context

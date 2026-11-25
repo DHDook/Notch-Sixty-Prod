@@ -800,6 +800,14 @@ enum MasterVolumeKeyStep: Equatable, Sendable {
         }
     }
 
+    /// E16 S2: a quarter of this step, for Option-Shift presses.
+    var quartered: MasterVolumeKeyStep {
+        switch self {
+        case .fraction(let denominator): return .fraction(denominator: denominator * 4)
+        case .decibels(let step): return .decibels(step / 4)
+        }
+    }
+
     /// The level after one press up (`direction` 1) or down (−1).
     func level(afterPress direction: Double, from level: Double) -> Double {
         let range = MasterVolumeConfiguration.levelRange

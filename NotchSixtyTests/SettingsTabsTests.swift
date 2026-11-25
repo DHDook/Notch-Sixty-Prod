@@ -23,7 +23,11 @@ final class SettingsTabsTests: XCTestCase {
     }
 
     func testFiveTabsInOrderWithTheirCards() {
-        XCTAssertEqual(SettingsTab.allCases.map(\.title), ["General", "Volume", "Privacy", "Data", "About"])
+        XCTAssertEqual(
+            SettingsTab.visible(automationEnabled: false).map(\.title), ["General", "Volume", "Privacy", "Data", "About"])
+        XCTAssertEqual(
+            SettingsTab.visible(automationEnabled: true).map(\.title),
+            ["General", "Volume", "Shortcuts", "Privacy", "Data", "About"])
         XCTAssertEqual(SettingsTab.volume.cardTitles(offersDeveloperSwitch: false), ["Volume & Feedback"])
         XCTAssertEqual(SettingsTab.privacy.cardTitles(offersDeveloperSwitch: false), ["Permissions"])
         XCTAssertEqual(

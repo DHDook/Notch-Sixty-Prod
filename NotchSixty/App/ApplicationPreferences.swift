@@ -593,6 +593,11 @@ final class ApplicationPreferences: ObservableObject {
         coverSystemVolumePopup && volumePopupPosition == .topRight
     }
 
+    /// E16 S2: shown only while `e16.automation` is on, and only when the volume popup is off (it already covers it).
+    @Published var showMediaKeyIndicator: Bool {
+        didSet { defaults.set(showMediaKeyIndicator, forKey: Key.showMediaKeyIndicator) }
+    }
+
     private let volumeHUD = VolumeFeedbackHUDController()
     private var volumeFeedbackObservation: ObservationSubscription?
 
@@ -618,6 +623,7 @@ final class ApplicationPreferences: ObservableObject {
             rawValue: defaults.string(forKey: Key.volumePopupPosition) ?? ""
         ) ?? .bottomCenter
         coverSystemVolumePopup = defaults.bool(forKey: Key.coverSystemVolumePopup)
+        showMediaKeyIndicator = defaults.object(forKey: Key.showMediaKeyIndicator) as? Bool ?? true
         launchAtLoginEnabled = SMAppService.mainApp.status == .enabled
         launchAtLoginError = nil
         appearanceObservation = NSApplication.shared.observe(\.effectiveAppearance, options: [.new]) { [weak self] _, _ in
@@ -680,6 +686,17 @@ final class ApplicationPreferences: ObservableObject {
 
     var decibelReadoutShowsTenths: Bool { volumeStepResolution.readoutShowsTenths }
 
+    /// E16 S2: the level indicator for a media-key change.
+    func showMediaKeyLevel(of audioEngine: AudioIOEngine) {
+        guard showMediaKeyIndicator, !showVolumePopup else { return }
+        volumeHUD.show(
+            audioEngine.masterVolumeConfiguration,
+            position: volumePopupPosition,
+            coverSystemPopup: coversSystemVolumePopup,
+            decibels: showsDecibelReadout(for: audioEngine),
+            alwaysTenths: decibelReadoutShowsTenths)
+    }
+
     func apply(to audioEngine: AudioIOEngine) {
         self.audioEngine = audioEngine
         audioEngine.setSoftwareVolumeKeyStep(volumeStepResolution.keyStep)
@@ -728,6 +745,7 @@ final class ApplicationPreferences: ObservableObject {
         showVolumePopup = false
         volumePopupPosition = .bottomCenter
         coverSystemVolumePopup = false
+        showMediaKeyIndicator = true
         for key in SettingsPreferenceKeys.keys { defaults.removeObject(forKey: key) }
     }
 

@@ -9,7 +9,12 @@ import SwiftUI
 /// - E18 support bundle, crash reports and "What's new" go on About.
 /// - The V2 "Audio input path" section gets its own tab (it sits on General until then).
 enum SettingsTab: String, CaseIterable, Identifiable, Sendable {
-    case general, volume, privacy, data, about
+    case general, volume, shortcuts, privacy, data, about
+
+    /// E16 S2: Shortcuts shows only while `e16.automation` is on.
+    static func visible(automationEnabled: Bool) -> [SettingsTab] {
+        allCases.filter { $0 != .shortcuts || automationEnabled }
+    }
 
     var id: String { rawValue }
 
@@ -17,6 +22,7 @@ enum SettingsTab: String, CaseIterable, Identifiable, Sendable {
         switch self {
         case .general: return "General"
         case .volume: return "Volume"
+        case .shortcuts: return "Shortcuts"
         case .privacy: return "Privacy"
         case .data: return "Data"
         case .about: return "About"
@@ -27,6 +33,7 @@ enum SettingsTab: String, CaseIterable, Identifiable, Sendable {
         switch self {
         case .general: return "gearshape"
         case .volume: return "speaker.wave.2"
+        case .shortcuts: return "keyboard"
         case .privacy: return "lock.shield"
         case .data: return "externaldrive.badge.timemachine"
         case .about: return "info.circle"
@@ -41,6 +48,7 @@ enum SettingsTab: String, CaseIterable, Identifiable, Sendable {
             if offersDeveloperSwitch { titles.append("Developer Tools") }
             return titles
         case .volume: return ["Volume & Feedback"]
+        case .shortcuts: return ["Keyboard Shortcuts", "Media Keys"]
         case .privacy: return ["Permissions"]
         case .data: return ["Backup & Restore", "Automatic Backups", "Reset & Erase"]
         case .about: return ["About", "Licences", "Privacy Statement", "Help & Support"]
