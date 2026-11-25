@@ -551,7 +551,7 @@ Plan: `docs/epics/E15.md` (awaiting owner approval; flag `e15.follow-output`).
 
 ### E16 Automation and remote
 
-Plan: `docs/epics/E16.md` (slices S1–S6, flags `e16.automation` and `e16.local-api`; plan PR `e16/plan` awaits the owner). Two tiers (owner, 11 Nov 2026):
+Plan: `docs/epics/E16.md` (slices S1–S6, flags `e16.automation` and `e16.local-api`; Q1–Q6 answered by the owner, 25 Nov 2026). Two tiers (owner, 11 Nov 2026):
 
 - [ ] Tier 1, App Intents and Shortcuts for profile, volume, mute, bypass and correction on/off, and starting a Quiet Zone session (always subject to the arm; an intent never arms anything by itself)
 - [ ] Tier 1, global hotkeys, media-key volume for DACs without hardware volume, and richer menu-bar quick controls
