@@ -488,7 +488,7 @@ struct RoomCorrectionMeasurementPlan: Equatable, Sendable {
     }
 }
 
-private enum CoreAudioDeviceCatalogSupport {
+enum CoreAudioDeviceCatalogSupport {
     static func allDeviceIDs() throws -> [AudioDeviceID] {
         var address = AudioObjectPropertyAddress(
             mSelector: kAudioHardwarePropertyDevices,

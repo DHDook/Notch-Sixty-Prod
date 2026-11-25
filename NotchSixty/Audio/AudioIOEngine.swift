@@ -1013,7 +1013,7 @@ final class AudioIOEngine {
     private(set) var speakerRoutingConfiguration: SpeakerRoutingConfiguration?
 
     private let deviceCatalog: any OutputDeviceCataloging
-    private let eventMonitor: AudioHardwareEventMonitor
+    private let eventMonitor: any AudioHardwareEvents
     private let masterVolumeController: any MasterVolumeDeviceControlling
     private let globalVolumeKeyMonitor: any GlobalVolumeKeyMonitoring
     private let binauralProfileAssetStore: BinauralProfileAssetStore
@@ -1151,7 +1151,7 @@ final class AudioIOEngine {
     init(
         deviceCatalog: any OutputDeviceCataloging = CoreAudioOutputDeviceCatalog(),
         initialRouteConfiguration: AudioRouteConfiguration = AudioRouteConfiguration(),
-        eventMonitor: AudioHardwareEventMonitor = AudioHardwareEventMonitor(),
+        eventMonitor: any AudioHardwareEvents = AudioHardwareEventMonitor(),
         masterVolumeController: any MasterVolumeDeviceControlling = CoreAudioMasterVolumeController(),
         globalVolumeKeyMonitor: any GlobalVolumeKeyMonitoring = CoreGraphicsGlobalVolumeKeyMonitor(),
         binauralProfileAssetStore: BinauralProfileAssetStore = BinauralProfileAssetStore(),
@@ -3167,7 +3167,7 @@ final class AudioIOEngine {
         try start(resetProcessingSessionCounters: true)
     }
 
-    func stop() {
+    func stop(cause: TransportTeardownCause) {
         guard lifecycle.state != .idle else { return }
         recoveryGeneration &+= 1
         reconfigurationWorkItem?.cancel()
@@ -3176,7 +3176,7 @@ final class AudioIOEngine {
         recoveryWorkItem = nil
         eventMonitor.removeSelectedOutputSampleRateMonitor()
         if lifecycle.state != .stopping { try? setLifecycle(.stopping) }
-        tearDownTransport(fadeOut: true, cause: .stop)
+        tearDownTransport(fadeOut: true, cause: cause)
         try? setLifecycle(.idle)
         clearStagedAudioUnitRack()
         audioUnitRackRebuildPending = false
