@@ -1228,6 +1228,9 @@ final class ProductProfileController: ObservableObject {
         [PlaybackSystemHardwareMappingRequirement] = []
     /// E15 S1: which Playback System each output endpoint recalls. Inert until Follow macOS output is on (S3).
     @Published private(set) var outputBindings = OutputProfileBindings()
+    /// E15 S3: true while Follow macOS output is on, so picking a Playback System never moves the output (the output
+    /// follows macOS; the profile is applied to whatever is selected).
+    var ignoresAssociatedOutput: () -> Bool = { false }
     @Published private(set) var lastErrorDescription: String?
 
     init(
@@ -1676,6 +1679,31 @@ final class ProductProfileController: ObservableObject {
         persist()
         return OutputProfileBindings.ambiguousUIDs(associations: associations, bindings: outputBindings)
     }
+
+    /// E15 S3 (design note 5 step d): applies a bound Playback System to the output Follow macOS output just selected,
+    /// through the same transactional `applySystemState` (a failure rolls the previous system back). The stored
+    /// `associatedOutputUID` is ignored: the engine is already on the followed output and must stay there. Never arms
+    /// anything; arming stays the user's action.
+    func applyBoundSystem(_ id: UUID) throws {
+        guard let profile = systemProfiles.first(where: { $0.id == id }) else {
+            throw ProductProfileError.hardwareMappingRequired(profile: "Missing Playback System")
+        }
+        if hardwareMappingRequirement(for: id) != nil {
+            throw ProductProfileError.hardwareMappingRequired(profile: profile.name)
+        }
+        var state = profile.state
+        state.associatedOutputUID = nil
+        try applySystemState(state, profileName: profile.name)
+        selectedSystemProfileID = id
+        lastErrorDescription = nil
+        persist()
+    }
+
+    /// Profile ids that exist, and those restored without a hardware mapping (never activated by Follow).
+    var systemProfileIDs: Set<UUID> { Set(systemProfiles.map(\.id)) }
+    var systemProfileIDsNeedingMapping: Set<UUID> { Set(hardwareMappingRequirements.map(\.systemProfileID)) }
+
+    func systemProfileName(for id: UUID) -> String? { systemProfiles.first { $0.id == id }?.name }
 
     func replaceSelectedSystemOutputRouting(
         _ configuration: MultiOutputRoutingConfiguration?
@@ -2182,7 +2210,7 @@ final class ProductProfileController: ObservableObject {
         let previous = captureSystemState()
         let previousOutputUID = engine.routeConfiguration.selectedOutputUID
         do {
-            if let associated = state.associatedOutputUID,
+            if !ignoresAssociatedOutput(), let associated = state.associatedOutputUID,
                associated != engine.routeConfiguration.selectedOutputUID {
                 guard engine.lifecycleState == .idle else {
                     throw ProductProfileError.outputChangeRequiresIdle(profile: profileName)

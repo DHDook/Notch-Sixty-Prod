@@ -11,6 +11,14 @@ import Foundation
 protocol OutputFollowEngineControlling: AnyObject {
     var selectedOutputUID: String? { get }
     func switchFollowedOutput(to uid: String, resume: Bool) throws
+    /// E15 S3: also names the bound profile, so the coordinator can apply it between select and start.
+    func switchFollowedOutput(to uid: String, profileID: UUID?, resume: Bool) throws
+}
+
+extension OutputFollowEngineControlling {
+    func switchFollowedOutput(to uid: String, profileID: UUID?, resume: Bool) throws {
+        try switchFollowedOutput(to: uid, resume: resume)
+    }
 }
 
 extension AudioIOEngine: OutputFollowEngineControlling {
@@ -116,6 +124,16 @@ final class OutputFollowEventDriver {
     /// An excluded state (Safe Launch, acceptance, capture, failed) ended: apply the pending default (note 11).
     func resumePending() { evaluate() }
 
+    func currentDataSourceID(forDeviceUID uid: String) -> UInt32? { source.dataSourceID(forDeviceUID: uid) }
+
+    /// Follow was just turned on, or an excluded state ended with nothing pending: ask macOS what the default is now
+    /// and treat it as settled.
+    func syncToCurrentDefault() {
+        guard running, pending == nil, let target = source.currentDefaultTarget() else { return }
+        pending = (.defaultOutputChanged(target, receivedAt: policy.now().addingTimeInterval(-OutputFollowPolicy.settleWindow)), target)
+        evaluate()
+    }
+
     private func defaultOutputChanged(_ target: OutputFollowTarget?) {
         guard running else { return }
         guard let target else { return }
@@ -176,16 +194,16 @@ final class OutputFollowEventDriver {
             }
         case .switchTo(let uid, _, let profileID):
             pending = nil
-            perform(uid: uid, resume: true, target: target) { .switched(target, profileID: profileID) }
+            perform(uid: uid, profileID: profileID, resume: true, target: target) { .switched(target, profileID: profileID) }
         case .pause(let uid, _, let reason):
             pending = nil
-            perform(uid: uid, resume: false, target: target) { .paused(target, reason) }
+            perform(uid: uid, profileID: nil, resume: false, target: target) { .paused(target, reason) }
         }
     }
 
-    private func perform(uid: String, resume: Bool, target: OutputFollowTarget, outcome: () -> OutputFollowOutcome) {
+    private func perform(uid: String, profileID: UUID?, resume: Bool, target: OutputFollowTarget, outcome: () -> OutputFollowOutcome) {
         do {
-            try engine.switchFollowedOutput(to: uid, resume: resume)
+            try engine.switchFollowedOutput(to: uid, profileID: profileID, resume: resume)
             wake = nil
             source.monitorDataSource(ofDeviceUID: uid)
             onOutcome?(outcome())

@@ -106,6 +106,7 @@ struct ProductionProfileToolbar: View {
             }
         }
         .fixedSize(horizontal: true, vertical: false)
+        .modifier(OutputFollowPresentation(follow: product.outputFollow))
         .alert(
             editorPrompt?.title ?? "Edit",
             isPresented: Binding(
@@ -400,6 +401,9 @@ struct ProductionProfileToolbar: View {
         return "Audition \(slot.displayName): \(snapshot.sourceContentPresetName)\(level)"
     }
 
+    /// E15: the Follow macOS output items appear only while the flag is on.
+    private var followOutputEnabled: Bool { FeatureFlags().isEnabled(.followOutput) }
+
     private var systemMenu: some View {
         Menu {
             Section("Playback Systems") {
@@ -451,8 +455,10 @@ struct ProductionProfileToolbar: View {
                 }
 
                 Divider()
-                Button("Associate with Current Output") {
-                    profiles.associateSelectedSystemWithCurrentOutput()
+                if !followOutputEnabled {
+                    Button("Associate with Current Output") {
+                        profiles.associateSelectedSystemWithCurrentOutput()
+                    }
                 }
 
                 if profiles.selectedSystemHardwareMappingRequirement != nil {
@@ -460,6 +466,11 @@ struct ProductionProfileToolbar: View {
                         profiles.confirmSelectedSystemHardwareMapping()
                     }
                 }
+            }
+            if followOutputEnabled {
+                OutputFollowMenuSection(
+                    follow: product.outputFollow, profiles: profiles,
+                    currentDeviceName: engine.selectedOutputDevice?.name ?? "this output")
             }
         } label: {
             HStack(spacing: 6) {
