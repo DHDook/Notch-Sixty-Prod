@@ -218,6 +218,14 @@ final class AmbientCompensationController: ObservableObject {
             toneCandidates: detailed.snapshot.tonalComponents
         )
     }
+    /// E12 S20: hold-to-compare. While true the plan is unity, so the existing smoothing envelope fades the
+    /// adaptation out and back. Never persisted; cleared when adaptation stops.
+    @Published private(set) var compareHeld = false
+
+    func setCompareHeld(_ held: Bool) {
+        compareHeld = held && playbackAdaptationActive
+    }
+
     @Published private(set) var appliedTarget =
         AmbientCompensationTarget.unity
     @Published private(set) var lastErrorDescription: String?
@@ -504,6 +512,7 @@ final class AmbientCompensationController: ObservableObject {
     }
 
     func stopMonitoring() {
+        compareHeld = false
         pollTask?.cancel()
         pollTask = nil
         monitor?.stop()
@@ -684,7 +693,7 @@ final class AmbientCompensationController: ObservableObject {
                 detailed: detailed, mode: mode, running: running
             )
             let planned: AmbientCompensationTarget
-            if mode == .off {
+            if mode == .off || compareHeld {
                 planned = .unity
                 monitorStatus = .observing
             } else if !running {
@@ -761,7 +770,7 @@ final class AmbientCompensationController: ObservableObject {
                     Double(Self.pollIntervalNanoseconds)
                         / 1_000_000_000
             )
-            attachUnmaskingCuts(to: &smoothed, mode: mode, freshAnalysis: true)
+            attachUnmaskingCuts(to: &smoothed, mode: compareHeld ? .off : mode, freshAnalysis: true)
             try engine.replaceAmbientCompensationRuntimeTarget(
                 smoothed
             )

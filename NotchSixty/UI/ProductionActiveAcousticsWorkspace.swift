@@ -284,6 +284,8 @@ struct ProductionActiveAcousticsWorkspace: View {
     @State private var ambientActionError: String?
     @State private var quietZoneActionError: String?
     @State private var advancedExpanded = false
+    /// E12 S20: results kept for the "Earlier results" list.
+    @StateObject private var results = AcousticsResultsStore()
 
     /// E12 S19 (`e12.active-acoustics-page`): the one Quiet Zone card. Swift only.
     private var onePageFlag: Bool { FeatureFlags().isEnabled(.activeAcousticsPage) }
@@ -301,6 +303,8 @@ struct ProductionActiveAcousticsWorkspace: View {
                 .pickerStyle(.segmented)
                 .frame(maxWidth: 520)
 
+                if onePageFlag { resultCard(for: selection) }
+
                 switch selection {
                 case .ambientAnalysis:
                     ambientAnalysis
@@ -313,6 +317,80 @@ struct ProductionActiveAcousticsWorkspace: View {
         }
         .task(id: engine.lifecycleState.rawValue) {
             await refreshTransportLoop()
+        }
+        // E12 S20: a compare ends on a tab change, when the page goes away and on quit.
+        .onChange(of: selection) { _, _ in releaseCompare() }
+        .onDisappear { releaseCompare() }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
+            releaseCompare()
+        }
+        .onChange(of: allResultLines, initial: true) { _, _ in
+            guard onePageFlag else { return }
+            for tab in ActiveAcousticsTab.allCases { results.record(resultLines(for: tab), tab: tab) }
+        }
+    }
+
+    // MARK: E12 S20 results and compare
+
+    private var allResultLines: [AcousticsResultLine] {
+        ActiveAcousticsTab.allCases.flatMap { resultLines(for: $0) }
+    }
+
+    private func resultLines(for tab: ActiveAcousticsTab) -> [AcousticsResultLine] {
+        switch tab {
+        case .ambientAnalysis:
+            return AcousticsResultModel.playbackAdaptation(
+                target: ambient.appliedTarget, monitoring: ambient.playbackAdaptationActive).map { [$0] } ?? []
+        case .quietZone:
+            return AcousticsResultModel.quietZone(tones: quietZone.toneTelemetry).map { [$0] } ?? []
+        case .roomTreatment:
+            guard let mimoTreatment, mimoTreatment.isAvailable else { return [] }
+            return AcousticsResultModel.roomTreatment(
+                predicted: mimoTreatment.seatDecays, measured: mimoTreatment.measuredSeatDecays)
+        }
+    }
+
+    private func releaseCompare() {
+        ambient.setCompareHeld(false)
+        quietZone.setCompareHeld(false)
+    }
+
+    private var quietZoneCompareReason: String? {
+        if feedForwardArming?.isRequested == true {
+            return "Turn off Feed-forward to compare."
+        }
+        return quietZone.compareUnavailableReason
+    }
+
+    @ViewBuilder private func resultCard(for tab: ActiveAcousticsTab) -> some View {
+        switch tab {
+        case .ambientAnalysis:
+            ProductionAcousticsResultCard(
+                lines: resultLines(for: tab),
+                emptyText: "No change to your music right now.",
+                history: results.history.entries(for: tab),
+                compare: .init(
+                    isHeld: ambient.compareHeld,
+                    unavailableReason: ambient.playbackAdaptationActive ? nil : "Turn Playback Adaptation on to compare.",
+                    setHeld: { ambient.setCompareHeld($0) }),
+                compareNote: nil)
+        case .quietZone:
+            ProductionAcousticsResultCard(
+                lines: resultLines(for: tab),
+                emptyText: "No measurement yet. Arm Quiet Zone to measure the reduction at your seat.",
+                history: results.history.entries(for: tab),
+                compare: .init(
+                    isHeld: quietZone.compareHeld,
+                    unavailableReason: quietZoneCompareReason,
+                    setHeld: { quietZone.setCompareHeld($0) }),
+                compareNote: nil)
+        case .roomTreatment:
+            ProductionAcousticsResultCard(
+                lines: resultLines(for: tab),
+                emptyText: "No prediction yet. Design a treatment to see the predicted bass decay.",
+                history: results.history.entries(for: tab),
+                compare: nil,
+                compareNote: "Room Treatment cannot be switched off and back on while you hold: turning it off ends the armed session, and arming again needs a permit. Use Bypass, then arm again, to compare.")
         }
     }
 

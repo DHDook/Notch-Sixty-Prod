@@ -123,6 +123,12 @@ final class MIMOTreatmentController: ObservableObject {
     @Published var decayTarget: DecayTarget = .automatic
     @Published private(set) var phase: Phase = .idle
     @Published private(set) var seatDecays: [SeatDecay] = []
+    /// E12 S20: the decay after a repeat measurement of the treated room, per seat (empty until one exists).
+    @Published private(set) var measuredSeatDecays: [SeatDecay] = []
+    /// E12 S20: arm, disarm, guard trip and bypass in plain words, for the session event history.
+    var onSessionEvent: (@MainActor (String) -> Void)?
+    private var wasArmed = false
+    private var bypassRequested = false
     @Published private(set) var readout: [SourceReadout] = []
     @Published private(set) var gates: [GateLine] = []
     @Published private(set) var designAdvice: [String] = []
@@ -670,6 +676,11 @@ final class MIMOTreatmentController: ObservableObject {
         }
         let verification = MIMOTreatmentVerifier.verify(
             baseline: baselineLow, predicted: predictedLow, measured: measuredLow, spatial: spatial, sampleRate: lowRate)
+        measuredSeatDecays = (verification.measuredBands ?? []).enumerated().map { index, bands in
+            SeatDecay(
+                id: index, name: seatDecays[safe: index]?.name ?? "Seat \(index + 1)",
+                beforeSeconds: Self.median(verification.baselineBands[safe: index]), afterSeconds: Self.median(bands))
+        }
         if case .failure(let refusal) = host.issueTreatmentPermit(verification: verification, acceptance: host.hardwareAcceptance()) {
             switch refusal {
             case .verificationFailed(let failures): permitRefusals = failures.map(\.reason)
@@ -686,6 +697,7 @@ final class MIMOTreatmentController: ObservableObject {
     }
 
     func bypass() {
+        bypassRequested = true
         host.disarmTreatment()
         refreshReadout()
     }
@@ -696,6 +708,20 @@ final class MIMOTreatmentController: ObservableObject {
         let context = host.treatmentContext()
         let treatment = host.treatment
         isArmed = treatment.isArmed
+        if isArmed != wasArmed {
+            wasArmed = isArmed
+            if isArmed {
+                bypassRequested = false
+                onSessionEvent?("Room Treatment armed.")
+            } else if bypassRequested || treatment.arm.lastDisarmReason == .user {
+                bypassRequested = false
+                onSessionEvent?("You bypassed Room Treatment.")
+            } else if let reason = treatment.arm.lastDisarmReason {
+                onSessionEvent?("Room Treatment turned off: \(SafetyFlightRecorder.explanation(for: reason))")
+            } else {
+                onSessionEvent?("Room Treatment turned off.")
+            }
+        }
         let readback = host.treatmentReadback()
         armStateLabel = Self.stateLabel(readback: readback, armed: treatment.isArmed)
         gates = [
