@@ -27,6 +27,8 @@ struct ProductionHardwareAcceptanceWorkspace: View {
     var engine: AudioIOEngine
     @ObservedObject var profiles: ProductProfileController
     @ObservedObject var acceptance: HardwareAcceptanceController
+    /// E12 S19: with `e12.active-acoustics-page` on, the feed-forward evidence rows live here, not on Active Acoustics.
+    var quietZone: ActiveQuietZoneController?
 
     @State private var showingCampaignForm = false
 
@@ -116,6 +118,10 @@ struct ProductionHardwareAcceptanceWorkspace: View {
             VStack(alignment: .leading, spacing: DesignSpacing.xl.pt) {
                 header
                 authorityBoundaryCard
+
+                if let quietZone, FeatureFlags().isEnabled(.activeAcousticsPage) {
+                    ProductionFeedForwardReadinessCard(quietZone: quietZone)
+                }
 
                 if let campaign = acceptance.campaign {
                     campaignSummary(campaign)

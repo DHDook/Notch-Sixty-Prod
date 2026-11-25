@@ -589,7 +589,8 @@ struct ProductionRootView: View {
             ProductionHardwareAcceptanceWorkspace(
                 engine: engine,
                 profiles: product.profiles,
-                acceptance: product.hardwareAcceptance
+                acceptance: product.hardwareAcceptance,
+                quietZone: product.activeQuietZone
             )
         case .plugins:
             ProductionPluginWorkspace(product: product)

@@ -223,7 +223,7 @@ private struct AmbientCompensationResponseCurveView: View {
     }
 }
 
-private enum ActiveAcousticsTab: String, CaseIterable, Identifiable {
+enum ActiveAcousticsTab: String, CaseIterable, Identifiable {
     case ambientAnalysis
     case quietZone
     case roomTreatment
@@ -253,10 +253,40 @@ struct ProductionActiveAcousticsWorkspace: View {
     @ObservedObject var microphone: RoomCorrectionCalibrationController
     @ObservedObject var projects: RoomCorrectionProjectController
 
-    @State private var selection: ActiveAcousticsTab = .ambientAnalysis
+    init(
+        engine: AudioIOEngine,
+        ambient: AmbientCompensationController,
+        quietZone: ActiveQuietZoneController,
+        adaptiveQuietZone: AdaptiveQuietZoneShadow,
+        feedForwardSurvey: QuietZoneFeedForwardSurveyController,
+        feedForwardShadow: QuietZoneFeedForwardShadow,
+        feedForwardArming: FeedForwardLiveArmingController?,
+        mimoTreatment: MIMOTreatmentController?,
+        microphone: RoomCorrectionCalibrationController,
+        projects: RoomCorrectionProjectController,
+        initialTab: ActiveAcousticsTab = .ambientAnalysis
+    ) {
+        self.engine = engine
+        self.ambient = ambient
+        self.quietZone = quietZone
+        self.adaptiveQuietZone = adaptiveQuietZone
+        self.feedForwardSurvey = feedForwardSurvey
+        self.feedForwardShadow = feedForwardShadow
+        self.feedForwardArming = feedForwardArming
+        self.mimoTreatment = mimoTreatment
+        self.microphone = microphone
+        self.projects = projects
+        _selection = State(initialValue: initialTab)
+    }
+
+    @State private var selection: ActiveAcousticsTab
     @State private var transportSnapshot: ProductionTransportMeterSnapshot?
     @State private var ambientActionError: String?
     @State private var quietZoneActionError: String?
+    @State private var advancedExpanded = false
+
+    /// E12 S19 (`e12.active-acoustics-page`): the one Quiet Zone card. Swift only.
+    private var onePageFlag: Bool { FeatureFlags().isEnabled(.activeAcousticsPage) }
 
     var body: some View {
         ProductionPageContainer {
@@ -275,7 +305,7 @@ struct ProductionActiveAcousticsWorkspace: View {
                 case .ambientAnalysis:
                     ambientAnalysis
                 case .quietZone:
-                    quietZoneView
+                    if onePageFlag { quietZonePageView } else { quietZoneView }
                 case .roomTreatment:
                     roomTreatment
                 }
@@ -366,27 +396,32 @@ struct ProductionActiveAcousticsWorkspace: View {
                                     ? .green
                                     : .secondary
                         )
-                    if quietZone.arm.isArmed {
-                        Button("Disarm", role: .destructive) {
-                            quietZone.arm.disarm(.user)
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .tint(.red)
-                        .accessibilityLabel("Disarm Active Quiet Zone")
-                    }
-                    Toggle(
-                        "Arm Active Quiet Zone",
-                        isOn: Binding(
-                            get: { quietZone.configuration.enabled },
-                            set: { enabled in
-                                performQuietZone {
-                                    try quietZone.setEnabled(enabled)
-                                }
+                    if onePageFlag {
+                        Button("Open Quiet Zone") { selection = .quietZone }
+                            .buttonStyle(.bordered)
+                    } else {
+                        if quietZone.arm.isArmed {
+                            Button("Disarm", role: .destructive) {
+                                quietZone.arm.disarm(.user)
                             }
+                            .buttonStyle(.borderedProminent)
+                            .tint(.red)
+                            .accessibilityLabel("Disarm Active Quiet Zone")
+                        }
+                        Toggle(
+                            "Arm Active Quiet Zone",
+                            isOn: Binding(
+                                get: { quietZone.configuration.enabled },
+                                set: { enabled in
+                                    performQuietZone {
+                                        try quietZone.setEnabled(enabled)
+                                    }
+                                }
+                            )
                         )
-                    )
-                    .toggleStyle(.switch)
-                    .labelsHidden()
+                        .toggleStyle(.switch)
+                        .labelsHidden()
+                    }
                 }
             }
             .padding(18)
@@ -1261,6 +1296,103 @@ struct ProductionActiveAcousticsWorkspace: View {
                 ProductionFeedForwardLiveCard(quietZone: quietZone, arming: feedForwardArming)
             }
 
+            quietZoneResultSections
+
+            ProductionAdaptiveQuietZoneCard(
+                shadow: adaptiveQuietZone,
+                latencyText: ancLatencyText
+            )
+
+            safetyNote(
+                "Active Quiet Zone is deliberately limited to stable low-frequency components. It does not cancel speech, claps or broadband room sound and makes no claim of whole-room silence. A low-level probe must measurably improve the physical error microphone before full cancellation is allowed."
+            )
+        }
+    }
+
+    /// E12 S19: the one-card Quiet Zone page. One card (setup list, where to quiet, the two switches), then the
+    /// measured result, then everything else under "Advanced".
+    private var quietZonePageView: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            if engine.lifecycleState != .running {
+                statusBanner(
+                    title: "Playback engine must be running",
+                    detail: "Quiet Zone generates bounded anti-noise through the active stereo speaker route. Start processing before arming it.",
+                    systemImage: "speaker.slash"
+                )
+            }
+
+            ProductionQuietZoneCard(
+                quietZone: quietZone,
+                ambient: ambient,
+                microphone: microphone,
+                engineRunning: engine.lifecycleState == .running,
+                perform: { performQuietZone($0) }
+            )
+
+            if let reason = quietZone.holdReason {
+                Label(
+                    quietZoneHoldReasonText(reason),
+                    systemImage: quietZone.status == .fault ? "exclamationmark.octagon.fill" : "pause.circle.fill"
+                )
+                .font(.callout)
+                .foregroundStyle(quietZone.status == .fault ? Color.red : Color.secondary)
+                .padding(14)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(
+                    (quietZone.status == .fault ? Color.red : Color.secondary).opacity(0.08),
+                    in: RoundedRectangle(cornerRadius: 12)
+                )
+            }
+            if let error = quietZoneActionError ?? quietZone.lastErrorDescription {
+                Label(error, systemImage: "exclamationmark.triangle.fill")
+                    .font(.callout)
+                    .foregroundStyle(.red)
+                    .textSelection(.enabled)
+            }
+
+            // Setup that the card's "where to quiet" choice and the sub step depend on.
+            ProductionSubAwareQuietZoneCard(quietZone: quietZone, survey: feedForwardSurvey)
+            if let virtualMic = quietZone.virtualMic {
+                ProductionVirtualMicrophoneCard(
+                    survey: virtualMic,
+                    quietZoneRunning: quietZone.configuration.enabled && quietZone.status != .fault,
+                    showsEarSwitch: false)
+                if let zones = quietZone.zones {
+                    ProductionZoneChooserCard(
+                        zones: zones, first: virtualMic, second: zones.second,
+                        quietZoneRunning: quietZone.configuration.enabled && quietZone.status != .fault,
+                        showsModePicker: false)
+                }
+            }
+
+            quietZoneResultSections
+
+            DisclosureGroup("Advanced", isExpanded: $advancedExpanded) {
+                VStack(alignment: .leading, spacing: 16) {
+                    if let noiseSurvey = quietZone.noiseSurvey {
+                        ProductionNoiseSurveyCard(survey: noiseSurvey)
+                    }
+                    if let virtualMic = quietZone.virtualMic, let headFollow = virtualMic.headFollow {
+                        // The camera consent control: kept out of the main card so it has only its two switches.
+                        ProductionHeadFollowCard(follow: headFollow, survey: virtualMic)
+                    }
+                    spatialQuietZoneCard
+                    ProductionFeedForwardDesignSurveyCard(survey: feedForwardSurvey)
+                    ProductionFeedForwardShadowCard(shadow: feedForwardShadow)
+                    ProductionAdaptiveQuietZoneCard(shadow: adaptiveQuietZone, latencyText: ancLatencyText)
+                }
+                .padding(.top, 12)
+            }
+            .font(.headline)
+
+            safetyNote(
+                "Active Quiet Zone is deliberately limited to stable low-frequency components. It does not cancel speech, claps or broadband room sound and makes no claim of whole-room silence. A low-level probe must measurably improve the physical error microphone before full cancellation is allowed."
+            )
+        }
+    }
+
+    /// The measured results, hold reason and last error, shared by the old and the one-card Quiet Zone page.
+    @ViewBuilder private var quietZoneResultSections: some View {
             LazyVGrid(
                 columns: [
                     GridItem(.flexible()),
@@ -1400,16 +1532,6 @@ struct ProductionActiveAcousticsWorkspace: View {
                 .foregroundStyle(.red)
                 .textSelection(.enabled)
             }
-
-            ProductionAdaptiveQuietZoneCard(
-                shadow: adaptiveQuietZone,
-                latencyText: ancLatencyText
-            )
-
-            safetyNote(
-                "Active Quiet Zone is deliberately limited to stable low-frequency components. It does not cancel speech, claps or broadband room sound and makes no claim of whole-room silence. A low-level probe must measurably improve the physical error microphone before full cancellation is allowed."
-            )
-        }
     }
 
     /// E4 S7: measured round trip for the current output, microphone, rate
@@ -1432,6 +1554,27 @@ struct ProductionActiveAcousticsWorkspace: View {
         )
         let status = ANCSupportedHardware.latency(for: key, store: QuietZoneMeasuredLatencyStore())
         return "\(status.displayText), \(bufferText)"
+    }
+
+    private var spatialControlToggle: some View {
+        Toggle(
+                    "Spatial Control",
+                    isOn: Binding(
+                        get: {
+                            quietZone.spatialCalibration?
+                                .settings.enabled ?? false
+                        },
+                        set: { enabled in
+                            performQuietZone {
+                                try quietZone.setSpatialEnabled(enabled)
+                            }
+                        }
+                    )
+                )
+                .disabled(
+                    quietZone.spatialCalibration?.surveys.isEmpty
+                        != false
+                )
     }
 
     private var spatialQuietZoneCard: some View {
@@ -1474,25 +1617,11 @@ struct ProductionActiveAcousticsWorkspace: View {
                 .buttonStyle(.bordered)
                 Spacer()
 
-                Toggle(
-                    "Spatial Control",
-                    isOn: Binding(
-                        get: {
-                            quietZone.spatialCalibration?
-                                .settings.enabled ?? false
-                        },
-                        set: { enabled in
-                            performQuietZone {
-                                try quietZone.setSpatialEnabled(enabled)
-                            }
-                        }
-                    )
-                )
-                .toggleStyle(.switch)
-                .disabled(
-                    quietZone.spatialCalibration?.surveys.isEmpty
-                        != false
-                )
+                if onePageFlag {
+                    spatialControlToggle.toggleStyle(.checkbox)
+                } else {
+                    spatialControlToggle.toggleStyle(.switch)
+                }
             }
 
             if let calibration = quietZone.spatialCalibration {

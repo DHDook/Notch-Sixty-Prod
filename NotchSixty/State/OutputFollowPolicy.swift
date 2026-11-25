@@ -29,6 +29,9 @@ enum OutputFollowPauseReason: Equatable, Sendable {
     case noBinding
     /// The bound system references hardware that is not mapped yet, so it is never activated.
     case needsMapping(UUID)
+    /// The bound system failed to apply on this device (for example a 5.1 arrangement on a two-channel device); the
+    /// previous system's state was rolled back and nothing was started.
+    case applyFailed(UUID, message: String)
 }
 
 enum OutputFollowDeferral: Equatable, Sendable {

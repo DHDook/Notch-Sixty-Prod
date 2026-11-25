@@ -548,7 +548,8 @@ struct ProductionMetersView: View {
 
             if enhanced { ProductionEventHistoryCard(history: history) }
 
-            Text("Recovery remains pinned to the selected stable device UID. Notch Sixty does not silently follow the macOS default output or substitute a different device after disconnect.")
+            Text(OutputFollowCopy.recoveryPolicy(
+                following: OutputSelectionMode.effective(stored: .stored(), flagEnabled: FeatureFlags().isEnabled(.followOutput)) == .followSystem))
                 .font(DesignType.caption.font)
                 .foregroundStyle(.secondary)
         }

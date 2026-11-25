@@ -91,6 +91,9 @@ final class ProductController: ObservableObject {
     let recovery: ProductRecoveryController
     let headroomAssistant: HeadroomAssistantController
     let reference: ProductionReferenceNavigator
+    /// E15 S3: Follow macOS output (dark behind `e15.follow-output`; the listener is installed only in follow mode).
+    let outputFollow: OutputFollowCoordinator
+    private var outputFollowObservers: [AnyObject] = []
     /// E36 S5: the Settings audio input path (tap or virtual driver), owned here so Quit can restore the system output.
     let audioInputPath = AudioInputPathModel.production(openURL: { NSWorkspace.shared.open($0) })
     private var calibrationObservation: AnyCancellable?
@@ -232,6 +235,12 @@ final class ProductController: ObservableObject {
             abComparison: abComparison
         )
         self.reference = ProductionReferenceNavigator()
+        let follow = OutputFollowWiring.make(
+            engine: audioEngine, profiles: profiles, recovery: recovery, calibration: calibration,
+            multichannel: multichannelCalibration, quietZone: activeQuietZone, feedForward: feedForwardArming,
+            mimo: mimoTreatment)
+        self.outputFollow = follow.coordinator
+        outputFollowObservers = follow.observers
         observeAudioEngine()
         observeTermination()
         // The explicitly selected output is authoritative across launches,
@@ -366,6 +375,12 @@ final class ProductController: ObservableObject {
             abComparison: abComparison
         )
         self.reference = ProductionReferenceNavigator()
+        let follow = OutputFollowWiring.make(
+            engine: audioEngine, profiles: profiles, recovery: recovery, calibration: calibration,
+            multichannel: multichannelCalibration, quietZone: activeQuietZone, feedForward: feedForwardArming,
+            mimo: mimoTreatment)
+        self.outputFollow = follow.coordinator
+        outputFollowObservers = follow.observers
         observeAudioEngine()
     }
 
@@ -400,6 +415,7 @@ final class ProductController: ObservableObject {
         ambientCompensation.prepareForUse()
         activeQuietZone.prepareForUse()
         hardwareAcceptance.prepareForUse()
+        outputFollow.reconcile()
         if FeatureFlags().isEnabled(.virtualDriver) {
             audioInputPath.coordinator?.recoverAfterCrash()
             audioInputPath.startMonitoring()
