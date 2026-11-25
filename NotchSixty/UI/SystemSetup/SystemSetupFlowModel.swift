@@ -108,6 +108,9 @@ final class SystemSetupFlowModel: ObservableObject {
             guard let self else { throw SystemSetupVerificationError.couldNotMeasure("The setup window closed.") }
             return try self.verificationCandidate(sampleRate: rate)
         }
+        // E15 S6: a new system for a wireless output starts with the no-added-delay correction mode (design note 15).
+        correctionMode = WirelessOutputPolicy.defaultCorrectionMode(
+            transport: engine.selectedOutputDevice?.transport, flagOn: FeatureFlags().isEnabled(.followOutput))
     }
 
     var choices: SystemSetupChoices { flow.choices }

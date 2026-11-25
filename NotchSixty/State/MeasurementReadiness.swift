@@ -29,6 +29,8 @@ enum MeasurementReadiness: Equatable {
         var inputChannelIndex: Int = 0
         var inputChannelCount: Int?
         var hasOutputDevice: Bool
+        /// E15 S6: the output is wireless with `e15.follow-output` on (`WirelessOutputPolicy.applies`); measuring is refused.
+        var outputIsWireless: Bool = false
         /// The surface needs an enabled output device profile (multichannel, Speaker Lab).
         var requiresProfile: Bool = false
         var hasProfile: Bool = true
@@ -110,6 +112,9 @@ enum MeasurementReadiness: Equatable {
         }
         if !inputs.hasOutputDevice {
             return .blocked(Blocker(reason: "Choose the Playback System output device.", fix: .selectOutput))
+        }
+        if inputs.outputIsWireless {
+            return .blocked(Blocker(reason: WirelessOutputPolicy.measurementRefusal, fix: .selectOutput))
         }
         if inputs.requiresProfile && !inputs.hasProfile {
             return .blocked(Blocker(

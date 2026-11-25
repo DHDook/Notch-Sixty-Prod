@@ -258,6 +258,7 @@ struct ProductionDashboardView: View {
                 .help("Refresh Outputs")
                 .disabled(engine.lifecycleState != .idle)
             }
+            WirelessOutputNotes(engine: engine)
             if let error = engine.lastErrorDescription {
                 Label(error, systemImage: "exclamationmark.triangle.fill")
                     .foregroundStyle(.orange)

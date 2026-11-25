@@ -187,6 +187,7 @@ final class SpeakerMeasurementLabController: ObservableObject {
             permission: microphone.permissionStatus,
             hasInputDevice: microphone.selectedInputDevice != nil,
             hasOutputDevice: engine.selectedOutputDevice != nil,
+            outputIsWireless: WirelessOutputPolicy.applies(engine.selectedOutputDevice?.transport, flagOn: FeatureFlags().isEnabled(.followOutput)),
             requiresProfile: true,
             hasProfile: profiles.selectedSystemProfile?.state.outputDeviceProfile?.enabled == true,
             profileReason: SystemCapabilityText.profileRequiredReason(

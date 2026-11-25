@@ -584,8 +584,21 @@ enum CoreAudioDeviceCatalogSupport {
             ),
             nominalSampleRate: try readNominalSampleRate(deviceID: deviceID),
             availableSampleRateRanges: try readAvailableSampleRateRanges(deviceID: deviceID),
-            outputChannelCount: try readOutputChannelCount(deviceID: deviceID)
+            outputChannelCount: try readOutputChannelCount(deviceID: deviceID),
+            transport: readTransportKind(deviceID: deviceID)
         )
+    }
+
+    /// E15 S6: the device's transport type; `.unknown` when the property cannot be read (never throws).
+    static func readTransportKind(deviceID: AudioDeviceID) -> OutputTransportKind {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyTransportType,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain)
+        var value: UInt32 = 0
+        var size = UInt32(MemoryLayout<UInt32>.size)
+        guard AudioObjectGetPropertyData(deviceID, &address, 0, nil, &size, &value) == noErr else { return .unknown }
+        return OutputTransportKind(coreAudioTransportType: value)
     }
 
     static func makeInputDevice(deviceID: AudioDeviceID) throws -> AudioInputDevice {

@@ -176,7 +176,9 @@ final class ActiveQuietZoneController: ObservableObject {
             subwooferActive: subwooferActiveForAnc && !subAwareAncEnabled,
             receiverBassUndeclared: receiverBassUndeclared,
             arrangementRefusal: arrangementRefusal,
-            subAwareRefusal: subAwareReadiness(mode: .feedForward).message)
+            subAwareRefusal: subAwareReadiness(mode: .feedForward).message,
+            outputIsWireless: WirelessOutputPolicy.applies(
+                engine.selectedOutputDevice?.transport, flagOn: FeatureFlags().isEnabled(.followOutput)))
     }
 
     /// E26 flag `e26.sub-aware-anc`, set at construction. Only Swift reads it.
@@ -1126,7 +1128,9 @@ final class ActiveQuietZoneController: ObservableObject {
             outputGainDB: engine.liveTreatmentOutputGainDB,
             microphoneSignalFault: ambient.microphoneSignalFault,
             howlGuardTripCount: engine.liveTreatmentHowlTripCount,
-            bassPathFingerprint: bassConditioningActive ? ancBassPathState.fingerprint.value : nil
+            bassPathFingerprint: bassConditioningActive ? ancBassPathState.fingerprint.value : nil,
+            outputIsWireless: WirelessOutputPolicy.applies(
+                engine.selectedOutputDevice?.transport, flagOn: FeatureFlags().isEnabled(.followOutput))
         )
     }
 

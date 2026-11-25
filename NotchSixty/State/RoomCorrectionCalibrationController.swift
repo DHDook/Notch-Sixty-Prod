@@ -172,6 +172,7 @@ final class RoomCorrectionCalibrationController: ObservableObject {
             inputChannelIndex: selectedInputChannelIndex,
             inputChannelCount: selectedInputDevice?.inputChannelCount,
             hasOutputDevice: selectedOutputDevice != nil,
+            outputIsWireless: WirelessOutputPolicy.applies(selectedOutputDevice?.transport, flagOn: FeatureFlags().isEnabled(.followOutput)),
             transportActive: activeTransport != nil,
             stateAllowsStart: state == .ready || state == .reviewing,
             timelineBytes: selectedOutputDevice.map { MeasurementReadiness.timelineBytes(for: sweepSettings(sampleRate: $0.nominalSampleRate)) }))
