@@ -528,7 +528,7 @@ complete, speaker ANC qualified, and a full hardware regression passing at every
 - [x] S9 `e13/headphones-page-cleanup` (owner, 17 Nov 2026; needs-owner: removes user-visible controls; owns G18–G20, G22, G24, G25; new flag `e13.headphones-page`): one target with shaping sliders, one import, optional Auto headroom (manual stays the default), drawn fit, crossfeed Custom controls, plain wording
 - [x] S10 `e13/headphone-list` (owns G23; built behind `e13.headphones-page`): a list of headphones per Playback System, each with its own correction and an optional linked device; picker with add, duplicate, rename, delete; today's profile migrates to the first entry. Auto-selection by linked device waits for E15 S6 (E13 G27)
 - [ ] S11 `e13/generic-hrtf` (owns G17): a generic HRTF generated in `core/` from a head model, native at the eight rates, the default for Virtual Speakers
-- [ ] S12 `e13/headphones-compare-and-ship` (needs-owner; owns G21; after E12 S13): bypass per card, the E12 S13 before/after on headphone sessions, graduate `e13.headphones-page`
+- [~] S12 `e13/headphones-compare-and-ship` (needs-owner; owns G21; after E12 S13): bypass per card, the E12 S13 before/after on headphone sessions, graduate `e13.headphones-page` (built behind `e13.headphones-page`, PR pending; wiring: S13 `e13/graduate` after E15 S6, G27)
 
 ### E14 Upmixer
 
@@ -704,10 +704,10 @@ unified graph only.
 
 - [~] First slice (owner decision 7 Nov 2026, E6 G1): graph-vs-kernel full-config corpus (every stage on, all layouts, eight rates) plus the E6 S5 stereo-chain parity and latency test (latency report equals measured impulse delay). `N60RenderKernel` must not be deleted until it is green. S1 `e23/graph-kernel-parity` built in part (PR #464); the rest is S1b `e23/precision-and-cleanup`
 - [~] S1b `e23/precision-and-cleanup` (PR pending, needs-owner, engine): double state for E6 G18, G25 and the Linkwitz form for G31 built; cleanup whole-buffer pass (E6 G37) partly built, per-section hoisting open as E23 G5; wiring slice: graph path, not yet on the shipped UI as a separate check
-- [ ] S1c `e23/parity-and-host-fold` (needs-owner, engine): G2 latency report at 44.1 and 88.2 kHz, G3 clipped-input level difference, E6 G48 Quiet Zone host fold
+- [x] S1c `e23/parity-and-host-fold` (needs-owner, engine): G2 latency report at 44.1 and 88.2 kHz, G3 clipped-input level difference, E6 G48 Quiet Zone host fold
 - [ ] Confirm nothing falls back to the kernel, the old N-channel path or the legacy binaural pipeline (E6 S12a–S12h)
 - [x] S2 `e23/kernel-reference-inventory` (owner, 11 Nov 2026): list the 43 files (not 17) that still reference `N60RenderKernel` in `docs/epics/E23.md`, each with the slice that removes the reference
-- [ ] S3 `e23/content-view-removal` (owner, 11 Nov 2026; needs-owner if any user-visible control goes): remove `ContentView.swift` (1,607 lines, still instantiated from `NotchSixtyApp.swift`) once every control it holds is reachable elsewhere
+- [x] S3 `e23/content-view-removal` (owner, 11 Nov 2026; needs-owner): deleted `ContentView.swift` and its debug tab; controls with no production home are in E23 G17 (S9)
 - [ ] S4 `e23/audio-io-engine-split` (owner, 11 Nov 2026; needs-owner: `AudioIOEngine.swift`): split `AudioIOEngine.swift` (6,382 lines) along its legacy-path seams as the kernel paths go. From now on no slice in any epic may make the file longer
 - [ ] S5 `e23/idle-render-path` (performance review, owner approved 15 Nov 2026); needs-owner, engine; after the kernel is deleted: skip or cut rendering when the input is silent and every tail has decayed, never while ANC, MIMO treatment or the generator is active; idle bench row
 - [ ] S6 `e23/rebuild-cost` (performance review, owner approved 15 Nov 2026); needs-owner, engine: "rebuild in progress" bench row, then switch the rebuild CPU budget on or reuse unchanged stages (the host sets `cpuBudgetPercent` to 0 today); build new graphs off the main actor (the linear-phase EQ design moved to E33 S27, owner 17 Nov 2026); debounce profile saving if drags reach it
