@@ -93,6 +93,12 @@ enum SystemCalibrationChange: String, Equatable, Sendable {
     }
 }
 
+/// The two speaker feeds as measured (E12 S16).
+struct MeasuredFeedCalibration: Codable, Equatable, Sendable {
+    var left: SpeakerFeedCalibration
+    var right: SpeakerFeedCalibration
+}
+
 /// Stored with a system profile. `stamp` is nil until a correction is deployed or verified.
 struct SystemCalibrationRecord: Codable, Equatable, Sendable {
     var verifiedDesignID: UUID?
@@ -101,6 +107,9 @@ struct SystemCalibrationRecord: Codable, Equatable, Sendable {
     var stampDate: Date?
     /// "I moved something": set by the user, cleared when a new calibration is stamped.
     var movedDate: Date?
+    /// E12 S16 (G18): the per-speaker trim, delay and polarity as the last alignment measured them, so a manual change
+    /// can be marked and "Reset to measured" has something to return to. nil until an alignment is applied.
+    var measuredFeeds: MeasuredFeedCalibration?
 
     /// Out-of-date reasons for the live system. Age alone is never a reason.
     func outOfDateReasons(current: SystemCalibrationStamp) -> [SystemCalibrationChange] {

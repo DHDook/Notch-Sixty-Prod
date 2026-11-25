@@ -2155,6 +2155,28 @@ final class ProductProfileController: ObservableObject {
         persist()
     }
 
+    /// E12 S16 (G18): remembers the speaker feeds the alignment measured.
+    func recordMeasuredFeeds(left: SpeakerFeedCalibration, right: SpeakerFeedCalibration) {
+        guard let index = selectedSystemProfileIndex else { return }
+        var record = systemProfiles[index].state.calibrationRecord ?? SystemCalibrationRecord()
+        record.measuredFeeds = MeasuredFeedCalibration(left: left, right: right)
+        systemProfiles[index].state.calibrationRecord = record
+        persist()
+    }
+
+    /// E12 S16 (G91): called before a manual change to a system that already has alignment or bass set. A system with
+    /// no stamp (nothing deployed or verified) takes one of its state before the change, so the change reads as "out of
+    /// date" afterwards. A stamp already there is left alone.
+    func stampBeforeManualChange(hadConfiguration: Bool) {
+        guard hadConfiguration, let index = selectedSystemProfileIndex else { return }
+        var record = systemProfiles[index].state.calibrationRecord ?? SystemCalibrationRecord()
+        guard record.stamp == nil else { return }
+        record.stamp = currentCalibrationStamp()
+        record.stampDate = Date()
+        systemProfiles[index].state.calibrationRecord = record
+        persist()
+    }
+
     private var selectedSystemProfileIndex: Int? {
         guard let selectedSystemProfileID else { return nil }
         return systemProfiles.firstIndex { $0.id == selectedSystemProfileID }
