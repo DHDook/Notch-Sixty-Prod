@@ -383,7 +383,7 @@ minimum-phase in blind ABX at three or more seats, and measurement results match
 - [ ] S22 `e12/acoustics-status` (needs-owner; owns G23, G25, G32): microphone live and lost states, a read-only Dashboard status line per feature (no menu bar control), Room Treatment says what arming needs; graduates `e12.active-acoustics-page`
 - [x] S23 `e12/settings-tabs` (owner, 17 Nov 2026; needs-owner; owns G33, G39–G42): Settings in five tabs (General, Volume, Privacy, Data, About), a fuller About, the developer tools switch hidden in release builds, one "Reset page displays" button; adds flag `e12.settings-page`
 - [~] S24 `e12/resume-and-permissions` (needs-owner; owns G34, G35): optional resume of processing on open (off by default, same device, never arms), permission status with a button to System Settings; built dark (PR pending), wiring slice S25
-- [ ] S25 `e12/backup-and-reset` (needs-owner; owns G36, G37): settings in the backup, automatic backup (last five), restore default settings, erase all data with a typed confirmation; graduates `e12.settings-page`
+- [~] S25 `e12/backup-and-reset` (built dark; flag graduation waits for a clear E12 ledger; needs-owner; owns G36, G37): settings in the backup, automatic backup (last five), restore default settings, erase all data with a typed confirmation; graduates `e12.settings-page`
 - [~] S26 `e12/compare-service` (owner, 17 Nov 2026; needs-owner; owns G45, G46, G55; before S13). Built dark: service, level matching, fixed switch, room-correction test moved onto it; other sides (G76, G77) wait for S27 and the switch-time bench check (G78) for E22: one comparison service for any two configurations, computed level matching, fixed-time fade switch; the room-correction blind test moves onto it; behind `e12.blind-listening`
 - [~] S27 `e12/blind-live` (PR #662, built dark; low-risk; owns G43, G46, G47, G54; system-profile sides G79 in S28, E33 S24 entry G80, bench G81):  Blind Listening compares current settings, processing off and saved profiles live on the user's music; ABX and a blind preference test; keyboard shortcuts; "needed correct" guidance
 - [~] S28 `e12/blind-files-history` (PR #667, built; not graduated by owner ruling G84, 22 Nov 2026; G79 remainder and graduation move to S28b; low-risk; owns G44, G48–G53): two-files mode on the selected output with loudness matching, loop and position keeping; level slider; history in the backup; plain wording; graduates `e12.blind-listening`
@@ -532,7 +532,7 @@ complete, speaker ANC qualified, and a full hardware regression passing at every
 
 ### E14 Upmixer
 
-No epic file yet: epic-planner writes `docs/epics/E14.md` when `/next` reaches it.
+Plan: `docs/epics/E14.md` (owner answered Q1–Q6, 25 Nov 2026; flag `e14.upmixer`).
 
 - [ ] One stereo-to-layout upmix for 5.1, 7.1 and 7.1.4: centre extraction, ambience to surrounds and heights
 - [ ] A single strength control, and a bypass for content that is already multichannel
@@ -546,20 +546,21 @@ Plan: `docs/epics/E15.md` (awaiting owner approval; flag `e15.follow-output`).
 - [ ] Keep today's fixed-output policy as the default
 - [ ] S5 `e15/source-rate-investigation` (owner, 11 Nov 2026): one investigation slice on following the source sample rate through the process tap; record the finding either way, and build it only if the finding supports it
 - [ ] S6 `e15/connection-and-wireless-defaults` (owner, 11 Nov 2026): the bound profile switches when headphones or another DAC connect (confirm what S1–S3b already cover and add the rest); Bluetooth and AirPlay outputs get sensible defaults (latency, rate, no long FIR)
-- [ ] S7 `e15/schedules` (owner, 11 Nov 2026): switch profile or night mode by time of day
+- [x] S7 `e15/schedules` (owner, 11 Nov 2026): switch profile or night mode by time of day (content presets built; the night-mode action waits for E30, G13)
 - [ ] S4 `e15/ship` (runs after S5–S7) graduates `e15.follow-output` (default on; the mode still defaults to fixed; removal is the FC phase)
 
 ### E16 Automation and remote
 
-No epic file yet: epic-planner writes `docs/epics/E16.md` when `/next` reaches it. Two tiers (owner, 11 Nov 2026):
+Plan: `docs/epics/E16.md` (slices S1–S6, flags `e16.automation` and `e16.local-api`; Q1–Q6 answered by the owner, 25 Nov 2026). Two tiers (owner, 11 Nov 2026):
 
 - [ ] Tier 1, App Intents and Shortcuts for profile, volume, mute, bypass and correction on/off, and starting a Quiet Zone session (always subject to the arm; an intent never arms anything by itself)
 - [ ] Tier 1, global hotkeys, media-key volume for DACs without hardware volume, and richer menu-bar quick controls
 - [ ] Tier 2, local authenticated REST/websocket API, off by default
 - [ ] Tier 1, `e16/control-centre-widget` (owner, 17 Nov 2026; needs-owner: new widget extension target and shared-state entitlement): a Control Centre control and a desktop widget for profile, volume, mute and correction on/off, built on the App Intents above; never arms anything and offers no Quiet Zone or MIMO start. MIDI and OSC control are not planned (the local API covers integrations)
 
-Owner decision, 11 Nov 2026: the iPhone remote moved to the post-v1 "iPhone companion app" entry
-under "Platform reach after v1". The local API must stay usable by that future iPhone client
+Owner decision, 11 Nov 2026: the iPhone parts leave E16. The iPhone remote and iPhone as a
+measurement microphone moved to the post-v1 "iPhone companion app" entry under "Platform reach
+after v1" (V2-4 in `docs/V2_ROADMAP.md`); E16 keeps only the Mac-side items above. The local API must stay usable by that future iPhone client
 (documented, versioned, authenticated pairing that a phone can complete).
 
 ### E17 Output integrity and interchange (was Export and dither; owner, 11 Nov 2026)

@@ -26,7 +26,9 @@ final class SettingsTabsTests: XCTestCase {
         XCTAssertEqual(SettingsTab.allCases.map(\.title), ["General", "Volume", "Privacy", "Data", "About"])
         XCTAssertEqual(SettingsTab.volume.cardTitles(offersDeveloperSwitch: false), ["Volume & Feedback"])
         XCTAssertEqual(SettingsTab.privacy.cardTitles(offersDeveloperSwitch: false), ["Permissions"])
-        XCTAssertEqual(SettingsTab.data.cardTitles(offersDeveloperSwitch: false), ["Backup & Restore"])
+        XCTAssertEqual(
+            SettingsTab.data.cardTitles(offersDeveloperSwitch: false),
+            ["Backup & Restore", "Automatic Backups", "Reset & Erase"])
         let general = SettingsTab.general.cardTitles(offersDeveloperSwitch: false)
         XCTAssertEqual(general, ["Appearance", "App Presence", "Startup", "Presets", "Page Displays"])
         XCTAssertTrue(SettingsTab.general.cardTitles(offersDeveloperSwitch: true).contains("Developer Tools"))

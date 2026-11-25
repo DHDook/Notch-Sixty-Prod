@@ -40,6 +40,25 @@ final class ProductTreatmentDisarmer: OutputFollowTreatmentDisarming {
 
 @MainActor
 enum OutputFollowWiring {
+    /// The excluded states other than a failed engine (note 11): Safe Launch and a room capture. E15 S7 schedules reuse
+    /// the same signals.
+    static func externalBlocks(
+        recovery: ProductRecoveryController, calibration: RoomCorrectionCalibrationController,
+        multichannel: MultichannelCalibrationController
+    ) -> () -> Set<OutputFollowBlock> {
+        { [weak recovery, weak calibration, weak multichannel] in
+            var blocks: Set<OutputFollowBlock> = []
+            if recovery?.safeLaunchActive == true { blocks.insert(.safeLaunch) }
+            if let state = calibration?.state, [.arming, .measuring, .analyzing].contains(state) {
+                blocks.insert(.measurementCapture)
+            }
+            if let state = multichannel?.state, [.measuring, .analyzing].contains(state) {
+                blocks.insert(.measurementCapture)
+            }
+            return blocks
+        }
+    }
+
     /// Builds the production coordinator and the observers that end an excluded state (note 11): Safe Launch, a room
     /// capture, a failed engine. Held by the returned bag, which `ProductController` keeps for its lifetime.
     static func make(
@@ -57,17 +76,7 @@ enum OutputFollowWiring {
             profiles: profiles,
             treatments: ProductTreatmentDisarmer(quietZone: quietZone, feedForward: feedForward, mimo: mimo),
             source: CoreAudioFollowOutputEventSource(),
-            externalBlocks: { [weak recovery, weak calibration, weak multichannel] in
-                var blocks: Set<OutputFollowBlock> = []
-                if recovery?.safeLaunchActive == true { blocks.insert(.safeLaunch) }
-                if let state = calibration?.state, [.arming, .measuring, .analyzing].contains(state) {
-                    blocks.insert(.measurementCapture)
-                }
-                if let state = multichannel?.state, [.measuring, .analyzing].contains(state) {
-                    blocks.insert(.measurementCapture)
-                }
-                return blocks
-            },
+            externalBlocks: Self.externalBlocks(recovery: recovery, calibration: calibration, multichannel: multichannel),
             displayName: { [weak engine] uid in engine?.outputDevices.first { $0.uid == uid }?.name ?? uid })
 
         // E15 S3b: macOS notifications. The notification center is touched only outside a test host.
