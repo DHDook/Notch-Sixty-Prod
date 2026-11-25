@@ -23,6 +23,8 @@ struct UnifiedGraphOutputLane: Equatable, Sendable {
     /// E8 S7: the way's high-pass and low-pass realised as a linear-phase FIR (the crossover then carries trim, polarity
     /// and EQ only). nil for IIR ways.
     var driverFIR: UnifiedGraphDriverFIR?
+    /// E8 S13: the way's long-term power limit (a THERMAL_LIMIT stage before the lane's PROTECTION). nil means none.
+    var thermalLimit: RoutingPowerLimit?
 }
 
 /// A DRIVER_FIR or DRIVER_FIR_TWO_BAND stage's content, designed for the graph's sample rate.
@@ -132,6 +134,7 @@ enum SpeakerRoutingCompiler {
             var crossover: UnifiedGraphCrossover?
             var userDelayMilliseconds = 0.0
             var driverFIR: UnifiedGraphDriverFIR?
+            var thermalLimit: RoutingPowerLimit?
             if let way = owner {
                 var highPass = way.highPass, lowPass = way.lowPass
                 let wayName = way.name.isEmpty ? way.id.uuidString : way.name
@@ -162,11 +165,12 @@ enum SpeakerRoutingCompiler {
                 if let l = way.limiter {
                     protection = l.graphProtection
                 }
+                if let p = way.powerLimit, p.isValid { thermalLimit = p }
             }
             outputs.append(UnifiedGraphOutputLane(
                 lane: firstOutputLane + position, entries: entries, crossover: crossover,
                 delayFrames: userDelayMilliseconds * 0.001 * base.sampleRate, protection: protection,
-                driverFIR: driverFIR))
+                driverFIR: driverFIR, thermalLimit: thermalLimit))
             latencies.append((protection?.latencyFrames(sampleRate: base.sampleRate) ?? 0) + (driverFIR?.latencyFrames ?? 0))
         }
         // Alignment: every physical output ends up with the same total latency (the largest limiter latency).
@@ -217,6 +221,8 @@ extension UnifiedGraphConfiguration {
     static let xoverStageBase: UInt32 = 3_100
     static let outputProtectionStageBase: UInt32 = 3_200
     static let driverFIRStageBase: UInt32 = 3_300
+    /// E8 S13: the long-term power limit of a way's lane.
+    static let thermalLimitStageBase: UInt32 = 3_700
     /// E7 S1: the DELAY half of a fractional way delay longer than the FRAC_DELAY ring.
     static let wayWholeDelayBase: UInt32 = 3_400
 
@@ -293,6 +299,12 @@ extension UnifiedGraphConfiguration {
             }
         }
         for output in routing.outputs {
+            if let limit = output.thermalLimit {
+                let id = UInt32(output.lane)
+                rest.append(UnifiedGraphStageSpec(
+                    kind: N60_STAGE_THERMAL_LIMIT.rawValue, stageId: Self.thermalLimitStageBase + id, laneA: id,
+                    params: [Float(limit.levelDB), Float(limit.timeConstantMilliseconds)]))
+            }
             guard let protection = output.protection else { continue }
             let id = UInt32(output.lane)
             // E9 S5c (G16): a routed output keeps its own limiter, but with output protection on its ceiling never exceeds the

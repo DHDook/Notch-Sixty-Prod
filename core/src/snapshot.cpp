@@ -301,6 +301,7 @@ uint32_t rankOf(uint32_t kind) {
     if (kind == N60_STAGE_ANALYSER_TAP_DYN) return 115; // ABI v21: after the expander, before METER_OUT
     if (kind == N60_STAGE_MIMO) return 135;             // ABI v33: after BASS_MGMT (130), before ROOM_FIR (140)
     if (kind == N60_STAGE_ROUTE) return 235;
+    if (kind == N60_STAGE_THERMAL_LIMIT) return 265;   // ABI v49: after ANC_INJECT (260), before PROTECTION (270)
     if (kind == N60_STAGE_MIMO_ROUTED) return 236;      // ABI v40: after ROUTE, before XOVER
     if (kind == N60_STAGE_XOVER) return 237;
     if (kind == N60_STAGE_DRIVER_FIR || kind == N60_STAGE_DRIVER_FIR_TWO_BAND) return 238;

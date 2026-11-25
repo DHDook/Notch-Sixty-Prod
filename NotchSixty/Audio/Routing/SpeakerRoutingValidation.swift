@@ -34,6 +34,12 @@ enum SpeakerRoutingError: Equatable, Sendable {
     case driverHighPassBelowSafe(way: String, cornerHz: Double, safeHz: Double)
     /// E8 S12: a first-order high-pass is too gentle unless its corner is at least twice the lowest safe frequency.
     case driverHighPassTooGentle(way: String, cornerHz: Double, safeHz: Double)
+    /// E8 S13: trim plus EQ add more than +18 dB inside the way's passband.
+    case boostTooHigh(way: String, gainDB: Double, atHz: Double)
+    /// E8 S13: the driver EQ boosts below the way's lowest safe frequency.
+    case boostBelowSafe(way: String, gainDB: Double, atHz: Double, safeHz: Double)
+    /// E8 S13: the long-term power limit's level or time constant is out of range.
+    case invalidPowerLimit(way: String)
 }
 
 enum SpeakerRoutingWarning: Equatable, Sendable {
@@ -46,6 +52,8 @@ enum SpeakerRoutingWarning: Equatable, Sendable {
     case unroutedSource(RoutingSource)
     /// The way's linearisation was left out of the compiled graph.
     case linearisationSkipped(way: String, reason: LinearisationSkipReason)
+    /// E8 S13: trim plus EQ add more than +12 dB inside the way's passband.
+    case boostHigh(way: String, gainDB: Double, atHz: Double)
 }
 
 enum LinearisationSkipReason: Equatable, Sendable {
@@ -123,9 +131,14 @@ extension SpeakerRoutingConfiguration {
                     || !(0.0...20.0).contains(l.lookAheadMilliseconds) {
                     v.errors.append(.invalidLimiter(way: name))
                 }
+                if let p = way.powerLimit, !p.isValid { v.errors.append(.invalidPowerLimit(way: name)) }
             }
             v.warnings += Self.bandWarnings(speaker: label(speaker), ways: speaker.ways)
             if context.enforceDriverRoles { v.errors += Self.driverRoleErrors(speaker.ways, label: label) }
+        }
+        if context.enforceDriverRoles {
+            v.errors += boostErrors(sampleRate: context.sampleRate)
+            v.warnings += boostWarnings(sampleRate: context.sampleRate)
         }
         var entriesPerOutput: [PhysicalOutputEndpoint: Int] = [:]
         for speaker in speakers { for way in speaker.ways { entriesPerOutput[way.endpoint, default: 0] += 1 } }

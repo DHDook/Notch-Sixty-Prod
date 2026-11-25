@@ -231,6 +231,7 @@ uint32_t expectedParamCount(uint32_t kind, const float *p, uint32_t have) {
             return have == 7 || have == kProtWordParams7 || have == kProtParamsV12 || have == kProtWordParams18 ? have : 0u;
         case N60_STAGE_STEREO_CROSSOVER: return have == 8 || have == 12 ? have : 0u;  // ABI v19: 8, or 12 with a filter-spec trailer
         case N60_STAGE_MUTE: return 1;
+        case N60_STAGE_THERMAL_LIMIT: return 2;  // ABI v49: level dBFS, time constant ms
         case N60_STAGE_DELTA_CAPTURE:
         case N60_STAGE_DELTA_SUBTRACT: return 1;
         case N60_STAGE_EXTERNAL: return 1;
@@ -453,6 +454,12 @@ struct MuteLane {
     Ramp g;
     float seen;
 };
+// ABI v49 (E8 S13): the long-term power limit. `ms` is the one-pole mean square of the lane's input; `thr` is the level
+// as an amplitude, smoothed over 5 ms so a live level edit never steps the gain.
+struct ThermalLane {
+    double ms;
+    double thr;
+};
 struct InjectShared {
     Ramp g;
     Ramp hold;        // 10 ms mute ramp driven by rebuilds (E6 S6): 1 = passing, 0 = held
@@ -587,6 +594,7 @@ bool isSystemKind(uint32_t kind) N60_RT_NONBLOCKING {
         case N60_STAGE_ANC_INJECT:
         case N60_STAGE_PROTECTION:
         case N60_STAGE_MUTE:
+        case N60_STAGE_THERMAL_LIMIT:
         case N60_STAGE_FRAC_DELAY:
         case N60_STAGE_STEREO_CROSSOVER:
         case N60_STAGE_DELTA_CAPTURE:
@@ -692,6 +700,7 @@ bool paramOk(uint32_t kind, uint32_t i, float v, const float *p, double rate, ui
                 default: return isInt(v) && v >= 0.0f && v <= 8.0f;  // 8..11: trailer family / order (checked as a pair below)
             }
         case N60_STAGE_MUTE: return v == 0.0f || v == 1.0f;
+        case N60_STAGE_THERMAL_LIMIT: return i == 0 ? inR(v, -60.0, 0.0) : inR(v, 100.0, 30000.0);
         case N60_STAGE_DELTA_CAPTURE:
         case N60_STAGE_DELTA_SUBTRACT: return v == 1.0f;
         case N60_STAGE_EXTERNAL: return v == 0.0f || v == 1.0f;
@@ -838,6 +847,7 @@ void systemSizes(const n60_stage_desc &s, double rate, size_t &perLane, size_t &
         case N60_STAGE_PAUSE_GATE: shared = up(sizeof(GateShared)); break;
         case N60_STAGE_BASS_MGMT: perLane = up(sizeof(BassLane)); shared = up(sizeof(BassShared)); break;
         case N60_STAGE_MUTE: perLane = up(sizeof(MuteLane)); break;
+        case N60_STAGE_THERMAL_LIMIT: perLane = up(sizeof(ThermalLane)); break;
         case N60_STAGE_FRAC_DELAY: perLane = up(sizeof(FdLane)); break;
         case N60_STAGE_STEREO_CROSSOVER: perLane = up(sizeof(XoLane)); shared = up(sizeof(XoShared)); break;
         case N60_STAGE_DELTA_CAPTURE:
@@ -1115,6 +1125,13 @@ void systemInit(SnapHeader *h, const StageRec &r) {
                 m->seen = p[0];
             }
             break;
+        case N60_STAGE_THERMAL_LIMIT:
+            for (uint32_t l = 0; l < r.laneCount; ++l) {
+                ThermalLane *t = reinterpret_cast<ThermalLane *>(laneState(h, r, l));
+                t->thr = db2lin(p[0]);
+                t->ms = t->thr * t->thr;  // starts at the level: a new snapshot never opens a window of unlimited level
+            }
+            break;
         case N60_STAGE_ANC_INJECT: {
             InjectShared *s = reinterpret_cast<InjectShared *>(sh);
             s->authorised = p[1] != 0.0f ? 1u : 0u;
@@ -1234,6 +1251,7 @@ n60_status validateSystemParam(const SnapHeader *h, const StageRec &r, uint32_t 
         }
         case N60_STAGE_PROTECTION: live = idx >= 1 && idx <= 3; break;
         case N60_STAGE_MUTE: live = true; break;
+        case N60_STAGE_THERMAL_LIMIT: live = true; break;
         case N60_STAGE_EXTERNAL: live = idx == 0; break;
         case N60_STAGE_ANC_GUARD: live = idx == 11; break;
         case N60_STAGE_ANC_INJECT: live = idx == 2 || idx == 3; break;
@@ -1899,6 +1917,32 @@ void runMute(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) {
         float *buf = lanes[laneOf(r, l)];
         if (m.g.remaining == 0 && m.g.cur == 1.0f) continue;
         for (uint32_t i = 0; i < frames; ++i) buf[i] *= rampNext(m.g);
+    }
+}
+
+// ABI v49 (E8 S13): feed-forward slow RMS limiter. Gain is min(1, level / rms), rms from the lane's own input mean square, so
+// below the level the stage multiplies by nothing at all (the sample is left untouched) and above it a sustained signal
+// settles at the level. No allocation; state is two doubles (16 bytes) per lane; no latency.
+void runThermal(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) {
+    const float *p = paramsOf(h, r);
+    const double target = db2lin(static_cast<double>(p[0]));
+    const double a = -std::expm1(-1.0 / (static_cast<double>(p[1]) * 0.001 * h->sampleRate));
+    const double k = -std::expm1(-1.0 / (0.005 * h->sampleRate));
+    for (uint32_t l = 0; l < r.laneCount; ++l) {
+        ThermalLane &t = *reinterpret_cast<ThermalLane *>(laneState(h, r, l));
+        float *buf = lanes[laneOf(r, l)];
+        double ms = t.ms, thr = t.thr;
+        for (uint32_t i = 0; i < frames; ++i) {
+            const double x = static_cast<double>(buf[i]);
+            const double x2 = x * x;
+            // A non-finite sample must not poison the window: it counts as the level, so the lane keeps limiting.
+            ms += a * ((x2 <= 1.0e30 ? x2 : thr * thr) - ms);
+            thr += k * (target - thr);
+            const double thr2 = thr * thr;
+            if (ms > thr2 && x2 <= 1.0e30) buf[i] = static_cast<float>(x * std::sqrt(thr2 / ms));
+        }
+        t.ms = ms < 1.0e-24 ? 1.0e-24 : ms;  // keeps the state out of the subnormals
+        t.thr = thr;
     }
 }
 
@@ -2794,6 +2838,7 @@ void runSystem(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames)
         case N60_STAGE_PAUSE_GATE: runGate(h, r, lanes, frames); break;
         case N60_STAGE_BASS_MGMT: runBass(h, r, lanes, frames); break;
         case N60_STAGE_MUTE: runMute(h, r, lanes, frames); break;
+        case N60_STAGE_THERMAL_LIMIT: runThermal(h, r, lanes, frames); break;
         case N60_STAGE_EXTERNAL: runExternal(h, r, lanes, frames); break;
         case N60_STAGE_FRAC_DELAY: runFracDelay(h, r, lanes, frames); break;
         case N60_STAGE_STEREO_CROSSOVER: runStereoCrossover(h, r, lanes, frames); break;

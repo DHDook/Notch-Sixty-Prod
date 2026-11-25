@@ -32,6 +32,19 @@ struct RoutingLimiter: Codable, Equatable, Sendable {
     var oversampling = 1
 }
 
+/// E8 S13: a way's long-term power limit, a slow RMS limiter acting as a simple thermal guard (a THERMAL_LIMIT stage on
+/// that way's lane). Off by default; suggested on for tweeters.
+struct RoutingPowerLimit: Codable, Equatable, Sendable {
+    static let levelRangeDB: ClosedRange<Double> = -60...0
+    static let timeConstantRangeMilliseconds: ClosedRange<Double> = 100...30_000
+    var levelDB: Double = -12
+    var timeConstantMilliseconds: Double = 2_000
+
+    var isValid: Bool {
+        Self.levelRangeDB.contains(levelDB) && Self.timeConstantRangeMilliseconds.contains(timeConstantMilliseconds)
+    }
+}
+
 /// How a way's crossover is realised. Linear-phase FIR arrives with E8 S7; until then it compiles as its IIR equivalent
 /// and validation says so.
 enum RoutingRealisation: String, Codable, Sendable {
@@ -59,6 +72,16 @@ enum DriverRole: String, Codable, CaseIterable, Sendable {
         case .tweeter: return 1_500
         case .midrange: return 200
         case .subwoofer, .woofer, .fullRange: return nil
+        }
+    }
+
+    /// E8 S13: the ceiling (dBFS) of the per-way limiter a way with this role starts with. A tweeter has the least headroom.
+    var defaultLimiterCeilingDB: Double {
+        switch self {
+        case .tweeter: return -12
+        case .midrange: return -9
+        case .woofer, .fullRange: return -6
+        case .subwoofer: return -3
         }
     }
 
@@ -96,6 +119,10 @@ struct RoutedWay: Identifiable, Codable, Equatable, Sendable {
     var lowestSafeHz: Double?
     /// True while the role was inferred (migration or load) and the user has not confirmed it yet.
     var roleInferred: Bool?
+    /// E8 S13: true once the user switched the per-way limiter off, so the role default is not put back. Additive.
+    var limiterDeclined: Bool?
+    /// E8 S13: the long-term power limit; nil means none.
+    var powerLimit: RoutingPowerLimit?
 
     /// The limit validation holds the high-pass to, nil when there is none.
     var effectiveLowestSafeHz: Double? { role == nil ? nil : (lowestSafeHz ?? role?.defaultLowestSafeHz) }
