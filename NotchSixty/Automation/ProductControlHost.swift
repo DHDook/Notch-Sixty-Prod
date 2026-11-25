@@ -59,6 +59,27 @@ final class ProductControlHost: ControlHost {
 }
 
 extension ProductController {
+    /// E16 S2: creates the media-key controller (which now owns the monitor the engine used to hold) and the hotkeys.
+    /// Both read `e16.automation` on every action. `onLevelChanged` shows the level indicator.
+    func installAutomationInputs(
+        service: ControlService,
+        flags: @escaping @MainActor () -> FeatureFlags = { FeatureFlags() },
+        onLevelChanged: @escaping () -> Void
+    ) {
+        let engine = audioEngine
+        let volumeKeys = VolumeKeyController(
+            target: engine,
+            perform: { _ = await service.perform($0) },
+            isEnabled: { flags().isEnabled(.automation) })
+        volumeKeys.onLevelChanged = onLevelChanged
+        self.volumeKeys = volumeKeys
+        hotkeys = HotkeyController(
+            registrar: CarbonHotkeyRegistrar(),
+            service: { service },
+            volumeStep: { engine.softwareVolumeKeyStep },
+            isEnabled: { flags().isEnabled(.automation) })
+    }
+
     /// E16 S1: the one control service for this app. Reads `e16.automation` on every command, so a stored override or
     /// launch argument takes effect without a rebuild.
     func makeControlService(flags: @escaping @MainActor () -> FeatureFlags = { FeatureFlags() }) -> ControlService {

@@ -264,7 +264,13 @@ final class StereoPlaybackControlTests: XCTestCase {
             .decrement
         )
         XCTAssertNil(CoreGraphicsGlobalVolumeKeyMonitor.action(subtype: 8, data1: volumeUpReleaseEvent))
-        XCTAssertNil(CoreGraphicsGlobalVolumeKeyMonitor.action(subtype: 8, data1: muteDownEvent))
+        XCTAssertEqual(CoreGraphicsGlobalVolumeKeyMonitor.action(subtype: 8, data1: muteDownEvent), .mute)
+        let muteReleaseEvent = (7 << 16) | (0xB << 8)
+        XCTAssertNil(CoreGraphicsGlobalVolumeKeyMonitor.action(subtype: 8, data1: muteReleaseEvent))
+        XCTAssertNil(CoreGraphicsGlobalVolumeKeyMonitor.action(subtype: 8, data1: (5 << 16) | (0xA << 8)))
+        XCTAssertTrue(CoreGraphicsGlobalVolumeKeyMonitor.isFineStep([.option, .shift]))
+        XCTAssertFalse(CoreGraphicsGlobalVolumeKeyMonitor.isFineStep([.option]))
+        XCTAssertFalse(CoreGraphicsGlobalVolumeKeyMonitor.isFineStep([.option, .shift, .command]))
         XCTAssertNil(CoreGraphicsGlobalVolumeKeyMonitor.action(subtype: 7, data1: volumeUpDownEvent))
     }
 

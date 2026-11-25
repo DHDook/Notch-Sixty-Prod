@@ -207,7 +207,7 @@ struct ProductionSettingsView: View {
     /// E12 S23: five tabs. Each tab is a scrolling page of cards.
     private var tabbedSettings: some View {
         TabView(selection: $selectedTab) {
-            ForEach(SettingsTab.allCases) { tab in
+            ForEach(SettingsTab.visible(automationEnabled: featureFlags.isEnabled(.automation))) { tab in
                 tabPage(tab)
                     .tabItem { Label(tab.title, systemImage: tab.systemImage) }
                     .tag(tab)
@@ -249,6 +249,10 @@ struct ProductionSettingsView: View {
                         #endif
                     case .volume:
                         volumeCard
+                    case .shortcuts:
+                        if let hotkeys = product.hotkeys, let volumeKeys = product.volumeKeys {
+                            ShortcutsSettingsView(hotkeys: hotkeys, volumeKeys: volumeKeys, preferences: preferences)
+                        }
                     case .privacy:
                         permissionsCard
                     case .data:

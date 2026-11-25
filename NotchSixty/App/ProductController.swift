@@ -67,6 +67,9 @@ final class ProductController: ObservableObject {
     nonisolated let objectWillChange = ObservableObjectPublisher()
 
     let audioEngine: AudioIOEngine
+    /// E16 S2: the media-key monitor and the global hotkeys (installed by `installAutomationInputs`).
+    var volumeKeys: VolumeKeyController?
+    var hotkeys: HotkeyController?
     /// E12 S24: resume processing on open (Swift only; behind `e12.settings-page`).
     let resume = ResumeProcessingCoordinator()
     /// E12 S25: automatic backups, restore default settings and erase all data (Settings > Data).

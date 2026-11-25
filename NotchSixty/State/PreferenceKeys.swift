@@ -11,6 +11,8 @@ enum PreferenceKeys {
         static let showVolumePopup = "application.showVolumePopup"
         static let volumePopupPosition = "application.volumePopupPosition"
         static let coverSystemVolumePopup = "application.coverSystemVolumePopup"
+        /// E16 S2: our own level indicator when a media key changes the software volume (default on).
+        static let showMediaKeyIndicator = "application.showMediaKeyIndicator"
         static let showDeveloperTools = "application.showDeveloperTools"
         /// E12 S8: "simple" or "expert" (`InterfaceMode`).
         static let interfaceMode = "application.interfaceMode"

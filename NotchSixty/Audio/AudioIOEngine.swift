@@ -60,7 +60,6 @@ final class AudioIOEngine {
     private let deviceCatalog: any OutputDeviceCataloging
     let eventMonitor: any AudioHardwareEvents
     let masterVolumeController: any MasterVolumeDeviceControlling
-    private let globalVolumeKeyMonitor: any GlobalVolumeKeyMonitoring
     let binauralProfileAssetStore: BinauralProfileAssetStore
     /// E6 S9c: converted HRTF assets per (asset, rate), shared by session start and live asset swaps.
     let binauralAssetCache = BinauralResampledAssetCache()
@@ -153,7 +152,8 @@ final class AudioIOEngine {
     var playbackControlConfiguration = PlaybackControlConfiguration()
     private(set) var masterVolumeConfiguration = MasterVolumeConfiguration()
     var masterVolumeCapabilities = MasterVolumeDeviceCapabilities.softwareOnly
-    private(set) var globalVolumeKeyMonitoringState: GlobalVolumeKeyMonitoringState = .stopped
+    /// E16 S2: told when media keys may act (software volume on a selected output). `VolumeKeyController` owns the monitor.
+    @ObservationIgnored var onVolumeKeyRouteChange: ((Bool) -> Void)?
     var softwareVolumeKeyStep = MasterVolumeKeyStep.fraction(denominator: 16)
     var gainConfiguration = DSPGainConfiguration()
     var bassManagementConfiguration = BassManagementConfiguration()
@@ -198,7 +198,6 @@ final class AudioIOEngine {
         initialRouteConfiguration: AudioRouteConfiguration = AudioRouteConfiguration(),
         eventMonitor: any AudioHardwareEvents = AudioHardwareEventMonitor(),
         masterVolumeController: any MasterVolumeDeviceControlling = CoreAudioMasterVolumeController(),
-        globalVolumeKeyMonitor: any GlobalVolumeKeyMonitoring = CoreGraphicsGlobalVolumeKeyMonitor(),
         binauralProfileAssetStore: BinauralProfileAssetStore = BinauralProfileAssetStore(),
         masterVolumeStore: (any MasterVolumePersisting)? = nil,
         outputBufferSizeController: any OutputBufferSizeControlling = CoreAudioOutputBufferSizeController()
@@ -211,7 +210,6 @@ final class AudioIOEngine {
         self.routeConfiguration = initialRouteConfiguration
         self.eventMonitor = eventMonitor
         self.masterVolumeController = masterVolumeController
-        self.globalVolumeKeyMonitor = globalVolumeKeyMonitor
         self.binauralProfileAssetStore = binauralProfileAssetStore
         let lifecycle = AudioLifecycleStateMachine()
         self.lifecycle = lifecycle
@@ -224,8 +222,6 @@ final class AudioIOEngine {
         eventMonitor.onWillSleep = { [weak self] in self?.handleWillSleep() }
         eventMonitor.onDidWake = { [weak self] in self?.handleDidWake() }
         masterVolumeController.onExternalChange = { [weak self] in self?.handleMasterVolumeDeviceChange() }
-        globalVolumeKeyMonitor.onVolumeIncrement = { [weak self] in self?.handleGlobalVolumeKey(direction: 1.0) }
-        globalVolumeKeyMonitor.onVolumeDecrement = { [weak self] in self?.handleGlobalVolumeKey(direction: -1.0) }
     }
 
     var ambientCompensationAvailableHeadroomDB: Double {
@@ -1106,9 +1102,8 @@ final class AudioIOEngine {
             routeConfiguration.selectedOutputUID = nil
             masterVolumeSynchronizedOutputUID = nil
             masterVolumeController.stopMonitoring()
-            globalVolumeKeyMonitor.stop()
-            globalVolumeKeyMonitoringState = .stopped
             masterVolumeCapabilities = .softwareOnly
+            onVolumeKeyRouteChange?(false)
             return
         }
         guard outputDevices.contains(where: { $0.uid == uid }) else {
@@ -1158,8 +1153,7 @@ final class AudioIOEngine {
             }
         }
         masterVolumeController.stopMonitoring()
-        globalVolumeKeyMonitor.stop()
-        globalVolumeKeyMonitoringState = .stopped
+        onVolumeKeyRouteChange?(false)
         eventMonitor.stop()
     }
 
@@ -1236,14 +1230,13 @@ final class AudioIOEngine {
     func syncMasterVolumeMonitorToSelectedOutput() throws {
         guard let output = selectedOutputDevice else {
             masterVolumeController.stopMonitoring()
-            globalVolumeKeyMonitor.stop()
-            globalVolumeKeyMonitoringState = .stopped
             masterVolumeCapabilities = .softwareOnly
+            onVolumeKeyRouteChange?(false)
             return
         }
         try masterVolumeController.monitor(deviceID: output.deviceID)
         try synchronizeMasterVolumeFromSelectedDevice()
-        syncGlobalVolumeKeyMonitor()
+        onVolumeKeyRouteChange?(masterVolumeCapabilities.controlMode == .softwareDSP)
     }
 
     private func synchronizeMasterVolumeFromSelectedDevice() throws {
@@ -1304,29 +1297,9 @@ final class AudioIOEngine {
         }
     }
 
-    private func syncGlobalVolumeKeyMonitor() {
-        globalVolumeKeyMonitor.stop()
-        globalVolumeKeyMonitoringState = .stopped
+    /// E16 S2: a media-key level change. Software volume only; never writes the device.
+    func applySoftwareVolumeKey(level: Double) {
         guard masterVolumeCapabilities.controlMode == .softwareDSP else { return }
-        do {
-            try globalVolumeKeyMonitor.start()
-            globalVolumeKeyMonitoringState = globalVolumeKeyMonitor.state
-        } catch {
-            globalVolumeKeyMonitoringState = globalVolumeKeyMonitor.state
-            // Input Monitoring is a keyboard-control capability, not an audio-route
-            // requirement. Keep the selected output usable and surface permission
-            // state independently instead of failing refresh/recovery.
-        }
-    }
-
-    private func handleGlobalVolumeKey(direction: Double) {
-        guard masterVolumeCapabilities.controlMode == .softwareDSP,
-              direction == 1.0 || direction == -1.0 else { return }
-        let level = softwareVolumeKeyStep.level(
-            afterPress: direction,
-            from: masterVolumeConfiguration.level
-        )
-        guard abs(level - masterVolumeConfiguration.level) > 0.000_001 else { return }
         var updated = masterVolumeConfiguration
         updated.level = level
         do {
