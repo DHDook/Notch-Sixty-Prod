@@ -26,7 +26,7 @@ final class OutputFollowEventDriverTests: XCTestCase {
         func ownDeviceUIDs() -> Set<String> { ["com.dhdook.NotchSixty.aggregate.1"] }
     }
 
-    private final class FakeEngine: OutputFollowEngineControlling {
+    @MainActor private final class FakeEngine: OutputFollowEngineControlling {
         var selectedOutputUID: String?
         var rates: [String: Double] = [:]
         var switches: [(uid: String, resume: Bool)] = []

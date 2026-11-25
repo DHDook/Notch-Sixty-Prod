@@ -7,6 +7,7 @@ import Foundation
 /// default. The profile half of a switch (note 5 steps a and d) is the S3 coordinator's, reached through `onOutcome`.
 
 /// What the driver needs from the engine.
+@MainActor
 protocol OutputFollowEngineControlling: AnyObject {
     var selectedOutputUID: String? { get }
     func switchFollowedOutput(to uid: String, resume: Bool) throws
