@@ -89,16 +89,37 @@ final class RoomSeatMapController {
     private(set) var derivedRows: [RoomSeatMapDerivedRow] = []
     /// Estimated response into each unmeasured, positioned seat (left and right feed power-summed).
     private(set) var derivedResponses: [UUID: RoomBandResponse] = [:]
+    private var libraryRecords: [MeasurementRecord] = []
+    /// Loads a measurement record's impulse response (the library in production; a fake in tests). E29 S5.
+    private let impulseResponseLoader: (UUID) -> [Float]?
+    /// The stereo feed calibration, for the locate delay cross-check. Display only.
+    var stereoAlignment: StereoBassAlignment?
+    /// What the last locate said (fix, uncertainty and cross-checks, or why it was refused).
+    private(set) var locateMessage: String?
 
-    init(projectStore: RoomCorrectionProjectStore, unit: RoomSeatMapUnit = .forLocale()) {
+    init(
+        projectStore: RoomCorrectionProjectStore, unit: RoomSeatMapUnit = .forLocale(),
+        impulseResponseLoader: @escaping (UUID) -> [Float]? = RoomSeatMapController.libraryLoader
+    ) {
         self.projectStore = projectStore
         self.unit = unit
+        self.impulseResponseLoader = impulseResponseLoader
+    }
+
+    /// The measurement library's impulse response for a record, or nil when it cannot be read.
+    nonisolated static func libraryLoader(_ id: UUID) -> [Float]? {
+        try? MeasurementLibrary(root: MeasurementLibrary.defaultRoot()).loadImpulseResponse(id: id)
     }
 
     // MARK: Loading
 
-    func load(project: RoomCorrectionProject, geometry: RoomGeometryModel?, context: RoomModelContext = RoomModelContext()) {
+    func load(
+        project: RoomCorrectionProject, geometry: RoomGeometryModel?, context: RoomModelContext = RoomModelContext(),
+        library: [MeasurementRecord] = []
+    ) {
         self.project = project
+        self.libraryRecords = library
+        locateMessage = nil
         self.projectID = project.id
         self.geometry = geometry
         self.context = context
@@ -130,7 +151,7 @@ final class RoomSeatMapController {
 
     private func rebuild() {
         guard let project else { model = RoomModel(); return }
-        let built = RoomModelAdapter.build(RoomModelAdapterInput(positions: project.measurements))
+        let built = RoomModelAdapter.build(RoomModelAdapterInput(positions: project.measurements, library: libraryRecords))
         let linked = linkedPointIDs
         let main = listenerID
         var base = built.points
@@ -309,10 +330,12 @@ final class RoomSeatMapController {
     /// Moves a point. Returns the geometry to hand to the advisor when the point is linked to it, so there is still
     /// one store for the room; the caller saves it through the geometry section.
     @discardableResult
-    func setPosition(_ id: UUID, x: Double, y: Double, z: Double?, source: RoomPositionSource = .typed) -> RoomGeometryModel? {
+    func setPosition(
+        _ id: UUID, x: Double, y: Double, z: Double?, source: RoomPositionSource = .typed, uncertainty: Double? = nil
+    ) -> RoomGeometryModel? {
         guard x.isFinite, y.isFinite, z?.isFinite ?? true, model.point(id) != nil else { return nil }
         let height = z ?? model.point(id)?.position?.z ?? defaultHeight(for: id)
-        let pos = RoomPosition(x: max(0, x), y: max(0, y), z: max(0, height), source: source, uncertaintyMetres: nil)
+        let pos = RoomPosition(x: max(0, x), y: max(0, y), z: max(0, height), source: source, uncertaintyMetres: uncertainty)
         var updated: RoomGeometryModel?
         if linkedPointIDs.contains(id), var g = geometry {
             let p = RoomGeometryPoint3D(x: pos.x, y: pos.y, z: pos.z)
@@ -350,6 +373,101 @@ final class RoomSeatMapController {
     func nudge(_ id: UUID, dx: Double, dy: Double) -> RoomGeometryModel? {
         guard let p = model.point(id)?.position else { return nil }
         return setPosition(id, x: p.x + dx, y: p.y + dy, z: nil)
+    }
+
+    // MARK: Acoustic locate (E29 S5)
+
+    /// Gathers the seat's measured speaker paths with their impulse responses. Library records only: they carry the
+    /// timing tier; legacy room-correction positions have none, so they are never a source (design note 3).
+    private func locateSources(for seat: UUID, loadImpulseResponses: Bool) -> (sources: [RoomLocateSource], problem: String?) {
+        func feedPosition(_ id: UUID) -> RoomPosition? { model.point(id)?.position }
+        var newest: [UUID: RoomPath] = [:]
+        for path in model.paths where path.receiver == seat && path.hasImpulseResponse {
+            guard case .measurementRecord = path.origin, RoomModelRule.state(of: path, in: context) == .measured else { continue }
+            if let existing = newest[path.source], (existing.date ?? .distantPast) >= (path.date ?? .distantPast) { continue }
+            newest[path.source] = path
+        }
+        guard !newest.isEmpty else {
+            return ([], "Locate needs library measurements of this seat from each speaker, made with loopback timing.")
+        }
+        var sources: [RoomLocateSource] = []
+        for (sourceID, path) in newest.sorted(by: { name(of: $0.key) < name(of: $1.key) }) {
+            guard let point = model.point(sourceID), case .measurementRecord(let recordID) = path.origin else { continue }
+            if point.kind == .subLane {
+                sources.append(RoomLocateSource(
+                    speakerName: point.name, speakerPosition: RoomPosition(x: 0, y: 0, z: 0, source: .unknown, uncertaintyMetres: nil),
+                    impulseResponse: [Float](repeating: 0, count: 16), sampleRate: path.sampleRate,
+                    timingTrusted: path.timingTier.carriesPhase, isSub: true))
+                continue
+            }
+            // A library channel named "Left" or "Right" uses the stereo feed's position (the advisor's geometry).
+            let lower = point.name.lowercased()
+            let feed: UUID? = lower.contains("left") ? RoomModelAdapter.leftFeedID : lower.contains("right") ? RoomModelAdapter.rightFeedID : nil
+            guard let position = feedPosition(feed ?? sourceID) ?? point.position else {
+                return ([], "Enter the position of \(feed.map { name(of: $0) } ?? point.name) first.")
+            }
+            // The availability check runs while drawing, so it does not read the files.
+            guard let ir = loadImpulseResponses ? impulseResponseLoader(recordID) : [Float](repeating: 0, count: 16), ir.count >= 16 else {
+                return ([], "The impulse response of \(point.name) could not be read.")
+            }
+            sources.append(RoomLocateSource(
+                speakerName: point.name, speakerPosition: position, impulseResponse: ir, sampleRate: path.sampleRate,
+                timingTrusted: path.timingTier.carriesPhase))
+        }
+        return (sources, nil)
+    }
+
+    private func isLocatable(_ id: UUID) -> Bool {
+        guard let kind = model.point(id)?.kind else { return false }
+        return kind == .seat || kind == .ear
+    }
+
+    /// Why "Locate from measurement" is not offered for this point, or nil when it is.
+    func locateUnavailableReason(for id: UUID) -> String? {
+        guard isLocatable(id) else { return "Only seats and ears can be located." }
+        let gathered = locateSources(for: id, loadImpulseResponses: false)
+        if let problem = gathered.problem { return problem }
+        let fullRange = gathered.sources.filter { !$0.isSub }
+        if fullRange.count < 2 { return RoomLocateRefusal.tooFewSpeakers.message }
+        if fullRange.contains(where: { !$0.timingTrusted }) { return RoomLocateRefusal.noLoopbackTiming.message }
+        return nil
+    }
+
+    /// Fills the seat's position from the time of flight. Returns the geometry to save when the seat is linked to it.
+    @discardableResult
+    func locate(_ id: UUID) -> RoomGeometryModel? {
+        locateMessage = nil
+        if let reason = locateUnavailableReason(for: id) { locateMessage = reason; return nil }
+        let gathered = locateSources(for: id, loadImpulseResponses: true)
+        if let problem = gathered.problem { locateMessage = problem; return nil }
+        let height = model.point(id)?.position?.z ?? defaultHeight(for: id)
+        switch RoomAcousticLocator.locate(gathered.sources, seatHeight: height) {
+        case .refused(let why):
+            locateMessage = why.message
+            return nil
+        case .located(let fix):
+            let updated = setPosition(
+                id, x: fix.position.x, y: fix.position.y, z: fix.position.z, source: .acousticLocate,
+                uncertainty: fix.position.uncertaintyMetres)
+            var text = String(
+                format: "Located at %.2f m across, %.2f m into the room (about %.0f cm, %d speakers, assumed height %.2f m).",
+                fix.position.x, fix.position.y, (fix.position.uncertaintyMetres ?? 0) * 100, fix.speakersUsed, fix.position.z)
+            let off = fix.checks.filter { abs($0.differenceMetres) > 0.1 }
+            for c in off {
+                text += String(
+                    format: " %@: measured %.2f m, entered position gives %.2f m; check its position.",
+                    c.speakerName, c.measuredMetres, c.geometricMetres)
+            }
+            let left = fix.checks.first { $0.speakerName.lowercased().contains("left") }
+            let right = fix.checks.first { $0.speakerName.lowercased().contains("right") }
+            if let l = left, let r = right,
+               let note = RoomAcousticLocator.delayCrossCheck(
+                   left: l.measuredMetres, right: r.measuredMetres, calibration: stereoAlignment) {
+                text += " " + note
+            }
+            locateMessage = text
+            return updated
+        }
     }
 
     private func defaultHeight(for id: UUID) -> Double {
