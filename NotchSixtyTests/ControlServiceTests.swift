@@ -330,7 +330,7 @@ final class ControlServiceTests: XCTestCase {
         AutomationRuntime.shared.install(
             service: ControlService(host: host, isEnabled: { enabled }), navigation: nil)
 
-        var volume = SetVolumeIntent()
+        let volume = SetVolumeIntent()
         volume.percent = 30
         do {
             _ = try await volume.perform()
@@ -344,32 +344,32 @@ final class ControlServiceTests: XCTestCase {
         _ = try await volume.perform()
         XCTAssertEqual(host.volumeLevel, 0.3, accuracy: 1e-9)
 
-        var change = ChangeVolumeIntent()
+        let change = ChangeVolumeIntent()
         change.percent = -10
         _ = try await change.perform()
         XCTAssertEqual(host.volumeLevel, 0.2, accuracy: 1e-9)
 
-        var mute = SetMuteIntent()
+        let mute = SetMuteIntent()
         mute.muted = true
         _ = try await mute.perform()
         XCTAssertTrue(host.isMuted)
 
-        var bypass = SetBypassIntent()
+        let bypass = SetBypassIntent()
         bypass.bypassed = true
         _ = try await bypass.perform()
         XCTAssertTrue(host.isBypassed)
 
-        var rc = SetRoomCorrectionIntent()
+        let rc = SetRoomCorrectionIntent()
         rc.on = true
         _ = try await rc.perform()
         XCTAssertTrue(host.isRoomCorrectionEnabled)
 
-        var processing = SetProcessingIntent()
+        let processing = SetProcessingIntent()
         processing.on = true
         _ = try await processing.perform()
         XCTAssertEqual(host.lifecycleState, .running)
 
-        var select = SelectPresetIntent()
+        let select = SelectPresetIntent()
         select.preset = ContentPresetEntity(id: preset.id, name: preset.name)
         _ = try await select.perform()
         XCTAssertEqual(host.selectedPresetID, preset.id)
@@ -383,7 +383,7 @@ final class ControlServiceTests: XCTestCase {
 
     func testIntentRefusesBeforeTheAppHasInstalledAService() async {
         AutomationRuntime.shared.uninstall()
-        var mute = SetMuteIntent()
+        let mute = SetMuteIntent()
         mute.muted = true
         do {
             _ = try await mute.perform()
