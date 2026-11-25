@@ -516,6 +516,9 @@ struct ProductionRootView: View {
                     engine: engine, profiles: product.profiles, navigation: navigation,
                     failsafeMessage: ActiveSpeakerFailsafe.message(failsafeVerdict, launch: true),
                     resume: product.resume,
+                    acoustics: AcousticsStatusSource(
+                        ambient: product.ambientCompensation, quietZone: product.activeQuietZone,
+                        microphone: product.calibration, mimoTreatment: product.mimoTreatment),
                     entryCard: setupEntryCard)
             } else {
                 ProductionDashboardView(engine: engine, entryCard: setupEntryCard)

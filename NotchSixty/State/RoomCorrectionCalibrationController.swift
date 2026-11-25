@@ -136,6 +136,33 @@ final class RoomCorrectionCalibrationController: ObservableObject {
 
     var selectedOutputDevice: AudioOutputDevice? { engine.selectedOutputDevice }
 
+    /// E12 S22 (G25): the chosen microphone that went away, until the same one returns or the user chooses another.
+    /// The choice is kept (not swapped for another device), so the same microphone resumes by its UID.
+    @Published private(set) var lostInput: (uid: String, name: String)?
+
+    enum InputPresenceChange: Equatable { case lost(name: String), returned(name: String) }
+
+    /// Looks at the live device list without changing the choice. Control plane; called about once a second by the
+    /// microphone watch. Returns a change only when the chosen microphone appears or disappears.
+    func checkInputPresence() -> InputPresenceChange? {
+        guard permissionStatus == .authorized, let devices = try? inputCatalog.inputDevices() else { return nil }
+        let previousName = inputDevices.first { $0.uid == selectedInputUID }?.name
+        if devices != inputDevices { inputDevices = devices }
+        if let lost = lostInput, selectedInputUID != lost.uid { lostInput = nil }
+        guard let uid = selectedInputUID else { return nil }
+        let present = devices.contains { $0.uid == uid }
+        if !present, lostInput == nil {
+            let name = previousName ?? "Your microphone"
+            lostInput = (uid, name)
+            return .lost(name: name)
+        }
+        if present, let lost = lostInput, lost.uid == uid {
+            lostInput = nil
+            return .returned(name: lost.name)
+        }
+        return nil
+    }
+
     /// Why a measurement cannot start now, or `.ready` (E24 S2). Playback is not a blocker:
     /// `beginMeasurement` stops it and sets `playbackNotice`.
     var readiness: MeasurementReadiness {
@@ -468,6 +495,7 @@ final class RoomCorrectionCalibrationController: ObservableObject {
             return devices
         }
         let replacementUID = devices.first?.uid
+        lostInput = nil
         if selectedInputUID != replacementUID {
             microphoneCalibration = nil
         }

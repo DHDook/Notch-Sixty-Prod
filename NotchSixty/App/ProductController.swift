@@ -443,6 +443,7 @@ final class ProductController: ObservableObject {
         multichannelCalibration.prepareForUse()
         ambientCompensation.prepareForUse()
         activeQuietZone.prepareForUse()
+        ambientCompensation.watchMicrophonePresence()
         hardwareAcceptance.prepareForUse()
         outputFollow.reconcile()
         if let scheduler { Task { @MainActor in await scheduler.handle(.launch) } }
