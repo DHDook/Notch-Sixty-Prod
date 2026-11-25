@@ -100,7 +100,9 @@ void inverse(const void *plan, Complex *x) N60_RT_NONBLOCKING {
     vDSP_fft_zip(p->setup, &z, 2, p->log2n, kFFTDirection_Inverse);
     N60_RT_TRUST_END
     float *f = reinterpret_cast<float *>(x);
-    for (uint32_t i = 0; i < 2 * p->n; ++i) f[i] *= s;
+    N60_RT_TRUST_BEGIN  // whole-buffer in-place scale: no allocation
+    vDSP_vsmul(f, 1, &s, f, 1, 2 * static_cast<vDSP_Length>(p->n));
+    N60_RT_TRUST_END
 }
 
 // Real transforms. vDSP's packed real format: m = n/2 complex slots z[j] = x[2j] + i x[2j+1] go in, and z[0] comes out as
@@ -114,7 +116,10 @@ void forwardReal(const void *plan, float *x) N60_RT_NONBLOCKING {
     N60_RT_TRUST_END
     const float dc = 0.5f * x[0];
     const float nyq = 0.5f * x[1];
-    for (uint32_t i = 2; i < 2 * m; ++i) x[i] *= 0.5f;
+    const float half = 0.5f;
+    N60_RT_TRUST_BEGIN  // whole-buffer in-place scale of bins 1 .. m-1: no allocation
+    vDSP_vsmul(x + 2, 1, &half, x + 2, 1, 2 * static_cast<vDSP_Length>(m) - 2);
+    N60_RT_TRUST_END
     x[0] = dc;
     x[1] = 0.0f;
     x[2 * m] = nyq;
@@ -130,7 +135,9 @@ void inverseReal(const void *plan, float *x) N60_RT_NONBLOCKING {
     vDSP_fft_zrip(p->setup, &z, 2, p->log2n, kFFTDirection_Inverse);
     N60_RT_TRUST_END
     const float s = 1.0f / static_cast<float>(2 * m);  // vDSP's real round trip scales by n
-    for (uint32_t i = 0; i < 2 * m; ++i) x[i] *= s;
+    N60_RT_TRUST_BEGIN  // as forward
+    vDSP_vsmul(x, 1, &s, x, 1, 2 * static_cast<vDSP_Length>(m));
+    N60_RT_TRUST_END
 }
 
 }  // namespace n60::fft::vdsp
