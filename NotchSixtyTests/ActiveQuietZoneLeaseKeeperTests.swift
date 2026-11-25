@@ -18,7 +18,12 @@ final class ActiveQuietZoneLeaseKeeperTests: XCTestCase {
         XCTAssertEqual(renewals, [3], "the lease must exist before any anti-noise plays")
         XCTAssertTrue(keeper.isRunning)
 
-        try await Task.sleep(nanoseconds: 120_000_000)
+        // Wait for the periodic renewals with a generous deadline instead of a fixed sleep, so a
+        // slow CI runner cannot starve the 10 ms ticks inside a short wall-clock window.
+        let deadline = ContinuousClock.now + .seconds(20)
+        while renewals.count <= 2 && ContinuousClock.now < deadline {
+            try await Task.sleep(nanoseconds: 5_000_000)
+        }
         XCTAssertGreaterThan(renewals.count, 2)
         XCTAssertTrue(renewals.allSatisfy { $0 == 3 })
 
